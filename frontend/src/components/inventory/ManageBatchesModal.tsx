@@ -2,9 +2,34 @@ import { useEffect, useState } from 'react'
 import X from 'lucide-react/dist/esm/icons/x.js'
 import Trash2 from 'lucide-react/dist/esm/icons/trash-2.js'
 import AppSelect, { type AppSelectOption } from '../shared/AppSelect'
+import SectionCard from '../shared/SectionCard'
 import { deactivateBatch, getProductBatches, updateBatch, updateBatchBranchQuantity, type ProductBatch } from '../../api/batchesTransport.ts'
+import { getInventoryMovements } from '../../api/inventoryTransport.ts'
 import { batchDisplayLabel } from '../../utils/batchLabel.ts'
 import { dateToBatchCode } from '../../utils/batchCode.ts'
+
+type DayMovement = {
+  id?: number | string
+  movement_type?: string
+  quantity?: number
+  reason?: string | null
+  branch_name?: string | null
+  user_name?: string | null
+  created_at?: string | null
+}
+
+// Everyday use shows the batch DATE only; the day view is where the TIMES
+// live (user, Aug 28): selecting a batch's received date drills into that
+// day's movements with the clock time of each add — a historical import's
+// movements carry only the date, shown honestly as date-only.
+function movementTime(createdAt: string | null | undefined): string | null {
+  const value = String(createdAt || '')
+  const match = value.match(/[T ](\d{2}:\d{2})/)
+  if (!match) return null
+  // A midnight timestamp on an imported historical movement is the date
+  // standing in for an unknown time, not a real 00:00 receipt.
+  return match[1] === '00:00' ? null : match[1]
+}
 
 type InventoryId = number | string
 type Translator = (key: string) => string | undefined
@@ -56,6 +81,12 @@ export default function ManageBatchesModal({
   const [editingId, setEditingId] = useState<InventoryId | null>(null)
   const [draft, setDraft] = useState<{ expiryDate: string; receivedAt: string; notes: string; quantity: string }>({ expiryDate: '', receivedAt: '', notes: '', quantity: '' })
   const [savingId, setSavingId] = useState<InventoryId | null>(null)
+  // Drill level: null = the batch list; a yyyy-mm-dd date = that day's
+  // movement detail (with times). Back always returns to the list.
+  const [dayDetail, setDayDetail] = useState<string | null>(null)
+  const [dayMovements, setDayMovements] = useState<DayMovement[]>([])
+  const [dayLoading, setDayLoading] = useState(false)
+  const [dayError, setDayError] = useState('')
 
   const productId = product ? Number(product.id) : null
 
@@ -78,7 +109,24 @@ export default function ManageBatchesModal({
   useEffect(() => {
     setBranchId(defaultBranchId || String(branchSelectOptions[0]?.value ?? ''))
     setEditingId(null)
+    setDayDetail(null)
   }, [product?.id])
+
+  useEffect(() => {
+    if (!dayDetail || !productId) return
+    let alive = true
+    setDayLoading(true)
+    setDayError('')
+    Promise.resolve(getInventoryMovements({ productId, branchId, startDate: dayDetail, endDate: dayDetail, page: 1, pageSize: 200 }))
+      .then((res: unknown) => {
+        const items = (res as { items?: DayMovement[] } | null)?.items
+        if (alive) setDayMovements(Array.isArray(items) ? items : [])
+      })
+      .catch((e: unknown) => { if (alive) setDayError(e instanceof Error ? e.message : tr('load_failed', 'Failed to load')) })
+      .finally(() => { if (alive) setDayLoading(false) })
+    return () => { alive = false }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dayDetail, productId, branchId])
 
   useEffect(() => {
     load()
@@ -186,7 +234,49 @@ export default function ManageBatchesModal({
         </div>
 
         <div className="modal-scroll space-y-2 p-4">
-          {loading ? (
+          {dayDetail ? (
+            <SectionCard
+              kind="stock"
+              collapsible={false}
+              onBack={() => setDayDetail(null)}
+              backLabel={tr('back', 'Back', 'ថយក្រោយ')}
+              title={`${tr('movements_on_day', 'Movements on', 'ចលនាស្តុកនៅ')} ${dayDetail}`}
+              subtitle={tr('day_detail_time_hint', 'Times shown where recorded — imported history carries the date only.', 'បង្ហាញម៉ោងដែលបានកត់ត្រា — ប្រវត្តិនាំចូលមានតែកាលបរិច្ឆេទប៉ុណ្ណោះ។')}
+            >
+              <div className="space-y-1.5 p-3">
+                {dayLoading ? (
+                  <div className="py-6 text-center text-sm text-gray-400">{t('loading') || 'Loading...'}</div>
+                ) : dayError ? (
+                  <div className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700 dark:border-red-900 dark:bg-red-950/30 dark:text-red-200">{dayError}</div>
+                ) : dayMovements.length === 0 ? (
+                  <div className="py-6 text-center text-sm text-gray-400">{tr('no_movements_that_day', 'No recorded movements on this day for this branch.', 'គ្មានចលនាស្តុកដែលបានកត់ត្រានៅថ្ងៃនេះសម្រាប់សាខានេះទេ។')}</div>
+                ) : dayMovements.map((movement, index) => {
+                  const type = String(movement.movement_type || '').toLowerCase()
+                  const label = type === 'add' ? tr('stock_in', 'Stock in', 'ស្តុកចូល')
+                    : type === 'sale' ? tr('sale', 'Sale', 'ការលក់')
+                    : type === 'remove' || type === 'out' ? tr('stock_out', 'Stock out', 'ស្តុកចេញ')
+                    : type.startsWith('adjust') ? tr('adjustment', 'Adjustment', 'ការកែតម្រូវ')
+                    : movement.movement_type || '—'
+                  const inbound = type === 'add'
+                  const time = movementTime(movement.created_at)
+                  return (
+                    <div key={movement.id ?? index} className="flex items-center gap-2 rounded-lg border border-gray-100 px-2.5 py-1.5 text-xs dark:border-gray-700">
+                      <span className="w-12 flex-shrink-0 font-mono text-gray-500 dark:text-gray-400">
+                        {time || tr('date_only', 'date', 'កាលបរិច្ឆេទ')}
+                      </span>
+                      <span className={`flex-shrink-0 rounded-full px-2 py-0.5 font-medium ${inbound ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300' : 'bg-orange-50 text-orange-700 dark:bg-orange-900/30 dark:text-orange-300'}`}>
+                        {label}
+                      </span>
+                      <span className="flex-shrink-0 font-semibold text-gray-900 dark:text-white">
+                        {inbound ? '+' : '-'}{Math.abs(Number(movement.quantity) || 0)}
+                      </span>
+                      <span className="min-w-0 flex-1 truncate text-gray-400">{movement.reason || movement.branch_name || ''}</span>
+                    </div>
+                  )
+                })}
+              </div>
+            </SectionCard>
+          ) : loading ? (
             <div className="py-8 text-center text-sm text-gray-400">{t('loading') || 'Loading...'}</div>
           ) : loadError ? (
             <div className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700 dark:border-red-900 dark:bg-red-950/30 dark:text-red-200">{loadError}</div>
@@ -269,6 +359,17 @@ export default function ManageBatchesModal({
                       <div className="min-w-0">
                         <div className="font-semibold text-amber-700 dark:text-amber-200">{batchDisplayLabel(batch, tr('batch', 'Batch'))}</div>
                         <div className="mt-0.5 text-xs text-gray-500 dark:text-gray-300">{batch.expiry_date || tr('no_expiry', 'No expiry')}</div>
+                        {batch.received_at ? (
+                          // Everyday use shows the DATE only; the day view
+                          // behind this link is where the times live.
+                          <button
+                            type="button"
+                            className="mt-0.5 block text-xs text-blue-600 hover:underline dark:text-blue-300"
+                            onClick={() => setDayDetail(String(batch.received_at || '').slice(0, 10) || null)}
+                          >
+                            {tr('received_on', 'Received', 'បានទទួល')}: {String(batch.received_at || '').slice(0, 10)} ›
+                          </button>
+                        ) : null}
                         {batch.notes ? <div className="mt-1 text-xs text-gray-400">{batch.notes}</div> : null}
                         {!batch.is_active ? <div className="mt-1 text-[11px] font-medium text-gray-400">{tr('deactivated', 'Deactivated')}</div> : null}
                       </div>

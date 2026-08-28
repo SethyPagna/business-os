@@ -925,6 +925,7 @@
   "customer_optional": "Customer (optional)",
   "customer_pays_label": "customer pays",
   "customer_phone": "Customer Phone",
+  "customer_phone_exists_selected": "That phone already belongs to {name} — selected them.",
   "customer_portal": "Customer Portal",
   "customer_returns": "Customer Returns",
   "customer_returns_short": "Cust",
@@ -956,10 +957,12 @@
   "date": "Date",
   "date_added": "Date added",
   "date_from": "From Date",
+  "date_only": "date",
   "date_to": "To Date",
   "dated_count_mapping_body": "Match each field this import needs to a column in your file. Fields marked required must be mapped; optional ones can be left as \"-- none --\".",
   "dated_reconciliation_suggestion_body": "This file looks like dated stock counts. Dated Stock Reconciliation handles it better.",
   "day": "Day",
+  "day_detail_time_hint": "Times shown where recorded — imported history carries the date only.",
   "days_1": "1 day",
   "days_14": "14 days",
   "days_3": "3 days",
@@ -1026,6 +1029,7 @@
   "delivery_fees": "Delivery Fees",
   "delivery_on_receipt": "🚚 Delivery on Receipt",
   "delivery_order_label": "🚚 Delivery Order",
+  "delivery_phone_exists_selected": "That phone already belongs to {name} — selected them.",
   "delivery_phone_label": "Phone",
   "delivery_position_after_desc": "Appears right after the items, before totals",
   "delivery_position_totals_desc": "Appears with subtotal, discount, tax (recommended)",
@@ -1916,6 +1920,7 @@
   "movement_type_row_move_in": "Row move in",
   "movement_type_row_move_out": "Row move out",
   "movements": "Movements",
+  "movements_on_day": "Movements on",
   "multi_device_sync": "Multi-Device Sync",
   "n_images_matched": "{n} images matched",
   "n_products_created": "{n} products created",
@@ -2004,6 +2009,7 @@
   "no_folder_selected": "No folder selected",
   "no_image": "No Image",
   "no_item_details": "No item details available",
+  "no_movements_that_day": "No recorded movements on this day for this branch.",
   "no_named_customers": "No named customers in this period",
   "no_pending_actions": "No pending requests here.",
   "no_pending_devices": "No devices are waiting for approval.",
@@ -2489,6 +2495,38 @@
           "answer": "Tell us your skin type, concerns, and what kind of routine you want. We can recommend suitable skincare, cosmetics, hair, or body products from our available stock.",
           "question": "How do I choose products for my skin type?"
         },
+        "2": {
+          "answer": "The portal reads from our current Business OS catalog. Stock can still change during busy periods, so please contact the store if you need a final confirmation before visiting.",
+          "question": "Are the products shown here available in store?"
+        },
+        "3": {
+          "answer": "Open the Membership section, enter your membership number, and you can review purchase history, returns, and current points from your customer account.",
+          "question": "How do I check my membership points?"
+        },
+        "4": {
+          "answer": "Share our store on social media, upload your screenshot in the portal, and our staff will review it. Approved submissions can receive reward points in your membership account.",
+          "question": "How does Share & Reward work?"
+        },
+        "5": {
+          "answer": "Use the social links on this page or call the store directly. Our team can help with product matching, stock checks, and more specific skincare or makeup questions.",
+          "question": "How can I contact Leang Beauty for more accurate advice?"
+        },
+        "6": {
+          "answer": "Yes. Ask our team or use the AI assistant with your skin type and concerns so we can narrow options that are gentler and easier to compare from current stock.",
+          "question": "Do you have products for sensitive skin?"
+        },
+        "7": {
+          "answer": "Yes. Contact the store directly if you want brand confirmation, latest packaging details, or a more exact stock check before buying.",
+          "question": "Can I ask whether a product is original or from a specific brand line?"
+        },
+        "8": {
+          "answer": "Yes. Leang Beauty carries multiple beauty categories, so you can search the catalog or ask for recommendations across skincare, cosmetics, perfume, hair, and body products.",
+          "question": "Do you sell skincare, makeup, hair care, and body care together?"
+        },
+        "9": {
+          "answer": "Yes. Share your budget, skin type, concerns, and whether you need morning, night, or event-based products. We can help match a more complete routine from available products.",
+          "question": "Can the store help me build a full routine?"
+        },
         "10": {
           "answer": "If an item is unavailable, message the store through Facebook, Instagram, Telegram, or phone so the team can suggest alternatives or confirm when stock changes.",
           "question": "What should I do if an item is out of stock?"
@@ -2529,10 +2567,6 @@
           "answer": "The assistant compares your question against the live store catalog, so it may show a short list when several products fit your needs or when stock can change by branch.",
           "question": "Why does the assistant sometimes suggest several options instead of one product?"
         },
-        "2": {
-          "answer": "The portal reads from our current Business OS catalog. Stock can still change during busy periods, so please contact the store if you need a final confirmation before visiting.",
-          "question": "Are the products shown here available in store?"
-        },
         "20": {
           "answer": "Yes. Open a suggested product to see the reason, use case, and any extra online reference notes the provider returned for that answer.",
           "question": "Can the assistant explain why a product was recommended?"
@@ -2556,34 +2590,6 @@
         "25": {
           "answer": "Check the Promotions section on this page for current offers. New discounts and bundles are added there as they become available, so it is worth checking back regularly.",
           "question": "Where can I see current promotions and discounts?"
-        },
-        "3": {
-          "answer": "Open the Membership section, enter your membership number, and you can review purchase history, returns, and current points from your customer account.",
-          "question": "How do I check my membership points?"
-        },
-        "4": {
-          "answer": "Share our store on social media, upload your screenshot in the portal, and our staff will review it. Approved submissions can receive reward points in your membership account.",
-          "question": "How does Share & Reward work?"
-        },
-        "5": {
-          "answer": "Use the social links on this page or call the store directly. Our team can help with product matching, stock checks, and more specific skincare or makeup questions.",
-          "question": "How can I contact Leang Beauty for more accurate advice?"
-        },
-        "6": {
-          "answer": "Yes. Ask our team or use the AI assistant with your skin type and concerns so we can narrow options that are gentler and easier to compare from current stock.",
-          "question": "Do you have products for sensitive skin?"
-        },
-        "7": {
-          "answer": "Yes. Contact the store directly if you want brand confirmation, latest packaging details, or a more exact stock check before buying.",
-          "question": "Can I ask whether a product is original or from a specific brand line?"
-        },
-        "8": {
-          "answer": "Yes. Leang Beauty carries multiple beauty categories, so you can search the catalog or ask for recommendations across skincare, cosmetics, perfume, hair, and body products.",
-          "question": "Do you sell skincare, makeup, hair care, and body care together?"
-        },
-        "9": {
-          "answer": "Yes. Share your budget, skin type, concerns, and whether you need morning, night, or event-based products. We can help match a more complete routine from available products.",
-          "question": "Can the store help me build a full routine?"
         }
       },
       "stockStatus": "Stock status",
@@ -3008,6 +3014,7 @@
   "receipt_template": "Receipt Settings",
   "receipt_test_pdf": "Receipt Test",
   "receive_batch": "Receive Batch",
+  "received_on": "Received",
   "received_payment": "Received payment",
   "recent_activity": "Recent Activity",
   "recent_imports": "Recent imports",
@@ -3438,6 +3445,7 @@
   "searchCategories": "Search categories...",
   "searchLanguages": "Search languages",
   "searchPlaceholder": "Search by product name, description, category, or brand",
+  "search_and_filters": "Search & Filters",
   "search_and_tip": "AND mode — all terms must match",
   "search_audit": "Search audit log...",
   "search_audit_placeholder": "Search by user, action…",
@@ -4079,6 +4087,39 @@
   "whatsapp": "WhatsApp",
   "wholeUnitsOnly": "Customers can view balances with decimals, but staff redeem points only in whole units.",
   "will_permanently_delete": "This will permanently delete:",
+  "wire_images_acknowledge": "I have reviewed this list and want to attach the checked photos.",
+  "wire_images_ambiguous": "{count} photo(s) matched more than one product",
+  "wire_images_ambiguous_hint": "These are left alone on purpose -- attaching one of several same-named products would be a guess. Merge the duplicates, or rename them apart, first.",
+  "wire_images_applied_summary": "Attached {images} photo(s) to {products} product(s).",
+  "wire_images_button_hint": "Match uploaded photos to products by filename, then review before anything is attached",
+  "wire_images_confirm_count": "Attach {images} photo(s) to {products} product(s)",
+  "wire_images_count": "{count} product(s) would get photos. Uncheck any you want to leave alone.",
+  "wire_images_error": "Could not match the library against your products.",
+  "wire_images_loading": "Matching library photos to products...",
+  "wire_images_none": "Every library photo that matches a product is already attached to it. Nothing to do.",
+  "wire_images_photo_count": "{count} photo(s)",
+  "wire_images_replace_warning": "{count} of the checked products already have a photo, which will be replaced. The old file stays in your Library.",
+  "wire_images_replaces": "Replaces its current photo",
+  "wire_images_stat_change": "Products to update",
+  "wire_images_stat_library": "Library photos",
+  "wire_images_stat_matched": "Matched a product",
+  "wire_images_stat_replace": "Would replace a photo",
+  "wire_images_summary": "Matches photos already in your Library to products by filename. \"Rose Serum.jpg\" goes to Rose Serum; add _1, _2 and _3 to give one product up to three photos. Only exact name matches are used -- nothing is attached on a guess, and nothing is attached until you confirm below.",
+  "wire_images_title": "Wire images to products",
+  "wire_images_unmatched": "{count} photo(s) matched no product",
+  "wire_images_unmatched_hint": "Rename the file to the product name exactly, then run this again.",
+  "wire_images_unwire_confirm": "Detach photos from {count} product(s)",
+  "wire_images_unwire_hint": "Removes the link between the checked products and their photos. The files stay in your Library, so you can fix the filenames and wire them again.",
+  "wire_images_unwire_toggle": "Detach photos instead",
+  "wire_images_unwired_summary": "Detached photos from {count} product(s). The files are still in your Library.",
+  "wire_images_working": "Attaching...",
+  "wire_import_images_action": "Wire images to these rows",
+  "wire_import_images_done": "{n} image(s) will be attached when this import is applied.",
+  "wire_import_images_failed": "Could not wire this import's images.",
+  "wire_import_images_hint": "Photos are matched to rows by filename but stay unattached until you ask for it, so you can review the match first. Nothing about the products changes if you skip this.",
+  "wire_import_images_title": "Attach this import's images",
+  "wire_import_images_wired": "Images will be attached",
+  "wire_import_images_working": "Wiring...",
   "workspace": "Workspace",
   "written_off": "Written Off",
   "year": "Year",
@@ -4111,40 +4152,5 @@
   "zip_unreadable": "The ZIP file could not be read; no images were extracted from it.",
   "zoom": "Zoom",
   "zoom_in": "Zoom in",
-  "zoom_out": "Zoom out",
-  "wire_images_title": "Wire images to products",
-  "wire_images_button_hint": "Match uploaded photos to products by filename, then review before anything is attached",
-  "wire_images_summary": "Matches photos already in your Library to products by filename. \"Rose Serum.jpg\" goes to Rose Serum; add _1, _2 and _3 to give one product up to three photos. Only exact name matches are used -- nothing is attached on a guess, and nothing is attached until you confirm below.",
-  "wire_images_loading": "Matching library photos to products...",
-  "wire_images_error": "Could not match the library against your products.",
-  "wire_images_none": "Every library photo that matches a product is already attached to it. Nothing to do.",
-  "wire_images_count": "{count} product(s) would get photos. Uncheck any you want to leave alone.",
-  "wire_images_photo_count": "{count} photo(s)",
-  "wire_images_replaces": "Replaces its current photo",
-  "wire_images_stat_library": "Library photos",
-  "wire_images_stat_matched": "Matched a product",
-  "wire_images_stat_change": "Products to update",
-  "wire_images_stat_replace": "Would replace a photo",
-  "wire_images_unmatched": "{count} photo(s) matched no product",
-  "wire_images_unmatched_hint": "Rename the file to the product name exactly, then run this again.",
-  "wire_images_ambiguous": "{count} photo(s) matched more than one product",
-  "wire_images_ambiguous_hint": "These are left alone on purpose -- attaching one of several same-named products would be a guess. Merge the duplicates, or rename them apart, first.",
-  "wire_images_replace_warning": "{count} of the checked products already have a photo, which will be replaced. The old file stays in your Library.",
-  "wire_images_acknowledge": "I have reviewed this list and want to attach the checked photos.",
-  "wire_images_confirm_count": "Attach {images} photo(s) to {products} product(s)",
-  "wire_images_working": "Attaching...",
-  "wire_images_applied_summary": "Attached {images} photo(s) to {products} product(s).",
-  "wire_images_unwire_toggle": "Detach photos instead",
-  "wire_images_unwire_hint": "Removes the link between the checked products and their photos. The files stay in your Library, so you can fix the filenames and wire them again.",
-  "wire_images_unwire_confirm": "Detach photos from {count} product(s)",
-  "wire_images_unwired_summary": "Detached photos from {count} product(s). The files are still in your Library.",
-  "wire_import_images_title": "Attach this import's images",
-  "wire_import_images_hint": "Photos are matched to rows by filename but stay unattached until you ask for it, so you can review the match first. Nothing about the products changes if you skip this.",
-  "wire_import_images_action": "Wire images to these rows",
-  "wire_import_images_working": "Wiring...",
-  "wire_import_images_wired": "Images will be attached",
-  "wire_import_images_done": "{n} image(s) will be attached when this import is applied.",
-  "wire_import_images_failed": "Could not wire this import's images.",
-  "customer_phone_exists_selected": "That phone already belongs to {name} — selected them.",
-  "delivery_phone_exists_selected": "That phone already belongs to {name} — selected them."
+  "zoom_out": "Zoom out"
 }

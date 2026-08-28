@@ -170,15 +170,20 @@ console.log('addSaleImportMapping tests passed')
 // §12 supersedes the old Add/Sale mapping above with one ten-column file
 // contract shared by Direct and Reconcile. Keep the legacy checks until
 // the last old entry point is removed, and lock the replacement beside it.
+// 'supplier' (11th, OPTIONAL — migration 0062) attributes the batch a row's
+// stock was bought from; ten-column files must keep importing unchanged.
 assert.deepEqual(UNIFIED_STOCK_HEADERS, [
   'name', 'barcode', 'shop', 'warehouse', 'date', 'action',
-  'selling_price', 'vip_price', 'cost_price', 'batch',
+  'selling_price', 'vip_price', 'cost_price', 'batch', 'supplier',
 ])
 assert.equal(buildUnifiedStockTemplateCsv(), `\uFEFF${UNIFIED_STOCK_HEADERS.join(',')}\r\n`)
-assert.deepEqual(mapUnifiedStockHeaders(['Product Name', 'UPC', 'Shop Qty', 'Warehouse', 'Sale Date', 'Movement', 'Price USD', 'Special Price', 'Unit Cost', 'Lot Code']), {
+assert.deepEqual(mapUnifiedStockHeaders(['Product Name', 'UPC', 'Shop Qty', 'Warehouse', 'Sale Date', 'Movement', 'Price USD', 'Special Price', 'Unit Cost', 'Lot Code', 'Vendor Name']), {
   name: 'Product Name', barcode: 'UPC', shop: 'Shop Qty', warehouse: 'Warehouse', date: 'Sale Date', action: 'Movement',
-  selling_price: 'Price USD', vip_price: 'Special Price', cost_price: 'Unit Cost', batch: 'Lot Code',
+  selling_price: 'Price USD', vip_price: 'Special Price', cost_price: 'Unit Cost', batch: 'Lot Code', supplier: 'Vendor Name',
 })
+// A ten-column file (no supplier header) still maps cleanly — supplier just
+// resolves to nothing.
+assert.equal(mapUnifiedStockHeaders(['name', 'barcode', 'shop', 'warehouse', 'date', 'action', 'selling_price', 'vip_price', 'cost_price', 'batch']).supplier, null)
 assert.equal(normalizeUnifiedStockDate('08/27/2026'), '2026-08-27')
 assert.equal(normalizeUnifiedStockDate('2026-02-29'), null)
 

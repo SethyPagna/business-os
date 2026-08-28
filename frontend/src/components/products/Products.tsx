@@ -4,6 +4,7 @@
 import { Suspense, useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import type { ReactNode, MouseEvent as ReactMouseEvent } from 'react'
 import { lazyRetry } from '../../utils/lazyImport.ts'
+import SectionCard from '../shared/SectionCard'
 import ChevronLeft from 'lucide-react/dist/esm/icons/chevron-left.js'
 import ChevronRight from 'lucide-react/dist/esm/icons/chevron-right.js'
 import PackageSearch from 'lucide-react/dist/esm/icons/package-search.js'
@@ -3407,9 +3408,21 @@ function ProductsFullEditor() {
             SearchInput's own `min-w-0 flex-1` (its default className) do
             the shrinking it already supports, since every other child
             here is already shrink-0/icon-only. Same fix as Inventory.tsx's
-            identical row. */}
-        <div className="pt-1">
-          <div className="flex items-center gap-1.5">
+            identical row.
+
+            SectionCard debut (N3): the row reads as the page's color-coded
+            "Search & Filters" section, and folding it reclaims vertical
+            space inside this sticky bar — the fold state persists per
+            user. The select-all / bulk toolbar below stays OUTSIDE the
+            card: it must remain visible in select mode regardless of how
+            the search section is folded. */}
+        <SectionCard
+          kind="search"
+          title={t('search_and_filters') || 'Search & Filters'}
+          storageKey="products-search"
+          className="mt-1"
+        >
+          <div className="flex items-center gap-1.5 px-2 py-2">
             <SearchInput
               id="products-search"
               name="products_search"
@@ -3442,7 +3455,7 @@ function ProductsFullEditor() {
               mobileIconOnly
             />
           </div>
-        </div>
+        </SectionCard>
 
         {bulkDeleteJobStatus && (bulkDeleteJobStatus.status === 'pending' || bulkDeleteJobStatus.status === 'processing') && (
           <div className="bulk-toolbar mb-2 flex items-center gap-3 rounded-2xl border px-3 py-2 text-xs sm:rounded-xl">
