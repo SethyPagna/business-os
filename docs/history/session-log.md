@@ -7845,3 +7845,39 @@ measured before staging the migration.
 group unification (D6b); the fees import UI (the migration covers the historical
 data; ongoing entries are manual or via a future importer); B4/B5 and the rest of
 the master plan.
+
+## Part 380 (chat, Aug 28 2026) — audit catch (zombie family removed), POS order + VIP reveal, image-only VIP grant, eighth-batch specs
+
+**Ask.** Deep staleness/deadness audit; POS order is Customer → Membership →
+Discount → Delivery; VIP shows label only, click to reveal then select; the
+image-only route should be able to VIEW selling/VIP/barcode/batches/branch stocks —
+view, search, upload images only, each capability its own preselected-but-custom
+row; whole-system bulk price edit; discounts managed in Promotions with
+promoted-first ordering; grouping same-name only (affirmed); product name tag
+label; delivery never a category/product; delivery actual-cost sub-stat.
+
+**What changed.**
+- Audit CATCH: the five addSaleImport* modules were zombies — imported only by each
+  other + tests since Part 361, and the recorded "importModeDetection still uses
+  them" justification was a stale comment. Removed (`b4ee1d86`), their §12
+  unified-contract assertions preserved in unifiedStockContract.test.ts, chain
+  rewired (116 files, coverage-guard verified), stale comment fixed. Other audit
+  greps clean: no 'Leang Cosmetics' remnants, SectionCard consumed, no absolute
+  InfoHints.
+- `1733b639` POS: Membership block moved above Discount (the corrected order); VIP
+  amount removed from the grid line; detail-sheet VIP button = two-step reveal.
+- `f50bbaef` permissions: products_image_only_show_vip end-to-end (field map +
+  editor + view + en/km + 14-check pure test). The per-field opt-in system already
+  existed — the user's "view everything, touch nothing" preset is mostly a bundling
+  UX + the batches/branch-stock view rows (specced in K6).
+- progress.md: Phase P (P1–P6: order done, VIP reveal done, whole-system bulk edit,
+  name tag label, delivery-is-delivery standing decision, delivery actual-cost
+  sub-stat), G1 promoted-first ordering + Promotions-managed discounts, K6 refined.
+
+**Verified.** Full frontend chain green + build; full backend sweep 0 failures
+(image-only pure test now 14 checks); typechecks clean throughout; the coverage
+guard proves every remaining test file is chained.
+
+**Not done.** Deploy (user; ships everything since Part 373's); P3/P4/P6, the K6
+preset bundle + batches/branch-stock view rows, G1 implementation, and the ordered
+master plan remainder.

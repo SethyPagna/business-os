@@ -421,6 +421,12 @@ deep-linkable tabs.*
   discount; optional display Title (tag/label shown or hidden); scope = one product,
   a set, category/brand; start/end dates. POS + portal both read the SAME rule evaluation
   kernel (truth never diverges between what POS charges and what the portal advertises).
+  **Refined Aug 28:** per-product discounts MANAGE in Promotions (moved out of the
+  Products edit surface), while their labels stay VISIBLE in Products' default view,
+  the POS grid and the public portal. **Ordering rule:** promoted/discounted items are
+  always shown FIRST — they occupy a higher-order block above the alphabetical run and
+  the A–Z rail applies after them (Products, POS, portal alike). Filters exist for
+  every one of these states (promoted / discounted / by promotion).
 - [ ] G2. Loyalty Points moves in as a Promotions section (E5).
 - [ ] G3. Portal promo strip: one auto-scrolling row above search; "·" dots represent each
   promoted product/promotion, click a dot to jump. Promos render Title + discount.
@@ -557,10 +563,46 @@ deep-linkable tabs.*
 - [ ] K4. Storage/jobs hardening phases 1–6 of the locked execution plan (leases, R2
   NDJSON staging, D1 slimming — the 193MB staging JSON), safeguards, Sentry wiring.
 - [ ] K5. Identity: rename-regroup (9.1 — via D6), auto-merge flag + filter (9.2).
-- [ ] K6. Permissions: per-action widening story (7.1) + editor redesign (7.2, in E4).
+- [~] K6. Permissions: per-action widening story (7.1) + editor redesign (7.2, in E4).
+  **Refined + partly built Aug 28 (Part 380):** the per-capability opt-in system for
+  the image-only role ALREADY exists (each visible field is its own permission row —
+  Part 243), and it gained `products_image_only_show_vip` (VIP price as its own grant,
+  separate from selling price; server field-map + editor row + view render + pure test
+  all updated). **The user's target preset:** a "view everything, touch nothing" tier —
+  view + search + upload-images with selling/VIP/barcode/category/brand/stock/batches/
+  branch-stock visible, NO edit buttons or other sections — composed of the individual
+  rows PRESELECTED, each still toggleable, and custom additions possible (e.g. also
+  grant stock-in). **Still to build:** the batches + per-branch-stock VIEW rows (those
+  aren't product-row columns — they need the read attachments gated), the preset
+  bundle UX in the editor, and the guarantee-by-test that none of this touches POS/
+  sales/full access (surface scoping already enforces it server-side).
 - [ ] K7. Performance pass (measured), portal §6 leftovers, Library details (8.1),
   edit-form section jump bug (10.2), path-width inputs (11.17 — still needs the user to
   point at which input).
+
+### Phase P — Aug-28 eighth-batch additions (Part 380)
+
+- [x] P1. **POS cart order corrected:** Customer → **Membership → Discount** →
+  Delivery → Summary → Payment (membership before store discount, per the user).
+- [x] P2. **VIP price reveals on request in POS:** the grid shows only the VIP chip
+  (no amount); the detail sheet's VIP button first says "VIP price", the FIRST tap
+  reveals the amount, the second tap adds at it — keyed per product/variant so one
+  reveal never exposes another row. Cost stays never-shown.
+- [ ] P3. **Bulk edit, whole-system scope.** The existing bulk price adjust (selling/
+  VIP/cost, ±, USD/KHR) operates on the selection; add an explicit "ALL products in
+  the system" scope that runs server-side in bounded batches with a preview count and
+  the standard confirm — never by materializing 8k ids in the client.
+- [ ] P4. **Product name tag label.** Optional per-product short tag shown as a chip
+  next to the name (a user's own memory aid), additive migration
+  (`products.tag_label TEXT`), editable in the form, searchable and filterable.
+- [x] P5. **Standing decision — delivery is DELIVERY, never a category/product.** The
+  old system modeled delivery fees as a "Delivery" category line item (visible in its
+  exports); this system records them only as the sale's delivery fields. The sales
+  migration already converts old delivery line items into delivery fees; no importer,
+  report or UI may reintroduce the old shape.
+- [ ] P6. **Delivery stat drill-down:** inside the delivery stat, the customer-charge
+  figure carries a separate sub-stat for ACTUAL delivery cost (and the margin) —
+  staff-only per C2's redaction scope. Extends C3's shared kernel.
 
 ### Flagged, not guessed (Golden Rule 7)
 
