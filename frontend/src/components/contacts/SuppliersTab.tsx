@@ -1,4 +1,6 @@
 import { Suspense, lazy, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react'
+import RenameCascadeModal, { type RenameCascadeChoice, type RenameCascadeRequest } from '../shared/RenameCascadeModal.tsx'
+import { getRenameImpact } from '../../api/renameCascadeTransport.ts'
 import { lazyRetry } from '../../utils/lazyImport.ts'
 import { consumeLongPressClick, createLongPressHandlers } from '../../utils/longPress.ts'
 import type { ComponentProps } from 'react'
@@ -385,6 +387,21 @@ function SuppliersTab({ t, notify, active = true, initialSearch }: SuppliersTabP
   const loadWatchdogRef = useRef<number | null>(null)
   const loadPromiseRef = useRef<Promise<void> | null>(null)
   const saveInFlightRef = useRef(false)
+
+  // D6 rename gate: a promise the save flow awaits while the shared
+  // before->after dialog asks what happens to attached rows.
+  const [renameRequest, setRenameRequest] = useState<RenameCascadeRequest | null>(null)
+  const renameResolveRef = useRef<((choice: RenameCascadeChoice) => void) | null>(null)
+  const askRenameChoice = (request: RenameCascadeRequest) => new Promise<RenameCascadeChoice>((resolve) => {
+    renameResolveRef.current = resolve
+    setRenameRequest(request)
+  })
+  const handleRenameChoice = (choice: RenameCascadeChoice) => {
+    setRenameRequest(null)
+    const resolve = renameResolveRef.current
+    renameResolveRef.current = null
+    resolve?.(choice)
+  }
   const deleteInFlightRef = useRef(false)
   const bulkDeleteInFlightRef = useRef(false)
   const isKhmer = /[\u1780-\u17FF]/.test(t('cancel') || '')
@@ -662,16 +679,32 @@ function SuppliersTab({ t, notify, active = true, initialSearch }: SuppliersTabP
     }
     try {
       const existingSnapshot = selected ? cloneHistorySnapshot(selected) : null
-      const payload = { ...form, userId: user?.id, userName: user?.name }
-      const result = selected
-        ? await runSupplierMutation(() => getSupplierApi().updateSupplier(selected.id, payload), 'Update supplier')
+      const payload: Record<string, unknown> = { ...form, userId: user?.id, userName: user?.name }
+      // D6: renaming a supplier previews the products/batches carrying the
+      // old free-text name and asks -- carry them to the new name, keep a
+      // copy (a fresh supplier, the old keeps its rows), or cancel.
+      let renameCopy = false
+      const oldSupplierName = selected ? String(selected.name || '').trim() : ''
+      const newSupplierName = String(form.name || '').trim()
+      if (selected && oldSupplierName && oldSupplierName.toLowerCase() !== newSupplierName.toLowerCase()) {
+        try {
+          const impact = await getRenameImpact('supplier', oldSupplierName, newSupplierName)
+          const choice = await askRenameChoice({ kind: 'supplier', from: oldSupplierName, to: newSupplierName, impact, choices: ['carry', 'copy'] })
+          if (choice === 'cancel') { finishSingleAction(saveInFlightRef); return }
+          if (choice === 'carry') payload.__rename_cascade = 'carry'
+          if (choice === 'copy') renameCopy = true
+        } catch { /* preview unavailable -- plain rename, no cascade (old behavior) */ }
+      }
+      const useUpdate = Boolean(selected) && !renameCopy
+      const result = useUpdate
+        ? await runSupplierMutation(() => getSupplierApi().updateSupplier((selected as { id: number | string }).id, payload), 'Update supplier')
         : await runSupplierMutation(() => getSupplierApi().createSupplier(payload), 'Create supplier')
       if (result?.success === false) {
         notify(result.error || 'Failed', 'error')
         return
       }
-      if (selected && existingSnapshot) {
-        const nextSnapshot = cloneHistorySnapshot({ ...existingSnapshot, ...payload, id: selected.id })
+      if (useUpdate && existingSnapshot) {
+        const nextSnapshot = cloneHistorySnapshot({ ...existingSnapshot, ...payload, id: (selected as { id: number | string }).id })
         actionHistory.pushAction({
           label: `Edit supplier ${existingSnapshot.name || nextSnapshot.name || ''}`.trim(),
           undo: async () => {
@@ -693,7 +726,7 @@ function SuppliersTab({ t, notify, active = true, initialSearch }: SuppliersTabP
         })
       } else {
         let createdSupplierId = extractHistoryResultId(result)
-        const createdSnapshot = cloneHistorySnapshot({ ...payload, id: createdSupplierId })
+        const createdSnapshot = cloneHistorySnapshot({ ...(payload as Partial<SupplierRow>), id: createdSupplierId })
         if (createdSupplierId > 0) {
           actionHistory.pushAction({
             label: `Add supplier ${createdSnapshot.name || ''}`.trim(),
@@ -1216,6 +1249,7 @@ function SuppliersTab({ t, notify, active = true, initialSearch }: SuppliersTabP
           />
         </Suspense>
       ) : null}
+      <RenameCascadeModal request={renameRequest} busy={false} t={(key, fallback) => t(key) || fallback || key} onChoose={handleRenameChoice} />
     </div>
   )
 }

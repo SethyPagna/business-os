@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import RenameCascadeModal, { type RenameCascadeChoice, type RenameCascadeRequest } from '../../shared/RenameCascadeModal.tsx'
+import { getRenameImpact } from '../../../api/renameCascadeTransport.ts'
 import type { ComponentProps } from 'react'
 import Modal from '../../shared/Modal'
 import ActionHistoryBar from '../../shared/ActionHistoryBar'
@@ -170,6 +172,21 @@ export default function ManageCategoriesModal({ onClose, onReviewSelection, t }:
   const [err, setErr] = useState('')
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
+
+  // D6 rename gate: a promise the save flow awaits while the shared
+  // before->after dialog asks what happens to attached rows.
+  const [renameRequest, setRenameRequest] = useState<RenameCascadeRequest | null>(null)
+  const renameResolveRef = useRef<((choice: RenameCascadeChoice) => void) | null>(null)
+  const askRenameChoice = (request: RenameCascadeRequest) => new Promise<RenameCascadeChoice>((resolve) => {
+    renameResolveRef.current = resolve
+    setRenameRequest(request)
+  })
+  const handleRenameChoice = (choice: RenameCascadeChoice) => {
+    setRenameRequest(null)
+    const resolve = renameResolveRef.current
+    renameResolveRef.current = null
+    resolve?.(choice)
+  }
   const [deletingId, setDeletingId] = useState<EntityId | 'selected' | null>(null)
   const [selectedIds, setSelectedIds] = useState<Set<number>>(() => new Set())
   const { notify, user } = useApp()
@@ -308,7 +325,19 @@ export default function ManageCategoriesModal({ onClose, onReviewSelection, t }:
     setSaving(true)
     try {
       const previousSnapshot = categories.find((entry) => Number(entry?.id || 0) === Number(category?.id || 0))
-      const payload = { name: category.name, color: category.color || DEFAULT_CATEGORY_COLOR, expectedUpdatedAt: category.updated_at || undefined }
+      const payload: CategoryPayload & { cascade?: 'copy' } = { name: category.name, color: category.color || DEFAULT_CATEGORY_COLOR, expectedUpdatedAt: category.updated_at || undefined }
+      // D6: a real rename previews its blast radius and asks -- carry the
+      // attached products, keep a copy (new name starts fresh), or cancel.
+      const oldName = String(previousSnapshot?.name || '').trim()
+      const newName = String(category.name || '').trim()
+      if (oldName && newName && oldName.toLowerCase() !== newName.toLowerCase()) {
+        try {
+          const impact = await getRenameImpact('category', oldName, newName)
+          const choice = await askRenameChoice({ kind: 'category', from: oldName, to: newName, impact, choices: ['carry', 'copy'] })
+          if (choice === 'cancel') return
+          if (choice === 'copy') payload.cascade = 'copy'
+        } catch { /* preview unavailable -- the rename carries, as it always did */ }
+      }
       const res = await runCategoryMutation(() => getCategoryApi().updateCategory(category.id, payload), 'Update category')
       if (res?.success === false) {
         setErr(res.error || 'Failed')
@@ -604,6 +633,7 @@ export default function ManageCategoriesModal({ onClose, onReviewSelection, t }:
           ))}
         </div>
       </div>
+      <RenameCascadeModal request={renameRequest} busy={saving} t={(key, fallback) => t(key) || fallback || key} onChoose={handleRenameChoice} />
     </Modal>
   )
 }

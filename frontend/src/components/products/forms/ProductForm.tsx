@@ -13,6 +13,8 @@ import AppSelect, { type AppSelectOption } from '../../shared/AppSelect.tsx'
 import { MarginCard, DualPriceInput, parseNumericInput, sanitizeNumericInput } from '../shared/primitives'
 import BranchStockAdjuster from './BranchStockAdjuster'
 import { calculateProductDiscount, formatPriceNumber, normalizePriceValue } from '../../../utils/pricing.ts'
+import RenameCascadeModal, { type RenameCascadeChoice, type RenameCascadeRequest } from '../../shared/RenameCascadeModal.tsx'
+import { getRenameImpact, renameBrandEverywhere } from '../../../api/renameCascadeTransport.ts'
 import { buildCacheBustedMediaPath } from '../../../utils/mediaUpload.ts'
 import {
   beginTrackedRequest,
@@ -639,6 +641,22 @@ export default function ProductForm({
   // updated_at is dropped rather than resurrecting stale edits over newer
   // server data.
   const draftKey = `bos_draft_product_${product?.id ?? 'new'}`
+
+  // D6 rename gate: a promise the save flow awaits while the shared
+  // before->after dialog asks what happens to attached rows.
+  const [renameRequest, setRenameRequest] = useState<RenameCascadeRequest | null>(null)
+  const renameResolveRef = useRef<((choice: RenameCascadeChoice) => void) | null>(null)
+  const askRenameChoice = (request: RenameCascadeRequest) => new Promise<RenameCascadeChoice>((resolve) => {
+    renameResolveRef.current = resolve
+    setRenameRequest(request)
+  })
+  const handleRenameChoice = (choice: RenameCascadeChoice) => {
+    setRenameRequest(null)
+    const resolve = renameResolveRef.current
+    renameResolveRef.current = null
+    resolve?.(choice)
+  }
+
   useEffect(() => {
     formDirtyRef.current = false
     try {
@@ -830,6 +848,38 @@ export default function ProductForm({
       image_path: imageList[0] || '',
       is_group: form.parent_id ? 0 : (Number(form.is_group) ? 1 : 0),
       parent_id: form.parent_id ? Number(form.parent_id) : null,
+    }
+    // D6: renaming an EXISTING product that shares its name with siblings
+    // asks whether the whole group carries (9.1's regroup) or only this
+    // row splits off; a brand change over a multi-product brand asks
+    // whether the brand renames everywhere. Preview counts come from the
+    // server; if the preview endpoint is unreachable the save behaves
+    // exactly as before (only this row).
+    if (product?.id) {
+      const oldName = String(product.name || '').trim()
+      const newName = String(payload.name || '').trim()
+      if (oldName && newName && oldName.toLowerCase() !== newName.toLowerCase()) {
+        try {
+          const impact = await getRenameImpact('product_name', oldName, newName)
+          if (impact.group_rows > 1) {
+            const choice = await askRenameChoice({ kind: 'product_name', from: oldName, to: newName, impact, choices: ['carry', 'only'] })
+            if (choice === 'cancel') { saveInFlightRef.current = false; return }
+            if (choice === 'carry') (payload as unknown as Record<string, unknown>).__rename_scope = 'group'
+          }
+        } catch { /* preview unavailable -- old only-this-row behavior */ }
+      }
+      const oldBrand = String((product as Record<string, unknown>).brand || '').trim()
+      const newBrand = String(payload.brand || '').trim()
+      if (oldBrand && newBrand && oldBrand.toLowerCase() !== newBrand.toLowerCase()) {
+        try {
+          const impact = await getRenameImpact('brand', oldBrand, newBrand)
+          if (impact.products_primary + impact.products_secondary > 1) {
+            const choice = await askRenameChoice({ kind: 'brand', from: oldBrand, to: newBrand, impact, choices: ['carry', 'only'] })
+            if (choice === 'cancel') { saveInFlightRef.current = false; return }
+            if (choice === 'carry') await renameBrandEverywhere(oldBrand, newBrand)
+          }
+        } catch { /* preview unavailable -- brand changes on this row only */ }
+      }
     }
     setSaving(true)
     try {
@@ -1314,7 +1364,8 @@ export default function ProductForm({
           </div>
           </> : null}
 
-          {/* G1 (Part 391): the per-product discount editor MOVED to the
+          <RenameCascadeModal request={renameRequest} busy={saving} t={(key, fallback) => t(key) || fallback || key} onChoose={handleRenameChoice} />
+      {/* G1 (Part 391): the per-product discount editor MOVED to the
               Promotions page (user: "per-product discounts manage in
               Promotions, labels stay visible in Products"). The product
               still CARRIES its discount fields -- saving here never
