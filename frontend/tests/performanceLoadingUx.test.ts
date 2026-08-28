@@ -3035,8 +3035,13 @@ assert.match(
 )
 assert.match(
   filePickerModal,
-  /const notifyRef = useRef\(notify\)[\s\S]*notifyRef\.current = notify[\s\S]*notifyRef\.current\(getErrorMessage\(error, 'Failed to load files'\), 'error'\)[\s\S]*\}, \[mediaType, search\]\)/,
-  'file picker load effect should avoid unstable notify dependencies that can restart the modal loader every render',
+  /const notifyRef = useRef\(notify\)[\s\S]*notifyRef\.current = notify[\s\S]*notifyRef\.current\(getErrorMessage\(error, 'Failed to load files'\), 'error'\)[\s\S]*\}, \[mediaType, page, search\]\)/,
+  'file picker load effect should avoid unstable notify dependencies that can restart the modal loader every render (page is a real dependency: each page is a separate fetch)',
+)
+assert.match(
+  filePickerModal,
+  /setPage\(1\)[\s\S]{0,80}\}, \[search, mediaType\]\)/,
+  'changing the picker search or media-type filter must jump back to page 1, or a filter applied on page 3 shows an empty page',
 )
 assert.match(
   filePickerModal,
@@ -3045,7 +3050,7 @@ assert.match(
 )
 assert.match(
   filePickerModal,
-  /withLoaderTimeout\(\(\) => fetchPickerFiles\(\{ search, mediaType \}\), 'Files library picker', FILE_PICKER_LOAD_TIMEOUT_MS\)/,
+  /withLoaderTimeout\(\s*\(\) => fetchPickerFiles\(\{ search, mediaType, page, pageSize: PICKER_PAGE_SIZE, includeMeta: true \}\),\s*'Files library picker',\s*FILE_PICKER_LOAD_TIMEOUT_MS,?\s*\)/,
   'file picker library should timeout slow file reads',
 )
 assert.doesNotMatch(

@@ -110,6 +110,14 @@ export default function FilePickerModal({
   const normalizedInitialSelectedKey = Array.isArray(initialSelected) ? initialSelected.filter(Boolean).join('\u0000') : ''
   const [files, setFiles] = useState<FileAsset[]>([])
   const [loading, setLoading] = useState(false)
+  // The picker used to fetch with NO page params, so the server's default
+  // page (24 items) was ALL a user could ever see or select from — a
+  // library past 24 files was silently unreachable here (Aug 28 report:
+  // "no page to press next or back"). Real pagination now.
+  const [page, setPage] = useState(1)
+  const [totalFiles, setTotalFiles] = useState(0)
+  const PICKER_PAGE_SIZE = 48
+  const totalPages = Math.max(1, Math.ceil(Math.max(0, totalFiles) / PICKER_PAGE_SIZE))
   const [search, setSearch] = useState('')
   const [uploading, setUploading] = useState(false)
   const [deletingAssetId, setDeletingAssetId] = useState<string | number | null>(null)
@@ -133,16 +141,27 @@ export default function FilePickerModal({
     const requestId = beginTrackedRequest(loadRequestRef)
     setLoading(true)
     try {
-      const result = await withLoaderTimeout(() => fetchPickerFiles({ search, mediaType }), 'Files library picker', FILE_PICKER_LOAD_TIMEOUT_MS)
+      const result = await withLoaderTimeout(
+        () => fetchPickerFiles({ search, mediaType, page, pageSize: PICKER_PAGE_SIZE, includeMeta: true }),
+        'Files library picker',
+        FILE_PICKER_LOAD_TIMEOUT_MS,
+      )
       if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
-      setFiles(normalizeFileAssets(result))
+      const meta = result as { items?: unknown; total?: unknown } | null
+      const rawItems = meta && Array.isArray(meta.items) ? meta.items : result
+      setFiles(normalizeFileAssets(rawItems))
+      setTotalFiles(Number(meta?.total) || (Array.isArray(rawItems) ? rawItems.length : 0))
     } catch (error) {
       if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
       notifyRef.current(getErrorMessage(error, 'Failed to load files'), 'error')
     } finally {
       if (isTrackedRequestCurrent(loadRequestRef, requestId)) setLoading(false)
     }
-  }, [mediaType, search])
+  }, [mediaType, page, search])
+
+  useEffect(() => {
+    setPage(1)
+  }, [search, mediaType])
 
   useEffect(() => {
     if (!open) return undefined
@@ -249,12 +268,13 @@ export default function FilePickerModal({
 
   if (!open) return null
 
-  // The picker's own file list isn't paginated (fetchPickerFiles returns
-  // the full search/mediaType-filtered result -- a real library plus a
-  // multi-select session can both run into the hundreds), so checking
-  // membership with `selectedPaths.includes(...)` once per rendered file
-  // was an O(files x selectedPaths) scan on every render, same shape as
-  // the productGrouping.ts fix elsewhere in this project. A Set gives
+  // The picker IS paginated now (48 per page, Part 382 — it used to fetch
+  // the server's default 24-item first page with no way to reach the rest),
+  // but a multi-select session's selectedPaths can still run into the
+  // hundreds across pages, so checking membership with
+  // `selectedPaths.includes(...)` once per rendered file was an
+  // O(files x selectedPaths) scan on every render, same shape as the
+  // productGrouping.ts fix elsewhere in this project. A Set gives
   // O(1) membership checks for both the per-file render loop below and
   // the selectedAssets derivation.
   const selectedPathSet = new Set(selectedPaths)
@@ -314,6 +334,20 @@ export default function FilePickerModal({
                 </div>
               )
             })}
+          </div>
+        ) : null}
+
+        {!loading && totalPages > 1 ? (
+          <div className="mt-3 flex items-center justify-between gap-2">
+            <button type="button" className="btn-secondary text-sm" disabled={page <= 1} onClick={() => setPage((current) => Math.max(1, current - 1))}>
+              {tr('previous', 'Previous')}
+            </button>
+            <span className="text-sm text-slate-500">
+              {tr('page', 'Page')} {page} / {totalPages} · {totalFiles} {tr('files', 'files')}
+            </span>
+            <button type="button" className="btn-secondary text-sm" disabled={page >= totalPages} onClick={() => setPage((current) => Math.min(totalPages, current + 1))}>
+              {tr('next', 'Next')}
+            </button>
           </div>
         ) : null}
 
