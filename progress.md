@@ -483,7 +483,7 @@ store really paid the rider; margin = charge − cost and is internal only.*
   Filters grow: by supplier, by date range (the new date row), by action type,
   by branch. **Date-scope row** sits directly below the search row on Products AND
   Inventory, with the Filter button moved onto it.
-- [~] D3 **[CLAIMED: session a7]** (the drill half shipped with D1/Part 415;
+- [~] D3 *(first full slice SHIPPED, Part 422, session a7: the detail modal gained four folded N3 SectionCards -- Batches (per-lot totals across branches + received/expiry + supplier), Suppliers (D1b identity rule, honest lots_without_cost), Sales (kernel per-day/month via whereActiveSales), Stock Changes (D1 ledger scoped to the product -- running balance, never disagrees with the page ledger). One new read /products/:id/detail-report + kernel getProductSalesBreakdown. STILL OPEN here: in-detail movement filters + the full Date/Type/Batch/Qty/Balance/Reference table (Batch column needs the movements.batch_id migration -- D2 gap), receipt-# references, and product-search-by-supplier/batch (search-engine unit).)* **[CLAIMED: session a7]** (the drill half shipped with D1/Part 415;
   this claim = the full user detail-page spec below. Footprint:
   products/surfaces/ProductDetailModal.tsx + new folded sections +
   salesAnalytics kernel gains the per-product breakdown + one new
