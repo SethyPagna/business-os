@@ -1420,6 +1420,102 @@ first; renumbered per the reservation protocol.)*
   here so whichever session lands it builds the format switch into H1's dialog
   rather than per-page one-offs.
 
+### Phase Y — Aug-28 seventeenth batch (session 43): live-use regressions + speed + density
+
+*The user ran the migrated system for real (products import, POS sale, searching)
+and reported ~20 issues, two screenshots. Ordered by severity: broken function
+first, then workflow regressions, then density/design. Several land in files hot
+with 6e's F3 slice 2 (Products.tsx / Inventory.tsx / ProductForm.tsx /
+FastStockInModal.tsx / Modal.tsx / Sidebar.tsx) — marked [HOT-6e], do not start
+those until that unit commits.*
+
+- [ ] Y1. **Search is very slow / reads broken.** Products search "pink dahlia"
+  took >5s; Contacts search also very slow — and while a search is in flight the
+  list shows "No matching customers" instead of a searching state (reads as data
+  loss). Fix both: measure where the time goes (server query vs frontend), add
+  proper in-flight state on every list search (Products/Contacts at minimum:
+  "Searching…" until the response for the CURRENT term arrives).
+- [ ] Y2. **POS sale errors in cart but the sale actually lands.** POS showed 1
+  item in stock; adding to cart + completing sale showed an error, yet the sale
+  then appears on the Sales page. So the write succeeds and the client reports
+  failure — find the mismatched response/error path (or double-submit where the
+  first succeeded) and make outcome reporting truthful.
+- [ ] Y3. **Branches page lost the branches.** After E1's hub merge the Branches
+  page no longer shows the branch list itself. Regression — restore branches on
+  the Stats & Branches section.
+- [ ] Y4. **Scroll regressions everywhere:** Fees section can't scroll, Settings
+  page can't scroll, print/reprint view, Sales page + its sections, Branch page.
+  Likely one shared cause in the hub-section layout (overflow clipped at the hub
+  wrapper). Fix the pattern, then verify every hub.
+- [ ] Y5. **Products import "uncategorized row error product name 48" — serious.**
+  A row error naming "product name 48" with an uncategorized bucket appeared
+  during the products import. Reproduce with the pack, find what the engine did
+  (fabricated name? counter leak?), fix + test.
+- [ ] Y6. **Import wire-images-to-products not working.** Linking library images
+  to products (the import's image wiring) does nothing visible. Diagnose end to
+  end (match rule → write → product cover render) and fix.
+- [ ] Y7. **Import ran with only ONE batch date (08/24/2026)** — the many real
+  past stock batch dates are missing. Expected: the aug27 template is a SNAPSHOT
+  (single synthetic date — M1's known finding, manifest Step 1) and real dates
+  arrive with `stock_in_history.csv` (M4). Verify which file the user ran; if
+  the FIXED template still stamps one date on every lot, confirm that's the
+  documented snapshot behavior and make the UI/manifest say so; make sure the
+  history import path is actually runnable now (see Y8's stall).
+- [ ] Y8. **Import flow regression — slow, stalled, review after the wait.**
+  Report: upload slow; TWO analyze passes; then "view report / resolve product
+  conflicts / approve"; then a long "Applying changes" that stalled at
+  4,800/12,094 with "No update in a while — this import may have stopped"; whole
+  process 10–20+ min. Wants the OLD contract feel: review comes BEFORE the long
+  work, not after waiting. Split: (a) find why analyze runs twice (dup work);
+  (b) find the applying stall (queue consumer death/lease?); (c) restore/keep
+  review-before-commit so approval happens on the analysis, and the ONLY long
+  phase after approve is the apply, clearly progressing.
+- [ ] Y9. **Import progress UI too text-heavy.** The tracker card is a wall of
+  words (screenshot 1). Compact design: status chip + progress bar + counts;
+  details fold behind an expander.
+- [ ] Y10. **POS "awaiting payment" must not require a payment method.** Today it
+  demands one upfront; the point of awaiting-payment is deciding later on the
+  Sales page. Make method optional for awaiting-payment sales (validation +
+  server accept NULL method until completion).
+- [ ] Y11. **POS delivery "paid by" block: too much text, confusing.** Redesign
+  compact (the paid-by choice + cost stay, prose goes). Membership explanation
+  sentence becomes an InfoHint tooltip instead of inline text.
+- [ ] Y12. **"Change did not link to the fees page" — FLAGGED, needs the user.**
+  Reading unclear: cash change on POS payment? the cancel lost-fee link? Ask
+  before building. (Golden Rule 7.)
+- [ ] Y13. **Products page: kill the "Search & Filters" SectionCard wrapper**
+  (screenshot 2). Search row becomes a plain page-level control (no folded
+  card, no wrapper title); the "Created" filter moves OUT of the filter menu to
+  sit below the search row; when Stock Changes becomes a section (Y15) it gets
+  its own, more-detailed filter row. [HOT-6e: Products.tsx]
+- [ ] Y14. **Sticky rules on Products:** only the search+filter row pins on
+  scroll — the select-all row must NOT pin; and remove the gap above the pinned
+  row (a category header currently shows through between the top edge and the
+  pinned search row). [HOT-6e: Products.tsx]
+- [ ] Y15. **Products page becomes chip-sectioned like Promotions:** page title
+  left, section switcher (Products | Stock Changes | …) — Stock Changes stops
+  being an inline card on the same scroll (screenshot 1) and becomes its own
+  section. [HOT-6e: Products.tsx]
+- [ ] Y16. **History + Manage buttons join the section-chip row** (not their own
+  toolbar row) on: Sales, Branches, Contacts, Settings, Library, Review & Logs.
+  (Products' equivalent rides Y15.)
+- [ ] Y17. **Sales list: Excel-like columns, details folded into the row.**
+  Customer = ONE column (name + phone) that opens a detail view (membership
+  etc.) on click; cashier same pattern; payment one row; drop the per-row
+  detail sprawl.
+- [ ] Y18. **Dashboard shows stale data** — a cancelled sale still shows as
+  completed in dashboard figures. Find the cache/refresh gap (cancel doesn't
+  bump the dashboard read) and fix.
+- [ ] Y19. **Dashboard range: replace the separate "custom" option with the
+  built-in Start → End pill** (X1's DateTimeRangePicker): presets update the
+  pill, the pill IS the custom editor; the options menu gets the Products
+  Created-filter visual treatment.
+- [ ] Y20. **Pagination redesign, all list pages:** merge the items-range /
+  per-page / pages row INTO the select-all row (select-all wastes a whole row on
+  large screens). Compact form: `‹ page (1–20) / totalPages ›` where the page
+  number is editable in place (no size growth) and clicking "(1–20)" opens the
+  per-page options (20/30/50/100…). [Products part HOT-6e]
+
 ### Flagged, not guessed (Golden Rule 7)
 
 - **Products now differs from the other five list pages (Part 389):** B6's rule ("the
