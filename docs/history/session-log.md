@@ -7920,3 +7920,51 @@ live query (read-only).
 **Not done.** Deploy (now also carries 0064 — the expense history arrives with it);
 the P7 parity sweep implementation (starting with POS quick-add options); P3/P4/P6,
 K6 view rows, G1, and the ordered remainder.
+
+## Part 382 (chat, Aug 28 2026) — supplier credit end-to-end, device-approval lockout fix, picker pagination, customers verified
+
+**Asked.** Continue the plan; connect costs+supplier so the supplier section can
+show them when searched; receiving stock offers paid vs on-credit with a due date
+and an admin reminder (update notifications); the files picker has no next/back —
+fix it; verify customers/phones against production (phones unique, names updated
+to match).
+
+**What changed.**
+- `39d34121` (Q1): migration `0065` puts `payment_status` / `credit_due_date` /
+  `unit_cost_usd` on product_batches — the lot now carries who it came from
+  (0062), what one unit cost, and whether the supplier is paid. Receive modal +
+  POST take supplier / unit cost / Paid-or-Credit; credit REFUSES to save without
+  its due date (client and server — the reminder is built on that date). PATCH
+  flips credit→paid (clears the date), moves dates, corrects supplier/cost
+  (explicit edit overrides; receive stays fill-if-NULL, first attribution wins —
+  pure tests prove both). The §12 import writer stores per-lot unit cost the same
+  way, so the 21k-row history lands with supplier AND cost per batch. New
+  notifications section lists on-credit lots — overdue in danger tone first, then
+  due within a configurable window (default 7 days); toggle + window editable in
+  Settings; en/km labels added for every new string.
+- `c5e93c41` (Q2): device-approval notifications RE-REGISTERED. A stale comment
+  claimed the login gate was "fully disabled" and the section deliberately unused
+  — the gate is LIVE for every non-admin login and the Aug-28 clean slate wiped
+  all trusted devices, so each employee's next login sits PENDING with no surface
+  telling any admin. Silent lockout, now surfaced to admin-control users.
+- `806bf45d` (Q3): the file picker fetched the server's default 24-item first
+  page with no controls — everything past 24 was unreachable (the reported bug).
+  Now 48/page + Previous/Page x of y/Next + reset-to-page-1 on search/filter
+  change; the guard test pins the new fetch shape and the reset.
+- Q4 (data, read-only): production's 4,652 customers checked — phones are unique
+  except TWO pairs (`010 229 119` R_Lara #19728 vs Phopph #22853; `010 868 888`
+  Nay Nay #19911 vs Nay Naysochivy #19912) left for the USER to merge in the
+  Duplicates tab, never auto-merged. 9,796 receipts match exactly one current
+  customer by phone; **6,548 names re-spelled to the current system's version**;
+  the 18 rows on the two ambiguous phones untouched; xlsx twins regenerated and
+  the whole pack re-validated.
+
+**Verified.** Backend sweep 0 failures; frontend chain green (116 test files —
+one guard updated for the picker's new pagination pins); both typechecks clean;
+real vite build; wrangler dry-run; harness applies all 66 migrations with the
+0065 columns present.
+
+**Not done.** Deploy (`npm run deploy:full` now carries 0061–0065); D5's
+supplier-section purchases/cost summary READ view (the data side is complete);
+the two customer merges (user); the ordered remainder (P7 parity sweep, P3, P4,
+P6, K6, G1, D1b, H1, N1c, N2, N3, D6b, A3).

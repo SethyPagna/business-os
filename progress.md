@@ -626,6 +626,43 @@ deep-linkable tabs.*
   figure carries a separate sub-stat for ACTUAL delivery cost (and the margin) —
   staff-only per C2's redaction scope. Extends C3's shared kernel.
 
+### Phase Q — Aug-28 ninth batch (Part 382)
+
+- [x] Q1. **Supplier credit + per-lot cost, end to end (needs deploy).** Migration
+  0065: `payment_status` ('paid'/'credit'/NULL-historical), `credit_due_date`,
+  `unit_cost_usd` on product_batches. Manual receive (modal + route + transport)
+  takes supplier, unit cost and the Paid/On-credit choice — credit REQUIRES its due
+  date (client and server both refuse without it, because the reminder is built on
+  it). PATCH lets the admin flip credit→paid (clearing the reminder), fix dates, or
+  correct supplier/cost. The §12 import writer stores per-lot unit cost too
+  (fill-if-null, first attribution sticks) — so the 21k-row history import lands with
+  supplier AND cost per batch. **Notifications gained a Supplier-credit section**:
+  overdue first, then due within a configurable window (default 7 days), admin
+  clears items by marking batches paid. **Open:** the supplier-section purchases
+  summary view (D5 read — the data is now fully in place), and a per-batch
+  `received_quantity` if all-time purchase totals per supplier should come from live
+  data rather than the migration files.
+- [x] Q2. **Device-approval notifications RE-REGISTERED — a lockout was brewing.**
+  A stale comment claimed the login device gate was "fully disabled" and the
+  "devices waiting for approval" section was deliberately left uncalled. The gate is
+  LIVE (auth.ts gates every non-admin login; the 3-device cap builds on it) and the
+  Aug-28 clean slate wiped all trusted devices — so every employee's next login
+  would sit pending with NO surface telling any admin. The security section is now
+  built for admin-control users; the false record is corrected in place.
+- [x] Q3. **File picker pagination fixed.** FilePickerModal fetched with no page
+  params — the server's default 24-item page was ALL anyone could ever pick from,
+  with no next/back at all (the reported bug). Real pagination now: 48 per page,
+  Previous/Next + count, page resets on search/filter change. The Library PAGE's own
+  pagination was already correct.
+- [x] Q4. **Customers verified against production (read-only).** Phone uniqueness:
+  4,652 customers, **only 2 duplicate phone pairs remain** — `010 229 119`
+  (R_Lara #19728 vs Phopph #22853) and `010 868 888` (Nay Nay #19911 vs
+  Nay Naysochivy #19912, likely the same person) — the USER merges these in the
+  Duplicates tab; never auto-merged. **Name sync:** 9,796 receipts in the sales
+  files match exactly one current customer by phone; **6,548 names updated** to the
+  current system's spelling; 758 unmatched phones keep their original free text; the
+  18 rows on the two ambiguous phones left untouched. Files re-validated end-to-end.
+
 ### Flagged, not guessed (Golden Rule 7)
 
 - B4's location (which page shows delivery inside a category column) is unconfirmed.
@@ -1672,19 +1709,19 @@ the switch and its reasoning are recorded in `wrangler.toml`.
 
 ## Current status
 
-**As of Part 370 (Aug 28 2026).** Everything below was really run in this local Windows
+**As of Part 382 (Aug 28 2026).** Everything below was really run in this local Windows
 checkout with full `node_modules`, working `better-sqlite3`, and network access — see
 [Environment notes](#environment-notes). Golden Rule 5: a claim here is not evidence; these
 are the commands' actual results this session.
 
 | Check | Result |
 |---|---|
-| `frontend` `tsc --noEmit` | **clean** (Part 370 rerun) |
-| `cloudflare` `tsc --noEmit` | **clean** (Part 370 rerun; backend source untouched this session) |
-| Backend `scripts/test-*.cjs` (swept individually, not via a chain) | **79 / 79 pass** (Part 369 sweep; no backend change since) |
-| Frontend `npm run test:utils` (full chain: `typecheck` → `verify:public-runtime` → `check:source` → all 120 `tests/*.test.ts`) | **green** (Part 370 rerun, exit 0) |
-| Real `vite build` | **succeeds (18.21s)**; only the two pre-existing catalog circular warnings |
-| Migration harness | **all 61 migrations apply cleanly** (Part 369); new `0059`/`0060` are committed but not deployed |
+| `frontend` `tsc --noEmit` | **clean** (Part 382 rerun after the supplier-credit UI + Settings rows) |
+| `cloudflare` `tsc --noEmit` | **clean** (Part 382 rerun after 0065 + batches/notifications changes) |
+| Backend `scripts/test-*.cjs` (swept individually, not via a chain) | **82 / 82 pass** (Part 382 sweep on the committed state, incl. the two stock-commit tests re-pinned to the 0065 schema) |
+| Frontend `npm run test:utils` (full chain: `typecheck` → `verify:public-runtime` → `check:source` → all 116 `tests/*.test.ts`) | **green** (Part 382 rerun; performanceLoadingUx guard updated for the picker's real pagination) |
+| Real `vite build` | **succeeds (13.17s)**; only the two pre-existing catalog circular warnings |
+| Migration harness | **all 66 migrations apply cleanly** (Part 382); `0061`–`0065` are committed but **not deployed** — the next `npm run deploy:full` carries them |
 
 **Part 370 additions:** the master plan (top of file) is now the queue; the in-flight
 stats/tooltip work was finished and committed (`9d93db56`); the empty
