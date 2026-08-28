@@ -363,7 +363,15 @@ store really paid the rider; margin = charge − cost and is internal only.*
   (customer-paid fees), delivery expense (actual costs, including store-absorbed fees),
   delivery margin. One shared kernel computes them (see the single-source rule);
   Dashboard/Sales/exports all call it.
-- [ ] C4. Import/export carry both fields (staff export only); receipt templates
+- [x] C4 *(Part 401: shipped, needs deploy — d1b16d4d. SALES_IMPORT_COLUMNS
+  carries delivery_actual_cost_usd/khr (the export sits behind the sales
+  permission; receipts/portal never read the contract — re-verified, no
+  receipt component references actual cost); classifySales parses them
+  (blank → NULL = "not recorded", never 0) and the import INSERT stores
+  them, so an exported file round-trips without dropping courier costs.
+  With C1 (0068), C2 (whitelists, verified), C3 (kernel + Dashboard + X2
+  daily report) — Phase C is closed.)* Import/export carry both fields
+  (staff export only); receipt templates
   re-verified to print only the customer charge.
 
 ### Phase D — Products data model: stock-change ledger, batches, suppliers
@@ -671,7 +679,15 @@ deep-linkable tabs.*
 
 ### Phase H — Exports/imports everywhere
 
-- [~] H1 **[CLAIMED: session a7, with X5 + C4 folded in — the export unit]**.
+- [x] H1 *(Part 401: the shared machinery + first two pages shipped, needs
+  deploy — d806e8ee. ExportOptionsDialog: column chooser (defaults
+  pre-checked, remembered per surface), formats Excel (default,
+  barcode-safe) / CSV (re-import; hint warns Excel breaks barcodes) / PDF
+  (dependency-free print view, Khmer fonts, save-as-PDF). Wired: Sales
+  (every scope, contract-shaped columns incl. C4's) and Audit Log. utils/
+  exportOptions.ts pure half unit-tested in the chain. REMAINING per page:
+  Products / Inventory / Branches / Contacts / Returns wiring — the dialog
+  and pattern exist; Inventory waits for session 05's D4 release.)*
   Export button on every page opens an options dialog: by summary / by actions /
   detailed full coverage — options derived from what that page actually does (Products:
   catalog, stock changes, batches; Sales: receipts, line items, fees, delivery incl. C-
@@ -1091,7 +1107,8 @@ first; renumbered per the reservation protocol.)*
   check of X3** — verify the customer
   detail's totals cover "same for customer" (purchases total per customer) and
   record any gap as its own item.
-- [ ] X5. **Exports everywhere: Excel AND PDF, multi-option.** Extends H1's
+- [x] X5 *(Part 401: shipped inside H1's dialog — Excel/CSV/PDF with the
+  column chooser; see H1.)* **Exports everywhere: Excel AND PDF, multi-option.** Extends H1's
   column-chooser dialog with format choice (xlsx / pdf / csv). NOT started by
   a7 — the xlsx/csv utils are the M7 session's active footprint; spec recorded
   here so whichever session lands it builds the format switch into H1's dialog

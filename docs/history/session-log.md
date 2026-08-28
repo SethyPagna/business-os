@@ -9236,3 +9236,60 @@ portal-editor save — the Google-Maps embed included — served stale
 config until the TTL died. Fixed both halves (settings bumps its own
 version; the portal key composes products+settings), regression-pinned.
 Phase G (G1-G5, every §6 row) is now entirely closed.
+
+## Part 401 (chat, Aug 28 2026) -- the export unit: H1's dialog + X5's formats + C4's round-trip
+
+Session a7, continuing automatically. Claimed on the board (d3557981) before
+building; the "C4 unit from 35" a peer saw on origin was THIS session's
+d1b16d4d riding along in the shared repo's linear history -- attribution
+corrected in coordination.
+
+**C4 (Phase C closes).** SALES_IMPORT_COLUMNS gains
+delivery_actual_cost_usd/khr: the staff export (behind the sales permission;
+receipts/portal never read the contract -- re-verified by grep, no receipt
+component references actual cost) now carries the courier cost, classifySales
+parses it back (blank/absent -> NULL = "not recorded", never 0 -- the
+kernel's honesty rule) and salesImportCommit's INSERT stores it, so an
+exported file re-imports losslessly. The worker test's column pin derives
+from the contract and self-adjusted; the commit-pure harness passed with the
+widened INSERT.
+
+**H1 + X5.** One shared ExportOptionsDialog for every page:
+
+- Column chooser -- defaults pre-checked, Select all / Defaults, the chosen
+  set REMEMBERED per surface (localStorage, fail-soft both directions, a
+  remembered key that no longer exists is silently dropped).
+- Formats: **Excel** (default -- the barcode-as-text-safe choice the old
+  csvImport pin protected), **CSV** (kept for re-import/machine use; its
+  hint now warns that opening in Excel can break barcodes), **PDF** as a
+  dependency-free print view -- clean table, repeating THEAD across pages,
+  Khmer system fonts, auto window.print(); every platform's print dialog
+  saves as PDF. No PDF library: smaller bundle, offline, real Khmer glyphs.
+- utils/exportOptions.ts holds the pure half (projection that keeps COLUMN
+  order and never leaks an unticked field; label humanizer; remembered
+  columns; escaped print-document builder) -- exportOptions.test.ts covers
+  it and pins the C4 columns + the Sales wiring, added to the chain.
+- Wired: **Sales** (all four scopes open the dialog with contract-shaped
+  rows -- the chooser lists exactly the columns the file will carry; the
+  direct downloadXLSX calls are gone) and **Audit Log** (readable-shape
+  rows; its dead CSV lazy-loader removed). 12 new en/km pack keys (the
+  raw-key lesson applied on the first pass this time).
+- Three pins updated with their intent PRESERVED and stated in place:
+  export helpers now load even later than the old lazy imports (inside the
+  lazy dialog, on Export click), and the dialog's xlsx DEFAULT carries the
+  barcode-safety decision forward.
+
+**Coordination.** Session 05 claimed D4 (Inventory.tsx et al.) -- confirmed
+zero uncommitted Inventory edits here, holding H1's Inventory wiring until
+their release, and warned them off "inline tr() fallbacks instead of pack
+keys" (the documented t()-returns-the-key trap that bit J3). 6e closed
+Phase G with the §6.3 fix built exactly from this session's repro.
+
+**Verified (really run).** Both tsc clean; exportOptions + csvImport +
+performanceLoadingUx + salesImportWorker + test-sales-import-commit-pure
+pass; FULL test:utils chain exit 0; vite build 13.68s.
+
+**Not done.** H1's remaining page wirings (Products/Inventory/Branches/
+Contacts/Returns -- pattern exists; Inventory waits on session 05).
+Visual pass of the dialog itself (B1-style; the print view is
+string-builder-tested). Deploy (user).
