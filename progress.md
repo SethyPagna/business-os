@@ -626,7 +626,16 @@ deep-linkable tabs.*
   **Settings absorbs Users and Backup** as sections/mini-sections; the permissions
   editor redesign (7.2) lands as part of this move.
 - [x] E5 *(Satisfied by G2, Part 399: the Promotions page exists with Loyalty Points as a lazy section behind a switcher — exactly this item; see G2.)* **Promotions page** (new) with Loyalty Points as a section (see Phase G).
-- [ ] E6. Every export/import affordance on the moved pages is re-checked after the move
+- [x] E6 *(closed with E1, Part 413, session a7 — per-move evidence: E3/E4
+  re-checked by 6e at their landing (AuditLog's export dialog, Users'
+  flows, Backup's surface — see E4's own note); E2 verified live at Part
+  407 (Returns + Fees export dialogs open as hub sections); E1 verified
+  live at Part 413 — Branches' ExportOptionsDialog OPENS on the hub's
+  Stats & Branches chip, Inventory's per-tab export option builders
+  (movements/products/rfid, Part-405 structure) moved untouched with the
+  component and their chain pins stayed green; /audit-log, /users,
+  /backup, /returns, /fees, /inventory all remap, none 404.)*
+  Every export/import affordance on the moved pages is re-checked after the move
   (no orphaned buttons, no dead routes) — Golden Rule 6.
 
 ### Phase F — Add/create flows: wizard, fast batch entry, drafts
