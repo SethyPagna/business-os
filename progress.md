@@ -572,8 +572,12 @@ deep-linkable tabs.*
   promoted product/promotion, click a dot to jump. Promos render Title + discount.
 - [x] G4 *(Part 399: brand-alpha order with blank brands trailing as "Other Brands", brand grid headers, rail letters/counts/initial-filter all from p.brand server-side, admin-preview fallback matches; both regression tests re-seeded brand-first.)* Portal ordering flips to BRAND-first: alphabetical order and the fast A–Z rail
   index brands, not categories.
-- [~] G5 *(Part 399, session 6e — 6.1/6.2/6.5 SHIPPED, 6.4 was ALREADY BUILT,
-  6.3 remains (needs a live-browser repro; offered to a7's B1 visual sweep).
+- [x] G5 *(Part 399, session 6e — ALL FIVE CLOSED; Phase G complete. 6.3 was
+  reproduced live by a7's Part-400 sweep and fixed by 6e (b32026a2-adjacent
+  commit): settings saves bump their own cache version and the portal cache
+  key composes products+settings, so portal-editor saves (map embed
+  included) apply immediately instead of hiding behind the 60s TTL —
+  regression-pinned.
   6.1: cover image stands alone (no colour gradient/scrim) and backs the
   WHOLE About card, content on a translucent surface. 6.2: top bar carries
   no logo; socials left, language + light/dark right; the About hero became
@@ -1339,7 +1343,7 @@ the repository evidence, never from intent.
 |---|---|---|
 | 6.1 | **Remove the colour overlay in the About section**, and make the **cover image cover the whole section**, not half of it. | done (Part 399) |
 | 6.2 | Top bar: **remove the logo**; split social links to one side and language + light/dark to the other. | done (Part 399) |
-| 6.3 | Stale cache of embedded sites on the public site — reproduce, then scope. | **REPRODUCED + scoped (Part 400 sweep)**: a `customer_portal_*` save stores instantly but `GET /api/portal/config` serves the old value the full 60s TTL (measured stale +30s, fresh +66s) — `portalCacheVersion` keys on the PRODUCTS version only and settings saves bump nothing. Fix (2 changes, in the G-session's claimed files, handed over): settings POST bumps a 'settings' version; portalCacheVersion composes products+settings. |
+| 6.3 | Stale cache of embedded sites on the public site — reproduce, then scope. | **REPRODUCED + scoped (Part 400 sweep)**: a `customer_portal_*` save stores instantly but `GET /api/portal/config` serves the old value the full 60s TTL (measured stale +30s, fresh +66s) — `portalCacheVersion` keys on the PRODUCTS version only and settings saves bump nothing. Fix (2 changes, in the G-session's claimed files, handed over): settings POST bumps a 'settings' version; portalCacheVersion composes products+settings. **FIXED (6e, same day): both changes landed exactly as scoped, regression-pinned in test-promotion-rules-pure.** |
 | 6.4 | **Google Translate for languages** instead of hand-maintained packs. Must be fast, must not corrupt layout or Khmer text, and must degrade safely — the current packs are the fallback, not the casualty. | was already built (verified Part 399: portalTranslateController + admin toggle + tests); row had gone stale |
 | 6.5 | Portal pagination counts **unmerged** rows: the server paginates at 50 before the browser merges duplicates, so the pager promises pages that do not exist. | done (Part 399): group pagination via familyPagination on both portal endpoints; behavioral test |
 
