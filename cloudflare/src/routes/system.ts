@@ -25,7 +25,16 @@ import { checkRateLimit, getClientIp } from '../lib/rateLimit'
 // over is stated in the response rather than being silently treated as
 // deleted. Those objects are no longer referenced by any product row, so
 // they surface in the Library and can be removed there.
-const MAX_IMAGE_DELETES_PER_RESET = 200
+//
+// A4 (session 05): 200 -> 500 under the Feb-2026 Paid limits (10,000
+// subrequests/invocation, pinned in wrangler.toml -- 500 is 5% of it).
+// The deletes below run SEQUENTIALLY, so the honest per-run bound is the
+// admin's wall-clock wait: ~20-40ms per delete keeps 500 inside ~10-20s
+// on top of an already-heavy reset. Deliberately NOT raised to "the whole
+// catalog": a 20k-object sweep belongs to a continuation design, not one
+// interactive request, and the leftover-reporting path already handles
+// the remainder honestly.
+const MAX_IMAGE_DELETES_PER_RESET = 500
 
 const app = new Hono<{ Bindings: Env; Variables: { user: any } }>()
 

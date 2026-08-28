@@ -555,6 +555,7 @@ export default function Inventory() {
     selling_price_usd: '', selling_price_khr: '', special_price_usd: '', special_price_khr: '',
     discount_enabled: false, discount_type: 'percent', discount_percent: '', discount_amount_usd: '',
     cost_usd: 0, cost_khr: 0, barcode: '', batch_id: '', received_date: todayIsoDate(),
+    supplier_id: '', supplier_name: '',
   })
   const [transferModal, setTransferModal] = useState<InventoryProduct | null>(null)
   const [transferForm,  setTransferForm]  = useState<TransferForm>({ from_branch_id: '', to_branch_id: '', quantity: 1, reason: '' })
@@ -1485,6 +1486,11 @@ export default function Inventory() {
           && adjustForm.received_date
         ? String(adjustForm.received_date)
         : undefined,
+      // D5a: sent only for adds, mirroring the picker's own visibility.
+      // The modal already cleared these when an attributed lot was picked
+      // (first attribution sticks), so what's here is what was on screen.
+      supplierId: adjustForm.type === 'add' && adjustForm.supplier_id !== '' ? Number(adjustForm.supplier_id) : undefined,
+      supplierName: adjustForm.type === 'add' && String(adjustForm.supplier_name || '').trim() !== '' ? String(adjustForm.supplier_name).trim() : undefined,
       pricing: unlockPricing ? {
         selling_price_usd: parseFloat(String(adjustForm.selling_price_usd)) || 0,
         selling_price_khr: parseFloat(String(adjustForm.selling_price_khr)) || 0,
@@ -1642,6 +1648,9 @@ export default function Inventory() {
       // adjustment must never silently carry into the next one (same
       // stale-draft rule ReceiveBatchModal documents for its own date).
       received_date: todayIsoDate(),
+      // D5a: same stale-value rule -- last adjustment's supplier must
+      // never silently attribute the next lot.
+      supplier_id: '', supplier_name: '',
     })
   }
 
