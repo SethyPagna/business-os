@@ -1,7 +1,7 @@
 {
-  "name": "Leang Cosmetics",
-  "short_name": "Leang Cosmetics",
-  "description": "Leang Cosmetics online store",
+  "name": "Leang Beauty",
+  "short_name": "Leang Beauty",
+  "description": "Leang Beauty online store",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",

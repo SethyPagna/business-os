@@ -81,7 +81,7 @@ assert.equal(localized.intro, 'Browse our newest products.')
 const defaultCopyLocalized = localizePortalConfig({
   aboutTitle: 'About us',
   aiTitle: 'Beauty Assistant',
-  aiIntro: 'Tell us what you are shopping for and the assistant will suggest products from Leang Cosmetics.',
+  aiIntro: 'Tell us what you are shopping for and the assistant will suggest products from Leang Beauty.',
   aiDisclaimer: 'AI generated, for reference only. For more accurate inquiries, please contact our store on Instagram or Facebook.',
   faqTitle: 'Frequently asked questions',
   translations: {},

@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url'
 // visual regression that no other test would catch:
 //
 //   Business OS      -> the ADMIN app (admin.leangcosmetics.dpdns.org)
-//   Leang Cosmetics  -> the PUBLIC storefront (leangcosmetics.dpdns.org),
+//   Leang Beauty  -> the PUBLIC storefront (leangcosmetics.dpdns.org),
 //                       including its favicon and its "Add to Home Screen"
 //                       PWA icon
 //
@@ -62,14 +62,14 @@ assert.ok(
   'the admin manifest must never reference storefront icons',
 )
 
-// --- public storefront uses STATIC Leang Cosmetics branding ---------------
+// --- public storefront uses STATIC Leang Beauty branding ---------------
 
 // The live customer site (PublicCatalogPage) points the tab icon + manifest
 // at fixed Leang assets, NOT at anything derived from business config.
 assert.match(
   publicCatalog,
   /const STOREFRONT_ICON = '\/leang-cosmetics-icon-512\.png'/,
-  'the live storefront should use the static Leang Cosmetics tab icon, not a Business OS icon or a merchant upload',
+  'the live storefront should use the static Leang Beauty tab icon, not a Business OS icon or a merchant upload',
 )
 assert.match(
   publicCatalog,
@@ -92,7 +92,7 @@ const portalManifest = JSON.parse(read('../public/portal-manifest.json')) as {
   name: string
   icons: Array<{ src: string }>
 }
-assert.equal(portalManifest.name, 'Leang Cosmetics', 'the static portal manifest is the storefront brand, not Business OS')
+assert.equal(portalManifest.name, 'Leang Beauty', 'the static portal manifest is the storefront brand, not Business OS')
 assert.ok(
   portalManifest.icons.length > 0 && portalManifest.icons.every((icon) => /leang/i.test(icon.src)),
   'every portal-manifest icon must be a Leang asset',
@@ -185,7 +185,7 @@ function runBootstrap(hostname: string, pathname: string) {
 
 const publicRoot = runBootstrap('leangcosmetics.dpdns.org', '/')
 assert.equal(publicRoot.attributes.get('data-business-os-initial-route'), 'public')
-assert.equal(publicRoot.document.title, 'Leang Cosmetics')
+assert.equal(publicRoot.document.title, 'Leang Beauty')
 assert.equal(publicRoot.elements.get('manifest')?.attrs.get('href'), '/portal-manifest.json')
 assert.equal(publicRoot.elements.get('apple-icon')?.attrs.get('href'), '/leang-cosmetics-apple-touch-icon-v1.png')
 assert.equal(publicRoot.favicon.attrs.get('href'), '/leang-cosmetics-icon-512.png')

@@ -24,7 +24,7 @@ import {
 
 const OAUTH_PENDING_TTL_MS = 30 * 60 * 1000
 
-// Admin sign-in is Business OS branding; the storefront is Leang Cosmetics.
+// Admin sign-in is Business OS branding; the storefront is Leang Beauty.
 //
 // This REVERSES an earlier decision recorded here, at explicit request
 // (Aug 25 2026): "business-os logo for admin page, default... leang
@@ -41,7 +41,7 @@ const OAUTH_PENDING_TTL_MS = 30 * 60 * 1000
 // wins, via the brandLogo/brandName state below.
 //
 // The storefront's own defaults are untouched and must stay Leang
-// Cosmetics: PublicCatalogPage.tsx's DEFAULT_PUBLIC_PORTAL_ICON (the live
+// Beauty: PublicCatalogPage.tsx's DEFAULT_PUBLIC_PORTAL_ICON (the live
 // customer site, its favicon and its PWA icon) and CatalogPage.tsx's
 // DEFAULT_PORTAL_ICON_SRC (the admin-side preview OF that customer site).
 // tests/brandIcons.test.ts pins the whole split.
@@ -358,11 +358,11 @@ export default function Login() {
   // uploaded/has logo display turned off (showLogo) -- never a broken
   // image or blank title.
   // User-reported: "the busines-os logo in login page the icon hasn't been
-  // removed" -- this app has always been a single-tenant Leang Cosmetics
+  // removed" -- this app has always been a single-tenant Leang Beauty
   // deployment, so defaulting to the generic Building2 icon/"Business OS"
   // string (only overridden once the config fetch below resolves) meant
   // every fresh page load flashed the wrong branding first. Default to the
-  // same bundled Leang Cosmetics icon/name the public catalog side already
+  // same bundled Leang Beauty icon/name the public catalog side already
   // falls back to (PublicCatalogPage.tsx's DEFAULT_PUBLIC_PORTAL_ICON,
   // portalManifest.ts's DEFAULT_PORTAL_MANIFEST_NAME) so first paint is
   // already correct; still overridden by the live config fetch below the
@@ -1050,7 +1050,7 @@ export default function Login() {
                     setOrganizationSearch(event.target.value)
                     setOrganizationId('')
                   }}
-                  placeholder="LeangCosmetics"
+                  placeholder="LeangBeauty"
                   autoComplete="organization"
                 />
                 {organizationLoading ? (

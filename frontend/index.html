@@ -89,11 +89,11 @@
             && !adminRoutes[segment]
         document.documentElement.setAttribute('data-business-os-initial-route', publicRoute ? 'public' : 'admin')
         if (publicRoute) {
-          document.title = 'Leang Cosmetics'
+          document.title = 'Leang Beauty'
           var description = document.querySelector('meta[name="description"]')
-          if (description) description.setAttribute('content', 'Leang Cosmetics online store')
+          if (description) description.setAttribute('content', 'Leang Beauty online store')
           var appTitle = document.querySelector('meta[name="apple-mobile-web-app-title"]')
-          if (appTitle) appTitle.setAttribute('content', 'Leang Cosmetics')
+          if (appTitle) appTitle.setAttribute('content', 'Leang Beauty')
           var manifest = document.querySelector('link[rel="manifest"]')
           if (manifest) manifest.setAttribute('href', '/portal-manifest.json')
           var icons = document.querySelectorAll('link[rel="icon"]')
@@ -192,7 +192,7 @@
           <div class="business-os-initial-brand">
             <h1 class="business-os-initial-title">
               <span data-business-os-admin>Business OS</span>
-              <span data-business-os-public>Leang Cosmetics</span>
+              <span data-business-os-public>Leang Beauty</span>
             </h1>
             <p class="business-os-initial-copy">
               <span data-business-os-admin>Opening workspace</span>

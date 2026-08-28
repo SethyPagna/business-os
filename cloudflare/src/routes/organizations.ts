@@ -52,7 +52,7 @@ const ORG_COLUMNS = 'id, name, slug, public_id, is_active, setup_enabled, create
 // silently start offering it and could auto-select the wrong one.
 //
 // `BUSINESS_OS_ORGANIZATION_SLUG` (wrangler.toml [vars]) makes the pin
-// explicit: this deployment is Leang Cosmetics and nothing else. It is
+// explicit: this deployment is Leang Beauty and nothing else. It is
 // deliberately a PREFERENCE, not a hard requirement -- if the configured
 // slug matches no row (a rename, a fresh database, a local dev copy seeded
 // under a different name), this falls back to the old first-by-id

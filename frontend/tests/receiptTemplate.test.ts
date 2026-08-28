@@ -41,7 +41,7 @@ await runTest('serializeReceiptTemplate keeps default fields available for previ
 await runTest('compact ABA receipt and KHR visibility settings survive a template round trip', () => {
   const serialized = serializeReceiptTemplate({
     sales_receipt_enabled: true,
-    sales_receipt_aba_account_name: 'Leang Cosmetics',
+    sales_receipt_aba_account_name: 'Leang Beauty',
     sales_receipt_aba_account_number: '123 456 789',
     sales_receipt_aba_qr_image: '/uploads/aba-payment.webp',
     sales_receipt_note: 'received_payment',
@@ -52,7 +52,7 @@ await runTest('compact ABA receipt and KHR visibility settings survive a templat
   const reparsed = parseReceiptTemplate(serialized)
 
   assert.equal(reparsed.sales_receipt_enabled, true)
-  assert.equal(reparsed.sales_receipt_aba_account_name, 'Leang Cosmetics')
+  assert.equal(reparsed.sales_receipt_aba_account_name, 'Leang Beauty')
   assert.equal(reparsed.sales_receipt_aba_account_number, '123 456 789')
   assert.equal(reparsed.sales_receipt_aba_qr_image, '/uploads/aba-payment.webp')
   assert.equal(reparsed.sales_receipt_note, 'received_payment')

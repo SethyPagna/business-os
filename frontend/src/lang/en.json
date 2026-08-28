@@ -2127,7 +2127,7 @@
   "organization": "Organization",
   "organization_hidden_hint": "Organization details stay hidden until you expand this section.",
   "organization_join_hint": "Search the organization name and select it before signing in.",
-  "organization_join_locked": "Organization creation is currently disabled. This server is prepared for LeangCosmetics and future organization-ready expansion.",
+  "organization_join_locked": "Organization creation is currently disabled. This server is prepared for LeangBeauty and future organization-ready expansion.",
   "organization_name": "Organization name",
   "organization_not_selected": "Choose organization",
   "organization_privacy_hint": "Organization identifiers stay hidden here. Only the organization name and role context are shown.",
@@ -2519,7 +2519,7 @@
         },
         "17": {
           "answer": "Yes. The assistant is designed to prioritize products from our current Business OS catalog, then explain why those items fit your question.",
-          "question": "Does the AI only recommend products available at Leang Cosmetics?"
+          "question": "Does the AI only recommend products available at Leang Beauty?"
         },
         "18": {
           "answer": "No. AI answers are for reference only. For sensitive skin issues, allergies, pregnancy-safe guidance, or stronger treatment advice, please contact our team directly first.",
@@ -2550,7 +2550,7 @@
           "question": "What are your store hours?"
         },
         "24": {
-          "answer": "Yes. Leang Cosmetics only sells authentic products sourced through official channels. If you ever have a concern about a specific item, contact the store directly and we can confirm sourcing details.",
+          "answer": "Yes. Leang Beauty only sells authentic products sourced through official channels. If you ever have a concern about a specific item, contact the store directly and we can confirm sourcing details.",
           "question": "Do you guarantee that products sold here are 100% authentic?"
         },
         "25": {
@@ -2567,7 +2567,7 @@
         },
         "5": {
           "answer": "Use the social links on this page or call the store directly. Our team can help with product matching, stock checks, and more specific skincare or makeup questions.",
-          "question": "How can I contact Leang Cosmetics for more accurate advice?"
+          "question": "How can I contact Leang Beauty for more accurate advice?"
         },
         "6": {
           "answer": "Yes. Ask our team or use the AI assistant with your skin type and concerns so we can narrow options that are gentler and easier to compare from current stock.",
@@ -2578,7 +2578,7 @@
           "question": "Can I ask whether a product is original or from a specific brand line?"
         },
         "8": {
-          "answer": "Yes. Leang Cosmetics carries multiple beauty categories, so you can search the catalog or ask for recommendations across skincare, cosmetics, perfume, hair, and body products.",
+          "answer": "Yes. Leang Beauty carries multiple beauty categories, so you can search the catalog or ask for recommendations across skincare, cosmetics, perfume, hair, and body products.",
           "question": "Do you sell skincare, makeup, hair care, and body care together?"
         },
         "9": {

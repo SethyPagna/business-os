@@ -37,7 +37,7 @@ assert.deepEqual(
 
 assert.deepEqual(
   getSettingsRefreshChannels({
-    business_name: 'Leang Cosmetics',
+    business_name: 'Leang Beauty',
   }),
   ['settings', 'sales', 'pos', 'dashboard', 'catalog'],
 )

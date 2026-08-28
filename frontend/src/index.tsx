@@ -215,7 +215,7 @@ function InitialShellFallback({ publicMode }: { publicMode: boolean }) {
       <div className="business-os-initial-panel">
         <div className="business-os-initial-spinner" aria-hidden="true" />
         <div className="business-os-initial-brand">
-          <h1 className="business-os-initial-title">{publicMode ? 'Leang Cosmetics' : 'Business OS'}</h1>
+          <h1 className="business-os-initial-title">{publicMode ? 'Leang Beauty' : 'Business OS'}</h1>
           <p className="business-os-initial-copy">
             {publicMode ? 'Opening catalog' : 'Opening workspace'}
           </p>

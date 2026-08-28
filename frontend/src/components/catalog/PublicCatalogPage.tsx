@@ -70,7 +70,7 @@ const PUBLIC_PORTAL_PRODUCT_SEARCH_TIMEOUT_MS = 12000
 const PUBLIC_PORTAL_MEMBERSHIP_TIMEOUT_MS = 12000
 const PUBLIC_PORTAL_SUBMISSION_TIMEOUT_MS = 12000
 const PUBLIC_PORTAL_AI_TIMEOUT_MS = 25000
-// Fixed Leang Cosmetics browser branding for the live storefront, served as
+// Fixed Leang Beauty browser branding for the live storefront, served as
 // STATIC same-origin files (installable, unlike the old runtime blob: manifest
 // -- see the brand effect below). Not per-merchant customizable (11.14-16).
 const STOREFRONT_ICON = '/leang-cosmetics-icon-512.png'
@@ -202,7 +202,7 @@ type CatalogApi = {
 const DEFAULT_PUBLIC_CONFIG: PortalConfig = {
   aboutBlocks: [],
   aiEnabled: true,
-  businessName: 'Leang Cosmetics',
+  businessName: 'Leang Beauty',
   contactLinkLabels: { messenger: 'Messenger', telegram: 'Telegram', whatsapp: 'WhatsApp', phone: '', instagram: 'Instagram' },
   contactLinks: { messenger: '', telegram: '', whatsapp: '', phone: '', instagram: '' },
   exchangeRate: 4100,
@@ -261,7 +261,7 @@ const DEFAULT_PUBLIC_CONFIG: PortalConfig = {
   stockThresholdMode: 'product',
   submissionEnabled: true,
   submissionRewardPoints: 5,
-  title: 'Leang Cosmetics',
+  title: 'Leang Beauty',
   translateWidgetEnabled: true,
 }
 
@@ -1112,7 +1112,7 @@ export default function PublicCatalogPage() {
       .catch(() => {})
   }, [activeTab, displayConfig.aiEnabled])
 
-  // Storefront tab title + FIXED Leang Cosmetics browser branding.
+  // Storefront tab title + FIXED Leang Beauty browser branding.
   //
   // This used to build the manifest AND the favicon at runtime from the
   // merchant's uploaded logo. Two problems, both fixed here:
@@ -1126,15 +1126,15 @@ export default function PublicCatalogPage() {
   //
   // The fix keeps the established admin/storefront brand split (admin =
   // Business OS via the static /manifest.json + /favicon.ico in index.html;
-  // storefront = Leang Cosmetics) but serves the storefront's icon + manifest
+  // storefront = Leang Beauty) but serves the storefront's icon + manifest
   // as STATIC same-origin files, which ARE installable, instead of a runtime
   // blob. No canvas, no idle scheduling, no business-config input -- just a
   // fixed brand swap. See public/portal-manifest.json and brandIcons.test.ts.
   useEffect(() => {
     if (typeof document === 'undefined') return undefined
     const previousTitle = document.title
-    const title = String(displayConfig.businessName || displayConfig.title || 'Leang Cosmetics').trim()
-    document.title = title || 'Leang Cosmetics'
+    const title = String(displayConfig.businessName || displayConfig.title || 'Leang Beauty').trim()
+    document.title = title || 'Leang Beauty'
 
     const iconEls = Array.from(document.querySelectorAll<HTMLLinkElement>('link[rel="icon"]'))
     const previousIconHrefs = iconEls.map((el) => el.getAttribute('href') || '')
@@ -1153,7 +1153,7 @@ export default function PublicCatalogPage() {
 
     const appleTitle = document.querySelector<HTMLMetaElement>('meta[name="apple-mobile-web-app-title"]')
     const previousAppleTitle = appleTitle?.getAttribute('content') || ''
-    if (appleTitle) appleTitle.setAttribute('content', 'Leang Cosmetics')
+    if (appleTitle) appleTitle.setAttribute('content', 'Leang Beauty')
 
     return () => {
       document.title = previousTitle
@@ -1316,7 +1316,7 @@ export default function PublicCatalogPage() {
     window.scrollTo({ top, behavior: 'smooth' })
   }
 
-  const bucketBusinessName = String(displayConfig.businessName || displayConfig.title || 'Leang Cosmetics').trim()
+  const bucketBusinessName = String(displayConfig.businessName || displayConfig.title || 'Leang Beauty').trim()
 
   const handleBucketCopy = () => {
     const text = formatPortalBucketText(bucket.items, bucketBusinessName)

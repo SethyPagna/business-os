@@ -91,14 +91,14 @@ for (const language of firstPartyLanguages) {
 }
 
 const protectedCopy = String(localizePortalFaqText(
-  'Contact Leang Cosmetics through Facebook, Instagram, Telegram, or phone for product stock advice.',
+  'Contact Leang Beauty through Facebook, Instagram, Telegram, or phone for product stock advice.',
   'km',
 ))
-assert.match(protectedCopy, /Leang Cosmetics/)
+assert.match(protectedCopy, /Leang Beauty/)
 assert.match(protectedCopy, /Facebook/)
 assert.match(protectedCopy, /Instagram/)
 assert.match(protectedCopy, /Telegram/)
-assert.notEqual(protectedCopy, 'Contact Leang Cosmetics through Facebook, Instagram, Telegram, or phone for product stock advice.')
+assert.notEqual(protectedCopy, 'Contact Leang Beauty through Facebook, Instagram, Telegram, or phone for product stock advice.')
 
 for (const language of firstPartyLanguages) {
   for (const key of ['faqTitle', 'aiTitle', 'products', 'membership', 'stockStatus', 'filters']) {
@@ -125,7 +125,7 @@ const newStarterFaq = [
   },
   {
     question: 'Do you guarantee that products sold here are 100% authentic?',
-    answer: 'Yes. Leang Cosmetics only sells authentic products sourced through official channels. If you ever have a concern about a specific item, contact the store directly and we can confirm sourcing details.',
+    answer: 'Yes. Leang Beauty only sells authentic products sourced through official channels. If you ever have a concern about a specific item, contact the store directly and we can confirm sourcing details.',
   },
   {
     question: 'Where can I see current promotions and discounts?',
