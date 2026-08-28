@@ -10114,3 +10114,70 @@ sweep + dry-run green. Migration 0076 rides the user's next
 `npm run deploy:full`. The per-product merge-log VIEW (showing losing
 values in the product drill) is left for D3's detail surface -- noted
 to a7, whose D1/D2 own that drill.
+
+## Part 422 (chat, Aug 28 2026) -- D3: the product detail's report sections
+
+**Session a7.** The user's Aug-28 detail-page spec, first full slice:
+ProductDetailModal keeps its compact at-a-glance pane and gains four
+folded N3 SectionCards below it (own 9.7kB lazy chunk, loads when a
+detail opens):
+
+- **Batches** (amber): every active lot with TOTAL qty across branches,
+  received/expiry dates, supplier attribution -- from the new
+  GET /products/:id/detail-report, which also serves...
+- **Suppliers** (purple): every distinct supplier the product was bought
+  from, D1b's identity rule (id-attributed + name-only lots of one
+  supplier merge into ONE group), lot/qty totals, first->last received
+  span, lots_without_cost stated instead of a fabricated complete total.
+- **Sales** (red): per-day / per-month qty + revenue via the kernel's new
+  getProductSalesBreakdown -- the SAME whereActiveSales predicate as
+  every other Sales number (cancelled sales never count anywhere).
+- **Stock Changes** (orange): the per-product mini-ledger from D1's
+  /stock-ledger read with the derived running balance -- the detail and
+  the Products-page ledger can never disagree.
+
+**Landing note:** the backend commit (0a7b7d83) went out first to
+unblock 9d's K5 in the same file, and its wholesale add swept their
+three uncommitted K5 hunks in -- recorded in their Part-421 entry; the
+same shared-tree hazard as earlier board-flip rides, now bitten in both
+directions. Gallery pure test gained the salesAnalytics stub in the
+same edit that added the import (the stub-in-same-edit convention,
+adopted at 9d's request after three misses of this pattern).
+
+**Honestly open on D3 (board carries it):** in-detail movement filters
+(date/type/batch) and the full Date-Type-Batch-Qty-Balance-Reference
+table shape -- the Batch column stays blank-honest until the
+movements.batch_id migration (D2's documented linkage gap); receipt-#
+references need the same enrichment. "Product search can filter by
+supplier/batch attributes" is a search-engine change, its own unit.
+
+## Part 423 (chat, Aug 28 2026) -- H2: the post-move import-contract sweep
+
+Verification part (no code changes) -- every import affordance
+re-checked against §13's two-screen contract now that ALL Phase-E
+moves are in.
+
+**Two-screen contract -- HOLDS everywhere.** All six import entry
+points ride the one job pipeline with a real review gate:
+ContactImportModal, InventoryImportModal (ServerImportReviewScreen
+with Approve / Review-later), BulkImportModal, StockActionImportModal,
+SalesImportModal, and the Import Hub (N1c) whose queued jobs surface
+in BackgroundImportTracker -- which binds the per-row review/decisions
+endpoints, not a blind Approve. No business write before confirmation
+anywhere; the existing stockActionImportModel tests pin the gate. The
+moved hubs (Sales, Branches, Review & Logs, Settings) mount exactly
+these verified components -- E6 already proved the affordances OPEN;
+this part proves what they open still honors the contract.
+
+**Templates.** Delivery cost: ALREADY regenerated -- the sales
+template's contract (salesImportContract.ts) carries delivery_fee_usd/
+khr, delivery_fee_paid_by, and delivery_actual_cost_usd/khr, and
+classifySales parses them; nothing to do. Supplier status: a REAL gap,
+recorded as P7-f -- the inventory-ADD import has no supplier /
+payment_status / credit_due_date anywhere (template, classifier, or
+apply; its apply writes movements + stock, no batch attribution),
+while every manual receive surface carries the D5a picker. The fix is
+kernel parity in the import apply, deliberately deferred until after
+the user's M-phase migration imports run (same stability reasoning as
+K4); regenerating the template before the engine parses the columns
+would be a lie, so it rides the engine fix.

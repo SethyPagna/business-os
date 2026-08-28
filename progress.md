@@ -895,7 +895,7 @@ deep-linkable tabs.*
   **Refined Aug 28: a COLUMN CHOOSER** — the export dialog lists the available columns
   (defaults pre-checked) and the operator can add/remove columns before downloading;
   the chosen set is remembered per page.
-- [~] H2 **[CLAIMED: session 6e — Part 423 (422 = a7's D3 by agreement).
+- [x] H2 *(Part 423, session 6e — VERIFIED, one confirmed gap spun out.
   Verification sweep, unblocked now that ALL Phase-E moves landed: every
   import affordance on the moved hubs (Sales/Returns/Fees, Review & Logs,
   Settings hub, Branches hub) re-checked against §13's two-screen
@@ -903,7 +903,16 @@ deep-linkable tabs.*
   confirmation), plus template regeneration where columns changed
   (delivery cost, supplier status). Read-mostly; fixes committed
   per-finding; evidence recorded like E6's sweep. No a7-frontend files
-  (ProductDetailModal/productReadTransport).]** Every page's import re-checked against the two-screen contract (§13) after the
+  (ProductDetailModal/productReadTransport). RESULTS: all six import
+  entry points (Contact/Inventory/Bulk/StockAction/Sales modals +
+  ImportHub) route through the job pipeline's review→approve — no
+  business write before confirmation, per-row decisions, pinned by the
+  existing stockActionImportModel tests. The moved hubs mount exactly
+  these verified components. Templates: delivery cost ALREADY carried
+  (salesImportContract: delivery_fee_*/paid_by/delivery_actual_cost_*,
+  engine parses them — verified, nothing to regenerate); supplier
+  status = P7-f, a real engine-side gap recorded above, deferred past
+  M-phase deliberately.)* Every page's import re-checked against the two-screen contract (§13) after the
   IA moves; templates regenerated where columns changed (delivery cost, supplier status).
 
 ### Phase I — Audit log wraps the whole app
@@ -1123,6 +1132,18 @@ deep-linkable tabs.*
   - P7-e *(checked, NOT a gap)*: POS quick-add duplicate handling already matches
     the contacts form (11.8: possible-duplicate confirm-retry + phone-conflict
     select-existing).
+  - [ ] P7-f *(new, confirmed — found by H2's Part-423 sweep)*: the
+    inventory-ADD import takes NO supplier / payment_status /
+    credit_due_date columns (classifyInventory parses none; the template
+    has none) and its apply writes movements + stock only — no batch
+    attribution — while EVERY manual receive surface carries the D5a
+    supplier picker and paid/on-credit. Cross-surface rule violation.
+    The fix is kernel parity (inventory-add apply attributing lots like
+    the products import does at 5061), sized beyond a sweep and
+    DELIBERATELY deferred until after the user's M-phase migration
+    imports run — same import-stability reasoning that defers K4. The
+    template regeneration rides the engine fix, never precedes it (a
+    template column the engine ignores is a lie).
   - Receive-batch vs §12 historical dates remains D4 (already tracked).
 - [x] P8. **Cambodian phone normalization in the migration data (Part 381).** All
   three sales files re-generated with the user's rule: restore the leading zero the
