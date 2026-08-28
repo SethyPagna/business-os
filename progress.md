@@ -989,7 +989,15 @@ deep-linkable tabs.*
   media-optimize.Dockerfile header, not this item.)*
 - [ ] K4. Storage/jobs hardening phases 1–6 of the locked execution plan (leases, R2
   NDJSON staging, D1 slimming — the 193MB staging JSON), safeguards, Sentry wiring.
-- [ ] K5. Identity: rename-regroup (9.1 — via D6), auto-merge flag + filter (9.2).
+- [~] K5 **[CLAIMED: session 6e — Part 420. 9.1 was closed by D6 long
+  since; this claim is 9.2: the auto-merge flag + filter. Footprint:
+  migration 0076 (products.auto_merged_count + an import_auto_merges
+  record table preserving each losing row's values), importEngine.ts
+  recording at its merge sites (file is at rest — 05's A4 landed),
+  a products facet (merged=auto) + its own filter-options helper file,
+  ONE small mount hunk in Products.tsx coordinated with a7 (who holds
+  StockChangeSection for D2), backend read endpoint for a product's
+  merge log, tests.]** Identity: rename-regroup (9.1 — via D6), auto-merge flag + filter (9.2).
 - [x] K6 *(Part 387: branch-stock + batches view rows shipped — branch_stock rides the row allowlist; the batches read gate accepts the grant with a money-blind list response (unit cost/paid-credit stripped, supplier NAME kept); Product Viewer role preset = image-only + all 8 rows preselected, each still toggleable. 7.1/7.2 editor redesign remains with E4.)* Permissions: per-action widening story (7.1) + editor redesign (7.2, in E4).
   **Refined + partly built Aug 28 (Part 380):** the per-capability opt-in system for
   the image-only role ALREADY exists (each visible field is its own permission row —
