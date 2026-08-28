@@ -898,11 +898,17 @@ deep-linkable tabs.*
   cheaper under Workers Paid, A4).
 - [~] K4. Storage/jobs hardening phases 1–6 of the locked execution plan (leases, R2
   NDJSON staging, D1 slimming — the 193MB staging JSON), safeguards, Sentry wiring.
-  **[CLAIMED (slice only): session b5 — the three UNBOUNDED `Promise.all` R2 delete
-  sweeps A4/Part 411 flagged in routes/system.ts (reset-data mode='all' ×2,
-  factory-reset ×1): cap + sequence them the way the includeImages cleanup already
-  is, report any remainder honestly. Footprint: cloudflare/src/routes/system.ts +
-  test-reset-products-pure.cjs. The rest of K4 (leases/NDJSON/slimming) stays open.]**
+  *(Part 412, session b5 — the three UNBOUNDED `Promise.all` R2 delete sweeps
+  A4/Part 411 flagged are SHIPPED, needs deploy (6e3ad3e8): reset-data mode='all' ×2
+  + factory-reset ×1 now spend ONE shared MAX_IMAGE_DELETES_PER_RESET budget via the
+  exported sweepPrefixCapped() — sequential, failures collected, over-cap remainder
+  REPORTED in message/fields/audit instead of silently implied deleted; factory-reset
+  only claims "All data and images wiped" when true. test-reset-products-pure.cjs
+  22 PASS incl. factory-reset end-to-end, unlocked by two harness-fidelity fixes:
+  d1compat run() now returns the real wrapper's { changes, lastInsertRowid } as a
+  superset of the old meta shape, and that test's transpile gained esModuleInterop
+  for bcryptjs. The REST of K4 — leases/NDJSON staging/D1 slimming/Sentry — stays
+  open.)*
 - [ ] K5. Identity: rename-regroup (9.1 — via D6), auto-merge flag + filter (9.2).
 - [x] K6 *(Part 387: branch-stock + batches view rows shipped — branch_stock rides the row allowlist; the batches read gate accepts the grant with a money-blind list response (unit cost/paid-credit stripped, supplier NAME kept); Product Viewer role preset = image-only + all 8 rows preselected, each still toggleable. 7.1/7.2 editor redesign remains with E4.)* Permissions: per-action widening story (7.1) + editor redesign (7.2, in E4).
   **Refined + partly built Aug 28 (Part 380):** the per-capability opt-in system for

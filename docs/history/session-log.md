@@ -9669,3 +9669,73 @@ UNBOUNDED `Promise.all(objects.map(deleteObject))` sweeps at three other
 sites (~409/415/588) -- the same hazard class the capped reset path
 documents. Under the old 1,000-internal ceiling a 1,000-object listing
 page could take the whole request down mid-delete.
+
+## Part 412 (chat, Aug 28 2026) -- K4 slice: the three unbounded R2 delete sweeps are capped and honest
+
+Session b5 (worktree). **Ask:** the follow-through on Part 411's closing
+flag: routes/system.ts still fired `await Promise.all(objects.map((o) =>
+deleteObject(...)))` over FULL R2 listings at three sites -- reset-data
+mode='all' (uploads/ then imports/) and factory-reset (both prefixes) --
+while the capped includeImages path in the same file documents exactly why
+that is the worst available failure: each delete is a subrequest,
+listObjects walks every 1,000-object page, so the burst lands AFTER the D1
+wipe committed and takes the whole request down. Bound + sequence them the
+way the capped path does, and report any remainder honestly.
+
+**What changed (6e3ad3e8):** new exported `sweepPrefixCapped(bucket,
+prefix, maxDeletes)` -- sequential deletes over the listing, per-key
+failures collected (never thrown), `attempted` returned so several
+prefixes can spend ONE shared budget, `leftover` = what the budget could
+not cover, and a failed listing reports its error while fabricating no
+counts. Both routes now spend one shared MAX_IMAGE_DELETES_PER_RESET
+(500, now exported) across uploads/ + imports/. The non-fatal contract is
+unchanged -- R2 cleanup failures never fail the reset that already
+committed -- but where reset-data's old `catch (_) {}` swallowed even a
+total listing failure silently, both failure kinds and the over-cap
+remainder now surface in the response message (which the frontend shows
+verbatim), in new `r2FilesDeleted`/`r2FilesLeftOverCap` fields, and in the
+audit row. Two honesty fixes fell out: factory-reset's "All data and
+images wiped." is only claimed when true (otherwise "N deleted, M left in
+storage -- run Factory Reset again later"), and its `deletedObjectCount`
+used to count the LISTING length the moment Promise.all resolved -- it now
+counts deletes that actually succeeded.
+
+**What was found:** factory-reset had never been runnable in the pure
+harness, for two stacked reasons worth remembering. (1)
+harness/d1compat.cjs `run()` returned only the raw-D1
+`{ meta: { last_row_id } }` shape, while lib/db.ts's REAL wrapper hands
+route code `{ changes, lastInsertRowid }` at the top level --
+coreDataInvariants' reseed read `inserted.lastInsertRowid` as undefined
+and died on `NOT NULL organization_groups.organization_id` (this mismatch
+is why several tests carry their own private adapter copies). d1compat now
+returns the SUPERSET of both shapes; meta kept, so every existing consumer
+still works. (2) The test's ts.transpileModule lacked esModuleInterop, so
+coreDataInvariants' `import bcrypt from 'bcryptjs'` (a CJS package) became
+`.default.hashSync` of undefined -- production never sees this because
+esbuild does the interop at bundle time; the reset test's transpile now
+sets it.
+
+**Verified (really run this session, in the b5 worktree with node_modules
+junctioned read-only from the main checkout):**
+`node scripts/test-reset-products-pure.cjs` -> **22 PASS, 0 FAIL** -- the
+15 existing checks unchanged plus 7 new: shared-budget arithmetic across
+prefixes (uploads/ listed at cap-1 leaves exactly 1 delete for imports/,
+leftover 2 reported); under-cap full sweep with no leftover note; a
+failing delete continues past the bad key and is reported; a failing
+uploads/ listing is reported while imports/ still sweeps; factory-reset
+capped with the honest message and the admin reseed intact; under-cap
+factory-reset keeps the full "All data and images wiped" message; direct
+sweepPrefixCapped edges (failed listing = zeros + 1 error, zero budget =
+nothing deleted, whole listing counted leftover). All 18 other runnable
+d1compat-based suites pass unchanged (the 19th is the stock-action e2e,
+which needs a live stack). cloudflare `tsc --noEmit` clean.
+`wrangler deploy --dry-run` OK. Note: this worktree is checked out
+CRLF (`core.autocrlf=true`, index verified `i/lf` on every touched file),
+so Part 411's CRLF-leak incident does not apply here.
+
+**Not done:** needs deploy (rides the next `npm run deploy:full`). The
+rest of K4 (leases, R2 NDJSON staging, D1 slimming, Sentry wiring) is
+untouched. A >500-object cleanup still takes multiple reset runs by
+design -- the whole-catalog sweep belongs to the continuation design
+(M4/K4), exactly as the cap's comment prescribes. Frontend untouched:
+it renders result.message verbatim, which is where the honesty lives.
