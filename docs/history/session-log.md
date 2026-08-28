@@ -8704,3 +8704,82 @@ a stale value from a previous open can never leak again. frontend tsc clean
 compiles too). Commit c904a9fd. Products.tsx was untouched by the G1 session
 at commit time (verified: the file's whole diff was this fix) and is
 released back to cold.
+
+## Part 395 (chat, Aug 28 2026) — the migration pack under the tested contract: full re-validation, three real finds
+
+**Ask.** "Continue make sure the migration files are all correct no broken khmer,
+special characters, brand name, barcode no scientific notation, phone number etc..."
+
+**What changed.**
+- **`businessos-migration-aug28/validate-pack.cjs`** — a full-pack validator that
+  LIVES IN THE PACK (every earlier validation script died in a session scratchpad;
+  this one survives with the files and the manifest now says to run it after any
+  edit). It transpiles and runs the app's REAL parsers (backend importCsv, the
+  frontend xlsx bridge), so "clean" means clean by the exact code that runs the
+  import. Coverage: strict UTF-8 + BOM on all 20 CSVs, NFC, mojibake signatures
+  (U+FFFD, C1 residue, â€/Ã/áž patterns), '???' runs, control characters, per-file
+  Khmer presence counts; barcode text-safety (no scientific notation anywhere, no
+  float artifacts, no leading-zero collisions or stripped-zero variants); template
+  identity (exact name+barcode pairs, the engine's name-fallback for
+  placeholder-barcode products, and EXACTLY the 6 recorded junk orphans); P8 phone
+  formatting; the mm/dd/yyyy convention with 24h times (receipt_number's @ISO
+  disambiguators exempt); per-branch catalog shape (6,034 + 73 products), the sales
+  first-line-header contract (14,919 receipts / 21,061 continuation lines), recorded
+  row counts and the 0064 expense sums; and all 12 CSV↔XLSX twins row-by-row with
+  identity columns byte-exact.
+- **Three real finds, fixed:**
+  1. `stock_adjustments.csv` rows with text-form dates ('1 Jan 2025', '1 Jan 2026'
+     ×2) — the one shape the Part-388 every-date-cell conversion missed. Converted
+     to 01/01/2025 / 01/01/2026; the xlsx twin regenerated.
+  2. `drawer_sessions.csv` — its 1,509 begin/end datetimes were still ISO (it was
+     not among Part 388's ten files). Converted to MM/DD/YYYY HH:mm so the pack is
+     uniform.
+  3. **A real app bug, found BY the twin check:** `xlsxExport.buildWorksheet`
+     forced whole columns to Text only when EVERY value looked id-like — in a MIXED
+     column the per-cell fallback still numbered numeric-looking strings, and
+     Number('035000463760') ate the leading zero (897 damaged cells in one
+     regenerated twin). Fixed per-cell (id-like strings stay Text everywhere),
+     pinned in tests/encodingSafety.test.ts, commit `72e90b21`.
+- **IMPORT-MANIFEST.md corrected:** Step 1/2 row counts were stale (the files are
+  per-branch now: 12,093 rows / 6,034 products and 146 rows / 73 products; the old
+  8,803/73 predated the Part-388 restructure), the two remaining "ISO" wording
+  leftovers now state the mm/dd/yyyy convention, and a "Re-validating the pack"
+  section points at the validator.
+
+**What was found (established as CORRECT, no change needed).**
+- Encoding is clean everywhere: zero mojibake/replacement/control characters, all
+  NFC, BOM on every file, Khmer present and counted in all nine files that carry it
+  (11,872 cells in the catalog file alone).
+- Phones: 10,352 in P8 format across the five phone-carrying files; the 273
+  preserved-as-is are dual numbers ('0X… / 0X…'), foreign shapes, or partials —
+  exactly the "garbage stays untouched" rule; ZERO valid-but-unformatted leftovers;
+  suppliers-from-po's phone column empty as recorded.
+- Identity: history 20,997 + adjustments 909 rows ALL exact template pairs; the
+  sales files' 270 non-pair rows all attach by catalog NAME (products whose template
+  barcode is the '0' placeholder — the preflights proved they import); the only
+  orphans are the recorded 6 junk lines. Supplier vocabulary 8,053/8,053; every
+  brand in the catalog vocabulary; the 73 NEW names obey the S2 naming rules.
+- The blank receipt_number rows (21,061) are the sales template's own
+  continuation-line contract, not damage; non-blank receipts = exactly 14,919.
+- Template names with double spaces (the Suave Kids row) are the template's own
+  authoritative spelling, reproduced byte-identically in every file — flagged only
+  if a file ever diverges.
+- One documented source artifact: sales-2025 row 7991 customer_name '8.55E+11' is
+  the OLD system's own damage (a number typed in the name field, sci-mangled before
+  export); its customer_phone (012 860 695) is intact and phone-first matching never
+  reads the name. Preserved, and pinned as a known artifact in the validator.
+
+**Verified (really run).** `node validate-pack.cjs` (full, twins included):
+**ALL CHECKS PASSED** — after the fixes, zero problems, zero warnings across 20
+CSVs and 12 twins. Repo side: `tests/encodingSafety.test.ts` 10/10 (new
+mixed-column pin), frontend tsc clean, vite build 16.21s. The two file fixes were
+re-proven by the validator's own re-run, not assumed.
+
+**Not done.**
+- The 26 catalog products with >2 per-branch rows (same-identity price variants)
+  are recorded as info — the Part-388 proof run landed them on exact per-branch
+  quantities, so they are treated as by-design.
+- Deploy + the imports themselves (user, per IMPORT-MANIFEST).
+
+Commits: `72e90b21` (xlsxExport fix + test pin); the pack files live outside the
+repo and carry the changes directly.

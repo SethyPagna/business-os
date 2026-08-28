@@ -239,7 +239,26 @@ autocorrect — templates, imports, exports and generated files alike.*
   there; (3) .csv entries inside export ZIP packages carried no UTF-8 BOM → Khmer as
   '?' in Excel; (4) errors.csv (backend) same, BOM added. Screen 1's
   scientific-notation rejection + xlsxExport's Text-cell forcing + full
-  export→reimport identity round-trips are pinned by test. Commit `8e5f87e8`.)*
+  export→reimport identity round-trips are pinned by test. Commit `8e5f87e8`.
+  **Part 395 addendum — the MIGRATION PACK itself is now under the same tested
+  contract:** `businessos-migration-aug28/validate-pack.cjs` (persists WITH the pack —
+  every earlier validator died in a session scratchpad) re-proves all 20 CSVs + 12
+  XLSX twins through the app's real parsers: strict UTF-8+BOM/NFC/no-mojibake with
+  Khmer presence counts per file, zero scientific-notation/float/stripped-zero
+  barcodes, template identity incl. the name-fallback rows and EXACTLY the 6 recorded
+  junk orphans, P8 phone formatting (10,352 formatted; the 273 preserved-as-is are
+  dual numbers/foreign/partials, zero unformatted-valid leftovers), the mm/dd/yyyy
+  convention (only receipt_number's @ISO disambiguators exempt), recorded row counts
+  + 0064 sums, and row-by-row CSV↔XLSX agreement with identity columns byte-exact.
+  Final state: **ALL CHECKS PASSED.** Three real finds fixed along the way: 3
+  text-form dates ('1 Jan 2025/2026') in stock_adjustments that the Part-388
+  conversion missed (CSV + twin regenerated), drawer_sessions' 1,509 datetimes still
+  ISO (converted to the pack convention), and — found BY the twin check — a real app
+  bug: xlsxExport numbered id-like strings in MIXED columns, eating leading zeros
+  (fixed + pinned, `72e90b21`). IMPORT-MANIFEST corrected: 12,093/146 per-branch row
+  counts, mm/dd/yyyy convention lines, and a "re-validate after any edit" section.
+  One documented source artifact stays: sales-2025 row 7991's customer_name is the
+  old system's own '8.55E+11' (its phone 012 860 695 is intact and drives matching).)*
   Encoding-safety sweep as a TESTED contract: template downloads, exports and
   the import parser preserve text barcodes (no scientific notation, no stripped leading
   zeros), Khmer text (UTF-8 + BOM where Excel is a consumer) and literal formats.
