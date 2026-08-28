@@ -8336,3 +8336,78 @@ board update.
 
 **Not done.** Deploy (user). The Products select-model asymmetry awaits the
 user's call. B1's visual sweep still open. D1b was in flight in a peer session.
+
+## Part 388 addendum (chat, Aug 28 2026) — the proof re-run on the converted pack; the seven remaining units landed
+
+Written by the session that ran the Part-388 proof (the "second session" of
+Part 388's concurrency note — three sessions now share this checkout and
+coordinate over cross-session messages; the earlier entry recorded the proof
+from the peer's vantage while this session's units were still uncommitted).
+
+**The definitive run.** After every date cell in the migration pack was
+converted to mm/dd/yyyy (51,916 cells across 10 files; `receipt_number`'s
+embedded `NNN@YYYY-MM-DD` IDs deliberately untouched), the validator's
+sale_date pin was updated to `mm/dd/yyyy HH:mm`, the pack re-validated ALL
+PASS, xlsx twins regenerated, and `simulate_full_migration.mjs` re-run END TO
+END on the converted files: **all 6,104 products per-branch IDENTICAL (0
+diffs); 14,913/14,919 receipts, 35,970 lines; 0 dup receipts; 0 unexpected
+receipts; 26,018 batches / 15 suppliers** (runtime 381s). That is the final
+answer to "be clear that the file I sent Aug 28 vs the whole process of
+migrate import manifest will result in same product quantities" — proven on
+exactly the files the user will import.
+
+**Units committed this session** (each path-scoped around two peers' in-flight
+work): 627782c0 analyze-e2e goes mode-aware (direct 481 rows reach review,
+reconcile keeps 480); ac556f8d MAX_HISTORICAL_SALE_LINES 50→100 (the three
+real 86/58/55-line receipts); 2e3e6c8e batch code numeric MMDDYYYY revert with
+honest format history + trailing-time-tolerant normalizeToIsoDate; e736a90e
+Canva-level persistence (popstate through the nav guard — also fixing Back
+never actually changing the page — + ProductForm/ReceiveBatchModal localStorage
+drafts); 09e6538f Dashboard stat merge with formula-with-numbers tooltips;
+9d797b77 leangbeauty.com defaults + portal PWA icon purposes unswapped;
+30a09266 lang keys (carries 12 inert D1b keys for the peer's unlanded
+feature, noted in-message).
+
+**Cross-session state observed while landing:** peer sessions committed this
+tree's earlier Part-388 work (0af2a6e9, ca3d9dc5) plus their own I1/B6/389
+units; test-stock-action-apply-pure's 5 failures were the D1b session's
+in-flight received_branch_id column (fixed by them); the two stale test pins
+(notes-reorder audit stub, backups hoisted-user regex) were fixed here and
+committed by a7 as 92684fe3.
+
+**Verification (this session, after all units):** backend sweep 86 files —
+green except the D1b session's two in-flight test files (theirs, confirmed
+fixed on their side); both `tsc --noEmit` clean; frontend `npm run test:utils`
+FULL chain exit 0; `vite build` 24.57s; `wrangler deploy --dry-run` OK.
+
+**Not done.** Deploy + imports (user; `npm run deploy:full` carries 0061-0069,
+and 0070 once D1b lands). Next session-log entry should be **Part 390** —
+Part 389 is taken by a7's entry above.
+
+### Part 389 addendum -- J3 shipped in the same session
+
+After I1 + B6, J3 (admin device/session management) also closed -- chosen
+because devices.ts, deviceAdminTransport.ts and DeviceApprovals.tsx were in no
+peer session's working set (confirmed by coordination message with
+business-os-v1-6e, which also mis-attributed the 0070/supplier-invoice work to
+this session; corrected -- that is the third session's).
+
+- Backend: sessions are the missing half the J-phase items kept referencing
+  ("an admin revoke ends it") -- there was NO admin surface over user_sessions.
+  routes/devices.ts (already admin-gated) gained GET /sessions (?userId=),
+  POST /sessions/:id/revoke, POST /sessions/revoke-user. The listing's WHERE is
+  the same predicate getSessionUser authenticates with, so the list can never
+  show a session that could not actually make a request. token_hash stays
+  inside lib/auth (comment-only mention; the pure test strips comments and
+  asserts the code never touches it).
+- UI: Users > Devices restructured per J3's "per-user devices": pending queue,
+  then one card per account (approved devices with last seen + Revoke; live
+  sessions with signed-in/last-seen/expires/IP + End session; Sign out
+  everywhere), then rejected/revoked history. The section label uses a NEW
+  device_rejected_history key (fallback) because the packs' device_history
+  translation ("Device history") would mislabel the now-rejected-only list.
+- test-admin-sessions-pure.cjs: 17 checks -- source pins + the routes' own
+  lifted SQL run against the real migration schema (0001 user_sessions +
+  0006 device_id) in better-sqlite3.
+- Verified: cloudflare tsc clean, frontend tsc clean, the new test 17/17,
+  test-audit-coverage-pure re-run 49/49 (devices.ts changed). Commit 98cf74a3.

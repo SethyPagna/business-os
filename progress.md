@@ -316,7 +316,29 @@ store really paid the rider; margin = charge − cost and is internal only.*
 
 ### Phase D — Products data model: stock-change ledger, batches, suppliers
 
-- [~] D1b *(IN PROGRESS — claimed by session business-os-v1-35, Aug 28 — do not pick up in parallel)*. **Stock-In Invoice report view (user, Aug 28 — modeled on the old
+- [x] D1b *(Part 389: SHIPPED, needs deploy — the report lives as a folded teal
+  SectionCard ("reports" kind) on Contacts → Suppliers, because per-lot costs +
+  supplier spend are exactly what the contacts_suppliers gate scopes (R2) — both
+  endpoints sit under /suppliers/* so requireSupplierAccess covers them. Migration
+  0070 adds `product_batches.received_branch_id` (+ received_at index): branch_batch_stock
+  says where stock SITS, not where it was RECEIVED, so the branch filter needed the
+  receive-time fact — both writers (receiveBatchStock, applyUnifiedStockAdd) stamp it,
+  first-attribution-sticks like supplier, and it deploys BEFORE the history import so
+  the 21k rows land with their real shop/warehouse split. Invoice = supplier + received
+  DAY: the old system's invoice NUMBER was never stored in this schema — date is the
+  honest grouping, nothing fabricated. Groups endpoint paginated ≤25; lines load per
+  invoice on expand, paginated ≤200, so the catalog import's synthetic same-day group
+  can never balloon a response. Honest-count rules tested: cost totals only where
+  qty+cost both known (lines_without_cost says the rest), branch filter reports
+  invoices_without_branch instead of silently hiding, date bounds exclude the no-date
+  group which stays reachable unfiltered ("No date recorded"). id-attributed and
+  name-only lots of one supplier merge into ONE group (same rule as the D5 purchases
+  drill, other direction). `test-stock-in-invoice-report-pure.cjs` proves it against
+  the REAL 71-migration chain + real transpiled writers. **Remaining:** (a) §11
+  products-import batch INSERTs (importEngine.ts — another session's in-flight file,
+  Aug 28) don't stamp received_branch_id yet; those lots show honestly as "no branch
+  recorded"; (b) the sibling reports this one's filter row anticipates — stock-out,
+  adjustments, expenses/fees — are still open.)* **Stock-In Invoice report view (user, Aug 28 — modeled on the old
   system's).** A reporting surface grouped supplier → invoice (date + number) →
   product lines (name, barcode, qty, unit, unit cost, net total), with the SAME filter
   row everywhere: branch (shop / warehouse / all) · supplier · date range. The same
@@ -475,7 +497,7 @@ deep-linkable tabs.*
   jobs sharing one review session; (c) the §12 template's optional `supplier` column
   (D5) and the M4 continuation dispatch so volume is never the reason to split a file.
   Builds on §13's two-screen contract — no new commit paths.
-- [x] N2 *(Part 387: utils/dirtyWork.ts registry + navigateTo intercept + the three-option modal (Save & Leave only when every dirty item can save, Discard & Leave, Stay) + beforeunload + sidebar amber dot. First registrations: product form + receive-batch modal; POS cart deliberately exempt (drafts persist by design); import jobs persist server-side. Known limit recorded: browser BACK bypasses the SPA guard.)* **Navigation guard against stale work.** When leaving a page/section that has
+- [x] N2 *(Part 387: utils/dirtyWork.ts registry + navigateTo intercept + the three-option modal (Save & Leave only when every dirty item can save, Discard & Leave, Stay) + beforeunload + sidebar amber dot. First registrations: product form + receive-batch modal; POS cart deliberately exempt (drafts persist by design); import jobs persist server-side. Part 388 closed the recorded browser-BACK limit: popstate now routes through the same guard — clean state follows history (also fixing the latent bug where Back changed the URL but never the page), dirty state re-asserts the URL and opens the modal — and "Canva-level" drafts landed: ProductForm (800ms) + ReceiveBatchModal (600ms) autosave to per-record localStorage, restore after crash/reload when newer than the record's updated_at, clear on save or explicit discard.)* **Navigation guard against stale work.** When leaving a page/section that has
   unsaved/in-progress work (add-product draft, batch-in, an open import review, an edit),
   prompt: finish now, or keep it ("I'll be back"), or discard — so switching pages forces
   a reconcile instead of silently stranding work. Needs a shared "dirty work registry"
@@ -569,8 +591,18 @@ deep-linkable tabs.*
   in once, confirm the session survives days and an admin revoke ends it.
 - [x] J2. Password-manager friendliness — verified already correct: real `<form>`
   submit, `autocomplete="username"` / `"current-password"`, stable field names.
-- [ ] J3. Admin device/session management UI lands in Settings→Users (E4): per-user
-  devices, last seen, revoke button.
+- [x] J3 *(Part 389: shipped, needs deploy. Backend: GET /api/auth/devices/sessions
+  lists LIVE sessions (the exact revoked_at-IS-NULL + unexpired predicate
+  getSessionUser enforces; explicit columns — token_hash never leaves lib/auth),
+  POST /sessions/:id/revoke ends one session immediately, POST
+  /sessions/revoke-user = sign out everywhere via revokeUserSessions; all audited.
+  UI: Users → Devices is now per-ACCOUNT — each account card shows its approved
+  devices (last seen, Revoke) and live sessions (signed in / last seen / expires /
+  IP, End session) plus "Sign out everywhere"; rejected/revoked history separate.
+  `test-admin-sessions-pure.cjs` 17 checks incl. behavioral SQL runs against the
+  real 0001+0006 schema. Canonical en/km label keys deferred to N3a's sweep —
+  fallback-rendered for now.)* Admin device/session management UI lands in
+  Settings→Users (E4): per-user devices, last seen, revoke button.
 
 ### Phase K — Carried-over engineering backlog (unchanged priorities)
 
@@ -802,6 +834,35 @@ deep-linkable tabs.*
   sidebar dot; product form + receive-batch registered first. See N2's entry.
 - [x] V3. **P3 closed** — whole-catalog price adjustment, server-side with true
   preview count. See P3's entry.
+
+### Phase W — Aug-28 fifteenth batch (Part 388): the quantity proof + the mm/dd/yyyy sweep
+
+- [x] W1. **Quantity equivalence PROVEN, definitively, on the final mm/dd/yyyy
+  pack**: the whole manifest process (catalog + the 73 + 21,286-row history +
+  three sales files + zero/re-import) executed through the REAL engine → all
+  6,104 products' per-branch quantities IDENTICAL to the Aug-28 files (0 diffs;
+  the only deltas en route are the 14 negative old-system values the import
+  clamps to 0 with its own warning). Sales: 14,913/14,919 receipts, 35,970
+  lines (6 junk lines err by design), 0 duplicate receipts, 0 unexpected
+  receipts. Two engine bugs found+fixed by the proof (in-chunk identity fork;
+  analyze cap blind to direct mode) and one real limit raised
+  (MAX_HISTORICAL_SALE_LINES 50→100 — three genuine 86/58/55-line wholesale
+  receipts were the ONLY unstorable ones). Validator + xlsx twins re-run green
+  after every date cell in the pack (51,916 across 10 files) went mm/dd/yyyy.
+- [x] W2. **mm/dd/yyyy + 24-hour everywhere**: fmtDate/fmtTime/fmtDateTime24
+  pinned; fmtDateOnly + backend formatDateMdy close the raw-ISO leaks; batch
+  code back to numeric MMDDYYYY per user direction (both copies, history-honest
+  comment); normalizeToIsoDate tolerates datetime cells.
+- [x] W3. **POS discount + payment inputs compacted** — toggle + both currency
+  inputs on ONE row, payment grid slimmed.
+- [x] W4. **N2's recorded limit closed + Canva-level drafts** — see N2.
+- [x] W5. **Dashboard stats merged like Inventory's** — COGS card folded into
+  Revenue (COGS + Gross profit as drill rows), net-after-refunds into Returns;
+  every tooltip states its formula with the period's real numbers.
+- [x] W6. **Production domain defaults + PWA icons** — web-api dev fallback +
+  Server page placeholder → admin.leangbeauty.com; .claude/launch.json run
+  entries; portal-manifest icon purposes unswapped (any/maskable were crossed,
+  so iOS/Android picked the wrong art).
 
 ### Flagged, not guessed (Golden Rule 7)
 
@@ -1868,7 +1929,7 @@ are the commands' actual results this session.
 | Backend `scripts/test-*.cjs` (swept individually, not via a chain) | **85 / 85 pass** (Part 387 sweep; +test-bulk-price-adjust-pure, image-only/batches pins extended) |
 | Frontend `npm run test:utils` (full chain: `typecheck` → `verify:public-runtime` → `check:source` → all 116 `tests/*.test.ts`) | **green** (Part 384 rerun, plus check:source) |
 | Real `vite build` | **succeeds (25.53s)**; only the two pre-existing catalog circular warnings |
-| Migration harness | **all 70 migrations apply cleanly** (Part 386; `0068` delivery_actual_cost + `0069` tag_label verified present); `0061`–`0069` are committed but **not deployed** — the next `npm run deploy:full` carries them |
+| Migration harness | **all 71 migrations apply cleanly** (Part 390 rerun; `0070` received_branch_id verified present on top of Part 386's `0068`/`0069` checks); `0061`–`0070` are committed but **not deployed** — the next `npm run deploy:full` carries them |
 | Migration pack (after the S2 name propagation) | **ALL VALIDATIONS PASSED** rerun (quantities exact vs footer, revenue 0.02%, Khmer byte-perfect, zero scientific barcodes); xlsx round-trip OK |
 | Production devices (read-only D1 query) | trusted_devices **0**, user_sessions 94 (**2 live**) — the Part 375 clean slate holds |
 | **Part 385 connection preflight** (real classifiers over the real files vs merged catalog + 4,652 real customers) | stock history **21,286/21,286 attach**, sales **14,913/14,919 receipts** (6 junk lines err by design), customers **99%+ linked**, suppliers **8,053/8,053**; pack re-validated ALL PASS after the identity rewrite |
@@ -1881,6 +1942,20 @@ model on Inventory/Sales/Returns/Branches/Contacts) both shipped, needs deploy.
 Re-verified this session: both tsc clean, `test:utils` full chain green, vite
 build 22.09s. **Flagged:** Products now carries the OPPOSITE 11.2 resolution
 (toolbar Select-all, no header checkbox) — see Flagged, not guessed.
+
+**Part 390 (Aug 28, parallel session):** D1b shipped, needs deploy (`c30f5159`) — the
+Stock-In Invoice report (supplier → received day → product lines, filters
+branch·supplier·date-range) as a folded teal SectionCard on Contacts → Suppliers under
+the contacts_suppliers gate; migration `0070` adds `product_batches.received_branch_id`,
+stamped by BOTH receive writers with first-attribution-sticks, so the branch filter
+reads the receive-time fact — and it deploys before the history import, so the 21k
+rows land with their real shop/warehouse split. Verified this session: both tsc clean,
+backend sweep **87/87** (new `test-stock-in-invoice-report-pure` over the real
+71-migration chain; both stock-action fixtures gained the column), vite build 12.50s,
+check:source + langKeyIntegrity green (12 new en/km keys — landed in `30a09266` by
+cross-session coordination), wrangler dry-run OK. One full `test:utils` chain run
+failed at typecheck in ANOTHER session's in-flight `DeviceApprovals.tsx` — outside
+this unit's blast radius; every check over this unit's own files ran green.
 
 **Part 370 additions:** the master plan (top of file) is now the queue; the in-flight
 stats/tooltip work was finished and committed (`9d93db56`); the empty
