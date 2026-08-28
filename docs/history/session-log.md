@@ -8411,3 +8411,85 @@ this session; corrected -- that is the third session's).
   0006 device_id) in better-sqlite3.
 - Verified: cloudflare tsc clean, frontend tsc clean, the new test 17/17,
   test-audit-coverage-pure re-run 49/49 (devices.ts changed). Commit 98cf74a3.
+
+## Part 390 (chat, Aug 28 2026) — parallel-session backlog: D1b, the Stock-In Invoice report
+
+**Ask.** "Check progress.md and what the other sessions are doing, then continue one
+task … without touching each other." Five peer sessions were live. The dirty tree plus
+a coordination message from business-os-v1-6e mapped their footprints (Part 388: batch-
+code numeric format, POS compaction, Dashboard/Inventory stat merges, domain/PWA; Part
+389: I1 audit sweep + B6 select model; a third session mid-flight on the J3 device UI).
+Picked the highest-ordered open master-plan item whose file set was fully disjoint —
+**D1b** — and wrote the claim into progress.md before touching code.
+
+**What changed.**
+- Migration `0070_batch_received_branch.sql`: `product_batches.received_branch_id` + a
+  received_at index. branch_batch_stock says where a lot's stock SITS (transfers add
+  rows there), not where it was RECEIVED — the report's branch filter needs the
+  receive-time fact. Pre-0070 rows keep NULL honestly.
+- Both receive writers stamp it — `lib/productBatches.ts` (receiveBatchStock) and
+  `lib/stockActionCommit.ts` (applyUnifiedStockAdd): set on INSERT, COALESCE-fill on
+  top-ups. First attribution sticks, the exact supplier/cost rule 0062/0065 set. It
+  deploys BEFORE the history import, so the 21,286-row history (whose rows carry
+  shop/warehouse) lands with its real branch split.
+- `routes/contacts.ts`: `GET /suppliers/reports/stock-in-invoices` (invoice groups,
+  ≤25/page) + `GET /suppliers/reports/stock-in-invoice-lines` (one group's lines,
+  ≤200/page), both under the existing requireSupplierAccess middleware — per-lot cost
+  and supplier spend are exactly what contacts_suppliers protects (R2). A shared
+  derived table resolves supplier identity: supplier_id wins; name-only lots resolve
+  by lowest-id name match, so id-attributed and name-only lots of one supplier read as
+  ONE group (the D5 purchases merge rule, run from the other direction); no supplier =
+  the 'none' bucket, "No supplier recorded" — which honestly also holds non-purchase
+  receipts (return restocks, count corrections); the schema cannot tell them apart and
+  the report shows what it holds.
+- Invoice = supplier + received DAY. The old system's invoice NUMBER was never stored
+  in this schema — the date is the honest grouping; flagged, not fabricated.
+- Honest counts everywhere: cost totals only where qty AND unit cost are both known
+  (`lines_without_cost` names the rest); a branch filter reports
+  `invoices_without_branch` instead of silently hiding; date bounds exclude the
+  no-date group, which stays reachable unfiltered as "No date recorded" (its lines
+  travel as day='none', because an empty query value would be dropped in transit).
+- Frontend: `StockInInvoicesSection.tsx` (its own lazy chunk, loads only when the
+  section opens) mounted in SuppliersTab as a folded teal "reports" SectionCard —
+  filter row (branch · supplier · from/to dates), totals tiles, expandable invoice
+  rows with the 10-column line table (name, barcode, batch, qty, unit, unit cost,
+  total, payment, received-into, remaining), pagination at both levels. Transport in
+  `contactReadTransport.ts`. 12 new en/km keys, glossary-consistent, line-spliced at
+  alphabetical positions; the D5 purchase keys reused everywhere else.
+
+**What was found.**
+- inventory_movements cannot back this report: movements carry branch/type/date but
+  never a batch id (the receive path writes only a reason string). Batches are the
+  data source — matching the master plan's own wording.
+- The transfer clone path (resolveDestinationBatch) copies lot/expiry/notes but never
+  supplier/cost/received_quantity, so transfer clones cannot double-count purchases.
+- test-stock-action-{commit,apply}-pure fixture their own product_batches tables; both
+  needed the new column (one found by the sweep, one flagged back by session 6e).
+
+**Verified (really run, this checkout).**
+- `node scripts/test-stock-in-invoice-report-pure.cjs` — ALL PASS: 0070 applies on the
+  real 71-migration chain; the real transpiled writers stamp / stick / fill; grouping,
+  supplier merge, honest-count filters and lines proven against real SQLite.
+- Backend sweep **87/87** `test-*.cjs` (the one mid-session failure was the apply-pure
+  fixture; fixed here, rerun green).
+- `tsc --noEmit` clean in BOTH packages (cloudflare rerun after each backend edit).
+- `vite build` 12.50s with `StockInInvoicesSection-*.js` emitted as its own chunk;
+  `check:source` 375 files; `langKeyIntegrity` 3,499-key parity.
+- `wrangler deploy --dry-run` OK with 0070 present.
+- One full `test:utils` chain run exited 2 at the typecheck stage — in
+  `users/DeviceApprovals.tsx`, another session's in-flight J3 work, not a file of this
+  unit; the standalone frontend typecheck had passed before that edit appeared, and
+  every check over this unit's own files ran green.
+- Coordination: the D1b claim went into progress.md first; 6e confirmed the disjoint
+  split, flagged the apply-pure failure, and carried the 12 lang keys in their
+  `30a09266` chore(lang) commit (recorded in this unit's commit message).
+
+**Not done.**
+- §11 products-import batch INSERTs (importEngine.ts — owned by another session's
+  in-flight work throughout) don't stamp received_branch_id yet; those lots show as
+  "no branch recorded" in the report. Small follow-up once the file frees up.
+- The sibling reports the shared filter row anticipates — stock-out, adjustments,
+  expenses/fees — remain with M6/Phase D.
+- Deploy (`0061`–`0070` ride the next `npm run deploy:full`) + the imports (user).
+
+Commits: `c30f5159` (feature), lang keys inside `30a09266` (6e's, by agreement).

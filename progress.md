@@ -316,7 +316,7 @@ store really paid the rider; margin = charge − cost and is internal only.*
 
 ### Phase D — Products data model: stock-change ledger, batches, suppliers
 
-- [x] D1b *(Part 389: SHIPPED, needs deploy — the report lives as a folded teal
+- [x] D1b *(Part 390: SHIPPED, needs deploy — the report lives as a folded teal
   SectionCard ("reports" kind) on Contacts → Suppliers, because per-lot costs +
   supplier spend are exactly what the contacts_suppliers gate scopes (R2) — both
   endpoints sit under /suppliers/* so requireSupplierAccess covers them. Migration
