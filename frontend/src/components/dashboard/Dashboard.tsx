@@ -1025,6 +1025,13 @@ export default function Dashboard() {
   const aProfit   = analytics?.totals?.profit_usd || 0
   const aCost     = analytics?.totals?.cost_usd   || 0
   const aAvgOrder = analytics?.totals?.avg_order_usd || 0
+  // "What actually changed hands" = net revenue + tax + customer-paid
+  // delivery (the kernel exposes it; fall back to the sum for an older
+  // payload). Used as the Transactions card's collected-total drill line.
+  const aCollected = analytics?.totals?.collected_total_usd ?? (aRevenue + aTax + aDelivery)
+  const aProductCount = summary?.product_count || 0
+  const aDiscountRate = aGrossSales > 0 ? (aDiscounts / aGrossSales) * 100 : 0
+  const aAvgStockValue = aProductCount > 0 ? aStockValue / aProductCount : 0
   const aReturns   = analytics?.periodReturns?.return_count  || 0
   const aRefundUsd = analytics?.periodReturns?.refund_usd    || 0
   const aItemsRet  = analytics?.periodReturns?.items_returned || 0
@@ -1121,9 +1128,14 @@ export default function Dashboard() {
       value: fmtUSD(aStockValue),
       color: 'text-cyan-600',
       sub: matchStockShortLabel,
+      // Evened out (user, Aug 29): the money on the shelf plus what's behind
+      // it -- average value per product and the risk counts (low/out) -- so
+      // this card carries a real drill instead of two lines.
       details: [
         { label: translateOr('stock_value', 'Stock value'), value: fmtUSD(aStockValue) },
-        { label: translateOr('products_total', 'Products'), value: summary?.product_count || 0 },
+        { label: translateOr('avg_value_per_product', 'Avg value / product'), value: fmtUSD(aAvgStockValue) },
+        { label: translateOr('low_stock', 'Low stock'), value: lowStockCount },
+        { label: translateOr('out_of_stock', 'Out of stock'), value: outOfStockCount },
       ],
     },
     {
@@ -1162,6 +1174,7 @@ ${translateOr('revenue_short', 'Revenue')} ${fmtUSD(aRevenue)} = ${translateOr('
         { label: translateOr('discounts', 'Discounts'), value: fmtUSD(aDiscounts) },
         { label: translateOr('store_discounts', 'Store discounts'), value: fmtUSD(aStoreDiscounts) },
         { label: translateOr('membership_discounts', 'Membership discounts'), value: fmtUSD(aMemberDiscounts) },
+        { label: translateOr('discount_rate', 'Discount rate'), value: `${aDiscountRate.toFixed(1)}%` },
       ],
     },
     // The standalone COGS card is gone (Part 388: it held a single row --
@@ -1177,9 +1190,10 @@ ${translateOr('profit_margin', 'Margin')} = ${translateOr('gross_profit', 'Profi
       value: fmtUSD(aProfit),
       color: aProfit >= 0 ? 'text-blue-600' : 'text-red-600',
       sub: aRevenue > 0 ? `${((aProfit / aRevenue) * 100).toFixed(1)}% ${marginShortLabel}` : '',
+      // Evened out (user, Aug 29): dropped the duplicate "Revenue" line (it
+      // headlines its own card) -- the profit formula's own parts remain.
       details: [
         { label: translateOr('est_profit', 'Est. profit'), value: fmtUSD(aProfit) },
-        { label: translateOr('revenue', 'Revenue'), value: fmtUSD(aRevenue) },
         { label: translateOr('cogs', 'COGS'), value: fmtUSD(aCost) },
         { label: translateOr('store_paid_delivery', 'Store-paid delivery'), value: fmtUSD(aStoreDelivery) },
         { label: translateOr('profit_margin', 'Profit margin'), value: aRevenue > 0 ? `${((aProfit / aRevenue) * 100).toFixed(2)}%` : '0.00%' },
@@ -1192,9 +1206,14 @@ ${translateOr('profit_margin', 'Margin')} = ${translateOr('gross_profit', 'Profi
       value: aTxCount,
       sub: `${translateOr('avg_short', 'Avg')} ${fmtUSD(aAvgOrder)}/${saleShortLabel}`,
       trend: calcTrend(aTxCount, aPrevTxCount),
+      // Evened out (user, Aug 29): the activity card now carries how many of
+      // those sales were deliveries and the collected total (what actually
+      // changed hands = net revenue + tax + delivery), not just count + avg.
       details: [
         { label: translateOr('transactions', 'Transactions'), value: aTxCount },
         { label: translateOr('avg_order_value', 'Avg order'), value: fmtUSD(aAvgOrder) },
+        { label: translateOr('deliveries', 'Deliveries'), value: aDeliverySales },
+        { label: translateOr('collected_total', 'Collected total'), value: fmtUSD(aCollected) },
       ],
     },
     {
@@ -1209,13 +1228,15 @@ ${translateOr('net_revenue_after_refunds', 'Net after refunds')} ${fmtUSD(aReven
       value: aReturns,
       color: aReturns > 0 ? 'text-orange-600' : 'text-gray-500',
       sub: aReturns > 0 ? `${refundShortLabel} ${fmtUSD(aRefundUsd)} | ${aItemsRet} ${itemsShortLabel}` : translateOr('no_returns', 'No returns'),
+      // Evened out (user, Aug 29): customer + supplier returns in one balanced
+      // drill. Supplier count + its money loss fold into one line; the
+      // derivable "net after refunds" (shown in the chart + the info formula)
+      // drops from the drill.
       details: [
-        { label: translateOr('returns_count', 'Returns'), value: aReturns },
-        { label: translateOr('total_refunded', 'Refunded'), value: fmtUSD(aRefundUsd) },
+        { label: translateOr('customer_returns', 'Customer returns'), value: aReturns },
         { label: translateOr('items', 'Items'), value: aItemsRet },
-        { label: `${translateOr('net_revenue_after_refunds', 'Net after refunds')} (= ${translateOr('revenue_short', 'Revenue')} − ${translateOr('total_refunded', 'Refunded')})`, value: fmtUSD(aRevenue - aRefundUsd) },
-        { label: translateOr('supplier_returns', 'Supplier returns'), value: aSupplierReturns },
-        { label: translateOr('business_loss', 'Business loss'), value: fmtUSD(aSupplierLossUsd) },
+        { label: translateOr('total_refunded', 'Refunded'), value: fmtUSD(aRefundUsd) },
+        { label: `${translateOr('supplier_returns', 'Supplier returns')} (${aSupplierReturns})`, value: fmtUSD(aSupplierLossUsd) },
       ],
     },
     // Promoted to its own outer card (user, Aug 29): pulled out of Revenue's
@@ -1249,6 +1270,9 @@ ${translateOr('delivery_margin', 'Delivery margin')} ${fmtUSD(aDeliveryMargin)} 
     aDeliveryActualCount,
     aDeliveryMargin,
     aDeliverySales,
+    aCollected,
+    aDiscountRate,
+    aAvgStockValue,
     aCost,
     aDelivery,
     aDiscounts,

@@ -4415,5 +4415,7 @@
   "delivery": "Delivery",
   "margin_short": "Margin",
   "store_paid_delivery": "Store-paid delivery",
-  "dash_info_delivery": "Delivery in this period: what customers were charged, what the couriers actually cost, and the margin between them."
+  "dash_info_delivery": "Delivery in this period: what customers were charged, what the couriers actually cost, and the margin between them.",
+  "avg_value_per_product": "Avg value / product",
+  "discount_rate": "Discount rate"
 }
