@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react'
+import { createPortal } from 'react-dom'
 import X from 'lucide-react/dist/esm/icons/x.js'
 
 type Translator = (key: string) => string | undefined
@@ -23,7 +24,11 @@ type InventoryStatDetailModalProps = {
 export default function InventoryStatDetailModal({ onClose, statDetail, t }: InventoryStatDetailModalProps) {
   if (!statDetail) return null
 
-  return (
+  // Portaled to document.body (5.3): position:fixed anchors to the nearest
+  // transformed ancestor rather than the viewport, so rendering inline deep
+  // in the Inventory tree risks a partially-covering panel the moment any
+  // wrapper gains a transform. Same rule as shared Modal / InfoHint.
+  return createPortal(
     <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-0 sm:items-center sm:p-4" onClick={onClose}>
       <div className="flex max-h-modal-85 w-full flex-col rounded-t-2xl bg-white shadow-2xl dark:bg-gray-800 sm:max-w-sm sm:rounded-2xl pb-[env(safe-area-inset-bottom)] sm:pb-0" onClick={(event) => event.stopPropagation()}>
         <div className="flex items-center justify-between border-b border-gray-200 p-4 dark:border-gray-700">
@@ -58,6 +63,7 @@ export default function InventoryStatDetailModal({ onClose, statDetail, t }: Inv
           )) : null}
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   )
 }

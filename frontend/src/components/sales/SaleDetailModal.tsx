@@ -1,4 +1,5 @@
 import { useMemo, useState, type MouseEvent } from 'react'
+import { createPortal } from 'react-dom'
 import X from 'lucide-react/dist/esm/icons/x.js'
 import { fmtTime } from '../../utils/formatters.ts'
 import AppSelect from '../shared/AppSelect.tsx'
@@ -176,7 +177,7 @@ export default function SaleDetailModal({
     }
   }
 
-  return (
+  return createPortal(
     <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-0 sm:items-center sm:p-4" onClick={onClose}>
       <div
         className="flex max-h-modal-92 w-full flex-col rounded-t-2xl bg-white shadow-2xl sm:max-w-3xl sm:rounded-2xl dark:bg-gray-800"
@@ -474,6 +475,7 @@ export default function SaleDetailModal({
           ) : null}
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   )
 }

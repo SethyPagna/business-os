@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import X from 'lucide-react/dist/esm/icons/x.js'
 import { useApp as useAppHook } from '../../AppContext.tsx'
 import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.ts'
@@ -643,7 +644,7 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
     }
   }
 
-  return (
+  return createPortal(
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
       <div className="fade-in flex max-h-modal-92 w-full max-w-2xl flex-col rounded-2xl bg-white shadow-2xl dark:bg-gray-800">
         <div className="flex items-center justify-between border-b border-gray-200 p-5 dark:border-gray-700">
@@ -1009,6 +1010,7 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   )
 }

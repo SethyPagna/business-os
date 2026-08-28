@@ -1,4 +1,5 @@
 import type { RenameImpact } from '../../api/renameCascadeTransport.ts'
+import { createPortal } from 'react-dom'
 
 // D6: the before -> after rename dialog. Shows what the rename touches
 // (real counts from /api/products/rename-impact) and asks what happens to
@@ -60,7 +61,7 @@ export default function RenameCascadeModal({
 }) {
   if (!request) return null
   const lines = impactSummary(request.impact, t)
-  return (
+  return createPortal(
     <div className="fixed inset-0 z-[60] bg-black/50 flex items-end sm:items-center justify-center p-0 sm:p-4" onClick={() => !busy && onChoose('cancel')}>
       <div className="bg-white dark:bg-gray-800 rounded-t-2xl sm:rounded-2xl shadow-2xl w-full sm:max-w-md fade-in" onClick={(event) => event.stopPropagation()}>
         <div className="p-4 border-b border-gray-200 dark:border-gray-700">
@@ -102,6 +103,7 @@ export default function RenameCascadeModal({
           </div>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   )
 }

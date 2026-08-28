@@ -1,4 +1,5 @@
 import type { Dispatch, SetStateAction } from 'react'
+import { createPortal } from 'react-dom'
 import X from 'lucide-react/dist/esm/icons/x.js'
 
 type InventoryReasonType = 'adjust' | 'transfer' | 'move' | 'delete'
@@ -49,7 +50,7 @@ export default function InventoryReasonManagerModal({
 
   const close = () => setReasonManager((current) => ({ ...current, open: false }))
 
-  return (
+  return createPortal(
     <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-0 sm:items-center sm:p-4" onClick={close}>
       <div className="flex max-h-modal-88 w-full flex-col rounded-t-2xl bg-white shadow-2xl dark:bg-gray-800 sm:max-w-lg sm:rounded-2xl pb-[env(safe-area-inset-bottom)] sm:pb-0" onClick={(event) => event.stopPropagation()}>
         <div className="flex items-center justify-between border-b border-gray-200 p-4 dark:border-gray-700">
@@ -103,6 +104,7 @@ export default function InventoryReasonManagerModal({
           </div>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   )
 }
