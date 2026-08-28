@@ -87,6 +87,11 @@ const POS_CUSTOMER_CREATE_TIMEOUT_MS = 12000
 const POS_DELIVERY_CREATE_TIMEOUT_MS = 12000
 const POS_CHECKOUT_TIMEOUT_MS = 20000
 import type { ContactOption } from '../contacts/contactOptionUtils'
+// P7-a: quick-add saves through the SAME option serialization the full
+// contact forms use, so a quick-added contact's phone/name/address land as a
+// proper primary option row (editable later in the full form) instead of a
+// bare string in the address column.
+import { createContactOption, serializeContactOptions } from '../contacts/contactOptionUtils'
 
 type ContactOptionUtilsModule = typeof import('../contacts/contactOptionUtils')
 
@@ -475,7 +480,7 @@ async function createPosCustomer(payload: CustomerFormState & { confirmDuplicate
   return createCustomer(payload) as Promise<Partial<CustomerRecord>>
 }
 
-async function createPosDeliveryContact(payload: DeliveryFormState & { confirmDuplicate?: boolean }): Promise<Partial<DeliveryContactRecord>> {
+async function createPosDeliveryContact(payload: DeliveryFormState & { confirmDuplicate?: boolean; address?: string }): Promise<Partial<DeliveryContactRecord>> {
   const { createDeliveryContact } = await getContactWriteTransport()
   return createDeliveryContact(payload) as Promise<Partial<DeliveryContactRecord>>
 }
@@ -1577,8 +1582,20 @@ export default function POS() {
     savingCustomerRef.current = true
     setSavingCustomer(true)
     try {
+      // P7-a: the typed fields become a real primary option row (the shape
+      // the full customer form writes), not a bare address string.
+      const customerPayload = {
+        ...newCustomerForm,
+        address: serializeContactOptions([createContactOption({
+          label: 'Default',
+          name: newCustomerForm.name.trim(),
+          phone: newCustomerForm.phone.trim(),
+          address: newCustomerForm.address.trim(),
+        })]) || '',
+        ...(confirmDuplicate ? { confirmDuplicate: true } : {}),
+      }
       const created = await withLoaderTimeout(
-        () => createPosCustomer(confirmDuplicate ? { ...newCustomerForm, confirmDuplicate: true } : newCustomerForm),
+        () => createPosCustomer(customerPayload),
         'Create POS customer',
         POS_CUSTOMER_CREATE_TIMEOUT_MS,
       )
@@ -1650,9 +1667,18 @@ export default function POS() {
     savingDeliveryRef.current = true
     setSavingDelivery(true)
     try {
+      const resolvedDriverName = newDeliveryForm.name.trim() || `Driver ${newDeliveryForm.phone.trim()}`
       const payload = {
         ...newDeliveryForm,
-        name: newDeliveryForm.name.trim() || `Driver ${newDeliveryForm.phone.trim()}`,
+        name: resolvedDriverName,
+        // P7-a: same primary-option shape the full delivery form writes
+        // (delivery options carry `area` instead of `address`).
+        address: serializeContactOptions([createContactOption({
+          label: 'Default',
+          name: resolvedDriverName,
+          phone: newDeliveryForm.phone.trim(),
+          area: newDeliveryForm.area.trim(),
+        })]) || '',
         ...(confirmDuplicate ? { confirmDuplicate: true } : {}),
       }
       const res = await withLoaderTimeout(

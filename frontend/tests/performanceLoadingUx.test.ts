@@ -3369,7 +3369,10 @@ assert.match(
 )
 assert.match(
   pos,
-  /withLoaderTimeout\(\s*\(\) => createPosCustomer\([^)]*newCustomerForm[^)]*\),\s*'Create POS customer',\s*POS_CUSTOMER_CREATE_TIMEOUT_MS,\s*\)/,
+  // P7-a: the create's argument is customerPayload (newCustomerForm
+  // serialized into a primary contact-option row); the timeout wrapper,
+  // label and constant are what this pin protects.
+  /withLoaderTimeout\(\s*\(\) => createPosCustomer\(customerPayload\),\s*'Create POS customer',\s*POS_CUSTOMER_CREATE_TIMEOUT_MS,\s*\)/,
   'POS quick-add customer writes should timeout slow creates',
 )
 assert.match(

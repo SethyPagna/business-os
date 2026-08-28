@@ -63,7 +63,13 @@ await runTest('POS quick-add customer and delivery writes are bounded', () => {
   assert.match(pos, /const POS_DELIVERY_CREATE_TIMEOUT_MS = 12000/)
   assert.match(pos, /if \(savingCustomerRef\.current\) return/)
   assert.match(pos, /savingCustomerRef\.current = true[\s\S]*setSavingCustomer\(true\)/)
-  assert.match(pos, /withLoaderTimeout\(\s*\(\) => createPosCustomer\([^)]*newCustomerForm[^)]*\)[\s\S]*'Create POS customer',\s*POS_CUSTOMER_CREATE_TIMEOUT_MS,\s*\)/)
+  // P7-a renamed the argument: the quick-add now builds `customerPayload`
+  // (the form fields serialized into a primary contact-option row) from
+  // newCustomerForm before the timeout-wrapped create. The pin's INTENT is
+  // unchanged -- the create goes through withLoaderTimeout with its label
+  // and timeout constant -- plus the payload being derived from the form.
+  assert.match(pos, /const customerPayload = \{\s*\.\.\.newCustomerForm/)
+  assert.match(pos, /withLoaderTimeout\(\s*\(\) => createPosCustomer\(customerPayload\),\s*'Create POS customer',\s*POS_CUSTOMER_CREATE_TIMEOUT_MS,\s*\)/)
   assert.match(pos, /finally \{[\s\S]*savingCustomerRef\.current = false[\s\S]*setSavingCustomer\(false\)/)
   assert.match(pos, /if \(savingDeliveryRef\.current\) return/)
   assert.match(pos, /savingDeliveryRef\.current = true[\s\S]*setSavingDelivery\(true\)/)
