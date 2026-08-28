@@ -52,9 +52,14 @@ export default function SalesHubPage() {
   const visibleTabs = tabs.filter((tab) => tab.allowed)
 
   return (
-    <div className="space-y-3">
+    // The hub root MUST be a height-filling flex column: PageSlot is an
+    // overflow-hidden flex column, and the hosted sections' own `page-scroll`
+    // roots only scroll when they get a bounded height from a flex parent.
+    // A plain block root here left every section clipped and unscrollable
+    // (Phase Y4 regression).
+    <div className="flex min-h-0 flex-1 flex-col space-y-3">
       {visibleTabs.length > 1 ? (
-        <div className="px-4 pt-4">
+        <div className="shrink-0 px-4 pt-4">
           <div className="inline-flex rounded-xl bg-gray-100 dark:bg-gray-800 p-0.5">
             {visibleTabs.map((tab) => {
               const Icon = tab.icon

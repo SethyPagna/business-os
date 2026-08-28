@@ -90,9 +90,14 @@ export default function BranchesHubPage() {
   const active: BranchesHubSection = visibleTabs.some((tab) => tab.id === section) ? section : (visibleTabs[0]?.id || 'branches')
 
   return (
-    <div className="space-y-3">
+    // Height-filling flex column so the hosted sections' `page-scroll`
+    // roots get a bounded height and actually scroll. The old plain block
+    // root clipped everything below the fold -- which is also how the
+    // branch list "disappeared" (Y3): it rendered BELOW Inventory's stats
+    // in an unscrollable page (Y4).
+    <div className="flex min-h-0 flex-1 flex-col space-y-3">
       {visibleTabs.length > 1 ? (
-        <div className="px-4 pt-4">
+        <div className="shrink-0 px-4 pt-4">
           <div className="inline-flex max-w-full overflow-x-auto rounded-xl bg-gray-100 dark:bg-gray-800 p-0.5">
             {visibleTabs.map((tab) => {
               const Icon = tab.icon
@@ -114,13 +119,28 @@ export default function BranchesHubPage() {
         {/* Inventory stays MOUNTED across chip switches (hostSection just
             re-slices it) so filters, selections and loaded data survive
             moving between chips -- the exact state a standalone page kept. */}
+        {/* On the home chip BOTH sections show: Inventory's stats pane keeps
+            its natural height up to 45% of the hub so the branch list below
+            always gets real space (each pane scrolls itself -- the two
+            `page-scroll` roots stay the scroll containers their internal
+            jump/scroll helpers expect). On every other chip Inventory owns
+            the full height. */}
         {canInventory ? (
-          <InventorySection
-            hostSection={active === 'branches' ? 'stats' : active}
-            onHostSectionChange={(next) => setSection(next === 'stats' ? 'branches' : next)}
-          />
+          <div className={active === 'branches' && canBranchList
+            ? 'flex min-h-0 max-h-[45%] flex-none flex-col'
+            : 'flex min-h-0 flex-1 flex-col'}
+          >
+            <InventorySection
+              hostSection={active === 'branches' ? 'stats' : active}
+              onHostSectionChange={(next) => setSection(next === 'stats' ? 'branches' : next)}
+            />
+          </div>
         ) : null}
-        {active === 'branches' && canBranchList ? <BranchesSection /> : null}
+        {active === 'branches' && canBranchList ? (
+          <div className="flex min-h-0 flex-1 flex-col">
+            <BranchesSection />
+          </div>
+        ) : null}
       </Suspense>
     </div>
   )

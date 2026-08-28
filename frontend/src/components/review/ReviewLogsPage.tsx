@@ -37,9 +37,11 @@ export default function ReviewLogsPage() {
   const [section, setSection] = useState<ReviewLogsSection>(() => initialSection(canReview, canAudit))
 
   return (
-    <div className="space-y-3">
+    // Height-filling flex column so the hosted sections' `page-scroll`
+    // roots get a bounded height and actually scroll (Y4 regression).
+    <div className="flex min-h-0 flex-1 flex-col space-y-3">
       {canReview && canAudit ? (
-        <div className="px-4 pt-4">
+        <div className="shrink-0 px-4 pt-4">
           <div className="inline-flex rounded-xl bg-gray-100 dark:bg-gray-800 p-0.5">
             <button
               type="button"

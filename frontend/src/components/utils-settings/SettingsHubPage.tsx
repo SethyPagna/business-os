@@ -55,9 +55,12 @@ export default function SettingsHubPage() {
   const visibleTabs = tabs.filter((tab) => tab.allowed)
 
   return (
-    <div className="space-y-3">
+    // Height-filling flex column so the hosted sections' `page-scroll`
+    // roots get a bounded height and actually scroll (Y4 regression --
+    // a plain block root clipped Settings/Users/Backup at the fold).
+    <div className="flex min-h-0 flex-1 flex-col space-y-3">
       {visibleTabs.length > 1 ? (
-        <div className="px-4 pt-4">
+        <div className="shrink-0 px-4 pt-4">
           <div className="inline-flex rounded-xl bg-gray-100 dark:bg-gray-800 p-0.5">
             {visibleTabs.map((tab) => {
               const Icon = tab.icon
