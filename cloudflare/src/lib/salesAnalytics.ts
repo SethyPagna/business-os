@@ -423,6 +423,47 @@ export async function getDeliveryContactTotals(
     .sort((a, b) => b.deliveries - a.deliveries)
 }
 
+// X4: per-customer purchase totals -- the "same for customer" leg of the
+// per-contact drills (suppliers have D5's purchases; couriers have X3).
+export interface CustomerSalesTotalsRow {
+  tx_count: number
+  collected_usd: number
+  discount_usd: number
+  membership_discount_usd: number
+  points_redeemed: number
+  first_sale_at: string | null
+  last_sale_at: string | null
+}
+
+export async function getCustomerSalesTotals(
+  env: Env,
+  f: SalesFilters & { customerId: number | string },
+): Promise<CustomerSalesTotalsRow> {
+  const db = getDb(env)
+  const { sql: whereSql, params } = whereActiveSales('sales', f)
+  params.customerId = f.customerId
+  const row = await db.prepare(`
+    SELECT COUNT(*) AS tx_count,
+           COALESCE(SUM(total_usd + CASE WHEN COALESCE(delivery_fee_paid_by, 'customer') = 'store' THEN 0 ELSE COALESCE(delivery_fee_usd, 0) END), 0) AS collected_usd,
+           COALESCE(SUM(discount_usd), 0) AS discount_usd,
+           COALESCE(SUM(membership_discount_usd), 0) AS membership_discount_usd,
+           COALESCE(SUM(membership_points_redeemed), 0) AS points_redeemed,
+           MIN(created_at) AS first_sale_at,
+           MAX(created_at) AS last_sale_at
+    FROM sales
+    WHERE ${whereSql} AND sales.customer_id = @customerId
+  `).get<Record<string, unknown>>(params)
+  return {
+    tx_count: num(row?.tx_count),
+    collected_usd: round2(num(row?.collected_usd)),
+    discount_usd: round2(num(row?.discount_usd)),
+    membership_discount_usd: round2(num(row?.membership_discount_usd)),
+    points_redeemed: round2(num(row?.points_redeemed)),
+    first_sale_at: row?.first_sale_at ? String(row.first_sale_at) : null,
+    last_sale_at: row?.last_sale_at ? String(row.last_sale_at) : null,
+  }
+}
+
 export async function getSalesDayReport(
   env: Env,
   day: string,

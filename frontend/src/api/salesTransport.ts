@@ -190,3 +190,12 @@ export function getDeliveryContactReport(params: QueryParams = {}): Promise<unkn
     null,
   )
 }
+
+export function getCustomerSalesReport(params: QueryParams = {}): Promise<unknown> {
+  const query = buildQueryString(params, { skipEmpty: false })
+  return route(
+    `sales:customer-report:${query}`,
+    () => apiFetch('GET', appendQuery('/api/sales/customer-report', query)),
+    null,
+  )
+}

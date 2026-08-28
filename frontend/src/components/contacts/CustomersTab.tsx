@@ -40,7 +40,7 @@ import { generateCustomerMembershipNumber } from './customerMembershipNumber'
 
 type TranslateFn = (key: string) => string | undefined
 type NotifyFn = (message: string, tone?: string) => void
-type ContactModal = 'form' | 'import' | 'detail' | null
+type ContactModal = 'form' | 'import' | 'detail' | 'purchases' | null
 type SortDirection = 'asc' | 'desc'
 type CustomerGroupMode = 'time' | 'alphabet'
 type CustomerPayload = Omit<CustomerRow, 'id' | 'points_balance' | 'points_earned' | 'points_redeemed' | 'points_rewarded' | 'points_deducted' | 'created_at'> & {
@@ -222,6 +222,7 @@ function tr(t: TranslateFn, key: string, fallback: string): string {
 
 const ContactImportModal = lazyRetry(() => import('./ContactImportModal'), 'customers-contact-import')
 const CustomerFormModal = lazyRetry(() => import('./CustomerFormModal'), 'customers-form-modal')
+const CustomerPurchasesReportModal = lazyRetry(() => import('./CustomerPurchasesReportModal'), 'customers-purchases-report')
 const CUSTOMER_MUTATION_TIMEOUT_MS = 12000
 
 function CustomersTab({ t, notify, active = true, initialSearch }: CustomersTabProps) {
@@ -1132,7 +1133,20 @@ function CustomersTab({ t, notify, active = true, initialSearch }: CustomersTabP
           onDelete={canDeleteContact ? () => handleDelete(selected) : undefined}
           onClose={() => { setModal(null); setSelected(null) }}
           t={t}
+          extraButtons={[{ label: tr(t, 'customer_purchases', 'Purchases'), onClick: () => setModal('purchases') }]}
         />
+      ) : null}
+      {/* X4: per-customer purchase totals -- the customer leg of the
+          per-contact drills (suppliers: D5; couriers: X3). */}
+      {modal === 'purchases' && selected ? (
+        <Suspense fallback={null}>
+          <CustomerPurchasesReportModal
+            customerId={selected.id as number}
+            customerName={String(selected.name || '')}
+            t={t}
+            onClose={() => setModal('detail')}
+          />
+        </Suspense>
       ) : null}
     </div>
   )

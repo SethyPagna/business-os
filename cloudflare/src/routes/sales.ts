@@ -6,7 +6,7 @@ import { audit } from '../lib/audit'
 import { hasPermission, hasAnyPermission } from '../lib/permissions'
 import { assertUpdatedAtMatch, getExpectedUpdatedAt, writeConflictResponse, WriteConflictError } from '../lib/conflictControl'
 import { bumpVersion } from '../lib/cache'
-import { getDeliveryContactTotals, getSalesDayReport, getSalesPeriodSeries, getSalesTotals } from '../lib/salesAnalytics'
+import { getCustomerSalesTotals, getDeliveryContactTotals, getSalesDayReport, getSalesPeriodSeries, getSalesTotals } from '../lib/salesAnalytics'
 import { decrementBatchStockStatement, decrementBatchStockStrictStatement } from '../lib/productBatches'
 import { VALID_SALE_STATUSES, STOCK_DEDUCTED_STATUSES } from '../lib/salesStatus'
 import {
@@ -1404,6 +1404,35 @@ app.get('/delivery-contact-report', async (c) => {
     tzOffsetMinutes: Number(query.tzOffsetMinutes) || 0,
   })
   return c.json({ startDate, endDate, contacts })
+})
+
+// GET /api/sales/customer-report?customerId&startDate&endDate -- X4: the
+// customer leg of the per-contact drills. Same sales-OR-contacts gate as
+// the courier report (the Customers tab lives behind 'contacts').
+app.get('/customer-report', async (c) => {
+  if (!hasAnyPermission(c.get('user'), ['sales', 'contacts'])) {
+    return c.json({ error: 'You do not have permission to perform this action' }, 403)
+  }
+  const query = c.req.query()
+  const customerId = Number(query.customerId)
+  if (!Number.isInteger(customerId) || customerId <= 0) {
+    return c.json({ error: 'A valid customerId is required' }, 400)
+  }
+  const startDate = String(query.startDate || '').slice(0, 10)
+  const endDate = String(query.endDate || '').slice(0, 10)
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate) || !/^\d{4}-\d{2}-\d{2}$/.test(endDate)) {
+    return c.json({ error: 'startDate and endDate (YYYY-MM-DD) are required' }, 400)
+  }
+  const totals = await getCustomerSalesTotals(c.env, {
+    startDate,
+    endDate,
+    customerId,
+    branchId: query.branchId || null,
+    startTime: query.startTime || null,
+    endTime: query.endTime || null,
+    tzOffsetMinutes: Number(query.tzOffsetMinutes) || 0,
+  })
+  return c.json({ startDate, endDate, customerId, totals })
 })
 
 // GET /api/sales/export -- accounting summary + detail rows for a date

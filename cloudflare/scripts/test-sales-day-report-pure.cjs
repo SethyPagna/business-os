@@ -165,6 +165,18 @@ const env = { DB: {} }
   ok(dayWithTime.totals.tx_count === 4 && dayWithTime.payment_methods.every((m) => m.payment_method !== 'aba'),
     'the day report threads the time window into every block (the 22:00 aba sale drops out)')
 
+  // ---- X4: per-customer purchase totals -----------------------------------
+  db.exec("UPDATE sales SET customer_id = 5 WHERE receipt_number IN ('R1', 'R2', 'R5', 'R7')")
+  const customerDay = await kernel.getCustomerSalesTotals(env, { startDate: D, endDate: D, customerId: 5 })
+  ok(customerDay.tx_count === 2 && customerDay.collected_usd === 37,
+    'customer totals: cancelled excluded; collected = totals + customer-paid delivery (10 + 25+2)')
+  ok(customerDay.discount_usd === 5 && customerDay.membership_discount_usd === 0,
+    'customer discount split rides along')
+  const customerAll = await kernel.getCustomerSalesTotals(env, { startDate: '2026-08-27', endDate: D, customerId: 5 })
+  ok(customerAll.tx_count === 3 && String(customerAll.first_sale_at).startsWith('2026-08-27')
+    && String(customerAll.last_sale_at).startsWith(D),
+    'range widens to earlier purchases; first/last stamps bracket the range')
+
   console.log(`\nAll ${checks} day-report kernel checks passed.`)
 })().catch((error) => {
   console.error(error)
