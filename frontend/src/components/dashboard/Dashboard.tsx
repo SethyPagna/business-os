@@ -1,4 +1,5 @@
 import { Suspense, useState, useEffect, useCallback } from 'react'
+import { createPortal } from 'react-dom'
 import type { ReactNode } from 'react'
 import { lazyRetry } from '../../utils/lazyImport.ts'
 import { isBrokenLocalizedString as isBrokenLocalizedStringHook, useApp as useAppHook, useSync as useSyncHook } from '../../AppContext.tsx'
@@ -685,7 +686,10 @@ export default function Dashboard() {
       }))
     }
     setProductDetail(null)
-    navigateTo('inventory')
+    // E1: the inventory page id retired into the Branches hub -- the focus
+    // payload written above still targets Inventory (the hub peeks it to
+    // open the Products chip; Inventory consumes it exactly as before).
+    navigateTo('branches')
   }, [navigateTo])
 
   const getCurrentDashboardRange = useCallback(() => {
@@ -2148,8 +2152,13 @@ ${translateOr('net_revenue_after_refunds', 'Net after refunds')} ${fmtUSD(aReven
         </div>
       ) : null}
 
-      {/* Product detail modal */}
-      {productDetail && (
+      {/* Product detail modal. This and the two overlays below render
+          through a portal to document.body (5.3): position:fixed anchors to
+          the nearest transformed/contained ancestor, not the viewport, so an
+          overlay rendered inline deep in the page tree can end up partially
+          covering the screen the moment any wrapper gains a transform. The
+          shared Modal and InfoHint already portal for exactly this reason. */}
+      {productDetail && createPortal(
         <div className="fixed inset-0 bg-black/50 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4" onClick={() => setProductDetail(null)}>
           <div className="bg-white dark:bg-gray-800 rounded-t-2xl sm:rounded-2xl shadow-2xl w-full sm:max-w-sm flex flex-col max-h-modal-85 pb-[env(safe-area-inset-bottom)] sm:pb-0" onClick={e=>e.stopPropagation()}>
             <div className="flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-700">
@@ -2212,11 +2221,12 @@ ${translateOr('net_revenue_after_refunds', 'Net after refunds')} ${fmtUSD(aReven
               )}
             </div>
           </div>
-        </div>
+        </div>,
+        document.body,
       )}
 
-      {/* Customer detail modal */}
-      {customerDetail && (
+      {/* Customer detail modal -- portaled, see the product detail note. */}
+      {customerDetail && createPortal(
         <div className="fixed inset-0 bg-black/50 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4" onClick={() => setCustomerDetail(null)}>
           <div className="bg-white dark:bg-gray-800 rounded-t-2xl sm:rounded-2xl shadow-2xl w-full sm:max-w-sm flex flex-col max-h-modal-85 pb-[env(safe-area-inset-bottom)] sm:pb-0" onClick={e=>e.stopPropagation()}>
             <div className="flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-700">
@@ -2261,9 +2271,11 @@ ${translateOr('net_revenue_after_refunds', 'Net after refunds')} ${fmtUSD(aReven
               </button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body,
       )}
-      {kpiDetail && (
+      {/* KPI drill panel -- portaled, see the product detail note. */}
+      {kpiDetail && createPortal(
         <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-0 sm:items-center sm:p-4" onClick={() => setKpiDetail(null)}>
           <div className="flex max-h-modal-85 w-full flex-col rounded-t-2xl bg-white shadow-2xl dark:bg-gray-800 sm:max-w-sm sm:rounded-2xl pb-[env(safe-area-inset-bottom)] sm:pb-0" onClick={(event) => event.stopPropagation()}>
             <div className="flex items-center justify-between border-b border-gray-200 p-4 dark:border-gray-700">
@@ -2282,7 +2294,8 @@ ${translateOr('net_revenue_after_refunds', 'Net after refunds')} ${fmtUSD(aReven
               )) : null}
             </div>
           </div>
-        </div>
+        </div>,
+        document.body,
       )}
       {importReportJobId && (
         <Suspense fallback={null}>

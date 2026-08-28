@@ -549,7 +549,9 @@ const PAGE_PERMISSIONS: Record<string, string | null> = {
   promotions:       'promotions',
   pos:              'pos',
   products:         'products',
-  inventory:        'inventory',
+  // inventory page row removed (E1): the PAGE id retired into the Branches
+  // hub; the 'inventory' permission key lives on and gates the hub's
+  // stats/products/movements/rfid chips inside BranchesHubPage.
   branches:         'branches',  // Split from 'inventory' -- own key now, see navigationConfig.ts's note
   sales:            'sales',
   contacts:         'contacts',  // Requires explicit contacts permission
@@ -2033,6 +2035,10 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
     // same contract as above -- a returns- or fees-only grant still opens
     // the Sales page, whose sections self-gate on their own keys inside.
     if (pageId === 'sales' && (getPermissionTier('returns') !== 'none' || getPermissionTier('fees') !== 'none')) return true
+    // E1: inventory retired as a standalone page into the Branches hub --
+    // an inventory-only grant still opens the Branches page, whose chips
+    // self-gate ('branches' for the branch list, 'inventory' for the rest).
+    if (pageId === 'branches' && getPermissionTier('inventory') !== 'none') return true
     // 'settings'/'receipt_settings' page (this session, alongside
     // routes/settings.ts's new per-field business_identity/sales_policy
     // gating): a user granted only one of the narrower settings

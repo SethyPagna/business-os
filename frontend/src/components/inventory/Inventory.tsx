@@ -511,7 +511,19 @@ const RFID_SECTION_OPTIONS = [
   { value: 'sessions', labelKey: 'rfid_section_sessions', hintKey: 'rfid_section_sessions_hint', label: 'Sessions', hint: 'Audit RFID scan sessions and manually apply approved results.' },
 ]
 
-export default function Inventory() {
+// E1 (Part 413): Inventory renders as sections of the Branches hub now --
+// BranchesHubPage owns the chip row and passes the slice to show via
+// hostSection; internal section changes (a product's "view history" jump,
+// the Dashboard focus handoff) report back through onHostSectionChange so
+// the hub's chips stay truthful. Standalone rendering (no props) keeps
+// working exactly as before -- the internal SectionSwitcher only hides
+// when a host is driving.
+export type InventoryHostSection = 'stats' | 'products' | 'movements' | 'rfid'
+
+export default function Inventory({ hostSection, onHostSectionChange }: {
+  hostSection?: InventoryHostSection
+  onHostSectionChange?: (section: InventoryHostSection) => void
+} = {}) {
   const { can, t, user, notify, fmtUSD, fmtKHR, usdSymbol } = useApp() as InventoryAppContext
   // Every stock-moving action here mutates live batch/stock state that could
   // go stale between a Review Required user's request and an admin's
@@ -523,7 +535,10 @@ export default function Inventory() {
   const canAdjustStock = can('inventory', 'adjust')
   const canTransferStock = can('inventory', 'transfer')
   const { syncChannel } = useSync() as InventorySyncContext
-  const isActive = useIsPageActive('inventory')
+  // E1: the standalone 'inventory' page id retired -- this component only
+  // renders inside the Branches hub, so activity is "am I on the branches
+  // page" (the same re-key AuditLog/Users/Backup/Returns/Fees got in E3/E4/E2).
+  const isActive = useIsPageActive('branches')
   const isKhmer = /[\u1780-\u17FF]/.test(t('cancel') || '')
   const safeT = useCallback((key: string, fallback: string) => {
     const value = typeof t === 'function' ? t(key) : null
@@ -639,8 +654,17 @@ export default function Inventory() {
   const [inventoryBatch, setInventoryBatch] = useState<InventoryBatch>(null)
   const [batchApplying, setBatchApplying] = useState(false)
   const [rfidStatus, setRfidStatus] = useState<LegacyInventoryRecord | null>(null)
-  const [tab,           setTab]           = useState('products')
-  const [inventorySection, setInventorySection] = useState('products')
+  const [tab,           setTab]           = useState<string>(hostSection && hostSection !== 'stats' ? hostSection : 'products')
+  const [inventorySection, setInventorySection] = useState<string>(hostSection || 'products')
+  // E1: the hub's chip is authoritative -- when it changes, re-slice. Runs
+  // only on hostSection changes, so internal jumps (view-history, focus
+  // handoff) still work between chip clicks; they report back through
+  // onHostSectionChange instead of being overridden here.
+  useEffect(() => {
+    if (!hostSection) return
+    setInventorySection(hostSection)
+    if (hostSection !== 'stats') setTab(hostSection)
+  }, [hostSection])
   const [rfidSection, setRfidSection] = useState('all')
   const [movFilter,     setMovFilter]     = useState('all')
   const [movementUserFilter, setMovementUserFilter] = useState('all')
@@ -1235,7 +1259,10 @@ export default function Inventory() {
     if (!raw) return
     try {
       const nextFocus = JSON.parse(raw)
-      if (nextFocus?.section === 'products') setInventorySection('products')
+      if (nextFocus?.section === 'products') {
+        setInventorySection('products')
+        onHostSectionChange?.('products')
+      }
       if (nextFocus?.tab === 'products') setTab('products')
       if (typeof nextFocus?.stockFilter === 'string' && nextFocus.stockFilter) {
         setStockFilter(nextFocus.stockFilter)
@@ -1695,8 +1722,9 @@ export default function Inventory() {
     setHistoryPreview(null)
     setInventorySection('movements')
     setTab('movements')
+    onHostSectionChange?.('movements')
     if (name) setSearch(name)
-  }, [setSearch])
+  }, [setSearch, onHostSectionChange])
 
   // Scoped preview of a single product's stock movements, opened from the
   // "View stock history" row in ProductDetailModal. Uses the precise
@@ -2851,7 +2879,12 @@ ${inventoryStatLabels.netSold} ${totalQtySold} = ${tr('items_sold', 'Items sold'
       value: (returnStats?.count ?? 0) + (returnStats?.supplier_count ?? 0),
       cls: 'text-orange-600 dark:text-orange-400',
       border: 'border-orange-400',
-        sub: `${returnStats?.count ?? 0} ${customerShortLabel} | ${returnStats?.supplier_count ?? 0} ${supplierShortLabel}`,
+        // 5.4 (one rule, both pages): each derived metric is card-visible
+        // only on its home page -- Gross Profit's home is Dashboard (its
+        // card there stays), Net Sold's home is HERE, so it must be
+        // readable at card level, not only inside the drill. The sub line
+        // is that card-level surface; the drill keeps the full formula.
+        sub: `${inventoryStatLabels.netSold} ${totalQtySold} · ${returnStats?.count ?? 0} ${customerShortLabel} | ${returnStats?.supplier_count ?? 0} ${supplierShortLabel}`,
       detailSections: [
         {
           title: inventoryStatLabels.netSold,
@@ -3405,6 +3438,11 @@ ${inventoryStatLabels.netSold} ${totalQtySold} = ${tr('items_sold', 'Items sold'
 
   return (
     <div className="page-scroll p-3 sm:p-6">
+      {/* E1: when the Branches hub is driving (hostSection set), its chip
+          row replaces this internal picker -- rendering both would be two
+          competing section controls. Standalone use keeps it, including its
+          remembered-section restore. */}
+      {hostSection ? null : (
       <SectionSwitcher
         className="mb-3"
         label=""
@@ -3414,6 +3452,7 @@ ${inventoryStatLabels.netSold} ${totalQtySold} = ${tr('items_sold', 'Items sold'
         storageKey={sectionStorageKey}
         shouldRestoreStoredValue={(storedValue) => storedValue !== 'all'}
       />
+      )}
 
       <LoadingWatchdog
         loading={loading && !isProductsFirstLoad && !isMovementsFirstLoad}
