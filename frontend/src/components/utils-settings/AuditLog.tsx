@@ -1,5 +1,6 @@
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
+import { lazyRetry } from '../../utils/lazyImport.ts'
 import ChevronDown from 'lucide-react/dist/esm/icons/chevron-down.js'
 import ChevronRight from 'lucide-react/dist/esm/icons/chevron-right.js'
 import ClipboardList from 'lucide-react/dist/esm/icons/clipboard-list.js'
@@ -93,7 +94,7 @@ interface DetailRowProps {
 }
 
 type AuditFallback = string | { en?: string; km?: string }
-type CsvUtilsModule = typeof import('../../utils/csv')
+const ExportOptionsDialog = lazyRetry(() => import('../shared/ExportOptionsDialog'), 'audit-export-options')
 
 interface ExportItem {
   label: string
@@ -103,12 +104,6 @@ interface ExportItem {
 
 const useApp = useAppHook as () => AppContextValue
 const isBrokenLocalizedString = isBrokenLocalizedStringHook as (value: unknown) => boolean
-let csvUtilsModulePromise: Promise<CsvUtilsModule> | null = null
-
-function loadCsvUtilsModule(): Promise<CsvUtilsModule> {
-  if (!csvUtilsModulePromise) csvUtilsModulePromise = import('../../utils/csv')
-  return csvUtilsModulePromise
-}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
@@ -735,18 +730,27 @@ export default function AuditLog() {
     return `#${Number(log?.id || 0)}`
   }
 
+  // H1+X5 (Part 401): the export menu opens the shared options dialog
+  // (column chooser + CSV/Excel/PDF) with the rows pre-built to this
+  // page's readable shape.
+  const [exportDialog, setExportDialog] = useState<{ rows: Array<Record<string, unknown>>; baseName: string } | null>(null)
+  const AUDIT_EXPORT_COLUMNS = useMemo(() => (
+    ['entry', 'time', 'entity', 'user', 'action', 'device', 'timezone', 'summary'] as const
+  ).map((key) => ({ key, label: key.charAt(0).toUpperCase() + key.slice(1) })), [])
   const exportRows = useCallback(async (rows: AuditLogRow[], prefix = 'audit-log') => {
-    const { downloadCSV } = await loadCsvUtilsModule()
-    downloadCSV(`${prefix}-${new Date().toISOString().slice(0, 10)}.csv`, rows.map((log) => ({
-      Entry: sessionEntryLabel(log),
-      Time: formatLogTime(log),
-      Entity: formatEntityName(log),
-      User: log.user_name || '',
-      Action: actionLabel(log.action),
-      Device: auditDeviceLabel(log),
-      Timezone: auditTimezoneLabel(log),
-      Summary: readableSummary(log) || '',
-    })))
+    setExportDialog({
+      baseName: prefix,
+      rows: rows.map((log) => ({
+        entry: sessionEntryLabel(log),
+        time: formatLogTime(log),
+        entity: formatEntityName(log),
+        user: log.user_name || '',
+        action: actionLabel(log.action),
+        device: auditDeviceLabel(log),
+        timezone: auditTimezoneLabel(log),
+        summary: readableSummary(log) || '',
+      })),
+    })
   }, [actionLabel])
   const desktopColGroup = (
     <colgroup>
@@ -850,6 +854,19 @@ export default function AuditLog() {
 
   return (
     <div className="page-scroll flex flex-col p-3 sm:p-6">
+      {exportDialog ? (
+        <Suspense fallback={null}>
+          <ExportOptionsDialog
+            title={t('export_options_title') || 'Export options'}
+            fileBaseName={exportDialog.baseName}
+            columns={AUDIT_EXPORT_COLUMNS}
+            rows={exportDialog.rows}
+            rememberKey="audit-log"
+            t={t}
+            onClose={() => setExportDialog(null)}
+          />
+        </Suspense>
+      ) : null}
       <div className="mb-3 min-h-[2.75rem]">
         {loading && !hasLoadedOnce ? (
           <div className="flex h-14 animate-pulse items-center justify-between rounded-xl border border-slate-200 bg-white/80 px-3 py-2 shadow-sm dark:border-slate-700 dark:bg-slate-900/70">

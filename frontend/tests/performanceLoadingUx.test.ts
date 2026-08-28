@@ -696,7 +696,18 @@ for (const [name, source] of [['Customers', customers], ['Suppliers', suppliers]
   assert.match(source, /type CsvUtilsModule = typeof import\('\.\.\/\.\.\/utils\/csv'\) & typeof import\('\.\.\/\.\.\/utils\/xlsxExport'\)[\s\S]*function loadCsvUtilsModule\(\): Promise<CsvUtilsModule>[\s\S]*import\('\.\.\/\.\.\/utils\/csv'\)[\s\S]*import\('\.\.\/\.\.\/utils\/xlsxExport'\)[\s\S]*const \{ downloadXLSX \} = await loadCsvUtilsModule\(\)/, `${name} contacts export should lazy-load CSV and XLSX helpers through a memoized dynamic import`)
 }
 assert.doesNotMatch(sales, /import \{ downloadCSV \} from '\.\.\/\.\.\/utils\/csv'/, 'Sales route should not load CSV export helpers before export intent')
-assert.match(sales, /const handleExportSelected = useCallback\(async[\s\S]*await import\('\.\.\/\.\.\/utils\/xlsxExport\.ts'\)[\s\S]*const exportVisibleSales = useCallback\(async[\s\S]*await import\('\.\.\/\.\.\/utils\/xlsxExport\.ts'\)/, 'Sales export paths should load XLSX helpers only after export intent')
+// H1+X5 (Part 401): Sales no longer downloads directly -- every export scope
+// opens the LAZY ExportOptionsDialog, and csv/xlsx helpers dynamic-import
+// inside the dialog's runExport, i.e. even later than before (format chosen,
+// Export clicked). The pin's intent (no export helpers before intent) holds
+// stricter than ever: Sales.tsx must not import the helpers at all.
+assert.doesNotMatch(sales, /from '\.\.\/\.\.\/utils\/xlsxExport/, 'Sales route should not load XLSX helpers before export intent')
+assert.match(sales, /const ExportOptionsDialog = lazyRetry\(\(\) => import\('\.\.\/shared\/ExportOptionsDialog'\)/, 'Sales export goes through the lazy shared options dialog')
+{
+  const exportDialogSource = fs.readFileSync(new URL('../src/components/shared/ExportOptionsDialog.tsx', import.meta.url), 'utf8')
+  assert.match(exportDialogSource, /await import\('\.\.\/\.\.\/utils\/csv\.ts'\)/, 'dialog loads CSV helpers only on Export click')
+  assert.match(exportDialogSource, /await import\('\.\.\/\.\.\/utils\/xlsxExport\.ts'\)/, 'dialog loads XLSX helpers only on Export click')
+}
 assert.doesNotMatch(returns, /import \{ downloadCSV \} from '\.\.\/\.\.\/utils\/csv'/, 'Returns route should not load CSV export helpers before export intent')
 assert.match(returns, /const exportVisible = useCallback\(async[\s\S]*await import\('\.\.\/\.\.\/utils\/xlsxExport\.ts'\)/, 'Returns export should load XLSX helpers only after export intent')
 assert.match(returns, /import ReturnsListSurface from '\.\/ReturnsListSurface'/, 'Returns list surface should render from the route chunk instead of adding a first-paint subchunk waterfall')
@@ -707,7 +718,10 @@ assert.match(viteConfig, /returns:\s*\[\s*'Returns',\s*'returns-read-api',\s*\]/
 assert.match(viteConfig, /users:\s*\[\s*'Users',\s*'user-admin-api',\s*'user-permission-definitions',\s*\]/, 'Users should have focused route-aware preloads for the route, user API, and permission definitions')
 
 assert.doesNotMatch(auditLog, /import \{ downloadCSV \} from '\.\.\/\.\.\/utils\/csv'/, 'Audit Log route should not load CSV export helpers before export intent')
-assert.match(auditLog, /type CsvUtilsModule = typeof import\('\.\.\/\.\.\/utils\/csv'\)[\s\S]*function loadCsvUtilsModule\(\): Promise<CsvUtilsModule>[\s\S]*import\('\.\.\/\.\.\/utils\/csv'\)[\s\S]*const \{ downloadCSV \} = await loadCsvUtilsModule\(\)/, 'Audit Log export should lazy-load CSV helpers only after export intent')
+// H1+X5 (Part 401): Audit Log routes through the same lazy ExportOptionsDialog
+// as Sales -- helpers dynamic-import inside the dialog on Export click (the
+// dialog-side pins live in the Sales block above).
+assert.match(auditLog, /const ExportOptionsDialog = lazyRetry\(\(\) => import\('\.\.\/shared\/ExportOptionsDialog'\)/, 'Audit Log export goes through the lazy shared options dialog')
 // The manual "Clear 30d" retention action was removed from this route (see
 // the code comment near line 823 of AuditLog.tsx) in favor of the automatic
 // server-side retention sweep (cloudflare/src/lib/audit.ts,

@@ -43,9 +43,11 @@ const CancelSaleModal = lazyRetry(() => import('./CancelSaleModal'), 'sales-canc
 const ExportModal = lazyRetry(() => import('./ExportModal'), 'sales-export-modal')
 const SalesImportModal = lazyRetry(() => import('./SalesImportModal'), 'sales-import')
 const SalesDailyReport = lazyRetry(() => import('./SalesDailyReport'), 'sales-daily-report')
+const ExportOptionsDialog = lazyRetry(() => import('../shared/ExportOptionsDialog'), 'sales-export-options')
 import SalesListSurface from './SalesListSurface'
 import { TOOLBAR_BUTTON_WIDTH, manageToolbarButtonClassName } from '../shared/toolbarButtonStyles'
-import { buildSalesImportRows } from '../../utils/salesImportContract.ts'
+import { buildSalesImportRows, SALES_IMPORT_COLUMNS } from '../../utils/salesImportContract.ts'
+import { exportColumnLabel } from '../../utils/exportOptions.ts'
 
 const SALES_USER_OPTIONS_TIMEOUT_MS = 8000
 const SALES_STATUS_MUTATION_TIMEOUT_MS = 12000
@@ -794,13 +796,23 @@ export default function Sales() {
     [selectedIds],
   )
 
-  const handleExportSelected = useCallback(async () => {
-    if (!selectedSales.length) return
-    const { downloadXLSX } = await import('../../utils/xlsxExport.ts')
-    const rows = buildSaleExportRows(selectedSales)
-    downloadXLSX(`sales-selected-${new Date().toISOString().slice(0, 10)}.xlsx`, rows)
-    notify(`Exported ${selectedSales.length} selected sale${selectedSales.length === 1 ? '' : 's'}.`)
-  }, [notify, selectedSales])
+  // H1+X5 (Part 401): every export scope opens the shared options dialog
+  // (column chooser remembered per page, CSV / Excel / PDF) instead of an
+  // immediate fixed-column download. Rows are built to the sales contract
+  // ONCE when the dialog opens, so the chooser lists exactly the columns
+  // the file will carry (incl. C4's staff-only actual delivery cost).
+  const [exportDialog, setExportDialog] = useState<{ rows: Array<Record<string, unknown>>; baseName: string } | null>(null)
+  const openExportOptions = useCallback((scopeRows: SaleRecord[], baseName: string) => {
+    if (!scopeRows.length) {
+      notify(t('no_data_to_export') || 'No data to export', 'error')
+      return
+    }
+    setExportDialog({ rows: buildSaleExportRows(scopeRows), baseName })
+  }, [notify, t])
+
+  const handleExportSelected = useCallback(() => {
+    openExportOptions(selectedSales, 'sales-selected')
+  }, [openExportOptions, selectedSales])
 
   const applySaleStatusEntries = useCallback(async (entries: SaleStatusEntry[] = [], notes = '', extra: SaleCancelPayload | null = null) => {
     const statusRun = await runConcurrentTasks<SaleStatusEntry, number>(entries, async (entry: SaleStatusEntry) => {
@@ -873,10 +885,8 @@ export default function Sales() {
   }
 
   const exportVisibleSales = useCallback(async (rows: SaleRecord[] = filtered, filePrefix = 'sales-visible') => {
-    const { downloadXLSX } = await import('../../utils/xlsxExport.ts')
-    const exportRows = buildSaleExportRows(rows)
-    downloadXLSX(`${filePrefix}-${new Date().toISOString().slice(0, 10)}.xlsx`, exportRows)
-  }, [filtered])
+    openExportOptions(rows, filePrefix)
+  }, [filtered, openExportOptions])
 
   const salesExportItems = useMemo<Array<PortalMenuItem | null | false>>(() => ([
     { label: translateOr('export_visible_sales', 'Export visible sales', 'នាំចេញការលក់ដែលកំពុងបង្ហាញ'), onClick: () => exportVisibleSales(filtered, 'sales-visible') },
@@ -1180,6 +1190,21 @@ export default function Sales() {
         toggleSelectAll={toggleSelectAll}
         toggleSelectionScope={toggleSelectionScope}
       />
+      ) : null}
+
+      {exportDialog ? (
+        <Suspense fallback={null}>
+          <ExportOptionsDialog
+            title={t('export_options_title') || 'Export options'}
+            fileBaseName={exportDialog.baseName}
+            columns={SALES_IMPORT_COLUMNS.map((key) => ({ key, label: exportColumnLabel(key) }))}
+            rows={exportDialog.rows}
+            rememberKey="sales"
+            t={t}
+            notify={notify}
+            onClose={() => setExportDialog(null)}
+          />
+        </Suspense>
       ) : null}
 
       {detailSale ? (

@@ -118,9 +118,16 @@ await runTest('contact/sales list exports use XLSX (barcode-as-text safe), not p
     assert.doesNotMatch(source, /downloadCSV\(`[^`]+\.csv`/, `${file} should not still call the old downloadCSV export path`)
   }
   const salesSource = fs.readFileSync(new URL('../src/components/sales/Sales.tsx', import.meta.url), 'utf8')
-  const xlsxCalls = salesSource.match(/downloadXLSX\(`[^`]+\.xlsx`/g) || []
-  assert.ok(xlsxCalls.length >= 2, 'Sales.tsx should export both its selected-rows and filtered-list downloads via downloadXLSX')
+  // H1+X5 (Part 401): Sales no longer downloads directly at all -- every
+  // scope opens the shared ExportOptionsDialog. The barcode-safety decision
+  // this test protects lives on in the dialog: its DEFAULT format is xlsx,
+  // and the CSV option exists for re-import/machine use with its hint
+  // carrying an explicit Excel-breaks-barcodes warning.
   assert.doesNotMatch(salesSource, /downloadCSV\(`[^`]+\.csv`/, 'Sales.tsx should not still call the old downloadCSV export path')
+  assert.doesNotMatch(salesSource, /downloadXLSX\(`[^`]+\.xlsx`/, 'Sales.tsx direct downloads are gone -- exports go through the options dialog')
+  assert.match(salesSource, /openExportOptions\(/, 'Sales export scopes open the shared options dialog')
+  const exportDialogSource = fs.readFileSync(new URL('../src/components/shared/ExportOptionsDialog.tsx', import.meta.url), 'utf8')
+  assert.match(exportDialogSource, /useState<ExportFormat>\('xlsx'\)/, 'the export dialog DEFAULTS to xlsx (barcode-as-text safe)')
 })
 
 await runTest('product/inventory/sales import modals accept a dropped file, not just the file-dialog picker', () => {
