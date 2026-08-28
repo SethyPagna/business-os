@@ -6,7 +6,7 @@ import { audit } from '../lib/audit'
 import { hasPermission, hasAnyPermission } from '../lib/permissions'
 import { assertUpdatedAtMatch, getExpectedUpdatedAt, writeConflictResponse, WriteConflictError } from '../lib/conflictControl'
 import { bumpVersion } from '../lib/cache'
-import { getSalesTotals } from '../lib/salesAnalytics'
+import { getDeliveryContactTotals, getSalesDayReport, getSalesPeriodSeries, getSalesTotals } from '../lib/salesAnalytics'
 import { decrementBatchStockStatement, decrementBatchStockStrictStatement } from '../lib/productBatches'
 import { VALID_SALE_STATUSES, STOCK_DEDUCTED_STATUSES } from '../lib/salesStatus'
 import {
@@ -1329,6 +1329,70 @@ app.get('/stats', async (c) => {
     // would have been cut off, so the UI can show "N+ more not shown" etc.
     truncated_in_list: rows.length > listLimit,
   })
+})
+
+// ---- Phase X (Part 395): the daily report ---------------------------------
+// GET /api/sales/daily-report?startDate&endDate&branchId -- one row per day
+// in the range (the report section's list), straight from the shared
+// salesAnalytics kernel so every figure agrees with the Dashboard and /stats.
+app.get('/daily-report', async (c) => {
+  if (!hasPermission(c.get('user'), 'sales')) {
+    return c.json({ error: 'You do not have permission to perform this action' }, 403)
+  }
+  const query = c.req.query()
+  const startDate = String(query.startDate || '').slice(0, 10)
+  const endDate = String(query.endDate || '').slice(0, 10)
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate) || !/^\d{4}-\d{2}-\d{2}$/.test(endDate)) {
+    return c.json({ error: 'startDate and endDate (YYYY-MM-DD) are required' }, 400)
+  }
+  const days = await getSalesPeriodSeries(c.env, {
+    startDate,
+    endDate,
+    branchId: query.branchId || null,
+  }, 'day')
+  return c.json({ startDate, endDate, days })
+})
+
+// GET /api/sales/day-report?date&branchId -- the click-a-day drill: the
+// day's full totals plus the payment-method, delivery (incl. per-courier)
+// and discount breakdowns. Actual delivery cost is a staff figure; this
+// whole route sits behind the sales permission, and the portal/receipt
+// surfaces never call it (C2's redaction scope).
+app.get('/day-report', async (c) => {
+  if (!hasPermission(c.get('user'), 'sales')) {
+    return c.json({ error: 'You do not have permission to perform this action' }, 403)
+  }
+  const query = c.req.query()
+  const date = String(query.date || '').slice(0, 10)
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+    return c.json({ error: 'date (YYYY-MM-DD) is required' }, 400)
+  }
+  const report = await getSalesDayReport(c.env, date, query.branchId || null)
+  return c.json(report)
+})
+
+// GET /api/sales/delivery-contact-report?startDate&endDate&branchId&contactId
+// X3: per-courier delivery totals over a range -- "check expenses of
+// delivery by contact". Gated on sales OR contacts: the DeliveryTab drill
+// belongs to contacts-granted staff, and the figures are the same ones the
+// sales surfaces already show them per sale.
+app.get('/delivery-contact-report', async (c) => {
+  if (!hasAnyPermission(c.get('user'), ['sales', 'contacts'])) {
+    return c.json({ error: 'You do not have permission to perform this action' }, 403)
+  }
+  const query = c.req.query()
+  const startDate = String(query.startDate || '').slice(0, 10)
+  const endDate = String(query.endDate || '').slice(0, 10)
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate) || !/^\d{4}-\d{2}-\d{2}$/.test(endDate)) {
+    return c.json({ error: 'startDate and endDate (YYYY-MM-DD) are required' }, 400)
+  }
+  const contacts = await getDeliveryContactTotals(c.env, {
+    startDate,
+    endDate,
+    branchId: query.branchId || null,
+    contactId: query.contactId || null,
+  })
+  return c.json({ startDate, endDate, contacts })
 })
 
 // GET /api/sales/export -- accounting summary + detail rows for a date

@@ -252,6 +252,181 @@ export async function getSalesPeriodSeries(env: Env, f: SalesFilters, granularit
   return rows.sort((a, b) => (a.period < b.period ? -1 : a.period > b.period ? 1 : 0))
 }
 
+// ---- Phase X (Part 395): daily report + per-contact delivery totals -------
+// Same single-source rule as everything above: these are KERNEL functions so
+// the Sales daily report, the delivery-contact drill and any export all
+// agree. USD-centric like the rest of the file (KHR derives at display).
+
+export interface PaymentMethodBreakdownRow {
+  payment_method: string
+  tx_count: number
+  // What actually changed hands for these sales: total_usd plus the
+  // customer-PAID delivery fee (a store-absorbed fee was never collected).
+  collected_usd: number
+  total_usd: number
+}
+
+export interface DeliveryContactTotalsRow {
+  delivery_contact_id: number | null
+  delivery_contact_name: string
+  deliveries: number
+  charged_fee_usd: number
+  absorbed_fee_usd: number
+  // NULL actual costs don't count (same honesty rule as SalesTotals):
+  // actual_cost_count says how many deliveries carried a recorded cost.
+  actual_cost_usd: number
+  actual_cost_count: number
+  margin_usd: number
+  last_delivery_at: string | null
+}
+
+export interface SalesDayReport {
+  date: string
+  totals: SalesTotals
+  payment_methods: PaymentMethodBreakdownRow[]
+  delivery_contacts: DeliveryContactTotalsRow[]
+  discounts: {
+    store_usd: number
+    membership_usd: number
+    store_tx_count: number
+    membership_tx_count: number
+  }
+}
+
+export async function getPaymentMethodBreakdown(env: Env, f: SalesFilters): Promise<PaymentMethodBreakdownRow[]> {
+  const db = getDb(env)
+  const { sql: whereSql, params } = whereActiveSales('sales', f)
+  const rows = await db.prepare(`
+    SELECT COALESCE(NULLIF(TRIM(payment_method), ''), 'Unknown') AS payment_method,
+           COUNT(*) AS tx_count,
+           COALESCE(SUM(total_usd), 0) AS total_usd,
+           COALESCE(SUM(total_usd + CASE WHEN COALESCE(delivery_fee_paid_by, 'customer') = 'store' THEN 0 ELSE COALESCE(delivery_fee_usd, 0) END), 0) AS collected_usd
+    FROM sales
+    WHERE ${whereSql}
+    GROUP BY COALESCE(NULLIF(TRIM(payment_method), ''), 'Unknown')
+    ORDER BY collected_usd DESC
+  `).all<Record<string, unknown>>(params)
+  return (rows || []).map((r) => ({
+    payment_method: String(r.payment_method || 'Unknown'),
+    tx_count: num(r.tx_count),
+    collected_usd: round2(num(r.collected_usd)),
+    total_usd: round2(num(r.total_usd)),
+  }))
+}
+
+// Per-courier totals over a range -- X3's "check expenses of delivery by
+// contact". Grouped by the LINK (delivery_contact_id) with the name snapshot
+// merged per id in JS, so a renamed contact still shows as one line under
+// its latest name; unlinked deliveries group by their name snapshot alone
+// (imported history links by id where the contact exists -- T3).
+export async function getDeliveryContactTotals(
+  env: Env,
+  f: SalesFilters & { contactId?: number | string | null },
+): Promise<DeliveryContactTotalsRow[]> {
+  const db = getDb(env)
+  const { sql: whereSql, params } = whereActiveSales('sales', f)
+  const clauses = [whereSql, 'COALESCE(sales.is_delivery, 0) = 1']
+  if (f.contactId != null && f.contactId !== '') {
+    clauses.push('sales.delivery_contact_id = @contactId')
+    params.contactId = f.contactId
+  }
+  const rows = await db.prepare(`
+    SELECT delivery_contact_id,
+           COALESCE(NULLIF(TRIM(delivery_contact_name), ''), '') AS delivery_contact_name,
+           COUNT(*) AS deliveries,
+           COALESCE(SUM(CASE WHEN COALESCE(delivery_fee_paid_by, 'customer') = 'store' THEN 0 ELSE COALESCE(delivery_fee_usd, 0) END), 0) AS charged_fee_usd,
+           COALESCE(SUM(CASE WHEN delivery_fee_paid_by = 'store' THEN COALESCE(delivery_fee_usd, 0) ELSE 0 END), 0) AS absorbed_fee_usd,
+           COALESCE(SUM(delivery_actual_cost_usd), 0) AS actual_cost_usd,
+           COALESCE(SUM(CASE WHEN delivery_actual_cost_usd IS NOT NULL THEN 1 ELSE 0 END), 0) AS actual_cost_count,
+           MAX(created_at) AS last_delivery_at
+    FROM sales
+    WHERE ${clauses.join(' AND ')}
+    GROUP BY delivery_contact_id, LOWER(TRIM(COALESCE(delivery_contact_name, '')))
+  `).all<Record<string, unknown>>(params)
+
+  // Merge rows that share a real contact id (name-snapshot renames), keep
+  // NULL-id rows separate per name.
+  const merged = new Map<string, DeliveryContactTotalsRow & { _lastAt: string }>()
+  for (const r of rows || []) {
+    const id = r.delivery_contact_id == null ? null : Number(r.delivery_contact_id)
+    const name = String(r.delivery_contact_name || '')
+    const key = id != null ? `id:${id}` : `name:${name.toLowerCase()}`
+    const lastAt = String(r.last_delivery_at || '')
+    const existing = merged.get(key)
+    const add = {
+      deliveries: num(r.deliveries),
+      charged: num(r.charged_fee_usd),
+      absorbed: num(r.absorbed_fee_usd),
+      actual: num(r.actual_cost_usd),
+      actualCount: num(r.actual_cost_count),
+    }
+    if (!existing) {
+      merged.set(key, {
+        delivery_contact_id: id,
+        delivery_contact_name: name,
+        deliveries: add.deliveries,
+        charged_fee_usd: add.charged,
+        absorbed_fee_usd: add.absorbed,
+        actual_cost_usd: add.actual,
+        actual_cost_count: add.actualCount,
+        margin_usd: 0,
+        last_delivery_at: lastAt || null,
+        _lastAt: lastAt,
+      })
+      continue
+    }
+    existing.deliveries += add.deliveries
+    existing.charged_fee_usd += add.charged
+    existing.absorbed_fee_usd += add.absorbed
+    existing.actual_cost_usd += add.actual
+    existing.actual_cost_count += add.actualCount
+    if (lastAt > existing._lastAt) {
+      existing._lastAt = lastAt
+      existing.last_delivery_at = lastAt
+      // Latest snapshot wins the display name for a renamed contact.
+      if (name) existing.delivery_contact_name = name
+    }
+  }
+  return [...merged.values()]
+    .map(({ _lastAt, ...row }) => ({
+      ...row,
+      charged_fee_usd: round2(row.charged_fee_usd),
+      absorbed_fee_usd: round2(row.absorbed_fee_usd),
+      actual_cost_usd: round2(row.actual_cost_usd),
+      margin_usd: round2(row.charged_fee_usd - row.actual_cost_usd),
+    }))
+    .sort((a, b) => b.deliveries - a.deliveries)
+}
+
+export async function getSalesDayReport(env: Env, day: string, branchId?: string | number | null): Promise<SalesDayReport> {
+  const f: SalesFilters = { startDate: day, endDate: day, branchId: branchId ?? null }
+  const db = getDb(env)
+  const { sql: whereSql, params } = whereActiveSales('sales', f)
+  const [totals, paymentMethods, deliveryContacts, discountCounts] = await Promise.all([
+    getSalesTotals(env, f),
+    getPaymentMethodBreakdown(env, f),
+    getDeliveryContactTotals(env, f),
+    db.prepare(`
+      SELECT COALESCE(SUM(CASE WHEN COALESCE(discount_usd, 0) > 0 THEN 1 ELSE 0 END), 0) AS store_tx_count,
+             COALESCE(SUM(CASE WHEN COALESCE(membership_discount_usd, 0) > 0 THEN 1 ELSE 0 END), 0) AS membership_tx_count
+      FROM sales
+      WHERE ${whereSql}
+    `).get<Record<string, number>>(params),
+  ])
+  return {
+    date: day,
+    totals,
+    payment_methods: paymentMethods,
+    delivery_contacts: deliveryContacts,
+    discounts: {
+      store_usd: totals.store_discount_usd,
+      membership_usd: totals.membership_discount_usd,
+      store_tx_count: num(discountCounts?.store_tx_count),
+      membership_tx_count: num(discountCounts?.membership_tx_count),
+    },
+  }
+}
+
 // Shifts [startDate, endDate] back by its own length, for a same-length
 // "previous period" comparison (used for the Dashboard's trend arrows).
 export function previousPeriodFilters(f: SalesFilters): SalesFilters {
