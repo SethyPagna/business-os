@@ -1,4 +1,5 @@
 import X from 'lucide-react/dist/esm/icons/x.js'
+import { createPortal } from 'react-dom'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useApp as useAppFromContext } from '../../AppContext.tsx'
 import {
@@ -183,8 +184,13 @@ export default function OtpModal({ mode, userId, onClose, onDone, t }: OtpModalP
     onClose()
   }, [onClose])
 
-  return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60] p-4">
+  // Z6: portal to document.body and sit ABOVE the profile Modal (z-[1050]).
+  // Rendered inline, the OTP dialog was a DOM child of UserProfileModal's
+  // tree -- trapped inside its stacking context (painted UNDER the profile)
+  // and unmounted the moment the profile closed. Portaling + z-[1060] fixes
+  // both: it paints on top of everything and its lifecycle is its own.
+  return createPortal((
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[1060] p-4">
       <div className="flex max-h-modal-90 w-full max-w-md flex-col rounded-2xl bg-white shadow-2xl dark:bg-gray-800 fade-in">
       <div className="overflow-auto p-6">
         <div className="flex items-center justify-between mb-4">
@@ -294,5 +300,5 @@ export default function OtpModal({ mode, userId, onClose, onDone, t }: OtpModalP
       </div>
       </div>
     </div>
-  )
+  ), document.body)
 }

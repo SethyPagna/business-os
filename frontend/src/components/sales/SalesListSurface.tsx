@@ -135,7 +135,7 @@ export default function SalesListSurface({
                 <th className="hidden px-4 py-3 text-left font-semibold text-gray-600 dark:text-gray-400 md:table-cell">{t('branch')}</th>
                 <th className="px-4 py-3 text-right font-semibold text-gray-600 dark:text-gray-400">{t('total')}</th>
                 <th className="hidden px-4 py-3 text-center font-semibold text-gray-600 dark:text-gray-400 md:table-cell">{t('items')}</th>
-                <th className="px-4 py-3 text-center font-semibold text-gray-600 dark:text-gray-400">{t('actions')}</th>
+                <th className="px-4 py-3 text-center font-semibold text-gray-600 dark:text-gray-400">{t('print')}</th>
               </tr>
             </thead>
             <tbody>
