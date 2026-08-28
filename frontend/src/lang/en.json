@@ -4410,5 +4410,6 @@
   "no_matching_customers": "No matching customers",
   "payment_amount_required": "Enter the amount received.",
   "payment_method_required": "Enter the payment method.",
-  "record_payment": "Record payment"
+  "record_payment": "Record payment",
+  "import_warning_kind_unreadable_batch_date": "Batch date unreadable (received as today)"
 }

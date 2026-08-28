@@ -27,6 +27,7 @@ const useApp = useAppHook as () => AppContextValue
 // uses -- kept local rather than shared since this is the only consumer.
 const IMPORT_WARNING_KIND_KEYS: Record<string, string> = {
   negative_stock: 'import_warning_kind_negative_stock',
+  unreadable_batch_date: 'import_warning_kind_unreadable_batch_date',
   barcode_collision: 'import_warning_kind_barcode_collision',
   sku_collision: 'import_warning_kind_sku_collision',
   name_match: 'import_warning_kind_name_match',
@@ -122,7 +123,7 @@ function formatRowNumbers(rows: number[]): string {
 // import with e.g. a membership-number mismatch showed it under the calmer
 // "Other warnings" section instead of "Needs attention" even though the
 // backend already correctly classified it as serious.
-const SERIOUS_KINDS = new Set(['negative_stock', 'barcode_collision', 'sku_collision', 'name_match', 'membership_mismatch', 'membership_phone_conflict', 'duplicate_row_match', 'stock_action_conflict'])
+const SERIOUS_KINDS = new Set(['negative_stock', 'unreadable_batch_date', 'barcode_collision', 'sku_collision', 'name_match', 'membership_mismatch', 'membership_phone_conflict', 'duplicate_row_match', 'stock_action_conflict'])
 
 export default function ImportReportModal({ jobId, onClose, title }: ImportReportModalProps) {
   const { t } = useApp()
