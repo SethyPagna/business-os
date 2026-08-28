@@ -683,7 +683,12 @@ assert.match(products, /function loadBranchModule\(\): Promise<BranchModule>[\s\
 assert.doesNotMatch(products, /function loadInventoryModule\(\): Promise<InventoryModule>[\s\S]*inventoryTransport\.ts/, 'Products stock writes should not load the read-heavy inventory transport')
 assert.doesNotMatch(products, /import \{ downloadCSV \} from '\.\.\/\.\.\/utils\/csv'/, 'Products route should not load CSV export helpers before export intent')
 assert.doesNotMatch(products, /buildProductExportRows[\s\S]*from '\.\/helpers\/productFilterHelpers\.ts'/, 'Products route should not import export row builders through the live filter helper')
-assert.match(products, /const exportProductsCsv = useCallback\(async[\s\S]*Promise\.all\(\[[\s\S]*import\('\.\.\/\.\.\/utils\/xlsxExport\.ts'\)[\s\S]*import\('\.\/helpers\/productExport\.ts'\)/, 'Products export should load XLSX helpers and export row builders only after the export action')
+// Part 405 made the two intent-time imports sequential (row builder
+// first, format helper at the branch that needs it) -- the pin follows
+// the INTENT: both stay dynamic imports INSIDE the export callback, never
+// top-level, whatever their composition.
+assert.match(products, /const exportProductsCsv = useCallback\(async[\s\S]*?await import\('\.\/helpers\/productExport\.ts'\)[\s\S]*?await import\('\.\.\/\.\.\/utils\/xlsxExport\.ts'\)/, 'Products export should load XLSX helpers and export row builders only after the export action')
+assert.doesNotMatch(products, /^import[^\n]*utils\/xlsxExport/m, 'the XLSX helper must never be a top-level import on the Products route')
 assert.match(productExport, /export function buildProductExportRows/, 'Products export chunk should own CSV row formatting')
 assert.match(productExport, /formatPriceNumber/, 'Products export chunk should own export-only price formatting')
 assert.doesNotMatch(productFilterHelpers, /buildProductExportRows|formatPriceNumber/, 'Products live filtering helper should not carry export row or price formatting code')

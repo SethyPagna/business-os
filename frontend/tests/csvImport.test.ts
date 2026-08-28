@@ -114,7 +114,12 @@ await runTest('contact/sales list exports use XLSX (barcode-as-text safe), not p
   ]
   for (const file of files) {
     const source = fs.readFileSync(new URL(file, import.meta.url), 'utf8')
-    assert.match(source, /downloadXLSX\(`[^`]+\.xlsx`/, `${file} should export via downloadXLSX with an .xlsx filename`)
+    // Part 405: the tabs no longer download directly -- every export opens
+    // the shared ExportOptionsDialog, whose DEFAULT format is xlsx (the
+    // barcode-safety decision this test protects) with CSV behind an
+    // explicit Excel-breaks-barcodes warning. The pin follows the intent:
+    // the dialog is the only export path, the old direct CSV call is gone.
+    assert.match(source, /ExportOptionsDialog/, `${file} should export through the shared ExportOptionsDialog`)
     assert.doesNotMatch(source, /downloadCSV\(`[^`]+\.csv`/, `${file} should not still call the old downloadCSV export path`)
   }
   const salesSource = fs.readFileSync(new URL('../src/components/sales/Sales.tsx', import.meta.url), 'utf8')

@@ -160,6 +160,26 @@ export default function PermissionEditor({ permissions, onChange, t }: Permissio
     section.permissions.length > 1 || section.permissions.some((permission) => permission.tier)
   )
 
+  // 7.2: the at-a-glance read. One state per section -- what an admin
+  // scanning the list needs before opening anything -- computed from the
+  // SAME per-key data the controls edit, purely presentational.
+  const sectionGlance = (section: PermissionSection): { label: string; tone: 'full' | 'none' | 'partial' } => {
+    const keys = section.permissions
+    const granted = keys.filter((permission) => tierOf(perms[permission.key]) !== 'none').length
+    const reviewCount = keys.filter((permission) => tierOf(perms[permission.key]) === 'review').length
+    if (granted === 0) return { label: translate('none', 'None'), tone: 'none' }
+    if (granted === keys.length && reviewCount === 0) return { label: translate('label_full_access', 'Full Access'), tone: 'full' }
+    if (reviewCount > 0) return { label: translate('review_required', 'Partial Access'), tone: 'partial' }
+    return { label: `${granted}/${keys.length}`, tone: 'partial' }
+  }
+  const glanceChipClass = (tone: 'full' | 'none' | 'partial'): string => (
+    tone === 'full'
+      ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300'
+      : tone === 'partial'
+        ? 'bg-amber-100 text-amber-700 dark:bg-amber-950/40 dark:text-amber-200'
+        : 'bg-gray-100 text-gray-500 dark:bg-zinc-800 dark:text-gray-400'
+  )
+
   const setSectionMode = (section: PermissionSection, mode: 'none' | 'full') => {
     const next: PermissionState = { ...perms }
     delete next.all
@@ -279,6 +299,20 @@ export default function PermissionEditor({ permissions, onChange, t }: Permissio
         </div>
       </div>
 
+      {/* 7.2: the whole role in one line before any scrolling. */}
+      {(() => {
+        const scanned = PERMISSION_SECTIONS.filter((section) => section.key !== 'full_access')
+        const counts = { full: 0, none: 0, partial: 0 }
+        for (const section of scanned) counts[sectionGlance(section).tone] += 1
+        return (
+          <div className="mb-2 flex flex-wrap items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
+            <span className="font-semibold">{translate('perm_role_summary', 'This role at a glance:')}</span>
+            <span className={`rounded-full px-2 py-0.5 font-semibold ${glanceChipClass('full')}`}>{counts.full} {translate('label_full_access', 'Full Access')}</span>
+            <span className={`rounded-full px-2 py-0.5 font-semibold ${glanceChipClass('partial')}`}>{counts.partial} {translate('permission_custom', 'Custom')}</span>
+            <span className={`rounded-full px-2 py-0.5 font-semibold ${glanceChipClass('none')}`}>{counts.none} {translate('none', 'None')}</span>
+          </div>
+        )
+      })()}
       <div className="space-y-3">
         {PERMISSION_SECTIONS.map((section) => {
           // The master "Full Administrator Access" section keeps its
@@ -292,14 +326,28 @@ export default function PermissionEditor({ permissions, onChange, t }: Permissio
           const showBreakdown = isMasterSection || !customizable || effectiveMode === 'custom'
           return (
           <section key={section.key} className="rounded-2xl border border-gray-200 bg-gray-50/70 p-3 dark:border-zinc-700 dark:bg-zinc-800/60">
-            <div className="mb-2 flex flex-wrap items-start justify-between gap-2">
-              <div>
-                <div className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+            {/* 7.2: header on ONE row -- the description lives in the
+                info hint instead of an always-on paragraph under every
+                title, and a live state chip makes the whole role readable
+                top-to-bottom without opening a single section. */}
+            <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+              <div className="flex min-w-0 items-center gap-1.5">
+                <InfoHint
+                  className="flex-shrink-0"
+                  label={translate(section.tKey, section.label)}
+                  text={translate(`${section.tKey}_desc`, section.description)}
+                />
+                <span className="truncate text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
                   {translate(section.tKey, section.label)}
-                </div>
-                <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
-                  {translate(`${section.tKey}_desc`, section.description)}
-                </p>
+                </span>
+                {!isMasterSection ? (() => {
+                  const glance = sectionGlance(section)
+                  return (
+                    <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${glanceChipClass(glance.tone)}`}>
+                      {glance.label}
+                    </span>
+                  )
+                })() : null}
               </div>
               {customizable ? (
                 <div className="flex overflow-hidden rounded-lg border border-gray-200 dark:border-zinc-700" role="group" aria-label={`${translate(section.tKey, section.label)} access mode`}>
