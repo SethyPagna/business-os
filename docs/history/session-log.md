@@ -8904,3 +8904,49 @@ customer totals. Both tsc clean; test:utils chain exit 0 twice; vite build
 owner). Visual click-through of the new picker/report/drills (B1's sweep; the
 new surfaces are code-verified only). P7-a is now unblocked (POS released) but
 not started this part.
+
+## Part 397 (chat, Aug 28 2026) — G1b: more deal shapes, cheapest-of-group, wording styles, filter reorg
+
+**Asked.** A refinement round on G1: (a) "relevance still wins but if
+relevance also have discounts, discounts top"; (b) more rule shapes —
+spend-threshold saves, buy-X-get-%-off, and buy-N-get-your-next-item-off,
+"but remember only lowest of the two for these get the discount"; (c)
+label wording styles ("save to get, can change free or something…same
+meaning just different wording styles"); (d) "since it seems to grow,
+reorganize the filters, make it smart and excellent easy to use"; (e)
+"make sure for example public portal doesn't show supplier etc… smart."
+
+**Shipped (37ccd919 backend · 642188a4 surfaces).** Migration 0073
+(min_spend_usd/khr, label_style). Kernel: `spend_save`,
+`quantity_percent`, `next_item`. The cheapest-of-group rule is resolved
+literally and merchant-safely by a new cart-level pass —
+`evaluateCartPromotionAdjustments` pools units across every line a rule
+reaches, earns `floor(units / (N+1))` hits, and lands them on the
+CHEAPEST units; the dearest items never take the cut, and a line reverts
+to full price the moment its pairing partner leaves the cart. Each line
+still keeps one best benefit, never stacked. `promotionAutoLabel` renders
+Save/Get/Free wording (a typed Title always overrides; "Free" only when
+the math is genuinely 100%), previewed live in the editor and reused as
+the rules-list summary so there is exactly one wording source. Badges and
+hints now cover every threshold type, so a spend or buy-N deal advertises
+before it is earned. Ordering flipped: promoted matches top the result
+set, relevance orders within each block (relevance still decides what
+matches at all) — Products and portal search alike. Filter menu
+reorganized: everyday facets first (Availability, Category, Brand,
+Promotions), Created/Issues/Search-mode last. Portal privacy audited and
+PINNED by test: no supplier/cost/tag_label columns or facets ever reach
+the storefront, which gains exactly one public promo pill
+("Promotions only") wired to the server `promo=` param.
+
+**Verification.** Backend sweep 93/93 (the pure test grew to 8 groups,
+incl. cross-line pairing math and the portal-privacy pin); frontend chain
+exit 0 (18 promo checks); both tsc; vite build; wrangler dry-run.
+
+**Concurrency.** Footprint re-claimed on the board before writing code
+(628e759c); a7 confirmed POS/Products/promotions cold and took Part 396
+(Phase X), 35 took B5 as Part 398. Migration slots: 0071 + 0073 mine,
+0072 a7's; next free is 0074.
+
+**Not done.** Deploy (0071/0072/0073 ride `npm run deploy:full`). G2/G3/G4
+still open. The next_item cheapest-of-group reading is recorded on the
+board as a stated interpretation, not a silent guess.

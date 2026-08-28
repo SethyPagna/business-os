@@ -320,7 +320,7 @@ autocorrect — templates, imports, exports and generated files alike.*
   untouched, USD 129,696.60/KHR 82,419,900 preserved, idempotent; the manifest's
   live check stays valid.)* "Delivery was made into the category column — separate
   it."
-- [ ] B5. Receipt print: when 80x50 is enabled, clicking Print offers BOTH sizes and the
+- [~] B5 *(IN PROGRESS — claimed by session business-os-v1-35, Aug 28, Part 398 — do not pick up in parallel)*. Receipt print: when 80x50 is enabled, clicking Print offers BOTH sizes and the
   preview shows BOTH (today only one previews). Verify printing end-to-end while there.
 - [x] B6 *(Part 389: shipped on all five pages, needs deploy. Inventory: toolbar
   select-all control removed, bulk toolbar exists only while selected, header checkbox
@@ -494,7 +494,7 @@ deep-linkable tabs.*
 
 ### Phase G — Promotions + public portal
 
-- [~] G1b *(IN PROGRESS — claimed by session 6e, Part 397, migration 0073.
+- [x] G1b *(Part 397, session 6e — SHIPPED, needs deploy (0073). Migration 0073.
   User refinement round, Aug 28: (a) search ordering — within matching
   results, discounted/promoted items top; relevance orders inside each
   block ("relevance still wins but if relevance also have discounts,
@@ -508,7 +508,18 @@ deep-linkable tabs.*
   admin-internal facet must never reach the portal. Footprint: both
   kernels + promotionRulesSql, routes/promotions|products|portal,
   PromotionsPage, posCore/POS/ProductDetailSheet, Products + filter
-  helpers, portal display/section/page, lang packs additive, promo tests.)*
+  helpers, portal display/section/page, lang packs additive, promo tests.
+  Delivered: three new rule types (spend_save, quantity_percent, next_item);
+  next_item pairs units ACROSS cart lines and the CHEAPEST unit of each
+  earned group takes the cut, reverting when its partner leaves; auto-label
+  wording styles Save/Get/Free with a live preview (typed Title overrides);
+  ordering flipped so promoted matches top the result set with relevance
+  ordering inside each block; filter menu reorganized (everyday facets first,
+  Created/Issues/Search-mode last); portal gains ONE 'Promotions only' pill
+  and a test pins that portal payloads/facets never carry supplier, cost or
+  tag_label. Scope note: the cheapest-of-group reading is merchant-safe
+  (hits = floor(units/(N+1)) landing on the cheapest units) — flagged here
+  rather than guessed silently.)*
 - [x] G1 *(Part 391, session 6e — SHIPPED, needs deploy (0071). Migration 0071
   promotion_rules; ONE kernel lib/promotionRules.ts + hand-synced frontend mirror
   (byte-drift-guarded by test); routes/promotions.ts /rules* — manage under the new
