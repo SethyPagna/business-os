@@ -494,12 +494,27 @@ deep-linkable tabs.*
 
 ### Phase G — Promotions + public portal
 
-- [~] G1 *(IN PROGRESS — claimed by session business-os-v1-6e, Aug 28, Part 391.
-  Footprint: NEW migration 0071 + lib/promotionEngine.ts (+ hand-synced frontend
-  mirror) + routes/promotions.ts + Promotions page component; wiring touches
-  POS.tsx, portal catalog ordering, Products list view, navigationConfig/AppContext
-  nav + permissions defaults. Peers: please avoid those wiring files until this
-  lands.)* Promotion engine: rule types "buy ≥ X save Y", "% off selected items", fixed
+- [x] G1 *(Part 391, session 6e — SHIPPED, needs deploy (0071). Migration 0071
+  promotion_rules; ONE kernel lib/promotionRules.ts + hand-synced frontend mirror
+  (byte-drift-guarded by test); routes/promotions.ts /rules* — manage under the new
+  'promotions' page permission, /rules/active open to any authed user, strip keeps
+  its products gate; promoted-first is SERVER-side (familyPagination family_promoted
+  aggregate; portal snapshot+search reordered too) so it holds across pages, with
+  relevance still first during a search; rules ride search/bootstrap/portal payloads
+  (POS offline inherits the cached copy); POS grid/sheet advertise via the kernel —
+  quantity deals show BEFORE the threshold — and a pure cart reprice pass drops the
+  price when qty crosses and restores it when it falls back, storing through the
+  existing product_discount_* sale fields (no sale schema change); Promotions admin
+  page (rules editor + per-product discounts manager); ProductForm's Discounts tab
+  removed per the refinement; Products gains the Promotions filter section
+  (promoted/discounted/any rule/each rule, server promo= param); portal shows a
+  single 'Promotions' header over the promoted block and prices identically —
+  the portal SELECTs finally carry discount columns at all (pre-existing gap: the
+  storefront could never show a per-product discount). Deliberate scope notes:
+  POS has ordering+badges but no promo FILTER control (cashiers search; Products
+  is the management surface — flagged, not silently skipped); admin Catalog
+  PREVIEW evaluates without rules (per-product discounts only) — the live portal
+  is the truth surface.)* Promotion engine: rule types "buy ≥ X save Y", "% off selected items", fixed
   discount; optional display Title (tag/label shown or hidden); scope = one product,
   a set, category/brand; start/end dates. POS + portal both read the SAME rule evaluation
   kernel (truth never diverges between what POS charges and what the portal advertises).

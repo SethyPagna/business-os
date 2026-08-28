@@ -8783,3 +8783,53 @@ re-proven by the validator's own re-run, not assumed.
 
 Commits: `72e90b21` (xlsxExport fix + test pin); the pack files live outside the
 repo and carry the changes directly.
+
+## Part 391 (chat, Aug 28 2026) — G1: the promotion engine, one kernel end to end
+
+**Asked.** "Check progress.md and what the other sessions are doing, then
+continue one task without touching each other." Claimed G1 on the board
+(e24c0eb5), coordinated footprints over cross-session messages (a7 → I2
+then B4/P7, 35 → M7; the earlier I2 double-claim was arbitrated to a7 by
+board order), and built the promotion engine.
+
+**Shipped (398666f1 backend · 185c1efb admin · aa0d1f31 surfaces).**
+Migration 0071 `promotion_rules` — quantity_save / percent_off /
+fixed_off, scope products/set/category/brand, optional shown-or-hidden
+Title, windows, badge color. ONE evaluation kernel
+(cloudflare lib/promotionRules.ts ≡ frontend utils/promotionRules.ts,
+hand-synced with a byte-for-byte drift-guard test): best single benefit
+(rule vs the product's own discount), never stacked; POS charges with it,
+Products and the portal advertise with it. Promoted-first ordering is
+server-side everywhere (familyPagination's additive family_promoted
+aggregate for /api/products/search; the portal snapshot + portal search
+reordered the same way), relevance stays first while searching. Rules
+ride the product/portal payloads (POS offline inherits its cached copy);
+/rules/active is readable by any authed user, manage sits under the NEW
+'promotions' page permission. POS: badges + detail-sheet buttons
+advertise quantity deals before the threshold, promotion mode survives
+qty-1 no-benefit, and a pure reprice pass moves line prices exactly at
+the threshold (stored via the existing product_discount_* sale fields —
+no sale schema change). Promotions admin page: rules editor +
+per-product discounts manager; ProductForm's Discounts tab removed per
+the Aug-28 refinement. Products: kernel chips + the Promotions filter
+section (server `promo=` param). Portal: kernel prices/badges, one
+'Promotions' header over the promoted block — and the portal product
+SELECTs now carry the discount columns at all (found: the storefront
+could never display a per-product discount before; the merchant toggle
+was dead).
+
+**Peer-fallout fixed en route (verify-for-real):** two transpile-harness
+stubs for the new promotionRulesSql import; the audit-log
+filter-count pin updated for I2's entityFilter; 16 lang keys that landed
+missing from concurrent features (I2 entity filter + the day-report set)
+added to both packs — langKeyIntegrity was failing at HEAD.
+
+**Verification.** Backend sweep 93/93 (incl. the new pure test's
+SQL-vs-kernel row-for-row parity on a real sqlite table); frontend
+chain exit 0 (118 files, incl. the new 14-check test); both tsc clean;
+vite build; wrangler dry-run.
+
+**Not done.** Deploy (0071 rides `npm run deploy:full`). G2 (Loyalty
+into Promotions), G3 (portal promo strip), G4 (brand-first portal
+ordering) stay open. POS promo-filter control and rules-aware admin
+Catalog preview recorded as deliberate scope cuts on the board.
