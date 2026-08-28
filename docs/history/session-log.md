@@ -9614,3 +9614,58 @@ integrity gate covers bare t() only).
 **Coordination:** Part 407 = a7's E2 (landed mid-unit); 4a holds D5a
 picker + P7-c as Part 409. E1 stays with whoever holds the nav quartet
 after E2 -- not this unit.
+
+## Part 411 (chat, Aug 28 2026) -- A4: the platform moved, the ceilings measured against it
+
+Session 05. A4 (Workers-Paid re-base) turned out to be an archaeology
+job first: the codebase carried THREE generations of platform model, and
+two of them contradicted each other in-code (backup.ts reasoned from
+"Free allows 50 subrequests"; M4's engine comment asserted "1,000
+internal does not rise on Paid"). Measured against the Cloudflare docs
+MCP: since the Feb 11 2026 changelog, Workers Paid defaults to 10,000
+subrequests per invocation (configurable to 10M via [limits]
+subrequests); Free stays 50 external / 1,000 internal. Both old comments
+described real-but-dead platforms.
+
+**Shipped (4c5502d9):** wrangler.toml pins `subrequests = 10_000`
+explicitly beside cpu_ms and carries the ledger of every ceiling
+decision. Raised with per-site reasoning: backup asset copies 20 -> 100
+(2% of budget, sequential wall ~10-20s, full-catalog coverage in ~200
+runs instead of ~1,000); reset image deletes 200 -> 500 (5% of budget,
+deliberately NOT whole-catalog -- that wants a continuation design);
+ROWS_PER_IMPORT_CHUNK 150 -> 600 (exactly the raise its own comment
+prescribed once Paid cpu_ms returned); STOCK_ACTION_MAX_UNITS 60 -> 240
++ MAX_ROWS 480 -> 1920 (~29% of budget worst-case; RECONCILE accepts 4x
+bigger single-snapshot sheets; note the unit cap doubles as direct
+mode's per-invocation dispatch window, so continuations now move 4x per
+hop -- budgeted, and the M4 comment corrected). NOT raised, reasons
+recorded: MAX_HISTORICAL_SALE_LINES=100 (a DATA bound -- largest real
+receipt is 86 lines; its error message no longer claims "Free-plan");
+M4's CLASSIFY_WINDOW/DISPATCH_READ (sized by job-state growth, not the
+platform); D1's 100-bound-params (plan-independent).
+
+**The caps are exported now and every boundary fixture seeds RELATIVE
+to them** -- backup slices, the cross-window analyze CSV, reconcile
+rejections, direct-continuation invocation counts. Five fixtures were
+silently welded to the old numbers in ways grep-for-the-constant never
+finds (a 151-row CSV, a 130-row sheet, "45 assets", "[2, 152]"); they
+now re-size themselves on the next deliberate re-base.
+
+**Found while verifying, worth remembering:** this session's editing
+flipped every touched cloudflare file to CRLF wholesale. Git's eol
+normalization HID that from diffs, but source-pin regexes read raw
+bytes -- test-loyalty-accrual-pure failed on `,\n` patterns against a
+file that was suddenly `,\r\n`. Normalized my nine files back to LF and
+the pin passed again. If a source-pin test fails with a huge "actual"
+string containing \r\n, check endings before suspecting the pin.
+
+**Verification:** tsc --noEmit clean; `wrangler deploy --dry-run` OK
+(the new [limits] key parses); ALL backend test-*.cjs pass, 0 failures.
+Frontend untouched by this unit (its full suite ran green twice earlier
+this session under D4/D4b).
+
+**Flagged for K4, not fixed here:** routes/system.ts still fires
+UNBOUNDED `Promise.all(objects.map(deleteObject))` sweeps at three other
+sites (~409/415/588) -- the same hazard class the capped reset path
+documents. Under the old 1,000-internal ceiling a 1,000-object listing
+page could take the whole request down mid-delete.
