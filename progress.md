@@ -661,7 +661,14 @@ deep-linkable tabs.*
   add as child of the matched group · proceed as new — with a before→after arrow preview
   and a page-by-page confirm. Price similarity is advisory ("matches X on name+price but
   differs on barcode; recommend child row").
-- [ ] F2. **Fast stock-in (batch in):** enter batch + supplier once, then per-product
+- [~] F2 **[CLAIMED: session 6e — Part 414. Footprint: a NEW
+  inventory/FastStockInModal.tsx (session header: branch + received date
+  + shared SupplierPickerField + paid/credit once; then per-line name
+  search → qty/cost/expiry, Add = one receiveBatchStock write per line
+  through the D4 kernel, visible per-line result, Done closes) + its
+  launcher button in Inventory.tsx + tests. No Products.tsx (a7 holds
+  it), no routes changes — the existing /api/batches receive endpoint IS
+  the kernel.]** **Fast stock-in (batch in):** enter batch + supplier once, then per-product
   name→details entry; "Add" appends and continues, "Done" completes the batch. Backed by
   the same add/batch kernel as D4 — no parallel write path.
 - [ ] F3. **Draft persistence + tab chrome:** unfinished add-product / batch-in / detail
