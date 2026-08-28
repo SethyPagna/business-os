@@ -159,26 +159,39 @@ export async function ensureCoreDataInvariants(env: Env): Promise<CoreDataInvari
   const orgSlug = String(env.BUSINESS_OS_ORGANIZATION_SLUG || '').trim().toLowerCase() || 'business-os'
   const publicId = `org_${orgSlug.replace(/-/g, '_')}`
 
-  // The identity this code shipped with before it was configurable. An
-  // existing deployment's row still carries it, so it has to be matchable --
-  // otherwise configuring a new slug would not rename that row, it would
-  // insert a SECOND organization beside it and the login screen would start
-  // offering a choice between them.
-  const LEGACY_SLUG = 'business-os'
-  const LEGACY_PUBLIC_ID = 'org_business_os'
+  // Identities this deployment's row may STILL carry from before a rename.
+  // Every rename in this app's history appends here: matching a previous
+  // identity is what lets a newly configured slug adopt and rename the
+  // EXISTING row in place -- without it, the new slug matches nothing and
+  // this function inserts a SECOND, empty organization beside the real one
+  // (and the login pin starts falling back to first-by-id). 'business-os'
+  // is the identity the code originally shipped with; 'leangcosmetics' is
+  // the identity in production before the Aug 2026 rename to LeangBeauty.
+  const PREVIOUS_IDENTITIES = [
+    { slug: 'leangcosmetics', publicId: 'org_leangcosmetics' },
+    { slug: 'business-os', publicId: 'org_business_os' },
+  ]
 
   const fastPathResult = await tryFastPath(db, orgName, orgSlug, publicId)
   if (fastPathResult) return fastPathResult
 
-  // Prefer the configured identity; fall back to the legacy one so an
-  // existing organization is adopted and renamed in place.
+  // Prefer the configured identity; fall back to previous identities (most
+  // recent first) so an existing organization is adopted and renamed in
+  // place rather than duplicated.
+  const previousIdPlaceholders = PREVIOUS_IDENTITIES.map((_, index) => `@previousId${index}`).join(', ')
+  const previousSlugPlaceholders = PREVIOUS_IDENTITIES.map((_, index) => `@previousSlug${index}`).join(', ')
+  const previousParams: Record<string, string> = {}
+  PREVIOUS_IDENTITIES.forEach(({ slug, publicId: pid }, index) => {
+    previousParams[`previousId${index}`] = pid
+    previousParams[`previousSlug${index}`] = slug
+  })
   const existingOrg = await db.prepare(`
     SELECT id FROM organizations
     WHERE public_id = @publicId OR slug = @slug
-       OR public_id = @legacyPublicId OR slug = @legacySlug
+       OR public_id IN (${previousIdPlaceholders}) OR slug IN (${previousSlugPlaceholders})
     ORDER BY CASE WHEN public_id = @publicId THEN 0 WHEN slug = @slug THEN 1 ELSE 2 END, id ASC
     LIMIT 1
-  `).get<{ id: number }>({ publicId, slug: orgSlug, legacyPublicId: LEGACY_PUBLIC_ID, legacySlug: LEGACY_SLUG })
+  `).get<{ id: number }>({ publicId, slug: orgSlug, ...previousParams })
 
   let organizationId: number
   if (existingOrg?.id) {

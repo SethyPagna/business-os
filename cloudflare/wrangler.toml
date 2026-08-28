@@ -217,21 +217,19 @@ BUSINESS_OS_ADMIN_URL = "https://admin.leangbeauty.com"
 # case-insensitively. If it matches nothing, the Worker falls back to the
 # first organization row rather than failing -- a stale value here can
 # never lock anyone out. Change this if the organization is ever renamed.
-# KEPT as leangcosmetics on purpose during the leangbeauty.com domain move
-# (Aug 28 2026). This slug/name pair is the ORGANIZATION'S identity in D1,
-# not the domain: coreDataInvariants matches the existing row by this slug
-# (or the legacy business-os one) and renames it in place -- but a value
-# matching NEITHER makes it INSERT A SECOND, EMPTY organization next to the
-# real one (verified against the live matching logic; production has exactly
-# one org row: LeangCosmetics/leangcosmetics). If the business itself should
-# be renamed to LeangBeauty, that needs the adoption logic extended to match
-# the current row first -- ask for it explicitly, do not just edit this.
-BUSINESS_OS_ORGANIZATION_SLUG = "leangcosmetics"
+# Renamed to LeangBeauty by explicit request (Aug 28 2026). SAFE ONLY
+# because coreDataInvariants' PREVIOUS_IDENTITIES list now includes
+# 'leangcosmetics' -- that is what lets the existing production row be
+# adopted and renamed IN PLACE. A slug value matching neither the current
+# nor a listed previous identity makes the invariant INSERT A SECOND, EMPTY
+# organization next to the real one. If this is ever renamed again: append
+# the then-current identity to PREVIOUS_IDENTITIES first, then change these.
+BUSINESS_OS_ORGANIZATION_SLUG = "leangbeauty"
 # Display name for that organization. Previously hardcoded to "Business OS"
 # in lib/coreDataInvariants.ts, which rewrote it on every run -- so renaming
 # the organization in the database never stuck. Setting it here is what makes
 # the rename permanent.
-BUSINESS_OS_ORGANIZATION_NAME = "LeangCosmetics"
+BUSINESS_OS_ORGANIZATION_NAME = "LeangBeauty"
 
 # Sentry ingest DSN. A DSN is a PUBLIC key by design -- it only permits
 # writing events into this one project, never reading them -- so it belongs

@@ -55,6 +55,26 @@
           '/server': true
         }
         var hostname = String(window.location && window.location.hostname || '').toLowerCase()
+        // Old-domain VISITS redirect to leangbeauty.com (Aug 28 2026). Only
+        // page navigations go through this bootstrap -- API/upload fetches
+        // never load index.html -- so existing integrations keep working
+        // while people (and bookmarks/PWA opens) land on the new domain
+        // with their path and query preserved. try/catch keeps the test
+        // DOM doubles (no location.replace) and any exotic browser on the
+        // normal render path instead of a blank page.
+        var redirectHosts = {
+          'leangcosmetics.dpdns.org': 'leangbeauty.com',
+          'admin.leangcosmetics.dpdns.org': 'admin.leangbeauty.com',
+          'leangcosmetics.com': 'leangbeauty.com',
+          'www.leangcosmetics.com': 'leangbeauty.com',
+          'admin.leangcosmetics.com': 'admin.leangbeauty.com',
+          'www.leangbeauty.com': 'leangbeauty.com'
+        }
+        if (redirectHosts[hostname]) {
+          try {
+            window.location.replace('https://' + redirectHosts[hostname] + window.location.pathname + window.location.search + window.location.hash)
+          } catch (redirectError) { /* fall through to normal render */ }
+        }
         var adminHostname = hostname === 'localhost'
           || hostname === '127.0.0.1'
           || hostname === '::1'

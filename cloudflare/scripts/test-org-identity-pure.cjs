@@ -32,8 +32,13 @@ function check(name, fn) {
   console.log(`PASS ${name}`)
 }
 
-const LEGACY_SLUG = 'business-os'
-const LEGACY_PUBLIC_ID = 'org_business_os'
+// Mirrors coreDataInvariants' PREVIOUS_IDENTITIES: every prior identity the
+// production row may still carry, so a newly configured slug adopts and
+// renames it in place instead of inserting a second, empty organization.
+const PREVIOUS_IDENTITIES = [
+  { slug: 'leangcosmetics', publicId: 'org_leangcosmetics' },
+  { slug: 'business-os', publicId: 'org_business_os' },
+]
 
 // Mirrors ensureCoreDataInvariants' organization half.
 function resolveIdentity(env) {
@@ -45,13 +50,20 @@ function resolveIdentity(env) {
 
 function ensureOrganization(db, env) {
   const { orgName, orgSlug, publicId } = resolveIdentity(env)
+  const prevIdPlaceholders = PREVIOUS_IDENTITIES.map((_, i) => `:previousId${i}`).join(', ')
+  const prevSlugPlaceholders = PREVIOUS_IDENTITIES.map((_, i) => `:previousSlug${i}`).join(', ')
+  const prevParams = {}
+  PREVIOUS_IDENTITIES.forEach(({ slug, publicId: pid }, i) => {
+    prevParams[`previousId${i}`] = pid
+    prevParams[`previousSlug${i}`] = slug
+  })
   const existing = db.prepare(`
     SELECT id FROM organizations
     WHERE public_id = :publicId OR slug = :slug
-       OR public_id = :legacyPublicId OR slug = :legacySlug
+       OR public_id IN (${prevIdPlaceholders}) OR slug IN (${prevSlugPlaceholders})
     ORDER BY CASE WHEN public_id = :publicId THEN 0 WHEN slug = :slug THEN 1 ELSE 2 END, id ASC
     LIMIT 1
-  `).get({ publicId, slug: orgSlug, legacyPublicId: LEGACY_PUBLIC_ID, legacySlug: LEGACY_SLUG })
+  `).get({ publicId, slug: orgSlug, ...prevParams })
 
   if (existing) {
     db.prepare(`
@@ -105,6 +117,18 @@ check('the rename STICKS across repeated runs -- the actual regression', () => {
   const row = db.prepare('SELECT name, slug FROM organizations WHERE id = 1').get()
   assert.strictEqual(row.name, 'LeangCosmetics', 'the name must not revert on a later run')
   assert.strictEqual(row.slug, 'leangcosmetics')
+  db.close()
+})
+
+check('a leangcosmetics row is RENAMED to leangbeauty in place, not duplicated', () => {
+  // The Aug 28 2026 rename. Production's single row is
+  // LeangCosmetics/leangcosmetics; configuring leangbeauty must adopt and
+  // rename THAT row, never insert a second empty organization beside it.
+  const db = freshDb([{ id: 1, name: 'LeangCosmetics', slug: 'leangcosmetics', public_id: 'org_leangcosmetics' }])
+  ensureOrganization(db, { BUSINESS_OS_ORGANIZATION_NAME: 'LeangBeauty', BUSINESS_OS_ORGANIZATION_SLUG: 'leangbeauty' })
+  const all = db.prepare('SELECT id, name, slug, public_id FROM organizations').all()
+  assert.strictEqual(all.length, 1, 'must not insert a second organization for the new name')
+  assert.deepStrictEqual(all[0], { id: 1, name: 'LeangBeauty', slug: 'leangbeauty', public_id: 'org_leangbeauty' })
   db.close()
 })
 
