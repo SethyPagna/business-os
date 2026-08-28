@@ -250,7 +250,7 @@ check('a BOM-prefixed upload cannot spawn a phantom row at a window boundary', (
   // The engine's ranged decode must keep the BOM visible so its stripBom can
   // MEASURE it -- this is the line whose absence caused the phantom row.
   const engine = fs.readFileSync(path.join(cloudflareRoot, 'src', 'lib', 'importEngine.ts'), 'utf8')
-  assert.match(engine, /new TextDecoder\('utf-8', \{ ignoreBOM: true \}\)\.decode\(buffer\)/, 'fetchCsvRange must decode with ignoreBOM so bomBytes can be measured')
+  assert.match(engine, /new TextDecoder\('utf-8', \{ ignoreBOM: true[^}]*\}\)\.decode\(buffer\)/, 'fetchCsvRange must decode with ignoreBOM so bomBytes can be measured')
 })
 
 // ---- the engine must actually use the ranged path ----

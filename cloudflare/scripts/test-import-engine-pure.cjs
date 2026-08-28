@@ -1008,7 +1008,11 @@ assert.strictEqual(isD1CpuLimitError(new Error('Network request failed')), false
     const db = makeFakeProductsDb([])
     const results = await classifyProducts(db, [row({ name: 'New Column Item', selling_price_usd: '10', 'batch(mm/dd/yyyy)': '08/24/2026' }, 1)], 'job-batch-col', null, noImages)
     const d = results[0].data
-    assert.strictEqual(d.received_date, '08/24/2026')
+    // Stored as ISO, not the typed mm/dd/yyyy display string: received_at
+    // is compared/sorted/grouped with SQL date functions, and the verbatim
+    // slash form put 6,031 unqueryable dates into production (fixed with
+    // migration 0077; this pins the parse-time normalization).
+    assert.strictEqual(d.received_date, '2026-08-24')
     assert.strictEqual(d.lot_code, '08242026')
   }
 

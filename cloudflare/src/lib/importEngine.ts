@@ -72,7 +72,7 @@ import { buildImportedContactState } from './contactOptions'
 import { bumpVersion } from './cache'
 import { broadcast } from '../durable-objects/broadcastHub'
 import { VALID_SALE_STATUSES, RETURN_STATUSES, normalizeSaleStatus } from './salesStatus'
-import { dateToBatchCode } from './batchCode'
+import { dateToBatchCode, normalizeToIsoDate } from './batchCode'
 import { normalizeSearchText, compactSearchText } from './searchMatch'
 import { classifyUnifiedStockActions, type StockActionImportResult } from './stockActionCatalog'
 import { countUnifiedStockConfirmationRows, sealUnifiedStockAnalyzeConflicts } from './stockActionSeal'
@@ -108,7 +108,7 @@ export type RowAction = 'create' | 'update' | 'skip' | 'error'
 // callsite that doesn't bother threading a specific kind through; the
 // report still counts and lists it, just under a generic bucket instead of
 // silently dropping it from the summary.
-export type ImportWarningKind = 'negative_stock' | 'barcode_collision' | 'sku_collision' | 'name_match' | 'membership_mismatch' | 'membership_phone_conflict' | 'duplicate_row_match' | 'stock_action_conflict' | 'other'
+export type ImportWarningKind = 'negative_stock' | 'unreadable_batch_date' | 'barcode_collision' | 'sku_collision' | 'name_match' | 'membership_mismatch' | 'membership_phone_conflict' | 'duplicate_row_match' | 'stock_action_conflict' | 'other'
 
 export type ImportRowWarning = { kind: ImportWarningKind; message: string }
 
@@ -145,6 +145,7 @@ export type ImportRowResult = {
 // the wording only needs to change in one place.
 export const IMPORT_WARNING_LABELS: Record<ImportWarningKind, string> = {
   negative_stock: 'Negative stock (clamped to 0)',
+  unreadable_batch_date: 'Batch date unreadable (received as today)',
   barcode_collision: 'Same barcode, different name',
   sku_collision: 'Same SKU, different name',
   name_match: 'Matched an existing contact by name',
@@ -159,7 +160,7 @@ export const IMPORT_WARNING_LABELS: Record<ImportWarningKind, string> = {
 // specifically (as opposed to a routine "just so you know") -- used to
 // decide what surfaces in the import report / dashboard / audit log
 // without the caller needing its own copy of this list.
-export const SERIOUS_IMPORT_WARNING_KINDS: ReadonlySet<ImportWarningKind> = new Set(['negative_stock', 'barcode_collision', 'sku_collision', 'name_match', 'membership_mismatch', 'membership_phone_conflict', 'duplicate_row_match', 'stock_action_conflict'])
+export const SERIOUS_IMPORT_WARNING_KINDS: ReadonlySet<ImportWarningKind> = new Set(['negative_stock', 'unreadable_batch_date', 'barcode_collision', 'sku_collision', 'name_match', 'membership_mismatch', 'membership_phone_conflict', 'duplicate_row_match', 'stock_action_conflict'])
 
 // Counts DISTINCT rows that carry at least one warning whose kind is in
 // `kinds` -- NOT the sum of summarizeImportWarnings' per-kind group counts.
@@ -673,7 +674,7 @@ async function fetchCsvRange(
     // phantom one-field row (production: the "48" product every BOM-prefixed
     // catalog upload gained at the first window boundary; total_rows 12,094
     // for a 12,093-row file, 8,728 for the 8,727-row one).
-    text: new TextDecoder('utf-8', { ignoreBOM: true }).decode(buffer),
+    text: new TextDecoder('utf-8', { ignoreBOM: true, fatal: false }).decode(buffer),
     fileName: file.original_name || 'import.csv',
     totalSize,
     bytesRead: buffer.byteLength,
@@ -1382,7 +1383,16 @@ export async function classifyProducts(
     // broken by the rename. Either way, a blank cell still means
     // "received now" -- see the comment above on why this can't just be
     // null.
-    data.received_date = str(row['batch(mm/dd/yyyy)'] || row.batch || row.date || row.received_date) || todayIso()
+    // Normalize to ISO before storing: the cell is TYPED mm/dd/yyyy (the
+    // column header says so) but received_at is a DATE column every reader
+    // compares/sorts/groups with SQL date functions -- storing the raw
+    // display string put "08/24/2026" verbatim into 6,031 production lots
+    // (Aug-28 catalog import), where date() returns NULL and ordering is
+    // lexicographic garbage. Migration 0077 repairs the stored rows; this
+    // keeps new ones ISO. An unreadable non-blank cell falls back to today
+    // WITH a visible warning below, never silently.
+    const rawReceivedDate = str(row['batch(mm/dd/yyyy)'] || row.batch || row.date || row.received_date)
+    data.received_date = normalizeToIsoDate(rawReceivedDate) || todayIso()
     // The stored/displayed batch code is always derived from
     // received_date directly above, never from a separately-typed label
     // -- "lot code can be removed... batch column is just a translated
@@ -1419,6 +1429,9 @@ export async function classifyProducts(
       // message meant for a human to read.
       const displayValue = str(rawStockValue).replace(/^'/, '')
       rowWarnings.push({ kind: 'negative_stock', message: `Stock quantity "${displayValue}" is negative; imported as 0 (negative stock isn't supported).` })
+    }
+    if (rawReceivedDate && !normalizeToIsoDate(rawReceivedDate)) {
+      rowWarnings.push({ kind: 'unreadable_batch_date', message: `Batch date "${rawReceivedDate}" is not a readable mm/dd/yyyy date; the batch was received as today instead.` })
     }
     // Only set image_path when this row actually resolved one, and only
     // then if the row didn't explicitly ask to keep whatever the existing
