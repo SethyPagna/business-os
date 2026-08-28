@@ -10430,3 +10430,42 @@ Z5 (global contrast + hamburger), Z7 (stats redundancy + Khmer contrast), Z8
 now interacts with Z11's 8-card layout). The import-writer two-branch drift
 (root of Z1b) — a focused fix after the migration phase. Everything shipped
 needs the next deploy (migration 0079 + the earlier 0077/0078).
+
+## Part 428 (Aug 29 2026, session business-os-v1-43) — Z12: even out every Dashboard stat drill (excl. Products)
+
+**Ask.** "go deep into each stats excluding products stats... and see if it can
+be merged or evenly distributed somehow."
+
+**What changed.** The Dashboard KPI cards' folded drill counts were lopsided
+after Z11 (Stock Value 2, Revenue 5, Discounts 3, Gross Profit 5, Transactions
+2, Returns 6, Delivery 4). Evened to ~4 each, keeping the 8-card outer layout
+(merging would have made the outer count odd again, which the user wanted
+even), by removing duplicated headline-as-detail lines and filling thin cards
+with genuinely-available facts:
+- **Stock Value** 2->4: + Avg value/product (stock_value/product_count), Low
+  stock, Out of stock -- the money on the shelf plus what's behind it; dropped
+  the bare "Products" repeat.
+- **Revenue** stays 5 (core money-in: Net/Gross/Discounts/Refunds/Tax).
+- **Discounts** 3->4: + Discount rate (% of gross).
+- **Gross Profit** 5->4: dropped the duplicate "Revenue" line (headlines its
+  own card); profit-formula parts remain.
+- **Transactions** 2->4: + Deliveries (delivery_sale_count), Collected total
+  (kernel's collected_total_usd = net revenue + tax + delivery -- previously
+  computed but never surfaced).
+- **Returns** 6->4: customer + supplier in one balanced drill; supplier count
+  folds into its loss line; the derivable "net after refunds" drops from the
+  drill (still in the chart + the info formula).
+- **Delivery** stays 4.
+New computed vars aCollected / aDiscountRate / aAvgStockValue; two new en+km
+keys (avg_value_per_product, discount_rate); every other key already existed.
+
+**Verified.** frontend tsc clean (except 6e's onMinimize); dashboardData-
+Reliability PASS; collected_total_usd confirmed computed in salesAnalytics.ts
+(l.210) with a sum fallback for old payloads. Live on worker-dev: 8 KPI cards
+render with the lang pack loaded and correct labels.
+
+**Not done.** The rest of Phase Z (Z1a display rule, Z2 discount decouple, Z3a
+live summary, Z4 dual receipt preview, Z5 hamburger, Z7 Khmer contrast, Z8
+Credit, Z9 rename, Z10 "Reconcile Revenue" -- needs its definition, now
+interacts with the 8-card layout), plus Y12 the recordable per-currency sales
+change. Needs deploy (migrations 0077/0078/0079 + these frontend changes).

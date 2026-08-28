@@ -1703,6 +1703,18 @@ other" with the Phase-Y items.*
   moved to a NEW outer Delivery card (fees / actual courier cost n/m /
   margin / store-paid), making the outer count EVEN at 8. P6 staff-only
   scoping preserved. Verified live: 8 cards render.
+- [x] Z12. **Even out every stat drill excl. Products (Part 428 — SHIPPED,
+  needs deploy; user, Aug 29: "go deep into each stat excl. products, see
+  if it can be merged or evenly distributed").** The folded drill counts
+  were lopsided (Stock Value 2, Revenue 5, Discounts 3, Gross Profit 5,
+  Transactions 2, Returns 6, Delivery 4). Now ~4 each: Stock Value +Avg
+  value/product +Low +Out (dropped the bare Products repeat); Discounts
+  +Discount rate; Gross Profit −duplicate Revenue line; Transactions
+  +Deliveries +Collected total (kernel's collected_total_usd); Returns
+  folded to customer+supplier (supplier count into its loss line, dropped
+  the derivable net-after-refunds); Revenue + Delivery unchanged.
+  Duplicated headline-as-detail lines removed throughout. tsc clean,
+  dashboard test passes, 8 cards render live.
 
 ### Flagged, not guessed (Golden Rule 7)
 
