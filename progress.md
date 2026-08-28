@@ -535,12 +535,15 @@ deep-linkable tabs.*
 - [ ] E1. **Inventory merges into Branches** as sections: "Stats & Branches" (Inventory's
   stat cards + branch list), "Movements", "RFID". Branch transfer options updated to
   everything shipped since (batch preservation, §14 details).
-- [~] E2 **[CLAIMED: session a7]**. **Sales absorbs Returns and Fees** as sections of one Sales page.
-  *(a7, after 6e's E3/E4 landing freed the nav quartet: same hub pattern —
-  SalesHubPage hosts Sales + Returns + Fees intact, returns/fees PAGE ids
-  retire, permission keys stay, old URLs land on the right section.
-  Files: new components/sales/SalesHubPage.tsx + the quartet + Returns.tsx/
-  FeesPage.tsx useIsPageActive re-key + Sidebar icon rows.)*
+- [x] E2 *(Part 407, session a7 — SHIPPED. SalesHubPage hosts Sales +
+  Returns + Fees as lazy tier-gated sections (components moved INTACT,
+  Part-405 export wiring and rememberKeys untouched); returns/fees PAGE
+  ids retired across the quartet, permission keys unchanged; /returns
+  and /fees deep-link to their sections; useIsPageActive re-keyed to
+  'sales' in both absorbed pages; sales door widened for returns-/fees-
+  only grants. 594-test chain + build green; verified live: both
+  sections render AND fetch, deep links land right, nav clean.)*
+  **Sales absorbs Returns and Fees** as sections of one Sales page.
 - [x] E3 *(Part 404, session 6e — SHIPPED (renumbered off 403 = 05's D4).
   'Review & Logs' hosts the queue + audit trail as sections; audit_log page
   id/nav/path retired, permission keys stable, sections self-gate, the door

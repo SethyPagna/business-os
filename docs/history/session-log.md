@@ -9525,3 +9525,45 @@ commit messages). Part numbers 404/405 were already reserved by 6e/a7
 **Standing note:** the UTC-day default for "today" flag from Part 403
 remains open for a deliberate decision -- unchanged here since every
 surface now shares it consistently.
+
+## Part 407 (chat, Aug 28 2026) -- E2: the Sales hub -- Sales absorbs Returns and Fees
+
+**Session a7.** Picked up E2 the moment 6e's E3/E4 landing (35cfc5b7)
+freed the nav quartet; 05's D4b landed minutes later, leaving the whole
+tree cold. Same hub pattern as ReviewLogsPage/SettingsHubPage, applied
+to the sales trio.
+
+**New:** components/sales/SalesHubPage.tsx -- lazy sections (Sales /
+Returns / FeesPage moved INTACT, including Part-405 export wiring and
+its localStorage rememberKeys, untouched), tier-gated chips
+(BadgeDollarSign/RotateCcw/HandCoins match the old sidebar icons),
+initialSection reads the pathname so old URLs open the right section.
+
+**Rewiring:** App.tsx PageId union/-importers/-lazy/-component map drop
+returns+fees (sales importer now points at the hub); pathRouting
+segments REMAPPED not deleted ('/returns' and '/fees' land on page
+'sales'), ADMIN_PATH_BY_PAGE rows removed; navigationConfig entries
+removed; AppContext PAGE_PERMISSIONS rows removed with the sales door
+widened (returns- or fees-only grants still open the hub; sections
+self-gate inside); Returns.tsx/FeesPage.tsx useIsPageActive re-keyed to
+'sales' (the E3/E4 lesson -- without this the absorbed sections never
+load); Sidebar's two now-dead icon rows + imports removed. Permission
+keys 'returns'/'fees' live on unchanged everywhere.
+
+**Tests:** appShellUtils URL pin updated with intent strengthened (old
+URLs must remap into the hub, not 404). Full frontend chain green: 594
+PASS, tsc clean, vite build clean -- hub is its own 2.55kB chunk,
+Returns (33.5kB) and FeesPage (19.6kB) still load lazily per section.
+
+**Verification (Golden Rule 5, live on wrangler dev):** /sales opens
+the hub with Receipts|Daily Report intact (2 sales listed); Returns
+chip renders the full section AND fetches (stat cards, Export/History/
+New Return); Fees chip lists real rows ($129,696.60 total, the 0072
+courier rows visible); deep links /returns and /fees land on their
+sections; mobile pinned nav carries no standalone Returns/Fees.
+
+**Coordination:** Part 407 reserved for this by 4a's board note; 6e's
+F1 (Part 408) is in flight in ProductForm.tsx -- that file is hot and
+excluded from this commit. E6's re-check for this move: both moved
+sections' export dialogs verified live above; no orphaned buttons, no
+dead routes.
