@@ -126,6 +126,21 @@ await runTest('xlsxExport forces barcode-shaped columns to Text cells', () => {
   assert.equal((sheet.D2 as XLSX.CellObject).z, undefined, 'and gains no forced number format')
 })
 
+await runTest('a MIXED column never numbers its id-like strings (leading zeros survive)', () => {
+  // The column as a whole does NOT qualify for Text forcing (one value is
+  // non-numeric), which used to drop every numeric-looking string into a
+  // real number cell -- Number('035000463760') eats the leading zero.
+  // Found by the migration pack's CSV↔XLSX twin validator (M7).
+  const sheet = buildWorksheet([
+    { barcode: 'MascaraSkyHighNoBox', qty: '2' },
+    { barcode: '035000463760', qty: '3.5' },
+  ] as never)
+  assert.equal((sheet.A2 as XLSX.CellObject).t, 's', 'non-numeric code stays text')
+  assert.deepEqual(sheet.A3, { t: 's', v: '035000463760', z: '@' }, 'id-like string stays a Text cell even in a mixed column')
+  assert.equal((sheet.B2 as XLSX.CellObject).t, 'n', 'genuine short numbers still become numbers')
+  assert.equal((sheet.B3 as XLSX.CellObject).v, 3.5)
+})
+
 await runTest('full xlsx round-trip (export → read back → parse) is the identity', () => {
   const rows = [{ name: 'ស្តុកចូល Serum', barcode: '0123456789012', qty: -5, note: '=SUM(A1)' }]
   const worksheet = buildWorksheet(rows as never)

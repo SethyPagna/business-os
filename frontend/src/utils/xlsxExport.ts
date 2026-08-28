@@ -93,7 +93,17 @@ export function buildWorksheet(rows: ExportRow[]): XLSX.WorkSheet {
         sheet[addr] = { t: 'n', v: raw }
         return
       }
+      // An id-like STRING in a column that didn't qualify for whole-column
+      // Text forcing (a MIXED column -- some rows hold real barcodes, some
+      // hold non-numeric codes) must still never become a number cell:
+      // Number('035000463760') destroys the leading zero and long ids drift
+      // into scientific display. Per-cell, the same rule as the column
+      // check (M7 -- found by the migration pack's own twin validator).
       if (typeof raw === 'string' && isPlainNumericString(raw)) {
+        if (looksLikeIdLikeNumber(raw.trim())) {
+          sheet[addr] = { t: 's', v: raw, z: '@' }
+          return
+        }
         sheet[addr] = { t: 'n', v: Number(raw) }
         return
       }
