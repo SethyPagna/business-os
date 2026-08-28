@@ -32,11 +32,8 @@ type PageId =
   | 'contacts'
   | 'catalog'
   | 'promotions'
-  | 'users'
   | 'review'
-  | 'audit_log'
   | 'receipt_settings'
-  | 'backup'
   | 'settings'
   | 'files'
   | 'server'
@@ -306,12 +303,11 @@ const PAGE_IMPORTERS = {
   contacts: asPageModule(() => import('./components/contacts/Contacts')),
   catalog: asPageModule(() => import('./components/catalog/CatalogPage.tsx')),
   promotions: asPageModule(() => import('./components/promotions/PromotionsPage.tsx')),
-  users: asPageModule(() => import('./components/users/Users')),
-  review: asPageModule(() => import('./components/review/ReviewQueue')),
-  audit_log: asPageModule(() => import('./components/utils-settings/AuditLog')),
+  // E3: the review page id now hosts Review & Logs (queue + audit trail).
+  review: asPageModule(() => import('./components/review/ReviewLogsPage.tsx')),
   receipt_settings: asPageModule(() => import('./components/receipt-settings/ReceiptSettings')),
-  backup: asPageModule(() => import('./components/utils-settings/Backup')),
-  settings: asPageModule(() => import('./components/utils-settings/Settings')),
+  // E4: the settings page id now hosts Settings + Users + Backup.
+  settings: asPageModule(() => import('./components/utils-settings/SettingsHubPage.tsx')),
   files: asPageModule(() => import('./components/files/FilesPage')),
   server: asPageModule(() => import('./components/server/ServerPage')),
 } satisfies Record<PageId, ChunkImporter>
@@ -508,12 +504,9 @@ const Branches = lazyWithRetry(PAGE_IMPORTERS.branches, 'branches')
 const Contacts = lazyWithRetry(PAGE_IMPORTERS.contacts, 'contacts')
 const CatalogPage = lazyWithRetry(PAGE_IMPORTERS.catalog, 'catalog')
 const PromotionsPage = lazyWithRetry(PAGE_IMPORTERS.promotions, 'promotions')
-const Users = lazyWithRetry(PAGE_IMPORTERS.users, 'users')
-const ReviewQueue = lazyWithRetry(PAGE_IMPORTERS.review, 'review')
-const AuditLog = lazyWithRetry(PAGE_IMPORTERS.audit_log, 'audit_log')
+const ReviewLogsPage = lazyWithRetry(PAGE_IMPORTERS.review, 'review')
 const ReceiptSettings = lazyWithRetry(PAGE_IMPORTERS.receipt_settings, 'receipt_settings')
-const Backup = lazyWithRetry(PAGE_IMPORTERS.backup, 'backup')
-const Settings = lazyWithRetry(PAGE_IMPORTERS.settings, 'settings')
+const SettingsHubPage = lazyWithRetry(PAGE_IMPORTERS.settings, 'settings')
 const FilesPage = lazyWithRetry(PAGE_IMPORTERS.files, 'files')
 const ServerPage = lazyWithRetry(PAGE_IMPORTERS.server, 'server')
 const Login = lazyWithRetry(asPageModule(() => import('./components/auth/Login')), 'auth-login')
@@ -533,12 +526,9 @@ const PAGE_COMPONENTS: Record<AdminPageId, ReturnType<typeof lazyWithRetry>> = {
   inventory: Inventory,
   branches: Branches,
   contacts: Contacts,
-  users: Users,
-  review: ReviewQueue,
-  audit_log: AuditLog,
+  review: ReviewLogsPage,
   receipt_settings: ReceiptSettings,
-  backup: Backup,
-  settings: Settings,
+  settings: SettingsHubPage,
   files: FilesPage,
   server: ServerPage,
   catalog: CatalogPage,

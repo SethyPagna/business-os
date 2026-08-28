@@ -554,10 +554,7 @@ const PAGE_PERMISSIONS: Record<string, string | null> = {
   sales:            'sales',
   fees:             'fees',
   contacts:         'contacts',  // Requires explicit contacts permission
-  users:            'users',
   review:           'review',  // Review/Approval queue page -- Full Access only, own explicit key (see navigationConfig.ts's own note)
-  audit_log:        'audit_log',
-  backup:           'backup',
   settings:         'settings',
   files:            null,        // Library view is unconditional for any authenticated user (this session) -- matches navigationConfig.ts's own null gate; upload/download/rename/delete still self-gate inside FilesPage.tsx/files.ts on real Full Access to `library`
   receipt_settings: 'settings',  // was 'all' (super-admin only); Settings.tsx already exposes the core receipt fields (tax_rate, footer) to any 'settings' user inline, so gating the fuller standalone page behind 'all' was an inconsistency, not a deliberate restriction -- aligned with its sibling settings sub-pages (files/server)
@@ -2022,6 +2019,13 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
     // sections inside self-gate on the real 'promotions' tier, so this
     // widens the door, not the controls.
     if (pageId === 'promotions' && getPermissionTier('customer_portal') !== 'none') return true
+    // E3/E4 (Part 403): audit_log, users and backup retired as standalone
+    // pages -- their components are sections of Review & Logs / Settings
+    // now. A grant on any absorbed section opens its host page; each
+    // section still self-gates on its own key inside, so this widens the
+    // door, never the controls.
+    if (pageId === 'review' && getPermissionTier('audit_log') !== 'none') return true
+    if (pageId === 'settings' && (getPermissionTier('users') !== 'none' || getPermissionTier('backup') !== 'none')) return true
     // 'settings'/'receipt_settings' page (this session, alongside
     // routes/settings.ts's new per-field business_identity/sales_policy
     // gating): a user granted only one of the narrower settings

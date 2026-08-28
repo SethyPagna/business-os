@@ -329,7 +329,8 @@ function UsersMobileSkeletonCards() {
 export default function Users() {
   const { t, notify, hasPermission, user: currentUser } = useApp()
   const { syncChannel } = useSync()
-  const isActive = useIsPageActive('users')
+  // E4: renders inside the Settings hub now.
+  const isActive = useIsPageActive('settings')
   const loadedOnceRef = useRef(false)
   const loadRequestRef = useRef(0)
   const loadWatchdogRef = useRef<number | null>(null)

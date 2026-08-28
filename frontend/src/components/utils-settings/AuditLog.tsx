@@ -325,7 +325,8 @@ function DetailRow({ label, value, mono = false }: DetailRowProps) {
 
 export default function AuditLog() {
   const { t, user, hasPermission } = useApp()
-  const isActive = useIsPageActive('audit_log')
+  // E3: renders inside Review & Logs now -- lifecycle keys on that page.
+  const isActive = useIsPageActive('review')
   const [logs, setLogs] = useState<AuditLogRow[]>([])
   const [search, setSearch] = useState('')
   const [yearFilter, setYearFilter] = useState('all')

@@ -1450,7 +1450,8 @@ const MemoBackupOverview = memo(BackupOverview)
 export default function Backup() {
   const { t, notify, hasPermission, user } = useApp()
   const copy = useCopy(t)
-  const isActive = useIsPageActive('backup')
+  // E4: renders inside the Settings hub now.
+  const isActive = useIsPageActive('settings')
   const [historyReady, setHistoryReady] = useState(false)
   const actionHistory = useActionHistory({ limit: 3, notify, scope: 'backup', enabled: historyReady, user }) as ActionHistoryValue
   const [loading, setLoading] = useState<BackupAction>('')

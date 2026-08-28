@@ -52,20 +52,20 @@ export const NAV_ITEMS: NavigationItem[] = [
   { id: 'returns', key: 'returns', permission: 'returns' },
   { id: 'fees', key: 'fees', permission: 'fees' },
   { id: 'contacts', key: 'contacts', permission: 'contacts' },
-  { id: 'users', key: 'users', permission: 'users' },
+  // users/audit_log/backup nav entries removed (E3/E4): their components
+  // are sections of Review & Logs / Settings now; canAccessPage opens the
+  // host pages for their grant-holders.
   // Review/Approval queue -- step (3) of the "Permissions UI redesign"
   // item, Full Access only, same gate pattern Users already uses (see
   // that item's own note on why the review page needs its own explicit
   // grant rather than falling back to any section's own tier).
   { id: 'review', key: 'review', permission: 'review' },
-  { id: 'audit_log', key: 'audit_log', permission: 'audit_log' },
   // 'settings': matches AppContext.tsx's PAGE_PERMISSIONS guard for this
   // page, loosened from 'all' -- the inline receipt fields on the main
   // Settings page (tax_rate, footer) were already reachable by any
   // 'settings' user, so gating the standalone page behind super-admin-only
   // 'all' was an inconsistency rather than an intentional restriction.
   { id: 'receipt_settings', key: 'receipt_settings', permission: 'settings' },
-  { id: 'backup', key: 'backup', permission: 'backup' },
   { id: 'settings', key: 'settings', permission: 'settings' },
   // Library is now view-by-default for any authenticated user (this
   // session's explicit ask) -- browsing/previewing needs no permission at

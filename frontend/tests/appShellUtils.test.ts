@@ -41,7 +41,12 @@ runTest('admin path helpers map direct admin URLs to app pages', () => {
   assert.equal(getAdminPageFromPath('/products'), 'products')
   assert.equal(getAdminPageFromPath('/inventory/movements'), 'inventory')
   assert.equal(getAdminPageFromPath('/point-of-sale'), 'pos')
-  assert.equal(getAdminPageFromPath('/audit-log'), 'audit_log')
+  // E3 (Part 403): the standalone audit page merged into Review & Logs --
+  // the old URL keeps working by landing on the host page (which opens
+  // its Audit section for this segment).
+  assert.equal(getAdminPageFromPath('/audit-log'), 'review')
+  assert.equal(getAdminPageFromPath('/users'), 'settings')
+  assert.equal(getAdminPageFromPath('/backup'), 'settings')
   assert.equal(getAdminPageFromPath('/fees'), 'fees')
   assert.equal(getAdminPageFromPath('/login'), '')
 })
