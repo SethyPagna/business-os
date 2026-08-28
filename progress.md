@@ -656,7 +656,8 @@ deep-linkable tabs.*
 
 ### Phase H — Exports/imports everywhere
 
-- [ ] H1. Export button on every page opens an options dialog: by summary / by actions /
+- [~] H1 **[CLAIMED: session a7, with X5 + C4 folded in — the export unit]**.
+  Export button on every page opens an options dialog: by summary / by actions /
   detailed full coverage — options derived from what that page actually does (Products:
   catalog, stock changes, batches; Sales: receipts, line items, fees, delivery incl. C-
   fields staff-only; Branches: per-branch stock; Review & Logs: filtered audit slice).
