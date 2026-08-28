@@ -102,11 +102,30 @@ function matchProduct(
 ): { product: UnifiedStockCatalogProduct | null; conflict: string | null } {
   const barcodeMatches = barcode ? products.filter((product) => key(product.barcode) === key(barcode)) : []
   if (barcodeMatches.length) {
-    const sameName = name ? barcodeMatches.filter((product) => key(product.name) === key(name)) : barcodeMatches
-    const candidates = sameName.length ? sameName : barcodeMatches
-    if (candidates.length === 1) return { product: candidates[0], conflict: null }
-    return { product: null, conflict: `Barcode ${barcode} matches ${candidates.length} products; choose the exact product before importing.` }
+    // Identity rule: same name + same barcode = the SAME product; same
+    // barcode + a DIFFERENT name = a separate product (shared/promo
+    // barcodes are real). So a named row only ever attaches to a
+    // name-compatible barcode match -- when none is compatible this is NOT
+    // a match at all and the row proceeds as a create of its own product
+    // (identityKey `new:name|barcode`), exactly what classifyProducts does
+    // for the same collision. The old fallback here attached the row to a
+    // lone different-name product, putting its stock on the wrong item.
+    if (name) {
+      const sameName = barcodeMatches.filter((product) => key(product.name) === key(name))
+      if (sameName.length === 1) return { product: sameName[0], conflict: null }
+      if (sameName.length > 1) return { product: null, conflict: `Barcode ${barcode} + name "${name}" match ${sameName.length} products (duplicate rows in the catalog); merge them before importing.` }
+      return { product: null, conflict: null }
+    }
+    if (barcodeMatches.length === 1) return { product: barcodeMatches[0], conflict: null }
+    return { product: null, conflict: `Barcode ${barcode} matches ${barcodeMatches.length} products; add the product name so the right one is chosen.` }
   }
+  // A row that CARRIES a barcode nothing in the catalog has is a new
+  // name+barcode identity pair: same name + different barcode = child row
+  // (a separate product) under the identity rule, so it must NOT attach to
+  // a same-name product that has some other (or no) barcode -- it creates
+  // its own product instead, same as classifyProducts' detail-signature
+  // fallback decides for the identical situation.
+  if (barcode) return { product: null, conflict: null }
   const nameMatches = name ? products.filter((product) => key(product.name) === key(name)) : []
   if (nameMatches.length === 1) return { product: nameMatches[0], conflict: null }
   if (nameMatches.length > 1) return { product: null, conflict: `Name "${name}" matches ${nameMatches.length} products; add a barcode or choose the exact product.` }

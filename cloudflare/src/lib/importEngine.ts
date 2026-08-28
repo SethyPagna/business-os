@@ -2011,27 +2011,71 @@ export function getInventoryImportAction(policyJson: string | null | undefined):
   }
 }
 
-async function classifyInventory(db: D1Compat, rows: ParsedCsvRow[], inventoryAction?: InventoryImportAction | null): Promise<ImportRowResult[]> {
+export async function classifyInventory(db: D1Compat, rows: ParsedCsvRow[], inventoryAction?: InventoryImportAction | null): Promise<ImportRowResult[]> {
   const products = await db
     .prepare(`SELECT id, sku, barcode, name, stock_quantity, cost_price_usd, cost_price_khr FROM products`)
     .all<{ id: number; sku: string | null; barcode: string | null; name: string | null; stock_quantity: number; cost_price_usd: number | null; cost_price_khr: number | null }>()
   const branches = await db.prepare(`SELECT id, name FROM branches`).all<{ id: number; name: string }>()
-  const bySku = new Map<string, (typeof products)[number]>()
-  const byBarcode = new Map<string, (typeof products)[number]>()
+  // Identity rule (same shape as classifyProducts): an sku/barcode can be
+  // legitimately reused across DIFFERENT-name products, so these maps hold
+  // every candidate instead of last-write-wins, and a row that names its
+  // product only ever attaches to a name-compatible candidate. The old
+  // single-value maps silently put an adjustment on whichever same-barcode
+  // product happened to load last -- wrong-product stock changes with no
+  // error.
+  const bySku = new Map<string, (typeof products)[number][]>()
+  const byBarcode = new Map<string, (typeof products)[number][]>()
+  const byName = new Map<string, (typeof products)[number] | null>() // null = ambiguous (several products share the name)
   for (const product of products) {
-    if (str(product.sku)) bySku.set(lower(product.sku), product)
-    if (str(product.barcode)) byBarcode.set(lower(product.barcode), product)
+    if (str(product.sku)) { const k = lower(product.sku); bySku.set(k, [...(bySku.get(k) || []), product]) }
+    if (str(product.barcode)) { const k = lower(product.barcode); byBarcode.set(k, [...(byBarcode.get(k) || []), product]) }
+    const nameKey = normalizeProductGroupName(product.name)
+    if (nameKey) byName.set(nameKey, byName.has(nameKey) ? null : product)
   }
   const branchByName = new Map<string, number>()
   for (const branch of branches) branchByName.set(lower(branch.name), branch.id)
+
+  const pickCompatible = (candidates: (typeof products)[number][] | undefined, rowName: string): { product: (typeof products)[number] | null; message: string | null } => {
+    if (!candidates?.length) return { product: null, message: null }
+    if (!rowName) {
+      if (candidates.length === 1) return { product: candidates[0], message: null }
+      return { product: null, message: `Matches ${candidates.length} different products -- add the product name so the right one is chosen.` }
+    }
+    const compatible = candidates.filter((candidate) => normalizeProductGroupName(candidate.name) === normalizeProductGroupName(rowName))
+    if (compatible.length === 1) return { product: compatible[0], message: null }
+    if (compatible.length > 1) return { product: null, message: `Matches ${compatible.length} duplicate products with this same name -- merge them before importing.` }
+    return { product: null, message: `Belongs to a different product ("${candidates[0].name || 'unnamed'}") -- not "${rowName}". Stock adjustments never attach across names.` }
+  }
 
   const results: ImportRowResult[] = []
   for (const row of rows) {
     const sku = str(row.sku || row.product_sku)
     const barcode = str(row.barcode)
-    const product = (sku && bySku.get(lower(sku))) || (barcode && byBarcode.get(lower(barcode))) || null
+    const rowName = str(row.name || row.product_name)
+    let product: (typeof products)[number] | null = null
+    let resolveError: string | null = null
+    if (sku) {
+      const picked = pickCompatible(bySku.get(lower(sku)), rowName)
+      product = picked.product
+      if (picked.message) resolveError = `SKU "${sku}": ${picked.message}`
+    }
+    if (!product && !resolveError && barcode) {
+      const picked = pickCompatible(byBarcode.get(lower(barcode)), rowName)
+      product = picked.product
+      if (picked.message) resolveError = `Barcode "${barcode}": ${picked.message}`
+    }
+    // Name-only fallback, unambiguous matches only -- same as classifySales.
+    // Only for rows with NO sku/barcode at all: a row that carries one which
+    // matched nothing (or a different-name product) is a different identity,
+    // not "close enough".
+    if (!product && !resolveError && !sku && !barcode && rowName) {
+      product = byName.get(normalizeProductGroupName(rowName)) || null
+      if (!product && byName.get(normalizeProductGroupName(rowName)) === null) {
+        resolveError = `Name "${rowName}" matches several products -- add the barcode so the right one is chosen.`
+      }
+    }
     if (!product) {
-      results.push({ rowNumber: row._rowNumber, action: 'error', identifier: sku || barcode || null, existingId: null, message: 'Product not found for sku/barcode', changes: {}, data: row })
+      results.push({ rowNumber: row._rowNumber, action: 'error', identifier: sku || barcode || rowName || null, existingId: null, message: resolveError || 'Product not found for sku/barcode', changes: {}, data: row })
       continue
     }
     // 'add'/'remove' templates always carry a plain positive quantity (how
@@ -2242,14 +2286,27 @@ export async function classifySales(db: D1Compat, rows: ParsedCsvRow[]): Promise
   const products = await db
     .prepare(`SELECT id, sku, barcode, name, selling_price_usd, selling_price_khr, cost_price_usd, cost_price_khr FROM products`)
     .all<{ id: number; sku: string | null; barcode: string | null; name: string | null; selling_price_usd: number; selling_price_khr: number; cost_price_usd: number | null; cost_price_khr: number | null }>()
-  const bySku = new Map<string, (typeof products)[number]>()
-  const byBarcode = new Map<string, (typeof products)[number]>()
+  // Same collision-aware identity resolution as classifyInventory above
+  // (and classifyProducts): sku/barcode maps keep every candidate, and a
+  // row that names its product only attaches to a name-compatible one --
+  // the old single-value byBarcode put a sale line on whichever
+  // same-barcode product loaded last. byName keys use
+  // normalizeProductGroupName so "same name" means the same thing here as
+  // in every other import path.
+  const bySku = new Map<string, (typeof products)[number][]>()
+  const byBarcode = new Map<string, (typeof products)[number][]>()
   const byName = new Map<string, (typeof products)[number] | null>()
   for (const product of products) {
-    if (str(product.sku)) bySku.set(lower(product.sku), product)
-    if (str(product.barcode)) byBarcode.set(lower(product.barcode), product)
-    const nameKey = lower(product.name)
+    if (str(product.sku)) { const k = lower(product.sku); bySku.set(k, [...(bySku.get(k) || []), product]) }
+    if (str(product.barcode)) { const k = lower(product.barcode); byBarcode.set(k, [...(byBarcode.get(k) || []), product]) }
+    const nameKey = normalizeProductGroupName(product.name)
     if (nameKey) byName.set(nameKey, byName.has(nameKey) ? null : product)
+  }
+  const pickSaleProduct = (candidates: (typeof products)[number][] | undefined, rowName: string): (typeof products)[number] | null => {
+    if (!candidates?.length) return null
+    if (!rowName) return candidates.length === 1 ? candidates[0] : null
+    const compatible = candidates.filter((candidate) => normalizeProductGroupName(candidate.name) === normalizeProductGroupName(rowName))
+    return compatible.length === 1 ? compatible[0] : null
   }
 
   const branches = await db.prepare(`SELECT id, name FROM branches`).all<{ id: number; name: string }>()
@@ -2411,7 +2468,9 @@ export async function classifySales(db: D1Compat, rows: ParsedCsvRow[]): Promise
       const sku = str(row.sku || row.product_sku)
       const barcode = str(row.barcode)
       const productName = str(row.name || row.product_name)
-      const product = (sku && bySku.get(lower(sku))) || (barcode && byBarcode.get(lower(barcode))) || (productName && byName.get(lower(productName))) || null
+      const product = (sku ? pickSaleProduct(bySku.get(lower(sku)), productName) : null)
+        || (barcode ? pickSaleProduct(byBarcode.get(lower(barcode)), productName) : null)
+        || (productName ? byName.get(normalizeProductGroupName(productName)) || null : null)
       if (!product) {
         error = `Product not found for sku/barcode/name "${sku || barcode || productName}"`
         break
@@ -3655,6 +3714,74 @@ export async function markJobFailed(db: D1Compat, jobId: string, message: string
 // chunk's, not just the last), so it is correct whether the job ran in one
 // pass or many. Caller does its own cache-invalidation/broadcast first (the
 // channels differ by type); this only writes the terminal job row.
+// D6b: after an apply that created or updated products, category/brand are
+// unified inside every same-name group the job TOUCHED (any member with
+// updated_at >= the job's start), and only those -- an import must not
+// silently rewrite groups it never went near. Rule (progress.md D6b): the
+// most frequent non-empty value in the group wins; on a tie, the value held
+// by the group's first (lowest-id, i.e. oldest) row -- which also means an
+// existing catalog product beats a just-imported newcomer on a 1v1 tie, so
+// the authoritative template never loses to a single new child row. Blank
+// members are filled with the winner too: "unified" means the whole group
+// carries one value. Runs on the LAST chunk only, so cross-window groups
+// (rows of one name split across chunks) are all present in the table by
+// the time it looks.
+export async function unifyTouchedProductGroups(db: D1Compat, cutoff: string): Promise<number> {
+  const products = await db
+    .prepare(`SELECT id, name, category, brand, updated_at FROM products WHERE is_active = 1`)
+    .all<{ id: number; name: string | null; category: string | null; brand: string | null; updated_at: string | null }>()
+  const groups = new Map<string, typeof products>()
+  for (const product of products) {
+    const key = normalizeProductGroupName(product.name)
+    if (!key) continue
+    const list = groups.get(key)
+    if (list) list.push(product)
+    else groups.set(key, [product])
+  }
+
+  const pickWinner = (members: typeof products, field: 'category' | 'brand'): string | null => {
+    const counts = new Map<string, number>()
+    for (const member of members) {
+      const value = String(member[field] ?? '').trim()
+      if (value) counts.set(value, (counts.get(value) || 0) + 1)
+    }
+    if (!counts.size) return null
+    const top = Math.max(...counts.values())
+    const tied = new Set([...counts.entries()].filter(([, n]) => n === top).map(([value]) => value))
+    if (tied.size === 1) return [...tied][0]
+    for (const member of [...members].sort((a, b) => a.id - b.id)) {
+      const value = String(member[field] ?? '').trim()
+      if (tied.has(value)) return value
+    }
+    return [...tied][0]
+  }
+
+  const statements: Array<{ sql: string; params: Record<string, unknown> }> = []
+  let changedGroups = 0
+  for (const members of groups.values()) {
+    if (members.length < 2) continue
+    if (!members.some((member) => (member.updated_at || '') >= cutoff)) continue
+    let groupChanged = false
+    for (const field of ['category', 'brand'] as const) {
+      const winner = pickWinner(members, field)
+      if (!winner) continue
+      for (const member of members) {
+        if (String(member[field] ?? '').trim() === winner) continue
+        statements.push({
+          sql: `UPDATE products SET ${field} = @value, updated_at = CURRENT_TIMESTAMP WHERE id = @id`,
+          params: { value: winner, id: member.id },
+        })
+        groupChanged = true
+      }
+    }
+    if (groupChanged) changedGroups += 1
+  }
+  for (let i = 0; i < statements.length; i += 50) {
+    await db.batch(statements.slice(i, i + 50))
+  }
+  return changedGroups
+}
+
 async function finalizeImportApply(
   db: D1Compat,
   jobId: string,
@@ -3663,6 +3790,7 @@ async function finalizeImportApply(
   applyMarks: Record<string, number>,
   queueLatencyMs: number | undefined,
   deactivatedCount: number,
+  unifiedGroupCount = 0,
 ): Promise<{ applied: number; failed: number }> {
   const finalCounts = await db.prepare(`SELECT action, COUNT(*) AS n FROM import_job_rows WHERE job_id = @id AND phase = 'apply' GROUP BY action`)
     .all<{ action: RowAction; n: number }>({ id: jobId })
@@ -3697,6 +3825,7 @@ async function finalizeImportApply(
   summary.warned = warnedApply
   summary.total = totalUnits
   if (deactivatedCount > 0) summary.deactivated = deactivatedCount
+  if (unifiedGroupCount > 0) summary.groupsUnified = unifiedGroupCount
   summary.timings = {
     ...priorTimings,
     apply: {
@@ -4004,7 +4133,13 @@ async function applyStockActionsSinglePass(
   await broadcast(env, 'sales', { action: 'import', jobId }).catch(() => {})
   sw.lap('cacheInvalidateMs')
 
-  const outcome = await finalizeImportApply(db, jobId, totalUnits, startedAtMs, sw.marks, queueLatencyMs, 0)
+  // D6b applies here too: a §12 sheet can CREATE products (child rows with
+  // no category/brand of their own), and those must adopt their name
+  // group's values the same as a products-file import would give them.
+  const stockJobRow = await db.prepare(`SELECT started_at FROM import_jobs WHERE id = @id`).get<{ started_at: string | null }>({ id: jobId })
+  const unifiedGroupCount = stockJobRow?.started_at ? await unifyTouchedProductGroups(db, stockJobRow.started_at) : 0
+
+  const outcome = await finalizeImportApply(db, jobId, totalUnits, startedAtMs, sw.marks, queueLatencyMs, 0, unifiedGroupCount)
   console.log('[import-timing] stock-action apply done', jobId, outcome)
   return outcome
 }
@@ -4230,7 +4365,11 @@ async function applyStockActionsContinuation(
   await broadcast(env, 'sales', { action: 'import', jobId }).catch(() => {})
   sw.lap('cacheInvalidateMs')
   await saveChunkState(db, jobId, cursor, state)
-  const outcome = await finalizeImportApply(db, jobId, totalRows, state.startedAtMs ?? startedAtMs, sw.marks, queueLatencyMs, 0)
+  // Same D6b tail as the single-pass path -- runs once, on the final
+  // continuation window only, after every created child row exists.
+  const contJobRow = await db.prepare(`SELECT started_at FROM import_jobs WHERE id = @id`).get<{ started_at: string | null }>({ id: jobId })
+  const unifiedGroupCount = contJobRow?.started_at ? await unifyTouchedProductGroups(db, contJobRow.started_at) : 0
+  const outcome = await finalizeImportApply(db, jobId, totalRows, state.startedAtMs ?? startedAtMs, sw.marks, queueLatencyMs, 0, unifiedGroupCount)
   console.log('[import-timing] stock-action apply done', jobId, outcome)
   return outcome
 }
@@ -5025,6 +5164,14 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
       deactivatedCount = result.changes || 0
     }
 
+    // D6b group unification -- see unifyTouchedProductGroups. After the
+    // replace_all deactivation on purpose: a deactivated row is no longer
+    // part of any group and must not vote on its group's category/brand.
+    let unifiedGroupCount = 0
+    if (job.type === 'products') {
+      unifiedGroupCount = await unifyTouchedProductGroups(db, jobRow.started_at || nowIso)
+    }
+
     // Last chunk: cache invalidation + broadcast, once, now that every
     // chunk has committed.
     //
@@ -5065,7 +5212,7 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
     // EVERY chunk (not just this last one) -- see runImportAnalyze's
     // finalize step for the same reasoning. Shared so the dedicated
     // stock-actions apply path can never disagree with this one.
-    const outcome = await finalizeImportApply(db, jobId, totalUnits, state.startedAtMs, sw.marks, queueLatencyMs, deactivatedCount)
+    const outcome = await finalizeImportApply(db, jobId, totalUnits, state.startedAtMs, sw.marks, queueLatencyMs, deactivatedCount, unifiedGroupCount)
     console.log('[import-timing] apply done', jobId, outcome)
     return outcome
   } catch (error) {

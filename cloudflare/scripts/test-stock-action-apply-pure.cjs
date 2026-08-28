@@ -95,7 +95,7 @@ assert.strictEqual(typeof runImportApply, 'function', 'runImportApply must be ex
 function makeDb() {
   const sqlite = new Database(':memory:')
   sqlite.exec(`
-    CREATE TABLE products (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT, barcode TEXT, unit TEXT,
+    CREATE TABLE products (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT, barcode TEXT, unit TEXT, category TEXT, brand TEXT,
       selling_price_usd REAL DEFAULT 0, special_price_usd REAL DEFAULT 0, cost_price_usd REAL DEFAULT 0,
       stock_quantity REAL DEFAULT 0, is_active INTEGER DEFAULT 1, client_request_id TEXT,
       created_at TEXT, updated_at TEXT);
