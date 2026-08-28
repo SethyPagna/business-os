@@ -185,6 +185,74 @@ check('CRLF line endings survive ranged reads, including a split \\r\\n pair', (
   }
 })
 
+check('a BOM-prefixed upload cannot spawn a phantom row at a window boundary', () => {
+  // Production bug (Aug 28): every upload carries a UTF-8 BOM
+  // (uploadImportJobCsv prepends one), and TextDecoder WITHOUT
+  // { ignoreBOM: true } silently consumes it -- so the engine's stripBom
+  // measured bomBytes = 0 while the raw file still held 3 BOM bytes. The
+  // persisted byte cursor came up 3 bytes short and the SECOND window
+  // re-read the previous row's last 3 bytes, emitting them as a phantom
+  // one-field row (the "48" product; total_rows 12,094 for a 12,093-row
+  // file). This harness mirrors ensureSourceRowsMaterialized's decode + bom
+  // accounting exactly and must agree with the whole-file parse at every
+  // window size.
+  const bomAware = new TextDecoder('utf-8', { ignoreBOM: true })
+  const parseByRangesEngineStyle = (bytes, windowBytes, maxRows = 3) => {
+    const total = bytes.byteLength
+    const out = []
+    let byteOffset = 0
+    let inQuotes = false
+    let guard = 0
+    while (byteOffset < total) {
+      if (guard++ > 100000) throw new Error('no forward progress -- would spin forever in production')
+      let size = windowBytes
+      // The regex below strips a LITERAL U+FEFF (invisible in most editors)
+      // -- same contract as importCsv.ts's stripBom.
+      const stripLeadingBom = (text) => text.replace(/^﻿/, '')
+      let slice = bomAware.decode(bytes.slice(byteOffset, byteOffset + size))
+      let bomBytes = 0
+      if (byteOffset === 0) {
+        const stripped = stripLeadingBom(slice)
+        bomBytes = byteLen(slice) - byteLen(stripped)
+        slice = stripped
+      }
+      let reachedEof = byteOffset + Math.min(size, total - byteOffset) >= total
+      let w = parseDelimitedRowsWindow(slice, ',', 0, inQuotes, maxRows, reachedEof)
+      while (!w.rows.length && !reachedEof) {
+        size *= 4
+        slice = bomAware.decode(bytes.slice(byteOffset, byteOffset + size))
+        if (byteOffset === 0) {
+          const stripped = stripLeadingBom(slice)
+          bomBytes = byteLen(slice) - byteLen(stripped)
+          slice = stripped
+        }
+        reachedEof = byteOffset + Math.min(size, total - byteOffset) >= total
+        w = parseDelimitedRowsWindow(slice, ',', 0, inQuotes, maxRows, reachedEof)
+      }
+      out.push(...w.rows)
+      const consumed = byteLen(slice.slice(0, w.nextIndex))
+      if (consumed <= 0 && !w.done) throw new Error('zero-byte advance')
+      byteOffset += bomBytes + consumed
+      inQuotes = w.nextInQuotes
+      if (w.done) break
+    }
+    return out
+  }
+  const reference = parseWhole(TRICKY)
+  // The prepended quoted string is a LITERAL U+FEFF BOM (invisible).
+  const withBom = encoder.encode('﻿' + TRICKY)
+  // 4 = the smallest window that can hold the whole 3-byte BOM plus one
+  // real byte; the engine's real window is 256 KB, always far larger.
+  for (let windowBytes = 4; windowBytes <= byteLen(TRICKY) + 8; windowBytes += 1) {
+    const ranged = parseByRangesEngineStyle(withBom, windowBytes)
+    assert.deepEqual(ranged, reference, `window of ${windowBytes} bytes over a BOM-prefixed file disagreed with the whole-file parse`)
+  }
+  // The engine's ranged decode must keep the BOM visible so its stripBom can
+  // MEASURE it -- this is the line whose absence caused the phantom row.
+  const engine = fs.readFileSync(path.join(cloudflareRoot, 'src', 'lib', 'importEngine.ts'), 'utf8')
+  assert.match(engine, /new TextDecoder\('utf-8', \{ ignoreBOM: true \}\)\.decode\(buffer\)/, 'fetchCsvRange must decode with ignoreBOM so bomBytes can be measured')
+})
+
 // ---- the engine must actually use the ranged path ----
 check('ensureSourceRowsMaterialized reads a range, not the whole object', () => {
   const engine = fs.readFileSync(path.join(cloudflareRoot, 'src', 'lib', 'importEngine.ts'), 'utf8')

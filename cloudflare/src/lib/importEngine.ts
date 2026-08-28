@@ -664,7 +664,16 @@ async function fetchCsvRange(
   // whether this slice reaches EOF.
   const totalSize = Number((object as { size?: number }).size ?? 0)
   return {
-    text: new TextDecoder('utf-8').decode(buffer),
+    // ignoreBOM (confusingly named: it means "do NOT consume the BOM") keeps
+    // a leading U+FEFF in the decoded string. Without it the decoder ATE the
+    // BOM before ensureSourceRowsMaterialized's stripBom could measure it, so
+    // bomBytes computed 0 while the raw file still carried 3 BOM bytes -- the
+    // persisted byte cursor came up 3 bytes short and the SECOND window
+    // re-read the last 3 bytes of the previous row, emitting them as a
+    // phantom one-field row (production: the "48" product every BOM-prefixed
+    // catalog upload gained at the first window boundary; total_rows 12,094
+    // for a 12,093-row file, 8,728 for the 8,727-row one).
+    text: new TextDecoder('utf-8', { ignoreBOM: true }).decode(buffer),
     fileName: file.original_name || 'import.csv',
     totalSize,
     bytesRead: buffer.byteLength,
