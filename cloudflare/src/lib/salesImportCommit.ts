@@ -1,7 +1,13 @@
 import type { D1Compat } from './db'
 import { RETURN_STATUSES } from './salesStatus'
 
-export const MAX_HISTORICAL_SALE_LINES = 50
+// 100, not 50, since Part 388: the real Aug-28 sales history holds three
+// genuine receipts of 86/58/55 lines (big wholesale orders) that the old
+// 50-line cap rejected wholesale -- measured, the only three receipts the
+// full-migration simulation could not store. 100 admits every real
+// receipt seen while still bounding a malformed group; the Workers-Paid
+// plan's raised cpu_ms makes the larger atomic write comfortable.
+export const MAX_HISTORICAL_SALE_LINES = 100
 
 type SaleImportData = Record<string, unknown> & {
   items: Array<Record<string, unknown>>
