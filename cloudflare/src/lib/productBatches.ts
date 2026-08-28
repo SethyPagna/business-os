@@ -187,6 +187,16 @@ export async function receiveBatchStock(db: D1Compat, input: {
   // product's batch list (the price-unlock case in routes/inventory.ts)
   // can't silently top up the wrong product's batch.
   batchId?: number | null
+  // Migration 0062/0065: who this lot was bought from, what one unit cost,
+  // and whether it is paid or on credit (with the due date the admin is
+  // reminded about). First attribution sticks on top-ups, same rule as the
+  // import writer: a lot's recorded supplier/cost is never overwritten by a
+  // later receive, only filled where still NULL.
+  supplierId?: number | null
+  supplierName?: string | null
+  unitCostUsd?: number | null
+  paymentStatus?: 'paid' | 'credit' | null
+  creditDueDate?: string | null
 }): Promise<{ batchId: number; created: boolean; batchNumber: number | null; lotCode: string }> {
   const resolvedIso = normalizeToIsoDate(input.receivedDate) || new Date().toISOString().slice(0, 10)
   const lotCode = dateToBatchCode(resolvedIso) as string
@@ -217,8 +227,8 @@ export async function receiveBatchStock(db: D1Compat, input: {
     // later deactivated.
     const nextNumber = await nextBatchNumber(db, input.productId)
     const inserted = await db.prepare(`
-      INSERT INTO product_batches (variant_product_id, batch_key, lot_code, expiry_date, received_at, is_active, notes, batch_number)
-      VALUES (@productId, @batchKey, @lotCode, @expiryDate, @receivedAt, 1, @notes, @batchNumber)
+      INSERT INTO product_batches (variant_product_id, batch_key, lot_code, expiry_date, received_at, is_active, notes, batch_number, supplier_id, supplier_name, unit_cost_usd, payment_status, credit_due_date)
+      VALUES (@productId, @batchKey, @lotCode, @expiryDate, @receivedAt, 1, @notes, @batchNumber, @supplierId, @supplierName, @unitCostUsd, @paymentStatus, @creditDueDate)
     `).run({
       productId: input.productId,
       batchKey,
@@ -227,6 +237,11 @@ export async function receiveBatchStock(db: D1Compat, input: {
       receivedAt: resolvedIso,
       notes: input.notes || null,
       batchNumber: nextNumber,
+      supplierId: input.supplierId ?? null,
+      supplierName: input.supplierName?.trim() || null,
+      unitCostUsd: Number.isFinite(Number(input.unitCostUsd)) && Number(input.unitCostUsd) >= 0 ? Number(input.unitCostUsd) : null,
+      paymentStatus: input.paymentStatus === 'paid' || input.paymentStatus === 'credit' ? input.paymentStatus : null,
+      creditDueDate: input.paymentStatus === 'credit' ? (input.creditDueDate || null) : null,
     })
     batchId = Number(inserted.lastInsertRowid)
     batchNumber = nextNumber
@@ -240,6 +255,15 @@ export async function receiveBatchStock(db: D1Compat, input: {
     const params: Record<string, unknown> = { id: batchId }
     if (input.expiryDate !== undefined && input.expiryDate !== null) { updates.push('expiry_date = @expiryDate'); params.expiryDate = input.expiryDate }
     if (input.notes !== undefined && input.notes !== null) { updates.push('notes = @notes'); params.notes = input.notes }
+    // First attribution sticks (same rule as the import writer): a top-up
+    // only FILLS supplier/cost/payment fields that are still NULL.
+    if (input.supplierName?.trim()) { updates.push('supplier_name = COALESCE(supplier_name, @supplierName)', 'supplier_id = COALESCE(supplier_id, @supplierId)'); params.supplierName = input.supplierName.trim(); params.supplierId = input.supplierId ?? null }
+    if (Number.isFinite(Number(input.unitCostUsd)) && Number(input.unitCostUsd) >= 0) { updates.push('unit_cost_usd = COALESCE(unit_cost_usd, @unitCostUsd)'); params.unitCostUsd = Number(input.unitCostUsd) }
+    if (input.paymentStatus === 'paid' || input.paymentStatus === 'credit') {
+      updates.push('payment_status = COALESCE(payment_status, @paymentStatus)', 'credit_due_date = COALESCE(credit_due_date, @creditDueDate)')
+      params.paymentStatus = input.paymentStatus
+      params.creditDueDate = input.paymentStatus === 'credit' ? (input.creditDueDate || null) : null
+    }
     await db.prepare(`UPDATE product_batches SET ${updates.join(', ')} WHERE id = @id`).run(params)
   }
 

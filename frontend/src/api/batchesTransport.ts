@@ -25,6 +25,14 @@ export type ReceiveBatchPayload = {
   expiryDate?: string | null
   receivedDate?: string | null
   notes?: string | null
+  // Migrations 0062/0065: supplier attribution, per-lot unit cost, and the
+  // paid / on-credit choice (credit requires the due date the admin
+  // reminder is built on — the server enforces it too).
+  supplierId?: number | null
+  supplierName?: string | null
+  unitCostUsd?: number | null
+  paymentStatus?: 'paid' | 'credit' | null
+  creditDueDate?: string | null
 }
 
 // The lot a cashier picked at checkout for a batch-tracked product -- see
@@ -109,6 +117,11 @@ export function receiveBatchStock(payload: ReceiveBatchPayload): Promise<{ succe
       expiry_date: payload.expiryDate || null,
       received_date: payload.receivedDate || null,
       notes: payload.notes || null,
+      supplier_id: payload.supplierId ?? null,
+      supplier_name: payload.supplierName || null,
+      unit_cost_usd: payload.unitCostUsd ?? null,
+      payment_status: payload.paymentStatus || null,
+      credit_due_date: payload.creditDueDate || null,
     }),
     null,
     true,

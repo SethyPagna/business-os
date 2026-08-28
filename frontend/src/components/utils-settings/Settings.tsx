@@ -1592,6 +1592,7 @@ export default function Settings() {
               {[
                 ['notifications_inventory_enabled', 'notification_inventory_alerts', 'Inventory alerts', 'notification_inventory_alerts_desc', 'Low stock and out of stock warnings'],
                 ['notifications_expiry_enabled', 'notification_expiry_alerts', 'Expiry alerts', 'notification_expiry_alerts_desc', 'Products expiring soon or already expired'],
+                ['notifications_supplier_credit_enabled', 'notification_supplier_credit_alerts', 'Supplier credit alerts', 'notification_supplier_credit_alerts_desc', 'Unpaid supplier purchases coming due or overdue'],
                 ['notifications_sales_enabled', 'notification_sales_alerts', 'Sales alerts', 'notification_sales_alerts_desc', 'Awaiting payment and delivery follow-up'],
                 ['notifications_loyalty_enabled', 'notification_loyalty_alerts', 'Loyalty alerts', 'notification_loyalty_alerts_desc', 'Customers who reached your points target'],
                 ['notifications_portal_enabled', 'notification_portal_alerts', 'Customer portal alerts', 'notification_portal_alerts_desc', 'Other customer portal notices (pending Share & Reward submissions always appear, regardless of this setting)'],
@@ -1626,6 +1627,25 @@ export default function Settings() {
                 />
                 <p className="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
                   {t('notification_expiry_days_desc') || 'Notify when a product expiry date is inside this many days.'}
+                </p>
+              </div>
+              <div className="sm:col-span-2">
+                <label htmlFor="settings-notifications-supplier-credit-days" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                  {t('notification_supplier_credit_days') || 'Supplier credit reminder window'}
+                </label>
+                <input
+                  id="settings-notifications-supplier-credit-days"
+                  name="notifications_supplier_credit_days"
+                  className="input max-w-xs"
+                  type="number"
+                  min="0"
+                  max="365"
+                  step="1"
+                  value={form.notifications_supplier_credit_days || '7'}
+                  onChange={(event) => setValue('notifications_supplier_credit_days', event.target.value)}
+                />
+                <p className="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
+                  {t('notification_supplier_credit_days_desc') || 'Remind when an on-credit supplier purchase is due inside this many days (overdue ones always show).'}
                 </p>
               </div>
               <div className="sm:col-span-2">

@@ -107,6 +107,8 @@ async function loadPreferences(env: Env) {
     portalEnabled: normalizeBoolean(map.notifications_portal_enabled, true),
     systemEnabled: normalizeBoolean(map.notifications_system_enabled, true),
     expiryEnabled: normalizeBoolean(map.notifications_expiry_enabled, true),
+    supplierCreditEnabled: normalizeBoolean(map.notifications_supplier_credit_enabled, true),
+    supplierCreditDays: Math.max(0, Math.min(365, Math.floor(toNumber(map.notifications_supplier_credit_days, 7)))),
     expiryDays: Math.max(0, Math.min(3650, Math.floor(toNumber(map.notifications_expiry_days, 30)))),
     loyaltyThreshold: Math.max(1, Math.floor(toNumber(map.notifications_loyalty_threshold, 100))),
     // Minutes an unresolved alert stays suppressed from the bell badge
@@ -220,6 +222,59 @@ async function buildExpirySection(env: Env, days: number): Promise<NotificationS
     ]),
     items,
     enabledKey: 'notifications_expiry_enabled',
+  }
+}
+
+// Supplier credit reminders (migration 0065; user, Aug 28): a batch received
+// ON CREDIT carries a due date exactly so the admin is reminded — overdue
+// first, then anything due within the window. Marking the batch paid
+// (PATCH /api/batches/:id payment_status='paid') clears it from here.
+async function buildSupplierCreditSection(env: Env, days: number): Promise<NotificationSection | null> {
+  const db = getDb(env)
+  const rows = await db.prepare(`
+    SELECT pb.id, pb.credit_due_date, pb.supplier_name, pb.lot_code, pb.unit_cost_usd,
+      p.name AS product_name,
+      CAST(julianday(pb.credit_due_date) - julianday('now') AS INTEGER) AS days_until_due
+    FROM product_batches pb
+    JOIN products p ON p.id = pb.variant_product_id
+    WHERE pb.is_active = 1
+      AND pb.payment_status = 'credit'
+      AND pb.credit_due_date IS NOT NULL AND trim(pb.credit_due_date) != ''
+      AND julianday(pb.credit_due_date) - julianday('now') <= @days
+    ORDER BY pb.credit_due_date ASC
+    LIMIT 50
+  `).all<{ id: number; credit_due_date: string; supplier_name: string | null; lot_code: string | null; unit_cost_usd: number | null; product_name: string; days_until_due: number }>({ days })
+  if (!rows.length) return null
+
+  let overdueCount = 0
+  const items: NotificationItem[] = rows.map((row) => {
+    const daysLeft = Number(row.days_until_due || 0)
+    if (daysLeft < 0) overdueCount += 1
+    const who = row.supplier_name || 'supplier'
+    return {
+      id: `supplier-credit-${row.id}`,
+      label: `${who} — ${row.product_name}${row.lot_code ? ` (${row.lot_code})` : ''}`,
+      meta: daysLeft < 0
+        ? `Overdue ${Math.abs(daysLeft)} day${Math.abs(daysLeft) === 1 ? '' : 's'} — due ${row.credit_due_date}`
+        : `Due in ${daysLeft} day${daysLeft === 1 ? '' : 's'} (${row.credit_due_date})`,
+      kind: daysLeft < 0 ? 'supplier_credit_overdue' : 'supplier_credit_due',
+      tone: daysLeft < 0 ? 'danger' as const : 'warning' as const,
+      pageId: 'inventory',
+    }
+  })
+  const dueSoonCount = rows.length - overdueCount
+
+  return {
+    id: 'supplier_credit',
+    label: 'Supplier credit',
+    pageId: 'inventory',
+    count: rows.length,
+    summary: joinSummary([
+      overdueCount ? `${overdueCount} overdue` : null,
+      dueSoonCount ? `${dueSoonCount} due within ${days} days` : null,
+    ]),
+    items,
+    enabledKey: 'notifications_supplier_credit_enabled',
   }
 }
 
@@ -547,6 +602,9 @@ app.get('/summary', async (c) => {
   if (hasPermission(user, 'customer_portal')) tasks.push(buildPortalSection(c.env))
   if (hasAnyPermission(user, ['products', 'contacts', 'inventory', 'sales'])) tasks.push(buildImportsSection(c.env, user))
   if (preferences.systemEnabled && hasPermission(user, 'backup')) tasks.push(Promise.resolve(buildSystemSection(preferences.driveSyncEnabled)))
+  // Supplier credit reminders (0065): admin-facing money obligations —
+  // gated on inventory access like the other stock sections.
+  if (preferences.supplierCreditEnabled && hasPermission(user, 'inventory')) tasks.push(buildSupplierCreditSection(c.env, preferences.supplierCreditDays))
   // Device approve/reject notifications intentionally removed: the
   // device-approval gate itself is fully disabled at login (see
   // deviceTrust.ts's requiresDeviceApproval, which always returns false --

@@ -68,27 +68,33 @@ app.get('/', async (c) => {
 app.post('/', async (c) => {
   const db = getDb(c.env)
   const user = c.get('user')
-  const body = await c.req.json<{
+  type ReceiveBody = {
     product_id?: number
     branch_id?: number
     quantity?: number
     expiry_date?: string | null
     received_date?: string | null
     notes?: string | null
-  }>().catch(() => ({} as {
-    product_id?: number
-    branch_id?: number
-    quantity?: number
-    expiry_date?: string | null
-    received_date?: string | null
-    notes?: string | null
-  }))
+    supplier_id?: number | null
+    supplier_name?: string | null
+    unit_cost_usd?: number | null
+    payment_status?: string | null
+    credit_due_date?: string | null
+  }
+  const body = await c.req.json<ReceiveBody>().catch(() => ({} as ReceiveBody))
 
   const productId = Number(body.product_id)
   const branchId = Number(body.branch_id)
   const quantity = Number(body.quantity)
   if (!productId || !branchId) return c.json({ error: 'product_id and branch_id are required' }, 400)
   if (!Number.isFinite(quantity) || quantity <= 0) return c.json({ error: 'quantity must be a positive number' }, 400)
+  // Paid vs on-credit (migration 0065). A credit purchase without a due
+  // date has no reminder to fire, which defeats the point of recording it.
+  const paymentStatus = body.payment_status === 'paid' || body.payment_status === 'credit' ? body.payment_status : null
+  const creditDueDate = String(body.credit_due_date || '').slice(0, 10) || null
+  if (paymentStatus === 'credit' && !creditDueDate) {
+    return c.json({ error: 'A credit purchase needs its due date — that is what the admin reminder is built on.' }, 400)
+  }
 
   const product = await db.prepare('SELECT id, name FROM products WHERE id = ?').get<{ id: number; name: string }>([productId])
   if (!product) return c.json({ error: 'Product not found' }, 404)
@@ -101,6 +107,11 @@ app.post('/', async (c) => {
     expiryDate: body.expiry_date || null,
     receivedDate: body.received_date || null,
     notes: body.notes || null,
+    supplierId: Number.isFinite(Number(body.supplier_id)) && Number(body.supplier_id) > 0 ? Number(body.supplier_id) : null,
+    supplierName: body.supplier_name || null,
+    unitCostUsd: body.unit_cost_usd == null ? null : Number(body.unit_cost_usd),
+    paymentStatus,
+    creditDueDate,
   })
 
   // receiveBatchStock now also moves branch_stock/products.stock_quantity
@@ -177,6 +188,31 @@ app.patch('/:id', async (c) => {
     params.received_at = resolvedIso
     params.batch_key = code
     params.lot_code = code
+  }
+  // Supplier credit lifecycle (0065): the admin can flip credit -> paid
+  // (clearing the reminder), fix the due date, or correct supplier/cost —
+  // an explicit EDIT overrides, unlike the receive path's fill-if-NULL.
+  const bodyExtra = body as typeof body & { payment_status?: string | null; credit_due_date?: string | null; supplier_name?: string | null; supplier_id?: number | null; unit_cost_usd?: number | null }
+  if (bodyExtra.payment_status !== undefined) {
+    const nextStatus = bodyExtra.payment_status === 'paid' || bodyExtra.payment_status === 'credit' ? bodyExtra.payment_status : null
+    const nextDue = String(bodyExtra.credit_due_date || '').slice(0, 10) || null
+    if (nextStatus === 'credit' && !nextDue) return c.json({ error: 'A credit purchase needs its due date.' }, 400)
+    updates.push('payment_status = @payment_status', 'credit_due_date = @credit_due_date')
+    params.payment_status = nextStatus
+    params.credit_due_date = nextStatus === 'credit' ? nextDue : null
+  } else if (bodyExtra.credit_due_date !== undefined) {
+    updates.push('credit_due_date = @credit_due_date')
+    params.credit_due_date = String(bodyExtra.credit_due_date || '').slice(0, 10) || null
+  }
+  if (bodyExtra.supplier_name !== undefined) {
+    updates.push('supplier_name = @supplier_name', 'supplier_id = @supplier_id')
+    params.supplier_name = String(bodyExtra.supplier_name || '').trim() || null
+    params.supplier_id = Number.isFinite(Number(bodyExtra.supplier_id)) && Number(bodyExtra.supplier_id) > 0 ? Number(bodyExtra.supplier_id) : null
+  }
+  if (bodyExtra.unit_cost_usd !== undefined) {
+    const cost = Number(bodyExtra.unit_cost_usd)
+    updates.push('unit_cost_usd = @unit_cost_usd')
+    params.unit_cost_usd = Number.isFinite(cost) && cost >= 0 ? cost : null
   }
   if (!updates.length) return c.json({ error: 'No fields to update' }, 400)
   updates.push(`updated_at = datetime('now')`)

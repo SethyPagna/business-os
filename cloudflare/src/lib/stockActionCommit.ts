@@ -207,20 +207,21 @@ export async function applyUnifiedStockAdd(db: D1Compat, input: UnifiedStockAddI
     },
     {
       sql: `INSERT OR IGNORE INTO product_batches
-              (variant_product_id, batch_key, lot_code, received_at, is_active, notes, batch_number, supplier_id, supplier_name)
-            SELECT @productId, @batchKey, @lotCode, @receivedAt, 1, @reason, @batchNumber, @supplierId, @supplierName
+              (variant_product_id, batch_key, lot_code, received_at, is_active, notes, batch_number, supplier_id, supplier_name, unit_cost_usd)
+            SELECT @productId, @batchKey, @lotCode, @receivedAt, 1, @reason, @batchNumber, @supplierId, @supplierName, @costPriceUsd
             WHERE ${guard}`,
       params,
     },
     {
       // The add may land on an EXISTING lot (INSERT OR IGNORE above). A lot
-      // with no supplier yet adopts this row's; a supplier already recorded
-      // on the lot wins — first attribution sticks, imports never rewrite it.
+      // with no supplier/cost yet adopts this row's; values already recorded
+      // on the lot win — first attribution sticks, imports never rewrite it.
       sql: `UPDATE product_batches SET
               supplier_name = COALESCE(supplier_name, @supplierName),
-              supplier_id = COALESCE(supplier_id, @supplierId)
+              supplier_id = COALESCE(supplier_id, @supplierId),
+              unit_cost_usd = COALESCE(unit_cost_usd, @costPriceUsd)
             WHERE variant_product_id = @productId AND batch_key = @batchKey
-              AND @supplierName IS NOT NULL AND ${guard}`,
+              AND (@supplierName IS NOT NULL OR @costPriceUsd IS NOT NULL) AND ${guard}`,
       params,
     },
     {

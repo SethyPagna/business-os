@@ -49,6 +49,13 @@ export default function ReceiveBatchModal({
   const [receivedDate, setReceivedDate] = useState(todayIsoDate())
   const [expiryDate, setExpiryDate] = useState('')
   const [notes, setNotes] = useState('')
+  // Supplier + cost + paid/on-credit (migrations 0062/0065): who this lot
+  // came from, what one unit cost, and — when on credit — the due date the
+  // admin reminder is built on.
+  const [supplierName, setSupplierName] = useState('')
+  const [unitCost, setUnitCost] = useState('')
+  const [paymentStatus, setPaymentStatus] = useState<'' | 'paid' | 'credit'>('')
+  const [creditDueDate, setCreditDueDate] = useState('')
   const [saving, setSaving] = useState(false)
 
   // Reset the form whenever a different product is opened (or the modal is
@@ -61,6 +68,10 @@ export default function ReceiveBatchModal({
     setReceivedDate(todayIsoDate())
     setExpiryDate('')
     setNotes('')
+    setSupplierName('')
+    setUnitCost('')
+    setPaymentStatus('')
+    setCreditDueDate('')
   }, [product?.id])
 
   if (!product) return null
@@ -75,6 +86,10 @@ export default function ReceiveBatchModal({
     const parsedQuantity = Number(quantity)
     if (!parsedBranchId) { notify(tr('choose_branch', 'Choose a branch'), 'error'); return }
     if (!Number.isFinite(parsedQuantity) || parsedQuantity <= 0) { notify(tr('quantity_must_be_positive', 'Quantity must be a positive number'), 'error'); return }
+    if (paymentStatus === 'credit' && !creditDueDate) {
+      notify(tr('credit_needs_due_date', 'A credit purchase needs its due date — the admin reminder is built on it.'), 'error')
+      return
+    }
 
     setSaving(true)
     try {
@@ -85,6 +100,10 @@ export default function ReceiveBatchModal({
         expiryDate: expiryDate || null,
         receivedDate: receivedDate || null,
         notes: notes.trim() || null,
+        supplierName: supplierName.trim() || null,
+        unitCostUsd: unitCost.trim() === '' ? null : Number(unitCost),
+        paymentStatus: paymentStatus || null,
+        creditDueDate: paymentStatus === 'credit' ? creditDueDate : null,
       })
       if (res?.success === false) {
         notify((res as any)?.error || tr('receive_batch_failed', 'Failed to receive batch stock'), 'error')
@@ -168,13 +187,69 @@ export default function ReceiveBatchModal({
               />
             </label>
           </div>
+          {/* Supplier + cost on one row (this lot's own facts) */}
+          <div className="grid gap-2 sm:grid-cols-2">
+            <label className="block">
+              <span className="mb-1 block text-[11px] font-medium text-gray-600 dark:text-gray-400">{t('supplier') || 'Supplier'}</span>
+              <input
+                className="input w-full text-sm"
+                value={supplierName}
+                onChange={(event) => setSupplierName(event.target.value)}
+                placeholder={tr('supplier_optional_placeholder', 'Who this lot was bought from')}
+                autoComplete="off"
+              />
+            </label>
+            <label className="block">
+              <span className="mb-1 block text-[11px] font-medium text-gray-600 dark:text-gray-400">{tr('unit_cost_usd', 'Unit cost (USD)')}</span>
+              <input
+                className="input w-full text-sm"
+                type="number"
+                min="0"
+                step="any"
+                inputMode="decimal"
+                value={unitCost}
+                onChange={(event) => setUnitCost(event.target.value)}
+                placeholder="0.00"
+              />
+            </label>
+          </div>
+          {/* Paid vs on-credit; the due date appears only when credit and is
+              required — it is what the admin reminder is built on. */}
+          <div>
+            <span className="mb-1 block text-[11px] font-medium text-gray-600 dark:text-gray-400">{tr('payment_to_supplier', 'Payment to supplier')}</span>
+            <div className="flex items-center gap-2">
+              <div className="inline-flex overflow-hidden rounded-lg border border-gray-200 text-xs font-medium dark:border-gray-600">
+                {([['', tr('payment_unset', '—')], ['paid', tr('paid', 'Paid')], ['credit', tr('on_credit', 'On credit')]] as const).map(([value, label], index) => (
+                  <button
+                    key={value || 'unset'}
+                    type="button"
+                    className={`px-3 py-1.5 ${index > 0 ? 'border-l border-gray-200 dark:border-gray-600' : ''} ${paymentStatus === value ? 'bg-blue-600 text-white' : 'text-gray-500 hover:bg-gray-50 dark:hover:bg-gray-700'}`}
+                    onClick={() => setPaymentStatus(value)}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+              {paymentStatus === 'credit' ? (
+                <label className="flex min-w-0 flex-1 items-center gap-1.5">
+                  <span className="flex-shrink-0 text-[11px] text-gray-500">{tr('due', 'Due')}</span>
+                  <input
+                    className="input min-w-0 flex-1 text-sm"
+                    type="date"
+                    value={creditDueDate}
+                    onChange={(event) => setCreditDueDate(event.target.value)}
+                  />
+                </label>
+              ) : null}
+            </div>
+          </div>
           <label className="block">
             <span className="mb-1 block text-[11px] font-medium text-gray-600 dark:text-gray-400">{t('notes') || 'Notes'}</span>
             <textarea
               className="input min-h-[70px] w-full text-sm"
               value={notes}
               onChange={(event) => setNotes(event.target.value)}
-              placeholder={tr('receive_batch_notes_placeholder', 'Optional -- supplier, PO number, condition, etc.')}
+              placeholder={tr('receive_batch_notes_placeholder', 'Optional -- PO number, condition, etc.')}
             />
           </label>
         </div>
