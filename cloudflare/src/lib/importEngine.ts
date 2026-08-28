@@ -79,7 +79,7 @@ import { countUnifiedStockConfirmationRows, sealUnifiedStockAnalyzeConflicts } f
 import { applyUnifiedStockAdd, applyUnifiedStockSale, ensureUnifiedStockProduct, type UnifiedStockSaleLine } from './stockActionCommit'
 import { parseStockAction, saleGroupKeyFor } from './stockActionResolver'
 import { applyHistoricalSaleImport, MAX_HISTORICAL_SALE_LINES } from './salesImportCommit'
-import type { UnifiedStockResolvedRow } from './stockActionImport'
+import { getUnifiedStockMode, type UnifiedStockResolvedRow } from './stockActionImport'
 import {
   normalizeImageMatchKey,
   MAX_IMAGES_PER_PRODUCT,
@@ -2837,6 +2837,26 @@ type ImportChunkState = {
   // job's summary_json; the bulk that made this column expensive is gone.
   imageMatch?: ImportImageMatchSummaryJson & { hasRenamePlan?: boolean }
   startedAtMs?: number // real wall-clock start of this whole (possibly many-invocation) phase run, for an honest summary_json.timings totalMs at the end
+  // DIRECT-mode stock-action continuation (see applyStockActionsJob): the
+  // apply runs as windowed CLASSIFY invocations (chunk_cursor = source-row
+  // cursor) followed by windowed DISPATCH invocations. Everything here is
+  // small bookkeeping — the per-row plans live in import_job_rows, and the
+  // idempotency that makes crash/redelivery safe lives in the writers'
+  // import_stock_action_commits seals, never in this blob.
+  stock?: {
+    phase: 'classify' | 'dispatch'
+    // sale-group bookkeeping, stable across windows: key -> group_index
+    // written to import_job_rows.group_index so a receipt scattered over
+    // the sheet can be fetched back as one unit by SQL.
+    groupSeq: Record<string, number>
+    nextGroupIndex: number
+    // sale-group keys poisoned by an unresolvable sibling line — the whole
+    // receipt fails together, never partially (same rule as single-pass).
+    poisoned: string[]
+    // dispatch cursor: highest row_number whose unit has been dispatched
+    // (or needed no dispatch). Rows at or below it are settled.
+    dispatchAfterRow: number
+  }
   // NOTE: the cross-chunk in-file duplicate ledger USED to live here as
   // `productSignatures`. It moved to the import_job_row_signatures table in
   // migration 0051 -- as a state blob it was parsed and re-serialised in
@@ -3703,6 +3723,135 @@ async function finalizeImportApply(
 // finalization and broadcasts instead of balancing at the platform ceiling.
 const STOCK_ACTION_MAX_ROWS = 480 // 60 maximum groups x the writer's 8-line receipt ceiling
 const STOCK_ACTION_MAX_UNITS = 60
+// DIRECT-mode continuation (M4): a direct sheet is not capped at 60 units --
+// it classifies and dispatches in windows across self-enqueued invocations,
+// each invocation staying inside the same per-invocation budgets the caps
+// above encode (the 1,000-internal-subrequest ceiling does NOT rise on
+// Workers Paid; what Paid buys is cpu_ms for the larger classify windows).
+// RECONCILE mode keeps the single-pass caps on purpose: its deltas compare
+// against ONE consistent live-stock snapshot, which windowed classification
+// across invocations cannot promise.
+const STOCK_ACTION_DIRECT_MAX_ROWS = 25000
+const STOCK_ACTION_CLASSIFY_WINDOW = 480
+const STOCK_ACTION_DISPATCH_READ = 400
+// Pathology guards for the small continuation-state blob: distinct sale
+// groups and poisoned groups are operator-scale numbers; a sheet exceeding
+// these is malformed and fails loudly instead of growing job state.
+const STOCK_ACTION_MAX_SALE_GROUPS = 5000
+const STOCK_ACTION_MAX_POISONED_GROUPS = 2000
+
+// Shared per-unit dispatchers — the ONE orchestration both the reconcile
+// single-pass and the direct continuation path use, so the two modes cannot
+// drift on how a unit reaches the atomic writers in stockActionCommit.ts.
+type ResolveSupplierId = (name: string) => Promise<number | null>
+
+function makeSupplierIdResolver(db: D1Compat): ResolveSupplierId {
+  // Supplier linkage for add rows (migration 0062): match the as-entered
+  // name against the suppliers table once per distinct name. Match-only —
+  // an unknown supplier keeps its text on the batch with a NULL id, and an
+  // import never auto-creates supplier contacts.
+  const cache = new Map<string, number | null>()
+  return async (name: string) => {
+    const normalized = name.toLowerCase()
+    if (cache.has(normalized)) return cache.get(normalized) ?? null
+    const row = await db.prepare(`SELECT id FROM suppliers WHERE lower(trim(name)) = @name LIMIT 1`)
+      .get<{ id: number }>({ name: normalized })
+    const id = row?.id ?? null
+    cache.set(normalized, id)
+    return id
+  }
+}
+
+// Dispatches one single-row unit (create / add / noop). Mutates r.action to
+// 'skip' for a noop and r.existingId for a create; throws on failure and the
+// caller records the error on the row.
+async function dispatchStockActionSingle(
+  db: D1Compat,
+  jobId: string,
+  r: StockActionImportResult,
+  resolveSupplierId: ResolveSupplierId,
+): Promise<void> {
+  const resolved = r.data as unknown as UnifiedStockResolvedRow
+  const plan = resolved.plan!
+  if (plan.kind === 'noop') { r.action = 'skip'; return }
+  const branchNameById = new Map(resolved.branchRefs.map((ref) => [ref.branchId, ref.branchName]))
+  let productId = resolved.productId ?? 0
+  if (plan.kind === 'create') {
+    const ensured = await ensureUnifiedStockProduct(db, {
+      jobId,
+      identityKey: resolved.identityKey,
+      productName: resolved.productName,
+      barcode: resolved.barcode || null,
+      sellingPriceUsd: resolved.sellingPriceUsd,
+      vipPriceUsd: resolved.vipPriceUsd,
+      costPriceUsd: resolved.costPriceUsd,
+    })
+    productId = ensured.productId
+    r.existingId = productId
+  }
+  if (!(productId > 0)) throw new Error('Could not resolve the product for this row.')
+  // A create is an add that also inserts the product; both dispatch the
+  // row's positive per-branch quantities through the same atomic writer.
+  const adds = plan.branchActions.filter((a) => a.direction === 'add' && a.quantity > 0)
+  const supplierName = String(resolved.supplier || '').trim() || null
+  const supplierId = supplierName ? await resolveSupplierId(supplierName) : null
+  for (const add of adds) {
+    await applyUnifiedStockAdd(db, {
+      jobId,
+      rowNumber: resolved.rowNumber,
+      productId,
+      productName: resolved.productName,
+      branchId: add.branchId,
+      branchName: branchNameById.get(add.branchId) || '',
+      quantity: add.quantity,
+      date: resolved.date,
+      batchLabel: resolved.batchLabel,
+      sellingPriceUsd: resolved.sellingPriceUsd,
+      vipPriceUsd: resolved.vipPriceUsd,
+      costPriceUsd: resolved.costPriceUsd,
+      supplierName,
+      supplierId,
+    })
+  }
+}
+
+// Dispatches one whole sale group (= one receipt) atomically. Returns
+// 'skipped' when the group resolves to no sale lines; throws on failure and
+// the caller fails every row of the group together.
+async function dispatchStockActionSaleGroup(
+  db: D1Compat,
+  jobId: string,
+  saleGroupKey: string,
+  groupRows: StockActionImportResult[],
+): Promise<'applied' | 'skipped'> {
+  const first = groupRows[0].data as unknown as UnifiedStockResolvedRow
+  const lines: UnifiedStockSaleLine[] = []
+  for (const r of groupRows) {
+    const resolved = r.data as unknown as UnifiedStockResolvedRow
+    const branchNameById = new Map(resolved.branchRefs.map((ref) => [ref.branchId, ref.branchName]))
+    // A single sheet row may sell from both branches; each becomes its own
+    // sale line so the writer's FIFO/oversell guard runs per branch.
+    for (const sale of resolved.plan!.branchActions) {
+      if (sale.direction !== 'sale' || sale.quantity <= 0) continue
+      lines.push({
+        rowNumber: resolved.rowNumber,
+        productId: resolved.productId ?? 0,
+        productName: resolved.productName,
+        branchId: sale.branchId,
+        branchName: branchNameById.get(sale.branchId) || '',
+        quantity: sale.quantity,
+        sellingPriceUsd: Number(resolved.sellingPriceUsd ?? 0),
+        costPriceUsd: resolved.costPriceUsd,
+        batchLabel: resolved.batchLabel,
+      })
+    }
+  }
+  if (!lines.length) return 'skipped'
+  await applyUnifiedStockSale(db, { jobId, saleGroupKey, date: first.date, lines })
+  return 'applied'
+}
+
+const STOCK_POISON_MESSAGE = 'This sale group has a line that could not be resolved; a receipt is never imported partially — fix or remove that line, then re-import.'
 
 /**
  * Applies a unified "Add / Sale / Reconciliation" stock-action import.
@@ -3740,11 +3889,42 @@ export async function applyStockActionsJob(
     return { applied: 0, failed: 0 }
   }
 
-  const decisions = getDecisionMap(policyJson)
   const rowCount = await db.prepare(`SELECT COUNT(*) AS n FROM import_job_source_rows WHERE job_id = @id`).get<{ n: number }>({ id: jobId })
-  if (Number(rowCount?.n || 0) > STOCK_ACTION_MAX_ROWS) {
-    throw new Error(`This stock import has ${Number(rowCount?.n || 0)} rows; split it into files of at most ${STOCK_ACTION_MAX_ROWS} rows before importing.`)
+  const totalRows = Number(rowCount?.n || 0)
+  if (!totalRows) throw new Error('No CSV file uploaded for this job')
+
+  // Mode routing (M4). RECONCILE keeps the proven single pass and its caps:
+  // its deltas compare every row against ONE consistent live-stock snapshot,
+  // which windowed classification across invocations cannot promise. DIRECT
+  // rows ARE the change, so the sheet classifies and dispatches in windows
+  // across self-enqueued continuation invocations — no total-unit ceiling,
+  // only per-invocation budgets, with the writers' idempotency seals making
+  // crash/redelivery resume exact.
+  if (getUnifiedStockMode(policyJson) === 'reconcile') {
+    if (totalRows > STOCK_ACTION_MAX_ROWS) {
+      throw new Error(`This stock import has ${totalRows} rows; reconcile mode checks every row against one live-stock snapshot, so split it into files of at most ${STOCK_ACTION_MAX_ROWS} rows before importing.`)
+    }
+    return await applyStockActionsSinglePass(env, db, jobId, policyJson, sw, queueLatencyMs, startedAtMs)
   }
+  if (totalRows > STOCK_ACTION_DIRECT_MAX_ROWS) {
+    throw new Error(`This stock import has ${totalRows} rows; the ceiling is ${STOCK_ACTION_DIRECT_MAX_ROWS} rows per file — split it before importing.`)
+  }
+  return await applyStockActionsContinuation(env, db, jobId, policyJson, sw, queueLatencyMs, startedAtMs, totalRows)
+}
+
+// The original single-pass engine, now reconcile-only. Classifies the whole
+// (capped) sheet at once, groups in memory, dispatches through the shared
+// per-unit helpers, persists every row and finalizes — all in one invocation.
+async function applyStockActionsSinglePass(
+  env: Env,
+  db: D1Compat,
+  jobId: string,
+  policyJson: string | null,
+  sw: ReturnType<typeof makeStopwatch>,
+  queueLatencyMs: number | undefined,
+  startedAtMs: number,
+): Promise<{ applied: number; failed: number }> {
+  const decisions = getDecisionMap(policyJson)
   const rows = await readAllMaterializedRows(db, jobId, decisions)
   const totalUnits = rows.length
   if (!totalUnits) throw new Error('No CSV file uploaded for this job')
@@ -3789,67 +3969,12 @@ export async function applyStockActionsJob(
   }
 
   const fail = (r: StockActionImportResult, message: string) => { r.action = 'error'; r.message = message }
-
-  // Supplier linkage for add rows (migration 0062): match the as-entered
-  // name against the suppliers table once per distinct name. Match-only —
-  // an unknown supplier keeps its text on the batch with a NULL id, and an
-  // import never auto-creates supplier contacts.
-  const supplierIdCache = new Map<string, number | null>()
-  const resolveSupplierId = async (name: string): Promise<number | null> => {
-    const normalized = name.toLowerCase()
-    if (supplierIdCache.has(normalized)) return supplierIdCache.get(normalized) ?? null
-    const row = await db.prepare(`SELECT id FROM suppliers WHERE lower(trim(name)) = @name LIMIT 1`)
-      .get<{ id: number }>({ name: normalized })
-    const id = row?.id ?? null
-    supplierIdCache.set(normalized, id)
-    return id
-  }
+  const resolveSupplierId = makeSupplierIdResolver(db)
 
   // --- Single rows: create / add / noop -----------------------------------
   for (const r of singles) {
-    const resolved = resolvedOf(r)
-    const plan = resolved.plan!
-    if (plan.kind === 'noop') { r.action = 'skip'; continue }
-    const branchNameById = new Map(resolved.branchRefs.map((ref) => [ref.branchId, ref.branchName]))
     try {
-      let productId = resolved.productId ?? 0
-      if (plan.kind === 'create') {
-        const ensured = await ensureUnifiedStockProduct(db, {
-          jobId,
-          identityKey: resolved.identityKey,
-          productName: resolved.productName,
-          barcode: resolved.barcode || null,
-          sellingPriceUsd: resolved.sellingPriceUsd,
-          vipPriceUsd: resolved.vipPriceUsd,
-          costPriceUsd: resolved.costPriceUsd,
-        })
-        productId = ensured.productId
-        r.existingId = productId
-      }
-      if (!(productId > 0)) { fail(r, 'Could not resolve the product for this row.'); continue }
-      // A create is an add that also inserts the product; both dispatch the
-      // row's positive per-branch quantities through the same atomic writer.
-      const adds = plan.branchActions.filter((a) => a.direction === 'add' && a.quantity > 0)
-      const supplierName = String(resolved.supplier || '').trim() || null
-      const supplierId = supplierName ? await resolveSupplierId(supplierName) : null
-      for (const add of adds) {
-        await applyUnifiedStockAdd(db, {
-          jobId,
-          rowNumber: resolved.rowNumber,
-          productId,
-          productName: resolved.productName,
-          branchId: add.branchId,
-          branchName: branchNameById.get(add.branchId) || '',
-          quantity: add.quantity,
-          date: resolved.date,
-          batchLabel: resolved.batchLabel,
-          sellingPriceUsd: resolved.sellingPriceUsd,
-          vipPriceUsd: resolved.vipPriceUsd,
-          costPriceUsd: resolved.costPriceUsd,
-          supplierName,
-          supplierId,
-        })
-      }
+      await dispatchStockActionSingle(db, jobId, r, resolveSupplierId)
     } catch (error) {
       fail(r, error instanceof Error ? error.message : 'Stock action failed')
     }
@@ -3858,34 +3983,12 @@ export async function applyStockActionsJob(
   // --- Sale groups: one atomic receipt each -------------------------------
   for (const [saleGroupKey, groupRows] of saleGroups) {
     if (poisoned.has(saleGroupKey)) {
-      for (const r of groupRows) fail(r, 'This sale group has a line that could not be resolved; a receipt is never imported partially — fix or remove that line, then re-import.')
+      for (const r of groupRows) fail(r, STOCK_POISON_MESSAGE)
       continue
     }
-    const first = resolvedOf(groupRows[0])
-    const lines: UnifiedStockSaleLine[] = []
-    for (const r of groupRows) {
-      const resolved = resolvedOf(r)
-      const branchNameById = new Map(resolved.branchRefs.map((ref) => [ref.branchId, ref.branchName]))
-      // A single sheet row may sell from both branches; each becomes its own
-      // sale line so the writer's FIFO/oversell guard runs per branch.
-      for (const sale of resolved.plan!.branchActions) {
-        if (sale.direction !== 'sale' || sale.quantity <= 0) continue
-        lines.push({
-          rowNumber: resolved.rowNumber,
-          productId: resolved.productId ?? 0,
-          productName: resolved.productName,
-          branchId: sale.branchId,
-          branchName: branchNameById.get(sale.branchId) || '',
-          quantity: sale.quantity,
-          sellingPriceUsd: Number(resolved.sellingPriceUsd ?? 0),
-          costPriceUsd: resolved.costPriceUsd,
-          batchLabel: resolved.batchLabel,
-        })
-      }
-    }
-    if (!lines.length) { for (const r of groupRows) { r.action = 'skip' } continue }
     try {
-      await applyUnifiedStockSale(db, { jobId, saleGroupKey, date: first.date, lines })
+      const outcome = await dispatchStockActionSaleGroup(db, jobId, saleGroupKey, groupRows)
+      if (outcome === 'skipped') for (const r of groupRows) r.action = 'skip'
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Sale group failed'
       for (const r of groupRows) fail(r, message)
@@ -3906,6 +4009,187 @@ export async function applyStockActionsJob(
   sw.lap('cacheInvalidateMs')
 
   const outcome = await finalizeImportApply(db, jobId, totalUnits, startedAtMs, sw.marks, queueLatencyMs, 0)
+  console.log('[import-timing] stock-action apply done', jobId, outcome)
+  return outcome
+}
+
+// DIRECT-mode continuation engine (M4). Two windowed phases, resumed across
+// self-enqueued queue invocations via chunk_state:
+//
+//   CLASSIFY — windows of source rows are classified against the live
+//   catalog and persisted one-for-one into import_job_rows (plan included).
+//   Sale rows get a stable group_index (chunk-state groupSeq) so a receipt
+//   scattered across the sheet can be fetched back as ONE unit by SQL; a
+//   blocked sale line poisons its would-be group exactly like single-pass.
+//
+//   DISPATCH — walks the persisted rows in row order, dispatching at most
+//   STOCK_ACTION_MAX_UNITS units per invocation through the SAME shared
+//   helpers single-pass uses. A sale group dispatches when its lowest row
+//   is reached (later member rows cost nothing). Crash or queue redelivery
+//   at ANY point re-dispatches at-most-one window, and every writer is
+//   sealed per unit in import_stock_action_commits, so a resume can never
+//   double-add stock or duplicate a receipt.
+//
+// Totals are computed at finalize FROM the persisted rows, so continuation
+// needs no fragile accumulators.
+async function applyStockActionsContinuation(
+  env: Env,
+  db: D1Compat,
+  jobId: string,
+  policyJson: string | null,
+  sw: ReturnType<typeof makeStopwatch>,
+  queueLatencyMs: number | undefined,
+  startedAtMs: number,
+  totalRows: number,
+): Promise<{ applied: number; failed: number }> {
+  const decisions = getDecisionMap(policyJson)
+  const { cursor, state } = await getChunkState(db, jobId)
+  if (!state.startedAtMs) state.startedAtMs = startedAtMs
+  const stock = state.stock ?? { phase: 'classify' as const, groupSeq: {}, nextGroupIndex: 0, poisoned: [], dispatchAfterRow: 0 }
+  state.stock = stock
+
+  if (stock.phase === 'classify') {
+    const windowRows = await readMaterializedWindow(db, jobId, cursor, STOCK_ACTION_CLASSIFY_WINDOW, decisions)
+    const results = (await classifyRows(db, 'stock_actions', windowRows, jobId, policyJson)) as StockActionImportResult[]
+    sw.lap('classifyChunkMs')
+
+    const poisonedSet = new Set(stock.poisoned)
+    const groupIndexByRowNumber = new Map<number, number>()
+    for (const r of results) {
+      const resolved = r.data as unknown as UnifiedStockResolvedRow
+      const plan = resolved.plan
+      if (r.action === 'error' || !plan) {
+        const parsed = parseStockAction(resolved.action)
+        if (parsed.kind === 'sale' && resolved.date) poisonedSet.add(saleGroupKeyFor(resolved.date, parsed.saleOrdinal))
+        continue
+      }
+      if (plan.kind === 'sale' && plan.saleGroupKey) {
+        let groupIndex = stock.groupSeq[plan.saleGroupKey]
+        if (groupIndex === undefined) {
+          groupIndex = stock.nextGroupIndex
+          stock.nextGroupIndex += 1
+          stock.groupSeq[plan.saleGroupKey] = groupIndex
+        }
+        groupIndexByRowNumber.set(r.rowNumber, groupIndex)
+      }
+    }
+    if (Object.keys(stock.groupSeq).length > STOCK_ACTION_MAX_SALE_GROUPS) {
+      throw new Error(`This stock import resolves to more than ${STOCK_ACTION_MAX_SALE_GROUPS} distinct sale receipts; that is beyond operator scale — check the action column, or split the file.`)
+    }
+    if (poisonedSet.size > STOCK_ACTION_MAX_POISONED_GROUPS) {
+      throw new Error(`More than ${STOCK_ACTION_MAX_POISONED_GROUPS} sale groups in this sheet have unresolvable lines; fix the file rather than importing it.`)
+    }
+    stock.poisoned = [...poisonedSet]
+
+    await persistChunkResults(db, jobId, 'apply', results, groupIndexByRowNumber)
+    const nextCursor = cursor + windowRows.length
+    const classifyDone = windowRows.length < STOCK_ACTION_CLASSIFY_WINDOW || nextCursor >= totalRows
+    if (classifyDone) stock.phase = 'dispatch'
+    await saveChunkState(db, jobId, nextCursor, state)
+    await db.prepare(`UPDATE import_jobs SET processed_rows = @n, updated_at = CURRENT_TIMESTAMP WHERE id = @id`)
+      .run({ id: jobId, n: Math.min(nextCursor, totalRows) })
+    console.log('[import-timing] stock-action classify window', jobId, { cursor, nextCursor, totalRows, classifyDone, ...sw.marks })
+    await env.IMPORT_QUEUE.send({ jobId, kind: 'apply' })
+    return { applied: 0, failed: 0 }
+  }
+
+  // ---- DISPATCH phase ----
+  const poisoned = new Set(stock.poisoned)
+  const resolveSupplierId = makeSupplierIdResolver(db)
+  const touched: StockActionImportResult[] = []
+  const touchedGroupIndex = new Map<number, number>()
+  const parseRow = (json: string): StockActionImportResult | null => {
+    try { return JSON.parse(json) as StockActionImportResult } catch { return null }
+  }
+  let unitsDispatched = 0
+  let after = stock.dispatchAfterRow
+  let moreRows = true
+
+  outer: while (unitsDispatched < STOCK_ACTION_MAX_UNITS) {
+    const batch = await db.prepare(`
+      SELECT row_number, group_index, result_json FROM import_job_rows
+      WHERE job_id = @id AND phase = 'apply' AND row_number > @after
+      ORDER BY row_number LIMIT ${STOCK_ACTION_DISPATCH_READ}
+    `).all<{ row_number: number; group_index: number | null; result_json: string }>({ id: jobId, after })
+    if (!batch.length) { moreRows = false; break }
+
+    for (const record of batch) {
+      if (unitsDispatched >= STOCK_ACTION_MAX_UNITS) break outer
+      after = record.row_number
+      const r = parseRow(record.result_json)
+      if (!r) continue
+      const resolved = r.data as unknown as UnifiedStockResolvedRow
+      const plan = resolved?.plan
+      if (r.action === 'error' || r.action === 'skip' || !plan) continue // already settled at classify or by an earlier window
+
+      if (plan.kind === 'sale' && plan.saleGroupKey && record.group_index != null) {
+        // Dispatch the whole receipt when its FIRST row is reached; later
+        // member rows cost nothing. After a crash between the writer's seal
+        // and the row re-persist below, the resumed dispatch re-runs the
+        // writer, whose per-group seal makes it a no-op.
+        const minRow = await db.prepare(`SELECT MIN(row_number) AS m FROM import_job_rows WHERE job_id = @id AND phase = 'apply' AND group_index = @gi`)
+          .get<{ m: number }>({ id: jobId, gi: record.group_index })
+        if (Number(minRow?.m) !== record.row_number) continue
+        const memberRows = await db.prepare(`SELECT row_number, result_json FROM import_job_rows WHERE job_id = @id AND phase = 'apply' AND group_index = @gi ORDER BY row_number`)
+          .all<{ row_number: number; result_json: string }>({ id: jobId, gi: record.group_index })
+        const groupResults = memberRows.map((m) => parseRow(m.result_json)).filter((m): m is StockActionImportResult => !!m && !!(m.data as unknown as UnifiedStockResolvedRow)?.plan)
+        if (!groupResults.length) continue
+        unitsDispatched += 1
+        const markGroup = (mutate: (row: StockActionImportResult) => void) => {
+          for (const member of groupResults) {
+            mutate(member)
+            touched.push(member)
+            touchedGroupIndex.set(member.rowNumber, record.group_index as number)
+          }
+        }
+        if (poisoned.has(plan.saleGroupKey)) {
+          markGroup((row) => { row.action = 'error'; row.message = STOCK_POISON_MESSAGE })
+          continue
+        }
+        try {
+          const outcome = await dispatchStockActionSaleGroup(db, jobId, plan.saleGroupKey, groupResults)
+          if (outcome === 'skipped') markGroup((row) => { row.action = 'skip' })
+        } catch (error) {
+          const message = error instanceof Error ? error.message : 'Sale group failed'
+          markGroup((row) => { row.action = 'error'; row.message = message })
+        }
+        continue
+      }
+
+      // Single unit: create / add / noop.
+      unitsDispatched += 1
+      try {
+        await dispatchStockActionSingle(db, jobId, r, resolveSupplierId)
+        // The helper mutates r.action for a noop; TS's narrowing from the
+        // guard above doesn't see through the call, hence the cast.
+        if ((r.action as RowAction) === 'skip' || r.existingId != null) touched.push(r)
+      } catch (error) {
+        r.action = 'error'
+        r.message = error instanceof Error ? error.message : 'Stock action failed'
+        touched.push(r)
+      }
+    }
+  }
+
+  stock.dispatchAfterRow = after
+  if (touched.length) await persistChunkResults(db, jobId, 'apply', touched, touchedGroupIndex)
+  sw.lap('buildAndWriteStatementsMs')
+
+  if (moreRows) {
+    await saveChunkState(db, jobId, cursor, state)
+    console.log('[import-timing] stock-action dispatch window', jobId, { after, unitsDispatched, ...sw.marks })
+    await env.IMPORT_QUEUE.send({ jobId, kind: 'apply' })
+    return { applied: 0, failed: 0 }
+  }
+
+  // Done — same refresh + finalize tail as single-pass.
+  await bumpVersion(env, 'products').catch(() => {})
+  await broadcast(env, 'products', { action: 'import', jobId }).catch(() => {})
+  await broadcast(env, 'inventory', { action: 'import', jobId }).catch(() => {})
+  await broadcast(env, 'sales', { action: 'import', jobId }).catch(() => {})
+  sw.lap('cacheInvalidateMs')
+  await saveChunkState(db, jobId, cursor, state)
+  const outcome = await finalizeImportApply(db, jobId, totalRows, state.startedAtMs ?? startedAtMs, sw.marks, queueLatencyMs, 0)
   console.log('[import-timing] stock-action apply done', jobId, outcome)
   return outcome
 }

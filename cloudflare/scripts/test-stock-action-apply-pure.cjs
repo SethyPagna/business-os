@@ -174,6 +174,23 @@ function seedJob(sqlite, jobId, rows, policy) {
 const env = { IMPORT_QUEUE: { send: async () => {} } }
 const sw = { lap() {}, marks: {} }
 
+// DIRECT mode is a continuation engine (M4): each invocation does one window
+// of classify or dispatch and self-enqueues the next. This pump simulates
+// Cloudflare Queues delivering those continuation messages until the job
+// stops asking for more; the LAST invocation reports the real totals.
+async function runJobToCompletion(db, jobId, policy, { maxInvocations = 1000 } = {}) {
+  const queue = []
+  const pumpEnv = { IMPORT_QUEUE: { send: async (message) => { queue.push(message) } } }
+  let invocations = 1
+  let out = await applyStockActionsJob(pumpEnv, db, jobId, policy, sw, undefined)
+  while (queue.length) {
+    if (++invocations > maxInvocations) throw new Error('continuation did not terminate')
+    queue.shift()
+    out = await applyStockActionsJob(pumpEnv, db, jobId, policy, sw, undefined)
+  }
+  return { out, invocations }
+}
+
 let failures = 0
 async function test(name, fn) {
   try { await fn(); console.log(`PASS ${name}`) }
@@ -188,7 +205,7 @@ async function test(name, fn) {
     seedJob(sqlite, 'job-add', [
       { _rowNumber: 2, name: 'Serum', barcode: 'S10', shop: '5', warehouse: '', date: '08/27/2026', action: 'add', selling_price: '', vip_price: '', cost_price: '', batch: 'AUG' },
     ], { stock_action_mode: 'direct' })
-    const out = await applyStockActionsJob(env, db, 'job-add', JSON.stringify({ stock_action_mode: 'direct' }), sw, undefined)
+    const { out } = await runJobToCompletion(db, 'job-add', JSON.stringify({ stock_action_mode: 'direct' }))
     assert.deepStrictEqual(out, { applied: 1, failed: 0 })
     assert.strictEqual(sqlite.prepare(`SELECT quantity FROM branch_stock WHERE product_id=10 AND branch_id=1`).get().quantity, 5)
     assert.strictEqual(sqlite.prepare(`SELECT stock_quantity FROM products WHERE id=10`).get().stock_quantity, 5)
@@ -202,7 +219,7 @@ async function test(name, fn) {
     seedJob(sqlite, 'job-new', [
       { _rowNumber: 2, name: 'Brand New Balm', barcode: 'BNB1', shop: '7', warehouse: '', date: '2026-08-27', action: 'create', selling_price: '9', vip_price: '', cost_price: '3', batch: '' },
     ], { stock_action_mode: 'direct' })
-    const out = await applyStockActionsJob(env, db, 'job-new', JSON.stringify({ stock_action_mode: 'direct' }), sw, undefined)
+    const { out } = await runJobToCompletion(db, 'job-new', JSON.stringify({ stock_action_mode: 'direct' }))
     assert.deepStrictEqual(out, { applied: 1, failed: 0 })
     const product = sqlite.prepare(`SELECT id, stock_quantity, selling_price_usd, cost_price_usd FROM products WHERE name='Brand New Balm'`).get()
     assert.ok(product && product.id > 0, 'product created')
@@ -223,7 +240,7 @@ async function test(name, fn) {
     ]
     seedJob(sqlite, 'job-sale', rows, { stock_action_mode: 'direct' })
     const policy = JSON.stringify({ stock_action_mode: 'direct' })
-    const out = await applyStockActionsJob(env, db, 'job-sale', policy, sw, undefined)
+    const { out } = await runJobToCompletion(db, 'job-sale', policy)
     assert.deepStrictEqual(out, { applied: 2, failed: 0 })
     assert.strictEqual(sqlite.prepare(`SELECT COUNT(*) n FROM sales`).get().n, 1, 'one receipt for the group')
     assert.strictEqual(sqlite.prepare(`SELECT COUNT(*) n FROM sale_items`).get().n, 2)
@@ -234,7 +251,7 @@ async function test(name, fn) {
     assert.strictEqual(sqlite.prepare(`SELECT quantity FROM branch_batch_stock WHERE batch_id=202`).get().quantity, 3)
 
     // Whole-job retry (a redelivery / crash-resume) must not double anything.
-    const retry = await applyStockActionsJob(env, db, 'job-sale', policy, sw, undefined)
+    const { out: retry } = await runJobToCompletion(db, 'job-sale', policy)
     assert.deepStrictEqual(retry, { applied: 2, failed: 0 })
     assert.strictEqual(sqlite.prepare(`SELECT COUNT(*) n FROM sales`).get().n, 1, 'retry does not add a second receipt')
     assert.strictEqual(sqlite.prepare(`SELECT quantity FROM branch_stock WHERE product_id=20 AND branch_id=1`).get().quantity, 3)
@@ -252,7 +269,7 @@ async function test(name, fn) {
       { _rowNumber: 3, name: 'Mist', barcode: 'M31', shop: '4', warehouse: '', date: '08/27/2026', action: 'add', selling_price: '', vip_price: '', cost_price: '', batch: '' },
     ]
     seedJob(sqlite, 'job-mix', rows, { stock_action_mode: 'direct' })
-    const out = await applyStockActionsJob(env, db, 'job-mix', JSON.stringify({ stock_action_mode: 'direct' }), sw, undefined)
+    const { out } = await runJobToCompletion(db, 'job-mix', JSON.stringify({ stock_action_mode: 'direct' }))
     assert.strictEqual(out.failed, 1, 'the oversell group is one failed row')
     assert.strictEqual(out.applied, 1, 'the independent add still applied')
     assert.strictEqual(sqlite.prepare(`SELECT COUNT(*) n FROM sales`).get().n, 0, 'no partial receipt from the failed group')
@@ -273,39 +290,96 @@ async function test(name, fn) {
       { _rowNumber: 3, name: 'Ghost Product That Does Not Exist', barcode: 'ZZZ', shop: '1', warehouse: '', date: '08/27/2026', action: 'sale3', selling_price: '10', vip_price: '', cost_price: '', batch: '' },
     ]
     seedJob(sqlite, 'job-poison', rows, { stock_action_mode: 'direct' })
-    const out = await applyStockActionsJob(env, db, 'job-poison', JSON.stringify({ stock_action_mode: 'direct' }), sw, undefined)
+    const { out } = await runJobToCompletion(db, 'job-poison', JSON.stringify({ stock_action_mode: 'direct' }))
     assert.strictEqual(sqlite.prepare(`SELECT COUNT(*) n FROM sales`).get().n, 0, 'no receipt at all -- the good line is not committed alone')
     assert.strictEqual(sqlite.prepare(`SELECT quantity FROM branch_stock WHERE product_id=40 AND branch_id=1`).get().quantity, 20, 'stock untouched')
     assert.ok(out.failed >= 1, 'the group is reported as failed')
   })
 
-  // 6) Free-plan dispatch ceiling -----------------------------------------
-  await test('more than 60 business actions fail before any stock write', async () => {
+  // 6) DIRECT continuation (M4): more than 60 units load across invocations
+  await test('a direct sheet beyond 60 units applies fully across continuation invocations', async () => {
     const { sqlite, db } = makeDb()
     seedProduct(sqlite, { id: 50, name: 'Bounded', barcode: 'B50' })
-    const rows = Array.from({ length: 61 }, (_, index) => ({
+    // 130 add rows = 130 units: one classify window, then three dispatch
+    // windows (60 + 60 + 10). Distinct dates so each row makes its own lot.
+    const rows = Array.from({ length: 130 }, (_, index) => ({
       _rowNumber: index + 2, name: 'Bounded', barcode: 'B50', shop: '1', warehouse: '',
-      date: '08/27/2026', action: 'add', selling_price: '', vip_price: '', cost_price: '', batch: '',
+      date: `2026-0${1 + (index % 6)}-${String(1 + (index % 27)).padStart(2, '0')}`,
+      action: 'add', selling_price: '', vip_price: '', cost_price: '', batch: `L${index}`,
     }))
-    seedJob(sqlite, 'job-units-bound', rows, { stock_action_mode: 'direct' })
-    await assert.rejects(
-      () => applyStockActionsJob(env, db, 'job-units-bound', JSON.stringify({ stock_action_mode: 'direct' }), sw, undefined),
-      /61 actions.*at most 60 actions/,
-    )
-    assert.strictEqual(sqlite.prepare(`SELECT COUNT(*) n FROM inventory_movements`).get().n, 0)
-    assert.strictEqual(sqlite.prepare(`SELECT quantity FROM branch_stock WHERE product_id=50 AND branch_id=1`).get().quantity, 0)
+    seedJob(sqlite, 'job-continue', rows, { stock_action_mode: 'direct' })
+    const { out, invocations } = await runJobToCompletion(db, 'job-continue', JSON.stringify({ stock_action_mode: 'direct' }))
+    assert.deepStrictEqual(out, { applied: 130, failed: 0 })
+    assert.ok(invocations >= 4, `expected multiple continuation invocations, got ${invocations}`)
+    assert.strictEqual(sqlite.prepare(`SELECT quantity FROM branch_stock WHERE product_id=50 AND branch_id=1`).get().quantity, 130)
+    assert.strictEqual(sqlite.prepare(`SELECT COUNT(*) n FROM product_batches WHERE variant_product_id=50`).get().n, 130)
+    assert.strictEqual(sqlite.prepare(`SELECT COUNT(*) n FROM inventory_movements WHERE movement_type='add'`).get().n, 130)
+    assert.strictEqual(sqlite.prepare(`SELECT status FROM import_jobs WHERE id='job-continue'`).get().status, 'completed')
   })
 
-  // 7) Raw-row ceiling prevents one giant sale group bypassing unit count --
-  await test('more than 480 raw rows fail before full-sheet classification', async () => {
+  // 6b) Crash/redelivery mid-dispatch resumes without doubling stock -------
+  await test('a redelivered continuation resumes exactly; no double-adds', async () => {
+    const { sqlite, db } = makeDb()
+    seedProduct(sqlite, { id: 51, name: 'Resumed', barcode: 'R51' })
+    const rows = Array.from({ length: 75 }, (_, index) => ({
+      _rowNumber: index + 2, name: 'Resumed', barcode: 'R51', shop: '1', warehouse: '',
+      date: '2026-03-05', action: 'add', selling_price: '', vip_price: '', cost_price: '', batch: `R${index}`,
+    }))
+    seedJob(sqlite, 'job-resume', rows, { stock_action_mode: 'direct' })
+    const policy = JSON.stringify({ stock_action_mode: 'direct' })
+    // classify invocation + FIRST dispatch window (60 units) only...
+    await applyStockActionsJob(env, db, 'job-resume', policy, sw, undefined)
+    await applyStockActionsJob(env, db, 'job-resume', policy, sw, undefined)
+    // ...then simulate the crashed window's message being REDELIVERED twice
+    // before the run continues to completion.
+    const { out } = await runJobToCompletion(db, 'job-resume', policy)
+    await applyStockActionsJob(env, db, 'job-resume', policy, sw, undefined)
+    assert.deepStrictEqual(out, { applied: 75, failed: 0 })
+    assert.strictEqual(sqlite.prepare(`SELECT quantity FROM branch_stock WHERE product_id=51 AND branch_id=1`).get().quantity, 75, 'resume + redelivery never double-add')
+    assert.strictEqual(sqlite.prepare(`SELECT COUNT(*) n FROM inventory_movements`).get().n, 75)
+  })
+
+  // 7) RECONCILE keeps the single-pass caps (one live-stock snapshot) ------
+  await test('reconcile mode: more than 480 raw rows fail before classification', async () => {
     const { sqlite, db } = makeDb()
     const rows = Array.from({ length: 481 }, (_, index) => ({ _rowNumber: index + 2, name: `Raw ${index}` }))
-    seedJob(sqlite, 'job-rows-bound', rows, { stock_action_mode: 'direct' })
+    seedJob(sqlite, 'job-rows-bound', rows, { stock_action_mode: 'reconcile' })
     await assert.rejects(
-      () => applyStockActionsJob(env, db, 'job-rows-bound', JSON.stringify({ stock_action_mode: 'direct' }), sw, undefined),
+      () => applyStockActionsJob(env, db, 'job-rows-bound', JSON.stringify({ stock_action_mode: 'reconcile' }), sw, undefined),
       /481 rows.*at most 480 rows/,
     )
     assert.strictEqual(sqlite.prepare(`SELECT COUNT(*) n FROM import_job_rows`).get().n, 0)
+  })
+
+  // 7b) Reconcile unit ceiling still guards before any stock write ---------
+  await test('reconcile mode: more than 60 business actions fail before any stock write', async () => {
+    const { sqlite, db } = makeDb()
+    seedProduct(sqlite, { id: 52, name: 'Bounded', barcode: 'B52' })
+    const rows = Array.from({ length: 61 }, (_, index) => ({
+      _rowNumber: index + 2, name: 'Bounded', barcode: 'B52', shop: String(index + 1), warehouse: '',
+      date: '08/27/2026', action: 'add', selling_price: '', vip_price: '', cost_price: '', batch: '',
+    }))
+    seedJob(sqlite, 'job-units-bound', rows, { stock_action_mode: 'reconcile' })
+    await assert.rejects(
+      () => applyStockActionsJob(env, db, 'job-units-bound', JSON.stringify({ stock_action_mode: 'reconcile' }), sw, undefined),
+      /actions.*at most 60 actions/,
+    )
+    assert.strictEqual(sqlite.prepare(`SELECT COUNT(*) n FROM inventory_movements`).get().n, 0)
+    assert.strictEqual(sqlite.prepare(`SELECT quantity FROM branch_stock WHERE product_id=52 AND branch_id=1`).get().quantity, 0)
+  })
+
+  // 7c) The direct-mode ceiling exists too, far higher ---------------------
+  await test('direct mode: more than 25,000 raw rows fail with the split instruction', async () => {
+    const { sqlite, db } = makeDb()
+    sqlite.prepare(`INSERT INTO import_jobs(id, type, policy_json, status, phase, started_at, materialize_done)
+      VALUES ('job-direct-bound', 'stock_actions', '{"stock_action_mode":"direct"}', 'applying', 'applying', datetime('now'), 1)`).run()
+    const insert = sqlite.prepare(`INSERT INTO import_job_source_rows(job_id, sequence, row_number, data_json) VALUES ('job-direct-bound', ?, ?, '{}')`)
+    const bulk = sqlite.transaction(() => { for (let i = 0; i < 25001; i++) insert.run(i, i + 2) })
+    bulk()
+    await assert.rejects(
+      () => applyStockActionsJob(env, db, 'job-direct-bound', JSON.stringify({ stock_action_mode: 'direct' }), sw, undefined),
+      /25001 rows.*25000 rows/,
+    )
   })
 
   // 8) Queue-entry cancellation happens before materialization/classify/write
