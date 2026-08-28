@@ -24,7 +24,7 @@ import type { PermissionValue } from '../../utils/permissions.ts'
 // REVIEW_TIER_KEYS comment) rather than grant anything. Employee gets no
 // library management (None, same as omitting the key); Manager still gets
 // `library: true` (Full) below.
-export type RolePresetKey = 'employee' | 'manager' | 'admin'
+export type RolePresetKey = 'employee' | 'manager' | 'product_viewer' | 'admin'
 
 export interface RolePreset {
   key: RolePresetKey
@@ -78,6 +78,30 @@ export const ROLE_PRESETS: RolePreset[] = [
       review: true,
       backup: true,
       settings: true,
+    },
+  },
+  {
+    // K6 (Part 387): the "view everything, touch nothing" arrangement the
+    // user specced -- the image-only surface with EVERY view row
+    // preselected (selling, VIP, barcode, category, brand, stock,
+    // per-branch stock, batches-without-costs) and image actions as the
+    // only writes. Each row stays individually toggleable after applying
+    // the preset, and grants can be added on top (e.g. stock-in).
+    key: 'product_viewer',
+    labelKey: 'role_preset_product_viewer',
+    label: 'Product Viewer',
+    descriptionKey: 'role_preset_product_viewer_desc',
+    description: 'View everything about products, touch nothing: search, browse, and manage images only, with every product fact visible -- selling and VIP prices, barcode, category, brand, stock, per-branch stock, and batches (costs stay hidden). No edit, no POS, no other pages.',
+    permissions: {
+      products_image_only: true,
+      products_image_only_show_price: true,
+      products_image_only_show_vip: true,
+      products_image_only_show_barcode: true,
+      products_image_only_show_category: true,
+      products_image_only_show_brand: true,
+      products_image_only_show_stock: true,
+      products_image_only_show_branch_stock: true,
+      products_image_only_show_batches: true,
     },
   },
   {

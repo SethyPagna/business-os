@@ -54,6 +54,10 @@ interface ImageOnlyProduct {
   category?: string | null
   brand?: string | null
   stock_quantity?: number | string | null
+  // K6: attached per-branch quantities -- present only when the
+  // products_image_only_show_branch_stock grant allowlists the key.
+  branch_stock?: Array<{ branch_id: number; branch_name?: string; quantity?: number }>
+
   low_stock_threshold?: number | string | null
   out_of_stock_threshold?: number | string | null
 }
@@ -147,6 +151,11 @@ export default function ProductsImageOnlyView() {
   const showCategory = hasPermission('products_image_only_show_category')
   const showBrand = hasPermission('products_image_only_show_brand')
   const showStock = hasPermission('products_image_only_show_stock')
+  // K6 (Part 387): per-branch quantities ride the row's attached
+  // branch_stock array (server allowlists the key on this grant); lots come
+  // from GET /api/batches per branch, fetched lazily when the detail opens.
+  const showBranchStock = hasPermission('products_image_only_show_branch_stock')
+  const showBatches = hasPermission('products_image_only_show_batches')
   const showMetaRow = showBarcode || showCategory || showBrand || showStock
   const [items, setItems] = useState<ImageOnlyProduct[]>([])
   const [total, setTotal] = useState(0)
@@ -175,6 +184,32 @@ export default function ProductsImageOnlyView() {
   // renders from) -- no new data fetch, no new permission surface, purely
   // a way to read the full value of what's already on screen.
   const [detailsProduct, setDetailsProduct] = useState<ImageOnlyProduct | null>(null)
+  // K6: lots for the open detail, one flat list across the row's branches
+  // ('loading' | 'error' | rows). Only ever fetched when the grant exists.
+  type DetailBatchRow = { id: number; lotCode: string | null; expiryDate: string | null; batchNumber: number | null; quantity: number; branchName: string }
+  const [detailBatches, setDetailBatches] = useState<'loading' | 'error' | DetailBatchRow[]>([])
+  useEffect(() => {
+    if (!detailsProduct || !showBatches) { setDetailBatches([]); return }
+    const branches = Array.isArray(detailsProduct.branch_stock) ? detailsProduct.branch_stock : []
+    if (!branches.length) { setDetailBatches([]); return }
+    let alive = true
+    setDetailBatches('loading')
+    Promise.all(branches.map(async (branch) => {
+      const { getProductBatches } = await import('../../api/batchesTransport.ts')
+      const result = await getProductBatches(Number(detailsProduct.id), branch.branch_id)
+      return (result?.batches || []).map((batch) => ({
+        id: batch.id,
+        lotCode: batch.lot_code,
+        expiryDate: batch.expiry_date,
+        batchNumber: batch.batch_number,
+        quantity: Number(batch.quantity || 0),
+        branchName: branch.branch_name || String(branch.branch_id),
+      }))
+    }))
+      .then((lists) => { if (alive) setDetailBatches(lists.flat()) })
+      .catch(() => { if (alive) setDetailBatches('error') })
+    return () => { alive = false }
+  }, [detailsProduct, showBatches])
   // Filter dimensions are offered ONLY where this role may already see the
   // value on the row itself. Offering a category filter to someone without
   // category visibility would hand them the whole taxonomy through the
@@ -622,7 +657,44 @@ export default function ProductsImageOnlyView() {
                   </dd>
                 </div>
               ) : null}
+              {/* K6: per-branch quantities -- present only when the grant
+                  put branch_stock on the row (server allowlist). */}
+              {showBranchStock && Array.isArray(detailsProduct.branch_stock) ? (
+                detailsProduct.branch_stock.map((entry) => (
+                  <div key={`branch-${entry.branch_id}`} className="flex justify-between gap-3 py-2">
+                    <dt className="text-gray-500 dark:text-gray-400">{entry.branch_name || `${t('branch') || 'Branch'} ${entry.branch_id}`}</dt>
+                    <dd className="text-right text-gray-800 dark:text-gray-100">{Number(entry.quantity || 0)}</dd>
+                  </div>
+                ))
+              ) : null}
             </dl>
+            {/* K6: the lot view -- read-only list per branch, fetched when
+                the detail opened (see the loader effect). Money terms are
+                stripped SERVER-side for this grant. */}
+            {showBatches ? (
+              <div className="rounded-xl border border-gray-200 p-3 text-sm dark:border-slate-700">
+                <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">{t('batches') || 'Batches'}</div>
+                {detailBatches === 'loading' ? (
+                  <div className="py-2 text-xs text-gray-400">{t('loading') || 'Loading...'}</div>
+                ) : detailBatches === 'error' ? (
+                  <div className="py-2 text-xs text-amber-600 dark:text-amber-300">{t('batches_load_failed') || 'Could not load batches.'}</div>
+                ) : !Array.isArray(detailBatches) || detailBatches.length === 0 ? (
+                  <div className="py-2 text-xs text-gray-400">{t('no_batches_yet') || 'No batches recorded.'}</div>
+                ) : (
+                  <div className="divide-y divide-gray-100 dark:divide-slate-700">
+                    {detailBatches.map((batch) => (
+                      <div key={`${batch.branchName}-${batch.id}`} className="flex items-center justify-between gap-2 py-1.5 text-xs">
+                        <span className="min-w-0 truncate text-gray-700 dark:text-gray-200">
+                          {batch.lotCode || `#${batch.batchNumber ?? batch.id}`}
+                          {batch.expiryDate ? <span className="ml-1 text-gray-400">exp {String(batch.expiryDate).slice(0, 10)}</span> : null}
+                        </span>
+                        <span className="flex-shrink-0 text-gray-500 dark:text-gray-400">{batch.branchName}: {Number(batch.quantity || 0)}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ) : null}
             <div className="flex justify-end">
               <button type="button" className="btn-secondary text-sm" onClick={() => setDetailsProduct(null)}>
                 {t('close') || 'Close'}

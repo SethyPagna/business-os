@@ -348,7 +348,22 @@ export const IMAGE_ONLY_OPTIONAL_FIELDS: Record<string, readonly string[]> = {
   // is healthy or nearly out. Granting stock visibility without the number
   // that gives it meaning would be a distinction with no use.
   products_image_only_show_stock: ['stock_quantity', 'low_stock_threshold', 'out_of_stock_threshold'],
+  // K6 (Part 387): per-branch quantities. `branch_stock` is not a table
+  // column -- it is the array attachBranchStock() glues onto each row --
+  // but the restriction runs AFTER attachment, so allowlisting the key is
+  // the entire server change.
+  products_image_only_show_branch_stock: ['branch_stock'],
 }
+
+/**
+ * K6: lot/batch visibility for the image-only role. No product-row column
+ * carries batches (the view fetches GET /api/batches?productId= on demand),
+ * so this key lives outside IMAGE_ONLY_OPTIONAL_FIELDS -- it gates the
+ * batches READ route (routes/batches.ts) and the drill button in
+ * ProductsImageOnlyView.tsx. Listed here so the editor/preset/tests have
+ * one authoritative set of every image-only grant.
+ */
+export const IMAGE_ONLY_EXTRA_GRANTS = ['products_image_only_show_batches'] as const
 
 /**
  * Backward-compat alias for callers that only care about "the fields this

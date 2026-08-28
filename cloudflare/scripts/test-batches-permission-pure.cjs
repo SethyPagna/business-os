@@ -93,4 +93,13 @@ check('the router really does split read from write', () => {
   assert.match(writeBranch, /'inventory'/, 'writes must still require inventory')
 })
 
+check('K6: the image-only lot-view grant reads batches but never the money terms', () => {
+  assert.match(src, /hasPermission\(user, 'products_image_only_show_batches'\)/, 'reads must accept the image-only lot-view grant')
+  // The write branch must NOT accept it (checked via the writes line above
+  // staying inventory-only), and a reader admitted ONLY via this grant is
+  // stripped of unit cost / paid-credit state in the list response.
+  assert.match(src, /moneyBlind/, 'the GET / list must have the money-blind branch')
+  assert.match(src, /unit_cost_usd: _c, payment_status: _p, credit_due_date: _d/, 'the strip must drop exactly the money-term columns')
+})
+
 console.log(`\n${passed} batches-permission checks passed`)

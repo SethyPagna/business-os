@@ -32,8 +32,12 @@ app.use('*', async (c, next) => {
   // Reading which lots exist is not a privileged action -- it is strictly
   // less than the product/price data 'pos' already grants.
   const isRead = c.req.method === 'GET'
+  // products_image_only_show_batches (K6): the image-only role's opt-in
+  // lot VIEW -- read-only by construction (writes stay inventory-only),
+  // and note batch rows carry unit_cost_usd, so this grant is the
+  // admin's explicit choice to show that.
   const allowed = isRead
-    ? (hasPermission(user, 'inventory') || hasPermission(user, 'pos') || hasPermission(user, 'sales'))
+    ? (hasPermission(user, 'inventory') || hasPermission(user, 'pos') || hasPermission(user, 'sales') || hasPermission(user, 'products_image_only_show_batches'))
     : hasPermission(user, 'inventory')
   if (!allowed) return c.json({ error: 'You do not have permission to perform this action' }, 403)
   return next()
@@ -54,12 +58,21 @@ app.get('/tracked-product-ids', async (c) => {
 // GET /api/batches?productId=&branchId=&onlyAvailable=1
 app.get('/', async (c) => {
   const db = getDb(c.env)
+  const user = c.get('user')
   const productId = Number(c.req.query('productId'))
   const branchId = Number(c.req.query('branchId'))
   if (!productId || !branchId) return c.json({ error: 'productId and branchId are required' }, 400)
   const onlyAvailable = c.req.query('onlyAvailable') === '1' || c.req.query('onlyAvailable') === 'true'
   const batches = await listBatchesForProduct(db, productId, branchId, { onlyAvailable })
-  return c.json({ batches })
+  // A reader admitted ONLY via the image-only lot-view grant (K6) sees the
+  // lots -- code, expiry, quantity, supplier NAME -- but never the money
+  // terms: unit cost and paid/credit state stay with the roles that manage
+  // purchasing. Same name-only supplier rule batches follow everywhere.
+  const moneyBlind = !hasPermission(user, 'inventory') && !hasPermission(user, 'pos') && !hasPermission(user, 'sales')
+  const payload = moneyBlind
+    ? (batches as Array<Record<string, unknown>>).map(({ unit_cost_usd: _c, payment_status: _p, credit_due_date: _d, ...rest }) => rest)
+    : batches
+  return c.json({ batches: payload })
 })
 
 // POST /api/batches -- receive stock into a batch (creates a new batch, or

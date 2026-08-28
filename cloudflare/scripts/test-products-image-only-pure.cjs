@@ -40,7 +40,7 @@ const { outputText } = ts.transpileModule(combinedSource, {
 })
 const moduleObj = { exports: {} }
 new Function('exports', outputText)(moduleObj.exports)
-const { isImageOnlyWritePayload, restrictToImageOnlyFields, computeImageOnlyVisibleFields, IMAGE_ONLY_BASE_FIELDS, IMAGE_ONLY_OPTIONAL_FIELDS, IMAGE_ONLY_VISIBLE_FIELDS } = moduleObj.exports
+const { isImageOnlyWritePayload, restrictToImageOnlyFields, computeImageOnlyVisibleFields, IMAGE_ONLY_BASE_FIELDS, IMAGE_ONLY_OPTIONAL_FIELDS, IMAGE_ONLY_VISIBLE_FIELDS, IMAGE_ONLY_EXTRA_GRANTS } = moduleObj.exports
 
 assert.ok(Array.isArray(IMAGE_ONLY_VISIBLE_FIELDS) && IMAGE_ONLY_VISIBLE_FIELDS.includes('image_path'), 'IMAGE_ONLY_VISIBLE_FIELDS must include image_path')
 assert.ok(Array.isArray(IMAGE_ONLY_BASE_FIELDS) && IMAGE_ONLY_BASE_FIELDS.includes('image_path'), 'IMAGE_ONLY_BASE_FIELDS must include image_path')
@@ -139,9 +139,13 @@ check('restrictToImageOnlyFields honors a merged-permissions map, granting exact
   assert.strictEqual('stock_quantity' in restricted, false, 'stock must stay hidden -- not granted in this scenario')
 })
 
-check('IMAGE_ONLY_OPTIONAL_FIELDS covers exactly the six expected optional keys, each mapping to real product columns', () => {
+check('IMAGE_ONLY_OPTIONAL_FIELDS covers exactly the seven expected optional keys, each mapping to real row keys', () => {
   assert.deepStrictEqual(Object.keys(IMAGE_ONLY_OPTIONAL_FIELDS).sort(), [
     'products_image_only_show_barcode',
+    // Per-branch quantities (K6): not a table column -- the array
+    // attachBranchStock() glues onto each row; restriction runs after
+    // attachment, so allowlisting the key is the whole server change.
+    'products_image_only_show_branch_stock',
     'products_image_only_show_brand',
     'products_image_only_show_category',
     'products_image_only_show_price',
@@ -152,6 +156,17 @@ check('IMAGE_ONLY_OPTIONAL_FIELDS covers exactly the six expected optional keys,
   ])
   assert.deepStrictEqual(IMAGE_ONLY_OPTIONAL_FIELDS.products_image_only_show_price, ['selling_price_usd', 'selling_price_khr'])
   assert.deepStrictEqual(IMAGE_ONLY_OPTIONAL_FIELDS.products_image_only_show_vip, ['special_price_usd', 'special_price_khr'])
+  assert.deepStrictEqual(IMAGE_ONLY_OPTIONAL_FIELDS.products_image_only_show_branch_stock, ['branch_stock'])
+})
+
+check('K6: the batches grant lives OUTSIDE the field map (no row column carries lots) and branch_stock passes through when granted', () => {
+  assert.deepStrictEqual([...IMAGE_ONLY_EXTRA_GRANTS], ['products_image_only_show_batches'])
+  const restricted = restrictToImageOnlyFields(
+    { id: 5, name: 'Serum', image_path: '/x.jpg', image_gallery: [], updated_at: 'now', branch_stock: [{ branch_id: 1, branch_name: 'Shop', quantity: 4 }], selling_price_usd: 9 },
+    { products_image_only: true, products_image_only_show_branch_stock: true },
+  )
+  assert.deepStrictEqual(restricted.branch_stock, [{ branch_id: 1, branch_name: 'Shop', quantity: 4 }])
+  assert.strictEqual('selling_price_usd' in restricted, false, 'branch-stock grant alone must not leak prices')
 })
 
 check('isImageOnlyWritePayload accepts an image_path-only body (the one real use case)', () => {

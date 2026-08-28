@@ -220,6 +220,8 @@ export const PERMISSION_SECTIONS: PermissionSection[] = [
           'products_image_only_show_category',
           'products_image_only_show_brand',
           'products_image_only_show_stock',
+          'products_image_only_show_branch_stock',
+          'products_image_only_show_batches',
         ],
       },
       // Part 243: each of these unlocks ONE extra field for the
@@ -239,6 +241,12 @@ export const PERMISSION_SECTIONS: PermissionSection[] = [
       { key: 'products_image_only_show_category', tKey: 'perm_products_image_only_show_category', label: 'Image-only role: show category', sensitivity: 'normal' },
       { key: 'products_image_only_show_brand', tKey: 'perm_products_image_only_show_brand', label: 'Image-only role: show brand', sensitivity: 'normal' },
       { key: 'products_image_only_show_stock', tKey: 'perm_products_image_only_show_stock', label: 'Image-only role: show stock quantity', sensitivity: 'normal' },
+      // K6 (Part 387): the last two view rows of the "view everything,
+      // touch nothing" arrangement. Branch stock rides the row's attached
+      // per-branch array; batches opens the read-only lot list (the server
+      // strips unit cost / paid-credit state for this grant).
+      { key: 'products_image_only_show_branch_stock', tKey: 'perm_products_image_only_show_branch_stock', label: 'Image-only role: show per-branch stock', sensitivity: 'normal' },
+      { key: 'products_image_only_show_batches', tKey: 'perm_products_image_only_show_batches', label: 'Image-only role: show batches/lots (no costs)', sensitivity: 'normal' },
     ],
   },
   {
