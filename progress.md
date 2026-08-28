@@ -952,7 +952,14 @@ deep-linkable tabs.*
   clear Selling-vs-VIP price choice per line; damaged stock joins as an option once
   11.13 lands. Same option data the product detail shows (D3) — one kernel, two
   surfaces.
-- [ ] K3. Media pipeline completion (quality ladder, provider fallback, 6h audit — now
+- [~] K3 **[CLAIMED: session 6e — Part 412. The ladder (imagePipeline.ts),
+  provider fallback, and the 6h audit cron all EXIST already; the gap is
+  on-upload normalization: no producer ever sends optimize-image to
+  MEDIA_QUEUE and the consumer ignores it, so fresh uploads wait for the
+  400-per-6h sweep. Footprint: lib/imageAudit.ts (per-key kernel +
+  enqueue helper), src/queue.ts optimize-image branch, and the six image
+  ASSETS.put sites (files/users/products/portal/importJobs×2) + a pure
+  test. No POS/returns/Products.tsx/inventory.ts.]** Media pipeline completion (quality ladder, provider fallback, 6h audit — now
   cheaper under Workers Paid, A4).
 - [ ] K4. Storage/jobs hardening phases 1–6 of the locked execution plan (leases, R2
   NDJSON staging, D1 slimming — the 193MB staging JSON), safeguards, Sentry wiring.
