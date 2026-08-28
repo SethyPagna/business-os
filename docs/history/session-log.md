@@ -8627,3 +8627,60 @@ Part 393 shipped it. Second pick, claimed in progress.md and by peer message: **
   next `npm run deploy:full`).
 
 Commit: `8e5f87e8`.
+
+## Part 394 (chat, Aug 28 2026) -- B4 located + fixed (migration 0072); P7 parity sweep measured
+
+Session a7 continuing (fourth unit set after Parts 389/393). Both units chosen
+for zero overlap with the two active claims (G1 = promotions session, M7 =
+encoding session).
+
+**Ask.** "continue" -- same non-conflicting-tasks mandate.
+
+**B4 -- "Delivery was made into the category column, separate it."**
+
+- **Located with production data, not a screenshot** (read-only remote D1):
+  products/categories are still EMPTY (imports not yet run) -- the sighting is
+  NOT Sales or Contacts. It is the old-system EXPENSES: 3,130 of the 4,240
+  rows migration 0064 imported carry `Delivery / <courier>` in the single
+  label column ('Delivery / Capital Express' 600, '/ Virak Buntam' 590,
+  '/ J&T Express' 556, '/ Grab' 472, '/ ពូ​ ខុម' 441, '/ តា តឿ' 393,
+  '/ ពូ​ ហុង' 77, bare 'Delivery' 1) -- the old system's delivery-as-category
+  shape with kind and counterparty jammed into one string, rendered on the
+  Fees page as Type=Expense.
+- **Migration 0072** separates: fee_type -> 'delivery' (already a FEE_TYPES
+  member), label -> courier only (substr past the 11-char 'Delivery / '
+  prefix -- character-based, Khmer names intact). Scoped to
+  created_by_name='Old system' so a person's own deliberately-labeled expense
+  is never rewritten. Measured safe BEFORE writing: the only fees writers are
+  the manual form and the cancel lost-fee; nothing aggregates
+  fee_type='delivery' as revenue (customer-charged delivery lives on sales
+  columns); the Fees page's per-type stats are informational.
+- **Verified in the real harness** (0018 -> 0023 -> 0064 verbatim -> 0072 in
+  better-sqlite3): 3,130 re-typed with courier-only labels, 1,110 expenses
+  untouched, USD 129,696.60 / KHR 82,419,900 preserved exactly, second run a
+  no-op. The IMPORT-MANIFEST's live verification query (created_by_name only)
+  stays valid. Deploy-order safe whether remote 0064 is pending or already
+  manually applied. Commit 3a6da305.
+
+**P7 -- the parity sweep, measured (fixes listed, mostly deferred to cold files).**
+
+- P7-a (the named gap, confirmed): POS quick-add customer/delivery save a bare
+  address/area string; the full forms serialize multi-OPTION rows into the
+  same column. Fix lives in POS files -- the G1 session's footprint -- deferred.
+- P7-b (NEW): the scientific-notation barcode guard exists only on import
+  screens; manual product create/edit accepts a pasted '8.85156E+12' barcode.
+  Needs ProductForm + a server-side guard in routes/products.ts (also G1-hot
+  right now) -- deferred with the item recorded.
+- P7-c (minor): manual contact creates skip the P8 phone display convention;
+  digit-based matching keeps linkage working -- display consistency only.
+- P7-d/P7-e (checked, NOT gaps): §12 import deliberately cannot set
+  supplier-credit status (0065's NULL=historical design); POS quick-add
+  duplicate handling already matches the contacts form (11.8).
+- Receive-vs-import historical dates remain D4, already tracked.
+
+**Verified.** The 0072 harness run above (real migration files, real sums);
+remote D1 probes were read-only SELECTs. No frontend/backend code changed in
+this part -- B4's fix is data-shape, P7's deliverable is the measured list.
+
+**Not done.** P7-a/b/c fixes (deferred while their files sit in the G1
+session's footprint -- each is its own checkbox under P7 now); deploy (user).

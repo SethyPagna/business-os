@@ -289,10 +289,18 @@ autocorrect — templates, imports, exports and generated files alike.*
   row; the standalone `= KHR` echo removed (the paid-by note already shows USD (KHR)
   added/absorbed); "Fee paid by" label + Customer/Store toggle on one row, buttons sized
   to their text.
-- [ ] B4. "Delivery was made into the category column — separate it." **Needs locating
-  before changing** (Golden Rule 7): find where a delivery value renders inside a
-  category column (Sales list? Contacts?), confirm with a screenshot/DOM read, then split
-  it into its own column.
+- [x] B4 *(Part 394: LOCATED with production data, then fixed — migration 0072,
+  needs deploy. Not Sales/Contacts: the old system recorded courier payments as
+  EXPENSES whose one label column carried kind+counterparty — 3,130 of the 4,240
+  rows 0064 imported read `Delivery / Capital Express`, `/ Grab`, `/ J&T Express`,
+  `/ Virak Buntam`, `/ តា តឿ`, `/ ពូ​ ខុម`, `/ ពូ​ ហុង` (+1 bare `Delivery`),
+  shown on the Fees page as Type=Expense. 0072 moves the kind into fee_type
+  ('delivery' was already in FEE_TYPES) and keeps only the courier in the label —
+  measured safe first: nothing counts fee_type='delivery' as revenue. Verified in
+  the real harness (0018→0023→0064 verbatim→0072): 3,130 re-typed, 1,110 expenses
+  untouched, USD 129,696.60/KHR 82,419,900 preserved, idempotent; the manifest's
+  live check stays valid.)* "Delivery was made into the category column — separate
+  it."
 - [ ] B5. Receipt print: when 80x50 is enabled, clicking Print offers BOTH sizes and the
   preview shows BOTH (today only one previews). Verify printing end-to-end while there.
 - [x] B6 *(Part 389: shipped on all five pages, needs deploy. Inventory: toolbar
@@ -696,6 +704,26 @@ deep-linkable tabs.*
   quick-add cannot create them). Sweep surface-by-surface (POS quick-adds, manual
   add-stock vs import validation, receive-batch vs §12 rules, edit forms vs import
   normalizers) and list every gap found as its own item before fixing.
+  **SWEEP DONE (Part 394) — measured results, fixes listed as their own items:**
+  - [ ] P7-a *(the named gap, confirmed)*: POS quick-add customer/delivery save a
+    BARE address/area string; the full contact forms serialize multi-OPTION rows
+    into the same column. Fix in POSQuickAddModals/POS.tsx — **deferred while POS
+    is in the G1 session's footprint**; smallest correct fix is saving through
+    serializeContactOptions with one primary option so later form edits see options.
+  - [ ] P7-b *(new, confirmed)*: the scientific-notation barcode guard exists ONLY
+    on import screens (BulkImportModal/productImportPlanner/spreadsheetImport) —
+    manual product create/edit accepts a pasted `8.85156E+12` barcode; ProductForm
+    AND routes/products.ts (server-side, like the identity guard) should reject it.
+    routes/products.ts is currently the G1 session's file — fix after it lands.
+  - [ ] P7-c *(minor, confirmed)*: manual contact creates don't apply the P8 phone
+    display convention (`XXX XXX XXX`); matching is digit-based so linkage works —
+    display consistency only. `contactDuplicates.normalizePhone` exists to reuse.
+  - P7-d *(checked, NOT a gap)*: §12 import deliberately cannot set supplier-credit
+    payment_status (NULL = historical is 0065's design); credit is manual-receive-only.
+  - P7-e *(checked, NOT a gap)*: POS quick-add duplicate handling already matches
+    the contacts form (11.8: possible-duplicate confirm-retry + phone-conflict
+    select-existing).
+  - Receive-batch vs §12 historical dates remains D4 (already tracked).
 - [x] P8. **Cambodian phone normalization in the migration data (Part 381).** All
   three sales files re-generated with the user's rule: restore the leading zero the
   old system's Excel export ate, format `XXX XXX XXX` (9 digits) / `XXX XXX XXXX`
@@ -905,7 +933,9 @@ deep-linkable tabs.*
   opposite resolution, from the earlier 11.2 pass. Flipping Products to match is a
   small change (ProductsListSurface header + Products.tsx toolbar) but it REVERSES
   a previously-shipped decision, so it waits for the user's confirmation.
-- B4's location (which page shows delivery inside a category column) is unconfirmed.
+- ~~B4's location (which page shows delivery inside a category column) is
+  unconfirmed.~~ **Located Part 394** — the old-system expense labels
+  (`Delivery / <courier>`, 3,130 rows) on the Fees page; migration 0072 separates.
 - Commission/service fields for sales import/export still have no business rule.
 - H1's exact per-page option lists should be confirmed against real usage before build.
 
