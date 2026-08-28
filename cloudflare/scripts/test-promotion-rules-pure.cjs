@@ -149,14 +149,90 @@ const pass = (msg) => { checks++; console.log('PASS ' + msg) }
 
   const productsSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'routes', 'products.ts'), 'utf8')
   assert.match(productsSrc, /family_promoted DESC, \$\{familyOrderSql\}/, 'browse order: promoted families lead')
-  assert.match(productsSrc, /match_rank ASC, family_promoted DESC/, 'search order: relevance first, promoted breaks ties')
+  // G1b flip: within MATCHING results, discounted items top; relevance
+  // orders inside each block ("relevance still wins but if relevance also
+  // have discounts, discounts top" -- relevance decides what matches at
+  // all, promoted matches lead).
+  assert.match(productsSrc, /family_promoted DESC, match_rank ASC/, 'search order: promoted matches top, relevance orders within each block')
   assert.match(productsSrc, /promo === 'promoted'|promoFilter === 'promoted'/, 'promoted filter must exist')
   assert.match(productsSrc, /promotion_rules: promotionRules/, 'search/bootstrap payload carries the active rules')
   pass("products.ts: promoted-first family ordering + promo filter + rules in the payload")
 
   const migration = fs.readFileSync(path.join(__dirname, '..', 'migrations', '0071_promotion_rules.sql'), 'utf8')
   assert.match(migration, /CREATE TABLE promotion_rules/, 'migration 0071 creates promotion_rules')
-  pass('migration 0071 present')
+  const migration73 = fs.readFileSync(path.join(__dirname, '..', 'migrations', '0073_promotion_rule_types.sql'), 'utf8')
+  assert.match(migration73, /ADD COLUMN min_spend_usd/, '0073 adds the spend threshold')
+  assert.match(migration73, /ADD COLUMN label_style/, '0073 adds the label wording style')
+  pass('migrations 0071 + 0073 present')
+}
+
+// ---- 4. G1b rule types + auto-labels + cart pairing ---------------------
+{
+  const mk = (row) => kernel.normalizePromotionRule({ id: 5, scope_type: 'products', product_ids: '[7,8]', is_active: 1, ...row })
+  const cheap = { id: 7, selling_price_usd: 10, selling_price_khr: 41000 }
+  const dear = { id: 8, selling_price_usd: 30, selling_price_khr: 123000 }
+
+  // spend_save: crosses on line gross
+  const spend = mk({ rule_type: 'spend_save', min_spend_usd: 50, save_usd: 5 })
+  assert.strictEqual(kernel.evaluatePromotionPricing(dear, 1, [spend]).active, false, '30 < 50: not yet')
+  const spent = kernel.evaluatePromotionPricing(dear, 2, [spend])
+  assert.strictEqual(spent.active, true)
+  assert.strictEqual(spent.line_total_usd, 55, '60 - 5')
+
+  // quantity_percent: threshold percent
+  const qtyPct = mk({ rule_type: 'quantity_percent', min_quantity: 2, percent_off: 10 })
+  assert.strictEqual(kernel.evaluatePromotionPricing(dear, 1, [qtyPct]).active, false)
+  assert.strictEqual(kernel.evaluatePromotionPricing(dear, 2, [qtyPct]).line_total_usd, 54, '60 - 10%')
+
+  // next_item per-line: buy 1 get 2nd 50% off, qty 3 -> ONE complete pair
+  const bogo = mk({ rule_type: 'next_item', min_quantity: 1, percent_off: 50 })
+  const perLine = kernel.evaluatePromotionPricing(dear, 3, [bogo])
+  assert.strictEqual(perLine.line_discount_usd, 15, 'one 50% hit on a $30 unit; the 3rd unit starts an incomplete group')
+
+  // next_item CROSS-line: the CHEAPEST of the pair takes the cut
+  const adjustments = kernel.evaluateCartPromotionAdjustments(
+    [
+      { line_id: 'a', product: dear, quantity: 1 },
+      { line_id: 'b', product: cheap, quantity: 1 },
+    ],
+    [bogo], 4100,
+  )
+  assert.strictEqual(adjustments.get('a').active, false, 'the dear item stays full price')
+  assert.strictEqual(adjustments.get('b').line_discount_usd, 5, 'the CHEAP item gets 50% off ("only lowest of the two")')
+  // two complete pairs across mixed lines -> two cheapest units hit
+  const two = kernel.evaluateCartPromotionAdjustments(
+    [
+      { line_id: 'a', product: dear, quantity: 2 },
+      { line_id: 'b', product: cheap, quantity: 2 },
+    ],
+    [bogo], 4100,
+  )
+  assert.strictEqual(two.get('b').line_discount_usd, 10, 'both cheap units discounted across two groups')
+  assert.strictEqual(two.get('a').active, false)
+
+  // auto-labels per wording style
+  assert.strictEqual(kernel.promotionAutoLabel(mk({ rule_type: 'quantity_save', min_quantity: 3, save_usd: 5, label_style: 'save' })), 'Buy 3+ Save $5')
+  assert.strictEqual(kernel.promotionAutoLabel(mk({ rule_type: 'quantity_save', min_quantity: 3, save_usd: 5, label_style: 'get' })), 'Buy 3+ Get $5 Off')
+  assert.strictEqual(kernel.promotionAutoLabel(mk({ rule_type: 'next_item', min_quantity: 1, percent_off: 100, label_style: 'free' })), 'Buy 1 Get 1 Free')
+  assert.strictEqual(kernel.promotionAutoLabel(mk({ rule_type: 'spend_save', min_spend_usd: 50, save_usd: 5, label_style: 'get' })), 'Spend $50 Get $5 Off')
+
+  // hints: a not-yet-earned spend/next deal still badges (and counts promoted)
+  assert.strictEqual(kernel.promotionBadgeForProduct(dear, [bogo]).kind, 'quantity_hint')
+  assert.strictEqual(kernel.isProductPromoted(dear, [spend]), true)
+  pass('G1b: spend_save/quantity_percent/next_item math, cheapest-of-group pairing, style-worded auto-labels, hint coverage')
+}
+
+// ---- 5. portal surface privacy ------------------------------------------
+{
+  // The public portal must never expose internal fields or facets --
+  // supplier names, cost prices, the operator's tag_label -- neither as
+  // payload columns nor as filters (user rule, Part 397: "make sure for
+  // example public portal doesn't show supplier etc").
+  const portalSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'routes', 'portal.ts'), 'utf8')
+  assert.ok(!/p\.supplier|p\.cost_price|p\.tag_label/.test(portalSrc), 'portal SELECTs must not carry supplier/cost/tag columns')
+  assert.ok(!/query\.supplier/.test(portalSrc), 'portal filters must not accept a supplier facet')
+  assert.match(portalSrc, /query\.promo/, "portal exposes exactly the one public promo facet ('promoted')")
+  pass('portal payloads and facets stay customer-only (no supplier/cost/tag), promo facet present')
 }
 
 console.log(`\n${checks} check group(s) passed.`)

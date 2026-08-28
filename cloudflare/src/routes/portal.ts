@@ -1506,6 +1506,17 @@ async function runPortalProductSearch(c: { env: Env; req: { query(): Record<stri
     where.push(initialClause)
   }
   const joinSql = joins.join('\n')
+  // G1 promoted ordering + the public promo filter (G1b), hoisted ABOVE
+  // whereSql so the COUNT and the page query see the same condition. The
+  // storefront exposes exactly ONE promo facet -- 'promoted' (a live
+  // discount or any active rule); rule-id filtering stays admin-only and
+  // internal facets (supplier etc.) never reach the portal (standing
+  // surface rule).
+  const searchRules = await loadActivePromotionRules(db)
+  const searchPromotedOrderSql = `CASE WHEN ${productPromotedSql(searchRules, params)} THEN 1 ELSE 0 END DESC`
+  if (String(query.promo || '').trim().toLowerCase() === 'promoted') {
+    where.push(productPromotedSql(searchRules, params))
+  }
   const whereSql = `WHERE ${where.join(' AND ')}`
 
   const totalRow = await db.prepare(`SELECT COUNT(*) AS count FROM products p ${joinSql} ${whereSql}`).get<{ count: number }>(params)
@@ -1534,11 +1545,8 @@ async function runPortalProductSearch(c: { env: Env; req: { query(): Record<stri
   // session's FTS5 change. Mirrors products.ts's own
   // effectiveFamilyOrderSql pattern (match_rank ASC, then the caller's
   // chosen sort).
-  const searchRules = await loadActivePromotionRules(db)
-  const searchPromotedParams: Record<string, unknown> = {}
-  const searchPromotedOrderSql = `CASE WHEN ${productPromotedSql(searchRules, searchPromotedParams)} THEN 1 ELSE 0 END DESC`
   const orderBySql = filters.matchRankSql
-    ? `${filters.matchRankSql} ASC, ${searchPromotedOrderSql}, lower(p.name) ASC, p.id ASC`
+    ? `${searchPromotedOrderSql}, ${filters.matchRankSql} ASC, lower(p.name) ASC, p.id ASC`
     : `${searchPromotedOrderSql}, ${PORTAL_CATALOG_DEFAULT_ORDER_SQL}`
   let items = await db.prepare(`
     SELECT ${selectColumnsSql}
@@ -1547,7 +1555,7 @@ async function runPortalProductSearch(c: { env: Env; req: { query(): Record<stri
     ${whereSql}
     ORDER BY ${orderBySql}
     LIMIT @pageSize OFFSET @offset
-  `).all({ ...params, ...searchPromotedParams, pageSize, offset })
+  `).all({ ...params, pageSize, offset })
 
   // JS fuzzy (typo-tolerant) fallback -- see lib/searchMatch.ts's
   // runFuzzyFallbackMatch header comment and products.ts's/inventory.ts's

@@ -542,10 +542,12 @@ async function searchProductsPayload(env: Env, query: Record<string, string>, op
   // created-date order applies within each block. During a search,
   // relevance stays primary -- someone typing a specific product's name
   // must not find it buried under unrelated promoted items -- with
-  // promoted-first demoted to the tiebreaker between equally-relevant
-  // families.
+  // promoted matches TOP the result set (G1b refinement: "relevance
+  // still wins but if relevance also have discounts, discounts top" --
+  // relevance decides WHAT matches at all, discounted matches lead, and
+  // relevance orders within each block).
   const effectiveFamilyOrderSql = matchRankSql
-    ? `match_rank ASC, family_promoted DESC, ${familyOrderSql}`
+    ? `family_promoted DESC, match_rank ASC, ${familyOrderSql}`
     : `family_promoted DESC, ${familyOrderSql}`
 
   const selectColumns = `p.id, p.name, p.sku, p.barcode, p.category, p.brand, p.unit, p.description,

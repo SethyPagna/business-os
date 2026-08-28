@@ -29,8 +29,21 @@ const requireKey = (key: string): MiddlewareHandler<{ Bindings: Env; Variables: 
 // G1 promotion RULES (/rules*) -- registered BEFORE the legacy strip routes
 // so /rules/:id never falls into the strip's own /:id patterns.
 
-const RULE_TYPES = new Set(['quantity_save', 'percent_off', 'fixed_off'])
+const RULE_TYPES = new Set(['quantity_save', 'percent_off', 'fixed_off', 'spend_save', 'quantity_percent', 'next_item'])
 const RULE_SCOPES = new Set(['products', 'category', 'brand'])
+const LABEL_STYLES = new Set(['save', 'get', 'free'])
+// Which value fields each rule type actually uses -- everything else is
+// zeroed on write so a stale field from a previous type choice can never
+// leak into the evaluation.
+const TYPE_USES = {
+  quantity_save: { qty: true, save: true, pct: false, spend: false },
+  percent_off: { qty: false, save: false, pct: true, spend: false },
+  fixed_off: { qty: false, save: true, pct: false, spend: false },
+  spend_save: { qty: false, save: true, pct: false, spend: true },
+  quantity_percent: { qty: true, save: false, pct: true, spend: false },
+  // next_item: benefit is EITHER percent (wins when > 0) or a flat amount.
+  next_item: { qty: true, save: true, pct: true, spend: false },
+} as const
 
 type RuleInput = Record<string, unknown>
 
@@ -45,14 +58,18 @@ function normalizeRuleWrite(body: RuleInput = {}) {
     if (!raw) return null
     return normalizeToIsoDate(raw)
   }
+  const uses = TYPE_USES[ruleType as keyof typeof TYPE_USES]
   return {
     title: String(body.title || '').trim().slice(0, 120),
     show_title: body.show_title === false || body.show_title === 0 ? 0 : 1,
     rule_type: ruleType,
-    min_quantity: ruleType === 'quantity_save' ? Math.max(0, Number(body.min_quantity) || 0) : 0,
-    save_usd: ruleType === 'percent_off' ? 0 : money(body.save_usd),
-    save_khr: ruleType === 'percent_off' ? 0 : Math.max(0, Math.round(Number(body.save_khr) || 0)),
-    percent_off: ruleType === 'percent_off' ? Math.min(100, Math.max(0, Number(body.percent_off) || 0)) : 0,
+    min_quantity: uses.qty ? Math.max(0, Number(body.min_quantity) || 0) : 0,
+    save_usd: uses.save ? money(body.save_usd) : 0,
+    save_khr: uses.save ? Math.max(0, Math.round(Number(body.save_khr) || 0)) : 0,
+    percent_off: uses.pct ? Math.min(100, Math.max(0, Number(body.percent_off) || 0)) : 0,
+    min_spend_usd: uses.spend ? money(body.min_spend_usd) : 0,
+    min_spend_khr: uses.spend ? Math.max(0, Math.round(Number(body.min_spend_khr) || 0)) : 0,
+    label_style: LABEL_STYLES.has(String(body.label_style)) ? String(body.label_style) : 'save',
     scope_type: scopeType,
     product_ids: JSON.stringify(scopeType === 'products' ? productIds : []),
     category: scopeType === 'category' ? String(body.category || '').trim().slice(0, 200) : null,
@@ -66,9 +83,11 @@ function normalizeRuleWrite(body: RuleInput = {}) {
 
 function ruleWriteError(input: ReturnType<typeof normalizeRuleWrite>, body: RuleInput): string | null {
   if (!RULE_TYPES.has(input.rule_type)) return 'Unknown rule type'
-  if (input.rule_type === 'percent_off' && input.percent_off <= 0) return 'Enter a percent greater than 0'
-  if (input.rule_type !== 'percent_off' && input.save_usd <= 0 && input.save_khr <= 0) return 'Enter a save amount in USD or KHR'
-  if (input.rule_type === 'quantity_save' && input.min_quantity < 1) return 'Enter the minimum quantity to buy (at least 1)'
+  if ((input.rule_type === 'percent_off' || input.rule_type === 'quantity_percent') && input.percent_off <= 0) return 'Enter a percent greater than 0'
+  if ((input.rule_type === 'quantity_save' || input.rule_type === 'fixed_off' || input.rule_type === 'spend_save') && input.save_usd <= 0 && input.save_khr <= 0) return 'Enter a save amount in USD or KHR'
+  if (input.rule_type === 'next_item' && input.percent_off <= 0 && input.save_usd <= 0 && input.save_khr <= 0) return 'Enter a percent or an amount off the next item'
+  if ((input.rule_type === 'quantity_save' || input.rule_type === 'quantity_percent' || input.rule_type === 'next_item') && input.min_quantity < 1) return 'Enter the minimum quantity to buy (at least 1)'
+  if (input.rule_type === 'spend_save' && input.min_spend_usd <= 0 && input.min_spend_khr <= 0) return 'Enter the spend threshold in USD or KHR'
   if (input.scope_type === 'products' && JSON.parse(input.product_ids).length === 0) return 'Choose at least one product'
   if (input.scope_type === 'category' && !input.category) return 'Choose a category'
   if (input.scope_type === 'brand' && !input.brand) return 'Choose a brand'
@@ -114,8 +133,10 @@ app.post('/rules', requireKey('promotions'), async (c) => {
   const insert = await db.prepare(`
     INSERT INTO promotion_rules (
       title, show_title, rule_type, min_quantity, save_usd, save_khr, percent_off,
+      min_spend_usd, min_spend_khr, label_style,
       scope_type, product_ids, category, brand, badge_color, starts_at, ends_at, is_active, updated_at
     ) VALUES (@title, @show_title, @rule_type, @min_quantity, @save_usd, @save_khr, @percent_off,
+      @min_spend_usd, @min_spend_khr, @label_style,
       @scope_type, @product_ids, @category, @brand, @badge_color, @starts_at, @ends_at, @is_active, CURRENT_TIMESTAMP)
   `).run(input)
   await audit(c.env, user?.id ?? null, user?.username ?? null, 'create', 'promotion_rule', insert.lastInsertRowid, { title: input.title, rule_type: input.rule_type, scope_type: input.scope_type })
@@ -140,7 +161,9 @@ app.put('/rules/:id', requireKey('promotions'), async (c) => {
   await db.prepare(`
     UPDATE promotion_rules SET
       title=@title, show_title=@show_title, rule_type=@rule_type, min_quantity=@min_quantity,
-      save_usd=@save_usd, save_khr=@save_khr, percent_off=@percent_off, scope_type=@scope_type,
+      save_usd=@save_usd, save_khr=@save_khr, percent_off=@percent_off,
+      min_spend_usd=@min_spend_usd, min_spend_khr=@min_spend_khr, label_style=@label_style,
+      scope_type=@scope_type,
       product_ids=@product_ids, category=@category, brand=@brand, badge_color=@badge_color,
       starts_at=@starts_at, ends_at=@ends_at, is_active=@is_active, updated_at=CURRENT_TIMESTAMP
     WHERE id=@id
