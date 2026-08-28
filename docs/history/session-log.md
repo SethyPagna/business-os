@@ -9094,3 +9094,41 @@ honestly, not loosened); vite build 27.66s. Commits f5b72502 + ea3afbdb.
 
 **Not done.** Visual click-through (B1's sweep). X5 remains offered to the
 M7 session. Part numbered 400 -- 399 is reserved by the G2-G4 session.
+
+## Part 399 (chat, Aug 28 2026) — G2+G3+G4: Loyalty into Promotions, the promo strip, brand-first portal
+
+**Asked.** "Then after automatically moves to G2, G3, G4, etc… going
+through progress.md various tasks."
+
+**G2 (eebfe6bd).** The standalone Loyalty Points page retired into the
+Promotions page as a lazy section behind a Promotions | Loyalty Points
+switcher. Access widened at the door, not the controls: canAccessPage
+admits customer_portal holders (their old Loyalty grant keeps working),
+promo sections self-gate on the 'promotions' tier, the switcher shows
+only to holders of both. Old /loyalty-points URLs land on Promotions;
+nav entry/page id/label removed rather than left as zombies; the
+embedded page keys its lifecycle on the promotions page activity.
+
+**G3 (46e8c12b).** PortalPromoStrip: one auto-scrolling row above the
+storefront search (public-only, honors the merchant's show-promotions
+toggle) — a chip per shown-title rule (Title or its style-worded
+auto-label) and a compact card per promoted product with its kernel cut
+price; requestAnimationFrame drift, pauses on hover/touch, a "·" dot per
+item jumps the strip. Hidden-title rules keep their chips off; their
+products still show cut prices.
+
+**G4 (46e8c12b).** The storefront browses BRAND-first: brand-alpha order
+(blank brands trail as "Other Brands"), names A-Z within brand, brand
+section headers, and the A-Z rail indexes brands — letters, counts and
+the initial filter all from p.brand server-side, with the admin
+preview's client fallback bucketing identically. Both portal regression
+tests (catalog sort, alpha-rail parity) re-seeded and re-pinned
+brand-first with the same adversarial shapes.
+
+**Verification** on the tree merged with a7's Part-400 (P7-a + Inventory
+menu match): frontend chain exit 0, backend sweep 93/93, both tsc, vite
+build, wrangler dry-run.
+
+**Not done.** G5 (§6.1 About overlay, §6.2 top-bar split, §6.3 stale
+embed cache repro, §6.4 Google-Translate languages, §6.5 pagination
+counts) stays open — next in line as the board continues.

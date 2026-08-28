@@ -561,15 +561,15 @@ deep-linkable tabs.*
   always shown FIRST — they occupy a higher-order block above the alphabetical run and
   the A–Z rail applies after them (Products, POS, portal alike). Filters exist for
   every one of these states (promoted / discounted / by promotion).
-- [~] G2-G4 *(IN PROGRESS — claimed by session 6e, Part 399. Footprint:
+- [x] G2-G4 *(Part 399, session 6e — SHIPPED. Footprint:
   PromotionsPage + LoyaltyPointsPage embed + nav/pathRouting/AppContext perm
   gates, portal PublicCatalogPage/CatalogProductsSection + routes/portal.ts
   ordering+initials, lang packs additive. NOT touching POS.tsx (a7 holds
   P7-a) or receipt files (35).)*
-- [ ] G2. Loyalty Points moves in as a Promotions section (E5).
-- [ ] G3. Portal promo strip: one auto-scrolling row above search; "·" dots represent each
+- [x] G2 *(Part 399: standalone page retired; renders lazily as a Promotions section behind a Promotions | Loyalty Points switcher; customer_portal holders keep access through the widened page door while promo sections self-gate; old /loyalty-points URLs land on Promotions.)* Loyalty Points moves in as a Promotions section (E5).
+- [x] G3 *(Part 399: PortalPromoStrip above search, public-only, honors show-promotions; rule chips (Title/auto-label, hidden titles stay hidden) + promoted-product cards with kernel cut prices; rAF drift, pause on hover/touch, dot-per-item jump.)* Portal promo strip: one auto-scrolling row above search; "·" dots represent each
   promoted product/promotion, click a dot to jump. Promos render Title + discount.
-- [ ] G4. Portal ordering flips to BRAND-first: alphabetical order and the fast A–Z rail
+- [x] G4 *(Part 399: brand-alpha order with blank brands trailing as "Other Brands", brand grid headers, rail letters/counts/initial-filter all from p.brand server-side, admin-preview fallback matches; both regression tests re-seeded brand-first.)* Portal ordering flips to BRAND-first: alphabetical order and the fast A–Z rail
   index brands, not categories.
 - [ ] G5. Carried portal items: §6.1 About overlay/cover, §6.2 top-bar split, §6.3 stale
   embed cache (repro first), §6.4 Google-Translate-backed languages (packs as fallback),
