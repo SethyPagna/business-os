@@ -9159,3 +9159,20 @@ B1 sweep, stays open.
 
 Verification: frontend chain exit 0, backend sweep green, both tsc,
 vite build, wrangler dry-run.
+
+## Part 399 second addendum (chat, Aug 28 2026) — D6: rename cascades with a real before→after
+
+Continuing down the board after Phase G. **845e05cc backend · 9188c1e7
+frontend.** One engine (lib/renameCascade.ts) previews a rename's blast
+radius — attached products split primary vs multi-value membership,
+supplier batches, name-group rows, a target-exists merge flag — and
+carries every attached LIVE row; history keeps its captured text. The
+shared dialog (old name struck through → new, real counts, carry /
+keep-a-copy / only-this / cancel) gates three save flows: category
+manager, supplier editor, product form. Closed along the way: 9.1
+(renaming a grouped product can now carry the WHOLE group, proven with
+the real 0010 name_key trigger on real sqlite), the category rename's
+multi-value-membership gap (secondary values kept stale text), and the
+supplier rename leaving products/batches pointing at a dead name.
+Verification: chain exit 0, backend sweep green (one transpile-harness
+stub added), both tsc, build, dry-run.

@@ -462,7 +462,7 @@ store really paid the rider; margin = charge − cost and is internal only.*
   groups disagree (needs a cross-window pass like the §12 seal; rule: most frequent
   non-empty value in the group, tie → first row), plus surfacing "group unified" in
   the review screen.
-- [~] D6 *(IN PROGRESS — session 6e, Part 399 continuation. Footprint: NEW lib/renameCascade.ts + rename-impact/rename-brand endpoints in routes/products.ts, lookups.ts cascade modes, contacts.ts supplier carry, shared RenameCascadeModal + wiring in ManageCategoriesModal/ProductForm/supplier edit, pure test.)*
+- [x] D6 *(Part 399 continuation, session 6e — SHIPPED. lib/renameCascade.ts impact+carry engine (distinct-product counts; history never rewritten); GET /rename-impact + POST /rename-brand; PUT /:id __rename_scope='group' closes 9.1 (whole name group renames, 0010 trigger keeps grouping); lookups cascade:'copy' + the multi-value-membership gap FIXED; supplier __rename_cascade='carry' finally follows products+batches. Shared before→after modal (carry / keep-a-copy / only-this / cancel) wired in the category manager, supplier editor and product form (name-group + brand-wide asks); preview-endpoint failure falls back to each surface's old behavior. 5-check pure test on real sqlite + real migrations.)*
 - [ ] D6. Rename cascades with before→after preview: changing a category/brand/supplier/
   product name shows before and after and asks what happens to attached rows (carry all
   attached products to the new name / keep a copy, new is new / cancel-go-back). Also the
