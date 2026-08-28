@@ -66,7 +66,22 @@ assert.equal(summary.redeemed, 5, 'summarizePoints still counts redemption on a 
 // ---- 5. The two writers ----
 const importCommit = read(path.join('lib', 'salesImportCommit.ts'))
 assert.match(importCommit, /loyalty_accrual, sale_status, items/, 'import INSERT carries the column')
-assert.match(importCommit, /loyalty_accrual: 0/, 'historical sales import always writes loyalty_accrual = 0')
+assert.match(importCommit, /loyalty_accrual: input\.accrueLoyalty \? 1 : 0/, 'sales import defaults to 0, opts in only on explicit accrueLoyalty')
+
+// The import-time loyalty OPTION: policy.accrue_loyalty gates it, safe default off.
+const engine = read(path.join('lib', 'importEngine.ts'))
+const gsMatch = engine.match(/export function getSalesImportAccrueLoyalty[\s\S]*?\n}/)
+assert.ok(gsMatch, 'importEngine exports getSalesImportAccrueLoyalty')
+const gsOut = ts.transpileModule(gsMatch[0].replace('export function', 'function') + '\nmodule.exports = { getSalesImportAccrueLoyalty }',
+  { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 } }).outputText
+const gsMod = { exports: {} }
+new Function('exports', 'require', 'module', gsOut)(gsMod.exports, require, gsMod)
+const { getSalesImportAccrueLoyalty } = gsMod.exports
+assert.equal(getSalesImportAccrueLoyalty(JSON.stringify({ accrue_loyalty: true })), true, 'explicit opt-in accrues')
+assert.equal(getSalesImportAccrueLoyalty(JSON.stringify({ accrue_loyalty: false })), false, 'explicit false does not')
+assert.equal(getSalesImportAccrueLoyalty(null), false, 'absent policy defaults to no accrual')
+assert.equal(getSalesImportAccrueLoyalty('{bad json'), false, 'malformed policy defaults to no accrual')
+assert.match(engine, /accrueLoyalty,\n\s*\}\)/, 'apply loop threads accrueLoyalty into the sale writer')
 assert.match(salesRoute, /loyalty_accrual: body\.loyalty_accrual === false \? 0 : 1/, 'POS route: only an explicit false opts out')
 const contacts = read(path.join('routes', 'contacts.ts'))
 assert.match(contacts, /COALESCE\(loyalty_accrual, 1\) AS loyalty_accrual/, 'contacts feeds the flag into summarizePoints')

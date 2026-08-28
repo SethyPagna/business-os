@@ -17,7 +17,11 @@ const pendingGuard = `(SELECT status FROM import_sales_commits WHERE job_id = @j
 /** Commit one reviewed historical receipt as an indivisible, retry-safe unit. */
 export async function applyHistoricalSaleImport(
   db: D1Compat,
-  input: { jobId: string; rowNumber: number; data: SaleImportData; nowIso: string },
+  // `accrueLoyalty` is the import-time choice the operator makes on the
+  // review screen (default OFF -- migrated history should not inflate
+  // balances, which are summed from sales). Set true only when the operator
+  // explicitly opts a sales import into earning points.
+  input: { jobId: string; rowNumber: number; data: SaleImportData; nowIso: string; accrueLoyalty?: boolean },
 ): Promise<HistoricalSaleCommitResult> {
   const jobId = String(input.jobId || '').trim()
   const rowNumber = Number(input.rowNumber)
@@ -64,10 +68,12 @@ export async function applyHistoricalSaleImport(
             @delivery_contact_address, @delivery_fee_usd, @delivery_fee_khr, @delivery_fee_paid_by,
             @loyalty_accrual, @sale_status, @items_json, @created_at, @client_request_id
           WHERE ${pendingGuard}`,
-    // Imported (historical) sales never earn loyalty points -- the balance is
+    // Imported sales default to NOT earning loyalty points -- the balance is
     // computed by summing sales, so migrated old-system receipts would
     // otherwise inflate every matched customer's balance (migration 0061).
-    params: { ...common, ...d, loyalty_accrual: 0, items_json: JSON.stringify(d.items), created_at: d.created_at || input.nowIso },
+    // The operator can opt a specific import INTO accrual on the review
+    // screen (input.accrueLoyalty), keeping the choice in their hands.
+    params: { ...common, ...d, loyalty_accrual: input.accrueLoyalty ? 1 : 0, items_json: JSON.stringify(d.items), created_at: d.created_at || input.nowIso },
   }]
 
   const isReturnGroup = RETURN_STATUSES.has(d.sale_status)

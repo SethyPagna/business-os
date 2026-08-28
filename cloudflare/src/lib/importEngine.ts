@@ -458,6 +458,19 @@ type ImagePolicyOverrides = {
   imageLimitDecisions: Record<string, Array<number | string>>
 }
 
+// A sales import earns loyalty points only when the operator explicitly
+// opted in on the review screen (policy.accrue_loyalty === true). Anything
+// else -- absent, false, malformed JSON -- keeps the safe historical default
+// of no accrual, so a migrated ledger can never inflate point balances.
+export function getSalesImportAccrueLoyalty(policyJson: string | null | undefined): boolean {
+  try {
+    const policy = policyJson ? JSON.parse(policyJson) : {}
+    return policy?.accrue_loyalty === true
+  } catch (_) {
+    return false
+  }
+}
+
 function getImagePolicyOverrides(policyJson: string | null | undefined): ImagePolicyOverrides {
   try {
     const policy = policyJson ? JSON.parse(policyJson) : {}
@@ -4606,12 +4619,16 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
     // parent id inside SQL, removing the concurrency-unsafe "latest N sale
     // ids" lookup that could attach one user's lines to another sale.
     if (job.type === 'sales' && actionable.length) {
+      // Loyalty accrual is the operator's import-time choice (default OFF for
+      // historical data). Read it once per chunk from the reviewed policy.
+      const accrueLoyalty = getSalesImportAccrueLoyalty(job.policy_json)
       for (const r of actionable) {
         await applyHistoricalSaleImport(db, {
           jobId,
           rowNumber: r.rowNumber,
           data: r.data as Record<string, unknown> & { items: Array<Record<string, unknown>>; sale_status: string; receipt_number: string | null; created_at: string | null },
           nowIso,
+          accrueLoyalty,
         })
       }
     }
