@@ -87,9 +87,14 @@ const engineMod = { exports: {} }
 new Function('exports', 'require', 'module', '__filename', '__dirname', transpile(engineAbs))(
   engineMod.exports, makeRequire(libDir), engineMod, engineAbs, libDir,
 )
-const { applyStockActionsJob, runImportApply } = engineMod.exports
+const { applyStockActionsJob, runImportApply, STOCK_ACTION_MAX_ROWS, STOCK_ACTION_MAX_UNITS } = engineMod.exports
 assert.strictEqual(typeof applyStockActionsJob, 'function', 'applyStockActionsJob must be exported')
 assert.strictEqual(typeof runImportApply, 'function', 'runImportApply must be exported')
+// A4: the boundary fixtures below seed RELATIVE to the real caps so a
+// deliberate future re-base re-sizes them instead of silently pinning a
+// stale number.
+assert.ok(Number.isInteger(STOCK_ACTION_MAX_ROWS) && STOCK_ACTION_MAX_ROWS > 0, 'STOCK_ACTION_MAX_ROWS export missing')
+assert.ok(Number.isInteger(STOCK_ACTION_MAX_UNITS) && STOCK_ACTION_MAX_UNITS > 0, 'STOCK_ACTION_MAX_UNITS export missing')
 
 // --- In-memory D1 adapter ---------------------------------------------------
 function makeDb() {
@@ -297,24 +302,28 @@ async function test(name, fn) {
     assert.ok(out.failed >= 1, 'the group is reported as failed')
   })
 
-  // 6) DIRECT continuation (M4): more than 60 units load across invocations
-  await test('a direct sheet beyond 60 units applies fully across continuation invocations', async () => {
+  // 6) DIRECT continuation (M4): more than one unit-cap's worth of units
+  // loads across invocations
+  await test('a direct sheet beyond the unit cap applies fully across continuation invocations', async () => {
     const { sqlite, db } = makeDb()
     seedProduct(sqlite, { id: 50, name: 'Bounded', barcode: 'B50' })
-    // 130 add rows = 130 units: one classify window, then three dispatch
-    // windows (60 + 60 + 10). Distinct dates so each row makes its own lot.
-    const rows = Array.from({ length: 130 }, (_, index) => ({
+    // Two full dispatch windows + 10: one-or-two classify windows, then
+    // three dispatch windows (cap + cap + 10) -- the unit cap is also the
+    // per-invocation dispatch window (see the engine's own comment).
+    // Distinct batch labels so each row makes its own lot.
+    const CONTINUE_UNITS = STOCK_ACTION_MAX_UNITS * 2 + 10
+    const rows = Array.from({ length: CONTINUE_UNITS }, (_, index) => ({
       _rowNumber: index + 2, name: 'Bounded', barcode: 'B50', shop: '1', warehouse: '',
       date: `2026-0${1 + (index % 6)}-${String(1 + (index % 27)).padStart(2, '0')}`,
       action: 'add', selling_price: '', vip_price: '', cost_price: '', batch: `L${index}`,
     }))
     seedJob(sqlite, 'job-continue', rows, { stock_action_mode: 'direct' })
     const { out, invocations } = await runJobToCompletion(db, 'job-continue', JSON.stringify({ stock_action_mode: 'direct' }))
-    assert.deepStrictEqual(out, { applied: 130, failed: 0 })
+    assert.deepStrictEqual(out, { applied: CONTINUE_UNITS, failed: 0 })
     assert.ok(invocations >= 4, `expected multiple continuation invocations, got ${invocations}`)
-    assert.strictEqual(sqlite.prepare(`SELECT quantity FROM branch_stock WHERE product_id=50 AND branch_id=1`).get().quantity, 130)
-    assert.strictEqual(sqlite.prepare(`SELECT COUNT(*) n FROM product_batches WHERE variant_product_id=50`).get().n, 130)
-    assert.strictEqual(sqlite.prepare(`SELECT COUNT(*) n FROM inventory_movements WHERE movement_type='add'`).get().n, 130)
+    assert.strictEqual(sqlite.prepare(`SELECT quantity FROM branch_stock WHERE product_id=50 AND branch_id=1`).get().quantity, CONTINUE_UNITS)
+    assert.strictEqual(sqlite.prepare(`SELECT COUNT(*) n FROM product_batches WHERE variant_product_id=50`).get().n, CONTINUE_UNITS)
+    assert.strictEqual(sqlite.prepare(`SELECT COUNT(*) n FROM inventory_movements WHERE movement_type='add'`).get().n, CONTINUE_UNITS)
     assert.strictEqual(sqlite.prepare(`SELECT status FROM import_jobs WHERE id='job-continue'`).get().status, 'completed')
   })
 
@@ -328,7 +337,9 @@ async function test(name, fn) {
     }))
     seedJob(sqlite, 'job-resume', rows, { stock_action_mode: 'direct' })
     const policy = JSON.stringify({ stock_action_mode: 'direct' })
-    // classify invocation + FIRST dispatch window (60 units) only...
+    // classify invocation + FIRST dispatch window only (which may already
+    // cover every unit when the sheet fits inside one window -- the
+    // redelivery claims below hold either way)...
     await applyStockActionsJob(env, db, 'job-resume', policy, sw, undefined)
     await applyStockActionsJob(env, db, 'job-resume', policy, sw, undefined)
     // ...then simulate the crashed window's message being REDELIVERED twice
@@ -341,29 +352,30 @@ async function test(name, fn) {
   })
 
   // 7) RECONCILE keeps the single-pass caps (one live-stock snapshot) ------
-  await test('reconcile mode: more than 480 raw rows fail before classification', async () => {
+  await test('reconcile mode: more raw rows than the single-pass cap fail before classification', async () => {
     const { sqlite, db } = makeDb()
-    const rows = Array.from({ length: 481 }, (_, index) => ({ _rowNumber: index + 2, name: `Raw ${index}` }))
+    const overRows = STOCK_ACTION_MAX_ROWS + 1
+    const rows = Array.from({ length: overRows }, (_, index) => ({ _rowNumber: index + 2, name: `Raw ${index}` }))
     seedJob(sqlite, 'job-rows-bound', rows, { stock_action_mode: 'reconcile' })
     await assert.rejects(
       () => applyStockActionsJob(env, db, 'job-rows-bound', JSON.stringify({ stock_action_mode: 'reconcile' }), sw, undefined),
-      /481 rows.*at most 480 rows/,
+      new RegExp(`${overRows} rows[\\s\\S]*at most ${STOCK_ACTION_MAX_ROWS} rows`),
     )
     assert.strictEqual(sqlite.prepare(`SELECT COUNT(*) n FROM import_job_rows`).get().n, 0)
   })
 
   // 7b) Reconcile unit ceiling still guards before any stock write ---------
-  await test('reconcile mode: more than 60 business actions fail before any stock write', async () => {
+  await test('reconcile mode: more business actions than the unit cap fail before any stock write', async () => {
     const { sqlite, db } = makeDb()
     seedProduct(sqlite, { id: 52, name: 'Bounded', barcode: 'B52' })
-    const rows = Array.from({ length: 61 }, (_, index) => ({
+    const rows = Array.from({ length: STOCK_ACTION_MAX_UNITS + 1 }, (_, index) => ({
       _rowNumber: index + 2, name: 'Bounded', barcode: 'B52', shop: String(index + 1), warehouse: '',
       date: '08/27/2026', action: 'add', selling_price: '', vip_price: '', cost_price: '', batch: '',
     }))
     seedJob(sqlite, 'job-units-bound', rows, { stock_action_mode: 'reconcile' })
     await assert.rejects(
       () => applyStockActionsJob(env, db, 'job-units-bound', JSON.stringify({ stock_action_mode: 'reconcile' }), sw, undefined),
-      /actions.*at most 60 actions/,
+      new RegExp(`actions[\\s\\S]*at most ${STOCK_ACTION_MAX_UNITS} actions`),
     )
     assert.strictEqual(sqlite.prepare(`SELECT COUNT(*) n FROM inventory_movements`).get().n, 0)
     assert.strictEqual(sqlite.prepare(`SELECT quantity FROM branch_stock WHERE product_id=52 AND branch_id=1`).get().quantity, 0)

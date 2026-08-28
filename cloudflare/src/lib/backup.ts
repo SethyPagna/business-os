@@ -14,11 +14,21 @@ export const CLOUDFLARE_BACKUP_KEEP = 2
 // manifest (as before) but their bytes are not copied this run --
 // `summary.assetsBackedUp` vs `summary.assetsSkipped` makes that visible
 // instead of silently claiming a complete asset backup that isn't one.
-// Each copy is one R2 get plus one R2 put. Workers Free allows 50
-// subrequests per invocation, so 20 copies leave headroom for the lifecycle
-// state read/write, manifest work and queue send. The old value (40) could
-// require 80+ subrequests and fail before the continuation was recorded.
-const MAX_ASSET_BYTES_PER_BACKUP = 20
+// Each copy is one R2 get plus one R2 put -- two internal-service
+// subrequests. A4 (session 05) re-based this onto the Feb-2026 platform:
+// Workers Paid now allows 10,000 subrequests per invocation (pinned
+// explicitly in wrangler.toml), so 100 copies = ~200 subrequests, 2% of
+// the budget, with the lifecycle state read/write, manifest work and
+// queue send costing single digits on top. The copies run SEQUENTIALLY
+// (each awaited), so the real per-run bound is wall time: ~100-200ms per
+// asset copy keeps a full slice inside ~10-20s, which both the manual
+// request path and the queue continuation tolerate. Full coverage of the
+// ~20k-object catalog drops from ~1,000 runs to ~200. History: this was
+// 20 under the Free plan's older model (and 40 before that, which could
+// fail before the continuation was recorded). Exported so the regression
+// tests seed their fixtures relative to the real cap instead of pinning
+// a copy of the number that silently drifts.
+export const MAX_ASSET_BYTES_PER_BACKUP = 100
 const MAX_ASSET_COPY_ATTEMPTS = 3
 const BACKUP_LIFECYCLE_FORMAT = 'business-os-cloudflare-backup-state'
 const BACKUP_LIFECYCLE_VERSION = 1
@@ -34,7 +44,7 @@ const STALE_BACKUP_MS = 24 * 60 * 60 * 1000
 // backed up. This cursor (persisted in KV, the same binding
 // storeSystemJob/getSystemJob already use for cross-invocation state)
 // makes each run resume where the previous one left off and wrap back to
-// the start once it reaches the end -- so ceil(assetCount / 40) runs are
+// the start once it reaches the end -- so ceil(assetCount / cap) runs are
 // enough to genuinely cover every asset at least once, instead of
 // however many runs happen to get lucky with list-order churn.
 const BACKUP_ASSET_CURSOR_KEY = 'system-cursor:backup-asset-copy'

@@ -236,14 +236,21 @@ const MAX_SYNC_ROWS = 20000 // hard ceiling on total rows any one job will proce
 // invocation, and classifying a row (Map lookups, diffFields, image
 // resolution) plus, for apply, building its INSERT/UPDATE statements is
 // real synchronous JS work that adds up linearly with row count. Small
-// chunks + a fresh 10ms budget per invocation beats one giant pass that
+// chunks + a fresh CPU budget per invocation beats one giant pass that
 // eventually exceeds it, at the cost of an import taking many queued
 // invocations (seconds, not milliseconds) to finish end to end -- a
 // trade worth making since nothing here is on a user-facing request path.
-// Tune down further if wrangler tail still shows "Exceeded CPU Limit" on
-// analyze/apply for a particular job; tune up if this account moves to
-// Workers Paid and restores wrangler.toml's higher [limits] cpu_ms.
-const ROWS_PER_IMPORT_CHUNK = 150
+// A4 (session 05): raised 150 -> 600, which is exactly the raise this
+// comment used to prescribe "if this account moves to Workers Paid and
+// restores wrangler.toml's higher [limits] cpu_ms" -- both are true now
+// (cpu_ms = 300000 since A4a). 4x the rows per invocation = 4x fewer
+// queued hops per import; the per-chunk synchronous work that dictated
+// 150 under the old 10ms default has a 30,000x larger budget behind it.
+// Tune down again only if wrangler tail shows "Exceeded CPU Limit" on
+// analyze/apply for a particular job. Exported (like backup.ts's copy
+// cap) so window-crossing test fixtures seed relative to the real value
+// instead of pinning a copy that silently drifts.
+export const ROWS_PER_IMPORT_CHUNK = 600
 
 // POST /:id/preflight (importJobs.ts) is a synchronous HTTP request, not a
 // queue invocation -- it can't self-continue across chunks the way
@@ -2403,7 +2410,7 @@ export async function classifySales(db: D1Compat, rows: ParsedCsvRow[]): Promise
         action: 'error',
         identifier,
         existingId: null,
-        message: `Sale exceeds the ${MAX_HISTORICAL_SALE_LINES}-line Free-plan safety limit; split it into smaller receipts.`,
+        message: `Sale exceeds the ${MAX_HISTORICAL_SALE_LINES}-line safety limit; split it into smaller receipts.`,
         changes: {},
         data: first,
       })
@@ -3875,21 +3882,35 @@ async function finalizeImportApply(
   return { applied: totalApplied, failed: totalFailed }
 }
 
-// Free-plan ceilings for one unified stock-action import. Unlike the
+// Single-pass ceilings for one unified stock-action import. Unlike the
 // generic apply path this is a SINGLE pass (see applyStockActionsJob's own
 // comment on why it cannot be chunked), so BOTH raw rows and dispatched
-// business units are bounded. Workers Free permits 1,000 internal-service
-// subrequests per invocation; a worst-case new-product row touching both
-// branches can use roughly 12 D1 calls across resolve/create/add/verification.
-// Sixty units leaves meaningful headroom for classification, persistence,
-// finalization and broadcasts instead of balancing at the platform ceiling.
-const STOCK_ACTION_MAX_ROWS = 480 // 60 maximum groups x the writer's 8-line receipt ceiling
-const STOCK_ACTION_MAX_UNITS = 60
-// DIRECT-mode continuation (M4): a direct sheet is not capped at 60 units --
-// it classifies and dispatches in windows across self-enqueued invocations,
-// each invocation staying inside the same per-invocation budgets the caps
-// above encode (the 1,000-internal-subrequest ceiling does NOT rise on
-// Workers Paid; what Paid buys is cpu_ms for the larger classify windows).
+// business units are bounded. A worst-case new-product row touching both
+// branches can use roughly 12 D1 calls across resolve/create/add/
+// verification. A4 (session 05) re-based these onto the Feb-2026 platform:
+// Workers Paid now allows 10,000 subrequests per invocation by default
+// (wrangler.toml pins it explicitly; Free stays 50 external / 1,000 to
+// Cloudflare services -- the older note here that the 1,000 ceiling "does
+// not rise on Paid" described the pre-Feb-2026 platform). 240 units x ~12
+// calls ~= 2,880, under a third of the pinned budget, leaving ample room
+// for classification, persistence, finalization and broadcasts; cpu_ms =
+// 300000 covers the compute side. The 4x raise means RECONCILE mode --
+// which genuinely needs one pass (below) -- accepts 4x bigger sheets
+// before asking the operator to split.
+// Both exported for the same cap-relative-test reason as
+// ROWS_PER_IMPORT_CHUNK above. Note the unit cap is ALSO direct mode's
+// per-invocation dispatch window (see the dispatch loop), so raising it
+// widens how much one continuation invocation dispatches -- budgeted in
+// the subrequest math above.
+export const STOCK_ACTION_MAX_ROWS = 1920 // 240 maximum groups x the writer's 8-line receipt ceiling
+export const STOCK_ACTION_MAX_UNITS = 240
+// DIRECT-mode continuation (M4): a direct sheet is not capped at the unit
+// ceiling at all -- it classifies and dispatches in windows across
+// self-enqueued invocations, each invocation staying inside the same
+// per-invocation budgets the caps above encode. The window sizes below are
+// M4's own proven values and deliberately NOT raised by A4: they are sized
+// by job-state blob growth and per-window write batching, not by the
+// platform limits that changed.
 // RECONCILE mode keeps the single-pass caps on purpose: its deltas compare
 // against ONE consistent live-stock snapshot, which windowed classification
 // across invocations cannot promise.

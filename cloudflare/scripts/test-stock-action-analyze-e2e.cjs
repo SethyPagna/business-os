@@ -98,14 +98,21 @@ function csvCell(value) {
   return /[",\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text
 }
 
+// A4: seeded RELATIVE to the real analyze window (ROWS_PER_IMPORT_CHUNK,
+// exported by the engine) -- one row more than a full window, so the two
+// Anchor rows are guaranteed to land in DIFFERENT classification windows,
+// which is the whole cross-window claim this fixture exists to exercise.
+const FILLER_ROWS = engine.ROWS_PER_IMPORT_CHUNK - 1
+const TOTAL_CSV_ROWS = FILLER_ROWS + 2
+
 function buildCrossWindowCsv() {
   const header = ['name', 'barcode', 'shop', 'warehouse', 'date', 'action', 'selling_price', 'vip_price', 'cost_price', 'batch']
   const rows = []
   rows.push(['Anchor Serum', 'ANCHOR', '1', '', '08/27/2026', 'add', '12', '', '4', 'LOT-A'])
-  // 149 distinct, valid rows ensure the other Anchor row lands in the next
-  // 150-row classification window. They are new products and therefore
+  // Distinct, valid rows ensure the other Anchor row lands in the next
+  // classification window. They are new products and therefore
   // preview as creates; analyze must not write any of them to products.
-  for (let i = 0; i < 149; i += 1) {
+  for (let i = 0; i < FILLER_ROWS; i += 1) {
     rows.push([`Filler ${i}`, `F${i}`, '1', '', '08/27/2026', 'add', '5', '', '2', `FILL-${i}`])
   }
   rows.push(['Anchor Serum', 'ANCHOR', '1', '', '08/27/2026', 'add', '12', '', '7', 'LOT-B'])
@@ -163,27 +170,29 @@ async function drainAnalyze(env, jobId) {
   const summary = JSON.parse(job.summary_json)
   assert.strictEqual(job.status, 'awaiting_review')
   assert.strictEqual(job.phase, 'awaiting_review')
-  assert.strictEqual(job.total_rows, 151)
+  assert.strictEqual(job.total_rows, TOTAL_CSV_ROWS)
   assert.strictEqual(job.processed_rows, 0)
   assert.strictEqual(job.failed_rows, 0)
   assert.strictEqual(job.lease_token, null, 'every continuation releases its single-writer lease')
   assert.strictEqual(summary.requires_stock_action_confirmation, true)
   assert.strictEqual(summary.stock_action_confirmation_rows, 2)
-  assert.strictEqual(summary.total, 151)
+  assert.strictEqual(summary.total, TOTAL_CSV_ROWS)
   assert.strictEqual(summary.updated, 2)
-  assert.strictEqual(summary.created, 149)
+  assert.strictEqual(summary.created, FILLER_ROWS)
   assert.strictEqual(job.warning_count, 2)
 
   const sourceCount = await db.prepare(`SELECT COUNT(*) AS n FROM import_job_source_rows WHERE job_id = @id`).get({ id: 'analyze-e2e' })
   const reviewCount = await db.prepare(`SELECT COUNT(*) AS n FROM import_job_rows WHERE job_id = @id AND phase = 'analyze'`).get({ id: 'analyze-e2e' })
-  assert.strictEqual(sourceCount.n, 151)
-  assert.strictEqual(reviewCount.n, 151, 'Screen 2 has one persisted review result per source row')
+  assert.strictEqual(sourceCount.n, TOTAL_CSV_ROWS)
+  assert.strictEqual(reviewCount.n, TOTAL_CSV_ROWS, 'Screen 2 has one persisted review result per source row')
 
   const anchorRows = await db.prepare(`SELECT row_number, action, result_json FROM import_job_rows
     WHERE job_id = @id AND phase = 'analyze'
       AND json_extract(result_json, '$.data.identityKey') = 'product:10'
     ORDER BY row_number`).all({ id: 'analyze-e2e' })
-  assert.deepStrictEqual(anchorRows.map((row) => row.row_number), [2, 152])
+  // Header is row 1, first Anchor row 2, the fillers, then the second
+  // Anchor lands one row past the full window.
+  assert.deepStrictEqual(anchorRows.map((row) => row.row_number), [2, FILLER_ROWS + 3])
   for (const row of anchorRows) {
     const result = JSON.parse(row.result_json)
     assert.strictEqual(row.action, 'update')
@@ -191,7 +200,7 @@ async function drainAnalyze(env, jobId) {
     assert.ok(result.data.conflicts.length > 0)
   }
 
-  // Analyze is preview-only: even 149 create verdicts cannot mutate live data.
+  // Analyze is preview-only: a full window of create verdicts cannot mutate live data.
   assert.strictEqual((await db.prepare(`SELECT COUNT(*) AS n FROM products`).get({})).n, 1)
   assert.strictEqual((await db.prepare(`SELECT COUNT(*) AS n FROM product_batches`).get({})).n, 0)
   assert.strictEqual((await db.prepare(`SELECT COUNT(*) AS n FROM inventory_movements`).get({})).n, 0)
@@ -210,23 +219,26 @@ async function drainAnalyze(env, jobId) {
   // The analyzer rejects oversized RECONCILE stock sheets before
   // classification, so an operator cannot spend time reviewing a job the
   // apply path will refuse later (reconcile's delta math needs one live
-  // snapshot, so its 480-row cap is real). DIRECT mode is different since
-  // Part 388: its M4 continuation engine handles up to 25,000 rows across
-  // windows, so the same 481-row file must sail through analyze -- the
-  // 21k-row history migration file depends on exactly that.
+  // snapshot, so its single-pass row cap is real). DIRECT mode is
+  // different since Part 388: its M4 continuation engine handles up to
+  // 25,000 rows across windows, so the same over-cap file must sail
+  // through analyze -- the 21k-row history migration file depends on
+  // exactly that.
+  const RECONCILE_OVER_ROWS = engine.STOCK_ACTION_MAX_ROWS + 1
+  const reconcileOverRegex = new RegExp(`${RECONCILE_OVER_ROWS} rows[\\s\\S]*at most ${engine.STOCK_ACTION_MAX_ROWS} rows`)
   const header = 'name,barcode,shop,warehouse,date,action,selling_price,vip_price,cost_price,batch'
-  const oversizedCsv = `${header}\n${Array.from({ length: 481 }, (_, i) => `Raw ${i},R${i},1,,08/27/2026,add,5,,2,B${i}`).join('\n')}\n`
+  const oversizedCsv = `${header}\n${Array.from({ length: RECONCILE_OVER_ROWS }, (_, i) => `Raw ${i},R${i},1,,08/27/2026,add,5,,2,B${i}`).join('\n')}\n`
   assets.replace(oversizedCsv)
   await seedJob(db, 'analyze-oversized-direct', Buffer.byteLength(oversizedCsv), 0, 'direct')
   await drainAnalyze(env, 'analyze-oversized-direct')
   const directOversized = await db.prepare(`SELECT status, phase FROM import_jobs WHERE id = @id`).get({ id: 'analyze-oversized-direct' })
-  assert.strictEqual(directOversized.status, 'awaiting_review', '481 direct rows must reach review (continuation engine handles them)')
+  assert.strictEqual(directOversized.status, 'awaiting_review', 'over-cap direct rows must reach review (continuation engine handles them)')
   await seedJob(db, 'analyze-oversized', Buffer.byteLength(oversizedCsv), 0, 'reconcile')
-  await assert.rejects(() => drainAnalyze(env, 'analyze-oversized'), /481 rows.*at most 480 rows/)
+  await assert.rejects(() => drainAnalyze(env, 'analyze-oversized'), reconcileOverRegex)
   const oversized = await db.prepare(`SELECT status, phase, last_error, lease_token FROM import_jobs WHERE id = @id`).get({ id: 'analyze-oversized' })
   assert.strictEqual(oversized.status, 'failed')
   assert.strictEqual(oversized.phase, 'failed')
-  assert.match(oversized.last_error, /481 rows.*at most 480 rows/)
+  assert.match(oversized.last_error, reconcileOverRegex)
   assert.strictEqual(oversized.lease_token, null)
   assert.strictEqual((await db.prepare(`SELECT COUNT(*) AS n FROM import_job_rows WHERE job_id = @id`).get({ id: 'analyze-oversized' })).n, 0)
 

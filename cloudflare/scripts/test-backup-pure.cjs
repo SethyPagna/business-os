@@ -73,7 +73,14 @@ const {
   storeSystemJob,
   getSystemJob,
   CLOUDFLARE_BACKUP_PREFIX,
+  MAX_ASSET_BYTES_PER_BACKUP,
 } = backupModuleObj.exports
+
+// A4: fixtures below seed RELATIVE to the real per-run copy cap, so a
+// deliberate future re-base of the constant re-sizes the tests with it
+// instead of silently pinning a stale number.
+const ASSET_CAP = MAX_ASSET_BYTES_PER_BACKUP
+assert.ok(Number.isInteger(ASSET_CAP) && ASSET_CAP > 0, 'MAX_ASSET_BYTES_PER_BACKUP export missing or invalid')
 
 for (const fn of [createCloudflareBackup, restoreCloudflareBackup, pruneCloudflareBackups, listCloudflareBackups, validateCloudflareBackup, selectAssetsToCopy, continueCloudflareBackupAssetCopy, getCloudflareBackupState, linkCloudflareBackupJob, storeSystemJob, getSystemJob]) {
   assert.strictEqual(typeof fn, 'function', 'expected backup.ts export missing -- source may have changed')
@@ -347,7 +354,7 @@ async function main() {
     assert.strictEqual(result.summary.tableCount, 2)
     assert.strictEqual(result.summary.rowCount, 3)
     assert.strictEqual(result.summary.assetCount, 3)
-    assert.strictEqual(result.summary.assetsBackedUp, 3, 'all 3 assets are under the 20-asset cap, all should be copied')
+    assert.strictEqual(result.summary.assetsBackedUp, 3, 'all 3 assets are under the per-run cap, all should be copied')
     assert.strictEqual(result.summary.assetsSkipped, 0)
     assert.ok(result.key.startsWith(CLOUDFLARE_BACKUP_PREFIX) && result.key.endsWith('.json'))
 
@@ -363,14 +370,14 @@ async function main() {
 
   // -- Test 2: the free-plan-safe 20-object copy cap is respected --
   // assets beyond it are listed in the manifest but not byte-copied.
-  await checkAsync('createCloudflareBackup caps asset byte-copies at 20 and reports the skip count', async () => {
+  await checkAsync('createCloudflareBackup caps asset byte-copies at the per-run cap and reports the skip count', async () => {
     const schema = { settings: { columns: ['key', 'value'], rows: [] } }
     const assets = {}
-    for (let i = 0; i < 45; i++) assets[`uploads/img-${String(i).padStart(2, '0')}.png`] = { body: `img${i}` }
+    for (let i = 0; i < ASSET_CAP + 25; i++) assets[`uploads/img-${String(i).padStart(4, '0')}.png`] = { body: `img${i}` }
     const env = makeEnv({ schema, assets })
     const result = await createCloudflareBackup(env, 'manual')
-    assert.strictEqual(result.summary.assetCount, 45)
-    assert.strictEqual(result.summary.assetsBackedUp, 20, 'copy count should be capped at MAX_ASSET_BYTES_PER_BACKUP')
+    assert.strictEqual(result.summary.assetCount, ASSET_CAP + 25)
+    assert.strictEqual(result.summary.assetsBackedUp, ASSET_CAP, 'copy count should be capped at MAX_ASSET_BYTES_PER_BACKUP')
     assert.strictEqual(result.summary.assetsSkipped, 25)
   })
 
@@ -402,29 +409,29 @@ async function main() {
   // -- Test 2c: end-to-end through createCloudflareBackup -- consecutive
   // runs against the same env (same persisted KV cursor) make genuine
   // cumulative progress instead of every run re-copying the same first
-  // 20, which is the actual gap this was closing.
-  await checkAsync('createCloudflareBackup resumes asset copying across consecutive runs instead of repeating the same first 20', async () => {
+  // slice, which is the actual gap this was closing.
+  await checkAsync('createCloudflareBackup resumes asset copying across consecutive runs instead of repeating the same first slice', async () => {
     const schema = { settings: { columns: ['key', 'value'], rows: [] } }
     const assets = {}
-    for (let i = 0; i < 35; i++) assets[`uploads/img-${String(i).padStart(2, '0')}.png`] = { body: `img${i}` }
+    for (let i = 0; i < ASSET_CAP + 15; i++) assets[`uploads/img-${String(i).padStart(4, '0')}.png`] = { body: `img${i}` }
     const env = makeEnv({ schema, assets })
 
     const first = await createCloudflareBackup(env, 'manual')
-    assert.strictEqual(first.summary.assetsBackedUp, 20)
+    assert.strictEqual(first.summary.assetsBackedUp, ASSET_CAP)
     const firstManifest = JSON.parse(await (await env.ASSETS.get(first.key)).text())
 
     const second = await createCloudflareBackup(env, 'manual')
-    assert.strictEqual(second.summary.assetsBackedUp, 20)
+    assert.strictEqual(second.summary.assetsBackedUp, ASSET_CAP)
     const secondManifest = JSON.parse(await (await env.ASSETS.get(second.key)).text())
 
     // The two runs' copied sets should differ (real progress was made),
-    // and together they should cover every one of the 35 assets at least
-    // once -- the actual guarantee this cursor exists to provide.
+    // and together they should cover every one of the seeded assets at
+    // least once -- the actual guarantee this cursor exists to provide.
     const firstKeys = new Set(firstManifest.r2.copiedKeys)
     const secondKeys = new Set(secondManifest.r2.copiedKeys)
     assert.notDeepStrictEqual([...firstKeys].sort(), [...secondKeys].sort(), 'second run should not just repeat the first run\'s exact set')
     const union = new Set([...firstKeys, ...secondKeys])
-    assert.strictEqual(union.size, 35, 'two runs together should cover all 35 assets at least once')
+    assert.strictEqual(union.size, ASSET_CAP + 15, 'two runs together should cover every seeded asset at least once')
   })
 
   // -- Test 3: restore replaces live table contents with the backup's,
@@ -563,10 +570,10 @@ async function main() {
   await checkAsync('createCloudflareBackup with no BACKUP_QUEUE bound is unchanged from the pre-Part-122 no-queue path', async () => {
     const schema = { settings: { columns: ['key', 'value'], rows: [] } }
     const assets = {}
-    for (let i = 0; i < 45; i++) assets[`uploads/nq-${String(i).padStart(2, '0')}.png`] = { body: `img${i}` }
+    for (let i = 0; i < ASSET_CAP + 25; i++) assets[`uploads/nq-${String(i).padStart(4, '0')}.png`] = { body: `img${i}` }
     const env = makeEnv({ schema, assets }) // no queue option -- env.BACKUP_QUEUE is undefined
     const result = await createCloudflareBackup(env, 'manual')
-    assert.strictEqual(result.summary.assetsBackedUp, 20)
+    assert.strictEqual(result.summary.assetsBackedUp, ASSET_CAP)
     assert.strictEqual(result.summary.assetsSkipped, 25)
     const payload = JSON.parse(await (await env.ASSETS.get(result.key)).text())
     assert.strictEqual(payload.r2.assetCopyProgress, undefined, 'no-queue path should not set assetCopyProgress at all')
@@ -579,16 +586,16 @@ async function main() {
   await checkAsync('createCloudflareBackup with BACKUP_QUEUE bound enqueues a continuation message when assets exceed the cap', async () => {
     const schema = { settings: { columns: ['key', 'value'], rows: [] } }
     const assets = {}
-    for (let i = 0; i < 55; i++) assets[`uploads/q-${String(i).padStart(2, '0')}.png`] = { body: `img${i}` }
+    for (let i = 0; i < ASSET_CAP + 35; i++) assets[`uploads/q-${String(i).padStart(4, '0')}.png`] = { body: `img${i}` }
     const queue = makeFakeQueue()
     const env = makeEnv({ schema, assets, queue })
     const result = await createCloudflareBackup(env, 'manual')
-    assert.strictEqual(result.summary.assetsBackedUp, 20)
+    assert.strictEqual(result.summary.assetsBackedUp, ASSET_CAP)
     assert.strictEqual(result.summary.assetsSkipped, 35)
     assert.strictEqual(queue.sent.length, 1, 'exactly one continuation message should be enqueued')
-    assert.deepStrictEqual(queue.sent[0], { kind: 'backup-continue', backupName: result.name.replace(/\.json$/, ''), nextIndex: 20 })
+    assert.deepStrictEqual(queue.sent[0], { kind: 'backup-continue', backupName: result.name.replace(/\.json$/, ''), nextIndex: ASSET_CAP })
     const payload = JSON.parse(await (await env.ASSETS.get(result.key)).text())
-    assert.deepStrictEqual(payload.r2.assetCopyProgress, { nextIndex: 20, complete: false })
+    assert.deepStrictEqual(payload.r2.assetCopyProgress, { nextIndex: ASSET_CAP, complete: false })
     const state = await getCloudflareBackupState(env, result.name.replace(/\.json$/, ''))
     assert.strictEqual(state.status, 'copying')
     assert.strictEqual(state.pendingKeys.length, 35)
@@ -603,16 +610,17 @@ async function main() {
     assert.deepStrictEqual(smallPayload.r2.assetCopyProgress, { nextIndex: 1, complete: true })
   })
 
-  // -- Part 122, Test 9: driving a 95-asset backup through repeated
-  // continueCloudflareBackupAssetCopy calls the way the real
-  // handleBackupQueue consumer would (reading each enqueued message and
-  // calling the function again) reaches full coverage and stops
-  // re-enqueueing once done -- the core claim this feature makes,
+  // -- Part 122, Test 9: driving a multi-window backup (just under five
+  // caps' worth of assets) through repeated continueCloudflareBackupAssetCopy
+  // calls the way the real handleBackupQueue consumer would (reading each
+  // enqueued message and calling the function again) reaches full coverage
+  // and stops re-enqueueing once done -- the core claim this feature makes,
   // exercised end-to-end rather than just at the unit level.
+  const BIG_ASSET_COUNT = ASSET_CAP * 4 + 15
   await checkAsync('continueCloudflareBackupAssetCopy driven through a real message loop reaches 100% coverage and stops re-enqueueing', async () => {
     const schema = { settings: { columns: ['key', 'value'], rows: [] } }
     const assets = {}
-    for (let i = 0; i < 95; i++) assets[`uploads/big-${String(i).padStart(3, '0')}.png`] = { body: `img${i}` }
+    for (let i = 0; i < BIG_ASSET_COUNT; i++) assets[`uploads/big-${String(i).padStart(4, '0')}.png`] = { body: `img${i}` }
     const queue = makeFakeQueue()
     const env = makeEnv({ schema, assets, queue })
 
@@ -629,7 +637,7 @@ async function main() {
       assert.strictEqual(message.backupName, backupName)
       await continueCloudflareBackupAssetCopy(env, message.backupName, message.nextIndex)
       iterations += 1
-      assert.ok(iterations < 20, 'should not take anywhere near this many continuation steps for 95 assets at 20/step')
+      assert.ok(iterations < 20, `should not take anywhere near this many continuation steps for ${BIG_ASSET_COUNT} assets at ${ASSET_CAP}/step`)
     }
 
     const finalPayload = JSON.parse(await (await env.ASSETS.get(created.key)).text())
@@ -637,11 +645,12 @@ async function main() {
     assert.strictEqual(finalState.status, 'finalized')
     assert.strictEqual(finalState.pendingKeys.length, 0)
     assert.strictEqual(finalState.failedKeys.length, 0)
-    assert.strictEqual(new Set(finalState.copiedKeys).size, 95, 'no duplicate copies, every asset covered exactly once')
+    assert.strictEqual(new Set(finalState.copiedKeys).size, BIG_ASSET_COUNT, 'no duplicate copies, every asset covered exactly once')
     // Every asset's bytes should be genuinely readable back from the
     // backup's own assets/ prefix, not just listed in copiedKeys.
-    const sample = await env.ASSETS.get(`${finalPayload.r2.assetsPrefix}big-094.png`)
-    assert.strictEqual(await sample.text(), 'img94')
+    const lastIndex = BIG_ASSET_COUNT - 1
+    const sample = await env.ASSETS.get(`${finalPayload.r2.assetsPrefix}big-${String(lastIndex).padStart(4, '0')}.png`)
+    assert.strictEqual(await sample.text(), `img${lastIndex}`)
   })
 
   // -- Part 122, Test 10: a redundant continuation call against an
@@ -692,7 +701,9 @@ async function main() {
       first = await createCloudflareBackup(env, 'manual')
       tick = 1
       second = await createCloudflareBackup(env, 'manual')
-      for (let i = 0; i < 24; i++) await env.ASSETS.put(`uploads/extra-${String(i).padStart(2, '0')}.png`, `E${i}`)
+      // Enough extras that the third backup is genuinely mid-copy (over
+      // the per-run cap) when pruning runs -- the whole point of this test.
+      for (let i = 0; i < ASSET_CAP + 24; i++) await env.ASSETS.put(`uploads/extra-${String(i).padStart(4, '0')}.png`, `E${i}`)
       env.BACKUP_QUEUE = queue
       tick = 2
       third = await createCloudflareBackup(env, 'manual')
@@ -750,7 +761,11 @@ async function main() {
   await checkAsync('a linked manual-backup job moves from visible running progress to completed at finalization', async () => {
     const schema = { settings: { columns: ['key', 'value'], rows: [] } }
     const assets = {}
-    for (let i = 0; i < 25; i++) assets[`uploads/job-${String(i).padStart(2, '0')}.png`] = { body: `J${i}` }
+    // Cap + 25 so the first run genuinely leaves a mid-copy 'running'
+    // state behind (with cap 100 the ratio is exactly 80% -- if a future
+    // cap re-base makes the percentage non-integer, re-derive the
+    // expected progress from however lib/backup.ts rounds it).
+    for (let i = 0; i < ASSET_CAP + 25; i++) assets[`uploads/job-${String(i).padStart(4, '0')}.png`] = { body: `J${i}` }
     const queue = makeFakeQueue()
     const env = makeEnv({ schema, assets, queue })
     const created = await createCloudflareBackup(env, 'manual')
@@ -766,8 +781,8 @@ async function main() {
 
     const running = await getSystemJob(env, 'job-1')
     assert.strictEqual(running.status, 'running')
-    assert.strictEqual(running.progress, 80)
-    assert.match(running.message, /20\/25/)
+    assert.strictEqual(running.progress, Math.round((ASSET_CAP / (ASSET_CAP + 25)) * 100))
+    assert.match(running.message, new RegExp(`${ASSET_CAP}/${ASSET_CAP + 25}`))
 
     while (queue.sent.length) {
       const message = queue.sent.shift()
