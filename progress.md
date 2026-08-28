@@ -517,14 +517,24 @@ deep-linkable tabs.*
   stat cards + branch list), "Movements", "RFID". Branch transfer options updated to
   everything shipped since (batch preservation, §14 details).
 - [ ] E2. **Sales absorbs Returns and Fees** as sections of one Sales page.
-- [~] E3 *(IN PROGRESS — session 6e, Part 403. Footprint: review/audit page
-  components + App.tsx/AppContext/pathRouting/navigationConfig +
-  section-switcher host; page ids retire, permission keys stay stable.)*
+- [x] E3 *(Part 404, session 6e — SHIPPED (renumbered off 403 = 05's D4).
+  'Review & Logs' hosts the queue + audit trail as sections; audit_log page
+  id/nav/path retired, permission keys stable, sections self-gate, the door
+  admits either grant; /audit-log deep-links open the Audit section; the
+  AuditLog component moved INTACT with its Part-401 export dialog.)*
   **Review + Audit Log merge into "Review & Logs"** — approvals queue and the
   audit trail side by side.
-- [~] E4 *(IN PROGRESS — session 6e, Part 403, after E3. Footprint:
-  Settings/Users/Backup components + the same nav wiring files + the 7.2
-  permissions-editor redesign inside Users' editor components.)*
+- [x] E4 *(Part 404, session 6e — SHIPPED. The Settings hub hosts
+  Settings | Users | Backup as sections; users/backup page ids retired,
+  /users and /backup deep-link to their sections, narrower settings grants
+  (business_identity/sales_policy/drive_credentials) still open the hub.
+  7.2 landed with it: role-summary strip, per-section live state chips,
+  one-row headers with descriptions in the info hint — same keys, same
+  storage, all pinned behavior unchanged. Sidebar is three entries
+  shorter. E6 sweep for these two moves: export/import affordances all
+  live INSIDE the moved components (AuditLog's export dialog, Users'
+  flows, Backup's own surface) — nothing orphaned, no dead routes; old
+  URLs remap rather than 404.)*
   **Settings absorbs Users and Backup** as sections/mini-sections; the permissions
   editor redesign (7.2) lands as part of this move.
 - [x] E5 *(Satisfied by G2, Part 399: the Promotions page exists with Loyalty Points as a lazy section behind a switcher — exactly this item; see G2.)* **Promotions page** (new) with Loyalty Points as a section (see Phase G).

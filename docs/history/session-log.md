@@ -9433,3 +9433,39 @@ is green (15.64s).
 
 **Not done.** The chain's green run happens on the E3/E4 landing (theirs).
 Dialog visual pass stays with B1's sweep. Deploy (user).
+
+## Part 404 (chat, Aug 28 2026) — E3+E4+7.2: Review & Logs, the Settings hub, and an at-a-glance permissions editor
+
+**(Claimed as 403; renumbered — write-order gave 403 to 05's D4 and 405
+to a7's H1 completion.)**
+
+**E3+E4 (35cfc5b7).** Three standalone pages retire into two hosts:
+Review + Audit Log become "Review & Logs"; Settings absorbs Users and
+Backup. Pure rewiring per the Phase-E contract — every component moves
+intact, permission keys stay stable, sections self-gate on their own
+keys while canAccessPage widens only the door, and the old URLs
+(/audit-log, /users, /backup) deep-link to the right section of their
+host. Page ids, nav entries, importers and path rows are removed rather
+than left as zombies; activity keys follow the hosts so lifecycles keep
+firing; the sidebar shrinks by three. E6 checked for these moves:
+export/import affordances all live inside the moved components — nothing
+orphaned.
+
+**7.2 (f27c5a25).** The permissions editor now reads top-to-bottom
+without opening anything: a role-summary strip (N Full · N Custom · N
+None), a live state chip per section computed from the same per-key data
+the controls edit, and one-row headers with the descriptions tucked into
+the info hint. No semantic changes — same keys, storage shape, tier and
+override behavior, every pinned editor test passing unchanged.
+
+Also en route: two test pins followed a7's landed Part-405 export
+refactor with intent preserved (sequential intent-time imports; contacts
+tabs exporting through the shared dialog) plus a new never-top-level
+guard on the XLSX helper.
+
+**Verification.** Frontend chain exit 0 on the settled tree, backend
+sweep green, both tsc, vite build.
+
+**Phase E remaining.** E1 (Inventory→Branches) and E2 (Sales absorbs
+Returns+Fees) — open, waiting on Branches/Inventory (05) and the pages'
+current holders to clear.
