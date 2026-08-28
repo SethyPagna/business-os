@@ -552,6 +552,9 @@ deep-linkable tabs.*
 
 ### Phase F — Add/create flows: wizard, fast batch entry, drafts
 
+- [~] F1 *(IN PROGRESS — session 6e, Part 408 (407 reserved for 4a's E2).
+  Footprint: ProductForm + product create flow + a live-match helper +
+  pure/frontend tests; no nav files (4a holds those for E2).)*
 - [ ] F1. **Add Product = new products only.** Typing a name live-searches existing
   products; matching name/barcode/both raises a structured warning with actions: go back ·
   add as child of the matched group · proceed as new — with a before→after arrow preview
