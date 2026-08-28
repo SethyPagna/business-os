@@ -112,6 +112,9 @@ const productsRoute = loadReal('routes/products.ts', {
   // ranking; test-promotion-rules-pure.cjs covers the real SQL against the
   // real kernel.
   '../lib/promotionRulesSql': { loadActivePromotionRules: async () => [], productPromotedSql: () => '0', productDiscountActiveSql: () => '0', anyRuleAppliesSql: () => '0', singleRuleAppliesSql: () => '0' },
+  // D6 rename engine stubbed inert -- this test asserts image wiring;
+  // test-rename-cascade-pure.cjs covers the real engine on real sqlite.
+  '../lib/renameCascade': { computeRenameImpact: async () => ({}), applyRenameCarry: async () => ({ products: 0, batches: 0 }) },
 
   '../lib/cache': { cachedJsonResponse: async (_r, _c, _v, _t, producer) => producer(), getVersion: async () => '0', bumpVersion: async () => {} },
   '../lib/rateLimit': { checkRateLimit: async () => ({ allowed: true }), getClientIp: () => '127.0.0.1' },

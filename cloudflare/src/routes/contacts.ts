@@ -3,6 +3,7 @@ import { getDb } from '../lib/db'
 import { chunkForBinding } from '../lib/sqlBinding'
 import { requireAuth, type SessionUser } from '../lib/auth'
 import { audit } from '../lib/audit'
+import { applyRenameCarry } from '../lib/renameCascade'
 import { getPermissionTier, hasPermission, isAdminControlUser } from '../lib/permissions'
 import { broadcast, type BroadcastChannel } from '../durable-objects/broadcastHub'
 import { assertUpdatedAtMatch, getExpectedUpdatedAt, writeConflictResponse, WriteConflictError } from '../lib/conflictControl'
@@ -690,6 +691,20 @@ function registerContactRoutes(config: ContactConfig) {
     const allowedColumns = tier === 'review' ? ['name'] : config.columns
     const payload = pickColumns(body, allowedColumns)
     payload.name = name
+
+    // D6: renaming a SUPPLIER used to leave every product/batch that
+    // carries the old free-text name pointing at nothing. When the rename
+    // dialog chose "carry", every attached row follows the new name;
+    // without the flag the old (no-cascade) behavior stands, and "keep a
+    // copy, new is new" is the frontend creating a fresh supplier instead.
+    if (config.table === 'suppliers' && body.__rename_cascade === 'carry') {
+      const fromName = String(current.name || '').trim()
+      if (fromName && fromName.toLowerCase() !== name.toLowerCase()) {
+        const carried = await applyRenameCarry(db, 'supplier', fromName, name, new Date().toISOString())
+        await audit(c.env, user?.id ?? null, user?.name ?? null, 'rename', 'supplier_cascade', id, { from: fromName, to: name, products: carried.products, batches: carried.batches })
+      }
+    }
+    delete (body as Record<string, unknown>).__rename_cascade
 
     // Flagged as a UX gap in Part 155, fixed here (Part 157): a Review
     // Required edit used to return a plain 200 even though only `name`

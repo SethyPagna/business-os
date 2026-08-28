@@ -2,6 +2,7 @@ import { Hono, type Context } from 'hono'
 import { getDb } from '../lib/db'
 import { requireAuth, type SessionUser } from '../lib/auth'
 import { audit } from '../lib/audit'
+import { applyRenameCarry } from '../lib/renameCascade'
 import { assertUpdatedAtMatch, getExpectedUpdatedAt, writeConflictResponse, WriteConflictError } from '../lib/conflictControl'
 import { hasPermission } from '../lib/permissions'
 import { assertCatalogTextIntegrity, normalizeCatalogText } from '../lib/catalogText'
@@ -148,6 +149,19 @@ function registerLookupRoutes(kind: LookupKind, table: 'categories' | 'units', p
     }
 
     const color = normalizeColor(body.color)
+    // D6: the rename dialog's third choice -- "keep a copy, new is new" --
+    // creates the NEW name as a fresh row and leaves the old one (and
+    // every product on it) untouched.
+    if (body.cascade === 'copy') {
+      const copyDuplicate = await db.prepare(`SELECT id FROM ${table} WHERE lower(trim(name)) = lower(trim(@name)) LIMIT 1`).get({ name })
+      if (copyDuplicate) return c.json({ error: `${kind === 'category' ? 'Category' : 'Unit'} already exists` }, 400)
+      const inserted = await db.prepare(`INSERT INTO ${table} (name, color, updated_at) VALUES (@name, @color, CURRENT_TIMESTAMP)`).run({ name, color })
+      const copyId = inserted.lastInsertRowid
+      await audit(c.env, user?.id ?? null, user?.name ?? null, 'create', kind, copyId, { name, copied_from_id: id })
+      const copyRow = await db.prepare(`SELECT * FROM ${table} WHERE id = @id`).get({ id: copyId })
+      c.executionCtx.waitUntil(broadcast(c.env, table, { action: 'create', id: copyId }))
+      return c.json({ ...copyRow, copied: true, copied_from_id: id })
+    }
     const duplicate = await db.prepare(`SELECT * FROM ${table} WHERE id != @id AND lower(trim(name)) = lower(trim(@name)) LIMIT 1`).get<Record<string, unknown>>({ id, name })
     const normalizedCurrent = normalizeLower(current.name)
 
@@ -170,6 +184,15 @@ function registerLookupRoutes(kind: LookupKind, table: 'categories' | 'units', p
       responseRow = await db.prepare(`SELECT * FROM ${table} WHERE id = @id`).get({ id })
     }
 
+    // D6 gap fix: the primary-column cascade above never touched the
+    // multi-value 'categories' membership (migration 0033), so a product
+    // holding the renamed category as a SECONDARY value kept the stale
+    // text. applyRenameCarry rewrites those memberships (and re-runs the
+    // primary update, harmlessly idempotent here).
+    if (kind === 'category') {
+      await applyRenameCarry(db, 'category', String(current.name || ''), name, new Date().toISOString())
+      if (duplicate) await applyRenameCarry(db, 'category', String(duplicate.name || ''), name, new Date().toISOString())
+    }
     await audit(c.env, user?.id ?? null, user?.name ?? null, duplicate ? 'merge' : 'update', kind, mergedIntoId || id, { name, merged_from_id: duplicate ? id : null })
     c.executionCtx.waitUntil(broadcast(c.env, table, { action: duplicate ? 'merge' : 'update', id: mergedIntoId || id }))
     return c.json({ ...responseRow, merged: !!duplicate, merged_from_id: duplicate ? id : null })

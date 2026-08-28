@@ -19,6 +19,7 @@ import { broadcast } from '../durable-objects/broadcastHub'
 import { createBulkDeleteJob, getBulkDeleteJob, reapStalledBulkDeleteJobs } from '../lib/bulkDeleteEngine'
 import { ADMIN_MAX_IMAGES_PER_PRODUCT, MAX_IMAGES_PER_PRODUCT } from '../lib/importImageMatch'
 import { loadActivePromotionRules, productPromotedSql, productDiscountActiveSql, anyRuleAppliesSql, singleRuleAppliesSql } from '../lib/promotionRulesSql'
+import { computeRenameImpact, applyRenameCarry, type RenameKind } from '../lib/renameCascade'
 import {
   buildFtsMatchExpression,
   buildHybridMatchClause,
@@ -1185,6 +1186,41 @@ app.post('/', async (c) => {
   return c.json({ item, id, success: true })
 })
 
+// D6: before -> after preview numbers for a rename, before anything
+// writes. Same gate as the writes the preview leads to.
+app.get('/rename-impact', async (c) => {
+  const user = c.get('user')
+  if (getActionTier(user, 'products', 'edit') === 'none') {
+    return c.json({ error: 'You do not have permission to perform this action' }, 403)
+  }
+  const kind = String(c.req.query('kind') || '') as RenameKind
+  const from = String(c.req.query('from') || '').trim()
+  const to = String(c.req.query('to') || '').trim()
+  if (!['category', 'brand', 'supplier', 'product_name'].includes(kind)) return c.json({ error: 'Unknown rename kind' }, 400)
+  if (!from || !to) return c.json({ error: 'from and to are required' }, 400)
+  return c.json(await computeRenameImpact(getDb(c.env), kind, from, to))
+})
+
+// D6: brand has no lookup table -- a brand "rename" IS the cascade over
+// the products that carry it (carry-only; "keep a copy" for a free-text
+// value means simply typing the new brand on new products).
+app.post('/rename-brand', async (c) => {
+  const user = c.get('user')
+  if (getActionTier(user, 'products', 'edit') === 'none') {
+    return c.json({ error: 'You do not have permission to perform this action' }, 403)
+  }
+  const body = (await c.req.json<Record<string, unknown>>().catch(() => ({}))) as Record<string, unknown>
+  const from = String(body.from || '').trim()
+  const to = String(body.to || '').trim()
+  if (!from || !to) return c.json({ error: 'from and to are required' }, 400)
+  if (from.toLowerCase() === to.toLowerCase()) return c.json({ error: 'New brand name is the same' }, 400)
+  const changed = await applyRenameCarry(getDb(c.env), 'brand', from, to, new Date().toISOString())
+  await audit(c.env, user?.id ?? null, user?.name ?? null, 'rename', 'brand', null, { from, to, products: changed.products })
+  c.executionCtx.waitUntil(bumpVersion(c.env, 'products'))
+  c.executionCtx.waitUntil(broadcast(c.env, 'products', { action: 'rename-brand', from, to }))
+  return c.json({ renamed: true, ...changed })
+})
+
 app.put('/:id', async (c) => {
   const user = c.get('user')
   const body = (await c.req.json<Record<string, unknown>>().catch(() => ({}))) as Record<string, unknown>
@@ -1228,6 +1264,19 @@ app.put('/:id', async (c) => {
         duplicate,
       }, 409)
     }
+    // D6 / 9.1 ("rename does not regroup"): when the operator chose to
+    // carry the WHOLE name group to the new name, rename the siblings
+    // first -- the ordinary row update below then writes this row like
+    // any other edit. Only-this-row (the old behavior, a deliberate
+    // split) is the default when the flag is absent.
+    if (body.__rename_scope === 'group' && body.name !== undefined && current?.name) {
+      const fromName = String(current.name || '').trim()
+      if (fromName && fromName.toLowerCase() !== nextName.toLowerCase()) {
+        const carried = await applyRenameCarry(getDb(c.env), 'product_name', fromName, nextName, new Date().toISOString())
+        await audit(c.env, user?.id ?? null, user?.name ?? null, 'rename', 'product_group', id, { from: fromName, to: nextName, rows: carried.products })
+      }
+    }
+    delete body.__rename_scope
   }
 
   // Image-only edits are never queued for review -- 'review' tier and this
