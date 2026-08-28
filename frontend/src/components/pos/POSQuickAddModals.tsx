@@ -60,21 +60,23 @@ export default function POSQuickAddModals({
             <label htmlFor="pos-quick-customer-name" className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{t('name')} *</label>
             <input id="pos-quick-customer-name" name="pos_quick_customer_name" className="input" value={newCustomerForm.name} onChange={(event) => setNewCustomerForm((form) => ({ ...form, name: event.target.value }))} autoComplete="name" autoFocus />
           </div>
-          <div>
-            <label htmlFor="pos-quick-customer-membership" className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">
-              {posCopy('Membership ID', 'Membership ID')} <span className="font-normal text-gray-400">({posCopy('optional', 'optional')})</span>
-            </label>
-            <input id="pos-quick-customer-membership" name="pos_quick_customer_membership" className="input" value={newCustomerForm.membership_number} onChange={(event) => setNewCustomerForm((form) => ({ ...form, membership_number: event.target.value }))} placeholder={posCopy('Auto-generated if blank', 'Auto-generated if blank')} autoComplete="off" />
-          </div>
+          {/* Phone directly after the name -- the default/first contact
+              information (user, Aug 28); membership follows. */}
           <div className="grid grid-cols-2 gap-2">
             <div>
-              <label htmlFor="pos-quick-customer-phone" className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{t('phone')}</label>
+              <label htmlFor="pos-quick-customer-phone" className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{t('phone_number') || 'Phone Number'}</label>
               <input id="pos-quick-customer-phone" name="pos_quick_customer_phone" className="input" value={newCustomerForm.phone} onChange={(event) => setNewCustomerForm((form) => ({ ...form, phone: event.target.value }))} autoComplete="tel" />
             </div>
             <div>
               <label htmlFor="pos-quick-customer-address" className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{t('address')}</label>
               <input id="pos-quick-customer-address" name="pos_quick_customer_address" className="input" value={newCustomerForm.address} onChange={(event) => setNewCustomerForm((form) => ({ ...form, address: event.target.value }))} autoComplete="street-address" />
             </div>
+          </div>
+          <div>
+            <label htmlFor="pos-quick-customer-membership" className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">
+              {posCopy('Membership ID', 'Membership ID')} <span className="font-normal text-gray-400">({posCopy('optional', 'optional')})</span>
+            </label>
+            <input id="pos-quick-customer-membership" name="pos_quick_customer_membership" className="input" value={newCustomerForm.membership_number} onChange={(event) => setNewCustomerForm((form) => ({ ...form, membership_number: event.target.value }))} placeholder={posCopy('Auto-generated if blank', 'Auto-generated if blank')} autoComplete="off" />
           </div>
         </QuickAddModal>
       ) : null}

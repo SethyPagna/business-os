@@ -311,6 +311,10 @@ type PosOrder = Record<string, unknown> & {
   id: string
   isDelivery: boolean
   label?: string
+  // Whether this sale EARNS loyalty points. Optional with "on" semantics
+  // (only an explicit false turns accrual off), so carts persisted before
+  // the field existed keep the long-standing always-accrue behavior.
+  loyaltyAccrual?: boolean
   membershipDiscountKhr: string
   membershipDiscountUsd: string
   membershipRedeemUnits: string
@@ -2434,6 +2438,7 @@ export default function POS() {
       membership_discount_usd: membershipDiscUsd,
       membership_discount_khr: membershipDiscKhr,
       membership_points_redeemed: membershipRedeemUnits * redeemPointsStep,
+      loyalty_accrual: active.loyaltyAccrual !== false,
       tax_usd:      taxUsd,     tax_khr:      taxKhr,
       total_usd:    totalUsd,   total_khr:    totalKhr,
       payment_method:   paymentMethodSummary(activePaymentDetails),
@@ -2975,55 +2980,57 @@ export default function POS() {
 
               {showDelivery && active.isDelivery && (
                 <div className="px-3 pb-3 space-y-2">
-                  {/* Delivery contact picker */}
+                  {/* Rider search + fee share ONE row (user, Aug 28): the fee
+                      is a small figure, so it rides beside the search instead
+                      of owning a row. The standalone "= KHR" echo is gone --
+                      the paid-by note below already shows USD (KHR). */}
                   <div>
-                    <div className="flex items-center justify-between mb-1">
+                    <div className="mb-1 flex items-center justify-between gap-2">
                       <span className="text-xs text-gray-400">{t('rider_contact')||'Rider / Contact'}</span>
-                      <button onClick={() => setShowAddDelivery(true)} className="text-xs text-orange-500 hover:text-orange-700 font-medium">{t('add_new')||'+ New'}</button>
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs text-gray-400">{t('delivery_fee')||'Delivery fee'}</span>
+                        <button onClick={() => setShowAddDelivery(true)} className="text-xs text-orange-500 hover:text-orange-700 font-medium">{t('add_new')||'+ New'}</button>
+                      </div>
                     </div>
-                    <div className="relative">
-                      <label htmlFor="pos-delivery-search" className="sr-only">{t('search')}</label>
-                      <input id="pos-delivery-search" name="pos_delivery_search" autoComplete="name" className="input text-xs py-1.5 pr-8" placeholder={`${t('search')}...`} value={active.deliverySearch || ''}
-                        onChange={e => { patchActive({ deliverySearch: e.target.value }); setShowDeliveryDrop(true) }}
-                        onFocus={() => setShowDeliveryDrop(true)} />
-                      {active.deliverySearch && <button className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-red-500" onClick={clearDelivery}>{t('clear')||'Clear'}</button>}
-                      {showDeliveryDrop && deliverySuggestions.length > 0 && (
-                        <div className="absolute top-full left-0 right-0 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 rounded-lg shadow-lg z-20 max-h-32 overflow-auto mt-0.5">
-                          {deliverySuggestions.map(d => (
-                            <button key={d.id} className="w-full text-left px-3 py-2 hover:bg-orange-50 dark:hover:bg-orange-900/20 text-xs" onClick={() => selectDelivery(d)}>
-                              <span className="font-medium text-gray-900 dark:text-white">{d.name}</span>
-                              {d.phone && <span className="text-gray-400 ml-2">{d.phone}</span>}
-                              {d.area  && <span className="text-orange-500 ml-2 text-[10px]">{d.area}</span>}
-                            </button>
-                          ))}
-                        </div>
-                      )}
+                    <div className="flex items-start gap-2">
+                      <div className="relative min-w-0 flex-1">
+                        <label htmlFor="pos-delivery-search" className="sr-only">{t('search')}</label>
+                        <input id="pos-delivery-search" name="pos_delivery_search" autoComplete="name" className="input text-xs py-1.5 pr-8" placeholder={`${t('search')}...`} value={active.deliverySearch || ''}
+                          onChange={e => { patchActive({ deliverySearch: e.target.value }); setShowDeliveryDrop(true) }}
+                          onFocus={() => setShowDeliveryDrop(true)} />
+                        {active.deliverySearch && <button className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-red-500" onClick={clearDelivery}>{t('clear')||'Clear'}</button>}
+                        {showDeliveryDrop && deliverySuggestions.length > 0 && (
+                          <div className="absolute top-full left-0 right-0 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 rounded-lg shadow-lg z-20 max-h-32 overflow-auto mt-0.5">
+                            {deliverySuggestions.map(d => (
+                              <button key={d.id} className="w-full text-left px-3 py-2 hover:bg-orange-50 dark:hover:bg-orange-900/20 text-xs" onClick={() => selectDelivery(d)}>
+                                <span className="font-medium text-gray-900 dark:text-white">{d.name}</span>
+                                {d.phone && <span className="text-gray-400 ml-2">{d.phone}</span>}
+                                {d.area  && <span className="text-orange-500 ml-2 text-[10px]">{d.area}</span>}
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                      <div className="relative w-24 flex-shrink-0">
+                        <label htmlFor="pos-delivery-fee-usd" className="sr-only">{t('delivery_fee')||'Delivery fee'}</label>
+                        <span className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-400 text-xs pointer-events-none">{usdSymbol}</span>
+                        <input id="pos-delivery-fee-usd" name="pos_delivery_fee_usd" className="input text-xs py-1.5 pl-5 w-full" type="number" step="any" placeholder="0.00" value={active.deliveryFeeUsd} onChange={e => patchActive({ deliveryFeeUsd: e.target.value })} autoComplete="off" />
+                      </div>
                     </div>
                     {deliveryContacts.length === 0 && (
                       <p className="text-xs text-gray-400 mt-1">{t('no_contacts_yet')||'No contacts yet.'} <button className="text-orange-500 underline" onClick={() => setShowAddDelivery(true)}>{t('add_one')||'Add one'}</button></p>
                     )}
                   </div>
 
-                  {/* Delivery fee with USD input and KHR auto-display */}
+                  {/* Who pays: label + toggle on one row, buttons sized to
+                      their text instead of stretching half the panel each. */}
                   <div>
-                    <label htmlFor="pos-delivery-fee-usd" className="text-xs text-gray-400 block mb-1">{t('delivery_fee')||'Delivery fee'}</label>
-                    <div className="flex gap-2 items-center">
-                      {/* Capped width -- a delivery fee is a small figure, so a
-                          full-width input read as "too large" (11.11). */}
-                      <div className="relative w-28 max-w-full">
-                        <span className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-400 text-xs pointer-events-none">{usdSymbol}</span>
-                        <input id="pos-delivery-fee-usd" name="pos_delivery_fee_usd" className="input text-xs py-1 pl-5 w-full" type="number" step="any" placeholder="0.00" value={active.deliveryFeeUsd} onChange={e => patchActive({ deliveryFeeUsd: e.target.value })} autoComplete="off" />
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-xs text-gray-400">{t('fee_paid_by')||'Fee paid by'}</span>
+                      <div className="flex overflow-hidden rounded-lg border border-gray-200 text-xs dark:border-gray-600">
+                        <button onClick={() => patchActive({ deliveryFeePaidBy: DELIVERY_FEE_PAYER.CUSTOMER })} className={`px-3 py-1.5 font-medium transition-colors ${active.deliveryFeePaidBy === DELIVERY_FEE_PAYER.CUSTOMER ? 'bg-orange-500 text-white' : 'text-gray-500 hover:bg-gray-50 dark:hover:bg-gray-700'}`}>{t('fee_by_customer')||'Customer'}</button>
+                        <button onClick={() => patchActive({ deliveryFeePaidBy: DELIVERY_FEE_PAYER.STORE })}    className={`border-l border-gray-200 px-3 py-1.5 font-medium transition-colors dark:border-gray-600 ${active.deliveryFeePaidBy === DELIVERY_FEE_PAYER.STORE    ? 'bg-blue-600 text-white'   : 'text-gray-500 hover:bg-gray-50 dark:hover:bg-gray-700'}`}>{t('fee_by_store')||'Store'}</button>
                       </div>
-                      {feeUsd > 0 && <span className="text-xs text-gray-400 whitespace-nowrap">= {fmtKHR(feeKhr)}</span>}
-                    </div>
-                  </div>
-
-                  {/* Who pays the fee */}
-                  <div>
-                    <div className="text-xs text-gray-400 block mb-1">{t('fee_paid_by')||'Fee paid by'}</div>
-                    <div className="flex rounded-lg border border-gray-200 dark:border-gray-600 overflow-hidden text-xs">
-                      <button onClick={() => patchActive({ deliveryFeePaidBy: DELIVERY_FEE_PAYER.CUSTOMER })} className={`flex-1 py-1.5 font-medium transition-colors ${active.deliveryFeePaidBy === DELIVERY_FEE_PAYER.CUSTOMER ? 'bg-orange-500 text-white' : 'text-gray-500 hover:bg-gray-50 dark:hover:bg-gray-700'}`}>{t('fee_by_customer')||'Customer'}</button>
-                      <button onClick={() => patchActive({ deliveryFeePaidBy: DELIVERY_FEE_PAYER.STORE })}    className={`flex-1 py-1.5 font-medium transition-colors ${active.deliveryFeePaidBy === DELIVERY_FEE_PAYER.STORE    ? 'bg-blue-600 text-white'   : 'text-gray-500 hover:bg-gray-50 dark:hover:bg-gray-700'}`}>{t('fee_by_store')||'Store'}</button>
                     </div>
                     {feeUsd > 0 && (
                       <p className={`text-xs mt-1 px-2 py-1 rounded-lg ${active.deliveryFeePaidBy === DELIVERY_FEE_PAYER.CUSTOMER ? 'bg-orange-50 dark:bg-orange-900/20 text-orange-700 dark:text-orange-300' : 'bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-300'}`}>
@@ -3111,6 +3118,25 @@ export default function POS() {
                     </div>
                   )}
                 </div>
+                {/* Earn-points toggle: any sale attached to a customer accrues
+                    points (balances are computed by summing sales server-side),
+                    so this shows for every selected customer, not only members.
+                    Default ON preserves the long-standing auto-accrual. */}
+                {active.customer?.id ? (
+                  <div className="mt-2 flex items-center justify-between gap-2">
+                    <span className="text-xs font-medium text-gray-500">{posCopy('Count loyalty points', 'គិតពិន្ទុសមាជិក')}</span>
+                    <button
+                      type="button"
+                      role="switch"
+                      aria-checked={active.loyaltyAccrual !== false}
+                      aria-label={posCopy('Count loyalty points', 'គិតពិន្ទុសមាជិក')}
+                      onClick={() => patchActive({ loyaltyAccrual: active.loyaltyAccrual === false })}
+                      className={`relative h-5 w-9 flex-shrink-0 rounded-full transition-colors ${active.loyaltyAccrual !== false ? 'bg-emerald-500' : 'bg-gray-300 dark:bg-gray-600'}`}
+                    >
+                      <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform ${active.loyaltyAccrual !== false ? 'translate-x-4' : 'translate-x-0.5'}`} />
+                    </button>
+                  </div>
+                ) : null}
               </div>
 
               {/* Order summary */}
