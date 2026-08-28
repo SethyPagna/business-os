@@ -256,6 +256,12 @@ type CartLineRecord = ProductRecord & {
   batch_label?: string | null
   batch_expiry_date?: string | null
   batch_available_quantity?: number
+  // 11.9: this line draws from a damaged lot -- capped by that lot's
+  // quantity_remaining, and the checkout sends damaged_lot_id so the
+  // server consumes the LOT, never branch/batch stock.
+  damaged_lot_id?: number | null
+  damaged_lot_label?: string | null
+  damaged_available_quantity?: number
 }
 
 type CustomerRecord = Record<string, unknown> & {
@@ -2110,7 +2116,7 @@ export default function POS() {
   }, [])
 
 // Cart mutations
-  function addToCart(product: ProductRecord, priceMode = 'selling', batchSelection?: BatchSelection, branchIdOverride?: string | number | null) {
+  function addToCart(product: ProductRecord, priceMode = 'selling', batchSelection?: BatchSelection, branchIdOverride?: string | number | null, damagedSelection?: { damagedLotId: number; quantity: number; label: string }) {
     // An explicit branch from the detail sheet WINS. The sheet resolves its
     // own branch for the Branch step, the stock figure and the lot list, so
     // re-deriving a different one here (highest-stock, or the branch filter)
@@ -2130,13 +2136,24 @@ export default function POS() {
     // stock, not the product's overall stock -- a different lot for the
     // same product/branch/price is a separate cart line (see
     // findMatchingCartLineIndex/posCore.ts), each with its own ceiling.
-    const batchCeiling = batchSelection ? Math.max(0, Math.floor(batchSelection.quantity)) : null
-    const existingIndex = findMatchingCartLineIndex(active.cart, {
-      productId: product?.id,
-      priceMode: priceValues.price_mode,
-      branchId: assignedBranchId,
-      batchId: batchSelection?.batchId ?? null,
-    })
+    const batchCeiling = damagedSelection
+      ? Math.max(0, Math.floor(damagedSelection.quantity))
+      : batchSelection ? Math.max(0, Math.floor(batchSelection.quantity)) : null
+    // A damaged-source line merges only with the SAME damaged lot's line;
+    // and a plain add never merges into a damaged line (the matcher knows
+    // nothing about damaged lots, so both directions are guarded here).
+    let existingIndex = damagedSelection
+      ? active.cart.findIndex((item) => Number((item as CartLineRecord).damaged_lot_id) === damagedSelection.damagedLotId
+          && Number(item.id) === Number(product?.id)
+          && String(item.price_mode || 'selling') === priceValues.price_mode
+          && Number(item.branch_id || 0) === Number(assignedBranchId || 0))
+      : findMatchingCartLineIndex(active.cart, {
+          productId: product?.id,
+          priceMode: priceValues.price_mode,
+          branchId: assignedBranchId,
+          batchId: batchSelection?.batchId ?? null,
+        })
+    if (!damagedSelection && existingIndex >= 0 && (active.cart[existingIndex] as CartLineRecord).damaged_lot_id) existingIndex = -1
     const existing = existingIndex >= 0 ? active.cart[existingIndex] : null
     let newCart: CartLineRecord[]
     if (existing) {
@@ -2153,7 +2170,7 @@ export default function POS() {
       if (stock <= 0) { notify(t('not_enough_stock'), 'error'); return }
       newCart = [...active.cart, {
         ...product,
-        cart_line_id: `${Number(product.id)}:${priceValues.price_mode}:${Number(assignedBranchId || 0)}:${batchSelection?.batchId || 0}:${Date.now()}:${Math.random().toString(36).slice(2, 7)}`,
+        cart_line_id: `${Number(product.id)}:${priceValues.price_mode}:${Number(assignedBranchId || 0)}:${batchSelection?.batchId || 0}:D${damagedSelection?.damagedLotId || 0}:${Date.now()}:${Math.random().toString(36).slice(2, 7)}`,
         quantity: 1,
         ...priceValues,
         branch_id: assignedBranchId || null,
@@ -2162,6 +2179,11 @@ export default function POS() {
           batch_label: batchSelection.batchLabel,
           batch_expiry_date: batchSelection.batchExpiryDate,
           batch_available_quantity: batchCeiling ?? 0,
+        } : {}),
+        ...(damagedSelection ? {
+          damaged_lot_id: damagedSelection.damagedLotId,
+          damaged_lot_label: damagedSelection.label,
+          damaged_available_quantity: batchCeiling ?? 0,
         } : {}),
       } as CartLineRecord]
     }
@@ -2187,7 +2209,9 @@ export default function POS() {
     // A batch-tracked line is capped by the lot's own remaining stock
     // (captured on the line when it was added -- see addToCart), not the
     // product's overall stock across every lot.
-    const stockCeiling = cartItem?.batch_id ? (cartItem.batch_available_quantity ?? 0) : getDisplayStock(product, cartItem)
+    const stockCeiling = cartItem?.damaged_lot_id
+      ? (cartItem.damaged_available_quantity ?? 0)
+      : cartItem?.batch_id ? (cartItem.batch_available_quantity ?? 0) : getDisplayStock(product, cartItem)
     if (qty > stockCeiling) { notify(t('not_enough_stock'), 'error'); return }
     patchActive({ cart: active.cart.map((item) => getCartLineId(item) === cartLineId ? { ...item, quantity: qty } : item) })
   }
@@ -2488,6 +2512,7 @@ export default function POS() {
         batch_id:          i.batch_id || null,
         batch_label:       i.batch_label || null,
         batch_expiry_date: i.batch_expiry_date || null,
+        damaged_lot_id:    i.damaged_lot_id || null,
       })),
       subtotal_usd: subtotalUsd, subtotal_khr: subtotalKhr,
       discount_usd: discUsd,    discount_khr: discKhr,

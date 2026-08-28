@@ -138,6 +138,9 @@ const batchesRoute = loadReal('routes/batches.ts', {
   '../lib/cache': { bumpVersion: async () => {} },
   '../lib/productBatches': productBatches,
   '../lib/batchCode': batchCode,
+  // K2 Part 411: routes/batches.ts gained the damaged-lots POS lookup;
+  // these tests exercise receive/adjust, so an empty stub is honest.
+  '../lib/returnsStock': { listOpenDamagedLots: async () => [] },
 })
 const batchesApp = batchesRoute.default
 

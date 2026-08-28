@@ -932,16 +932,21 @@ deep-linkable tabs.*
 
 - [ ] K1. Server-level undo/redo (3.1) — appliers replay stored payloads; admin sees all,
   users see their own.
-- [~] K2 **[session 6e — 11.13 + 11.12 SHIPPED as Part 410 (backend
-  14dc36d5 + UI): per-item three-way chooser (none/restock/damaged) on
+- [x] K2 *(session 6e — COMPLETE across Parts 410 + 411. Part 410
+  (11.13 + 11.12): per-item three-way chooser (none/restock/damaged) on
   create AND edit, damaged stock as traceable lots (damaged_stock_lots,
   migration 0074) with consumed-lot edit blocking, Replace from
   same-name stock drained the POS way with even-exchange default and
-  full-access-gated price-difference settlement, detail modal shows
-  actions + replacement lines. REMAINING (Part 411, still session 6e):
-  the 11.9 POS SP/VIP price picker + damage source option drawing from
-  damaged_stock_lots — footprint POS.tsx/posCore.ts + routes/sales.ts +
-  a sale_items.damaged_lot_id migration.]** Returns Replace + damaged-stock chooser (11.12/11.13) and the POS SP/VIP/damage
+  full-access-gated price-difference settlement. Part 411 (rest of
+  11.9): the POS Damage source option — open damaged lots listed beside
+  sellable lots in the detail sheet (both flows, amber, never cost),
+  one-source-per-line exclusivity, lot-capped quantities; checkout
+  sends sale_items.damaged_lot_id (migration 0075) and the server
+  consumes/restores damaged_stock_lots.quantity_remaining through sale,
+  cancel, and un-cancel on the same heldQuantity state machine
+  (damage_out/damage_in ledger). SP/VIP short-label pricing already
+  existed in the sheet (Selling/VIP/Promotion buttons) and is untouched.
+  POS still never shows cost.)* Returns Replace + damaged-stock chooser (11.12/11.13) and the POS SP/VIP/damage
   picker rest of 11.9. **Elevated Aug 28 — "for POS, focus on batches and various
   options":** the POS picking flow leads with the BATCH (lot, received/expiry) and a
   clear Selling-vs-VIP price choice per line; damaged stock joins as an option once

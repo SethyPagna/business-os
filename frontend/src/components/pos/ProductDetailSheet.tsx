@@ -6,6 +6,7 @@ import X from 'lucide-react/dist/esm/icons/x.js'
 import { promotionBadgeForProduct, evaluatePromotionPricing, type PromotionRule } from '../../utils/promotionRules.ts'
 import { getKhmerTextProps } from '../../utils/scriptTypography.ts'
 import { getProductBatches } from '../../api/batchesTransport.ts'
+import { getDamagedLots, type DamagedLot } from '../../api/damagedLotsTransport.ts'
 import type { BatchSelection, ProductBatch } from '../../api/batchesTransport.ts'
 import { batchDisplayLabel } from '../../utils/batchLabel.ts'
 import { buildProductBranchSummaryLabel } from '../products/helpers/productDisplayHelpers.ts'
@@ -203,7 +204,7 @@ interface ProductDetailSheetProps {
   // That mismatch showed up as "the stock displayed doesn't match the option I
   // picked", and booked lots against the wrong branch -- caught only as a 409
   // server-side, after the sale was committed.
-  onAddToCart: (product: ProductRecord, priceMode?: PriceMode, batchSelection?: BatchSelection, branchId?: string | number | null) => void
+  onAddToCart: (product: ProductRecord, priceMode?: PriceMode, batchSelection?: BatchSelection, branchId?: string | number | null, damagedSelection?: { damagedLotId: number; quantity: number; label: string }) => void
   onClose: () => void
   onOpenImageLightbox: (product: ProductRecord, index: number) => void
   // G1: the active promotion rules -- the sheet's price buttons and the
@@ -270,6 +271,11 @@ export default function ProductDetailSheet({
   // lots. The two must not render the same way -- see the fetch below.
   const [batchesError, setBatchesError] = useState('')
   const [selectedBatchId, setSelectedBatchId] = useState<number | null>(null)
+  // 11.9: open damaged lots for the resolved row/branch -- the Damage
+  // source option shown beside the sellable lots. A failed fetch shows no
+  // option (absence is safe; damaged stock is an offer, not a gate).
+  const [damagedLots, setDamagedLots] = useState<DamagedLot[]>([])
+  const [selectedDamagedLotId, setSelectedDamagedLotId] = useState<number | null>(null)
   const [batchPage, setBatchPage] = useState(0)
   useEffect(() => {
     setSelectedBranchId(null)
@@ -433,7 +439,17 @@ export default function ProductDetailSheet({
   // rule the product-level reset above already applies to Branch/Barcode
   // themselves.
   useEffect(() => {
+    if (resolvedProduct == null || resolvedBranchId == null) { setDamagedLots([]); return }
+    let cancelled = false
+    getDamagedLots(resolvedProduct.id, resolvedBranchId).then((res) => {
+      if (!cancelled) setDamagedLots(Array.isArray(res?.lots) ? res.lots : [])
+    }).catch(() => { if (!cancelled) setDamagedLots([]) })
+    return () => { cancelled = true }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [resolvedProduct?.id, resolvedBranchId])
+  useEffect(() => {
     setSelectedBatchId(null)
+    setSelectedDamagedLotId(null)
     setBatchPage(0)
   }, [resolvedProduct?.id, resolvedBranchId])
 
@@ -447,19 +463,34 @@ export default function ProductDetailSheet({
   // which lot it's coming from. Now applies the same way whether the
   // resolved row came from the flat flow or from the group's Branch/
   // Barcode steps.
+  const selectedDamagedLot = damagedLots.find((lot) => lot.id === selectedDamagedLotId) || null
   const batchSelectionRequired = isBatchTracked
-  const batchReadyToSell = !batchSelectionRequired || (selectedBatch != null && Number(selectedBatch.quantity || 0) > 0)
+  // A picked damaged lot IS the line's source -- it satisfies the lot gate
+  // the same way a sellable lot does (the units come from that lot).
+  const batchReadyToSell = selectedDamagedLot != null
+    ? Number(selectedDamagedLot.quantity_remaining || 0) > 0
+    : (!batchSelectionRequired || (selectedBatch != null && Number(selectedBatch.quantity || 0) > 0))
 
   // The ONE stock number this sheet shows. Colour and value both read it, so
   // they can never disagree: a picked lot's own remaining quantity, else the
   // lot total when a lot must be picked, else the resolved row's stock at the
   // resolved branch.
-  const displayedStock = selectedBatch
-    ? Number(selectedBatch.quantity || 0)
-    : (batchSelectionRequired ? batchStockTotal : effectiveVariantStock)
+  const displayedStock = selectedDamagedLot
+    ? Number(selectedDamagedLot.quantity_remaining || 0)
+    : selectedBatch
+      ? Number(selectedBatch.quantity || 0)
+      : (batchSelectionRequired ? batchStockTotal : effectiveVariantStock)
 
+
+  const damagedLotLabel = (lot: DamagedLot): string =>
+    `${posCopy('Damage', 'Damage')} · ${lot.return_id ? `${posCopy('return', 'return')} #${lot.return_id}` : `#${lot.id}`}`
+
+  const buildDamagedSelection = () => selectedDamagedLot
+    ? { damagedLotId: selectedDamagedLot.id, quantity: Number(selectedDamagedLot.quantity_remaining || 0), label: damagedLotLabel(selectedDamagedLot) }
+    : undefined
 
   const buildBatchSelection = (): BatchSelection | undefined => {
+    if (selectedDamagedLot) return undefined
     if (!batchSelectionRequired || !selectedBatch) return undefined
     return {
       batchId: selectedBatch.id,
@@ -470,7 +501,7 @@ export default function ProductDetailSheet({
   }
 
   const closeAfterAdd = (nextProduct: ProductRecord, priceMode: PriceMode) => {
-    onAddToCart(nextProduct, priceMode, buildBatchSelection(), effectiveBranchId)
+    onAddToCart(nextProduct, priceMode, buildBatchSelection(), effectiveBranchId, buildDamagedSelection())
     onClose()
   }
 
@@ -655,7 +686,7 @@ export default function ProductDetailSheet({
                                   key={batch.id}
                                   type="button"
                                   className={pillClass(batch.id === selectedBatchId, batchOut)}
-                                  onClick={() => setSelectedBatchId(batch.id)}
+                                  onClick={() => { setSelectedBatchId(batch.id); setSelectedDamagedLotId(null) }}
                                 >
                                   <span className="font-mono">{formatBatchLabel(batch, posCopy)}</span>
                                   {batch.expiry_date ? <span className="ml-1 text-[10px] font-normal opacity-75">{posCopy('exp', 'exp')} {batch.expiry_date}</span> : null}
@@ -667,6 +698,21 @@ export default function ProductDetailSheet({
                           <PillPager page={clampedBatchPage} pageCount={batchPageCount} onPageChange={setBatchPage} posCopy={posCopy} />
                         </>
                       )}
+                    </div>
+                  ) : null}
+                  {damagedLots.length > 0 ? (
+                    <div className="mb-2 rounded-lg border border-orange-200 bg-orange-50/60 p-2 dark:border-orange-900/50 dark:bg-orange-950/20">
+                      <div className="mb-1.5 text-[11px] font-semibold text-orange-500 dark:text-orange-400">🟠 {posCopy('Damage (from returns)', 'Damage (from returns)')}</div>
+                      <div className="flex flex-wrap gap-1.5">
+                        {damagedLots.map((lot) => (
+                          <button key={lot.id} type="button"
+                            className={pillClass(lot.id === selectedDamagedLotId, Number(lot.quantity_remaining || 0) <= 0)}
+                            onClick={() => { setSelectedDamagedLotId(lot.id === selectedDamagedLotId ? null : lot.id); setSelectedBatchId(null) }}>
+                            <span className="font-mono">{damagedLotLabel(lot)}</span>
+                            <span className="ml-1 text-[10px] font-normal opacity-75">({lot.quantity_remaining})</span>
+                          </button>
+                        ))}
+                      </div>
                     </div>
                   ) : null}
                   <div className="flex flex-wrap gap-1.5">
@@ -724,7 +770,7 @@ export default function ProductDetailSheet({
                             key={batch.id}
                             type="button"
                             className={pillClass(batch.id === selectedBatchId, batchOut)}
-                            onClick={() => setSelectedBatchId(batch.id)}
+                            onClick={() => { setSelectedBatchId(batch.id); setSelectedDamagedLotId(null) }}
                           >
                             <span className="font-mono">{formatBatchLabel(batch, posCopy)}</span>
                             {batch.expiry_date ? <span className="ml-1 text-[10px] font-normal opacity-75">{posCopy('exp', 'exp')} {batch.expiry_date}</span> : null}
@@ -736,6 +782,21 @@ export default function ProductDetailSheet({
                     <PillPager page={clampedBatchPage} pageCount={batchPageCount} onPageChange={setBatchPage} posCopy={posCopy} />
                   </>
                 )}
+              </div>
+            ) : null}
+            {damagedLots.length > 0 ? (
+              <div className="rounded-xl border border-orange-200 bg-orange-50/60 p-3 dark:border-orange-900/50 dark:bg-orange-950/20">
+                <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-orange-500 dark:text-orange-400">🟠 {posCopy('Damage (from returns)', 'Damage (from returns)')}</div>
+                <div className="flex flex-wrap gap-1.5">
+                  {damagedLots.map((lot) => (
+                    <button key={lot.id} type="button"
+                      className={pillClass(lot.id === selectedDamagedLotId, Number(lot.quantity_remaining || 0) <= 0)}
+                      onClick={() => { setSelectedDamagedLotId(lot.id === selectedDamagedLotId ? null : lot.id); setSelectedBatchId(null) }}>
+                      <span className="font-mono">{damagedLotLabel(lot)}</span>
+                      <span className="ml-1 text-[10px] font-normal opacity-75">({lot.quantity_remaining})</span>
+                    </button>
+                  ))}
+                </div>
               </div>
             ) : null}
             <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">

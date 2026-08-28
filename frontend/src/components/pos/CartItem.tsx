@@ -36,6 +36,9 @@ interface CartLineItem {
   batch_id?: number | string | null
   batch_label?: string | null
   batch_expiry_date?: string | null
+  // 11.9: this line draws from a damaged lot (see POS.tsx addToCart) --
+  // shown in amber so a damage sale reads differently from a plain one.
+  damaged_lot_label?: string | null
 }
 
 interface BranchOption {
@@ -130,6 +133,11 @@ export default function CartItem({
           {item.batch_label ? (
             <div {...getKhmerTextProps(item.batch_label, 'mt-0.5 truncate text-[10px] font-medium text-sky-600 dark:text-sky-400')} title={item.batch_label}>
               {item.batch_label}
+            </div>
+          ) : null}
+          {item.damaged_lot_label ? (
+            <div className="mt-0.5 truncate text-[10px] font-medium text-orange-500 dark:text-orange-400" title={item.damaged_lot_label}>
+              🟠 {item.damaged_lot_label}
             </div>
           ) : null}
         </div>

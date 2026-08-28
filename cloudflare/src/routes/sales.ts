@@ -9,10 +9,12 @@ import { bumpVersion } from '../lib/cache'
 import { getCustomerSalesTotals, getDeliveryContactTotals, getSalesDayReport, getSalesPeriodSeries, getSalesTotals } from '../lib/salesAnalytics'
 import { decrementBatchStockStatement, decrementBatchStockStrictStatement } from '../lib/productBatches'
 import { VALID_SALE_STATUSES, STOCK_DEDUCTED_STATUSES } from '../lib/salesStatus'
+import { consumeDamagedLot, restoreDamagedLot, DamagedLotShortfallError, DAMAGE_OUT_MOVEMENT, DAMAGE_IN_MOVEMENT } from '../lib/returnsStock'
 import {
   CANCEL_REASONS,
   allocateReturnedQuantities,
   cancelReasonLabel,
+  heldQuantity,
   guardSaleStatusTransition,
   normalizeCancelReason,
   planSaleStockTransition,
@@ -62,6 +64,10 @@ type SaleItemInput = {
   batch_id?: number | null
   batch_label?: string | null
   batch_expiry_date?: string | null
+  // 11.9 (Part 411): set when the cashier picked the DAMAGE source for
+  // this line -- the units come out of this damaged_stock_lots row
+  // (quantity_remaining), not out of branch/batch stock.
+  damaged_lot_id?: number | null
 }
 
 type NormalizedItem = Omit<SaleItemInput, 'branch_id'> & { product_id: number; quantity: number; branch_id: number | null }
@@ -214,7 +220,9 @@ app.post('/', async (c) => {
   // every checkout. The common case (one branch per sale) now costs exactly
   // one query, matching the same IN(...) batching pattern already used just
   // above for the `products` lookup.
-  const stockCheckItems = normalized.filter((item) => item.branch_id && shouldDeductStock)
+  // Damaged-source lines check against their LOT below, not branch_stock --
+  // their units were never in sellable stock to begin with.
+  const stockCheckItems = normalized.filter((item) => item.branch_id && shouldDeductStock && !item.damaged_lot_id)
   const stockByBranch = new Map<number, Map<number, number>>()
   const branchIdsNeedingStock = [...new Set(stockCheckItems.map((item) => item.branch_id as number))]
   for (const branchId of branchIdsNeedingStock) {
@@ -252,6 +260,24 @@ app.post('/', async (c) => {
       if (item.quantity > available) {
         const name = productMap.get(item.product_id)?.name || `product #${item.product_id}`
         return c.json({ error: `Insufficient batch stock for ${name}: requested ${item.quantity}, available ${available}` }, 409)
+      }
+    }
+  }
+
+  // 11.9: damaged-source availability (plain read, same validate-then-write
+  // shape as above; consumeDamagedLot's own WHERE clause below remains the
+  // real race guard).
+  const damagedItems = normalized.filter((item) => item.damaged_lot_id && shouldDeductStock)
+  if (damagedItems.length) {
+    for (const item of damagedItems) {
+      const lot = await db.prepare('SELECT id, product_id, quantity_remaining FROM damaged_stock_lots WHERE id = ?')
+        .get<{ id: number; product_id: number; quantity_remaining: number }>([item.damaged_lot_id])
+      const name = productMap.get(item.product_id)?.name || `product #${item.product_id}`
+      if (!lot || Number(lot.product_id) !== Number(item.product_id)) {
+        return c.json({ error: `The damaged lot picked for ${name} no longer exists for that product. Refresh and pick again.` }, 409)
+      }
+      if (item.quantity > (Number(lot.quantity_remaining) || 0)) {
+        return c.json({ error: `Insufficient damaged stock for ${name}: requested ${item.quantity}, available ${Number(lot.quantity_remaining) || 0}` }, 409)
       }
     }
   }
@@ -471,6 +497,30 @@ app.post('/', async (c) => {
     })
   const saleId = saleInsert.lastInsertRowid
 
+  // 11.9: draw the damaged lots FIRST (each consumeDamagedLot is its own
+  // atomic, self-guarding statement -- see the kernel); anything that
+  // fails after this point restores them in its error path, the same
+  // compensation shape the returns route uses for receiveBatchStock.
+  const consumedDamagedLots: Array<{ lotId: number; quantity: number }> = []
+  const restoreConsumedDamagedLots = async () => {
+    for (const consumed of consumedDamagedLots) {
+      try { await restoreDamagedLot(db, { lotId: consumed.lotId, quantity: consumed.quantity }) } catch { /* compensation is best-effort; the lot ledger still holds the draw */ }
+    }
+  }
+  if (shouldDeductStock) {
+    for (const item of damagedItems) {
+      try {
+        await consumeDamagedLot(db, { lotId: Number(item.damaged_lot_id), productId: item.product_id, quantity: item.quantity })
+        consumedDamagedLots.push({ lotId: Number(item.damaged_lot_id), quantity: item.quantity })
+      } catch (error) {
+        await restoreConsumedDamagedLots()
+        await db.prepare('DELETE FROM sales WHERE id = ?').run([saleId])
+        const status = error instanceof DamagedLotShortfallError ? 409 : 400
+        return c.json({ error: (error as Error).message }, status)
+      }
+    }
+  }
+
   // ---- 5. Atomically write items + stock deduction + movement log.
   // If ANY of this fails, none of it is applied (D1 batch() semantics) --
   // and we then delete the orphaned sale header from step 4, so the caller
@@ -493,14 +543,14 @@ app.post('/', async (c) => {
                 cost_price_usd, cost_price_khr, total_usd, total_khr, branch_id,
                 price_mode, product_discount_type, product_discount_label, product_discount_usd, product_discount_khr,
                 base_price_usd, base_price_khr, manual_discount_type, manual_discount_value, manual_discount_usd, manual_discount_khr,
-                batch_id, batch_label, batch_expiry_date
+                batch_id, batch_label, batch_expiry_date, damaged_lot_id
               )
               VALUES (
                 @sale_id, @product_id, @product_name, @quantity, @applied_price_usd, @applied_price_khr,
                 @cost_price_usd, @cost_price_khr, @total_usd, @total_khr, @branch_id,
                 @price_mode, @product_discount_type, @product_discount_label, @product_discount_usd, @product_discount_khr,
                 @base_price_usd, @base_price_khr, @manual_discount_type, @manual_discount_value, @manual_discount_usd, @manual_discount_khr,
-                @batch_id, @batch_label, @batch_expiry_date
+                @batch_id, @batch_label, @batch_expiry_date, @damaged_lot_id
               )`,
         params: {
           sale_id: saleId,
@@ -532,16 +582,37 @@ app.post('/', async (c) => {
           batch_id: item.batch_id || null,
           batch_label: item.batch_label || null,
           batch_expiry_date: item.batch_expiry_date || null,
+          damaged_lot_id: item.damaged_lot_id || null,
         },
       })
-      if (item.batch_id && item.branch_id && shouldDeductStock) {
+      // A damaged-source line's stock ALREADY moved (the lot draw above);
+      // only its ledger entry rides this batch. Regular branch/batch
+      // deductions never apply to it.
+      if (item.damaged_lot_id && item.branch_id && shouldDeductStock) {
+        statements.push({
+          sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_usd, unit_cost_khr, reference_id, user_id, user_name)
+                VALUES (@product_id, @product_name, @branch_id, '${DAMAGE_OUT_MOVEMENT}', @quantity, @unit_cost_usd, @unit_cost_khr, @reference_id, @user_id, @user_name)`,
+          params: {
+            product_id: item.product_id,
+            product_name: item.product_name,
+            branch_id: item.branch_id,
+            quantity: -item.quantity,
+            unit_cost_usd: item.costPriceUsd,
+            unit_cost_khr: item.costPriceKhr,
+            reference_id: saleId,
+            user_id: body.cashier_id || null,
+            user_name: body.cashier_name || null,
+          },
+        })
+      }
+      if (item.batch_id && item.branch_id && shouldDeductStock && !item.damaged_lot_id) {
         // Strict (no MAX(0) clamp): under a race two sales can both pass the
         // plain-read availability check above, so the deduction itself is the
         // real guard -- an oversell of this lot violates branch_batch_stock's
         // CHECK(quantity >= 0) (migration 0058) and rolls the whole sale back.
         statements.push(decrementBatchStockStrictStatement(item.batch_id, item.branch_id, item.quantity))
       }
-      if (item.branch_id && shouldDeductStock) {
+      if (item.branch_id && shouldDeductStock && !item.damaged_lot_id) {
         // Plain subtraction, NOT MAX(0, ...): the availability check at step 2
         // is a non-atomic read, so a concurrent sale of the last unit could
         // slip past it. branch_stock's CHECK(quantity >= 0) (migration 0058)
@@ -620,7 +691,8 @@ app.post('/', async (c) => {
   } catch (error) {
     // The atomic batch rolled back, so nothing here was applied; delete the
     // orphaned header written in step 4 so the caller never sees an itemless
-    // sale.
+    // sale. Damaged-lot draws happened before the batch -- hand them back.
+    await restoreConsumedDamagedLots()
     await db.prepare('DELETE FROM sales WHERE id = ?').run([saleId])
     const message = (error as Error).message || ''
     // A CHECK(quantity >= 0) failure means a concurrent sale consumed the
@@ -769,7 +841,7 @@ app.patch('/:id/status', async (c) => {
     cancelFeeNote = String(body.cancel_fee_note || '').trim() || null
   }
 
-  const items = await db.prepare('SELECT id, product_id, product_name, quantity, cost_price_usd, cost_price_khr, branch_id, batch_id FROM sale_items WHERE sale_id = ?').all<SaleItemRow>([id])
+  const items = await db.prepare('SELECT id, product_id, product_name, quantity, cost_price_usd, cost_price_khr, branch_id, batch_id, damaged_lot_id FROM sale_items WHERE sale_id = ?').all<SaleItemRow & { damaged_lot_id: number | null }>([id])
 
   // How much of each line already came back through real returns
   // (non-cancelled, customer scope; return_to_stock does NOT matter here:
@@ -800,11 +872,25 @@ app.patch('/:id/status', async (c) => {
     : oldStatus === 'cancelled'
       ? `Sale cancellation reverted (back to ${saleStatus})`
       : `Sale status changed from ${oldStatus} to ${saleStatus}`
+  // 11.9: damaged-source lines never touch branch/batch stock -- their
+  // units live in damaged_stock_lots.quantity_remaining, so the branch
+  // plan below runs on the regular lines only and the damaged lines get
+  // their own ops on the SAME heldQuantity state machine.
+  const regularItems = items.filter((item) => !item.damaged_lot_id)
+  const damagedTransitionOps: Array<{ lotId: number; productId: number; productName: string | null; branchId: number | null; delta: number }> = []
+  for (const item of items) {
+    if (!item.damaged_lot_id || !item.product_id) continue
+    const returned = Math.max(0, Number(returnedByItem.get(item.id)) || 0)
+    const delta = heldQuantity(saleStatus, item.quantity, returned) - heldQuantity(oldStatus, item.quantity, returned)
+    if (delta === 0) continue
+    damagedTransitionOps.push({ lotId: Number(item.damaged_lot_id), productId: item.product_id, productName: item.product_name, branchId: item.branch_id, delta })
+  }
+
   const plan = planSaleStockTransition({
     saleId: id,
     oldStatus,
     newStatus: saleStatus,
-    items,
+    items: regularItems,
     returnedByItem,
     reason: movementReason,
     userId: user?.id ?? null,
@@ -862,9 +948,53 @@ app.patch('/:id/status', async (c) => {
   statements.push({ sql: `UPDATE sales SET ${updates.join(', ')} WHERE id = @id`, params: updateParams })
   statements.push(...plan.statements)
 
+  // Damaged-lot moves first (each statement self-guards; see the kernel).
+  // If the atomic batch below then fails, these reverse in its catch --
+  // same compensation shape POST / uses.
+  const appliedDamagedOps: Array<{ lotId: number; productId: number; delta: number }> = []
+  const reverseAppliedDamagedOps = async () => {
+    for (const op of appliedDamagedOps) {
+      try {
+        if (op.delta > 0) await restoreDamagedLot(db, { lotId: op.lotId, quantity: op.delta })
+        else await consumeDamagedLot(db, { lotId: op.lotId, productId: op.productId, quantity: -op.delta })
+      } catch { /* best-effort compensation */ }
+    }
+  }
+  for (const op of damagedTransitionOps) {
+    try {
+      if (op.delta > 0) {
+        // stock goes OUT with the sale again (e.g. un-cancel)
+        await consumeDamagedLot(db, { lotId: op.lotId, productId: op.productId, quantity: op.delta })
+      } else {
+        // stock comes BACK to the lot (e.g. cancel)
+        await restoreDamagedLot(db, { lotId: op.lotId, quantity: -op.delta })
+      }
+      appliedDamagedOps.push({ lotId: op.lotId, productId: op.productId, delta: op.delta })
+    } catch (error) {
+      await reverseAppliedDamagedOps()
+      const status = error instanceof DamagedLotShortfallError ? 409 : 400
+      return c.json({ error: (error as Error).message }, status)
+    }
+    statements.push({
+      sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_usd, unit_cost_khr, reason, reference_id, user_id, user_name)
+            VALUES (@product_id, @product_name, @branch_id, '${op.delta > 0 ? DAMAGE_OUT_MOVEMENT : DAMAGE_IN_MOVEMENT}', @quantity, 0, 0, @reason, @reference_id, @user_id, @user_name)`,
+      params: {
+        product_id: op.productId,
+        product_name: op.productName,
+        branch_id: op.branchId,
+        quantity: -op.delta,
+        reason: movementReason,
+        reference_id: id,
+        user_id: user?.id ?? null,
+        user_name: user?.name ?? null,
+      },
+    })
+  }
+
   try {
     await db.batch(statements)
   } catch (error) {
+    await reverseAppliedDamagedOps()
     const message = (error as Error).message || ''
     // Same race guard as POST /: a CHECK(quantity >= 0) failure means a
     // concurrent sale consumed the stock (or the line's specific lot)

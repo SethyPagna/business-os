@@ -9828,3 +9828,48 @@ catalog/ProductDetailFlyout, CustomTables, ImportModeWizard,
 PromotionsPage, ReceiptSettings, AuditLog, OtpModal, UserDetailSheet,
 Sidebar's own sheet, and 4a's four hot stock modals. Same three-line
 pattern applies to each.
+
+## Part 411 (chat, Aug 28 2026) -- K2 complete: the POS Damage source (rest of 11.9)
+
+**Part 410 addendum first:** the full test:utils chain re-ran GREEN once
+a7 fixed their in-flight Inventory.tsx type error (their fix took ~60s;
+the chain block noted in Part 410 is closed).
+
+**11.9's remaining piece -- damaged stock reaches the POS.** The
+SP/VIP short-label pricing already existed in the detail sheet
+(Selling / VIP two-tap reveal / Promotion buttons -- untouched); what
+was missing was the `damage` option, which needed 11.13's lots:
+
+- **Sheet:** open damaged lots (from the new POS-readable
+  GET /api/batches/damaged-lots, backed by listOpenDamagedLots -- no
+  cost by construction) render as amber "Damage (from returns)" pills
+  beside the sellable lots, in BOTH the flat and group flows. A line
+  has exactly one source: picking a damaged lot clears the batch pick
+  and vice versa; a damaged pick satisfies the lot gate and caps the
+  displayed stock at the lot's quantity_remaining.
+- **Cart/checkout:** damaged lines carry damaged_lot_id/label/ceiling
+  (amber tag in the cart via CartItem), merge only with the same lot's
+  line (and a plain add never merges into a damaged line), and the
+  checkout payload sends damaged_lot_id -- never a label pretending to
+  be a lot code.
+- **Server (routes/sales.ts):** damaged lines skip every sellable-stock
+  check and deduction; their units draw from
+  damaged_stock_lots.quantity_remaining via the kernel's
+  consumeDamagedLot (the UPDATE's own WHERE clause is the race guard --
+  zero changes throws without writing), with compensation restores on
+  any later checkout failure. sale_items.damaged_lot_id (migration
+  0075) records the lot; damage_out movements ledger the draw. Status
+  transitions (cancel / un-cancel) run damaged lines on the SAME
+  heldQuantity state machine as everything else, moving the lot instead
+  of branch stock, with damage_in/out entries and their own
+  compensation on batch failure.
+
+**Verification:** kernel checks (draw/shortfall/wrong-product/clamped
+restore) + sales/batches wiring pins in
+test-returns-replace-damaged-pure (10 checks); frontend
+returnOptions.test.ts grew the 11.9 end-to-end pin set (9 checks); all
+seven sales-route-loading backend tests re-ran green; both tsc, full
+backend sweep, frontend chain + build, wrangler dry-run green (05's A4
+lane still holds its known mid-flight failures, theirs to reconcile).
+Migrations 0074 + 0075 ride the user's next `npm run deploy:full`.
+K2 is COMPLETE: 11.12, 11.13, and all of 11.9.

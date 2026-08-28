@@ -89,6 +89,39 @@ runTest('K2: ReturnDetailModal shows the per-item action and the replacement lin
   assert.match(detailSource, /settlement_mode === 'price_difference'/)
 })
 
+runTest('K2/11.9: the POS damage source option is wired end to end', () => {
+  const transportSource = readFileSync(new URL('../src/api/damagedLotsTransport.ts', import.meta.url), 'utf8')
+  // per-product cache key and NO local fallback -- a failed read must never
+  // cache as a definitive "no damaged stock"
+  assert.match(transportSource, /batches:damaged:\$\{productId\}/)
+  assert.match(transportSource, /raceLocalFallback: false/)
+
+  const sheetSource = readFileSync(new URL('../src/components/pos/ProductDetailSheet.tsx', import.meta.url), 'utf8')
+  // damaged lots fetched beside the sellable lots; picking one clears the
+  // other (a line has exactly ONE source)
+  assert.match(sheetSource, /getDamagedLots\(resolvedProduct\.id, resolvedBranchId\)/)
+  assert.match(sheetSource, /setSelectedDamagedLotId\(lot\.id === selectedDamagedLotId \? null : lot\.id\); setSelectedBatchId\(null\)/)
+  assert.match(sheetSource, /setSelectedBatchId\(batch\.id\); setSelectedDamagedLotId\(null\)/)
+  // a damaged pick satisfies the lot gate and caps the shown stock
+  assert.match(sheetSource, /const batchReadyToSell = selectedDamagedLot != null/)
+  assert.match(sheetSource, /const displayedStock = selectedDamagedLot/)
+  // the selection travels with the add
+  assert.match(sheetSource, /onAddToCart\(nextProduct, priceMode, buildBatchSelection\(\), effectiveBranchId, buildDamagedSelection\(\)\)/)
+  // the Damage section renders in BOTH flows (group + flat)
+  assert.equal((sheetSource.match(/Damage \(from returns\)/g) || []).length >= 4, true)
+
+  const posSource = readFileSync(new URL('../src/components/pos/POS.tsx', import.meta.url), 'utf8')
+  // capped by the lot, merges only with the same lot's line, and the
+  // checkout sends damaged_lot_id (never a label pretending to be a lot)
+  assert.match(posSource, /damagedSelection\?: \{ damagedLotId: number; quantity: number; label: string \}/)
+  assert.match(posSource, /cartItem\?\.damaged_lot_id\s*\?\s*\(cartItem\.damaged_available_quantity \?\? 0\)/)
+  assert.match(posSource, /damaged_lot_id:\s+i\.damaged_lot_id \|\| null,/)
+  assert.match(posSource, /\(active\.cart\[existingIndex\] as CartLineRecord\)\.damaged_lot_id\) existingIndex = -1/)
+
+  const cartItemSource = readFileSync(new URL('../src/components/pos/CartItem.tsx', import.meta.url), 'utf8')
+  assert.match(cartItemSource, /item\.damaged_lot_label/)
+})
+
 runTest('K2: the frontend mirror cannot drift from the backend kernel silently', () => {
   // same normalization branches...
   for (const pin of ["=== 'none' || explicit === 'restock' || explicit === 'damaged'", "return_to_stock !== false ? 'restock' : 'none'"]) {

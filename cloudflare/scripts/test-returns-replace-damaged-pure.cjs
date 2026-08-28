@@ -203,6 +203,54 @@ async function run() {
     assert.equal((await db.prepare('SELECT quantity FROM branch_batch_stock WHERE batch_id = ? AND branch_id = 1').get([batchId])).quantity, 4)
   })
 
+  await check('11.9: consumeDamagedLot draws strictly, refuses shortfalls and wrong products', async () => {
+    await kernel.createDamagedLot(db, {
+      productId: ids.tc2, productName: 'Twin Cream', branchId: 1, batchId: null,
+      returnId: 701, quantity: 4, reason: 'POS damage source test', userId: 1, userName: 'Tester',
+    })
+    const lot = (await kernel.listOpenDamagedLots(db, { productId: ids.tc2 })).find((row) => row.return_id === 701)
+    const drawn = await kernel.consumeDamagedLot(db, { lotId: lot.id, productId: ids.tc2, quantity: 3 })
+    assert.equal(drawn.productName, 'Twin Cream')
+    assert.equal((await db.prepare('SELECT quantity_remaining FROM damaged_stock_lots WHERE id = ?').get([lot.id])).quantity_remaining, 1)
+    // a draw the lot can't cover throws WITHOUT writing
+    await assert.rejects(
+      () => kernel.consumeDamagedLot(db, { lotId: lot.id, productId: ids.tc2, quantity: 2 }),
+      (err) => err.name === 'DamagedLotShortfallError' && err.available === 1,
+    )
+    assert.equal((await db.prepare('SELECT quantity_remaining FROM damaged_stock_lots WHERE id = ?').get([lot.id])).quantity_remaining, 1)
+    // a different product's id never draws from this lot
+    await assert.rejects(
+      () => kernel.consumeDamagedLot(db, { lotId: lot.id, productId: ids.os1, quantity: 1 }),
+      /does not belong to this product/,
+    )
+    // restore comes back but clamps at the lot's original quantity
+    await kernel.restoreDamagedLot(db, { lotId: lot.id, quantity: 3 })
+    assert.equal((await db.prepare('SELECT quantity_remaining FROM damaged_stock_lots WHERE id = ?').get([lot.id])).quantity_remaining, 4)
+    await kernel.restoreDamagedLot(db, { lotId: lot.id, quantity: 99 })
+    assert.equal((await db.prepare('SELECT quantity_remaining FROM damaged_stock_lots WHERE id = ?').get([lot.id])).quantity_remaining, 4)
+  })
+
+  await check('11.9: sales route + POS lookup wiring pins', async () => {
+    const salesSource = fs.readFileSync(path.join(cloudflareRoot, 'src', 'routes', 'sales.ts'), 'utf8')
+    // damaged lines skip the sellable-stock checks and deductions...
+    assert.match(salesSource, /shouldDeductStock && !item\.damaged_lot_id\)/)
+    // ...draw their lot up front with compensation on every later failure...
+    assert.match(salesSource, /await consumeDamagedLot\(db, \{ lotId: Number\(item\.damaged_lot_id\)/)
+    assert.match(salesSource, /await restoreConsumedDamagedLots\(\)\s+await db\.prepare\('DELETE FROM sales WHERE id = \?'\)/)
+    // ...record which lot on the sale line, and ledger the draw
+    assert.match(salesSource, /@batch_id, @batch_label, @batch_expiry_date, @damaged_lot_id/)
+    assert.match(salesSource, /DAMAGE_OUT_MOVEMENT/)
+    // status transitions run damaged lines on the SAME heldQuantity state
+    // machine, outside the branch-stock plan
+    assert.match(salesSource, /const regularItems = items\.filter\(\(item\) => !item\.damaged_lot_id\)/)
+    assert.match(salesSource, /heldQuantity\(saleStatus, item\.quantity, returned\) - heldQuantity\(oldStatus, item\.quantity, returned\)/)
+    const batchesSource = fs.readFileSync(path.join(cloudflareRoot, 'src', 'routes', 'batches.ts'), 'utf8')
+    assert.match(batchesSource, /app\.get\('\/damaged-lots'/)
+    assert.ok(batchesSource.indexOf(`app.get('/damaged-lots'`) < batchesSource.indexOf(`// GET /api/batches?productId=`))
+    const migration75 = fs.readFileSync(path.join(cloudflareRoot, 'migrations', '0075_sale_items_damaged_lot.sql'), 'utf8')
+    assert.match(migration75, /ALTER TABLE sale_items ADD COLUMN damaged_lot_id INTEGER/)
+  })
+
   await check('route + migration wiring pins', async () => {
     const routeSource = fs.readFileSync(path.join(cloudflareRoot, 'src', 'routes', 'returns.ts'), 'utf8')
     // three-way action drives both create and edit re-apply, and the

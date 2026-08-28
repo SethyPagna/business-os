@@ -219,6 +219,68 @@ export async function applyReplacementStock(db: D1Compat, input: {
   return { usedBatch }
 }
 
+export const DAMAGE_OUT_MOVEMENT = 'damage_out'
+
+export class DamagedLotShortfallError extends Error {
+  available: number
+  constructor(productName: string, requested: number, available: number) {
+    super(`Only ${available} left in the damaged lot for ${productName} (requested ${requested})`)
+    this.name = 'DamagedLotShortfallError'
+    this.available = available
+  }
+}
+
+// d1compat's run() reports changes as {changes} (typed) or {meta:{changes}}
+// (what D1 actually returns) -- read both, same lesson renameCascade.ts
+// already encodes.
+function changesOf(result: unknown): number {
+  const record = result as { changes?: number; meta?: { changes?: number } } | null
+  return Number(record?.changes ?? record?.meta?.changes ?? 0)
+}
+
+// 11.9: POS's damage source -- draw units out of ONE damaged lot. The
+// UPDATE's own WHERE clause is the race guard (damaged_stock_lots has no
+// CHECK constraint): a concurrent draw that empties the lot makes this
+// statement match zero rows, and the zero-changes read throws WITHOUT
+// having written anything. quantity_remaining only ever shrinks here.
+export async function consumeDamagedLot(db: D1Compat, input: {
+  lotId: number
+  productId: number
+  quantity: number
+}): Promise<{ productName: string | null; branchId: number | null; returnId: number | null }> {
+  const lot = await db.prepare(`
+    SELECT id, product_id, product_name, branch_id, return_id, quantity_remaining
+    FROM damaged_stock_lots WHERE id = @id
+  `).get<{ id: number; product_id: number; product_name: string | null; branch_id: number | null; return_id: number | null; quantity_remaining: number }>({ id: input.lotId })
+  if (!lot || Number(lot.product_id) !== Number(input.productId)) {
+    throw new Error('Selected damaged lot does not belong to this product')
+  }
+  const result = await db.prepare(`
+    UPDATE damaged_stock_lots
+    SET quantity_remaining = quantity_remaining - @quantity, updated_at = datetime('now')
+    WHERE id = @id AND quantity_remaining >= @quantity
+  `).run({ id: input.lotId, quantity: input.quantity })
+  if (!changesOf(result)) {
+    throw new DamagedLotShortfallError(String(lot.product_name || `product #${input.productId}`), input.quantity, Number(lot.quantity_remaining) || 0)
+  }
+  return { productName: lot.product_name, branchId: lot.branch_id, returnId: lot.return_id }
+}
+
+// The reverse (a cancelled sale hands its units back to the lot; also the
+// compensation path when a checkout fails after its draw). Clamped to the
+// lot's original quantity -- restoring can never mint damaged stock.
+export async function restoreDamagedLot(db: D1Compat, input: {
+  lotId: number
+  quantity: number
+}): Promise<boolean> {
+  const result = await db.prepare(`
+    UPDATE damaged_stock_lots
+    SET quantity_remaining = MIN(quantity, quantity_remaining + @quantity), updated_at = datetime('now')
+    WHERE id = @id
+  `).run({ id: input.lotId, quantity: input.quantity })
+  return changesOf(result) > 0
+}
+
 // Open damaged lots for one product (optionally one branch) -- the product
 // detail's damage entries (D3) and, next part, POS's damage source option.
 // Never exposes cost; damaged lots carry none by design.

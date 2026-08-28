@@ -6,6 +6,7 @@ import { hasPermission } from '../lib/permissions'
 import { broadcast } from '../durable-objects/broadcastHub'
 import { bumpVersion } from '../lib/cache'
 import { getTrackedProductIds, listBatchesForProduct, receiveBatchStock } from '../lib/productBatches'
+import { listOpenDamagedLots } from '../lib/returnsStock'
 import { dateToBatchCode, normalizeToIsoDate } from '../lib/batchCode'
 import type { Env } from '../index'
 
@@ -53,6 +54,20 @@ app.get('/tracked-product-ids', async (c) => {
   const branchId = Number(c.req.query('branchId')) || null
   const productIds = await getTrackedProductIds(db, branchId)
   return c.json({ productIds })
+})
+
+// GET /api/batches/damaged-lots?productId=&branchId= -- 11.9 (Part 411):
+// the POS picker lists a product's OPEN damaged lots beside its sellable
+// ones ("Damage alongside batch/branch/barcode/SP/VIP" -- locked note).
+// Registered on this router because it shares the POS-readable gate above;
+// carries no cost by construction (damaged lots never store money terms).
+app.get('/damaged-lots', async (c) => {
+  const db = getDb(c.env)
+  const productId = Number(c.req.query('productId'))
+  if (!productId) return c.json({ error: 'productId is required' }, 400)
+  const branchId = Number(c.req.query('branchId')) || null
+  const lots = await listOpenDamagedLots(db, { productId, branchId })
+  return c.json({ lots })
 })
 
 // GET /api/batches?productId=&branchId=&onlyAvailable=1
