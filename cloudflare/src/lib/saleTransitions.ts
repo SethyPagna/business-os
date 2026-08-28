@@ -56,6 +56,18 @@ export function heldQuantity(status: string, quantity: number, returnedQuantity:
   return 0
 }
 
+// Z0: which lot(s) this line drew from, with per-unit release tracking
+// (migration 0078). quantity = units attributed to the lot;
+// released_quantity = how many of those are currently back in stock.
+// Rows are fetched in draw order (id ASC); restores walk them in REVERSE
+// (last-drawn units come back first), re-deducts walk them FORWARD.
+export type SaleItemAllocation = {
+  id: number
+  batch_id: number
+  quantity: number
+  released_quantity: number
+}
+
 export type TransitionItem = {
   id: number
   product_id: number | null
@@ -65,6 +77,9 @@ export type TransitionItem = {
   cost_price_khr: number | null
   branch_id: number | null
   batch_id: number | null
+  // Absent/empty = fall back to the single-lot batch_id behavior (old
+  // sales whose allocation insert failed, or callers that did not fetch).
+  allocations?: SaleItemAllocation[]
 }
 
 // Returns recorded against a sale reference either a specific sale_item
@@ -187,12 +202,33 @@ export function planSaleStockTransition(input: {
         sql: `UPDATE products SET stock_quantity = MAX(0, stock_quantity - @quantity), updated_at = CURRENT_TIMESTAMP WHERE id = @product_id`,
         params: { product_id: item.product_id, quantity: delta },
       })
-      if (item.batch_id) {
+      const deductAllocations = item.allocations || []
+      if (deductAllocations.length) {
+        // Z0: re-take the units from the SAME lots the sale drew from,
+        // forward (FIFO) order, each capped at what that lot has released.
+        // Strict decrements, like a sale: a lot that cannot cover its share
+        // aborts the whole transition (batch CHECK, migration 0058).
+        let remaining = delta
+        for (const alloc of deductAllocations) {
+          if (remaining <= 0) break
+          const take = Math.min(Math.max(0, Number(alloc.released_quantity) || 0), remaining)
+          if (take <= 0) continue
+          statements.push(decrementBatchStockStrictStatement(alloc.batch_id, item.branch_id, take))
+          statements.push({
+            sql: `UPDATE sale_item_batch_allocations
+                  SET released_quantity = released_quantity - @take,
+                      released_at = CASE WHEN released_quantity - @take <= 0 THEN NULL ELSE released_at END
+                  WHERE id = @id`,
+            params: { take, id: alloc.id },
+          })
+          remaining -= take
+        }
+      } else if (item.batch_id) {
         // Strict, like a sale: a lot that cannot cover the re-deduct
         // aborts the whole transition (batch CHECK, migration 0058).
         statements.push(decrementBatchStockStrictStatement(item.batch_id, item.branch_id, delta))
         statements.push({
-          sql: `UPDATE sale_item_batch_allocations SET released_at = NULL
+          sql: `UPDATE sale_item_batch_allocations SET released_at = NULL, released_quantity = 0
                 WHERE sale_item_id = @sale_item_id AND batch_id = @batch_id`,
           params: { sale_item_id: item.id, batch_id: item.batch_id },
         })
@@ -226,10 +262,32 @@ export function planSaleStockTransition(input: {
         sql: `UPDATE products SET stock_quantity = stock_quantity + @quantity, updated_at = CURRENT_TIMESTAMP WHERE id = @product_id`,
         params: { product_id: item.product_id, quantity: restore },
       })
-      if (item.batch_id) {
+      const restoreAllocations = item.allocations || []
+      if (restoreAllocations.length) {
+        // Z0: put the units back into the SAME lots the sale drew from --
+        // reverse order (last-drawn units return first), each capped at the
+        // allocation's outstanding (quantity - released_quantity), so units
+        // a recorded return already restocked are never re-added.
+        let remaining = restore
+        for (let index = restoreAllocations.length - 1; index >= 0 && remaining > 0; index -= 1) {
+          const alloc = restoreAllocations[index]
+          const outstanding = Math.max(0, (Number(alloc.quantity) || 0) - (Number(alloc.released_quantity) || 0))
+          const give = Math.min(outstanding, remaining)
+          if (give <= 0) continue
+          statements.push(incrementBatchStockStatement(alloc.batch_id, item.branch_id, give))
+          statements.push({
+            sql: `UPDATE sale_item_batch_allocations
+                  SET released_quantity = released_quantity + @give,
+                      released_at = CASE WHEN released_quantity + @give >= quantity THEN datetime('now') ELSE released_at END
+                  WHERE id = @id`,
+            params: { give, id: alloc.id },
+          })
+          remaining -= give
+        }
+      } else if (item.batch_id) {
         statements.push(incrementBatchStockStatement(item.batch_id, item.branch_id, restore))
         statements.push({
-          sql: `UPDATE sale_item_batch_allocations SET released_at = datetime('now')
+          sql: `UPDATE sale_item_batch_allocations SET released_at = datetime('now'), released_quantity = quantity
                 WHERE sale_item_id = @sale_item_id AND batch_id = @batch_id AND released_at IS NULL`,
           params: { sale_item_id: item.id, batch_id: item.batch_id },
         })

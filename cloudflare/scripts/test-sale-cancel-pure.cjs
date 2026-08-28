@@ -65,7 +65,7 @@ function setup() {
     CREATE TABLE products (id INTEGER PRIMARY KEY, name TEXT, stock_quantity REAL DEFAULT 0, updated_at TEXT);
     CREATE TABLE branch_stock (product_id INTEGER, branch_id INTEGER, quantity REAL DEFAULT 0 CHECK(quantity >= 0), UNIQUE(product_id, branch_id));
     CREATE TABLE branch_batch_stock (batch_id INTEGER, branch_id INTEGER, quantity REAL DEFAULT 0 CHECK(quantity >= 0), updated_at TEXT, UNIQUE(batch_id, branch_id));
-    CREATE TABLE sale_item_batch_allocations (id INTEGER PRIMARY KEY AUTOINCREMENT, sale_item_id INTEGER, batch_id INTEGER, branch_id INTEGER, quantity REAL, released_at TEXT);
+    CREATE TABLE sale_item_batch_allocations (id INTEGER PRIMARY KEY AUTOINCREMENT, sale_item_id INTEGER, batch_id INTEGER, branch_id INTEGER, quantity REAL, released_at TEXT, released_quantity REAL NOT NULL DEFAULT 0);
     CREATE TABLE inventory_movements (id INTEGER PRIMARY KEY AUTOINCREMENT, product_id INTEGER, product_name TEXT,
       branch_id INTEGER, movement_type TEXT, quantity REAL, unit_cost_usd REAL, unit_cost_khr REAL,
       reason TEXT, reference_id INTEGER, user_id INTEGER, user_name TEXT, created_at TEXT DEFAULT CURRENT_TIMESTAMP);
@@ -228,9 +228,56 @@ console.log('PASS reasons + held() math')
   console.log('PASS product-level returns allocate across lines, capped at each line quantity')
 }
 
+// ---- 8: Z0 -- cancel/un-cancel restore to the SAME lots via allocations ---
+{
+  // A line drew 5 units across TWO lots (2 from lot 77, 3 from lot 88) --
+  // its sale_items.batch_id is NULL, but the allocations record which lots.
+  const { sqlite, apply } = setup()
+  sqlite.prepare(`INSERT INTO products (id, name, stock_quantity) VALUES (10, 'Serum', 20)`).run()
+  sqlite.prepare(`INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (10, 1, 20)`).run()
+  sqlite.prepare(`INSERT INTO branch_batch_stock (batch_id, branch_id, quantity) VALUES (77, 1, 0)`).run() // lot 77 fully drawn
+  sqlite.prepare(`INSERT INTO branch_batch_stock (batch_id, branch_id, quantity) VALUES (88, 1, 5)`).run() // lot 88 partly drawn
+  sqlite.prepare(`INSERT INTO sale_item_batch_allocations (sale_item_id, batch_id, branch_id, quantity, released_quantity, released_at) VALUES (11, 77, 1, 2, 0, NULL)`).run()
+  sqlite.prepare(`INSERT INTO sale_item_batch_allocations (sale_item_id, batch_id, branch_id, quantity, released_quantity, released_at) VALUES (11, 88, 1, 3, 0, NULL)`).run()
+  const multiItem = { id: 11, product_id: 10, product_name: 'Serum', quantity: 5, cost_price_usd: 4, cost_price_khr: 0, branch_id: 1, batch_id: null,
+    allocations: [
+      { id: 1, batch_id: 77, quantity: 2, released_quantity: 0 },
+      { id: 2, batch_id: 88, quantity: 3, released_quantity: 0 },
+    ] }
+  const plan = planSaleStockTransition({
+    saleId: 1, oldStatus: 'completed', newStatus: 'cancelled', items: [multiItem],
+    returnedByItem: new Map([[11, 0]]), reason: 'Sale cancelled (Mistake)', userId: 9, userName: 'Sokha',
+  })
+  apply(plan.statements)
+  assert.strictEqual(sqlite.prepare('SELECT quantity FROM branch_batch_stock WHERE batch_id = 77').get().quantity, 2, 'lot 77 gets its 2 units back -- not a new batch')
+  assert.strictEqual(sqlite.prepare('SELECT quantity FROM branch_batch_stock WHERE batch_id = 88').get().quantity, 8, 'lot 88 gets its 3 units back')
+  const rel = sqlite.prepare('SELECT batch_id, released_quantity FROM sale_item_batch_allocations ORDER BY batch_id').all()
+  assert.strictEqual(rel[0].released_quantity, 2, 'lot 77 allocation fully released')
+  assert.strictEqual(rel[1].released_quantity, 3, 'lot 88 allocation fully released')
+  console.log('PASS Z0: a multi-lot line cancels back into its exact lots, never a new batch')
+
+  // Un-cancel re-takes from the SAME lots, forward order, capped at released.
+  const plan2 = planSaleStockTransition({
+    saleId: 1, oldStatus: 'cancelled', newStatus: 'completed',
+    items: [{ ...multiItem, allocations: [{ id: 1, batch_id: 77, quantity: 2, released_quantity: 2 }, { id: 2, batch_id: 88, quantity: 3, released_quantity: 3 }] }],
+    returnedByItem: new Map([[11, 0]]), reason: 'reverted', userId: 9, userName: 'Sokha',
+  })
+  apply(plan2.statements)
+  assert.strictEqual(sqlite.prepare('SELECT quantity FROM branch_batch_stock WHERE batch_id = 77').get().quantity, 0, 'lot 77 re-deducted its 2 units')
+  assert.strictEqual(sqlite.prepare('SELECT quantity FROM branch_batch_stock WHERE batch_id = 88').get().quantity, 5, 'lot 88 re-deducted its 3 units')
+  console.log('PASS Z0: un-cancel re-deducts from the same lots the sale drew from')
+}
+
 // ---- source locks: the route + returns flow actually wire this ------------
 {
   const salesSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'routes', 'sales.ts'), 'utf8')
+  // Z0: the sale write path auto-allocates FIFO lots and records them, and
+  // the transition/returns paths restore to the same lots.
+  assert.match(salesSrc, /readFifoLotAvailability\(db, item\.product_id, item\.branch_id\)/, 'sale checkout auto-allocates from FIFO lots')
+  assert.match(salesSrc, /autoAllocationsByItemIndex/, 'sale checkout records multi-lot allocations')
+  assert.match(salesSrc, /FROM sale_item_batch_allocations WHERE sale_item_id IN/, 'the transition route fetches each line\'s allocations')
+  const returnsBatchSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'routes', 'returns.ts'), 'utf8')
+  assert.match(returnsBatchSrc, /fetchSaleItemAllocations/, 'returns restock consults recorded allocations for multi-lot lines')
   assert.match(salesSrc, /guardSaleStatusTransition\(oldStatus, saleStatus, sale\.status_before_cancel \|\| null\)/, 'route must consult the transition guard')
   assert.match(salesSrc, /planSaleStockTransition\(\{/, 'route must build stock statements through the kernel')
   assert.match(salesSrc, /COALESCE\(r\.status, 'completed'\) != 'cancelled'\s*\n\s*AND COALESCE\(r\.return_scope, 'customer'\) = 'customer'/, 'returned-quantity query counts non-cancelled customer returns -- and deliberately does NOT filter return_to_stock (a damaged return is written off, not still out)')

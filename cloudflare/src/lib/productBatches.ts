@@ -470,6 +470,59 @@ export function incrementBatchStockStatement(batchId: number, branchId: number, 
   }
 }
 
+// ---------------------------------------------------------------------------
+// Z0: FIFO lot allocation for sales that did not explicitly pick a batch.
+// The user's rule -- "returns and cancels must return stock to the SAME
+// batch, never a new one" -- only works when the SALE knows which lot(s) it
+// drew from, so a checkout line with no picked lot is auto-allocated across
+// the product's active lots at that branch, oldest received first.
+
+export type FifoLotAvailability = {
+  batchId: number
+  lotCode: string | null
+  expiryDate: string | null
+  available: number
+}
+
+// Active lots with sellable stock at the branch, oldest received_at first
+// (NULL received dates sort last -- an undated legacy lot is drawn only
+// after every dated one), then batch_number/id for a stable tiebreak.
+export async function readFifoLotAvailability(db: D1Compat, productId: number, branchId: number): Promise<FifoLotAvailability[]> {
+  const rows = await db.prepare(`
+    SELECT pb.id AS batch_id, pb.lot_code, pb.expiry_date, bbs.quantity AS available
+    FROM product_batches pb
+    JOIN branch_batch_stock bbs ON bbs.batch_id = pb.id AND bbs.branch_id = @branchId
+    WHERE pb.variant_product_id = @productId AND pb.is_active = 1 AND bbs.quantity > 0
+    ORDER BY (pb.received_at IS NULL) ASC, pb.received_at ASC, pb.batch_number ASC, pb.id ASC
+  `).all<{ batch_id: number; lot_code: string | null; expiry_date: string | null; available: number }>({ productId, branchId })
+  return rows.map((row) => ({
+    batchId: Number(row.batch_id),
+    lotCode: row.lot_code ?? null,
+    expiryDate: row.expiry_date ?? null,
+    available: Math.max(0, Number(row.available) || 0),
+  }))
+}
+
+export type FifoLotTake = { batchId: number; lotCode: string | null; expiryDate: string | null; quantity: number }
+
+// Pure split of `quantity` across the lots in the given (already FIFO)
+// order, clamped to each lot's availability. Any remainder beyond what the
+// lots can cover is returned as `uncovered` -- legacy stock the lot ledger
+// never tracked; the sale still proceeds on branch_stock alone for that
+// part, it is just not attributable to a lot (and so not restorable to one).
+export function allocateAcrossLots(lots: FifoLotAvailability[], quantity: number): { takes: FifoLotTake[]; uncovered: number } {
+  const takes: FifoLotTake[] = []
+  let remaining = Math.max(0, Number(quantity) || 0)
+  for (const lot of lots) {
+    if (remaining <= 0) break
+    const take = Math.min(lot.available, remaining)
+    if (take <= 0) continue
+    takes.push({ batchId: lot.batchId, lotCode: lot.lotCode, expiryDate: lot.expiryDate, quantity: take })
+    remaining -= take
+  }
+  return { takes, uncovered: remaining }
+}
+
 // True if this product row has ever had a batch created for it (active or
 // not). Used by routes/inventory.ts's /adjust as the auto-routing signal
 // for callers that omit `batchId` entirely -- undo/redo replay, bulk add-

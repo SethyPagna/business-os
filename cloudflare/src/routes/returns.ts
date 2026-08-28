@@ -163,6 +163,31 @@ async function fetchSaleItemBatchInfo(
   return map
 }
 
+// Z0: the lot(s) each sale line actually drew from, in draw order, with the
+// units still OUT (quantity - released_quantity). A multi-lot line's
+// sale_items.batch_id is NULL (no single lot), so a return of it must split
+// the restock across these -- reverse order (last-drawn first), matching the
+// cancel path in saleTransitions.ts. Empty for old sales / legacy-stock lines.
+async function fetchSaleItemAllocations(
+  db: ReturnType<typeof getDb>,
+  saleItemIds: number[],
+): Promise<Map<number, Array<{ batch_id: number; outstanding: number }>>> {
+  const map = new Map<number, Array<{ batch_id: number; outstanding: number }>>()
+  const ids = [...new Set(saleItemIds)].filter((id) => Number.isFinite(id) && id > 0)
+  if (!ids.length) return map
+  const rows = await selectInChunks(ids, 0, (chunk) => db
+    .prepare(`SELECT sale_item_id, batch_id, quantity, released_quantity FROM sale_item_batch_allocations WHERE sale_item_id IN (${chunk.map(() => '?').join(',')}) ORDER BY id ASC`)
+    .all<{ sale_item_id: number; batch_id: number; quantity: number; released_quantity: number }>(chunk))
+  for (const row of rows) {
+    const outstanding = Math.max(0, (Number(row.quantity) || 0) - (Number(row.released_quantity) || 0))
+    if (outstanding <= 0) continue
+    const list = map.get(Number(row.sale_item_id)) || []
+    list.push({ batch_id: Number(row.batch_id), outstanding })
+    map.set(Number(row.sale_item_id), list)
+  }
+  return map
+}
+
 // Validate requested return quantities against what's actually returnable
 // (sold minus already-returned), mirroring assertReturnableItems in the
 // original. `excludeReturnId` lets an update re-validate without double
@@ -558,10 +583,11 @@ app.post('/', async (c) => {
     // Resolve once, up front, which batch (if any) each returned line's
     // sale_item_id was originally sold from -- see fetchSaleItemBatchInfo's
     // own comment for why this is a batch-fetch-once/Map-lookup shape.
-    const saleItemBatchInfo = await fetchSaleItemBatchInfo(
-      db,
-      body.items.map((i) => i.sale_item_id).filter((id): id is number => Number.isFinite(id) && Number(id) > 0),
-    )
+    const returnSaleItemIds = body.items.map((i) => i.sale_item_id).filter((id): id is number => Number.isFinite(id) && Number(id) > 0)
+    const saleItemBatchInfo = await fetchSaleItemBatchInfo(db, returnSaleItemIds)
+    // Z0: multi-lot lines (sale_items.batch_id NULL) restock across their
+    // recorded allocations instead of the plain branch_stock bump.
+    const saleItemAllocations = await fetchSaleItemAllocations(db, returnSaleItemIds)
 
     // Insert-return-items statements share the outer db.batch() below, but
     // a batch-aware restock (receiveBatchStock) runs its own separate
@@ -586,7 +612,26 @@ app.post('/', async (c) => {
       let resolvedBatchId: number | null = null
       if (returnToStock && item.product_id && itemBranchId) {
         const originalBatchId = item.sale_item_id ? (saleItemBatchInfo.get(item.sale_item_id)?.batch_id ?? null) : null
-        if (originalBatchId != null) {
+        // Z0: the same lots the sale drew from, last-drawn first. A
+        // single-lot line has one entry (== originalBatchId); a multi-lot
+        // line (batch_id NULL) splits across several here.
+        const allocs = item.sale_item_id ? (saleItemAllocations.get(item.sale_item_id) || []) : []
+        let restockRemaining = quantity
+        if (allocs.length) {
+          for (let index = allocs.length - 1; index >= 0 && restockRemaining > 0; index -= 1) {
+            const alloc = allocs[index]
+            const give = Math.min(alloc.outstanding, restockRemaining)
+            if (give <= 0) continue
+            try {
+              const received = await receiveBatchStock(db, { productId: item.product_id, branchId: itemBranchId, quantity: give, batchId: alloc.batch_id })
+              if (resolvedBatchId == null) resolvedBatchId = received.batchId
+              restockRemaining -= give
+            } catch (_err) {
+              // That lot no longer belongs to this product (rare -- a merge
+              // since the sale). Leave the units for the fallback bump below.
+            }
+          }
+        } else if (originalBatchId != null) {
           try {
             const received = await receiveBatchStock(db, {
               productId: item.product_id,
@@ -595,6 +640,7 @@ app.post('/', async (c) => {
               batchId: originalBatchId,
             })
             resolvedBatchId = received.batchId
+            restockRemaining = 0
           } catch (_err) {
             // The exact batch this item was sold from no longer belongs to
             // this product (rare -- e.g. a merge-duplicates run since the
@@ -604,11 +650,13 @@ app.post('/', async (c) => {
             resolvedBatchId = null
           }
         }
-        if (resolvedBatchId == null) {
+        // Any units not attributable to a lot (legacy stock, or a lot that
+        // vanished) land on the plain branch_stock aggregate, as before.
+        if (restockRemaining > 0) {
           statements.push({
             sql: `INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (@product_id, @branch_id, @quantity)
                   ON CONFLICT(product_id, branch_id) DO UPDATE SET quantity = branch_stock.quantity + @quantity`,
-            params: { product_id: item.product_id, branch_id: itemBranchId, quantity },
+            params: { product_id: item.product_id, branch_id: itemBranchId, quantity: restockRemaining },
           })
         }
         statements.push({

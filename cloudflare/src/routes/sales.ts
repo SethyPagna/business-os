@@ -7,7 +7,7 @@ import { hasPermission, hasAnyPermission } from '../lib/permissions'
 import { assertUpdatedAtMatch, getExpectedUpdatedAt, writeConflictResponse, WriteConflictError } from '../lib/conflictControl'
 import { bumpVersion } from '../lib/cache'
 import { getCustomerSalesTotals, getDeliveryContactTotals, getSalesDayReport, getSalesPeriodSeries, getSalesTotals } from '../lib/salesAnalytics'
-import { decrementBatchStockStatement, decrementBatchStockStrictStatement } from '../lib/productBatches'
+import { allocateAcrossLots, decrementBatchStockStatement, decrementBatchStockStrictStatement, readFifoLotAvailability, type FifoLotAvailability, type FifoLotTake } from '../lib/productBatches'
 import { VALID_SALE_STATUSES, STOCK_DEDUCTED_STATUSES } from '../lib/salesStatus'
 import { consumeDamagedLot, restoreDamagedLot, DamagedLotShortfallError, DAMAGE_OUT_MOVEMENT, DAMAGE_IN_MOVEMENT } from '../lib/returnsStock'
 import {
@@ -19,6 +19,7 @@ import {
   normalizeCancelReason,
   planSaleStockTransition,
   type CancelReason,
+  type SaleItemAllocation,
 } from '../lib/saleTransitions'
 import { buildLikeAliasClause, tokenizeSearchTermGroups } from '../lib/searchMatch'
 import { computeSaleTotals, round2 } from '../lib/saleTotals'
@@ -278,6 +279,48 @@ app.post('/', async (c) => {
       }
       if (item.quantity > (Number(lot.quantity_remaining) || 0)) {
         return c.json({ error: `Insufficient damaged stock for ${name}: requested ${item.quantity}, available ${Number(lot.quantity_remaining) || 0}` }, 409)
+      }
+    }
+  }
+
+  // ---- 2c. Z0: FIFO auto-allocation for lines with NO picked batch ----
+  // The standing rule (user, Aug 28): a return/cancel must put stock back
+  // into the SAME batch the sale took it from -- which requires the SALE to
+  // know its lot(s). A line whose cashier picked no lot is allocated across
+  // the product's active lots at that branch, oldest received first. One
+  // lot covering the whole line becomes the line's batch_id (identical to
+  // an explicit pick everywhere downstream); a multi-lot split keeps
+  // batch_id NULL and records per-lot allocation rows instead. Units beyond
+  // what the lot ledger tracks (legacy stock) stay unlotted -- the sale
+  // still proceeds on branch_stock, exactly as before this pass existed.
+  // Runs for non-deducting statuses too (awaiting_payment): the attribution
+  // is recorded now (released_quantity = quantity, nothing physically out),
+  // so the later deducting transition draws the same lots.
+  const autoAllocationsByItemIndex = new Map<number, FifoLotTake[]>()
+  {
+    const lotCache = new Map<string, FifoLotAvailability[]>()
+    for (const [itemIndex, item] of normalized.entries()) {
+      if (item.batch_id || item.damaged_lot_id || !item.branch_id) continue
+      const key = `${item.product_id}:${item.branch_id}`
+      let lots = lotCache.get(key)
+      if (!lots) {
+        lots = await readFifoLotAvailability(db, item.product_id, item.branch_id)
+        lotCache.set(key, lots)
+      }
+      const { takes } = allocateAcrossLots(lots, item.quantity)
+      if (!takes.length) continue
+      // Consume the shared availability so a second line of the same
+      // product in this sale cannot double-take the same units.
+      for (const take of takes) {
+        const lot = lots.find((entry) => entry.batchId === take.batchId)
+        if (lot) lot.available -= take.quantity
+      }
+      if (takes.length === 1 && takes[0].quantity >= item.quantity) {
+        item.batch_id = takes[0].batchId
+        item.batch_label = takes[0].lotCode || undefined
+        item.batch_expiry_date = takes[0].expiryDate || undefined
+      } else {
+        autoAllocationsByItemIndex.set(itemIndex, takes)
       }
     }
   }
@@ -618,6 +661,15 @@ app.post('/', async (c) => {
         // CHECK(quantity >= 0) (migration 0058) and rolls the whole sale back.
         statements.push(decrementBatchStockStrictStatement(item.batch_id, item.branch_id, item.quantity))
       }
+      // Z0: a multi-lot auto-allocated line (batch_id stays NULL) deducts
+      // each allocated lot, same strictness as the explicit pick above.
+      // Allocation is clamped to availability read moments ago, so an abort
+      // here means a genuine concurrent draw on the same lot.
+      if (!item.batch_id && item.branch_id && shouldDeductStock && !item.damaged_lot_id) {
+        for (const take of autoAllocationsByItemIndex.get(itemIndex) || []) {
+          statements.push(decrementBatchStockStrictStatement(take.batchId, item.branch_id, take.quantity))
+        }
+      }
       if (item.branch_id && shouldDeductStock && !item.damaged_lot_id) {
         // Plain subtraction, NOT MAX(0, ...): the availability check at step 2
         // is a non-atomic read, so a concurrent sale of the last unit could
@@ -668,27 +720,42 @@ app.post('/', async (c) => {
     // known up front) -- this is bookkeeping for reporting/returns, not
     // stock-accuracy-critical, so a failure here is logged and swallowed
     // rather than rolling back an otherwise-successful sale.
+    // Z0: one row per lot a line drew from -- single-lot lines (explicit
+    // pick OR an auto-allocation one lot fully covered) and multi-lot
+    // auto-allocated lines alike. released_quantity starts at 0 for a
+    // deducting sale (units are OUT with the sale) and at the full take for
+    // a non-deducting one (awaiting_payment -- nothing physically left, the
+    // later deducting transition consumes released_quantity back down).
     const allocationItems = priced
-      .map((item, itemIndex) => ({ item, itemIndex }))
-      .filter(({ item }) => item.batch_id && item.branch_id)
+      .map((item, itemIndex) => ({
+        item,
+        itemIndex,
+        takes: item.batch_id && item.branch_id
+          ? [{ batchId: item.batch_id, lotCode: item.batch_label || null, expiryDate: item.batch_expiry_date || null, quantity: item.quantity } as FifoLotTake]
+          : autoAllocationsByItemIndex.get(itemIndex) || [],
+      }))
+      .filter(({ item, takes }) => takes.length && item.branch_id && !item.damaged_lot_id)
     if (allocationItems.length) {
       try {
-        const allocationStatements = allocationItems.map(({ item, itemIndex }) => {
+        const allocationStatements = allocationItems.flatMap(({ item, itemIndex, takes }) => {
           const statementIndex = saleItemStatementIndexByItemIndex[itemIndex]
           const saleItemId = Number(batchResults[statementIndex]?.meta?.last_row_id || 0)
-          return {
-            sql: `INSERT INTO sale_item_batch_allocations (sale_item_id, batch_id, branch_id, quantity, lot_code, expiry_date)
-                  VALUES (@sale_item_id, @batch_id, @branch_id, @quantity, @lot_code, @expiry_date)`,
+          if (!(saleItemId > 0)) return []
+          return takes.map((take) => ({
+            sql: `INSERT INTO sale_item_batch_allocations (sale_item_id, batch_id, branch_id, quantity, lot_code, expiry_date, released_quantity, released_at)
+                  VALUES (@sale_item_id, @batch_id, @branch_id, @quantity, @lot_code, @expiry_date, @released_quantity, @released_at)`,
             params: {
               sale_item_id: saleItemId,
-              batch_id: item.batch_id,
+              batch_id: take.batchId,
               branch_id: item.branch_id,
-              quantity: item.quantity,
-              lot_code: item.batch_label || null,
-              expiry_date: item.batch_expiry_date || null,
+              quantity: take.quantity,
+              lot_code: take.lotCode || null,
+              expiry_date: take.expiryDate || null,
+              released_quantity: shouldDeductStock ? 0 : take.quantity,
+              released_at: shouldDeductStock ? null : new Date().toISOString(),
             },
-          }
-        }).filter((statement) => Number(statement.params.sale_item_id) > 0)
+          }))
+        })
         if (allocationStatements.length) await db.batch(allocationStatements)
       } catch (allocationError) {
         console.error('[sales] failed to record sale_item_batch_allocations (stock already deducted correctly)', allocationError)
@@ -889,6 +956,28 @@ app.patch('/:id/status', async (c) => {
   // plan below runs on the regular lines only and the damaged lines get
   // their own ops on the SAME heldQuantity state machine.
   const regularItems = items.filter((item) => !item.damaged_lot_id)
+  // Z0: attach each line's recorded lot allocations (migration 0078) so the
+  // transition kernel restores/re-deducts to the SAME batches the sale drew
+  // from -- draw order (id ASC), which the kernel walks in reverse to give
+  // last-drawn units back first. A line with no allocation rows (old sales,
+  // or a line the lot ledger never tracked) falls back to its single
+  // batch_id, unchanged.
+  const regularItemIds = regularItems.map((item) => Number(item.id)).filter((value) => value > 0)
+  if (regularItemIds.length) {
+    const allocRows = await selectInChunks(regularItemIds, 0, (chunk) => db
+      .prepare(`SELECT id, sale_item_id, batch_id, quantity, released_quantity FROM sale_item_batch_allocations WHERE sale_item_id IN (${chunk.map(() => '?').join(',')}) ORDER BY id ASC`)
+      .all<{ id: number; sale_item_id: number; batch_id: number; quantity: number; released_quantity: number }>(chunk))
+    const allocByItem = new Map<number, SaleItemAllocation[]>()
+    for (const row of allocRows) {
+      const list = allocByItem.get(Number(row.sale_item_id)) || []
+      list.push({ id: Number(row.id), batch_id: Number(row.batch_id), quantity: Number(row.quantity) || 0, released_quantity: Number(row.released_quantity) || 0 })
+      allocByItem.set(Number(row.sale_item_id), list)
+    }
+    for (const item of regularItems) {
+      const list = allocByItem.get(Number(item.id))
+      if (list && list.length) (item as SaleItemRow & { allocations?: SaleItemAllocation[] }).allocations = list
+    }
+  }
   const damagedTransitionOps: Array<{ lotId: number; productId: number; productName: string | null; branchId: number | null; delta: number }> = []
   for (const item of items) {
     if (!item.damaged_lot_id || !item.product_id) continue
