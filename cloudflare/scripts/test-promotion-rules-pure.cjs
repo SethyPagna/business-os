@@ -233,6 +233,15 @@ const pass = (msg) => { checks++; console.log('PASS ' + msg) }
   assert.ok(!/query\.supplier/.test(portalSrc), 'portal filters must not accept a supplier facet')
   assert.match(portalSrc, /query\.promo/, "portal exposes exactly the one public promo facet ('promoted')")
   pass('portal payloads and facets stay customer-only (no supplier/cost/tag), promo facet present')
+
+  // 6.3 regression pins: settings saves bump their own cache version and
+  // the portal cache key composes products+settings -- without both, every
+  // portal-editor save (map embed included) served stale config until the
+  // TTL died (reproduced live in Part 400's sweep).
+  const settingsSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'routes', 'settings.ts'), 'utf8')
+  assert.match(settingsSrc, /bumpVersion\(c\.env, 'settings'\)/, 'settings POST must bump the settings cache version')
+  assert.match(portalSrc, /getVersionWithFallback\(c\.env, 'settings'\)/, 'portal cache key must include the settings version')
+  pass('6.3: settings saves invalidate the portal cache immediately (no TTL hiding)')
 }
 
 console.log(`\n${checks} check group(s) passed.`)

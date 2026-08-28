@@ -528,7 +528,16 @@ const PORTAL_CONFIG_TTL_SECONDS = 60
 const PORTAL_CATALOG_TTL_SECONDS = 30
 
 async function portalCacheVersion(c: { env: Env }): Promise<string> {
-  return getVersionWithFallback(c.env, 'products')
+  // 6.3: the portal's responses depend on PRODUCTS and on SETTINGS (the
+  // whole storefront config lives in settings rows) -- composing both
+  // versions means a save on either side invalidates immediately instead
+  // of hiding behind the TTL. Reproduced live: stale at +30s, fresh only
+  // after the 60s TTL, on every portal-editor save.
+  const [productsVersion, settingsVersion] = await Promise.all([
+    getVersionWithFallback(c.env, 'products'),
+    getVersionWithFallback(c.env, 'settings'),
+  ])
+  return `${productsVersion}:${settingsVersion}`
 }
 
 app.get('/config', async (c) => {

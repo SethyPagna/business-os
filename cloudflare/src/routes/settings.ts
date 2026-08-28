@@ -4,6 +4,7 @@ import { requireAuth, type SessionUser } from '../lib/auth'
 import { audit } from '../lib/audit'
 import { hasPermission } from '../lib/permissions'
 import { broadcast } from '../durable-objects/broadcastHub'
+import { bumpVersion } from '../lib/cache'
 import { assertUpdatedAtMatch, getExpectedUpdatedAt, writeConflictResponse, WriteConflictError } from '../lib/conflictControl'
 import type { Env } from '../index'
 
@@ -224,6 +225,13 @@ app.post('/', async (c) => {
 
   const updatedAt = await getSettingsUpdatedAt(c.env)
   await audit(c.env, user?.id ?? null, user?.name ?? null, 'update', 'settings', null, { keys: attemptedKeys })
+  // 6.3 (reproduced live by the Part-400 sweep): the portal caches its
+  // config/catalog responses keyed on a version this route never bumped,
+  // so every customer_portal_* save -- map embed included, the user's
+  // "stale cache of embedded sites" -- served the OLD value until the TTL
+  // died (~60s). Settings writes now carry their own version; the portal
+  // cache key composes it (see portalCacheVersion).
+  c.executionCtx.waitUntil(bumpVersion(c.env, 'settings'))
   c.executionCtx.waitUntil(broadcast(c.env, 'settings', { action: 'update', keys: attemptedKeys }))
   return c.json({ updatedAt, keys: attemptedKeys })
 })
