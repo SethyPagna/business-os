@@ -3222,33 +3222,30 @@ function ProductsFullEditor() {
                 a normal child of the same column means it now lines up
                 exactly, with no hardcoded offset to keep in sync by hand.
 
-                Split into two rows (this session, backlog item: "selling
-                price should get its own row instead of sharing a column
-                with something else") -- previously cost/selling/special/
-                discount/stock were all crammed onto one "|"-separated line,
-                the exact "sharing" the ask called out; the desktop table
-                row already gives selling price its own dedicated cell
-                (col-highlight-green), this just brings the mobile card in
-                line with that. Selling price (plus its special/discount
-                sub-figures, same values as before) now gets its own row,
-                sized and weighted like the desktop cell's green figure;
-                cost and stock share the second row same as before -- only
-                selling price was named in the ask, so cost+stock staying
-                together isn't the "sharing" being fixed here. */}
-            <div className="mt-1 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[13px] font-semibold text-green-700 dark:text-green-400">
-              <span className="whitespace-nowrap">{fmtUSD(sellingUsd)}</span>
+                ONE row, only one row (user, Aug 28 2026, with a screenshot
+                of the two-row card): every price AND the stock qty share a
+                single line. This SUPERSEDES the earlier "selling price
+                should get its own row" split from the Aug-25 backlog --
+                the user saw the split live and rejected it, so don't
+                re-split without a fresh ask. Selling (green) leads and
+                keeps its bigger weight so it still reads first; special/
+                discount figures ride beside it; then cost (red) and the
+                status-colored qty+unit, "|"-separated like before.
+                flex-wrap stays purely as overflow protection for genuinely
+                too-narrow cards -- the default render is one line. */}
+            <div className="mt-1 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[11px]">
+              <span className="whitespace-nowrap text-[13px] font-semibold text-green-700 dark:text-green-400">{fmtUSD(sellingUsd)}</span>
               {specialUsd > 0 ? (
-                <span className="whitespace-nowrap text-[11px] font-medium text-primary-700 dark:text-primary-400">
+                <span className="whitespace-nowrap font-medium text-primary-700 dark:text-primary-400">
                   Special {fmtUSD(specialUsd)}
                 </span>
               ) : null}
               {promotion.active ? (
-                <span className="whitespace-nowrap text-[11px] font-medium text-rose-600 dark:text-rose-300">
+                <span className="whitespace-nowrap font-medium text-rose-600 dark:text-rose-300">
                   {String(p.discount_label || tr('discounts', 'Discounts'))} {fmtUSD(promotion.applied_price_usd)}
                 </span>
               ) : null}
-            </div>
-            <div className="mt-0.5 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[11px]">
+              <span className="text-gray-300 dark:text-gray-600">|</span>
               <span className="whitespace-nowrap text-red-600">{fmtUSD(costUsd)}</span>
               <span className="text-gray-300 dark:text-gray-600">|</span>
               {/* Colored by stock status (red/yellow/green) instead of the
