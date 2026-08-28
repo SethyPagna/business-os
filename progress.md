@@ -584,14 +584,18 @@ deep-linkable tabs.*
 
 ### Phase F — Add/create flows: wizard, fast batch entry, drafts
 
-- [~] F1 *(IN PROGRESS — session 6e, Part 408 (407 reserved for a7's E2 —
-  identity note: the E2 holder signs as a7; session 4a is the pre-compaction
-  a7's continuation under a new name and holds D5a-picker + P7-c, not E2).
-  Footprint: ProductForm + product create flow + a live-match helper +
-  pure/frontend tests; no nav files (a7 holds those for E2). P7-b (the
-  sci-notation barcode guard, ProductForm + routes/products.ts server-side)
-  belongs in this footprint — handed to 6e by 4a.)*
-- [ ] F1. **Add Product = new products only.** Typing a name live-searches existing
+- [x] F1 *(Part 408, session 6e — SHIPPED, with P7-b folded in. Pure
+  classifier helpers/productCreateMatch.ts (exact_twin / name_match /
+  barcode_match, canonical-name adoption, price advisory, before→after
+  lines); ProductForm create mode live-searches name+barcode (350ms
+  debounce, stale-response guard) with an inline verdict panel under the
+  name input and a submit-gating modal: go back · add as child (adopts the
+  group's exact casing) · proceed as new (withheld for an exact twin —
+  backend 409s it anyway). Asked once per typed identity, not per click.
+  P7-b: scientific-notation barcodes refused client-side (same regex as
+  productImportPlanner) AND server-side 400 (code
+  barcode_scientific_notation) on both create and update doors.)*
+  **Add Product = new products only.** Typing a name live-searches existing
   products; matching name/barcode/both raises a structured warning with actions: go back ·
   add as child of the matched group · proceed as new — with a before→after arrow preview
   and a page-by-page confirm. Price similarity is advisory ("matches X on name+price but
@@ -933,7 +937,11 @@ deep-linkable tabs.*
     customer/delivery saved a
     BARE address/area string; the full contact forms serialize multi-OPTION rows
     into the same column.
-  - [ ] P7-b *(new, confirmed)*: the scientific-notation barcode guard exists ONLY
+  - [x] P7-b *(CLOSED in Part 408 with F1, session 6e: ProductForm submit
+    rejects the pattern with the planner's own regex + a clear alert;
+    routes/products.ts returns 400 `barcode_scientific_notation` on BOTH
+    create and update, checked before the identity/duplicate logic.)*
+    *(was: new, confirmed)*: the scientific-notation barcode guard exists ONLY
     on import screens (BulkImportModal/productImportPlanner/spreadsheetImport) —
     manual product create/edit accepts a pasted `8.85156E+12` barcode; ProductForm
     AND routes/products.ts (server-side, like the identity guard) should reject it.

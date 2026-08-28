@@ -9567,3 +9567,50 @@ F1 (Part 408) is in flight in ProductForm.tsx -- that file is hot and
 excluded from this commit. E6's re-check for this move: both moved
 sections' export dialogs verified live above; no orphaned buttons, no
 dead routes.
+
+## Part 408 (chat, Aug 28 2026) -- F1: Add Product speaks the identity rule live (+ P7-b barcode guard)
+
+**F1 -- "Add Product = new products only."** The manual create form now
+live-searches the catalog while the operator types (name and barcode, 350ms
+debounce, stale responses discarded) and speaks the ONE product identity
+rule BEFORE the save, not as a 409 after it.
+
+- `helpers/productCreateMatch.ts` (pure, tested): classifies typed
+  name/barcode against fetched candidates into `exact_twin` (same name +
+  same barcode -- cannot be created; "proceed as new" is withheld because
+  the backend refuses it anyway), `name_match` (child row of that name
+  group expected; canonical name = the group's exact casing), or
+  `barcode_match` (legal separate product sharing a barcode). Price
+  similarity is ADVISORY only, per the spec.
+- ProductForm (create mode only): an inline panel under the name input
+  states the verdict as it forms; submit is gated by a modal offering
+  **go back / add as child of the matched group / proceed as new**, with
+  before->after arrow lines (e.g. "Aloe Vera Gel (2 rows) -> Aloe Vera
+  Gel (3 rows -- this one joins as a child)") and the price advisory.
+  "Add as child" adopts the group's canonical spelling so the new row
+  lands INSIDE the group instead of forking a near-miss name. The modal
+  asks once per typed identity (name|barcode ack key), so a deliberate
+  "proceed as new" isn't re-litigated on the same click-through.
+- Fast-saver caveat (deliberate): save faster than the debounce and the
+  advisory modal may not have candidates yet -- the identity rule itself
+  is still enforced server-side (409 duplicate_product), only the
+  courtesy preview is skipped.
+
+**P7-b (folded in, handed over by 4a -- same footprint):** a barcode
+reading as scientific notation (`8.85156E+12`, Excel's General-format
+export artifact) is now refused at the MANUAL doors too, with the same
+regex the import planner uses: client-side alert in ProductForm submit,
+and server-side 400 `barcode_scientific_notation` in routes/products.ts
+on BOTH create and update, checked before the identity/duplicate logic.
+
+**Verification:** new `tests/productCreateMatch.test.ts` (8 checks: 5
+pure classifier + form-gate pins + both P7-b halves) registered in the
+chain; full frontend chain green (typecheck, check:source,
+langKeyIntegrity, 121 test files); backend scripts/test-*.cjs sweep
+green; both tsc runs clean; vite build + wrangler dry-run clean. tr()
+strings carry inline en+km fallbacks (no pack keys needed -- the
+integrity gate covers bare t() only).
+
+**Coordination:** Part 407 = a7's E2 (landed mid-unit); 4a holds D5a
+picker + P7-c as Part 409. E1 stays with whoever holds the nav quartet
+after E2 -- not this unit.

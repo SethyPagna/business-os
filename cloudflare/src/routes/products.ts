@@ -1073,6 +1073,16 @@ app.post('/bulk-price-adjust', async (c) => {
 // so manual create/edit must refuse to mint a twin of it. A same-name row
 // with a DIFFERENT or empty barcode is a legitimate child row and is never
 // returned here.
+// P7-b: a barcode that reads as scientific notation ("8.85107E+12") is an
+// Excel General-format export artifact, never a real code -- the import
+// planner already refuses these (barcode_scientific_notation), so the
+// manual create/update doors refuse them too, with the same rule.
+const SCIENTIFIC_NOTATION_BARCODE = /^[+-]?\d+(?:\.\d+)?e[+-]?\d+$/i
+const scientificBarcodeError = (barcode: string) => ({
+  error: `Barcode "${barcode}" looks like scientific notation (an Excel export artifact). Edit it or clear it -- it cannot be saved as-is.`,
+  code: 'barcode_scientific_notation',
+})
+
 async function findSameNameBarcodeProduct(
   env: Env,
   name: string,
@@ -1100,6 +1110,10 @@ app.post('/', async (c) => {
   const body = (await c.req.json<Record<string, unknown>>().catch(() => ({}))) as Record<string, unknown>
   const name = String(body.name || '').trim()
   if (!name) return c.json({ error: 'Product name is required' }, 400)
+  const createBarcode = String(body.barcode ?? '').trim()
+  if (SCIENTIFIC_NOTATION_BARCODE.test(createBarcode)) {
+    return c.json(scientificBarcodeError(createBarcode), 400)
+  }
 
   // The ONE product identity rule, enforced on the MANUAL path too (Aug 28:
   // "identity rules applied fully across all codepaths"): same name + same
@@ -1252,6 +1266,12 @@ app.put('/:id', async (c) => {
   // into an exact name+barcode twin of another product (excluding itself).
   // Only runs when the body actually carries a name or barcode change to
   // judge — an image-only or stock-only edit never reaches the query.
+  if (body.barcode !== undefined) {
+    const nextBarcodeText = String(body.barcode ?? '').trim()
+    if (SCIENTIFIC_NOTATION_BARCODE.test(nextBarcodeText)) {
+      return c.json(scientificBarcodeError(nextBarcodeText), 400)
+    }
+  }
   if (body.name !== undefined || body.barcode !== undefined) {
     const current = await getDb(c.env).prepare('SELECT name, barcode FROM products WHERE id = @id').get<{ name: string; barcode: string | null }>({ id })
     const nextName = body.name !== undefined ? String(body.name || '').trim() : String(current?.name || '')

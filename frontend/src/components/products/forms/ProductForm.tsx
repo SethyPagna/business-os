@@ -15,6 +15,8 @@ import BranchStockAdjuster from './BranchStockAdjuster'
 import { calculateProductDiscount, formatPriceNumber, normalizePriceValue } from '../../../utils/pricing.ts'
 import RenameCascadeModal, { type RenameCascadeChoice, type RenameCascadeRequest } from '../../shared/RenameCascadeModal.tsx'
 import { getRenameImpact, renameBrandEverywhere } from '../../../api/renameCascadeTransport.ts'
+import { classifyCreateMatches, type CreateMatchVerdict, type CreateMatchCandidate } from '../helpers/productCreateMatch.ts'
+import { searchProducts as searchProductsForMatch } from '../../../api/methods.ts'
 import { buildCacheBustedMediaPath } from '../../../utils/mediaUpload.ts'
 import {
   beginTrackedRequest,
@@ -657,6 +659,58 @@ export default function ProductForm({
     resolve?.(choice)
   }
 
+  // F1 (Part 408): CREATE mode live-searches the catalog while the name/
+  // barcode is typed and speaks the identity rule BEFORE create -- the
+  // structured verdict modal offers go-back / add-as-child / proceed-as-new
+  // (as-new withheld for an exact twin, which the backend refuses anyway).
+  const isCreateMode = !product?.id
+  const [createMatches, setCreateMatches] = useState<CreateMatchCandidate[]>([])
+  const [createVerdictOpen, setCreateVerdictOpen] = useState(false)
+  const createVerdictResolveRef = useRef<((choice: 'back' | 'child' | 'new') => void) | null>(null)
+  const createMatchSeqRef = useRef(0)
+  const createMatchAckRef = useRef('')
+  const createVerdict: CreateMatchVerdict = useMemo(
+    () => classifyCreateMatches({ name: form.name, barcode: form.barcode, selling_price_usd: parseNumericInput(form.selling_price_usd) }, createMatches),
+    [form.name, form.barcode, form.selling_price_usd, createMatches],
+  )
+  useEffect(() => {
+    if (!isCreateMode) return
+    const name = String(form.name || '').trim()
+    const barcode = String(form.barcode || '').trim()
+    if (name.length < 2 && !barcode) { setCreateMatches([]); return }
+    const seq = ++createMatchSeqRef.current
+    const timer = window.setTimeout(async () => {
+      try {
+        const queries = [name, barcode].filter((query) => query.length >= 2)
+        const results: CreateMatchCandidate[] = []
+        for (const query of queries) {
+          const payload = await searchProductsForMatch({ query, pageSize: 10 }) as { items?: CreateMatchCandidate[] }
+          if (Array.isArray(payload?.items)) results.push(...payload.items)
+        }
+        if (seq !== createMatchSeqRef.current) return
+        const seen = new Set<string>()
+        setCreateMatches(results.filter((row) => {
+          const key = String(row.id)
+          if (seen.has(key)) return false
+          seen.add(key)
+          return true
+        }))
+      } catch { /* live match is advisory -- a failed search never blocks typing */ }
+    }, 350)
+    return () => window.clearTimeout(timer)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isCreateMode, form.name, form.barcode])
+  const askCreateVerdict = () => new Promise<'back' | 'child' | 'new'>((resolve) => {
+    createVerdictResolveRef.current = resolve
+    setCreateVerdictOpen(true)
+  })
+  const resolveCreateVerdict = (choice: 'back' | 'child' | 'new') => {
+    setCreateVerdictOpen(false)
+    const resolve = createVerdictResolveRef.current
+    createVerdictResolveRef.current = null
+    resolve?.(choice)
+  }
+
   useEffect(() => {
     formDirtyRef.current = false
     try {
@@ -810,6 +864,36 @@ export default function ProductForm({
     if (!String(form.name || '').trim()) {
       alert(tr('name_required_alert', 'Name is required', 'ត្រូវការឈ្មោះ'))
       return
+    }
+    // P7-b: a barcode reading as scientific notation is an Excel export
+    // artifact, never a real code -- refuse it at this door with the same
+    // rule the import planner applies (productImportPlanner
+    // barcode_scientific_notation), so the catalog can't take one in
+    // through manual create/edit either. The server enforces it too.
+    if (/^[+-]?\d+(?:\.\d+)?e[+-]?\d+$/i.test(String(form.barcode || '').trim())) {
+      alert(tr(
+        'barcode_scientific_notation_alert',
+        'This barcode looks like scientific notation (an Excel export artifact). Edit it or clear it — it cannot be saved as-is.',
+        'បាកូដនេះមើលទៅដូចជាទម្រង់វិទ្យាសាស្ត្រ (កំហុសពីការនាំចេញ Excel)។ កែ ឬលុបវាចេញ — មិនអាចរក្សាទុកបែបនេះបានទេ។',
+      ))
+      return
+    }
+    // F1: the page-by-page confirm -- a matching name/barcode stops the
+    // create ONCE per exact typed identity and asks. 'child' adopts the
+    // matched group's canonical spelling so the new row joins the group
+    // instead of forking a near-miss; 'new' proceeds deliberately (never
+    // offered for an exact twin); 'back' returns to editing.
+    if (isCreateMode && createVerdict.kind) {
+      const ackKey = `${String(form.name || '').trim().toLowerCase()}|${String(form.barcode || '').trim()}`
+      if (createMatchAckRef.current !== ackKey) {
+        const choice = await askCreateVerdict()
+        if (choice === 'back') return
+        if (choice === 'child' && createVerdict.canonicalName) {
+          setField('name', createVerdict.canonicalName)
+          form.name = createVerdict.canonicalName
+        }
+        createMatchAckRef.current = ackKey
+      }
     }
     if (!product && branches.length > 0 && !form.branch_id) {
       alert(tr('branch_required_alert', 'Please choose a branch for this product.', 'សូមជ្រើសរើសសាខាសម្រាប់ផលិតផលនេះ។'))
@@ -1079,6 +1163,21 @@ export default function ProductForm({
                   </button>
                 ) : null}
               </div>
+              {/* F1: while a NEW product is typed, say out loud what the
+                  identity rule will do with this name/barcode -- before the
+                  save button is anywhere near being pressed. */}
+              {isCreateMode && createVerdict.kind ? (
+                <p className={`mt-1 rounded-lg border px-2.5 py-1.5 text-xs ${createVerdict.kind === 'exact_twin'
+                  ? 'border-red-200 bg-red-50 text-red-700 dark:border-red-900/40 dark:bg-red-950/30 dark:text-red-300'
+                  : 'border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-900/40 dark:bg-amber-950/30 dark:text-amber-300'}`}>
+                  {createVerdict.kind === 'exact_twin'
+                    ? tr('create_match_twin_hint', 'This exact product already exists (same name and barcode) — it cannot be created twice.', 'ផលិតផលនេះមានរួចហើយ (ឈ្មោះ និងបាកូដដូចគ្នា) — មិនអាចបង្កើតម្តងទៀតបានទេ។')
+                    : createVerdict.kind === 'name_match'
+                      ? tr('create_match_name_hint', 'This name already exists ({n} rows) — saving adds this as a new row of that group.', 'ឈ្មោះនេះមានរួចហើយ ({n} ជួរ) — ការរក្សាទុកនឹងបន្ថែមជាជួរថ្មីនៃក្រុមនោះ។').replace('{n}', String(createVerdict.groupRows.length))
+                      : tr('create_match_barcode_hint', 'This barcode is already on "{name}".', 'បាកូដនេះមាននៅលើ "{name}" រួចហើយ។').replace('{name}', createVerdict.canonicalName)}
+                  {createVerdict.priceMatches ? ` · ${tr('create_match_price_hint', 'same price too', 'តម្លៃដូចគ្នាដែរ')}` : ''}
+                </p>
+              ) : null}
               {/* Which group this row belongs to, and where in it.
                   The "Group parent" dropdown further down only knows about
                   parent_id, which name-grouped rows do not have -- so for a
@@ -1619,6 +1718,76 @@ export default function ProductForm({
             />
           ) : null}
         </Suspense>
+      ) : null}
+      {createVerdictOpen ? (
+        <Modal
+          title={createVerdict.kind === 'exact_twin'
+            ? tr('create_match_twin_title', 'Product already exists', 'ផលិតផលមានរួចហើយ')
+            : createVerdict.kind === 'name_match'
+              ? tr('create_match_name_title', 'Name already exists', 'ឈ្មោះមានរួចហើយ')
+              : tr('create_match_barcode_title', 'Barcode already in use', 'បាកូដកំពុងប្រើរួចហើយ')}
+          onClose={() => resolveCreateVerdict('back')}
+          size="sm"
+        >
+          <div className="space-y-4 text-sm text-gray-700 dark:text-gray-300">
+            <div className={`flex items-start gap-3 rounded-lg border p-3 ${createVerdict.kind === 'exact_twin'
+              ? 'border-red-200 bg-red-50 dark:border-red-900/40 dark:bg-red-950/30'
+              : 'border-amber-200 bg-amber-50 dark:border-amber-900/40 dark:bg-amber-950/30'}`}>
+              <AlertTriangleIcon className={`mt-0.5 h-4 w-4 shrink-0 ${createVerdict.kind === 'exact_twin' ? 'text-red-600 dark:text-red-400' : 'text-amber-600 dark:text-amber-400'}`} />
+              <div className={`space-y-1 ${createVerdict.kind === 'exact_twin' ? 'text-red-800 dark:text-red-300' : 'text-amber-800 dark:text-amber-300'}`}>
+                <p>
+                  {createVerdict.kind === 'exact_twin'
+                    ? tr('create_match_twin_body', 'An identical product already exists — same name and same barcode. Go back and adjust, or open the existing product instead.', 'ផលិតផលដូចគ្នាបេះបិទមានរួចហើយ — ឈ្មោះ និងបាកូដដូចគ្នា។ ត្រឡប់ក្រោយ ហើយកែសម្រួល ឬបើកផលិតផលដែលមានស្រាប់ជំនួសវិញ។')
+                    : createVerdict.kind === 'name_match'
+                      ? tr('create_match_name_body', 'A product with this exact name already exists. Saving will add this as a child row of that group.', 'ផលិតផលដែលមានឈ្មោះដូចគ្នាបេះបិទមានរួចហើយ។ ការរក្សាទុកនឹងបន្ថែមវាជាជួរកូននៃក្រុមនោះ។')
+                      : tr('create_match_barcode_body', 'This barcode already belongs to "{name}". Join that group (adopting its name), or keep this as a separate product that shares the barcode.', 'បាកូដនេះជារបស់ "{name}" រួចហើយ។ ចូលរួមក្រុមនោះ (ដោយយកឈ្មោះរបស់វា) ឬរក្សាវាជាផលិតផលដាច់ដោយឡែកដែលប្រើបាកូដរួមគ្នា។').replace('{name}', createVerdict.canonicalName)}
+                </p>
+                {createVerdict.priceMatches ? (
+                  <p className="text-xs">
+                    {tr('create_match_price_advisory', 'The selling price also matches an existing row — worth a second look before creating.', 'តម្លៃលក់ក៏ត្រូវគ្នានឹងជួរដែលមានស្រាប់ដែរ — គួរពិនិត្យម្តងទៀតមុនបង្កើត។')}
+                  </p>
+                ) : null}
+              </div>
+            </div>
+            {createVerdict.beforeAfter.child || (createVerdict.allowProceedAsNew && createVerdict.beforeAfter.asNew) ? (
+              <div className="space-y-1 rounded-lg bg-slate-50 p-3 text-xs text-slate-600 dark:bg-slate-800/60 dark:text-slate-300">
+                {createVerdict.beforeAfter.child ? (
+                  <p><span className="font-semibold">{tr('create_match_child_label', 'As a child:', 'ជាកូន៖')}</span> {createVerdict.beforeAfter.child}</p>
+                ) : null}
+                {createVerdict.allowProceedAsNew && createVerdict.beforeAfter.asNew ? (
+                  <p><span className="font-semibold">{tr('create_match_new_label', 'As new:', 'ជាថ្មី៖')}</span> {createVerdict.beforeAfter.asNew}</p>
+                ) : null}
+              </div>
+            ) : null}
+            <div className="flex flex-wrap gap-3">
+              <button
+                type="button"
+                className="rounded-lg border border-gray-300 px-4 py-2 text-sm text-gray-600 dark:border-gray-600 dark:text-gray-300"
+                onClick={() => resolveCreateVerdict('back')}
+              >
+                {tr('create_match_back', 'Go back', 'ត្រឡប់ក្រោយ')}
+              </button>
+              {createVerdict.kind !== 'exact_twin' ? (
+                <button
+                  type="button"
+                  className="rounded-lg bg-amber-600 px-4 py-2 text-sm text-white hover:bg-amber-700"
+                  onClick={() => resolveCreateVerdict('child')}
+                >
+                  {tr('create_match_child_button', 'Add as child of "{name}"', 'បន្ថែមជាកូននៃ "{name}"').replace('{name}', createVerdict.canonicalName)}
+                </button>
+              ) : null}
+              {createVerdict.allowProceedAsNew ? (
+                <button
+                  type="button"
+                  className="rounded-lg border border-gray-300 px-4 py-2 text-sm text-gray-600 dark:border-gray-600 dark:text-gray-300"
+                  onClick={() => resolveCreateVerdict('new')}
+                >
+                  {tr('create_match_new_button', 'Create as a separate product', 'បង្កើតជាផលិតផលដាច់ដោយឡែក')}
+                </button>
+              ) : null}
+            </div>
+          </div>
+        </Modal>
       ) : null}
       {nameUnlockConfirmOpen ? (
         <Modal title={tr('unlock_name_confirm_title', 'Unlock product name?', 'ដោះសោឈ្មោះផលិតផល?')} onClose={() => setNameUnlockConfirmOpen(false)} size="sm">
