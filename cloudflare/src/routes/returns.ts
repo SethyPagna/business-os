@@ -9,6 +9,11 @@ import { broadcast } from '../durable-objects/broadcastHub'
 import { bumpVersion } from '../lib/cache'
 import { buildLikeAliasClause, tokenizeSearchTermGroups } from '../lib/searchMatch'
 import { receiveBatchStock, removeStockFromBatch, InsufficientBatchStockError } from '../lib/productBatches'
+import {
+  normalizeStockAction, computeSettlement, assertReplacementsSameName,
+  createDamagedLot, reverseDamagedLots, applyReplacementStock, listOpenDamagedLots,
+  ConsumedDamagedStockError, DAMAGE_IN_MOVEMENT, DAMAGE_REVERSAL_MOVEMENT,
+} from '../lib/returnsStock'
 import type { Env } from '../index'
 
 const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser } }>()
@@ -129,6 +134,9 @@ type ReturnItemInput = {
   unit_cost_usd?: number
   unit_cost_khr?: number
   return_to_stock?: boolean
+  // 11.13: 'none' | 'restock' | 'damaged'; absent falls back to the
+  // return_to_stock boolean's historical meaning (see normalizeStockAction).
+  stock_action?: string
   branch_id?: number
 }
 
@@ -344,7 +352,25 @@ app.get('/', async (c) => {
     if (!itemsByReturn.has(row.return_id)) itemsByReturn.set(row.return_id, [])
     itemsByReturn.get(row.return_id)!.push(row)
   }
-  return c.json(returns.map((r) => ({ ...r, items: itemsByReturn.get(r.id) || [] })))
+  const replacementRows = await selectInChunks(ids, 0, (chunk) => db.prepare(`SELECT * FROM return_replacement_items WHERE return_id IN (${chunk.map(() => '?').join(',')}) ORDER BY return_id ASC, id ASC`).all<{ return_id: number; [key: string]: unknown }>(chunk))
+  const replacementsByReturn = new Map<number, unknown[]>()
+  for (const row of replacementRows) {
+    if (!replacementsByReturn.has(row.return_id)) replacementsByReturn.set(row.return_id, [])
+    replacementsByReturn.get(row.return_id)!.push(row)
+  }
+  return c.json(returns.map((r) => ({ ...r, items: itemsByReturn.get(r.id) || [], replacement_items: replacementsByReturn.get(r.id) || [] })))
+})
+
+// GET /api/returns/damaged-lots?product_id=&branch_id= -- open damaged
+// lots (quantity_remaining > 0) for one product. Registered before /:id
+// so the param route doesn't swallow it. Carries no cost by design.
+app.get('/damaged-lots', async (c) => {
+  const db = getDb(c.env)
+  const productId = Number(c.req.query('product_id'))
+  if (!Number.isFinite(productId) || productId <= 0) return c.json({ error: 'product_id is required' }, 400)
+  const branchIdRaw = Number(c.req.query('branch_id'))
+  const lots = await listOpenDamagedLots(db, { productId, branchId: Number.isFinite(branchIdRaw) && branchIdRaw > 0 ? branchIdRaw : null })
+  return c.json(lots)
 })
 
 // GET /api/returns/:id
@@ -354,7 +380,8 @@ app.get('/:id', async (c) => {
   const row = await db.prepare('SELECT * FROM returns WHERE id = ?').get<ReturnRow>([id])
   if (!row) return c.json({ error: 'Return not found' }, 404)
   const items = await db.prepare('SELECT * FROM return_items WHERE return_id = ?').all([id])
-  return c.json({ ...row, items })
+  const replacementItems = await db.prepare('SELECT * FROM return_replacement_items WHERE return_id = ?').all([id])
+  return c.json({ ...row, items, replacement_items: replacementItems })
 })
 
 // POST /api/returns -- create a customer return, restocking branch_stock
@@ -379,11 +406,34 @@ app.post('/', async (c) => {
     exchange_rate?: number
     return_number?: string
     client_request_id?: string
+    // 11.12 Replace: lines handed to the customer from same-name stock.
+    replacement_items?: Array<{ product_id: number; product_name?: string; branch_id?: number; batch_id?: number; quantity: number; applied_price_usd?: number; applied_price_khr?: number }>
+    settlement_mode?: string
   }>()
 
   const clientRequestId = normalizeClientRequestId(body.client_request_id)
   if (!Array.isArray(body.items) || body.items.length === 0) return c.json({ error: 'Return items required' }, 400)
   if (!body.reason) return c.json({ error: 'Reason is required' }, 400)
+  const replacementInputs = Array.isArray(body.replacement_items) ? body.replacement_items : []
+  for (const rep of replacementInputs) {
+    if (!rep?.product_id || !(Number(rep.quantity) > 0)) {
+      return c.json({ error: 'Each replacement line needs a product and a positive quantity' }, 400)
+    }
+  }
+  if (replacementInputs.length) {
+    // Replace is an even exchange from SAME-NAME stock (locked design
+    // note) -- a different product is a refund plus a new sale, and the
+    // name group is this app's product identity, so the gate is name_key.
+    try {
+      await assertReplacementsSameName(
+        db,
+        body.items.map((i) => Number(i.product_id)).filter((pid) => Number.isFinite(pid) && pid > 0),
+        replacementInputs.map((rep) => Number(rep.product_id)),
+      )
+    } catch (error) {
+      return c.json({ error: (error as Error).message }, 400)
+    }
+  }
 
   if (clientRequestId) {
     const existing = await db.prepare('SELECT id, return_number FROM returns WHERE client_request_id = ? LIMIT 1').get<{ id: number; return_number: string }>([clientRequestId])
@@ -408,11 +458,60 @@ app.post('/', async (c) => {
     ? (await db.prepare('SELECT name FROM branches WHERE id = ?').get<{ name: string }>([branchId]))?.name || saleMeta.branch_name || null
     : saleMeta.branch_name || null
 
-  const productIds = [...new Set(body.items.map((i) => Number(i.product_id)).filter((id) => Number.isFinite(id) && id > 0))]
-  const productMap = new Map<number, { id: number; name: string; cost_price_usd: number; cost_price_khr: number }>()
+  const productIds = [...new Set([
+    ...body.items.map((i) => Number(i.product_id)),
+    ...replacementInputs.map((rep) => Number(rep.product_id)),
+  ].filter((id) => Number.isFinite(id) && id > 0))]
+  const productMap = new Map<number, { id: number; name: string; cost_price_usd: number; cost_price_khr: number; selling_price_usd: number; selling_price_khr: number }>()
   if (productIds.length > 0) {
-    const rows = await selectInChunks(productIds, 0, (chunk) => db.prepare(`SELECT id, name, cost_price_usd, cost_price_khr FROM products WHERE id IN (${chunk.map(() => '?').join(',')})`).all<typeof productMap extends Map<number, infer V> ? V : never>(chunk))
+    const rows = await selectInChunks(productIds, 0, (chunk) => db.prepare(`SELECT id, name, cost_price_usd, cost_price_khr, selling_price_usd, selling_price_khr FROM products WHERE id IN (${chunk.map(() => '?').join(',')})`).all<typeof productMap extends Map<number, infer V> ? V : never>(chunk))
     for (const row of rows) productMap.set(row.id, row)
+  }
+
+  // 11.12 settlement: value coming back vs value handed out, decided
+  // BEFORE any write. Even exchange (default) is only legal at a zero
+  // gap; a real gap needs the explicit price-difference mode, which is
+  // full-access only (locked note: "Non-default price adjustment
+  // requires full access and an explicit preview").
+  const replacementLines = replacementInputs.map((rep) => {
+    const meta = productMap.get(Number(rep.product_id))
+    const quantity = Number(rep.quantity) || 0
+    const priceUsd = rep.applied_price_usd != null ? toNumber(rep.applied_price_usd, 0) : (meta?.selling_price_usd || 0)
+    const priceKhr = rep.applied_price_khr != null ? toNumber(rep.applied_price_khr, 0) : (meta?.selling_price_khr || 0)
+    return {
+      productId: Number(rep.product_id),
+      productName: rep.product_name?.trim() || meta?.name || `product #${rep.product_id}`,
+      branchId: Number(rep.branch_id) || 0,
+      batchId: Number.isFinite(Number(rep.batch_id)) && Number(rep.batch_id) > 0 ? Number(rep.batch_id) : null,
+      quantity,
+      priceUsd,
+      priceKhr,
+      totalUsd: Number((priceUsd * quantity).toFixed(2)),
+      totalKhr: Math.round(priceKhr * quantity),
+      unitCostUsd: meta?.cost_price_usd || 0,
+      unitCostKhr: meta?.cost_price_khr || 0,
+    }
+  })
+  let settlementMode: string | null = null
+  let settlementDiffUsd = 0
+  let settlementDiffKhr = 0
+  if (replacementLines.length) {
+    const settlement = computeSettlement({
+      mode: body.settlement_mode,
+      returnedTotalUsd: body.items.reduce((sum, i) => sum + (toNumber(i.applied_price_usd, 0) * (Number(i.quantity) || 0)), 0),
+      returnedTotalKhr: body.items.reduce((sum, i) => sum + (toNumber(i.applied_price_khr, 0) * (Number(i.quantity) || 0)), 0),
+      replacementTotalUsd: replacementLines.reduce((sum, line) => sum + line.totalUsd, 0),
+      replacementTotalKhr: replacementLines.reduce((sum, line) => sum + line.totalKhr, 0),
+    })
+    if (settlement.evenExchangeBlocked) {
+      return c.json({ error: `This is not an even exchange -- the replacement differs from the returned value by $${settlement.diffUsd.toFixed(2)}. Choose "settle the price difference" (full access), or adjust quantities/prices until the totals match.`, code: 'uneven_exchange' }, 400)
+    }
+    if (settlement.needsFullAccess && getPermissionTier(user, 'returns') !== 'full') {
+      return c.json({ error: 'Settling a price difference on a replacement requires Full Access to Returns.' }, 403)
+    }
+    settlementMode = settlement.mode
+    settlementDiffUsd = settlement.mode === 'price_difference' ? settlement.diffUsd : 0
+    settlementDiffKhr = settlement.mode === 'price_difference' ? settlement.diffKhr : 0
   }
 
   // Insert the return header first (mirrors sales.ts's POST / -- a single
@@ -422,10 +521,12 @@ app.post('/', async (c) => {
     INSERT INTO returns (
       return_number, client_request_id, sale_id, receipt_number, cashier_id, cashier_name,
       customer_id, customer_name, branch_id, branch_name, return_scope, reason, return_type,
-      notes, total_refund_usd, total_refund_khr, exchange_rate, status
+      notes, total_refund_usd, total_refund_khr, exchange_rate, status,
+      settlement_mode, settlement_diff_usd, settlement_diff_khr
     ) VALUES (@return_number, @client_request_id, @sale_id, @receipt_number, @cashier_id, @cashier_name,
       @customer_id, @customer_name, @branch_id, @branch_name, @return_scope, @reason, @return_type,
-      @notes, @total_refund_usd, @total_refund_khr, @exchange_rate, 'completed')
+      @notes, @total_refund_usd, @total_refund_khr, @exchange_rate, 'completed',
+      @settlement_mode, @settlement_diff_usd, @settlement_diff_khr)
   `).run({
     return_number: returnNumber,
     client_request_id: clientRequestId,
@@ -444,6 +545,9 @@ app.post('/', async (c) => {
     total_refund_usd: body.total_refund_usd || 0,
     total_refund_khr: body.total_refund_khr || 0,
     exchange_rate: body.exchange_rate || saleMeta.exchange_rate || 4100,
+    settlement_mode: settlementMode,
+    settlement_diff_usd: settlementDiffUsd,
+    settlement_diff_khr: settlementDiffKhr,
   })
   const returnId = returnInsert.lastInsertRowid
 
@@ -469,7 +573,8 @@ app.post('/', async (c) => {
       const quantity = Number(item.quantity) || 0
       const totalUsd = (item.applied_price_usd || 0) * quantity
       const totalKhr = (item.applied_price_khr || 0) * quantity
-      const returnToStock = item.return_to_stock !== false
+      const stockAction = normalizeStockAction(item)
+      const returnToStock = stockAction === 'restock'
       const itemBranchId = item.branch_id || branchId || null
       const productMeta = item.product_id ? productMap.get(item.product_id) : undefined
       const safeProductName = (item.product_name && item.product_name.trim()) || productMeta?.name || (item.product_id ? `product #${item.product_id}` : 'Product')
@@ -525,11 +630,46 @@ app.post('/', async (c) => {
         touchedProductIds.add(item.product_id)
       }
 
+      // 11.13(c): restock as DAMAGED -- a traceable lot tied to this
+      // return/branch/(original sale batch), NEVER sellable branch_stock,
+      // plus its damage entry in the product's movement trail.
+      if (stockAction === 'damaged' && item.product_id && itemBranchId) {
+        const originalBatchId = item.sale_item_id ? (saleItemBatchInfo.get(item.sale_item_id)?.batch_id ?? null) : null
+        await createDamagedLot(db, {
+          productId: item.product_id,
+          productName: safeProductName,
+          branchId: itemBranchId,
+          batchId: originalBatchId,
+          returnId,
+          quantity,
+          reason: body.reason,
+          userId: user?.id ?? null,
+          userName: user?.name ?? null,
+        })
+        statements.push({
+          sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_usd, unit_cost_khr, reason, reference_id, user_id, user_name)
+                VALUES (@product_id, @product_name, @branch_id, '${DAMAGE_IN_MOVEMENT}', @quantity, @unit_cost_usd, @unit_cost_khr, @reason, @reference_id, @user_id, @user_name)`,
+          params: {
+            product_id: item.product_id,
+            product_name: safeProductName,
+            branch_id: itemBranchId,
+            quantity,
+            unit_cost_usd: costUsd,
+            unit_cost_khr: costKhr,
+            reason: `Return (damaged): ${body.reason}`,
+            reference_id: returnId,
+            user_id: user?.id ?? null,
+            user_name: user?.name ?? null,
+          },
+        })
+      }
+
       statements.push({
-        sql: `INSERT INTO return_items (return_id, sale_item_id, product_id, product_name, quantity, applied_price_usd, applied_price_khr, cost_price_usd, cost_price_khr, total_usd, total_khr, return_to_stock, branch_id, batch_id)
-              VALUES (@return_id, @sale_item_id, @product_id, @product_name, @quantity, @applied_price_usd, @applied_price_khr, @cost_price_usd, @cost_price_khr, @total_usd, @total_khr, @return_to_stock, @branch_id, @batch_id)`,
+        sql: `INSERT INTO return_items (return_id, sale_item_id, product_id, product_name, quantity, applied_price_usd, applied_price_khr, cost_price_usd, cost_price_khr, total_usd, total_khr, return_to_stock, stock_action, branch_id, batch_id)
+              VALUES (@return_id, @sale_item_id, @product_id, @product_name, @quantity, @applied_price_usd, @applied_price_khr, @cost_price_usd, @cost_price_khr, @total_usd, @total_khr, @return_to_stock, @stock_action, @branch_id, @batch_id)`,
         params: {
           return_id: returnId,
+          stock_action: stockAction,
           sale_item_id: item.sale_item_id || null,
           product_id: item.product_id || null,
           product_name: safeProductName,
@@ -545,6 +685,46 @@ app.post('/', async (c) => {
           batch_id: resolvedBatchId,
         },
       })
+    }
+
+    // 11.12: hand out the replacement lines -- stock leaves the POS way
+    // (explicit batch drains that exact lot; otherwise a validated plain
+    // branch_stock decrement). Same non-atomic-across-steps tradeoff as
+    // receiveBatchStock above; a failure lands in the catch below, which
+    // deletes this return's rows.
+    for (const line of replacementLines) {
+      const lineBranchId = line.branchId || Number(branchId) || 0
+      if (!lineBranchId) throw new Error(`Replacement line for ${line.productName} needs a branch`)
+      await applyReplacementStock(db, {
+        productId: line.productId,
+        productName: line.productName,
+        branchId: lineBranchId,
+        batchId: line.batchId,
+        quantity: line.quantity,
+        unitCostUsd: line.unitCostUsd,
+        unitCostKhr: line.unitCostKhr,
+        returnId,
+        returnNumber,
+        userId: user?.id ?? null,
+        userName: user?.name ?? null,
+      })
+      statements.push({
+        sql: `INSERT INTO return_replacement_items (return_id, product_id, product_name, branch_id, batch_id, quantity, applied_price_usd, applied_price_khr, total_usd, total_khr)
+              VALUES (@return_id, @product_id, @product_name, @branch_id, @batch_id, @quantity, @applied_price_usd, @applied_price_khr, @total_usd, @total_khr)`,
+        params: {
+          return_id: returnId,
+          product_id: line.productId,
+          product_name: line.productName,
+          branch_id: lineBranchId,
+          batch_id: line.batchId,
+          quantity: line.quantity,
+          applied_price_usd: line.priceUsd,
+          applied_price_khr: line.priceKhr,
+          total_usd: line.totalUsd,
+          total_khr: line.totalKhr,
+        },
+      })
+      touchedProductIds.add(line.productId)
     }
 
     // receiveBatchStock already keeps branch_stock/products.stock_quantity
@@ -573,6 +753,8 @@ app.post('/', async (c) => {
     }
   } catch (error) {
     await db.prepare('DELETE FROM returns WHERE id = ?').run([returnId])
+    await db.prepare('DELETE FROM damaged_stock_lots WHERE return_id = ?').run([returnId])
+    await db.prepare('DELETE FROM return_replacement_items WHERE return_id = ?').run([returnId])
     return c.json({ error: `Failed to record return items: ${(error as Error).message}` }, 500)
   }
 
@@ -805,7 +987,7 @@ app.patch('/:id', async (c) => {
 
   const existingItems = await db.prepare('SELECT * FROM return_items WHERE return_id = ?').all<{
     id: number; product_id: number | null; product_name: string | null; quantity: number
-    return_to_stock: number; branch_id: number | null; cost_price_usd: number | null; cost_price_khr: number | null
+    return_to_stock: number; stock_action: string | null; branch_id: number | null; cost_price_usd: number | null; cost_price_khr: number | null
     batch_id: number | null
   }>([id])
   const newItems: ReturnItemInput[] = Array.isArray(body.items) ? body.items : existingItems
@@ -827,6 +1009,32 @@ app.patch('/:id', async (c) => {
 
   const statements: Array<{ sql: string; params: Record<string, unknown> }> = []
   const touchedProductIds = new Set<number>()
+
+  // 11.13: this return's damaged lots come back out before the re-apply.
+  // A lot POS already drew from can't be un-damaged (that stock left the
+  // building) -- ConsumedDamagedStockError blocks the edit outright.
+  try {
+    const reversedLots = await reverseDamagedLots(db, id)
+    for (const lot of reversedLots) {
+      statements.push({
+        sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_usd, unit_cost_khr, reason, reference_id, user_id, user_name)
+              VALUES (@product_id, @product_name, @branch_id, '${DAMAGE_REVERSAL_MOVEMENT}', @quantity, 0, 0, @reason, @reference_id, @user_id, @user_name)`,
+        params: {
+          product_id: lot.product_id,
+          product_name: lot.product_name,
+          branch_id: lot.branch_id,
+          quantity: -lot.quantity,
+          reason: `Return #${existing.return_number} updated - reversing damaged stock`,
+          reference_id: id,
+          user_id: user?.id ?? null,
+          user_name: user?.name ?? null,
+        },
+      })
+    }
+  } catch (error) {
+    if (error instanceof ConsumedDamagedStockError) return c.json({ error: error.message }, 400)
+    throw error
+  }
 
   // Reverse the stock effect of every existing item that had been
   // restocked. Batch-aware now: an item that recorded a batch_id (this
@@ -899,7 +1107,8 @@ app.patch('/:id', async (c) => {
     const quantity = Number(item.quantity) || 0
     const totalUsd = (item.applied_price_usd || 0) * quantity
     const totalKhr = (item.applied_price_khr || 0) * quantity
-    const returnToStock = item.return_to_stock !== false
+    const stockAction = normalizeStockAction(item)
+    const returnToStock = stockAction === 'restock'
     const itemBranchId = item.branch_id || existing.branch_id || null
     totalRefundUsd += totalUsd
     totalRefundKhr += totalKhr
@@ -930,11 +1139,43 @@ app.patch('/:id', async (c) => {
       touchedProductIds.add(item.product_id)
     }
 
+    if (stockAction === 'damaged' && item.product_id && itemBranchId) {
+      const originalBatchId = item.sale_item_id ? (saleItemBatchInfoForEdit.get(item.sale_item_id)?.batch_id ?? null) : null
+      await createDamagedLot(db, {
+        productId: item.product_id,
+        productName: item.product_name || null,
+        branchId: itemBranchId,
+        batchId: originalBatchId,
+        returnId: id,
+        quantity,
+        reason: String(body.reason || existing.reason || '') || null,
+        userId: user?.id ?? null,
+        userName: user?.name ?? null,
+      })
+      statements.push({
+        sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_usd, unit_cost_khr, reason, reference_id, user_id, user_name)
+              VALUES (@product_id, @product_name, @branch_id, '${DAMAGE_IN_MOVEMENT}', @quantity, @unit_cost_usd, @unit_cost_khr, @reason, @reference_id, @user_id, @user_name)`,
+        params: {
+          product_id: item.product_id,
+          product_name: item.product_name || null,
+          branch_id: itemBranchId,
+          quantity,
+          unit_cost_usd: item.cost_price_usd || 0,
+          unit_cost_khr: item.cost_price_khr || 0,
+          reason: `Return #${existing.return_number} updated (damaged): ${body.reason || existing.reason}`,
+          reference_id: id,
+          user_id: user?.id ?? null,
+          user_name: user?.name ?? null,
+        },
+      })
+    }
+
     statements.push({
-      sql: `INSERT INTO return_items (return_id, sale_item_id, product_id, product_name, quantity, applied_price_usd, applied_price_khr, cost_price_usd, cost_price_khr, total_usd, total_khr, return_to_stock, branch_id, batch_id)
-            VALUES (@return_id, @sale_item_id, @product_id, @product_name, @quantity, @applied_price_usd, @applied_price_khr, @cost_price_usd, @cost_price_khr, @total_usd, @total_khr, @return_to_stock, @branch_id, @batch_id)`,
+      sql: `INSERT INTO return_items (return_id, sale_item_id, product_id, product_name, quantity, applied_price_usd, applied_price_khr, cost_price_usd, cost_price_khr, total_usd, total_khr, return_to_stock, stock_action, branch_id, batch_id)
+            VALUES (@return_id, @sale_item_id, @product_id, @product_name, @quantity, @applied_price_usd, @applied_price_khr, @cost_price_usd, @cost_price_khr, @total_usd, @total_khr, @return_to_stock, @stock_action, @branch_id, @batch_id)`,
       params: {
         return_id: id,
+        stock_action: stockAction,
         sale_item_id: item.sale_item_id || null,
         product_id: item.product_id || null,
         product_name: item.product_name || null,
@@ -971,6 +1212,28 @@ app.patch('/:id', async (c) => {
     }
   }
 
+  // 11.12: replacement lines are immutable through this edit form, but
+  // editing the RETURNED side moves the value gap -- recompute it against
+  // the existing replacement rows so an even exchange stays even and a
+  // price-difference settlement stays truthful.
+  const existingReplacements = await db.prepare('SELECT total_usd, total_khr FROM return_replacement_items WHERE return_id = ?').all<{ total_usd: number; total_khr: number }>([id])
+  let settlementDiffUsd = toNumber((existing as Record<string, unknown>).settlement_diff_usd, 0)
+  let settlementDiffKhr = toNumber((existing as Record<string, unknown>).settlement_diff_khr, 0)
+  if (existingReplacements.length) {
+    const settlement = computeSettlement({
+      mode: (existing as Record<string, unknown>).settlement_mode,
+      returnedTotalUsd: newItems.reduce((sum, i) => sum + (toNumber(i.applied_price_usd, 0) * (Number(i.quantity) || 0)), 0),
+      returnedTotalKhr: newItems.reduce((sum, i) => sum + (toNumber(i.applied_price_khr, 0) * (Number(i.quantity) || 0)), 0),
+      replacementTotalUsd: existingReplacements.reduce((sum, row) => sum + toNumber(row.total_usd, 0), 0),
+      replacementTotalKhr: existingReplacements.reduce((sum, row) => sum + toNumber(row.total_khr, 0), 0),
+    })
+    if (settlement.evenExchangeBlocked) {
+      return c.json({ error: `This edit breaks the even exchange -- the replacement now differs from the returned value by $${settlement.diffUsd.toFixed(2)}. Keep the totals equal, or record a new return settled as a price difference instead.`, code: 'uneven_exchange' }, 400)
+    }
+    settlementDiffUsd = settlement.mode === 'price_difference' ? settlement.diffUsd : 0
+    settlementDiffKhr = settlement.mode === 'price_difference' ? settlement.diffKhr : 0
+  }
+
   for (const productId of touchedProductIds) {
     statements.push({
       sql: `UPDATE products SET stock_quantity = (SELECT COALESCE(SUM(quantity), 0) FROM branch_stock WHERE product_id = @productId), updated_at = CURRENT_TIMESTAMP WHERE id = @productId`,
@@ -981,6 +1244,7 @@ app.patch('/:id', async (c) => {
   statements.push({
     sql: `UPDATE returns SET reason=@reason, return_type=@return_type, notes=@notes,
           total_refund_usd=@total_refund_usd, total_refund_khr=@total_refund_khr,
+          settlement_diff_usd=@settlement_diff_usd, settlement_diff_khr=@settlement_diff_khr,
           branch_id=@branch_id, branch_name=@branch_name, updated_at=CURRENT_TIMESTAMP WHERE id=@id`,
     params: {
       reason: body.reason || existing.reason,
@@ -988,6 +1252,8 @@ app.patch('/:id', async (c) => {
       notes: body.notes !== undefined ? body.notes : existing.notes,
       total_refund_usd: body.total_refund_usd !== undefined ? body.total_refund_usd : totalRefundUsd,
       total_refund_khr: body.total_refund_khr !== undefined ? body.total_refund_khr : totalRefundKhr,
+      settlement_diff_usd: settlementDiffUsd,
+      settlement_diff_khr: settlementDiffKhr,
       branch_id: body.branch_id || existing.branch_id,
       branch_name: branchName,
       id,

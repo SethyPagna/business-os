@@ -107,6 +107,10 @@ const returnsRoute = loadReal('routes/returns.ts', {
   '../lib/cache': { bumpVersion: async () => {} },
   '../lib/searchMatch': { buildLikeAliasClause: () => '1=1', tokenizeSearchTermGroups: () => [] },
   '../lib/productBatches': productBatches,
+  // K2 (Part 410): real, pure -- the three-way stock_action + Replace
+  // kernel the route now imports (test-returns-replace-damaged-pure.cjs
+  // covers it in isolation; here it runs under the real route).
+  '../lib/returnsStock': loadReal('lib/returnsStock.ts', { './db': { getDb: () => db }, './productBatches': productBatches, './sqlBinding': loadReal('lib/sqlBinding.ts') }),
 })
 
 const app = returnsRoute.default
@@ -119,7 +123,7 @@ async function check(name, fn) {
 }
 
 function seed() {
-  rawDb.exec('DELETE FROM branch_batch_stock; DELETE FROM product_batches; DELETE FROM branch_stock; DELETE FROM products; DELETE FROM branches; DELETE FROM sale_items; DELETE FROM sales; DELETE FROM returns; DELETE FROM return_items; DELETE FROM inventory_movements;')
+  rawDb.exec('DELETE FROM branch_batch_stock; DELETE FROM product_batches; DELETE FROM branch_stock; DELETE FROM products; DELETE FROM branches; DELETE FROM sale_items; DELETE FROM sales; DELETE FROM returns; DELETE FROM return_items; DELETE FROM inventory_movements; DELETE FROM damaged_stock_lots; DELETE FROM return_replacement_items;')
   rawDb.prepare('INSERT INTO branches (id, name, is_active, is_default) VALUES (1, \'Main\', 1, 1)').run()
   rawDb.prepare("INSERT INTO products (id, name, is_active, stock_quantity) VALUES (1, 'Widget', 1, 0)").run()
   rawDb.prepare("INSERT INTO sales (id, branch_id) VALUES (1, 1)").run()
@@ -215,6 +219,96 @@ async function main() {
 
     const aggregateQty = rawDb.prepare('SELECT quantity FROM branch_stock WHERE product_id = 1 AND branch_id = 1').get().quantity
     assert.strictEqual(aggregateQty, 6, 'aggregate should match the batch ledger')
+  })
+
+  await check('K2: the three-way stock_action lands end-to-end -- none/restock/damaged in one return', async () => {
+    seed()
+    const { status, json } = await req('POST', '/', {
+      items: [
+        { product_id: 1, quantity: 1, stock_action: 'none', branch_id: 1, applied_price_usd: 10 },
+        { product_id: 1, quantity: 2, stock_action: 'restock', branch_id: 1, applied_price_usd: 10 },
+        { product_id: 1, quantity: 3, stock_action: 'damaged', branch_id: 1, applied_price_usd: 10 },
+      ],
+      reason: 'Mixed condition return',
+    })
+    assert.strictEqual(status, 200, JSON.stringify(json))
+    // only the 'restock' units entered sellable stock
+    const aggregateQty = rawDb.prepare('SELECT quantity FROM branch_stock WHERE product_id = 1 AND branch_id = 1').get().quantity
+    assert.strictEqual(aggregateQty, 2)
+    const lot = rawDb.prepare('SELECT * FROM damaged_stock_lots WHERE return_id = @id').get({ id: json.id })
+    assert.strictEqual(lot.quantity, 3)
+    assert.strictEqual(lot.quantity_remaining, 3)
+    assert.strictEqual(lot.branch_id, 1)
+    const actions = rawDb.prepare('SELECT stock_action FROM return_items WHERE return_id = @id ORDER BY id').all({ id: json.id }).map((r) => r.stock_action)
+    assert.deepStrictEqual(actions, ['none', 'restock', 'damaged'])
+    const damageMove = rawDb.prepare("SELECT quantity FROM inventory_movements WHERE movement_type = 'damage_in' AND reference_id = @id").get({ id: json.id })
+    assert.strictEqual(damageMove.quantity, 3)
+  })
+
+  await check('K2: Replace hands out same-name stock -- even exchange records lines and drains stock', async () => {
+    seed()
+    rawDb.prepare('INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (1, 1, 10)').run()
+    rawDb.prepare('UPDATE products SET stock_quantity = 10, selling_price_usd = 10 WHERE id = 1').run()
+    const { status, json } = await req('POST', '/', {
+      items: [{ product_id: 1, quantity: 2, stock_action: 'none', branch_id: 1, applied_price_usd: 10 }],
+      replacement_items: [{ product_id: 1, quantity: 2, branch_id: 1, applied_price_usd: 10 }],
+      reason: 'Defective, swapped on the spot',
+    })
+    assert.strictEqual(status, 200, JSON.stringify(json))
+    const rep = rawDb.prepare('SELECT * FROM return_replacement_items WHERE return_id = @id').get({ id: json.id })
+    assert.strictEqual(rep.quantity, 2)
+    assert.strictEqual(rep.total_usd, 20)
+    assert.strictEqual(rawDb.prepare('SELECT quantity FROM branch_stock WHERE product_id = 1 AND branch_id = 1').get().quantity, 8)
+    const header = rawDb.prepare('SELECT settlement_mode, settlement_diff_usd FROM returns WHERE id = @id').get({ id: json.id })
+    assert.strictEqual(header.settlement_mode, 'even_exchange')
+    assert.strictEqual(header.settlement_diff_usd, 0)
+    const move = rawDb.prepare("SELECT quantity FROM inventory_movements WHERE movement_type = 'replacement_out' AND reference_id = @id").get({ id: json.id })
+    assert.strictEqual(move.quantity, -2)
+  })
+
+  await check('K2: an uneven "even exchange" is refused; price_difference stores the signed gap', async () => {
+    seed()
+    rawDb.prepare('INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (1, 1, 10)').run()
+    const uneven = await req('POST', '/', {
+      items: [{ product_id: 1, quantity: 1, stock_action: 'none', branch_id: 1, applied_price_usd: 10 }],
+      replacement_items: [{ product_id: 1, quantity: 2, branch_id: 1, applied_price_usd: 10 }],
+      reason: 'Uneven swap attempt',
+    })
+    assert.strictEqual(uneven.status, 400)
+    assert.strictEqual(uneven.json.code, 'uneven_exchange')
+    // nothing was written by the refusal
+    assert.strictEqual(rawDb.prepare('SELECT COUNT(*) AS n FROM returns').get().n, 0)
+    assert.strictEqual(rawDb.prepare('SELECT quantity FROM branch_stock WHERE product_id = 1 AND branch_id = 1').get().quantity, 10)
+
+    const settled = await req('POST', '/', {
+      items: [{ product_id: 1, quantity: 1, stock_action: 'none', branch_id: 1, applied_price_usd: 10 }],
+      replacement_items: [{ product_id: 1, quantity: 2, branch_id: 1, applied_price_usd: 10 }],
+      settlement_mode: 'price_difference',
+      reason: 'Customer pays the gap',
+    })
+    assert.strictEqual(settled.status, 200, JSON.stringify(settled.json))
+    const header = rawDb.prepare('SELECT settlement_mode, settlement_diff_usd FROM returns WHERE id = @id').get({ id: settled.json.id })
+    assert.strictEqual(header.settlement_mode, 'price_difference')
+    assert.strictEqual(header.settlement_diff_usd, 10) // positive = customer owes
+  })
+
+  await check('K2: editing a return whose damaged lot was already drawn from is blocked', async () => {
+    seed()
+    const created = await req('POST', '/', {
+      items: [{ product_id: 1, quantity: 3, stock_action: 'damaged', branch_id: 1, applied_price_usd: 10 }],
+      reason: 'Damaged on arrival',
+    })
+    assert.strictEqual(created.status, 200)
+    // POS (11.9, next part) draws one unit from the lot
+    rawDb.prepare('UPDATE damaged_stock_lots SET quantity_remaining = 2 WHERE return_id = @id').run({ id: created.json.id })
+    const edited = await req('PATCH', `/${created.json.id}`, {
+      items: [{ product_id: 1, quantity: 1, stock_action: 'damaged', branch_id: 1, applied_price_usd: 10 }],
+      reason: 'Trying to shrink it',
+    })
+    assert.strictEqual(edited.status, 400)
+    assert.match(edited.json.error, /already been drawn/)
+    // the lot is untouched by the blocked edit
+    assert.strictEqual(rawDb.prepare('SELECT quantity_remaining FROM damaged_stock_lots WHERE return_id = @id').get({ id: created.json.id }).quantity_remaining, 2)
   })
 
   console.log(`\n${passed} check(s) passed.`)
