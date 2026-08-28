@@ -1,5 +1,6 @@
 import { Suspense, startTransition, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { describeJobPolicy } from '../products/import/importTemplateRouter.ts'
+import { parseServerTimestampMs } from '../../utils/formatters.ts'
 import AlertTriangle from 'lucide-react/dist/esm/icons/alert-triangle.js'
 import CheckCircle2 from 'lucide-react/dist/esm/icons/check-circle-2.js'
 import FileDown from 'lucide-react/dist/esm/icons/file-down.js'
@@ -326,7 +327,12 @@ function dedupeJobsById(jobs: ImportJob[] = []): ImportJob[] {
 }
 
 function isRecent(job: ImportJob, maxAgeMs = 2 * 60 * 60 * 1000): boolean {
-  const stamp = Date.parse(String(job?.updated_at || job?.finished_at || job?.created_at || ''))
+  // parseServerTimestampMs, NOT bare Date.parse: the server writes
+  // timezone-less UTC ("2026-08-28 14:33:20"), which Date.parse reads as
+  // LOCAL time -- for a UTC+7 viewer every ACTIVE job instantly looked 7
+  // hours stale, so the "this import may have stopped -- safe to cancel"
+  // warning showed on jobs that were mid-apply and progressing fine (Y8).
+  const stamp = parseServerTimestampMs(String(job?.updated_at || job?.finished_at || job?.created_at || ''))
   if (!Number.isFinite(stamp)) return true
   return Date.now() - stamp <= maxAgeMs
 }

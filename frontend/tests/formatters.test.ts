@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
-import { fmtCount, fmtDate, fmtShort, fmtTime } from '../src/utils/formatters.ts'
+import fs from 'node:fs'
+import { fmtCount, fmtDate, fmtShort, fmtTime, parseServerTimestampMs } from '../src/utils/formatters.ts'
 
 let failed = 0
 
@@ -30,6 +31,20 @@ await runTest('short numeric formatters abbreviate values', () => {
   assert.equal(fmtShort(1200), '$1.2k')
   assert.equal(fmtShort(3_500_000), '$3.5M')
   assert.equal(fmtCount(1249), '1.2k')
+})
+
+await runTest('Y8: server timestamps parse as UTC regardless of the viewer timezone', () => {
+  // SQLite CURRENT_TIMESTAMP writes timezone-less UTC. A bare Date.parse
+  // reads that shape as LOCAL time, which made every active import job look
+  // hours stale to a UTC+7 viewer (the false "may have stopped" warning).
+  assert.equal(parseServerTimestampMs('2026-08-28 14:33:20'), Date.parse('2026-08-28T14:33:20Z'))
+  assert.equal(parseServerTimestampMs('2026-08-28T14:33:20Z'), Date.parse('2026-08-28T14:33:20Z'))
+  assert.equal(parseServerTimestampMs('2026-08-28T14:33:20+07:00'), Date.parse('2026-08-28T07:33:20Z'))
+  assert.ok(Number.isNaN(parseServerTimestampMs('')), 'empty input stays NaN for the caller to handle')
+  // The import tracker's staleness check must use the UTC-aware parser.
+  const trackerSource = fs.readFileSync(new URL('../src/components/shared/BackgroundImportTracker.tsx', import.meta.url), 'utf8')
+  assert.match(trackerSource, /parseServerTimestampMs\(String\(job\?\.updated_at/)
+  assert.doesNotMatch(trackerSource, /Date\.parse\(String\(job\?\.updated_at/)
 })
 
 if (failed > 0) {

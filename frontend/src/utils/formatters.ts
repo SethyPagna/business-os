@@ -23,6 +23,20 @@ function normalizeTimestampInput(raw: TimestampInput): string {
 }
 
 /**
+ * Epoch milliseconds for a server timestamp, treating a timezone-less value
+ * as UTC (SQLite's CURRENT_TIMESTAMP writes "YYYY-MM-DD HH:MM:SS" in UTC
+ * with no marker). A bare Date.parse on that shape is interpreted as LOCAL
+ * time, which made every server stamp look hours old to a UTC+7 viewer --
+ * the Y8 false "this import may have stopped" warning. NaN for unparseable
+ * input, so callers decide their own fallback.
+ */
+export function parseServerTimestampMs(raw: TimestampInput): number {
+  const normalized = normalizeTimestampInput(raw)
+  if (!normalized) return Number.NaN
+  return Date.parse(normalized)
+}
+
+/**
  * Format a UTC timestamp from the database into a human-readable local date+time string.
  * @param {string|Date} raw - Raw timestamp from DB
  * @returns {string}
