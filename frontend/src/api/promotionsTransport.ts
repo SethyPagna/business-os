@@ -52,11 +52,14 @@ export type PromotionRuleRow = Record<string, unknown> & {
 export type PromotionRuleWrite = {
   title?: string
   show_title?: boolean
-  rule_type: 'quantity_save' | 'percent_off' | 'fixed_off'
+  rule_type: 'quantity_save' | 'percent_off' | 'fixed_off' | 'spend_save' | 'quantity_percent' | 'next_item'
   min_quantity?: number
   save_usd?: number
   save_khr?: number
   percent_off?: number
+  min_spend_usd?: number
+  min_spend_khr?: number
+  label_style?: 'save' | 'get' | 'free'
   scope_type: 'products' | 'category' | 'brand'
   product_ids?: number[]
   category?: string

@@ -607,6 +607,8 @@ export default function PublicCatalogPage() {
   const [brandFilter, setBrandFilter] = useState<string[]>([])
   const [branchFilter, setBranchFilter] = useState<string[]>([])
   const [stockFilter, setStockFilter] = useState<string[]>([])
+  // G1b: the storefront's single promo facet -- "show only deals".
+  const [promoOnly, setPromoOnly] = useState(false)
   const [filtersOpen, setFiltersOpen] = useState(false)
   const [loading, setLoading] = useState(() => !(cachedPortal?.config || cachedPortal?.products?.length))
   const [refreshingProducts, setRefreshingProducts] = useState(false)
@@ -843,7 +845,7 @@ export default function PublicCatalogPage() {
 
   useEffect(() => {
     setProductPage(1)
-  }, [brandFilter, branchFilter, categoryFilter, deferredSearch, productInitial, stockFilter])
+  }, [brandFilter, branchFilter, categoryFilter, deferredSearch, productInitial, promoOnly, stockFilter])
 
   useEffect(() => {
     if (!config.showCatalog) return undefined
@@ -865,6 +867,7 @@ export default function PublicCatalogPage() {
       // buildPortalProductFilters), but dropping it here as well keeps a
       // stale selection from ever being sent in the first place.
       stockState: config.showStockStatus === false ? '' : stockFilter.join(','),
+      promo: promoOnly ? 'promoted' : '',
       initial: productInitial,
     }
     withLoaderTimeout(() => getCatalogApi().searchPortalCatalogProducts?.(params) || Promise.reject(new Error('Portal product search API unavailable')), 'Portal product search', PUBLIC_PORTAL_PRODUCT_SEARCH_TIMEOUT_MS)
@@ -921,7 +924,7 @@ export default function PublicCatalogPage() {
     return () => {
       invalidateTrackedRequest(productRequestRef)
     }
-  }, [brandFilter, branchFilter, categoryFilter, config.showCatalog, config.showStockStatus, deferredSearch, loading, productInitial, productPage, productPageSize, products.length, stockFilter])
+  }, [brandFilter, branchFilter, categoryFilter, config.showCatalog, config.showStockStatus, deferredSearch, loading, productInitial, productPage, productPageSize, products.length, promoOnly, stockFilter])
 
   useEffect(() => () => {
     aliveRef.current = false
@@ -946,7 +949,7 @@ export default function PublicCatalogPage() {
   const versionedBusinessLogo = withAssetVersion(displayConfig.businessLogo, displayConfig.businessLogo || displayConfig.businessName)
   const versionedBusinessCover = withAssetVersion(displayConfig.businessCover, displayConfig.businessCover || displayConfig.businessName)
   const selectedStockBranch = branchFilter[0] || 'all'
-  const portalActiveFilterCount = categoryFilter.length + brandFilter.length + branchFilter.length + (displayConfig.showStockStatus === false ? 0 : stockFilter.length) + (productInitial === 'all' ? 0 : 1)
+  const portalActiveFilterCount = categoryFilter.length + brandFilter.length + branchFilter.length + (displayConfig.showStockStatus === false ? 0 : stockFilter.length) + (productInitial === 'all' ? 0 : 1) + (promoOnly ? 1 : 0)
   const publicFaqItems = normalizeFaqItems(displayConfig.faqItems)
   const mapEmbedUrl = displayConfig.showGoogleMap && activeTab === 'about' ? normalizeGoogleMapsEmbed(displayConfig.googleMapsEmbed || '') : ''
   const socialLinks = [
@@ -1037,6 +1040,7 @@ export default function PublicCatalogPage() {
     setBrandFilter([])
     setBranchFilter([])
     setStockFilter([])
+    setPromoOnly(false)
     setProductInitial('all')
   }
   const openProductGallery = (product: CatalogProduct, startIndex = 0) => {
@@ -1236,6 +1240,8 @@ export default function PublicCatalogPage() {
         branchFilter={branchFilter}
         setBranchFilter={setBranchFilter}
         stockFilter={stockFilter}
+        promoOnly={promoOnly}
+        setPromoOnly={setPromoOnly}
         setStockFilter={setStockFilter}
         toggleFilterValue={toggleFilterValue}
         toggleFilterValues={toggleFilterValues}

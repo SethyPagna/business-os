@@ -17,6 +17,7 @@ import {
   type PromotionRuleWrite,
 } from '../../api/promotionsTransport.ts'
 import { searchProducts, getProductFilters, updateProduct } from '../../api/methods.ts'
+import { promotionAutoLabel, normalizePromotionRule } from '../../utils/promotionRules.ts'
 import { calculateProductDiscount, isProductDiscountActive } from '../../utils/pricing.ts'
 
 // Same minimal-context cast pattern as FeesPage/LoyaltyPointsPage --
@@ -47,11 +48,14 @@ type RuleDraft = {
   id: number | null
   title: string
   show_title: boolean
-  rule_type: 'quantity_save' | 'percent_off' | 'fixed_off'
+  rule_type: 'quantity_save' | 'percent_off' | 'fixed_off' | 'spend_save' | 'quantity_percent' | 'next_item'
   min_quantity: string
   save_usd: string
   save_khr: string
   percent_off: string
+  min_spend_usd: string
+  min_spend_khr: string
+  label_style: 'save' | 'get' | 'free'
   scope_type: 'products' | 'category' | 'brand'
   products: ProductLite[]
   category: string
@@ -65,6 +69,7 @@ type RuleDraft = {
 const EMPTY_RULE: RuleDraft = {
   id: null, title: '', show_title: true, rule_type: 'percent_off',
   min_quantity: '', save_usd: '', save_khr: '', percent_off: '',
+  min_spend_usd: '', min_spend_khr: '', label_style: 'save',
   scope_type: 'products', products: [], category: '', brand: '',
   badge_color: '#e11d48', starts_at: '', ends_at: '', is_active: true,
 }
@@ -90,13 +95,12 @@ function dateInputValue(value: unknown): string {
   return match ? match[1] : ''
 }
 
-function ruleSummary(row: PromotionRuleRow, t: (key: string, fallback?: string) => string): string {
+function ruleSummary(row: PromotionRuleRow): string {
+  // The kernel's auto-label IS the human summary -- one wording source
+  // (promotionAutoLabel) instead of a second copy that could drift.
   const rule = row.normalized
-  if (!rule) return t('promo_rule_invalid') || 'Invalid rule'
-  if (rule.rule_type === 'percent_off') return `${rule.percent_off}% ${t('promo_off') || 'off'}`
-  const amount = rule.save_usd > 0 ? `$${rule.save_usd}` : `៛${rule.save_khr}`
-  if (rule.rule_type === 'fixed_off') return `${amount} ${t('promo_off') || 'off'}`
-  return `${t('promo_buy') || 'Buy'} ${rule.min_quantity}+ ${t('promo_save') || 'save'} ${amount}`
+  if (!rule) return 'Invalid rule'
+  return promotionAutoLabel(rule)
 }
 
 function ruleScopeSummary(row: PromotionRuleRow, t: (key: string, fallback?: string) => string): string {
@@ -199,6 +203,9 @@ export default function PromotionsPage() {
       save_usd: rule.save_usd ? String(rule.save_usd) : '',
       save_khr: rule.save_khr ? String(rule.save_khr) : '',
       percent_off: rule.percent_off ? String(rule.percent_off) : '',
+      min_spend_usd: rule.min_spend_usd ? String(rule.min_spend_usd) : '',
+      min_spend_khr: rule.min_spend_khr ? String(rule.min_spend_khr) : '',
+      label_style: rule.label_style,
       scope_type: rule.scope_type,
       products: rule.product_ids.map((id) => ({ id, name: `#${id}` })),
       category: rule.category,
@@ -233,6 +240,9 @@ export default function PromotionsPage() {
       save_usd: Number(draft.save_usd) || 0,
       save_khr: Number(draft.save_khr) || 0,
       percent_off: Number(draft.percent_off) || 0,
+      min_spend_usd: Number(draft.min_spend_usd) || 0,
+      min_spend_khr: Number(draft.min_spend_khr) || 0,
+      label_style: draft.label_style,
       scope_type: draft.scope_type,
       product_ids: draft.products.map((p) => Number(p.id)),
       category: draft.category,
@@ -368,7 +378,7 @@ export default function PromotionsPage() {
                       )}
                     </div>
                     <p className="text-xs text-gray-500 truncate">
-                      {ruleSummary(row, t)} · {ruleScopeSummary(row, t)}
+                      {ruleSummary(row)} · {ruleScopeSummary(row, t)}
                       {rule?.starts_at ? ` · ${t('promo_from') || 'from'} ${fmtDate(rule.starts_at)}` : ''}
                       {rule?.ends_at ? ` · ${t('promo_until') || 'until'} ${fmtDate(rule.ends_at)}` : ''}
                     </p>
@@ -493,6 +503,9 @@ export default function PromotionsPage() {
                     { value: 'percent_off', label: t('promo_type_percent') || '% off' },
                     { value: 'fixed_off', label: t('promo_type_fixed') || 'Fixed amount off' },
                     { value: 'quantity_save', label: t('promo_type_quantity') || 'Buy ≥ X, save Y' },
+                    { value: 'quantity_percent', label: t('promo_type_quantity_percent') || 'Buy ≥ X, get % off' },
+                    { value: 'spend_save', label: t('promo_type_spend') || 'Spend ≥ X, save Y' },
+                    { value: 'next_item', label: t('promo_type_next_item') || 'Buy X, next item off' },
                   ]}
                 />
               </div>
@@ -503,23 +516,50 @@ export default function PromotionsPage() {
               </div>
             </div>
 
-            {draft.rule_type === 'percent_off' ? (
+            {(draft.rule_type === 'quantity_save' || draft.rule_type === 'quantity_percent' || draft.rule_type === 'next_item') && (
               <div>
-                <label className={labelCls}>{t('promo_percent_label') || 'Percent off (%)'}</label>
+                <label className={labelCls}>
+                  {draft.rule_type === 'next_item'
+                    ? (t('promo_buy_count') || 'Buy this many (the NEXT one gets the deal)')
+                    : (t('promo_min_qty') || 'Buy at least')}
+                </label>
+                <input className={inputCls} inputMode="numeric" value={draft.min_quantity}
+                  onChange={(event) => setDraft({ ...draft, min_quantity: event.target.value })} />
+              </div>
+            )}
+            {draft.rule_type === 'spend_save' && (
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className={labelCls}>{t('promo_min_spend_usd') || 'Spend at least (USD)'}</label>
+                  <input className={inputCls} inputMode="decimal" value={draft.min_spend_usd}
+                    onChange={(event) => setDraft({ ...draft, min_spend_usd: event.target.value })} />
+                </div>
+                <div>
+                  <label className={labelCls}>{t('promo_min_spend_khr') || 'Spend at least (KHR)'}</label>
+                  <input className={inputCls} inputMode="numeric" value={draft.min_spend_khr}
+                    onChange={(event) => setDraft({ ...draft, min_spend_khr: event.target.value })} />
+                </div>
+              </div>
+            )}
+            {(draft.rule_type === 'percent_off' || draft.rule_type === 'quantity_percent' || draft.rule_type === 'next_item') && (
+              <div>
+                <label className={labelCls}>
+                  {draft.rule_type === 'next_item'
+                    ? (t('promo_next_percent') || 'Next item: percent off (%) — leave 0 to use an amount')
+                    : (t('promo_percent_label') || 'Percent off (%)')}
+                </label>
                 <input className={inputCls} inputMode="decimal" value={draft.percent_off}
                   onChange={(event) => setDraft({ ...draft, percent_off: event.target.value })} />
               </div>
-            ) : (
-              <div className={`grid gap-2 ${draft.rule_type === 'quantity_save' ? 'grid-cols-3' : 'grid-cols-2'}`}>
-                {draft.rule_type === 'quantity_save' && (
-                  <div>
-                    <label className={labelCls}>{t('promo_min_qty') || 'Buy at least'}</label>
-                    <input className={inputCls} inputMode="numeric" value={draft.min_quantity}
-                      onChange={(event) => setDraft({ ...draft, min_quantity: event.target.value })} />
-                  </div>
-                )}
+            )}
+            {(draft.rule_type === 'quantity_save' || draft.rule_type === 'fixed_off' || draft.rule_type === 'spend_save' || draft.rule_type === 'next_item') && (
+              <div className="grid grid-cols-2 gap-2">
                 <div>
-                  <label className={labelCls}>{t('promo_save_usd') || 'Save (USD)'}</label>
+                  <label className={labelCls}>
+                    {draft.rule_type === 'next_item'
+                      ? (t('promo_next_amount_usd') || 'Next item: amount off (USD)')
+                      : (t('promo_save_usd') || 'Save (USD)')}
+                  </label>
                   <input className={inputCls} inputMode="decimal" value={draft.save_usd}
                     onChange={(event) => setDraft({ ...draft, save_usd: event.target.value })} />
                 </div>
@@ -531,6 +571,39 @@ export default function PromotionsPage() {
                 </div>
               </div>
             )}
+            {/* Wording style for the AUTO title ("save to get, can change
+                free or something -- same meaning, different wording") +
+                a live preview of exactly what customers will read. A
+                typed Title above always overrides the auto wording. */}
+            <div className="grid grid-cols-[auto_1fr] items-end gap-2">
+              <div>
+                <label className={labelCls}>{t('promo_label_style') || 'Label wording'}</label>
+                <AppSelect
+                  value={draft.label_style}
+                  onChange={(value: string) => setDraft({ ...draft, label_style: (value === 'get' || value === 'free') ? value : 'save' })}
+                  options={[
+                    { value: 'save', label: t('promo_style_save') || '“Save …”' },
+                    { value: 'get', label: t('promo_style_get') || '“Get … Off”' },
+                    { value: 'free', label: t('promo_style_free') || '“… Free”' },
+                  ]}
+                />
+              </div>
+              <div className="pb-1 text-xs text-gray-500 truncate">
+                {(t('promo_label_preview') || 'Shown as:')}{' '}
+                <span className="font-semibold text-gray-700 dark:text-gray-200">
+                  {draft.title.trim() || (() => {
+                    const preview = normalizePromotionRule({
+                      id: 1, rule_type: draft.rule_type, min_quantity: Number(draft.min_quantity) || 0,
+                      save_usd: Number(draft.save_usd) || 0, save_khr: Number(draft.save_khr) || 0,
+                      percent_off: Number(draft.percent_off) || 0,
+                      min_spend_usd: Number(draft.min_spend_usd) || 0, min_spend_khr: Number(draft.min_spend_khr) || 0,
+                      label_style: draft.label_style, scope_type: draft.scope_type, product_ids: '[1]', is_active: 1,
+                    })
+                    return preview ? promotionAutoLabel(preview) : ''
+                  })()}
+                </span>
+              </div>
+            </div>
 
             <div>
               <label className={labelCls}>{t('promo_scope') || 'Applies to'}</label>

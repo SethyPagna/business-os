@@ -191,6 +191,50 @@ runTest('repricePromotionCartLines never touches selling/special lines', () => {
 })
 
 // ---------------------------------------------------------------------------
+runTest('G1b types: spend_save crosses on line gross, quantity_percent on count', () => {
+  const spend = rule({ rule_type: 'spend_save', min_spend_usd: 50, save_usd: 5, percent_off: 0 })
+  assert.equal(evaluatePromotionPricing(product, 2, [spend], 4100).active, false, '40 < 50')
+  assert.equal(evaluatePromotionPricing(product, 3, [spend], 4100).line_total_usd, 55, '60 - 5')
+  const qtyPct = rule({ rule_type: 'quantity_percent', min_quantity: 2, percent_off: 10 })
+  assert.equal(evaluatePromotionPricing(product, 2, [qtyPct], 4100).line_total_usd, 36, '40 - 10%')
+})
+
+runTest('next_item across cart lines: the CHEAPEST item takes the cut, and it reverts when the partner leaves', () => {
+  const bogo = rule({ rule_type: 'next_item', min_quantity: 1, percent_off: 50, product_ids: '[7, 8]' })
+  const dear = {
+    ...product, id: 8, name: 'Dear', selling_price_usd: 30, selling_price_khr: 123000,
+    price_mode: 'promotion', quantity: 1, cart_line_id: 'dear',
+    applied_price_usd: 30, applied_price_khr: 123000, base_price_usd: 30, base_price_khr: 123000,
+  }
+  const cheap = {
+    ...product, id: 7, name: 'Cheap', selling_price_usd: 20, selling_price_khr: 82000,
+    price_mode: 'promotion', quantity: 1, cart_line_id: 'cheap',
+    applied_price_usd: 20, applied_price_khr: 82000, base_price_usd: 20, base_price_khr: 82000,
+  }
+  const { cart, changed } = repricePromotionCartLines([dear, cheap], [bogo], 4100)
+  assert.equal(changed, true)
+  const dearLine = cart.find((line) => line.cart_line_id === 'dear')
+  const cheapLine = cart.find((line) => line.cart_line_id === 'cheap')
+  assert.equal(dearLine?.applied_price_usd, 30, 'dear item stays full price ("only lowest of the two")')
+  assert.equal(cheapLine?.applied_price_usd, 10, 'cheap item gets 50% off')
+  assert.equal(String(cheapLine?.product_discount_label || ''), 'Deal', "the rule's typed Title wins over the auto-label")
+  // partner leaves -> the deal disengages and the price honestly restores
+  const solo = repricePromotionCartLines([{ ...cheapLine, quantity: 1 }], [bogo], 4100)
+  assert.equal(solo.cart[0].applied_price_usd, 20, 'no pair left, full price again')
+})
+
+runTest('auto-labels follow the wording style; badge.label carries them; free phrasing at 100%', () => {
+  const save = rule({ rule_type: 'quantity_save', min_quantity: 3, save_usd: 5, label_style: 'save', title: '' })
+  const get = rule({ rule_type: 'quantity_save', min_quantity: 3, save_usd: 5, label_style: 'get', title: '' })
+  const free = rule({ rule_type: 'next_item', min_quantity: 1, percent_off: 100, label_style: 'free', title: '' })
+  assert.equal(promotionBadgeForProduct(product, [save]).label, 'Buy 3+ Save $5')
+  assert.equal(promotionBadgeForProduct(product, [get]).label, 'Buy 3+ Get $5 Off')
+  assert.equal(promotionBadgeForProduct(product, [free]).label, 'Buy 1 Get 1 Free')
+  const hidden = rule({ rule_type: 'percent_off', percent_off: 20, show_title: 0, title: 'Secret' })
+  assert.equal(promotionBadgeForProduct(product, [hidden]).label, '', 'hidden title = no label text, price cut still applies')
+})
+
+// ---------------------------------------------------------------------------
 runTest('promotions filter section: states, one-active-chip, rule entries', () => {
   let value = 'all'
   const section = buildPromotionsFilterSection({

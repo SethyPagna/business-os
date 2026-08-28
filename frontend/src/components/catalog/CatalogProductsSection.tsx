@@ -107,6 +107,10 @@ type CatalogProductsSectionProps = {
   setBranchFilter: StringListSetter
   stockFilter: string[]
   setStockFilter: StringListSetter
+  // G1b: the one public promo facet ("only deals"); optional so the
+  // admin preview surface can omit it.
+  promoOnly?: boolean
+  setPromoOnly?: (value: boolean) => void
   toggleFilterValue: (currentValues: string[], setter: StringListSetter, value: string) => void
   // Optional: batch-select a whole "Main - Sub" hierarchical category group
   // in one tap (see utils/categoryGrouping.ts / PortalFilterCombobox's
@@ -204,6 +208,8 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
     setBranchFilter,
     stockFilter,
     setStockFilter,
+    promoOnly = false,
+    setPromoOnly,
     toggleFilterValue,
     toggleFilterValues,
     previewConfig,
@@ -317,6 +323,24 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
   // never drift apart.
   const renderFilterFields = () => (
     <>
+      {/* G1b: the storefront's ONE promo facet -- a single "only deals"
+          toggle. Deliberately no rule-by-rule or admin facets here
+          (supplier etc. never reach the portal -- standing surface rule). */}
+      {setPromoOnly ? (
+        <button
+          type="button"
+          onClick={() => setPromoOnly(!promoOnly)}
+          aria-pressed={promoOnly}
+          className={`mb-2 flex w-full items-center justify-between rounded-[1.1rem] px-3 py-2 text-xs font-bold uppercase tracking-wide ring-1 transition-colors ${
+            promoOnly
+              ? 'bg-rose-600 text-white ring-rose-600'
+              : 'bg-slate-50 text-gray-500 ring-slate-100 hover:text-rose-600 dark:bg-neutral-800 dark:text-neutral-400 dark:ring-neutral-700'
+          }`}
+        >
+          <span>{copy('promotionsFilter', 'Promotions only')}</span>
+          <span aria-hidden="true">{promoOnly ? '✓' : ''}</span>
+        </button>
+      ) : null}
       <div className="rounded-[1.1rem] bg-slate-50 p-2 ring-1 ring-slate-100 dark:bg-neutral-800 dark:ring-neutral-700">
         <div className="grid grid-cols-[5rem_minmax(0,1fr)] items-start gap-2 sm:grid-cols-[5.6rem_minmax(0,1fr)] lg:grid-cols-1 lg:gap-1">
           <div className="min-w-0 pt-1.5 text-[10px] font-bold uppercase tracking-wide text-gray-500 dark:text-neutral-400 lg:pt-0">

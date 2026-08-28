@@ -167,7 +167,9 @@ const sections = buildProductFilterSections({
 // construct itself -- mockCreatedSection above stands in for it).
 assert.deepEqual(
   sections.map((section) => section.id),
-  ['created', 'branch', 'group', 'stock', 'category', 'brand'],
+  // G1b order: everyday facets first (availability trio, category, brand),
+  // range/diagnostic controls (created) after them.
+  ['branch', 'group', 'stock', 'category', 'brand', 'created'],
   'filter sections preserve Products menu ordering',
 )
 assert.equal(sectionOptions(requireSection(sections, 'branch'))[2]?.active, true)

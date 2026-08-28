@@ -11,8 +11,21 @@
 // for the plain per-product discount path; the semantics here are kept
 // identical to it (see the kernel's own comments).
 
-export type PromotionRuleType = 'quantity_save' | 'percent_off' | 'fixed_off'
+export type PromotionRuleType =
+  | 'quantity_save'    // buy >= X items, save $Y off the line
+  | 'percent_off'      // Z% off qualifying products
+  | 'fixed_off'        // $Y off each qualifying unit
+  | 'spend_save'       // spend >= $X on a qualifying line, save $Y
+  | 'quantity_percent' // buy >= X items, get Z% off the line
+  | 'next_item'        // buy X items, the NEXT one is Z%/$Y off -- the
+                       // CHEAPEST item of each complete group takes the
+                       // cut ("only lowest of the two"), repeating per
+                       // group, evaluated cart-wide across the scope
 export type PromotionScopeType = 'products' | 'category' | 'brand'
+// Wording family for AUTO-generated titles (a typed title overrides):
+// 'save' -> "Buy 3+ Save $5" | 'get' -> "Buy 3+ Get $5 Off" | 'free' ->
+// "Buy 1 Get 1 Free" when the math genuinely makes the item free.
+export type PromotionLabelStyle = 'save' | 'get' | 'free'
 
 export interface PromotionRule {
   id: number
@@ -24,6 +37,9 @@ export interface PromotionRule {
   save_khr: number
   percent_off: number
   scope_type: PromotionScopeType
+  min_spend_usd: number
+  min_spend_khr: number
+  label_style: PromotionLabelStyle
   product_ids: number[]
   category: string
   brand: string
@@ -35,7 +51,8 @@ export interface PromotionRule {
 
 type ProductLike = Record<string, unknown>
 
-const RULE_TYPES = new Set<string>(['quantity_save', 'percent_off', 'fixed_off'])
+const RULE_TYPES = new Set<string>(['quantity_save', 'percent_off', 'fixed_off', 'spend_save', 'quantity_percent', 'next_item'])
+const LABEL_STYLES = new Set<string>(['save', 'get', 'free'])
 const SCOPE_TYPES = new Set<string>(['products', 'category', 'brand'])
 const DEFAULT_BADGE_COLOR = '#e11d48'
 
@@ -96,6 +113,9 @@ export function normalizePromotionRule(row: Record<string, unknown> | null | und
     save_khr: Math.max(0, toFiniteNumber(row.save_khr, 0)),
     percent_off: Math.min(100, Math.max(0, toFiniteNumber(row.percent_off, 0))),
     scope_type: scopeType,
+    min_spend_usd: money(row.min_spend_usd, 0),
+    min_spend_khr: Math.max(0, toFiniteNumber(row.min_spend_khr, 0)),
+    label_style: LABEL_STYLES.has(String(row.label_style)) ? String(row.label_style) as PromotionLabelStyle : 'save',
     product_ids: productIds,
     category: normText(row.category),
     brand: normText(row.brand),
@@ -131,6 +151,9 @@ export function isRuleActive(rule: PromotionRule | null | undefined, now: Date |
   if (rule.rule_type === 'percent_off' && rule.percent_off <= 0) return false
   if (rule.rule_type === 'fixed_off' && rule.save_usd <= 0 && rule.save_khr <= 0) return false
   if (rule.rule_type === 'quantity_save' && (rule.min_quantity < 1 || (rule.save_usd <= 0 && rule.save_khr <= 0))) return false
+  if (rule.rule_type === 'spend_save' && ((rule.min_spend_usd <= 0 && rule.min_spend_khr <= 0) || (rule.save_usd <= 0 && rule.save_khr <= 0))) return false
+  if (rule.rule_type === 'quantity_percent' && (rule.min_quantity < 1 || rule.percent_off <= 0)) return false
+  if (rule.rule_type === 'next_item' && (rule.min_quantity < 1 || (rule.percent_off <= 0 && rule.save_usd <= 0 && rule.save_khr <= 0))) return false
   if (rule.scope_type === 'products' && rule.product_ids.length === 0) return false
   if (rule.scope_type === 'category' && !rule.category) return false
   if (rule.scope_type === 'brand' && !rule.brand) return false
@@ -289,6 +312,48 @@ export function evaluatePromotionPricing(
         lineDiscountUsd: money(lineUsd), lineDiscountKhr: money(lineKhr),
         percentOff: lineTotal > 0 ? Math.round((lineUsd / lineTotal) * 100) : 0,
       })
+    } else if (rule.rule_type === 'spend_save') {
+      // Spend threshold: the USD threshold decides when set; otherwise the
+      // KHR one. Benefit is a flat line saving, clamped at the line gross.
+      const grossUsd = money(sellingUsd * qty)
+      const grossKhr = money(sellingKhr * qty)
+      const crossed = rule.min_spend_usd > 0 ? grossUsd >= rule.min_spend_usd : grossKhr >= rule.min_spend_khr
+      if (crossed) {
+        const lineUsd = Math.min(rule.save_usd, grossUsd)
+        const lineKhr = Math.min(rule.save_khr || money(rule.save_usd * (toFiniteNumber(exchangeRate, 0) || 4100)), grossKhr)
+        candidates.push({
+          source: 'rule', rule,
+          lineDiscountUsd: money(lineUsd), lineDiscountKhr: money(lineKhr),
+          percentOff: grossUsd > 0 ? Math.round((lineUsd / grossUsd) * 100) : 0,
+        })
+      }
+    } else if (rule.rule_type === 'quantity_percent' && qty >= rule.min_quantity) {
+      const perUnitUsd = money(sellingUsd * (rule.percent_off / 100))
+      const perUnitKhr = money(sellingKhr * (rule.percent_off / 100))
+      candidates.push({ source: 'rule', rule, lineDiscountUsd: money(perUnitUsd * qty), lineDiscountKhr: money(perUnitKhr * qty), percentOff: rule.percent_off })
+    } else if (rule.rule_type === 'next_item') {
+      // Per-LINE evaluation of "buy N get the next one off": every
+      // complete group of (N+1) units on THIS line discounts one unit --
+      // same-product units share one price, so the cheapest-of-the-group
+      // rule is trivially satisfied here. CROSS-line pairing (different
+      // products in the rule's scope; the cheapest of each mixed group
+      // takes the cut) lives in evaluateCartPromotionAdjustments below --
+      // POS uses that; this per-line half keeps single-line carts, the
+      // portal and grids correct on their own.
+      const groupSize = rule.min_quantity + 1
+      const groups = Math.floor(qty / groupSize)
+      if (groups > 0) {
+        const perHitUsd = rule.percent_off > 0 ? money(sellingUsd * (rule.percent_off / 100)) : Math.min(rule.save_usd, sellingUsd)
+        const perHitKhr = rule.percent_off > 0
+          ? money(sellingKhr * (rule.percent_off / 100))
+          : Math.min(rule.save_khr || money(rule.save_usd * (toFiniteNumber(exchangeRate, 0) || 4100)), sellingKhr)
+        const lineTotal = sellingUsd * qty
+        candidates.push({
+          source: 'rule', rule,
+          lineDiscountUsd: money(perHitUsd * groups), lineDiscountKhr: money(perHitKhr * groups),
+          percentOff: lineTotal > 0 ? Math.round(((perHitUsd * groups) / lineTotal) * 100) : 0,
+        })
+      }
     }
   }
 
@@ -329,6 +394,61 @@ export function evaluatePromotionPricing(
   }
 }
 
+// Money text for auto-labels: USD amount when set, else KHR.
+function amountText(usd: number, khr: number): string {
+  if (usd > 0) return '$' + String(usd)
+  return '\u17DB' + String(khr)
+}
+
+// AUTO-generated title for a rule, in the operator's chosen wording style
+// ('save' / 'get' / 'free' -- "basically same meaning just different
+// wording styles"). A typed title always overrides (see ruleLabel);
+// 'free' falls back to 'get' phrasing when the math isn't a genuine
+// 100% freebie.
+export function promotionAutoLabel(rule: PromotionRule | null | undefined): string {
+  if (!rule) return ''
+  const style = rule.label_style
+  const amount = amountText(rule.save_usd, rule.save_khr)
+  const pct = rule.percent_off
+  switch (rule.rule_type) {
+    case 'percent_off':
+      return style === 'save' ? 'Save ' + pct + '%' : pct + '% Off'
+    case 'fixed_off':
+      return style === 'save' ? 'Save ' + amount : amount + ' Off'
+    case 'quantity_save':
+      return style === 'save'
+        ? 'Buy ' + rule.min_quantity + '+ Save ' + amount
+        : 'Buy ' + rule.min_quantity + '+ Get ' + amount + ' Off'
+    case 'spend_save': {
+      const threshold = amountText(rule.min_spend_usd, rule.min_spend_khr)
+      return style === 'save'
+        ? 'Spend ' + threshold + ' Save ' + amount
+        : 'Spend ' + threshold + ' Get ' + amount + ' Off'
+    }
+    case 'quantity_percent':
+      return style === 'save'
+        ? 'Buy ' + rule.min_quantity + '+ Save ' + pct + '%'
+        : 'Buy ' + rule.min_quantity + '+ Get ' + pct + '% Off'
+    case 'next_item': {
+      if (style === 'free' && pct >= 100) return 'Buy ' + rule.min_quantity + ' Get 1 Free'
+      const benefit = pct > 0 ? pct + '% Off' : amount + ' Off'
+      return style === 'save'
+        ? 'Buy ' + rule.min_quantity + ' Save ' + (pct > 0 ? pct + '%' : amount) + ' On Next'
+        : 'Buy ' + rule.min_quantity + ' Get Next ' + benefit
+    }
+    default:
+      return ''
+  }
+}
+
+// Display text for a winning rule: the typed Title when shown, the
+// auto-label otherwise -- and nothing at all when the operator hid the
+// title (the price cut itself still shows wherever prices render).
+function ruleLabel(rule: PromotionRule): string {
+  if (!rule.show_title) return ''
+  return rule.title || promotionAutoLabel(rule)
+}
+
 export interface PromotionBadge {
   active: boolean
   // 'price' badges change the displayed price at quantity 1;
@@ -342,6 +462,10 @@ export interface PromotionBadge {
   min_quantity: number
   save_usd: number
   save_khr: number
+  // Display-ready text: the typed Title when shown, else the style-worded
+  // auto-label; '' when the operator hid the title (or the winning benefit
+  // is the product's own discount with no label).
+  label: string
 }
 
 // What a product GRID (Products page, POS grid, portal card) shows before
@@ -355,28 +479,40 @@ export function promotionBadgeForProduct(
 ): PromotionBadge {
   const none: PromotionBadge = {
     active: false, kind: null, title: '', show_title: false,
-    badge_color: DEFAULT_BADGE_COLOR, percent_off: 0, min_quantity: 0, save_usd: 0, save_khr: 0,
+    badge_color: DEFAULT_BADGE_COLOR, percent_off: 0, min_quantity: 0, save_usd: 0, save_khr: 0, label: '',
   }
   if (!product) return none
   const atOne = evaluatePromotionPricing(product, 1, rules, 4100, now)
   if (atOne.active) {
+    const winningRule = atOne.rule_id != null ? rules.find((rule) => rule.id === atOne.rule_id) || null : null
     return {
       active: true, kind: 'price', title: atOne.title, show_title: atOne.show_title,
       badge_color: atOne.badge_color, percent_off: atOne.percent_off,
       min_quantity: 0, save_usd: atOne.line_discount_usd, save_khr: atOne.line_discount_khr,
+      label: winningRule ? ruleLabel(winningRule) : (atOne.show_title ? atOne.title : ''),
     }
   }
+  // Not-yet-earned deals advertise as hints -- every threshold type, not
+  // just quantity_save: a spend threshold, a buy-X-percent deal and a
+  // buy-N-get-next deal must all be visible on the card, not a checkout
+  // surprise. Best hint = biggest save amount, then biggest percent.
   let hint: PromotionRule | null = null
   for (const rule of rules) {
-    if (rule.rule_type !== 'quantity_save') continue
+    if (rule.rule_type !== 'quantity_save' && rule.rule_type !== 'quantity_percent' && rule.rule_type !== 'next_item' && rule.rule_type !== 'spend_save') continue
     if (!isRuleActive(rule, now) || !ruleAppliesToProduct(rule, product)) continue
-    if (!hint || rule.save_usd > hint.save_usd || (rule.save_usd === hint.save_usd && rule.save_khr > hint.save_khr)) hint = rule
+    if (
+      !hint
+      || rule.save_usd > hint.save_usd
+      || (rule.save_usd === hint.save_usd && rule.percent_off > hint.percent_off)
+      || (rule.save_usd === hint.save_usd && rule.percent_off === hint.percent_off && rule.save_khr > hint.save_khr)
+    ) hint = rule
   }
   if (!hint) return none
   return {
     active: true, kind: 'quantity_hint', title: hint.title, show_title: hint.show_title,
-    badge_color: hint.badge_color, percent_off: 0,
+    badge_color: hint.badge_color, percent_off: hint.percent_off,
     min_quantity: hint.min_quantity, save_usd: hint.save_usd, save_khr: hint.save_khr,
+    label: ruleLabel(hint),
   }
 }
 
@@ -402,4 +538,125 @@ export function partitionPromotedFirst<T extends ProductLike>(
     (isProductPromoted(product, rules, now) ? promoted : rest).push(product)
   }
   return [...promoted, ...rest]
+}
+
+// ---------------------------------------------------------------------------
+// Cart-level evaluation (POS). Per-line rules evaluate line-by-line;
+// next_item rules pair units ACROSS every line their scope reaches:
+// units sort by price DESC, each complete group of (min_quantity+1)
+// units discounts its CHEAPEST unit ("only lowest of the two gets the
+// discount" -- user rule), repeating per group. Each line then takes its
+// single best benefit -- its per-line winner or its share of a next_item
+// pairing -- never stacked.
+
+export interface PromotionCartLine {
+  line_id: string
+  product: ProductLike
+  quantity: number
+}
+
+export interface CartLineAdjustment {
+  line_id: string
+  active: boolean
+  rule_id: number | null
+  rule_type: PromotionRuleType | 'product_discount' | null
+  label: string
+  badge_color: string
+  unit_price_usd: number
+  unit_price_khr: number
+  line_discount_usd: number
+  line_discount_khr: number
+}
+
+function nextItemAllocations(
+  lines: readonly PromotionCartLine[],
+  rule: PromotionRule,
+  exchangeRate: number,
+): Map<string, { usd: number; khr: number }> {
+  const out = new Map<string, { usd: number; khr: number }>()
+  type Unit = { line_id: string; usd: number; khr: number }
+  const units: Unit[] = []
+  for (const line of lines) {
+    if (!ruleAppliesToProduct(rule, line.product)) continue
+    const unitUsd = money(line.product?.selling_price_usd)
+    const unitKhr = money(line.product?.selling_price_khr || unitUsd * (toFiniteNumber(exchangeRate, 0) || 4100))
+    const qty = Math.max(0, Math.floor(toFiniteNumber(line.quantity, 0)))
+    for (let i = 0; i < qty; i++) units.push({ line_id: line.line_id, usd: unitUsd, khr: unitKhr })
+  }
+  const groupSize = rule.min_quantity + 1
+  if (units.length < groupSize) return out
+  // The user's "only lowest of the two gets the discount", read the
+  // merchant-safe way the big carts read it too: the number of EARNED
+  // hits is floor(units / (N+1)), and those hits land on the CHEAPEST
+  // qualifying units overall -- the shopper pays full price for the
+  // dearest items, never earns the cut on them.
+  units.sort((a, b) => a.usd - b.usd || a.khr - b.khr)
+  const hits = Math.floor(units.length / groupSize)
+  for (let g = 0; g < hits; g++) {
+    const cheapest = units[g]
+    const cutUsd = rule.percent_off > 0 ? money(cheapest.usd * (rule.percent_off / 100)) : Math.min(rule.save_usd, cheapest.usd)
+    const cutKhr = rule.percent_off > 0
+      ? money(cheapest.khr * (rule.percent_off / 100))
+      : Math.min(rule.save_khr || money(rule.save_usd * (toFiniteNumber(exchangeRate, 0) || 4100)), cheapest.khr)
+    const bucket = out.get(cheapest.line_id) || { usd: 0, khr: 0 }
+    bucket.usd = money(bucket.usd + cutUsd)
+    bucket.khr = money(bucket.khr + cutKhr)
+    out.set(cheapest.line_id, bucket)
+  }
+  return out
+}
+
+export function evaluateCartPromotionAdjustments(
+  lines: readonly PromotionCartLine[] = [],
+  rules: readonly PromotionRule[] = [],
+  exchangeRate = 4100,
+  now: Date | string | number = new Date(),
+): Map<string, CartLineAdjustment> {
+  const result = new Map<string, CartLineAdjustment>()
+  const activeRules = rules.filter((rule) => isRuleActive(rule, now))
+  const perLineRules = activeRules.filter((rule) => rule.rule_type !== 'next_item')
+  const nextItemRules = activeRules.filter((rule) => rule.rule_type === 'next_item')
+  const pairings = nextItemRules.map((rule) => ({ rule, allocation: nextItemAllocations(lines, rule, exchangeRate) }))
+
+  for (const line of lines) {
+    const qty = Math.max(1, toFiniteNumber(line.quantity, 1))
+    const sellingUsd = money(line.product?.selling_price_usd)
+    const sellingKhr = money(line.product?.selling_price_khr || sellingUsd * (toFiniteNumber(exchangeRate, 0) || 4100))
+    const grossUsd = money(sellingUsd * qty)
+    const grossKhr = money(sellingKhr * qty)
+
+    const perLine = evaluatePromotionPricing(line.product, qty, perLineRules, exchangeRate, now)
+    let best: { usd: number; khr: number; rule: PromotionRule | null; fromProductDiscount: boolean } = perLine.active
+      ? {
+          usd: perLine.line_discount_usd,
+          khr: perLine.line_discount_khr,
+          rule: perLine.rule_id != null ? perLineRules.find((rule) => rule.id === perLine.rule_id) || null : null,
+          fromProductDiscount: perLine.source === 'product_discount',
+        }
+      : { usd: 0, khr: 0, rule: null, fromProductDiscount: false }
+    for (const pairing of pairings) {
+      const share = pairing.allocation.get(line.line_id)
+      if (!share) continue
+      if (share.usd > best.usd || (share.usd === best.usd && share.khr > best.khr)) {
+        best = { usd: share.usd, khr: share.khr, rule: pairing.rule, fromProductDiscount: false }
+      }
+    }
+
+    const lineDiscountUsd = Math.min(best.usd, grossUsd)
+    const lineDiscountKhr = Math.min(best.khr, grossKhr)
+    const active = lineDiscountUsd > 0 || lineDiscountKhr > 0
+    result.set(line.line_id, {
+      line_id: line.line_id,
+      active,
+      rule_id: best.rule ? best.rule.id : null,
+      rule_type: !active ? null : best.rule ? best.rule.rule_type : (best.fromProductDiscount ? 'product_discount' : null),
+      label: !active ? '' : best.rule ? ruleLabel(best.rule) : (perLine.show_title ? perLine.title : ''),
+      badge_color: best.rule ? best.rule.badge_color : (active ? perLine.badge_color : DEFAULT_BADGE_COLOR),
+      unit_price_usd: active ? money(Math.max(0, grossUsd - lineDiscountUsd) / qty) : sellingUsd,
+      unit_price_khr: active ? money(Math.max(0, grossKhr - lineDiscountKhr) / qty) : sellingKhr,
+      line_discount_usd: active ? lineDiscountUsd : 0,
+      line_discount_khr: active ? lineDiscountKhr : 0,
+    })
+  }
+  return result
 }

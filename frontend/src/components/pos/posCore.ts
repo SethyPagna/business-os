@@ -1,5 +1,5 @@
 import { calculateProductDiscount, normalizePriceValue } from '../../utils/pricing.ts'
-import { evaluatePromotionPricing, type PromotionRule } from '../../utils/promotionRules.ts'
+import { evaluatePromotionPricing, evaluateCartPromotionAdjustments, type PromotionRule } from '../../utils/promotionRules.ts'
 import { buildProductGroups, compareProductsByNameBranchPriceBarcode } from '../../utils/productGrouping.ts'
 import type { ProductRecord as ProductGroupRecord } from '../../utils/productGrouping.ts'
 import { aggregateInitialOptions } from '../../utils/initials.ts'
@@ -352,31 +352,42 @@ export function resolveCartPriceValues(
   }
 }
 
-// G1: quantity-threshold rules ("buy >= X save Y") change a line's price
-// when its QUANTITY crosses the threshold, not just when it's added -- so
-// after any cart mutation, every 'promotion'-mode line re-evaluates the
-// kernel at its current quantity. Pure: returns the same array instance
-// when nothing changed so callers can patch state without render loops.
-// Lines in other price modes (selling/special, manual price edits) are
-// never touched.
+// G1/G1b: promotion-mode lines re-evaluate on EVERY cart mutation --
+// quantity thresholds engage/disengage, and next_item rules pair units
+// ACROSS lines (buy N, the CHEAPEST item of each complete group takes
+// the cut -- the user's "only lowest of the two" rule), so the whole
+// promotion-mode subset evaluates as one cart through the kernel's
+// evaluateCartPromotionAdjustments. Pure: returns the same array
+// instance when nothing changed so callers can patch state without
+// render loops. Lines in other price modes (selling/special, manual
+// price edits) are never touched and never join the pairing pool.
 export function repricePromotionCartLines(
   cart: readonly ProductRecord[] = [],
   promotionRules: readonly PromotionRule[] = [],
   exchangeRate = 0,
 ): { cart: ProductRecord[]; changed: boolean } {
+  const list = Array.isArray(cart) ? cart : []
+  const promoLines = list
+    .filter((item) => String(item?.price_mode || 'selling') === 'promotion')
+    .map((item) => ({
+      line_id: getCartLineId(item),
+      product: item as Record<string, unknown>,
+      quantity: Math.max(1, Number((item as Record<string, unknown>).quantity) || 1),
+    }))
+  const adjustments = evaluateCartPromotionAdjustments(promoLines, promotionRules, exchangeRate || 4100)
   let changed = false
-  const next = (Array.isArray(cart) ? cart : []).map((item) => {
+  const next = list.map((item) => {
     if (String(item?.price_mode || 'selling') !== 'promotion') return item
-    const quantity = Math.max(1, Number((item as Record<string, unknown>).quantity) || 1)
-    const evaluation = evaluatePromotionPricing(item, quantity, promotionRules, exchangeRate || 4100)
+    const adjustment = adjustments.get(getCartLineId(item))
+    if (!adjustment) return item
     const sellingUsd = normalizePriceValue(item?.selling_price_usd || 0, 0)
     const sellingKhr = normalizePriceValue(item?.selling_price_khr || 0, 0)
     // Nothing active any more (rule expired/deleted, quantity fell under
-    // the threshold with no other benefit) -> the line honestly returns
-    // to full selling price rather than keeping a stale cut.
-    const unitUsd = evaluation.active ? evaluation.unit_price_usd : sellingUsd
-    const unitKhr = evaluation.active ? evaluation.unit_price_khr : sellingKhr
-    const label = evaluation.active && evaluation.show_title ? evaluation.title : ''
+    // the threshold, the pairing partner left the cart) -> the line
+    // honestly returns to full selling price, never keeping a stale cut.
+    const unitUsd = adjustment.active ? adjustment.unit_price_usd : sellingUsd
+    const unitKhr = adjustment.active ? adjustment.unit_price_khr : sellingKhr
+    const label = adjustment.active ? adjustment.label : ''
     const current = item as Record<string, unknown>
     if (
       normalizePriceValue(current.applied_price_usd, -1) === unitUsd
@@ -390,11 +401,11 @@ export function repricePromotionCartLines(
       applied_price_khr: unitKhr,
       base_price_usd: unitUsd,
       base_price_khr: unitKhr,
-      product_discount_type: !evaluation.active
+      product_discount_type: !adjustment.active
         ? current.product_discount_type
-        : evaluation.rule_type === 'product_discount'
+        : adjustment.rule_type === 'product_discount'
           ? String(current.discount_type || 'percent')
-          : String(evaluation.rule_type || 'percent'),
+          : String(adjustment.rule_type || 'percent'),
       product_discount_label: label,
       product_discount_usd: Math.max(0, normalizePriceValue(sellingUsd - unitUsd, 0)),
       product_discount_khr: Math.max(0, normalizePriceValue(sellingKhr - unitKhr, 0)),

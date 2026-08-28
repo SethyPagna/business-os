@@ -344,17 +344,10 @@ export function buildProductFilterSections({
     // than the old client-only year/month picker this function used to
     // build inline against product.created_at -- see progress.md's
     // "Created section reworked to filter by batch date" item.
-    createdSection ? createdSection : null,
-    // AND/OR search-mode section (see searchModeSection's own comment
-    // above) -- right after Created, before Availability/Category, same
-    // splice point as the standalone button used to sit at (right next to
-    // the search box, which is directly above this menu).
-    searchModeSection ? searchModeSection : null,
-    // Merged Branch/Groups/Stock "Availability" section when the .tsx
-    // caller built one (see components/shared/AvailabilityFilterOptions.tsx)
-    // -- covers all three, so the separate sections below are skipped.
-    // Falls back to those three separate sections when not supplied (e.g.
-    // the plain-node test harness, which can't construct the JSX render).
+    // G1b order: the facets people reach for daily lead (Availability,
+    // Category, Brand, Promotions); range/diagnostic/advanced controls
+    // (Created, Issues, Search mode) sit at the end -- "reorganize the
+    // filters, make it smart and easy to use" (user, Aug 28).
     availabilitySection ? availabilitySection : branches.length > 1 ? {
       id: 'branch',
       label: t('branch') || 'Branch',
@@ -391,8 +384,6 @@ export function buildProductFilterSections({
     // "Issues" quick filter -- see components/shared/IssuesFilterOptions.tsx
     // for the section itself. No non-JSX fallback (same as createdSection/
     // searchModeSection): omitted entirely when not supplied.
-    issuesSection ? issuesSection : null,
-    promotionsSection ? promotionsSection : null,
     categories.length ? {
       id: 'category',
       label: t('category') || 'Category',
@@ -433,6 +424,19 @@ export function buildProductFilterSections({
     // 'supplier' section removed from the filter menu (see comment above
     // 'created' section) -- suppliers/supplierFilter/setSupplierFilter
     // params stay for countActiveProductFilters and the export-menu
-    // "filtered supplier" item, just no longer rendered here.
+    // "filtered supplier" item, just no longer rendered here.    promotionsSection ? promotionsSection : null,
+    createdSection ? createdSection : null,
+    // AND/OR search-mode section (see searchModeSection's own comment
+    // above) -- right after Created, before Availability/Category, same
+    // splice point as the standalone button used to sit at (right next to
+    // the search box, which is directly above this menu).
+    issuesSection ? issuesSection : null,
+    searchModeSection ? searchModeSection : null,
+    // Merged Branch/Groups/Stock "Availability" section when the .tsx
+    // caller built one (see components/shared/AvailabilityFilterOptions.tsx)
+    // -- covers all three, so the separate sections below are skipped.
+    // Falls back to those three separate sections when not supplied (e.g.
+    // the plain-node test harness, which can't construct the JSX render).
+
   ].filter(Boolean) as FilterSection[]
 }
