@@ -1133,29 +1133,22 @@ export default function Dashboard() {
       // into this card (its standalone card showed a single row).
       info: `${translateOr('dash_info_revenue', "Money actually kept from sales in this period: gross sales, minus discounts and refunds.")}
 
-${translateOr('revenue_short', 'Revenue')} ${fmtUSD(aRevenue)} = ${translateOr('gross_revenue', 'Gross')} ${fmtUSD(aGrossSales)} − ${translateOr('discounts', 'Discounts')} ${fmtUSD(aDiscounts)}
-${translateOr('gross_profit', 'Gross profit')} ${fmtUSD(aRevenue - aCost)} = ${translateOr('revenue_short', 'Revenue')} ${fmtUSD(aRevenue)} − ${translateOr('cogs', 'COGS')} ${fmtUSD(aCost)}`,
+${translateOr('revenue_short', 'Revenue')} ${fmtUSD(aRevenue)} = ${translateOr('gross_revenue', 'Gross')} ${fmtUSD(aGrossSales)} − ${translateOr('discounts', 'Discounts')} ${fmtUSD(aDiscounts)}`,
       label: translateOr('revenue', 'Revenue'),
       value: fmtUSD(aRevenue),
       sub: `${grossShortLabel} ${fmtUSD(aGrossSales)}`,
       color: 'text-green-600',
       trend: calcTrend(aRevenue, aPrevRevenue),
+      // Slimmed (user, Aug 29 -- "too many folded stats inside, i want it
+      // less"): the core money-in story only. COGS + Gross profit live in
+      // the Profit card; the delivery lines moved to their own outer
+      // Delivery card below (which also makes the outer count EVEN at 8).
       details: [
         { label: translateOr('revenue', 'Net revenue'), value: fmtUSD(aRevenue) },
-        { label: translateOr('cogs', 'COGS'), value: fmtUSD(aCost) },
-        { label: `${translateOr('gross_profit', 'Gross profit')} (= ${translateOr('revenue_short', 'Revenue')} − ${translateOr('cogs', 'COGS')})`, value: fmtUSD(aRevenue - aCost) },
         { label: translateOr('gross_revenue', 'Gross revenue'), value: fmtUSD(aGrossSales) },
         { label: translateOr('discounts', 'Discounts'), value: fmtUSD(aDiscounts) },
         { label: translateOr('total_refunded', 'Refunds'), value: fmtUSD(aRefundUsd) },
         { label: translateOr('tax_collected', 'Tax'), value: fmtUSD(aTax) },
-        { label: translateOr('delivery_fees', 'Delivery fees'), value: fmtUSD(aDelivery) },
-        // P6: what delivery ACTUALLY cost (courier money out) + the margin
-        // over what customers were charged. Staff-only drill lines.
-        {
-          label: translateOr('delivery_actual_cost', 'Actual delivery cost'),
-          value: `${fmtUSD(aDeliveryActual)}${aDeliverySales > 0 && aDeliveryActualCount < aDeliverySales ? ` (${aDeliveryActualCount}/${aDeliverySales} ${translateOr('recorded_short', 'recorded')})` : ''}`,
-        },
-        { label: translateOr('delivery_margin', 'Delivery margin'), value: fmtUSD(aDeliveryMargin) },
       ],
     },
     {
@@ -1225,7 +1218,37 @@ ${translateOr('net_revenue_after_refunds', 'Net after refunds')} ${fmtUSD(aReven
         { label: translateOr('business_loss', 'Business loss'), value: fmtUSD(aSupplierLossUsd) },
       ],
     },
+    // Promoted to its own outer card (user, Aug 29): pulled out of Revenue's
+    // folded list so Revenue reads less AND the outer count is even (8). The
+    // customer-charged fee is the headline; actual courier cost + margin +
+    // store-absorbed delivery are the drill (P6 -- staff-only, never on
+    // receipts, and cost never touches Profit).
+    {
+      id: 'delivery',
+      info: `${translateOr('dash_info_delivery', "Delivery in this period: what customers were charged, what the couriers actually cost, and the margin between them.")}
+
+${translateOr('delivery_margin', 'Delivery margin')} ${fmtUSD(aDeliveryMargin)} = ${translateOr('delivery_fees', 'Delivery fees')} ${fmtUSD(aDelivery)} − ${translateOr('delivery_actual_cost', 'Actual delivery cost')} ${fmtUSD(aDeliveryActual)}`,
+      label: translateOr('delivery', 'Delivery'),
+      value: fmtUSD(aDelivery),
+      color: 'text-violet-600',
+      sub: `${translateOr('margin_short', 'Margin')} ${fmtUSD(aDeliveryMargin)}`,
+      details: [
+        { label: translateOr('delivery_fees', 'Delivery fees'), value: fmtUSD(aDelivery) },
+        {
+          label: translateOr('delivery_actual_cost', 'Actual delivery cost'),
+          value: `${fmtUSD(aDeliveryActual)}${aDeliverySales > 0 && aDeliveryActualCount < aDeliverySales ? ` (${aDeliveryActualCount}/${aDeliverySales} ${translateOr('recorded_short', 'recorded')})` : ''}`,
+        },
+        { label: translateOr('delivery_margin', 'Delivery margin'), value: fmtUSD(aDeliveryMargin) },
+        { label: translateOr('store_paid_delivery', 'Store-paid delivery'), value: fmtUSD(aStoreDelivery) },
+      ],
+    },
   ]), [
+    aStoreDelivery,
+    aDelivery,
+    aDeliveryActual,
+    aDeliveryActualCount,
+    aDeliveryMargin,
+    aDeliverySales,
     aCost,
     aDelivery,
     aDiscounts,
@@ -1492,7 +1515,7 @@ ${translateOr('net_revenue_after_refunds', 'Net after refunds')} ${fmtUSD(aReven
           </div>
           {analyticsPending ? (
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-4 sm:gap-2.5">
-              {[...Array(7)].map((_, i) => <div key={i} className="card h-16 animate-pulse rounded-xl bg-gray-100 dark:bg-gray-700" />)}
+              {[...Array(8)].map((_, i) => <div key={i} className="card h-16 animate-pulse rounded-xl bg-gray-100 dark:bg-gray-700" />)}
             </div>
           ) : analyticsUnavailable ? (
             <div className="rounded-xl border border-amber-200 bg-white px-3 py-4 text-center text-sm text-amber-900 dark:border-amber-800/70 dark:bg-slate-900 dark:text-amber-100">

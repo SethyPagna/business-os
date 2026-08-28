@@ -4411,5 +4411,9 @@
   "payment_amount_required": "បញ្ចូលចំនួនទឹកប្រាក់ដែលបានទទួល។",
   "payment_method_required": "បញ្ចូលវិធីទូទាត់។",
   "record_payment": "កត់ត្រាការទូទាត់",
-  "import_warning_kind_unreadable_batch_date": "កាលបរិច្ឆេទឡូតមិនអាចអានបាន (កត់ត្រាជាថ្ងៃនេះ)"
+  "import_warning_kind_unreadable_batch_date": "កាលបរិច្ឆេទឡូតមិនអាចអានបាន (កត់ត្រាជាថ្ងៃនេះ)",
+  "delivery": "ការដឹកជញ្ជូន",
+  "margin_short": "ចំណេញ",
+  "store_paid_delivery": "ថ្លៃដឹកហាងចេញ",
+  "dash_info_delivery": "ការដឹកជញ្ជូនក្នុងអំឡុងពេលនេះ៖ អ្វីដែលអតិថិជនត្រូវបង់ ថ្លៃពិតប្រាកដរបស់អ្នកដឹក និងចំណេញរវាងវា។"
 }
