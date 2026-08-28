@@ -1369,7 +1369,11 @@ if (typeof window !== 'undefined') {
         scheduleBootstrapOfflineDbWrite((db) => db.settings.put({ key: 'sync_server_url', value: url }))
       }
     } else {
-      // Vite dev -- use stored value (normally points to localhost:8787, wrangler's local dev port)
+      // Vite dev -- use stored value (localhost:8787 for wrangler local
+      // dev), falling back to the PRODUCTION admin origin (user, Part 388:
+      // "default leangbeauty.com and admin.leangbeauty.com") so a fresh
+      // checkout talks to the real server until someone points it
+      // elsewhere on the Server page.
       url = sanitizeSyncServerUrl(localStorage.getItem(STORAGE_KEYS.SYNC_SERVER) || '')
       if (!skipOfflineBootstrapDb) {
         try {
@@ -1378,6 +1382,7 @@ if (typeof window !== 'undefined') {
           if (!url && stored[0]?.value) url = sanitizeSyncServerUrl(stored[0].value)
         } catch (_) {}
       }
+      if (!url) url = sanitizeSyncServerUrl('https://admin.leangbeauty.com')
     }
 
     if (url) {

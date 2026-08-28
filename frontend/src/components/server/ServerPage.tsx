@@ -915,7 +915,7 @@ export default function ServerPage() {
                   autoComplete="url"
                   value={urlInput}
                   onChange={(event: ChangeEvent<HTMLInputElement>) => { setUrlInput(event.target.value); setTestResult(null) }}
-                  placeholder="https://leangcosmetics.dpdns.org"
+                  placeholder="https://admin.leangbeauty.com"
                   className="input text-sm"
                 />
                 <p className="mt-1 text-xs text-gray-400">{t('sync_manual_url_hint') || 'No trailing slash.'}</p>
