@@ -396,17 +396,22 @@ export default function Sales() {
   // directly once a filtered range has more matching rows than that cap.
   const [salesStats, setSalesStats] = useState<{ revenue_usd: number; pending_revenue_usd: number; total_count: number; truncated_in_list: boolean } | null>(null)
 
-  useEffect(() => {
+  // Z3a: the summary aggregate must refresh whenever a sale's status changes,
+  // not only when a filter changes. Extracted into a callable so the sync
+  // effect below (fired on 'sales'/'returns' events, which every status
+  // mutation + return dispatches) can refetch it in lockstep with the row
+  // list -- previously it went stale (a cancelled sale kept counting toward
+  // the "N sales | $revenue" header until a filter change forced a refetch).
+  const loadSalesStats = useCallback(async (): Promise<void> => {
     if (!isActive) return
-    let cancelled = false
     const params = {
       ...(isAdmin && userFilter !== 'all' ? { userId: userFilter } : {}),
       ...(statusFilter !== 'all' ? { status: statusFilter } : {}),
       ...(debouncedSearch ? { search: debouncedSearch } : {}),
       ...salesDateRange,
     }
-    fetchSalesStats(params).then((result) => {
-      if (cancelled) return
+    try {
+      const result = await fetchSalesStats(params)
       const row = (result || {}) as Record<string, unknown>
       setSalesStats({
         revenue_usd: Number(row.revenue_usd) || 0,
@@ -414,9 +419,16 @@ export default function Sales() {
         total_count: Number(row.total_count) || 0,
         truncated_in_list: Boolean(row.truncated_in_list),
       })
-    }).catch(() => { if (!cancelled) setSalesStats(null) })
-    return () => { cancelled = true }
+    } catch {
+      setSalesStats(null)
+    }
   }, [debouncedSearch, isActive, isAdmin, salesDateRange, statusFilter, userFilter])
+
+  useEffect(() => {
+    let cancelled = false
+    void loadSalesStats().then(() => { if (cancelled) return })
+    return () => { cancelled = true }
+  }, [loadSalesStats])
 
   useEffect(() => {
     if (!isActive) {
@@ -443,8 +455,11 @@ export default function Sales() {
 
   useEffect(() => {
     if (!isActive || !syncChannel?.channel) return
-    if (syncChannel.channel === 'sales' || syncChannel.channel === 'returns') loadSales(true)
-  }, [isActive, loadSales, syncChannel?.channel, syncChannel?.ts])
+    if (syncChannel.channel === 'sales' || syncChannel.channel === 'returns') {
+      loadSales(true)
+      void loadSalesStats() // Z3a: keep the summary aggregate in lockstep with the rows
+    }
+  }, [isActive, loadSales, loadSalesStats, syncChannel?.channel, syncChannel?.ts])
   useEffect(() => {
     if (!isActive || !isAdmin || !salesFiltersOpen || userOptionsLoaded) return
     let cancelled = false
@@ -522,6 +537,7 @@ export default function Sales() {
       await runSaleStatusMutation(saleId, newStatus, notes, extra)
       notify(`${t('status_updated') || 'Status updated'}: ${getStatusLabel(newStatus, t)}`)
       await loadSales(true)
+      void loadSalesStats() // Z3a: refresh the summary aggregate immediately, not only via the sync round-trip
       window.dispatchEvent(new CustomEvent('sync:update', { detail: { channel: 'inventory' } }))
       window.dispatchEvent(new CustomEvent('sync:update', { detail: { channel: 'products' } }))
       window.dispatchEvent(new CustomEvent('sync:update', { detail: { channel: 'sales' } }))
