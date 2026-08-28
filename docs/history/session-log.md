@@ -9391,3 +9391,45 @@ real vite build 14.35s.
   default (ReceiveBatchModal included) uses the UTC day, so early-
   morning Phnom Penh entries default to "yesterday". Consistent
   everywhere, so left alone; flagging for a deliberate decision.
+
+## Part 405 (chat, Aug 28 2026) -- H1 complete: the export dialog on every page
+
+Session a7 (404 is the E3/E4 session's after their renumber off the 403
+collision -- the log's own numbering trap fired between two OTHER sessions
+this time; arbitrated by write-order per the standing rule).
+
+**What changed.** Returns, Customers/Suppliers/Delivery, Branches, Inventory
+and Products joined Sales + Audit Log on the shared ExportOptionsDialog --
+H1's "export button on every page opens an options dialog" is now literally
+true, with X5's formats everywhere:
+
+- Returns + the three Contacts tabs: existing row builders feed the dialog;
+  the tabs' unreferenced memoized csv/xlsx loaders deleted (zombie rule).
+  columnsFromRows derives the chooser from the rows' own keys.
+- Branches: had NO export -- new toolbar Export walks every active branch
+  through the UNPAGED /branches/:id/stock (whole branch in one response, a
+  deliberate server shape found by reading the route, so no page loop) and
+  flattens Branch-per-row stock with computed value. Covers H1's
+  "per-branch stock" spec.
+- Inventory: inventoryExport.ts exposes collectors for its three list
+  exports; dialog path and legacy download functions share them (one row
+  shape per kind). The multi-sheet ZIP package keeps its direct build --
+  a zip is not a column-chooser flow.
+- Products: ExportFieldsModal already WAS H1's chooser (scope + field
+  groups, from the Aug-2026 polish pass) -- respected, not replaced; it
+  gained the format row (xlsx default / csv / pdf) and Products.tsx routes
+  the confirm through the shared print view for PDF.
+- Pins: performanceLoadingUx's Returns + contacts-tab asserts updated with
+  intent PRESERVED and strengthened -- pages must not import export helpers
+  at all now (they load inside the lazy dialog on Export click).
+
+**Coordination this part.** Session 05's D4 landed then was re-scoped by the
+user (D4b); they queued behind my Inventory.tsx/Branches.tsx and both were
+released to them at f4110464 with a rebase map. The E3/E4 session confirmed
+AuditLog.tsx (with its Part-401 export wiring) moves intact into Review &
+Logs. The full chain currently fails ONLY on that session's in-flight
+pathRouting state; my units' tests all pass individually and the real build
+is green (15.64s).
+
+**Not done.** The chain's green run happens on the E3/E4 landing (theirs).
+Dialog visual pass stays with B1's sweep. Deploy (user).

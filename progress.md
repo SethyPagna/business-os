@@ -717,7 +717,10 @@ deep-linkable tabs.*
 
 ### Phase H — Exports/imports everywhere
 
-- [x] H1 *(Part 401: the shared machinery + first two pages shipped, needs
+- [x] H1 *(Part 405: COMPLETE — every remaining page wired (Returns, three
+  Contacts tabs, Branches gained its first-ever per-branch-stock export,
+  Inventory via module collectors, Products' existing chooser gained the
+  format row), f4110464. Part 401: the shared machinery + first two pages shipped, needs
   deploy — d806e8ee. ExportOptionsDialog: column chooser (defaults
   pre-checked, remembered per surface), formats Excel (default,
   barcode-safe) / CSV (re-import; hint warns Excel breaks barcodes) / PDF
