@@ -1429,39 +1429,93 @@ with 6e's F3 slice 2 (Products.tsx / Inventory.tsx / ProductForm.tsx /
 FastStockInModal.tsx / Modal.tsx / Sidebar.tsx) — marked [HOT-6e], do not start
 those until that unit commits.*
 
-- [ ] Y1. **Search is very slow / reads broken.** Products search "pink dahlia"
+- [~] Y1 *(client half SHIPPED, Part 425: all three contact tabs track a
+  refreshing flag spanning silent search refetches and show "Searching…"
+  instead of the false "No matching customers"; search joins the shared
+  180ms debounce (was bare useDeferredValue — a query per keystroke, each
+  refetching includePoints). REMAINING: measure the server-side timing —
+  contacts + products search are FTS5-backed and paginated, so the 5s+
+  the user saw most plausibly came from the Worker being saturated by the
+  concurrently-running import apply; re-measure on an idle worker before
+  building anything server-side.)* **Search is very slow / reads broken.** Products search "pink dahlia"
   took >5s; Contacts search also very slow — and while a search is in flight the
   list shows "No matching customers" instead of a searching state (reads as data
   loss). Fix both: measure where the time goes (server query vs frontend), add
   proper in-flight state on every list search (Products/Contacts at minimum:
   "Searching…" until the response for the CURRENT term arrives).
-- [ ] Y2. **POS sale errors in cart but the sale actually lands.** POS showed 1
+- [x] Y2 *(Part 425 — SHIPPED, needs deploy. Root cause: a 20s client
+  timeout raced a server write that still committed (the Worker was busy
+  applying the 12k-row import), and each retry click generated a FRESH
+  client_request_id, so retries could double-sell. POS now keeps ONE
+  client_request_id per order until success (the server already dedupes
+  on it), the timeout is 45s, and a timeout message says the truth: the
+  sale may be recorded and retrying is safe.)* **POS sale errors in cart but the sale actually lands.** POS showed 1
   item in stock; adding to cart + completing sale showed an error, yet the sale
   then appears on the Sales page. So the write succeeds and the client reports
   failure — find the mismatched response/error path (or double-submit where the
   first succeeded) and make outcome reporting truthful.
-- [ ] Y3. **Branches page lost the branches.** After E1's hub merge the Branches
+- [x] Y3 *(Part 425 — SHIPPED with Y4, verified live on worker-dev: the
+  branch list renders again below a stats pane capped at 45% height.)*
+  **Branches page lost the branches.** After E1's hub merge the Branches
   page no longer shows the branch list itself. Regression — restore branches on
   the Stats & Branches section.
-- [ ] Y4. **Scroll regressions everywhere:** Fees section can't scroll, Settings
+- [~] Y4 *(hub half SHIPPED, Part 425: PageSlot is an overflow-hidden flex
+  column, and all four Phase-E hubs rooted with a plain block div, so the
+  hosted components' page-scroll containers resolved height:100% against
+  an auto-height parent — everything below the fold was clipped and
+  unscrollable. Hub roots are now height-filling flex columns; verified
+  live on worker-dev (Settings/Fees/Branches all get bounded scroll
+  containers, deep links intact). REMAINING: the print/reprint view the
+  user also named — it is not a hub surface; reproduce separately.)*
+  **Scroll regressions everywhere:** Fees section can't scroll, Settings
   page can't scroll, print/reprint view, Sales page + its sections, Branch page.
   Likely one shared cause in the hub-section layout (overflow clipped at the hub
   wrapper). Fix the pattern, then verify every hub.
-- [ ] Y5. **Products import "uncategorized row error product name 48" — serious.**
+- [x] Y5 *(Part 425 — root-caused bit-for-bit against the ACTUAL uploaded
+  R2 object and SHIPPED, needs deploy. fetchCsvRange's TextDecoder
+  silently consumed the upload's UTF-8 BOM, so the materialize byte
+  cursor came up 3 bytes short and the SECOND window re-read the
+  previous row's last 3 bytes as a phantom one-field row — the "48"
+  product (job d8b19dd5: 12,094 staged rows for a 12,093-row file; the
+  Aug-26 job's 8,728 for 8,727 shows the same +1). Fixed with
+  ignoreBOM:true; test-csv-range-window-pure gains an engine-exact BOM
+  harness at every window size. The phantom production product (id 65)
+  was already deactivated by the user — nothing else to clean.)*
+  **Products import "uncategorized row error product name 48" — serious.**
   A row error naming "product name 48" with an uncategorized bucket appeared
   during the products import. Reproduce with the pack, find what the engine did
   (fabricated name? counter leak?), fix + test.
-- [ ] Y6. **Import wire-images-to-products not working.** Linking library images
+- [~] Y6 *(MEASURED, Part 425 — needs the user, not code yet: production
+  holds 6,031 active products, 34 with an image, the file library holds
+  only 51 assets, and the import job carried 0 uploaded images and 0
+  image matches. The wiring worked for what existed — the missing piece
+  is the image SOURCE (the pre-reset catalog's images were deleted with
+  the reset). Ask the user where the product images should come from
+  before building anything.)* **Import wire-images-to-products not working.** Linking library images
   to products (the import's image wiring) does nothing visible. Diagnose end to
   end (match rule → write → product cover render) and fix.
-- [ ] Y7. **Import ran with only ONE batch date (08/24/2026)** — the many real
+- [x] Y7 *(Part 425 — ANSWERED + a real bug found and fixed. The single
+  08/24/2026 date is the documented template-snapshot behavior; real
+  dates land when stock_in_history.csv runs (M4/manifest Step 3 — the
+  user has not run it yet). BUT the check exposed that the import stored
+  received_at as the RAW "08/24/2026" display string (unqueryable by SQL
+  date functions) — normalized at parse time now, migration 0077 repairs
+  the 6,031 production rows, engine test re-pinned to ISO. Needs deploy.)*
+  **Import ran with only ONE batch date (08/24/2026)** — the many real
   past stock batch dates are missing. Expected: the aug27 template is a SNAPSHOT
   (single synthetic date — M1's known finding, manifest Step 1) and real dates
-  arrive with `stock_in_history.csv` (M4). Verify which file the user ran; if
-  the FIXED template still stamps one date on every lot, confirm that's the
-  documented snapshot behavior and make the UI/manifest say so; make sure the
-  history import path is actually runnable now (see Y8's stall).
-- [ ] Y8. **Import flow regression — slow, stalled, review after the wait.**
+  arrive with `stock_in_history.csv` (M4).
+- [~] Y8 *(the false-stall half SHIPPED, Part 425: the tracker's 6-minute
+  staleness check parsed SQLite's timezone-less UTC updated_at with bare
+  Date.parse = LOCAL time, so for a UTC+7 viewer every ACTIVE job looked
+  7 hours stale and "may have stopped — safe to cancel" showed on a job
+  that was progressing (it completed normally at 14:33). Fixed via shared
+  parseServerTimestampMs. MEASURED timeline of the reported 20+ min:
+  upload 14:07 → analyze + the user's review of 6,062 conflicts → approve
+  14:27 → apply DONE 14:33 (6 min for 12k rows). REMAINING: the perceived
+  "two analyzes" (materialize pass + analyze pass both read as
+  "Analyzing" — label them distinctly), and Y9's card compaction.)*
+  **Import flow regression — slow, stalled, review after the wait.**
   Report: upload slow; TWO analyze passes; then "view report / resolve product
   conflicts / approve"; then a long "Applying changes" that stalled at
   4,800/12,094 with "No update in a while — this import may have stopped"; whole
@@ -1473,7 +1527,14 @@ those until that unit commits.*
 - [ ] Y9. **Import progress UI too text-heavy.** The tracker card is a wall of
   words (screenshot 1). Compact design: status chip + progress bar + counts;
   details fold behind an expander.
-- [ ] Y10. **POS "awaiting payment" must not require a payment method.** Today it
+- [x] Y10 *(Part 425 — SHIPPED end to end, needs deploy. POS no longer
+  demands the full amount (and with it a method) for awaiting_payment;
+  with nothing paid the sale records NO method (the server's 'Cash'
+  fabrication removed); completing it on the Sales page collects method
+  + USD/KHR amounts (SaleDetailModal, USD prefilled with the total) and
+  PATCH /:id/status stores them on exactly that transition — payment
+  fields on any other transition are refused, never silently dropped.)*
+  **POS "awaiting payment" must not require a payment method.** Today it
   demands one upfront; the point of awaiting-payment is deciding later on the
   Sales page. Make method optional for awaiting-payment sales (validation +
   server accept NULL method until completion).
@@ -1503,7 +1564,13 @@ those until that unit commits.*
   Customer = ONE column (name + phone) that opens a detail view (membership
   etc.) on click; cashier same pattern; payment one row; drop the per-row
   detail sprawl.
-- [ ] Y18. **Dashboard shows stale data** — a cancelled sale still shows as
+- [x] Y18 *(Part 425 — SHIPPED. Writes and sync:update events invalidated
+  only the entity's own client-cache prefix, so dashboard:*/analytics:*
+  stayed fresh (20s TTL) and the Dashboard's own post-cancel refresh
+  re-served pre-cancel numbers FROM the cache. One derived-read map in
+  api/http.ts now clears dashboard+analytics whenever sales/returns/
+  products/inventory invalidate, on all three paths; behavioral + wiring
+  test in apiHttp.test.ts.)* **Dashboard shows stale data** — a cancelled sale still shows as
   completed in dashboard figures. Find the cache/refresh gap (cancel doesn't
   bump the dashboard read) and fix.
 - [ ] Y19. **Dashboard range: replace the separate "custom" option with the

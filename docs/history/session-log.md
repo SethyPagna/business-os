@@ -10181,3 +10181,114 @@ kernel parity in the import apply, deliberately deferred until after
 the user's M-phase migration imports run (same stability reasoning as
 K4); regenerating the template before the engine parses the columns
 would be a lie, so it rides the engine fix.
+
+## Part 425 (Aug 28 2026, session business-os-v1-43) — Phase Y triage: eight live-use regressions root-caused, seven shipped
+
+**Ask.** A twenty-item feedback batch from the user's first real end-to-end run
+of the migrated system (products import, POS sale, searching, page-by-page
+review; two screenshots). Recorded whole as `### Phase Y` on the board (Y1–Y20,
+hot-file flags for 6e's in-flight F3-slice-2 unit), then fixed in severity
+order, staying off the six dirty files.
+
+**What changed / found.**
+
+- **Y3+Y4 (hubs unscrollable; branch list "lost")** — PageSlot is an
+  overflow-hidden flex column, and all four Phase-E hub pages (Sales, Settings,
+  Review & Logs, Branches) rooted with a plain `space-y-3` block div, so the
+  hosted components' `page-scroll` roots resolved `height:100%` against an
+  auto-height parent: nothing scrolled, everything below the fold was clipped,
+  and the branch list (rendered below Inventory's stats) was simply out of
+  reach. Hub roots are now `flex min-h-0 flex-1 flex-col`; the Branches hub
+  caps the stats pane at 45% so the branch list always gets space. Verified
+  live on worker-dev (bounded scroll containers on /settings, /fees, /branches;
+  deep links intact; branch list renders). `63676c4d`.
+- **Y2 (POS reports an error but the sale lands)** — the 20s client timeout
+  raced a server write that still committed (the Worker was busy applying the
+  12k-row import), and every retry click generated a fresh client_request_id,
+  making retries potential duplicate sales even though the SERVER already
+  dedupes on that id. POS now keeps ONE id per order until success, the timeout
+  is 45s, and a timeout notifies the truth (sale may be recorded; retrying is
+  safe and cannot duplicate). `33840327`.
+- **Y10 (awaiting_payment demanded payment upfront)** — the insufficient-amount
+  gate now skips awaiting_payment; with nothing paid the sale records NO
+  payment method (create route's 'Cash' fabrication removed for exactly that
+  case); SaleDetailModal collects method + USD/KHR amounts when completing an
+  awaiting-payment sale and PATCH /:id/status stores them on exactly that
+  transition (payment fields anywhere else are 400-refused). Same commit.
+- **Y1 client half (search lies while in flight)** — all three contact tabs
+  showed "No matching customers" while a silent search refetch ran (their
+  client-side re-filter empties the stale page). Each tab now tracks a
+  `refreshing` flag spanning every load and shows "Searching…"; search joins
+  the shared 180ms debounce the other list pages already use (was bare
+  useDeferredValue — one server query per keystroke, each with includePoints).
+  `0f1060fb`. Server-side timing NOT yet measured on an idle worker — the 5s+
+  the user saw most plausibly was worker saturation from the concurrent import.
+- **Y18 (Dashboard stale after cancel)** — writes/sync events invalidated only
+  the entity's own client-cache prefix; `dashboard:get`/`analytics:*` stayed
+  fresh (20s TTL) so the Dashboard's own refresh re-served pre-cancel numbers
+  from cache. One derived-read map in api/http.ts clears dashboard+analytics
+  whenever sales/returns/products/inventory invalidate (all three invalidation
+  paths); behavioral+wiring test. `438d7e47`.
+- **Y5 (the "48" uncategorized product — serious)** — reproduced bit-for-bit
+  against the ACTUAL uploaded R2 object: fetchCsvRange's TextDecoder silently
+  consumed the upload's UTF-8 BOM, so stripBom measured bomBytes=0, the
+  materialize byte cursor ran 3 bytes short, and the SECOND window re-read the
+  previous row's last 3 bytes ("48\n") as a phantom one-field row — product
+  id 65 "48" (already deactivated by the user). Every BOM-prefixed upload
+  gained exactly +1 phantom row (12,094/12,093; the Aug-26 job's 8,728/8,727
+  confirms). Fixed with `ignoreBOM: true`; the exact-bytes simulation now
+  yields 12,093 clean rows; test-csv-range-window-pure gains an engine-exact
+  BOM harness at every window size + a mutation check showing the old decoder
+  produces the phantom. `2ca54886` + fatal:false follow-up in `8a2df525`.
+- **Y7 (single 08/24/2026 batch date) — answered + a second real bug.** The
+  single date is the documented template-snapshot behavior (real dates arrive
+  with stock_in_history.csv — manifest Step 3, not yet run). BUT the check
+  exposed that classifyProducts stored the `batch(mm/dd/yyyy)` CELL verbatim
+  into product_batches.received_at — 6,031 production lots hold '08/24/2026'
+  (SQL date() = NULL, lexicographic ordering, D1b day-grouping can never
+  match) while manual receives store ISO. Parse-time normalizeToIsoDate now +
+  new visible 'unreadable_batch_date' warning (backend kind + frontend mirror +
+  en/km keys) + migration 0077 repairing all four slash shapes in place
+  (verified idempotent incl. datetime/NULL passthrough). The engine test's
+  stale assertion that PINNED the verbatim string was corrected to ISO.
+  `8a2df525`, `02cd6c18`.
+- **Y8 false stall ("this import may have stopped" on a progressing job)** —
+  the tracker's 6-minute staleness check parsed SQLite's timezone-less UTC
+  `updated_at` with bare Date.parse (= LOCAL time), so for a UTC+7 viewer every
+  ACTIVE job looked 7 hours stale instantly. New shared parseServerTimestampMs
+  (formatters.ts) + tracker wired to it + test. Measured truth of the "20+
+  minutes": upload 14:07, analyze + the user reviewing 6,062 conflicts, approve
+  14:27, apply finished 14:33 (6 min server work for 12k rows); the job the
+  tracker called stalled completed normally. `81cd57b0`.
+- **Y6 (image wiring) — measured, needs the user:** 6,031 active products, 34
+  with an image, 51 library assets, 0 images uploaded with the job. The wiring
+  worked for what existed; the pre-reset images are gone. The open question is
+  where product images should come from.
+
+**Verified.** frontend `tsc --noEmit`: clean except `onMinimize` errors in 6e's
+uncommitted ProductForm/Products (their in-flight F3 slice 2 — file-ownership
+attributed, untouched). cloudflare `tsc --noEmit`: clean. `vite build`: green
+(21.2s). Backend: every `scripts/test-*.cjs` swept — one failure, the
+import-warning mirror drift MY change caused, fixed and re-run PASS
+(test-import-warning-detail-pure); test-import-engine-pure 26/26 after the ISO
+re-pin; test-csv-range-window-pure 9/9. Frontend tests individually: apiHttp
+(incl. new Y18 check), formatters (incl. new Y8 check), posCore,
+posSearchFocusEffectSplit, offlineSalesQueue, contactSearchFilter,
+pricingContacts, salesImportWorker — all PASS; langKeyIntegrity fails ONLY on
+`minimized_dismiss_hint`, referenced solely by 6e's uncommitted
+MinimizedWorkTray.tsx (theirs, transient). Live verification on worker-dev
+(the shared 8787 server was a stale pre-build workerd serving SPA-fallback for
+new chunk hashes; killed the orphaned wrangler tree — no live peer owns it per
+ListAgents — and relaunched): hubs scroll, branch list back, Fees deep-link
+renders with the 0064 totals.
+
+**Production reads made (all read-only):** import_jobs timeline,
+import_job_source_rows around sequence 99, the uploaded CSV object from R2,
+products id 65, batch received_at day distribution, image/library counts.
+
+**Not done.** Y9 (tracker card compaction), Y11 (POS delivery paid-by prose +
+membership InfoHint), Y12 (needs the user: what "change did not link to the
+fees page" means), Y13–Y17/Y19/Y20 (density redesigns; several HOT with 6e's
+F3 slice 2), Y1's server-side timing measurement on an idle worker, Y4's
+print/reprint scroll check (not a hub surface), Y8's "two analyzes" labeling.
+Everything shipped here needs the next deploy (incl. migration 0077).
