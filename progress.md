@@ -924,6 +924,48 @@ deep-linkable tabs.*
   entries; portal-manifest icon purposes unswapped (any/maskable were crossed,
   so iOS/Android picked the wrong art).
 
+### Phase X — Aug-28 sixteenth batch (Part 395): date+time range, daily sales report, per-contact delivery totals
+
+*User batch with two mockups (a date+time range panel; a "Start → End" trigger
+pill). Standing principle recorded as X0. Claimed by session a7 except X5.*
+
+- [x] X0. **Standing principle — old records stay, new flows do it properly.**
+  The 0072-re-typed delivery expenses are the OLD system's records, kept as
+  data. The NEW system's shape is structural: delivery goes through delivery
+  CONTACTS linked on the sale (`sales.delivery_contact_id`, which already
+  exists), never through text labels/categories; the same applies wherever an
+  old-system shape was a text mash — keep the imported data, never build new
+  flows on it.
+- [~] X1. **Shared date+time range picker (the mockups).** Trigger = compact
+  "Start → End" pill showing the chosen range; panel = two manual date inputs
+  + optional HH:MM–HH:MM time range + month chips (Jan–Dec) + full calendar
+  range grid (Mon-first) + year chips + quarter chips (Q1 25 … style) + clear
+  ✕. One shared component, used by Sales (X2) first, then Audit Log and the
+  D2 pages. **Flagged, not guessed:** the stock mockup shows DD/MM/YYYY
+  placeholders, but mm/dd/yyyy-everywhere is a settled decision (en-US pinned,
+  re-swept Part 388/W2) — building with MM/DD/YYYY; say the word to flip.
+- [~] X2. **Sales daily report — "by day report/view, search page when
+  clicked".** A Sales-page report section scoped by X1's range: one row per
+  day (tx count, subtotal, discounts, delivery, total); clicking a day opens
+  its full breakdown — totals from the SHARED salesAnalytics kernel (single-
+  source rule), plus per-payment-method totals, the delivery block (charged /
+  store-absorbed / actual cost / margin, and per-COURIER lines via
+  delivery_contact_id), and discounts split store vs membership.
+- [~] X3. **Per-contact delivery totals — "check expenses of delivery by
+  contact".** Kernel + endpoint aggregating sales by delivery_contact_id
+  (deliveries, charged fees, absorbed, actual cost, margin, last delivery);
+  DeliveryTab gains a per-contact drill (the supplier Purchases-modal
+  pattern). Suppliers already have D5's purchases drill; customers already
+  have their sales history in the detail — X3 closes the delivery leg.
+- [ ] X4. **Customer/supplier parity check of X3** — verify the customer
+  detail's totals cover "same for customer" (purchases total per customer) and
+  record any gap as its own item.
+- [ ] X5. **Exports everywhere: Excel AND PDF, multi-option.** Extends H1's
+  column-chooser dialog with format choice (xlsx / pdf / csv). NOT started by
+  a7 — the xlsx/csv utils are the M7 session's active footprint; spec recorded
+  here so whichever session lands it builds the format switch into H1's dialog
+  rather than per-page one-offs.
+
 ### Flagged, not guessed (Golden Rule 7)
 
 - **Products now differs from the other five list pages (Part 389):** B6's rule ("the
