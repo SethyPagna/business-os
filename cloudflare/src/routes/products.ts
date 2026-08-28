@@ -1,4 +1,5 @@
 import { Hono } from 'hono'
+import { enqueueImageNormalization } from '../lib/imageAudit'
 import { getDb } from '../lib/db'
 import { paginateProductFamilies } from '../lib/familyPagination'
 import { cachedJsonResponse, getVersion, bumpVersion } from '../lib/cache'
@@ -1007,6 +1008,56 @@ app.get('/bootstrap', async (c) => {
 
 app.get('/filters', async (c) => {
   return c.json(await loadProductFilters(c.env, c.req.query()))
+})
+
+// D1 (Part 415): the Products page's Stock Change ledger -- one row per
+// recorded action with a derived running balance. READ-ONLY over the
+// EXISTING inventory_movements history; no new write path. Lives under
+// /products (the page that hosts the section) but admits an inventory
+// grant too, mirroring canAccessPage's door for the same reason:
+// movement data is inventory-domain, the surface is the Products page.
+// Query/classification semantics live in lib/stockLedgerQuery.ts (the
+// kernel the pure test drives directly).
+app.get('/stock-ledger', async (c) => {
+  const user = c.get('user')
+  // A REAL products or inventory tier is required. products_image_only on
+  // its own never qualifies: that flag only exists for users whose
+  // products tier is 'none' (see isImageOnlyRead above), so this check
+  // already turns them away without naming the flag.
+  const allowed = getPermissionTier(user, 'products') !== 'none'
+    || getPermissionTier(user, 'inventory') !== 'none'
+  if (!allowed) {
+    return c.json({ error: 'You do not have permission to perform this action' }, 403)
+  }
+  const query = c.req.query()
+  const page = Math.max(1, Number(query.page) || 1)
+  const pageSize = Math.min(100, Math.max(1, Number(query.pageSize) || 50))
+  const ledger = buildStockLedgerQuery({
+    view: String(query.view || 'all') as StockLedgerView,
+    productId: Number(query.productId) || 0,
+    branchId: Number(query.branchId) || 0,
+    startDate: String(query.startDate || ''),
+    endDate: String(query.endDate || ''),
+    search: String(query.search || ''),
+  })
+
+  const db = getDb(c.env)
+  const countRow = await db.prepare(ledger.countSql).get<{ total: number }>(ledger.params)
+  const total = Number(countRow?.total || 0)
+  const rows = await db.prepare(ledger.rowsSql).all<Record<string, unknown>>({
+    ...ledger.params,
+    limit: pageSize,
+    offset: (page - 1) * pageSize,
+  })
+
+  return c.json({
+    items: attachBeforeQty(rows || []),
+    total,
+    page,
+    pageSize,
+    totalPages: Math.max(1, Math.ceil(total / pageSize)),
+    view: ['all', 'adjustments', 'in', 'out'].includes(String(query.view || '')) ? String(query.view) : 'all',
+  })
 })
 
 // P3 (Part 387): whole-catalog price adjustment, run server-side as
@@ -2544,6 +2595,8 @@ app.post('/upload-image', async (c) => {
   const storedName = buildUniqueStoredName(originalName)
   const objectKey = `uploads/${storedName}`
   await c.env.ASSETS.put(objectKey, buffer, { httpMetadata: { contentType: mimeType } })
+  // K3: same on-upload normalization every other image entry point gets.
+  await enqueueImageNormalization(c.env, objectKey)
   const publicPath = `/uploads/${storedName}`
 
   const db = getDb(c.env)

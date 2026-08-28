@@ -1,4 +1,5 @@
 import { Hono } from 'hono'
+import { enqueueImageNormalization } from '../lib/imageAudit'
 import { getDb } from '../lib/db'
 import { requireAuth, type SessionUser } from '../lib/auth'
 import { hasPermission, getPermissionTier } from '../lib/permissions'
@@ -221,6 +222,9 @@ app.post('/upload', async (c) => {
   const storedName = buildUniqueStoredName(originalName)
   const objectKey = `uploads/${storedName}`
   await c.env.ASSETS.put(objectKey, buffer, { httpMetadata: { contentType: mimeType } })
+  // K3: fresh image uploads normalize via the media queue within seconds
+  // (the 6h sweep stays the safety net); videos wait on the container path.
+  if (mediaType === 'image') await enqueueImageNormalization(c.env, objectKey)
 
   const publicPath = `/uploads/${storedName}`
   const db = getDb(c.env)

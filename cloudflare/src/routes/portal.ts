@@ -1,4 +1,5 @@
 import { Hono } from 'hono'
+import { enqueueImageNormalization } from '../lib/imageAudit'
 import { getDb } from '../lib/db'
 import { buildInClause, inlineIntegerIds, selectInChunks } from '../lib/sqlBinding'
 import { cachedJsonResponse, getVersionWithFallback } from '../lib/cache'
@@ -1017,6 +1018,8 @@ async function materializePortalScreenshots(env: Env, screenshots: string[]): Pr
       const storedName = buildUniqueStoredName(`portal-submission-${Date.now()}.jpg`)
       const objectKey = `uploads/${storedName}`
       await env.ASSETS.put(objectKey, decoded.bytes, { httpMetadata: { contentType: decoded.mimeType } })
+      // K3: same on-upload normalization every other image entry point gets.
+      await enqueueImageNormalization(env, objectKey)
       resolved.push(`/uploads/${storedName}`)
       continue
     }

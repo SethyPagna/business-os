@@ -9873,3 +9873,39 @@ backend sweep, frontend chain + build, wrangler dry-run green (05's A4
 lane still holds its known mid-flight failures, theirs to reconcile).
 Migrations 0074 + 0075 ride the user's next `npm run deploy:full`.
 K2 is COMPLETE: 11.12, 11.13, and all of 11.9.
+
+## Part 412 (chat, Aug 28 2026) -- K3: on-upload image normalization closes the media pipeline's gap
+
+The quality ladder (imagePipeline.ts: format -> dimensions -> quality,
+350KB ceiling, never-store-larger), the provider fallback (Cloudflare
+Images -> Cloudinary, honest reasons), and the 6-hourly audit cron
+(sweep + paced reprocess) all already existed. The REAL gap: nothing
+ever produced an optimize-image message -- MEDIA_QUEUE's image branch
+was dead code -- so a fresh upload sat oversized until the 400-per-tick
+sweep happened to reach it.
+
+Closed end to end:
+
+- **lib/imageAudit.ts** gains the queue-side kernel
+  `normalizeStoredImage(env, key)` -- one key, the sweep's exact rules:
+  under-ceiling objects recorded 'ok' untouched; a result that isn't
+  genuinely smaller is never stored ('no_saving'); failure leaves the
+  object byte-identical with reason+provider recorded; success writes
+  back, upserts image_audit (original_size preserved), and meters
+  quota. Plus `enqueueImageNormalization(env, key)` -- the producer:
+  image-extension gated, no-op without the binding, send errors
+  swallowed and logged (an upload must never fail because the queue
+  hiccuped; the sweep remains the safety net).
+- **src/queue.ts**: the optimize-image branch now calls the kernel.
+- **All six image ASSETS.put sites enqueue**: files.ts generic upload
+  (image mediaType only -- videos wait on the container path), users.ts
+  avatar, products.ts product image, portal.ts submission photos,
+  importJobs.ts library-bound files (imports/... staging keys stay out
+  of the uploads/ audit scope) and client-recompress swaps.
+
+**Verification:** new scripts/test-image-normalize-pure.cjs (6 checks:
+kernel rules on real migration-0054 schema with the pipeline stubbed at
+its seam, producer filtering/swallowing, consumer + all six producer
+pins); imageAudit stubs added to the two route-loading tests the new
+import touched (portal-catalog-sort, wire-images-gallery); full backend
+sweep green (97 files), tsc clean, dry-run clean. No frontend changes.

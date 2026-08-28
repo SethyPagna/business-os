@@ -952,15 +952,22 @@ deep-linkable tabs.*
   clear Selling-vs-VIP price choice per line; damaged stock joins as an option once
   11.13 lands. Same option data the product detail shows (D3) — one kernel, two
   surfaces.
-- [~] K3 **[CLAIMED: session 6e — Part 412. The ladder (imagePipeline.ts),
-  provider fallback, and the 6h audit cron all EXIST already; the gap is
-  on-upload normalization: no producer ever sends optimize-image to
-  MEDIA_QUEUE and the consumer ignores it, so fresh uploads wait for the
-  400-per-6h sweep. Footprint: lib/imageAudit.ts (per-key kernel +
-  enqueue helper), src/queue.ts optimize-image branch, and the six image
-  ASSETS.put sites (files/users/products/portal/importJobs×2) + a pure
-  test. No POS/returns/Products.tsx/inventory.ts.]** Media pipeline completion (quality ladder, provider fallback, 6h audit — now
-  cheaper under Workers Paid, A4).
+- [x] K3 *(Part 412, session 6e — SHIPPED. The ladder (imagePipeline.ts),
+  provider fallback, and the 6h audit cron already existed; what was
+  missing was ON-UPLOAD normalization, now closed: every image
+  ASSETS.put site (files upload, avatar, product image, portal
+  submission, import-library files, client-recompress swaps) enqueues
+  optimize-image to MEDIA_QUEUE via enqueueImageNormalization
+  (swallowing, image-extension-gated — an upload never fails on a queue
+  hiccup; the 6h sweep stays the safety net), and the consumer's
+  optimize-image branch runs normalizeStoredImage: the per-key kernel
+  with the sweep's exact rules — only over-ceiling objects enter the
+  ladder, a not-smaller result is never stored, failure leaves bytes
+  untouched and recorded, success writes back + upserts image_audit.
+  Videos still wait on the container path (unchanged stub). Pure test
+  (6 checks incl. all six producer pins) on real migrations.
+  Video/container half of the pipeline remains open — tracked by the
+  media-optimize.Dockerfile header, not this item.)*
 - [ ] K4. Storage/jobs hardening phases 1–6 of the locked execution plan (leases, R2
   NDJSON staging, D1 slimming — the 193MB staging JSON), safeguards, Sentry wiring.
 - [ ] K5. Identity: rename-regroup (9.1 — via D6), auto-merge flag + filter (9.2).

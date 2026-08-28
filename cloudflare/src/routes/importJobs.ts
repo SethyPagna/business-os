@@ -1,4 +1,5 @@
 import { Hono } from 'hono'
+import { enqueueImageNormalization } from '../lib/imageAudit'
 import { getDb } from '../lib/db'
 import { requireAuth, type SessionUser } from '../lib/auth'
 import { hasPermission, hasAnyPermission } from '../lib/permissions'
@@ -696,6 +697,10 @@ async function storeUpload(c: any, jobId: string, kind: 'csv' | 'zip' | 'image',
   const addToLibrary = kind !== 'csv'
   const key = addToLibrary ? `uploads/${storedName}` : `imports/${jobId}/incoming/${storedName}`
   await c.env.ASSETS.put(key, bytes, { httpMetadata: { contentType: mimeType } })
+  // K3: only library-bound files normalize (imports/... staging keys are
+  // transient and outside the uploads/ audit scope); the helper's own
+  // image-extension gate filters CSVs and other non-images.
+  if (addToLibrary) await enqueueImageNormalization(c.env, key)
 
   const db = getDb(c.env)
   let fileAssetId: number | null = null
@@ -1016,6 +1021,8 @@ app.post('/:id/images/:fileId/recompress', async (c) => {
   }
 
   await c.env.ASSETS.put(row.stored_path, bytes, { httpMetadata: { contentType: mimeType } })
+  // K3: a client-recompressed swap may still sit over the server ceiling.
+  await enqueueImageNormalization(c.env, String(row.stored_path))
   await db.prepare(`UPDATE import_job_files SET byte_size = @byteSize, mime_type = @mimeType WHERE id = @id`)
     .run({ byteSize: bytes.byteLength, mimeType, id: row.id })
   if (row.file_asset_id) {

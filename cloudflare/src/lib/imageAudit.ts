@@ -180,6 +180,75 @@ export async function reprocessAuditedImages(env: Env): Promise<ReprocessResult>
   return { attempted: pending.length, optimized, failed, bytesSaved }
 }
 
+export type NormalizeOutcome = 'optimized' | 'skipped' | 'failed' | 'missing' | 'not_image'
+
+/**
+ * K3 (Part 412): normalize ONE stored object NOW -- the queue-side kernel
+ * behind the on-upload path, so a fresh upload doesn't sit oversized for
+ * up to six hours waiting for the sweep to list it. Same rules as
+ * reprocessAuditedImages, one key at a time:
+ *
+ *   - only objects over the ceiling enter the ladder (needsOptimization);
+ *     smaller ones are recorded 'ok' so the sweep needn't re-discover them
+ *   - a result that isn't genuinely smaller is never stored ('no_saving')
+ *   - a failed optimisation leaves the object exactly as it was and
+ *     records why -- nothing here ever deletes or degrades an original
+ */
+export async function normalizeStoredImage(env: Env, key: string): Promise<NormalizeOutcome> {
+  if (!IMAGE_KEY_RE.test(String(key || ''))) return 'not_image'
+  const db = getDb(env)
+  const upsert = (fields: { byteSize: number; status: string; reason?: string | null; provider?: string | null; originalSize?: number | null; optimized?: boolean }) => db.prepare(`
+    INSERT INTO image_audit (key, byte_size, status, reason, provider, original_size, optimized_at, checked_at)
+    VALUES (@key, @byteSize, @status, @reason, @provider, @originalSize, ${fields.optimized ? 'CURRENT_TIMESTAMP' : 'NULL'}, CURRENT_TIMESTAMP)
+    ON CONFLICT(key) DO UPDATE SET
+      byte_size = @byteSize, status = @status, reason = @reason,
+      provider = COALESCE(@provider, image_audit.provider),
+      original_size = COALESCE(image_audit.original_size, @originalSize),
+      ${fields.optimized ? 'optimized_at = CURRENT_TIMESTAMP,' : ''}
+      checked_at = CURRENT_TIMESTAMP
+  `).run({ key, byteSize: fields.byteSize, status: fields.status, reason: fields.reason ?? null, provider: fields.provider ?? null, originalSize: fields.originalSize ?? null })
+
+  const object = await env.ASSETS.get(key)
+  if (!object) return 'missing'
+  const source = await object.arrayBuffer()
+  if (!needsOptimization(source.byteLength)) {
+    await upsert({ byteSize: source.byteLength, status: 'ok' })
+    return 'skipped'
+  }
+  const result = await optimizeImage(env, source, key.split('/').pop() || 'image')
+  if (!result.ok || !result.bytes) {
+    await upsert({ byteSize: source.byteLength, status: 'failed', reason: String(result.reason || 'unknown').slice(0, 120), provider: result.provider })
+    return 'failed'
+  }
+  if (result.byteSize && result.byteSize >= source.byteLength) {
+    await upsert({ byteSize: source.byteLength, status: 'skipped', reason: 'no_saving', provider: result.provider })
+    return 'skipped'
+  }
+  await env.ASSETS.put(key, result.bytes, {
+    httpMetadata: { contentType: result.contentType || 'image/webp' },
+  })
+  await consumeQuota(env, 'r2_class_a', 1)
+  await upsert({ byteSize: result.byteSize || 0, status: 'optimized', provider: result.provider, originalSize: source.byteLength, optimized: true })
+  recordAnalytics(env, { kind: 'image_reprocess', labels: ['on_upload'], values: [1, 0, source.byteLength - (result.byteSize || 0)] })
+  return 'optimized'
+}
+
+/**
+ * The producer half: fire one optimize-image message for a key that was
+ * just written. Deliberately swallowing -- an upload must never fail
+ * because the queue hiccuped, and the 6h sweep remains the safety net
+ * that catches anything this misses (queue absent locally, send error,
+ * consumer crash).
+ */
+export async function enqueueImageNormalization(env: Env, key: string): Promise<void> {
+  if (!env.MEDIA_QUEUE || !IMAGE_KEY_RE.test(String(key || ''))) return
+  try {
+    await env.MEDIA_QUEUE.send({ assetKey: key, kind: 'optimize-image' })
+  } catch (error) {
+    console.error('[image-audit] enqueue failed (the 6h sweep will catch it)', error)
+  }
+}
+
 /**
  * One cron tick: measure, then reprocess a small batch.
  *

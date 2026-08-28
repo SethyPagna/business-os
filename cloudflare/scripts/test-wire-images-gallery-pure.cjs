@@ -107,6 +107,9 @@ const productsRoute = loadReal('routes/products.ts', {
     getMergedPermissions: () => ({}),
   },
   '../lib/audit': { audit: async () => {} },
+  // K3 Part 412: products.ts enqueues on-upload image normalization;
+  // this test asserts gallery wiring, so a no-op stub is honest.
+  '../lib/imageAudit': { enqueueImageNormalization: async () => {} },
   // G1: rules load stubbed empty + promoted-SQL collapsed to a constant --
   // this test asserts pre-existing behavior (sort/wiring), not promotion
   // ranking; test-promotion-rules-pure.cjs covers the real SQL against the

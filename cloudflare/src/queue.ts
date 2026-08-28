@@ -19,6 +19,7 @@ import { getDb } from './lib/db'
 import { runImportAnalyze, runImportApply, markJobFailed } from './lib/importEngine'
 import { runBulkDeleteJob } from './lib/bulkDeleteEngine'
 import { continueCloudflareBackupAssetCopy, type BackupQueueMessage } from './lib/backup'
+import { normalizeStoredImage } from './lib/imageAudit'
 
 type ImportJobMessage = { jobId: string; kind: 'analyze' | 'apply' | 'bulk-delete' }
 type MediaJobMessage = { assetKey: string; kind: 'optimize-video' | 'optimize-image' }
@@ -140,6 +141,14 @@ export async function handleMediaQueue(batch: MessageBatch<MediaJobMessage>, env
   for (const message of batch.messages) {
     try {
       const { assetKey, kind } = message.body
+      if (kind === 'optimize-image') {
+        // K3 (Part 412): the on-upload normalization path -- every image
+        // ASSETS.put enqueues one of these (see enqueueImageNormalization),
+        // so a fresh upload is normalized within seconds instead of waiting
+        // for the 6h sweep. Same never-store-larger / never-delete rules as
+        // the sweep; see lib/imageAudit.ts's normalizeStoredImage.
+        await normalizeStoredImage(env, assetKey)
+      }
       if (kind === 'optimize-video') {
         // ffmpeg cannot run inside a Worker (V8 isolate, no native binaries).
         // Hand off to a Cloudflare Container instead -- a real Docker image

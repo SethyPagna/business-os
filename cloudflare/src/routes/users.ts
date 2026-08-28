@@ -1,4 +1,5 @@
 import { Hono, type Context } from 'hono'
+import { enqueueImageNormalization } from '../lib/imageAudit'
 import bcrypt from 'bcryptjs'
 import { getDb } from '../lib/db'
 import { requireAuth, revokeUserSessions, type SessionUser } from '../lib/auth'
@@ -329,6 +330,8 @@ app.post('/users/avatar-upload', async (c) => {
   const storedName = buildUniqueStoredName(originalName)
   const objectKey = `uploads/${storedName}`
   await c.env.ASSETS.put(objectKey, buffer, { httpMetadata: { contentType: mimeType } })
+  // K3: same on-upload normalization every other image entry point gets.
+  await enqueueImageNormalization(c.env, objectKey)
 
   const publicPath = `/uploads/${storedName}`
   const db = getDb(c.env)
