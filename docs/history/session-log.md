@@ -10040,3 +10040,37 @@ green. No backend changes -- the existing /api/batches receive endpoint
 IS the kernel. Code landed as 4af178a7 (its message already carries the
 419 renumber); the board flip rode a7's 9c1ee47e via an autostash
 collision on the shared file, noted here for the record.
+
+## Part 420 (chat, Aug 28 2026) -- D2 slice: the ledger's filter row
+
+**Session a7.** Branch (AppSelect -- the source check rightly rejected a
+native select) + inclusive date range on the Stock Change ledger; action
+type was already the view chips. All server-side against
+/products/stock-ledger, which took branchId/startDate/endDate from day
+one -- this exposes them. Filters reset pagination; the branch select
+only renders when more than one branch exists.
+
+**Honest scoping of the rest (board note carries it):** a supplier
+filter is NOT implementable truthfully today -- inventory_movements
+never records which batch a movement touched (verified across writers:
+manual adjust inserts carry no reference to the created lot; the sale
+path's reference_id points at the sale). It needs an additive
+movements.batch_id migration with writer stamping first; importEngine's
+writer sits in 05's A4-hot lane, so that lands as its own coordinated
+unit. The page-level Date-scope row on Products AND Inventory (Filter
+button moved onto it) also stays open -- Inventory.tsx was hot with
+9d's F2 while this shipped.
+
+**Also noted:** the unified sale import writes movement quantity
+NEGATIVE ('sale', -qty) while manual writers store magnitudes -- the
+ledger kernel's ABS()-everywhere handles both spellings, worth knowing
+before anyone "normalizes" one of them.
+
+**Dev-server trap addendum (Part 420):** restarting wrangler by killing
+the PID that LISTENS on 8787 kills workerd, not wrangler -- the parent
+node process survives, respawns its workerd, and rebinds the port with
+its ORIGINAL asset snapshot. Repeated restarts this way piled up four
+live wrangler parents fighting over 8787/8788, one serving each
+historical dist. Restart discipline: kill the wrangler PARENT node
+processes (CommandLine match 'wrangler'), not the port holder, then
+boot exactly one.

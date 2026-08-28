@@ -470,7 +470,17 @@ store really paid the rider; margin = charge − cost and is internal only.*
   opens details: a summary section + a detailed mini-ledger incl. batches. Data source is
   the EXISTING movement history — this is a read/UI surface, not a new write path.
   Reuses/absorbs Inventory's "view stock movement" detail (D3).
-- [ ] D2. Filters grow: by supplier, by date range (the new date row), by action type,
+- [~] D2 *(partially advanced, Part 420, session a7: the LEDGER's filter
+  row shipped — branch (AppSelect), inclusive date range, action type
+  (the view chips), all server-side on /stock-ledger which took these
+  params from day one. REMAINING, honestly scoped: (a) supplier — cannot
+  be answered truthfully from existing data: inventory_movements never
+  records which batch a row touched, so it needs an additive
+  movements.batch_id migration + writer stamping first (importEngine's
+  writer is 05's A4-hot lane; coordinate); (b) the page-level Date-scope
+  row below the search row on Products AND Inventory with the Filter
+  button moved onto it — Inventory.tsx hot with 9d's F2 at the time.)*
+  Filters grow: by supplier, by date range (the new date row), by action type,
   by branch. **Date-scope row** sits directly below the search row on Products AND
   Inventory, with the Filter button moved onto it.
 - [ ] D3. Product "click to view details" absorbs Inventory's stock-movement detail, so
