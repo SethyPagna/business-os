@@ -958,10 +958,12 @@ deep-linkable tabs.*
   entries; portal-manifest icon purposes unswapped (any/maskable were crossed,
   so iOS/Android picked the wrong art).
 
-### Phase X — Aug-28 sixteenth batch (Part 395): date+time range, daily sales report, per-contact delivery totals
+### Phase X — Aug-28 sixteenth batch (Part 396): date+time range, daily sales report, per-contact delivery totals
 
 *User batch with two mockups (a date+time range panel; a "Start → End" trigger
-pill). Standing principle recorded as X0. Claimed by session a7 except X5.*
+pill). Standing principle recorded as X0. Claimed by session a7 except X5.
+(Originally headed "Part 395" — session 35's migration-pack entry took 395
+first; renumbered per the reservation protocol.)*
 
 - [x] X0. **Standing principle — old records stay, new flows do it properly.**
   The 0072-re-typed delivery expenses are the OLD system's records, kept as
@@ -970,7 +972,12 @@ pill). Standing principle recorded as X0. Claimed by session a7 except X5.*
   exists), never through text labels/categories; the same applies wherever an
   old-system shape was a text mash — keep the imported data, never build new
   flows on it.
-- [~] X1. **Shared date+time range picker (the mockups).** Trigger = compact
+- [x] X1 *(Part 396: shipped, needs deploy — commits 2bbdad22 + da1e75c9.
+  shared/DateTimeRangePicker.tsx per the mockups; the time row genuinely
+  FILTERS: the kernel gained a viewer-local time-of-day window (client sends
+  its tz offset; overnight windows wrap; existing callers byte-identical,
+  test-pinned). Visual click-through pending — B1's sweep.)* **Shared
+  date+time range picker (the mockups).** Trigger = compact
   "Start → End" pill showing the chosen range; panel = two manual date inputs
   + optional HH:MM–HH:MM time range + month chips (Jan–Dec) + full calendar
   range grid (Mon-first) + year chips + quarter chips (Q1 25 … style) + clear
@@ -978,20 +985,36 @@ pill). Standing principle recorded as X0. Claimed by session a7 except X5.*
   D2 pages. **Flagged, not guessed:** the stock mockup shows DD/MM/YYYY
   placeholders, but mm/dd/yyyy-everywhere is a settled decision (en-US pinned,
   re-swept Part 388/W2) — building with MM/DD/YYYY; say the word to flip.
-- [~] X2. **Sales daily report — "by day report/view, search page when
+- [x] X2 *(Part 396: shipped, needs deploy. Receipts | Daily report switch on
+  Sales; day rows newest-first with range totals; click-a-day breakdown —
+  payments, discounts split with counts, delivery charged/absorbed/actual
+  (n/m recorded)/margin + per-courier lines. /daily-report + /day-report from
+  the shared kernel; 24-check pure test.)* **Sales daily report — "by day
+  report/view, search page when
   clicked".** A Sales-page report section scoped by X1's range: one row per
   day (tx count, subtotal, discounts, delivery, total); clicking a day opens
   its full breakdown — totals from the SHARED salesAnalytics kernel (single-
   source rule), plus per-payment-method totals, the delivery block (charged /
   store-absorbed / actual cost / margin, and per-COURIER lines via
   delivery_contact_id), and discounts split store vs membership.
-- [~] X3. **Per-contact delivery totals — "check expenses of delivery by
+- [x] X3 *(Part 396: shipped, needs deploy. getDeliveryContactTotals grouped
+  by the delivery_contact_id LINK (renames merge under the latest snapshot;
+  unlinked bucket by name; NULL actual costs count as unrecorded, never
+  zero); /delivery-contact-report gated sales-OR-contacts; DeliveryTab
+  detail gains the range-scoped Deliveries drill.)* **Per-contact delivery
+  totals — "check expenses of delivery by
   contact".** Kernel + endpoint aggregating sales by delivery_contact_id
   (deliveries, charged fees, absorbed, actual cost, margin, last delivery);
   DeliveryTab gains a per-contact drill (the supplier Purchases-modal
   pattern). Suppliers already have D5's purchases drill; customers already
   have their sales history in the detail — X3 closes the delivery leg.
-- [ ] X4. **Customer/supplier parity check of X3** — verify the customer
+- [x] X4 *(Part 396: measured — the customer detail had NO purchase totals
+  (points only), a real gap — then closed: getCustomerSalesTotals +
+  /customer-report + a range-scoped Purchases drill on the customer detail
+  (collected incl. customer-paid delivery, discount split, points redeemed,
+  first→last purchase). The per-contact trio is complete: suppliers D5,
+  couriers X3, customers X4. Commit c0943357.)* **Customer/supplier parity
+  check of X3** — verify the customer
   detail's totals cover "same for customer" (purchases total per customer) and
   record any gap as its own item.
 - [ ] X5. **Exports everywhere: Excel AND PDF, multi-option.** Extends H1's

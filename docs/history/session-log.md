@@ -8833,3 +8833,74 @@ vite build; wrangler dry-run.
 into Promotions), G3 (portal promo strip), G4 (brand-first portal
 ordering) stay open. POS promo-filter control and rules-aware admin
 Catalog preview recorded as deliberate scope cuts on the board.
+
+## Part 396 (chat, Aug 28 2026) -- Phase X: range picker, daily sales report, the per-contact trio completed
+
+Session a7. Numbered 396 after re-checking: session 35's migration-pack entry
+took 395 while this batch was in flight (the phase header in progress.md is
+corrected in place with a note). Peer coordination mid-part: the G1 session
+landed and RELEASED its footprint, fixed two integration misses of mine (16
+missing lang keys incl. I2's audit_entity -- their Khmer reviewed on request,
+good as written; and the performanceLoadingUx audit filter-count pin), and
+a remote now exists -- origin/main carries everything.
+
+**Ask (user batch, two mockups).** Date+time range picker ("i still haven't
+seen the range scope date + time"); sales by-day report with breakdowns
+(delivery, discounts, payment methods) "when clicked"; delivery expenses BY
+CONTACT using delivery contacts + sales, "same for supplier, customer"; the
+standing old-vs-new principle ("keep old record but new system we do it
+properly"); exports everywhere as Excel/PDF (X5, spec'd for the H1 owner --
+the xlsx utils were the M7 session's footprint).
+
+**What changed.**
+
+- **X1 -- shared/DateTimeRangePicker.tsx**, built to the mockups: "Start →
+  End" trigger pill; panel with manual MM/DD/YYYY inputs (the settled
+  mm/dd/yyyy decision, flagged vs the mockup's DD/MM artwork), optional
+  HH:MM-HH:MM times, month chips (one tap = that whole month of the view
+  year), Monday-first calendar range grid (auto-swap, today ring), year
+  chips (view switch), quarter quick-ranges, red close + Clear,
+  outside-click close. ISO internally; display by string parts so no
+  timezone shifts a day. **The time row is real**: SalesFilters gained a
+  viewer-local time-of-day window -- created_at is UTC, so the client sends
+  its tz offset (minutes east) and the clause compares
+  time(datetime(created_at, '+N minutes')); overnight windows (22:00-02:00)
+  wrap; callers that omit it are byte-identical (pinned).
+- **X2 -- the Sales daily report.** Receipts | Daily report switch (list
+  chrome hides with the list). Range+time scoped day rows newest-first (tx,
+  revenue, discounts, profit; range totals in the header); clicking a day
+  expands collected/revenue/profit/avg-order chips plus three breakdowns:
+  payment methods (collected = total + customer-PAID delivery only),
+  discounts store-vs-membership with per-kind counts, and the delivery
+  block -- charged / absorbed / actual (n/m recorded) / margin with
+  per-courier lines. Endpoints /daily-report, /day-report; every figure
+  from the shared salesAnalytics kernel.
+- **X3 -- per-courier totals.** getDeliveryContactTotals grouped by the
+  delivery_contact_id LINK (X0: the new system's delivery is structural,
+  never a text label -- the 0072 rows remain the old system's record);
+  renames merge under the latest snapshot, unlinked deliveries bucket by
+  name, NULL actual costs count as UNRECORDED, never zero.
+  /delivery-contact-report (sales-OR-contacts gate); the delivery contact
+  detail gains a range-scoped "Deliveries" drill (supplier-Purchases
+  pattern).
+- **X4 -- customers closed the trio.** Measured: the customer detail had NO
+  purchase totals (loyalty points only). getCustomerSalesTotals +
+  /customer-report + the Purchases drill (collected incl. customer-paid
+  delivery, discount split, points redeemed, first→last). Suppliers (D5),
+  couriers (X3), customers (X4) now all drill the same way.
+- **Lang packs** (cold after G1 released them): the 9 X3/X4 modal keys added
+  to BOTH packs at sorted positions via a line-preserving inserter;
+  langKeyIntegrity green.
+
+**Verified (really run).** test-sales-day-report-pure.cjs 24/24 -- the
+COMPILED kernel (only its two module-boundary lines shimmed, strict) against
+the real 0001+0068 schema: Unknown-method bucketing, collected-vs-total,
+rename merge, unrecorded-cost honesty, contactId scoping, branch filter on
+every block, the +420 local-time shift, overnight wrap, no-time-no-change,
+customer totals. Both tsc clean; test:utils chain exit 0 twice; vite build
+15.45-15.73s; langKeyIntegrity green after the key inserts.
+
+**Not done.** X5 (Excel/PDF export options -- spec'd under Phase X for the H1
+owner). Visual click-through of the new picker/report/drills (B1's sweep; the
+new surfaces are code-verified only). P7-a is now unblocked (POS released) but
+not started this part.
