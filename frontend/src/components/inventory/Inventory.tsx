@@ -658,7 +658,6 @@ export default function Inventory() {
   const [savingReasons, setSavingReasons] = useState(false)
   const [historyReady, setHistoryReady] = useState(false)
   const movementSelectAllRef = useRef<HTMLInputElement | null>(null)
-  const inventorySelectAllRef = useRef<HTMLInputElement | null>(null)
   // Same "edited-but-filtered-out row stays visible until re-search" fix
   // Products.tsx already has (see its own pinnedEditedProductsRef comment,
   // parts 133/139) -- a silent load(true) after a stock adjust/transfer
@@ -2121,11 +2120,6 @@ export default function Inventory() {
     setSelectedProductIds((current) => pruneSelectionToVisibleIds(current, validIds))
   }, [visibleInventoryProductIds])
 
-  useEffect(() => {
-    if (!inventorySelectAllRef.current) return
-    inventorySelectAllRef.current.indeterminate = selectedProductIds.size > 0 && selectedProductIds.size < visibleInventoryProducts.length
-  }, [selectedProductIds.size, visibleInventoryProducts.length])
-
   const toggleSelectedProduct = useCallback((productId: InventoryId) => {
     const numericId = Number(productId)
     if (!Number.isFinite(numericId)) return
@@ -2573,10 +2567,9 @@ export default function Inventory() {
     // by hand, same fix and same root cause as Products.tsx's identical
     // productSelectedLabel bug found in the same audit pass.
     selected: tr('inventory_selected_count', `${selectedProducts.length} selected`).replace('{count}', String(selectedProducts.length)),
-    selectAll: `${tr('select_all', 'Select all')} (${visibleInventoryProducts.length})`,
     batch: tr('inventory_batch_session', 'Batch'),
     reasons: tr('saved_reasons', 'Reasons'),
-  }), [selectedProducts.length, tr, visibleInventoryProducts.length])
+  }), [selectedProducts.length, tr])
   useEffect(() => {
     setCollapsedInventorySections((current) => {
       const validIds = new Set(inventoryProductSections.map((section) => section.id))
@@ -2642,13 +2635,9 @@ export default function Inventory() {
   }, [inventoryProductSafePageSize])
   const inventoryThresholdFormulaText = tr('inventory_formula_thresholds', 'Low/Out counts are derived from stock thresholds')
   const inventoryStockValueFormulaText = tr('inventory_formula_stock_value', 'Stock value = positive quantity x effective cost for all matching stock, not just the visible page')
-  const inventoryNetSoldFormulaText = tr('inventory_formula_net_sold', 'Net sold = sold quantity - returned quantity')
-  const inventoryRevenueFormulaText = tr('inventory_formula_revenue', 'Revenue shown is net after discounts and refunds')
-  const inventoryCogsFormulaText = tr('inventory_formula_cogs', 'COGS excludes quantities restored by restocked returns')
   const inventoryProfitFormulaText = tr('inventory_formula_profit', 'Profit = Revenue - COGS')
   const inventoryDiscountFormulaText = tr('inventory_formula_discounts', 'Discount totals show store-funded and membership-funded reductions allocated across sold items.')
   const inventoryFeesFormulaText = tr('inventory_formula_fees', 'Fees collected combines sales tax and delivery fees captured on completed sales.')
-  const inventoryReturnsFormulaText = tr('inventory_formula_returns', 'Returns combines customer refunds and supplier return cases so you can review every recovery path together.')
   const statsValue = (value: ReactNode) => (stockStatsLoaded ? value : '...')
   const inventoryStatLabels = {
     products: safeT('products', safeT('products_total', 'Products')),
@@ -2747,46 +2736,24 @@ ${inventoryStockValueFormulaText}`,
         { label: inventoryStatLabels.products, value: totalProducts },
       ],
     },
-    {
-      id: 'net-sold',
-      label: inventoryStatLabels.netSold,
-      info: `${tr('inventory_info_net_sold', 'How many items actually left the shop: everything sold, minus anything customers brought back.')}
-
-${inventoryNetSoldFormulaText}`,
-      value: statsValue(totalQtySold),
-      cls: 'text-purple-700 dark:text-purple-300',
-        sub: afterReturnsShortLabel,
-      details: [
-        { label: inventoryStatLabels.netSold, value: totalQtySold },
-        { label: inventoryStatLabels.returnsCount, value: returnStats?.count ?? 0 },
-        { label: tr('items', 'Returned items'), value: returnStats?.items ?? 0 },
-      ],
-    },
+    // Part 388 merges (user): the standalone COGS card held a single row --
+    // it folds into Revenue; Net sold folds into Returns (below). Info text
+    // now leads with the FORMULA carrying the real numbers, not prose only.
     {
       id: 'revenue',
       label: inventoryStatLabels.revenue,
       info: `${tr('inventory_info_revenue', 'Money taken from customers, after refunds are subtracted.')}
 
-${inventoryRevenueFormulaText}`,
+${inventoryStatLabels.revenue} ${fmtUSD(totalRevenue)} − ${inventoryStatLabels.refunded} ${fmtUSD(returnStats?.refund_usd || 0)} = ${fmtUSD(totalRevenue - (returnStats?.refund_usd || 0))}
+${tr('gross_profit', 'Gross profit')} ${fmtUSD(totalRevenue - totalCOGS)} = ${inventoryStatLabels.revenue} ${fmtUSD(totalRevenue)} − ${inventoryStatLabels.cogs} ${fmtUSD(totalCOGS)}`,
       value: statsValue(fmtUSD(totalRevenue)),
       cls: 'text-emerald-600 dark:text-emerald-400',
         sub: afterRefundsShortLabel,
       details: [
         { label: inventoryStatLabels.revenue, value: fmtUSD(totalRevenue) },
         { label: inventoryStatLabels.refunded, value: fmtUSD(returnStats?.refund_usd || 0) },
-      ],
-    },
-    {
-      id: 'cogs',
-      label: inventoryStatLabels.cogs,
-      info: `${tr('inventory_info_cogs', 'What the items you sold originally cost you to buy.')}
-
-${inventoryCogsFormulaText}`,
-      value: statsValue(fmtUSD(totalCOGS)),
-      cls: 'text-orange-600 dark:text-orange-400',
-      sub: inventoryStatLabels.costOfGoodsSold,
-      details: [
         { label: inventoryStatLabels.cogs, value: fmtUSD(totalCOGS) },
+        { label: `${tr('gross_profit', 'Gross profit')} (= ${inventoryStatLabels.revenue} − ${inventoryStatLabels.cogs})`, value: fmtUSD(totalRevenue - totalCOGS) },
       ],
     },
   ]
@@ -2836,14 +2803,24 @@ ${inventoryFeesFormulaText}`,
     {
       id: 'returns',
       label: inventoryStatLabels.returns,
+      // Part 388: Net sold lives here now (its old card merged in) -- the
+      // formula IS the explanation, with the live numbers substituted.
       info: `${tr('inventory_info_returns', 'Items sent back: by customers to you, and by you to suppliers.')}
 
-${inventoryReturnsFormulaText}`,
+${inventoryStatLabels.netSold} ${totalQtySold} = ${tr('items_sold', 'Items sold')} ${totalQtySold + (returnStats?.items ?? 0)} − ${tr('items', 'Returned items')} ${returnStats?.items ?? 0}`,
       value: (returnStats?.count ?? 0) + (returnStats?.supplier_count ?? 0),
       cls: 'text-orange-600 dark:text-orange-400',
       border: 'border-orange-400',
         sub: `${returnStats?.count ?? 0} ${customerShortLabel} | ${returnStats?.supplier_count ?? 0} ${supplierShortLabel}`,
       detailSections: [
+        {
+          title: inventoryStatLabels.netSold,
+          rows: [
+            { label: tr('items_sold', 'Items sold'), value: totalQtySold + (returnStats?.items ?? 0) },
+            { label: tr('items', 'Returned items'), value: returnStats?.items ?? 0 },
+            { label: `${inventoryStatLabels.netSold} (= ${tr('items_sold', 'Items sold')} − ${tr('items', 'Returned items')})`, value: totalQtySold },
+          ],
+        },
         {
           title: t('returns_count') || 'Customer returns',
           rows: [
@@ -3659,25 +3636,21 @@ ${inventoryReturnsFormulaText}`,
           </div>
         </div>
 
-        {showProductsSection ? (
+        {/* 11.2 (B6): the standing "Select all (N)" toolbar control is gone.
+            The bulk toolbar only exists while something IS selected (enter
+            select mode by long-pressing a row); select-all lives on the
+            desktop table's column-header checkbox, and mobile keeps its
+            per-section checkboxes. */}
+        {showProductsSection && hasSelectedProducts ? (
           <div className="bulk-toolbar relative overflow-hidden rounded-2xl border shadow-sm sm:rounded-xl">
-            <div className={inventoryProductControlsRevealReady ? '' : 'invisible'}>
+            <div>
               <div className="px-2 py-2">
-                <div className={`grid items-center gap-1.5 ${hasSelectedProducts ? 'grid-cols-[minmax(0,1fr)_4.25rem_4.6rem]' : 'grid-cols-1'}`}>
-                  <label className="inline-flex min-w-0 flex-1 items-center gap-2 overflow-hidden rounded-2xl border border-slate-200 bg-white/95 px-2.5 py-1.5 text-[11px] font-medium text-slate-700 shadow-sm dark:border-slate-700 dark:bg-slate-900/85 dark:text-slate-100">
-                    <input
-                      ref={inventorySelectAllRef}
-                      type="checkbox"
-                      className="h-4 w-4 shrink-0 rounded"
-                      checked={visibleInventoryProducts.length > 0 && selectedProductIds.size === visibleInventoryProducts.length}
-                      onChange={(event) => toggleSelectAllProducts(event.target.checked)}
-                    />
+                <div className="grid items-center gap-1.5 grid-cols-[minmax(0,1fr)_4.25rem_4.6rem]">
+                  <span className="inline-flex min-w-0 flex-1 items-center gap-2 overflow-hidden rounded-2xl border border-slate-200 bg-white/95 px-2.5 py-1.5 text-[11px] font-medium text-slate-700 shadow-sm dark:border-slate-700 dark:bg-slate-900/85 dark:text-slate-100">
                     <span className="overflow-hidden text-ellipsis whitespace-nowrap">
-                      {hasSelectedProducts
-                        ? inventoryControlLabels.selected
-                        : inventoryControlLabels.selectAll}
+                      {inventoryControlLabels.selected}
                     </span>
-                  </label>
+                  </span>
                   {hasSelectedProducts ? (
                     <>
                       <button
@@ -3707,11 +3680,6 @@ ${inventoryReturnsFormulaText}`,
                 </div>
               </div>
             </div>
-            {!inventoryProductControlsRevealReady ? (
-              <div className="pointer-events-none absolute inset-0 flex items-center px-2 py-2">
-                <div className="h-9 w-full rounded-2xl bg-slate-100 dark:bg-slate-800" />
-              </div>
-            ) : null}
           </div>
         ) : null}
       </div>
@@ -3760,6 +3728,9 @@ ${inventoryReturnsFormulaText}`,
             openAdjust={canAdjustStock ? openAdjust : undefined}
             selectedProductIds={selectedProductIds}
             selectionModeActive={selectionModeActive}
+            selectAllChecked={visibleInventoryProducts.length > 0 && selectedProductIds.size === visibleInventoryProducts.length}
+            selectAllIndeterminate={selectedProductIds.size > 0 && selectedProductIds.size < visibleInventoryProducts.length}
+            onToggleSelectAll={toggleSelectAllProducts}
             getInventoryLongPressState={getInventoryLongPressState}
             setDetailProduct={setDetailProduct}
             showProductsSection={showProductsSection}

@@ -24,6 +24,7 @@ import { useIsPageActive } from '../shared/pageActivity'
 import { useActionHistory } from '../../utils/actionHistory.ts'
 import { runConcurrentTasks } from '../../utils/bulkOps.ts'
 import { pruneSelectionToVisibleIds } from '../../utils/rowSelection.ts'
+import { createLongPressState, type LongPressState } from '../../utils/longPress.ts'
 import { buildTimeActionSections, getAvailableYears, getTimeGroupingMode, toggleIdSet } from '../../utils/groupedRecords.ts'
 import { buildPeriodFilterOptions } from '../../utils/periodFilterOptions.ts'
 import { beginKeyedAction, beginSingleAction, finishKeyedAction, finishSingleAction } from '../../utils/actionGuards.ts'
@@ -225,6 +226,22 @@ export default function Sales() {
   const [yearFilter, setYearFilter] = useState('all')
   const [monthFilter, setMonthFilter] = useState('all')
   const [selectedIds, setSelectedIds] = useState<Set<number>>(() => new Set())
+  // 11.1/11.2 (B6): same selection model as Products/Inventory -- checkboxes
+  // only exist while something is selected; a long-press on a row/card
+  // enters select mode; the desktop column-header checkbox is select-all.
+  // Ends automatically once the last item is deselected.
+  const selectionModeActive = selectedIds.size > 0
+  // One long-press slot per visible row, keyed by sale id -- same reasoning
+  // as Products.tsx/Inventory.tsx: SalesListSurface renders rows inside a
+  // .map(), not as mounted components, so the mutable state lives here.
+  const saleLongPressStateByRowIdRef = useRef<Map<number, LongPressState>>(new Map())
+  const getSaleLongPressState = useCallback((rowId: number): LongPressState => {
+    const existing = saleLongPressStateByRowIdRef.current.get(rowId)
+    if (existing) return existing
+    const created = createLongPressState()
+    saleLongPressStateByRowIdRef.current.set(rowId, created)
+    return created
+  }, [])
   const [selectedSale, setSelectedSale] = useState<SaleRecord | null>(null)
   const [detailSale, setDetailSale] = useState<SaleRecord | null>(null)
   const [showExport, setShowExport] = useState(false)
@@ -1116,6 +1133,8 @@ export default function Sales() {
         salesSections={salesSections as SalesListSurfaceProps['salesSections']}
         selectAllRef={selectAllRef as SalesListSurfaceProps['selectAllRef']}
         selectedIds={selectedIds}
+        selectionModeActive={selectionModeActive}
+        getSaleLongPressState={getSaleLongPressState}
         setDetailSale={(sale) => setDetailSale(sale as SaleRecord)}
         setSelectedSale={(sale) => setSelectedSale(sale as SaleRecord)}
         showSalesActionGroups={showSalesActionGroups}

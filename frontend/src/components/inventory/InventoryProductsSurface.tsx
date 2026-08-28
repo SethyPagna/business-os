@@ -108,6 +108,14 @@ type InventoryProductsSurfaceProps = {
   // selection inside it. See getInventoryLongPressState's own comment on
   // Inventory.tsx for why this state lives in the parent, not here.
   selectionModeActive: boolean
+  // 11.2 (B6): in select mode the desktop column-header checkbox IS the
+  // select-all control -- the separate toolbar "Select all (N)" button is
+  // gone. Checked/indeterminate state is computed by Inventory.tsx from the
+  // same visible-ids set toggleSelectAllProducts operates on, so the header
+  // can never disagree with what toggling it would do.
+  selectAllChecked: boolean
+  selectAllIndeterminate: boolean
+  onToggleSelectAll: (checked: boolean) => void
   getInventoryLongPressState: (rowId: number) => LongPressState
   setDetailProduct: (product: InventoryProductRow) => void
   showProductsSection?: boolean
@@ -149,6 +157,9 @@ export default function InventoryProductsSurface({
   openAdjust,
   selectedProductIds,
   selectionModeActive,
+  selectAllChecked,
+  selectAllIndeterminate,
+  onToggleSelectAll,
   getInventoryLongPressState,
   setDetailProduct,
   showProductsSection,
@@ -215,11 +226,32 @@ export default function InventoryProductsSurface({
   }
   const flashClassName = 'ring-2 ring-blue-400 dark:ring-blue-500 bg-blue-50 dark:bg-blue-900/20 transition-colors duration-[1400ms]'
 
+  // 11.1 (B6): the checkbox column only takes space in SELECT mode -- out of
+  // select mode every first-column cell drops its padding and content, so
+  // the auto table layout collapses the column to nothing. 11.2: in select
+  // mode the header cell carries the real select-all checkbox (the toolbar
+  // "Select all (N)" control is gone -- Inventory.tsx renders its bulk
+  // toolbar only once something is selected).
+  const selectCellPad = selectionModeActive ? 'px-3' : 'px-0'
+
   const renderDesktopTableHead = (showSelectionControl: boolean) => (
     <thead className="bg-gray-50 dark:bg-gray-700/50 sticky top-0 z-10">
       <tr>
-        <th className="px-3 py-1.5 text-left font-semibold text-gray-600 dark:text-gray-400">
-          {showSelectionControl ? <span className="sr-only">{t('select') || 'Select'}</span> : <span className="sr-only">loading</span>}
+        <th className={`${selectCellPad} py-1.5 text-left font-semibold text-gray-600 dark:text-gray-400`}>
+          {showSelectionControl && selectionModeActive ? (
+            <input
+              type="checkbox"
+              className="h-4 w-4 rounded"
+              checked={selectAllChecked}
+              ref={(node) => {
+                if (node) node.indeterminate = selectAllIndeterminate
+              }}
+              onChange={(event) => onToggleSelectAll(event.target.checked)}
+              aria-label={t('select_all') || 'Select all'}
+            />
+          ) : (
+            <span className="sr-only">{showSelectionControl ? (t('select') || 'Select') : 'loading'}</span>
+          )}
         </th>
         <th className="text-left px-3 py-1.5 font-semibold text-gray-600 dark:text-gray-400 min-w-[140px]">{t('product_name')}</th>
         <th className="text-right px-3 py-1.5 font-semibold text-gray-600 dark:text-gray-400 whitespace-nowrap">{t('current_stock')}</th>
@@ -549,7 +581,7 @@ export default function InventoryProductsSurface({
                 return (
                   <Fragment key={section.id}>
                     <tr className="bg-slate-50 dark:bg-slate-800/60" data-inventory-jump-id={section.id}>
-                      <td className="px-3 py-2">
+                      <td className={`${selectCellPad} py-2`}>
                         {selectionModeActive ? (
                         <input
                           type="checkbox"
@@ -580,7 +612,7 @@ export default function InventoryProductsSurface({
                         <Fragment key={group.key}>
                           {showGroupRow ? (
                             <tr className="bg-white dark:bg-gray-800/70">
-                              <td className="px-3 py-2">
+                              <td className={`${selectCellPad} py-2`}>
                                 {selectionModeActive ? (
                                 <input
                                   type="checkbox"
@@ -652,7 +684,7 @@ export default function InventoryProductsSurface({
                                 onClick={selectionModeActive ? handleRowClick : undefined}
                                 {...(selectionModeActive ? {} : longPress)}
                               >
-                                <td className={`px-3 py-1 ${showGroupRow ? 'pl-4' : ''}`} onClick={(event) => event.stopPropagation()}>
+                                <td className={`${selectCellPad} py-1 ${selectionModeActive && showGroupRow ? 'pl-4' : ''}`} onClick={(event) => event.stopPropagation()}>
                                   {selectionModeActive ? (
                                   <input
                                     type="checkbox"

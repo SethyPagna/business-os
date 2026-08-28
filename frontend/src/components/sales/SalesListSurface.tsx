@@ -2,6 +2,7 @@ import { Fragment, type RefObject } from 'react'
 import ChevronDown from 'lucide-react/dist/esm/icons/chevron-down.js'
 import ChevronRight from 'lucide-react/dist/esm/icons/chevron-right.js'
 import StatusBadge from './StatusBadge.tsx'
+import { consumeLongPressClick, createLongPressHandlers, type LongPressState } from '../../utils/longPress.ts'
 
 type TranslateFn = (key: string) => string
 type MoneyFormatter = (value: number | string) => string
@@ -54,6 +55,12 @@ interface SalesListSurfaceProps {
   salesSections: SalesSection[]
   selectAllRef: RefObject<HTMLInputElement>
   selectedIds: Set<number>
+  // 11.1/11.2 (B6), same selection model as Products/Inventory: checkboxes
+  // and the select column only exist while something IS selected; enter
+  // select mode by long-pressing a row (click-and-hold with a mouse). The
+  // desktop column-header checkbox is the select-all control.
+  selectionModeActive: boolean
+  getSaleLongPressState: (rowId: number) => LongPressState
   setDetailSale: (sale: SaleRecord) => void
   setSelectedSale: (sale: SaleRecord) => void
   showSalesActionGroups: boolean
@@ -83,6 +90,8 @@ export default function SalesListSurface({
   salesSections,
   selectAllRef,
   selectedIds,
+  selectionModeActive,
+  getSaleLongPressState,
   setDetailSale,
   setSelectedSale,
   showSalesActionGroups,
@@ -94,6 +103,10 @@ export default function SalesListSurface({
 }: SalesListSurfaceProps) {
   const skeletonRows = Array.from({ length: 8 }, (_, index) => index)
   const mobileSkeletonCards = Array.from({ length: 4 }, (_, index) => index)
+  // 11.1: the checkbox column only takes space in select mode; out of it
+  // every first-column cell drops padding/content and auto layout collapses
+  // the column.
+  const selectCellPad = selectionModeActive ? 'px-3' : 'px-0'
 
   return (
     <>
@@ -102,15 +115,17 @@ export default function SalesListSurface({
           <table className="w-full text-sm" style={{ minWidth: 760 }}>
             <thead className="sticky top-0 bg-gray-50 dark:bg-gray-700/50">
               <tr>
-                <th className="w-10 px-3 py-3">
-                  <input
-                    ref={selectAllRef}
-                    type="checkbox"
-                    className="h-4 w-4 rounded"
-                    checked={filteredIds.length > 0 && selectedIds.size === filteredIds.length}
-                    onChange={(event) => toggleSelectAll(event.target.checked)}
-                    aria-label="Select all sales"
-                  />
+                <th className={`${selectionModeActive ? 'w-10' : 'w-0'} ${selectCellPad} py-3`}>
+                  {selectionModeActive ? (
+                    <input
+                      ref={selectAllRef}
+                      type="checkbox"
+                      className="h-4 w-4 rounded"
+                      checked={filteredIds.length > 0 && selectedIds.size === filteredIds.length}
+                      onChange={(event) => toggleSelectAll(event.target.checked)}
+                      aria-label="Select all sales"
+                    />
+                  ) : null}
                 </th>
                 <th className="px-4 py-3 text-left font-semibold text-gray-600 dark:text-gray-400">{t('receipt_number')}</th>
                 <th className="px-4 py-3 text-left font-semibold text-gray-600 dark:text-gray-400">{t('date')}</th>
@@ -127,7 +142,7 @@ export default function SalesListSurface({
               {loading ? (
                 skeletonRows.map((row) => (
                   <tr key={`sale-skeleton-${row}`} className="animate-pulse">
-                    <td className="px-3 py-3"><div className="h-4 w-4 rounded bg-slate-200 dark:bg-slate-700" /></td>
+                    <td className={`${selectCellPad} py-3`} />
                     <td className="px-4 py-3"><div className="h-4 w-40 rounded bg-slate-200 dark:bg-slate-700" /></td>
                     <td className="px-4 py-3"><div className="h-3 w-24 rounded bg-slate-200 dark:bg-slate-700" /></td>
                     <td className="px-4 py-3"><div className="h-5 w-20 rounded-full bg-slate-200 dark:bg-slate-700" /></td>
@@ -149,6 +164,7 @@ export default function SalesListSurface({
                       <td colSpan={10} className="px-4 py-2">
                         <div className="flex items-center justify-between gap-3 text-xs">
                           <label className="inline-flex min-w-0 items-center gap-2 font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
+                            {selectionModeActive ? (
                             <input
                               type="checkbox"
                               className="h-4 w-4 rounded"
@@ -159,6 +175,7 @@ export default function SalesListSurface({
                               onChange={(event) => toggleSelectionScope(section.ids, event.target.checked)}
                               aria-label={`Select ${section.label}`}
                             />
+                            ) : null}
                             <span>{section.label}</span>
                             <span className="text-slate-400">{section.ids.length} sale{section.ids.length === 1 ? '' : 's'}</span>
                           </label>
@@ -179,6 +196,7 @@ export default function SalesListSurface({
                           <tr className="bg-slate-50/80 dark:bg-slate-900/30">
                             <td colSpan={10} className="px-6 py-2">
                               <div className="flex flex-wrap items-center gap-3 text-xs">
+                                {selectionModeActive ? (
                                 <input
                                   type="checkbox"
                                   className="h-4 w-4 rounded"
@@ -189,6 +207,7 @@ export default function SalesListSurface({
                                   onChange={(event) => toggleSelectionScope(group.ids, event.target.checked)}
                                   aria-label={`Select ${group.label}`}
                                 />
+                                ) : null}
                                 <span className="font-medium text-slate-600 dark:text-slate-300">{group.label}</span>
                                 <span className="text-slate-400">{group.items.length}</span>
                               </div>
@@ -201,20 +220,38 @@ export default function SalesListSurface({
                           const totalKhr = sale.total_khr || 0
                           const status = sale.sale_status || 'completed'
                           const branchLabel = getSaleBranchLabel(sale)
+                          const rowSelected = selectedIds.has(Number(sale.id))
+                          // Same long-press-to-select-mode pattern as Products/
+                          // Inventory rows: out of select mode a plain click
+                          // opens the detail and a hold starts selection; in
+                          // select mode a plain click toggles.
+                          const rowLongPressState = getSaleLongPressState(Number(sale.id))
+                          const longPress = createLongPressHandlers(rowLongPressState, {
+                            disabled: selectionModeActive,
+                            onLongPress: () => toggleSelected(sale.id),
+                            onClick: () => setDetailSale(sale),
+                          })
+                          const handleRowClick = () => {
+                            if (consumeLongPressClick(rowLongPressState)) return
+                            toggleSelected(sale.id)
+                          }
                           return (
                             <tr
                               key={sale.id}
-                              className={`table-row cursor-pointer hover:bg-blue-50 dark:hover:bg-blue-900/10 ${status === 'cancelled' ? 'opacity-60' : ''}`}
-                              onClick={() => setDetailSale(sale)}
+                              className={`table-row cursor-pointer select-none hover:bg-blue-50 dark:hover:bg-blue-900/10 ${rowSelected ? 'bg-blue-50 dark:bg-blue-900/20' : ''} ${status === 'cancelled' ? 'opacity-60' : ''}`}
+                              onClick={selectionModeActive ? handleRowClick : undefined}
+                              {...(selectionModeActive ? {} : longPress)}
                             >
-                              <td className="px-3 py-2.5" onClick={(event) => event.stopPropagation()}>
+                              <td className={`${selectCellPad} py-2.5`} onClick={(event) => event.stopPropagation()}>
+                                {selectionModeActive ? (
                                 <input
                                   type="checkbox"
                                   className="h-4 w-4 rounded"
-                                  checked={selectedIds.has(Number(sale.id))}
+                                  checked={rowSelected}
                                   onChange={() => toggleSelected(sale.id)}
                                   aria-label={`Select ${sale.receipt_number}`}
                                 />
+                                ) : null}
                               </td>
                               <td className="px-4 py-2.5 font-mono font-medium text-blue-600 dark:text-blue-400">{sale.receipt_number}</td>
                               <td className="px-4 py-2.5 whitespace-nowrap text-xs text-gray-500">{fmtTime(sale.created_at)}</td>
@@ -292,6 +329,7 @@ export default function SalesListSurface({
               <div className="rounded-xl bg-slate-100 px-3 py-2 dark:bg-slate-800/70">
                 <div className="flex items-center justify-between gap-3 text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
                   <label className="inline-flex min-w-0 items-center gap-2">
+                    {selectionModeActive ? (
                     <input
                       type="checkbox"
                       className="h-4 w-4 rounded"
@@ -302,6 +340,7 @@ export default function SalesListSurface({
                       onChange={(event) => toggleSelectionScope(section.ids, event.target.checked)}
                       aria-label={`Select ${section.label}`}
                     />
+                    ) : null}
                     <span>{section.label}</span>
                     <span className="normal-case tracking-normal text-slate-400">{section.ids.length}</span>
                   </label>
@@ -316,6 +355,7 @@ export default function SalesListSurface({
                   {showSalesActionGroups ? (
                     <div className="px-2 text-xs font-medium text-slate-500 dark:text-slate-400">
                       <div className="inline-flex items-center gap-2">
+                        {selectionModeActive ? (
                         <input
                           type="checkbox"
                           className="h-4 w-4 rounded"
@@ -326,6 +366,7 @@ export default function SalesListSurface({
                           onChange={(event) => toggleSelectionScope(group.ids, event.target.checked)}
                           aria-label={`Select ${group.label}`}
                         />
+                        ) : null}
                         <span>{group.label}</span>
                         <span className="text-slate-400">{group.items.length}</span>
                       </div>
@@ -337,19 +378,41 @@ export default function SalesListSurface({
                     const totalKhr = sale.total_khr || 0
                     const status = sale.sale_status || 'completed'
                     const branchLabel = getSaleBranchLabel(sale)
+                    const cardSelected = selectedIds.has(Number(sale.id))
+                    // Mobile mirror of the desktop rows' long-press pattern --
+                    // the card and the row share one per-sale state slot, which
+                    // is fine: only one of the two layouts is interactive at a
+                    // given viewport width.
+                    const cardLongPressState = getSaleLongPressState(Number(sale.id))
+                    const cardLongPress = createLongPressHandlers(cardLongPressState, {
+                      disabled: selectionModeActive,
+                      onLongPress: () => toggleSelected(sale.id),
+                      onClick: () => setDetailSale(sale),
+                    })
+                    const handleCardClick = () => {
+                      if (consumeLongPressClick(cardLongPressState)) return
+                      toggleSelected(sale.id)
+                    }
                     return (
-                      <div key={sale.id} className="card cursor-pointer p-3 active:bg-blue-50 dark:active:bg-blue-900/10" onClick={() => setDetailSale(sale)}>
+                      <div
+                        key={sale.id}
+                        className={`card cursor-pointer select-none p-3 active:bg-blue-50 dark:active:bg-blue-900/10 ${cardSelected ? 'ring-1 ring-blue-300 bg-blue-50/60 dark:ring-blue-700 dark:bg-blue-900/20' : ''}`}
+                        onClick={selectionModeActive ? handleCardClick : undefined}
+                        {...(selectionModeActive ? {} : cardLongPress)}
+                      >
                         <div className="flex items-start justify-between gap-2">
                           <div className="min-w-0 flex-1">
                             <div className="mb-1 flex flex-wrap items-center gap-2">
+                              {selectionModeActive ? (
                               <input
                                 type="checkbox"
                                 className="h-4 w-4 rounded"
-                                checked={selectedIds.has(Number(sale.id))}
+                                checked={cardSelected}
                                 onChange={() => toggleSelected(sale.id)}
                                 onClick={(event) => event.stopPropagation()}
                                 aria-label={`Select ${sale.receipt_number}`}
                               />
+                              ) : null}
                               <span className="font-mono text-sm font-semibold text-blue-600 dark:text-blue-400">{sale.receipt_number}</span>
                               <span className="text-xs text-gray-400">{fmtTime(sale.created_at)}</span>
                               <span className="badge-blue text-xs">{sale.payment_method || 'N/A'}</span>
