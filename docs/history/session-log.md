@@ -8025,3 +8025,45 @@ wrangler dry-run OK; harness applies all **67** migrations with 0066 present.
 **Not done.** Deploy (0061–0066 ride the next `npm run deploy:full`); D5's
 supplier purchases/cost summary READ view; the two customer merges (user);
 the ordered remainder (P7, P3, P4, P6, K6, G1, D1b, H1, N1c, N2, N3, A3).
+
+## Part 384 (chat, Aug 28 2026) — the review step was already done; names normalized + propagated; D5 ships
+
+**Asked.** "Do this for me" on README's "Decide the 72 review + 17 new rows" step
+(+ re-sent the Part-375 decision list), with new naming rules — every word's first
+character uppercase, no dashes, single spaces; matching products follow the
+existing names; tell me what to import, with suppliers; 3-device cap + clear
+devices; continue the redesign.
+
+**What changed.**
+- S1: the step was ALREADY DONE (Part 375) — every named instruction re-audited
+  and confirmed present in `product_mapping_review_VERIFIED.csv` (Dior 436/999
+  reorder, all ten deletes, YSL Caring Satin 04, Miss Dior Lip Glow 1947, the
+  Dior Addict Duo Lip Glow Sets, Clinique Clarifying Lotion 2, Rouge Dior
+  Forever 558 Grace, Snow UV double-space fix, 5 Couleurs similar-check). The
+  stale README checklist is superseded and points at IMPORT-MANIFEST.
+- S2: naming rules applied — 10 of 73 names changed (incl. em-dash removal on
+  Rhode Pocket Blush Freckle). The propagation audit then caught a REAL bug-in-
+  waiting: the sales/stock files still carried the OLD names for the 73 (e.g.
+  `Rhode Frekle`), which R1's strict name+barcode identity would now reject at
+  import. 355 rows re-identified across stock_in_history, sales-import-2024/25/
+  26, and stock_adjustments (barcode-first, the 5 barcode-less adds by exact old
+  name); product_mapping.csv records final names; xlsx twins regenerated;
+  validation suite fully re-passed. Consistency check: 0 wrong rows, 0 dashes,
+  0 double spaces, 0 lowercase word-starts across all final names.
+- S3: devices verified read-only on production — trusted_devices 0, sessions 94
+  with 2 live (the admin's own): the Part 375 wipe holds, nothing to clear; the
+  3-device cap rides the pending deploy.
+- S4 (D5, `47d5ce3f`): migration 0067 `received_quantity`
+  (cumulative, written by BOTH receive paths, redelivery-safe), the gated
+  GET /suppliers/:id/purchases (per-lot product/received/cost/remaining/credit
+  + honest totals with `batches_without_cost`), and the Purchases drill in the
+  supplier detail modal. Deployed before the history import runs, so the 21k
+  rows land with real received totals per supplier.
+
+**Verified.** Backend sweep **84/84**; frontend chain **116/116 + check:source**;
+both typechecks; build 17.03s; wrangler dry-run; harness **68 migrations** with
+0067 present; pack ALL VALIDATIONS PASSED after the renames.
+
+**Not done.** Deploy (0061–0067 ride `npm run deploy:full`); the imports
+themselves (manifest order); the two customer merges; ordered remainder
+(P7, P3, P4, P6, K6, G1, D1b, H1, N1c, N2, N3, A3).

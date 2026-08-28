@@ -350,7 +350,11 @@ store really paid the rider; margin = charge − cost and is internal only.*
   first attribution sticks, later adds never rewrite it, a blank changes nothing
   (all test-proven). **Remaining:** the manual add-stock/receive UI supplier picker,
   and the read surfaces below (D3 supplier section, per-supplier totals).
-- [ ] D5. **Supplier accounting**: per-supplier totals (how much bought), auto-derived
+- [x] D5. **Supplier accounting** *(Part 384: shipped — 0067 `received_quantity`
+  written by both receive paths, GET /suppliers/:id/purchases under the
+  contacts_suppliers gate, Purchases drill in the supplier detail modal with
+  per-lot cost/credit and honest `batches_without_cost` for pre-tracking lots;
+  "awaiting payment" = the credit state, admin-reminded via Q1)*: per-supplier totals (how much bought), auto-derived
   from batches/add-stock; per-add-stock payment status incl. **awaiting payment**;
   add/create stock can pick the supplier. Supplier lives on the batch/receipt level and
   FOLDS into the product as a "Supplier" section — child rows inherit the group's
@@ -703,6 +707,29 @@ deep-linkable tabs.*
   goes back only to status_before_cancel, deletes the linked lost-fee row, and
   re-deducts through the same formula. Migration 0066 adds cancel_reason/cancel_note/
   cancelled_at/cancelled_by_name/status_before_cancel/cancel_fee_id.
+
+### Phase S — Aug-28 eleventh batch (Part 384)
+
+- [x] S1. **The "decide the 72 review rows" step was already DONE — stale docs fixed.**
+  The user found `README.md`'s old checklist still saying "Decide the 72 review + 17
+  new rows"; the decisions closed in Part 375 (89 rows: 73 add / 6 merge / 10 delete,
+  every named instruction verified present in `product_mapping_review_VERIFIED.csv`).
+  README superseded → points at IMPORT-MANIFEST; manifest Step 2 notes the naming pass.
+- [x] S2. **Naming rules applied + propagated (the real find).** New rules: every word
+  starts uppercase, NO dashes (hyphen/en/em), single spaces — 10 of the 73 names
+  changed (Rhode Pocket Blush Freckle, Dior Hydra Life 2 In 1, TheBalm, Bobbi Brown
+  W 066 shades, Clinique ID…). Propagation audit found the sales/stock files still
+  carried the OLD names for the 73 (e.g. `Rhode Frekle`) — under R1's strict
+  name+barcode identity those rows would ERROR at import. **355 rows re-identified**
+  across stock_in_history + all three sales files + stock_adjustments (barcode-first;
+  the 5 barcode-less adds by exact old name); `product_mapping.csv` records the final
+  names; xlsx twins regenerated; full validation suite re-passed. Template names stay
+  untouched (authority rule).
+- [x] S3. **Devices verified (read-only).** trusted_devices = 0 (Part 375 wipe holds),
+  user_sessions 94 with only 2 live (the admin's own) — nothing to clear; the 3-device
+  cap ships with the pending deploy and everyone re-registers under it.
+- [x] S4. **D5 shipped** — see D5 above (0067 received_quantity + purchases endpoint +
+  supplier detail Purchases drill).
 
 ### Flagged, not guessed (Golden Rule 7)
 
@@ -1750,20 +1777,21 @@ the switch and its reasoning are recorded in `wrangler.toml`.
 
 ## Current status
 
-**As of Part 383 (Aug 28 2026).** Everything below was really run in this local Windows
+**As of Part 384 (Aug 28 2026).** Everything below was really run in this local Windows
 checkout with full `node_modules`, working `better-sqlite3`, and network access — see
 [Environment notes](#environment-notes). Golden Rule 5: a claim here is not evidence; these
 are the commands' actual results this session.
 
 | Check | Result |
 |---|---|
-| `frontend` `tsc --noEmit` | **clean** (Part 383 rerun after the cancel flow + supplier-privacy UI) |
-| `cloudflare` `tsc --noEmit` | **clean** (Part 383 rerun after 0066 + saleTransitions + contacts gate) |
-| Backend `scripts/test-*.cjs` (swept individually, not via a chain) | **84 / 84 pass** (Part 383 sweep; +test-import-identity-rule-pure, +test-sale-cancel-pure) |
-| Frontend `npm run test:utils` (full chain: `typecheck` → `verify:public-runtime` → `check:source` → all 116 `tests/*.test.ts`) | **green** (Part 383 rerun; actionStability + performanceLoadingUx pins updated to the new call shapes) |
-| Real `vite build` | **succeeds (12.57s)**; only the two pre-existing catalog circular warnings |
-| Migration harness | **all 67 migrations apply cleanly** (Part 383, 0066 columns verified present); `0061`–`0066` are committed but **not deployed** — the next `npm run deploy:full` carries them |
-| Migration pack re-validation (R1b) | **ALL VALIDATIONS PASSED** rerun; 0064 replay = exactly 4,240 rows / USD 129,696.60 / KHR 82,419,900, zero mojibake |
+| `frontend` `tsc --noEmit` | **clean** (Part 384 rerun after the purchases modal + supplier drill) |
+| `cloudflare` `tsc --noEmit` | **clean** (Part 384 rerun after 0067 + purchases endpoint) |
+| Backend `scripts/test-*.cjs` (swept individually, not via a chain) | **84 / 84 pass** (Part 384 sweep on the final state, incl. cumulative received_quantity + endpoint gate locks) |
+| Frontend `npm run test:utils` (full chain: `typecheck` → `verify:public-runtime` → `check:source` → all 116 `tests/*.test.ts`) | **green** (Part 384 rerun, plus check:source) |
+| Real `vite build` | **succeeds (17.03s)**; only the two pre-existing catalog circular warnings |
+| Migration harness | **all 68 migrations apply cleanly** (Part 384, `received_quantity` verified present); `0061`–`0067` are committed but **not deployed** — the next `npm run deploy:full` carries them |
+| Migration pack (after the S2 name propagation) | **ALL VALIDATIONS PASSED** rerun (quantities exact vs footer, revenue 0.02%, Khmer byte-perfect, zero scientific barcodes); xlsx round-trip OK |
+| Production devices (read-only D1 query) | trusted_devices **0**, user_sessions 94 (**2 live**) — the Part 375 clean slate holds |
 
 **Part 370 additions:** the master plan (top of file) is now the queue; the in-flight
 stats/tooltip work was finished and committed (`9d93db56`); the empty
