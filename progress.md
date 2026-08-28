@@ -561,6 +561,11 @@ deep-linkable tabs.*
   always shown FIRST — they occupy a higher-order block above the alphabetical run and
   the A–Z rail applies after them (Products, POS, portal alike). Filters exist for
   every one of these states (promoted / discounted / by promotion).
+- [~] G2-G4 *(IN PROGRESS — claimed by session 6e, Part 399. Footprint:
+  PromotionsPage + LoyaltyPointsPage embed + nav/pathRouting/AppContext perm
+  gates, portal PublicCatalogPage/CatalogProductsSection + routes/portal.ts
+  ordering+initials, lang packs additive. NOT touching POS.tsx (a7 holds
+  P7-a) or receipt files (35).)*
 - [ ] G2. Loyalty Points moves in as a Promotions section (E5).
 - [ ] G3. Portal promo strip: one auto-scrolling row above search; "·" dots represent each
   promoted product/promotion, click a dot to jump. Promos render Title + discount.
