@@ -295,7 +295,13 @@ const { hasPermission, hasAnyPermission, isAdminControlUser } = lib
 
   const notificationsSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'routes', 'notifications.ts'), 'utf8')
   assert.match(notificationsSrc, /preferences\.supplierCreditEnabled && isAdminControlUser\(user\)/, 'supplier-credit reminders (money owed) must be admin-control only')
-  console.log('PASS suppliers section is gated (contacts_suppliers / admin), name-only list stays open, credit reminders are admin-only')
+  // D5: the purchases drill (per-lot received totals x unit cost = money
+  // spent with a supplier) must live under /suppliers/* so the same gate
+  // covers it -- registering it anywhere else would leak cost data past
+  // the contacts_suppliers permission.
+  assert.match(contactsSrc, /app\.get\('\/suppliers\/:id\/purchases', async \(c\) => \{/, 'the supplier purchases endpoint must sit under the gated /suppliers/* prefix')
+  assert.match(contactsSrc, /pb\.received_quantity,\s*\n\s*pb\.unit_cost_usd, pb\.payment_status, pb\.credit_due_date/, 'purchases rows carry received totals + cost + credit state')
+  console.log('PASS suppliers section is gated (contacts_suppliers / admin), name-only list stays open, credit reminders are admin-only, purchases drill sits inside the gate')
 }
 
 console.log('\nAll route-permission regression checks passed.')

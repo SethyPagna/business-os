@@ -225,6 +225,15 @@ export async function applyUnifiedStockAdd(db: D1Compat, input: UnifiedStockAddI
       params,
     },
     {
+      // Cumulative received total (0067): EVERY applied add counts, create
+      // and top-up alike — unlike the fill-if-NULL attribution above. The
+      // pending guard keeps redeliveries from double-counting, same as
+      // every other statement in this batch.
+      sql: `UPDATE product_batches SET received_quantity = COALESCE(received_quantity, 0) + @quantity
+            WHERE variant_product_id = @productId AND batch_key = @batchKey AND ${guard}`,
+      params,
+    },
+    {
       sql: `INSERT INTO branch_batch_stock (batch_id, branch_id, quantity)
             SELECT id, @branchId, @quantity FROM product_batches
             WHERE variant_product_id = @productId AND batch_key = @batchKey AND ${guard}

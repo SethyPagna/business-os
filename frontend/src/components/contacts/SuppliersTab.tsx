@@ -40,11 +40,12 @@ import {
 import type { ContactOption } from './contactOptionUtils'
 
 const ContactImportModal = lazyRetry(() => import('./ContactImportModal'), 'suppliers-contact-import')
+const SupplierPurchasesModal = lazyRetry(() => import('./SupplierPurchasesModal'), 'suppliers-purchases-modal')
 const SUPPLIER_MUTATION_TIMEOUT_MS = 12000
 
 type TranslateFn = (key: string) => string | undefined
 type NotifyFn = (message: string, tone?: string) => void
-type ContactModal = 'form' | 'import' | 'detail' | null
+type ContactModal = 'form' | 'import' | 'detail' | 'purchases' | null
 type SortDirection = 'asc' | 'desc'
 type SupplierGroupMode = 'time' | 'alphabet'
 
@@ -1120,7 +1121,20 @@ function SuppliersTab({ t, notify, active = true, initialSearch }: SuppliersTabP
           onDelete={canDeleteContact ? () => handleDelete(selected) : undefined}
           onClose={() => { setModal(null); setSelected(null) }}
           t={t}
+          extraButtons={[{ label: tr('supplier_purchases', 'Purchases'), onClick: () => setModal('purchases') }]}
         />
+      ) : null}
+
+      {modal === 'purchases' && selected ? (
+        <Suspense fallback={null}>
+          <SupplierPurchasesModal
+            supplierId={selected.id as number}
+            supplierName={String(selected.name || '')}
+            fetchPurchases={async (id) => (await loadContactReadTransportModule()).getSupplierPurchases(id)}
+            onClose={() => setModal('detail')}
+            t={t}
+          />
+        </Suspense>
       ) : null}
     </div>
   )

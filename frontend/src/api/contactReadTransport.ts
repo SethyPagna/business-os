@@ -162,6 +162,13 @@ export function getSuppliers(params: QueryParams = {}): Promise<unknown> {
   return readContacts(SUPPLIER_READ, params)
 }
 
+// D5 (Part 384): every batch attributed to one supplier, with received
+// totals, unit costs, remaining stock, and paid/credit state. Server-gated
+// by the contacts_suppliers permission like the rest of /suppliers.
+export function getSupplierPurchases(id: number | string): Promise<unknown> {
+  return apiFetch('GET', `/api/suppliers/${encodeURIComponent(String(id))}/purchases`)
+}
+
 export function getDeliveryContacts(params: QueryParams = {}): Promise<unknown> {
   return readContacts(DELIVERY_CONTACT_READ, params)
 }

@@ -58,6 +58,9 @@ interface DetailModalProps {
   onDelete?: () => void
   onClose: () => void
   t?: TranslateFn
+  // Optional extra buttons in the footer row, before Edit -- e.g. the
+  // supplier detail's "Purchases" drill (Part 384 D5).
+  extraButtons?: Array<{ label: string; onClick: () => void }>
 }
 
 interface ContactTableProps<T extends ContactRow> {
@@ -218,7 +221,7 @@ export function ThreeDotMenu({ onDetails, onEdit, onDelete }: ThreeDotMenuProps)
   )
 }
 
-export function DetailModal({ item, fields = [], onEdit, onDelete, onClose, t }: DetailModalProps) {
+export function DetailModal({ item, fields = [], onEdit, onDelete, onClose, t, extraButtons = [] }: DetailModalProps) {
   const title = item?.name || (typeof t === 'function' ? (t('details') || 'Details') : 'Details')
 
   return (
@@ -236,6 +239,9 @@ export function DetailModal({ item, fields = [], onEdit, onDelete, onClose, t }:
           ))}
         </div>
         <div className="flex gap-2">
+          {extraButtons.map((button) => (
+            <button key={button.label} type="button" className="btn-secondary flex-1" onClick={button.onClick}>{button.label}</button>
+          ))}
           <button type="button" className="btn-secondary flex-1" onClick={onEdit}>{t?.('edit') || 'Edit'}</button>
           <button type="button" className="btn-secondary flex-1 border-red-300 text-red-600 dark:border-red-500/40 dark:text-red-400" onClick={onDelete}>{t?.('delete') || 'Delete'}</button>
           <button type="button" className="btn-primary flex-1" onClick={onClose}>{t?.('close') || 'Close'}</button>

@@ -89,7 +89,7 @@ function makeDb() {
     CREATE TABLE product_batches (id INTEGER PRIMARY KEY AUTOINCREMENT, variant_product_id INTEGER,
       batch_key TEXT, lot_code TEXT, expiry_date TEXT, received_at TEXT, is_active INTEGER DEFAULT 1,
       notes TEXT, batch_number INTEGER, supplier_id INTEGER, supplier_name TEXT, unit_cost_usd REAL,
-      payment_status TEXT, credit_due_date TEXT, created_at TEXT, updated_at TEXT);
+      payment_status TEXT, credit_due_date TEXT, received_quantity REAL, created_at TEXT, updated_at TEXT);
     CREATE TABLE branch_batch_stock (batch_id INTEGER, branch_id INTEGER, quantity REAL DEFAULT 0,
       updated_at TEXT, UNIQUE(batch_id, branch_id));
     INSERT INTO branches(id, name) VALUES (1, 'Shop'), (2, 'Warehouse');

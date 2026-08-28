@@ -227,8 +227,8 @@ export async function receiveBatchStock(db: D1Compat, input: {
     // later deactivated.
     const nextNumber = await nextBatchNumber(db, input.productId)
     const inserted = await db.prepare(`
-      INSERT INTO product_batches (variant_product_id, batch_key, lot_code, expiry_date, received_at, is_active, notes, batch_number, supplier_id, supplier_name, unit_cost_usd, payment_status, credit_due_date)
-      VALUES (@productId, @batchKey, @lotCode, @expiryDate, @receivedAt, 1, @notes, @batchNumber, @supplierId, @supplierName, @unitCostUsd, @paymentStatus, @creditDueDate)
+      INSERT INTO product_batches (variant_product_id, batch_key, lot_code, expiry_date, received_at, is_active, notes, batch_number, supplier_id, supplier_name, unit_cost_usd, payment_status, credit_due_date, received_quantity)
+      VALUES (@productId, @batchKey, @lotCode, @expiryDate, @receivedAt, 1, @notes, @batchNumber, @supplierId, @supplierName, @unitCostUsd, @paymentStatus, @creditDueDate, @receivedQuantity)
     `).run({
       productId: input.productId,
       batchKey,
@@ -242,6 +242,7 @@ export async function receiveBatchStock(db: D1Compat, input: {
       unitCostUsd: Number.isFinite(Number(input.unitCostUsd)) && Number(input.unitCostUsd) >= 0 ? Number(input.unitCostUsd) : null,
       paymentStatus: input.paymentStatus === 'paid' || input.paymentStatus === 'credit' ? input.paymentStatus : null,
       creditDueDate: input.paymentStatus === 'credit' ? (input.creditDueDate || null) : null,
+      receivedQuantity: input.quantity,
     })
     batchId = Number(inserted.lastInsertRowid)
     batchNumber = nextNumber
@@ -264,6 +265,10 @@ export async function receiveBatchStock(db: D1Compat, input: {
       params.paymentStatus = input.paymentStatus
       params.creditDueDate = input.paymentStatus === 'credit' ? (input.creditDueDate || null) : null
     }
+    // Cumulative received total (0067): a top-up ADDS, unlike the
+    // fill-if-NULL fields above -- every receipt into this lot counts.
+    updates.push('received_quantity = COALESCE(received_quantity, 0) + @receivedQuantity')
+    params.receivedQuantity = input.quantity
     await db.prepare(`UPDATE product_batches SET ${updates.join(', ')} WHERE id = @id`).run(params)
   }
 

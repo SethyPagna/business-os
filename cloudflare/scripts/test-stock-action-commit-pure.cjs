@@ -28,7 +28,7 @@ function setup() {
     CREATE TABLE branch_stock (product_id INTEGER, branch_id INTEGER, quantity REAL DEFAULT 0,
       UNIQUE(product_id, branch_id));
     CREATE TABLE product_batches (id INTEGER PRIMARY KEY AUTOINCREMENT, variant_product_id INTEGER,
-      batch_key TEXT, lot_code TEXT, received_at TEXT, is_active INTEGER, notes TEXT, batch_number INTEGER, supplier_id INTEGER, supplier_name TEXT, unit_cost_usd REAL, payment_status TEXT, credit_due_date TEXT,
+      batch_key TEXT, lot_code TEXT, received_at TEXT, is_active INTEGER, notes TEXT, batch_number INTEGER, supplier_id INTEGER, supplier_name TEXT, unit_cost_usd REAL, payment_status TEXT, credit_due_date TEXT, received_quantity REAL,
       UNIQUE(variant_product_id, batch_key), UNIQUE(variant_product_id, batch_number));
     CREATE TABLE branch_batch_stock (batch_id INTEGER, branch_id INTEGER, quantity REAL DEFAULT 0,
       updated_at TEXT, UNIQUE(batch_id, branch_id));
@@ -92,6 +92,20 @@ const input = {
     supplied.sqlite.prepare(`SELECT supplier_name, supplier_id FROM product_batches`).get(),
     { supplier_name: 'srey now', supplier_id: 7 },
     'first supplier attribution sticks; a later add never rewrites the lot',
+  )
+  // received_quantity (0067) is CUMULATIVE, unlike the fill-if-NULL
+  // attribution above: both adds into the same lot count toward what was
+  // bought, and the earlier retry-idempotency case must not have
+  // double-counted its own redelivery.
+  assert.strictEqual(
+    supplied.sqlite.prepare(`SELECT received_quantity FROM product_batches`).get().received_quantity,
+    4,
+    'two 2-unit adds into one lot record received_quantity = 4',
+  )
+  assert.strictEqual(
+    sqlite.prepare(`SELECT received_quantity FROM product_batches`).get().received_quantity,
+    2,
+    'a redelivered (already-applied) add never double-counts received_quantity',
   )
   const unsupplied = setup()
   await subject.applyUnifiedStockAdd(unsupplied.db, { ...input })

@@ -873,6 +873,71 @@ registerContactRoutes(CUSTOMERS)
 registerContactRoutes(SUPPLIERS)
 registerContactRoutes(DELIVERY_CONTACTS)
 
+// D5 (Part 384): what a supplier actually supplied -- every batch
+// attributed to them (0062 supplier-on-batch), with per-lot received
+// totals (0067), unit cost (0065), what remains, and the paid/credit
+// state. Sits under /suppliers/* so requireSupplierAccess already gates
+// it -- purchase costs are exactly the data the suppliers grant protects.
+// Matches by supplier_id, plus name-only batches (supplier typed free-text
+// before the id existed, or the import's resolver found no contact row).
+app.get('/suppliers/:id/purchases', async (c) => {
+  const db = getDb(c.env)
+  const id = Number(c.req.param('id'))
+  if (!Number.isFinite(id) || id <= 0) return c.json({ error: 'Invalid supplier id' }, 400)
+  const supplier = await db.prepare('SELECT id, name FROM suppliers WHERE id = ?').get<{ id: number; name: string | null }>([id])
+  if (!supplier) return c.json({ error: 'Supplier not found' }, 404)
+
+  const batches = await db.prepare(`
+    SELECT pb.id, pb.batch_number, pb.lot_code, pb.received_at, pb.received_quantity,
+           pb.unit_cost_usd, pb.payment_status, pb.credit_due_date, pb.is_active,
+           p.id AS product_id, p.name AS product_name,
+           COALESCE(SUM(bbs.quantity), 0) AS remaining_quantity
+    FROM product_batches pb
+    JOIN products p ON p.id = pb.variant_product_id
+    LEFT JOIN branch_batch_stock bbs ON bbs.batch_id = pb.id
+    WHERE pb.supplier_id = @id
+       OR (pb.supplier_id IS NULL AND pb.supplier_name IS NOT NULL AND lower(trim(pb.supplier_name)) = @name)
+    GROUP BY pb.id
+    ORDER BY pb.received_at DESC, pb.id DESC
+    LIMIT 1000
+  `).all<{
+    id: number; batch_number: number | null; lot_code: string | null; received_at: string | null
+    received_quantity: number | null; unit_cost_usd: number | null; payment_status: string | null
+    credit_due_date: string | null; is_active: number | null
+    product_id: number; product_name: string | null; remaining_quantity: number
+  }>({ id, name: String(supplier.name || '').trim().toLowerCase() })
+
+  const totals = {
+    batches: batches.length,
+    products: new Set(batches.map((b) => b.product_id)).size,
+    units_received: 0,
+    // Purchase cost only where BOTH received qty and unit cost are known --
+    // batches_without_cost says how many lots the total cannot see, rather
+    // than quietly pretending they cost 0.
+    cost_usd: 0,
+    credit_open_usd: 0,
+    credit_batches: 0,
+    batches_without_cost: 0,
+  }
+  for (const batch of batches) {
+    const received = Number(batch.received_quantity)
+    const unitCost = Number(batch.unit_cost_usd)
+    if (Number.isFinite(received) && batch.received_quantity != null) totals.units_received += received
+    if (batch.received_quantity != null && batch.unit_cost_usd != null && Number.isFinite(received) && Number.isFinite(unitCost)) {
+      const cost = received * unitCost
+      totals.cost_usd += cost
+      if (batch.payment_status === 'credit') totals.credit_open_usd += cost
+    } else {
+      totals.batches_without_cost += 1
+    }
+    if (batch.payment_status === 'credit') totals.credit_batches += 1
+  }
+  totals.cost_usd = Math.round(totals.cost_usd * 100) / 100
+  totals.credit_open_usd = Math.round(totals.credit_open_usd * 100) / 100
+
+  return c.json({ supplier, totals, batches })
+})
+
 // Administrator-only manual point awards. A ledger event is created instead
 // of mutating a balance column, preserving the same calculable/auditable
 // model used for sales, returns, and approved share rewards.
