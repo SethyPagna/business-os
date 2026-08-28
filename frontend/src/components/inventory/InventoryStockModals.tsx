@@ -56,13 +56,13 @@ type AdjustForm = {
   cost_usd: InventoryFormValue
   cost_khr: InventoryFormValue
   barcode: string
-  // Mandatory batch selection (add/remove, flat rows only -- see
-  // routes/inventory.ts's `/adjust` batchId comment): '' = nothing picked
-  // yet (blocks submit on a flat row), 'new' = create a fresh batch (the
-  // default once the picker loads for 'add'), a number = an existing
-  // batch's id. Ignored server-side when pricing is unlocked, so it's
-  // left as-is (not reset) when the person flips that toggle -- the UI
-  // just stops asking for it.
+  // Mandatory batch selection (add/remove, every target incl. group
+  // containers -- D4b; see routes/inventory.ts's `/adjust` batchId
+  // comment): '' = nothing picked yet (blocks submit), 'new' = create a
+  // fresh batch (the default once the picker loads for 'add'), a number =
+  // an existing batch's id. Ignored server-side when pricing is unlocked,
+  // so it's left as-is (not reset) when the person flips that toggle --
+  // the UI just stops asking for it.
   batch_id: InventoryId | ''
   // D4 (11.28): the REAL received date for stock recorded late. Shown
   // only when this add creates a lot ("New batch", or unlocked pricing
@@ -155,17 +155,17 @@ export default function InventoryStockModals({
 }: InventoryStockModalsProps) {
   const addQuantityChoices = [...new Set([1, defaultAddQuantity, 5, 10, 20].filter((n) => n > 0))]
 
-  // Mandatory batch selection -- scoped to flat rows only (!is_group).
-  // Group container rows have no stock of their own (each child row has
-  // its own product_batches), so there's nothing to pick a batch *for* at
-  // the group level -- same exclusion the existing batch/expiry system
-  // (ReceiveBatchModal, ManageBatchesModal) already documents for
-  // variant/group picking. Resolve against whichever row the "Adjust
-  // target" picker actually has selected, same as adjustCurrentQuantity/
-  // adjustCurrentPricing above.
+  // Mandatory batch selection, for EVERY target -- group containers
+  // included (D4b). The old "flat rows only" exclusion predated the
+  // unconditional batch-ledger auto-routing in routes/inventory.ts's
+  // /adjust: since that change, an add on an is_group container CREATES a
+  // container batch server-side either way, so hiding the picker only hid
+  // lots that already existed -- one surface silently weaker than its
+  // siblings, the exact inconsistency the user rejected. (Name-grouped
+  // rows -- most real groups -- are flat rows and always had the picker.)
+  // Resolve against whichever row the "Adjust target" picker actually has
+  // selected, same as adjustCurrentQuantity/adjustCurrentPricing above.
   const adjustTargetId = adjustForm.product_id || adjustModal?.id
-  const adjustTargetProduct = adjustTargetOptions.find((p) => String(p.id) === String(adjustTargetId)) || adjustModal
-  const isGroupTarget = Boolean(adjustTargetProduct?.is_group)
   const unlockPricing = adjustForm.type === 'add' && !adjustForm.pricingLocked
   // A batch is scoped to one branch's stock -- "No specific branch" (the
   // placeholder option in adjustBranchSelectOptions) has no branch to pick
@@ -173,8 +173,7 @@ export default function InventoryStockModals({
   // selected. In practice `openAdjust` always pre-fills the default
   // branch, so this only matters if the person explicitly clears it.
   const adjustBranchId = adjustForm.branch_id ? Number(adjustForm.branch_id) : null
-  const showBatchPicker = !isGroupTarget
-    && (adjustForm.type === 'add' || adjustForm.type === 'remove')
+  const showBatchPicker = (adjustForm.type === 'add' || adjustForm.type === 'remove')
     && !unlockPricing
     && Boolean(adjustBranchId)
 

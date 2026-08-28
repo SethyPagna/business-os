@@ -25,6 +25,10 @@ export type ReceiveBatchPayload = {
   expiryDate?: string | null
   receivedDate?: string | null
   notes?: string | null
+  // D4b: explicit existing lot to top up (the same picker every adjust
+  // surface has). When set it always wins over date matching; the server
+  // validates the lot belongs to this product and keeps its received_at.
+  batchId?: number | null
   // Migrations 0062/0065: supplier attribution, per-lot unit cost, and the
   // paid / on-credit choice (credit requires the due date the admin
   // reminder is built on — the server enforces it too).
@@ -116,6 +120,7 @@ export function receiveBatchStock(payload: ReceiveBatchPayload): Promise<{ succe
       quantity: payload.quantity,
       expiry_date: payload.expiryDate || null,
       received_date: payload.receivedDate || null,
+      batch_id: payload.batchId ?? null,
       notes: payload.notes || null,
       supplier_id: payload.supplierId ?? null,
       supplier_name: payload.supplierName || null,

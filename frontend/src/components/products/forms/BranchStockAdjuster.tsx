@@ -51,9 +51,6 @@ type Product = {
   cost_price_usd?: number
   cost_price_khr?: number
   branch_stock?: BranchStockEntry[]
-  // Mandatory batch selection (below) is scoped to flat rows only -- a
-  // group container has no stock/batches of its own, same exclusion
-  // InventoryStockModals.tsx's showBatchPicker already documents.
   is_group?: number | boolean | null
 }
 
@@ -150,7 +147,6 @@ export default function BranchStockAdjuster({ product, branches, user, onDone, t
   const [reasonDraft, setReasonDraft] = useState('')
   const [savingReasons, setSavingReasons] = useState(false)
   const saveInFlightRef = useRef(false)
-  const isGroupProduct = Boolean(product.is_group)
   const isKhmer = /[\u1780-\u17FF]/.test((typeof t === 'function' ? t('cancel') : '') || '')
 
   const T = (key: string, fallbackEn: string, fallbackKm = fallbackEn) => {
@@ -240,18 +236,18 @@ export default function BranchStockAdjuster({ product, branches, user, onDone, t
     // still accepts a missing batchId from other callers like undo/redo).
     // Checked up front for every row about to be submitted, before any
     // write happens, so a later row's missing batch can't leave earlier
-    // rows applied and a later one silently untracked.
-    if (!isGroupProduct) {
-      for (const { row } of changes) {
-        if (row.type === 'set') continue
-        if (row.batchId === '') {
-          setMsg(T('select_batch_required', 'Select a batch first', 'សូមជ្រើសរើសបាច់ជាមុនសិន'))
-          return
-        }
-        if (row.type === 'remove' && row.batchId === 'new') {
-          setMsg(T('select_batch_required', 'Select a batch first', 'សូមជ្រើសរើសបាច់ជាមុនសិន'))
-          return
-        }
+    // rows applied and a later one silently untracked. Applies to EVERY
+    // product incl. is_group containers (D4b) -- container adds create
+    // container batches server-side, so the pick is just as mandatory.
+    for (const { row } of changes) {
+      if (row.type === 'set') continue
+      if (row.batchId === '') {
+        setMsg(T('select_batch_required', 'Select a batch first', 'សូមជ្រើសរើសបាច់ជាមុនសិន'))
+        return
+      }
+      if (row.type === 'remove' && row.batchId === 'new') {
+        setMsg(T('select_batch_required', 'Select a batch first', 'សូមជ្រើសរើសបាច់ជាមុនសិន'))
+        return
       }
     }
     if (!beginSingleAction(saveInFlightRef, { blocked: saving })) return
@@ -271,11 +267,11 @@ export default function BranchStockAdjuster({ product, branches, user, onDone, t
           reason: `${reason.trim()} (${row.branchName})`,
           userId: user?.id,
           userName: user?.name,
-          batchId: !isGroupProduct && row.type !== 'set' && row.batchId !== '' ? row.batchId : undefined,
+          batchId: row.type !== 'set' && row.batchId !== '' ? row.batchId : undefined,
           // Sent only when the date input was actually on screen (add +
-          // "New batch" on a flat row) -- a lingering value must never
-          // silently re-date some other kind of change.
-          receivedDate: !isGroupProduct && row.type === 'add' && row.batchId === 'new' && row.receivedDate ? row.receivedDate : undefined,
+          // "New batch") -- a lingering value must never silently re-date
+          // some other kind of change.
+          receivedDate: row.type === 'add' && row.batchId === 'new' && row.receivedDate ? row.receivedDate : undefined,
         }), 'Adjust branch product stock')
         if (result?.success === false) throw new Error(result?.error || 'Failed to adjust branch stock')
       }
@@ -302,7 +298,6 @@ export default function BranchStockAdjuster({ product, branches, user, onDone, t
             row={row}
             productId={product.id}
             unit={product.unit}
-            isGroupProduct={isGroupProduct}
             onChange={(patch) => setRow(index, patch)}
             T={T}
           />
@@ -377,7 +372,6 @@ type StockAdjustBranchRowProps = {
   row: BranchStockRow
   productId: number | string
   unit?: string
-  isGroupProduct: boolean
   onChange: (patch: Partial<Pick<BranchStockRow, 'delta' | 'type' | 'batchId' | 'receivedDate'>>) => void
   T: (key: string, fallbackEn: string, fallbackKm?: string) => string
 }
@@ -386,8 +380,12 @@ type StockAdjustBranchRowProps = {
 // effect (can't call hooks in a loop from the parent) -- mirrors
 // InventoryStockModals.tsx's single-target showBatchPicker/getProductBatches
 // pairing, just one instance per row instead of one for the whole modal.
-function StockAdjustBranchRow({ row, productId, unit, isGroupProduct, onChange, T }: StockAdjustBranchRowProps) {
-  const showBatchPicker = !isGroupProduct && (row.type === 'add' || row.type === 'remove') && row.delta !== ''
+// D4b: the picker shows for EVERY product incl. is_group containers --
+// container adds create container batches server-side (unconditional
+// auto-routing in routes/inventory.ts), so hiding the picker only hid
+// lots that already existed. Name-grouped rows were always flat here.
+function StockAdjustBranchRow({ row, productId, unit, onChange, T }: StockAdjustBranchRowProps) {
+  const showBatchPicker = (row.type === 'add' || row.type === 'remove') && row.delta !== ''
   const [batchOptions, setBatchOptions] = useState<ProductBatch[]>([])
   const [batchLoading, setBatchLoading] = useState(false)
 

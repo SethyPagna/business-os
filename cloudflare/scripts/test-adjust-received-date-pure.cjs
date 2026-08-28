@@ -127,6 +127,20 @@ const inventoryRoute = loadReal('routes/inventory.ts', {
 
 const app = inventoryRoute.default
 
+// D4b: the Receive Batch route grows the same explicit-lot pick every
+// adjust surface has -- loaded with the same real kernel + real batchCode.
+const batchesRoute = loadReal('routes/batches.ts', {
+  '../lib/db': { getDb: () => db },
+  '../lib/auth': { requireAuth: async (c, next) => { c.set('user', FAKE_USER); return next() } },
+  '../lib/audit': { audit: async () => {} },
+  '../lib/permissions': permissions,
+  '../durable-objects/broadcastHub': { broadcast: async () => {} },
+  '../lib/cache': { bumpVersion: async () => {} },
+  '../lib/productBatches': productBatches,
+  '../lib/batchCode': batchCode,
+})
+const batchesApp = batchesRoute.default
+
 let passed = 0
 async function check(name, fn) {
   await fn()
@@ -142,8 +156,8 @@ function seed() {
 
 const fakeExecutionCtx = { waitUntil: (p) => { p?.catch?.(() => {}) }, passThroughOnException: () => {} }
 
-async function req(method, url, body) {
-  const res = await app.request(url, {
+async function req(method, url, body, targetApp = app) {
+  const res = await targetApp.request(url, {
     method,
     headers: { 'Content-Type': 'application/json' },
     body: body != null ? JSON.stringify(body) : undefined,
@@ -228,6 +242,39 @@ async function main() {
     assert.strictEqual(rows.length, 1)
     assert.strictEqual(rows[0].received_at, todayIso, 'absent date still means "received today", unchanged behavior')
     assert.strictEqual(rows[0].lot_code, batchCode.dateToBatchCode(todayIso))
+  })
+
+  await check('D4b: POST /api/batches with an explicit batch_id tops up that exact lot and keeps its received_at', async () => {
+    seed()
+    const first = await req('POST', '/', {
+      product_id: 1, branch_id: 1, quantity: 6, received_date: '2025-02-10',
+    }, batchesApp)
+    assert.strictEqual(first.status, 200, JSON.stringify(first.json))
+    const lot = batchRows()[0]
+    assert.strictEqual(lot.received_at, '2025-02-10')
+    const topUp = await req('POST', '/', {
+      product_id: 1, branch_id: 1, quantity: 4, batch_id: lot.id, received_date: '2026-08-01',
+    }, batchesApp)
+    assert.strictEqual(topUp.status, 200, JSON.stringify(topUp.json))
+    const rows = batchRows()
+    assert.strictEqual(rows.length, 1, 'the explicit pick must not have spawned a twin from the different date')
+    assert.strictEqual(rows[0].received_at, '2025-02-10', "the lot's own received date stays (first attribution sticks)")
+    assert.strictEqual(rows[0].received_quantity, 10, 'cumulative received total counts both receipts')
+    const lotQty = rawDb.prepare('SELECT quantity FROM branch_batch_stock WHERE batch_id = @id AND branch_id = 1').get({ id: rows[0].id })
+    assert.strictEqual(lotQty.quantity, 10)
+  })
+
+  await check("D4b: a batch_id belonging to a DIFFERENT product is refused (400), nothing written", async () => {
+    rawDb.prepare("INSERT INTO products (id, name, is_active, stock_quantity) VALUES (2, 'Other', 1, 0)").run()
+    const foreign = batchRows()[0]
+    const aggBefore = rawDb.prepare('SELECT stock_quantity FROM products WHERE id = 2').get().stock_quantity
+    const { status } = await req('POST', '/', {
+      product_id: 2, branch_id: 1, quantity: 3, batch_id: foreign.id,
+    }, batchesApp)
+    assert.strictEqual(status, 400, 'a caller mistake answers 400, not an unhandled 500')
+    const aggAfter = rawDb.prepare('SELECT stock_quantity FROM products WHERE id = 2').get().stock_quantity
+    assert.strictEqual(aggAfter, aggBefore, 'no stock moved onto the wrong product')
+    assert.strictEqual(batchRows().length, 1, 'no batch row appeared')
   })
 
   await check("D4's transfer rule source pin: branch transfers never set/change a product barcode", async () => {

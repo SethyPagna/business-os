@@ -18,8 +18,15 @@ import { getInventoryReasons, saveInventoryReasons } from '../../../api/methods.
 // omitted on 'remove' FIFO-drains oldest batches first) and makes that
 // behavior visible/confirmable instead of leaving it silent.
 import InventoryReasonManagerModal from '../../inventory/InventoryReasonManagerModal.tsx'
+import { dateToBatchCode } from '../../../utils/batchCode.ts'
 
 const BULK_ADD_STOCK_MUTATION_TIMEOUT_MS = 12000
+
+// Same helper (and same UTC-day convention) as every other received-date
+// default (ReceiveBatchModal, BranchStockAdjuster, Inventory's Adjust).
+function todayIsoDate(): string {
+  return new Date().toISOString().slice(0, 10)
+}
 
 type Translate = (key: string) => string | undefined
 type InventoryReasonType = 'adjust' | 'transfer' | 'move' | 'delete'
@@ -66,6 +73,7 @@ type AdjustStockPayload = {
   reason: string
   userId?: number | string
   userName?: string
+  receivedDate?: string
 }
 
 type ApiResult = {
@@ -133,6 +141,12 @@ export default function BulkAddStockModal({ productIds, products, branches, user
   const [branchId, setBranchId] = useState(String(defaultBranchId))
   const [action, setAction] = useState<StockAction>(initialAction || 'add')
   const [qty, setQty] = useState(initialQuantity != null && initialQuantity !== '' ? String(initialQuantity) : '')
+  // D4b: the received date IS the lot control in a bulk add -- there is no
+  // per-product batch picker here (see the import comment above for why a
+  // single picker can't span a mixed selection), but the date drives the
+  // server's date->code matching per product exactly as a picker's "New
+  // batch" does, so late bulk stock-ins land with their real date.
+  const [receivedDate, setReceivedDate] = useState(todayIsoDate())
   const [saving, setSaving] = useState(false)
   const [msg, setMsg] = useState<string | null>(null)
   const [reason, setReason] = useState('')
@@ -251,6 +265,9 @@ export default function BulkAddStockModal({ productIds, products, branches, user
             reason: reason.trim(),
             userId: user?.id,
             userName: user?.name,
+            // Only an 'add' creates/matches lots -- same visibility-mirror
+            // rule as every other adjust surface.
+            receivedDate: action === 'add' && receivedDate ? receivedDate : undefined,
           }), 'Bulk adjust product stock')
           if (result?.success === false) throw new Error(result?.error || 'Failed to adjust stock')
           done += 1
@@ -335,9 +352,26 @@ export default function BulkAddStockModal({ productIds, products, branches, user
           {action !== 'set' ? (
             <p className="rounded-lg bg-blue-50 px-3 py-2 text-xs text-blue-700 dark:bg-blue-900/20 dark:text-blue-300">
               {action === 'add'
-                ? (t('bulk_add_batch_note') || 'Each product gets its own new batch, dated today.')
+                ? (t('bulk_add_batch_note') || 'Each product gets its own new batch with the received date below.')
                 : (t('bulk_remove_batch_note') || 'Stock is drawn from each product\u2019s oldest batch first (FIFO).')}
             </p>
+          ) : null}
+          {action === 'add' ? (
+            <div>
+              <label htmlFor="bulk-add-stock-received-date" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                {t('received_date') || 'Received date'}
+              </label>
+              <input
+                id="bulk-add-stock-received-date"
+                className="input text-sm"
+                type="date"
+                value={receivedDate}
+                onChange={(event) => setReceivedDate(event.target.value)}
+              />
+              <div className="mt-1 text-[11px] text-gray-400">
+                {t('batch_code_preview') || 'Batch code'}: {dateToBatchCode(receivedDate) || '--'}
+              </div>
+            </div>
           ) : null}
           <div>
             <label htmlFor="bulk-add-stock-reason" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">

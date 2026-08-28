@@ -1453,15 +1453,15 @@ export default function Inventory() {
     // locked (the default) is the fast add-to-this-row path, matching
     // this endpoint's behavior before the grouping feature existed.
     const unlockPricing = adjustForm.type === 'add' && !adjustForm.pricingLocked
-    // Mandatory batch selection -- flat rows only (matches
-    // InventoryStockModals.tsx's own `showBatchPicker` derivation: group
-    // rows excluded, and an unlocked add always gets a fresh batch
-    // server-side so there's nothing to require picking here). Checked
-    // client-side for a fast error message; routes/inventory.ts's /adjust
-    // also accepts a missing batchId on 'remove' from other callers
-    // (undo/redo, bulk edits) without requiring one -- this validation is
-    // this form's own rule, not the wire contract's.
-    if (!unlockPricing && !selectedAdjustProduct.is_group && (adjustForm.type === 'add' || adjustForm.type === 'remove') && numericBranchId) {
+    // Mandatory batch selection, every target incl. group containers --
+    // D4b (matches InventoryStockModals.tsx's own `showBatchPicker`
+    // derivation; an unlocked add always gets a fresh batch server-side so
+    // there's nothing to require picking there). Checked client-side for a
+    // fast error message; routes/inventory.ts's /adjust also accepts a
+    // missing batchId on 'remove' from other callers (undo/redo, bulk
+    // edits) without requiring one -- this validation is this form's own
+    // rule, not the wire contract's.
+    if (!unlockPricing && (adjustForm.type === 'add' || adjustForm.type === 'remove') && numericBranchId) {
       if (adjustForm.batch_id === '') { notify(tr('select_batch_required', 'Select a batch first'), 'error'); return }
       if (adjustForm.type === 'remove' && adjustForm.batch_id === 'new') { notify(tr('select_batch_required', 'Select a batch first'), 'error'); return }
     }
@@ -1479,10 +1479,9 @@ export default function Inventory() {
       // D4 (11.28): sent only when the date input was actually on screen
       // (InventoryStockModals.tsx's own visibility condition, recomputed
       // here) -- a value lingering from a hidden input must never re-date
-      // some other kind of change, e.g. after switching the adjust target
-      // to a group row.
+      // some other kind of change. Group containers included since D4b.
       receivedDate: adjustForm.type === 'add'
-          && (unlockPricing || (!selectedAdjustProduct.is_group && Boolean(numericBranchId) && adjustForm.batch_id === 'new'))
+          && (unlockPricing || (Boolean(numericBranchId) && adjustForm.batch_id === 'new'))
           && adjustForm.received_date
         ? String(adjustForm.received_date)
         : undefined,

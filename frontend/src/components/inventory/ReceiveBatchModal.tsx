@@ -2,8 +2,9 @@ import { useEffect, useRef, useState } from 'react'
 import X from 'lucide-react/dist/esm/icons/x.js'
 import { registerDirtyWork } from '../../utils/dirtyWork.ts'
 import AppSelect, { type AppSelectOption } from '../shared/AppSelect'
-import { receiveBatchStock } from '../../api/batchesTransport.ts'
+import { getProductBatches, receiveBatchStock, type ProductBatch } from '../../api/batchesTransport.ts'
 import { dateToBatchCode } from '../../utils/batchCode.ts'
+import { batchDisplayLabel } from '../../utils/batchLabel.ts'
 
 function todayIsoDate(): string {
   return new Date().toISOString().slice(0, 10)
@@ -58,6 +59,35 @@ export default function ReceiveBatchModal({
   const [paymentStatus, setPaymentStatus] = useState<'' | 'paid' | 'credit'>('')
   const [creditDueDate, setCreditDueDate] = useState('')
   const [saving, setSaving] = useState(false)
+  // D4b: the same existing-lot picker every adjust surface has -- 'new'
+  // creates/matches by date (this modal's original behavior), a number
+  // tops up that exact lot (its own received_at stays; the server
+  // validates it belongs to this product). Deliberately NOT persisted in
+  // the localStorage draft: a drafted lot id can go stale (deactivated,
+  // deleted) between sessions, and 'new' is always a safe default.
+  const [batchChoice, setBatchChoice] = useState<'new' | number>('new')
+  const [batchOptions, setBatchOptions] = useState<ProductBatch[]>([])
+  const [batchLoading, setBatchLoading] = useState(false)
+
+  useEffect(() => {
+    const productId = Number(product?.id)
+    const parsedBranchId = Number(branchId)
+    setBatchChoice('new')
+    if (!productId || !parsedBranchId) { setBatchOptions([]); return }
+    let cancelled = false
+    setBatchLoading(true)
+    // Every active lot, empty ones included -- topping one back up is a
+    // normal receipt, same list the adjust pickers show for 'add'.
+    getProductBatches(productId, parsedBranchId, false)
+      .then((res) => { if (!cancelled) setBatchOptions(res?.batches || []) })
+      .catch((error: unknown) => {
+        if (cancelled) return
+        console.error('[ReceiveBatchModal] batch options load failed:', error)
+        setBatchOptions([])
+      })
+      .finally(() => { if (!cancelled) setBatchLoading(false) })
+    return () => { cancelled = true }
+  }, [product?.id, branchId])
 
   // Reset the form whenever a different product is opened (or the modal is
   // closed and re-opened for the same one) -- otherwise a leftover
@@ -147,7 +177,10 @@ export default function ReceiveBatchModal({
         branchId: parsedBranchId,
         quantity: parsedQuantity,
         expiryDate: expiryDate || null,
-        receivedDate: receivedDate || null,
+        // Mirrors the inputs' visibility: an explicit lot ignores the date
+        // (it keeps its own), so the date only rides on 'new'.
+        receivedDate: batchChoice === 'new' ? (receivedDate || null) : null,
+        batchId: typeof batchChoice === 'number' ? batchChoice : null,
         notes: notes.trim() || null,
         supplierName: supplierName.trim() || null,
         unitCostUsd: unitCost.trim() === '' ? null : Number(unitCost),
@@ -210,23 +243,65 @@ export default function ReceiveBatchModal({
                 autoComplete="off"
               />
             </label>
-            <label className="block">
-              <span className="mb-1 block text-[11px] font-medium text-gray-600 dark:text-gray-400">{tr('received_date', 'Received date')}</span>
-              <input
-                className="input w-full text-sm"
-                type="date"
-                value={receivedDate}
-                onChange={(event) => setReceivedDate(event.target.value)}
-              />
-              {/* Preview only -- the backend always recomputes and stores
-                  the authoritative code itself from whichever date is
-                  actually submitted (see batchCode.ts's dateToBatchCode).
-                  A receipt on the same date as an existing batch tops it
-                  up automatically; there's no separate lot code to type. */}
-              <span className="mt-1 block text-[11px] text-gray-400">
-                {tr('batch_code_preview', 'Batch code')}: {dateToBatchCode(receivedDate) || '--'}
-              </span>
-            </label>
+            {/* D4b: the same batch picker every adjust surface has --
+                consistent everywhere. 'New batch' keeps this modal's
+                original create-or-match-by-date behavior; picking a lot
+                tops up that exact one. */}
+            <div className="block sm:col-span-2">
+              <span className="mb-1 block text-[11px] font-medium text-gray-600 dark:text-gray-400">{tr('batch', 'Batch')}</span>
+              {batchLoading ? (
+                <div className="text-[11px] text-gray-400">{t('loading') || 'Loading...'}</div>
+              ) : (
+                <div className="flex flex-wrap gap-1.5">
+                  <button
+                    type="button"
+                    className={`rounded-full border px-2.5 py-1 text-[11px] font-medium ${batchChoice === 'new' ? 'border-blue-600 bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300' : 'border-gray-200 text-gray-600 dark:border-gray-600 dark:text-gray-400'}`}
+                    onClick={() => setBatchChoice('new')}
+                  >
+                    {tr('new_batch', '+ New batch')}
+                  </button>
+                  {batchOptions.map((batch) => (
+                    <button
+                      key={batch.id}
+                      type="button"
+                      className={`rounded-full border px-2.5 py-1 text-[11px] font-medium ${batchChoice === Number(batch.id) ? 'border-blue-600 bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300' : 'border-gray-200 text-gray-600 dark:border-gray-600 dark:text-gray-400'}`}
+                      onClick={() => setBatchChoice(Number(batch.id))}
+                    >
+                      {batchDisplayLabel(batch, tr('batch', 'Batch'))} ({batch.quantity})
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+            {batchChoice === 'new' ? (
+              <label className="block">
+                <span className="mb-1 block text-[11px] font-medium text-gray-600 dark:text-gray-400">{tr('received_date', 'Received date')}</span>
+                <input
+                  className="input w-full text-sm"
+                  type="date"
+                  value={receivedDate}
+                  onChange={(event) => setReceivedDate(event.target.value)}
+                />
+                {/* Preview only -- the backend always recomputes and stores
+                    the authoritative code itself from whichever date is
+                    actually submitted (see batchCode.ts's dateToBatchCode).
+                    A receipt on the same date as an existing batch tops it
+                    up automatically; there's no separate lot code to type. */}
+                <span className="mt-1 block text-[11px] text-gray-400">
+                  {tr('batch_code_preview', 'Batch code')}: {dateToBatchCode(receivedDate) || '--'}
+                </span>
+              </label>
+            ) : (
+              /* Same visibility rule as the adjust surfaces: an existing
+                 lot keeps its own received date, so the date input hides
+                 rather than pretending to apply. */
+              <div className="block">
+                <span className="mb-1 block text-[11px] font-medium text-gray-600 dark:text-gray-400">{tr('received_date', 'Received date')}</span>
+                <span className="mt-2 block text-[11px] text-gray-400">
+                  {tr('existing_lot_keeps_date', 'Tops up the selected lot — its received date stays.')}
+                </span>
+              </div>
+            )}
             <label className="block">
               <span className="mb-1 block text-[11px] font-medium text-gray-600 dark:text-gray-400">{tr('expiry_date', 'Expiry date')}</span>
               <input

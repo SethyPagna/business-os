@@ -87,6 +87,10 @@ app.post('/', async (c) => {
     quantity?: number
     expiry_date?: string | null
     received_date?: string | null
+    // D4b: explicit existing lot to top up -- the same picker every adjust
+    // surface has. receiveBatchStock validates it belongs to product_id and
+    // keeps the lot's own received_at (first attribution sticks).
+    batch_id?: number | null
     notes?: string | null
     supplier_id?: number | null
     supplier_name?: string | null
@@ -113,19 +117,29 @@ app.post('/', async (c) => {
   if (!product) return c.json({ error: 'Product not found' }, 404)
   const branch = await db.prepare('SELECT id, name FROM branches WHERE id = ?').get<{ id: number; name: string }>([branchId])
 
-  const { batchId, batchNumber, lotCode } = await receiveBatchStock(db, {
-    productId,
-    branchId,
-    quantity,
-    expiryDate: body.expiry_date || null,
-    receivedDate: body.received_date || null,
-    notes: body.notes || null,
-    supplierId: Number.isFinite(Number(body.supplier_id)) && Number(body.supplier_id) > 0 ? Number(body.supplier_id) : null,
-    supplierName: body.supplier_name || null,
-    unitCostUsd: body.unit_cost_usd == null ? null : Number(body.unit_cost_usd),
-    paymentStatus,
-    creditDueDate,
-  })
+  let received: { batchId: number; batchNumber: number | null; lotCode: string }
+  try {
+    received = await receiveBatchStock(db, {
+      productId,
+      branchId,
+      quantity,
+      expiryDate: body.expiry_date || null,
+      receivedDate: body.received_date || null,
+      batchId: Number.isFinite(Number(body.batch_id)) && Number(body.batch_id) > 0 ? Number(body.batch_id) : null,
+      notes: body.notes || null,
+      supplierId: Number.isFinite(Number(body.supplier_id)) && Number(body.supplier_id) > 0 ? Number(body.supplier_id) : null,
+      supplierName: body.supplier_name || null,
+      unitCostUsd: body.unit_cost_usd == null ? null : Number(body.unit_cost_usd),
+      paymentStatus,
+      creditDueDate,
+    })
+  } catch (err) {
+    // The explicit-lot pick can fail validation ("Selected batch does not
+    // belong to this product") -- a caller mistake, not a server fault, so
+    // it answers 400 exactly as /inventory/adjust's batch path does.
+    return c.json({ error: err instanceof Error ? err.message : 'Failed to receive batch stock' }, 400)
+  }
+  const { batchId, batchNumber, lotCode } = received
 
   // receiveBatchStock now also moves branch_stock/products.stock_quantity
   // (see that function's own comment for why -- it used to only touch

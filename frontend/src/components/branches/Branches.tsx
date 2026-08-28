@@ -219,6 +219,10 @@ type ActionHistoryProp = ComponentProps<typeof ActionHistoryBar>['history']
 const useApp = useAppHook as () => AppContextValue
 const useSync = useSyncHook as () => SyncContextValue
 const LazyTransferModal = lazyRetry(async () => ({ default: (await import('./TransferModal')).default }), 'branches-transfer-modal')
+// D4b: the Branches per-branch stock view gets the SAME receive entry point
+// Inventory has (11.28's "Branch batch views") -- the one shared modal, with
+// this branch preselected, not a parallel form.
+const LazyReceiveBatchModal = lazyRetry(async () => ({ default: (await import('../inventory/ReceiveBatchModal')).default }), 'branches-receive-batch-modal')
 const ExportOptionsDialog = lazyRetry(() => import('../shared/ExportOptionsDialog'), 'branches-export-options')
 
 function getBranchApi(): BranchApi {
@@ -296,6 +300,10 @@ export default function Branches() {
   // utils/permissionActions.ts. Add/edit/delete DO queue for that tier, so
   // they stay available; only transfer is withheld.
   const canTransferStock = can('branches', 'transfer')
+  // Same grant Inventory's own adjust/receive affordances check, because
+  // POST /api/batches sits behind 'inventory' server-side -- a button the
+  // server would 403 is worse than no button.
+  const canReceiveStock = can('inventory', 'adjust')
   const { syncChannel } = useSync()
   const isActive = useIsPageActive('branches')
   const branchApi = useMemo(() => getBranchApi(), [])
@@ -316,6 +324,9 @@ export default function Branches() {
   const [selected, setSelected] = useState<BranchRecord | null>(null)
   const [transfers, setTransfers] = useState<StockTransfer[]>([])
   const [branchStocks, setBranchStocks] = useState<Record<string | number, BranchStockState>>({})
+  // D4b receive entry point: which product card's "receive" was clicked,
+  // and into which branch (preselected in the shared modal).
+  const [receiveTarget, setReceiveTarget] = useState<{ product: BranchStockProduct; branchId: string } | null>(null)
   // A Set (not a single value) so more than one branch card can be open at
   // once -- was accordion-style (opening one silently closed any other),
   // reported as "can only open one branch at a time, should allow checking
@@ -490,6 +501,12 @@ export default function Branches() {
     () => activeBranches.map((branch) => ({ id: branch.id, name: branch.name || `Branch ${branch.id}` })),
     [activeBranches],
   )
+  // ReceiveBatchModal's AppSelect option shape ({value,label}), distinct
+  // from TransferModal's ({id,name}) above.
+  const receiveBranchSelectOptions = useMemo(
+    () => activeBranches.map((branch) => ({ value: String(branch.id), label: branch.name || `Branch ${branch.id}` })),
+    [activeBranches],
+  )
   const visibleBranches = useMemo(() => branches.filter((branch) => (
     branchStatusFilter === 'all' ? true : branchStatusFilter === 'active' ? Boolean(branch.is_active) : !branch.is_active
   )), [branches, branchStatusFilter])
@@ -629,6 +646,22 @@ export default function Branches() {
           items: [...(current.items || []), ...(nextStockPage.items || [])],
         },
       }))
+    } catch (error) {
+      notify(getErrorMessage(error, tr('failed_to_load_data', 'Failed to load data')), 'warning')
+    }
+  }
+
+  // Refetch page 1 of one branch's stock in place (section stays expanded)
+  // -- used after a receive so the new quantity shows without collapsing
+  // or nuking every other branch's cache the way the transfer path does.
+  const refreshBranchStock = async (branchId: string | number) => {
+    try {
+      const stock = await withLoaderTimeout(
+        () => branchApi.getBranchStock(branchId, { page: 1, pageSize: 20, stockState: 'positive' }),
+        'Branch stock',
+        12000,
+      )
+      setBranchStocks((prev) => ({ ...prev, [branchId]: stock }))
     } catch (error) {
       notify(getErrorMessage(error, tr('failed_to_load_data', 'Failed to load data')), 'warning')
     }
@@ -1331,7 +1364,23 @@ export default function Branches() {
                                             : 'border-gray-100 bg-gray-50 dark:border-gray-700 dark:bg-gray-700/30'
                                       }`}
                                     >
-                                      <div className="mb-0.5 truncate font-medium text-gray-800 dark:text-gray-200">{product.name}</div>
+                                      <div className="mb-0.5 flex min-w-0 items-center justify-between gap-1">
+                                        <span className="truncate font-medium text-gray-800 dark:text-gray-200">{product.name}</span>
+                                        {/* D4b: receive stock into THIS branch from right here --
+                                            the same shared ReceiveBatchModal (batch picker +
+                                            received date) every other entry point uses. */}
+                                        {canReceiveStock ? (
+                                          <button
+                                            type="button"
+                                            className="flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full text-gray-400 transition-colors hover:bg-blue-100 hover:text-blue-600 dark:hover:bg-blue-900/40 dark:hover:text-blue-300"
+                                            title={tr('receive_batch', 'Receive Batch')}
+                                            aria-label={`${tr('receive_batch', 'Receive Batch')} — ${product.name || ''}`}
+                                            onClick={() => setReceiveTarget({ product, branchId: String(branch.id) })}
+                                          >
+                                            <Plus className="h-3.5 w-3.5" />
+                                          </button>
+                                        ) : null}
+                                      </div>
                                       <div
                                         className={`text-sm font-bold ${
                                           Number(product.branch_quantity || 0) <= Number(product.out_of_stock_threshold || 0)
@@ -1509,6 +1558,24 @@ export default function Branches() {
             }}
             user={user || undefined}
             notify={notify}
+          />
+        </Suspense>
+      ) : null}
+      {receiveTarget ? (
+        <Suspense fallback={null}>
+          <LazyReceiveBatchModal
+            product={{ id: receiveTarget.product.id, name: receiveTarget.product.name || '', unit: receiveTarget.product.unit || '' }}
+            branchSelectOptions={receiveBranchSelectOptions}
+            defaultBranchId={receiveTarget.branchId}
+            notify={notify}
+            onClose={() => setReceiveTarget(null)}
+            onReceived={() => {
+              const branchId = receiveTarget.branchId
+              setReceiveTarget(null)
+              void refreshBranchStock(branchId)
+            }}
+            t={t}
+            tr={(key: string, fallbackEn = '', _fallbackKm = fallbackEn) => tr(key, fallbackEn)}
           />
         </Suspense>
       ) : null}
