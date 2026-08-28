@@ -215,6 +215,7 @@ export const PERMISSION_SECTIONS: PermissionSection[] = [
         exclusiveWithTier: 'products',
         alsoClearsKeys: [
           'products_image_only_show_price',
+          'products_image_only_show_vip',
           'products_image_only_show_barcode',
           'products_image_only_show_category',
           'products_image_only_show_brand',
@@ -233,6 +234,7 @@ export const PERMISSION_SECTIONS: PermissionSection[] = [
       // mapping enforced server-side, and ProductsImageOnlyView.tsx for
       // where the UI reads these same keys via useApp().hasPermission().
       { key: 'products_image_only_show_price', tKey: 'perm_products_image_only_show_price', label: 'Image-only role: show selling price', sensitivity: 'normal' },
+      { key: 'products_image_only_show_vip', tKey: 'perm_products_image_only_show_vip', label: 'Image-only role: show VIP price', sensitivity: 'normal' },
       { key: 'products_image_only_show_barcode', tKey: 'perm_products_image_only_show_barcode', label: 'Image-only role: show barcode', sensitivity: 'normal' },
       { key: 'products_image_only_show_category', tKey: 'perm_products_image_only_show_category', label: 'Image-only role: show category', sensitivity: 'normal' },
       { key: 'products_image_only_show_brand', tKey: 'perm_products_image_only_show_brand', label: 'Image-only role: show brand', sensitivity: 'normal' },

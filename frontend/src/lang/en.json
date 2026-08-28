@@ -2739,6 +2739,7 @@
   "perm_products_image_only_show_category": "Image-only role: show category",
   "perm_products_image_only_show_price": "Image-only role: show selling price",
   "perm_products_image_only_show_stock": "Image-only role: show stock quantity",
+  "perm_products_image_only_show_vip": "Image-only role: show VIP price",
   "perm_products_review_desc": "Under Partial Access, viewing and searching products works directly. Adding, editing, or deleting a product goes to the Review/Approval queue for an admin to approve or reject. Import, export, merge-duplicates, and the zero-quantity cleanup tool all require Full Access.",
   "perm_returns": "Returns",
   "perm_returns_review_desc": "Under Partial Access, viewing, searching, and creating a return all work directly. Editing an existing return requires Full Access. There is no delete action for returns in this app.",

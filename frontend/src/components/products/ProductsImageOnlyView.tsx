@@ -48,6 +48,8 @@ interface ImageOnlyProduct {
   updated_at?: string
   selling_price_usd?: number | string | null
   selling_price_khr?: number | string | null
+  special_price_usd?: number | string | null
+  special_price_khr?: number | string | null
   barcode?: string | null
   category?: string | null
   brand?: string | null
@@ -140,6 +142,7 @@ export default function ProductsImageOnlyView() {
   // `product` anyway. Kept as plain booleans (not memoized) since
   // hasPermission() itself is already a cheap map lookup.
   const showPrice = hasPermission('products_image_only_show_price')
+  const showVip = hasPermission('products_image_only_show_vip')
   const showBarcode = hasPermission('products_image_only_show_barcode')
   const showCategory = hasPermission('products_image_only_show_category')
   const showBrand = hasPermission('products_image_only_show_brand')
@@ -452,6 +455,13 @@ export default function ProductsImageOnlyView() {
                       {Number(product.selling_price_khr || 0) > 0 ? ` · ${fmtKHR(product.selling_price_khr)}` : ''}
                     </p>
                   ) : null}
+                  {showVip && (Number(product.special_price_usd || 0) > 0 || Number(product.special_price_khr || 0) > 0) ? (
+                    <p className="truncate text-xs text-emerald-600 dark:text-emerald-400">
+                      <span className="text-gray-400 dark:text-gray-500">{t('special_price') || 'VIP price'}: </span>
+                      {fmtUSD(product.special_price_usd)}
+                      {Number(product.special_price_khr || 0) > 0 ? ` · ${fmtKHR(product.special_price_khr)}` : ''}
+                    </p>
+                  ) : null}
                   <div className="flex min-w-0 flex-wrap items-center gap-1.5">
                     {showMetaRow && metaParts.length > 0 ? (
                       <span className="truncate text-xs text-gray-400 dark:text-gray-500">{metaParts.join(' · ')}</span>
@@ -564,6 +574,15 @@ export default function ProductsImageOnlyView() {
                   <dd className="text-right text-gray-800 dark:text-gray-100">
                     {fmtUSD(detailsProduct.selling_price_usd)}
                     {Number(detailsProduct.selling_price_khr || 0) > 0 ? ` · ${fmtKHR(detailsProduct.selling_price_khr)}` : ''}
+                  </dd>
+                </div>
+              ) : null}
+              {showVip && (Number(detailsProduct.special_price_usd || 0) > 0 || Number(detailsProduct.special_price_khr || 0) > 0) ? (
+                <div className="flex justify-between gap-3 py-2">
+                  <dt className="text-gray-500 dark:text-gray-400">{t('special_price') || 'VIP price'}</dt>
+                  <dd className="text-right text-emerald-700 dark:text-emerald-300">
+                    {fmtUSD(detailsProduct.special_price_usd)}
+                    {Number(detailsProduct.special_price_khr || 0) > 0 ? ` · ${fmtKHR(detailsProduct.special_price_khr)}` : ''}
                   </dd>
                 </div>
               ) : null}

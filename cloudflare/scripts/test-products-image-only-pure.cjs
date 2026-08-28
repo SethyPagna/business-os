@@ -139,15 +139,19 @@ check('restrictToImageOnlyFields honors a merged-permissions map, granting exact
   assert.strictEqual('stock_quantity' in restricted, false, 'stock must stay hidden -- not granted in this scenario')
 })
 
-check('IMAGE_ONLY_OPTIONAL_FIELDS covers exactly the five expected optional keys, each mapping to real product columns', () => {
+check('IMAGE_ONLY_OPTIONAL_FIELDS covers exactly the six expected optional keys, each mapping to real product columns', () => {
   assert.deepStrictEqual(Object.keys(IMAGE_ONLY_OPTIONAL_FIELDS).sort(), [
     'products_image_only_show_barcode',
     'products_image_only_show_brand',
     'products_image_only_show_category',
     'products_image_only_show_price',
     'products_image_only_show_stock',
+    // VIP price is its own grant, separate from selling price (Aug 28) --
+    // an org can show shelf price while keeping VIP terms private.
+    'products_image_only_show_vip',
   ])
   assert.deepStrictEqual(IMAGE_ONLY_OPTIONAL_FIELDS.products_image_only_show_price, ['selling_price_usd', 'selling_price_khr'])
+  assert.deepStrictEqual(IMAGE_ONLY_OPTIONAL_FIELDS.products_image_only_show_vip, ['special_price_usd', 'special_price_khr'])
 })
 
 check('isImageOnlyWritePayload accepts an image_path-only body (the one real use case)', () => {

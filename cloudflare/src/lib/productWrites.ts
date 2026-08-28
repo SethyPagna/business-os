@@ -335,6 +335,10 @@ export const IMAGE_ONLY_BASE_FIELDS = [
  */
 export const IMAGE_ONLY_OPTIONAL_FIELDS: Record<string, readonly string[]> = {
   products_image_only_show_price: ['selling_price_usd', 'selling_price_khr'],
+  // VIP price is its own grant, separate from selling price (Aug 28): an org
+  // can let this role check the shelf price while keeping VIP terms private,
+  // or grant both for the "view everything, touch nothing" arrangement.
+  products_image_only_show_vip: ['special_price_usd', 'special_price_khr'],
   products_image_only_show_barcode: ['barcode'],
   products_image_only_show_category: ['category'],
   products_image_only_show_brand: ['brand'],
