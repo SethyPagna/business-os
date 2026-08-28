@@ -9,6 +9,7 @@ import ChevronLeft from 'lucide-react/dist/esm/icons/chevron-left.js'
 import ChevronRight from 'lucide-react/dist/esm/icons/chevron-right.js'
 import ClipboardList from 'lucide-react/dist/esm/icons/clipboard-list.js'
 import Download from 'lucide-react/dist/esm/icons/download.js'
+import Zap from 'lucide-react/dist/esm/icons/zap.js'
 import Upload from 'lucide-react/dist/esm/icons/upload.js'
 import Package from 'lucide-react/dist/esm/icons/package.js'
 import Settings2 from 'lucide-react/dist/esm/icons/settings-2.js'
@@ -47,6 +48,7 @@ const InventoryImportModal = lazyRetry(() => import('./InventoryImportModal'), '
 const InventoryMovementsSurface = lazyRetry(() => import('./InventoryMovementsSurface'), 'inventory-movements-surface') as any
 const InventoryRfidSurface = lazyRetry(() => import('./InventoryRfidSurface'), 'inventory-rfid-surface') as any
 const InventoryStockModals = lazyRetry(() => import('./InventoryStockModals'), 'inventory-stock-modals') as any
+const FastStockInModal = lazyRetry(() => import('./FastStockInModal'), 'inventory-fast-stock-in-modal') as any
 const InventoryBatchModal = lazyRetry(() => import('./InventoryBatchModal'), 'inventory-batch-modal') as any
 const ExportOptionsDialog = lazyRetry(() => import('../shared/ExportOptionsDialog'), 'inventory-export-options') as any
 const ManageBatchesModal = lazyRetry(() => import('./ManageBatchesModal'), 'inventory-manage-batches-modal') as any
@@ -695,6 +697,10 @@ export default function Inventory({ hostSection, onHostSectionChange }: {
   const [transferSaving, setTransferSaving] = useState(false)
   const [statDetail,    setStatDetail]    = useState<StatDetail>(null)
   const [showImport, setShowImport] = useState(false)
+  // F2 (Part 414): the fast per-shipment stock-in flow -- see
+  // FastStockInModal.tsx; writes ride the same receive kernel as every
+  // other add-stock surface.
+  const [showFastStockIn, setShowFastStockIn] = useState(false)
   const [inventoryReasons, setInventoryReasons] = useState<InventoryReason[]>([])
   const [reasonManager, setReasonManager] = useState<{ open: boolean; type: InventoryReasonType }>({ open: false, type: 'adjust' })
   const [reasonDraft, setReasonDraft] = useState('')
@@ -3567,6 +3573,7 @@ ${inventoryStatLabels.netSold} ${totalQtySold} = ${tr('items_sold', 'Items sold'
           )}
           items={([
             { label: tr('import', 'Import'), onClick: () => setShowImport(true), color: 'blue', icon: <Download className="h-4 w-4 shrink-0" /> },
+            { label: tr('fast_stockin_title', 'Fast stock-in'), onClick: () => setShowFastStockIn(true), color: 'green', icon: <Zap className="h-4 w-4 shrink-0" /> },
             ...(showProductsSection
               ? [
                 'divider' as const,
@@ -4010,6 +4017,19 @@ ${inventoryStatLabels.netSold} ${totalQtySold} = ${tr('items_sold', 'Items sold'
             onChanged={() => load(true)}
             t={t}
             tr={tr}
+          />
+        </Suspense>
+      ) : null}
+
+      {showFastStockIn ? (
+        <Suspense fallback={null}>
+          <FastStockInModal
+            branchOptions={branchSelectOptions}
+            defaultBranchId={branchFilter !== 'all' ? branchFilter : null}
+            tr={tr}
+            notify={notify}
+            onClose={() => setShowFastStockIn(false)}
+            onDone={() => load(false)}
           />
         </Suspense>
       ) : null}
