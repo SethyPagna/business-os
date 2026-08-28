@@ -483,7 +483,14 @@ store really paid the rider; margin = charge − cost and is internal only.*
   Filters grow: by supplier, by date range (the new date row), by action type,
   by branch. **Date-scope row** sits directly below the search row on Products AND
   Inventory, with the Filter button moved onto it.
-- [ ] D3. Product "click to view details" absorbs Inventory's stock-movement detail, so
+- [~] D3 **[CLAIMED: session a7]** (the drill half shipped with D1/Part 415;
+  this claim = the full user detail-page spec below. Footprint:
+  products/surfaces/ProductDetailModal.tsx + new folded sections +
+  salesAnalytics kernel gains the per-product breakdown + one new
+  /products/:id/detail-report read. The movement table's Batch column will
+  be blank-honest until the movements.batch_id migration lands — same
+  linkage gap D2 documented.)
+  Product "click to view details" absorbs Inventory's stock-movement detail, so
   the product detail is the one place with: info, batches (§14 modal), movements,
   supplier section. Inventory's product list then repurposes/thins accordingly (see F1).
   **Detail-page spec (user, Aug 28):** header = name + barcode + total current stock
