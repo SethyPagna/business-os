@@ -781,11 +781,15 @@ deep-linkable tabs.*
   add-stock vs import validation, receive-batch vs §12 rules, edit forms vs import
   normalizers) and list every gap found as its own item before fixing.
   **SWEEP DONE (Part 394) — measured results, fixes listed as their own items:**
-  - [ ] P7-a *(the named gap, confirmed)*: POS quick-add customer/delivery save a
+  - [x] P7-a *(Part 400: shipped, needs deploy — f5b72502. POS quick-add now
+    serializes ONE primary option ('Default': name + phone + address/area)
+    through the same createContactOption/serializeContactOptions the full
+    forms use, so quick-added contacts open in the full form as real editable
+    option rows; empty forms still store ''. Two source pins updated to the
+    customerPayload shape with intent preserved.)* POS quick-add
+    customer/delivery saved a
     BARE address/area string; the full contact forms serialize multi-OPTION rows
-    into the same column. Fix in POSQuickAddModals/POS.tsx — **deferred while POS
-    is in the G1 session's footprint**; smallest correct fix is saving through
-    serializeContactOptions with one primary option so later form edits see options.
+    into the same column.
   - [ ] P7-b *(new, confirmed)*: the scientific-notation barcode guard exists ONLY
     on import screens (BulkImportModal/productImportPlanner/spreadsheetImport) —
     manual product create/edit accepts a pasted `8.85156E+12` barcode; ProductForm

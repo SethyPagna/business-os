@@ -9056,3 +9056,41 @@ Lesson recorded: when a DOM probe says a component is broken, dump outerHTML of
 the actual container before reporting — a wrong selector produces exactly the
 same evidence as a real defect, and this one survived three probe rounds because
 every probe shared the same selector.
+
+## Part 400 (chat, Aug 28 2026) -- P7-a quick-add option parity + the Inventory filter-menu match
+
+Session a7, continuing automatically through the board (user instruction
+relayed via the G2-G4 session). Both units were the two explicitly reserved
+for this session after the G1b release.
+
+**P7-a (the Part-394 sweep's named gap), closed.** POS quick-add wrote the
+customer's address / driver's area as a BARE string into the address column;
+the full contact forms serialize multi-OPTION rows into that same column.
+Quick-add now builds one primary option ('Default' label, name + phone +
+address/area) through the SAME createContactOption/serializeContactOptions
+the full forms use -- a quick-added contact opened later in the full form
+shows a real editable option row carrying the phone/name, pickers and
+summaries read it identically, and an empty form still stores '' (the
+hasContactOptionData filter). Backend untouched: the contacts routes already
+accept `address` for all three tables and the header comment in
+routes/contacts.ts documents exactly this serialization. Two source pins
+(actionStability, performanceLoadingUx) named the old `newCustomerForm`
+argument literally; updated to the `customerPayload` shape with the pins'
+intent (timeout wrapper + label + constant) preserved and a NEW pin that the
+payload derives from the form -- the same pin-integrity treatment the peer
+sessions applied to my earlier changes.
+
+**Inventory filter menu matched to the Products principle** (G1b order,
+pinned in productMenuHelpers.test.ts): everyday facets first -- Availability,
+Category, Brand -- diagnostic/mode controls (Issues, AND/OR search mode)
+last. Inventory previously led with the search-mode toggle. Contents of every
+section unchanged; the stale "same splice point as Products" comment replaced
+by one naming the current principle.
+
+**Verified (really run).** frontend tsc clean; inventorySelectionMode,
+productMenuHelpers, actionStability, performanceLoadingUx all pass; FULL
+test:utils chain exit 0 (the first run caught the two literal pins -- fixed
+honestly, not loosened); vite build 27.66s. Commits f5b72502 + ea3afbdb.
+
+**Not done.** Visual click-through (B1's sweep). X5 remains offered to the
+M7 session. Part numbered 400 -- 399 is reserved by the G2-G4 session.
