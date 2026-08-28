@@ -60,6 +60,21 @@ export function fmtTime(raw: TimestampInput): string {
  * @param {string|Date} raw - Raw timestamp or date string
  * @returns {string}
  */
+/**
+ * mm/dd/yyyy for DATE-ONLY values ('2026-08-28' or a datetime whose date
+ * part is what's shown). Pure string reorder -- deliberately NOT routed
+ * through new Date(): a bare date string parses as UTC midnight, so
+ * formatting it in the business timezone can shift it a day. Used by the
+ * surfaces that used to print raw ISO slices (batch received/expiry dates,
+ * credit due dates) -- the whole app shows mm/dd/yyyy by request
+ * (Aug 25 2026, reaffirmed Part 388).
+ */
+export function fmtDateOnly(raw: unknown): string {
+  const match = String(raw ?? '').match(/^(\d{4})-(\d{2})-(\d{2})/)
+  if (!match) return String(raw ?? '') || '—'
+  return `${match[2]}/${match[3]}/${match[1]}`
+}
+
 export function fmtDate(raw: TimestampInput): string {
   const normalized = normalizeTimestampInput(raw)
   if (!normalized) return '—'

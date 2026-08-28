@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import Modal from '../shared/Modal'
+import { fmtDateOnly } from '../../utils/formatters'
 
 type TranslateFn = (key: string) => string | undefined
 
@@ -128,14 +129,14 @@ export default function SupplierPurchasesModal({ supplierId, supplierName, fetch
                       <tr key={batch.id} className="border-t border-gray-100 dark:border-gray-800">
                         <td className="px-3 py-2 text-gray-800 dark:text-gray-100">{batch.product_name || '--'}</td>
                         <td className="px-3 py-2 text-gray-500">{batch.lot_code || (batch.batch_number != null ? `#${batch.batch_number}` : '--')}</td>
-                        <td className="px-3 py-2 text-gray-500">{String(batch.received_at || '').slice(0, 10) || '--'}</td>
+                        <td className="px-3 py-2 text-gray-500">{batch.received_at ? fmtDateOnly(batch.received_at) : '--'}</td>
                         <td className="px-3 py-2 text-right text-gray-800 dark:text-gray-100">{qty(batch.received_quantity)}</td>
                         <td className="px-3 py-2 text-right text-gray-800 dark:text-gray-100">{batch.unit_cost_usd == null ? '--' : money(batch.unit_cost_usd)}</td>
                         <td className="px-3 py-2 text-right text-gray-500">{qty(batch.remaining_quantity)}</td>
                         <td className="px-3 py-2">
                           {batch.payment_status === 'credit' ? (
                             <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-medium text-amber-800 dark:bg-amber-900/40 dark:text-amber-200">
-                              {tr('on_credit', 'On credit')}{batch.credit_due_date ? ` · ${String(batch.credit_due_date).slice(0, 10)}` : ''}
+                              {tr('on_credit', 'On credit')}{batch.credit_due_date ? ` · ${fmtDateOnly(batch.credit_due_date)}` : ''}
                             </span>
                           ) : batch.payment_status === 'paid' ? (
                             <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-medium text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-200">{tr('paid', 'Paid')}</span>

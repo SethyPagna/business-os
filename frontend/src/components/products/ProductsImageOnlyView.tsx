@@ -28,6 +28,7 @@ import PaginationControls, { PAGE_SIZE_OPTIONS } from '../shared/PaginationContr
 import Modal from '../shared/Modal'
 import { ProductImg, ProductImagePlaceholder } from './shared/primitives'
 import { lazyRetry } from '../../utils/lazyImport.ts'
+import { fmtDateOnly } from '../../utils/formatters'
 
 // Same lazyRetry pattern ProductForm.tsx already uses for this modal --
 // keeps it out of this view's own (deliberately tiny, per Part 241) bundle
@@ -686,7 +687,7 @@ export default function ProductsImageOnlyView() {
                       <div key={`${batch.branchName}-${batch.id}`} className="flex items-center justify-between gap-2 py-1.5 text-xs">
                         <span className="min-w-0 truncate text-gray-700 dark:text-gray-200">
                           {batch.lotCode || `#${batch.batchNumber ?? batch.id}`}
-                          {batch.expiryDate ? <span className="ml-1 text-gray-400">exp {String(batch.expiryDate).slice(0, 10)}</span> : null}
+                          {batch.expiryDate ? <span className="ml-1 text-gray-400">exp {fmtDateOnly(batch.expiryDate)}</span> : null}
                         </span>
                         <span className="flex-shrink-0 text-gray-500 dark:text-gray-400">{batch.branchName}: {Number(batch.quantity || 0)}</span>
                       </div>

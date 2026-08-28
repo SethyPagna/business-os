@@ -3039,39 +3039,42 @@ export default function POS() {
                 ) : null}
               </div>
 
-              {/* Discount: label STACKED above the percent/dollar toggle
-                  (user, Aug 28 -- not side by side), inputs on the next row. */}
+              {/* Discount: label stacked above (user, Aug 28), and BELOW it
+                  ONE row holding the %/$ toggle AND the amount input(s) --
+                  the currency boxes used to wrap to their own row and were
+                  oversized (user screenshot, Part 388). Both currencies sit
+                  compact beside the toggle. */}
               <div>
                 <label htmlFor="pos-discount-usd" className="block text-xs text-gray-500 font-medium">{t('discount')}</label>
-                <div className="mt-1">
-                  <div className="inline-flex overflow-hidden rounded-lg border border-gray-200 text-sm font-medium dark:border-gray-600">
+                <div className="mt-1 flex items-center gap-1.5">
+                  <div className="inline-flex flex-shrink-0 overflow-hidden rounded-lg border border-gray-200 text-sm font-medium dark:border-gray-600">
                     <button
                       type="button"
-                      className={`min-w-[2.5rem] px-3 py-1.5 ${active.discountType === 'percent' ? 'bg-blue-600 text-white' : 'text-gray-500 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700'}`}
+                      className={`min-w-[2.25rem] px-2.5 py-1 ${active.discountType === 'percent' ? 'bg-blue-600 text-white' : 'text-gray-500 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700'}`}
                       onClick={() => handleDiscountType('percent')}
                     >
                       %
                     </button>
                     <button
                       type="button"
-                      className={`min-w-[2.5rem] border-l border-gray-200 px-3 py-1.5 dark:border-gray-600 ${active.discountType !== 'percent' ? 'bg-blue-600 text-white' : 'text-gray-500 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700'}`}
+                      className={`min-w-[2.25rem] border-l border-gray-200 px-2.5 py-1 dark:border-gray-600 ${active.discountType !== 'percent' ? 'bg-blue-600 text-white' : 'text-gray-500 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700'}`}
                       onClick={() => handleDiscountType('fixed')}
                     >
                       {usdSymbol}
                     </button>
                   </div>
+                  {active.discountType === 'percent' ? (
+                    <div className="relative w-20 flex-shrink-0">
+                      <input id="pos-discount-usd" name="pos_discount_percent" className="input text-xs py-1 pr-6 w-full" type="number" min="0" max="100" step="any" placeholder="0" value={active.discountPercent} onChange={e => handleDiscountPercent(e.target.value)} autoComplete="off" />
+                      <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-xs text-gray-400">%</span>
+                    </div>
+                  ) : (
+                    <>
+                      <div className="relative min-w-0 flex-1"><span className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-400 text-xs pointer-events-none">{usdSymbol}</span><input id="pos-discount-usd" name="pos_discount_usd" className="input text-xs py-1 pl-5 w-full" type="number" step="any" placeholder="0.00" value={active.discountUsd} onChange={e => handleDiscountUsd(e.target.value)} autoComplete="off" /></div>
+                      <div className="relative min-w-0 flex-1"><label htmlFor="pos-discount-khr" className="sr-only">{`${t('discount')} ${khrSymbol}`}</label><input id="pos-discount-khr" name="pos_discount_khr" className="input text-xs py-1 pr-5 w-full" type="number" step="any" placeholder="0" value={active.discountKhr ? Number(active.discountKhr).toFixed(0) : ''} onChange={e => handleDiscountKhr(e.target.value)} autoComplete="off" /><span className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 text-xs pointer-events-none">{khrSymbol}</span></div>
+                    </>
+                  )}
                 </div>
-                {active.discountType === 'percent' ? (
-                  <div className="relative mt-1">
-                    <input id="pos-discount-usd" name="pos_discount_percent" className="input text-xs py-1 pr-6" type="number" min="0" max="100" step="any" placeholder="0" value={active.discountPercent} onChange={e => handleDiscountPercent(e.target.value)} autoComplete="off" />
-                    <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-xs text-gray-400">%</span>
-                  </div>
-                ) : (
-                  <div className="grid grid-cols-2 gap-1 mt-1">
-                    <div className="relative"><span className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-400 text-xs pointer-events-none">{usdSymbol}</span><input id="pos-discount-usd" name="pos_discount_usd" className="input text-xs py-1 pl-5" type="number" step="any" placeholder="0.00" value={active.discountUsd} onChange={e => handleDiscountUsd(e.target.value)} autoComplete="off" /></div>
-                    <div className="relative"><label htmlFor="pos-discount-khr" className="sr-only">{`${t('discount')} ${khrSymbol}`}</label><input id="pos-discount-khr" name="pos_discount_khr" className="input text-xs py-1 pr-5" type="number" step="any" placeholder="0" value={active.discountKhr ? Number(active.discountKhr).toFixed(0) : ''} onChange={e => handleDiscountKhr(e.target.value)} autoComplete="off" /><span className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 text-xs pointer-events-none">{khrSymbol}</span></div>
-                  </div>
-                )}
               </div>
 
             </div>
@@ -3202,18 +3205,21 @@ export default function POS() {
                   {/* Method column narrowed (a method name is short); the
                       amount inputs take the freed room (user, Aug 28). */}
                   {activePaymentDetails.map((detail, index) => (
-                    <div key={detail.id} className="grid grid-cols-[minmax(0,6.5rem)_minmax(0,1fr)_minmax(0,1fr)_auto] gap-1">
+                    // Inputs minimized further (user screenshot, Part 388):
+                    // shorter boxes (py-1), narrower method column -- the
+                    // whole row stays ONE line.
+                    <div key={detail.id} className="grid grid-cols-[minmax(0,5.5rem)_minmax(0,1fr)_minmax(0,1fr)_auto] gap-1">
                       <input
                         aria-label={`${t('payment_method') || 'Payment method'} ${index + 1}`}
-                        className="input min-w-0 py-1.5 text-xs"
+                        className="input min-w-0 py-1 text-xs"
                         list="pos-payment-method-options"
                         value={detail.method}
                         onChange={(event) => updatePaymentDetail(detail.id, { method: event.target.value })}
                         placeholder={t('payment_method_placeholder') || 'Payment method'}
                         autoComplete="off"
                       />
-                      <div className="relative"><span className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-400 text-xs pointer-events-none">{usdSymbol}</span><input aria-label={`${t('amount_paid') || 'Amount paid'} USD ${index + 1}`} className="input w-full py-1.5 pl-5 text-xs" type="number" step="any" placeholder="0.00" value={detail.usd} onChange={(event) => updatePaymentDetail(detail.id, { usd: event.target.value })} autoComplete="off" /></div>
-                      <div className="relative"><input aria-label={`${t('amount_paid') || 'Amount paid'} KHR ${index + 1}`} className="input w-full py-1.5 pr-5 text-xs" type="number" step="any" placeholder="0" value={detail.khr} onChange={(event) => updatePaymentDetail(detail.id, { khr: event.target.value })} autoComplete="off" /><span className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 text-xs pointer-events-none">{khrSymbol}</span></div>
+                      <div className="relative"><span className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-400 text-xs pointer-events-none">{usdSymbol}</span><input aria-label={`${t('amount_paid') || 'Amount paid'} USD ${index + 1}`} className="input w-full py-1 pl-5 text-xs" type="number" step="any" placeholder="0.00" value={detail.usd} onChange={(event) => updatePaymentDetail(detail.id, { usd: event.target.value })} autoComplete="off" /></div>
+                      <div className="relative"><input aria-label={`${t('amount_paid') || 'Amount paid'} KHR ${index + 1}`} className="input w-full py-1 pr-5 text-xs" type="number" step="any" placeholder="0" value={detail.khr} onChange={(event) => updatePaymentDetail(detail.id, { khr: event.target.value })} autoComplete="off" /><span className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 text-xs pointer-events-none">{khrSymbol}</span></div>
                       {/* Compact button, LEGIBLE icon — it was an h-8 box
                           drawing a text-xs '×' (huge button, tiny icon). */}
                       <button type="button" className="flex h-7 w-7 items-center justify-center self-center rounded text-lg leading-none text-red-500 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-40 dark:hover:bg-red-900/20" disabled={activePaymentDetails.length === 1} onClick={() => updatePaymentDetails((details) => details.filter((entry) => entry.id !== detail.id))} aria-label={`${t('remove') || 'Remove'} ${detail.method || index + 1}`}>×</button>

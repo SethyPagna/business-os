@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { fmtDateOnly } from '../../utils/formatters'
 import X from 'lucide-react/dist/esm/icons/x.js'
 import Trash2 from 'lucide-react/dist/esm/icons/trash-2.js'
 import AppSelect, { type AppSelectOption } from '../shared/AppSelect'
@@ -240,7 +241,7 @@ export default function ManageBatchesModal({
               collapsible={false}
               onBack={() => setDayDetail(null)}
               backLabel={tr('back', 'Back', 'ថយក្រោយ')}
-              title={`${tr('movements_on_day', 'Movements on', 'ចលនាស្តុកនៅ')} ${dayDetail}`}
+              title={`${tr('movements_on_day', 'Movements on', 'ចលនាស្តុកនៅ')} ${fmtDateOnly(dayDetail)}`}
               subtitle={tr('day_detail_time_hint', 'Times shown where recorded — imported history carries the date only.', 'បង្ហាញម៉ោងដែលបានកត់ត្រា — ប្រវត្តិនាំចូលមានតែកាលបរិច្ឆេទប៉ុណ្ណោះ។')}
             >
               <div className="space-y-1.5 p-3">
@@ -367,7 +368,7 @@ export default function ManageBatchesModal({
                             className="mt-0.5 block text-xs text-blue-600 hover:underline dark:text-blue-300"
                             onClick={() => setDayDetail(String(batch.received_at || '').slice(0, 10) || null)}
                           >
-                            {tr('received_on', 'Received', 'បានទទួល')}: {String(batch.received_at || '').slice(0, 10)} ›
+                            {tr('received_on', 'Received', 'បានទទួល')}: {fmtDateOnly(String(batch.received_at || '').slice(0, 10))} ›
                           </button>
                         ) : null}
                         {batch.notes ? <div className="mt-1 text-xs text-gray-400">{batch.notes}</div> : null}
