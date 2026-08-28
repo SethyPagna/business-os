@@ -320,7 +320,18 @@ autocorrect — templates, imports, exports and generated files alike.*
   untouched, USD 129,696.60/KHR 82,419,900 preserved, idempotent; the manifest's
   live check stays valid.)* "Delivery was made into the category column — separate
   it."
-- [~] B5 *(IN PROGRESS — claimed by session business-os-v1-35, Aug 28, Part 398 — do not pick up in parallel)*. Receipt print: when 80x50 is enabled, clicking Print offers BOTH sizes and the
+- [x] B5 *(Part 398: SHIPPED, needs deploy (`26b04c91`) — enabling the 80x50 card no
+  longer makes the FULL receipt unreachable: the receipt view stacks BOTH renditions
+  (card first, labeled "80 × 50 mm"; full roll receipt under it, labeled "<N> mm") and
+  Print splits into "Print 80×50" (fixed zero-margin sheet) + "Print <N>mm" (the full
+  receipt on the continuous roll — an '80x50mm' stored size maps to the 80mm roll for
+  it, any other configured size is kept). Open PDF / Save Image keep acting on the
+  configured card; single-size mode unchanged. Both source-lock tests re-pinned.
+  Verified LIVE on worker-dev with a real sale (both renditions render real data, both
+  Print buttons fire their variant); the print WINDOW can't open in a hidden browser
+  pane (the shared pipeline awaits requestAnimationFrame — environmental, also true of
+  the old single-Print path), so physical printing stays on the post-deploy live
+  checklist with A2.)* Receipt print: when 80x50 is enabled, clicking Print offers BOTH sizes and the
   preview shows BOTH (today only one previews). Verify printing end-to-end while there.
 - [x] B6 *(Part 389: shipped on all five pages, needs deploy. Inventory: toolbar
   select-all control removed, bulk toolbar exists only while selected, header checkbox
@@ -2156,6 +2167,17 @@ CSVs and errors.csv gained the UTF-8 BOM Khmer needs in Excel. Verified: both ne
 tests green, 11 import/export-adjacent frontend tests green, backend sweep 89/89
 (one transient failure = another session's mid-edit promotions module), both tsc,
 build 13.87s, dry-run. Directly protects the M2 migration imports.
+
+**Part 398 (Aug 28, parallel session):** B5 shipped, needs deploy (`26b04c91`) — the
+80x50 card and the full roll receipt are now BOTH previewed and BOTH printable (two
+explicit Print buttons; full receipt maps an '80x50mm' paper setting to the 80mm
+roll). Verified: receiptTemplate + receiptSettingsSync re-pinned and green, posCore +
+chain coverage green, build green, and a LIVE worker-dev pass with a real sale
+(migrated local D1 to 0073 to do it; local dev admin password was reset to the seed
+default `Admin123456!` in the process — local scratch only). Found along the way,
+NOT this unit's: the current shared `frontend/dist` (a peer's mid-work build) renders
+the POS "Record Sale As" status modal EMPTY, so checkout can't complete on worker-dev
+until the G1b session's next green build — flagged to that session directly.
 
 **Part 370 additions:** the master plan (top of file) is now the queue; the in-flight
 stats/tooltip work was finished and committed (`9d93db56`); the empty

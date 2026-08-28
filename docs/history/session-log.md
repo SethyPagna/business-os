@@ -8978,3 +8978,61 @@ in the pack was stale), then reorganized:
   prerequisite now naming 0064 + 0072's automatic effects.
 
 Pack-side only -- no repo code changed in this addendum.
+
+## Part 398 (chat, Aug 28 2026) — B5: both receipt sizes printable and previewed
+
+**Ask.** "Continue" (the standing disjoint-task instruction). Claimed B5 in
+progress.md and by peer message before writing code; 6e had pre-cleared it against
+their G1 footprint (receipt components only, no POS.tsx).
+
+**What changed** (all in `frontend/src/components/receipt/Receipt.tsx` + the two
+source-lock tests):
+- Enabling the compact 80x50 sales card (template flag or the '80x50mm' paper
+  setting) used to make the FULL receipt unreachable — one shell rendered
+  `compactReceiptBlock || full` and every action used the forced card settings.
+- Now the preview stacks BOTH renditions, each labeled ("80 × 50 mm" card first —
+  the configured primary — then "<N> mm" full receipt), and Print splits into
+  "Print 80×50" and "Print <N>mm". The full receipt prints on the continuous roll:
+  an '80x50mm' stored paper size maps to the 80mm roll for it; any other configured
+  size (58/72/A4/custom, with the card enabled via the template flag) is kept as
+  set. `exportReceiptPdf` resolves target ref + per-variant settings; Open PDF /
+  Save Image deliberately keep today's behavior (the configured card); the
+  single-size mode renders character-for-character as before.
+- `receiptTemplate.test.ts` + `receiptSettingsSync.test.ts` re-pin the new shape:
+  per-variant target resolution, both explicit print variants, the resolved
+  settings object reaching the print tools, and the 80x50→80mm roll mapping.
+
+**Verified (really run).**
+- Both receipt source-lock tests, posCore, encodingSafety, testChainCoverage —
+  green individually. Frontend typecheck clean over this unit (the only tsc errors
+  in the tree are another session's in-flight PromotionsPage). Vite build green.
+- LIVE on worker-dev (wrangler dev + the built frontend, local D1 migrated to
+  0073): logged in, inserted a complete sale (receipt B5-VERIFY-001) with the
+  80x50 paper setting active, opened Sales → Reprint — **both renditions render
+  with the real sale data under their size labels, and both Print buttons fire
+  their variant into the real print pipeline** (the busy state and the pipeline
+  entry were observed; each button targets its own ref/settings per the pinned
+  locks).
+- The print WINDOW itself cannot open in this environment: the shared print
+  pipeline awaits requestAnimationFrame, which never fires in a hidden,
+  non-compositing browser pane — so the popup stage parks. This limit equally
+  affects the OLD single-Print path (environmental, not a regression); physical
+  printing joins the post-deploy live checklist (A2).
+
+**Found along the way (not this unit's, flagged to owners).**
+- The current shared `frontend/dist` — built by a peer from their mid-work G1b
+  tree — renders the POS "Record Sale As" status modal EMPTY (only the Close
+  button), so POS checkout cannot complete on worker-dev until their next green
+  build. Messaged to the G1b session. (Receipt verification bypassed it by
+  inserting the sale directly.)
+- Local-dev housekeeping, recorded honestly: local D1 migrated to 0073; local dev
+  admin password reset to the seed default `Admin123456!` (it predated the seed
+  and was unknown); seeded fixtures named `B5 Print Test Serum` / `B5-VERIFY-001`;
+  `receipt_print_settings` set to 80x50mm; `businessos_sync_server` set in the
+  pane's localStorage — all local scratch state only.
+
+**Not done.** Deploy; the physical-printer end-to-end check (A2 checklist). If the
+operators want Open PDF / Save Image to also offer both sizes, that is a one-line
+ask away — the variant machinery is in place; kept to the confirmed scope.
+
+Commit: `26b04c91`.
