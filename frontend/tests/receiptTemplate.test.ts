@@ -100,8 +100,14 @@ await runTest('receipt layout keeps Khmer labels, item columns, and row-aware im
   assert.doesNotMatch(receiptSource, /getStatusLabel/)
   assert.doesNotMatch(receiptSource, /<Row label=\{labelFor\(lang, 'status'\)/)
   assert.doesNotMatch(receiptSource, /@\s*\{fmtUSD\(unitUsd\)\}/)
-  assert.match(receiptSource, /printTools\.printReceipt\(printRef\.current,\s*\{[\s\S]*title:\s*''/)
-  assert.match(receiptSource, /printTools\.openReceiptPdf\(printRef\.current,\s*\{[\s\S]*title:\s*''/)
+  // B5: actions resolve their target per variant -- the full receipt's ref
+  // or the 80x50 card's -- and with the card enabled, Print offers BOTH
+  // sizes as explicit variants.
+  assert.match(receiptSource, /const target = variant === 'compact' \? compactPrintRef\.current : printRef\.current/)
+  assert.match(receiptSource, /printTools\.printReceipt\(target,\s*\{[\s\S]*title:\s*''/)
+  assert.match(receiptSource, /printTools\.openReceiptPdf\(target,\s*\{[\s\S]*title:\s*''/)
+  assert.match(receiptSource, /exportReceiptPdf\('print', 'compact'\)/)
+  assert.match(receiptSource, /exportReceiptPdf\('print', 'full'\)/)
   assert.match(receiptSource, /data-receipt-line="true"/)
   assert.match(receiptSource, /data-receipt-cell="qty"/)
   assert.match(utilSource, /function wrapReceiptFallbackLine/)

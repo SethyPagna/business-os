@@ -33,7 +33,12 @@ assert.match(receiptSource, /const appliedConfig = useMemo\(\(\) => buildApplied
 // path must receive that resolved object, not the untouched stored settings.
 assert.match(receiptSource, /const effectivePrintSettings = compactSalesReceipt/)
 assert.match(receiptSource, /paperSize: 'custom', customWidth: '80', customHeight: '50'/)
-assert.match(receiptSource, /printSettings:\s*effectivePrintSettings/)
+// B5: the printable path receives the RESOLVED per-variant object -- the
+// forced 80x50 zero-margin configuration for the card, the roll settings
+// for the full receipt (an '80x50mm' stored size maps to the 80mm roll).
+assert.match(receiptSource, /const variantSettings = variant === 'compact' \? compactPrintSettings : fullPrintSettings/)
+assert.match(receiptSource, /printSettings:\s*variantSettings/)
+assert.match(receiptSource, /\? \{ \.\.\.appliedPrintSettings, paperSize: '80mm' \}/)
 
 assert.match(printUtilSource, /RECEIPT_PRINT_SETTINGS_STORAGE_KEY/)
 assert.match(printUtilSource, /normalizeReceiptPrintSettings/)

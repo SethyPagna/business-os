@@ -266,15 +266,25 @@ function Row({ label, value, subValue, bold = false, tone = '' }: RowProps) {
 export default function Receipt({ sale, settings = {}, onClose, _previewMode }: ReceiptProps) {
   const { fmtUSD, fmtKHR, khrSymbol, t } = useApp()
   const printRef = useRef<HTMLDivElement | null>(null)
+  const compactPrintRef = useRef<HTMLDivElement | null>(null)
   const appliedConfig = useMemo(() => buildAppliedReceiptConfig({ settings }), [settings])
   const tpl = parseReceiptTemplate(appliedConfig.serializedTemplate)
   const appliedSettings = appliedConfig.settings
   const appliedPrintSettings = appliedConfig.printSettings
   const compactSalesReceipt = tpl.sales_receipt_enabled === true || String(appliedPrintSettings.paperSize || '').toLowerCase() === '80x50mm'
-  const effectivePrintSettings = compactSalesReceipt
-    ? { ...appliedPrintSettings, paperSize: 'custom', customWidth: '80', customHeight: '50', marginTop: '0', marginRight: '0', marginBottom: '0', marginLeft: '0' }
+  // B5: enabling the 80x50 card must not make the FULL receipt unreachable
+  // -- with it on, BOTH renditions preview and Print offers BOTH sizes.
+  // The card prints on its fixed 80x50 sheet (zero margins, the sheet IS
+  // the layout); the full receipt prints on the continuous roll -- an
+  // '80x50mm' paper setting maps to the 80mm roll for it, any other
+  // configured size is kept as the operator set it.
+  const compactPrintSettings = { ...appliedPrintSettings, paperSize: 'custom', customWidth: '80', customHeight: '50', marginTop: '0', marginRight: '0', marginBottom: '0', marginLeft: '0' }
+  const fullPrintSettings = String(appliedPrintSettings.paperSize || '').toLowerCase() === '80x50mm'
+    ? { ...appliedPrintSettings, paperSize: '80mm' }
     : appliedPrintSettings
+  const effectivePrintSettings = compactSalesReceipt ? compactPrintSettings : appliedPrintSettings
   const receiptWidthMm = getReceiptPaperWidthMm(effectivePrintSettings, tpl.width || 80)
+  const fullReceiptWidthMm = getReceiptPaperWidthMm(fullPrintSettings, tpl.width || 80)
   const [lang, setLang] = useState<LanguageMode>((tpl.receipt_language as LanguageMode) || 'en')
   const [pdfBusy, setPdfBusy] = useState<ReceiptExportMode | ''>('')
 
@@ -545,27 +555,35 @@ export default function Receipt({ sale, settings = {}, onClose, _previewMode }: 
   ) : null
 
   const receiptTitle = `Receipt ${rNum}`
-  const exportReceiptPdf = async (mode: ReceiptExportMode) => {
-    if (!printRef.current) return
+  // Which rendition an action targets. With the 80x50 card enabled the
+  // card stays the DEFAULT (today's behavior for Open PDF / Save Image);
+  // the Print buttons pass their variant explicitly so both sizes are one
+  // tap away (B5).
+  type ReceiptVariant = 'full' | 'compact'
+  const defaultVariant: ReceiptVariant = compactSalesReceipt ? 'compact' : 'full'
+  const exportReceiptPdf = async (mode: ReceiptExportMode, variant: ReceiptVariant = defaultVariant) => {
+    const target = variant === 'compact' ? compactPrintRef.current : printRef.current
+    const variantSettings = variant === 'compact' ? compactPrintSettings : fullPrintSettings
+    if (!target) return
     setPdfBusy(mode)
     try {
       const printTools = await loadReceiptPrintModule()
       if (mode === 'image') {
-        await printTools.downloadReceiptImage(printRef.current, {
+        await printTools.downloadReceiptImage(target, {
           title: receiptTitle,
           fileName: receiptTitle,
-          printSettings: effectivePrintSettings,
+          printSettings: variantSettings,
         })
       } else if (mode === 'print') {
-        await printTools.printReceipt(printRef.current, {
+        await printTools.printReceipt(target, {
           title: '',
-          printSettings: effectivePrintSettings,
+          printSettings: variantSettings,
         })
       } else {
-        await printTools.openReceiptPdf(printRef.current, {
+        await printTools.openReceiptPdf(target, {
           title: '',
           fileName: receiptTitle,
-          printSettings: effectivePrintSettings,
+          printSettings: variantSettings,
           previewFallback: true,
           previewFallbackNote: t?.('receipt_pdf_preview_fallback') || 'PDF export was unavailable, so a printable receipt preview was opened instead.',
         })
@@ -577,10 +595,10 @@ export default function Receipt({ sale, settings = {}, onClose, _previewMode }: 
     }
   }
 
-  const shellStyle: CSSProperties = {
+  const shellStyleFor = (widthMm: number): CSSProperties => ({
     fontFamily: actualFont,
     fontSize: fs,
-    width: `${receiptWidthMm}mm`,
+    width: `${widthMm}mm`,
     maxWidth: '100%',
     minWidth: 0,
     background: '#ffffff',
@@ -593,7 +611,8 @@ export default function Receipt({ sale, settings = {}, onClose, _previewMode }: 
     overflowWrap: 'break-word',
     wordBreak: 'normal',
     boxSizing: 'border-box',
-  }
+  })
+  const shellStyle = shellStyleFor(receiptWidthMm)
 
   if (_previewMode) {
     return <div data-receipt-export-root="true" style={shellStyle}>{compactReceiptBlock || <>{renderedSections}{qrBlock}</>}</div>
@@ -602,7 +621,35 @@ export default function Receipt({ sale, settings = {}, onClose, _previewMode }: 
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-y-auto bg-gray-100 dark:bg-zinc-900">
       <div className="flex flex-shrink-0 flex-wrap items-center justify-between gap-3 border-b border-gray-200 bg-white px-3 py-3 dark:border-zinc-700 dark:bg-zinc-800">
-        <div className="grid w-full grid-cols-3 gap-2 sm:flex sm:w-auto sm:flex-wrap sm:items-center">
+        <div className={`grid w-full gap-2 sm:flex sm:w-auto sm:flex-wrap sm:items-center ${compactSalesReceipt ? 'grid-cols-2' : 'grid-cols-3'}`}>
+        {compactSalesReceipt ? (
+          // B5: with the 80x50 card enabled, Print offers BOTH sizes -- the
+          // card on its fixed sheet, and the full receipt on the roll.
+          <>
+            <button
+              type="button"
+              className="btn-primary min-w-0 justify-center px-3 py-2 text-sm"
+              onClick={() => exportReceiptPdf('print', 'compact')}
+              disabled={pdfBusy !== ''}
+            >
+              <span className="inline-flex min-w-0 items-center justify-center gap-1.5">
+                <Printer className="h-4 w-4 shrink-0" />
+                <span className="truncate">{pdfBusy === 'print' ? (t?.('preparing_pdf') || 'Preparing PDF...') : `${t?.('print') || 'Print'} 80×50`}</span>
+              </span>
+            </button>
+            <button
+              type="button"
+              className="btn-primary min-w-0 justify-center px-3 py-2 text-sm"
+              onClick={() => exportReceiptPdf('print', 'full')}
+              disabled={pdfBusy !== ''}
+            >
+              <span className="inline-flex min-w-0 items-center justify-center gap-1.5">
+                <Printer className="h-4 w-4 shrink-0" />
+                <span className="truncate">{pdfBusy === 'print' ? (t?.('preparing_pdf') || 'Preparing PDF...') : `${t?.('print') || 'Print'} ${fullReceiptWidthMm}mm`}</span>
+              </span>
+            </button>
+          </>
+        ) : (
         <button
           type="button"
           className="btn-primary min-w-0 justify-center px-3 py-2 text-sm"
@@ -614,6 +661,7 @@ export default function Receipt({ sale, settings = {}, onClose, _previewMode }: 
             <span className="truncate">{pdfBusy === 'print' ? (t?.('preparing_pdf') || 'Preparing PDF...') : (t?.('print') || 'Print')}</span>
           </span>
         </button>
+        )}
         <button
           type="button"
           className="btn-secondary min-w-0 justify-center px-3 py-2 text-sm"
@@ -664,12 +712,32 @@ export default function Receipt({ sale, settings = {}, onClose, _previewMode }: 
       </div>
 
       <div className="flex flex-1 justify-center overflow-auto p-4">
-        <div style={{ width: '100%', maxWidth: `calc(${receiptWidthMm}mm + 32px)` }}>
-          <div className="rounded-[18px] border border-gray-200 bg-white p-2 shadow-[0_22px_48px_rgba(15,23,42,0.14)] dark:border-zinc-700 dark:bg-white">
-          <div ref={printRef} data-receipt-export-root="true" style={shellStyle}>
-            {compactReceiptBlock || <>{renderedSections}{qrBlock}</>}
-          </div>
-          </div>
+        <div style={{ width: '100%', maxWidth: `calc(${Math.max(receiptWidthMm, compactSalesReceipt ? fullReceiptWidthMm : 0)}mm + 32px)` }}>
+          {compactSalesReceipt ? (
+            // B5: BOTH renditions preview -- the 80x50 card first (it is the
+            // configured primary), the full roll receipt under it, each
+            // labeled with the size its Print button uses.
+            <>
+              <p className="mb-1 text-center text-[11px] font-semibold uppercase tracking-wide text-gray-400">80 × 50 mm</p>
+              <div className="mx-auto rounded-[18px] border border-gray-200 bg-white p-2 shadow-[0_22px_48px_rgba(15,23,42,0.14)] dark:border-zinc-700 dark:bg-white" style={{ maxWidth: `calc(${receiptWidthMm}mm + 16px)` }}>
+                <div ref={compactPrintRef} data-receipt-export-root="true" style={shellStyle}>
+                  {compactReceiptBlock}
+                </div>
+              </div>
+              <p className="mb-1 mt-4 text-center text-[11px] font-semibold uppercase tracking-wide text-gray-400">{fullReceiptWidthMm} mm</p>
+              <div className="mx-auto rounded-[18px] border border-gray-200 bg-white p-2 shadow-[0_22px_48px_rgba(15,23,42,0.14)] dark:border-zinc-700 dark:bg-white" style={{ maxWidth: `calc(${fullReceiptWidthMm}mm + 16px)` }}>
+                <div ref={printRef} data-receipt-export-root="true" style={shellStyleFor(fullReceiptWidthMm)}>
+                  {renderedSections}{qrBlock}
+                </div>
+              </div>
+            </>
+          ) : (
+            <div className="rounded-[18px] border border-gray-200 bg-white p-2 shadow-[0_22px_48px_rgba(15,23,42,0.14)] dark:border-zinc-700 dark:bg-white">
+            <div ref={printRef} data-receipt-export-root="true" style={shellStyle}>
+              {renderedSections}{qrBlock}
+            </div>
+            </div>
+          )}
           <p className="mt-3 inline-flex w-full items-center justify-center gap-2 text-center text-xs text-gray-400">
             <FileText className="h-3.5 w-3.5" />
             {t?.('receipt_pdf_layout_note') || 'PDF export uses this exact receipt layout.'}
