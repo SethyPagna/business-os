@@ -1,0 +1,255 @@
+import { useRef, useState } from 'react'
+import UploadCloud from 'lucide-react/dist/esm/icons/upload-cloud.js'
+import FileSpreadsheet from 'lucide-react/dist/esm/icons/file-spreadsheet.js'
+import AppSelect from '../../shared/AppSelect.tsx'
+import { parseImportFile } from '../../../utils/spreadsheetImport.ts'
+import { classifyImportContent, type DetectedImportType } from './importTemplateRouter.ts'
+import { createImportJob, uploadImportJobCsv, startImportJob } from '../../../api/importJobsTransport.ts'
+
+// N1c: the ONE import entry point. Drop one file or many -- each is
+// classified by its real header shape (importTemplateRouter) and shown in
+// a routing plan the operator can override per file -- then every file is
+// dispatched into the SAME job pipeline every importer already uses
+// (create -> upload csv -> start analyze; §13's two-screen contract, no
+// new commit paths). The queued jobs are siblings in the shared import
+// tracker, where each is reviewed and approved exactly like a job started
+// from its own page. Volume never forces a split: stock files ride the M4
+// continuation engine, and the §12 supplier column comes along untouched.
+
+type TranslateFn = (key: string, fallback?: string, km?: string) => string
+
+type PlanEntry = {
+  file: File
+  name: string
+  content: string
+  rowCount: number
+  detected: DetectedImportType
+  signals: string[]
+  chosen: DetectedImportType | 'skip'
+  status: 'planned' | 'creating' | 'uploading' | 'queued' | 'error'
+  jobId?: string | number
+  error?: string
+}
+
+const TYPE_LABELS: Record<DetectedImportType, { key: string; fallback: string }> = {
+  products: { key: 'import_hub_type_products', fallback: 'Products (catalog / stock)' },
+  stock_actions: { key: 'import_hub_type_stock', fallback: 'Stock actions (add / sale / reconcile)' },
+  sales: { key: 'import_hub_type_sales', fallback: 'Sales history' },
+  customers: { key: 'import_hub_type_customers', fallback: 'Customers' },
+  suppliers: { key: 'import_hub_type_suppliers', fallback: 'Suppliers' },
+  delivery_contacts: { key: 'import_hub_type_delivery', fallback: 'Delivery contacts' },
+  unknown: { key: 'import_hub_type_unknown', fallback: 'Unknown — choose' },
+}
+
+function defaultPolicyFor(type: DetectedImportType, accrueLoyalty: boolean): Record<string, unknown> {
+  if (type === 'sales') return { source: 'import_hub', accrue_loyalty: accrueLoyalty }
+  if (type === 'customers' || type === 'suppliers' || type === 'delivery_contacts') {
+    // The contacts importer's own default: merge into phone-matched
+    // existing contacts rather than duplicating or skipping.
+    return { source: 'import_hub', conflictMode: 'merge' }
+  }
+  return { source: 'import_hub' }
+}
+
+export default function ImportHub({
+  t,
+  onUseClassic,
+  onClose,
+}: {
+  t: TranslateFn
+  onUseClassic: () => void
+  onClose: () => void
+}) {
+  const [plan, setPlan] = useState<PlanEntry[]>([])
+  const [reading, setReading] = useState(false)
+  const [dispatching, setDispatching] = useState(false)
+  const [done, setDone] = useState(false)
+  const [accrueLoyalty, setAccrueLoyalty] = useState(false)
+  const inputRef = useRef<HTMLInputElement | null>(null)
+  const T = (key: string, fallback: string) => {
+    const value = t(key)
+    return value && value !== key ? value : fallback
+  }
+
+  const addFiles = async (files: FileList | File[] | null) => {
+    const list = Array.from(files || [])
+    if (!list.length) return
+    setReading(true)
+    try {
+      const entries: PlanEntry[] = []
+      for (const file of list) {
+        try {
+          const parsed = await parseImportFile(file)
+          const detection = classifyImportContent(parsed.content)
+          const rowCount = Math.max(0, parsed.content.split(/\r?\n/).filter((line) => line.trim()).length - 1)
+          entries.push({
+            file, name: file.name, content: parsed.content, rowCount,
+            detected: detection.type, signals: detection.signals,
+            chosen: detection.type === 'unknown' ? 'skip' : detection.type,
+            status: 'planned',
+          })
+        } catch (error) {
+          entries.push({
+            file, name: file.name, content: '', rowCount: 0,
+            detected: 'unknown', signals: [], chosen: 'skip',
+            status: 'error', error: error instanceof Error ? error.message : String(error),
+          })
+        }
+      }
+      setPlan((previous) => [...previous, ...entries])
+    } finally {
+      setReading(false)
+    }
+  }
+
+  const dispatchAll = async () => {
+    if (dispatching) return
+    setDispatching(true)
+    try {
+      // Sequential on purpose: each job's create+upload+start is cheap,
+      // and one-at-a-time keeps failures attributable to their file.
+      for (let index = 0; index < plan.length; index++) {
+        const entry = plan[index]
+        if (entry.chosen === 'skip' || entry.status === 'queued' || entry.status === 'error') continue
+        const update = (patch: Partial<PlanEntry>) => setPlan((previous) => previous.map((row, i) => i === index ? { ...row, ...patch } : row))
+        try {
+          update({ status: 'creating' })
+          const created = await createImportJob({
+            type: entry.chosen,
+            policy: defaultPolicyFor(entry.chosen, accrueLoyalty),
+          }) as { job?: { id?: string | number }; id?: string | number }
+          const jobId = created?.job?.id ?? created?.id
+          if (!jobId) throw new Error(T('import_hub_job_failed', 'Import job was not created'))
+          update({ status: 'uploading', jobId })
+          await uploadImportJobCsv({ jobId, text: entry.content, fileName: entry.name })
+          await startImportJob(jobId)
+          update({ status: 'queued' })
+        } catch (error) {
+          update({ status: 'error', error: error instanceof Error ? error.message : String(error) })
+        }
+      }
+      setDone(true)
+    } finally {
+      setDispatching(false)
+    }
+  }
+
+  const queuedCount = plan.filter((entry) => entry.status === 'queued').length
+  const actionable = plan.some((entry) => entry.chosen !== 'skip' && entry.status === 'planned')
+  const hasSales = plan.some((entry) => entry.chosen === 'sales' && entry.status !== 'queued')
+
+  return (
+    <div className="space-y-4">
+      <div>
+        <h3 className="text-base font-semibold text-gray-900 dark:text-gray-100">
+          {T('import_hub_title', 'Import — drop your files, we route them')}
+        </h3>
+        <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+          {T('import_hub_sub', 'One combined sheet or separate files per aspect — catalog, stock-in, sales, contacts — together or over several sessions. Each file is recognized by its columns and queued into its own reviewed import; nothing commits without you.')}
+        </p>
+      </div>
+
+      <button
+        type="button"
+        onClick={() => inputRef.current?.click()}
+        className="w-full rounded-2xl border-2 border-dashed border-gray-300 dark:border-gray-600 hover:border-blue-400 p-6 text-center transition-colors"
+        onDragOver={(event) => event.preventDefault()}
+        onDrop={(event) => { event.preventDefault(); void addFiles(event.dataTransfer?.files || null) }}
+      >
+        <UploadCloud className="w-8 h-8 mx-auto text-gray-400" />
+        <p className="mt-2 text-sm font-medium text-gray-700 dark:text-gray-200">
+          {reading ? (T('import_hub_reading', 'Reading files…')) : T('import_hub_drop', 'Drop CSV / Excel files here, or click to choose (multiple allowed)')}
+        </p>
+      </button>
+      <input
+        ref={inputRef}
+        type="file"
+        accept=".csv,.xlsx,.xls,.tsv,.txt"
+        multiple
+        className="hidden"
+        onChange={(event) => { void addFiles(event.target.files); event.target.value = '' }}
+      />
+
+      {plan.length > 0 ? (
+        <div className="space-y-2">
+          {plan.map((entry, index) => (
+            <div key={`${entry.name}-${index}`} className="rounded-xl border border-gray-200 dark:border-gray-700 p-3">
+              <div className="flex items-center gap-2 flex-wrap">
+                <FileSpreadsheet className="w-4 h-4 text-gray-400 shrink-0" />
+                <span className="text-sm font-medium truncate">{entry.name}</span>
+                <span className="text-xs text-gray-400">{entry.rowCount} {T('import_hub_rows', 'rows')}</span>
+                <span className={`ml-auto text-xs font-semibold ${
+                  entry.status === 'queued' ? 'text-emerald-600'
+                  : entry.status === 'error' ? 'text-red-600'
+                  : entry.status === 'planned' ? 'text-gray-400'
+                  : 'text-blue-600'
+                }`}>
+                  {entry.status === 'planned' ? ''
+                    : entry.status === 'creating' ? T('import_hub_creating', 'creating job…')
+                    : entry.status === 'uploading' ? T('import_hub_uploading', 'uploading…')
+                    : entry.status === 'queued' ? T('import_hub_queued', 'queued for review')
+                    : (entry.error || T('import_failed', 'Import failed'))}
+                </span>
+              </div>
+              <div className="mt-2 flex items-center gap-2 flex-wrap">
+                <div className="min-w-[16rem]">
+                  <AppSelect
+                    value={entry.chosen}
+                    onChange={(value: string) => setPlan((previous) => previous.map((row, i) => i === index ? { ...row, chosen: value as PlanEntry['chosen'] } : row))}
+                    options={[
+                      ...(['products', 'stock_actions', 'sales', 'customers', 'suppliers', 'delivery_contacts'] as const).map((type) => ({
+                        value: type,
+                        label: T(TYPE_LABELS[type].key, TYPE_LABELS[type].fallback),
+                      })),
+                      { value: 'skip', label: T('import_hub_skip', 'Skip this file') },
+                    ]}
+                  />
+                </div>
+                {entry.detected !== 'unknown' ? (
+                  <span className="text-[11px] text-gray-400">
+                    {T('import_hub_detected_by', 'detected by')}: {entry.signals.join(', ') || entry.detected}
+                  </span>
+                ) : (
+                  <span className="text-[11px] text-amber-600">
+                    {T('import_hub_unrecognized', 'Columns not recognized — choose the import type or skip')}
+                  </span>
+                )}
+              </div>
+            </div>
+          ))}
+
+          {hasSales ? (
+            <label className="flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 dark:border-amber-500/30 dark:bg-amber-500/10 p-3 text-xs cursor-pointer">
+              <input type="checkbox" checked={accrueLoyalty} onChange={(event) => setAccrueLoyalty(event.target.checked)} className="mt-0.5" />
+              <span className="text-amber-800 dark:text-amber-200">
+                {T('sales_import_accrue_loyalty', 'Count loyalty points for these sales')}{' '}
+                <span className="text-amber-600 dark:text-amber-300">
+                  {T('import_hub_loyalty_note', '— leave OFF for historical sales: balances are computed by summing sales, so old receipts would inflate them.')}
+                </span>
+              </span>
+            </label>
+          ) : null}
+        </div>
+      ) : null}
+
+      <div className="flex items-center justify-between gap-2 pt-1">
+        <button type="button" className="text-xs text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 underline" onClick={onUseClassic}>
+          {T('import_hub_classic', 'I know what I’m importing — use the classic screens')}
+        </button>
+        <div className="flex items-center gap-2">
+          {done && queuedCount > 0 ? (
+            <span className="text-xs text-emerald-600 font-medium">
+              {queuedCount} {T('import_hub_done', 'import(s) queued — review and approve each in the import tracker (bottom of the screen)')}
+            </span>
+          ) : null}
+          <button type="button" className="btn btn-ghost btn-sm" onClick={onClose} disabled={dispatching}>
+            {T('close', 'Close')}
+          </button>
+          <button type="button" className="btn btn-primary btn-sm" onClick={() => void dispatchAll()} disabled={!actionable || dispatching || reading}>
+            {dispatching ? T('import_hub_dispatching', 'Queueing…') : T('import_hub_start', 'Queue the imports')}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}

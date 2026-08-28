@@ -1,4 +1,5 @@
 import { Suspense, startTransition, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { describeJobPolicy } from '../products/import/importTemplateRouter.ts'
 import AlertTriangle from 'lucide-react/dist/esm/icons/alert-triangle.js'
 import CheckCircle2 from 'lucide-react/dist/esm/icons/check-circle-2.js'
 import FileDown from 'lucide-react/dist/esm/icons/file-down.js'
@@ -86,6 +87,8 @@ type ImportJobSummary = {
 
 type ImportJob = {
   id?: unknown
+  // the job's persisted options (serializeJob parses policy_json) -- N1b
+  policy?: unknown
   status?: unknown
   phase?: unknown
   type?: unknown
@@ -1369,6 +1372,19 @@ export default function BackgroundImportTracker() {
                       {lastError ? ` - ${lastError}` : ''}
                       {isStalledSilently ? ` - ${t('import_stalled_no_error') || 'No update in a while -- this import may have stopped. Safe to cancel or remove.'}` : ''}
                     </div>
+                    {(() => {
+                      const policyLines = describeJobPolicy(job.policy)
+                      if (!policyLines.length) return null
+                      return (
+                        <div className="mt-1 flex flex-wrap gap-1">
+                          {policyLines.map((line) => (
+                            <span key={line.key} className="rounded-full bg-black/5 px-1.5 py-0.5 text-[10px] dark:bg-white/10" title={`${line.label}: ${line.value}`}>
+                              {line.label}: {line.value}
+                            </span>
+                          ))}
+                        </div>
+                      )
+                    })()}
                   </div>
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="rounded-full bg-black/10 px-2 py-1 text-xs font-semibold dark:bg-white/10">{jobProgress.label}</span>
