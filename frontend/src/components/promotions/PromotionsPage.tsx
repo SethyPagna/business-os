@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import Gift from 'lucide-react/dist/esm/icons/gift.js'
 import Plus from 'lucide-react/dist/esm/icons/plus.js'
 import Pencil from 'lucide-react/dist/esm/icons/pencil.js'
 import Trash2 from 'lucide-react/dist/esm/icons/trash-2.js'
@@ -27,8 +28,14 @@ type PromotionsAppContext = {
   notify: (message: string, type?: string) => void
   fmtUSD: (value: number) => string
   fmtKHR: (value: number) => string
+  getPermissionTier: (key: string) => string
 }
 const useApp = useAppHook as unknown as () => PromotionsAppContext
+
+// G2: Loyalty Points renders as a SECTION of this page (its own chunk
+// stays split -- the old standalone page component loads lazily only
+// when the section opens).
+const LoyaltyPointsSection = lazy(() => import('../loyalty-points/LoyaltyPointsPage'))
 
 // G1 (Part 391): the promotion engine's management surface. Two sections:
 //   1. Promotion RULES -- "buy >= X save Y", "% off", "fixed off", scoped
@@ -113,7 +120,12 @@ function ruleScopeSummary(row: PromotionRuleRow, t: (key: string, fallback?: str
 }
 
 export default function PromotionsPage() {
-  const { t, notify, fmtUSD, fmtKHR } = useApp()
+  const { t, notify, fmtUSD, fmtKHR, getPermissionTier } = useApp()
+  // G2 section gates: the page door admits either grant (see
+  // AppContext.canAccessPage); each section still needs its own.
+  const canPromotions = getPermissionTier('promotions') !== 'none'
+  const canLoyalty = getPermissionTier('customer_portal') !== 'none'
+  const [activeSection, setActiveSection] = useState<'promotions' | 'loyalty'>(canPromotions ? 'promotions' : 'loyalty')
   const [rules, setRules] = useState<PromotionRuleRow[]>([])
   const [rulesLoading, setRulesLoading] = useState(true)
   const [rulesError, setRulesError] = useState('')
@@ -331,13 +343,43 @@ export default function PromotionsPage() {
 
   return (
     <div className="p-4 space-y-4 max-w-5xl mx-auto">
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-2 flex-wrap">
         <BadgePercent className="w-6 h-6 text-rose-600" />
         <h1 className="text-xl font-semibold">{t('promotions') || 'Promotions'}</h1>
-        <span className="text-sm text-gray-500">
-          {activeCount} {t('promo_active_now') || 'active now'}
-        </span>
+        {activeSection === 'promotions' ? (
+          <span className="text-sm text-gray-500">
+            {activeCount} {t('promo_active_now') || 'active now'}
+          </span>
+        ) : null}
+        {canPromotions && canLoyalty ? (
+          <div className="ml-auto inline-flex rounded-xl bg-gray-100 dark:bg-gray-800 p-0.5">
+            <button
+              type="button"
+              onClick={() => setActiveSection('promotions')}
+              className={`px-3 py-1.5 rounded-lg text-sm font-medium inline-flex items-center gap-1.5 ${activeSection === 'promotions' ? 'bg-white dark:bg-gray-900 shadow text-rose-600' : 'text-gray-500'}`}
+            >
+              <BadgePercent className="w-4 h-4" /> {t('promotions') || 'Promotions'}
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveSection('loyalty')}
+              className={`px-3 py-1.5 rounded-lg text-sm font-medium inline-flex items-center gap-1.5 ${activeSection === 'loyalty' ? 'bg-white dark:bg-gray-900 shadow text-amber-600' : 'text-gray-500'}`}
+            >
+              <Gift className="w-4 h-4" /> {t('loyalty_points') || 'Loyalty Points'}
+            </button>
+          </div>
+        ) : null}
       </div>
+
+      {activeSection === 'loyalty' ? (
+        // G2: the whole former Loyalty Points page, embedded (its own
+        // header/sections/logic untouched -- one implementation, new home).
+        <Suspense fallback={<p className="text-sm text-gray-500 py-4">{t('loading') || 'Loading'}...</p>}>
+          <LoyaltyPointsSection />
+        </Suspense>
+      ) : null}
+
+      {activeSection === 'promotions' ? (<>
 
       <SectionCard
         kind="sales"
@@ -788,6 +830,7 @@ export default function PromotionsPage() {
           </div>
         </div>
       )}
+      </>) : null}
     </div>
   )
 }

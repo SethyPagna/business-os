@@ -33,7 +33,9 @@ export const NAV_ITEMS: NavigationItem[] = [
   // (NotesWidget.tsx) still exists as a shortcut into this same page.
   { id: 'notes', key: 'notes', permission: null },
   { id: 'catalog', key: 'catalog', permission: 'customer_portal' },
-  { id: 'loyalty_points', key: 'loyalty_points', permission: 'customer_portal' },
+  // loyalty_points nav entry removed (G2): Loyalty Points is a section
+  // of the Promotions page now; canAccessPage lets customer_portal
+  // holders through the promotions door for it.
   // G1's promotion engine page -- its own permission key, per the standing
   // "every page gets its own permission" decision (same as branches/returns).
   { id: 'promotions', key: 'promotions', permission: 'promotions' },

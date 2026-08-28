@@ -289,7 +289,9 @@ async function submitPortalReview(id: string | number, payload: Record<string, u
 
 export default function LoyaltyPointsPage() {
   const { settings, saveSettings, notify, t, language, fmtUSD, fmtKHR } = useApp()
-  const isActive = useIsPageActive('loyalty_points')
+  // G2: this component renders inside the Promotions page now, so its
+  // load/refresh lifecycle keys on that page's activity.
+  const isActive = useIsPageActive('promotions')
   const isKhmer = language === 'km'
   const copy = (key: string, fallback?: string): string => {
     const translated = t?.(key)

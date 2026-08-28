@@ -16,8 +16,10 @@ const ADMIN_ROUTE_PAGE_BY_SEGMENT = new Map<string, string>([
   ['contacts', 'contacts'],
   ['delivery-contacts', 'contacts'],
   ['catalog', 'catalog'],
-  ['loyalty-points', 'loyalty_points'],
-  ['loyalty', 'loyalty_points'],
+  // G2: the standalone Loyalty page merged into Promotions -- old
+  // bookmarks/deep links keep working.
+  ['loyalty-points', 'promotions'],
+  ['loyalty', 'promotions'],
   ['promotions', 'promotions'],
   ['promos', 'promotions'],
   ['users', 'users'],
@@ -47,7 +49,6 @@ const ADMIN_PATH_BY_PAGE = new Map<string, string>([
   ['branches', '/branches'],
   ['contacts', '/contacts'],
   ['catalog', '/catalog'],
-  ['loyalty_points', '/loyalty-points'],
   ['promotions', '/promotions'],
   ['users', '/users'],
   ['review', '/review'],

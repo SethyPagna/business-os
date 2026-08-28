@@ -288,7 +288,6 @@ const CORE_ENGLISH_PACK: TranslationPack = {
   loading: 'Loading',
   login: 'Login',
   logout: 'Logout',
-  loyalty_points: 'Loyalty Points',
   promotions: 'Promotions',
   movements: 'Movements',
   next: 'Next',
@@ -547,7 +546,6 @@ const PAGE_PERMISSIONS: Record<string, string | null> = {
   dashboard:        'dashboard',
   notes:            null,        // Personal scratchpad -- just needs to be logged in, same as dashboard used to be
   catalog:          'customer_portal',
-  loyalty_points:   'customer_portal',
   promotions:       'promotions',
   pos:              'pos',
   products:         'products',
@@ -2018,6 +2016,12 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
     // real tier is 'none', since anyone with actual products access
     // already passed the check above.
     if (pageId === 'products' && hasPermission('products_image_only')) return true
+    // G2: Loyalty Points lives INSIDE the Promotions page now. A user
+    // whose only grant is customer_portal (the old Loyalty page's gate)
+    // must still reach the page for its Loyalty section -- the promo
+    // sections inside self-gate on the real 'promotions' tier, so this
+    // widens the door, not the controls.
+    if (pageId === 'promotions' && getPermissionTier('customer_portal') !== 'none') return true
     // 'settings'/'receipt_settings' page (this session, alongside
     // routes/settings.ts's new per-field business_identity/sales_policy
     // gating): a user granted only one of the narrower settings
