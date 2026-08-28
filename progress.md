@@ -700,7 +700,16 @@ deep-linkable tabs.*
   menu (⚡). tests/fastStockIn.test.ts pins each clause of the spec.)* **Fast stock-in (batch in):** enter batch + supplier once, then per-product
   name→details entry; "Add" appends and continues, "Done" completes the batch. Backed by
   the same add/batch kernel as D4 — no parallel write path.
-- [ ] F3. **Draft persistence + tab chrome:** unfinished add-product / batch-in / detail
+- [~] F3 **[CLAIMED: session 6e — Part 424, two slices. Slice 1: extract
+  Part-388's ProductForm localStorage-draft pattern into ONE shared
+  utils/workDrafts.ts and wire FastStockInModal (batch-in header + the
+  in-progress line survive reload; the received log is already server
+  truth) with ProductForm re-based onto the shared store unchanged in
+  behavior. Slice 2: the ✕/− tab chrome — minimize parks the flow as a
+  top-bar chip (draft store + N2's dirtyWork registry behind it),
+  restore reopens it anywhere. Footprint: new util + ProductForm +
+  FastStockInModal + the top-bar host; coordinated before touching any
+  shell file a peer holds.]** **Draft persistence + tab chrome:** unfinished add-product / batch-in / detail
   tabs survive navigation and reload (persisted drafts); each tab gets ✕ (close) and −
   (minimize to a top-bar icon). One draft store, used by all three flows.
 
