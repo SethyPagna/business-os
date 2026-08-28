@@ -93,6 +93,20 @@ Two rules learned the hard way, both from real incidents in this file's own hist
   for @leangbeauty.com. **DNS caveat:** `leangcosmetics.com` currently resolves to
   36.37.242.94 (NOT Cloudflare), so its redirect route can't fire until its DNS points
   at Cloudflare — a dashboard action; the .dpdns.org redirect works today.
+- [~] A4a. **First Paid-plan re-basing applied (Part 376, needs deploy):**
+  `[limits] cpu_ms = 300000` restored (the block wrangler.toml itself said to re-add on
+  Paid — it was removed only because Free rejected it with error 100328), and the import
+  queue consumer's `max_batch_size` returned 1 → 5, the exact condition its comment set.
+  `wrangler deploy --dry-run` validates. The M4 continuation-dispatch engine remains the
+  big remaining Paid unlock (see M4).
+- [x] A6. **Rebrand: the visible product is Leang Beauty now (Part 376).** 80+ display
+  strings swept "Leang Cosmetics" → "Leang Beauty" across storefront titles, PWA
+  manifest, Apple titles, FAQ/AI copy, every portal language pack, en/km org strings and
+  the tests that pin them; org placeholder "LeangCosmetics" → "LeangBeauty". Historical
+  records deliberately NOT touched (the adoption list, quoted past asks, outage notes).
+  Storefront icon is an "L" monogram — no text to regenerate; internal
+  `leang-cosmetics-*.png` FILENAMES kept (user-invisible; renaming would churn the
+  service-worker cache — optional follow-up).
 - [ ] A4. **Workers Paid ($5/mo) is active — re-base the platform assumptions.** The
   code is full of Free-plan ceilings that are now 30s CPU / higher D1+KV quotas /
   1000 subrequests: apply caps (480 rows/60 units, 50-line receipts), backup slice
@@ -260,12 +274,15 @@ store really paid the rider; margin = charge − cost and is internal only.*
   supplier section. Inventory's product list then repurposes/thins accordingly (see F1).
   **Detail-page spec (user, Aug 28):** header = name + barcode + total current stock
   (sum of batches) with click-to-view opening the batch details; a batch summary card
-  (each lot: current qty + received/expiry dates); a movement history table filterable
-  by date range / movement type / batch with columns Date · Type · Batch · Quantity ·
-  **Running Balance** · Reference (receipt #, adjustment #, import job); and a sales
-  breakdown (total sold per day/month). The templates are a SNAPSHOT (final quantity
-  only — clarified in the migration pack README); this page is where the real history
-  becomes visible once M4/M6 load it.
+  (each lot: current qty + received/expiry dates **+ its supplier** — D5); a movement
+  history table filterable by date range / movement type / batch with columns Date ·
+  Type · Batch · Quantity · **Running Balance** · Reference (receipt #, adjustment #,
+  import job); a sales breakdown (total sold per day/month); and a Supplier section
+  listing every distinct supplier the product was bought from with per-supplier totals.
+  All of it SEARCHABLE — within the detail, and product search can filter by supplier/
+  batch attributes. The templates are a SNAPSHOT (final quantity only — clarified in
+  the migration pack README); this page is where the real history becomes visible once
+  M4/M6 load it. Sections here render through N3's SectionCard.
 - [ ] D4. (11.28) **Manual historical batches**: enter real received date + batch when
   recording stock late — from Product edit, Inventory batch view and Branch batch views.
   One shared validation + stock/batch kernel for all entry points. Branch transfers
@@ -274,7 +291,14 @@ store really paid the rider; margin = charge − cost and is internal only.*
   from batches/add-stock; per-add-stock payment status incl. **awaiting payment**;
   add/create stock can pick the supplier. Supplier lives on the batch/receipt level and
   FOLDS into the product as a "Supplier" section — child rows inherit the group's
-  sections rather than each carrying supplier state.
+  sections rather than each carrying supplier state. **Clarified Aug 28: the SAME
+  product can have DIFFERENT suppliers across batches** — supplier is a property of the
+  BATCH (schema: additive migration putting supplier name/id on `product_batches`; the
+  measured schema has none today), the product's Supplier section lists every distinct
+  supplier with per-supplier received totals, and the product detail + search can find
+  products by supplier. The unified §12 import template gains an optional `supplier`
+  column so a stock-in row attributes its batch at import time (blank = unattributed —
+  the nine current exports carry none, but future files and manual entry will).
 - [ ] D6. Rename cascades with before→after preview: changing a category/brand/supplier/
   product name shows before and after and asks what happens to attached rows (carry all
   attached products to the new name / keep a copy, new is new / cancel-go-back). Also the
@@ -346,6 +370,16 @@ deep-linkable tabs.*
   duplicate handling already exists per import type, and each job already persists its
   `policy` — so this is about surfacing MORE choices through the same policy mechanism,
   not new machinery. Add options only where a real calculation exists to gate.
+- [ ] N1c. **One place or many, one file or many (user, Aug 28).** The import surface
+  must take the messy real shape of the data: EITHER one combined sheet OR separate
+  files per aspect (catalog, stock-in with its many batches, adjustments, period
+  summaries, sales) — uploaded together or over multiple sessions — and everything
+  lands in the same engines with the same review gates. Concretely: (a) one Import
+  entry point that routes by detected template rather than forcing the user to know
+  which page owns which file; (b) multi-file selection in Screen 1 queued as sibling
+  jobs sharing one review session; (c) the §12 template's optional `supplier` column
+  (D5) and the M4 continuation dispatch so volume is never the reason to split a file.
+  Builds on §13's two-screen contract — no new commit paths.
 - [ ] N2. **Navigation guard against stale work.** When leaving a page/section that has
   unsaved/in-progress work (add-product draft, batch-in, an open import review, an edit),
   prompt: finish now, or keep it ("I'll be back"), or discard — so switching pages forces
@@ -356,16 +390,20 @@ deep-linkable tabs.*
   guard for browser close/reload and a visible dirty indicator (a dot on the tab/section
   title) so the state is legible before the prompt ever fires. Keep the prompt calm, not
   alarming.
-- [ ] N3. **Section UI: colored card rows, obvious and well-designed.** Each section
-  (the Phase E sub-pages, and section-like groupings generally) gets its own colored
-  card-row header so they read as distinct, well-designed blocks rather than a flat list.
-  Depends on Phase E sections existing; build the shared SectionCard component + palette
-  first so every section is consistent. Pairs with the stats-card compaction (B1).
-  **Palette proposal (user, Aug 28; confirm before applying):** one consistent color per
-  main section carried through cards, headers and the active nav item — Dashboard blue,
-  Products green, Sales orange, Customers purple, Reports/Logs teal — implemented as one
-  CSS variable per section (`--section-color`) driving a colored left border/soft
-  gradient on cards, not per-page ad-hoc CSS.
+- [ ] N3. **Section UI: colored card rows WITHIN pages — clarified Aug 28 (supersedes
+  the per-page palette reading).** The colors identify the SECTIONS inside a page, not
+  the pages: e.g. on Products, the search/filter block, the stock-change ledger, the
+  batches area and the supplier section each get their own colored card-row header so a
+  long page reads as distinct, obvious blocks. Requirements from the user: clear AND
+  detailed AND responsive — sections are collapsible ("fold in buttons": a section's
+  actions fold behind its header on small widths, expand on wide screens), headers stay
+  smart/compact, and the SAME section kind uses the SAME color on every page (search =
+  one color everywhere, stock movements = another…) so color becomes meaning, not
+  decoration. Build: one shared `SectionCard` (header row = color chip + title +
+  fold/expand + folded action buttons; body = content) driven by `--section-color`
+  tokens per section KIND, fold state persisted per user. Apply page by page starting
+  with Products (D1/D2) and the Phase E merged pages. Final palette still gets user
+  confirmation before the app-wide pass.
 
 ### Phase H — Exports/imports everywhere
 
@@ -414,7 +452,11 @@ deep-linkable tabs.*
 - [ ] K1. Server-level undo/redo (3.1) — appliers replay stored payloads; admin sees all,
   users see their own.
 - [ ] K2. Returns Replace + damaged-stock chooser (11.12/11.13) and the POS SP/VIP/damage
-  picker rest of 11.9.
+  picker rest of 11.9. **Elevated Aug 28 — "for POS, focus on batches and various
+  options":** the POS picking flow leads with the BATCH (lot, received/expiry) and a
+  clear Selling-vs-VIP price choice per line; damaged stock joins as an option once
+  11.13 lands. Same option data the product detail shows (D3) — one kernel, two
+  surfaces.
 - [ ] K3. Media pipeline completion (quality ladder, provider fallback, 6h audit — now
   cheaper under Workers Paid, A4).
 - [ ] K4. Storage/jobs hardening phases 1–6 of the locked execution plan (leases, R2
@@ -1500,6 +1542,19 @@ chain + build re-ran green after the Login change; backend untouched. **The depl
 itself is blocked for the assistant by the permission classifier — the user must run
 `npm run deploy:full`** (from `cloudflare/`), then A2/A5's live checks apply. Google
 Drive measured to still hold ZERO backup files post-deploy — A3 is a real bug hunt.
+
+**Part 376 (Aug 28, sixth batch):** the visible product is **Leang Beauty** — 80+
+display strings swept (storefront titles/manifest/Apple title/FAQ/AI copy/every portal
+language pack/en+km org strings + the tests pinning them), historical records
+untouched, icons need no change (L monogram). Paid-plan limits applied per
+wrangler.toml's own instructions: `[limits] cpu_ms = 300000` + import consumer
+`max_batch_size` 1→5 (dry-run validates). Clarifications folded into the plan: N3 =
+colored, foldable sections WITHIN pages (SectionCard per section KIND, same color =
+same meaning everywhere); D5 = supplier is a property of the BATCH (same product,
+different suppliers) with a §12 optional supplier column; D3 detail gains per-batch
+supplier + supplier section + searchability; N1c = one-file-or-many import contract;
+K2/POS batch-first + Selling/VIP focus. Verified after the sweep: frontend full chain
+green (exit 0), build 15.50s, both typechecks clean.
 
 **Part 375 (Aug 28, fifth batch):** M3 CLOSED — all 89 review rows decided (73 add /
 6 merge / 10 delete) after applying the user's renames+deletes and three more barcode

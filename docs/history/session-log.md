@@ -7689,3 +7689,40 @@ source changed this part. Production actions returned changes=69 and changes=17.
 M2/M3 imports themselves (user, per the manifest); the M4 continuation-dispatch
 engine; N1b/N2/N3; the old system's dated sales export and PO-detail export remain
 requested from the user.
+
+## Part 376 (chat, Aug 28 2026) — Leang Beauty rebrand, Paid-plan limits applied, import/detail/POS/N3 clarifications folded in
+
+**Ask.** Imports must take one file or many across every aspect (in/out, adjustments,
+summaries, sales, many batches) including suppliers — where the SAME product can have
+different suppliers; product click-to-detail shows all of it searchably; POS focuses
+on batches + Selling/VIP options; N3 colors are for SECTIONS WITHIN pages (foldable,
+responsive, smart), not per page; and the visible brand is Leang Beauty now.
+
+**What changed.**
+- Rebrand sweep: 78 replacements in 17 frontend files ("Leang Cosmetics" → "Leang
+  Beauty": index.html bootstrap titles, portal-manifest name/short_name/description,
+  PublicCatalogPage/CatalogPage defaults + Apple title, FAQ/AI copy, all portal
+  language packs, en/km keys, the six tests pinning them) + the wrapped Login.tsx
+  comment the exact-match sweep missed, the "LeangCosmetics" org placeholder and
+  org-lock lang strings, and two cloudflare current-state comments. Historical records
+  (adoption identities, quoted asks, outage notes) untouched. Icons are an "L"
+  monogram — nothing to regenerate; internal leang-cosmetics-* filenames kept.
+- wrangler.toml: `[limits] cpu_ms = 300000` restored per its own on-Paid instruction;
+  import consumer max_batch_size 1 → 5 per its own comment's stated condition;
+  dry-run validates.
+- progress.md: N3 rewritten (SectionCard per section KIND, same color = same meaning
+  across pages, foldable action buttons, palette confirmation pending); D5 gains
+  supplier-is-a-property-of-the-BATCH with the schema note (product_batches has no
+  supplier column today — measured); D3 detail spec extended (per-batch supplier,
+  Supplier section with per-supplier totals, searchable); N1c added (one-or-many
+  files/places contract routed by detected template into the same engines); K2/POS
+  elevated (batch-first picking + clear Selling/VIP choice).
+
+**Verified.** Frontend `tsc --noEmit` clean; full `test:utils` chain + build result
+recorded in Current status once finished (running at write time — see status table);
+`wrangler deploy --dry-run` green with the Paid limits. Icon inspection by actually
+rendering both PNGs.
+
+**Not done.** Deploy (rebrand + limits + everything since ship together); the
+supplier-on-batch migration, N1c multi-file UI, M4 continuation dispatch, N3
+SectionCard build; the palette confirmation from the user.
