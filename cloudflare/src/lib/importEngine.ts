@@ -1371,7 +1371,7 @@ export async function classifyProducts(
     // received_date directly above, never from a separately-typed label
     // -- "lot code can be removed... batch column is just a translated
     // version of received date": 08/22/2026 or 8/22/2026 becomes
-    // AUG222026, 08/2/2026 becomes AUG022026 (see batchCode.ts's
+    // 08222026, 08/2/2026 becomes 08022026 (see batchCode.ts's
     // dateToBatchCode). This is the date that decides which lot a
     // restock row tops up (see materializeImportChunk's
     // batchByProductAndLot matching below, and receiveBatchStock's
@@ -2995,6 +2995,10 @@ async function applyCrossChunkProductDedupe(
 }
 
 function previewProductSignature(d: Record<string, unknown>): string {
+  // Mirrors productImportRowSignature's Part-388 identity-rule form so the
+  // analyze preview counts the same merges apply will actually perform.
+  const barcode = String((d as { barcode?: unknown }).barcode ?? '').trim().toLowerCase()
+  if (barcode) return `${normalizeProductGroupName((d as { name?: unknown }).name)}|bc:${barcode}`
   return productIdentitySignature(d)
 }
 
@@ -3375,8 +3379,19 @@ export async function runImportAnalyze(env: Env, jobId: string, queueLatencyMs?:
     const meta = await fetchMaterializedMeta(db, jobId)
     sw.lap('fetchAndParseMs') // now a couple of narrow SELECTs, not a full re-parse -- see ensureSourceRowsMaterialized above
     if (!meta) throw new Error('No CSV file uploaded for this job')
-    if (meta.type === 'stock_actions' && meta.totalRows > STOCK_ACTION_MAX_ROWS) {
-      throw new Error(`This stock import has ${meta.totalRows} rows; split it into files of at most ${STOCK_ACTION_MAX_ROWS} rows before importing.`)
+    // Mode-aware row ceiling (Part 388 fix, caught by the full-migration
+    // simulation): DIRECT mode's M4 continuation engine handles up to
+    // STOCK_ACTION_DIRECT_MAX_ROWS across windowed invocations -- the
+    // apply path has said so since M4, but THIS analyze gate still applied
+    // the single-pass 480 cap to every stock job, so the 21k-row history
+    // file was rejected at upload before the continuation engine ever got
+    // a chance. RECONCILE keeps the strict cap (its delta math needs one
+    // live-stock snapshot -- see applyStockActionsJob's own guard).
+    const stockActionRowCap = meta.type === 'stock_actions'
+      ? (getUnifiedStockMode(meta.policyJson) === 'direct' ? STOCK_ACTION_DIRECT_MAX_ROWS : STOCK_ACTION_MAX_ROWS)
+      : Infinity
+    if (meta.type === 'stock_actions' && meta.totalRows > stockActionRowCap) {
+      throw new Error(`This stock import has ${meta.totalRows} rows; split it into files of at most ${stockActionRowCap} rows before importing.`)
     }
     const { cursor, state } = await getChunkState(db, jobId)
     const decisions = getDecisionMap(meta.policyJson)
@@ -3662,11 +3677,24 @@ export type ProductImportSignatureInput = {
 
 // Branch is intentionally NOT part of this signature -- see classifyProducts'
 // byName/cost/price/barcode fallback comment for why. Two rows in the same
-// chunk with identical name/cost/price/barcode but different branches are
-// the SAME product (each row's own branch just gets its own branch_stock
-// entry via the normal update-path write once the second row resolves to
-// the first's pre-allocated id below), not two products.
+// chunk with identical identity but different branches are the SAME product
+// (each row's own branch just gets its own branch_stock entry via the
+// normal update-path write once the second row resolves to the first's
+// pre-allocated id below), not two products.
+//
+// Part 388 fix, caught by the full-migration simulation: this used to be
+// the FULL detail signature (name + barcode + cost + prices), so a
+// product's shop row and warehouse row -- adjacent in a per-branch export,
+// and routinely carrying DIFFERENT per-branch costs -- forked two products
+// with the SAME name and SAME barcode: 706 duplicate-identity groups from
+// one real 8,803-row file, warehouse quantities doubling on re-import, and
+// a third of sales receipts erroring on the ambiguity. The user's identity
+// rule is explicit: same name + same barcode = the SAME product. So when a
+// row HAS a barcode, name+barcode alone decide; the detail signature
+// remains the (conservative) tiebreak only for barcode-less rows.
 export function productImportRowSignature(d: ProductImportSignatureInput): string {
+  const barcode = String(d.barcode ?? '').trim().toLowerCase()
+  if (barcode) return `${normalizeProductGroupName(d.name)}|bc:${barcode}`
   return productIdentitySignature(d)
 }
 
@@ -4694,18 +4722,26 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
           batchByProductAndLot.set(`${batch.variant_product_id}\u0001${lower(batch.lot_code)}`, { id: batch.id, received_at: batch.received_at })
         }
       }
-      const inBatchSignatureToId = new Map<string, number>()
+      const inBatchSignatureToId = new Map<string, { id: number; data: Record<string, unknown> }>()
       for (const r of createRows) {
         const d = r.data as Record<string, unknown> & { branch_id: number | null }
         const signature = productImportRowSignature(d as unknown as ProductImportSignatureInput)
-        const earlierId = inBatchSignatureToId.get(signature)
-        if (earlierId != null) {
+        const earlier = inBatchSignatureToId.get(signature)
+        if (earlier != null) {
           r.action = 'update'
-          r.existingId = earlierId
+          r.existingId = earlier.id
+          // The identity rule's merge semantics (Part 388): when the twin
+          // rows disagree on selling/VIP price, the HIGHEST wins -- applied
+          // to BOTH rows' data, because the first row's INSERT and this
+          // row's later UPDATE each write their own params and the update
+          // runs last (statement order preserves row order).
+          const merged = resolveMergedPricing([earlier.data, d])
+          Object.assign(earlier.data, merged)
+          Object.assign(d, merged)
           continue
         }
         nextProductId += 1
-        inBatchSignatureToId.set(signature, nextProductId)
+        inBatchSignatureToId.set(signature, { id: nextProductId, data: d })
         d.__importAssignedId = nextProductId
       }
       for (const r of actionable) {

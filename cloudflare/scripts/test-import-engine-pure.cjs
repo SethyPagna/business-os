@@ -227,7 +227,7 @@ Module._load = function patchedLoad(request, parent, isMain) {
     return sqlBindingModuleObj.exports // real module -- keeps IN(...) lookups inside D1's bound-parameter limit
   }
   if (request === './salesImportCommit') {
-    return { MAX_HISTORICAL_SALE_LINES: 50, applyHistoricalSaleImport: async () => ({ alreadyApplied: false }) }
+    return { MAX_HISTORICAL_SALE_LINES: 100, applyHistoricalSaleImport: async () => ({ alreadyApplied: false }) }
   }
   if (stubbable.has(request)) {
     return {} // empty stub -- fine, these truly aren't touched by the functions under test
@@ -327,6 +327,38 @@ assert.strictEqual(
   ])
   assert.strictEqual(merged.selling_price_usd, 3.49, 'highest selling price must win a merge')
   assert.strictEqual(merged.special_price_usd, 2.75, 'each price field resolves independently to its own highest')
+}
+
+// -- Test 5d (Part 388, caught by the full-migration simulation): when a
+// row HAS a barcode, name+barcode ALONE are identity -- per-branch exports
+// routinely carry DIFFERENT costs on a product's shop vs warehouse row,
+// and the old cost-in-signature rule forked 706 same-name+same-barcode
+// duplicate groups out of the real 8,803-row file (warehouse quantities
+// then doubled on re-import). Same name + same barcode = the SAME product.
+{
+  const shopRow = { name: 'Blush Stick', barcode: '0689304186537', cost_price_usd: 18.5, cost_price_khr: 0, selling_price_usd: 30, selling_price_khr: 0, branch_id: 1 }
+  const warehouseRow = { ...shopRow, cost_price_usd: 19.5, branch_id: 2 }
+  assert.strictEqual(
+    productImportRowSignature(shopRow),
+    productImportRowSignature(warehouseRow),
+    'barcoded rows differing only in cost/branch are ONE product (the 706-duplicates bug)',
+  )
+  // Same name + DIFFERENT barcode stays a separate child row.
+  const childRow = { ...shopRow, barcode: '0689304186999' }
+  assert.notStrictEqual(
+    productImportRowSignature(shopRow),
+    productImportRowSignature(childRow),
+    'a different barcode is a different identity (child row)',
+  )
+  // Barcode-LESS rows keep the conservative detail tiebreak: a cost
+  // difference still separates them (nothing else distinguishes them).
+  const bareA = { ...shopRow, barcode: '' }
+  const bareB = { ...bareA, cost_price_usd: 25 }
+  assert.notStrictEqual(
+    productImportRowSignature(bareA),
+    productImportRowSignature(bareB),
+    'barcode-less rows with different costs keep the conservative separate-row rule',
+  )
 }
 
 // -- Test 6: different barcode -> must NOT merge. Barcode is a detail.
@@ -966,9 +998,9 @@ assert.strictEqual(isD1CpuLimitError(new Error('Network request failed')), false
   const noImages = new Map()
 
   // dateToBatchCode itself: new month-abbreviation format.
-  assert.strictEqual(dateToBatchCode('08/24/2026'), 'AUG242026', 'dateToBatchCode should render 08/24/2026 as AUG242026, not the old numeric 08242026')
-  assert.strictEqual(dateToBatchCode('8/2/2026'), 'AUG022026', 'a single-digit day should still zero-pad, same as the old format')
-  assert.strictEqual(dateToBatchCode('2026-01-05'), 'JAN052026', 'an ISO-shaped input (e.g. from received_date) should resolve to the right month name, not just August')
+  assert.strictEqual(dateToBatchCode('08/24/2026'), '08242026', 'dateToBatchCode renders numeric MMDDYYYY again (Part 388 reversal of the Aug-24 month-abbreviation form)')
+  assert.strictEqual(dateToBatchCode('8/2/2026'), '08022026', 'single-digit month/day still zero-pad')
+  assert.strictEqual(dateToBatchCode('2026-01-05'), '01052026', 'an ISO-shaped input (e.g. from received_date) resolves to the right numeric month')
 
   // The new consolidated column, `batch(mm/dd/yyyy)`, is read as the
   // received date and drives lot_code.
@@ -977,7 +1009,7 @@ assert.strictEqual(isD1CpuLimitError(new Error('Network request failed')), false
     const results = await classifyProducts(db, [row({ name: 'New Column Item', selling_price_usd: '10', 'batch(mm/dd/yyyy)': '08/24/2026' }, 1)], 'job-batch-col', null, noImages)
     const d = results[0].data
     assert.strictEqual(d.received_date, '08/24/2026')
-    assert.strictEqual(d.lot_code, 'AUG242026')
+    assert.strictEqual(d.lot_code, '08242026')
   }
 
   // Old `batch` and `date` columns still work as fallbacks (in that
@@ -985,12 +1017,12 @@ assert.strictEqual(isD1CpuLimitError(new Error('Network request failed')), false
   {
     const db = makeFakeProductsDb([])
     const results = await classifyProducts(db, [row({ name: 'Old Batch Column', selling_price_usd: '10', batch: '01/15/2026' }, 1)], 'job-old-batch', null, noImages)
-    assert.strictEqual(results[0].data.lot_code, 'JAN152026', 'the old `batch` column should still be read as a date fallback')
+    assert.strictEqual(results[0].data.lot_code, '01152026', 'the old `batch` column should still be read as a date fallback')
   }
   {
     const db = makeFakeProductsDb([])
     const results = await classifyProducts(db, [row({ name: 'Old Date Column', selling_price_usd: '10', date: '03/10/2026' }, 1)], 'job-old-date', null, noImages)
-    assert.strictEqual(results[0].data.lot_code, 'MAR102026', 'the old `date` column should still be read as a date fallback')
+    assert.strictEqual(results[0].data.lot_code, '03102026', 'the old `date` column should still be read as a date fallback')
   }
 
   // A blank/missing column still means "received now" -- unchanged
@@ -1003,7 +1035,7 @@ assert.strictEqual(isD1CpuLimitError(new Error('Network request failed')), false
     assert.ok(results[0].data.lot_code, 'lot_code should still be derived from the defaulted received_date')
   }
 
-  console.log('PASS classifyProducts reads the consolidated `batch(mm/dd/yyyy)` column as the received date (with `batch`/`date` as fallbacks), and dateToBatchCode renders month-abbreviation codes like AUG242026')
+  console.log('PASS classifyProducts reads the consolidated `batch(mm/dd/yyyy)` column as the received date (with `batch`/`date` as fallbacks), and dateToBatchCode renders numeric MMDDYYYY codes like 08242026')
 }
 
 // -- classifyContacts: customer membership-number auto-assignment
