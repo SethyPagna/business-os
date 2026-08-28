@@ -9744,3 +9744,87 @@ after they fixed it (see addendum below when that lands). Migration
 **Coordination:** footprint kept out of 4a's D5a lane (productBatches.ts
 only READ) and 05's import/backup lane. Part 411 (next): the 11.9 POS
 SP/VIP + damage picker on top of damaged_stock_lots.
+
+## Part 413 (chat, Aug 28 2026) -- E1: the Branches hub -- Inventory merges into Branches
+
+**Session a7.** The last Phase-E merge, sequenced with 4a in chat: hub +
+quartet first (uncommitted, tsc-green in the shared tree throughout),
+Inventory.tsx content only after their Part-409 AdjustForm slice landed
+(a0ec6207) so their additive lines ride the move for free.
+
+**New:** components/branches/BranchesHubPage.tsx. Chips: Stats & Branches
+/ Products / Movements / RFID. The board named three sections; Products
+is kept as a FOURTH chip because Inventory's product-stock slice has no
+other home -- flagged here per "nothing lost", not silently dropped. The
+'all' combined view of Inventory's internal picker retires with the
+picker itself when hosted (each slice is one chip tap; standalone
+rendering, if ever used again, keeps the full picker including 'all').
+
+**How the slicing works:** Inventory.tsx predates this merge with its own
+internal section system (inventorySection: stats/products/movements/
+rfid); the hub drives it via a new optional hostSection prop instead of
+carving the 4,000-line component apart. Internal jumps (a product's
+view-history, the Dashboard focus handoff) report back through
+onHostSectionChange so the chips stay truthful. Inventory stays MOUNTED
+across chip switches -- filters, selections and loaded data survive
+exactly as they did on the standalone page. The hub peeks (never
+consumes) Dashboard's sessionStorage focus payload, both at mount and on
+re-activation (the mounted-pages cache means a handoff can arrive
+without a remount); Inventory still consumes it, same as always.
+
+**Rewiring:** the same E2/E3/E4 contract -- App.tsx PageId/importers/
+component map drop 'inventory' ('branches' importer now points at the
+hub); pathRouting REMAPS '/inventory' to the branches page (products
+chip opens for that segment); navigationConfig entry removed; AppContext
+PAGE_PERMISSIONS row removed with the branches door widened (inventory-
+only grants open the hub; each chip self-gates -- branch list on
+'branches', the rest on 'inventory'); Dashboard's stock-card handoff
+navigates to 'branches'; Sidebar's inventory icon row + Boxes import
+removed; Inventory's useIsPageActive re-keyed to 'branches'; Branches
+already keyed 'branches'. Permission keys unchanged everywhere. New
+en+km key: stats_and_branches (line-preserving sorted insert).
+
+**5.4 landed with it (one rule, decided per the item's own mandate):**
+each derived metric is card-visible only on its HOME page -- Gross
+Profit's home is Dashboard (card unchanged there, drill-row on
+Inventory), Net Sold's home is Inventory (was buried in the Returns
+card's drill since Part 388; now surfaced on that card's sub line at
+card level). No new tiles on either page -- consistent with 5.6's
+slimming.
+
+**Tests:** appShellUtils '/inventory/movements' pin updated to 'branches'
+with the remap intent stated. Full chain green (619 PASS), tsc clean,
+build clean -- BranchesHubPage is a 3.3kB chunk, Inventory/Branches stay
+their own lazy chunks.
+
+## Part 414 (chat, Aug 28 2026) -- 5.3: overlay panels portal to document.body
+
+**Session a7.** The click-to-view detail panels' "not fully covered /
+not responsive" complaint, root-caused instead of guessed: these panels
+are position:fixed overlays rendered INLINE deep in page trees, and
+fixed positioning anchors to the nearest transformed/filtered ancestor,
+NOT the viewport -- so any wrapper transform (present or future) makes a
+panel cover only part of the screen. Shared Modal and InfoHint already
+portal to document.body for exactly this reason (the 5.1 fix); the
+hand-rolled overlays never got the same treatment. Measured live before/
+after on the Dashboard KPI drill at 375x812: inline it rendered with a
+real 16px offset (y:16, h:796); portaled it measures exactly 0,0,375x812
+as a direct body child.
+
+**Wrapped (import createPortal / return createPortal(overlay,
+document.body), markup otherwise untouched):** Dashboard's three
+overlays (KPI drill, product detail, customer detail),
+InventoryStatDetailModal, TransferModal, SaleDetailModal,
+CancelSaleModal, ImageGalleryLightbox, RenameCascadeModal,
+InventoryBatchModal, InventoryReasonManagerModal, ManageBatchesModal,
+inventory/ProductDetailModal. returns/* wraps (ReturnDetailModal,
+EditReturnModal, NewSupplierReturnModal + 6e's own NewReturnModal) ride
+6e's K2 commit by agreement -- their K2 edits share those files.
+
+**Deliberately NOT wrapped yet** (enumerated for a follow-up, most sit
+in peers' active lanes or POS which 6e is about to claim): POS.tsx,
+pos/ProductDetailSheet, pos/QuickAddModal, products/surfaces/*,
+catalog/ProductDetailFlyout, CustomTables, ImportModeWizard,
+PromotionsPage, ReceiptSettings, AuditLog, OtpModal, UserDetailSheet,
+Sidebar's own sheet, and 4a's four hot stock modals. Same three-line
+pattern applies to each.

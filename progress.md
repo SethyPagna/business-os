@@ -308,6 +308,21 @@ autocorrect — templates, imports, exports and generated files alike.*
   pack; the manifest's Step 4c now just says deploy + the live verification query.
 
 - [~] B1. (11.26/5.1–5.3) Same-row stat label + info, portaled viewport-aware tooltip.
+  **5.3 landed (Part 414, session a7):** the click-to-view panels were
+  inline position:fixed overlays anchoring to transformed ancestors, not
+  the viewport — 16 of them now portal to document.body like Modal/
+  InfoHint (Dashboard×3, InventoryStatDetailModal, TransferModal,
+  SaleDetailModal, CancelSaleModal, ImageGalleryLightbox,
+  RenameCascadeModal, 4 free inventory modals; returns/* ride 6e's K2
+  commit by agreement). Measured before/after at 375×812. Remaining
+  non-portaled overlays are enumerated in the Part-414 log entry — same
+  three-line pattern, most in peers' active lanes (POS, products
+  surfaces, settings-area, 4a's stock modals).
+  **5.4 landed (Part 413, with E1):** one rule decided per the item's
+  mandate — each derived metric is card-visible only on its home page:
+  Gross Profit card stays Dashboard-only (drill-row on Inventory), Net
+  Sold's home is Inventory where it now reads on the Returns card's sub
+  line at card level (no new tiles, consistent with 5.6's slimming).
   **Dashboard `MiniStat`, Branches, Inventory, Returns landed this session (Part 370):**
   hint and drill-down are separate controls (a `role="button"` wrapper would re-fire the
   drill-down from the hint's keyboard events), tooltip height uses the real space above/
@@ -565,9 +580,20 @@ ids + permission keys STABLE (the permission model, `canAccessPage`, and audit
 references key off them); the sidebar shrinks and the moved pages become sections with
 deep-linkable tabs.*
 
-- [~] E1 **[CLAIMED: session a7]** *(sequenced with 4a: hub + nav first;
-  Inventory.tsx content moves only after their Part-409 AdjustForm slice
-  lands — agreed in chat.)* **Inventory merges into Branches** as sections: "Stats & Branches" (Inventory's
+- [x] E1 *(Part 413, session a7 — SHIPPED. BranchesHubPage chips: Stats &
+  Branches / Products / Movements / RFID — Inventory moves INTACT, sliced
+  through its own pre-existing section system via a hostSection prop
+  (internal jumps report back so chips stay truthful; component stays
+  mounted across chips). Products kept as a 4th chip — FLAGGED deviation
+  from the 3-section wording: that slice has no other home and "nothing
+  lost" outranks the count; Inventory's internal 'all' view retires with
+  its picker when hosted. inventory PAGE id retired across the quartet,
+  permission key lives on gating the three inventory chips; /inventory
+  remaps (products chip); Dashboard handoff re-pointed and peeked by the
+  hub; branch-transfer options were already current (05's D4b landed
+  batch preservation on every surface). Phase E is now fully closed. 619
+  PASS chain + build green; live-verified below with 4a's D5a on the
+  same dist.)* **Inventory merges into Branches** as sections: "Stats & Branches" (Inventory's
   stat cards + branch list), "Movements", "RFID". Branch transfer options updated to
   everything shipped since (batch preservation, §14 details).
 - [x] E2 *(Part 407, session a7 — SHIPPED. SalesHubPage hosts Sales +
