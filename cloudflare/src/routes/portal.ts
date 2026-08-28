@@ -14,6 +14,7 @@ import { generatePortalAiResponse, getPortalAiUsageStatus } from '../lib/portalA
 import { ADMIN_MAX_IMAGES_PER_PRODUCT } from '../lib/importImageMatch'
 import { buildFtsMatchExpression, buildPartialWordMatchClause, buildShortWordFallbackClause, buildTrigramMatchExpression, PRODUCTS_FTS_BM25_SQL, runFuzzyFallbackMatch, tokenizeSearchWords } from '../lib/searchMatch'
 import { loadActivePromotionRules, productPromotedSql } from '../lib/promotionRulesSql'
+import { paginateProductFamilies } from '../lib/familyPagination'
 import type { Env } from '../index'
 
 const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser } }>()
@@ -315,11 +316,11 @@ function portalVisibleProductFilter(showOutOfStockProducts: boolean): string {
 // string sorting first alphabetically. Shared by buildPortalCatalog's
 // bootstrap snapshot and /catalog/products/search's own no-search-term
 // default so the two never drift into two different browsing orders.
-// G4 (Part 399): BRAND-first, per the user -- the storefront browses by
-// brand (blank brands sink to the end), names A-Z within each brand. Was
-// category-first since Part 226.
-const PORTAL_CATALOG_DEFAULT_ORDER_SQL =
-  "CASE WHEN trim(COALESCE(p.brand, '')) = '' THEN 1 ELSE 0 END ASC, lower(trim(p.brand)) ASC, lower(p.name) ASC, p.id ASC"
+// 6.5: group-level brand-first sort key (blank brands keyed to sort
+// last) -- the per-FAMILY twin of the row order below, fed to the shared
+// familyPagination helper as family_sort_value.
+const PORTAL_BRAND_SORT_KEY_SQL = "CASE WHEN trim(COALESCE(p.brand, '')) = '' THEN '1' ELSE '0' END || lower(trim(COALESCE(p.brand, '')))"
+
 
 // Ported from routes/products.ts's attachBranchStock so the public portal's
 // product rows carry the same per-branch breakdown the admin catalog does.
@@ -408,12 +409,10 @@ async function buildPortalCatalog(env: Env, showOutOfStockProducts: boolean) {
   // initializes from, so the two must agree or the first live page fetch
   // after hydration would jump size out from under the visitor.
   const pageSize = 50
-  const totalRow = await db.prepare(`
-    SELECT COUNT(*) AS count
-    FROM products p
-    WHERE ${visibleFilter}
-  `).get<{ count: number }>()
-  const total = totalRow?.count || 0
+  // 6.5: group-counted, matching the search endpoint and the rail.
+  const snapshotRules = await loadActivePromotionRules(db)
+  const snapshotParams: Record<string, unknown> = {}
+  const snapshotPromotedRankSql = `CASE WHEN ${productPromotedSql(snapshotRules, snapshotParams)} THEN 1 ELSE 0 END`
   // Discount + multi-taxonomy columns (G1, Part 391): the portal's price
   // presentation (portalCatalogDisplay.ts) and the shared promotion kernel
   // both read discount_*/categories/brands, but this snapshot never
@@ -421,25 +420,30 @@ async function buildPortalCatalog(env: Env, showOutOfStockProducts: boolean) {
   // per-product discount price or badge no matter what the merchant's
   // "show product discount" setting said. All customer-facing fields;
   // costs stay unselected.
-  // G1 ordering rule: promoted products (live per-product discount OR an
-  // active promotion rule) occupy the block above the category-alphabetical
-  // run -- decided server-side so it holds across pagination, same as
-  // /api/products/search.
-  const portalRules = await loadActivePromotionRules(db)
-  const promotedParams: Record<string, unknown> = {}
-  const promotedOrderSql = `CASE WHEN ${productPromotedSql(portalRules, promotedParams)} THEN 1 ELSE 0 END DESC`
-  const items = await db.prepare(`
-    SELECT p.id, p.name, p.category, p.brand, p.categories, p.brands, p.unit, p.description,
+  // G1 promoted-first + G4 brand-first + 6.5 group pagination, via the
+  // shared familyPagination helper (one ordering/paging rule with the
+  // search endpoint).
+  const snapshot = await paginateProductFamilies<Record<string, unknown>>({
+    db,
+    selectColumns: `p.id, p.name, p.category, p.brand, p.categories, p.brands, p.unit, p.description,
            p.selling_price_usd, p.selling_price_khr, p.stock_quantity,
            p.low_stock_threshold, p.out_of_stock_threshold, p.image_path,
            p.discount_enabled, p.discount_type, p.discount_percent,
            p.discount_amount_usd, p.discount_amount_khr, p.discount_label,
-           p.discount_badge_color, p.discount_starts_at, p.discount_ends_at
-    FROM products p
-    WHERE ${visibleFilter}
-    ORDER BY ${promotedOrderSql}, ${PORTAL_CATALOG_DEFAULT_ORDER_SQL}
-    LIMIT @pageSize
-  `).all({ ...promotedParams, pageSize })
+           p.discount_badge_color, p.discount_starts_at, p.discount_ends_at`,
+    joinSql: '',
+    whereSql: `WHERE ${visibleFilter}`,
+    params: snapshotParams,
+    page,
+    pageSize,
+    familyOrderSql: 'family_promoted DESC, family_sort_value ASC, family_name ASC',
+    intraFamilyOrderSql: 'lower(name) ASC, id ASC',
+    promotedRankSql: snapshotPromotedRankSql,
+    familySortValueSql: PORTAL_BRAND_SORT_KEY_SQL,
+  })
+  const items = snapshot.items
+  const total = snapshot.total
+  const portalRules = snapshotRules
   const itemsWithBranchStock = await attachPortalBranchStock(env, (items || []) as Array<Record<string, unknown>>)
   // Two things were wrong here, and both made the storefront's A-Z rail
   // disagree with what the page below it actually shows.
@@ -1518,14 +1522,11 @@ async function runPortalProductSearch(c: { env: Env; req: { query(): Record<stri
   // internal facets (supplier etc.) never reach the portal (standing
   // surface rule).
   const searchRules = await loadActivePromotionRules(db)
-  const searchPromotedOrderSql = `CASE WHEN ${productPromotedSql(searchRules, params)} THEN 1 ELSE 0 END DESC`
+  const searchPromotedRankSql = `CASE WHEN ${productPromotedSql(searchRules, params)} THEN 1 ELSE 0 END`
   if (String(query.promo || '').trim().toLowerCase() === 'promoted') {
     where.push(productPromotedSql(searchRules, params))
   }
   const whereSql = `WHERE ${where.join(' AND ')}`
-
-  const totalRow = await db.prepare(`SELECT COUNT(*) AS count FROM products p ${joinSql} ${whereSql}`).get<{ count: number }>(params)
-  let total = totalRow?.count || 0
 
   // Same field set as buildPortalCatalog's initial (unfiltered, page-1)
   // load above -- this endpoint is what every page/page-size/filter
@@ -1550,17 +1551,32 @@ async function runPortalProductSearch(c: { env: Env; req: { query(): Record<stri
   // session's FTS5 change. Mirrors products.ts's own
   // effectiveFamilyOrderSql pattern (match_rank ASC, then the caller's
   // chosen sort).
-  const orderBySql = filters.matchRankSql
-    ? `${searchPromotedOrderSql}, ${filters.matchRankSql} ASC, lower(p.name) ASC, p.id ASC`
-    : `${searchPromotedOrderSql}, ${PORTAL_CATALOG_DEFAULT_ORDER_SQL}`
-  let items = await db.prepare(`
-    SELECT ${selectColumnsSql}
-    FROM products p
-    ${joinSql}
-    ${whereSql}
-    ORDER BY ${orderBySql}
-    LIMIT @pageSize OFFSET @offset
-  `).all({ ...params, pageSize, offset })
+  // 6.5: paginate by GROUP (shared familyPagination helper), not by row --
+  // the browser merges name groups into one card, so row-paged responses
+  // thinned out and the pager promised pages that did not exist. total is
+  // now a GROUP count (equal to the cards rendered and to what the A-Z
+  // rail already counts), and a page carries every row of its window's
+  // groups so the client merge yields exactly pageSize cards. Ordering is
+  // the same promoted-first + brand-first rule, computed per family
+  // (relevance first-by-best-row while searching).
+  const paged = await paginateProductFamilies<Record<string, unknown>>({
+    db,
+    selectColumns: selectColumnsSql,
+    joinSql,
+    whereSql,
+    params,
+    page,
+    pageSize,
+    familyOrderSql: filters.matchRankSql
+      ? 'family_promoted DESC, match_rank ASC, family_sort_value ASC, family_name ASC'
+      : 'family_promoted DESC, family_sort_value ASC, family_name ASC',
+    intraFamilyOrderSql: 'lower(name) ASC, id ASC',
+    matchRankSql: filters.matchRankSql,
+    promotedRankSql: searchPromotedRankSql,
+    familySortValueSql: PORTAL_BRAND_SORT_KEY_SQL,
+  })
+  let items = paged.items
+  let total = paged.total
 
   // JS fuzzy (typo-tolerant) fallback -- see lib/searchMatch.ts's
   // runFuzzyFallbackMatch header comment and products.ts's/inventory.ts's

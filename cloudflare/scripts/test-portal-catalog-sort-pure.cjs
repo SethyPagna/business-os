@@ -76,6 +76,9 @@ const portalRoute = loadReal('routes/portal.ts', {
   // Real, pure -- its chunking is what keeps these reads inside D1's
   // 100-bound-parameter limit, so a stub would test the stub.
   '../lib/sqlBinding': loadReal('lib/sqlBinding.ts'),
+  // Real, pure -- 6.5 made the portal paginate by GROUP through this
+  // shared helper; stubbing it would test the stub's idea of paging.
+  '../lib/familyPagination': loadReal('lib/familyPagination.ts'),
   // Caching is transparent to what this test asserts (sort order), so the
   // producer is invoked directly -- exercising the real Cache API here would
   // test Workers, not this route's SQL.
@@ -187,6 +190,28 @@ async function run() {
     const { status, json } = await get('/catalog/products/search?q=Serum')
     assert.equal(status, 200)
     assert.ok(json.items.some((p) => p.name === 'Vitamin C Serum'), 'expected the Serum product to be found via search')
+  })
+
+  await check('6.5: pagination counts GROUPS and a page carries every row of its groups', async () => {
+    // 'Dior Lip Glow' = a 3-row name group; with the 7 visible singles
+    // seeded above the catalog holds 8 CARDS over 10 rows. A row-paged
+    // server used to report totals/pages from the 10.
+    for (const barcode of ['g1', 'g2', 'g3']) {
+      const id = db.prepare(
+        `INSERT INTO products (name, category, brand, barcode, is_active, stock_quantity, out_of_stock_threshold)
+         VALUES ('Dior Lip Glow', 'Lips', 'Dior', @barcode, 1, 4, 0) RETURNING id`
+      ).get({ barcode })?.id
+      db.prepare(`INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (@id, @branchId, 4)`).run({ id, branchId })
+    }
+    const { status, json } = await get('/catalog/products/search?page=1&pageSize=50')
+    assert.equal(status, 200)
+    assert.equal(json.total, 8, 'total counts groups (8 cards), not rows (10)')
+    const glowRows = json.items.filter((p) => p.name === 'Dior Lip Glow')
+    assert.equal(glowRows.length, 3, 'every row of an in-window group ships so the client merge has all variants')
+    const page1 = await get('/catalog/products/search?page=1&pageSize=2')
+    const distinctNames = new Set(page1.json.items.map((p) => p.name))
+    assert.equal(distinctNames.size, 2, 'pageSize means CARDS: exactly 2 groups on the page')
+    assert.equal(page1.json.totalPages, 4, '8 groups at 2 per page = 4 real pages')
   })
 
   console.log(`\n${passed} checks passed.`)
