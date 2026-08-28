@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { getStockLedger } from '../../api/productReadTransport.ts'
 import { movementColorClass, translateMovementType } from '../inventory/movementGroups.ts'
+import AppSelect from '../shared/AppSelect'
 import Modal from '../shared/Modal'
 import PaginationControls from '../shared/PaginationControls'
 import SearchInput from '../shared/SearchInput'
@@ -55,11 +56,23 @@ function signedLabel(row: LedgerRow): string {
   return `${sign}${Math.abs(row.signed_quantity)}`
 }
 
+type BranchOption = { id: number; name: string }
+
 export default function StockChangeSection({ t }: { t: Translate }) {
   const [view, setView] = useState<LedgerView>('all')
   const [page, setPage] = useState(1)
   const [search, setSearch] = useState('')
   const debouncedSearch = useDebouncedValue(search, 350)
+  // D2's ledger filters: branch + inclusive date range (the endpoint took
+  // these from day one; this row exposes them). Supplier is deliberately
+  // absent: inventory_movements never records which batch a row touched,
+  // so a movement-level supplier filter cannot be answered truthfully
+  // from existing data -- it needs an additive movements.batch_id column
+  // stamped by the writers first (flagged on the board under D2).
+  const [branchId, setBranchId] = useState(0)
+  const [branches, setBranches] = useState<BranchOption[]>([])
+  const [startDate, setStartDate] = useState('')
+  const [endDate, setEndDate] = useState('')
   const [rows, setRows] = useState<LedgerRow[]>([])
   const [total, setTotal] = useState(0)
   const [loading, setLoading] = useState(false)
@@ -77,6 +90,9 @@ export default function StockChangeSection({ t }: { t: Translate }) {
         page,
         pageSize: PAGE_SIZE,
         search: debouncedSearch || undefined,
+        branchId: branchId || undefined,
+        startDate: startDate || undefined,
+        endDate: endDate || undefined,
       }) as LedgerResponse
       if (requestRef.current !== requestId) return
       setRows(Array.isArray(response?.items) ? response.items : [])
@@ -88,10 +104,25 @@ export default function StockChangeSection({ t }: { t: Translate }) {
     } finally {
       if (requestRef.current === requestId) setLoading(false)
     }
-  }, [view, page, debouncedSearch])
+  }, [view, page, debouncedSearch, branchId, startDate, endDate])
 
   useEffect(() => { void load() }, [load])
-  useEffect(() => { setPage(1) }, [view, debouncedSearch])
+  useEffect(() => { setPage(1) }, [view, debouncedSearch, branchId, startDate, endDate])
+
+  useEffect(() => {
+    let cancelled = false
+    import('../../api/branchTransport.ts')
+      .then(({ getBranches }) => getBranches())
+      .then((rows) => {
+        if (cancelled || !Array.isArray(rows)) return
+        setBranches(rows
+          .filter((row): row is Record<string, unknown> => !!row && typeof row === 'object')
+          .map((row) => ({ id: Number(row.id) || 0, name: String(row.name || '') }))
+          .filter((row) => row.id > 0))
+      })
+      .catch(() => { /* filter row simply stays branch-less */ })
+    return () => { cancelled = true }
+  }, [])
 
   const openDetail = useCallback(async (row: LedgerRow) => {
     setDetail(row)
@@ -145,6 +176,33 @@ export default function StockChangeSection({ t }: { t: Translate }) {
         <div className="min-w-48 flex-1 sm:max-w-72">
           <SearchInput id="stock-ledger-search" name="stock_ledger_search" value={search} onChange={setSearch} placeholder={tr(t, 'search', 'Search')} />
         </div>
+        {branches.length > 1 ? (
+          <AppSelect
+            name="stock_ledger_branch"
+            value={String(branchId || '')}
+            onChange={(value) => setBranchId(Number(value) || 0)}
+            ariaLabel={tr(t, 'branch', 'Branch')}
+            options={[
+              { value: '', label: `${tr(t, 'branch', 'Branch')}: ${tr(t, 'all', 'All')}` },
+              ...branches.map((branch) => ({ value: String(branch.id), label: branch.name })),
+            ]}
+          />
+        ) : null}
+        <input
+          type="date"
+          className="input h-9 w-auto text-sm"
+          value={startDate}
+          onChange={(event) => setStartDate(event.target.value)}
+          aria-label={tr(t, 'start_date', 'Start date')}
+        />
+        <span className="text-xs text-gray-400">→</span>
+        <input
+          type="date"
+          className="input h-9 w-auto text-sm"
+          value={endDate}
+          onChange={(event) => setEndDate(event.target.value)}
+          aria-label={tr(t, 'end_date', 'End date')}
+        />
         <span className="text-xs text-gray-400">{total}</span>
       </div>
 
