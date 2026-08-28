@@ -513,7 +513,7 @@ app.get('/bootstrap', async (c) => {
   // COUNT(*)/SUM() over all active rows, which overcounted product_count
   // (and split its stock status) vs. the family-grouped `total` the
   // `payload` above already reports for the listing itself.
-  const [familyStats, movements, brands, categories] = await Promise.all([
+  const [familyStats, movements, brands, categories, branchRows] = await Promise.all([
     getFamilyStockStats({
       db,
       joinSql: '',
@@ -526,6 +526,15 @@ app.get('/bootstrap', async (c) => {
     // Previously missing -- same gap as getInventoryProductMetadata's own
     // brands-only query, just this route's separate first-load copy of it.
     db.prepare("SELECT DISTINCT trim(category) AS value FROM products WHERE is_active = 1 AND trim(COALESCE(category, '')) <> '' ORDER BY lower(trim(category)) ASC").all<{ value: string }>({}),
+    // Previously missing -- Inventory.tsx's products-only load path reads
+    // `bootstrapResult.branches` (its adjust modal's branch prefill, and
+    // through that D4b's mandatory-batch section, hangs off it), but this
+    // response never carried the key, so a session that stayed on the
+    // products slice kept branches [] and the batch/date/supplier section
+    // silently vanished from the Adjust modal. Same gap and same fix as
+    // routes/products.ts's bootstrap (its own comment above branchRows):
+    // the active-branches query routes/branches.ts's list endpoint uses.
+    db.prepare('SELECT * FROM branches WHERE is_active = 1 ORDER BY is_default DESC, id ASC').all({}),
   ])
   return c.json({
     products: payload,
@@ -545,6 +554,7 @@ app.get('/bootstrap', async (c) => {
     },
     movements: { items: movements || [], total: (movements || []).length, page: 1, pageSize: 50 },
     filters: { brands: (brands || []).map((row) => row.value), categories: (categories || []).map((row) => row.value) },
+    branches: branchRows || [],
   })
 })
 
