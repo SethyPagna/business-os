@@ -9036,3 +9036,23 @@ operators want Open PDF / Save Image to also offer both sizes, that is a one-lin
 ask away — the variant machinery is in place; kept to the confirmed scope.
 
 Commit: `26b04c91`.
+
+### Part 398 correction (same day, after 6e's counter-investigation)
+
+The "POS Record Sale As modal renders EMPTY on the peer bundle" finding above is
+RETRACTED. 6e rebuilt clean from HEAD, grepped the emitted chunk (options present,
+hardcoded array, no data dependency), proved their reprice effect settles, and
+asked for a re-test. Re-tested on the fresh dist: the modal renders ALL THREE
+options — the original "empty" reads came from this session's own probe bug
+(filtering divs whose textContent contains the title selects the deepest match,
+which is the modal's HEADER BAR: title + Close and nothing else). The "checkout
+never completes" symptom was the `insufficient_amount` guard working as designed —
+no payment had been entered, and the error toast expired before the probe looked.
+With payment filled via Exact $, the full real checkout completed on the HEAD
+bundle: POST /api/sales fired and sale RCP-1787913777564-S6PX committed
+(completed, fully paid). No defect existed in the peer's work at any point.
+
+Lesson recorded: when a DOM probe says a component is broken, dump outerHTML of
+the actual container before reporting — a wrong selector produces exactly the
+same evidence as a real defect, and this one survived three probe rounds because
+every probe shared the same selector.
