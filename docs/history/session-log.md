@@ -7640,3 +7640,52 @@ cloudflare `tsc` clean. Live domain checks by curl; Rhode barcode by web search.
 **Not done.** Deploy (ships redirect + org rename + accrual UI — user runs
 `npm run deploy:full`); leangcosmetics.com DNS dashboard action; M2 import via UI;
 the 12 user_decide rows; N1b/N2/N3 implementation; A4 cap raise before M4.
+
+## Part 375 (chat, Aug 28 2026) — review closed, import manifest + artifacts, device cap + clean slate
+
+**Ask.** Apply decisions to the 89-row review (Dior 436/999 Khmer renames, 10
+deletions, gift-set naming, Miss Dior Lip Glow 1947, deeper web checks on YSL
+Lipstick 04 / Dior 558 / similar-name consistency, no double spaces); say exactly
+what to import including suppliers; max 3 devices per account with the current
+devices cleared; keep building.
+
+**What changed.**
+- Review file: every row now decided — **73 add_as_new / 6 merge / 10 delete / 0
+  undecided**. Three more barcode verifications: 3614273945455 is on YSL's own site
+  under Rouge Pur Couture Caring Satin (user's "not Loveshine" confirmed);
+  3348901633161 = Rouge Dior Forever Lipstick 558 Forever Grace (transfer-proof
+  matte, matching បំពង់ស្ងួត); 681619814778 = theBalm Mad Lash travel 4.5ml. Names
+  normalized (no double spaces; 5 Couleurs renamed to the template's pattern; Dior
+  Snow spelling matched to template). User copy: `Downloads\REVIEW-products-web-verified-v2.csv`
+  (v1 was locked open in Excel).
+- Generated `products-import-NEW-from-review.csv` (73 rows, template 29-column
+  format; brand inferred from the template's own brand list, category/stock from the
+  old summary where present — 2 rows carry stock, 71 enter at 0 pending history) and
+  `suppliers-from-po.csv` (16 suppliers, $1.27M, 12 of 16 supplied both branches, no
+  phones in the PO export). `IMPORT-MANIFEST.md` orders all of it and states the
+  supplier truth: no export links supplier→product/batch; per-batch attribution needs
+  D5 or the old system's PO-detail export.
+- `d5d9b863`: MAX_APPROVED_DEVICES_PER_USER = 3 in deviceTrust, enforced at the
+  approve endpoint (409 device_limit_reached; idempotent re-approval; admins exempt);
+  `test-device-cap-pure.cjs`. Production cleared on request via the D1 MCP after the
+  CLI write was permission-blocked: 69 sessions revoked, 17 device rows deleted.
+- `3e54e66f`: the full sweep caught Part 373's hand-built placeholder lists in
+  coreDataInvariants — routed through sqlBinding's buildInClause; org-identity (11)
+  and bound-params (8) checks green.
+
+**What was found.** A4/M4 correction: the stock-action 60-unit cap is sized against
+the 1,000 internal-subrequest ceiling, which does NOT rise on Workers Paid — and each
+add row is its own unit, so the 21,287-row history would be ~355 jobs today. The real
+unblock is persisting the classified plan and dispatching ≤60-unit continuation
+invocations over the existing idempotency seals; recorded in M4, not hand-waved as a
+constant bump.
+
+**Verified.** test-device-cap-pure, test-d1-bound-params-repro (8), test-org-identity
+(11) green; cloudflare tsc clean; full backend sweep ran (single failure was the
+pre-existing coreDataInvariants guard trip, fixed above and re-proven). No frontend
+source changed this part. Production actions returned changes=69 and changes=17.
+
+**Not done.** Deploy (activates the device cap + everything since 4d6103b0); the
+M2/M3 imports themselves (user, per the manifest); the M4 continuation-dispatch
+engine; N1b/N2/N3; the old system's dated sales export and PO-detail export remain
+requested from the user.
