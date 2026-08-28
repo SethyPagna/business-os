@@ -21,6 +21,7 @@ import { useIsPageActive } from '../shared/pageActivity'
 import { useActionHistory } from '../../utils/actionHistory.ts'
 import { cloneHistorySnapshot } from '../../utils/historyHelpers.ts'
 import { buildTimeActionSections, getAvailableYears, getTimeGroupingMode, toggleIdSet } from '../../utils/groupedRecords.ts'
+import { createLongPressState, type LongPressState } from '../../utils/longPress.ts'
 import { buildPeriodFilterOptions } from '../../utils/periodFilterOptions.ts'
 import {
   beginTrackedRequest,
@@ -308,6 +309,19 @@ export default function Returns() {
   const [monthFilter, setMonthFilter] = useState('all')
   const [typeFilter, setTypeFilter] = useState('all')
   const [selectedIds, setSelectedIds] = useState<Set<number>>(() => new Set())
+  // 11.1/11.2 (B6): same selection model as Products/Inventory/Sales --
+  // checkboxes only exist while something is selected; long-press a
+  // row/card to enter select mode; the desktop column-header checkbox is
+  // select-all. Ends automatically once the last item is deselected.
+  const selectionModeActive = selectedIds.size > 0
+  const returnLongPressStateByRowIdRef = useRef<Map<number, LongPressState>>(new Map())
+  const getReturnLongPressState = useCallback((rowId: number): LongPressState => {
+    const existing = returnLongPressStateByRowIdRef.current.get(rowId)
+    if (existing) return existing
+    const created = createLongPressState()
+    returnLongPressStateByRowIdRef.current.set(rowId, created)
+    return created
+  }, [])
   const [detailRet, setDetailRet] = useState<ReturnRow | null>(null)
   const [showCustomerForm, setShowCustomerForm] = useState(false)
   const [showSupplierForm, setShowSupplierForm] = useState(false)
@@ -1063,6 +1077,8 @@ export default function Returns() {
         scope={scope}
         selectAllRef={selectAllRef as ReturnsListSurfaceProps['selectAllRef']}
         selectedIds={selectedIds}
+        selectionModeActive={selectionModeActive}
+        getReturnLongPressState={getReturnLongPressState}
         setDetailRet={(ret) => setDetailRet(ret as ReturnRow)}
         showReturnActionGroups={showReturnActionGroups}
         SUPPLIER_SCOPE={SUPPLIER_SCOPE}

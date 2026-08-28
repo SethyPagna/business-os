@@ -1,5 +1,6 @@
 import type { ComponentProps, ReactNode } from 'react'
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { consumeLongPressClick, createLongPressHandlers, createLongPressState, type LongPressState } from '../../utils/longPress.ts'
 import ArrowRightLeft from 'lucide-react/dist/esm/icons/arrow-right-left.js'
 import ChevronDown from 'lucide-react/dist/esm/icons/chevron-down.js'
 import ChevronRight from 'lucide-react/dist/esm/icons/chevron-right.js'
@@ -850,6 +851,21 @@ export default function Branches() {
     })
   }
 
+  // 11.1/11.2 (B6): same selection model as the table pages -- checkboxes
+  // only exist while something is selected, entered by long-pressing a
+  // branch card. Branches is a card list with no column header, so the
+  // select-all checkbox lives on the list-top row that only renders in
+  // select mode (the card list's equivalent of the table header).
+  const selectionModeActive = selectedIds.size > 0
+  const branchLongPressStateByIdRef = useRef<Map<string | number, LongPressState>>(new Map())
+  const getBranchLongPressState = (branchId: string | number): LongPressState => {
+    const existing = branchLongPressStateByIdRef.current.get(branchId)
+    if (existing) return existing
+    const created = createLongPressState()
+    branchLongPressStateByIdRef.current.set(branchId, created)
+    return created
+  }
+
   const toggleSelectAll = () => {
     // Scope select-all to the currently *visible* (filtered) branches, not the
     // full unfiltered list — otherwise selecting-all under an active status
@@ -1029,7 +1045,6 @@ export default function Branches() {
               {[0, 1].map((index) => (
                 <div key={`branch-loading-${index}`} className="card p-3 sm:p-4">
                   <div className="flex items-start gap-3">
-                    <div className="mt-1 h-4 w-4 rounded bg-slate-200 dark:bg-slate-700" />
                     <div className="min-w-0 flex-1 space-y-2">
                       <div className="h-5 w-40 max-w-[70%] rounded bg-slate-200 dark:bg-slate-700" />
                       <div className="h-3 w-52 max-w-[85%] rounded bg-slate-100 dark:bg-slate-800" />
@@ -1042,7 +1057,9 @@ export default function Branches() {
             </div>
           ) : null}
 
-          {!loading && visibleBranches.length > 0 ? (
+          {/* 11.2 (B6): no standing "Select all (N)" control -- this row only
+              exists in select mode, where its checkbox is the select-all. */}
+          {!loading && visibleBranches.length > 0 && selectionModeActive ? (
             <div className="flex items-center gap-3 px-2">
               <input
                 id="branches-select-all"
@@ -1059,9 +1076,7 @@ export default function Branches() {
                 onChange={toggleSelectAll}
               />
               <span className="text-xs text-gray-500 dark:text-gray-400">
-                {selectedCount > 0
-                  ? `${selectedCount} selected`
-                  : `${tr('select_all', 'Select all')} (${visibleBranches.length})`}
+                {`${selectedCount} selected`}
               </span>
             </div>
           ) : null}
@@ -1095,10 +1110,34 @@ export default function Branches() {
             const outStockCount = Number(stockSummary.out_of_stock_products ?? 0)
             const totalValue = Number(stockSummary.positive_value_usd ?? stockSummary.total_value_usd ?? 0)
 
+            const cardLongPressState = getBranchLongPressState(branch.id)
+            const cardLongPress = createLongPressHandlers(cardLongPressState, {
+              disabled: selectionModeActive,
+              onLongPress: () => {
+                if (!selectedIds.has(branch.id)) toggleSelect(branch.id)
+              },
+              // No onClick: a plain tap on the card keeps hitting whatever
+              // inner control it landed on (expand, manage, transfer).
+            })
             return (
-              <div key={branch.id} className={`card overflow-hidden transition-all ${selectedIds.has(branch.id) ? 'ring-2 ring-blue-400 dark:ring-blue-500' : ''}`}>
+              <div
+                key={branch.id}
+                className={`card select-none overflow-hidden transition-all ${selectedIds.has(branch.id) ? 'ring-2 ring-blue-400 dark:ring-blue-500' : ''}`}
+                {...(selectionModeActive ? {} : cardLongPress)}
+                // The ghost click that follows a fired long-press would land
+                // on an inner control (e.g. the expand button) -- swallow it
+                // in the capture phase so entering select mode doesn't also
+                // toggle whatever sat under the finger.
+                onClickCapture={(event) => {
+                  if (consumeLongPressClick(cardLongPressState)) {
+                    event.preventDefault()
+                    event.stopPropagation()
+                  }
+                }}
+              >
                 <div className="p-3 sm:p-4">
                   <div className="flex items-start gap-2">
+                    {selectionModeActive ? (
                     <input
                       id={`branch-select-${branch.id}`}
                       name={`branch_select_${branch.id}`}
@@ -1108,6 +1147,7 @@ export default function Branches() {
                       checked={selectedIds.has(branch.id)}
                       onChange={() => toggleSelect(branch.id)}
                     />
+                    ) : null}
                     <div className="min-w-0 flex-1">
                       <div className="flex items-start justify-between gap-3">
                         {/* The whole name/details block is now the click

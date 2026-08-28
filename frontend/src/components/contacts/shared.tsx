@@ -8,6 +8,7 @@ import PaginationControls, { paginateItems, DEFAULT_PAGE_SIZE } from '../shared/
 import LoadingWatchdog from '../shared/LoadingWatchdog'
 import { useApp as useAppHook } from '../../AppContext.tsx'
 import { pruneSelectionToVisibleIds } from '../../utils/rowSelection.ts'
+import { createLongPressState, type LongPressState } from '../../utils/longPress.ts'
 
 type TranslateFn = (key: string) => string | undefined
 
@@ -33,6 +34,11 @@ interface ContactSelection {
   toggleOne: (id: unknown) => void
   clearSelection: () => void
   selectAllProp: SelectAllProps
+  // 11.1/11.2 (B6): true while anything is selected -- the tabs render
+  // checkboxes (and ContactTable its header select-all) only in this state;
+  // a long-press on a row/card is how the state is entered.
+  selectionModeActive: boolean
+  getRowLongPressState: (rowId: number) => LongPressState
 }
 
 type MenuAction = {
@@ -70,6 +76,10 @@ interface ContactTableProps<T extends ContactRow> {
   compactEmptyState?: boolean
   columns?: ReactNode[]
   selectAll?: Partial<SelectAllProps>
+  // 11.1/11.2 (B6): while false the select column collapses to nothing and
+  // the header select-all checkbox is not rendered; the tabs flip it once
+  // something is selected (entered by long-pressing a row/card).
+  selectionModeActive?: boolean
   renderRow?: (row: T) => ReactNode
   renderCard?: (row: T) => ReactNode
   totalCount?: number
@@ -110,6 +120,18 @@ export function useContactSelection<T extends ContactRow>(rows: T[] = []): Conta
 
   const clearSelection = () => setSelectedIds(new Set())
 
+  // One long-press slot per visible row -- same reasoning as Products.tsx's
+  // longPressStateByRowIdRef: renderRow/renderCard run inside a .map(), not
+  // as mounted components, so the mutable state lives in this hook.
+  const longPressStateByRowIdRef = useRef<Map<number, LongPressState>>(new Map())
+  const getRowLongPressState = (rowId: number): LongPressState => {
+    const existing = longPressStateByRowIdRef.current.get(rowId)
+    if (existing) return existing
+    const created = createLongPressState()
+    longPressStateByRowIdRef.current.set(rowId, created)
+    return created
+  }
+
   const selectAllProp = {
     checked: rowIds.length > 0 && selectedIds.size === rowIds.length,
     indeterminate: selectedIds.size > 0 && selectedIds.size < rowIds.length,
@@ -128,6 +150,8 @@ export function useContactSelection<T extends ContactRow>(rows: T[] = []): Conta
     toggleOne,
     clearSelection,
     selectAllProp,
+    selectionModeActive: selectedIds.size > 0,
+    getRowLongPressState,
   }
 }
 
@@ -258,6 +282,7 @@ export function ContactTable<T extends ContactRow>({
   compactEmptyState = false,
   columns = [],
   selectAll,
+  selectionModeActive = false,
   renderRow,
   renderCard,
   totalCount,
@@ -307,9 +332,8 @@ export function ContactTable<T extends ContactRow>({
           <table className="w-full text-sm">
             <thead className="bg-gray-50 text-left text-xs uppercase tracking-wide text-gray-500 dark:bg-zinc-800 dark:text-gray-400">
               <tr>
-                <th className="w-10 px-3 py-2">
-                  <div className="h-4 w-4 animate-pulse rounded bg-slate-200 dark:bg-slate-700" />
-                </th>
+                {/* Select column collapsed while loading (selection can't be active). */}
+                <th className="w-0 px-0 py-2" />
                 {columns.map((column, index) => (
                   <th key={`contact-skeleton-head-${index}`} className="px-3 py-2">
                     {column}
@@ -323,9 +347,7 @@ export function ContactTable<T extends ContactRow>({
             <tbody className="divide-y divide-gray-100 dark:divide-zinc-800">
               {skeletonRows.map((row) => (
                 <tr key={`contact-skeleton-row-${row}`} className="animate-pulse">
-                  <td className="px-3 py-3">
-                    <div className="h-4 w-4 rounded bg-slate-200 dark:bg-slate-700" />
-                  </td>
+                  <td className="px-0 py-3" />
                   {columns.map((_, index) => (
                     <td key={`contact-skeleton-cell-${row}-${index}`} className="px-3 py-3">
                       <div className={`h-4 rounded bg-slate-100 dark:bg-slate-800 ${index === 0 ? 'w-32' : index >= columns.length - 2 ? 'w-20' : 'w-24'}`} />
@@ -405,18 +427,22 @@ export function ContactTable<T extends ContactRow>({
         <table className="w-full text-sm">
           <thead className="bg-gray-50 text-left text-xs uppercase tracking-wide text-gray-500 dark:bg-zinc-800 dark:text-gray-400">
             <tr>
-              <th className="w-10 px-3 py-2">
-                <label htmlFor="contacts-select-all" className="sr-only">Select all contacts</label>
-                <input
-                  ref={selectAllRef}
-                  id="contacts-select-all"
-                  name="contacts_select_all"
-                  aria-label="Select all contacts"
-                  type="checkbox"
-                  className="h-4 w-4 rounded"
-                  checked={!!selectAll?.checked}
-                  onChange={(event) => selectAll?.onChange?.(event.target.checked)}
-                />
+              <th className={selectionModeActive ? 'w-10 px-3 py-2' : 'w-0 px-0 py-2'}>
+                {selectionModeActive ? (
+                  <>
+                    <label htmlFor="contacts-select-all" className="sr-only">Select all contacts</label>
+                    <input
+                      ref={selectAllRef}
+                      id="contacts-select-all"
+                      name="contacts_select_all"
+                      aria-label="Select all contacts"
+                      type="checkbox"
+                      className="h-4 w-4 rounded"
+                      checked={!!selectAll?.checked}
+                      onChange={(event) => selectAll?.onChange?.(event.target.checked)}
+                    />
+                  </>
+                ) : null}
               </th>
               {columns.map((column) => (
                 <th key={String(column)} className="px-4 py-2">{column}</th>

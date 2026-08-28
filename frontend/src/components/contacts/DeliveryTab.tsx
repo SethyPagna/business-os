@@ -1,6 +1,7 @@
 // ?€?€ DeliveryTab ?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€
 import { Suspense, lazy, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react'
 import { lazyRetry } from '../../utils/lazyImport.ts'
+import { consumeLongPressClick, createLongPressHandlers } from '../../utils/longPress.ts'
 import type { ComponentProps } from 'react'
 import ChevronDown from 'lucide-react/dist/esm/icons/chevron-down.js'
 import ChevronRight from 'lucide-react/dist/esm/icons/chevron-right.js'
@@ -537,7 +538,17 @@ function DeliveryTab({ t, notify, active = true, initialSearch }: DeliveryTabPro
     [collapsedSections, filteredSections],
   )
 
-  const { selectedIds, setSelectedIds, toggleOne, selectAllProp } = useContactSelection(visibleContacts)
+  const { selectedIds, setSelectedIds, toggleOne, selectAllProp, selectionModeActive, getRowLongPressState } = useContactSelection(visibleContacts)
+  // 11.1/11.2 (B6): in select mode a cell click toggles the row; out of it
+  // the cell keeps opening the detail panel (long-press enters the mode).
+  const handleContactCellClick = (contact: DeliveryContact) => {
+    if (selectionModeActive) {
+      toggleOne(contact.id)
+      return
+    }
+    setSelected(contact)
+    setModal('detail')
+  }
   const deliveryColumns = [t('name') || 'Name', t('phone') || 'Phone', t('area_zone')||'Area / Zone', t('gender') || 'Gender', t('col_added') || 'Added']
   const contactFilterSections = useMemo(() => ([
     {
@@ -984,6 +995,7 @@ function DeliveryTab({ t, notify, active = true, initialSearch }: DeliveryTabPro
         emptyLabel={t('no_delivery_contacts')||'No delivery contacts'}
         columns={deliveryColumns}
         selectAll={selectAllProp}
+        selectionModeActive={selectionModeActive}
         totalCount={visibleContacts.length}
         onRetry={() => load({ silent: false, label: 'Delivery contacts retry' })}
         loadingLabel={tr('loading_delivery_contacts', 'Loading delivery contacts...')}
@@ -997,6 +1009,7 @@ function DeliveryTab({ t, notify, active = true, initialSearch }: DeliveryTabPro
               <td colSpan={deliveryColumns.length + 2} className="px-4 py-2">
                 <div className="flex items-center justify-between gap-3">
                   <label className="inline-flex min-w-0 items-center gap-2 text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
+                    {selectionModeActive ? (
                     <input
                       type="checkbox"
                       className="h-4 w-4 rounded"
@@ -1007,6 +1020,7 @@ function DeliveryTab({ t, notify, active = true, initialSearch }: DeliveryTabPro
                       onChange={(event) => toggleSectionSelection(section.ids, event.target.checked)}
                       aria-label={`Select ${section.label}`}
                     />
+                    ) : null}
                     <span>{section.label}</span>
                     <span className="normal-case tracking-normal text-slate-400">{section.items.length}</span>
                   </label>
@@ -1026,17 +1040,40 @@ function DeliveryTab({ t, notify, active = true, initialSearch }: DeliveryTabPro
           const primaryOption = getPrimaryContactOption(options, {
             fallback: { name: contact.name || '', phone: contact.phone || '', area: contact.area || '' },
           })
+          const rowLongPressState = getRowLongPressState(Number(contact.id))
+          const rowLongPress = createLongPressHandlers(rowLongPressState, {
+            disabled: selectionModeActive,
+            onLongPress: () => {
+              if (!selectedIds.has(Number(contact.id))) toggleOne(contact.id)
+            },
+            // No onClick: plain taps keep hitting the cells' own handlers.
+          })
           return (
-          <tr key={contact.id} className={`table-row cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700/30 ${selectedIds.has(Number(contact.id)) ? 'bg-blue-50 dark:bg-blue-900/20' : ''}`}>
-            <td className="px-3 py-2 w-10" onClick={e => e.stopPropagation()}>
+          <tr
+            key={contact.id}
+            className={`table-row cursor-pointer select-none hover:bg-gray-50 dark:hover:bg-gray-700/30 ${selectedIds.has(Number(contact.id)) ? 'bg-blue-50 dark:bg-blue-900/20' : ''}`}
+            {...(selectionModeActive ? {} : rowLongPress)}
+            onClickCapture={(event) => {
+              // Swallow the ghost click that follows a fired long-press.
+              if (consumeLongPressClick(rowLongPressState)) {
+                event.preventDefault()
+                event.stopPropagation()
+              }
+            }}
+          >
+            <td className={selectionModeActive ? 'px-3 py-2 w-10' : 'px-0 py-2 w-0'} onClick={e => e.stopPropagation()}>
+              {selectionModeActive ? (
+              <>
               <label htmlFor={`delivery-select-${contact.id}`} className="sr-only">{`Select ${contact.name}`}</label>
               <input id={`delivery-select-${contact.id}`} name={`delivery_select_${contact.id}`} type="checkbox" className="w-4 h-4 cursor-pointer rounded" checked={selectedIds.has(Number(contact.id))} onChange={() => toggleOne(contact.id)} />
+              </>
+              ) : null}
             </td>
-            <td className="px-4 py-2 font-medium text-gray-900 dark:text-white cursor-pointer" onClick={() => { setSelected(contact); setModal('detail') }}>{contact.name}</td>
-            <td className="px-4 py-2 text-gray-500 cursor-pointer" onClick={() => { setSelected(contact); setModal('detail') }}>{primaryOption.phone || contact.phone || '-'}</td>
-            <td className="px-4 py-2 text-gray-500 cursor-pointer" onClick={() => { setSelected(contact); setModal('detail') }}>{primaryOption.area || contact.area || '-'}</td>
-            <td className="px-4 py-2 text-gray-500 cursor-pointer" onClick={() => { setSelected(contact); setModal('detail') }}>{contact.gender ? tr(contact.gender, contact.gender) : tr('unspecified', 'Unspecified')}</td>
-            <td className="px-4 py-2 text-xs text-gray-500 cursor-pointer" onClick={() => { setSelected(contact); setModal('detail') }}>{fmtDateTime24(contact.created_at)}</td>
+            <td className="px-4 py-2 font-medium text-gray-900 dark:text-white cursor-pointer" onClick={() => handleContactCellClick(contact)}>{contact.name}</td>
+            <td className="px-4 py-2 text-gray-500 cursor-pointer" onClick={() => handleContactCellClick(contact)}>{primaryOption.phone || contact.phone || '-'}</td>
+            <td className="px-4 py-2 text-gray-500 cursor-pointer" onClick={() => handleContactCellClick(contact)}>{primaryOption.area || contact.area || '-'}</td>
+            <td className="px-4 py-2 text-gray-500 cursor-pointer" onClick={() => handleContactCellClick(contact)}>{contact.gender ? tr(contact.gender, contact.gender) : tr('unspecified', 'Unspecified')}</td>
+            <td className="px-4 py-2 text-xs text-gray-500 cursor-pointer" onClick={() => handleContactCellClick(contact)}>{fmtDateTime24(contact.created_at)}</td>
             <td className="px-2 py-2 text-right" onClick={e => e.stopPropagation()}>
               <ThreeDotMenu onDetails={() => { setSelected(contact); setModal('detail') }} onEdit={() => { setSelected(contact); setModal('form') }} onDelete={canDeleteContact ? () => handleDelete(contact) : undefined} />
             </td>
@@ -1050,6 +1087,7 @@ function DeliveryTab({ t, notify, active = true, initialSearch }: DeliveryTabPro
             <div key={section.id} className="rounded-xl bg-slate-100 px-3 py-2 dark:bg-slate-800/70">
               <div className="flex items-center justify-between gap-3">
                 <label className="inline-flex min-w-0 items-center gap-2 text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
+                  {selectionModeActive ? (
                   <input
                     type="checkbox"
                     className="h-4 w-4 rounded"
@@ -1060,6 +1098,7 @@ function DeliveryTab({ t, notify, active = true, initialSearch }: DeliveryTabPro
                     onChange={(event) => toggleSectionSelection(section.ids, event.target.checked)}
                     aria-label={`Select ${section.label}`}
                   />
+                  ) : null}
                   <span>{section.label}</span>
                   <span className="normal-case tracking-normal text-slate-400">{section.items.length}</span>
                 </label>
@@ -1077,16 +1116,35 @@ function DeliveryTab({ t, notify, active = true, initialSearch }: DeliveryTabPro
           const primaryOption = getPrimaryContactOption(options, {
             fallback: { name: contact.name || '', phone: contact.phone || '', area: contact.area || '' },
           })
+          const cardLongPressState = getRowLongPressState(Number(contact.id))
+          const cardLongPress = createLongPressHandlers(cardLongPressState, {
+            disabled: selectionModeActive,
+            onLongPress: () => {
+              if (!selectedIds.has(Number(contact.id))) toggleOne(contact.id)
+            },
+          })
           return (
-          <div key={contact.id} className={`card p-3 flex items-center gap-3 ${selectedIds.has(Number(contact.id)) ? 'ring-2 ring-blue-400 bg-blue-50 dark:bg-blue-900/20' : ''}`}>
+          <div
+            key={contact.id}
+            className={`card p-3 flex select-none items-center gap-3 ${selectedIds.has(Number(contact.id)) ? 'ring-2 ring-blue-400 bg-blue-50 dark:bg-blue-900/20' : ''}`}
+            {...(selectionModeActive ? {} : cardLongPress)}
+            onClickCapture={(event) => {
+              if (consumeLongPressClick(cardLongPressState)) {
+                event.preventDefault()
+                event.stopPropagation()
+              }
+            }}
+          >
+            {selectionModeActive ? (
             <div className="flex-shrink-0" onClick={e => { e.stopPropagation(); toggleOne(contact.id) }}>
               <label htmlFor={`delivery-card-select-${contact.id}`} className="sr-only">{`Select ${contact.name}`}</label>
               <input id={`delivery-card-select-${contact.id}`} name={`delivery_card_select_${contact.id}`} type="checkbox" className="w-5 h-5 cursor-pointer rounded" checked={selectedIds.has(Number(contact.id))} onChange={() => toggleOne(contact.id)} />
             </div>
+            ) : null}
             <div className="w-9 h-9 bg-green-100 dark:bg-green-900/40 rounded-full flex items-center justify-center text-green-600 font-bold text-sm flex-shrink-0">
               {contact.name?.[0]?.toUpperCase()}
             </div>
-            <div className="flex-1 min-w-0 cursor-pointer" onClick={() => { setSelected(contact); setModal('detail') }}>
+            <div className="flex-1 min-w-0 cursor-pointer" onClick={() => handleContactCellClick(contact)}>
               <div className="font-semibold text-gray-900 dark:text-white text-sm truncate flex items-center gap-1">
                 {contact.name}
               </div>

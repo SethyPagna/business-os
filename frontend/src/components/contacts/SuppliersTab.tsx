@@ -1,5 +1,6 @@
 import { Suspense, lazy, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react'
 import { lazyRetry } from '../../utils/lazyImport.ts'
+import { consumeLongPressClick, createLongPressHandlers } from '../../utils/longPress.ts'
 import type { ComponentProps } from 'react'
 import ChevronDown from 'lucide-react/dist/esm/icons/chevron-down.js'
 import ChevronRight from 'lucide-react/dist/esm/icons/chevron-right.js'
@@ -484,7 +485,17 @@ function SuppliersTab({ t, notify, active = true, initialSearch }: SuppliersTabP
     [collapsedSections, filteredSections],
   )
 
-  const { selectedIds, setSelectedIds, toggleOne, selectAllProp } = useContactSelection(visibleSuppliers)
+  const { selectedIds, setSelectedIds, toggleOne, selectAllProp, selectionModeActive, getRowLongPressState } = useContactSelection(visibleSuppliers)
+  // 11.1/11.2 (B6): in select mode a cell click toggles the row; out of it
+  // the cell keeps opening the detail panel (long-press enters the mode).
+  const handleContactCellClick = (supplier: SupplierRow) => {
+    if (selectionModeActive) {
+      toggleOne(supplier.id)
+      return
+    }
+    setSelected(supplier)
+    setModal('detail')
+  }
   // 'Company' dropped from the table column set per explicit user
   // direction -- still stored/editable on the record (form, detail panel,
   // XLSX export) and still searchable via the filter box, just no longer
@@ -960,6 +971,7 @@ function SuppliersTab({ t, notify, active = true, initialSearch }: SuppliersTabP
         emptyLabel={t('no_suppliers') || 'No suppliers'}
         columns={supplierColumns}
         selectAll={selectAllProp}
+        selectionModeActive={selectionModeActive}
         totalCount={visibleSuppliers.length}
         onRetry={() => load({ silent: false, label: 'Suppliers retry' })}
         loadingLabel={tr('loading_suppliers', 'Loading suppliers...')}
@@ -973,6 +985,7 @@ function SuppliersTab({ t, notify, active = true, initialSearch }: SuppliersTabP
               <td colSpan={supplierColumns.length + 2} className="px-4 py-2">
                 <div className="flex items-center justify-between gap-3">
                   <label className="inline-flex min-w-0 items-center gap-2 text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
+                    {selectionModeActive ? (
                     <input
                       type="checkbox"
                       className="h-4 w-4 rounded"
@@ -983,6 +996,7 @@ function SuppliersTab({ t, notify, active = true, initialSearch }: SuppliersTabP
                       onChange={(event) => toggleSectionSelection(section.ids, event.target.checked)}
                       aria-label={`Select ${section.label}`}
                     />
+                    ) : null}
                     <span>{section.label}</span>
                     <span className="normal-case tracking-normal text-slate-400">{section.items.length}</span>
                   </label>
@@ -1007,18 +1021,41 @@ function SuppliersTab({ t, notify, active = true, initialSearch }: SuppliersTabP
               address: '',
             },
           })
+          const rowLongPressState = getRowLongPressState(Number(supplier.id))
+          const rowLongPress = createLongPressHandlers(rowLongPressState, {
+            disabled: selectionModeActive,
+            onLongPress: () => {
+              if (!selectedIds.has(Number(supplier.id))) toggleOne(supplier.id)
+            },
+            // No onClick: plain taps keep hitting the cells' own handlers.
+          })
           return (
-          <tr key={supplier.id} className={`table-row cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700/30 ${selectedIds.has(Number(supplier.id)) ? 'bg-blue-50 dark:bg-blue-900/20' : ''}`}>
-            <td className="w-10 px-3 py-2" onClick={(event) => event.stopPropagation()}>
+          <tr
+            key={supplier.id}
+            className={`table-row cursor-pointer select-none hover:bg-gray-50 dark:hover:bg-gray-700/30 ${selectedIds.has(Number(supplier.id)) ? 'bg-blue-50 dark:bg-blue-900/20' : ''}`}
+            {...(selectionModeActive ? {} : rowLongPress)}
+            onClickCapture={(event) => {
+              // Swallow the ghost click that follows a fired long-press.
+              if (consumeLongPressClick(rowLongPressState)) {
+                event.preventDefault()
+                event.stopPropagation()
+              }
+            }}
+          >
+            <td className={selectionModeActive ? 'w-10 px-3 py-2' : 'w-0 px-0 py-2'} onClick={(event) => event.stopPropagation()}>
+              {selectionModeActive ? (
+              <>
               <label htmlFor={`supplier-select-${supplier.id}`} className="sr-only">{`Select ${supplier.name}`}</label>
               <input id={`supplier-select-${supplier.id}`} name={`supplier_select_${supplier.id}`} type="checkbox" className="h-4 w-4 cursor-pointer rounded" checked={selectedIds.has(Number(supplier.id))} onChange={() => toggleOne(supplier.id)} />
+              </>
+              ) : null}
             </td>
-            <td className="cursor-pointer px-4 py-2 font-medium text-gray-900 dark:text-white" onClick={() => { setSelected(supplier); setModal('detail') }}>{supplier.name}</td>
-            <td className="cursor-pointer px-4 py-2 text-gray-500" onClick={() => { setSelected(supplier); setModal('detail') }}>{primaryOption.phone || supplier.phone || '--'}</td>
-            <td className="cursor-pointer px-4 py-2 text-xs text-gray-500" onClick={() => { setSelected(supplier); setModal('detail') }}>{primaryOption.email || supplier.email || '--'}</td>
-            <td className="cursor-pointer px-4 py-2 text-gray-500" onClick={() => { setSelected(supplier); setModal('detail') }}>{primaryOption.name || supplier.contact_person || '--'}</td>
-            <td className="cursor-pointer px-4 py-2 text-gray-500" onClick={() => { setSelected(supplier); setModal('detail') }}>{supplier.gender ? tr(supplier.gender, supplier.gender) : tr('unspecified', 'Unspecified')}</td>
-            <td className="cursor-pointer px-4 py-2 text-xs text-gray-500" onClick={() => { setSelected(supplier); setModal('detail') }}>{fmtDateTime24(supplier.created_at)}</td>
+            <td className="cursor-pointer px-4 py-2 font-medium text-gray-900 dark:text-white" onClick={() => handleContactCellClick(supplier)}>{supplier.name}</td>
+            <td className="cursor-pointer px-4 py-2 text-gray-500" onClick={() => handleContactCellClick(supplier)}>{primaryOption.phone || supplier.phone || '--'}</td>
+            <td className="cursor-pointer px-4 py-2 text-xs text-gray-500" onClick={() => handleContactCellClick(supplier)}>{primaryOption.email || supplier.email || '--'}</td>
+            <td className="cursor-pointer px-4 py-2 text-gray-500" onClick={() => handleContactCellClick(supplier)}>{primaryOption.name || supplier.contact_person || '--'}</td>
+            <td className="cursor-pointer px-4 py-2 text-gray-500" onClick={() => handleContactCellClick(supplier)}>{supplier.gender ? tr(supplier.gender, supplier.gender) : tr('unspecified', 'Unspecified')}</td>
+            <td className="cursor-pointer px-4 py-2 text-xs text-gray-500" onClick={() => handleContactCellClick(supplier)}>{fmtDateTime24(supplier.created_at)}</td>
             <td className="px-2 py-2 text-right" onClick={(event) => event.stopPropagation()}>
               <ThreeDotMenu onDetails={() => { setSelected(supplier); setModal('detail') }} onEdit={() => { setSelected(supplier); setModal('form') }} onDelete={canDeleteContact ? () => handleDelete(supplier) : undefined} />
             </td>
@@ -1032,6 +1069,7 @@ function SuppliersTab({ t, notify, active = true, initialSearch }: SuppliersTabP
             <div key={section.id} className="rounded-xl bg-slate-100 px-3 py-2 dark:bg-slate-800/70">
               <div className="flex items-center justify-between gap-3">
                 <label className="inline-flex min-w-0 items-center gap-2 text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
+                  {selectionModeActive ? (
                   <input
                     type="checkbox"
                     className="h-4 w-4 rounded"
@@ -1042,6 +1080,7 @@ function SuppliersTab({ t, notify, active = true, initialSearch }: SuppliersTabP
                     onChange={(event) => toggleSectionSelection(section.ids, event.target.checked)}
                     aria-label={`Select ${section.label}`}
                   />
+                  ) : null}
                   <span>{section.label}</span>
                   <span className="normal-case tracking-normal text-slate-400">{section.items.length}</span>
                 </label>
@@ -1064,16 +1103,35 @@ function SuppliersTab({ t, notify, active = true, initialSearch }: SuppliersTabP
               address: '',
             },
           })
+          const cardLongPressState = getRowLongPressState(Number(supplier.id))
+          const cardLongPress = createLongPressHandlers(cardLongPressState, {
+            disabled: selectionModeActive,
+            onLongPress: () => {
+              if (!selectedIds.has(Number(supplier.id))) toggleOne(supplier.id)
+            },
+          })
           return (
-          <div key={supplier.id} className={`card flex items-center gap-3 p-3 ${selectedIds.has(Number(supplier.id)) ? 'bg-blue-50 ring-2 ring-blue-400 dark:bg-blue-900/20' : ''}`}>
+          <div
+            key={supplier.id}
+            className={`card flex select-none items-center gap-3 p-3 ${selectedIds.has(Number(supplier.id)) ? 'bg-blue-50 ring-2 ring-blue-400 dark:bg-blue-900/20' : ''}`}
+            {...(selectionModeActive ? {} : cardLongPress)}
+            onClickCapture={(event) => {
+              if (consumeLongPressClick(cardLongPressState)) {
+                event.preventDefault()
+                event.stopPropagation()
+              }
+            }}
+          >
+            {selectionModeActive ? (
             <div className="flex-shrink-0" onClick={(event) => { event.stopPropagation(); toggleOne(supplier.id) }}>
               <label htmlFor={`supplier-card-select-${supplier.id}`} className="sr-only">{`Select ${supplier.name}`}</label>
               <input id={`supplier-card-select-${supplier.id}`} name={`supplier_card_select_${supplier.id}`} type="checkbox" className="h-5 w-5 cursor-pointer rounded" checked={selectedIds.has(Number(supplier.id))} onChange={() => toggleOne(supplier.id)} />
             </div>
+            ) : null}
             <div className="h-9 w-9 flex-shrink-0 rounded-full bg-orange-100 text-center text-sm font-bold leading-9 text-orange-600 dark:bg-orange-900/40">
               {supplier.name?.[0]?.toUpperCase()}
             </div>
-            <div className="min-w-0 flex-1 cursor-pointer" onClick={() => { setSelected(supplier); setModal('detail') }}>
+            <div className="min-w-0 flex-1 cursor-pointer" onClick={() => handleContactCellClick(supplier)}>
               <div className="truncate text-sm font-semibold text-gray-900 dark:text-white">{supplier.name}</div>
               {primaryOption.phone || supplier.phone ? <div className="text-xs text-gray-500">{primaryOption.phone || supplier.phone}</div> : null}
               {options.length ? <div className="mt-0.5 text-xs text-blue-500">{options.length} contact option{options.length !== 1 ? 's' : ''}</div> : null}
