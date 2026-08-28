@@ -571,14 +571,20 @@ deep-linkable tabs.*
   in 22 of 30 route files today — sweep the other
   8 and every uncovered mutation so ALL actions/changes land in the trail (one helper,
   no bespoke logging). List the uncovered routes in the session log when measured.
-- [~] I2 **[CLAIMED: session a7 (Part 389), in progress]** — measured on pickup: the
-  page's action/user/date/search filter controls ALREADY send params the server
-  IGNORES (compat.ts GET /system/audit-logs reads only page/pageSize) and there is
-  no client-side filtering either — every filter on the Audit Log page is currently
-  dead. Fix is server-side WHERE + entity ("page") filter + server-wide filter
-  vocabularies; the detail view with before→after field diff already exists
-  (auditLogFieldDiff, raw-JSON toggle). Audit UI (inside Review & Logs): the same
-  one-row date-range control as
+- [x] I2 *(Part 393: shipped, needs deploy — commit e0330edc. The REAL bug: every
+  filter control on the Audit Log page was DEAD (the page sent search/action/userId/
+  startDate/endDate; the server read only page/pageSize; nothing filtered
+  client-side — independently confirmed by a second session). lib/auditLogQuery.ts
+  builds the WHERE (comma-joined multi-values, case-insensitive, entity OR legacy
+  table_name, inclusive date(created_at) range, LIKE with %/_ escaped); COUNT shares
+  the clause so pagination agrees; filter vocabularies are whole-table; new entity
+  "Page / record type" multi-select in the UI; and the silent-empty catch (db error
+  → empty 200 rendered as "no logs") is now a 500 so the local-mirror fallback +
+  message path runs instead. The before→after detail view already existed
+  (auditLogFieldDiff) — untouched. test-audit-log-filters-pure.cjs 17 checks against
+  the real 0001 schema. Still open for the D2 era: the one-row date-range control
+  (today's range comes from the year/month period filters).)* Audit UI (inside
+  Review & Logs): the same one-row date-range control as
   Products/Inventory (D2), filters by action / page / user, clean multi-option design,
   detail drawer per entry showing before→after payloads where stored.
 

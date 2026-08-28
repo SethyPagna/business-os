@@ -8493,3 +8493,66 @@ Picked the highest-ordered open master-plan item whose file set was fully disjoi
 - Deploy (`0061`–`0070` ride the next `npm run deploy:full`) + the imports (user).
 
 Commits: `c30f5159` (feature), lang keys inside `30a09266` (6e's, by agreement).
+
+## Part 393 (chat, Aug 28 2026) -- I2: the Audit Log's dead filters, fixed end to end
+
+Session a7's third unit (after Part 389's I1 + B6 + J3). Numbered 393 on the
+cross-session reservation map (390 = the D1b session, 391 reserved by the G1
+session, 392 reserved by the M7 session) -- taking the next free number instead
+of the next sequential one is what keeps three sessions from the Part-collision
+trap this file's own header warns about.
+
+**Ask.** Continue non-conflicting progress.md tasks; I2 claimed on the board
+(1753adeb) after a claim race with a peer was arbitrated in my favor.
+
+**What was found (the real substance of I2).**
+
+- **Every filter control on the Audit Log page was dead.** AuditLog.tsx has
+  been sending `search`/`action`/`userId`/`startDate`/`endDate` since the
+  filters were built; compat.ts's GET /system/audit-logs read ONLY
+  page/pageSize; and `filtered = useMemo(() => logs, [logs])` meant no
+  client-side filtering existed either. Changing any filter refetched the same
+  unfiltered page. A second session (35) independently found the same bug
+  minutes later -- corroboration, and they handed over two extras (the
+  silent-empty catch; the missing entity control) before re-claiming M7.
+- **The handler's catch returned an empty 200** -- a database error rendered
+  as "no logs" with real-looking pagination: the same silent-empty failure
+  class as the Part-346 POS lot-lookup bug.
+- The action dropdown's vocabulary came from the visible page only, so
+  filtering by an action not on the current page was impossible even had the
+  server honored it.
+
+**What changed.**
+
+- `lib/auditLogQuery.ts` (new): pure WHERE builder matching the page's real
+  contract -- comma-joined multi-values for action/entity/userId
+  (toggleMultiValue's shape), case-insensitive matching, entity matches
+  `entity` OR legacy `table_name`, inclusive YYYY-MM-DD range on
+  date(created_at) (server truth, not device client_time), search LIKE over
+  the human-readable columns with %/_ escaped (a literal "100%" is findable).
+- compat.ts: applies the clause to the rows AND the COUNT (pagination agrees
+  with the filtered set), returns whole-table `filters.actions`/`filters.
+  entities` vocabularies alongside the existing users list, and the catch now
+  returns a 500 with the message -- letting the transport's local-mirror
+  fallback (and its "showing latest loaded data" messaging) do its designed
+  job instead of presenting an error as an empty trail.
+- AuditLog.tsx: new "Page / record type" (entity) multi-select filter section;
+  action/entity menus feed from the server vocabularies with the page-derived
+  fallback kept (a local-mirror answer carries no vocabularies -- keeping the
+  last good list beats emptying the menus mid-recovery); entity wired into
+  params, page-reset, Clear, and the active-filter count. The detail view
+  with the before->after field diff (auditLogFieldDiff) already existed and
+  is deliberately untouched.
+
+**Verified (really run).** `test-audit-log-filters-pure.cjs` 17/17 -- the
+COMPILED production module against the real 0001_init.sql audit_logs schema in
+better-sqlite3: multi-values, case-insensitivity, entity/table_name fallback,
+inclusive dates, wildcard escaping, Khmer search, AND-combination, pagination
+inside the filtered set; plus wiring pins (shared COUNT clause, whole-table
+vocabularies, silent-empty catch gone). Both `tsc --noEmit` clean;
+`auditLogFieldDiff.test.ts` and `check:source` (375 files) green.
+
+**Not done.** The D2-style one-row date-range control (today's range still
+derives from the year/month period filters) -- lands with D2 itself so the two
+pages share one control. Local-mirror fallback rows are unfiltered by design
+(offline path); the UI already flags partial data. Deploy (user).
