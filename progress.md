@@ -249,14 +249,14 @@ autocorrect — templates, imports, exports and generated files alike.*
   the type vocabulary in the frontend union, the form options, en+km labels AND
   routes/fees.ts's FEE_TYPES (without which normalizeFeeType would silently rewrite a
   saved 'expense' to 'other').
-- [ ] B9. **Old-system expenses → fees migration: PREPARED, blocked on permissions.**
-  `businessos-migration-aug28/expenses-fees-migration.sql` holds all 4,240 entries as
-  29 batched INSERTs (fee_type='expense', label = de-duplicated Khmer category,
-  created_by_name='Old system' as the idempotency marker). Expected results to verify
-  after running: **4,240 rows · SUM(amount_usd)=129,696.60 · SUM(amount_khr)=
-  82,419,900** — matching the source report's own grand total. Production fees table
-  measured EMPTY beforehand. Both the wrangler CLI write and the D1 MCP insert were
-  denied by the permission classifier, so the user runs one command (in the manifest).
+- [x] B9. **Old-system expenses are now cloudflare migration `0064_old_system_expenses.sql`
+  (Part 381)** — per the user: "make sure all are imported by migration… doing from
+  backend." The deploy's `migrate:remote` applies it; idempotent by construction (it
+  clears its own 'Old system'-marked rows first, so even a prior manual run cannot
+  double). Verified in the real harness: 65 migrations apply; **4,240 rows ·
+  SUM(amount_usd)=129,696.60 · SUM(amount_khr)=82,419,900 — expected == actual**,
+  equal to the source report's grand total. The standalone SQL was removed from the
+  pack; the manifest's Step 4c now just says deploy + the live verification query.
 
 - [~] B1. (11.26/5.1–5.3) Same-row stat label + info, portaled viewport-aware tooltip.
   **Dashboard `MiniStat`, Branches, Inventory, Returns landed this session (Part 370):**
@@ -595,6 +595,28 @@ deep-linkable tabs.*
 - [ ] P4. **Product name tag label.** Optional per-product short tag shown as a chip
   next to the name (a user's own memory aid), additive migration
   (`products.tag_label TEXT`), editable in the form, searchable and filterable.
+- [~] P7. **Identity rules + feature parity across ALL codepaths (user, Aug 28).**
+  Done (Part 381): the MANUAL product create/edit routes now enforce the identity
+  rule — same name + same non-empty barcode returns 409 `duplicate_product` with the
+  match (guard runs BEFORE the review queue so reviewers never approve twins; edits
+  that rename/re-barcode into a collision are judged too; no override flag — the rule
+  is absolute; `test-product-identity-guard-pure` proves the SQL against the real
+  schema + the wiring). **Open — the parity sweep:** every capability must exist on
+  every surface that plausibly needs it. Named example: POS quick-add creates plain
+  contacts while the full contact forms support multi-OPTION contacts (option rows,
+  serialized storage, pick-on-select — the POS picker already picks options, but
+  quick-add cannot create them). Sweep surface-by-surface (POS quick-adds, manual
+  add-stock vs import validation, receive-batch vs §12 rules, edit forms vs import
+  normalizers) and list every gap found as its own item before fixing.
+- [x] P8. **Cambodian phone normalization in the migration data (Part 381).** All
+  three sales files re-generated with the user's rule: restore the leading zero the
+  old system's Excel export ate, format `XXX XXX XXX` (9 digits) / `XXX XXX XXXX`
+  (10); garbage/partials preserved untouched. **10,330 numbers normalized** — and
+  this was a MATCHING fix, not cosmetics: production customers are 100%
+  leading-zero (measured: 3,143 nine-digit + 1,027 ten-digit), and the importer
+  matches digit sequences, so ~1,100 receipts' customers would have silently failed
+  the phone-first match. Suppliers: the PO export carries no phones (nothing to
+  normalize; add by hand after import).
 - [x] P5. **Standing decision — delivery is DELIVERY, never a category/product.** The
   old system modeled delivery fees as a "Delivery" category line item (visible in its
   exports); this system records them only as the sale's delivery fields. The sales

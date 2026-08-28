@@ -7881,3 +7881,42 @@ guard proves every remaining test file is chained.
 **Not done.** Deploy (user; ships everything since Part 373's); P3/P4/P6, the K6
 preset bundle + batches/branch-stock view rows, G1 implementation, and the ordered
 master plan remainder.
+
+## Part 381 (chat, Aug 28 2026) — identity rule on the manual path, phones fixed for matching, expenses become migration 0064
+
+**Ask.** Identity rules + every function applied across ALL codepaths, consistently;
+POS quick-add should support contact OPTIONS like the full forms (one example of a
+parity class); migration phone numbers with the leading zero, formatted
+XXX XXX XXX / XXX XXX XXXX (same for suppliers); move the direct data migrations
+into the cloudflare migrations so the backend applies them.
+
+**What changed.**
+- `a39ea7d5`: the 4,240 old-system expenses are now cloudflare migration
+  `0064_old_system_expenses.sql` (idempotent via a delete-own-marker preamble),
+  applied by migrate:remote on deploy — replaces the standalone SQL and the blocked
+  manual command entirely. Harness-verified: 65 migrations apply; marker rows =
+  exactly 4,240 / USD 129,696.60 / KHR 82,419,900 (expected == actual == the source
+  report's grand total). Manifest Step 4c rewritten.
+- Phone normalization across the three sales files: **10,330 numbers** gained their
+  leading zero + `XXX XXX XXX(X)` spacing. Measured first: production customers are
+  100% leading-zero (3,143 nine-digit + 1,027 ten-digit) while the old export was
+  dominated by zero-stripped 8/9-digit values — without this, ~1,100 receipts'
+  customers would have silently failed the phone-first match. Garbage/partials
+  preserved untouched; xlsx twins regenerated; full validation suite re-passed.
+  Suppliers: the PO export carries no phones — nothing to normalize.
+- `5a1a7ff7`: the identity rule now guards MANUAL product create/edit — 409
+  `duplicate_product` on same name + same non-empty barcode, before the review
+  queue, edits judged on their effective next identity, no override; child rows
+  (same name, different barcode) untouched. New pure test proves the SQL against
+  the real schema + the wiring order.
+- progress.md: P7 (the parity sweep, with the POS quick-add contact-OPTIONS gap as
+  the named first item), P8 (phones), B9 closed as migration 0064.
+
+**Verified.** Backend sweep **0 failures** (with 0064 loading into every harness DB
+and the new guard test); frontend chain green + build; both typechecks; migration
+harness expected==actual on the expense sums; production phone-shape measurement by
+live query (read-only).
+
+**Not done.** Deploy (now also carries 0064 — the expense history arrives with it);
+the P7 parity sweep implementation (starting with POS quick-add options); P3/P4/P6,
+K6 view rows, G1, and the ordered remainder.
