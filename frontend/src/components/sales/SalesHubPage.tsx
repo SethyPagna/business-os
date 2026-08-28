@@ -37,15 +37,17 @@ function initialSection(canSales: boolean, canReturns: boolean, canFees: boolean
 
 export default function SalesHubPage() {
   const { t, getPermissionTier } = useApp()
+  // t() returns the KEY on a miss (stale/failed pack) -- guard so chips fall back to readable English, never snake_case keys.
+  const trh = (key: string, fallback: string): string => { const v = t(key); return v && v !== key ? v : fallback }
   const canSales = getPermissionTier('sales') !== 'none'
   const canReturns = getPermissionTier('returns') !== 'none'
   const canFees = getPermissionTier('fees') !== 'none'
   const [section, setSection] = useState<SalesHubSection>(() => initialSection(canSales, canReturns, canFees))
 
   const tabs: Array<{ id: SalesHubSection; label: string; icon: typeof BadgeDollarSign; allowed: boolean; tone: string }> = [
-    { id: 'sales', label: t('sales') || 'Sales', icon: BadgeDollarSign, allowed: canSales, tone: 'text-blue-600' },
-    { id: 'returns', label: t('returns') || 'Returns', icon: RotateCcw, allowed: canReturns, tone: 'text-amber-600' },
-    { id: 'fees', label: t('fees') || 'Fees', icon: HandCoins, allowed: canFees, tone: 'text-emerald-600' },
+    { id: 'sales', label: trh('sales', 'Sales'), icon: BadgeDollarSign, allowed: canSales, tone: 'text-blue-600' },
+    { id: 'returns', label: trh('returns', 'Returns'), icon: RotateCcw, allowed: canReturns, tone: 'text-amber-600' },
+    { id: 'fees', label: trh('fees', 'Fees'), icon: HandCoins, allowed: canFees, tone: 'text-emerald-600' },
   ]
   const visibleTabs = tabs.filter((tab) => tab.allowed)
 
@@ -70,7 +72,7 @@ export default function SalesHubPage() {
           </div>
         </div>
       ) : null}
-      <Suspense fallback={<p className="p-4 text-sm text-gray-500">{t('loading') || 'Loading'}...</p>}>
+      <Suspense fallback={<p className="p-4 text-sm text-gray-500">{trh('loading', 'Loading')}...</p>}>
         {section === 'returns' && canReturns ? <ReturnsSection />
           : section === 'fees' && canFees ? <FeesSection />
           : canSales ? <SalesSection />
