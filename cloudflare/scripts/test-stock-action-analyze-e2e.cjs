@@ -112,11 +112,11 @@ function buildCrossWindowCsv() {
   return [header, ...rows].map((row) => row.map(csvCell).join(',')).join('\n') + '\n'
 }
 
-async function seedJob(db, id, csvSize, cancelRequested = 0) {
+async function seedJob(db, id, csvSize, cancelRequested = 0, mode = 'direct') {
   await db.prepare(`INSERT INTO import_jobs
       (id, type, status, phase, policy_json, cancel_requested, created_at, updated_at)
     VALUES (@id, 'stock_actions', 'queued', 'queued', @policy, @cancel, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`)
-    .run({ id, policy: JSON.stringify({ stock_action_mode: 'direct' }), cancel: cancelRequested })
+    .run({ id, policy: JSON.stringify({ stock_action_mode: mode }), cancel: cancelRequested })
   await db.prepare(`INSERT INTO import_job_files (job_id, kind, stored_path, original_name, byte_size)
     VALUES (@id, 'csv', 'imports/stock-actions.csv', 'stock-actions.csv', @size)`).run({ id, size: csvSize })
 }
@@ -207,14 +207,21 @@ async function drainAnalyze(env, jobId) {
   assert.strictEqual(assets.stats().rangedReads, readsBeforeCancel)
   assert.strictEqual((await db.prepare(`SELECT COUNT(*) AS n FROM import_job_source_rows WHERE job_id = @id`).get({ id: 'analyze-cancelled' })).n, 0)
 
-  // The analyzer rejects oversized stock sheets before classification, so
-  // an operator cannot spend time reviewing a job the Free-plan-safe apply
-  // path will refuse later. A single giant sale group cannot bypass this by
-  // counting as only one business unit.
+  // The analyzer rejects oversized RECONCILE stock sheets before
+  // classification, so an operator cannot spend time reviewing a job the
+  // apply path will refuse later (reconcile's delta math needs one live
+  // snapshot, so its 480-row cap is real). DIRECT mode is different since
+  // Part 388: its M4 continuation engine handles up to 25,000 rows across
+  // windows, so the same 481-row file must sail through analyze -- the
+  // 21k-row history migration file depends on exactly that.
   const header = 'name,barcode,shop,warehouse,date,action,selling_price,vip_price,cost_price,batch'
   const oversizedCsv = `${header}\n${Array.from({ length: 481 }, (_, i) => `Raw ${i},R${i},1,,08/27/2026,add,5,,2,B${i}`).join('\n')}\n`
   assets.replace(oversizedCsv)
-  await seedJob(db, 'analyze-oversized', Buffer.byteLength(oversizedCsv))
+  await seedJob(db, 'analyze-oversized-direct', Buffer.byteLength(oversizedCsv), 0, 'direct')
+  await drainAnalyze(env, 'analyze-oversized-direct')
+  const directOversized = await db.prepare(`SELECT status, phase FROM import_jobs WHERE id = @id`).get({ id: 'analyze-oversized-direct' })
+  assert.strictEqual(directOversized.status, 'awaiting_review', '481 direct rows must reach review (continuation engine handles them)')
+  await seedJob(db, 'analyze-oversized', Buffer.byteLength(oversizedCsv), 0, 'reconcile')
   await assert.rejects(() => drainAnalyze(env, 'analyze-oversized'), /481 rows.*at most 480 rows/)
   const oversized = await db.prepare(`SELECT status, phase, last_error, lease_token FROM import_jobs WHERE id = @id`).get({ id: 'analyze-oversized' })
   assert.strictEqual(oversized.status, 'failed')
