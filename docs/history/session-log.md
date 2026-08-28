@@ -9226,3 +9226,13 @@ DOM tools. What the sweep proved, found, and fixed:
   invalidates loaded chunk hashes (reload) and wrangler dev's asset
   snapshot (restart); the sweep's marker setting was restored and the local
   test customer left in the dev D1.
+
+## Part 399 third addendum (chat, Aug 28 2026) — §6.3 fixed; Phase G fully closed
+
+a7's live sweep reproduced §6.3 with timings (stale at +30s, fresh at
++66s) and handed it over: routes/settings.ts never bumped any cache
+version and portalCacheVersion keyed on 'products' alone, so every
+portal-editor save — the Google-Maps embed included — served stale
+config until the TTL died. Fixed both halves (settings bumps its own
+version; the portal key composes products+settings), regression-pinned.
+Phase G (G1-G5, every §6 row) is now entirely closed.
