@@ -10469,3 +10469,47 @@ live summary, Z4 dual receipt preview, Z5 hamburger, Z7 Khmer contrast, Z8
 Credit, Z9 rename, Z10 "Reconcile Revenue" -- needs its definition, now
 interacts with the 8-card layout), plus Y12 the recordable per-currency sales
 change. Needs deploy (migrations 0077/0078/0079 + these frontend changes).
+
+## Part 429 (Aug 29 2026, session business-os-v1-43) — Z13: even out the Branch page stat drills
+
+**Ask.** "do the same for the branch page stats, then continue."
+
+**What changed.** The 6 Branch/Inventory stat cards (in Inventory.tsx, hosted on
+the Branches hub's Stats & Branches chip) had lopsided drills: Stock Value 2,
+Revenue 4, Discounts 3, Fees 3, Returns 10 (three stacked sections -- Net sold,
+Customer returns, Supplier returns). Evened to ~4, mirroring the Dashboard pass:
+- **Stock Value** 2->4: + Avg value/product (totalValue/totalProducts), Low
+  stock, Out of stock; dropped the bare "Products" repeat.
+- **Discounts** 3->4: + Discount rate (total discounts / gross, gross = revenue
+  + discounts since revenue is net).
+- **Fees**: relabeled the mislabeled "Transactions" row to "Deliveries" (it is
+  taxDelivery.deliveryCount, not a transaction count); kept at 3.
+- **Returns** 10->4: one balanced section (Customer returns, Refunded,
+  Restocked, Supplier returns(N)->loss). Net sold + the items-sold math stay on
+  the card sub line and in the info-tooltip formula; supplier count folds into
+  its loss line; supplier compensation dropped.
+- **Revenue** unchanged (4).
+All lang keys already existed (avg_value_per_product / discount_rate added with
+Part 428; deliveries / customer_returns pre-existing).
+
+**Parallel-sessions handling.** Inventory.tsx carried a peer session's
+uncommitted F3-slice-2 work (minimizedWork import + fast-stockin restore effect
++ onMinimize prop). Committing the whole file would have either broken the build
+(the untracked minimizedWork.ts import) or absorbed their entire in-progress
+multi-file feature. Isolated instead: saved their patch, reverse-applied it to
+strip their hunks (disjoint from the stats section), committed ONLY the stat
+edits, then forward-applied their patch to restore their uncommitted work on top
+of the commit. Verified the remaining working-tree diff is EXACTLY their 3 hunks
+and none of my stat edits (mine are committed).
+
+**Verified.** Inventory.tsx typechecks clean (the only 3 frontend tsc errors are
+the peer's ProductForm/Products onMinimize, in their uncommitted files);
+avg_value_per_product present in the built Inventory-*.js bundle; live on
+worker-dev the 6 cards render (Products, Stock Value, Revenue, Discounts, Fees,
+Returns) with the Returns "Net Sold" sub preserved and the branch list below.
+
+**Not done.** The remaining Phase Z (Z1a display rule, Z2 discount decouple, Z3a
+live summary, Z4 dual receipt preview, Z5 hamburger, Z7 Khmer contrast, Z8
+Credit, Z9 rename, Z10 "Reconcile Revenue" -- needs its definition), Y12 the
+recordable per-currency sales change, and the peer's F3-slice-2 (theirs). Needs
+deploy (migrations 0077/0078/0079 + the frontend changes).

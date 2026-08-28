@@ -1715,6 +1715,20 @@ other" with the Phase-Y items.*
   the derivable net-after-refunds); Revenue + Delivery unchanged.
   Duplicated headline-as-detail lines removed throughout. tsc clean,
   dashboard test passes, 8 cards render live.
+- [x] Z13. **Same even-distribution pass on the Branch page stats (Part 429
+  — SHIPPED, needs deploy; user, Aug 29: "do the same for the branch page
+  stats").** The 6 Branch/Inventory cards' drills were lopsided (Stock
+  Value 2, Revenue 4, Discounts 3, Fees 3, Returns **10** across 3 stacked
+  sections). Now: Stock Value 2→4 (+Avg value/product, Low, Out — mirrors
+  Dashboard); Discounts 3→4 (+Discount rate); Fees relabeled the mislabeled
+  'Transactions' row to 'Deliveries' (it was the delivery count); Returns
+  10→4 in ONE section (Customer returns / Refunded / Restocked / Supplier
+  returns(N)→loss) with Net Sold + items-sold math kept on the card sub and
+  info formula; Revenue unchanged. Committed in ISOLATION from a peer
+  session's uncommitted F3-slice-2 work in the same Inventory.tsx (via
+  reverse-then-reapply of their patch — their work stays uncommitted and
+  untouched, per parallel-sessions protocol). tsc clean, key present in the
+  built Inventory bundle, 6 cards + branch list render live.
 
 ### Flagged, not guessed (Golden Rule 7)
 
