@@ -1485,7 +1485,8 @@ those until that unit commits.*
   A row error naming "product name 48" with an uncategorized bucket appeared
   during the products import. Reproduce with the pack, find what the engine did
   (fabricated name? counter leak?), fix + test.
-- [~] Y6 *(MEASURED, Part 425 — needs the user, not code yet: production
+- [x] Y6 *(CLOSED per the user, Aug 28 follow-up: "no need" — no image
+  wiring work. Measurement kept below for the record.)* *(MEASURED, Part 425 — needs the user, not code yet: production
   holds 6,031 active products, 34 with an image, the file library holds
   only 51 assets, and the import job carried 0 uploaded images and 0
   image matches. The wiring worked for what existed — the missing piece
@@ -1541,9 +1542,14 @@ those until that unit commits.*
 - [ ] Y11. **POS delivery "paid by" block: too much text, confusing.** Redesign
   compact (the paid-by choice + cost stay, prose goes). Membership explanation
   sentence becomes an InfoHint tooltip instead of inline text.
-- [ ] Y12. **"Change did not link to the fees page" — FLAGGED, needs the user.**
-  Reading unclear: cash change on POS payment? the cancel lost-fee link? Ask
-  before building. (Golden Rule 7.)
+- [ ] Y12. **POS sales CHANGE: explicit, recordable, per-currency (user
+  clarified Aug 28 follow-up — "the sales change").** The change given back
+  is sometimes KHR + USD mixed, sometimes one currency; the cashier must be
+  able to INPUT what was actually handed back (prefilled from the computed
+  overpay, editable per currency) and it must be RECORDED on the sale — the
+  change is often given in a DIFFERENT currency than the payment (a repeat
+  ask). Make the change display clear in cart + receipt. (The original
+  "link to fees page" phrasing is superseded by this reading.)
 - [ ] Y13. **Products page: kill the "Search & Filters" SectionCard wrapper**
   (screenshot 2). Search row becomes a plain page-level control (no folded
   card, no wrapper title); the "Created" filter moves OUT of the filter menu to
@@ -1582,6 +1588,69 @@ those until that unit commits.*
   large screens). Compact form: `‹ page (1–20) / totalPages ›` where the page
   number is editable in place (no size growth) and clicking "(1–20)" opens the
   per-page options (20/30/50/100…). [Products part HOT-6e]
+
+### Phase Z — Aug-28 eighteenth batch (session 43): returns-to-same-batch + the ten-point triage list
+
+*Follow-up to Phase Y: the user answered the open questions (Y6 closed "no
+need"; Y12 clarified as the recordable per-currency sales change) and added a
+correctness bug plus a pasted ten-point triage list to record "next to each
+other" with the Phase-Y items.*
+
+- [ ] Z0. **Returns + cancels must restore stock to the SAME batch the sale
+  took it from — never create a new batch. "Currently it is wrong. fix it."**
+  Sale items carry batch_id; every restoring transition (return with
+  restock, cancel, un-cancel's inverse) must move quantity back into exactly
+  that lot. ALSO a data repair: "make the one i see in sales/returns
+  currently go correctly" — find the restorations that already landed in
+  wrong/new batches and move them back to the originating lot.
+- [ ] Z1. **Stats not updating / inconsistent data.** (a) Products page shows
+  batch "08/28/2026" while batch details show "08242026" — audit the
+  list-vs-detail data path (date-format mismatch or stale cache; partly the
+  Y7/0077 received_at repair, partly lot_code MMDDYYYY being rendered where a
+  date belongs — decide ONE display rule: dates render mm/dd/yyyy, lot codes
+  render as codes, never interchanged). (b) POS: selecting a branch/warehouse
+  sometimes shows 0 for product groups/standalone items even when stock
+  exists — check the branch-filter query / per-branch quantity resolution.
+- [ ] Z2. **Cart: decouple product-level discount from the selling-price
+  input.** Applying a discount currently rewrites the price field too; the
+  price input must stay manually editable, the discount affects only the line
+  total (price × qty − discount). Receipts show the discount explicitly as
+  `(-$x.xx)` per product line.
+- [ ] Z3. **Sales page: live summary + Print column.** (a) The group summary
+  row ("4 Sales | $0.00 Revenue | 0 completed") doesn't refresh when a sale's
+  status changes — recompute on status mutation (the page already reloads
+  rows; the summary must derive from the same refreshed data). (b) Rename the
+  action column header to "Print".
+- [ ] Z4. **Receipt SETTINGS preview: enabling 80×50 must not replace the
+  other preview** — show both formats side-by-side or with a toggle in the
+  settings preview area (the receipt VIEW itself already stacks both since
+  B5; this is the settings-page preview parity).
+- [ ] Z5. **Global UI pass: contrast + button colors + hamburger menu.**
+  Increase contrast on critical icons (close ✕, currency symbols); Refresh/
+  Update actions blue, Exit red; introduce a hamburger menu housing Settings
+  (incl. Receipt Settings moved into the main Settings page), Update, Exit.
+  Larger item — schedule as its own unit.
+- [ ] Z6. **OTP enable broken + buried under the profile page — HIGH
+  priority.** The OTP dialog renders under/inside the profile surface and
+  vanishes when the profile closes; fix the modal layering (portal to body
+  like Modal/InfoHint) AND verify the enable/validation flow end to end.
+- [ ] Z7. **Stats & Branch section: keep only the 6 stats, cut the redundant
+  "original branch" stats, tighten the spacing between stats and branch
+  list, and make Khmer text larger + darker (grey-on-light fails contrast).**
+- [ ] Z8. **POS payment: explicit Credit / Awaiting Payment / Done choices in
+  the payment area**, and for awaiting-payment sales an "Edit Payments"
+  affordance to add/modify payment entries later (Y10 shipped the
+  completion-time entry; this extends to editing and the explicit Credit
+  option — define what Credit records vs awaiting_payment before building).
+- [ ] Z9. **POS: rename "Done - Delivery" to "Complete Sale"** with an
+  InfoHint summarizing the stock consequences of each status (held/locked vs
+  deducted awaiting delivery, etc.) — concise, no inline prose (ui-density
+  rule).
+- [ ] Z10. **Dashboard vs Branch stats mismatch + "Reconcile Revenue".**
+  Reconcile the two pages' numbers to the shared kernel (single-source rule),
+  then add "Reconcile Revenue" as an 8th Dashboard stat while Branch keeps
+  its 6 operational stats. NEEDS the user first: the exact definition of
+  "Reconcile Revenue" (what it reconciles against what).
 
 ### Flagged, not guessed (Golden Rule 7)
 
