@@ -1038,7 +1038,6 @@ export default function Dashboard() {
   const revenueFormulaText = translateOr('dashboard_formula_revenue', 'Net revenue = Gross sales - Discounts - Refunds')
   const collectedFormulaText = translateOr('dashboard_formula_collected_total', 'Collected total = Net revenue + Tax + Delivery')
   const storeDiscountFormulaText = translateOr('dashboard_formula_store_discounts', 'Store discounts are the cashier-entered sale discounts and product promotions.')
-  const cogsFormulaText = translateOr('dashboard_formula_cogs', 'COGS excludes quantities restored by restocked returns')
   const profitFormulaText = translateOr('dashboard_formula_profit', 'Profit = Net revenue - COGS - Store-paid delivery')
   const avgOrderFormulaText = translateOr('dashboard_formula_avg_order', 'Average order = Net revenue / transaction count')
   const returnsFormulaText = translateOr('dashboard_formula_returns', 'Returns decrease net revenue and loyalty points')
@@ -1125,7 +1124,13 @@ export default function Dashboard() {
     },
     {
       id: 'revenue',
-      info: translateOr('dash_info_revenue', "Money actually kept from sales in this period: gross sales, minus discounts and refunds."),
+      // Part 388: expressive/expression-based info -- the FORMULA with this
+      // period's real numbers substituted, not prose alone. COGS is merged
+      // into this card (its standalone card showed a single row).
+      info: `${translateOr('dash_info_revenue', "Money actually kept from sales in this period: gross sales, minus discounts and refunds.")}
+
+${translateOr('revenue_short', 'Revenue')} ${fmtUSD(aRevenue)} = ${translateOr('gross_revenue', 'Gross')} ${fmtUSD(aGrossSales)} − ${translateOr('discounts', 'Discounts')} ${fmtUSD(aDiscounts)}
+${translateOr('gross_profit', 'Gross profit')} ${fmtUSD(aRevenue - aCost)} = ${translateOr('revenue_short', 'Revenue')} ${fmtUSD(aRevenue)} − ${translateOr('cogs', 'COGS')} ${fmtUSD(aCost)}`,
       label: translateOr('revenue', 'Revenue'),
       value: fmtUSD(aRevenue),
       sub: `${grossShortLabel} ${fmtUSD(aGrossSales)}`,
@@ -1133,6 +1138,8 @@ export default function Dashboard() {
       trend: calcTrend(aRevenue, aPrevRevenue),
       details: [
         { label: translateOr('revenue', 'Net revenue'), value: fmtUSD(aRevenue) },
+        { label: translateOr('cogs', 'COGS'), value: fmtUSD(aCost) },
+        { label: `${translateOr('gross_profit', 'Gross profit')} (= ${translateOr('revenue_short', 'Revenue')} − ${translateOr('cogs', 'COGS')})`, value: fmtUSD(aRevenue - aCost) },
         { label: translateOr('gross_revenue', 'Gross revenue'), value: fmtUSD(aGrossSales) },
         { label: translateOr('discounts', 'Discounts'), value: fmtUSD(aDiscounts) },
         { label: translateOr('total_refunded', 'Refunds'), value: fmtUSD(aRefundUsd) },
@@ -1160,19 +1167,15 @@ export default function Dashboard() {
         { label: translateOr('membership_discounts', 'Membership discounts'), value: fmtUSD(aMemberDiscounts) },
       ],
     },
-    {
-      id: 'cogs',
-      info: translateOr('dash_info_cogs', "What the items you sold in this period originally cost you to buy."),
-      label: translateOr('cogs', 'COGS'),
-      value: fmtUSD(aCost),
-      color: 'text-red-600',
-      details: [
-        { label: translateOr('cogs', 'COGS'), value: fmtUSD(aCost) },
-      ],
-    },
+    // The standalone COGS card is gone (Part 388: it held a single row --
+    // "cogs only shows one stat inside"); COGS now lives inside Revenue
+    // above and in Profit's own formula below.
     {
       id: 'profit',
-      info: translateOr('dash_info_profit', "What is left after subtracting what the goods cost you from what you kept."),
+      info: `${translateOr('dash_info_profit', "What is left after subtracting what the goods cost you from what you kept.")}
+
+${translateOr('gross_profit', 'Gross profit')} ${fmtUSD(aProfit)} = ${translateOr('revenue_short', 'Revenue')} ${fmtUSD(aRevenue)} − ${translateOr('cogs', 'COGS')} ${fmtUSD(aCost)} − ${translateOr('store_paid_delivery', 'Store-paid delivery')} ${fmtUSD(aStoreDelivery)}
+${translateOr('profit_margin', 'Margin')} = ${translateOr('gross_profit', 'Profit')} ÷ ${translateOr('revenue_short', 'Revenue')} = ${aRevenue > 0 ? ((aProfit / aRevenue) * 100).toFixed(2) : '0.00'}%`,
       label: translateOr('gross_profit', 'Gross Profit'),
       value: fmtUSD(aProfit),
       color: aProfit >= 0 ? 'text-blue-600' : 'text-red-600',
@@ -1199,7 +1202,12 @@ export default function Dashboard() {
     },
     {
       id: 'returns',
-      info: translateOr('dash_info_returns', "Items customers brought back in this period, and what you refunded for them."),
+      // Part 388: the net-sold story merges into Returns -- what left the
+      // shop, minus what came back, expressed as the formula with this
+      // period's numbers.
+      info: `${translateOr('dash_info_returns', "Items customers brought back in this period, and what you refunded for them.")}
+
+${translateOr('net_revenue_after_refunds', 'Net after refunds')} ${fmtUSD(aRevenue - aRefundUsd)} = ${translateOr('revenue_short', 'Revenue')} ${fmtUSD(aRevenue)} − ${translateOr('total_refunded', 'Refunded')} ${fmtUSD(aRefundUsd)}`,
       label: translateOr('returns_count', 'Returns'),
       value: aReturns,
       color: aReturns > 0 ? 'text-orange-600' : 'text-gray-500',
@@ -1208,6 +1216,7 @@ export default function Dashboard() {
         { label: translateOr('returns_count', 'Returns'), value: aReturns },
         { label: translateOr('total_refunded', 'Refunded'), value: fmtUSD(aRefundUsd) },
         { label: translateOr('items', 'Items'), value: aItemsRet },
+        { label: `${translateOr('net_revenue_after_refunds', 'Net after refunds')} (= ${translateOr('revenue_short', 'Revenue')} − ${translateOr('total_refunded', 'Refunded')})`, value: fmtUSD(aRevenue - aRefundUsd) },
         { label: translateOr('supplier_returns', 'Supplier returns'), value: aSupplierReturns },
         { label: translateOr('business_loss', 'Business loss'), value: fmtUSD(aSupplierLossUsd) },
       ],
@@ -1232,7 +1241,6 @@ export default function Dashboard() {
     aTax,
     aTxCount,
     avgOrderFormulaText,
-    cogsFormulaText,
     collectedExampleText,
     collectedFormulaText,
     fmtUSD,
