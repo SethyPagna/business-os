@@ -49,6 +49,7 @@ interface SaleDetail {
   tax_usd?: number | string | null
   subtotal_usd?: number | string | null
   amount_paid_usd?: number | string | null
+  amount_paid_khr?: number | string | null
   change_usd?: number | string | null
   cashier_name?: string | null
   payment_method?: string | null
@@ -74,7 +75,9 @@ interface SaleDetailModalProps {
   sale?: SaleDetail | null
   settings?: unknown
   onClose: () => void
-  onStatusChange?: (saleId: string | number, status: string, notes: string) => Promise<unknown> | unknown
+  // recordHistory/extra mirror Sales.tsx's handleStatusChange -- `extra`
+  // carries the Y10 payment payload when completing an awaiting-payment sale.
+  onStatusChange?: (saleId: string | number, status: string, notes: string, recordHistory?: boolean, extra?: Record<string, unknown> | null) => Promise<unknown> | unknown
   onAttachMembership?: (saleId: string | number, membershipNumber: string) => Promise<boolean | unknown> | boolean | unknown
   onPrint?: (sale: SaleDetail) => void
   t: TranslateFn
@@ -127,6 +130,15 @@ export default function SaleDetailModal({
   const [newStatus, setNewStatus] = useState(sale?.sale_status || 'completed')
   const [statusNotes, setStatusNotes] = useState('')
   const [statusSaving, setStatusSaving] = useState(false)
+  // Y10: payment entered when completing an awaiting-payment sale. USD
+  // prefills with the sale total (the common exact-payment case is one tap).
+  const [payMethod, setPayMethod] = useState('Cash')
+  const [payUsd, setPayUsd] = useState(() => {
+    const total = toNumber(sale?.total_usd || sale?.total)
+    return total > 0 ? total.toFixed(2) : ''
+  })
+  const [payKhr, setPayKhr] = useState('')
+  const [payError, setPayError] = useState('')
   const [membershipNumber, setMembershipNumber] = useState(sale?.customer_membership_number || '')
   const [membershipSaving, setMembershipSaving] = useState(false)
   const isKhmer = /[\u1780-\u17FF]/.test(t('cancel') || '')
@@ -152,13 +164,40 @@ export default function SaleDetailModal({
   const taxUsd = toNumber(sale.tax_usd)
   const subtotalUsd = toNumber(sale.subtotal_usd)
   const amountPaidUsd = toNumber(sale.amount_paid_usd)
+  const amountPaidKhr = toNumber(sale.amount_paid_khr)
   const changeUsd = toNumber(sale.change_usd)
+
+  // Y10: an awaiting-payment sale with nothing recorded gets its payment
+  // entered HERE, at completion time -- the whole point of the status.
+  const needsPaymentEntry = currentStatus === 'awaiting_payment'
+    && (newStatus === 'completed' || newStatus === 'awaiting_delivery')
+    && amountPaidUsd <= 0 && amountPaidKhr <= 0
 
   const handleStatusUpdate = async (): Promise<void> => {
     if (!onStatusChange || newStatus === currentStatus) return
+    let extra: Record<string, unknown> | null = null
+    if (needsPaymentEntry) {
+      const method = payMethod.trim()
+      const paidUsdNum = parseFloat(payUsd) || 0
+      const paidKhrNum = parseFloat(payKhr) || 0
+      if (!method) {
+        setPayError(translateOr('payment_method_required', 'Enter the payment method.', 'បញ្ចូលវិធីទូទាត់។'))
+        return
+      }
+      if (paidUsdNum <= 0 && paidKhrNum <= 0) {
+        setPayError(translateOr('payment_amount_required', 'Enter the amount received.', 'បញ្ចូលចំនួនទឹកប្រាក់ដែលបានទទួល។'))
+        return
+      }
+      setPayError('')
+      extra = {
+        payment_method: method,
+        amount_paid_usd: paidUsdNum,
+        amount_paid_khr: paidKhrNum,
+      }
+    }
     setStatusSaving(true)
     try {
-      await onStatusChange(sale.id, newStatus, statusNotes)
+      await onStatusChange(sale.id, newStatus, statusNotes, true, extra)
       onClose()
     } finally {
       setStatusSaving(false)
@@ -461,6 +500,50 @@ export default function SaleDetailModal({
                   />
                 </div>
               </div>
+              {needsPaymentEntry ? (
+                <div className="mt-3 rounded-xl border border-emerald-200 bg-emerald-50/60 p-3 dark:border-emerald-800/70 dark:bg-emerald-950/20">
+                  <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-emerald-700 dark:text-emerald-300">
+                    {translateOr('record_payment', 'Record payment', 'កត់ត្រាការទូទាត់')}
+                  </div>
+                  <div className="grid gap-2 sm:grid-cols-3">
+                    <div>
+                      <label htmlFor="sale-pay-method" className="mb-1 block text-xs text-gray-400">
+                        {t('payment_method') || 'Payment method'}
+                      </label>
+                      <input
+                        id="sale-pay-method"
+                        className="input h-10 text-sm"
+                        value={payMethod}
+                        onChange={(event) => setPayMethod(event.target.value)}
+                        placeholder="Cash / ABA / Wing"
+                      />
+                    </div>
+                    <div>
+                      <label htmlFor="sale-pay-usd" className="mb-1 block text-xs text-gray-400">USD</label>
+                      <input
+                        id="sale-pay-usd"
+                        className="input h-10 text-sm"
+                        inputMode="decimal"
+                        value={payUsd}
+                        onChange={(event) => setPayUsd(event.target.value)}
+                        placeholder="0.00"
+                      />
+                    </div>
+                    <div>
+                      <label htmlFor="sale-pay-khr" className="mb-1 block text-xs text-gray-400">KHR</label>
+                      <input
+                        id="sale-pay-khr"
+                        className="input h-10 text-sm"
+                        inputMode="numeric"
+                        value={payKhr}
+                        onChange={(event) => setPayKhr(event.target.value)}
+                        placeholder="0"
+                      />
+                    </div>
+                  </div>
+                  {payError ? <p className="mt-2 text-xs text-red-600 dark:text-red-400">{payError}</p> : null}
+                </div>
+              ) : null}
               <button
                 type="button"
                 className="btn-primary mt-3 w-full text-sm"

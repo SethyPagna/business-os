@@ -406,9 +406,15 @@ app.post('/', async (c) => {
       }))
       .filter((detail) => detail.method && (detail.amount_usd > 0 || detail.amount_khr > 0))
     : []
+  // Y10: an awaiting-payment sale with nothing paid records NO payment
+  // method -- the old 'Cash' fallback fabricated a method for a sale whose
+  // whole point is deciding the payment later (it is entered when the sale
+  // is completed on the Sales page, PATCH /:id/status below).
   const effectivePaymentDetails = paymentDetails.length
     ? paymentDetails
-    : [{ method: String(body.payment_method || 'Cash').trim().slice(0, 80) || 'Cash', amount_usd: amountPaidUsd, amount_khr: amountPaidKhr }]
+    : saleStatus === 'awaiting_payment' && amountPaidUsd <= 0 && amountPaidKhr <= 0
+      ? []
+      : [{ method: String(body.payment_method || 'Cash').trim().slice(0, 80) || 'Cash', amount_usd: amountPaidUsd, amount_khr: amountPaidKhr }]
   const paymentMethod = Array.from(new Set(effectivePaymentDetails.map((detail) => detail.method))).join(' + ')
   const receiptNumber = body.receipt_number?.trim() || `RCP-${Date.now()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`
 
@@ -779,6 +785,12 @@ app.patch('/:id/status', async (c) => {
     cancel_fee_usd?: number
     cancel_fee_khr?: number
     cancel_fee_note?: string
+    // Y10: payment recorded at completion time for a sale that was created
+    // as awaiting_payment with no method (see POST / above).
+    payment_method?: string
+    payment_details?: Array<{ method?: string; amount_usd?: number | string; amount_khr?: number | string }>
+    amount_paid_usd?: number | string
+    amount_paid_khr?: number | string
     [key: string]: unknown
   }>().catch(() => ({} as Record<string, unknown>))
   const saleStatus = String(body.sale_status || '')
@@ -915,6 +927,57 @@ app.patch('/:id/status', async (c) => {
   if (body.notes !== undefined) {
     updates.push('notes = @notes')
     updateParams.notes = body.notes
+  }
+
+  // Y10: the payment for an awaiting-payment sale is decided when it is
+  // completed -- accept it here, on exactly that transition. Same
+  // normalization rules as POST /. Payment fields on any other transition
+  // are refused rather than silently dropped.
+  const paymentFieldsSent = body.payment_method !== undefined
+    || body.payment_details !== undefined
+    || body.amount_paid_usd !== undefined
+    || body.amount_paid_khr !== undefined
+  if (paymentFieldsSent) {
+    const isDeferredPaymentSettle = oldStatus === 'awaiting_payment'
+      && (saleStatus === 'completed' || saleStatus === 'awaiting_delivery')
+    if (!isDeferredPaymentSettle) {
+      return c.json({ error: 'Payment can only be recorded when completing an awaiting-payment sale.' }, 400)
+    }
+    const paidUsd = round2(Math.max(0, Number(body.amount_paid_usd) || 0))
+    const paidKhr = Math.round(Math.max(0, Number(body.amount_paid_khr) || 0))
+    const details = Array.isArray(body.payment_details)
+      ? body.payment_details
+        .slice(0, 12)
+        .map((detail) => ({
+          method: String(detail?.method || '').trim().slice(0, 80),
+          amount_usd: round2(Math.max(0, Number(detail?.amount_usd) || 0)),
+          amount_khr: Math.round(Math.max(0, Number(detail?.amount_khr) || 0)),
+        }))
+        .filter((detail) => detail.method && (detail.amount_usd > 0 || detail.amount_khr > 0))
+      : []
+    const effectiveDetails = details.length
+      ? details
+      : [{ method: String(body.payment_method || 'Cash').trim().slice(0, 80) || 'Cash', amount_usd: paidUsd, amount_khr: paidKhr }]
+    const methodSummary = Array.from(new Set(effectiveDetails.map((detail) => detail.method))).join(' + ')
+    const rate = Number(sale.exchange_rate) > 0 ? Number(sale.exchange_rate) : 4100
+    const paidCombinedUsd = paidUsd + paidKhr / rate
+    const overpayUsd = round2(Math.max(0, paidCombinedUsd - (Number(sale.total_usd) || 0)))
+    updates.push(
+      'payment_method = @payment_method',
+      'payment_details = @payment_details',
+      'payment_currency = @payment_currency',
+      'amount_paid_usd = @amount_paid_usd',
+      'amount_paid_khr = @amount_paid_khr',
+      'change_usd = @change_usd',
+      'change_khr = @change_khr',
+    )
+    updateParams.payment_method = methodSummary
+    updateParams.payment_details = JSON.stringify(effectiveDetails)
+    updateParams.payment_currency = paidUsd > 0 && paidKhr > 0 ? 'MIXED' : paidKhr > 0 ? 'KHR' : 'USD'
+    updateParams.amount_paid_usd = paidUsd
+    updateParams.amount_paid_khr = paidKhr
+    updateParams.change_usd = overpayUsd
+    updateParams.change_khr = Math.round(overpayUsd * rate)
   }
   if (saleStatus === 'cancelled') {
     updates.push(

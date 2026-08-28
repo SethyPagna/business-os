@@ -469,7 +469,7 @@ export default function Sales() {
     loadPromiseRef.current = null
   }, [clearLoadWatchdog])
 
-  const runSaleStatusMutation = useCallback((saleId: number | string, nextStatus: string, notes?: string, extra?: SaleCancelPayload | null) => (
+  const runSaleStatusMutation = useCallback((saleId: number | string, nextStatus: string, notes?: string, extra?: SaleCancelPayload | Record<string, unknown> | null) => (
     withLoaderTimeout(
       () => getSalesApi().updateSaleStatus(saleId, nextStatus, notes, extra || undefined),
       'Update sale status',
@@ -485,7 +485,9 @@ export default function Sales() {
     )
   ), [])
 
-  const handleStatusChange = async (saleId: number | string, newStatus: string, notes = '', recordHistory = true, extra: SaleCancelPayload | null = null): Promise<boolean> => {
+  // `extra` also carries the Y10 payment payload when SaleDetailModal
+  // completes an awaiting-payment sale (payment_method/amount_paid_*).
+  const handleStatusChange = async (saleId: number | string, newStatus: string, notes = '', recordHistory = true, extra: SaleCancelPayload | Record<string, unknown> | null = null): Promise<boolean> => {
     const numericId = Number(saleId)
     if (!Number.isFinite(numericId)) return false
     const previousSale = sales.find((entry) => Number(entry?.id || 0) === numericId)

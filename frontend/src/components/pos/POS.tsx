@@ -85,7 +85,12 @@ const POS_CATEGORY_OPTIONS_TIMEOUT_MS = 8000
 const POS_MEMBERSHIP_LOOKUP_TIMEOUT_MS = 12000
 const POS_CUSTOMER_CREATE_TIMEOUT_MS = 12000
 const POS_DELIVERY_CREATE_TIMEOUT_MS = 12000
-const POS_CHECKOUT_TIMEOUT_MS = 20000
+// Y2: 20s produced FALSE failures -- a Worker busy with an import apply can
+// take longer than that to commit a sale, so the client reported an error
+// while the sale landed (the user hit exactly this). The write is deduped
+// server-side by client_request_id, so a longer wait + a safe-retry message
+// beats a short race that lies about the outcome.
+const POS_CHECKOUT_TIMEOUT_MS = 45000
 import type { ContactOption } from '../contacts/contactOptionUtils'
 // P7-a: quick-add saves through the SAME option serialization the full
 // contact forms use, so a quick-added contact's phone/name/address land as a
@@ -946,6 +951,9 @@ export default function POS() {
   const savingCustomerRef = useRef(false)
   const savingDeliveryRef = useRef(false)
   const checkoutInFlightRef = useRef(false)
+  // Y2: per-order idempotency key for checkout -- kept across failed/timed-out
+  // attempts (so a retry dedupes server-side), cleared on success.
+  const checkoutRequestIdsRef = useRef(new Map<string, string>())
   const taxRate   = parseFloat(asText(settings.tax_rate || '0')) / 100
   // Settings > POS Settings > "Show Discount in Cart" (pos_show_item_discount).
   // Unset/anything but the literal string 'false' means shown -- same
@@ -2451,7 +2459,13 @@ export default function POS() {
 
   const handleCheckout = async (saleStatus = 'completed') => {
     if (active.cart.length === 0)        return notify(t('cart_empty'), 'error')
-    if (totalPaid < totalUsd - 0.005)    return notify(t('insufficient_amount'), 'error')
+    // Y10: an awaiting-payment sale is exactly the "decide the payment
+    // later on the Sales page" flow -- requiring the full amount (and with
+    // it a payment method) up front defeated it. Paid statuses keep the
+    // gate.
+    if (saleStatus !== 'awaiting_payment' && totalPaid < totalUsd - 0.005) {
+      return notify(t('insufficient_amount'), 'error')
+    }
     if (loading || checkoutInFlightRef.current) return
 
     const invalidBranchItem = active.cart.find((item) => item.branch_id && !branchesById.has(Number(item.branch_id)))
@@ -2474,8 +2488,30 @@ export default function POS() {
 
     const saleBranchId = cartTotals.branchIds.length === 1 ? cartTotals.branchIds[0] : null
 
+    // Y2: ONE client_request_id per order until a checkout SUCCEEDS. The
+    // server dedupes sales on it (unique index + early return), so after a
+    // timeout/network failure the cashier can safely press Complete again --
+    // if the first attempt actually landed, the retry returns that sale
+    // instead of creating a second one. A fresh id per click (the old
+    // behavior, generated inside the transport) made every retry a
+    // potential duplicate sale.
+    const orderKey = String(resolvedActiveId || 'pos-order')
+    let clientRequestId = checkoutRequestIdsRef.current.get(orderKey)
+    if (!clientRequestId) {
+      clientRequestId = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+        ? `sale_${crypto.randomUUID()}`
+        : `sale_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`
+      checkoutRequestIdsRef.current.set(orderKey, clientRequestId)
+    }
+
+    // Y10: with no payment typed on an awaiting-payment sale, record NO
+    // payment method -- "Cash" here would be a fabrication; the method is
+    // chosen later when the sale is completed on the Sales page.
+    const hasPaymentInput = paidUsdNum > 0 || paidKhrNum > 0
+
     const device = getClientDeviceInfo()
     const saleData = {
+      client_request_id: clientRequestId,
       cashier_id:   user?.id || null,
       cashier_name: user?.name || '',
       customer_name:    active.customer.name    || null,
@@ -2522,8 +2558,8 @@ export default function POS() {
       loyalty_accrual: active.loyaltyAccrual !== false,
       tax_usd:      taxUsd,     tax_khr:      taxKhr,
       total_usd:    totalUsd,   total_khr:    totalKhr,
-      payment_method:   paymentMethodSummary(activePaymentDetails),
-      payment_details: activePaymentDetails.map((detail) => ({
+      payment_method:   saleStatus === 'awaiting_payment' && !hasPaymentInput ? '' : paymentMethodSummary(activePaymentDetails),
+      payment_details: saleStatus === 'awaiting_payment' && !hasPaymentInput ? [] : activePaymentDetails.map((detail) => ({
         method: detail.method.trim() || 'Cash',
         amount_usd: parseFloat(detail.usd) || 0,
         amount_khr: parseFloat(detail.khr) || 0,
@@ -2558,6 +2594,7 @@ export default function POS() {
         POS_CHECKOUT_TIMEOUT_MS,
       )
       if (result.success) {
+        checkoutRequestIdsRef.current.delete(orderKey)
         const receiptNumber = result.receiptNumber || result.receipt_number || `RCP-${Date.now()}`
         setReceiptQueue(q => [...q, { ...saleData, id: result.id, receiptNumber, created_at: new Date().toISOString() }])
         if (resolvedActiveId) closeOrder(resolvedActiveId)
@@ -2569,7 +2606,18 @@ export default function POS() {
         notify(result.error || t('error'), 'error')
       }
     } catch (e) {
-      notify(getErrorMessage(e, t('error') || 'Error'), 'error')
+      // Y2: a timeout is NOT a confirmed failure -- the request keeps
+      // running server-side and may commit. Say so, and say that retrying
+      // is safe (the stable client_request_id makes the retry return the
+      // recorded sale instead of duplicating it).
+      if ((e as { code?: string } | null)?.code === 'loader_timeout') {
+        notify(posCopy(
+          'The server has not confirmed this sale yet. It may still be recorded - pressing Complete again is safe and will NOT create a duplicate.',
+          'ម៉ាស៊ីនមេមិនទាន់បញ្ជាក់ការលក់នេះទេ។ វាប្រហែលជាត្រូវបានកត់ត្រា - ចុច Complete ម្តងទៀតដោយសុវត្ថិភាព វានឹងមិនបង្កើតច្បាប់ចម្លងទេ។',
+        ), 'error')
+      } else {
+        notify(getErrorMessage(e, t('error') || 'Error'), 'error')
+      }
     } finally {
       checkoutInFlightRef.current = false
       setLoading(false)
