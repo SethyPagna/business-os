@@ -47,6 +47,7 @@ export const FEE_TYPE_OPTIONS: { value: FeeType; labelKey: string; fallback: str
   { value: 'tax', labelKey: 'fee_type_tax', fallback: 'Tax' },
   { value: 'delivery', labelKey: 'fee_type_delivery', fallback: 'Delivery' },
   { value: 'change', labelKey: 'fee_type_change', fallback: 'Change' },
+  { value: 'expense', labelKey: 'fee_type_expense', fallback: 'Expense' },
   { value: 'other', labelKey: 'fee_type_other', fallback: 'Other' },
 ]
 
@@ -92,6 +93,9 @@ export function feeToFormState(fee?: FeeRecord | null): FeeFormState {
 
 type FeeFormProps = {
   fee?: FeeRecord | null
+  /** Distinct labels already used on saved fees — offered as suggestions so
+   *  a recurring reason ("Boost", "ទឹកភ្លើង") is picked, not retyped. */
+  labelSuggestions?: string[]
   onSave: (payload: {
     fee_type: FeeType
     label: string | null
@@ -105,7 +109,7 @@ type FeeFormProps = {
   onClose: () => void
 }
 
-export default function FeeForm({ fee, onSave, onClose }: FeeFormProps) {
+export default function FeeForm({ fee, labelSuggestions = [], onSave, onClose }: FeeFormProps) {
   const { t } = useApp()
   const [form, setForm] = useState<FeeFormState>(() => feeToFormState(fee))
   const [saving, setSaving] = useState(false)
@@ -255,32 +259,41 @@ export default function FeeForm({ fee, onSave, onClose }: FeeFormProps) {
         void handleSave()
       }}
     >
-      <div>
-        <label htmlFor="fee-type" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
-          {t('fee_type') || 'Fee Type'} *
-        </label>
-        <AppSelect
-          id="fee-type"
-          value={form.fee_type}
-          buttonClassName="w-full"
-          ariaLabel={t('fee_type') || 'Fee Type'}
-          options={FEE_TYPE_OPTIONS.map((opt) => ({ value: opt.value, label: t(opt.labelKey) || opt.fallback }))}
-          onChange={(value) => set('fee_type', value as FeeType)}
-        />
-      </div>
-
-      <div>
-        <label htmlFor="fee-label" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
-          {t('fee_label') || 'Label'}
-        </label>
-        <input
-          id="fee-label"
-          className="input"
-          value={form.label}
-          onChange={(event) => set('label', event.target.value)}
-          placeholder={t('fee_label_placeholder') || 'e.g. Delivery charge, Phnom Penh weekend rush'}
-          maxLength={200}
-        />
+      {/* Type + label genuinely share one row (the old comment claimed this
+          while the JSX still stacked them). The label input suggests every
+          label already saved on a fee, so recurring reasons are reusable
+          without retyping — and a brand-new label just gets typed in. */}
+      <div className="grid grid-cols-[minmax(0,9rem)_minmax(0,1fr)] gap-3">
+        <div>
+          <label htmlFor="fee-type" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
+            {t('fee_type') || 'Fee Type'} *
+          </label>
+          <AppSelect
+            id="fee-type"
+            value={form.fee_type}
+            buttonClassName="w-full"
+            ariaLabel={t('fee_type') || 'Fee Type'}
+            options={FEE_TYPE_OPTIONS.map((opt) => ({ value: opt.value, label: t(opt.labelKey) || opt.fallback }))}
+            onChange={(value) => set('fee_type', value as FeeType)}
+          />
+        </div>
+        <div>
+          <label htmlFor="fee-label" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
+            {t('fee_label') || 'Label'}
+          </label>
+          <input
+            id="fee-label"
+            className="input"
+            list="fee-label-suggestions"
+            value={form.label}
+            onChange={(event) => set('label', event.target.value)}
+            placeholder={t('fee_label_placeholder') || 'e.g. Delivery charge, Phnom Penh weekend rush'}
+            maxLength={200}
+          />
+          <datalist id="fee-label-suggestions">
+            {labelSuggestions.map((label) => <option key={label} value={label} />)}
+          </datalist>
+        </div>
       </div>
 
       <div className="grid grid-cols-2 gap-3">

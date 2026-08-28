@@ -1367,6 +1367,7 @@
   "fee_type": "Fee Type",
   "fee_type_change": "Change",
   "fee_type_delivery": "Delivery",
+  "fee_type_expense": "Expense",
   "fee_type_other": "Other",
   "fee_type_tax": "Tax",
   "fee_updated": "Fee updated",

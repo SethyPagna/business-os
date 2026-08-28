@@ -7,7 +7,11 @@ import { appendQuery, buildQueryString, type QueryParams } from './query.ts'
 // needing an outbox/sync story like sales or inventory writes, since fees
 // aren't part of the POS checkout critical path.
 
-export type FeeType = 'tax' | 'delivery' | 'change' | 'other'
+// 'expense' joined the set with the old-system expense migration (Part 379):
+// 4,240 historical expense entries carry fee_type='expense', and manual
+// entry offers it too. The column is free text in D1; this union is the
+// frontend's vocabulary.
+export type FeeType = 'tax' | 'delivery' | 'change' | 'expense' | 'other'
 
 export type FeeRecord = {
   id: number

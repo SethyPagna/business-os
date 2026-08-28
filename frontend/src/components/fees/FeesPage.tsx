@@ -543,7 +543,12 @@ export default function FeesPage() {
 
       {modal === 'form' ? (
         <Modal title={selected ? tr('edit_fee', 'Edit Fee') : tr('add_fee', 'Add Fee')} onClose={closeModal} size="sm">
-          <FeeForm fee={selected} onSave={handleSave} onClose={closeModal} />
+          <FeeForm
+            fee={selected}
+            labelSuggestions={[...new Set(fees.map((row) => String(row.label || '').trim()).filter(Boolean))].sort()}
+            onSave={handleSave}
+            onClose={closeModal}
+          />
         </Modal>
       ) : null}
     </div>

@@ -35,7 +35,10 @@ app.use('*', async (c, next) => {
   await next()
 })
 
-export const FEE_TYPES = Object.freeze(['tax', 'delivery', 'change', 'other'])
+// 'expense' joined with the old-system expense migration (Part 379): 4,240
+// historical entries carry it, and manual entry offers it. Without it here,
+// normalizeFeeType would silently rewrite a saved 'expense' back to 'other'.
+export const FEE_TYPES = Object.freeze(['tax', 'delivery', 'change', 'expense', 'other'])
 type FeeType = (typeof FEE_TYPES)[number]
 
 type FeeRow = {
