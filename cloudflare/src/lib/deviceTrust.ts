@@ -32,6 +32,23 @@ export function requiresDeviceApproval(user: PermissionUser): boolean {
   return Boolean(user) && !isAdminControlUser(user)
 }
 
+// Each account may hold at most this many APPROVED devices at once — the
+// user's rule (Aug 28): an employee can be signed in on at most 3 devices
+// at the same time. Enforced at the admin approve endpoint, which is the
+// ONLY path a device takes to 'approved'; a 4th device stays pending until
+// an existing one is revoked. Admin-control accounts bypass the device gate
+// entirely (see requiresDeviceApproval), so the cap governs employees.
+export const MAX_APPROVED_DEVICES_PER_USER = 3
+
+export async function countApprovedDevices(env: Env, userId: number, excludeRowId?: number): Promise<number> {
+  const db = getDb(env)
+  const row = await db.prepare(`
+    SELECT COUNT(*) AS n FROM trusted_devices
+    WHERE user_id = @user_id AND status = 'approved' AND id != @exclude_id
+  `).get<{ n: number }>({ user_id: userId, exclude_id: excludeRowId ?? -1 })
+  return row?.n || 0
+}
+
 // Called after password (and OTP, if enabled) verify but before a session
 // is issued. Returns `null` when the device is approved and login should
 // proceed normally. Returns a status string otherwise, and the caller

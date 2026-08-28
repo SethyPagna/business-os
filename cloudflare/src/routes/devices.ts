@@ -5,7 +5,7 @@ import { audit } from '../lib/audit'
 import { isAdminControlUser } from '../lib/permissions'
 import { broadcast } from '../durable-objects/broadcastHub'
 import type { Env } from '../index'
-import type { TrustedDeviceRow } from '../lib/deviceTrust'
+import { MAX_APPROVED_DEVICES_PER_USER, countApprovedDevices, type TrustedDeviceRow } from '../lib/deviceTrust'
 
 // Admin device-approval management -- mounted at /api/auth/devices.
 // Everything here requires an authenticated admin-control session (see
@@ -69,6 +69,18 @@ app.post('/:id/approve', async (c) => {
   const db = getDb(c.env)
   const device = await db.prepare('SELECT * FROM trusted_devices WHERE id = @id LIMIT 1').get<TrustedDeviceRow>({ id })
   if (!device) return c.json({ error: 'Device request not found' }, 404)
+
+  // At most MAX_APPROVED_DEVICES_PER_USER approved devices per account (the
+  // Aug-28 rule). Excluding this row keeps re-approving an already-approved
+  // device idempotent instead of tripping its own limit.
+  const approvedCount = await countApprovedDevices(c.env, device.user_id, device.id)
+  if (approvedCount >= MAX_APPROVED_DEVICES_PER_USER) {
+    return c.json({
+      error: `This account already has ${approvedCount} approved devices (limit ${MAX_APPROVED_DEVICES_PER_USER}). Revoke one of its devices first, then approve this one.`,
+      code: 'device_limit_reached',
+      limit: MAX_APPROVED_DEVICES_PER_USER,
+    }, 409)
+  }
 
   await db.prepare(`
     UPDATE trusted_devices
