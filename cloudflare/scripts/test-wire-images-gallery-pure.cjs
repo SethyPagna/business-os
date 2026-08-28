@@ -115,6 +115,9 @@ const productsRoute = loadReal('routes/products.ts', {
   // stubs are honest. (Added by 6e while landing the Part-registry fix --
   // the D1 train missed this loader.)
   '../lib/stockLedgerQuery': { attachBeforeQty: (rows) => rows, buildStockLedgerQuery: () => ({ sql: 'SELECT 1', params: {} }) },
+  // D3 (Part 422, a7): detail-report's sales breakdown -- inert here; the
+  // kernel has its own real-SQL coverage via test-sales-day-report-pure.
+  '../lib/salesAnalytics': { getProductSalesBreakdown: async () => ({ by_day: [], by_month: [] }) },
   // G1: rules load stubbed empty + promoted-SQL collapsed to a constant --
   // this test asserts pre-existing behavior (sort/wiring), not promotion
   // ranking; test-promotion-rules-pure.cjs covers the real SQL against the

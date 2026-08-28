@@ -11,6 +11,7 @@ import { getMediaType, buildUniqueStoredName, sanitizeOriginalFileName } from '.
 import { sanitizeMediaList } from '../lib/media'
 import { buildInClause, chunkForBinding, selectInChunks } from '../lib/sqlBinding'
 import { attachBeforeQty, buildStockLedgerQuery, type StockLedgerView } from '../lib/stockLedgerQuery'
+import { getProductSalesBreakdown } from '../lib/salesAnalytics'
 import { validateUploadedBuffer } from '../lib/uploadSecurity'
 import { checkRateLimit, getClientIp } from '../lib/rateLimit'
 import { audit } from '../lib/audit'
@@ -466,7 +467,8 @@ async function expandSearchResultsToNameSiblings(env: Env, items: Array<Record<s
              p.is_group, p.discount_enabled, p.discount_type, p.discount_percent,
              p.discount_amount_usd, p.discount_amount_khr, p.discount_label,
              p.discount_badge_color, p.discount_starts_at, p.discount_ends_at,
-             p.expiry_date, p.expiry_alert_days, p.created_at, p.updated_at
+             p.expiry_date, p.expiry_alert_days, p.created_at, p.updated_at,
+           COALESCE(p.auto_merged_count, 0) AS auto_merged_count
       FROM products p
       WHERE p.is_active = 1
         AND lower(trim(p.name)) IN (${sql})
@@ -524,6 +526,13 @@ async function searchProductsPayload(env: Env, query: Record<string, string>, op
     where.push(anyRuleAppliesSql(promotionRules, params))
   } else if (/^rule:\d+$/.test(promoFilter) || /^\d+$/.test(promoFilter)) {
     where.push(singleRuleAppliesSql(promotionRules, Number(promoFilter.replace('rule:', '')), params))
+  }
+  // 9.2 (Part 421): the auto-merged facet -- products that absorbed
+  // in-file import merges (auto_merged_count, migration 0076), so "what
+  // merged automatically" is one click, not archaeology.
+  const mergedFilter = String(query.merged || '').trim().toLowerCase()
+  if (mergedFilter === 'auto') {
+    where.push('COALESCE(p.auto_merged_count, 0) > 0')
   }
   const initial = String(query.initial || '').trim()
   const initialClause = initial && initial.toLowerCase() !== 'all'
@@ -1011,6 +1020,83 @@ app.get('/filters', async (c) => {
   return c.json(await loadProductFilters(c.env, c.req.query()))
 })
 
+// D3 (Part 422): the product detail page's report read -- per-supplier
+// totals from batch attribution plus the sales breakdown (kernel). One
+// round trip for the detail modal's Suppliers and Sales sections; the
+// Batches section keeps using the existing /batches read and the
+// movements section the /stock-ledger read.
+app.get('/:id/detail-report', async (c) => {
+  const user = c.get('user')
+  const allowed = getPermissionTier(user, 'products') !== 'none'
+    || getPermissionTier(user, 'inventory') !== 'none'
+  if (!allowed) {
+    return c.json({ error: 'You do not have permission to perform this action' }, 403)
+  }
+  const productId = Number(c.req.param('id')) || 0
+  if (!productId) return c.json({ error: 'Product not found' }, 404)
+  const query = c.req.query()
+  const today = new Date().toISOString().slice(0, 10)
+  const startDate = /^\d{4}-\d{2}-\d{2}$/.test(String(query.startDate || '')) ? String(query.startDate) : '2000-01-01'
+  const endDate = /^\d{4}-\d{2}-\d{2}$/.test(String(query.endDate || '')) ? String(query.endDate) : today
+
+  const db = getDb(c.env)
+  // Distinct suppliers this product was bought from, with per-supplier lot
+  // and quantity totals. Same identity rule the D1b supplier report uses:
+  // id-attributed and name-only lots of one supplier merge into ONE group
+  // (key = supplier_id when present, else the lowercased name). Costs sum
+  // only where recorded; lots_without_cost says the rest -- never a
+  // fabricated zero total presented as complete.
+  const suppliers = await db.prepare(`
+    SELECT
+      COALESCE('id:' || pb.supplier_id, 'name:' || lower(trim(pb.supplier_name))) AS supplier_key,
+      MAX(pb.supplier_id) AS supplier_id,
+      COALESCE(MAX(CASE WHEN pb.supplier_id IS NOT NULL THEN pb.supplier_name END), MAX(pb.supplier_name)) AS supplier_name,
+      COUNT(*) AS lot_count,
+      COALESCE(SUM(bbs.qty), 0) AS current_qty,
+      SUM(CASE WHEN pb.unit_cost_usd IS NOT NULL THEN 1 ELSE 0 END) AS lots_with_cost,
+      SUM(CASE WHEN pb.unit_cost_usd IS NULL THEN 1 ELSE 0 END) AS lots_without_cost,
+      MIN(pb.received_at) AS first_received_at,
+      MAX(pb.received_at) AS last_received_at
+    FROM product_batches pb
+    LEFT JOIN (
+      SELECT batch_id, SUM(quantity) AS qty FROM branch_batch_stock GROUP BY batch_id
+    ) bbs ON bbs.batch_id = pb.id
+    WHERE pb.variant_product_id = @productId
+      AND pb.is_active = 1
+      AND (pb.supplier_id IS NOT NULL OR trim(COALESCE(pb.supplier_name, '')) <> '')
+    GROUP BY supplier_key
+    ORDER BY last_received_at DESC
+  `).all<Record<string, unknown>>({ productId })
+
+  // Per-lot summary with the TOTAL quantity across branches -- the
+  // detail page's batch card wants "this product's lots", not one
+  // branch's slice (the §14 ManageBatchesModal stays the per-branch
+  // editor). Synthetic day-added lots are included: they carry the
+  // received date history for products that predate real lots.
+  const batches = await db.prepare(`
+    SELECT pb.id, pb.lot_code, pb.batch_number, pb.received_at, pb.expiry_date,
+           pb.supplier_id, pb.supplier_name, pb.unit_cost_usd,
+           COALESCE(bbs.qty, 0) AS total_qty
+    FROM product_batches pb
+    LEFT JOIN (
+      SELECT batch_id, SUM(quantity) AS qty FROM branch_batch_stock GROUP BY batch_id
+    ) bbs ON bbs.batch_id = pb.id
+    WHERE pb.variant_product_id = @productId AND pb.is_active = 1
+    ORDER BY pb.received_at DESC, pb.id DESC
+    LIMIT 100
+  `).all<Record<string, unknown>>({ productId })
+
+  const sales = await getProductSalesBreakdown(c.env, productId, { startDate, endDate })
+
+  return c.json({
+    product_id: productId,
+    batches: batches || [],
+    suppliers: suppliers || [],
+    sales,
+    range: { startDate, endDate },
+  })
+})
+
 // D1 (Part 415): the Products page's Stock Change ledger -- one row per
 // recorded action with a derived running balance. READ-ONLY over the
 // EXISTING inventory_movements history; no new write path. Lives under
@@ -1254,6 +1340,29 @@ app.post('/', async (c) => {
 
 // D6: before -> after preview numbers for a rename, before anything
 // writes. Same gate as the writes the preview leads to.
+// 9.2 (Part 421): the auto-merge log for one product -- each row is one
+// losing source row's ORIGINAL values (import_auto_merges), the evidence
+// "the first row's details win" used to erase. Read-only; supplier/cost
+// values may appear inside losing_json, so this stays behind the same
+// products read gate as the rest of this router (never portal-exposed).
+app.get('/auto-merges/:productId', async (c) => {
+  const productId = Number(c.req.param('productId'))
+  if (!Number.isInteger(productId) || productId <= 0) return c.json({ error: 'Invalid product id' }, 400)
+  const rows = await getDb(c.env).prepare(`
+    SELECT id, import_job_id, row_number, losing_json, created_at
+    FROM import_auto_merges WHERE product_id = @productId
+    ORDER BY id DESC LIMIT 500
+  `).all<{ id: number; import_job_id: number | null; row_number: number | null; losing_json: string | null; created_at: string | null }>({ productId })
+  return c.json({
+    productId,
+    merges: rows.map((row) => {
+      let losing: unknown = null
+      try { losing = row.losing_json ? JSON.parse(row.losing_json) : null } catch { losing = row.losing_json }
+      return { id: row.id, import_job_id: row.import_job_id, row_number: row.row_number, losing, created_at: row.created_at }
+    }),
+  })
+})
+
 app.get('/rename-impact', async (c) => {
   const user = c.get('user')
   if (getActionTier(user, 'products', 'edit') === 'none') {

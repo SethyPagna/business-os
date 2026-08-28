@@ -511,3 +511,47 @@ export function previousPeriodFilters(f: SalesFilters): SalesFilters {
     branchId: f.branchId,
   }
 }
+
+// D3 (Part 422): the product detail page's sales breakdown -- how much of
+// ONE product sold per day and per month, through the SAME active-sales
+// predicate every other number on the Sales surfaces uses (single-source
+// rule; a cancelled sale never counts anywhere). Day rows cover the filter
+// range; month rows aggregate the same range by month.
+export type ProductSalesBreakdownRow = {
+  period: string
+  qty: number
+  revenue_usd: number
+  sale_count: number
+}
+
+export async function getProductSalesBreakdown(
+  env: Env,
+  productId: number,
+  f: SalesFilters,
+): Promise<{ by_day: ProductSalesBreakdownRow[]; by_month: ProductSalesBreakdownRow[] }> {
+  const db = getDb(env)
+  const { sql: activeSql, params } = whereActiveSales('s', f)
+  const run = async (periodExpr: string): Promise<ProductSalesBreakdownRow[]> => {
+    const rows = await db.prepare(`
+      SELECT ${periodExpr} AS period,
+             COALESCE(SUM(si.quantity), 0) AS qty,
+             COALESCE(SUM(si.total_usd), 0) AS revenue_usd,
+             COUNT(DISTINCT s.id) AS sale_count
+      FROM sale_items si
+      JOIN sales s ON s.id = si.sale_id
+      WHERE ${activeSql} AND si.product_id = @productId
+      GROUP BY period
+      ORDER BY period DESC
+    `).all<Record<string, unknown>>({ ...params, productId })
+    return (rows || []).map((row) => ({
+      period: String(row.period || ''),
+      qty: num(row.qty),
+      revenue_usd: round2(num(row.revenue_usd)),
+      sale_count: num(row.sale_count),
+    }))
+  }
+  return {
+    by_day: await run("date(s.created_at)"),
+    by_month: await run("strftime('%Y-%m', s.created_at)"),
+  }
+}
