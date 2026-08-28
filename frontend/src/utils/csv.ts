@@ -25,6 +25,24 @@ export function escapeCsvValue(value: unknown): string {
     : text
 }
 
+// RFC4180 quoting ONLY -- no Excel-formula-injection apostrophe. For
+// delimited text bound for THIS APP'S OWN PARSERS (the xlsx→text bridge in
+// spreadsheetImport.ts), never for a file a person will open in Excel.
+// escapeCsvValue's leading-' guard is right for human-bound downloads, but
+// on a machine path it would rewrite real values -- an Excel cell holding
+// -5 (a negative adjustment) or "+855 12..." must reach the import
+// analyzers as typed, not as '-5 (M7, the encoding-safety contract; both
+// parsers ALSO strip the guard on read, so files that round-tripped
+// through the human exports still import clean -- see csvImport.ts's
+// stripExcelTextGuard and its backend twin in importCsv.ts).
+export function csvFieldForMachine(value: unknown): string {
+  if (value == null) return ''
+  const text = String(value)
+  return text.includes(',') || text.includes('"') || text.includes('\n')
+    ? `"${text.replace(/"/g, '""')}"`
+    : text
+}
+
 export function buildCSV(rows: unknown[] = []): string {
   if (!Array.isArray(rows) || !rows.length) return ''
   const headers = Object.keys((rows[0] || {}) as object)
@@ -51,7 +69,7 @@ export function downloadCSV(filename: string, rows: unknown[]): void {
   downloadBlob(filename, new Blob([UTF8_BOM, csv], { type: 'text/csv;charset=utf-8' }))
 }
 
-function normalizeZipFile(file: ZipFileInput | null | undefined): NormalizedZipFile | null {
+export function normalizeZipFile(file: ZipFileInput | null | undefined): NormalizedZipFile | null {
   if (!file) return null
   const name = String(file.name || file.filename || '').trim()
   if (!name) return null
@@ -60,7 +78,17 @@ function normalizeZipFile(file: ZipFileInput | null | undefined): NormalizedZipF
     content = buildCSV(file.rows)
   }
   if (content === undefined || content === null) return null
-  return { name, content: String(content) }
+  let text = String(content)
+  // A .csv entry inside an export package is opened in Excel just like a
+  // directly-downloaded one, and downloadCSV's BOM is what stops Excel
+  // guessing the ANSI codepage and turning Khmer into '?'. The zip path
+  // used to skip it (buildCSV emits bare text), so packaged CSVs broke
+  // where single-file exports didn't (M7). Non-CSV entries (HTML reports)
+  // are left alone.
+  if (/\.csv$/i.test(name) && !text.startsWith(UTF8_BOM)) {
+    text = UTF8_BOM + text
+  }
+  return { name, content: text }
 }
 
 const CRC32_TABLE = (() => {

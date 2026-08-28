@@ -296,13 +296,33 @@ export function hasParsedCsvRowContent(row: ParsedCsvRow): boolean {
   return false
 }
 
+// The two well-known Excel text-protection wrappers, unescaped identically
+// to the frontend parser (utils/csvImport.ts -- see its comment for the
+// full reasoning): ="text" formula-shaped wraps, and the leading-'
+// injection guard csv.ts's escapeCsvValue writes on exported values
+// starting with = + - @. The backend parse is the one that COMMITS (the
+// job stores the raw file; Screen 1's preview parses the same bytes in the
+// browser), so the two parsers MUST transform values identically or the
+// operator confirms one value and a different one lands. Before this, a
+// ="0012345678905"-protected barcode previewed as the digits and imported
+// as the literal ="..." text (M7's encoding-safety contract; parity is
+// pinned by test-encoding-safety-pure.cjs).
+function unwrapExcelFormulaText(value: string): string {
+  const match = /^="([^"]*)"$/.exec(value)
+  return match ? match[1] : value
+}
+
+function stripExcelTextGuard(value: string): string {
+  return /^'[=+\-@\t\r]/.test(value) ? value.slice(1) : value
+}
+
 export function csvValuesToRow(values: string[], headers: string[], rowNumber: number): ParsedCsvRow {
   const row: ParsedCsvRow = { _rowNumber: rowNumber }
   for (let headerIndex = 0; headerIndex < headers.length; headerIndex += 1) {
     const header = headers[headerIndex]
     if (!header) continue
     const value = values[headerIndex]
-    row[header] = typeof value === 'string' ? value.normalize('NFC').trim() : value
+    row[header] = typeof value === 'string' ? stripExcelTextGuard(unwrapExcelFormulaText(value.normalize('NFC').trim())) : value
   }
   return row
 }

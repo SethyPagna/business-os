@@ -215,16 +215,33 @@ export function normalizeCsvKey(value: unknown): string {
     .toLowerCase()
 }
 
-// Reverses csv.ts's forceExcelText() -- a value shaped exactly like
-// ="text" (no embedded quotes) is that deliberate Excel-text wrap, not a
-// real formula a user typed, so unwrap it back to the plain value here.
-// This also covers files a user has protected the same well-known way
-// manually in Excel (typing ="0012345678905" into a barcode cell so it
-// round-trips through Excel as text) -- without this, either case would
-// import the literal ="..." text instead of the value it represents.
+// Reverses the two well-known Excel text-protection wrappers, so a
+// protected cell imports as the value it represents, not the wrapper:
+//
+//   ="text"  -- the formula-shaped text wrap (this app used to export it;
+//               people also type it by hand so barcodes survive Excel).
+//   'value   -- the leading-apostrophe text guard, which csv.ts's
+//               escapeCsvValue writes on every exported value starting
+//               with = + - @ (the OWASP formula-injection prefix set).
+//               Excel itself treats a leading ' as "this is text" and
+//               never shows or saves it as part of the value, so
+//               stripping exactly one, only ahead of a guarded
+//               character, matches Excel's own semantics -- and without
+//               it, re-importing this app's own CSV export corrupts every
+//               guarded value ('-5, '+855..., '=... import literally).
+//
+// Both parsers apply BOTH unescapes identically -- this one and the
+// backend's csvValuesToRow (cloudflare/src/lib/importCsv.ts). Screen 1's
+// preview and the committed apply parse the same file server-side, so the
+// two MUST agree or the operator confirms one value and a different one
+// lands (M7's contract pins the parity by test).
 function unwrapExcelFormulaText(value: string): string {
   const match = /^="([^"]*)"$/.exec(value)
   return match ? match[1] : value
+}
+
+function stripExcelTextGuard(value: string): string {
+  return /^'[=+\-@\t\r]/.test(value) ? value.slice(1) : value
 }
 
 // Real import-file audit (Aug 22 2026) flagged this as a genuine gap: a
@@ -313,7 +330,7 @@ export function parseCsvRows(text: string, options: ParseDelimitedOptions = {}):
       const row: CsvRow = { _rowNumber: index + 2 }
       headers.forEach((header, headerIndex) => {
         if (!header) return
-        row[header] = unwrapExcelFormulaText(String(values[headerIndex] ?? '').trim())
+        row[header] = stripExcelTextGuard(unwrapExcelFormulaText(String(values[headerIndex] ?? '').trim()))
       })
       return row
     })

@@ -1256,7 +1256,10 @@ app.get('/:id/errors.csv', async (c) => {
   const denied = await requireImportPermission(c as any, job)
   if (denied) return denied
   const csv = await buildErrorsCsv(c.env, id)
-  return new Response(csv, {
+  // BOM: errors.csv is opened in Excel, whose codepage guess without one
+  // turns the Khmer product names inside error messages into '?' (the same
+  // reason every frontend CSV download carries it -- M7).
+  return new Response(String.fromCharCode(0xFEFF) + csv, {
     headers: {
       'Content-Type': 'text/csv; charset=utf-8',
       'Content-Disposition': `attachment; filename="${id}-errors.csv"`,

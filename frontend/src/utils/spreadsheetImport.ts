@@ -34,7 +34,7 @@
 // it -- needs to know or care that the original file was Excel.
 import * as XLSX from 'xlsx'
 import { decodeTextBuffer } from './csvImport.ts'
-import { escapeCsvValue } from './csv.ts'
+import { csvFieldForMachine } from './csv.ts'
 
 export type ImportFileResult = {
   content: string
@@ -89,7 +89,11 @@ export function workbookToDelimitedText(workbook: XLSX.WorkBook, sheetName?: str
       const cell = sheet[XLSX.utils.encode_cell({ r: row, c: col })]
       const text = cellToText(cell)
       if (text !== '') rowHasValue = true
-      cells.push(escapeCsvValue(text))
+      // Machine quoting, not escapeCsvValue: this text goes straight into
+      // this app's own parsers, never Excel, and the injection guard's
+      // leading apostrophe would corrupt real cell values -- a numeric -5
+      // (negative adjustment) became the unparseable text '-5 (M7).
+      cells.push(csvFieldForMachine(text))
     }
     // Skip fully blank rows (matches parseDelimitedRows' own blank-row
     // filtering in csvImport.ts, so behavior is identical either way a file
