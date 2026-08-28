@@ -9469,3 +9469,59 @@ sweep green, both tsc, vite build.
 **Phase E remaining.** E1 (Inventory→Branches) and E2 (Sales absorbs
 Returns+Fees) — open, waiting on Branches/Inventory (05) and the pages'
 current holders to clear.
+
+## Part 406 (chat, Aug 28 2026) -- D4b: the batch picker and received date reach EVERY stock-add surface
+
+Session 05. The user rejected Part 403's flagged exclusions directly: "it
+should have batch picker... it has to be consistent, cannot have one
+place not the other... smart and fully consistent and user-friendly."
+D4b removes every carve-out (claim 62150e77, feature 49acefd5):
+
+- **Group containers.** Both adjusters (Inventory's Adjust modal,
+  Product edit's per-branch rows) drop the is_group exclusion, and the
+  mandatory-batch validation now covers groups. Measured first: the
+  "containers have no batches" comment was STALE -- since /adjust's
+  unconditional auto-routing, a container add has always created a
+  container batch server-side; the hidden picker only hid lots that
+  already existed. Name-grouped rows (most real groups) were always
+  flat and unaffected.
+- **BulkAddStockModal.** 'Add' gains the received date + derived-code
+  preview -- in a bulk add the date IS the lot control (the server
+  matches/creates per product by date); the note key no longer
+  hardcodes "dated today" (en+km values updated).
+- **ReceiveBatchModal.** Gains the same existing-lot picker the adjust
+  surfaces have ('+ New batch' default + lot chips via
+  getProductBatches). An explicit lot tops up exactly that lot and the
+  date input HIDES (the lot keeps its own received_at) instead of
+  pretending to apply -- the same visibility-mirror rule every other
+  surface follows. POST /api/batches accepts batch_id; the transport
+  passes it; a lot belonging to another product answers 400 (matching
+  /adjust) instead of an unhandled 500. The lot choice deliberately
+  stays out of the localStorage draft (a drafted id can go stale;
+  'new' is always safe).
+- **Branches page.** Every per-branch stock card gains a receive
+  button -- gated on the same 'inventory' grant POST /api/batches
+  enforces server-side -- opening the ONE shared ReceiveBatchModal
+  with that product and branch preselected; the branch section
+  refreshes in place afterward. 11.28's "Branch batch views" entry
+  point now actually exists.
+
+**Tests:** test-adjust-received-date-pure.cjs grows to 8 checks -- the
+two new ones drive the REAL transpiled routes/batches.ts: explicit-lot
+top-up keeps received_at across a different submitted date; a foreign
+batch_id is refused 400 with nothing written.
+
+**Verification (Golden Rule 5):** tsc --noEmit clean in BOTH packages;
+ALL backend test-*.cjs pass; ALL frontend tests pass run individually
+(the two Part-403-era failures were a7's in-flight pins, since landed);
+real vite build 22.67s.
+
+**Coordination:** a7 released Inventory.tsx + Branches.tsx mid-unit for
+this work (their H1 sweep landed as Part 405) and is released back both
+files as of 49acefd5; pack lines rode 6e's 35cfc5b7 (noted in both
+commit messages). Part numbers 404/405 were already reserved by 6e/a7
+-- this entry took 406 per the check-the-tail-first protocol.
+
+**Standing note:** the UTC-day default for "today" flag from Part 403
+remains open for a deliberate decision -- unchanged here since every
+surface now shares it consistently.
