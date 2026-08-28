@@ -1,4 +1,6 @@
-// Regression test for the public catalog's category-first browsing order
+// Regression test for the public catalog's BRAND-first browsing order
+// (G4, Part 399: was category-first from Part 226 until the user flipped
+// the storefront to browse by brand)
 // (routes/portal.ts's PORTAL_CATALOG_DEFAULT_ORDER_SQL) -- added when the
 // admin Products/Inventory pages' own category-header sort (Part 226:
 // category A-Z first, name A-Z within category, "Uncategorized" pinned
@@ -121,19 +123,21 @@ function seed() {
   // Deliberately inserted OUT of any sorted order, with mixed case and a
   // blank category, so a passing test can only mean the ORDER BY is doing
   // real work -- not accidentally matching insertion order.
+  // Same adversarial shape as the category-first era, now on BRAND:
+  // mixed case, blank and whitespace-only brands, inserted out of order.
   const rows = [
-    { name: 'Zinc Cream', category: 'Skincare' },
-    { name: 'Argan Oil', category: 'haircare' },
-    { name: 'Rose Water', category: '' },
-    { name: 'Vitamin C Serum', category: 'skincare' }, // same bucket as 'Skincare', different case
-    { name: 'Shampoo Bar', category: 'Haircare' }, // same bucket as 'haircare', different case
-    { name: 'Lip Balm', category: '   ' }, // whitespace-only -- also Uncategorized
-    { name: 'Body Lotion', category: 'Bath & Body' },
+    { name: 'Zinc Cream', category: 'Skincare', brand: 'Sulwhasoo' },
+    { name: 'Argan Oil', category: 'haircare', brand: 'dior' },
+    { name: 'Rose Water', category: '', brand: '' },
+    { name: 'Vitamin C Serum', category: 'skincare', brand: 'Dior' }, // same bucket as 'dior', different case
+    { name: 'Shampoo Bar', category: 'Haircare', brand: 'DIOR' }, // same case-insensitive bucket
+    { name: 'Lip Balm', category: '   ', brand: '   ' }, // whitespace-only -- blank-brand bucket
+    { name: 'Body Lotion', category: 'Bath & Body', brand: 'Chanel' },
   ]
   for (const r of rows) {
     const id = db.prepare(
-      `INSERT INTO products (name, category, is_active, stock_quantity, out_of_stock_threshold)
-       VALUES (@name, @category, 1, 10, 0) RETURNING id`
+      `INSERT INTO products (name, category, brand, is_active, stock_quantity, out_of_stock_threshold)
+       VALUES (@name, @category, @brand, 1, 10, 0) RETURNING id`
     ).get(r)?.id
     db.prepare(
       `INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (@id, @branchId, 10)`
@@ -151,22 +155,22 @@ async function check(name, fn) {
 async function run() {
   seed()
 
-  await check('bootstrap catalog (GET /catalog/products) is category-first, name-second, case-insensitive, Uncategorized last', async () => {
+  await check('bootstrap catalog (GET /catalog/products) is BRAND-first, name-second, case-insensitive, blank brands last', async () => {
     const { status, json } = await get('/catalog/products')
     assert.equal(status, 200)
     const names = json.items.map((p) => p.name)
     assert.deepStrictEqual(names, [
-      'Body Lotion',       // Bath & Body
-      'Argan Oil',         // haircare
-      'Shampoo Bar',       // Haircare (same case-insensitive bucket, name A-Z within)
-      'Vitamin C Serum',   // skincare
-      'Zinc Cream',        // Skincare (same case-insensitive bucket, name A-Z within)
-      'Lip Balm',          // Uncategorized (whitespace-only), name A-Z within
-      'Rose Water',        // Uncategorized (blank)
+      'Body Lotion',       // Chanel
+      'Argan Oil',         // dior (same case-insensitive bucket, name A-Z within)
+      'Shampoo Bar',       // DIOR
+      'Vitamin C Serum',   // Dior
+      'Zinc Cream',        // Sulwhasoo
+      'Lip Balm',          // blank brand (whitespace-only), name A-Z within
+      'Rose Water',        // blank brand
     ])
   })
 
-  await check('search endpoint, no search term, defaults to the same category-first order', async () => {
+  await check('search endpoint, no search term, defaults to the same brand-first order', async () => {
     const { status, json } = await get('/catalog/products/search?page=1&pageSize=50')
     assert.equal(status, 200)
     const names = json.items.map((p) => p.name)
@@ -175,7 +179,7 @@ async function run() {
     ])
   })
 
-  await check('search endpoint WITH a search term switches to relevance order, not category order', async () => {
+  await check('search endpoint WITH a search term switches to relevance order, not brand order', async () => {
     // "Serum" only matches one product here -- what this actually proves
     // is that the search path takes a different, non-category-first code
     // branch at all (matchRankSql present), not the specific ranking of

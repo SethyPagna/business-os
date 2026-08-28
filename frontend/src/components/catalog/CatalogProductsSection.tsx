@@ -15,6 +15,7 @@ import CatalogProductImage from './catalogImages'
 import CatalogPaginationControls, { CATALOG_DEFAULT_PAGE_SIZE, paginateCatalogItems } from './catalogPagination'
 import { SectionShell, StatusPill } from './catalogUi'
 import PortalFilterCombobox from './PortalFilterCombobox'
+import PortalPromoStrip from './PortalPromoStrip.tsx'
 import { buildPortalHighlightBadges, buildPortalPricePresentation, shouldShowStockStatus } from './portalCatalogDisplay.ts'
 import { isProductPromoted, type PromotionRule } from '../../utils/promotionRules.ts'
 import { aggregateInitialOptions, getInitialKey } from '../../utils/initials.ts'
@@ -166,8 +167,12 @@ function getBadgeToneClass(badge: PortalBadge): string {
   return 'bg-slate-900/90 text-white ring-1 ring-white/20'
 }
 
-function getProductInitial(product: Pick<CatalogProduct, 'name'> | null | undefined): string {
-  return getInitialKey(product?.name || '')
+// G4: the A-Z rail indexes BRANDS (server-side rail letters come from
+// p.brand too -- routes/portal.ts); the non-serverPaged fallback (the
+// admin editor's live preview) must bucket the same way or the preview's
+// rail would disagree with the storefront it previews.
+function getProductInitial(product: Pick<CatalogProduct, 'brand'> | null | undefined): string {
+  return getInitialKey(product?.brand || '')
 }
 
 /**
@@ -303,14 +308,16 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
       && isProductPromoted(pagedProducts[promotedRun], promotionRules)
     ) promotedRun++
     if (promotedRun > 0) headers.set(0, copy('promotionsHeader', 'Promotions'))
+    // G4: BRAND headers -- the grid browses brand-first now (server
+    // ordering matches), so the section breaks follow p.brand.
     let lastKey: string | null = null
     pagedProducts.forEach((product, index) => {
       if (index < promotedRun) return
-      const raw = String(product.category || '').trim()
+      const raw = String(product.brand || '').trim()
       const key = raw.toLowerCase()
       if (key === lastKey) return
       lastKey = key
-      headers.set(index, raw || copy('uncategorized', 'Uncategorized'))
+      headers.set(index, raw || copy('noBrandHeader', 'Other Brands'))
     })
     return headers
   }, [pagedProducts, showCategoryHeaders, copy, promotionRules])
@@ -460,6 +467,17 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
         </aside>
 
         <div className="min-w-0">
+      {/* G3: the auto-scrolling promo row sits ABOVE search, public view
+          only, and only when the merchant shows promotions at all. */}
+      {publicView && previewConfig.showPromotions !== false ? (
+        <PortalPromoStrip
+          products={filteredProducts}
+          promotionRules={promotionRules}
+          copy={copy}
+          formatPrice={(usd, khr) => formatPortalPrice(usd, khr, previewConfig)}
+          openProductDetail={openProductDetail}
+        />
+      ) : null}
       <div className="mb-5 space-y-3">
         <div className="sticky top-16 z-20 -mx-1 rounded-[26px] border border-slate-200 bg-white/95 p-2 shadow-sm backdrop-blur dark:border-neutral-700 dark:bg-neutral-900/95 sm:top-20">
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center">

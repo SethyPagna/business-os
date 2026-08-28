@@ -129,8 +129,12 @@ check('storefront and admin rails count identically -- both by name group', asyn
 check('the storefront bootstrap rail applies the visibility filter, not a bare is_active', async () => {
   const portal = fs.readFileSync(path.join(cloudflareRoot, 'src', 'routes', 'portal.ts'), 'utf8')
   const railBlock = portal.slice(portal.indexOf('const initials = await db.prepare'))
+  // G4 (Part 399): the portal rail indexes BRANDS now -- the visibility
+  // rule is unchanged, the letter source moved from p.name to p.brand
+  // (blank brands are excluded from the rail; they render under the
+  // trailing "Other Brands" grid section instead).
   assert.ok(
-    /WHERE \$\{visibleFilter\} AND trim\(COALESCE\(p\.name, ''\)\) <> ''/.test(railBlock),
+    /WHERE \$\{visibleFilter\} AND trim\(COALESCE\(p\.brand, ''\)\) <> ''/.test(railBlock),
     'the bootstrap rail must use visibleFilter so it matches what the grid renders',
   )
   assert.ok(

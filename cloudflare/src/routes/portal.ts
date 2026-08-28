@@ -315,8 +315,11 @@ function portalVisibleProductFilter(showOutOfStockProducts: boolean): string {
 // string sorting first alphabetically. Shared by buildPortalCatalog's
 // bootstrap snapshot and /catalog/products/search's own no-search-term
 // default so the two never drift into two different browsing orders.
+// G4 (Part 399): BRAND-first, per the user -- the storefront browses by
+// brand (blank brands sink to the end), names A-Z within each brand. Was
+// category-first since Part 226.
 const PORTAL_CATALOG_DEFAULT_ORDER_SQL =
-  "CASE WHEN trim(COALESCE(p.category, '')) = '' THEN 1 ELSE 0 END ASC, lower(trim(p.category)) ASC, lower(p.name) ASC, p.id ASC"
+  "CASE WHEN trim(COALESCE(p.brand, '')) = '' THEN 1 ELSE 0 END ASC, lower(trim(p.brand)) ASC, lower(p.name) ASC, p.id ASC"
 
 // Ported from routes/products.ts's attachBranchStock so the public portal's
 // product rows carry the same per-branch breakdown the admin catalog does.
@@ -458,11 +461,13 @@ async function buildPortalCatalog(env: Env, showOutOfStockProducts: boolean) {
   // name_key is the trigger-maintained lower(trim(name)) column from
   // migration 0010, so this groups exactly the way the rest of the app does
   // and uses the existing index rather than a fresh expression.
+  // G4: the rail indexes BRANDS now -- one letter per brand initial,
+  // counting distinct products under brands starting with it.
   const initials = await db.prepare(`
-    SELECT upper(substr(trim(p.name), 1, 1)) AS value,
+    SELECT upper(substr(trim(p.brand), 1, 1)) AS value,
            COUNT(DISTINCT COALESCE(NULLIF(p.name_key, ''), CAST(p.id AS TEXT))) AS count
     FROM products p
-    WHERE ${visibleFilter} AND trim(COALESCE(p.name, '')) <> ''
+    WHERE ${visibleFilter} AND trim(COALESCE(p.brand, '')) <> ''
     GROUP BY value
     ORDER BY value ASC
   `).all<{ value: string; count: number }>()
@@ -1499,7 +1504,7 @@ async function runPortalProductSearch(c: { env: Env; req: { query(): Record<stri
   // selected letter. See the `initialClause` use in the fallback block.
   const initial = String(query.initial || '').trim()
   const initialClause = initial && initial.toLowerCase() !== 'all'
-    ? "upper(substr(trim(COALESCE(p.name, '')), 1, 1)) = @initial"
+    ? "upper(substr(trim(COALESCE(p.brand, '')), 1, 1)) = @initial"
     : undefined
   if (initialClause) {
     params.initial = initial.toUpperCase()
@@ -1624,11 +1629,11 @@ async function runPortalProductSearch(c: { env: Env; req: { query(): Record<stri
   // than the grid can possibly show. Matches buildPortalCatalog's rail above
   // and loadProductFilters' rail in admin.
   const initials = await db.prepare(`
-    SELECT upper(substr(trim(p.name), 1, 1)) AS value,
+    SELECT upper(substr(trim(p.brand), 1, 1)) AS value,
            COUNT(DISTINCT COALESCE(NULLIF(p.name_key, ''), CAST(p.id AS TEXT))) AS count
     FROM products p
     ${initialsJoins.join('\n')}
-    WHERE ${initialsWhere.join(' AND ')} AND trim(COALESCE(p.name, '')) <> ''
+    WHERE ${initialsWhere.join(' AND ')} AND trim(COALESCE(p.brand, '')) <> ''
     GROUP BY value
     ORDER BY value ASC
   `).all<{ value: string; count: number }>(initialsParams)
