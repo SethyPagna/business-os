@@ -124,22 +124,42 @@ autocorrect — templates, imports, exports and generated files alike.*
   single synthetic date, wrong format for the importer; fixed copy generated
   (`products-import-aug27-FIXED.csv`). Real received dates live in the stock-in
   history, so batches should come from there, not the template's batch column.
+- [x] M1b. **Deep pass (Part 372).** Date order PROVEN `YYYY-MM-DD` in every old text
+  export (12,413 rows have day > 12 in day position; zero anomalies in month position) —
+  the dd/mm warning applies to the old app's display, not these files; outputs stay ISO.
+  **Canonical identity mapping** over 6,218 distinct old products: 5,776 barcode + 226
+  exact-name + 127 strong-fuzzy (≥0.80) = **6,129 auto-mapped (98.6%)**; **72 review**
+  rows (each with top-3 template candidates + old-vs-template cost as a tie-breaker —
+  mostly size/shade variants where a wrong merge would corrupt identity) and **17
+  genuinely new/junk**. Event files now carry the TEMPLATE name/barcode/brand/category
+  on auto rows (`identity` column records the tier; old identity preserved beside it).
+  **Ledger validation:** Begin+In−Sold(±Adj)=End holds for 5,725/5,903; the 178
+  failures are in `ledger_validation_failures.csv` with residuals. **Period discovery:**
+  the old stock-report is a **2026-01-01 → now period report** (best-fit period start by
+  a wide margin, and reported Stock-In never exceeds the summed lines) — its columns are
+  renamed `beginning_qty_2026_01_01 / stock_in_2026 / stock_out_sold_2026 /
+  ending_qty_current`, and lifetime per-product sales are NOT derivable from these files.
 - [ ] M2. Import `products-import-aug27-FIXED.csv` (Products import, update-stock mode,
   through the two-screen review) — brings the live catalog's stock current and adds the
   76 new rows. User-driven in the UI; the file is ready.
-- [ ] M3. User decides the **218 unmatched old-system products**
-  (`unmatched_products_review.csv`): add as new products or retire.
+- [ ] M3. User decides the **72 review + 17 new** rows in `product_mapping.csv`
+  (supersedes the earlier 218-row list — fuzzy matching resolved most). Web-verifying
+  official names is the tie-breaker for the review rows if wanted.
 - [ ] M4. Load `stock_in_history.csv` (21,287 rows, real received dates 2024-07-09 →
   2026-08-27) through the unified stock-action import so history becomes real batches —
   AFTER the Workers-Paid cap raise (A4): today's 480-row/60-unit apply cap means ~45
   jobs; raise the caps first, then batch it.
-- [ ] M5. Historical SALES linkage (awaiting old-system sales/customer exports — the
-  nine files carry none): match customers by phone then name; matched customers'
-  imported sales must show in their history/search. **Loyalty flag prerequisite:**
-  points balances are COMPUTED by summing sales (`routes/sales.ts` aggregation), so
-  imported sales need `loyalty_accrual = 0` (new column) filtered in every points
-  aggregation (sales route, portal, analytics) — plus a visible on/off accrual control
-  for live sales (previously always auto-counted). Cross-refs Phase G loyalty.
+- [~] M5. Historical SALES linkage. **The loyalty prerequisite is DONE in code
+  (Part 372, needs migrations/deploy):** migration `0061` adds `sales.loyalty_accrual`
+  (default 1); every aggregation (sales route redemption check, shared
+  `summarizePoints` fed by portal + contacts, notifications loyalty section) skips the
+  EARN for accrual=0 rows while still counting points redeemed on them; the historical
+  sales import always writes 0; POS gains a per-sale "Count loyalty points" toggle
+  (default ON, shown for any selected customer). `test-loyalty-accrual-pure.cjs` proves
+  it against the real migrations + real route SQL + real kernel source. **Still open:**
+  the sales import itself awaits the old system's dated sales/customer export (the nine
+  files carry none — the stock-report's Sold column is 2026-only); customers match by
+  phone then name against the de-duplicated contacts when it arrives.
 - [ ] M6. Adjustments (930), expenses (4,240) and PO invoices (3,204) land with their
   Phase D features — stock-change ledger, expense import, supplier accounting. The
   CSVs already use the final column naming, so those importers should accept them as-is.
@@ -159,12 +179,15 @@ autocorrect — templates, imports, exports and generated files alike.*
   page for the old pattern (no `InfoHint className="absolute…"` call sites remain — verify
   visually), then the click-to-view detail panels' responsiveness (5.3), then 5.4's
   Dashboard-vs-Inventory metric symmetry.
-- [ ] B2. Contact field labels tell the truth: "Contact Person" on Suppliers actually
-  holds a phone number — relabel to Phone Number (en+km) and make phone the first/default
-  field for supplier, customer AND delivery contact forms. Label = what the field holds.
-- [ ] B3. POS delivery panel compaction: rider search + fee on ONE row; the `= …៛` KHR
-  hint absorbed into that row; "Fee paid by" label + Customer/Store toggle on one row with
-  buttons sized to their text (no full-width halves).
+- [x] B2. **DONE (Part 372, needs deploy).** Supplier form's first field is now "Phone
+  Number" (edits the primary contact option's phone; the person's name stays editable in
+  the option rows and contact_person is still derived on save — no data loss). Customer
+  form + POS quick-add put Phone Number directly after the name, ahead of membership.
+  New `phone_number` en+km key. Delivery forms already led with phone.
+- [x] B3. **DONE (Part 372, needs deploy).** POS delivery: rider search + fee share one
+  row; the standalone `= KHR` echo removed (the paid-by note already shows USD (KHR)
+  added/absorbed); "Fee paid by" label + Customer/Store toggle on one row, buttons sized
+  to their text.
 - [ ] B4. "Delivery was made into the category column — separate it." **Needs locating
   before changing** (Golden Rule 7): find where a delivery value renders inside a
   category column (Sales list? Contacts?), confirm with a screenshot/DOM read, then split
@@ -1397,6 +1420,17 @@ chain + build re-ran green after the Login change; backend untouched. **The depl
 itself is blocked for the assistant by the permission classifier — the user must run
 `npm run deploy:full`** (from `cloudflare/`), then A2/A5's live checks apply. Google
 Drive measured to still hold ZERO backup files post-deploy — A3 is a real bug hunt.
+
+**Part 372 (Aug 28, third batch — deep reconciliation + first build work):**
+M1b deep pass done (canonical mapping 98.6% auto over 6,218 old products, date order
+proven ISO, ledger validation 5,725/5,903, stock-report identified as a 2026-01-01
+period report; pack regenerated with template identity applied). Landed in code
+(`204584ea`, `84b91b0f`, `d40138b8`): the loyalty-accrual flag end-to-end (migration
+`0061` + every aggregation + import writes 0 + POS toggle + pure test), POS delivery
+row compaction (B3), phone-first contact forms (B2). Verified this session: new test
+passes, full backend sweep **80/80 = 0 failures**, both typechecks clean, full frontend
+chain green, build 13.55s. Migrations `0059`–`0061` are committed but NOT yet applied
+remotely — the next `npm run deploy:full` applies them.
 
 **Nothing is deployed.** Every fix Parts 346–369 — including the two production outages
 (0.1, 0.2) and the storefront Install bug (16.1) — is committed and waiting on

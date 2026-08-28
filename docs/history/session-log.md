@@ -7534,3 +7534,49 @@ the user must run it, then verify A2/A5 (possible DNS-record conflict on
 admin.leangbeauty.com; Google OAuth console needs the two new redirect URIs; Resend
 needs the new domain verified). M2–M7 (imports themselves), the loyalty flag/toggle,
 and everything else in the master plan phases B–K.
+
+## Part 372 (chat, Aug 28 2026) — deep reconciliation v2, loyalty accrual flag, first Phase-B build work
+
+**Ask.** Go deeper into the nine data files: canonicalize old-system rows to the
+template's naming/barcode/brand/category, reconcile broken naming/barcodes, watch for
+dd/mm vs mm/dd, make in/out/adjustment data reconcile "with little errors" — then
+start fixing/polishing the app.
+
+**What changed.**
+- Migration pack v2 (`Downloads/businessos-migration-aug28/`): canonical
+  `product_mapping.csv` (auto/review/new tiers; review rows carry top-3 template
+  candidates + cost tie-breaker), event files rewritten with template identity applied
+  on auto rows (old identity kept beside it), `ledger_validation_failures.csv`,
+  period-true column names on the stock summary, README rewritten.
+- `204584ea` loyalty accrual: migration 0061 `sales.loyalty_accrual` default 1; earn
+  skipped for accrual=0 at every aggregation (sales route SQL, summarizePoints kernel
+  + portal/contacts feeds, notifications); redeemed still counted; historical sales
+  import writes 0; POS route accepts explicit false. `test-loyalty-accrual-pure.cjs`
+  runs the real SQL + real kernel source against the real migration schema.
+- `84b91b0f` POS: per-sale "Count loyalty points" switch (default ON, any selected
+  customer); delivery search + fee on one row, `= KHR` echo removed, fee-paid-by label
+  + text-fit toggle on one row; quick-add customer phone-first.
+- `d40138b8` contacts: supplier's first field is Phone Number (edits primary option
+  phone; contact_person still derived, data preserved); customer form phone above
+  membership; `phone_number` key added en+km (alphabetical position).
+
+**What was found.**
+- Date order in every old text export is PROVEN `YYYY-MM-DD` (12,413 day>12 cases in
+  day position, zero in month position) — the dd/mm risk was display-only.
+- The old stock-report is a **2026-01-01 → now period report**: Stock-In equals the
+  summed stock-in lines for 4,569/5,867 products at that period start (best fit by a
+  wide margin) and NEVER exceeds the lines. Lifetime sold is not derivable from it.
+- Old-system internal ledger holds for 5,725/5,903 products; 178 residuals exported.
+- 6,218 distinct old products: 98.6% auto-map to the template (barcode → exact name →
+  fuzzy ≥0.80); 72 need review (size/shade traps like 200ml vs 125ml — never
+  auto-merged); 17 genuinely new/junk.
+
+**Verified.** `test-loyalty-accrual-pure.cjs` green; full backend sweep **80/80, 0
+failures**; both `tsc --noEmit` clean; full frontend `test:utils` chain green;
+production build 13.55s. Reconciliation numbers are from the scripts' actual runs.
+
+**Not done.** Deploy (user runs `npm run deploy:full` — applies 0059–0061 and the
+domain custom-domains config). M2 (products import via UI), M3 (72+17 decisions), M4
+(stock-in history load after the A4 cap raise), M5's sales import (awaiting the old
+system's dated sales export), M6, M7 sweep as a tested contract, and the rest of
+phases B–K.
