@@ -5,6 +5,10 @@ import {
   __resetApiWriteDedupeForTests,
   apiFetch,
   buildApiRequestDedupeKey,
+  cacheGet,
+  cacheInvalidate,
+  cacheInvalidateWithDerived,
+  cacheSet,
   createApiVersionMismatchError,
   isTransientGatewayError,
   isCloudflareAccessRedirectResponse,
@@ -1460,6 +1464,30 @@ await runTest('large search methods do not use empty local fallbacks for require
   assert.doesNotMatch(source, /products:search:\$\{q\}`,[\s\S]{0,240}\(\)\s*=>\s*\(\{\s*items:\s*\[\]/)
   assert.doesNotMatch(productReadTransportSource, /products:search:\$\{query\}`,[\s\S]{0,240}\(\)\s*=>\s*\(\{\s*items:\s*\[\]/)
   assert.doesNotMatch(source, /inventory:products:search:\$\{q\}`,[\s\S]{0,260}\(\)\s*=>\s*\(\{\s*items:\s*\[\]/)
+})
+
+await runTest('Y18: derived dashboard/analytics caches die with their entity group', () => {
+  const httpSource = fs.readFileSync(new URL('../src/api/http.ts', import.meta.url), 'utf8')
+  // Behavioral: invalidating any of the four entity groups clears the
+  // aggregation reads derived from them; unrelated groups leave them alone.
+  for (const entity of ['sales', 'returns', 'products', 'inventory']) {
+    cacheSet('dashboard:get', { marker: entity })
+    cacheSet('analytics:get:x', { marker: entity })
+    cacheSet(`${entity}:get:`, [1])
+    cacheInvalidateWithDerived(entity)
+    assert.equal(cacheGet('dashboard:get'), null, `dashboard cache must die with ${entity}`)
+    assert.equal(cacheGet('analytics:get:x'), null, `analytics cache must die with ${entity}`)
+    assert.equal(cacheGet(`${entity}:get:`), null)
+  }
+  cacheSet('dashboard:get', { keep: true })
+  cacheInvalidateWithDerived('settings')
+  assert.deepEqual(cacheGet('dashboard:get'), { keep: true }, 'unrelated groups must not clear dashboard')
+  cacheInvalidate('dashboard')
+  // Wiring: both invalidation paths (sync:update listener + write success)
+  // and the conflict path go through the derived-aware helper.
+  assert.match(httpSource, /cacheInvalidateWithDerived\(channel\)/)
+  assert.match(httpSource, /cacheInvalidateWithDerived\(channel\.split\(':'\)\[0\]\)/)
+  assert.match(httpSource, /cacheInvalidateWithDerived\(refreshChannel\)/)
 })
 
 if (failed > 0) {

@@ -235,6 +235,25 @@ export function cacheSet(key: string, data: any): void  { _cache[key] = { data, 
 export function cacheInvalidate(prefix: string): void {
   Object.keys(_cache).forEach(k => { if (k.startsWith(prefix)) delete _cache[k] })
 }
+
+// Y18: aggregation reads DERIVED from an entity must die with it. The
+// dashboard/analytics payloads are computed from sales/returns/products/
+// inventory, but their cache channels start with 'dashboard'/'analytics' --
+// so a sale write (or its sync:update) invalidated only 'sales*' and the
+// Dashboard's own refresh then re-served the pre-write numbers from a
+// still-fresh 20s cache (the reported "cancelled sale still shows
+// completed"). Declared ONCE here; both invalidation paths below apply it.
+const DERIVED_READ_PREFIXES: Record<string, string[]> = {
+  sales: ['dashboard', 'analytics'],
+  returns: ['dashboard', 'analytics'],
+  products: ['dashboard', 'analytics'],
+  inventory: ['dashboard', 'analytics'],
+}
+
+export function cacheInvalidateWithDerived(prefix: string): void {
+  cacheInvalidate(prefix)
+  for (const derived of DERIVED_READ_PREFIXES[prefix] || []) cacheInvalidate(derived)
+}
 export function cacheClearAll(): void {
   Object.keys(_cache).forEach(k => delete _cache[k])
   Object.keys(_inflight).forEach(k => delete _inflight[k])
@@ -259,7 +278,7 @@ export function ensureSyncUpdateCacheListener(): void {
       cacheClearAll()
       return
     }
-    cacheInvalidate(channel)
+    cacheInvalidateWithDerived(channel)
   })
 }
 
@@ -1284,7 +1303,7 @@ export async function route<T = any>(
     // the next write would succeed; try the write and let the request result
     // decide whether the operation is valid.
     const result = await serverFn()
-    cacheInvalidate(channel.split(':')[0])
+    cacheInvalidateWithDerived(channel.split(':')[0])
     setServerHealth(true)
     logCall(channel, 'server', Date.now() - t0)
     return result
@@ -1313,7 +1332,7 @@ export async function route<T = any>(
     logCall(channel, 'server', ms, false)
     if (isWriteConflictError(e)) {
       const refreshChannels = getConflictRefreshChannels(e, channel)
-      refreshChannels.forEach((refreshChannel) => cacheInvalidate(refreshChannel))
+      refreshChannels.forEach((refreshChannel) => cacheInvalidateWithDerived(refreshChannel))
       dispatchGlobalDataRefresh(refreshChannels)
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new CustomEvent('sync:conflict', {
