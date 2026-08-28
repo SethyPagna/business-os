@@ -637,8 +637,29 @@ export default function ProductForm({
     setForm((current) => ({ ...current, [key]: value }))
   }
 
+  // Part 388 "Canva-level" persistence: the in-progress form autosaves to
+  // localStorage (debounced) and comes back after a crash, reload, or
+  // accidental close. The draft is cleared on a successful save and on an
+  // explicit Discard & Leave; a draft older than the product's own
+  // updated_at is dropped rather than resurrecting stale edits over newer
+  // server data.
+  const draftKey = `bos_draft_product_${product?.id ?? 'new'}`
   useEffect(() => {
     formDirtyRef.current = false
+    try {
+      const raw = localStorage.getItem(draftKey)
+      if (raw) {
+        const draft = JSON.parse(raw) as { at?: number; form?: Partial<ProductFormState> }
+        const serverEditedAt = (product as Record<string, unknown> | null)?.updated_at ? Date.parse(String((product as Record<string, unknown>).updated_at)) : 0
+        if (draft?.form && (!serverEditedAt || (draft.at || 0) > serverEditedAt)) {
+          setForm((current) => ({ ...current, ...draft.form }))
+          formDirtyRef.current = true
+          // (no notify prop here -- the restored values themselves are the signal)
+        } else {
+          localStorage.removeItem(draftKey)
+        }
+      }
+    } catch { /* draft storage unavailable -- form still works */ }
     const productLabel = String(product?.name || form.name || '').trim()
     return registerDirtyWork({
       key: `product-form-${product?.id ?? 'new'}`,
@@ -649,9 +670,19 @@ export default function ProductForm({
       // identity validation -- auto-submitting from a navigation prompt
       // would surface those errors in a page the user is trying to leave.
       // The guard offers Discard & Leave / Stay for this entry.
+      discard: () => { try { localStorage.removeItem(draftKey) } catch { /* fine */ } },
     })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [product?.id])
+
+  useEffect(() => {
+    if (!formDirtyRef.current) return
+    const timer = window.setTimeout(() => {
+      try { localStorage.setItem(draftKey, JSON.stringify({ at: Date.now(), form })) } catch { /* full/blocked */ }
+    }, 800)
+    return () => window.clearTimeout(timer)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form, draftKey])
 
   function setNumericField(key: keyof ProductFormState, value: unknown, options?: NumericInputOptions): void {
     setField(key, sanitizeNumericInput(value, options))
@@ -808,6 +839,9 @@ export default function ProductForm({
     setSaving(true)
     try {
       await Promise.resolve(onSave(payload))
+      // Saved for real -- the autosaved draft is now history (Part 388).
+      formDirtyRef.current = false
+      try { localStorage.removeItem(draftKey) } catch { /* fine */ }
     } catch (error) {
       alert(getErrorMessage(error, tr('failed', 'Failed', 'បរាជ័យ')))
     } finally {

@@ -2120,6 +2120,32 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
     return () => window.removeEventListener('beforeunload', handler)
   }, [])
 
+  // Browser BACK/FORWARD (popstate) goes through the SAME guard (Part 388
+  // -- the recorded N2 limit). This also fixes a latent gap: popstate only
+  // bumped a render counter before, so Back changed the URL without ever
+  // changing the page. Clean state follows the history entry; dirty state
+  // re-asserts the current page's URL (undoing the back) and opens the
+  // guard for the intended target instead.
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const onPopState = () => {
+      const target = getAdminPageFromPath(window.location.pathname) || 'dashboard'
+      if (target === pageRef.current || !canAccessPage(target)) return
+      const dirty = getDirtyWork()
+      if (dirty.length > 0) {
+        const currentPath = getAdminPathForPage(pageRef.current)
+        if (currentPath) {
+          window.history.pushState(window.history.state, '', `${currentPath}${window.location.search}${window.location.hash}`)
+        }
+        setNavGuard({ pageId: target, entries: dirty })
+        return
+      }
+      startTransition(() => setPage(target))
+    }
+    window.addEventListener('popstate', onPopState)
+    return () => window.removeEventListener('popstate', onPopState)
+  }, [canAccessPage])
+
   // Currency helpers.
   const exchangeRate    = parseFloat(String(settings.exchange_rate || '4100'))
   const usdSymbol       = String(settings.currency_usd_symbol || '$')

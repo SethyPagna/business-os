@@ -82,16 +82,46 @@ export default function ReceiveBatchModal({
     quantity !== '1' || expiryDate !== '' || notes !== '' ||
     supplierName !== '' || unitCost !== '' || paymentStatus !== '' || creditDueDate !== ''
   )
+  // Part 388 "Canva-level" persistence: typed values survive a crash,
+  // reload, or accidental close via a per-product localStorage draft --
+  // cleared on a successful receive and on explicit Discard & Leave.
+  const draftKey = product ? `bos_draft_receive_${product.id}` : ''
   useEffect(() => {
     if (!product) return
+    try {
+      const raw = localStorage.getItem(draftKey)
+      if (raw) {
+        const draft = JSON.parse(raw) as Record<string, string>
+        if (draft.quantity !== undefined) setQuantity(draft.quantity)
+        if (draft.receivedDate) setReceivedDate(draft.receivedDate)
+        if (draft.expiryDate !== undefined) setExpiryDate(draft.expiryDate)
+        if (draft.notes !== undefined) setNotes(draft.notes)
+        if (draft.supplierName !== undefined) setSupplierName(draft.supplierName)
+        if (draft.unitCost !== undefined) setUnitCost(draft.unitCost)
+        if (draft.paymentStatus === 'paid' || draft.paymentStatus === 'credit' || draft.paymentStatus === '') setPaymentStatus(draft.paymentStatus)
+        if (draft.creditDueDate !== undefined) setCreditDueDate(draft.creditDueDate)
+      }
+    } catch { /* storage unavailable -- modal still works */ }
     return registerDirtyWork({
       key: `receive-batch-${product.id}`,
       pageId: 'inventory',
       label: `${tr('receive_batch', 'Receive Batch')}${product.name ? ` — ${product.name}` : ''}`,
       isDirty: () => dirtyStateRef.current,
+      discard: () => { try { localStorage.removeItem(draftKey) } catch { /* fine */ } },
     })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [product?.id])
+
+  useEffect(() => {
+    if (!product || !dirtyStateRef.current) return
+    const timer = window.setTimeout(() => {
+      try {
+        localStorage.setItem(draftKey, JSON.stringify({ quantity, receivedDate, expiryDate, notes, supplierName, unitCost, paymentStatus, creditDueDate }))
+      } catch { /* full/blocked */ }
+    }, 600)
+    return () => window.clearTimeout(timer)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [quantity, receivedDate, expiryDate, notes, supplierName, unitCost, paymentStatus, creditDueDate])
 
   if (!product) return null
 
@@ -129,6 +159,7 @@ export default function ReceiveBatchModal({
         return
       }
       notify(tr('batch_received', 'Batch stock received'))
+      try { localStorage.removeItem(`bos_draft_receive_${productId}`) } catch { /* fine */ }
       onReceived()
       onClose()
     } catch (e: unknown) {
