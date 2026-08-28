@@ -121,6 +121,14 @@ export function getProductsByIds(ids: unknown[] = [], params: QueryParams = {}):
   return routeCachedProductQuery(cacheKey, appendQuery('/api/products/search', query))
 }
 
+// D3: the product detail page's one-round-trip report -- per-lot totals,
+// per-supplier totals, and the sales breakdown. Fresh on every open for
+// the same reason as the ledger below.
+export function getProductDetailReport(productId: number | string, params: QueryParams = {}): Promise<unknown> {
+  const query = buildQueryString(params)
+  return apiFetch('GET', appendQuery(`/api/products/${encodeURIComponent(String(productId))}/detail-report`, query))
+}
+
 // D1: the Stock Change ledger read. Deliberately NOT routed through the
 // cached-query path -- a ledger must reflect the write that just happened,
 // and the section refetches on open/page/view changes anyway.

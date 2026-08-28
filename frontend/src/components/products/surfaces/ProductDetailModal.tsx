@@ -13,6 +13,10 @@ import { lazyRetry } from '../../../utils/lazyImport.ts'
 import { ADMIN_MAX_PRODUCT_GALLERY_IMAGES } from '../helpers/productGalleryHelpers.ts'
 
 const ProductDescriptionDetailModal = lazyRetry(() => import('./ProductDescriptionDetailModal'), 'products-description-detail-modal')
+// D3 (Part 422): the detail page's report sections (batch summary,
+// movements with running balance, sales breakdown, suppliers) -- its own
+// chunk, loaded only when a detail pane opens.
+const ProductDetailReport = lazyRetry(() => import('./ProductDetailReport.tsx'), 'products-detail-report')
 
 // Truncation length for the description Row's inline preview -- long
 // enough to still be useful at a glance, short enough that a real
@@ -496,6 +500,19 @@ export default function ProductDetailModal({
               </span>
               {onManageBatches ? <ChevronRight className="h-3.5 w-3.5 flex-shrink-0 text-gray-300" /> : null}
             </button>
+          ) : null}
+
+          {/* D3 (Part 422): the report sections per the user's detail-page
+              spec -- folded SectionCards so the compact info pane above
+              stays the at-a-glance view it always was. Needs a real
+              product id (a just-created optimistic row without one simply
+              doesn't render the reports yet). */}
+          {Number(p.id) > 0 ? (
+            <div className="border-t border-gray-100 pt-2 dark:border-gray-700">
+              <Suspense fallback={<p className="py-2 text-center text-xs text-gray-400">...</p>}>
+                <ProductDetailReport productId={Number(p.id)} t={t || (() => undefined)} fmtUSD={fmtUSD} />
+              </Suspense>
+            </div>
           ) : null}
         </div>
 
