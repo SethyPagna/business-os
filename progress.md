@@ -1627,13 +1627,19 @@ other" with the Phase-Y items.*
   branch_stock for the named branch but never a branch_batch_stock row, so
   a product with warehouse stock whose only lot sits at shop shows lot-qty
   0 at warehouse. POS/Products READ per-branch qty from branch_stock (the
-  correct aggregate — line 346/363/648 in routes/products.ts), so the POS
-  grid should be right; the "shows 0" is most likely the batch/lot DETAIL
-  view (branch_batch_stock) or a GROUP-level per-branch aggregation.
-  REMAINING: confirm which surface shows 0 for the user, then either
-  reconcile lots↔branch_stock (a migration seeding the missing
-  branch_batch_stock rows) or fix the group per-branch read. Needs the
-  user to point at the exact screen.
+  correct aggregate — line 346/363/648 in routes/products.ts). **CONFIRMED
+  + FIXED (Part 427, needs deploy):** the user pointed at the batch DETAIL —
+  "batch per row shows 0" and the branch selector "doesn't change the stock,
+  just grand total". Both are the same root cause: branch_batch_stock had
+  1,253 missing rows (+4 drifted), so the lot detail read 0 and switching
+  branches showed nothing while the branch_stock grand total was right.
+  Migration 0079 reconciles branch_batch_stock to branch_stock for the
+  single-lot products (all 6,105 of them — unambiguous attribution),
+  inserting missing rows and correcting drift, leaving any multi-lot product
+  untouched; verified on synthetic data (insert/correct/skip-multi/
+  idempotent) + real chain. The import-writer gap that created the drift
+  (two-branch rows) is left for a focused fix per the P7-f/K4 mid-migration
+  stability deferral. (a) the date-vs-lot-code display rule stays open.
 - [ ] Z2. **Cart: decouple product-level discount from the selling-price
   input — SCOPED, deferred (Part 426).** Applying a discount currently
   rewrites the price field (the input binds to applied_price_usd, which
@@ -1685,7 +1691,18 @@ other" with the Phase-Y items.*
   Reconcile the two pages' numbers to the shared kernel (single-source rule),
   then add "Reconcile Revenue" as an 8th Dashboard stat while Branch keeps
   its 6 operational stats. NEEDS the user first: the exact definition of
-  "Reconcile Revenue" (what it reconciles against what).
+  "Reconcile Revenue" (what it reconciles against what). NOTE: the Dashboard
+  already has 8 outer stats after Z11, so "Reconcile Revenue" would be a 9th
+  or replace one — clarify against Z11's new layout.
+- [x] Z11. **Revenue stat slimmed + Delivery promoted (Part 427 — SHIPPED,
+  needs deploy; user, Aug 29: "revenue stats has too many folded stats
+  inside, i want it less... an additional stat outside so it is even").**
+  The Revenue card folded 10 sub-stats and the outer count was odd (7).
+  Revenue now folds only Net revenue / Gross revenue / Discounts / Refunds /
+  Tax (5); COGS + Gross profit stay in the Profit card; the delivery lines
+  moved to a NEW outer Delivery card (fees / actual courier cost n/m /
+  margin / store-paid), making the outer count EVEN at 8. P6 staff-only
+  scoping preserved. Verified live: 8 cards render.
 
 ### Flagged, not guessed (Golden Rule 7)
 

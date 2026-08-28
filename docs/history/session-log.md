@@ -10374,3 +10374,59 @@ larger), Z7 (stats redundancy + Khmer contrast), Z8 (explicit Credit /
 awaiting-payment editing), Z9 ("Complete Sale" rename + InfoHint), Z10
 (Dashboard/Branch reconcile + "Reconcile Revenue" — needs the definition).
 Everything shipped needs the next deploy (migrations 0077 + 0078).
+
+## Part 427 (Aug 29 2026, session business-os-v1-43) — Z1b batch-stock reconcile + Revenue stat slim (Z11)
+
+**Ask.** Follow-up on Phase Z: "Z1b batch per row shows 0... for the detail
+above the options don't change the stock based on select, just grand total"
+and "revenue stats has too many folded stats inside, i want it less... an
+additional stat outside so it is even number of stats outside."
+
+**What changed / found.**
+
+- **Z1b (batch rows show 0; branch selector doesn't re-scope) — root-caused
+  and fixed.** Both symptoms are the same cause: measured on production, every
+  one of ~6,100 products has exactly ONE active lot, but branch_batch_stock
+  had 1,253 MISSING rows (+4 drifted) versus branch_stock — the catalog
+  import created lots + branch_stock but not a branch_batch_stock row for
+  every product/branch (two-branch rows). So the lot detail read 0 and
+  switching the branch selector showed nothing, while the branch_stock grand
+  total was correct. Migration 0079 reconciles branch_batch_stock to
+  branch_stock for single-lot products (all of them — one lot means
+  unambiguous attribution): inserts the missing rows, corrects the drifted
+  ones, leaves any multi-lot product untouched. Verified on synthetic data
+  mirroring the production shape (insert missing / correct drift / skip
+  multi-lot / idempotent) and that the full chain applies through 0079. The
+  import-writer gap that creates the drift is left for a focused fix (P7-f/K4
+  mid-migration stability deferral). Commit `6b09a719`.
+- **Z11 (Revenue folds too many; make the outer count even).** The Revenue
+  card folded 10 sub-stats and the outer stat count was odd (7). Revenue now
+  folds only its core money-in story — Net revenue, Gross revenue, Discounts,
+  Refunds, Tax (5); COGS + Gross profit stay in the Profit card (no loss);
+  the delivery lines (fees, actual courier cost with n/m-recorded, margin,
+  store-paid) move to a NEW outer Delivery card. That makes the outer count
+  EVEN at 8 (Products, Stock Value, Revenue, Discounts, Gross Profit,
+  Transactions, Returns, Delivery). Delivery keeps P6's staff-only scoping
+  (cost never touches Profit, never on receipts). Loading skeleton 7->8; new
+  en+km keys (delivery, margin_short, store_paid_delivery, dash_info_delivery).
+  Commit `8adfc72a`.
+
+**Verified.** frontend `tsc --noEmit` clean (except 6e's in-flight onMinimize).
+Migration 0079 applies through the real chain; synthetic-data test of its
+insert/correct/skip-multi/idempotent behavior passes. dashboardDataReliability
++ exportOptions tests PASS; langKeyIntegrity fails ONLY on 6e's
+minimized_dismiss_hint (their uncommitted file). Live on worker-dev: the
+Dashboard renders 8 KPI cards with the new Delivery card and the slimmed
+Revenue.
+
+**Production reads (read-only):** single vs multi-lot product counts (6,105 /
+0), missing/mismatched branch_batch_stock rows (1,253 / 4).
+
+**Not done.** Z1a (date-vs-lot-code display rule), Z2 (discount decouple —
+scoped), Z3a (live Sales summary refresh), Z4 (receipt-settings dual preview),
+Z5 (global contrast + hamburger), Z7 (stats redundancy + Khmer contrast), Z8
+(explicit Credit / awaiting-payment editing), Z9 ("Complete Sale" rename), Z10
+(Dashboard/Branch reconcile + "Reconcile Revenue" — needs the definition, and
+now interacts with Z11's 8-card layout). The import-writer two-branch drift
+(root of Z1b) — a focused fix after the migration phase. Everything shipped
+needs the next deploy (migration 0079 + the earlier 0077/0078).
