@@ -8684,3 +8684,23 @@ this part -- B4's fix is data-shape, P7's deliverable is the measured list.
 
 **Not done.** P7-a/b/c fixes (deferred while their files sit in the G1
 session's footprint -- each is its own checkbox under P7 now); deploy (user).
+
+### Part 394 addendum -- 10.2 root-caused and fixed
+
+The "Edit does not auto-move sections back to Details" product-form bug:
+`formInitialTab` in Products.tsx survived a save. "Adjust Stock" opens the
+form with 'stock'; BOTH save-success close paths (update and create) call
+setModal(null) without resetting the tab (only the explicit onClose/onDelete
+callbacks reset it); the toolbar "Add product" opened the form WITHOUT
+passing a tab -- so after one Adjust Stock + save, the next Add/Edit opened
+mid-sections on Stock. ProductForm's own resetKey guard (the earlier
+"snaps back to Basic" fix) is per-mount and could not help across opens.
+
+Fixed at the root rather than patching each scattered close: the tab is SET
+at every open (toolbar Add now passes 'basic' explicitly; openProductFormTab
+already did), with the invariant documented at the state declaration --
+a stale value from a previous open can never leak again. frontend tsc clean
+(over the G1 session's in-flight tree, incidentally confirming theirs
+compiles too). Commit c904a9fd. Products.tsx was untouched by the G1 session
+at commit time (verified: the file's whole diff was this fix) and is
+released back to cold.
