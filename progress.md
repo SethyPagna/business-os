@@ -73,7 +73,7 @@ Two rules learned the hard way, both from real incidents in this file's own hist
 - [ ] A2. Live-verify the deploy checklist: reset-data, /api/products, POS sale with lots,
   storefront iPhone install (delete old shortcut first), import round-trip, R2 keeps
   exactly 2 finalized sets.
-- [ ] A3. **Google Drive mirror produces NOTHING — measured, not assumed.** A Drive
+- [x] A3 *(Part 386: root cause MEASURED — production has ZERO drive_sync settings rows: Drive was never CONNECTED, so the scheduled sync silently skipped forever. The OAuth flow is fully implemented (compat.ts /system/drive-sync/*); after deploy the user connects in Settings → Backup. Retention 7→10; the stale "OAuth isn't implemented" comment removed; notifications now carry a STANDING admin warning while Drive is not connected — the exact state that was invisible.)* **Google Drive mirror produces NOTHING — measured, not assumed.** A Drive
   search for business-os/backup files on Aug 28, AFTER the deploy, returns zero results.
   So the mirror is genuinely broken or never triggered (candidates: cron/backup never ran
   since deploy, Drive OAuth token absent in production secrets, silent skip path). Debug
@@ -596,7 +596,7 @@ deep-linkable tabs.*
   VIP/cost, ±, USD/KHR) operates on the selection; add an explicit "ALL products in
   the system" scope that runs server-side in bounded batches with a preview count and
   the standard confirm — never by materializing 8k ids in the client.
-- [ ] P4. **Product name tag label.** Optional per-product short tag shown as a chip
+- [x] P4 *(Part 386: migration 0069 tag_label; form field; chip on POS cards + group summary pills; in every client search haystack + a tag_label facet filter server-side incl. the /filters distinct list. Column-driven write path made the backend free.)* **Product name tag label.** Optional per-product short tag shown as a chip
   next to the name (a user's own memory aid), additive migration
   (`products.tag_label TEXT`), editable in the form, searchable and filterable.
 - [~] P7. **Identity rules + feature parity across ALL codepaths (user, Aug 28).**
@@ -626,7 +626,7 @@ deep-linkable tabs.*
   exports); this system records them only as the sale's delivery fields. The sales
   migration already converts old delivery line items into delivery fees; no importer,
   report or UI may reintroduce the old shape.
-- [ ] P6. **Delivery stat drill-down:** inside the delivery stat, the customer-charge
+- [x] P6 *(Part 386: migration 0068 delivery_actual_cost_usd/khr; POS fee-paid-by row gains the staff-only Cost input (NULL when untyped, so "not recorded" ≠ "0"); kernel sums actual + margin + recorded-count WITHOUT touching profit (standing rule); Dashboard revenue drill shows Actual delivery cost (n/m recorded) + Delivery margin; portal/receipts structurally excluded — column whitelists.)* **Delivery stat drill-down:** inside the delivery stat, the customer-charge
   figure carries a separate sub-stat for ACTUAL delivery cost (and the margin) —
   staff-only per C2's redaction scope. Extends C3's shared kernel.
 
@@ -760,6 +760,19 @@ deep-linkable tabs.*
   `customers-missing-from-sales.csv` (53 phone-carrying customers ranked by
   receipts). Pack re-validated end-to-end (validator now falls back to the recorded
   source footer when the original .xls has left Downloads); xlsx twins regenerated.
+
+### Phase U — Aug-28 thirteenth batch (Part 386): backlog continuation
+
+- [x] U1. **A3 closed** — Drive mirror root cause measured (never connected, zero
+  settings rows), standing not-connected admin warning added, retention 7→10, the
+  stale 'OAuth not implemented' record corrected, and (found in passing) the Part
+  382 supplier-credit setting keys finally LOAD — they were written by Settings but
+  missing from NOTIFICATION_SETTING_KEYS, so defaults always applied.
+- [x] U2. **P6 closed** — 0068 delivery_actual_cost, POS staff-only Cost input,
+  kernel actual/margin/recorded-count (profit deliberately untouched), Dashboard
+  drill lines, portal/receipt exclusion verified.
+- [x] U3. **P4 closed** — 0069 tag_label end to end (form, chips, both client
+  search haystacks, server facet filter + /filters distinct list).
 
 ### Flagged, not guessed (Golden Rule 7)
 
@@ -1807,7 +1820,7 @@ the switch and its reasoning are recorded in `wrangler.toml`.
 
 ## Current status
 
-**As of Part 384 (Aug 28 2026).** Everything below was really run in this local Windows
+**As of Part 386 (Aug 28 2026).** Everything below was really run in this local Windows
 checkout with full `node_modules`, working `better-sqlite3`, and network access — see
 [Environment notes](#environment-notes). Golden Rule 5: a claim here is not evidence; these
 are the commands' actual results this session.
@@ -1816,10 +1829,10 @@ are the commands' actual results this session.
 |---|---|
 | `frontend` `tsc --noEmit` | **clean** (Part 384 rerun after the purchases modal + supplier drill) |
 | `cloudflare` `tsc --noEmit` | **clean** (Part 384 rerun after 0067 + purchases endpoint) |
-| Backend `scripts/test-*.cjs` (swept individually, not via a chain) | **84 / 84 pass** (Part 384 sweep on the final state, incl. cumulative received_quantity + endpoint gate locks) |
+| Backend `scripts/test-*.cjs` (swept individually, not via a chain) | **84 / 84 pass** (Part 386 sweep; Drive prune rescaled to keep-10, analytics gains the actual-cost/margin pins) |
 | Frontend `npm run test:utils` (full chain: `typecheck` → `verify:public-runtime` → `check:source` → all 116 `tests/*.test.ts`) | **green** (Part 384 rerun, plus check:source) |
-| Real `vite build` | **succeeds (17.03s)**; only the two pre-existing catalog circular warnings |
-| Migration harness | **all 68 migrations apply cleanly** (Part 384, `received_quantity` verified present); `0061`–`0067` are committed but **not deployed** — the next `npm run deploy:full` carries them |
+| Real `vite build` | **succeeds (23.65s)**; only the two pre-existing catalog circular warnings |
+| Migration harness | **all 70 migrations apply cleanly** (Part 386; `0068` delivery_actual_cost + `0069` tag_label verified present); `0061`–`0069` are committed but **not deployed** — the next `npm run deploy:full` carries them |
 | Migration pack (after the S2 name propagation) | **ALL VALIDATIONS PASSED** rerun (quantities exact vs footer, revenue 0.02%, Khmer byte-perfect, zero scientific barcodes); xlsx round-trip OK |
 | Production devices (read-only D1 query) | trusted_devices **0**, user_sessions 94 (**2 live**) — the Part 375 clean slate holds |
 | **Part 385 connection preflight** (real classifiers over the real files vs merged catalog + 4,652 real customers) | stock history **21,286/21,286 attach**, sales **14,913/14,919 receipts** (6 junk lines err by design), customers **99%+ linked**, suppliers **8,053/8,053**; pack re-validated ALL PASS after the identity rewrite |

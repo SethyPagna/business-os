@@ -8114,3 +8114,40 @@ the preflight numbers, new steps 3b/3c/4d/4e, and the stock-math explainer.
 
 **Not done.** Deploy + the imports themselves (user, per manifest); two customer
 merges; ordered remainder (P7, P3, P4, P6, K6, G1, D1b, H1, N1c, N2, N3, A3).
+
+## Part 386 (chat, Aug 28 2026) — backlog continuation: A3 root-caused, P6 + P4 shipped
+
+**Asked.** "Continue progress.md."
+
+**What changed.**
+- A3 (Drive mirror produces nothing): root cause MEASURED read-only on
+  production — ZERO drive_sync settings rows exist. Google Drive was never
+  CONNECTED; the scheduled sync silently skipped 'not-connected' on every cron
+  tick, and a stale comment ("OAuth isn't implemented on Cloudflare yet" — it IS,
+  compat.ts /system/drive-sync/* + lib/googleDrive.ts) made the notification
+  section return null in exactly that state. Now a STANDING admin warning shows
+  while Drive is not connected ("only the R2 copies exist — connect in Backup
+  settings"), a second variant covers connected-but-disabled, and silence means
+  both good. Retention 7→10 per the standing "2 in R2, 10 in Drive" spec (prune
+  test rescaled). Found in passing: the Part-382 supplier-credit setting keys
+  were never in NOTIFICATION_SETTING_KEYS — Settings wrote values nothing
+  loaded; both keys now load.
+- P6 (delivery actual cost): migration 0068 (usd/khr pair, NULL = not recorded),
+  POS fee-paid-by row gains a compact staff-only Cost input, POST validates and
+  persists it on delivery sales only, the analytics kernel sums actual cost +
+  recorded-count (n of m deliveries) + delivery_margin_usd = charged − actual —
+  profit_usd deliberately unchanged (pure-test-pinned). Dashboard revenue drill
+  shows both lines. Receipts + portal structurally excluded (explicit field
+  lists, verified).
+- P4 (tag label): migration 0069 products.tag_label; form field (column-driven
+  write path needed no route change); chip on POS cards; group summary pills
+  lead with up to 3 distinct tags; both client search haystacks include it; a
+  tag_label facet filter server-side with its own /filters distinct list.
+
+**Verified.** Backend sweep **84/84**; frontend chain **116/116 + check:source**;
+both typechecks; build 23.65s; wrangler dry-run; harness **70 migrations** with
+0068/0069 columns present.
+
+**Not done.** Deploy (0061–0069 now ride it) + Drive CONNECT after deploy (user,
+Settings → Backup); imports per manifest; the ordered remainder (P3, K6, G1,
+D1b, H1, N1c, N2, N3, E-phase).
