@@ -4406,5 +4406,9 @@
   "zip_unreadable": "The ZIP file could not be read; no images were extracted from it.",
   "zoom": "Zoom",
   "zoom_in": "Zoom in",
-  "zoom_out": "Zoom out"
+  "zoom_out": "Zoom out",
+  "no_matching_customers": "No matching customers",
+  "payment_amount_required": "Enter the amount received.",
+  "payment_method_required": "Enter the payment method.",
+  "record_payment": "Record payment"
 }

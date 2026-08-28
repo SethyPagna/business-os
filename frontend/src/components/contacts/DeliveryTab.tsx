@@ -1,5 +1,5 @@
 // ?€?€ DeliveryTab ?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€
-import { Suspense, lazy, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react'
+import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { lazyRetry } from '../../utils/lazyImport.ts'
 import { consumeLongPressClick, createLongPressHandlers } from '../../utils/longPress.ts'
 import { columnsFromRows } from '../../utils/exportOptions.ts'
@@ -32,6 +32,7 @@ import { useActionHistory } from '../../utils/actionHistory.ts'
 import { cloneHistorySnapshot, extractHistoryResultId } from '../../utils/historyHelpers.ts'
 import { runConcurrentTasks } from '../../utils/bulkOps.ts'
 import { fuzzyTextMatches } from '../../utils/searchMatch.ts'
+import { useDebouncedValue } from '../../utils/useDebouncedValue.ts'
 import {
   CONTACT_OPTION_LIMIT,
   buildContactOptionSummary,
@@ -450,6 +451,9 @@ function DeliveryTab({ t, notify, active = true, initialSearch }: DeliveryTabPro
   const [modal,    setModal]    = useState<DeliveryModal>(null)
   const [selected, setSelected] = useState<DeliveryContact | null>(null)
   const [loading,  setLoading]  = useState(true)
+  // Y1: true while ANY load is in flight (incl. silent search refetches)
+  // so an empty list can say Searching... instead of a false empty state.
+  const [refreshing, setRefreshing] = useState(false)
   const [loadError, setLoadError] = useState('')
   const [bulkActionBusy, setBulkActionBusy] = useState(false)
   const [yearFilter, setYearFilter] = useState('all')
@@ -459,7 +463,9 @@ function DeliveryTab({ t, notify, active = true, initialSearch }: DeliveryTabPro
   const [groupMode, setGroupMode] = useState<DeliveryGroupMode>('time')
   const [collapsedSections, setCollapsedSections] = useState<Set<string>>(() => new Set())
   const [historyReady, setHistoryReady] = useState(false)
-  const deferredSearch = useDeferredValue(search)
+  // Y1: same shared 180ms debounce as the other list pages (was only
+  // useDeferredValue -- every keystroke could fire its own server query).
+  const deferredSearch = useDebouncedValue(search, 180)
   const syncChannelName = String(syncChannel?.channel || '')
   const syncChannelTs = Number(syncChannel?.ts || 0)
   const actionHistory = useActionHistory({ limit: 3, notify, enabled: historyReady, user })
@@ -622,6 +628,7 @@ function DeliveryTab({ t, notify, active = true, initialSearch }: DeliveryTabPro
     const requestId = beginTrackedRequest(loadRequestRef)
     const promise = (async () => {
       clearLoadWatchdog()
+      setRefreshing(true)
       if (!silent || !loadedOnceRef.current) {
         setLoading(true)
         setLoadError('')
@@ -651,6 +658,7 @@ function DeliveryTab({ t, notify, active = true, initialSearch }: DeliveryTabPro
         clearLoadWatchdog()
         if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
         setLoading(false)
+        setRefreshing(false)
       }
     })()
     const wrappedPromise = promise.finally(() => {
@@ -986,7 +994,7 @@ function DeliveryTab({ t, notify, active = true, initialSearch }: DeliveryTabPro
       <ContactTable
         loading={loading}
         rows={displayRows}
-        emptyLabel={t('no_delivery_contacts')||'No delivery contacts'}
+        emptyLabel={refreshing ? (t('searching') || 'Searching...') : (t('no_delivery_contacts')||'No delivery contacts')}
         columns={deliveryColumns}
         selectAll={selectAllProp}
         selectionModeActive={selectionModeActive}

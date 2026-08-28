@@ -4406,5 +4406,9 @@
   "zip_unreadable": "ឯកសារ ZIP មិនអាចអានបានទេ; គ្មានរូបភាពត្រូវបានស្រង់ចេញពីវាទេ។",
   "zoom": "ពង្រីក",
   "zoom_in": "ពង្រីកចូល",
-  "zoom_out": "បង្រួមចេញ"
+  "zoom_out": "បង្រួមចេញ",
+  "no_matching_customers": "គ្មានអតិថិជនត្រូវគ្នាទេ",
+  "payment_amount_required": "បញ្ចូលចំនួនទឹកប្រាក់ដែលបានទទួល។",
+  "payment_method_required": "បញ្ចូលវិធីទូទាត់។",
+  "record_payment": "កត់ត្រាការទូទាត់"
 }
