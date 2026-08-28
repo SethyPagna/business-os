@@ -394,11 +394,19 @@ function deferRenderBlockingStylesheets(): Plugin {
       link.media = 'all';
     });
   }
+  // rAF alone is NOT enough: requestAnimationFrame never fires while the
+  // document is hidden (background-tab load, tab restore, prerender,
+  // headless), so a page loaded hidden ran with media=print CSS -- every
+  // positioning utility inert -- until its first visible frame. Measured
+  // for real in the Part-400 sweep. activate() is idempotent, so belt and
+  // braces: rAF for the fast path, an unconditional timeout so activation
+  // can never be deferred indefinitely, and a visibilitychange kick for
+  // the hidden-then-shown case.
   if (typeof window.requestAnimationFrame === 'function') {
     window.requestAnimationFrame(activate);
-    return;
   }
-  window.setTimeout(activate, 0);
+  window.setTimeout(activate, 150);
+  document.addEventListener('visibilitychange', activate, { once: true });
 }());`)}</script>`
         return nextHtml.replace('</head>', `\n ${activationScript}\n <noscript>${noscriptLinks}</noscript>\n </head>`)
       },
