@@ -7726,3 +7726,43 @@ rendering both PNGs.
 **Not done.** Deploy (rebrand + limits + everything since ship together); the
 supplier-on-batch migration, N1c multi-file UI, M4 continuation dispatch, N3
 SectionCard build; the palette confirmation from the user.
+
+## Part 377 (chat, Aug 28 2026) — supplier-on-batch, the M4 continuation engine, SectionCard + batch day drill
+
+**Ask.** Build the three named items (supplier-on-batch migration + §12 supplier
+column, the M4 continuation-dispatch engine, SectionCard debut on Products), plus
+batch DATES with a day drill-down showing add TIMES, back buttons on every deeper
+level, and en/km naming consistency (Stock in = ស្តុកចូល, Stock out = ស្តុកចេញ…).
+
+**What changed.**
+- `607fe7ee` supplier-on-batch: migration 0062 (supplier_id/supplier_name on
+  product_batches), optional 11th `supplier` template column both sides (aliases,
+  ten-column files unchanged), match-only supplier-id resolution (never auto-creates),
+  atomic ADD writer stores it — first attribution sticks, never rewritten
+  (test-proven in the commit suite).
+- `41eef20e` M4 continuation engine: DIRECT mode = windowed classify (plans persisted
+  to import_job_rows, receipts keyed by group_index) + windowed dispatch (≤60
+  units/invocation via the shared per-unit helpers, crash/redelivery exact on the
+  writers' seals), ceiling 25,000 rows; RECONCILE keeps the single pass + caps
+  deliberately. The 21k-row history is now one job.
+- `c61d7c0c` the repo's chunk-state-size guard caught the first cut keeping
+  file-scaled collections in chunk state — migration 0063 gives sale-group
+  bookkeeping a table; chunk state stays scalar. Also taught
+  test-reset-products-pure about coreDataInvariants' sqlBinding import.
+- `a59f7d0e` SectionCard (one kind→color map; fold persists; back slot) debuts on
+  Products' search row (foldable, select toolbar deliberately outside) and in Manage
+  Batches, where batches now show the received DATE and the date drills into that
+  day's movements with TIMES where recorded (imported history says date-only, never a
+  fake midnight); movement labels ride the canonical glossary keys; six keys added
+  en+km, packs re-sorted; addSaleImportMapping now locks the 11-column contract AND
+  ten-column compatibility.
+
+**Verified.** Backend sweep run twice: final **0 failures** (incl. the new
+continuation tests: 130 units over 4+ invocations, redelivery resume without
+double-adds, reconcile caps, 25k ceiling). Frontend: `tsc` clean, ALL 120 test files
+run INDIVIDUALLY green (stronger than the chain per Golden Rule 5) plus the full
+chain green, build 26.41s.
+
+**Not done.** Deploy (applies 0062+0063 and everything since); the M2/M4 imports in
+the UI; D5's picker UI + supplier read surfaces; N3 palette confirmation + page
+sweep; the wider back-button/consistency sweep beyond the new surfaces.

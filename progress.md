@@ -178,17 +178,19 @@ autocorrect — templates, imports, exports and generated files alike.*
 - [x] M3b. **Production catalog is EMPTY** (0 active products, 0 batches, 0 branch_stock;
   4,652 customers preserved) — measured Part 373. So the products import is a clean
   first load with no double-count risk. Users(3)/import_jobs(7) intact.
-- [ ] M4. Load `stock_in_history.csv` (21,287 rows, real received dates 2024-07-09 →
-  2026-08-27) through the unified stock-action import so history becomes real batches.
-  **Corrected analysis (Part 375):** the 60-unit cap is NOT a Free-plan CPU limit — it
-  is sized against the 1,000 internal-subrequest ceiling per invocation (~12 D1 calls
-  per worst-case unit), and that ceiling does NOT rise on Workers Paid. So "raise the
-  constant" is wrong; each add row is its own unit, so 21,287 rows ≈ 355 jobs today.
-  **The real fix:** persist the classified whole-sheet plan once (Paid CPU makes the
-  full classify fine), then dispatch units across CONTINUATION queue invocations of
-  ≤60 units each — the per-group idempotency seals already make re-dispatch safe, so
-  the single-pass grouping constraint (which is about classification, not dispatch)
-  is preserved. Build this before loading the history.
+- [~] M4. **The continuation-dispatch engine is BUILT and PROVEN (Part 377, needs
+  deploy).** DIRECT-mode stock sheets are no longer capped at 60 units: windowed
+  CLASSIFY invocations persist every row's plan (sale groups get a stable group_index
+  in new table `import_stock_action_groups`, migration 0063 — the repo's own
+  chunk-state-size guard rightly refused collections in chunk state), then windowed
+  DISPATCH invocations apply ≤60 units each through the SAME shared per-unit helpers
+  the single pass uses; crash/redelivery resumes exactly on the writers' seals.
+  Ceiling: 25,000 rows/file — the 21,287-row history is now ONE import job
+  (~355 automatic queue invocations internally). RECONCILE keeps the single pass and
+  its 480/60 caps on purpose (one consistent live-stock snapshot). Proven:
+  130 units across 4+ invocations, redelivered-message resume with zero double-adds,
+  both reconcile caps, the direct ceiling. **Remaining:** deploy (applies 0062+0063),
+  then run `stock_in_history.csv` through the stock-action import in the UI.
 - [~] M5. Historical SALES linkage. **The loyalty prerequisite is DONE in code
   (Part 372, needs migrations/deploy):** migration `0061` adds `sales.loyalty_accrual`
   (default 1); every aggregation (sales route redemption check, shared
@@ -287,6 +289,14 @@ store really paid the rider; margin = charge − cost and is internal only.*
   recording stock late — from Product edit, Inventory batch view and Branch batch views.
   One shared validation + stock/batch kernel for all entry points. Branch transfers
   PRESERVE the barcode; only create/add/adjust flows may set/change one.
+- [~] D5a. **Supplier-on-batch foundation is BUILT (Part 377, needs deploy).**
+  Migration 0062: `product_batches.supplier_id/supplier_name`. §12 template accepts an
+  optional 11th `supplier` column (ten-column files unchanged; vendor/suppliername
+  aliases); the apply engine matches names against the suppliers table (match-only,
+  never auto-creates) and the atomic ADD writer stores it on batch creation — a lot's
+  first attribution sticks, later adds never rewrite it, a blank changes nothing
+  (all test-proven). **Remaining:** the manual add-stock/receive UI supplier picker,
+  and the read surfaces below (D3 supplier section, per-supplier totals).
 - [ ] D5. **Supplier accounting**: per-supplier totals (how much bought), auto-derived
   from batches/add-stock; per-add-stock payment status incl. **awaiting payment**;
   add/create stock can pick the supplier. Supplier lives on the batch/receipt level and
@@ -390,6 +400,23 @@ deep-linkable tabs.*
   guard for browser close/reload and a visible dirty indicator (a dot on the tab/section
   title) so the state is legible before the prompt ever fires. Keep the prompt calm, not
   alarming.
+- [~] N3a. **SectionCard is BUILT and debuted (Part 377, needs deploy).** One shared
+  component + ONE kind→color map (`shared/SectionCard.tsx`: search blue, catalog green,
+  stock orange, batches amber, suppliers purple, sales red, reports teal — change it
+  there and every page follows). Color chip + title + fold chevron with the actions as
+  SEPARATE controls; fold state persists per user; an `onBack` slot so every drill-down
+  level has a back button. Debuts: Products' sticky search row is the foldable
+  "Search & Filters" section (folding reclaims list space; the select-all toolbar
+  deliberately stays outside), and the Manage Batches day view renders through it.
+  **Batch dates (user, Aug 28) shipped with it:** batches show the received DATE only
+  in everyday use; selecting the date drills into that day's movements with each
+  entry's clock TIME where recorded — imported history carries the date only and the
+  view says so instead of faking midnight; Back returns to the list. **Glossary rule
+  now in force:** the canonical en/km keys already agree with the user's pairs
+  (stock_in = ស្តុកចូល, stock_out = ស្តុកចេញ, adjustment = ការកែប្រែ…) — every new
+  surface must label through these keys, never fresh literals; six missing keys added
+  and both packs re-sorted. **Remaining:** palette confirmation with the user, then the
+  page-by-page sweep (+ the literal-label cleanup in existing surfaces).
 - [ ] N3. **Section UI: colored card rows WITHIN pages — clarified Aug 28 (supersedes
   the per-page palette reading).** The colors identify the SECTIONS inside a page, not
   the pages: e.g. on Products, the search/filter block, the stock-change ledger, the
