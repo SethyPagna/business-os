@@ -449,7 +449,12 @@ store really paid the rider; margin = charge − cost and is internal only.*
   every report reads identically (SectionCard kinds carry the color). Backed by the
   data that now exists: batches carry supplier (0062) + received date, movements carry
   type/date/branch. Nothing hidden — show as much as the data holds.
-- [ ] D1. **Stock Change section on Products** (the user's ledger design): one row per
+- [~] D1 **[CLAIMED: session a7]** (with D3's detail-reuse half; D2's filters
+  follow). Footprint: Products.tsx (new folded section) + a new
+  products/StockChangeSection component + reads on the EXISTING
+  /api/inventory/movements — no new write paths, routes/inventory.ts only
+  if a read param is missing (4a released it after D5a).
+  **Stock Change section on Products** (the user's ledger design): one row per
   action with columns Name · Barcode (+N) · Before Qty · Adjustment (±, reason) ·
   Stock In (add/create, colour-coded) · Stock Out (sale/damage/return/lost/wrong,
   colour-coded) · After Qty. Views: All / Adjustments / Stock In / Stock Out. Row click
