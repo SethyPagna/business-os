@@ -40,6 +40,7 @@ import LoadingWatchdog from '../shared/LoadingWatchdog'
 import { TOOLBAR_BUTTON_WIDTH, manageToolbarButtonClassName } from '../shared/toolbarButtonStyles'
 import InventoryProductsSurface from './InventoryProductsSurface'
 import { createLongPressHandlers, createLongPressState, consumeLongPressClick, type LongPressState } from '../../utils/longPress.ts'
+import { columnsFromRows } from '../../utils/exportOptions.ts'
 import { lazyRetry } from '../../utils/lazyImport.ts'
 const ProductDetailModal = lazyRetry(() => import('./ProductDetailModal'), 'inventory-product-detail-modal') as any
 const InventoryImportModal = lazyRetry(() => import('./InventoryImportModal'), 'inventory-import') as any
@@ -47,6 +48,7 @@ const InventoryMovementsSurface = lazyRetry(() => import('./InventoryMovementsSu
 const InventoryRfidSurface = lazyRetry(() => import('./InventoryRfidSurface'), 'inventory-rfid-surface') as any
 const InventoryStockModals = lazyRetry(() => import('./InventoryStockModals'), 'inventory-stock-modals') as any
 const InventoryBatchModal = lazyRetry(() => import('./InventoryBatchModal'), 'inventory-batch-modal') as any
+const ExportOptionsDialog = lazyRetry(() => import('../shared/ExportOptionsDialog'), 'inventory-export-options') as any
 const ManageBatchesModal = lazyRetry(() => import('./ManageBatchesModal'), 'inventory-manage-batches-modal') as any
 const InventoryReasonManagerModal = lazyRetry(() => import('./InventoryReasonManagerModal'), 'inventory-reason-manager-modal') as any
 const InventoryStatDetailModal = lazyRetry(() => import('./InventoryStatDetailModal'), 'inventory-stat-detail-modal') as any
@@ -3020,19 +3022,24 @@ ${inventoryStatLabels.netSold} ${totalQtySold} = ${tr('items_sold', 'Items sold'
     visibleMovementRecordCount,
   ])
 
+  // H1+X5 (Part 405): the three list-style exports open the shared options
+  // dialog (column chooser remembered per kind + CSV/Excel/PDF) with rows
+  // from the module's own collectors -- one row shape per kind, whichever
+  // path downloads. The zip package export below keeps its direct build.
+  const [exportDialog, setExportDialog] = useState<{ rows: Array<Record<string, unknown>>; baseName: string; rememberKey: string } | null>(null)
   const exportMovementGroups = useCallback(async (groups: LegacyInventoryRecord[], filePrefix = 'inventory-movements') => {
     const exportModule = await loadInventoryExportModule()
-    await exportModule.exportInventoryMovementGroups(buildInventoryExportScope(), groups, filePrefix)
-  }, [buildInventoryExportScope])
+    setExportDialog({ rows: exportModule.collectInventoryMovementRows(groups), baseName: filePrefix, rememberKey: 'inventory-movements' })
+  }, [])
 
   const exportInventorySummary = useCallback(async (productsToExport: InventoryProduct[] = filteredSummary, filePrefix = 'inventory') => {
     const exportModule = await loadInventoryExportModule()
-    await exportModule.exportInventorySummary(buildInventoryExportScope(), productsToExport, filePrefix)
+    setExportDialog({ rows: exportModule.collectInventorySummaryRows(buildInventoryExportScope(), productsToExport), baseName: filePrefix, rememberKey: 'inventory-summary' })
   }, [buildInventoryExportScope, filteredSummary])
 
   const exportInventoryStats = useCallback(async (filePrefix = 'inventory-stats') => {
     const exportModule = await loadInventoryExportModule()
-    await exportModule.exportInventoryStats(buildInventoryExportScope(), filePrefix)
+    setExportDialog({ rows: exportModule.collectInventoryStatsRows(buildInventoryExportScope()), baseName: filePrefix, rememberKey: 'inventory-stats' })
   }, [buildInventoryExportScope])
 
   const exportInventoryPackage = useCallback(async (mode = tab) => {
@@ -3899,6 +3906,21 @@ ${inventoryStatLabels.netSold} ${totalQtySold} = ${tr('items_sold', 'Items sold'
             setReasonManager={setReasonManager}
             t={t}
             tr={tr}
+          />
+        </Suspense>
+      ) : null}
+
+      {exportDialog ? (
+        <Suspense fallback={null}>
+          <ExportOptionsDialog
+            title={t('export_options_title') || 'Export options'}
+            fileBaseName={exportDialog.baseName}
+            columns={columnsFromRows(exportDialog.rows)}
+            rows={exportDialog.rows}
+            rememberKey={exportDialog.rememberKey}
+            t={t}
+            notify={notify}
+            onClose={() => setExportDialog(null)}
           />
         </Suspense>
       ) : null}

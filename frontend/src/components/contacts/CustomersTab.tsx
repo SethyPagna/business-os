@@ -1,6 +1,7 @@
 import { Suspense, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react'
 import { lazyRetry } from '../../utils/lazyImport.ts'
 import { consumeLongPressClick, createLongPressHandlers } from '../../utils/longPress.ts'
+import { columnsFromRows } from '../../utils/exportOptions.ts'
 import type { ComponentProps, ReactNode } from 'react'
 import ChevronDown from 'lucide-react/dist/esm/icons/chevron-down.js'
 import ChevronRight from 'lucide-react/dist/esm/icons/chevron-right.js'
@@ -149,11 +150,9 @@ const isBrokenLocalizedString = isBrokenLocalizedStringHook as (value: unknown) 
 
 type ContactReadTransportModule = typeof import('../../api/contactReadTransport.ts')
 type ContactWriteTransportModule = typeof import('../../api/contactWriteTransport.ts')
-type CsvUtilsModule = typeof import('../../utils/csv') & typeof import('../../utils/xlsxExport')
 
 let contactReadTransportModulePromise: Promise<ContactReadTransportModule> | null = null
 let contactWriteTransportModulePromise: Promise<ContactWriteTransportModule> | null = null
-let csvUtilsModulePromise: Promise<CsvUtilsModule> | null = null
 
 function loadContactReadTransportModule(): Promise<ContactReadTransportModule> {
   if (!contactReadTransportModulePromise) contactReadTransportModulePromise = import('../../api/contactReadTransport.ts')
@@ -163,16 +162,6 @@ function loadContactReadTransportModule(): Promise<ContactReadTransportModule> {
 function loadContactWriteTransportModule(): Promise<ContactWriteTransportModule> {
   if (!contactWriteTransportModulePromise) contactWriteTransportModulePromise = import('../../api/contactWriteTransport.ts')
   return contactWriteTransportModulePromise
-}
-
-function loadCsvUtilsModule(): Promise<CsvUtilsModule> {
-  if (!csvUtilsModulePromise) {
-    csvUtilsModulePromise = Promise.all([
-      import('../../utils/csv'),
-      import('../../utils/xlsxExport'),
-    ]).then(([csvUtils, xlsxUtils]) => ({ ...csvUtils, ...xlsxUtils }) as CsvUtilsModule)
-  }
-  return csvUtilsModulePromise
 }
 
 function getCustomerApi(): CustomerApi {
@@ -223,6 +212,7 @@ function tr(t: TranslateFn, key: string, fallback: string): string {
 const ContactImportModal = lazyRetry(() => import('./ContactImportModal'), 'customers-contact-import')
 const CustomerFormModal = lazyRetry(() => import('./CustomerFormModal'), 'customers-form-modal')
 const CustomerPurchasesReportModal = lazyRetry(() => import('./CustomerPurchasesReportModal'), 'customers-purchases-report')
+const ExportOptionsDialog = lazyRetry(() => import('../shared/ExportOptionsDialog'), 'customers-export-options')
 const CUSTOMER_MUTATION_TIMEOUT_MS = 12000
 
 function CustomersTab({ t, notify, active = true, initialSearch }: CustomersTabProps) {
@@ -379,6 +369,8 @@ function CustomersTab({ t, notify, active = true, initialSearch }: CustomersTabP
   )
 
   const { selectedIds, setSelectedIds, toggleOne, selectAllProp, selectionModeActive, getRowLongPressState } = useContactSelection(visibleCustomers)
+  // H1+X5 (Part 402): exports go through the shared options dialog.
+  const [exportDialog, setExportDialog] = useState<{ rows: Array<Record<string, unknown>>; baseName: string } | null>(null)
   // 11.1/11.2 (B6): in select mode a cell click toggles the row; out of it
   // the cell keeps opening the detail panel (long-press enters the mode).
   const handleContactCellClick = (customer: CustomerRow) => {
@@ -803,7 +795,10 @@ function CustomersTab({ t, notify, active = true, initialSearch }: CustomersTabP
               label: tr(t, 'export', 'Export'),
               color: 'green',
               icon: <Upload className="h-4 w-4 shrink-0" />,
-              onClick: async () => {
+              // H1+X5 (Part 402): opens the shared options dialog (column
+              // chooser + CSV/Excel/PDF) with the same readable rows the
+              // old direct xlsx download built.
+              onClick: () => {
                 const rows = visibleCustomers.map((customer) => {
                   const options = parseContactOptions(customer.address)
                   return {
@@ -817,8 +812,7 @@ function CustomersTab({ t, notify, active = true, initialSearch }: CustomersTabP
                     Created: customer.created_at || '',
                   }
                 })
-                const { downloadXLSX } = await loadCsvUtilsModule()
-                downloadXLSX(`customers-${new Date().toISOString().slice(0, 10)}.xlsx`, rows)
+                setExportDialog({ rows, baseName: 'customers' })
               },
             },
           ] as PortalMenuItem[])}
@@ -1135,6 +1129,20 @@ function CustomersTab({ t, notify, active = true, initialSearch }: CustomersTabP
           t={t}
           extraButtons={[{ label: tr(t, 'customer_purchases', 'Purchases'), onClick: () => setModal('purchases') }]}
         />
+      ) : null}
+      {exportDialog ? (
+        <Suspense fallback={null}>
+          <ExportOptionsDialog
+            title={t('export_options_title') || 'Export options'}
+            fileBaseName={exportDialog.baseName}
+            columns={columnsFromRows(exportDialog.rows)}
+            rows={exportDialog.rows}
+            rememberKey="contacts-customers"
+            t={t}
+            notify={notify}
+            onClose={() => setExportDialog(null)}
+          />
+        </Suspense>
       ) : null}
       {/* X4: per-customer purchase totals -- the customer leg of the
           per-contact drills (suppliers: D5; couriers: X3). */}

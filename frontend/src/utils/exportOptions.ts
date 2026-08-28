@@ -31,6 +31,14 @@ export function projectExportRows(
   })
 }
 
+// For pages whose export rows come from a fixed-shape builder: the column
+// list derives from the first row's own keys, so chooser and file can never
+// disagree and there is no second list to keep in sync.
+export function columnsFromRows(rows: Array<Record<string, unknown>>): ExportColumn[] {
+  if (!rows.length) return []
+  return Object.keys(rows[0]).map((key) => ({ key, label: exportColumnLabel(key) }))
+}
+
 // Humanizes a snake_case contract key for the checkbox label / exported
 // header: same convention the audit field diff uses.
 export function exportColumnLabel(key: string): string {

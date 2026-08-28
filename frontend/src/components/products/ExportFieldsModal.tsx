@@ -11,6 +11,12 @@ export interface ExportScopeOption {
   count: number
 }
 
+// H1+X5 (Part 402): this modal already WAS the column chooser H1 asks for
+// (scope + field groups), so it keeps its shape and only gains the format
+// choice -- Excel stays the default (barcode-as-text safe), CSV serves
+// re-import/machines, PDF is the shared print view.
+export type ProductExportFormat = 'csv' | 'xlsx' | 'pdf'
+
 type ExportFieldsModalProps = {
   rowCount: number
   onClose: () => void
@@ -20,7 +26,7 @@ type ExportFieldsModalProps = {
   scopes?: ExportScopeOption[]
   selectedScopeId?: string
   onScopeChange?: (id: string) => void
-  onConfirm: (groups: ExportFieldGroup[]) => void
+  onConfirm: (groups: ExportFieldGroup[], format: ProductExportFormat) => void
   t?: Translate
 }
 
@@ -52,6 +58,7 @@ export default function ExportFieldsModal({ rowCount, onClose, scopes, selectedS
     return value && value !== key ? value : fallback
   }
   const [selected, setSelected] = useState<Set<ExportFieldGroup>>(() => new Set(EXPORT_FIELD_GROUPS.map((g) => g.key)))
+  const [format, setFormat] = useState<ProductExportFormat>('xlsx')
 
   const toggle = (key: ExportFieldGroup) => {
     setSelected((prev) => {
@@ -123,6 +130,31 @@ export default function ExportFieldsModal({ rowCount, onClose, scopes, selectedS
           </label>
         ))}
       </div>
+      <div className="mb-4">
+        <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+          {tr('export_format_label', 'Format')}
+        </p>
+        <div className="grid grid-cols-3 gap-1.5">
+          {([
+            ['xlsx', tr('export_format_excel', 'Excel'), tr('export_format_excel_hint', '.xlsx — opens in Excel, Khmer-safe')],
+            ['csv', tr('export_format_csv', 'CSV'), tr('export_format_csv_hint', '.csv — for re-import/machines; opening in Excel can break barcodes')],
+            ['pdf', tr('export_format_pdf', 'PDF'), tr('export_format_pdf_hint', 'Print view — save as PDF or print')],
+          ] as Array<[ProductExportFormat, string, string]>).map(([value, label, hint]) => (
+            <button
+              key={value}
+              type="button"
+              onClick={() => setFormat(value)}
+              aria-pressed={format === value}
+              title={hint}
+              className={`rounded-lg border px-2 py-1.5 text-xs font-semibold transition ${format === value
+                ? 'border-blue-500 bg-blue-50 text-blue-800 dark:border-blue-500 dark:bg-blue-950/30 dark:text-blue-200'
+                : 'border-gray-200 bg-white text-gray-600 hover:border-gray-300 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300'}`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
       <div className="flex justify-end gap-2">
         <button
           type="button"
@@ -133,10 +165,10 @@ export default function ExportFieldsModal({ rowCount, onClose, scopes, selectedS
         </button>
         <button
           type="button"
-          title={tr('export_confirm_hint', 'Download an XLSX file with the chosen scope and fields')}
+          title={tr('export_confirm_hint', 'Download the chosen scope and fields in the selected format')}
           className="px-4 py-2 rounded-lg text-sm font-medium text-white bg-green-600 hover:bg-green-700 disabled:opacity-50"
           disabled={!selected.size}
-          onClick={() => onConfirm([...selected])}
+          onClick={() => onConfirm([...selected], format)}
         >
           {tr('export', 'Export')}
         </button>

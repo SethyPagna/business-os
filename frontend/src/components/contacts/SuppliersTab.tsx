@@ -3,6 +3,7 @@ import RenameCascadeModal, { type RenameCascadeChoice, type RenameCascadeRequest
 import { getRenameImpact } from '../../api/renameCascadeTransport.ts'
 import { lazyRetry } from '../../utils/lazyImport.ts'
 import { consumeLongPressClick, createLongPressHandlers } from '../../utils/longPress.ts'
+import { columnsFromRows } from '../../utils/exportOptions.ts'
 import type { ComponentProps } from 'react'
 import ChevronDown from 'lucide-react/dist/esm/icons/chevron-down.js'
 import ChevronRight from 'lucide-react/dist/esm/icons/chevron-right.js'
@@ -46,6 +47,7 @@ import type { ContactOption } from './contactOptionUtils'
 const ContactImportModal = lazyRetry(() => import('./ContactImportModal'), 'suppliers-contact-import')
 const SupplierPurchasesModal = lazyRetry(() => import('./SupplierPurchasesModal'), 'suppliers-purchases-modal')
 const StockInInvoicesSection = lazyRetry(() => import('./StockInInvoicesSection'), 'suppliers-stock-in-report')
+const ExportOptionsDialog = lazyRetry(() => import('../shared/ExportOptionsDialog'), 'suppliers-export-options')
 const SUPPLIER_MUTATION_TIMEOUT_MS = 12000
 
 type TranslateFn = (key: string) => string | undefined
@@ -143,11 +145,9 @@ const useSync = useSyncHook as () => SyncContextValue
 
 type ContactReadTransportModule = typeof import('../../api/contactReadTransport.ts')
 type ContactWriteTransportModule = typeof import('../../api/contactWriteTransport.ts')
-type CsvUtilsModule = typeof import('../../utils/csv') & typeof import('../../utils/xlsxExport')
 
 let contactReadTransportModulePromise: Promise<ContactReadTransportModule> | null = null
 let contactWriteTransportModulePromise: Promise<ContactWriteTransportModule> | null = null
-let csvUtilsModulePromise: Promise<CsvUtilsModule> | null = null
 
 function loadContactReadTransportModule(): Promise<ContactReadTransportModule> {
   if (!contactReadTransportModulePromise) contactReadTransportModulePromise = import('../../api/contactReadTransport.ts')
@@ -157,16 +157,6 @@ function loadContactReadTransportModule(): Promise<ContactReadTransportModule> {
 function loadContactWriteTransportModule(): Promise<ContactWriteTransportModule> {
   if (!contactWriteTransportModulePromise) contactWriteTransportModulePromise = import('../../api/contactWriteTransport.ts')
   return contactWriteTransportModulePromise
-}
-
-function loadCsvUtilsModule(): Promise<CsvUtilsModule> {
-  if (!csvUtilsModulePromise) {
-    csvUtilsModulePromise = Promise.all([
-      import('../../utils/csv'),
-      import('../../utils/xlsxExport'),
-    ]).then(([csvUtils, xlsxUtils]) => ({ ...csvUtils, ...xlsxUtils }) as CsvUtilsModule)
-  }
-  return csvUtilsModulePromise
 }
 
 function getSupplierApi(): SupplierApi {
@@ -505,6 +495,8 @@ function SuppliersTab({ t, notify, active = true, initialSearch }: SuppliersTabP
   )
 
   const { selectedIds, setSelectedIds, toggleOne, selectAllProp, selectionModeActive, getRowLongPressState } = useContactSelection(visibleSuppliers)
+  // H1+X5 (Part 402): exports go through the shared options dialog.
+  const [exportDialog, setExportDialog] = useState<{ rows: Array<Record<string, unknown>>; baseName: string } | null>(null)
   // 11.1/11.2 (B6): in select mode a cell click toggles the row; out of it
   // the cell keeps opening the detail panel (long-press enters the mode).
   const handleContactCellClick = (supplier: SupplierRow) => {
@@ -921,8 +913,9 @@ function SuppliersTab({ t, notify, active = true, initialSearch }: SuppliersTabP
                     }
                   })(),
                 }))
-                const { downloadXLSX } = await loadCsvUtilsModule()
-                downloadXLSX(`suppliers-${new Date().toISOString().slice(0, 10)}.xlsx`, rows)
+                // H1+X5 (Part 402): shared options dialog instead of a
+                // fixed xlsx download.
+                setExportDialog({ rows, baseName: 'suppliers' })
               },
             },
           ] as PortalMenuItem[])}
@@ -1238,6 +1231,20 @@ function SuppliersTab({ t, notify, active = true, initialSearch }: SuppliersTabP
         />
       ) : null}
 
+      {exportDialog ? (
+        <Suspense fallback={null}>
+          <ExportOptionsDialog
+            title={t('export_options_title') || 'Export options'}
+            fileBaseName={exportDialog.baseName}
+            columns={columnsFromRows(exportDialog.rows)}
+            rows={exportDialog.rows}
+            rememberKey="contacts-suppliers"
+            t={t}
+            notify={notify}
+            onClose={() => setExportDialog(null)}
+          />
+        </Suspense>
+      ) : null}
       {modal === 'purchases' && selected ? (
         <Suspense fallback={null}>
           <SupplierPurchasesModal

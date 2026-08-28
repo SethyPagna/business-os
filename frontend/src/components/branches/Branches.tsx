@@ -1,11 +1,13 @@
 import type { ComponentProps, ReactNode } from 'react'
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { consumeLongPressClick, createLongPressHandlers, createLongPressState, type LongPressState } from '../../utils/longPress.ts'
+import { columnsFromRows } from '../../utils/exportOptions.ts'
 import ArrowRightLeft from 'lucide-react/dist/esm/icons/arrow-right-left.js'
 import ChevronDown from 'lucide-react/dist/esm/icons/chevron-down.js'
 import ChevronRight from 'lucide-react/dist/esm/icons/chevron-right.js'
 import Pencil from 'lucide-react/dist/esm/icons/pencil.js'
 import Plus from 'lucide-react/dist/esm/icons/plus.js'
+import Upload from 'lucide-react/dist/esm/icons/upload.js'
 import Trash2 from 'lucide-react/dist/esm/icons/trash-2.js'
 import Warehouse from 'lucide-react/dist/esm/icons/warehouse.js'
 import { useApp as useAppHook, useSync as useSyncHook } from '../../AppContext.tsx'
@@ -217,6 +219,7 @@ type ActionHistoryProp = ComponentProps<typeof ActionHistoryBar>['history']
 const useApp = useAppHook as () => AppContextValue
 const useSync = useSyncHook as () => SyncContextValue
 const LazyTransferModal = lazyRetry(async () => ({ default: (await import('./TransferModal')).default }), 'branches-transfer-modal')
+const ExportOptionsDialog = lazyRetry(() => import('../shared/ExportOptionsDialog'), 'branches-export-options')
 
 function getBranchApi(): BranchApi {
   return {
@@ -851,6 +854,47 @@ export default function Branches() {
     })
   }
 
+  // H1+X5 (Part 403): per-branch stock export -- the unpaged
+  // GET /branches/:id/stock (no query params) returns EVERY product with
+  // its quantity for that branch in one response, so no page loop; one
+  // fetch per active branch, flattened into Branch-per-row records for the
+  // shared options dialog.
+  const [exportDialog, setExportDialog] = useState<{ rows: Array<Record<string, unknown>>; baseName: string } | null>(null)
+  const [branchExportLoading, setBranchExportLoading] = useState(false)
+  const openBranchStockExport = useCallback(async () => {
+    if (branchExportLoading) return
+    setBranchExportLoading(true)
+    try {
+      const rows: Array<Record<string, unknown>> = []
+      for (const branch of branches) {
+        const stock = await getBranchStockRequest(branch.id, {}) as Array<Record<string, unknown>> | null
+        for (const product of Array.isArray(stock) ? stock : []) {
+          const quantity = Number(product.branch_quantity || 0)
+          const costUsd = Number(product.purchase_price_usd || 0)
+          rows.push({
+            Branch: branch.name || `Branch ${branch.id}`,
+            Product: product.name || '',
+            SKU: product.sku || '',
+            Unit: product.unit || '',
+            Quantity: quantity,
+            Selling_USD: Number(product.selling_price_usd || 0),
+            Cost_USD: costUsd,
+            Stock_Value_USD: Math.round(quantity * costUsd * 100) / 100,
+          })
+        }
+      }
+      if (!rows.length) {
+        notify(tr('no_data_to_export', 'No data to export'), 'error')
+        return
+      }
+      setExportDialog({ rows, baseName: 'branch-stock' })
+    } catch (error) {
+      notify(error instanceof Error && error.message ? error.message : tr('export_failed', 'Export failed.'), 'error')
+    } finally {
+      setBranchExportLoading(false)
+    }
+  }, [branchExportLoading, branches, notify, tr])
+
   // 11.1/11.2 (B6): same selection model as the table pages -- checkboxes
   // only exist while something is selected, entered by long-pressing a
   // branch card. Branches is a card list with no column header, so the
@@ -997,6 +1041,19 @@ export default function Branches() {
               <span className="truncate">{tr('transfer', 'Transfer')}</span>
             </button>
           ) : null}
+          {/* H1+X5 (Part 403): Branches had NO export at all -- this one
+              covers H1's "per-branch stock" spec through the shared options
+              dialog (Excel/CSV/PDF + column chooser). */}
+          <button
+            className="inline-flex h-9 flex-1 items-center justify-center gap-1.5 rounded-xl border border-slate-300 bg-white px-2 text-xs font-semibold text-slate-700 shadow-sm transition-colors hover:border-emerald-400 hover:bg-emerald-50/60 hover:text-emerald-700 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 dark:hover:border-emerald-500 dark:hover:bg-slate-700/80 dark:hover:text-emerald-300 sm:text-sm"
+            onClick={() => { void openBranchStockExport() }}
+            disabled={branchExportLoading}
+            title={tr('export_branch_stock', 'Export per-branch stock')}
+            aria-label={tr('export_branch_stock', 'Export per-branch stock')}
+          >
+            <Upload className="h-4 w-4 shrink-0" />
+            <span className="truncate">{branchExportLoading ? tr('exporting', 'Exporting…') : tr('export', 'Export')}</span>
+          </button>
           <button
             className="inline-flex h-9 flex-1 items-center justify-center gap-1.5 rounded-xl border border-blue-700 bg-blue-600 px-2 text-xs font-semibold text-white shadow-sm transition-colors hover:bg-blue-700 hover:border-blue-800 sm:text-sm"
             onClick={() => { setSelected(null); setModal('form') }}
@@ -1426,6 +1483,20 @@ export default function Branches() {
         </Modal>
       ) : null}
 
+      {exportDialog ? (
+        <Suspense fallback={null}>
+          <ExportOptionsDialog
+            title={t('export_options_title') || 'Export options'}
+            fileBaseName={exportDialog.baseName}
+            columns={columnsFromRows(exportDialog.rows)}
+            rows={exportDialog.rows}
+            rememberKey="branches"
+            t={t}
+            notify={notify}
+            onClose={() => setExportDialog(null)}
+          />
+        </Suspense>
+      ) : null}
       {modal === 'transfer' ? (
         <Suspense fallback={null}>
           <LazyTransferModal

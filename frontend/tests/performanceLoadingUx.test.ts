@@ -693,7 +693,11 @@ assert.match(viteConfig, /'assets\/dashboard-export-',/, 'Dashboard export chunk
 assert.match(viteConfig, /normalized\.includes\('\/src\/components\/dashboard\/charts\/'\)\) return 'dashboard-charts'[\s\S]*normalized\.endsWith\('\/src\/components\/dashboard\/dashboardExport\.ts'\)\) return 'dashboard-export'/, 'Dashboard charts should not be owned by the export/report chunk')
 for (const [name, source] of [['Customers', customers], ['Suppliers', suppliers], ['Delivery', delivery]] as const) {
   assert.doesNotMatch(source, /import \{ downloadCSV \} from '\.\.\/\.\.\/utils\/csv'/, `${name} contacts tab should not load CSV helpers before export intent`)
-  assert.match(source, /type CsvUtilsModule = typeof import\('\.\.\/\.\.\/utils\/csv'\) & typeof import\('\.\.\/\.\.\/utils\/xlsxExport'\)[\s\S]*function loadCsvUtilsModule\(\): Promise<CsvUtilsModule>[\s\S]*import\('\.\.\/\.\.\/utils\/csv'\)[\s\S]*import\('\.\.\/\.\.\/utils\/xlsxExport'\)[\s\S]*const \{ downloadXLSX \} = await loadCsvUtilsModule\(\)/, `${name} contacts export should lazy-load CSV and XLSX helpers through a memoized dynamic import`)
+  // Part 405: the tabs route through the lazy ExportOptionsDialog -- csv/xlsx
+  // helpers load inside the dialog on Export click (pinned in the Sales
+  // block), so the tabs themselves must not import them at all.
+  assert.doesNotMatch(source, /from '\.\.\/\.\.\/utils\/xlsxExport/, `${name} contacts tab should not load XLSX helpers before export intent`)
+  assert.match(source, /const ExportOptionsDialog = lazyRetry\(\(\) => import\('\.\.\/shared\/ExportOptionsDialog'\)/, `${name} contacts export goes through the lazy shared options dialog`)
 }
 assert.doesNotMatch(sales, /import \{ downloadCSV \} from '\.\.\/\.\.\/utils\/csv'/, 'Sales route should not load CSV export helpers before export intent')
 // H1+X5 (Part 401): Sales no longer downloads directly -- every export scope
@@ -709,7 +713,10 @@ assert.match(sales, /const ExportOptionsDialog = lazyRetry\(\(\) => import\('\.\
   assert.match(exportDialogSource, /await import\('\.\.\/\.\.\/utils\/xlsxExport\.ts'\)/, 'dialog loads XLSX helpers only on Export click')
 }
 assert.doesNotMatch(returns, /import \{ downloadCSV \} from '\.\.\/\.\.\/utils\/csv'/, 'Returns route should not load CSV export helpers before export intent')
-assert.match(returns, /const exportVisible = useCallback\(async[\s\S]*await import\('\.\.\/\.\.\/utils\/xlsxExport\.ts'\)/, 'Returns export should load XLSX helpers only after export intent')
+// Part 405: Returns routes through the lazy ExportOptionsDialog like Sales --
+// helpers load inside the dialog on Export click (pinned in the Sales block).
+assert.doesNotMatch(returns, /from '\.\.\/\.\.\/utils\/xlsxExport/, 'Returns route should not load XLSX helpers before export intent')
+assert.match(returns, /const ExportOptionsDialog = lazyRetry\(\(\) => import\('\.\.\/shared\/ExportOptionsDialog'\)/, 'Returns export goes through the lazy shared options dialog')
 assert.match(returns, /import ReturnsListSurface from '\.\/ReturnsListSurface'/, 'Returns list surface should render from the route chunk instead of adding a first-paint subchunk waterfall')
 assert.doesNotMatch(returns, /const ReturnsListSurface = lazy\(\(\) => import\('\.\/ReturnsListSurface'\)\)/, 'Returns list surface should not suspend behind a second component chunk after the route loads')
 assert.doesNotMatch(returns, /loading_returns_surface/, 'Returns route should not show a route-subchunk loading placeholder after data is available')

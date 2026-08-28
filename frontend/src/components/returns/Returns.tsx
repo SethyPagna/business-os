@@ -22,6 +22,7 @@ import { useActionHistory } from '../../utils/actionHistory.ts'
 import { cloneHistorySnapshot } from '../../utils/historyHelpers.ts'
 import { buildTimeActionSections, getAvailableYears, getTimeGroupingMode, toggleIdSet } from '../../utils/groupedRecords.ts'
 import { createLongPressState, type LongPressState } from '../../utils/longPress.ts'
+import { exportColumnLabel } from '../../utils/exportOptions.ts'
 import { buildPeriodFilterOptions } from '../../utils/periodFilterOptions.ts'
 import {
   beginTrackedRequest,
@@ -40,6 +41,7 @@ const ReturnDetailModal = lazyRetry(() => import('./ReturnDetailModal'), 'return
 const EditReturnModal = lazyRetry(() => import('./EditReturnModal'), 'returns-edit-modal')
 const NewReturnModal = lazyRetry(() => import('./NewReturnModal'), 'returns-new-modal')
 const NewSupplierReturnModal = lazyRetry(() => import('./NewSupplierReturnModal'), 'returns-new-supplier-modal')
+const ExportOptionsDialog = lazyRetry(() => import('../shared/ExportOptionsDialog'), 'returns-export-options')
 
 type ActionHistoryBarHistory = ComponentProps<typeof ActionHistoryBar>['history']
 type ReturnsListSurfaceProps = ComponentProps<typeof ReturnsListSurface>
@@ -229,6 +231,13 @@ function toNumericAmount(value: number | string | null | undefined): number {
   const numericValue = Number(value || 0)
   return Number.isFinite(numericValue) ? numericValue : 0
 }
+
+// H1+X5 (Part 402): the dialog's column list derives from this builder's own
+// keys, so chooser and file can never disagree.
+export const RETURN_EXPORT_KEYS = [
+  'Return_Number', 'Scope', 'Date', 'Receipt', 'Customer', 'Supplier', 'Reason',
+  'Type', 'Settlement', 'Refund_USD', 'Compensation_USD', 'Business_Loss_USD', 'Status',
+] as const
 
 function exportReturnRows(rows: ReturnRow[] = [], tr: TranslateFn): Array<Record<string, unknown>> {
   return rows.map((ret) => ({
@@ -805,16 +814,21 @@ export default function Returns() {
 
   const { customerRows, supplierRows, customerStats, supplierStats } = returnScopeSummary
 
+  // H1+X5 (Part 402): exports open the shared options dialog (column
+  // chooser remembered per page + CSV/Excel/PDF) instead of a fixed xlsx.
+  const [exportDialog, setExportDialog] = useState<{ rows: Array<Record<string, unknown>>; baseName: string } | null>(null)
   const exportVisible = useCallback(async (rowsToExport: ReturnRow[] = visibleReturns, prefix = 'returns-visible') => {
-    const { downloadXLSX } = await import('../../utils/xlsxExport.ts')
-    downloadXLSX(`${prefix}-${new Date().toISOString().slice(0, 10)}.xlsx`, exportReturnRows(rowsToExport, tr))
-  }, [tr, visibleReturns])
+    if (!rowsToExport.length) {
+      notify(tr('no_data_to_export', 'No data to export'), 'error')
+      return
+    }
+    setExportDialog({ rows: exportReturnRows(rowsToExport, tr), baseName: prefix })
+  }, [notify, tr, visibleReturns])
 
   const exportSelected = useCallback(async () => {
     if (!selectedReturns.length) return
     await exportVisible(selectedReturns, 'returns-selected')
-    notify(`Exported ${selectedReturns.length} selected return${selectedReturns.length === 1 ? '' : 's'}.`)
-  }, [exportVisible, notify, selectedReturns])
+  }, [exportVisible, selectedReturns])
 
   const exportItems = useMemo(() => ([
     { label: tr('export_visible_returns', 'Export visible returns', 'នាំចេញការត្រឡប់ដែលកំពុងបង្ហាញ'), onClick: () => exportVisible(visibleReturns, `returns-${scope}`) },
@@ -1090,6 +1104,21 @@ export default function Returns() {
         tr={tr}
         visibleIds={visibleIds}
       />
+
+      {exportDialog ? (
+        <Suspense fallback={null}>
+          <ExportOptionsDialog
+            title={t('export_options_title') || 'Export options'}
+            fileBaseName={exportDialog.baseName}
+            columns={RETURN_EXPORT_KEYS.map((key) => ({ key, label: exportColumnLabel(key) }))}
+            rows={exportDialog.rows}
+            rememberKey="returns"
+            t={t}
+            notify={notify}
+            onClose={() => setExportDialog(null)}
+          />
+        </Suspense>
+      ) : null}
 
       {detailRet ? (
         <Suspense fallback={null}>

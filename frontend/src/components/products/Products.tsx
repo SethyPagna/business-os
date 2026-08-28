@@ -1946,13 +1946,32 @@ function ProductsFullEditor() {
   // re-importing it never turns barcodes into scientific notation or Khmer
   // into '?' the way a plain CSV round-trip through Excel can. See
   // utils/xlsxExport.ts's header comment for the full explanation.
-  const exportProductsCsv = useCallback(async (rowsToExport = filtered, filePrefix = 'products', groups?: import('./helpers/productExport.ts').ExportFieldGroup[], branchId?: string) => {
-    const [{ downloadXLSX }, { buildProductExportRows }] = await Promise.all([
-      import('../../utils/xlsxExport.ts'),
-      import('./helpers/productExport.ts'),
-    ])
-    downloadXLSX(`${filePrefix}-${new Date().toISOString().slice(0,10)}.xlsx`, buildProductExportRows(rowsToExport, { ...(groups ? { groups } : {}), ...(branchId ? { branchId } : {}) }))
-  }, [filtered])
+  // H1+X5 (Part 402): the format comes from ExportFieldsModal's new format
+  // row (xlsx default -- the barcode-safe choice). PDF goes through the
+  // shared print view; CSV exists for re-import/machine use.
+  const exportProductsCsv = useCallback(async (rowsToExport = filtered, filePrefix = 'products', groups?: import('./helpers/productExport.ts').ExportFieldGroup[], branchId?: string, format: 'csv' | 'xlsx' | 'pdf' = 'xlsx') => {
+    const { buildProductExportRows } = await import('./helpers/productExport.ts')
+    const rows = buildProductExportRows(rowsToExport, { ...(groups ? { groups } : {}), ...(branchId ? { branchId } : {}) })
+    const filename = `${filePrefix}-${new Date().toISOString().slice(0,10)}`
+    if (format === 'csv') {
+      const { downloadCSV } = await import('../../utils/csv.ts')
+      downloadCSV(`${filename}.csv`, rows)
+      return
+    }
+    if (format === 'pdf') {
+      const { openPrintExport } = await import('../../utils/exportOptions.ts')
+      const opened = openPrintExport({
+        title: `${filePrefix} — ${new Date().toISOString().slice(0, 10)}`,
+        subtitle: `${rows.length} ${t('records') || 'records'}`,
+        headers: rows.length ? Object.keys(rows[0]) : [],
+        rows,
+      })
+      if (!opened) notify(t('export_popup_blocked') || 'The print view was blocked -- allow pop-ups for this site and try again.', 'error')
+      return
+    }
+    const { downloadXLSX } = await import('../../utils/xlsxExport.ts')
+    downloadXLSX(`${filename}.xlsx`, rows)
+  }, [filtered, notify, t])
 
   const productsById = useMemo(() => buildProductIdMap(products), [products])
 
@@ -4086,7 +4105,7 @@ function ProductsFullEditor() {
             selectedScopeId={exportScopeId}
             onScopeChange={setExportScopeId}
             onClose={() => setExportFieldsOpen(false)}
-            onConfirm={(groups) => {
+            onConfirm={(groups, format) => {
               setExportFieldsOpen(false)
               const scope = productExportScopes.find((s) => s.id === exportScopeId) || productExportScopes[0]
               // 'full' scope explicitly means "ignore filters" (see

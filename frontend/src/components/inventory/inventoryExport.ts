@@ -327,20 +327,23 @@ function buildInventoryProductRows(productsToExport: AnyRecord[], getStockQty: S
   }))
 }
 
-export async function exportInventoryMovementGroups(scope: InventoryExportScope, groups: AnyRecord[], filePrefix = 'inventory-movements'): Promise<void> {
-  const { downloadXLSX } = await loadInventoryExportTools()
-  downloadXLSX(`${filePrefix}-${scope.exportStamp}.xlsx`, buildMovementRows(groups))
+// H1+X5 (Part 405): the three list-style exports expose their ROW builders
+// so Inventory.tsx can feed the shared options dialog (column chooser +
+// CSV/Excel/PDF); the download functions below delegate to the same
+// collectors, so there is exactly one row shape per export kind. The zip
+// package export keeps its direct multi-sheet build (a zip is not a
+// column-chooser flow).
+export function collectInventoryMovementRows(groups: AnyRecord[]): AnyRecord[] {
+  return buildMovementRows(groups)
 }
 
-export async function exportInventorySummary(scope: InventoryExportScope, productsToExport: AnyRecord[] = scope.filteredSummary, filePrefix = 'inventory'): Promise<void> {
-  const { downloadXLSX } = await loadInventoryExportTools()
-  downloadXLSX(`${filePrefix}-${scope.exportStamp}.xlsx`, buildInventoryProductRows(productsToExport, scope.getStockQty))
+export function collectInventorySummaryRows(scope: InventoryExportScope, productsToExport: AnyRecord[] = scope.filteredSummary): AnyRecord[] {
+  return buildInventoryProductRows(productsToExport, scope.getStockQty)
 }
 
-export async function exportInventoryStats(scope: InventoryExportScope, filePrefix = 'inventory-stats'): Promise<void> {
-  const { downloadXLSX } = await loadInventoryExportTools()
+export function collectInventoryStatsRows(scope: InventoryExportScope): AnyRecord[] {
   const stockStatusRows = getStockStatusRows(scope)
-  const rows = [
+  return [
     ...buildInventoryExportContextRows(scope).map((row) => ({
       Section: row.Section,
       Metric: row.Metric,
@@ -363,7 +366,21 @@ export async function exportInventoryStats(scope: InventoryExportScope, filePref
       Example: row.Example,
     })),
   ]
-  downloadXLSX(`${filePrefix}-${scope.exportStamp}.xlsx`, rows)
+}
+
+export async function exportInventoryMovementGroups(scope: InventoryExportScope, groups: AnyRecord[], filePrefix = 'inventory-movements'): Promise<void> {
+  const { downloadXLSX } = await loadInventoryExportTools()
+  downloadXLSX(`${filePrefix}-${scope.exportStamp}.xlsx`, collectInventoryMovementRows(groups))
+}
+
+export async function exportInventorySummary(scope: InventoryExportScope, productsToExport: AnyRecord[] = scope.filteredSummary, filePrefix = 'inventory'): Promise<void> {
+  const { downloadXLSX } = await loadInventoryExportTools()
+  downloadXLSX(`${filePrefix}-${scope.exportStamp}.xlsx`, collectInventorySummaryRows(scope, productsToExport))
+}
+
+export async function exportInventoryStats(scope: InventoryExportScope, filePrefix = 'inventory-stats'): Promise<void> {
+  const { downloadXLSX } = await loadInventoryExportTools()
+  downloadXLSX(`${filePrefix}-${scope.exportStamp}.xlsx`, collectInventoryStatsRows(scope))
 }
 
 export async function exportInventoryPackage(scope: InventoryExportScope, mode = scope.tab): Promise<void> {

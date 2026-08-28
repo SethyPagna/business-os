@@ -2,6 +2,7 @@
 import { Suspense, lazy, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react'
 import { lazyRetry } from '../../utils/lazyImport.ts'
 import { consumeLongPressClick, createLongPressHandlers } from '../../utils/longPress.ts'
+import { columnsFromRows } from '../../utils/exportOptions.ts'
 import type { ComponentProps } from 'react'
 import ChevronDown from 'lucide-react/dist/esm/icons/chevron-down.js'
 import ChevronRight from 'lucide-react/dist/esm/icons/chevron-right.js'
@@ -43,6 +44,7 @@ import type { ContactOption } from './contactOptionUtils'
 
 const ContactImportModal = lazyRetry(() => import('./ContactImportModal'), 'delivery-contact-import')
 const DeliveryContactReportModal = lazyRetry(() => import('./DeliveryContactReportModal'), 'delivery-contact-report')
+const ExportOptionsDialog = lazyRetry(() => import('../shared/ExportOptionsDialog'), 'delivery-export-options')
 const DELIVERY_CONTACT_MUTATION_TIMEOUT_MS = 12000
 
 type TranslateFn = (key: string) => string | undefined
@@ -136,11 +138,9 @@ const useSync = useSyncHook as () => SyncContextValue
 
 type ContactReadTransportModule = typeof import('../../api/contactReadTransport.ts')
 type ContactWriteTransportModule = typeof import('../../api/contactWriteTransport.ts')
-type CsvUtilsModule = typeof import('../../utils/csv') & typeof import('../../utils/xlsxExport')
 
 let contactReadTransportModulePromise: Promise<ContactReadTransportModule> | null = null
 let contactWriteTransportModulePromise: Promise<ContactWriteTransportModule> | null = null
-let csvUtilsModulePromise: Promise<CsvUtilsModule> | null = null
 
 function loadContactReadTransportModule(): Promise<ContactReadTransportModule> {
   if (!contactReadTransportModulePromise) contactReadTransportModulePromise = import('../../api/contactReadTransport.ts')
@@ -150,16 +150,6 @@ function loadContactReadTransportModule(): Promise<ContactReadTransportModule> {
 function loadContactWriteTransportModule(): Promise<ContactWriteTransportModule> {
   if (!contactWriteTransportModulePromise) contactWriteTransportModulePromise = import('../../api/contactWriteTransport.ts')
   return contactWriteTransportModulePromise
-}
-
-function loadCsvUtilsModule(): Promise<CsvUtilsModule> {
-  if (!csvUtilsModulePromise) {
-    csvUtilsModulePromise = Promise.all([
-      import('../../utils/csv'),
-      import('../../utils/xlsxExport'),
-    ]).then(([csvUtils, xlsxUtils]) => ({ ...csvUtils, ...xlsxUtils }) as CsvUtilsModule)
-  }
-  return csvUtilsModulePromise
 }
 
 function getDeliveryApi(): DeliveryApi {
@@ -540,6 +530,8 @@ function DeliveryTab({ t, notify, active = true, initialSearch }: DeliveryTabPro
   )
 
   const { selectedIds, setSelectedIds, toggleOne, selectAllProp, selectionModeActive, getRowLongPressState } = useContactSelection(visibleContacts)
+  // H1+X5 (Part 402): exports go through the shared options dialog.
+  const [exportDialog, setExportDialog] = useState<{ rows: Array<Record<string, unknown>>; baseName: string } | null>(null)
   // 11.1/11.2 (B6): in select mode a cell click toggles the row; out of it
   // the cell keeps opening the detail panel (long-press enters the mode).
   const handleContactCellClick = (contact: DeliveryContact) => {
@@ -911,8 +903,9 @@ function DeliveryTab({ t, notify, active = true, initialSearch }: DeliveryTabPro
                     Created: c.created_at || '',
                   }
                 })
-                const { downloadXLSX } = await loadCsvUtilsModule()
-                downloadXLSX(`delivery-contacts-${new Date().toISOString().slice(0,10)}.xlsx`, rows)
+                // H1+X5 (Part 402): shared options dialog instead of a
+                // fixed xlsx download.
+                setExportDialog({ rows, baseName: 'delivery-contacts' })
               },
             },
           ] as PortalMenuItem[])}
@@ -1187,6 +1180,20 @@ function DeliveryTab({ t, notify, active = true, initialSearch }: DeliveryTabPro
           onEdit={() => setModal('form')} onDelete={canDeleteContact ? () => handleDelete(selected) : undefined} onClose={() => { setModal(null); setSelected(null) }} t={t}
           extraButtons={[{ label: tr('delivery_report', 'Deliveries'), onClick: () => setModal('report') }]} />
       )}
+      {exportDialog ? (
+        <Suspense fallback={null}>
+          <ExportOptionsDialog
+            title={t('export_options_title') || 'Export options'}
+            fileBaseName={exportDialog.baseName}
+            columns={columnsFromRows(exportDialog.rows)}
+            rows={exportDialog.rows}
+            rememberKey="contacts-delivery"
+            t={t}
+            notify={notify}
+            onClose={() => setExportDialog(null)}
+          />
+        </Suspense>
+      ) : null}
       {/* X3: the per-courier totals drill -- the same pattern as the supplier
           Purchases modal, backed by /api/sales/delivery-contact-report. */}
       {modal === 'report' && selected ? (
