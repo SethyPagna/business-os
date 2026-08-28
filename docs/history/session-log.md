@@ -10292,3 +10292,85 @@ fees page" means), Y13–Y17/Y19/Y20 (density redesigns; several HOT with 6e's
 F3 slice 2), Y1's server-side timing measurement on an idle worker, Y4's
 print/reprint scroll check (not a hub surface), Y8's "two analyzes" labeling.
 Everything shipped here needs the next deploy (incl. migration 0077).
+
+## Part 426 (Aug 29 2026, session business-os-v1-43) — Phase Z: same-batch restore (Z0), OTP layering (Z6), Print column (Z3b); Z1b/Z2 measured + scoped
+
+**Ask.** The user answered Phase Y's open questions (Y6 "no need"; Y12 =
+recordable per-currency sales change) and added a correctness bug plus a
+pasted ten-point triage list to record alongside Phase Y. Recorded as Phase Z
+(Z0 + Z1–Z10); fixed the correctness-critical and high-priority ones, measured
+and scoped the rest.
+
+**What changed / found.**
+
+- **Z0 (returns/cancels must restore to the SAME batch, never a new one) —
+  the core fix.** Root cause measured against production: a POS sale where the
+  cashier picked no lot recorded NO batch attribution (sale_items.batch_id
+  NULL), so its units left branch_stock but no specific lot; a return/cancel
+  then put stock back on the aggregate only, and lots + branch_stock drifted
+  apart (the same drift underlies Z1b). Fix at the source: every no-lot
+  checkout line is auto-allocated across the product's active lots at that
+  branch, OLDEST received first (new readFifoLotAvailability +
+  allocateAcrossLots in productBatches.ts). A single lot that covers the line
+  becomes the line's batch_id (identical downstream to an explicit pick); a
+  multi-lot split records per-lot rows in sale_item_batch_allocations, which
+  gains per-unit release tracking (released_quantity, migration 0078). The
+  cancel/un-cancel kernel (saleTransitions.ts) and the returns restock
+  (returns.ts) now walk those allocations: restores put units back into the
+  exact lots last-drawn-first, re-deducts take them FIFO, capped at each
+  allocation's outstanding/released so a recorded return's units are never
+  double-added. Legacy untracked units still ride branch_stock, never a
+  fabricated new lot. The "data repair" clause is moot — production has ZERO
+  returns and only cancels of product #1, whose single lot (id 1) was restored
+  correctly (branch_batch_stock 8, matching branch_stock). Commit `86f106ba`.
+- **Z6 (OTP dialog buried under the profile — HIGH priority).** The OTP
+  setup/disable dialog rendered inline inside UserProfileModal, so it was a
+  DOM child of the profile's tree — trapped in its stacking context (z-[60]
+  painted under the profile Modal's z-[1050]) and unmounted the instant the
+  profile closed. Now portals to document.body at z-[1060]. Layering was the
+  reported blocker; the generation/validation logic was not measured broken
+  (verify end-to-end post-deploy). Commit `00786aa7`.
+- **Z3b (Sales action column).** The column's only control is reprint, so its
+  header now reads "Print" (the `print` en+km key already existed). Verified
+  live on worker-dev. Same commit as Z6.
+- **Z1b (POS shows 0 for a branch) — MEASURED, needs the user.** Production
+  branch_stock = 23,113 units / 12,210 rows (6,105 products × 2 branches) but
+  branch_batch_stock = 12,725 / 6,105 lots (one lot per product, at one
+  branch). The catalog import's default apply path writes branch_stock for the
+  named branch but no branch_batch_stock row, so a product's warehouse stock
+  whose only lot sits at shop shows lot-qty 0 at warehouse. POS/Products read
+  per-branch qty from branch_stock (the correct aggregate), so the grid should
+  be right — the "0" is most likely the lot/batch DETAIL view or a group-level
+  per-branch read. Recorded on the board; needs the user to point at the exact
+  screen before a reconcile-migration or a group-read fix.
+- **Z2 (discount overwrites the price input) — SCOPED, deferred.** The cart
+  price input binds to applied_price_usd (which drops after a discount)
+  instead of base_price_usd; the fix touches posCore.ts + CartItem binding +
+  receipt templates and must not disturb any total, so it is recorded for a
+  focused unit. The base/applied split already exists in schema — a
+  display/binding rewire, not new machinery.
+
+**Verified.** cloudflare `tsc --noEmit`: clean. frontend `tsc --noEmit`: clean
+except the 6e in-flight `onMinimize` errors (ProductForm/Products — untouched).
+`vite build`: green. Backend: full `scripts/test-*.cjs` sweep, 0 real failures
+(the flagged names print "SQLITE_ERROR"/"FAIL" in expected-error assertions but
+exit 0); test-sale-cancel-pure (11 incl. new multi-lot Z0 cases),
+test-fifo-lot-allocation-pure (5, new), test-returns-batch-restock-pure (7),
+test-sales-oversell-strict, test-import-engine (26), test-stock-action-apply,
+test-reset-products all PASS. Migration 0078 applies against the real chain
+(released_quantity present) and is idempotent. Live: app loads on worker-dev
+(the dev asset watcher hit the known EPERM node_modules lock, so a
+stop/restart was needed to serve the fresh dist); Sales page shows the "Print"
+header.
+
+**Production reads (read-only):** returns (0), recent cancelled sales + their
+sale_items/batches (product #1, lot 1 correctly restored), branch_stock vs
+branch_batch_stock totals.
+
+**Not done.** Z1a (one date-vs-lot-code display rule), Z1b fix (needs the
+user's exact screen), Z2 (scoped unit), Z3a (live summary refresh on status
+change), Z4 (receipt-settings dual preview), Z5 (global contrast + hamburger —
+larger), Z7 (stats redundancy + Khmer contrast), Z8 (explicit Credit /
+awaiting-payment editing), Z9 ("Complete Sale" rename + InfoHint), Z10
+(Dashboard/Branch reconcile + "Reconcile Revenue" — needs the definition).
+Everything shipped needs the next deploy (migrations 0077 + 0078).

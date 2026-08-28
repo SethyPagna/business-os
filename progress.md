@@ -1596,31 +1596,61 @@ need"; Y12 clarified as the recordable per-currency sales change) and added a
 correctness bug plus a pasted ten-point triage list to record "next to each
 other" with the Phase-Y items.*
 
-- [ ] Z0. **Returns + cancels must restore stock to the SAME batch the sale
-  took it from — never create a new batch. "Currently it is wrong. fix it."**
-  Sale items carry batch_id; every restoring transition (return with
-  restock, cancel, un-cancel's inverse) must move quantity back into exactly
-  that lot. ALSO a data repair: "make the one i see in sales/returns
-  currently go correctly" — find the restorations that already landed in
-  wrong/new batches and move them back to the originating lot.
-- [ ] Z1. **Stats not updating / inconsistent data.** (a) Products page shows
-  batch "08/28/2026" while batch details show "08242026" — audit the
-  list-vs-detail data path (date-format mismatch or stale cache; partly the
-  Y7/0077 received_at repair, partly lot_code MMDDYYYY being rendered where a
-  date belongs — decide ONE display rule: dates render mm/dd/yyyy, lot codes
-  render as codes, never interchanged). (b) POS: selecting a branch/warehouse
-  sometimes shows 0 for product groups/standalone items even when stock
-  exists — check the branch-filter query / per-branch quantity resolution.
+- [x] Z0 *(Part 426 — SHIPPED, needs deploy. Root cause MEASURED: a POS
+  sale where the cashier picked no lot recorded NO batch attribution
+  (sale_items.batch_id NULL), so units left branch_stock but no specific
+  lot, and returns/cancels put them back on the aggregate only — lots and
+  branch_stock drifting apart. Fix at the source: every no-lot checkout
+  line is auto-allocated across the product's active lots at that branch,
+  OLDEST received first (readFifoLotAvailability + allocateAcrossLots);
+  single-lot lines set batch_id, multi-lot record per-lot allocations with
+  per-unit release tracking (migration 0078). The cancel/un-cancel kernel
+  and the returns restock now walk those allocations — restores go back to
+  the exact lots (last-drawn first), re-deducts take them FIFO; legacy
+  untracked units still ride branch_stock, never a fabricated new lot.
+  Tests: new test-fifo-lot-allocation-pure (5) + test-sale-cancel-pure
+  multi-lot cases + route wiring locks. NOTE: fixes NEW sales; existing
+  drift is the Z1b import-data issue below. The "data repair" clause is
+  moot — production has ZERO returns and only cancels of product #1, whose
+  single lot was restored correctly (measured).)*
+  **Returns + cancels must restore stock to the SAME batch — never a new one.**
+- [~] Z1. **Stats not updating / inconsistent data.** (a) Products page shows
+  batch "08/28/2026" while batch details show "08242026" — partly the
+  Y7/0077 received_at repair (raw slash dates), partly lot_code MMDDYYYY
+  (08242026) being rendered where a date belongs. **Decide ONE display
+  rule: dates render mm/dd/yyyy, lot codes render as codes, never
+  interchanged** — still open. (b) **MEASURED (Part 426), a real
+  import-data inconsistency:** production branch_stock holds 23,113 units
+  across 12,210 rows (6,105 products × 2 branches) but branch_batch_stock
+  holds only 12,725 units in 6,105 lots (ONE lot per product, at ONE
+  branch). The catalog import's default/legacy apply path writes
+  branch_stock for the named branch but never a branch_batch_stock row, so
+  a product with warehouse stock whose only lot sits at shop shows lot-qty
+  0 at warehouse. POS/Products READ per-branch qty from branch_stock (the
+  correct aggregate — line 346/363/648 in routes/products.ts), so the POS
+  grid should be right; the "shows 0" is most likely the batch/lot DETAIL
+  view (branch_batch_stock) or a GROUP-level per-branch aggregation.
+  REMAINING: confirm which surface shows 0 for the user, then either
+  reconcile lots↔branch_stock (a migration seeding the missing
+  branch_batch_stock rows) or fix the group per-branch read. Needs the
+  user to point at the exact screen.
 - [ ] Z2. **Cart: decouple product-level discount from the selling-price
-  input.** Applying a discount currently rewrites the price field too; the
-  price input must stay manually editable, the discount affects only the line
-  total (price × qty − discount). Receipts show the discount explicitly as
-  `(-$x.xx)` per product line.
-- [ ] Z3. **Sales page: live summary + Print column.** (a) The group summary
-  row ("4 Sales | $0.00 Revenue | 0 completed") doesn't refresh when a sale's
-  status changes — recompute on status mutation (the page already reloads
-  rows; the summary must derive from the same refreshed data). (b) Rename the
-  action column header to "Print".
+  input — SCOPED, deferred (Part 426).** Applying a discount currently
+  rewrites the price field (the input binds to applied_price_usd, which
+  drops after a discount, instead of base_price_usd). The fix touches the
+  POS pricing kernel (posCore.ts), CartItem's input binding, AND the
+  receipt templates (show `(-$x.xx)` per line) — a coordinated multi-file
+  change that must not disturb any total, so it is recorded here for a
+  focused unit rather than rushed alongside the correctness fixes. The
+  base/applied split already EXISTS in the schema (sale_items.base_price_*
+  vs applied_price_*), so this is a display/binding rewire, not new
+  machinery.
+- [~] Z3. **Sales page: live summary + Print column.** (a) STILL OPEN: the
+  group summary row ("4 Sales | $0.00 Revenue | 0 completed") doesn't
+  refresh when a sale's status changes — recompute on status mutation. (b)
+  **DONE (Z3b, Part 426, verified live):** the action column header now reads
+  "Print" (the column's only control is reprint); the `print` en+km key
+  already existed.
 - [ ] Z4. **Receipt SETTINGS preview: enabling 80×50 must not replace the
   other preview** — show both formats side-by-side or with a toggle in the
   settings preview area (the receipt VIEW itself already stacks both since
@@ -1630,10 +1660,15 @@ other" with the Phase-Y items.*
   Update actions blue, Exit red; introduce a hamburger menu housing Settings
   (incl. Receipt Settings moved into the main Settings page), Update, Exit.
   Larger item — schedule as its own unit.
-- [ ] Z6. **OTP enable broken + buried under the profile page — HIGH
-  priority.** The OTP dialog renders under/inside the profile surface and
-  vanishes when the profile closes; fix the modal layering (portal to body
-  like Modal/InfoHint) AND verify the enable/validation flow end to end.
+- [~] Z6. **OTP enable broken + buried under the profile page — HIGH
+  priority.** **Layering FIXED (Part 426, needs deploy):** the OTP dialog
+  rendered inline inside UserProfileModal — a DOM child of its tree,
+  trapped in its stacking context (painted UNDER the profile at z-[60] vs
+  the profile Modal's z-[1050]) and unmounted the moment the profile
+  closed. It now portals to document.body at z-[1060], so it paints on top
+  and owns its own lifecycle. REMAINING: verify the enable/validation flow
+  end to end once deployed (the layering was the reported blocker; the
+  generation/validation logic itself was not measured broken).
 - [ ] Z7. **Stats & Branch section: keep only the 6 stats, cut the redundant
   "original branch" stats, tighten the spacing between stats and branch
   list, and make Khmer text larger + darker (grey-on-light fails contrast).**
