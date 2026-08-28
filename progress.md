@@ -1338,7 +1338,7 @@ the repository evidence, never from intent.
 |---|---|---|
 | 6.1 | **Remove the colour overlay in the About section**, and make the **cover image cover the whole section**, not half of it. | done (Part 399) |
 | 6.2 | Top bar: **remove the logo**; split social links to one side and language + light/dark to the other. | done (Part 399) |
-| 6.3 | Stale cache of embedded sites on the public site — reproduce, then scope. | not started |
+| 6.3 | Stale cache of embedded sites on the public site — reproduce, then scope. | **REPRODUCED + scoped (Part 400 sweep)**: a `customer_portal_*` save stores instantly but `GET /api/portal/config` serves the old value the full 60s TTL (measured stale +30s, fresh +66s) — `portalCacheVersion` keys on the PRODUCTS version only and settings saves bump nothing. Fix (2 changes, in the G-session's claimed files, handed over): settings POST bumps a 'settings' version; portalCacheVersion composes products+settings. |
 | 6.4 | **Google Translate for languages** instead of hand-maintained packs. Must be fast, must not corrupt layout or Khmer text, and must degrade safely — the current packs are the fallback, not the casualty. | was already built (verified Part 399: portalTranslateController + admin toggle + tests); row had gone stale |
 | 6.5 | Portal pagination counts **unmerged** rows: the server paginates at 50 before the browser merges duplicates, so the pager promises pages that do not exist. | done (Part 399): group pagination via familyPagination on both portal endpoints; behavioral test |
 
