@@ -191,6 +191,7 @@ type ProductRecord = Record<string, unknown> & {
   cost_price_usd?: string | number
   description?: string
   discount_label?: string
+  tag_label?: string | null
   // Flat, non-batch expiry tracking -- distinct from the per-lot expiry
   // carried by the batch/lot system. See ProductDetailSheet.tsx.
   expiry_date?: string | null
@@ -299,6 +300,7 @@ type PosOrder = Record<string, unknown> & {
   customerSearch: string
   deliveryFeePaidBy: string
   deliveryFeeUsd: string
+  deliveryActualCostUsd: string
   deliverySearch: string
   discountKhr: string
   discountUsd: string
@@ -1621,7 +1623,7 @@ export default function POS() {
     setDeliverySuggestions([])
     setShowDeliveryDrop(false)
   }
-  const clearDelivery = () => patchActive({ selectedDelivery: null, deliverySearch: '' })
+  const clearDelivery = () => patchActive({ selectedDelivery: null, deliverySearch: '', deliveryActualCostUsd: '' })
 
   const handleAddDelivery = async (confirmDuplicateArg: unknown = false) => {
     const confirmDuplicate = confirmDuplicateArg === true
@@ -1834,7 +1836,9 @@ export default function POS() {
       // request -- see PRODUCT_SEARCH_COLUMNS's own comment in
       // cloudflare/src/lib/searchMatch.ts for the full reasoning.
       if (searchTerms.length > 0) {
-        const hay = [p.name, p.sku, p.barcode]
+        // tag_label (P4) joins the haystack: the whole point of the tag is
+        // typing YOUR word for a product and finding it.
+        const hay = [p.name, p.sku, p.barcode, p.tag_label]
         if (!matchesSearchTermGroups(hay, searchTerms, searchMode)) return false
       }
 
@@ -2461,6 +2465,9 @@ export default function POS() {
       delivery_fee_usd:          feeUsd,
       delivery_fee_khr:          feeKhr,
       delivery_fee_paid_by:      active.isDelivery ? active.deliveryFeePaidBy : DELIVERY_FEE_PAYER.CUSTOMER,
+      // P6: only sent when the cashier typed one -- absent stays NULL on
+      // the sale so stats can tell "not recorded" from "cost 0".
+      delivery_actual_cost_usd:  active.isDelivery && String(active.deliveryActualCostUsd || '').trim() !== '' ? (parseFloat(active.deliveryActualCostUsd) || 0) : undefined,
       sale_status: saleStatus,
       client_time: device.clientTime,
       device_tz: device.deviceTz || '',
@@ -2680,7 +2687,13 @@ export default function POS() {
                       <ProductDiscountBadge product={p} exchangeRate={exchangeRate} fmtUSD={fmtUSD} label={posCopy('Discounts', 'Discounts')} />
                     </button>
                     <div className="flex items-start justify-between gap-2">
-                      <p {...getKhmerTextProps(p.__displayName || p.name, 'text-xs font-medium text-gray-900 dark:text-white leading-tight mb-1 line-clamp-2')}>{p.__displayName || p.name}</p>
+                      <p {...getKhmerTextProps(p.__displayName || p.name, 'text-xs font-medium text-gray-900 dark:text-white leading-tight mb-1 line-clamp-2')}>
+                        {p.__displayName || p.name}
+                        {/* P4: the operator's own memory-aid tag chip */}
+                        {String(p.tag_label || '').trim() ? (
+                          <span className="ml-1 inline-flex items-center rounded-full bg-sky-100 px-1.5 py-0.5 align-middle text-[9px] font-semibold text-sky-700 dark:bg-sky-900/30 dark:text-sky-300">{String(p.tag_label).trim()}</span>
+                        ) : null}
+                      </p>
                       {groupProduct ? (
                         <span
                           className="inline-flex flex-shrink-0 items-center rounded-full bg-purple-100 px-2 py-0.5 text-[10px] font-semibold text-purple-700 dark:bg-purple-900/30 dark:text-purple-300"
@@ -3123,14 +3136,22 @@ export default function POS() {
                     )}
                   </div>
 
-                  {/* Who pays: label + toggle on one row, buttons sized to
-                      their text instead of stretching half the panel each. */}
+                  {/* Who pays + the actual courier cost, one row. The cost
+                      input (P6) is what WE pay the driver -- staff-only,
+                      stored on the sale, never printed on the receipt. */}
                   <div>
                     <div className="flex items-center justify-between gap-2">
                       <span className="text-xs text-gray-400">{t('fee_paid_by')||'Fee paid by'}</span>
-                      <div className="flex overflow-hidden rounded-lg border border-gray-200 text-xs dark:border-gray-600">
-                        <button onClick={() => patchActive({ deliveryFeePaidBy: DELIVERY_FEE_PAYER.CUSTOMER })} className={`px-3 py-1.5 font-medium transition-colors ${active.deliveryFeePaidBy === DELIVERY_FEE_PAYER.CUSTOMER ? 'bg-orange-500 text-white' : 'text-gray-500 hover:bg-gray-50 dark:hover:bg-gray-700'}`}>{t('fee_by_customer')||'Customer'}</button>
-                        <button onClick={() => patchActive({ deliveryFeePaidBy: DELIVERY_FEE_PAYER.STORE })}    className={`border-l border-gray-200 px-3 py-1.5 font-medium transition-colors dark:border-gray-600 ${active.deliveryFeePaidBy === DELIVERY_FEE_PAYER.STORE    ? 'bg-blue-600 text-white'   : 'text-gray-500 hover:bg-gray-50 dark:hover:bg-gray-700'}`}>{t('fee_by_store')||'Store'}</button>
+                      <div className="flex items-center gap-2">
+                        <div className="flex overflow-hidden rounded-lg border border-gray-200 text-xs dark:border-gray-600">
+                          <button onClick={() => patchActive({ deliveryFeePaidBy: DELIVERY_FEE_PAYER.CUSTOMER })} className={`px-3 py-1.5 font-medium transition-colors ${active.deliveryFeePaidBy === DELIVERY_FEE_PAYER.CUSTOMER ? 'bg-orange-500 text-white' : 'text-gray-500 hover:bg-gray-50 dark:hover:bg-gray-700'}`}>{t('fee_by_customer')||'Customer'}</button>
+                          <button onClick={() => patchActive({ deliveryFeePaidBy: DELIVERY_FEE_PAYER.STORE })}    className={`border-l border-gray-200 px-3 py-1.5 font-medium transition-colors dark:border-gray-600 ${active.deliveryFeePaidBy === DELIVERY_FEE_PAYER.STORE    ? 'bg-blue-600 text-white'   : 'text-gray-500 hover:bg-gray-50 dark:hover:bg-gray-700'}`}>{t('fee_by_store')||'Store'}</button>
+                        </div>
+                        <div className="relative w-20 flex-shrink-0">
+                          <label htmlFor="pos-delivery-actual-cost" className="sr-only">{t('delivery_actual_cost')||'Actual delivery cost'}</label>
+                          <span className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-400 text-xs pointer-events-none">{usdSymbol}</span>
+                          <input id="pos-delivery-actual-cost" name="pos_delivery_actual_cost" className="input text-xs py-1.5 pl-5 w-full" type="number" step="any" min="0" placeholder={t('cost_short')||'Cost'} title={t('delivery_actual_cost_hint')||'What the driver is paid (staff-only, not on the receipt)'} value={active.deliveryActualCostUsd} onChange={e => patchActive({ deliveryActualCostUsd: e.target.value })} autoComplete="off" />
+                        </div>
                       </div>
                     </div>
                     {feeUsd > 0 && (

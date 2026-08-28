@@ -51,6 +51,16 @@ export interface SalesTotals {
   tax_usd: number
   delivery_usd: number
   store_delivery_usd: number
+  // P6: the courier money actually paid out (staff-only surface; NULL rows
+  // don't count -- delivery_actual_cost_count says how many sales carried
+  // one, vs delivery_sale_count deliveries total, so a partial record is
+  // visible instead of read as profit). Display-only: deliberately NOT
+  // folded into profit_usd (standing rule: existing calculations don't
+  // change without an explicit ask).
+  delivery_actual_cost_usd: number
+  delivery_actual_cost_count: number
+  delivery_sale_count: number
+  delivery_margin_usd: number
   revenue_usd: number
   collected_total_usd: number
   cost_usd: number
@@ -74,8 +84,9 @@ export interface SalesPeriodRow {
 export function emptySalesTotals(): SalesTotals {
   return {
     tx_count: 0, gross_sales_usd: 0, store_discount_usd: 0, membership_discount_usd: 0,
-    discount_usd: 0, tax_usd: 0, delivery_usd: 0, store_delivery_usd: 0, revenue_usd: 0,
-    collected_total_usd: 0, cost_usd: 0, profit_usd: 0, avg_order_usd: 0,
+    discount_usd: 0, tax_usd: 0, delivery_usd: 0, store_delivery_usd: 0,
+    delivery_actual_cost_usd: 0, delivery_actual_cost_count: 0, delivery_sale_count: 0, delivery_margin_usd: 0,
+    revenue_usd: 0, collected_total_usd: 0, cost_usd: 0, profit_usd: 0, avg_order_usd: 0,
   }
 }
 
@@ -117,7 +128,10 @@ async function salesLevelTotals(env: Env, f: SalesFilters) {
            COALESCE(SUM(membership_discount_usd), 0) AS membership_discount_usd,
            COALESCE(SUM(tax_usd), 0) AS tax_usd,
            COALESCE(SUM(CASE WHEN COALESCE(delivery_fee_paid_by, 'customer') = 'store' THEN 0 ELSE delivery_fee_usd END), 0) AS delivery_usd,
-           COALESCE(SUM(CASE WHEN delivery_fee_paid_by = 'store' THEN delivery_fee_usd ELSE 0 END), 0) AS store_delivery_usd
+           COALESCE(SUM(CASE WHEN delivery_fee_paid_by = 'store' THEN delivery_fee_usd ELSE 0 END), 0) AS store_delivery_usd,
+           COALESCE(SUM(delivery_actual_cost_usd), 0) AS delivery_actual_cost_usd,
+           COALESCE(SUM(CASE WHEN delivery_actual_cost_usd IS NOT NULL THEN 1 ELSE 0 END), 0) AS delivery_actual_cost_count,
+           COALESCE(SUM(CASE WHEN COALESCE(is_delivery, 0) = 1 THEN 1 ELSE 0 END), 0) AS delivery_sale_count
     FROM sales
     WHERE ${whereSql}
   `).get<Record<string, number>>(params)
@@ -148,6 +162,7 @@ export function deriveTotals(level: Record<string, number>, costUsd: number): Sa
   const taxUsd = num(level.tax_usd)
   const deliveryUsd = num(level.delivery_usd)
   const storeDeliveryUsd = num(level.store_delivery_usd)
+  const deliveryActualCostUsd = num(level.delivery_actual_cost_usd)
   const revenueUsd = grossSalesUsd - discountUsd
   const collectedTotalUsd = revenueUsd + taxUsd + deliveryUsd
   const profitUsd = revenueUsd - costUsd - storeDeliveryUsd
@@ -160,6 +175,12 @@ export function deriveTotals(level: Record<string, number>, costUsd: number): Sa
     tax_usd: round2(taxUsd),
     delivery_usd: round2(deliveryUsd),
     store_delivery_usd: round2(storeDeliveryUsd),
+    delivery_actual_cost_usd: round2(deliveryActualCostUsd),
+    delivery_actual_cost_count: num(level.delivery_actual_cost_count),
+    delivery_sale_count: num(level.delivery_sale_count),
+    // Margin over the CHARGED fees: what customers paid for delivery minus
+    // what the couriers were actually paid.
+    delivery_margin_usd: round2(deliveryUsd - deliveryActualCostUsd),
     revenue_usd: round2(revenueUsd),
     collected_total_usd: round2(collectedTotalUsd),
     cost_usd: round2(costUsd),

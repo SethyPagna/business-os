@@ -128,6 +128,10 @@ interface DashboardPeriodRow {
   discount_usd?: number
   tax_usd?: number
   delivery_usd?: number
+  delivery_actual_cost_usd?: number
+  delivery_actual_cost_count?: number
+  delivery_sale_count?: number
+  delivery_margin_usd?: number
   refund_usd?: number
   profit_usd?: number
   cost_usd?: number
@@ -1004,6 +1008,13 @@ export default function Dashboard() {
   const lowStockPreviewTruncated = !!summary?.low_stock_preview_truncated
   const outOfStockPreviewTruncated = !!summary?.out_of_stock_preview_truncated
   const aStoreDelivery = analytics?.totals?.store_delivery_usd || 0
+  // P6: actual courier money out vs what customers were charged --
+  // staff-only figures (this whole page is permission-gated), never on
+  // receipts. Count vs sale-count makes a partial record visible.
+  const aDeliveryActual = analytics?.totals?.delivery_actual_cost_usd || 0
+  const aDeliveryActualCount = analytics?.totals?.delivery_actual_cost_count || 0
+  const aDeliverySales = analytics?.totals?.delivery_sale_count || 0
+  const aDeliveryMargin = analytics?.totals?.delivery_margin_usd ?? (aDelivery - aDeliveryActual)
   const aPrevRevenue = analytics?.prevTotals?.revenue_usd || 0
   const aTxCount  = analytics?.totals?.tx_count || 0
   const aPrevTxCount = analytics?.prevTotals?.tx_count || 0
@@ -1127,6 +1138,13 @@ export default function Dashboard() {
         { label: translateOr('total_refunded', 'Refunds'), value: fmtUSD(aRefundUsd) },
         { label: translateOr('tax_collected', 'Tax'), value: fmtUSD(aTax) },
         { label: translateOr('delivery_fees', 'Delivery fees'), value: fmtUSD(aDelivery) },
+        // P6: what delivery ACTUALLY cost (courier money out) + the margin
+        // over what customers were charged. Staff-only drill lines.
+        {
+          label: translateOr('delivery_actual_cost', 'Actual delivery cost'),
+          value: `${fmtUSD(aDeliveryActual)}${aDeliverySales > 0 && aDeliveryActualCount < aDeliverySales ? ` (${aDeliveryActualCount}/${aDeliverySales} ${translateOr('recorded_short', 'recorded')})` : ''}`,
+        },
+        { label: translateOr('delivery_margin', 'Delivery margin'), value: fmtUSD(aDeliveryMargin) },
       ],
     },
     {

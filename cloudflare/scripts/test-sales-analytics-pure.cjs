@@ -77,6 +77,28 @@ const lib = require(path.join(tmpDir, 'salesAnalytics.js'))
   assert.equal(totals.profit_usd, 26, 'profit = revenue - cost (50 - 24), not deflated/inflated by item count')
 }
 
+// ---- P6: delivery actual cost is display-only and never moves profit ----
+{
+  const level = {
+    tx_count: 4, gross_sales_usd: 100, store_discount_usd: 0, membership_discount_usd: 0,
+    tax_usd: 0, delivery_usd: 12, store_delivery_usd: 3,
+    delivery_actual_cost_usd: 9, delivery_actual_cost_count: 3, delivery_sale_count: 4,
+  }
+  const totals = lib.deriveTotals(level, 20)
+  assert.equal(totals.delivery_actual_cost_usd, 9, 'actual courier cost sums straight through')
+  assert.equal(totals.delivery_margin_usd, 3, 'margin = customer-charged delivery (12) - actual cost (9)')
+  assert.equal(totals.delivery_actual_cost_count, 3, 'how many sales actually recorded a cost')
+  assert.equal(totals.delivery_sale_count, 4, 'vs how many deliveries there were -- the gap is visible')
+  assert.equal(totals.profit_usd, 77, 'profit stays revenue - cost - store-paid delivery (100-20-3): actual cost is display-only until an explicit decision folds it in')
+}
+{
+  // No actual costs recorded at all (every historical sale): zeros, not NaN.
+  const totals = lib.deriveTotals({ tx_count: 1, gross_sales_usd: 10, delivery_usd: 2 }, 0)
+  assert.equal(totals.delivery_actual_cost_usd, 0)
+  assert.equal(totals.delivery_margin_usd, 2)
+  assert.equal(totals.delivery_actual_cost_count, 0)
+}
+
 // ---- previousPeriodFilters: same-length window shifted immediately before ----
 {
   const prev = lib.previousPeriodFilters({ startDate: '2026-08-08', endDate: '2026-08-14' })

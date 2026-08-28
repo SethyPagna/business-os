@@ -143,6 +143,9 @@ app.post('/', async (c) => {
     delivery_fee_usd?: number
     delivery_fee_khr?: number
     delivery_fee_paid_by?: string
+    // P6: staff-entered actual courier cost -- never printed on receipts.
+    delivery_actual_cost_usd?: number | string | null
+    delivery_actual_cost_khr?: number | string | null
   }>()
 
   const clientRequestId = normalizeClientRequestId(body.client_request_id)
@@ -344,6 +347,14 @@ app.post('/', async (c) => {
   const deliveryFeeUsd = round2(Number(body.delivery_fee_usd) || 0)
   const deliveryFeeKhr = Math.round(Number(body.delivery_fee_khr) || deliveryFeeUsd * exchangeRate)
   const deliveryFeePaidBy = String(body.delivery_fee_paid_by || 'customer')
+  // P6: what the delivery ACTUALLY cost the shop (courier money out) --
+  // staff-only, never on receipts. NULL when not entered, so stats can
+  // tell "recorded as zero" apart from "never recorded".
+  const rawActualCost = Number(body.delivery_actual_cost_usd)
+  const deliveryActualCostUsd = isDelivery && Number.isFinite(rawActualCost) && rawActualCost >= 0 && body.delivery_actual_cost_usd !== undefined && body.delivery_actual_cost_usd !== null && String(body.delivery_actual_cost_usd) !== ''
+    ? round2(rawActualCost)
+    : null
+  const deliveryActualCostKhr = deliveryActualCostUsd != null ? Math.round(Number(body.delivery_actual_cost_khr) || deliveryActualCostUsd * exchangeRate) : null
 
   // Membership discount reduces the recorded total (previously dropped, so a
   // points-redeemed sale recorded more than the customer actually paid).
@@ -397,6 +408,7 @@ app.post('/', async (c) => {
         membership_discount_usd, membership_discount_khr, membership_points_redeemed,
         is_delivery, delivery_contact_id, delivery_contact_name, delivery_contact_phone, delivery_contact_address,
         delivery_fee_usd, delivery_fee_khr, delivery_fee_paid_by,
+        delivery_actual_cost_usd, delivery_actual_cost_khr,
         loyalty_accrual, sale_status, created_at, updated_at
       ) VALUES (@receipt_number, @client_request_id, @cashier_id, @cashier_name, @branch_id, @branch_name,
         @customer_id, @customer_name, @customer_phone, @customer_address,
@@ -406,6 +418,7 @@ app.post('/', async (c) => {
         @membership_discount_usd, @membership_discount_khr, @membership_points_redeemed,
         @is_delivery, @delivery_contact_id, @delivery_contact_name, @delivery_contact_phone, @delivery_contact_address,
         @delivery_fee_usd, @delivery_fee_khr, @delivery_fee_paid_by,
+        @delivery_actual_cost_usd, @delivery_actual_cost_khr,
         @loyalty_accrual, @sale_status, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
     `)
     .run({
@@ -452,6 +465,8 @@ app.post('/', async (c) => {
       // Same resolved value the total was computed from -- re-deriving it
       // here would let the stored payer disagree with the charged total.
       delivery_fee_paid_by: deliveryFeePaidBy,
+      delivery_actual_cost_usd: deliveryActualCostUsd,
+      delivery_actual_cost_khr: deliveryActualCostKhr,
       sale_status: saleStatus,
     })
   const saleId = saleInsert.lastInsertRowid

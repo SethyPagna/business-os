@@ -119,6 +119,9 @@ export type PosOrder = {
   deliverySearch: string
   selectedDelivery: unknown | null
   deliveryFeeUsd: string
+  // P6: what the courier is actually paid for this delivery -- staff-only
+  // (stored on the sale, shown in stats/detail, never on receipts).
+  deliveryActualCostUsd: string
   deliveryFeePaidBy: typeof DELIVERY_FEE_PAYER.CUSTOMER
   discountUsd: string
   discountKhr: string
@@ -148,6 +151,7 @@ export function createEmptyOrder(number: number): PosOrder {
     deliverySearch: '',
     selectedDelivery: null,
     deliveryFeeUsd: '',
+    deliveryActualCostUsd: '',
     deliveryFeePaidBy: DELIVERY_FEE_PAYER.CUSTOMER,
     discountUsd: '',
     discountKhr: '',
