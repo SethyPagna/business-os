@@ -39,6 +39,9 @@ import {
   getFiles as getFilesRequest,
   LIBRARY_IMAGE_COMPRESS_OPTIONS,
   renameFileAsset as renameFileAssetRequest,
+  getFileUsage as getFileUsageRequest,
+  rewireFileAsset as rewireFileAssetRequest,
+  type FileUsageDetail,
   uploadFileAsset as uploadFileAssetRequest,
 } from '../../api/fileTransport.ts'
 import {
@@ -241,6 +244,8 @@ interface FilesApi {
   uploadFileAsset: (payload: { file: File; userId?: string | number; userName?: string; compressOptions?: typeof LIBRARY_IMAGE_COMPRESS_OPTIONS }) => Promise<unknown>
   deleteFileAsset: (id: string | number, options: { expectedUpdatedAt?: string; force?: boolean; confirmText?: string }) => Promise<unknown>
   renameFileAsset: (id: string | number, originalName: string) => Promise<unknown>
+  getFileUsage: (id: string | number) => Promise<FileUsageDetail>
+  rewireFileAsset: (id: string | number, toFileId: string | number) => Promise<{ success?: boolean; rewired?: { products?: number; gallery?: number; avatars?: number }; settingsSkipped?: number } | null>
   getAiProviders: () => Promise<ProvidersResponse>
   getAiResponses: (limit: number) => Promise<AiResponsesResponse>
   createAiProvider: (payload: ProviderPayload) => Promise<ProviderMutationResult>
@@ -264,6 +269,8 @@ const focusedFilesApi: FilesApi = {
   uploadFileAsset: (payload) => uploadFileAssetRequest(payload),
   deleteFileAsset: (id, options) => deleteFileAssetRequest(id, options),
   renameFileAsset: (id, originalName) => renameFileAssetRequest(id, originalName),
+  getFileUsage: (id) => getFileUsageRequest(id),
+  rewireFileAsset: (id, toFileId) => rewireFileAssetRequest(id, toFileId),
   getAiProviders: () => getAiProvidersRequest() as Promise<ProvidersResponse>,
   getAiResponses: (limit) => getAiResponsesRequest(limit) as Promise<AiResponsesResponse>,
   createAiProvider: (payload) => createAiProviderRequest(payload) as Promise<ProviderMutationResult>,
@@ -323,16 +330,197 @@ function AssetPreview({ asset, onOpenPreview }: AssetPreviewProps) {
   )
 }
 
-// Full-size lightbox for a Library image -- opened by clicking an
-// AssetPreview thumbnail. Deliberately just an image + filename + close,
-// not a rebuild of the card's rename/delete/history actions (those stay
-// on the card itself; this is purely "let me actually see the picture").
-function AssetPreviewModal({ asset, onClose }: { asset: FileAsset; onClose: () => void }) {
+// 8.1 (Part 413): clicking an image opens DETAILS -- the full preview plus
+// what is actually USING this asset (named products/gallery rows/avatars/
+// settings keys, the drill-in behind the card's usage counts) and, for
+// Full Access, a rewire flow that repoints every product/avatar reference
+// to another library image. Rename/delete stay on the card.
+function AssetPreviewModal({ asset, onClose, canManage, notify, filesApi, onRewired }: {
+  asset: FileAsset
+  onClose: () => void
+  canManage: boolean
+  notify: NotifyFunction
+  filesApi: FilesApi
+  onRewired: () => void
+}) {
   const previewUrl = resolvePublicAssetUrl(asset.public_path) || asset.browser_public_path || asset.public_path
+  const [usage, setUsage] = useState<FileUsageDetail | null>(null)
+  const [usageError, setUsageError] = useState('')
+  const [rewireOpen, setRewireOpen] = useState(false)
+  const [rewireSearch, setRewireSearch] = useState('')
+  const [rewireCandidates, setRewireCandidates] = useState<FileAsset[]>([])
+  const [rewireTargetId, setRewireTargetId] = useState<string | number | null>(null)
+  const [rewiring, setRewiring] = useState(false)
+
+  useEffect(() => {
+    let cancelled = false
+    setUsage(null)
+    setUsageError('')
+    filesApi.getFileUsage(asset.id).then((detail) => {
+      if (!cancelled) setUsage(detail)
+    }).catch((error) => {
+      if (!cancelled) setUsageError(getErrorMessage(error, 'Could not load usage'))
+    })
+    return () => { cancelled = true }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [asset.id])
+
+  useEffect(() => {
+    if (!rewireOpen) return
+    let cancelled = false
+    const timer = window.setTimeout(async () => {
+      try {
+        const response = await filesApi.getFiles({ search: rewireSearch.trim(), mediaType: 'image', page: 1, pageSize: 12, includeMeta: true })
+        if (cancelled) return
+        const items = (Array.isArray(response) ? response : (response as { items?: FileAsset[] })?.items) || []
+        // physical rows only, minus this asset itself -- a rewire targets a
+        // FILE, and offering the same file is a no-op the server refuses
+        const seen = new Set<string>()
+        setRewireCandidates((items as FileAsset[]).filter((row) => {
+          if (String(row.id) === String(asset.id)) return false
+          if (seen.has(String(row.id))) return false
+          seen.add(String(row.id))
+          return true
+        }))
+      } catch { if (!cancelled) setRewireCandidates([]) }
+    }, 250)
+    return () => { cancelled = true; window.clearTimeout(timer) }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rewireOpen, rewireSearch])
+
+  const referenceCount = usage ? usage.covers.length + usage.gallery.length + usage.avatars.length : 0
+
+  const handleRewire = async () => {
+    if (rewireTargetId == null || rewiring) return
+    setRewiring(true)
+    try {
+      const result = await filesApi.rewireFileAsset(asset.id, rewireTargetId)
+      const rewired = result?.rewired || {}
+      const moved = Number(rewired.products || 0) + Number(rewired.gallery || 0) + Number(rewired.avatars || 0)
+      notify(`Rewired ${moved} reference${moved === 1 ? '' : 's'}${result?.settingsSkipped ? ' (settings references left for the Settings page)' : ''}`, 'success')
+      setRewireOpen(false)
+      setRewireTargetId(null)
+      onRewired()
+      onClose()
+    } catch (error) {
+      notify(getErrorMessage(error, 'Rewire failed'), 'error')
+    } finally {
+      setRewiring(false)
+    }
+  }
+
   return (
-    <Modal title={sanitizeFallback(logicalAssetDisplayName(asset)) || 'Preview'} onClose={onClose} size="xl">
-      <div className="flex max-h-[70vh] w-full items-center justify-center overflow-hidden rounded-xl bg-slate-100 dark:bg-slate-800">
-        <img src={previewUrl || ''} alt={logicalAssetDisplayName(asset)} className="max-h-[70vh] w-full object-contain" />
+    <Modal title={sanitizeFallback(logicalAssetDisplayName(asset)) || 'Details'} onClose={onClose} size="xl">
+      <div className="space-y-4">
+        <div className="flex max-h-[55vh] w-full items-center justify-center overflow-hidden rounded-xl bg-slate-100 dark:bg-slate-800">
+          <img src={previewUrl || ''} alt={logicalAssetDisplayName(asset)} className="max-h-[55vh] w-full object-contain" />
+        </div>
+
+        <div className="rounded-xl border border-slate-200 p-3 text-sm dark:border-slate-700">
+          <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Used by</div>
+          {usageError ? (
+            <div className="text-xs font-medium text-red-500">{usageError}</div>
+          ) : !usage ? (
+            <div className="text-xs text-slate-400">Loading usage…</div>
+          ) : referenceCount === 0 && usage.settings.length === 0 ? (
+            <div className="text-xs text-slate-400">Not used anywhere — safe to delete from the card.</div>
+          ) : (
+            <div className="space-y-2">
+              {usage.covers.length > 0 ? (
+                <div>
+                  <div className="text-xs font-medium text-slate-600 dark:text-slate-300">Product cover ({usage.covers.length})</div>
+                  <ul className="mt-0.5 space-y-0.5 text-xs text-slate-500 dark:text-slate-400">
+                    {usage.covers.map((row) => (
+                      <li key={`cover-${row.id}`} className="truncate">{row.name || `product #${row.id}`}{row.barcode ? ` · ${row.barcode}` : ''}</li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
+              {usage.gallery.length > 0 ? (
+                <div>
+                  <div className="text-xs font-medium text-slate-600 dark:text-slate-300">Product gallery ({usage.gallery.length})</div>
+                  <ul className="mt-0.5 space-y-0.5 text-xs text-slate-500 dark:text-slate-400">
+                    {usage.gallery.map((row, index) => (
+                      <li key={`gallery-${row.product_id}-${index}`} className="truncate">{row.name || `product #${row.product_id}`}{row.sort_order != null ? ` · image ${Number(row.sort_order) + 1}` : ''}</li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
+              {usage.avatars.length > 0 ? (
+                <div>
+                  <div className="text-xs font-medium text-slate-600 dark:text-slate-300">User avatar ({usage.avatars.length})</div>
+                  <ul className="mt-0.5 space-y-0.5 text-xs text-slate-500 dark:text-slate-400">
+                    {usage.avatars.map((row) => (
+                      <li key={`avatar-${row.id}`} className="truncate">{row.name || row.username || `user #${row.id}`}</li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
+              {usage.settings.length > 0 ? (
+                <div className="text-xs text-slate-500 dark:text-slate-400">
+                  Settings: {usage.settings.join(', ')} <span className="text-slate-400">(managed on the Settings page — rewire skips these)</span>
+                </div>
+              ) : null}
+            </div>
+          )}
+        </div>
+
+        {canManage && asset.media_type === 'image' ? (
+          <div className="rounded-xl border border-slate-200 p-3 dark:border-slate-700">
+            {!rewireOpen ? (
+              <button
+                type="button"
+                className="btn-secondary text-xs"
+                disabled={!usage || referenceCount === 0}
+                title={referenceCount === 0 ? 'Nothing references this image' : undefined}
+                onClick={() => setRewireOpen(true)}
+              >
+                🔀 Rewire {referenceCount} reference{referenceCount === 1 ? '' : 's'} to another image…
+              </button>
+            ) : (
+              <div className="space-y-2">
+                <div className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Pick the image these references should point to</div>
+                <input
+                  className="input w-full text-sm"
+                  placeholder="Search library images…"
+                  value={rewireSearch}
+                  onChange={(event) => setRewireSearch(event.target.value)}
+                />
+                <div className="grid max-h-48 grid-cols-4 gap-2 overflow-y-auto sm:grid-cols-6">
+                  {rewireCandidates.map((candidate) => {
+                    const url = resolvePublicAssetUrl(candidate.public_path) || candidate.browser_public_path || candidate.public_path
+                    const selected = String(candidate.id) === String(rewireTargetId)
+                    return (
+                      <button
+                        key={candidate.id}
+                        type="button"
+                        onClick={() => setRewireTargetId(selected ? null : candidate.id)}
+                        className={`aspect-square overflow-hidden rounded-lg border-2 transition ${selected ? 'border-blue-500 ring-2 ring-blue-300' : 'border-transparent hover:border-slate-300'}`}
+                        title={sanitizeFallback(String(candidate.original_name || ''))}
+                      >
+                        <img src={url || ''} alt="" className="h-full w-full object-cover" loading="lazy" />
+                      </button>
+                    )
+                  })}
+                  {rewireCandidates.length === 0 ? (
+                    <div className="col-span-full py-4 text-center text-xs text-slate-400">No other images found</div>
+                  ) : null}
+                </div>
+                <div className="flex gap-2">
+                  <button type="button" className="btn-secondary flex-1 text-xs" onClick={() => { setRewireOpen(false); setRewireTargetId(null) }}>Cancel</button>
+                  <button
+                    type="button"
+                    className="btn-primary flex-1 text-xs disabled:opacity-50"
+                    disabled={rewireTargetId == null || rewiring}
+                    onClick={() => void handleRewire()}
+                  >
+                    {rewiring ? '⏳ Rewiring…' : `Repoint ${referenceCount} reference${referenceCount === 1 ? '' : 's'}`}
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        ) : null}
       </div>
     </Modal>
   )
@@ -1587,7 +1775,16 @@ export default function FilesPage() {
         </Suspense>
       ) : null}
 
-      {previewAsset ? <AssetPreviewModal asset={previewAsset} onClose={() => setPreviewAsset(null)} /> : null}
+      {previewAsset ? (
+        <AssetPreviewModal
+          asset={previewAsset}
+          onClose={() => setPreviewAsset(null)}
+          canManage={canManageLibrary}
+          notify={notify}
+          filesApi={filesApi}
+          onRewired={() => { void loadFiles() }}
+        />
+      ) : null}
 
       {deleteConfirmAsset ? (
         <Modal title={tr('delete_file', 'Delete file')} onClose={closeDeleteConfirm} size="sm">

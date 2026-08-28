@@ -9,6 +9,7 @@ import { logicalLibraryName } from '../lib/libraryLogicalAssets'
 import { validateUploadedBuffer } from '../lib/uploadSecurity'
 import { audit } from '../lib/audit'
 import { broadcast } from '../durable-objects/broadcastHub'
+import { bumpVersion } from '../lib/cache'
 import type { Env } from '../index'
 
 const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser } }>()
@@ -294,6 +295,112 @@ app.get('/:id/download', async (c) => {
   headers.set('X-Content-Type-Options', 'nosniff')
   headers.set('Cache-Control', 'private, no-store')
   return new Response(object.body, { headers })
+})
+
+// 8.1 (Part 413): the drill-in behind the list's usage COUNTS -- which
+// products/rows/avatars/settings actually reference this asset, by NAME.
+// Read-only, so it follows the list's own rule: any authenticated user can
+// see it (no cost or money data lives here).
+app.get('/:id/usage', async (c) => {
+  const id = Number(c.req.param('id'))
+  if (!Number.isInteger(id) || id <= 0) return c.json({ error: 'Invalid file id' }, 400)
+  const db = getDb(c.env)
+  const asset = await db.prepare('SELECT id, public_path FROM file_assets WHERE id = ?').get<{ id: number; public_path: string }>([id])
+  if (!asset) return c.json({ error: 'File not found' }, 404)
+  const publicPath = String(asset.public_path || '')
+  const [covers, gallery, avatars, settingRows] = await Promise.all([
+    db.prepare('SELECT id, name, barcode FROM products WHERE image_path = @path ORDER BY name COLLATE NOCASE ASC LIMIT 200')
+      .all<{ id: number; name: string | null; barcode: string | null }>({ path: publicPath }),
+    db.prepare(`
+      SELECT pi.product_id AS product_id, p.name AS name, pi.sort_order AS sort_order
+      FROM product_images pi LEFT JOIN products p ON p.id = pi.product_id
+      WHERE pi.image_path = @path ORDER BY p.name COLLATE NOCASE ASC LIMIT 200
+    `).all<{ product_id: number; name: string | null; sort_order: number | null }>({ path: publicPath }),
+    db.prepare('SELECT id, name, username FROM users WHERE avatar_path = @path ORDER BY name COLLATE NOCASE ASC LIMIT 50')
+      .all<{ id: number; name: string | null; username: string | null }>({ path: publicPath }),
+    db.prepare('SELECT key, value FROM settings').all<{ key: string; value: string }>(),
+  ])
+  const settingKeys = publicPath
+    ? settingRows.filter((row) => String(row.value || '').includes(publicPath)).map((row) => row.key)
+    : []
+  return c.json({
+    id,
+    public_path: publicPath,
+    covers,
+    gallery,
+    avatars,
+    settings: settingKeys,
+  })
+})
+
+// 8.1 (Part 413): rewire -- repoint every product cover/gallery reference
+// (and avatars) from this asset to another library asset, without copying
+// bytes or touching either stored object. Settings references are
+// deliberately NOT rewired: branding belongs to the Settings page, and
+// silently swapping a logo from the Library would be surprising there.
+// Management action -- Full Access to Library, same as rename/delete.
+app.post('/:id/rewire', async (c) => {
+  const user = c.get('user')
+  if (!hasFullLibraryAccess(user)) {
+    return c.json({ error: 'Rewiring file references requires Full Access to Library.' }, 403)
+  }
+  const id = Number(c.req.param('id'))
+  if (!Number.isInteger(id) || id <= 0) return c.json({ error: 'Invalid file id' }, 400)
+  const body = await c.req.json<{ to_file_id?: unknown }>().catch(() => ({} as Record<string, unknown>))
+  const toId = Number(body.to_file_id)
+  if (!Number.isInteger(toId) || toId <= 0) return c.json({ error: 'to_file_id is required' }, 400)
+  if (toId === id) return c.json({ error: 'Pick a different file to rewire to.' }, 400)
+
+  const db = getDb(c.env)
+  const [source, target] = await Promise.all([
+    db.prepare('SELECT id, public_path, original_name, media_type FROM file_assets WHERE id = ?').get<{ id: number; public_path: string; original_name: string; media_type: string | null }>([id]),
+    db.prepare('SELECT id, public_path, original_name, media_type FROM file_assets WHERE id = ?').get<{ id: number; public_path: string; original_name: string; media_type: string | null }>([toId]),
+  ])
+  if (!source) return c.json({ error: 'File not found' }, 404)
+  if (!target) return c.json({ error: 'Target file not found' }, 404)
+  if (String(target.media_type || '') !== 'image') {
+    return c.json({ error: 'Product images and avatars can only be rewired to another IMAGE.' }, 400)
+  }
+  const fromPath = String(source.public_path || '')
+  const toPath = String(target.public_path || '')
+  if (!fromPath || !toPath) return c.json({ error: 'Both files need a stored path.' }, 400)
+
+  // A product whose gallery ALREADY holds the target image must not end up
+  // with two identical rows -- drop the would-be duplicates first, then
+  // repoint the rest. Covers are a single column, no such hazard.
+  const statements = [
+    {
+      sql: `DELETE FROM product_images WHERE image_path = @from AND product_id IN (
+              SELECT product_id FROM product_images WHERE image_path = @to)`,
+      params: { from: fromPath, to: toPath },
+    },
+    { sql: 'UPDATE product_images SET image_path = @to WHERE image_path = @from', params: { from: fromPath, to: toPath } },
+    { sql: 'UPDATE products SET image_path = @to, updated_at = CURRENT_TIMESTAMP WHERE image_path = @from', params: { from: fromPath, to: toPath } },
+    { sql: 'UPDATE users SET avatar_path = @to WHERE avatar_path = @from', params: { from: fromPath, to: toPath } },
+  ]
+  const results = await db.batch(statements)
+  const changesAt = (index: number) => Number((results[index] as { changes?: number; meta?: { changes?: number } })?.changes ?? (results[index] as { meta?: { changes?: number } })?.meta?.changes ?? 0)
+  const rewired = {
+    gallery_duplicates_removed: changesAt(0),
+    gallery: changesAt(1),
+    products: changesAt(2),
+    avatars: changesAt(3),
+  }
+
+  const settingRows = await db.prepare('SELECT value FROM settings').all<{ value: string }>()
+  const settingsSkipped = isPathReferencedInSettings(settingRows, fromPath) ? 1 : 0
+
+  await audit(c.env, user.id, user.username || null, 'rewire', 'file', id, {
+    from: source.original_name,
+    to: target.original_name,
+    toFileId: toId,
+    rewired,
+    settingsSkipped,
+  })
+  c.executionCtx.waitUntil(broadcast(c.env, 'files', { action: 'rewire', id }))
+  c.executionCtx.waitUntil(broadcast(c.env, 'products', { action: 'update' }))
+  c.executionCtx.waitUntil(bumpVersion(c.env, 'products'))
+  return c.json({ success: true, rewired, settingsSkipped })
 })
 
 // Renames only the display name (`original_name`) shown in the Library --

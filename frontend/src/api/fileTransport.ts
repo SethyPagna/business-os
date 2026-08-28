@@ -226,6 +226,41 @@ export function deleteFileAsset(id: string | number, payload: Record<string, unk
 // key / public path are untouched server-side (see routes/files.ts's own
 // comment), so this never breaks an existing product image, avatar, or
 // portal-setting reference to the file.
+// 8.1 (Part 413): the drill-in behind the list's usage counts -- which
+// products/gallery rows/avatars/settings reference this asset, by name.
+export type FileUsageDetail = {
+  id: number
+  public_path: string
+  covers: Array<{ id: number; name: string | null; barcode: string | null }>
+  gallery: Array<{ product_id: number; name: string | null; sort_order: number | null }>
+  avatars: Array<{ id: number; name: string | null; username: string | null }>
+  settings: string[]
+}
+
+export async function getFileUsage(id: string | number): Promise<FileUsageDetail> {
+  const result = await route<FileUsageDetail>(
+    `files:usage:${id}`,
+    () => apiFetch('GET', `/api/files/${encodeURIComponent(String(id))}/usage`),
+    // No offline mirror, same reasoning as getFiles: a failed read must
+    // surface as an error, never as "this file is used by nothing".
+    null,
+  )
+  if (result == null) throw new Error('File usage is unavailable')
+  return result
+}
+
+// 8.1: repoint every product cover/gallery/avatar reference from this
+// asset to another library image (settings references stay put -- the
+// server says so in its response).
+export function rewireFileAsset(id: string | number, toFileId: string | number): Promise<{ success?: boolean; rewired?: { products?: number; gallery?: number; avatars?: number }; settingsSkipped?: number } | null> {
+  return route(
+    'files:rewire',
+    () => apiFetch('POST', `/api/files/${encodeURIComponent(String(id))}/rewire`, { to_file_id: Number(toFileId) }),
+    null,
+    true,
+  )
+}
+
 export function renameFileAsset(id: string | number, originalName: string): Promise<unknown> {
   return route(
     'files:rename',

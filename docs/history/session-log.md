@@ -9909,3 +9909,37 @@ its seam, producer filtering/swallowing, consumer + all six producer
 pins); imageAudit stubs added to the two route-loading tests the new
 import touched (portal-catalog-sort, wire-images-gallery); full backend
 sweep green (97 files), tsc clean, dry-run clean. No frontend changes.
+
+## Part 413 (chat, Aug 28 2026) -- 8.1: Library image details -- what uses it, and rewire
+
+The Library list already counted usage per asset (products / gallery /
+avatars / settings, Part-era work behind canDelete); 8.1 is the
+drill-in the user asked for: "click an image to open details: what is
+using it (which products/rows), edit, and rewire."
+
+- **GET /api/files/:id/usage** names every reference: product covers
+  (name + barcode), gallery rows (product name + image position),
+  avatars (user name), and which settings KEYS embed the path. Read
+  stays open to any authenticated user, same as the list -- nothing
+  here carries money data.
+- **POST /api/files/:id/rewire** repoints every product cover, gallery
+  row, and avatar from this asset to another library IMAGE in one
+  atomic batch. A product whose gallery already holds the target loses
+  the would-be duplicate row instead of gaining twins; settings
+  references are DELIBERATELY skipped (branding belongs to the
+  Settings page) and reported as skipped. Full Access to Library only,
+  audited with per-kind counts, broadcast on files+products, products
+  cache version bumped.
+- **FilesPage:** the thumbnail-click lightbox became the details
+  modal -- full preview, the named usage lists (or "not used anywhere
+  -- safe to delete"), and for managers a rewire flow: search the
+  library's images, pick a target thumbnail, one confirm shows exactly
+  how many references move. Rename/delete stay on the card as before.
+
+**Verification:** tests/libraryAssetDetails.test.ts (4 checks pinning
+route rules, transport, and modal gating) registered in the chain;
+check:source 398 files, both tsc, build, dry-run,
+route-permissions/image-normalize backend tests all green; full chain
+re-run green after a7's transient D1 WIP window. (a7's Products
+tree went red twice this session mid-edit and greened within a minute
+each time -- coordination worked, nothing shipped red.)

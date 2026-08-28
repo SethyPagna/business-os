@@ -985,12 +985,19 @@ deep-linkable tabs.*
   bundle UX in the editor, and the guarantee-by-test that none of this touches POS/
   sales/full access (surface scoping already enforces it server-side).
 - [~] K7. Performance pass (measured), portal §6 leftovers, Library details (8.1
-  **[CLAIMED: session 6e — Part 413, the 8.1 slice ONLY. Footprint:
-  routes/files.ts (GET /:id/usage + POST /:id/rewire) +
-  FilesPage.tsx/fileTransport.ts (details modal: named usage lists,
-  rename, rewire picker) + tests. Other K7 items stay open.]**),
+  **[8.1 SHIPPED — Part 413, session 6e: clicking a Library image opens
+  DETAILS — full preview + named usage (product covers with barcode,
+  gallery rows with position, avatars, settings keys), and a Full-Access
+  rewire flow: pick another library image, every product/gallery/avatar
+  reference repoints in one atomic batch (duplicate-gallery-safe,
+  image-to-image only, settings deliberately skipped — branding belongs
+  to Settings), audited + broadcast + products cache bumped. Rename
+  stays on the card (already existed). Backend GET /:id/usage +
+  POST /:id/rewire; tests/libraryAssetDetails.test.ts pins all four
+  layers.]**),
   edit-form section jump bug (10.2), path-width inputs (11.17 — still needs the user to
-  point at which input).
+  point at which input). **K7's remaining items (perf pass, portal §6
+  leftovers, 10.2, 11.17) stay open — 6e's claim covered 8.1 only.**
 
 ### Phase P — Aug-28 eighth-batch additions (Part 380)
 
