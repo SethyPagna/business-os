@@ -7766,3 +7766,44 @@ chain green, build 26.41s.
 **Not done.** Deploy (applies 0062+0063 and everything since); the M2/M4 imports in
 the UI; D5's picker UI + supplier read surfaces; N3 palette confirmation + page
 sweep; the wider back-button/consistency sweep beyond the new surfaces.
+
+## Part 378 (chat, Aug 28 2026) — the sales export arrived; supplier attribution; full no-deploy verification
+
+**Ask.** Second file drop: the two Stock-In Invoice reports (suppliers per product
+line), report-invoice-detail (the dated sales export), Item Report. Build similar
+reporting in the system (branch/supplier/date filters for stock in/out/expenses),
+column-choosing exports, verify EVERYTHING deeply (nothing deployed yet), no broken
+barcodes/question marks, consistent names.
+
+**What changed.**
+- Parsed the interleaved supplier-header structure of both Stock-In Invoice reports →
+  `stock_in_invoice_lines.csv` (7,340 lines, zero missing supplier headers), and
+  joined on barcode+date to fill `stock_in_history.csv`'s supplier column: 8,053 of
+  21,287 (37.8%); 38 ambiguous same-day multi-supplier cases left blank.
+- Built the sales history: `sales-import-2024/2025/2026.csv` (35,980 line rows,
+  14,919 receipts) in the app's exact SALES_IMPORT_COLUMNS contract, from
+  `report-invoice-detail (1).xls`. Cost semantics proven per-unit from qty>1 rows
+  (741 votes vs 0). 4,348 reused invoice numbers disambiguated `NNN@date`.
+  Delivery-service lines → delivery fee + driver as delivery contact. Credit/
+  commission → notes. Branch assumed 'shop' (source carries none — flagged).
+- Verified in source (not assumed) that classifySales already matches customers
+  phone-first → unambiguous-name, match-only, and delivery contacts/cashiers
+  likewise — the user's rule was already the code's rule.
+- `sold_by_supplier_summary.csv` from Item Report (16 suppliers, revenue/cost/profit).
+- Validation harness over EVERY generated CSV: BOM, zero U+FFFD, no '?' adjacent to
+  Khmer, no scientific-notation barcodes, contract-exact sales headers, first-line
+  receipt rule, strict dates, positive quantities — and totals cross-checked against
+  the source's own footer: quantities reconcile EXACTLY (58,253 + 4,368 = 62,621),
+  revenue+fees within 0.02% of grand total, known Khmer name byte-for-byte.
+- Manifest + README updated (Step 4 suppliers, new Step 4b sales; stale "sales export
+  still needed" bullet closed). progress.md: M5b/M5c, D1b Stock-In-Invoice report
+  spec, H1 column-chooser refinement.
+
+**Verified (nothing deployed — the point).** All **64 migrations** apply cleanly in
+the real SQLite harness with 0061/0062/0063 columns+tables confirmed; `wrangler
+deploy --dry-run` green; cloudflare tsc clean; **backend sweep 0 failures**; frontend
+tsc clean; **all 120 frontend test files pass individually** plus production build.
+
+**Not done.** Deploy (user); the imports themselves (manifest order: deploy →
+catalog → 73 extras → suppliers → stock-in history → sales by year); D1b report UI +
+H1 column chooser (specced); the sales files assume branch 'shop' — confirm.

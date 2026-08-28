@@ -191,6 +191,27 @@ autocorrect — templates, imports, exports and generated files alike.*
   130 units across 4+ invocations, redelivered-message resume with zero double-adds,
   both reconcile caps, the direct ceiling. **Remaining:** deploy (applies 0062+0063),
   then run `stock_in_history.csv` through the stock-action import in the UI.
+- [~] M5b. **The dated sales export ARRIVED and the import files are BUILT + VALIDATED
+  (Part 378).** `report-invoice-detail (1).xls` (40,344 lines) became
+  `sales-import-2024/2025/2026.csv` — 14,919 receipts in the app's exact
+  SALES_IMPORT_COLUMNS contract. Validated hard: line quantities reconcile EXACTLY
+  with the source footer (58,253 + 4,368 delivery lines = 62,621); revenue + delivery
+  fees within 0.02% of the source grand total; Khmer byte-perfect; strict 24-hour
+  times from check-in stamps; **4,348 reused invoice numbers disambiguated `NNN@date`
+  so the importer's receipt grouping can never merge two sales**; delivery-service
+  lines → delivery fee + driver as delivery contact (Walk-In = not delivery); credit/
+  commission preserved in notes; per-line historical COGS carried; branch assumed
+  'shop' (source has no branch column — flagged). The import's matcher was verified
+  IN SOURCE to already do exactly the user's rule: customers phone-first → unambiguous
+  name, match-only. **User runs them (oldest first) after catalog import; loyalty
+  checkbox stays OFF.**
+- [x] M5c. **Supplier attribution for stock history (Part 378).** The Stock-In Invoice
+  reports carry per-product lines under supplier headers (7,340 lines →
+  `stock_in_invoice_lines.csv`); joined on barcode+date they fill
+  `stock_in_history.csv`'s supplier column for **8,053 of 21,287 lines (37.8%)** —
+  the rest genuinely has no supplier record; 38 same-day multi-supplier cases left
+  blank, never guessed. With 0062 deployed, those batches import with their supplier.
+  `sold_by_supplier_summary.csv` (Item Report) adds per-supplier revenue/cost/profit.
 - [~] M5. Historical SALES linkage. **The loyalty prerequisite is DONE in code
   (Part 372, needs migrations/deploy):** migration `0061` adds `sales.loyalty_accrual`
   (default 1); every aggregation (sales route redemption check, shared
@@ -261,6 +282,14 @@ store really paid the rider; margin = charge − cost and is internal only.*
 
 ### Phase D — Products data model: stock-change ledger, batches, suppliers
 
+- [ ] D1b. **Stock-In Invoice report view (user, Aug 28 — modeled on the old
+  system's).** A reporting surface grouped supplier → invoice (date + number) →
+  product lines (name, barcode, qty, unit, unit cost, net total), with the SAME filter
+  row everywhere: branch (shop / warehouse / all) · supplier · date range. The same
+  filter pattern applies to stock-out, adjustments and the expenses/fees section, so
+  every report reads identically (SectionCard kinds carry the color). Backed by the
+  data that now exists: batches carry supplier (0062) + received date, movements carry
+  type/date/branch. Nothing hidden — show as much as the data holds.
 - [ ] D1. **Stock Change section on Products** (the user's ledger design): one row per
   action with columns Name · Barcode (+N) · Before Qty · Adjustment (±, reason) ·
   Stock In (add/create, colour-coded) · Stock Out (sale/damage/return/lost/wrong,
@@ -438,6 +467,9 @@ deep-linkable tabs.*
   detailed full coverage — options derived from what that page actually does (Products:
   catalog, stock changes, batches; Sales: receipts, line items, fees, delivery incl. C-
   fields staff-only; Branches: per-branch stock; Review & Logs: filtered audit slice).
+  **Refined Aug 28: a COLUMN CHOOSER** — the export dialog lists the available columns
+  (defaults pre-checked) and the operator can add/remove columns before downloading;
+  the chosen set is remembered per page.
 - [ ] H2. Every page's import re-checked against the two-screen contract (§13) after the
   IA moves; templates regenerated where columns changed (delivery cost, supplier status).
 
