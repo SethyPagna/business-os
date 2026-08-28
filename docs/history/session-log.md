@@ -8236,3 +8236,103 @@ commits are scoped strictly to my own files.
 
 **Not done.** Deploy; imports (user); G1 and the remainder — D1b appears to be
 in flight in the other session.
+
+## Part 389 (chat, Aug 28 2026) -- parallel-session backlog: I1 audit coverage + B6 select-model sweep
+
+Third session running beside the two migration-proof sessions (original + fork),
+deliberately scoped to master-plan items whose files those sessions were not
+touching. Coordination was by measurement: read both peer transcripts, diffed the
+shared working tree, and picked I1 + B6.
+
+**Ask.** "know what the other two sessions and forked are working on, then continue
+in the progress.md tasks that do not conflict."
+
+**What changed.**
+
+- **I1 (audit coverage), closed.** Measured the 8 route files without `audit(`:
+  four are read-only by design (catalog, organizations, runtime, notifications --
+  zero mutation handlers, zero direct writes) and four had real unaudited
+  mutations, now covered:
+  - `backups.ts` -- backup creation AND the destructive restore. A full database
+    rollback previously left no audit trail at all; the restore entry records who,
+    which backup key, and lands only after `restoreCloudflareBackup` returned.
+    `user` is hoisted to the handler top (the create branch needs it too).
+  - `files.ts` -- upload (name/type/size), rename (from -> to), delete including
+    `forced: true` + the usage breakdown when the CONFIRM DELETE override was used.
+  - `notes.ts` -- create/delete only, id-only details. Two deliberate NON-audits,
+    commented in source and pinned by test: the autosave PUT fires per debounced
+    keystroke (auditing it writes hundreds of rows per editing session), and note
+    title/content never enter the admin-readable trail (personal scratchpad).
+  - `sync.ts` -- the chunked-upload `/complete` is audited in the ROUTE (the
+    Durable Object writes the `file_assets` row with `source='offline_sync'` and
+    has no session context; the route buffers the small JSON response to name the
+    created asset). `/outbox` is deliberately unaudited: it replays every queued
+    operation through the real route handler with the same cookie, so the target
+    route's own `audit()` fires -- auditing the outbox would double-log.
+  - `test-audit-coverage-pure.cjs` (49 checks): every route file registering a
+    mutation handler must contain `audit(`; the read-only four must STAY free of
+    mutation handlers and direct writes (adding one forces the audit decision);
+    the specific new calls are pinned by shape; both deliberate non-audits are
+    pinned as hard as the audits.
+- **B6 (11.1/11.2 rest), closed on all five pages.** The rule as the master plan
+  states it: no standing "Select all" control; in select mode the column-header
+  checkbox IS select-all; the select column collapses to nothing outside it.
+  - Inventory: toolbar select-all label/checkbox removed; the bulk toolbar
+    renders only while something is selected; header checkbox added (checked /
+    indeterminate over the same visible-ids set `toggleSelectAllProducts` uses);
+    first-column cells collapse via a shared `selectCellPad`.
+  - Sales and Returns: these pages had ALWAYS-visible checkboxes and no select
+    mode -- both gained the Products/Inventory long-press model (shared
+    `utils/longPress.ts`, per-row state Map owned by the page component). Out of
+    select mode a click still opens the detail and a hold starts selection; in it
+    a click toggles and selected rows highlight. Section/group checkboxes are
+    select-mode-only; skeleton first cells collapsed.
+  - Branches (card list -- no table header exists): the "Select all (N)" row now
+    renders ONLY in select mode, where its checkbox is the select-all (the card
+    list's header-equivalent). Card checkboxes are mode-only; long-press selects;
+    a capture-phase `onClickCapture` + `consumeLongPressClick` swallows the ghost
+    click so entering select mode cannot also fire the inner control (expand /
+    manage) that sat under the finger.
+  - Contacts: `useContactSelection` (shared.tsx) now owns `selectionModeActive`
+    and the per-row long-press slots, so Customers/Suppliers/Delivery inherit ONE
+    implementation. `ContactTable` renders its header select-all only in select
+    mode and collapses the column (skeletons too). In select mode a cell click
+    toggles the row (`handleContactCellClick`); out of it cells keep opening the
+    detail panel; ThreeDotMenu's explicit "Details" always opens detail.
+
+**What was found.**
+
+- notifications.ts -- listed in I1's "8 without audit" -- turned out to have NO
+  mutation handlers at all: nothing to audit. I1's real gap was 4 files, not 8.
+- The B6 rule REVERSES the earlier 11.2 resolution that Products shipped
+  (Products kept the toolbar "Select all (N)" and removed the header checkbox as
+  the duplicate). Flagged under "Flagged, not guessed" rather than silently
+  flipping Products: making Products match the other five is small but undoes a
+  shipped decision, so it waits for the user.
+- The peer session adapted `test-notes-reorder-pure.cjs` (audit stub) and
+  `test-route-permissions-pure.cjs` (hoisted-user pin) to the I1 changes
+  mid-flight; committed here (92684fe3) because I1 made them necessary.
+
+**Verified (really run, this session).**
+
+- `cloudflare` `tsc --noEmit` clean after the audit edits.
+- `node scripts/test-audit-coverage-pure.cjs` -- 49/49 PASS.
+- `test-library-logical-assets-pure`, `test-notes-reorder-pure` (5 checks),
+  `test-route-permissions-pure` -- all PASS against the audited routes.
+- `frontend` `tsc --noEmit` clean; `npm run test:utils` FULL chain green
+  (typecheck -> verify:public-runtime -> check:source -> all 116 test files,
+  including the inventorySelectionMode and productsRowAlignment pins);
+  real `vite build` succeeds (22.09s, only the two pre-existing circular
+  warnings).
+- NOT done visually in a browser: click-through of the five pages' select flows.
+  The peers' in-flight working tree (dev servers, node_modules locks) made a live
+  session this hour a contention risk; the B1 visual sweep item already covers
+  walking these surfaces when the next UI pass runs.
+
+**Commits (scoped strictly to files no peer session was editing):** 30a79fd8
+(I1), 14b896c8 (B6 part 1: Inventory + Sales), c598368d (B6 part 2: Returns +
+Branches + Contacts), 92684fe3 (peer test adaptations), plus the progress.md
+board update.
+
+**Not done.** Deploy (user). The Products select-model asymmetry awaits the
+user's call. B1's visual sweep still open. D1b was in flight in a peer session.

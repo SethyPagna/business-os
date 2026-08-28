@@ -281,7 +281,17 @@ autocorrect — templates, imports, exports and generated files alike.*
   it into its own column.
 - [ ] B5. Receipt print: when 80x50 is enabled, clicking Print offers BOTH sizes and the
   preview shows BOTH (today only one previews). Verify printing end-to-end while there.
-- [ ] B6. (11.1/11.2 rest) Select-column collapse + header-checkbox-as-select-all on
+- [x] B6 *(Part 389: shipped on all five pages, needs deploy. Inventory: toolbar
+  select-all control removed, bulk toolbar exists only while selected, header checkbox
+  = select-all, column collapses. Sales + Returns additionally gained the Products
+  long-press-to-select model they never had (checkboxes no longer permanent; click
+  still opens detail out of select mode). Branches (card list, no header): the
+  select-all row renders only in select mode as the list's header-equivalent; card
+  long-press with a capture-phase ghost-click guard. Contacts: useContactSelection
+  owns selectionModeActive + long-press slots so all three tabs inherit one
+  implementation; in select mode a cell click toggles, out of it cells open detail.
+  NOTE the Products asymmetry flagged under "Flagged, not guessed".)* (11.1/11.2 rest)
+  Select-column collapse + header-checkbox-as-select-all on
   Inventory/Sales/Returns/Branches/Contacts (Products already done). "Select all" button
   is removed; in select mode the column-header checkbox IS select-all.
 
@@ -521,7 +531,17 @@ deep-linkable tabs.*
 
 ### Phase I — Audit log wraps the whole app
 
-- [ ] I1. Coverage: `audit(…)` is called in 22 of 30 route files today — sweep the other
+- [x] I1 *(Part 389: measured — of the 8 uncovered files, 4 are read-only by design
+  (catalog, organizations, runtime, notifications) and 4 had real unaudited mutations,
+  now covered: backups (create + the destructive RESTORE, previously trail-less),
+  files (upload / rename with from→to / delete incl. the forced CONFIRM-DELETE
+  override), notes (lifecycle only, id-only — the autosave PUT is deliberately
+  unaudited per-keystroke-flood, content never enters the admin-readable trail),
+  sync (chunked-upload /complete audited in the route since the DO has no session;
+  /outbox deliberately unaudited — it replays through real handlers which audit
+  themselves). `test-audit-coverage-pure.cjs` (49 checks) pins the file-level law,
+  the read-only four, and both deliberate non-audits.)* Coverage: `audit(…)` is called
+  in 22 of 30 route files today — sweep the other
   8 and every uncovered mutation so ALL actions/changes land in the trail (one helper,
   no bespoke logging). List the uncovered routes in the session log when measured.
 - [ ] I2. Audit UI (inside Review & Logs): the same one-row date-range control as
@@ -785,6 +805,13 @@ deep-linkable tabs.*
 
 ### Flagged, not guessed (Golden Rule 7)
 
+- **Products now differs from the other five list pages (Part 389):** B6's rule ("the
+  'Select all' button is removed; in select mode the column-header checkbox IS
+  select-all") is live on Inventory/Sales/Returns/Branches/Contacts, but Products
+  still has its toolbar "Select all (N)" control and NO header checkbox — the
+  opposite resolution, from the earlier 11.2 pass. Flipping Products to match is a
+  small change (ProductsListSurface header + Products.tsx toolbar) but it REVERSES
+  a previously-shipped decision, so it waits for the user's confirmation.
 - B4's location (which page shows delivery inside a category column) is unconfirmed.
 - Commission/service fields for sales import/export still have no business rule.
 - H1's exact per-page option lists should be confirmed against real usage before build.
@@ -1845,6 +1872,15 @@ are the commands' actual results this session.
 | Migration pack (after the S2 name propagation) | **ALL VALIDATIONS PASSED** rerun (quantities exact vs footer, revenue 0.02%, Khmer byte-perfect, zero scientific barcodes); xlsx round-trip OK |
 | Production devices (read-only D1 query) | trusted_devices **0**, user_sessions 94 (**2 live**) — the Part 375 clean slate holds |
 | **Part 385 connection preflight** (real classifiers over the real files vs merged catalog + 4,652 real customers) | stock history **21,286/21,286 attach**, sales **14,913/14,919 receipts** (6 junk lines err by design), customers **99%+ linked**, suppliers **8,053/8,053**; pack re-validated ALL PASS after the identity rewrite |
+
+**Part 389 (Aug 28, parallel session):** I1 (audit coverage — 4 real gaps closed:
+backups create/RESTORE, files upload/rename/force-delete, notes lifecycle, sync
+chunked-upload; 2 deliberate non-audits pinned; `test-audit-coverage-pure.cjs`
+49/49) and B6 (header-checkbox select-all + select-column collapse + long-press
+model on Inventory/Sales/Returns/Branches/Contacts) both shipped, needs deploy.
+Re-verified this session: both tsc clean, `test:utils` full chain green, vite
+build 22.09s. **Flagged:** Products now carries the OPPOSITE 11.2 resolution
+(toolbar Select-all, no header checkbox) — see Flagged, not guessed.
 
 **Part 370 additions:** the master plan (top of file) is now the queue; the in-flight
 stats/tooltip work was finished and committed (`9d93db56`); the empty
