@@ -306,7 +306,7 @@ store really paid the rider; margin = charge − cost and is internal only.*
 
 ### Phase D — Products data model: stock-change ledger, batches, suppliers
 
-- [ ] D1b. **Stock-In Invoice report view (user, Aug 28 — modeled on the old
+- [~] D1b *(IN PROGRESS — claimed by session business-os-v1-35, Aug 28 — do not pick up in parallel)*. **Stock-In Invoice report view (user, Aug 28 — modeled on the old
   system's).** A reporting surface grouped supplier → invoice (date + number) →
   product lines (name, barcode, qty, unit, unit cost, net total), with the SAME filter
   row everywhere: branch (shop / warehouse / all) · supplier · date range. The same

@@ -8190,3 +8190,49 @@ dry-run.
 **Not done.** Deploy (0061–0069) + Drive connect; imports per manifest; ordered
 remainder (G1 promotions engine + promoted-first ordering, D1b, H1, N1c, N3
 SectionCard sweep, E-phase page merges, D6 rename cascades, K7).
+
+## Part 388 (chat, Aug 28 2026) — the quantity proof, two engine bugs caught, mm/dd/yyyy, POS compaction
+
+**Asked.** Be clear the Aug-28 file vs the whole manifest process end at the SAME
+product quantities; mm/dd/yyyy for the whole app; merge the POS discount currency
+inputs onto one row and shrink them + the payment inputs; continue progress.md.
+
+**The proof.** Built `simulate_full_migration.mjs` (scratchpad): the ENTIRE
+manifest — catalog, the 73, 21,286-row §12 history, all three sales files,
+zero + re-import — executed through the app's REAL engine (70 migrations, real
+classifiers, real continuation queue, analyze-then-apply exactly like the
+two-screen flow) against an in-memory database. FINAL VERDICT: **all 6,104
+products' per-branch quantities IDENTICAL to the Aug-28 files — 0 differences**;
+sales land at exactly **14,913 receipts / 35,970 lines** (only the 6 junk lines
+err, by design); batches 26,018 with 15 suppliers and 114,278 received units.
+The only systematic deltas en route were 14 old-system NEGATIVE stock values,
+clamped to 0 exactly as the import's own warning states.
+
+**Two real bugs the proof caught first** (`git: fix(import): identity-rule
+in-batch signature + direct-mode analyze cap`):
+- The same-chunk duplicate-merge signature included COST — per-branch exports
+  carry different shop/warehouse costs, so 706 same-name+same-barcode duplicate
+  groups forked from the real file, warehouse quantities doubled on re-import,
+  and a third of sales receipts erred on the ambiguity. Barcoded rows now merge
+  on name+barcode alone (the identity rule verbatim), highest price wins.
+- runImportAnalyze capped EVERY stock job at 480 rows — direct mode's 25,000-row
+  continuation was unreachable; the 21k file died at upload. Gate is mode-aware.
+
+**Manifest updated**: Step 4d now zeroes branch stock first (two wrangler
+commands) so the re-import writes exactly the files' truth — single-branch
+products included; the proof paragraph + numbers added.
+
+**Also**: fmtDateOnly + formatDateMdy close the raw-ISO leaks (batch dates,
+purchase rows, credit due dates, day-drill title, notification meta); POS
+discount toggle + BOTH currency inputs share one compact row; payment rows
+slimmed (py-1, narrower method column).
+
+**Concurrency note**: a SECOND session is working in this same checkout
+(batchCode 08DDYYYY codes, received_branch_id, D1b invoice-report transports,
+methods.ts/Branches.tsx edits — all uncommitted). Five backend tests currently
+fail from that in-flight work (notes-reorder, route-permissions,
+stock-action-analyze-e2e/apply/commit); they are that session's to land. My
+commits are scoped strictly to my own files.
+
+**Not done.** Deploy; imports (user); G1 and the remainder — D1b appears to be
+in flight in the other session.
