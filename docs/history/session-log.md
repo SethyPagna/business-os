@@ -11186,3 +11186,52 @@ Sales/Returns/Fees/contacts-shared=74, importEngine/contacts/system=import sessi
 were left untouched. Part 443 taken after re-checking max = 442.
 
 **Needs deploy.** Frontend-only; ships on the next build.
+
+## Part 444 (Aug 29 2026, session business-os-v1-74) — Y20: shared range-pager + non-Products list adoption
+
+**The compact pager the user drew: `‹ page (1-20) / total ›`, where the item
+range is itself the per-page control.** Split with e4 (who owns Products.tsx and
+its own Y20 call-site follow-up): I own the shared `PaginationControls.tsx` and
+the non-Products list pages. Nothing in Products.tsx was touched.
+
+**`PageSizeSelect` — new `buttonContent?: ReactNode`.** Backward-compatible
+override for the trigger label. The button normally prints the current page
+size; when `buttonContent` is passed it prints that instead, while selection is
+unchanged (picking an option still calls `onChange(size)`). Omitted → falls back
+to the numeric size, so every other caller is byte-for-byte the same. This is the
+seam the merged pager uses to show "1-20" on a control that is really the size
+dropdown.
+
+**`PaginationControls` — new opt-in `rangeAsPageSize?: boolean` (only with
+`compact`, default false).** Adds one branch *ahead of* the existing
+`if (compact)` block: a single pill of prev · editable current page · the
+item-range chip · `/ totalPages` · next. The range chip is a `PageSizeSelect`
+with `buttonContent={`${start}-${end}`}` — so tapping "1-20" opens 20/50/100 and
+the separate per-page column disappears. `editablePageInput` still governs
+whether the page number is a text input or static. Because the branch is gated on
+the new flag, the plain three-column `compact` form (Products, e4's call) and the
+full form are untouched — verified by structural test.
+
+**Wired, right-aligned, on the non-Products lists.** Sales, Returns, Fees, and
+the shared Contacts `ContactListSection` swapped their full-width
+"Showing x of y" row for `<div className="mb-{2,3} flex justify-end">` wrapping
+the compact `rangeAsPageSize` pill. Each frees the vertical band the old row took.
+AuditLog was briefly edited then reverted (a peer was mid-edit on it — left it to
+them; it already uses `compact compactPageInput`). Products call-site adoption
+stays with e4; the prop is ready for them to add `rangeAsPageSize` to their
+existing `compact` call, folding per-page into the bulk-toolbar row their Y14
+moved into normal flow.
+
+**Verify.** `frontend/tests/paginationRangeControl.test.ts` (4 structural checks:
+opt-in gating + ordering, range-as-trigger wiring, editable-page/total/prev-next
+presence, buttonContent fallback) — PASS. `tsc --noEmit` on the frontend — clean.
+`returnsLayout` + `productSearchPagination` tests — PASS. Full `vite build` —
+green (only the pre-existing catalog circular-chunk warnings). A live visual
+walkthrough was not possible: the `wrangler dev` worker serves only the API (404
+at `/`), and the catalog is reset to empty, so most list pagers have no rows to
+render; verification is build + test + typecheck.
+
+Commits: `801fcef6` (shared component + test), `30b11686` (four page wirings),
+`b10a53e9` (progress.md).
+
+**Needs deploy.** Frontend-only; ships on the next build.
