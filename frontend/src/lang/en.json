@@ -4425,5 +4425,7 @@
   "change_given": "Change given",
   "use_computed": "Use computed",
   "use_computed_change_hint": "Fill USD with the full computed change",
-  "short": "short"
+  "short": "short",
+  "minimize_hint": "Minimize — continue later from the chip",
+  "minimized_dismiss_hint": "Dismiss and discard this draft"
 }

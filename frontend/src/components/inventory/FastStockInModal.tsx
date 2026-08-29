@@ -43,6 +43,9 @@ interface FastStockInModalProps {
   notify: (message: string, kind?: string) => void
   onClose: () => void
   onDone: () => void
+  // F3 slice 2: park this shipment as a chip; the draft (slice 1) already
+  // holds everything, so minimize is just "close without finishing".
+  onMinimize?: (label: string) => void
 }
 
 function todayMmDdYyyy(): string {
@@ -69,7 +72,7 @@ type FastStockInDraft = {
   expiryDate: string
 }
 
-export default function FastStockInModal({ branchOptions, defaultBranchId, tr, notify, onClose, onDone }: FastStockInModalProps) {
+export default function FastStockInModal({ branchOptions, defaultBranchId, tr, notify, onClose, onDone, onMinimize }: FastStockInModalProps) {
   // ---- shipment header (entered once, applies to every line) ----
   const draftRef = useRef<FastStockInDraft | null>(readWorkDraft<FastStockInDraft>(FAST_STOCKIN_DRAFT_KEY)?.data ?? null)
   const draft = draftRef.current
@@ -200,7 +203,18 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
       <div className="flex max-h-modal-92 w-full flex-col rounded-t-2xl bg-white shadow-2xl sm:max-w-2xl sm:rounded-2xl dark:bg-gray-800" onClick={(event) => event.stopPropagation()}>
         <div className="flex flex-shrink-0 items-center justify-between border-b border-gray-200 p-4 dark:border-gray-700">
           <h2 className="text-lg font-bold text-gray-900 dark:text-white">⚡ {tr('fast_stockin_title', 'Fast stock-in')}</h2>
-          <button type="button" onClick={closeIfIdle} disabled={saving} aria-label={tr('close', 'Close')} className="flex h-8 w-8 items-center justify-center text-gray-400 hover:text-gray-600 disabled:opacity-50"><X className="h-4 w-4" /></button>
+          <div className="flex items-center gap-1">
+            {onMinimize ? (
+              <button type="button" disabled={saving}
+                onClick={() => { if (!saving) { onMinimize(tr('fast_stockin_title', 'Fast stock-in')); onClose() } }}
+                aria-label={tr('minimize', 'Minimize')}
+                title={tr('minimize_hint', 'Minimize — continue later from the chip')}
+                className="flex h-8 w-8 items-center justify-center rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-600 disabled:opacity-50 dark:hover:bg-gray-700">
+                <span className="text-base leading-none">−</span>
+              </button>
+            ) : null}
+            <button type="button" onClick={closeIfIdle} disabled={saving} aria-label={tr('close', 'Close')} className="flex h-8 w-8 items-center justify-center text-gray-400 hover:text-gray-600 disabled:opacity-50"><X className="h-4 w-4" /></button>
+          </div>
         </div>
 
         <div className="modal-scroll space-y-4 p-4">

@@ -157,6 +157,11 @@ interface FilePickerModalProps {
   mediaType: string
   title: string
   onClose: () => void
+  // F3 slice 2: minimize (−) -- the HOST parks the flow as a chip and
+  // closes this modal WITHOUT touching the draft (slice 1 persists it).
+  // Only offered in create mode; the label is the typed name so the chip
+  // reads "Add product — Dior 999", not a bare generic.
+  onMinimize?: (label: string) => void
   onSelect: (publicPath: string) => void
 }
 
@@ -177,6 +182,10 @@ interface ProductFormProps {
   // prop is present AND `product` is set, so a fresh "Add product" form
   // never shows it.
   onDelete?: () => void
+  // F3 slice 2: when supplied (create mode only), the modal shows a −
+  // minimize control that parks the in-progress add-product flow as a
+  // top-bar chip via the shared minimizedWork registry. Omitted for edit.
+  onMinimize?: (label: string) => void
   t: Translate
   usdSymbol: string
   khrSymbol: string
@@ -341,6 +350,7 @@ export default function ProductForm({
   onSave,
   onDelete,
   onClose,
+  onMinimize,
   t,
   usdSymbol,
   khrSymbol,
@@ -1006,7 +1016,27 @@ export default function ProductForm({
     : []
 
   return (
-    <Modal title={product ? `${tr('edit_product', 'Edit Product', 'កែប្រែផលិតផល')}: ${product.name}` : tr('add_product', 'Add Product', 'បន្ថែមផលិតផល')} onClose={onClose} wide>
+    <Modal
+      title={product ? `${tr('edit_product', 'Edit Product', 'កែប្រែផលិតផល')}: ${product.name}` : tr('add_product', 'Add Product', 'បន្ថែមផលិតផល')}
+      onClose={onClose}
+      wide
+      headerExtra={onMinimize ? (
+        <button
+          type="button"
+          disabled={saving}
+          onClick={() => {
+            if (saving) return
+            const typedName = String(form.name || '').trim()
+            onMinimize(`${tr('add_product', 'Add Product', 'បន្ថែមផលិតផល')}${typedName ? ` — ${typedName}` : ''}`)
+          }}
+          aria-label={tr('minimize', 'Minimize', 'បង្រួម')}
+          title={tr('minimize_hint', 'Minimize — continue later from the chip', 'បង្រួម — បន្តពេលក្រោយពីស្លាក')}
+          className="flex h-8 w-8 items-center justify-center rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-600 disabled:opacity-50 dark:hover:bg-gray-700"
+        >
+          <span className="text-base leading-none">−</span>
+        </button>
+      ) : undefined}
+    >
       <div className="mb-5 -mx-5 border-b border-gray-200 px-5 dark:border-gray-700">
         <div className="flex gap-1 overflow-x-auto">
           {tabs.map((tab) => (

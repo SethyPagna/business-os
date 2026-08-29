@@ -8,6 +8,10 @@ type ModalProps = {
   title: ReactNode
   onClose: () => void
   children: ReactNode
+  // F3 (Part 424): optional controls rendered between the title and the ✕
+  // (e.g. a flow's − minimize button). Interactive children are already
+  // drag-exempt via handlePointerDown's closest('button...') guard.
+  headerExtra?: ReactNode
   wide?: boolean
   size?: ModalSize
   // Lets the operator drag the modal window around by its header -- added
@@ -19,7 +23,7 @@ type ModalProps = {
   draggable?: boolean
 }
 
-export default function Modal({ title, onClose, children, wide, size, draggable }: ModalProps) {
+export default function Modal({ title, onClose, children, wide, size, draggable, headerExtra }: ModalProps) {
   const widthClass =
     size === 'sm' ? 'max-w-lg' :
     size === 'lg' ? 'max-w-3xl' :
@@ -119,12 +123,15 @@ export default function Modal({ title, onClose, children, wide, size, draggable 
           onPointerUp={handlePointerUp}
         >
           <h2 className="text-lg font-bold text-gray-900 dark:text-white">{title}</h2>
+          <div className="flex items-center gap-1">
+          {headerExtra}
           <button
             type="button"
             onClick={onClose}
             aria-label="Close"
             className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 w-8 h-8 flex items-center justify-center rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700"
           ><X className="h-4 w-4" /></button>
+          </div>
         </div>
         <div className="modal-scroll p-5">{children}</div>
       </div>

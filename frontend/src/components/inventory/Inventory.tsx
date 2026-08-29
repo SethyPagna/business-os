@@ -49,6 +49,10 @@ const InventoryMovementsSurface = lazyRetry(() => import('./InventoryMovementsSu
 const InventoryRfidSurface = lazyRetry(() => import('./InventoryRfidSurface'), 'inventory-rfid-surface') as any
 const InventoryStockModals = lazyRetry(() => import('./InventoryStockModals'), 'inventory-stock-modals') as any
 const FastStockInModal = lazyRetry(() => import('./FastStockInModal'), 'inventory-fast-stock-in-modal') as any
+// F3 slice 2: the minimized-work chip's restore path (see
+// utils/minimizedWork.ts -- event for a mounted host, pending for a
+// fresh mount).
+import { RESTORE_WORK_EVENT, consumePendingRestore, markRestoreHandled, minimizeWork } from '../../utils/minimizedWork.ts'
 const InventoryBatchModal = lazyRetry(() => import('./InventoryBatchModal'), 'inventory-batch-modal') as any
 const ExportOptionsDialog = lazyRetry(() => import('../shared/ExportOptionsDialog'), 'inventory-export-options') as any
 const ManageBatchesModal = lazyRetry(() => import('./ManageBatchesModal'), 'inventory-manage-batches-modal') as any
@@ -701,6 +705,16 @@ export default function Inventory({ hostSection, onHostSectionChange }: {
   // FastStockInModal.tsx; writes ride the same receive kernel as every
   // other add-stock surface.
   const [showFastStockIn, setShowFastStockIn] = useState(false)
+  useEffect(() => {
+    if (consumePendingRestore('fast_stockin')) setShowFastStockIn(true)
+    const onRestore = (event: Event) => {
+      if ((event as CustomEvent).detail?.kind !== 'fast_stockin') return
+      markRestoreHandled('fast_stockin')
+      setShowFastStockIn(true)
+    }
+    window.addEventListener(RESTORE_WORK_EVENT, onRestore)
+    return () => window.removeEventListener(RESTORE_WORK_EVENT, onRestore)
+  }, [])
   const [inventoryReasons, setInventoryReasons] = useState<InventoryReason[]>([])
   const [reasonManager, setReasonManager] = useState<{ open: boolean; type: InventoryReasonType }>({ open: false, type: 'adjust' })
   const [reasonDraft, setReasonDraft] = useState('')
@@ -4029,6 +4043,7 @@ ${inventoryStatLabels.netSold} ${totalQtySold} = ${tr('items_sold', 'Items sold'
             notify={notify}
             onClose={() => setShowFastStockIn(false)}
             onDone={() => load(false)}
+            onMinimize={(label: string) => minimizeWork({ key: 'fast-stockin', kind: 'fast_stockin', pageId: 'branches', label })}
           />
         </Suspense>
       ) : null}

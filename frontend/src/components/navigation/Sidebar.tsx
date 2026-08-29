@@ -25,6 +25,7 @@ import { useApp as useAppHook } from '../../AppContext.tsx'
 import { DEFAULT_MOBILE_PINNED, NAV_ITEMS as NAV_CONFIG_ITEMS, orderNavItems, parseNavSetting, type NavigationItem, type NavigationPermission } from '../shared/navigationConfig'
 import { APP_PAGE_INTENT_EVENT } from '../../app/appShellUtils.ts'
 import { lazyRetry } from '../../utils/lazyImport.ts'
+import MinimizedWorkTray from '../shared/MinimizedWorkTray.tsx'
 
 const QuickPreferenceToggles = lazyRetry(() => import('../shared/QuickPreferenceToggles'), 'quick-preference-toggles')
 
@@ -317,6 +318,7 @@ export default function Sidebar({ notificationSlot = null, desktopNotificationSl
             )}
           </div>
           <div className="ml-auto flex items-center gap-1.5">
+            <MinimizedWorkTray variant="desktop" />
             {desktopNotificationSlot}
             {showQuickPreferences ? (
               <Suspense fallback={<QuickPreferenceTogglesFallback />}>
@@ -428,6 +430,9 @@ export default function Sidebar({ notificationSlot = null, desktopNotificationSl
               </span>
             )}
           </div>
+        </div>
+        <div className="mx-2 min-w-0 flex-1">
+          <MinimizedWorkTray variant="mobile" />
         </div>
         <div className="flex flex-shrink-0 items-center gap-2">
           {notificationSlot}

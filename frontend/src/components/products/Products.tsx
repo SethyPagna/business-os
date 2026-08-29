@@ -123,6 +123,7 @@ import { buildAvailabilityFilterSection } from '../shared/AvailabilityFilterOpti
 import { buildSearchModeFilterSection } from '../shared/SearchModeFilterOptions.tsx'
 import { buildCreatedDateFilterSection } from './CreatedDateFilterOptions.tsx'
 import { buildAutoMergedFilterSection } from './AutoMergedFilterOptions.tsx'
+import { RESTORE_WORK_EVENT, consumePendingRestore, markRestoreHandled, minimizeWork } from '../../utils/minimizedWork.ts'
 import { buildIssuesFilterSection } from '../shared/IssuesFilterOptions.tsx'
 import { buildPromotionsFilterSection } from '../shared/PromotionsFilterOptions.ts'
 import type { PromotionRule } from '../../utils/promotionRules.ts'
@@ -703,6 +704,20 @@ function ProductsFullEditor() {
   // closed the modal without resetting it, and the next Add/Edit that
   // didn't pass a tab opened on the stale Stock section.
   const [formInitialTab, setFormInitialTab] = useState<ProductFormTab>('basic')
+  // F3 slice 2: a minimized add-product chip restores here -- create mode,
+  // slice 1's draft repopulates the form.
+  useEffect(() => {
+    const open = () => { setSelected(null); setFormInitialTab('basic'); setModal('form') }
+    if (consumePendingRestore('add_product')) open()
+    const onRestore = (event: Event) => {
+      if ((event as CustomEvent).detail?.kind !== 'add_product') return
+      markRestoreHandled('add_product')
+      open()
+    }
+    window.addEventListener(RESTORE_WORK_EVENT, onRestore)
+    return () => window.removeEventListener(RESTORE_WORK_EVENT, onRestore)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
   const [detailProduct,setDetailProduct]= useState<ProductRecord | null>(null)
   // `toModalProduct(selected)` used to be called inline in the ProductForm
   // JSX below -- a plain function returning a new object literal on every
@@ -4084,6 +4099,10 @@ function ProductsFullEditor() {
             initialTab={formInitialTab}
             onSave={(payload) => handleSaveWithGallery((payload || {}) as unknown as ProductRecord)}
             onClose={()=>{setModal(null);setSelected(null);setFormInitialTab('basic')}}
+            onMinimize={!modalProduct ? (label: string) => {
+              minimizeWork({ key: 'add-product', kind: 'add_product', pageId: 'products', label })
+              setModal(null); setSelected(null); setFormInitialTab('basic')
+            } : undefined}
             onDelete={selected ? () => { const target = selected; setModal(null); setSelected(null); setFormInitialTab('basic'); handleDelete(target) } : undefined}
             t={t}
             usdSymbol={usdSymbol}
