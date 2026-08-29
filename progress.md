@@ -1581,11 +1581,14 @@ those until that unit commits.*
   test in apiHttp.test.ts.)* **Dashboard shows stale data** — a cancelled sale still shows as
   completed in dashboard figures. Find the cache/refresh gap (cancel doesn't
   bump the dashboard read) and fix.
-- [~] Y19 **[CLAIMED: session a8]**. **Dashboard range: replace the separate
-  "custom" option with the built-in Start → End pill** (X1's
-  DateTimeRangePicker): presets update the pill, the pill IS the custom editor;
-  the options menu gets the Products Created-filter visual treatment. Footprint:
-  frontend/src/components/dashboard/Dashboard.tsx only.
+- [x] Y19 *(Part 431 — SHIPPED, needs deploy; session a8).* **Dashboard range:
+  the separate "Custom" chip + bare date inputs are gone — the shared
+  DateTimeRangePicker (X1) Start → End pill now shows the effective range AND
+  is the custom editor (a preset updates it; editing it switches rangeId to
+  'custom'). The pill carries the month/quarter/year-chip + calendar panel the
+  mockups asked for (same component the Sales daily report + contact reports
+  use). tsc + build green; live click-through deferred (peer's shared 8787
+  dev server). Dashboard.tsx only.
 - [ ] Y20. **Pagination redesign, all list pages:** merge the items-range /
   per-page / pages row INTO the select-all row (select-all wastes a whole row on
   large screens). Compact form: `‹ page (1–20) / totalPages ›` where the page

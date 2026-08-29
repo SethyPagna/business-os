@@ -10599,3 +10599,36 @@ half is partly done via Y10. Z10 ("Reconcile Revenue") -- needs its definition,
 now interacts with the 8-card Dashboard. Z5 (hamburger + button-colour pass) --
 large, best as its own unit. Z7's stats-block/branch-list spacing tweak lives in
 F3-hot Inventory.tsx. Needs deploy (migrations 0077/0078/0079 + frontend).
+
+## Part 431 (Aug 29 2026, session business-os-v1-a8) — Y19: Dashboard range Start → End pill
+
+**Ask.** "continue" -- picked Y19 (Dashboard range redesign) after coordinating
+with the live peer session business-os-v1-74 (which confirmed Dashboard.tsx was
+all mine and clean at HEAD, and that it had just shipped Z3a/Z9/Y11/Z7/Z4).
+
+**What changed.** The Dashboard range row dropped the standalone "Custom" preset
+chip and the two bare <input type=date> fields. The shared DateTimeRangePicker
+(X1) Start → End pill now both SHOWS the effective range (preset or custom) and
+IS the custom editor: it is fed getCurrentDashboardRange() (so a preset click
+updates it), and its onChange sets rangeId='custom' + customStart/customEnd. The
+pill carries the month/quarter/year-chip + Mon-first calendar panel the Aug-28
+mockups asked for -- the same component the Sales daily report (X2) and the
+customer/delivery contact reports already use. 'custom' stays a valid rangeId,
+it just no longer renders as a preset button; rangeLabel/periodShort still read
+it for the KPI period header + exports.
+
+**Verified.** frontend tsc clean (the only 3 errors are the F3-peer's
+uncommitted ProductForm/Products onMinimize, untouched). vite build green;
+DateTimeRange wiring confirmed in the built Dashboard-*.js and the picker's
+calendar UI in the shared app-shared chunk. Live click-through deferred: the
+shared 8787 wrangler dev is the peer session's (community property -- not
+disrupted), and DateTimeRangePicker is already proven in 3 live callers.
+
+**Parallel-sessions note.** Coordinated the split by message: peer keeps the
+F3-slice-2 files + Products.tsx + Z5/Z8, I took Y19 (Dashboard.tsx only). Part
+431 reserved for me, peer took 432+. Inventory.tsx still carries the F3 peer's
+uncommitted work (leave it alone or isolate, per Z13's note).
+
+**Not done.** Y17 (Sales Excel-like columns) next this session; Z2/Y12 scoped,
+Z5/Z8/Z10 with the peer or needing a definition. Needs deploy (migrations
+0077/0078/0079 + all the frontend changes).
