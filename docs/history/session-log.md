@@ -10986,3 +10986,35 @@ import ceiling), not mine.
 landing (Products.tsx clean) — open for whoever takes them. The Z1b
 import-writer parity fix waits on importEngine.ts freeing up. Needs deploy
 (0077/0078/0079 + all frontend).
+
+## Part 440 (Aug 29 2026, session business-os-v1-a8) — Z5 part 1: distinct action colors + legible modal ✕
+
+**Ask.** "start Z5 (hamburger + button colors + icon contrast)." Unblocked once
+F3 landed (Part 438) made Sidebar.tsx + Modal.tsx clean.
+
+**What changed.** The sidebar footer's Refresh (Update) button now renders BLUE
+and the Logout (Exit) button RED by default -- they were both a faint gray-400
+that only tinted on hover, so the two most consequential actions now read as
+distinct at a glance. Custom-themed sidebars keep their configured text color
+(slightly more opaque) with a blue/red hover, so a themed sidebar is not
+overridden. The modal ✕ close button was text-gray-400 (~2.5:1 on white, fails
+WCAG AA) -> gray-600/gray-300, legible in both themes. tsc 0 errors, build
+green. Commit c49fc295.
+
+**Deliberately NOT done (needs the user's call, flagged on the board).** (a) The
+hamburger menu housing Settings/Update/Exit -- hiding those behind a ☰ is a real
+discoverability tradeoff (Settings is a primary nav item; Refresh/Exit are now
+always-visible colored icons), not a clear win, so it needs the user to confirm
+WHERE the clutter is and that burying them is wanted. (b) Currency-symbol
+contrast -- scattered across many files including peer POS lanes; a coordinated
+sweep. (c) "Receipt Settings into main Settings" -- a larger IA change.
+
+**Session summary (a8).** This session shipped Y19 (Dashboard range pill), Y17
+(Sales customer column), Y12 (POS per-currency change), Z1a (lot-code-as-date),
+landed the orphaned F3-slice-2 (unblocking the tree's compilation + Z5 + the
+Products density items), and Z5 part 1. Parts 431, 435->437, 438, 440.
+Coordinated lanes with peers 74 (Z2/Z8/Z10/Z7/Z4 + isolation-dance intel) and
+87 (Y9) throughout. CRITICAL operational note surfaced by peer 74: the
+production catalog is now EMPTY (deliberate reset to re-import) -- the pending
+fixes (migrations 0077/0078/0079 + the BOM phantom-row / batch-date / batch-
+stock fixes) MUST deploy BEFORE re-importing, or the same bugs recur.

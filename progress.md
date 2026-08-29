@@ -1573,19 +1573,19 @@ those until that unit commits.*
   already renders USD + KHR change additively (confirmed, no Receipt edit).
   New order fields changeGivenUsd/khr; 4 en+km keys. Footprint constants.ts +
   POS.tsx + lang. tsc + build green.
-- [ ] Y13. **Products page: kill the "Search & Filters" SectionCard wrapper**
+- [~] Y13 **[CLAIMED: session e4]**. **Products page: kill the "Search & Filters" SectionCard wrapper**
   (screenshot 2). Search row becomes a plain page-level control (no folded
   card, no wrapper title); the "Created" filter moves OUT of the filter menu to
   sit below the search row; when Stock Changes becomes a section (Y15) it gets
-  its own, more-detailed filter row. [HOT-6e: Products.tsx]
-- [ ] Y14. **Sticky rules on Products:** only the search+filter row pins on
+  its own, more-detailed filter row. (Products.tsx now clean post-F3, per Part 439.)
+- [~] Y14 **[CLAIMED: session e4]**. **Sticky rules on Products:** only the search+filter row pins on
   scroll — the select-all row must NOT pin; and remove the gap above the pinned
   row (a category header currently shows through between the top edge and the
-  pinned search row). [HOT-6e: Products.tsx]
-- [ ] Y15. **Products page becomes chip-sectioned like Promotions:** page title
+  pinned search row).
+- [~] Y15 **[CLAIMED: session e4]**. **Products page becomes chip-sectioned like Promotions:** page title
   left, section switcher (Products | Stock Changes | …) — Stock Changes stops
   being an inline card on the same scroll (screenshot 1) and becomes its own
-  section. [HOT-6e: Products.tsx]
+  section.
 - [ ] Y16. **History + Manage buttons join the section-chip row** (not their own
   toolbar row) on: Sales, Branches, Contacts, Settings, Library, Review & Logs.
   (Products' equivalent rides Y15.)
@@ -1707,15 +1707,19 @@ other" with the Phase-Y items.*
   stacks BOTH renditions (labeled '80 × 50 mm' and '<N> mm'), mirroring the
   receipt view since B5. Non-compact configs preview the single full receipt
   unchanged.
-- [~] Z5 **[CLAIMED: session a8]**. **Global UI pass: contrast + button colors
-  + hamburger menu.**
-  Increase contrast on critical icons (close ✕, currency symbols); Refresh/
-  Update actions blue, Exit red; introduce a hamburger menu housing Settings
-  (incl. Receipt Settings moved into the main Settings page), Update, Exit.
-  Footprint: Sidebar.tsx + Modal.tsx + App.tsx (+ main.css for icon/currency
-  contrast) — all clean post-F3. NOTE: "Receipt Settings moved into main
-  Settings" is a larger IA change scoped as a follow-up; this unit does the
-  hamburger + button colors + contrast.
+- [~] Z5. **Global UI pass: contrast + button colors + hamburger menu.**
+  **PART 1 DONE (Part 440, session a8, needs deploy):** the sidebar Refresh
+  (Update) button renders BLUE and Logout (Exit) RED by default (were faint
+  gray-400, hover-only tint); the modal ✕ went from text-gray-400 (~2.5:1,
+  fails WCAG AA) to gray-600/gray-300 (legible both themes). **REMAINING,
+  needs the user's call:** (a) the hamburger menu housing Settings/Update/
+  Exit — deferred because hiding those (Settings is a primary nav item;
+  Refresh/Exit are now always-visible colored icons) behind a ☰ is a real
+  discoverability tradeoff, not a clear win; confirm WHERE the clutter is
+  (desktop footer vs mobile) and that burying them is wanted before building.
+  (b) currency-symbol contrast — scattered across many files incl. peer POS
+  lanes; needs a coordinated sweep. (c) "Receipt Settings moved into main
+  Settings" — a larger IA change, its own unit.
 - [~] Z6. **OTP enable broken + buried under the profile page — HIGH
   priority.** **Layering FIXED (Part 426, needs deploy):** the OTP dialog
   rendered inline inside UserProfileModal — a DOM child of its tree,
