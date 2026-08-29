@@ -5,9 +5,9 @@ import Search from 'lucide-react/dist/esm/icons/search.js'
 import AppSelect from '../../shared/AppSelect'
 import { approveImportJob, getImportJob, getImportJobReview, updateImportJobDecisions } from '../../../api/importJobsTransport'
 import { beginSingleAction, finishSingleAction } from '../../../utils/actionGuards'
+import { importPollDelayMs } from '../../../utils/importPoll'
 
 const PAGE_SIZE = 50
-const POLL_MS = 1200
 
 type TranslateFn = (key: string) => string | undefined
 type NotifyFn = (message: string, tone?: 'info' | 'success' | 'warning' | 'error') => void
@@ -102,6 +102,7 @@ export default function ProductServerImportReviewScreen({ jobId, jobRevision, t,
   useEffect(() => {
     let cancelled = false
     let timer: number | null = null
+    let attempt = 0
     const poll = async () => {
       try {
         const raw = await getImportJob(jobId)
@@ -112,12 +113,12 @@ export default function ProductServerImportReviewScreen({ jobId, jobRevision, t,
         setJobError(String(job?.last_error || job?.error_message || ''))
         if (job) onJob?.(job)
         if (!['awaiting_review', 'failed', 'cancelled', 'completed', 'completed_with_errors'].includes(nextStatus)) {
-          timer = window.setTimeout(poll, POLL_MS)
+          timer = window.setTimeout(poll, importPollDelayMs(attempt++))
         }
       } catch (error) {
         if (cancelled) return
         setJobError(error instanceof Error ? error.message : tr('import_status_failed', 'Could not read import status.'))
-        timer = window.setTimeout(poll, POLL_MS)
+        timer = window.setTimeout(poll, importPollDelayMs(attempt++))
       }
     }
     void poll()

@@ -5,6 +5,7 @@ import AlertTriangle from 'lucide-react/dist/esm/icons/alert-triangle.js'
 import AppSelect from '../shared/AppSelect'
 import { approveImportJob, getImportJob, getImportJobReview } from '../../api/importJobsTransport'
 import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards'
+import { importPollDelayMs } from '../../utils/importPoll'
 
 type TranslateFn = (key: string) => string | undefined
 type NotifyFn = (message: string, tone?: string) => void
@@ -27,7 +28,6 @@ type ReviewPayload = {
 }
 
 const PAGE_SIZE = 50
-const POLL_MS = 1200
 
 function unwrapJob(value: unknown): Record<string, unknown> | null {
   if (!value || typeof value !== 'object') return null
@@ -84,6 +84,7 @@ export default function ServerImportReviewScreen({ jobId, label, source, t, noti
   useEffect(() => {
     let cancelled = false
     let timeoutId: number | null = null
+    let attempt = 0
     const poll = async () => {
       try {
         const raw = await getImportJob(jobId)
@@ -93,12 +94,12 @@ export default function ServerImportReviewScreen({ jobId, label, source, t, noti
         setStatus(nextStatus)
         setJobError(String(job?.error_message || ''))
         if (!['awaiting_review', 'failed', 'cancelled', 'completed', 'completed_with_errors'].includes(nextStatus)) {
-          timeoutId = window.setTimeout(poll, POLL_MS)
+          timeoutId = window.setTimeout(poll, importPollDelayMs(attempt++))
         }
       } catch (error) {
         if (cancelled) return
         setJobError(error instanceof Error ? error.message : tr('import_status_failed', 'Could not read import status.'))
-        timeoutId = window.setTimeout(poll, POLL_MS)
+        timeoutId = window.setTimeout(poll, importPollDelayMs(attempt++))
       }
     }
     void poll()

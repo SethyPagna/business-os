@@ -271,7 +271,12 @@ function writeDismissedJobs(map: DismissedJobsMap): void {
     // won't survive a reload in that case, same as the old behavior. Not fatal.
   }
 }
-const IMPORT_TRACKER_ACTIVE_POLL_MS = 5000
+// 3s (was 5s) while a job is active: this is what paces the unified import hub's
+// auto-approve (the tracker detects awaiting_review here, then approves), and how
+// fast an applying job's progress updates. Imports are infrequent and short, so
+// the extra polls over a job's lifetime are negligible; the idle cadence and the
+// failure backoff are unchanged.
+const IMPORT_TRACKER_ACTIVE_POLL_MS = 3000
 const IMPORT_TRACKER_IDLE_POLL_MS = 12000
 const IMPORT_TRACKER_MAX_BACKOFF_MS = 60000
 const IMPORT_TRACKER_LOAD_TIMEOUT_MS = 8000
