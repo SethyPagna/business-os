@@ -157,7 +157,6 @@ export default function ProductsImageOnlyView() {
   // from GET /api/batches per branch, fetched lazily when the detail opens.
   const showBranchStock = hasPermission('products_image_only_show_branch_stock')
   const showBatches = hasPermission('products_image_only_show_batches')
-  const showMetaRow = showBarcode || showCategory || showBrand || showStock
   const [items, setItems] = useState<ImageOnlyProduct[]>([])
   const [total, setTotal] = useState(0)
   const [search, setSearch] = useState('')
@@ -433,8 +432,10 @@ export default function ProductsImageOnlyView() {
             // is simply absent on `product` (server-enforced), so this
             // naturally renders nothing for an ungranted field rather than
             // needing its own separate empty-state.
+            // Barcode is pulled OUT of this joined run onto its own line
+            // below (user, Aug 29: "show barcode outside") -- an identifier a
+            // grey "code · category · brand" blur made hard to read/scan.
             const metaParts: string[] = []
-            if (showBarcode && product.barcode) metaParts.push(String(product.barcode))
             if (showCategory && product.category) metaParts.push(String(product.category))
             if (showBrand && product.brand) metaParts.push(String(product.brand))
             // Stock deliberately does NOT join metaParts any more: a bare
@@ -498,8 +499,13 @@ export default function ProductsImageOnlyView() {
                       {Number(product.special_price_khr || 0) > 0 ? ` · ${fmtKHR(product.special_price_khr)}` : ''}
                     </p>
                   ) : null}
+                  {showBarcode && product.barcode ? (
+                    <p className="truncate font-mono text-[11px] text-gray-600 dark:text-gray-300" title={String(product.barcode)}>
+                      {product.barcode}
+                    </p>
+                  ) : null}
                   <div className="flex min-w-0 flex-wrap items-center gap-1.5">
-                    {showMetaRow && metaParts.length > 0 ? (
+                    {(showCategory || showBrand) && metaParts.length > 0 ? (
                       <span className="truncate text-xs text-gray-400 dark:text-gray-500">{metaParts.join(' · ')}</span>
                     ) : null}
                     {showStock ? (

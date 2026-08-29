@@ -12483,3 +12483,31 @@ productImportDirectApply.test.ts. Commit `bf45e85e`. tsc + tests green.
 **Needs deploy** (frontend-only) — the user deployed the earlier direct-apply
 changes but this review-first step is the actual fix for their report, and ships
 on the next build.
+
+## Part 480 (Aug 29 2026, session business-os-v1-e4) — image-only card: barcode on its own line ("show barcode outside")
+
+**User (Aug 29): "make the upload image only to display vip price ... also show in
+default display ... show barcode outside."** Audited the image-only view first:
+- **VIP price already displays** there (green "VIP price: $…" line, gated by
+  `products_image_only_show_vip`, which the role preset defaults to true) — the
+  label is deliberate (Part-243 design: a bare number for this role could read as
+  cost/promo), so it stays labelled, unlike the default card's number-only style.
+- **Barcode was buried** inside the joined grey "barcode · category · brand" meta
+  run. Pulled it OUT onto its own `font-mono` line above the category/brand line
+  (still gated by `products_image_only_show_barcode`, also preset-true) so it reads
+  as a scannable identifier — "barcode outside". Dropped it from `metaParts`; the
+  meta run is now category/brand only; removed the now-unused `showMetaRow`.
+
+**Default display (Products.tsx) is a PEER's lane** — its VIP price was just done by
+another session (`9a310f3e`: number + colour on the small-screen card), and the file
+is currently dirty under them. So the "also show in default display" half is already
+covered for VIP; the barcode there already renders on the card's meta line. Not
+touched — flagged to the user, will coordinate if they want the same own-line barcode
+treatment on the default card.
+
+**Verification.** tsc + check:source (405 files) + vite build green.
+ProductsImageOnlyView.tsx only.
+
+**Parallel sessions.** One file, clean/disjoint. Part 480 after re-checking max = 479.
+
+**Needs deploy.** Frontend-only; ships on the next build.
