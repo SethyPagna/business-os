@@ -123,7 +123,7 @@ async function check(name, fn) {
 }
 
 function seed() {
-  rawDb.exec('DELETE FROM branch_batch_stock; DELETE FROM product_batches; DELETE FROM branch_stock; DELETE FROM products; DELETE FROM branches; DELETE FROM sale_items; DELETE FROM sales; DELETE FROM returns; DELETE FROM return_items; DELETE FROM inventory_movements; DELETE FROM damaged_stock_lots; DELETE FROM return_replacement_items;')
+  rawDb.exec('DELETE FROM branch_batch_stock; DELETE FROM product_batches; DELETE FROM branch_stock; DELETE FROM products; DELETE FROM branches; DELETE FROM sale_items; DELETE FROM sale_item_batch_allocations; DELETE FROM sales; DELETE FROM returns; DELETE FROM return_items; DELETE FROM return_item_batch_allocations; DELETE FROM inventory_movements; DELETE FROM damaged_stock_lots; DELETE FROM return_replacement_items;')
   rawDb.prepare('INSERT INTO branches (id, name, is_active, is_default) VALUES (1, \'Main\', 1, 1)').run()
   rawDb.prepare("INSERT INTO products (id, name, is_active, stock_quantity) VALUES (1, 'Widget', 1, 0)").run()
   rawDb.prepare("INSERT INTO sales (id, branch_id) VALUES (1, 1)").run()
@@ -219,6 +219,56 @@ async function main() {
 
     const aggregateQty = rawDb.prepare('SELECT quantity FROM branch_stock WHERE product_id = 1 AND branch_id = 1').get().quantity
     assert.strictEqual(aggregateQty, 6, 'aggregate should match the batch ledger')
+  })
+
+  await check('multi-lot return records its per-lot split and an edit reverses each EXACT lot (no phantom stock)', async () => {
+    seed()
+    const batchQtyOf = (b) => rawDb.prepare('SELECT quantity FROM branch_batch_stock WHERE batch_id = @batchId AND branch_id = 1').get({ batchId: b.batchId }).quantity
+    // A sale line drew 5 units split across TWO lots (3 from A, 2 from B) --
+    // exactly what sales.ts records when FIFO spans lots: sale_items.batch_id
+    // stays NULL and the split lives in sale_item_batch_allocations.
+    // Distinct RECEIVED DATES make two distinct lots -- receiveBatchStock
+    // derives batch_key from the date, not the lotCode arg (see its source).
+    const batchA = await productBatches.receiveBatchStock(db, { productId: 1, branchId: 1, quantity: 10, receivedDate: '2026-01-05' })
+    const batchB = await productBatches.receiveBatchStock(db, { productId: 1, branchId: 1, quantity: 10, receivedDate: '2026-03-20' })
+    assert.notStrictEqual(batchA.batchId, batchB.batchId, 'sanity: the two receives must be distinct lots')
+    await productBatches.removeStockFromBatch(db, { batchId: batchA.batchId, productId: 1, branchId: 1, quantity: 3 })
+    await productBatches.removeStockFromBatch(db, { batchId: batchB.batchId, productId: 1, branchId: 1, quantity: 2 })
+    rawDb.prepare('INSERT INTO sale_items (id, sale_id, product_id, quantity, batch_id) VALUES (1, 1, 1, 5, NULL)').run()
+    rawDb.prepare('INSERT INTO sale_item_batch_allocations (sale_item_id, batch_id, branch_id, quantity, released_quantity) VALUES (1, @a, 1, 3, 0)').run({ a: batchA.batchId })
+    rawDb.prepare('INSERT INTO sale_item_batch_allocations (sale_item_id, batch_id, branch_id, quantity, released_quantity) VALUES (1, @b, 1, 2, 0)').run({ b: batchB.batchId })
+    assert.strictEqual(batchQtyOf(batchA), 7, 'sanity: A has 7 after the sale drew 3')
+    assert.strictEqual(batchQtyOf(batchB), 8, 'sanity: B has 8 after the sale drew 2')
+
+    const created = await req('POST', '/', {
+      sale_id: 1,
+      items: [{ sale_item_id: 1, product_id: 1, quantity: 5, return_to_stock: true, applied_price_usd: 10 }],
+      reason: 'Multi-lot return',
+    })
+    assert.strictEqual(created.status, 200, JSON.stringify(created.json))
+    assert.strictEqual(batchQtyOf(batchA), 10, 'the 3 that came from A go back into A')
+    assert.strictEqual(batchQtyOf(batchB), 10, 'the 2 that came from B go back into B')
+
+    const allocs = rawDb.prepare('SELECT batch_id, quantity FROM return_item_batch_allocations WHERE return_item_id IN (SELECT id FROM return_items WHERE return_id = @id)').all({ id: created.json.id })
+    assert.strictEqual(allocs.length, 2, 'the split is recorded per lot, not collapsed to one return_items.batch_id')
+    const allocMap = new Map(allocs.map((r) => [r.batch_id, r.quantity]))
+    assert.strictEqual(allocMap.get(batchA.batchId), 3)
+    assert.strictEqual(allocMap.get(batchB.batchId), 2)
+
+    // Editing the return must reverse 3 out of A and 2 out of B (the recorded
+    // split), then re-apply the same -- both lots land back at 10 with NO
+    // phantom stock. The pre-fix code pulled all 5 out of one lot here.
+    const edited = await req('PATCH', `/${created.json.id}`, {
+      items: [{ sale_item_id: 1, product_id: 1, quantity: 5, return_to_stock: true, applied_price_usd: 10 }],
+      reason: 'Re-saved',
+    })
+    assert.strictEqual(edited.status, 200, JSON.stringify(edited.json))
+    assert.strictEqual(batchQtyOf(batchA), 10, 'after edit A is exactly its 3 back -- not over/under-drawn')
+    assert.strictEqual(batchQtyOf(batchB), 10, 'after edit B is exactly its 2 back -- no phantom stock left behind')
+    const aggregate = rawDb.prepare('SELECT quantity FROM branch_stock WHERE product_id = 1 AND branch_id = 1').get().quantity
+    assert.strictEqual(aggregate, 20, 'aggregate matches the two lots (10 + 10)')
+    const reAllocs = rawDb.prepare('SELECT COUNT(*) AS n FROM return_item_batch_allocations WHERE return_item_id IN (SELECT id FROM return_items WHERE return_id = @id)').get({ id: created.json.id }).n
+    assert.strictEqual(reAllocs, 2, 'the edit re-recorded the fresh split for the next edit')
   })
 
   await check('K2: the three-way stock_action lands end-to-end -- none/restock/damaged in one return', async () => {
