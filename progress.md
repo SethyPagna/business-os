@@ -1429,7 +1429,7 @@ with 6e's F3 slice 2 (Products.tsx / Inventory.tsx / ProductForm.tsx /
 FastStockInModal.tsx / Modal.tsx / Sidebar.tsx) — marked [HOT-6e], do not start
 those until that unit commits.*
 
-- [x] Y1 *(client half Part 425; server side MEASURED + CLOSED Part 436).*
+- [x] Y1 *(client half Part 425; server side MEASURED + CLOSED Part 439).*
   Client: all three contact tabs track a refreshing flag spanning silent
   search refetches and show "Searching…" instead of the false "No matching
   customers"; search joins the shared 180ms debounce (was bare
