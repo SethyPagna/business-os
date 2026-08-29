@@ -11721,3 +11721,44 @@ accumulated on HEAD (Parts 346–454: outages, POS oversell/sell-path, imports, 
 B/C/D/E/F/G/M/N/Y/Z, migrations through 0079, rebrand). A2's live-verify checklist
 (reset-data, /api/products, POS sale with lots, storefront iPhone install, import
 round-trip, R2 retention) is the remaining user-side verification.
+
+## Part 456 (Aug 29 2026, session business-os-v1-e4) — receipt Print becomes an All / 80×50 / Default menu; "All" opens separate files
+
+**User directive (Aug 29).** "for print two options it should mention two options
+... instead of displaying both prints format dimensions ... like can have all,
+80x50 and default ... also, when open it will only open one separate files to
+print not combined print."
+
+**Before.** When the 80×50 card is enabled, the receipt toolbar showed TWO
+dimension-labeled Print buttons (B5): "Print 80×50" and "Print {N}mm", each
+printing its own rendition.
+
+**After (Receipt.tsx).** Those two buttons are replaced by ONE **Print** menu
+(shared LazyPortalMenu, chevron affordance) offering three choices: **All**,
+**80 × 50 mm**, and **{N} mm (Default)**. 80×50 and Default each open just their
+one format (unchanged behavior, via exportReceiptPdf's 'compact'/'full' variant).
+**All** opens the 80×50 card AND the full receipt as TWO SEPARATE print files —
+never a single combined print — via a new `printBothSeparately` that fires both
+`printReceipt` calls together with `Promise.allSettled` (not awaited one-after-the-
+other) so both `window.open`s land inside the same click's user-activation window;
+sequencing them would push the second past the activation and get it popup-blocked.
+The toolbar grid drops from a compact-only `grid-cols-2` to a uniform `grid-cols-3`
+(Print menu · Open PDF · Image). Non-compact configs keep the single Print button.
+The body still previews BOTH renditions (B5/Z4) — that is the visual preview, not
+the print action, and was left alone.
+
+**Lang.** One new key pair `print_default` (en "Default", km "លំនាំដើម") for the
+Default menu label; langKeyIntegrity parity holds. The "All" item reuses the
+existing `all` key; the size items are language-neutral (mm).
+
+**Verification.** tsc clean, langKeyIntegrity + check:source (404 files) +
+receiptTemplate + receiptSettingsSync tests pass, vite build green. Live
+click-through of the actual two-window print deferred (peer-owned dev backend;
+needs a real sale/receipt) — the popup-activation reasoning is the load-bearing
+part and is handled by firing both opens in one gesture.
+
+**Parallel sessions.** Receipt.tsx + en/km.json only; lang diff verified as exactly
+the two `print_default` lines (no peer content swept). Part 456 taken after
+re-checking max = 455.
+
+**Needs deploy.** Frontend-only; ships on the next build.

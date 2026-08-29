@@ -3,11 +3,13 @@ import ArrowLeft from 'lucide-react/dist/esm/icons/arrow-left.js'
 import FileText from 'lucide-react/dist/esm/icons/file-text.js'
 import ImageDown from 'lucide-react/dist/esm/icons/image-down.js'
 import Printer from 'lucide-react/dist/esm/icons/printer.js'
+import ChevronDown from 'lucide-react/dist/esm/icons/chevron-down.js'
 import { useApp as useAppHook } from '../../AppContext.tsx'
 import { BUSINESS_TIME_ZONE } from '../../constants.ts'
 import { parseReceiptTemplate } from '../receipt-settings/template'
 import { buildAppliedReceiptConfig } from '../../utils/receiptAppliedConfig.ts'
 import ReceiptQrCodes, { normalizeQrSocialLinksForReceipt, type ReceiptQrEntry } from './ReceiptQrCodes.tsx'
+import LazyPortalMenu from '../shared/LazyPortalMenu'
 
 type LanguageMode = 'en' | 'km' | 'both'
 type ReceiptExportMode = 'print' | 'open' | 'image'
@@ -607,6 +609,30 @@ export default function Receipt({ sale, settings = {}, onClose, _previewMode }: 
     }
   }
 
+  // "Print all": the 80x50 card and the full receipt open as TWO SEPARATE
+  // print files (each its own window), never one combined print — per the
+  // user's request. Both are fired TOGETHER (not one awaited after the
+  // other) so both window.open calls land inside the same click's
+  // user-activation window; awaiting them sequentially would push the second
+  // open past the activation and get it popup-blocked.
+  const printBothSeparately = async () => {
+    if (!compactPrintRef.current || !printRef.current) return
+    setPdfBusy('print')
+    try {
+      const printTools = await loadReceiptPrintModule()
+      const results = await Promise.allSettled([
+        printTools.printReceipt(compactPrintRef.current, { title: '', printSettings: compactPrintSettings }),
+        printTools.printReceipt(printRef.current, { title: '', printSettings: fullPrintSettings }),
+      ])
+      const failure = results.find((r): r is PromiseRejectedResult => r.status === 'rejected')
+      if (failure) throw failure.reason
+    } catch (error) {
+      window.alert(getErrorMessage(error, t?.('unable_generate_receipt_pdf') || 'Unable to generate receipt PDF'))
+    } finally {
+      setPdfBusy('')
+    }
+  }
+
   const shellStyleFor = (widthMm: number): CSSProperties => ({
     fontFamily: actualFont,
     fontSize: fs,
@@ -648,34 +674,39 @@ export default function Receipt({ sale, settings = {}, onClose, _previewMode }: 
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-y-auto bg-gray-100 dark:bg-zinc-900">
       <div className="flex flex-shrink-0 flex-wrap items-center justify-between gap-3 border-b border-gray-200 bg-white px-3 py-3 dark:border-zinc-700 dark:bg-zinc-800">
-        <div className={`grid w-full gap-2 sm:flex sm:w-auto sm:flex-wrap sm:items-center ${compactSalesReceipt ? 'grid-cols-2' : 'grid-cols-3'}`}>
+        <div className="grid w-full grid-cols-3 gap-2 sm:flex sm:w-auto sm:flex-wrap sm:items-center">
         {compactSalesReceipt ? (
-          // B5: with the 80x50 card enabled, Print offers BOTH sizes -- the
-          // card on its fixed sheet, and the full receipt on the roll.
-          <>
-            <button
-              type="button"
-              className="btn-primary min-w-0 justify-center px-3 py-2 text-sm"
-              onClick={() => exportReceiptPdf('print', 'compact')}
-              disabled={pdfBusy !== ''}
-            >
-              <span className="inline-flex min-w-0 items-center justify-center gap-1.5">
-                <Printer className="h-4 w-4 shrink-0" />
-                <span className="truncate">{pdfBusy === 'print' ? (t?.('preparing_pdf') || 'Preparing PDF...') : `${t?.('print') || 'Print'} 80×50`}</span>
-              </span>
-            </button>
-            <button
-              type="button"
-              className="btn-primary min-w-0 justify-center px-3 py-2 text-sm"
-              onClick={() => exportReceiptPdf('print', 'full')}
-              disabled={pdfBusy !== ''}
-            >
-              <span className="inline-flex min-w-0 items-center justify-center gap-1.5">
-                <Printer className="h-4 w-4 shrink-0" />
-                <span className="truncate">{pdfBusy === 'print' ? (t?.('preparing_pdf') || 'Preparing PDF...') : `${t?.('print') || 'Print'} ${fullReceiptWidthMm}mm`}</span>
-              </span>
-            </button>
-          </>
+          // The 80x50 card and the full receipt are two print FORMATS. Rather
+          // than two dimension-labeled Print buttons (the old B5 layout),
+          // Print is ONE menu offering All / 80×50 / Default (user, Aug 29:
+          // "it should mention two options ... all, 80x50 and default").
+          // "All" opens the two as SEPARATE print files, never one combined
+          // print (printBothSeparately fires both windows together).
+          <LazyPortalMenu
+            align="auto"
+            compact
+            triggerWrapperClassName="min-w-0"
+            menuClassName="min-w-[11rem]"
+            trigger={(
+              <button
+                type="button"
+                className="btn-primary w-full min-w-0 justify-center px-3 py-2 text-sm"
+                disabled={pdfBusy !== ''}
+                aria-haspopup="true"
+              >
+                <span className="inline-flex min-w-0 items-center justify-center gap-1.5">
+                  <Printer className="h-4 w-4 shrink-0" />
+                  <span className="truncate">{pdfBusy === 'print' ? (t?.('preparing_pdf') || 'Preparing PDF...') : (t?.('print') || 'Print')}</span>
+                  <ChevronDown className="h-3.5 w-3.5 shrink-0 opacity-80" />
+                </span>
+              </button>
+            )}
+            items={[
+              { label: t?.('all') || 'All', disabled: pdfBusy !== '', onClick: () => { void printBothSeparately() } },
+              { label: '80 × 50 mm', disabled: pdfBusy !== '', onClick: () => { void exportReceiptPdf('print', 'compact') } },
+              { label: `${t?.('print_default') || 'Default'} · ${fullReceiptWidthMm} mm`, disabled: pdfBusy !== '', onClick: () => { void exportReceiptPdf('print', 'full') } },
+            ]}
+          />
         ) : (
         <button
           type="button"

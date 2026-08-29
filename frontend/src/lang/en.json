@@ -2948,6 +2948,7 @@
   "pricing_short": "Price",
   "primary": "Primary",
   "print": "Print",
+  "print_default": "Default",
   "print_auto_save_note": "🖨️ Settings saved automatically and applied every time you print from POS or Sales.",
   "print_bottom": "Bottom",
   "print_height_mm": "Height (mm)",
