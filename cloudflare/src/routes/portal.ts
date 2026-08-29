@@ -11,7 +11,7 @@ import { buildUniqueStoredName } from '../lib/fileAssets'
 import { sanitizeMediaList } from '../lib/media'
 import { detectBufferKind } from '../lib/uploadSecurity'
 import { broadcast } from '../durable-objects/broadcastHub'
-import { generatePortalAiResponse, getPortalAiUsageStatus } from '../lib/portalAi'
+import { generatePortalAiResponse } from '../lib/portalAi'
 import { ADMIN_MAX_IMAGES_PER_PRODUCT } from '../lib/importImageMatch'
 import { buildFtsMatchExpression, buildPartialWordMatchClause, buildShortWordFallbackClause, buildTrigramMatchExpression, PRODUCTS_FTS_BM25_SQL, runFuzzyFallbackMatch, tokenizeSearchWords } from '../lib/searchMatch'
 import { loadActivePromotionRules, productPromotedSql } from '../lib/promotionRulesSql'
@@ -648,14 +648,17 @@ app.get('/ai/status', async (c) => {
         WHERE enabled = 1 AND provider_type = 'chat' ORDER BY priority ASC LIMIT 1
       `).get<{ id: number; name: string; requests_per_minute: number }>()
 
+  // Public availability only: whether the assistant is on, plus its title
+  // and disclaimer. The backing provider row's identity (id/name) and config
+  // are internal and never exposed here -- the shopper only needs to know the
+  // assistant is available. `usage` stays as an empty, non-identifying shape
+  // for response-shape stability with the client's existing handling.
   return c.json({
     success: true,
     enabled: !!config.aiEnabled && !!provider,
     title: config.aiTitle,
     disclaimer: config.aiDisclaimer,
-    usage: {
-      providers: provider ? [{ id: provider.id, name: provider.name, requestsPerMinute: provider.requests_per_minute }] : [],
-    },
+    usage: { providers: [] },
   })
 })
 
@@ -710,6 +713,15 @@ function collectRecommendationCitations(recommendations: Array<{ citations?: unk
 async function loadPortalAiCatalog(env: Env, showOutOfStockProducts: boolean) {
   const db = getDb(env)
   const visibleFilter = portalVisibleProductFilter(showOutOfStockProducts)
+  // SECURITY BOUNDARY -- this SELECT is the only product data the public AI
+  // assistant ever sees. It is an explicit allowlist of public, on-card
+  // fields ONLY. Never add internal columns here: cost_price_usd/khr, any
+  // VIP/wholesale price, supplier, margin, or other back-office fields. Even
+  // the selling price and raw stock_quantity fetched below are withheld from
+  // the model itself (lib/portalAi.ts buildPrompt shows it only a coarse
+  // stock_status + on_sale flag) and only the public selling price is
+  // re-attached to the final recommendations -- so nothing sensitive can
+  // reach the model's reasoning or the shopper's screen through this path.
   const products = await db.prepare(`
     SELECT id, name, brand, category, unit, description,
            selling_price_usd, selling_price_khr, stock_quantity,
@@ -822,6 +834,18 @@ app.post('/ai/chat', async (c) => {
       // Logging failure should never block the customer-facing response.
     }
 
+    // Public portal response: only the customer-facing answer leaves the
+    // Worker. Internal AI operational details are deliberately NOT returned
+    // to the anonymous visitor:
+    //   - `usage` / provider list -> AI vendor, model, priority, per-config
+    //     rate limits and `lastFailure` error text.
+    //   - `failovers` -> provider ids, vendor, model, and raw provider error
+    //     strings (which can carry endpoint/quota/account detail).
+    // All of that is still captured server-side in ai_response_logs above and
+    // is readable only through the admin, `settings`-gated GET /api/ai/
+    // responses -- so operators keep full observability while the public site
+    // exposes none of it. `requestPolicy` (max question length + per-visitor
+    // per-minute cap) is the only non-sensitive knob the shopper UI needs.
     return c.json({
       success: true,
       summary: response.summary || '',
@@ -829,9 +853,7 @@ app.post('/ai/chat', async (c) => {
       contactNote: response.contact_note || config.aiDisclaimer,
       followUpQuestions: response.follow_up_questions || [],
       recommendations: response.recommendations || [],
-      usage: response.usage || (await getPortalAiUsageStatus(c.env, config.aiProviderId)),
       requestPolicy: response.requestPolicy || {},
-      failovers: response.failovers || [],
     })
   } catch (error) {
     return c.json({ error: (error as Error)?.message || 'Portal AI request failed' }, 400)
