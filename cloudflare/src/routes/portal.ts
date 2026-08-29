@@ -106,10 +106,41 @@ export async function loadSettingsMap(env: Env): Promise<SettingsMap> {
   return map
 }
 
+// Hostnames this shop has since migrated AWAY from -- kept in sync with the
+// old-domain redirect map in frontend/index.html (redirectHosts, Aug 28 2026
+// rebrand LeangCosmetics -> LeangBeauty). A stored customer_portal_public_url
+// that still points at one of these is stale: it was almost always FROZEN
+// there by the portal editor round-tripping the then-current RESOLVED url back
+// into the setting (CatalogPage.tsx prefills the override input with
+// config.publicUrl, which already includes the env fallback -- so a save
+// promotes the fallback into an explicit override), not a deliberate
+// external-domain choice. Honoring it makes the live storefront advertise a
+// dead domain and shadows a later BUSINESS_OS_PUBLIC_URL change (the exact
+// symptom on the Aug-29 deploy: publicUrl stuck on leangcosmetics.dpdns.org
+// after the domain moved to leangbeauty.com). We drop such a value and fall
+// back to the live env url; a genuine external funnel domain -- any host NOT
+// listed here -- is still honored, so the override feature is preserved.
+const DEPRECATED_PORTAL_HOSTS = new Set([
+  'leangcosmetics.dpdns.org',
+  'admin.leangcosmetics.dpdns.org',
+  'leangcosmetics.com',
+  'www.leangcosmetics.com',
+  'admin.leangcosmetics.com',
+])
+
+function urlHost(url: string): string {
+  try {
+    return new URL(url).hostname.toLowerCase()
+  } catch (_) {
+    return ''
+  }
+}
+
 function portalPublicUrl(settings: SettingsMap, env: Env): string {
   const configured = normalizeUrl(settings.customer_portal_public_url)
   const fallback = normalizeUrl(env.BUSINESS_OS_PUBLIC_URL)
-  return (configured || fallback).replace(/\/public$/i, '')
+  const configuredIsStale = !!configured && DEPRECATED_PORTAL_HOSTS.has(urlHost(configured))
+  return ((configuredIsStale ? '' : configured) || fallback).replace(/\/public$/i, '')
 }
 
 export function buildPortalConfig(settings: SettingsMap, env: Env) {
