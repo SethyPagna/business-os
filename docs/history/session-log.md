@@ -10759,7 +10759,11 @@ code- + tsc-verified.
 Receipt), Z5 (hamburger — large). Needs deploy (migrations 0077/0078/0079 +
 frontend).
 
-## Part 435 (Aug 29 2026, session business-os-v1-a8) — Z1a: date-derived lot codes render as their date
+## Part 437 (Aug 29 2026, session business-os-v1-a8) — Z1a: date-derived lot codes render as their date
+
+*(Renumbered from a duplicate Part 435: a peer session concurrently took 435
+for Z2. Per the write-order rule the later duplicate renumbers; 436 was
+reserved by session 87 for Y9, so this moved to 437.)*
 
 **Ask.** "check what peer is doing then continue." Peer (business-os-v1-74) was
 mid-Z10 (editing cloudflare/src/routes/inventory.ts to make the Branch /stats
@@ -10845,3 +10849,36 @@ Z10/Z13 are already in HEAD so committing Inventory.tsx picks up only the F3 hun
 **Not done.** Z5 (a8 taking it). The user's Z8→Z2 queue is complete on my side
 (Z8, Z10, Z2 shipped; Y12 by a8). Needs deploy (migrations 0077/0078/0079 +
 frontend).
+
+## Part 438 (Aug 29 2026, session business-os-v1-a8) — landed the orphaned F3-slice-2 (minimize work to a chip)
+
+**Ask.** "start Z5" -- but Z5's surfaces (Sidebar hamburger, Modal ✕ contrast)
+were blocked by the F3-slice-2 "minimize to tray" work, which had sat
+uncommitted AND non-compiling across many session resumes (onMinimize errors in
+ProductForm/Products), also blocking the Products density items (Y13-Y16/Y20),
+the last of Z1a, and forcing a reverse-then-reapply isolation dance on every
+Inventory.tsx commit by session 74.
+
+**What changed.** Both live peers (74, 87) confirmed F3 orphaned and greenlit
+landing it. Preserved the F3 author's design; the ONLY change to make it
+compile was declaring the already-USED onMinimize prop on ProductFormProps and
+destructuring it in ProductForm -- no redesign. Committed all F3 files together
+(new utils/minimizedWork.ts + MinimizedWorkTray.tsx; Modal.tsx headerExtra;
+Sidebar tray slots; ProductForm/FastStockInModal park+restore; Inventory/
+Products consume restore events) plus the two lang keys the feature references
+(minimize_hint, minimized_dismiss_hint) and a Y12 leftover 'short' that had
+churned out of HEAD. Inventory.tsx committed the F3 hunks ONLY -- 74's Z10/Z13
+stat work is already in HEAD (diff verified clean). Commit 3aa35da2.
+
+**Verified.** tsc 0 errors -- the tree COMPILES for the first time in many
+sessions (previously always 3 F3 errors); vite build green; langKeyIntegrity
+PASS (877 bare t() lookups all resolve, 3694 shared keys); workDrafts +
+fastStockIn PASS.
+
+**Unblocks.** Z5 (Sidebar/Modal now clean), Products density Y13-Y16/Y20
+(Products.tsx clean), Z1a's Inventory.tsx batch pill (~475/477, now clean),
+and ends session 74's Inventory.tsx isolation dance.
+
+**Part-number note.** My Z1a entry and a peer's Z2 entry both took Part 435 in a
+concurrent race; per the write-order rule the duplicate renumbered -- my Z1a is
+now Part 437 (436 was reserved by session 87 for Y9), this F3 entry is 438.

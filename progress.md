@@ -1632,7 +1632,7 @@ other" with the Phase-Y items.*
   single lot was restored correctly (measured).)*
   **Returns + cancels must restore stock to the SAME batch — never a new one.**
 - [~] Z1. **Stats not updating / inconsistent data.** (a) **Z1a FIXED (Part
-  435, needs deploy).** The rule is decided + enforced: a date-derived lot
+  437, needs deploy).** The rule is decided + enforced: a date-derived lot
   code (MMDDYYYY, e.g. 08242026) renders as its mm/dd/yyyy date where a date
   belongs; a genuine CUSTOM lot code renders as a code. Landed in the shared
   batchDisplayLabel util (fixes ManageBatchesModal, the POS lot picker,
