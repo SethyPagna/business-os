@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react'
 import { calculateProductDiscount } from '../../../utils/pricing.ts'
 import { buildBatchPreview } from '../../../utils/productBatches.ts'
+import { batchDisplayLabel } from '../../../utils/batchLabel.ts'
 
 type BranchId = string | number
 type Translate = (key: string, fallback?: string, khmerFallback?: string) => string
@@ -100,7 +101,9 @@ export function ProductBatchPreview({
     <div className={`flex flex-wrap items-center gap-1 ${compact ? 'mt-1' : 'mt-1.5'}`}>
       {preview.items.map((batch) => {
         const batchId = String(batch.id || batch.batch_id || 'batch')
-        const lotCode = String(batch.lot_code || tr('batch', 'Batch', 'Batch'))
+        // Z1a: a date-derived lot code reads as its mm/dd/yyyy date; a real
+        // custom code stays a code.
+        const lotCode = batchDisplayLabel({ id: String(batch.id ?? batch.batch_id ?? 'batch'), lot_code: (batch.lot_code as string) ?? null, received_at: (batch.received_at as string) ?? null, batch_number: (batch.batch_number as number) ?? null }, tr('batch', 'Batch', 'Batch'))
         const expiryDate = String(batch.expiry_date || tr('no_expiry', 'No expiry', 'No expiry'))
         const quantity = Number(batch.quantity || 0)
         return (

@@ -50,13 +50,41 @@ export function formatDefaultBatchLabel(batchNumber: number | null | undefined, 
   return null
 }
 
-// Full fallback chain for displaying one batch: the date-derived code
-// (lot_code -- see cloudflare/src/lib/batchCode.ts's dateToBatchCode,
-// always populated now, e.g. "08222026") wins as the primary identifier,
-// then "Batch <n: mm/dd/yyyy>" for pre-redesign rows that predate it,
-// then a bare id as the last resort so a pill/row is never blank.
+// Z1a: a lot code that is a pure 8-digit MMDDYYYY string (dateToBatchCode's
+// output, e.g. "08242026") is really the received date wearing a code's
+// clothes -- showing it verbatim next to real mm/dd/yyyy dates on other
+// surfaces is exactly the "08242026 where a date belongs" confusion the user
+// flagged. Decode it back to mm/dd/yyyy; return null for anything that is not
+// a valid MMDDYYYY calendar date (a genuine custom lot code, which must render
+// AS a code, per the rule "dates render mm/dd/yyyy, lot codes render as
+// codes, never interchanged").
+export function lotCodeAsDate(lotCode: string | null | undefined): string | null {
+  const raw = String(lotCode || '').trim()
+  if (!/^\d{8}$/.test(raw)) return null
+  const mm = Number(raw.slice(0, 2))
+  const dd = Number(raw.slice(2, 4))
+  const yyyy = Number(raw.slice(4, 8))
+  if (mm < 1 || mm > 12 || dd < 1 || yyyy < 1970 || yyyy > 2999) return null
+  const lastDay = new Date(Date.UTC(yyyy, mm, 0)).getUTCDate()
+  if (dd > lastDay) return null
+  return `${String(mm).padStart(2, '0')}/${String(dd).padStart(2, '0')}/${yyyy}`
+}
+
+// Full fallback chain for displaying one batch. Z1a display rule: a batch
+// reads as its received DATE (mm/dd/yyyy) everywhere -- the stored
+// received_at wins (authoritative), falling back to decoding a date-derived
+// lot code. Only a GENUINE custom lot code (not an MMDDYYYY date) renders as a
+// code. Then "Batch <n: mm/dd/yyyy>" for pre-redesign rows, then a bare id so
+// a pill/row is never blank.
 export function batchDisplayLabel(batch: BatchLike, batchWord = 'Batch'): string {
-  if (batch.lot_code) return batch.lot_code
+  const codeAsDate = lotCodeAsDate(batch.lot_code)
+  // A real custom code (has a lot_code that is NOT an MMDDYYYY date) shows as
+  // the code.
+  if (batch.lot_code && !codeAsDate) return batch.lot_code
+  // Otherwise show the received date: the stored received_at, or the code
+  // decoded to a date.
+  const dateLabel = formatBatchReceivedDate(batch.received_at) || codeAsDate
+  if (dateLabel) return dateLabel
   const defaultLabel = formatDefaultBatchLabel(batch.batch_number, batch.received_at)
   if (defaultLabel) return `${batchWord} ${defaultLabel}`
   return `${batchWord} #${batch.id}`

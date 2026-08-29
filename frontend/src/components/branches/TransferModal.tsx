@@ -19,6 +19,7 @@ import type { ProductBatch } from '../../api/batchesTransport.ts'
 import { useDebouncedValue } from '../products/helpers/productPageHelpers.ts'
 import AppSelect, { type AppSelectOption } from '../shared/AppSelect.tsx'
 import { buildProductGroups } from '../../utils/productGrouping.ts'
+import { batchDisplayLabel } from '../../utils/batchLabel.ts'
 
 const TRANSFER_STOCK_LOAD_TIMEOUT_MS = 12000
 const TRANSFER_STOCK_MUTATION_TIMEOUT_MS = 12000
@@ -809,7 +810,7 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
                                 : 'hover:bg-gray-50 dark:hover:bg-gray-700/50'
                             }`}
                           >
-                            <span className="font-mono">{batch.lot_code || `${t('batch') || 'Batch'} #${batch.id}`}</span>
+                            <span className="font-mono">{batchDisplayLabel({ id: batch.id, lot_code: (batch.lot_code as string) ?? null, received_at: (batch.received_at as string) ?? null, batch_number: (batch.batch_number as number) ?? null }, t('batch') || 'Batch')}</span>
                             <span className="text-xs text-gray-500 dark:text-gray-400">
                               {batch.expiry_date ? `${t('expires') || 'exp'} ${batch.expiry_date} · ` : ''}
                               {batch.quantity} {selectedProduct.unit}
