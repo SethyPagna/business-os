@@ -1868,7 +1868,7 @@ other" with the Phase-Y items.*
 
 - ~~**Products now differs from the other five list pages (Part 389):** Products had
   a toolbar "Select all (N)" control and an empty header checkbox column — the
-  opposite of Inventory/Sales/Returns/Branches/Contacts.~~ **RESOLVED (Part 450,
+  opposite of Inventory/Sales/Returns/Branches/Contacts.~~ **RESOLVED (Part 451,
   session c1, needs deploy — `7a35f75c`):** the user confirmed the flip during the
   go-live hardening pass. Products' desktop header cell now renders the select-all
   checkbox in select mode (same isSelectionScope*/toggleSelectionScope helpers the
