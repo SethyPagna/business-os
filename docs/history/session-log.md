@@ -12729,3 +12729,71 @@ guessed at.
 
 **Needs deploy.** Migration 0080 applies on the next `npm run deploy:full`; the report
 figures change only after it does.
+
+## Part 486 (Aug 29 2026, session business-os-v1-4f) — The lot ledger, reconciled for multi-lot products (migration 0081) + manifest Step 4f
+
+**What was wrong.** Part 484 measured it: `branch_stock` totals 23,113 units,
+`branch_batch_stock` totals 12,725. Per product x branch — 10,943 pairs agree, 1,257
+are short by 10,415 units, 8 are the reverse (27 units of lot stock standing against
+zero branch stock). Because every product carries an active batch, the POS treats all
+of them as batch-tracked and will not enable the add button without a lot that has
+stock: **30 Shop products (109 units) were unsellable while plainly showing stock** —
+e.g. #4461 Morphe Fluidity Concealer C2.65, 11 on hand, 0 lotted — and the Warehouse
+had 1,225 rows / 10,298 units with no lot at all.
+
+**Why 0079 did not cover it.** `0079_reconcile_batch_stock` fixes exactly this and is
+applied, but its guard is `n = 1`, written when "every one of the ~6,100 products has
+exactly ONE active lot". Step 4's stock history then created 19,914 more lots: 6,007
+products are now multi-lot (up to 57) and only 97 remain single-lot, so 0079 skips 98%
+of the catalog. It was right when written and quietly stopped applying.
+
+**Migration 0081.** `branch_stock` is authoritative — it is what the template snapshot
+rebuilt and what every stock figure in the app reads — so each product x branch
+difference lands on that product's single `Received via product import` opening lot
+(verified on production: 6,104 products, 6,104 such lots, none inactive, none
+duplicated). Historical `Unified stock import` lots are never touched, so the pack's
+Step 4e stays intact and re-running 4e afterwards is a no-op; the two are
+complementary. Where the OTHER lots alone already claim more than the branch holds,
+they are zeroed and the opening lot takes the whole branch quantity — a ledger
+claiming stock the branch does not have lets the POS put units in a cart that
+`CHECK (quantity >= 0)` on `branch_stock` then refuses at sale time.
+
+**Written set-based on purpose.** The first draft used correlated subqueries per
+candidate pair; running its read-only equivalent against production returned "D1 DB
+exceeded its CPU time limit and was reset". Rewritten against three pre-aggregated
+helper tables with every join on a primary key, the same simulation runs clean. Worth
+recording as a rule: a migration shape that cannot be *simulated* on production cannot
+be *run* on it either.
+
+**Simulated read-only against production before shipping:** 1,265 pairs planned,
+**+10,415 units added, 27 removed**, no pair needing the zero-others branch (all 8
+reversed pairs turn out to hold their phantom units on the opening lot itself). The lot
+ledger lands on 12,725 + 10,415 - 27 = **23,113**, exactly `branch_stock`.
+
+**Verification.** New `test-lot-ledger-reconcile-pure.cjs` — 8 checks, real SQLite,
+real migration chain, the world seeded as it stood BEFORE 0081 and then the migration
+file itself executed (not a paraphrase). Covers each shape measured on production: a
+branch the opening lot never reached, a partly-lotted branch with a parked historical
+lot that must stay 0, a pair that already agrees and must not be touched, lot stock
+against zero branch stock, other-lots-exceed-branch, idempotence on a second run,
+helper tables dropped, and no negative quantity written. Suite 102 -> 103, all passing;
+`node validate-pack.cjs` still ALL CHECKS PASSED.
+
+**IMPORT-MANIFEST.md gains Step 4f and a new completion gate.** Without them the
+manifest reproduces this exact state on any fresh run — Steps 1/2 lot only the first
+branch named, 4d re-imports through the default path that never writes lots, 4e parks
+the historical ones. The new gate is the one whose absence let a run pass every other
+gate while 45% of stock sat outside the ledger:
+
+    (SELECT SUM(quantity) FROM branch_stock) == (SELECT SUM(bbs.quantity) FROM
+    branch_batch_stock bbs JOIN product_batches pb ON pb.id = bbs.batch_id
+    AND pb.is_active = 1)   -- both 23,113
+
+**Answering the question asked directly:** this changes NO migration-status number.
+Every existing gate reads `products.stock_quantity`, `branch_stock`,
+`inventory_movements`, batch counts/dates, sales or fees; the reconciliation writes only
+`branch_batch_stock`. Product stock stays 23,113, summed branch stock stays 23,113,
+movements stay 21,278 / 114,277.8, batch dates stay 07/09/2024-08/27/2026.
+
+**Needs deploy.** 0081 applies on the next `npm run deploy:full`; the 30 blocked Shop
+products only become sellable once it does.
