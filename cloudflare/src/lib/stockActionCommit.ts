@@ -232,7 +232,15 @@ export async function applyUnifiedStockAdd(db: D1Compat, input: UnifiedStockAddI
       // every other statement in this batch. Receiving branch (0070) rides
       // along fill-if-NULL: an add landing on an existing lot only fills a
       // branch that was never recorded — first attribution sticks.
+      // 0080: the money accumulates the same way the quantity does. Before
+      // it, a lot's spend was read as `received_quantity * unit_cost_usd` --
+      // and since batch_key is the date code, a second receipt of the same
+      // product on the same day tops THIS lot up, so its units were valued
+      // at the FIRST receipt's cost. @costPriceUsd is NULL whenever the
+      // source row recorded no price; COALESCE makes that contribute 0
+      // instead of borrowing a sibling receipt's price.
       sql: `UPDATE product_batches SET received_quantity = COALESCE(received_quantity, 0) + @quantity,
+              received_cost_usd = COALESCE(received_cost_usd, 0) + (@quantity * COALESCE(@costPriceUsd, 0)),
               received_branch_id = COALESCE(received_branch_id, @branchId)
             WHERE variant_product_id = @productId AND batch_key = @batchKey AND ${guard}`,
       params,

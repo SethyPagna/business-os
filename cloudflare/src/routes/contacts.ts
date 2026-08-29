@@ -912,7 +912,7 @@ app.get('/suppliers/:id/purchases', async (c) => {
 
   const batches = await db.prepare(`
     SELECT pb.id, pb.batch_number, pb.lot_code, pb.received_at, pb.received_quantity,
-           pb.unit_cost_usd, pb.payment_status, pb.credit_due_date, pb.is_active,
+           pb.unit_cost_usd, pb.received_cost_usd, pb.payment_status, pb.credit_due_date, pb.is_active,
            p.id AS product_id, p.name AS product_name,
            COALESCE(SUM(bbs.quantity), 0) AS remaining_quantity
     FROM product_batches pb
@@ -925,7 +925,7 @@ app.get('/suppliers/:id/purchases', async (c) => {
     LIMIT 1000
   `).all<{
     id: number; batch_number: number | null; lot_code: string | null; received_at: string | null
-    received_quantity: number | null; unit_cost_usd: number | null; payment_status: string | null
+    received_quantity: number | null; unit_cost_usd: number | null; received_cost_usd: number | null; payment_status: string | null
     credit_due_date: string | null; is_active: number | null
     product_id: number; product_name: string | null; remaining_quantity: number
   }>({ id, name: String(supplier.name || '').trim().toLowerCase() })
@@ -944,10 +944,14 @@ app.get('/suppliers/:id/purchases', async (c) => {
   }
   for (const batch of batches) {
     const received = Number(batch.received_quantity)
-    const unitCost = Number(batch.unit_cost_usd)
+    // 0080: spend comes from the lot's recorded money, not from re-deriving
+    // it as quantity x unit_cost_usd. unit_cost_usd is first-attribution, so
+    // that form valued a same-day second receipt at the first receipt's
+    // price -- overstating this exact figure by 11.5% on the migrated data.
+    const recordedCost = Number(batch.received_cost_usd)
     if (Number.isFinite(received) && batch.received_quantity != null) totals.units_received += received
-    if (batch.received_quantity != null && batch.unit_cost_usd != null && Number.isFinite(received) && Number.isFinite(unitCost)) {
-      const cost = received * unitCost
+    if (batch.received_cost_usd != null && Number.isFinite(recordedCost)) {
+      const cost = recordedCost
       totals.cost_usd += cost
       if (batch.payment_status === 'credit') totals.credit_open_usd += cost
     } else {
@@ -984,9 +988,14 @@ app.get('/suppliers/:id/purchases', async (c) => {
 // recorded" -- which honestly includes non-purchase receipts like return
 // restocks and count corrections; the data cannot tell them apart and the
 // report says what it holds rather than hiding rows).
+// Product imports create one empty placeholder lot per catalog product so
+// later stock can attach to it. Those `import:*` rows are not receipts and
+// must not become a giant "No supplier recorded" invoice merely because
+// the catalog was imported that day. Keep genuine no-supplier receipts;
+// exclude only the unmistakable all-null catalog placeholder shape.
 const STOCK_IN_REPORT_SOURCE = `
   SELECT pb.id, pb.variant_product_id, pb.batch_number, pb.lot_code, pb.received_at,
-         pb.received_quantity, pb.unit_cost_usd, pb.payment_status, pb.credit_due_date,
+         pb.received_quantity, pb.unit_cost_usd, pb.received_cost_usd, pb.payment_status, pb.credit_due_date,
          pb.received_branch_id,
          CASE
            WHEN s.id IS NOT NULL THEN 'id:' || s.id
@@ -999,6 +1008,14 @@ const STOCK_IN_REPORT_SOURCE = `
   LEFT JOIN suppliers s ON s.id = COALESCE(pb.supplier_id,
     (SELECT MIN(s2.id) FROM suppliers s2
      WHERE trim(COALESCE(pb.supplier_name, '')) <> '' AND lower(trim(s2.name)) = lower(trim(pb.supplier_name))))
+  WHERE NOT (
+    pb.batch_key LIKE 'import:%'
+    AND pb.received_quantity IS NULL
+    AND pb.supplier_id IS NULL
+    AND trim(COALESCE(pb.supplier_name, '')) = ''
+    AND pb.unit_cost_usd IS NULL
+    AND pb.received_branch_id IS NULL
+  )
 `
 
 // Builds the WHERE clause + params both endpoints share. A date bound also
@@ -1043,8 +1060,8 @@ app.get('/suppliers/reports/stock-in-invoices', async (c) => {
            COUNT(*) AS line_count,
            SUM(CASE WHEN t.received_quantity IS NOT NULL THEN t.received_quantity ELSE 0 END) AS units_received,
            SUM(CASE WHEN t.received_quantity IS NULL THEN 1 ELSE 0 END) AS lines_without_qty,
-           SUM(CASE WHEN t.received_quantity IS NOT NULL AND t.unit_cost_usd IS NOT NULL THEN t.received_quantity * t.unit_cost_usd ELSE 0 END) AS cost_usd,
-           SUM(CASE WHEN t.received_quantity IS NULL OR t.unit_cost_usd IS NULL THEN 1 ELSE 0 END) AS lines_without_cost,
+           SUM(COALESCE(t.received_cost_usd, 0)) AS cost_usd,
+           SUM(CASE WHEN t.received_cost_usd IS NULL THEN 1 ELSE 0 END) AS lines_without_cost,
            SUM(CASE WHEN t.payment_status = 'credit' THEN 1 ELSE 0 END) AS credit_lines,
            GROUP_CONCAT(DISTINCT t.received_branch_id) AS branch_ids
     FROM (${STOCK_IN_REPORT_SOURCE}) t
@@ -1067,8 +1084,8 @@ app.get('/suppliers/reports/stock-in-invoices', async (c) => {
     db.prepare(`
       SELECT COUNT(*) AS line_count,
              SUM(CASE WHEN t.received_quantity IS NOT NULL THEN t.received_quantity ELSE 0 END) AS units_received,
-             SUM(CASE WHEN t.received_quantity IS NOT NULL AND t.unit_cost_usd IS NOT NULL THEN t.received_quantity * t.unit_cost_usd ELSE 0 END) AS cost_usd,
-             SUM(CASE WHEN t.received_quantity IS NULL OR t.unit_cost_usd IS NULL THEN 1 ELSE 0 END) AS lines_without_cost,
+             SUM(COALESCE(t.received_cost_usd, 0)) AS cost_usd,
+             SUM(CASE WHEN t.received_cost_usd IS NULL THEN 1 ELSE 0 END) AS lines_without_cost,
              SUM(CASE WHEN t.payment_status = 'credit' THEN 1 ELSE 0 END) AS credit_lines
       FROM (${STOCK_IN_REPORT_SOURCE}) t ${where}
     `).get<TotalsRow>(params),
@@ -1149,14 +1166,14 @@ app.get('/suppliers/reports/stock-in-invoice-lines', async (c) => {
 
   type LineRow = {
     id: number; batch_number: number | null; lot_code: string | null; received_at: string | null
-    received_quantity: number | null; unit_cost_usd: number | null; payment_status: string | null
+    received_quantity: number | null; unit_cost_usd: number | null; received_cost_usd: number | null; payment_status: string | null
     credit_due_date: string | null; received_branch_id: number | null; received_branch_name: string | null
     product_id: number; product_name: string | null; barcode: string | null; unit: string | null; remaining_quantity: number
   }
   const [lines, countRow] = await Promise.all([
     db.prepare(`
       SELECT t.id, t.batch_number, t.lot_code, t.received_at, t.received_quantity,
-             t.unit_cost_usd, t.payment_status, t.credit_due_date, t.received_branch_id,
+             t.unit_cost_usd, t.received_cost_usd, t.payment_status, t.credit_due_date, t.received_branch_id,
              b.name AS received_branch_name,
              p.id AS product_id, p.name AS product_name, p.barcode, p.unit,
              COALESCE((SELECT SUM(bbs.quantity) FROM branch_batch_stock bbs WHERE bbs.batch_id = t.id), 0) AS remaining_quantity
@@ -1173,8 +1190,11 @@ app.get('/suppliers/reports/stock-in-invoice-lines', async (c) => {
   return c.json({
     lines: lines.map((line) => ({
       ...line,
-      line_total_usd: line.received_quantity != null && line.unit_cost_usd != null
-        ? Math.round(line.received_quantity * line.unit_cost_usd * 100) / 100
+      // 0080: the money this lot actually recorded, not quantity x a single
+      // unit cost -- a lot can hold same-day receipts bought at different
+      // prices, and the old form valued all of them at the first one.
+      line_total_usd: line.received_cost_usd != null
+        ? Math.round(line.received_cost_usd * 100) / 100
         : null,
     })),
     page,

@@ -65,6 +65,20 @@ function freshDb() {
   return { sqlite, db }
 }
 
+// Applies the chain only up to (and excluding) the named migration, so a
+// test can seed the world as it stood before that migration and then run it.
+function dbBefore(migrationFile) {
+  const sqlite = new Database(':memory:')
+  for (const file of migrationFiles) {
+    if (file === migrationFile) break
+    sqlite.exec(fs.readFileSync(path.join(migrationsDir, file), 'utf8'))
+  }
+  return sqlite
+}
+function applyMigration(sqlite, migrationFile) {
+  sqlite.exec(fs.readFileSync(path.join(migrationsDir, migrationFile), 'utf8'))
+}
+
 // The route's derived table, extracted from the shipped source so this
 // test exercises what actually runs -- if the route's SQL drifts, this
 // fails loudly instead of testing a stale copy.
@@ -80,8 +94,8 @@ const GROUPS_SQL = (where) => `
   SELECT t.supplier_key, MAX(t.supplier_display) AS supplier_name, t.received_day,
          COUNT(*) AS line_count,
          SUM(CASE WHEN t.received_quantity IS NOT NULL THEN t.received_quantity ELSE 0 END) AS units_received,
-         SUM(CASE WHEN t.received_quantity IS NOT NULL AND t.unit_cost_usd IS NOT NULL THEN t.received_quantity * t.unit_cost_usd ELSE 0 END) AS cost_usd,
-         SUM(CASE WHEN t.received_quantity IS NULL OR t.unit_cost_usd IS NULL THEN 1 ELSE 0 END) AS lines_without_cost,
+         SUM(COALESCE(t.received_cost_usd, 0)) AS cost_usd,
+         SUM(CASE WHEN t.received_cost_usd IS NULL THEN 1 ELSE 0 END) AS lines_without_cost,
          SUM(CASE WHEN t.payment_status = 'credit' THEN 1 ELSE 0 END) AS credit_lines
   FROM (${REPORT_SOURCE}) t
   ${where}
@@ -145,30 +159,115 @@ const GROUPS_SQL = (where) => `
     console.log('PASS applyUnifiedStockAdd stamps the branch; redelivery guard holds')
   }
 
+  // --- 3b. 0080: a lot records the money each receipt actually carried ------
+  // The defect this pins: batch_key is the DATE code, so two receipts of one
+  // product on one day land on the same lot. `received_quantity` accumulated
+  // both, but `unit_cost_usd` is fill-if-NULL "first attribution sticks" --
+  // so a report deriving spend as quantity x unit_cost_usd valued the second
+  // receipt at the first one's price. Measured on the migrated production
+  // data that overstated supplier purchases by $150,694 (11.5%) against the
+  // old system's own two agreeing sources.
+  {
+    const { sqlite, db } = freshDb()
+    sqlite.prepare(`INSERT INTO products (id, name, is_active) VALUES (10, 'Serum', 1)`).run()
+    const base = {
+      jobId: 'job-cost', productId: 10, productName: 'Serum',
+      branchId: 2, branchName: 'Shop', date: '08/19/2026', batchLabel: '',
+    }
+    // 4 units at $10, then 6 more of the SAME product on the SAME day at $30.
+    await stockActionCommit.applyUnifiedStockAdd(db, { ...base, rowNumber: 2, quantity: 4, costPriceUsd: 10 })
+    await stockActionCommit.applyUnifiedStockAdd(db, { ...base, rowNumber: 3, quantity: 6, costPriceUsd: 30 })
+    let row = sqlite.prepare('SELECT COUNT(*) AS lots, SUM(received_quantity) AS qty, SUM(unit_cost_usd) AS unit, SUM(received_cost_usd) AS money FROM product_batches').get()
+    assert.strictEqual(row.lots, 1, 'same product + same day is one lot')
+    assert.strictEqual(row.qty, 10, 'received_quantity still accumulates (0067 unchanged)')
+    assert.strictEqual(row.unit, 10, 'unit_cost_usd still keeps the FIRST attribution')
+    assert.strictEqual(row.money, 4 * 10 + 6 * 30, 'received_cost_usd is each receipt at its OWN cost')
+    assert.notStrictEqual(row.money, row.qty * row.unit, 'and is NOT quantity x the first unit cost -- the bug')
+
+    // A receipt with no recorded price contributes nothing rather than
+    // borrowing the lot's existing cost: 21,286 of the migrated rows had a
+    // quantity and only 6,966 had a price.
+    await stockActionCommit.applyUnifiedStockAdd(db, { ...base, rowNumber: 4, quantity: 5 })
+    row = sqlite.prepare('SELECT received_quantity AS qty, received_cost_usd AS money FROM product_batches').get()
+    assert.strictEqual(row.qty, 15, 'the unpriced receipt still counts as units')
+    assert.strictEqual(row.money, 220, 'but adds no money it never recorded')
+
+    // The manual receive path (Inventory / Receive Stock) follows the same
+    // rule -- one model, not two.
+    sqlite.prepare(`INSERT INTO products (id, name, is_active) VALUES (11, 'Toner', 1)`).run()
+    await productBatches.receiveBatchStock(db, { productId: 11, branchId: 1, quantity: 2, receivedDate: '2026-08-20', unitCostUsd: 7 })
+    await productBatches.receiveBatchStock(db, { productId: 11, branchId: 1, quantity: 3, receivedDate: '2026-08-20', unitCostUsd: 11 })
+    row = sqlite.prepare('SELECT received_quantity AS qty, unit_cost_usd AS unit, received_cost_usd AS money FROM product_batches WHERE variant_product_id = 11').get()
+    assert.strictEqual(row.qty, 5, 'manual top-up accumulates units')
+    assert.strictEqual(row.unit, 7, 'manual top-up keeps first-attribution unit cost')
+    assert.strictEqual(row.money, 2 * 7 + 3 * 11, 'manual top-up accumulates its own money')
+    console.log('PASS 0080: a lot records the money each receipt carried, not quantity x the first unit cost')
+  }
+
+  // --- 3c. 0080 backfills the real per-receipt money from the kept rows -----
+  // The stock imports keep every source row in `import_job_source_rows`, so
+  // the money each receipt actually recorded is recoverable without
+  // re-uploading anything. Checked against the pre-0080 world: two rows for
+  // one product on one day at different prices (the exact shape that made the
+  // old formula overstate), plus a third row with no price at all.
+  {
+    const sqlite = dbBefore('0080_batch_received_cost.sql')
+    sqlite.prepare(`INSERT INTO products (id, name, barcode, is_active) VALUES (10, 'Serum', 'BC-10', 1)`).run()
+    sqlite.prepare(`INSERT INTO import_jobs (id, type, status) VALUES ('job-x', 'stock_actions', 'completed')`).run()
+    sqlite.prepare(`INSERT INTO import_jobs (id, type, status) VALUES ('job-cancelled', 'stock_actions', 'cancelled')`).run()
+    // One lot, exactly as the import would have left it: quantity summed
+    // across all three receipts, unit cost stuck at the first one's.
+    sqlite.prepare(`INSERT INTO product_batches (id, variant_product_id, batch_key, lot_code, received_at, is_active, notes, batch_number, received_quantity, unit_cost_usd)
+      VALUES (900, 10, '08192026', '08192026', '2026-08-19', 1, 'Unified stock import job-x, row 2', 1, 15, 10)`).run()
+    const src = sqlite.prepare('INSERT INTO import_job_source_rows (job_id, sequence, row_number, data_json) VALUES (?, ?, ?, ?)')
+    const row = (shop, cost) => JSON.stringify({ barcode: 'BC-10', date: '08/19/2026 09:00:00', shop: String(shop), warehouse: '', cost_price: cost === null ? '' : String(cost) })
+    src.run('job-x', 1, 2, row(4, 10))
+    src.run('job-x', 2, 3, row(6, 30))
+    src.run('job-x', 3, 4, row(5, null))
+    // A cancelled job's rows must never reach the backfill.
+    src.run('job-cancelled', 1, 2, row(999, 999))
+
+    applyMigration(sqlite, '0080_batch_received_cost.sql')
+
+    const lot = sqlite.prepare('SELECT received_quantity AS qty, unit_cost_usd AS unit, received_cost_usd AS money FROM product_batches WHERE id = 900').get()
+    assert.strictEqual(lot.qty, 15, 'the backfill leaves the quantity alone')
+    assert.strictEqual(lot.unit, 10, 'and leaves unit_cost_usd alone -- it is still first attribution')
+    assert.strictEqual(lot.money, 4 * 10 + 6 * 30, 'money is each receipt at its own cost; the unpriced row adds nothing')
+    assert.notStrictEqual(lot.money, lot.qty * lot.unit, 'the pre-0080 formula would have said 150 -- that is the overstatement')
+    const leftovers = sqlite.prepare(`SELECT COUNT(*) AS n FROM sqlite_master WHERE name LIKE '_batch_cost_backfill%'`).get()
+    assert.strictEqual(leftovers.n, 0, 'the migration drops its helper tables')
+    console.log('PASS 0080 backfill recovers per-receipt money from the kept source rows')
+  }
+
   // --- 4. the report itself -------------------------------------------------
   {
     const { sqlite } = freshDb()
     sqlite.prepare(`INSERT INTO products (id, name, barcode, is_active) VALUES (101, 'Serum', 'S1', 1), (102, 'Toner', 'T1', 1)`).run()
     sqlite.prepare(`INSERT INTO suppliers (id, name) VALUES (7, 'Srey Now'), (9, 'Bong Long')`).run()
     const insert = sqlite.prepare(`
-      INSERT INTO product_batches (id, variant_product_id, batch_key, received_at, is_active, supplier_id, supplier_name, unit_cost_usd, payment_status, received_quantity, received_branch_id)
-      VALUES (@id, @productId, @batchKey, @receivedAt, 1, @supplierId, @supplierName, @unitCostUsd, @paymentStatus, @receivedQuantity, @receivedBranchId)
+      INSERT INTO product_batches (id, variant_product_id, batch_key, received_at, is_active, supplier_id, supplier_name, unit_cost_usd, payment_status, received_quantity, received_branch_id, received_cost_usd)
+      VALUES (@id, @productId, @batchKey, @receivedAt, 1, @supplierId, @supplierName, @unitCostUsd, @paymentStatus, @receivedQuantity, @receivedBranchId, @receivedCostUsd)
     `)
     // Same supplier twice on one day: once by id, once by free-typed name
     // (different case) -- the report must read them as ONE invoice.
-    insert.run({ id: 1, productId: 101, batchKey: 'K1', receivedAt: '2026-08-20', supplierId: 7, supplierName: 'Srey Now', unitCostUsd: 2.5, paymentStatus: 'paid', receivedQuantity: 10, receivedBranchId: 1 })
-    insert.run({ id: 2, productId: 102, batchKey: 'K2', receivedAt: '2026-08-20', supplierId: null, supplierName: 'srey now', unitCostUsd: 1, paymentStatus: null, receivedQuantity: 4, receivedBranchId: 1 })
+    insert.run({ id: 1, productId: 101, batchKey: 'K1', receivedAt: '2026-08-20', supplierId: 7, supplierName: 'Srey Now', unitCostUsd: 2.5, paymentStatus: 'paid', receivedQuantity: 10, receivedBranchId: 1, receivedCostUsd: 25 })
+    insert.run({ id: 2, productId: 102, batchKey: 'K2', receivedAt: '2026-08-20', supplierId: null, supplierName: 'srey now', unitCostUsd: 1, paymentStatus: null, receivedQuantity: 4, receivedBranchId: 1, receivedCostUsd: 4 })
     // Credit purchase with no recorded cost.
-    insert.run({ id: 3, productId: 101, batchKey: 'K3', receivedAt: '2026-08-21', supplierId: 9, supplierName: 'Bong Long', unitCostUsd: null, paymentStatus: 'credit', receivedQuantity: 5, receivedBranchId: 2 })
+    insert.run({ id: 3, productId: 101, batchKey: 'K3', receivedAt: '2026-08-21', supplierId: 9, supplierName: 'Bong Long', unitCostUsd: null, paymentStatus: 'credit', receivedQuantity: 5, receivedBranchId: 2, receivedCostUsd: null })
     // No supplier, no qty/cost, no branch (a catalog-import style lot).
-    insert.run({ id: 4, productId: 102, batchKey: 'K4', receivedAt: '2026-08-22', supplierId: null, supplierName: null, unitCostUsd: null, paymentStatus: null, receivedQuantity: null, receivedBranchId: null })
+    insert.run({ id: 4, productId: 102, batchKey: 'K4', receivedAt: '2026-08-22', supplierId: null, supplierName: null, unitCostUsd: null, paymentStatus: null, receivedQuantity: null, receivedBranchId: null, receivedCostUsd: null })
     // Attributed lot with NO received date (the no-date group).
-    insert.run({ id: 5, productId: 101, batchKey: 'K5', receivedAt: null, supplierId: 7, supplierName: 'Srey Now', unitCostUsd: null, paymentStatus: null, receivedQuantity: null, receivedBranchId: null })
+    insert.run({ id: 5, productId: 101, batchKey: 'K5', receivedAt: null, supplierId: 7, supplierName: 'Srey Now', unitCostUsd: null, paymentStatus: null, receivedQuantity: null, receivedBranchId: null, receivedCostUsd: null })
+    // Empty catalog placeholder: unlike K4's unknown-provenance lot, this
+    // exact import:* + all-null shape is not a receipt and must stay out of
+    // the invoice report.
+    insert.run({ id: 6, productId: 102, batchKey: 'import:102:2026-08-23T00:00:00.000Z', receivedAt: '2026-08-23', supplierId: null, supplierName: null, unitCostUsd: null, paymentStatus: null, receivedQuantity: null, receivedBranchId: null, receivedCostUsd: null })
     // Remaining stock for line 1: split across branches, sums to 7.
     sqlite.prepare(`INSERT INTO branch_batch_stock (batch_id, branch_id, quantity) VALUES (1, 1, 6), (1, 2, 1)`).run()
 
     const groups = sqlite.prepare(GROUPS_SQL('')).all()
     assert.strictEqual(groups.length, 4, 'four invoice groups: merged supplier day, credit day, none day, no-date')
+    assert.ok(!groups.some((g) => g.received_day === '2026-08-23'), 'the empty import:* catalog placeholder is not reported as a stock-in invoice')
     assert.deepStrictEqual(groups.map((g) => [g.supplier_key, g.received_day]), [
       ['none', '2026-08-22'], ['id:9', '2026-08-21'], ['id:7', '2026-08-20'], ['id:7', ''],
     ], 'ordered by received day DESC with the no-date group last')
@@ -176,7 +275,7 @@ const GROUPS_SQL = (where) => `
     assert.strictEqual(merged.line_count, 2, 'id-attributed and name-only lots of one supplier merge into one invoice')
     assert.strictEqual(merged.supplier_name, 'Srey Now', 'the suppliers-table spelling wins the display name')
     assert.strictEqual(merged.units_received, 14)
-    assert.strictEqual(Math.round(merged.cost_usd * 100) / 100, 29, 'cost = 10×2.50 + 4×1.00')
+    assert.strictEqual(Math.round(merged.cost_usd * 100) / 100, 29, 'cost = the money the two lots recorded, 25.00 + 4.00')
     const credit = groups.find((g) => g.supplier_key === 'id:9')
     assert.strictEqual(credit.credit_lines, 1)
     assert.strictEqual(credit.lines_without_cost, 1, 'a qty-without-cost line is counted, not silently 0')

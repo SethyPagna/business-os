@@ -303,7 +303,7 @@ const { hasPermission, hasAnyPermission, isAdminControlUser } = lib
   // covers it -- registering it anywhere else would leak cost data past
   // the contacts_suppliers permission.
   assert.match(contactsSrc, /app\.get\('\/suppliers\/:id\/purchases', async \(c\) => \{/, 'the supplier purchases endpoint must sit under the gated /suppliers/* prefix')
-  assert.match(contactsSrc, /pb\.received_quantity,\s*\n\s*pb\.unit_cost_usd, pb\.payment_status, pb\.credit_due_date/, 'purchases rows carry received totals + cost + credit state')
+  assert.match(contactsSrc, /pb\.received_quantity,\s*\n\s*pb\.unit_cost_usd, pb\.received_cost_usd, pb\.payment_status, pb\.credit_due_date/, 'purchases rows carry received totals + recorded cost + credit state')
   console.log('PASS suppliers section is gated (contacts_suppliers / admin), name-only list stays open, credit reminders are admin-only, purchases drill sits inside the gate')
 }
 

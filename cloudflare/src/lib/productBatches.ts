@@ -105,6 +105,22 @@ export async function attachBatchCounts(db: D1Compat, items: Array<Record<string
   for (const item of items) item.batch_count = countByProduct.get(Number(item.id)) || 0
 }
 
+// A receipt's unit cost, or null when none was recorded. Same acceptance
+// rule the insert/top-up paths already applied inline (finite and >= 0),
+// pulled out so the quantity write and the money write can never disagree
+// about whether this particular receipt carried a price.
+function unitCostForReceipt(value: unknown): number | null {
+  const cost = Number(value)
+  return Number.isFinite(cost) && cost >= 0 ? cost : null
+}
+
+// This receipt's own money: its quantity at its own unit cost, or null
+// when no price was recorded for it.
+function receiptCostUsd(unitCost: unknown, quantity: number): number | null {
+  const cost = unitCostForReceipt(unitCost)
+  return cost === null ? null : Number(quantity) * cost
+}
+
 export async function getTrackedProductIds(db: D1Compat, branchId: number | null): Promise<number[]> {
   const sql = branchId
     ? `SELECT DISTINCT pb.variant_product_id AS productId
@@ -243,8 +259,8 @@ export async function receiveBatchStock(db: D1Compat, input: {
     // later deactivated.
     const nextNumber = await nextBatchNumber(db, input.productId)
     const inserted = await db.prepare(`
-      INSERT INTO product_batches (variant_product_id, batch_key, lot_code, expiry_date, received_at, is_active, notes, batch_number, supplier_id, supplier_name, unit_cost_usd, payment_status, credit_due_date, received_quantity, received_branch_id)
-      VALUES (@productId, @batchKey, @lotCode, @expiryDate, @receivedAt, 1, @notes, @batchNumber, @supplierId, @supplierName, @unitCostUsd, @paymentStatus, @creditDueDate, @receivedQuantity, @receivedBranchId)
+      INSERT INTO product_batches (variant_product_id, batch_key, lot_code, expiry_date, received_at, is_active, notes, batch_number, supplier_id, supplier_name, unit_cost_usd, payment_status, credit_due_date, received_quantity, received_branch_id, received_cost_usd)
+      VALUES (@productId, @batchKey, @lotCode, @expiryDate, @receivedAt, 1, @notes, @batchNumber, @supplierId, @supplierName, @unitCostUsd, @paymentStatus, @creditDueDate, @receivedQuantity, @receivedBranchId, @receivedCostUsd)
     `).run({
       productId: input.productId,
       batchKey,
@@ -260,6 +276,10 @@ export async function receiveBatchStock(db: D1Compat, input: {
       creditDueDate: input.paymentStatus === 'credit' ? (input.creditDueDate || null) : null,
       receivedQuantity: input.quantity,
       receivedBranchId: input.branchId,
+      // 0080: the money accumulates exactly like the quantity beside it.
+      // A receipt with no recorded price contributes nothing rather than
+      // borrowing whatever price the lot happens to carry.
+      receivedCostUsd: receiptCostUsd(input.unitCostUsd, input.quantity),
     })
     batchId = Number(inserted.lastInsertRowid)
     batchNumber = nextNumber
@@ -286,6 +306,17 @@ export async function receiveBatchStock(db: D1Compat, input: {
     // fill-if-NULL fields above -- every receipt into this lot counts.
     updates.push('received_quantity = COALESCE(received_quantity, 0) + @receivedQuantity')
     params.receivedQuantity = input.quantity
+    // 0080: and so does the money. `unit_cost_usd` above stays first-
+    // attribution (what a unit cost when this lot was first recorded, which
+    // is what the lot pickers show); `received_cost_usd` is what a spend
+    // report must read, because one lot can hold receipts bought at
+    // different prices -- batch_key is the date code, so a same-day
+    // re-receive tops THIS lot up rather than starting its own.
+    const receiptCost = receiptCostUsd(input.unitCostUsd, input.quantity)
+    if (receiptCost !== null) {
+      updates.push('received_cost_usd = COALESCE(received_cost_usd, 0) + @receivedCostUsd')
+      params.receivedCostUsd = receiptCost
+    }
     // Receiving branch (0070): first attribution sticks, same as supplier --
     // a lot topped up from another branch keeps the branch it first arrived
     // at; pre-0070 lots get filled by their next receipt.
