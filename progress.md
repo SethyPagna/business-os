@@ -1739,18 +1739,20 @@ other" with the Phase-Y items.*
   receipt view since B5. Non-compact configs preview the single full receipt
   unchanged.
 - [~] Z5. **Global UI pass: contrast + button colors + hamburger menu.**
-  **PART 1 DONE (Part 440, session a8, needs deploy):** the sidebar Refresh
-  (Update) button renders BLUE and Logout (Exit) RED by default (were faint
-  gray-400, hover-only tint); the modal ✕ went from text-gray-400 (~2.5:1,
-  fails WCAG AA) to gray-600/gray-300 (legible both themes). **REMAINING,
-  needs the user's call:** (a) the hamburger menu housing Settings/Update/
-  Exit — deferred because hiding those (Settings is a primary nav item;
-  Refresh/Exit are now always-visible colored icons) behind a ☰ is a real
-  discoverability tradeoff, not a clear win; confirm WHERE the clutter is
-  (desktop footer vs mobile) and that burying them is wanted before building.
-  (b) currency-symbol contrast — scattered across many files incl. peer POS
-  lanes; needs a coordinated sweep. (c) "Receipt Settings moved into main
-  Settings" — a larger IA change, its own unit.
+  **PART 1 DONE (Part 440):** the sidebar Refresh (Update) button renders BLUE
+  and Logout (Exit) RED by default (were faint gray-400, hover-only tint); the
+  modal ✕ went from text-gray-400 (~2.5:1, fails WCAG AA) to gray-600/gray-300
+  (legible both themes). **PART 2 DONE (Part 446, session a8, needs deploy;
+  user picked "desktop"):** the two loose footer icons are replaced by a
+  single ☰ that opens an upward popover with Settings / Update (blue) / Exit
+  (red); transparent-backdrop close (mobile-More pattern); Settings stays in
+  the main nav too (not removed). tsc + build + langKeyIntegrity green; live
+  click-through deferred (peer owns the shared 8787 dev server). **REMAINING:**
+  (a) currency-symbol contrast — scattered across many files incl. peer POS
+  lanes; needs a coordinated sweep. (b) "Receipt Settings moved into main
+  Settings" — a larger IA change, its own unit. (c) whether to REMOVE Settings
+  from the main nav (leaving it only in the ☰) — a discoverability call for
+  the user.
 - [~] Z6. **OTP enable broken + buried under the profile page — HIGH
   priority.** **Layering FIXED (Part 426, needs deploy):** the OTP dialog
   rendered inline inside UserProfileModal — a DOM child of its tree,

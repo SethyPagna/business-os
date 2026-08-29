@@ -11286,3 +11286,57 @@ line changed; zero product code, fully disjoint from every active lane
 reserved after re-checking max = 444.
 
 **Needs deploy.** None — tests/CI only.
+
+## Part 446 (Aug 29 2026, session business-os-v1-a8) — Z5 part 2: desktop sidebar hamburger (☰) housing Settings / Update / Exit
+
+**The user picked "desktop":** the clutter to consolidate is the desktop
+sidebar *footer*, which carried two loose icon buttons (Refresh and Logout)
+next to the profile pill. Part 1 (Part 440) had made those two legible by
+giving them distinct default colours (blue / red); this part removes them from
+the footer entirely and folds them into one control.
+
+**One ☰ button, an upward popover.** The footer now shows a single `Menu`
+(lucide) icon button. Clicking it toggles `sysMenuOpen` and opens an
+`absolute bottom-full right-0 mb-2 w-44` card *above* the button (the footer
+sits at the bottom of the sidebar, so the menu has to open upward) with three
+rows:
+- **Settings** → `navigateTo('settings')` (neutral gray, a `Settings` icon).
+- **Update** → `runAppUpdate()` (blue) — the exact service-worker
+  `BUSINESS_OS_SKIP_WAITING` post + 250 ms reload the old Refresh icon did,
+  lifted verbatim into a small named helper.
+- **Exit** → `logout()` (red).
+
+The blue/red action colours from Part 1 move onto the Update/Exit rows, so the
+footer itself is now visually quiet (one neutral ☰) while the coloured
+affordances live inside the menu where they read as a labelled list.
+
+**Close-on-outside-click with no new hooks.** A transparent
+`fixed inset-0 z-40` backdrop is rendered only while open; a click anywhere
+dismisses it. The ☰ wrapper and the card are `z-50`, above the backdrop, so
+the trigger stays clickable — the same pattern the mobile "More" drawer in
+this same file already uses (no document-level listener, no `useEffect`, no
+`useRef`). Each menu item closes the menu as it fires.
+
+**Settings stays in the main nav.** The ☰ only *adds* a convenient path; it
+does not remove Settings from the primary navigation. Whether to remove it
+from the nav (leaving it solely in the ☰) is a discoverability call left to
+the user — noted on the Z5 board as remaining item (c).
+
+**Lang.** New `menu` key in en + km (used for the button `aria-label`/`title`).
+`minimized_dismiss_hint` rode along in the same lang diff — that is my own F3
+key resurfacing from the ongoing cross-session lang churn (langKeyIntegrity
+confirms every key present exactly once), benign, not a peer's. 87's
+`import_reading_file` stayed untouched in HEAD.
+
+**Verify.** `tsc --noEmit` on the frontend — 0 errors (this also confirms
+`navigateTo` and the `Settings` import are in scope for the new JSX). Full
+`vite build` — green. `langKeyIntegrity` — 3 PASS, no missing keys. A live
+click-through was not done: the shared `wrangler dev` on 8787 belongs to a
+peer session and the Browser tools in this session can't reach it; the
+backdrop+dropdown pattern is already proven by the mobile More drawer in the
+same component, and the change is a pure presentational reshuffle of existing
+handlers.
+
+Commit: `e48ce114` (Sidebar.tsx + en.json + km.json).
+
+**Needs deploy.** Frontend-only; ships on the next build.
