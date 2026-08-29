@@ -2798,7 +2798,7 @@ export default function BulkImportModal({ onClose, onDone, t, topMode = 'general
             onClick={handleImport}
             disabled={loading || !csvData?.content || blockingIssueCount > 0 || (importMode === 'replace_columns' && !selectedReplaceColumns.length)}
           >
-            {loading ? T('uploading_for_review', 'Uploading for review…') : T('upload_and_review', 'Upload & review')}
+            {loading ? T('uploading_import', 'Uploading…') : T('upload_and_import', 'Upload & import')}
           </button>
 
         </div>
