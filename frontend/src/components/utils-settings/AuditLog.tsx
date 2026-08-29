@@ -331,6 +331,14 @@ export default function AuditLog() {
   const [search, setSearch] = useState('')
   const [yearFilter, setYearFilter] = useState('all')
   const [monthFilter, setMonthFilter] = useState('all')
+  // I2 (D2-era leftover): an explicit one-row start->end date range, the same
+  // control the Products/Inventory stock ledger (StockChangeSection) uses.
+  // When set it is the AUTHORITATIVE date filter (server startDate/endDate);
+  // the year/month period chips stay as the grouping period and as the
+  // fallback date range when no explicit range is typed. Native date inputs
+  // carry ISO yyyy-mm-dd, exactly the shape the server already accepts.
+  const [rangeStart, setRangeStart] = useState('')
+  const [rangeEnd, setRangeEnd] = useState('')
   const [actionFilter, setActionFilter] = useState('all')
   // I2: filter by the record's entity ("page"/area) -- entity or legacy
   // table_name server-side, comma-joined multi-select like action/user.
@@ -449,6 +457,19 @@ export default function AuditLog() {
     }
   }, [monthFilter, yearFilter])
 
+  // Explicit range wins over the period-derived range; a lone start or end is
+  // a valid open-ended bound. Falls back to the year/month range only when
+  // neither explicit input is set, preserving the prior behaviour.
+  const effectiveDateRange = useMemo<Pick<AuditLogParams, 'startDate' | 'endDate'>>(() => {
+    if (rangeStart || rangeEnd) {
+      return {
+        startDate: rangeStart || undefined,
+        endDate: rangeEnd || undefined,
+      }
+    }
+    return auditDateRange
+  }, [auditDateRange, rangeEnd, rangeStart])
+
   const load = useCallback(async (silent = false): Promise<void> => {
     const requestId = beginTrackedRequest(loadRequestRef)
     let didLoadRows = false
@@ -469,7 +490,7 @@ export default function AuditLog() {
         action: actionFilter !== 'all' ? actionFilter : undefined,
         entity: entityFilter !== 'all' ? entityFilter : undefined,
         userId: isAdmin && userFilter !== 'all' ? userFilter : undefined,
-        ...auditDateRange,
+        ...effectiveDateRange,
       }
       const data = await withLoaderTimeout(
         () => getAuditLogsRequest(params) as Promise<AuditLogResponse | AuditLogRow[]>,
@@ -528,7 +549,7 @@ export default function AuditLog() {
       }
       if (!silent) setLoading(false)
     }
-  }, [actionFilter, auditDateRange, entityFilter, isAdmin, page, pageSize, search, userFilter])
+  }, [actionFilter, effectiveDateRange, entityFilter, isAdmin, page, pageSize, search, userFilter])
 
   useEffect(() => {
     if (!isActive) {
@@ -558,7 +579,7 @@ export default function AuditLog() {
 
   useEffect(() => {
     setPage(1)
-  }, [actionFilter, entityFilter, monthFilter, pageSize, search, userFilter, yearFilter])
+  }, [actionFilter, entityFilter, monthFilter, pageSize, rangeEnd, rangeStart, search, userFilter, yearFilter])
 
   useEffect(() => () => {
     aliveRef.current = false
@@ -849,8 +870,8 @@ export default function AuditLog() {
   ].filter(Boolean)), [actionFilter, actionOptions, auditUsers, availableYears, copy, entityFilter, entityOptions, groupMode, isAdmin, monthFilter, sortDirection, t, userFilter, yearFilter])
 
   const activeFilterCount = useMemo(
-    () => countActiveFlags([yearFilter !== 'all', monthFilter !== 'all', actionFilter !== 'all', entityFilter !== 'all', userFilter !== 'all', sortDirection !== 'desc', groupMode !== 'time']),
-    [actionFilter, entityFilter, groupMode, monthFilter, sortDirection, userFilter, yearFilter],
+    () => countActiveFlags([yearFilter !== 'all', monthFilter !== 'all', Boolean(rangeStart || rangeEnd), actionFilter !== 'all', entityFilter !== 'all', userFilter !== 'all', sortDirection !== 'desc', groupMode !== 'time']),
+    [actionFilter, entityFilter, groupMode, monthFilter, rangeEnd, rangeStart, sortDirection, userFilter, yearFilter],
   )
 
   return (
@@ -932,6 +953,8 @@ export default function AuditLog() {
             onClear={() => {
               setYearFilter('all')
               setMonthFilter('all')
+              setRangeStart('')
+              setRangeEnd('')
               setActionFilter('all')
               setEntityFilter('all')
               setUserFilter('all')
@@ -941,6 +964,39 @@ export default function AuditLog() {
             compact
             mobileIconOnly
           />
+        </div>
+
+        {/* I2: the explicit start->end date range, mirroring the D2 stock
+            ledger's control -- native date inputs (ISO in/out) joined by an
+            arrow, with an inline clear when active. Its own compact row so it
+            never crowds the search + export + filter row above. */}
+        <div className="flex flex-wrap items-center gap-2 text-xs text-gray-600 dark:text-gray-300">
+          <input
+            type="date"
+            className="input h-8 w-auto text-xs"
+            value={rangeStart}
+            max={rangeEnd || undefined}
+            onChange={(event) => setRangeStart(event.target.value)}
+            aria-label={t('start_date') || 'Start date'}
+          />
+          <span className="text-gray-400" aria-hidden="true">→</span>
+          <input
+            type="date"
+            className="input h-8 w-auto text-xs"
+            value={rangeEnd}
+            min={rangeStart || undefined}
+            onChange={(event) => setRangeEnd(event.target.value)}
+            aria-label={t('end_date') || 'End date'}
+          />
+          {rangeStart || rangeEnd ? (
+            <button
+              type="button"
+              className="font-medium text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
+              onClick={() => { setRangeStart(''); setRangeEnd('') }}
+            >
+              {t('clear') || 'Clear'}
+            </button>
+          ) : null}
         </div>
 
         {selectedLogs.length > 0 ? (
