@@ -1895,9 +1895,20 @@ other" with the Phase-Y items.*
   settings, not code, so A5/A6 could not fix them; they are also user-editable
   (intro/submissionInstructions may be customised), so NOT auto-rewritten — the
   fix is the admin editing them in Settings → Customer Portal / business identity,
-  or an explicitly-authorised one-time settings update. `publicUrl` specifically
-  may warrant a code look (it ideally follows BUSINESS_OS_PUBLIC_URL =
-  leangbeauty.com rather than a stale stored override).
+  or an explicitly-authorised one-time settings update. **`publicUrl` is now FIXED
+  in code (Part 460, `341f7fce`, needs deploy):** `portalPublicUrl` drops a stored
+  `customer_portal_public_url` override whose host is one of this shop's own
+  DEPRECATED hosts (synced with index.html's redirect map) and falls back to the
+  live `BUSINESS_OS_PUBLIC_URL`, while still honouring a genuine external funnel
+  domain; `test-portal-public-url-pure.cjs` (12 checks) pins it. **Root cause still
+  open (flagged, follow-up):** the portal editor freezes the resolved publicUrl
+  back into the stored override on every save — `CatalogPage.tsx:680` prefills the
+  `customer_portal_public_url` input with the RESOLVED `config.publicUrl` (env
+  fallback included) rather than the raw stored override, so a save promotes the
+  fallback into an explicit override. The proper cure is to expose the raw override
+  (e.g. `config.publicUrlOverride`) and prefill the editor from that so a blank
+  field stays blank; deferred here as a larger portal-editor change. The four
+  brand/text fields above remain user-side per the "no rebrand settings" instruction.
 
 ---
 
