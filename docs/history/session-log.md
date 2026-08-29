@@ -11534,7 +11534,7 @@ e4's concurrent Z1a edit to that shared file.
 **Needs deploy.** Frontend-only; ships with the in-progress production deploy or
 the next build.
 
-## Part 450 (Aug 29 2026, session business-os-v1-15) — Branches hub: "Stats & Branches" un-stacked into two top sections
+## Part 452 (Aug 29 2026, session business-os-v1-15) — Branches hub: "Stats & Branches" un-stacked into two top sections
 
 **Why.** The user, reviewing the live app, flagged that the new hub pages "are
 jumbling different sections in one single page" and asked for sections at the top
@@ -11569,8 +11569,13 @@ click-through DEFERRED — a peer owns the dev server in this checkout and start
 second one risks the node_modules-lock trap this repo has hit before; static gates
 green is the bar.
 
-**Parallel sessions.** Only BranchesHubPage.tsx changed; the peer import-backend
-lanes (importEngine / contacts / system) are fully disjoint. Part 450 after
-re-checking max = 449 (449 was taken by c1 mid-work).
+**Parallel sessions.** Only BranchesHubPage.tsx changed (code); the peer
+import-backend lanes (importEngine / contacts / system) are fully disjoint.
+**Ride-along + number de-collision:** the code commit `00a5ecc6` pathspec-committed
+the shared `session-log.md`, which at that instant also held e4's and c1's
+then-uncommitted "Part 450" doc entries — so `00a5ecc6` swept both in (content
+preserved, nothing lost). That triple-claimed Part 450; e4 renumbered to 451 and c1
+holds 450 (its code committed first), so this Branches-hub entry is renumbered
+**450 → 452** and messaged to c1/e4. Number re-checked free before this write.
 
 **Needs deploy.** Frontend-only; ships on the next build.

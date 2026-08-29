@@ -627,7 +627,7 @@ deep-linkable tabs.*
   same dist.)* **Inventory merges into Branches** as sections: "Stats & Branches" (Inventory's
   stat cards + branch list), "Movements", "RFID". Branch transfer options updated to
   everything shipped since (batch preservation, §14 details).
-- [x] E1b *(Part 450, session business-os-v1-15 — user, reviewing the live app,
+- [x] E1b *(Part 452, session business-os-v1-15 — user, reviewing the live app,
   flagged the hub pages "jumbling different sections in one single page" and asked
   for sections at the top, not sub-tabs. Audit: Sales/Settings/Review hubs already
   show one section per top chip; Branches was the sole exception — its
