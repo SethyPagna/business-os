@@ -11616,3 +11616,54 @@ backend deploy list. Part 453 taken after re-checking max = 452 (the 449/450
 three-way churn resolved: c1=450, e4=451 batch-pill, 15=452, this=453).
 
 **Needs deploy.** Frontend-only; ships on the next build.
+
+## Part 454 (Aug 29 2026, session business-os-v1-74) — POS: a committed sale no longer shows a false error; checkout guardrails
+
+**The report.** "POS shows an error but the sale still went through" — the user
+re-raised it as "make sure it doesn't allow a sale when it shows an error, on
+POS and the Sales page."
+
+**Root cause (traced through the whole chain, not guessed).** The create
+endpoint returns the SALE itself — `{ id, receiptNumber, ... }` on a fresh sale,
+`{ id, receiptNumber, duplicate }` on a client_request_id dedupe hit — and
+carries **no top-level `success` flag** (only the offline-queue path adds one;
+real server errors are thrown by `apiFetch`, which returns `res.json()` raw on
+2xx and throws on non-2xx, and `route`'s write path returns that result raw). But
+POS `handleCheckout` gated its success branch on `if (result.success)`, which is
+`undefined` on every online sale. So a committed sale fell into the ELSE branch:
+a generic error toast, no receipt queued, the order left open — while the sale
+had in fact landed. Retrying hit the same branch (the dedupe response also lacks
+`success`), so the cashier was stuck while sales piled up server-side (deduped to
+one). The check has been wrong since the original POS.jsx; the server route was
+later rewritten without a `success` field, and nothing caught the contract drift
+because `handleCheckout` isn't unit-tested.
+
+**Fix (pure, tested helpers in posCore.ts).**
+- `isSaleRecorded(result)`: recorded = an `id` (or explicit `success`) and no
+  `error`. Fixes the false-error direction.
+- `findCheckoutBlocker(cart, { totalUsd })`: a hard pre-submit guardrail
+  rejecting a non-positive/NaN quantity, a negative/NaN price, or a negative/NaN
+  grand total — a `$0` line stays allowed (giveaway / fully-discounted promo).
+  Closes the other direction: an errored checkout never records a sale.
+Both wired into `handleCheckout`; behavioral + wiring tests added to
+posCore.test.ts (which also gained a final failure gate — the old one sat
+mid-file so later tests never affected the exit code). The **Sales page needed no
+change**: `handleStatusChange` already uses the throw-on-error pattern (success =
+no throw), so it never misreads a `success` field.
+
+**Verified live** in the local app (after `migrate:local` — the local D1 was
+behind and missing `0075_sale_items_damaged_lot.sql`, which surfaced first as a
+genuine "no column damaged_lot_id" error that CORRECTLY blocked the sale and left
+the cart intact — the guardrail direction working). Post-migration, an
+awaiting-payment sale completed cleanly: receipt preview shown
+(RCP-1787970435203), cart cleared, **no error toast**, and `GET /api/sales`
+confirmed the sale landed (count 2 → 3, status awaiting_payment, $10.50). Before
+the fix this exact flow showed a false "Error" and left the cart full.
+
+Commit: `d66bb94b` (POS.tsx + posCore.ts + posCore.test.ts). tsc clean; posCore
+suite green.
+
+**Needs deploy.** Frontend-only. NOTE: this fix is newer than the deploy that was
+in flight at time of writing (target 7565fed7, two commits behind HEAD) — flagged
+to the deploying session to fast-forward or redeploy so production actually gets
+the sell-path fix.
