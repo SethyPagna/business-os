@@ -12164,3 +12164,35 @@ dirty from another session's lang sweep, and km needs Khmer), so the copy update
 was deferred rather than fight the peer-hot files for a text tweak.
 
 **Needs deploy** (frontend-only).
+
+## Part 468 (Aug 29 2026, session business-os-v1-e4) — SectionCard gains a nested "mini-section" variant; applied to the Suppliers Stock-In Invoices
+
+**User directive (Aug 29):** "can do sections mini sections in the sections" — the
+shared section system should support sub-sections nested inside a section, and (from
+the prior screenshot batch) the Suppliers "Stock-In Invoices" reads as too prominent
+a full section ("supplier invoice in sections instead").
+
+**Capability (shared/SectionCard.tsx).** Added an additive `nested?: boolean` prop
+(default false, so every existing SectionCard is byte-unchanged). When set it renders
+a lighter, smaller "mini-section" — same color-by-kind accent and fold behaviour, but
+a 2px accent (was 3px), `rounded-lg` on a subtle `bg-gray-50/60` surface, `px-2.5
+py-1.5` header, `text-xs` title, smaller dot/chevron/back-button — so a sub-section
+nested in a parent section's body reads as clearly subordinate. The two weights are
+one styles object switched on `nested`, keeping a single source of truth for the
+palette and fold logic.
+
+**First use (contacts/SuppliersTab.tsx).** The Stock-In Invoices report, which sat
+as a full `kind="reports"` section above the supplier list, now passes `nested` — it
+becomes a quiet mini-section instead of competing with the list, directly answering
+the "supplier invoice in sections" complaint. Same title/subtitle/fold/storageKey.
+
+**Verification.** tsc + check:source (405 files) + vite build all green. SectionCard
+is a shared component; the prop is opt-in so no other caller changed. Could not
+live-repro (admin login / peer dev server) — a deterministic style variant.
+
+**Parallel sessions.** SectionCard.tsx (shared, additive) + SuppliersTab.tsx (a
+contacts-lane file, but currently clean and this is a one-line user-directed change);
+neither in a peer's dirty set. Messaging the contacts session as a courtesy. Part 468
+taken after re-checking max = 467.
+
+**Needs deploy.** Frontend-only; ships on the next build.

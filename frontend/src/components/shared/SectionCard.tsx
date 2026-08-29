@@ -33,6 +33,11 @@ type SectionCardProps = {
   backLabel?: string
   /** Foldable by default. Pass false for a section that must always show. */
   collapsible?: boolean
+  /** Mini "section within a section": a lighter, smaller, indented variant
+   *  for sub-sections nested inside a parent SectionCard's body (user, Aug 29:
+   *  "sections, mini sections in the sections"). Same color-by-kind accent and
+   *  fold behaviour, just quieter chrome so the hierarchy reads at a glance. */
+  nested?: boolean
   defaultOpen?: boolean
   /** Persist the fold state per user under this key (localStorage; safe to
    *  omit for ephemeral surfaces like modals). */
@@ -68,6 +73,7 @@ export default function SectionCard({
   onBack,
   backLabel,
   collapsible = true,
+  nested = false,
   defaultOpen = true,
   storageKey,
   className = '',
@@ -83,23 +89,54 @@ export default function SectionCard({
     })
   }
 
+  // Two visual weights from one component: a full page-level section, and a
+  // mini sub-section (`nested`) meant to sit inside another section's body.
+  // The mini variant keeps the same color-by-kind accent and fold behaviour
+  // but drops to a lighter surface, thinner accent and smaller type so the
+  // parent/child hierarchy is obvious.
+  const s = nested
+    ? {
+        section: 'overflow-hidden rounded-lg border border-gray-200/80 bg-gray-50/60 dark:border-gray-700/60 dark:bg-gray-900/30',
+        accent: '2px',
+        header: 'flex min-w-0 items-center gap-2 px-2.5 py-1.5',
+        backBtn: 'flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-md text-gray-500 hover:bg-gray-100 hover:text-gray-800 dark:text-gray-400 dark:hover:bg-gray-700 dark:hover:text-gray-100',
+        backIcon: 'h-3.5 w-3.5',
+        dot: 'h-2 w-2 flex-shrink-0 rounded-sm',
+        title: 'block truncate text-xs font-semibold text-gray-800 dark:text-gray-100',
+        subtitle: 'block truncate text-[10px] text-gray-400',
+        chevron: 'h-3.5 w-3.5 flex-shrink-0 text-gray-400 transition-transform',
+        body: 'border-t border-gray-100/70 dark:border-gray-700/40',
+      }
+    : {
+        section: 'overflow-hidden rounded-xl border border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800',
+        accent: '3px',
+        header: 'flex min-w-0 items-center gap-2 px-3 py-2',
+        backBtn: 'flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-lg text-gray-500 hover:bg-gray-100 hover:text-gray-800 dark:text-gray-400 dark:hover:bg-gray-700 dark:hover:text-gray-100',
+        backIcon: 'h-4 w-4',
+        dot: 'h-2.5 w-2.5 flex-shrink-0 rounded-sm',
+        title: 'block truncate text-sm font-semibold text-gray-900 dark:text-white',
+        subtitle: 'block truncate text-[11px] text-gray-400',
+        chevron: 'h-4 w-4 flex-shrink-0 text-gray-400 transition-transform',
+        body: 'border-t border-gray-100 dark:border-gray-700/60',
+      }
+
   return (
     <section
-      className={`overflow-hidden rounded-xl border border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800 ${className}`}
-      style={{ borderLeft: `3px solid ${color}` }}
+      className={`${s.section} ${className}`}
+      style={{ borderLeft: `${s.accent} solid ${color}` }}
     >
-      <div className="flex min-w-0 items-center gap-2 px-3 py-2">
+      <div className={s.header}>
         {onBack ? (
           <button
             type="button"
             onClick={onBack}
             aria-label={backLabel || 'Back'}
-            className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-lg text-gray-500 hover:bg-gray-100 hover:text-gray-800 dark:text-gray-400 dark:hover:bg-gray-700 dark:hover:text-gray-100"
+            className={s.backBtn}
           >
-            <ArrowLeft className="h-4 w-4" />
+            <ArrowLeft className={s.backIcon} />
           </button>
         ) : (
-          <span className="h-2.5 w-2.5 flex-shrink-0 rounded-sm" style={{ backgroundColor: color }} aria-hidden="true" />
+          <span className={s.dot} style={{ backgroundColor: color }} aria-hidden="true" />
         )}
         {/* The whole title area toggles the fold, but the header's action
             controls stay SEPARATE buttons — same rule as the stat cards
@@ -112,16 +149,16 @@ export default function SectionCard({
           className="flex min-w-0 flex-1 items-center gap-2 text-left"
         >
           <span className="min-w-0">
-            <span className="block truncate text-sm font-semibold text-gray-900 dark:text-white">{title}</span>
-            {subtitle ? <span className="block truncate text-[11px] text-gray-400">{subtitle}</span> : null}
+            <span className={s.title}>{title}</span>
+            {subtitle ? <span className={s.subtitle}>{subtitle}</span> : null}
           </span>
           {collapsible ? (
-            <ChevronDown className={`h-4 w-4 flex-shrink-0 text-gray-400 transition-transform ${open ? '' : '-rotate-90'}`} />
+            <ChevronDown className={`${s.chevron} ${open ? '' : '-rotate-90'}`} />
           ) : null}
         </button>
         {actions ? <div className="flex flex-shrink-0 flex-wrap items-center justify-end gap-1">{actions}</div> : null}
       </div>
-      {open ? <div className="border-t border-gray-100 dark:border-gray-700/60">{children}</div> : null}
+      {open ? <div className={s.body}>{children}</div> : null}
     </section>
   )
 }

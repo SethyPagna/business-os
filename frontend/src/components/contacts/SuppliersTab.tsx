@@ -1012,6 +1012,7 @@ function SuppliersTab({ t, notify, active = true, initialSearch }: SuppliersTabP
           only loads when opened. */}
       <SectionCard
         kind="reports"
+        nested
         title={tr('stock_in_invoices', 'Stock-In Invoices', 'វិក្កយបត្រស្តុកចូល')}
         subtitle={tr('stock_in_invoices_hint', 'Every lot received into stock, grouped by supplier and received date', 'គ្រប់ឡុតដែលទទួលចូលស្តុក ដាក់ជាក្រុមតាមអ្នកផ្គត់ផ្គង់ និងថ្ងៃទទួល')}
         storageKey="suppliers_stock_in_invoices"
