@@ -261,314 +261,246 @@ export default function ProductDetailModal({
           </button>
         </div>
 
-        {/* Details/Actions split applied at every width now, not just
-            `lg:` -- per the Aug 22 ask: "the mobile click to view detail is
-            split half vertical, one side details the other buttons", same
-            grid-cols-2 pattern this already used above `lg`, just without
-            the `lg:` gate. Replaces the separate icon-grid action bar that
-            used to run along the bottom on narrower screens (see the
-            deleted block below this div) -- actions live in the same
-            right-hand column at every size now, so there's no longer a
-            second, differently-shaped action surface to keep in sync. */}
-        {/* The actions column is sized to its content rather than taking
-            half the width. grid-cols-2 gave two or three buttons the same
-            room as every product detail combined, which is what made them
-            read as over-wide with too much space around them. */}
-        <div className="grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)_auto]">
-          <div className="min-h-0 space-y-2.5 overflow-auto p-4">
-          {/* Short label:value rows (Barcode/Supplier/Stock/Expiry) laid
-              out 2-per-row instead of one full-width row each -- per the
-              explicit "make it as column" ask: a product with every one of
-              these fields set used to run 7 full-width rows deep before
-              even reaching Description/pricing, "crushing" everything
-              below it further down the sheet. gap-x-3/gap-y-1.5 keeps the
-              two columns from touching; min-w-0 on Row itself (above) lets
-              a long value truncate/wrap inside its own column instead of
-              forcing the grid wider.
-              RESPONSIVENESS FIX (Aug 22 2026): this used to be a plain
-              (non-responsive) 2-column grid on the reasoning that these
-              are short chip/badge-style values that "fit comfortably at
-              the narrowest phone width" -- true only when this pane was
-              still a full-width bottom sheet below `sm`. It no longer is:
-              this pane is now the LEFT HALF of a grid-cols-2 details/
-              actions split active at every width (see that split's own
-              comment above), so a plain 2-col grid in here means four
-              columns' worth of squeeze at phone width (~375px sheet ->
-              ~180px half, minus padding, split again -> under 90px per
-              sub-column -- not enough room for an 80px label plus any
-              value, which is exactly the cramped title/label positioning
-              this was reported to have). Single column below `sm`, two
-              columns from `sm` up once there's actually a wide-enough
-              dialog to fit them. Description right below stays full-width
-              on every size since free text doesn't share that same
-              "always short" property. Category and Brand no longer have
-              rows here -- both moved up to the header line next to the
-              title (see above). Unit deliberately has no row of its own
-              here -- it's already shown right next to the Stock quantity
-              below, and a second, separate "Unit" row just repeated the
-              same value a second time for no reason. */}
-          <div className="grid grid-cols-1 gap-y-1.5 sm:grid-cols-2 sm:gap-x-3">
-            {p.supplier ? <Row label={T('label_supplier', 'Supplier')}>{p.supplier}</Row> : null}
-            <Row label={T('label_stock', 'Stock')}>
-              <strong className="text-gray-900 dark:text-white">{stockQuantity}</strong>
-              {p.unit ? (
-                unitColor ? (
-                  <span className="ml-2 inline-flex rounded-full px-2 py-0.5 text-xs font-semibold" style={{ background: unitColor, color: getContrastingTextColor(unitColor) }}>
-                    {p.unit}
-                  </span>
-                ) : (
-                  <span className="ml-1">{p.unit}</span>
-                )
-              ) : null}
-            </Row>
-            {expiryDate ? (
-              <Row label={T('product_expiry_date', 'Expiry')}>
-                <span className={expiryDaysLeft != null && expiryDaysLeft < 0 ? 'text-red-600 dark:text-red-300' : 'text-amber-600 dark:text-amber-300'}>
-                  {expiryDate}
-                  {expiryDaysLeft != null ? (
-                    <span className="ml-2 text-xs">
-                      {expiryDaysLeft < 0
-                        ? `${T('expired', 'Expired')} ${Math.abs(expiryDaysLeft)}d`
-                        : `${expiryDaysLeft}d`}
-                    </span>
+        {/* Aug 29 rework: the actions no longer occupy a right-hand column.
+            They sit in ONE row along the bottom (see the footer below), which
+            frees the whole pane for the product data. The old details/actions
+            vertical split (with its slate-filled actions aside and heavy
+            border) is replaced by two DATA mini-sections split by a THIN
+            same-background divider on wide screens; on phones the two
+            mini-sections stack into one full-width column so the label:value
+            rows aren't crushed into a ~180px half the way the old split
+            crushed them. The report block spans the full pane beneath both
+            mini-sections. */}
+        <div className="flex min-h-0 flex-1 flex-col">
+          <div className="min-h-0 flex-1 overflow-auto p-4">
+            <div className="grid grid-cols-1 gap-y-2.5 sm:grid-cols-2 sm:gap-x-5 sm:divide-x sm:divide-gray-100 dark:sm:divide-gray-700">
+              {/* Left mini-section: the compact identity + stock facts. */}
+              <div className="min-w-0 space-y-2.5 sm:pr-5">
+                <div className="grid grid-cols-1 gap-y-1.5">
+                  {p.supplier ? <Row label={T('label_supplier', 'Supplier')}>{p.supplier}</Row> : null}
+                  <Row label={T('label_stock', 'Stock')}>
+                    <strong className="text-gray-900 dark:text-white">{stockQuantity}</strong>
+                    {p.unit ? (
+                      unitColor ? (
+                        <span className="ml-2 inline-flex rounded-full px-2 py-0.5 text-xs font-semibold" style={{ background: unitColor, color: getContrastingTextColor(unitColor) }}>
+                          {p.unit}
+                        </span>
+                      ) : (
+                        <span className="ml-1">{p.unit}</span>
+                      )
+                    ) : null}
+                  </Row>
+                  {expiryDate ? (
+                    <Row label={T('product_expiry_date', 'Expiry')}>
+                      <span className={expiryDaysLeft != null && expiryDaysLeft < 0 ? 'text-red-600 dark:text-red-300' : 'text-amber-600 dark:text-amber-300'}>
+                        {expiryDate}
+                        {expiryDaysLeft != null ? (
+                          <span className="ml-2 text-xs">
+                            {expiryDaysLeft < 0
+                              ? `${T('expired', 'Expired')} ${Math.abs(expiryDaysLeft)}d`
+                              : `${expiryDaysLeft}d`}
+                          </span>
+                        ) : null}
+                      </span>
+                    </Row>
                   ) : null}
-                </span>
-              </Row>
-            ) : null}
-          </div>
-          {/* Description kept full-width, outside the 2-column grid above
-              -- free-text can run much longer than a category/unit chip
-              and would force the grid's row height (or wrap awkwardly
-              against a short neighbor) if it shared a row with one.
-              Aug 23 rework: truncates with "..." instead of dumping the
-              raw blob inline, and is clickable -- opens
-              ProductDescriptionDetailModal.tsx, the admin-side
-              counterpart to the public-portal Details flyout, showing
-              the same parsed Features/Benefits/Ingredients/Caution
-              breakdown a shopper sees rather than plain text. */}
-          {p.description ? (
-            <div className="flex min-w-0 gap-2">
-              <span className="w-20 flex-shrink-0 pt-0.5 text-xs text-gray-400">{T('label_description', 'Description')}</span>
-              <button
-                type="button"
-                onClick={() => setDescriptionDetailOpen(true)}
-                className="min-w-0 flex-1 truncate rounded text-left text-sm text-gray-800 underline-offset-2 hover:text-blue-700 hover:underline dark:text-gray-200 dark:hover:text-blue-300"
-                title={T('view_full_description', 'View full description')}
-              >
-                {p.description.length > DESCRIPTION_PREVIEW_LENGTH
-                  ? `${p.description.slice(0, DESCRIPTION_PREVIEW_LENGTH).trimEnd()}...`
-                  : p.description}
-              </button>
-            </div>
-          ) : null}
+                </div>
 
-          {/* Margin used to have its own grid column next to Cost, putting
-              it in a third place instead of alongside the two prices it's
-              derived from -- per the Aug 22 2026 ask, folded into the
-              Selling Price row -- and has since been moved back out to its
-              own row again, see the comment below Selling Price. Cost
-              kept as its own full-width row, same treatment as Selling
-              Price below it, instead of the old 2-column grid pairing
-              (which only had one real member left once Margin moved). */}
-          <div className="border-t border-gray-100 pt-2 dark:border-gray-700">
-            <Row label={T('label_cost', 'Cost')}>
-              <span className="text-red-600">{fmtUSD(purchaseUsd)}</span>
-              {purchaseKhr > 0 ? <span className="ml-2 text-xs text-gray-400">{fmtKHR(purchaseKhr)}</span> : null}
-            </Row>
-          </div>
-          {/* Selling Price pulled out of the 2-column grid into its own
-              full-width row -- it used to share a row with Cost, making it
-              just another column instead of the one price a shopper/staffer
-              actually cares about scanning for first. Full-width also gives
-              it room to sit directly above Special Price/Discounts (which
-              are its variants), instead of those wrapping onto a
-              differently-paired row below depending on which of them are
-              present. Margin (cost vs. this price) now rides along inline
-              here rather than its own row. */}
-          <Row label={T('label_selling_price', 'Selling Price')}>
-            <span className="text-base font-semibold text-green-600">{fmtUSD(sellingUsd)}</span>
-            {sellingKhr > 0 ? <span className="ml-2 text-xs text-gray-400">{fmtKHR(sellingKhr)}</span> : null}
-          </Row>
-          {/* Margin is its own row again (Aug 25 2026: "margin should be
-              another row instead of continuing from selling price"), which
-              REVERSES the Aug 22 change that folded it inline. Inline, it
-              ran on from the price as a parenthetical and the two figures
-              read as one wrapping sentence -- particularly once a KHR price
-              sat between them. As a labelled row it lines up with Cost and
-              Selling Price above it, so all three read down the same
-              column. */}
-          {purchaseUsd > 0 && sellingUsd > 0 ? (
-            <Row label={T('label_margin', 'Margin')}>
-              <span className={`font-medium ${marginUsd >= 0 ? 'text-blue-600' : 'text-yellow-600'}`}>
-                {fmtUSD(marginUsd)}
-              </span>
-              <span className="ml-2 text-xs text-gray-400">{marginPct.toFixed(1)}%</span>
-            </Row>
-          ) : null}
-          {(specialUsd > 0 || specialKhr > 0) ? (
-            <Row label={T('special_price', 'VIP Price')}>
-              <span className="text-blue-600">{fmtUSD(specialUsd || sellingUsd)}</span>
-              {(specialKhr > 0 || sellingKhr > 0) ? <span className="ml-2 text-xs text-gray-400">{fmtKHR(specialKhr || sellingKhr)}</span> : null}
-            </Row>
-          ) : null}
-          {promotion.active ? (
-            <Row label={T('product_discount', 'Discounts')}>
-              <span className="text-rose-600 dark:text-rose-300">{fmtUSD(promotion.applied_price_usd)}</span>
-              {promotion.applied_price_khr > 0 ? <span className="ml-2 text-xs text-gray-400">{fmtKHR(promotion.applied_price_khr)}</span> : null}
-              <span className="ml-2 rounded-full px-2 py-0.5 text-xs font-semibold text-white" style={{ backgroundColor: p.discount_badge_color || '#e11d48' }}>
-                {p.discount_label || `${promotion.percent_off || 0}%`}
-              </span>
-            </Row>
-          ) : null}
+                <Row label={T('status', 'Status')}>
+                  {stockQuantity <= outOfStockThreshold ? (
+                    <span className="badge-red">{T('out_of_stock', 'Out of stock')}</span>
+                  ) : stockQuantity <= lowStockThreshold ? (
+                    <span className="badge-yellow">{T('low_stock', 'Low stock')}</span>
+                  ) : (
+                    <span className="badge-green">{T('in_stock', 'In stock')}</span>
+                  )}
+                </Row>
 
-          {(p.branch_stock || []).length > 0 ? (
-            <div className="border-t border-gray-100 pt-2 dark:border-gray-700">
-              <div className="mb-1.5 text-xs text-gray-400">{T('label_branches', 'Branch Stock')}</div>
-              <div className="flex flex-wrap gap-1.5">
-                {(p.branch_stock || []).map((bs) => {
-                  const branchQuantity = Number(bs.quantity || 0)
-                  return (
-                  <span
-                    key={bs.branch_id || bs.branch_name}
-                    className={`rounded-full px-2 py-0.5 text-xs ${
-                      branchQuantity > 0
-                        ? 'bg-green-100 text-green-700 dark:bg-green-900/30'
-                        : 'bg-gray-100 text-gray-400 dark:bg-gray-700'
-                    }`}
+                {(p.branch_stock || []).length > 0 ? (
+                  <div className="border-t border-gray-100 pt-2 dark:border-gray-700">
+                    <div className="mb-1.5 text-xs text-gray-400">{T('label_branches', 'Branch Stock')}</div>
+                    <div className="flex flex-wrap gap-1.5">
+                      {(p.branch_stock || []).map((bs) => {
+                        const branchQuantity = Number(bs.quantity || 0)
+                        return (
+                        <span
+                          key={bs.branch_id || bs.branch_name}
+                          className={`rounded-full px-2 py-0.5 text-xs ${
+                            branchQuantity > 0
+                              ? 'bg-green-100 text-green-700 dark:bg-green-900/30'
+                              : 'bg-gray-100 text-gray-400 dark:bg-gray-700'
+                          }`}
+                        >
+                          {bs.branch_name}: {branchQuantity}
+                        </span>
+                        )
+                      })}
+                    </div>
+                  </div>
+                ) : null}
+
+                {batchCount ? (
+                  <div className="border-t border-gray-100 pt-2 dark:border-gray-700">
+                    {/* Click-to-view row, same pattern as Inventory's own
+                        ProductDetailModal "View stock history" row -- a summary
+                        count plus a chevron that opens the full live-fetched,
+                        per-branch batch editor (ManageBatchesModal), rather than
+                        rendering every batch inline in this already-dense pane. */}
+                    <button
+                      type="button"
+                      onClick={onManageBatches}
+                      disabled={!onManageBatches}
+                      className="flex w-full items-center justify-between gap-2 rounded-lg bg-amber-50/70 px-2.5 py-1.5 text-left text-xs text-amber-700 transition-colors hover:bg-amber-50 disabled:cursor-default disabled:opacity-100 dark:bg-amber-950/20 dark:text-amber-200 dark:hover:bg-amber-950/30"
+                    >
+                      <span className="flex items-center gap-1.5">
+                        <Layers className="h-3.5 w-3.5" />
+                        {T('batches', 'Batches')} <span className="text-amber-500/80 dark:text-amber-300/70">({batchCount})</span>
+                      </span>
+                      {onManageBatches ? <ChevronRight className="h-3.5 w-3.5 flex-shrink-0" /> : null}
+                    </button>
+                  </div>
+                ) : null}
+
+                {/* "Added" (the product record's created_at) replaced with
+                    "Batch" -- the most recently received batch's date, which
+                    is what actually changes as stock gets restocked over time;
+                    when a product was first created is far less useful to see
+                    at a glance than when its stock last came in. Falls back to
+                    created_at only if no batch has a received_at set yet. */}
+                {formattedBatchDate ? (
+                  <button
+                    type="button"
+                    onClick={onManageBatches}
+                    disabled={!onManageBatches}
+                    className="flex w-full min-w-0 items-center justify-between gap-2 rounded-lg px-0 py-0.5 text-left transition-colors hover:bg-gray-50 disabled:cursor-default disabled:hover:bg-transparent dark:hover:bg-gray-700/40"
                   >
-                    {bs.branch_name}: {branchQuantity}
-                  </span>
-                  )
-                })}
+                    <span className="flex min-w-0 gap-2">
+                      <span className="w-20 flex-shrink-0 pt-0.5 text-xs text-gray-400">{T('label_batch', 'Batch')}</span>
+                      <span className="min-w-0 flex-1 text-sm text-gray-800 dark:text-gray-200">
+                        {formattedBatchDate}
+                        {latestBatchLotCode ? <span className="ml-2 text-xs text-gray-400" title={latestBatchLotCode}>{latestBatchLotCode}</span> : null}
+                      </span>
+                    </span>
+                    {onManageBatches ? <ChevronRight className="h-3.5 w-3.5 flex-shrink-0 text-gray-300" /> : null}
+                  </button>
+                ) : null}
+              </div>
+
+              {/* Right mini-section: description + the pricing stack. */}
+              <div className="min-w-0 space-y-2.5 border-t border-gray-100 pt-2.5 dark:border-gray-700 sm:border-t-0 sm:pl-5 sm:pt-0">
+                {/* Description truncates with "..." and opens
+                    ProductDescriptionDetailModal.tsx, the admin-side
+                    counterpart to the public-portal Details flyout, showing
+                    the same parsed Features/Benefits/Ingredients/Caution
+                    breakdown a shopper sees rather than plain text. */}
+                {p.description ? (
+                  <div className="flex min-w-0 gap-2">
+                    <span className="w-20 flex-shrink-0 pt-0.5 text-xs text-gray-400">{T('label_description', 'Description')}</span>
+                    <button
+                      type="button"
+                      onClick={() => setDescriptionDetailOpen(true)}
+                      className="min-w-0 flex-1 truncate rounded text-left text-sm text-gray-800 underline-offset-2 hover:text-blue-700 hover:underline dark:text-gray-200 dark:hover:text-blue-300"
+                      title={T('view_full_description', 'View full description')}
+                    >
+                      {p.description.length > DESCRIPTION_PREVIEW_LENGTH
+                        ? `${p.description.slice(0, DESCRIPTION_PREVIEW_LENGTH).trimEnd()}...`
+                        : p.description}
+                    </button>
+                  </div>
+                ) : null}
+
+                <Row label={T('label_cost', 'Cost')}>
+                  <span className="text-red-600">{fmtUSD(purchaseUsd)}</span>
+                  {purchaseKhr > 0 ? <span className="ml-2 text-xs text-gray-400">{fmtKHR(purchaseKhr)}</span> : null}
+                </Row>
+                <Row label={T('label_selling_price', 'Selling Price')}>
+                  <span className="text-base font-semibold text-green-600">{fmtUSD(sellingUsd)}</span>
+                  {sellingKhr > 0 ? <span className="ml-2 text-xs text-gray-400">{fmtKHR(sellingKhr)}</span> : null}
+                </Row>
+                {purchaseUsd > 0 && sellingUsd > 0 ? (
+                  <Row label={T('label_margin', 'Margin')}>
+                    <span className={`font-medium ${marginUsd >= 0 ? 'text-blue-600' : 'text-yellow-600'}`}>
+                      {fmtUSD(marginUsd)}
+                    </span>
+                    <span className="ml-2 text-xs text-gray-400">{marginPct.toFixed(1)}%</span>
+                  </Row>
+                ) : null}
+                {(specialUsd > 0 || specialKhr > 0) ? (
+                  <Row label={T('special_price', 'VIP Price')}>
+                    <span className="text-blue-600">{fmtUSD(specialUsd || sellingUsd)}</span>
+                    {(specialKhr > 0 || sellingKhr > 0) ? <span className="ml-2 text-xs text-gray-400">{fmtKHR(specialKhr || sellingKhr)}</span> : null}
+                  </Row>
+                ) : null}
+                {promotion.active ? (
+                  <Row label={T('product_discount', 'Discounts')}>
+                    <span className="text-rose-600 dark:text-rose-300">{fmtUSD(promotion.applied_price_usd)}</span>
+                    {promotion.applied_price_khr > 0 ? <span className="ml-2 text-xs text-gray-400">{fmtKHR(promotion.applied_price_khr)}</span> : null}
+                    <span className="ml-2 rounded-full px-2 py-0.5 text-xs font-semibold text-white" style={{ backgroundColor: p.discount_badge_color || '#e11d48' }}>
+                      {p.discount_label || `${promotion.percent_off || 0}%`}
+                    </span>
+                  </Row>
+                ) : null}
               </div>
             </div>
-          ) : null}
 
-          {batchCount ? (
-            <div className="border-t border-gray-100 pt-2 dark:border-gray-700">
-              {/* Click-to-view row, same pattern as Inventory's own
-                  ProductDetailModal "View stock history" row -- a summary
-                  count plus a chevron that opens the full live-fetched,
-                  per-branch batch editor (ManageBatchesModal), rather than
-                  rendering every batch inline in this already-dense pane. */}
-              <button
-                type="button"
-                onClick={onManageBatches}
-                disabled={!onManageBatches}
-                className="flex w-full items-center justify-between gap-2 rounded-lg bg-amber-50/70 px-2.5 py-1.5 text-left text-xs text-amber-700 transition-colors hover:bg-amber-50 disabled:cursor-default disabled:opacity-100 dark:bg-amber-950/20 dark:text-amber-200 dark:hover:bg-amber-950/30"
-              >
-                <span className="flex items-center gap-1.5">
-                  <Layers className="h-3.5 w-3.5" />
-                  {T('batches', 'Batches')} <span className="text-amber-500/80 dark:text-amber-300/70">({batchCount})</span>
-                </span>
-                {onManageBatches ? <ChevronRight className="h-3.5 w-3.5 flex-shrink-0" /> : null}
-              </button>
-            </div>
-          ) : null}
-
-          <Row label={T('status', 'Status')}>
-            {stockQuantity <= outOfStockThreshold ? (
-              <span className="badge-red">{T('out_of_stock', 'Out of stock')}</span>
-            ) : stockQuantity <= lowStockThreshold ? (
-              <span className="badge-yellow">{T('low_stock', 'Low stock')}</span>
-            ) : (
-              <span className="badge-green">{T('in_stock', 'In stock')}</span>
-            )}
-          </Row>
-
-          {/* "Added" (the product record's created_at) replaced with
-              "Batch" -- the most recently received batch's date, which is
-              what actually changes as stock gets restocked over time; when
-              a product was first created is far less useful to see at a
-              glance than when its stock last came in. Falls back to
-              created_at only if no batch has a received_at set yet (should
-              be rare -- every product gets a "day added" batch at creation,
-              see getVisibleProductBatches's comment above). */}
-          {formattedBatchDate ? (
-            <button
-              type="button"
-              onClick={onManageBatches}
-              disabled={!onManageBatches}
-              className="flex w-full min-w-0 items-center justify-between gap-2 rounded-lg px-0 py-0.5 text-left transition-colors hover:bg-gray-50 disabled:cursor-default disabled:hover:bg-transparent dark:hover:bg-gray-700/40"
-            >
-              <span className="flex min-w-0 gap-2">
-                <span className="w-20 flex-shrink-0 pt-0.5 text-xs text-gray-400">{T('label_batch', 'Batch')}</span>
-                <span className="min-w-0 flex-1 text-sm text-gray-800 dark:text-gray-200">
-                  {formattedBatchDate}
-                  {latestBatchLotCode ? <span className="ml-2 text-xs text-gray-400" title={latestBatchLotCode}>{latestBatchLotCode}</span> : null}
-                </span>
-              </span>
-              {onManageBatches ? <ChevronRight className="h-3.5 w-3.5 flex-shrink-0 text-gray-300" /> : null}
-            </button>
-          ) : null}
-
-          {/* D3 (Part 422): the report sections per the user's detail-page
-              spec -- folded SectionCards so the compact info pane above
-              stays the at-a-glance view it always was. Needs a real
-              product id (a just-created optimistic row without one simply
-              doesn't render the reports yet). */}
-          {Number(p.id) > 0 ? (
-            <div className="border-t border-gray-100 pt-2 dark:border-gray-700">
-              <Suspense fallback={<p className="py-2 text-center text-xs text-gray-400">...</p>}>
-                <ProductDetailReport productId={Number(p.id)} t={t || (() => undefined)} fmtUSD={fmtUSD} />
-              </Suspense>
-            </div>
-          ) : null}
-        </div>
-
-        {/* Single actions pane, visible at every width. Aug 23 rework:
-            three standalone buttons -- Add variant / Adjust stock / Edit.
-            Delete is gone from this pane entirely, it now lives inside the
-            Edit flow itself (ProductForm's own footer -- see Products.tsx),
-            not as a fourth button here. Adjust stock is back as its own
-            button (was dropped Aug 22, restored per Aug 23 ask) with a
-            literal "adjust" icon (SlidersHorizontal) instead of a generic
-            pencil/gear so it doesn't read as a second Edit. Icon+label at
-            `sm:` and up, icon-only (label visually hidden, kept for
-            screen readers via aria-label + a title tooltip) below `sm` so
-            three buttons keep fitting the narrow half of a phone-width
-            split without truncating into illegibility. */}
-        <aside className="flex min-h-0 w-28 flex-col justify-center border-l border-gray-200 bg-slate-50/70 p-2.5 dark:border-gray-700 dark:bg-slate-900/30 sm:w-40 sm:p-4">
-          <div className="mb-2 hidden sm:block">
-            <p className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">{T('actions', 'Actions')}</p>
+            {/* D3 (Part 422): the report sections per the user's detail-page
+                spec -- folded SectionCards. Now spans the FULL pane width
+                beneath both mini-sections rather than sitting inside the left
+                data column. Needs a real product id (a just-created optimistic
+                row without one simply doesn't render the reports yet). */}
+            {Number(p.id) > 0 ? (
+              <div className="mt-2.5 border-t border-gray-100 pt-2 dark:border-gray-700">
+                <Suspense fallback={<p className="py-2 text-center text-xs text-gray-400">...</p>}>
+                  <ProductDetailReport productId={Number(p.id)} t={t || (() => undefined)} fmtUSD={fmtUSD} />
+                </Suspense>
+              </div>
+            ) : null}
           </div>
-          <div className="space-y-1.5">
+
+          {/* Bottom action row (Aug 29 ask): the three actions -- Add variant
+              / Adjust stock / Edit -- sit side by side in ONE row along the
+              bottom, sharing the width equally (flex-1). Replaces the old
+              right-hand slate-filled actions column; only a thin top border
+              separates them from the data now, no slate fill. Labels stay
+              visible at every width since a full-width row has room for them.
+              Delete is not here -- it lives inside the Edit flow (ProductForm's
+              own footer, see Products.tsx). */}
+          <div className="flex items-center gap-2 border-t border-gray-200 p-3 dark:border-gray-700">
             {onAddVariant ? (
               <button
                 type="button"
-                className="btn-secondary flex w-full items-center justify-center gap-1.5 truncate px-3 py-1.5 text-xs sm:text-sm"
+                className="btn-secondary flex flex-1 items-center justify-center gap-1.5 truncate px-3 py-2 text-xs sm:text-sm"
                 onClick={onAddVariant}
                 aria-label={T('add_variant', 'Add variant')}
                 title={T('add_variant', 'Add variant')}
               >
-                <PlusCircle className="h-3.5 w-3.5 flex-shrink-0" />
-                <span className="hidden truncate sm:inline">{T('add_variant', 'Add variant')}</span>
+                <PlusCircle className="h-4 w-4 flex-shrink-0" />
+                <span className="truncate">{T('add_variant', 'Add variant')}</span>
               </button>
             ) : null}
             {onAdjustStock ? (
               <button
                 type="button"
-                className="btn-secondary flex w-full items-center justify-center gap-1.5 truncate px-3 py-1.5 text-xs sm:text-sm"
+                className="btn-secondary flex flex-1 items-center justify-center gap-1.5 truncate px-3 py-2 text-xs sm:text-sm"
                 onClick={onAdjustStock}
                 aria-label={T('adjust_stock', 'Adjust stock')}
                 title={T('adjust_stock', 'Adjust stock')}
               >
-                <SlidersHorizontal className="h-3.5 w-3.5 flex-shrink-0" />
-                <span className="hidden truncate sm:inline">{T('adjust_stock', 'Adjust stock')}</span>
+                <SlidersHorizontal className="h-4 w-4 flex-shrink-0" />
+                <span className="truncate">{T('adjust_stock', 'Adjust stock')}</span>
               </button>
             ) : null}
             <button
               type="button"
-              className="btn-primary flex w-full items-center justify-center gap-1.5 truncate px-3 py-1.5 text-xs sm:text-sm"
+              className="btn-primary flex flex-1 items-center justify-center gap-1.5 truncate px-3 py-2 text-xs sm:text-sm"
               onClick={onEdit}
               aria-label={T('edit', 'Edit')}
               title={T('edit', 'Edit')}
             >
-              <Pencil className="h-3.5 w-3.5 flex-shrink-0" />
-              <span className="hidden truncate sm:inline">{T('edit', 'Edit')}</span>
+              <Pencil className="h-4 w-4 flex-shrink-0" />
+              <span className="truncate">{T('edit', 'Edit')}</span>
             </button>
           </div>
-        </aside>
         </div>
       </div>
       {descriptionDetailOpen ? (
