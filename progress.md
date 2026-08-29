@@ -1544,15 +1544,17 @@ those until that unit commits.*
   compact "Select a member to apply" cue with the explanation behind an
   InfoHint. The delivery paid-by block was already compacted to one row + a
   short fee-effect line in B3 (Part 372), so it stays.
-- [~] Y12 **[CLAIMED: session a8]**. **POS sales CHANGE: explicit, recordable,
-  per-currency (user
-  clarified Aug 28 follow-up — "the sales change").** The change given back
-  is sometimes KHR + USD mixed, sometimes one currency; the cashier must be
-  able to INPUT what was actually handed back (prefilled from the computed
-  overpay, editable per currency) and it must be RECORDED on the sale — the
-  change is often given in a DIFFERENT currency than the payment (a repeat
-  ask). Make the change display clear in cart + receipt. (The original
-  "link to fees page" phrasing is superseded by this reading.)
+- [x] Y12 *(Part 431 — SHIPPED, needs deploy; session a8).* **POS sales CHANGE:
+  recordable, per-currency.** The change row is now two editable inputs (USD +
+  KHR), prefilled/placeholdered from the computed change with a 'Use computed'
+  shortcut; the cashier records what was ACTUALLY handed back (change is often
+  given in a different currency than the payment). Checkout records those
+  amounts ADDITIVELY (change_usd/change_khr as real per-currency amounts) when
+  either field is entered, else the computed dual representation unchanged —
+  byte-identical until a cashier edits. Change never feeds totals; the receipt
+  already renders USD + KHR change additively (confirmed, no Receipt edit).
+  New order fields changeGivenUsd/khr; 4 en+km keys. Footprint constants.ts +
+  POS.tsx + lang. tsc + build green.
 - [ ] Y13. **Products page: kill the "Search & Filters" SectionCard wrapper**
   (screenshot 2). Search row becomes a plain page-level control (no folded
   card, no wrapper title); the "Created" filter moves OUT of the filter menu to

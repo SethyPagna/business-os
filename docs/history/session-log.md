@@ -10642,8 +10642,30 @@ UNCOMMITTED keys from the shared packs — the peer's Z8 `credit_awaiting_paymen
 and a stray `status_stock_effect_label` — into HEAD. Benign (additive strings,
 no code dep); messaged the peer to drop them from their pending edit.
 
-**Not done.** Z2/Y12 scoped, Z5/Z8/Z10 with the peer or needing a definition.
-Needs deploy (migrations 0077/0078/0079 + all the frontend changes).
+**Y12 (same session, folded into this Part).** POS change is now recordable
+per-currency: two editable USD/KHR inputs in the change row, prefilled/
+placeholdered from the computed change with a 'Use computed' shortcut. Checkout
+records the entered amounts ADDITIVELY (change_usd/change_khr as real
+per-currency amounts) when either field is filled, else the computed dual
+representation unchanged (byte-identical until a cashier edits). Change never
+feeds totals; the receipt already renders USD + KHR change additively (verified
+read-only, no Receipt.tsx edit -- the peer's Z4 lane). New order fields
+changeGivenUsd/khr (constants.ts PosOrder + POS shadow type), 4 en+km keys.
+Commit 6b7dbd50. Lang note: credit_awaiting_payment (peer's Z8) rode along
+again via the shared packs but the end state is a single valid key (verified);
+langKeyIntegrity's only failure is the F3-peer's uncommitted
+minimized_dismiss_hint.
+
+**Coordination this session (peer business-os-v1-74).** Split by message: I took
+Y19 + Y17 + Y12 (Dashboard.tsx / SalesListSurface.tsx / POS.tsx+constants.ts);
+peer took Z7/Z4/Z8 (main.css / Receipt.tsx / SaleDetailModal.tsx) and is on Z10
+(Dashboard.tsx, after my Y19 committed). I stayed off SaleDetailModal.tsx and
+Receipt.tsx (peer lanes) and the F3-slice-2 files. Part 431 mine, 432+ peer's.
+
+**Not done.** Z2 scoped (POS pricing + receipt), Z5 (dedicated unit -- user
+wants standalone), Z8 done by peer, Z10 with peer (needs a period-scope design
+decision), Y13–Y16/Y20 (HOT with the F3 Products.tsx or multi-file). Needs
+deploy (migrations 0077/0078/0079 + all the frontend changes).
 
 ## Part 433 (Aug 29 2026, session business-os-v1-43) — Z8 credit/record-payment; Z10 root-caused (needs a decision)
 
