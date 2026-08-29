@@ -1896,7 +1896,7 @@ other" with the Phase-Y items.*
   (intro/submissionInstructions may be customised), so NOT auto-rewritten — the
   fix is the admin editing them in Settings → Customer Portal / business identity,
   or an explicitly-authorised one-time settings update. **`publicUrl` is now FIXED
-  in code (Part 460, `341f7fce`, needs deploy):** `portalPublicUrl` drops a stored
+  in code (Part 461, `341f7fce`, needs deploy):** `portalPublicUrl` drops a stored
   `customer_portal_public_url` override whose host is one of this shop's own
   DEPRECATED hosts (synced with index.html's redirect map) and falls back to the
   live `BUSINESS_OS_PUBLIC_URL`, while still honouring a genuine external funnel

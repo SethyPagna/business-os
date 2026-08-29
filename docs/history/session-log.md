@@ -11900,3 +11900,50 @@ ExportFieldsModal.tsx only.
 taken after re-checking max = 459.
 
 **Needs deploy.** Frontend-only; ships on the next build.
+
+## Part 461 (Aug 29 2026, session business-os-v1-87) — portal publicUrl follows the env, not a stale self-domain override (the Part-458 finding's code angle)
+
+**Ask.** The user picked the `publicUrl` code angle from the Part-458 post-deploy
+audit ("publicUrl should follow BUSINESS_OS_PUBLIC_URL rather than a stale stored
+value; land the code fix"), and explicitly declined the settings-data rebrand
+("no need rebrand settings for me") — so this is code-only.
+
+**Root cause (measured).** `routes/portal.ts` `portalPublicUrl(settings, env)`
+returned `configured || fallback`, preferring the stored
+`customer_portal_public_url` over `env.BUSINESS_OS_PUBLIC_URL`. Production's stored
+value is the OLD domain `https://leangcosmetics.dpdns.org`, so it shadowed the
+rebranded env (`leangbeauty.com`) — the storefront advertised a dead domain. And
+the stored value is almost never a deliberate choice: `CatalogPage.tsx:680`
+prefills the editor's override input with the RESOLVED `config.publicUrl` (which
+already folds in the env fallback), so every portal SAVE freezes the then-current
+resolved url into an explicit override that then permanently shadows any later env
+change.
+
+**Fix (`341f7fce`, needs deploy).** `portalPublicUrl` now DROPS a stored override
+whose host is one of this shop's own DEPRECATED hosts — a `DEPRECATED_PORTAL_HOSTS`
+set mirroring `frontend/index.html`'s old-domain `redirectHosts`
+(leangcosmetics.dpdns.org + admin/.com/www variants) — and falls back to the live
+`BUSINESS_OS_PUBLIC_URL`. A GENUINE external funnel domain (any host NOT on the
+list) is still honored, so the documented override feature is preserved; no
+settings data is touched. New `test-portal-public-url-pure.cjs` transpiles the real
+route and drives `buildPortalConfig` for 12 checks: the exact production repro
+(stale dpdns → env), every deprecated host, a genuine external override honored,
+blank/unset → env, current-host honored, `/public` trim, case-insensitive host
+match, and an unrelated config field untouched. cloudflare `tsc` clean;
+`test-portal-catalog-sort-pure.cjs` still green (portal.ts loads unchanged).
+
+**Flagged (Golden Rule 7), NOT fixed here.** The editor-freezing root cause
+(`CatalogPage.tsx:680` prefilling from resolved `config.publicUrl`) stays open —
+the proper cure is to expose the raw override (`config.publicUrlOverride`) and
+prefill the editor from that so a blank field stays blank and never re-promotes the
+fallback. Deferred as a larger portal-editor change (the deprecated-host guard
+neutralises the live symptom now). The other four stale rebrand fields
+(businessName/title/intro/submissionInstructions) remain user-side per the user's
+"no rebrand settings" instruction. "Flagged, not guessed" bullet updated.
+
+Parallel note: portal.ts + the new test were clean/disjoint from the active lanes
+(the import-engine session still holds importEngine/contacts/system uncommitted;
+Branches/Contacts/Receipt/lang held by others). Renumbered to Part 461 after a
+460 collision with e4's export-modal entry; the fix commit 341f7fce's message
+still reads "Part 460" (pushed, not rewritten) — the fix IS this Part 461, cited
+by hash to stay unambiguous.
