@@ -1636,11 +1636,21 @@ those until that unit commits.*
   mockups asked for (same component the Sales daily report + contact reports
   use). tsc + build green; live click-through deferred (peer's shared 8787
   dev server). Dashboard.tsx only.
-- [ ] Y20. **Pagination redesign, all list pages:** merge the items-range /
+- [~] Y20. **Pagination redesign, all list pages:** merge the items-range /
   per-page / pages row INTO the select-all row (select-all wastes a whole row on
   large screens). Compact form: `‹ page (1–20) / totalPages ›` where the page
   number is editable in place (no size growth) and clicking "(1–20)" opens the
   per-page options (20/30/50/100…). [Products part HOT-6e]
+  - *SHARED COMPONENT + NON-PRODUCTS LISTS SHIPPED (this session).*
+    `PaginationControls` gained an opt-in `rangeAsPageSize` mode (only with
+    `compact`): one pill of prev · editable page · item-range chip · `/ total` ·
+    next, where the range chip **is** the per-page dropdown (via a new
+    backward-compatible `buttonContent` override on `PageSizeSelect`). Wired,
+    right-aligned, on Sales, Returns, Fees and the Contacts list. Existing
+    compact/full callers unchanged (flag defaults false). Tested by
+    `frontend/tests/paginationRangeControl.test.ts`.
+  - *Products call-site adoption stays e4's (HOT-6e); the prop is ready for
+    them to add `rangeAsPageSize` to their existing `compact` call.*
 
 ### Phase Z — Aug-28 eighteenth batch (session 43): returns-to-same-batch + the ten-point triage list
 
