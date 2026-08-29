@@ -158,6 +158,37 @@ app.get('/', async (c) => {
   })
 })
 
+// GET /api/fees/report?startDate&endDate&branchId -- fee totals over a range
+// for the Reports hub: range totals, a per-day series (keyed on fee_date, the
+// effective date the fee is booked to, not created_at), and a per-fee-type
+// breakdown. Registered before /:id so 'report' is not eaten by the id param
+// route. Auto-gated by the fees-permission middleware above.
+app.get('/report', async (c) => {
+  const db = getDb(c.env)
+  const query = c.req.query()
+  const startDate = String(query.startDate || '').slice(0, 10)
+  const endDate = String(query.endDate || '').slice(0, 10)
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate) || !/^\d{4}-\d{2}-\d{2}$/.test(endDate)) {
+    return c.json({ error: 'startDate and endDate (YYYY-MM-DD) are required' }, 400)
+  }
+  const clauses = ['f.fee_date BETWEEN @startDate AND @endDate']
+  const params: Record<string, unknown> = { startDate, endDate }
+  if (query.branchId) { clauses.push('f.branch_id = @branchId'); params.branchId = query.branchId }
+  const where = clauses.join(' AND ')
+  const [totals, days, byType] = await Promise.all([
+    db.prepare(`SELECT COUNT(*) AS count, ROUND(COALESCE(SUM(amount_usd), 0), 2) AS amount_usd FROM fees f WHERE ${where}`).get<Record<string, number>>(params),
+    db.prepare(`SELECT f.fee_date AS date, COUNT(*) AS count, ROUND(COALESCE(SUM(amount_usd), 0), 2) AS amount_usd FROM fees f WHERE ${where} GROUP BY f.fee_date ORDER BY f.fee_date DESC`).all<Record<string, unknown>>(params),
+    db.prepare(`SELECT f.fee_type AS fee_type, COUNT(*) AS count, ROUND(COALESCE(SUM(amount_usd), 0), 2) AS amount_usd FROM fees f WHERE ${where} GROUP BY f.fee_type ORDER BY amount_usd DESC`).all<Record<string, unknown>>(params),
+  ])
+  return c.json({
+    startDate,
+    endDate,
+    totals: { count: Number(totals?.count || 0), amount_usd: Number(totals?.amount_usd || 0) },
+    days: (days || []).map((d) => ({ date: String(d.date || ''), count: Number(d.count || 0), amount_usd: Number(d.amount_usd || 0) })),
+    by_type: (byType || []).map((r) => ({ fee_type: String(r.fee_type || ''), count: Number(r.count || 0), amount_usd: Number(r.amount_usd || 0) })),
+  })
+})
+
 // GET /api/fees/:id
 app.get('/:id', async (c) => {
   const db = getDb(c.env)

@@ -88,6 +88,18 @@ export function getFee(id: number): Promise<{ fee: FeeRecord }> {
   ) as Promise<{ fee: FeeRecord }>
 }
 
+// Reports hub: fee totals over a range (startDate/endDate/branchId), keyed on
+// fee_date. Mirrors the sales daily-report transport shape.
+export function getFeesReport(params: QueryParams = {}): Promise<unknown> {
+  const query = buildQueryString(params, { skipEmpty: false })
+  return route(
+    `fees:report:${query}`,
+    () => apiFetch('GET', appendQuery('/api/fees/report', query)),
+    null,
+    { raceLocalFallback: false },
+  )
+}
+
 export function createFee(payload: FeePayload): Promise<{ fee: FeeRecord }> {
   return route(
     'fees:create',

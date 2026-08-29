@@ -386,32 +386,31 @@ app.get('/', async (c) => {
   const searchGroups = tokenizeSearchTermGroups(search)
   if (searchGroups.length) {
     const searchMode = String(query.searchMode || query.search_mode || 'AND').toUpperCase() === 'OR' ? 'OR' : 'AND'
-    const flatColumns = [
-      'r.return_number',
-      "CAST(r.id AS TEXT)",
-      'r.receipt_number',
-      'r.cashier_name',
-      'r.customer_name',
-      'r.supplier_name',
-      'r.reason',
-      'r.notes',
-      "COALESCE(r.return_type, '')",
-      "COALESCE(r.supplier_settlement, '')",
-    ]
-    const itemColumns = [
-      "COALESCE(rii.product_name, '')",
-      "COALESCE(rip.sku, '')",
-      "COALESCE(rip.barcode, '')",
-      "COALESCE(rip.brand, '')",
-    ]
+    // Same bounded SQL shape as Sales: one shallow concatenated haystack
+    // per row context avoids repeating the full diacritic REPLACE chain
+    // for every column/word, which exceeds D1's statement-size limit at
+    // production scale. Catalog-side normalized fields retain folded
+    // product-name and compact-brand matching without the query-time tree.
+    const flatHaystack = `(
+      COALESCE(r.return_number, '') || ' ' || CAST(r.id AS TEXT) || ' ' ||
+      COALESCE(r.receipt_number, '') || ' ' || COALESCE(r.cashier_name, '') || ' ' ||
+      COALESCE(r.customer_name, '') || ' ' || COALESCE(r.supplier_name, '') || ' ' ||
+      COALESCE(r.reason, '') || ' ' || COALESCE(r.notes, '') || ' ' ||
+      COALESCE(r.return_type, '') || ' ' || COALESCE(r.supplier_settlement, '')
+    )`
+    const itemHaystack = `(
+      COALESCE(rii.product_name, '') || ' ' || COALESCE(rip.sku, '') || ' ' ||
+      COALESCE(rip.barcode, '') || ' ' || COALESCE(rip.brand, '') || ' ' ||
+      COALESCE(rip.name_normalized, '') || ' ' || COALESCE(rip.brand_compact, '')
+    )`
     let groupIndex = 0
     const groupClauses = searchGroups.map((words) => {
       let wordIndex = 0
       const wordClauses = words.map((word) => {
         const keyBase = `rsrch${groupIndex}_${wordIndex}`
         wordIndex += 1
-        const flatClause = buildLikeAliasClause(word, flatColumns, params, `${keyBase}_f`)
-        const itemClause = buildLikeAliasClause(word, itemColumns, params, `${keyBase}_i`)
+        const flatClause = buildLikeAliasClause(word, [flatHaystack], params, `${keyBase}_f`, true)
+        const itemClause = buildLikeAliasClause(word, [itemHaystack], params, `${keyBase}_i`, true)
         return `(${flatClause} OR EXISTS (
           SELECT 1 FROM return_items rii
           LEFT JOIN products rip ON rip.id = rii.product_id
@@ -458,6 +457,46 @@ app.get('/damaged-lots', async (c) => {
   const branchIdRaw = Number(c.req.query('branch_id'))
   const lots = await listOpenDamagedLots(db, { productId, branchId: Number.isFinite(branchIdRaw) && branchIdRaw > 0 ? branchIdRaw : null })
   return c.json(lots)
+})
+
+// GET /api/returns/report?startDate&endDate&branchId -- customer-return
+// (refund) totals over a range for the Reports hub: range totals, a per-day
+// series, and reason/type breakdowns. Scoped to customer returns
+// (return_scope='customer'), where total_refund_usd is the money refunded to
+// customers; supplier returns carry compensation/loss instead and are not
+// refunds. Cancelled returns are excluded, matching the sales report's
+// hide-cancelled default. Registered before /:id so 'report' is not eaten by
+// the id param route. Auto-gated by the returns-permission middleware above.
+app.get('/report', async (c) => {
+  const db = getDb(c.env)
+  const query = c.req.query()
+  const startDate = String(query.startDate || '').slice(0, 10)
+  const endDate = String(query.endDate || '').slice(0, 10)
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate) || !/^\d{4}-\d{2}-\d{2}$/.test(endDate)) {
+    return c.json({ error: 'startDate and endDate (YYYY-MM-DD) are required' }, 400)
+  }
+  const clauses = [
+    'date(created_at) BETWEEN date(@startDate) AND date(@endDate)',
+    `COALESCE(return_scope, 'customer') = 'customer'`,
+    `COALESCE(status, 'completed') <> 'cancelled'`,
+  ]
+  const params: Record<string, unknown> = { startDate, endDate }
+  if (query.branchId) { clauses.push('branch_id = @branchId'); params.branchId = query.branchId }
+  const where = clauses.join(' AND ')
+  const [totals, days, byReason, byType] = await Promise.all([
+    db.prepare(`SELECT COUNT(*) AS count, ROUND(COALESCE(SUM(total_refund_usd), 0), 2) AS refund_usd FROM returns WHERE ${where}`).get<Record<string, number>>(params),
+    db.prepare(`SELECT date(created_at) AS date, COUNT(*) AS count, ROUND(COALESCE(SUM(total_refund_usd), 0), 2) AS refund_usd FROM returns WHERE ${where} GROUP BY date(created_at) ORDER BY date(created_at) DESC`).all<Record<string, unknown>>(params),
+    db.prepare(`SELECT COALESCE(NULLIF(TRIM(reason), ''), '—') AS reason, COUNT(*) AS count, ROUND(COALESCE(SUM(total_refund_usd), 0), 2) AS refund_usd FROM returns WHERE ${where} GROUP BY COALESCE(NULLIF(TRIM(reason), ''), '—') ORDER BY refund_usd DESC`).all<Record<string, unknown>>(params),
+    db.prepare(`SELECT COALESCE(NULLIF(TRIM(return_type), ''), 'restock') AS return_type, COUNT(*) AS count, ROUND(COALESCE(SUM(total_refund_usd), 0), 2) AS refund_usd FROM returns WHERE ${where} GROUP BY COALESCE(NULLIF(TRIM(return_type), ''), 'restock') ORDER BY count DESC`).all<Record<string, unknown>>(params),
+  ])
+  return c.json({
+    startDate,
+    endDate,
+    totals: { count: Number(totals?.count || 0), refund_usd: Number(totals?.refund_usd || 0) },
+    days: (days || []).map((d) => ({ date: String(d.date || ''), count: Number(d.count || 0), refund_usd: Number(d.refund_usd || 0) })),
+    by_reason: (byReason || []).map((r) => ({ reason: String(r.reason || ''), count: Number(r.count || 0), refund_usd: Number(r.refund_usd || 0) })),
+    by_type: (byType || []).map((r) => ({ return_type: String(r.return_type || ''), count: Number(r.count || 0), refund_usd: Number(r.refund_usd || 0) })),
+  })
 })
 
 // GET /api/returns/:id

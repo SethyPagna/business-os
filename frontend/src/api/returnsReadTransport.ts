@@ -22,3 +22,14 @@ export function getReturn(id: number | string): Promise<unknown> {
     () => null,
   )
 }
+
+// Reports hub: customer-return (refund) totals over a range. Mirrors the
+// sales daily-report transport shape (startDate/endDate/branchId).
+export function getReturnsReport(params: QueryParams = {}): Promise<unknown> {
+  const query = buildQueryString(params, { skipEmpty: false })
+  return route(
+    `returns:report:${query}`,
+    () => apiFetch('GET', appendQuery('/api/returns/report', query)),
+    () => null,
+  )
+}
