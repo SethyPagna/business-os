@@ -2752,21 +2752,22 @@ export default function POS() {
                 message shown inside the empty-grid state further down --
                 same on-screen duplication as Products.tsx. Removed; the
                 grid's own empty/refreshing state (below) is enough. */}
-            <PaginationControls
-              className="mb-3"
-              page={productPage}
-              pageSize={productPageSize}
-              totalItems={productTotal}
-              label={productCountLabel}
-              t={t}
-              compact
-              compactPageInput
-              onPageChange={setProductPage}
-              onPageSizeChange={(size) => {
-                setProductPageSize(size)
-                setProductPage(1)
-              }}
-            />
+            <div className="mb-3 flex justify-end">
+              <PaginationControls
+                page={productPage}
+                pageSize={productPageSize}
+                totalItems={productTotal}
+                label={productCountLabel}
+                t={t}
+                compact
+                rangeAsPageSize
+                onPageChange={setProductPage}
+                onPageSizeChange={(size) => {
+                  setProductPageSize(size)
+                  setProductPage(1)
+                }}
+              />
+            </div>
             <div className="pos-product-grid">
               {pagedProductCards.map(p => {
                 const variants = getVariantChoices(p)
