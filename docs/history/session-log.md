@@ -11762,3 +11762,48 @@ the two `print_default` lines (no peer content swept). Part 456 taken after
 re-checking max = 455.
 
 **Needs deploy.** Frontend-only; ships on the next build.
+
+## Part 457 (Aug 29 2026, session business-os-v1-74) — hardening sweep: two more "shows error but the write went through" bugs (transfer, branch delete)
+
+**Generalized the POS finding across the whole write surface.** Audited EVERY
+`.success` read in the frontend and classified each by whether its endpoint
+actually returns a `success` flag. The dominant safe form is
+`result?.success === false` (fail only on an EXPLICIT false — a flag-less entity
+response passes); the dangerous form is a bare `if (result?.success)` /
+`if (!result?.success)`, which reads an ABSENT flag as failure. Most sites were
+already safe.
+
+**Two more confirmed bugs (same class as the POS one), both fixed:**
+- **Single stock transfer** (TransferModal). The endpoint returns the moved lot —
+  `{ destBatchId }` or a merge summary — with no `success`, but the handler gated
+  on `if (res?.success)` and fell through to `notify('Transfer failed')`. So a
+  transfer that actually moved stock reported failure. (The BULK transfer was
+  fine — branches.ts:655 does return `success: true`; only the single path
+  omitted it.)
+- **Branch delete** (Branches: delete + the undo/redo/bulk history callbacks).
+  Direct delete returns `{}` with no `success`, but the checks used
+  `if (!result?.success)`, so a delete that removed the branch showed "Cannot
+  delete branch" (or threw in undo/redo). The create/update checks in the SAME
+  file already used the safe `=== false` form — the delete paths were the
+  oversight.
+
+**Fix.** Converted all seven sites to the codebase's own safe contract:
+`res?.success !== false` for the success branch, `res?.success === false` for the
+error branch — robust whether or not an endpoint sends a flag.
+
+**Verified safe (no change needed):** Login / OTP / ResetData / product create all
+hit endpoints that DO return `{ success: true }` (auth.ts, system.ts,
+products.ts), and Sales status changes + all Returns modals use the throw-on-error
+pattern. So POS + transfer + branch delete were the only three real bugs in this
+class.
+
+**Regression guard.** `frontend/tests/mutationSuccessContract.test.ts` forbids the
+bare require-success form in TransferModal.tsx / Branches.tsx / POS.tsx (registered
+in the test chain). tsc clean; posCore + the new suite green.
+
+**Server note (optional follow-up, not blocking).** The single-transfer and
+direct-delete endpoints omit `success: true` while their bulk/pending siblings
+include it — a server inconsistency. Left as-is because the client is now robust
+either way; worth normalizing server-side someday.
+
+Commit: `08cdcacf`. **Needs deploy** (frontend-only).
