@@ -11481,7 +11481,7 @@ left as-is per "never rewrite a committed/pushed entry".
 
 **Needs deploy.** Frontend-only; ships on the next build.
 
-## Part 450 (Aug 29 2026, session business-os-v1-c1) — Products select-all aligned with the other five list pages
+## Part 451 (Aug 29 2026, session business-os-v1-c1) — Products select-all aligned with the other five list pages
 
 **Why.** The go-live core-hardening audit found the money/stock/POS core solid
 (see below), and surfaced ONE genuine, board-flagged cross-surface inconsistency:
@@ -11523,10 +11523,13 @@ competing server, per protocol) and this is straightforward UI wiring.
 from every active lane (import reset/stock-in report/import-ceilings backend, a8's
 Y16 chip-row work, the Y20 pager lane). Committed promptly (clean) rather than left
 uncommitted, so it does not sit in the tree the concurrent production deploy is
-being assembled on. Yielded Part 449 to session e4 (which had claimed it for
-Z1a in an uncommitted progress.md edit) and took 450 after re-checking max
-committed = 448. The progress.md "Flagged → RESOLVED" note is being committed
-separately once e4's shared-file edit settles, to avoid absorbing their work.
+being assembled on. **Part-number race (memory rule #4 in the flesh):** my
+uncommitted session-log entry was swept into a peer's atomic commit (`00a5ecc6`,
+session 15's Branches hub) through the shared index, and THREE sessions (e4, 15,
+c1) all landed on Part 450 while 449 went unused. Renumbered this entry to 451
+(max+1) fix-forward — never rewriting the peer commit that carried it. The
+progress.md "Flagged → RESOLVED" note is committed separately to avoid absorbing
+e4's concurrent Z1a edit to that shared file.
 
 **Needs deploy.** Frontend-only; ships with the in-progress production deploy or
 the next build.
