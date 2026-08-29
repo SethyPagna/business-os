@@ -12569,3 +12569,16 @@ green.
 max = 481.
 
 **Needs deploy.** Frontend-only; ships on the next build.
+
+## Part 483 (Aug 29 2026, session business-os-v1-e4) — Products default card: larger product image
+
+**User: "make the image in the default display larger."** The mobile product card's
+thumbnail (and its placeholder, and the grouped-header thumbnail whose mobile size
+deliberately matches the standalone card) were `h-14 w-14` (56px). Bumped every mobile
+instance to `h-20 w-20` (80px); the grouped-header thumbnail keeps its `sm:h-8 sm:w-8`
+desktop size (the desktop table row image is untouched). Stale sizing comment updated.
+
+**Verification.** tsc + check:source (405 files) + productsRowAlignment + vite build
+green. Products.tsx only.
+
+**Needs deploy.** Frontend-only; ships on the next build.

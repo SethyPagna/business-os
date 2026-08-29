@@ -3162,7 +3162,7 @@ function ProductsFullEditor() {
           {indented ? null : (
             <div className="relative flex-shrink-0">
               {thumbnailState.hasImage
-                ? <ProductImg src={thumbnailState.thumbnail} alt={productName} className="h-14 w-14 rounded-xl bg-slate-50 object-contain p-0.5 cursor-zoom-in dark:bg-slate-800" onClick={(e) => { e.stopPropagation(); openLightbox(thumbnailState.gallery, 0, productName) }}
+                ? <ProductImg src={thumbnailState.thumbnail} alt={productName} className="h-20 w-20 rounded-xl bg-slate-50 object-contain p-0.5 cursor-zoom-in dark:bg-slate-800" onClick={(e) => { e.stopPropagation(); openLightbox(thumbnailState.gallery, 0, productName) }}
                 // Stopping only the CLICK left the row still opening its
                 // detail flyout behind the lightbox: the row's long-press
                 // handlers bind mousedown/touchstart (utils/longPress.ts),
@@ -3171,7 +3171,7 @@ function ProductsFullEditor() {
                 // AND the detail at once. Stop the gesture at its start.
                 onMouseDown={(e) => e.stopPropagation()}
                 onTouchStart={(e) => e.stopPropagation()} />
-                : <ProductImagePlaceholder className="h-14 w-14 rounded-xl" />}
+                : <ProductImagePlaceholder className="h-20 w-20 rounded-xl" />}
               <ProductDiscountBadge product={p} promotion={promotion} fmtUSD={fmtUSD} label={tr('discounts', 'Discounts')} overlay />
             </div>
           )}
@@ -3272,16 +3272,17 @@ function ProductsFullEditor() {
   // showed up was liable to change just from reordering/adding variants.
   // Uploading is still done from the lead product's own edit form -- this
   // only changes which image the collapsed header reflects.
-  // Mobile-first sizing (h-14 w-14, matching a standalone card's own
-  // image -- see renderMobileProductCard) that shrinks back down at the
+  // Mobile-first sizing (h-20 w-20, matching a standalone card's own
+  // image -- see renderMobileProductCard; enlarged from h-14 on Aug 29 per
+  // user request) that shrinks back down at the
   // `sm:` breakpoint where the desktop table takes over (its row image is
   // the smaller w-10 h-10, and this header sits inline next to the group
   // title/chevron rather than as its own block, so it stays compact there).
   const renderGroupThumbnail = useCallback((group: { rows?: ProductRecord[]; leadProduct?: ProductRecord }) => {
     const state = buildGroupThumbnailState(group.rows, group.leadProduct)
     return state.hasImage
-      ? <ProductImg src={state.thumbnail} alt={String(group.leadProduct?.name || group.rows?.[0]?.name || '')} className="h-14 w-14 rounded-xl bg-slate-50 object-contain p-0.5 cursor-zoom-in sm:h-8 sm:w-8 sm:rounded-lg dark:bg-slate-800" onClick={(event) => { event.stopPropagation(); openLightbox(state.gallery, 0, String(group.leadProduct?.name || group.rows?.[0]?.name || '')) }} />
-      : <ProductImagePlaceholder className="h-14 w-14 rounded-xl sm:h-8 sm:w-8 sm:rounded-lg" compact />
+      ? <ProductImg src={state.thumbnail} alt={String(group.leadProduct?.name || group.rows?.[0]?.name || '')} className="h-20 w-20 rounded-xl bg-slate-50 object-contain p-0.5 cursor-zoom-in sm:h-8 sm:w-8 sm:rounded-lg dark:bg-slate-800" onClick={(event) => { event.stopPropagation(); openLightbox(state.gallery, 0, String(group.leadProduct?.name || group.rows?.[0]?.name || '')) }} />
+      : <ProductImagePlaceholder className="h-20 w-20 rounded-xl sm:h-8 sm:w-8 sm:rounded-lg" compact />
   }, [openLightbox])
 
   // Group-title three-dot menu: "Add child row" (opens the variant modal,
