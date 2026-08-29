@@ -66,10 +66,10 @@ function initialSection(canBranchList: boolean, canInventory: boolean): Branches
     // Old /inventory URLs open Inventory's old default slice (products).
     if (segment.includes('inventory')) return 'products'
   }
-  // Default landing now that Stats and Branches are separate sections:
-  // inventory users open on Stats; branch-only users on the branch list.
-  if (canInventory) return 'stats'
-  return 'branches'
+  // Default landing is the merged "Stats & Branches" section for everyone (it
+  // renders whichever halves the viewer may see). Only a Dashboard stock-card
+  // handoff or an old /inventory URL (both handled above) opens a slice.
+  return 'stats'
 }
 
 export default function BranchesHubPage() {
@@ -91,12 +91,15 @@ export default function BranchesHubPage() {
   }, [isActive, canInventory])
 
   const tabs: Array<{ id: BranchesHubSection; label: string; icon: typeof Building2; allowed: boolean; tone: string }> = [
-    // Two separate top sections where the old "Stats & Branches" chip used
-    // to stack both: Stats is Inventory's stats slice (inventory grant),
-    // Branches is the branch list (branches grant). Each self-gates and
-    // shows alone.
-    { id: 'stats', label: trh('stats', 'Stats'), icon: BarChart3, allowed: canInventory, tone: 'text-blue-600' },
-    { id: 'branches', label: trh('branches', 'Branches'), icon: Building2, allowed: canBranchList, tone: 'text-sky-600' },
+    // "Stats & Branches" is ONE section again (user, Aug 29: "merge stats and
+    // branch one section" + "make the inventory stat and branch part close ...
+    // no space gap"). The E1b split into separate Stats / Branches chips is
+    // undone: the inventory stat cards now flow directly on top of the branch
+    // list in a single scroll (both rendered `embedded`, see below), with no
+    // capped-pane gap. Products / Movements / RFID stay their own inventory
+    // slices. Allowed to anyone with EITHER grant; the render shows only the
+    // halves the viewer may see.
+    { id: 'stats', label: `${trh('stats', 'Stats')} & ${trh('branches', 'Branches')}`, icon: BarChart3, allowed: canInventory || canBranchList, tone: 'text-sky-600' },
     { id: 'products', label: trh('products', 'Products'), icon: Package, allowed: canInventory, tone: 'text-teal-600' },
     { id: 'movements', label: trh('movements', 'Movements'), icon: ArrowLeftRight, allowed: canInventory, tone: 'text-violet-600' },
     { id: 'rfid', label: trh('rfid', 'RFID'), icon: Radio, allowed: canInventory, tone: 'text-emerald-600' },
@@ -131,26 +134,30 @@ export default function BranchesHubPage() {
         </div>
       ) : null}
       <Suspense fallback={<p className="p-4 text-sm text-gray-500">{trh('loading', 'Loading')}...</p>}>
-        {/* Stats / Products / Movements / RFID are Inventory's own slices.
-            Inventory stays MOUNTED across section switches -- hidden (not
-            unmounted) on the Branches section, re-sliced by hostSection on
-            the others -- so filters, selections and loaded data survive the
-            switch, exactly as a standalone page kept them. Its own
-            `page-scroll` root stays the scroll container its internal
-            jump/scroll helpers expect. */}
-        {canInventory ? (
-          <div className={active === 'branches' ? 'hidden' : 'flex min-h-0 flex-1 flex-col'}>
+        {active === 'stats' ? (
+          // Merged "Stats & Branches": both halves flow in ONE shared
+          // page-scroll, each rendered `embedded` (no own scroll root), so
+          // the inventory stat cards sit right on top of the branch list with
+          // no capped-pane gap. Each half self-gates on its own grant.
+          // Trade-off vs the old split: Inventory REMOUNTS when you switch
+          // between this merged view and a Products/Movements/RFID slice
+          // (different DOM position), so its in-memory filters/selection
+          // reload -- acceptable for the requested single-section layout.
+          <div className="page-scroll flex min-h-0 flex-1 flex-col">
+            {canInventory ? (
+              <InventorySection hostSection="stats" embedded onHostSectionChange={(next) => setSection(next)} />
+            ) : null}
+            {canBranchList ? <BranchesSection embedded /> : null}
+          </div>
+        ) : canInventory ? (
+          // A single inventory slice (Products / Movements / RFID) keeps its
+          // own full-height page-scroll, exactly like a standalone Inventory
+          // page -- unchanged from before.
+          <div className="flex min-h-0 flex-1 flex-col">
             <InventorySection
-              hostSection={active === 'branches' ? 'stats' : active}
+              hostSection={active === 'products' || active === 'movements' || active === 'rfid' ? active : 'products'}
               onHostSectionChange={(next) => setSection(next)}
             />
-          </div>
-        ) : null}
-        {/* Branches is its own full-height section now -- it no longer
-            shares a scroll with the stats pane, so nothing is stacked. */}
-        {active === 'branches' && canBranchList ? (
-          <div className="flex min-h-0 flex-1 flex-col">
-            <BranchesSection />
           </div>
         ) : null}
       </Suspense>

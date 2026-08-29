@@ -545,9 +545,14 @@ const RFID_SECTION_OPTIONS = [
 // when a host is driving.
 export type InventoryHostSection = 'stats' | 'products' | 'movements' | 'rfid'
 
-export default function Inventory({ hostSection, onHostSectionChange }: {
+export default function Inventory({ hostSection, onHostSectionChange, embedded = false }: {
   hostSection?: InventoryHostSection
   onHostSectionChange?: (section: InventoryHostSection) => void
+  // `embedded`: render inline (no own `page-scroll` root) so a host can flow
+  // this section directly above/below another in ONE shared scroll -- used by
+  // the Branches hub's merged "Stats & Branches" view so the stats cards sit
+  // right on top of the branch list with no capped-pane gap between them.
+  embedded?: boolean
 } = {}) {
   const { can, t, user, notify, fmtUSD, fmtKHR, usdSymbol } = useApp() as InventoryAppContext
   // Every stock-moving action here mutates live batch/stock state that could
@@ -3475,7 +3480,7 @@ ${inventoryStatLabels.netSold} ${totalQtySold} = ${tr('items_sold', 'Items sold'
   }
 
   return (
-    <div className="page-scroll p-3 sm:p-6">
+    <div className={`${embedded ? '' : 'page-scroll'} p-3 sm:p-6`}>
       {/* E1: when the Branches hub is driving (hostSection set), its chip
           row replaces this internal picker -- rendering both would be two
           competing section controls. Standalone use keeps it, including its

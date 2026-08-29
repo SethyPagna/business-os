@@ -277,7 +277,7 @@ function formatTransferDate(rawValue: string | null | undefined): string {
   })
 }
 
-export default function Branches() {
+export default function Branches({ embedded = false }: { embedded?: boolean } = {}) {
   const { can, t, user, notify, fmtUSD } = useApp()
   // Transferring stock moves real quantities against live state, so
   // routes/branches.ts blocks it outright for the Review Required tier
@@ -938,7 +938,7 @@ export default function Branches() {
   }
 
   return (
-    <div className="page-scroll flex min-h-0 flex-col p-3 sm:p-6">
+    <div className={`flex min-h-0 flex-col ${embedded ? 'flex-1' : 'page-scroll'} p-3 sm:p-6`}>
       {/* The aggregate Branches / Items / Value stat cards that used to sit
           here (above the Branches / Transfer History tabs) were removed
           (user, Aug 29: "remove the stats above the branches/transfers

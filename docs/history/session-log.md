@@ -12383,3 +12383,42 @@ reference to any removed symbol.
 neither in a peer's dirty set. Part 475 after re-checking max = 474.
 
 **Needs deploy.** Frontend-only; ships on the next build.
+
+## Part 476 (Aug 29 2026, session business-os-v1-e4) — Branches hub: Stats + Branches merged back into ONE section (undoes E1b split)
+
+**User (Aug 29): "make the inventory stat and branch part close to each other no
+need space gap. also merge stats and branch one section."** E1b (Part 450) had
+split the old "Stats & Branches" chip into separate Stats and Branches chips
+because the two stacked with the stats pane capped at 45% — and that cap is exactly
+what left an empty gap above the branch list when the stat cards were shorter than
+their pane. The user wants them one section, flush.
+
+**Root of the difficulty + fix.** Both Inventory and Branches root at `.page-scroll`
+(`flex:1 1 0%; height:100%`), so stacking the two full-height scroll roots is what
+forced the capped-pane split. Added a small **`embedded`** prop to each (Inventory.tsx,
+Branches.tsx): when set, the root drops `page-scroll` and renders inline at natural
+height. The hub's merged "Stats & Branches" chip now wraps BOTH in ONE shared
+`page-scroll` — `<InventorySection hostSection="stats" embedded/>` directly above
+`<BranchesSection embedded/>` — so the stat cards flow straight into the branch list
+with no capped gap, in a single scroll. Each half self-gates (inventory grant shows
+stats, branches grant shows the list). Products / Movements / RFID slices are
+UNCHANGED (still their own full-height page-scroll).
+
+**Known trade-off (recorded).** Inventory REMOUNTS when switching between the merged
+view and a Products/Movements/RFID slice (different DOM position), so the E1
+"stays mounted, filters survive" optimization is lost for that transition — accepted
+for the requested single-section layout. The Products/Movements/RFID slices
+themselves keep their own scroll, so their behavior is untouched (lower-risk than
+making everything embedded).
+
+**Verification.** tsc + check:source (405 files) + sectionNavigation +
+inventorySelectionMode tests + vite build all green. **NOT verified live** — the
+merged layout's scroll/flow behavior needs a real device (admin login I can't
+perform; dev server peer-owned). Flagged to the user to check on their phone and
+screenshot; the embedded-flow approach is the deliberate fix for the "gap", but the
+exact spacing/scroll wants their eyes.
+
+**Parallel sessions.** Inventory.tsx (huge/shared but clean at edit time) + two
+branches files; none in a peer's dirty set. Part 476 after re-checking max = 475.
+
+**Needs deploy.** Frontend-only; ships on the next build.
