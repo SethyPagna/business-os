@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { getProductDetailReport, getStockLedger } from '../../../api/productReadTransport.ts'
 import { movementColorClass, translateMovementType } from '../../inventory/movementGroups.ts'
 import SectionCard from '../../shared/SectionCard'
-import { fmtDate } from '../../../utils/formatters'
+import { fmtDate, fmtDateTime24 } from '../../../utils/formatters'
 
 // D3 (Part 422): the detail page's report sections, per the user's Aug-28
 // spec -- batch summary (each lot: qty + received/expiry + supplier),
@@ -127,7 +127,7 @@ export default function ProductDetailReport({ productId, t, fmtUSD }: {
             <div className="space-y-1">
               {movements.map((row) => (
                 <div key={row.id} className="flex items-center justify-between gap-2 rounded-lg bg-gray-50 px-2.5 py-1.5 text-xs dark:bg-gray-800/60">
-                  <span className="whitespace-nowrap text-gray-400">{fmtDate(row.created_at)}</span>
+                  <span className="whitespace-nowrap text-gray-400">{fmtDateTime24(row.created_at)}</span>
                   <span className={`rounded px-1.5 py-0.5 font-semibold ${movementColorClass(row.movement_type, row.signed_quantity)}`}>
                     {signed(row)} {translateMovementType(row.movement_type, t as (key: string) => string)}
                   </span>

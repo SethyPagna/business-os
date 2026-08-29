@@ -11579,3 +11579,40 @@ holds 450 (its code committed first), so this Branches-hub entry is renumbered
 **450 → 452** and messaged to c1/e4. Number re-checked free before this write.
 
 **Needs deploy.** Frontend-only; ships on the next build.
+
+## Part 453 (Aug 29 2026, session business-os-v1-e4) — stock-change entries show the 24-hour time (the "day going into time" layer)
+
+**User directive (Aug 29, follow-up to the batch-format work).** "for the click
+to open i think we already applied but haven't gone another layer for each day
+going into time." Asked which of two readings, the user chose: **show the 24-hour
+time on each entry** where a row currently shows only mm/dd/yyyy.
+
+**Root cause: the two Products-side stock-change ledgers showed date-only.** The
+Products page **Stock Changes** ledger (StockChangeSection.tsx) rendered
+`fmtDate(created_at)` (mm/dd/yyyy) in all three places — the main table row, the
+detail modal's Date tile, and the drilled per-movement list (the "day going into
+time" drill the user meant) — and the product detail flyout's Stock Changes
+section (surfaces/ProductDetailReport.tsx, the movement rows) did the same.
+Meanwhile the Inventory **Movements** surface (InventoryMovementsSurface.tsx) and
+ProductHistoryPreviewModal already showed `fmtTime(created_at)` per movement, so
+the two Products-side ledgers were the ones out of step.
+
+**Fix.** Both now use `fmtDateTime24` (mm/dd/yyyy HH:MM, 24-hour, h23, the
+standing helper from utils/formatters.ts) for the movement `created_at`. Full
+date+time (not bare fmtTime) because these are FLAT lists, not day-grouped like
+the Inventory surface — each row needs its own date. Deliberately left alone:
+ProductDetailReport's batch received_at / expiry (date fields, shown separately
+per Z1a), its sales by-day/by-month period buckets (aggregates, no single time),
+and the StockIn-invoice group headers (a received-day header, not a per-entry
+timestamp). `fmtDate` dropped from StockChangeSection's import (now unused there);
+kept in ProductDetailReport (still used by the batch/sales/supplier date fields).
+
+**Verification.** tsc clean, check:source all 404 files, vite build green. Live
+click-through deferred (peer owns the dev backend; production catalog empty).
+
+**Parallel sessions.** Two frontend files (StockChangeSection.tsx,
+ProductDetailReport.tsx) — neither in any peer's dirty set nor session 87's
+backend deploy list. Part 453 taken after re-checking max = 452 (the 449/450
+three-way churn resolved: c1=450, e4=451 batch-pill, 15=452, this=453).
+
+**Needs deploy.** Frontend-only; ships on the next build.
