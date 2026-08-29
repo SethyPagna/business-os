@@ -3,6 +3,9 @@ import ChevronDown from 'lucide-react/dist/esm/icons/chevron-down.js'
 import ChevronRight from 'lucide-react/dist/esm/icons/chevron-right.js'
 import DateTimeRangePicker, { EMPTY_DATE_TIME_RANGE, type DateTimeRange } from '../shared/DateTimeRangePicker.tsx'
 import { getSalesDailyReport, getSalesDayReport } from '../../api/salesTransport.ts'
+import { ALL_STATUSES, getStatusLabel } from './StatusBadge'
+import { useApp as useAppHook } from '../../AppContext.tsx'
+import AppSelect, { type AppSelectOption } from '../shared/AppSelect.tsx'
 
 // X2 (Part 395): the Sales "by day" report -- a range-scoped list of days,
 // each expanding into its full breakdown (payment methods, delivery incl.
@@ -12,6 +15,17 @@ import { getSalesDailyReport, getSalesDayReport } from '../../api/salesTransport
 
 type TranslateFn = (key: string) => string | undefined
 type MoneyFormatter = (value: number | string) => string
+
+type DailyReportAppContext = { settings?: { pos_payment_methods?: unknown } }
+const useApp = useAppHook as unknown as () => DailyReportAppContext
+
+interface BranchOption { id: string; name: string }
+
+// Mirrors POS.tsx's parsing of the configured payment methods (same retired
+// set + default list) so the Reports filter offers exactly the methods the
+// till does.
+const PAYMENT_METHOD_FALLBACK = ['Cash', 'Card', 'ABA Bank', 'Wing', 'KHQR']
+const RETIRED_PAYMENT_METHODS = new Set(['pi pay', 'transfer'])
 
 interface DayRow {
   date: string
@@ -105,6 +119,65 @@ export default function SalesDailyReport({ t, fmtUSD, active = true }: SalesDail
   const [dayError, setDayError] = useState('')
   const requestRef = useRef(0)
 
+  const { settings } = useApp()
+  const [statusFilter, setStatusFilter] = useState('')
+  const [paymentFilter, setPaymentFilter] = useState('')
+  const [branchFilter, setBranchFilter] = useState('')
+  const [branches, setBranches] = useState<BranchOption[]>([])
+
+  const paymentMethods = useMemo<string[]>(() => {
+    try {
+      const parsed = JSON.parse(String(settings?.pos_payment_methods || '[]')) as unknown
+      if (!Array.isArray(parsed)) return PAYMENT_METHOD_FALLBACK
+      const methods = parsed
+        .map((method) => String(method || '').trim())
+        .filter((method) => method && !RETIRED_PAYMENT_METHODS.has(method.toLowerCase()))
+      return methods.length ? methods : PAYMENT_METHOD_FALLBACK
+    } catch {
+      return PAYMENT_METHOD_FALLBACK
+    }
+  }, [settings?.pos_payment_methods])
+
+  // Branch options -- the daily/day report endpoints already accept a
+  // branchId; the picklist just was never surfaced on this view before.
+  useEffect(() => {
+    let cancelled = false
+    import('../../api/branchTransport.ts')
+      .then((mod) => mod.getBranches())
+      .then((res) => {
+        if (cancelled) return
+        const raw = Array.isArray(res) ? res : (res as { branches?: unknown[] } | null)?.branches
+        const list = (Array.isArray(raw) ? raw : []).reduce<BranchOption[]>((acc, entry) => {
+          const rec = entry as { id?: unknown; name?: unknown; branch_name?: unknown }
+          const id = rec.id == null ? '' : String(rec.id)
+          if (id) acc.push({ id, name: String(rec.name || rec.branch_name || id) })
+          return acc
+        }, [])
+        setBranches(list)
+      })
+      .catch(() => {})
+    return () => { cancelled = true }
+  }, [])
+
+  const filterParams = useMemo<Record<string, string>>(() => ({
+    ...(statusFilter ? { status: statusFilter } : {}),
+    ...(paymentFilter ? { paymentMethod: paymentFilter } : {}),
+    ...(branchFilter ? { branchId: branchFilter } : {}),
+  }), [statusFilter, paymentFilter, branchFilter])
+
+  const statusOptions = useMemo<AppSelectOption[]>(() => [
+    { value: '', label: t('all_statuses') || 'All statuses' },
+    ...ALL_STATUSES.map((status) => ({ value: status, label: getStatusLabel(status, (key) => t(key) || key) })),
+  ], [t])
+  const paymentOptions = useMemo<AppSelectOption[]>(() => [
+    { value: '', label: t('all_payment_methods') || 'All methods' },
+    ...paymentMethods.map((method) => ({ value: method, label: method })),
+  ], [paymentMethods, t])
+  const branchOptions = useMemo<AppSelectOption[]>(() => [
+    { value: '', label: t('all_branches') || 'All Branches' },
+    ...branches.map((branch) => ({ value: branch.id, label: branch.name })),
+  ], [branches, t])
+
   const load = useCallback(async () => {
     if (!range.startDate || !range.endDate) return
     const requestId = requestRef.current + 1
@@ -116,6 +189,7 @@ export default function SalesDailyReport({ t, fmtUSD, active = true }: SalesDail
         startDate: range.startDate,
         endDate: range.endDate,
         ...timeParams(range),
+        ...filterParams,
       }) as { days?: DayRow[] } | null
       if (requestRef.current !== requestId) return
       setDays(Array.isArray(result?.days) ? result.days : [])
@@ -126,7 +200,7 @@ export default function SalesDailyReport({ t, fmtUSD, active = true }: SalesDail
     } finally {
       if (requestRef.current === requestId) setLoading(false)
     }
-  }, [range, t])
+  }, [range, t, filterParams])
 
   useEffect(() => {
     if (!active) return
@@ -147,14 +221,14 @@ export default function SalesDailyReport({ t, fmtUSD, active = true }: SalesDail
     setDayError('')
     setDayLoading(true)
     try {
-      const report = await getSalesDayReport({ date, ...timeParams(range) }) as DayReport | null
+      const report = await getSalesDayReport({ date, ...timeParams(range), ...filterParams }) as DayReport | null
       setDayReport(report && report.date === date ? report : null)
     } catch (err) {
       setDayError(err instanceof Error && err.message ? err.message : (t('daily_report_failed') || 'Could not load this day.'))
     } finally {
       setDayLoading(false)
     }
-  }, [expandedDate, range, t])
+  }, [expandedDate, range, t, filterParams])
 
   const rangeTotals = useMemo(() => days.reduce((acc, day) => ({
     tx: acc.tx + (day.tx_count || 0),
@@ -286,6 +360,38 @@ export default function SalesDailyReport({ t, fmtUSD, active = true }: SalesDail
     <div className="space-y-3">
       <div className="flex flex-wrap items-center gap-2">
         <DateTimeRangePicker value={range} onChange={setRange} t={t} />
+        <AppSelect
+          value={statusFilter}
+          options={statusOptions}
+          onChange={setStatusFilter}
+          ariaLabel={t('status') || 'Status'}
+          buttonClassName="py-1.5 text-xs"
+        />
+        <AppSelect
+          value={paymentFilter}
+          options={paymentOptions}
+          onChange={setPaymentFilter}
+          ariaLabel={t('payment_method') || 'Payment method'}
+          buttonClassName="py-1.5 text-xs"
+        />
+        {branches.length ? (
+          <AppSelect
+            value={branchFilter}
+            options={branchOptions}
+            onChange={setBranchFilter}
+            ariaLabel={t('branch') || 'Branch'}
+            buttonClassName="py-1.5 text-xs"
+          />
+        ) : null}
+        {(statusFilter || paymentFilter || branchFilter) ? (
+          <button
+            type="button"
+            onClick={() => { setStatusFilter(''); setPaymentFilter(''); setBranchFilter('') }}
+            className="text-xs font-medium text-blue-600 underline-offset-2 hover:underline dark:text-blue-400"
+          >
+            {t('clear') || 'Clear'}
+          </button>
+        ) : null}
         <div className="ml-auto flex flex-wrap items-center gap-3 text-xs text-slate-500 dark:text-slate-400">
           <span>{rangeTotals.tx} {t('sales') || 'sales'}</span>
           <span>{t('revenue') || 'Revenue'}: <span className="font-semibold text-slate-900 dark:text-white">{fmtUSD(rangeTotals.revenue)}</span></span>

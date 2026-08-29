@@ -49,6 +49,14 @@ export interface SalesFilters {
   startTime?: string | null
   endTime?: string | null
   tzOffsetMinutes?: number | null
+  // Optional report filters (Reports view). Absent on every existing caller
+  // (Dashboard, /stats, per-contact drills), so those stay byte-for-byte
+  // unchanged. `status` is matched against COALESCE(sale_status,'completed');
+  // when set it REPLACES the default hide-cancelled guard, so picking
+  // 'cancelled' actually surfaces cancelled sales. `paymentMethod` matches
+  // the same normalized label the payment-method breakdown groups by.
+  status?: string | null
+  paymentMethod?: string | null
 }
 
 export interface SalesTotals {
@@ -112,11 +120,28 @@ function round2(n: number): number {
 // date range (and optional branch)". `alias` lets callers use this against
 // either a bare `sales` table or an aliased `s` in a join.
 function whereActiveSales(alias: string, f: SalesFilters) {
+  const params: Record<string, unknown> = { startDate: f.startDate, endDate: f.endDate }
   const clauses = [
     `date(${alias}.created_at) BETWEEN date(@startDate) AND date(@endDate)`,
-    `COALESCE(${alias}.sale_status, 'completed') <> 'cancelled'`,
   ]
-  const params: Record<string, unknown> = { startDate: f.startDate, endDate: f.endDate }
+  // Status: an explicit filter wins over the default hide-cancelled guard, so
+  // a caller asking for 'cancelled' actually gets cancelled sales. Bound as a
+  // param -- never interpolated -- so an arbitrary value is injection-safe and
+  // simply matches nothing.
+  const status = typeof f.status === 'string' ? f.status.trim() : ''
+  if (status) {
+    clauses.push(`COALESCE(${alias}.sale_status, 'completed') = @status`)
+    params.status = status
+  } else {
+    clauses.push(`COALESCE(${alias}.sale_status, 'completed') <> 'cancelled'`)
+  }
+  // Payment method: matched against the same normalized label the breakdown
+  // groups by (trimmed, empty -> 'Unknown'), so the dropdown values line up.
+  const paymentMethod = typeof f.paymentMethod === 'string' ? f.paymentMethod.trim() : ''
+  if (paymentMethod) {
+    clauses.push(`COALESCE(NULLIF(TRIM(${alias}.payment_method), ''), 'Unknown') = @paymentMethod`)
+    params.paymentMethod = paymentMethod
+  }
   if (f.branchId) {
     clauses.push(`${alias}.branch_id = @branchId`)
     params.branchId = f.branchId
@@ -467,7 +492,7 @@ export async function getCustomerSalesTotals(
 export async function getSalesDayReport(
   env: Env,
   day: string,
-  opts: Pick<SalesFilters, 'branchId' | 'startTime' | 'endTime' | 'tzOffsetMinutes'> = {},
+  opts: Pick<SalesFilters, 'branchId' | 'startTime' | 'endTime' | 'tzOffsetMinutes' | 'status' | 'paymentMethod'> = {},
 ): Promise<SalesDayReport> {
   const f: SalesFilters = { startDate: day, endDate: day, ...opts }
   const db = getDb(env)

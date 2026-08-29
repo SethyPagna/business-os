@@ -1639,6 +1639,8 @@ app.get('/daily-report', async (c) => {
     startDate,
     endDate,
     branchId: query.branchId || null,
+    status: query.status || null,
+    paymentMethod: query.paymentMethod || null,
     startTime: query.startTime || null,
     endTime: query.endTime || null,
     tzOffsetMinutes: Number(query.tzOffsetMinutes) || 0,
@@ -1662,6 +1664,8 @@ app.get('/day-report', async (c) => {
   }
   const report = await getSalesDayReport(c.env, date, {
     branchId: query.branchId || null,
+    status: query.status || null,
+    paymentMethod: query.paymentMethod || null,
     startTime: query.startTime || null,
     endTime: query.endTime || null,
     tzOffsetMinutes: Number(query.tzOffsetMinutes) || 0,
