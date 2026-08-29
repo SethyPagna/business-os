@@ -40,7 +40,7 @@ interface DateTimeRangePickerProps {
   align?: 'left' | 'right'
   className?: string
   // Layout/shape utilities for the trigger button. Omitted => the default
-  // compact "Start → End" pill (rounded-full). Surfaces that want the trigger
+  // compact "Start → End" pill (rounded-md). Surfaces that want the trigger
   // to read as a prominent rectangular field (e.g. the dashboard range box)
   // pass their own e.g. 'flex w-full ... rounded-lg'; border, colors and
   // transition are always layered on top regardless.
@@ -86,7 +86,7 @@ function lastDayOfMonth(year: number, month1: number): number {
   return new Date(Date.UTC(year, month1, 0)).getUTCDate()
 }
 
-const chipBase = 'rounded-xl border px-2.5 py-1.5 text-xs font-medium transition'
+const chipBase = 'rounded-md border px-2.5 py-1.5 text-xs font-medium transition'
 const chipIdle = 'border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800'
 const chipActive = 'border-slate-800 bg-slate-800 text-white dark:border-slate-200 dark:bg-slate-200 dark:text-slate-900'
 
@@ -221,7 +221,7 @@ export default function DateTimeRangePicker({
       <button
         type="button"
         onClick={() => setOpen((current) => !current)}
-        className={`${triggerClassName || 'inline-flex items-center gap-2 rounded-full px-3.5 py-1.5'} border text-xs font-medium transition ${hasSelection
+        className={`${triggerClassName || 'inline-flex items-center gap-2 rounded-md px-3.5 py-1.5'} border text-xs font-medium transition ${hasSelection
           ? 'border-blue-300 bg-blue-50 text-blue-800 dark:border-blue-700 dark:bg-blue-900/30 dark:text-blue-200'
           : 'border-slate-300 bg-white text-slate-600 hover:border-slate-400 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-300'}`}
         aria-expanded={open}
@@ -238,11 +238,11 @@ export default function DateTimeRangePicker({
 
       {open ? (
         <div
-          className={`absolute top-full z-40 mt-2 w-[21rem] max-w-[92vw] rounded-2xl border border-slate-200 bg-white p-3 shadow-xl dark:border-slate-700 dark:bg-slate-900 ${align === 'right' ? 'right-0' : 'left-0'}`}
+          className={`absolute top-full z-40 mt-2 w-[21rem] max-w-[92vw] rounded-lg border border-slate-200 bg-white p-3 shadow-xl dark:border-slate-700 dark:bg-slate-900 ${align === 'right' ? 'right-0' : 'left-0'}`}
         >
           {/* Manual dates + close (mockup row 1) */}
           <div className="flex items-center gap-2">
-            <div className={`flex min-w-0 flex-1 items-center gap-1 rounded-xl border px-2 py-1.5 ${startInvalid || endInvalid ? 'border-red-300 dark:border-red-700' : 'border-slate-200 dark:border-slate-600'}`}>
+            <div className={`flex min-w-0 flex-1 items-center gap-1 rounded-md border px-2 py-1.5 ${startInvalid || endInvalid ? 'border-red-300 dark:border-red-700' : 'border-slate-200 dark:border-slate-600'}`}>
               <input
                 className={`w-full min-w-0 bg-transparent text-center text-xs outline-none placeholder:text-slate-400 ${startInvalid ? 'text-red-600 dark:text-red-400' : 'text-slate-800 dark:text-slate-100'}`}
                 placeholder="MM/DD/YYYY"
@@ -265,7 +265,7 @@ export default function DateTimeRangePicker({
             </div>
             <button
               type="button"
-              className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-red-600 text-white hover:bg-red-700"
+              className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-red-600 text-white hover:bg-red-700"
               onClick={() => setOpen(false)}
               aria-label={t('close') || 'Close'}
             >
@@ -276,7 +276,7 @@ export default function DateTimeRangePicker({
           {/* Time range (mockup row 2) */}
           {showTime ? (
             <div className="mt-2 flex items-center gap-2">
-              <div className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 px-2 py-1.5 dark:border-slate-600">
+              <div className="inline-flex items-center gap-1.5 rounded-md border border-slate-200 px-2 py-1.5 dark:border-slate-600">
                 <input
                   type="time"
                   className="bg-transparent text-xs text-slate-800 outline-none dark:text-slate-100"
@@ -329,7 +329,7 @@ export default function DateTimeRangePicker({
           </div>
 
           {/* Calendar range grid, Monday-first */}
-          <div className="mt-3 rounded-2xl border border-slate-100 p-2 dark:border-slate-700/60">
+          <div className="mt-3 rounded-lg border border-slate-100 p-2 dark:border-slate-700/60">
             <div className="grid grid-cols-7 text-center text-[11px] font-semibold text-slate-600 dark:text-slate-300">
               {DOW_LABELS.map((label) => <div key={label} className="py-1">{label}</div>)}
             </div>
@@ -339,7 +339,7 @@ export default function DateTimeRangePicker({
                   key={cell.iso}
                   type="button"
                   onClick={() => pickDay(cell.iso)}
-                  className={`mx-auto my-0.5 flex h-8 w-8 items-center justify-center rounded-full transition ${isEdge(cell.iso)
+                  className={`mx-auto my-0.5 flex h-8 w-8 items-center justify-center rounded-md transition ${isEdge(cell.iso)
                     ? 'bg-slate-800 font-semibold text-white dark:bg-slate-200 dark:text-slate-900'
                     : inRange(cell.iso)
                       ? 'bg-slate-200 text-slate-800 dark:bg-slate-700 dark:text-slate-100'
