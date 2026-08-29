@@ -8,7 +8,7 @@ setlocal
 if defined BUSINESS_OS_ADMIN_URL (
   set "URL=%BUSINESS_OS_ADMIN_URL%"
 ) else (
-  set "URL=https://admin.leangcosmetics.dpdns.org"
+  set "URL=https://admin.leangbeauty.com"
 )
 echo Opening %URL% ...
 start "" "%URL%"

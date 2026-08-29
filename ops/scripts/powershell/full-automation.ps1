@@ -37,7 +37,7 @@
 #  Env overrides:
 #    BUSINESS_OS_REPO_ROOT   - repo root (default: two levels up from this file)
 #    BUSINESS_OS_HEALTH_URL  - full health-check URL
-#                              (default: https://admin.leangcosmetics.dpdns.org/health,
+#                              (default: https://admin.leangbeauty.com/health,
 #                              taken from cloudflare/wrangler.toml's admin route)
 #    BUSINESS_OS_HEALTH_TIMEOUT_SEC - seconds to poll before giving up (default: 60)
 #    BUSINESS_OS_SKIP_INSTALL - set to 1 to skip the dependency-install step
@@ -87,7 +87,7 @@ if (-not (Test-Path $CloudflareDir)) {
   exit 1
 }
 
-$HealthUrl = if ($env:BUSINESS_OS_HEALTH_URL) { $env:BUSINESS_OS_HEALTH_URL } else { 'https://admin.leangcosmetics.dpdns.org/health' }
+$HealthUrl = if ($env:BUSINESS_OS_HEALTH_URL) { $env:BUSINESS_OS_HEALTH_URL } else { 'https://admin.leangbeauty.com/health' }
 $HealthTimeoutSec = if ($env:BUSINESS_OS_HEALTH_TIMEOUT_SEC) { [int]$env:BUSINESS_OS_HEALTH_TIMEOUT_SEC } else { 60 }
 
 Write-Host "Business OS full automation (Cloudflare)" -ForegroundColor Yellow

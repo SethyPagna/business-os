@@ -49,7 +49,7 @@ npm run deploy
 Then confirm it's live:
 
 ```sh
-curl https://admin.leangcosmetics.dpdns.org/health
+curl https://admin.leangbeauty.com/health
 # {"status":"ok","version":"...","time":"..."}
 ```
 
@@ -81,7 +81,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File ops\scripts\powershell\full-
 ```
 
 This does the same steps as `deploy:full`, plus a live polling health check
-against the real `https://admin.leangcosmetics.dpdns.org/health` URL after
+against the real `https://admin.leangbeauty.com/health` URL after
 deploying, so you get a clear pass/fail instead of just "wrangler said OK."
 
 ### Just checking a change locally, not releasing it
