@@ -11,6 +11,7 @@ import MiniStat from './MiniStat'
 import { fmtTime, getBusinessTimezoneOffsetHours } from '../../utils/formatters'
 import { todayStr, offsetDate, businessYear, businessMonth } from '../../utils/dateHelpers'
 import ExportMenu from '../shared/ExportMenu'
+import DateTimeRangePicker, { type DateTimeRange } from '../shared/DateTimeRangePicker'
 import { useIsPageActive } from '../shared/pageActivity'
 import { withLoaderTimeout } from '../../utils/loaders.ts'
 import { beginTrackedRequest, invalidateTrackedRequest, isTrackedRequestCurrent } from '../../utils/loaders.ts'
@@ -625,7 +626,9 @@ export default function Dashboard() {
     { id: '7d',     label: translateOr('range_7d', '7 Days', '៧ ថ្ងៃ'),          getRange: () => ({ start: offsetDate(-6), end: todayStr(), gran: 'day' }) },
     { id: 'month',  label: translateOr('range_this_month', 'This Month', 'ខែនេះ'),  getRange: () => ({ start: `${businessYear()}-${String(businessMonth()).padStart(2,'0')}-01`, end: todayStr(), gran: 'day' }) },
     { id: 'year',   label: translateOr('range_this_year', 'This Year', 'ឆ្នាំនេះ'),   getRange: () => ({ start: `${businessYear()}-01-01`, end: todayStr(), gran: 'month' }) },
-    { id: 'custom', label: translateOr('range_custom', 'Custom', 'កំណត់'),      getRange: null },
+    // Y19: the separate "Custom" chip is gone -- the Start → End pill below IS
+    // the custom editor. 'custom' stays a valid rangeId (set when the pill is
+    // edited); it just no longer renders as a preset button.
   ]
 
   const [summary, setSummary]     = useState<DashboardSummary | null>(null)
@@ -1491,7 +1494,22 @@ ${translateOr('delivery_margin', 'Delivery margin')} ${fmtUSD(aDeliveryMargin)} 
               near-empty row below the preset pills. */}
           <div className="flex min-w-0 items-center gap-2 lg:max-w-[22rem]">
             <span className="shrink-0 text-xs font-semibold text-gray-700 dark:text-gray-300 sm:text-sm">{translateOr('period_label', 'Range', 'ជ្រើសពេល')}:</span>
-            <span className="min-w-0 flex-1 truncate rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-500 dark:bg-slate-800 dark:text-slate-300 sm:text-sm">{rangeLabel}</span>
+            {/* Y19: the Start → End pill both SHOWS the effective range (preset
+                or custom) and IS the custom editor -- editing it switches to
+                the 'custom' rangeId. Replaces the old read-only range-label
+                pill + the separate custom date inputs below. */}
+            <div className="min-w-0 flex-1">
+              <DateTimeRangePicker
+                value={{ startDate: getCurrentDashboardRange().start, endDate: getCurrentDashboardRange().end, startTime: '', endTime: '' } as DateTimeRange}
+                onChange={(r) => {
+                  setRangeId('custom')
+                  if (r.startDate) setCustomStart(r.startDate)
+                  if (r.endDate) setCustomEnd(r.endDate)
+                }}
+                t={t}
+                showTime={false}
+              />
+            </div>
             {hasPermission('dashboard_export') && (
               <ExportMenu label={exportLabel} items={dashboardExportItems} iconOnly />
             )}
@@ -1504,29 +1522,6 @@ ${translateOr('delivery_margin', 'Delivery margin')} ${fmtUSD(aDeliveryMargin)} 
               </button>
             ))}
           </div>
-          {rangeId === 'custom' && (
-            <div className="grid w-full grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-1.5 sm:w-auto sm:min-w-[22rem] lg:min-w-[18rem] lg:max-w-[23rem]">
-              <input
-                id="dashboard-custom-start-date"
-                name="dashboard_custom_start_date"
-                aria-label="Dashboard custom start date"
-                type="date"
-                className="input min-h-8 w-full px-2 py-1.5 text-xs sm:min-h-9 sm:text-sm"
-                value={customStart}
-                onChange={e => setCustomStart(e.target.value)}
-              />
-              <span className="text-[11px] font-medium text-gray-400 sm:text-xs">to</span>
-              <input
-                id="dashboard-custom-end-date"
-                name="dashboard_custom_end_date"
-                aria-label="Dashboard custom end date"
-                type="date"
-                className="input min-h-8 w-full px-2 py-1.5 text-xs sm:min-h-9 sm:text-sm"
-                value={customEnd}
-                onChange={e => setCustomEnd(e.target.value)}
-              />
-            </div>
-          )}
         </div>
       </div>
 
