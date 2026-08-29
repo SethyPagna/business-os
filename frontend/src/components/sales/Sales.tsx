@@ -996,16 +996,39 @@ export default function Sales() {
 
   return (
     <div className="page-scroll flex flex-col p-3 sm:p-6">
-      {/* Merged toolbar row: Import/Export/History each take an equal share
-          of the row's full width (flex-1 on all three, labels always
-          visible) instead of icon-only buttons clustered on the left with
-          dead space to the right -- same treatment as Inventory's toolbar.
-          Kept above the search row (rather than below it) so the actions
-          people reach for on page load -- Import, Export, History -- are
-          the first thing in the flow, with search/filter right underneath. */}
-      {/* Manage (Import + Export folded into one dropdown, same pattern
-          Products.tsx uses) / History -- History before Manage, matching
-          Products' ordering. */}
+      {/* X2: Receipts | Reports view switch. The section toggle leads the
+          page (per the Aug 29 ask "actions right below the sections"): the
+          Receipts/Reports chips are the topmost control, with the action
+          row directly beneath them, so Import/Manage/History no longer sit
+          crammed against the hub's section chips where they read as clipped.
+          The reports view carries its own range/time scope and totals, so
+          the list-only chrome (search, filters, pagination, stats bar, bulk
+          toolbar) hides with the list instead of sitting there doing
+          nothing. */}
+      <div className="mb-2 inline-flex rounded-xl border border-slate-200 bg-white p-0.5 text-xs font-medium dark:border-slate-700 dark:bg-slate-900">
+        <button
+          type="button"
+          className={`rounded-[10px] px-3 py-1.5 transition ${salesView === 'receipts' ? 'bg-slate-800 text-white dark:bg-slate-200 dark:text-slate-900' : 'text-slate-600 hover:text-slate-900 dark:text-slate-300 dark:hover:text-white'}`}
+          onClick={() => setSalesView('receipts')}
+        >
+          {t('receipts') || 'Receipts'}
+        </button>
+        <button
+          type="button"
+          className={`rounded-[10px] px-3 py-1.5 transition ${salesView === 'daily' ? 'bg-slate-800 text-white dark:bg-slate-200 dark:text-slate-900' : 'text-slate-600 hover:text-slate-900 dark:text-slate-300 dark:hover:text-white'}`}
+          onClick={() => setSalesView('daily')}
+        >
+          {translateOr('reports', 'Reports', 'របាយការណ៍')}
+        </button>
+      </div>
+
+      {/* Merged action row: Import/Export/History, now placed directly below
+          the section toggle (Aug 29 ask) instead of above it. Import/Export
+          each take an equal share of the row's full width (flex-1 on all
+          three, labels always visible) -- same treatment as Inventory's
+          toolbar. Manage (Import + Export folded into one dropdown, same
+          pattern Products.tsx uses) / History -- History before Manage,
+          matching Products' ordering. */}
       <div className="mb-3 flex min-w-0 items-stretch gap-1.5 overflow-x-auto pb-1">
         <ActionHistoryBar history={actionHistory as unknown as ActionHistoryBarHistory} t={t} className="min-w-0 flex-1" showLabel />
         <LazyPortalMenu
@@ -1047,27 +1070,6 @@ export default function Sales() {
               .map((item) => (item === 'divider' ? item : { ...item, icon: item.icon ?? <Upload className="h-4 w-4 shrink-0" /> })),
           ] as PortalMenuItem[])}
         />
-      </div>
-
-      {/* X2: Receipts | Daily report view switch. The daily view carries its
-          own range/time scope and totals, so the list-only chrome (search,
-          filters, pagination, stats bar, bulk toolbar) hides with the list
-          instead of sitting there doing nothing. */}
-      <div className="mb-2 inline-flex rounded-xl border border-slate-200 bg-white p-0.5 text-xs font-medium dark:border-slate-700 dark:bg-slate-900">
-        <button
-          type="button"
-          className={`rounded-[10px] px-3 py-1.5 transition ${salesView === 'receipts' ? 'bg-slate-800 text-white dark:bg-slate-200 dark:text-slate-900' : 'text-slate-600 hover:text-slate-900 dark:text-slate-300 dark:hover:text-white'}`}
-          onClick={() => setSalesView('receipts')}
-        >
-          {t('receipts') || 'Receipts'}
-        </button>
-        <button
-          type="button"
-          className={`rounded-[10px] px-3 py-1.5 transition ${salesView === 'daily' ? 'bg-slate-800 text-white dark:bg-slate-200 dark:text-slate-900' : 'text-slate-600 hover:text-slate-900 dark:text-slate-300 dark:hover:text-white'}`}
-          onClick={() => setSalesView('daily')}
-        >
-          {t('daily_report') || 'Daily report'}
-        </button>
       </div>
 
       {salesView === 'daily' ? (
