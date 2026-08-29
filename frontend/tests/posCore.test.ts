@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict'
+import fs from 'node:fs'
 import { buildVariantOptionLabels,
+  applyManualDiscount,
   buildPosFilterMeta,
   buildProductsById,
   buildVariantChildrenByParentId,
@@ -255,6 +257,55 @@ await runTest('computeExpiryStatus classifies expired, expiring-soon, and ok dat
   // product form itself defaults to.
   const defaultedWindow = computeExpiryStatus('2026-09-10', undefined, today)
   assert.equal(defaultedWindow?.status, 'expiring')
+})
+
+// ---- Z2: the price input is the SELLING/base price; discounts are separate --
+await runTest('Z2: a manual discount reduces applied but never the base price', () => {
+  // A 10% discount on a $10 line: base stays $10, applied becomes $9, the
+  // discount is a separate $1 -- the kernel the cart + updatePrice use.
+  const d = applyManualDiscount(10, 41000, 4100, 'percent', 10)
+  assert.equal(d.applied_price_usd, 9)
+  assert.equal(d.manual_discount_usd, 1)
+  assert.equal(d.manual_discount_type, 'percent')
+})
+
+await runTest('Z2: editing the price re-applies the SAME discount against the new base', () => {
+  // Simulates POS.tsx updatePrice: the cashier changes the selling price
+  // from $10 to $20 while a 10% manual discount is set. The discount stays
+  // 10% (a separate reduction), so applied tracks the new base -- it does
+  // NOT freeze the old discounted price or turn the edit into a fixed cut.
+  const before = applyManualDiscount(10, 41000, 4100, 'percent', 10)
+  assert.equal(before.applied_price_usd, 9)
+  const afterEdit = applyManualDiscount(20, 82000, 4100, before.manual_discount_type, before.manual_discount_value)
+  assert.equal(afterEdit.applied_price_usd, 18, 'applied = new base 20 - 10% = 18')
+  assert.equal(afterEdit.manual_discount_usd, 2, 'the discount scales with the new base, still separate')
+})
+
+await runTest('Z2: no discount means base equals applied (price edit sets the price cleanly)', () => {
+  const d = applyManualDiscount(12.5, 51250, 4100, null, 0)
+  assert.equal(d.applied_price_usd, 12.5)
+  assert.equal(d.manual_discount_usd, 0)
+  assert.equal(d.manual_discount_type, null)
+})
+
+await runTest('Z2 wiring: the cart input, updatePrice, and receipt are decoupled from the discount', () => {
+  const cartItem = fs.readFileSync(new URL('../src/components/pos/CartItem.tsx', import.meta.url), 'utf8')
+  // The price inputs read the BASE price, not the (discounted) applied price.
+  assert.match(cartItem, /value=\{normalizePriceValue\(\(item\.base_price_usd \?\? item\.applied_price_usd\)/)
+  assert.match(cartItem, /value=\{normalizePriceValue\(\(item\.base_price_khr \?\? item\.applied_price_khr\)/)
+
+  const pos = fs.readFileSync(new URL('../src/components/pos/POS.tsx', import.meta.url), 'utf8')
+  // updatePrice sets the base price and re-applies the manual discount --
+  // it must NOT create a fixed discount from the typed price any more.
+  assert.match(pos, /base_price_usd: newBaseUsd/)
+  assert.match(pos, /applyManualDiscount\(newBaseUsd, newBaseKhr, exchangeRate, item\.manual_discount_type/)
+  const updatePriceBody = pos.slice(pos.indexOf('const updatePrice ='), pos.indexOf('const updatePrice =') + 1400)
+  assert.doesNotMatch(updatePriceBody, /manual_discount_type: discountUsd > 0 \? 'fixed' : null/)
+
+  const receipt = fs.readFileSync(new URL('../src/components/receipt/Receipt.tsx', import.meta.url), 'utf8')
+  // The receipt's per-line "original" price is base + product-level cut, so
+  // the full discount shows (previously it used the charged price_usd).
+  assert.match(receipt, /baseUnitUsd > 0\s*\n\s*\? baseUnitUsd \+ productDiscUnitUsd/)
 })
 
 if (failed > 0) {

@@ -28,6 +28,11 @@ interface ReceiptItem {
   price_usd?: number | string | null
   price_khr?: number | string | null
   price?: number | string | null
+  // Z2: the line's selling/base price (before the manual discount) and any
+  // product-level (promotion/special) cut, so the receipt can show the full
+  // per-line discount (list − charged) as (-$x.xx).
+  base_price_usd?: number | string | null
+  product_discount_usd?: number | string | null
 }
 
 interface ReceiptSale {
@@ -391,16 +396,23 @@ export default function Receipt({ sale, settings = {}, onClose, _previewMode }: 
           const unitKhr = toNumber(item.applied_price_khr ?? item.price_khr)
           const lineUsd = unitUsd * qty
           const lineKhr = unitKhr * qty
-          // Individual/per-product discounts: the item's original list price
-          // (price_usd) vs. what was actually charged (applied_price_usd).
-          // When a product-level discount was applied at time of sale these
-          // differ, so show the crossed-out original + savings per line
-          // instead of silently only reflecting the discounted total.
-          const originalUnitUsd = toNumber(item.price_usd ?? item.price)
+          // Per-line discount = the line's ORIGINAL selling price minus what
+          // was actually charged, shown as a crossed-out original + savings.
+          // Z2: the original is the base/selling price plus any product-level
+          // cut (base_price + product_discount = the pre-discount list price),
+          // so BOTH the product-level discount AND the cashier's manual
+          // discount show -- previously this used price_usd, which checkout
+          // stores as the CHARGED price, so real sales showed no discount at
+          // all. Falls back to price_usd for older sales without base_price.
+          const baseUnitUsd = toNumber(item.base_price_usd)
+          const productDiscUnitUsd = toNumber(item.product_discount_usd)
+          const originalUnitUsd = baseUnitUsd > 0
+            ? baseUnitUsd + productDiscUnitUsd
+            : toNumber(item.price_usd ?? item.price)
           const hasItemDiscount = tpl.show_item_discount !== false
             && originalUnitUsd > 0
             && unitUsd > 0
-            && originalUnitUsd > unitUsd
+            && originalUnitUsd > unitUsd + 0.005
             && item.applied_price_usd != null
           const itemSavingsUsd = hasItemDiscount ? (originalUnitUsd - unitUsd) * qty : 0
           return (

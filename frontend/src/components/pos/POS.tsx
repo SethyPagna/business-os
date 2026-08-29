@@ -2243,41 +2243,27 @@ export default function POS() {
     patchActive({
       cart: active.cart.map((item) => {
         if (getCartLineId(item) !== cartLineId) return item
-        const baseUsd = item.base_price_usd ?? item.applied_price_usd
-        const baseKhr = item.base_price_khr ?? item.applied_price_khr
-        // Editing the price directly is still a valid way to override a
-        // line's total (kept from the existing behavior), but it now also
-        // reconciles the manual-discount fields against the new price so
-        // the two controls never disagree about what's actually charged --
-        // the discount becomes a plain 'fixed' amount equal to the gap
-        // between the line's base price and the price just typed in.
-        if (field === 'usd') {
-          const appliedKhr = normalizePriceValue(CURRENCY.usdToKhr(num, exchangeRate), 0)
-          const discountUsd = Math.max(0, normalizePriceValue(baseUsd - num, 0))
-          return {
-            ...item,
-            applied_price_usd: num,
-            applied_price_khr: appliedKhr,
-            manual_discount_type: discountUsd > 0 ? 'fixed' : null,
-            manual_discount_value: discountUsd,
-            manual_discount_usd: discountUsd,
-            manual_discount_khr: Math.max(0, normalizePriceValue(baseKhr - appliedKhr, 0)),
-          }
+        // Z2 (user, Aug 29): the price input is the line's SELLING/base price
+        // and editing it SETS that base -- any manual discount stays a
+        // SEPARATE reduction, re-applied against the new base, so the line
+        // total is (base × qty) − discount and the input never shows the
+        // discounted price. (Previously typing a price silently CREATED a
+        // fixed discount == base − typed, which is exactly what conflated the
+        // price field with the discount.)
+        const newBaseUsd = field === 'usd' ? num : normalizePriceValue(CURRENCY.khrToUsd(num, exchangeRate), 0)
+        const newBaseKhr = field === 'khr' ? num : normalizePriceValue(CURRENCY.usdToKhr(num, exchangeRate), 0)
+        const result = applyManualDiscount(newBaseUsd, newBaseKhr, exchangeRate, item.manual_discount_type || null, item.manual_discount_value || 0)
+        return {
+          ...item,
+          base_price_usd: newBaseUsd,
+          base_price_khr: newBaseKhr,
+          applied_price_usd: result.applied_price_usd,
+          applied_price_khr: result.applied_price_khr,
+          manual_discount_type: item.manual_discount_type || null,
+          manual_discount_value: result.manual_discount_value,
+          manual_discount_usd: result.manual_discount_usd,
+          manual_discount_khr: result.manual_discount_khr,
         }
-        if (field === 'khr') {
-          const appliedUsd = normalizePriceValue(CURRENCY.khrToUsd(num, exchangeRate), 0)
-          const discountUsd = Math.max(0, normalizePriceValue(baseUsd - appliedUsd, 0))
-          return {
-            ...item,
-            applied_price_khr: num,
-            applied_price_usd: appliedUsd,
-            manual_discount_type: discountUsd > 0 ? 'fixed' : null,
-            manual_discount_value: discountUsd,
-            manual_discount_usd: discountUsd,
-            manual_discount_khr: Math.max(0, normalizePriceValue(baseKhr - num, 0)),
-          }
-        }
-        return item
       }),
     })
   }

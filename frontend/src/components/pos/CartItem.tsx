@@ -185,13 +185,17 @@ export default function CartItem({
           />
           <button type="button" className="flex h-7 w-7 items-center justify-center text-sm text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700" onClick={() => onQtyChange(lineId, item.quantity + 1)}>+</button>
         </div>
+        {/* Z2: the price input shows the line's SELLING/base price and stays
+            put when a discount is applied -- the discount reduces the line
+            total below, never this field. Editing it sets the selling price
+            (POS.tsx updatePrice re-applies any manual discount against it). */}
         <div className="relative min-w-[70px] flex-1">
           <span className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-xs text-gray-400">{usdSymbol}</span>
           <input
             className="input w-full py-1 pl-5 text-xs"
             type="number"
             step="any"
-            value={normalizePriceValue(item.applied_price_usd || 0).toFixed(2)}
+            value={normalizePriceValue((item.base_price_usd ?? item.applied_price_usd) || 0).toFixed(2)}
             onChange={(event) => onPriceChange(lineId, 'usd', event.target.value)}
           />
         </div>
@@ -200,7 +204,7 @@ export default function CartItem({
             className="input w-full py-1 pr-5 text-xs"
             type="number"
             step="any"
-            value={normalizePriceValue(item.applied_price_khr || 0).toFixed(2)}
+            value={normalizePriceValue((item.base_price_khr ?? item.applied_price_khr) || 0).toFixed(2)}
             onChange={(event) => onPriceChange(lineId, 'khr', event.target.value)}
           />
           <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-xs text-gray-400">{khrSymbol}</span>
