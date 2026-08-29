@@ -115,7 +115,10 @@ export default function ServerImportReviewScreen({ jobId, label, source, t, noti
   }, [jobId])
 
   useEffect(() => {
-    if (status !== 'awaiting_review') return
+    // Skip the paged review fetch in the clean direct-apply case -- the screen
+    // auto-approves and closes without ever showing the table, so pulling a
+    // 50-row page here would be a wasted round-trip.
+    if (status !== 'awaiting_review' || (autoApprove && !autoFellBack)) return
     let cancelled = false
     setLoadingRows(true)
     getImportJobReview(jobId, { page, pageSize: PAGE_SIZE, type: filter, query: query || undefined, sort })
@@ -131,7 +134,7 @@ export default function ServerImportReviewScreen({ jobId, label, source, t, noti
       })
       .finally(() => { if (!cancelled) setLoadingRows(false) })
     return () => { cancelled = true }
-  }, [filter, jobId, page, query, sort, status])
+  }, [filter, jobId, page, query, sort, status, autoApprove, autoFellBack])
 
   const pages = Math.max(1, Math.ceil(total / PAGE_SIZE))
   const summary = useMemo(() => ['create', 'update', 'skip', 'error']

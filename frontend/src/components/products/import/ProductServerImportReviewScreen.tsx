@@ -146,7 +146,11 @@ export default function ProductServerImportReviewScreen({ jobId, jobRevision, t,
     }
   }
 
-  useEffect(() => { if (status === 'awaiting_review') void loadRows() }, [filter, page, query, sort, status]) // eslint-disable-line react-hooks/exhaustive-deps
+  // Only fetch the (paged) review rows when the table will actually be shown --
+  // i.e. a manual review, or an auto-approve that fell back to one. In the clean
+  // direct-apply case the screen auto-approves and closes, so fetching a 50-row
+  // page here would be a wasted round-trip; the progress uses the known rowCount.
+  useEffect(() => { if (status === 'awaiting_review' && (!autoApprove || autoFellBack)) void loadRows() }, [filter, page, query, sort, status, autoApprove, autoFellBack]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const saveDecision = async (row: ReviewRow, choice: string) => {
     if (savingRow !== null) return
