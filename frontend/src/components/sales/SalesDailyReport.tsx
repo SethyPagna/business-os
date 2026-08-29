@@ -74,6 +74,15 @@ interface SalesDailyReportProps {
   t: TranslateFn
   fmtUSD: MoneyFormatter
   active?: boolean
+  // Reports hub embeds this with a range + branch owned by the hub. When
+  // `range`/`onRangeChange` are passed the range is controlled by the parent;
+  // when `embedded` is set the component hides its own range picker and branch
+  // filter (the hub provides them) and scopes to `branchId`. Status/payment
+  // filters stay -- they are Sales-specific.
+  range?: DateTimeRange
+  onRangeChange?: (range: DateTimeRange) => void
+  branchId?: string
+  embedded?: boolean
 }
 
 function monthStartIso(): string {
@@ -104,12 +113,14 @@ function timeParams(range: DateTimeRange): Record<string, string | number> {
   return { startTime: range.startTime, endTime: range.endTime, tzOffsetMinutes: localTzOffsetMinutes() }
 }
 
-export default function SalesDailyReport({ t, fmtUSD, active = true }: SalesDailyReportProps) {
-  const [range, setRange] = useState<DateTimeRange>(() => ({
+export default function SalesDailyReport({ t, fmtUSD, active = true, range: externalRange, onRangeChange, branchId: externalBranchId, embedded = false }: SalesDailyReportProps) {
+  const [internalRange, setInternalRange] = useState<DateTimeRange>(() => ({
     ...EMPTY_DATE_TIME_RANGE,
     startDate: monthStartIso(),
     endDate: todayIso(),
   }))
+  const range = externalRange ?? internalRange
+  const setRange = onRangeChange ?? setInternalRange
   const [days, setDays] = useState<DayRow[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
@@ -139,8 +150,10 @@ export default function SalesDailyReport({ t, fmtUSD, active = true }: SalesDail
   }, [settings?.pos_payment_methods])
 
   // Branch options -- the daily/day report endpoints already accept a
-  // branchId; the picklist just was never surfaced on this view before.
+  // branchId; the picklist just was never surfaced on this view before. Not
+  // needed when embedded: the hub owns the branch filter and passes branchId.
   useEffect(() => {
+    if (embedded) return undefined
     let cancelled = false
     import('../../api/branchTransport.ts')
       .then((mod) => mod.getBranches())
@@ -157,13 +170,15 @@ export default function SalesDailyReport({ t, fmtUSD, active = true }: SalesDail
       })
       .catch(() => {})
     return () => { cancelled = true }
-  }, [])
+  }, [embedded])
 
+  // Embedded: the hub owns the branch; standalone: our own branch dropdown.
+  const effectiveBranch = embedded ? (externalBranchId || '') : branchFilter
   const filterParams = useMemo<Record<string, string>>(() => ({
     ...(statusFilter ? { status: statusFilter } : {}),
     ...(paymentFilter ? { paymentMethod: paymentFilter } : {}),
-    ...(branchFilter ? { branchId: branchFilter } : {}),
-  }), [statusFilter, paymentFilter, branchFilter])
+    ...(effectiveBranch ? { branchId: effectiveBranch } : {}),
+  }), [statusFilter, paymentFilter, effectiveBranch])
 
   const statusOptions = useMemo<AppSelectOption[]>(() => [
     { value: '', label: t('all_statuses') || 'All statuses' },
@@ -359,7 +374,7 @@ export default function SalesDailyReport({ t, fmtUSD, active = true }: SalesDail
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-center gap-2">
-        <DateTimeRangePicker value={range} onChange={setRange} t={t} />
+        {!embedded ? <DateTimeRangePicker value={range} onChange={setRange} t={t} /> : null}
         <AppSelect
           value={statusFilter}
           options={statusOptions}
@@ -374,7 +389,7 @@ export default function SalesDailyReport({ t, fmtUSD, active = true }: SalesDail
           ariaLabel={t('payment_method') || 'Payment method'}
           buttonClassName="py-1.5 text-xs"
         />
-        {branches.length ? (
+        {!embedded && branches.length ? (
           <AppSelect
             value={branchFilter}
             options={branchOptions}
@@ -383,7 +398,7 @@ export default function SalesDailyReport({ t, fmtUSD, active = true }: SalesDail
             buttonClassName="py-1.5 text-xs"
           />
         ) : null}
-        {(statusFilter || paymentFilter || branchFilter) ? (
+        {(statusFilter || paymentFilter || (!embedded && branchFilter)) ? (
           <button
             type="button"
             onClick={() => { setStatusFilter(''); setPaymentFilter(''); setBranchFilter('') }}

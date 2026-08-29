@@ -42,7 +42,6 @@ const SaleDetailModal = lazyRetry(() => import('./SaleDetailModal'), 'sales-sale
 const CancelSaleModal = lazyRetry(() => import('./CancelSaleModal'), 'sales-cancel-sale-modal')
 const ExportModal = lazyRetry(() => import('./ExportModal'), 'sales-export-modal')
 const SalesImportModal = lazyRetry(() => import('./SalesImportModal'), 'sales-import')
-const SalesDailyReport = lazyRetry(() => import('./SalesDailyReport'), 'sales-daily-report')
 const ExportOptionsDialog = lazyRetry(() => import('../shared/ExportOptionsDialog'), 'sales-export-options')
 import SalesListSurface from './SalesListSurface'
 import { TOOLBAR_BUTTON_WIDTH, manageToolbarButtonClassName } from '../shared/toolbarButtonStyles'
@@ -229,9 +228,8 @@ export default function Sales() {
   const [yearFilter, setYearFilter] = useState('all')
   const [monthFilter, setMonthFilter] = useState('all')
   const [selectedIds, setSelectedIds] = useState<Set<number>>(() => new Set())
-  // X2 (Part 395): the page has two views -- the receipts list, and the
-  // by-day report (range-scoped day rows, click a day for its breakdown).
-  const [salesView, setSalesView] = useState<'receipts' | 'daily'>('receipts')
+  // The by-day report moved out to its own top-level Reports hub section
+  // (ReportsHub.tsx); Sales now shows only the receipts list.
   // 11.1/11.2 (B6): same selection model as Products/Inventory -- checkboxes
   // only exist while something is selected; a long-press on a row/card
   // enters select mode; the desktop column-header checkbox is select-all.
@@ -273,7 +271,16 @@ export default function Sales() {
   const selectAllRef = useRef<HTMLInputElement>(null)
   const loadedOnceRef = useRef(false)
   const loadRequestRef = useRef(0)
+  const salesStatsRequestRef = useRef(0)
   const loadPromiseRef = useRef<Promise<void> | null>(null)
+  // A filter/search change can arrive while the initial Sales request is
+  // still in flight. Returning that older promise without scheduling the
+  // newer query leaves the new text visible but only re-filters the stale
+  // first page locally (historical receipts outside that page show "No data
+  // found"). Products already uses the same one-slot trailing-load pattern:
+  // coalesce bursts, then run once more with the latest callback/filters.
+  const pendingLoadRef = useRef<{ silent: boolean } | null>(null)
+  const latestLoadRef = useRef<((silent?: boolean) => Promise<void>) | null>(null)
   const loadWatchdogRef = useRef<number | undefined>(undefined)
   const statusActionRef = useRef<Set<string>>(new Set())
   const membershipActionRef = useRef<Set<string>>(new Set())
@@ -339,7 +346,12 @@ export default function Sales() {
   }, [])
 
   const loadSales = useCallback(async (silent = false): Promise<void> => {
-    if (loadPromiseRef.current) return loadPromiseRef.current
+    if (loadPromiseRef.current) {
+      const pending = pendingLoadRef.current || { silent: true }
+      pending.silent = pending.silent && silent
+      pendingLoadRef.current = pending
+      return loadPromiseRef.current
+    }
     const requestId = beginTrackedRequest(loadRequestRef)
     const promise = (async () => {
       if (!silent && aliveRef.current) {
@@ -385,10 +397,22 @@ export default function Sales() {
     })()
     const wrappedPromise = promise.finally(() => {
       if (loadPromiseRef.current === wrappedPromise) loadPromiseRef.current = null
+      const pending = pendingLoadRef.current
+      if (pending) {
+        pendingLoadRef.current = null
+        queueMicrotask(() => {
+          const nextLoad = latestLoadRef.current || loadSales
+          nextLoad(Boolean(pending.silent)).catch(() => {})
+        })
+      }
     })
     loadPromiseRef.current = wrappedPromise
     return wrappedPromise
   }, [clearLoadWatchdog, debouncedSearch, isAdmin, salesDateRange, statusFilter, translateOr, userFilter])
+
+  useEffect(() => {
+    latestLoadRef.current = loadSales
+  }, [loadSales])
 
   // Unbounded revenue/count aggregate (see routes/sales.ts's /stats) --
   // `sales` above is capped at the list endpoint's page limit, so the
@@ -404,6 +428,7 @@ export default function Sales() {
   // the "N sales | $revenue" header until a filter change forced a refetch).
   const loadSalesStats = useCallback(async (): Promise<void> => {
     if (!isActive) return
+    const requestId = beginTrackedRequest(salesStatsRequestRef)
     const params = {
       ...(isAdmin && userFilter !== 'all' ? { userId: userFilter } : {}),
       ...(statusFilter !== 'all' ? { status: statusFilter } : {}),
@@ -412,6 +437,7 @@ export default function Sales() {
     }
     try {
       const result = await fetchSalesStats(params)
+      if (!aliveRef.current || !isTrackedRequestCurrent(salesStatsRequestRef, requestId)) return
       const row = (result || {}) as Record<string, unknown>
       setSalesStats({
         revenue_usd: Number(row.revenue_usd) || 0,
@@ -420,6 +446,7 @@ export default function Sales() {
         truncated_in_list: Boolean(row.truncated_in_list),
       })
     } catch {
+      if (!aliveRef.current || !isTrackedRequestCurrent(salesStatsRequestRef, requestId)) return
       setSalesStats(null)
     }
   }, [debouncedSearch, isActive, isAdmin, salesDateRange, statusFilter, userFilter])
@@ -435,7 +462,9 @@ export default function Sales() {
       setHistoryReady(false)
       clearLoadWatchdog()
       invalidateTrackedRequest(loadRequestRef)
+      invalidateTrackedRequest(salesStatsRequestRef)
       loadPromiseRef.current = null
+      pendingLoadRef.current = null
       setLoading(false)
       return
     }
@@ -481,7 +510,9 @@ export default function Sales() {
     aliveRef.current = false
     clearLoadWatchdog()
     invalidateTrackedRequest(loadRequestRef)
+    invalidateTrackedRequest(salesStatsRequestRef)
     loadPromiseRef.current = null
+    pendingLoadRef.current = null
   }, [clearLoadWatchdog])
 
   const runSaleStatusMutation = useCallback((saleId: number | string, nextStatus: string, notes?: string, extra?: SaleCancelPayload | Record<string, unknown> | null) => (
@@ -996,38 +1027,11 @@ export default function Sales() {
 
   return (
     <div className="page-scroll flex flex-col p-3 sm:p-6">
-      {/* X2: Receipts | Reports view switch. The section toggle leads the
-          page (per the Aug 29 ask "actions right below the sections"): the
-          Receipts/Reports chips are the topmost control, with the action
-          row directly beneath them, so Import/Manage/History no longer sit
-          crammed against the hub's section chips where they read as clipped.
-          The reports view carries its own range/time scope and totals, so
-          the list-only chrome (search, filters, pagination, stats bar, bulk
-          toolbar) hides with the list instead of sitting there doing
-          nothing. */}
-      <div className="mb-2 inline-flex rounded-xl border border-slate-200 bg-white p-0.5 text-xs font-medium dark:border-slate-700 dark:bg-slate-900">
-        <button
-          type="button"
-          className={`rounded-[10px] px-3 py-1.5 transition ${salesView === 'receipts' ? 'bg-slate-800 text-white dark:bg-slate-200 dark:text-slate-900' : 'text-slate-600 hover:text-slate-900 dark:text-slate-300 dark:hover:text-white'}`}
-          onClick={() => setSalesView('receipts')}
-        >
-          {t('receipts') || 'Receipts'}
-        </button>
-        <button
-          type="button"
-          className={`rounded-[10px] px-3 py-1.5 transition ${salesView === 'daily' ? 'bg-slate-800 text-white dark:bg-slate-200 dark:text-slate-900' : 'text-slate-600 hover:text-slate-900 dark:text-slate-300 dark:hover:text-white'}`}
-          onClick={() => setSalesView('daily')}
-        >
-          {translateOr('reports', 'Reports', 'របាយការណ៍')}
-        </button>
-      </div>
-
-      {/* Merged action row: Import/Export/History, now placed directly below
-          the section toggle (Aug 29 ask) instead of above it. Import/Export
-          each take an equal share of the row's full width (flex-1 on all
-          three, labels always visible) -- same treatment as Inventory's
-          toolbar. Manage (Import + Export folded into one dropdown, same
-          pattern Products.tsx uses) / History -- History before Manage,
+      {/* Import/Manage/History action row. The Sales daily/reports view moved
+          out to its own top-level Reports hub section (ReportsHub.tsx), so
+          Sales now shows only the receipts list. Import/Export each take an
+          equal share of the row (flex-1); Manage folds Import + Export into
+          one dropdown (same pattern Products.tsx uses), History before Manage,
           matching Products' ordering. */}
       <div className="mb-3 flex min-w-0 items-stretch gap-1.5 overflow-x-auto pb-1">
         <ActionHistoryBar history={actionHistory as unknown as ActionHistoryBarHistory} t={t} className="min-w-0 flex-1" showLabel />
@@ -1072,13 +1076,6 @@ export default function Sales() {
         />
       </div>
 
-      {salesView === 'daily' ? (
-        <Suspense fallback={<div className="card h-40 animate-pulse" />}>
-          <SalesDailyReport t={t} fmtUSD={fmtUSD} active />
-        </Suspense>
-      ) : null}
-
-      {salesView === 'receipts' ? (
       <div className="mb-2 flex justify-end">
         <PaginationControls
           compact
@@ -1095,7 +1092,6 @@ export default function Sales() {
           }}
         />
       </div>
-      ) : null}
 
       {/* Search bar and bulk-action bar pin to the top of the page's scroll
           container while scrolling (Aug 11 2026 UI-polish request, same
@@ -1106,7 +1102,6 @@ export default function Sales() {
           search row, which pinned the bar but let the search box scroll
           away. Pagination now lives above this group instead of below it,
           matching Products/Inventory's order. */}
-      {salesView === 'receipts' ? (
       <div className="sticky top-2 z-30 -mx-1 space-y-2 bg-gray-50/95 pb-2 backdrop-blur dark:bg-gray-900/95 sm:mx-0">
         <div className="flex flex-wrap items-center gap-2 pt-1">
           <SearchInput
@@ -1152,9 +1147,8 @@ export default function Sales() {
           </div>
         ) : null}
       </div>
-      ) : null}
 
-      {salesView === 'receipts' && filtered.length > 0 ? (
+      {filtered.length > 0 ? (
         <div className="mb-3 flex min-h-10 flex-wrap items-center gap-x-2 gap-y-1 rounded-xl bg-blue-50 px-4 py-2 text-sm dark:bg-blue-900/20">
           <span className="font-semibold text-blue-700 dark:text-blue-300">{salesStats ? salesStats.total_count : filtered.length} {t('sales') || 'sales'}</span>
           <span className="text-gray-400">|</span>
@@ -1186,7 +1180,6 @@ export default function Sales() {
 
       <p className="mb-2 text-xs text-gray-400">{t('click_for_details') || 'Click a row for details'}</p>
 
-      {salesView === 'receipts' ? (
       <SalesListSurface
         collapsedSalesSections={collapsedSalesSections}
         filtered={filtered}
@@ -1213,7 +1206,6 @@ export default function Sales() {
         toggleSelectAll={toggleSelectAll}
         toggleSelectionScope={toggleSelectionScope}
       />
-      ) : null}
 
       {exportDialog ? (
         <Suspense fallback={null}>
