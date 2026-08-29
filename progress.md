@@ -1717,24 +1717,20 @@ other" with the Phase-Y items.*
   Delivery" renamed to "Complete Sale"** with an InfoHint above the button
   ("Stock effect by status") summarizing each status's stock consequence
   (reusing the existing pos_status_*_desc strings) — no inline prose.
-- [~] Z10. **Dashboard vs Branch stats consistency — user (Aug 29): "Z10 is
-  fine, just make it consistent with stat and branch"** (the "Reconcile
-  Revenue" 8th-stat idea dropped). **ROOT CAUSE MEASURED (Part 433):** the
-  two pages differ STRUCTURALLY, not by bug. (1) SCOPE: the Branch/Inventory
-  GET /stats endpoint (cloudflare/src/routes/inventory.ts, statsQuery in
-  Inventory.tsx) takes NO date range — it is ALL-TIME — while the Dashboard
-  is period-scoped via its range picker; for any period ≠ all-time the same
-  "Revenue" label shows different numbers. (2) DEFINITION: Branch Revenue
-  subtracts refunds (`SUM(si.revenue_usd) − refund`, line ~809) and its info
-  says "after refunds", whereas the Dashboard keeps Revenue before refunds
-  with refunds in the Returns card. Both already exclude cancelled +
-  awaiting_payment (matched). **THE FIX = period-scope the Branch stats**
-  (add a Start→End range — reuse Y19's shared DateTimeRangePicker — + a
-  backend date filter on /stats), which lands in the F3-HOT Inventory.tsx +
-  a UI range control (a real feature, not a tweak). DECISION NEEDED from the
-  user: does the Branch page get its OWN range control (clean, both
-  period-consistent), and should Branch Revenue drop the refund subtraction
-  to match the Dashboard's definition? Not rushed into the hot file mid-F3.
+- [x] Z10 *(Part 434 — SHIPPED, needs deploy).* **Dashboard vs Branch stats
+  consistency.** User clarified (Aug 29): it's about the FOLDED mini-stats,
+  NOT date scope — "follow dashboard, keeps them separate." Root cause: the
+  Branch/Inventory GET /stats computed Revenue = SUM(revenue) − refunds and
+  COGS = SUM(cogs) − returned-cogs, so its Revenue was quietly net-of-refunds
+  while the Dashboard's salesAnalytics kernel keeps Revenue = gross − discounts
+  and COGS = SUM(cost×qty), both GROSS, with refunds separate in Returns. Fix:
+  /stats revenue_usd/khr + cogs_usd/khr now gross (net_sold_qty keeps its
+  units-return subtraction); the Branch Revenue card drops the 'Refunded' fold
+  + 'after refunds' framing (refunds stay in the Returns card) and its info/sub
+  read the Dashboard's before-refunds definition. inventory_info_revenue lang
+  value updated. Inventory.tsx committed via the F3 reverse-then-reapply
+  isolation. Both tsc clean; build green. (The date-scope difference the
+  earlier read flagged is intentional per the user — NOT part of this fix.)
 - [x] Z11. **Revenue stat slimmed + Delivery promoted (Part 427 — SHIPPED,
   needs deploy; user, Aug 29: "revenue stats has too many folded stats
   inside, i want it less... an additional stat outside so it is even").**

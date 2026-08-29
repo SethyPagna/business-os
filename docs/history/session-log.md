@@ -10713,3 +10713,48 @@ was verified at Part 425.
 (discount decouple — money math, dedicated unit), Z5 (hamburger + colours —
 large). Y12 is a8's. Z7's stats/branch spacing tweak lives in F3-hot
 Inventory.tsx. Needs deploy (migrations 0077/0078/0079 + frontend).
+
+## Part 434 (Aug 29 2026, session business-os-v1-43) — Z10: Branch stats follow the Dashboard (refunds kept separate)
+
+**Ask.** User clarified Z10: the Dashboard↔Branch inconsistency is the FOLDED
+mini-stats, not date scope — "for 1 i meant the stats and mini stats folded in
+stats not period scoped or all time. follow dashboard keeps them separate."
+
+**What changed.** The Branch/Inventory GET /stats endpoint computed Revenue =
+SUM(si.revenue_usd) − refunds and COGS = SUM(si.cogs_usd) − returned-cogs, so
+its "Revenue" was quietly net-of-refunds, whereas the Dashboard's salesAnalytics
+kernel keeps Revenue = gross_sales − discounts and cost = SUM(cost×qty), both
+GROSS, with refunds sitting separately in the Returns card. Aligned the Branch
+to the Dashboard:
+- Backend (cloudflare/src/routes/inventory.ts GET /stats): revenue_usd/khr and
+  cogs_usd/khr are now gross (dropped the `− ret.refund`/`− ret.cogs_returned`
+  subtraction). net_sold_qty keeps its return subtraction — it's a units
+  metric, not revenue. Confirmed the Dashboard cost is gross (salesAnalytics.ts
+  l.173: SUM(cost_price×qty), no return adjustment) so the two now agree.
+- Frontend (Inventory.tsx Revenue card): dropped the 'Refunded' fold and the
+  'after refunds' info/sub framing (refunds stay in the Returns card, sourced
+  from the separate returnStats); the info/sub now read the Dashboard's
+  before-refunds definition (Gross profit = Revenue − COGS). Removed the now
+  unused afterRefundsShortLabel. inventory_info_revenue lang value updated
+  en+km.
+
+Refunds are still fully visible on the Branch page (Returns card, returnStats)
+— they're just no longer folded into Revenue, so the same set of sales now
+shows the same Revenue on both pages. The date-scope difference an earlier read
+flagged (Branch all-time vs Dashboard period) is intentional per the user and
+NOT part of this fix.
+
+**Parallel sessions.** Inventory.tsx committed in isolation from the F3-slice-2
+peer's uncommitted work (reverse-then-reapply of their patch); verified the
+remaining working-tree diff is exactly their 3 hunks. a8 stood down after
+shipping Y19/Y17/Y12; Z2 and the rest of my lane are collision-free.
+
+**Verified.** cloudflare tsc clean (no test pinned the old after-refunds
+behavior); frontend tsc clean (only the 3 F3-peer onMinimize errors); vite
+build green. Full Dashboard=Branch number match needs sales-with-refunds data
+to click through (production has zero returns); the definition change is
+code- + tsc-verified.
+
+**Not done.** Z2 (discount decouple — next, my lane: posCore/CartItem/POS/
+Receipt), Z5 (hamburger — large). Needs deploy (migrations 0077/0078/0079 +
+frontend).
