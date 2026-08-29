@@ -12441,3 +12441,18 @@ live phone check for the exact feel (per Part 476); this only reduces the seam.
 time. Part 477 after re-checking max = 476.
 
 **Needs deploy.** Frontend-only; ships on the next build.
+
+## Part 478 (Aug 29 2026, session business-os-v1-e4) — merged Stats & Branches: subtle divider between the halves
+
+**Continuing the refinement.** Added a thin inset divider (`border-t`, inset by the
+section padding, `aria-hidden`) between the embedded stats and the embedded branch
+list in the merged hub view — rendered ONLY when both halves show. It delineates the
+two parts so the section reads as "stats above, list below" without reintroducing a
+gap. BranchesHubPage.tsx only.
+
+**Verification.** tsc + check:source (405 files) + vite build green. Live phone feel
+still deferred (authenticated page).
+
+**Parallel sessions.** One file, clean. Part 478 after re-checking max = 477.
+
+**Needs deploy.** Frontend-only; ships on the next build.

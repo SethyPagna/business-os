@@ -147,6 +147,12 @@ export default function BranchesHubPage() {
             {canInventory ? (
               <InventorySection hostSection="stats" embedded onHostSectionChange={(next) => setSection(next)} />
             ) : null}
+            {/* A subtle inset divider between the two halves (only when both
+                show) so the merged section reads as stats-above-list without
+                a gap -- delineation, not separation. */}
+            {canInventory && canBranchList ? (
+              <div className="mx-3 shrink-0 border-t border-gray-200 dark:border-gray-700 sm:mx-6" aria-hidden="true" />
+            ) : null}
             {canBranchList ? <BranchesSection embedded /> : null}
           </div>
         ) : canInventory ? (
