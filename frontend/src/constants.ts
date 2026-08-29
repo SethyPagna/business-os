@@ -138,6 +138,12 @@ export type PosOrder = {
   customPayment: boolean
   paidUsd: string
   paidKhr: string
+  // Y12: the ACTUAL change handed back, per currency. Change is often given
+  // in a different currency than the payment (e.g. owe $3, give 12,000 KHR),
+  // so these are editable and additive (USD + KHR are separate amounts, not
+  // a dual representation of one). Empty = fall back to the computed change.
+  changeGivenUsd: string
+  changeGivenKhr: string
 }
 
 export function createEmptyOrder(number: number): PosOrder {
@@ -164,6 +170,8 @@ export function createEmptyOrder(number: number): PosOrder {
     customPayment: false,
     paidUsd: '',
     paidKhr: '',
+    changeGivenUsd: '',
+    changeGivenKhr: '',
   }
 }
 

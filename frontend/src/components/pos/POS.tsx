@@ -341,6 +341,9 @@ type PosOrder = Record<string, unknown> & {
   membershipRedeemUnits: string
   paidKhr: string
   paidUsd: string
+  // Y12: actual change handed back per currency (see constants.ts PosOrder).
+  changeGivenUsd: string
+  changeGivenKhr: string
   paymentDetails: PaymentDetail[]
   paymentMethod: string
   selectedDelivery: DeliveryContactRecord | null
@@ -2568,8 +2571,11 @@ export default function POS() {
       payment_currency: (paidUsdNum > 0 && paidKhrNum > 0) ? 'MIXED' : paidKhrNum > 0 ? 'KHR' : 'USD',
       amount_paid_usd: paidUsdNum,
       amount_paid_khr: paidKhrNum,
-      change_usd: Math.max(0, changeUsd),
-      change_khr: Math.max(0, changeKhr),
+      // Y12: when the cashier entered the actual change handed back (either
+      // currency non-empty), record THOSE per-currency amounts additively;
+      // otherwise fall back to the computed dual representation, unchanged.
+      change_usd: (active.changeGivenUsd !== '' || active.changeGivenKhr !== '') ? Math.max(0, parseFloat(active.changeGivenUsd) || 0) : Math.max(0, changeUsd),
+      change_khr: (active.changeGivenUsd !== '' || active.changeGivenKhr !== '') ? Math.max(0, Math.round(parseFloat(active.changeGivenKhr) || 0)) : Math.max(0, changeKhr),
       exchange_rate: exchangeRate,
       is_delivery:               active.isDelivery ? 1 : 0,
       delivery_contact_id:       active.selectedDelivery?.id      || null,
@@ -3369,13 +3375,58 @@ export default function POS() {
                 </div>
                 {(paidUsdNum > 0 || paidKhrNum > 0) && (
                   <div className={`mt-1.5 p-2 rounded-lg text-xs ${changeUsd >= 0 ? 'bg-green-50 dark:bg-green-900/20' : 'bg-red-50 dark:bg-red-900/20'}`}>
-                    <div className="flex justify-between">
-                      <span className="text-gray-600 dark:text-gray-400">{t('change')}:</span>
-                      <div className="text-right font-bold">
-                        <div className={changeUsd >= 0 ? 'text-green-600' : 'text-red-600'}>{fmtUSD(Math.abs(changeUsd))}{changeUsd < 0 ? ' short' : ''}</div>
-                        {Math.abs(changeKhr) > 1 && <div className="text-gray-400 font-normal">{fmtKHR(Math.abs(changeKhr))}</div>}
+                    {changeUsd >= 0 ? (
+                      // Y12: record the ACTUAL change handed back, per currency
+                      // -- prefilled/placeholdered from the computed change, but
+                      // editable because change is often given in a different
+                      // currency than the payment. Empty fields = use computed.
+                      <div className="space-y-1.5">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-gray-600 dark:text-gray-400">{t('change_given') || 'Change given'}:</span>
+                          <button
+                            type="button"
+                            className="text-[11px] text-blue-500 hover:underline"
+                            onClick={() => patchActive({ changeGivenUsd: changeUsd > 0 ? changeUsd.toFixed(2) : '', changeGivenKhr: '' })}
+                            title={t('use_computed_change_hint') || 'Fill USD with the full computed change'}
+                          >
+                            {t('use_computed') || 'Use computed'}: {fmtUSD(changeUsd)}{changeKhr > 1 ? ` / ${fmtKHR(changeKhr)}` : ''}
+                          </button>
+                        </div>
+                        <div className="grid grid-cols-2 gap-1.5">
+                          <div className="relative">
+                            <span className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-gray-400">{usdSymbol}</span>
+                            <input
+                              id="pos-change-given-usd"
+                              name="pos_change_given_usd"
+                              className="input py-1 pl-5 text-xs"
+                              inputMode="decimal"
+                              placeholder={changeUsd > 0 ? changeUsd.toFixed(2) : '0.00'}
+                              value={active.changeGivenUsd}
+                              onChange={e => patchActive({ changeGivenUsd: e.target.value })}
+                              autoComplete="off"
+                            />
+                          </div>
+                          <div className="relative">
+                            <span className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-gray-400">{khrSymbol}</span>
+                            <input
+                              id="pos-change-given-khr"
+                              name="pos_change_given_khr"
+                              className="input py-1 pl-5 text-xs"
+                              inputMode="numeric"
+                              placeholder="0"
+                              value={active.changeGivenKhr}
+                              onChange={e => patchActive({ changeGivenKhr: e.target.value })}
+                              autoComplete="off"
+                            />
+                          </div>
+                        </div>
                       </div>
-                    </div>
+                    ) : (
+                      <div className="flex justify-between">
+                        <span className="text-gray-600 dark:text-gray-400">{t('change')}:</span>
+                        <div className="text-right font-bold text-red-600">{fmtUSD(Math.abs(changeUsd))} {t('short') || 'short'}</div>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>

@@ -4421,5 +4421,9 @@
   "status_stock_effect_cue": "ផលប៉ះពាល់ស្តុកតាមស្ថានភាព",
   "status_stock_effect_label": "ស្ថានភាពលក់នីមួយៗធ្វើអ្វីចំពោះស្តុក",
   "walk_in": "អតិថិជនទូទៅ",
-  "credit_awaiting_payment": "ឥណទាន — រង់ចាំការទូទាត់"
+  "credit_awaiting_payment": "ឥណទាន — រង់ចាំការទូទាត់",
+  "change_given": "ប្រាក់អាប់ដែលឲ្យ",
+  "use_computed": "ប្រើតម្លៃគណនា",
+  "use_computed_change_hint": "បំពេញ USD ដោយប្រាក់អាប់គណនាទាំងស្រុង",
+  "short": "ខ្វះ"
 }
