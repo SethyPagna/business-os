@@ -615,7 +615,22 @@ export default function Receipt({ sale, settings = {}, onClose, _previewMode }: 
   const shellStyle = shellStyleFor(receiptWidthMm)
 
   if (_previewMode) {
-    return <div data-receipt-export-root="true" style={shellStyle}>{compactReceiptBlock || <>{renderedSections}{qrBlock}</>}</div>
+    // Z4: enabling the 80x50 card must not REPLACE the full-receipt preview
+    // in Receipt Settings -- the settings preview now stacks BOTH renditions
+    // (each labeled with the size its Print button uses), the same way the
+    // receipt view has since B5. Non-compact configs preview the single full
+    // receipt exactly as before.
+    if (compactSalesReceipt) {
+      return (
+        <div>
+          <p className="mb-1 text-center text-[11px] font-semibold uppercase tracking-wide text-gray-400">80 × 50 mm</p>
+          <div data-receipt-export-root="true" style={shellStyle}>{compactReceiptBlock}</div>
+          <p className="mb-1 mt-4 text-center text-[11px] font-semibold uppercase tracking-wide text-gray-400">{fullReceiptWidthMm} mm</p>
+          <div style={shellStyleFor(fullReceiptWidthMm)}>{renderedSections}{qrBlock}</div>
+        </div>
+      )
+    }
+    return <div data-receipt-export-root="true" style={shellStyle}>{renderedSections}{qrBlock}</div>
   }
 
   return (
