@@ -1429,15 +1429,17 @@ with 6e's F3 slice 2 (Products.tsx / Inventory.tsx / ProductForm.tsx /
 FastStockInModal.tsx / Modal.tsx / Sidebar.tsx) — marked [HOT-6e], do not start
 those until that unit commits.*
 
-- [~] Y1 *(client half SHIPPED, Part 425: all three contact tabs track a
-  refreshing flag spanning silent search refetches and show "Searching…"
-  instead of the false "No matching customers"; search joins the shared
-  180ms debounce (was bare useDeferredValue — a query per keystroke, each
-  refetching includePoints). REMAINING: measure the server-side timing —
-  contacts + products search are FTS5-backed and paginated, so the 5s+
-  the user saw most plausibly came from the Worker being saturated by the
-  concurrently-running import apply; re-measure on an idle worker before
-  building anything server-side.)* **Search is very slow / reads broken.** Products search "pink dahlia"
+- [x] Y1 *(client half Part 425; server side MEASURED + CLOSED Part 436).*
+  Client: all three contact tabs track a refreshing flag spanning silent
+  search refetches and show "Searching…" instead of the false "No matching
+  customers"; search joins the shared 180ms debounce (was bare
+  useDeferredValue — a query per keystroke, each refetching includePoints).
+  **Server side measured on the now-idle production worker: the search infra
+  is fast** — the FTS5 MATCH for "pink dahlia" runs in 0.53ms and the
+  family-pagination CTE/window query in <0.5ms. So the original >5s was
+  Worker saturation from the concurrently-running 12k-row import apply (CPU
+  bound), not the search itself — resolved now the import is done. No
+  server-side change needed.)* **Search is very slow / reads broken.** Products search "pink dahlia"
   took >5s; Contacts search also very slow — and while a search is in flight the
   list shows "No matching customers" instead of a searching state (reads as data
   loss). Fix both: measure where the time goes (server query vs frontend), add
@@ -1525,12 +1527,25 @@ those until that unit commits.*
   (b) find the applying stall (queue consumer death/lease?); (c) restore/keep
   review-before-commit so approval happens on the analysis, and the ONLY long
   phase after approve is the apply, clearly progressing.
-- [~] Y9. **[CLAIMED session business-os-v1-87, Part 436]** **Import progress UI too
-  text-heavy.** The tracker card is a wall of
+- [x] Y9 *(Part 436, session business-os-v1-87 — SHIPPED, needs deploy.
+  BackgroundImportTracker.tsx only; no new lang keys. Each expanded per-job row
+  was a run-on ' - ' line of rows/images/issues/result-tally/timing/error/stall
+  plus an always-visible policy-chip row. Recomposed as: label + per-job progress
+  bar (active only, amber when stalled) + a terse counts line (rows · images ·
+  issues) + an error/stall line kept VISIBLE on its own amber row + a per-job
+  "Details" fold (ChevronDown, existing view_details/hide_details keys) holding
+  the result tallies as chips, phase timing, and the applied-option chips. The
+  collapsed header's redundant prose subtitle ('<type> import - <phase>', already
+  in the status chip) became the same terse counts line. No data/handler/action/
+  timeout change — getJobResultSummary→getJobResultParts (array for chips),
+  getJobCountsSummary added, transient openDetailJobIds fold state. tsc clean,
+  vite build green, every pinned tracker contract re-verified pass. Two whole-file
+  test aborts (actionStability POS_CHECKOUT_TIMEOUT_MS=20000, performanceLoadingUx
+  Dashboard range labels) are PRE-EXISTING peer assertions (Y2/Y19) on clean
+  committed files — not this change; owning sessions must refresh them.)*
+  **Import progress UI too text-heavy.** The tracker card is a wall of
   words (screenshot 1). Compact design: status chip + progress bar + counts;
-  details fold behind an expander. Footprint: BackgroundImportTracker.tsx only
-  (disjoint from a8's Z1a batchLabel sweep and 6e's F3 tray) + its lang keys
-  (reusing existing view_details/hide_details/import_* keys — no new keys).
+  details fold behind an expander.
 - [x] Y10 *(Part 425 — SHIPPED end to end, needs deploy. POS no longer
   demands the full amount (and with it a method) for awaiting_payment;
   with nothing paid the sale records NO method (the server's 'Cash'
@@ -1692,11 +1707,15 @@ other" with the Phase-Y items.*
   stacks BOTH renditions (labeled '80 × 50 mm' and '<N> mm'), mirroring the
   receipt view since B5. Non-compact configs preview the single full receipt
   unchanged.
-- [ ] Z5. **Global UI pass: contrast + button colors + hamburger menu.**
+- [~] Z5 **[CLAIMED: session a8]**. **Global UI pass: contrast + button colors
+  + hamburger menu.**
   Increase contrast on critical icons (close ✕, currency symbols); Refresh/
   Update actions blue, Exit red; introduce a hamburger menu housing Settings
   (incl. Receipt Settings moved into the main Settings page), Update, Exit.
-  Larger item — schedule as its own unit.
+  Footprint: Sidebar.tsx + Modal.tsx + App.tsx (+ main.css for icon/currency
+  contrast) — all clean post-F3. NOTE: "Receipt Settings moved into main
+  Settings" is a larger IA change scoped as a follow-up; this unit does the
+  hamburger + button colors + contrast.
 - [~] Z6. **OTP enable broken + buried under the profile page — HIGH
   priority.** **Layering FIXED (Part 426, needs deploy):** the OTP dialog
   rendered inline inside UserProfileModal — a DOM child of its tree,
