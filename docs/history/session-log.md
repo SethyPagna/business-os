@@ -12059,3 +12059,35 @@ phone shown twice; POS cart empty-state overlapped by the Customer/Discount pane
 taken after re-checking max = 463.
 
 **Needs deploy.** Frontend-only; ships on the next build.
+
+## Part 465 (Aug 29 2026, session business-os-v1-74) — direct-apply import extended to inventory, sales, and contacts
+
+Follow-up to the products change (Part 463): the user asked for the same "one
+fast review, then it just imports — no import/merge screen" flow on the other
+import pages. Extended it to all of them.
+
+- **Inventory + Sales** share `imports/ServerImportReviewScreen.tsx`; it gained
+  the same `autoApprove` mode as the products screen — poll to `awaiting_review`,
+  then approve automatically, showing an "Importing…" progress state instead of
+  the review table (the modal closes into the BackgroundImportTracker on
+  `onApproved`). Both `InventoryImportModal` and `SalesImportModal` pass
+  `autoApprove`. Neither type conflict-blocks on the server's approve (only
+  products and the contact types do — importJobs.ts), so these simply apply; any
+  unexpected approve error falls back to the manual table.
+- **Contacts** use a different post-start flow (`ContactImportModal` with
+  `postStartStep` polling → conflicts | ready_to_approve). Added an effect that
+  auto-fires `handleApproveNow` the moment a CLEAN analysis reaches
+  `ready_to_approve` (once per run, via `autoApproveAttemptedRef`), and replaced
+  the manual "Approve now" panel with an "Importing…" progress state. Genuine
+  phone/name conflicts still route to `ContactImportConflictsModal` (the merge
+  screen) for manual resolution — the one acceptable mid-flow review, matching
+  the products fallback on `product_conflicts_unresolved`.
+
+**Verification.** tsc clean; `importDirectApplySurfaces.test.ts` guards the wiring
+across the shared screen + all three modals. The core pattern was already proven
+LIVE on products in Part 463 (drop CSV → instant review → Upload & import →
+"Importing…" → auto-approve → products appeared, no second review); inventory and
+sales reuse that exact screen/logic, and contacts is the same pattern on its own
+flow with the merge-screen fallback preserved.
+
+Commit: `d8d969c5`. **Needs deploy** (frontend-only).
