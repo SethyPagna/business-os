@@ -105,7 +105,7 @@ export default function ProductDetailReport({ productId, t, fmtUSD }: {
     <div className="space-y-2">
       {loadError ? <p className="rounded-lg bg-red-50 px-2.5 py-1.5 text-xs text-red-600 dark:bg-red-900/20 dark:text-red-300">{loadError}</p> : null}
 
-      <SectionCard kind="batches" title={`${tr('batches', 'Batches')}${report?.batches?.length ? ` (${report.batches.length})` : ''}`} storageKey="product_detail_batches" defaultOpen={false}>
+      <SectionCard kind="batches" nested title={`${tr('batches', 'Batches')}${report?.batches?.length ? ` (${report.batches.length})` : ''}`} storageKey="product_detail_batches" defaultOpen={false}>
         <div className="max-h-56 space-y-1 overflow-y-auto p-2">
           {(report?.batches || []).map((lot) => (
             <div key={lot.id} className="flex flex-wrap items-center justify-between gap-x-3 gap-y-0.5 rounded-lg bg-gray-50 px-2.5 py-1.5 text-xs dark:bg-gray-800/60">
@@ -121,7 +121,7 @@ export default function ProductDetailReport({ productId, t, fmtUSD }: {
         </div>
       </SectionCard>
 
-      <SectionCard kind="stock" title={tr('stock_change_ledger', 'Stock Changes')} storageKey="product_detail_movements" defaultOpen={false}>
+      <SectionCard kind="stock" nested title={tr('stock_change_ledger', 'Stock Changes')} storageKey="product_detail_movements" defaultOpen={false}>
         <div className="max-h-64 overflow-y-auto p-2">
           {movements === null ? <p className="py-2 text-center text-xs text-gray-400">{tr('loading', 'Loading')}...</p> : (
             <div className="space-y-1">
@@ -141,7 +141,7 @@ export default function ProductDetailReport({ productId, t, fmtUSD }: {
         </div>
       </SectionCard>
 
-      <SectionCard kind="sales" title={tr('sales', 'Sales')} storageKey="product_detail_sales" defaultOpen={false}>
+      <SectionCard kind="sales" nested title={tr('sales', 'Sales')} storageKey="product_detail_sales" defaultOpen={false}>
         <div className="p-2">
           <div className="mb-1.5 inline-flex rounded-lg bg-gray-100 p-0.5 text-xs dark:bg-gray-800">
             <button type="button" onClick={() => setSalesMode('by_day')} className={`rounded-md px-2 py-1 font-medium ${salesMode === 'by_day' ? 'bg-white text-blue-600 shadow dark:bg-gray-900' : 'text-gray-500'}`}>{tr('daily', 'Daily')}</button>
@@ -161,7 +161,7 @@ export default function ProductDetailReport({ productId, t, fmtUSD }: {
         </div>
       </SectionCard>
 
-      <SectionCard kind="suppliers" title={`${tr('suppliers', 'Suppliers')}${report?.suppliers?.length ? ` (${report.suppliers.length})` : ''}`} storageKey="product_detail_suppliers" defaultOpen={false}>
+      <SectionCard kind="suppliers" nested title={`${tr('suppliers', 'Suppliers')}${report?.suppliers?.length ? ` (${report.suppliers.length})` : ''}`} storageKey="product_detail_suppliers" defaultOpen={false}>
         <div className="max-h-52 space-y-1 overflow-y-auto p-2">
           {(report?.suppliers || []).map((supplier) => (
             <div key={supplier.supplier_key} className="rounded-lg bg-gray-50 px-2.5 py-1.5 text-xs dark:bg-gray-800/60">

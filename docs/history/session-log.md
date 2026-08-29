@@ -12225,3 +12225,22 @@ tsc + tests green. The import flow itself was already proven live end-to-end in
 Parts 463/467, so this is a cadence tweak on a verified path.
 
 Commit `71f93fc2`. **Needs deploy** (frontend-only).
+
+## Part 470 (Aug 29 2026, session business-os-v1-e4) — product detail report blocks become mini-sections
+
+**Continuing the mini-section pass (user: "continue").** The product detail modal's
+report (surfaces/ProductDetailReport.tsx) stacked four full `SectionCard`s — Batches,
+Stock Changes, Sales, Suppliers — as drill-downs beneath the primary product info.
+They are secondary sub-reports, not page-level sections, so all four now pass the
+`nested` mini variant added in Part 468: same color-by-kind accent, fold state and
+storageKeys, just the lighter/smaller chrome, so they read as compact sub-sections of
+the product rather than four heavy cards competing with the info above them.
+
+**Verification.** tsc + check:source (405 files) + vite build green.
+ProductDetailReport.tsx only — no other caller of the shared SectionCard changed
+(nested is opt-in).
+
+**Parallel sessions.** One frontend file (mine, clean); not in a peer's dirty set.
+Part 470 taken after re-checking max = 469.
+
+**Needs deploy.** Frontend-only; ships on the next build.
