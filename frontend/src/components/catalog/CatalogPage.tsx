@@ -677,7 +677,13 @@ function buildDraft(config: PortalConfig): PortalDraft {
     customer_portal_show_phone: !!config.showPhone,
     customer_portal_show_email: !!config.showEmail,
     customer_portal_show_address: !!config.showAddress,
-    customer_portal_public_url: config.publicUrl || '',
+    // Prefill from the RAW stored override, not the RESOLVED publicUrl: prefilling
+    // the resolved value (which folds in the BUSINESS_OS_PUBLIC_URL fallback) meant
+    // every save froze that fallback into an explicit stored override, permanently
+    // shadowing later env changes (the stale-publicUrl root cause). `??` keeps an
+    // explicit blank override blank; the publicUrl fall-through only fires for an
+    // older cached config that predates the publicUrlOverride field.
+    customer_portal_public_url: (config.publicUrlOverride ?? config.publicUrl) || '',
     customer_portal_website: config.links?.website || '',
     customer_portal_facebook: config.links?.facebook || '',
     customer_portal_instagram: config.links?.instagram || '',
@@ -806,7 +812,11 @@ function applyDraft(config: PortalConfig, draft: PortalDraft): PortalConfig {
     showPhone: toBoolean(draft.customer_portal_show_phone, config.showPhone),
     showEmail: toBoolean(draft.customer_portal_show_email, config.showEmail),
     showAddress: toBoolean(draft.customer_portal_show_address, config.showAddress),
-    publicUrl: String(draft.customer_portal_public_url || '').trim(),
+    // Keep the raw override AND a resolved publicUrl in optimistic state: when the
+    // override is cleared the resolved value falls back to the current (env-based)
+    // publicUrl rather than going blank, mirroring the backend's fallback.
+    publicUrlOverride: String(draft.customer_portal_public_url || '').trim(),
+    publicUrl: String(draft.customer_portal_public_url || '').trim() || config.publicUrl || '',
     links: {
       website: draft.customer_portal_website || '',
       facebook: draft.customer_portal_facebook || '',

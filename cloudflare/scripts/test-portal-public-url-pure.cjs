@@ -130,4 +130,20 @@ check('deprecated host is case-insensitive', publicUrlFor('https://LeangCosmetic
 const cfg = buildPortalConfig({ customer_portal_public_url: 'https://leangcosmetics.dpdns.org', business_name: 'Some Shop' }, ENV)
 check('unrelated businessName unaffected', cfg.businessName, 'Some Shop')
 
+// 9. publicUrlOverride: the RAW stored override the portal editor prefills its
+//    input from -- exposed separately from the RESOLVED publicUrl so a blank
+//    override stays blank on save instead of freezing the env fallback. It shows
+//    the actual stored value (even a stale deprecated one, so the merchant can
+//    see and clear it), and is empty when no override is set.
+const overrideFor = (override) =>
+  buildPortalConfig(override === undefined ? {} : { customer_portal_public_url: override }, ENV).publicUrlOverride
+check('override exposed raw (stale value visible to editor, not resolved)', overrideFor('https://leangcosmetics.dpdns.org'), 'https://leangcosmetics.dpdns.org')
+check('override exposed raw (genuine external)', overrideFor('https://customers.example.com'), 'https://customers.example.com')
+check('blank override -> empty publicUrlOverride (stays blank, no freeze)', overrideFor(''), '')
+check('unset override -> empty publicUrlOverride', overrideFor(undefined), '')
+// And the resolved publicUrl on that same stale-override config is STILL the env
+// (the deprecated-host guard), so the editor shows the stale override in its input
+// while the live/resolved url is already correct.
+check('resolved publicUrl stays env even while override input shows the stale value', cfg.publicUrl, 'https://leangbeauty.com')
+
 console.log(`\nALL ${checks} CHECKS PASSED`)

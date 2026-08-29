@@ -205,6 +205,13 @@ export function buildPortalConfig(settings: SettingsMap, env: Env) {
     // assistant, forwarded into the prompt built by lib/portalAi.ts.
     aiPrompt: settings.customer_portal_ai_prompt || '',
     publicUrl: portalPublicUrl(settings, env),
+    // The RAW stored override, separate from the resolved publicUrl above. The
+    // portal editor prefills its "Public customer URL" input from THIS (not the
+    // resolved publicUrl), so a blank override stays blank on save instead of
+    // freezing the env fallback into an explicit stored override -- the root
+    // cause behind the stale-publicUrl symptom the deprecated-host guard in
+    // portalPublicUrl neutralises. Empty when the merchant has set no override.
+    publicUrlOverride: normalizeUrl(settings.customer_portal_public_url),
     publicPath: settings.customer_portal_path || '/',
     links: {
       website: settings.customer_portal_website || '',
