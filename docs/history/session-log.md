@@ -10629,6 +10629,18 @@ F3-slice-2 files + Products.tsx + Z5/Z8, I took Y19 (Dashboard.tsx only). Part
 431 reserved for me, peer took 432+. Inventory.tsx still carries the F3 peer's
 uncommitted work (leave it alone or isolate, per Z13's note).
 
-**Not done.** Y17 (Sales Excel-like columns) next this session; Z2/Y12 scoped,
-Z5/Z8/Z10 with the peer or needing a definition. Needs deploy (migrations
-0077/0078/0079 + all the frontend changes).
+**Y17 (same session, folded into this Part).** The Sales list had no customer
+column at all; added a Customer cell folding name + phone into one column
+(desktop table after Date + leading the mobile card meta line). The row click
+already opens SaleDetailModal (membership/address/line items) so no detail
+wiring changed; the local SaleRecord interface gained customer_name/phone (the
+list endpoint returns them via SELECT s.*), colSpans 10→11, an 11th skeleton
+cell, walk_in en+km key. SalesListSurface.tsx + lang packs only; Sales.tsx and
+SaleDetailModal.tsx untouched (the latter is the peer's active Z8 lane).
+Commit c4eadd5f. **Ride-along flagged:** that lang commit swept two
+UNCOMMITTED keys from the shared packs — the peer's Z8 `credit_awaiting_payment`
+and a stray `status_stock_effect_label` — into HEAD. Benign (additive strings,
+no code dep); messaged the peer to drop them from their pending edit.
+
+**Not done.** Z2/Y12 scoped, Z5/Z8/Z10 with the peer or needing a definition.
+Needs deploy (migrations 0077/0078/0079 + all the frontend changes).

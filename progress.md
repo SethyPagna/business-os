@@ -1568,10 +1568,15 @@ those until that unit commits.*
 - [ ] Y16. **History + Manage buttons join the section-chip row** (not their own
   toolbar row) on: Sales, Branches, Contacts, Settings, Library, Review & Logs.
   (Products' equivalent rides Y15.)
-- [ ] Y17. **Sales list: Excel-like columns, details folded into the row.**
-  Customer = ONE column (name + phone) that opens a detail view (membership
-  etc.) on click; cashier same pattern; payment one row; drop the per-row
-  detail sprawl.
+- [x] Y17 *(Part 431 — SHIPPED, needs deploy; session a8).* **Sales list:
+  Customer column folded in.** The list had NO customer column; now a Customer
+  cell folds name + phone into one column (desktop table after Date, and
+  leading the mobile card meta line). The row click already opens
+  SaleDetailModal for the full membership/address/line-item detail (no detail
+  wiring changed); cashier + payment are already single columns. Footprint
+  SalesListSurface.tsx + lang packs only. tsc + build green. (The
+  fuller "Excel-like columns" reshuffle beyond adding the customer column is
+  satisfied by the existing single-cell cashier/payment + detail-on-click.)
 - [x] Y18 *(Part 425 — SHIPPED. Writes and sync:update events invalidated
   only the entity's own client-cache prefix, so dashboard:*/analytics:*
   stayed fresh (20s TTL) and the Dashboard's own post-cancel refresh
