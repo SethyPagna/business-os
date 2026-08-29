@@ -285,6 +285,8 @@ export default function InventoryImportModal({ onClose, onDone }: ImportModalPro
           jobId={reviewJob.id}
           label={tr('inventory', 'Inventory')}
           source="inventory_modal"
+          // Direct-apply: approve automatically after analysis, no second review.
+          autoApprove
           t={t}
           notify={notify}
           onApproved={async () => {

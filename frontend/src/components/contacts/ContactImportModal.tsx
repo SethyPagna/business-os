@@ -226,6 +226,9 @@ export default function ContactImportModal({ type, onClose, onDone }: ContactImp
   const pollTimeoutRef = useRef<number | null>(null)
   const pollAttemptRef = useRef(0)
   const pollGenerationRef = useRef(0)
+  // Direct-apply: fire the approve once when a clean (no-conflict) import is
+  // ready, so the operator doesn't click a second "approve now". Reset per run.
+  const autoApproveAttemptedRef = useRef(false)
 
   const stopPostStartPoll = () => {
     pollGenerationRef.current += 1
@@ -309,6 +312,19 @@ export default function ContactImportModal({ type, onClose, onDone }: ContactImp
       if (aliveRef.current) setApproving(false)
     }
   }
+
+  // Direct-apply: a clean import (analysis found nothing to resolve) reaches
+  // 'ready_to_approve' -- approve it automatically instead of waiting for a
+  // second "approve now" click. Conflicts route to 'conflicts' (the merge
+  // screen) instead and are unaffected, so real phone/name matches are still
+  // resolved by hand.
+  useEffect(() => {
+    if (postStartStep !== 'ready_to_approve' || postStartJobId === null) return
+    if (approving || autoApproveAttemptedRef.current) return
+    autoApproveAttemptedRef.current = true
+    void handleApproveNow(postStartJobId, rowCount, conflictMode)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [postStartStep, postStartJobId])
 
   const signalDone = async (payload: ContactImportResult): Promise<void> => {
     if (typeof onDone === 'function') {
@@ -489,6 +505,7 @@ export default function ContactImportModal({ type, onClose, onDone }: ContactImp
       // job's own status so conflict resolution (if any) happens as the
       // next step of THIS session, instead of a separate discovery in
       // BackgroundImportTracker's floating widget later.
+      autoApproveAttemptedRef.current = false
       setPostStartJobId(jobId)
       setPostStartStep('polling')
       pollAttemptRef.current = 0
@@ -544,28 +561,19 @@ export default function ContactImportModal({ type, onClose, onDone }: ContactImp
           </div>
         </div>
       ) : postStartStep === 'ready_to_approve' && postStartJobId !== null ? (
-        <div className="space-y-4">
-          <div className="flex items-center gap-2 rounded-xl border border-green-200 bg-green-50 p-4 text-sm text-green-700 dark:border-green-900/40 dark:bg-green-900/10 dark:text-green-400">
-            {tr('contacts_import_ready_to_approve', 'Analysis finished. Ready to import -- approve to apply it now.')}
-          </div>
-          <div className="flex gap-2">
-            <button
-              type="button"
-              className="btn-primary flex-1"
-              disabled={approving}
-              onClick={() => void handleApproveNow(postStartJobId, rowCount, conflictMode)}
-            >
-              {approving ? (tr('approving', 'Approving...')) : tr('contacts_import_approve_now', 'Approve now')}
-            </button>
-            <button
-              type="button"
-              className="btn-secondary"
-              disabled={approving}
-              onClick={() => void fallBackToBackgroundTracking(rowCount, postStartJobId, conflictMode)}
-            >
-              {tr('contacts_import_approve_later', "I'll approve later")}
-            </button>
-          </div>
+        // Direct-apply: the auto-approve effect applies this the moment it's
+        // ready, so this is a brief progress state, not a manual approve step.
+        <div className="space-y-3 py-6 text-center">
+          <p className="text-sm font-semibold text-gray-800 dark:text-gray-100">{tr('import_applying_now', 'Importing…')}</p>
+          <p className="text-xs text-gray-500 dark:text-gray-400">{tr('import_applying_hint', 'Applying your reviewed import. This closes when it starts.')}</p>
+          <button
+            type="button"
+            className="btn-secondary text-sm"
+            disabled={approving}
+            onClick={() => postStartJobId !== null && void fallBackToBackgroundTracking(rowCount, postStartJobId, conflictMode)}
+          >
+            {tr('contacts_import_continue_in_background', 'Continue in background')}
+          </button>
         </div>
       ) : (
       <div className="space-y-4">

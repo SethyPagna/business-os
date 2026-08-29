@@ -253,6 +253,8 @@ export default function SalesImportModal({ onClose, onDone }: ImportModalProps) 
           jobId={reviewJob.id}
           label={tr('sales', 'Sales')}
           source="sales_modal"
+          // Direct-apply: approve automatically after analysis, no second review.
+          autoApprove
           t={t}
           notify={notify}
           onApproved={async () => {

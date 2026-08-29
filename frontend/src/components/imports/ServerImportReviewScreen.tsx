@@ -36,7 +36,7 @@ function unwrapJob(value: unknown): Record<string, unknown> | null {
   return nested && typeof nested === 'object' ? nested as Record<string, unknown> : record
 }
 
-export default function ServerImportReviewScreen({ jobId, label, source, t, notify, onApproved, onReviewLater }: {
+export default function ServerImportReviewScreen({ jobId, label, source, t, notify, onApproved, onReviewLater, autoApprove = false }: {
   jobId: string | number
   label: string
   source: 'sales_modal' | 'inventory_modal'
@@ -44,6 +44,12 @@ export default function ServerImportReviewScreen({ jobId, label, source, t, noti
   notify: NotifyFn
   onApproved: () => void | Promise<void>
   onReviewLater: () => void | Promise<void>
+  // Direct-apply: once analysis reaches awaiting_review, approve automatically
+  // instead of showing the review table -- the operator already reviewed on the
+  // upload screen. Inventory/sales approve never conflict-blocks server-side, so
+  // this just applies; on any unexpected approve error we fall back to the
+  // manual table so the operator isn't stuck.
+  autoApprove?: boolean
 }) {
   const tr = (key: string, fallback: string): string => {
     const value = t(key)
@@ -62,6 +68,10 @@ export default function ServerImportReviewScreen({ jobId, label, source, t, noti
   const [loadingRows, setLoadingRows] = useState(false)
   const [approving, setApproving] = useState(false)
   const approvingRef = useRef(false)
+  // Direct-apply: fell back to the manual review after an unexpected approve
+  // error; autoAttemptedRef makes the auto-approve fire once.
+  const [autoFellBack, setAutoFellBack] = useState(false)
+  const autoAttemptedRef = useRef(false)
 
   useEffect(() => {
     const timeout = window.setTimeout(() => {
@@ -124,19 +134,54 @@ export default function ServerImportReviewScreen({ jobId, label, source, t, noti
     .map((key) => `${key}: ${Number(counts[key] || 0)}`)
     .join(' · '), [counts])
 
-  const confirm = async () => {
+  const confirm = async ({ auto = false }: { auto?: boolean } = {}) => {
     if (!beginSingleAction(approvingRef)) return
     setApproving(true)
     try {
       await approveImportJob(jobId, { source })
-      notify(tr('import_approved_now', 'Confirmed — the import is applying now.'), 'success')
+      if (!auto) notify(tr('import_approved_now', 'Confirmed — the import is applying now.'), 'success')
       await onApproved()
     } catch (error) {
+      // Direct-apply hit an unexpected error: drop to the manual review so the
+      // operator can see it and retry, rather than a dead-ended spinner.
+      if (auto) setAutoFellBack(true)
       notify(error instanceof Error ? error.message : tr('import_apply_failed', 'Could not approve import'), 'error')
     } finally {
       finishSingleAction(approvingRef)
       setApproving(false)
     }
+  }
+
+  // Direct-apply mode: approve automatically once analysis reaches
+  // awaiting_review. Fires once; disabled after a fallback.
+  useEffect(() => {
+    if (!autoApprove || autoFellBack) return
+    if (status !== 'awaiting_review') return
+    if (approvingRef.current || autoAttemptedRef.current) return
+    autoAttemptedRef.current = true
+    void confirm({ auto: true })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [status, autoApprove, autoFellBack])
+
+  // Direct-apply mode (no second review): one progress state while the server
+  // analyzes and we auto-approve; the modal closes on onApproved and the apply
+  // runs in the background tracker. Skipped once autoFellBack flips true.
+  if (autoApprove && !autoFellBack) {
+    const terminal = ['failed', 'cancelled', 'completed', 'completed_with_errors'].includes(status)
+    return (
+      <div className="space-y-4 py-8 text-center">
+        {!terminal ? <Loader2 className="mx-auto h-6 w-6 animate-spin text-blue-500" /> : <AlertTriangle className="mx-auto h-6 w-6 text-amber-500" />}
+        <p className="text-sm font-semibold text-slate-800 dark:text-slate-100">
+          {terminal ? tr('import_analysis_stopped', 'Import analysis stopped') : tr('import_applying_now', 'Importing…')}
+        </p>
+        <p className="text-xs text-slate-500 dark:text-slate-400">
+          {jobError || (terminal ? status : tr('import_applying_hint', 'Applying your reviewed import. This closes when it starts.'))}
+        </p>
+        <button type="button" className="btn-secondary text-sm" onClick={() => void onReviewLater()}>
+          {tr('continue_in_background', 'Continue in background')}
+        </button>
+      </div>
+    )
   }
 
   if (status !== 'awaiting_review') {
