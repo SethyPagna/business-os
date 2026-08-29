@@ -12314,3 +12314,36 @@ break the apply.
 
 Commits `5df6f337` (informative progress + surfaces test) and `6ba2b227` (skip
 fetch). tsc + import tests green. **Needs deploy** (frontend-only).
+
+## Part 473 (Aug 29 2026, session business-os-v1-e4) — Branches hub: the redundant "Stats" section removed
+
+**User (Aug 29): "branch stats can be removed... we already got the stats in
+branches."** The Branches hub (BranchesHubPage.tsx) carried five top chips: Stats,
+Branches, Products, Movements, RFID. "Stats" hosted Inventory's stats slice (Stock
+Value / Revenue / Discounts / Fees / Returns) — the same business-performance
+figures the Dashboard already shows — while the "Branches" view already carries its
+own branch summary cards (branches / items / value). So the dedicated Stats chip on
+this hub was redundant.
+
+**Change (BranchesHubPage.tsx only).** Dropped the 'stats' tab from the chip row;
+default landing is now the branch list ('branches'), falling back to 'products' for
+an inventory-only user with no branch grant (was 'stats'). The hidden-but-mounted
+Inventory host (kept alive under the Branches chip for state preservation) now hosts
+'products' instead of the retired 'stats' slice, and the unused BarChart3 icon import
+was removed. The 'stats' value stays in the union type (it is still one of
+Inventory's own internal sections); it is simply never surfaced as a hub chip.
+Inventory.tsx itself was NOT touched — its stats section still exists, just
+unhosted here; the business stats remain on the Dashboard.
+
+**Interpretation note.** Read "we already got the stats in branches" as: keep the
+branch summary cards ON the Branches view, remove the SEPARATE Stats chip. If the
+intent was the reverse (drop the branches/items/value cards, keep a Stats chip), it
+is a one-line revert — flagged to the user.
+
+**Verification.** tsc + check:source (405 files) + sectionNavigation + navigationConfig
+tests + vite build green. No test asserted a Branches 'stats' chip.
+
+**Parallel sessions.** BranchesHubPage.tsx only (session 15, its E1/E1b author, is
+gone; file clean). Part 473 taken after re-checking max = 472.
+
+**Needs deploy.** Frontend-only; ships on the next build.

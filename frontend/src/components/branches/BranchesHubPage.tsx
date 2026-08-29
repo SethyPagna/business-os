@@ -1,5 +1,4 @@
 import { Suspense, lazy, useEffect, useState } from 'react'
-import BarChart3 from 'lucide-react/dist/esm/icons/bar-chart-3.js'
 import Building2 from 'lucide-react/dist/esm/icons/building-2.js'
 import Package from 'lucide-react/dist/esm/icons/package.js'
 import ArrowLeftRight from 'lucide-react/dist/esm/icons/arrow-left-right.js'
@@ -66,10 +65,11 @@ function initialSection(canBranchList: boolean, canInventory: boolean): Branches
     // Old /inventory URLs open Inventory's old default slice (products).
     if (segment.includes('inventory')) return 'products'
   }
-  // Default landing now that Stats and Branches are separate sections:
-  // inventory users open on Stats; branch-only users on the branch list.
-  if (canInventory) return 'stats'
-  return 'branches'
+  // Default landing: the branch list (the hub's namesake). The old separate
+  // "Stats" section was removed (see the tabs comment), so an inventory-only
+  // user with no branch grant opens on Products instead.
+  if (canBranchList) return 'branches'
+  return 'products'
 }
 
 export default function BranchesHubPage() {
@@ -91,18 +91,18 @@ export default function BranchesHubPage() {
   }, [isActive, canInventory])
 
   const tabs: Array<{ id: BranchesHubSection; label: string; icon: typeof Building2; allowed: boolean; tone: string }> = [
-    // Two separate top sections where the old "Stats & Branches" chip used
-    // to stack both: Stats is Inventory's stats slice (inventory grant),
-    // Branches is the branch list (branches grant). Each self-gates and
-    // shows alone.
-    { id: 'stats', label: trh('stats', 'Stats'), icon: BarChart3, allowed: canInventory, tone: 'text-blue-600' },
+    // The dedicated "Stats" section was removed (user, Aug 29: "branch stats
+    // can be removed... we already got the stats in branches"). The Branches
+    // view already carries branch summary cards (branches / items / value) and
+    // the business-performance stats live on the Dashboard, so a separate
+    // Inventory-stats chip here was redundant. Remaining chips each self-gate.
     { id: 'branches', label: trh('branches', 'Branches'), icon: Building2, allowed: canBranchList, tone: 'text-sky-600' },
     { id: 'products', label: trh('products', 'Products'), icon: Package, allowed: canInventory, tone: 'text-teal-600' },
     { id: 'movements', label: trh('movements', 'Movements'), icon: ArrowLeftRight, allowed: canInventory, tone: 'text-violet-600' },
     { id: 'rfid', label: trh('rfid', 'RFID'), icon: Radio, allowed: canInventory, tone: 'text-emerald-600' },
   ]
   const visibleTabs = tabs.filter((tab) => tab.allowed)
-  const active: BranchesHubSection = visibleTabs.some((tab) => tab.id === section) ? section : (visibleTabs[0]?.id || 'stats')
+  const active: BranchesHubSection = visibleTabs.some((tab) => tab.id === section) ? section : (visibleTabs[0]?.id || 'branches')
 
   return (
     // Height-filling flex column so the hosted sections' `page-scroll`
@@ -141,7 +141,7 @@ export default function BranchesHubPage() {
         {canInventory ? (
           <div className={active === 'branches' ? 'hidden' : 'flex min-h-0 flex-1 flex-col'}>
             <InventorySection
-              hostSection={active === 'branches' ? 'stats' : active}
+              hostSection={active === 'branches' ? 'products' : active}
               onHostSectionChange={(next) => setSection(next)}
             />
           </div>
