@@ -1662,10 +1662,12 @@ other" with the Phase-Y items.*
   and refresh it in lockstep with the rows (sync effect on 'sales'/'returns'
   + directly after the status mutation). (b) **Z3b (Part 426):** action
   column header now reads "Print".
-- [ ] Z4. **Receipt SETTINGS preview: enabling 80×50 must not replace the
-  other preview** — show both formats side-by-side or with a toggle in the
-  settings preview area (the receipt VIEW itself already stacks both since
-  B5; this is the settings-page preview parity).
+- [x] Z4 *(Part 432 — SHIPPED, needs deploy).* **Receipt SETTINGS preview:
+  enabling 80×50 no longer replaces the full-receipt preview.** In
+  _previewMode the receipt returned ONLY the 80×50 card when enabled; it now
+  stacks BOTH renditions (labeled '80 × 50 mm' and '<N> mm'), mirroring the
+  receipt view since B5. Non-compact configs preview the single full receipt
+  unchanged.
 - [ ] Z5. **Global UI pass: contrast + button colors + hamburger menu.**
   Increase contrast on critical icons (close ✕, currency symbols); Refresh/
   Update actions blue, Exit red; introduce a hamburger menu housing Settings
@@ -1680,9 +1682,17 @@ other" with the Phase-Y items.*
   and owns its own lifecycle. REMAINING: verify the enable/validation flow
   end to end once deployed (the layering was the reported blocker; the
   generation/validation logic itself was not measured broken).
-- [ ] Z7. **Stats & Branch section: keep only the 6 stats, cut the redundant
-  "original branch" stats, tighten the spacing between stats and branch
-  list, and make Khmer text larger + darker (grey-on-light fails contrast).**
+- [~] Z7. **Stats & Branch section + Khmer contrast.** **Khmer DONE (Part
+  432, needs deploy):** the faint muted greys (text-gray-400/500,
+  text-slate-400/500) now resolve to gray-600 (~7:1 vs gray-400's ~2.5:1,
+  fails AA) in Khmer LIGHT mode only (scoped html:not(.dark) + body.lang-km;
+  dark mode untouched — verified live); the tiny [10px]/[11px] bracket sizes
+  gained a floor (the larger-Khmer-font ask was already handled by existing
+  lang-km .text-* rules). The stats redundancy is effectively addressed by
+  Z13 (Branch page now 6 balanced cards). REMAINING: tighten the vertical
+  spacing between the stats block and the branch list on the hub — but that's
+  in Inventory.tsx/BranchesHubPage (Inventory is F3-hot; do via isolation or
+  after F3 lands).
 - [ ] Z8. **POS payment: explicit Credit / Awaiting Payment / Done choices in
   the payment area**, and for awaiting-payment sales an "Edit Payments"
   affordance to add/modify payment entries later (Y10 shipped the

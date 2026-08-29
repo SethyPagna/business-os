@@ -10553,3 +10553,49 @@ connection-refused, environmental).
 preview, Z5 hamburger/contrast, Z7 Khmer contrast, Z8 explicit Credit, Z10
 "Reconcile Revenue" (needs the definition), Y12 per-currency change; plus the
 peer's F3-slice-2 (theirs). Needs deploy (migrations 0077/0078/0079 + frontend).
+
+## Part 432 (Aug 29 2026, session business-os-v1-43) — Z7 Khmer contrast + Z4 dual receipt-settings preview
+
+**Ask.** "continue" over the remaining Phase-Z items. Took the two safe,
+contained ones and deliberately HELD the money-touching / decision-blocked ones.
+
+**What changed.**
+- **Z7 (Khmer contrast in light mode).** Khmer glyphs have thinner strokes than
+  Latin, so the muted greys that read fine for Latin were too faint in Khmer
+  light mode (the user's "grey in light mode"). text-gray-400/500 and
+  text-slate-400/500 now resolve to gray-600 (~7:1 on white vs gray-400's
+  ~2.5:1, which fails WCAG AA) -- scoped to html:not(.dark) (dark mode keeps its
+  palette) and body.lang-km (Latin-language UIs keep their muted hierarchy). The
+  tiny [10px]/[11px] bracket sizes, not covered by the existing .text-xs Khmer
+  bump, gained a size floor. main.css only. Verified live: text-gray-400
+  computes to rgb(75,85,99) in Khmer light mode and stays rgb(156,163,175) in
+  dark mode. The larger-Khmer-font ask was already handled by existing
+  lang-km .text-* rules. Commit 26684f62.
+- **Z4 (receipt-settings dual preview).** In _previewMode the receipt returned
+  ONLY the 80x50 card when it was enabled, hiding the full-receipt preview in
+  Receipt Settings. It now stacks BOTH renditions (labeled '80 × 50 mm' and
+  '<N> mm'), mirroring the receipt view since B5; non-compact configs preview
+  the single full receipt unchanged. Receipt.tsx only. tsc clean. Commit
+  85e9d19f.
+
+**Parallel sessions.** Peer session a8 messaged mid-work claiming Y19 (Dashboard
+range picker, Dashboard.tsx) and reserving Part 431; replied confirming the
+split (my Dashboard Z11/Z12 already committed, so a8 branches clean), that Z4/Z7
+are done, and the CRITICAL Inventory.tsx warning: it holds the F3-slice-2 peer's
+uncommitted work, so a plain commit of it absorbs their feature + breaks the
+build (my Z13 stats change went in via reverse-then-reapply isolation). I took
+Part 432+.
+
+**Verified.** frontend tsc clean throughout (only the 3 peer ProductForm/
+Products onMinimize errors in their uncommitted files); scriptTypography test
+passes; vite build green; Z7 CSS + Z4 change confirmed in build; Z7 verified
+live via computed color in both themes.
+
+**Not done / needs the user.** Z2 (discount decouple) + Y12 (per-currency
+change) -- money-math on every sale, held for a dedicated test-covered unit
+rather than rushed. Z8 (explicit Credit) -- needs the definition of what
+"Credit" records vs awaiting_payment before building; the "edit payments later"
+half is partly done via Y10. Z10 ("Reconcile Revenue") -- needs its definition,
+now interacts with the 8-card Dashboard. Z5 (hamburger + button-colour pass) --
+large, best as its own unit. Z7's stats-block/branch-list spacing tweak lives in
+F3-hot Inventory.tsx. Needs deploy (migrations 0077/0078/0079 + frontend).
