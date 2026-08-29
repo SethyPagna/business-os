@@ -51,6 +51,15 @@ runTest('Contacts import auto-approves a clean import but keeps the merge screen
   assert.match(contactModal, /ContactImportConflictsModal/, 'the merge screen component must still be wired')
 })
 
+runTest('the direct-apply progress shows what is importing (counts / rows), not a bare spinner', () => {
+  // The shared screen builds a progressDetail from the server breakdown (summary)
+  // or the known row count, and the modals pass their rowCount in.
+  assert.match(genericScreen, /const progressDetail = summary/, 'the shared screen must derive a progress detail')
+  assert.match(genericScreen, /rowCount > 0 \?/, 'it must fall back to the row count')
+  assert.match(inventoryModal, /rowCount=\{reviewJob\.rowCount\}/, 'InventoryImportModal must pass its row count')
+  assert.match(salesModal, /rowCount=\{reviewJob\.rowCount\}/, 'SalesImportModal must pass its row count')
+})
+
 if (failed > 0) {
   process.exitCode = 1
   console.error(`\n${failed} import direct-apply surface test(s) failed`)

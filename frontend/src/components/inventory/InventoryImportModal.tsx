@@ -287,6 +287,7 @@ export default function InventoryImportModal({ onClose, onDone }: ImportModalPro
           source="inventory_modal"
           // Direct-apply: approve automatically after analysis, no second review.
           autoApprove
+          rowCount={reviewJob.rowCount}
           t={t}
           notify={notify}
           onApproved={async () => {

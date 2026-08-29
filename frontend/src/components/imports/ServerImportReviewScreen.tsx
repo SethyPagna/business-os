@@ -36,7 +36,7 @@ function unwrapJob(value: unknown): Record<string, unknown> | null {
   return nested && typeof nested === 'object' ? nested as Record<string, unknown> : record
 }
 
-export default function ServerImportReviewScreen({ jobId, label, source, t, notify, onApproved, onReviewLater, autoApprove = false }: {
+export default function ServerImportReviewScreen({ jobId, label, source, t, notify, onApproved, onReviewLater, autoApprove = false, rowCount = 0 }: {
   jobId: string | number
   label: string
   source: 'sales_modal' | 'inventory_modal'
@@ -50,6 +50,10 @@ export default function ServerImportReviewScreen({ jobId, label, source, t, noti
   // this just applies; on any unexpected approve error we fall back to the
   // manual table so the operator isn't stuck.
   autoApprove?: boolean
+  // Rows being imported (known from the caller before the server round-trip):
+  // shown in the direct-apply progress as "Importing N rows…" until the server's
+  // create/update breakdown lands.
+  rowCount?: number
 }) {
   const tr = (key: string, fallback: string): string => {
     const value = t(key)
@@ -169,6 +173,10 @@ export default function ServerImportReviewScreen({ jobId, label, source, t, noti
   // runs in the background tracker. Skipped once autoFellBack flips true.
   if (autoApprove && !autoFellBack) {
     const terminal = ['failed', 'cancelled', 'completed', 'completed_with_errors'].includes(status)
+    // Server create/update breakdown once analysis lands, else the known row
+    // count -- so the progress reads "Importing N rows…" rather than a bare spinner.
+    const progressDetail = summary
+      || (rowCount > 0 ? `${rowCount.toLocaleString()} ${tr('rows', 'rows')}` : '')
     return (
       <div className="space-y-4 py-8 text-center">
         {!terminal ? <Loader2 className="mx-auto h-6 w-6 animate-spin text-blue-500" /> : <AlertTriangle className="mx-auto h-6 w-6 text-amber-500" />}
@@ -176,7 +184,7 @@ export default function ServerImportReviewScreen({ jobId, label, source, t, noti
           {terminal ? tr('import_analysis_stopped', 'Import analysis stopped') : tr('import_applying_now', 'Importing…')}
         </p>
         <p className="text-xs text-slate-500 dark:text-slate-400">
-          {jobError || (terminal ? status : tr('import_applying_hint', 'Applying your reviewed import. This closes when it starts.'))}
+          {jobError || (terminal ? status : (progressDetail || tr('import_applying_hint', 'Applying your reviewed import. This closes when it starts.')))}
         </p>
         <button type="button" className="btn-secondary text-sm" onClick={() => void onReviewLater()}>
           {tr('continue_in_background', 'Continue in background')}

@@ -565,7 +565,7 @@ export default function ContactImportModal({ type, onClose, onDone }: ContactImp
         // ready, so this is a brief progress state, not a manual approve step.
         <div className="space-y-3 py-6 text-center">
           <p className="text-sm font-semibold text-gray-800 dark:text-gray-100">{tr('import_applying_now', 'Importing…')}</p>
-          <p className="text-xs text-gray-500 dark:text-gray-400">{tr('import_applying_hint', 'Applying your reviewed import. This closes when it starts.')}</p>
+          <p className="text-xs text-gray-500 dark:text-gray-400">{rowCount > 0 ? `${rowCount.toLocaleString()} ${tr('rows', 'rows')}` : tr('import_applying_hint', 'Applying your reviewed import. This closes when it starts.')}</p>
           <button
             type="button"
             className="btn-secondary text-sm"

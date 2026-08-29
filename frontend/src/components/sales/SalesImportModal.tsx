@@ -255,6 +255,7 @@ export default function SalesImportModal({ onClose, onDone }: ImportModalProps) 
           source="sales_modal"
           // Direct-apply: approve automatically after analysis, no second review.
           autoApprove
+          rowCount={reviewJob.rowCount}
           t={t}
           notify={notify}
           onApproved={async () => {

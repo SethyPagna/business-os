@@ -53,7 +53,7 @@ function decisionFor(choice: string): { action: string; field_overrides?: Record
   return { action: 'apply' }
 }
 
-export default function ProductServerImportReviewScreen({ jobId, jobRevision, t, notify, onApproved, onReviewLater, onCancel, onJob, autoApprove = false }: {
+export default function ProductServerImportReviewScreen({ jobId, jobRevision, t, notify, onApproved, onReviewLater, onCancel, onJob, autoApprove = false, rowCount = 0 }: {
   jobId: string | number
   jobRevision?: unknown
   t: TranslateFn
@@ -69,6 +69,11 @@ export default function ProductServerImportReviewScreen({ jobId, jobRevision, t,
   // the manual review below so they can be resolved. Clean imports (the common
   // case) never see this screen's table at all.
   autoApprove?: boolean
+  // Rows the operator is importing (known from the client analysis before the
+  // server round-trip). Shown in the direct-apply progress so it reads
+  // "Importing N rows…" instead of a bare spinner; the server's create/update
+  // breakdown replaces it as soon as analysis lands.
+  rowCount?: number
 }) {
   const tr = (key: string, fallback: string): string => {
     const value = t(key)
@@ -211,10 +216,15 @@ export default function ProductServerImportReviewScreen({ jobId, jobRevision, t,
   // apply runs in the background tracker. Skipped once autoFellBack flips true.
   if (autoApprove && !autoFellBack) {
     const terminal = ['failed', 'cancelled', 'completed', 'completed_with_errors'].includes(status)
+    // What's being imported: the server's create/update breakdown once analysis
+    // lands, else the row count the client already knows -- so the progress reads
+    // "Importing 3 rows…" / "2 new · 1 update" instead of a bare spinner.
+    const progressDetail = summary
+      || (rowCount > 0 ? `${rowCount.toLocaleString()} ${tr('rows', 'rows')}` : '')
     return <div className="space-y-4 py-8 text-center">
       {!terminal ? <Loader2 className="mx-auto h-6 w-6 animate-spin text-blue-500" /> : <AlertTriangle className="mx-auto h-6 w-6 text-amber-500" />}
       <p className="text-sm font-semibold">{terminal ? tr('import_analysis_stopped', 'Import analysis stopped') : tr('import_applying_now', 'Importing…')}</p>
-      <p className="text-xs text-slate-500 dark:text-slate-400">{jobError || (terminal ? status : tr('import_applying_hint', 'Applying your reviewed import. This closes when it starts.'))}</p>
+      <p className="text-xs text-slate-500 dark:text-slate-400">{jobError || (terminal ? status : (progressDetail || tr('import_applying_hint', 'Applying your reviewed import. This closes when it starts.')))}</p>
       <div className="flex justify-center gap-2"><button type="button" className="btn-secondary text-sm" onClick={() => void onCancel()}>{tr('cancel_import', 'Cancel import')}</button><button type="button" className="btn-secondary text-sm" onClick={() => void onReviewLater()}>{tr('continue_in_background', 'Continue in background')}</button></div>
     </div>
   }

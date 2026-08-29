@@ -2868,6 +2868,7 @@ export default function BulkImportModal({ onClose, onDone, t, topMode = 'general
           // review. Falls back to the manual table only if the server reports
           // unresolved conflicts.
           autoApprove
+          rowCount={totalCount}
           t={(key) => T(key, key)}
           notify={notify}
           onJob={(job) => setCurrentJob(job as ImportJob)}
