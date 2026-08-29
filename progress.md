@@ -1880,6 +1880,24 @@ other" with the Phase-Y items.*
   (`Delivery / <courier>`, 3,130 rows) on the Fees page; migration 0072 separates.
 - Commission/service fields for sales import/export still have no business rule.
 - H1's exact per-page option lists should be confirmed against real usage before build.
+- **Rebrand is incomplete in PRODUCTION portal SETTINGS DATA (post-deploy audit,
+  Part 458, session business-os-v1-87).** The A6 code-rebrand (Part 376) swept all
+  code strings — source has zero hardcoded "Leang Cosmetics" and every title
+  fallback is "Leang Beauty" — but the live storefront still shows the old name
+  because `GET /api/portal/bootstrap` (production data) carries it in five
+  customer-facing portal-settings fields: `config.businessName` = "Leang
+  Cosmetics", `config.title` = "Leang Cosmetics", `config.intro` = "Browse Leang
+  Cosmetics products and promotions.", `config.submissionInstructions` = "Share
+  \"Leang Cosmetics\" on social media…", and `config.publicUrl` =
+  "https://leangcosmetics.dpdns.org" (old domain; the current apex is
+  leangbeauty.com). (The `meta.brands.*` "… Cosmetics" values — BH/IT/Kylie/etc. —
+  are legitimate PRODUCT brand names, correctly not touched.) These are stored
+  settings, not code, so A5/A6 could not fix them; they are also user-editable
+  (intro/submissionInstructions may be customised), so NOT auto-rewritten — the
+  fix is the admin editing them in Settings → Customer Portal / business identity,
+  or an explicitly-authorised one-time settings update. `publicUrl` specifically
+  may warrant a code look (it ideally follows BUSINESS_OS_PUBLIC_URL =
+  leangbeauty.com rather than a stale stored override).
 
 ---
 

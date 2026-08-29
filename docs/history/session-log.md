@@ -11807,3 +11807,36 @@ include it — a server inconsistency. Left as-is because the client is now robu
 either way; worth normalizing server-side someday.
 
 Commit: `08cdcacf`. **Needs deploy** (frontend-only).
+
+## Part 458 (Aug 29 2026, session business-os-v1-87) — post-deploy smoke test + rebrand-data audit of the live storefront
+
+Read-only verification of the Part-455 production deploy (nothing mutated).
+
+**Deploy is healthy.** `/health` → `{"status":"ok"}`; leangbeauty.com and
+admin.leangbeauty.com both HTTP 200; the storefront renders and serves products
+(catalog search `/api/portal/catalog/products/search` → 200, real products
+paint) — i.e. the products read path that caused the old "too many SQL variables"
+outage works. The `401 invalid_session` console line is the expected
+unauthenticated-visitor auth bootstrap, not a regression. The critical POS
+sell-path fix (`d66bb94b`) is in the shipped build by provenance (deployed HEAD
+24edfb13 contains it; posCore tests green on that commit).
+
+**Finding — rebrand incomplete in production SETTINGS DATA (not code).** The live
+storefront still displays "Leang Cosmetics" (browser tab + a header element).
+Root-caused: source is fully rebranded (no hardcoded old name; title fallbacks are
+"Leang Beauty"), so it comes from stored portal settings. `GET /api/portal/bootstrap`
+carries the old brand/domain in five customer-facing fields — `config.businessName`,
+`config.title`, `config.intro`, `config.submissionInstructions`, and
+`config.publicUrl` (= the old leangcosmetics.dpdns.org domain). The
+`meta.brands.*` "… Cosmetics" values are legitimate product brands (BH/IT/Kylie/
+Grande/Melt/OFRA Cosmetics), correctly excluded. Recorded under "Flagged, not
+guessed": these are stored, partly user-editable settings, so NOT auto-rewritten —
+the admin fixes them in Settings → Customer Portal / business identity (or an
+explicitly authorised one-time settings update); `publicUrl` may warrant a code
+look (ideally follows BUSINESS_OS_PUBLIC_URL = leangbeauty.com). Flagged to the
+user; no production data changed (a settings mutation needs explicit authorisation).
+
+Context: 6–8 sessions active; the clean disjoint master-plan backlog is exhausted
+(remaining items are user-side A2/M2/M6 or large/contested K1/K4/N3), the lang
+packs are held by a peer, so this read-only audit was the highest-value disjoint
+work available.
