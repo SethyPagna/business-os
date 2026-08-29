@@ -11235,3 +11235,54 @@ Commits: `801fcef6` (shared component + test), `30b11686` (four page wirings),
 `b10a53e9` (progress.md).
 
 **Needs deploy.** Frontend-only; ships on the next build.
+
+## Part 445 (Aug 29 2026, session business-os-v1-87) — the test:utils chain is green again (stale assertions from shipped Y2/Y19/I2 + an unwired Y20 test)
+
+**Why.** While verifying Y9/Y8 I noticed `actionStability` and
+`performanceLoadingUx` were red — and since `test:utils` chains its files with
+`&&`, one red assertion aborts the WHOLE chain, blocking every session's
+Golden-Rule-5 verification. The user asked me to make it green. It was not two
+stale assertions but four, plus one committed-but-unwired test file. None were
+product bugs — every case was a test pin that drifted from already-shipped,
+committed peer code.
+
+**Fixed (test assertions only, matched to shipped behaviour):**
+- `actionStability.test.ts` + `performanceLoadingUx.test.ts`:
+  `POS_CHECKOUT_TIMEOUT_MS` pin 20000 → 45000. Y2 (Part 425) raised the POS
+  checkout timeout to 45s (POS.tsx:94, documented in the Y2 board note); both
+  files pinned the old 20000.
+- `performanceLoadingUx.test.ts` (Dashboard range presets): Y19 (Part 431)
+  removed the standalone "Custom" preset chip and moved `range_custom` into the
+  pill-label map (`custom: translateOr('range_custom','Custom')`), and changed
+  the `range_7d`/`range_this_month` fallbacks — so the rigid five-in-sequence
+  `label: translateOr(...'Custom')` regex no longer matched. Replaced with a
+  per-key loop asserting each of the five range keys uses guarded `translateOr`
+  — same rationale the file already states for the card labels just below it,
+  and robust to the extraction/reorder. Line 888's `doesNotMatch t('range_*')`
+  still guards raw-key exposure.
+- `performanceLoadingUx.test.ts` (AuditLog `countActiveFlags`): c1's I2/D2 audit
+  date-range control (Part 442) added `Boolean(rangeStart || rangeEnd)` to the
+  flag list (AuditLog.tsx:873); the pin now tracks the current vocabulary.
+
+**Wired:**
+- `frontend/package.json`: the committed Y20 test `paginationRangeControl.test.ts`
+  (feat commit 801fcef6, 4 checks, passing) was never added to the `test:utils`
+  chain, so `testChainCoverage` failed ("test files exist but are never run").
+  Added it beside `productSearchPagination.test.ts`.
+
+**Verified.** All 129 frontend test files pass (`node --test tests/*.test.ts` →
+129/129). `tsc --noEmit` clean, `check:source` PASS (404 files),
+`verify:public-runtime` green. A transient `langKeyIntegrity` batch failure was a
+peer's mid-commit lang-pack race (en/km were dirty from another session); it
+passes run on its own (3,696 keys, parity intact). Commit `4f15acf1`.
+
+**Parallel sessions / ownership.** Coordinated with a8 (owner of Y2 + Y19), who
+confirmed both were their test debt (targeted-tested, not the full chain) and
+green-lit the fixes, and confirmed the exact Y19 restructure. The AuditLog pin
+belongs to c1's Part-442 feature and the unwired test to whoever shipped Y20 —
+both flagged in the commit message. Only test files + the one package.json chain
+line changed; zero product code, fully disjoint from every active lane
+(a8/Z5-Sidebar, c1/audit, the Products+pagination and backend lanes). Part 445
+reserved after re-checking max = 444.
+
+**Needs deploy.** None — tests/CI only.
