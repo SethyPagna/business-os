@@ -10882,3 +10882,107 @@ and ends session 74's Inventory.tsx isolation dance.
 **Part-number note.** My Z1a entry and a peer's Z2 entry both took Part 435 in a
 concurrent race; per the write-order rule the duplicate renumbered -- my Z1a is
 now Part 437 (436 was reserved by session 87 for Y9), this F3 entry is 438.
+
+## Part 436 (Aug 29 2026, session business-os-v1-87) — Y9: compact the import tracker card
+
+**Ask (Phase Y, Y9).** "Import progress UI too text-heavy — the tracker card is
+a wall of words. Compact design: status chip + progress bar + counts; details
+fold behind an expander." Picked as the highest-ordered OPEN Y/Z item whose file
+set was fully disjoint from the peers' in-flight lanes (a8's Z1a batchLabel sweep,
+6e's F3 minimize-to-tray, and a backend importEngine/contacts/system lane) — the
+whole change lives in `frontend/src/components/shared/BackgroundImportTracker.tsx`
+and adds no lang keys.
+
+**Root of the "wall of words."** Each expanded per-job row rendered a single
+run-on `text-xs` line that string-concatenated seven things with ` - `
+separators — `getRowsDisplay` + images + issues + the full result tally
+(created/updated/skipped/…) + phase timing ("Took 6m 3s") + `last_error` + the
+stall note — and directly under it an always-visible row of policy chips. Nothing
+was ever folded, so a finished 12k-row import showed a paragraph of prose per job.
+The collapsed header made it worse: its subtitle was `getJobLabel(primaryJob)`
+("products import - applying"), whose phase already shows in the status chip to
+the right.
+
+**Recompose.** Each expanded job row is now: the job label, a per-job progress
+bar (active statuses only, amber when stalled — the tracker only had a single
+top-level bar before), a terse **counts** line (`rows · images · issues`, middot-
+separated, non-zero parts only), then an error/stall line kept **visible** on its
+own amber row (attention is never folded), then a per-job **Details** toggle
+(ChevronDown + existing `view_details`/`hide_details` keys) that folds the neutral
+breakdown — result tallies as small chips, phase timing, and the applied-import-
+option chips (`describeJobPolicy`). The collapsed header's prose subtitle becomes
+the same terse counts line for the primary job. Status chip + action buttons
+(Cancel/Report/Resolve/Approve/Retry/Remove/Close) are untouched.
+
+**No behaviour change.** Same data, same handlers, same actions, same timeouts.
+`getJobResultSummary` (only caller was this row; unexported, untested) became
+`getJobResultParts` returning the tallies as an array for chips; new
+`getJobCountsSummary` builds the counts line. Per-job Details fold is transient
+in-memory state (`openDetailJobIds`), like `expanded`.
+
+**Verified.** Frontend `tsc --noEmit` clean (0 errors — the tree typechecks now
+that a8 landed the F3 onMinimize wiring mid-session). Real `vite build` green
+(24.8s). Every pinned tracker contract still holds: the actionStability
+"background import tracker actions use a synchronous action guard" test PASSES,
+and all of performanceLoadingUx's tracker assertions (listImportJobs timeout, the
+six IMPORT_TRACKER_*_TIMEOUT_MS constants + their withLoaderTimeout wires, no
+`trash-2.js`, no `setJobs([])` on catch) were re-run individually against the
+committed file and all PASS. Live visual check deferred: the card only renders
+with a real in-flight import job, and a peer owns the shared 8787 dev server —
+starting my own risks node_modules contention (parallel-sessions rule 6), same
+deferral peers recorded for Y19.
+
+**Two whole-file test FAILURES that are NOT this change.** `actionStability` and
+`performanceLoadingUx` each abort on a pre-existing peer assertion about a file I
+never touched — `const POS_CHECKOUT_TIMEOUT_MS = 20000` (Y2 raised it to 45000)
+and the Dashboard range-preset guarded-translation regex (Y19). Both target
+committed, clean files (Dashboard.tsx is not dirty), so they fail on HEAD
+independent of Y9; the owning sessions need to refresh those assertions for their
+own shipped work. Flagged, not silently worked around.
+
+**Parallel sessions.** Confirmed to a8 up front that Y9 touches only
+BackgroundImportTracker.tsx and none of the F3 files (Sidebar/Modal/Products/
+ProductForm/Inventory/FastStockInModal/minimizedWork/MinimizedWorkTray) — a8
+green-lit and then committed the F3 onMinimize wiring plus Z1a during my session.
+Part number: reserved 436 while max was 435; a8's Z1a renumbered 435→437 and
+session 43 took 435 for Z2 mid-session, leaving 436 free and unclaimed as its own
+header (re-checked before writing this entry).
+
+**Needs deploy.** Frontend-only; ships with the next build.
+
+## Part 439 (Aug 29 2026, session business-os-v1-43) — Y1 server-side measured (fast); production catalog observed empty
+
+**Y1 server-side — CLOSED.** With my client-side fix already shipped (Part 425),
+I measured the search path on the now-idle production worker: the FTS5 MATCH for
+"pink dahlia" runs in 0.53ms and the family-pagination CTE/window query in
+<0.5ms. So the original >5s the user saw was Worker CPU saturation from the
+concurrently-running 12k-row import apply, not the search itself — resolved now
+the import is done. No server-side change needed; Y1 fully done.
+
+**Observed (read-only): the production catalog is now EMPTY.** products=0,
+sales=0, product_batches=0, branch_stock=0 — while customers (4,652) and
+import_jobs (8) are preserved. Earlier this session products=6,105. This is the
+signature of a deliberate catalog/data reset to re-import cleanly (the T2 reset
+flow keeps customers/users/jobs). Surfaced to the user with the critical
+deploy-first guidance: the phantom-"48"-row fix (Y5 BOM), the received_at ISO
+fix (Y7), the batch-restore (Z0), and migrations 0077/0078/0079 all live in the
+PENDING deploy, so a re-import BEFORE deploying repeats those bugs. Also flagged
+that the branch_batch_stock multi-branch parity at import time (Z1b's root, the
+import-WRITER) is still the deferred P7-f item — and importEngine.ts is
+currently another session's active lane — so after a fresh re-import the
+batch-vs-branch-stock drift can recur until that writer fix lands; the 0079
+reconcile (a one-shot migration) would need re-running against the re-imported
+data.
+
+**Parallel sessions.** a8 LANDED F3-slice-2 (3aa35da2) — the whole tree now
+compiles (tsc 0 errors for the first time in many sessions); they committed only
+the F3 hunks in Inventory.tsx (verified none of my Z10/Z13), so my Inventory.tsx
+isolation dance is retired. Part numbers reconciled: 435 Z2 (mine), 436 Y9 (87),
+437 Z1a (a8), 438 F3 (a8), 439 this. a8 now on Z5 (Sidebar/Modal/App —
+steering clear). importEngine/contacts/system.ts are another session's (25k-row
+import ceiling), not mine.
+
+**Not done.** Z5 (a8). Products density Y13–Y16/Y20 now unblocked by the F3
+landing (Products.tsx clean) — open for whoever takes them. The Z1b
+import-writer parity fix waits on importEngine.ts freeing up. Needs deploy
+(0077/0078/0079 + all frontend).
