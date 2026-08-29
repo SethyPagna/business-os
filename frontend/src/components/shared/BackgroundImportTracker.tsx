@@ -137,7 +137,7 @@ type ImportTrackerApi = {
 }
 
 type ProgressLabels = Partial<Record<
-  'analyzed' | 'rows' | 'reviewReady' | 'analyzingFile' | 'cancelled' | 'queued' | 'cancelRequested' | 'finalCleanup' | 'waitingForWorker' | 'readyToAnalyze' | 'startingApply' | 'applyingChanges',
+  'analyzed' | 'rows' | 'reviewReady' | 'analyzingFile' | 'readingFile' | 'cancelled' | 'queued' | 'cancelRequested' | 'finalCleanup' | 'waitingForWorker' | 'readyToAnalyze' | 'startingApply' | 'applyingChanges',
   string
 >>
 
@@ -431,12 +431,16 @@ export function getJobProgressDetails(job: ImportJob, labels: ProgressLabels = {
         indeterminate: false,
       }
     }
+    // Y8: distinct "Reading file" label for this staging sub-phase -- the
+    // classify sub-phase above keeps "Analyzing", so the pipeline now reads
+    // "Reading file" -> "Analyzing" instead of "Analyzing file" twice (the
+    // user reported it as two analyze passes).
     const materializedSoFar = readMaterializedRowsWrittenSoFar(job)
     return {
       value: 12,
       label: materializedSoFar
-        ? `${labels.analyzingFile || 'Analyzing file'} - ${materializedSoFar.toLocaleString()} ${labels.rows || 'rows'} read`
-        : (labels.analyzingFile || 'Analyzing file'),
+        ? `${labels.readingFile || 'Reading file'} - ${materializedSoFar.toLocaleString()} ${labels.rows || 'rows'} read`
+        : (labels.readingFile || 'Reading file'),
       indeterminate: true,
     }
   }
@@ -1032,6 +1036,11 @@ export default function BackgroundImportTracker() {
     rows: rowsLabel,
     reviewReady: t('review_ready') || 'Review ready',
     analyzingFile: t('analyzing_file') || 'Analyzing file',
+    // Y8: the materialize/staging sub-phase (raw CSV still being read into
+    // rows, before total_rows exists) gets its OWN label so it no longer
+    // shares "Analyzing file" with the classify sub-phase -- that shared
+    // label is what read as "two analyze passes" to the user.
+    readingFile: t('import_reading_file') || 'Reading file',
     cancelled: t('cancelled') || 'Cancelled',
     queued: t('queued') || 'Queued',
     cancelRequested: t('import_cancel_requested') || 'Cancel requested',

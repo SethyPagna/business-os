@@ -1665,6 +1665,7 @@
   "import_preview": "Import Preview",
   "import_products": "Import Products",
   "import_queued_notice": "{n} item(s) queued for review. Approve the import from the tracker in the top-right corner to apply it.",
+  "import_reading_file": "Reading file",
   "import_ready_to_analyze": "Ready to analyze",
   "import_remove_failed": "Could not remove import",
   "import_removed": "Import removed",
