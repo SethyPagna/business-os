@@ -1508,16 +1508,23 @@ those until that unit commits.*
   past stock batch dates are missing. Expected: the aug27 template is a SNAPSHOT
   (single synthetic date — M1's known finding, manifest Step 1) and real dates
   arrive with `stock_in_history.csv` (M4).
-- [~] Y8 *(the false-stall half SHIPPED, Part 425: the tracker's 6-minute
+- [x] Y8 *(the false-stall half SHIPPED, Part 425: the tracker's 6-minute
   staleness check parsed SQLite's timezone-less UTC updated_at with bare
   Date.parse = LOCAL time, so for a UTC+7 viewer every ACTIVE job looked
   7 hours stale and "may have stopped — safe to cancel" showed on a job
   that was progressing (it completed normally at 14:33). Fixed via shared
   parseServerTimestampMs. MEASURED timeline of the reported 20+ min:
   upload 14:07 → analyze + the user's review of 6,062 conflicts → approve
-  14:27 → apply DONE 14:33 (6 min for 12k rows). REMAINING: the perceived
-  "two analyzes" (materialize pass + analyze pass both read as
-  "Analyzing" — label them distinctly), and Y9's card compaction.)*
+  14:27 → apply DONE 14:33 (6 min for 12k rows). CLOSED — both remaining
+  pieces shipped, needs deploy: (1) the perceived "two analyzes" is fixed
+  (Part 441, session business-os-v1-87, commit abc1c915) — getJobProgressDetails
+  ran the materialize/staging sub-phase (raw CSV read into rows, before
+  total_rows exists) and the classify sub-phase through the SAME
+  labels.analyzingFile ('Analyzing file'); the staging sub-phase now shows a
+  distinct 'Reading file' (new i18n key import_reading_file en+km), so the
+  pipeline reads 'Reading file' → 'Analyzing file' instead of 'Analyzing'
+  twice; tsc + langKeyIntegrity (3695 keys) + vite build green. (2) the
+  tracker card compaction landed as Y9 (Part 436).)*
   **Import flow regression — slow, stalled, review after the wait.**
   Report: upload slow; TWO analyze passes; then "view report / resolve product
   conflicts / approve"; then a long "Applying changes" that stalled at

@@ -11018,3 +11018,55 @@ Coordinated lanes with peers 74 (Z2/Z8/Z10/Z7/Z4 + isolation-dance intel) and
 production catalog is now EMPTY (deliberate reset to re-import) -- the pending
 fixes (migrations 0077/0078/0079 + the BOM phantom-row / batch-date / batch-
 stock fixes) MUST deploy BEFORE re-importing, or the same bugs recur.
+
+## Part 441 (Aug 29 2026, session business-os-v1-87) — Y8 closed: the materialize pass reads "Reading file", not a second "Analyzing"
+
+**Ask (Phase Y, Y8 — last remaining piece).** Y8 was mostly shipped in Part 425
+(the false 6-minute-stall warning) and Part 436 (Y9's card compaction); its one
+open remnant was "the perceived 'two analyzes' — materialize pass + analyze pass
+both read as 'Analyzing' — label them distinctly." Picked as a clean single-file
+continuation of the Y9 tracker work, disjoint from every peer lane.
+
+**Root.** `getJobProgressDetails` (BackgroundImportTracker.tsx) runs the analyze
+status through two sub-phases, both under `phase.includes('analyz')`: the
+materialize/staging sub-phase (`ensureSourceRowsMaterialized` is still reading the
+raw CSV into rows — `total_rows` does not exist yet, only
+`materialize_state_json.rowsWritten`) and the classify sub-phase (`total_rows` set,
+`processed_rows` climbing). BOTH rendered `labels.analyzingFile` = "Analyzing
+file". So the status chip showed "Analyzing file … / Analyzing file …" back to
+back, which the user read as the import analyzing twice.
+
+**Fix.** The staging sub-phase now renders a distinct **"Reading file"** label —
+new i18n key `import_reading_file` (en "Reading file" / km "កំពុងអានឯកសារ"),
+wired as `progressLabels.readingFile` and a `'readingFile'` member on the
+`ProgressLabels` type. The classify sub-phase keeps "Analyzing file", so the
+pipeline now reads **"Reading file" → "Analyzing file"** — one continuous
+read-then-analyze flow, not "Analyzing" twice. Label-only: no phase logic,
+timing, progress value, data, or handler change. `getRowsDisplay` (the counts
+line) already distinguished the two sub-phases ("N rows read" vs "X / Y rows
+analyzed") so it needed nothing; the "two analyzes" confusion lived only in the
+status-chip label.
+
+**Verified.** Frontend `tsc --noEmit` clean (0 errors). `langKeyIntegrity` PASS —
+en/km now share 3,695 keys (the new key added to both, parity intact), all 878
+bare `t()` lookups resolve (incl. `t('import_reading_file')`), no blank strings.
+Real `vite build` green (14.4s — the first attempt hit a transient socket/stream
+error under a peer's concurrent build; the clean re-run confirms it was
+environmental, not a compile failure). Live visual check deferred for the same
+reason as Y9: the tracker only renders with a real in-flight import job and a peer
+owns the shared 8787 dev server.
+
+**Commits.** Code + lang `abc1c915` (BackgroundImportTracker.tsx + en.json +
+km.json — verified the lang diffs carried ONLY `import_reading_file`, no peer
+edits absorbed). Y9's card compaction was `29b6bcf1` (Part 436). Y8 flips to
+**done** on the board.
+
+**Parallel sessions.** Six sessions live (c1, 74, a8, e4 + two Remote Control).
+Coordinated with a8 up front: Y8's footprint (BackgroundImportTracker.tsx + two
+lang keys) is fully disjoint from a8's Z5 (Sidebar/Modal/App), and a8 confirmed
+its Z5 claim + Part 440 + its own lang edits were already in HEAD (acc41036,
+2029de81, c49fc295) and that it is not touching en/km.json (Z5 paused on the
+hamburger pending a user decision) — so a clean lang-pack base, zero collision.
+Part 441 reserved after re-checking max = 440.
+
+**Needs deploy.** Frontend-only; ships on the next build.
