@@ -12026,3 +12026,36 @@ closed → **both new products ("Auto Apply Test A" \$9.99, "Auto Apply Test B"
 
 Commits: `c5b4f6ab` (autoApprove mode + test), `83f554ce` (button relabel). tsc +
 import tests green. **Needs deploy** (frontend-only).
+
+## Part 464 (Aug 29 2026, session business-os-v1-e4) — Branches toolbar "buttons on each other" fixed (from the phone screenshots)
+
+**User-reported (screenshot): the Branches hub toolbar's History and Transfer
+buttons overlap on a phone.** Root cause: the row is four equal `flex-1` buttons
+(History / Transfer / Export / Add Branch), so on a narrow screen each got ~1/4 of
+the width, and the History control (shared ActionHistoryBar, a `whitespace-nowrap`
+"History" label with no truncate/overflow guard) overflowed its 1/4 box rightward
+into Transfer — reading as two buttons drawn on top of each other.
+
+**Fix (Branches.tsx only — session 15, the former Branches owner, is gone; file was
+clean).** Transfer and Export collapse to compact icon-only buttons on phones
+(`flex-none`, `min-w-9`, label `hidden ... sm:inline`), so History and Add Branch —
+the two labelled controls — keep `flex-1` and get the room they need; History no
+longer overflows. From `sm` up all four return to equal-share `flex-1` with labels
+(`sm:flex-1`), so the desktop layout is unchanged. Did NOT touch the shared
+ActionHistoryBar (its nowrap-label overflow is the deeper root cause and shows up
+wherever it sits in a tight flex-1 row — flagged for a follow-up that owns that
+shared file; the call-site room fix resolves the reported Branches case without a
+broad-blast change).
+
+**Verification.** tsc + check:source (404 files) + vite build green. Could not
+live-repro (admin needs a login I can't perform, and the dev server is peer-owned) —
+the fix is a deterministic flex-layout change reasoned from the screenshot + code.
+
+**Still open from the same screenshot batch (peer/other lanes, catalogued in Part
+462):** Suppliers "Stock-In Invoices" rendered as a section card; Contacts customer
+phone shown twice; POS cart empty-state overlapped by the Customer/Discount panel.
+
+**Parallel sessions.** Branches.tsx only; not in any peer's dirty set. Part 464
+taken after re-checking max = 463.
+
+**Needs deploy.** Frontend-only; ships on the next build.

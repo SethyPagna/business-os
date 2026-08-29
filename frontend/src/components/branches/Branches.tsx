@@ -1048,17 +1048,16 @@ export default function Branches() {
           and pulling a tab-conditional row up into this always-rendered
           wrapper would change its behavior, not just its position. */}
       <div className="sticky top-2 z-30 -mx-1 mb-4 space-y-3 bg-gray-50/95 pb-2 backdrop-blur dark:bg-gray-900/95 sm:mx-0">
-        {/* Merged toolbar row: History (bundles Undo/Redo + admin user
-            filter), Transfer, and Add Branch each take an equal share of
-            the row's full width (flex-1, labels always visible) --
-            previously only History's wrapper grew to fill the row while
-            the small icon button inside it stayed put, so a wide
-            invisible History control sat crowded right up against
-            Transfer/Add Branch with barely any visual gap. Bulk-delete
-            stays a fixed-width contextual button (only shown once
-            something's selected) rather than joining the equal-share set,
-            since it's a rare, high-stakes action rather than a fixed
-            toolbar control. */}
+        {/* Merged toolbar row. On phones (user-reported "buttons on each
+            other"): four equal flex-1 buttons gave History only ~1/4 of a
+            narrow row, and its nowrap "History" label overflowed its box into
+            Transfer -- so History and Add Branch (the two labelled controls)
+            stay flex-1 while Transfer and Export collapse to compact icon-only
+            buttons (flex-none, label hidden below sm), freeing the width
+            History needs. From sm up all four go back to equal-share flex-1
+            with labels. Bulk-delete stays a fixed-width contextual button
+            (only shown once something's selected), a rare high-stakes action
+            rather than a fixed toolbar control. */}
         <div className="flex min-w-0 items-stretch gap-1.5 overflow-x-auto pt-1">
           <ActionHistoryBar history={actionHistory as unknown as ActionHistoryProp} t={t} className="min-w-0 flex-1" showLabel />
           {selectedCount > 0 ? (
@@ -1069,27 +1068,27 @@ export default function Branches() {
           ) : null}
           {canTransferStock ? (
             <button
-              className="inline-flex h-9 flex-1 items-center justify-center gap-1.5 rounded-xl border border-slate-300 bg-white px-2 text-xs font-semibold text-slate-700 shadow-sm transition-colors hover:border-blue-400 hover:bg-blue-50/60 hover:text-blue-700 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 dark:hover:border-blue-500 dark:hover:bg-slate-700/80 dark:hover:text-blue-300 sm:text-sm"
+              className="inline-flex h-9 min-w-9 flex-none items-center justify-center gap-1.5 rounded-xl border border-slate-300 bg-white px-2 text-xs font-semibold text-slate-700 shadow-sm transition-colors hover:border-blue-400 hover:bg-blue-50/60 hover:text-blue-700 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 dark:hover:border-blue-500 dark:hover:bg-slate-700/80 dark:hover:text-blue-300 sm:flex-1 sm:text-sm"
               onClick={() => setModal('transfer')}
               title={tr('transfer', 'Transfer')}
               aria-label={tr('transfer', 'Transfer')}
             >
               <ArrowRightLeft className="h-4 w-4 shrink-0" />
-              <span className="truncate">{tr('transfer', 'Transfer')}</span>
+              <span className="hidden truncate sm:inline">{tr('transfer', 'Transfer')}</span>
             </button>
           ) : null}
           {/* H1+X5 (Part 403): Branches had NO export at all -- this one
               covers H1's "per-branch stock" spec through the shared options
               dialog (Excel/CSV/PDF + column chooser). */}
           <button
-            className="inline-flex h-9 flex-1 items-center justify-center gap-1.5 rounded-xl border border-slate-300 bg-white px-2 text-xs font-semibold text-slate-700 shadow-sm transition-colors hover:border-emerald-400 hover:bg-emerald-50/60 hover:text-emerald-700 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 dark:hover:border-emerald-500 dark:hover:bg-slate-700/80 dark:hover:text-emerald-300 sm:text-sm"
+            className="inline-flex h-9 min-w-9 flex-none items-center justify-center gap-1.5 rounded-xl border border-slate-300 bg-white px-2 text-xs font-semibold text-slate-700 shadow-sm transition-colors hover:border-emerald-400 hover:bg-emerald-50/60 hover:text-emerald-700 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 dark:hover:border-emerald-500 dark:hover:bg-slate-700/80 dark:hover:text-emerald-300 sm:flex-1 sm:text-sm"
             onClick={() => { void openBranchStockExport() }}
             disabled={branchExportLoading}
             title={tr('export_branch_stock', 'Export per-branch stock')}
             aria-label={tr('export_branch_stock', 'Export per-branch stock')}
           >
             <Upload className="h-4 w-4 shrink-0" />
-            <span className="truncate">{branchExportLoading ? tr('exporting', 'Exporting…') : tr('export', 'Export')}</span>
+            <span className="hidden truncate sm:inline">{branchExportLoading ? tr('exporting', 'Exporting…') : tr('export', 'Export')}</span>
           </button>
           <button
             className="inline-flex h-9 flex-1 items-center justify-center gap-1.5 rounded-xl border border-blue-700 bg-blue-600 px-2 text-xs font-semibold text-white shadow-sm transition-colors hover:bg-blue-700 hover:border-blue-800 sm:text-sm"
