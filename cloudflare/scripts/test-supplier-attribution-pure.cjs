@@ -78,6 +78,10 @@ const batchCode = loadReal('lib/batchCode.ts')
 const sqlBinding = loadReal('lib/sqlBinding.ts')
 const productBatches = loadReal('lib/productBatches.ts', { './db': { getDb: () => db }, './batchCode': batchCode, './sqlBinding': sqlBinding })
 const permissions = loadReal('lib/permissions.ts')
+// routes/batches.ts imports the shared optimistic-locking helpers; without
+// this override the transpiled module's './conflictControl' require resolves
+// against scripts/ and the whole test file dies at load time.
+const conflictControl = loadReal('lib/conflictControl.ts')
 
 const FAKE_USER = { id: 1, username: 'tester', name: 'Test User', permissions: JSON.stringify({ inventory: true }) }
 
@@ -129,6 +133,7 @@ const batchesRoute = loadReal('routes/batches.ts', {
   // K2 Part 416: routes/batches.ts gained the damaged-lots POS lookup;
   // these tests exercise receive/adjust, so an empty stub is honest.
   '../lib/returnsStock': { listOpenDamagedLots: async () => [] },
+  '../lib/conflictControl': conflictControl,
 })
 const batchesApp = batchesRoute.default
 

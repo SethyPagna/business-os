@@ -143,6 +143,11 @@ const productsRoute = loadReal('routes/products.ts', {
   '../lib/familyPagination': loadReal('lib/familyPagination.ts'),
   '../lib/fileAssets': { getMediaType: () => 'image', buildUniqueStoredName: (n) => n, sanitizeOriginalFileName: (n) => n },
   '../lib/catalogText': { normalizeCatalogText: (v) => v, hasSuspiciousCatalogText: () => false },
+  // routes/products.ts imports the shared optimistic-locking helpers. They
+  // are pure (no deps of their own), so load the real module rather than a
+  // stub -- without this entry the transpiled require resolves against
+  // scripts/ and the whole test file dies before a single check runs.
+  '../lib/conflictControl': loadReal('lib/conflictControl.ts'),
 })
 
 const app = productsRoute.default || productsRoute
