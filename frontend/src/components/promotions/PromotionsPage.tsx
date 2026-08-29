@@ -342,7 +342,12 @@ export default function PromotionsPage() {
   const labelCls = 'block text-xs font-medium text-gray-500 mb-1'
 
   return (
-    <div className="p-4 space-y-4 max-w-5xl mx-auto">
+    // page-scroll (full-width) is the scroll container; the inner wrapper keeps
+    // the old max-w-5xl centering. Without page-scroll here the whole page sat
+    // inside PageSlot's overflow-hidden box and anything below the fold was
+    // unreachable (reported: Promotions/Loyalty could not scroll).
+    <div className="page-scroll p-4">
+      <div className="space-y-4 max-w-5xl mx-auto">
       <div className="flex items-center gap-2 flex-wrap">
         <BadgePercent className="w-6 h-6 text-rose-600" />
         <h1 className="text-xl font-semibold">{t('promotions') || 'Promotions'}</h1>
@@ -831,6 +836,7 @@ export default function PromotionsPage() {
         </div>
       )}
       </>) : null}
+      </div>
     </div>
   )
 }
