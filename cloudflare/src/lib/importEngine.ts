@@ -228,7 +228,12 @@ export function summarizeImportWarnings(rows: Array<{ rowNumber: number; warning
 // really do share a name).
 export type RowDecision = { action?: 'apply' | 'skip' | 'force_create'; field_overrides?: Record<string, unknown> }
 
-const MAX_SYNC_ROWS = 20000 // hard ceiling on total rows any one job will process, chunked or not
+// Keep the materialized/chunked path at least as large as the stock-action
+// route's documented direct-import allowance below. The migration pack's
+// stock history contains 21,286 rows; the old 20,000 ceiling silently marked
+// materialization complete and dropped its final 1,286 rows even though the
+// stock-action preflight explicitly accepts files up to 25,000 rows.
+const MAX_SYNC_ROWS = 25_000 // hard ceiling on total rows any one job will process, chunked or not
 
 // How many rows (or, for sales, order_reference GROUPS) runImportAnalyze /
 // runImportApply classify + write per queue invocation. See migration
@@ -743,18 +748,14 @@ type MaterializeState = {
 // Kept separate from ROWS_PER_IMPORT_CHUNK: a materialize window only
 // parses + does one INSERT OR REPLACE per row (no classify, no image-match,
 // no branch resolution, no 1-3-statements-per-row apply logic), so per-row
-// it's cheaper than analyze/apply's own chunk work. Still tuned to a
-// smaller row count than ROWS_PER_IMPORT_CHUNK, not a larger one: measuring
-// parseDelimitedRowsWindow against a real ~12,000-row/38-column export
-// showed the worst single window roughly doubling from ~7ms to ~15ms going
-// from 150 to 300 rows/window on ordinary dev hardware -- a cold Workers
-// isolate (no JIT warmup yet) is not going to be faster than that, and
-// 15ms already exceeds the Free plan's 10ms budget outright. 100 measured
-// consistently under 7ms worst-case on the same file. Lower this further
-// if wrangler tail shows a CPU-limit reset during the materializing phase
-// on a very wide or heavily-quoted file; there's no correctness cost to
-// going smaller, only more queue round-trips.
-const MATERIALIZE_ROWS_PER_CHUNK = 100
+// it's cheaper than analyze/apply's own chunk work. This was held at 100
+// for the old Workers Free 10ms CPU limit. The production account is now on
+// Paid with cpu_ms=300000, so use the same measured 600-row window as the
+// heavier classify/apply phase. That removes five out of every six queue
+// round-trips for the 12k/21k migration files while keeping each D1 write
+// split by runD1BatchInChunks. Lower it again only if production telemetry
+// shows a materialization-specific CPU failure.
+const MATERIALIZE_ROWS_PER_CHUNK = 600
 
 async function getMaterializeState(db: D1Compat, jobId: string): Promise<{ state: MaterializeState; done: boolean; type: ImportType | null }> {
   const row = await db.prepare(`SELECT type, materialize_state_json, materialize_done FROM import_jobs WHERE id = @id`)
