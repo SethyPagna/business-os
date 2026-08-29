@@ -12511,3 +12511,34 @@ ProductsImageOnlyView.tsx only.
 **Parallel sessions.** One file, clean/disjoint. Part 480 after re-checking max = 479.
 
 **Needs deploy.** Frontend-only; ships on the next build.
+
+## Part 481 (Aug 29 2026, session business-os-v1-e4) — Products: sticky search pins to the true top; small-screen card swaps category for barcode
+
+**Two user reports (Aug 29), both Products.tsx (clean at edit time).**
+
+**1. "Search did not stick to the very top — still shows in between edge and
+search row."** (Screenshot: a product row bled through the strip above the pinned
+search bar.) Cause: the `.page-scroll` root carried `p-3 sm:p-6`, so its TOP padding
+sat above the sticky search row's `top-0` anchor — the row pinned below the padding
+and list content showed in the gap (Y14's `top-2`→`top-0` alone didn't fix it because
+the container padding was the real culprit). Moved the top padding off the scroll
+root (`p-3 sm:p-6` → `px-3 pb-3 sm:px-6 sm:pb-6`) and onto the header row
+(`pt-3 sm:pt-6`), so the scroll container is flush-topped and the bar pins to the
+true top with nothing above it. (The stray explanatory JSX comment I first put
+between `return (` and the root `<div>` broke the single-root rule — tsc caught it;
+moved it to a `//` comment above the return.)
+
+**2. "Small-screen default card: hide the category (it's in the details) and replace
+the outside with barcode."** renderMobileProductCard's meta row showed a category
+pill + a brand pill and no barcode. Replaced the category pill with the product
+`barcode` (mono, truncated chip); brand stays; category remains reachable in the
+detail view. Removed the now-unused `categoryName` local. Desktop table row
+untouched.
+
+**Verification.** tsc + check:source (405 files) + productsRowAlignment +
+productDiscountUx tests + vite build green.
+
+**Parallel sessions.** Products.tsx only; clean/disjoint. Part 481 after re-checking
+max = 480.
+
+**Needs deploy.** Frontend-only; ships on the next build.

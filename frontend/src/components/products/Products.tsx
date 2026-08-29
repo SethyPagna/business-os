@@ -3073,8 +3073,8 @@ function ProductsFullEditor() {
   const renderMobileProductCard = useCallback((p: ProductRecord, { indented = false }: { indented?: boolean } = {}) => {
     const productId = p.id ?? 0
     const productName = String(p.name || '')
-    const categoryName = String(p.category || '')
     const brandName = String(p.brand || '')
+    const barcode = String(p.barcode || '')
     const sellingUsd = Number(p.selling_price_usd || 0)
     const specialUsd = Number(p.special_price_usd || 0)
     const unitName = typeof p.unit === 'string' ? p.unit : undefined
@@ -3182,16 +3182,17 @@ function ProductsFullEditor() {
               </div>
             </div>
             <div className="mt-0.5 flex flex-wrap gap-1">
-              {categoryName ? (
+              {/* Small-screen default card shows the BARCODE here in place of
+                  the category (user, Aug 29: "hide the category inside the
+                  details ... replace the outside with barcode"). Category is
+                  one tap away in the detail view; a scannable code is more
+                  useful on the card face. Brand stays. */}
+              {barcode ? (
                 <span
-                  className="inline-block max-w-[8rem] truncate rounded-full px-1.5 py-0.5 text-[10px]"
-                  style={{
-                    background: catMap[categoryName]?.color || '#6b7280',
-                    color: getContrastingTextColor(catMap[categoryName]?.color || '#6b7280'),
-                  }}
-                  title={categoryName}
+                  className="inline-block max-w-[10rem] truncate rounded-full bg-slate-100 px-1.5 py-0.5 font-mono text-[10px] text-slate-600 dark:bg-slate-800 dark:text-slate-300"
+                  title={barcode}
                 >
-                  {categoryName}
+                  {barcode}
                 </span>
               ) : null}
               {brandName ? (
@@ -3340,8 +3341,14 @@ function ProductsFullEditor() {
     </div>
   )
 
+  // Top padding lives on the header row below, NOT on this page-scroll root:
+  // a `pt` here would sit ABOVE the sticky search row's `top-0` anchor, so on
+  // scroll a list row showed through the strip between the screen edge and the
+  // pinned search bar (user, Aug 29: "search did not stick to the very top").
+  // With the scroll container flush-topped, the search bar pins to the true
+  // top and nothing bleeds above it.
   return (
-    <div className="page-scroll p-3 sm:p-6">
+    <div className="page-scroll px-3 pb-3 sm:px-6 sm:pb-6">
       {/* Page title + section switcher on the left; Manage / History / Add
           product on the right of the SAME row (Y15/Y16: the header actions
           join the section-chip row instead of getting their own toolbar
@@ -3349,7 +3356,7 @@ function ProductsFullEditor() {
           here (duplicating what Manage's dropdown already offered) and
           History used to sit separately in the search row below -- both
           folded into HeaderActions.tsx. */}
-      <div className="mb-3 flex min-w-0 flex-wrap items-center gap-2">
+      <div className="mb-3 flex min-w-0 flex-wrap items-center gap-2 pt-3 sm:pt-6">
         {/* Small screens hide the page title -- the section switcher below
             already carries "Products" (and Stock Changes), so an <h1> saying
             the same word is wasted vertical space on a phone (user, Aug 29:
