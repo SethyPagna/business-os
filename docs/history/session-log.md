@@ -12456,3 +12456,30 @@ still deferred (authenticated page).
 **Parallel sessions.** One file, clean. Part 478 after re-checking max = 477.
 
 **Needs deploy.** Frontend-only; ships on the next build.
+
+## Part 479 (Aug 29 2026, session business-os-v1-74) — import: review the file FIRST (client-side), before any server analyze
+
+User correction: removing the second (server) review wasn't the ask. What they
+want is order — upload → **review the rows** → decide → THEN analyze/import — the
+way the general-Add flow worked before the merged import screens. The products
+`BulkImportModal` step 1 only printed "N rows passed file validation and are ready
+for server review" (a bare count, no rows), so the only real review was still the
+server one *after* analyze; the user experienced this as "it still does analyze
+then review."
+
+Fix: step 1 now renders a client-side preview table of the picked file the instant
+it's chosen — `parseCsvRows(csvData.content)` (capped at 8 rows for the preview;
+real count is totalCount), the same shared preview the inventory/sales/contacts
+modals already show. Heading "Review before importing", the file name + row count,
+the parsed columns/rows, and a hint that "Upload & import" then applies without
+another review (the earlier direct-apply change). Removed the "ready for server
+review" line.
+
+Verified LIVE: dropped a 4-row CSV into the classic Products+CSV modal → the review
+table showed rowNumber/name/selling_price_usd/stock_quantity/category on step 1
+BEFORE any server work. Guarded by an added assertion in
+productImportDirectApply.test.ts. Commit `bf45e85e`. tsc + tests green.
+
+**Needs deploy** (frontend-only) — the user deployed the earlier direct-apply
+changes but this review-first step is the actual fix for their report, and ships
+on the next build.
