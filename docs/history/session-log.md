@@ -11870,3 +11870,33 @@ peer lanes to free up or the user to point at the next page.
 Products.tsx only.
 
 **Needs deploy.** Frontend-only; ships on the next build.
+
+## Part 460 (Aug 29 2026, session business-os-v1-e4) — export modal: format tradeoffs moved from native tooltips into a touch-accessible InfoHint
+
+**Continuing the small-screen density pass (user, Aug 29: "go through imports,
+exports, view details in products, contacts").** Surveyed the Products
+import/export/view-details surfaces; most are already density-compliant — the
+import mode picker (ProductImportModeTabs) is a `grid-cols-2` (mobile) segmented
+control whose option descriptions already sit behind InfoHints; the view-details
+modal (surfaces/ProductDetailModal) is already a mobile bottom-sheet with
+`grid-cols-1 sm:grid-cols-2` fields and icon-only actions on phones. Contacts was
+left untouched — a peer session owns its tabs.
+
+**Concrete win found + fixed (ExportFieldsModal.tsx).** The three export-format
+choices (Excel / CSV / PDF) carried their tradeoff text — Excel is Khmer-safe, CSV
+can break barcodes if opened in Excel, PDF is the print view — in each button's
+native `title` attribute, which NEVER opens on touch, so a phone user could not
+read the guidance that actually decides the format. Folded all three into ONE
+`InfoHint` beside the "Format" label (touch + hover), and dropped the per-button
+`title`. Also removed two other generic touch-dead `title` tooltips (the scope
+radio row and the field-group checkboxes) whose text just restated their visible
+labels. This is the app's standing "explanations behind InfoHint, never inline or
+in a native title" rule (ui-density-preference memory), applied to exports.
+
+**Verification.** tsc clean, check:source (404 files), vite build green.
+ExportFieldsModal.tsx only.
+
+**Parallel sessions.** One frontend file; not in any peer's dirty set. Part 460
+taken after re-checking max = 459.
+
+**Needs deploy.** Frontend-only; ships on the next build.

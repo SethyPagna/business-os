@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import ModalBase from '../shared/Modal'
+import InfoHint from '../shared/InfoHint'
 import type { ExportFieldGroup } from './helpers/productExport.ts'
 import { EXPORT_FIELD_GROUPS } from './helpers/productExport.ts'
 
@@ -83,7 +84,6 @@ export default function ExportFieldsModal({ rowCount, onClose, scopes, selectedS
             {scopes.map((scope) => (
               <label
                 key={scope.id}
-                title={tr('export_scope_option_hint', 'Choose which rows this export includes')}
                 className={`flex cursor-pointer items-center justify-between gap-2 rounded-lg border px-3 py-2 text-sm transition-colors ${
                   scope.id === selectedScopeId
                     ? 'border-green-500 bg-green-50 text-green-800 dark:border-green-500/70 dark:bg-green-500/10 dark:text-green-300'
@@ -119,7 +119,7 @@ export default function ExportFieldsModal({ rowCount, onClose, scopes, selectedS
       </div>
       <div className="space-y-2 mb-4">
         {EXPORT_FIELD_GROUPS.map(({ key }) => (
-          <label key={key} title={tr('export_field_group_hint', 'Include this group of columns in the file')} className="flex items-start gap-2 text-sm text-gray-700 dark:text-gray-200">
+          <label key={key} className="flex items-start gap-2 text-sm text-gray-700 dark:text-gray-200">
             <input
               type="checkbox"
               className="mt-0.5"
@@ -131,21 +131,29 @@ export default function ExportFieldsModal({ rowCount, onClose, scopes, selectedS
         ))}
       </div>
       <div className="mb-4">
-        <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+        {/* Format tradeoffs used to live in each button's native `title`
+            tooltip, which never opens on touch. Folded into one InfoHint by
+            the label so a phone user can actually read them (the app's
+            standing "explanations behind InfoHint, not inline / not native
+            title" density rule). */}
+        <p className="mb-1.5 flex items-center gap-1 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
           {tr('export_format_label', 'Format')}
+          <InfoHint
+            label={tr('export_format_label', 'Format')}
+            text={`${tr('export_format_excel', 'Excel')}: ${tr('export_format_excel_hint', '.xlsx — opens in Excel, Khmer-safe')}. ${tr('export_format_csv', 'CSV')}: ${tr('export_format_csv_hint', '.csv — for re-import/machines; opening in Excel can break barcodes')}. ${tr('export_format_pdf', 'PDF')}: ${tr('export_format_pdf_hint', 'Print view — save as PDF or print')}.`}
+          />
         </p>
         <div className="grid grid-cols-3 gap-1.5">
           {([
-            ['xlsx', tr('export_format_excel', 'Excel'), tr('export_format_excel_hint', '.xlsx — opens in Excel, Khmer-safe')],
-            ['csv', tr('export_format_csv', 'CSV'), tr('export_format_csv_hint', '.csv — for re-import/machines; opening in Excel can break barcodes')],
-            ['pdf', tr('export_format_pdf', 'PDF'), tr('export_format_pdf_hint', 'Print view — save as PDF or print')],
-          ] as Array<[ProductExportFormat, string, string]>).map(([value, label, hint]) => (
+            ['xlsx', tr('export_format_excel', 'Excel')],
+            ['csv', tr('export_format_csv', 'CSV')],
+            ['pdf', tr('export_format_pdf', 'PDF')],
+          ] as Array<[ProductExportFormat, string]>).map(([value, label]) => (
             <button
               key={value}
               type="button"
               onClick={() => setFormat(value)}
               aria-pressed={format === value}
-              title={hint}
               className={`rounded-lg border px-2 py-1.5 text-xs font-semibold transition ${format === value
                 ? 'border-blue-500 bg-blue-50 text-blue-800 dark:border-blue-500 dark:bg-blue-950/30 dark:text-blue-200'
                 : 'border-gray-200 bg-white text-gray-600 hover:border-gray-300 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300'}`}
