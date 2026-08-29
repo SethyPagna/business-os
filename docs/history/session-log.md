@@ -12624,7 +12624,7 @@ REPLACES a branch's quantity and never touches `product_batches`, while only the
 *first* CSV row per product takes the new-product path that creates a lot — so the
 6,104 `Received via product import` lots sit 5,927 at Shop and 177 at Warehouse.
 Step 4d re-imported through that same default path, rebuilding `branch_stock` while
-leaving the lot ledger untouched. Effect on the POS: every product carries an active
+leaving the lot ledger untouched. **`0079_reconcile_batch_stock` went inert before it could cover this.** It fixes exactly this divergence and is applied (all 80 migrations are), but its guard is `n = 1` -- written when "every one of the ~6,100 products has exactly ONE active lot". Step 4 then created 19,914 more lots: today 6,007 products carry multiple lots (up to 57) and only 97 are single-lot, so the migration now skips 98% of the catalog. A multi-lot rule is available and unambiguous: the shortfall at each product x branch is the template opening quantity, and every product has exactly one `Received via product import` lot to carry it, leaving the parked historical lots at 0 as Step 4e intended. Effect on the POS: every product carries an active
 batch, so `batchSelectionRequired` is true for all of them and the add button needs a
 lot with stock. At Shop 30 products (109 units) are therefore unsellable despite
 showing stock — e.g. #4461 Morphe Fluidity Concealer C2.65, 11 on hand, 0 in any lot.
