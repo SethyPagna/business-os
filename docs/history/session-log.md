@@ -12196,3 +12196,32 @@ neither in a peer's dirty set. Messaging the contacts session as a courtesy. Par
 taken after re-checking max = 467.
 
 **Needs deploy.** Frontend-only; ships on the next build.
+
+## Part 469 (Aug 29 2026, session business-os-v1-74) — faster import feedback: adaptive poll cadence + tighter tracker active poll
+
+"Make it smarter and faster." The direct-apply workflow (Parts 463/465/467) was
+the smarter half; this is the faster half. The remaining latency was pure polling
+overhead: the "Importing…" spinner could sit for a full fixed interval AFTER the
+server had actually finished.
+
+- **`importPollDelayMs()` (new `src/utils/importPoll.ts`)** — the in-modal review
+  screens (`ProductServerImportReviewScreen` + the shared inventory/sales
+  `ServerImportReviewScreen`) now poll fast at first — 300 / 400 / 600 / 900ms —
+  then hold at the old 1.2s steady interval. A small/fresh import's analyze+apply
+  (the common case, and every import onto the reset catalog) is caught almost
+  immediately; a large/slow import backs off to the same cadence as before, so no
+  extra server load. First poll is still fired immediately.
+- **Tracker active-job poll 5s → 3s** (`IMPORT_TRACKER_ACTIVE_POLL_MS`). This is
+  what paces the unified import hub's auto-approve (the tracker detects
+  awaiting_review here, then approves) and how fast an applying job's progress
+  updates. Imports are infrequent and short, so the extra polls over a job's life
+  are negligible; idle cadence (12s) and the failure backoff are untouched.
+
+Contacts kept its tuned 1.5s post-start cadence — its max-attempts→background
+fallback is timed against that and adaptive delays would shift that window.
+
+Pure helper covered by `importPoll.test.ts` (ramp shape, boundaries, junk input).
+tsc + tests green. The import flow itself was already proven live end-to-end in
+Parts 463/467, so this is a cadence tweak on a verified path.
+
+Commit `71f93fc2`. **Needs deploy** (frontend-only).
