@@ -9,6 +9,7 @@ import DatabaseBackup from 'lucide-react/dist/esm/icons/database-backup.js'
 import FolderOpen from 'lucide-react/dist/esm/icons/folder-open.js'
 import LayoutDashboard from 'lucide-react/dist/esm/icons/layout-dashboard.js'
 import LogOut from 'lucide-react/dist/esm/icons/log-out.js'
+import Menu from 'lucide-react/dist/esm/icons/menu.js'
 import MoreHorizontal from 'lucide-react/dist/esm/icons/more-horizontal.js'
 import Package from 'lucide-react/dist/esm/icons/package.js'
 import Pencil from 'lucide-react/dist/esm/icons/pencil.js'
@@ -198,6 +199,14 @@ export default function Sidebar({ notificationSlot = null, desktopNotificationSl
 
   const [moreOpen, setMoreOpen] = useState(false)
   const [profileOpen, setProfileOpen] = useState(false)
+  // Z5: desktop sidebar-footer system menu (☰) housing Settings / Update /
+  // Exit -- declutters the footer from two loose icons into one control.
+  const [sysMenuOpen, setSysMenuOpen] = useState(false)
+  const runAppUpdate = () => {
+    // Same "check for update and refresh" work the old footer Refresh icon did.
+    navigator.serviceWorker?.controller?.postMessage?.({ type: 'BUSINESS_OS_SKIP_WAITING' })
+    window.setTimeout(() => window.location.reload(), 250)
+  }
 
   // N2: which pages currently hold registered unsaved work -- drives the
   // amber dot on their nav items. Registry changes (open/close of a dirty
@@ -380,33 +389,52 @@ export default function Sidebar({ notificationSlot = null, desktopNotificationSl
                 {user?.role_name || t('no_role') || 'No role'}
               </div>
             </button>
-            <button
-              onClick={() => {
-                // Manual "check for update and refresh" action, replacing the
-                // old always-appearing floating "Update ready" banner (see
-                // App.tsx's OfflineModeBanner) -- that banner reappeared on
-                // effectively every login/reload rather than only once when
-                // a genuinely new build was waiting, which read as a
-                // redundant nag. This does the same underlying work (tell
-                // any waiting service worker to activate, then reload) but
-                // only when the person actually asks for it.
-                navigator.serviceWorker?.controller?.postMessage?.({ type: 'BUSINESS_OS_SKIP_WAITING' })
-                window.setTimeout(() => window.location.reload(), 250)
-              }}
-              className={`transition-colors ${textClass ? 'opacity-70 hover:opacity-100 hover:text-blue-400' : 'text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300'}`}
-              title={t('refresh_app') || 'Refresh / check for update'}
-              style={textStyle}
-            >
-              <RefreshCw className="h-4 w-4" />
-            </button>
-            <button
-              onClick={logout}
-              className={`transition-colors ${textClass ? 'opacity-70 hover:opacity-100 hover:text-red-400' : 'text-red-600 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300'}`}
-              title={t('logout')}
-              style={textStyle}
-            >
-              <LogOut className="h-4 w-4" />
-            </button>
+            {/* Z5: one ☰ control housing Settings / Update / Exit, replacing
+                the two loose footer icons. The menu items carry the action
+                colours (Update blue, Exit red). A transparent backdrop
+                closes it on an outside click (same pattern as the mobile
+                More drawer). */}
+            <div className="relative z-50 flex-shrink-0">
+              <button
+                type="button"
+                onClick={() => setSysMenuOpen((open) => !open)}
+                aria-label={t('menu') || 'Menu'}
+                aria-expanded={sysMenuOpen}
+                className={`transition-colors ${textClass ? 'opacity-70 hover:opacity-100' : 'text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-white'}`}
+                title={t('menu') || 'Menu'}
+                style={textStyle}
+              >
+                <Menu className="h-4 w-4" />
+              </button>
+              {sysMenuOpen ? (
+                <>
+                  <div className="fixed inset-0 z-40" onClick={() => setSysMenuOpen(false)} />
+                  <div className="absolute bottom-full right-0 z-50 mb-2 w-44 overflow-hidden rounded-xl border border-gray-200 bg-white py-1 shadow-xl dark:border-gray-700 dark:bg-gray-800">
+                    <button
+                      type="button"
+                      onClick={() => { navigateTo('settings'); setSysMenuOpen(false) }}
+                      className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-700"
+                    >
+                      <Settings className="h-4 w-4 text-gray-500 dark:text-gray-400" /> {t('settings') || 'Settings'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => { runAppUpdate(); setSysMenuOpen(false) }}
+                      className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-sm text-blue-600 hover:bg-blue-50 dark:text-blue-400 dark:hover:bg-blue-900/20"
+                    >
+                      <RefreshCw className="h-4 w-4" /> {t('refresh_app') || 'Update'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => { setSysMenuOpen(false); logout() }}
+                      className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-sm text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-900/20"
+                    >
+                      <LogOut className="h-4 w-4" /> {t('logout') || 'Exit'}
+                    </button>
+                  </div>
+                </>
+              ) : null}
+            </div>
           </div>
         </div>
       </aside>

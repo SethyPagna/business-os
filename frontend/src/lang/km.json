@@ -4428,5 +4428,6 @@
   "use_computed_change_hint": "បំពេញ USD ដោយប្រាក់អាប់គណនាទាំងស្រុង",
   "short": "ខ្វះ",
   "minimize_hint": "បង្រួម — បន្តពេលក្រោយពីស្លាក",
-  "minimized_dismiss_hint": "បោះបង់ និងលុបសេចក្តីព្រាងនេះ"
+  "minimized_dismiss_hint": "បោះបង់ និងលុបសេចក្តីព្រាងនេះ",
+  "menu": "ម៉ឺនុយ"
 }
