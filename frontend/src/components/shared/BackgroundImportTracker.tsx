@@ -790,6 +790,11 @@ export default function BackgroundImportTracker() {
   const jobsSignatureRef = useRef('')
   const jobsRef = useRef<ImportJob[]>([])
   const actionInFlightRef = useRef('')
+  // Direct-apply (unified import hub): remembers which auto_approve jobs we have
+  // already fired the approve for, and bridges to handleApprove (defined below
+  // the primaryJob early return) so the auto-approve effect above can call it.
+  const autoApprovedJobIdsRef = useRef<Set<string>>(new Set())
+  const autoApproveHandlerRef = useRef<((job: ImportJob) => void) | null>(null)
   const trackerRef = useRef<HTMLDivElement | null>(null)
   // Drag is now initiated from anywhere on the header row (icon, title,
   // subtitle) instead of only a small dedicated grip button. Previously the
@@ -1011,6 +1016,28 @@ export default function BackgroundImportTracker() {
     previousHasAttentionRef.current = hasAttention
   }, [hasAttention, setMinimized])
 
+  // Direct-apply for the unified import hub: jobs it flagged `auto_approve` in
+  // their policy were already reviewed on the hub, so approve them the moment
+  // analysis reaches awaiting_review -- once each. It goes through handleApprove,
+  // which still redirects genuine product/contact conflicts into their review /
+  // merge screen instead of applying blindly (so this never bypasses that
+  // safety). handleApprove is read through a ref because it is defined below the
+  // primaryJob early return.
+  useEffect(() => {
+    const approve = autoApproveHandlerRef.current
+    if (!approve) return
+    for (const job of jobs) {
+      const jobId = String(job?.id || '')
+      if (!jobId || autoApprovedJobIdsRef.current.has(jobId)) continue
+      const policy = job?.policy as { auto_approve?: boolean } | null | undefined
+      if (!policy || policy.auto_approve !== true) continue
+      if (normalizeJobStatus(job) !== 'awaiting_review') continue
+      autoApprovedJobIdsRef.current.add(jobId)
+      approve(job)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [jobs])
+
   if (!primaryJob) return null
 
   const status = normalizeJobStatus(primaryJob)
@@ -1164,6 +1191,9 @@ export default function BackgroundImportTracker() {
       finishTrackerAction(action)
     }
   }
+  // Bridge for the auto-approve effect above (which sits before the primaryJob
+  // early return and so cannot reference handleApprove directly).
+  autoApproveHandlerRef.current = handleApprove
 
   const handleDownloadErrors = async (job: ImportJob) => {
     const action = beginTrackerAction(job, 'download-errors')

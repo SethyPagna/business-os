@@ -116,7 +116,11 @@ export default function ImportHub({
           update({ status: 'creating' })
           const created = await createImportJob({
             type: entry.chosen,
-            policy: defaultPolicyFor(entry.chosen, accrueLoyalty),
+            // Direct-apply: the routed files were already reviewed here on the
+            // hub, so flag each job to auto-approve once the server finishes
+            // analysis. The tracker fires the approve; genuine conflicts still
+            // route to their review/merge screen instead of applying blindly.
+            policy: { ...defaultPolicyFor(entry.chosen, accrueLoyalty), auto_approve: true },
           }) as { job?: { id?: string | number }; id?: string | number }
           const jobId = created?.job?.id ?? created?.id
           if (!jobId) throw new Error(T('import_hub_job_failed', 'Import job was not created'))
