@@ -4419,5 +4419,7 @@
   "avg_value_per_product": "Avg value / product",
   "discount_rate": "Discount rate",
   "status_stock_effect_cue": "Stock effect by status",
-  "status_stock_effect_label": "What each sale status does to stock"
+  "status_stock_effect_label": "What each sale status does to stock",
+  "walk_in": "Walk-in",
+  "credit_awaiting_payment": "Credit — awaiting payment"
 }

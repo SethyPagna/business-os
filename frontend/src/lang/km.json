@@ -4419,5 +4419,7 @@
   "avg_value_per_product": "តម្លៃមធ្យម / ផលិតផល",
   "discount_rate": "អត្រាបញ្ចុះតម្លៃ",
   "status_stock_effect_cue": "ផលប៉ះពាល់ស្តុកតាមស្ថានភាព",
-  "status_stock_effect_label": "ស្ថានភាពលក់នីមួយៗធ្វើអ្វីចំពោះស្តុក"
+  "status_stock_effect_label": "ស្ថានភាពលក់នីមួយៗធ្វើអ្វីចំពោះស្តុក",
+  "walk_in": "អតិថិជនទូទៅ",
+  "credit_awaiting_payment": "ឥណទាន — រង់ចាំការទូទាត់"
 }

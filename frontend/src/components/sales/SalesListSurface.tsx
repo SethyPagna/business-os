@@ -24,6 +24,10 @@ interface SaleRecord {
   total?: number
   total_khr?: number
   items?: SaleItem[] | string | null
+  // Y17: the customer column folds name + phone into one cell; the full
+  // membership/address detail opens in SaleDetailModal on row click.
+  customer_name?: string
+  customer_phone?: string
 }
 
 interface SalesGroup {
@@ -129,6 +133,7 @@ export default function SalesListSurface({
                 </th>
                 <th className="px-4 py-3 text-left font-semibold text-gray-600 dark:text-gray-400">{t('receipt_number')}</th>
                 <th className="px-4 py-3 text-left font-semibold text-gray-600 dark:text-gray-400">{t('date')}</th>
+                <th className="px-4 py-3 text-left font-semibold text-gray-600 dark:text-gray-400">{t('customer')}</th>
                 <th className="px-4 py-3 text-left font-semibold text-gray-600 dark:text-gray-400">{t('status')}</th>
                 <th className="hidden px-4 py-3 text-left font-semibold text-gray-600 dark:text-gray-400 lg:table-cell">{t('cashier')}</th>
                 <th className="px-4 py-3 text-left font-semibold text-gray-600 dark:text-gray-400">{t('payment_method')}</th>
@@ -145,6 +150,7 @@ export default function SalesListSurface({
                     <td className={`${selectCellPad} py-3`} />
                     <td className="px-4 py-3"><div className="h-4 w-40 rounded bg-slate-200 dark:bg-slate-700" /></td>
                     <td className="px-4 py-3"><div className="h-3 w-24 rounded bg-slate-200 dark:bg-slate-700" /></td>
+                    <td className="px-4 py-3"><div className="h-4 w-28 rounded bg-slate-200 dark:bg-slate-700" /></td>
                     <td className="px-4 py-3"><div className="h-5 w-20 rounded-full bg-slate-200 dark:bg-slate-700" /></td>
                     <td className="hidden px-4 py-3 lg:table-cell"><div className="h-3 w-24 rounded bg-slate-200 dark:bg-slate-700" /></td>
                     <td className="px-4 py-3"><div className="h-5 w-16 rounded-full bg-slate-200 dark:bg-slate-700" /></td>
@@ -155,13 +161,13 @@ export default function SalesListSurface({
                   </tr>
                 ))
               ) : filtered.length === 0 ? (
-                <tr><td colSpan={10} className="py-10 text-center text-gray-400">{t('no_data')}</td></tr>
+                <tr><td colSpan={11} className="py-10 text-center text-gray-400">{t('no_data')}</td></tr>
               ) : salesSections.map((section) => {
                 const isCollapsed = collapsedSalesSections.has(section.id)
                 return (
                   <Fragment key={section.id}>
                     <tr className="bg-slate-100/90 dark:bg-slate-800/80">
-                      <td colSpan={10} className="px-4 py-2">
+                      <td colSpan={11} className="px-4 py-2">
                         <div className="flex items-center justify-between gap-3 text-xs">
                           <label className="inline-flex min-w-0 items-center gap-2 font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
                             {selectionModeActive ? (
@@ -194,7 +200,7 @@ export default function SalesListSurface({
                       <Fragment key={group.id}>
                         {showSalesActionGroups ? (
                           <tr className="bg-slate-50/80 dark:bg-slate-900/30">
-                            <td colSpan={10} className="px-6 py-2">
+                            <td colSpan={11} className="px-6 py-2">
                               <div className="flex flex-wrap items-center gap-3 text-xs">
                                 {selectionModeActive ? (
                                 <input
@@ -255,6 +261,15 @@ export default function SalesListSurface({
                               </td>
                               <td className="px-4 py-2.5 font-mono font-medium text-blue-600 dark:text-blue-400">{sale.receipt_number}</td>
                               <td className="px-4 py-2.5 whitespace-nowrap text-xs text-gray-500">{fmtTime(sale.created_at)}</td>
+                              <td className="px-4 py-2.5">
+                                {/* Y17: name + phone folded into one column; the
+                                    row click opens the full detail (membership,
+                                    address, line items). */}
+                                <div className="min-w-0 max-w-[12rem]">
+                                  <div className="truncate font-medium text-gray-800 dark:text-gray-200">{sale.customer_name?.trim() || (t('walk_in') || 'Walk-in')}</div>
+                                  {sale.customer_phone?.trim() ? <div className="truncate text-xs text-gray-400">{sale.customer_phone}</div> : null}
+                                </div>
+                              </td>
                               <td className="px-4 py-2.5"><StatusBadge status={status} t={t} /></td>
                               <td className="hidden px-4 py-2.5 text-gray-700 dark:text-gray-300 lg:table-cell">{sale.cashier_name || 'N/A'}</td>
                               <td className="px-4 py-2.5"><span className="badge-blue text-xs">{sale.payment_method || 'N/A'}</span></td>
@@ -418,8 +433,12 @@ export default function SalesListSurface({
                               <span className="badge-blue text-xs">{sale.payment_method || 'N/A'}</span>
                               <StatusBadge status={status} t={t} />
                             </div>
-                            <div className="mt-0.5 flex flex-wrap items-center gap-2 text-xs text-gray-500">
-                              {sale.cashier_name ? <span>{sale.cashier_name}</span> : null}
+                            {/* Y17: customer (name + phone) leads the meta line;
+                                tapping the card opens the full detail. */}
+                            <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-gray-500">
+                              <span className="font-medium text-gray-700 dark:text-gray-300">{sale.customer_name?.trim() || (t('walk_in') || 'Walk-in')}</span>
+                              {sale.customer_phone?.trim() ? <span className="text-gray-400">{sale.customer_phone}</span> : null}
+                              {sale.cashier_name ? <span>| {sale.cashier_name}</span> : null}
                               {branchLabel ? <span>| {branchLabel}</span> : null}
                               <span>| {items.length} {t('items')}</span>
                             </div>
