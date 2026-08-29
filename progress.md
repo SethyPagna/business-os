@@ -1607,9 +1607,12 @@ those until that unit commits.*
   renders FULL as its own section (it already carries its own view switcher + search +
   date-range filter). tsc + check:source + 6 unit suites + vite build all green; live
   click-through deferred (peer owns the dev-server backend).
-- [ ] Y16. **History + Manage buttons join the section-chip row** (not their own
+- [~] Y16. **History + Manage buttons join the section-chip row** (not their own
   toolbar row) on: Sales, Branches, Contacts, Settings, Library, Review & Logs.
-  (Products' equivalent rides Y15.)
+  (Products' equivalent rides Y15.) **CLAIMED Part-TBD, session a8 (Aug 29):**
+  scoping each surface's current toolbar; must ship on ALL siblings at once
+  (cross-surface rule) — Sales/Contacts/AuditLog files are peer-hot, will
+  coordinate file-by-file.
 - [x] Y17 *(Part 431 — SHIPPED, needs deploy; session a8).* **Sales list:
   Customer column folded in.** The list had NO customer column; now a Customer
   cell folds name + phone into one column (desktop table after Date, and
