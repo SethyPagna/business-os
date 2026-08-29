@@ -1066,19 +1066,22 @@ export default function Returns() {
 
       <p className="mb-2 text-xs text-gray-400">{tr('tap_to_view_details', 'Tap a record to view details.')}</p>
 
-      <PaginationControls
-        className="mb-3"
-        page={returnPage}
-        pageSize={returnPageSize}
-        totalItems={allVisibleReturns.length}
-        label={tr('returns_count', 'returns')}
-        t={t}
-        onPageChange={setReturnPage}
-        onPageSizeChange={(size) => {
-          setReturnPageSize(size)
-          setReturnPage(1)
-        }}
-      />
+      <div className="mb-3 flex justify-end">
+        <PaginationControls
+          compact
+          rangeAsPageSize
+          page={returnPage}
+          pageSize={returnPageSize}
+          totalItems={allVisibleReturns.length}
+          label={tr('returns_count', 'returns')}
+          t={t}
+          onPageChange={setReturnPage}
+          onPageSizeChange={(size) => {
+            setReturnPageSize(size)
+            setReturnPage(1)
+          }}
+        />
+      </div>
       <ReturnsListSurface
         collapsedReturnSections={collapsedReturnSections}
         CUSTOMER_SCOPE={CUSTOMER_SCOPE}

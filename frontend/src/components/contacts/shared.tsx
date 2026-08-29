@@ -400,24 +400,27 @@ export function ContactTable<T extends ContactRow>({
 
   return (
     <>
-      <PaginationControls
-        className="mb-2"
-        page={activePage}
-        pageSize={activePageSize}
-        totalItems={totalItems}
-        label={typeof t === 'function' ? (t('records') || 'records') : 'records'}
-        t={t}
-        onPageChange={usingControlledPagination ? onControlledPageChange : setPage}
-        onPageSizeChange={(size) => {
-          if (usingControlledPagination) {
-            onControlledPageSizeChange?.(size)
-            onControlledPageChange?.(1)
-            return
-          }
-          setPageSize(size)
-          setPage(1)
-        }}
-      />
+      <div className="mb-2 flex justify-end">
+        <PaginationControls
+          compact
+          rangeAsPageSize
+          page={activePage}
+          pageSize={activePageSize}
+          totalItems={totalItems}
+          label={typeof t === 'function' ? (t('records') || 'records') : 'records'}
+          t={t}
+          onPageChange={usingControlledPagination ? onControlledPageChange : setPage}
+          onPageSizeChange={(size) => {
+            if (usingControlledPagination) {
+              onControlledPageSizeChange?.(size)
+              onControlledPageChange?.(1)
+              return
+            }
+            setPageSize(size)
+            setPage(1)
+          }}
+        />
+      </div>
       {loading ? (
         <div className="mb-2 rounded-xl border border-blue-100 bg-blue-50/80 px-3 py-2 text-xs text-blue-600 dark:border-blue-900/40 dark:bg-blue-900/20 dark:text-blue-300">
           Refreshing...

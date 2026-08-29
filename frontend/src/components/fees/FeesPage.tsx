@@ -531,15 +531,18 @@ export default function FeesPage() {
             ))}
           </div>
 
-          <PaginationControls
-            className="mt-3"
-            page={page}
-            pageSize={pageSize}
-            totalItems={result.total}
-            t={t}
-            onPageChange={setPage}
-            onPageSizeChange={(size) => { setPageSize(size); setPage(1) }}
-          />
+          <div className="mt-3 flex justify-end">
+            <PaginationControls
+              compact
+              rangeAsPageSize
+              page={page}
+              pageSize={pageSize}
+              totalItems={result.total}
+              t={t}
+              onPageChange={setPage}
+              onPageSizeChange={(size) => { setPageSize(size); setPage(1) }}
+            />
+          </div>
         </>
       )}
 

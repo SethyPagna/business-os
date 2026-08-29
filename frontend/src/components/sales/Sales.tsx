@@ -1077,19 +1077,22 @@ export default function Sales() {
       ) : null}
 
       {salesView === 'receipts' ? (
-      <PaginationControls
-        className="mb-2"
-        page={salesPage}
-        pageSize={salesPageSize}
-        totalItems={allVisibleSales.length}
-        label={t('sales') || 'sales'}
-        t={t}
-        onPageChange={setSalesPage}
-        onPageSizeChange={(size) => {
-          setSalesPageSize(size)
-          setSalesPage(1)
-        }}
-      />
+      <div className="mb-2 flex justify-end">
+        <PaginationControls
+          compact
+          rangeAsPageSize
+          page={salesPage}
+          pageSize={salesPageSize}
+          totalItems={allVisibleSales.length}
+          label={t('sales') || 'sales'}
+          t={t}
+          onPageChange={setSalesPage}
+          onPageSizeChange={(size) => {
+            setSalesPageSize(size)
+            setSalesPage(1)
+          }}
+        />
+      </div>
       ) : null}
 
       {/* Search bar and bulk-action bar pin to the top of the page's scroll
