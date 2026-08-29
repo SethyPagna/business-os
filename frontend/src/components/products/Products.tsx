@@ -661,7 +661,6 @@ function ProductsFullEditor() {
   const [searchMode, setSearchMode] = useState<SearchMode>('AND')
   const [productPage, setProductPage] = useState(1)
   const [productPageSize, setProductPageSize] = useState(DEFAULT_PAGE_SIZE)
-  const [productPageDraft, setProductPageDraft] = useState('1')
   const [productTotal, setProductTotal] = useState(0)
   const [productFilterMeta, setProductFilterMeta] = useState<ProductFilterMeta>({ brands: [], categories: [], suppliers: [], initials: [] })
   // Horizontal A-Z filter UI removed (Aug 19 2026) -- initialFilter locked
@@ -2049,7 +2048,6 @@ function ProductsFullEditor() {
   // plain click opens the product detail view instead ("click-to-view").
   const selectionModeActive = selectedIds.size > 0
   const {
-    safePage: productSafePage,
     safePageSize: productSafePageSize,
     totalPages: productTotalPages,
     summaryLabel: productSummaryLabel,
@@ -2072,9 +2070,9 @@ function ProductsFullEditor() {
   // reset path, since it's a `load(true)` refetch, not a filter change. Left
   // alone, that refetch would ask the server for a page past the new last
   // page, get back zero items, and leave the grid stuck empty even though
-  // productSafePage/productSummaryLabel display a clamped, seemingly-correct
-  // "page 2 of 2" underneath it -- content and footer disagreeing. Mirrors
-  // the equivalent clampPage effect already used in Sales.tsx.
+  // productSummaryLabel and the pagination pill display a clamped,
+  // seemingly-correct "page 2 of 2" underneath it -- content and footer
+  // disagreeing. Mirrors the equivalent clampPage effect used in Sales.tsx.
   useEffect(() => {
     if (productPage > productTotalPages) {
       setProductPage(productTotalPages)
@@ -2159,24 +2157,9 @@ function ProductsFullEditor() {
     if (mobileSelectAllRef.current) mobileSelectAllRef.current.indeterminate = indeterminate
   }, [selectedVisibleCount, visibleIds.length])
 
-  useEffect(() => {
-    setProductPageDraft(String(productSafePage))
-  }, [productSafePage])
-
   const toggleSelectionScope = useCallback((ids: EntityId[], checked: boolean) => {
     setSelectedIds((current) => toggleIdSet(current, ids, checked))
   }, [])
-
-  const commitProductPageDraft = useCallback(() => {
-    const parsed = Number.parseInt(String(productPageDraft || '').trim(), 10)
-    if (!Number.isFinite(parsed)) {
-      setProductPageDraft(String(productSafePage))
-      return
-    }
-    const nextPage = Math.min(productTotalPages, Math.max(1, parsed))
-    setProductPage(nextPage)
-    setProductPageDraft(String(nextPage))
-  }, [productPageDraft, productSafePage, productTotalPages])
 
   const cycleProductPageSize = useCallback(() => {
     const currentIndex = PAGE_SIZE_OPTIONS.findIndex((option) => Number(option) === Number(productSafePageSize))
@@ -3446,85 +3429,13 @@ function ProductsFullEditor() {
           instead of a folded card at the bottom of this same scroll. */}
       {activeProductSection === 'products' && (<>
 
-      {/* Items-per-page / page-number bar -- deliberately NOT part of the
-          sticky group below (Aug 11 2026 UI-polish request: pin search /
-          select-all / bulk-action bar on scroll, but leave pagination out
-          of it so it scrolls away normally). Used to be bundled into the
-          same sticky card as select-all below it; split out so toggling
-          page size or jumping pages doesn't require a control that's
-          permanently glued to the top of the screen. A second, compact
-          copy renders below the list too (see ProductsListSurface), so
-          paging doesn't force a scroll back up either. */}
-      <div className="mb-2 -mx-1 overflow-hidden rounded-2xl border border-slate-200 bg-white/95 px-2 py-1.5 shadow-sm dark:border-slate-700 dark:bg-slate-900/85 sm:mx-0">
-        <div className="grid min-w-0 grid-cols-[minmax(5.2rem,1fr)_minmax(6.4rem,7.6rem)_minmax(6.9rem,9.4rem)] items-center gap-1.5">
-          <span className="inline-flex min-w-0 items-center justify-center overflow-hidden text-ellipsis whitespace-nowrap rounded-full bg-slate-50 px-2 py-1 text-[10px] font-medium text-slate-700 dark:bg-slate-800 dark:text-slate-100">
-            {productSummaryLabel}
-          </span>
-          <div className="flex min-w-0 items-center gap-1">
-          <PageSizeSelect
-            value={productSafePageSize}
-            options={PAGE_SIZE_OPTIONS}
-            onChange={(nextValue) => {
-              setProductPageSize(nextValue)
-              setProductPage(1)
-            }}
-            // Matches routes/products.ts's clampInt(query.pageSize, 20, 1,
-            // 100) -- the server silently clamped anything higher, so a
-            // custom value above 100 looked "accepted" here but never
-            // actually took effect. Capping the input to what the server
-            // will honor keeps what's typed and what's applied in sync.
-            maxValue={100}
-            ariaLabel={`${t('per_page') || 'per page'} ${productSafePageSize}`}
-            className="h-7 w-full min-w-0"
-            buttonClassName="h-7 w-full rounded-full px-2 py-0 pl-2 pr-1.5 text-[10px] font-semibold shadow-none"
-            menuClassName="min-w-[9rem]"
-            optionClassName="text-xs"
-          />
-          </div>
-          <div className="inline-flex h-7 min-w-0 items-center overflow-hidden rounded-full border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-950">
-            <button
-              type="button"
-              className="inline-flex h-7 w-6 shrink-0 items-center justify-center text-slate-500 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40 dark:text-slate-300 dark:hover:bg-slate-800"
-              disabled={productSafePage <= 1}
-              onClick={() => setProductPage(productSafePage - 1)}
-              aria-label="Previous page"
-            >
-              <ChevronLeft className="h-3.5 w-3.5" />
-              </button>
-              <input
-              type="text"
-              inputMode="numeric"
-              aria-label={t('page') || 'Page'}
-              className="h-7 min-w-0 flex-1 border-0 bg-transparent px-0 text-center text-[10px] font-semibold text-slate-700 outline-none dark:text-slate-100"
-              value={productPageDraft}
-              onChange={(event) => setProductPageDraft(event.target.value.replace(/[^\d]/g, '') || '')}
-              onBlur={commitProductPageDraft}
-              onKeyDown={(event) => {
-                if (event.key === 'Enter') {
-                    event.preventDefault()
-                    commitProductPageDraft()
-                    event.currentTarget.blur()
-                  } else if (event.key === 'Escape') {
-                    setProductPageDraft(String(productSafePage))
-                    event.currentTarget.blur()
-                }
-              }}
-            />
-            <span className="pr-1.5 text-[10px] font-semibold text-slate-500 dark:text-slate-300">
-              / {productTotalPages}
-            </span>
-            <button
-              type="button"
-              className="inline-flex h-7 w-6 shrink-0 items-center justify-center text-slate-500 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40 dark:text-slate-300 dark:hover:bg-slate-800"
-              disabled={productSafePage >= productTotalPages}
-              onClick={() => setProductPage(productSafePage + 1)}
-              aria-label="Next page"
-            >
-              <ChevronRight className="h-3.5 w-3.5" />
-            </button>
-          </div>
-        </div>
-      </div>
+      {/* Y20: the items-range / per-page / pages controls used to render as
+          their own bar here (a whole row above the search). They now fold
+          into the select-all row below, as the shared PaginationControls
+          compact `rangeAsPageSize` pill -- one line: prev / editable page /
+          the "1-20" range chip (which IS the per-page dropdown) / total
+          pages / next. The second, compact copy still renders below the list
+          (see the PaginationControls after ProductsListSurface). */}
 
       {/* The "Refreshing products..." state is already surfaced inside the
           list body itself (ProductsListSurface's empty/refreshing state,
@@ -3648,7 +3559,7 @@ function ProductsFullEditor() {
             flow while the search / filter row above stays pinned. */}
         <div className="bulk-toolbar mb-2 overflow-hidden rounded-2xl border shadow-sm sm:rounded-xl">
           <div className="px-2 py-2">
-            <div className={`grid items-center gap-1.5 ${hasSelected ? 'grid-cols-[minmax(0,1fr)_4.9rem]' : 'grid-cols-1'}`}>
+            <div className="flex flex-wrap items-center gap-1.5">
                 <label className="inline-flex min-w-0 items-center gap-2 overflow-hidden rounded-2xl border border-slate-200 bg-white/95 px-2.5 py-1.5 text-[11px] font-medium text-slate-700 shadow-sm dark:border-slate-700 dark:bg-slate-900/85 dark:text-slate-100">
                   <input
                     type="checkbox"
@@ -3673,6 +3584,25 @@ function ProductsFullEditor() {
                     {productChipLabels.delete}
                   </button>
                 ) : null}
+                {/* Y20: the pagination controls fold into this select-all
+                    row (they used to be a whole separate bar above the
+                    search). Right-aligned via ml-auto; wraps to its own line
+                    on narrow screens. The range chip "1-20" is itself the
+                    per-page dropdown. */}
+                <div className="ml-auto flex min-w-0 justify-end">
+                  <PaginationControls
+                    compact
+                    rangeAsPageSize
+                    editablePageSizeInput={false}
+                    page={productPage}
+                    pageSize={productSafePageSize}
+                    totalItems={productTotal}
+                    onPageChange={setProductPage}
+                    onPageSizeChange={(nextValue) => { setProductPageSize(nextValue); setProductPage(1) }}
+                    pageSizeOptions={PAGE_SIZE_OPTIONS}
+                    t={t}
+                  />
+                </div>
             </div>
           </div>
           {hasSelected ? (

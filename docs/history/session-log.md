@@ -11340,3 +11340,45 @@ handlers.
 Commit: `e48ce114` (Sidebar.tsx + en.json + km.json).
 
 **Needs deploy.** Frontend-only; ships on the next build.
+
+## Part 447 (Aug 29 2026, session business-os-v1-e4) — Y20 Products call-site: the pager folds into the select-all row
+
+**Completes Y20 for the last list page.** Session 74 shipped the shared
+`rangeAsPageSize` mode + the non-Products lists in Part 444 and explicitly left the
+Products call-site to me (it is in my Products.tsx lane, hot from Y13–Y15). 74
+messaged the exact prop shape; I adopted it. Products.tsx only.
+
+**What changed.** Deleted the hand-rolled top pagination bar — a whole
+items-range / per-page / prev-page-next row that sat above the search — and folded
+its function into the Y14 select-all/bulk toolbar as the shared
+`<PaginationControls compact rangeAsPageSize editablePageSizeInput={false} … />`
+pill (prev · editable page · the "1-20" range chip that IS the per-page dropdown ·
+`/ totalPages` · next), right-aligned via `ml-auto` in a `flex flex-wrap` row so it
+drops to its own line on narrow screens. The select-all inner grid
+(`grid-cols-[minmax(0,1fr)_4.9rem]` / `grid-cols-1`) became that flex row. The
+second compact pager below the list is unchanged (kept as the scroll-back-up
+convenience).
+
+**Dead code removed (Golden Rule).** The old bar's supporting state was the only
+consumer of the hand-rolled page-draft input, so removing the bar orphaned it:
+deleted `productPageDraft` state, `commitProductPageDraft`, the draft-sync effect,
+and the `safePage: productSafePage` destructure (the shared pager manages its own
+draft/clamp internally). `productTotalPages` stays — the self-heal out-of-range-page
+effect still uses it; its comment was updated to stop naming the removed var.
+(`noUnusedLocals` is off here — a pre-existing unused `cycleProductPageSize` proves
+it — so this was for cleanliness, not to satisfy the compiler; the pre-existing
+`cycleProductPageSize` was left alone as out-of-scope, not mine.)
+
+**Verification.** `tsc --noEmit` clean, `check:source` parsed all 404 files,
+productSearchPagination / productPageHelpers / productsRowAlignment / sectionNavigation
+suites pass, `vite build` green. The pill self-hides when `total <= 0`
+(PaginationControls returns null), so the empty-catalog and initial-load states show
+just the select-all label — no broken empty pill. Live click-through DEFERRED (same
+reason as Parts 443/446: a peer owns the 8787 backend and the production catalog is
+empty per Part 439 anyway) — static gates green is the bar.
+
+**Parallel sessions.** Only Products.tsx changed; no peer file touched. Coordinated
+directly with 74 (they stayed off Products.tsx; I owned this call-site). Part 447
+taken after re-checking max = 446.
+
+**Needs deploy.** Frontend-only; ships on the next build.
