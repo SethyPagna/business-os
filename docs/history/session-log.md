@@ -11667,3 +11667,57 @@ suite green.
 in flight at time of writing (target 7565fed7, two commits behind HEAD) — flagged
 to the deploying session to fast-forward or redeploy so production actually gets
 the sell-path fix.
+
+## Part 455 (Aug 29 2026, session business-os-v1-87) — PRODUCTION DEPLOY of committed HEAD 24edfb13 (isolated-worktree, incl. the POS sell-path fix)
+
+**Ask.** User: "update the run files, then run full automation for deploy."
+
+**Run files updated (commit c4d8236f).** The org rebranded LeangCosmetics→LeangBeauty
+(Part 373/376) but `ops/scripts/powershell/full-automation.ps1` (health-check default),
+`run/open-app.bat`, and `DEPLOY.md` still pointed at the dead `admin.leangcosmetics.dpdns.org`
+— a clean deploy would have failed its post-deploy health check on a stale hostname.
+Repointed all to `admin.leangbeauty.com` (the live custom-domain admin URL;
+wrangler.toml routes deliberately left alone — both domains kept during transition).
+
+**Deploy method — isolated worktree at committed HEAD (user decision).** With 7
+concurrent sessions editing the shared checkout, `full-automation.bat` as-is was
+hazardous: its `npm ci` wipes node_modules + kills dev servers (breaks every peer),
+and `wrangler deploy` ships the *working tree* — which held uncommitted peer Worker
+code (`importEngine.ts`/`contacts.ts`/`routes/system.ts`, orphaned >1.5h from an
+ended session; no active session claimed it). Surfaced both blockers; the user chose
+"hold & coordinate," then — when the tree would not converge (it got *dirtier* over
+25 min of a clean-tree watcher) — "deploy from committed HEAD." Executed via
+`git worktree add --detach` at HEAD: only committed/reviewed code shipped, the
+orphaned/in-flight edits excluded, and no peer's node_modules/dev server touched.
+Copied the gitignored `.wrangler-auth.local`/`.dev.vars` into the worktree,
+`npm ci` there (isolated), typecheck+build checkpoint BEFORE the irreversible steps.
+
+**POS fix caught in time.** Mid-deploy, session 74 flagged commit `d66bb94b`
+(`fix(pos): a committed sale no longer shows an error; add pre-submit cart
+guardrails`) — the long-standing "POS shows an error but the sale still went through"
+bug (handleCheckout gated on a non-existent `result.success`; the create endpoint
+returns the sale object). It post-dated the worktree's HEAD (7565fed7), so I advanced
+the worktree to 24edfb13 (a clean fast-forward that includes d66bb94b + a test-only
+pin), re-ran the typecheck/build/posCore-test checkpoint, and deployed that.
+
+**Result — LIVE and healthy.**
+- `migrate:remote`: **No migrations to apply** — remote production D1 already at 0079
+  (applied in an earlier deploy); database untouched.
+- `secrets:sync`: 4 secrets pushed (APP_ENCRYPTION_KEY skipped — blank in .dev.vars).
+- `wrangler deploy`: exit 0, Worker `business-os` uploaded, **Version da817916-25ee-4b19-a9a7-2f0364e0a78a**,
+  all 4 routes (leangbeauty.com + admin.leangbeauty.com custom domains, old dpdns.org
+  zone routes), 6h cron + import/media/backup queues wired.
+- Health: `{"status":"ok","version":"cloudflare-portal-bootstrap-20260728",...}`;
+  leangbeauty.com and admin.leangbeauty.com both HTTP 200.
+- Worktree removed (`git worktree remove --force`), which also cleared the copied
+  secret files. Main tree + every peer's in-flight work untouched.
+
+**Coordination.** All 5 active sessions messaged; a8/c1/74/e4 confirmed their
+committed work was deploy-ready and held off migrate/deploy; a8 ended mid-deploy.
+Posted DEPLOY DONE with the version + health result to c1/74/e4.
+
+**Note for the board.** This shipped the large "needs deploy" backlog that had
+accumulated on HEAD (Parts 346–454: outages, POS oversell/sell-path, imports, Phase
+B/C/D/E/F/G/M/N/Y/Z, migrations through 0079, rebrand). A2's live-verify checklist
+(reset-data, /api/products, POS sale with lots, storefront iPhone install, import
+round-trip, R2 retention) is the remaining user-side verification.
