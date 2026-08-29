@@ -10758,3 +10758,44 @@ code- + tsc-verified.
 **Not done.** Z2 (discount decouple — next, my lane: posCore/CartItem/POS/
 Receipt), Z5 (hamburger — large). Needs deploy (migrations 0077/0078/0079 +
 frontend).
+
+## Part 435 (Aug 29 2026, session business-os-v1-a8) — Z1a: date-derived lot codes render as their date
+
+**Ask.** "check what peer is doing then continue." Peer (business-os-v1-74) was
+mid-Z10 (editing cloudflare/src/routes/inventory.ts to make the Branch /stats
+revenue GROSS like the Dashboard) + on Z2 (POS pricing). With POS.tsx/posCore/
+CartItem/Receipt (Z2), Dashboard.tsx + inventory.ts (Z10), SaleDetailModal (Z8)
+and the F3-slice-2 files all in peer/hot lanes, I took Z1a in a clean lane.
+
+**What changed.** The user saw a batch shown as "08242026" (dateToBatchCode's
+MMDDYYYY output) where a date belongs, clashing with "08/24/2026" elsewhere.
+The rule (decided): dates render mm/dd/yyyy, lot codes render as codes, never
+interchanged. The shared batchDisplayLabel util now decodes a pure MMDDYYYY lot
+code back to its received date and shows that (preferring the authoritative
+stored received_at); a GENUINE custom lot code still renders as a code. New
+lotCodeAsDate helper (validates the code is a real calendar date). This fixes
+every surface that already used the util (ManageBatchesModal -- the "batch
+details" the user pointed at -- plus the POS lot picker, ReceiveBatchModal,
+InventoryStockModals, BranchStockAdjuster). Also routed three direct-render
+date-identifier surfaces through it: inventory/ProductDetailModal,
+products/surfaces/ProductRowParts, branches/TransferModal. Left as code-columns
+(they show the received date SEPARATELY, so the code is correct there):
+products/surfaces/ProductDetailReport + the supplier/stock-in report tables.
+
+**Verified.** New tests/batchLabelDisplay.test.ts (6 checks: decode valid
+MMDDYYYY, reject non-dates/malformed -> stay codes, the exact production case,
+received_at-wins-over-code, custom-code-stays-code, no-code fallback chain),
+wired into the test:utils chain (testChainCoverage PASS, 128 files). frontend
+tsc clean (only the 3 F3-peer onMinimize errors remain); vite build green.
+Commits 2d44897a + 034cb029.
+
+**Remaining / flagged.** Inventory.tsx's OWN products-page batch pill (~475/477)
+renders lot_code raw too but is HOT with the F3-slice-2 peer's uncommitted work
+-- it needs the same batchDisplayLabel routing once that lands (recorded on the
+board under Z1a). Z1b (the branch_batch_stock reconcile) shipped earlier as
+migration 0079.
+
+**Coordination.** Confirmed lanes by message throughout: peer on Z2/Z8/Z10/Z7/
+Z4, me on Y19/Y17/Y12/Z1a. Stayed off POS.tsx, posCore.ts, CartItem.tsx,
+Receipt.tsx, Dashboard.tsx, inventory.ts, SaleDetailModal.tsx, and the F3 files.
+Parts: peer 432-434, me 431 + 435.

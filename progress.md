@@ -1628,12 +1628,20 @@ other" with the Phase-Y items.*
   moot — production has ZERO returns and only cancels of product #1, whose
   single lot was restored correctly (measured).)*
   **Returns + cancels must restore stock to the SAME batch — never a new one.**
-- [~] Z1. **Stats not updating / inconsistent data.** (a) Products page shows
-  batch "08/28/2026" while batch details show "08242026" — partly the
-  Y7/0077 received_at repair (raw slash dates), partly lot_code MMDDYYYY
-  (08242026) being rendered where a date belongs. **Decide ONE display
-  rule: dates render mm/dd/yyyy, lot codes render as codes, never
-  interchanged** — still open. (b) **MEASURED (Part 426), a real
+- [~] Z1. **Stats not updating / inconsistent data.** (a) **Z1a FIXED (Part
+  435, needs deploy).** The rule is decided + enforced: a date-derived lot
+  code (MMDDYYYY, e.g. 08242026) renders as its mm/dd/yyyy date where a date
+  belongs; a genuine CUSTOM lot code renders as a code. Landed in the shared
+  batchDisplayLabel util (fixes ManageBatchesModal, the POS lot picker,
+  ReceiveBatchModal, InventoryStockModals, BranchStockAdjuster) + a new
+  lotCodeAsDate helper, test-covered (6 cases, wired into test:utils). Three
+  direct-render date-identifier surfaces also routed through it
+  (inventory/ProductDetailModal, products/surfaces/ProductRowParts,
+  branches/TransferModal); code-columns that show the date separately
+  (ProductDetailReport + supplier/stock-in report tables) correctly keep the
+  code. **REMAINING:** Inventory.tsx's own batch pill (~475/477) renders
+  lot_code raw too but is HOT with the F3-slice-2 peer's uncommitted work —
+  route it through batchDisplayLabel once that lands. (b) **MEASURED (Part 426), a real
   import-data inconsistency:** production branch_stock holds 23,113 units
   across 12,210 rows (6,105 products × 2 branches) but branch_batch_stock
   holds only 12,725 units in 6,105 lots (ONE lot per product, at ONE
