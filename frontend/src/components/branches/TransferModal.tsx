@@ -550,7 +550,13 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
         batchId: batchSelectionRequired ? selectedBatchId : null,
       }), 'Transfer branch stock', TRANSFER_STOCK_MUTATION_TIMEOUT_MS)
 
-      if (res?.success) {
+      // The single-transfer endpoint returns the moved lot ({ destBatchId } or a
+      // merge summary) with NO `success` flag -- a real failure is thrown by
+      // apiFetch. Gating on `res?.success` treated every successful transfer as
+      // a failure ("Transfer failed" while the stock had actually moved). Treat
+      // a returned result as success unless the server explicitly says false --
+      // the same shape the create/update checks already use.
+      if (res?.success !== false) {
         const message = (t('transfer_success') || 'Transferred {n} {unit} of "{name}"')
           .replace('{n}', String(qty))
           .replace('{unit}', selectedProduct.unit || '')
@@ -622,7 +628,7 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
         userName: user?.name,
       }), 'Bulk transfer branch stock', TRANSFER_STOCK_BULK_MUTATION_TIMEOUT_MS)
 
-      if (res?.success) {
+      if (res?.success !== false) {
         const message = (t('transfer_bulk_success') || 'Transferred {n} products').replace('{n}', String(res.transferredCount ?? items.length))
         // Same identity-match redirect as the single-item handler above,
         // just per-item -- summarize how many of this batch redirected

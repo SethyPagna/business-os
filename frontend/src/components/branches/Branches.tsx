@@ -719,7 +719,7 @@ export default function Branches() {
               () => branchApi.deleteBranch(createdBranchId, user?.id, user?.name),
               'Undo branch create',
             )
-            if (!result?.success) throw new Error(result?.error || 'Failed to undo branch creation')
+            if (result?.success === false) throw new Error(result?.error || 'Failed to undo branch creation')
             await load()
           },
           redo: async () => {
@@ -756,7 +756,11 @@ export default function Branches() {
         () => branchApi.deleteBranch(branch.id, user?.id, user?.name),
         'Delete branch',
       )
-      if (!res?.success) {
+      // deleteBranch's direct (non-review) success returns {} with no `success`
+      // flag; a real failure is thrown. Gating on `!res?.success` showed "Cannot
+      // delete branch" on a delete that actually succeeded. Only an explicit
+      // success:false is a failure here.
+      if (res?.success === false) {
         notify(res?.error || 'Cannot delete branch', 'error')
         return
       }
@@ -779,7 +783,7 @@ export default function Branches() {
             () => branchApi.deleteBranch(targetId, user?.id, user?.name),
             'Redo branch delete',
           )
-          if (!result?.success) throw new Error(result?.error || 'Failed to delete branch again')
+          if (result?.success === false) throw new Error(result?.error || 'Failed to delete branch again')
           await load()
         },
       })
@@ -814,7 +818,7 @@ export default function Branches() {
           () => branchApi.deleteBranch(branch.id, user?.id, user?.name),
           'Bulk delete branches',
         )
-        if (!result?.success) throw new Error(result?.error || 'Failed to delete branch')
+        if (result?.success === false) throw new Error(result?.error || 'Failed to delete branch')
         return Number(branch.id || 0)
       })
       const failedIds = deleteRun.failures
@@ -857,7 +861,7 @@ export default function Branches() {
                 () => branchApi.deleteBranch(branchId, user?.id, user?.name),
                 'Redo bulk branch delete',
               )
-              if (!result?.success) throw new Error(result?.error || 'Failed to re-delete branch')
+              if (result?.success === false) throw new Error(result?.error || 'Failed to re-delete branch')
             })
             if (redoRun.failures.length) throw (redoRun.failures[0]?.error || new Error('Failed to re-delete branch'))
             await load()
