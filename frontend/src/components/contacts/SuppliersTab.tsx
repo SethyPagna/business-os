@@ -11,6 +11,7 @@ import Upload from 'lucide-react/dist/esm/icons/upload.js'
 import Plus from 'lucide-react/dist/esm/icons/plus.js'
 import Download from 'lucide-react/dist/esm/icons/download.js'
 import Settings2 from 'lucide-react/dist/esm/icons/settings-2.js'
+import Phone from 'lucide-react/dist/esm/icons/phone.js'
 import { useApp as useAppHook, useSync as useSyncHook } from '../../AppContext.tsx'
 import type { QueryParams } from '../../api/query.ts'
 import { fmtDateTime24 } from '../../utils/formatters'
@@ -1166,10 +1167,22 @@ function SuppliersTab({ t, notify, active = true, initialSearch }: SuppliersTabP
               if (!selectedIds.has(Number(supplier.id))) toggleOne(supplier.id)
             },
           })
+          // Suppliers store their default contact as option[0] (the phone
+          // column mirrors it), so the option count already includes the
+          // default; fall back to the phone column for legacy rows with no
+          // options JSON.
+          const contactCount = options.length || ((supplier.phone || supplier.email) ? 1 : 0)
+          const cardPhone = primaryOption.phone || supplier.phone || ''
+          const cardEmail = primaryOption.email || supplier.email || ''
+          const cardContactPerson = primaryOption.name || supplier.contact_person || ''
+          const cardCompany = supplier.company || ''
+          const cardMetaPrimary = [cardPhone, cardEmail].filter(Boolean).join(' · ')
+          const cardMetaSecondary = [cardContactPerson, cardCompany].filter(Boolean).join(' · ')
           return (
           <div
             key={supplier.id}
-            className={`card flex select-none items-center gap-3 p-3 ${selectedIds.has(Number(supplier.id)) ? 'bg-blue-50 ring-2 ring-blue-400 dark:bg-blue-900/20' : ''}`}
+            className={`card flex cursor-pointer select-none items-center gap-3 p-3 ${selectedIds.has(Number(supplier.id)) ? 'bg-blue-50 ring-2 ring-blue-400 dark:bg-blue-900/20' : ''}`}
+            onClick={() => handleContactCellClick(supplier)}
             {...(selectionModeActive ? {} : cardLongPress)}
             onClickCapture={(event) => {
               if (consumeLongPressClick(cardLongPressState)) {
@@ -1187,13 +1200,17 @@ function SuppliersTab({ t, notify, active = true, initialSearch }: SuppliersTabP
             <div className="h-9 w-9 flex-shrink-0 rounded-full bg-orange-100 text-center text-sm font-bold leading-9 text-orange-600 dark:bg-orange-900/40">
               {supplier.name?.[0]?.toUpperCase()}
             </div>
-            <div className="min-w-0 flex-1 cursor-pointer" onClick={() => handleContactCellClick(supplier)}>
-              <div className="truncate text-sm font-semibold text-gray-900 dark:text-white">{supplier.name}</div>
-              {primaryOption.phone || supplier.phone ? <div className="text-xs text-gray-500">{primaryOption.phone || supplier.phone}</div> : null}
-              {options.length ? <div className="mt-0.5 text-xs text-blue-500">{options.length} contact option{options.length !== 1 ? 's' : ''}</div> : null}
-            </div>
-            <div onClick={(event) => event.stopPropagation()}>
-              <ThreeDotMenu onDetails={() => { setSelected(supplier); setModal('detail') }} onEdit={() => { setSelected(supplier); setModal('form') }} onDelete={canDeleteContact ? () => handleDelete(supplier) : undefined} />
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-1.5">
+                <span className="truncate text-sm font-semibold text-gray-900 dark:text-white">{supplier.name}</span>
+                {contactCount > 0 ? (
+                  <span className="inline-flex shrink-0 items-center gap-0.5 rounded-full bg-orange-100 px-1.5 py-0.5 text-[10px] font-semibold text-orange-600 dark:bg-orange-900/40 dark:text-orange-300" title={`${contactCount} ${tr('contact_options', 'contact options')}`}>
+                    <Phone className="h-2.5 w-2.5" />{contactCount}
+                  </span>
+                ) : null}
+              </div>
+              {cardMetaPrimary ? <div className="mt-0.5 truncate text-[11px] text-gray-500">{cardMetaPrimary}</div> : null}
+              {cardMetaSecondary ? <div className="truncate text-[11px] text-gray-400">{cardMetaSecondary}</div> : null}
             </div>
           </div>
           )

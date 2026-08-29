@@ -10,6 +10,7 @@ import Upload from 'lucide-react/dist/esm/icons/upload.js'
 import Plus from 'lucide-react/dist/esm/icons/plus.js'
 import Download from 'lucide-react/dist/esm/icons/download.js'
 import Settings2 from 'lucide-react/dist/esm/icons/settings-2.js'
+import Phone from 'lucide-react/dist/esm/icons/phone.js'
 import LazyPortalMenu from '../shared/LazyPortalMenu'
 import type { PortalMenuItem } from '../shared/PortalMenu'
 import { useApp as useAppHook, useSync as useSyncHook } from '../../AppContext.tsx'
@@ -1125,10 +1126,18 @@ function DeliveryTab({ t, notify, active = true, initialSearch }: DeliveryTabPro
               if (!selectedIds.has(Number(contact.id))) toggleOne(contact.id)
             },
           })
+          // Delivery contacts store their default as option[0] (the phone
+          // column mirrors it), so the option count already includes the
+          // default; fall back to the phone column for legacy rows.
+          const contactCount = options.length || (contact.phone ? 1 : 0)
+          const cardPhone = primaryOption.phone || contact.phone || ''
+          const cardArea = primaryOption.area || contact.area || ''
+          const cardMeta = [cardPhone, cardArea].filter(Boolean).join(' · ')
           return (
           <div
             key={contact.id}
-            className={`card p-3 flex select-none items-center gap-3 ${selectedIds.has(Number(contact.id)) ? 'ring-2 ring-blue-400 bg-blue-50 dark:bg-blue-900/20' : ''}`}
+            className={`card p-3 flex cursor-pointer select-none items-center gap-3 ${selectedIds.has(Number(contact.id)) ? 'ring-2 ring-blue-400 bg-blue-50 dark:bg-blue-900/20' : ''}`}
+            onClick={() => handleContactCellClick(contact)}
             {...(selectionModeActive ? {} : cardLongPress)}
             onClickCapture={(event) => {
               if (consumeLongPressClick(cardLongPressState)) {
@@ -1146,16 +1155,16 @@ function DeliveryTab({ t, notify, active = true, initialSearch }: DeliveryTabPro
             <div className="w-9 h-9 bg-green-100 dark:bg-green-900/40 rounded-full flex items-center justify-center text-green-600 font-bold text-sm flex-shrink-0">
               {contact.name?.[0]?.toUpperCase()}
             </div>
-            <div className="flex-1 min-w-0 cursor-pointer" onClick={() => handleContactCellClick(contact)}>
-              <div className="font-semibold text-gray-900 dark:text-white text-sm truncate flex items-center gap-1">
-                {contact.name}
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-1.5">
+                <span className="truncate text-sm font-semibold text-gray-900 dark:text-white">{contact.name}</span>
+                {contactCount > 0 ? (
+                  <span className="inline-flex shrink-0 items-center gap-0.5 rounded-full bg-green-100 px-1.5 py-0.5 text-[10px] font-semibold text-green-600 dark:bg-green-900/40 dark:text-green-300" title={`${contactCount} ${tr('contact_options', 'contact options')}`}>
+                    <Phone className="h-2.5 w-2.5" />{contactCount}
+                  </span>
+                ) : null}
               </div>
-              {primaryOption.phone || contact.phone ? <div className="text-xs text-gray-500">{primaryOption.phone || contact.phone}</div> : null}
-              {primaryOption.area || contact.area ? <div className="text-xs text-gray-400 truncate">{primaryOption.area || contact.area}</div> : null}
-              {options.length ? <div className="mt-0.5 text-xs text-blue-500">{options.length} contact option{options.length !== 1 ? 's' : ''}</div> : null}
-            </div>
-            <div onClick={e => e.stopPropagation()}>
-              <ThreeDotMenu onDetails={() => { setSelected(contact); setModal('detail') }} onEdit={() => { setSelected(contact); setModal('form') }} onDelete={canDeleteContact ? () => handleDelete(contact) : undefined} />
+              {cardMeta ? <div className="mt-0.5 truncate text-[11px] text-gray-500">{cardMeta}</div> : null}
             </div>
           </div>
           )

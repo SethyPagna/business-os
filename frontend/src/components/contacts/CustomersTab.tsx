@@ -9,6 +9,7 @@ import Upload from 'lucide-react/dist/esm/icons/upload.js'
 import Plus from 'lucide-react/dist/esm/icons/plus.js'
 import Download from 'lucide-react/dist/esm/icons/download.js'
 import Settings2 from 'lucide-react/dist/esm/icons/settings-2.js'
+import Phone from 'lucide-react/dist/esm/icons/phone.js'
 import LazyPortalMenu from '../shared/LazyPortalMenu'
 import { DEFAULT_PAGE_SIZE } from '../shared/PaginationControls'
 import type { PortalMenuItem } from '../shared/PortalMenu'
@@ -1074,10 +1075,18 @@ function CustomersTab({ t, notify, active = true, initialSearch }: CustomersTabP
               if (!selectedIds.has(Number(customerRow.id))) toggleOne(customerRow.id)
             },
           })
+          // Contact-method count shown next to the name: the default
+          // phone/email counts as 1 (customers store extra options in the
+          // `address` JSON separately from the phone/email columns), so a
+          // customer with only a default reads "1" and each extra option
+          // bumps it -- one default + one option = 2.
+          const contactCount = options.length + ((customerRow.phone || customerRow.email) ? 1 : 0)
+          const cardPhone = primaryOption.phone || customerRow.phone || ''
           return (
             <div
               key={customerRow.id}
-              className={`card flex select-none items-center gap-3 p-3 ${selectedIds.has(Number(customerRow.id)) ? 'bg-blue-50 ring-2 ring-blue-400 dark:bg-blue-900/20' : ''}`}
+              className={`card flex cursor-pointer select-none items-center gap-3 p-3 ${selectedIds.has(Number(customerRow.id)) ? 'bg-blue-50 ring-2 ring-blue-400 dark:bg-blue-900/20' : ''}`}
+              onClick={() => handleContactCellClick(customerRow)}
               {...(selectionModeActive ? {} : cardLongPress)}
               onClickCapture={(event) => {
                 if (consumeLongPressClick(cardLongPressState)) {
@@ -1093,15 +1102,21 @@ function CustomersTab({ t, notify, active = true, initialSearch }: CustomersTabP
               </div>
               ) : null}
               <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-blue-100 text-sm font-bold text-blue-600 dark:bg-blue-900/40">{customerRow.name?.[0]?.toUpperCase()}</div>
-              <div className="min-w-0 flex-1 cursor-pointer" onClick={() => handleContactCellClick(customerRow)}>
-                <div className="truncate text-sm font-semibold text-gray-900 dark:text-white">{customerRow.name}</div>
-                {customerRow.membership_number ? <div className="font-mono text-[11px] text-blue-500">{customerRow.membership_number}</div> : null}
-                <div className="text-xs font-semibold text-blue-600 dark:text-blue-300">{tr(t, 'loyalty_points', 'Points')}: {formatPoints(customerRow.points_balance)}</div>
-                {primaryOption.phone || customerRow.phone ? <div className="text-xs text-gray-500">{primaryOption.phone || customerRow.phone}</div> : null}
-                {options.length ? <div className="mt-0.5 text-xs text-blue-500">{options.length} contact option{options.length !== 1 ? 's' : ''}</div> : null}
-              </div>
-              <div onClick={(event) => event.stopPropagation()}>
-                <ThreeDotMenu onDetails={() => { setSelected(customerRow); setModal('detail') }} onEdit={() => { setSelected(customerRow); setModal('form') }} onDelete={canDeleteContact ? () => handleDelete(customerRow) : undefined} />
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-1.5">
+                  <span className="truncate text-sm font-semibold text-gray-900 dark:text-white">{customerRow.name}</span>
+                  {contactCount > 0 ? (
+                    <span className="inline-flex shrink-0 items-center gap-0.5 rounded-full bg-blue-100 px-1.5 py-0.5 text-[10px] font-semibold text-blue-600 dark:bg-blue-900/40 dark:text-blue-300" title={`${contactCount} ${tr(t, 'contact_options', 'contact options')}`}>
+                      <Phone className="h-2.5 w-2.5" />{contactCount}
+                    </span>
+                  ) : null}
+                </div>
+                <div className="mt-0.5 truncate text-[11px] text-gray-500">
+                  {customerRow.membership_number ? <span className="font-mono text-blue-500">{customerRow.membership_number}</span> : null}
+                  {customerRow.membership_number ? <span className="mx-1 text-gray-300 dark:text-gray-600">·</span> : null}
+                  <span className="font-semibold text-blue-600 dark:text-blue-300">{formatPoints(customerRow.points_balance)} {tr(t, 'points_short', 'pts')}</span>
+                </div>
+                {cardPhone ? <div className="truncate text-[11px] text-gray-500">{cardPhone}</div> : null}
               </div>
             </div>
           )
