@@ -53,6 +53,15 @@ runTest('the products modal turns autoApprove ON for its review screen', () => {
   assert.match(propsRegion, /autoApprove/, 'BulkImportModal must pass autoApprove to the review screen')
 })
 
+runTest('step 1 shows a client-side review table before any server work (review, then import)', () => {
+  // The old "Add" flow reviewed the file before importing; it must again -- a
+  // preview built from the picked file client-side, not "ready for server review".
+  assert.match(modal, /const csvPreview = useMemo\(/, 'a client-side CSV preview must be derived from the picked file')
+  assert.match(modal, /parseCsvRows\(csvData\.content\)/, 'the preview must parse the picked file client-side')
+  assert.match(modal, /import_review_before'?, 'Review before importing'/, 'step 1 must present a review heading')
+  assert.doesNotMatch(modal, /ready for server review/, 'the bare "ready for server review" line must be gone')
+})
+
 if (failed > 0) {
   process.exitCode = 1
   console.error(`\n${failed} direct-apply test(s) failed`)

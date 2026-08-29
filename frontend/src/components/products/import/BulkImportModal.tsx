@@ -25,6 +25,7 @@ import {
 import { beginNamedAction, finishNamedAction } from '../../../utils/actionGuards.ts'
 import { withLoaderTimeout } from '../../../utils/loaders.ts'
 import { parseImportFile } from '../../../utils/spreadsheetImport.ts'
+import { parseCsvRows } from '../../../utils/csvImport.ts'
 import { useApp as useAppHook } from '../../../app/AppContextCore.tsx'
 import { detectLikelyDatedReconciliation, type ImportModeDetectionResult } from './importModeDetection.ts'
 import { REPLACE_COLUMN_GROUPS } from './productReplaceColumnGroups.ts'
@@ -1985,6 +1986,21 @@ export default function BulkImportModal({ onClose, onDone, t, topMode = 'general
     })
     return rowsByIndex
   }, [importRows])
+
+  // Client-side review the operator sees the instant a file is picked -- the
+  // first rows of the file exactly as it will be read, so they review and decide
+  // BEFORE any server analyze/import runs (restores the pre-merged-screens "Add"
+  // flow: review first, then import). Parsing the whole file just to preview is
+  // wasteful, so cap it; the real row COUNT is totalCount.
+  const csvPreview = useMemo(() => {
+    if (!csvData?.content) return { rows: [] as Record<string, string | number>[], columns: [] as string[] }
+    try {
+      const rows = parseCsvRows(csvData.content).slice(0, 8)
+      return { rows, columns: rows.length ? Object.keys(rows[0]) : [] }
+    } catch {
+      return { rows: [], columns: [] }
+    }
+  }, [csvData?.content])
   const conflictsByIndex = useMemo(() => {
     const rowsByIndex = new Map()
     ;(conflicts || []).forEach((entry) => {
@@ -2565,9 +2581,38 @@ export default function BulkImportModal({ onClose, onDone, t, topMode = 'general
           </button>
 
           {csvData ? (
-            <div className="order-3 rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-900 dark:border-emerald-900/60 dark:bg-emerald-950/30 dark:text-emerald-100">
-              <div className="font-semibold">{csvData.name || T('selected_file', 'Selected file')}</div>
-              <div className="mt-1">{T('rows_ready_for_server_review', '{n} row(s) passed file validation and are ready for server review.').replace('{n}', String(totalCount))}</div>
+            <div className="order-3 space-y-2">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-sm font-semibold text-gray-800 dark:text-gray-100">{T('import_review_before', 'Review before importing')}</span>
+                <span className="min-w-0 truncate text-xs text-gray-500 dark:text-gray-400">{csvData.name || T('selected_file', 'Selected file')} · {totalCount.toLocaleString()} {T('rows', 'rows')}</span>
+              </div>
+              {csvPreview.rows.length ? (
+                <div className="max-h-56 overflow-auto rounded-xl border border-gray-200 dark:border-gray-700">
+                  <table className="w-full text-left text-xs">
+                    <thead className="sticky top-0 bg-slate-50 dark:bg-slate-800">
+                      <tr>
+                        {csvPreview.columns.map((col) => (
+                          <th key={col} className="whitespace-nowrap px-2 py-1.5 font-medium text-slate-500 dark:text-slate-400">{col}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {csvPreview.rows.map((row, index) => (
+                        <tr key={index} className="border-t border-gray-100 dark:border-gray-800">
+                          {csvPreview.columns.map((col) => (
+                            <td key={col} className="whitespace-nowrap px-2 py-1.5 text-slate-600 dark:text-slate-300">{String(row[col] ?? '')}</td>
+                          ))}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : null}
+              <p className="text-xs text-gray-500 dark:text-gray-400">
+                {totalCount > csvPreview.rows.length
+                  ? T('import_review_hint_more', 'Showing the first {shown} of {total} rows. Review, then Upload & import — it applies without another review.').replace('{shown}', String(csvPreview.rows.length)).replace('{total}', totalCount.toLocaleString())
+                  : T('import_review_hint', 'Review the rows, then Upload & import — it applies without another review.')}
+              </p>
             </div>
           ) : null}
 
