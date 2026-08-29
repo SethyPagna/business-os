@@ -3342,7 +3342,12 @@ function ProductsFullEditor() {
           History used to sit separately in the search row below -- both
           folded into HeaderActions.tsx. */}
       <div className="mb-3 flex min-w-0 flex-wrap items-center gap-2">
-        <h1 className="shrink-0 text-lg font-semibold text-slate-900 dark:text-slate-100">
+        {/* Small screens hide the page title -- the section switcher below
+            already carries "Products" (and Stock Changes), so an <h1> saying
+            the same word is wasted vertical space on a phone (user, Aug 29:
+            "small screens no need page title as sections cover them"). Kept
+            on sm+ as the semantic page heading. */}
+        <h1 className="hidden shrink-0 text-lg font-semibold text-slate-900 dark:text-slate-100 sm:block">
           {t('products') || 'Products'}
         </h1>
         {/* Y15: section switcher (Products | Stock Changes), same pill

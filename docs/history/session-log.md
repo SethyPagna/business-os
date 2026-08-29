@@ -11840,3 +11840,33 @@ Context: 6–8 sessions active; the clean disjoint master-plan backlog is exhaus
 (remaining items are user-side A2/M2/M6 or large/contested K1/K4/N3), the lang
 packs are held by a peer, so this read-only audit was the highest-value disjoint
 work available.
+
+## Part 459 (Aug 29 2026, session business-os-v1-e4) — small-screen density: Products page title hidden on phones (slice 1 of a whole-app ask)
+
+**User directive (Aug 29, whole-app).** "many things in small screens can be
+compacted ... small screens no need page title as sections cover them ... click to
+view for contacts ... make clear and compact for small screens ... not too many
+rows ... contacts, sales, dashboard, products, receipt settings, settings." A broad,
+multi-page density pass — recorded as a standing preference in assistant memory
+(ui-density-preference).
+
+**This slice (Products.tsx, the page I own and just reshaped in Y13–Y20).** The
+header rendered "Products" TWICE on a phone — the `<h1>` page title AND the section
+switcher's first tab ("Products | Stock Changes"). Hid the `<h1>` on small screens
+(`hidden ... sm:block`); the switcher already names the page there, so the title was
+pure wasted vertical space. Kept on sm+ as the semantic page heading.
+
+**Scope note / coordination (why just one page).** Audited the other named pages
+rather than sprawling across peer lanes: **Contacts is peer-hot right now**
+(CustomersTab/SuppliersTab/DeliveryTab all dirty under another session — almost
+certainly the "click to view for contacts" ask, so I stayed off it); **Receipt
+Settings** is already small-screen-optimized (section chips scroll, the Save label
+is `hidden sm:inline`, a mobile-only preview toggle, no redundant `<h1>`);
+**Dashboard** has no redundant `<h1>` at all. So Products' duplicate title was the
+one clean, disjoint, unambiguous win. The rest of the app-wide pass wants either the
+peer lanes to free up or the user to point at the next page.
+
+**Verification.** tsc + check:source (404 files) green — a className-only change.
+Products.tsx only.
+
+**Needs deploy.** Frontend-only; ships on the next build.
