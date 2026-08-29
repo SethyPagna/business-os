@@ -39,6 +39,12 @@ interface DateTimeRangePickerProps {
   showTime?: boolean
   align?: 'left' | 'right'
   className?: string
+  // Layout/shape utilities for the trigger button. Omitted => the default
+  // compact "Start → End" pill (rounded-full). Surfaces that want the trigger
+  // to read as a prominent rectangular field (e.g. the dashboard range box)
+  // pass their own e.g. 'flex w-full ... rounded-lg'; border, colors and
+  // transition are always layered on top regardless.
+  triggerClassName?: string
 }
 
 const MONTH_LABELS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
@@ -91,6 +97,7 @@ export default function DateTimeRangePicker({
   showTime = true,
   align = 'left',
   className = '',
+  triggerClassName,
 }: DateTimeRangePickerProps) {
   const [open, setOpen] = useState(false)
   const rootRef = useRef<HTMLDivElement | null>(null)
@@ -214,7 +221,7 @@ export default function DateTimeRangePicker({
       <button
         type="button"
         onClick={() => setOpen((current) => !current)}
-        className={`inline-flex items-center gap-2 rounded-full border px-3.5 py-1.5 text-xs font-medium transition ${hasSelection
+        className={`${triggerClassName || 'inline-flex items-center gap-2 rounded-full px-3.5 py-1.5'} border text-xs font-medium transition ${hasSelection
           ? 'border-blue-300 bg-blue-50 text-blue-800 dark:border-blue-700 dark:bg-blue-900/30 dark:text-blue-200'
           : 'border-slate-300 bg-white text-slate-600 hover:border-slate-400 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-300'}`}
         aria-expanded={open}

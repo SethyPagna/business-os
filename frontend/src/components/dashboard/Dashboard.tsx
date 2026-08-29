@@ -1493,11 +1493,10 @@ ${translateOr('delivery_margin', 'Delivery margin')} ${fmtUSD(aDeliveryMargin)} 
               now sits in that same slack space instead of getting its own
               near-empty row below the preset pills. */}
           <div className="flex min-w-0 items-center gap-2 lg:max-w-[22rem]">
-            <span className="shrink-0 text-xs font-semibold text-gray-700 dark:text-gray-300 sm:text-sm">{translateOr('period_label', 'Range', 'ជ្រើសពេល')}:</span>
-            {/* Y19: the Start → End pill both SHOWS the effective range (preset
+            {/* Y19: the Start → End box both SHOWS the effective range (preset
                 or custom) and IS the custom editor -- editing it switches to
-                the 'custom' rangeId. Replaces the old read-only range-label
-                pill + the separate custom date inputs below. */}
+                the 'custom' rangeId. No "Range:" label: the rectangular,
+                full-width box reads as the range on its own. */}
             <div className="min-w-0 flex-1">
               <DateTimeRangePicker
                 value={{ startDate: getCurrentDashboardRange().start, endDate: getCurrentDashboardRange().end, startTime: '', endTime: '' } as DateTimeRange}
@@ -1508,6 +1507,7 @@ ${translateOr('delivery_margin', 'Delivery margin')} ${fmtUSD(aDeliveryMargin)} 
                 }}
                 t={t}
                 showTime={false}
+                triggerClassName="flex w-full items-center justify-center gap-2 rounded-lg px-3.5 py-2"
               />
             </div>
             {hasPermission('dashboard_export') && (
