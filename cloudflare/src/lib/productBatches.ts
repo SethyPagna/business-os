@@ -508,6 +508,47 @@ export async function readFifoLotAvailability(db: D1Compat, productId: number, b
   }))
 }
 
+// Batched form of readFifoLotAvailability for a whole cart: fetches the FIFO
+// lot availability for many (product, branch) pairs in ONE chunked query
+// instead of one round-trip per product, then groups the rows by
+// `product:branch` preserving the same FIFO order. The checkout's
+// auto-allocation used to fire a read per batch-tracked line; a cart with
+// several such lines is now a single round-trip.
+export async function readFifoLotAvailabilityForCart(
+  db: D1Compat,
+  pairs: ReadonlyArray<{ productId: number; branchId: number }>,
+): Promise<Map<string, FifoLotAvailability[]>> {
+  const map = new Map<string, FifoLotAvailability[]>()
+  const productIds = [...new Set(pairs.map((pair) => Number(pair.productId)).filter((id) => Number.isFinite(id) && id > 0))]
+  const branchIds = [...new Set(pairs.map((pair) => Number(pair.branchId)).filter((id) => Number.isFinite(id) && id > 0))]
+  if (!productIds.length || !branchIds.length) return map
+  // reservedParams = branchIds.length -- those bind alongside each chunk of
+  // product ids (branches are few, usually one POS branch).
+  const rows = await selectInChunks(productIds, branchIds.length, (chunk) => db.prepare(`
+    SELECT pb.variant_product_id AS product_id, bbs.branch_id AS branch_id,
+           pb.id AS batch_id, pb.lot_code, pb.expiry_date, bbs.quantity AS available
+    FROM product_batches pb
+    JOIN branch_batch_stock bbs ON bbs.batch_id = pb.id
+    WHERE pb.variant_product_id IN (${chunk.map(() => '?').join(',')})
+      AND bbs.branch_id IN (${branchIds.map(() => '?').join(',')})
+      AND pb.is_active = 1 AND bbs.quantity > 0
+    ORDER BY pb.variant_product_id ASC, bbs.branch_id ASC,
+             (pb.received_at IS NULL) ASC, pb.received_at ASC, pb.batch_number ASC, pb.id ASC
+  `).all<{ product_id: number; branch_id: number; batch_id: number; lot_code: string | null; expiry_date: string | null; available: number }>([...chunk, ...branchIds]))
+  for (const row of rows) {
+    const key = `${Number(row.product_id)}:${Number(row.branch_id)}`
+    const list = map.get(key) || []
+    list.push({
+      batchId: Number(row.batch_id),
+      lotCode: row.lot_code ?? null,
+      expiryDate: row.expiry_date ?? null,
+      available: Math.max(0, Number(row.available) || 0),
+    })
+    map.set(key, list)
+  }
+  return map
+}
+
 export type FifoLotTake = { batchId: number; lotCode: string | null; expiryDate: string | null; quantity: number }
 
 // Pure split of `quantity` across the lots in the given (already FIFO)

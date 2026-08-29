@@ -273,7 +273,7 @@ console.log('PASS reasons + held() math')
   const salesSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'routes', 'sales.ts'), 'utf8')
   // Z0: the sale write path auto-allocates FIFO lots and records them, and
   // the transition/returns paths restore to the same lots.
-  assert.match(salesSrc, /readFifoLotAvailability\(db, item\.product_id, item\.branch_id\)/, 'sale checkout auto-allocates from FIFO lots')
+  assert.match(salesSrc, /readFifoLotAvailabilityForCart\(db, fifoPairs\)/, 'sale checkout auto-allocates from FIFO lots (one batched read for the whole cart)')
   assert.match(salesSrc, /autoAllocationsByItemIndex/, 'sale checkout records multi-lot allocations')
   assert.match(salesSrc, /FROM sale_item_batch_allocations WHERE sale_item_id IN/, 'the transition route fetches each line\'s allocations')
   const returnsBatchSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'routes', 'returns.ts'), 'utf8')
