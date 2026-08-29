@@ -128,10 +128,15 @@ runTest('a grouped child row aligns with the group title -- no text indent (the 
   assert.match(surface, /renderDesktopProductRow\(product, \{ indented: showGroupRow \}\)/)
 })
 
-runTest('11.2: the desktop table header has no redundant select-all checkbox', () => {
-  assert.ok(!/ref=\{desktopSelectAllRef\}/.test(surface), 'the header select-all checkbox must be gone')
-  assert.ok(!/desktopSelectAllRef/.test(products), 'Products.tsx must not keep a dead desktopSelectAllRef')
-  assert.match(surface, /<th className=\{`\$\{selectCellPad\} py-3`\} aria-hidden \/>/, 'the header checkbox cell is an empty, collapsing header')
+runTest('11.2: the desktop header checkbox is the select-all (aligned with the other five list pages)', () => {
+  // Part 451: Products was the lone list page with an always-visible toolbar
+  // "Select all (N)" control and an empty header cell; it now matches
+  // Inventory/Sales/Returns/Branches/Contacts -- the column-header checkbox
+  // IS select-all in select mode, over the shared selection helpers.
+  assert.match(surface, /checked=\{isSelectionScopeFullySelected\(allVisibleIds\)\}/, 'the header select-all reads whether every visible product is selected')
+  assert.match(surface, /onChange=\{\(event\) => toggleSelectionScope\(allVisibleIds, event\.target\.checked\)\}/, 'the header select-all toggles the whole visible scope')
+  assert.ok(!/desktopSelectAllRef|mobileSelectAllRef/.test(products), 'Products.tsx keeps no dead select-all ref')
+  assert.ok(!/const productSelectAllLabel/.test(products), 'the always-visible toolbar "Select all (N)" control is removed')
 })
 
 runTest('11.1: the checkbox column only takes space in select mode', () => {

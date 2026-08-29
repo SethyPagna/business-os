@@ -48,10 +48,19 @@ assert.match(
   /initialDesktopRevealReady[\s\S]*productTotalLabel[\s\S]*t\('loading'\)/,
   'Products desktop footer should show a pending label instead of 0 / 0 Products during first load',
 )
+// Part 451: Products aligned with the other five list pages -- the
+// always-visible "Select all (N)" label is gone (the column-header checkbox
+// is the select-all in select mode), so there is no visibleProducts.length
+// count that could render a false "(0)" during first load. A "N selected"
+// chip shows only while selecting.
+assert.ok(
+  !/const productSelectAllLabel/.test(productsPage),
+  'Products no longer keeps a "Select all (N)" count label (a false-zero source during first load)',
+)
 assert.match(
   productsPage,
-  /const productSelectAllLabel = loadedOnceRef\.current \|\| !loading[\s\S]*Select all/,
-  'Products mobile select-all label should not show a false zero count during first load',
+  /\{productSelectedLabel\}/,
+  'the toolbar shows only a select-mode "N selected" count',
 )
 // Free-text product search is scoped to name/sku/barcode only (see
 // PRODUCT_SEARCH_COLUMNS's own comment in cloudflare/src/lib/searchMatch.ts)
