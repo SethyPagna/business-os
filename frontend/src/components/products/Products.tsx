@@ -783,7 +783,6 @@ function ProductsFullEditor() {
   const pinnedEditedProductsRef = useRef<Map<number, ProductRecord>>(new Map())
   const productDeleteInFlightRef = useRef(false)
   const bulkActionInFlightRef = useRef(false)
-  const mobileSelectAllRef = useRef<HTMLInputElement | null>(null)
   const initializedCollapsedGroupKeysRef = useRef<Set<string>>(new Set())
   // One long-press timer/start-point slot per visible row, keyed by
   // product id -- see utils/longPress.ts for why this can't just be a
@@ -1560,13 +1559,6 @@ function ProductsFullEditor() {
     })
   }
 
-  const toggleSelectAll = (checked: boolean) => {
-    if (!checked) {
-      setSelectedIds(new Set())
-      return
-    }
-    setSelectedIds(new Set(visibleIds))
-  }
   // Opens DeleteConfirmModal for a single product instead of deleting
   // immediately -- actual delete moved to runSingleDeleteConfirmed below.
   const handleDelete = (p: ProductRecord) => {
@@ -2079,9 +2071,6 @@ function ProductsFullEditor() {
     }
   }, [productPage, productTotalPages])
 
-  const productSelectAllLabel = loadedOnceRef.current || !loading
-    ? `${t('select_all') || 'Select all'} (${visibleProducts.length})`
-    : (t('select_all') || 'Select all')
   // tr() does a plain key lookup with no template interpolation (see
   // AppContext.tsx's t()) -- the stored translation for this key is the
   // literal string "{count} selected" / Khmer equivalent, so the {count}
@@ -2151,11 +2140,6 @@ function ProductsFullEditor() {
       return changed ? next : current
     })
   }, [productSections])
-
-  useEffect(() => {
-    const indeterminate = selectedVisibleCount > 0 && selectedVisibleCount < visibleIds.length
-    if (mobileSelectAllRef.current) mobileSelectAllRef.current.indeterminate = indeterminate
-  }, [selectedVisibleCount, visibleIds.length])
 
   const toggleSelectionScope = useCallback((ids: EntityId[], checked: boolean) => {
     setSelectedIds((current) => toggleIdSet(current, ids, checked))
@@ -3560,20 +3544,16 @@ function ProductsFullEditor() {
         <div className="bulk-toolbar mb-2 overflow-hidden rounded-2xl border shadow-sm sm:rounded-xl">
           <div className="px-2 py-2">
             <div className="flex flex-wrap items-center gap-1.5">
-                <label className="inline-flex min-w-0 items-center gap-2 overflow-hidden rounded-2xl border border-slate-200 bg-white/95 px-2.5 py-1.5 text-[11px] font-medium text-slate-700 shadow-sm dark:border-slate-700 dark:bg-slate-900/85 dark:text-slate-100">
-                  <input
-                    type="checkbox"
-                    className="h-4 w-4 shrink-0 rounded"
-                    checked={visibleIds.length > 0 && selectedVisibleCount === visibleIds.length}
-                    ref={mobileSelectAllRef}
-                    onChange={(event) => toggleSelectAll(event.target.checked)}
-                  />
-                  <span className="truncate whitespace-nowrap">
-                    {hasSelected
-                      ? productSelectedLabel
-                      : productSelectAllLabel}
+                {/* 11.2 alignment: no always-visible "Select all" here -- the
+                    desktop header checkbox is the select-all in select mode,
+                    like the other five list pages. This slot now just shows
+                    the running "N selected" count while selecting; the pager
+                    (Y20) stays on this row via ml-auto below. */}
+                {hasSelected ? (
+                  <span className="inline-flex min-w-0 items-center overflow-hidden rounded-2xl border border-slate-200 bg-white/95 px-2.5 py-1.5 text-[11px] font-medium text-slate-700 shadow-sm dark:border-slate-700 dark:bg-slate-900/85 dark:text-slate-100">
+                    <span className="truncate whitespace-nowrap">{productSelectedLabel}</span>
                   </span>
-                </label>
+                ) : null}
                 {hasSelected ? (
                   <button
                     type="button"
@@ -3893,6 +3873,7 @@ function ProductsFullEditor() {
         initialDesktopRevealReady={loadedOnceRef.current || !loading}
         isSelectionScopeFullySelected={isSelectionScopeFullySelected}
         isSelectionScopePartiallySelected={isSelectionScopePartiallySelected}
+        allVisibleIds={visibleIds}
         loading={loading}
         productSections={productSections}
         productTotal={productTotal}

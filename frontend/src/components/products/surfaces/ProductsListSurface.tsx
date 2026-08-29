@@ -98,6 +98,10 @@ type ProductsListSurfaceProps = {
   initialDesktopRevealReady: boolean
   isSelectionScopeFullySelected: (ids: ProductId[]) => boolean
   isSelectionScopePartiallySelected: (ids: ProductId[]) => boolean
+  // Every selectable product id in the current view -- backs the desktop
+  // header select-all checkbox (11.2 alignment: in select mode the
+  // column-header checkbox IS select-all, like the other five list pages).
+  allVisibleIds: ProductId[]
   loading: boolean
   productSections: ProductSection[]
   productTotal?: number
@@ -134,6 +138,7 @@ export default function ProductsListSurface({
   initialDesktopRevealReady,
   isSelectionScopeFullySelected,
   isSelectionScopePartiallySelected,
+  allVisibleIds,
   loading,
   productSections,
   productTotal,
@@ -162,10 +167,10 @@ export default function ProductsListSurface({
   // Out of select mode the column collapses to 0 width and its cells drop
   // their padding, so nothing is reserved and the whole grid sits a touch
   // further left; entering select mode pushes everything right by the
-  // checkbox width, and leaving it reverts. The desktop table HEADER no
-  // longer carries a select-all checkbox at all -- it duplicated the
-  // toolbar's "Select all (N)" control, so that redundant header box is
-  // gone (11.2).
+  // checkbox width, and leaving it reverts. In select mode the desktop
+  // table HEADER checkbox IS the select-all (11.2 alignment with the other
+  // five list pages) -- the old duplicate toolbar "Select all (N)" control
+  // was removed.
   const selectColWidth = selectionModeActive ? SELECT_COL_WIDTH : '0px'
   const selectCellPad = selectionModeActive ? 'px-2' : 'px-0'
 
@@ -193,11 +198,21 @@ export default function ProductsListSurface({
   const renderDesktopTableHead = () => (
     <thead className="sticky top-0 z-10">
       <tr>
-        {/* No select-all checkbox here -- it duplicated the toolbar's
-            own "Select all (N)" control (11.2). The cell stays only as the
-            checkbox column's header, collapsing to nothing out of select
-            mode. */}
-        <th className={`${selectCellPad} py-3`} aria-hidden />
+        {/* 11.2 alignment: in select mode the column-header checkbox IS
+            select-all, matching the other five list pages. The cell
+            collapses to nothing out of select mode. */}
+        <th className={`${selectCellPad} py-3`}>
+          {selectionModeActive ? (
+            <input
+              type="checkbox"
+              className="h-4 w-4 rounded"
+              checked={isSelectionScopeFullySelected(allVisibleIds)}
+              ref={(node) => { if (node) node.indeterminate = isSelectionScopePartiallySelected(allVisibleIds) }}
+              onChange={(event) => toggleSelectionScope(allVisibleIds, event.target.checked)}
+              aria-label={t('select_all') || 'Select all'}
+            />
+          ) : null}
+        </th>
         <th className="whitespace-nowrap px-2 py-3 text-left font-semibold text-gray-600 dark:text-gray-400">{t('receipt_image_short') || t('image') || 'Image'}</th>
         <th className={`min-w-[140px] ${ROW_TEXT_GUTTER} py-3 text-left font-semibold text-gray-600 dark:text-gray-400`}>{t('product_name')}</th>
         <th className="hidden whitespace-nowrap px-3 py-3 text-left font-semibold text-gray-600 dark:text-gray-400 md:table-cell">{t('details') || 'Details'}</th>
