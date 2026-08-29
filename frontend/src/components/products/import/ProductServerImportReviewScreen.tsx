@@ -53,7 +53,7 @@ function decisionFor(choice: string): { action: string; field_overrides?: Record
   return { action: 'apply' }
 }
 
-export default function ProductServerImportReviewScreen({ jobId, jobRevision, t, notify, onApproved, onReviewLater, onCancel, onJob }: {
+export default function ProductServerImportReviewScreen({ jobId, jobRevision, t, notify, onApproved, onReviewLater, onCancel, onJob, autoApprove = false }: {
   jobId: string | number
   jobRevision?: unknown
   t: TranslateFn
@@ -62,6 +62,13 @@ export default function ProductServerImportReviewScreen({ jobId, jobRevision, t,
   onReviewLater: () => void | Promise<void>
   onCancel: () => void | Promise<void>
   onJob?: (job: Record<string, unknown>) => void
+  // Direct-apply mode: once analysis reaches awaiting_review, approve
+  // automatically instead of showing the review table -- the operator already
+  // reviewed on the client screen. The server is the authority on conflicts
+  // (its approve 409s on unresolved ones), so if that happens we fall back to
+  // the manual review below so they can be resolved. Clean imports (the common
+  // case) never see this screen's table at all.
+  autoApprove?: boolean
 }) {
   const tr = (key: string, fallback: string): string => {
     const value = t(key)
@@ -82,6 +89,10 @@ export default function ProductServerImportReviewScreen({ jobId, jobRevision, t,
   const [savingRow, setSavingRow] = useState<number | null>(null)
   const [approving, setApproving] = useState(false)
   const approvalRef = useRef(false)
+  // Direct-apply: fell back to the manual review because the server reported
+  // unresolved conflicts; `autoAttemptedRef` makes the auto-approve fire once.
+  const [autoFellBack, setAutoFellBack] = useState(false)
+  const autoAttemptedRef = useRef(false)
 
   useEffect(() => {
     const timer = window.setTimeout(() => { setQuery(queryDraft.trim()); setPage(1) }, 300)
@@ -144,8 +155,11 @@ export default function ProductServerImportReviewScreen({ jobId, jobRevision, t,
     }
   }
 
-  const confirm = async () => {
-    if (unresolved > 0) {
+  const confirm = async ({ auto = false }: { auto?: boolean } = {}) => {
+    // Manual confirm keeps its client guard; auto-approve lets the server be the
+    // authority (it 409s on unresolved conflicts), so it need not wait for the
+    // review rows to have loaded first.
+    if (!auto && unresolved > 0) {
       notify(tr('product_import_resolve_first', `Resolve ${unresolved} flagged row(s) before importing.`), 'error')
       return
     }
@@ -153,9 +167,19 @@ export default function ProductServerImportReviewScreen({ jobId, jobRevision, t,
     setApproving(true)
     try {
       await approveImportJob(jobId, { source: 'products_modal' })
-      notify(tr('import_approved_now', 'Confirmed — the import is applying now.'), 'success')
+      if (!auto) notify(tr('import_approved_now', 'Confirmed — the import is applying now.'), 'success')
       await onApproved()
     } catch (error) {
+      const code = (error as { code?: string } | null)?.code
+      const httpStatus = (error as { status?: number } | null)?.status
+      // Direct-apply hit real conflicts the client couldn't pre-resolve: drop to
+      // the manual review table (no scary toast) so the operator can resolve
+      // them, rather than silently applying a risky default.
+      if (auto && (code === 'product_conflicts_unresolved' || httpStatus === 409)) {
+        setAutoFellBack(true)
+        await loadRows()
+        return
+      }
       notify(error instanceof Error ? error.message : tr('import_apply_failed', 'Could not approve import.'), 'error')
       await loadRows()
     } finally {
@@ -164,10 +188,35 @@ export default function ProductServerImportReviewScreen({ jobId, jobRevision, t,
     }
   }
 
+  // Direct-apply mode: once the server finishes analysis (awaiting_review),
+  // approve automatically. Fires once; `autoFellBack` disables it if the server
+  // sent us back to the manual table.
+  useEffect(() => {
+    if (!autoApprove || autoFellBack) return
+    if (status !== 'awaiting_review') return
+    if (approvalRef.current || autoAttemptedRef.current) return
+    autoAttemptedRef.current = true
+    void confirm({ auto: true })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [status, autoApprove, autoFellBack])
+
   const summary = ['create', 'update', 'skip', 'error']
     .filter((key) => Number(counts[key] || 0) > 0)
     .map((key) => `${key}: ${Number(counts[key] || 0)}`)
     .join(' · ')
+
+  // Direct-apply mode (no second review): show a single progress state while the
+  // server analyzes and we auto-approve. The modal closes on onApproved, and the
+  // apply runs in the background tracker. Skipped once autoFellBack flips true.
+  if (autoApprove && !autoFellBack) {
+    const terminal = ['failed', 'cancelled', 'completed', 'completed_with_errors'].includes(status)
+    return <div className="space-y-4 py-8 text-center">
+      {!terminal ? <Loader2 className="mx-auto h-6 w-6 animate-spin text-blue-500" /> : <AlertTriangle className="mx-auto h-6 w-6 text-amber-500" />}
+      <p className="text-sm font-semibold">{terminal ? tr('import_analysis_stopped', 'Import analysis stopped') : tr('import_applying_now', 'Importing…')}</p>
+      <p className="text-xs text-slate-500 dark:text-slate-400">{jobError || (terminal ? status : tr('import_applying_hint', 'Applying your reviewed import. This closes when it starts.'))}</p>
+      <div className="flex justify-center gap-2"><button type="button" className="btn-secondary text-sm" onClick={() => void onCancel()}>{tr('cancel_import', 'Cancel import')}</button><button type="button" className="btn-secondary text-sm" onClick={() => void onReviewLater()}>{tr('continue_in_background', 'Continue in background')}</button></div>
+    </div>
+  }
 
   if (status !== 'awaiting_review') {
     const terminal = ['failed', 'cancelled', 'completed', 'completed_with_errors'].includes(status)

@@ -2863,6 +2863,11 @@ export default function BulkImportModal({ onClose, onDone, t, topMode = 'general
         <ProductServerImportReviewScreen
           jobId={(currentJob.id || currentJob.job_id) as EntityId}
           jobRevision={currentJob.updated_at || currentJob.status}
+          // Direct-apply: the operator already reviewed on the client screen, so
+          // approve automatically once the server finishes analysis -- no second
+          // review. Falls back to the manual table only if the server reports
+          // unresolved conflicts.
+          autoApprove
           t={(key) => T(key, key)}
           notify={notify}
           onJob={(job) => setCurrentJob(job as ImportJob)}
