@@ -150,6 +150,24 @@ body.lang-km select,
 body.lang-km .input {
   line-height: 1.65;
 }
+
+/* Z7 (user, Aug 29): Khmer glyphs have thinner strokes than Latin, so the
+   muted greys that read fine for Latin are too faint in Khmer LIGHT mode
+   ("currently grey in light mode"). Darken the faintest muted text to a
+   WCAG-AA grey. Scoped to light mode (html:not(.dark)) so dark mode keeps its
+   palette, and to lang-km so Latin-language UIs keep their intended muted
+   hierarchy. gray-400 is ~2.5:1 on white (fails AA); gray-600 is ~7:1. */
+html:not(.dark) body.lang-km .text-gray-400,
+html:not(.dark) body.lang-km .text-slate-400,
+html:not(.dark) body.lang-km .text-gray-500,
+html:not(.dark) body.lang-km .text-slate-500 {
+  color: #4b5563 !important;
+}
+
+/* The tiny bracket sizes aren't covered by the .text-xs bump above, and they
+   are exactly where Khmer becomes hard to read -- give them a floor. */
+body.lang-km .text-\[10px\] { font-size: calc(0.72rem * var(--ui-text-scale, 1)) !important; }
+body.lang-km .text-\[11px\] { font-size: calc(0.78rem * var(--ui-text-scale, 1)) !important; }
   :root {
     --sidebar-width: 240px;
     --ui-font-size: 14px;
