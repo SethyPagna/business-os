@@ -44,6 +44,13 @@ export interface PaginationControlsProps {
   compactPageInput?: boolean
   editablePageInput?: boolean
   editablePageSizeInput?: boolean
+  // Opt-in single-line compact form the user asked for: "‹ page (1-20) / total ›".
+  // The item range doubles as the per-page trigger -- tapping "1-20" opens the
+  // 20/50/100 options -- so the separate per-page column disappears and the
+  // whole control fits inline next to a Select-all checkbox. Only applies with
+  // `compact`; leaving it off keeps the existing three-column compact layout,
+  // so callers that don't set it are unaffected.
+  rangeAsPageSize?: boolean
 }
 
 export function clampPage(page: NumericInput, totalItems: NumericInput, pageSize: NumericInput): number {
@@ -74,6 +81,7 @@ export default function PaginationControls({
   compactPageInput = false,
   editablePageInput = true,
   editablePageSizeInput = true,
+  rangeAsPageSize = false,
 }: PaginationControlsProps) {
   const safePageSize = Math.max(1, Number(pageSize || DEFAULT_PAGE_SIZE))
   const total = Math.max(0, Number(totalItems || 0))
@@ -114,6 +122,67 @@ export default function PaginationControls({
   }
 
   if (total <= 0) return null
+
+  if (compact && rangeAsPageSize) {
+    // The user's "‹ page (1-20) / total ›" form. Everything lives on one line
+    // inside a single pill so it can sit in the Select-all row: prev, the
+    // editable current page, the item-range chip (which is itself the per-page
+    // dropdown trigger), the total page count, and next.
+    return (
+      <div className={`inline-flex max-w-full items-center overflow-hidden rounded-full border border-slate-200 bg-white text-xs text-slate-600 shadow-sm dark:border-slate-700 dark:bg-slate-950 dark:text-slate-300 ${className}`}>
+        <button
+          type="button"
+          className="inline-flex h-7 w-8 shrink-0 items-center justify-center text-slate-500 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40 dark:text-slate-300 dark:hover:bg-slate-800"
+          disabled={safePage <= 1}
+          onClick={() => onPageChange?.(safePage - 1)}
+          aria-label="Previous page"
+        >
+          <ChevronLeft className="h-4 w-4" />
+        </button>
+        <div className="inline-flex min-w-0 items-center gap-1 px-1">
+          {editablePageInput ? (
+            <>
+              <span className="sr-only">{pageLabel}</span>
+              <input
+                type="text"
+                inputMode="numeric"
+                aria-label={pageLabel}
+                className="h-7 w-6 border-0 bg-transparent px-0 text-center text-[11px] font-semibold text-slate-700 outline-none dark:text-slate-100"
+                value={pageDraft}
+                onChange={(event) => setPageDraft(event.target.value.replace(/[^\d]/g, '') || '')}
+                onBlur={(event) => commitPageDraft(event.currentTarget.value)}
+                onKeyDown={handlePageInputKeyDown}
+              />
+            </>
+          ) : (
+            <span className="px-0.5 text-[11px] font-semibold text-slate-700 dark:text-slate-100">{safePage}</span>
+          )}
+          <PageSizeSelect
+            value={safePageSize}
+            options={pageSizeOptions}
+            onChange={(nextValue) => onPageSizeChange?.(nextValue)}
+            ariaLabel={perPageLabel}
+            allowCustom={editablePageSizeInput}
+            buttonContent={`${start.toLocaleString()}-${end.toLocaleString()}`}
+            className="min-w-0"
+            buttonClassName="h-6 rounded-full border border-slate-200 bg-slate-50 px-1.5 py-0 text-[11px] font-semibold text-slate-700 shadow-none dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
+            menuClassName="min-w-[9rem]"
+            optionClassName="text-xs"
+          />
+          <span className="shrink-0 whitespace-nowrap text-[11px] font-semibold text-slate-500 dark:text-slate-300">/ {totalPages}</span>
+        </div>
+        <button
+          type="button"
+          className="inline-flex h-7 w-8 shrink-0 items-center justify-center text-slate-500 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40 dark:text-slate-300 dark:hover:bg-slate-800"
+          disabled={safePage >= totalPages}
+          onClick={() => onPageChange?.(safePage + 1)}
+          aria-label="Next page"
+        >
+          <ChevronRight className="h-4 w-4" />
+        </button>
+      </div>
+    )
+  }
 
   if (compact) {
     return (

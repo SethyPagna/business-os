@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { KeyboardEvent } from 'react'
+import type { KeyboardEvent, ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import ChevronDown from 'lucide-react/dist/esm/icons/chevron-down.js'
 
@@ -28,6 +28,12 @@ export interface PageSizeSelectProps {
   disabled?: boolean
   usePortalMenu?: boolean
   allowCustom?: boolean
+  // Override the text shown on the trigger button. The button normally prints
+  // the current page size; a caller that wants the same dropdown to read as
+  // something else -- e.g. an item range "1-20" that opens the per-page
+  // options when tapped -- passes the label here. Selection behaviour is
+  // unchanged: picking an option still calls onChange with the size.
+  buttonContent?: ReactNode
 }
 
 export default function PageSizeSelect({
@@ -45,6 +51,7 @@ export default function PageSizeSelect({
   disabled = false,
   usePortalMenu = true,
   allowCustom = true,
+  buttonContent,
 }: PageSizeSelectProps) {
   const [open, setOpen] = useState(false)
   const [position, setPosition] = useState({ top: 0, left: 0, width: 160 })
@@ -151,7 +158,10 @@ export default function PageSizeSelect({
     }
   }
 
-  const buttonLabel = useMemo(() => (isPreset ? safeValue : safeValue), [isPreset, safeValue])
+  const buttonLabel = useMemo(
+    () => (buttonContent !== undefined ? buttonContent : safeValue),
+    [buttonContent, safeValue],
+  )
 
   return (
     <div ref={rootRef} className={`relative inline-flex min-w-0 ${className}`.trim()} data-page-size-select-root="true">
