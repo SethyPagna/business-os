@@ -1900,15 +1900,18 @@ other" with the Phase-Y items.*
   `customer_portal_public_url` override whose host is one of this shop's own
   DEPRECATED hosts (synced with index.html's redirect map) and falls back to the
   live `BUSINESS_OS_PUBLIC_URL`, while still honouring a genuine external funnel
-  domain; `test-portal-public-url-pure.cjs` (12 checks) pins it. **Root cause still
-  open (flagged, follow-up):** the portal editor freezes the resolved publicUrl
-  back into the stored override on every save — `CatalogPage.tsx:680` prefills the
-  `customer_portal_public_url` input with the RESOLVED `config.publicUrl` (env
-  fallback included) rather than the raw stored override, so a save promotes the
-  fallback into an explicit override. The proper cure is to expose the raw override
-  (e.g. `config.publicUrlOverride`) and prefill the editor from that so a blank
-  field stays blank; deferred here as a larger portal-editor change. The four
-  brand/text fields above remain user-side per the "no rebrand settings" instruction.
+  domain; `test-portal-public-url-pure.cjs` (17 checks) pins it. **Root cause now
+  FIXED too (Part 471, `9a46056c`, needs deploy):** the portal editor was freezing
+  the resolved publicUrl back into the stored override on every save —
+  `CatalogPage.tsx` `buildDraft` prefilled the `customer_portal_public_url` input
+  with the RESOLVED `config.publicUrl` (env fallback included), so a save promoted
+  the fallback into an explicit override that then shadowed later env changes.
+  `buildPortalConfig` now also returns `publicUrlOverride` (the RAW stored value,
+  empty when unset); `buildDraft` prefills from that (falling back to `publicUrl`
+  only for a pre-field cached config), and `applyDraft` carries the raw override in
+  optimistic state — so a blank override stays blank and a real env change flows
+  through. The four brand/text fields above remain user-side per the "no rebrand
+  settings" instruction.
 
 ---
 

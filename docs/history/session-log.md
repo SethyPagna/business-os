@@ -12244,3 +12244,42 @@ ProductDetailReport.tsx only — no other caller of the shared SectionCard chang
 Part 470 taken after re-checking max = 469.
 
 **Needs deploy.** Frontend-only; ships on the next build.
+
+## Part 471 (Aug 29 2026, session business-os-v1-87) — kill the publicUrl editor-freeze root cause (+ drop an obsolete Dashboard test pin)
+
+Follow-up to Part 461's deprecated-host guard (which neutralised the live
+symptom); this removes the ROOT cause so the stale-override can't re-form.
+
+**Root cause fixed (`9a46056c`, needs deploy).** The portal editor's `buildDraft`
+(`CatalogPage.tsx`) prefilled the "Public customer URL" input with the RESOLVED
+`config.publicUrl` — which already folds in the `BUSINESS_OS_PUBLIC_URL` fallback
+— so every portal save FROZE that fallback into an explicit
+`customer_portal_public_url` override, which then permanently shadowed any later
+env/domain change (why the rebrand never reached publicUrl). Fix, end to end:
+`buildPortalConfig` now also returns `publicUrlOverride` — the RAW stored override
+(`normalizeUrl`'d, empty when unset), separate from the resolved `publicUrl`;
+`buildDraft` prefills the input from `publicUrlOverride` (`?? config.publicUrl`
+only as a fall-through for a pre-field cached config, so a legit override is never
+cleared mid-deploy); `applyDraft` carries the raw override in optimistic state
+while keeping `publicUrl` falling back to the current env-resolved value when the
+override is cleared. The loose `Record<string, any>` config/draft types needed no
+change, and the field rides the existing bootstrap spread + the full
+`buildPortalConfig` returned by the portal bootstrap route. `test-portal-public-
+url-pure.cjs` extended 12 → 17 checks (publicUrlOverride shows the raw stored value
+incl. a stale one, is empty when unset, and the resolved publicUrl still follows
+the env under the deprecated-host guard). cloudflare + frontend tsc clean, frontend
+build green, `portalEditorUtils` + the `buildDraft` call-site pins still pass.
+
+**Obsolete Dashboard test pin dropped (`7800824e`).** Running `performanceLoadingUx`
+during verification surfaced a NEW, unrelated red: it pinned
+`translateOr('period_label', 'Range')`, but Dashboard.tsx commit 7565fed7
+("rectangular range box, drop the 'Range:' label") intentionally removed that
+label — so the assertion could never match and aborted the whole file. The feature
+is gone, so the assertion is removed (not rewritten); the sibling `doesNotMatch`
+still guards period_label from a raw `t()`. Full frontend suite back to 135/135
+green. (Same class as the Part-445 stale-pin cleanup; flagged as the Dashboard
+peer's oversight, fixed to keep the shared chain green.)
+
+Parallel note: portal.ts/CatalogPage.tsx were clean/disjoint of the active lanes
+(import-engine session still holds importEngine/contacts/system uncommitted); peers
+landed Parts 461–470 during this unit, so Part 471 taken after re-checking max=470.
