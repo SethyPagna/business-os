@@ -11947,3 +11947,49 @@ Branches/Contacts/Receipt/lang held by others). Renumbered to Part 461 after a
 460 collision with e4's export-modal entry; the fix commit 341f7fce's message
 still reads "Part 460" (pushed, not rewritten) — the fix IS this Part 461, cited
 by hash to stay unambiguous.
+
+## Part 462 (Aug 29 2026, session business-os-v1-e4) — Products small-screen fixes from live phone screenshots: Created range picker + Manage no longer truncates to "Ma..."
+
+**User sent 8 mobile screenshots of the live admin.** Concrete bugs, not
+guesswork. Two are squarely in the Products lane (mine) and fixed here; the rest
+are catalogued for their owners at the bottom.
+
+**Fix 1 — the "Created" filter is now the shared Start → End range picker
+(Products.tsx).** It was a cramped `Created [box] – [box]` of two BARE native
+date inputs that never said which box was start vs end, and looked nothing like
+the clean "MM/DD/YYYY → MM/DD/YYYY" pill the Dashboard and Sales daily report
+already use. Swapped in the shared `DateTimeRangePicker` (X1) with `showTime=false`
+(the range is date-only — server-side batchDateFrom/To), `className="min-w-0 flex-1"`
++ a full-width `triggerClassName`, mapping the existing createdDateFrom/To strings
+to/from its DateTimeRange. Now it shows the built-in "Start → End" affordance when
+empty, the formatted range when set, a calendar + its own Clear in the popover, and
+matches the rest of the app (user: "inbuilt start and end ... made full row").
+countActiveProductFilters / clearAllFilters / the search query are unchanged — same
+two state strings underneath.
+
+**Fix 2 — Manage stops truncating to "Ma..." on phones (HeaderActions.tsx).** The
+top toolbar has four buttons (info-guide, History, Manage, Add); on a narrow phone
+the flex-1 split left "Manage" no room and it truncated to "Ma...". Its label is now
+`hidden sm:inline` (icon-only gear on phones, still equal-width/flex-1 with the
+others, no truncation); the ButtonGuidePopover to its left still names it, and the
+label returns from sm up.
+
+**Catalogued for their owners (NOT mine — peer lanes, flagged not touched):**
+- **Branches hub — the History and Transfer buttons overlap** (screenshot: "History"
+  and "Transfer" touch with no gap). A real "buttons on each other" bug in
+  BranchesHubPage / Branches toolbar (session-15 lane).
+- **Suppliers tab — "Stock-In Invoices" renders as a section card inside the tab**
+  (user: "supplier invoice in sections instead"); contacts-peer lane.
+- **Contacts (Customers) — the phone number is shown twice** per card (as the name
+  AND again below the loyalty line); contacts-peer lane.
+- **POS Cart — the empty-cart message ("Tap a product to add it to cart") is
+  overlapped** by the Customer/Discount panel below it; POS lane.
+
+**Verification.** tsc + check:source (404 files) + productFilterHelpers /
+productPageHelpers / productSearchPagination tests + vite build all green.
+Products.tsx + HeaderActions.tsx only.
+
+**Parallel sessions.** Two frontend files, neither in any peer's dirty set. Part
+462 taken after re-checking max = 461.
+
+**Needs deploy.** Frontend-only; ships on the next build.

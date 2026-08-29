@@ -13,6 +13,7 @@ import ImagePlus from 'lucide-react/dist/esm/icons/image-plus.js'
 import { isBrokenLocalizedString, useApp, useSync } from '../../AppContext'
 import Modal from '../shared/Modal'
 import AlphaIndexRail from '../shared/AlphaIndexRail'
+import DateTimeRangePicker from '../shared/DateTimeRangePicker'
 import FilterMenu from '../shared/FilterMenu'
 import PortalMenu from '../shared/PortalMenu'
 import AppSelect from '../shared/AppSelect'
@@ -3485,42 +3486,27 @@ function ProductsFullEditor() {
           </div>
       </div>
 
-      {/* Y13: the "Created" date filter moved OUT of the filter menu to its
-          own row directly below the search row (a real server-side
-          batch-received-date range -- see CreatedDateFilterOptions.tsx,
-          whose section is no longer passed into buildProductFilterSections).
-          Not pinned -- Y14 keeps only the search row sticky. */}
-      <div className="mb-2 flex flex-wrap items-center gap-2 rounded-2xl border border-slate-200 bg-white/95 px-2.5 py-1.5 shadow-sm dark:border-slate-700 dark:bg-slate-900/85">
+      {/* Y13 + Aug-29 rework: the "Created" batch-received-date range. It was
+          a cramped "Created [box] – [box]" whose two bare native date boxes
+          never said which was Start vs End (user, Aug 29: "inbuilt start and
+          end ... made full row"). Now it uses the shared DateTimeRangePicker
+          (X1) — the SAME clean "Start → End" pill + calendar the Dashboard and
+          Sales reports use, so the date range looks identical across the app —
+          stretched to fill the row. Still the server-side batchDateFrom/To
+          range (date-only, so the time row is off); the picker carries its own
+          Clear, and the Filters menu's "Clear all" still resets it too. */}
+      <div className="mb-2 flex items-center gap-2 rounded-2xl border border-slate-200 bg-white/95 px-2.5 py-1.5 shadow-sm dark:border-slate-700 dark:bg-slate-900/85">
         <span className="shrink-0 text-[11px] font-medium text-gray-500 dark:text-gray-400">
           {tr('created', 'Created')}
         </span>
-        <input
-          type="date"
-          className="input h-8 min-w-0 flex-1 text-xs sm:flex-none"
-          aria-label={tr('start_date', 'Start Date')}
-          value={createdDateFrom}
-          max={createdDateTo || undefined}
-          onChange={(event) => setCreatedDateFrom(event.target.value)}
+        <DateTimeRangePicker
+          t={t}
+          showTime={false}
+          value={{ startDate: createdDateFrom, endDate: createdDateTo, startTime: '', endTime: '' }}
+          onChange={(range) => { setCreatedDateFrom(range.startDate); setCreatedDateTo(range.endDate) }}
+          className="min-w-0 flex-1"
+          triggerClassName="flex w-full items-center justify-center gap-2 rounded-xl px-3 py-1.5"
         />
-        <span className="shrink-0 text-xs text-gray-400">{'–'}</span>
-        <input
-          type="date"
-          className="input h-8 min-w-0 flex-1 text-xs sm:flex-none"
-          aria-label={tr('end_date', 'End Date')}
-          value={createdDateTo}
-          min={createdDateFrom || undefined}
-          max={new Date().toISOString().slice(0, 10)}
-          onChange={(event) => setCreatedDateTo(event.target.value)}
-        />
-        {(createdDateFrom || createdDateTo) ? (
-          <button
-            type="button"
-            className="shrink-0 text-[11px] font-medium text-slate-500 underline hover:text-slate-700 dark:text-slate-300 dark:hover:text-slate-100"
-            onClick={() => { setCreatedDateFrom(''); setCreatedDateTo('') }}
-          >
-            {tr('clear', 'Clear')}
-          </button>
-        ) : null}
       </div>
 
         {bulkDeleteJobStatus && (bulkDeleteJobStatus.status === 'pending' || bulkDeleteJobStatus.status === 'processing') && (

@@ -203,7 +203,12 @@ export default function ProductsHeaderActions({
               title={manageHint}
             >
               <Settings2 className="h-4 w-4 shrink-0" />
-              <span className="min-w-0 truncate">{manageLabel}</span>
+              {/* Icon-only on phones: four toolbar buttons split the narrow
+                  row four ways, so a labeled "Manage" truncated to "Ma..."
+                  (user-reported). The gear reads as Manage on its own; the
+                  ButtonGuidePopover to the left still names it, and the label
+                  returns from sm up. */}
+              <span className="hidden min-w-0 truncate sm:inline">{manageLabel}</span>
             </button>
           )}
           items={manageItems}
