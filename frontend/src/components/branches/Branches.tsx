@@ -938,7 +938,7 @@ export default function Branches({ embedded = false }: { embedded?: boolean } = 
   }
 
   return (
-    <div className={`flex min-h-0 flex-col ${embedded ? 'flex-1' : 'page-scroll'} p-3 sm:p-6`}>
+    <div className={`flex min-h-0 flex-col ${embedded ? 'flex-1 px-3 pb-3 pt-1 sm:px-6 sm:pb-6 sm:pt-2' : 'page-scroll p-3 sm:p-6'}`}>
       {/* The aggregate Branches / Items / Value stat cards that used to sit
           here (above the Branches / Transfer History tabs) were removed
           (user, Aug 29: "remove the stats above the branches/transfers

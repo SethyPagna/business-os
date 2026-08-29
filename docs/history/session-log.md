@@ -12422,3 +12422,22 @@ exact spacing/scroll wants their eyes.
 branches files; none in a peer's dirty set. Part 476 after re-checking max = 475.
 
 **Needs deploy.** Frontend-only; ships on the next build.
+
+## Part 477 (Aug 29 2026, session business-os-v1-e4) — merged Stats & Branches: tighten the gap between the two halves
+
+**User confirmed Part 476 "works as intended" and asked to refine it.** The merged
+view still doubled the vertical padding where the two halves meet — the embedded
+InventorySection's bottom padding (`p-3 sm:p-6`) plus the embedded BranchesSection's
+top padding stacked to ~24-48px of dead space between the stat cards and the branch
+list. Split the embedded roots' padding so the seam is tight: Inventory embedded now
+`pt-3 pb-1 sm:pt-6 sm:pb-2` and Branches embedded `pt-1 pb-3 sm:pt-2 sm:pb-6`, i.e.
+~8-16px total at the join instead of a stacked full gap, while the outer edges keep
+normal padding. Non-embedded (standalone) roots are unchanged.
+
+**Verification.** tsc + check:source (405 files) + vite build green. Still wants a
+live phone check for the exact feel (per Part 476); this only reduces the seam.
+
+**Parallel sessions.** Inventory.tsx + Branches.tsx (className-only); clean at edit
+time. Part 477 after re-checking max = 476.
+
+**Needs deploy.** Frontend-only; ships on the next build.

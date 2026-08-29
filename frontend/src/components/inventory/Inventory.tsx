@@ -3480,7 +3480,7 @@ ${inventoryStatLabels.netSold} ${totalQtySold} = ${tr('items_sold', 'Items sold'
   }
 
   return (
-    <div className={`${embedded ? '' : 'page-scroll'} p-3 sm:p-6`}>
+    <div className={embedded ? 'px-3 pt-3 pb-1 sm:px-6 sm:pt-6 sm:pb-2' : 'page-scroll p-3 sm:p-6'}>
       {/* E1: when the Branches hub is driving (hostSection set), its chip
           row replaces this internal picker -- rendering both would be two
           competing section controls. Standalone use keeps it, including its
