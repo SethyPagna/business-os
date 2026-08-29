@@ -7,7 +7,7 @@ import { hasPermission, hasAnyPermission } from '../lib/permissions'
 import { assertUpdatedAtMatch, getExpectedUpdatedAt, writeConflictResponse, WriteConflictError } from '../lib/conflictControl'
 import { bumpVersion } from '../lib/cache'
 import { getCustomerSalesTotals, getDeliveryContactTotals, getSalesDayReport, getSalesPeriodSeries, getSalesTotals } from '../lib/salesAnalytics'
-import { allocateAcrossLots, decrementBatchStockStatement, decrementBatchStockStrictStatement, readFifoLotAvailability, type FifoLotAvailability, type FifoLotTake } from '../lib/productBatches'
+import { allocateAcrossLots, decrementBatchStockStatement, decrementBatchStockStrictStatement, readFifoLotAvailabilityForCart, type FifoLotTake } from '../lib/productBatches'
 import { VALID_SALE_STATUSES, STOCK_DEDUCTED_STATUSES } from '../lib/salesStatus'
 import { consumeDamagedLot, restoreDamagedLot, DamagedLotShortfallError, DAMAGE_OUT_MOVEMENT, DAMAGE_IN_MOVEMENT } from '../lib/returnsStock'
 import {
@@ -270,9 +270,15 @@ app.post('/', async (c) => {
   // real race guard).
   const damagedItems = normalized.filter((item) => item.damaged_lot_id && shouldDeductStock)
   if (damagedItems.length) {
+    // One chunked read instead of a SELECT per damaged line -- same batched
+    // shape as the branch_stock and branch_batch_stock checks above.
+    const damagedLotIds = [...new Set(damagedItems.map((item) => item.damaged_lot_id as number))]
+    const damagedLotRows = await selectInChunks(damagedLotIds, 0, (chunk) => db
+      .prepare(`SELECT id, product_id, quantity_remaining FROM damaged_stock_lots WHERE id IN (${chunk.map(() => '?').join(',')})`)
+      .all<{ id: number; product_id: number; quantity_remaining: number }>(chunk))
+    const damagedLotMap = new Map(damagedLotRows.map((row) => [Number(row.id), row]))
     for (const item of damagedItems) {
-      const lot = await db.prepare('SELECT id, product_id, quantity_remaining FROM damaged_stock_lots WHERE id = ?')
-        .get<{ id: number; product_id: number; quantity_remaining: number }>([item.damaged_lot_id])
+      const lot = damagedLotMap.get(Number(item.damaged_lot_id))
       const name = productMap.get(item.product_id)?.name || `product #${item.product_id}`
       if (!lot || Number(lot.product_id) !== Number(item.product_id)) {
         return c.json({ error: `The damaged lot picked for ${name} no longer exists for that product. Refresh and pick again.` }, 409)
@@ -298,15 +304,17 @@ app.post('/', async (c) => {
   // so the later deducting transition draws the same lots.
   const autoAllocationsByItemIndex = new Map<number, FifoLotTake[]>()
   {
-    const lotCache = new Map<string, FifoLotAvailability[]>()
+    // One batched read of every unlotted line's FIFO availability instead of
+    // a round-trip per line -- the grouped Map is still mutated in place
+    // below so a second line of the same product can't double-take a lot.
+    const fifoPairs = normalized
+      .filter((item) => !item.batch_id && !item.damaged_lot_id && item.branch_id)
+      .map((item) => ({ productId: item.product_id, branchId: item.branch_id as number }))
+    const lotsByKey = await readFifoLotAvailabilityForCart(db, fifoPairs)
     for (const [itemIndex, item] of normalized.entries()) {
       if (item.batch_id || item.damaged_lot_id || !item.branch_id) continue
       const key = `${item.product_id}:${item.branch_id}`
-      let lots = lotCache.get(key)
-      if (!lots) {
-        lots = await readFifoLotAvailability(db, item.product_id, item.branch_id)
-        lotCache.set(key, lots)
-      }
+      const lots = lotsByKey.get(key) || []
       const { takes } = allocateAcrossLots(lots, item.quantity)
       if (!takes.length) continue
       // Consume the shared availability so a second line of the same
