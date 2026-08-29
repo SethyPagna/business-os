@@ -1665,17 +1665,19 @@ other" with the Phase-Y items.*
   idempotent) + real chain. The import-writer gap that created the drift
   (two-branch rows) is left for a focused fix per the P7-f/K4 mid-migration
   stability deferral. (a) the date-vs-lot-code display rule stays open.
-- [ ] Z2. **Cart: decouple product-level discount from the selling-price
-  input — SCOPED, deferred (Part 426).** Applying a discount currently
-  rewrites the price field (the input binds to applied_price_usd, which
-  drops after a discount, instead of base_price_usd). The fix touches the
-  POS pricing kernel (posCore.ts), CartItem's input binding, AND the
-  receipt templates (show `(-$x.xx)` per line) — a coordinated multi-file
-  change that must not disturb any total, so it is recorded here for a
-  focused unit rather than rushed alongside the correctness fixes. The
-  base/applied split already EXISTS in the schema (sale_items.base_price_*
-  vs applied_price_*), so this is a display/binding rewire, not new
-  machinery.
+- [x] Z2 *(Part 435 — SHIPPED, needs deploy; VERIFIED LIVE).* **Cart: discount
+  decoupled from the price input.** The price input bound to applied_price
+  (post-discount) and editing it silently created a fixed discount == base −
+  typed, conflating the price field with the discount. Now: CartItem price
+  inputs show the line's SELLING/base price (base_price_usd/khr), unchanged
+  when a discount applies; POS.tsx updatePrice SETS the base and re-applies any
+  manual discount against it (applyManualDiscount), so line total = (base ×
+  qty) − discount; Receipt.tsx shows the full per-line discount ((base +
+  product_discount) − charged, so BOTH product-level and manual show as
+  (-$x.xx); was comparing against the charged price_usd and showed nothing on
+  real sales; falls back to price_usd for old sales). 4 new posCore tests +
+  wiring lock. Verified live: $2 discount on a $12.50 line — input stays
+  $12.50, total $10.50, "-$2.00 Discount" separate.
 - [x] Z3. **Sales page: live summary + Print column — BOTH DONE.** (a) **Z3a
   (Part 430, needs deploy):** the "N sales | $revenue | N completed" header
   read from a server salesStats aggregate whose effect only re-ran on filter

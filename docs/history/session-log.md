@@ -10799,3 +10799,49 @@ migration 0079.
 Z4, me on Y19/Y17/Y12/Z1a. Stayed off POS.tsx, posCore.ts, CartItem.tsx,
 Receipt.tsx, Dashboard.tsx, inventory.ts, SaleDetailModal.tsx, and the F3 files.
 Parts: peer 432-434, me 431 + 435.
+
+## Part 435 (Aug 29 2026, session business-os-v1-43) — Z2: discount decoupled from the POS price input
+
+**Ask.** User queue: Z8 → Z10 → Z2 → (Y12 → a8) → Z5. Z2 is the money-touching
+one flagged for a careful, test-covered unit.
+
+**What changed.** Root cause: the cart price input bound to applied_price (the
+post-discount charged price), and POS.tsx updatePrice reinterpreted an edit as
+"set applied + derive a fixed discount == base − typed" — so applying ANY
+discount changed the price field and editing the price silently created a
+discount, conflating the two.
+- CartItem.tsx: the USD/KHR price inputs now show base_price_usd/khr (the
+  line's selling/promo price), unchanged when a discount is applied.
+- POS.tsx updatePrice: editing the price SETS the base price and re-applies the
+  existing manual discount against it via applyManualDiscount, so any discount
+  stays a separate reduction and the line total is (base × qty) − discount. The
+  old "typing a price creates a fixed discount" behavior is gone (the exact
+  conflation the user reported).
+- Receipt.tsx: the per-line "original" price is now base_price + product_discount
+  (the pre-discount list price) vs the charged price, so BOTH the product-level
+  and the manual discount render as (-$x.xx). Previously it compared against
+  price_usd, which checkout stores as the CHARGED price, so real sales showed no
+  per-line discount at all. Falls back to price_usd for older sales without
+  base_price. Added base_price_usd/product_discount_usd to the receipt item type.
+
+**Verified.** 4 new posCore tests (a manual discount leaves base intact and only
+reduces applied; a price edit re-applies the SAME discount against the new base
+rather than freezing/creating a fixed cut; no-discount clean; + a source wiring
+lock across CartItem/POS/Receipt). posCore 25/25, receiptTemplate + productDiscountUx
+pass, frontend tsc clean (only the 3 F3-peer onMinimize errors), build green.
+LIVE on worker-dev: added a $12.50 line, applied a $2 discount — the price input
+STAYED $12.50, the line total read $10.50, and "-$2.00 Discount" showed separately.
+
+**Parallel sessions.** a8 shipped Z1a (batchLabel util — lot pills now show
+MMDDYYYY codes as mm/dd/yyyy dates; not my files) and is starting Z5, which needs
+the orphaned F3-slice-2 work (Sidebar + Modal.tsx ✕ + the minimize-to-tray
+wiring) finished. Confirmed to a8 I'm on NONE of the F3 files and they've been
+byte-static across my whole session (my Inventory.tsx commits used
+reverse-then-reapply isolation around them) — green-lit a8 to finish the minimal
+onMinimize wiring and commit it (unblocks Z5/Products density/Z1a AND ends my
+isolation dance), with the caveat to preserve the F3 author's design and that my
+Z10/Z13 are already in HEAD so committing Inventory.tsx picks up only the F3 hunks.
+
+**Not done.** Z5 (a8 taking it). The user's Z8→Z2 queue is complete on my side
+(Z8, Z10, Z2 shipped; Y12 by a8). Needs deploy (migrations 0077/0078/0079 +
+frontend).
