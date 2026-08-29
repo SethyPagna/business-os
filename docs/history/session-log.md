@@ -11070,3 +11070,51 @@ hamburger pending a user decision) — so a clean lang-pack base, zero collision
 Part 441 reserved after re-checking max = 440.
 
 **Needs deploy.** Frontend-only; ships on the next build.
+
+## Part 442 (Aug 29 2026, session business-os-v1-c1) — I2 leftover: the D2 date-range control on the Audit Log
+
+**What + why.** The I2 Audit UI item (Part 393) shipped every filter except the
+one it deferred "for the D2 era": an explicit date-range control. Until now the
+Audit Log could only bound dates through the year/month *period* chips, so an
+arbitrary "Aug 3 → Aug 17" window was impossible. This adds the SAME one-row
+start→end control the D2 Products/Inventory stock ledger (StockChangeSection)
+uses — two native `<input type="date">` joined by an arrow, plus an inline
+Clear — to the Audit Log's sticky filter area.
+
+**Design.** The server already accepted `startDate`/`endDate`; only the frontend
+lacked a way to set them directly. New `rangeStart`/`rangeEnd` state feeds a
+memoized `effectiveDateRange` that PREFERS the explicit range and falls back to
+the year/month-derived `auditDateRange` when neither input is set — so prior
+behavior is byte-identical when the control is untouched. A lone start or end is
+a valid open-ended bound. The year/month period chips are intentionally kept:
+they still drive the time GROUPING (`getTimeGroupingMode` →
+`buildTimeActionSections`) and remain the fallback range, so the explicit range
+and the grouping period are independent rather than fighting. The range counts
+toward the active-filter badge, resets pagination on change, and is cleared by
+Filters → Clear.
+
+**No lang churn.** Reuses `start_date` / `end_date` / `clear` (all present in
+en.json) for aria-labels and the Clear button; no visible "Date range" label
+(matching D2, which has none), so en/km.json were NOT touched — zero lang-pack
+collision surface.
+
+**Footprint.** `frontend/src/components/utils-settings/AuditLog.tsx` only
+(commit `2f53c414`). Fully disjoint from the four active lanes at pick time
+(import reset-data ledger — system.ts; stock-in invoice report — contacts.ts;
+import row ceilings — importEngine.ts; Products page — Products.tsx) and from the
+Y20 pagination lane (PaginationControls/PageSizeSelect): AuditLog imports
+PaginationControls but its pagination area was left untouched.
+
+**Verified.** `tsc --noEmit` green (EXIT 0 — a first run showed ONLY a peer's
+transient Products.tsx JSX parse error, which cleared once they saved; nothing in
+AuditLog), `check:source` PASS (404 files), real `vite build` green (20.5s).
+Frontend-only. Live visual check deferred: a peer owns the shared 8787 dev server
+(no casual restart, per protocol) and the control renders trivially (native date
+inputs) — type + build green is the bar for this UI addition.
+
+**Parallel sessions.** Live at pick time: c1 (me), 74 (Y8, just landed Part 441),
+a8 (Z5 part 1 shipped; hamburger deferred to the user), e4. Claimed the I2
+leftover in progress.md via an atomic pathspec commit (`c8bdada2`) before coding;
+no peer work absorbed. Part 442 taken after re-checking max = 441.
+
+**Needs deploy.** Frontend-only; ships on the next build.

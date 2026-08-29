@@ -950,9 +950,13 @@ deep-linkable tabs.*
   → empty 200 rendered as "no logs") is now a 500 so the local-mirror fallback +
   message path runs instead. The before→after detail view already existed
   (auditLogFieldDiff) — untouched. test-audit-log-filters-pure.cjs 17 checks against
-  the real 0001 schema. Still open for the D2 era: the one-row date-range control
-  (today's range comes from the year/month period filters). **[CLAIMED: session
-  c1 — adding the D2 start→end date inputs to AuditLog.tsx now.]**)* Audit UI (inside
+  the real 0001 schema. **The D2-era one-row date-range control SHIPPED (Part
+  442, session c1, needs deploy — `2f53c414`):** an explicit start→end pair of
+  native date inputs (the same control the D2 Products/Inventory stock ledger
+  uses) now drives the server startDate/endDate authoritatively, while the
+  year/month period chips stay for time-grouping and as the fallback range when
+  no explicit range is set. AuditLog.tsx only; reuses start_date/end_date/clear
+  (no lang-pack edits). tsc + check:source + vite build all green.)* Audit UI (inside
   Review & Logs): the same one-row date-range control as
   Products/Inventory (D2), filters by action / page / user, clean multi-option design,
   detail drawer per entry showing before→after payloads where stored.
