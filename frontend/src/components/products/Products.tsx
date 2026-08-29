@@ -3230,8 +3230,15 @@ function ProductsFullEditor() {
             <div className="mt-1 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[11px]">
               <span className="whitespace-nowrap text-[13px] font-semibold text-green-700 dark:text-green-400">{fmtUSD(sellingUsd)}</span>
               {specialUsd > 0 ? (
+                // The VIP price (the special_price_* field -- labelled "VIP
+                // Price" elsewhere, e.g. ProductDetailModal; the old hardcoded
+                // "Special" here was a mislabel). On the small-screen default
+                // card it shows as JUST the number, colour-coded (primary/blue)
+                // with no text label -- the colour distinguishes it from selling
+                // (green) and cost (red) on this compact one-line price row
+                // (user, Aug 29 2026). The desktop table row keeps its own labelling.
                 <span className="whitespace-nowrap font-medium text-primary-700 dark:text-primary-400">
-                  Special {fmtUSD(specialUsd)}
+                  {fmtUSD(specialUsd)}
                 </span>
               ) : null}
               {promotion.active ? (
