@@ -11426,3 +11426,145 @@ the test).
 
 **Needs deploy.** Frontend-only; ships on the next build (a coordinated,
 user-authorized production deploy was in progress at time of writing).
+
+## Part 450 (Aug 29 2026, session business-os-v1-e4) — batch-format consistency: the Inventory pill now reads mm/dd/yyyy (Z1a leftover closed)
+
+**User directive.** "some uses mm/dd/yyyy some uses mmddyyyy" — the batch
+identifier renders inconsistently across surfaces. Audited every batch-display
+site against the shared `batchDisplayLabel` helper (utils/batchLabel.ts, the
+Z1a single source: a date-derived MMDDYYYY lot code reads as its mm/dd/yyyy
+date; only a genuine custom code stays a code).
+
+**Root cause: one outlier.** Eight surfaces already route through
+`batchDisplayLabel`. The `InventoryBatchPreview` pill in Inventory.tsx (~475/477)
+did NOT — it printed `batch.lot_code` verbatim, so a date-derived batch showed
+"08242026" there while the byte-for-byte-identical Products page pill
+(surfaces/ProductRowParts.tsx, same `buildBatchPreview`, same expiry/qty) showed
+"08/24/2026". This was Z1a's explicitly-deferred REMAINING item ("HOT with the
+F3-slice-2 peer's uncommitted work — route it through once that lands"); F3 has
+landed and Inventory.tsx is clean, so it is now fixed as an exact mirror of
+ProductRowParts (import added; the `.map` body computes one `lotLabel` via
+`batchDisplayLabel` used in both the title and the visible text; expiry_date and
+quantity untouched — both pills render expiry verbatim so they still agree).
+
+**Re-audited the rest; the other raw-`lot_code` sites are NOT bugs.** All three
+report tables show the received date SEPARATELY as mm/dd/yyyy alongside the code
+identifier — ProductDetailReport (fmtDate, line 114), SupplierPurchasesModal (a
+dedicated "Received" column, fmtDateOnly line 132), and StockInInvoicesSection (a
+grouped-day header, fmtDateOnly line 358). Decoding their code column would just
+duplicate the date already in the adjacent column, so per the Z1a rule they
+correctly keep the code. Left untouched.
+
+**Still open (surfaced to the user, not guessed):** within those three report
+tables a date-derived batch shows "08242026" in the code column right next to
+"08/24/2026" in the date column — the two formats side by side. That is
+Z1a-by-design (code = identifier, date = date), so unifying it (show the date
+twice, or switch the code column to #batch_number) reverses a deliberate
+decision and awaits the user's call. Also open per the user: the batch
+click-to-open drill exists but has no deeper day→time layer yet (separate
+follow-up, surface TBD).
+
+**Verification.** `tsc --noEmit` clean, `check:source` all 404 files,
+`batchLabelDisplay` test passes, `vite build` green. Live click-through deferred
+(peer owns the dev backend; production catalog empty per Part 439).
+
+**Parallel sessions.** Only Inventory.tsx (frontend) changed — none of session
+87's five backend deploy-blocking files. Committed promptly so the tree stays
+clean for 87's in-flight production deploy. Part 449 collided with session c1's
+"select-all aligned" log entry (both appended after Part 448); I am the later
+writer, so per the write-order rule I renumbered mine up to **450**. c1's own
+uncommitted Part 449 log write-up rides along in this commit (its code already
+landed in 7a35f75c) — recorded here as a ride-along, not rewritten.
+
+**Needs deploy.** Frontend-only; ships on the next build.
+
+## Part 450 (Aug 29 2026, session business-os-v1-c1) — Products select-all aligned with the other five list pages
+
+**Why.** The go-live core-hardening audit found the money/stock/POS core solid
+(see below), and surfaced ONE genuine, board-flagged cross-surface inconsistency:
+Products was the lone list page whose selection UI did NOT match the other five.
+Inventory/Sales/Returns/Branches/Contacts use the column-HEADER checkbox as
+select-all (in select mode) with no always-visible "Select all" button; Products
+instead had an always-visible toolbar "Select all (N)" control and a deliberately
+EMPTY header checkbox column — the opposite 11.2-era resolution. It waited on a
+user decision because flipping it reverses a shipped choice. **The user confirmed
+it during this session**, so it's now flipped.
+
+**What changed (footprint: two frontend files only).**
+- `ProductsListSurface.tsx`: the desktop header cell now renders a real select-all
+  checkbox WHILE in select mode, wired to the SAME
+  `isSelectionScopeFullySelected` / `isSelectionScopePartiallySelected` /
+  `toggleSelectionScope` helpers the section- and group-header checkboxes already
+  use, over a new `allVisibleIds` prop (the flat `visibleIds` list). Out of select
+  mode the column still collapses to nothing. Stale "no header checkbox" comments
+  updated.
+- `Products.tsx`: removed the always-visible toolbar "Select all (N)" checkbox +
+  label; a select-mode-only "N selected" chip keeps the running count. Y20's folded
+  pager stays on that row (ml-auto), untouched. Dead wiring removed so nothing
+  dangles: `toggleSelectAll`, `productSelectAllLabel`, `mobileSelectAllRef` and its
+  indeterminate `useEffect`. Long-press to ENTER select mode is unchanged.
+
+**Nuance the board's stale estimate missed.** The Part-389 note called this "a
+small change (ProductsListSurface header + Products.tsx toolbar)" — but Y20 (Part
+446-ish) had since folded the pagination INTO that same select-all row, so the row
+can't simply become select-mode-only. The change threads that: it removes only the
+select-all affordance and keeps the always-visible pager.
+
+**Verified.** `tsc --noEmit` green (EXIT 0 — no dangling refs from the removed
+wiring, id types compatible), real `vite build` green (26.6s). The header checkbox
+reuses already-tested selection helpers (rowSelection.test), so no new logic to
+test. Live visual check deferred: a peer owns the shared 8787 dev server (no casual
+competing server, per protocol) and this is straightforward UI wiring.
+
+**Commit** `7a35f75c` (code), this doc entry separate. Footprint fully disjoint
+from every active lane (import reset/stock-in report/import-ceilings backend, a8's
+Y16 chip-row work, the Y20 pager lane). Committed promptly (clean) rather than left
+uncommitted, so it does not sit in the tree the concurrent production deploy is
+being assembled on. Yielded Part 449 to session e4 (which had claimed it for
+Z1a in an uncommitted progress.md edit) and took 450 after re-checking max
+committed = 448. The progress.md "Flagged → RESOLVED" note is being committed
+separately once e4's shared-file edit settles, to avoid absorbing their work.
+
+**Needs deploy.** Frontend-only; ships with the in-progress production deploy or
+the next build.
+
+## Part 450 (Aug 29 2026, session business-os-v1-15) — Branches hub: "Stats & Branches" un-stacked into two top sections
+
+**Why.** The user, reviewing the live app, flagged that the new hub pages "are
+jumbling different sections in one single page" and asked for sections at the top
+(explicitly NOT sub-tabs). Audit of the four Phase-E hubs: Sales, Settings and
+Review & Logs already show ONE section per top chip. The Branches hub (E1) was the
+sole exception — its "Stats & Branches" chip STACKED two sections in a single
+scroll: Inventory's stats pane capped at 45% height ABOVE the branch list. That is
+the jumble the user saw.
+
+**What changed (BranchesHubPage.tsx only).** Split the combined chip into two
+separate TOP section chips — **Stats** (Inventory's stats slice, BarChart3 icon)
+and **Branches** (the branch list, Building2 icon). Each renders full-height and
+alone; the two never share a scroll now. Products/Movements/RFID chips untouched.
+Inventory still stays MOUNTED across switches (hidden via the `hidden` class on the
+Branches chip rather than unmounted) so filters/selection/loaded data survive,
+exactly as before. hostSection now maps 1:1 to the section id (the old
+'stats'→'branches' remap is gone); onHostSectionChange feeds setSection directly.
+Default landing: inventory users open on Stats, branch-only users on Branches.
+Deep links (/inventory → products) and the Dashboard stock-card focus handoff
+(products/movements/rfid) are preserved. No new lang keys — 'stats'/'branches'
+already exist in en/km. Permission gating tightened correctly: the Stats chip
+gates on `inventory`, the Branches chip on `branches` (the old combined chip
+showed on EITHER and self-gated each half inside).
+
+**Scroll invariant (Part 448).** The hub root stays the height-filling
+`flex min-h-0 flex-1 flex-col` column; each section wrapper is `flex min-h-0
+flex-1 flex-col` hosting its own `.page-scroll` root, so the pageScrollRoots guard
+stays satisfied.
+
+**Verification.** `tsc --noEmit` clean; `check:source` parsed all 404 files. Live
+click-through DEFERRED — a peer owns the dev server in this checkout and starting a
+second one risks the node_modules-lock trap this repo has hit before; static gates
+green is the bar.
+
+**Parallel sessions.** Only BranchesHubPage.tsx changed; the peer import-backend
+lanes (importEngine / contacts / system) are fully disjoint. Part 450 after
+re-checking max = 449 (449 was taken by c1 mid-work).
+
+**Needs deploy.** Frontend-only; ships on the next build.

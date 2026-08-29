@@ -627,6 +627,17 @@ deep-linkable tabs.*
   same dist.)* **Inventory merges into Branches** as sections: "Stats & Branches" (Inventory's
   stat cards + branch list), "Movements", "RFID". Branch transfer options updated to
   everything shipped since (batch preservation, §14 details).
+- [x] E1b *(Part 450, session business-os-v1-15 — user, reviewing the live app,
+  flagged the hub pages "jumbling different sections in one single page" and asked
+  for sections at the top, not sub-tabs. Audit: Sales/Settings/Review hubs already
+  show one section per top chip; Branches was the sole exception — its
+  "Stats & Branches" chip STACKED Inventory's stats pane (45%) over the branch list
+  in one scroll. Split into two separate TOP section chips, "Stats" and "Branches",
+  each full-height and shown alone; Inventory stays mounted (hidden on Branches) so
+  its state survives; no new lang keys. tsc + check:source green; live click-through
+  deferred to the peer-owned dev server. BranchesHubPage.tsx only.)* **Branches hub
+  sections un-stacked** — Stats and Branches are now separate top sections, matching
+  the other three hubs.
 - [x] E2 *(Part 407, session a7 — SHIPPED. SalesHubPage hosts Sales +
   Returns + Fees as lazy tier-gated sections (components moved INTACT,
   Part-405 export wiring and rememberKeys untouched); returns/fees PAGE
@@ -1696,9 +1707,18 @@ other" with the Phase-Y items.*
   (inventory/ProductDetailModal, products/surfaces/ProductRowParts,
   branches/TransferModal); code-columns that show the date separately
   (ProductDetailReport + supplier/stock-in report tables) correctly keep the
-  code. **REMAINING:** Inventory.tsx's own batch pill (~475/477) renders
-  lot_code raw too but is HOT with the F3-slice-2 peer's uncommitted work —
-  route it through batchDisplayLabel once that lands. (b) **MEASURED (Part 426), a real
+  code. **Z1a REMAINING now CLOSED (Part 450, session e4, needs deploy):** the
+  Inventory.tsx batch pill (`InventoryBatchPreview`, ~475/477) rendered
+  `lot_code` raw — the one surface still showing "08242026" where every other
+  pill shows "08/24/2026". F3 has since landed (Inventory.tsx clean), so it is
+  now routed through `batchDisplayLabel`, an exact mirror of the Products page
+  pill (surfaces/ProductRowParts.tsx); expiry/quantity untouched (both pills
+  render expiry verbatim, so they still match). Re-audited every batch-display
+  site while here: the three report tables (ProductDetailReport line 114,
+  SupplierPurchasesModal's own "Received" column line 132, StockInInvoices'
+  group header line 358) each show the received date SEPARATELY via
+  fmtDate/fmtDateOnly, so their code column is the deliberate identifier, not a
+  format bug — left as-is per the Z1a rule. (b) **MEASURED (Part 426), a real
   import-data inconsistency:** production branch_stock holds 23,113 units
   across 12,210 rows (6,105 products × 2 branches) but branch_batch_stock
   holds only 12,725 units in 6,105 lots (ONE lot per product, at ONE
@@ -1846,13 +1866,15 @@ other" with the Phase-Y items.*
 
 ### Flagged, not guessed (Golden Rule 7)
 
-- **Products now differs from the other five list pages (Part 389):** B6's rule ("the
-  'Select all' button is removed; in select mode the column-header checkbox IS
-  select-all") is live on Inventory/Sales/Returns/Branches/Contacts, but Products
-  still has its toolbar "Select all (N)" control and NO header checkbox — the
-  opposite resolution, from the earlier 11.2 pass. Flipping Products to match is a
-  small change (ProductsListSurface header + Products.tsx toolbar) but it REVERSES
-  a previously-shipped decision, so it waits for the user's confirmation.
+- ~~**Products now differs from the other five list pages (Part 389):** Products had
+  a toolbar "Select all (N)" control and an empty header checkbox column — the
+  opposite of Inventory/Sales/Returns/Branches/Contacts.~~ **RESOLVED (Part 449,
+  session c1, needs deploy — `7a35f75c`):** the user confirmed the flip during the
+  go-live hardening pass. Products' desktop header cell now renders the select-all
+  checkbox in select mode (same isSelectionScope*/toggleSelectionScope helpers the
+  section/group boxes use), and the always-visible toolbar "Select all (N)" control
+  is gone (a select-mode "N selected" chip keeps the count; Y20's folded pager
+  stays on that row). Long-press still enters select mode. tsc + vite build green.
 - ~~B4's location (which page shows delivery inside a category column) is
   unconfirmed.~~ **Located Part 394** — the old-system expense labels
   (`Delivery / <courier>`, 3,130 rows) on the Fees page; migration 0072 separates.
