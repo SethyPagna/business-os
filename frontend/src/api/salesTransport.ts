@@ -154,7 +154,11 @@ export function getSalesExport(params: QueryParams = {}): Promise<unknown> {
 export function getSalesStats(params: QueryParams = {}): Promise<unknown> {
   const query = buildQueryString(params, { skipEmpty: false })
   return route(
-    'sales:stats',
+    // Aggregate results are filter-specific. A constant channel made the
+    // first (usually unfiltered) response a fresh-cache hit for every later
+    // search/date/status request, so a one-row receipt search displayed the
+    // all-history count and revenue until the cache expired.
+    `sales:stats:${query}`,
     () => apiFetch('GET', appendQuery('/api/sales/stats', query)),
     () => ({ total_count: 0, revenue_usd: 0, pending_revenue_usd: 0, truncated_in_list: false }),
   )
