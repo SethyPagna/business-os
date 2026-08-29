@@ -129,7 +129,10 @@ export default function Modal({ title, onClose, children, wide, size, draggable,
             type="button"
             onClick={onClose}
             aria-label="Close"
-            className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 w-8 h-8 flex items-center justify-center rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700"
+            /* Z5: the ✕ was text-gray-400 (~2.5:1 on white, fails WCAG AA);
+               gray-600/gray-300 gives a legible close affordance in both
+               themes. */
+            className="text-gray-600 hover:text-gray-900 dark:text-gray-300 dark:hover:text-white w-8 h-8 flex items-center justify-center rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700"
           ><X className="h-4 w-4" /></button>
           </div>
         </div>

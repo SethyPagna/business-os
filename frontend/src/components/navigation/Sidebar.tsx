@@ -393,7 +393,7 @@ export default function Sidebar({ notificationSlot = null, desktopNotificationSl
                 navigator.serviceWorker?.controller?.postMessage?.({ type: 'BUSINESS_OS_SKIP_WAITING' })
                 window.setTimeout(() => window.location.reload(), 250)
               }}
-              className={`transition-colors hover:text-blue-500 ${textClass ? 'opacity-60 hover:opacity-100' : 'text-gray-400'}`}
+              className={`transition-colors ${textClass ? 'opacity-70 hover:opacity-100 hover:text-blue-400' : 'text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300'}`}
               title={t('refresh_app') || 'Refresh / check for update'}
               style={textStyle}
             >
@@ -401,7 +401,7 @@ export default function Sidebar({ notificationSlot = null, desktopNotificationSl
             </button>
             <button
               onClick={logout}
-              className={`transition-colors hover:text-red-500 ${textClass ? 'opacity-60 hover:opacity-100' : 'text-gray-400'}`}
+              className={`transition-colors ${textClass ? 'opacity-70 hover:opacity-100 hover:text-red-400' : 'text-red-600 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300'}`}
               title={t('logout')}
               style={textStyle}
             >
