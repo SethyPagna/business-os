@@ -891,7 +891,10 @@ for (const rangeKey of ['range_today', 'range_7d', 'range_this_month', 'range_th
 // requiring a source-order relationship between cards would make this test
 // fail on a harmless extraction/reorder while the user-visible contract is
 // still fully satisfied.
-assert.match(dashboard, /translateOr\('period_label', 'Range'/, 'Dashboard range label should use a guarded translation')
+// (The 'Range:' range-box label was intentionally dropped — Dashboard.tsx commit
+// 7565fed7 "rectangular range box, drop the 'Range:' label" — so there is no
+// period_label to guard any more; the assertion for it was removed. Line below's
+// doesNotMatch still keeps period_label from being rendered as a raw t() key.)
 assert.match(dashboard, /translateOr\('payment_method', 'Payment Method'/, 'Dashboard payment-method label should use a guarded translation')
 assert.match(dashboard, /translateOr\('no_data', 'No data found'/, 'Dashboard empty states should use guarded translations')
 assert.doesNotMatch(dashboard, /t\('(range_today|range_7d|range_this_month|range_this_year|range_custom|period_label|payment_method|no_data)'\)/, 'Dashboard should not render raw translation keys for visible range, payment, or empty-state labels')
