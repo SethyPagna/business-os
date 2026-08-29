@@ -3,6 +3,7 @@ import { describeJobPolicy } from '../products/import/importTemplateRouter.ts'
 import { parseServerTimestampMs } from '../../utils/formatters.ts'
 import AlertTriangle from 'lucide-react/dist/esm/icons/alert-triangle.js'
 import CheckCircle2 from 'lucide-react/dist/esm/icons/check-circle-2.js'
+import ChevronDown from 'lucide-react/dist/esm/icons/chevron-down.js'
 import FileDown from 'lucide-react/dist/esm/icons/file-down.js'
 import FileWarning from 'lucide-react/dist/esm/icons/file-warning.js'
 import GripVertical from 'lucide-react/dist/esm/icons/grip-vertical.js'
@@ -60,7 +61,7 @@ type ImportJobSummary = {
   rows?: unknown
   total?: unknown
   // Real field names importEngine.ts's runImportAnalyze/runImportApply
-  // write to summary_json (see CHANGES-VERIFIED.md) -- getJobResultSummary
+  // write to summary_json (see CHANGES-VERIFIED.md) -- getJobResultParts
   // below already read these; the type just never declared them, which
   // was a real `keyof` compile error, not a cosmetic one.
   created?: unknown
@@ -508,7 +509,11 @@ function getJobLabel(job: ImportJob): string {
   return `${type} import${phase ? ` - ${phase}` : ''}`
 }
 
-function getJobResultSummary(job: ImportJob, labels: ResultLabels = {}): string {
+// Returns the non-zero result tallies as discrete parts (created / updated /
+// skipped / row issue / needs review / image matched-skipped). Y9 renders
+// these as small chips inside the folded "Details" section rather than the
+// old " - "-joined prose run that helped make the card a wall of words.
+function getJobResultParts(job: ImportJob, labels: ResultLabels = {}): string[] {
   const summary = job?.summary || {}
   const parts: string[] = []
   const add = (key: keyof ImportJobSummary, label: string) => {
@@ -536,7 +541,30 @@ function getJobResultSummary(job: ImportJob, labels: ResultLabels = {}): string 
   // work lands and starts writing these fields.
   add('images_matched', labels.imageMatched || 'image matched')
   add('skipped_images', labels.imageSkipped || 'image skipped')
-  return parts.join(' - ')
+  return parts
+}
+
+// The terse "counts" line: processed/total rows, then images and issue
+// counts only when non-zero. Numbers-forward with middot separators. Y9
+// replaces the old always-visible run-on line (rows - images - issues -
+// result summary - timing - error) with just these figures; the verbose
+// tallies, timing and applied options move behind the Details fold, and an
+// error/stall line renders on its own coloured row (never folded).
+function getJobCountsSummary(
+  job: ImportJob,
+  labels: { rows: string; images: string; issues: string; analyzed?: string },
+): string {
+  const parts: string[] = [getRowsDisplay(job, labels.rows, labels.analyzed)]
+  const totalImages = Number(job?.total_images || 0)
+  if (totalImages) {
+    parts.push(`${Number(job?.processed_images || 0).toLocaleString()} / ${totalImages.toLocaleString()} ${labels.images}`)
+  }
+  const failedRows = Number(job?.failed_rows || job?.summary?.failed || 0)
+  const failedImages = Number(job?.failed_images || 0)
+  if (failedRows || failedImages) {
+    parts.push(`${(failedRows + failedImages).toLocaleString()} ${labels.issues}`)
+  }
+  return parts.join(' · ')
 }
 
 function formatTimingMs(ms: unknown): string | null {
@@ -721,6 +749,18 @@ export default function BackgroundImportTracker() {
     setReviewedConflictJobIds((current) => (current.has(jobId) ? current : new Set(current).add(jobId)))
   }, [])
   const [busyJobId, setBusyJobId] = useState('')
+  // Y9: which expanded job rows have their "Details" fold open (per-result
+  // tallies, phase timing, applied import options). In-memory only, like
+  // `expanded` -- a transient display choice, not worth persisting.
+  const [openDetailJobIds, setOpenDetailJobIds] = useState<Set<string>>(() => new Set())
+  const toggleJobDetails = useCallback((jobId: string) => {
+    setOpenDetailJobIds((current) => {
+      const next = new Set(current)
+      if (next.has(jobId)) next.delete(jobId)
+      else next.add(jobId)
+      return next
+    })
+  }, [])
   const [dismissedJobs, setDismissedJobs] = useState<DismissedJobsMap>(() => readDismissedJobs())
   const [pollBackoffMs, setPollBackoffMs] = useState(0)
   const [dragPos, setDragPos] = useState<DragPos | null>(() => readDragPos())
@@ -1318,7 +1358,10 @@ export default function BackgroundImportTracker() {
             {hasAttention ? <AlertTriangle className="h-4 w-4 flex-shrink-0" /> : isActive ? <Loader2 className="h-4 w-4 flex-shrink-0 animate-spin" /> : <CheckCircle2 className="h-4 w-4 flex-shrink-0" />}
             <div className={`min-w-0 ${compactTracker ? '' : 'flex-1'}`}>
               <div className="font-semibold">{title}</div>
-              {!compactTracker ? <div className="truncate text-xs opacity-80">{getJobLabel(primaryJob)}</div> : null}
+              {/* Y9: terse counts (rows / images / issues) instead of the
+                  old prose "<type> import - <phase>" subtitle, whose phase
+                  already shows in the status chip to the right. */}
+              {!compactTracker ? <div className="truncate text-xs opacity-80">{getJobCountsSummary(primaryJob, { rows: rowsLabel, images: imagesLabel, issues: issuesLabel, analyzed: progressLabels.analyzed })}</div> : null}
             </div>
             {!compactTracker ? <span className="text-xs font-semibold">{primaryProgress.label}</span> : null}
           </button>
@@ -1342,10 +1385,7 @@ export default function BackgroundImportTracker() {
             const isJobDismissable = DISMISSABLE_STATUSES.has(jobStatus)
             const isJobRemovable = REMOVABLE_STATUSES.has(jobStatus)
             const isAwaitingReview = jobStatus === 'awaiting_review'
-            const failedRows = Number(job.failed_rows || job.summary?.failed || 0)
-            const failedImages = Number(job.failed_images || 0)
             const lastError = String(job.last_error || '').trim()
-            const resultSummary = getJobResultSummary(job, resultLabels)
             // Active status but either carrying an error, or simply not
             // having checked in for a long time (worker died mid-phase
             // without updating status at all -- see CANCELLABLE/REMOVABLE
@@ -1357,6 +1397,15 @@ export default function BackgroundImportTracker() {
             // getJobTimingSummary's comment on why totalMs is meaningless
             // mid-run.
             const timingSummary = !ACTIVE_STATUSES.has(jobStatus) ? getJobTimingSummary(job) : null
+            // Y9: the neutral breakdown (per-result tallies, phase timing,
+            // applied import options) folds behind a per-job "Details"
+            // toggle so each row stays a terse status chip + progress bar +
+            // counts. An error or stall line is never folded -- it renders on
+            // its own coloured row above the toggle.
+            const resultParts = getJobResultParts(job, resultLabels)
+            const policyLines = describeJobPolicy(job.policy)
+            const hasFoldableDetails = resultParts.length > 0 || !!timingSummary || policyLines.length > 0
+            const detailsOpen = openDetailJobIds.has(String(job.id || ''))
             return (
               <div
                 key={String(job.id || '')}
@@ -1366,31 +1415,61 @@ export default function BackgroundImportTracker() {
                     : 'border-current/15 bg-white/65 dark:bg-slate-950/45'
                 }`}
               >
-                <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
-                  <div className="min-w-0">
+                <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
+                  <div className="min-w-0 flex-1">
                     <div className="truncate text-sm font-semibold">{getJobLabel(job)}</div>
-                    <div className="text-xs opacity-75">
-                      {getRowsDisplay(job, rowsLabel, progressLabels.analyzed)}
-                      {Number(job.total_images || 0) ? ` - ${Number(job.processed_images || 0)} / ${Number(job.total_images || 0)} ${imagesLabel}` : ''}
-                      {(failedRows || failedImages) ? ` - ${failedRows + failedImages} ${issuesLabel}` : ''}
-                      {resultSummary ? ` - ${resultSummary}` : ''}
-                      {timingSummary ? ` - ${t('import_took') || 'Took'} ${timingSummary}` : ''}
-                      {lastError ? ` - ${lastError}` : ''}
-                      {isStalledSilently ? ` - ${t('import_stalled_no_error') || 'No update in a while -- this import may have stopped. Safe to cancel or remove.'}` : ''}
+                    {ACTIVE_STATUSES.has(jobStatus) ? (
+                      <div className="mt-1 h-1 overflow-hidden rounded-full bg-black/10 dark:bg-white/10">
+                        <div
+                          className={`h-full rounded-full ${isStalled ? 'bg-amber-500' : 'bg-blue-500'} ${jobProgress.indeterminate ? 'animate-pulse' : ''}`}
+                          style={{ width: `${Math.max(jobProgress.indeterminate ? 28 : 0, jobProgress.value)}%` }}
+                        />
+                      </div>
+                    ) : null}
+                    <div className="mt-1 text-xs opacity-75">
+                      {getJobCountsSummary(job, { rows: rowsLabel, images: imagesLabel, issues: issuesLabel, analyzed: progressLabels.analyzed })}
                     </div>
-                    {(() => {
-                      const policyLines = describeJobPolicy(job.policy)
-                      if (!policyLines.length) return null
-                      return (
-                        <div className="mt-1 flex flex-wrap gap-1">
-                          {policyLines.map((line) => (
-                            <span key={line.key} className="rounded-full bg-black/5 px-1.5 py-0.5 text-[10px] dark:bg-white/10" title={`${line.label}: ${line.value}`}>
-                              {line.label}: {line.value}
-                            </span>
-                          ))}
-                        </div>
-                      )
-                    })()}
+                    {(lastError || isStalledSilently) ? (
+                      <div className="mt-1 text-xs font-medium text-amber-700 dark:text-amber-300">
+                        {lastError || (t('import_stalled_no_error') || 'No update in a while -- this import may have stopped. Safe to cancel or remove.')}
+                      </div>
+                    ) : null}
+                    {hasFoldableDetails ? (
+                      <div className="mt-1">
+                        <button
+                          type="button"
+                          className="inline-flex items-center gap-1 text-xs font-medium opacity-70 transition-opacity hover:opacity-100"
+                          aria-expanded={detailsOpen}
+                          onClick={() => toggleJobDetails(String(job.id || ''))}
+                        >
+                          <ChevronDown className={`h-3 w-3 transition-transform ${detailsOpen ? 'rotate-180' : ''}`} aria-hidden="true" />
+                          {detailsOpen ? (t('hide_details') || 'Hide details') : (t('view_details') || 'View Details')}
+                        </button>
+                        {detailsOpen ? (
+                          <div className="mt-1 flex flex-col gap-1">
+                            {resultParts.length ? (
+                              <div className="flex flex-wrap gap-1">
+                                {resultParts.map((part) => (
+                                  <span key={part} className="rounded-full bg-black/5 px-1.5 py-0.5 text-[10px] dark:bg-white/10">{part}</span>
+                                ))}
+                              </div>
+                            ) : null}
+                            {timingSummary ? (
+                              <div className="text-[11px] opacity-70">{t('import_took') || 'Took'} {timingSummary}</div>
+                            ) : null}
+                            {policyLines.length ? (
+                              <div className="flex flex-wrap gap-1">
+                                {policyLines.map((line) => (
+                                  <span key={line.key} className="rounded-full bg-black/5 px-1.5 py-0.5 text-[10px] dark:bg-white/10" title={`${line.label}: ${line.value}`}>
+                                    {line.label}: {line.value}
+                                  </span>
+                                ))}
+                              </div>
+                            ) : null}
+                          </div>
+                        ) : null}
+                      </div>
+                    ) : null}
                   </div>
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="rounded-full bg-black/10 px-2 py-1 text-xs font-semibold dark:bg-white/10">{jobProgress.label}</span>
