@@ -1525,9 +1525,12 @@ those until that unit commits.*
   (b) find the applying stall (queue consumer death/lease?); (c) restore/keep
   review-before-commit so approval happens on the analysis, and the ONLY long
   phase after approve is the apply, clearly progressing.
-- [ ] Y9. **Import progress UI too text-heavy.** The tracker card is a wall of
+- [~] Y9. **[CLAIMED session business-os-v1-87, Part 436]** **Import progress UI too
+  text-heavy.** The tracker card is a wall of
   words (screenshot 1). Compact design: status chip + progress bar + counts;
-  details fold behind an expander.
+  details fold behind an expander. Footprint: BackgroundImportTracker.tsx only
+  (disjoint from a8's Z1a batchLabel sweep and 6e's F3 tray) + its lang keys
+  (reusing existing view_details/hide_details/import_* keys — no new keys).
 - [x] Y10 *(Part 425 — SHIPPED end to end, needs deploy. POS no longer
   demands the full amount (and with it a method) for awaiting_payment;
   with nothing paid the sale records NO method (the server's 'Cash'
