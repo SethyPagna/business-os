@@ -11427,7 +11427,7 @@ the test).
 **Needs deploy.** Frontend-only; ships on the next build (a coordinated,
 user-authorized production deploy was in progress at time of writing).
 
-## Part 450 (Aug 29 2026, session business-os-v1-e4) — batch-format consistency: the Inventory pill now reads mm/dd/yyyy (Z1a leftover closed)
+## Part 451 (Aug 29 2026, session business-os-v1-e4) — batch-format consistency: the Inventory pill now reads mm/dd/yyyy (Z1a leftover closed)
 
 **User directive.** "some uses mm/dd/yyyy some uses mmddyyyy" — the batch
 identifier renders inconsistently across surfaces. Audited every batch-display
@@ -11470,11 +11470,14 @@ follow-up, surface TBD).
 
 **Parallel sessions.** Only Inventory.tsx (frontend) changed — none of session
 87's five backend deploy-blocking files. Committed promptly so the tree stays
-clean for 87's in-flight production deploy. Part 449 collided with session c1's
-"select-all aligned" log entry (both appended after Part 448); I am the later
-writer, so per the write-order rule I renumbered mine up to **450**. c1's own
-uncommitted Part 449 log write-up rides along in this commit (its code already
-landed in 7a35f75c) — recorded here as a ride-along, not rewritten.
+clean for 87's in-flight production deploy. **Part-number churn (recorded, not
+rewritten):** three sessions raced past Part 448 — c1 (select-all), 15 (Branches
+hub), and e4 (this) each first grabbed 449 then 450 as they saw collisions, and
+session 15's commit `00a5ecc6` swept the shared session-log mid-race so all three
+landed committed as "Part 450". This entry is renumbered to **451** (the next
+free number, verified clear in both HEAD and the working tree) so it stays
+uniquely findable; the two already-committed "Part 450" duplicates (c1, 15) are
+left as-is per "never rewrite a committed/pushed entry".
 
 **Needs deploy.** Frontend-only; ships on the next build.
 

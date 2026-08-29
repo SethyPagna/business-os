@@ -84,6 +84,7 @@ import { aggregateInitialOptions, buildInitialOptionsFromProducts, getInitialKey
 import { buildProductCategorySections } from '../../utils/productGrouping.ts'
 import { buildProductGroupPriceLabel, buildProductGroupSummaryParts } from '../products/helpers/productGroupViewHelpers.ts'
 import { buildBatchPreview } from '../../utils/productBatches.ts'
+import { batchDisplayLabel } from '../../utils/batchLabel.ts'
 import { runConcurrentTasks } from '../../utils/bulkOps.ts'
 import { pruneSelectionToVisibleIds } from '../../utils/rowSelection.ts'
 import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.ts'
@@ -468,15 +469,33 @@ function InventoryBatchPreview({
   if (!preview.totalCount) return null
   return (
     <div className={`flex flex-wrap items-center gap-1 ${compact ? 'mt-1' : 'mt-1.5'}`}>
-      {preview.items.map((batch) => (
+      {preview.items.map((batch) => {
+        // Z1a: a date-derived lot code (MMDDYYYY, e.g. "08242026") reads as
+        // its mm/dd/yyyy date; only a genuine custom code stays a code. This
+        // is the SAME batchDisplayLabel treatment the Products page pill uses
+        // (surfaces/ProductRowParts.tsx), so the batch identifier reads
+        // identically on both pages instead of "08242026" here vs
+        // "08/24/2026" there. Expiry/quantity are unchanged and still match
+        // ProductRowParts (both render expiry_date verbatim).
+        const lotLabel = batchDisplayLabel(
+          {
+            id: String(batch.id ?? batch.batch_id ?? 'batch'),
+            lot_code: (batch.lot_code as string) ?? null,
+            received_at: (batch.received_at as string) ?? null,
+            batch_number: (batch.batch_number as number) ?? null,
+          },
+          label('batch', 'Batch'),
+        )
+        return (
         <span
           key={`${product?.id || 'product'}-inv-batch-${batch.id || batch.batch_id}`}
           className="inline-flex max-w-[13rem] items-center truncate rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-medium text-amber-700 ring-1 ring-amber-100 dark:bg-amber-950/30 dark:text-amber-200 dark:ring-amber-900/50"
-          title={`${String(batch.lot_code || label('batch', 'Batch'))} / ${String(batch.expiry_date || label('no_expiry', 'No expiry'))} / ${String(batch.quantity ?? '')}`}
+          title={`${lotLabel} / ${String(batch.expiry_date || label('no_expiry', 'No expiry'))} / ${String(batch.quantity ?? '')}`}
         >
-          {String(batch.lot_code || label('batch', 'Batch'))} / {String(batch.expiry_date || label('no_expiry', 'No expiry'))} / {String(batch.quantity ?? '')}
+          {lotLabel} / {String(batch.expiry_date || label('no_expiry', 'No expiry'))} / {String(batch.quantity ?? '')}
         </span>
-      ))}
+        )
+      })}
       {preview.extraCount ? (
         <span className="inline-flex rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-300">
           +{preview.extraCount}

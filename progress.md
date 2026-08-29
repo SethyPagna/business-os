@@ -1707,7 +1707,7 @@ other" with the Phase-Y items.*
   (inventory/ProductDetailModal, products/surfaces/ProductRowParts,
   branches/TransferModal); code-columns that show the date separately
   (ProductDetailReport + supplier/stock-in report tables) correctly keep the
-  code. **Z1a REMAINING now CLOSED (Part 450, session e4, needs deploy):** the
+  code. **Z1a REMAINING now CLOSED (Part 451, session e4, needs deploy):** the
   Inventory.tsx batch pill (`InventoryBatchPreview`, ~475/477) rendered
   `lot_code` raw — the one surface still showing "08242026" where every other
   pill shows "08/24/2026". F3 has since landed (Inventory.tsx clean), so it is
@@ -1868,7 +1868,7 @@ other" with the Phase-Y items.*
 
 - ~~**Products now differs from the other five list pages (Part 389):** Products had
   a toolbar "Select all (N)" control and an empty header checkbox column — the
-  opposite of Inventory/Sales/Returns/Branches/Contacts.~~ **RESOLVED (Part 449,
+  opposite of Inventory/Sales/Returns/Branches/Contacts.~~ **RESOLVED (Part 450,
   session c1, needs deploy — `7a35f75c`):** the user confirmed the flip during the
   go-live hardening pass. Products' desktop header cell now renders the select-all
   checkbox in select mode (same isSelectionScope*/toggleSelectionScope helpers the
