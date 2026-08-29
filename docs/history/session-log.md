@@ -12283,3 +12283,34 @@ peer's oversight, fixed to keep the shared chain green.)
 Parallel note: portal.ts/CatalogPage.tsx were clean/disjoint of the active lanes
 (import-engine session still holds importEngine/contacts/system uncommitted); peers
 landed Parts 461–470 during this unit, so Part 471 taken after re-checking max=470.
+
+## Part 472 (Aug 29 2026, session business-os-v1-74) — import: informative direct-apply progress + skip the wasted review fetch
+
+Two follow-ups to "make it smarter and faster": show what's importing, and cut a
+wasted round-trip.
+
+**Informative progress (the "show what's importing" ask).** The direct-apply
+"Importing…" state used to be a bare spinner. It now shows what it's doing: the
+server's create/update/skip breakdown once analysis lands, else the row count the
+client already knows from its analysis. Both review screens
+(`ProductServerImportReviewScreen` + the shared inventory/sales
+`ServerImportReviewScreen`) take a `rowCount` prop; the products/inventory/sales/
+contacts modals pass their known count in, so it reads "Importing… 3 rows" from
+the first frame.
+
+**Efficiency — skip the paged review fetch on a clean auto-apply.** In
+auto-approve mode with no conflicts the review table is never shown (the screen
+approves and closes), yet the screens still fetched a 50-row review page just to
+read counts. Gated that fetch on `(!autoApprove || autoFellBack)`: manual reviews
+and conflict fallbacks still load it; the clean path (the common case) now skips
+it entirely and uses the client-known rowCount for its progress line. One fewer
+round-trip per clean import.
+
+**Verified LIVE end-to-end.** Classic products import of a 3-row CSV → the step-2
+progress showed **"Importing… 3 rows"** (not a bare spinner) → auto-approved and
+closed → `GET /api/products/search` confirmed all three landed ("Progress Test
+One" \$6.50/8, "Two" \$9.75/3, "Three" \$4.00/5). The skipped-fetch change did not
+break the apply.
+
+Commits `5df6f337` (informative progress + surfaces test) and `6ba2b227` (skip
+fetch). tsc + import tests green. **Needs deploy** (frontend-only).
