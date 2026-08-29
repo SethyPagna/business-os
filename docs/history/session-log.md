@@ -12666,3 +12666,66 @@ stock_actions. One manifest claim is now measurably false, though: it says
 real vite build · every figure above read from remote D1, not inferred.
 
 **Needs deploy.** The /stats aggregate ships on the next `npm run deploy:full`.
+
+## Part 485 (Aug 29 2026, session business-os-v1-4f) — A lot records the money each receipt carried (migration 0080)
+
+**The defect, in the user's money.** Part 484 measured it: the Stock-In Invoice report
+and the per-supplier Purchases drill showed **$1,462,395.81** of supplier spend against
+an old-system truth of **$1,311,701.46** — and that truth is not a guess, it is two
+independent exports agreeing to the cent (`suppliers-from-po.csv`'s per-supplier
+`total_purchased_usd` and `later/stock_in_invoice_lines.csv`'s summed
+`net_total_usd`). Wrong per supplier in both directions: bong long +$37,330, dane
+japan +$24,460, srun **−**$1,805, piset exact.
+
+**Cause.** `product_batches.batch_key` is the date code, so two receipts of one product
+on one calendar day land on the SAME lot. `received_quantity` accumulates both (0067),
+but `supplier_id`/`supplier_name`/`unit_cost_usd` are fill-if-NULL "first attribution
+sticks" (0062/0065). Any report deriving spend as `received_quantity * unit_cost_usd`
+therefore values the second receipt at the first receipt's price. That is how all
+19,914 imported lots ended up carrying a unit cost when only 6,966 source rows recorded
+one. It is not a migration artifact — it recurs on ordinary receiving.
+
+**Fix.** `unit_cost_usd` is left exactly as it is: it still answers "what did a unit of
+this lot cost when we first recorded it", which is what the lot pickers show. Migration
+**0080** adds `product_batches.received_cost_usd`, and both writers —
+`lib/stockActionCommit.ts`'s import add and `lib/productBatches.ts`'s
+`receiveBatchStock` — now accumulate each receipt's own quantity at its own cost. A
+receipt with no recorded price contributes 0 rather than borrowing a sibling's; the
+report already surfaces `lines_without_cost`, so an unpriced receipt stays visible
+instead of being invented. `routes/contacts.ts` reads the recorded money in both report
+endpoints, the per-line total, and the per-supplier purchases totals.
+
+**Backfill.** The completed stock-action imports kept every source row in
+`import_job_source_rows` — 21,286 rows, 114,277.8 units, $1,338,467.08 of recorded
+cost, reproducing the source CSV exactly — so the real per-receipt money is recoverable
+with nothing re-uploaded. A source row reaches its lot by product barcode + the
+date-derived `batch_key`, scoped to lots that same job created; `MIN(pb.id)` applies the
+standing lowest-id tie-break for the 54 barcodes shared by 346 identity-merge children,
+so every row counts exactly once. Written with materialized helper tables and `instr`
+rather than `LIKE`: the direct correlated form returns "D1 DB exceeded its CPU time
+limit", and `LIKE` on this table returns "pattern too complex" (the same limit the
+migration pack's own Step 4e works around).
+
+**Measured outcome, simulated read-only against production before shipping:** the
+supplier report moves **$1,462,395.81 → $1,337,024.88**, removing **$125,370.93 —
+83% of the error**. Only 12 of 7,022 supplier lots fall back to the old formula. The
+residual $25,323.42 lives inside the migration pack itself (`stock_in_history.csv`'s
+own qty x cost totals $1,335,449.08, not the invoices' $1,311,701.46) and only the
+deferred `stock_in_invoice_lines.csv` import can close it.
+
+**Verification.** `test-stock-in-invoice-report-pure.cjs` gains two checks on real
+SQLite: one drives both writers with two same-day receipts at different prices and
+asserts the lot records 4x$10 + 6x$30 = $220 while `unit_cost_usd` stays $10 and
+`received_cost_usd != received_quantity * unit_cost_usd` — the bug, pinned; the other
+seeds the world as it stood BEFORE 0080 (new `dbBefore`/`applyMigration` helpers), runs
+the migration, and asserts it recovers $220 rather than the old formula's $150, ignores
+a cancelled job's rows, and drops its helper tables. Its `GROUPS_SQL` copy of the route
+query was also still asserting the pre-0080 formula and now matches what ships.
+
+**Not done.** The drill-down still labels a column "Unit cost (USD)" beside a line
+total that no longer equals unit cost x quantity when a lot holds receipts bought at
+different prices. That is honest but reads oddly; left for a UI pass rather than
+guessed at.
+
+**Needs deploy.** Migration 0080 applies on the next `npm run deploy:full`; the report
+figures change only after it does.
