@@ -11993,3 +11993,36 @@ Products.tsx + HeaderActions.tsx only.
 462 taken after re-checking max = 461.
 
 **Needs deploy.** Frontend-only; ships on the next build.
+
+## Part 463 (Aug 29 2026, session business-os-v1-74) — products import applies directly after the fast client review (no second server review)
+
+**The report.** "I upload and want to see/review within 1–2 seconds, decide once,
+and the import goes without any mid-action review/resolve — products import had
+this before." Diagnosed: the products import made the operator review TWICE — the
+fast client review on step 1 (`analyzeProductCsvInWorker`), then a second,
+server-side `ProductServerImportReviewScreen` that polled "Analyzing on the
+server…" before applying. That second review is what regressed the flow.
+
+**Decision (asked the user):** "Apply directly, no second review." The client
+review is the single decision point; after it the import auto-approves and
+applies in the background.
+
+**Implementation.** `ProductServerImportReviewScreen` gained an `autoApprove`
+mode: it still polls to `awaiting_review`, then fires the approve automatically —
+showing an "Importing…" progress state instead of the review table — and the
+modal closes on `onApproved` into the BackgroundImportTracker. Data safety is
+kept: the server 409s on unresolved product conflicts
+(`product_conflicts_unresolved`), and only in that case does the screen fall back
+to the manual review table so they can be resolved. `BulkImportModal` passes
+`autoApprove`, and its action button was relabelled "Upload & import" (was
+"Upload & review"). Guarded by `productImportDirectApply.test.ts`.
+
+**Verified LIVE end-to-end** in the local app (rebuilt dist, applied local
+migrations earlier). Dropped a 2-row CSV → instant client review ("2 rows passed
+validation") → clicked Upload & import → step 2 showed **"Importing…"** (not the
+review table) → analysis finished → auto-approve fired ("Starting apply") → modal
+closed → **both new products ("Auto Apply Test A" \$9.99, "Auto Apply Test B"
+\$14.50) appeared in the catalog.** No second review, no manual approve.
+
+Commits: `c5b4f6ab` (autoApprove mode + test), `83f554ce` (button relabel). tsc +
+import tests green. **Needs deploy** (frontend-only).
