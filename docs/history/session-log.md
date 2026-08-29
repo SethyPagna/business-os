@@ -12125,3 +12125,42 @@ concurrent batches/import work is elsewhere). Part 466 taken after re-checking
 max = 465.
 
 **Needs deploy.** Frontend-only; ships on the next build.
+
+## Part 467 (Aug 29 2026, session business-os-v1-74) — direct-apply for the unified import hub (drop-your-files wizard)
+
+Completed the direct-apply rollout: the newer unified `ImportHub` ("Import — drop
+your files, we route them") now auto-applies too, matching the per-page flows.
+
+**How.** The hub queues one server import job per routed file and hands off to the
+BackgroundImportTracker for review/approval — it has no review screen of its own.
+So the hub now flags each queued job `auto_approve: true` in its policy
+(`{ ...defaultPolicyFor(type), auto_approve: true }`), and the tracker gained an
+effect that auto-fires its existing `handleApprove(job)` for any `auto_approve`
+job the moment it reaches `awaiting_review` (once per job, tracked in a ref).
+Because it routes through `handleApprove`, genuine product/contact conflicts are
+still redirected to their review/merge screen instead of applying blindly — the
+same safety the per-page flows keep. handleApprove sits below the tracker's
+`if (!primaryJob) return null` early return, so the effect reaches it via a ref
+bridge (`autoApproveHandlerRef`) to stay within the Rules of Hooks.
+
+No backend change: the server already stores the whole policy
+(`JSON.stringify(body.policy)`) and returns it parsed (`serializeJob`), and
+`listImportJobs` maps `serializeJob`, so `job.policy.auto_approve` round-trips to
+the tracker.
+
+**Verified LIVE end-to-end.** Opened the unified wizard, injected a 2-row products
+CSV → it routed as "Products (catalog / stock)" → Queue the imports → a background
+job appeared → **without any manual approval** the tracker auto-approved it and
+`GET /api/products/search` confirmed both products were created ("Hub Route Test
+X" \$7.25/4, "Hub Route Test Y" \$11/6).
+
+Guarded by `importHubDirectApply.test.ts`. Commit `24dc2c5d`. tsc + tests green.
+
+**Follow-up (not done — lang packs are peer-hot):** the hub's descriptive copy is
+now stale — `import_hub_sub` still says "queued into its own reviewed import;
+nothing commits without you" and `import_hub_done`/`import_hub_queued` say "review
+and approve each" / "queued for review". These live in en.json + km.json (both
+dirty from another session's lang sweep, and km needs Khmer), so the copy update
+was deferred rather than fight the peer-hot files for a text tweak.
+
+**Needs deploy** (frontend-only).
