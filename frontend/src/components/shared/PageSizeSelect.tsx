@@ -28,6 +28,10 @@ export interface PageSizeSelectProps {
   disabled?: boolean
   usePortalMenu?: boolean
   allowCustom?: boolean
+  // Drop the trailing dropdown caret -- for a trigger that already reads as
+  // tappable on its own (e.g. the compact pager's "1-20" range chip, where
+  // the caret was visual noise). The menu still opens on click.
+  hideCaret?: boolean
   // Override the text shown on the trigger button. The button normally prints
   // the current page size; a caller that wants the same dropdown to read as
   // something else -- e.g. an item range "1-20" that opens the per-page
@@ -52,6 +56,7 @@ export default function PageSizeSelect({
   usePortalMenu = true,
   allowCustom = true,
   buttonContent,
+  hideCaret = false,
 }: PageSizeSelectProps) {
   const [open, setOpen] = useState(false)
   const [position, setPosition] = useState({ top: 0, left: 0, width: 160 })
@@ -182,7 +187,9 @@ export default function PageSizeSelect({
         }}
       >
         <span className="min-w-0 flex-1 truncate">{buttonLabel}</span>
-        <ChevronDown className={`h-3.5 w-3.5 shrink-0 text-slate-500 transition-transform dark:text-slate-300 ${open ? 'rotate-180' : ''}`} aria-hidden="true" />
+        {hideCaret ? null : (
+          <ChevronDown className={`h-3.5 w-3.5 shrink-0 text-slate-500 transition-transform dark:text-slate-300 ${open ? 'rotate-180' : ''}`} aria-hidden="true" />
+        )}
       </button>
 
       {open && createPortal(

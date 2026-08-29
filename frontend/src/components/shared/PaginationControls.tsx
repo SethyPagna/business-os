@@ -128,18 +128,25 @@ export default function PaginationControls({
     // inside a single pill so it can sit in the Select-all row: prev, the
     // editable current page, the item-range chip (which is itself the per-page
     // dropdown trigger), the total page count, and next.
+    // Consistent one-line pill: prev / editable page / the "1-20" range chip
+    // (which IS the per-page dropdown -- no caret, tap to open) / total pages
+    // / next. Everything is text-xs and font-semibold on the same slate ramp
+    // so the numbers read as one set; the prev/next arrows are the strongest
+    // element (darker, bolder stroke, solid hover) so the primary action --
+    // paging -- stands out and the disabled edge is unmistakable.
+    const arrowButtonClass = 'inline-flex h-7 w-8 shrink-0 items-center justify-center text-slate-600 transition-colors hover:bg-slate-100 hover:text-slate-900 disabled:cursor-not-allowed disabled:bg-transparent disabled:text-slate-300 dark:text-slate-200 dark:hover:bg-slate-800 dark:hover:text-white dark:disabled:text-slate-600'
     return (
-      <div className={`inline-flex max-w-full items-center overflow-hidden rounded-full border border-slate-200 bg-white text-xs text-slate-600 shadow-sm dark:border-slate-700 dark:bg-slate-950 dark:text-slate-300 ${className}`}>
+      <div className={`inline-flex max-w-full items-center overflow-hidden rounded-full border border-slate-300 bg-white text-xs font-semibold text-slate-800 shadow-sm dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100 ${className}`}>
         <button
           type="button"
-          className="inline-flex h-7 w-8 shrink-0 items-center justify-center text-slate-500 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40 dark:text-slate-300 dark:hover:bg-slate-800"
+          className={arrowButtonClass}
           disabled={safePage <= 1}
           onClick={() => onPageChange?.(safePage - 1)}
           aria-label="Previous page"
         >
-          <ChevronLeft className="h-4 w-4" />
+          <ChevronLeft className="h-4 w-4" strokeWidth={2.5} />
         </button>
-        <div className="inline-flex min-w-0 items-center gap-1 px-1">
+        <div className="inline-flex min-w-0 items-center gap-1.5 px-1.5">
           {editablePageInput ? (
             <>
               <span className="sr-only">{pageLabel}</span>
@@ -147,7 +154,7 @@ export default function PaginationControls({
                 type="text"
                 inputMode="numeric"
                 aria-label={pageLabel}
-                className="h-7 w-6 border-0 bg-transparent px-0 text-center text-[11px] font-semibold text-slate-700 outline-none dark:text-slate-100"
+                className="h-7 w-6 border-0 bg-transparent px-0 text-center text-xs font-semibold text-slate-800 outline-none dark:text-slate-100"
                 value={pageDraft}
                 onChange={(event) => setPageDraft(event.target.value.replace(/[^\d]/g, '') || '')}
                 onBlur={(event) => commitPageDraft(event.currentTarget.value)}
@@ -155,7 +162,7 @@ export default function PaginationControls({
               />
             </>
           ) : (
-            <span className="px-0.5 text-[11px] font-semibold text-slate-700 dark:text-slate-100">{safePage}</span>
+            <span className="px-0.5 text-xs font-semibold text-slate-800 dark:text-slate-100">{safePage}</span>
           )}
           <PageSizeSelect
             value={safePageSize}
@@ -163,22 +170,23 @@ export default function PaginationControls({
             onChange={(nextValue) => onPageSizeChange?.(nextValue)}
             ariaLabel={perPageLabel}
             allowCustom={editablePageSizeInput}
+            hideCaret
             buttonContent={`${start.toLocaleString()}-${end.toLocaleString()}`}
             className="min-w-0"
-            buttonClassName="h-6 rounded-full border border-slate-200 bg-slate-50 px-1.5 py-0 text-[11px] font-semibold text-slate-700 shadow-none dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
+            buttonClassName="h-6 rounded-full border border-slate-200 bg-slate-100 px-2.5 py-0 text-xs font-semibold text-slate-800 shadow-none hover:bg-slate-200 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700"
             menuClassName="min-w-[9rem]"
             optionClassName="text-xs"
           />
-          <span className="shrink-0 whitespace-nowrap text-[11px] font-semibold text-slate-500 dark:text-slate-300">/ {totalPages}</span>
+          <span className="shrink-0 whitespace-nowrap text-xs font-semibold text-slate-500 dark:text-slate-400">/ {totalPages}</span>
         </div>
         <button
           type="button"
-          className="inline-flex h-7 w-8 shrink-0 items-center justify-center text-slate-500 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40 dark:text-slate-300 dark:hover:bg-slate-800"
+          className={arrowButtonClass}
           disabled={safePage >= totalPages}
           onClick={() => onPageChange?.(safePage + 1)}
           aria-label="Next page"
         >
-          <ChevronRight className="h-4 w-4" />
+          <ChevronRight className="h-4 w-4" strokeWidth={2.5} />
         </button>
       </div>
     )

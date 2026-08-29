@@ -3227,8 +3227,8 @@ function ProductsFullEditor() {
                 status-colored qty+unit, "|"-separated like before.
                 flex-wrap stays purely as overflow protection for genuinely
                 too-narrow cards -- the default render is one line. */}
-            <div className="mt-1 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[11px]">
-              <span className="whitespace-nowrap text-[13px] font-semibold text-green-700 dark:text-green-400">{fmtUSD(sellingUsd)}</span>
+            <div className="mt-1 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-xs">
+              <span className="whitespace-nowrap font-semibold text-green-700 dark:text-green-400">{fmtUSD(sellingUsd)}</span>
               {specialUsd > 0 ? (
                 // The VIP price (the special_price_* field -- labelled "VIP
                 // Price" elsewhere, e.g. ProductDetailModal; the old hardcoded
@@ -3503,9 +3503,6 @@ function ProductsFullEditor() {
           range (date-only, so the time row is off); the picker carries its own
           Clear, and the Filters menu's "Clear all" still resets it too. */}
       <div className="mb-2 flex items-center gap-2 rounded-2xl border border-slate-200 bg-white/95 px-2.5 py-1.5 shadow-sm dark:border-slate-700 dark:bg-slate-900/85">
-        <span className="shrink-0 text-[11px] font-medium text-gray-500 dark:text-gray-400">
-          {tr('created', 'Created')}
-        </span>
         <DateTimeRangePicker
           t={t}
           showTime={false}
