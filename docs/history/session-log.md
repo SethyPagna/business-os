@@ -12582,3 +12582,87 @@ desktop size (the desktop table row image is untouched). Stale sizing comment up
 green. Products.tsx only.
 
 **Needs deploy.** Frontend-only; ships on the next build.
+
+## Part 484 (Aug 29 2026, session business-os-v1-4f) — Migration audit: every manifest gate passes; three real defects found beneath them
+
+**Scope.** Independent re-verification of the Aug-28 migration pack against live
+production D1, plus the fixes that did not need a decision.
+
+**Every completion gate in `IMPORT-MANIFEST.md` passes, measured live.** products
+6,104 · suppliers 16 · delivery contacts 2 · customers 4,705 (4,652 + the 53
+optional) · inventory movements 21,278 totalling 114,277.8 units · product stock and
+summed branch stock both 23,113 · batch dates 07/09/2024–08/27/2026 with 0 on 08/28 ·
+sales 14,913 distinct receipts, 35,970 line items, none beginning `RCP-` · fees 4,240
+/ $129,696.60 / 82,419,900 KHR · `PRAGMA foreign_key_check` empty · every one of the
+21 import jobs terminal · 0 orphaned sale items, 0 dangling customer/courier ids.
+`/health` 200. The import itself is faithful to its sources.
+
+**Fixed 1 — three suite scripts had been dead on committed HEAD.**
+`test-adjust-received-date-pure`, `test-supplier-attribution-pure` and
+`test-wire-images-gallery-pure` load `routes/batches.ts`/`routes/products.ts`, which
+import `../lib/conflictControl`. The harnesses hand the transpiled route the *test
+file's* `require`, so an import missing from `requireOverrides` resolves against
+`scripts/` and throws MODULE_NOT_FOUND before a single check runs — 22 checks that
+looked green and never executed. Suite 99/102 → 102/102. Commit `2b907b48`.
+
+**Fixed 2 — `GET /api/sales/stats` was an N+1 over the whole history.** It read every
+matching sale into the Worker, then ran one chunked refund query per 100 sale ids —
+roughly 150 sequential D1 statements for the Sales page's own unfiltered header
+request. Replaced with one aggregate (COUNT + two conditional SUMs, refunds joined as
+a pre-aggregated derived table). `COALESCE(NULLIF(sale_status, ''), 'completed')`
+preserves the JS `|| 'completed'` semantics a plain COALESCE would break. Proven
+against production (14,913 / $1,871,573.34 / $0, identical to an independent
+cross-check) and pinned by a new real-SQLite check that runs the route's SQL and the
+replaced JS side by side over mixed statuses and multi-refund sales. Commit
+`01a72864`.
+
+**Open 1 — the lot ledger and branch stock disagree on 45% of on-hand units.**
+`branch_stock` totals 23,113; `branch_batch_stock` totals 12,725. Per product×branch:
+10,943 pairs agree, 1,257 are short by 10,415 units, and 8 are the reverse (27 units
+of lot stock against zero branch stock). Cause: the products import's default path
+REPLACES a branch's quantity and never touches `product_batches`, while only the
+*first* CSV row per product takes the new-product path that creates a lot — so the
+6,104 `Received via product import` lots sit 5,927 at Shop and 177 at Warehouse.
+Step 4d re-imported through that same default path, rebuilding `branch_stock` while
+leaving the lot ledger untouched. Effect on the POS: every product carries an active
+batch, so `batchSelectionRequired` is true for all of them and the add button needs a
+lot with stock. At Shop 30 products (109 units) are therefore unsellable despite
+showing stock — e.g. #4461 Morphe Fluidity Concealer C2.65, 11 on hand, 0 in any lot.
+At Warehouse 1,225 rows / 10,298 units have no lot at all. Needs a reconciliation
+write on production plus a decision about the import path; not done unilaterally.
+
+**Open 2 — supplier spend is overstated by 11.5% on the Stock-In Invoice report.**
+The old system's own two independent sources agree exactly: `suppliers-from-po.csv`
+per-supplier totals and `later/stock_in_invoice_lines.csv` net totals both sum to
+**$1,311,701.46**. The report computes **$1,462,395.81** — **+$150,694.35**, wrong per
+supplier in both directions (bong long +$37,330, dane japan +$24,460, srun
+−$1,805, piset exact). Mechanism, confirmed in `lib/stockActionCommit.ts`:
+`received_quantity` accumulates on every add to a lot, while `unit_cost_usd` and the
+supplier are fill-if-NULL "first attribution sticks". Same product, same day, two
+receipts at different costs ⇒ the second receipt's units are valued at the first's
+cost. All 19,914 imported lots ended up carrying a cost though only 6,966 source rows
+had one. This is not migration-only: it recurs in ordinary receiving. The honest model
+is a cumulative `received_cost_usd` with `unit_cost_usd` derived, which is a schema +
+engine change and a decision, so it is flagged rather than guessed at.
+
+**Open 3 — sales/returns search lost diacritic folding (currently harmless).** The
+SQLITE_TOOBIG fix passes `alreadyNormalizedCols=true` for haystacks built from RAW
+columns, so `normalizedHaystackSql` emits `lower(COALESCE(...))` with no
+DIACRITIC_SQL_PAIRS chain. Measured exposure today is zero: 0 sales rows carry Latin
+diacritics in any flat column, and the 611 diacritic-bearing `sale_items.product_name`
+rows are all covered by the write-time-normalized `products.name_normalized` in the
+same haystack, with 0 orphaned line items. Restoring the fold at query time would
+re-cross D1's depth-100 limit; the durable fix is a write-time search column on
+`sales`, as migration 0037 already did for products.
+
+**`later/` re-checked, verdict unchanged.** No destination table exists in production
+for drawer sessions, PO invoices, or a stock-adjustment ledger, and `ALLOWED_TYPES`
+still covers only products/customers/suppliers/delivery_contacts/inventory/sales/
+stock_actions. One manifest claim is now measurably false, though: it says
+`stock_in_invoice_lines.csv` loses nothing because its data is already joined into
+`stock_in_history.csv` — Open 2 above is exactly the $150,694 that join lost.
+
+**Verification.** cloudflare tsc clean · frontend tsc clean · 102/102 backend tests ·
+real vite build · every figure above read from remote D1, not inferred.
+
+**Needs deploy.** The /stats aggregate ships on the next `npm run deploy:full`.
