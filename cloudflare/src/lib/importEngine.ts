@@ -3914,8 +3914,9 @@ async function finalizeImportApply(
 // Workers Paid now allows 10,000 subrequests per invocation by default
 // (wrangler.toml pins it explicitly; Free stays 50 external / 1,000 to
 // Cloudflare services -- the older note here that the 1,000 ceiling "does
-// not rise on Paid" described the pre-Feb-2026 platform). 240 units x ~12
-// calls ~= 2,880, under a third of the pinned budget, leaving ample room
+// not rise on Paid" described the pre-Feb-2026 platform). 480 units x ~12
+// calls ~= 5,760 (~58% of the pinned budget) -- raised from 240 to roughly
+// halve the 21k-row migration dispatch time, still leaving ample room
 // for classification, persistence, finalization and broadcasts; cpu_ms =
 // 300000 covers the compute side. The 4x raise means RECONCILE mode --
 // which genuinely needs one pass (below) -- accepts 4x bigger sheets
@@ -3926,7 +3927,7 @@ async function finalizeImportApply(
 // widens how much one continuation invocation dispatches -- budgeted in
 // the subrequest math above.
 export const STOCK_ACTION_MAX_ROWS = 1920 // 240 maximum groups x the writer's 8-line receipt ceiling
-export const STOCK_ACTION_MAX_UNITS = 240
+export const STOCK_ACTION_MAX_UNITS = 480
 // DIRECT-mode continuation (M4): a direct sheet is not capped at the unit
 // ceiling at all -- it classifies and dispatches in windows across
 // self-enqueued invocations, each invocation staying inside the same
