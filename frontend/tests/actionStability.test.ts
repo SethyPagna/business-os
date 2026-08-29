@@ -39,7 +39,7 @@ await runTest('POS checkout keeps client, API, and backend duplicate guards', ()
 
   assert.match(pos, /if \(loading \|\| checkoutInFlightRef\.current\) return/)
   assert.match(pos, /checkoutInFlightRef\.current = true[\s\S]*setLoading\(true\)/)
-  assert.match(pos, /const POS_CHECKOUT_TIMEOUT_MS = 20000/)
+  assert.match(pos, /const POS_CHECKOUT_TIMEOUT_MS = 45000/)
   assert.match(pos, /withLoaderTimeout\(\s*\(\) => createPosSale\(saleData\)[\s\S]*'Create POS sale',\s*POS_CHECKOUT_TIMEOUT_MS,\s*\)/)
   assert.match(pos, /finally \{[\s\S]*checkoutInFlightRef\.current = false[\s\S]*setLoading\(false\)/)
 

@@ -876,7 +876,16 @@ assert.match(dashboard, /function ChartFallback/, 'Dashboard chart Suspense fall
 assert.doesNotMatch(dashboardChartNoData, /AppContext|useApp/, 'dashboard chart empty states should not import AppContext and pull auth/bootstrap code into the chart chunk')
 assert.match(dashboard, /lucide-react\/dist\/esm\/icons\/layout-dashboard\.js/, 'Dashboard should use direct Lucide icon modules instead of the app-wide barrel')
 assert.doesNotMatch(dashboard, /Upload \} from 'lucide-react'/, 'Dashboard should not keep unused startup icon imports')
-assert.match(dashboard, /label: translateOr\('range_today', 'Today'[\s\S]*label: translateOr\('range_7d', '7 Days'[\s\S]*label: translateOr\('range_this_month', 'This Month'[\s\S]*label: translateOr\('range_this_year', 'This Year'[\s\S]*label: translateOr\('range_custom', 'Custom'/, 'Dashboard range preset labels should use guarded translations instead of exposing raw keys during language-pack loading')
+// The four range presets live in the preset array; range_custom moved into
+// the pill-label map when the standalone Custom preset chip was removed (Y19,
+// Part 431 -- the shared DateTimeRangePicker Start->End pill is now the custom
+// editor). Each range label is still guarded via translateOr wherever it
+// renders, so assert that directly per key rather than pinning a source-order
+// sequence of `label:` entries -- same rationale as the card labels below,
+// and robust to the harmless extraction/reorder.
+for (const rangeKey of ['range_today', 'range_7d', 'range_this_month', 'range_this_year', 'range_custom']) {
+  assert.match(dashboard, new RegExp(`translateOr\\('${rangeKey}',`), `Dashboard ${rangeKey} label should use a guarded translation instead of exposing the raw key during language-pack loading`)
+}
 // These labels now live in separate reusable dashboard cards after the
 // requested card-order changes. Check each guarded translation directly;
 // requiring a source-order relationship between cards would make this test
@@ -2532,8 +2541,9 @@ assert.match(
 assert.match(
   auditLog,
   // entityFilter joined the flag list with I2's entity ("page") filter
-  // (Part 393) -- the pin tracks the current filter vocabulary.
-  /countActiveFlags\(\[yearFilter !== 'all', monthFilter !== 'all', actionFilter !== 'all', entityFilter !== 'all', userFilter !== 'all', sortDirection !== 'desc', groupMode !== 'time'\]\)/,
+  // (Part 393); the D2-era one-row date-range control then added
+  // Boolean(rangeStart || rangeEnd) -- the pin tracks the current vocabulary.
+  /countActiveFlags\(\[yearFilter !== 'all', monthFilter !== 'all', Boolean\(rangeStart \|\| rangeEnd\), actionFilter !== 'all', entityFilter !== 'all', userFilter !== 'all', sortDirection !== 'desc', groupMode !== 'time'\]\)/,
   'audit log active filter count should avoid temporary filtered boolean arrays',
 )
 assert.doesNotMatch(
@@ -3385,7 +3395,7 @@ assert.match(
 )
 assert.match(
   pos,
-  /const POS_CHECKOUT_TIMEOUT_MS = 20000/,
+  /const POS_CHECKOUT_TIMEOUT_MS = 45000/,
   'POS checkout should use an explicit timeout',
 )
 assert.match(
