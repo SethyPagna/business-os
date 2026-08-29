@@ -951,7 +951,8 @@ deep-linkable tabs.*
   message path runs instead. The before→after detail view already existed
   (auditLogFieldDiff) — untouched. test-audit-log-filters-pure.cjs 17 checks against
   the real 0001 schema. Still open for the D2 era: the one-row date-range control
-  (today's range comes from the year/month period filters).)* Audit UI (inside
+  (today's range comes from the year/month period filters). **[CLAIMED: session
+  c1 — adding the D2 start→end date inputs to AuditLog.tsx now.]**)* Audit UI (inside
   Review & Logs): the same one-row date-range control as
   Products/Inventory (D2), filters by action / page / user, clean multi-option design,
   detail drawer per entry showing before→after payloads where stored.
