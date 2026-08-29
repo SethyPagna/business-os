@@ -1421,7 +1421,11 @@ export default function BackgroundImportTracker() {
       </div>
 
       {expanded ? (
-        <div className="mt-2 grid gap-2">
+        // Many concurrent/queued imports used to grow this list past the
+        // bottom of the screen (the whole fixed widget ran off-viewport).
+        // Cap it and scroll internally instead, so the header/progress stay
+        // put and the job rows scroll within a bounded box (user, Aug 29).
+        <div className="mt-2 grid max-h-[min(60vh,26rem)] gap-2 overflow-y-auto overscroll-contain pr-0.5">
           {visibleJobs.map((job) => {
             const jobStatus = normalizeJobStatus(job)
             const jobProgress = getJobProgressDetails(job, progressLabels)

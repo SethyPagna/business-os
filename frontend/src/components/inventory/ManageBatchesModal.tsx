@@ -357,46 +357,58 @@ export default function ManageBatchesModal({
                     </div>
                   </div>
                 ) : (
-                  <>
-                    <div className="flex items-start justify-between gap-2">
-                      <div className="min-w-0">
-                        <div className="font-semibold text-amber-700 dark:text-amber-200">{batchDisplayLabel(batch, tr('batch', 'Batch'))}</div>
-                        <div className="mt-0.5 text-xs text-gray-500 dark:text-gray-300">{batch.expiry_date || tr('no_expiry', 'No expiry')}</div>
-                        {batch.received_at ? (
-                          // Everyday use shows the DATE only; the day view
-                          // behind this link is where the times live.
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0 flex-1">
+                      <div className="font-semibold text-amber-700 dark:text-amber-200">{batchDisplayLabel(batch, tr('batch', 'Batch'))}</div>
+                      {/* Compact product-card-style meta: received date (drills
+                          to the day view where the times live), expiry and
+                          supplier collapse onto ONE wrapping line instead of a
+                          stack of separate rows (user, Aug 29: "like product
+                          cards ... compact, less rows"). */}
+                      <div className="mt-0.5 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[11px] text-gray-500 dark:text-gray-300">
+                        {[
+                          batch.received_at ? (
+                            <button
+                              type="button"
+                              className="text-blue-600 hover:underline dark:text-blue-300"
+                              onClick={() => setDayDetail(String(batch.received_at || '').slice(0, 10) || null)}
+                            >
+                              {tr('received_on', 'Received', 'បានទទួល')} {fmtDateOnly(String(batch.received_at || '').slice(0, 10))} ›
+                            </button>
+                          ) : null,
+                          <span>{tr('expiry', 'Expiry')} {batch.expiry_date ? fmtDateOnly(batch.expiry_date) : tr('no_expiry', 'No expiry')}</span>,
+                          batch.supplier_name ? <span className="max-w-[9rem] truncate" title={String(batch.supplier_name)}>{batch.supplier_name}</span> : null,
+                          !batch.is_active ? <span className="font-medium text-gray-400">{tr('deactivated', 'Deactivated')}</span> : null,
+                        ].filter(Boolean).map((node, i) => (
+                          <span key={i} className="inline-flex min-w-0 items-center gap-1.5">
+                            {i > 0 ? <span className="text-gray-300 dark:text-gray-600" aria-hidden="true">·</span> : null}
+                            {node}
+                          </span>
+                        ))}
+                      </div>
+                      {batch.notes ? <div className="mt-0.5 truncate text-[11px] text-gray-400" title={batch.notes}>{batch.notes}</div> : null}
+                    </div>
+                    <div className="flex flex-shrink-0 flex-col items-end gap-1">
+                      <div className="whitespace-nowrap text-sm font-medium text-gray-900 dark:text-white">{batch.quantity} {product.unit}</div>
+                      <div className="flex items-center gap-0.5">
+                        <button type="button" className="rounded-lg px-2 py-1 text-xs font-medium text-blue-600 hover:bg-blue-50 dark:text-blue-300 dark:hover:bg-blue-950/30" onClick={() => startEdit(batch)} disabled={isSaving}>
+                          {t('edit') || 'Edit'}
+                        </button>
+                        {batch.is_active ? (
                           <button
                             type="button"
-                            className="mt-0.5 block text-xs text-blue-600 hover:underline dark:text-blue-300"
-                            onClick={() => setDayDetail(String(batch.received_at || '').slice(0, 10) || null)}
+                            className="flex items-center rounded-lg px-1.5 py-1 text-xs font-medium text-red-600 hover:bg-red-50 disabled:opacity-50 dark:text-red-300 dark:hover:bg-red-950/30"
+                            onClick={() => deactivate(batch)}
+                            disabled={isSaving}
+                            title={tr('deactivate', 'Deactivate')}
+                            aria-label={tr('deactivate', 'Deactivate')}
                           >
-                            {tr('received_on', 'Received', 'បានទទួល')}: {fmtDateOnly(String(batch.received_at || '').slice(0, 10))} ›
+                            <Trash2 className="h-3.5 w-3.5" />
                           </button>
                         ) : null}
-                        {batch.notes ? <div className="mt-1 text-xs text-gray-400">{batch.notes}</div> : null}
-                        {!batch.is_active ? <div className="mt-1 text-[11px] font-medium text-gray-400">{tr('deactivated', 'Deactivated')}</div> : null}
-                      </div>
-                      <div className="flex-shrink-0 text-right">
-                        <div className="text-sm font-medium text-gray-900 dark:text-white">{batch.quantity} {product.unit}</div>
                       </div>
                     </div>
-                    <div className="mt-2 flex justify-end gap-1">
-                      <button type="button" className="rounded-lg px-2 py-1 text-xs font-medium text-blue-600 hover:bg-blue-50 dark:text-blue-300 dark:hover:bg-blue-950/30" onClick={() => startEdit(batch)} disabled={isSaving}>
-                        {t('edit') || 'Edit'}
-                      </button>
-                      {batch.is_active ? (
-                        <button
-                          type="button"
-                          className="flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-medium text-red-600 hover:bg-red-50 disabled:opacity-50 dark:text-red-300 dark:hover:bg-red-950/30"
-                          onClick={() => deactivate(batch)}
-                          disabled={isSaving}
-                        >
-                          <Trash2 className="h-3 w-3" />
-                          {isSaving ? (t('saving') || 'Saving...') : tr('deactivate', 'Deactivate')}
-                        </button>
-                      ) : null}
-                    </div>
-                  </>
+                  </div>
                 )}
               </div>
             )

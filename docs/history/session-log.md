@@ -12542,3 +12542,30 @@ productDiscountUx tests + vite build green.
 max = 480.
 
 **Needs deploy.** Frontend-only; ships on the next build.
+
+## Part 482 (Aug 29 2026, session business-os-v1-e4) — compact batch cards + scrollable import widget
+
+**Two user asks (Aug 29), both clean/disjoint frontend files.**
+
+**1. Batch details like product cards, compact, fewer rows (ManageBatchesModal.tsx).**
+Each batch's read view stacked ~5 rows (label, expiry, received link, notes,
+deactivated). Collapsed the expiry / received-date / supplier / deactivated facts
+onto ONE wrapping product-card-style meta line (dot-separated, `flex-wrap`), added the
+lot's `supplier_name` (it was never shown), formatted expiry via fmtDateOnly, kept the
+received-date link that drills to the day view where the times live, and moved Edit +
+a now-icon-only Deactivate up beside the quantity so there is no separate full-width
+action row. Notes stay as a single truncated line. Net ~2 rows instead of ~6.
+
+**2. Import widget runs off-screen with many imports (BackgroundImportTracker.tsx).**
+The expanded job list was an unbounded `grid`, so many concurrent/queued imports grew
+the fixed widget past the bottom of the viewport. Capped it `max-h-[min(60vh,26rem)]`
+with `overflow-y-auto overscroll-contain`, so the header/progress stay put and the job
+rows scroll inside a bounded box.
+
+**Verification.** tsc + check:source (405 files) + batchLabelDisplay test + vite build
+green.
+
+**Parallel sessions.** Two files, both clean/disjoint. Part 482 after re-checking
+max = 481.
+
+**Needs deploy.** Frontend-only; ships on the next build.
