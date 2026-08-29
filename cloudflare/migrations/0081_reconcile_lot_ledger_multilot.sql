@@ -55,6 +55,7 @@
 -- exists".
 
 DROP TABLE IF EXISTS _lot_ledger_reconcile;
+DROP TABLE IF EXISTS _lot_ledger_zero_batches;
 DROP TABLE IF EXISTS _lot_ledger_opening;
 DROP TABLE IF EXISTS _lot_ledger_totals;
 
@@ -137,6 +138,14 @@ FROM (
 JOIN _lot_ledger_opening ol ON ol.product_id = p.product_id
 WHERE p.branch_qty <> p.lot_qty;
 
+-- The final opening-lot UPDATE probes this helper by opening batch + branch,
+-- not by its product + branch primary key. Without this index D1 scans all
+-- ~1,265 planned rows once for every branch_batch_stock row (~26k), which is
+-- exactly the production-scale path that exceeded the CPU limit on the first
+-- 0081 apply attempt.
+CREATE INDEX _lot_ledger_reconcile_open_idx
+  ON _lot_ledger_reconcile (opening_batch_id, branch_id);
+
 -- The opening lot may have no row at that branch yet -- that IS the common
 -- shortfall case (5,927 opening lots live at Shop, 177 at Warehouse, so a
 -- product's other branch usually has none).
@@ -148,20 +157,34 @@ WHERE NOT EXISTS (
   WHERE bbs.batch_id = r.opening_batch_id AND bbs.branch_id = r.branch_id
 );
 
+-- Materialize the tiny set of other lot rows that must be zeroed. The old
+-- correlated IN form rejoined/scanned branch_batch_stock from inside an
+-- UPDATE of that same table; this primary-keyed helper turns the UPDATE into
+-- one indexed existence probe per row.
+CREATE TABLE _lot_ledger_zero_batches (
+  batch_id INTEGER NOT NULL,
+  branch_id INTEGER NOT NULL,
+  PRIMARY KEY (batch_id, branch_id)
+);
+
+INSERT INTO _lot_ledger_zero_batches (batch_id, branch_id)
+SELECT bbs.batch_id, bbs.branch_id
+FROM branch_batch_stock bbs
+JOIN product_batches pb ON pb.id = bbs.batch_id
+JOIN _lot_ledger_reconcile r
+  ON r.product_id = pb.variant_product_id
+ AND r.branch_id = bbs.branch_id
+ AND r.zero_others = 1
+ AND bbs.batch_id <> r.opening_batch_id;
+
 -- Zero the other lots first, only for the pairs that need it, so the opening
 -- lot's target below lands on a ledger that already agrees with it.
 UPDATE branch_batch_stock
 SET quantity = 0, updated_at = datetime('now')
-WHERE branch_batch_stock.batch_id IN (
-  SELECT bbs.batch_id
-  FROM branch_batch_stock bbs
-  JOIN product_batches pb ON pb.id = bbs.batch_id
-  JOIN _lot_ledger_reconcile r
-    ON r.product_id = pb.variant_product_id
-   AND r.branch_id = bbs.branch_id
-   AND r.zero_others = 1
-   AND bbs.batch_id <> r.opening_batch_id
-  WHERE bbs.branch_id = branch_batch_stock.branch_id
+WHERE EXISTS (
+  SELECT 1 FROM _lot_ledger_zero_batches z
+  WHERE z.batch_id = branch_batch_stock.batch_id
+    AND z.branch_id = branch_batch_stock.branch_id
 );
 
 UPDATE branch_batch_stock
@@ -176,5 +199,6 @@ WHERE EXISTS (
 );
 
 DROP TABLE _lot_ledger_reconcile;
+DROP TABLE _lot_ledger_zero_batches;
 DROP TABLE _lot_ledger_opening;
 DROP TABLE _lot_ledger_totals;

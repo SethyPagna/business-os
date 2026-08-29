@@ -165,6 +165,13 @@ check('running it twice changes nothing, and it leaves no helper table behind', 
   assert.strictEqual(leftovers.n, 0, 'the helper table is dropped')
 })
 
+check('production-scale UPDATE probes are indexed instead of correlated full scans', () => {
+  const source = fs.readFileSync(path.join(migrationsDir, MIGRATION), 'utf8')
+  assert.match(source, /CREATE INDEX _lot_ledger_reconcile_open_idx\s+ON _lot_ledger_reconcile \(opening_batch_id, branch_id\)/)
+  assert.match(source, /CREATE TABLE _lot_ledger_zero_batches[\s\S]*PRIMARY KEY \(batch_id, branch_id\)/)
+  assert.doesNotMatch(source, /WHERE branch_batch_stock\.batch_id IN \([\s\S]*WHERE bbs\.branch_id = branch_batch_stock\.branch_id/)
+})
+
 check('every quantity it writes satisfies the CHECK (quantity >= 0) the schema enforces', () => {
   const sqlite = seed()
   applyMigration(sqlite, MIGRATION)
