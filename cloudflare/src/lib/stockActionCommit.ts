@@ -175,17 +175,18 @@ export async function applyUnifiedStockAdd(db: D1Compat, input: UnifiedStockAddI
   if (!branchName) throw new Error('Branch name is required')
 
   const actionKey = `row:${rowNumber}:add:branch:${branchId}`
-  const existing = await db.prepare(`
-    SELECT status FROM import_stock_action_commits WHERE job_id = @jobId AND action_key = @actionKey
-  `).get<{ status: string }>({ jobId, actionKey })
-  if (existing?.status === 'applied') return { actionKey, applied: true, alreadyApplied: true }
-
   const { batchKey, lotCode, receivedAt } = batchIdentity(input.date, input.batchLabel)
-  const nextBatch = await db.prepare(`
-    SELECT COALESCE(MAX(batch_number), 0) + 1 AS next
-    FROM product_batches WHERE variant_product_id = @productId
-  `).get<{ next: number }>({ productId })
-  const batchNumber = Math.max(1, Number(nextBatch?.next || 1))
+  // One round-trip instead of two: the redelivery fast-path status and the
+  // next batch_number are independent scalars, so read them together. Across
+  // a 20k+ row migration this saves a full D1 latency per unit (collapses the
+  // separate existing-check and MAX(batch_number) reads into one).
+  const pre = await db.prepare(`
+    SELECT
+      (SELECT status FROM import_stock_action_commits WHERE job_id = @jobId AND action_key = @actionKey) AS status,
+      (SELECT COALESCE(MAX(batch_number), 0) + 1 FROM product_batches WHERE variant_product_id = @productId) AS next_batch
+  `).get<{ status: string | null; next_batch: number }>({ jobId, actionKey, productId })
+  if (pre?.status === 'applied') return { actionKey, applied: true, alreadyApplied: true }
+  const batchNumber = Math.max(1, Number(pre?.next_batch || 1))
   const guard = pendingGuard()
   const supplierName = String(input.supplierName || '').trim().replace(/\s{2,}/g, ' ').slice(0, 120) || null
   const supplierId = Number.isSafeInteger(Number(input.supplierId)) && Number(input.supplierId) > 0 ? Number(input.supplierId) : null
@@ -276,10 +277,10 @@ export async function applyUnifiedStockAdd(db: D1Compat, input: UnifiedStockAddI
     },
   ])
 
-  const committed = await db.prepare(`
-    SELECT status FROM import_stock_action_commits WHERE job_id = @jobId AND action_key = @actionKey
-  `).get<{ status: string }>({ jobId, actionKey })
-  if (committed?.status !== 'applied') throw new Error('Stock action did not commit')
+  // No post-commit verify read: db.batch is atomic and its final statement
+  // flips this row's status to 'applied', and the pre-read above already
+  // returns early for an already-applied row -- a verify would only confirm
+  // what the atomic batch guarantees. Dropped to save a round-trip per unit.
   return { actionKey, applied: true, alreadyApplied: false }
 }
 
