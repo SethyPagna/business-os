@@ -10644,3 +10644,50 @@ no code dep); messaged the peer to drop them from their pending edit.
 
 **Not done.** Z2/Y12 scoped, Z5/Z8/Z10 with the peer or needing a definition.
 Needs deploy (migrations 0077/0078/0079 + all the frontend changes).
+
+## Part 433 (Aug 29 2026, session business-os-v1-43) — Z8 credit/record-payment; Z10 root-caused (needs a decision)
+
+**Ask.** User set an order: Z8 → Z10 → Z2 → Y12 → Z5, and clarified Z8 ("credit
+is the same as awaiting payment, just click near the payment method to edit
+later") and Z10 ("just make it consistent with stat and branch").
+
+**What changed.**
+- **Z8 (credit = awaiting_payment + edit near the method).** No new status. For
+  an awaiting-payment sale the SaleDetailModal Payment-method field now shows a
+  "Credit — awaiting payment" chip + a Record payment button; clicking it
+  selects the completing status (revealing Y10's payment inputs) and scrolls
+  the status section into view. Records payment → completes, same path as Y10.
+  SaleDetailModal.tsx only; the credit_awaiting_payment lang key was already in
+  HEAD (rode in on session a8's Y17 lang-pack sweep, identical value). tsc
+  clean. Commit c88a9f9a.
+
+**Z10 root-caused, NOT built (needs a user decision).** Measured why the
+Dashboard and Branch stats differ — it is structural, not a bug: (1) the
+Branch/Inventory GET /stats endpoint takes NO date range (all-time) while the
+Dashboard is period-scoped, so the same "Revenue" label shows different numbers
+for any non-all-time period; (2) Branch Revenue subtracts refunds while the
+Dashboard keeps refunds separate. Both already exclude cancelled +
+awaiting_payment. The real fix = period-scope the Branch stats (reuse a8's Y19
+DateTimeRangePicker + a backend date filter), which lands in the F3-HOT
+Inventory.tsx and adds a UI range control — a real feature. Did NOT rush it into
+the hot file mid-F3; surfaced the design decision (own range control? drop the
+Branch refund subtraction?) to the user.
+
+**Parallel sessions.** Heavy coordination with a8 this stretch: they shipped
+Y19 (Dashboard range pill) and Y17 (Sales list customer column), took Y12
+(per-currency change, POS.tsx), and their Y17 commit swept two of my
+uncommitted lang keys (credit_awaiting_payment, status_stock_effect_label) into
+HEAD — benign additive, verified my tree matches, no double-add. I claimed
+SaleDetailModal.tsx (Z8) and Dashboard.tsx (Z10); a8 confirmed hands-off on
+both.
+
+**Verified.** frontend tsc clean (only the 3 peer ProductForm/Products onMinimize
+errors); vite build green; Z8 strings in build. Z8 full flow (make an
+awaiting_payment sale → open detail → Record payment → complete) needs a sale in
+that state to click through end-to-end — the code path reuses the Y10 flow that
+was verified at Part 425.
+
+**Not done / needs the user.** Z10 (the one design decision above), Z2
+(discount decouple — money math, dedicated unit), Z5 (hamburger + colours —
+large). Y12 is a8's. Z7's stats/branch spacing tweak lives in F3-hot
+Inventory.tsx. Needs deploy (migrations 0077/0078/0079 + frontend).

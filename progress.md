@@ -1715,13 +1715,24 @@ other" with the Phase-Y items.*
   Delivery" renamed to "Complete Sale"** with an InfoHint above the button
   ("Stock effect by status") summarizing each status's stock consequence
   (reusing the existing pos_status_*_desc strings) — no inline prose.
-- [ ] Z10. **Dashboard vs Branch stats mismatch + "Reconcile Revenue".**
-  Reconcile the two pages' numbers to the shared kernel (single-source rule),
-  then add "Reconcile Revenue" as an 8th Dashboard stat while Branch keeps
-  its 6 operational stats. NEEDS the user first: the exact definition of
-  "Reconcile Revenue" (what it reconciles against what). NOTE: the Dashboard
-  already has 8 outer stats after Z11, so "Reconcile Revenue" would be a 9th
-  or replace one — clarify against Z11's new layout.
+- [~] Z10. **Dashboard vs Branch stats consistency — user (Aug 29): "Z10 is
+  fine, just make it consistent with stat and branch"** (the "Reconcile
+  Revenue" 8th-stat idea dropped). **ROOT CAUSE MEASURED (Part 433):** the
+  two pages differ STRUCTURALLY, not by bug. (1) SCOPE: the Branch/Inventory
+  GET /stats endpoint (cloudflare/src/routes/inventory.ts, statsQuery in
+  Inventory.tsx) takes NO date range — it is ALL-TIME — while the Dashboard
+  is period-scoped via its range picker; for any period ≠ all-time the same
+  "Revenue" label shows different numbers. (2) DEFINITION: Branch Revenue
+  subtracts refunds (`SUM(si.revenue_usd) − refund`, line ~809) and its info
+  says "after refunds", whereas the Dashboard keeps Revenue before refunds
+  with refunds in the Returns card. Both already exclude cancelled +
+  awaiting_payment (matched). **THE FIX = period-scope the Branch stats**
+  (add a Start→End range — reuse Y19's shared DateTimeRangePicker — + a
+  backend date filter on /stats), which lands in the F3-HOT Inventory.tsx +
+  a UI range control (a real feature, not a tweak). DECISION NEEDED from the
+  user: does the Branch page get its OWN range control (clean, both
+  period-consistent), and should Branch Revenue drop the refund subtraction
+  to match the Dashboard's definition? Not rushed into the hot file mid-F3.
 - [x] Z11. **Revenue stat slimmed + Delivery promoted (Part 427 — SHIPPED,
   needs deploy; user, Aug 29: "revenue stats has too many folded stats
   inside, i want it less... an additional stat outside so it is even").**
