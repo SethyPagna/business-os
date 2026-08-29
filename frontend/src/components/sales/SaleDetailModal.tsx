@@ -1,4 +1,4 @@
-import { useMemo, useState, type MouseEvent } from 'react'
+import { useMemo, useRef, useState, type MouseEvent } from 'react'
 import { createPortal } from 'react-dom'
 import X from 'lucide-react/dist/esm/icons/x.js'
 import { fmtTime } from '../../utils/formatters.ts'
@@ -139,6 +139,16 @@ export default function SaleDetailModal({
   })
   const [payKhr, setPayKhr] = useState('')
   const [payError, setPayError] = useState('')
+  // Z8 (user, Aug 29): "credit is the same as awaiting payment, just that you
+  // can click near the payment method to edit later." The Record-payment
+  // affordance lives on the Payment-method field for an awaiting-payment
+  // sale; clicking it selects the completing status (revealing the payment
+  // inputs) and scrolls this section into view.
+  const statusSectionRef = useRef<HTMLDivElement | null>(null)
+  const startRecordPayment = () => {
+    if (newStatus === 'awaiting_payment' || newStatus === (sale?.sale_status || 'completed')) setNewStatus('completed')
+    setTimeout(() => statusSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 60)
+  }
   const [membershipNumber, setMembershipNumber] = useState(sale?.customer_membership_number || '')
   const [membershipSaving, setMembershipSaving] = useState(false)
   const isKhmer = /[\u1780-\u17FF]/.test(t('cancel') || '')
@@ -260,7 +270,28 @@ export default function SaleDetailModal({
               </div>
               <div className="grid gap-3">
                 <InfoBlock label={t('cashier') || 'Cashier'} value={sale.cashier_name} />
-                <InfoBlock label={t('payment_method') || 'Payment method'} value={sale.payment_method} badge />
+                {/* Z8: an awaiting-payment (credit) sale carries no method yet
+                    -- the field becomes a Record-payment affordance right here
+                    "near the payment method", per the user. */}
+                {currentStatus === 'awaiting_payment' ? (
+                  <div>
+                    <div className="text-xs text-gray-400">{t('payment_method') || 'Payment method'}</div>
+                    <div className="mt-1 flex flex-wrap items-center gap-2">
+                      <span className="rounded-full bg-yellow-100 px-2 py-0.5 text-xs font-medium text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-300">
+                        {translateOr('credit_awaiting_payment', 'Credit — awaiting payment', 'ឥណទាន — រង់ចាំការទូទាត់')}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={startRecordPayment}
+                        className="rounded-lg bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-700 hover:bg-emerald-100 dark:bg-emerald-900/30 dark:text-emerald-300 dark:hover:bg-emerald-900/50"
+                      >
+                        {translateOr('record_payment', 'Record payment', 'កត់ត្រាការទូទាត់')}
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <InfoBlock label={t('payment_method') || 'Payment method'} value={sale.payment_method} badge />
+                )}
                 <InfoBlock label={t('branch') || 'Branch'} value={sale.branch_name} />
                 <InfoBlock label={t('status') || 'Status'} value={getStatusLabel(currentStatus, t)} />
                 <InfoBlock label={t('timezone') || 'Timezone'} value={sale.device_tz} mono />
@@ -461,7 +492,7 @@ export default function SaleDetailModal({
           ) : null}
 
           {!['returned', 'cancelled'].includes(currentStatus) ? (
-            <section className="rounded-xl border border-gray-200 p-3 dark:border-gray-700">
+            <section ref={statusSectionRef} className="rounded-xl border border-gray-200 p-3 dark:border-gray-700">
               <div className="mb-3 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
                 {t('update_status') || 'Update status'}
               </div>
