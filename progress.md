@@ -1544,7 +1544,8 @@ those until that unit commits.*
   compact "Select a member to apply" cue with the explanation behind an
   InfoHint. The delivery paid-by block was already compacted to one row + a
   short fee-effect line in B3 (Part 372), so it stays.
-- [ ] Y12. **POS sales CHANGE: explicit, recordable, per-currency (user
+- [~] Y12 **[CLAIMED: session a8]**. **POS sales CHANGE: explicit, recordable,
+  per-currency (user
   clarified Aug 28 follow-up — "the sales change").** The change given back
   is sometimes KHR + USD mixed, sometimes one currency; the cashier must be
   able to INPUT what was actually handed back (prefilled from the computed
@@ -1701,11 +1702,15 @@ other" with the Phase-Y items.*
   spacing between the stats block and the branch list on the hub — but that's
   in Inventory.tsx/BranchesHubPage (Inventory is F3-hot; do via isolation or
   after F3 lands).
-- [ ] Z8. **POS payment: explicit Credit / Awaiting Payment / Done choices in
-  the payment area**, and for awaiting-payment sales an "Edit Payments"
-  affordance to add/modify payment entries later (Y10 shipped the
-  completion-time entry; this extends to editing and the explicit Credit
-  option — define what Credit records vs awaiting_payment before building).
+- [x] Z8 *(Part 433 — SHIPPED, needs deploy).* **Credit = awaiting_payment +
+  edit-payment-near-the-method.** User clarified (Aug 29): "credit is the same
+  as awaiting payment, just that you can click near the payment method to edit
+  later" — so NO new status. For an awaiting-payment sale the SaleDetailModal
+  Payment-method field shows a 'Credit — awaiting payment' chip + a Record
+  payment button; clicking it selects the completing status (revealing Y10's
+  payment inputs) and scrolls the status section into view. Records payment →
+  completes, same as Y10. SaleDetailModal.tsx only (lang key rode in on a8's
+  Y17 sweep).
 - [x] Z9 *(Part 430 — SHIPPED, needs deploy; verified live).* **POS: "Done -
   Delivery" renamed to "Complete Sale"** with an InfoHint above the button
   ("Stock effect by status") summarizing each status's stock consequence
