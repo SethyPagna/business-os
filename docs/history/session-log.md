@@ -12347,3 +12347,7 @@ tests + vite build green. No test asserted a Branches 'stats' chip.
 gone; file clean). Part 473 taken after re-checking max = 472.
 
 **Needs deploy.** Frontend-only; ships on the next build.
+
+## Part 474 (Aug 29 2026, session business-os-v1-87) — small-screen Products card: VIP price shows number + colour only, no label
+
+renderMobileProductCard (Products.tsx) rendered the VIP price as `Special $X.XX`. Per the user, the default small-screen Products card now shows JUST the number, colour-coded primary/blue, with no text label — the colour already tells it apart from selling (green) and cost (red) on the one-line price row. Also corrected the mislabel: special_price_* IS the VIP price (labelled "VIP Price" elsewhere, e.g. ProductDetailModal), never "Special". Desktop table row untouched. frontend tsc clean, vite build green. Commit 9a310f3e. Products.tsx was clean/disjoint of the active lanes; Part 474 after max=473.
