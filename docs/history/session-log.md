@@ -11118,3 +11118,71 @@ leftover in progress.md via an atomic pathspec commit (`c8bdada2`) before coding
 no peer work absorbed. Part 442 taken after re-checking max = 441.
 
 **Needs deploy.** Frontend-only; ships on the next build.
+
+## Part 443 (Aug 29 2026, session business-os-v1-e4) — Y13/Y14/Y15: Products page density (chip sections, plain search row, sticky fix)
+
+**The three tie together into one Products.tsx render restructure** (they overlap
+in the same toolbar/section region, so they ship as one coherent unit rather than
+three separable commits). Products.tsx only; no other file's behavior changed.
+
+**Y15 — chip-sectioned like Promotions.** Added an `activeProductSection`
+(`'products' | 'stock_changes'`) switcher to the page header, the same pill pattern
+Promotions uses (title left, `inline-flex rounded-xl bg-gray-100 p-0.5` with an
+active `bg-white shadow text-primary-600` tab). The Stock Changes ledger stops being
+a folded `reports` SectionCard at the bottom of the product scroll and becomes its
+own page section — it renders FULL now (it already carries its own view switcher +
+search + date-range filter row, so Y13's "its own more-detailed filter row" was
+already satisfied by the component itself; only a one-line hint is added above it).
+The whole product listing (top pagination bar, sticky search, select-all, bulk
+panels, list surface, alpha rail, bottom pagination) is wrapped in
+`{activeProductSection === 'products' && (…)}`; modals stay outside the wrap. Section
+state is not persisted (matches Promotions).
+
+**Y16 (Products part) rides Y15.** The Manage / History / Add-product header actions
+already lived in the page's top row; the title + switcher were added to the LEFT of
+that same row (actions keep `sm:ml-auto`), so they join the section-chip row instead
+of getting their own toolbar row — exactly what Y16 asks for on the Products page.
+
+**Y13 — kill the "Search & Filters" SectionCard wrapper.** The folding SectionCard
+(kind="search", title, per-user fold state) is gone; the search row is now a plain
+bordered page-level control (SearchInput + Scan + FilterMenu). The "Created" date
+filter moved OUT of the FilterMenu to its own compact row directly below the search
+row — two native `<input type="date">` (from/to, bounded from ≤ to ≤ today) + a Clear
+button, reusing the existing `createdDateFrom/To` state and the real server-side
+batch-received-date semantics. The menu's `activeCount` now subtracts the created
+contribution so the Filters badge only counts what's still IN the menu.
+
+**Y14 — sticky rules.** Only the search+filter row pins now: the select-all / bulk
+toolbar (and the bulk-delete progress bar) moved OUT of the sticky wrapper into
+normal flow, so they scroll away instead of wasting a permanently-pinned row on large
+screens. The sticky wrapper went `top-2` → `top-0` (with `pt-2` inside) so the old
+0.5rem gap — through which a category section header showed above the pinned row — is
+closed; the background now meets the top edge.
+
+**Dead-export flagged, not deleted (Golden Rule 7).** With Created rendered inline,
+`buildCreatedDateFilterSection` in `CreatedDateFilterOptions.tsx` is no longer wired
+(its only caller was Products.tsx). The file is NOT deleted: it is referenced by name
+in explanatory comments across many files — including `cloudflare/src/lib/importEngine.ts`,
+which is another session's ACTIVE lane — so deleting it would dangle those references
+in a file I must not touch. Left in place as the canonical doc of the batch-received-
+date filter contract; flagged here as currently-unwired. Its two now-unused imports
+(`SectionCard`, `buildCreatedDateFilterSection`) were removed from Products.tsx.
+
+**Verification.** `tsc --noEmit` clean, `check:source` parsed all 404 files (JSX
+balance OK), 6 relevant unit suites pass (productMenuHelpers, productFilterHelpers,
+productPageHelpers, productSearchPagination, sectionNavigation, autoMergedFacet),
+`vite build` green (Products bundle emitted). Live click-through DEFERRED: a peer owns
+the dev-server backend on this folder and starting a second vite/wrangler stack risks
+node_modules contention (parallel-sessions protocol) — same "live deferred, static
+gates green" bar as Parts 429/431/439.
+
+**Parallel sessions.** Claimed Y13–Y15 in progress.md before coding; that claim
+commit was swept into a8's Part 440 commit (`2029de81`) via the shared git index —
+recorded here as a ride-along, not rewritten. Coordinated file boundaries with 74
+(who is doing Y20): I own ALL of Products.tsx incl. its Y20 pagination call-site as a
+follow-up; 74 owns the shared `PaginationControls.tsx` + the non-Products list pages.
+My only changed code file is Products.tsx; peers' concurrent edits (Sidebar=a8 Z5,
+Sales/Returns/Fees/contacts-shared=74, importEngine/contacts/system=import session)
+were left untouched. Part 443 taken after re-checking max = 442.
+
+**Needs deploy.** Frontend-only; ships on the next build.

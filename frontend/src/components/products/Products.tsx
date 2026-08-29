@@ -4,7 +4,6 @@
 import { Suspense, useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import type { ReactNode, MouseEvent as ReactMouseEvent } from 'react'
 import { lazyRetry } from '../../utils/lazyImport.ts'
-import SectionCard from '../shared/SectionCard'
 import ChevronLeft from 'lucide-react/dist/esm/icons/chevron-left.js'
 import ChevronRight from 'lucide-react/dist/esm/icons/chevron-right.js'
 import PackageSearch from 'lucide-react/dist/esm/icons/package-search.js'
@@ -121,7 +120,6 @@ import { buildProductSupplierOptions } from './helpers/productSupplierOptions.ts
 import { buildHierarchicalCategoryFilterOptions } from '../shared/CategoryFilterOptions.tsx'
 import { buildAvailabilityFilterSection } from '../shared/AvailabilityFilterOptions.tsx'
 import { buildSearchModeFilterSection } from '../shared/SearchModeFilterOptions.tsx'
-import { buildCreatedDateFilterSection } from './CreatedDateFilterOptions.tsx'
 import { buildAutoMergedFilterSection } from './AutoMergedFilterOptions.tsx'
 import { RESTORE_WORK_EVENT, consumePendingRestore, markRestoreHandled, minimizeWork } from '../../utils/minimizedWork.ts'
 import { buildIssuesFilterSection } from '../shared/IssuesFilterOptions.tsx'
@@ -650,6 +648,10 @@ function ProductsFullEditor() {
   const [promotionRules, setPromotionRules] = useState<PromotionRule[]>([])
   const [createdDateFrom, setCreatedDateFrom] = useState('')
   const [createdDateTo, setCreatedDateTo] = useState('')
+  // Y15: the page is chip-sectioned like Promotions -- a switcher in the
+  // header flips between the product listing and the Stock Changes ledger,
+  // which used to be a folded card at the bottom of the same scroll.
+  const [activeProductSection, setActiveProductSection] = useState<'products' | 'stock_changes'>('products')
   const [productSortDirection, setProductSortDirection] = useState<ProductSortDirection>('name_asc')
   const [search,       setSearch]       = useState('')
   // AND/OR toggle restored (Aug 20 2026), reachable from inside the Filter
@@ -2834,13 +2836,10 @@ function ProductsFullEditor() {
       branchFilter,
       setBranchFilter,
     }),
-    createdSection: buildCreatedDateFilterSection({
-      t,
-      createdDateFrom,
-      setCreatedDateFrom,
-      createdDateTo,
-      setCreatedDateTo,
-    }),
+    // Y13: the "Created" date filter is no longer a menu section -- it moved
+    // to its own row directly below the search row (see the render below).
+    // buildProductFilterSections treats createdSection as optional, so
+    // omitting it here simply drops it from the menu.
     issuesSection: buildIssuesFilterSection({
       t,
       issueFilter,
@@ -3368,12 +3367,37 @@ function ProductsFullEditor() {
 
   return (
     <div className="page-scroll p-3 sm:p-6">
-      {/* Single row at every breakpoint: Manage / History / Add product.
-          Import and Export used to also render as their own buttons here
-          (duplicating what Manage's dropdown already offered) and History
-          used to sit separately in the search row below -- both folded
-          into this one row now, see HeaderActions.tsx. */}
-      <div className="mb-3 flex min-w-0 flex-wrap items-center justify-end gap-2">
+      {/* Page title + section switcher on the left; Manage / History / Add
+          product on the right of the SAME row (Y15/Y16: the header actions
+          join the section-chip row instead of getting their own toolbar
+          row). Import and Export used to also render as their own buttons
+          here (duplicating what Manage's dropdown already offered) and
+          History used to sit separately in the search row below -- both
+          folded into HeaderActions.tsx. */}
+      <div className="mb-3 flex min-w-0 flex-wrap items-center gap-2">
+        <h1 className="shrink-0 text-lg font-semibold text-slate-900 dark:text-slate-100">
+          {t('products') || 'Products'}
+        </h1>
+        {/* Y15: section switcher (Products | Stock Changes), same pill
+            pattern as the Promotions page. Stock Changes stops being a
+            folded card at the bottom of the listing and becomes its own
+            section reached from here. */}
+        <div className="inline-flex shrink-0 rounded-xl bg-gray-100 p-0.5 dark:bg-gray-800">
+          <button
+            type="button"
+            onClick={() => setActiveProductSection('products')}
+            className={`rounded-lg px-3 py-1.5 text-sm font-medium transition-colors ${activeProductSection === 'products' ? 'bg-white text-primary-600 shadow dark:bg-gray-900' : 'text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'}`}
+          >
+            {t('products') || 'Products'}
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveProductSection('stock_changes')}
+            className={`rounded-lg px-3 py-1.5 text-sm font-medium transition-colors ${activeProductSection === 'stock_changes' ? 'bg-white text-primary-600 shadow dark:bg-gray-900' : 'text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'}`}
+          >
+            {tr('stock_change_ledger', 'Stock Changes', 'ការផ្លាស់ប្តូរស្តុក')}
+          </button>
+        </div>
         <div className="w-full min-w-0 overflow-x-auto pb-1 sm:ml-auto sm:w-auto sm:flex-shrink-0 sm:pb-0">
           {/* Each handler is passed only when this role's tier actually
               permits the action -- HeaderActions drops any control whose
@@ -3416,6 +3440,11 @@ function ProductsFullEditor() {
           />
         </div>
       </div>
+
+      {/* Y15: everything below is the "products" listing section; the Stock
+          Changes ledger renders as its own section (see the switcher above)
+          instead of a folded card at the bottom of this same scroll. */}
+      {activeProductSection === 'products' && (<>
 
       {/* Items-per-page / page-number bar -- deliberately NOT part of the
           sticky group below (Aug 11 2026 UI-polish request: pin search /
@@ -3504,37 +3533,24 @@ function ProductsFullEditor() {
           message showed twice on screen at once. Removed; keep only the
           one inside the list surface. */}
 
-      {/* Search bar, select-all, and bulk-action bar all pin to the top of
-          the page's scroll container while scrolling (same Aug 11 2026
-          request as the pagination note above). Grouped into ONE sticky
-          wrapper, rather than three independently-sticky siblings, so
-          there's no need to hand-compute a per-element `top` offset to
-          stack them without overlapping -- position:sticky only needs one
-          offset per stuck region this way; the pieces inside just stack in
-          normal flow. bg-gray-50/dark:bg-gray-900 matches #app-root's
-          background (page-scroll itself is transparent) so list rows
-          scrolling underneath don't show through while this is stuck. */}
-      <div className="sticky top-2 z-30 -mx-1 space-y-2 bg-gray-50/95 pb-2 backdrop-blur dark:bg-gray-900/95 sm:mx-0">
-        {/* Search row: a hard min-w-[19.5rem] row floor used to force a
-            horizontal scrollbar on narrow screens instead of letting
-            SearchInput's own `min-w-0 flex-1` (its default className) do
-            the shrinking it already supports, since every other child
-            here is already shrink-0/icon-only. Same fix as Inventory.tsx's
-            identical row.
-
-            SectionCard debut (N3): the row reads as the page's color-coded
-            "Search & Filters" section, and folding it reclaims vertical
-            space inside this sticky bar — the fold state persists per
-            user. The select-all / bulk toolbar below stays OUTSIDE the
-            card: it must remain visible in select mode regardless of how
-            the search section is folded. */}
-        <SectionCard
-          kind="search"
-          title={t('search_and_filters') || 'Search & Filters'}
-          storageKey="products-search"
-          className="mt-1"
-        >
-          <div className="flex items-center gap-1.5 px-2 py-2">
+      {/* Y14: ONLY the search + filter row pins to the top of the page's
+          scroll container while scrolling. The select-all / bulk-action bar
+          used to sit inside this same sticky wrapper and pinned too, wasting
+          a whole pinned row of height on large screens; it now sits below in
+          normal flow and scrolls away. top-0 (was top-2): the old 0.5rem
+          offset left a gap above the pinned row through which a category
+          section header showed -- the background now meets the top edge.
+          bg-gray-50/dark:bg-gray-900 matches #app-root's background (the
+          page-scroll itself is transparent) so list rows scrolling
+          underneath don't show through while this is stuck. */}
+      <div className="sticky top-0 z-30 -mx-1 bg-gray-50/95 pb-2 pt-2 backdrop-blur dark:bg-gray-900/95 sm:mx-0">
+        {/* Y13: a plain page-level search row (the folding "Search &
+            Filters" SectionCard wrapper was removed). SearchInput's own
+            `min-w-0 flex-1` default handles narrow-screen shrink; every
+            other child here is shrink-0/icon-only. History moved to the
+            header row (ProductsHeaderActions' historySlot); the AND/OR
+            toggle was removed (Aug 19 2026), so searchMode stays 'AND'. */}
+        <div className="flex items-center gap-1.5 rounded-2xl border border-slate-200 bg-white/95 px-2 py-2 shadow-sm dark:border-slate-700 dark:bg-slate-900/85">
             <SearchInput
               id="products-search"
               name="products_search"
@@ -3560,14 +3576,52 @@ function ProductsFullEditor() {
                 competing for room in this already-busy search row. */}
             <FilterMenu
               label={t('filters') || 'Filters'}
-              activeCount={activeFilters}
+              activeCount={activeFilters - (createdDateFrom ? 1 : 0) - (createdDateTo ? 1 : 0)}
               sections={productFilterSections}
               onClear={clearAllFilters}
               onOpenChange={setIsProductFilterMenuOpen}
               mobileIconOnly
             />
           </div>
-        </SectionCard>
+      </div>
+
+      {/* Y13: the "Created" date filter moved OUT of the filter menu to its
+          own row directly below the search row (a real server-side
+          batch-received-date range -- see CreatedDateFilterOptions.tsx,
+          whose section is no longer passed into buildProductFilterSections).
+          Not pinned -- Y14 keeps only the search row sticky. */}
+      <div className="mb-2 flex flex-wrap items-center gap-2 rounded-2xl border border-slate-200 bg-white/95 px-2.5 py-1.5 shadow-sm dark:border-slate-700 dark:bg-slate-900/85">
+        <span className="shrink-0 text-[11px] font-medium text-gray-500 dark:text-gray-400">
+          {tr('created', 'Created')}
+        </span>
+        <input
+          type="date"
+          className="input h-8 min-w-0 flex-1 text-xs sm:flex-none"
+          aria-label={tr('start_date', 'Start Date')}
+          value={createdDateFrom}
+          max={createdDateTo || undefined}
+          onChange={(event) => setCreatedDateFrom(event.target.value)}
+        />
+        <span className="shrink-0 text-xs text-gray-400">{'–'}</span>
+        <input
+          type="date"
+          className="input h-8 min-w-0 flex-1 text-xs sm:flex-none"
+          aria-label={tr('end_date', 'End Date')}
+          value={createdDateTo}
+          min={createdDateFrom || undefined}
+          max={new Date().toISOString().slice(0, 10)}
+          onChange={(event) => setCreatedDateTo(event.target.value)}
+        />
+        {(createdDateFrom || createdDateTo) ? (
+          <button
+            type="button"
+            className="shrink-0 text-[11px] font-medium text-slate-500 underline hover:text-slate-700 dark:text-slate-300 dark:hover:text-slate-100"
+            onClick={() => { setCreatedDateFrom(''); setCreatedDateTo('') }}
+          >
+            {tr('clear', 'Clear')}
+          </button>
+        ) : null}
+      </div>
 
         {bulkDeleteJobStatus && (bulkDeleteJobStatus.status === 'pending' || bulkDeleteJobStatus.status === 'processing') && (
           <div className="bulk-toolbar mb-2 flex items-center gap-3 rounded-2xl border px-3 py-2 text-xs sm:rounded-xl">
@@ -3589,7 +3643,10 @@ function ProductsFullEditor() {
           </div>
         )}
 
-        <div className="bulk-toolbar overflow-hidden rounded-2xl border shadow-sm sm:rounded-xl">
+        {/* Y14: select-all + bulk-action bar -- no longer pinned (it used to
+            sit inside the sticky wrapper above). It scrolls away in normal
+            flow while the search / filter row above stays pinned. */}
+        <div className="bulk-toolbar mb-2 overflow-hidden rounded-2xl border shadow-sm sm:rounded-xl">
           <div className="px-2 py-2">
             <div className={`grid items-center gap-1.5 ${hasSelected ? 'grid-cols-[minmax(0,1fr)_4.9rem]' : 'grid-cols-1'}`}>
                 <label className="inline-flex min-w-0 items-center gap-2 overflow-hidden rounded-2xl border border-slate-200 bg-white/95 px-2.5 py-1.5 text-[11px] font-medium text-slate-700 shadow-sm dark:border-slate-700 dark:bg-slate-900/85 dark:text-slate-100">
@@ -3645,7 +3702,6 @@ function ProductsFullEditor() {
             </div>
           ) : null}
         </div>
-      </div>
 
       {/* Expanded bulk-edit panels -- intentionally OUTSIDE the sticky
           group above: these are full edit forms, not quick-glance controls,
@@ -3944,26 +4000,29 @@ function ProductsFullEditor() {
         className="mt-2"
       />
 
-      {/* D1 (Part 415): the user's Stock Change ledger -- every recorded
-          stock action with its derived running balance, as a folded
-          reports section below the listing (same shape as SuppliersTab's
-          Stock-In Invoices card). Read-only over existing movement
-          history; the section (its own lazy chunk) only loads when
-          opened. Image-only users never reach this component at all (the
-          Products() wrapper routes them to the restricted view), and the
-          endpoint independently requires a real products/inventory tier. */}
-      <SectionCard
-        kind="reports"
-        title={tr('stock_change_ledger', 'Stock Changes', 'ការផ្លាស់ប្តូរស្តុក')}
-        subtitle={tr('stock_change_ledger_hint', 'Every recorded stock action with its running balance', 'រាល់សកម្មភាពស្តុកទាំងអស់ ជាមួយសមតុល្យបន្តបន្ទាប់')}
-        storageKey="products_stock_change_ledger"
-        defaultOpen={false}
-        className="mt-3"
-      >
-        <Suspense fallback={<div className="py-6 text-center text-sm text-gray-400">{t('loading') || 'Loading'}...</div>}>
-          <StockChangeSection t={t} />
-        </Suspense>
-      </SectionCard>
+      </>)}
+
+      {/* D1 (Part 415) / Y15: the user's Stock Change ledger -- every
+          recorded stock action with its derived running balance. It used to
+          be a folded "reports" card at the bottom of the products listing;
+          it is now its own page section (reached from the header switcher),
+          so it renders full instead of collapsed. It carries its own view
+          switcher, search and date-range filter row, so only a one-line
+          hint is added here. Read-only over existing movement history (its
+          own lazy chunk, loaded when the section is first opened). Image-only
+          users never reach this component at all (the Products() wrapper
+          routes them to the restricted view), and the endpoint independently
+          requires a real products/inventory tier. */}
+      {activeProductSection === 'stock_changes' && (
+        <div className="mt-1">
+          <p className="mb-3 text-xs text-gray-500 dark:text-gray-400">
+            {tr('stock_change_ledger_hint', 'Every recorded stock action with its running balance', 'រាល់សកម្មភាពស្តុកទាំងអស់ ជាមួយសមតុល្យបន្តបន្ទាប់')}
+          </p>
+          <Suspense fallback={<div className="py-6 text-center text-sm text-gray-400">{t('loading') || 'Loading'}...</div>}>
+            <StockChangeSection t={t} />
+          </Suspense>
+        </div>
+      )}
 
       {/* Product detail modal */}
       {detailProduct && (

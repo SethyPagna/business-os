@@ -1585,19 +1585,28 @@ those until that unit commits.*
   already renders USD + KHR change additively (confirmed, no Receipt edit).
   New order fields changeGivenUsd/khr; 4 en+km keys. Footprint constants.ts +
   POS.tsx + lang. tsc + build green.
-- [~] Y13 **[CLAIMED: session e4]**. **Products page: kill the "Search & Filters" SectionCard wrapper**
-  (screenshot 2). Search row becomes a plain page-level control (no folded
-  card, no wrapper title); the "Created" filter moves OUT of the filter menu to
-  sit below the search row; when Stock Changes becomes a section (Y15) it gets
-  its own, more-detailed filter row. (Products.tsx now clean post-F3, per Part 439.)
-- [~] Y14 **[CLAIMED: session e4]**. **Sticky rules on Products:** only the search+filter row pins on
-  scroll — the select-all row must NOT pin; and remove the gap above the pinned
-  row (a category header currently shows through between the top edge and the
-  pinned search row).
-- [~] Y15 **[CLAIMED: session e4]**. **Products page becomes chip-sectioned like Promotions:** page title
-  left, section switcher (Products | Stock Changes | …) — Stock Changes stops
-  being an inline card on the same scroll (screenshot 1) and becomes its own
-  section.
+- [x] Y13 *(Part 443 — SHIPPED, needs deploy; session e4).* **Products page: kill the "Search & Filters" SectionCard wrapper.**
+  The folding SectionCard (title + per-user fold state) is gone; the search row is a
+  plain bordered page-level control (SearchInput + Scan + FilterMenu). The "Created"
+  date filter moved OUT of the FilterMenu to its own compact row directly below the
+  search row (two native date inputs from ≤ to ≤ today + Clear, reusing the existing
+  server-side batch-received-date state); the menu's activeCount subtracts Created so
+  the badge only counts what is still IN the menu. Stock Changes' own filter row rides
+  Y15. Note: `buildCreatedDateFilterSection` (CreatedDateFilterOptions.tsx) is now an
+  unwired export — kept, not deleted, because it is doc-referenced by name across many
+  files incl. importEngine.ts (a peer's active lane); flagged in Part 443.
+- [x] Y14 *(Part 443 — SHIPPED, needs deploy; session e4).* **Sticky rules on Products:** only the search+filter
+  row pins now — the select-all / bulk toolbar (and bulk-delete progress) moved OUT of
+  the sticky wrapper into normal flow, so they scroll away. Sticky wrapper `top-2` →
+  `top-0` (+ inner `pt-2`) closes the 0.5rem gap through which a category header showed
+  above the pinned row.
+- [x] Y15 *(Part 443 — SHIPPED, needs deploy; session e4).* **Products page becomes chip-sectioned like Promotions:**
+  a header switcher (`activeProductSection`) flips Products | Stock Changes, same pill
+  pattern as Promotions (title left, actions ride the same row — Y16's Products part).
+  Stock Changes stops being a folded card at the bottom of the product scroll and
+  renders FULL as its own section (it already carries its own view switcher + search +
+  date-range filter). tsc + check:source + 6 unit suites + vite build all green; live
+  click-through deferred (peer owns the dev-server backend).
 - [ ] Y16. **History + Manage buttons join the section-chip row** (not their own
   toolbar row) on: Sales, Branches, Contacts, Settings, Library, Review & Logs.
   (Products' equivalent rides Y15.)
