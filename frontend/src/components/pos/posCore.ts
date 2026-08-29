@@ -511,3 +511,63 @@ export function buildVariantOptionLabels(
     : (priceVaries ? 'Price' : 'Option')
   return { stepTitle, byId }
 }
+
+// ---- Checkout result + guardrails -------------------------------------------
+
+export type SaleCreateResult =
+  | { id?: string | number | null; error?: string | null; success?: boolean }
+  | null
+  | undefined
+
+// Was the sale actually recorded by the server?
+//
+// The create endpoint returns the SALE itself -- { id, receiptNumber, ... } on
+// a fresh sale, { id, receiptNumber, duplicate } on a client_request_id dedupe
+// hit -- and NEITHER carries a top-level `success` flag. Only the offline-queue
+// path adds { success: true }. A real server error is a REJECTED promise from
+// apiFetch (non-2xx throws), so it never reaches this predicate at all.
+//
+// The old check was `if (result.success)`, which is undefined on every online
+// sale -- so a committed sale was treated as a failure: a generic error toast,
+// no receipt, the order left open. That is the "POS shows an error but the sale
+// still went through" report. A sale is recorded when the response came back
+// with an id (or an explicit success) and carries no error.
+export function isSaleRecorded(result: SaleCreateResult): boolean {
+  if (!result || typeof result !== 'object') return false
+  if (result.error) return false
+  if (result.success === true) return true
+  return result.id != null && result.id !== ''
+}
+
+export type CheckoutCartLine = {
+  name?: string | null
+  quantity?: unknown
+  applied_price_usd?: unknown
+}
+
+export type CheckoutBlocker = { code: 'empty_cart' | 'invalid_quantity' | 'invalid_price' | 'invalid_total'; itemName?: string }
+
+// Hard, unambiguous blockers that must stop a checkout before it is sent,
+// regardless of sale status. Deliberately narrow so it never blocks a
+// legitimate sale: a $0 line (a giveaway or a fully-discounted promo) is
+// allowed; only a genuinely broken line -- a non-positive/NaN quantity, a
+// negative/NaN price -- or a negative/NaN grand total is rejected. Returns the
+// FIRST blocking issue found, or null when the cart is safe to submit. Paired
+// with the success predicate above, this closes both directions of the report:
+// an errored checkout never records a sale, and a recorded sale never shows an
+// error.
+export function findCheckoutBlocker(
+  cart: readonly CheckoutCartLine[] = [],
+  { totalUsd = 0 }: { totalUsd?: unknown } = {},
+): CheckoutBlocker | null {
+  if (!Array.isArray(cart) || cart.length === 0) return { code: 'empty_cart' }
+  for (const item of cart) {
+    const qty = Number(item?.quantity)
+    if (!Number.isFinite(qty) || qty <= 0) return { code: 'invalid_quantity', itemName: item?.name || undefined }
+    const price = Number(item?.applied_price_usd)
+    if (!Number.isFinite(price) || price < 0) return { code: 'invalid_price', itemName: item?.name || undefined }
+  }
+  const total = Number(totalUsd)
+  if (!Number.isFinite(total) || total < 0) return { code: 'invalid_total' }
+  return null
+}

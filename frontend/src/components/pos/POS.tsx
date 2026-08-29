@@ -47,6 +47,8 @@ import {
   applyManualDiscount,
   computeExpiryStatus,
   repricePromotionCartLines,
+  isSaleRecorded,
+  findCheckoutBlocker,
   type ManualDiscountType,
 } from './posCore.ts'
 import { promotionBadgeForProduct, evaluatePromotionPricing, type PromotionRule } from '../../utils/promotionRules.ts'
@@ -2449,6 +2451,18 @@ export default function POS() {
 
   const handleCheckout = async (saleStatus = 'completed') => {
     if (active.cart.length === 0)        return notify(t('cart_empty'), 'error')
+    // Guardrail: a genuinely broken line (non-positive/NaN quantity, negative/
+    // NaN price) or a negative grand total must never be submitted. A $0 line
+    // stays allowed on purpose (a giveaway or a fully-discounted promo).
+    const cartBlocker = findCheckoutBlocker(active.cart, { totalUsd })
+    if (cartBlocker) {
+      const blockerMessage = cartBlocker.code === 'invalid_quantity'
+        ? `${posCopy('Invalid quantity - review the cart')}${cartBlocker.itemName ? `: ${cartBlocker.itemName}` : ''}`
+        : cartBlocker.code === 'invalid_price'
+          ? `${posCopy('Invalid price - review the cart')}${cartBlocker.itemName ? `: ${cartBlocker.itemName}` : ''}`
+          : posCopy('This sale total is invalid. Review the cart before completing.')
+      return notify(blockerMessage, 'error')
+    }
     // Y10: an awaiting-payment sale is exactly the "decide the payment
     // later on the Sales page" flow -- requiring the full amount (and with
     // it a payment method) up front defeated it. Paid statuses keep the
@@ -2586,7 +2600,12 @@ export default function POS() {
         'Create POS sale',
         POS_CHECKOUT_TIMEOUT_MS,
       )
-      if (result.success) {
+      // The server returns the sale itself ({ id, receiptNumber, ... }) with no
+      // top-level success flag, so the old raw success-flag check treated every
+      // committed online sale as a failure -- an error toast, no receipt, the
+      // order left open, while the sale had in fact landed. isSaleRecorded reads
+      // the real signal: an id (or an explicit success) and no error.
+      if (isSaleRecorded(result)) {
         checkoutRequestIdsRef.current.delete(orderKey)
         const receiptNumber = result.receiptNumber || result.receipt_number || `RCP-${Date.now()}`
         setReceiptQueue(q => [...q, { ...saleData, id: result.id, receiptNumber, created_at: new Date().toISOString() }])

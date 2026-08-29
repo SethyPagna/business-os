@@ -9,9 +9,11 @@ import { buildVariantOptionLabels,
   computeCartLineSavings,
   computeExpiryStatus,
   findMatchingCartLineIndex,
+  findCheckoutBlocker,
   getCartLineId,
   getVariantChoices,
   getVariantRootProduct,
+  isSaleRecorded,
   resolveCartPriceValues,
 } from '../src/components/pos/posCore.ts'
 
@@ -385,3 +387,85 @@ await runTest('buildVariantOptionLabels tolerates empty/invalid input', () => {
   assert.equal(result.byId.size, 0)
   assert.equal(result.stepTitle, 'Option')
 })
+
+// ---------------------------------------------------------------------------
+// isSaleRecorded -- did the checkout actually record a sale?
+// ---------------------------------------------------------------------------
+// The create endpoint returns the sale itself ({ id, receiptNumber, ... }) with
+// NO top-level `success` on the online path; only the offline queue adds one,
+// and real server errors are thrown (rejected), never returned. The old
+// `if (result.success)` therefore treated every committed online sale as a
+// failure -- the "POS shows an error but the sale still went through" report.
+await runTest('isSaleRecorded: an online create response (id, no success flag) counts as recorded', () => {
+  assert.equal(isSaleRecorded({ id: 42, receiptNumber: 'RCP-1' } as never), true)
+  assert.equal(isSaleRecorded({ id: '42' } as never), true)
+})
+
+await runTest('isSaleRecorded: a client_request_id dedupe hit (id + duplicate) counts as recorded', () => {
+  assert.equal(isSaleRecorded({ id: 42, receiptNumber: 'RCP-1', duplicate: true } as never), true)
+})
+
+await runTest('isSaleRecorded: an offline-queued sale (explicit success, negative local id) counts as recorded', () => {
+  assert.equal(isSaleRecorded({ success: true, queued: true, id: -1730000000000 } as never), true)
+})
+
+await runTest('isSaleRecorded: an error response is NOT recorded, even if an id rode along', () => {
+  assert.equal(isSaleRecorded({ error: 'boom' } as never), false)
+  assert.equal(isSaleRecorded({ error: 'boom', id: 42 } as never), false)
+})
+
+await runTest('isSaleRecorded: empty / missing / id-less responses are NOT recorded', () => {
+  assert.equal(isSaleRecorded(null), false)
+  assert.equal(isSaleRecorded(undefined), false)
+  assert.equal(isSaleRecorded({} as never), false)
+  assert.equal(isSaleRecorded({ id: null } as never), false)
+  assert.equal(isSaleRecorded({ id: '' } as never), false)
+})
+
+// ---------------------------------------------------------------------------
+// findCheckoutBlocker -- hard guardrails that stop a broken sale before submit
+// ---------------------------------------------------------------------------
+await runTest('findCheckoutBlocker: a normal cart is clear to submit', () => {
+  assert.equal(findCheckoutBlocker([{ name: 'A', quantity: 2, applied_price_usd: 5 }], { totalUsd: 10 }), null)
+})
+
+await runTest('findCheckoutBlocker: an empty cart is blocked', () => {
+  assert.equal(findCheckoutBlocker([], { totalUsd: 0 })?.code, 'empty_cart')
+})
+
+await runTest('findCheckoutBlocker: a non-positive or NaN quantity is blocked (with the item name)', () => {
+  assert.deepEqual(findCheckoutBlocker([{ name: 'Serum', quantity: 0, applied_price_usd: 5 }], { totalUsd: 0 }), { code: 'invalid_quantity', itemName: 'Serum' })
+  assert.equal(findCheckoutBlocker([{ name: 'Serum', quantity: -1, applied_price_usd: 5 }], { totalUsd: 0 })?.code, 'invalid_quantity')
+  assert.equal(findCheckoutBlocker([{ name: 'Serum', quantity: Number.NaN, applied_price_usd: 5 }], { totalUsd: 0 })?.code, 'invalid_quantity')
+})
+
+await runTest('findCheckoutBlocker: a negative or NaN price is blocked', () => {
+  assert.equal(findCheckoutBlocker([{ name: 'Serum', quantity: 1, applied_price_usd: -1 }], { totalUsd: 0 })?.code, 'invalid_price')
+  assert.equal(findCheckoutBlocker([{ name: 'Serum', quantity: 1, applied_price_usd: Number.NaN }], { totalUsd: 0 })?.code, 'invalid_price')
+})
+
+await runTest('findCheckoutBlocker: a $0 line is ALLOWED (giveaway / fully-discounted promo)', () => {
+  assert.equal(findCheckoutBlocker([{ name: 'Freebie', quantity: 1, applied_price_usd: 0 }], { totalUsd: 0 }), null)
+})
+
+await runTest('findCheckoutBlocker: a negative or NaN grand total is blocked', () => {
+  assert.equal(findCheckoutBlocker([{ name: 'A', quantity: 1, applied_price_usd: 5 }], { totalUsd: -5 })?.code, 'invalid_total')
+  assert.equal(findCheckoutBlocker([{ name: 'A', quantity: 1, applied_price_usd: 5 }], { totalUsd: Number.NaN })?.code, 'invalid_total')
+})
+
+// ---------------------------------------------------------------------------
+// Wiring: POS.tsx must USE the guardrails, not the old raw success flag
+// ---------------------------------------------------------------------------
+await runTest('POS checkout uses isSaleRecorded and the cart blocker, not `result.success`', () => {
+  const pos = fs.readFileSync(new URL('../src/components/pos/POS.tsx', import.meta.url), 'utf8')
+  assert.match(pos, /if \(isSaleRecorded\(result\)\)/, 'the success branch must gate on isSaleRecorded')
+  assert.doesNotMatch(pos, /if \(result\.success\)/, 'the broken raw success check must be gone')
+  assert.match(pos, /findCheckoutBlocker\(active\.cart/, 'the pre-submit cart guardrail must be wired in')
+})
+
+if (failed > 0) {
+  process.exitCode = 1
+  console.error(`\n${failed} posCore test(s) failed`)
+} else {
+  console.log('\nAll posCore tests passed')
+}
