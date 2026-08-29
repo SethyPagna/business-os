@@ -1348,22 +1348,25 @@ function buildSalesSearchWhere(query: Record<string, string>, params: Record<str
   if (!groups.length) return undefined
   const mode = String(query.searchMode || query.search_mode || 'AND').toUpperCase() === 'OR' ? 'OR' : 'AND'
 
-  const flatColumns = [
-    's.receipt_number',
-    's.cashier_name',
-    's.customer_name',
-    's.customer_phone',
-    's.branch_name',
-    's.payment_method',
-    's.notes',
-    "COALESCE(c.membership_number, '')",
-  ]
-  const itemColumns = [
-    'sis.product_name',
-    "COALESCE(sis.sku, '')",
-    "COALESCE(sip.barcode, '')",
-    "COALESCE(sip.brand, '')",
-  ]
+  // Keep one shallow haystack per row context. Passing every raw column to
+  // buildLikeAliasClause with its default normalization repeats the full
+  // ~70-REPLACE diacritic expression for every column and every word. At
+  // production history size D1 rejected even an ordinary product-name
+  // search with `SQLITE_TOOBIG` before it could return a row. Query words
+  // are already normalized/tokenized above; punctuation variants still
+  // work because each normalized word is searched independently. Product
+  // name/brand also include their write-time-normalized catalog columns.
+  const flatHaystack = `(
+    COALESCE(s.receipt_number, '') || ' ' || COALESCE(s.cashier_name, '') || ' ' ||
+    COALESCE(s.customer_name, '') || ' ' || COALESCE(s.customer_phone, '') || ' ' ||
+    COALESCE(s.branch_name, '') || ' ' || COALESCE(s.payment_method, '') || ' ' ||
+    COALESCE(s.notes, '') || ' ' || COALESCE(c.membership_number, '')
+  )`
+  const itemHaystack = `(
+    COALESCE(sis.product_name, '') || ' ' || COALESCE(sis.sku, '') || ' ' ||
+    COALESCE(sip.barcode, '') || ' ' || COALESCE(sip.brand, '') || ' ' ||
+    COALESCE(sip.name_normalized, '') || ' ' || COALESCE(sip.brand_compact, '')
+  )`
 
   let groupIndex = 0
   const groupClauses = groups.map((words) => {
@@ -1371,8 +1374,8 @@ function buildSalesSearchWhere(query: Record<string, string>, params: Record<str
     const wordClauses = words.map((word) => {
       const keyBase = `srch${groupIndex}_${wordIndex}`
       wordIndex += 1
-      const flatClause = buildLikeAliasClause(word, flatColumns, params, `${keyBase}_f`)
-      const itemClause = buildLikeAliasClause(word, itemColumns, params, `${keyBase}_i`)
+      const flatClause = buildLikeAliasClause(word, [flatHaystack], params, `${keyBase}_f`, true)
+      const itemClause = buildLikeAliasClause(word, [itemHaystack], params, `${keyBase}_i`, true)
       return `(${flatClause} OR EXISTS (
         SELECT 1 FROM sale_items sis
         LEFT JOIN products sip ON sip.id = sis.product_id
@@ -1551,8 +1554,9 @@ app.get('/', async (c) => {
 // aggregate over every matching row, not just the page that was fetched.
 app.get('/stats', async (c) => {
   const query = c.req.query()
+  const user = c.get('user')
   // Matches GET / above -- same 'sales'-gated data, just aggregated.
-  if (!hasPermission(c.get('user'), 'sales')) {
+  if (!hasPermission(user, 'sales')) {
     return c.json({ error: 'You do not have permission to perform this action' }, 403)
   }
   const db = getDb(c.env)
@@ -1562,6 +1566,37 @@ app.get('/stats', async (c) => {
   if (query.startDate) { where.push('date(s.created_at) >= @startDate'); params.startDate = query.startDate }
   if (query.endDate) { where.push('date(s.created_at) <= @endDate'); params.endDate = query.endDate }
   if (query.cashier) { where.push('s.cashier_name LIKE @cashier'); params.cashier = `%${query.cashier}%` }
+  if (query.userId) {
+    const permissions = (() => { try { return JSON.parse(user?.permissions || '{}') } catch { return {} } })()
+    const isAdmin = user?.username === 'admin' || permissions?.all === true
+    if (!isAdmin) return c.json({ error: 'Administrator access required for cashier user filters.' }, 403)
+    const userIds = String(query.userId).split(',').map((v) => v.trim()).filter(Boolean)
+    if (userIds.length === 1) {
+      where.push('s.cashier_id = @userId')
+      params.userId = Number(userIds[0]) || userIds[0]
+    } else if (userIds.length > 1) {
+      const keys = userIds.map((id, index) => {
+        const key = `userId${index}`
+        params[key] = Number(id) || id
+        return `@${key}`
+      })
+      where.push(`s.cashier_id IN (${keys.join(', ')})`)
+    }
+  }
+  if (query.status) {
+    const statuses = String(query.status).split(',').map((v) => v.trim()).filter(Boolean)
+    if (statuses.length === 1) {
+      where.push('s.sale_status = @status')
+      params.status = statuses[0]
+    } else if (statuses.length > 1) {
+      const keys = statuses.map((status, index) => {
+        const key = `status${index}`
+        params[key] = status
+        return `@${key}`
+      })
+      where.push(`s.sale_status IN (${keys.join(', ')})`)
+    }
+  }
   if (query.branchId) {
     where.push('(s.branch_id = @branchId OR EXISTS (SELECT 1 FROM sale_items sif WHERE sif.sale_id = s.id AND sif.branch_id = @branchId))')
     params.branchId = query.branchId
@@ -1569,55 +1604,56 @@ app.get('/stats', async (c) => {
   const searchClause = buildSalesSearchWhere(query, params)
   if (searchClause) where.push(searchClause)
 
-  // buildSalesSearchWhere's item-side clause references `c.membership_number`
-  // via the flat-columns list, so this query needs the same customers join
-  // GET / already has -- without it, a search including a membership-number
-  // term would silently 500 (unknown column c.membership_number) instead of
-  // just finding zero matches, and revenue stats would disagree with the
-  // list view for that exact query shape (the drift risk this shared
-  // function was written to prevent in the first place).
-  const rows = await db.prepare(`
-    SELECT s.id, s.sale_status, s.total_usd
+  // ONE aggregate, not "read every matching row, then chunk a refund
+  // lookup over their ids". The old shape pulled the entire result set
+  // into the Worker and then issued a sequential D1 statement per 100
+  // sale ids (chunkForBinding caps an IN list at D1's 100 bound
+  // parameters), so the page's own unfiltered header -- the request the
+  // Sales page fires on load -- cost ~150 round trips against production's
+  // 14.9k receipts for three numbers SQLite computes in a single pass.
+  // Refunds join as a PRE-AGGREGATED derived table so a sale carrying two
+  // returns still subtracts once, exactly as the per-sale Map did.
+  //
+  // buildSalesSearchWhere's flat clause references `c.membership_number`,
+  // so this query needs the same customers join GET / already has --
+  // without it, a search including a membership-number term would silently
+  // 500 (unknown column c.membership_number) instead of just finding zero
+  // matches, and revenue stats would disagree with the list view for that
+  // exact query shape (the drift risk buildSalesSearchWhere exists to
+  // prevent in the first place).
+  //
+  // COALESCE(NULLIF(s.sale_status, ''), 'completed') is the SQL spelling of
+  // the JS `sale_status || 'completed'` it replaces: BOTH an empty string
+  // and NULL mean completed, so a blank status keeps counting as revenue
+  // rather than silently dropping out of the total. A plain COALESCE alone
+  // would leave '' unmatched and quietly lose those sales.
+  const totals = await db.prepare(`
+    SELECT
+      COUNT(*) AS total_count,
+      COALESCE(SUM(CASE WHEN COALESCE(NULLIF(s.sale_status, ''), 'completed') NOT IN ('cancelled', 'awaiting_payment')
+        THEN COALESCE(s.total_usd, 0) - COALESCE(r.refund_usd, 0) ELSE 0 END), 0) AS revenue_usd,
+      COALESCE(SUM(CASE WHEN COALESCE(NULLIF(s.sale_status, ''), 'completed') = 'awaiting_payment'
+        THEN COALESCE(s.total_usd, 0) ELSE 0 END), 0) AS pending_revenue_usd
     FROM sales s
     LEFT JOIN customers c ON c.id = s.customer_id
+    LEFT JOIN (
+      SELECT sale_id, SUM(total_refund_usd) AS refund_usd
+      FROM returns
+      WHERE COALESCE(status, 'completed') != 'cancelled' AND COALESCE(return_scope, 'customer') = 'customer'
+      GROUP BY sale_id
+    ) r ON r.sale_id = s.id
     WHERE ${where.join(' AND ')}
-  `).all<{ id: number; sale_status: string | null; total_usd: number | null }>(params)
+  `).get<{ total_count: number; revenue_usd: number; pending_revenue_usd: number }>(params)
 
-  if (rows.length === 0) {
-    return c.json({ total_count: 0, revenue_usd: 0, pending_revenue_usd: 0, truncated_in_list: false })
-  }
-
-  const revenueSaleIds = rows
-    .filter((r) => !['cancelled', 'awaiting_payment'].includes(r.sale_status || 'completed'))
-    .map((r) => r.id)
-  // This list is EVERY matching sale (no LIMIT on the query above), so it
-  // is unbounded by construction -- chunked, per-sale aggregate.
-  const refundRows = await selectInChunks(revenueSaleIds, 0, (chunk) => db.prepare(`
-    SELECT sale_id, COALESCE(SUM(total_refund_usd), 0) AS refund_usd
-    FROM returns
-    WHERE sale_id IN (${chunk.map(() => '?').join(',')}) AND COALESCE(status, 'completed') != 'cancelled' AND COALESCE(return_scope, 'customer') = 'customer'
-    GROUP BY sale_id
-  `).all<{ sale_id: number; refund_usd: number }>(chunk))
-  const refundBySale = new Map(refundRows.map((r) => [r.sale_id, r.refund_usd || 0]))
-  const rowsById = new Map(rows.map((r) => [r.id, r]))
-
-  const revenueUsd = revenueSaleIds.reduce((sum, id) => {
-    const row = rowsById.get(id)
-    const refund = refundBySale.get(id) || 0
-    return sum + ((row?.total_usd || 0) - refund)
-  }, 0)
-  const pendingRevenueUsd = rows
-    .filter((r) => (r.sale_status || 'completed') === 'awaiting_payment')
-    .reduce((sum, r) => sum + (r.total_usd || 0), 0)
-
+  const totalCount = Number(totals?.total_count) || 0
   const listLimit = Math.min(Number.parseInt(String(query.limit || '100'), 10) || 100, 500)
   return c.json({
-    total_count: rows.length,
-    revenue_usd: round2(revenueUsd),
-    pending_revenue_usd: round2(pendingRevenueUsd),
+    total_count: totalCount,
+    revenue_usd: round2(Number(totals?.revenue_usd) || 0),
+    pending_revenue_usd: round2(Number(totals?.pending_revenue_usd) || 0),
     // Tells the caller whether the list endpoint (with the same filters)
     // would have been cut off, so the UI can show "N+ more not shown" etc.
-    truncated_in_list: rows.length > listLimit,
+    truncated_in_list: totalCount > listLimit,
   })
 })
 
