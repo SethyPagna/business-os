@@ -155,6 +155,7 @@ export default function ManageBatchesModal({
         expiryDate: draft.expiryDate || null,
         receivedAt: draft.receivedAt || null,
         notes: draft.notes.trim() || null,
+        expectedUpdatedAt: batch.updated_at ?? null,
       })
       if (res?.success === false) {
         notify((res as any)?.error || tr('update_failed', 'Update failed'), 'error')

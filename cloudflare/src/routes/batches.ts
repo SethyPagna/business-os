@@ -8,6 +8,7 @@ import { bumpVersion } from '../lib/cache'
 import { getTrackedProductIds, listBatchesForProduct, receiveBatchStock } from '../lib/productBatches'
 import { listOpenDamagedLots } from '../lib/returnsStock'
 import { dateToBatchCode, normalizeToIsoDate } from '../lib/batchCode'
+import { assertUpdatedAtMatch, getExpectedUpdatedAt, writeConflictResponse, WriteConflictError } from '../lib/conflictControl'
 import type { Env } from '../index'
 
 // Batch / expiry-date tracking -- schema notes and design rationale live in
@@ -204,8 +205,21 @@ app.patch('/:id', async (c) => {
   const body = await c.req.json<{ expiry_date?: string | null; notes?: string | null; is_active?: boolean; received_at?: string | null }>()
     .catch(() => ({} as { expiry_date?: string | null; notes?: string | null; is_active?: boolean; received_at?: string | null }))
 
-  const existing = await db.prepare('SELECT id FROM product_batches WHERE id = ?').get<{ id: number }>([id])
+  const existing = await db.prepare('SELECT id, updated_at FROM product_batches WHERE id = ?').get<{ id: number; updated_at: string | null }>([id])
   if (!existing) return c.json({ error: 'Batch not found' }, 404)
+
+  // Optimistic-concurrency guard, the same one products/contacts/sales use.
+  // No-op when the editor sends no token; a stale token means someone else
+  // changed this lot first, so reject instead of silently clobbering it.
+  try {
+    assertUpdatedAtMatch('batch', existing, getExpectedUpdatedAt(body as Record<string, unknown>))
+  } catch (error) {
+    if (error instanceof WriteConflictError) {
+      const { body: conflictBody, status } = writeConflictResponse(error)
+      return c.json(conflictBody, status)
+    }
+    throw error
+  }
 
   const updates: string[] = []
   const params: Record<string, unknown> = { id }

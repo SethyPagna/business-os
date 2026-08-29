@@ -18,6 +18,7 @@ import { audit } from '../lib/audit'
 import { findDuplicateProductGroups } from '../lib/productIdentity'
 import { attachBatchCounts } from '../lib/productBatches'
 import { maybeQueueForReview } from '../lib/reviewGate'
+import { assertUpdatedAtMatch, getExpectedUpdatedAt, writeConflictResponse, WriteConflictError } from '../lib/conflictControl'
 import { broadcast } from '../durable-objects/broadcastHub'
 import { createBulkDeleteJob, getBulkDeleteJob, reapStalledBulkDeleteJobs } from '../lib/bulkDeleteEngine'
 import { ADMIN_MAX_IMAGES_PER_PRODUCT, MAX_IMAGES_PER_PRODUCT } from '../lib/importImageMatch'
@@ -1413,6 +1414,32 @@ app.put('/:id', async (c) => {
   if (getActionTier(user, 'products', 'edit') === 'none' && !isImageOnlyEdit) {
     return c.json({ error: 'You do not have permission to perform this action' }, 403)
   }
+
+  // Optimistic-concurrency guard, the same one every other editable entity
+  // enforces (contacts/sales/branches/notes/... via conflictControl). The
+  // client (productWriteTransport.updateProduct) already sends an
+  // expectedUpdatedAt on every edit; products were the sole entity whose
+  // server handler discarded it (PRODUCT_SKIP_KEYS) and never checked it,
+  // so two people editing the same product last-write-wins silently. Reject
+  // a stale edit before the review-queue gate so it never even queues.
+  // No-op when the client sends no token, so token-less/bulk writes are
+  // unaffected; a missing row surfaces as a 'deleted' conflict.
+  const expectedProductUpdatedAt = getExpectedUpdatedAt(body)
+  if (expectedProductUpdatedAt) {
+    const currentForConflict = await getDb(c.env)
+      .prepare('SELECT updated_at FROM products WHERE id = @id')
+      .get<{ updated_at: string | null }>({ id })
+    try {
+      assertUpdatedAtMatch('product', currentForConflict, expectedProductUpdatedAt)
+    } catch (error) {
+      if (error instanceof WriteConflictError) {
+        const { body: conflictBody, status } = writeConflictResponse(error)
+        return c.json(conflictBody, status)
+      }
+      throw error
+    }
+  }
+
   const imageLimitError = await validateImageGalleryPayload(c.env, user, body, id)
   if (imageLimitError) {
     return c.json({

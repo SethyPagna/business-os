@@ -53,6 +53,10 @@ export type ProductBatchRow = {
   // not here.
   supplier_id: number | null
   supplier_name: string | null
+  // Optimistic-concurrency token: the lot's last-modified stamp, surfaced on
+  // every list read so an editor can echo it back and the server can reject a
+  // stale write (see routes/batches.ts's PATCH /:id conflict check).
+  updated_at: string | null
 }
 
 function normalizeLotCode(lotCode: string | null | undefined): string | null {
@@ -135,6 +139,7 @@ export async function listBatchesForProduct(
       pb.batch_number AS batch_number,
       pb.supplier_id AS supplier_id,
       pb.supplier_name AS supplier_name,
+      pb.updated_at AS updated_at,
       COALESCE(bbs.quantity, 0) AS quantity
     FROM product_batches pb
     LEFT JOIN branch_batch_stock bbs ON bbs.batch_id = pb.id AND bbs.branch_id = @branchId

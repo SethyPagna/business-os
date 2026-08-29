@@ -22,6 +22,10 @@ export type ProductBatch = {
   // blank". Optional because older cached list payloads predate the field.
   supplier_id?: number | null
   supplier_name?: string | null
+  // Optimistic-concurrency token echoed back on edit so the server can reject
+  // a stale write (see updateBatch). Optional because older cached list
+  // payloads predate the field.
+  updated_at?: string | null
 }
 
 export type ReceiveBatchPayload = {
@@ -144,12 +148,14 @@ export function receiveBatchStock(payload: ReceiveBatchPayload): Promise<{ succe
 // more separately-editable lot code -- correcting receivedAt recomputes
 // the batch's code automatically server-side (see cloudflare/src/lib/
 // batchCode.ts's dateToBatchCode).
-export function updateBatch(id: number | string, patch: { expiryDate?: string | null; notes?: string | null; isActive?: boolean; receivedAt?: string | null }): Promise<{ success: boolean }> {
+export function updateBatch(id: number | string, patch: { expiryDate?: string | null; notes?: string | null; isActive?: boolean; receivedAt?: string | null; expectedUpdatedAt?: string | null }): Promise<{ success: boolean }> {
   const body: Record<string, unknown> = {}
   if (patch.expiryDate !== undefined) body.expiry_date = patch.expiryDate || null
   if (patch.notes !== undefined) body.notes = patch.notes || null
   if (patch.isActive !== undefined) body.is_active = patch.isActive
   if (patch.receivedAt !== undefined) body.received_at = patch.receivedAt || null
+  // Sent through so the server can reject a stale edit (conflictControl).
+  if (patch.expectedUpdatedAt) body.expectedUpdatedAt = patch.expectedUpdatedAt
   return route(
     'batches:update',
     () => apiFetch('PATCH', `/api/batches/${encodeURIComponent(String(id))}`, body),
