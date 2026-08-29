@@ -12351,3 +12351,35 @@ gone; file clean). Part 473 taken after re-checking max = 472.
 ## Part 474 (Aug 29 2026, session business-os-v1-87) — small-screen Products card: VIP price shows number + colour only, no label
 
 renderMobileProductCard (Products.tsx) rendered the VIP price as `Special $X.XX`. Per the user, the default small-screen Products card now shows JUST the number, colour-coded primary/blue, with no text label — the colour already tells it apart from selling (green) and cost (red) on the one-line price row. Also corrected the mislabel: special_price_* IS the VIP price (labelled "VIP Price" elsewhere, e.g. ProductDetailModal), never "Special". Desktop table row untouched. frontend tsc clean, vite build green. Commit 9a310f3e. Products.tsx was clean/disjoint of the active lanes; Part 474 after max=473.
+
+## Part 475 (Aug 29 2026, session business-os-v1-e4) — Branches: removed the RIGHT stats (corrects Part 473)
+
+**Part 473 removed the wrong thing.** I read "branch stats can be removed... we
+already got the stats in branches" as "drop the dedicated Stats hub chip". The user
+clarified the reverse: "remove the stats ABOVE the branches/transfers section — the
+stats moved from inventory is KEPT, stats in each branch is KEPT."
+
+**So this Part:**
+1. **Restored the "Stats" hub chip** — reverted Part 473's BranchesHubPage.tsx edit
+   in full (`git checkout` of the pre-473 file): the Inventory-moved Stats section,
+   the default-to-stats landing, the hidden-host 'stats' slice and the BarChart3
+   import are all back. Part 473's log entry stays as history; only its code is undone.
+2. **Removed the aggregate Branches / Items / Value cards** that sat above the
+   "Branches / Transfer History" tabs in the branch-list view (Branches.tsx). Those
+   three tiles (fed by the `branchSummary` endpoint) were the "stats above the
+   section" the user meant. Cleaned up everything they solely owned: the
+   `branchSummary` state + its loader task + setter, the `getBranchSummary` API
+   import/interface-field/wrapper, the `BranchSummary` interface, the
+   `BRANCHES_SUMMARY_TIMEOUT_MS` const, and the now-unused `buildStockHealthSegments`
+   import — so no dead fetch runs on every branch load.
+3. **Kept the per-branch stats** — the `BranchStatTile` tiles inside each expanded
+   branch (Total / In Stock / Healthy / Low / Out / Value) and the shared
+   `openStatDetail` modal are untouched; they never used `branchSummary`.
+
+**Verification.** tsc + check:source (405 files) + vite build green; no residual
+reference to any removed symbol.
+
+**Parallel sessions.** Two branches files (mine/ownerless — session 15, gone);
+neither in a peer's dirty set. Part 475 after re-checking max = 474.
+
+**Needs deploy.** Frontend-only; ships on the next build.

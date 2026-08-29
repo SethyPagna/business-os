@@ -23,7 +23,6 @@ import { lazyRetry } from '../../utils/lazyImport.ts'
 import { runConcurrentTasks } from '../../utils/bulkOps.ts'
 import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.ts'
 import { buildProductGroups } from '../../utils/productGrouping.ts'
-import { buildStockHealthSegments } from '../inventory/stockHealthSummary.ts'
 import {
   beginTrackedRequest,
   getFirstLoaderError,
@@ -37,7 +36,6 @@ import {
   deleteBranch as deleteBranchRequest,
   getBranches as getBranchesRequest,
   getBranchStock as getBranchStockRequest,
-  getBranchSummary as getBranchSummaryRequest,
   getTransfers as getTransfersRequest,
   updateBranch as updateBranchRequest,
 } from '../../api/branchTransport.ts'
@@ -51,7 +49,6 @@ import {
  */
 
 const BRANCHES_LIST_TIMEOUT_MS = 10000
-const BRANCHES_SUMMARY_TIMEOUT_MS = 10000
 const BRANCH_TRANSFERS_TIMEOUT_MS = 12000
 const BRANCH_MUTATION_TIMEOUT_MS = 12000
 
@@ -119,16 +116,6 @@ interface BranchPayload {
 
 type BranchTransportPayload = BranchPayload & Record<string, unknown>
 
-interface BranchSummary {
-  branch_count?: number
-  total_products?: number
-  in_stock?: number
-  healthy?: number
-  low_stock?: number
-  out_of_stock?: number
-  stock_value_usd?: number | string
-}
-
 interface BranchStockProduct {
   id: string | number
   name?: string | null
@@ -186,7 +173,6 @@ interface BranchMutationResult {
 
 interface BranchApi {
   getBranches: () => Promise<unknown>
-  getBranchSummary?: () => Promise<unknown>
   getTransfers: (params: Record<string, unknown>) => Promise<unknown>
   getBranchStock: (branchId: string | number, options: { page: number; pageSize: number; stockState: string }) => Promise<BranchStockState>
   updateBranch: (id: string | number, payload: BranchTransportPayload) => Promise<BranchMutationResult>
@@ -228,7 +214,6 @@ const ExportOptionsDialog = lazyRetry(() => import('../shared/ExportOptionsDialo
 function getBranchApi(): BranchApi {
   return {
     getBranches: getBranchesRequest,
-    getBranchSummary: getBranchSummaryRequest,
     getTransfers: () => getTransfersRequest(),
     getBranchStock: (branchId, options) => getBranchStockRequest(branchId, options) as Promise<BranchStockState>,
     updateBranch: (id, payload) => updateBranchRequest(id, payload) as Promise<BranchMutationResult>,
@@ -318,7 +303,6 @@ export default function Branches() {
    * 2.2 UI selection/expansion state.
    */
   const [branches, setBranches] = useState<BranchRecord[]>([])
-  const [branchSummary, setBranchSummary] = useState<BranchSummary | null>(null)
   const [tab, setTab] = useState<BranchTab>('branches')
   const [modal, setModal] = useState<BranchModal>(null)
   const [selected, setSelected] = useState<BranchRecord | null>(null)
@@ -397,11 +381,6 @@ export default function Branches() {
             'Branches list',
             BRANCHES_LIST_TIMEOUT_MS,
           ),
-          branchSummary: () => withLoaderTimeout(
-            () => branchApi.getBranchSummary?.(),
-            'Branch summary',
-            BRANCHES_SUMMARY_TIMEOUT_MS,
-          ).catch(() => null),
         }
         if (tab === 'transfers') {
           tasks.transfers = () => withLoaderTimeout(
@@ -414,7 +393,6 @@ export default function Branches() {
 
         if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return null
         if (Array.isArray(result.values.branches)) setBranches(result.values.branches.filter(isBranchRecord))
-        if (result.values.branchSummary && typeof result.values.branchSummary === 'object') setBranchSummary(result.values.branchSummary as BranchSummary)
         if (Array.isArray(result.values.transfers)) setTransfers(result.values.transfers.filter(isTransferRecord))
 
         if (!result.hasAnySuccess) {
@@ -961,59 +939,11 @@ export default function Branches() {
 
   return (
     <div className="page-scroll flex min-h-0 flex-col p-3 sm:p-6">
-      {branchSummary ? (
-        // 11.21: the outer row used to carry SEVEN tiles, four of them the
-        // stock-health split (In Stock / Healthy / Low / Out) spelled out
-        // separately. Like the Inventory page (11.20), that split now rides on
-        // the Items tile as ONE coloured sub-line (green/amber/red counts via
-        // the shared buildStockHealthSegments), so the outer row is just
-        // Branches / Items / Value. The full health breakdown stays reachable
-        // by clicking Items. Per-branch stock stats below are untouched.
-        <div className="mb-4 grid grid-cols-3 gap-1.5 sm:gap-2">
-          {(() => {
-            const healthSegments = buildStockHealthSegments(
-              { healthy: branchSummary.healthy || 0, low: branchSummary.low_stock || 0, out: branchSummary.out_of_stock || 0 },
-              { healthy: tr('healthy_stock_short', 'Healthy'), low: tr('low_stock_short', 'Low'), out: tr('out_of_stock_short', 'Out') },
-            )
-            const inStock = branchSummary.in_stock || 0
-            const itemsDetail = `${tr('in_stock_short', 'In Stock')}: ${inStock} · ${healthSegments.map((s) => `${s.count} ${s.label}`).join(' · ')}`
-            const tiles = [
-              { key: 'branches', label: tr('branches_short', tr('branches', 'Branches')), value: branchSummary.branch_count ?? activeBranches.length, color: 'text-blue-600 dark:text-blue-300', detail: tr('branch_stat_branches_detail', 'Active branch locations available for stock review and transfer.'), sub: null as ReactNode },
-              // `total_products` (getFamilyStockStats) counts one family/group
-              // as a single item, matching the listing's own pagination.
-              {
-                key: 'items',
-                label: tr('items_short', 'Items'),
-                value: branchSummary.total_products || 0,
-                color: 'text-slate-700 dark:text-slate-100',
-                detail: itemsDetail,
-                sub: (
-                  <span className="inline-flex items-center gap-1">
-                    {healthSegments.map((seg, i) => (
-                      <span key={seg.key} className="inline-flex items-center gap-1">
-                        {i > 0 ? <span className="text-gray-300 dark:text-gray-600" aria-hidden="true">·</span> : null}
-                        <span className={`font-semibold ${seg.colorClass}`} title={`${seg.count} ${seg.label}`} aria-label={`${seg.count} ${seg.label}`}>{seg.count}</span>
-                      </span>
-                    ))}
-                  </span>
-                ),
-              },
-              { key: 'value', label: tr('stock_value_short', 'Value'), value: fmtUSD(Number(branchSummary.stock_value_usd || 0)), color: 'text-cyan-600 dark:text-cyan-300', detail: tr('branch_stat_value_detail', 'Estimated stock value using available branch stock and product cost.'), sub: null as ReactNode },
-            ]
-            return tiles.map(({ key, label, value, color, detail, sub }) => (
-              <BranchStatTile
-                key={key}
-                label={label}
-                value={value}
-                color={color}
-                detail={detail}
-                sub={sub}
-                onClick={() => openStatDetail(label, value, detail)}
-              />
-            ))
-          })()}
-        </div>
-      ) : null}
+      {/* The aggregate Branches / Items / Value stat cards that used to sit
+          here (above the Branches / Transfer History tabs) were removed
+          (user, Aug 29: "remove the stats above the branches/transfers
+          section"). The per-branch stat tiles inside each expanded branch
+          below are kept, and the Inventory-moved "Stats" hub section is kept. */}
 
       {loadError && !loading && !branches.length && !transfers.length ? (
         <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-200">
