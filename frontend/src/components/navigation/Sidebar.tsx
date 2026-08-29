@@ -9,7 +9,6 @@ import DatabaseBackup from 'lucide-react/dist/esm/icons/database-backup.js'
 import FolderOpen from 'lucide-react/dist/esm/icons/folder-open.js'
 import LayoutDashboard from 'lucide-react/dist/esm/icons/layout-dashboard.js'
 import LogOut from 'lucide-react/dist/esm/icons/log-out.js'
-import Menu from 'lucide-react/dist/esm/icons/menu.js'
 import MoreHorizontal from 'lucide-react/dist/esm/icons/more-horizontal.js'
 import Package from 'lucide-react/dist/esm/icons/package.js'
 import Pencil from 'lucide-react/dist/esm/icons/pencil.js'
@@ -22,6 +21,8 @@ import ShoppingBag from 'lucide-react/dist/esm/icons/shopping-bag.js'
 import ShoppingCart from 'lucide-react/dist/esm/icons/shopping-cart.js'
 import Ticket from 'lucide-react/dist/esm/icons/ticket.js'
 import Users from 'lucide-react/dist/esm/icons/users.js'
+import User from 'lucide-react/dist/esm/icons/user.js'
+import ChevronUp from 'lucide-react/dist/esm/icons/chevron-up.js'
 import { useApp as useAppHook } from '../../AppContext.tsx'
 import { DEFAULT_MOBILE_PINNED, NAV_ITEMS as NAV_CONFIG_ITEMS, orderNavItems, parseNavSetting, type NavigationItem, type NavigationPermission } from '../shared/navigationConfig'
 import { APP_PAGE_INTENT_EVENT } from '../../app/appShellUtils.ts'
@@ -124,6 +125,12 @@ const ICONS_BY_ID: Record<string, LucideIcon> = {
   server: Server,
 }
 
+// These pages no longer render as their own sidebar nav rows -- they live
+// under the footer account expander (Profile / Settings / Receipt Settings /
+// Update / Exit) instead, per the user's "fold these into the account row"
+// request. Still real pages reachable from there; just not top-level nav.
+const ACCOUNT_NAV_IDS = new Set(['settings', 'receipt_settings'])
+
 function getFallbackLabel(itemId: string, language: string): string {
   void language
   if (itemId === 'server') return 'Sync Server'
@@ -199,9 +206,12 @@ export default function Sidebar({ notificationSlot = null, desktopNotificationSl
 
   const [moreOpen, setMoreOpen] = useState(false)
   const [profileOpen, setProfileOpen] = useState(false)
-  // Z5: desktop sidebar-footer system menu (☰) housing Settings / Update /
-  // Exit -- declutters the footer from two loose icons into one control.
-  const [sysMenuOpen, setSysMenuOpen] = useState(false)
+  // The footer account row is a full-width toggle that expands into an account
+  // panel -- Profile / Settings / Receipt Settings / Update / Exit -- so those
+  // stop being separate sidebar nav rows and live under the account instead
+  // (user request). The same panel opens as a dropdown from the mobile header
+  // avatar.
+  const [accountOpen, setAccountOpen] = useState(false)
   const runAppUpdate = () => {
     // Same "check for update and refresh" work the old footer Refresh icon did.
     navigator.serviceWorker?.controller?.postMessage?.({ type: 'BUSINESS_OS_SKIP_WAITING' })
@@ -243,7 +253,7 @@ export default function Sidebar({ notificationSlot = null, desktopNotificationSl
   const visibleItems = useMemo<NavigationItemWithIcon[]>(() => {
     const orderedIds = parseNavSetting(settings?.ui_nav_order, [])
     const allowedItems = NAV_CONFIG_ITEMS
-      .filter((item) => canAccessPage(item.id))
+      .filter((item) => canAccessPage(item.id) && !ACCOUNT_NAV_IDS.has(item.id))
       .map((item) => ({ ...item, icon: getIconForItem(item.id) }))
     return orderNavItems(allowedItems, orderedIds)
   }, [canAccessPage, settings?.ui_nav_order])
@@ -291,6 +301,40 @@ export default function Sidebar({ notificationSlot = null, desktopNotificationSl
     sidebarTextColor ? { color: sidebarTextColor } : undefined,
     sidebarTextColor ? { backgroundColor: withAlpha(sidebarTextColor, isDark ? '24' : '18') || undefined } : undefined,
   )
+
+  // Account panel actions -- rendered inside the desktop footer expander and
+  // the mobile header dropdown. Settings / Receipt Settings are gated the same
+  // way their old nav rows were; Profile / Update / Exit are always available
+  // to a logged-in user. Update is blue, Exit red, matching the old ☰ menu.
+  type AccountAction = { id: string; label: string; icon: LucideIcon; onClick: () => void; tone?: 'blue' | 'red' }
+  const accountActions: AccountAction[] = [
+    { id: 'profile', label: t('profile') || 'Profile', icon: User, onClick: () => setProfileOpen(true) },
+    ...(canAccessPage('settings') ? [{ id: 'settings', label: t('settings') || 'Settings', icon: Settings, onClick: () => navigateTo('settings') } as AccountAction] : []),
+    ...(canAccessPage('receipt_settings') ? [{ id: 'receipt_settings', label: t('receipt_settings') || 'Receipt Settings', icon: Receipt, onClick: () => navigateTo('receipt_settings') } as AccountAction] : []),
+    { id: 'update', label: t('refresh_app') || 'Update', icon: RefreshCw, onClick: runAppUpdate, tone: 'blue' },
+    { id: 'logout', label: t('logout') || 'Exit', icon: LogOut, onClick: logout, tone: 'red' },
+  ]
+  const accountActionToneClass = (tone?: 'blue' | 'red') => (
+    tone === 'blue'
+      ? 'text-blue-600 hover:bg-blue-50 dark:text-blue-400 dark:hover:bg-blue-900/20'
+      : tone === 'red'
+        ? 'text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-900/20'
+        : 'text-gray-700 hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-700'
+  )
+  const renderAccountAction = (item: AccountAction) => {
+    const Icon = item.icon
+    return (
+      <button
+        key={item.id}
+        type="button"
+        onClick={() => { setAccountOpen(false); item.onClick() }}
+        className={`flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left text-[13px] font-medium transition-colors ${accountActionToneClass(item.tone)}`}
+      >
+        <Icon className="h-4 w-4 shrink-0" />
+        <span className="truncate">{item.label}</span>
+      </button>
+    )
+  }
 
   return (
     <>
@@ -371,7 +415,26 @@ export default function Sidebar({ notificationSlot = null, desktopNotificationSl
         </nav>
 
         <div className={`border-t p-3 ${borderClass}`}>
-          <div className="flex items-center gap-3 px-2 py-2">
+          {/* The account expander -- Profile / Settings / Receipt Settings /
+              Update / Exit -- opens upward above the account row. Rendered in
+              a neutral panel so its item tones read regardless of a custom
+              sidebar colour. Settings & Receipt Settings used to be their own
+              nav rows; they live here now. */}
+          {accountOpen ? (
+            <div className="mb-2 space-y-0.5 rounded-xl border border-gray-200 bg-white p-1 shadow-sm dark:border-gray-700 dark:bg-gray-800">
+              {accountActions.map(renderAccountAction)}
+            </div>
+          ) : null}
+          {/* Full-width account row -- the whole row is the toggle: click to
+              expand/collapse the panel above. */}
+          <button
+            type="button"
+            onClick={() => setAccountOpen((open) => !open)}
+            aria-expanded={accountOpen}
+            aria-label={t('account') || 'Account'}
+            className={`flex w-full items-center gap-3 rounded-lg px-2 py-2 text-left transition-colors ${hoverClass || 'hover:bg-gray-100 dark:hover:bg-slate-800'}`}
+            style={textStyle}
+          >
             <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full" style={{ background: 'var(--ui-accent)22' }}>
               {user?.avatar_path ? (
                 <img src={user.avatar_path} alt={user?.name || 'User'} className="h-8 w-8 rounded-full object-cover" loading="lazy" decoding="async" />
@@ -381,61 +444,16 @@ export default function Sidebar({ notificationSlot = null, desktopNotificationSl
                 </span>
               )}
             </div>
-            <button type="button" onClick={() => setProfileOpen(true)} className="min-w-0 flex-1 text-left">
+            <div className="min-w-0 flex-1">
               <div className={`truncate text-sm font-medium ${textClass || 'text-gray-900 dark:text-white'}`} style={textStyle}>
                 {user?.name}
               </div>
               <div className={`truncate text-xs ${subTextClass || 'text-gray-400'}`} style={subduedTextStyle}>
                 {user?.role_name || t('no_role') || 'No role'}
               </div>
-            </button>
-            {/* Z5: one ☰ control housing Settings / Update / Exit, replacing
-                the two loose footer icons. The menu items carry the action
-                colours (Update blue, Exit red). A transparent backdrop
-                closes it on an outside click (same pattern as the mobile
-                More drawer). */}
-            <div className="relative z-50 flex-shrink-0">
-              <button
-                type="button"
-                onClick={() => setSysMenuOpen((open) => !open)}
-                aria-label={t('menu') || 'Menu'}
-                aria-expanded={sysMenuOpen}
-                className={`transition-colors ${textClass ? 'opacity-70 hover:opacity-100' : 'text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-white'}`}
-                title={t('menu') || 'Menu'}
-                style={textStyle}
-              >
-                <Menu className="h-4 w-4" />
-              </button>
-              {sysMenuOpen ? (
-                <>
-                  <div className="fixed inset-0 z-40" onClick={() => setSysMenuOpen(false)} />
-                  <div className="absolute bottom-full right-0 z-50 mb-2 w-44 overflow-hidden rounded-xl border border-gray-200 bg-white py-1 shadow-xl dark:border-gray-700 dark:bg-gray-800">
-                    <button
-                      type="button"
-                      onClick={() => { navigateTo('settings'); setSysMenuOpen(false) }}
-                      className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-700"
-                    >
-                      <Settings className="h-4 w-4 text-gray-500 dark:text-gray-400" /> {t('settings') || 'Settings'}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => { runAppUpdate(); setSysMenuOpen(false) }}
-                      className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-sm text-blue-600 hover:bg-blue-50 dark:text-blue-400 dark:hover:bg-blue-900/20"
-                    >
-                      <RefreshCw className="h-4 w-4" /> {t('refresh_app') || 'Update'}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => { setSysMenuOpen(false); logout() }}
-                      className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-sm text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-900/20"
-                    >
-                      <LogOut className="h-4 w-4" /> {t('logout') || 'Exit'}
-                    </button>
-                  </div>
-                </>
-              ) : null}
             </div>
-          </div>
+            <ChevronUp className={`h-4 w-4 flex-shrink-0 transition-transform ${accountOpen ? 'rotate-180' : ''} ${subTextClass || 'text-gray-400'}`} style={subduedTextStyle} />
+          </button>
         </div>
       </aside>
 
@@ -469,17 +487,40 @@ export default function Sidebar({ notificationSlot = null, desktopNotificationSl
               <QuickPreferenceToggles />
             </Suspense>
           ) : null}
-          <button type="button" onClick={() => setProfileOpen(true)} className="flex h-11 w-11 items-center justify-center rounded-full bg-blue-50/90 p-0.5 dark:bg-blue-900/30">
-            <div className="flex h-10 w-10 items-center justify-center overflow-hidden rounded-full bg-blue-100 dark:bg-blue-900/40">
-              {user?.avatar_path ? (
-                <img src={user.avatar_path} alt={user?.name || 'User'} className="h-10 w-10 object-cover" loading="lazy" decoding="async" />
-              ) : (
-                <span className="text-base font-bold text-blue-600 dark:text-blue-400">
-                  {user?.name?.[0]?.toUpperCase()}
-                </span>
-              )}
-            </div>
-          </button>
+          <div className="relative z-50 flex-shrink-0">
+            <button type="button" onClick={() => setAccountOpen((open) => !open)} aria-expanded={accountOpen} aria-label={t('account') || 'Account'} className="flex h-11 w-11 items-center justify-center rounded-full bg-blue-50/90 p-0.5 dark:bg-blue-900/30">
+              <div className="flex h-10 w-10 items-center justify-center overflow-hidden rounded-full bg-blue-100 dark:bg-blue-900/40">
+                {user?.avatar_path ? (
+                  <img src={user.avatar_path} alt={user?.name || 'User'} className="h-10 w-10 object-cover" loading="lazy" decoding="async" />
+                ) : (
+                  <span className="text-base font-bold text-blue-600 dark:text-blue-400">
+                    {user?.name?.[0]?.toUpperCase()}
+                  </span>
+                )}
+              </div>
+            </button>
+            {accountOpen ? (
+              <>
+                <div className="fixed inset-0 z-40" onClick={() => setAccountOpen(false)} />
+                <div className="absolute right-0 top-full z-50 mt-2 w-56 overflow-hidden rounded-xl border border-gray-200 bg-white p-1 shadow-xl dark:border-gray-700 dark:bg-gray-800">
+                  <div className="mb-1 flex items-center gap-2.5 border-b border-gray-100 px-2.5 py-2 dark:border-gray-700">
+                    <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center overflow-hidden rounded-full bg-blue-100 dark:bg-blue-900/40">
+                      {user?.avatar_path ? (
+                        <img src={user.avatar_path} alt={user?.name || 'User'} className="h-8 w-8 object-cover" loading="lazy" decoding="async" />
+                      ) : (
+                        <span className="text-sm font-bold text-blue-600 dark:text-blue-400">{user?.name?.[0]?.toUpperCase()}</span>
+                      )}
+                    </div>
+                    <div className="min-w-0">
+                      <div className="truncate text-sm font-medium text-gray-900 dark:text-white">{user?.name}</div>
+                      <div className="truncate text-xs text-gray-400">{user?.role_name || t('no_role') || 'No role'}</div>
+                    </div>
+                  </div>
+                  {accountActions.map(renderAccountAction)}
+                </div>
+              </>
+            ) : null}
+          </div>
         </div>
       </header>
 
