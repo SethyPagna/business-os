@@ -11382,3 +11382,47 @@ directly with 74 (they stayed off Products.tsx; I owned this call-site). Part 44
 taken after re-checking max = 446.
 
 **Needs deploy.** Frontend-only; ships on the next build.
+
+## Part 448 (Aug 29 2026, session business-os-v1-74) — scroll audit of every page; Promotions/Loyalty scroll fix
+
+**The invariant.** Every admin page mounts inside PageSlot, a bounded
+`overflow:hidden; flex:1; flex-direction:column; min-height:0` box that
+deliberately does not scroll. A page therefore scrolls only if its root resolves
+to a `.page-scroll` container (`flex:1; min-height:0; overflow-y:auto`), or — for
+the three hub pages (sales/branches/settings) — is a height-filling
+`flex min-h-0 flex-1 flex-col` column that lets the hosted sub-page's own
+`.page-scroll` fill.
+
+**Audit result.** Walked all 14 registry pages + the hub sub-pages and tabs. The
+hubs and the reported-earlier pages (Fees, Settings, Contacts/Files tabs) were
+already correct — their fixes had landed in prior parts. **One real break
+remained: PromotionsPage.** Its root was a plain
+`<div className="p-4 space-y-4 max-w-5xl mx-auto">`, so the Promotions rules /
+per-product-discounts sections and the whole embedded Loyalty Points section were
+clipped below the fold with no way to reach them.
+
+**Fix.** Made the root a full-width `.page-scroll` and moved the `max-w-5xl
+mx-auto` centering to an inner wrapper (so the scrollbar sits at the viewport
+edge, matching every other page). Verified live in the local app: before the
+rebuild the active promotions slot had NO `.page-scroll` (bug reproduced in the
+browser); after, its root is `page-scroll p-4` with `overflow-y:auto;
+flex-grow:1` and the inner `space-y-4 max-w-5xl mx-auto` wrapper intact.
+
+**Regression guard.** `frontend/tests/pageScrollRoots.test.ts` parses App.tsx's
+live PAGE_IMPORTERS registry and asserts every page either owns a `.page-scroll`
+root or (for the hubs) carries the fill wrapper — so a new page, or a hub that
+loses its wrapper, fails in CI instead of stranding content. Registered in the
+frontend test chain.
+
+**Also confirmed end-to-end in the local app** (worker-dev serving a fresh
+`frontend/dist`; the earlier "empty/404" preview was only a dev server started
+before the frontend was built): Dashboard, Products and POS all render and
+scroll. POS cart shows correct decoupled-discount math (1 x $12.50 - $2.00 =
+$10.50, discount shown separately) and the Complete Sale button; Products shows
+the chip sections and the Y20 pager folded into the Select-all row.
+
+Commits: `9029d724` (Promotions fix + pageScrollRoots test), `95f136e2` (register
+the test).
+
+**Needs deploy.** Frontend-only; ships on the next build (a coordinated,
+user-authorized production deploy was in progress at time of writing).
