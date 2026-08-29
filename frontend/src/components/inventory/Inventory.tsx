@@ -2743,7 +2743,6 @@ export default function Inventory({ hostSection, onHostSectionChange }: {
   const healthyShortLabel = tr('healthy_stock_short', 'Healthy')
   const matchStockShortLabel = tr('matching_stock_short', 'Matching')
   const afterReturnsShortLabel = tr('after_returns_short', 'After ret.')
-  const afterRefundsShortLabel = tr('after_refunds_short', 'After ref.')
   const storeDiscountShortLabel = tr('store_discounts_short', 'Store')
   const memberShortLabel = tr('membership_short', 'Mem')
   const taxShortLabel = tr('tax_short', 'Tax')
@@ -2821,16 +2820,19 @@ ${inventoryStockValueFormulaText}`,
     {
       id: 'revenue',
       label: inventoryStatLabels.revenue,
-      info: `${tr('inventory_info_revenue', 'Money taken from customers, after refunds are subtracted.')}
+      // Z10 (user, Aug 29 -- "follow dashboard, keeps them separate"): Revenue
+      // is net of discounts, BEFORE refunds, exactly like the Dashboard;
+      // refunds are kept separate in the Returns card, no longer folded into
+      // this number or its drill. Backend GET /stats revenue_usd/cogs_usd are
+      // now gross to match (routes/inventory.ts).
+      info: `${tr('inventory_info_revenue', 'Money kept from sales: gross sales minus discounts. Refunds are shown separately in Returns.')}
 
-${inventoryStatLabels.revenue} ${fmtUSD(totalRevenue)} − ${inventoryStatLabels.refunded} ${fmtUSD(returnStats?.refund_usd || 0)} = ${fmtUSD(totalRevenue - (returnStats?.refund_usd || 0))}
 ${tr('gross_profit', 'Gross profit')} ${fmtUSD(totalRevenue - totalCOGS)} = ${inventoryStatLabels.revenue} ${fmtUSD(totalRevenue)} − ${inventoryStatLabels.cogs} ${fmtUSD(totalCOGS)}`,
       value: statsValue(fmtUSD(totalRevenue)),
       cls: 'text-emerald-600 dark:text-emerald-400',
-        sub: afterRefundsShortLabel,
+        sub: `${tr('gross_profit', 'Gross profit')} ${fmtUSD(totalRevenue - totalCOGS)}`,
       details: [
         { label: inventoryStatLabels.revenue, value: fmtUSD(totalRevenue) },
-        { label: inventoryStatLabels.refunded, value: fmtUSD(returnStats?.refund_usd || 0) },
         { label: inventoryStatLabels.cogs, value: fmtUSD(totalCOGS) },
         { label: `${tr('gross_profit', 'Gross profit')} (= ${inventoryStatLabels.revenue} − ${inventoryStatLabels.cogs})`, value: fmtUSD(totalRevenue - totalCOGS) },
       ],

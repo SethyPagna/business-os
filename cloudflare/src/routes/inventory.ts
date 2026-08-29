@@ -806,10 +806,18 @@ app.get('/stats', async (c) => {
         COALESCE(SUM(COALESCE(si.store_discount_khr, 0)), 0) AS store_discount_khr,
         COALESCE(SUM(COALESCE(si.membership_discount_usd, 0)), 0) AS membership_discount_usd,
         COALESCE(SUM(COALESCE(si.membership_discount_khr, 0)), 0) AS membership_discount_khr,
-        COALESCE(SUM(COALESCE(si.revenue_usd, 0) - COALESCE(ret.refund_usd, 0)), 0) AS revenue_usd,
-        COALESCE(SUM(COALESCE(si.revenue_khr, 0) - COALESCE(ret.refund_khr, 0)), 0) AS revenue_khr,
-        COALESCE(SUM(COALESCE(si.cogs_usd, 0) - COALESCE(ret.cogs_returned_usd, 0)), 0) AS cogs_usd,
-        COALESCE(SUM(COALESCE(si.cogs_khr, 0) - COALESCE(ret.cogs_returned_khr, 0)), 0) AS cogs_khr
+        -- Z10 (user, Aug 29 -- "follow dashboard, keeps them separate"):
+        -- Revenue and COGS are GROSS here (before refunds / returned COGS),
+        -- exactly like the Dashboard's salesAnalytics kernel (revenue_usd =
+        -- gross_sales - discounts; cost_usd = SUM(cost*qty), neither adjusted
+        -- for returns). Refunds stay in the Returns card (returnStats), so the
+        -- Branch "Revenue" now agrees with the Dashboard's for the same set of
+        -- sales instead of being quietly net-of-refunds. net_sold_qty keeps
+        -- its return subtraction -- it is a units metric, not revenue.
+        COALESCE(SUM(COALESCE(si.revenue_usd, 0)), 0) AS revenue_usd,
+        COALESCE(SUM(COALESCE(si.revenue_khr, 0)), 0) AS revenue_khr,
+        COALESCE(SUM(COALESCE(si.cogs_usd, 0)), 0) AS cogs_usd,
+        COALESCE(SUM(COALESCE(si.cogs_khr, 0)), 0) AS cogs_khr
       FROM products p
       ${joinSql}
       ${financialJoinSql}

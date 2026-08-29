@@ -1777,7 +1777,7 @@
   "inventory_info_net_sold": "How many items actually left the shop: everything sold, minus anything customers brought back.",
   "inventory_info_products": "How many products you carry. A group of same-name items counts as ONE product here, the same way it appears as one row in the list below.",
   "inventory_info_returns": "Items sent back: by customers to you, and by you to suppliers.",
-  "inventory_info_revenue": "Money taken from customers, after refunds are subtracted.",
+  "inventory_info_revenue": "Money kept from sales: gross sales minus discounts. Refunds are shown separately in Returns.",
   "inventory_info_stock_value": "What the stock you are holding right now cost you to buy. Not what it will sell for.",
   "inventory_item_details": "Inventory item details",
   "inventory_load_slow": "Inventory is taking longer than expected. Tap Refresh or revisit in a moment.",
