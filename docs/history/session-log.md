@@ -12091,3 +12091,37 @@ sales reuse that exact screen/logic, and contacts is the same pattern on its own
 flow with the merge-screen fallback preserved.
 
 Commit: `d8d969c5`. **Needs deploy** (frontend-only).
+
+## Part 466 (Aug 29 2026, session business-os-v1-e4) — POS cart "All" view: draggable products/details split
+
+**User directive (Aug 29):** "make the all in cart able to adjust down or up
+between details and products." In the cart's **All** view the product line-items
+(top) and the customer/discount/delivery/payment summary (bottom) share the panel;
+the summary was capped at a FIXED `max-h-[46%]`, so the cashier could not give the
+details more room (e.g. while filling delivery + payment) or the products more room
+(a long edited cart).
+
+**Fix (POS.tsx).** Added a draggable divider between the two panes, shown only in
+'all' view (in 'products'/'details' each pane fills the panel alone, nothing to
+split). It mirrors the existing horizontal cart-WIDTH resize on the vertical axis:
+a new `cartDetailsPct` state (default 46, clamped 22–78%, persisted to
+`pos_cart_details_pct` in localStorage), a `startCartSplitResize(clientY)` pointer/
+touch handler that adjusts the percentage from the drag delta over the cart panel's
+measured height (drag up → more details, down → more products), and `resetCartSplit`
+on double-click. The summary region's height became `style={{ maxHeight:
+cartDetailsPct% }}` in 'all' view (was the fixed class); the cart list stays flex-1
+and takes the rest; the pinned Complete-Sale footer is untouched. The handle is
+`touch-none` so a touch-drag resizes instead of scrolling the list. Two new lang
+keys (`resize_cart_sections` + `_hint`, en/km) for its aria-label/title;
+langKeyIntegrity parity holds.
+
+**Verification.** tsc + check:source (404 files) + langKeyIntegrity + posCore tests
++ vite build all green. Could not live-repro the drag (admin needs a login I can't
+perform; dev server peer-owned) — the resize logic is a deterministic mirror of the
+already-shipped, working width-resize on the same panel.
+
+**Parallel sessions.** POS.tsx + en/km.json; none in a peer's dirty set (the
+concurrent batches/import work is elsewhere). Part 466 taken after re-checking
+max = 465.
+
+**Needs deploy.** Frontend-only; ships on the next build.

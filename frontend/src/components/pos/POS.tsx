@@ -913,6 +913,64 @@ export default function POS() {
     window.localStorage.setItem(CART_WIDTH_STORAGE_KEY, String(CART_WIDTH_DEFAULT_PX))
   }, [])
 
+  // --- Cart 'All' view: draggable products/details split (user, Aug 29:
+  // "make the all in cart able to adjust down or up between details and
+  // products"). In 'all' the product line-items (top) and the customer/
+  // discount/delivery/payment summary (bottom) share the panel; the summary
+  // was capped at a fixed 46% of the height. This lets the cashier drag the
+  // divider UP (more details) or DOWN (more products) and remembers the ratio
+  // across sessions -- the vertical-axis twin of the width resize above.
+  // Clamped so neither pane can vanish.
+  const CART_SPLIT_STORAGE_KEY = 'pos_cart_details_pct'
+  const CART_SPLIT_DEFAULT_PCT = 46
+  const CART_SPLIT_MIN_PCT = 22
+  const CART_SPLIT_MAX_PCT = 78
+  const cartPanelRef = useRef<HTMLDivElement | null>(null)
+  const [cartDetailsPct, setCartDetailsPct] = useState<number>(() => {
+    const stored = Number(window.localStorage.getItem(CART_SPLIT_STORAGE_KEY))
+    return Number.isFinite(stored) && stored >= CART_SPLIT_MIN_PCT && stored <= CART_SPLIT_MAX_PCT
+      ? stored
+      : CART_SPLIT_DEFAULT_PCT
+  })
+  const [cartSplitResizing, setCartSplitResizing] = useState(false)
+  const cartDetailsPctRef = useRef(cartDetailsPct)
+  useEffect(() => { cartDetailsPctRef.current = cartDetailsPct }, [cartDetailsPct])
+  const startCartSplitResize = useCallback((clientY: number) => {
+    const panelHeight = cartPanelRef.current?.getBoundingClientRect().height || 0
+    if (panelHeight <= 0) return
+    const startY = clientY
+    const startPct = cartDetailsPctRef.current
+    setCartSplitResizing(true)
+    const previousUserSelect = document.body.style.userSelect
+    document.body.style.userSelect = 'none'
+    const handleMove = (moveClientY: number) => {
+      // Dragging up (smaller Y) grows the details pane; down shrinks it.
+      const deltaPct = ((startY - moveClientY) / panelHeight) * 100
+      setCartDetailsPct(Math.min(CART_SPLIT_MAX_PCT, Math.max(CART_SPLIT_MIN_PCT, startPct + deltaPct)))
+    }
+    const onMouseMove = (event: MouseEvent) => handleMove(event.clientY)
+    const onTouchMove = (event: TouchEvent) => {
+      if (event.touches[0]) { event.preventDefault(); handleMove(event.touches[0].clientY) }
+    }
+    const stop = () => {
+      window.removeEventListener('mousemove', onMouseMove)
+      window.removeEventListener('mouseup', stop)
+      window.removeEventListener('touchmove', onTouchMove)
+      window.removeEventListener('touchend', stop)
+      document.body.style.userSelect = previousUserSelect
+      setCartSplitResizing(false)
+      window.localStorage.setItem(CART_SPLIT_STORAGE_KEY, String(Math.round(cartDetailsPctRef.current)))
+    }
+    window.addEventListener('mousemove', onMouseMove)
+    window.addEventListener('mouseup', stop)
+    window.addEventListener('touchmove', onTouchMove, { passive: false })
+    window.addEventListener('touchend', stop)
+  }, [])
+  const resetCartSplit = useCallback(() => {
+    setCartDetailsPct(CART_SPLIT_DEFAULT_PCT)
+    window.localStorage.setItem(CART_SPLIT_STORAGE_KEY, String(CART_SPLIT_DEFAULT_PCT))
+  }, [])
+
   // Re-clamp a stored/dragged width against the window itself resizing
   // (e.g. moving to a smaller monitor, or a browser window shrink) so the
   // products panel never gets pushed to an unusably small width just by
@@ -2939,6 +2997,7 @@ export default function POS() {
 
         {/* Right: Cart panel */}
         <div
+          ref={cartPanelRef}
           className={`flex flex-col flex-shrink-0 w-full bg-white dark:bg-gray-800 border-l border-gray-200 dark:border-gray-700 h-full min-h-0 ${mobileView === 'products' ? 'hidden md:flex' : 'flex'}`}
           style={isDesktopViewport ? { width: `${cartWidthPx}px`, minWidth: `${cartWidthPx}px` } : undefined}
         >
@@ -3034,15 +3093,35 @@ export default function POS() {
             </div>
           </div>
 
+          {/* Drag handle for the products/details split -- only in 'all'
+              view, where both panes share the panel ('products'/'details'
+              each fill it alone, so there's nothing to split). Drag up for
+              more details, down for more products; double-click resets.
+              touch-none so a touch-drag resizes instead of scrolling. */}
+          {cartViewMode === 'all' ? (
+            <div
+              role="separator"
+              aria-orientation="horizontal"
+              aria-label={t('resize_cart_sections') || 'Drag to resize products and details'}
+              title={t('resize_cart_sections_hint') || 'Drag up/down to resize · double-click to reset'}
+              onMouseDown={(event) => { event.preventDefault(); startCartSplitResize(event.clientY) }}
+              onTouchStart={(event) => { if (event.touches[0]) startCartSplitResize(event.touches[0].clientY) }}
+              onDoubleClick={resetCartSplit}
+              className={`group flex flex-shrink-0 cursor-row-resize touch-none items-center justify-center border-y border-gray-200 py-1 transition-colors dark:border-gray-700 ${cartSplitResizing ? 'bg-blue-100 dark:bg-blue-900/40' : 'bg-gray-50 hover:bg-blue-50 dark:bg-gray-900 dark:hover:bg-blue-950/30'}`}
+            >
+              <span className="h-1 w-10 rounded-full bg-gray-300 transition-colors group-hover:bg-blue-400 dark:bg-gray-600 dark:group-hover:bg-blue-500" aria-hidden="true" />
+            </div>
+          ) : null}
+
           {/* Summary + customer + delivery + discount + payment -- a
-              second, separate scroll region capped to a fraction of the
-              panel height so the cart items above always keep the
-              majority of the space. Only scrolls internally on short
-              screens/many open sub-sections; it never grows at the cart
-              list's expense. In 'details' view mode it takes the full
-              panel height instead (the cart items block above is hidden),
-              since there's no items list left to share space with. */}
-          <div className={`min-h-0 overflow-y-auto ${cartViewMode === 'details' ? 'flex-1' : 'flex-shrink-0 max-h-[46%]'} ${cartViewMode === 'products' ? 'hidden' : ''}`}>
+              second, separate scroll region. In 'all' view its height is the
+              draggable products/details split (default 46%, adjusted by the
+              handle above and remembered across sessions); in 'details' view
+              it takes the full panel (the items list is hidden). */}
+          <div
+            className={`min-h-0 overflow-y-auto ${cartViewMode === 'details' ? 'flex-1' : 'flex-shrink-0'} ${cartViewMode === 'products' ? 'hidden' : ''}`}
+            style={cartViewMode === 'all' ? { maxHeight: `${cartDetailsPct}%` } : undefined}
+          >
 
             {/* Customer section (collapsible) */}
             <div className="border-t border-gray-200 dark:border-gray-700">

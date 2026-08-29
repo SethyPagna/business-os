@@ -439,6 +439,8 @@
   "card_style": "Card Style",
   "cart": "Cart",
   "cart_empty": "Cart is empty",
+  "resize_cart_sections": "Resize products and details",
+  "resize_cart_sections_hint": "Drag up or down to resize · double-click to reset",
   "cash": "Cash",
   "cashier": "Cashier",
   "catalogLoading": "Loading products...",
