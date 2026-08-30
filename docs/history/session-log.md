@@ -13621,3 +13621,47 @@ Verified live at 8899: Dashboard and Products both render with standalone
 controls, no nested boxes. tsc clean (two Sales.tsx tx_count errors observed
 during the run belong to a peer's in-flight payment-stats edit, not this
 work); rowAlignment + perf guards green. **Needs deploy.**
+
+## Part 507 (Aug 30 2026, session business-os-v1-b9) — K1 slice 2: reloaded server actions become genuinely undoable
+
+Continuation of Part K1's first slice (session 17, `ef5f5e40`): the server
+could already replay a payload naming a registered applier, but the UI only
+ever offered Undo/Redo on the LIVE closure stack — after a reload every row
+degraded to the inert "Recorded" label even when the Worker could replay it
+fine. Commit `b63e6c67`:
+
+- `lib/undoAppliers.ts`: new `isServerReplayable(row, undoPayload, redoPayload)`
+  — an `undoable` row's next transition replays its undo_payload, a `redoable`
+  row's its redo_payload; anything else (recorded/failed/irreversible, or an
+  unregistered applier) is not replayable. Exported so the route and the pure
+  test share one definition.
+- `routes/actionHistory.ts`: GET / stamps `server_replayable` per row via that
+  helper. POST /:id/undo|redo accepts `require_applied` and refuses (409)
+  BEFORE any status flip when no applier is registered — flipping first would
+  record a reversal that never happened. Callers that omit the flag keep the
+  exact pre-existing flip-and-return-payload contract, so live closures are
+  untouched.
+- `utils/actionHistory.ts`: `undoServer`/`redoServer` reverse a server row
+  with no live closure (always sending `require_applied: true`); page data
+  catches up through the applier's own broadcast. Success notifies with the
+  row's undo_label/redo_label; shared `busy` still serializes operations.
+- `ActionHistoryBar.tsx`: recorded rows the server marked replayable render
+  as real Undo/Redo buttons (same row/chip styling as the live sections);
+  non-replayable rows keep the honest "Recorded" treatment + hint. No new
+  lang keys (en/km are d7-hot; undo/redo/recorded keys already exist).
+- `test-undo-appliers-pure.cjs` 6 → 8 checks: isServerReplayable follows the
+  status to the RIGHT payload (and stays false otherwise); source lock that
+  mapRow stamps via the shared helper and that the require_applied refusal
+  sits before the status-flip UPDATE.
+
+Admin-sees-all / user-sees-own was already enforced server-side
+(canReadAllHistory / canOperateHistoryRow) — this slice completes the
+actionable surface on top of it. Verified: pure test 8/8, tsc clean both
+packages, real vite build green. performanceLoadingUx's action-history pins
+(lines ~474–768) all pass; the suite then fails at its Sales.tsx import pin —
+that file is a peer's in-flight uncommitted edit (stats work), attributed,
+not mine. Live click-through deferred: all three dev ports (5173/8787/8899)
+are peer-owned and wrangler shares local D1 state. Still open on K1:
+create/delete reversal (row-id remapping) and the other scopes' declarative
+payloads (contacts, inventory, files, lookups — peer-hot, per scope).
+**Needs deploy.**
