@@ -13601,3 +13601,23 @@ Eight-item user batch, all shipped and live-verified on a second dev server
 
 .claude/launch.json gained worker-dev-b (port 8899) for dual-session preview.
 tsc clean; pagination/product-detail/perf guards green. **Needs deploy.**
+
+## Part 506 (Aug 30 2026, session business-os-v1-62) — de-carding sweep: one control, one border
+
+Audit of every page for the reported double-card chrome (a bordered/shadowed
+card wrapping controls that already carry their own border). Fixed
+(`b22a5fe7` + `90a3b414`):
+- Dashboard: the 'card' wrapper around the range pill + preset chips removed.
+- Products: the sticky search row's inner card removed (the sticky backdrop
+  already separates it); the Created-range row's card around the Start → End
+  pill removed; the idle select-all row no longer draws its bulk-toolbar card
+  when it holds nothing but the pager (chrome returns while selecting, when
+  the count/Delete/chips need the frame), and the idle pager centers.
+- Pagers: every remaining old-form pagination (bordered card row around inner
+  pills) converted to the single centered rangeAsPageSize pill — Products
+  bottom, Products image-only, Stock Changes ledger, Audit Log, Inventory
+  movements main + both expanded-group sub-pagers.
+Verified live at 8899: Dashboard and Products both render with standalone
+controls, no nested boxes. tsc clean (two Sales.tsx tx_count errors observed
+during the run belong to a peer's in-flight payment-stats edit, not this
+work); rowAlignment + perf guards green. **Needs deploy.**
