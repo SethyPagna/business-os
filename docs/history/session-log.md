@@ -14665,7 +14665,10 @@ Cancelled + N/A on their own line.
 overlap the parallel session's active "de-carding" passes — applied here only
 to surfaces this batch touched (reports sections, strip folds).
 
-## Part 526 (Aug 30 2026, session business-os-v1-b9) — Part-77 HIGH fix: OTP verify bound to the first factor
+## Part 527 (Aug 30 2026, session business-os-v1-b9) — Part-77 HIGH fix: OTP verify bound to the first factor
+
+*(Renumbered from a colliding "Part 526" — a peer's 526 landed in the same
+minutes; this entry keeps its position.)*
 
 **Ask:** findings-backlog continuation (claimed first, re-verified). POST
 /auth/otp/verify was effectively a standalone 6-digit login: reachable with
