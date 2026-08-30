@@ -138,6 +138,35 @@ export function previewMergeDuplicateProducts(): Promise<unknown> {
   return apiFetch('GET', '/api/products/merge-duplicates/preview')
 }
 
+// Products → Duplicates review section ("possibly the same" residue --
+// same real barcode with differing details, or same display name with
+// different barcodes). The sweep and dismiss mirror the contacts
+// Possible Duplicates panel; the merge is a one-pair fold where the
+// REVIEWER picked the keeper, so both ids ride in the payload. GET stays
+// a plain apiFetch (read-only, retryable); the two writes go through
+// route() like every other real mutation.
+export function getPossiblySameProducts(): Promise<unknown> {
+  return apiFetch('GET', '/api/products/possible-duplicates')
+}
+
+export function dismissProductDuplicateCluster(type: 'barcode' | 'name', value: string): Promise<unknown> {
+  return route(
+    'products:dismissDuplicateCluster',
+    () => apiFetch('POST', '/api/products/possible-duplicates/dismiss', { type, value }),
+    null,
+    true,
+  )
+}
+
+export function mergePossiblySameProducts(keepId: number | string, mergeId: number | string): Promise<unknown> {
+  return route(
+    'products:mergePossiblySame',
+    () => apiFetch('POST', '/api/products/possible-duplicates/merge', { keepId, mergeId }),
+    null,
+    true,
+  )
+}
+
 // Zero-quantity product cleanup (progress.md part 91's full spec, part 97
 // build): a read-only candidate scan plus a confirm-only delete, mirroring
 // mergeDuplicateProducts()/previewMergeDuplicateProducts() above -- GET for

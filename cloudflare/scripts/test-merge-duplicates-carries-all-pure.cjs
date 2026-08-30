@@ -21,11 +21,13 @@ const path = require('node:path')
 
 const routeSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'routes', 'products.ts'), 'utf8')
 
-// The merge lives between the duplicate loop and its audit call. Scoping the
-// assertions to that region keeps them from being satisfied by an unrelated
-// mention of the same table elsewhere in this 1,900-line file.
-const mergeStart = routeSrc.indexOf('for (const dup of group.duplicates)')
-assert.ok(mergeStart > 0, 'merge-duplicates loop not found -- update this test')
+// The whole per-duplicate fold now lives in the shared helper
+// foldDuplicateProductInto (used by both POST /merge-duplicates and
+// POST /possible-duplicates/merge), so the assertions scope to the helper
+// body up to its audit call. Scoping keeps them from being satisfied by an
+// unrelated mention of the same table elsewhere in this large file.
+const mergeStart = routeSrc.indexOf('async function foldDuplicateProductInto')
+assert.ok(mergeStart > 0, 'foldDuplicateProductInto not found -- update this test')
 const mergeEnd = routeSrc.indexOf("'merge_duplicate'", mergeStart)
 assert.ok(mergeEnd > mergeStart, 'merge audit call not found -- update this test')
 const mergeBlock = routeSrc.slice(mergeStart, mergeEnd)
@@ -89,6 +91,23 @@ check('the audit entry reports what was moved, including images', () => {
   const auditBlock = routeSrc.slice(mergeEnd, mergeEnd + 700)
   assert.ok(/batchesMoved:/.test(auditBlock))
   assert.ok(/imagesMoved:/.test(auditBlock), 'a merge that moved imagery must say so rather than doing it invisibly')
+})
+
+check('both merge endpoints route through the ONE shared fold helper -- they can never drift', () => {
+  const groupLoopAt = routeSrc.indexOf('for (const dup of group.duplicates)')
+  assert.ok(groupLoopAt > 0, 'whole-catalog merge loop not found')
+  assert.ok(/for \(const dup of group\.duplicates\) \{\s*\n\s*await foldDuplicateProductInto\(/.test(routeSrc), 'POST /merge-duplicates must fold via the shared helper')
+  const pairRouteAt = routeSrc.indexOf("app.post('/possible-duplicates/merge'")
+  assert.ok(pairRouteAt > 0, 'the one-pair review merge route must exist')
+  assert.ok(routeSrc.indexOf('foldDuplicateProductInto(', pairRouteAt) > pairRouteAt, 'POST /possible-duplicates/merge must fold via the shared helper')
+})
+
+check('the review merge refuses inactive or group rows and recomputes the keeper stock cache', () => {
+  const pairRouteAt = routeSrc.indexOf("app.post('/possible-duplicates/merge'")
+  const pairBlock = routeSrc.slice(pairRouteAt, pairRouteAt + 4000)
+  assert.ok(/Both products must be active/.test(pairBlock), 'merging an already-merged row must 409, not double-fold')
+  assert.ok(/is_group \|\| dup\.is_group/.test(pairBlock), 'group rows must be refused')
+  assert.ok(/SET stock_quantity = \(SELECT COALESCE\(SUM\(quantity\), 0\) FROM branch_stock/.test(pairBlock), 'the keeper\'s denormalized stock cache must be recomputed after the fold')
 })
 
 console.log(`\n${passed} check(s) passed.`)

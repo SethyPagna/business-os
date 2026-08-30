@@ -134,6 +134,7 @@ const ManageCategoriesModal = lazyRetry(() => import('./lookups/ManageCategories
 // bundle for a user who will only ever see this lightweight surface.
 const ProductsImageOnlyView = lazyRetry(() => import('./ProductsImageOnlyView.tsx'), 'products-image-only-view')
 const StockChangeSection = lazyRetry(() => import('./StockChangeSection.tsx'), 'products-stock-change-section')
+const ProductDuplicatesTab = lazyRetry(() => import('./ProductDuplicatesTab.tsx'), 'products-duplicates-tab')
 const ManageBrandsModal = lazyRetry(() => import('./lookups/ManageBrandsModal'), 'products-manage-brands-modal')
 const ManageUnitsModal = lazyRetry(() => import('./lookups/ManageUnitsModal'), 'products-manage-units-modal')
 const ImportModeWizard = lazyRetry(() => import('./import/ImportModeWizard'), 'products-bulk-import-wizard')
@@ -652,7 +653,7 @@ function ProductsFullEditor() {
   // Y15: the page is chip-sectioned like Promotions -- a switcher in the
   // header flips between the product listing and the Stock Changes ledger,
   // which used to be a folded card at the bottom of the same scroll.
-  const [activeProductSection, setActiveProductSection] = useState<'products' | 'stock_changes'>('products')
+  const [activeProductSection, setActiveProductSection] = useState<'products' | 'stock_changes' | 'duplicates'>('products')
   const [productSortDirection, setProductSortDirection] = useState<ProductSortDirection>('name_asc')
   const [search,       setSearch]       = useState('')
   // AND/OR toggle restored (Aug 20 2026), reachable from inside the Filter
@@ -3387,6 +3388,18 @@ function ProductsFullEditor() {
           >
             {tr('stock_change_ledger', 'Stock Changes', 'ការផ្លាស់ប្តូរស្តុក')}
           </button>
+          {/* Duplicates review (possibly-same residue) -- same section-chip
+              pattern, gated by the same permission as the merge tool since
+              its actions are the same kind of merge. */}
+          {canMergeDuplicates ? (
+            <button
+              type="button"
+              onClick={() => setActiveProductSection('duplicates')}
+              className={`rounded-lg px-3 py-1.5 text-sm font-medium transition-colors ${activeProductSection === 'duplicates' ? 'bg-white text-primary-600 shadow dark:bg-gray-900' : 'text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'}`}
+            >
+              {tr('product_duplicates_section', 'Duplicates', 'ស្ទួន')}
+            </button>
+          ) : null}
         </div>
         <div className="w-full min-w-0 overflow-x-auto pb-1 sm:ml-auto sm:w-auto sm:flex-shrink-0 sm:pb-0">
           {/* Each handler is passed only when this role's tier actually
@@ -3936,6 +3949,25 @@ function ProductsFullEditor() {
           </p>
           <Suspense fallback={<div className="py-6 text-center text-sm text-gray-400">{t('loading') || 'Loading'}...</div>}>
             <StockChangeSection t={t} />
+          </Suspense>
+        </div>
+      )}
+
+      {/* Duplicates review section -- mirrors the contacts Possible
+          Duplicates panel for the product catalog. "Open" on a row jumps
+          back to the listing pre-filtered to that product's name so the
+          reviewer can compare full details by hand. */}
+      {activeProductSection === 'duplicates' && canMergeDuplicates && (
+        <div className="mt-1">
+          <Suspense fallback={<div className="py-6 text-center text-sm text-gray-400">{t('loading') || 'Loading'}...</div>}>
+            <ProductDuplicatesTab
+              t={t}
+              notify={notify}
+              onResolve={(term) => {
+                setActiveProductSection('products')
+                setSearch(term)
+              }}
+            />
           </Suspense>
         </div>
       )}

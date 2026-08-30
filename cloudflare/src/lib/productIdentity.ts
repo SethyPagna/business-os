@@ -123,6 +123,109 @@ export type ProductDuplicateGroup = {
   duplicates: ProductIdentityRow[]
 }
 
+// ---------------------------------------------------------------------------
+// "Possibly the same" sweep for the Products → Duplicates review section.
+// Where findDuplicateProductGroups (below) finds rows PROVABLY identical
+// under THE identity rule (name_key + cost + price + barcode) and is safe
+// to auto-merge, this finds the residue only a human can settle -- the
+// classes the Aug 30 production audit surfaced:
+//  - same_barcode: two+ active products sharing one real barcode but
+//    differing in name/price (an EDP/EDT pair, two shades, or the same
+//    item entered twice under two naming conventions).
+//  - same_name: two+ active products sharing a display name (name_key)
+//    with DIFFERENT barcodes -- usually genuinely distinct SKUs (shades /
+//    scents), listed for a glance, never auto-merged.
+// Nothing here merges anything; the routes let the reviewer merge one
+// pair at a time or dismiss a cluster (product_duplicate_dismissals,
+// migration 0083 -- same persistence model as the contacts panel).
+
+export type PossiblySameSeverity = 'same_barcode' | 'same_name'
+
+export type PossiblySameProductEntry = {
+  id: number
+  name: string | null
+  barcode: string | null
+  cost_price_usd: number | null
+  selling_price_usd: number | null
+  stock_quantity: number | null
+  image_path: string | null
+}
+
+export type PossiblySameProductCluster = {
+  type: 'barcode' | 'name'
+  value: string
+  severity: PossiblySameSeverity
+  products: PossiblySameProductEntry[]
+}
+
+// The old system stamped '0' (and the empty string) on products without a
+// real barcode -- 238 such products share barcode "0" in production. Any
+// barcode that short cannot identify a product, so it never forms a
+// cluster.
+const MIN_REAL_BARCODE_LENGTH = 4
+
+// Dismissals are stored NORMALIZED (trimmed barcode / name_key) so the
+// same cluster matches its dismissal regardless of the display casing the
+// panel happened to show at dismiss time -- the same rule the contacts
+// panel applies (contactDuplicates.ts's normalized dismissal compare).
+export function normalizeProductClusterKey(type: 'barcode' | 'name', value: unknown): string {
+  return type === 'barcode' ? String(value ?? '').trim() : normalizeProductGroupName(value)
+}
+
+export async function findPossiblySameProductClusters(db: D1Compat): Promise<PossiblySameProductCluster[]> {
+  const [rows, dismissalRows] = await Promise.all([
+    db.prepare(`
+      SELECT id, name, barcode, cost_price_usd, selling_price_usd, stock_quantity, image_path, name_key
+      FROM products
+      WHERE is_active = 1 AND COALESCE(is_group, 0) = 0
+      ORDER BY id ASC
+    `).all<PossiblySameProductEntry & { name_key: string | null }>({}),
+    db.prepare(`SELECT cluster_type, cluster_value FROM product_duplicate_dismissals`)
+      .all<{ cluster_type: string; cluster_value: string }>({}),
+  ])
+  const dismissed = new Set(dismissalRows.map((row) => `${row.cluster_type}${row.cluster_value}`))
+
+  const byBarcode = new Map<string, (PossiblySameProductEntry & { name_key: string | null })[]>()
+  const byNameKey = new Map<string, (PossiblySameProductEntry & { name_key: string | null })[]>()
+  for (const row of rows) {
+    const barcode = String(row.barcode || '').trim()
+    if (barcode.length >= MIN_REAL_BARCODE_LENGTH) {
+      if (!byBarcode.has(barcode)) byBarcode.set(barcode, [])
+      byBarcode.get(barcode)!.push(row)
+    }
+    if (row.name_key) {
+      if (!byNameKey.has(row.name_key)) byNameKey.set(row.name_key, [])
+      byNameKey.get(row.name_key)!.push(row)
+    }
+  }
+
+  const toEntry = (row: PossiblySameProductEntry): PossiblySameProductEntry => ({
+    id: row.id, name: row.name, barcode: row.barcode,
+    cost_price_usd: row.cost_price_usd, selling_price_usd: row.selling_price_usd,
+    stock_quantity: row.stock_quantity, image_path: row.image_path,
+  })
+
+  const clusters: PossiblySameProductCluster[] = []
+  for (const [barcode, group] of byBarcode) {
+    if (group.length < 2) continue
+    if (dismissed.has(`barcode${barcode}`)) continue
+    clusters.push({ type: 'barcode', value: barcode, severity: 'same_barcode', products: group.map(toEntry) })
+  }
+  for (const [nameKey, group] of byNameKey) {
+    if (group.length < 2) continue
+    if (dismissed.has(`name${nameKey}`)) continue
+    // A name group whose members all share one real barcode IS the barcode
+    // cluster above -- listing it twice would make one decision look like
+    // two. Groups with mixed/placeholder barcodes still show here.
+    const barcodes = new Set(group.map((row) => String(row.barcode || '').trim()))
+    if (barcodes.size === 1 && [...barcodes][0].length >= MIN_REAL_BARCODE_LENGTH) continue
+    clusters.push({ type: 'name', value: group[0].name || nameKey, severity: 'same_name', products: group.map(toEntry) })
+  }
+  // Worst-first: a shared real barcode is far stronger same-item evidence
+  // than a shared display name.
+  return clusters.sort((a, b) => (a.severity === b.severity ? 0 : a.severity === 'same_barcode' ? -1 : 1))
+}
+
 export async function findDuplicateProductGroups(db: D1Compat): Promise<ProductDuplicateGroup[]> {
   const rows = await db
     .prepare(`

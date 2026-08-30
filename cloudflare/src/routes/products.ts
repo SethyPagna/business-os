@@ -15,7 +15,7 @@ import { getProductSalesBreakdown } from '../lib/salesAnalytics'
 import { validateUploadedBuffer } from '../lib/uploadSecurity'
 import { checkRateLimit, getClientIp } from '../lib/rateLimit'
 import { audit } from '../lib/audit'
-import { findDuplicateProductGroups } from '../lib/productIdentity'
+import { findDuplicateProductGroups, findPossiblySameProductClusters, normalizeProductClusterKey } from '../lib/productIdentity'
 import { attachBatchCounts } from '../lib/productBatches'
 import { maybeQueueForReview } from '../lib/reviewGate'
 import { assertUpdatedAtMatch, getExpectedUpdatedAt, writeConflictResponse, WriteConflictError } from '../lib/conflictControl'
@@ -2041,6 +2041,174 @@ app.post('/unwire-images', async (c) => {
   return c.json({ success: true, cleared })
 })
 
+// The complete fold of ONE duplicate product into a keeper -- branch_stock
+// summed per branch (with an inventory_movements record each), gallery +
+// primary image carried over, product_batches re-pointed lot-by-lot (or
+// folded into the keeper's same-key lot -- see the batch_key comment in the
+// body), the duplicate soft-deactivated so old sales/movements referencing
+// its id stay valid, and an audit entry written. Shared verbatim by the
+// whole-catalog POST /merge-duplicates below and the one-pair
+// POST /possible-duplicates/merge, so the two paths can never drift.
+// Callers recompute the keeper's denormalized stock_quantity afterwards
+// (once per group / once per pair) and bump caches.
+async function foldDuplicateProductInto(
+  env: Env,
+  db: ReturnType<typeof getDb>,
+  user: SessionUser | null,
+  canonical: { id: number; name: string | null },
+  dup: { id: number; name: string | null; image_path?: string | null },
+  branchNameById: Map<number, string>,
+  mergeContext: string,
+): Promise<{ batchesMoved: number; batchesFolded: number; imagesMoved: number; quantityMoved: number }> {
+  const canonicalId = canonical.id
+  const canonicalName = canonical.name
+  // Snapshot the keeper's current batch set at call time; a group caller
+  // folding several duplicates commits each fold before the next call, so
+  // a later duplicate sees (and folds into) batches an earlier one moved.
+  const canonicalBatchRows = await db
+    .prepare('SELECT id, batch_key, batch_number FROM product_batches WHERE variant_product_id = @id')
+    .all<{ id: number; batch_key: string; batch_number: number | null }>({ id: canonicalId })
+  const canonicalBatchIdByKey = new Map<string, number>(canonicalBatchRows.map((b) => [b.batch_key, b.id]))
+  let nextCanonicalBatchNumber = canonicalBatchRows.reduce((max, b) => Math.max(max, Number(b.batch_number) || 0), 0) + 1
+
+  const stockRows = await db
+    .prepare('SELECT branch_id, quantity FROM branch_stock WHERE product_id = @id')
+    .all<{ branch_id: number; quantity: number }>({ id: dup.id })
+  const dupBatchRows = await db
+    .prepare('SELECT id, batch_key FROM product_batches WHERE variant_product_id = @id')
+    .all<{ id: number; batch_key: string }>({ id: dup.id })
+  // Images were the one thing this merge silently threw away: branch_stock,
+  // inventory_movements and product_batches were all carried over, but the
+  // duplicate's gallery (product_images) and its image_path were left
+  // attached to a row that is about to be deactivated -- so a photo the
+  // duplicate carried and the canonical didn't simply vanished from the
+  // catalog. That breaks the standing rule that images follow a product
+  // through a rename or a regroup.
+  const dupImageRows = await db
+    .prepare('SELECT image_path, sort_order FROM product_images WHERE product_id = @id ORDER BY sort_order ASC, id ASC')
+    .all<{ image_path: string; sort_order: number | null }>({ id: dup.id })
+  const canonicalImageRows = await db
+    .prepare('SELECT image_path FROM product_images WHERE product_id = @id')
+    .all<{ image_path: string }>({ id: canonicalId })
+  const canonicalImagePaths = new Set(canonicalImageRows.map((r) => String(r.image_path)))
+  let nextCanonicalImageOrder = canonicalImageRows.length
+
+  const statements: Array<{ sql: string; params?: Record<string, unknown> }> = []
+  let quantityMoved = 0
+  for (const row of stockRows) {
+    const qty = Number(row.quantity) || 0
+    if (!qty) continue
+    quantityMoved += qty
+    statements.push({
+      sql: `INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (@canonicalId, @branchId, @qty)
+            ON CONFLICT(product_id, branch_id) DO UPDATE SET quantity = quantity + excluded.quantity`,
+      params: { canonicalId, branchId: row.branch_id, qty },
+    })
+    statements.push({
+      sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id, branch_name, movement_type, quantity, reason, user_id, user_name, created_at)
+            VALUES (@productId, @productName, @branchId, @branchName, 'adjustment', @quantity, @reason, @userId, @userName, CURRENT_TIMESTAMP)`,
+      params: {
+        productId: canonicalId,
+        productName: canonicalName,
+        branchId: row.branch_id,
+        branchName: branchNameById.get(row.branch_id) || null,
+        quantity: qty,
+        reason: `Merged duplicate product "${dup.name}" (#${dup.id}) into this product -- ${mergeContext}`,
+        userId: user?.id ?? null,
+        userName: user?.name ?? null,
+      },
+    })
+  }
+  statements.push({ sql: 'DELETE FROM branch_stock WHERE product_id = @id', params: { id: dup.id } })
+
+  // Move any gallery image the canonical doesn't already have, appended
+  // after the canonical's own so its existing order is preserved. Deduped
+  // by path, since two duplicates of one product very often reference the
+  // same stored object.
+  let imagesMovedThisDup = 0
+  for (const image of dupImageRows) {
+    const imagePath = String(image.image_path || '')
+    if (!imagePath || canonicalImagePaths.has(imagePath)) continue
+    canonicalImagePaths.add(imagePath)
+    statements.push({
+      sql: 'INSERT INTO product_images (product_id, image_path, sort_order) VALUES (@canonicalId, @path, @order)',
+      params: { canonicalId, path: imagePath, order: nextCanonicalImageOrder },
+    })
+    nextCanonicalImageOrder += 1
+    imagesMovedThisDup += 1
+  }
+  statements.push({ sql: 'DELETE FROM product_images WHERE product_id = @id', params: { id: dup.id } })
+  // A canonical with no primary image adopts the duplicate's, so a merge
+  // can only ever add imagery, never remove it.
+  statements.push({
+    sql: `UPDATE products SET image_path = COALESCE(NULLIF(image_path, ''), @dupImagePath), updated_at = CURRENT_TIMESTAMP
+          WHERE id = @canonicalId AND @dupImagePath IS NOT NULL AND @dupImagePath != ''`,
+    params: { canonicalId, dupImagePath: dup.image_path ?? null },
+  })
+
+  statements.push({ sql: 'UPDATE products SET is_active = 0, updated_at = CURRENT_TIMESTAMP WHERE id = @id', params: { id: dup.id } })
+
+  // batch_key has a UNIQUE(variant_product_id, batch_key) index, so a
+  // batch can't just be re-pointed at the canonical product if the
+  // canonical already has a batch with the same key -- fold that
+  // duplicate batch's branch_batch_stock into the canonical's existing
+  // same-key batch instead (summed per branch, same ON CONFLICT
+  // pattern as branch_stock above) and leave the now-empty duplicate
+  // batch row deactivated in place rather than deleting it, since
+  // sale_item_batch_allocations/return_item_batch_allocations may
+  // still reference its id. No collision -> reassign the FK directly
+  // and give it a fresh batch_number in the canonical's own sequence
+  // (this is the batch's first-ever assignment under that product, not
+  // a renumbering of an existing stable one -- see productBatches.ts's
+  // "stable once assigned" comment, which is about a batch keeping its
+  // number for as long as it stays on the same product).
+  let batchesMovedThisDup = 0
+  let batchesFoldedThisDup = 0
+  for (const batchRow of dupBatchRows) {
+    const existingCanonicalBatchId = canonicalBatchIdByKey.get(batchRow.batch_key)
+    if (existingCanonicalBatchId) {
+      const dupBatchStockRows = await db
+        .prepare('SELECT branch_id, quantity FROM branch_batch_stock WHERE batch_id = @id')
+        .all<{ branch_id: number; quantity: number }>({ id: batchRow.id })
+      for (const bbs of dupBatchStockRows) {
+        const qty = Number(bbs.quantity) || 0
+        if (!qty) continue
+        statements.push({
+          sql: `INSERT INTO branch_batch_stock (batch_id, branch_id, quantity) VALUES (@batchId, @branchId, @qty)
+                ON CONFLICT(batch_id, branch_id) DO UPDATE SET quantity = quantity + excluded.quantity, updated_at = CURRENT_TIMESTAMP`,
+          params: { batchId: existingCanonicalBatchId, branchId: bbs.branch_id, qty },
+        })
+      }
+      statements.push({ sql: 'DELETE FROM branch_batch_stock WHERE batch_id = @id', params: { id: batchRow.id } })
+      statements.push({ sql: 'UPDATE product_batches SET is_active = 0, updated_at = CURRENT_TIMESTAMP WHERE id = @id', params: { id: batchRow.id } })
+      batchesFoldedThisDup += 1
+    } else {
+      statements.push({
+        sql: 'UPDATE product_batches SET variant_product_id = @canonicalId, batch_number = @batchNumber, updated_at = CURRENT_TIMESTAMP WHERE id = @id',
+        params: { canonicalId, batchNumber: nextCanonicalBatchNumber, id: batchRow.id },
+      })
+      canonicalBatchIdByKey.set(batchRow.batch_key, batchRow.id)
+      nextCanonicalBatchNumber += 1
+      batchesMovedThisDup += 1
+    }
+  }
+
+  await db.batch(statements)
+
+  await audit(env, user?.id ?? null, user?.name ?? null, 'merge_duplicate', 'product', dup.id, {
+    productName: dup.name,
+    mergedIntoProductId: canonicalId,
+    mergedIntoProductName: canonicalName,
+    batchesMoved: batchesMovedThisDup,
+    batchesFoldedIntoExistingLot: batchesFoldedThisDup,
+    // Recorded so a merge that moved imagery is visible in the audit log
+    // rather than being an invisible side effect.
+    imagesMoved: imagesMovedThisDup,
+  })
+
+  return { batchesMoved: batchesMovedThisDup, batchesFolded: batchesFoldedThisDup, imagesMoved: imagesMovedThisDup, quantityMoved }
+}
+
 app.get('/merge-duplicates/preview', async (c) => {
   const user = c.get('user')
   if (getActionTier(user, 'products', 'merge_duplicates') !== 'full') {
@@ -2148,157 +2316,20 @@ app.post('/merge-duplicates', async (c) => {
     const mergedIds: number[] = []
     const mergedNames: (string | null)[] = []
 
-    // Batch/lot history reassignment -- fixes the gap
-    // MergeDuplicatesReviewModal.tsx explicitly warns about: a duplicate's
-    // product_batches rows (lot codes, expiry dates) used to stay pointed
-    // at its now-inactive id and never followed the quantity into the
-    // canonical product, so "Manage Batches" on the surviving row could
-    // silently miss real batch/expiry detail after a merge. Snapshot the
-    // canonical's current batches once per group (not per duplicate) so
-    // every duplicate in the group checks/reserves the same growing set --
-    // two duplicates in one group can each carry a batch with the same
-    // batch_key (e.g. both received the same real-world lot before either
-    // was merged).
-    const canonicalBatchRows = await db
-      .prepare('SELECT id, batch_key, batch_number FROM product_batches WHERE variant_product_id = @id')
-      .all<{ id: number; batch_key: string; batch_number: number | null }>({ id: canonicalId })
-    const canonicalBatchIdByKey = new Map<string, number>(canonicalBatchRows.map((b) => [b.batch_key, b.id]))
-    let nextCanonicalBatchNumber = canonicalBatchRows.reduce((max, b) => Math.max(max, Number(b.batch_number) || 0), 0) + 1
-
+    // Batch/lot history reassignment, stock fold, image carry, audit --
+    // the whole per-duplicate fold lives in foldDuplicateProductInto
+    // (shared with POST /possible-duplicates/merge). Each fold commits
+    // before the next runs, so a later duplicate in the group sees -- and
+    // folds into -- batches an earlier one already moved (the same
+    // "growing set" the old per-group snapshot provided).
     for (const dup of group.duplicates) {
-      const stockRows = await db
-        .prepare('SELECT branch_id, quantity FROM branch_stock WHERE product_id = @id')
-        .all<{ branch_id: number; quantity: number }>({ id: dup.id })
-      const dupBatchRows = await db
-        .prepare('SELECT id, batch_key FROM product_batches WHERE variant_product_id = @id')
-        .all<{ id: number; batch_key: string }>({ id: dup.id })
-      // Images were the one thing this merge silently threw away: branch_stock,
-      // inventory_movements and product_batches were all carried over, but the
-      // duplicate's gallery (product_images) and its image_path were left
-      // attached to a row that is about to be deactivated -- so a photo the
-      // duplicate carried and the canonical didn't simply vanished from the
-      // catalog. That breaks the standing rule that images follow a product
-      // through a rename or a regroup.
-      const dupImageRows = await db
-        .prepare('SELECT image_path, sort_order FROM product_images WHERE product_id = @id ORDER BY sort_order ASC, id ASC')
-        .all<{ image_path: string; sort_order: number | null }>({ id: dup.id })
-      const canonicalImageRows = await db
-        .prepare('SELECT image_path FROM product_images WHERE product_id = @id')
-        .all<{ image_path: string }>({ id: canonicalId })
-      const canonicalImagePaths = new Set(canonicalImageRows.map((r) => String(r.image_path)))
-      let nextCanonicalImageOrder = canonicalImageRows.length
-
-      const statements: Array<{ sql: string; params?: Record<string, unknown> }> = []
-      for (const row of stockRows) {
-        const qty = Number(row.quantity) || 0
-        if (!qty) continue
-        statements.push({
-          sql: `INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (@canonicalId, @branchId, @qty)
-                ON CONFLICT(product_id, branch_id) DO UPDATE SET quantity = quantity + excluded.quantity`,
-          params: { canonicalId, branchId: row.branch_id, qty },
-        })
-        statements.push({
-          sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id, branch_name, movement_type, quantity, reason, user_id, user_name, created_at)
-                VALUES (@productId, @productName, @branchId, @branchName, 'adjustment', @quantity, @reason, @userId, @userName, CURRENT_TIMESTAMP)`,
-          params: {
-            productId: canonicalId,
-            productName: canonicalName,
-            branchId: row.branch_id,
-            branchName: branchNameById.get(row.branch_id) || null,
-            quantity: qty,
-            reason: `Merged duplicate product "${dup.name}" (#${dup.id}) into this product -- branch-only duplicate cleanup`,
-            userId: user?.id ?? null,
-            userName: user?.name ?? null,
-          },
-        })
-      }
-      statements.push({ sql: 'DELETE FROM branch_stock WHERE product_id = @id', params: { id: dup.id } })
-
-      // Move any gallery image the canonical doesn't already have, appended
-      // after the canonical's own so its existing order is preserved. Deduped
-      // by path, since two duplicates of one product very often reference the
-      // same stored object.
-      let imagesMovedThisDup = 0
-      for (const image of dupImageRows) {
-        const imagePath = String(image.image_path || '')
-        if (!imagePath || canonicalImagePaths.has(imagePath)) continue
-        canonicalImagePaths.add(imagePath)
-        statements.push({
-          sql: 'INSERT INTO product_images (product_id, image_path, sort_order) VALUES (@canonicalId, @path, @order)',
-          params: { canonicalId, path: imagePath, order: nextCanonicalImageOrder },
-        })
-        nextCanonicalImageOrder += 1
-        imagesMovedThisDup += 1
-      }
-      statements.push({ sql: 'DELETE FROM product_images WHERE product_id = @id', params: { id: dup.id } })
-      // A canonical with no primary image adopts the duplicate's, so a merge
-      // can only ever add imagery, never remove it.
-      statements.push({
-        sql: `UPDATE products SET image_path = COALESCE(NULLIF(image_path, ''), @dupImagePath), updated_at = CURRENT_TIMESTAMP
-              WHERE id = @canonicalId AND @dupImagePath IS NOT NULL AND @dupImagePath != ''`,
-        params: { canonicalId, dupImagePath: dup.image_path ?? null },
-      })
-
-      statements.push({ sql: 'UPDATE products SET is_active = 0, updated_at = CURRENT_TIMESTAMP WHERE id = @id', params: { id: dup.id } })
-
-      // batch_key has a UNIQUE(variant_product_id, batch_key) index, so a
-      // batch can't just be re-pointed at the canonical product if the
-      // canonical already has a batch with the same key -- fold that
-      // duplicate batch's branch_batch_stock into the canonical's existing
-      // same-key batch instead (summed per branch, same ON CONFLICT
-      // pattern as branch_stock above) and leave the now-empty duplicate
-      // batch row deactivated in place rather than deleting it, since
-      // sale_item_batch_allocations/return_item_batch_allocations may
-      // still reference its id. No collision -> reassign the FK directly
-      // and give it a fresh batch_number in the canonical's own sequence
-      // (this is the batch's first-ever assignment under that product, not
-      // a renumbering of an existing stable one -- see productBatches.ts's
-      // "stable once assigned" comment, which is about a batch keeping its
-      // number for as long as it stays on the same product).
-      let batchesMovedThisDup = 0
-      let batchesFoldedThisDup = 0
-      for (const batchRow of dupBatchRows) {
-        const existingCanonicalBatchId = canonicalBatchIdByKey.get(batchRow.batch_key)
-        if (existingCanonicalBatchId) {
-          const dupBatchStockRows = await db
-            .prepare('SELECT branch_id, quantity FROM branch_batch_stock WHERE batch_id = @id')
-            .all<{ branch_id: number; quantity: number }>({ id: batchRow.id })
-          for (const bbs of dupBatchStockRows) {
-            const qty = Number(bbs.quantity) || 0
-            if (!qty) continue
-            statements.push({
-              sql: `INSERT INTO branch_batch_stock (batch_id, branch_id, quantity) VALUES (@batchId, @branchId, @qty)
-                    ON CONFLICT(batch_id, branch_id) DO UPDATE SET quantity = quantity + excluded.quantity, updated_at = CURRENT_TIMESTAMP`,
-              params: { batchId: existingCanonicalBatchId, branchId: bbs.branch_id, qty },
-            })
-          }
-          statements.push({ sql: 'DELETE FROM branch_batch_stock WHERE batch_id = @id', params: { id: batchRow.id } })
-          statements.push({ sql: 'UPDATE product_batches SET is_active = 0, updated_at = CURRENT_TIMESTAMP WHERE id = @id', params: { id: batchRow.id } })
-          batchesFoldedThisDup += 1
-        } else {
-          statements.push({
-            sql: 'UPDATE product_batches SET variant_product_id = @canonicalId, batch_number = @batchNumber, updated_at = CURRENT_TIMESTAMP WHERE id = @id',
-            params: { canonicalId, batchNumber: nextCanonicalBatchNumber, id: batchRow.id },
-          })
-          canonicalBatchIdByKey.set(batchRow.batch_key, batchRow.id)
-          nextCanonicalBatchNumber += 1
-          batchesMovedThisDup += 1
-        }
-      }
-
-      await db.batch(statements)
-
-      await audit(c.env, user?.id ?? null, user?.name ?? null, 'merge_duplicate', 'product', dup.id, {
-        productName: dup.name,
-        mergedIntoProductId: canonicalId,
-        mergedIntoProductName: canonicalName,
-        batchesMoved: batchesMovedThisDup,
-        batchesFoldedIntoExistingLot: batchesFoldedThisDup,
-        // Recorded so a merge that moved imagery is visible in the audit log
-        // rather than being an invisible side effect.
-        imagesMoved: imagesMovedThisDup,
-      })
-
+      await foldDuplicateProductInto(
+        c.env, db, user,
+        { id: canonicalId, name: canonicalName },
+        dup,
+        branchNameById,
+        'branch-only duplicate cleanup',
+      )
       mergedIds.push(dup.id)
       mergedNames.push(dup.name)
       mergedProductsCount += 1
@@ -2320,6 +2351,83 @@ app.post('/merge-duplicates', async (c) => {
   c.executionCtx.waitUntil(broadcast(c.env, 'products', { action: 'update' }))
   c.executionCtx.waitUntil(broadcast(c.env, 'inventory', { action: 'update' }))
   return c.json({ success: true, mergedGroups: groups.length, mergedProducts: mergedProductsCount, groups: groupSummaries })
+})
+
+// ---------------------------------------------------------------------------
+// Products → Duplicates review section ("possibly the same" residue).
+// Where /merge-duplicates auto-merges rows PROVABLY identical under THE
+// identity rule, these three routes back the human review of the looser
+// classes the Aug 30 production audit surfaced (same real barcode with
+// differing details; same display name with different barcodes): a live
+// sweep to look at, a per-cluster dismissal ("reviewed, genuinely two
+// items"), and a one-pair merge where the REVIEWER picks the keeper.
+// Same permission as the auto-merge -- it is the same kind of action.
+// ---------------------------------------------------------------------------
+app.get('/possible-duplicates', async (c) => {
+  const user = c.get('user')
+  if (getActionTier(user, 'products', 'merge_duplicates') !== 'full') {
+    return c.json({ success: false, error: 'You do not have permission to perform this action' }, 403)
+  }
+  const clusters = await findPossiblySameProductClusters(getDb(c.env))
+  return c.json({ success: true, clusters })
+})
+
+app.post('/possible-duplicates/dismiss', async (c) => {
+  const user = c.get('user')
+  if (getActionTier(user, 'products', 'merge_duplicates') !== 'full') {
+    return c.json({ error: 'You do not have permission to perform this action' }, 403)
+  }
+  const body = await c.req.json().catch(() => ({})) as { type?: string; value?: string }
+  const type = body.type === 'barcode' || body.type === 'name' ? body.type : null
+  const value = type ? normalizeProductClusterKey(type, body.value) : ''
+  if (!type || !value) return c.json({ error: 'type (barcode|name) and value are required' }, 400)
+  await getDb(c.env).prepare(`
+    INSERT INTO product_duplicate_dismissals (cluster_type, cluster_value, dismissed_by_id, dismissed_by_name, dismissed_at)
+    VALUES (@type, @value, @byId, @byName, CURRENT_TIMESTAMP)
+    ON CONFLICT(cluster_type, cluster_value) DO UPDATE SET
+      dismissed_by_id = @byId, dismissed_by_name = @byName, dismissed_at = CURRENT_TIMESTAMP
+  `).run({ type, value, byId: user?.id ?? null, byName: user?.name ?? null })
+  return c.json({ success: true })
+})
+
+app.post('/possible-duplicates/merge', async (c) => {
+  const user = c.get('user')
+  if (getActionTier(user, 'products', 'merge_duplicates') !== 'full') {
+    return c.json({ error: 'You do not have permission to perform this action' }, 403)
+  }
+  const body = await c.req.json().catch(() => ({})) as { keepId?: unknown; mergeId?: unknown }
+  const keepId = Number(body.keepId)
+  const mergeId = Number(body.mergeId)
+  if (!Number.isFinite(keepId) || !Number.isFinite(mergeId) || keepId === mergeId) {
+    return c.json({ error: 'keepId and mergeId (two different ids) are required' }, 400)
+  }
+  const db = getDb(c.env)
+  const [keeper, dup] = await Promise.all([
+    db.prepare('SELECT id, name, image_path, is_active, COALESCE(is_group, 0) AS is_group FROM products WHERE id = @id')
+      .get<{ id: number; name: string | null; image_path: string | null; is_active: number; is_group: number }>({ id: keepId }),
+    db.prepare('SELECT id, name, image_path, is_active, COALESCE(is_group, 0) AS is_group FROM products WHERE id = @id')
+      .get<{ id: number; name: string | null; image_path: string | null; is_active: number; is_group: number }>({ id: mergeId }),
+  ])
+  if (!keeper || !dup) return c.json({ error: 'Both products must exist' }, 404)
+  if (!keeper.is_active || !dup.is_active) return c.json({ error: 'Both products must be active — one of them was already merged or deleted' }, 409)
+  if (keeper.is_group || dup.is_group) return c.json({ error: 'Group rows cannot be merged — merge the variant products instead' }, 400)
+
+  const branchRows = await db.prepare('SELECT id, name FROM branches').all<{ id: number; name: string }>({})
+  const stats = await foldDuplicateProductInto(
+    c.env, db, user,
+    { id: keeper.id, name: keeper.name },
+    { id: dup.id, name: dup.name, image_path: dup.image_path },
+    new Map<number, string>(branchRows.map((b) => [b.id, b.name])),
+    'possible-duplicates review merge',
+  )
+  await db
+    .prepare('UPDATE products SET stock_quantity = (SELECT COALESCE(SUM(quantity), 0) FROM branch_stock WHERE product_id = @id), updated_at = CURRENT_TIMESTAMP WHERE id = @id')
+    .run({ id: keeper.id })
+
+  c.executionCtx.waitUntil(bumpVersion(c.env, 'products'))
+  c.executionCtx.waitUntil(broadcast(c.env, 'products', { action: 'update' }))
+  c.executionCtx.waitUntil(broadcast(c.env, 'inventory', { action: 'update' }))
+  return c.json({ success: true, keptId: keeper.id, mergedId: dup.id, ...stats })
 })
 
 // GET /api/products/zero-quantity-candidates -- read-only scan for the
