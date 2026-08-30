@@ -147,13 +147,23 @@ export default function DateTimeRangePicker({
     onChange(next)
   }
 
+  // Day clicks alternate start -> end -> start... via an explicit phase ref
+  // instead of inferring from an empty endDate. The old inference broke on
+  // parents that never hold an empty end (the Dashboard's onChange ignores
+  // blank dates), where every click could only ever move the START -- the
+  // reported "pick a day then another and it couldn't change". First click
+  // sets a one-day range (start=end=that day, so the parent always sees a
+  // complete range); the second click extends it (apply() swaps if it lands
+  // before the start); the third starts over.
+  const pickPhaseRef = useRef<'start' | 'end'>('start')
   const pickDay = (iso: string) => {
-    if (!value.startDate || (value.startDate && value.endDate)) {
-      // Fresh selection: this day starts a new range.
-      apply({ startDate: iso, endDate: '' })
+    if (pickPhaseRef.current === 'start') {
+      apply({ startDate: iso, endDate: iso })
+      pickPhaseRef.current = 'end'
       return
     }
     apply({ endDate: iso })
+    pickPhaseRef.current = 'start'
   }
 
   // Start/End month+year select rows (the redesign's replacement for the old
@@ -234,7 +244,11 @@ export default function DateTimeRangePicker({
     <div ref={rootRef} className={`relative ${className}`}>
       <button
         type="button"
-        onClick={() => setOpen((current) => !current)}
+        onClick={() => setOpen((current) => {
+          // A fresh open always starts a fresh day-click sequence.
+          if (!current) pickPhaseRef.current = 'start'
+          return !current
+        })}
         className={`${triggerClassName || 'inline-flex items-center gap-2 rounded-md px-3 py-1.5 sm:gap-2.5 sm:px-4 sm:py-2.5 sm:text-sm sm:min-w-[15rem]'} border text-xs font-medium transition ${hasSelection
           ? 'border-blue-400 bg-blue-50 text-blue-800 shadow-sm dark:border-blue-600 dark:bg-blue-900/30 dark:text-blue-100'
           : 'border-slate-300 bg-white text-slate-700 hover:border-blue-300 hover:bg-blue-50/50 hover:text-blue-700 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-300 dark:hover:border-blue-600'}`}
@@ -345,8 +359,8 @@ export default function DateTimeRangePicker({
               const year = iso ? Number(iso.slice(0, 4)) : (which === 'start' ? viewYear : Number((value.endDate || value.startDate || today).slice(0, 4)))
               const rowLabel = which === 'start' ? (t('range_start') || 'Start') : (t('range_end') || 'End')
               return (
-                <div key={which} className="grid grid-cols-[3.25rem_minmax(0,1fr)_minmax(0,5.5rem)] items-center gap-1.5">
-                  <span className="text-[11px] font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">{rowLabel}</span>
+                <div key={which} className="grid grid-cols-[minmax(3.25rem,max-content)_minmax(0,1fr)_minmax(0,5.5rem)] items-center gap-1.5">
+                  <span className="whitespace-nowrap text-[11px] font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">{rowLabel}</span>
                   <AppSelect
                     value={String(month1)}
                     options={monthOptions}
