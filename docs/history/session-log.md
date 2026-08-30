@@ -14479,3 +14479,34 @@ on HEAD again after coordinator 7b's Part 520); frontend tsc clean apart
 from a peer's in-flight uncommitted StockChangeSection.tsx edit
 (`bucketCell` — attributed via the uncommitted diff, not mine).
 **Needs deploy** (rides with the b9 batch: Parts 507/512/513/517/518/521).
+
+## Part 516 (Aug 30 2026, session 5752…ec47) — Stock Changes redesigned to day-grouped cards; instructions moved into InfoHints
+
+Commit `bba6a737`. Products → Stock Changes ledger.
+
+- **Table → day-grouped card list**: the horizontally-scrolling before/after
+  table (`min-w-[920px]`) is replaced by a card list grouped by business day.
+  A divider header per day carries the date (mm/dd/yyyy) + count; each change
+  is one tappable card showing its TIME only (`fmtClock24`, new shared
+  HH:mm/business-tz formatter — the time-only companion to `fmtDateTime24`),
+  product name, the colored movement chip, before → after, and muted
+  batch/branch/reason chips. Tap opens the existing per-product mini-ledger
+  modal (unchanged). Grouping is over the current server page (25/pp); rows
+  arrive created_at desc so day + within-day order are preserved; a day that
+  straddles a page edge simply re-shows its header.
+- **Instructions → InfoHint** (density preference): the one-line
+  `stock_change_ledger_hint` that sat inline above the section (Products.tsx)
+  is gone; the fuller explanation now lives behind an InfoHint next to the
+  total count inside StockChangeSection. Same treatment applied to
+  InventoryReasonManagerModal — its "Reuse common reasons…" description
+  sentence is now behind an InfoHint on the "Saved reasons" header.
+
+Multi-session hygiene: Products.tsx has a peer's toolbar rework in flight
+(Created-date row moved above search, pager folded in) — committed ONLY my
+`<p>`→comment hunk via `git apply --cached`. Sales.tsx / SalesListSurface /
+StatsStrip / PortalMenu / ButtonGuidePopover / FeesPage are peer-dirty and
+untouched. tsc clean outside the peer's `Inventory.tsx`.
+
+Verified live on 8899 (rebuild + wrangler restart; the dist watcher dies
+with EPERM on Windows). **Needs deploy** with everything since Worker
+65f7b69d.
