@@ -7,6 +7,7 @@ import PaginationControls from '../shared/PaginationControls'
 import SearchInput from '../shared/SearchInput'
 import { useDebouncedValue } from '../../utils/useDebouncedValue.ts'
 import { fmtDateTime24 } from '../../utils/formatters'
+import { batchDisplayLabel } from '../../utils/batchLabel.ts'
 
 // D1 (Part 415): the user's Stock Change ledger on the Products page --
 // one row per recorded action over the EXISTING movement history, with the
@@ -32,6 +33,13 @@ type LedgerRow = {
   ledger_bucket: 'adjustment' | 'in' | 'out'
   before_qty: number
   after_qty: number
+  // 0084 (D2a): the ONE lot this movement touched, when attributable --
+  // NULL for multi-lot spreads, legacy aggregate stock and pre-0084 rows.
+  batch_id: number | null
+  batch_lot_code: string | null
+  batch_received_at: string | null
+  batch_supplier_id: number | null
+  batch_supplier_name: string | null
 }
 
 type LedgerResponse = {
@@ -63,14 +71,15 @@ export default function StockChangeSection({ t }: { t: Translate }) {
   const [page, setPage] = useState(1)
   const [search, setSearch] = useState('')
   const debouncedSearch = useDebouncedValue(search, 350)
-  // D2's ledger filters: branch + inclusive date range (the endpoint took
-  // these from day one; this row exposes them). Supplier is deliberately
-  // absent: inventory_movements never records which batch a row touched,
-  // so a movement-level supplier filter cannot be answered truthfully
-  // from existing data -- it needs an additive movements.batch_id column
-  // stamped by the writers first (flagged on the board under D2).
+  // D2's ledger filters: branch + inclusive date range + supplier. The
+  // supplier filter reads the movement's lot attribution (migration 0084's
+  // movements.batch_id, stamped by every writer where ONE lot is truthfully
+  // known); rows without an attributed lot are honestly excluded from a
+  // supplier-filtered view, never guessed in.
   const [branchId, setBranchId] = useState(0)
   const [branches, setBranches] = useState<BranchOption[]>([])
+  const [supplierId, setSupplierId] = useState(0)
+  const [suppliers, setSuppliers] = useState<Array<{ id: number; name: string }>>([])
   const [startDate, setStartDate] = useState('')
   const [endDate, setEndDate] = useState('')
   const [rows, setRows] = useState<LedgerRow[]>([])
@@ -93,6 +102,7 @@ export default function StockChangeSection({ t }: { t: Translate }) {
         branchId: branchId || undefined,
         startDate: startDate || undefined,
         endDate: endDate || undefined,
+        supplierId: supplierId || undefined,
       }) as LedgerResponse
       if (requestRef.current !== requestId) return
       setRows(Array.isArray(response?.items) ? response.items : [])
@@ -104,10 +114,10 @@ export default function StockChangeSection({ t }: { t: Translate }) {
     } finally {
       if (requestRef.current === requestId) setLoading(false)
     }
-  }, [view, page, debouncedSearch, branchId, startDate, endDate])
+  }, [view, page, debouncedSearch, branchId, startDate, endDate, supplierId])
 
   useEffect(() => { void load() }, [load])
-  useEffect(() => { setPage(1) }, [view, debouncedSearch, branchId, startDate, endDate])
+  useEffect(() => { setPage(1) }, [view, debouncedSearch, branchId, startDate, endDate, supplierId])
 
   useEffect(() => {
     let cancelled = false
@@ -121,6 +131,12 @@ export default function StockChangeSection({ t }: { t: Translate }) {
           .filter((row) => row.id > 0))
       })
       .catch(() => { /* filter row simply stays branch-less */ })
+    // The shared cached name-only suppliers read every role may call (the
+    // same loader the supplier pickers use).
+    import('../shared/SupplierPickerField.tsx')
+      .then(({ loadSupplierNames }) => loadSupplierNames())
+      .then((rows) => { if (!cancelled) setSuppliers(rows) })
+      .catch(() => { /* filter row simply stays supplier-less */ })
     return () => { cancelled = true }
   }, [])
 
@@ -188,6 +204,18 @@ export default function StockChangeSection({ t }: { t: Translate }) {
             ]}
           />
         ) : null}
+        {suppliers.length ? (
+          <AppSelect
+            name="stock_ledger_supplier"
+            value={String(supplierId || '')}
+            onChange={(value) => setSupplierId(Number(value) || 0)}
+            ariaLabel={tr(t, 'supplier', 'Supplier')}
+            options={[
+              { value: '', label: `${tr(t, 'supplier', 'Supplier')}: ${tr(t, 'all', 'All')}` },
+              ...suppliers.map((supplier) => ({ value: String(supplier.id), label: supplier.name })),
+            ]}
+          />
+        ) : null}
         <input
           type="date"
           className="input h-9 w-auto text-sm"
@@ -214,12 +242,13 @@ export default function StockChangeSection({ t }: { t: Translate }) {
       ) : null}
 
       <div className="overflow-x-auto rounded-xl border border-gray-100 dark:border-gray-700">
-        <table className="w-full min-w-[860px] text-left text-sm">
+        <table className="w-full min-w-[920px] text-left text-sm">
           <thead>
             <tr className="border-b border-gray-100 text-[11px] uppercase tracking-wide text-gray-400 dark:border-gray-700">
               <th className="px-2 py-2">{tr(t, 'date', 'Date')}</th>
               <th className="px-2 py-2">{tr(t, 'name', 'Name')}</th>
               <th className="px-2 py-2">{tr(t, 'barcode', 'Barcode')}</th>
+              <th className="px-2 py-2">{tr(t, 'batch', 'Batch')}</th>
               <th className="px-2 py-2 text-right">{beforeLabel}</th>
               <th className="px-2 py-2">{tr(t, 'adjustment', 'Adjustment')}</th>
               <th className="px-2 py-2">{tr(t, 'stock_in', 'Stock In')}</th>
@@ -237,6 +266,9 @@ export default function StockChangeSection({ t }: { t: Translate }) {
                 <td className="whitespace-nowrap px-2 py-1.5 text-xs text-gray-500">{fmtDateTime24(row.created_at)}</td>
                 <td className="max-w-52 truncate px-2 py-1.5 font-medium text-gray-800 dark:text-gray-100" title={row.product_name}>{row.product_name}</td>
                 <td className="whitespace-nowrap px-2 py-1.5 text-xs text-gray-400">{row.barcode || '--'}</td>
+                <td className="whitespace-nowrap px-2 py-1.5 text-xs text-gray-500">
+                  {row.batch_id ? batchDisplayLabel({ id: row.batch_id, lot_code: row.batch_lot_code, received_at: row.batch_received_at }) : '--'}
+                </td>
                 <td className="px-2 py-1.5 text-right tabular-nums text-gray-500">{row.before_qty}</td>
                 {bucketCell(row, 'adjustment')}
                 {bucketCell(row, 'in')}
@@ -245,7 +277,7 @@ export default function StockChangeSection({ t }: { t: Translate }) {
               </tr>
             ))}
             {!rows.length && !loading ? (
-              <tr><td colSpan={8} className="px-3 py-6 text-center text-sm text-gray-400">{tr(t, 'no_data_found', 'No data found')}</td></tr>
+              <tr><td colSpan={9} className="px-3 py-6 text-center text-sm text-gray-400">{tr(t, 'no_data_found', 'No data found')}</td></tr>
             ) : null}
           </tbody>
         </table>
@@ -286,6 +318,13 @@ export default function StockChangeSection({ t }: { t: Translate }) {
                 <div className="mt-0.5 text-sm font-semibold tabular-nums text-gray-800 dark:text-gray-100">{detail.after_qty}</div>
               </div>
             </div>
+            {detail.batch_id ? (
+              <p className="rounded-xl bg-gray-50 px-3 py-2 text-sm text-gray-600 dark:bg-gray-800/60 dark:text-gray-300">
+                <span className="text-[11px] uppercase tracking-wide text-gray-400">{tr(t, 'batch', 'Batch')}: </span>
+                {batchDisplayLabel({ id: detail.batch_id, lot_code: detail.batch_lot_code, received_at: detail.batch_received_at })}
+                {detail.batch_supplier_name ? <span className="text-gray-400"> · {detail.batch_supplier_name}</span> : null}
+              </p>
+            ) : null}
             {detail.reason ? (
               <p className="rounded-xl bg-gray-50 px-3 py-2 text-sm text-gray-600 dark:bg-gray-800/60 dark:text-gray-300">
                 <span className="text-[11px] uppercase tracking-wide text-gray-400">{tr(t, 'reason', 'Reason')}: </span>

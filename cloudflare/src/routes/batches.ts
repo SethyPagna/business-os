@@ -164,8 +164,8 @@ app.post('/', async (c) => {
   // other stock addition, so this doesn't become a receipt that's visible
   // in the batch ledger and the audit log but invisible in Stock History.
   await db.prepare(`
-    INSERT INTO inventory_movements (product_id, product_name, branch_id, branch_name, movement_type, quantity, reason, user_id, user_name, created_at)
-    VALUES (@productId, @productName, @branchId, @branchName, 'add', @quantity, @reason, @userId, @userName, CURRENT_TIMESTAMP)
+    INSERT INTO inventory_movements (product_id, product_name, branch_id, branch_name, movement_type, quantity, reason, user_id, user_name, created_at, batch_id)
+    VALUES (@productId, @productName, @branchId, @branchName, 'add', @quantity, @reason, @userId, @userName, CURRENT_TIMESTAMP, @batchId)
   `).run({
     productId,
     productName: product.name,
@@ -175,6 +175,7 @@ app.post('/', async (c) => {
     reason: `Batch receipt (${lotCode})`,
     userId: user?.id ?? null,
     userName: user?.name ?? null,
+    batchId,
   })
 
   await audit(c.env, user?.id ?? null, user?.name ?? null, 'batch_receive', 'product_batch', batchId, {
@@ -332,8 +333,8 @@ app.patch('/:id/branches/:branchId', async (c) => {
 
   if (delta !== 0) {
     await db.prepare(`
-      INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, reason, user_id, user_name, created_at)
-      VALUES (@productId, @productName, @branchId, 'set', @quantity, @reason, @userId, @userName, CURRENT_TIMESTAMP)
+      INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, reason, user_id, user_name, created_at, batch_id)
+      VALUES (@productId, @productName, @branchId, 'set', @quantity, @reason, @userId, @userName, CURRENT_TIMESTAMP, @batchId)
     `).run({
       productId: batch.productId,
       productName: product?.name || null,
@@ -342,6 +343,7 @@ app.patch('/:id/branches/:branchId', async (c) => {
       reason: `Batch quantity correction (Batch #${batchId})`,
       userId: user?.id ?? null,
       userName: user?.name ?? null,
+      batchId,
     })
   }
 

@@ -41,7 +41,8 @@ function setup() {
       batch_id INTEGER, branch_id INTEGER, quantity REAL, lot_code TEXT, expiry_date TEXT);
     CREATE TABLE inventory_movements (id INTEGER PRIMARY KEY AUTOINCREMENT, product_id INTEGER,
       product_name TEXT, branch_id INTEGER, branch_name TEXT, movement_type TEXT, quantity REAL,
-      unit_cost_usd REAL, total_cost_usd REAL, reason TEXT, reference_id INTEGER, created_at TEXT);
+      unit_cost_usd REAL, total_cost_usd REAL, reason TEXT, reference_id INTEGER, created_at TEXT,
+      batch_id INTEGER);
   `)
   sqlite.exec(fs.readFileSync(path.join(__dirname, '..', 'migrations', '0056_import_stock_action_commits.sql'), 'utf8'))
   sqlite.exec(fs.readFileSync(path.join(__dirname, '..', 'migrations', '0057_import_stock_action_guards.sql'), 'utf8'))

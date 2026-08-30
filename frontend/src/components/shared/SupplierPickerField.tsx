@@ -34,7 +34,10 @@ type SupplierNameRow = { id: number; name: string }
 let supplierNamesCache: { rows: SupplierNameRow[]; at: number } | null = null
 const SUPPLIER_NAMES_TTL_MS = 60_000
 
-async function loadSupplierNames(): Promise<SupplierNameRow[]> {
+// Exported for other supplier-scoped controls (StockChangeSection's D2
+// ledger filter) so they share this one cached name-only read instead of
+// re-fetching or re-implementing it.
+export async function loadSupplierNames(): Promise<SupplierNameRow[]> {
   if (supplierNamesCache && Date.now() - supplierNamesCache.at < SUPPLIER_NAMES_TTL_MS) {
     return supplierNamesCache.rows
   }

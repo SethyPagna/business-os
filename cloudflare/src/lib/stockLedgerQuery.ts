@@ -28,6 +28,10 @@ export type StockLedgerFilters = {
   startDate?: string
   endDate?: string
   search?: string
+  // D2a (0084): filter by the supplier attributed to the movement's lot.
+  // Only movements stamped with a batch_id can match -- unattributed rows
+  // (multi-lot, legacy aggregate) are honestly excluded, never guessed in.
+  supplierId?: number
 }
 
 export type StockLedgerQuery = {
@@ -69,12 +73,25 @@ export function buildStockLedgerQuery(filters: StockLedgerFilters = {}): StockLe
     where.push(`(m.product_name LIKE @search ESCAPE '\\' OR p.barcode LIKE @search ESCAPE '\\')`)
     params.search = `%${search.replace(/([\\%_])/g, '\\$1')}%`
   }
+  const supplierId = Number(filters.supplierId) || 0
+  if (supplierId > 0) {
+    // Same supplier identity rule as D1b/D3: a lot matches by supplier_id
+    // when attributed, else by its recorded name equalling that supplier's
+    // name (name-only attribution -- D5a's match-only rule means the name
+    // was a real suppliers-table match at receive time). Rows without a
+    // batch_id cannot match: their lot -- and so their supplier -- was
+    // never recorded, and guessing is worse than excluding.
+    where.push(`(b.supplier_id = @supplierId OR (b.supplier_id IS NULL AND b.supplier_name IS NOT NULL
+      AND lower(trim(b.supplier_name)) = (SELECT lower(trim(name)) FROM suppliers WHERE id = @supplierId)))`)
+    params.supplierId = supplierId
+  }
   const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : ''
 
   const countSql = `
     SELECT COUNT(*) AS total
     FROM inventory_movements m
     LEFT JOIN products p ON p.id = m.product_id
+    LEFT JOIN product_batches b ON b.id = m.batch_id
     ${whereSql}
   `
 
@@ -93,6 +110,8 @@ export function buildStockLedgerQuery(filters: StockLedgerFilters = {}): StockLe
       m.branch_id, m.branch_name, m.movement_type, ABS(COALESCE(m.quantity, 0)) AS quantity,
       CASE WHEN m.movement_type IN (${OUT_LIST}) THEN -ABS(COALESCE(m.quantity, 0)) ELSE ABS(COALESCE(m.quantity, 0)) END AS signed_quantity,
       m.reason, m.user_name, m.created_at,
+      m.batch_id, b.lot_code AS batch_lot_code, b.received_at AS batch_received_at,
+      b.supplier_id AS batch_supplier_id, b.supplier_name AS batch_supplier_name,
       CASE WHEN m.movement_type IN (${ADJUSTMENT_LIST}) THEN 'adjustment'
            WHEN m.movement_type IN (${OUT_LIST}) THEN 'out'
            ELSE 'in' END AS ledger_bucket,
@@ -104,6 +123,7 @@ export function buildStockLedgerQuery(filters: StockLedgerFilters = {}): StockLe
       ), 0) AS after_qty
     FROM inventory_movements m
     LEFT JOIN products p ON p.id = m.product_id
+    LEFT JOIN product_batches b ON b.id = m.batch_id
     ${whereSql}
     ORDER BY m.created_at DESC, m.id DESC
     LIMIT @limit OFFSET @offset

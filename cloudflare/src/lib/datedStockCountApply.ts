@@ -58,10 +58,10 @@ async function applyPlainStockDelta(db: D1Compat, productId: number, branchId: n
   ])
 }
 
-async function insertMovementRow(db: D1Compat, movement: StockCountPlanMovement, userId: number | null, userName: string | null): Promise<number> {
+async function insertMovementRow(db: D1Compat, movement: StockCountPlanMovement, userId: number | null, userName: string | null, batchId: number | null = null): Promise<number> {
   const result = await db.prepare(`
-    INSERT INTO inventory_movements (product_id, product_name, branch_id, branch_name, movement_type, quantity, reason, user_id, user_name, created_at)
-    VALUES (@productId, @productName, @branchId, @branchName, @movementType, @quantity, @reason, @userId, @userName, @createdAt)
+    INSERT INTO inventory_movements (product_id, product_name, branch_id, branch_name, movement_type, quantity, reason, user_id, user_name, created_at, batch_id)
+    VALUES (@productId, @productName, @branchId, @branchName, @movementType, @quantity, @reason, @userId, @userName, @createdAt, @batchId)
   `).run({
     productId: movement.productId,
     productName: movement.productName,
@@ -72,6 +72,9 @@ async function insertMovementRow(db: D1Compat, movement: StockCountPlanMovement,
     reason: movement.reason,
     userId,
     userName,
+    // 0084: single-lot attribution, resolved by the caller from this
+    // movement's own recorded batch actions.
+    batchId,
     // Dated to the movement's own snapshot date, not import time -- this
     // is a RECONCILIATION import, the whole point is a historically
     // accurate movement log, not a pile of movements all timestamped to
@@ -179,7 +182,13 @@ export async function applyDatedStockCountPlan(
         const delta = movement.movementType === 'add' ? movement.quantity : -movement.quantity
         await applyPlainStockDelta(db, movement.productId, movement.branchId, delta)
       }
-      const movementId = await insertMovementRow(db, movement, actor.userId, actor.userName)
+      // 0084: stamp the movement's batch_id when exactly ONE lot covered
+      // its whole quantity (action quantities are signed; the movement's is
+      // a magnitude). A multi-lot spread or a shortfall remainder stays
+      // NULL -- the full per-lot detail is in the actions table either way.
+      const singleLotBatchId = batchActions.length === 1 && Math.abs(batchActions[0].quantity) === movement.quantity
+        ? batchActions[0].batchId : null
+      const movementId = await insertMovementRow(db, movement, actor.userId, actor.userName, singleLotBatchId)
       await insertBatchActions(db, movementId, batchActions)
       movementsApplied += 1
     }

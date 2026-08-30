@@ -136,11 +136,11 @@ export class ConsumedDamagedStockError extends Error {
 export async function reverseDamagedLots(
   db: D1Compat,
   returnId: number | string,
-): Promise<Array<{ product_id: number; product_name: string | null; branch_id: number | null; quantity: number }>> {
+): Promise<Array<{ product_id: number; product_name: string | null; branch_id: number | null; batch_id: number | null; quantity: number }>> {
   const lots = await db.prepare(`
-    SELECT id, product_id, product_name, branch_id, quantity, quantity_remaining
+    SELECT id, product_id, product_name, branch_id, batch_id, quantity, quantity_remaining
     FROM damaged_stock_lots WHERE return_id = @return_id
-  `).all<{ id: number; product_id: number; product_name: string | null; branch_id: number | null; quantity: number; quantity_remaining: number }>({ return_id: returnId })
+  `).all<{ id: number; product_id: number; product_name: string | null; branch_id: number | null; batch_id: number | null; quantity: number; quantity_remaining: number }>({ return_id: returnId })
   if (!lots.length) return []
   for (const lot of lots) {
     if (Number(lot.quantity_remaining) < Number(lot.quantity)) {
@@ -148,7 +148,9 @@ export async function reverseDamagedLots(
     }
   }
   await db.prepare('DELETE FROM damaged_stock_lots WHERE return_id = @return_id').run({ return_id: returnId })
-  return lots.map((lot) => ({ product_id: lot.product_id, product_name: lot.product_name, branch_id: lot.branch_id, quantity: Number(lot.quantity) }))
+  // batch_id = the original sale lot the damaged units belonged to (0084
+  // reads it for the reversal movement's attribution).
+  return lots.map((lot) => ({ product_id: lot.product_id, product_name: lot.product_name, branch_id: lot.branch_id, batch_id: lot.batch_id ?? null, quantity: Number(lot.quantity) }))
 }
 
 export class InsufficientReplacementStockError extends Error {
@@ -202,8 +204,8 @@ export async function applyReplacementStock(db: D1Compat, input: {
     `).run({ product_id: input.productId, branch_id: input.branchId, quantity: input.quantity })
   }
   await db.prepare(`
-    INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_usd, unit_cost_khr, reason, reference_id, user_id, user_name)
-    VALUES (@product_id, @product_name, @branch_id, '${REPLACEMENT_OUT_MOVEMENT}', @quantity, @unit_cost_usd, @unit_cost_khr, @reason, @reference_id, @user_id, @user_name)
+    INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_usd, unit_cost_khr, reason, reference_id, user_id, user_name, batch_id)
+    VALUES (@product_id, @product_name, @branch_id, '${REPLACEMENT_OUT_MOVEMENT}', @quantity, @unit_cost_usd, @unit_cost_khr, @reason, @reference_id, @user_id, @user_name, @batch_id)
   `).run({
     product_id: input.productId,
     product_name: input.productName,
@@ -215,6 +217,9 @@ export async function applyReplacementStock(db: D1Compat, input: {
     reference_id: input.returnId,
     user_id: input.userId,
     user_name: input.userName,
+    // 0084: an explicit lot pick drained exactly that lot; the plain path
+    // touched no specific lot.
+    batch_id: input.batchId ?? null,
   })
   return { usedBatch }
 }

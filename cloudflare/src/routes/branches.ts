@@ -358,18 +358,21 @@ app.post('/transfer', async (c) => {
       params: { productId, productName: product.name, fromBranchId, toBranchId, quantity, note: combinedNote, userId: user?.id ?? null, userName: user?.name ?? null },
     },
     {
-      sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id, branch_name, movement_type, quantity, reason, user_id, user_name, created_at)
-            VALUES (@productId, @productName, @branchId, @branchName, 'transfer_out', @quantity, @reason, @userId, @userName, CURRENT_TIMESTAMP)`,
-      params: { productId, productName: product.name, branchId: fromBranchId, branchName: fromBranch?.name || null, quantity, reason: `Transfer out to ${toBranch?.name || 'destination'}${note ? ` - ${note}` : ''}`, userId: user?.id ?? null, userName: user?.name ?? null },
+      // 0084: a lot-scoped transfer stamps its lot on both legs (out = the
+      // source lot, in = the same/cloned destination lot); an aggregate
+      // transfer touched no specific lot and stays NULL.
+      sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id, branch_name, movement_type, quantity, reason, user_id, user_name, created_at, batch_id)
+            VALUES (@productId, @productName, @branchId, @branchName, 'transfer_out', @quantity, @reason, @userId, @userName, CURRENT_TIMESTAMP, @batchId)`,
+      params: { productId, productName: product.name, branchId: fromBranchId, branchName: fromBranch?.name || null, quantity, reason: `Transfer out to ${toBranch?.name || 'destination'}${note ? ` - ${note}` : ''}`, userId: user?.id ?? null, userName: user?.name ?? null, batchId: sourceBatch?.id ?? null },
     },
     {
       // Recorded against destProductId -- this is a real per-product stock
       // audit trail (used to reconcile that product's own stock_quantity),
       // so it has to reflect whichever row's branch_stock actually gained
       // the quantity, not necessarily the row the operator picked.
-      sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id, branch_name, movement_type, quantity, reason, user_id, user_name, created_at)
-            VALUES (@productId, @productName, @branchId, @branchName, 'transfer_in', @quantity, @reason, @userId, @userName, CURRENT_TIMESTAMP)`,
-      params: { productId: destProductId, productName: destProductName, branchId: toBranchId, branchName: toBranch?.name || null, quantity, reason: `Transfer in from ${fromBranch?.name || 'source'}${note ? ` - ${note}` : ''}${mergeTarget ? ` (merged from "${product.name}" #${productId})` : ''}`, userId: user?.id ?? null, userName: user?.name ?? null },
+      sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id, branch_name, movement_type, quantity, reason, user_id, user_name, created_at, batch_id)
+            VALUES (@productId, @productName, @branchId, @branchName, 'transfer_in', @quantity, @reason, @userId, @userName, CURRENT_TIMESTAMP, @batchId)`,
+      params: { productId: destProductId, productName: destProductName, branchId: toBranchId, branchName: toBranch?.name || null, quantity, reason: `Transfer in from ${fromBranch?.name || 'source'}${note ? ` - ${note}` : ''}${mergeTarget ? ` (merged from "${product.name}" #${productId})` : ''}`, userId: user?.id ?? null, userName: user?.name ?? null, batchId: destBatchId },
     },
   ]
   // Track A/C audit (part 53) found this was missing: when the transfer
@@ -581,6 +584,13 @@ app.post('/transfer-bulk', async (c) => {
     const combinedNote = [note, mergedNote].filter(Boolean).join(' -- ') || null
     if (mergeTarget) merges.push({ productId: item.productId, productName: product.name, mergedIntoProductId: destProductId, mergedIntoProductName: destProductName })
 
+    // Resolved BEFORE the movement inserts so both legs can stamp their
+    // lot (0084) -- same values the branch_batch_stock statements below use.
+    const sourceBatchForItem = item.batchId != null ? batchById.get(item.batchId)! : null
+    const destBatchIdForItem = sourceBatchForItem
+      ? (mergeTarget ? await resolveDestinationBatch(db, sourceBatchForItem, destProductId) : sourceBatchForItem.id)
+      : null
+
     statements.push(
       { sql: 'UPDATE branch_stock SET quantity = quantity - @quantity WHERE product_id = @productId AND branch_id = @branchId', params: { quantity: item.quantity, productId: item.productId, branchId: fromBranchId } },
       {
@@ -594,18 +604,18 @@ app.post('/transfer-bulk', async (c) => {
         params: { productId: item.productId, productName: product.name, fromBranchId, toBranchId, quantity: item.quantity, note: combinedNote, userId: user?.id ?? null, userName: user?.name ?? null },
       },
       {
-        sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id, branch_name, movement_type, quantity, reason, user_id, user_name, created_at)
-              VALUES (@productId, @productName, @branchId, @branchName, 'transfer_out', @quantity, @reason, @userId, @userName, CURRENT_TIMESTAMP)`,
-        params: { productId: item.productId, productName: product.name, branchId: fromBranchId, branchName: fromBranch?.name || null, quantity: item.quantity, reason: `Transfer out to ${toBranch?.name || 'destination'}${note ? ` - ${note}` : ''}`, userId: user?.id ?? null, userName: user?.name ?? null },
+        sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id, branch_name, movement_type, quantity, reason, user_id, user_name, created_at, batch_id)
+              VALUES (@productId, @productName, @branchId, @branchName, 'transfer_out', @quantity, @reason, @userId, @userName, CURRENT_TIMESTAMP, @batchId)`,
+        params: { productId: item.productId, productName: product.name, branchId: fromBranchId, branchName: fromBranch?.name || null, quantity: item.quantity, reason: `Transfer out to ${toBranch?.name || 'destination'}${note ? ` - ${note}` : ''}`, userId: user?.id ?? null, userName: user?.name ?? null, batchId: sourceBatchForItem?.id ?? null },
       },
       {
         // Recorded against destProductId, same as the single-item route --
         // this is a real per-product stock audit trail, so it has to
         // reflect whichever row's branch_stock actually gained the
         // quantity, not necessarily the row the operator selected.
-        sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id, branch_name, movement_type, quantity, reason, user_id, user_name, created_at)
-              VALUES (@productId, @productName, @branchId, @branchName, 'transfer_in', @quantity, @reason, @userId, @userName, CURRENT_TIMESTAMP)`,
-        params: { productId: destProductId, productName: destProductName, branchId: toBranchId, branchName: toBranch?.name || null, quantity: item.quantity, reason: `Transfer in from ${fromBranch?.name || 'source'}${note ? ` - ${note}` : ''}${mergeTarget ? ` (merged from "${product.name}" #${item.productId})` : ''}`, userId: user?.id ?? null, userName: user?.name ?? null },
+        sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id, branch_name, movement_type, quantity, reason, user_id, user_name, created_at, batch_id)
+              VALUES (@productId, @productName, @branchId, @branchName, 'transfer_in', @quantity, @reason, @userId, @userName, CURRENT_TIMESTAMP, @batchId)`,
+        params: { productId: destProductId, productName: destProductName, branchId: toBranchId, branchName: toBranch?.name || null, quantity: item.quantity, reason: `Transfer in from ${fromBranch?.name || 'source'}${note ? ` - ${note}` : ''}${mergeTarget ? ` (merged from "${product.name}" #${item.productId})` : ''}`, userId: user?.id ?? null, userName: user?.name ?? null, batchId: destBatchIdForItem },
       },
     )
 
@@ -627,12 +637,10 @@ app.post('/transfer-bulk', async (c) => {
       )
     }
 
-    if (item.batchId != null) {
-      const sourceBatch = batchById.get(item.batchId)!
-      const destBatchId = mergeTarget ? await resolveDestinationBatch(db, sourceBatch, destProductId) : sourceBatch.id
+    if (sourceBatchForItem && destBatchIdForItem != null) {
       statements.push(
-        decrementBatchStockStatement(sourceBatch.id, fromBranchId, item.quantity),
-        incrementBatchStockStatement(destBatchId, toBranchId, item.quantity),
+        decrementBatchStockStatement(sourceBatchForItem.id, fromBranchId, item.quantity),
+        incrementBatchStockStatement(destBatchIdForItem, toBranchId, item.quantity),
       )
     }
   }

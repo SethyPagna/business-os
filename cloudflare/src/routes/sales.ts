@@ -702,9 +702,17 @@ app.post('/', async (c) => {
                 ON CONFLICT(product_id, branch_id) DO UPDATE SET quantity = branch_stock.quantity - @quantity`,
           params: { product_id: item.product_id, branch_id: item.branch_id, quantity: item.quantity },
         })
+        // 0084: an explicit lot pick stamps the movement; a no-pick line
+        // stamps its single auto-allocated lot only when that lot covered
+        // the WHOLE quantity (a partial draw with a legacy-aggregate
+        // remainder, or a multi-lot spread, stays NULL -- the per-lot
+        // detail lives in sale_item_batch_allocations).
+        const autoTakes = autoAllocationsByItemIndex.get(itemIndex) || []
+        const movementBatchId = item.batch_id
+          || (autoTakes.length === 1 && autoTakes[0].quantity === item.quantity ? autoTakes[0].batchId : null)
         statements.push({
-          sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_usd, unit_cost_khr, reference_id, user_id, user_name)
-                VALUES (@product_id, @product_name, @branch_id, 'sale', @quantity, @unit_cost_usd, @unit_cost_khr, @reference_id, @user_id, @user_name)`,
+          sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_usd, unit_cost_khr, reference_id, user_id, user_name, batch_id)
+                VALUES (@product_id, @product_name, @branch_id, 'sale', @quantity, @unit_cost_usd, @unit_cost_khr, @reference_id, @user_id, @user_name, @batch_id)`,
           params: {
             product_id: item.product_id,
             product_name: item.product_name,
@@ -715,6 +723,7 @@ app.post('/', async (c) => {
             reference_id: saleId,
             user_id: body.cashier_id || null,
             user_name: body.cashier_name || null,
+            batch_id: movementBatchId,
           },
         })
         // Keep products.stock_quantity (the all-branches rollup shown on the

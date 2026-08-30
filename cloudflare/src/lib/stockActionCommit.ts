@@ -272,9 +272,12 @@ export async function applyUnifiedStockAdd(db: D1Compat, input: UnifiedStockAddI
       params,
     },
     {
+      // 0084: the add just created/topped exactly one lot (keyed
+      // productId+batchKey above), so the movement records it.
       sql: `INSERT INTO inventory_movements
-              (product_id, product_name, branch_id, branch_name, movement_type, quantity, reason, created_at)
-            SELECT @productId, @productName, @branchId, @branchName, 'add', @quantity, @reason, @receivedAt
+              (product_id, product_name, branch_id, branch_name, movement_type, quantity, reason, created_at, batch_id)
+            SELECT @productId, @productName, @branchId, @branchName, 'add', @quantity, @reason, @receivedAt,
+              (SELECT id FROM product_batches WHERE variant_product_id = @productId AND batch_key = @batchKey)
             WHERE ${guard}`,
       params,
     },
@@ -548,19 +551,27 @@ export async function applyUnifiedStockSale(db: D1Compat, input: UnifiedStockSal
       })
     }
     statements.push({
+      // 0084: single-lot lines stamp their lot; a line allocated across
+      // several lots stays NULL (the per-lot detail is in
+      // sale_item_batch_allocations), blank-honest.
       sql: `INSERT INTO inventory_movements (
               product_id, product_name, branch_id, branch_name, movement_type,
-              quantity, unit_cost_usd, total_cost_usd, reason, reference_id, created_at
+              quantity, unit_cost_usd, total_cost_usd, reason, reference_id, created_at, batch_id
             )
             SELECT @productId, @productName, @branchId, @branchName, 'sale',
               -@quantity, @costPriceUsd, @totalCostUsd, @reason,
-              (SELECT id FROM sales WHERE client_request_id = @clientRequestId), @soldAt
+              (SELECT id FROM sales WHERE client_request_id = @clientRequestId), @soldAt, @movementBatchId
             WHERE ${guard}`,
       params: {
         ...common, ...line, costPriceUsd,
         totalCostUsd: Math.round(costPriceUsd * line.quantity * 100) / 100,
         reason: `Unified stock import ${jobId}, group ${saleGroupKey}, row ${line.rowNumber}`,
         soldAt,
+        // Full coverage required: a single allocation that covers only part
+        // of the line (rest drawn from legacy unlotted stock) must not
+        // claim the whole movement for that lot.
+        movementBatchId: line.allocations.length === 1 && line.allocations[0].quantity === line.quantity
+          ? line.allocations[0].batchId : null,
       },
     })
   }

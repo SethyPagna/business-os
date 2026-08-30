@@ -152,4 +152,76 @@ assert.equal(paged.items.length, 2)
 assert.deepEqual(paged.items.map((r) => r.movement_type), ['sale', 'add'], 'page 2 of 4-per-page holds the two oldest')
 ok(true, 'pagination returns the correct slice with the full total')
 
+// ---- 0084: movement <-> batch linkage + supplier filter --------------------
+// Two suppliers; two lots on product A -- one id-attributed, one name-only
+// (D5a's match-only free-text attribution). Movements: one stamped with each
+// lot, the six existing rows stay batch-less (pre-0084 history).
+db.prepare(`INSERT INTO suppliers (id, name) VALUES (61, 'Bong Long')`).run({})
+db.prepare(`INSERT INTO suppliers (id, name) VALUES (62, 'Dane Japan')`).run({})
+db.prepare(`INSERT INTO product_batches (id, variant_product_id, batch_key, lot_code, received_at, is_active, batch_number, supplier_id, supplier_name)
+  VALUES (501, 9001, '08202026', '08202026', '2026-08-20 10:00:00', 1, 1, 61, 'Bong Long')`).run({})
+db.prepare(`INSERT INTO product_batches (id, variant_product_id, batch_key, lot_code, received_at, is_active, batch_number, supplier_id, supplier_name)
+  VALUES (502, 9001, 'LOT-CUSTOM', 'LOT-CUSTOM', '2026-08-27 10:00:00', 1, 2, NULL, 'dane  japan')`).run({})
+// Normalize the name-only lot to the exact-name form the filter compares
+// (lower/trim only -- the writers already collapse doubled spaces).
+db.prepare(`UPDATE product_batches SET supplier_name = 'Dane Japan' WHERE id = 502`).run({})
+db.prepare(`INSERT INTO inventory_movements
+  (id, product_id, product_name, branch_id, branch_name, movement_type, quantity, reason, user_name, created_at, batch_id)
+  VALUES (8, 9001, 'Ledger Test Cream', 1, 'Main Store', 'add', 4, 'batch receipt', 'tester', '2026-08-27 10:00:00', 501)`).run({})
+db.prepare(`INSERT INTO inventory_movements
+  (id, product_id, product_name, branch_id, branch_name, movement_type, quantity, reason, user_name, created_at, batch_id)
+  VALUES (9, 9001, 'Ledger Test Cream', 1, 'Main Store', 'sale', 1, '', 'tester', '2026-08-28 10:00:00', 502)`).run({})
+db.prepare(`UPDATE products SET stock_quantity = 8 WHERE id = 9001`).run({})
+
+const withBatch = runLedger({ productId: 9001 })
+assert.equal(withBatch.total, 8)
+const stamped = withBatch.items.find((r) => r.id === 8)
+assert.equal(stamped.batch_id, 501)
+assert.equal(stamped.batch_lot_code, '08202026')
+assert.equal(stamped.batch_supplier_name, 'Bong Long')
+const unstamped = withBatch.items.find((r) => r.id === 1)
+assert.equal(unstamped.batch_id, null)
+assert.equal(unstamped.batch_lot_code, null)
+ok(true, '0084: stamped rows surface their lot (code + supplier) through the join; pre-0084 rows stay NULL')
+
+// supplier filter: id-attributed lot matches by supplier_id
+const bySupplier = runLedger({ productId: 9001, supplierId: 61 })
+assert.equal(bySupplier.total, 1)
+assert.equal(bySupplier.items[0].id, 8)
+ok(true, 'supplier filter (id-attributed lot) returns exactly the stamped movement')
+
+// name-only attributed lot matches through the supplier-name identity rule
+const byNameOnly = runLedger({ productId: 9001, supplierId: 62 })
+assert.equal(byNameOnly.total, 1)
+assert.equal(byNameOnly.items[0].id, 9)
+ok(true, 'supplier filter matches a name-only attributed lot (D1b identity rule), unattributed rows honestly excluded')
+
+// ---- 0084 backfill: dated stock-count provenance ---------------------------
+// A pre-0084 world (chain up to 0083), seeded with the three provenance
+// shapes, then the REAL 0084 file applied: single-lot full coverage
+// backfills, multi-lot stays NULL, partial coverage (shortfall) stays NULL.
+{
+  const migrationsDir = path.join(cloudflareRoot, 'migrations')
+  const files = fs.readdirSync(migrationsDir).filter((f) => f.endsWith('.sql')).sort()
+  const pre = files.filter((f) => !f.startsWith('0084'))
+  const db2 = openDb(pre.map((f) => fs.readFileSync(path.join(migrationsDir, f), 'utf8')))
+  db2.prepare(`INSERT INTO products (id, name, unit, stock_quantity, is_active) VALUES (9101, 'Backfill Test', 'pcs', 0, 1)`).run({})
+  const mv = (id, qty) => db2.prepare(`INSERT INTO inventory_movements
+    (id, product_id, product_name, branch_id, movement_type, quantity, reason, created_at)
+    VALUES (@id, 9101, 'Backfill Test', 1, 'remove', @qty, 'stock count', '2026-08-01 00:00:00')`).run({ id, qty })
+  mv(101, 5); mv(102, 6); mv(103, 5)
+  const act = (movementId, batchId, qty) => db2.prepare(
+    `INSERT INTO dated_stock_count_batch_actions (movement_id, batch_id, quantity) VALUES (@movementId, @batchId, @qty)`,
+  ).run({ movementId, batchId, qty })
+  act(101, 601, -5)              // one lot, full coverage -> backfilled
+  act(102, 601, -4); act(102, 602, -2) // two lots -> NULL
+  act(103, 601, -3)              // one lot, PARTIAL coverage (shortfall) -> NULL
+  db2.exec(fs.readFileSync(path.join(migrationsDir, files.find((f) => f.startsWith('0084'))), 'utf8'))
+  const got = Object.fromEntries(
+    db2.prepare('SELECT id, batch_id FROM inventory_movements WHERE id IN (101, 102, 103)').all({}).map((r) => [r.id, r.batch_id]),
+  )
+  assert.deepEqual(got, { 101: 601, 102: null, 103: null })
+  ok(true, '0084 backfill: single-lot full-coverage movements gain their batch_id; multi-lot and shortfall rows stay NULL')
+}
+
 console.log(`\nAll ${checks} stock-ledger kernel checks passed`)

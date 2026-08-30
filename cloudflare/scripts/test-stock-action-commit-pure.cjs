@@ -34,7 +34,7 @@ function setup() {
       updated_at TEXT, UNIQUE(batch_id, branch_id));
     CREATE TABLE inventory_movements (id INTEGER PRIMARY KEY AUTOINCREMENT, product_id INTEGER,
       product_name TEXT, branch_id INTEGER, branch_name TEXT, movement_type TEXT, quantity REAL,
-      reason TEXT, created_at TEXT);
+      reason TEXT, created_at TEXT, batch_id INTEGER);
   `)
   sqlite.exec(fs.readFileSync(path.join(__dirname, '..', 'migrations', '0056_import_stock_action_commits.sql'), 'utf8'))
   sqlite.prepare(`INSERT INTO products(id, name) VALUES (10, 'Serum')`).run()

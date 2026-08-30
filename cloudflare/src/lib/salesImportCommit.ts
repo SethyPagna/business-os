@@ -143,9 +143,11 @@ export async function applyHistoricalSaleImport(
       }
     }
     statements.push({
+      // 0084: the historical line's recorded lot (when it had one) is the
+      // lot the restock above bumped -- stamp it; NULL otherwise.
       sql: `INSERT INTO inventory_movements
-              (product_id, product_name, branch_id, movement_type, quantity, reason, created_at)
-            SELECT @product_id, @product_name, @branch_id, 'return', @returned_quantity, @reason, @updated_at
+              (product_id, product_name, branch_id, movement_type, quantity, reason, created_at, batch_id)
+            SELECT @product_id, @product_name, @branch_id, 'return', @returned_quantity, @reason, @updated_at, @batch_id
             WHERE ${pendingGuard}`,
       params: stockParams,
     })

@@ -781,8 +781,8 @@ app.post('/', async (c) => {
           })
         }
         statements.push({
-          sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_usd, unit_cost_khr, reason, reference_id, user_id, user_name)
-                VALUES (@product_id, @product_name, @branch_id, 'return', @quantity, @unit_cost_usd, @unit_cost_khr, @reason, @reference_id, @user_id, @user_name)`,
+          sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_usd, unit_cost_khr, reason, reference_id, user_id, user_name, batch_id)
+                VALUES (@product_id, @product_name, @branch_id, 'return', @quantity, @unit_cost_usd, @unit_cost_khr, @reason, @reference_id, @user_id, @user_name, @batch_id)`,
           params: {
             product_id: item.product_id,
             product_name: safeProductName,
@@ -794,6 +794,10 @@ app.post('/', async (c) => {
             reference_id: returnId,
             user_id: user?.id ?? null,
             user_name: user?.name ?? null,
+            // 0084: attributable only when the WHOLE restock landed on one
+            // lot; a multi-lot split or a plain-bump remainder stays NULL
+            // (the per-lot detail is in return_item_batch_allocations).
+            batch_id: itemSplits.length === 1 && itemSplits[0].quantity === quantity ? itemSplits[0].batchId : null,
           },
         })
         touchedProductIds.add(item.product_id)
@@ -816,8 +820,8 @@ app.post('/', async (c) => {
           userName: user?.name ?? null,
         })
         statements.push({
-          sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_usd, unit_cost_khr, reason, reference_id, user_id, user_name)
-                VALUES (@product_id, @product_name, @branch_id, '${DAMAGE_IN_MOVEMENT}', @quantity, @unit_cost_usd, @unit_cost_khr, @reason, @reference_id, @user_id, @user_name)`,
+          sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_usd, unit_cost_khr, reason, reference_id, user_id, user_name, batch_id)
+                VALUES (@product_id, @product_name, @branch_id, '${DAMAGE_IN_MOVEMENT}', @quantity, @unit_cost_usd, @unit_cost_khr, @reason, @reference_id, @user_id, @user_name, @batch_id)`,
           params: {
             product_id: item.product_id,
             product_name: safeProductName,
@@ -829,6 +833,9 @@ app.post('/', async (c) => {
             reference_id: returnId,
             user_id: user?.id ?? null,
             user_name: user?.name ?? null,
+            // 0084: the ORIGINAL sale lot these units belonged to -- the
+            // same attribution the damaged lot itself records.
+            batch_id: originalBatchId,
           },
         })
       }
@@ -1105,9 +1112,11 @@ app.post('/supplier', async (c) => {
       // availability is consumed so a second line of the same product at this
       // branch can't double-take a lot; any uncovered remainder is legacy
       // unlotted stock that rides branch_stock alone, matching the bump above.
+      let supplierReturnTakes: Array<{ batchId: number; quantity: number }> = []
       if (itemBranchId) {
         const lots = supplierFifoLots.get(`${item.product_id}:${itemBranchId}`) || []
         const { takes } = allocateAcrossLots(lots, qty)
+        supplierReturnTakes = takes
         for (const take of takes) {
           const lot = lots.find((entry) => entry.batchId === take.batchId)
           if (lot) lot.available -= take.quantity
@@ -1115,8 +1124,8 @@ app.post('/supplier', async (c) => {
         }
       }
       statements.push({
-        sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_usd, unit_cost_khr, reason, reference_id, user_id, user_name)
-              VALUES (@product_id, @product_name, @branch_id, 'supplier_return', @quantity, @unit_cost_usd, @unit_cost_khr, @reason, @reference_id, @user_id, @user_name)`,
+        sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_usd, unit_cost_khr, reason, reference_id, user_id, user_name, batch_id)
+              VALUES (@product_id, @product_name, @branch_id, 'supplier_return', @quantity, @unit_cost_usd, @unit_cost_khr, @reason, @reference_id, @user_id, @user_name, @batch_id)`,
         params: {
           product_id: item.product_id,
           product_name: safeProductName,
@@ -1128,6 +1137,8 @@ app.post('/supplier', async (c) => {
           reference_id: returnId,
           user_id: user?.id ?? null,
           user_name: user?.name ?? null,
+          // 0084: attributable only when one lot covered the whole deduction.
+          batch_id: supplierReturnTakes.length === 1 && supplierReturnTakes[0].quantity === qty ? supplierReturnTakes[0].batchId : null,
         },
       })
       if (item.product_id) touchedProductIds.add(item.product_id)
@@ -1224,8 +1235,8 @@ app.patch('/:id', async (c) => {
     const reversedLots = await reverseDamagedLots(db, id)
     for (const lot of reversedLots) {
       statements.push({
-        sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_usd, unit_cost_khr, reason, reference_id, user_id, user_name)
-              VALUES (@product_id, @product_name, @branch_id, '${DAMAGE_REVERSAL_MOVEMENT}', @quantity, 0, 0, @reason, @reference_id, @user_id, @user_name)`,
+        sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_usd, unit_cost_khr, reason, reference_id, user_id, user_name, batch_id)
+              VALUES (@product_id, @product_name, @branch_id, '${DAMAGE_REVERSAL_MOVEMENT}', @quantity, 0, 0, @reason, @reference_id, @user_id, @user_name, @batch_id)`,
         params: {
           product_id: lot.product_id,
           product_name: lot.product_name,
@@ -1235,6 +1246,8 @@ app.patch('/:id', async (c) => {
           reference_id: id,
           user_id: user?.id ?? null,
           user_name: user?.name ?? null,
+          // 0084: the original sale lot the damaged units belonged to.
+          batch_id: lot.batch_id,
         },
       })
     }
@@ -1260,6 +1273,9 @@ app.patch('/:id', async (c) => {
     const productId = item.product_id
     const branchIdForItem = item.branch_id
     let plainRemainder = Number(item.quantity) || 0
+    // 0084: which lots this reversal actually drew from -- the movement row
+    // stamps a batch_id only when ONE lot covered the whole quantity.
+    const reversalLots: Array<{ batchId: number; quantity: number }> = []
     const recordedAllocs = existingReturnAllocations.get(Number(item.id)) || []
     if (recordedAllocs.length) {
       for (const alloc of recordedAllocs) {
@@ -1267,6 +1283,7 @@ app.patch('/:id', async (c) => {
         if (give <= 0) continue
         try {
           await removeStockFromBatch(db, { batchId: alloc.batch_id, productId, branchId: branchIdForItem, quantity: give })
+          reversalLots.push({ batchId: alloc.batch_id, quantity: give })
           plainRemainder -= give
         } catch (err) {
           // That lot was sold/moved down since, or no longer belongs here;
@@ -1279,6 +1296,7 @@ app.patch('/:id', async (c) => {
       // Legacy return (no recorded split): reverse its single recorded lot.
       try {
         await removeStockFromBatch(db, { batchId: item.batch_id, productId, branchId: branchIdForItem, quantity: plainRemainder })
+        reversalLots.push({ batchId: item.batch_id, quantity: plainRemainder })
         plainRemainder = 0
       } catch (err) {
         void err
@@ -1292,8 +1310,8 @@ app.patch('/:id', async (c) => {
       })
     }
     statements.push({
-      sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_usd, unit_cost_khr, reason, reference_id, user_id, user_name)
-            VALUES (@product_id, @product_name, @branch_id, 'return_reversal', @quantity, @unit_cost_usd, @unit_cost_khr, @reason, @reference_id, @user_id, @user_name)`,
+      sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_usd, unit_cost_khr, reason, reference_id, user_id, user_name, batch_id)
+            VALUES (@product_id, @product_name, @branch_id, 'return_reversal', @quantity, @unit_cost_usd, @unit_cost_khr, @reason, @reference_id, @user_id, @user_name, @batch_id)`,
       params: {
         product_id: productId,
         product_name: item.product_name,
@@ -1305,6 +1323,8 @@ app.patch('/:id', async (c) => {
         reference_id: id,
         user_id: user?.id ?? null,
         user_name: user?.name ?? null,
+        // 0084: attributable only when one lot covered the whole reversal.
+        batch_id: reversalLots.length === 1 && reversalLots[0].quantity === (Number(item.quantity) || 0) ? reversalLots[0].batchId : null,
       },
     })
   }
@@ -1393,8 +1413,8 @@ app.patch('/:id', async (c) => {
         userName: user?.name ?? null,
       })
       statements.push({
-        sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_usd, unit_cost_khr, reason, reference_id, user_id, user_name)
-              VALUES (@product_id, @product_name, @branch_id, '${DAMAGE_IN_MOVEMENT}', @quantity, @unit_cost_usd, @unit_cost_khr, @reason, @reference_id, @user_id, @user_name)`,
+        sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_usd, unit_cost_khr, reason, reference_id, user_id, user_name, batch_id)
+              VALUES (@product_id, @product_name, @branch_id, '${DAMAGE_IN_MOVEMENT}', @quantity, @unit_cost_usd, @unit_cost_khr, @reason, @reference_id, @user_id, @user_name, @batch_id)`,
         params: {
           product_id: item.product_id,
           product_name: item.product_name || null,
@@ -1406,6 +1426,8 @@ app.patch('/:id', async (c) => {
           reference_id: id,
           user_id: user?.id ?? null,
           user_name: user?.name ?? null,
+          // 0084: the original sale lot, same as the create path.
+          batch_id: originalBatchId,
         },
       })
     }
@@ -1434,8 +1456,8 @@ app.patch('/:id', async (c) => {
 
     if (returnToStock && item.product_id && itemBranchId) {
       statements.push({
-        sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_usd, unit_cost_khr, reason, reference_id, user_id, user_name)
-              VALUES (@product_id, @product_name, @branch_id, 'return', @quantity, @unit_cost_usd, @unit_cost_khr, @reason, @reference_id, @user_id, @user_name)`,
+        sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_usd, unit_cost_khr, reason, reference_id, user_id, user_name, batch_id)
+              VALUES (@product_id, @product_name, @branch_id, 'return', @quantity, @unit_cost_usd, @unit_cost_khr, @reason, @reference_id, @user_id, @user_name, @batch_id)`,
         params: {
           product_id: item.product_id,
           product_name: item.product_name || null,
@@ -1447,6 +1469,8 @@ app.patch('/:id', async (c) => {
           reference_id: id,
           user_id: user?.id ?? null,
           user_name: user?.name ?? null,
+          // 0084: same single-lot-covers-all rule as the create path.
+          batch_id: itemSplits.length === 1 && itemSplits[0].quantity === quantity ? itemSplits[0].batchId : null,
         },
       })
     }

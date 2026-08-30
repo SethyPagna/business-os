@@ -1448,6 +1448,9 @@ app.post('/adjust', async (c) => {
       try {
         const drained = await removeStockAcrossBatches(db, { productId: targetProductId, branchId, quantity })
         autoBatchDrainIds = drained.batchIds
+        // 0084: an auto-drain that ONE lot fully covered is attributable to
+        // it; a multi-lot spread or a legacy-aggregate remainder is not.
+        resolvedBatchId = drained.batchIds.length === 1 && drained.remainder === 0 ? drained.batchIds[0] : null
         if (drained.remainder > 0) await applyStockDelta(c.env, targetProductId, branchId, -drained.remainder)
       } catch (err) {
         return c.json({ error: err instanceof Error ? err.message : 'Failed to remove batch stock' }, 400)
@@ -1459,8 +1462,8 @@ app.post('/adjust', async (c) => {
 
   if (delta !== 0) {
     await db.prepare(`
-      INSERT INTO inventory_movements (product_id, product_name, branch_id, branch_name, movement_type, quantity, reason, user_id, user_name, created_at)
-      VALUES (@productId, @productName, @branchId, @branchName, @movementType, @quantity, @reason, @userId, @userName, CURRENT_TIMESTAMP)
+      INSERT INTO inventory_movements (product_id, product_name, branch_id, branch_name, movement_type, quantity, reason, user_id, user_name, created_at, batch_id)
+      VALUES (@productId, @productName, @branchId, @branchName, @movementType, @quantity, @reason, @userId, @userName, CURRENT_TIMESTAMP, @batchId)
     `).run({
       productId: targetProductId,
       productName: targetProductName,
@@ -1473,6 +1476,10 @@ app.post('/adjust', async (c) => {
         : setToNote ? `${reason} (${setToNote})` : reason,
       userId: user?.id ?? null,
       userName: user?.name ?? null,
+      // 0084: the lot this adjust touched -- the received/topped lot on
+      // add, the explicit pick or fully-covering single auto-drained lot
+      // on remove; NULL when no single lot owns the whole movement.
+      batchId: useBatchLedger ? resolvedBatchId : null,
     })
   }
 
@@ -1753,17 +1760,20 @@ app.post('/move-row', async (c) => {
   // branch_stock/branch_batch_stock/products in lockstep.
   const moveDrained = await removeStockAcrossBatches(db, { productId: sourceProductId, branchId, quantity })
   if (moveDrained.remainder > 0) await applyStockDelta(c.env, sourceProductId, branchId, -moveDrained.remainder)
-  await receiveBatchStock(db, { productId: destinationProductId, branchId, quantity })
+  const moveReceived = await receiveBatchStock(db, { productId: destinationProductId, branchId, quantity })
   await db.batch([
     {
-      sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id, branch_name, movement_type, quantity, reason, user_id, user_name, created_at)
-            VALUES (@productId, @productName, @branchId, @branchName, 'move_out', @quantity, @reason, @userId, @userName, CURRENT_TIMESTAMP)`,
-      params: { productId: sourceProductId, productName: source.name, branchId, branchName: branch?.name || null, quantity, reason: reason ? `Moved to ${destination.name} - ${reason}` : `Moved to ${destination.name}`, userId: user?.id ?? null, userName: user?.name ?? null },
+      // 0084 batch attribution: out is stampable only when ONE source lot
+      // covered the whole move; in always lands on exactly the lot
+      // receiveBatchStock resolved.
+      sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id, branch_name, movement_type, quantity, reason, user_id, user_name, created_at, batch_id)
+            VALUES (@productId, @productName, @branchId, @branchName, 'move_out', @quantity, @reason, @userId, @userName, CURRENT_TIMESTAMP, @batchId)`,
+      params: { productId: sourceProductId, productName: source.name, branchId, branchName: branch?.name || null, quantity, reason: reason ? `Moved to ${destination.name} - ${reason}` : `Moved to ${destination.name}`, userId: user?.id ?? null, userName: user?.name ?? null, batchId: moveDrained.batchIds.length === 1 && moveDrained.remainder === 0 ? moveDrained.batchIds[0] : null },
     },
     {
-      sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id, branch_name, movement_type, quantity, reason, user_id, user_name, created_at)
-            VALUES (@productId, @productName, @branchId, @branchName, 'move_in', @quantity, @reason, @userId, @userName, CURRENT_TIMESTAMP)`,
-      params: { productId: destinationProductId, productName: destination.name, branchId, branchName: branch?.name || null, quantity, reason: reason ? `Moved from ${source.name} - ${reason}` : `Moved from ${source.name}`, userId: user?.id ?? null, userName: user?.name ?? null },
+      sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id, branch_name, movement_type, quantity, reason, user_id, user_name, created_at, batch_id)
+            VALUES (@productId, @productName, @branchId, @branchName, 'move_in', @quantity, @reason, @userId, @userName, CURRENT_TIMESTAMP, @batchId)`,
+      params: { productId: destinationProductId, productName: destination.name, branchId, branchName: branch?.name || null, quantity, reason: reason ? `Moved from ${source.name} - ${reason}` : `Moved from ${source.name}`, userId: user?.id ?? null, userName: user?.name ?? null, batchId: moveReceived.batchId },
     },
   ])
 

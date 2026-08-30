@@ -3,6 +3,7 @@ import { getProductDetailReport, getStockLedger } from '../../../api/productRead
 import { movementColorClass, translateMovementType } from '../../inventory/movementGroups.ts'
 import SectionCard from '../../shared/SectionCard'
 import { fmtDate, fmtDateTime24 } from '../../../utils/formatters'
+import { batchDisplayLabel } from '../../../utils/batchLabel.ts'
 
 // D3 (Part 422): the detail page's report sections, per the user's Aug-28
 // spec -- batch summary (each lot: qty + received/expiry + supplier),
@@ -15,10 +16,10 @@ import { fmtDate, fmtDateTime24 } from '../../../utils/formatters'
 // by default, and this whole component is its own lazy chunk that only
 // loads when the detail modal opens.
 //
-// The spec's movement-table Batch column is rendered blank-honest for
-// now: inventory_movements never records which lot a row touched (the
-// same linkage gap the D2 board note documents); the Reference column
-// carries what IS recorded (receipt/import/adjustment reasons).
+// The spec's movement-table Batch column: migration 0084 records the lot
+// on every movement where ONE lot is truthfully known (writers stamp
+// movements.batch_id); rows spread across several lots, over legacy
+// aggregate stock, or written before 0084 stay blank-honest.
 
 type Translate = (key: string) => string | undefined
 
@@ -60,6 +61,9 @@ type LedgerRow = {
   before_qty: number
   after_qty: number
   reference_id?: number | null
+  batch_id?: number | null
+  batch_lot_code?: string | null
+  batch_received_at?: string | null
 }
 
 export default function ProductDetailReport({ productId, t, fmtUSD }: {
@@ -122,6 +126,11 @@ export default function ProductDetailReport({ productId, t, fmtUSD }: {
                     {signed(row)} {translateMovementType(row.movement_type, t as (key: string) => string)}
                   </span>
                   <span className="tabular-nums text-gray-500">{row.before_qty} → {row.after_qty}</span>
+                  {row.batch_id ? (
+                    <span className="whitespace-nowrap rounded bg-amber-50 px-1.5 py-0.5 text-amber-700 dark:bg-amber-900/20 dark:text-amber-300">
+                      {batchDisplayLabel({ id: row.batch_id, lot_code: row.batch_lot_code, received_at: row.batch_received_at })}
+                    </span>
+                  ) : null}
                   <span className="max-w-40 truncate text-gray-400" title={row.reason || ''}>{row.reason || ''}</span>
                 </div>
               ))}

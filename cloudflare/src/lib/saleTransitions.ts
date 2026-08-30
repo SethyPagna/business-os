@@ -202,6 +202,9 @@ export function planSaleStockTransition(input: {
         sql: `UPDATE products SET stock_quantity = MAX(0, stock_quantity - @quantity), updated_at = CURRENT_TIMESTAMP WHERE id = @product_id`,
         params: { product_id: item.product_id, quantity: delta },
       })
+      // 0084: which lots this item's movement row actually touched -- the
+      // row stamps a batch_id only when ONE lot covered the whole delta.
+      const touchedLots: Array<{ batchId: number; quantity: number }> = []
       const deductAllocations = item.allocations || []
       if (deductAllocations.length) {
         // Z0: re-take the units from the SAME lots the sale drew from,
@@ -214,6 +217,7 @@ export function planSaleStockTransition(input: {
           const take = Math.min(Math.max(0, Number(alloc.released_quantity) || 0), remaining)
           if (take <= 0) continue
           statements.push(decrementBatchStockStrictStatement(alloc.batch_id, item.branch_id, take))
+          touchedLots.push({ batchId: alloc.batch_id, quantity: take })
           statements.push({
             sql: `UPDATE sale_item_batch_allocations
                   SET released_quantity = released_quantity - @take,
@@ -227,6 +231,7 @@ export function planSaleStockTransition(input: {
         // Strict, like a sale: a lot that cannot cover the re-deduct
         // aborts the whole transition (batch CHECK, migration 0058).
         statements.push(decrementBatchStockStrictStatement(item.batch_id, item.branch_id, delta))
+        touchedLots.push({ batchId: item.batch_id, quantity: delta })
         statements.push({
           sql: `UPDATE sale_item_batch_allocations SET released_at = NULL, released_quantity = 0
                 WHERE sale_item_id = @sale_item_id AND batch_id = @batch_id`,
@@ -234,13 +239,15 @@ export function planSaleStockTransition(input: {
         })
       }
       statements.push({
-        sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_usd, unit_cost_khr, reason, reference_id, user_id, user_name)
-              VALUES (@product_id, @product_name, @branch_id, 'sale', @quantity, @unit_cost_usd, @unit_cost_khr, @reason, @reference_id, @user_id, @user_name)`,
+        sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_usd, unit_cost_khr, reason, reference_id, user_id, user_name, batch_id)
+              VALUES (@product_id, @product_name, @branch_id, 'sale', @quantity, @unit_cost_usd, @unit_cost_khr, @reason, @reference_id, @user_id, @user_name, @batch_id)`,
         params: {
           product_id: item.product_id,
           product_name: item.product_name,
           branch_id: item.branch_id,
           quantity: -delta,
+          // 0084: attributable only when one lot covered the whole delta.
+          batch_id: touchedLots.length === 1 && touchedLots[0].quantity === delta ? touchedLots[0].batchId : null,
           unit_cost_usd: item.cost_price_usd || 0,
           unit_cost_khr: item.cost_price_khr || 0,
           reason: input.reason,
@@ -262,6 +269,8 @@ export function planSaleStockTransition(input: {
         sql: `UPDATE products SET stock_quantity = stock_quantity + @quantity, updated_at = CURRENT_TIMESTAMP WHERE id = @product_id`,
         params: { product_id: item.product_id, quantity: restore },
       })
+      // 0084: same single-lot attribution rule as the deduct branch above.
+      const restoredLots: Array<{ batchId: number; quantity: number }> = []
       const restoreAllocations = item.allocations || []
       if (restoreAllocations.length) {
         // Z0: put the units back into the SAME lots the sale drew from --
@@ -275,6 +284,7 @@ export function planSaleStockTransition(input: {
           const give = Math.min(outstanding, remaining)
           if (give <= 0) continue
           statements.push(incrementBatchStockStatement(alloc.batch_id, item.branch_id, give))
+          restoredLots.push({ batchId: alloc.batch_id, quantity: give })
           statements.push({
             sql: `UPDATE sale_item_batch_allocations
                   SET released_quantity = released_quantity + @give,
@@ -286,6 +296,7 @@ export function planSaleStockTransition(input: {
         }
       } else if (item.batch_id) {
         statements.push(incrementBatchStockStatement(item.batch_id, item.branch_id, restore))
+        restoredLots.push({ batchId: item.batch_id, quantity: restore })
         statements.push({
           sql: `UPDATE sale_item_batch_allocations SET released_at = datetime('now'), released_quantity = quantity
                 WHERE sale_item_id = @sale_item_id AND batch_id = @batch_id AND released_at IS NULL`,
@@ -296,13 +307,15 @@ export function planSaleStockTransition(input: {
       // carries the cancellation ("add stock back with a note, never undo
       // the original movements").
       statements.push({
-        sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_usd, unit_cost_khr, reason, reference_id, user_id, user_name)
-              VALUES (@product_id, @product_name, @branch_id, 'return', @quantity, @unit_cost_usd, @unit_cost_khr, @reason, @reference_id, @user_id, @user_name)`,
+        sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_usd, unit_cost_khr, reason, reference_id, user_id, user_name, batch_id)
+              VALUES (@product_id, @product_name, @branch_id, 'return', @quantity, @unit_cost_usd, @unit_cost_khr, @reason, @reference_id, @user_id, @user_name, @batch_id)`,
         params: {
           product_id: item.product_id,
           product_name: item.product_name,
           branch_id: item.branch_id,
           quantity: restore,
+          // 0084: attributable only when one lot received the whole restore.
+          batch_id: restoredLots.length === 1 && restoredLots[0].quantity === restore ? restoredLots[0].batchId : null,
           unit_cost_usd: item.cost_price_usd || 0,
           unit_cost_khr: item.cost_price_khr || 0,
           reason: input.reason,
