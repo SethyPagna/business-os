@@ -13381,3 +13381,77 @@ as exemplar: Date/Total/Customer/Cashier/Status/Receipt; date keeps the
 time-section pipeline, other fields render flat; Filters' old Sort section is
 now Period. listSort.test.ts registered. tsc clean. Rollout to Customers/
 Returns/Fees/Inventory/Users offered next. **Needs deploy** (frontend).
+
+## Part 501
+
+**Ask.** Three items: (1) build the possible-duplicates review the Part-499 audit
+surfaced, "make the UI great"; (2) "confirm the note tab icon hidden is actually
+draggable for all devices"; (3) "check whether all imports are using upload review
+first then analyze and apply... not upload then analyze then import then resolve
+conflict... this is wrong, very wrong, and it takes longer."
+
+**What changed.**
+- *Products → Duplicates review section.* Contacts already had a Possible
+  Duplicates panel with merge/dismiss; products only had the strict-identity
+  auto-merge. Now: migration `0083_product_duplicate_dismissals`;
+  `findPossiblySameProductClusters` in productIdentity.ts (same-real-barcode
+  clusters — barcode len ≥4, so the old system's 238 "0" placeholders never
+  cluster — and same-name-different-barcode clusters, dismissals filtered
+  server-side, normalized keys); routes GET /possible-duplicates,
+  POST .../dismiss, POST .../merge (reviewer picks the keeper; refuses
+  inactive/group rows; recomputes the keeper's stock cache). The whole
+  per-duplicate fold was extracted VERBATIM into `foldDuplicateProductInto`,
+  now shared by POST /merge-duplicates and the pair merge so they can never
+  drift (branch_stock summed + movements, gallery/primary image carry,
+  lot-identity-preserving batch re-point/fold, soft-deactivate, audit).
+  Frontend: `ProductDuplicatesTab` mirroring contacts/DuplicatesTab (severity
+  cards, two-tap "Keep this" merge, dismiss, search + severity chips, product
+  thumbs/prices/stock), a third "Duplicates" section pill on Products (gated
+  by the merge_duplicates permission), "Open" jumps to the listing filtered
+  to the name. New lang keys in both packs (incl. missing `all_severities`
+  and `pcs` the bare-t() scan caught).
+- *Notes launcher.* Confirmed NOT draggable at all (fixed CSS; the scout also
+  found a real bug: `justDraggedRef` was set by the open panel's header drag
+  but consumed by the chip's onClick, silently eating the chip's FIRST tap
+  after any panel reposition). Now: vertical drag along its left-edge dock via
+  pointer events (mouse+touch+pen one path), `touchAction:'none'`,
+  per-pointer-type threshold, viewport clamp + resize re-clamp, own storage
+  key `businessos_notes_launcher_pos`, position persists; `justDraggedRef` is
+  now armed ONLY by the launcher's own drag (panel-drag arming removed).
+- *Import flow (the "very wrong" one).* Audit of every entry point found
+  `StockActionImportModal` was the violation: a mandatory second server-side
+  review + "Confirm & Import". Rebuilt single-screen: CsvImportPreview rows
+  BEFORE upload, then create/upload/start with `auto_approve` and hand-off to
+  the shared `ServerImportReviewScreen` (extended with a `stock_action_modal`
+  source + `confirmStockActions` pass-through). BackgroundImportTracker's
+  approve (auto + manual button) now sends `confirmStockActions:true` for
+  stock_actions jobs — hub-routed stock imports used to 409-dead-end
+  unapprovably. The products warned>0 client pre-gate
+  (`shouldPromptProductConflictReviewBeforeApprove`) was removed: approve is
+  attempted and only a REAL server 409 `product_conflicts_unresolved` opens
+  the conflicts modal, whose onAllResolved now re-fires the interrupted
+  approve. ContactImportModal gained the missing pre-upload parsed-rows
+  preview. Stale hub copy ("review and approve each") corrected. Unused
+  stock review view-model exports removed (no zombie code).
+
+**Verified.** cloudflare tsc clean; test-merge-duplicates-carries-all-pure 10
+PASS (re-anchored to the shared helper + 2 new endpoint pins). frontend tsc
+clean; check:source 412 files; langKeyIntegrity (3,72x keys, both packs);
+stockActionImportModel (rewritten, PASS), importJobApproveGate (rewritten,
+PASS), notesWidgetResize (+2 launcher-drag pins, PASS), importTemplateRouter,
+importHubDirectApply, sales/inventory/contact import workers,
+contactImportPostStartFlow, importDirectApplySurfaces, unifiedStockContract —
+all PASS. Live on local wrangler (0083 applied) + Vite: seeded a same-barcode
+pair and a same-name pair; the Duplicates section rendered both clusters with
+severity chips; a real two-tap merge folded 3+2→5 pcs onto the keeper,
+deactivated the loser, wrote the audit row (checked in D1); dismiss removed
+the name cluster and persisted normalized ('gate twin serum') with reviewer
+attribution; the new single-screen stock import modal rendered; the notes chip
+dragged by mouse (persisted top=281), reloaded into place on a 375×812
+viewport, moved again via dispatched pointerType:'touch' events (281→401), a
+plain tap after a drag opened the panel FIRST try.
+
+**Not done.** Deploy (0083 + worker + frontend). The 53 real possibly-same
+groups in production await the operator's own merge/dismiss decisions in the
+new section. Two dead-code finds spun off as a separate task chip
+(DatedStockReconciliationModal orphaned; legacy bulkImport* transports).

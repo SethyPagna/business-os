@@ -26,15 +26,12 @@ export interface ApproveGateJob {
 
 export const CONTACT_IMPORT_JOB_TYPES = new Set(['customers', 'suppliers', 'delivery_contacts'])
 
-export function shouldPromptProductConflictReviewBeforeApprove(
-  job: ApproveGateJob,
-  resolvedJobIds: ReadonlySet<string>,
-  jobId: string,
-): boolean {
-  if (String(job.type || '') !== 'products') return false
-  if (!(Number(job.summary?.warned || 0) > 0)) return false
-  return !resolvedJobIds.has(jobId)
-}
+// Products deliberately have NO client-side pre-gate anymore: the old
+// warned>0 check bounced hub jobs whose warnings were already resolved into
+// the conflicts modal for nothing. The server's approve 409 (code
+// 'product_conflicts_unresolved', computed from the same unresolved-rows
+// query the review screen uses) is the one authority; the tracker reacts to
+// that instead (see BackgroundImportTracker's handleApprove catch).
 
 // `reviewedJobIds` is the caller's own per-session "conflicts modal has
 // been opened for this job at least once" set -- this function doesn't

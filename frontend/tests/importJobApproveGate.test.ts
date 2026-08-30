@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
-import { shouldPromptConflictReviewBeforeApprove, shouldPromptProductConflictReviewBeforeApprove } from '../src/components/shared/importJobApproveGate.ts'
+import { shouldPromptConflictReviewBeforeApprove } from '../src/components/shared/importJobApproveGate.ts'
 
 let failed = 0
 async function runTest(name: string, fn: () => void | Promise<void>): Promise<void> {
@@ -51,15 +51,21 @@ await runTest('reviewedJobIds is keyed by job id, not job type -- a different jo
   assert.equal(shouldPromptConflictReviewBeforeApprove(job, new Set(['job-1']), 'job-2'), true)
 })
 
-await runTest('a warned products job prompts until its server conflicts are resolved', () => {
-  const job = { type: 'products', summary: { warned: 2 } }
-  assert.equal(shouldPromptProductConflictReviewBeforeApprove(job, new Set(), 'product-1'), true)
-  assert.equal(shouldPromptProductConflictReviewBeforeApprove(job, new Set(['product-1']), 'product-1'), false)
+await runTest('products have NO client pre-gate -- the tracker reacts to the server 409 code instead', () => {
+  // The old warned>0 pre-gate bounced fully-resolved hub jobs into the
+  // conflicts modal for nothing; the server's product_conflicts_unresolved
+  // 409 is the one authority now. Pin both halves of that contract.
+  const gate = fs.readFileSync(new URL('../src/components/shared/importJobApproveGate.ts', import.meta.url), 'utf8')
+  assert.doesNotMatch(gate, /shouldPromptProductConflictReviewBeforeApprove/)
+  const tracker = fs.readFileSync(new URL('../src/components/shared/BackgroundImportTracker.tsx', import.meta.url), 'utf8')
+  assert.match(tracker, /code === 'product_conflicts_unresolved'/)
+  assert.match(tracker, /setProductConflictsJobId\(jobId\)/)
+  assert.match(tracker, /if \(job\) void handleApprove\(job\)/, 'resolving every conflict re-fires the interrupted approve')
 })
 
-await runTest('product prompting never captures other job types or clean products', () => {
-  assert.equal(shouldPromptProductConflictReviewBeforeApprove({ type: 'sales', summary: { warned: 2 } }, new Set(), 'sale-1'), false)
-  assert.equal(shouldPromptProductConflictReviewBeforeApprove({ type: 'products', summary: { warned: 0 } }, new Set(), 'product-2'), false)
+await runTest('the tracker approve carries the stock confirm flag so hub stock jobs cannot dead-end on the 409', () => {
+  const tracker = fs.readFileSync(new URL('../src/components/shared/BackgroundImportTracker.tsx', import.meta.url), 'utf8')
+  assert.match(tracker, /=== 'stock_actions' \? \{ confirmStockActions: true \} : undefined/)
 })
 
 await runTest('the product resolver persists explicit apply/skip decisions and exposes their consequence', () => {

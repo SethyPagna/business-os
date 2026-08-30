@@ -36,10 +36,10 @@ function unwrapJob(value: unknown): Record<string, unknown> | null {
   return nested && typeof nested === 'object' ? nested as Record<string, unknown> : record
 }
 
-export default function ServerImportReviewScreen({ jobId, label, source, t, notify, onApproved, onReviewLater, autoApprove = false, rowCount = 0 }: {
+export default function ServerImportReviewScreen({ jobId, label, source, t, notify, onApproved, onReviewLater, autoApprove = false, rowCount = 0, confirmStockActions = false }: {
   jobId: string | number
   label: string
-  source: 'sales_modal' | 'inventory_modal'
+  source: 'sales_modal' | 'inventory_modal' | 'stock_action_modal'
   t: TranslateFn
   notify: NotifyFn
   onApproved: () => void | Promise<void>
@@ -54,6 +54,11 @@ export default function ServerImportReviewScreen({ jobId, label, source, t, noti
   // shown in the direct-apply progress as "Importing N rows…" until the server's
   // create/update breakdown lands.
   rowCount?: number
+  // Stock-action jobs: approve carries the explicit confirm_stock_actions
+  // flag (the server 409s a conflicted stock plan without it). The operator
+  // reviewed the rows client-side before upload; any conflict a row carried
+  // is recorded per-row and lands in the finished job's report.
+  confirmStockActions?: boolean
 }) {
   const tr = (key: string, fallback: string): string => {
     const value = t(key)
@@ -146,7 +151,7 @@ export default function ServerImportReviewScreen({ jobId, label, source, t, noti
     if (!beginSingleAction(approvingRef)) return
     setApproving(true)
     try {
-      await approveImportJob(jobId, { source })
+      await approveImportJob(jobId, { source, ...(confirmStockActions ? { confirmStockActions: true } : {}) })
       if (!auto) notify(tr('import_approved_now', 'Confirmed — the import is applying now.'), 'success')
       await onApproved()
     } catch (error) {

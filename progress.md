@@ -3004,6 +3004,23 @@ the switch and its reasoning are recorded in `wrangler.toml`.
 
 ## Current status
 
+**Part 501 (Aug 30 2026, parallel session):** (1) Products gained a "Duplicates"
+review section (section pill beside Stock Changes) for the Part-499 possibly-same
+residue — live sweep by shared real barcode / shared name (migration 0083 for
+dismissals), two-tap keeper merge through the SAME fold the merge-duplicates
+cleanup uses (extracted as `foldDuplicateProductInto`, shared so the paths can't
+drift; lots keep identity, images carry, sales stay valid). (2) The Notes pencil
+chip is now genuinely draggable on all devices (pointer events + touch-action
+none, own storage key, clamped), and the panel-drag-swallows-next-tap bug is
+fixed. (3) The import-flow rule is enforced everywhere: StockActionImportModal
+rebuilt single-screen (client row review BEFORE upload → auto-apply; its old
+mandatory "Confirm & Import" second review is gone), the tracker approves stock
+jobs with confirm_stock_actions (hub stock imports used to 409-dead-end), the
+products warned>0 pre-gate replaced by reacting to the server's real
+`product_conflicts_unresolved` 409 (resolve → approve auto-refires), contacts
+import gained the missing pre-upload row preview. All verified live + suites
+green (see Part 501). **Needs deploy (incl. migration 0083).**
+
 **Part 499 (Aug 30 2026, parallel session):** Full production duplicate/loss audit —
 ALL CLEAN (14,913 sales / $1,871,573.34 / 0 dup receipts / 0 stock-lot-orphan-math
 mismatches / 0 loyalty on historical); the "possibly same" residue is old-system data

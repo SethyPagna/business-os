@@ -309,7 +309,7 @@ export default function ImportHub({
         <div className="flex items-center gap-2">
           {done && queuedCount > 0 ? (
             <span className="text-xs text-emerald-600 font-medium">
-              {queuedCount} {T('import_hub_done', 'import(s) queued — review and approve each in the import tracker (bottom of the screen)')}
+              {queuedCount} {T('import_hub_done', 'import(s) queued — they apply automatically once analyzed; only a genuine conflict pauses in the import tracker')}
             </span>
           ) : null}
           <button type="button" className="btn btn-ghost btn-sm" onClick={onClose} disabled={dispatching}>

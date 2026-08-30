@@ -18,7 +18,7 @@ import { dispatchImportCompletionRefresh, onImportTrackerPoke, shouldDispatchImp
 import { beginNamedAction, finishNamedAction } from '../../utils/actionGuards.ts'
 import { withLoaderTimeout } from '../../utils/loaders.ts'
 import { lazyRetry } from '../../utils/lazyImport.ts'
-import { shouldPromptConflictReviewBeforeApprove, shouldPromptProductConflictReviewBeforeApprove } from './importJobApproveGate.ts'
+import { shouldPromptConflictReviewBeforeApprove } from './importJobApproveGate.ts'
 
 // This widget is the ONE place import jobs surface across every page
 // (mounted globally in NotificationCenter.tsx -- Products/Inventory/Sales/
@@ -130,7 +130,7 @@ type ImportTrackerApi = {
   cancelImportJob: (jobId: string) => Promise<unknown>
   retryImportJob: (jobId: string) => Promise<unknown>
   preflightImportJob?: (jobId: string) => Promise<ImportPreflightResult>
-  approveImportJob: (jobId: string) => Promise<unknown>
+  approveImportJob: (jobId: string, options?: { confirmStockActions?: boolean }) => Promise<unknown>
   downloadImportJobErrors: (jobId: string) => Promise<unknown>
   deleteImportJob: (jobId: string, options: { force: boolean }) => Promise<unknown>
   dismissImportJob: (jobId: string) => Promise<unknown>
@@ -752,7 +752,6 @@ export default function BackgroundImportTracker() {
   // re-prompting once more for a still-open job is the safe direction to
   // err in, not the annoying one.
   const [reviewedConflictJobIds, setReviewedConflictJobIds] = useState<Set<string>>(() => new Set())
-  const [resolvedProductConflictJobIds, setResolvedProductConflictJobIds] = useState<Set<string>>(() => new Set())
   const openConflictsModal = useCallback((jobId: string, entityLabel: string) => {
     setConflictsJob({ id: jobId, entityLabel })
     setReviewedConflictJobIds((current) => (current.has(jobId) ? current : new Set(current).add(jobId)))
@@ -1163,11 +1162,6 @@ export default function BackgroundImportTracker() {
       )
       return
     }
-    if (shouldPromptProductConflictReviewBeforeApprove(job, resolvedProductConflictJobIds, jobId)) {
-      setProductConflictsJobId(jobId)
-      notify('Review every flagged product row before importing.', 'info')
-      return
-    }
     const action = beginTrackerAction(job, 'approve')
     if (!action) return
     try {
@@ -1184,14 +1178,31 @@ export default function BackgroundImportTracker() {
         return
       }
       await withLoaderTimeout(
-        () => api.approveImportJob(action.jobId),
+        // Stock-action jobs carry the explicit confirm flag: the rows were
+        // reviewed client-side before upload, and without it the server
+        // 409s any conflicted plan -- which made a hub-routed stock job
+        // unapprovable from this tracker at all (auto-approve AND the
+        // manual button both hit the same dead-end).
+        () => api.approveImportJob(action.jobId, String(job.type || '') === 'stock_actions' ? { confirmStockActions: true } : undefined),
         'Approve import job',
         IMPORT_TRACKER_APPROVE_TIMEOUT_MS,
       )
       await loadJobs()
       notify(t('import_apply_started') || 'Import apply started. You can keep using the app.', 'success')
     } catch (error) {
-      notify(getErrorMessage(error) || (t('import_apply_failed') || 'Could not approve import'), 'error')
+      // The server is the ONE authority on whether product conflicts are
+      // genuinely unresolved (its 409 uses the same unresolved-rows query
+      // the review screen does). The old client-side pre-gate fired on ANY
+      // warned>0 summary, bouncing fully-resolved hub jobs into the
+      // conflicts modal for nothing -- now approve is simply attempted and
+      // only a real 409 routes to the resolver, which retries the approve
+      // itself once everything is resolved.
+      if ((error as { code?: string } | null)?.code === 'product_conflicts_unresolved') {
+        setProductConflictsJobId(jobId)
+        notify(t('import_resolve_product_conflicts') || 'Some product rows need a decision — resolve them and the import continues.', 'info')
+      } else {
+        notify(getErrorMessage(error) || (t('import_apply_failed') || 'Could not approve import'), 'error')
+      }
     } finally {
       finishTrackerAction(action)
     }
@@ -1601,7 +1612,14 @@ export default function BackgroundImportTracker() {
           <ProductImportConflictsModal
             jobId={productConflictsJobId}
             notify={(message: string, tone?: string) => notify(message, tone as NotifyTone | undefined)}
-            onAllResolved={() => setResolvedProductConflictJobIds((current) => new Set(current).add(productConflictsJobId))}
+            // Every conflict decided -> re-fire the approve that the 409
+            // interrupted, so "resolve, then it continues" needs no second
+            // click on the tracker row.
+            onAllResolved={() => {
+              const job = jobsRef.current.find((candidate) => String(candidate.id || '') === productConflictsJobId)
+              setProductConflictsJobId('')
+              if (job) void handleApprove(job)
+            }}
             onClose={() => setProductConflictsJobId('')}
           />
         </Suspense>

@@ -10,6 +10,7 @@ import { resolvePublicAssetUrl } from '../../utils/publicAssetUrls.ts'
 import { withLoaderTimeout } from '../../utils/loaders.ts'
 import { countCsvDataRows } from '../../utils/csvRowCounter.ts'
 import { parseImportFile } from '../../utils/spreadsheetImport.ts'
+import { parseCsvRows } from '../../utils/csvImport.ts'
 import { getBlankCsvHeaderColumns } from '../../utils/csvImport.ts'
 import { getImportJob, approveImportJob } from '../../api/importJobsTransport.ts'
 import { decideContactImportPostStartAction, type ContactImportPostStartJob } from './contactImportPostStartFlow.ts'
@@ -627,6 +628,42 @@ export default function ContactImportModal({ type, onClose, onDone }: ContactImp
             </div>
           </div>
         ) : null}
+
+        {/* Review the actual parsed rows BEFORE the upload -- the same
+            pre-upload row preview sales/inventory/products show. A count
+            alone told the operator nothing about whether the columns
+            mapped; this is the client-side review the direct-apply flow
+            relies on. */}
+        {csvText && rowCount ? (() => {
+          let previewRows: Record<string, string | number>[] = []
+          let previewColumns: string[] = []
+          try {
+            previewRows = parseCsvRows(csvText).slice(0, 3)
+            previewColumns = previewRows.length ? Object.keys(previewRows[0]) : []
+          } catch { /* header-only or malformed preview stays empty */ }
+          return previewRows.length ? (
+            <div className="max-h-40 overflow-auto rounded-lg border border-gray-200 dark:border-zinc-700">
+              <table className="w-full text-left text-[11px]">
+                <thead className="sticky top-0 bg-slate-50 dark:bg-slate-800">
+                  <tr>
+                    {previewColumns.map((column) => (
+                      <th key={column} className="whitespace-nowrap px-2 py-1 font-medium text-slate-500 dark:text-slate-400">{column}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {previewRows.map((row, index) => (
+                    <tr key={index} className="border-t border-gray-100 dark:border-zinc-800">
+                      {previewColumns.map((column) => (
+                        <td key={column} className="whitespace-nowrap px-2 py-1 text-slate-600 dark:text-slate-300">{String(row[column] ?? '')}</td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : null
+        })() : null}
 
         <div className="grid gap-3 md:grid-cols-2">
           <div>
