@@ -1743,8 +1743,17 @@ app.post('/move-row', async (c) => {
   const available = await branchStockQty(c.env, sourceProductId, branchId)
   if (quantity > available) return c.json({ error: `Cannot move ${quantity} - only ${available} available in ${branch?.name || 'this branch'}` }, 400)
 
-  await applyStockDelta(c.env, sourceProductId, branchId, -quantity)
-  await applyStockDelta(c.env, destinationProductId, branchId, quantity)
+  // Lot-ledger parity on BOTH legs (was plain applyStockDelta on each, which
+  // moved branch_stock while every branch_batch_stock row stayed frozen -- the
+  // same lot drift POST /adjust already avoids). Source: FIFO-drain its active
+  // lots for the moved units (removeStockAcrossBatches does the aggregate write
+  // too; any legacy-unlotted remainder rides applyStockDelta as before).
+  // Destination: a batch can't cross products, so the units arrive as a fresh
+  // lot via receiveBatchStock -- which keeps the destination's own
+  // branch_stock/branch_batch_stock/products in lockstep.
+  const moveDrained = await removeStockAcrossBatches(db, { productId: sourceProductId, branchId, quantity })
+  if (moveDrained.remainder > 0) await applyStockDelta(c.env, sourceProductId, branchId, -moveDrained.remainder)
+  await receiveBatchStock(db, { productId: destinationProductId, branchId, quantity })
   await db.batch([
     {
       sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id, branch_name, movement_type, quantity, reason, user_id, user_name, created_at)

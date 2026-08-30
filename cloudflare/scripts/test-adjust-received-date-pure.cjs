@@ -298,6 +298,28 @@ async function main() {
     assert.ok(!/INSERT\s+INTO\s+products\b/i.test(transferSrc), 'a transfer never creates a product row (so it cannot mint a new barcode either)')
   })
 
+  await check('move-row drains the source lots and receives a fresh lot on the destination (no ledger drift)', async () => {
+    seed()
+    rawDb.prepare("INSERT INTO products (id, name, is_active, stock_quantity) VALUES (2, 'Destination', 1, 0)").run()
+    const add = await req('POST', '/adjust', { productId: 1, type: 'add', quantity: 10, reason: 'stock in', branchId: 1, batchId: 'new' })
+    assert.strictEqual(add.status, 200, JSON.stringify(add.json))
+    const srcLot = batchRows()[0]
+    const srcLotQty = () => rawDb.prepare('SELECT quantity FROM branch_batch_stock WHERE batch_id = @id AND branch_id = 1').get({ id: srcLot.id }).quantity
+    assert.strictEqual(srcLotQty(), 10, 'sanity: source lot holds 10')
+
+    const moved = await req('POST', '/move-row', { sourceProductId: 1, destinationProductId: 2, quantity: 4, branchId: 1, reason: 'relabel' })
+    assert.strictEqual(moved.status, 200, JSON.stringify(moved.json))
+
+    // Source: aggregate AND its lot both drop to 6 -- in step, not stranded at 10.
+    assert.strictEqual(rawDb.prepare('SELECT quantity FROM branch_stock WHERE product_id = 1 AND branch_id = 1').get().quantity, 6, 'source aggregate drops by 4')
+    assert.strictEqual(srcLotQty(), 6, 'source lot drops in step -- the pre-fix drift left it at 10')
+
+    // Destination: aggregate = 4 AND a fresh lot holds exactly the moved units.
+    assert.strictEqual(rawDb.prepare('SELECT quantity FROM branch_stock WHERE product_id = 2 AND branch_id = 1').get().quantity, 4, 'destination aggregate is the moved 4')
+    const destLotTotal = (rawDb.prepare('SELECT COALESCE(SUM(bbs.quantity), 0) AS q FROM product_batches pb JOIN branch_batch_stock bbs ON bbs.batch_id = pb.id WHERE pb.variant_product_id = 2 AND bbs.branch_id = 1').get() || {}).q
+    assert.strictEqual(Number(destLotTotal), 4, 'destination received a lot -- its ledger equals its aggregate (invariant held on both sides)')
+  })
+
   console.log(`\n${passed} check(s) passed.`)
 }
 
