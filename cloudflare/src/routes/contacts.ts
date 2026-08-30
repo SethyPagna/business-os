@@ -679,7 +679,7 @@ function registerContactRoutes(config: ContactConfig) {
     if (Object.prototype.hasOwnProperty.call(payload, 'phone')) payload.phone = formatPhoneP8(payload.phone)
     // Keep the canonical phone key in sync so the storefront signup can detect
     // this contact as an existing customer (lib/phone.ts is the authority;
-    // 0086 backfilled the historical rows). Customers only — suppliers/delivery
+    // 0087 backfilled the historical rows). Customers only — suppliers/delivery
     // contacts have no such column.
     if (config.table === 'customers' && Object.prototype.hasOwnProperty.call(payload, 'phone')) {
       payload.phone_normalized = canonicalizePhone(payload.phone)

@@ -95,7 +95,7 @@ check('no declared foreign key dangles after the full chain', () => {
   assert.deepStrictEqual(rows, [], `foreign_key_check reported: ${JSON.stringify(rows.slice(0, 5))}`)
 })
 
-check('the portal customer-account tables from 0086 exist with their uniqueness gates', () => {
+check('the portal customer-account tables from 0087 exist with their uniqueness gates', () => {
   const tables = new Set(
     sqlite.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all().map((r) => r.name),
   )

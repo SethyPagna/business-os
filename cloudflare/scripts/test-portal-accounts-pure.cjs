@@ -1,7 +1,7 @@
 // Regression test for the storefront customer-account system (§2):
 // lib/phone.ts, lib/portalAccounts.ts, lib/portalAuthLockout.ts — the REAL
 // source, transpiled and run against an in-memory SQLite with every real
-// migration (including 0086_portal_accounts.sql) applied. No logic is
+// migration (including 0087_portal_accounts.sql) applied. No logic is
 // reimplemented here. Same transpile-and-run harness as
 // test-login-lockout-pure.cjs.
 //
@@ -107,9 +107,9 @@ async function run() {
     assert.strictEqual(canonicalizePhone(null), null)
   })
 
-  await check('the 0086 SQL backfill produces the same canonical key as lib/phone.ts', () => {
+  await check('the 0087 SQL backfill produces the same canonical key as lib/phone.ts', () => {
     seedCustomer({ name: 'Backfill One', phone: '+855 77 111 222', phone_normalized: null })
-    // The exact backfill statements from 0086.
+    // The exact backfill statements from 0087.
     rawDb.exec(`UPDATE customers SET phone_normalized = replace(replace(replace(replace(replace(replace(phone, ' ', ''), '-', ''), '(', ''), ')', ''), '.', ''), '+', '') WHERE name = 'Backfill One'`)
     rawDb.exec(`UPDATE customers SET phone_normalized = '0' || substr(phone_normalized, 4) WHERE phone_normalized LIKE '855%' AND length(phone_normalized) IN (11, 12)`)
     const row = rawDb.prepare("SELECT phone_normalized FROM customers WHERE name = 'Backfill One'").get()

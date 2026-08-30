@@ -15,7 +15,7 @@
 // two accounts get created for one human. This is the single canonical
 // function every account store / lookup / existing-customer probe uses. It
 // intentionally reuses formatPhoneP8's conservative 855->0 rule so the key
-// agrees with how customers.phone was already migrated (0086 backfills
+// agrees with how customers.phone was already migrated (0087 backfills
 // customers.phone_normalized with the SQL equivalent of this).
 
 export function canonicalizePhone(value: unknown): string | null {
