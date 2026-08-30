@@ -48,7 +48,6 @@ const ExportModal = lazyRetry(() => import('./ExportModal'), 'sales-export-modal
 const SalesImportModal = lazyRetry(() => import('./SalesImportModal'), 'sales-import')
 const ExportOptionsDialog = lazyRetry(() => import('../shared/ExportOptionsDialog'), 'sales-export-options')
 import SalesListSurface from './SalesListSurface'
-import { TOOLBAR_BUTTON_WIDTH, manageToolbarButtonClassName } from '../shared/toolbarButtonStyles'
 import { buildSalesImportRows, SALES_IMPORT_COLUMNS } from '../../utils/salesImportContract.ts'
 import { exportColumnLabel } from '../../utils/exportOptions.ts'
 
@@ -324,7 +323,11 @@ export default function Sales() {
   // actually replaced it landed on a completely different, longer cadence.
   // One debounced value for both call sites closes that gap here too.
   const debouncedSearch = useDebouncedValue(search, 180)
-  const timeGroupingMode = useMemo(() => getTimeGroupingMode(yearFilter, monthFilter), [monthFilter, yearFilter])
+  // Sales organize by DAY always (user, Aug 30: "for date in sales …
+  // do date by year month and day") — the day label is the full
+  // mm/dd/yyyy, so year+month+day all read off every section header
+  // instead of the old bare-year buckets.
+  const timeGroupingMode = 'day' as const
   const isAdmin = useMemo(() => {
     const roleCode = String(user?.role_code || '').toLowerCase()
     const username = String(user?.username || '').toLowerCase()
@@ -1180,65 +1183,47 @@ export default function Sales() {
           equal share of the row (flex-1); Manage folds Import + Export into
           one dropdown (same pattern Products.tsx uses), History before Manage,
           matching Products' ordering. */}
-      <div className="mb-3 flex min-w-0 items-stretch gap-1.5 overflow-x-auto pb-1">
-        <ActionHistoryBar history={actionHistory as unknown as ActionHistoryBarHistory} t={t} className="min-w-0 flex-1" showLabel />
-        <LazyPortalMenu
-          align="auto"
-          triggerWrapperClassName={`min-w-0 ${TOOLBAR_BUTTON_WIDTH}`}
-          menuClassName="max-h-[70vh] overflow-auto"
-          trigger={(
-            <button
-              type="button"
-              // Was a hardcoded solid-blue button -- the only "Manage"
-              // trigger in the app styled that way (Products.tsx/
-              // HeaderActions.tsx and Inventory.tsx both use the shared
-              // .btn-secondary white-card look for the identical action).
-              // The blue read as a primary/destructive-adjacent call to
-              // action next to History and confused people expecting the
-              // same neutral affordance as every other page. Switched to
-              // the shared class so Manage looks like Manage everywhere.
-              // Now also pulls the actual sizing from
-              // shared/toolbarButtonStyles.ts instead of its own
-              // `w-full` (no desktop cap) -- this button used to keep
-              // stretching to fill the row on large screens instead of
-              // settling to Products' Manage button's compact width
-              // (Aug 23 2026, "History/Manage/Product button sizing on
-              // large screens").
-              className={`w-full ${manageToolbarButtonClassName}`}
-              aria-haspopup="true"
-              aria-label={translateOr('manage', 'Manage')}
-              title={translateOr('manage', 'Manage')}
-            >
-              <Settings2 className="h-4 w-4 shrink-0" />
-              <span className="truncate">{translateOr('manage', 'Manage')}</span>
-            </button>
-          )}
-          items={([
-            { label: translateOr('import', 'Import'), onClick: () => setShowImport(true), color: 'blue', icon: <Download className="h-4 w-4 shrink-0" /> },
-            'divider' as const,
-            ...(salesExportItems || [])
-              .filter((item): item is PortalMenuItem => Boolean(item))
-              .map((item) => (item === 'divider' ? item : { ...item, icon: item.icon ?? <Upload className="h-4 w-4 shrink-0" /> })),
-          ] as PortalMenuItem[])}
-        />
-      </div>
-
-      <div className="mb-2 flex justify-center">
-        <PaginationControls
-          compact
-          rangeAsPageSize
-          page={salesPage}
-          pageSize={salesPageSize}
-          totalItems={allVisibleSales.length}
-          label={t('sales') || 'sales'}
-          t={t}
-          onPageChange={setSalesPage}
-          onPageSizeChange={(size) => {
-            setSalesPageSize(size)
-            setSalesPage(1)
-          }}
-        />
-      </div>
+      {/* The stats strip leads the page: range row (with History + the ONE
+          Manage menu folding Import/Export — "export history and stats can
+          be in one manage button") then the mini stat cards. The old
+          standalone action row and the centered pagination row are gone;
+          the pager now rides the sticky search row below. */}
+      <StatsStrip
+        className="mb-2"
+        cards={stripCards}
+        loading={stripLoading}
+        t={t}
+        range={stripRange}
+        onRangeChange={setStripRange}
+        actions={(
+          <>
+            <ActionHistoryBar history={actionHistory as unknown as ActionHistoryBarHistory} t={t} className="min-w-0" />
+            <LazyPortalMenu
+              align="auto"
+              menuClassName="max-h-[70vh] overflow-auto"
+              trigger={(
+                <button
+                  type="button"
+                  className="inline-flex h-8 shrink-0 items-center gap-1 rounded-lg border border-gray-200 bg-white px-2.5 text-xs font-semibold text-gray-700 transition-colors hover:border-blue-300 hover:text-blue-700 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-200"
+                  aria-haspopup="true"
+                  aria-label={translateOr('manage', 'Manage')}
+                  title={translateOr('manage', 'Manage')}
+                >
+                  <Settings2 className="h-3.5 w-3.5 shrink-0" />
+                  <span className="truncate">{translateOr('manage', 'Manage')}</span>
+                </button>
+              )}
+              items={([
+                { label: translateOr('import', 'Import'), onClick: () => setShowImport(true), color: 'blue', icon: <Download className="h-4 w-4 shrink-0" /> },
+                'divider' as const,
+                ...(salesExportItems || [])
+                  .filter((item): item is PortalMenuItem => Boolean(item))
+                  .map((item) => (item === 'divider' ? item : { ...item, icon: item.icon ?? <Upload className="h-4 w-4 shrink-0" /> })),
+              ] as PortalMenuItem[])}
+            />
+          </>
+        )}
+      />
 
       {/* Search bar and bulk-action bar pin to the top of the page's scroll
           container while scrolling (Aug 11 2026 UI-polish request, same
@@ -1285,6 +1270,20 @@ export default function Sales() {
             }}
             mobileIconOnly
           />
+          <PaginationControls
+            compact
+            rangeAsPageSize
+            page={salesPage}
+            pageSize={salesPageSize}
+            totalItems={allVisibleSales.length}
+            label={t('sales') || 'sales'}
+            t={t}
+            onPageChange={setSalesPage}
+            onPageSizeChange={(size) => {
+              setSalesPageSize(size)
+              setSalesPage(1)
+            }}
+          />
         </div>
 
         {selectedSales.length > 0 ? (
@@ -1301,20 +1300,6 @@ export default function Sales() {
         ) : null}
       </div>
 
-      {/* The foldable stats strip (shared StatsStrip, the app-wide stats
-          pattern): mini cards over a date range defaulting to TODAY; tapping
-          a card folds open its explanation + breakdown. Range-scoped on
-          purpose — filter-scoped totals stay on the list footer below. */}
-      <StatsStrip
-        className="mb-3"
-        cards={stripCards}
-        loading={stripLoading}
-        t={t}
-        range={stripRange}
-        onRangeChange={setStripRange}
-      />
-
-      <p className="mb-2 text-xs text-gray-400">{t('click_for_details') || 'Click a row for details'}</p>
 
       <SalesListSurface
         collapsedSalesSections={collapsedSalesSections}

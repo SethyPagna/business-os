@@ -141,6 +141,32 @@ export function fmtDateTime24(raw: TimestampInput): string {
 }
 
 /**
+ * Just the wall clock, HH:mm in 24-hour business time (e.g. "20:00").
+ * The time-only companion to fmtDateTime24 -- used where the DATE is
+ * already carried by a surrounding day header (the Stock Changes ledger's
+ * day-grouped cards) so each row need only show its time. Same h23 +
+ * business-timezone rules as fmtDateTime24 so the two never disagree.
+ */
+export function fmtClock24(raw: TimestampInput): string {
+  const normalized = normalizeTimestampInput(raw)
+  if (!normalized) return '—'
+  try {
+    const date = new Date(normalized)
+    if (Number.isNaN(date.getTime())) return '—'
+    const parts = new Intl.DateTimeFormat('en-US', {
+      hour: '2-digit',
+      minute: '2-digit',
+      hourCycle: 'h23',
+      timeZone: BUSINESS_TIME_ZONE,
+    }).formatToParts(date)
+    const get = (type: string) => parts.find((p) => p.type === type)?.value || ''
+    return `${get('hour')}:${get('minute')}`
+  } catch {
+    return String(raw || '')
+  }
+}
+
+/**
  * Display label for a captured IANA timezone. Asia/Bangkok and
  * Asia/Phnom_Penh share the identical UTC+07:00 wall clock (no DST), and
  * devices in Cambodia routinely report Asia/Bangkok -- the business is in

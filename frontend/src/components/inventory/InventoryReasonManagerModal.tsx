@@ -1,6 +1,7 @@
 import type { Dispatch, SetStateAction } from 'react'
 import { createPortal } from 'react-dom'
 import X from 'lucide-react/dist/esm/icons/x.js'
+import InfoHint from '../shared/InfoHint'
 
 type InventoryReasonType = 'adjust' | 'transfer' | 'move' | 'delete'
 type Translator = (key: string) => string | undefined
@@ -54,10 +55,15 @@ export default function InventoryReasonManagerModal({
     <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-0 sm:items-center sm:p-4" onClick={close}>
       <div className="flex max-h-modal-88 w-full flex-col rounded-t-2xl bg-white shadow-2xl dark:bg-gray-800 sm:max-w-lg sm:rounded-2xl pb-[env(safe-area-inset-bottom)] sm:pb-0" onClick={(event) => event.stopPropagation()}>
         <div className="flex items-center justify-between border-b border-gray-200 p-4 dark:border-gray-700">
-          <div>
-            <h2 className="font-bold text-gray-900 dark:text-white">{tr('saved_reasons', 'Saved reasons')}</h2>
-            <div className="mt-0.5 text-xs text-gray-400">{tr('saved_reasons_desc', 'Reuse common reasons for stock adjustments, transfers, row moves, and deletions.')}</div>
-          </div>
+          {/* The description sentence moved off the header into this InfoHint
+              (density: instructions live in the info toolkit, not inline). */}
+          <h2 className="flex items-center gap-1.5 font-bold text-gray-900 dark:text-white">
+            {tr('saved_reasons', 'Saved reasons')}
+            <InfoHint
+              label={tr('saved_reasons', 'Saved reasons')}
+              text={tr('saved_reasons_desc', 'Reuse common reasons for stock adjustments, transfers, row moves, and deletions.')}
+            />
+          </h2>
           <button type="button" onClick={close} aria-label={tr('close', 'Close')} className="flex h-8 w-8 items-center justify-center text-gray-400 hover:text-gray-600">
             <X className="h-4 w-4" />
           </button>

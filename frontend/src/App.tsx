@@ -422,6 +422,17 @@ async function clearStaleShellCaches() {
 }
 
 function triggerChunkRecoveryReload(marker: string): boolean {
+  // Offline guard (Part-77, offline audit): a chunk import fails OFFLINE for
+  // any page the SW never cached -- and this recovery then deleted the
+  // business-os-app-shell-*/static-* caches, i.e. the device's ONLY copy of
+  // the app, before a reload that cannot refetch anything. That bricked the
+  // whole offline PWA over one missing page. Recovery is pointless without a
+  // network (its entire mechanism is "refetch the newest HTML/chunks"), so
+  // offline: keep the caches, leave the one-shot retry marker UNSPENT (the
+  // full recovery stays available for when connectivity returns), and
+  // return false so the caller surfaces the failure instead.
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) return false
+
   try {
     sessionStorage.setItem(marker, '1')
   } catch (_) {}
@@ -475,8 +486,10 @@ function lazyWithRetry(importer: ChunkImporter, key: string) {
           continue
         }
 
-        if (shouldRetryChunk(marker)) {
-          triggerChunkRecoveryReload(marker)
+        // Recovery can decline (offline guard above) -- then fall through to
+        // the thrown error so the page-level error UI shows, with the retry
+        // marker still unspent for a real recovery once back online.
+        if (shouldRetryChunk(marker) && triggerChunkRecoveryReload(marker)) {
           return await new Promise(() => {})
         }
 

@@ -3194,17 +3194,17 @@ decision, so they were flagged rather than guessed (Golden Rule 7). A peer picki
 up should re-verify against current source first.
 
 **CRITICAL — data loss / corruption / privilege:**
-- **[CLAIMED: session b9, Aug 30 — slices A+B (tables + schema guard); slice C
-  (maintenance lock / atomicity) stays open]** Restore DELETEs all tables then
-  re-inserts non-atomically, no lock, no schema-version
-  check; and `BACKUP_TABLES` omits `product_batches`/`branch_batch_stock`/`*_batch_allocations`
-  so every restore (incl. the safety backup a reset takes) leaves the lot ledger empty
-  vs branch_stock. (×3: pipelines, batch-identity, +) `lib/backup.ts:83-118,860-942`.
-  b9's audit: the omission is wider than flagged — `fees`, `loyalty_point_adjustments`,
-  `damaged_stock_lots`, `return_replacement_items`, `promotion_rules`, `user_notes`,
-  duplicate-dismissals, import commit/guard ledgers, share submissions,
-  dated-count actions, `rfid_tags`, `ai_provider_configs`, `pending_actions` are ALL
-  absent from full backups today.
+- **[SLICES A+B FIXED: session b9, Aug 30 — Part 521, `40ed7d90`, needs deploy;
+  SLICE C STILL OPEN]** `BACKUP_TABLES` now carries the lot ledger AND the 17 other
+  silently-dropped tables b9's sweep found (fees, loyalty_point_adjustments,
+  damaged_stock_lots, replacement items, promotion_rules, notes, pending_actions,
+  dismissals, import commit/guard ledgers, …) in FK order, with deliberate
+  exclusions recorded; backups stamp `summary.schemaMigration` and restore REFUSES a
+  newer-schema backup before any delete, reporting `schemaMismatch` +
+  `tablesNotInBackup`. **Slice C open:** restore is still non-atomic
+  DELETE-then-reinsert with no maintenance lock — realistic design is a
+  write-blocking maintenance flag + resumable restore state (import-lease spirit),
+  NOT whole-restore atomicity (impossible in D1 batch limits at this size).
 - **[FIXED: session b9, Aug 30 — Part 518, `07fb7705`, needs deploy]** Inventory
   `/transfer` moved only `branch_stock`, stranding every lot at the source (the 0081
   drift class, ×3 audits). Now auto-allocates FIFO across source lots (same Z0 policy
@@ -3242,7 +3242,8 @@ up should re-verify against current source first.
   else falls back to the admin URL. (was ×1 auth)
 - OTP verify not bound to the password step and skips device-approval + lockout. (×1)
   `routes/auth.ts:475`.
-- SW chunk-recovery wipes app-shell+static caches with no `navigator.onLine` guard →
+- **[CLAIMED: session b9, Aug 30]** SW chunk-recovery wipes app-shell+static caches
+  with no `navigator.onLine` guard →
   bricks the offline PWA. (×1 offline) `App.tsx:359,414`.
 - Several `MAX(0, qty-n)` clamps still hide oversell races (supplier return, replacement
   stock, batch-branch correction, dated-count remove). (×2) `returns.ts:1098`,
