@@ -14767,3 +14767,34 @@ the tracker's read-cache and receipt/date-locale items should be marked FIXED
   *review-tier bypass* / *POS points balance omits adjustments* / *offline sale
   timestamp* / *import-review parity* (MEDIUM): each a backend behavioral change
   or touches a file an active session is editing; deferred to focused passes.
+
+## Part 528 (Aug 30 2026, session business-os-v1-b9) — Part-77 HIGH fix: POS money — cents-true loyalty, whole-riel KHR
+
+**Ask:** findings-backlog continuation (claimed first). Two POS money
+defects from the frontend audit, commit `1360a7c8`:
+
+- **Loyalty redemption rounded to whole dollars.** `redeemValueUsdStep`
+  Math.round'ed the configured USD-per-step: a $0.50/step store setting
+  doubled every redemption to $1, and $0.25/step became $0 — with
+  `membership_points_redeemed` still sent, the member's points were burned
+  for a $0 discount. Now cents precision (`×100 /100`).
+- **Fractional riel reached the server and the receipt.** The KHR tax
+  (afterDiscKhr × taxRate), total, and change (changeUsd × exchangeRate)
+  multiplications produced fractional riel that flowed into the checkout
+  payload and printed receipt; operator-typed KHR discount fields could
+  ride through with decimals too. Every KHR boundary amount now rounds to
+  whole riel (usdToKhr already did; payload subtotal_khr rounds as well).
+- **Flagged, not changed:** `redeemValueKhrStep`'s ceil-to-1000 floor can
+  also inflate a configured KHR step (2050 → 3000) — possibly a deliberate
+  note-denominations decision; left for the user to rule on rather than
+  silently altered.
+- **Ride-along unblock:** two COMMITTED peer tests
+  (`catalogLoyaltyDateFormat` from `9f6d6bb1`, `readCacheKeyIsolation`)
+  were never wired into the test:utils chain, so `testChainCoverage` was
+  red on HEAD for every session. Both verified green and wired in — the
+  chain guard now passes with all 144 test files covered.
+
+Verified: new `tests/posMoneyRounding.test.ts` 4/4 (wired into the chain),
+posCore, actionStability, testChainCoverage green; frontend tsc clean
+apart from a peer's in-flight uncommitted StockChangeSection edit.
+**Needs deploy** (rides with the b9 batch).
