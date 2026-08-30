@@ -5,7 +5,7 @@ import ImageDown from 'lucide-react/dist/esm/icons/image-down.js'
 import Printer from 'lucide-react/dist/esm/icons/printer.js'
 import ChevronDown from 'lucide-react/dist/esm/icons/chevron-down.js'
 import { useApp as useAppHook } from '../../AppContext.tsx'
-import { BUSINESS_TIME_ZONE } from '../../constants.ts'
+import { fmtDateTime24 } from '../../utils/formatters.ts'
 import { parseReceiptTemplate } from '../receipt-settings/template'
 import { buildAppliedReceiptConfig } from '../../utils/receiptAppliedConfig.ts'
 import ReceiptQrCodes, { normalizeQrSocialLinksForReceipt, type ReceiptQrEntry } from './ReceiptQrCodes.tsx'
@@ -306,7 +306,10 @@ export default function Receipt({ sale, settings = {}, onClose, _previewMode }: 
   const createdAt = sale.created_at
   const createdAtText = createdAt instanceof Date ? createdAt.toISOString() : String(createdAt || '')
   const parsedDate = createdAt ? new Date(createdAtText.includes('T') ? createdAtText : `${createdAtText}Z`) : new Date()
-  const dateStr = Number.isNaN(parsedDate.getTime()) ? String(createdAt || '') : parsedDate.toLocaleString(undefined, { timeZone: BUSINESS_TIME_ZONE })
+  // mm/dd/yyyy HH:mm like the rest of the app -- the locale-default form
+  // rendered 12-hour AM/PM (and day-first on non-US devices), the exact
+  // drift the app-wide mm/dd/yyyy + 24-hour convention forbids.
+  const dateStr = Number.isNaN(parsedDate.getTime()) ? String(createdAt || '') : fmtDateTime24(parsedDate)
   const exchangeRate = toNumber(sale.exchange_rate) || toNumber(appliedSettings.exchange_rate as number | string | undefined) || 4100
   const subtotalUsd = toNumber(sale.subtotal_usd ?? sale.subtotal)
   const discountUsd = toNumber(sale.discount_usd ?? sale.discount)
