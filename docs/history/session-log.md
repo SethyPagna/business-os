@@ -14706,3 +14706,64 @@ login-identifier, route-permissions, apiHttp, performanceLoadingUx green;
 tsc clean both packages. **Needs deploy** (rides with the b9 batch) — note
 for the operator: after deploy, an OTP user mid-login during the rollout
 gets "sign-in step expired" once and simply re-enters their password.
+
+## Part 528 — Part-77 sweep: read-cache key collisions + catalog/loyalty date locale
+
+**Ask.** User: "I want you to fix accordingly" pointing at the Part-77
+verification-sweep artifact. Most CRITICAL/HIGH items were already closed by
+the b9 batch (backup lot ledger, inventory transfer, action-history gate,
+reset permission, settings OAuth leak, password-reset redirect, chunk
+recovery, oversell clamps, returns create-path) and OTP binding (Part 527).
+This session took two still-open, fully-isolated findings that need no product
+decision and no file touched by an active session.
+
+**What changed.**
+- *Read-cache keys missing their id param* (MEDIUM). `route()`'s channel string
+  is BOTH the 20s read-cache key and the in-flight dedupe key. Three get-one
+  reads used a CONSTANT channel: `getFee` → `fees:get-one`, `getReturn` →
+  `returns:getOne`, `getCustomTableData` → `customTables:data`. So opening
+  record/table B within the 20s window rendered record/table A (same class as
+  the earlier lots-per-channel bug). Each channel now embeds the id/tableName
+  (`fees:get-one:${id}`, `returns:getOne:${encodeId(id)}`,
+  `customTables:data:${tableName}`). Files: `feesTransport.ts`,
+  `returnsReadTransport.ts`, `customTablesTransport.ts`. Commit `7d7fc3e7`.
+- *Receipt & three helpers ignore the mm/dd + 24h rule* (MEDIUM; the receipt
+  half was already `ed64958b`). The three duplicated `formatDateTime` helpers
+  in `CatalogPage.tsx`, `PublicCatalogPage.tsx`, `LoyaltyPointsPage.tsx`
+  rendered a bare `date.toLocaleString()` — no locale, no timeZone — so they
+  printed the viewer's locale (dd/mm, 12h) and timezone. `PublicCatalogPage` is
+  customer-facing, so shoppers saw it. Each now delegates to the canonical
+  `fmtTime` (en-US mm/dd/yyyy 24h, Asia/Phnom_Penh). Commit `9f6d6bb1`.
+
+**What was found (confirmed, not guessed).** Write-invalidation is by entity
+prefix (`getChannelRefreshKey` splits the channel on `:`, then `startsWith`),
+so per-id channels still clear on any entity write — verified by test, not
+assumed. `normalizeTimestampInput` (inside `fmtTime`) is strictly more robust
+than the local `raw.includes('T') ? raw : raw+'Z'` guard, so the swap is
+behaviour-equivalent-plus-fix.
+
+**Verified (Golden Rule 5, each run individually).**
+- New `readCacheKeyIsolation.test.ts` — 4 checks, PASS. Proven to FAIL on
+  pre-fix source (reverted `getFee` to the constant channel → "fee 2 must NOT
+  come back as the cached fee 1"), then restored.
+- New `catalogLoyaltyDateFormat.test.ts` — 3 source-lock checks, PASS.
+- `formatters.test.ts` — PASS.
+- `tsc --noEmit` (frontend) — 0 errors.
+All commits are path-scoped (only this session's files staged); `progress.md`
+had another session's uncommitted edits, so it was deliberately NOT touched —
+the tracker's read-cache and receipt/date-locale items should be marked FIXED
+(Part 528) by whoever next edits progress.md cleanly.
+
+**Not done (still open from the sweep, with why).**
+- *Money rounding* (HIGH, `POS.tsx:1027,2434-2465`): KHR totals carry sub-riel
+  fractions to server+receipt; loyalty redeem value `Math.round`ed to whole USD
+  ($0.50→$1.00, $0.25→$0 while burning points). Left for a product decision:
+  the whole-USD rounding mirrors the deliberate KHR→1000 denomination rounding
+  at line 1029, so "whole-dollar redeem values" may be intentional; and the KHR
+  total rounding sits on the checkout paid-vs-total path and wants its own
+  integration test. Needs the user to confirm intended redeem granularity.
+- *Import apply not idempotent* (HIGH, `importEngine.ts:5097,5344`),
+  *unpaged/N+1/indexes* (HIGH; involves migrations — unsafe to land in parallel),
+  *review-tier bypass* / *POS points balance omits adjustments* / *offline sale
+  timestamp* / *import-review parity* (MEDIUM): each a backend behavioral change
+  or touches a file an active session is editing; deferred to focused passes.
