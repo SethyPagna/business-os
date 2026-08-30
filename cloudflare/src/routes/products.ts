@@ -1127,6 +1127,7 @@ app.get('/stock-ledger', async (c) => {
     startDate: String(query.startDate || ''),
     endDate: String(query.endDate || ''),
     search: String(query.search || ''),
+    supplierId: Number(query.supplierId) || 0,
   })
 
   const db = getDb(c.env)
@@ -1347,6 +1348,17 @@ app.post('/', async (c) => {
 // values may appear inside losing_json, so this stays behind the same
 // products read gate as the rest of this router (never portal-exposed).
 app.get('/auto-merges/:productId', async (c) => {
+  // The header comment above promised this "stays behind the same products read
+  // gate as the rest of this router" -- but no gate was ever applied, so every
+  // authenticated account (a POS-only cashier, a products_image_only uploader)
+  // could walk product ids and read supplier + cost_price out of losing_json.
+  // Gate it like the sibling /detail-report: an internal products/inventory
+  // reader only. products_image_only resolves to tier 'none' here, so it is
+  // correctly excluded from the cost/supplier data.
+  const user = c.get('user')
+  if (getPermissionTier(user, 'products') === 'none' && getPermissionTier(user, 'inventory') === 'none') {
+    return c.json({ error: 'You do not have permission to perform this action' }, 403)
+  }
   const productId = Number(c.req.param('productId'))
   if (!Number.isInteger(productId) || productId <= 0) return c.json({ error: 'Invalid product id' }, 400)
   const rows = await getDb(c.env).prepare(`
