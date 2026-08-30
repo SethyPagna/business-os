@@ -37,22 +37,6 @@ export function getBranches(): Promise<unknown> {
   )
 }
 
-export function getBranchSummary(): Promise<unknown> {
-  return route(
-    'branches:summary',
-    () => apiFetch('GET', '/api/branches/summary'),
-    () => ({
-      branch_count: 0,
-      total_products: 0,
-      in_stock: 0,
-      low_stock: 0,
-      out_of_stock: 0,
-      stock_value_usd: 0,
-    }),
-    { raceLocalFallback: false },
-  )
-}
-
 export function createBranch(payload: BranchPayload = {}): Promise<unknown> {
   return route(
     'branches:create',

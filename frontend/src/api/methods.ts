@@ -481,10 +481,6 @@ export const getBranches = async () => {
   const { getBranches: getBranchesRequest } = await loadBranchTransport()
   return getBranchesRequest()
 }
-export const getBranchSummary = async () => {
-  const { getBranchSummary: getBranchSummaryRequest } = await loadBranchTransport()
-  return getBranchSummaryRequest()
-}
 export const createBranch = async payload => {
   const { createBranch: createBranchRequest } = await loadBranchTransport()
   return createBranchRequest(payload)
