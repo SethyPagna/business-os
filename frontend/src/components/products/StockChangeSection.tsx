@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { getStockLedger } from '../../api/productReadTransport.ts'
 import { movementColorClass, translateMovementType } from '../inventory/movementGroups.ts'
-import AppSelect from '../shared/AppSelect'
 import DateTimeRangePicker from '../shared/DateTimeRangePicker'
+import FilterMenu, { type FilterSection } from '../shared/FilterMenu'
 import Modal from '../shared/Modal'
 import PaginationControls from '../shared/PaginationControls'
 import SearchInput from '../shared/SearchInput'
@@ -163,6 +163,37 @@ export default function StockChangeSection({ t }: { t: Translate }) {
   const beforeLabel = tr(t, 'before_qty', 'Before')
   const afterLabel = tr(t, 'after_qty', 'After')
 
+  // Branch + supplier folded into the shared FilterMenu (user, Aug 30 2026:
+  // "fold supplier and branch into filter menu") instead of two loose selects
+  // on the toolbar row. Branch only appears when the business has more than
+  // one; the supplier list gets its own in-panel search once it's long
+  // (searchable). Empty when neither applies -> no filter trigger renders.
+  const filterSections = useMemo<FilterSection[]>(() => {
+    const sections: FilterSection[] = []
+    if (branches.length > 1) {
+      sections.push({
+        id: 'branch',
+        label: tr(t, 'branch', 'Branch'),
+        options: [
+          { id: '', label: tr(t, 'all', 'All'), active: !branchId, onClick: () => setBranchId(0) },
+          ...branches.map((branch) => ({ id: branch.id, label: branch.name, active: branchId === branch.id, onClick: () => setBranchId(branch.id) })),
+        ],
+      })
+    }
+    if (suppliers.length) {
+      sections.push({
+        id: 'supplier',
+        label: tr(t, 'supplier', 'Supplier'),
+        searchable: true,
+        options: [
+          { id: '', label: tr(t, 'all', 'All'), active: !supplierId, onClick: () => setSupplierId(0) },
+          ...suppliers.map((supplier) => ({ id: supplier.id, label: supplier.name, active: supplierId === supplier.id, onClick: () => setSupplierId(supplier.id) })),
+        ],
+      })
+    }
+    return sections
+  }, [branches, suppliers, branchId, supplierId, t])
+
   // Group the current page's rows by their business-timezone DAY so the date
   // lives once on a divider header and each card need only show its time
   // (user, Aug 30 2026: "for date just show outside separating the change by
@@ -235,14 +266,11 @@ export default function StockChangeSection({ t }: { t: Translate }) {
             </button>
           ))}
         </div>
-        <div className="min-w-48 flex-1 sm:max-w-72">
-          <SearchInput id="stock-ledger-search" name="stock_ledger_search" value={search} onChange={setSearch} placeholder={tr(t, 'search', 'Search')} />
-        </div>
-        {/* Order (user, Aug 30 2026): the Start → End date range comes FIRST
-            among the filters, THEN supplier (branch sits between only when the
-            business has more than one). Unified Start → End pill -- same
-            control as the Dashboard, Fees, Inventory movements and Audit Log
-            range filters. */}
+        {/* Order (user, Aug 30 2026): the Start → End date range comes FIRST,
+            then the search bar -- and search is MERGED with the filter menu
+            that now holds branch + supplier (they used to be loose selects on
+            this row). Unified Start → End pill -- same control as the
+            Dashboard, Fees, Inventory movements and Audit Log range filters. */}
         <DateTimeRangePicker
           value={{ startDate, endDate, startTime: '', endTime: '' }}
           onChange={(next) => {
@@ -253,30 +281,20 @@ export default function StockChangeSection({ t }: { t: Translate }) {
           showTime={false}
           triggerClassName="flex items-center justify-center gap-2 rounded-lg px-2.5 py-1.5"
         />
-        {branches.length > 1 ? (
-          <AppSelect
-            name="stock_ledger_branch"
-            value={String(branchId || '')}
-            onChange={(value) => setBranchId(Number(value) || 0)}
-            ariaLabel={tr(t, 'branch', 'Branch')}
-            options={[
-              { value: '', label: `${tr(t, 'branch', 'Branch')}: ${tr(t, 'all', 'All')}` },
-              ...branches.map((branch) => ({ value: String(branch.id), label: branch.name })),
-            ]}
-          />
-        ) : null}
-        {suppliers.length ? (
-          <AppSelect
-            name="stock_ledger_supplier"
-            value={String(supplierId || '')}
-            onChange={(value) => setSupplierId(Number(value) || 0)}
-            ariaLabel={tr(t, 'supplier', 'Supplier')}
-            options={[
-              { value: '', label: `${tr(t, 'supplier', 'Supplier')}: ${tr(t, 'all', 'All')}` },
-              ...suppliers.map((supplier) => ({ value: String(supplier.id), label: supplier.name })),
-            ]}
-          />
-        ) : null}
+        <div className="flex min-w-48 flex-1 items-center gap-1.5 sm:max-w-96">
+          <div className="min-w-0 flex-1">
+            <SearchInput id="stock-ledger-search" name="stock_ledger_search" value={search} onChange={setSearch} placeholder={tr(t, 'search', 'Search')} />
+          </div>
+          {filterSections.length ? (
+            <FilterMenu
+              label={tr(t, 'filters', 'Filters')}
+              activeCount={(branchId ? 1 : 0) + (supplierId ? 1 : 0)}
+              sections={filterSections}
+              onClear={() => { setBranchId(0); setSupplierId(0) }}
+              mobileIconOnly
+            />
+          ) : null}
+        </div>
         <span className="ml-auto inline-flex items-center gap-1 text-xs text-gray-400">
           {total}
           {/* The ledger's "what is this" explanation lives behind this info

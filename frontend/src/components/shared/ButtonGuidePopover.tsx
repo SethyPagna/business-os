@@ -37,7 +37,11 @@ export default function ButtonGuidePopover({ title, entries, align = 'auto', tri
           type="button"
           aria-label={triggerLabel || title}
           title={title}
-          className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-gray-200 text-gray-500 transition-colors hover:bg-gray-50 hover:text-gray-700 dark:border-neutral-700 dark:text-gray-400 dark:hover:bg-neutral-800 dark:hover:text-gray-200"
+          // Borderless -- just the info icon, no button outline (user, Aug 30
+          // 2026: "for info button, just need icon no button outline"). Keeps
+          // the h-9 w-9 tap target and a hover wash, matching InfoHint's
+          // plain-icon affordance instead of reading as a boxed button.
+          className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-600 dark:text-gray-400 dark:hover:bg-neutral-800 dark:hover:text-gray-200"
         >
           <Info className="h-4 w-4" />
         </button>
