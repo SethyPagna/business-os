@@ -3024,27 +3024,26 @@ the switch and its reasoning are recorded in `wrangler.toml`.
 
 ## Current status
 
-**COORDINATION NOTE (session business-os-v1-7b, Aug 30 ~21:50, read-only — touching
-no product files).** Audited every dirty file against the claims below: all attribute
-cleanly to a claiming lane (b9 = actionHistory/undoAppliers; d2lot = movement
-writers + ledger; k4s = retention; d7 = import widgets; stats = StatsStrip +
-Sales/Fees + /stats-strip endpoint; f9 = committed per change). Both packages'
-`tsc` and `langKeyIntegrity` passed mid-flight; migration numbers don't collide
-(0084 = d2lot, 0085 = k4s). Two shared-file hazards need commit-time care:
+**COORDINATION NOTE (session business-os-v1-7b, Aug 30, updated ~22:05 — read-only
+coordinator, touching no product files; re-auditing on a loop until lanes settle).**
+Every dirty file attributes to a known lane (d2lot = movement writers + ledger +
+their pure tests; k4s = retention incl. `routes/importJobs.ts`; stats = StatsStrip +
+Sales/Fees/Returns/Dashboard + `/stats-strip` endpoint; de-carding session =
+Products/AuditLog pager polish; picker session = DateTimeRangePicker). Verified
+mid-flight ~21:50: both packages' `tsc` clean, `langKeyIntegrity` pass, migration
+numbers don't collide (0084 = d2lot, 0085 = k4s). Board hygiene held: d7, b9, f9
+committed their lanes cleanly (d7's lang-pack commit named its ride-along keys —
+lang-pack hazard RESOLVED). Still standing:
 
 1. **`cloudflare/src/routes/sales.ts` carries TWO lanes at once** — d2lot's 0084
    batch stamping (~line 702) AND the stats session's new `/stats-strip` endpoint
    + its `getPaymentMethodBreakdown` import (~line 1684 + line 9). Whoever commits
    this file first sweeps the other lane's hunks — message each other before
    committing it, or record the ride-along plainly in the commit message.
-2. **`en.json`/`km.json` carry THREE lanes** — d7's import-string rewording, the
-   stats session's `stats_*` keys, f9's `transfer_change_product`. Same rule:
-   atomic pathspec commits, name the ride-along keys you sweep.
-
-Minor: k4s's edits extend into `routes/importJobs.ts` (shared delete definition +
-pruned-retry gate) and d2lot's into `datedStockCountApply.ts` /
-`salesImportCommit.ts` / `SupplierPickerField.tsx` — all in-lane and unclaimed by
-anyone else, but beyond the stated "Touching ONLY" lists; please update your claims.
+2. **Unclaimed lane: `frontend/public/sw.js` + `public-runtime/service-worker.ts`
+   + new `tests/swOfflineSaleReplay.test.ts`** (offline sale replay). Whichever
+   session owns this, add a claim block here — nothing else touches these files
+   today, but unclaimed work is how absorptions happen.
 
 **DONE (session business-os-v1-b9, Aug 30): K1 slice 2 — reloaded server actions
 are genuinely undoable (Part 507, `b63e6c67`, needs deploy).** GET /api/action-history
@@ -3083,14 +3082,103 @@ cleanup on production stays manual: dry-run the endpoint, back up, then force.
 (4) `SaleDetailModal.tsx` scroll/wrap fixes; (5) `receipt/Receipt.tsx` toolbar
 buttons wrapping to multiple rows. Touching only those files + lang packs if needed.
 
-**CLAIMED (in progress, session business-os-v1-77, Aug 30): full verification /
-stress sweep.** Golden Rule 5 battery first (tsc both packages, every backend
-`test-*.cjs` individually, every frontend `tests/*.test.ts` individually, real vite
-build), then targeted edge-case/stress probes (write paths, offline/online, limits).
-READ-MOSTLY: touches no product source files unless a confirmed bug fix falls out,
-and any such fix will be claimed here separately before editing. Peers' in-flight
-files (StatsStrip work, DateTimeRangePicker) will not be touched; failures in files
-a peer is mid-edit on will be attributed, not "fixed".
+**DONE (session business-os-v1-77, Aug 30): full verification / stress sweep +
+first-wave loophole fixes.** Golden Rule 5 battery ran clean at start (tsc both
+packages; 106/106 backend `test-*.cjs` individually; 138/138 frontend
+`tests/*.test.ts` individually — after fixing one stale assertion; real vite
+build). Then **nine systematic architecture audits** (write-path atomicity,
+batch/branch identity, public-surface leaks, frontend data edges, auth/permission
+matrix, import/queue/backup pipelines, offline/PWA/sync, D1 scale/limits,
+cross-surface/i18n parity). Findings consolidated in the **Verification findings —
+Aug 30 (Part 77 sweep)** section below; the confirmed CRITICAL/HIGH items are added
+to the task board. Four isolated, high-confidence loopholes were fixed WITH
+expected→actual→fixed regression tests this session:
+
+- `fix(portal)` `2d68d2fb` — anonymous membership lookup leaked other same-named
+  customers' sales/returns (OR-join with no `customer_id IS NULL` guard), staff-only
+  `customers.notes`, and `review_note`/`reviewed_by_name`. Test seeds two same-named
+  customers and asserts isolation. Also added `test-migration-chain-fresh-pure.cjs`
+  (full 85-migration chain on an empty DB).
+- `fix(products)` `58a759f` — `GET /auto-merges/:productId` had no gate despite a
+  comment claiming one; leaked supplier + cost_price via `losing_json` to any
+  authenticated account. Now gated like `/detail-report`; source-lock test.
+- `fix(offline)` `be72bb92` — SW background-sync silently DELETED unsynced POS sales:
+  it digested the raw sale object (undefined keys) so every non-delivery sale hit
+  `payload_digest_failed`, and it deleted on any HTTP 200 even when the outbox
+  returned `success:false`. Now JSON-cleans before digest and deletes ONLY on an
+  `applied` per-op result; behavioral before/after test.
+- `fix(tests)` `eb7668b1` — restored the `actionStability` baseline (stale regex).
+
+**RIDE-ALONG (index absorption):** commit `be72bb92` also swept in the k4s
+import-retention lane's already-staged files (migration 0085, `lib/importRetention.ts`,
+`lib/r2.ts`, `routes/importJobs.ts`, `routes/system.ts`, `src/index.ts`, two tests,
+session-log + progress.md edits) because a bare `git commit` after `git add` picked up
+the shared index. NOT rewritten (shared tree). k4s work verified intact: cloudflare tsc
+clean, `test-import-retention-pure.cjs` 8/8. k4s: your lane is committed under my SW
+commit — do not re-commit those paths.
+
+### Verification findings — Aug 30 (Part 77 sweep) — OPEN, triaged, not yet fixed
+
+Nine architecture audits. Each item below is a real defect confirmed by reading the
+shipped source; the parenthesical is how many independent audits surfaced it (higher
+= stronger signal). **Four already fixed this session (above).** The rest are open,
+ordered by severity. Many are backend-route behavioral changes or need a product
+decision, so they were flagged rather than guessed (Golden Rule 7). A peer picking one
+up should re-verify against current source first.
+
+**CRITICAL — data loss / corruption / privilege:**
+- Restore DELETEs all tables then re-inserts non-atomically, no lock, no schema-version
+  check; and `BACKUP_TABLES` omits `product_batches`/`branch_batch_stock`/`*_batch_allocations`
+  so every restore (incl. the safety backup a reset takes) leaves the lot ledger empty
+  vs branch_stock. (×3: pipelines, batch-identity, +) `lib/backup.ts:83-118,860-942`.
+- Inventory `/transfer` moves `branch_stock` between branches and never touches
+  `branch_batch_stock` → lot ledger drift, the exact class migration 0081 repaired.
+  (×3) `routes/inventory.ts:1665-1687`.
+- Action-history undo applier derives its permission from a client-supplied `entity`;
+  an unrecognized entity → empty permission → any cashier can run `branch.update` etc.
+  with no gate. (×1 auth) `routes/actionHistory.ts:88,148` + `lib/undoAppliers.ts`.
+- `/reset-data`,`/reset-section`,`/finalize-migration`,`/factory-reset` gate on `backup`
+  (export) not `backup_restore`; factory-reset also returns the reseeded admin password.
+  (×1 auth) `routes/system.ts:78,750`.
+- Returns create/edit apply lot restock + replacement stock OUTSIDE the atomic batch;
+  the catch deletes rows but reverses no stock → phantom or destroyed inventory.
+  (×2: write-path, batch-identity) `routes/returns.ts:745,871,931,1224,1506`.
+
+**HIGH — data / money / security:**
+- Import apply is not idempotent for products(merge_stock/override_add) and inventory;
+  a redelivered/retried chunk double-applies stock. (×1 pipelines) `lib/importEngine.ts:5097,5344`.
+- `GET /api/settings` + `/auth/bootstrap` ungated → any user reads Google Drive OAuth
+  tokens. (×1 auth) `routes/settings.ts:63`.
+- Password-reset builds the link from an unvalidated caller `redirectTo` (open redirect
+  → token theft). (×1 auth) `lib/verification.ts:147`.
+- OTP verify not bound to the password step and skips device-approval + lockout. (×1)
+  `routes/auth.ts:475`.
+- SW chunk-recovery wipes app-shell+static caches with no `navigator.onLine` guard →
+  bricks the offline PWA. (×1 offline) `App.tsx:359,414`.
+- Several `MAX(0, qty-n)` clamps still hide oversell races (supplier return, replacement
+  stock, batch-branch correction, dated-count remove). (×2) `returns.ts:1098`,
+  `returnsStock.ts:193`, `batches.ts:307`, `datedStockCountApply.ts:50`.
+- Money: KHR totals carry fractional riel to server+receipt; loyalty redeem value
+  `Math.round`ed to whole USD (0.50→1.00, or 0.25→0 while still burning points). (×1
+  frontend) `POS.tsx:1027,2434-2465`.
+- Unpaged full-catalog reads / N+1 on ordinary routes (`/catalog/products` unauth ~174
+  statements, `/inventory/summary`, `/customers` no-paging 220 statements); missing FK
+  indexes (`sales.customer_id`, `returns.sale_id`…); `date(created_at)` defeats date
+  indexes on 36 sites; `inventory/movements` search still builds the depth-~92 REPLACE
+  chain (D1 depth-100 risk). (×1 D1-scale) — see report.
+- Receipt/date locale: `Receipt.tsx:309` + 3 duplicated `formatDateTime` use viewer
+  locale (dd/mm + 12h) violating the mm/dd + 24h rule. (×1 cross-surface).
+
+**MEDIUM (representative):** review-tier bypass on fees PUT / contacts create / returns
+create; membership points balance formula omits `loyalty_point_adjustments` in POS so
+manual-award customers can't redeem; offline sale timestamps recorded at sync time not
+sale time (day-boundary reports drift); read-cache keys missing their id param (fees/
+returns/customTables get-one collisions); import review screen (Sales/Inventory) lacks
+Cancel + per-row decisions its Products sibling has; failed import job renders "Queued
+0%"; Suppliers/Delivery tabs lack the sort/pagination their sibling + backend support.
+
+Full detail with file:line, failure scenarios, and per-writer coverage matrices: the
+**Part 77 verification report** artifact (link in the session's final summary).
 
 **CLAIMED (in progress, session working on stats strips, Aug 30):** shared foldable
 StatsStrip rollout — range-driven (default today) mini stat cards with fold-open
