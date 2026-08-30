@@ -124,7 +124,7 @@ export default function BranchesHubPage() {
                   key={tab.id}
                   type="button"
                   onClick={() => setSection(tab.id)}
-                  className={`shrink-0 px-3 py-1.5 rounded-lg text-sm font-medium inline-flex items-center gap-1.5 ${active === tab.id ? `bg-white dark:bg-gray-900 shadow ${tab.tone}` : 'text-gray-500'}`}
+                  className={`shrink-0 px-3 py-1.5 rounded-lg text-sm font-medium inline-flex items-center gap-1.5 whitespace-nowrap ${active === tab.id ? `bg-white dark:bg-gray-900 shadow ${tab.tone}` : 'text-gray-500'}`}
                 >
                   <Icon className="w-4 h-4" /> {tab.label}
                 </button>

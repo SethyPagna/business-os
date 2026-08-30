@@ -76,7 +76,7 @@ export default function SectionSwitcher({
           <button
             key={option.value}
             type="button"
-            className={`h-8 rounded-lg px-3 font-semibold transition ${activeValue === option.value ? 'bg-slate-950 text-white dark:bg-white dark:text-slate-950' : 'text-slate-600 hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-800'}`}
+            className={`h-8 whitespace-nowrap rounded-lg px-3 font-semibold transition ${activeValue === option.value ? 'bg-slate-950 text-white dark:bg-white dark:text-slate-950' : 'text-slate-600 hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-800'}`}
             title={option.hint || (typeof option.label === 'string' ? option.label : undefined)}
             aria-pressed={activeValue === option.value}
             onClick={() => selectValue(option.value)}

@@ -3618,8 +3618,14 @@ export default function POS() {
       ) : null}
 
       {/* Receipt overlay shown after each completed sale */}
-      {/*   Displayed on top of the POS so other orders remain intact.   */}
-      {(imageLightbox || receiptQueue.length > 0) ? (
+      {/*   Displayed on top of the POS so other orders remain intact.
+           Gated on isActive: these overlays portal to <body>, so without the
+           gate a receipt left open kept covering EVERY page after switching
+           away from POS (the Aug-30 "various buttons are being blocked"
+           report -- the Sales page was unclickable under a stale receipt
+           backdrop). The queue itself is kept, so returning to POS shows the
+           receipt again. */}
+      {isActive && (imageLightbox || receiptQueue.length > 0) ? (
         <Suspense fallback={null}>
           {imageLightbox && imageLightbox.images?.length ? (
             <ImageGalleryLightbox

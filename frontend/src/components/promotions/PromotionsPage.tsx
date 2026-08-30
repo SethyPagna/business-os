@@ -361,14 +361,14 @@ export default function PromotionsPage() {
             <button
               type="button"
               onClick={() => setActiveSection('promotions')}
-              className={`px-3 py-1.5 rounded-lg text-sm font-medium inline-flex items-center gap-1.5 ${activeSection === 'promotions' ? 'bg-white dark:bg-gray-900 shadow text-rose-600' : 'text-gray-500'}`}
+              className={`px-3 py-1.5 rounded-lg text-sm font-medium inline-flex items-center gap-1.5 whitespace-nowrap ${activeSection === 'promotions' ? 'bg-white dark:bg-gray-900 shadow text-rose-600' : 'text-gray-500'}`}
             >
               <BadgePercent className="w-4 h-4" /> {t('promotions') || 'Promotions'}
             </button>
             <button
               type="button"
               onClick={() => setActiveSection('loyalty')}
-              className={`px-3 py-1.5 rounded-lg text-sm font-medium inline-flex items-center gap-1.5 ${activeSection === 'loyalty' ? 'bg-white dark:bg-gray-900 shadow text-amber-600' : 'text-gray-500'}`}
+              className={`px-3 py-1.5 rounded-lg text-sm font-medium inline-flex items-center gap-1.5 whitespace-nowrap ${activeSection === 'loyalty' ? 'bg-white dark:bg-gray-900 shadow text-amber-600' : 'text-gray-500'}`}
             >
               <Gift className="w-4 h-4" /> {t('loyalty_points') || 'Loyalty Points'}
             </button>
