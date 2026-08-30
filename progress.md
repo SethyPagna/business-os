@@ -72,7 +72,10 @@ Two rules learned the hard way, both from real incidents in this file's own hist
   PWA branding, backup lifecycle).
 - [ ] A2. Live-verify the deploy checklist: reset-data, /api/products, POS sale with lots,
   storefront iPhone install (delete old shortcut first), import round-trip, R2 keeps
-  exactly 2 finalized sets.
+  exactly 2 finalized sets. *(Added Aug 30, Part 519 / session 0b via coordinator:)*
+  make one POS sale and confirm live — receipt id is `RCP-YYYYMMDD-HHMMSS` Phnom Penh
+  wall clock, printed receipt date is mm/dd/yyyy 24-hour, and every timezone label
+  reads Phnom Penh (never Bangkok).
 - [x] A3 *(Part 386: root cause MEASURED — production has ZERO drive_sync settings rows: Drive was never CONNECTED, so the scheduled sync silently skipped forever. The OAuth flow is fully implemented (compat.ts /system/drive-sync/*); after deploy the user connects in Settings → Backup. Retention 7→10; the stale "OAuth isn't implemented" comment removed; notifications now carry a STANDING admin warning while Drive is not connected — the exact state that was invisible.)* **Google Drive mirror produces NOTHING — measured, not assumed.** A Drive
   search for business-os/backup files on Aug 28, AFTER the deploy, returns zero results.
   So the mirror is genuinely broken or never triggered (candidates: cron/backup never ran
@@ -3024,6 +3027,15 @@ the switch and its reasoning are recorded in `wrangler.toml`.
 
 ## Current status
 
+**CLAIMED (in progress, stats-strip session, Aug 30 evening):** the user's 25-item
+refinement batch: StatsStrip layout v2 (cards under the range row, actions slot,
+tighter chips), Sales top-row consolidation into one Manage menu + mobile card
+row fixes + day grouping, Fees add-button fit + row merge, Products range-row
+move + pager redesign + mobile batch badges, Reports single-select/All + text
+summaries + click-to-float drills, DateTimeRangePicker month/year into calendar
+header, Duplicates in-place resolve + decide-then-apply. Touching those files;
+NOT touching cloudflare/src/routes/inventory.ts.
+
 **DONE (session business-os-v1-0b, Aug 30 — Part 519, `ed64958b`+`bf85b94a`+
 `4833d61b`, needs deploy): receipt-ID datetime format + Phnom Penh timezone
 naming (user, Aug 30).** New receipts/returns mint `RCP-YYYYMMDD-HHMMSS`
@@ -3054,16 +3066,16 @@ stat cards on EVERY page, not sharing one row with them. Dashboard already stack
 the other pages must match. Not touched by f9 (your file); coordinator 7b confirmed
 routing.
 
-**→ STATS SESSION, URGENT — RED TEST ON HEAD (found by 0b, verified by coordinator
-7b ~22:25):** `tests/performanceLoadingUx.test.ts` FAILS on committed HEAD — your
-455ea3c9 removed every `InventoryStatDetailModal` reference from `Inventory.tsx`,
-so the "click-only lazy chunk" assertion can't match, and
-`inventory/InventoryStatDetailModal.tsx` is now ZOMBIE CODE (nothing imports it —
-Golden Rule violation). Every peer's test:utils run is red until this lands. Either
-re-wire the stat-detail depth into your StatsStrip folds or DELETE the component
-and retire that assertion — bundle it with the layout fix above, one commit. If
-still open at the coordinator's next check (~22:45), 7b will claim and fix it to
-unblock the chain.
+**✅ FIXED by coordinator 7b (Part 520, commit `574ac137`): the red test:utils chain
+on HEAD is GREEN again.** 455ea3c9 had left FIVE stale performanceLoadingUx
+assertion sites, not one: the orphaned InventoryStatDetailModal (component DELETED —
+zombie per statsStrip.test.ts:84 — and its two assertions retired), the Sales
+transport-import pin (re-pinned to include getSalesStatsStrip), the
+INVENTORY_RETURNS_STATS/INVENTORY_DASHBOARD_STATS timeout+fetch pins (dropped —
+those secondary fetches left Inventory with the rollout), and returnScopeSummary
+(re-pinned to its new one-pass customerRows/supplierRows shape). All absence guards
+kept. Verified: performanceLoadingUx PASS, statsStrip PASS, frontend tsc clean.
+The LAYOUT relay above STAYS OPEN for whoever holds the stats lane.
 
 **COORDINATION NOTE (session business-os-v1-7b, Aug 30, updated ~22:15 — read-only
 coordinator, touching no product files; re-auditing on a loop until lanes settle).**
@@ -3176,10 +3188,17 @@ decision, so they were flagged rather than guessed (Golden Rule 7). A peer picki
 up should re-verify against current source first.
 
 **CRITICAL — data loss / corruption / privilege:**
-- Restore DELETEs all tables then re-inserts non-atomically, no lock, no schema-version
+- **[CLAIMED: session b9, Aug 30 — slices A+B (tables + schema guard); slice C
+  (maintenance lock / atomicity) stays open]** Restore DELETEs all tables then
+  re-inserts non-atomically, no lock, no schema-version
   check; and `BACKUP_TABLES` omits `product_batches`/`branch_batch_stock`/`*_batch_allocations`
   so every restore (incl. the safety backup a reset takes) leaves the lot ledger empty
   vs branch_stock. (×3: pipelines, batch-identity, +) `lib/backup.ts:83-118,860-942`.
+  b9's audit: the omission is wider than flagged — `fees`, `loyalty_point_adjustments`,
+  `damaged_stock_lots`, `return_replacement_items`, `promotion_rules`, `user_notes`,
+  duplicate-dismissals, import commit/guard ledgers, share submissions,
+  dated-count actions, `rfid_tags`, `ai_provider_configs`, `pending_actions` are ALL
+  absent from full backups today.
 - **[FIXED: session b9, Aug 30 — Part 518, `07fb7705`, needs deploy]** Inventory
   `/transfer` moved only `branch_stock`, stranding every lot at the source (the 0081
   drift class, ×3 audits). Now auto-allocates FIFO across source lots (same Z0 policy

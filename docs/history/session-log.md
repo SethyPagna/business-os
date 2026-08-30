@@ -14340,3 +14340,34 @@ regression (stats session's lane, routed via 7b); live end-to-end sale
 verification on a running server — worth folding into the next deploy
 checklist (make a POS sale, confirm the receipt id shape and the printed
 date/timezone labels).
+
+## Part 520 (Aug 30 2026, session business-os-v1-7b, coordinator) — red test:utils chain on HEAD unblocked; StatsStrip-rollout zombie deleted
+
+**Ask** — standing coordination mandate ("coordinate the sessions... make sure changes
+aren't conflicted, broken", "make sure all sessions are committing everytime, not
+forgotten"). Session 0b reported tests/performanceLoadingUx.test.ts red on committed
+HEAD; the stats session ended with the item logged as "Not done"; the coordinator's
+announced ~22:45 claim deadline passed unclaimed.
+
+**What changed** — commit 574ac137, two files. InventoryStatDetailModal.tsx DELETED:
+455ea3c9 removed its last import and statsStrip.test.ts:84 pins that Inventory never
+references it again, so it was zombie code (Golden Rule). performanceLoadingUx.test.ts:
+retired the two assertions that read/pinned the deleted file; re-pinned the Sales
+transport-import assertion to include getSalesStatsStrip; dropped the
+INVENTORY_RETURNS_STATS/INVENTORY_DASHBOARD_STATS timeout + fetch assertions (both
+secondary fetches left Inventory with the rollout); re-pinned returnScopeSummary to its
+new one-pass customerRows/supplierRows shape. Absence guards all kept.
+
+**What was found** — the rollout had left FIVE stale assertion sites, not the one 0b
+reported; each verified against current source (token present in test, absent in
+source) before retiring, and intent-preserving assertions were re-pinned rather than
+deleted wherever the guarded behavior still exists.
+
+**Verified** — node frontend/tests/performanceLoadingUx.test.ts PASS;
+node frontend/tests/statsStrip.test.ts PASS (all 7); npm --prefix frontend run
+typecheck clean. Coordination-tick verifications this session: cloudflare+frontend tsc
+clean at ~21:50 and ~22:00 mid-flight, langKeyIntegrity 3737-key parity PASS.
+
+**Not done** — the user's StatsStrip LAYOUT direction (range picker + presets on their
+own row ABOVE the cards) stays open on the board for the stats lane; coordinator loop
+continues until all sessions settle.
