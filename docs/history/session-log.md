@@ -14217,3 +14217,46 @@ permission work, left untouched.
 
 **Not done.** Deploy. The two pre-existing 403 test failures (other session's
 scope). POS deliberately has no strip (a cashier surface, not a data page).
+
+## Part 515 (Aug 30 2026, session business-os-v1-b9) — Part-77 CRITICAL fix: inventory /transfer moves the lots with the quantity
+
+**Ask:** continuation of the findings backlog (claimed first, re-verified
+against current source). Inventory's POST /transfer — the Inventory page's
+branch-transfer flow — moved only the plain `branch_stock` total and never
+touched `branch_batch_stock`, so every transfer of a batch-tracked product
+stranded its lots at the source branch: the exact per-branch lot drift class
+migration 0081 had to repair. Flagged by three independent audits. Commit
+`07fb7705`:
+
+- `routes/inventory.ts` /transfer: the transferred quantity is auto-allocated
+  across the source branch's active lots with the SAME Z0 FIFO policy
+  checkout uses for a line with no explicit lot pick
+  (`readFifoLotAvailability` + `allocateAcrossLots` — reused, not
+  re-implemented), and each take moves per-lot inside the SAME atomic
+  db.batch: strict decrement at the source, increment of the SAME batch id
+  at the destination (lot identity preserved end to end — the batch row
+  itself never changes, only which branch holds its quantity, per the
+  batch-identity rule). Any `uncovered` remainder is legacy stock the lot
+  ledger never tracked and moves on branch_stock alone — the transfer
+  conserves pre-existing drift but can no longer create any.
+- STRICT (unclamped) source decrements, deliberately: a concurrent sale
+  draining a lot between the availability read and the batch violates
+  0058's CHECK(quantity >= 0) and aborts the whole transfer — a clamped
+  decrement would floor the source at 0 while the destination still gained
+  the full take, minting stock out of a race (the MAX(0)-clamp class is
+  itself an open HIGH finding).
+- Movement legs stamp `batch_id` blank-honestly per 0084: a single lot
+  covering the whole quantity stamps it; multi-lot or partly-untracked
+  transfers stay NULL.
+- NOT changed (scope): no destination identity-merge (branches.ts /transfer
+  has one; inventory's never did — cross-surface asymmetry left flagged
+  here, not silently introduced), and no lot picker in the Inventory UI
+  (Inventory.tsx is a peer's stats lane; FIFO auto-allocation is the
+  server-side guarantee either way).
+- `test-inventory-transfer-lots-pure.cjs` (4 checks on real SQLite with the
+  0058 CHECK): FIFO multi-lot move with identity, drift conservation on
+  legacy remainder, whole-batch race-abort with nothing minted, and the
+  route-wiring source lock.
+
+Verified: test 4/4, cloudflare tsc clean. **Needs deploy** (rides with
+Parts 507/512/513/514).
