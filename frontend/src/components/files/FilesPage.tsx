@@ -1489,11 +1489,16 @@ export default function FilesPage() {
               search+upload+select-all+bulk-bar together now wraps only the
               sticky portion -- Upload moved out above, everything else
               keeps its existing look/padding unchanged. */}
-          <div className="sticky top-2 z-30 -mx-1 pb-2 sm:mx-0">
-          <div className="card p-3 sm:p-4">
+          {/* De-carded (Aug 30 2026 "double cards" sweep, same treatment as
+              Products.tsx): the sticky wrapper's translucent page-colored
+              backdrop replaces the old card box, so the self-bordered search
+              input / filter chip aren't boxed twice. Only the bulk-action
+              row below keeps card chrome, and only while a selection is
+              active. */}
+          <div className="sticky top-0 z-30 -mx-1 bg-gray-50/95 pb-2 pt-2 backdrop-blur dark:bg-gray-900/95 sm:mx-0">
             {/* Search row: media type + rows-per-page are now one icon-only
                 Filter trigger instead of two separate dropdowns. */}
-            <div className="flex min-w-0 flex-wrap items-center gap-2">
+            <div className="flex min-w-0 flex-wrap items-center gap-2 px-0.5">
               <label htmlFor="library-search" className="sr-only">{tr('search_files', 'Search files')}</label>
               <input
                 id="library-search"
@@ -1536,7 +1541,7 @@ export default function FilesPage() {
               />
             </div>
             {files.length || totalFiles ? (
-              <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-slate-200 pt-3 text-xs text-slate-500 dark:border-slate-700">
+              <div className="mt-2 flex flex-wrap items-center justify-between gap-2 px-1 text-xs text-slate-500">
                 <div className="flex items-center gap-2">
                   <button type="button" className="inline-flex items-center gap-1 rounded-full px-2 py-1 hover:bg-slate-100 dark:hover:bg-slate-800" onClick={toggleSelectAllAssets}>
                     {allFilesSelected ? <CheckSquare className="h-3.5 w-3.5 text-blue-600" /> : <Square className="h-3.5 w-3.5" />}
@@ -1548,7 +1553,7 @@ export default function FilesPage() {
               </div>
             ) : null}
             {selectedAssets.length ? (
-              <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-slate-200 pt-3 dark:border-slate-700">
+              <div className="bulk-toolbar mt-2 flex flex-wrap items-center gap-2 rounded-2xl border p-2 shadow-sm sm:rounded-xl">
                 <button type="button" className="btn-secondary px-3 py-1.5 text-xs sm:text-sm" onClick={handleCopySelectedPaths}>
                   <Copy className="mr-1.5 inline h-3.5 w-3.5" />
                   {tr('copy_links', 'Copy links', 'ចម្លងតំណ')}
@@ -1583,7 +1588,6 @@ export default function FilesPage() {
                 ) : null}
               </div>
             ) : null}
-          </div>
           </div>
 
           {loadingFiles && !files.length ? (
