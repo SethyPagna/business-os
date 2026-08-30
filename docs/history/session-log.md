@@ -12900,3 +12900,46 @@ is scoped to CUSTOMER refunds by design (supplier returns carry compensation/los
 not a refund -- flagged for the user). "Combinations" is implemented as pick-any
 side-by-side sections, not a single merged P&L. Report FILTERS beyond date/branch for
 returns/fees were not added (their data dimensions differ from sales).
+
+## Part 489 (Aug 30 2026, session 79) — Redaction lock for staff-only delivery cost on the customer portal
+
+**Ask.** Continue progress.md / continue tasks, in a checkout with ~16 concurrent
+sessions. Picked a unit disjoint from every uncommitted peer file (the import-
+concurrency work in importEngine.ts/system.ts/test-reset-products-pure.cjs, the
+Part-487 migration reconciliation in progress.md, and the later products-list /
+ResetData frontend units).
+
+**Chosen item.** The ordered-backlog Delivery line: "store customer charge separately
+from restricted actual delivery cost; redact actual cost from receipts/customers/
+public APIs and report charge, expense and margin distinctly."
+
+**What was found (audit).** The feature is already complete and correct: migration
+0068 stores `delivery_actual_cost_usd/khr` distinct from the customer-charged
+`delivery_fee_usd/khr`; `salesAnalytics.ts` reports charged / actual / margin
+separately; and the redaction holds on every customer surface — the portal purchase-
+history handler (`GET /membership/:membershipNumber`) selects `delivery_fee_*` but
+never `delivery_actual_cost_*`, `Receipt.tsx` never references it, and the only two
+`SELECT * FROM sales` live in the auth-gated admin route (`sales.ts`), not on any
+public path. What was MISSING was a regression lock: the redaction lives entirely in
+one handler's explicit SELECT column list, and any peer later adding the column or a
+`SELECT *` would silently leak the shop's private courier cost to every customer.
+
+**What changed.** New `cloudflare/scripts/test-portal-membership-redaction-pure.cjs`
+(no production code touched). It runs the REAL shipped portal handler against a fully-
+migrated in-memory SQLite via the `openDb(loadAll())` harness, seeds a delivery sale
+whose actual courier cost IS stored in the row (7.77 / 31857), calls the real Hono
+`app.request()`, and asserts: the charged fee comes through, both actual-cost keys are
+absent from the returned sale, and neither the secret value nor the column name
+appears anywhere in the full response body (customer/totals/points included).
+
+**Verified.** `node scripts/test-portal-membership-redaction-pure.cjs` → ALL 7 CHECKS
+PASSED. The guard is genuine, not a tautology: the seeded DB row carries the actual
+cost, so the "absent" assertions only pass because the handler's SELECT omits it.
+Committed alone as `a60b3afb` via an atomic path-scoped commit; no peer files swept.
+
+**Not done.** progress.md's Delivery backlog line was NOT flipped to done this session
+— that file carries a peer's uncommitted Part-487 edits and marking it would absorb
+their work; left for whoever owns that progress.md edit (or a later clean window). No
+dev server started (standing rule with peers active). The test follows the
+`scripts/test-*.cjs` convention the individual sweep already discovers; no runner
+wiring needed.
