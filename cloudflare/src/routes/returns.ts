@@ -13,6 +13,7 @@ import {
   normalizeStockAction, computeSettlement, assertReplacementsSameName,
   createDamagedLot, reverseDamagedLots, applyReplacementStock, listOpenDamagedLots,
   ConsumedDamagedStockError, DAMAGE_IN_MOVEMENT, DAMAGE_REVERSAL_MOVEMENT,
+  REPLACEMENT_OUT_MOVEMENT,
 } from '../lib/returnsStock'
 import { uniqueBusinessDateTimeNumber } from '../lib/receiptNumber'
 import type { Env } from '../index'
@@ -710,6 +711,17 @@ app.post('/', async (c) => {
   })
   const returnId = returnInsert.lastInsertRowid
 
+  // Compensation log (Part-77, write-path + batch-identity audits): every
+  // stock write that lands OUTSIDE the outer db.batch() below --
+  // receiveBatchStock restocks and applyReplacementStock drains are each
+  // their own atomic write -- so the catch can reverse exactly what was
+  // applied. Before this, the catch deleted the return's rows and left the
+  // stock moved: phantom inventory from the restocks, destroyed inventory
+  // from the replacement drains. Declared OUTSIDE the try so the catch can
+  // read them.
+  const appliedLotRestocks: Array<{ productId: number; batchId: number; branchId: number; quantity: number }> = []
+  const appliedReplacements: Array<{ productId: number; productName: string; branchId: number; batchId: number | null; quantity: number }> = []
+
   try {
     const statements: Array<{ sql: string; params: Record<string, unknown> }> = []
     const touchedProductIds = new Set<number>()
@@ -765,6 +777,7 @@ app.post('/', async (c) => {
               const received = await receiveBatchStock(db, { productId: item.product_id, branchId: itemBranchId, quantity: give, batchId: alloc.batch_id })
               if (resolvedBatchId == null) resolvedBatchId = received.batchId
               itemSplits.push({ batchId: received.batchId, branchId: itemBranchId, quantity: give, saleItemId: item.sale_item_id ?? null })
+              appliedLotRestocks.push({ productId: item.product_id, batchId: received.batchId, branchId: itemBranchId, quantity: give })
               restockRemaining -= give
             } catch (_err) {
               // That lot no longer belongs to this product (rare -- a merge
@@ -781,6 +794,7 @@ app.post('/', async (c) => {
             })
             resolvedBatchId = received.batchId
             itemSplits.push({ batchId: received.batchId, branchId: itemBranchId, quantity, saleItemId: item.sale_item_id ?? null })
+            appliedLotRestocks.push({ productId: item.product_id, batchId: received.batchId, branchId: itemBranchId, quantity })
             restockRemaining = 0
           } catch (_err) {
             // The exact batch this item was sold from no longer belongs to
@@ -908,6 +922,7 @@ app.post('/', async (c) => {
         userId: user?.id ?? null,
         userName: user?.name ?? null,
       })
+      appliedReplacements.push({ productId: line.productId, productName: line.productName, branchId: lineBranchId, batchId: line.batchId, quantity: line.quantity })
       statements.push({
         sql: `INSERT INTO return_replacement_items (return_id, product_id, product_name, branch_id, batch_id, quantity, applied_price_usd, applied_price_khr, total_usd, total_khr)
               VALUES (@return_id, @product_id, @product_name, @branch_id, @batch_id, @quantity, @applied_price_usd, @applied_price_khr, @total_usd, @total_khr)`,
@@ -956,11 +971,61 @@ app.post('/', async (c) => {
       await db.prepare("UPDATE sales SET sale_status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?").run([fullyReturned ? 'returned' : 'partial_return', body.sale_id])
     }
   } catch (error) {
+    // Reverse the stock FIRST, then delete the rows (Part-77): the restocks
+    // and replacement drains above each committed as their own write, so
+    // deleting the return's rows alone left the stock moved -- phantom
+    // inventory from restocks, destroyed inventory from replacements.
+    // Best-effort per write, LOUDLY reported: a reversal can legitimately
+    // fail (e.g. a concurrent sale already consumed the restocked units) and
+    // that must reach the operator and the audit log, never be swallowed.
+    const unreversed: string[] = []
+    for (const restock of [...appliedLotRestocks].reverse()) {
+      try {
+        await removeStockFromBatch(db, { batchId: restock.batchId, productId: restock.productId, branchId: restock.branchId, quantity: restock.quantity })
+      } catch (_) {
+        unreversed.push(`restock of ${restock.quantity} into lot #${restock.batchId} (product #${restock.productId}, branch #${restock.branchId})`)
+      }
+    }
+    for (const line of [...appliedReplacements].reverse()) {
+      try {
+        if (line.batchId != null) {
+          await receiveBatchStock(db, { productId: line.productId, branchId: line.branchId, quantity: line.quantity, batchId: line.batchId })
+        } else {
+          await db.prepare(`
+            INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (@product_id, @branch_id, @quantity)
+            ON CONFLICT(product_id, branch_id) DO UPDATE SET quantity = branch_stock.quantity + @quantity
+          `).run({ product_id: line.productId, branch_id: line.branchId, quantity: line.quantity })
+          await db.prepare(
+            'UPDATE products SET stock_quantity = (SELECT COALESCE(SUM(quantity), 0) FROM branch_stock WHERE product_id = @productId), updated_at = CURRENT_TIMESTAMP WHERE id = @productId',
+          ).run({ productId: line.productId })
+        }
+      } catch (_) {
+        unreversed.push(`replacement drain of ${line.quantity} of "${line.productName}" (branch #${line.branchId})`)
+      }
+    }
+    // Movement rows the pre-batch writes recorded against this (about to be
+    // deleted) return -- type-scoped so an unrelated entity sharing the
+    // numeric reference_id is never touched.
+    try {
+      await db.prepare(`DELETE FROM inventory_movements WHERE reference_id = ? AND movement_type IN ('return', '${REPLACEMENT_OUT_MOVEMENT}', '${DAMAGE_IN_MOVEMENT}')`).run([returnId])
+    } catch (_) {}
     await db.prepare('DELETE FROM return_item_batch_allocations WHERE return_item_id IN (SELECT id FROM return_items WHERE return_id = ?)').run([returnId])
+    // return_items was missing from this cleanup entirely -- a failure AFTER
+    // the outer batch (allocation recording, sale-status update) left its
+    // rows orphaned under a deleted returns row.
+    await db.prepare('DELETE FROM return_items WHERE return_id = ?').run([returnId])
     await db.prepare('DELETE FROM returns WHERE id = ?').run([returnId])
     await db.prepare('DELETE FROM damaged_stock_lots WHERE return_id = ?').run([returnId])
     await db.prepare('DELETE FROM return_replacement_items WHERE return_id = ?').run([returnId])
-    return c.json({ error: `Failed to record return items: ${(error as Error).message}` }, 500)
+    if (unreversed.length) {
+      await audit(c.env, user?.id ?? null, user?.name ?? null, 'return_rollback_incomplete', 'return', returnId, { unreversed })
+    }
+    return c.json({
+      error: `Failed to record return items: ${(error as Error).message}`
+        + (unreversed.length
+          ? ` -- WARNING: ${unreversed.length} stock write(s) could not be reversed (recorded in the audit log; run Verify Integrity): ${unreversed.join('; ')}`
+          : ''),
+    }, 500)
   }
 
   await audit(c.env, user?.id ?? null, user?.name ?? null, 'create', 'return', returnId, { returnNumber, saleId: body.sale_id || null, reason: body.reason })

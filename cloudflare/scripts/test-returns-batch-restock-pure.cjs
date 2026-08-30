@@ -111,6 +111,10 @@ const returnsRoute = loadReal('routes/returns.ts', {
   // kernel the route now imports (test-returns-replace-damaged-pure.cjs
   // covers it in isolation; here it runs under the real route).
   '../lib/returnsStock': loadReal('lib/returnsStock.ts', { './db': { getDb: () => db }, './productBatches': productBatches, './sqlBinding': loadReal('lib/sqlBinding.ts') }),
+  // Part 519 (session 0b) gave the route a datetime return-number generator;
+  // the real one reads the DB for same-second collisions -- a deterministic
+  // stub keeps this suite's return numbers stable.
+  '../lib/receiptNumber': { uniqueBusinessDateTimeNumber: async (_db, prefix) => `${prefix}-20260830-120000` },
 })
 
 const app = returnsRoute.default
@@ -380,6 +384,41 @@ async function main() {
     assert.match(edited.json.error, /already been drawn/)
     // the lot is untouched by the blocked edit
     assert.strictEqual(rawDb.prepare('SELECT quantity_remaining FROM damaged_stock_lots WHERE return_id = @id').get({ id: created.json.id }).quantity_remaining, 2)
+  })
+
+  await check('Part-77: a failure AFTER a lot restock reverses the restock -- no phantom stock, no orphan rows', async () => {
+    seed()
+    // A prior sale drew 5 from a lot; the return restocks 3 back into it,
+    // then the replacement line (deliberately missing its branch) throws
+    // INSIDE the same request, after the restock already committed as its
+    // own write. The catch must reverse the restock, not just delete rows.
+    const batch = await productBatches.receiveBatchStock(db, { productId: 1, branchId: 1, quantity: 10, lotCode: 'LOT-R' })
+    await productBatches.removeStockFromBatch(db, { batchId: batch.batchId, productId: 1, branchId: 1, quantity: 5 })
+    rawDb.prepare('INSERT INTO sale_items (id, sale_id, product_id, quantity, batch_id) VALUES (1, 1, 1, 5, @batchId)').run({ batchId: batch.batchId })
+
+    const { status, json } = await req('POST', '/', {
+      sale_id: 1,
+      items: [{ sale_item_id: 1, product_id: 1, quantity: 3, return_to_stock: true, branch_id: 1, applied_price_usd: 10 }],
+      // Passes every pre-check (same name, price_difference waives the
+      // even-exchange rule) and then fails INSIDE applyReplacementStock:
+      // only 8 units exist after the restock, 99 requested.
+      replacement_items: [{ product_id: 1, quantity: 99, branch_id: 1, applied_price_usd: 10 }],
+      settlement_mode: 'price_difference',
+      reason: 'Compensation probe',
+    })
+    assert.strictEqual(status, 500, JSON.stringify(json))
+
+    // The restock was fully reversed: lot, aggregate and product total are
+    // exactly where the sale left them.
+    assert.strictEqual(rawDb.prepare('SELECT quantity FROM branch_batch_stock WHERE batch_id = @batchId AND branch_id = 1').get({ batchId: batch.batchId }).quantity, 5)
+    assert.strictEqual(rawDb.prepare('SELECT quantity FROM branch_stock WHERE product_id = 1 AND branch_id = 1').get().quantity, 5)
+    assert.strictEqual(rawDb.prepare('SELECT stock_quantity FROM products WHERE id = 1').get().stock_quantity, 5)
+    // And nothing of the failed return survives -- incl. return_items, which
+    // the old cleanup forgot entirely.
+    assert.strictEqual(rawDb.prepare('SELECT COUNT(*) AS n FROM returns').get().n, 0)
+    assert.strictEqual(rawDb.prepare('SELECT COUNT(*) AS n FROM return_items').get().n, 0)
+    assert.strictEqual(rawDb.prepare('SELECT COUNT(*) AS n FROM return_replacement_items').get().n, 0)
+    assert.strictEqual(rawDb.prepare("SELECT COUNT(*) AS n FROM inventory_movements WHERE movement_type IN ('return', 'replacement_out')").get().n, 0)
   })
 
   console.log(`\n${passed} check(s) passed.`)
