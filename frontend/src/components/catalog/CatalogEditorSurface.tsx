@@ -1101,9 +1101,11 @@ function CatalogEditorSurfaceContent() {
               </div>
 
               <div>
-                <label htmlFor="portal-ai-prompt" className="block text-sm font-medium text-slate-700">{copy('assistantPrompt', 'Extra prompt instructions')}</label>
+                <div className="flex items-center gap-1.5">
+                  <label htmlFor="portal-ai-prompt" className="text-sm font-medium text-slate-700">{copy('assistantPrompt', 'Extra prompt instructions')}</label>
+                  <InfoHint label={copy('assistantPrompt', 'Extra prompt instructions')} text={copy('assistantPromptHint', 'Optional store-specific rules, such as tone or what categories to prioritize.')} />
+                </div>
                 <textarea id="portal-ai-prompt" className="input mt-1 resize-none" rows={4} value={editorDraft.customer_portal_ai_prompt || ''} onChange={(event) => setDraft('customer_portal_ai_prompt', event.target.value)} />
-                <p className="mt-2 text-xs text-slate-500">{copy('assistantPromptHint', 'Optional store-specific rules, such as tone or what categories to prioritize.')}</p>
               </div>
 
             </div>
@@ -1113,9 +1115,9 @@ function CatalogEditorSurfaceContent() {
             <div className="mb-2 flex items-center gap-2 text-sm font-semibold text-slate-900">
               <ExternalLink className="h-4 w-4" />
               {copy('customerUrl', 'Customer URL')}
+              <InfoHint label={copy('customerUrl', 'Customer URL')} text={copy('customerUrlHint', 'Set a custom public path here, then publish that path through a separate customer-facing Funnel so the customer link is harder to guess from the admin side.')} />
             </div>
             <div className="break-all rounded-xl bg-white px-3 py-2 text-sm text-slate-700">{generatedPublicUrl}</div>
-            <p className="mt-2 text-xs text-slate-500">{copy('customerUrlHint', 'Set a custom public path here, then publish that path through a separate customer-facing Funnel so the customer link is harder to guess from the admin side.')}</p>
             <div className="mt-3">
               <label htmlFor="portal-public-path" className="block text-sm font-medium text-slate-700">{copy('publicPathInput', 'Custom public path')}</label>
               <input
@@ -1128,7 +1130,10 @@ function CatalogEditorSurfaceContent() {
               />
             </div>
             <div className="mt-3">
-              <label htmlFor="portal-public-url" className="block text-sm font-medium text-slate-700">{copy('publicUrlLabel', 'Public customer URL')}</label>
+              <div className="flex items-center gap-1.5">
+                <label htmlFor="portal-public-url" className="text-sm font-medium text-slate-700">{copy('publicUrlLabel', 'Public customer URL')}</label>
+                <InfoHint label={copy('publicUrlLabel', 'Public customer URL')} text={copy('publicUrlHint', 'Use a different public domain or Funnel URL here when you publish the customer portal outside the admin link.')} />
+              </div>
               <input
                 id="portal-public-url"
                 name="customer_portal_public_url"
@@ -1137,7 +1142,6 @@ function CatalogEditorSurfaceContent() {
                 placeholder={copy('publicUrlPlaceholder', 'https://customers.example.com')}
                 onChange={(event) => setDraft('customer_portal_public_url', event.target.value)}
               />
-              <p className="mt-2 text-xs text-slate-500">{copy('publicUrlHint', 'Use a different public domain or Funnel URL here when you publish the customer portal outside the admin link.')}</p>
             </div>
             <label className="mt-3 flex items-center justify-between gap-4 rounded-2xl border border-slate-200 bg-white px-4 py-3">
               <div>
@@ -1661,9 +1665,11 @@ function CatalogEditorSurfaceContent() {
                   <input id="portal-submission-enabled" name="customer_portal_submission_enabled" type="checkbox" checked={!!editorDraft.customer_portal_submission_enabled} onChange={(event) => setDraft('customer_portal_submission_enabled', event.target.checked)} />
                 </label>
                 <div>
-                  <label htmlFor="portal-submission-instructions" className="block text-sm font-medium text-slate-700">{copy('submissionInstructions', 'Submission instructions')}</label>
+                  <div className="flex items-center gap-1.5">
+                    <label htmlFor="portal-submission-instructions" className="text-sm font-medium text-slate-700">{copy('submissionInstructions', 'Submission instructions')}</label>
+                    <InfoHint label={copy('submissionInstructions', 'Submission instructions')} text={copy('submissionInstructionsHint', 'Customers can only submit screenshots. Staff reviews and awards points inside Business OS.')} />
+                  </div>
                   <textarea id="portal-submission-instructions" name="customer_portal_submission_instructions" autoComplete="off" className="input mt-1 resize-none" rows={4} value={editorDraft.customer_portal_submission_instructions || ''} onChange={(event) => setDraft('customer_portal_submission_instructions', event.target.value)} />
-                  <p className="mt-1 text-xs text-slate-500">{copy('submissionInstructionsHint', 'Customers can only submit screenshots. Staff reviews and awards points inside Business OS.')}</p>
                 </div>
               </div>
             </div>
