@@ -3004,6 +3004,19 @@ the switch and its reasoning are recorded in `wrangler.toml`.
 
 ## Current status
 
+**Part 499 (Aug 30 2026, parallel session):** Full production duplicate/loss audit —
+ALL CLEAN (14,913 sales / $1,871,573.34 / 0 dup receipts / 0 stock-lot-orphan-math
+mismatches / 0 loyalty on historical); the "possibly same" residue is old-system data
+quality kept on purpose (53 dup-barcode product pairs, 54 dup-name groups with distinct
+barcodes, 2 dup customer phones, 5 consecutive-receipt same-minute sale pairs — listed
+in the Part 499 log entry). The `later/` deferred-ledger rule is now ENFORCED in code,
+not just by unknown→skip: `importTemplateRouter` recognizes all five ledger shapes by
+name (checked first), and the Import Hub locks them to skip with a compact named
+amber row + InfoHint reason and NO type dropdown — force-routing
+`stock_in_invoice_lines` into stock (the double-count path) is no longer possible.
+Verified live in the local wrangler+Vite app (desktop + 375×812), router tests 11
+PASS, hub tests 4 PASS, FE tsc clean. Needs deploy.
+
 **As of Part 496 (Aug 30 2026).** Everything below was really run in this local Windows
 checkout against the production Worker/D1 where stated. See [Environment
 notes](#environment-notes). Golden Rule 5: a claim here is not evidence; these are the

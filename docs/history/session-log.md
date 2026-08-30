@@ -13298,3 +13298,55 @@ IMPORT-MANIFEST gained a dated "Deep audit + cost repair" addendum, including
 the warning that the engine fix must be DEPLOYED before any re-run of Steps
 1/2/4d or the same 61 costs wipe again. **Backend fix needs deploy** (the
 production DATA repair is already live).
+
+## Part 499
+
+**Ask.** "Go deep into all angles... receipts, invoice, sales, products, batches,
+supplier, customers... any duplicates, loss, possibly same. Next, no more existing
+files should be imported into current tables — po_invoices.csv, stock_adjustments.csv,
+drawer_sessions.csv, stock_in_invoice_lines.csv require new destination features
+first. Is this correct, has it been fully made and correct... good compact UI phones
+and PC."
+
+**What was found (production D1, measured Aug 30).** All invariants CLEAN:
+sales_total=14,913 (3,329/7,244/4,340 by year), dup receipt groups 0, missing
+receipt numbers 0, revenue $1,871,573.34 (matches Part 484), loyalty-accruing
+sales 0, branch_stock↔active-lot mismatches 0, products.stock_quantity↔branch
+sum mismatches 0, negative stock 0, orphan lots/batches/sale_items/allocations 0,
+sales money-math mismatches 0, 26,018 batches all active. "Possibly same" residue,
+all old-system data quality preserved on purpose (never guessed): 53 duplicate-
+barcode product groups (EDP/EDT and shade pairs plus naming twins like "Rare
+Beauty X"/"Rare X"; the 238-product barcode "0" group is the old system's
+no-barcode placeholder, distinct products), 54 duplicate-name groups (distinct
+barcodes = distinct SKUs, e.g. Yukazan patch ×7 scents), 2 duplicate customer
+phones (R_Lara/Phopph, Nay Nay/Nay Naysochivy), 5 same-minute same-total sale
+pairs with CONSECUTIVE receipt numbers (genuine back-to-back ring-ups, not
+doubles). No loss anywhere.
+
+**What changed.** The deferred-ledger rule existed only as unknown→skip default;
+the Import Hub dropdown still let an operator force-route a ledger file into
+products/stock (the exact double-count IMPORT-MANIFEST warns about). Now
+`importTemplateRouter.ts` recognizes all five `later/` shapes BY NAME
+(deferred_ledger + DeferredLedgerKind, checked FIRST, signals from the real
+exported headers: invoice_no+barcode → stock_in_invoice_lines, invoice_no+supplier
+→ po_invoices, adjustment_no/before+after_qty → stock_adjustments,
+begin_time+end_time → drawer_sessions, supplier+sold_qty → summary), with a
+DEFERRED_LEDGER_INFO label+reason map. ImportHub locks these rows to skip: no
+type dropdown renders (compact amber name + "kept aside, needs its own feature
+first" + InfoHint reason, per the density convention), dispatchAll refuses them
+defensively, Queue stays disabled when only deferred files are present.
+`.claude/launch.json` gained a `frontend` (Vite) entry.
+
+**Verified.** frontend `node tests/importTemplateRouter.test.ts` (11 PASS, incl.
+the four REAL headers verbatim + no-swallow of routable templates + hub-lock
+assertions), `tests/importHubDirectApply.test.ts` (4 PASS), `npx tsc --noEmit`
+clean. Live browser check on local wrangler+Vite (migrations 0001–0082 applied
+locally): dropped the four real ledger files + one products file into the hub —
+each ledger row rendered named/locked/no-dropdown, the products file routed
+normally with its dropdown, Queue disabled for deferred-only, InfoHint shows the
+double-count explanation; phone viewport (375×812) wraps cleanly. Production D1
+audit queries run read-only via wrangler.
+
+**Not done.** Merging the 53 possibly-same product pairs / 2 customer phone pairs
+is a business decision (each side carries its own sales history) — surfaced, not
+merged. The four ledgers still await their destination features (Phase D). Deploy.

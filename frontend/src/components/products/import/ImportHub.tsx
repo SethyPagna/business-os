@@ -4,7 +4,7 @@ import FileSpreadsheet from 'lucide-react/dist/esm/icons/file-spreadsheet.js'
 import AppSelect from '../../shared/AppSelect.tsx'
 import InfoHint from '../../shared/InfoHint.tsx'
 import { parseImportFile } from '../../../utils/spreadsheetImport.ts'
-import { classifyImportContent, type DetectedImportType } from './importTemplateRouter.ts'
+import { classifyImportContent, DEFERRED_LEDGER_INFO, type DeferredLedgerKind, type DetectedImportType } from './importTemplateRouter.ts'
 import { parseCsvRows } from '../../../utils/csvImport.ts'
 import { createImportJob, uploadImportJobCsv, startImportJob } from '../../../api/importJobsTransport.ts'
 
@@ -27,6 +27,7 @@ type PlanEntry = {
   rowCount: number
   detected: DetectedImportType
   signals: string[]
+  deferredLedger?: DeferredLedgerKind
   chosen: DetectedImportType | 'skip'
   status: 'planned' | 'creating' | 'uploading' | 'queued' | 'error'
   jobId?: string | number
@@ -40,6 +41,7 @@ const TYPE_LABELS: Record<DetectedImportType, { key: string; fallback: string }>
   customers: { key: 'import_hub_type_customers', fallback: 'Customers' },
   suppliers: { key: 'import_hub_type_suppliers', fallback: 'Suppliers' },
   delivery_contacts: { key: 'import_hub_type_delivery', fallback: 'Delivery contacts' },
+  deferred_ledger: { key: 'import_hub_type_deferred', fallback: 'Old-system ledger — kept aside' },
   unknown: { key: 'import_hub_type_unknown', fallback: 'Unknown — choose' },
 }
 
@@ -87,7 +89,11 @@ export default function ImportHub({
           entries.push({
             file, name: file.name, content: parsed.content, rowCount,
             detected: detection.type, signals: detection.signals,
-            chosen: detection.type === 'unknown' ? 'skip' : detection.type,
+            deferredLedger: detection.deferredLedger,
+            // Deferred ledgers are locked to skip -- their data either has no
+            // destination feature yet or is already counted in the live
+            // tables, so no override control renders for them below.
+            chosen: detection.type === 'unknown' || detection.type === 'deferred_ledger' ? 'skip' : detection.type,
             status: 'planned',
           })
         } catch (error) {
@@ -112,7 +118,7 @@ export default function ImportHub({
       // and one-at-a-time keeps failures attributable to their file.
       for (let index = 0; index < plan.length; index++) {
         const entry = plan[index]
-        if (entry.chosen === 'skip' || entry.status === 'queued' || entry.status === 'error') continue
+        if (entry.chosen === 'skip' || entry.detected === 'deferred_ledger' || entry.status === 'queued' || entry.status === 'error') continue
         const update = (patch: Partial<PlanEntry>) => setPlan((previous) => previous.map((row, i) => i === index ? { ...row, ...patch } : row))
         try {
           update({ status: 'creating' })
@@ -212,6 +218,20 @@ export default function ImportHub({
                     : (entry.error || T('import_failed', 'Import failed'))}
                 </span>
               </div>
+              {entry.detected === 'deferred_ledger' ? (
+                <div className="mt-2 flex items-center gap-1.5 flex-wrap text-[11px]">
+                  <span className="font-semibold text-amber-700 dark:text-amber-300">
+                    {T(`import_hub_ledger_${entry.deferredLedger}`, DEFERRED_LEDGER_INFO[entry.deferredLedger || 'po_invoices'].label)}
+                  </span>
+                  <span className="text-gray-500 dark:text-gray-400">
+                    {T('import_hub_ledger_kept_aside', '— kept aside, needs its own feature first')}
+                  </span>
+                  <InfoHint
+                    label={T('import_hub_ledger_why', 'Why this file is not imported')}
+                    text={T(`import_hub_ledger_${entry.deferredLedger}_why`, DEFERRED_LEDGER_INFO[entry.deferredLedger || 'po_invoices'].reason)}
+                  />
+                </div>
+              ) : (
               <div className="mt-2 flex items-center gap-2 flex-wrap">
                 <div className="min-w-[16rem]">
                   <AppSelect
@@ -236,6 +256,7 @@ export default function ImportHub({
                   </span>
                 )}
               </div>
+              )}
               {previews[index]?.rows.length ? (
                 <details className="mt-2">
                   <summary className="cursor-pointer select-none text-[11px] font-medium text-blue-600 dark:text-blue-400">
