@@ -168,15 +168,14 @@ autocorrect — templates, imports, exports and generated files alike.*
   a wide margin, and reported Stock-In never exceeds the summed lines) — its columns are
   renamed `beginning_qty_2026_01_01 / stock_in_2026 / stock_out_sold_2026 /
   ending_qty_current`, and lifetime per-product sales are NOT derivable from these files.
-- [ ] M2. Run the imports per **`businessos-migration-aug28/IMPORT-MANIFEST.md`**
-  (written Part 375): Step 1 `products-import-aug27-FIXED.csv` (catalog + stock, clean
-  first load), Step 2 `products-import-NEW-from-review.csv` (the 73 verified extras,
-  generated in template format — 71 enter at stock 0 pending history, 2 carry current
-  stock), Step 3 `suppliers-from-po.csv` (16 suppliers ranked by purchases, $1.27M
-  total; 12 of 16 supplied both branches; PO export carries no phones — add by hand).
-  **Supplier truth:** no export links supplier→product/batch (PO report has invoice
-  totals only); per-batch attribution starts with D5, or send the old system's
-  "PO invoice DETAILS" export if it exists. User-driven in the UI; files are ready.
+- [x] M2. **Production reset/re-import is complete and reconciled (Aug 30).** The
+  catalog is 6,104 active products (12,093 main rows → 6,031 identities, plus 146
+  review rows → 73); suppliers 16; delivery contacts 2; all 53 optional-customer
+  phones exist. Stock history completed 21,286 total / 21,278 applied / 8 true
+  zero-change skips / 0 failed, producing 21,278 movements and 114,277.8 units.
+  The final snapshot is 23,113 units in products, branch stock and the active lot
+  ledger, with zero product×branch differences. The measured file-by-file ledger
+  and rerun instructions are in `businessos-migration-aug28/IMPORT-MANIFEST.md`.
 - [x] M3. **CLOSED (Part 375) — every one of the 89 rows is decided: 73 add_as_new,
   6 merge_into_template, 10 delete, 0 undecided.** History: Part 373 web-verified the
   set; Part 374 spot-audited it (Rhode Frekle → rhode Pocket Blush Freckle); Part 375
@@ -194,20 +193,20 @@ autocorrect — templates, imports, exports and generated files alike.*
 - [x] M3b. **Production catalog is EMPTY** (0 active products, 0 batches, 0 branch_stock;
   4,652 customers preserved) — measured Part 373. So the products import is a clean
   first load with no double-count risk. Users(3)/import_jobs(7) intact.
-- [~] M4. **The continuation-dispatch engine is BUILT and PROVEN (Part 377, needs
-  deploy).** DIRECT-mode stock sheets are no longer capped at 60 units: windowed
+- [x] M4. **The continuation-dispatch engine is deployed and the full production
+  stock job completed.** DIRECT-mode stock sheets are no longer capped at 60 units: windowed
   CLASSIFY invocations persist every row's plan (sale groups get a stable group_index
   in new table `import_stock_action_groups`, migration 0063 — the repo's own
   chunk-state-size guard rightly refused collections in chunk state), then windowed
   DISPATCH invocations apply ≤60 units each through the SAME shared per-unit helpers
   the single pass uses; crash/redelivery resumes exactly on the writers' seals.
-  Ceiling: 25,000 rows/file — the 21,287-row history is now ONE import job
+  Ceiling: 25,000 rows/file — the 21,286-row history is now ONE import job
   (~355 automatic queue invocations internally). RECONCILE keeps the single pass and
   its 480/60 caps on purpose (one consistent live-stock snapshot). Proven:
   130 units across 4+ invocations, redelivered-message resume with zero double-adds,
-  both reconcile caps, the direct ceiling. **Remaining:** deploy (applies 0062+0063),
-  then run `stock_in_history.csv` through the stock-action import in the UI.
-- [~] M5b. **The dated sales export ARRIVED and the import files are BUILT + VALIDATED
+  both reconcile caps, the direct ceiling. The production run processed all 21,286
+  source rows and applied 21,278 non-zero movements.
+- [x] M5b. **The dated sales export is built, validated and imported in production
   (Part 378).** `report-invoice-detail (1).xls` (40,344 lines) became
   `sales-import-2024/2025/2026.csv` — 14,919 receipts in the app's exact
   SALES_IMPORT_COLUMNS contract. Validated hard: line quantities reconcile EXACTLY
@@ -219,29 +218,33 @@ autocorrect — templates, imports, exports and generated files alike.*
   commission preserved in notes; per-line historical COGS carried; branch assumed
   'shop' (source has no branch column — flagged). The import's matcher was verified
   IN SOURCE to already do exactly the user's rule: customers phone-first → unambiguous
-  name, match-only. **User runs them (oldest first) after catalog import; loyalty
-  checkbox stays OFF.**
+  name, match-only. They ran oldest first after catalog import and the loyalty
+  checkbox stayed OFF. Production has 3,329 / 7,244 / 4,340 receipts by year =
+  14,913 total; the only six rejects are the documented 4 `test` + 2 `For back` rows.
 - [x] M5c. **Supplier attribution for stock history (Part 378).** The Stock-In Invoice
   reports carry per-product lines under supplier headers (7,340 lines →
   `stock_in_invoice_lines.csv`); joined on barcode+date they fill
-  `stock_in_history.csv`'s supplier column for **8,053 of 21,287 lines (37.8%)** —
+  `stock_in_history.csv`'s supplier column for **8,053 of 21,286 lines (37.8%)** —
   the rest genuinely has no supplier record; 38 same-day multi-supplier cases left
   blank, never guessed. With 0062 deployed, those batches import with their supplier.
   `sold_by_supplier_summary.csv` (Item Report) adds per-supplier revenue/cost/profit.
-- [~] M5. Historical SALES linkage. **The loyalty prerequisite is DONE in code
-  (Part 372, needs migrations/deploy):** migration `0061` adds `sales.loyalty_accrual`
+- [x] M5. Historical SALES linkage. **The loyalty prerequisite is deployed (Part
+  372):** migration `0061` adds `sales.loyalty_accrual`
   (default 1); every aggregation (sales route redemption check, shared
   `summarizePoints` fed by portal + contacts, notifications loyalty section) skips the
   EARN for accrual=0 rows while still counting points redeemed on them; the historical
   sales import always writes 0; POS gains a per-sale "Count loyalty points" toggle
   (default ON, shown for any selected customer). `test-loyalty-accrual-pure.cjs` proves
-  it against the real migrations + real route SQL + real kernel source. **Still open:**
-  the sales import itself awaits the old system's dated sales/customer export (the nine
-  files carry none — the stock-report's Sold column is 2026-only); customers match by
-  phone then name against the de-duplicated contacts when it arrives.
-- [ ] M6. Adjustments (930), expenses (4,240) and PO invoices (3,204) land with their
-  Phase D features — stock-change ledger, expense import, supplier accounting. The
-  CSVs already use the final column naming, so those importers should accept them as-is.
+  it against the real migrations + real route SQL + real kernel source. Production has
+  14,913 historical sales, zero `RCP-` mistakes, zero loyalty accrual on those sales,
+  11,778/11,778 delivery sales linked, and 13,160/13,200 customer-carrying sales linked.
+- [~] M6. **Expenses are complete; the unsupported ledgers remain deliberately
+  deferred.** Migration 0064 loaded all 4,240 expenses into Fees (USD 129,696.60 +
+  KHR 82,419,900). `stock_adjustments.csv` (930) still waits for the stock-change
+  ledger, `drawer_sessions.csv` (755) for cash-session import, and `po_invoices.csv`
+  (3,204) for supplier accounting. `stock_in_invoice_lines.csv` (7,340) is already
+  joined into the stock history where attributable and must not be imported again as
+  stock; it remains the audit/backfill source for a future supplier-invoice ledger.
 - [x] M7 *(Part 392: SHIPPED, needs deploy — the contract is now TESTS
   (`tests/encodingSafety.test.ts` 9 cases + `test-encoding-safety-pure.cjs` incl. a
   frontend↔backend parse PARITY lock), and the sweep found + fixed four real gaps:
@@ -2958,22 +2961,36 @@ the switch and its reasoning are recorded in `wrangler.toml`.
 
 ## Current status
 
-**As of Part 387 (Aug 28 2026).** Everything below was really run in this local Windows
-checkout with full `node_modules`, working `better-sqlite3`, and network access — see
-[Environment notes](#environment-notes). Golden Rule 5: a claim here is not evidence; these
-are the commands' actual results this session.
+**As of Part 487 (Aug 30 2026).** Everything below was really run in this local Windows
+checkout against the production Worker/D1 where stated. See [Environment
+notes](#environment-notes). Golden Rule 5: a claim here is not evidence; these are the
+commands' actual results from the final migration audit.
 
 | Check | Result |
 |---|---|
-| `frontend` `tsc --noEmit` | **clean** (Part 384 rerun after the purchases modal + supplier drill) |
-| `cloudflare` `tsc --noEmit` | **clean** (Part 384 rerun after 0067 + purchases endpoint) |
-| Backend `scripts/test-*.cjs` (swept individually, not via a chain) | **85 / 85 pass** (Part 387 sweep; +test-bulk-price-adjust-pure, image-only/batches pins extended) |
-| Frontend `npm run test:utils` (full chain: `typecheck` → `verify:public-runtime` → `check:source` → all 116 `tests/*.test.ts`) | **green** (Part 384 rerun, plus check:source) |
-| Real `vite build` | **succeeds (25.53s)**; only the two pre-existing catalog circular warnings |
-| Migration harness | **all 71 migrations apply cleanly** (Part 390 rerun; `0070` received_branch_id verified present on top of Part 386's `0068`/`0069` checks); `0061`–`0070` are committed but **not deployed** — the next `npm run deploy:full` carries them |
-| Migration pack (after the S2 name propagation) | **ALL VALIDATIONS PASSED** rerun (quantities exact vs footer, revenue 0.02%, Khmer byte-perfect, zero scientific barcodes); xlsx round-trip OK |
-| Production devices (read-only D1 query) | trusted_devices **0**, user_sessions 94 (**2 live**) — the Part 375 clean slate holds |
-| **Part 385 connection preflight** (real classifiers over the real files vs merged catalog + 4,652 real customers) | stock history **21,286/21,286 attach**, sales **14,913/14,919 receipts** (6 junk lines err by design), customers **99%+ linked**, suppliers **8,053/8,053**; pack re-validated ALL PASS after the identity rewrite |
+| `frontend` `tsc --noEmit` + real Vite build | **clean / succeeds**; only the pre-existing circular-chunk warning |
+| `cloudflare` `tsc --noEmit` | **clean** |
+| Targeted migration/import/report tests | **green**: lot-ledger 0081 (9), sales/returns search (16), stock-in report suite |
+| Remote D1 migrations | **none pending**; 0080 received-cost and 0081 multi-lot reconciliation are applied |
+| Migration pack | `node validate-pack.cjs` **ALL CHECKS PASSED**, including every recorded row count, encoding/date/identity contract and all 12 CSV↔XLSX twins |
+| Production migration totals | products **6,104**; suppliers **16**; delivery contacts **2**; all **53/53** optional-customer phones present; stock **21,286 total / 21,278 applied / 8 zero-change / 0 failed**; sales **14,913/14,919** with only six documented junk rejects; Fees **4,240** |
+| Production integrity | product stock = branch stock = active lot ledger = **23,113**; product×branch lot differences **0**; `PRAGMA foreign_key_check` empty; active import jobs **0**; `RCP-` sales **0** |
+| Stock-In report | **19,914** grouped historical lots / **1,571** invoice-day groups / **114,277.8** units / **$1,361,076.28** recorded cost; dates 2024-07-09 through 2026-08-27, none on 2026-08-28 |
+
+**Part 488 (Aug 30 2026, parallel session):** Reports became its own top-level hub
+section (chip beside Sales/Returns/Fees) running the Sales, Returns and Fees reports in
+any combination, side by side, under one shared date range + branch — new
+`GET /api/returns/report` and `/api/fees/report` kernels, `ReportsHub` +
+Returns/Fees report sections, `SalesDailyReport` gained a controlled-range `embedded`
+mode, and the in-Sales report toggle was removed (Sales now shows only receipts).
+Also: sales report status/payment/branch filters threaded through the shared
+`whereActiveSales`; the Products detail modal's actions moved to one bottom row with
+the data spread as two mini-sections split by a thin same-background divider;
+`DateTimeRangePicker` relabelled Start Date/End Date and squared off (rounded-full/2xl/xl
+→ md/lg). Verified: FE+BE tsc clean, check:source 408 files, langKeyIntegrity 3,700-key
+parity, day-report 24/24, pageScrollRoots + sectionNavigation green. Needs deploy; not
+visually previewed (peers active). Commits `b4dfb213`, `bafd7b2c`, `e6dcf717`,
+`ef5aea11`, `4cd6bf1b`, `78d7cf45`.
 
 **Part 389 (Aug 28, parallel session):** I1 (audit coverage — 4 real gaps closed:
 backups create/RESTORE, files upload/rename/force-delete, notes lifecycle, sync

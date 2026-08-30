@@ -12797,3 +12797,106 @@ movements stay 21,278 / 114,277.8, batch dates stay 07/09/2024-08/27/2026.
 
 **Needs deploy.** 0081 applies on the next `npm run deploy:full`; the 30 blocked Shop
 products only become sellable once it does.
+
+## Part 487 (Aug 30 2026) — Final production migration reconciliation, every pack file accounted
+
+**Ask.** Continue the migration, check its status, and account for every expected
+file/row against the actual production database.
+
+**What changed.** `progress.md` now reflects the deployed/imported state instead of
+the old pre-import queue: M2/M4/M5/M5b are complete; M6 distinguishes the already
+loaded 4,240 expenses from the three unsupported/deferred ledgers. The external pack's
+`IMPORT-MANIFEST.md` gains a measured production reconciliation table, explicitly
+marks `stock_in_history_tail_1286.csv` as a verification-only subset, explains the
+three product case-only identity merges, and gives the eight customer review rows that
+must use Create separately / Force create on a future clean run.
+
+**What was found.** The 12,093-row main product file contains 6,034 raw name+barcode
+pairs but correctly created 6,031 identities: CK/Ck One EDP, Olay Recovery/ReCovery,
+and Shiseido Lx/LX are the three case-only pairs. The optional customer job recorded
+45 creates + 8 same-name skips (`Ah Pich`, `L`, `Srey Pich`), contradicting the old
+"no duplicates possible" wording; final production nevertheless contains all 53/53
+source phones and all ten sales using those eight phones link to the right customer
+IDs. The eight stock skips are exactly eight source rows whose shop change is 0, not
+lost inventory. The 1,286-row tail file is byte/logically the final 1,286 rows of the
+full stock history and must never be re-imported.
+
+**Verified.** Full `node validate-pack.cjs`: ALL CHECKS PASSED, including 20 CSV row
+contracts and 12 CSV/XLSX twins. Remote D1: no pending migrations; products 6,104;
+suppliers 16; delivery contacts 2; stock job 21,286 / 21,278 / 8 / 0; movements
+21,278 totaling 114,277.8; 19,914 expected product+date lots and 7,022 expected
+supplier-linked lot groups; sales 3,329 + 7,244 + 4,340 = 14,913; RCP sales 0;
+historical loyalty accrual 0; delivery links 11,778/11,778; Fees 4,240 with exact
+USD/KHR totals; product, branch and lot stock all 23,113; zero product×branch lot
+differences; foreign-key check empty; active jobs 0. Historical receiving ends
+2026-08-27 and has zero 2026-08-28 rows, matching the source.
+
+**Not done.** `later/stock_adjustments.csv` (930), `drawer_sessions.csv` (755), and
+`po_invoices.csv` (3,204) still have no destination feature and remain intentionally
+deferred. `stock_in_invoice_lines.csv` (7,340) remains an audit/backfill source for a
+future invoice ledger; importing it as stock now would double count data already
+joined into `stock_in_history.csv`. `sold_by_supplier_summary.csv` (16) and all
+`reference/` mapping/validation files are summaries or audit evidence, not imports.
+
+## Part 488 (Aug 30 2026, parallel session) — Reports hub (Sales + Returns + Fees), products-detail action reflow, sales toolbar reorder, date-picker relabel
+
+**Ask.** A live UI batch, in order: fix the Sales page where the sticky section
+chips clipped the Import/Manage buttons; rework the Products "click to view
+details" modal — move the buttons out of the right-hand slate column into one
+bottom row, spread the data across the pane as two mini-sections split by a thin
+same-background divider, report full-width beneath; add status/payment/branch
+filters to the sales report; then — superseding the in-Sales report toggle — make
+Reports its OWN top-level hub section beside Fees running multiple report types
+(Sales, Returns, Fees) in any combination, side by side, under one shared range;
+and relabel the range picker "Range start/end" -> "Start Date/End Date" with a
+squarer, less-rounded look.
+
+**What changed.**
+- `sales/Sales.tsx`: first moved the Receipts/Reports toggle above a repositioned
+  action row; then, when Reports moved to the hub, removed the toggle and the whole
+  `salesView` machinery (all four `=== 'receipts'` guards unwound, no zombie code) --
+  Sales now shows only the receipts list.
+- `products/surfaces/ProductDetailModal.tsx`: the details/actions grid became a flex
+  column -- a data area (two mini-sections split by a thin `divide-x` same-background
+  divider at `sm+`, single column on phones) over a bottom action row (Add variant /
+  Adjust stock / Edit, `flex-1` side by side); report spans full width beneath.
+  Replaces the slate-filled right-hand actions aside.
+- `lib/salesAnalytics.ts` + `routes/sales.ts`: `SalesFilters` gained optional
+  `status`/`paymentMethod`, threaded through the single `whereActiveSales` chokepoint
+  (status REPLACES the hide-cancelled default so 'cancelled' can be surfaced); parsed
+  on /daily-report and /day-report -- every report figure stays kernel-consistent.
+- `routes/returns.ts` + `routes/fees.ts`: new GET `/report` endpoints -- returns
+  (customer refunds only, cancelled excluded; totals + per-day + by-reason/by-type)
+  and fees (by fee_date; totals + per-day + by-fee-type), both branch-scopable,
+  registered before `/:id`, auto-gated by each file's permission middleware.
+- `sales/ReportsHub.tsx` (new): shared DateTimeRangePicker + branch AppSelect +
+  pick-any Sales/Returns/Fees chips; renders each ticked section under the shared
+  range. `sales/ReturnsReportSection.tsx` + `sales/FeesReportSection.tsx` (new).
+  `sales/SalesDailyReport.tsx`: gained a controlled-range `embedded` mode (hides its
+  own picker/branch when the hub owns them; keeps status/payment).
+- `sales/SalesHubPage.tsx`: Reports chip (BarChart3), shown to anyone who can see any
+  of sales/returns/fees. `shared/DateTimeRangePicker.tsx`: `range_start`/`range_end`
+  -> "Start Date"/"End Date"; rounded-full/2xl/xl -> md/lg throughout.
+  `lang/en+km.json`: added `reports`, `all_payment_methods`, `report_failed`, `by_day`,
+  `by_reason`, `by_type`, `reports_pick_type`; retuned `range_start`/`range_end`.
+
+**What was found.** The Sales `reports` toggle used `t('reports') || 'Reports'`, but
+t() returns the KEY on a miss, so a missing pack key renders literal "reports" --
+switched to the guarded `translateOr` and added the key. The `check:source` lint
+requires the shared keyboard-accessible `AppSelect` over native `<select>` for filter
+menus (it even flags the literal `<select>` inside a code comment) -- all report
+filters use AppSelect.
+
+**Verified.** frontend `tsc --noEmit` clean; `check:source` PASS (408 files);
+`langKeyIntegrity` PASS (3,700 keys, en/km parity); cloudflare `tsc --noEmit` clean;
+`test-sales-day-report-pure.cjs` 24/24 (cancelled-excluded default and branch
+filtering intact after the whereActiveSales change); `pageScrollRoots` and
+`sectionNavigation` green. Commits `b4dfb213`, `bafd7b2c`, `e6dcf717`, `ef5aea11`,
+`4cd6bf1b`, `78d7cf45` -- all path-scoped, no peer files swept in.
+
+**Not done.** Not visually previewed -- no dev server started with 6+ peers active
+(standing rule). Deploy held at the user's request ("review first"). Returns report
+is scoped to CUSTOMER refunds by design (supplier returns carry compensation/loss,
+not a refund -- flagged for the user). "Combinations" is implemented as pick-any
+side-by-side sections, not a single merged P&L. Report FILTERS beyond date/branch for
+returns/fees were not added (their data dimensions differ from sales).
