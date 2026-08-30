@@ -47,6 +47,15 @@ runTest('the tracker auto-approve goes through handleApprove (keeps the conflict
   assert.match(tracker, /shouldPromptConflictReviewBeforeApprove/, 'handleApprove must still gate contact conflicts')
 })
 
+runTest('the hub lets you review each routed file\'s rows before queueing', () => {
+  // Consistency with the classic Add screen: see the rows before importing. A
+  // per-file preview is derived (only the first lines are parsed, kept cheap)
+  // and rendered as a collapsible table.
+  assert.match(hub, /const previews = useMemo\(/, 'the hub must derive a per-file preview')
+  assert.match(hub, /parseCsvRows\(head\)/, 'the preview must parse only the head of each file')
+  assert.match(hub, /import_hub_preview_rows'?, 'Preview rows'/, 'each file must expose a Preview rows control')
+})
+
 if (failed > 0) {
   process.exitCode = 1
   console.error(`\n${failed} import-hub direct-apply test(s) failed`)

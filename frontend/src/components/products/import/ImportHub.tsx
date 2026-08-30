@@ -1,9 +1,10 @@
-import { useRef, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import UploadCloud from 'lucide-react/dist/esm/icons/upload-cloud.js'
 import FileSpreadsheet from 'lucide-react/dist/esm/icons/file-spreadsheet.js'
 import AppSelect from '../../shared/AppSelect.tsx'
 import { parseImportFile } from '../../../utils/spreadsheetImport.ts'
 import { classifyImportContent, type DetectedImportType } from './importTemplateRouter.ts'
+import { parseCsvRows } from '../../../utils/csvImport.ts'
 import { createImportJob, uploadImportJobCsv, startImportJob } from '../../../api/importJobsTransport.ts'
 
 // N1c: the ONE import entry point. Drop one file or many -- each is
@@ -142,6 +143,20 @@ export default function ImportHub({
   const actionable = plan.some((entry) => entry.chosen !== 'skip' && entry.status === 'planned')
   const hasSales = plan.some((entry) => entry.chosen === 'sales' && entry.status !== 'queued')
 
+  // Review before importing: a few rows of each routed file so the operator can
+  // sanity-check the data (and that it routed to the right type) before queueing
+  // -- the same "see the rows first" the classic Add screen shows. Only the first
+  // lines are parsed, so this stays cheap no matter how large the file is.
+  const previews = useMemo(() => plan.map((entry) => {
+    try {
+      const head = String(entry.content || '').split(/\r?\n/).slice(0, 4).join('\n')
+      const rows = parseCsvRows(head).slice(0, 3)
+      return { rows, columns: rows.length ? Object.keys(rows[0]) : [] }
+    } catch {
+      return { rows: [] as Record<string, string | number>[], columns: [] as string[] }
+    }
+  }), [plan])
+
   return (
     <div className="space-y-4">
       <div>
@@ -219,6 +234,33 @@ export default function ImportHub({
                   </span>
                 )}
               </div>
+              {previews[index]?.rows.length ? (
+                <details className="mt-2">
+                  <summary className="cursor-pointer select-none text-[11px] font-medium text-blue-600 dark:text-blue-400">
+                    {T('import_hub_preview_rows', 'Preview rows')}
+                  </summary>
+                  <div className="mt-1.5 max-h-40 overflow-auto rounded-lg border border-gray-200 dark:border-gray-700">
+                    <table className="w-full text-left text-[11px]">
+                      <thead className="sticky top-0 bg-slate-50 dark:bg-slate-800">
+                        <tr>
+                          {previews[index].columns.map((col) => (
+                            <th key={col} className="whitespace-nowrap px-2 py-1 font-medium text-slate-500 dark:text-slate-400">{col}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {previews[index].rows.map((row, r) => (
+                          <tr key={r} className="border-t border-gray-100 dark:border-gray-800">
+                            {previews[index].columns.map((col) => (
+                              <td key={col} className="whitespace-nowrap px-2 py-1 text-slate-600 dark:text-slate-300">{String(row[col] ?? '')}</td>
+                            ))}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </details>
+              ) : null}
             </div>
           ))}
 
