@@ -3182,7 +3182,13 @@ function ProductsFullEditor() {
                 <div {...getKhmerTextProps(productName, 'truncate text-sm font-semibold text-gray-900 dark:text-white')} title={productName}>{productName}</div>
               </div>
             </div>
-            <div className="mt-0.5 flex flex-wrap gap-1">
+            {/* min-h matches one chip's height (text-[10px] line ~15px +
+                py-0.5 = 19px) so a product with NO barcode/brand keeps the
+                price/qty line at the same vertical spot as its neighbours
+                instead of the row sliding up into the gap (user, Aug 30:
+                "instead of moving the price and quantity row just keep it
+                constant there"). */}
+            <div className="mt-0.5 flex min-h-[1.1875rem] flex-wrap gap-1">
               {/* Small-screen default card shows the BARCODE here in place of
                   the category (user, Aug 29: "hide the category inside the
                   details ... replace the outside with barcode"). Category is
