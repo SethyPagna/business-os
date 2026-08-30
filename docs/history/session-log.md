@@ -14045,3 +14045,28 @@ Verified: both new tests green, cloudflare + frontend tsc clean,
 maintenanceTierPicker / ownedGoogleAuth / settingsRefresh /
 settingsConflictHelpers green. Live click-through still deferred (dev ports
 peer-owned). **Needs deploy** (rides with Parts 507/512).
+
+## Part 514 (Aug 30 2026, session business-os-v1-b9) — Part-77 HIGH fix: password-reset open redirect closed
+
+**Ask:** continuation of the findings backlog (claimed in progress.md first,
+re-verified against current source). `issuePasswordResetLink` appended the
+single-use recovery token (as a hash fragment) to whatever `redirectTo` the
+UNAUTHENTICATED `/password-reset/email` caller supplied — so anyone who knew
+a username/email could have a legitimate-looking recovery email delivered
+whose link landed the token on an attacker host. Commit `1b4580b6`:
+
+- `lib/verification.ts`: new exported `resolvePasswordResetBase(env,
+  redirectTo)` — honors redirectTo only when its origin EXACTLY matches
+  `BUSINESS_OS_ADMIN_URL` or `BUSINESS_OS_PUBLIC_URL` (keeping origin +
+  pathname so the client lands back on the page it was on; query and hash
+  are dropped so nothing rides into the emailed link). Foreign hosts,
+  lookalike subdomains (admin.leangbeauty.com.evil.example), scheme/port
+  variants, relative paths and garbage all fall back to the admin URL.
+  `issuePasswordResetLink` now builds the link exclusively from the
+  resolver; legit clients see no behavior change (Login.tsx sends its own
+  origin+pathname on the canonical domains).
+- `test-password-reset-redirect-pure.cjs` (5 checks against the real
+  transpiled lib, incl. lookalike-subdomain and source-lock checks).
+
+Verified: test 5/5, cloudflare tsc clean. **Needs deploy** (rides with
+Parts 507/512/513).
