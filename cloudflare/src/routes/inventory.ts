@@ -11,7 +11,7 @@ import { broadcast } from '../durable-objects/broadcastHub'
 import { bumpVersion } from '../lib/cache'
 import { findIdentityMatch, type ProductIdentityRow } from '../lib/productIdentity'
 import { buildFtsMatchExpression, buildHybridMatchClause, buildIssueStateClauses, buildPartialWordMatchClause, buildShortWordFallbackClause, buildTrigramMatchExpression, expandAliasCandidates, normalizedHaystackSql, PRODUCT_SEARCH_COLUMNS, PRODUCTS_FTS_BM25_SQL, runFuzzyFallbackMatch, tokenizeSearchTermGroups, tokenizeSearchWords } from '../lib/searchMatch'
-import { receiveBatchStock, removeStockFromBatch, removeStockAcrossBatches, InsufficientBatchStockError } from '../lib/productBatches'
+import { receiveBatchStock, removeStockFromBatch, removeStockAcrossBatches, InsufficientBatchStockError, readFifoLotAvailability, allocateAcrossLots, decrementBatchStockStrictStatement, incrementBatchStockStatement } from '../lib/productBatches'
 import { normalizeToIsoDate } from '../lib/batchCode'
 import { parseDatedStockCountEntries, buildDatedStockCountPlan } from '../lib/datedStockCountRoute'
 import { applyDatedStockCountPlan } from '../lib/datedStockCountApply'
@@ -1669,6 +1669,28 @@ app.post('/transfer', async (c) => {
     db.prepare('SELECT id, name FROM branches WHERE id = @id').get<{ id: number; name: string }>({ id: toBranchId }),
   ])
 
+  // The LOTS move with the quantity (Part-77 CRITICAL, x3 audits): this
+  // route used to move only the plain branch_stock total, leaving every
+  // branch_batch_stock row at the source -- the exact per-branch lot drift
+  // migration 0081 had to repair after the fact. This surface has no lot
+  // picker, so the transferred quantity is auto-allocated across the source
+  // branch's active lots with the SAME FIFO policy checkout uses for an
+  // unpicked line (readFifoLotAvailability/allocateAcrossLots, Z0) -- the
+  // lot rows themselves keep their identity, only which branch holds their
+  // quantity changes. Any `uncovered` remainder is legacy stock the lot
+  // ledger never tracked; it moves on branch_stock alone, exactly like a
+  // sale of untracked stock, so the transfer never CREATES new drift.
+  // Strict (unclamped) source decrements: a concurrent sale that empties a
+  // lot between the read above and this batch violates branch_batch_stock's
+  // CHECK(quantity >= 0) and aborts the WHOLE atomic batch -- a clamped
+  // decrement here would floor the source lot at 0 while the destination
+  // still gained the full take, minting stock out of a race.
+  const sourceLots = await readFifoLotAvailability(db, productId, fromBranchId)
+  const { takes, uncovered } = allocateAcrossLots(sourceLots, quantity)
+  // 0084 blank-honest stamping: one lot truthfully owning the whole
+  // movement stamps it; a multi-lot or partly-untracked transfer stays NULL.
+  const movementBatchId = takes.length === 1 && uncovered === 0 ? takes[0].batchId : null
+
   await db.batch([
     { sql: 'UPDATE branch_stock SET quantity = quantity - @quantity WHERE product_id = @productId AND branch_id = @branchId', params: { quantity, productId, branchId: fromBranchId } },
     {
@@ -1676,24 +1698,28 @@ app.post('/transfer', async (c) => {
             ON CONFLICT(product_id, branch_id) DO UPDATE SET quantity = quantity + excluded.quantity`,
       params: { productId, branchId: toBranchId, quantity },
     },
+    ...takes.flatMap((take) => [
+      decrementBatchStockStrictStatement(take.batchId, fromBranchId, take.quantity),
+      incrementBatchStockStatement(take.batchId, toBranchId, take.quantity),
+    ]),
     {
       sql: `INSERT INTO stock_transfers (product_id, product_name, from_branch_id, to_branch_id, quantity, notes, user_id, user_name, created_at)
             VALUES (@productId, @productName, @fromBranchId, @toBranchId, @quantity, @reason, @userId, @userName, CURRENT_TIMESTAMP)`,
       params: { productId, productName: product.name, fromBranchId, toBranchId, quantity, reason, userId: user?.id ?? null, userName: user?.name ?? null },
     },
     {
-      sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id, branch_name, movement_type, quantity, reason, user_id, user_name, created_at)
-            VALUES (@productId, @productName, @branchId, @branchName, 'transfer_out', @quantity, @reason, @userId, @userName, CURRENT_TIMESTAMP)`,
-      params: { productId, productName: product.name, branchId: fromBranchId, branchName: fromBranch?.name || null, quantity, reason: `Transfer out to ${toBranch?.name || 'destination'}${reason ? ` - ${reason}` : ''}`, userId: user?.id ?? null, userName: user?.name ?? null },
+      sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id, branch_name, movement_type, quantity, reason, user_id, user_name, created_at, batch_id)
+            VALUES (@productId, @productName, @branchId, @branchName, 'transfer_out', @quantity, @reason, @userId, @userName, CURRENT_TIMESTAMP, @batchId)`,
+      params: { productId, productName: product.name, branchId: fromBranchId, branchName: fromBranch?.name || null, quantity, reason: `Transfer out to ${toBranch?.name || 'destination'}${reason ? ` - ${reason}` : ''}`, userId: user?.id ?? null, userName: user?.name ?? null, batchId: movementBatchId },
     },
     {
-      sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id, branch_name, movement_type, quantity, reason, user_id, user_name, created_at)
-            VALUES (@productId, @productName, @branchId, @branchName, 'transfer_in', @quantity, @reason, @userId, @userName, CURRENT_TIMESTAMP)`,
-      params: { productId, productName: product.name, branchId: toBranchId, branchName: toBranch?.name || null, quantity, reason: `Transfer in from ${fromBranch?.name || 'source'}${reason ? ` - ${reason}` : ''}`, userId: user?.id ?? null, userName: user?.name ?? null },
+      sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id, branch_name, movement_type, quantity, reason, user_id, user_name, created_at, batch_id)
+            VALUES (@productId, @productName, @branchId, @branchName, 'transfer_in', @quantity, @reason, @userId, @userName, CURRENT_TIMESTAMP, @batchId)`,
+      params: { productId, productName: product.name, branchId: toBranchId, branchName: toBranch?.name || null, quantity, reason: `Transfer in from ${fromBranch?.name || 'source'}${reason ? ` - ${reason}` : ''}`, userId: user?.id ?? null, userName: user?.name ?? null, batchId: movementBatchId },
     },
   ])
 
-  await audit(c.env, user?.id ?? null, user?.name ?? null, 'transfer', 'stock', productId, { productName: product.name, quantity, fromBranchId, toBranchId })
+  await audit(c.env, user?.id ?? null, user?.name ?? null, 'transfer', 'stock', productId, { productName: product.name, quantity, fromBranchId, toBranchId, lotsMoved: takes.length, uncoveredQuantity: uncovered || undefined })
   c.executionCtx.waitUntil(broadcast(c.env, 'branches', { action: 'transfer' }))
   c.executionCtx.waitUntil(broadcast(c.env, 'products', { action: 'update', id: productId }))
   c.executionCtx.waitUntil(broadcast(c.env, 'inventory', { action: 'transfer', id: productId }))
