@@ -1005,8 +1005,12 @@ function normalizePortalSubmissionRows(rows: Array<Record<string, unknown>>): Su
 }
 
 async function findCustomerByMembership(env: Env, membershipNumber: string) {
+  // `notes` is a STAFF-ONLY field (written only by the admin Contacts tab) and
+  // must never reach this anonymous customer surface -- the whole customer row
+  // is returned verbatim in the membership response, so the redaction has to
+  // live in the SELECT column list, not downstream.
   return getDb(env).prepare(`
-    SELECT id, name, membership_number, phone, email, address, notes, created_at
+    SELECT id, name, membership_number, phone, email, address, created_at
     FROM customers
     WHERE lower(trim(membership_number)) = lower(trim(@membershipNumber))
     LIMIT 1
@@ -1118,14 +1122,23 @@ app.get('/membership/:membershipNumber', async (c) => {
     submissionWhere.push('customer_id = @customerId')
   }
   if (params.customerName) {
+    // The name-match branch exists so a walk-in receipt recorded by name only
+    // (no customer_id link) still shows in the customer's own history. It is
+    // ORed with the customer_id scope, so it MUST be restricted to UNLINKED
+    // rows (`customer_id IS NULL`): without that guard a second registered
+    // customer who happens to share a display name has their linked sales and
+    // returns leaked here -- and the phone guard below self-disables for any
+    // looked-up customer with a blank phone, while the returns table has no
+    // phone column at all, so the name alone would cross customers.
     salesWhere.push(`(
-      lower(trim(COALESCE(s.customer_name, ''))) = lower(trim(@customerName))
+      s.customer_id IS NULL
+      AND lower(trim(COALESCE(s.customer_name, ''))) = lower(trim(@customerName))
       AND (
         @customerPhoneNormalized = ''
         OR replace(replace(replace(replace(replace(COALESCE(s.customer_phone, ''), ' ', ''), '-', ''), '+', ''), '(', ''), ')', '') LIKE @customerPhoneNormalized || '%'
       )
     )`)
-    returnsWhere.push(`lower(trim(COALESCE(r.customer_name, ''))) = lower(trim(@customerName))`)
+    returnsWhere.push(`(r.customer_id IS NULL AND lower(trim(COALESCE(r.customer_name, ''))) = lower(trim(@customerName)))`)
   }
   if (params.membershipNumber) {
     submissionWhere.push(`lower(trim(COALESCE(membership_number, ''))) = lower(trim(@membershipNumber))`)
@@ -1168,9 +1181,14 @@ app.get('/membership/:membershipNumber', async (c) => {
     LIMIT 100
   `).all(params)
 
+  // `review_note` (internal moderation note) and `reviewed_by_name` (the staff
+  // member who reviewed it) are staff-only and must NOT appear on this
+  // anonymous surface -- the customer's OWN `note`, `status` and `reward_points`
+  // stay so they can see their submission's outcome. The authenticated
+  // reviewer endpoint (/submissions/review) is where staff read those fields.
   const submissionRows = await db.prepare(`
     SELECT id, customer_id, membership_number, customer_name, platform, note, screenshots_json,
-           status, reward_points, review_note, reviewed_by_name, reviewed_at, created_at
+           status, reward_points, reviewed_at, created_at
     FROM customer_share_submissions
     WHERE ${submissionWhereSql}
     ORDER BY created_at DESC
