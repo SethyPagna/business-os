@@ -8,7 +8,7 @@ import { assertUpdatedAtMatch, getExpectedUpdatedAt, writeConflictResponse, Writ
 import { broadcast } from '../durable-objects/broadcastHub'
 import { bumpVersion } from '../lib/cache'
 import { buildLikeAliasClause, tokenizeSearchTermGroups, normalizeSearchText } from '../lib/searchMatch'
-import { receiveBatchStock, removeStockFromBatch, InsufficientBatchStockError } from '../lib/productBatches'
+import { receiveBatchStock, removeStockFromBatch, InsufficientBatchStockError, readFifoLotAvailabilityForCart, allocateAcrossLots, decrementBatchStockStatement } from '../lib/productBatches'
 import {
   normalizeStockAction, computeSettlement, assertReplacementsSameName,
   createDamagedLot, reverseDamagedLots, applyReplacementStock, listOpenDamagedLots,
@@ -1062,6 +1062,14 @@ app.post('/supplier', async (c) => {
   try {
     const statements: Array<{ sql: string; params: Record<string, unknown> }> = []
     const touchedProductIds = new Set<number>()
+    // Draw the deducted units out of the product's active lots FIFO, same as a
+    // sale of a no-lot line, so a supplier return of a batch-tracked product
+    // keeps branch_batch_stock in step with branch_stock instead of leaving the
+    // lot ledger high (a product×branch lot drift). Fetched once for the return.
+    const supplierFifoLots = await readFifoLotAvailabilityForCart(
+      db,
+      body.items.map((i) => ({ productId: Number(i.product_id), branchId: Number(i.branch_id || body.branch_id || 0) })),
+    )
     for (const item of body.items) {
       const qty = toNumber(item.quantity, 0)
       const unitCostUsd = toNumber(item.cost_price_usd ?? item.unit_cost_usd, 0)
@@ -1092,6 +1100,20 @@ app.post('/supplier', async (c) => {
               ON CONFLICT(product_id, branch_id) DO UPDATE SET quantity = MAX(0, branch_stock.quantity - @quantity)`,
         params: { product_id: item.product_id, branch_id: itemBranchId, quantity: qty },
       })
+      // Lot-ledger parity: pull the same units out of the product's active lots
+      // FIFO (clamped decrement -- returns keep the clamped version). The shared
+      // availability is consumed so a second line of the same product at this
+      // branch can't double-take a lot; any uncovered remainder is legacy
+      // unlotted stock that rides branch_stock alone, matching the bump above.
+      if (itemBranchId) {
+        const lots = supplierFifoLots.get(`${item.product_id}:${itemBranchId}`) || []
+        const { takes } = allocateAcrossLots(lots, qty)
+        for (const take of takes) {
+          const lot = lots.find((entry) => entry.batchId === take.batchId)
+          if (lot) lot.available -= take.quantity
+          statements.push(decrementBatchStockStatement(take.batchId, itemBranchId, take.quantity))
+        }
+      }
       statements.push({
         sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_usd, unit_cost_khr, reason, reference_id, user_id, user_name)
               VALUES (@product_id, @product_name, @branch_id, 'supplier_return', @quantity, @unit_cost_usd, @unit_cost_khr, @reason, @reference_id, @user_id, @user_name)`,

@@ -105,7 +105,7 @@ const returnsRoute = loadReal('routes/returns.ts', {
   },
   '../durable-objects/broadcastHub': { broadcast: async () => {} },
   '../lib/cache': { bumpVersion: async () => {} },
-  '../lib/searchMatch': { buildLikeAliasClause: () => '1=1', tokenizeSearchTermGroups: () => [] },
+  '../lib/searchMatch': { buildLikeAliasClause: () => '1=1', tokenizeSearchTermGroups: () => [], normalizeSearchText: (value) => String(value || '') },
   '../lib/productBatches': productBatches,
   // K2 (Part 410): real, pure -- the three-way stock_action + Replace
   // kernel the route now imports (test-returns-replace-damaged-pure.cjs
@@ -269,6 +269,27 @@ async function main() {
     assert.strictEqual(aggregate, 20, 'aggregate matches the two lots (10 + 10)')
     const reAllocs = rawDb.prepare('SELECT COUNT(*) AS n FROM return_item_batch_allocations WHERE return_item_id IN (SELECT id FROM return_items WHERE return_id = @id)').get({ id: created.json.id }).n
     assert.strictEqual(reAllocs, 2, 'the edit re-recorded the fresh split for the next edit')
+  })
+
+  await check('supplier return of a batch-tracked product deducts from the lot ledger, not just the aggregate', async () => {
+    seed()
+    const batch = await productBatches.receiveBatchStock(db, { productId: 1, branchId: 1, quantity: 10, receivedDate: '2026-02-10' })
+    const lotQty = () => rawDb.prepare('SELECT quantity FROM branch_batch_stock WHERE batch_id = @b AND branch_id = 1').get({ b: batch.batchId }).quantity
+    const aggQty = () => rawDb.prepare('SELECT quantity FROM branch_stock WHERE product_id = 1 AND branch_id = 1').get().quantity
+    assert.strictEqual(lotQty(), 10, 'sanity: lot starts at 10')
+    assert.strictEqual(aggQty(), 10, 'sanity: aggregate starts at 10')
+
+    // Supplier return of 4 units -- they leave the branch via the supplier.
+    const { status, json } = await req('POST', '/supplier', {
+      items: [{ product_id: 1, quantity: 4, branch_id: 1, cost_price_usd: 2 }],
+      branch_id: 1,
+      reason: 'Defective batch returned to supplier',
+      settlement: 'refund',
+      supplier_name: 'Acme',
+    })
+    assert.strictEqual(status, 200, JSON.stringify(json))
+    assert.strictEqual(aggQty(), 6, 'branch_stock drops by the 4 that left')
+    assert.strictEqual(lotQty(), 6, 'the lot ledger drops in step -- not left stranded at 10 (the pre-fix drift)')
   })
 
   await check('K2: the three-way stock_action lands end-to-end -- none/restock/damaged in one return', async () => {
