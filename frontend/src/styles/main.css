@@ -776,6 +776,22 @@ th, td, label, p, span, div, button, select, input, textarea { font-size:inherit
 .text-3xl { font-size: calc(1.875rem * var(--ui-text-scale, 1)) !important; }
 .text-4xl { font-size: calc(2.25rem * var(--ui-text-scale, 1)) !important; }
 
+/* Larger reading size on desktop-class screens ONLY (user, Aug 30: "text can
+   be made larger... only for large screens"). Bumping --ui-text-scale rides
+   the existing text-class scaling above (and the lang-km variants, which
+   multiply by the same variable) without touching layout metrics, the root
+   rem size, or the phone/tablet experience. The two tiny bracket sizes are
+   scaled here too -- outside lang-km nothing else scales them, and they are
+   exactly the sizes that get hardest to read on a distant desktop monitor. */
+@media (min-width: 1280px) {
+  :root { --ui-text-scale: 1.08; }
+  .text-\[10px\] { font-size: calc(10px * var(--ui-text-scale, 1)) !important; }
+  .text-\[11px\] { font-size: calc(11px * var(--ui-text-scale, 1)) !important; }
+}
+@media (min-width: 1920px) {
+  :root { --ui-text-scale: 1.14; }
+}
+
 .page-scroll > h1 {
   font-size: calc(1.25rem * var(--ui-title-scale, 1)) !important;
 }
