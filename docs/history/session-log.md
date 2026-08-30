@@ -13350,3 +13350,34 @@ audit queries run read-only via wrangler.
 **Not done.** Merging the 53 possibly-same product pairs / 2 customer phone pairs
 is a business decision (each side carries its own sales history) — surfaced, not
 merged. The four ledgers still await their destination features (Phase D). Deploy.
+
+## Part 500 (Aug 30 2026, session business-os-v1-62) — post-cutoff gap analysis (27th–30th old-system reports) + unified list sorting (SortChip, Sales first)
+
+**Gap analysis.** The user supplied six old-system exports covering 08/27 00:00
+→ 08/31. Measured against the pack and production: the stock-in report's two
+08/27 14:21:30 rows are the pack's literal last two lines (duplicates); the PO
+Invoice Report (Lang, $324) is the paperwork behind those same rows (already
+counted; the ledger itself stays deferred); Charlotte Hollywood 2.5 Fair "+3 @
+08/29" already exists as the snapshot's 3 warehouse units (production total
+correct — importing it would double-count; physically the units moved to the
+shop, so an in-app warehouse→shop transfer of 3 is the only sensible action);
+production sales actually extend to 08/28 08:46 (receipts 4349/4350), so the
+27th's 12 receipts + 28th-morning 2 are already in. MISSING from production:
+(a) ~73 units ≈ $2,139 of sales across ~55 product lines sold 08/28 08:46 →
+08/30 (the products-sold report is per-product aggregate — receipt-level export
+for 08/28–08/31 recommended, importer dedupes by receipt number); (b) 8 expense
+rows 08/28–08/30 totaling ៛195,500 (5 courier deliveries + 3 'ta' rows; the
+three 27th rows already exist as fees). The two summary files (income-by-
+category, stock roll-up) are reference-only. Deferred-ledger rule confirmed
+enforced (hub quarantines po_invoices/stock_adjustments/drawer_sessions/
+stock_in_invoice_lines).
+
+**Unified sorting (`29fae951`).** Audit: sort was hidden inside every Filters
+menu as newest/oldest only — no field sort, no visible state, per-page copies.
+Built utils/listSort.ts (typed fields, kind-aware stable sortRecords, blanks
+last, per-kind direction defaults, per-page persistence) + shared/SortChip.tsx
+(compact chip showing the ACTIVE sort; tap active field to flip). Sales wired
+as exemplar: Date/Total/Customer/Cashier/Status/Receipt; date keeps the
+time-section pipeline, other fields render flat; Filters' old Sort section is
+now Period. listSort.test.ts registered. tsc clean. Rollout to Customers/
+Returns/Fees/Inventory/Users offered next. **Needs deploy** (frontend).
