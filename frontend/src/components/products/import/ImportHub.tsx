@@ -2,6 +2,7 @@ import { useMemo, useRef, useState } from 'react'
 import UploadCloud from 'lucide-react/dist/esm/icons/upload-cloud.js'
 import FileSpreadsheet from 'lucide-react/dist/esm/icons/file-spreadsheet.js'
 import AppSelect from '../../shared/AppSelect.tsx'
+import InfoHint from '../../shared/InfoHint.tsx'
 import { parseImportFile } from '../../../utils/spreadsheetImport.ts'
 import { classifyImportContent, type DetectedImportType } from './importTemplateRouter.ts'
 import { parseCsvRows } from '../../../utils/csvImport.ts'
@@ -159,13 +160,14 @@ export default function ImportHub({
 
   return (
     <div className="space-y-4">
-      <div>
+      <div className="flex items-center gap-1.5">
         <h3 className="text-base font-semibold text-gray-900 dark:text-gray-100">
           {T('import_hub_title', 'Import — drop your files, we route them')}
         </h3>
-        <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-          {T('import_hub_sub', 'One combined sheet or separate files per aspect — catalog, stock-in, sales, contacts — together or over several sessions. Each file is recognized by its columns and queued into its own reviewed import; nothing commits without you.')}
-        </p>
+        <InfoHint
+          label={T('import_hub_how', 'How importing works')}
+          text={T('import_hub_sub', 'One combined sheet or separate files per aspect — catalog, stock-in, sales, contacts — together or over several sessions. Each file is recognized by its columns and imported automatically once analyzed; anything with conflicts pauses for your review in the import tracker.')}
+        />
       </div>
 
       <button
@@ -265,15 +267,16 @@ export default function ImportHub({
           ))}
 
           {hasSales ? (
-            <label className="flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 dark:border-amber-500/30 dark:bg-amber-500/10 p-3 text-xs cursor-pointer">
-              <input type="checkbox" checked={accrueLoyalty} onChange={(event) => setAccrueLoyalty(event.target.checked)} className="mt-0.5" />
-              <span className="text-amber-800 dark:text-amber-200">
-                {T('sales_import_accrue_loyalty', 'Count loyalty points for these sales')}{' '}
-                <span className="text-amber-600 dark:text-amber-300">
-                  {T('import_hub_loyalty_note', '— leave OFF for historical sales: balances are computed by summing sales, so old receipts would inflate them.')}
-                </span>
-              </span>
-            </label>
+            <div className="flex items-center gap-1.5 rounded-xl border border-amber-200 bg-amber-50 dark:border-amber-500/30 dark:bg-amber-500/10 p-3 text-xs">
+              <label className="flex cursor-pointer items-center gap-2 text-amber-800 dark:text-amber-200">
+                <input type="checkbox" checked={accrueLoyalty} onChange={(event) => setAccrueLoyalty(event.target.checked)} />
+                {T('sales_import_accrue_loyalty', 'Count loyalty points for these sales')}
+              </label>
+              <InfoHint
+                label={T('sales_import_accrue_loyalty', 'Count loyalty points for these sales')}
+                text={T('import_hub_loyalty_note', '— leave OFF for historical sales: balances are computed by summing sales, so old receipts would inflate them.').replace(/^—\s*/, '')}
+              />
+            </div>
           ) : null}
         </div>
       ) : null}
