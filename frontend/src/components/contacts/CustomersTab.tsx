@@ -117,6 +117,9 @@ interface CustomerRow extends Record<string, unknown> {
   points_redeemed?: number | string | null
   points_rewarded?: number | string | null
   points_deducted?: number | string | null
+  // Present when this contact has signed up for a storefront account (§2);
+  // null otherwise. Read-only flag joined by the customers list endpoint.
+  portal_account?: { membershipId: string; createdAt: string | null } | null
 }
 
 // SortChip vocabulary. This list is SERVER-paged, so both fields are sorted
@@ -1031,7 +1034,16 @@ function CustomersTab({ t, notify, active = true, initialSearch }: CustomersTabP
                 </>
                 ) : null}
               </td>
-              <td className="px-4 py-2 font-medium text-gray-900 cursor-pointer dark:text-white" onClick={() => handleContactCellClick(customerRow)}>{customerRow.name}</td>
+              <td className="px-4 py-2 font-medium text-gray-900 cursor-pointer dark:text-white" onClick={() => handleContactCellClick(customerRow)}>
+                <span className="inline-flex items-center gap-1.5">
+                  {customerRow.name}
+                  {customerRow.portal_account ? (
+                    <span className="inline-flex items-center rounded-full bg-emerald-100 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-700 dark:bg-emerald-400/15 dark:text-emerald-300" title={tr(t, 'portal_account_flag_title', 'Has a storefront account')}>
+                      {tr(t, 'portal_account_flag', 'Account')}
+                    </span>
+                  ) : null}
+                </span>
+              </td>
               <td className="px-4 py-2 font-mono text-xs text-gray-500 cursor-pointer" onClick={() => handleContactCellClick(customerRow)}>{customerRow.membership_number || '--'}</td>
               <td className="px-4 py-2 font-semibold text-blue-600 cursor-pointer dark:text-blue-300" onClick={() => handleContactCellClick(customerRow)}>
                 {formatPoints(customerRow.points_balance)}
@@ -1139,6 +1151,11 @@ function CustomersTab({ t, notify, active = true, initialSearch }: CustomersTabP
                   {contactCount > 0 ? (
                     <span className="inline-flex shrink-0 items-center gap-0.5 rounded-full bg-blue-100 px-1.5 py-0.5 text-[10px] font-semibold text-blue-600 dark:bg-blue-900/40 dark:text-blue-300" title={`${contactCount} ${tr(t, 'contact_options', 'contact options')}`}>
                       <Phone className="h-2.5 w-2.5" />{contactCount}
+                    </span>
+                  ) : null}
+                  {customerRow.portal_account ? (
+                    <span className="inline-flex shrink-0 items-center rounded-full bg-emerald-100 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-700 dark:bg-emerald-400/15 dark:text-emerald-300" title={tr(t, 'portal_account_flag_title', 'Has a storefront account')}>
+                      {tr(t, 'portal_account_flag', 'Account')}
                     </span>
                   ) : null}
                 </div>
