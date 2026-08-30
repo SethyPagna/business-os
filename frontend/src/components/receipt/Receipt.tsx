@@ -673,8 +673,14 @@ export default function Receipt({ sale, settings = {}, onClose, _previewMode }: 
 
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-y-auto bg-gray-100 dark:bg-zinc-900">
-      <div className="flex flex-shrink-0 flex-wrap items-center justify-between gap-3 border-b border-gray-200 bg-white px-3 py-3 dark:border-zinc-700 dark:bg-zinc-800">
-        <div className="grid w-full grid-cols-3 gap-2 sm:flex sm:w-auto sm:flex-wrap sm:items-center">
+      {/* ONE compact toolbar row (user, Aug 30: the buttons stacked into
+          multiple rows here, "not compact one row"). On phones the
+          secondary actions (Open PDF / Image / Back) collapse to icon-only
+          buttons -- same treatment as the Branches toolbar -- so
+          Print + PDF + Image + language + Back all fit a single row;
+          labels return from sm up. */}
+      <div className="flex flex-shrink-0 items-center gap-1.5 overflow-x-auto border-b border-gray-200 bg-white px-3 py-2 dark:border-zinc-700 dark:bg-zinc-800 sm:gap-2 sm:py-3">
+        <div className="flex min-w-0 flex-1 items-center gap-1.5 sm:gap-2">
         {compactSalesReceipt ? (
           // The 80x50 card and the full receipt are two print FORMATS. Rather
           // than two dimension-labeled Print buttons (the old B5 layout),
@@ -722,34 +728,32 @@ export default function Receipt({ sale, settings = {}, onClose, _previewMode }: 
         )}
         <button
           type="button"
-          className="btn-secondary min-w-0 justify-center px-3 py-2 text-sm"
+          className="btn-secondary min-w-0 justify-center px-2.5 py-2 text-sm sm:px-3"
           onClick={() => exportReceiptPdf('open')}
           disabled={pdfBusy !== ''}
+          title={t?.('open_pdf') || 'Open PDF'}
+          aria-label={t?.('open_pdf') || 'Open PDF'}
         >
           <span className="inline-flex min-w-0 items-center justify-center gap-1.5">
             <FileText className="h-4 w-4 shrink-0" />
-            <span className="truncate">{pdfBusy === 'open' ? (t?.('preparing_pdf') || 'Preparing PDF...') : (t?.('open_pdf') || 'Open PDF')}</span>
+            <span className="hidden truncate sm:inline">{pdfBusy === 'open' ? (t?.('preparing_pdf') || 'Preparing PDF...') : (t?.('open_pdf') || 'Open PDF')}</span>
           </span>
         </button>
         <button
           type="button"
-          className="btn-secondary min-w-0 justify-center px-3 py-2 text-sm"
+          className="btn-secondary min-w-0 justify-center px-2.5 py-2 text-sm sm:px-3"
           onClick={() => exportReceiptPdf('image')}
           disabled={pdfBusy !== ''}
+          title={t?.('receipt_image_short') || 'Image'}
+          aria-label={t?.('receipt_image_short') || 'Image'}
         >
           <span className="inline-flex min-w-0 items-center justify-center gap-1.5">
             <ImageDown className="h-4 w-4 shrink-0" />
-            <span className="truncate">{pdfBusy === 'image' ? (t?.('saving_image') || 'Saving image...') : (t?.('receipt_image_short') || 'Image')}</span>
+            <span className="hidden truncate sm:inline">{pdfBusy === 'image' ? (t?.('saving_image') || 'Saving image...') : (t?.('receipt_image_short') || 'Image')}</span>
           </span>
         </button>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
-        <button type="button" className="btn-secondary flex-1 py-2" onClick={onClose}>
-          <span className="inline-flex items-center gap-2">
-            <ArrowLeft className="h-4 w-4" />
-            {t?.('back') || 'Back'}
-          </span>
-        </button>
+        <div className="flex shrink-0 items-center gap-1.5 sm:gap-2">
         <div className="flex gap-1 rounded-lg bg-gray-100 p-1 dark:bg-zinc-700">
           {([
             ['en', 'EN'],
@@ -760,12 +764,24 @@ export default function Receipt({ sale, settings = {}, onClose, _previewMode }: 
               key={code}
               type="button"
               onClick={() => setLang(code)}
-              className={`rounded-md px-2.5 py-1 text-xs font-medium transition-colors ${lang === code ? 'bg-blue-600 text-white' : 'text-gray-500 hover:bg-gray-200 dark:text-gray-300 dark:hover:bg-zinc-600'}`}
+              className={`whitespace-nowrap rounded-md px-2 py-1 text-xs font-medium transition-colors sm:px-2.5 ${lang === code ? 'bg-blue-600 text-white' : 'text-gray-500 hover:bg-gray-200 dark:text-gray-300 dark:hover:bg-zinc-600'}`}
             >
               {text}
             </button>
           ))}
         </div>
+        <button
+          type="button"
+          className="btn-secondary min-w-0 justify-center px-2.5 py-2 text-sm sm:px-3"
+          onClick={onClose}
+          title={t?.('back') || 'Back'}
+          aria-label={t?.('back') || 'Back'}
+        >
+          <span className="inline-flex min-w-0 items-center justify-center gap-1.5">
+            <ArrowLeft className="h-4 w-4 shrink-0" />
+            <span className="hidden truncate sm:inline">{t?.('back') || 'Back'}</span>
+          </span>
+        </button>
         </div>
       </div>
 

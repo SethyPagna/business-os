@@ -232,12 +232,16 @@ export default function SaleDetailModal({
         className="flex max-h-modal-92 w-full flex-col rounded-t-2xl bg-white shadow-2xl sm:max-w-3xl sm:rounded-2xl dark:bg-gray-800"
         onClick={(event: MouseEvent<HTMLDivElement>) => event.stopPropagation()}
       >
-        <div className="flex flex-shrink-0 items-center justify-between border-b border-gray-200 p-4 dark:border-gray-700">
-          <div>
-            <div className="font-mono text-base font-bold text-gray-900 dark:text-white">{sale.receipt_number}</div>
+        <div className="flex flex-shrink-0 items-center justify-between gap-2 border-b border-gray-200 p-4 dark:border-gray-700">
+          {/* min-w-0 + truncate: long receipt numbers (RCP-<13 digits>-XXXX)
+              used to wrap onto three lines on phones once the status chip and
+              Print squeezed this column. The full number stays available via
+              title, and the chip/buttons stop wrapping too (shrink-0). */}
+          <div className="min-w-0 flex-1">
+            <div className="truncate font-mono text-sm font-bold text-gray-900 dark:text-white sm:text-base" title={sale.receipt_number || undefined}>{sale.receipt_number}</div>
             <div className="mt-1 text-xs text-gray-400">{fmtTime(sale.created_at)}</div>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex shrink-0 items-center gap-2 whitespace-nowrap">
             <StatusBadge status={currentStatus} t={t} />
             {onPrint ? (
               <button
@@ -583,7 +587,14 @@ export default function SaleDetailModal({
               >
                 {statusSaving
                   ? (t('loading') || 'Saving')
-                  : `${t('update_to_status') || 'Update to'} ${getStatusLabel(newStatus, t)}`}
+                  // The translation is a template ("Update to {status}") --
+                  // substitute the placeholder instead of appending after it,
+                  // which rendered a literal "{status}" in the button.
+                  : (() => {
+                      const template = t('update_to_status') || 'Update to {status}'
+                      const statusLabel = getStatusLabel(newStatus, t)
+                      return template.includes('{status}') ? template.replace('{status}', statusLabel) : `${template} ${statusLabel}`
+                    })()}
               </button>
             </section>
           ) : null}
