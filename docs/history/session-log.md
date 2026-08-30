@@ -14510,3 +14510,46 @@ untouched. tsc clean outside the peer's `Inventory.tsx`.
 Verified live on 8899 (rebuild + wrangler restart; the dist watcher dies
 with EPERM on Windows). **Needs deploy** with everything since Worker
 65f7b69d.
+
+## Part 523 (Aug 30 2026, session business-os-v1-b9) — Part-77 CRITICAL fix: a failed return-create reverses its own stock writes
+
+**Ask:** findings-backlog continuation (claimed first with the slice split:
+CREATE-path compensation; the edit-path equivalent and true atomicity stay
+open). Return creation applies lot restocks (`receiveBatchStock`) and
+replacement drains (`applyReplacementStock`) as separate atomic writes
+BEFORE the outer db.batch, and the catch deleted the return's rows while
+reversing none of that — a mid-request failure (e.g. a replacement line
+that turns out not to be coverable) minted phantom stock from the restocks
+and destroyed stock from the drains. Flagged by two audits (write-path,
+batch-identity). Commit `86125647`:
+
+- `routes/returns.ts` POST /: a compensation log records every pre-batch
+  stock write (per-lot restocks with product/branch/lot/qty; replacement
+  drains with their lot or aggregate path). The catch reverses them in
+  reverse order — restocks via `removeStockFromBatch` (exact lot, keeps
+  branch_stock + stock_quantity in lockstep), drains via
+  `receiveBatchStock` or the aggregate bump + stock_quantity re-derive.
+  Best-effort per write and LOUD: any unreversible write (a concurrent
+  sale consumed the units) is recorded in the audit log
+  (`return_rollback_incomplete`) and named in the 500 message with a
+  pointer to Verify Integrity — never swallowed.
+- Two adjacent latent bugs in the same cleanup, fixed: `return_items` was
+  missing from the row deletes entirely (a failure after the outer batch
+  left orphan rows under a deleted return), and the movement rows the
+  pre-batch writes recorded against the deleted return are now removed
+  (movement_type-scoped so an unrelated entity sharing the numeric
+  reference_id is never touched).
+- Suite fallout fixed in passing: Part 519 (session 0b) gave this route
+  `lib/receiptNumber`; the returns suite's module shim lacked it, so
+  `test-returns-batch-restock-pure` CRASHED on committed HEAD — stubbed
+  deterministically (attributed to 0b's lane in the commit message).
+
+Verified: suite 9 → 10 checks — the new probe drives the REAL route (real
+SQLite) into a post-restock in-request failure and asserts the lot, the
+branch_stock aggregate and products.stock_quantity all return to exactly
+the pre-return state with zero surviving return/replacement/movement rows.
+replace-damaged 19, sales-returns-search, sale-cancel green; cloudflare
+tsc clean. **Still open on this finding:** the PATCH /:id edit path's
+equivalent compensation, and true cross-step atomicity (same class as the
+backup slice C — needs a plan/lock design, not a bigger batch).
+**Needs deploy** (rides with the b9 batch).
