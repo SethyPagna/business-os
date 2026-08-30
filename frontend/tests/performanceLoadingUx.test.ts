@@ -581,7 +581,13 @@ assert.match(exportMenu, /import\('\.\/PortalMenu'\)\.then\(\(module\) => module
 assert.match(exportMenu, /defaultOpen=\{openOnLoad\}/, 'ExportMenu first click should open the menu after the PortalMenu chunk loads')
 assert.doesNotMatch(filterMenu, /import PortalMenu from '\.\/PortalMenu'/, 'FilterMenu should not statically import the portal menu positioning code during route startup')
 assert.match(filterMenu, /import LazyPortalMenu from '\.\/LazyPortalMenu'/, 'FilterMenu should route menu positioning through the intent-loaded wrapper')
-assert.match(filterMenu, /grid grid-cols-\[5rem_minmax\(0,1fr\)\]/, 'FilterMenu sections should keep labels and controls in one compact row')
+// Redesign (Aug 30 2026): sections are accordion rows inside the ONE panel --
+// no second popover floats over it (the old per-section flyout stacked two
+// popovers and capped labels at a 5rem grid column). Exactly one
+// LazyPortalMenu usage = the top-level menu itself.
+assert.strictEqual((filterMenu.match(/<LazyPortalMenu/g) || []).length, 1, 'FilterMenu must have exactly one popover layer — sections expand inline (accordion), never as a second floating menu')
+assert.match(filterMenu, /openSectionId/, 'FilterMenu sections should expand inline via accordion state')
+assert.match(filterMenu, /ActiveFilterChips/, 'FilterMenu should surface active picks as chips outside the menu')
 assert.match(filterMenu, /if \(label\.toLowerCase\(\) === 'back'\) return fallback/, 'FilterMenu should replace accidental Back labels with section-specific labels')
 assert.match(appSelect, /data-app-select-button="true"/, 'AppSelect should expose a stable rounded trigger hook for live visual checks')
 assert.match(appSelect, /data-app-select-selected="true"/, 'AppSelect should expose the selected value for live visual checks')
