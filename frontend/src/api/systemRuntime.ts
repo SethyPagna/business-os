@@ -74,6 +74,21 @@ export async function factoryReset(): Promise<unknown> {
   )
 }
 
+// The two old-system-migration finalize steps (IMPORT-MANIFEST.md Step 4d
+// "zero live stock" and Step 4e "park historical lots"), which used to be
+// hand-typed wrangler SQL -- see cloudflare/src/routes/system.ts's POST
+// /finalize-migration. Same long timeout as the resets above: each takes a
+// fresh scoped backup before the UPDATE, which can run past apiFetch's
+// generic default before the Worker responds.
+export async function finalizeMigration(step: 'zero_stock' | 'park_lots'): Promise<unknown> {
+  return route(
+    'data:finalizeMigration',
+    () => apiFetch('POST', '/api/system/finalize-migration', { step }, LONG_SYSTEM_ACTION_TIMEOUT_MS),
+    null,
+    true,
+  )
+}
+
 export async function openPath(targetPath: string): Promise<unknown> {
   try {
     return await apiFetch('POST', '/api/system/open-path', { path: targetPath })

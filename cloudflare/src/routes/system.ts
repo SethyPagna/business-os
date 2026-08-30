@@ -361,6 +361,20 @@ app.post('/reset-data', async (c) => {
         { sql: 'DELETE FROM suppliers' },
         { sql: 'DELETE FROM delivery_contacts' },
         { sql: 'DELETE FROM custom_fields' },
+        // Import bookkeeping added after the original reset route. Clear
+        // every job-scoped ledger before deleting import_jobs so a genuine
+        // "start over" does not leave materialized CSV rows, idempotency
+        // commits, guards, grouping state, image plans, or merge evidence
+        // from the previous run behind.
+        { sql: 'DELETE FROM import_auto_merges' },
+        { sql: 'DELETE FROM import_sales_commits' },
+        { sql: 'DELETE FROM import_stock_action_guards' },
+        { sql: 'DELETE FROM import_stock_action_commits' },
+        { sql: 'DELETE FROM import_stock_action_groups' },
+        { sql: 'DELETE FROM import_job_image_renames' },
+        { sql: 'DELETE FROM import_job_image_matches' },
+        { sql: 'DELETE FROM import_job_row_signatures' },
+        { sql: 'DELETE FROM import_job_source_rows' },
         { sql: 'DELETE FROM import_job_errors' },
         { sql: 'DELETE FROM import_job_batches' },
         { sql: 'DELETE FROM import_job_rows' },
@@ -552,6 +566,122 @@ app.post('/reset-section', async (c) => {
     })
   } catch (error) {
     return c.json({ success: false, error: (error as Error).message || 'Reset failed' }, 500)
+  }
+})
+
+// ---------------------------------------------------------------------------
+// Finalize migration: the two operator steps from the old-system import
+// runbook (Downloads/businessos-migration-aug28/IMPORT-MANIFEST.md) that
+// used to be hand-typed `wrangler d1 execute` UPDATEs, surfaced as a
+// guarded, backup-first endpoint so nobody edits production D1 by hand.
+//
+//   step='zero_stock'  -> Manifest Step 4d, part 1. Zero every live count
+//                         (branch_stock.quantity + products.stock_quantity)
+//                         so the follow-up Add/Update RE-IMPORT of the two
+//                         product files lands exactly on the template totals
+//                         instead of stacking on top of the history import's
+//                         units. The re-import itself is a file upload the
+//                         operator does next -- this endpoint only does the
+//                         zeroing half that was raw SQL before.
+//   step='park_lots'   -> Manifest Step 4e (optional, recommended). Zero the
+//                         remaining counts on the historical `Unified stock
+//                         import` lots so the POS lot picker skips them (the
+//                         old system never tied sales to lots, so their
+//                         remaining quantities aren't allocatable). Matches
+//                         the manifest's `instr(notes,'Unified stock import')=1`
+//                         predicate exactly -- the `Received via product
+//                         import` opening lots are deliberately untouched, so
+//                         migration 0081's lot-ledger reconcile (Step 4f)
+//                         still works and re-running this is a no-op.
+//
+// Both are idempotent (the `<> 0` guards mean a second run reports 0
+// affected), take a fresh scoped backup first exactly like every reset
+// above, and only zero quantities -- no row is ever deleted here.
+// ---------------------------------------------------------------------------
+const MIGRATION_FINALIZE_STEPS = ['zero_stock', 'park_lots'] as const
+type MigrationFinalizeStep = typeof MIGRATION_FINALIZE_STEPS[number]
+
+app.post('/finalize-migration', async (c) => {
+  const denied = denyUnlessBackupPermission(c)
+  if (denied) return denied
+  if (await rateLimited(c, 'finalize_migration', 10, 600)) {
+    return c.json({ error: 'Too many attempts. Wait a few minutes and try again.' }, 429)
+  }
+
+  const body = await c.req.json<{ step?: string }>().catch(() => ({}) as { step?: string })
+  const step = body.step as MigrationFinalizeStep
+  if (!MIGRATION_FINALIZE_STEPS.includes(step)) {
+    return c.json({ error: `Unknown step. Must be one of: ${MIGRATION_FINALIZE_STEPS.join(', ')}` }, 400)
+  }
+
+  const db = getDb(c.env)
+  const user = c.get('user')
+
+  // Same hard prerequisite as every reset: a fresh, scoped backup must
+  // succeed before any write runs, so the operation is always undoable.
+  const backupTables = step === 'zero_stock' ? ['branch_stock', 'products'] : ['branch_batch_stock']
+  try {
+    await createSectionBackup(c.env, backupTables, 'manual')
+  } catch (error) {
+    return c.json({
+      success: false,
+      error: `Aborted: could not create a backup first (${(error as Error).message || 'unknown error'}). No data was changed.`,
+    }, 500)
+  }
+
+  try {
+    if (step === 'zero_stock') {
+      const branchRows = await db.prepare('SELECT COUNT(*) AS n FROM branch_stock WHERE quantity <> 0').get<{ n: number }>()
+      const productRows = await db.prepare('SELECT COUNT(*) AS n FROM products WHERE stock_quantity <> 0').get<{ n: number }>()
+      // One atomic batch: either both live-count tables zero or neither does,
+      // so the catalog is never left half-zeroed if the request is cut off.
+      await db.batch([
+        { sql: 'UPDATE branch_stock SET quantity = 0 WHERE quantity <> 0' },
+        { sql: 'UPDATE products SET stock_quantity = 0 WHERE stock_quantity <> 0' },
+      ])
+      const affected = { branch_stock: branchRows?.n ?? 0, products: productRows?.n ?? 0 }
+
+      await audit(c.env, user?.id ?? null, user?.name ?? null, 'finalize_migration', 'system', null, {
+        label: `Migration finalize: zeroed live stock (${affected.branch_stock} branch-stock rows, ${affected.products} products)`,
+        step,
+      })
+      c.executionCtx.waitUntil(broadcast(c.env, 'products', { action: 'reset', step }))
+      c.executionCtx.waitUntil(broadcast(c.env, 'inventory', { action: 'reset', step }))
+      c.executionCtx.waitUntil(bumpVersion(c.env, 'products'))
+      c.executionCtx.waitUntil(bumpVersion(c.env, 'inventory'))
+
+      return c.json({
+        success: true,
+        affected,
+        message: `Live stock zeroed (${affected.branch_stock} branch-stock rows, ${affected.products} products). Now re-import the two product files (Add / Update) so totals land on the template. A fresh backup was taken first.`,
+      })
+    }
+
+    // step === 'park_lots'
+    const parkable = await db.prepare(
+      "SELECT COUNT(*) AS n FROM branch_batch_stock WHERE quantity <> 0 AND batch_id IN (SELECT id FROM product_batches WHERE instr(notes, 'Unified stock import') = 1)",
+    ).get<{ n: number }>()
+    await db.prepare(
+      "UPDATE branch_batch_stock SET quantity = 0 WHERE quantity <> 0 AND batch_id IN (SELECT id FROM product_batches WHERE instr(notes, 'Unified stock import') = 1)",
+    ).run()
+    const affected = { branch_batch_stock: parkable?.n ?? 0 }
+
+    await audit(c.env, user?.id ?? null, user?.name ?? null, 'finalize_migration', 'system', null, {
+      label: `Migration finalize: parked ${affected.branch_batch_stock} historical lot rows`,
+      step,
+    })
+    c.executionCtx.waitUntil(broadcast(c.env, 'products', { action: 'reset', step }))
+    c.executionCtx.waitUntil(broadcast(c.env, 'inventory', { action: 'reset', step }))
+    c.executionCtx.waitUntil(bumpVersion(c.env, 'products'))
+    c.executionCtx.waitUntil(bumpVersion(c.env, 'inventory'))
+
+    return c.json({
+      success: true,
+      affected,
+      message: `Parked ${affected.branch_batch_stock} historical lot row(s) — the POS lot picker will now skip un-allocatable "Unified stock import" lots. A fresh backup was taken first.`,
+    })
+  } catch (error) {
+    return c.json({ success: false, error: (error as Error).message || 'Finalize migration failed' }, 500)
   }
 })
 

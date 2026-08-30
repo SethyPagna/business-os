@@ -14,6 +14,7 @@ import RefreshCw from 'lucide-react/dist/esm/icons/refresh-cw.js'
 import RotateCcw from 'lucide-react/dist/esm/icons/rotate-ccw.js'
 import Trash2 from 'lucide-react/dist/esm/icons/trash-2.js'
 import ShieldAlert from 'lucide-react/dist/esm/icons/shield-alert.js'
+import Layers from 'lucide-react/dist/esm/icons/layers.js'
 import { isBrokenLocalizedString as isBrokenLocalizedStringHook, useApp as useAppHook } from '../../AppContext.tsx'
 import { useActionHistory } from '../../utils/actionHistory.ts'
 import { useIsPageActive } from '../shared/pageActivity'
@@ -287,17 +288,27 @@ const LazyFactoryReset = lazyRetry(async () => {
   return { default: module.FactoryReset as ComponentType<MaintenanceResetPanelProps> }
 }, 'backup-factory-reset')
 
+const LazyMigrationFinalize = lazyRetry(async () => {
+  const module = await import('./ResetData')
+  return { default: module.MigrationFinalize as ComponentType<MaintenanceResetPanelProps> }
+}, 'backup-migration-finalize')
+
 // Ordered least-to-most destructive -- 'section' (single entity: customers/
 // suppliers/delivery contacts/audit log) is the safest and deliberately
 // the default first-shown tab, 'data' (sales/products/all) is the next
 // step up, 'factory' (everything, unrecoverable) is last. See this
 // section's own render comment for why this tier layer exists.
-const MAINTENANCE_TIERS: Array<{ id: 'section' | 'data' | 'factory'; icon: ComponentType<{ className?: string }>; labelKey: string; label: string; hintKey: string; hint: string }> = [
+const MAINTENANCE_TIERS: Array<{ id: 'section' | 'data' | 'migration' | 'factory'; icon: ComponentType<{ className?: string }>; labelKey: string; label: string; hintKey: string; hint: string }> = [
   // Products moved from the Data Reset tier into this one: it clears one
   // page's data, which is what this tier is for, and sitting next to two
   // whole-database operations is what made it hard to find.
   { id: 'section', icon: RotateCcw, labelKey: 'maintenance_tier_section', label: 'Page Reset', hintKey: 'maintenance_tier_section_hint', hint: 'Clear one page on its own -- products, customers, suppliers, delivery contacts, or the audit log. Everything else is kept.' },
   { id: 'data', icon: Trash2, labelKey: 'maintenance_tier_data', label: 'Data Reset', hintKey: 'maintenance_tier_data_hint', hint: 'Sales-only or a full data reset -- these span the whole database. Users, roles, branches, and settings are kept.' },
+  // The old-system import finalize steps (IMPORT-MANIFEST.md 4d/4e) that used
+  // to be hand-typed wrangler SQL. Sits between Data Reset and Factory Reset
+  // because it mutates live stock wholesale but never deletes rows, so it is
+  // less destructive than either full reset.
+  { id: 'migration', icon: Layers, labelKey: 'maintenance_tier_migration', label: 'Finalize Migration', hintKey: 'maintenance_tier_migration_hint', hint: 'Run the last old-system import steps in order: zero live stock, re-import the product files, then park the historical lots. Only right after a fresh history import.' },
   { id: 'factory', icon: ShieldAlert, labelKey: 'maintenance_tier_factory', label: 'Factory Reset', hintKey: 'maintenance_tier_factory_hint', hint: 'Deletes everything and returns the app to factory defaults. The most dangerous option here, and unrecoverable.' },
 ]
 
@@ -1459,7 +1470,7 @@ export default function Backup() {
   const [folderImportPath, setFolderImportPath] = useState('')
   const [activeJob, setActiveJob] = useState<BackupJob | null>(null)
   const [advancedMaintenanceOpen, setAdvancedMaintenanceOpen] = useState(false)
-  const [maintenanceTier, setMaintenanceTier] = useState<'section' | 'data' | 'factory'>('section')
+  const [maintenanceTier, setMaintenanceTier] = useState<'section' | 'data' | 'migration' | 'factory'>('section')
   const [backupSection, setBackupSection] = useState<BackupSectionId>('all')
   const aliveRef = useRef(true)
   const jobStopRef = useRef<StopFn | null>(null)
@@ -1842,7 +1853,7 @@ export default function Backup() {
                   "pick one to reveal its options" pattern just applied to
                   each tool's own mode grid above (see ResetData.tsx). */}
               <div className="mt-4 space-y-4">
-                <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
                   {MAINTENANCE_TIERS.map((tier) => (
                     <button
                       key={tier.id}
@@ -1866,6 +1877,7 @@ export default function Backup() {
                 </div>
                 {maintenanceTier === 'section' ? <LazySectionReset actionHistory={actionHistory} /> : null}
                 {maintenanceTier === 'data' ? <LazyResetData actionHistory={actionHistory} /> : null}
+                {maintenanceTier === 'migration' ? <LazyMigrationFinalize actionHistory={actionHistory} /> : null}
                 {maintenanceTier === 'factory' ? <LazyFactoryReset actionHistory={actionHistory} /> : null}
               </div>
             </Suspense>

@@ -1197,6 +1197,23 @@ export async function factoryReset() {
   return result
 }
 
+// Old-system migration finalize steps (IMPORT-MANIFEST.md 4d/4e). Each only
+// zeroes stock quantities server-side, so the local mirror needs the same
+// stock tables refreshed afterwards -- 'zero_stock' touches branch_stock +
+// products.stock_quantity, 'park_lots' touches branch_batch_stock (which
+// has no separate local Dexie mirror table, so nothing extra to list for
+// it, same as reset-section's customer_share_submissions note above).
+const FINALIZE_MIGRATION_MIRROR_TABLES = {
+  zero_stock: ['branch_stock', 'products'],
+  park_lots: [],
+}
+
+export async function finalizeMigration(step) {
+  const result = await callSystemRuntimeMethod('finalizeMigration', step)
+  await invalidateClientRuntimeState(`finalize-migration-${step}`, FINALIZE_MIGRATION_MIRROR_TABLES[step] || [])
+  return result
+}
+
 // ─── Import template downloads ────────────────────────────────────────────────
 export function downloadImportTemplate(type) {
   // 1) Branch by import entity and emit a CSV header-only template.

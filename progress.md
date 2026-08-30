@@ -245,6 +245,24 @@ autocorrect — templates, imports, exports and generated files alike.*
   (3,204) for supplier accounting. `stock_in_invoice_lines.csv` (7,340) is already
   joined into the stock history where attributable and must not be imported again as
   stock; it remains the audit/backfill source for a future supplier-invoice ledger.
+- [x] M8. **In-app "Finalize migration" guided step — SHIPPED, needs deploy.**
+  IMPORT-MANIFEST.md's manual wrangler-SQL "extra options" are now a guided,
+  backup-first, confirm-gated panel: a new "Finalize Migration" tier in the
+  Backup → Maintenance utilities walks the operator through Step 4d (zero live
+  `branch_stock`/`products.stock_quantity`), a Step-4d re-import acknowledgement
+  (the file upload stays on the Products page — the panel can only instruct +
+  gate on it), and Step 4e (park the `Unified stock import` historical lots,
+  matching the manifest's `instr(notes,'Unified stock import')=1` predicate and
+  leaving the `Received via product import` opening lots for 0081). New
+  `POST /api/system/finalize-migration` (`step=zero_stock|park_lots`) takes a
+  fresh scoped backup first, is idempotent (`<> 0` guards), audits, and only
+  zeroes quantities — never deletes rows. Step 4f stays automatic (migration
+  0081). Backend pure test `test-migration-finalize-pure.cjs` (8 checks on the
+  real migration chain + real route SQL) proves the zeroing, the exact scoped
+  backups, backup-fail abort, idempotency, the opening-lot exclusion, and the
+  bad-step 400. Files: `cloudflare/src/routes/system.ts`,
+  `frontend/src/api/systemRuntime.ts`, `frontend/src/api/methods.ts`,
+  `frontend/src/components/utils-settings/{ResetData,Backup}.tsx`.
 - [x] M7 *(Part 392: SHIPPED, needs deploy — the contract is now TESTS
   (`tests/encodingSafety.test.ts` 9 cases + `test-encoding-safety-pure.cjs` incl. a
   frontend↔backend parse PARITY lock), and the sweep found + fixed four real gaps:

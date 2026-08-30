@@ -5,6 +5,10 @@ import RotateCcw from 'lucide-react/dist/esm/icons/rotate-ccw.js'
 import ShieldAlert from 'lucide-react/dist/esm/icons/shield-alert.js'
 import Trash2 from 'lucide-react/dist/esm/icons/trash-2.js'
 import PackageX from 'lucide-react/dist/esm/icons/package-x.js'
+import Upload from 'lucide-react/dist/esm/icons/upload.js'
+import CheckCircle2 from 'lucide-react/dist/esm/icons/check-circle-2.js'
+import Layers from 'lucide-react/dist/esm/icons/layers.js'
+import Archive from 'lucide-react/dist/esm/icons/archive.js'
 import { useApp as useAppFromContext } from '../../AppContext.tsx'
 import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.ts'
 import { refreshAppData } from '../../utils/appRefresh'
@@ -68,6 +72,12 @@ type ConfirmResetProps = {
   color?: ResetColor
   icon?: LucideIcon
   t?: Translate
+  // Header above the whatDeleted list. Defaults to "This will permanently
+  // delete:" for the actual resets; the migration-finalize steps override
+  // it because they ZERO stock counts (recoverable via the fresh backup +
+  // the very next re-import), not permanently delete rows -- calling that
+  // "permanently delete" would misdescribe the action on its own confirm.
+  whatHeader?: string
 }
 
 type ResetPanelProps = {
@@ -117,6 +127,7 @@ function ConfirmReset({
   color = 'red',
   icon: Icon = AlertTriangle,
   t,
+  whatHeader,
 }: ConfirmResetProps) {
   const T = (key: string, fallback: string) => (typeof t === 'function' ? t(key, fallback) || fallback : fallback)
   const [step, setStep] = useState(0)
@@ -174,7 +185,7 @@ function ConfirmReset({
           <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700 dark:border-red-800 dark:bg-red-900/20 dark:text-red-300">
             <p className="mb-1 flex items-center gap-2 font-semibold">
               <AlertTriangle className="h-4 w-4" />
-              {T('reset_will_delete', 'This will permanently delete:')}
+              {whatHeader || T('reset_will_delete', 'This will permanently delete:')}
             </p>
             <p className="text-xs">{whatDeleted}</p>
           </div>
@@ -729,4 +740,211 @@ function FactoryReset({ actionHistory = null }: ResetPanelProps) {
   )
 }
 
-export { ResetData, SectionReset, FactoryReset }
+// ---------------------------------------------------------------------------
+// Finalize migration -- the guided in-app version of the old-system import
+// runbook's last hand-run steps (Downloads/businessos-migration-aug28/
+// IMPORT-MANIFEST.md, Steps 4d + 4e), which used to be typed into
+// `wrangler d1 execute` by hand. It walks the operator through them in the
+// manifest's exact order:
+//
+//   1. Zero live stock (4d, part 1)  -> POST /finalize-migration zero_stock
+//   2. Re-import the two product files (4d, part 2) -- a FILE upload the
+//      operator does in Products -> Import; this panel can only instruct and
+//      gate on an explicit acknowledgement, it cannot upload their local CSVs
+//      for them.
+//   3. Park historical lots (4e)     -> POST /finalize-migration park_lots
+//
+// Step 4f (the lot-ledger reconcile) is migration 0081 and applies itself on
+// deploy, so it needs no button here. Both server calls take a fresh scoped
+// backup first and are idempotent, so a mis-click or a re-run is safe.
+// ---------------------------------------------------------------------------
+type FinalizeStep = 'zero_stock' | 'park_lots'
+type FinalizeApiResult = ResetApiResult & { affected?: Record<string, number> }
+type FinalizeApi = {
+  finalizeMigration?: (step: FinalizeStep) => Promise<FinalizeApiResult>
+}
+type FinalizeStage = 'zero' | 'reimport' | 'park' | 'done'
+
+function getFinalizeApi(): FinalizeApi {
+  return typeof window === 'undefined' ? {} : (window as Window & { api?: FinalizeApi }).api || {}
+}
+
+function MigrationFinalize({ actionHistory = null }: ResetPanelProps) {
+  const { t, notify, hasPermission } = useApp()
+  const T = (key: string, fallback: string) => (typeof t === 'function' ? t(key, fallback) || fallback : fallback)
+  const [stage, setStage] = useState<FinalizeStage>('zero')
+  const [working, setWorking] = useState(false)
+  const elapsedSeconds = useElapsedSeconds(working)
+  const inFlightRef = useRef(false)
+  const [reimportAck, setReimportAck] = useState(false)
+
+  const runStep = async (step: FinalizeStep, onSuccess: () => void) => {
+    if (!hasPermission('backup')) return notify(T('access_denied', 'No permission'), 'error')
+    if (!beginSingleAction(inFlightRef, { blocked: working })) return
+    setWorking(true)
+    try {
+      const result = await withLoaderTimeout(
+        () => getFinalizeApi().finalizeMigration?.(step) || Promise.resolve({ success: false, error: 'Migration finalize API is unavailable' }),
+        step === 'zero_stock' ? 'Zero live stock' : 'Park historical lots',
+        RESET_DATA_TIMEOUT_MS,
+      )
+      if (result?.success) {
+        actionHistory?.pushAction?.({
+          scope: 'backup',
+          entity: 'finalize_migration',
+          label: result.message || T('done', 'Done'),
+          undo_payload: { step },
+        })
+        notify(result.message || T('done', 'Done'), 'success')
+        refreshAppData()
+        onSuccess()
+      } else {
+        notify(`${T('error', 'Error')}: ${result?.error || 'unknown'}`, 'error')
+      }
+    } catch (error: unknown) {
+      notify(`${T('error', 'Error')}: ${getErrorMessage(error)}`, 'error')
+    } finally {
+      finishSingleAction(inFlightRef)
+      setWorking(false)
+    }
+  }
+
+  // Compact numbered progress rail (ui-density preference: terse, one row).
+  const steps: Array<{ id: FinalizeStage; label: string; icon: LucideIcon }> = [
+    { id: 'zero', label: T('finalize_step_zero', 'Zero stock'), icon: RotateCcw },
+    { id: 'reimport', label: T('finalize_step_reimport', 'Re-import'), icon: Upload },
+    { id: 'park', label: T('finalize_step_park', 'Park lots'), icon: Archive },
+  ]
+  const stageOrder: FinalizeStage[] = ['zero', 'reimport', 'park', 'done']
+  const currentIndex = stageOrder.indexOf(stage)
+
+  return (
+    <div className="space-y-4">
+      <div className="card border border-gray-200 p-4 dark:border-gray-700">
+        <div className="flex items-start gap-3">
+          <div className="rounded-xl bg-blue-100 p-2 text-blue-600 dark:bg-blue-900/30 dark:text-blue-300">
+            <Layers className="h-4 w-4" />
+          </div>
+          <div className="min-w-0">
+            <h2 className="mb-1 text-base font-semibold text-gray-800 dark:text-gray-200">{T('finalize_title', 'Finalize migration')}</h2>
+            <p className="text-sm text-gray-500 dark:text-gray-400">
+              {T('finalize_desc', 'The last two old-system import steps, run in order: zero the live stock, re-import the product files, then park the historical lots. Each takes a fresh backup first. Only run this right after the history import — never on a running store.')}
+            </p>
+          </div>
+        </div>
+
+        {/* Progress rail */}
+        <div className="mt-4 flex items-center gap-2 text-xs">
+          {steps.map((s, index) => {
+            const done = stage === 'done' || index < currentIndex
+            const active = index === currentIndex
+            return (
+              <div key={s.id} className="flex items-center gap-2">
+                <span
+                  className={`inline-flex items-center gap-1 rounded-full px-2 py-1 font-medium ${
+                    done
+                      ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300'
+                      : active
+                        ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300'
+                        : 'bg-gray-100 text-gray-400 dark:bg-gray-800 dark:text-gray-500'
+                  }`}
+                >
+                  {done ? <CheckCircle2 className="h-3.5 w-3.5" /> : <s.icon className="h-3.5 w-3.5" />}
+                  <span>{index + 1}. {s.label}</span>
+                </span>
+                {index < steps.length - 1 ? <span className="text-gray-300 dark:text-gray-600">→</span> : null}
+              </div>
+            )
+          })}
+        </div>
+      </div>
+
+      {stage === 'zero' ? (
+        <ConfirmReset
+          title={T('finalize_zero_title', 'Step 1 — Zero live stock')}
+          description={T('finalize_zero_desc', 'Sets every branch stock count and product stock quantity to zero, so the next re-import of the product files lands exactly on the template totals instead of stacking on top of the stock-history import. Reversible by the re-import you do next; a fresh backup is taken first.')}
+          whatHeader={T('finalize_zero_header', 'This will set to zero:')}
+          whatDeleted={T('finalize_zero_what', 'All branch_stock quantities and all products.stock_quantity values')}
+          whatKept={T('finalize_zero_kept', 'Products, batches, suppliers, sales, and lot costs — only the live counts are zeroed')}
+          confirmWord="ZERO STOCK"
+          onConfirm={() => runStep('zero_stock', () => { setReimportAck(false); setStage('reimport') })}
+          working={working}
+          elapsedSeconds={elapsedSeconds}
+          buttonLabel={T('finalize_zero_button', 'Zero live stock')}
+          icon={RotateCcw}
+          t={t}
+        />
+      ) : null}
+
+      {stage === 'reimport' ? (
+        <div className="card border-2 border-blue-200 p-5 dark:border-blue-900/50 sm:p-6">
+          <div className="mb-3 flex items-start gap-3">
+            <div className="rounded-xl bg-blue-100 p-2 text-blue-600 dark:bg-blue-900/30 dark:text-blue-300">
+              <Upload className="h-4 w-4" />
+            </div>
+            <div>
+              <h2 className="mb-1 text-base font-semibold text-gray-800 dark:text-gray-200">{T('finalize_reimport_title', 'Step 2 — Re-import the product files')}</h2>
+              <p className="text-sm text-gray-500 dark:text-gray-400">
+                {T('finalize_reimport_desc', 'This step is a file upload, so it happens on the Products page — it cannot be run from here. Open Products → Manage → Import → Add / Update, and re-import BOTH product files (the main catalog file, then the extra-products file), in Add / Update mode — never the Replace tab. Matched rows add their stock onto zero, landing exactly on the template numbers.')}
+              </p>
+            </div>
+          </div>
+          <label className="flex items-start gap-2 text-sm text-gray-700 dark:text-gray-300">
+            <input type="checkbox" className="mt-0.5" checked={reimportAck} onChange={(event) => setReimportAck(event.target.checked)} />
+            <span>{T('finalize_reimport_ack', "I've re-imported both product files (Add / Update). Continue to parking the historical lots.")}</span>
+          </label>
+          <div className="mt-4 flex gap-3">
+            <button
+              onClick={() => setStage('park')}
+              disabled={!reimportAck}
+              className="rounded-lg bg-blue-600 px-4 py-2 text-sm text-white hover:bg-blue-700 disabled:opacity-40"
+            >
+              {T('finalize_reimport_continue', 'Continue to Step 3')}
+            </button>
+            <button onClick={() => setStage('zero')} className="rounded-lg border border-gray-300 px-4 py-2 text-sm text-gray-600 dark:border-gray-600 dark:text-gray-300">
+              {T('back', 'Back')}
+            </button>
+          </div>
+        </div>
+      ) : null}
+
+      {stage === 'park' ? (
+        <ConfirmReset
+          title={T('finalize_park_title', 'Step 3 — Park historical lots')}
+          description={T('finalize_park_desc', "Zeros the remaining quantity on the historical 'Unified stock import' lots so the POS lot picker skips them — the old system never tied sales to lots, so their remaining counts aren't allocatable. The opening lots from the product import are left alone, so migration 0081's lot-ledger reconcile still works and re-running this is a no-op. A fresh backup is taken first.")}
+          whatHeader={T('finalize_park_header', 'This will set to zero:')}
+          whatDeleted={T('finalize_park_what', "The remaining quantity on every 'Unified stock import' historical lot")}
+          whatKept={T('finalize_park_kept', 'The lots themselves and their received/cost data (the supplier Purchases view still reads them); the product-import opening lots are untouched')}
+          confirmWord="PARK LOTS"
+          onConfirm={() => runStep('park_lots', () => setStage('done'))}
+          working={working}
+          elapsedSeconds={elapsedSeconds}
+          buttonLabel={T('finalize_park_button', 'Park historical lots')}
+          icon={Archive}
+          t={t}
+        />
+      ) : null}
+
+      {stage === 'done' ? (
+        <div className="card border-2 border-emerald-200 p-5 dark:border-emerald-900/50 sm:p-6">
+          <div className="mb-3 flex items-start gap-3">
+            <div className="rounded-xl bg-emerald-100 p-2 text-emerald-600 dark:bg-emerald-900/30 dark:text-emerald-300">
+              <CheckCircle2 className="h-4 w-4" />
+            </div>
+            <div>
+              <h2 className="mb-1 text-base font-semibold text-emerald-700 dark:text-emerald-400">{T('finalize_done_title', 'Migration finalized')}</h2>
+              <p className="text-sm text-gray-500 dark:text-gray-400">
+                {T('finalize_done_desc', 'Live stock is zeroed and re-imported to the template totals, and the historical lots are parked. The lot-ledger reconcile (Step 4f) runs automatically as migration 0081 on the next deploy — nothing more to do here.')}
+              </p>
+            </div>
+          </div>
+          <button onClick={() => { setReimportAck(false); setStage('zero') }} className="rounded-lg border border-gray-300 px-4 py-2 text-sm text-gray-600 dark:border-gray-600 dark:text-gray-300">
+            {T('finalize_start_over', 'Start over')}
+          </button>
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
+export { ResetData, SectionReset, FactoryReset, MigrationFinalize }
