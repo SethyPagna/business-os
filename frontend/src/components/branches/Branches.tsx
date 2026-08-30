@@ -671,6 +671,16 @@ export default function Branches({ embedded = false }: { embedded?: boolean } = 
         const nextSnapshot = cloneHistorySnapshot({ ...existingSnapshot, ...payload, id: selected.id })
         actionHistory.pushAction({
           label: `Edit branch ${existingSnapshot.name || nextSnapshot.name || ''}`.trim(),
+          // Declarative payloads (K1): the server's 'branch.update' applier can
+          // replay a branch edit by itself, so undo/redo survive a page reload
+          // where these closures are gone. undo restores the pre-edit fields,
+          // redo the post-edit fields. When the server applies it (response
+          // applied:true) the hook calls `refresh` instead of the closure, so
+          // there is no redundant/conflicting second write; when it does not
+          // (older server), the closures below run exactly as before.
+          undo_payload: { applier: 'branch.update', id: selected.id, fields: buildBranchPayload(existingSnapshot) },
+          redo_payload: { applier: 'branch.update', id: selected.id, fields: buildBranchPayload(nextSnapshot) },
+          refresh: async () => { await load() },
           undo: async () => {
             const result = await runBranchMutation(
               () => branchApi.updateBranch(existingSnapshot.id, buildBranchPayload(existingSnapshot)),

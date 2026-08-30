@@ -24,6 +24,13 @@ type ActionHistoryInput = {
   label?: unknown
   undo?: HistoryAction
   redo?: HistoryAction
+  // Optional refresh-only callback (K1). When the server replays the reversal
+  // itself (undo_payload/redo_payload names a registered applier and the
+  // /undo|/redo response is applied:true), the closure must NOT also mutate --
+  // that would be a redundant, and under optimistic-concurrency a conflicting,
+  // second write. If `refresh` is provided it is called INSTEAD of the closure
+  // to re-pull the page's data; without it, the closure runs as before.
+  refresh?: HistoryAction
   serverId?: unknown
   server_id?: unknown
   scope?: unknown
@@ -41,6 +48,7 @@ type ActionHistoryEntry = {
   label: string
   undo?: HistoryAction
   redo?: HistoryAction
+  refresh?: HistoryAction
   serverId: ActionHistoryId | null
   scope: string
   entity: unknown | null
@@ -117,6 +125,7 @@ function normalizeEntry(entry: ActionHistoryInput = {}, index = 0): ActionHistor
     label: String(entry.label || 'Recent action'),
     undo: entry.undo,
     redo: entry.redo,
+    refresh: entry.refresh,
     serverId: normalizeActionHistoryId(entry.serverId || entry.server_id),
     scope: String(entry.scope || 'global'),
     entity: entry.entity || null,
@@ -303,15 +312,25 @@ export function useActionHistory({ limit = 10, notify, scope = 'global', enabled
     if (typeof action !== 'function') return false
     setBusy(direction)
     let serverTransitioned = false
+    let serverApplied = false
     try {
       if (entry.serverId) {
         const api = await loadActionHistoryTransport()
-        if (direction === 'undo') await api.undoActionHistory(entry.serverId)
-        else await api.redoActionHistory(entry.serverId)
+        const response = direction === 'undo'
+          ? await api.undoActionHistory(entry.serverId)
+          : await api.redoActionHistory(entry.serverId)
         serverTransitioned = true
+        // applied:true means the Worker replayed the reversal itself (K1) --
+        // the closure must not mutate again; a refresh-only callback (if the
+        // consumer supplied one) re-pulls the page instead.
+        serverApplied = !!(response && typeof response === 'object' && (response as { applied?: unknown }).applied)
         refreshServerItems()
       }
-      await Promise.resolve(action())
+      if (serverApplied && typeof entry.refresh === 'function') {
+        await Promise.resolve(entry.refresh())
+      } else {
+        await Promise.resolve(action())
+      }
       if (direction === 'undo') {
         setUndoStack((current) => current.filter((item) => item.id !== entry.id))
         setRedoStack((current) => [...current.slice(-(Math.max(1, limit) - 1)), entry])

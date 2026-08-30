@@ -3,6 +3,7 @@ import { getDb } from '../lib/db'
 import { requireAuth, type SessionUser } from '../lib/auth'
 import { audit } from '../lib/audit'
 import { hasPermission, isAdminControlUser, isSensitiveActionHistory, permissionForActionHistory } from '../lib/permissions'
+import { resolveUndoApplier } from '../lib/undoAppliers'
 import type { Env } from '../index'
 
 // Ported from backend/src/routes/actionHistory.ts. This replaces the
@@ -12,9 +13,15 @@ import type { Env } from '../index'
 // store for the frontend's undo/redo toasts: a client records an action
 // (with an undo_payload/redo_payload it already knows how to replay), then
 // POSTs /:id/undo or /:id/redo to flip status and get the payload back to
-// replay locally. The Worker never executes the undo itself -- same as
-// the Docker backend, this is a payload store + status machine, not an
-// undo engine.
+// replay locally.
+//
+// K1 (server-level undo/redo) makes this ADDITIVELY more than a status
+// machine: when a payload names an applier registered in lib/undoAppliers.ts,
+// the Worker replays the reversal ITSELF and the response says applied:true,
+// so the client skips its own closure and the action survives a page reload
+// (where no in-memory closure exists). A payload that names no applier behaves
+// exactly as before -- flip status, return the payload for the client to
+// replay -- so nothing that has not opted in is affected.
 
 const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser } }>()
 app.use('*', requireAuth)
@@ -218,19 +225,38 @@ async function completeServerHistoryTransition(c: Context<{ Bindings: Env; Varia
       return c.json({ success: false, error: `Action is not ${direction === 'undo' ? 'undoable' : 'redoable'} right now` }, 409)
     }
 
+    // The payload for this direction: undo replays the undo_payload, redo the
+    // redo_payload. If it names a server applier (lib/undoAppliers.ts), the
+    // Worker performs the reversal here, BEFORE the status flip, so a failed
+    // applier leaves the action reversible and retryable rather than half-done.
+    const payload = direction === 'undo' ? parseJson(existing.undo_payload) : parseJson(existing.redo_payload)
+    const applier = resolveUndoApplier(payload)
+    let applied = false
+    if (applier) {
+      try {
+        await applier.run(payload, { env: c.env, user, direction })
+        applied = true
+      } catch (error) {
+        await db.prepare('UPDATE action_history SET last_error = @last_error, updated_at = CURRENT_TIMESTAMP WHERE id = @id')
+          .run({ last_error: (error as Error)?.message || `Failed to ${direction}`, id: existing.id })
+        return c.json({ success: false, error: (error as Error)?.message || `Failed to ${direction} this action` }, 500)
+      }
+    }
+
     await db.prepare(`
       UPDATE action_history SET status = @status, last_error = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = @id
     `).run({ status: nextStatus, id: existing.id })
 
     await audit(c.env, user?.id ?? null, user?.name ?? null, direction === 'undo' ? 'action_undo' : 'action_redo',
       existing.entity || 'action_history', existing.entity_id || existing.id,
-      { actionHistoryId: existing.id, scope: existing.scope, label: existing.label, status: nextStatus, serverPayloadOnly: true })
+      { actionHistoryId: existing.id, scope: existing.scope, label: existing.label, status: nextStatus, serverApplied: applied, appliedBy: applier?.name || null })
 
     const row = await db.prepare('SELECT * FROM action_history WHERE id = @id').get<ActionHistoryRow>({ id: existing.id })
     return c.json({
       success: true,
+      applied,
       item: row ? mapRow(row) : null,
-      payload: direction === 'undo' ? parseJson(existing.undo_payload) : parseJson(existing.redo_payload),
+      payload,
     })
   } catch (error) {
     return c.json({ success: false, error: (error as Error)?.message || `Failed to ${direction} action history` }, 500)

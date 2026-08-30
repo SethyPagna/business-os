@@ -13,6 +13,7 @@ import { audit } from '../lib/audit'
 import { assertUpdatedAtMatch, getExpectedUpdatedAt, writeConflictResponse, WriteConflictError } from '../lib/conflictControl'
 import { findIdentityMatch, findIdentityMatches, type ProductIdentityRow } from '../lib/productIdentity'
 import { decrementBatchStockStatement, incrementBatchStockStatement, resolveDestinationBatch } from '../lib/productBatches'
+import { branchUpdateStatements } from '../lib/branchWrites'
 import type { Env } from '../index'
 
 async function sha256Hex(input: string): Promise<string> {
@@ -920,25 +921,9 @@ app.put('/:id', async (c) => {
     return c.json({ success: true, pending: true, pendingActionId: pendingId }, 202)
   }
 
-  const defaultFlag = toDbBool(body.is_default, 0)
-  const activeFlag = toDbBool(body.is_active, 1)
-  const statements: Array<{ sql: string; params?: Record<string, unknown> }> = []
-  if (defaultFlag) statements.push({ sql: 'UPDATE branches SET is_default = 0' })
-  statements.push({
-    sql: `UPDATE branches SET name=@name, location=@location, phone=@phone, manager=@manager, notes=@notes,
-          is_default=@is_default, is_active=@is_active, updated_at=CURRENT_TIMESTAMP WHERE id=@id`,
-    params: {
-      name: body.name,
-      location: body.location || null,
-      phone: body.phone || null,
-      manager: body.manager || null,
-      notes: body.notes || null,
-      is_default: defaultFlag,
-      is_active: activeFlag,
-      id,
-    },
-  })
-  await db.batch(statements)
+  // Field write shared with the server-side undo/redo applier -- see
+  // lib/branchWrites.ts for why this is one definition, not two.
+  await db.batch(branchUpdateStatements(id, body))
 
   await audit(c.env, user?.id ?? null, user?.name ?? null, 'update', 'branch', id, { name: body.name })
   c.executionCtx.waitUntil(broadcast(c.env, 'branches', { action: 'update', id }))
