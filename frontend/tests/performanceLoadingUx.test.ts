@@ -1377,11 +1377,10 @@ assert.match(
   /const BRANCHES_LIST_TIMEOUT_MS = 10000/,
   'branches list should use an explicit timeout constant',
 )
-assert.match(
-  branches,
-  /const BRANCHES_SUMMARY_TIMEOUT_MS = 10000/,
-  'branches summary should use an explicit timeout constant',
-)
+// The aggregate branchSummary read (and its BRANCHES_SUMMARY_TIMEOUT_MS) was
+// removed with the Branches / Items / Value stat cards it fed (user, Aug 29:
+// "remove the stats above the branches/transfers section"), so it no longer
+// has a loader or timeout constant to assert.
 assert.match(
   branches,
   /const BRANCH_TRANSFERS_TIMEOUT_MS = 12000/,
@@ -1423,11 +1422,7 @@ assert.match(
   /withLoaderTimeout\(\s*\(\) => branchApi\.getBranches\(\),\s*'Branches list',\s*BRANCHES_LIST_TIMEOUT_MS,\s*\)/,
   'branches list should timeout slow reads',
 )
-assert.match(
-  branches,
-  /withLoaderTimeout\(\s*\(\) => branchApi\.getBranchSummary\?\.\(\),\s*'Branch summary',\s*BRANCHES_SUMMARY_TIMEOUT_MS,\s*\)/,
-  'branches summary should timeout slow reads',
-)
+// branchSummary loader removed with the stat cards (see the note above).
 assert.match(
   branches,
   /withLoaderTimeout\(\s*\(\) => branchApi\.getTransfers\(\{\}\),\s*'Branch transfers',\s*BRANCH_TRANSFERS_TIMEOUT_MS,\s*\)/,

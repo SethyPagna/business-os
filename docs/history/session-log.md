@@ -13036,3 +13036,25 @@ updated to the new batched FIFO call (behavioural asserts unchanged).
 backlog flips beyond the Z5 note left for a clean window / their owners. The
 `/:id/branches/:branchId` batch stock-take SET still last-write-wins (deliberately — a
 single-number correction; the user deprioritised adding a token there).
+
+## Part 492 (Aug 29 2026, session business-os-v1-e5) — regression sweep: the full frontend test suite is green again (stale branchSummary assertions removed)
+
+**"Keep sweeping for regressions" (user).** Ran the whole `test:utils` chain against
+the current committed tree. One failure surfaced and it was MINE to fix: when the
+Branches / Items / Value stat cards were removed (with their aggregate `branchSummary`
+loader), `performanceLoadingUx.test.ts` still asserted two things about that loader —
+`const BRANCHES_SUMMARY_TIMEOUT_MS = 10000` and the `withLoaderTimeout(() =>
+branchApi.getBranchSummary?.(), 'Branch summary', BRANCHES_SUMMARY_TIMEOUT_MS)` call.
+Both now describe code that no longer exists. Removed both assertions (with a note
+pointing at the card removal); the branches-list and transfer-history timeout
+assertions stay. Branches.tsx itself is clean of `branchSummary` — the removal was
+complete, no zombie.
+
+**Result.** The ENTIRE `test:utils` chain (typecheck + verify:public-runtime +
+check:source + ~130 unit suites) exits 0 — no other frontend regression from the
+concurrent work. Test-file-only change; no runtime code touched.
+
+**Parallel sessions.** performanceLoadingUx.test.ts only; clean at edit time. Part 492
+after re-checking max = 491.
+
+**Needs deploy.** No — test-only.
