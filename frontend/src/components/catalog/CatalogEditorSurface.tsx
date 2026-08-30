@@ -1,4 +1,5 @@
 import Bot from 'lucide-react/dist/esm/icons/bot.js'
+import InfoHint from '../shared/InfoHint'
 import { buildLogoImageStyle } from './logoImageStyle'
 import ExternalLink from 'lucide-react/dist/esm/icons/external-link.js'
 import Eye from 'lucide-react/dist/esm/icons/eye.js'
@@ -226,6 +227,18 @@ type CatalogEditorSurfaceProps = {
   contextValue: unknown
 }
 
+// Density: a setting's title with its explanation folded into an InfoHint (i)
+// instead of a paragraph of muted text under every field. Keeps the editor
+// scannable -- the label is visible, the "why/how" is one tap away.
+function HintLabel({ title, hint, className = 'text-sm font-medium text-slate-700 dark:text-slate-200' }: { title: string; hint: string; className?: string }) {
+  return (
+    <div className="flex items-center gap-1.5">
+      <span className={className}>{title}</span>
+      <InfoHint label={title} text={hint} />
+    </div>
+  )
+}
+
 export default function CatalogEditorSurface({ contextValue }: CatalogEditorSurfaceProps) {
   return (
     <CatalogPageProvider value={contextValue}>
@@ -346,8 +359,7 @@ function CatalogEditorSurfaceContent() {
               </label>
               <div className="flex items-center justify-between rounded-2xl border border-slate-200 bg-white px-4 py-3">
                 <div>
-                  <div className="text-sm font-medium text-slate-700">{copy('announcementStrip', 'Announcement strip')}</div>
-                  <div className="text-xs text-slate-500">{copy('announcementStripHint', 'Small horizontally-scrolling cards at the very top of the page — separate from the Promotions and posts cards below')}</div>
+                  <HintLabel title={copy('announcementStrip', 'Announcement strip')} hint={copy('announcementStripHint', 'Small horizontally-scrolling cards at the very top of the page — separate from the Promotions and posts cards below')} />
                 </div>
                 <button
                   type="button"
@@ -375,8 +387,7 @@ function CatalogEditorSurfaceContent() {
               </label>
               <label className="flex items-center justify-between rounded-2xl border border-slate-200 bg-white px-4 py-3">
                 <div>
-                  <span className="text-sm font-medium text-slate-700">{copy('showStockStatus', 'Show stock status')}</span>
-                  <div className="text-xs text-slate-500">{copy('showStockStatusHint', 'The In Stock / Low Stock / Out of Stock badge on each product, and the matching filter above the catalog. Turning this off hides both.')}</div>
+                  <HintLabel title={copy('showStockStatus', 'Show stock status')} hint={copy('showStockStatusHint', 'The In Stock / Low Stock / Out of Stock badge on each product, and the matching filter above the catalog. Turning this off hides both.')} />
                 </div>
                 <input id="portal-show-stock-status" name="customer_portal_show_stock_status" type="checkbox" checked={editorDraft.customer_portal_show_stock_status !== false} onChange={(event) => setDraft('customer_portal_show_stock_status', event.target.checked)} />
               </label>
@@ -452,8 +463,7 @@ function CatalogEditorSurfaceContent() {
             </div>
             <div className="mt-4 rounded-2xl border border-slate-200 bg-white p-4">
               <div className="flex flex-col gap-1">
-                <div className="text-sm font-semibold text-slate-900">{copy('portalHighlights', 'Product highlights')}</div>
-                <p className="text-xs text-slate-500">{copy('portalHighlightsHint', 'Use compact badges to call attention to trending, featured, or promotional items without overcrowding the product cards.')}</p>
+                <HintLabel className="text-sm font-semibold text-slate-900" title={copy('portalHighlights', 'Product highlights')} hint={copy('portalHighlightsHint', 'Use compact badges to call attention to trending, featured, or promotional items without overcrowding the product cards.')} />
               </div>
               <div className="mt-4 grid gap-3 md:grid-cols-2">
                 <label className="flex items-center justify-between rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
@@ -572,8 +582,7 @@ function CatalogEditorSurfaceContent() {
               <div className="mt-5 rounded-2xl border border-slate-200 bg-white p-4">
                 <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
                   <div>
-                    <div className="text-sm font-semibold text-slate-900">{copy('promotionsEditor', 'Promotions and posts')}</div>
-                    <p className="mt-1 text-xs text-slate-500">{copy('promotionsEditorHint', 'Add compact promo cards or store posts that appear before the product grid.')}</p>
+                    <HintLabel className="text-sm font-semibold text-slate-900" title={copy('promotionsEditor', 'Promotions and posts')} hint={copy('promotionsEditorHint', 'Add compact promo cards or store posts that appear before the product grid.')} />
                   </div>
                   <div className="flex items-center gap-3">
                     <label className="flex items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-600">
@@ -818,8 +827,7 @@ function CatalogEditorSurfaceContent() {
               <p className="mt-2 text-xs text-slate-500">{copy('aboutContentHint', 'Tell customers about your story, hours, policies, or services.')}</p>
             </div>
             <div className="mt-5 rounded-2xl border border-slate-200 bg-white p-4">
-              <div className="text-sm font-semibold text-slate-900">{copy('productDefaultsTitle', 'Product detail defaults')}</div>
-              <p className="mt-1 text-xs text-slate-500">{copy('productDefaultsHint', 'Shown on every product\'s detail view. A product\'s own Caution text (typed into its description) takes priority over this default; Need More Details always shows when set here.')}</p>
+              <HintLabel className="text-sm font-semibold text-slate-900" title={copy('productDefaultsTitle', 'Product detail defaults')} hint={copy('productDefaultsHint', 'Shown on every product\'s detail view. A product\'s own Caution text (typed into its description) takes priority over this default; Need More Details always shows when set here.')} />
               <div className="mt-3">
                 <label htmlFor="portal-product-caution-default" className="block text-sm font-medium text-slate-700">{copy('productCaution', 'Caution')}</label>
                 <textarea
@@ -848,8 +856,7 @@ function CatalogEditorSurfaceContent() {
             <div className="mt-5 rounded-2xl border border-slate-200 bg-white p-4">
               <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
                 <div>
-                  <div className="text-sm font-semibold text-slate-900">{copy('aboutBlocks', 'About blocks')}</div>
-                  <p className="mt-1 text-xs text-slate-500">{copy('aboutBlocksHint', 'Add text, image, and video sections, then move them into the order you want customers to see.')}</p>
+                  <HintLabel className="text-sm font-semibold text-slate-900" title={copy('aboutBlocks', 'About blocks')} hint={copy('aboutBlocksHint', 'Add text, image, and video sections, then move them into the order you want customers to see.')} />
                 </div>
 
                 <div className="flex flex-wrap gap-2">
@@ -1134,8 +1141,7 @@ function CatalogEditorSurfaceContent() {
             </div>
             <label className="mt-3 flex items-center justify-between gap-4 rounded-2xl border border-slate-200 bg-white px-4 py-3">
               <div>
-                <div className="text-sm font-medium text-slate-700">{copy('translateWidget', 'Enable public translate widget')}</div>
-                <div className="mt-1 text-xs text-slate-500">{copy('translateWidgetHint', 'Public customers switch English/Khmer instantly. External languages use Google only as a fallback.')}</div>
+                <HintLabel title={copy('translateWidget', 'Enable public translate widget')} hint={copy('translateWidgetHint', 'Public customers switch English/Khmer instantly. External languages use Google only as a fallback.')} />
               </div>
               <input id="portal-translate-widget-enabled" name="customer_portal_translate_widget_enabled" type="checkbox" checked={!!editorDraft.customer_portal_translate_widget_enabled} onChange={(event) => setDraft('customer_portal_translate_widget_enabled', event.target.checked)} />
             </label>
