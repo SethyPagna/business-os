@@ -1029,8 +1029,27 @@ deep-linkable tabs.*
 
 ### Phase K — Carried-over engineering backlog (unchanged priorities)
 
-- [ ] K1. Server-level undo/redo (3.1) — appliers replay stored payloads; admin sees all,
-  users see their own.
+- [~] K1. Server-level undo/redo (3.1) — appliers replay stored payloads; admin sees all,
+  users see their own. **First slice SHIPPED (session business-os-v1-17,
+  needs deploy — `ef5f5e40`).** The store always held undo/redo payloads but the
+  CLIENT replayed them from a live closure, so reversibility died on reload
+  (utils/actionHistory.ts's own comment: a generic closure can't be serialized).
+  Added the server-replay path, ADDITIVELY: `lib/undoAppliers.ts` (registry + a
+  `branch.update` applier) — a payload naming a registered applier is replayed by
+  the Worker (response `applied:true`); any payload without one behaves exactly as
+  before. `lib/branchWrites.ts` holds the branch field-write SQL now shared by the
+  PUT route AND the applier (one definition, source-locked by test).
+  `routes/actionHistory.ts` runs the applier before the status flip (a failed
+  applier stays reversible/retryable). `utils/actionHistory.ts` gained an optional
+  refresh-only callback: on `applied:true` the hook refreshes instead of re-running
+  the mutating closure (no redundant/conflicting second write). Branches' edit
+  emits the payloads + refresh, so a live branch edit's undo now goes through the
+  server end to end. `test-undo-appliers-pure` 6 checks; both tsc + vite build
+  green. **Still open:** create/delete reversal (row-id remapping across the
+  cycle), surfacing reloaded server items as undoable in the UI (today only the
+  live stack is actionable), and the other action_history scopes (contacts,
+  inventory, files, lookups…) — each lands as its consumer emits a declarative
+  payload, all peer-hot, so coordinate per scope.
 - [x] K2 *(session 6e — COMPLETE across Parts 410 + 416. Part 410
   (11.13 + 11.12): per-item three-way chooser (none/restock/damaged) on
   create AND edit, damaged stock as traceable lots (damaged_stock_lots,
