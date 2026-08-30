@@ -12972,3 +12972,67 @@ their work; left for whoever owns that progress.md edit (or a later clean window
 dev server started (standing rule with peers active). The test follows the
 `scripts/test-*.cjs` convention the individual sweep already discovers; no runner
 wiring needed.
+
+## Part 491 (Aug 30 2026, session business-os-v1-b9) — UI polish batch + a correctness/perf sweep + the account-row sidebar restructure
+
+**Ask.** A run of reactive user asks (dashboard range box; contacts card density;
+products price sizing + "Created" removal + pager polish; fold Settings/Receipt
+Settings/Profile/Update into the account row on both screen sizes) plus a
+self-directed "keep sweeping bug classes" thread the user greenlit (optimistic
+concurrency, batch identity through returns, checkout read efficiency, AI provider
+data exposure).
+
+**What changed** (all committed to main, path-scoped, **needs deploy**):
+
+- `7565fed` dashboard: the range box is a full-width rectangle and the redundant
+  "Range:" label is gone. Added an optional `triggerClassName` to the shared
+  `DateTimeRangePicker` so only the dashboard opts into the rectangular shape; the
+  four other surfaces keep the pill.
+- `727a4640` contacts: compact, click-to-view cards on all three tabs — merged the
+  stacked rows, a contact-count badge sits by the name (default counts as 1), and the
+  whole card opens the detail panel (the per-card ⋯ menu is gone; Edit/Delete stay in
+  that panel). Suppliers/Delivery now surface more of their stored fields.
+- `9c76eb38` portal-AI: the public `/ai/chat` and `/ai/status` responses no longer leak
+  AI provider internals (`usage`/`failovers`: vendor, model, priorities, raw provider
+  error strings) — those stay server-side in `ai_response_logs` (admin, settings-gated).
+  Documented `loadPortalAiCatalog`'s SELECT as the input security boundary (no
+  cost/VIP/supplier); the model itself was already shown only a coarse stock status.
+- `8642c752` concurrency: products were the ONE editable entity whose server handler
+  discarded the client's `expectedUpdatedAt` (PRODUCT_SKIP_KEYS) and never checked it —
+  wired `assertUpdatedAtMatch` into products' PUT and batches' PATCH (+ the client half
+  for batches: surface `updated_at` through the batch read, echo it from
+  ManageBatchesModal). Every other entity already enforced it.
+- `f801523e` returns: wired the present-but-unused `return_item_batch_allocations` table
+  so a multi-lot return records its per-lot split and a return EDIT reverses each exact
+  lot — it was pulling the whole line qty from one lot, drifting per-lot stock while the
+  product total self-healed. New multi-lot case in `test-returns-batch-restock-pure.cjs`
+  (8/8), replace/damaged 10/10. Extends Z0 to the returns-restock + edit paths.
+- `e38b137d` perf(checkout): the FIFO auto-allocation fired one D1 read per batch-tracked
+  line and the damaged-lot check one per damaged line — replaced with two batched reads
+  (new `readFifoLotAvailabilityForCart`). Allocation is byte-for-byte the same; the
+  multi-lot FIFO commit/cancel/return tests prove it.
+- `36866e5b` products/pager: the price row (selling · VIP · cost · stock) is one uniform
+  size now (selling keeps only heavier weight); "Created" label dropped; the shared
+  compact pager (6 pages) got consistent sizing, a caret-less click-to-open per-page
+  chip (`hideCaret` on PageSizeSelect), and higher-contrast, bolder prev/next arrows.
+- `37162ef0` sidebar: Settings / Receipt Settings / Profile / Update / Exit fold into a
+  full-width, expandable **account row** (desktop) and the same panel as a dropdown from
+  the mobile header avatar; Settings & Receipt Settings stop rendering as their own nav
+  rows (still real, still permission-gated). **Advances Z5** — supersedes Z5-part-2's ☰
+  menu and resolves Z5(c) ("remove Settings from the main nav"), the discoverability call
+  the user made this session.
+- `a21aa5ba` nav follow-up: hoisted the exclusion set to a shared `ACCOUNT_NAV_IDS` in
+  `navigationConfig` so the Settings nav-order/pinning editor also drops the folded-away
+  pages (it was still offering to reorder/pin rows the sidebar no longer showed).
+
+**Verified.** `frontend tsc` and `cloudflare tsc` clean throughout. Targeted tests green:
+returns batch-restock (8, incl. the new multi-lot-edit case), returns replace/damaged
+(10), fifo-lot-allocation (5), sales-oversell-strict, stock-action-sale-commit,
+sale-cancel, sale-totals, batches-permission, pagination range-control, navigationConfig,
+sectionNavigation, appShellUtils. One source-pin in `test-sale-cancel-pure.cjs` was
+updated to the new batched FIFO call (behavioural asserts unchanged).
+
+**Not done.** No deploy; no dev server (peers active on the shared 8787). progress.md
+backlog flips beyond the Z5 note left for a clean window / their owners. The
+`/:id/branches/:branchId` batch stock-take SET still last-write-wins (deliberately — a
+single-number correction; the user deprioritised adding a token there).
