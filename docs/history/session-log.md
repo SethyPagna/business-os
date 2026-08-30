@@ -13737,3 +13737,56 @@ the sweep will begin pruning the MIGRATION import jobs' staged rows (21,286
 source rows already consumed by 0080's backfill) — that is the intended 193MB
 slimming; raise `import_detail_retention_hours` in settings BEFORE deploying if
 those rows should live longer. **Needs deploy (incl. migration 0085).**
+
+## Part 509 (Aug 30 2026, session business-os-v1-d7) — import widget concision + small-screen header fix
+
+**Ask (user, Aug 30):** "The import widget explanations can be improved and
+made more concise... also the title and import widget name etc of the widget
+when in small screens seems to break each other."
+
+**What changed:**
+
+- `BackgroundImportTracker.tsx` — the small-screen break was the header row:
+  the title and the progress label shared one flex row with NO constraints
+  (title un-truncated, label free to wrap), so "Import running in background"
+  and "Analyzing - 1,234 / 11,890 rows" wrap-interleaved into each other at
+  phone widths. Title now truncates; label is shrink-0 + nowrap. To make that
+  safe (and the card less wordy), progress labels dropped the numbers the
+  counts line directly beneath already shows: analyzing/applying/reading show
+  just the phase word, awaiting_review shows "Review ready" instead of
+  repeating "Analyzed N rows" twice side by side. getRowsDisplay's queued
+  branch returns the queued label instead of "Waiting for import worker"
+  (the progress label beside it now says "Waiting for worker"). getJobLabel
+  dropped its "- <phase>" suffix (the status chip next to it already names
+  the phase) and capitalizes the type; since the row label no longer says
+  "failed", `failed` status gets a real "Failed" chip instead of falling
+  through to a stale mid-run percent. Stall/hide/apply notify strings
+  shortened (en fallbacks + both lang packs).
+- `ImportHub.tsx` — title "Import — drop your files, we route them" became
+  "Import files" (the routing explanation already lives in the InfoHint,
+  which was tightened too); drop-zone/done/classic strings shortened; the
+  plan-row file name got `min-w-0 flex-1 truncate` (a flex item never
+  shrinks below content without min-w-0, so a long CSV name pushed the row
+  count and status out of the row), row count/status got shrink-0.
+- `en.json` / `km.json` — the corresponding key updates, both languages.
+
+**What was found:** `performanceLoadingUx.test.ts` fails on HEAD on a
+Sales.tsx transport-import assertion — Sales.tsx is mid-flight in the
+SortChip/FilterMenu peer lane, not touched here; attributed, not fixed. All
+of that test's BackgroundImportTracker assertions (lines ~1129-1214) run
+BEFORE that failing assert (~1502) and passed.
+
+**Verified (really run):** `npx tsc --noEmit` (frontend) clean; both lang
+packs JSON-parse; individually green: langKeyIntegrity, actionStability,
+importJobApproveGate, importTemplateRouter, importHubDirectApply,
+importDirectApplySurfaces, importModeDetectionWiring. Layout proven in the
+Browser pane at 375x812 with a pixel-faithful harness of the exact old/new
+markup+classes: BEFORE shows the 3-line title/label interleave and the
+doubled "Analyzed 11,890 rows"; AFTER holds one clean line each (the app
+itself is login-gated, so the widget could not be exercised in-app locally).
+Committed as 1f55712e; the shared lang packs carried two peers' in-flight
+key additions (stats_*, transfer_change_product) as a recorded ride-along.
+
+**Not done:** needs deploy; in-app verification on a real phone after deploy.
+The ImportReportModal / conflict modals' own prose was not touched (only the
+tracker widget + hub surfaces the user pointed at).

@@ -3052,14 +3052,12 @@ Undo/Redo buttons; the hook's `undoServer`/`redoServer` send `require_applied`, 
 the route refuses BEFORE any status flip when no applier is registered. Pure test
 6→8 checks, tsc both packages + vite build green. See the K1 entry + Part 507.
 
-**CLAIMED (in progress, session business-os-v1-d7, Aug 30): import widget concision +
-small-screen header fix (user, Aug 30).** Tracker widget (`BackgroundImportTracker.tsx`):
-title/progress-label collision on narrow screens (both unconstrained in one flex row),
-progress labels de-duplicated against the counts line, terser job row labels. Import Hub
-(`ImportHub.tsx`): shorter title/drop/done strings, file-row name truncation. Touching ONLY
-those two files + `en.json`/`km.json` keys for those strings (lang packs are shared — will
-commit them atomically and flag ride-alongs). NOT touching peer lanes (TransferModal /
-SaleDetailModal / Receipt / main.css / stats regions / DateTimeRangePicker / importEngine).
+**DONE (Part 509, session business-os-v1-d7, Aug 30, commit 1f55712e — needs deploy):
+import widget concision + small-screen header fix (user, Aug 30).** Tracker header title
+now truncates and the progress label is shrink-0/nowrap (they used to wrap-interleave on
+phones); progress labels de-duplicated against the counts line; job row labels drop the
+phase suffix (failed jobs get a real "Failed" chip); Import Hub title/drop/done/classic
+strings shortened (en+km) and the file-row name truncates instead of blowing out the row.
 
 **Part 508 (Aug 30 2026, session business-os-v1-k4s): K4 Phase-1 slice SHIPPED,
 needs deploy (migration 0085).** Scheduled import-artifact retention per the
