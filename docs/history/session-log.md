@@ -14558,3 +14558,41 @@ tsc clean. **Still open on this finding:** the PATCH /:id edit path's
 equivalent compensation, and true cross-step atomicity (same class as the
 backup slice C — needs a plan/lock design, not a bigger batch).
 **Needs deploy** (rides with the b9 batch).
+
+## Part 525 (Aug 30 2026, session business-os-v1-b9) — Part-77 HIGH fix: the MAX(0) oversell-clamp sweep, judged per site
+
+**Ask:** findings-backlog continuation (claimed first). Four flagged
+`MAX(0, qty−n)` clamp sites that could hide oversell races — each judged on
+its own semantics rather than blanket-flipped (Golden Rule 7). Commit
+`97f3fcde`:
+
+- **Supplier returns — real bug, fixed.** No availability validation
+  existed at all: a supplier return larger than the branch's stock silently
+  floored the overshoot away (hidden stock loss, no error). Now validated
+  per item and CUMULATIVELY across same-product+branch lines (400 refusal
+  with the honest available/requested numbers via a named
+  SupplierReturnStockError); the aggregate and FIFO lot decrements go
+  STRICT, so a concurrent consumer winning the read→write race violates
+  0058's CHECK and aborts the whole atomic batch (the path was already
+  single-batch atomic — abort is clean, no compensation needed).
+- **Replacement drain (returnsStock.ts) — fixed.** Pre-validated already;
+  the clamp only hid the race. Strict subtraction; on a race the CHECK
+  rejects before the movement row is written, and the create-path
+  compensation (Part 523) unwinds anything earlier.
+- **Batch-branch correction (batches.ts) — floor KEPT, deliberately,
+  reasoning recorded.** A stock-take correction is the tool used precisely
+  on drifted data; aborting would make repair impossible. Improved instead:
+  products.stock_quantity now re-derives from SUM(branch_stock) rather than
+  clamping a delta (a floored aggregate no longer bakes its discrepancy
+  into the product total), and the fresh-row INSERT seed floors with the
+  conflict update binding @delta directly — excluded.quantity would carry
+  the floored seed and silently drop removes, the exact trap
+  datedStockCountApply's own comment documents.
+- **Dated-count apply — reviewed, UNCHANGED.** Its two clamps are already
+  documented as deliberate reconciliation semantics for historical imports,
+  written post-0058 with intent.
+
+Verified: returns batch-restock 10, replace-damaged 10, batches-permission
+8, dated-count apply 7 + route 12, fifo 5, inventory-transfer-lots 4,
+lot-ledger-reconcile 9, stock-ledger 17, stock-action-commit — all green;
+cloudflare tsc clean. **Needs deploy** (rides with the b9 batch).
