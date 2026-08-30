@@ -62,7 +62,6 @@ const inventory = fs.readFileSync(new URL('../src/components/inventory/Inventory
 const inventoryStockModals = fs.readFileSync(new URL('../src/components/inventory/InventoryStockModals.tsx', import.meta.url), 'utf8')
 const inventoryBatchModal = fs.readFileSync(new URL('../src/components/inventory/InventoryBatchModal.tsx', import.meta.url), 'utf8')
 const inventoryReasonManagerModal = fs.readFileSync(new URL('../src/components/inventory/InventoryReasonManagerModal.tsx', import.meta.url), 'utf8')
-const inventoryStatDetailModal = fs.readFileSync(new URL('../src/components/inventory/InventoryStatDetailModal.tsx', import.meta.url), 'utf8')
 const inventoryExport = fs.readFileSync(new URL('../src/components/inventory/inventoryExport.ts', import.meta.url), 'utf8')
 const backup = fs.readFileSync(new URL('../src/components/utils-settings/Backup.tsx', import.meta.url), 'utf8')
 const auditLog = fs.readFileSync(new URL('../src/components/utils-settings/AuditLog.tsx', import.meta.url), 'utf8')
@@ -934,10 +933,13 @@ assert.match(inventoryBatchModal, /export default function InventoryBatchModal/,
 assert.match(inventory, /const InventoryReasonManagerModal = lazyRetry\(\(\) => import\('\.\/InventoryReasonManagerModal'\), 'inventory-reason-manager-modal'\) as any/, 'Inventory saved-reasons manager should stay in a click-only lazy chunk')
 assert.doesNotMatch(inventory, /<h2 className="font-bold text-gray-900 dark:text-white">\{tr\('saved_reasons', 'Saved reasons'\)\}<\/h2>/, 'Inventory should not keep saved-reasons manager markup in the first route chunk')
 assert.match(inventoryReasonManagerModal, /export default function InventoryReasonManagerModal/, 'Inventory saved-reasons manager markup should live in the lazy reason manager component')
-assert.match(inventory, /const InventoryStatDetailModal = lazyRetry\(\(\) => import\('\.\/InventoryStatDetailModal'\), 'inventory-stat-detail-modal'\) as any/, 'Inventory stat detail modal should stay in a click-only lazy chunk')
+// The stat-tile -> detail-modal pattern is gone: the StatsStrip rollout
+// (455ea3c9) replaced it with fold-open cards, and statsStrip.test.ts pins
+// that Inventory never references InventoryStatDetailModal again. The
+// absence guards below stay so the old markup can't creep back into the
+// first route chunk.
 assert.doesNotMatch(inventory, /statDetail\.detailSections|statDetail\.details/, 'Inventory should not keep stat detail modal markup in the first route chunk')
 assert.doesNotMatch(inventory, /lucide-react\/dist\/esm\/icons\/x\.js/, 'Inventory should not import the close icon just for lazy modal chrome')
-assert.match(inventoryStatDetailModal, /export default function InventoryStatDetailModal/, 'Inventory stat detail modal markup should live in the lazy stat detail component')
 assert.doesNotMatch(sales, /SALES_HISTORY_READY_DELAY_MS|window\.setTimeout\(\(\) => \{\s*setHistoryReady\(true\)/, 'Sales background history should not add a fixed post-load delay')
 assert.match(sales, /const \[historyReady, setHistoryReady\] = useState\(false\)/, 'Sales should have an explicit post-ready action-history gate')
 assert.match(sales, /useActionHistory\(\{ limit: 3, notify, enabled: historyReady, user \}\)/, 'Sales should not fetch server action history during first route load')
@@ -1498,7 +1500,7 @@ assert.match(
 )
 assert.match(
   sales,
-  /import \{ getSales as fetchSales, getSalesStats as fetchSalesStats \} from '\.\.\/\.\.\/api\/salesTransport\.ts'[\s\S]*import \{ getUsers as fetchUsers \} from '\.\.\/\.\.\/api\/userReadTransport\.ts'/,
+  /import \{ getSales as fetchSales, getSalesStats as fetchSalesStats, getSalesStatsStrip \} from '\.\.\/\.\.\/api\/salesTransport\.ts'[\s\S]*import \{ getUsers as fetchUsers \} from '\.\.\/\.\.\/api\/userReadTransport\.ts'/,
   'sales route-start reads should use focused sales and user transports instead of app-api-methods',
 )
 assert.match(
@@ -1633,16 +1635,10 @@ assert.match(
   /const INVENTORY_PRODUCT_DETAIL_TIMEOUT_MS = 10000/,
   'inventory movement product detail fallback should use an explicit timeout',
 )
-assert.match(
-  inventory,
-  /const INVENTORY_RETURNS_STATS_TIMEOUT_MS = 12000/,
-  'inventory return stats should use an explicit timeout',
-)
-assert.match(
-  inventory,
-  /const INVENTORY_DASHBOARD_STATS_TIMEOUT_MS = 12000/,
-  'inventory dashboard fee stats should use an explicit timeout',
-)
+// The returns-stats and dashboard-stats secondary fetches left Inventory with
+// the StatsStrip rollout (455ea3c9) -- the strip's own range endpoint feeds
+// those figures now, so their timeout constants are gone with them. The
+// doesNotMatch guards further down keep the old fetch shapes from returning.
 assert.match(
   inventory,
   /withLoaderTimeout\(\(\) => getInventoryApi\(\)\.getUsers\(\), 'Inventory user filters', INVENTORY_USER_OPTIONS_TIMEOUT_MS\)/,
@@ -1905,25 +1901,10 @@ assert.match(
   /summaryById\.get\(productId\)/,
   'inventory movement detail should resolve products from the indexed summary map before falling back to API reads',
 )
-assert.match(
-  inventory,
-  /withLoaderTimeout\(\s*\(\) => getInventoryApi\(\)\.getReturns\(\{ scope: 'all' \}\),\s*'Inventory returns stats',\s*INVENTORY_RETURNS_STATS_TIMEOUT_MS,\s*\)/,
-  'inventory return stats should timeout slow returns reads',
-)
-assert.match(
-  inventory,
-  /const nextReturnStats = \{[\s\S]*supplier_loss_usd: 0,[\s\S]*\}[\s\S]*for \(const ret of rets\)/,
-  'inventory return stats should aggregate loaded returns in one pass',
-)
 assert.doesNotMatch(
   inventory,
   /const active = rets\.filter[\s\S]*const customerReturns = active\.filter[\s\S]*const supplierReturns = active\.filter/,
   'inventory return stats should not repeatedly filter the returns list',
-)
-assert.match(
-  inventory,
-  /withLoaderTimeout\(\s*\(\) => getInventoryApi\(\)\.getDashboard\(\),\s*'Inventory dashboard stats',\s*INVENTORY_DASHBOARD_STATS_TIMEOUT_MS,\s*\)/,
-  'inventory dashboard fee stats should timeout slow dashboard reads',
 )
 assert.doesNotMatch(
   inventory,
@@ -2121,7 +2102,7 @@ assert.match(
 )
 assert.match(
   returns,
-  /const returnScopeSummary = useMemo\(\(\) => \{[\s\S]*for \(const ret of searchFiltered\)[\s\S]*summary\.supplierStats\.lossUsd \+= toNumericAmount\(ret\.supplier_loss_usd\)[\s\S]*summary\.customerStats\.refundedUsd \+= toNumericAmount\(ret\.total_refund_usd\)/,
+  /const returnScopeSummary = useMemo\(\(\) => \{[\s\S]{0,200}for \(const ret of searchFiltered\)[\s\S]{0,200}summary\.supplierRows\.push\(ret\)[\s\S]{0,100}summary\.customerRows\.push\(ret\)/,
   'returns stats should split customer/supplier rows and totals in one pass, from the search-only (not type-filtered) view so switching the type filter does not zero out the other stat tiles',
 )
 // Sort moved onto the SortChip (unified listSort), so the badge counts only
