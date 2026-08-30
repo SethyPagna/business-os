@@ -35,6 +35,7 @@ import { handleImportQueue, handleImportDeadLetterQueue, handleMediaQueue, handl
 import { maybeRunScheduledBackup } from './lib/backup'
 import { maybeRunScheduledDriveSync } from './lib/googleDrive'
 import { maybeRunScheduledAuditLogRetention } from './lib/audit'
+import { maybeRunScheduledImportRetention } from './lib/importRetention'
 import { maybeRunScheduledImageAudit } from './lib/imageAudit'
 
 export type Env = {
@@ -286,6 +287,9 @@ export default {
       maybeRunScheduledBackup(env)
         .then(() => maybeRunScheduledDriveSync(env))
         .then(() => maybeRunScheduledAuditLogRetention(env))
+        // K4: import-artifact retention (24h detail / 7d summary). Swallows
+        // its own errors, so it cannot break the image audit behind it.
+        .then(() => maybeRunScheduledImportRetention(env))
         // Last on purpose: it is the only one of these that is optional to
         // the business. A backup must never be skipped because an image
         // sweep ran long, and maybeRunScheduledImageAudit swallows its own

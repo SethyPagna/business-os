@@ -19,6 +19,34 @@ export async function deleteObject(bucket: R2Bucket, key: string) {
   return bucket.delete(key)
 }
 
+// R2's binding-level delete accepts up to 1,000 keys per call, and one call
+// is ONE subrequest no matter how many keys it carries. The prefix-wide
+// sweeps in routes/system.ts used to fire one deleteObject() per key inside
+// a single Promise.all -- unbounded concurrency AND one subrequest per
+// object, which blows the per-invocation subrequest ceiling on a large
+// catalog (~20k objects) AFTER the D1 delete has already committed. Chunked
+// bulk deletes make the same sweep cost ceil(n/1000) subrequests, run
+// sequentially so a failure is attributable to its chunk.
+//
+// Never throws: every chunk is attempted, failures are collected per chunk,
+// so callers report exactly what was left behind instead of guessing.
+const R2_BULK_DELETE_MAX_KEYS = 1000
+
+export async function deleteObjectsBulk(bucket: R2Bucket, keys: string[]): Promise<{ deleted: number; errors: string[] }> {
+  let deleted = 0
+  const errors: string[] = []
+  for (let i = 0; i < keys.length; i += R2_BULK_DELETE_MAX_KEYS) {
+    const chunk = keys.slice(i, i + R2_BULK_DELETE_MAX_KEYS)
+    try {
+      await bucket.delete(chunk)
+      deleted += chunk.length
+    } catch (error) {
+      errors.push(`keys ${i}-${i + chunk.length - 1}: ${(error as Error).message || 'unknown error'}`)
+    }
+  }
+  return { deleted, errors }
+}
+
 // R2 has no server-side "copy" op on the Workers binding -- a copy is a
 // get() followed by a put() of the same bytes/metadata under a new key.
 // Used by lib/backup.ts to actually back up asset *contents*, not just a

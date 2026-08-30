@@ -80,7 +80,13 @@ const systemRoute = loadReal('routes/system.ts', {
   '../lib/r2': {
     listObjects: async () => [],
     deleteObject: async (_bucket, key) => { deletedObjectKeys.push(key) },
+    // K4: the prefix-wide sweeps now delete through the chunked bulk
+    // helper -- same recording, same "R2 is empty here" stance.
+    deleteObjectsBulk: async (_bucket, keys) => { deletedObjectKeys.push(...keys); return { deleted: keys.length, errors: [] } },
   },
+  // K4: the orphan-staging endpoint's engine lives in its own lib with its
+  // own pure test -- stubbed here, this test is about the reset contract.
+  '../lib/importRetention': { cleanOrphanImportStaging: async () => ({ applied: false, tables: {}, r2Keys: 0 }) },
   '../lib/coreDataInvariants': coreDataInvariants,
   '../lib/backup': {
     // Real prerequisite under test: every mode must call one of these

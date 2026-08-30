@@ -1,0 +1,18 @@
+-- K4 phase 1 (storage/jobs hardening): scheduled import-artifact retention.
+--
+-- The locked execution plan's policy: detailed import artifacts are kept for
+-- 24 hours after a job reaches a terminal status, a compact summary for
+-- 7 days. The bulky detail lives in import_job_source_rows (materialized CSV
+-- rows) and import_job_rows (per-row analyze/apply results) -- measured at
+-- roughly 193MB of the ~243MB production database in the Phase-0 audit.
+--
+-- The sweep (lib/importRetention.ts, chained into the scheduled worker in
+-- index.ts) purges the detail tables for terminal jobs older than the detail
+-- window and stamps this column so a pruned job is never rescanned. The
+-- import_jobs row itself (status, counts, summary_json) IS the 7-day
+-- summary; the sweep deletes the whole job once that window passes too.
+--
+-- A stamped job can no longer be retried -- /:id/retry needs the staged
+-- source rows and the raw file, both gone by design -- and the retry route
+-- refuses it with an explicit 409 instead of failing downstream.
+ALTER TABLE import_jobs ADD COLUMN details_pruned_at TEXT;

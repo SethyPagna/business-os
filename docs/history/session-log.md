@@ -13665,3 +13665,75 @@ are peer-owned and wrangler shares local D1 state. Still open on K1:
 create/delete reversal (row-id remapping) and the other scopes' declarative
 payloads (contacts, inventory, files, lookups — peer-hot, per scope).
 **Needs deploy.**
+
+## Part 508
+
+**Ask:** "check progress.md and what other sessions are doing... then continue." Three
+peers held claims (f9's Aug-30 UI batch, 77's verification sweep, the StatsStrip
+rollout), so the continue picked the last substantial unclaimed master-plan item:
+K4 storage/jobs hardening, Phase-1 slice (session business-os-v1-k4s).
+
+**What changed:**
+
+- `lib/importRetention.ts` (new) + migration `0085_import_job_details_pruned` —
+  the locked plan's import-artifact retention, scheduled: detailed artifacts
+  (import_job_rows / import_job_source_rows / errors / batches / row signatures /
+  image match+rename plans / stock-action grouping state, plus the job's UNLINKED
+  raw R2 file) are deleted 24h after a job reaches completed/failed/cancelled and
+  the job is stamped `details_pruned_at`; the whole job (row + sales/stock-action
+  idempotency ledgers + file rows) is deleted at 7 days. This is the standing
+  policy that drains the measured ~193MB of D1 staging JSON. Windows are
+  settings-overridable (`import_detail_retention_hours`, `import_summary_retention_days`,
+  summary clamped ≥ detail), work is bounded (20 jobs per tier per tick), the
+  sweep throttles itself (5h marker; the cron ticks every 6h) and swallows its
+  own errors so the backup→image-audit chain can't break on it. awaiting_review
+  and in-flight jobs are never touched; `import_auto_merges` (product-keyed merge
+  EVIDENCE) is deliberately in neither tier. Wired into index.ts's scheduled
+  chain between audit-log retention and the image audit.
+- `routes/importJobs.ts` — deleteJobData now runs the SHARED
+  `importJobFullDeleteStatements` list (one definition with the sweep). Real leak
+  fixed by that: the old inline list deleted only six tables, orphaning
+  signature/commit/guard/group/image rows on every user-facing job delete — the
+  exact "orphan staging rows" the Phase-0 audit measured. `/retry` now refuses a
+  details-pruned job with 409 `import_details_pruned` (analyze needs the raw
+  file, apply needs the materialized rows; both are gone by policy) instead of
+  failing downstream.
+- `routes/system.ts` + `lib/r2.ts` — the three UNBOUNDED `Promise.all` R2 delete
+  sweeps A4 flagged for K4 (reset-data mode=all ×2, factory-reset) now run
+  through a new `deleteObjectsBulk` (R2 array delete, ≤1,000 keys = ONE
+  subrequest per chunk, sequential, never throws — per-chunk errors are
+  returned). Failures now land in the audit record / response instead of being
+  swallowed; factory-reset's deletedObjectCount counts real successes. New
+  endpoint `POST /api/system/import-retention/orphans` (backup permission):
+  orphan-staging report, dry-run by DEFAULT; deleting requires dry_run:false AND
+  force:true, per the plan's "dry-run report and backup first" rule.
+- Test override maps of `test-reset-products-pure` / `test-migration-finalize-pure`
+  gained stubs for the two new imports (they load routes/system.ts for real).
+
+**What was found:** K4's Phase-1 "states and leases" item was already largely built
+(importEngine's queued→…→terminal machine, cancel_requested, expiring single-writer
+lease, idempotent chunk markers), so this slice targeted what was genuinely
+missing: retention, the per-job-delete orphan leak, and the unbounded sweeps.
+
+**Verified (really run):** `scripts/test-import-retention-pure.cjs` (new, 8 checks
+on the real migration chain via the shared node:sqlite harness + the REAL
+transpiled lib; covers detail purge boundaries, cancelled-without-finished_at
+via COALESCE, throttle, settings override, summary purge sparing auto-merge
+evidence and Library-linked files, orphan dry-run/apply, bulk-delete chunking
+with a failing chunk, and source-locks on routes/index/system). cloudflare
+`tsc --noEmit` clean. Full backend battery: **108 PASS, 2 transient FAILs**
+(test-sale-cancel-pure, test-stock-action-commit-pure, SQLITE_ERROR during the
+batch run only — both PASS standalone immediately after; attributed to peer 77
+running the same suite concurrently, not fixed). `npm run migrate:local` applied
+0084+0085 on real wrangler D1; `wrangler deploy --dry-run` builds.
+
+**Not done:** the rest of K4 — R2 NDJSON staging for live jobs (moving
+source/result payloads OUT of D1 at write time, not just deleting them later),
+Sentry wiring beyond what exists, phases 4–6 leftovers. The orphan cleanup on
+production is deliberately manual: after deploy, POST
+/api/system/import-retention/orphans (dry-run), take a backup, re-send with
+dry_run:false + force:true. NOTE FOR THE OPERATOR: on the first deployed ticks
+the sweep will begin pruning the MIGRATION import jobs' staged rows (21,286
+source rows already consumed by 0080's backfill) — that is the intended 193MB
+slimming; raise `import_detail_retention_hours` in settings BEFORE deploying if
+those rows should live longer. **Needs deploy (incl. migration 0085).**

@@ -12,6 +12,7 @@ import { MAX_IMAGES_PER_PRODUCT, buildImageDisplayName } from '../lib/importImag
 import { bumpVersion } from '../lib/cache'
 import { broadcast } from '../durable-objects/broadcastHub'
 import { canEditImportDecisions, canReplaceImportCsv, retryModeForImportStatus } from '../lib/importLifecycleGate'
+import { importJobFullDeleteStatements } from '../lib/importRetention'
 import { buildImportReviewOrder, buildImportReviewWhere, buildUnresolvedContactReviewWhere, buildUnresolvedProductReviewWhere } from '../lib/importReviewQuery'
 import type { Env } from '../index'
 
@@ -1197,14 +1198,12 @@ async function deleteJobData(c: any, id: string) {
     if (file.file_asset_id) continue
     await c.env.ASSETS.delete(file.stored_path).catch(() => undefined)
   }
-  await db.batch([
-    { sql: `DELETE FROM import_job_errors WHERE job_id = @id`, params: { id } },
-    { sql: `DELETE FROM import_job_batches WHERE job_id = @id`, params: { id } },
-    { sql: `DELETE FROM import_job_rows WHERE job_id = @id`, params: { id } }, // chunked analyze/apply's persisted per-row results -- see migration 0011
-    { sql: `DELETE FROM import_job_source_rows WHERE job_id = @id`, params: { id } }, // materialized parsed CSV rows -- see migration 0012
-    { sql: `DELETE FROM import_job_files WHERE job_id = @id`, params: { id } },
-    { sql: `DELETE FROM import_jobs WHERE id = @id`, params: { id } },
-  ])
+  // One shared delete definition with the K4 retention sweep
+  // (lib/importRetention.ts) so the two cannot drift. This also fixed a
+  // real leak: the inline list this replaced deleted only six tables,
+  // leaving signature/commit/guard/group/image-plan rows orphaned forever
+  // -- the "orphan staging rows" the K4 Phase-0 audit measured.
+  await db.batch(importJobFullDeleteStatements(id))
 }
 
 async function handleDelete(c: any) {
@@ -1236,6 +1235,14 @@ app.post('/:id/retry', async (c) => {
   if (denied) return denied
   const db = getDb(c.env)
   const status = String(job.status || '').toLowerCase()
+  // K4 retention: once the scheduled sweep has pruned a terminal job's
+  // staged detail (source rows + unlinked raw file, kept 24h by policy),
+  // a retry has nothing to re-run from -- analyze needs the file, apply
+  // needs the materialized rows. Refuse up front with the real reason
+  // instead of failing downstream with a missing-file error.
+  if (job.details_pruned_at) {
+    return c.json({ success: false, error: 'This import\'s staged data was cleaned up by retention (details are kept 24 hours after a job finishes). Upload the file again to re-import.', code: 'import_details_pruned' }, 409)
+  }
   // Awaiting review is not a failed phase and must never be an alternate
   // route into apply. In particular, stock_actions /approve enforces the
   // explicit conflict confirmation and records the confirming actor/time;

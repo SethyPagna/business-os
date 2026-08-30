@@ -1045,9 +1045,16 @@ deep-linkable tabs.*
   the mutating closure (no redundant/conflicting second write). Branches' edit
   emits the payloads + refresh, so a live branch edit's undo now goes through the
   server end to end. `test-undo-appliers-pure` 6 checks; both tsc + vite build
-  green. **Still open:** create/delete reversal (row-id remapping across the
-  cycle), surfacing reloaded server items as undoable in the UI (today only the
-  live stack is actionable), and the other action_history scopes (contacts,
+  green. **Slice 2 SHIPPED (session b9, Aug 30, Part 507 — `b63e6c67`, needs
+  deploy):** reloaded server rows whose payload names a registered applier now
+  render REAL Undo/Redo buttons in ActionHistoryBar instead of the inert
+  "Recorded" label — GET stamps `server_replayable` (new shared
+  `isServerReplayable` helper), the hook's `undoServer`/`redoServer` send
+  `require_applied`, and the route refuses BEFORE any status flip when no
+  applier is registered, so a reversal is never recorded that didn't happen.
+  Live closures keep their exact prior contract. Pure test 6→8 checks.
+  **Still open:** create/delete reversal (row-id remapping across the
+  cycle) and the other action_history scopes (contacts,
   inventory, files, lookups…) — each lands as its consumer emits a declarative
   payload, all peer-hot, so coordinate per scope.
 - [x] K2 *(session 6e — COMPLETE across Parts 410 + 416. Part 410
@@ -1086,8 +1093,20 @@ deep-linkable tabs.*
   (6 checks incl. all six producer pins) on real migrations.
   Video/container half of the pipeline remains open — tracked by the
   media-optimize.Dockerfile header, not this item.)*
-- [ ] K4. Storage/jobs hardening phases 1–6 of the locked execution plan (leases, R2
+- [~] K4. Storage/jobs hardening phases 1–6 of the locked execution plan (leases, R2
   NDJSON staging, D1 slimming — the 193MB staging JSON), safeguards, Sentry wiring.
+  **Phase-1 slice SHIPPED (Part 508, session k4s, needs deploy — migration 0085):**
+  scheduled import-artifact retention per the locked plan (24h detail / 7d summary,
+  settings-overridable, bounded per tick, terminal jobs only, auto-merge evidence
+  + Library-linked files exempt) — the standing policy that drains the ~193MB of
+  D1 staging; deleteJobData now shares ONE delete list with the sweep (fixing the
+  per-job-delete orphan leak) and /retry 409s on a pruned job; the three unbounded
+  Promise.all R2 sweeps A4 flagged are chunked bulk deletes (≤1000 keys = 1
+  subrequest) with failures reported, plus POST /api/system/import-retention/orphans
+  (dry-run by default; force required to delete — take a backup first). Leases/
+  states/cancel were ALREADY built (verified in importEngine.ts, not re-done).
+  **Still open:** R2 NDJSON staging for LIVE jobs (write-time, not just deletion),
+  Sentry wiring beyond client-error/reportError, phases 4–6 leftovers.
 - [x] K5 *(Part 421 — renumbered off a7's 420; SHIPPED by session 6e. 9.1 was closed by D6 long
   since; this claim is 9.2: the auto-merge flag + filter. Footprint:
   migration 0076 (products.auto_merged_count + an import_auto_merges
@@ -3003,6 +3022,95 @@ the switch and its reasoning are recorded in `wrangler.toml`.
 3. **Deploy** — nothing since the outage fix has shipped. `npm run deploy:full`.
 
 ## Current status
+
+**COORDINATION NOTE (session business-os-v1-7b, Aug 30 ~21:50, read-only — touching
+no product files).** Audited every dirty file against the claims below: all attribute
+cleanly to a claiming lane (b9 = actionHistory/undoAppliers; d2lot = movement
+writers + ledger; k4s = retention; d7 = import widgets; stats = StatsStrip +
+Sales/Fees + /stats-strip endpoint; f9 = committed per change). Both packages'
+`tsc` and `langKeyIntegrity` passed mid-flight; migration numbers don't collide
+(0084 = d2lot, 0085 = k4s). Two shared-file hazards need commit-time care:
+
+1. **`cloudflare/src/routes/sales.ts` carries TWO lanes at once** — d2lot's 0084
+   batch stamping (~line 702) AND the stats session's new `/stats-strip` endpoint
+   + its `getPaymentMethodBreakdown` import (~line 1684 + line 9). Whoever commits
+   this file first sweeps the other lane's hunks — message each other before
+   committing it, or record the ride-along plainly in the commit message.
+2. **`en.json`/`km.json` carry THREE lanes** — d7's import-string rewording, the
+   stats session's `stats_*` keys, f9's `transfer_change_product`. Same rule:
+   atomic pathspec commits, name the ride-along keys you sweep.
+
+Minor: k4s's edits extend into `routes/importJobs.ts` (shared delete definition +
+pruned-retry gate) and d2lot's into `datedStockCountApply.ts` /
+`salesImportCommit.ts` / `SupplierPickerField.tsx` — all in-lane and unclaimed by
+anyone else, but beyond the stated "Touching ONLY" lists; please update your claims.
+
+**DONE (session business-os-v1-b9, Aug 30): K1 slice 2 — reloaded server actions
+are genuinely undoable (Part 507, `b63e6c67`, needs deploy).** GET /api/action-history
+stamps `server_replayable`; ActionHistoryBar renders those recorded rows as real
+Undo/Redo buttons; the hook's `undoServer`/`redoServer` send `require_applied`, which
+the route refuses BEFORE any status flip when no applier is registered. Pure test
+6→8 checks, tsc both packages + vite build green. See the K1 entry + Part 507.
+
+**CLAIMED (in progress, session business-os-v1-d7, Aug 30): import widget concision +
+small-screen header fix (user, Aug 30).** Tracker widget (`BackgroundImportTracker.tsx`):
+title/progress-label collision on narrow screens (both unconstrained in one flex row),
+progress labels de-duplicated against the counts line, terser job row labels. Import Hub
+(`ImportHub.tsx`): shorter title/drop/done strings, file-row name truncation. Touching ONLY
+those two files + `en.json`/`km.json` keys for those strings (lang packs are shared — will
+commit them atomically and flag ride-alongs). NOT touching peer lanes (TransferModal /
+SaleDetailModal / Receipt / main.css / stats regions / DateTimeRangePicker / importEngine).
+
+**Part 508 (Aug 30 2026, session business-os-v1-k4s): K4 Phase-1 slice SHIPPED,
+needs deploy (migration 0085).** Scheduled import-artifact retention per the
+locked plan (24h detail / 7d summary — see the K4 master-plan entry for the full
+shape), the per-job-delete orphan leak fixed via ONE shared delete list,
+/retry 409 on pruned jobs, the three unbounded R2 sweeps now chunked bulk
+deletes, and the dry-run-first orphan-staging admin endpoint. Verified: new
+8-check pure test on the real chain, cloudflare tsc clean, full backend battery
+108 PASS (2 transient SQLITE_ERROR collisions with peer 77's concurrent sweep —
+both PASS standalone, attributed not fixed), migrate:local applied 0084+0085,
+wrangler dry-run builds. **Operator note before deploy:** the sweep's first
+production ticks will start pruning the MIGRATION jobs' staged source rows
+(already consumed by 0080's backfill) — that IS the intended 193MB slimming;
+raise `import_detail_retention_hours` in settings first if unwanted. Orphan
+cleanup on production stays manual: dry-run the endpoint, back up, then force.
+
+**CLAIMED (in progress, session business-os-v1-f9, Aug 30):** user's Aug-30 UI batch —
+(1) large-screen-only text bump via `--ui-text-scale` media query in `main.css`;
+(2) Branches expanded-branch product-card grid restyle + mobile transfer-card stray
+`<td>` fix (NOT the per-branch stat tiles — stats-strip session owns those);
+(3) `TransferModal.tsx` multi-select selected-area UI + transfer "can't fetch" debug;
+(4) `SaleDetailModal.tsx` scroll/wrap fixes; (5) `receipt/Receipt.tsx` toolbar
+buttons wrapping to multiple rows. Touching only those files + lang packs if needed.
+
+**CLAIMED (in progress, session business-os-v1-77, Aug 30): full verification /
+stress sweep.** Golden Rule 5 battery first (tsc both packages, every backend
+`test-*.cjs` individually, every frontend `tests/*.test.ts` individually, real vite
+build), then targeted edge-case/stress probes (write paths, offline/online, limits).
+READ-MOSTLY: touches no product source files unless a confirmed bug fix falls out,
+and any such fix will be claimed here separately before editing. Peers' in-flight
+files (StatsStrip work, DateTimeRangePicker) will not be touched; failures in files
+a peer is mid-edit on will be attributed, not "fixed".
+
+**CLAIMED (in progress, session working on stats strips, Aug 30):** shared foldable
+StatsStrip rollout — range-driven (default today) mini stat cards with fold-open
+detail breakdowns, replacing per-page stat tiles on Sales / Returns / Fees /
+Inventory / Branches / Dashboard. Touching: new `shared/StatsStrip.tsx`, those six
+pages' stat regions, and (backend, if needed) small range-scoped stat endpoints.
+NOT touching `DateTimeRangePicker.tsx` (another session has it mid-rebuild).
+
+**CLAIMED (in progress, session business-os-v1-d2lot, Aug 30): D2(a) movement↔batch
+linkage.** Additive migration 0084 `inventory_movements.batch_id` + stamping in every
+movement writer where ONE lot is truthfully known (import add/grouped-sale
+single-allocation lines, POS explicit-pick/single-lot/damaged lines, receive/manage
+batch, adjust, cancel/return restock walks); multi-lot rows stay NULL (blank-honest).
+Reads: stock-ledger supplier filter + lot join, D3 detail movement Batch column.
+Touching: cloudflare migrations + lib/stockActionCommit,stockLedgerQuery,
+saleTransitions,returnsStock,importEngine(movement INSERT only) + routes/sales,returns,
+batches,inventory,branches,products (movement INSERTs only) + frontend
+StockChangeSection.tsx/ProductDetailReport.tsx + new pure test. NOT touching peer lanes
+(TransferModal/SaleDetailModal/Receipt/main.css, stats regions, DateTimeRangePicker).
 
 **Part 501 (Aug 30 2026, parallel session):** (1) Products gained a "Duplicates"
 review section (section pill beside Stock Changes) for the Part-499 possibly-same

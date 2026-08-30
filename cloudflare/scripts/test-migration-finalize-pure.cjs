@@ -71,7 +71,11 @@ const systemRoute = loadReal('routes/system.ts', {
   '../lib/r2': {
     listObjects: async () => [],
     deleteObject: async () => {},
+    // K4: the prefix-wide sweeps delete through the chunked bulk helper now.
+    deleteObjectsBulk: async (_bucket, keys) => ({ deleted: keys.length, errors: [] }),
   },
+  // K4: orphan-staging engine has its own pure test -- irrelevant here.
+  '../lib/importRetention': { cleanOrphanImportStaging: async () => ({ applied: false, tables: {}, r2Keys: 0 }) },
   '../lib/coreDataInvariants': loadReal('lib/coreDataInvariants.ts', {
     './db': { getDb: () => db },
     './sqlBinding': loadReal('lib/sqlBinding.ts', {}),

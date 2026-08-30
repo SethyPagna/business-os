@@ -5,7 +5,8 @@ import { hasPermission } from '../lib/permissions'
 import { getDb } from '../lib/db'
 import { audit } from '../lib/audit'
 import { runDataIntegrityCheck } from '../lib/dataIntegrity'
-import { listObjects, deleteObject } from '../lib/r2'
+import { listObjects, deleteObject, deleteObjectsBulk } from '../lib/r2'
+import { cleanOrphanImportStaging } from '../lib/importRetention'
 import { sanitizeMediaList } from '../lib/media'
 import { ensureCoreDataInvariants, dropAllCustomTables, FACTORY_RESET_TABLES, PRODUCTS_RESET_TABLES } from '../lib/coreDataInvariants'
 import { createCloudflareBackup, createSectionBackup } from '../lib/backup'
@@ -400,6 +401,7 @@ app.post('/reset-data', async (c) => {
 
     await db.batch(statements)
 
+    const resetSweepErrors: string[] = []
     if (mode === 'all') {
       // Best-effort R2 cleanup -- not part of the atomic D1 batch (R2 has no
       // transactional link to D1), so failures here are logged but never
@@ -427,24 +429,29 @@ app.post('/reset-data', async (c) => {
       // deliberately does NOT reuse this blanket-prefix pattern -- it never
       // touches `file_assets` at all, so it collects and deletes only the
       // specific keys the rows it's actually removing pointed to.
-      try {
-        const objects = await listObjects(c.env.ASSETS, 'uploads/')
-        await Promise.all(objects.map((o) => deleteObject(c.env.ASSETS, o.key)))
-      } catch (_) {
-        // Non-fatal -- orphaned uploaded files in R2 don't affect app correctness.
-      }
-      try {
-        const objects = await listObjects(c.env.ASSETS, 'imports/')
-        await Promise.all(objects.map((o) => deleteObject(c.env.ASSETS, o.key)))
-      } catch (_) {
-        // Non-fatal -- orphaned import files in R2 don't affect app correctness.
+      //
+      // K4: chunked BULK deletes (deleteObjectsBulk) -- one subrequest per
+      // 1,000 keys instead of one per object. The old per-object
+      // Promise.all here was unbounded in both concurrency and subrequest
+      // count, so a large catalog could blow the invocation's subrequest
+      // ceiling AFTER the D1 wipe above had already committed. Still
+      // non-fatal (orphaned R2 objects don't affect app correctness), but
+      // failures are now counted in the audit record instead of vanishing.
+      for (const prefix of ['uploads/', 'imports/']) {
+        try {
+          const objects = await listObjects(c.env.ASSETS, prefix)
+          const result = await deleteObjectsBulk(c.env.ASSETS, objects.map((o) => o.key))
+          resetSweepErrors.push(...result.errors.map((e) => `${prefix}: ${e}`))
+        } catch (error) {
+          resetSweepErrors.push(`${prefix}: ${(error as Error).message || 'unknown error'}`)
+        }
       }
     }
 
     const label = mode === 'all'
       ? 'Full data reset - sales, returns, products, and contacts cleared'
       : 'Sales reset - sales, returns, and stock cleared'
-    await audit(c.env, user?.id ?? null, user?.name ?? null, 'reset_data', 'system', null, { label, mode })
+    await audit(c.env, user?.id ?? null, user?.name ?? null, 'reset_data', 'system', null, { label, mode, r2Errors: resetSweepErrors.length || undefined })
 
     // Notify every connected page/device (Dashboard, Products, Inventory,
     // Sales, POS, Branches, Returns) that their data just changed out from
@@ -721,11 +728,16 @@ app.post('/factory-reset', async (c) => {
     // success (the D1 wipe + reseed is the part that must not half-finish).
     let deletedObjectCount = 0
     const r2Errors: string[] = []
+    // K4: chunked BULK deletes, same reasoning as reset-data's sweep above
+    // (one subrequest per 1,000 keys; the old per-object Promise.all was
+    // unbounded). deletedObjectCount now counts actual successes, not the
+    // listing size.
     for (const prefix of ['uploads/', 'imports/']) {
       try {
         const objects = await listObjects(c.env.ASSETS, prefix)
-        await Promise.all(objects.map((o) => deleteObject(c.env.ASSETS, o.key)))
-        deletedObjectCount += objects.length
+        const result = await deleteObjectsBulk(c.env.ASSETS, objects.map((o) => o.key))
+        deletedObjectCount += result.deleted
+        r2Errors.push(...result.errors.map((e) => `${prefix}: ${e}`))
       } catch (error) {
         r2Errors.push(`${prefix}: ${(error as Error).message || 'unknown error'}`)
       }
@@ -753,6 +765,41 @@ app.post('/factory-reset', async (c) => {
   } catch (error) {
     return c.json({ success: false, error: (error as Error).message || 'Factory reset failed' }, 500)
   }
+})
+
+// ---------------------------------------------------------------------------
+// K4: orphan import-staging cleanup. Job-scoped rows whose import_jobs row
+// no longer exists -- left behind by the pre-K4 per-job delete, which
+// skipped half the ledgers (signatures, commits, guards, groups, image
+// plans). The Phase-0 audit measured these among the ~193MB of staging.
+//
+// Per the locked execution plan this cleanup is NEVER automatic: the
+// default is a dry-run report; deleting requires BOTH dry_run:false and
+// force:true in the body, and the operator is told to take a backup first.
+// The ongoing retention sweep (lib/importRetention.ts) prevents NEW
+// orphans, so this endpoint is a one-time-ish repair, not a schedule.
+// ---------------------------------------------------------------------------
+app.post('/import-retention/orphans', async (c) => {
+  const denied = denyUnlessBackupPermission(c)
+  if (denied) return denied
+  const user = c.get('user')
+  const body = (await c.req.json().catch(() => ({}))) as Record<string, unknown>
+  const apply = body?.dry_run === false && body?.force === true
+  const report = await cleanOrphanImportStaging(c.env, { apply })
+  if (apply) {
+    await audit(c.env, user?.id ?? null, user?.name ?? null, 'import_orphan_staging_clean', 'system', null, {
+      tables: report.tables,
+      r2Keys: report.r2Keys,
+      r2Deleted: report.r2Deleted,
+      r2Errors: report.r2Errors?.length || undefined,
+    })
+  }
+  return c.json({
+    success: true,
+    dry_run: !apply,
+    ...(apply ? {} : { note: 'Dry run only. Take a backup, then re-send with dry_run:false and force:true to delete these rows.' }),
+    ...report,
+  })
 })
 
 // ---------------------------------------------------------------------------

@@ -160,7 +160,14 @@ async function markQueueFailure(db, row, error, reason = 'sync_failed') {
 
 async function replayQueuedSale(db, row, base) {
   await putQueueRow(db, row, { status: 'syncing', error: null })
-  const payload = row.payload || {}
+  // Round-trip through JSON so the digest is computed over the SAME bytes the
+  // server will re-digest from the parsed request body. A structured-clone of
+  // the sale keeps undefined-valued keys (POS sets `delivery_actual_cost_usd:
+  // undefined` on every non-delivery sale), but `JSON.stringify` on the wire
+  // drops them -- so digesting `row.payload` directly produced a hash the
+  // server could never reproduce and EVERY such sale came back
+  // `payload_digest_failed`. Cleaning first makes both sides agree.
+  const payload = JSON.parse(JSON.stringify(row.payload || {}))
   const operation = {
     id: row.id,
     client_request_id: row.client_request_id || row.id || `legacy_sale_${row._seq || Date.now()}`,
@@ -183,7 +190,17 @@ async function replayQueuedSale(db, row, base) {
   const responsePayload = (() => { try { return JSON.parse(text) } catch (_) { return null } })()
   const status = Number(response.status || 0)
 
-  if (response.ok) {
+  // CRITICAL: the outbox endpoint returns HTTP 200 with { success:false,
+  // results:[...] } for a per-operation rejection or failure -- only a true
+  // write conflict is 409. So `response.ok` is NOT proof the sale was applied.
+  // Inspect the per-operation result and delete the queued sale ONLY when it
+  // genuinely landed (status === 'applied'); otherwise the sale is preserved
+  // and retried. Deleting on a bare 200 discarded digest-rejected/validation-
+  // rejected sales as "synced" and lost the revenue with no trace.
+  const result = Array.isArray(responsePayload?.results) ? responsePayload.results[0] : null
+  const applied = status < 400 && (result ? result.status === 'applied' : response.ok && result === null && responsePayload?.success !== false)
+
+  if (applied) {
     await deleteQueueRow(db, row)
     broadcastSyncEvent('BUSINESS_OS_OUTBOX_SYNCED', {
       channel: row.channel,
@@ -192,13 +209,13 @@ async function replayQueuedSale(db, row, base) {
     return true
   }
 
-  if (status === 409) {
+  if (status === 409 || result?.status === 'conflict' || result?.code === 'write_conflict') {
     await putQueueRow(db, row, {
       status: 'conflict',
       retry_at: null,
       conflict: true,
       reason: 'server_newer_version',
-      error: responsePayload?.error || text || 'Server has a newer version. Review before syncing.',
+      error: result?.error || responsePayload?.error || text || 'Server has a newer version. Review before syncing.',
     })
     broadcastSyncEvent('BUSINESS_OS_OUTBOX_CONFLICT', {
       channel: row.channel,
@@ -207,18 +224,21 @@ async function replayQueuedSale(db, row, base) {
     return false
   }
 
-  if (status === 401 || status === 403) {
+  if (status === 401 || status === 403 || result?.code === 'auth_required') {
     await putQueueRow(db, row, {
       status: 'failed',
       retry_at: null,
       reason: 'auth_required',
-      error: responsePayload?.error || text || 'Sign in again before background sync can continue.',
+      error: result?.error || responsePayload?.error || text || 'Sign in again before background sync can continue.',
     })
     broadcastSyncEvent('BUSINESS_OS_OUTBOX_AUTH_REQUIRED', { channel: row.channel })
     return false
   }
 
-  throw new Error(responsePayload?.error || text || `Sync failed with HTTP ${status || 'error'}`)
+  // Anything else -- a digest rejection, a validation failure, a transient
+  // error -- keeps the sale queued (markQueueFailure preserves the row with
+  // backoff), so it is retried rather than silently dropped.
+  throw new Error(result?.error || result?.code || responsePayload?.error || text || `Sync failed with HTTP ${status || 'error'}`)
 }
 
 async function syncOutbox() {
