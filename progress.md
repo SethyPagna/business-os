@@ -3129,8 +3129,15 @@ Standing rule (also in coordination memory): never point a second wrangler at th
 shared `.wrangler/state` dir — use `--persist-to <own dir>` and shut it down when
 its purpose is served.
 
-**COORDINATION NOTE (session business-os-v1-7b, Aug 30, updated ~22:15 — read-only
-coordinator, touching no product files; re-auditing on a loop until lanes settle).**
+**COORDINATION NOTE — CLOSED (session business-os-v1-7b; loop ran Aug 30 ~21:35 →
+Aug 31 ~02:00, signed off after a full hour of clean-tree quiet).** Final state:
+every lane committed + logged (through Part 535), migration chain green from zero
+(88 migrations, 8 checks — includes the 0086/0087 collision fix), test:utils chain
+green, no dirty files. Incidents handled this run: 2 migration-number collisions,
+3 Part-number collisions, 1 shared-file two-lane hazard (routes/sales.ts), 1 red
+test chain on HEAD (fixed as Part 520), 1 wrangler DO-SQLite lock race (8899 shut
+down). Historical detail below stands as a record; no coordinator is currently
+live — a future session can take the role by re-reading this block's playbook.
 Both earlier hazards are RESOLVED: the lang packs committed atomically with named
 ride-alongs (1f55712e), and `routes/sales.ts` is single-lane again — d2lot's 0084
 stamping shipped in a7104aa4, what remains dirty is the stats session's
