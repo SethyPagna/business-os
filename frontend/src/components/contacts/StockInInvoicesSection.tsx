@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import ChevronDown from 'lucide-react/dist/esm/icons/chevron-down.js'
 import AppSelect from '../shared/AppSelect.tsx'
+import DateTimeRangePicker from '../shared/DateTimeRangePicker'
 import { fmtDateOnly } from '../../utils/formatters'
 import { getStockInInvoiceLines, getStockInInvoiceReport } from '../../api/contactReadTransport.ts'
 
@@ -267,26 +268,18 @@ export default function StockInInvoicesSection({ t }: StockInInvoicesSectionProp
             ...supplierOptions.map((option) => ({ value: option.key, label: String(option.name || option.key) })),
           ]}
         />
-        <label className="flex items-center gap-1.5 text-xs text-gray-500">
-          <span>{tr('date_from', 'From Date')}</span>
-          <input
-            type="date"
-            className="input py-1 text-xs"
-            value={fromDate}
-            onChange={(event) => changeFilter(() => setFromDate(event.target.value))}
-            aria-label={tr('date_from', 'From Date')}
-          />
-        </label>
-        <label className="flex items-center gap-1.5 text-xs text-gray-500">
-          <span>{tr('date_to', 'To Date')}</span>
-          <input
-            type="date"
-            className="input py-1 text-xs"
-            value={toDate}
-            onChange={(event) => changeFilter(() => setToDate(event.target.value))}
-            aria-label={tr('date_to', 'To Date')}
-          />
-        </label>
+        {/* Unified Start → End pill (same control the Dashboard, reports,
+            Fees and Inventory movements use) instead of two loose inputs. */}
+        <DateTimeRangePicker
+          value={{ startDate: fromDate, endDate: toDate, startTime: '', endTime: '' }}
+          onChange={(range) => changeFilter(() => {
+            setFromDate(range.startDate || '')
+            setToDate(range.endDate || '')
+          })}
+          t={t}
+          showTime={false}
+          triggerClassName="flex items-center justify-center gap-2 rounded-lg px-2.5 py-1.5 text-xs"
+        />
         {anyFilter ? (
           <button
             type="button"

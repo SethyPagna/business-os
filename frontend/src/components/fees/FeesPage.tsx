@@ -13,6 +13,7 @@ import Receipt from 'lucide-react/dist/esm/icons/receipt.js'
 import Trash2 from 'lucide-react/dist/esm/icons/trash-2.js'
 import { useApp as useAppHook, useSync as useSyncHook } from '../../AppContext.tsx'
 import Modal from '../shared/Modal'
+import DateTimeRangePicker from '../shared/DateTimeRangePicker'
 import SearchInput from '../shared/SearchInput'
 import FilterMenu, { type FilterOption } from '../shared/FilterMenu'
 import PaginationControls, { PAGE_SIZE_OPTIONS, DEFAULT_PAGE_SIZE } from '../shared/PaginationControls'
@@ -296,35 +297,20 @@ export default function FeesPage() {
         ? `${fromDate || '…'} – ${toDate || '…'}`
         : tr('all_time', 'All time'),
       active: !!fromDate || !!toDate,
+      // Unified range control (same Start → End pill the Dashboard/reports
+      // use) instead of two loose raw date inputs.
       render: () => (
-        <div className="space-y-2 p-2">
-          <div>
-            <label htmlFor="fees-from-date" className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-300">
-              {tr('start_date', 'Start Date')}
-            </label>
-            <input
-              id="fees-from-date"
-              type="date"
-              className="input"
-              value={fromDate}
-              max={toDate || undefined}
-              onChange={(event) => setFromDate(event.target.value)}
-            />
-          </div>
-          <div>
-            <label htmlFor="fees-to-date" className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-300">
-              {tr('end_date', 'End Date')}
-            </label>
-            <input
-              id="fees-to-date"
-              type="date"
-              className="input"
-              value={toDate}
-              min={fromDate || undefined}
-              max={todayIso()}
-              onChange={(event) => setToDate(event.target.value)}
-            />
-          </div>
+        <div className="p-1">
+          <DateTimeRangePicker
+            value={{ startDate: fromDate, endDate: toDate, startTime: '', endTime: '' }}
+            onChange={(range) => {
+              setFromDate(range.startDate || '')
+              setToDate(range.endDate || '')
+            }}
+            t={t}
+            showTime={false}
+            triggerClassName="flex w-full items-center justify-center gap-2 rounded-lg px-3 py-2"
+          />
         </div>
       ),
     },

@@ -5,6 +5,7 @@ import ChevronRight from 'lucide-react/dist/esm/icons/chevron-right.js'
 import Info from 'lucide-react/dist/esm/icons/info.js'
 import Package from 'lucide-react/dist/esm/icons/package.js'
 import ExportMenu from '../shared/ExportMenu'
+import DateTimeRangePicker from '../shared/DateTimeRangePicker'
 import type { PaginationControlsProps } from '../shared/PaginationControls'
 import type { PortalMenuItem } from '../shared/PortalMenu'
 import { translateMovementType } from './movementGroups'
@@ -250,26 +251,18 @@ export default function InventoryMovementsSurface({
                 ) : null}
                 {showMovementDateFilter ? (
                   <div className="flex w-full items-center gap-1.5 sm:w-auto">
-                    <label className="min-w-0">
-                      <span className="sr-only">{tr('start_date', 'Start date')}</span>
-                      <input
-                        type="date"
-                        className="input min-h-8 w-full px-2 py-1.5 text-xs sm:min-h-9 sm:text-sm"
-                        value={movementStartDate}
-                        onChange={(event) => setMovementStartDate(event.target.value)}
-                      />
-                    </label>
-                    <span className="text-[11px] font-medium text-gray-400 sm:text-xs">to</span>
-                    <label className="min-w-0">
-                      <span className="sr-only">{tr('end_date', 'End date')}</span>
-                      <input
-                        type="date"
-                        className="input min-h-8 w-full px-2 py-1.5 text-xs sm:min-h-9 sm:text-sm"
-                        value={movementEndDate}
-                        min={movementStartDate || undefined}
-                        onChange={(event) => setMovementEndDate(event.target.value)}
-                      />
-                    </label>
+                    {/* Unified Start → End pill (same control the Dashboard,
+                        reports and Fees use) instead of two loose date inputs. */}
+                    <DateTimeRangePicker
+                      value={{ startDate: movementStartDate, endDate: movementEndDate, startTime: '', endTime: '' }}
+                      onChange={(range) => {
+                        setMovementStartDate(range.startDate || '')
+                        setMovementEndDate(range.endDate || '')
+                      }}
+                      t={t}
+                      showTime={false}
+                      triggerClassName="flex min-h-8 items-center justify-center gap-2 rounded-lg px-2.5 py-1.5 text-xs sm:min-h-9 sm:text-sm"
+                    />
                     {(movementStartDate || movementEndDate) ? (
                       <button
                         type="button"
