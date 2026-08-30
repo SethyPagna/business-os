@@ -18,6 +18,9 @@ import {
   type ContactDuplicateTable,
 } from '../lib/contactDuplicates'
 import type { ContactOptionMode } from '../lib/contactOptions'
+import { canonicalizePhone } from '../lib/phone'
+import { revokePortalSessionsForAccount } from '../lib/portalSession'
+import bcrypt from 'bcryptjs'
 import { buildContactMatchClause } from '../lib/contactSearch'
 import { createBulkDeleteJob, getBulkDeleteJob, reapStalledBulkDeleteJobs, type BulkDeleteEntityType } from '../lib/bulkDeleteEngine'
 import type { Env } from '../index'
@@ -356,6 +359,28 @@ async function computeCustomerPointsMap(env: Env, customerIds: number[]): Promis
   return result
 }
 
+// Which of these contacts have a storefront account (§2), keyed by contact_id.
+// Lets admin Contacts badge a contact that has signed up and show the
+// membership id it registered under. Chunked to stay within D1's bound-param
+// limit, same as computeCustomerPointsMap.
+type PortalAccountFlag = { membershipId: string; createdAt: string | null }
+async function computePortalAccountMap(env: Env, contactIds: number[]): Promise<Map<number, PortalAccountFlag>> {
+  const result = new Map<number, PortalAccountFlag>()
+  if (contactIds.length === 0) return result
+  const db = getDb(env)
+  for (const idChunk of chunkForBinding(contactIds)) {
+    const placeholders = idChunk.map(() => '?').join(',')
+    const rows = await db.prepare(
+      `SELECT contact_id, membership_id, created_at FROM portal_accounts WHERE contact_id IN (${placeholders})`,
+    ).all<{ contact_id: number; membership_id: string; created_at: string | null }>(idChunk)
+    for (const row of rows) {
+      if (row.contact_id == null) continue
+      result.set(Number(row.contact_id), { membershipId: row.membership_id, createdAt: row.created_at ?? null })
+    }
+  }
+  return result
+}
+
 // Lightweight per-contact "has past records worth knowing about before you
 // delete/merge this one" summary for the Possible Duplicates review panel
 // (DuplicatesTab.tsx) -- distinct from computeCustomerPointsMap's full
@@ -450,10 +475,14 @@ function registerContactRoutes(config: ContactConfig) {
     const withPoints = async (rows: Array<Record<string, unknown>>) => {
       if (config.table !== 'customers' || rows.length === 0) return rows
       const ids = rows.map((r) => Number(r.id)).filter((id) => Number.isFinite(id))
-      const pointsMap = await computeCustomerPointsMap(c.env, ids)
+      const [pointsMap, portalMap] = await Promise.all([
+        computeCustomerPointsMap(c.env, ids),
+        computePortalAccountMap(c.env, ids),
+      ])
       return rows.map((row) => {
         const points = pointsMap.get(Number(row.id))
-        return points
+        const portal = portalMap.get(Number(row.id)) || null
+        const base = points
           ? {
               ...row,
               points_balance: points.balance,
@@ -463,6 +492,9 @@ function registerContactRoutes(config: ContactConfig) {
               points_deducted: points.deducted,
             }
           : row
+        // `portal_account` flags contacts that have signed up for a storefront
+        // account (§2) so admin Contacts can badge them; null when none.
+        return { ...base, portal_account: portal }
       })
     }
 
@@ -645,6 +677,13 @@ function registerContactRoutes(config: ContactConfig) {
     // match the 10,352 migrated numbers. Matching below stays digit-based,
     // so this changes nothing about duplicate detection or linkage.
     if (Object.prototype.hasOwnProperty.call(payload, 'phone')) payload.phone = formatPhoneP8(payload.phone)
+    // Keep the canonical phone key in sync so the storefront signup can detect
+    // this contact as an existing customer (lib/phone.ts is the authority;
+    // 0086 backfilled the historical rows). Customers only — suppliers/delivery
+    // contacts have no such column.
+    if (config.table === 'customers' && Object.prototype.hasOwnProperty.call(payload, 'phone')) {
+      payload.phone_normalized = canonicalizePhone(payload.phone)
+    }
 
     const duplicateBlock = await checkContactDuplicateBlock(c.env, config, { name, phone: payload.phone, address: payload.address }, body.confirmDuplicate === true)
     if (duplicateBlock) return c.json(duplicateBlock.body, duplicateBlock.status as 400 | 409)
@@ -671,6 +710,34 @@ function registerContactRoutes(config: ContactConfig) {
     const item = await db.prepare(`SELECT * FROM ${config.table} WHERE id = @id`).get({ id })
     return c.json(item)
   })
+
+  // Staff-initiated storefront password reset (§2, the "contact us to reset"
+  // path — no SMS provider is wired for self-serve reset, and few customers
+  // have an email). Issues a fresh temporary password, returns it ONCE so
+  // staff can pass it to the customer, and kills every live session for that
+  // account. Customers only; full contacts tier only (review tier is limited).
+  if (config.table === 'customers') {
+    app.post(`${config.path}/:id/portal-reset`, async (c) => {
+      const user = c.get('user')
+      if (getPermissionTier(user, 'contacts') !== 'full') {
+        return c.json({ error: 'Resetting a storefront password needs full Contacts permission' }, 403)
+      }
+      const id = c.req.param('id')
+      const db = getDb(c.env)
+      const account = await db.prepare('SELECT id FROM portal_accounts WHERE contact_id = @id LIMIT 1').get<{ id: number }>({ id })
+      if (!account) return c.json({ error: 'This contact has no storefront account' }, 404)
+      // A readable-but-random temporary password (no ambiguous chars).
+      const alphabet = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789'
+      const bytes = new Uint8Array(10)
+      crypto.getRandomValues(bytes)
+      const tempPassword = [...bytes].map((b) => alphabet[b % alphabet.length]).join('')
+      await db.prepare('UPDATE portal_accounts SET password_hash = @h, updated_at = CURRENT_TIMESTAMP WHERE id = @aid')
+        .run({ h: bcrypt.hashSync(tempPassword, 10), aid: account.id })
+      await revokePortalSessionsForAccount(c.env, account.id)
+      await audit(c.env, user?.id ?? null, user?.name ?? null, 'portal_reset', config.entity, id, {})
+      return c.json({ ok: true, temporaryPassword: tempPassword })
+    })
+  }
 
   app.put(`${config.path}/:id`, async (c) => {
     const user = c.get('user')
@@ -710,6 +777,10 @@ function registerContactRoutes(config: ContactConfig) {
     // P7-c: same P8 display shape on edit as on create -- an update that
     // touches the phone must not undo the convention.
     if (Object.prototype.hasOwnProperty.call(payload, 'phone')) payload.phone = formatPhoneP8(payload.phone)
+    // Keep the canonical phone key in sync on edit too (see create above).
+    if (config.table === 'customers' && Object.prototype.hasOwnProperty.call(payload, 'phone')) {
+      payload.phone_normalized = canonicalizePhone(payload.phone)
+    }
 
     // D6: renaming a SUPPLIER used to leave every product/batch that
     // carries the old free-text name pointing at nothing. When the rename
