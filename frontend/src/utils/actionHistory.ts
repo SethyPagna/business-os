@@ -5,6 +5,7 @@ import {
   isTrackedRequestCurrent,
   withLoaderTimeout,
 } from './loaders'
+import { resolveReplayAction } from './actionReplay'
 
 type ActionDirection = 'undo' | 'redo'
 type ActionHistoryId = string | number
@@ -326,11 +327,8 @@ export function useActionHistory({ limit = 10, notify, scope = 'global', enabled
         serverApplied = !!(response && typeof response === 'object' && (response as { applied?: unknown }).applied)
         refreshServerItems()
       }
-      if (serverApplied && typeof entry.refresh === 'function') {
-        await Promise.resolve(entry.refresh())
-      } else {
-        await Promise.resolve(action())
-      }
+      const replay = resolveReplayAction({ serverApplied, refresh: entry.refresh, action })
+      await Promise.resolve(replay ? replay() : undefined)
       if (direction === 'undo') {
         setUndoStack((current) => current.filter((item) => item.id !== entry.id))
         setRedoStack((current) => [...current.slice(-(Math.max(1, limit) - 1)), entry])
