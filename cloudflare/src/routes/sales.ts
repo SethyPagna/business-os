@@ -6,7 +6,7 @@ import { audit } from '../lib/audit'
 import { hasPermission, hasAnyPermission } from '../lib/permissions'
 import { assertUpdatedAtMatch, getExpectedUpdatedAt, writeConflictResponse, WriteConflictError } from '../lib/conflictControl'
 import { bumpVersion } from '../lib/cache'
-import { getCustomerSalesTotals, getDeliveryContactTotals, getSalesDayReport, getSalesPeriodSeries, getSalesTotals } from '../lib/salesAnalytics'
+import { getCustomerSalesTotals, getDeliveryContactTotals, getPaymentMethodBreakdown, getSalesDayReport, getSalesPeriodSeries, getSalesTotals } from '../lib/salesAnalytics'
 import { allocateAcrossLots, decrementBatchStockStatement, decrementBatchStockStrictStatement, readFifoLotAvailabilityForCart, type FifoLotTake } from '../lib/productBatches'
 import { VALID_SALE_STATUSES, STOCK_DEDUCTED_STATUSES } from '../lib/salesStatus'
 import { consumeDamagedLot, restoreDamagedLot, DamagedLotShortfallError, DAMAGE_OUT_MOVEMENT, DAMAGE_IN_MOVEMENT } from '../lib/returnsStock'
@@ -1681,6 +1681,62 @@ app.get('/stats', async (c) => {
     // Tells the caller whether the list endpoint (with the same filters)
     // would have been cut off, so the UI can show "N+ more not shown" etc.
     truncated_in_list: totalCount > listLimit,
+  })
+})
+
+// GET /api/sales/stats-strip?startDate&endDate&branchId -- the Sales page's
+// foldable stats strip (shared StatsStrip component): headline figures from
+// THE salesAnalytics kernel (so they agree with the Dashboard and the daily
+// report for the same range) plus the per-card fold breakdowns -- payment
+// methods, status mix, and the range's customer returns. Deliberately
+// range+branch scoped only, NOT list-filter scoped: the strip answers "how
+// was this period", the list header keeps answering "what does this filter
+// match".
+app.get('/stats-strip', async (c) => {
+  if (!hasPermission(c.get('user'), 'sales')) {
+    return c.json({ error: 'You do not have permission to perform this action' }, 403)
+  }
+  const query = c.req.query()
+  const startDate = String(query.startDate || '').slice(0, 10)
+  const endDate = String(query.endDate || '').slice(0, 10)
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate) || !/^\d{4}-\d{2}-\d{2}$/.test(endDate)) {
+    return c.json({ error: 'startDate and endDate (YYYY-MM-DD) are required' }, 400)
+  }
+  const db = getDb(c.env)
+  const filters = { startDate, endDate, branchId: query.branchId || null }
+  const rangeParams: Record<string, unknown> = { startDate, endDate }
+  // Status mix counts EVERY status (the kernel's whereActiveSales excludes
+  // cancelled/awaiting on purpose for money figures; the mix card exists
+  // precisely to show those too).
+  const statusClauses = ['date(created_at) BETWEEN date(@startDate) AND date(@endDate)']
+  if (query.branchId) { statusClauses.push('branch_id = @branchId'); rangeParams.branchId = query.branchId }
+  const [totals, byPayment, byStatus, returnsRow] = await Promise.all([
+    getSalesTotals(c.env, filters),
+    getPaymentMethodBreakdown(c.env, filters),
+    db.prepare(`
+      SELECT COALESCE(NULLIF(TRIM(sale_status), ''), 'completed') AS sale_status,
+             COUNT(*) AS count, ROUND(COALESCE(SUM(total_usd), 0), 2) AS total_usd
+      FROM sales
+      WHERE ${statusClauses.join(' AND ')}
+      GROUP BY COALESCE(NULLIF(TRIM(sale_status), ''), 'completed')
+      ORDER BY count DESC
+    `).all<{ sale_status: string; count: number; total_usd: number }>(rangeParams),
+    db.prepare(`
+      SELECT COUNT(*) AS count, ROUND(COALESCE(SUM(total_refund_usd), 0), 2) AS refund_usd
+      FROM returns
+      WHERE date(created_at) BETWEEN date(@startDate) AND date(@endDate)
+        AND COALESCE(return_scope, 'customer') = 'customer'
+        AND COALESCE(status, 'completed') <> 'cancelled'
+        ${query.branchId ? 'AND branch_id = @branchId' : ''}
+    `).get<{ count: number; refund_usd: number }>(rangeParams),
+  ])
+  return c.json({
+    startDate,
+    endDate,
+    totals,
+    by_payment: byPayment,
+    by_status: byStatus || [],
+    returns: { count: Number(returnsRow?.count || 0), refund_usd: Number(returnsRow?.refund_usd || 0) },
   })
 })
 

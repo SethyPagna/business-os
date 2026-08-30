@@ -3151,7 +3151,8 @@ up should re-verify against current source first.
   check; and `BACKUP_TABLES` omits `product_batches`/`branch_batch_stock`/`*_batch_allocations`
   so every restore (incl. the safety backup a reset takes) leaves the lot ledger empty
   vs branch_stock. (×3: pipelines, batch-identity, +) `lib/backup.ts:83-118,860-942`.
-- Inventory `/transfer` moves `branch_stock` between branches and never touches
+- **[CLAIMED: session b9, Aug 30]** Inventory `/transfer` moves `branch_stock` between
+  branches and never touches
   `branch_batch_stock` → lot ledger drift, the exact class migration 0081 repaired.
   (×3) `routes/inventory.ts:1665-1687`.
 - **[FIXED: session b9, Aug 30 — Part 512, `bcf58378`, needs deploy]** Action-history
@@ -3210,12 +3211,17 @@ Cancel + per-row decisions its Products sibling has; failed import job renders "
 Full detail with file:line, failure scenarios, and per-writer coverage matrices: the
 **Part 77 verification report** artifact (link in the session's final summary).
 
-**CLAIMED (in progress, session working on stats strips, Aug 30):** shared foldable
-StatsStrip rollout — range-driven (default today) mini stat cards with fold-open
-detail breakdowns, replacing per-page stat tiles on Sales / Returns / Fees /
-Inventory / Branches / Dashboard. Touching: new `shared/StatsStrip.tsx`, those six
-pages' stat regions, and (backend, if needed) small range-scoped stat endpoints.
-NOT touching `DateTimeRangePicker.tsx` (another session has it mid-rebuild).
+**Part 516 (Aug 30 2026, parallel session): the app-wide foldable StatsStrip is
+DONE in code.** One shared surface (`shared/StatsStrip.tsx`) on Sales / Returns /
+Fees / Inventory (→Branches hub inherits) / Dashboard: compact mini stat cards in
+ONE horizontal row, each folding open an inline breakdown + InfoHint explanation,
+range-driven with per-day (today) default and Today/7D/Month/Year presets. New
+`GET /api/sales/stats-strip` (kernel totals + payment/status mix + range returns);
+`/api/returns/report` gained `scope=supplier`. Old tile grids, the Inventory stat
+drill modal, Dashboard's MiniStat grid + KPI sheet (except Best Hour), and the
+all-rows client-side returns sum are deleted. Verified live + suites green
+(statsStrip.test.ts pins the rollout; 2 pre-existing 403 pure-test failures
+proven NOT from this work — see Part 516). **Needs deploy.**
 
 **DONE (session business-os-v1-d2lot, Aug 30): D2(a)/D3 movement↔batch linkage
 shipped, needs deploy (Part 510, `a7104aa4`).** Migration 0084 adds

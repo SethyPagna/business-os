@@ -57,12 +57,15 @@ const InventoryBatchModal = lazyRetry(() => import('./InventoryBatchModal'), 'in
 const ExportOptionsDialog = lazyRetry(() => import('../shared/ExportOptionsDialog'), 'inventory-export-options') as any
 const ManageBatchesModal = lazyRetry(() => import('./ManageBatchesModal'), 'inventory-manage-batches-modal') as any
 const InventoryReasonManagerModal = lazyRetry(() => import('./InventoryReasonManagerModal'), 'inventory-reason-manager-modal') as any
-const InventoryStatDetailModal = lazyRetry(() => import('./InventoryStatDetailModal'), 'inventory-stat-detail-modal') as any
 const ProductHistoryPreviewModal = lazyRetry(() => import('./ProductHistoryPreviewModal'), 'inventory-product-history-preview-modal') as any
 const InventoryProductsSurfaceView = InventoryProductsSurface as any
 
 import { buildMovementGroups, getMovementGroupPage, movementColorClass, movementColorClassForRecord, movementGroupHaystack, translateMovementType } from './movementGroups'
 import { buildStockHealthSegments } from './stockHealthSummary'
+import StatsStrip, { statsPresetRange, type StatCardDef } from '../shared/StatsStrip.tsx'
+import type { DateTimeRange } from '../shared/DateTimeRangePicker'
+import { getSalesStatsStrip } from '../../api/salesTransport.ts'
+import { getReturnsReport } from '../../api/returnsReadTransport.ts'
 
 // Default quantity the Adjust-stock "Add" form starts with -- see
 // InventoryStockModals.tsx's quick-pick chips (1 / this value / 5 / 10 /
@@ -151,7 +154,6 @@ type InventoryUserOption = {
 }
 
 type InventoryStats = LegacyInventoryRecord | null
-type ReturnStats = LegacyInventoryRecord | null
 
 type InventoryFormValue = string | number
 
@@ -212,17 +214,6 @@ type InventoryBatchLine = LegacyInventoryRecord & {
 
 type InventoryBatch = {
   items: InventoryBatchLine[]
-} | null
-
-type StatDetail = {
-  id: string
-  label: ReactNode
-  details?: Array<{ label?: ReactNode; value?: ReactNode; note?: ReactNode }>
-  detailSections?: Array<{
-    title?: ReactNode
-    subtitle?: ReactNode
-    rows?: Array<{ label?: ReactNode; value?: ReactNode; note?: ReactNode }>
-  }>
 } | null
 
 type SectionOption = {
@@ -365,8 +356,6 @@ const INVENTORY_PRODUCTS_TIMEOUT_MS = 12000
 const INVENTORY_MOVEMENTS_TIMEOUT_MS = 15000
 const INVENTORY_RFID_TIMEOUT_MS = 8000
 const INVENTORY_PRODUCT_DETAIL_TIMEOUT_MS = 10000
-const INVENTORY_RETURNS_STATS_TIMEOUT_MS = 12000
-const INVENTORY_DASHBOARD_STATS_TIMEOUT_MS = 12000
 const INVENTORY_STOCK_MUTATION_TIMEOUT_MS = 12000
 const INVENTORY_METADATA_READ_DELAY_MS = 120
 const INVENTORY_METADATA_IDLE_TIMEOUT_MS = 800
@@ -595,8 +584,45 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
   const [movementsLoaded, setMovementsLoaded] = useState(false)
   const [movementMeta,  setMovementMeta]  = useState<MovementMeta>({ total: 0, page: 1, pageSize: 50, totalPages: 1 })
   const [branches,      setBranches]      = useState<InventoryBranch[]>([])
-  const [returnStats,   setReturnStats]   = useState<ReturnStats>(null)
-  const [taxDelivery,   setTaxDelivery]   = useState({ tax: 0, delivery: 0, deliveryCount: 0 })
+  // Range-scoped money figures for the foldable stats strip (shared
+  // StatsStrip, app-wide pattern; default TODAY). These replace the old
+  // all-time client-side sums (getReturns({scope:'all'}) walked EVERY
+  // return row into the browser just to add them up): the sales kernel
+  // (/api/sales/stats-strip) and /api/returns/report answer the same
+  // questions server-side for exactly the picked range, agreeing with the
+  // Dashboard and Reports for the same dates.
+  type InventoryStripKernel = { totals?: Record<string, number> }
+  type InventoryStripReturns = { totals?: { count?: number; refund_usd?: number; compensation_usd?: number; loss_usd?: number }; by_type?: Array<{ return_type?: string; count?: number }> }
+  const [stripRange, setStripRange] = useState<DateTimeRange>(() => statsPresetRange('today'))
+  const [stripKernel, setStripKernel] = useState<InventoryStripKernel | null>(null)
+  const [stripCustomerReturns, setStripCustomerReturns] = useState<InventoryStripReturns | null>(null)
+  const [stripSupplierReturns, setStripSupplierReturns] = useState<InventoryStripReturns | null>(null)
+  const [stripLoading, setStripLoading] = useState(false)
+  const stripRequestRef = useRef(0)
+  const loadStatsStrip = useCallback(async (): Promise<void> => {
+    if (!isActive || !stripRange.startDate || !stripRange.endDate) return
+    const requestId = ++stripRequestRef.current
+    setStripLoading(true)
+    const dates = { startDate: stripRange.startDate, endDate: stripRange.endDate }
+    try {
+      const [kernel, customer, supplier] = await Promise.all([
+        getSalesStatsStrip(dates).catch(() => null),
+        getReturnsReport({ ...dates, scope: 'customer' }).catch(() => null),
+        getReturnsReport({ ...dates, scope: 'supplier' }).catch(() => null),
+      ])
+      if (stripRequestRef.current !== requestId) return
+      setStripKernel((kernel || null) as InventoryStripKernel | null)
+      setStripCustomerReturns((customer || null) as InventoryStripReturns | null)
+      setStripSupplierReturns((supplier || null) as InventoryStripReturns | null)
+    } finally {
+      if (stripRequestRef.current === requestId) setStripLoading(false)
+    }
+  }, [isActive, stripRange.endDate, stripRange.startDate])
+  useEffect(() => { void loadStatsStrip() }, [loadStatsStrip])
+  useEffect(() => {
+    if (!isActive || !syncChannel?.channel) return
+    if (['sales', 'returns', 'inventory'].includes(syncChannel.channel)) void loadStatsStrip()
+  }, [isActive, loadStatsStrip, syncChannel?.channel, syncChannel?.ts])
   const [branchFilter,  setBranchFilter]  = useState('all')
   const [adjustModal,   setAdjustModal]   = useState<InventoryProduct | null>(null)
   const [manageBatchesModal, setManageBatchesModal] = useState<InventoryProduct | null>(null)
@@ -723,7 +749,6 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
   const [loadError,     setLoadError]     = useState<string | null>(null)
   const [adjustSaving,  setAdjustSaving]  = useState(false)
   const [transferSaving, setTransferSaving] = useState(false)
-  const [statDetail,    setStatDetail]    = useState<StatDetail>(null)
   const [showImport, setShowImport] = useState(false)
   // F2 (Part 419): the fast per-shipment stock-in flow -- see
   // FastStockInModal.tsx; writes ride the same receive kernel as every
@@ -1163,60 +1188,10 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
           })
         }
 
-        if (needsStatsData) {
-          void settleLoaderMap({
-            returns: () => withLoaderTimeout(
-              () => getInventoryApi().getReturns({ scope: 'all' }),
-              'Inventory returns stats',
-              INVENTORY_RETURNS_STATS_TIMEOUT_MS,
-            ),
-            dashboard: () => withLoaderTimeout(
-              () => getInventoryApi().getDashboard(),
-              'Inventory dashboard stats',
-              INVENTORY_DASHBOARD_STATS_TIMEOUT_MS,
-            ),
-          }).then((secondaryResult: LegacyInventoryRecord) => {
-            if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
-            const rets = secondaryResult.values.returns
-            const dash = secondaryResult.values.dashboard
-            if (dash && typeof dash === 'object') {
-              setTaxDelivery({
-                tax: dash.all_tax_usd || 0,
-                delivery: dash.all_delivery_usd || 0,
-                deliveryCount: dash.all_delivery_count || 0,
-              })
-            }
-            if (Array.isArray(rets)) {
-              const nextReturnStats = {
-                count: 0,
-                refund_usd: 0,
-                refund_khr: 0,
-                items: 0,
-                restock: 0,
-                supplier_count: 0,
-                supplier_compensation_usd: 0,
-                supplier_loss_usd: 0,
-              }
-              for (const ret of rets) {
-                if ((ret.status || 'completed') === 'cancelled') continue
-                if ((ret.return_scope || 'customer') === 'supplier') {
-                  nextReturnStats.supplier_count += 1
-                  nextReturnStats.supplier_compensation_usd += ret.supplier_compensation_usd || 0
-                  nextReturnStats.supplier_loss_usd += ret.supplier_loss_usd || 0
-                  continue
-                }
-                nextReturnStats.count += 1
-                nextReturnStats.refund_usd += ret.total_refund_usd || 0
-                nextReturnStats.refund_khr += ret.total_refund_khr || 0
-                if ((ret.return_type || 'restock') === 'restock') nextReturnStats.restock += 1
-                for (const item of ret.items || []) {
-                  nextReturnStats.items += item.quantity || 0
-                }
-              }
-              setReturnStats(nextReturnStats)
-            }
-          }).catch(() => {})
-        }
+        // (The old needsStatsData secondary fetch -- getReturns({scope:'all'})
+        // summed client-side plus the dashboard summary for tax/delivery --
+        // is gone: the range-driven stats strip reads those figures
+        // server-side via /api/sales/stats-strip and /api/returns/report.)
       } catch (e: unknown) {
         if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
         const message = e instanceof Error ? e.message : 'Failed to load inventory'
@@ -2788,18 +2763,39 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
   const customerShortLabel = tr('customer_returns_short', 'Cust')
   const supplierShortLabel = tr('supplier_returns_short', 'Supp')
   const marginShortLabel = tr('profit_margin_short', 'margin')
-  const primaryStats = [
+  // Range-scoped money figures for the strip (the sales kernel + the two
+  // returns-report scopes; see loadStatsStrip). Stock-state cards keep
+  // reading stockStats -- shelf counts are "as of now", not range-scoped.
+  const kernelTotals = (stripKernel?.totals || {}) as Record<string, number>
+  const stripMoney = (value: number): string => (stripLoading ? '···' : fmtUSD(value))
+  const stripCount = (value: number): string => (stripLoading ? '···' : String(value))
+  const stripRevenue = Number(kernelTotals.revenue_usd) || 0
+  const stripCogs = Number(kernelTotals.cost_usd) || 0
+  const stripProfit = Number(kernelTotals.profit_usd) || 0
+  const stripGross = Number(kernelTotals.gross_sales_usd) || 0
+  const stripStoreDiscount = Number(kernelTotals.store_discount_usd) || 0
+  const stripMemberDiscount = Number(kernelTotals.membership_discount_usd) || 0
+  const stripTax = Number(kernelTotals.tax_usd) || 0
+  const stripDeliveryFees = Number(kernelTotals.delivery_usd) || 0
+  const stripDeliveryCount = Number(kernelTotals.delivery_sale_count) || 0
+  const custReturnTotals = stripCustomerReturns?.totals || {}
+  const suppReturnTotals = stripSupplierReturns?.totals || {}
+  const stripCustomerReturnCount = Number(custReturnTotals.count) || 0
+  const stripRefunded = Number(custReturnTotals.refund_usd) || 0
+  const stripRestocked = Number((stripCustomerReturns?.by_type || []).find((row) => String(row.return_type || 'restock') === 'restock')?.count) || 0
+  const stripSupplierReturnCount = Number(suppReturnTotals.count) || 0
+  const stripSupplierLoss = Number(suppReturnTotals.loss_usd) || 0
+  const stripCards: StatCardDef[] = [
     {
-      id: 'products',
-      label: inventoryStatLabels.products,
-      info: `${tr('inventory_info_products', 'How many products you carry. A group of same-name items counts as ONE product here, the same way it appears as one row in the list below.')}
+      key: 'products',
+      label: String(inventoryStatLabels.products),
+      hint: `${tr('inventory_info_products', 'How many products you carry. A group of same-name items counts as ONE product here, the same way it appears as one row in the list below.')}
 
 ${inventoryThresholdFormulaText}`,
       value: statsValue(totalProducts),
-      cls: 'text-gray-800 dark:text-gray-200',
       // 11.20: colour carries healthy/low/out here (green/amber/red counts),
-      // not text labels -- the detail breakdown below keeps the names. The
-      // label rides along as title/aria so colour is not the only cue.
+      // not text labels -- the fold keeps the names. The label rides along
+      // as title/aria so colour is not the only cue.
       sub: stockStatsLoaded ? (
         <span className="inline-flex items-center gap-1">
           {buildStockHealthSegments(
@@ -2819,147 +2815,96 @@ ${inventoryThresholdFormulaText}`,
           ))}
         </span>
       ) : safeT('loading', 'Loading...'),
-      // Full breakdown, not just low/out -- total counts each product
-      // group as one (getFamilyStockStats/paginateProductFamilies both
-      // group by family root, matching the listing's own pagination), and
-      // in-stock is split into its Healthy/Low subsets so this card
-      // answers "how many, and in what shape" in one place instead of
-      // needing the separate stock-status filter to see the split.
       details: [
-        { label: inventoryStatLabels.products, value: totalProducts },
-        { label: inventoryStatLabels.inStock, value: inStockCount },
-        { label: inventoryStatLabels.healthy, value: healthyCount },
-        { label: inventoryStatLabels.lowStock, value: lowStockCount },
-        { label: inventoryStatLabels.outOfStock, value: outStockCount },
+        { label: String(inventoryStatLabels.products), value: totalProducts },
+        { label: String(inventoryStatLabels.inStock), value: inStockCount },
+        { label: String(inventoryStatLabels.healthy), value: healthyCount },
+        { label: String(inventoryStatLabels.lowStock), value: lowStockCount, tone: lowStockCount > 0 ? 'warn' : undefined },
+        { label: String(inventoryStatLabels.outOfStock), value: outStockCount, tone: outStockCount > 0 ? 'crit' : undefined },
       ],
     },
     {
-      id: 'stock-value',
-      label: inventoryStatLabels.stockValue,
-      info: `${tr('inventory_info_stock_value', 'What the stock you are holding right now cost you to buy. Not what it will sell for.')}
+      key: 'stock-value',
+      label: String(inventoryStatLabels.stockValue),
+      hint: `${tr('inventory_info_stock_value', 'What the stock you are holding right now cost you to buy. Not what it will sell for.')}
 
 ${inventoryStockValueFormulaText}`,
       value: statsValue(fmtUSD(totalValue)),
-      cls: 'text-blue-700 dark:text-blue-300',
-        sub: matchStockShortLabel,
-      // Evened out (user, Aug 29): the money on the shelf plus what's behind
-      // it -- average value per product and the risk counts -- mirroring the
-      // Dashboard Stock Value drill, replacing the bare "Products" repeat.
+      tone: 'accent',
+      sub: matchStockShortLabel,
       details: [
-        { label: inventoryStatLabels.stockValue, value: fmtUSD(totalValue) },
+        { label: String(inventoryStatLabels.stockValue), value: fmtUSD(totalValue) },
         { label: tr('avg_value_per_product', 'Avg value / product'), value: fmtUSD(totalProducts > 0 ? totalValue / totalProducts : 0) },
-        { label: inventoryStatLabels.lowStock, value: lowStockCount },
-        { label: inventoryStatLabels.outOfStock, value: outStockCount },
+        { label: String(inventoryStatLabels.lowStock), value: lowStockCount, tone: lowStockCount > 0 ? 'warn' : undefined },
+        { label: String(inventoryStatLabels.outOfStock), value: outStockCount, tone: outStockCount > 0 ? 'crit' : undefined },
       ],
     },
-    // Part 388 merges (user): the standalone COGS card held a single row --
-    // it folds into Revenue; Net sold folds into Returns (below). Info text
-    // now leads with the FORMULA carrying the real numbers, not prose only.
     {
-      id: 'revenue',
-      label: inventoryStatLabels.revenue,
+      key: 'revenue',
+      label: String(inventoryStatLabels.revenue),
       // Z10 (user, Aug 29 -- "follow dashboard, keeps them separate"): Revenue
-      // is net of discounts, BEFORE refunds, exactly like the Dashboard;
-      // refunds are kept separate in the Returns card, no longer folded into
-      // this number or its drill. Backend GET /stats revenue_usd/cogs_usd are
-      // now gross to match (routes/inventory.ts).
-      info: `${tr('inventory_info_revenue', 'Money kept from sales: gross sales minus discounts. Refunds are shown separately in Returns.')}
+      // is net of discounts, BEFORE refunds, exactly like the Dashboard; now
+      // computed by the SAME salesAnalytics kernel over the strip's range.
+      hint: `${tr('inventory_info_revenue', 'Money kept from sales: gross sales minus discounts. Refunds are shown separately in Returns.')}
 
-${tr('gross_profit', 'Gross profit')} ${fmtUSD(totalRevenue - totalCOGS)} = ${inventoryStatLabels.revenue} ${fmtUSD(totalRevenue)} − ${inventoryStatLabels.cogs} ${fmtUSD(totalCOGS)}`,
-      value: statsValue(fmtUSD(totalRevenue)),
-      cls: 'text-emerald-600 dark:text-emerald-400',
-        sub: `${tr('gross_profit', 'Gross profit')} ${fmtUSD(totalRevenue - totalCOGS)}`,
+${tr('gross_profit', 'Gross profit')} = ${String(inventoryStatLabels.revenue)} − ${String(inventoryStatLabels.cogs)}`,
+      value: stripMoney(stripRevenue),
+      tone: 'ok',
+      sub: stripLoading ? undefined : `${tr('gross_profit', 'Gross profit')} ${fmtUSD(stripProfit)}`,
       details: [
-        { label: inventoryStatLabels.revenue, value: fmtUSD(totalRevenue) },
-        { label: inventoryStatLabels.cogs, value: fmtUSD(totalCOGS) },
-        { label: `${tr('gross_profit', 'Gross profit')} (= ${inventoryStatLabels.revenue} − ${inventoryStatLabels.cogs})`, value: fmtUSD(totalRevenue - totalCOGS) },
+        { label: tr('stats_gross', 'Gross sales'), value: fmtUSD(stripGross) },
+        { label: String(inventoryStatLabels.revenue), value: fmtUSD(stripRevenue) },
+        { label: String(inventoryStatLabels.cogs), value: fmtUSD(stripCogs) },
+        { label: tr('gross_profit', 'Gross profit'), value: fmtUSD(stripProfit), tone: 'ok' },
+        { label: marginShortLabel, value: stripRevenue > 0 ? `${((stripProfit / stripRevenue) * 100).toFixed(1)}%` : '—' },
       ],
     },
   ]
-  const financeStats = [
+  stripCards.push(
     {
-      id: 'discounts',
-      label: inventoryStatLabels.discounts,
-      info: `${tr('inventory_info_discounts', 'Money given away as discounts: shop discounts plus member points redeemed.')}
+      key: 'discounts',
+      label: String(inventoryStatLabels.discounts),
+      hint: `${tr('inventory_info_discounts', 'Money given away as discounts: shop discounts plus member points redeemed.')}
 
 ${inventoryDiscountFormulaText}`,
-      value: statsValue(fmtUSD(totalStoreDiscounts + totalMembershipDiscounts)),
-      cls: 'text-amber-600 dark:text-amber-400',
-      border: 'border-amber-400',
-        sub: `${storeDiscountShortLabel} ${fmtUSD(totalStoreDiscounts)} | ${memberShortLabel} ${fmtUSD(totalMembershipDiscounts)}`,
-      detailSections: [
-        {
-          title: tr('discount_breakdown', 'Discount breakdown'),
-          rows: [
-            { label: tr('store_discounts', 'Store discounts'), value: fmtUSD(totalStoreDiscounts) },
-            { label: tr('membership_discounts', 'Membership discounts'), value: fmtUSD(totalMembershipDiscounts) },
-            { label: tr('discounts_total', 'Total discounts'), value: fmtUSD(totalStoreDiscounts + totalMembershipDiscounts) },
-            // Discount rate = total discounts / gross (revenue is already net
-            // of discounts, so gross = revenue + discounts) -- mirrors Dashboard.
-            { label: tr('discount_rate', 'Discount rate'), value: `${(() => { const gross = totalRevenue + totalStoreDiscounts + totalMembershipDiscounts; return gross > 0 ? (((totalStoreDiscounts + totalMembershipDiscounts) / gross) * 100).toFixed(1) : '0.0' })()}%` },
-          ],
-        },
+      value: stripMoney(stripStoreDiscount + stripMemberDiscount),
+      tone: (stripStoreDiscount + stripMemberDiscount) > 0 ? 'warn' : undefined,
+      details: [
+        { label: tr('store_discounts', 'Store discounts'), value: fmtUSD(stripStoreDiscount) },
+        { label: tr('membership_discounts', 'Membership discounts'), value: fmtUSD(stripMemberDiscount) },
+        { label: tr('discounts_total', 'Total discounts'), value: fmtUSD(stripStoreDiscount + stripMemberDiscount) },
+        // Discount rate = total discounts / gross -- mirrors Dashboard.
+        { label: tr('discount_rate', 'Discount rate'), value: `${stripGross > 0 ? (((stripStoreDiscount + stripMemberDiscount) / stripGross) * 100).toFixed(1) : '0.0'}%` },
       ],
     },
     {
-      id: 'fees',
-      label: inventoryStatLabels.feesCollected,
-      info: `${tr('inventory_info_fees', 'Extra charges collected on top of the price: tax and delivery fees.')}
+      key: 'fees',
+      label: String(inventoryStatLabels.feesCollected),
+      hint: `${tr('inventory_info_fees', 'Extra charges collected on top of the price: tax and delivery fees.')}
 
 ${inventoryFeesFormulaText}`,
-      value: fmtUSD((taxDelivery.tax || 0) + (taxDelivery.delivery || 0)),
-      cls: 'text-indigo-600 dark:text-indigo-400',
-      border: 'border-indigo-400',
-        sub: `${taxShortLabel} ${fmtUSD(taxDelivery.tax || 0)} | ${deliveryShortLabel} ${fmtUSD(taxDelivery.delivery || 0)}`,
-      detailSections: [
-        {
-          title: tr('fees_breakdown', 'Fee breakdown'),
-          rows: [
-            { label: inventoryStatLabels.taxCollected, value: fmtUSD(taxDelivery.tax || 0) },
-            { label: inventoryStatLabels.deliveryFees, value: fmtUSD(taxDelivery.delivery || 0) },
-            // Was mislabeled "Transactions" -- this is the delivery COUNT.
-            { label: tr('deliveries', 'Deliveries'), value: taxDelivery.deliveryCount || 0 },
-          ],
-        },
+      value: stripMoney(stripTax + stripDeliveryFees),
+      sub: stripLoading ? undefined : `${taxShortLabel} ${fmtUSD(stripTax)} | ${deliveryShortLabel} ${fmtUSD(stripDeliveryFees)}`,
+      details: [
+        { label: String(inventoryStatLabels.taxCollected), value: fmtUSD(stripTax) },
+        { label: String(inventoryStatLabels.deliveryFees), value: fmtUSD(stripDeliveryFees) },
+        { label: tr('deliveries', 'Deliveries'), value: stripDeliveryCount },
       ],
     },
     {
-      id: 'returns',
-      label: inventoryStatLabels.returns,
-      // Part 388: Net sold lives here now (its old card merged in) -- the
-      // formula IS the explanation, with the live numbers substituted.
-      info: `${tr('inventory_info_returns', 'Items sent back: by customers to you, and by you to suppliers.')}
-
-${inventoryStatLabels.netSold} ${totalQtySold} = ${tr('items_sold', 'Items sold')} ${totalQtySold + (returnStats?.items ?? 0)} − ${tr('items', 'Returned items')} ${returnStats?.items ?? 0}`,
-      value: (returnStats?.count ?? 0) + (returnStats?.supplier_count ?? 0),
-      cls: 'text-orange-600 dark:text-orange-400',
-      border: 'border-orange-400',
-        // 5.4 (one rule, both pages): each derived metric is card-visible
-        // only on its home page -- Gross Profit's home is Dashboard (its
-        // card there stays), Net Sold's home is HERE, so it must be
-        // readable at card level, not only inside the drill. The sub line
-        // is that card-level surface; the drill keeps the full formula.
-        sub: `${inventoryStatLabels.netSold} ${totalQtySold} · ${returnStats?.count ?? 0} ${customerShortLabel} | ${returnStats?.supplier_count ?? 0} ${supplierShortLabel}`,
-      // Evened out (user, Aug 29): one balanced drill instead of three
-      // stacked sections (was 10 rows). Net sold + the items-sold math stay
-      // on the card sub line and in the info formula above; the supplier
-      // count folds into its loss line, mirroring the Dashboard Returns card.
-      detailSections: [
-        {
-          title: inventoryStatLabels.returns,
-          rows: [
-            { label: tr('customer_returns', 'Customer returns'), value: returnStats?.count ?? 0 },
-            { label: inventoryStatLabels.refunded, value: fmtUSD(returnStats?.refund_usd || 0) },
-            { label: t('restocked_to_inventory') || 'Restocked', value: returnStats?.restock ?? 0 },
-            { label: `${t('supplier_returns') || 'Supplier returns'} (${returnStats?.supplier_count ?? 0})`, value: fmtUSD(returnStats?.supplier_loss_usd || 0) },
-          ],
-        },
+      key: 'returns',
+      label: String(inventoryStatLabels.returns),
+      hint: tr('inventory_info_returns', 'Items sent back: by customers to you, and by you to suppliers.'),
+      value: stripCount(stripCustomerReturnCount + stripSupplierReturnCount),
+      tone: (stripCustomerReturnCount + stripSupplierReturnCount) > 0 ? 'warn' : undefined,
+      sub: stripLoading ? undefined : `${stripCustomerReturnCount} ${customerShortLabel} | ${stripSupplierReturnCount} ${supplierShortLabel}`,
+      details: [
+        { label: tr('customer_returns', 'Customer returns'), value: stripCustomerReturnCount },
+        { label: String(inventoryStatLabels.refunded), value: fmtUSD(stripRefunded), tone: stripRefunded > 0 ? 'crit' : undefined },
+        { label: t('restocked_to_inventory') || 'Restocked', value: stripRestocked },
+        { label: `${t('supplier_returns') || 'Supplier returns'} (${stripSupplierReturnCount})`, value: fmtUSD(stripSupplierLoss), tone: stripSupplierLoss > 0 ? 'crit' : undefined },
       ],
     },
-  ]
-  const inventoryStatCards = useMemo<LegacyInventoryRecord[]>(
-    () => [...primaryStats, ...financeStats],
-    [financeStats, primaryStats],
   )
   const inventoryBrands = useMemo(() => (
     (Array.isArray(inventoryProductFilters.brands) && inventoryProductFilters.brands.length
@@ -3058,11 +3003,23 @@ ${inventoryStatLabels.netSold} ${totalQtySold} = ${tr('items_sold', 'Items sold'
     movementTimeMode,
     movementYearFilter,
     outStockCount,
-    returnStats,
+    // Range-scoped (the strip's range) since the strip replaced the old
+    // all-time client-side sums -- the stats export mirrors what the
+    // strip shows.
+    returnStats: {
+      count: stripCustomerReturnCount,
+      refund_usd: stripRefunded,
+      refund_khr: 0,
+      items: 0,
+      restock: stripRestocked,
+      supplier_count: stripSupplierReturnCount,
+      supplier_compensation_usd: Number(suppReturnTotals.compensation_usd) || 0,
+      supplier_loss_usd: stripSupplierLoss,
+    },
     search,
     stockFilter,
     tab,
-    taxDelivery,
+    taxDelivery: { tax: stripTax, delivery: stripDeliveryFees, deliveryCount: stripDeliveryCount },
     totalCOGS,
     totalMembershipDiscounts,
     totalProducts,
@@ -3093,11 +3050,18 @@ ${inventoryStatLabels.netSold} ${totalQtySold} = ${tr('items_sold', 'Items sold'
     movementTimeMode,
     movementYearFilter,
     outStockCount,
-    returnStats,
     search,
     stockFilter,
+    stripCustomerReturnCount,
+    stripDeliveryCount,
+    stripDeliveryFees,
+    stripRefunded,
+    stripRestocked,
+    stripSupplierLoss,
+    stripSupplierReturnCount,
+    stripTax,
+    suppReturnTotals,
     tab,
-    taxDelivery,
     totalCOGS,
     totalMembershipDiscounts,
     totalProducts,
@@ -3513,46 +3477,19 @@ ${inventoryStatLabels.netSold} ${totalQtySold} = ${tr('items_sold', 'Items sold'
       ) : null}
 
       {showInventoryStats ? (
-      <>
-        <div className="mb-2 grid grid-cols-2 items-start gap-1.5 sm:grid-cols-3 lg:grid-cols-4 2xl:grid-cols-8">
-          {/* The card is a plain container with the clickable area INSIDE it,
-              rather than the whole card being a <button>. InfoHint is itself a
-              <button>, and a button nested in a button is invalid HTML -- the
-              browser drops one of them, which silently breaks either the hint
-              or the drill-down. The hint therefore sits as a sibling of the
-              clickable region, in the corner, where it also cannot be hit by
-              accident while reaching for the card. */}
-          {inventoryStatCards.map((stat) => (
-            <div
-              key={stat.id}
-              className={`card flex min-h-[3.5rem] min-w-0 flex-col items-start self-start px-2.5 py-1.5 text-left transition focus-within:ring-2 focus-within:ring-blue-200 hover:ring-2 hover:ring-blue-200 dark:focus-within:ring-blue-800/50 dark:hover:ring-blue-800/50 ${stat.border ? `border-l-2 ${stat.border}` : ''}`}
-            >
-              <div className="flex w-full min-w-0 items-center gap-1">
-                <div className="min-w-0 flex-1 truncate text-[10px] font-medium uppercase leading-4 tracking-[0.06em] text-gray-400">{stat.label}</div>
-                {stat.info ? (
-                  <InfoHint
-                    className="shrink-0"
-                    label={`${String(stat.label)} - ${tr('what_this_means', 'what this means')}`}
-                    text={String(stat.info)}
-                  />
-                ) : null}
-              </div>
-              <button
-                type="button"
-                className="flex min-w-0 max-w-full flex-col items-start text-left"
-                onClick={() => setStatDetail(stat as StatDetail)}
-              >
-                <div className={`overflow-hidden text-ellipsis whitespace-nowrap text-base font-bold leading-5 ${stat.cls}`}>{stat.value}</div>
-                {stat.sub ? (
-                  <div className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-[9.5px] leading-3 text-gray-500 dark:text-gray-400">
-                    {stat.sub}
-                  </div>
-                ) : null}
-              </button>
-            </div>
-          ))}
-      </div>
-      </>
+        // The foldable stats strip (shared StatsStrip, the app-wide stats
+        // pattern) replaces the 8-card grid + its drill-down modal: tapping
+        // a card folds its breakdown open INLINE. Shelf-state cards
+        // (Products, Stock value) read the filter-scoped stockStats; the
+        // money cards are range-scoped (default today) via the sales
+        // kernel + returns report, agreeing with Dashboard/Reports.
+        <StatsStrip
+          className="mb-2"
+          cards={stripCards}
+          t={t}
+          range={stripRange}
+          onRangeChange={setStripRange}
+        />
       ) : null}
       {showInventoryTabs ? (
       <div className="mb-4 flex gap-2 overflow-x-auto border-b border-gray-200 dark:border-gray-700">
@@ -3938,16 +3875,6 @@ ${inventoryStatLabels.netSold} ${totalQtySold} = ${tr('items_sold', 'Items sold'
             rfidSectionOptions={rfidSectionOptions}
             setRfidSection={setRfidSection}
             tr={tr}
-          />
-        </Suspense>
-      ) : null}
-
-      {statDetail ? (
-        <Suspense fallback={null}>
-          <InventoryStatDetailModal
-            onClose={() => setStatDetail(null)}
-            statDetail={statDetail}
-            t={t}
           />
         </Suspense>
       ) : null}

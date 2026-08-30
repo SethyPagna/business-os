@@ -37,7 +37,10 @@ import { pruneSelectionToVisibleIds } from '../../utils/rowSelection.ts'
 import {
   getReturn as fetchReturnDetail,
   getReturns as fetchReturns,
+  getReturnsReport,
 } from '../../api/returnsReadTransport.ts'
+import StatsStrip, { statsPresetRange, type StatCardDef } from '../shared/StatsStrip.tsx'
+import type { DateTimeRange } from '../shared/DateTimeRangePicker'
 import ReturnsListSurface from './ReturnsListSurface'
 const ReturnDetailModal = lazyRetry(() => import('./ReturnDetailModal'), 'returns-detail-modal')
 const EditReturnModal = lazyRetry(() => import('./EditReturnModal'), 'returns-edit-modal')
@@ -274,34 +277,6 @@ function getInitialReturnPageSize(): number {
 }
 
 
-type ReturnStatTileProps = {
-  label: string
-  value: ReactNode
-  color: string
-  /** What this figure means, and what clicking it filters to. */
-  info: string
-  active: boolean
-  onClick: () => void
-}
-
-// These tiles are also the scope's type FILTER -- clicking one narrows the
-// list below -- which nothing on screen previously said. The hint carries
-// that, and `active` gives the currently-applied filter a visible ring so
-// the list and the tiles can never look out of sync.
-function ReturnStatTile({ label, value, color, info, active, onClick }: ReturnStatTileProps) {
-  return (
-    <div className={`card min-w-0 px-2.5 py-1.5 text-left transition ${active ? 'ring-2 ring-blue-400 dark:ring-blue-500/60' : ''}`}>
-      <div className="flex min-w-0 items-center gap-1">
-        <div className="min-w-0 flex-1 truncate text-[10px] uppercase tracking-wide text-gray-400">{label}</div>
-        <InfoHint className="shrink-0" label={label} text={info} />
-      </div>
-      <button type="button" className="block w-full text-left focus:outline-none" onClick={onClick} aria-pressed={active}>
-        <div className={`truncate text-sm font-bold leading-5 ${color}`}>{value}</div>
-      </button>
-    </div>
-  )
-}
-
 export default function Returns() {
   const { can, t, fmtUSD, fmtKHR, notify, user } = useApp()
   // Editing a return reverses and re-applies batch restocking against live
@@ -488,6 +463,106 @@ export default function Returns() {
       loadReturns(true)
     }
   }, [isActive, loadReturns, syncChannel?.channel, syncChannel?.ts])
+
+  // The foldable stats strip (shared StatsStrip, app-wide stats pattern):
+  // range-scoped (default TODAY), scope-aware -- customer returns show
+  // refunds + type mix, supplier cases show compensation vs business loss.
+  // Fold breakdowns come from GET /api/returns/report (same kernel the
+  // Reports hub reads, so figures always agree).
+  type ReturnsStripRow = { count?: number; refund_usd?: number; compensation_usd?: number; loss_usd?: number }
+  type ReturnsStripPayload = {
+    totals?: ReturnsStripRow
+    by_reason?: Array<ReturnsStripRow & { reason?: string }>
+    by_type?: Array<ReturnsStripRow & { return_type?: string }>
+  }
+  const [stripRange, setStripRange] = useState<DateTimeRange>(() => statsPresetRange('today'))
+  const [stripData, setStripData] = useState<ReturnsStripPayload | null>(null)
+  const [stripLoading, setStripLoading] = useState(false)
+  const stripRequestRef = useRef(0)
+  const loadStatsStrip = useCallback(async (): Promise<void> => {
+    if (!isActive || !stripRange.startDate || !stripRange.endDate) return
+    const requestId = ++stripRequestRef.current
+    setStripLoading(true)
+    try {
+      const result = await getReturnsReport({ startDate: stripRange.startDate, endDate: stripRange.endDate, scope })
+      if (stripRequestRef.current !== requestId) return
+      setStripData((result || {}) as ReturnsStripPayload)
+    } catch {
+      if (stripRequestRef.current !== requestId) return
+      setStripData(null)
+    } finally {
+      if (stripRequestRef.current === requestId) setStripLoading(false)
+    }
+  }, [isActive, scope, stripRange.endDate, stripRange.startDate])
+  useEffect(() => { void loadStatsStrip() }, [loadStatsStrip])
+  useEffect(() => {
+    if (!isActive || !syncChannel?.channel) return
+    if (syncChannel.channel === 'returns') void loadStatsStrip()
+  }, [isActive, loadStatsStrip, syncChannel?.channel, syncChannel?.ts])
+
+  const stripCards = useMemo<StatCardDef[]>(() => {
+    const totals = stripData?.totals || {}
+    const byType = stripData?.by_type || []
+    const byReason = (stripData?.by_reason || []).slice(0, 8)
+    const count = Number(totals.count) || 0
+    const typeLabel = (value: string): string => (
+      value === 'restock' ? tr('restocked', 'Restocked')
+        : value === 'writeoff' ? tr('written_off', 'Written Off')
+          : value === 'refund' ? tr('refund_only', 'Refund Only')
+            : value === 'credit' ? tr('supplier_credit', 'Credit')
+              : value || '—'
+    )
+    if (scope === SUPPLIER_SCOPE) {
+      return [
+        {
+          key: 'cases',
+          label: tr('return_to_supplier', 'Return to Supplier'),
+          value: String(count),
+          hint: tr('stats_supplier_cases_hint', 'How many cases you sent back to a supplier in the range, broken down by what happened to the goods.'),
+          details: byType.map((row) => ({ label: typeLabel(String(row.return_type || '')), value: String(Number(row.count) || 0) })),
+        },
+        {
+          key: 'compensation',
+          label: tr('supplier_compensation', 'Compensation'),
+          value: fmtUSD(Number(totals.compensation_usd) || 0),
+          tone: 'ok',
+          hint: tr('stats_supplier_compensation_hint', 'Money or credit the supplier gave back for goods you returned, broken down by reason.'),
+          details: byReason.map((row) => ({ label: String(row.reason || '—'), value: fmtUSD(Number(row.compensation_usd) || 0) })),
+        },
+        {
+          key: 'loss',
+          label: tr('business_loss', 'Business loss'),
+          value: fmtUSD(Number(totals.loss_usd) || 0),
+          tone: (Number(totals.loss_usd) || 0) > 0 ? 'crit' : undefined,
+          hint: tr('stats_business_loss_hint', 'What the returned goods cost you that the supplier did NOT cover — money the shop absorbs, broken down by reason.'),
+          details: byReason.map((row) => ({ label: String(row.reason || '—'), value: fmtUSD(Number(row.loss_usd) || 0), tone: (Number(row.loss_usd) || 0) > 0 ? ('crit' as const) : undefined })),
+        },
+      ]
+    }
+    return [
+      {
+        key: 'returns',
+        label: tr('returns', 'Returns'),
+        value: String(count),
+        hint: tr('stats_returns_count_hint', 'Customer returns created in the range (cancelled excluded). The breakdown shows what happened to the goods: restocked, written off, or refund-only.'),
+        details: byType.map((row) => ({
+          label: typeLabel(String(row.return_type || '')),
+          value: `${Number(row.count) || 0} · ${fmtUSD(Number(row.refund_usd) || 0)}`,
+        })),
+      },
+      {
+        key: 'refunded',
+        label: tr('total_refunded', 'Total Refunded'),
+        value: fmtUSD(Number(totals.refund_usd) || 0),
+        tone: (Number(totals.refund_usd) || 0) > 0 ? 'warn' : undefined,
+        hint: tr('stats_total_refunded_hint', 'Money paid back to customers across the range, broken down by return reason.'),
+        details: byReason.map((row) => ({
+          label: String(row.reason || '—'),
+          value: `${Number(row.count) || 0} · ${fmtUSD(Number(row.refund_usd) || 0)}`,
+        })),
+      },
+    ]
+  }, [fmtUSD, scope, stripData, tr])
 
   const handleOpenEdit = async (ret: ReturnRow): Promise<void> => {
     const requestId = beginTrackedRequest(editRequestRef)
@@ -814,54 +889,19 @@ export default function Returns() {
     [selectedIds],
   )
 
+  // Per-scope row split for the export menu. The old per-scope stat sums
+  // moved to the range-driven StatsStrip above (server-computed via
+  // /api/returns/report), so only the rows themselves are needed here.
   const returnScopeSummary = useMemo(() => {
-    const summary: {
-      customerRows: ReturnRow[]
-      supplierRows: ReturnRow[]
-      customerStats: {
-        refundedUsd: number
-        restockCount: number
-        writeoffCount: number
-        refundOnlyCount: number
-      }
-      supplierStats: {
-        count: number
-        compensationUsd: number
-        lossUsd: number
-      }
-    } = {
-      customerRows: [],
-      supplierRows: [],
-      customerStats: {
-        refundedUsd: 0,
-        restockCount: 0,
-        writeoffCount: 0,
-        refundOnlyCount: 0,
-      },
-      supplierStats: {
-        count: 0,
-        compensationUsd: 0,
-        lossUsd: 0,
-      },
-    }
+    const summary: { customerRows: ReturnRow[]; supplierRows: ReturnRow[] } = { customerRows: [], supplierRows: [] }
     for (const ret of searchFiltered) {
-      if (normalizeScope(ret.return_scope) === SUPPLIER_SCOPE) {
-        summary.supplierRows.push(ret)
-        summary.supplierStats.count += 1
-        summary.supplierStats.compensationUsd += toNumericAmount(ret.supplier_compensation_usd)
-        summary.supplierStats.lossUsd += toNumericAmount(ret.supplier_loss_usd)
-        continue
-      }
-      summary.customerRows.push(ret)
-      summary.customerStats.refundedUsd += toNumericAmount(ret.total_refund_usd)
-      if (ret.return_type === 'restock') summary.customerStats.restockCount += 1
-      else if (ret.return_type === 'writeoff') summary.customerStats.writeoffCount += 1
-      else if (ret.return_type === 'refund') summary.customerStats.refundOnlyCount += 1
+      if (normalizeScope(ret.return_scope) === SUPPLIER_SCOPE) summary.supplierRows.push(ret)
+      else summary.customerRows.push(ret)
     }
     return summary
   }, [searchFiltered])
 
-  const { customerRows, supplierRows, customerStats, supplierStats } = returnScopeSummary
+  const { customerRows, supplierRows } = returnScopeSummary
 
   // H1+X5 (Part 402): exports open the shared options dialog (column
   // chooser remembered per page + CSV/Excel/PDF) instead of a fixed xlsx.
@@ -978,69 +1018,19 @@ export default function Returns() {
         </div>
       ) : null}
 
-      {scope === CUSTOMER_SCOPE ? (
-        <div className="mb-3 grid grid-cols-2 gap-1.5 sm:grid-cols-4 sm:gap-2">
-          <ReturnStatTile
-            label={tr('total_refunded', 'Total Refunded')}
-            value={fmtUSD(customerStats.refundedUsd)}
-            color="text-orange-700 dark:text-orange-400"
-            info={tr('returns_info_total_refunded', 'Money paid back to customers across every return in this list. Click to clear the type filter and show all returns.')}
-            active={typeFilter === 'all'}
-            onClick={() => setTypeFilter('all')}
-          />
-          <ReturnStatTile
-            label={tr('restocked', 'Restocked')}
-            value={customerStats.restockCount}
-            color="text-green-700 dark:text-green-400"
-            info={tr('returns_info_restocked', 'Returns where the item came back in sellable condition and went back into stock. Click to show only these.')}
-            active={typeFilter === 'restock'}
-            onClick={() => setTypeFilter('restock')}
-          />
-          <ReturnStatTile
-            label={tr('written_off', 'Written Off')}
-            value={customerStats.writeoffCount}
-            color="text-red-600 dark:text-red-400"
-            info={tr('returns_info_written_off', 'Returns where the item could not be resold, so it was removed from stock as a loss. Click to show only these.')}
-            active={typeFilter === 'writeoff'}
-            onClick={() => setTypeFilter('writeoff')}
-          />
-          <ReturnStatTile
-            label={tr('refund_only', 'Refund Only')}
-            value={customerStats.refundOnlyCount}
-            color="text-blue-600 dark:text-blue-400"
-            info={tr('returns_info_refund_only', 'Returns where money was paid back but no item came in, so stock is unchanged. Click to show only these.')}
-            active={typeFilter === 'refund'}
-            onClick={() => setTypeFilter('refund')}
-          />
-        </div>
-      ) : (
-        <div className="mb-3 grid grid-cols-3 gap-1.5 sm:gap-2">
-          <ReturnStatTile
-            label={tr('return_to_supplier', 'Return to Supplier')}
-            value={supplierStats.count}
-            color="text-gray-800 dark:text-gray-200"
-            info={tr('returns_info_supplier_count', 'How many cases you sent back to a supplier. Click to clear the type filter and show all of them.')}
-            active={typeFilter === 'all'}
-            onClick={() => setTypeFilter('all')}
-          />
-          <ReturnStatTile
-            label={tr('supplier_compensation', 'Compensation')}
-            value={fmtUSD(supplierStats.compensationUsd)}
-            color="text-emerald-700 dark:text-emerald-400"
-            info={tr('returns_info_supplier_compensation', 'Money or credit the supplier gave back for goods you returned. Click to show only compensated cases.')}
-            active={typeFilter === 'refund'}
-            onClick={() => setTypeFilter('refund')}
-          />
-          <ReturnStatTile
-            label={tr('business_loss', 'Business loss')}
-            value={fmtUSD(supplierStats.lossUsd)}
-            color="text-rose-600 dark:text-rose-400"
-            info={tr('returns_info_business_loss', 'What the returned goods cost you that the supplier did NOT cover. This is money the shop absorbs. Click to show only these.')}
-            active={typeFilter === 'credit'}
-            onClick={() => setTypeFilter('credit')}
-          />
-        </div>
-      )}
+      {/* The foldable stats strip (shared StatsStrip, the app-wide stats
+          pattern) replaces the per-scope tile grids: range-scoped mini
+          cards (default today) whose folds carry the by-type / by-reason
+          breakdowns from /api/returns/report. Type filtering stayed where
+          it also already lived — the Filters menu's type section. */}
+      <StatsStrip
+        className="mb-3"
+        cards={stripCards}
+        loading={stripLoading}
+        t={t}
+        range={stripRange}
+        onRangeChange={setStripRange}
+      />
 
       {/* Merged toolbar row: Export/History/the primary New Return action
           each take an equal share of the row's full width (flex-1, labels

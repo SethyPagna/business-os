@@ -481,27 +481,41 @@ app.get('/report', async (c) => {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate) || !/^\d{4}-\d{2}-\d{2}$/.test(endDate)) {
     return c.json({ error: 'startDate and endDate (YYYY-MM-DD) are required' }, 400)
   }
+  // scope=supplier reports return-to-supplier cases (compensation / business
+  // loss) with the SAME response shape -- customer rows simply carry zero in
+  // the supplier money columns and vice versa, so one reader serves both the
+  // Reports hub (customer) and the Returns page's scope-aware stats strip.
+  const scope = String(query.scope || 'customer') === 'supplier' ? 'supplier' : 'customer'
   const clauses = [
     'date(created_at) BETWEEN date(@startDate) AND date(@endDate)',
-    `COALESCE(return_scope, 'customer') = 'customer'`,
+    `COALESCE(return_scope, 'customer') = @scope`,
     `COALESCE(status, 'completed') <> 'cancelled'`,
   ]
-  const params: Record<string, unknown> = { startDate, endDate }
+  const params: Record<string, unknown> = { startDate, endDate, scope }
   if (query.branchId) { clauses.push('branch_id = @branchId'); params.branchId = query.branchId }
   const where = clauses.join(' AND ')
+  const moneySums = `ROUND(COALESCE(SUM(total_refund_usd), 0), 2) AS refund_usd,
+    ROUND(COALESCE(SUM(supplier_compensation_usd), 0), 2) AS compensation_usd,
+    ROUND(COALESCE(SUM(supplier_loss_usd), 0), 2) AS loss_usd`
   const [totals, days, byReason, byType] = await Promise.all([
-    db.prepare(`SELECT COUNT(*) AS count, ROUND(COALESCE(SUM(total_refund_usd), 0), 2) AS refund_usd FROM returns WHERE ${where}`).get<Record<string, number>>(params),
-    db.prepare(`SELECT date(created_at) AS date, COUNT(*) AS count, ROUND(COALESCE(SUM(total_refund_usd), 0), 2) AS refund_usd FROM returns WHERE ${where} GROUP BY date(created_at) ORDER BY date(created_at) DESC`).all<Record<string, unknown>>(params),
-    db.prepare(`SELECT COALESCE(NULLIF(TRIM(reason), ''), '—') AS reason, COUNT(*) AS count, ROUND(COALESCE(SUM(total_refund_usd), 0), 2) AS refund_usd FROM returns WHERE ${where} GROUP BY COALESCE(NULLIF(TRIM(reason), ''), '—') ORDER BY refund_usd DESC`).all<Record<string, unknown>>(params),
-    db.prepare(`SELECT COALESCE(NULLIF(TRIM(return_type), ''), 'restock') AS return_type, COUNT(*) AS count, ROUND(COALESCE(SUM(total_refund_usd), 0), 2) AS refund_usd FROM returns WHERE ${where} GROUP BY COALESCE(NULLIF(TRIM(return_type), ''), 'restock') ORDER BY count DESC`).all<Record<string, unknown>>(params),
+    db.prepare(`SELECT COUNT(*) AS count, ${moneySums} FROM returns WHERE ${where}`).get<Record<string, number>>(params),
+    db.prepare(`SELECT date(created_at) AS date, COUNT(*) AS count, ${moneySums} FROM returns WHERE ${where} GROUP BY date(created_at) ORDER BY date(created_at) DESC`).all<Record<string, unknown>>(params),
+    db.prepare(`SELECT COALESCE(NULLIF(TRIM(reason), ''), '—') AS reason, COUNT(*) AS count, ${moneySums} FROM returns WHERE ${where} GROUP BY COALESCE(NULLIF(TRIM(reason), ''), '—') ORDER BY refund_usd DESC, count DESC`).all<Record<string, unknown>>(params),
+    db.prepare(`SELECT COALESCE(NULLIF(TRIM(return_type), ''), 'restock') AS return_type, COUNT(*) AS count, ${moneySums} FROM returns WHERE ${where} GROUP BY COALESCE(NULLIF(TRIM(return_type), ''), 'restock') ORDER BY count DESC`).all<Record<string, unknown>>(params),
   ])
+  const money = (row: Record<string, unknown> | null | undefined) => ({
+    refund_usd: Number(row?.refund_usd || 0),
+    compensation_usd: Number(row?.compensation_usd || 0),
+    loss_usd: Number(row?.loss_usd || 0),
+  })
   return c.json({
     startDate,
     endDate,
-    totals: { count: Number(totals?.count || 0), refund_usd: Number(totals?.refund_usd || 0) },
-    days: (days || []).map((d) => ({ date: String(d.date || ''), count: Number(d.count || 0), refund_usd: Number(d.refund_usd || 0) })),
-    by_reason: (byReason || []).map((r) => ({ reason: String(r.reason || ''), count: Number(r.count || 0), refund_usd: Number(r.refund_usd || 0) })),
-    by_type: (byType || []).map((r) => ({ return_type: String(r.return_type || ''), count: Number(r.count || 0), refund_usd: Number(r.refund_usd || 0) })),
+    scope,
+    totals: { count: Number(totals?.count || 0), ...money(totals) },
+    days: (days || []).map((d) => ({ date: String(d.date || ''), count: Number(d.count || 0), ...money(d) })),
+    by_reason: (byReason || []).map((r) => ({ reason: String(r.reason || ''), count: Number(r.count || 0), ...money(r) })),
+    by_type: (byType || []).map((r) => ({ return_type: String(r.return_type || ''), count: Number(r.count || 0), ...money(r) })),
   })
 })
 

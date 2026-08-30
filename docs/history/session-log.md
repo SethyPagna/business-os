@@ -14153,3 +14153,67 @@ served a broken mid-keystroke Dashboard chunk — "MiniStat is not defined" —
 resolved by rebuilding after their file settled). tsc clean outside the
 peer's in-flight `Inventory.tsx`. **Needs deploy** (with everything since
 Worker 65f7b69d).
+
+## Part 516
+
+**Ask.** "For each of data full pages can make stats with mini stats cards
+folded in them, to explain and show more stats of course based on date range.
+default per day... do so for all pages."
+
+**What changed.** ONE shared foldable stats surface, rolled out everywhere:
+- `shared/StatsStrip.tsx` + `shared/statsStripPresets.ts` (pure preset math in
+  .ts for node tests): a single horizontal row of compact mini stat cards
+  (overflow scrolls sideways, never stacks), each foldable card opening ONE
+  inline breakdown panel below the strip (label/value grid + InfoHint
+  explanation), driven by the shared DateTimeRangePicker + Today/7D/Month/Year
+  preset chips, DEFAULT = today (per-day). Cards take tone/trend/sub; value
+  and details are ReactNode so rich subs (Inventory's colored health segments)
+  survive.
+- Backend: new `GET /api/sales/stats-strip` (kernel getSalesTotals +
+  getPaymentMethodBreakdown + status mix + range customer-returns; sales-
+  permission-gated, range+branch scoped); `GET /api/returns/report` gains
+  `scope=supplier` returning the same shape with compensation/loss sums (one
+  reader for the hub AND the scope-aware Returns strip).
+- **Sales**: the blue filter-scoped summary bar became the strip (Sales /
+  Revenue / Payments / Returns cards; folds: status mix, gross→collected
+  money trail, per-method collected, refunds). Filter-scoped totals still
+  live on the list footer; strip refreshes on sales/returns sync events.
+- **Returns**: both per-scope tile grids (ReturnStatTile deleted) became one
+  scope-aware strip fed by /returns/report; type filtering stays in the
+  Filters menu where it already lived. returnScopeSummary slimmed to the row
+  split the export menu needs.
+- **Fees**: the lone Total pill became Fees + Total cards (folds: by type
+  with translated labels, top spend days mm/dd/yyyy).
+- **Inventory** (and therefore **Branches**, whose "Stats & Branches" hub
+  embeds it): the 8-card grid + InventoryStatDetailModal drill are gone; the
+  strip keeps shelf-state cards (Products with health segments, Stock value)
+  from stockStats and feeds the money cards (Revenue/Discounts/Fees/Returns)
+  from the range endpoints — replacing the old getReturns({scope:'all'})
+  fetch that walked EVERY return row into the browser to add them up. The
+  stats export scope now carries the same range figures.
+- **Dashboard**: the MiniStat KPI grid + the KPI portal sheet became the
+  strip (kpi.details/info/trend map 1:1; tone derived from the old color);
+  the dashboard's own range card keeps driving it (no strip-level range).
+  The portal sheet stays ONLY for the Best Hour drill. MiniStat.tsx deleted
+  (zero consumers).
+- Lang: en+km keys for card hints/labels (stats_*), including strip-specific
+  rewrites of the old tile hints whose "Click to filter" phrasing no longer
+  applied.
+
+**Verified.** FE tsc clean; BE tsc clean; `tests/statsStrip.test.ts` (7 PASS:
+preset math incl. year-boundary 7d, default-today pin on every page, fold
+semantics, zombie-grid absence) wired into the chain (coverage 140);
+check:source 414; langKeyIntegrity green; dashboardDataReliability PASS.
+LIVE on local wrangler+Vite: Sales strip defaulted to today (0/$0 — correct),
+This Month showed 3 sales / $35.50 / cash 1·$12.50 with the Revenue fold's
+6-row money trail; Returns strip live; Fees fold listed 8 days by spend;
+Branches hub inherited the Inventory strip (Products 17 with 3/14/0 health
+segments, Today active); Dashboard strip replaced the 2-row tile grid (~1
+screen of chrome reclaimed on phone). Full cloudflare pure suite: 111 PASS,
+2 FAIL (migration-finalize + reset-products 403s) — PROVEN pre-existing by
+path-stashing only this session's sales.ts/returns.ts and re-running: same
+failures without my changes; they belong to the parallel session's in-flight
+permission work, left untouched.
+
+**Not done.** Deploy. The two pre-existing 403 test failures (other session's
+scope). POS deliberately has no strip (a cashier surface, not a data page).
