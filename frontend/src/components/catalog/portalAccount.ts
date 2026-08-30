@@ -76,8 +76,16 @@ export function usePortalAccount(bucket: BucketLike, wishlist: WishlistLike) {
         a.getPortalCart ? a.getPortalCart().then(readItems).catch(() => []) : Promise.resolve([]),
         a.getPortalWishlist ? a.getPortalWishlist().then(readItems).catch(() => []) : Promise.resolve([]),
       ])
-      bucket.setAll(mergeBucketItems(bucketItemsRef.current, serverCart as PortalBucketItem[]))
-      wishlist.setAll(mergeWishlistItems(wishlistItemsRef.current, serverWishlist as PortalWishlistItem[]))
+      const mergedCart = mergeBucketItems(bucketItemsRef.current, serverCart as PortalBucketItem[])
+      const mergedWishlist = mergeWishlistItems(wishlistItemsRef.current, serverWishlist as PortalWishlistItem[])
+      bucket.setAll(mergedCart)
+      wishlist.setAll(mergedWishlist)
+      // Push the merged union straight back so a second device sees a guest's
+      // just-merged items immediately, not only after the next local edit.
+      await Promise.all([
+        a.savePortalCart ? a.savePortalCart(mergedCart).catch(() => {}) : Promise.resolve(),
+        a.savePortalWishlist ? a.savePortalWishlist(mergedWishlist).catch(() => {}) : Promise.resolve(),
+      ])
     } finally {
       // Even if the server reads failed, start mirroring so local edits persist.
       hydratedRef.current = true
