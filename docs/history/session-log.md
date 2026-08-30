@@ -14046,7 +14046,10 @@ maintenanceTierPicker / ownedGoogleAuth / settingsRefresh /
 settingsConflictHelpers green. Live click-through still deferred (dev ports
 peer-owned). **Needs deploy** (rides with Parts 507/512).
 
-## Part 514 (Aug 30 2026, session business-os-v1-b9) — Part-77 HIGH fix: password-reset open redirect closed
+## Part 517 (Aug 30 2026, session business-os-v1-b9) — Part-77 HIGH fix: password-reset open redirect closed
+
+*(Renumbered from a colliding "Part 514" — session f9 logged its own 514 in
+the same minutes; this entry keeps its original position in the file.)*
 
 **Ask:** continuation of the findings backlog (claimed in progress.md first,
 re-verified against current source). `issuePasswordResetLink` appended the
@@ -14218,7 +14221,10 @@ permission work, left untouched.
 **Not done.** Deploy. The two pre-existing 403 test failures (other session's
 scope). POS deliberately has no strip (a cashier surface, not a data page).
 
-## Part 515 (Aug 30 2026, session business-os-v1-b9) — Part-77 CRITICAL fix: inventory /transfer moves the lots with the quantity
+## Part 518 (Aug 30 2026, session business-os-v1-b9) — Part-77 CRITICAL fix: inventory /transfer moves the lots with the quantity
+
+*(Renumbered from a colliding "Part 515" — session 5752… logged its own 515
+in the same minutes.)*
 
 **Ask:** continuation of the findings backlog (claimed first, re-verified
 against current source). Inventory's POST /transfer — the Inventory page's
@@ -14259,4 +14265,4 @@ migration 0081 had to repair. Flagged by three independent audits. Commit
   route-wiring source lock.
 
 Verified: test 4/4, cloudflare tsc clean. **Needs deploy** (rides with
-Parts 507/512/513/514).
+Parts 507/512/513/517).
