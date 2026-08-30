@@ -14916,3 +14916,55 @@ every computation site must agree. `test-loyalty-accrual-pure` extended
 with a real-schema award plus parity source locks on BOTH formulas so
 they cannot drift apart again; sale-totals 15 green; tsc clean.
 **Needs deploy** (rides with the b9 batch).
+
+## Part 534 — Money model: per-purpose exchange rates + 100-riel physical-cash rounding
+
+**Ask.** Continuing "fix accordingly" (Part-77 sweep). The sweep's HIGH money
+finding (fractional-riel totals + whole-dollar loyalty redeem) was already
+closed by a parallel session (`1360a7c8`: redeem keeps cents, KHR whole riel).
+On confirming that with the user, they specified the business's actual money
+conventions, which go beyond the finding into a small feature. Confirmed over
+three rounds of Q&A (redeem value rounds "to cents"; KHR rules below).
+
+**What changed.**
+- *Part B — 100-riel physical-cash hints (commit `c65e7c3f`).* 100៛ is the
+  smallest note, so the cash a cashier physically collects / returns is a whole
+  100៛ — but this is a COUNTER convenience only: the saved sale and printed
+  receipt keep the EXACT figure (user: "it does not show in receipt … actual
+  calculations"). New `utils/rielRounding.ts` encodes the confirmed matrix:
+  collect is exact for a cash payment OR any walk-in, rounds UP to 100៛ only for
+  a non-cash payment on a delivery order; change handed back always rounds DOWN.
+  POS shows the collect figure under the total (only when it differs) and the
+  rounded-down change under "Change given", each behind an InfoHint stating the
+  saved sale + receipt stay exact. 3 en/km keys.
+- *Part A — dedicated change exchange rate (commit `a79f37d4`).* Change money
+  converts at its own USD→KHR rate, separate from the main rate (like loyalty's
+  own rate). New `change_exchange_rate` setting (key-value, no migration),
+  bucketed under `sales_policy`, editable in Settings → Currency; blank = "same
+  as exchange rate". `posCore.resolveChangeExchangeRate()` falls back to the
+  main rate on unset/blank/zero/malformed. POS applies it to the change calc
+  only; the already-persisted `change_khr` therefore records change at the
+  change rate.
+
+**Verified (Golden Rule 5, each run individually).** New `rielRounding.test.ts`
+(8 checks) and `changeExchangeRate.test.ts` (3 checks) pass; `posCore`,
+`langKeyIntegrity`, `settingsConflictHelpers` green; frontend AND cloudflare
+`tsc --noEmit` both 0 errors. All commits path-scoped (verified staged diffs
+carried only my keys/lines; `progress.md` + a sibling session's CustomersTab
+edits were left untouched). Browser check not run: another session's dev server
+holds the folder and starting a second risks the node_modules-lock trap — the
+logic is fully unit-tested and the wiring typechecks.
+
+**Not done / deferred (flagged, needs a decision or a coordinated window).**
+- Recording WHICH rate produced a sale's change as its own `sales.change_
+  exchange_rate` column needs a MIGRATION, unsafe to land while the two
+  committed `0086_*` migrations + the 0087 reassignment are being untangled
+  across sessions (coordinator 7b). The change AMOUNT already persists; only the
+  rate-of-record column is outstanding. Land it in a focused migration pass.
+- The "collect rounds UP for non-cash delivery" hint is surfaced per the user's
+  confirmed rule, but non-cash payments involve no physical riel, so the framing
+  may want a second look with the user once seen live. It changes nothing saved
+  or printed, so no data risk.
+- progress.md tracker (read-cache, receipt/date-locale, money-model) should be
+  marked FIXED by whoever next edits progress.md cleanly — it was dirty from
+  another session throughout, so this session never staged it.
