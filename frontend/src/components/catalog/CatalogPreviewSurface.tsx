@@ -317,7 +317,7 @@ export default function CatalogPreviewSurface({
                       </div>
                     ) : null}
                     <div
-                      className="notranslate truncate text-lg font-semibold tracking-tight text-slate-900 sm:text-2xl dark:text-neutral-100"
+                      className="notranslate text-lg font-semibold leading-tight tracking-tight text-balance break-words [overflow-wrap:anywhere] text-slate-900 sm:truncate sm:text-2xl dark:text-neutral-100"
                       style={{ fontFamily: "'Georgia', 'Times New Roman', serif" }}
                       translate="no"
                     >
