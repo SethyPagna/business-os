@@ -503,10 +503,12 @@ function CatalogEditorSurfaceContent() {
               </div>
               <div className="mt-4">
                 <div className="flex items-center justify-between gap-3">
-                  <div className="block text-sm font-medium text-slate-700">{copy('recommendedProducts', 'Recommended products')}</div>
+                  <div className="flex items-center gap-1.5">
+                    <div className="text-sm font-medium text-slate-700">{copy('recommendedProducts', 'Recommended products')}</div>
+                    <InfoHint label={copy('recommendedProducts', 'Recommended products')} text={copy('recommendedProductsHint', 'Select store-picked products that should always receive a recommended badge on the public portal.')} />
+                  </div>
                   <span className="text-xs font-semibold text-slate-500">{recommendedProductIds.length} {copy('selected', 'selected')}</span>
                 </div>
-                <p className="mt-1 text-xs text-slate-500">{copy('recommendedProductsHint', 'Select store-picked products that should always receive a recommended badge on the public portal.')}</p>
                 {selectedRecommendedProductOptions.length ? (
                   <div className="mt-3 flex flex-wrap gap-2">
                     {selectedRecommendedProductOptions.map((product) => (
@@ -815,7 +817,10 @@ function CatalogEditorSurfaceContent() {
               />
             </div>
             <div className="mt-4">
-              <label htmlFor="portal-about-content" className="block text-sm font-medium text-slate-700">{copy('aboutContent', 'About content')}</label>
+              <div className="flex items-center gap-1.5">
+                <label htmlFor="portal-about-content" className="text-sm font-medium text-slate-700">{copy('aboutContent', 'About content')}</label>
+                <InfoHint label={copy('aboutContent', 'About content')} text={copy('aboutContentHint', 'Tell customers about your story, hours, policies, or services.')} />
+              </div>
               <textarea
                 id="portal-about-content"
                 name="customer_portal_about_content"
@@ -824,7 +829,6 @@ function CatalogEditorSurfaceContent() {
                 value={editorDraft.customer_portal_about_content || ''}
                 onChange={(event) => setDraft('customer_portal_about_content', event.target.value)}
               />
-              <p className="mt-2 text-xs text-slate-500">{copy('aboutContentHint', 'Tell customers about your story, hours, policies, or services.')}</p>
             </div>
             <div className="mt-5 rounded-2xl border border-slate-200 bg-white p-4">
               <HintLabel className="text-sm font-semibold text-slate-900" title={copy('productDefaultsTitle', 'Product detail defaults')} hint={copy('productDefaultsHint', 'Shown on every product\'s detail view. A product\'s own Caution text (typed into its description) takes priority over this default; Need More Details always shows when set here.')} />
@@ -999,8 +1003,7 @@ function CatalogEditorSurfaceContent() {
             <div className="rounded-2xl border border-slate-200 bg-white p-4">
               <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                 <div>
-                  <div className="text-sm font-semibold text-slate-900">{copy('faqSettings', 'FAQ settings')}</div>
-                  <p className="mt-1 text-xs text-slate-500">{copy('faqHint', 'Add your most common customer questions here. Customers can open each answer one by one.')}</p>
+                  <HintLabel className="text-sm font-semibold text-slate-900" title={copy('faqSettings', 'FAQ settings')} hint={copy('faqHint', 'Add your most common customer questions here. Customers can open each answer one by one.')} />
                 </div>
                 <div className="flex flex-wrap gap-2">
                   <button type="button" className="btn-secondary inline-flex items-center gap-1.5 px-3 py-1.5 text-xs sm:text-sm" onClick={addFaqStarterSet}>
@@ -1214,7 +1217,10 @@ function CatalogEditorSurfaceContent() {
               <textarea id="portal-business-address" name="business_address" autoComplete="street-address" className="input resize-none" rows={2} value={editorDraft.business_address || ''} onChange={(event) => setDraft('business_address', event.target.value)} />
             </div>
             <div>
-              <label htmlFor="portal-address-link" className="block text-sm font-medium text-slate-700">{copy('addressLink', 'Address link')}</label>
+              <div className="flex items-center gap-1.5">
+                <label htmlFor="portal-address-link" className="text-sm font-medium text-slate-700">{copy('addressLink', 'Address link')}</label>
+                <InfoHint label={copy('addressLink', 'Address link')} text={copy('addressLinkHint', 'Optional external map or directions link opened when customers tap the address.')} />
+              </div>
               <input
                 id="portal-address-link"
                 name="customer_portal_address_link"
@@ -1224,7 +1230,6 @@ function CatalogEditorSurfaceContent() {
                 value={editorDraft.customer_portal_address_link || ''}
                 onChange={(event) => setDraft('customer_portal_address_link', event.target.value)}
               />
-              <p className="mt-2 text-xs text-slate-500">{copy('addressLinkHint', 'Optional external map or directions link opened when customers tap the address.')}</p>
             </div>
 
             <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
@@ -1388,7 +1393,7 @@ function CatalogEditorSurfaceContent() {
               </div>
 
               <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                <div className="mb-3 text-sm font-semibold text-slate-900">{copy('mapEmbed', 'Google map embed URL')}</div>
+                <div className="mb-3 flex items-center gap-1.5 text-sm font-semibold text-slate-900">{copy('mapEmbed', 'Google map embed URL')}<InfoHint label={copy('mapEmbed', 'Google map embed URL')} text={copy('mapEmbedHint', 'Paste a Google Maps link or embed URL. The portal will render it as an interactive map card.')} /></div>
                 <label htmlFor="portal-google-map-embed" className="sr-only">{copy('mapEmbed', 'Google map embed URL')}</label>
                 <textarea
                   id="portal-google-map-embed"
@@ -1400,7 +1405,6 @@ function CatalogEditorSurfaceContent() {
                   placeholder="<iframe src='https://www.google.com/maps/embed?...'></iframe>"
                   onChange={(event) => setDraft('customer_portal_google_maps_embed', event.target.value)}
                 />
-                <p className="mt-2 text-xs text-slate-500">{copy('mapEmbedHint', 'Paste a Google Maps link or embed URL. The portal will render it as an interactive map card.')}</p>
                 <label className="mt-3 flex items-center justify-between rounded-xl border border-slate-200 bg-white px-3 py-2" htmlFor="portal-show-google-map">
                   <span className="text-sm text-slate-700">{copy('showGoogleMap', 'Show Google map')}</span>
                   <input id="portal-show-google-map" name="customer_portal_show_google_map" type="checkbox" checked={!!editorDraft.customer_portal_show_google_map} onChange={(event) => setDraft('customer_portal_show_google_map', event.target.checked)} />
