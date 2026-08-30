@@ -13965,3 +13965,44 @@ Khmer-language visual pass over the receipt toolbar (EN verified; the layout
 is width-independent but Khmer strings were not eyeballed). Ride-along note:
 my `transfer_change_product` en/km keys were committed by a peer's lang-pack
 commit (1f55712e) while staged in the shared tree — content is correct there.
+
+## Part 512 (Aug 30 2026, session business-os-v1-b9) — Part-77 CRITICAL fix: undo-applier replay gated by server-declared permission
+
+**Ask:** continuation; picked the one Part-77 CRITICAL finding sitting in my own
+K1 lane (claimed in the findings section before editing): the action-history
+permission gate derives from the row's CLIENT-supplied entity/scope
+(`permissionForActionHistory`), and an unrecognized entity yields an empty
+permission that gates nothing — so any authenticated account could POST a
+history row under `scope: 'global'` with an unmapped entity whose payload names
+`branch.update`, then call /undo and have the Worker write branches for it.
+Re-verified against current source (incl. my slice 2, which made the path
+easier to reach via real Undo buttons) before fixing. Commit `bcf58378`:
+
+- `lib/undoAppliers.ts`: the registry entries become `{ permission, run }` —
+  every applier declares the permission section its replay writes under
+  (`branches` for `branch.update`, the same section the live PUT gates on).
+  The server-side registry is the authority; the client cannot influence it
+  (an unregistered applier name simply never runs). `resolveUndoApplier`
+  returns the declared permission.
+- `routes/actionHistory.ts`: the FULL tier of the applier-declared permission
+  is demanded at BOTH ends — record time (`canRecordHistory` →
+  `canUseNamedAppliers` over both payloads) and operate time (inside the
+  transition handler, before any status flip or replay; rows recorded before
+  this gate existed, or by a since-demoted user, must not replay on the
+  strength of the row alone). Full, not review: a replay is a direct write
+  with no review queue, and a review-tier user's forward edit queues for
+  approval. `mapRow`'s `server_replayable` is now ANDed with the requesting
+  user's tier, so the UI never renders an Undo/Redo button the operate gate
+  would refuse with 403.
+- Side effect worth knowing: a review-tier user's branch edit (which the PUT
+  queues, 202) no longer records an "undoable" history row via the applier
+  payloads — recording is refused, and the consumer's `.catch(() => {})`
+  swallows it. That row was already a lie (the edit itself hadn't applied);
+  the local closure stack in the originating tab is unaffected.
+- `test-undo-appliers-pure.cjs` 8 → 10: the applier declares 'branches';
+  source locks pin the record-time gate, the operate-time gate's position
+  BEFORE both the replay and the status flip, and mapRow's per-user AND.
+
+Verified: pure test 10/10, cloudflare tsc clean (frontend untouched this
+part). Live click-through still deferred (all three dev ports peer-owned).
+**Needs deploy** (rides with Part 507).
