@@ -13455,3 +13455,35 @@ plain tap after a drag opened the panel FIRST try.
 groups in production await the operator's own merge/dismiss decisions in the
 new section. Two dead-code finds spun off as a separate task chip
 (DatedStockReconciliationModal orphaned; legacy bulkImport* transports).
+
+## Part 502 (Aug 30 2026, session business-os-v1-62) — FilterMenu redesign: accordion sections, active-pick chips outside the menu
+
+User asked for a FilterMenu redesign. The old design stacked TWO popovers
+(Filters button → panel of section rows → each row's pill floated a second
+flyout over the panel for the actual options): three layers per filter change,
+the flyout hid the other sections' state, labels were capped at a 5rem grid
+column, and outside the menu all you saw was a count — never WHICH filters.
+
+New design (`2a18dd97`), same FilterSection/FilterOption API — zero call-site
+changes across all ~20 consumers:
+- Sections are ACCORDION rows inside the one panel — tap a header, options
+  expand inline beneath it, one open at a time, the section with active picks
+  starts open. Exactly one LazyPortalMenu layer (pinned by an updated
+  performanceLoadingUx assertion; the old 5rem-grid assertion replaced).
+- Active picks render as removable ×-chips OUTSIDE the menu, flowing after
+  the trigger in the toolbar (SortChip principle: never hide active state),
+  capped at 4 + "+n"; opt-out prop showActiveChips.
+- The panel's internal duplicate chip row removed.
+
+Also fixed two stale structural assertions found while validating: the
+tracker approve-timeout regex (peer's committed confirmStockActions argument
+— code right, regex rigid; proven pre-existing red at clean HEAD) and the
+sales countActiveFlags list (sort moved out of the badge in 29fae951 — that
+commit's miss, caught and corrected here).
+
+Verified LIVE on Sales: accordion expands STATUS inline with USER/GROUP BY/
+PERIOD collapsed below; picking Awaiting Payment lights "Filters (1)" and
+shows an "Awaiting Payment ×" chip beside the button; the chip's × clears it;
+the SortChip menu lists Date/Total/Customer/Cashier/Status/Receipt and
+sort-by-Total reorders flat (12.50, 12.50, 10.50) under a TOTAL section.
+tsc clean; performanceLoadingUx + productMenuHelpers green. **Needs deploy.**
