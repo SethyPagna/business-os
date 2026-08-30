@@ -52,12 +52,16 @@ runTest('the leading columns are sized from the shared constants, not hand-writt
   assert.match(surface, /const selectColWidth = selectionModeActive \? SELECT_COL_WIDTH : '0px'/, 'the checkbox column collapses to 0 out of select mode')
 })
 
-runTest('the image column is only a little wider than the thumbnail it holds', () => {
+runTest('the image column fits the thumbnail without excess indentation', () => {
   // "too much indentation when only need a bit spacing from group image".
   const imageWidth = Number(surface.match(/const IMAGE_COL_WIDTH = '([\d.]+)rem'/)![1])
-  // The thumbnail is h-10 w-10 = 2.5rem.
-  assert.ok(imageWidth >= 2.5, `the column must still fit the 2.5rem thumbnail, got ${imageWidth}rem`)
-  assert.ok(imageWidth <= 4, `the column reserved ${imageWidth}rem for a 2.5rem thumbnail -- that gap is the reported indentation`)
+  // The desktop thumbnail is h-14 w-14 = 3.5rem (enlarged Aug 29), and its
+  // cell adds px-2 (0.5rem each side = 1rem). The column must therefore be
+  // AT LEAST 4.5rem or the fixed-width thumbnail overflows into the name
+  // rail; and no more than ~a little over that, or the extra reads as the
+  // reported left-rail indentation.
+  assert.ok(imageWidth >= 4.5, `the column must fit the 3.5rem thumbnail + its 1rem px-2 gutter (>= 4.5rem), got ${imageWidth}rem`)
+  assert.ok(imageWidth <= 5.5, `the column reserved ${imageWidth}rem for a 3.5rem thumbnail -- that gap is the reported indentation`)
 })
 
 runTest("the full-width rows use REAL cells in the table's own columns, never a colSpan=8 with its own padding", () => {

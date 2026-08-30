@@ -31,12 +31,17 @@ import ChevronRight from 'lucide-react/dist/esm/icons/chevron-right.js'
 // aligning. It cannot drift, at any width, because there is nothing left
 // to keep in sync.
 //
-// What is still tunable is how much space those leading columns ASK for,
-// and they were asking for far more than their contents need: 2.5rem for a
-// 1rem checkbox, 4.5rem for a 2.5rem thumbnail. Tightened -- "only need a
-// bit spacing from the group image".
+// What is still tunable is how much space those leading columns ASK for.
+// The image column must fit the actual thumbnail plus its cell's `px-2`
+// gutter: after the desktop thumbnails were enlarged to h-14/w-14 (56px, Aug
+// 29) the old 3.5rem (56px) column was NARROWER than 56px image + 16px cell
+// padding = 72px, so in `table-fixed` the thumbnail overflowed its 56px
+// column and spilled into the name rail on large screens. 4.5rem (72px) is
+// the exact fit -- the 56px image plus its 16px px-2 gutter, no excess to
+// read as indentation; the checkbox column stays tight at 2rem for its 1rem
+// box.
 const SELECT_COL_WIDTH = '2rem'
-const IMAGE_COL_WIDTH = '3.5rem'
+const IMAGE_COL_WIDTH = '4.5rem'
 /** Padding between the image column and the start of any title text. */
 export const ROW_TEXT_GUTTER = 'px-2'
 // A grouped child row does NOT get a text indent: it aligns exactly with

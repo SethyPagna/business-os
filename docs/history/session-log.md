@@ -12901,6 +12901,35 @@ not a refund -- flagged for the user). "Combinations" is implemented as pick-any
 side-by-side sections, not a single merged P&L. Report FILTERS beyond date/branch for
 returns/fees were not added (their data dimensions differ from sales).
 
+## Part 490 (Aug 29 2026, session business-os-v1-e5) — desktop product thumbnail overflowed the name rail (regression from the enlarge-thumbnails change)
+
+**"Continue tasks" pick, verified live-broken, not stale.** The board's "Large-screen
+row alignment -- no indentation vs the category rail" item became true again: a recent
+peer commit (`47a877a6`) enlarged the desktop table thumbnail to `h-14 w-14` (56px)
+but left `IMAGE_COL_WIDTH` at `3.5rem` (56px). The image cell adds `px-2` (16px), so
+the fixed-width 56px thumbnail needed 72px of cell but only had a 56px `table-fixed`
+column -- it overflowed rightward into the name rail on large screens. Bumped
+`IMAGE_COL_WIDTH` to the exact fit `4.5rem` (56px image + 16px gutter, no excess to
+read as indentation). The whole left rail (category band, group title, product names)
+still aligns because they all start after this column.
+
+**Stale test fixed (mine, since my constant change tripped it).** productsRowAlignment
+still asserted the OLD 2.5rem thumbnail and capped the column at 4rem -- it never
+tracked the peer's enlargement, and would have flagged any correct width. Updated it to
+the current 3.5rem thumbnail: column must be >= 4.5rem (fit image + px-2) and <= 5.5rem
+(no excess indentation).
+
+**Verification.** tsc + check:source + productsRowAlignment (now passing) + vite build
+green. ProductsListSurface.tsx + the test only.
+
+**Board note.** progress.md left untouched (a peer holds an uncommitted board edit
+there right now); this closes the "large-screen row alignment" item in practice.
+Session e5 = the compaction-resumed continuation of e4 (Parts 443-483). Part 489
+collided with a peer's entry (both appended after 488); renumbered mine up to 490 per
+the write-order rule after re-checking 490 free.
+
+**Needs deploy.** Frontend-only; ships on the next build.
+
 ## Part 489 (Aug 30 2026, session 79) — Redaction lock for staff-only delivery cost on the customer portal
 
 **Ask.** Continue progress.md / continue tasks, in a checkout with ~16 concurrent
