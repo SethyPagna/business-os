@@ -13247,3 +13247,54 @@ was clean before the edit. Both committed via atomic pathspec; peers' import-con
 lane untouched. Part 497 after re-checking max = 496.
 
 **Needs deploy.** Yes — both ship on the next `npm run deploy:full`.
+
+## Part 498 (Aug 30 2026, session business-os-v1-62) — deep migration audit: 100% verified, one 61-product cost wipe found, repaired, and engine-fixed
+
+User asked for a full-depth verification that the migration pack (CSVs + Excel
+twins) and production data agree "100%, details not incomplete." Everything was
+re-measured, not trusted from the manifest's own reconciliation table.
+
+**Pack:** `validate-pack.cjs` full run (including all 12 CSV↔XLSX twin proofs)
+— ALL CHECKS PASSED, every twin byte-exact.
+
+**Production re-measurement — every gate passed:** products 6,104; suppliers 16;
+delivery contacts 2; customers 4,705 (4,652 + all 53/53 imported phones found,
+digit-normalized); fees 4,240 / $129,696.60 / ៛82,419,900 exact; movements
+21,278 / 114,277.8 units; product stock = branch stock = active lot ledger =
+23,174 (the 23,174 independently re-derived from the raw CSVs); historical lots
+19,914 spanning 07/09/2024→08/27/2026 with none later (the 2026-08-29-dated
+batches are the 73 Step-2 products' opening lots — expected); supplier lots
+7,022; sales 14,913 receipts with zero stray live receipts. Deeper than the
+gates: per-year receipts/lines/units match source EXACTLY (the 6 junk receipts
+span exactly 10 source lines → 35,970 sale lines to the line), revenue within
+$0.11 float noise on $1.87M, delivery 11,778/11,778 linked, customer links
+13,160/13,200 (99.7%), zero orphans across six FK joins, and per-column product
+fill-rates identical to source for barcode/category/brand/description/
+selling/VIP.
+
+**The one real defect: 61 products' cost_price wiped to 0.** Root cause proven
+in code: `PRODUCT_DETAIL_FIELD_RULE_KEYS` (the "Fill blanks only" preset)
+covers six detail fields but no price/cost column, and `normalizeImportMoney`
+turns a blank cell into 0 — so in merge mode the snapshot's warehouse twin row
+(blank cost) overwrote the cost its shop row had just written. Exactly 61
+identities have that one-sided-cost shape. Repaired directly on production
+from source values (user-authorized "continue"): single CASE UPDATE on the 61
+ids; then zeroed the initially-derived cost_price_khr on the same rows after
+measuring that the source carries NO khr costs anywhere (USD-only convention).
+Post-repair full re-diff: cost matches source for all 6,104 products under
+the engine's deterministic rules (last row of an identity wins + ceil-to-
+cents) — 0 unexplained values. The 727 raw value differences decompose into
+666 ceil-rounding + last-row-wins artifacts (documented behavior) and the 61
+real wipes (now repaired).
+
+**Engine fix `206f0b01`:** `preserveExistingMoneyOnBlankCells` — on a matched
+merge row, a blank money cell (across all header aliases) keeps the existing
+value; explicit 0 still lands; replace/override paths untouched. Pure +
+end-to-end regression tests in test-import-engine-pure.cjs (incl. the -0
+SameValue nit from the round-up normalizer). Full test:import-engine +
+warning-detail suites green; cloudflare tsc clean.
+
+IMPORT-MANIFEST gained a dated "Deep audit + cost repair" addendum, including
+the warning that the engine fix must be DEPLOYED before any re-run of Steps
+1/2/4d or the same 61 costs wipe again. **Backend fix needs deploy** (the
+production DATA repair is already live).
