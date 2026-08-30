@@ -21,7 +21,7 @@ import {
   type CancelReason,
   type SaleItemAllocation,
 } from '../lib/saleTransitions'
-import { buildLikeAliasClause, tokenizeSearchTermGroups } from '../lib/searchMatch'
+import { buildLikeAliasClause, tokenizeSearchTermGroups, normalizeSearchText } from '../lib/searchMatch'
 import { computeSaleTotals, round2 } from '../lib/saleTotals'
 import type { Env } from '../index'
 
@@ -492,7 +492,7 @@ app.post('/', async (c) => {
         is_delivery, delivery_contact_id, delivery_contact_name, delivery_contact_phone, delivery_contact_address,
         delivery_fee_usd, delivery_fee_khr, delivery_fee_paid_by,
         delivery_actual_cost_usd, delivery_actual_cost_khr,
-        loyalty_accrual, sale_status, created_at, updated_at
+        loyalty_accrual, sale_status, search_normalized, created_at, updated_at
       ) VALUES (@receipt_number, @client_request_id, @cashier_id, @cashier_name, @branch_id, @branch_name,
         @customer_id, @customer_name, @customer_phone, @customer_address,
         @payment_method, @payment_details, @payment_currency, @exchange_rate,
@@ -502,7 +502,7 @@ app.post('/', async (c) => {
         @is_delivery, @delivery_contact_id, @delivery_contact_name, @delivery_contact_phone, @delivery_contact_address,
         @delivery_fee_usd, @delivery_fee_khr, @delivery_fee_paid_by,
         @delivery_actual_cost_usd, @delivery_actual_cost_khr,
-        @loyalty_accrual, @sale_status, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+        @loyalty_accrual, @sale_status, @search_normalized, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
     `)
     .run({
       receipt_number: receiptNumber,
@@ -515,6 +515,16 @@ app.post('/', async (c) => {
       customer_name: body.customer_name || customer?.name || null,
       customer_phone: body.customer_phone || null,
       customer_address: body.customer_address || null,
+      // Write-time diacritic fold of this sale's own searchable text fields
+      // (migration 0082) -- the same normalizeSearchText the typed query is
+      // run through, so folded queries match folded storage. Read additively
+      // by buildSalesSearchWhere; membership_number is joined from customers
+      // at read time, so it stays out of this per-row blob.
+      search_normalized: normalizeSearchText(
+        [receiptNumber, body.cashier_name, body.customer_name || customer?.name, body.customer_phone, branchRow?.name, paymentMethod]
+          .filter(Boolean)
+          .join(' '),
+      ),
       payment_method: paymentMethod,
       payment_details: JSON.stringify(effectivePaymentDetails),
       payment_currency: body.payment_currency || 'USD',
@@ -1356,7 +1366,15 @@ function buildSalesSearchWhere(query: Record<string, string>, params: Record<str
   // are already normalized/tokenized above; punctuation variants still
   // work because each normalized word is searched independently. Product
   // name/brand also include their write-time-normalized catalog columns.
+  // s.search_normalized (migration 0082) is the write-time diacritic-folded
+  // form of the sale's own text fields; it is PREPENDED to the unchanged raw
+  // concatenation, not substituted for it. So a folded query ("jose") matches
+  // a stored "José" via the blob, while a row without a blob yet (historical
+  // import rows, which the importer does not populate) still searches exactly
+  // as before through the raw columns -- additive, never a regression. See the
+  // migration's own comment for why there is no data backfill.
   const flatHaystack = `(
+    COALESCE(s.search_normalized, '') || ' ' ||
     COALESCE(s.receipt_number, '') || ' ' || COALESCE(s.cashier_name, '') || ' ' ||
     COALESCE(s.customer_name, '') || ' ' || COALESCE(s.customer_phone, '') || ' ' ||
     COALESCE(s.branch_name, '') || ' ' || COALESCE(s.payment_method, '') || ' ' ||

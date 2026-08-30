@@ -49,7 +49,7 @@ const { outputText } = ts.transpileModule(searchMatchSource, {
 })
 const moduleObj = { exports: {} }
 new Function('exports', outputText)(moduleObj.exports)
-const { tokenizeSearchTermGroups, buildLikeAliasClause } = moduleObj.exports
+const { tokenizeSearchTermGroups, buildLikeAliasClause, normalizeSearchText } = moduleObj.exports
 
 let passed = 0
 function check(name, fn) {
@@ -76,7 +76,8 @@ function freshDb() {
     id INTEGER PRIMARY KEY, receipt_number TEXT, cashier_name TEXT,
     customer_name TEXT, customer_phone TEXT, branch_name TEXT,
     payment_method TEXT, notes TEXT, customer_id INTEGER,
-    sale_status TEXT DEFAULT 'completed', total_usd REAL DEFAULT 0
+    sale_status TEXT DEFAULT 'completed', total_usd REAL DEFAULT 0,
+    search_normalized TEXT
   )`)
   db.exec(`CREATE TABLE sale_items (
     id INTEGER PRIMARY KEY, sale_id INTEGER, product_id INTEGER,
@@ -86,7 +87,8 @@ function freshDb() {
     id INTEGER PRIMARY KEY, return_number TEXT, receipt_number TEXT,
     cashier_name TEXT, customer_name TEXT, supplier_name TEXT,
     reason TEXT, notes TEXT, return_type TEXT, supplier_settlement TEXT,
-    sale_id INTEGER, status TEXT, return_scope TEXT, total_refund_usd REAL
+    sale_id INTEGER, status TEXT, return_scope TEXT, total_refund_usd REAL,
+    search_normalized TEXT
   )`)
   db.exec(`CREATE TABLE return_items (
     id INTEGER PRIMARY KEY, return_id INTEGER, product_id INTEGER,
@@ -105,7 +107,7 @@ function buildSalesSearchWhere(query, params) {
   const groups = tokenizeSearchTermGroups(query.search || '')
   if (!groups.length) return undefined
   const mode = String(query.searchMode || 'AND').toUpperCase() === 'OR' ? 'OR' : 'AND'
-  const flatHaystack = `(COALESCE(s.receipt_number, '') || ' ' || COALESCE(s.cashier_name, '') || ' ' || COALESCE(s.customer_name, '') || ' ' || COALESCE(s.customer_phone, '') || ' ' || COALESCE(s.branch_name, '') || ' ' || COALESCE(s.payment_method, '') || ' ' || COALESCE(s.notes, '') || ' ' || COALESCE(c.membership_number, ''))`
+  const flatHaystack = `(COALESCE(s.search_normalized, '') || ' ' || COALESCE(s.receipt_number, '') || ' ' || COALESCE(s.cashier_name, '') || ' ' || COALESCE(s.customer_name, '') || ' ' || COALESCE(s.customer_phone, '') || ' ' || COALESCE(s.branch_name, '') || ' ' || COALESCE(s.payment_method, '') || ' ' || COALESCE(s.notes, '') || ' ' || COALESCE(c.membership_number, ''))`
   const itemHaystack = `(COALESCE(sis.product_name, '') || ' ' || COALESCE(sis.sku, '') || ' ' || COALESCE(sip.barcode, '') || ' ' || COALESCE(sip.brand, '') || ' ' || COALESCE(sip.name_normalized, '') || ' ' || COALESCE(sip.brand_compact, ''))`
   let groupIndex = 0
   const groupClauses = groups.map((words) => {
@@ -132,7 +134,7 @@ function buildReturnsSearchWhere(query, params) {
   const groups = tokenizeSearchTermGroups(query.search || '')
   if (!groups.length) return undefined
   const mode = String(query.searchMode || 'AND').toUpperCase() === 'OR' ? 'OR' : 'AND'
-  const flatHaystack = `(COALESCE(r.return_number, '') || ' ' || CAST(r.id AS TEXT) || ' ' || COALESCE(r.receipt_number, '') || ' ' || COALESCE(r.cashier_name, '') || ' ' || COALESCE(r.customer_name, '') || ' ' || COALESCE(r.supplier_name, '') || ' ' || COALESCE(r.reason, '') || ' ' || COALESCE(r.notes, '') || ' ' || COALESCE(r.return_type, '') || ' ' || COALESCE(r.supplier_settlement, ''))`
+  const flatHaystack = `(COALESCE(r.search_normalized, '') || ' ' || COALESCE(r.return_number, '') || ' ' || CAST(r.id AS TEXT) || ' ' || COALESCE(r.receipt_number, '') || ' ' || COALESCE(r.cashier_name, '') || ' ' || COALESCE(r.customer_name, '') || ' ' || COALESCE(r.supplier_name, '') || ' ' || COALESCE(r.reason, '') || ' ' || COALESCE(r.notes, '') || ' ' || COALESCE(r.return_type, '') || ' ' || COALESCE(r.supplier_settlement, ''))`
   const itemHaystack = `(COALESCE(rii.product_name, '') || ' ' || COALESCE(rip.sku, '') || ' ' || COALESCE(rip.barcode, '') || ' ' || COALESCE(rip.brand, '') || ' ' || COALESCE(rip.name_normalized, '') || ' ' || COALESCE(rip.brand_compact, ''))`
   let groupIndex = 0
   const groupClauses = groups.map((words) => {
@@ -209,7 +211,56 @@ db.prepare(`INSERT INTO returns (id, return_number, receipt_number, cashier_name
 db.prepare(`INSERT INTO return_items (id, return_id, product_id, product_name) VALUES (?, ?, ?, ?)`)
   .run(2, 102, 2, 'Blush Brush')
 
+// Diacritic fixtures (migration 0082). Sales 4 and 5 carry the SAME accented
+// name ("José ...") -- the only difference is that sale 4 is a LIVE-written row
+// whose search_normalized holds the write-time fold (built exactly the way
+// routes/sales.ts's POST / now builds it), while sale 5 is a pre-0082 /
+// historical-import row with search_normalized NULL. That isolates the fix to
+// the blob: a folded query must find sale 4 and NOT sale 5, and sale 5 must
+// still behave exactly as it did before 0082 (raw fallback, no fold) -- the
+// proof the change is purely additive and never a regression.
+const saleBlob = (receipt, cashier, customer, phone, branch, payment) =>
+  normalizeSearchText([receipt, cashier, customer, phone, branch, payment].filter(Boolean).join(' '))
+
+db.prepare(`INSERT INTO sales (id, receipt_number, cashier_name, customer_name, customer_phone, branch_name, payment_method, notes, customer_id, search_normalized)
+  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
+    4, 'RCP-4004', 'Alice', 'José García', '070111222', 'Shop', 'Cash', null, null,
+    saleBlob('RCP-4004', 'Alice', 'José García', '070111222', 'Shop', 'Cash'),
+  )
+db.prepare(`INSERT INTO sales (id, receipt_number, cashier_name, customer_name, customer_phone, branch_name, payment_method, notes, customer_id, search_normalized)
+  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
+    5, 'RCP-5005', 'Bob', 'José Mendez', '070333444', 'Shop', 'Cash', null, null, null,
+  )
+
+db.prepare(`INSERT INTO returns (id, return_number, receipt_number, cashier_name, customer_name, supplier_name, reason, notes, return_type, supplier_settlement, search_normalized)
+  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
+    103, 'RET-0103', 'RCP-4004', 'Alice', 'José García', null, 'Shade too dark', null, 'restock', 'none',
+    normalizeSearchText(['RET-0103', 'RCP-4004', 'Alice', 'José García', 'Shade too dark', 'restock'].filter(Boolean).join(' ')),
+  )
+db.prepare(`INSERT INTO returns (id, return_number, receipt_number, cashier_name, customer_name, supplier_name, reason, notes, return_type, supplier_settlement, search_normalized)
+  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
+    104, 'RET-0104', 'RCP-5005', 'Bob', 'José Mendez', null, 'Damaged', null, 'restock', 'none', null,
+  )
+
 // --- checks ----------------------------------------------------------------
+
+check('sales diacritic search: a folded query ("jose") finds the live row stored as "José" via search_normalized, and NOT the identical-name row that lacks a blob (the Part-484 fix, isolated to the mechanism)', () => {
+  // The typed query is itself folded (normalizeSearchText), so "jose" and
+  // "josé" resolve to the same word -- both must find sale 4 (blob) only.
+  assert.deepStrictEqual(runSalesSearch(db, 'jose'), [4])
+  assert.deepStrictEqual(runSalesSearch(db, 'josé'), [4])
+  assert.deepStrictEqual(runSalesSearch(db, 'garcia'), [4])
+})
+
+check('sales additive fallback: the pre-0082 row (search_normalized NULL) is unchanged by 0082 -- still found by its ASCII fields, still NOT foldable by its accented name (the honest pre-fix state that write-time population exists to end)', () => {
+  assert.deepStrictEqual(runSalesSearch(db, 'RCP-5005'), [5]) // raw fields still search
+  assert.deepStrictEqual(runSalesSearch(db, 'jose'), [4])     // accented name not foldable without a blob
+})
+
+check('returns diacritic search: a folded query finds the live "José" return via its blob, not the identical-name NULL-blob return', () => {
+  assert.deepStrictEqual(runReturnsSearch(db, 'jose'), [103])
+  assert.deepStrictEqual(runReturnsSearch(db, 'RET-0104'), [104]) // NULL-blob return still found by raw fields
+})
 
 check('sales search finds a sale by its product barcode fragment (mid-token, the "012" case)', () => {
   assert.deepStrictEqual(runSalesSearch(db, '012'), [1])

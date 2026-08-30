@@ -7,7 +7,7 @@ import { getPermissionTier } from '../lib/permissions'
 import { assertUpdatedAtMatch, getExpectedUpdatedAt, writeConflictResponse, WriteConflictError } from '../lib/conflictControl'
 import { broadcast } from '../durable-objects/broadcastHub'
 import { bumpVersion } from '../lib/cache'
-import { buildLikeAliasClause, tokenizeSearchTermGroups } from '../lib/searchMatch'
+import { buildLikeAliasClause, tokenizeSearchTermGroups, normalizeSearchText } from '../lib/searchMatch'
 import { receiveBatchStock, removeStockFromBatch, InsufficientBatchStockError } from '../lib/productBatches'
 import {
   normalizeStockAction, computeSettlement, assertReplacementsSameName,
@@ -391,7 +391,13 @@ app.get('/', async (c) => {
     // for every column/word, which exceeds D1's statement-size limit at
     // production scale. Catalog-side normalized fields retain folded
     // product-name and compact-brand matching without the query-time tree.
+    // r.search_normalized (migration 0082) is the write-time diacritic-folded
+    // form of the return's own text fields, PREPENDED to the unchanged raw
+    // concatenation exactly as buildSalesSearchWhere does -- additive, so a
+    // folded query matches folded storage while a row without a blob still
+    // searches through the raw columns as before. See the migration comment.
     const flatHaystack = `(
+      COALESCE(r.search_normalized, '') || ' ' ||
       COALESCE(r.return_number, '') || ' ' || CAST(r.id AS TEXT) || ' ' ||
       COALESCE(r.receipt_number, '') || ' ' || COALESCE(r.cashier_name, '') || ' ' ||
       COALESCE(r.customer_name, '') || ' ' || COALESCE(r.supplier_name, '') || ' ' ||
@@ -648,11 +654,11 @@ app.post('/', async (c) => {
       return_number, client_request_id, sale_id, receipt_number, cashier_id, cashier_name,
       customer_id, customer_name, branch_id, branch_name, return_scope, reason, return_type,
       notes, total_refund_usd, total_refund_khr, exchange_rate, status,
-      settlement_mode, settlement_diff_usd, settlement_diff_khr
+      settlement_mode, settlement_diff_usd, settlement_diff_khr, search_normalized
     ) VALUES (@return_number, @client_request_id, @sale_id, @receipt_number, @cashier_id, @cashier_name,
       @customer_id, @customer_name, @branch_id, @branch_name, @return_scope, @reason, @return_type,
       @notes, @total_refund_usd, @total_refund_khr, @exchange_rate, 'completed',
-      @settlement_mode, @settlement_diff_usd, @settlement_diff_khr)
+      @settlement_mode, @settlement_diff_usd, @settlement_diff_khr, @search_normalized)
   `).run({
     return_number: returnNumber,
     client_request_id: clientRequestId,
@@ -668,6 +674,13 @@ app.post('/', async (c) => {
     reason: body.reason,
     return_type: body.return_type || 'restock',
     notes: body.notes || null,
+    // Write-time diacritic fold of this return's own searchable text fields
+    // (migration 0082), read additively by the returns search builder.
+    search_normalized: normalizeSearchText(
+      [returnNumber, body.receipt_number || saleMeta.receipt_number, user?.name, body.customer_name || saleMeta.customer_name, branchName, body.reason, body.return_type || 'restock', body.notes]
+        .filter(Boolean)
+        .join(' '),
+    ),
     total_refund_usd: body.total_refund_usd || 0,
     total_refund_khr: body.total_refund_khr || 0,
     exchange_rate: body.exchange_rate || saleMeta.exchange_rate || 4100,
@@ -1006,11 +1019,11 @@ app.post('/supplier', async (c) => {
       return_number, client_request_id, cashier_id, cashier_name, branch_id, branch_name,
       return_scope, reason, return_type, notes, total_refund_usd, total_refund_khr, exchange_rate,
       supplier_id, supplier_name, supplier_settlement, supplier_compensation_usd, supplier_compensation_khr,
-      supplier_loss_usd, supplier_loss_khr, status
+      supplier_loss_usd, supplier_loss_khr, status, search_normalized
     ) VALUES (@return_number, @client_request_id, @cashier_id, @cashier_name, @branch_id, @branch_name,
       @return_scope, @reason, 'supplier_return', @notes, 0, 0, @exchange_rate,
       @supplier_id, @supplier_name, @settlement, @supplier_compensation_usd, @supplier_compensation_khr,
-      @supplier_loss_usd, @supplier_loss_khr, 'completed')
+      @supplier_loss_usd, @supplier_loss_khr, 'completed', @search_normalized)
   `).run({
     return_number: returnNumber,
     client_request_id: clientRequestId,
@@ -1025,6 +1038,13 @@ app.post('/supplier', async (c) => {
     supplier_id: body.supplier_id || null,
     supplier_name: body.supplier_name || null,
     settlement,
+    // Write-time diacritic fold of this supplier return's own searchable text
+    // fields (migration 0082), read additively by the returns search builder.
+    search_normalized: normalizeSearchText(
+      [returnNumber, user?.name, branchName, body.reason, 'supplier_return', body.notes, body.supplier_name, settlement]
+        .filter(Boolean)
+        .join(' '),
+    ),
     supplier_compensation_usd: supplierCompensationUsd,
     supplier_compensation_khr: supplierCompensationKhr,
     supplier_loss_usd: supplierLossUsd,

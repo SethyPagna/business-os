@@ -1,0 +1,52 @@
+-- Restores diacritic-folded search on the Sales and Returns pages, the
+-- durable way migration 0037 did it for products: a write-time normalized
+-- column instead of a query-time fold.
+--
+-- The bug (found + measured in Part 484): buildSalesSearchWhere
+-- (routes/sales.ts) and its twin in routes/returns.ts build a single
+-- shallow "flat haystack" by concatenating RAW columns and then pass
+-- alreadyNormalized=true to buildLikeAliasClause. That flag makes
+-- normalizedHaystackSql emit `lower(COALESCE(expr,''))` with ZERO
+-- diacritic REPLACE chain -- correct for columns that already hold a
+-- folded value (products.name_normalized), but these were raw columns, so
+-- no fold ran on them at all. Meanwhile the typed query IS folded
+-- (tokenizeSearchTermGroups -> normalizeSearchText), so a search for
+-- "jose" could never match a stored "José": the query word is folded, the
+-- haystack is not. Restoring the fold at QUERY time is not an option --
+-- foldDiacriticsSql's ~70 nested REPLACE() calls are exactly what tripped
+-- D1's depth-100 statement limit (SQLITE_TOOBIG) at production history
+-- size and is the whole reason 0037 exists.
+--
+-- The fix, mirroring 0037's split of responsibility:
+--   * Write time (exact): the sale/return INSERT sites compute
+--     search_normalized = normalizeSearchText(<flat text fields joined>)
+--     in JS -- the same normalization the query words already go through,
+--     so both sides fold identically. See routes/sales.ts's POST / and
+--     routes/returns.ts's two INSERT sites.
+--   * Read time (additive): the search builders PREPEND
+--     `COALESCE(s.search_normalized,'')` to the UNCHANGED raw haystack.
+--     Because the folded blob is added on top of (not in place of) the
+--     existing raw concatenation, a row that has no blob yet behaves
+--     EXACTLY as it does today -- no regression, no crash -- and a row
+--     that has one additionally matches diacritic-folded queries.
+--
+-- No data backfill. Two independent reasons make it unnecessary and a
+-- production write not worth its cost here:
+--   1. Part 484 measured ZERO existing sales/returns rows carrying Latin
+--      diacritics in any flat column, so there is nothing in the current
+--      data for a fold to change.
+--   2. A SQL backfill could not reproduce normalizeSearchText anyway --
+--      its NFD decomposition, Unicode \p{L}/\p{N} handling and the
+--      per-token O->0 shade-code fold have no SQLite expression -- so a
+--      backfilled value would not match the JS-folded query the way a
+--      write-time value does.
+-- Existing rows therefore keep search_normalized NULL and ride the raw
+-- fallback (today's behavior); every new live sale/return gets the exact
+-- fold at write time. Any future BULK sales/returns importer that wants
+-- full fold coverage for the rows it creates should populate this column
+-- the same way the live routes do (the current historical importers in
+-- lib/salesImportCommit.ts / lib/stockActionCommit.ts intentionally do
+-- not, and fall back safely) -- flagged, not silently required.
+
+ALTER TABLE sales ADD COLUMN search_normalized TEXT;
+ALTER TABLE returns ADD COLUMN search_normalized TEXT;
