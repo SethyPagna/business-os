@@ -3024,26 +3024,41 @@ the switch and its reasoning are recorded in `wrangler.toml`.
 
 ## Current status
 
-**COORDINATION NOTE (session business-os-v1-7b, Aug 30, updated ~22:05 — read-only
-coordinator, touching no product files; re-auditing on a loop until lanes settle).**
-Every dirty file attributes to a known lane (d2lot = movement writers + ledger +
-their pure tests; k4s = retention incl. `routes/importJobs.ts`; stats = StatsStrip +
-Sales/Fees/Returns/Dashboard + `/stats-strip` endpoint; de-carding session =
-Products/AuditLog pager polish; picker session = DateTimeRangePicker). Verified
-mid-flight ~21:50: both packages' `tsc` clean, `langKeyIntegrity` pass, migration
-numbers don't collide (0084 = d2lot, 0085 = k4s). Board hygiene held: d7, b9, f9
-committed their lanes cleanly (d7's lang-pack commit named its ride-along keys —
-lang-pack hazard RESOLVED). Still standing:
+**DONE (session business-os-v1-f9, Aug 30 — Part 514, `b0f12aad`):** Branches
+follow-up shipped and browser-verified — qty sits right beside the product name in
+the expanded-stock cards, and each expanded branch has a debounced server-backed
+product search between the mini stat tiles and the grid (query carried onto Show
+more + post-receive refresh; tiles keep branch-wide numbers during a search).
+**→ STILL OPEN — RELAY TO THE STATS-STRIP SESSION (user, Aug 30, verbatim):** "for
+the range date and the preset should be above the stats... not same row." — i.e. in
+StatsStrip the DateTimeRangePicker + preset chips get their OWN row ABOVE the mini
+stat cards on EVERY page, not sharing one row with them. Dashboard already stacks;
+the other pages must match. Not touched by f9 (your file); coordinator 7b confirmed
+routing.
 
-1. **`cloudflare/src/routes/sales.ts` carries TWO lanes at once** — d2lot's 0084
-   batch stamping (~line 702) AND the stats session's new `/stats-strip` endpoint
-   + its `getPaymentMethodBreakdown` import (~line 1684 + line 9). Whoever commits
-   this file first sweeps the other lane's hunks — message each other before
-   committing it, or record the ride-along plainly in the commit message.
-2. **Unclaimed lane: `frontend/public/sw.js` + `public-runtime/service-worker.ts`
-   + new `tests/swOfflineSaleReplay.test.ts`** (offline sale replay). Whichever
-   session owns this, add a claim block here — nothing else touches these files
-   today, but unclaimed work is how absorptions happen.
+**COORDINATION NOTE (session business-os-v1-7b, Aug 30, updated ~22:15 — read-only
+coordinator, touching no product files; re-auditing on a loop until lanes settle).**
+Both earlier hazards are RESOLVED: the lang packs committed atomically with named
+ride-alongs (1f55712e), and `routes/sales.ts` is single-lane again — d2lot's 0084
+stamping shipped in a7104aa4, what remains dirty is the stats session's
+`/stats-strip` endpoint only. The "unclaimed" sw.js/service-worker lane was session
+77's offline-sale data-loss fix, since committed and wired into test:utils
+(e0841de9). Lanes finished + committed: d7 (P509), b9 (P507), f9 (P511), d2lot
+(P510), k4s (P508, ride-along in be72bb92 documented), 77's fix batch + findings
+backlog. **Still active, all disjoint — no cross-lane hazard right now:**
+stats rollout (routes/sales+returns, salesTransport, Dashboard/Fees/Inventory/
+Returns/Sales, StatsStrip.tsx), de-carding polish (Products/AuditLog/FilesPage/
+CatalogEditorSurface/AppSelect), picker rebuild (DateTimeRangePicker), reset
+permission gate (system.ts/ResetData.tsx + new pure test — Part-77 backlog item).
+Reminder to the stats session: you'll sweep whitespace-churn hunks in
+routes/sales.ts when you commit — harmless, but note it. **USER DIRECTIVE (Aug 30,
+via coordinator): commit every finished slice — nothing rides uncommitted.**
+Commit-per-change is the standing rule; work that stays dirty across coordination
+checks risks absorption or loss. Called out specifically: the DateTimeRangePicker
+rebuild (dirty across every check since ~22:00) and the de-carding batch
+(Products/AuditLog/FilesPage/CatalogEditorSurface/AppSelect, open since ~21:55) —
+if a slice is done and green, commit it NOW with a path-scoped pathspec commit;
+if it's abandoned, revert it so the tree reflects reality.
 
 **DONE (session business-os-v1-b9, Aug 30): K1 slice 2 — reloaded server actions
 are genuinely undoable (Part 507, `b63e6c67`, needs deploy).** GET /api/action-history
@@ -3139,13 +3154,17 @@ up should re-verify against current source first.
 - Inventory `/transfer` moves `branch_stock` between branches and never touches
   `branch_batch_stock` → lot ledger drift, the exact class migration 0081 repaired.
   (×3) `routes/inventory.ts:1665-1687`.
-- **[CLAIMED: session b9, Aug 30 — my K1 lane]** Action-history undo applier derives
-  its permission from a client-supplied `entity`;
-  an unrecognized entity → empty permission → any cashier can run `branch.update` etc.
-  with no gate. (×1 auth) `routes/actionHistory.ts:88,148` + `lib/undoAppliers.ts`.
-- `/reset-data`,`/reset-section`,`/finalize-migration`,`/factory-reset` gate on `backup`
-  (export) not `backup_restore`; factory-reset also returns the reseeded admin password.
-  (×1 auth) `routes/system.ts:78,750`.
+- **[FIXED: session b9, Aug 30 — Part 512, `bcf58378`, needs deploy]** Action-history
+  undo applier derived its permission from a client-supplied `entity`; an unrecognized
+  entity → empty permission → any cashier could run `branch.update` etc. with no gate.
+  Now every applier declares its own permission section and the route demands its FULL
+  tier at both record and operate time; `server_replayable` is per-user. (was ×1 auth)
+- **[FIXED: session b9, Aug 30 — Part 513, `ea3174a3`, needs deploy]** `/reset-data`,
+  `/reset-section`,`/finalize-migration`,`/factory-reset` (+ forced orphan cleanup)
+  gated on `backup` (export) not `backup_restore`. Helper now demands backup_restore;
+  frontend pre-flights mirror it. Password return kept (only path back in, now
+  properly scoped). Open sub-question, flagged not changed: should
+  `/repair-integrity` (guided repair, currently backup-OR-settings) demand more?
 - Returns create/edit apply lot restock + replacement stock OUTSIDE the atomic batch;
   the catch deletes rows but reverses no stock → phantom or destroyed inventory.
   (×2: write-path, batch-identity) `routes/returns.ts:745,871,931,1224,1506`.
@@ -3153,10 +3172,15 @@ up should re-verify against current source first.
 **HIGH — data / money / security:**
 - Import apply is not idempotent for products(merge_stock/override_add) and inventory;
   a redelivered/retried chunk double-applies stock. (×1 pipelines) `lib/importEngine.ts:5097,5344`.
-- `GET /api/settings` + `/auth/bootstrap` ungated → any user reads Google Drive OAuth
-  tokens. (×1 auth) `routes/settings.ts:63`.
-- Password-reset builds the link from an unvalidated caller `redirectTo` (open redirect
-  → token theft). (×1 auth) `lib/verification.ts:147`.
+- **[FIXED: session b9, Aug 30 — Part 513, `31fa9f85`, needs deploy]** `GET /api/settings`
+  + `/auth/bootstrap` leaked Google Drive OAuth tokens to any logged-in account. New
+  `lib/settingsSensitive.ts` strips secret-bearing keys (explicit + credential
+  suffixes) from both responses for everyone; no frontend surface read them.
+- **[FIXED: session b9, Aug 30 — Part 514, `1b4580b6`, needs deploy]** Password-reset
+  built the link from an unvalidated caller `redirectTo` (open redirect → token theft).
+  New `resolvePasswordResetBase` honors only exact BUSINESS_OS_ADMIN_URL /
+  BUSINESS_OS_PUBLIC_URL origins (origin+pathname kept, query/hash dropped); everything
+  else falls back to the admin URL. (was ×1 auth)
 - OTP verify not bound to the password step and skips device-approval + lockout. (×1)
   `routes/auth.ts:475`.
 - SW chunk-recovery wipes app-shell+static caches with no `navigator.onLine` guard →
