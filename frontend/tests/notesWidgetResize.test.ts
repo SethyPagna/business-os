@@ -93,6 +93,17 @@ await runTest('the collapsed pencil launcher is draggable on every pointer type 
   assert.match(source, /getDragMoveThreshold\(state\.pointerType\)/, 'a plain tap still opens the panel -- only a real move drags')
 })
 
+await runTest('viewport clamping is applied at render, never written back over the remembered position', () => {
+  const source = readFrontend('src/components/shared/NotesWidget.tsx')
+  // A transient tiny viewport (mobile keyboard, rotation, emulation) once
+  // permanently collapsed the stored position to the top of the screen --
+  // the resize listener must only re-render, not mutate launcherTop.
+  assert.match(source, /const launcherDisplayTop = launcherTop != null/, 'display position is derived, clamped at render')
+  const resizeBlock = source.slice(source.indexOf('const [, setViewportTick]'), source.indexOf('const launcherDisplayTop'))
+  assert.doesNotMatch(resizeBlock, /setLauncherTop/, 'resize must never overwrite the remembered chip position')
+  assert.match(source, /launcherDisplayTop != null \? \{ top: `\$\{launcherDisplayTop\}px` \}/, 'the derived value is what renders')
+})
+
 await runTest('a drag-release does not open the panel, and a PANEL drag no longer swallows the chip\'s next tap', () => {
   const source = readFrontend('src/components/shared/NotesWidget.tsx')
   // justDraggedRef is set ONLY by the launcher's own drag end now. It used

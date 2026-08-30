@@ -369,13 +369,22 @@ export default function NotesWidget() {
   }, [])
 
   // A remembered chip position from a taller window must not strand the
-  // chip below the fold on a shorter one.
+  // chip below the fold on a shorter one -- but the clamp is applied at
+  // RENDER time, never written back into state/storage. A transient tiny
+  // viewport (mobile keyboard opening, orientation change, devtools
+  // emulation) would otherwise permanently collapse the remembered
+  // position to the top of the screen; this way the chip just tucks into
+  // view for the moment and returns to its spot when the viewport does.
+  const [, setViewportTick] = useState(0)
   useEffect(() => {
     if (launcherTop == null) return
-    const clampToViewport = () => setLauncherTop((current) => (current == null ? current : clampLauncherTop(current, 40)))
-    window.addEventListener('resize', clampToViewport)
-    return () => window.removeEventListener('resize', clampToViewport)
+    const bump = () => setViewportTick((tick) => tick + 1)
+    window.addEventListener('resize', bump)
+    return () => window.removeEventListener('resize', bump)
   }, [launcherTop == null])
+  const launcherDisplayTop = launcherTop != null && typeof window !== 'undefined'
+    ? clampLauncherTop(launcherTop, 40)
+    : launcherTop
 
   const handleResizeHandlePointerDown = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
     const el = panelRef.current
@@ -501,8 +510,8 @@ export default function NotesWidget() {
     // handlers instead of scrolling the page.
     return (
       <div
-        className={`pointer-events-none fixed left-0 z-[1001] ${launcherTop == null ? 'bottom-[calc(4.5rem+env(safe-area-inset-bottom))] md:bottom-auto md:top-1/2 md:-translate-y-1/2' : ''}`}
-        style={launcherTop != null ? { top: `${launcherTop}px` } : undefined}
+        className={`pointer-events-none fixed left-0 z-[1001] ${launcherDisplayTop == null ? 'bottom-[calc(4.5rem+env(safe-area-inset-bottom))] md:bottom-auto md:top-1/2 md:-translate-y-1/2' : ''}`}
+        style={launcherDisplayTop != null ? { top: `${launcherDisplayTop}px` } : undefined}
       >
         <button
           type="button"

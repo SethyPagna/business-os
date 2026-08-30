@@ -13487,3 +13487,43 @@ shows an "Awaiting Payment ×" chip beside the button; the chip's × clears it;
 the SortChip menu lists Date/Total/Customer/Cashier/Status/Receipt and
 sort-by-Total reorders flat (12.50, 12.50, 10.50) under a TOTAL section.
 tsc clean; performanceLoadingUx + productMenuHelpers green. **Needs deploy.**
+
+## Part 503
+
+**Ask.** "For the possible duplicate, they can be with multiple actions taken,
+multi select, works, must be good in design and ui."
+
+**What changed.** ProductDuplicatesTab gained the same multi-select bulk model
+the contacts Possible Duplicates panel ships (one review pattern everywhere):
+a checkbox on every cluster card (selected cards get a blue ring), "Select all"
+over the FILTERED view + "Clear selection", and a bulk bar with **Merge
+selected** / **Dismiss selected**. Bulk merge is automated only for
+exactly-2-product clusters — keeper is the older record (lower id, created
+first); 3+ groups are skipped and reported for a human-picked keeper, never
+guessed. Bulk runs are sequential with live progress ("Merging 2/5…"),
+continue past individual failures and report once at the end; selection clears
+after any bulk action and prunes when a cluster resolves individually. New
+lang keys in both packs (progress strings, bulk-merge hint, groups-shown).
+New `tests/productDuplicatesTab.test.ts` pins the whole contract and is wired
+into the test:utils chain (coverage check now counts 138 files).
+
+**What was found.** A real robustness bug in the Part-501 notes-chip drag: the
+resize listener clamped the REMEMBERED position destructively, so a transient
+tiny viewport (mobile keyboard, rotation, devtools emulation — observed live:
+401 collapsed to ~12 during a preset switch) permanently teleported the chip
+to the top. Fixed: clamping now happens at render over a derived value; resize
+only re-renders and never writes launcherTop. Pinned by a new test case.
+
+**Verified.** frontend tsc: my files clean (pre-existing errors in
+Returns.tsx belong to a parallel session's uncommitted work — untouched).
+productDuplicatesTab 6 PASS, notesWidgetResize 7 PASS, langKeyIntegrity +
+testChainCoverage green. Live against the other session's worker (8787) with
+my own Vite: seeded two same-barcode pairs + one same-name pair via the real
+POST /api/products; Select all → deselect one → Merge selected folded both
+pairs onto their older records (D1-checked: 4+6→10 pcs and 2+1→3 pcs, losers
+deactivated) while the deselected cluster was untouched; Dismiss selected
+cleared it; 375×812 shows the bulk bar with touch-sized buttons; the chip fix
+verified (stored 401 survives desktop↔mobile transitions and renders at 401).
+
+**Not done.** Deploy. Production's 53 real groups are ALL 2-product pairs, so
+bulk merge can cover any subset the operator selects there.

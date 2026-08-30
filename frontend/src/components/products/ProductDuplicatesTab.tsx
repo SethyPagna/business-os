@@ -58,18 +58,25 @@ function clusterKey(cluster: Cluster): string {
   return `${cluster.type}:${cluster.value}`
 }
 
+function replaceVars(template: string, values: Record<string, unknown>): string {
+  return template.replace(/\{(\w+)\}/g, (_match, key) => String(values?.[key] ?? ''))
+}
+
 function money(value: number | null | undefined): string {
   const n = Number(value) || 0
   return `$${n % 1 === 0 ? n : n.toFixed(2)}`
 }
 
 function ClusterCard({
-  cluster, t, dismissing, merging, onDismiss, onMergeInto, onResolve,
+  cluster, t, dismissing, merging, selected, selectable, onToggleSelect, onDismiss, onMergeInto, onResolve,
 }: {
   cluster: Cluster
   t: TranslateFn
   dismissing: boolean
   merging: boolean
+  selected: boolean
+  selectable: boolean
+  onToggleSelect: () => void
   onDismiss: () => void
   onMergeInto: (keeper: ClusterProduct) => void
   onResolve: (term: string) => void
@@ -91,9 +98,18 @@ function ClusterCard({
   }
 
   return (
-    <div className={`rounded-xl border px-3 py-2.5 ${SEVERITY_STYLE[cluster.severity]} ${busy ? 'opacity-60' : ''}`}>
+    <div className={`rounded-xl border px-3 py-2.5 transition-shadow ${SEVERITY_STYLE[cluster.severity]} ${busy ? 'opacity-60' : ''} ${selected ? 'ring-2 ring-blue-400 dark:ring-blue-500' : ''}`}>
       <div className="mb-1.5 flex items-center justify-between gap-2">
-        <span className={`text-xs font-semibold ${SEVERITY_TEXT[cluster.severity]}`}>{t(key) || fallback}</span>
+        <label className="flex cursor-pointer items-center gap-1.5">
+          <input
+            type="checkbox"
+            checked={selected}
+            onChange={onToggleSelect}
+            disabled={!selectable || busy}
+            aria-label={t('select_duplicate_cluster') || 'Select this duplicate group'}
+          />
+          <span className={`text-xs font-semibold ${SEVERITY_TEXT[cluster.severity]}`}>{t(key) || fallback}</span>
+        </label>
         <div className="flex items-center gap-1">
           <span className="max-w-[10rem] truncate text-[11px] text-gray-400" title={cluster.value}>
             {cluster.type === 'barcode' ? cluster.value : `"${cluster.value}"`}
@@ -178,6 +194,16 @@ export default function ProductDuplicatesTab({ t, notify, onResolve }: {
   const [severityFilter, setSeverityFilter] = useState<Severity | 'all'>('all')
   const [dismissingId, setDismissingId] = useState<string | null>(null)
   const [mergingId, setMergingId] = useState<string | null>(null)
+  // Multi-select for bulk actions -- keyed by clusterKey(), the same
+  // identity dismissingId/mergingId use, and the same selection model the
+  // contacts Possible Duplicates panel ships (cross-surface rule).
+  // Cleared after any bulk action (selections referencing a now-gone
+  // cluster are meaningless).
+  const [selectedKeys, setSelectedKeys] = useState<Set<string>>(() => new Set())
+  const [bulkBusy, setBulkBusy] = useState(false)
+  // "Merging 3/8…" -- bulk runs are sequential server calls, so tell the
+  // reviewer where it is instead of freezing on a bare disabled button.
+  const [bulkProgress, setBulkProgress] = useState('')
 
   const load = async () => {
     setLoading(true)
@@ -201,6 +227,21 @@ export default function ProductDuplicatesTab({ t, notify, onResolve }: {
 
   const removeCluster = (id: string) => {
     setClusters((current) => current.filter((cluster) => clusterKey(cluster) !== id))
+    setSelectedKeys((current) => {
+      if (!current.has(id)) return current
+      const next = new Set(current)
+      next.delete(id)
+      return next
+    })
+  }
+
+  const toggleSelected = (id: string) => {
+    setSelectedKeys((current) => {
+      const next = new Set(current)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
   }
 
   const handleDismiss = async (cluster: Cluster) => {
@@ -234,6 +275,74 @@ export default function ProductDuplicatesTab({ t, notify, onResolve }: {
       notify(e instanceof Error ? e.message : (t('merge_duplicate_failed') || 'Could not merge these records'), 'error')
     } finally {
       setMergingId(null)
+    }
+  }
+
+  // Bulk Dismiss -- safe for every selected cluster regardless of size
+  // (dismissing never touches a product record, just the reviewed flag).
+  // Continues past individual failures and reports once at the end, same
+  // as the contacts panel.
+  const bulkDismiss = async () => {
+    const targets = clusters.filter((cluster) => selectedKeys.has(clusterKey(cluster)))
+    if (!targets.length || bulkBusy) return
+    setBulkBusy(true)
+    let failed = 0
+    let done = 0
+    for (const cluster of targets) {
+      setBulkProgress(replaceVars(t('bulk_dismissing_progress') || 'Dismissing {done}/{total}…', { done: done + 1, total: targets.length }))
+      try {
+        await dismissProductDuplicateCluster(cluster.type, cluster.value)
+        removeCluster(clusterKey(cluster))
+      } catch {
+        failed += 1
+      }
+      done += 1
+    }
+    setBulkBusy(false)
+    setBulkProgress('')
+    setSelectedKeys(new Set())
+    if (failed) {
+      notify(replaceVars(t('bulk_dismiss_partial_failure') || '{count} of the selected duplicates could not be dismissed', { count: failed }), 'error')
+    } else {
+      notify(t('bulk_dismiss_success') || 'Dismissed the selected duplicates')
+    }
+  }
+
+  // Bulk Merge -- only automated for exactly-2-product clusters, where
+  // "keep the older record" (lower id, created first) is an unambiguous,
+  // defensible default; its sales/lot history is the longer one. A 3+
+  // cluster genuinely needs a human to pick the survivor (the per-row
+  // "Keep this" flow), so those are skipped here and reported, never
+  // guessed at -- identical rule to the contacts panel's bulk merge.
+  const bulkMerge = async () => {
+    const targets = clusters.filter((cluster) => selectedKeys.has(clusterKey(cluster)))
+    if (!targets.length || bulkBusy) return
+    const mergeable = targets.filter((cluster) => cluster.products.length === 2)
+    const skipped = targets.length - mergeable.length
+    setBulkBusy(true)
+    let failed = 0
+    let done = 0
+    for (const cluster of mergeable) {
+      setBulkProgress(replaceVars(t('bulk_merging_progress') || 'Merging {done}/{total}…', { done: done + 1, total: mergeable.length }))
+      const [keeper, other] = [...cluster.products].sort((a, b) => a.id - b.id)
+      try {
+        await mergePossiblySameProducts(keeper.id, other.id)
+        removeCluster(clusterKey(cluster))
+      } catch {
+        failed += 1
+      }
+      done += 1
+    }
+    setBulkBusy(false)
+    setBulkProgress('')
+    setSelectedKeys(new Set())
+    if (failed || skipped) {
+      const parts = []
+      if (failed) parts.push(replaceVars(t('bulk_merge_partial_failure') || '{count} could not be merged', { count: failed }))
+      if (skipped) parts.push(replaceVars(t('bulk_merge_skipped_multiway') || '{count} group(s) with 3+ records were skipped -- merge those individually', { count: skipped }))
+      notify(parts.join('. '), failed ? 'error' : 'info')
+    } else {
+      notify(t('bulk_merge_success') || 'Merged the selected duplicates')
     }
   }
 
@@ -309,23 +418,77 @@ export default function ProductDuplicatesTab({ t, notify, onResolve }: {
           {t('no_duplicates_match_filter') || 'No duplicates match this filter.'}
         </div>
       ) : (
-        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
-          {visibleClusters.map((cluster) => {
-            const id = clusterKey(cluster)
-            return (
-              <ClusterCard
-                key={id}
-                cluster={cluster}
-                t={t}
-                dismissing={dismissingId === id}
-                merging={mergingId === id}
-                onDismiss={() => void handleDismiss(cluster)}
-                onMergeInto={(keeper) => void handleMergeInto(cluster, keeper)}
-                onResolve={onResolve}
-              />
-            )
-          })}
-        </div>
+        <>
+          <div className="flex flex-wrap items-center gap-3 text-xs text-gray-500 dark:text-gray-400">
+            <span>{visibleClusters.length} {t('duplicate_groups_shown') || 'group(s) shown'}</span>
+            <button
+              type="button"
+              onClick={() => setSelectedKeys(new Set(visibleClusters.map((cluster) => clusterKey(cluster))))}
+              disabled={bulkBusy || !visibleClusters.length}
+              className="ml-auto text-blue-600 hover:underline disabled:opacity-50 disabled:no-underline dark:text-blue-400"
+            >
+              {t('select_all') || 'Select all'}
+            </button>
+            {selectedKeys.size > 0 ? (
+              <button
+                type="button"
+                onClick={() => setSelectedKeys(new Set())}
+                disabled={bulkBusy}
+                className="text-gray-500 hover:underline disabled:opacity-50 dark:text-gray-400"
+              >
+                {t('clear_selection') || 'Clear selection'}
+              </button>
+            ) : null}
+          </div>
+
+          {selectedKeys.size > 0 ? (
+            <div className="flex flex-wrap items-center gap-2 rounded-xl border border-blue-200 bg-blue-50 px-3 py-2 text-xs dark:border-blue-900/40 dark:bg-blue-950/30">
+              <span className="font-medium text-blue-700 dark:text-blue-300">
+                {bulkProgress || replaceVars(t('duplicates_bulk_selected_count') || '{count} selected', { count: selectedKeys.size })}
+              </span>
+              <button
+                type="button"
+                onClick={() => void bulkMerge()}
+                disabled={bulkBusy}
+                title={t('bulk_merge_products_hint') || 'Each selected pair merges into its older record (created first); groups of 3+ are skipped — pick their keeper by hand'}
+                className="btn-secondary px-2.5 py-1 text-xs disabled:opacity-50"
+              >
+                <Merge className="mr-1 inline h-3.5 w-3.5" />
+                {bulkBusy ? (t('saving') || 'Saving...') : (t('duplicates_bulk_merge_action') || 'Merge selected')}
+              </button>
+              <button
+                type="button"
+                onClick={() => void bulkDismiss()}
+                disabled={bulkBusy}
+                className="btn-secondary px-2.5 py-1 text-xs disabled:opacity-50"
+              >
+                <EyeOff className="mr-1 inline h-3.5 w-3.5" />
+                {bulkBusy ? (t('saving') || 'Saving...') : (t('duplicates_bulk_dismiss_action') || 'Dismiss selected')}
+              </button>
+            </div>
+          ) : null}
+
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
+            {visibleClusters.map((cluster) => {
+              const id = clusterKey(cluster)
+              return (
+                <ClusterCard
+                  key={id}
+                  cluster={cluster}
+                  t={t}
+                  dismissing={dismissingId === id}
+                  merging={mergingId === id}
+                  selected={selectedKeys.has(id)}
+                  selectable={!bulkBusy}
+                  onToggleSelect={() => toggleSelected(id)}
+                  onDismiss={() => void handleDismiss(cluster)}
+                  onMergeInto={(keeper) => void handleMergeInto(cluster, keeper)}
+                  onResolve={onResolve}
+                />
+              )
+            })}
+          </div>
+        </>
       )}
     </div>
   )
