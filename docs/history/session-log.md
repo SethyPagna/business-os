@@ -13790,3 +13790,103 @@ key additions (stats_*, transfer_change_product) as a recorded ride-along.
 **Not done:** needs deploy; in-app verification on a real phone after deploy.
 The ImportReportModal / conflict modals' own prose was not touched (only the
 tracker widget + hub surfaces the user pointed at).
+
+## Part 510 (Aug 30 2026, session business-os-v1-d2lot) — movement↔batch linkage (0084): the ledger knows its lots, the supplier filter becomes truthful
+
+**Ask.** "check progress.md and what other sessions are doing... then continue" —
+picked the D2(a)/D3 linkage gap, the item three board notes called the blocker:
+`inventory_movements` never recorded WHICH lot a row touched, so the D2 supplier
+filter "cannot be answered truthfully from existing data" and D3's movement-table
+Batch column stayed "blank-honest until the movements.batch_id migration lands".
+Disjoint from every active claim (f9 UI batch, 77 verification sweep, StatsStrip
+rollout, DateTimeRangePicker rebuild); the importEngine hot-lane deferral had
+lifted (K5: "file is at rest").
+
+**What changed (commit `a7104aa4`, needs deploy).**
+
+- `cloudflare/migrations/0084_movements_batch_id.sql` — additive nullable
+  `inventory_movements.batch_id` + a partial index, plus a SET-BASED backfill from
+  the one recorded provenance source that already exists
+  (`dated_stock_count_batch_actions`, migration 0035): only movements whose
+  recorded actions name ONE batch covering the FULL quantity are stamped;
+  multi-lot and shortfall rows stay NULL. No other backfill is attempted — sale
+  movements reference the sale, not the sale_item, so historical attribution
+  would be a guess. Set-based per 0081's CPU-limit lesson.
+- **The stamping rule, applied uniformly:** a movement stamps its lot ONLY when
+  one `product_batches` row truthfully covers the whole movement; otherwise NULL
+  (the per-lot detail stays in `sale_item_batch_allocations` /
+  `return_item_batch_allocations` / the dated-count actions table). Writers:
+  `lib/stockActionCommit.ts` (import add via the batch_key subquery; grouped-sale
+  lines when their single allocation covers the line), `routes/sales.ts` POS sale
+  (explicit pick, or a single auto-allocation covering the whole quantity),
+  `lib/saleTransitions.ts` (both walks track touched lots; stamp when one lot
+  moved the whole delta), `routes/batches.ts` (receive + per-branch quantity
+  correction — both single-lot by construction), `routes/inventory.ts` /adjust
+  (add = resolved lot; remove = explicit pick or fully-covering single
+  auto-drain) and /move-row (out = single-drain rule, in = the received lot),
+  `routes/branches.ts` transfer + transfer-bulk (lot-scoped transfers stamp both
+  legs — out the source lot, in the same/cloned dest lot; bulk resolution hoisted
+  above the movement inserts so both legs and the stock statements share one
+  computation), `routes/returns.ts` (restock when ONE lot took the whole
+  quantity; damage-in stamps the original sale lot, matching what
+  `damaged_stock_lots` records; supplier-return single-take rule; the PATCH edit
+  path mirrors all of it and `return_reversal` tracks which lots the reversal
+  actually drew from), `lib/returnsStock.ts` (`applyReplacementStock` stamps an
+  explicit lot pick; `reverseDamagedLots` now returns each lot's original
+  batch_id so the reversal movement can carry it), `lib/salesImportCommit.ts`
+  (historical return restock stamps the line's recorded lot),
+  `lib/datedStockCountApply.ts` (stamps from the movement's own recorded batch
+  actions, single-lot + full coverage only). Deliberately NOT stamped: product
+  delete / merge-fold / bulk-delete / reviewApply-delete movements (aggregate
+  branch_stock facts, no lot exists), inventory-type importEngine movements (the
+  file carries no lot), and damaged-POOL draws in POS checkout / sale-status
+  transitions (their truthful link is the damaged lot, not a sellable lot; the
+  reason/reference already carries it).
+- **Reads:** `lib/stockLedgerQuery.ts` LEFT JOINs `product_batches` and exposes
+  `batch_id`/`batch_lot_code`/`batch_received_at`/`batch_supplier_id`/`batch_supplier_name`;
+  new `supplierId` filter matches id-attributed lots OR name-only lots whose
+  recorded name equals that supplier's name (the D1b identity rule) — rows with
+  no attributed lot are honestly excluded, never guessed in. The
+  `/products/stock-ledger` route passes `supplierId` through.
+- **Frontend:** `StockChangeSection.tsx` — supplier AppSelect on the filter row
+  (fed by the shared cached name-only suppliers loader, now exported from
+  `SupplierPickerField.tsx` instead of duplicated), a Batch column rendering
+  `batchDisplayLabel` (Z1a rule: date-codes as mm/dd/yyyy, custom codes as
+  codes), and Batch + supplier rows in the row-detail modal; its stale
+  "supplier is deliberately absent" comment replaced by the real contract.
+  `ProductDetailReport.tsx` — the movement list shows each attributable row's
+  lot chip; its "blank-honest for now" header comment updated.
+
+**Found along the way.** Nothing broken in peers' work; four test fixtures
+(`test-sale-cancel-pure`, `test-stock-action-{commit,sale-commit,apply}-pure`)
+hand-roll `inventory_movements` and needed the new column added (the A4/Part-411
+"fixtures welded to old schema" class).
+
+**Verified (really run).** `test-stock-ledger-pure` 17/17 — 4 new checks: stamped
+rows surface lot+supplier through the join and pre-0084 rows stay NULL; supplier
+filter returns exactly the id-attributed movement; the name-only lot matches via
+the identity rule; and the 0084 backfill applied as the REAL migration file
+against a pre-0084 chain stamps single-lot/full-coverage only (multi-lot and
+shortfall stay NULL). The 12 writer suites (oversell, sale-cancel, fifo, returns
+restock+replace/damaged, stock-action commit/sale-commit/apply, dated-count
+apply, sales-import commit, supplier-attribution, adjust-received-date) and 12
+adjacent suites (migration-chain-fresh, lot-ledger-reconcile 0081, stock-in
+invoice report, batches-permission, dated-count route, import-engine,
+sales-analytics, audit-coverage, stock-clamp, merge-duplicates, bulk-delete,
+undo-appliers) all green. Both `tsc --noEmit` clean; frontend
+`supplierPicker.test.ts` 9/9; real vite build 21.25s; `wrangler deploy
+--dry-run` OK.
+
+**Coordination.** `routes/sales.ts` and `routes/returns.ts` each carried a peer's
+in-flight hunks (the stats session's `/stats-strip` endpoint + returns `/report`
+filters); committed via my-hunks-only patches staged with `git apply --cached`
+(the Part-429 isolation protocol, index edition) — the peers' hunks remain
+uncommitted and untouched in the working tree, verified by inspecting the staged
+diff before committing.
+
+**Not done.** Needs deploy (migration 0084 applies via `migrate:remote`). D2(b)
+(the page-level Date-scope row on Products AND Inventory) stays open. Live
+click-through of the supplier filter deferred — peers own the shared dev
+server; the kernel behavior is pinned by the pure test instead. Historical sale
+movements stay unattributed by design (no truthful join exists); only new
+writes and the dated-count backfill carry lots.

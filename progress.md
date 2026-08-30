@@ -491,20 +491,21 @@ store really paid the rider; margin = charge − cost and is internal only.*
   opens details: a summary section + a detailed mini-ledger incl. batches. Data source is
   the EXISTING movement history — this is a read/UI surface, not a new write path.
   Reuses/absorbs Inventory's "view stock movement" detail (D3).
-- [~] D2 *(partially advanced, Part 420, session a7: the LEDGER's filter
-  row shipped — branch (AppSelect), inclusive date range, action type
-  (the view chips), all server-side on /stock-ledger which took these
-  params from day one. REMAINING, honestly scoped: (a) supplier — cannot
-  be answered truthfully from existing data: inventory_movements never
-  records which batch a row touched, so it needs an additive
-  movements.batch_id migration + writer stamping first (importEngine's
-  writer is 05's A4-hot lane; coordinate); (b) the page-level Date-scope
-  row below the search row on Products AND Inventory with the Filter
-  button moved onto it — Inventory.tsx hot with 9d's F2 at the time.)*
+- [~] D2 *(Part 420, session a7: the LEDGER's filter row shipped — branch
+  (AppSelect), inclusive date range, action type (the view chips), all
+  server-side on /stock-ledger which took these params from day one.
+  **(a) CLOSED, Part 510, session d2lot (needs deploy):** migration 0084
+  `inventory_movements.batch_id` + stamping in every writer where ONE lot
+  truthfully covers the whole movement; the ledger now joins the lot and
+  filters by supplier (id-attributed OR name-only lots, D1b identity
+  rule) with unattributed rows honestly excluded, and the StockChange
+  filter row carries the supplier select. REMAINING: (b) the page-level
+  Date-scope row below the search row on Products AND Inventory with the
+  Filter button moved onto it — Inventory.tsx hot with 9d's F2 at the time.)*
   Filters grow: by supplier, by date range (the new date row), by action type,
   by branch. **Date-scope row** sits directly below the search row on Products AND
   Inventory, with the Filter button moved onto it.
-- [~] D3 *(first full slice SHIPPED, Part 422, session a7: the detail modal gained four folded N3 SectionCards -- Batches (per-lot totals across branches + received/expiry + supplier), Suppliers (D1b identity rule, honest lots_without_cost), Sales (kernel per-day/month via whereActiveSales), Stock Changes (D1 ledger scoped to the product -- running balance, never disagrees with the page ledger). One new read /products/:id/detail-report + kernel getProductSalesBreakdown. STILL OPEN here: in-detail movement filters + the full Date/Type/Batch/Qty/Balance/Reference table (Batch column needs the movements.batch_id migration -- D2 gap), receipt-# references, and product-search-by-supplier/batch (search-engine unit).)* **[CLAIMED: session a7]** (the drill half shipped with D1/Part 415;
+- [~] D3 *(first full slice SHIPPED, Part 422, session a7: the detail modal gained four folded N3 SectionCards -- Batches (per-lot totals across branches + received/expiry + supplier), Suppliers (D1b identity rule, honest lots_without_cost), Sales (kernel per-day/month via whereActiveSales), Stock Changes (D1 ledger scoped to the product -- running balance, never disagrees with the page ledger). One new read /products/:id/detail-report + kernel getProductSalesBreakdown. **Batch attribution LANDED (Part 510, session d2lot):** the movement list now shows each attributable row's lot chip via movements.batch_id (0084) -- the D2 linkage gap is closed, blank only where no single lot truthfully owns the row. STILL OPEN here: in-detail movement filters + the full Date/Type/Batch/Qty/Balance/Reference table layout, receipt-# references, and product-search-by-supplier/batch (search-engine unit).)* **[CLAIMED: session a7]** (the drill half shipped with D1/Part 415;
   this claim = the full user detail-page spec below. Footprint:
   products/surfaces/ProductDetailModal.tsx + new folded sections +
   salesAnalytics kernel gains the per-product breakdown + one new
@@ -3098,17 +3099,24 @@ Inventory / Branches / Dashboard. Touching: new `shared/StatsStrip.tsx`, those s
 pages' stat regions, and (backend, if needed) small range-scoped stat endpoints.
 NOT touching `DateTimeRangePicker.tsx` (another session has it mid-rebuild).
 
-**CLAIMED (in progress, session business-os-v1-d2lot, Aug 30): D2(a) movement↔batch
-linkage.** Additive migration 0084 `inventory_movements.batch_id` + stamping in every
-movement writer where ONE lot is truthfully known (import add/grouped-sale
-single-allocation lines, POS explicit-pick/single-lot/damaged lines, receive/manage
-batch, adjust, cancel/return restock walks); multi-lot rows stay NULL (blank-honest).
-Reads: stock-ledger supplier filter + lot join, D3 detail movement Batch column.
-Touching: cloudflare migrations + lib/stockActionCommit,stockLedgerQuery,
-saleTransitions,returnsStock,importEngine(movement INSERT only) + routes/sales,returns,
-batches,inventory,branches,products (movement INSERTs only) + frontend
-StockChangeSection.tsx/ProductDetailReport.tsx + new pure test. NOT touching peer lanes
-(TransferModal/SaleDetailModal/Receipt/main.css, stats regions, DateTimeRangePicker).
+**DONE (session business-os-v1-d2lot, Aug 30): D2(a)/D3 movement↔batch linkage
+shipped, needs deploy (Part 510, `a7104aa4`).** Migration 0084 adds
+`inventory_movements.batch_id` (additive, indexed, backfilled from
+dated_stock_count_batch_actions where single-lot + full coverage); every movement
+writer stamps it where ONE lot truthfully covers the whole movement (import
+add/grouped-sale lines, POS sale incl. single auto-allocation, receive, batch
+quantity correction, adjust all three paths, lot-scoped transfers single+bulk,
+move-row both legs, cancel/un-cancel walks, return restock/reversal/damage flows,
+replacement out, historical sales-import restock, dated stock-count apply);
+multi-lot spreads/legacy aggregate/pre-0084 rows stay NULL (blank-honest). Reads:
+/stock-ledger joins the lot + gains the supplier filter (id OR name-only lots,
+D1b identity rule); StockChangeSection gets supplier select + Batch column +
+detail rows; ProductDetailReport movement list shows the lot chip. Commit note:
+sales.ts/returns.ts were committed via my-hunks-only staged patches so the stats
+session's in-flight `/stats-strip` + returns `/report` hunks stayed uncommitted
+and untouched. Verified: test-stock-ledger-pure 17/17 (4 new), 24 adjacent
+backend suites green (4 fixtures gained the column), both tsc, vite build,
+wrangler dry-run.
 
 **Part 501 (Aug 30 2026, parallel session):** (1) Products gained a "Duplicates"
 review section (section pill beside Stock Changes) for the Part-499 possibly-same
