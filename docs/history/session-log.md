@@ -14768,7 +14768,10 @@ the tracker's read-cache and receipt/date-locale items should be marked FIXED
   timestamp* / *import-review parity* (MEDIUM): each a backend behavioral change
   or touches a file an active session is editing; deferred to focused passes.
 
-## Part 528 (Aug 30 2026, session business-os-v1-b9) — Part-77 HIGH fix: POS money — cents-true loyalty, whole-riel KHR
+## Part 529 (Aug 30 2026, session business-os-v1-b9) — Part-77 HIGH fix: POS money — cents-true loyalty, whole-riel KHR
+
+*(Renumbered from a colliding "Part 528" — the read-cache/date-locale
+session logged its 528 in the same minutes.)*
 
 **Ask:** findings-backlog continuation (claimed first). Two POS money
 defects from the frontend audit, commit `1360a7c8`:
