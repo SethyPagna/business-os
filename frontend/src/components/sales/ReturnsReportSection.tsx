@@ -83,7 +83,7 @@ export default function ReturnsReportSection({ t, fmtUSD, range, branchId, activ
   }, [active, load])
 
   const statChip = (label: string, value: string, tone = '') => (
-    <div className="rounded-lg border border-slate-200 bg-white px-3 py-2 dark:border-slate-700 dark:bg-slate-900">
+    <div className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 dark:border-slate-700 dark:bg-slate-900">
       <div className="text-[10px] font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">{label}</div>
       <div className={`text-sm font-semibold ${tone || 'text-slate-900 dark:text-white'}`}>{value}</div>
     </div>
@@ -98,14 +98,15 @@ export default function ReturnsReportSection({ t, fmtUSD, range, branchId, activ
         </div>
       ) : null}
 
-      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+      <div className="grid grid-cols-3 gap-2">
         {statChip(t('returns') || 'Returns', String(report?.totals.count ?? 0))}
         {statChip(t('refunds') || 'Refunds', fmtUSD(report?.totals.refund_usd ?? 0), 'text-red-600 dark:text-red-400')}
+        {statChip(t('avg_refund') || 'Avg refund', fmtUSD(report && report.totals.count > 0 ? report.totals.refund_usd / report.totals.count : 0))}
       </div>
 
-      <div className="grid gap-3 lg:grid-cols-3">
+      <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
         {/* Per-day list */}
-        <div className="rounded-lg border border-slate-200 bg-white p-3 dark:border-slate-700 dark:bg-slate-900 lg:col-span-1">
+        <div className="rounded-lg border border-slate-200 bg-white p-2.5 dark:border-slate-700 dark:bg-slate-900 lg:col-span-1">
           <div className="mb-2 text-xs font-semibold text-slate-700 dark:text-slate-200">{t('by_day') || 'By day'}</div>
           {loading && !report ? (
             <div className="space-y-2">{[0, 1, 2].map((row) => <div key={row} className="h-6 animate-pulse rounded bg-slate-100 dark:bg-slate-800" />)}</div>
@@ -127,7 +128,7 @@ export default function ReturnsReportSection({ t, fmtUSD, range, branchId, activ
         </div>
 
         {/* By reason */}
-        <div className="rounded-lg border border-slate-200 bg-white p-3 dark:border-slate-700 dark:bg-slate-900">
+        <div className="rounded-lg border border-slate-200 bg-white p-2.5 dark:border-slate-700 dark:bg-slate-900">
           <div className="mb-2 text-xs font-semibold text-slate-700 dark:text-slate-200">{t('by_reason') || 'By reason'}</div>
           {!report?.by_reason.length ? (
             <div className="text-xs text-slate-400">{t('no_data') || 'No data'}</div>
@@ -147,7 +148,7 @@ export default function ReturnsReportSection({ t, fmtUSD, range, branchId, activ
         </div>
 
         {/* By type */}
-        <div className="rounded-lg border border-slate-200 bg-white p-3 dark:border-slate-700 dark:bg-slate-900">
+        <div className="rounded-lg border border-slate-200 bg-white p-2.5 dark:border-slate-700 dark:bg-slate-900">
           <div className="mb-2 text-xs font-semibold text-slate-700 dark:text-slate-200">{t('by_type') || 'By type'}</div>
           {!report?.by_type.length ? (
             <div className="text-xs text-slate-400">{t('no_data') || 'No data'}</div>

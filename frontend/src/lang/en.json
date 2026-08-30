@@ -976,6 +976,8 @@
   "by_day": "By day",
   "by_reason": "By reason",
   "by_type": "By type",
+  "avg_refund": "Avg refund",
+  "avg_fee": "Avg fee",
   "damaged": "Damaged",
   "dark": "Dark",
   "dash_info_cogs": "What the items you sold in this period originally cost you to buy.",
