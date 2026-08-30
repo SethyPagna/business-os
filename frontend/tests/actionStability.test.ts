@@ -110,7 +110,9 @@ await runTest('background import tracker actions use a synchronous action guard'
   assert.match(source, /const handleRemove = async \(job: ImportJob\) => \{[\s\S]*const action = beginTrackerAction\(job, 'remove'\)/)
   assert.match(source, /withLoaderTimeout\(\s*\(\) => api\.cancelImportJob\(action\.jobId\)/)
   assert.match(source, /withLoaderTimeout\(\s*\(\) => api\.retryImportJob\(action\.jobId\)/)
-  assert.match(source, /withLoaderTimeout\(\s*\(\) => api\.approveImportJob\(action\.jobId\)/)
+  // Comment lines may sit between withLoaderTimeout( and the arrow, and the
+  // call may pass per-type options after the id (e.g. confirmStockActions).
+  assert.match(source, /withLoaderTimeout\(\s*(?:\/\/[^\n]*\n\s*)*\(\) => api\.approveImportJob\(action\.jobId[,)]/)
   assert.match(source, /withLoaderTimeout\(\s*\(\) => api\.downloadImportJobErrors\(action\.jobId\)/)
   assert.match(source, /withLoaderTimeout\(\s*\(\) => api\.deleteImportJob\(removedId, \{ force \}\)/)
 })
