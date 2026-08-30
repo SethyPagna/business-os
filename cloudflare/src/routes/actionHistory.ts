@@ -2,7 +2,7 @@ import { Hono, type Context } from 'hono'
 import { getDb } from '../lib/db'
 import { requireAuth, type SessionUser } from '../lib/auth'
 import { audit } from '../lib/audit'
-import { hasPermission, isAdminControlUser, isSensitiveActionHistory, permissionForActionHistory } from '../lib/permissions'
+import { getPermissionTier, hasPermission, isAdminControlUser, isSensitiveActionHistory, permissionForActionHistory } from '../lib/permissions'
 import { isServerReplayable, resolveUndoApplier } from '../lib/undoAppliers'
 import type { Env } from '../index'
 
@@ -82,8 +82,23 @@ function canOperateHistoryRow(user: SessionUser, row: ActionHistoryRow | null | 
   return hasPermission(user, 'audit_log')
 }
 
+// A payload naming a registered server applier is gated by the APPLIER's own
+// declared permission (full tier -- its replay is a direct write with no
+// review queue), never by the row's client-supplied entity/scope. Without
+// this, an unrecognized entity derived an empty permission and gated nothing,
+// so any account could store -- and later have the Worker replay -- a
+// 'branch.update' payload under scope 'global' (Part-77 CRITICAL finding).
+function canUseNamedAppliers(user: SessionUser, payloads: Array<unknown>): boolean {
+  for (const raw of payloads) {
+    const applier = resolveUndoApplier(raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : null)
+    if (applier && getPermissionTier(user, applier.permission) !== 'full') return false
+  }
+  return true
+}
+
 function canRecordHistory(user: SessionUser, body: Record<string, unknown>): boolean {
   if (isAdminControlUser(user)) return true
+  if (!canUseNamedAppliers(user, [body.undo_payload, body.redo_payload])) return false
   const permission = permissionForActionHistory({ entity: body.entity, scope: body.scope })
   if (permission && !hasPermission(user, permission)) return false
   const payload = {
@@ -95,19 +110,25 @@ function canRecordHistory(user: SessionUser, body: Record<string, unknown>): boo
   return !isSensitiveActionHistory({ entity: body.entity, scope: body.scope, payload })
 }
 
-function mapRow(row: ActionHistoryRow) {
+function mapRow(row: ActionHistoryRow, user: SessionUser) {
   const undoPayload = parseJson(row.undo_payload)
   const redoPayload = parseJson(row.redo_payload)
+  // K1 slice 2: tells the client this row's next transition can be replayed
+  // by the Worker (its payload names a registered applier), so a RELOADED
+  // page -- which has no live closure for the row -- can still render a
+  // real Undo/Redo button instead of the inert "Recorded" label. ANDed with
+  // THIS user's tier on the applier-declared permission, so the UI never
+  // offers a button the operate-time gate would refuse with 403.
+  const replayable = isServerReplayable(row, undoPayload, redoPayload)
+  const applier = replayable
+    ? resolveUndoApplier(String(row.status || '').toLowerCase() === 'redoable' ? redoPayload : undoPayload)
+    : null
   return {
     ...row,
     reversible: !!row.reversible,
     undo_payload: undoPayload,
     redo_payload: redoPayload,
-    // K1 slice 2: tells the client this row's next transition can be replayed
-    // by the Worker (its payload names a registered applier), so a RELOADED
-    // page -- which has no live closure for the row -- can still render a
-    // real Undo/Redo button instead of the inert "Recorded" label.
-    server_replayable: isServerReplayable(row, undoPayload, redoPayload),
+    server_replayable: !!(applier && getPermissionTier(user, applier.permission) === 'full'),
   }
 }
 
@@ -142,7 +163,7 @@ app.get('/', async (c) => {
         ORDER BY updated_at DESC, id DESC LIMIT @limit
       `).all<ActionHistoryRow>({ scope, user_id: user?.id || 0, limit })
     }
-    return c.json({ success: true, items: rows.map(mapRow) })
+    return c.json({ success: true, items: rows.map((row) => mapRow(row, user)) })
   } catch (error) {
     return c.json({ success: false, error: (error as Error)?.message || 'Failed to load action history' }, 500)
   }
@@ -245,6 +266,14 @@ async function completeServerHistoryTransition(c: Context<{ Bindings: Env; Varia
     // applier leaves the action reversible and retryable rather than half-done.
     const payload = direction === 'undo' ? parseJson(existing.undo_payload) : parseJson(existing.redo_payload)
     const applier = resolveUndoApplier(payload)
+    // The applier's own declared permission gates its replay -- full tier,
+    // checked HERE at operate time too (recording is gated the same way, but
+    // rows written before this gate existed, or by a user since demoted,
+    // must not replay on the strength of the row alone). Runs before any
+    // status flip so a refusal changes nothing.
+    if (applier && getPermissionTier(user, applier.permission) !== 'full') {
+      return c.json({ success: false, error: 'You do not have permission to perform this action' }, 403)
+    }
     // Refuse BEFORE any status flip: if the caller cannot replay the payload
     // itself (require_applied) and the Worker cannot either (no registered
     // applier), flipping the status would record a reversal that never
@@ -280,7 +309,7 @@ async function completeServerHistoryTransition(c: Context<{ Bindings: Env; Varia
     return c.json({
       success: true,
       applied,
-      item: row ? mapRow(row) : null,
+      item: row ? mapRow(row, user) : null,
       payload,
     })
   } catch (error) {

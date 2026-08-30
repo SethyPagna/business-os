@@ -206,10 +206,37 @@ await check('isServerReplayable follows the row status to the RIGHT payload and 
   assert.strictEqual(isServerReplayable({ reversible: 0, status: 'undoable' }, replayable, replayable), false)
 })
 
+await check('appliers declare their own permission and it is the branches section for branch.update', () => {
+  const resolved = resolveUndoApplier({ applier: 'branch.update', id: 1 })
+  assert.strictEqual(resolved?.permission, 'branches')
+})
+
+await check('source lock: the applier permission gate (full tier) guards BOTH record and operate, before any status flip or replay', () => {
+  const routeSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'routes', 'actionHistory.ts'), 'utf8')
+  // Record time: canRecordHistory must consult the applier registry, not
+  // only the client-supplied entity/scope.
+  assert.ok(/canUseNamedAppliers\(user, \[body\.undo_payload, body\.redo_payload\]\)/.test(routeSrc),
+    'canRecordHistory must gate payloads naming a registered applier')
+  assert.ok(/getPermissionTier\(user, applier\.permission\) !== 'full'/.test(routeSrc),
+    'the applier gate must demand the FULL tier of the applier-declared permission')
+  // Operate time: the gate must sit inside the transition handler BEFORE the
+  // status-flip UPDATE (and therefore before applier.run, which follows it).
+  const handlerStart = routeSrc.indexOf('completeServerHistoryTransition')
+  const operateGateAt = routeSrc.indexOf("getPermissionTier(user, applier.permission) !== 'full'", handlerStart)
+  const applierRunAt = routeSrc.indexOf('applier.run(payload', handlerStart)
+  const statusFlipAt = routeSrc.indexOf('UPDATE action_history SET status = @status, last_error = NULL', handlerStart)
+  assert.ok(operateGateAt > -1, 'the operate-time applier permission gate must exist in the transition handler')
+  assert.ok(applierRunAt > -1 && statusFlipAt > -1, 'expected the applier run and the status-flip UPDATE')
+  assert.ok(operateGateAt < applierRunAt, 'the permission gate must run before the applier replays')
+  assert.ok(operateGateAt < statusFlipAt, 'the permission gate must run before the status flip')
+})
+
 await check('source lock: routes/actionHistory.ts stamps server_replayable and refuses require_applied BEFORE the status flip', () => {
   const routeSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'routes', 'actionHistory.ts'), 'utf8')
-  assert.ok(/isServerReplayable/.test(routeSrc), 'actionHistory.ts must import/use isServerReplayable')
-  assert.ok(/server_replayable:\s*isServerReplayable\(/.test(routeSrc), 'mapRow must stamp server_replayable via the shared helper')
+  assert.ok(/const replayable = isServerReplayable\(row, undoPayload, redoPayload\)/.test(routeSrc), 'mapRow must derive replayability from the shared helper')
+  // ...ANDed with the requesting user's full tier on the applier-declared
+  // permission, so the UI is never offered a button the operate gate refuses.
+  assert.ok(/server_replayable: !!\(applier && getPermissionTier\(user, applier\.permission\) === 'full'\)/.test(routeSrc), 'mapRow must AND replayability with the user\'s tier on the applier permission')
   // The require_applied refusal must come BEFORE the status-flip UPDATE inside
   // the transition handler -- refusing after the flip would record a reversal
   // that never happened.

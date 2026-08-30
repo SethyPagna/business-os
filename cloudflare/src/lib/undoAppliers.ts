@@ -36,46 +36,62 @@ export interface UndoApplierContext {
 
 export type UndoApplier = (payload: Record<string, unknown>, ctx: UndoApplierContext) => Promise<void>
 
-const APPLIERS: Record<string, UndoApplier> = {
+// Every applier declares the permission section its replay writes under.
+// This -- the server-side registry -- is the AUTHORITY the route checks at
+// both record and operate time, never the row's client-supplied entity/scope
+// (the Part-77 CRITICAL finding: an unrecognized entity derived an empty
+// permission and gated nothing, so any account could store a payload naming
+// 'branch.update' under scope 'global' and have the Worker write branches
+// for it). A replay is a DIRECT write with no review queue, so the required
+// tier is FULL: a review-tier user's forward edit is queued for approval,
+// and their undo must not be the one path that writes the section directly.
+type UndoApplierDef = { permission: string; run: UndoApplier }
+
+const APPLIERS: Record<string, UndoApplierDef> = {
   // Payload shape: { applier: 'branch.update', id, fields: { name, location,
   // phone, manager, notes, is_default, is_active } }. The undo_payload carries
   // the PRE-edit field values and the redo_payload the POST-edit values, so the
   // one applier serves both directions -- the direction only decides which
   // stored payload the route hands in.
-  'branch.update': async (payload, ctx) => {
-    const db = getDb(ctx.env)
-    const id = Number(payload.id || 0)
-    if (!Number.isInteger(id) || id <= 0) {
-      throw new Error('This action cannot be replayed: its saved details are missing a branch id.')
-    }
-    const existing = await db.prepare('SELECT id FROM branches WHERE id = ?').get<{ id: number }>([id])
-    if (!existing) {
-      throw new Error('The branch this action changed no longer exists, so it cannot be reversed.')
-    }
-    const fields = payload.fields && typeof payload.fields === 'object'
-      ? (payload.fields as Record<string, unknown>)
-      : {}
-    await db.batch(branchUpdateStatements(id, fields))
-    await audit(
-      ctx.env,
-      ctx.user?.id ?? null,
-      ctx.user?.name ?? null,
-      ctx.direction === 'undo' ? 'action_undo' : 'action_redo',
-      'branch',
-      id,
-      { via: 'undo_applier', applier: 'branch.update' },
-    )
-    await broadcast(ctx.env, 'branches', { action: 'update', id })
+  'branch.update': {
+    // Same section the live PUT /branches/:id gates on (getPermissionTier
+    // (user, 'branches') in routes/branches.ts).
+    permission: 'branches',
+    run: async (payload, ctx) => {
+      const db = getDb(ctx.env)
+      const id = Number(payload.id || 0)
+      if (!Number.isInteger(id) || id <= 0) {
+        throw new Error('This action cannot be replayed: its saved details are missing a branch id.')
+      }
+      const existing = await db.prepare('SELECT id FROM branches WHERE id = ?').get<{ id: number }>([id])
+      if (!existing) {
+        throw new Error('The branch this action changed no longer exists, so it cannot be reversed.')
+      }
+      const fields = payload.fields && typeof payload.fields === 'object'
+        ? (payload.fields as Record<string, unknown>)
+        : {}
+      await db.batch(branchUpdateStatements(id, fields))
+      await audit(
+        ctx.env,
+        ctx.user?.id ?? null,
+        ctx.user?.name ?? null,
+        ctx.direction === 'undo' ? 'action_undo' : 'action_redo',
+        'branch',
+        id,
+        { via: 'undo_applier', applier: 'branch.update' },
+      )
+      await broadcast(ctx.env, 'branches', { action: 'update', id })
+    },
   },
 }
 
 // Returns the applier a payload opts into, or null when the payload names no
 // registered applier (the fall-through-to-client-replay case).
-export function resolveUndoApplier(payload: Record<string, unknown> | null | undefined): { name: string; run: UndoApplier } | null {
+export function resolveUndoApplier(payload: Record<string, unknown> | null | undefined): { name: string; permission: string; run: UndoApplier } | null {
   if (!payload || typeof payload !== 'object') return null
   const name = typeof payload.applier === 'string' ? payload.applier : ''
-  const run = name ? APPLIERS[name] : undefined
-  return run ? { name, run } : null
+  const def = name ? APPLIERS[name] : undefined
+  return def ? { name, permission: def.permission, run: def.run } : null
 }
 
 // Whether a stored action_history row's NEXT transition can be replayed by the
