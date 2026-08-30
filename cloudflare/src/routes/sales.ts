@@ -380,12 +380,22 @@ app.post('/', async (c) => {
     const rewardedAgg = await db.prepare(
       `SELECT COALESCE(SUM(reward_points), 0) AS rewarded FROM customer_share_submissions WHERE customer_id = ? AND status = 'approved'`,
     ).get<{ rewarded: number }>([customer.id])
+    // Manual awards (Part-77, MEDIUM): summarizePoints -- the balance POS
+    // DISPLAYS -- adds loyalty_point_adjustments, but this re-validation
+    // didn't, so a customer whose points were manually awarded saw a
+    // redeemable balance and then got "Insufficient points balance" at
+    // checkout. Same term, same sign (adjustments are positive awards by
+    // CHECK constraint).
+    const adjustedAgg = await db.prepare(
+      `SELECT COALESCE(SUM(points), 0) AS adjusted FROM loyalty_point_adjustments WHERE customer_id = ?`,
+    ).get<{ adjusted: number }>([customer.id])
 
     const earned = pointsBasis === 'khr' ? (salesAgg?.earned_khr || 0) * pointsPerKhr : (salesAgg?.earned_usd || 0) * pointsPerUsd
     const deducted = pointsBasis === 'khr' ? (returnsAgg?.refund_khr || 0) * pointsPerKhr : (returnsAgg?.refund_usd || 0) * pointsPerUsd
     const alreadyRedeemed = salesAgg?.redeemed || 0
     const rewarded = rewardedAgg?.rewarded || 0
-    const balance = Math.max(0, earned - deducted - alreadyRedeemed + rewarded)
+    const manuallyAwarded = adjustedAgg?.adjusted || 0
+    const balance = Math.max(0, earned - deducted - alreadyRedeemed + rewarded + manuallyAwarded)
 
     if (membershipPointsRedeemed > balance + 0.005) {
       return c.json({ error: `Insufficient points balance: requested ${membershipPointsRedeemed}, available ${Math.floor(balance)}` }, 409)

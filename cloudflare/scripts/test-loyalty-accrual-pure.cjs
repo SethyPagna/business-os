@@ -88,4 +88,18 @@ assert.match(contacts, /COALESCE\(loyalty_accrual, 1\) AS loyalty_accrual/, 'con
 const pos = fs.readFileSync(path.join(__dirname, '..', '..', 'frontend', 'src', 'components', 'pos', 'POS.tsx'), 'utf8')
 assert.match(pos, /loyalty_accrual: active\.loyaltyAccrual !== false/, 'POS checkout sends the flag with on-by-default semantics')
 
+// ---- Part-77 (MEDIUM): manual awards count at CHECKOUT, not just in the
+// display. summarizePoints (the balance POS shows) adds
+// loyalty_point_adjustments; the checkout re-validation omitted the term,
+// so a manually-awarded customer saw a redeemable balance the sale then
+// refused with "Insufficient points balance". The two formulas must not
+// drift.
+sqlite.prepare(`INSERT INTO loyalty_point_adjustments (customer_id, points, note) VALUES (7, 50, 'welcome bonus')`).run()
+const adjustedRow = sqlite.prepare(`SELECT COALESCE(SUM(points), 0) AS adjusted FROM loyalty_point_adjustments WHERE customer_id = 7`).get()
+assert.equal(adjustedRow.adjusted, 50, 'the aggregation the route runs sees the manual award')
+assert.match(salesRoute, /SUM\(points\), 0\) AS adjusted FROM loyalty_point_adjustments WHERE customer_id = \?/, 'checkout re-validation reads manual awards')
+assert.match(salesRoute, /\+ rewarded \+ manuallyAwarded\)/, 'checkout balance includes the manual-award term')
+const portalRoute = read(path.join('routes', 'portal.ts'))
+assert.match(portalRoute, /\+ rewarded \+ manuallyAwarded\)/, 'summarizePoints keeps the same term (display/checkout parity)')
+
 console.log('test-loyalty-accrual-pure: all checks passed')
