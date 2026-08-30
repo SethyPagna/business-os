@@ -77,6 +77,35 @@ await runTest('NotesWidget persists resized size across sessions, same pattern a
   )
 })
 
+await runTest('the collapsed pencil launcher is draggable on every pointer type and remembers its spot', () => {
+  const source = readFrontend('src/components/shared/NotesWidget.tsx')
+  assert.match(source, /LAUNCHER_POS_STORAGE_KEY = 'businessos_notes_launcher_pos'/, 'the chip has its OWN storage key, separate from the open panel\'s')
+  assert.match(source, /onPointerDown=\{handleLauncherPointerDown\}/, 'pointer events cover mouse, touch and pen in one path')
+  assert.match(source, /onPointerMove=\{handleLauncherPointerMove\}/)
+  assert.match(source, /onPointerUp=\{endLauncherDrag\}/)
+  assert.match(source, /onPointerCancel=\{endLauncherDrag\}/)
+  // Without touch-action:none a touch drag scrolls the page instead of
+  // reaching the pointer handlers -- the exact "not draggable on phones"
+  // failure this feature was asked to rule out.
+  const collapsedBlock = source.slice(source.indexOf('if (!open) {'), source.indexOf('return (\n    <div\n      ref={panelRef}'))
+  assert.match(collapsedBlock, /touchAction: 'none'/, 'the chip must opt out of touch scrolling so touch drags work')
+  assert.match(source, /function clampLauncherTop\(/, 'a drag can never strand the chip off-screen')
+  assert.match(source, /getDragMoveThreshold\(state\.pointerType\)/, 'a plain tap still opens the panel -- only a real move drags')
+})
+
+await runTest('a drag-release does not open the panel, and a PANEL drag no longer swallows the chip\'s next tap', () => {
+  const source = readFrontend('src/components/shared/NotesWidget.tsx')
+  // justDraggedRef is set ONLY by the launcher's own drag end now. It used
+  // to be set by the open panel's header drag -- a flag the launcher then
+  // consumed, silently eating the FIRST tap on the chip after any panel
+  // reposition.
+  const endHeaderDragBlock = source.slice(source.indexOf('const endHeaderDrag'), source.indexOf('// Launcher chip drag'))
+  assert.doesNotMatch(endHeaderDragBlock, /justDraggedRef\.current = true/, 'the panel header drag must not arm the launcher\'s click suppressor')
+  const endLauncherBlock = source.slice(source.indexOf('const endLauncherDrag'), source.indexOf('const handleResizeHandlePointerDown'))
+  assert.match(endLauncherBlock, /justDraggedRef\.current = true/, 'only the launcher\'s own drag suppresses its click')
+  assert.match(endLauncherBlock, /writeLauncherTop\(current\)/, 'position persists on release, not every move')
+})
+
 if (failed > 0) {
   console.error(`\n${failed} test(s) failed`)
   process.exit(1)

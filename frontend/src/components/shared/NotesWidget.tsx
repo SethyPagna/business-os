@@ -49,6 +49,39 @@ const useApp = useAppHook as () => AppContextValue
 
 const DRAG_POS_STORAGE_KEY = 'businessos_notes_widget_pos'
 const SIZE_STORAGE_KEY = 'businessos_notes_widget_size'
+// The collapsed pencil chip's own remembered position -- separate from the
+// open panel's DRAG_POS_STORAGE_KEY on purpose: the chip lives docked to
+// the LEFT EDGE and only its vertical position is draggable (free x/y
+// would detach it from the edge its rounded-r "bump" design hugs). One
+// number is all it needs.
+const LAUNCHER_POS_STORAGE_KEY = 'businessos_notes_launcher_pos'
+const LAUNCHER_EDGE_MARGIN = 8
+
+function readLauncherTop(): number | null {
+  if (typeof window === 'undefined') return null
+  try {
+    const raw = window.localStorage.getItem(LAUNCHER_POS_STORAGE_KEY)
+    if (raw == null) return null
+    const top = Number(raw)
+    return Number.isFinite(top) ? top : null
+  } catch (_) {
+    return null
+  }
+}
+
+function writeLauncherTop(top: number): void {
+  if (typeof window === 'undefined') return
+  try {
+    window.localStorage.setItem(LAUNCHER_POS_STORAGE_KEY, String(top))
+  } catch (_) {
+    // Same as writeDragPos -- the drag still works for the session.
+  }
+}
+
+function clampLauncherTop(top: number, chipHeight: number): number {
+  const maxTop = Math.max(LAUNCHER_EDGE_MARGIN, window.innerHeight - chipHeight - LAUNCHER_EDGE_MARGIN)
+  return Math.min(maxTop, Math.max(LAUNCHER_EDGE_MARGIN, top))
+}
 const DRAG_EDGE_MARGIN = 8
 const MIN_WIDTH = 280
 const MIN_HEIGHT = 280
@@ -206,7 +239,14 @@ export default function NotesWidget() {
   const panelRef = useRef<HTMLDivElement | null>(null)
   const dragStateRef = useRef<{ pointerId: number; startX: number; startY: number; origLeft: number; origTop: number; moved: boolean; pointerType: string } | null>(null)
   const resizeStateRef = useRef<{ pointerId: number; startX: number; startY: number; origWidth: number; origHeight: number; left: number; top: number; moved: boolean; pointerType: string } | null>(null)
+  // Set by the LAUNCHER's own drag ending -- consumed by its onClick so a
+  // drag-release doesn't also open the panel. (This used to be set by the
+  // open panel's header drag instead, which the launcher could never
+  // observe mid-drag -- the leftover flag silently swallowed the FIRST tap
+  // on the chip after any panel reposition.)
   const justDraggedRef = useRef(false)
+  const [launcherTop, setLauncherTop] = useState<number | null>(() => readLauncherTop())
+  const launcherDragStateRef = useRef<{ pointerId: number; startY: number; origTop: number; chipHeight: number; moved: boolean; pointerType: string } | null>(null)
 
   const label = useMemo(() => t('notes_title') || 'My Notes', [t])
 
@@ -284,9 +324,58 @@ export default function NotesWidget() {
         if (current) writeDragPos(current)
         return current
       })
-      justDraggedRef.current = true
     }
   }, [])
+
+  // Launcher chip drag -- vertical only, along the left edge it docks to.
+  // Pointer events cover mouse, touch and pen in one path (with
+  // touch-action: none on the chip so a touch drag isn't hijacked by page
+  // scroll), the same mechanics as the panel header drag above: capture,
+  // per-pointer-type move threshold so a plain tap still clicks, clamp to
+  // the viewport, persist only on release.
+  const handleLauncherPointerDown = useCallback((event: ReactPointerEvent<HTMLButtonElement>) => {
+    const rect = event.currentTarget.getBoundingClientRect()
+    launcherDragStateRef.current = {
+      pointerId: event.pointerId,
+      startY: event.clientY,
+      origTop: rect.top,
+      chipHeight: rect.height,
+      moved: false,
+      pointerType: event.pointerType || 'mouse',
+    }
+    event.currentTarget.setPointerCapture(event.pointerId)
+  }, [])
+
+  const handleLauncherPointerMove = useCallback((event: ReactPointerEvent<HTMLButtonElement>) => {
+    const state = launcherDragStateRef.current
+    if (!state || state.pointerId !== event.pointerId) return
+    const dy = event.clientY - state.startY
+    if (!state.moved && Math.abs(dy) < getDragMoveThreshold(state.pointerType)) return
+    state.moved = true
+    setLauncherTop(clampLauncherTop(state.origTop + dy, state.chipHeight))
+  }, [])
+
+  const endLauncherDrag = useCallback((event: ReactPointerEvent<HTMLButtonElement>) => {
+    const state = launcherDragStateRef.current
+    if (!state || state.pointerId !== event.pointerId) return
+    launcherDragStateRef.current = null
+    if (state.moved) {
+      justDraggedRef.current = true
+      setLauncherTop((current) => {
+        if (current != null) writeLauncherTop(current)
+        return current
+      })
+    }
+  }, [])
+
+  // A remembered chip position from a taller window must not strand the
+  // chip below the fold on a shorter one.
+  useEffect(() => {
+    if (launcherTop == null) return
+    const clampToViewport = () => setLauncherTop((current) => (current == null ? current : clampLauncherTop(current, 40)))
+    window.addEventListener('resize', clampToViewport)
+    return () => window.removeEventListener('resize', clampToViewport)
+  }, [launcherTop == null])
 
   const handleResizeHandlePointerDown = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
     const el = panelRef.current
@@ -405,17 +494,30 @@ export default function NotesWidget() {
     // vertical band where scrollable content actually lives. Desktop has
     // no bottom nav to clear and reports haven't flagged it there, so
     // `md:` keeps the original vertical-center dock.
+    // A dragged chip renders at its remembered top (vertical drag only --
+    // it stays docked to the left edge by design); otherwise the CSS
+    // defaults apply (above the mobile bottom nav / vertically centered on
+    // md+). touch-action: none is what lets a touch drag reach the pointer
+    // handlers instead of scrolling the page.
     return (
-      <div className="pointer-events-none fixed left-0 z-[1001] bottom-[calc(4.5rem+env(safe-area-inset-bottom))] md:bottom-auto md:top-1/2 md:-translate-y-1/2">
+      <div
+        className={`pointer-events-none fixed left-0 z-[1001] ${launcherTop == null ? 'bottom-[calc(4.5rem+env(safe-area-inset-bottom))] md:bottom-auto md:top-1/2 md:-translate-y-1/2' : ''}`}
+        style={launcherTop != null ? { top: `${launcherTop}px` } : undefined}
+      >
         <button
           type="button"
           onClick={() => {
             if (justDraggedRef.current) { justDraggedRef.current = false; return }
             openPanel()
           }}
+          onPointerDown={handleLauncherPointerDown}
+          onPointerMove={handleLauncherPointerMove}
+          onPointerUp={endLauncherDrag}
+          onPointerCancel={endLauncherDrag}
+          style={{ touchAction: 'none' }}
           aria-label={label}
           title={label}
-          className="group pointer-events-auto flex items-center gap-1.5 rounded-r-full border border-blue-200 bg-blue-50/95 py-2.5 pl-2 pr-1 text-blue-900 shadow-lg backdrop-blur transition-[padding-right,transform] duration-150 hover:pr-3 focus-visible:pr-3 dark:border-blue-900/50 dark:bg-blue-950/90 dark:text-blue-100"
+          className="group pointer-events-auto flex cursor-grab items-center gap-1.5 rounded-r-full border border-blue-200 bg-blue-50/95 py-2.5 pl-2 pr-1 text-blue-900 shadow-lg backdrop-blur transition-[padding-right,transform] duration-150 hover:pr-3 focus-visible:pr-3 active:cursor-grabbing dark:border-blue-900/50 dark:bg-blue-950/90 dark:text-blue-100"
         >
           <Pencil className="h-3.5 w-3.5 flex-shrink-0" />
           <span className="max-w-0 overflow-hidden whitespace-nowrap text-xs font-semibold opacity-0 transition-[max-width,opacity] duration-150 group-hover:max-w-[8rem] group-hover:opacity-100 group-focus-visible:max-w-[8rem] group-focus-visible:opacity-100">
