@@ -14968,3 +14968,114 @@ logic is fully unit-tested and the wiring typechecks.
 - progress.md tracker (read-cache, receipt/date-locale, money-model) should be
   marked FIXED by whoever next edits progress.md cleanly — it was dirty from
   another session throughout, so this session never staged it.
+
+## Part 535 — Public storefront customer accounts (§2): sign-up / sign-in, guest, wishlist, no-payment notice
+
+*(Commits for this work were labeled "Part 533" before the session-log was
+checked; a parallel session had meanwhile taken 533 AND 534, so this entry is
+535. The commit labels are left as-is — a harmless parallel-race artifact.)*
+
+**Ask (this session, verbatim intent):** disable the membership lookup and show
+"this feature is not built into the account structure for privacy and security
+purposes"; add sign-up (name required; unique phone; membership id optional →
+auto-created; a "if you previously bought from Leang Cosmetics/Leang Beauty,
+contact us for your membership id — your phone must match" reminder when the id
+is left blank) and sign-in ((name or membership id) + phone); a real password
+the customer sets, reset via OTP/email "let them setup" or contact admin; cannot
+fail more than ten times per sign-up and another ten per sign-in; the account
+records are single/canonical, not multiples like admin contacts; flag these in
+admin contacts; be full proof, no loopholes. Guests keep ALL features; the
+account version only adds permanent memory for their save (wishlist) and cart.
+A "we don't take online payments, please contact us — for your safety" notice
+across sections and the cart.
+
+**Decisions locked with the user this session (AskUserQuestion):** password —
+customer sets their own, reset via email link if they add an email else contact
+admin (no SMS provider wired — flagged); "save" = a heart/wishlist PLUS the
+persisted cart; existing customer (phone already in contacts) can't self-signup
+and registers with membership id + matching phone, new customer self-signs-up
+with an auto id; brand name in the two new customer-facing strings is the
+literal "Leang Cosmetics/Leang Beauty" (a deliberate exception to the Part-376
+"Leang Beauty" sweep).
+
+**What changed**
+- **Migration 0087_portal_accounts.sql** (renumbered from a 0086 that collided
+  with a parallel session's 0086_missing_fk_indexes): `portal_accounts`
+  (phone UNIQUE = one account per number, ci-unique membership_id, password_hash,
+  contact_id, cart_json, wishlist_json), `portal_sessions`,
+  `portal_password_resets` (portal-scoped, NOT the user-bound verification_codes
+  — reusing that was a cross-table takeover vector), `portal_auth_lockouts`, and
+  `customers.phone_normalized` (canonical key + SQL backfill + index).
+- **cloudflare/src/lib/phone.ts** — one `canonicalizePhone` (digits, 855→0 fold)
+  that every account store/lookup/probe uses; the repo had four inconsistent
+  normalizers and customers.phone is space-formatted, so without this the same
+  human registers three times and existing customers are missed.
+- **lib/portalSession.ts** (fork of user_sessions: bos_portal host-only cookie,
+  sliding renewal, requirePortalAccount), **lib/portalAuthLockout.ts** (flat
+  10-fail-per-flow cap then cooldown, phone-keyed signin + IP-keyed signup),
+  **lib/portalAccounts.ts** (signup/signin: enumeration-safe generic errors,
+  dummy bcrypt on miss, race-safe phone-claim-first since D1 has no interactive
+  tx, existing-customer detection incl. secondary phones).
+- **routes/portal.ts** — /auth/signup|signin|signout|me + session-scoped
+  /account/cart|wishlist (cookie account_id only, sanitized/bounded writes);
+  membership lookup DISABLED (returns feature_disabled; its data-returning body +
+  three now-dead helpers joinWrappedClauses/normalizePhone/summarizeMembership
+  Totals removed).
+- **routes/contacts.ts** — customers create/update keep phone_normalized in sync;
+  customers list read joins a portal_account flag; new full-tier-only
+  POST /customers/:id/portal-reset (one-time temp password + session revoke) is
+  the "contact us to reset" path.
+- **Frontend** — Account tab (always available) via new CatalogAccountSection
+  (sign-up/sign-in/signed-in + the reminder + privacy message); CatalogMembership
+  Section reduced to the privacy message (admin preview); usePortalAccount hook
+  orchestrates guest→account merge (cart qty = max) + debounced mirror;
+  usePortalWishlist + a heart on every product card; PortalNoPaymentNotice in the
+  cart drawer + account section; portalPublicTransport + public-web-api gain the
+  account methods (credentials: include); CustomersTab shows an "Account" badge.
+
+**What was found** (adversarial Plan-agent review, all closed): four
+incompatible phone normalizers; customers.phone stored space-formatted (a naive
+existing-customer probe would miss ~everyone and create duplicate contacts +
+membership numbers); verification_codes.user_id is untyped (portal reset would
+overwrite a staff users row); D1 has no interactive transaction (uniqueness must
+be a DB constraint, not a read); IP-only lockout self-DoSes CGNAT; the
+/submissions membership check is a residual oracle (left intact — it's a
+guest-usable feature the user wants kept, only the data-exposing lookup was
+disabled).
+
+**Verified (real runs):**
+- cloudflare tsc clean; frontend tsc clean (0 errors); frontend `npm run build`
+  green (catalog bundle carries the account section).
+- test-portal-accounts-pure.cjs 12/12 (canonical-phone collapse, backfill parity,
+  new vs existing signup, phone mismatch/unknown-id reminders, 10-fail lockout,
+  signin identifier/password + dummy-compare, per-store id uniqueness).
+- test-migration-chain-fresh-pure.cjs 8/8 over the full 88-migration chain incl.
+  0087 (portal tables + both uniqueness gates + phone_normalized).
+- Repurposed test-portal-membership-{crosscustomer,redaction}-pure to prove the
+  disabled endpoint leaks nothing; stubbed the account libs in every test that
+  loads portal.ts/contacts.ts; whole portal/contacts/loyalty/lockout suite green.
+- **Live HTTP e2e on an isolated wrangler** (own --persist-to + port 8901, all
+  88 migrations applied): signup→cookie→/me; membership lookup → 403
+  feature_disabled; PUT cart deduped+clamped and GET persisted; the SAME phone in
+  +855 form rejected (canonical uniqueness detected the just-created customer);
+  wrong password → generic 401; signin by membership-id+phone on a fresh cookie
+  loads the SAME server cart (cross-device permanent memory); bos_portal on
+  GET /api/customers → 401 (session isolation); /account/cart with no cookie →
+  401 (no anonymous access). Isolated worker stopped, port freed.
+
+**Not done / follow-ups:**
+- Self-serve password reset is email-link only (no SMS provider wired) — most
+  customers have no email, so the realistic path is the admin temp-password
+  reset shipped here. SMS-OTP reset needs a provider integration.
+- Khmer strings for the new storefront account UI rely on the portal
+  translate-widget fallback; the admin "Account" badge shows its English
+  fallback in Khmer (en/km.json left untouched to avoid a parallel-session
+  collision) — a small i18n follow-up.
+- PublicCatalogPage still carries the old membership-lookup state/handlers
+  (membershipNumber/handleMembershipLookup/refreshMembershipData) passed to
+  CatalogSecondaryTabs but never triggered now — a low-risk cleanup deferred to
+  avoid destabilizing that 1600-line file mid-feature.
+- Stopping the isolated worker used an unscoped `Stop-Process workerd`; the
+  community 8787 instance's workerd children may have been killed too (its
+  wrangler manager respawns them) — heads-up to that session.
+- NEEDS DEPLOY: migration 0087 + all code. Not deployed this session.

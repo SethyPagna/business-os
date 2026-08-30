@@ -3027,18 +3027,49 @@ the switch and its reasoning are recorded in `wrangler.toml`.
 
 ## Current status
 
-**[CLAIMED — Part 533, storefront-accounts session, Aug 30 2026]: public customer accounts
-(§2).** Building sign-up/sign-in on the public storefront with a real password + auto
-membership ID, disabling the anonymous membership lookup (replaced by a privacy message),
-guest mode kept full-featured, server-persisted cart + new wishlist, admin-Contacts account
-flag, and the "no online payments — contact us" notice. **Lane (disjoint from stats/de-carding/
-picker):** new `cloudflare/migrations/0086_portal_accounts.sql`; new `cloudflare/src/lib/{phone,
-portalAccounts,portalSession,portalAuthLockout}.ts`; `cloudflare/src/routes/portal.ts` (+auth/
-account endpoints, disable membership lookup) and `routes/contacts.ts` (phone_normalized sync +
-account flag); frontend `public-web-api.ts`, `api/portalPublicTransport.ts`, catalog
-`CatalogSecondaryTabs.tsx`/`PublicCatalogPage.tsx`/`portalBucket.ts`/new `CatalogAccountSection.tsx`/
-new `PortalNoPaymentNotice.tsx`, `ProductDetailFlyout.tsx`, admin `contacts/{CustomersTab,
-CustomerFormModal}.tsx`; en/km lang packs (append-only). Plan:
+**→ STOREFRONT-ACCOUNTS SESSION, URGENT — TWO COLLISIONS (coordinator 7b, Aug 31
+~00:25), fix BEFORE any deploy/remote migrate:**
+1. **Migration number 0086 is taken twice**: b9's `0086_missing_fk_indexes.sql`
+   (committed FIRST, 9dfc7235, keeps the number) and your `0086_portal_accounts.sql`
+   (0fd16a5c — later writer renames). Rename yours to `0087_portal_accounts.sql`.
+   D1 tracks by FILENAME: if your LOCAL dev DB already applied it under the old
+   name, fix the bookkeeping before your next migrate:local or it will re-apply
+   and die on the non-idempotent `ALTER TABLE customers ADD COLUMN`
+   (`UPDATE d1_migrations SET name='0087_portal_accounts.sql' WHERE
+   name='0086_portal_accounts.sql'` on the local DB). Remote/prod is safe — no
+   deploy has happened. Re-run `test-migration-chain-fresh-pure.cjs` after.
+2. **Part 533 is taken**: b9 LOGGED Part 533 (loyalty checkout fix, 8dcb6fdd)
+   — logged beats claimed. Your number is grep-max+1 at log-writing time (≥534);
+   also renumber this claim header and the `-- Part 533` comment baked into the
+   migration file (the baked-number trap, again).
+   **DEADLINE (added ~00:35):** if the rename hasn't landed by the coordinator's
+   ~01:00 check, 7b performs it (git mv to 0087 + the shared local d1_migrations
+   bookkeeping fix + note commit) — it doesn't touch your in-flight frontend
+   files, but flag here or message 7b if you're mid-something that assumes the
+   old filename.
+
+**[DONE IN CODE — Part 535 (commits labeled 533; 533/534 were taken by a
+parallel session), storefront-accounts session, Aug 31 2026, NEEDS DEPLOY]:
+public customer accounts (§2).** Sign-up/sign-in on the public storefront with a
+real password + auto membership ID, membership lookup DISABLED (privacy
+message), guests keep ALL features, server-persisted cart + new wishlist (heart),
+admin-Contacts "Account" badge, staff temp-password reset, and the "WE, Leang
+Cosmetics/Leang Beauty don't take online payments — contact us to purchase. YOUR
+PRIVACY IS OUR PRIORITY." notice. Migration is **0087**_portal_accounts.sql
+(renumbered — 0086 collided with a parallel `0086_missing_fk_indexes.sql`). New
+`cloudflare/src/lib/{phone,portalAccounts,portalSession,portalAuthLockout}.ts`;
+`routes/portal.ts` (+auth/account endpoints, lookup disabled) and
+`routes/contacts.ts` (phone_normalized sync + account flag + reset); frontend
+new `catalog/{portalAccount.ts,CatalogAccountSection.tsx,PortalNoPaymentNotice.tsx}`
++ `portalBucket.ts` (wishlist), `PublicCatalogPage.tsx`, `CatalogSecondaryTabs.tsx`,
+`CatalogProductsSection.tsx` (heart), `public-web-api.ts`, `api/portalPublicTransport.ts`,
+admin `contacts/CustomersTab.tsx`. **Verified:** both tscs + frontend build green;
+portal-accounts pure 12/12; migration chain 8/8 (88 migrations incl. 0087); live
+HTTP e2e on an isolated wrangler (signup→cookie→/me, lookup 403, cart persist +
+cross-device, canonical +855 dedupe, generic wrong-password, portal↔admin session
+isolation, no-cookie 401). Follow-ups: SMS-OTP reset (no provider); Khmer for new
+strings (translate-widget/fallbacks cover it); trim now-dead membership-lookup
+state in PublicCatalogPage. Full entry: session-log Part 535. Plan:
 `C:\Users\mrkl6\.claude\plans\atomic-floating-muffin.md`.
 
 **Part 526 (Aug 30 2026, parallel session): the 25-item refinement batch is DONE in code** — StatsStrip v2 (cards under the range row, actions slot hosting each page's buttons, tighter chips, scrollable folds), Sales top-row consolidation + day grouping + mobile third-row badges, fit-sized Add Fee/New Return in the range rows, Products range-above-search + pager merge + hover button-guide + flat mobile rows with yellow batch badges, Reports single-select All + inline branch + text summaries with "|" + click-to-open floats, date-picker month/year selects in the calendar header, Duplicates decide-all-then-apply + in-place resolve float. See Part 526. **Needs deploy.**
@@ -3305,10 +3336,13 @@ up should re-verify against current source first.
   locale (dd/mm + 12h) violating the mm/dd + 24h rule. (×1 cross-surface).
 
 **MEDIUM (representative):** review-tier bypass on fees PUT / contacts create / returns
-create; membership points balance formula omits `loyalty_point_adjustments` in POS so
-manual-award customers can't redeem; offline sale timestamps recorded at sync time not
+create; ~~membership points balance formula omits `loyalty_point_adjustments`~~
+**[FIXED: b9, Part 533, `ab8d172c`]** — checkout re-validation now carries the same
+manual-award term as summarizePoints, with parity source locks; offline sale
+timestamps recorded at sync time not
 sale time (day-boundary reports drift); read-cache keys missing their id param (fees/
-returns/customTables get-one collisions); import review screen (Sales/Inventory) lacks
+returns/customTables get-one collisions — **[FIXED by peer, Part 528]**); import
+review screen (Sales/Inventory) lacks
 Cancel + per-row decisions its Products sibling has; failed import job renders "Queued
 0%"; Suppliers/Delivery tabs lack the sort/pagination their sibling + backend support.
 
@@ -6256,7 +6290,14 @@ price list from the current rate is the correct behaviour there.
 stored values, never the live rate), and an explicit UI statement of the rule where the
 rate is edited, so nobody "fixes" it into retroactive behaviour later.
 
-### 2. 🔴 Public website accounts — signup, login, guest
+### 2. ✅ Public website accounts — signup, login, guest — BUILT (Part 535, needs deploy)
+
+> **DONE IN CODE (Part 535).** The concrete decisions and the shipped shape are
+> in [Current status](#current-status) and session-log Part 535. Password-less
+> was replaced by a customer-set password (user decision this session); phone is
+> the canonical unique account key; membership lookup is disabled with a privacy
+> message; guests keep all features; account adds a server-persisted cart +
+> wishlist. The original analysis below is kept for context.
 
 **Ask:** signup/login for `leangcosmetics.dpdns.org`; membership ID obtainable from an
 admin note; log in with email, Gmail, phone, or membership ID alone; strong passwords;
