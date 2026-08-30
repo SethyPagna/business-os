@@ -51,7 +51,9 @@ function loadReal(relPath, requireOverrides = {}) {
   return moduleObj.exports
 }
 
-const FAKE_USER = { id: 1, username: 'tester', name: 'Test User', permissions: JSON.stringify({ backup: true }) }
+// backup_restore, not just backup (Part 513): destructive resets (incl.
+// finalize-migration) now demand the restore/reset permission.
+const FAKE_USER = { id: 1, username: 'tester', name: 'Test User', permissions: JSON.stringify({ backup: true, backup_restore: true }) }
 
 let backupCallLog = []
 let backupShouldFail = false

@@ -49,7 +49,10 @@ function loadReal(relPath, requireOverrides = {}) {
   return moduleObj.exports
 }
 
-const FAKE_USER = { id: 1, username: 'tester', name: 'Test User', permissions: JSON.stringify({ backup: true }) }
+// backup_restore, not just backup (Part 513): destructive resets now demand
+// the restore/reset permission -- the export-grade 'backup' alone no longer
+// clears the gate this test drives.
+const FAKE_USER = { id: 1, username: 'tester', name: 'Test User', permissions: JSON.stringify({ backup: true, backup_restore: true }) }
 
 // Real table list under test -- if PRODUCTS_RESET_TABLES in the shipped
 // source drifts (a table added/removed), this import picks up the change
