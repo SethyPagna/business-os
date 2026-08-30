@@ -1,5 +1,6 @@
 import type { IndexableType, Table } from 'dexie'
 import { getClientDeviceInfo } from '../utils/deviceInfo.ts'
+import { businessDateTimeId } from '../utils/timestampId.ts'
 import {
   apiFetch,
   isNetErr,
@@ -45,10 +46,14 @@ function localTable(db: LocalDb, tableName: string): Table<LocalRow, IndexableTy
   return db.table(tableName) as Table<LocalRow, IndexableType>
 }
 
-function buildOfflineSaleReceiptNumber(payload: SalePayload = {}): string {
-  const clientRequestId = asText(payload.client_request_id || createSaleClientRequestId('sale')).trim()
-  const suffix = clientRequestId.replace(/^sale_/, '').replace(/[^a-z0-9]/gi, '').slice(0, 8).toUpperCase()
-  return `OFFLINE-${suffix || Date.now()}`
+// Offline sales mint their receipt id at QUEUE time from the device clock
+// -- the sale's own moment, not the later sync -- in the same
+// RCP-YYYYMMDD-HHMMSS shape the server mints online (user, Aug 30 2026:
+// receipt ids encode date+time). The id rides the replayed payload, so the
+// server keeps it; the pending-sync UI reads the sale row's
+// offline_pending flag, which is what the old OFFLINE- prefix signaled.
+function buildOfflineSaleReceiptNumber(): string {
+  return `RCP-${businessDateTimeId()}`
 }
 
 function isRetryableOfflineSaleError(error: unknown): boolean {
@@ -104,13 +109,13 @@ async function queueOfflineSale(payload: SalePayload, reason = 'server_offline')
       queued: true,
       duplicate: true,
       id: existing.entity_id || null,
-      receiptNumber: existing.entity_name || buildOfflineSaleReceiptNumber(salePayload),
+      receiptNumber: existing.entity_name || buildOfflineSaleReceiptNumber(),
       client_request_id: salePayload.client_request_id,
     }
   }
 
   const now = new Date().toISOString()
-  const receiptNumber = buildOfflineSaleReceiptNumber(salePayload)
+  const receiptNumber = buildOfflineSaleReceiptNumber()
   salePayload.receipt_number = salePayload.receipt_number || receiptNumber
   const localId = await putOfflineSaleMirror(salePayload, receiptNumber)
   const row = {

@@ -14,6 +14,7 @@ import {
   createDamagedLot, reverseDamagedLots, applyReplacementStock, listOpenDamagedLots,
   ConsumedDamagedStockError, DAMAGE_IN_MOVEMENT, DAMAGE_REVERSAL_MOVEMENT,
 } from '../lib/returnsStock'
+import { uniqueBusinessDateTimeNumber } from '../lib/receiptNumber'
 import type { Env } from '../index'
 
 const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser } }>()
@@ -592,7 +593,12 @@ app.post('/', async (c) => {
     return c.json({ error: (error as Error).message }, 400)
   }
 
-  const returnNumber = body.return_number?.trim() || `RET-${Date.now()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`
+  // RET-YYYYMMDD-HHMMSS (Phnom Penh wall clock) -- same datetime-id shape
+  // as sales receipts (lib/receiptNumber.ts); client-supplied numbers win.
+  const returnNumber = body.return_number?.trim() || await uniqueBusinessDateTimeNumber(
+    'RET',
+    async (candidate) => !!(await db.prepare('SELECT 1 AS hit FROM returns WHERE return_number = ? LIMIT 1').get([candidate])),
+  )
 
   let saleMeta: { receipt_number?: string; customer_id?: number; customer_name?: string; branch_id?: number; branch_name?: string; exchange_rate?: number } = {}
   if (body.sale_id) {
@@ -1030,7 +1036,11 @@ app.post('/supplier', async (c) => {
   const supplierLossUsd = Math.max(0, Number((totalCostUsd - supplierCompensationUsd).toFixed(2)))
   const supplierLossKhr = Math.max(0, Math.round(totalCostKhr - supplierCompensationKhr))
 
-  const returnNumber = body.return_number?.trim() || `SRET-${Date.now()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`
+  // SRET-YYYYMMDD-HHMMSS, same convention as the customer-return path above.
+  const returnNumber = body.return_number?.trim() || await uniqueBusinessDateTimeNumber(
+    'SRET',
+    async (candidate) => !!(await db.prepare('SELECT 1 AS hit FROM returns WHERE return_number = ? LIMIT 1').get([candidate])),
+  )
   const branchName = body.branch_id
     ? (await db.prepare('SELECT name FROM branches WHERE id = ?').get<{ name: string }>([body.branch_id]))?.name || null
     : null

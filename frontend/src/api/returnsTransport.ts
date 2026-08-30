@@ -1,4 +1,5 @@
 import { getClientDeviceInfo } from '../utils/deviceInfo.ts'
+import { businessDateTimeId } from '../utils/timestampId.ts'
 import { buildAttemptedReturnItems } from './conflicts.ts'
 import { withExpectedUpdatedAt, type ExpectedUpdatedAtPayload } from './expectedUpdatedAt.ts'
 import { apiFetch, route } from './http.ts'
@@ -31,8 +32,10 @@ function getResultTimestamp(result: unknown): string {
   return String(row.updated_at || row.updatedAt || new Date().toISOString())
 }
 
+// RET-/SRET-YYYYMMDD-HHMMSS (Phnom Penh wall clock) -- same datetime-id
+// convention as sales receipts; see utils/timestampId.ts.
 function buildReturnNumber(payload: ReturnPayload, prefix: string): string {
-  return String(payload.return_number || '').trim() || `${prefix}-${Date.now()}`
+  return String(payload.return_number || '').trim() || `${prefix}-${businessDateTimeId()}`
 }
 
 function attachAttemptedReturnUpdate(error: unknown, payload: ReturnPayload): never {

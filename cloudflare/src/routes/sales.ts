@@ -23,6 +23,7 @@ import {
 } from '../lib/saleTransitions'
 import { buildLikeAliasClause, tokenizeSearchTermGroups, normalizeSearchText } from '../lib/searchMatch'
 import { computeSaleTotals, round2 } from '../lib/saleTotals'
+import { uniqueBusinessDateTimeNumber } from '../lib/receiptNumber'
 import type { Env } from '../index'
 
 const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser } }>()
@@ -467,7 +468,13 @@ app.post('/', async (c) => {
       ? []
       : [{ method: String(body.payment_method || 'Cash').trim().slice(0, 80) || 'Cash', amount_usd: amountPaidUsd, amount_khr: amountPaidKhr }]
   const paymentMethod = Array.from(new Set(effectivePaymentDetails.map((detail) => detail.method))).join(' + ')
-  const receiptNumber = body.receipt_number?.trim() || `RCP-${Date.now()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`
+  // RCP-YYYYMMDD-HHMMSS in Phnom Penh wall-clock time -- the receipt id
+  // encodes the sale's own date+time (user, Aug 30 2026). Client-provided
+  // numbers (offline replays, imports) are preserved untouched.
+  const receiptNumber = body.receipt_number?.trim() || await uniqueBusinessDateTimeNumber(
+    'RCP',
+    async (candidate) => !!(await db.prepare('SELECT 1 AS hit FROM sales WHERE receipt_number = ? LIMIT 1').get([candidate])),
+  )
 
   // isDelivery / deliveryFeeUsd / deliveryFeeKhr / deliveryFeePaidBy are
   // computed with the totals above, since the customer-paid portion is part
