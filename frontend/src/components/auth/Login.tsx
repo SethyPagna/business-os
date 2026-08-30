@@ -72,6 +72,9 @@ interface LoginResult {
   error?: string
   message?: string
   otpRequired?: boolean
+  // Minted by the first factor (password / Google identity) and required by
+  // /otp/verify -- the server refuses a code that arrives without it.
+  otpChallenge?: string
   userId?: IdValue
   user?: AuthUser
   sessionExpiresAt?: string
@@ -157,6 +160,7 @@ interface AuthApi {
   otpVerify: (payload: {
     userId: IdValue | null
     token: string
+    otpChallenge?: string
     sessionDuration: string
     clientTime: string
     deviceTz?: string | null
@@ -287,6 +291,7 @@ export default function Login() {
   const [showPassword, setShowPassword] = useState(false)
   const [otpRequired, setOtpRequired] = useState(false)
   const [pendingUserId, setPendingUserId] = useState<IdValue | null>(null)
+  const [pendingOtpChallenge, setPendingOtpChallenge] = useState<string>('')
   const [deviceApprovalPending, setDeviceApprovalPending] = useState(false)
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
@@ -572,6 +577,7 @@ export default function Login() {
         if (callbackResult.otpRequired) {
           setOtpRequired(true)
           setPendingUserId(callbackResult.userId ?? null)
+          setPendingOtpChallenge(callbackResult.otpChallenge || '')
           return
         }
         if (callbackResult.user) {
@@ -631,6 +637,7 @@ export default function Login() {
         if (result?.otpRequired) {
           setOtpRequired(true)
           setPendingUserId(result.userId ?? null)
+          setPendingOtpChallenge(result.otpChallenge || '')
           return
         }
         if (result?.success && result?.user) {
@@ -682,6 +689,7 @@ export default function Login() {
       if (result?.otpRequired) {
         setOtpRequired(true)
         setPendingUserId(result.userId ?? null)
+        setPendingOtpChallenge(result.otpChallenge || '')
         return
       }
       if (!result?.success) setError(result?.error || 'Login failed')
@@ -708,13 +716,23 @@ export default function Login() {
       const verifyResult = await withLoaderTimeout(() => authApi.otpVerify({
         userId: pendingUserId,
         token: otp.trim(),
+        // Binds this code to the password/Google step that minted it -- the
+        // server refuses a bare userId+code without a live challenge.
+        otpChallenge: pendingOtpChallenge,
         sessionDuration,
         clientTime: new Date().toISOString(),
         deviceTz: device.deviceTz,
         deviceName: device.deviceName,
       }), 'OTP verification')
 
-      if (verifyResult?.success && verifyResult?.user) {
+      if (verifyResult?.deviceApprovalRequired) {
+        // The server re-runs the device gate at the OTP step now -- same
+        // pending-approval screen as the password step's answer.
+        setDeviceApprovalPending(true)
+        setError(verifyResult.deviceStatus === 'rejected'
+          ? tr('device_rejected', verifyResult.error || 'This device was denied access by an administrator.')
+          : '')
+      } else if (verifyResult?.success && verifyResult?.user) {
         await persistAuthenticatedUser(verifyResult.user, sessionDuration, verifyResult.sessionExpiresAt || '')
       } else {
         setError(verifyResult?.error || tr('invalid_otp_code', 'Invalid OTP code'))
@@ -1381,6 +1399,7 @@ export default function Login() {
               onClick={() => {
                 setOtpRequired(false)
                 setPendingUserId(null)
+                setPendingOtpChallenge('')
                 setOtp('')
                 setError('')
               }}

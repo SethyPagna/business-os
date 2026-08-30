@@ -11,6 +11,9 @@ import { isAdminControlUser } from '../lib/permissions'
 import { checkRateLimit, getClientIp } from '../lib/rateLimit'
 import { MIN_PASSWORD_LENGTH, passwordTooShort, passwordMinLengthError } from '../lib/passwordPolicy'
 import { stripSensitiveSettings } from '../lib/settingsSensitive'
+// The OTP login-challenge binding -- see lib/otpChallenge.ts's comment for
+// the Part-77 finding it closes.
+import { issueOtpChallenge, isLiveOtpChallenge, consumeOtpChallenge } from '../lib/otpChallenge'
 import { recordFailedLogin, getLoginLockoutState, clearLoginLockout } from '../lib/loginLockout'
 import { requiresDeviceApproval, checkDeviceTrust } from '../lib/deviceTrust'
 import {
@@ -269,7 +272,9 @@ app.post('/login', async (c) => {
     if (!otpSecret) {
       return c.json({ error: 'Two-factor authentication is unavailable for this account. Please contact an administrator.' }, 503)
     }
-    return c.json({ otpRequired: true, userId: user.id })
+    // The challenge binds the upcoming /otp/verify to THIS successful
+    // password (+ device) step -- see the challenge helpers above.
+    return c.json({ otpRequired: true, userId: user.id, otpChallenge: await issueOtpChallenge(c.env, user.id) })
   }
 
   const session = await createSession(c.env, user.id, {
@@ -477,8 +482,17 @@ app.get('/otp/status/:id', requireAuth, async (c) => {
 // POST /api/auth/otp/verify -- second step of login for OTP-enabled
 // accounts. Public (no session yet), so it's rate-limited both per-IP and
 // per-target-user, same two-bucket shape as backend/src/routes/auth.ts.
+//
+// Part-77 (auth audit) hardening -- this endpoint used to be a standalone
+// 6-digit login: reachable with just a guessable numeric userId, feeding no
+// escalating lockout, and re-running no device-approval check. Now it
+// (1) demands a live challenge minted by the first factor (see the
+// challenge helpers above /login), (2) checks and feeds the SAME escalating
+// per-username lockout /login uses, and (3) re-runs the device-approval
+// gate, so the second factor can never hand out what the first factor's
+// gates would have refused.
 app.post('/otp/verify', async (c) => {
-  const body = await c.req.json<{ userId?: number; token?: string; sessionDuration?: string; deviceName?: string; deviceId?: string; deviceTz?: string; clientTime?: string }>().catch(() => ({} as { userId?: number; token?: string; sessionDuration?: string; deviceName?: string; deviceId?: string; deviceTz?: string; clientTime?: string }))
+  const body = await c.req.json<{ userId?: number; token?: string; otpChallenge?: string; sessionDuration?: string; deviceName?: string; deviceId?: string; deviceTz?: string; clientTime?: string }>().catch(() => ({} as { userId?: number; token?: string; otpChallenge?: string; sessionDuration?: string; deviceName?: string; deviceId?: string; deviceTz?: string; clientTime?: string }))
   if (!body.userId || !body.token) return c.json({ error: 'userId and token required' }, 400)
 
   const ip = getClientIp(c.req.raw)
@@ -487,19 +501,75 @@ app.post('/otp/verify', async (c) => {
   const userLimit = await checkRateLimit(c.env, 'auth:otp', `user:${body.userId}`, OTP_LIMIT_MAX, OTP_LIMIT_WINDOW_MS)
   if (!userLimit.allowed) return c.json({ error: 'Too many OTP attempts.' }, 429)
 
+  // The first factor must have run, recently, for THIS user -- checked
+  // before any DB read so an unbound caller learns nothing (same generic
+  // shape as an unknown userId).
+  if (!(await isLiveOtpChallenge(c.env, body.otpChallenge, body.userId))) {
+    return c.json({ error: 'Your sign-in step expired. Please enter your password again.' }, 401)
+  }
+
   const db = getDb(c.env)
   const user = await db.prepare(`
-    SELECT id, username, name, organization_id, role_id, permissions, otp_secret
-    FROM users
-    WHERE id = ? AND is_active = 1 AND deleted_at IS NULL AND otp_enabled = 1 AND otp_secret IS NOT NULL
-  `).get<{ id: number; username: string; name: string; organization_id: number | null; role_id: number | null; permissions: string; otp_secret: string }>([body.userId])
+    SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.otp_secret,
+           r.code AS role_code, r.permissions AS role_permissions
+    FROM users u
+    LEFT JOIN roles r ON r.id = u.role_id
+    WHERE u.id = ? AND u.is_active = 1 AND u.deleted_at IS NULL AND u.otp_enabled = 1 AND u.otp_secret IS NOT NULL
+  `).get<{ id: number; username: string; name: string; organization_id: number | null; role_id: number | null; permissions: string; otp_secret: string; role_code: string | null; role_permissions: string | null }>([body.userId])
   if (!user) return c.json({ error: 'Invalid request' }, 401)
+
+  // Same escalating per-username lockout as /login -- a wrong second factor
+  // counts like a wrong password, and a locked account waits here too.
+  const lockoutState = await getLoginLockoutState(c.env, user.username)
+  if (lockoutState.locked) {
+    return c.json({
+      error: `Too many failed login attempts. Please wait ${lockoutState.retryAfterSeconds} seconds and try again.`,
+      locked: true,
+      retryAfterSeconds: lockoutState.retryAfterSeconds,
+    }, 429)
+  }
 
   const otpSecret = await decryptSecret(user.otp_secret, c.env.APP_ENCRYPTION_KEY)
   if (!otpSecret) return c.json({ error: 'OTP secret is unavailable. Please set up OTP again.' }, 400)
   const verified = await verifyTotp(otpSecret, String(body.token || ''))
-  if (!verified) return c.json({ error: 'Invalid OTP code' }, 401)
+  if (!verified) {
+    const failure = await recordFailedLogin(c.env, user.username)
+    if (failure.locked) {
+      return c.json({
+        error: `Too many failed login attempts. Please wait ${failure.retryAfterSeconds} seconds and try again.`,
+        locked: true,
+        retryAfterSeconds: failure.retryAfterSeconds,
+      }, 429)
+    }
+    return c.json({ error: 'Invalid OTP code', failedAttempts: failure.failedCount }, 401)
+  }
 
+  // Device-approval gate, re-run HERE with the deviceId this request
+  // carries -- the /login check ran against the login call's deviceId, and
+  // nothing forced the two to match. Same responses as /login's gate.
+  if (requiresDeviceApproval(user)) {
+    const trustCheck = await checkDeviceTrust(c.env, user.id, body.deviceId, {
+      deviceName: body.deviceName,
+      userAgent: c.req.header('user-agent'),
+      ip,
+      country: c.req.header('cf-ipcountry'),
+    })
+    if (trustCheck.status !== 'approved') {
+      if (trustCheck.status === 'rejected') {
+        await audit(c.env, user.id, user.username, 'login_device_rejected', 'user', user.id, { deviceId: body.deviceId, via: 'otp_verify' })
+        return c.json({ error: 'This device was denied access by an administrator. Contact your admin if this is unexpected.', deviceStatus: 'rejected' }, 403)
+      }
+      await audit(c.env, user.id, user.username, 'login_device_pending', 'user', user.id, { deviceId: body.deviceId, via: 'otp_verify', status: trustCheck.status })
+      return c.json({
+        deviceApprovalRequired: true,
+        deviceStatus: trustCheck.status === 'missing_device_id' ? 'pending' : trustCheck.status,
+        message: 'This device is awaiting administrator approval before you can sign in.',
+      }, 200)
+    }
+  }
+
+  await clearLoginLockout(c.env, user.username)
+  await consumeOtpChallenge(c.env, body.otpChallenge)
   await audit(c.env, user.id, user.username, 'login', 'user', user.id, { username: user.username, method: 'otp' })
 
   const session = await createSession(c.env, user.id, {
@@ -511,7 +581,15 @@ app.post('/otp/verify', async (c) => {
     ip: c.req.header('cf-connecting-ip') || undefined,
   })
   setSessionCookie(c, session.token, session.expiresAt)
-  return c.json({ user: buildUserPayload(user), sessionExpiresAt: session.expiresAt, authMode: 'cookie' })
+  // role_code/role_permissions ride along for the same self-sufficiency
+  // reason POST /login returns them (see its comment): most accounts hold
+  // their grants on the ROLE, and a login payload without them resolves to
+  // no permissions whenever the bootstrap re-fetch can't run.
+  return c.json({
+    user: { ...buildUserPayload(user), role_code: user.role_code, role_permissions: user.role_permissions },
+    sessionExpiresAt: session.expiresAt,
+    authMode: 'cookie',
+  })
 })
 
 // POST /api/auth/session-duration -- re-issues the current session's
@@ -904,7 +982,9 @@ app.get('/oauth/callback', async (c) => {
         if (!otpSecret) {
           callbackPayload = { success: false, error: 'OTP secret is unavailable for this account. Please contact an administrator.' }
         } else {
-          callbackPayload = { success: true, otpRequired: true, userId: localUser.id, provider: 'google' }
+          // Same challenge binding as POST /login's otpRequired branch --
+          // the Google identity check is this flow's first factor.
+          callbackPayload = { success: true, otpRequired: true, userId: localUser.id, provider: 'google', otpChallenge: await issueOtpChallenge(c.env, localUser.id) }
         }
       } else {
         const synced = await updateLocalUserGoogleIdentity(c.env, localUser.id, googleUser)
