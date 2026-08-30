@@ -54,8 +54,12 @@ export function createCustomTable(payload: CustomTablePayload = {}): Promise<unk
 }
 
 export function getCustomTableData({ tableName }: CustomTableDataRequest): Promise<unknown> {
+  // Per-table cache/dedupe key: a constant 'customTables:data' made every
+  // table share one 20s cache slot, so opening table B within the window
+  // rendered table A's rows. Write-invalidation is by 'customTables' prefix,
+  // so per-table keys still clear. (See feesTransport.getFee for reasoning.)
   return route(
-    'customTables:data',
+    `customTables:data:${tableName}`,
     () => apiFetch('GET', tableDataPath(tableName)),
     () => [],
   )

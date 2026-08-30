@@ -80,8 +80,15 @@ export function getFees(params: FeeListParams = {}): Promise<FeeListResult> {
 }
 
 export function getFee(id: number): Promise<{ fee: FeeRecord }> {
+  // The channel string is BOTH the 20s read-cache key and the in-flight
+  // dedupe key in route(); a constant 'fees:get-one' made every id share one
+  // slot, so opening fee B within the cache window rendered fee A's data (the
+  // same class as the fixed lots-per-channel bug). The id is part of the key
+  // now. Write-invalidation still works: it clears by entity prefix
+  // (getChannelRefreshKey splits on ':' -> 'fees'), which covers every
+  // per-id entry.
   return route(
-    'fees:get-one',
+    `fees:get-one:${id}`,
     () => apiFetch('GET', `/api/fees/${encodeURIComponent(String(id))}`),
     null,
     { raceLocalFallback: false },

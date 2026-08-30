@@ -16,8 +16,12 @@ export function getReturns(params: QueryParams = {}): Promise<unknown> {
 }
 
 export function getReturn(id: number | string): Promise<unknown> {
+  // Per-id cache/dedupe key: a constant 'returns:getOne' made every return
+  // share one 20s cache slot, so opening return B within the window rendered
+  // return A. Write-invalidation is by 'returns' prefix, so per-id keys still
+  // clear. (See feesTransport.getFee for the full reasoning.)
   return route(
-    'returns:getOne',
+    `returns:getOne:${encodeId(id)}`,
     () => apiFetch('GET', `/api/returns/${encodeId(id)}`),
     () => null,
   )
