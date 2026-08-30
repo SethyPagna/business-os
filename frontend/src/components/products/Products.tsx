@@ -3558,8 +3558,11 @@ function ProductsFullEditor() {
 
         {/* Y14: select-all + bulk-action bar -- no longer pinned (it used to
             sit inside the sticky wrapper above). It scrolls away in normal
-            flow while the search / filter row above stays pinned. */}
-        <div className="bulk-toolbar mb-2 overflow-hidden rounded-2xl border shadow-sm sm:rounded-xl">
+            flow while the search / filter row above stays pinned.
+            Card chrome only WHILE selecting -- idle, this row holds nothing
+            but the self-bordered pager pill, and boxing that again was the
+            double-card look (Aug 30 report). */}
+        <div className={`mb-2 ${hasSelected ? 'bulk-toolbar overflow-hidden rounded-2xl border shadow-sm sm:rounded-xl' : ''}`}>
           <div className="px-2 py-2">
             <div className="flex flex-wrap items-center gap-1.5">
                 {/* 11.2 alignment: no always-visible "Select all" here -- the
@@ -3587,7 +3590,7 @@ function ProductsFullEditor() {
                     search). Right-aligned via ml-auto; wraps to its own line
                     on narrow screens. The range chip "1-20" is itself the
                     per-page dropdown. */}
-                <div className="ml-auto flex min-w-0 justify-end">
+                <div className={hasSelected ? 'ml-auto flex min-w-0 justify-end' : 'flex w-full min-w-0 justify-center'}>
                   <PaginationControls
                     compact
                     rangeAsPageSize
