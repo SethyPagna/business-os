@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { getStockLedger } from '../../api/productReadTransport.ts'
 import { movementColorClass, translateMovementType } from '../inventory/movementGroups.ts'
 import AppSelect from '../shared/AppSelect'
@@ -6,8 +6,9 @@ import DateTimeRangePicker from '../shared/DateTimeRangePicker'
 import Modal from '../shared/Modal'
 import PaginationControls from '../shared/PaginationControls'
 import SearchInput from '../shared/SearchInput'
+import InfoHint from '../shared/InfoHint'
 import { useDebouncedValue } from '../../utils/useDebouncedValue.ts'
-import { fmtDateTime24 } from '../../utils/formatters'
+import { fmtDate, fmtClock24, fmtDateTime24 } from '../../utils/formatters'
 import { batchDisplayLabel } from '../../utils/batchLabel.ts'
 
 // D1 (Part 415): the user's Stock Change ledger on the Products page --
@@ -162,18 +163,62 @@ export default function StockChangeSection({ t }: { t: Translate }) {
   const beforeLabel = tr(t, 'before_qty', 'Before')
   const afterLabel = tr(t, 'after_qty', 'After')
 
-  const bucketCell = (row: LedgerRow, bucket: LedgerRow['ledger_bucket']) => {
-    if (row.ledger_bucket !== bucket) return <td key={bucket} className="px-2 py-1.5" />
-    return (
-      <td key={bucket} className="px-2 py-1.5">
+  // Group the current page's rows by their business-timezone DAY so the date
+  // lives once on a divider header and each card need only show its time
+  // (user, Aug 30 2026: "for date just show outside separating the change by
+  // day... in the card just put the time as we have date to divide outside").
+  // fmtDate is mm/dd/yyyy in business time, so grouping by that string IS a
+  // business-day grouping. Rows already arrive sorted created_at desc, so
+  // iteration preserves both the day order and the within-day order. A day
+  // can straddle a page edge -- that's fine, the header just reappears on the
+  // next page, same as every other server-paged day-grouped list here.
+  const dayGroups = useMemo(() => {
+    const groups: Array<{ key: string; rows: LedgerRow[] }> = []
+    const index = new Map<string, number>()
+    for (const row of rows) {
+      const key = fmtDate(row.created_at)
+      let at = index.get(key)
+      if (at === undefined) { at = groups.length; index.set(key, at); groups.push({ key, rows: [] }) }
+      groups[at].rows.push(row)
+    }
+    return groups
+  }, [rows])
+
+  const renderCard = (row: LedgerRow) => (
+    <button
+      key={row.id}
+      type="button"
+      onClick={() => void openDetail(row)}
+      className="flex w-full items-start justify-between gap-3 rounded-xl border border-gray-200 bg-white p-3 text-left shadow-sm transition hover:border-blue-300 hover:bg-blue-50/40 dark:border-gray-700 dark:bg-gray-900 dark:hover:border-blue-700 dark:hover:bg-blue-900/10"
+    >
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-2">
+          {/* Time only -- the day header above carries the date. */}
+          <span className="shrink-0 tabular-nums text-xs font-medium text-gray-400">{fmtClock24(row.created_at)}</span>
+          <span className="truncate text-sm font-semibold text-gray-800 dark:text-gray-100" title={row.product_name}>{row.product_name}</span>
+        </div>
+        <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[11px] text-gray-400">
+          {row.barcode ? <span className="rounded-full bg-gray-100 px-1.5 py-0.5 font-mono text-gray-500 dark:bg-gray-800 dark:text-gray-300">{row.barcode}</span> : null}
+          {row.batch_id ? (
+            <span className="rounded-full bg-gray-100 px-1.5 py-0.5 text-gray-500 dark:bg-gray-800 dark:text-gray-300">
+              {batchDisplayLabel({ id: row.batch_id, lot_code: row.batch_lot_code, received_at: row.batch_received_at })}
+            </span>
+          ) : null}
+          {row.branch_name ? <span className="truncate">{row.branch_name}</span> : null}
+          {row.reason ? <span className="truncate text-gray-400" title={row.reason}>· {row.reason}</span> : null}
+        </div>
+      </div>
+      <div className="shrink-0 text-right">
         <span className={`inline-flex items-center gap-1 rounded-lg px-2 py-0.5 text-xs font-semibold ${movementColorClass(row.movement_type, row.signed_quantity)}`}>
           {signedLabel(row)}
           <span className="font-normal opacity-80">{translateMovementType(row.movement_type, t)}</span>
         </span>
-        {row.reason ? <div className="mt-0.5 max-w-44 truncate text-[11px] text-gray-400" title={row.reason}>{row.reason}</div> : null}
-      </td>
-    )
-  }
+        <div className="mt-1 text-xs tabular-nums text-gray-500 dark:text-gray-400">
+          {row.before_qty} <span className="text-gray-300 dark:text-gray-600">→</span> <span className="font-semibold text-gray-800 dark:text-gray-100">{row.after_qty}</span>
+        </div>
+      </div>
+    </button>
+  )
 
   return (
     <div className="space-y-3">
@@ -230,7 +275,17 @@ export default function StockChangeSection({ t }: { t: Translate }) {
           showTime={false}
           triggerClassName="flex items-center justify-center gap-2 rounded-lg px-2.5 py-1.5"
         />
-        <span className="text-xs text-gray-400">{total}</span>
+        <span className="ml-auto inline-flex items-center gap-1 text-xs text-gray-400">
+          {total}
+          {/* The ledger's "what is this" explanation lives behind this info
+              affordance instead of an inline sentence above the section
+              (density: instructions move into the info toolkit, not the
+              layout). The section's own switcher/search stay visible. */}
+          <InfoHint
+            label={tr(t, 'stock_change_ledger', 'Stock Changes')}
+            text={tr(t, 'stock_change_ledger_info', 'Read-only. Every recorded stock action — adjustments, stock in, stock out — with the running balance (before → after) computed from current stock. Tap a card for that product’s full history.')}
+          />
+        </span>
       </div>
 
       {loadError ? (
@@ -240,48 +295,34 @@ export default function StockChangeSection({ t }: { t: Translate }) {
         </div>
       ) : null}
 
-      <div className="overflow-x-auto rounded-xl border border-gray-100 dark:border-gray-700">
-        <table className="w-full min-w-[920px] text-left text-sm">
-          <thead>
-            <tr className="border-b border-gray-100 text-[11px] uppercase tracking-wide text-gray-400 dark:border-gray-700">
-              <th className="px-2 py-2">{tr(t, 'date', 'Date')}</th>
-              <th className="px-2 py-2">{tr(t, 'name', 'Name')}</th>
-              <th className="px-2 py-2">{tr(t, 'barcode', 'Barcode')}</th>
-              <th className="px-2 py-2">{tr(t, 'batch', 'Batch')}</th>
-              <th className="px-2 py-2 text-right">{beforeLabel}</th>
-              <th className="px-2 py-2">{tr(t, 'adjustment', 'Adjustment')}</th>
-              <th className="px-2 py-2">{tr(t, 'stock_in', 'Stock In')}</th>
-              <th className="px-2 py-2">{tr(t, 'stock_out', 'Stock Out')}</th>
-              <th className="px-2 py-2 text-right">{afterLabel}</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((row) => (
-              <tr
-                key={row.id}
-                className="cursor-pointer border-b border-gray-50 last:border-0 hover:bg-blue-50/40 dark:border-gray-800 dark:hover:bg-blue-900/10"
-                onClick={() => void openDetail(row)}
-              >
-                <td className="whitespace-nowrap px-2 py-1.5 text-xs text-gray-500">{fmtDateTime24(row.created_at)}</td>
-                <td className="max-w-52 truncate px-2 py-1.5 font-medium text-gray-800 dark:text-gray-100" title={row.product_name}>{row.product_name}</td>
-                <td className="whitespace-nowrap px-2 py-1.5 text-xs text-gray-400">{row.barcode || '--'}</td>
-                <td className="whitespace-nowrap px-2 py-1.5 text-xs text-gray-500">
-                  {row.batch_id ? batchDisplayLabel({ id: row.batch_id, lot_code: row.batch_lot_code, received_at: row.batch_received_at }) : '--'}
-                </td>
-                <td className="px-2 py-1.5 text-right tabular-nums text-gray-500">{row.before_qty}</td>
-                {bucketCell(row, 'adjustment')}
-                {bucketCell(row, 'in')}
-                {bucketCell(row, 'out')}
-                <td className="px-2 py-1.5 text-right font-semibold tabular-nums text-gray-800 dark:text-gray-100">{row.after_qty}</td>
-              </tr>
-            ))}
-            {!rows.length && !loading ? (
-              <tr><td colSpan={9} className="px-3 py-6 text-center text-sm text-gray-400">{tr(t, 'no_data_found', 'No data found')}</td></tr>
-            ) : null}
-          </tbody>
-        </table>
-      </div>
-      {loading ? <p className="text-center text-xs text-gray-400">{tr(t, 'loading', 'Loading')}...</p> : null}
+      {/* Day-grouped card list (user, Aug 30 2026): a divider header per day
+          carries the date, then one tappable card per change showing just its
+          time -- replacing the horizontally-scrolling before/after table
+          (card design like the Products / Fees sections). Tap a card for the
+          per-product mini-ledger. */}
+      {loading && !rows.length ? (
+        <div className="space-y-2">
+          {[...Array(6)].map((_, i) => <div key={i} className="h-[4.25rem] animate-pulse rounded-xl border border-gray-100 bg-gray-50 dark:border-gray-800 dark:bg-gray-800/40" />)}
+        </div>
+      ) : !rows.length ? (
+        <div className="rounded-xl border border-dashed border-gray-200 px-3 py-10 text-center text-sm text-gray-400 dark:border-gray-700">{tr(t, 'no_data_found', 'No data found')}</div>
+      ) : (
+        <div className="space-y-4">
+          {dayGroups.map((group) => (
+            <div key={group.key} className="space-y-2">
+              <div className="flex items-center gap-2 px-0.5">
+                <span className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">{group.key}</span>
+                <span className="text-[11px] text-gray-400">{group.rows.length}</span>
+                <div className="h-px flex-1 bg-gray-100 dark:bg-gray-800" />
+              </div>
+              <div className="space-y-2">
+                {group.rows.map(renderCard)}
+              </div>
+            </div>
+          ))}
+          {loading ? <p className="text-center text-xs text-gray-400">{tr(t, 'loading', 'Loading')}...</p> : null}
+        </div>
+      )}
 
       <div className="flex justify-center">
         <PaginationControls

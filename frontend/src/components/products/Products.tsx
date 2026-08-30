@@ -3955,9 +3955,9 @@ function ProductsFullEditor() {
           requires a real products/inventory tier. */}
       {activeProductSection === 'stock_changes' && (
         <div className="mt-1">
-          <p className="mb-3 text-xs text-gray-500 dark:text-gray-400">
-            {tr('stock_change_ledger_hint', 'Every recorded stock action with its running balance', 'រាល់សកម្មភាពស្តុកទាំងអស់ ជាមួយសមតុល្យបន្តបន្ទាប់')}
-          </p>
+          {/* The one-line hint that used to sit here moved INTO the section,
+              behind an InfoHint next to the total (density: instructions go
+              into the info toolkit, not inline above the layout). */}
           <Suspense fallback={<div className="py-6 text-center text-sm text-gray-400">{t('loading') || 'Loading'}...</div>}>
             <StockChangeSection t={t} />
           </Suspense>
