@@ -136,11 +136,11 @@ export class ConsumedDamagedStockError extends Error {
 export async function reverseDamagedLots(
   db: D1Compat,
   returnId: number | string,
-): Promise<Array<{ product_id: number; product_name: string | null; branch_id: number | null; batch_id: number | null; quantity: number }>> {
+): Promise<Array<{ product_id: number; product_name: string | null; branch_id: number | null; batch_id: number | null; quantity: number; reason: string | null; created_by_user_id: number | string | null; created_by_user_name: string | null }>> {
   const lots = await db.prepare(`
-    SELECT id, product_id, product_name, branch_id, batch_id, quantity, quantity_remaining
+    SELECT id, product_id, product_name, branch_id, batch_id, quantity, quantity_remaining, reason, created_by_user_id, created_by_user_name
     FROM damaged_stock_lots WHERE return_id = @return_id
-  `).all<{ id: number; product_id: number; product_name: string | null; branch_id: number | null; batch_id: number | null; quantity: number; quantity_remaining: number }>({ return_id: returnId })
+  `).all<{ id: number; product_id: number; product_name: string | null; branch_id: number | null; batch_id: number | null; quantity: number; quantity_remaining: number; reason: string | null; created_by_user_id: number | string | null; created_by_user_name: string | null }>({ return_id: returnId })
   if (!lots.length) return []
   for (const lot of lots) {
     if (Number(lot.quantity_remaining) < Number(lot.quantity)) {
@@ -149,8 +149,11 @@ export async function reverseDamagedLots(
   }
   await db.prepare('DELETE FROM damaged_stock_lots WHERE return_id = @return_id').run({ return_id: returnId })
   // batch_id = the original sale lot the damaged units belonged to (0084
-  // reads it for the reversal movement's attribution).
-  return lots.map((lot) => ({ product_id: lot.product_id, product_name: lot.product_name, branch_id: lot.branch_id, batch_id: lot.batch_id ?? null, quantity: Number(lot.quantity) }))
+  // reads it for the reversal movement's attribution). reason/created_by
+  // ride along so a failed EDIT can re-create these rows faithfully -- the
+  // validation above guarantees quantity_remaining === quantity, so a
+  // re-creation via createDamagedLot loses nothing.
+  return lots.map((lot) => ({ product_id: lot.product_id, product_name: lot.product_name, branch_id: lot.branch_id, batch_id: lot.batch_id ?? null, quantity: Number(lot.quantity), reason: lot.reason ?? null, created_by_user_id: lot.created_by_user_id ?? null, created_by_user_name: lot.created_by_user_name ?? null }))
 }
 
 export class InsufficientReplacementStockError extends Error {

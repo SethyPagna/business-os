@@ -1352,14 +1352,52 @@ app.patch('/:id', async (c) => {
     ? (await db.prepare('SELECT name FROM branches WHERE id = ?').get<{ name: string }>([body.branch_id]))?.name || null
     : existing.branch_name
 
+  // 11.12 settlement gate -- HOISTED above every stock write (Part-77,
+  // write-path audit): this check used to run AFTER the reversal and
+  // re-apply loops had already committed their per-lot writes, so its mere
+  // 400 refusal left the return's stock reversed-and-reapplied while the
+  // return_items rows (whose rewrite lives in the batch that never ran)
+  // still described the OLD state -- a validation error that corrupted
+  // stock. It depends only on the new items and the existing replacement
+  // rows, so nothing forces it to run late.
+  const existingReplacements = await db.prepare('SELECT total_usd, total_khr FROM return_replacement_items WHERE return_id = ?').all<{ total_usd: number; total_khr: number }>([id])
+  let settlementDiffUsd = toNumber((existing as Record<string, unknown>).settlement_diff_usd, 0)
+  let settlementDiffKhr = toNumber((existing as Record<string, unknown>).settlement_diff_khr, 0)
+  if (existingReplacements.length) {
+    const settlement = computeSettlement({
+      mode: (existing as Record<string, unknown>).settlement_mode,
+      returnedTotalUsd: newItems.reduce((sum, i) => sum + (toNumber(i.applied_price_usd, 0) * (Number(i.quantity) || 0)), 0),
+      returnedTotalKhr: newItems.reduce((sum, i) => sum + (toNumber(i.applied_price_khr, 0) * (Number(i.quantity) || 0)), 0),
+      replacementTotalUsd: existingReplacements.reduce((sum, row) => sum + toNumber(row.total_usd, 0), 0),
+      replacementTotalKhr: existingReplacements.reduce((sum, row) => sum + toNumber(row.total_khr, 0), 0),
+    })
+    if (settlement.evenExchangeBlocked) {
+      return c.json({ error: `This edit breaks the even exchange -- the replacement now differs from the returned value by $${settlement.diffUsd.toFixed(2)}. Keep the totals equal, or record a new return settled as a price difference instead.`, code: 'uneven_exchange' }, 400)
+    }
+    settlementDiffUsd = settlement.mode === 'price_difference' ? settlement.diffUsd : 0
+    settlementDiffKhr = settlement.mode === 'price_difference' ? settlement.diffKhr : 0
+  }
+
   const statements: Array<{ sql: string; params: Record<string, unknown> }> = []
   const touchedProductIds = new Set<number>()
+
+  // Compensation log (Part-77, same shape as POST /'s -- Part 523): every
+  // stock write that lands OUTSIDE the final atomic batch, so a failure
+  // anywhere in the edit can put the stock back exactly where it started.
+  const editReversedRestocks: Array<{ productId: number; batchId: number; branchId: number; quantity: number }> = []
+  const editReappliedRestocks: Array<{ productId: number; batchId: number; branchId: number; quantity: number }> = []
+  let editReversedDamaged: Awaited<ReturnType<typeof reverseDamagedLots>> = []
+  let editCreatedDamaged = false
+  // Written inside the guarded stretch, read after it (the allocation
+  // recording runs post-batch) -- declared here so both can see it.
+  const perItemBatchSplits: ReturnBatchSplit[][] = []
 
   // 11.13: this return's damaged lots come back out before the re-apply.
   // A lot POS already drew from can't be un-damaged (that stock left the
   // building) -- ConsumedDamagedStockError blocks the edit outright.
   try {
     const reversedLots = await reverseDamagedLots(db, id)
+    editReversedDamaged = reversedLots
     for (const lot of reversedLots) {
       statements.push({
         sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_usd, unit_cost_khr, reason, reference_id, user_id, user_name, batch_id)
@@ -1382,6 +1420,12 @@ app.patch('/:id', async (c) => {
     if (error instanceof ConsumedDamagedStockError) return c.json({ error: error.message }, 400)
     throw error
   }
+
+  // Everything from here through the atomic batch runs under ONE catch that
+  // compensates the per-lot writes (they commit individually) -- see the
+  // catch below. Interior deliberately not re-indented: the diff stays
+  // reviewable and the block boundaries are these two comments.
+  try {
 
   // Reverse the stock effect of every existing item that had been restocked.
   // Per-lot aware: a return that recorded its restock split into
@@ -1411,6 +1455,7 @@ app.patch('/:id', async (c) => {
         try {
           await removeStockFromBatch(db, { batchId: alloc.batch_id, productId, branchId: branchIdForItem, quantity: give })
           reversalLots.push({ batchId: alloc.batch_id, quantity: give })
+          editReversedRestocks.push({ productId, batchId: alloc.batch_id, branchId: branchIdForItem, quantity: give })
           plainRemainder -= give
         } catch (err) {
           // That lot was sold/moved down since, or no longer belongs here;
@@ -1424,6 +1469,7 @@ app.patch('/:id', async (c) => {
       try {
         await removeStockFromBatch(db, { batchId: item.batch_id, productId, branchId: branchIdForItem, quantity: plainRemainder })
         reversalLots.push({ batchId: item.batch_id, quantity: plainRemainder })
+        editReversedRestocks.push({ productId, batchId: item.batch_id, branchId: branchIdForItem, quantity: plainRemainder })
         plainRemainder = 0
       } catch (err) {
         void err
@@ -1469,7 +1515,6 @@ app.patch('/:id', async (c) => {
   const editSaleItemIds = newItems.map((i) => i.sale_item_id).filter((sid): sid is number => Number.isFinite(sid) && Number(sid) > 0)
   const saleItemBatchInfoForEdit = await fetchSaleItemBatchInfo(db, editSaleItemIds)
   const saleItemAllocationsForEdit = await fetchSaleItemAllocations(db, editSaleItemIds)
-  const perItemBatchSplits: ReturnBatchSplit[][] = []
 
   let totalRefundUsd = 0
   let totalRefundKhr = 0
@@ -1500,6 +1545,7 @@ app.patch('/:id', async (c) => {
             const received = await receiveBatchStock(db, { productId: item.product_id, branchId: itemBranchId, quantity: give, batchId: alloc.batch_id })
             if (resolvedBatchId == null) resolvedBatchId = received.batchId
             itemSplits.push({ batchId: received.batchId, branchId: itemBranchId, quantity: give, saleItemId: item.sale_item_id ?? null })
+            editReappliedRestocks.push({ productId: item.product_id, batchId: received.batchId, branchId: itemBranchId, quantity: give })
             restockRemaining -= give
           } catch (_err) {
             // Lot gone/merged since the sale -- leave for the aggregate bump.
@@ -1510,6 +1556,7 @@ app.patch('/:id', async (c) => {
           const received = await receiveBatchStock(db, { productId: item.product_id, branchId: itemBranchId, quantity, batchId: originalBatchId })
           resolvedBatchId = received.batchId
           itemSplits.push({ batchId: received.batchId, branchId: itemBranchId, quantity, saleItemId: item.sale_item_id ?? null })
+          editReappliedRestocks.push({ productId: item.product_id, batchId: received.batchId, branchId: itemBranchId, quantity })
           restockRemaining = 0
         } catch (_err) {
           resolvedBatchId = null
@@ -1528,6 +1575,7 @@ app.patch('/:id', async (c) => {
 
     if (stockAction === 'damaged' && item.product_id && itemBranchId) {
       const originalBatchId = item.sale_item_id ? (saleItemBatchInfoForEdit.get(item.sale_item_id)?.batch_id ?? null) : null
+      editCreatedDamaged = true
       await createDamagedLot(db, {
         productId: item.product_id,
         productName: item.product_name || null,
@@ -1606,27 +1654,7 @@ app.patch('/:id', async (c) => {
     perItemBatchSplits.push(itemSplits)
   }
 
-  // 11.12: replacement lines are immutable through this edit form, but
-  // editing the RETURNED side moves the value gap -- recompute it against
-  // the existing replacement rows so an even exchange stays even and a
-  // price-difference settlement stays truthful.
-  const existingReplacements = await db.prepare('SELECT total_usd, total_khr FROM return_replacement_items WHERE return_id = ?').all<{ total_usd: number; total_khr: number }>([id])
-  let settlementDiffUsd = toNumber((existing as Record<string, unknown>).settlement_diff_usd, 0)
-  let settlementDiffKhr = toNumber((existing as Record<string, unknown>).settlement_diff_khr, 0)
-  if (existingReplacements.length) {
-    const settlement = computeSettlement({
-      mode: (existing as Record<string, unknown>).settlement_mode,
-      returnedTotalUsd: newItems.reduce((sum, i) => sum + (toNumber(i.applied_price_usd, 0) * (Number(i.quantity) || 0)), 0),
-      returnedTotalKhr: newItems.reduce((sum, i) => sum + (toNumber(i.applied_price_khr, 0) * (Number(i.quantity) || 0)), 0),
-      replacementTotalUsd: existingReplacements.reduce((sum, row) => sum + toNumber(row.total_usd, 0), 0),
-      replacementTotalKhr: existingReplacements.reduce((sum, row) => sum + toNumber(row.total_khr, 0), 0),
-    })
-    if (settlement.evenExchangeBlocked) {
-      return c.json({ error: `This edit breaks the even exchange -- the replacement now differs from the returned value by $${settlement.diffUsd.toFixed(2)}. Keep the totals equal, or record a new return settled as a price difference instead.`, code: 'uneven_exchange' }, 400)
-    }
-    settlementDiffUsd = settlement.mode === 'price_difference' ? settlement.diffUsd : 0
-    settlementDiffKhr = settlement.mode === 'price_difference' ? settlement.diffKhr : 0
-  }
+  // (11.12 settlement gate hoisted above the stock work -- see its comment.)
 
   for (const productId of touchedProductIds) {
     statements.push({
@@ -1655,6 +1683,65 @@ app.patch('/:id', async (c) => {
   })
 
   await db.batch(statements)
+
+  } catch (error) {
+    // Put the stock back exactly where the edit found it (Part-77, same
+    // discipline as POST /'s catch -- Part 523). Everything in `statements`
+    // rolled back atomically with the failed batch (incl. the return_items
+    // rewrite, so the OLD rows are intact); only the per-lot writes above
+    // committed on their own. Best-effort per write and LOUDLY reported --
+    // anything unreversible reaches the audit log and the 500 message.
+    const unreversed: string[] = []
+    for (const applied of [...editReappliedRestocks].reverse()) {
+      try {
+        await removeStockFromBatch(db, { batchId: applied.batchId, productId: applied.productId, branchId: applied.branchId, quantity: applied.quantity })
+      } catch (_) {
+        unreversed.push(`re-applied restock of ${applied.quantity} into lot #${applied.batchId} (product #${applied.productId})`)
+      }
+    }
+    for (const reversed of [...editReversedRestocks].reverse()) {
+      try {
+        await receiveBatchStock(db, { productId: reversed.productId, branchId: reversed.branchId, quantity: reversed.quantity, batchId: reversed.batchId })
+      } catch (_) {
+        unreversed.push(`reversal of ${reversed.quantity} out of lot #${reversed.batchId} (product #${reversed.productId})`)
+      }
+    }
+    if (editCreatedDamaged) {
+      // The fresh rows are unconsumed by construction, so this delete-them
+      // reversal cannot hit ConsumedDamagedStockError.
+      try {
+        await reverseDamagedLots(db, id)
+      } catch (_) {
+        unreversed.push('newly created damaged lots')
+      }
+    }
+    for (const lot of editReversedDamaged) {
+      try {
+        await createDamagedLot(db, {
+          productId: lot.product_id,
+          productName: lot.product_name,
+          branchId: lot.branch_id,
+          batchId: lot.batch_id,
+          returnId: id,
+          quantity: lot.quantity,
+          reason: lot.reason,
+          userId: lot.created_by_user_id,
+          userName: lot.created_by_user_name,
+        })
+      } catch (_) {
+        unreversed.push(`original damaged lot of ${lot.quantity} (product #${lot.product_id})`)
+      }
+    }
+    if (unreversed.length) {
+      await audit(c.env, user?.id ?? null, user?.name ?? null, 'return_rollback_incomplete', 'return', id, { via: 'edit', unreversed })
+    }
+    return c.json({
+      error: `Failed to update return: ${(error as Error).message}`
+        + (unreversed.length
+          ? ` -- WARNING: ${unreversed.length} stock write(s) could not be reversed (recorded in the audit log; run Verify Integrity): ${unreversed.join('; ')}`
+          : ''),
+    }, 500)
+  }
 
   // Record the fresh per-lot split for the re-inserted return_items, same as
   // POST / -- so a subsequent edit reverses the right lots again.

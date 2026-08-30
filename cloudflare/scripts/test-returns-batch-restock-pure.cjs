@@ -421,6 +421,40 @@ async function main() {
     assert.strictEqual(rawDb.prepare("SELECT COUNT(*) AS n FROM inventory_movements WHERE movement_type IN ('return', 'replacement_out')").get().n, 0)
   })
 
+  await check('Part-77: an even-exchange-blocked EDIT refuses before touching any stock (the gate is hoisted)', async () => {
+    seed()
+    // A lot-backed sale + an even-exchange return with a replacement line.
+    const batch = await productBatches.receiveBatchStock(db, { productId: 1, branchId: 1, quantity: 10, lotCode: 'LOT-E' })
+    await productBatches.removeStockFromBatch(db, { batchId: batch.batchId, productId: 1, branchId: 1, quantity: 5 })
+    rawDb.prepare('INSERT INTO sale_items (id, sale_id, product_id, quantity, batch_id) VALUES (1, 1, 1, 5, @batchId)').run({ batchId: batch.batchId })
+    const created = await req('POST', '/', {
+      sale_id: 1,
+      items: [{ sale_item_id: 1, product_id: 1, quantity: 2, return_to_stock: true, branch_id: 1, applied_price_usd: 10 }],
+      replacement_items: [{ product_id: 1, quantity: 2, branch_id: 1, applied_price_usd: 10 }],
+      reason: 'Even exchange',
+    })
+    assert.strictEqual(created.status, 200, JSON.stringify(created.json))
+
+    const lotBefore = rawDb.prepare('SELECT quantity FROM branch_batch_stock WHERE batch_id = @batchId AND branch_id = 1').get({ batchId: batch.batchId }).quantity
+    const stockBefore = rawDb.prepare('SELECT quantity FROM branch_stock WHERE product_id = 1 AND branch_id = 1').get().quantity
+    const itemsBefore = rawDb.prepare('SELECT COUNT(*) AS n FROM return_items WHERE return_id = @id').get({ id: created.json.id }).n
+
+    // Editing the returned side to 1 unit breaks the even exchange (the
+    // replacement stays at 2 x $10). The OLD code ran the reversal and
+    // re-apply loops FIRST and only then 400'd -- corrupting stock on a
+    // mere validation refusal. The hoisted gate must refuse untouched.
+    const edited = await req('PATCH', `/${created.json.id}`, {
+      items: [{ sale_item_id: 1, product_id: 1, quantity: 1, return_to_stock: true, branch_id: 1, applied_price_usd: 10 }],
+      reason: 'Shrinking the returned side',
+    })
+    assert.strictEqual(edited.status, 400, JSON.stringify(edited.json))
+    assert.match(edited.json.error, /even exchange/)
+
+    assert.strictEqual(rawDb.prepare('SELECT quantity FROM branch_batch_stock WHERE batch_id = @batchId AND branch_id = 1').get({ batchId: batch.batchId }).quantity, lotBefore, 'the lot must be untouched by a refused edit')
+    assert.strictEqual(rawDb.prepare('SELECT quantity FROM branch_stock WHERE product_id = 1 AND branch_id = 1').get().quantity, stockBefore, 'the aggregate must be untouched by a refused edit')
+    assert.strictEqual(rawDb.prepare('SELECT COUNT(*) AS n FROM return_items WHERE return_id = @id').get({ id: created.json.id }).n, itemsBefore, 'the return_items rows must survive a refused edit')
+  })
+
   console.log(`\n${passed} check(s) passed.`)
 }
 
