@@ -69,6 +69,12 @@ const portalRoute = loadReal('routes/portal.ts', {
   '../lib/imageAudit': { enqueueImageNormalization: async () => {} },
   '../lib/promotionRulesSql': { loadActivePromotionRules: async () => [], productPromotedSql: () => '0', productDiscountActiveSql: () => '0', anyRuleAppliesSql: () => '0', singleRuleAppliesSql: () => '0' },
   '../lib/rateLimit': { checkRateLimit: async () => ({ allowed: true, retryAfterSeconds: 0 }), getClientIp: () => '127.0.0.1' },
+  // The membership route is disabled, so these account libs are imported by
+  // portal.ts but never invoked here — stub them so the module loads.
+  '../lib/portalAccounts': { signupPortalAccount: async () => ({ ok: false }), signinPortalAccount: async () => ({ ok: false }) },
+  '../lib/portalSession': { createPortalSession: async () => ({ token: '', expiresAt: '' }), setPortalCookie: () => {}, clearPortalCookie: () => {}, revokePortalSession: async () => {}, getPortalAccount: async () => null },
+  '../lib/portalAuthLockout': { getPortalLockoutState: async () => ({ locked: false, failedCount: 0, retryAfterSeconds: 0 }), recordPortalFailure: async () => ({ locked: false, failedCount: 0, retryAfterSeconds: 0 }), clearPortalLockout: async () => {} },
+  '../lib/phone': { canonicalizePhone: (v) => String(v || '').replace(/\D/g, '') || null },
   '../lib/fileAssets': { buildUniqueStoredName: (n) => n },
   '../lib/media': { sanitizeMediaList: (l) => l },
   '../lib/uploadSecurity': { detectBufferKind: () => null },
@@ -129,26 +135,25 @@ async function main() {
     console.log(`PASS ${label}`)
   }
 
+  // The anonymous membership lookup was DISABLED (§2, Part 533): it returned
+  // customer data on a public surface, which is exactly the leak class this
+  // test was born to guard. Disabling it is the strongest possible fix — the
+  // endpoint now returns NO customer data at all. This test now proves that:
+  // the route refuses with feature_disabled and none of the seeded secrets can
+  // possibly appear in the body.
   const res = await app.request('/membership/GOLD-A', {}, { DB: db, BUSINESS_OS_PUBLIC_URL: 'https://leangbeauty.com' })
-  assert.strictEqual(res.status, 200, `membership lookup should return 200, got ${res.status}`)
+  assert.strictEqual(res.status, 403, `membership lookup must now be disabled (403), got ${res.status}`)
   const body = await res.json()
   const serialized = JSON.stringify(body)
 
-  // 1. Cross-customer isolation: none of B's linked rows may appear.
-  check('customer A lookup returns NONE of customer B\'s linked sales', Array.isArray(body.sales) && !body.sales.some((s) => s.receipt_number === 'R-CUSTOMER-B-SECRET'))
-  check('customer A lookup returns NONE of customer B\'s linked returns', Array.isArray(body.returns) && !body.returns.some((r) => r.return_number === 'RET-CUSTOMER-B-SECRET'))
-  check('B\'s private receipt id never appears anywhere in the response body', !serialized.includes('R-CUSTOMER-B-SECRET'))
-  check('B\'s private return id never appears anywhere in the response body', !serialized.includes('RET-CUSTOMER-B-SECRET'))
-
-  // 2. Staff-only customer notes must be entirely absent.
-  check('customer.notes is NOT a key on the returned customer', body.customer && !('notes' in body.customer))
-  check('the staff note text never appears anywhere in the response body', !serialized.includes(STAFF_NOTE))
-
-  // 3. Internal moderation fields must be absent from public submissions.
-  check('no submission exposes review_note', Array.isArray(body.submissions) && body.submissions.every((s) => !('review_note' in s)))
-  check('no submission exposes reviewed_by_name', Array.isArray(body.submissions) && body.submissions.every((s) => !('reviewed_by_name' in s)))
-  check('the internal review note text never appears anywhere in the response body', !serialized.includes(REVIEW_NOTE))
-  check('the reviewer staff name never appears anywhere in the response body', !serialized.includes(REVIEWER))
+  check('the disabled response is coded feature_disabled', body.code === 'feature_disabled')
+  check('the disabled response carries no customer object', !('customer' in body))
+  check('the disabled response carries no sales/returns/submissions', !('sales' in body) && !('returns' in body) && !('submissions' in body))
+  // Nothing seeded can leak — not another customer's receipts, not staff notes,
+  // not internal review fields — because the handler returns before any query.
+  for (const secret of ['R-CUSTOMER-B-SECRET', 'RET-CUSTOMER-B-SECRET', STAFF_NOTE, REVIEW_NOTE, REVIEWER, SHARED_NAME]) {
+    check(`the disabled response never contains "${secret.slice(0, 24)}"`, !serialized.includes(secret))
+  }
 
   console.log(`\nALL ${passed} CHECKS PASSED`)
 }

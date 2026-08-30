@@ -16,6 +16,10 @@ import { ADMIN_MAX_IMAGES_PER_PRODUCT } from '../lib/importImageMatch'
 import { buildFtsMatchExpression, buildPartialWordMatchClause, buildShortWordFallbackClause, buildTrigramMatchExpression, PRODUCTS_FTS_BM25_SQL, runFuzzyFallbackMatch, tokenizeSearchWords } from '../lib/searchMatch'
 import { loadActivePromotionRules, productPromotedSql } from '../lib/promotionRulesSql'
 import { paginateProductFamilies } from '../lib/familyPagination'
+import { signupPortalAccount, signinPortalAccount } from '../lib/portalAccounts'
+import { createPortalSession, setPortalCookie, clearPortalCookie, revokePortalSession, getPortalAccount } from '../lib/portalSession'
+import { getPortalLockoutState, recordPortalFailure, clearPortalLockout } from '../lib/portalAuthLockout'
+import { canonicalizePhone } from '../lib/phone'
 import type { Env } from '../index'
 
 const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser } }>()
@@ -895,15 +899,6 @@ app.get('/promotions', async (c) => {
 // public portal could not look up a membership or submit a screenshot,
 // and staff had nothing real to review. See PORTING_STATUS.md checkpoint 9.
 
-function joinWrappedClauses(clauses: string[]): string {
-  if (!clauses.length) return 'FALSE'
-  return clauses.map((clause) => `(${clause})`).join(' OR ')
-}
-
-function normalizePhone(value: unknown): string {
-  return String(value || '').replace(/[^\d]/g, '')
-}
-
 export type PortalConfigShape = ReturnType<typeof buildPortalConfig>
 
 function calculatePointsValue(amountUsd: number, amountKhr: number, config: PortalConfigShape): number {
@@ -963,31 +958,6 @@ export function summarizePoints(sales: Array<Record<string, unknown>>, returns: 
     nextRedeemNeeded: Math.max(0, Number((config.redeemPoints - (balance % config.redeemPoints || 0)).toFixed(2)) % config.redeemPoints),
     redeemValueUsd: Number((redeemableUnits * config.redeemValueUsd).toFixed(2)),
     redeemValueKhr: Number((redeemableUnits * config.redeemValueKhr).toFixed(0)),
-  }
-}
-
-function summarizeMembershipTotals(sales: Array<Record<string, unknown>>, returns: Array<Record<string, unknown>>) {
-  let totalSalesUsd = 0, totalSalesKhr = 0, totalReturnsUsd = 0, totalReturnsKhr = 0
-  let membershipDiscountUsd = 0, membershipDiscountKhr = 0
-
-  for (const sale of sales) {
-    totalSalesUsd += toNumber(sale.total_usd)
-    totalSalesKhr += toNumber(sale.total_khr)
-    membershipDiscountUsd += toNumber(sale.membership_discount_usd)
-    membershipDiscountKhr += toNumber(sale.membership_discount_khr)
-  }
-  for (const ret of returns) {
-    totalReturnsUsd += toNumber(ret.total_refund_usd)
-    totalReturnsKhr += toNumber(ret.total_refund_khr)
-  }
-
-  return {
-    totalSalesUsd: Number(totalSalesUsd.toFixed(2)),
-    totalSalesKhr: Number(totalSalesKhr.toFixed(0)),
-    totalReturnsUsd: Number(totalReturnsUsd.toFixed(2)),
-    totalReturnsKhr: Number(totalReturnsKhr.toFixed(0)),
-    membershipDiscountUsd: Number(membershipDiscountUsd.toFixed(2)),
-    membershipDiscountKhr: Number(membershipDiscountKhr.toFixed(0)),
   }
 }
 
@@ -1092,149 +1062,174 @@ async function materializePortalScreenshots(env: Env, screenshots: string[]): Pr
   return resolved
 }
 
+// ---- Customer accounts (storefront sign-up / sign-in) ----------------------
+// A public, unauthenticated ENTRY surface (like the former membership lookup),
+// but every response is enumeration-safe and every write is gated by the flat
+// 10-fail-per-flow lockout (lib/portalAuthLockout.ts) plus a per-IP sliding
+// window (lib/rateLimit.ts). Sessions use the separate bos_portal cookie
+// (lib/portalSession.ts), never the staff bos_session.
+const PORTAL_CART_MAX_ITEMS = 200
+const PORTAL_WISHLIST_MAX_ITEMS = 500
+
+function safeJsonArray(json: string | null | undefined): unknown[] {
+  if (!json) return []
+  try {
+    const value = JSON.parse(json)
+    return Array.isArray(value) ? value : []
+  } catch {
+    return []
+  }
+}
+
+// Bound and shape-clamp a client-supplied cart/wishlist so an authenticated
+// customer can't write an unbounded blob or inject arbitrary fields (L9). Only
+// the known display fields survive; qty is coerced into 1..999; ids dedupe.
+function sanitizePortalBucketItems(raw: unknown, max: number, withQty: boolean): Array<Record<string, unknown>> {
+  if (!Array.isArray(raw)) return []
+  const out: Array<Record<string, unknown>> = []
+  const seen = new Set<string>()
+  for (const entry of raw) {
+    if (out.length >= max) break
+    if (!entry || typeof entry !== 'object') continue
+    const e = entry as Record<string, unknown>
+    const id = String(e.id ?? '').trim().slice(0, 64)
+    if (!id || seen.has(id)) continue
+    seen.add(id)
+    const item: Record<string, unknown> = { id }
+    for (const field of ['name', 'category', 'brand', 'priceText'] as const) {
+      if (e[field] != null) item[field] = String(e[field]).slice(0, 200)
+    }
+    if (withQty) {
+      const q = Math.floor(Number(e.qty))
+      item.qty = Number.isFinite(q) ? Math.min(Math.max(q, 1), 999) : 1
+    }
+    out.push(item)
+  }
+  return out
+}
+
+async function loadAccountProfile(env: Env, accountId: number): Promise<{ membershipId: string; name: string; email: string | null } | null> {
+  const row = await getDb(env).prepare('SELECT membership_id, name, email FROM portal_accounts WHERE id = ? LIMIT 1')
+    .get<{ membership_id: string; name: string; email: string | null }>([accountId])
+  return row ? { membershipId: row.membership_id, name: row.name, email: row.email ?? null } : null
+}
+
+app.post('/auth/signup', async (c) => {
+  const ip = getClientIp(c.req.raw)
+  const ipWindow = await checkRateLimit(c.env, 'portal:signup:ip', ip, 30, 15 * 60 * 1000)
+  if (!ipWindow.allowed) {
+    c.header('Retry-After', String(ipWindow.retryAfterSeconds))
+    return c.json({ error: `Too many attempts. Try again in ${ipWindow.retryAfterSeconds} seconds.`, code: 'rate_limited' }, 429)
+  }
+  const lock = await getPortalLockoutState(c.env, 'signup', ip)
+  if (lock.locked) {
+    c.header('Retry-After', String(lock.retryAfterSeconds))
+    return c.json({ error: `Too many sign-up attempts. Please wait about ${Math.ceil(lock.retryAfterSeconds / 60)} minutes, or contact us.`, code: 'locked' }, 429)
+  }
+
+  const body = await c.req.json<Record<string, unknown>>().catch(() => ({} as Record<string, unknown>))
+  const result = await signupPortalAccount(c.env, { name: body.name, phone: body.phone, membershipId: body.membershipId, password: body.password })
+  if (!result.ok) {
+    // Only phone/membership-id probing counts toward the 10-fail cap; a benign
+    // form error (missing field, short password) is retryable without locking.
+    if (result.abuse) await recordPortalFailure(c.env, 'signup', ip)
+    return c.json({ error: result.error, code: result.code }, result.status as 400 | 409)
+  }
+  await clearPortalLockout(c.env, 'signup', ip)
+  const session = await createPortalSession(c.env, result.accountId, { userAgent: c.req.header('user-agent'), ip })
+  setPortalCookie(c, session.token, session.expiresAt)
+  return c.json({ ok: true, account: { membershipId: result.membershipId, name: result.name, email: null } })
+})
+
+app.post('/auth/signin', async (c) => {
+  const ip = getClientIp(c.req.raw)
+  const body = await c.req.json<Record<string, unknown>>().catch(() => ({} as Record<string, unknown>))
+  const ipWindow = await checkRateLimit(c.env, 'portal:signin:ip', ip, 40, 15 * 60 * 1000)
+  if (!ipWindow.allowed) {
+    c.header('Retry-After', String(ipWindow.retryAfterSeconds))
+    return c.json({ error: `Too many attempts. Try again in ${ipWindow.retryAfterSeconds} seconds.`, code: 'rate_limited' }, 429)
+  }
+  // Flat 10-fail cap keyed on the canonical phone (so one targeted account
+  // can't be hammered from rotating IPs), falling back to IP when no phone is
+  // supplied at all.
+  const phoneKey = canonicalizePhone(body.phone) || `nophone:${ip}`
+  const lock = await getPortalLockoutState(c.env, 'signin', phoneKey)
+  if (lock.locked) {
+    c.header('Retry-After', String(lock.retryAfterSeconds))
+    return c.json({ error: `Too many sign-in attempts. Please wait about ${Math.ceil(lock.retryAfterSeconds / 60)} minutes, or reset your password.`, code: 'locked' }, 429)
+  }
+
+  const result = await signinPortalAccount(c.env, { identifier: body.identifier, phone: body.phone, password: body.password })
+  if (!result.ok) {
+    await recordPortalFailure(c.env, 'signin', phoneKey)
+    return c.json({ error: result.error, code: result.code }, result.status as 401)
+  }
+  await clearPortalLockout(c.env, 'signin', phoneKey)
+  const session = await createPortalSession(c.env, result.accountId, { userAgent: c.req.header('user-agent'), ip })
+  setPortalCookie(c, session.token, session.expiresAt)
+  const profile = await loadAccountProfile(c.env, result.accountId)
+  return c.json({ ok: true, account: profile })
+})
+
+app.post('/auth/signout', async (c) => {
+  await revokePortalSession(c)
+  clearPortalCookie(c)
+  return c.json({ ok: true })
+})
+
+app.get('/auth/me', async (c) => {
+  const account = await getPortalAccount(c)
+  if (!account) return c.json({ account: null })
+  return c.json({ account: { membershipId: account.membership_id, name: account.name, email: account.email } })
+})
+
+// Server-persisted cart + wishlist ("permanent memory"). Strictly scoped by
+// the session's own account id from the cookie — never a client-supplied id
+// (no IDOR).
+app.get('/account/cart', async (c) => {
+  const account = await getPortalAccount(c)
+  if (!account) return c.json({ error: 'Not signed in', code: 'portal_unauthenticated' }, 401)
+  const row = await getDb(c.env).prepare('SELECT cart_json FROM portal_accounts WHERE id = ? LIMIT 1').get<{ cart_json: string | null }>([account.id])
+  return c.json({ items: safeJsonArray(row?.cart_json) })
+})
+
+app.put('/account/cart', async (c) => {
+  const account = await getPortalAccount(c)
+  if (!account) return c.json({ error: 'Not signed in', code: 'portal_unauthenticated' }, 401)
+  const body = await c.req.json<Record<string, unknown>>().catch(() => ({} as Record<string, unknown>))
+  const items = sanitizePortalBucketItems(body.items, PORTAL_CART_MAX_ITEMS, true)
+  await getDb(c.env).prepare('UPDATE portal_accounts SET cart_json = @j, updated_at = CURRENT_TIMESTAMP WHERE id = @id').run({ j: JSON.stringify(items), id: account.id })
+  return c.json({ ok: true, items })
+})
+
+app.get('/account/wishlist', async (c) => {
+  const account = await getPortalAccount(c)
+  if (!account) return c.json({ error: 'Not signed in', code: 'portal_unauthenticated' }, 401)
+  const row = await getDb(c.env).prepare('SELECT wishlist_json FROM portal_accounts WHERE id = ? LIMIT 1').get<{ wishlist_json: string | null }>([account.id])
+  return c.json({ items: safeJsonArray(row?.wishlist_json) })
+})
+
+app.put('/account/wishlist', async (c) => {
+  const account = await getPortalAccount(c)
+  if (!account) return c.json({ error: 'Not signed in', code: 'portal_unauthenticated' }, 401)
+  const body = await c.req.json<Record<string, unknown>>().catch(() => ({} as Record<string, unknown>))
+  const items = sanitizePortalBucketItems(body.items, PORTAL_WISHLIST_MAX_ITEMS, false)
+  await getDb(c.env).prepare('UPDATE portal_accounts SET wishlist_json = @j, updated_at = CURRENT_TIMESTAMP WHERE id = @id').run({ j: JSON.stringify(items), id: account.id })
+  return c.json({ ok: true, items })
+})
+
+// Membership lookup is DISABLED (§2, user request). A customer typing a
+// membership number to see their purchases/points exposed data across the
+// public surface (the 2d68d2fb same-name leak was one symptom of that design).
+// The account system replaces it; the storefront shows a privacy message in
+// its place, and this endpoint refuses so the data path can't be reached
+// directly either. findCustomerByMembership is retained — /submissions still
+// uses it — but nothing here returns customer rows anymore.
 app.get('/membership/:membershipNumber', async (c) => {
-  const rate = await checkRateLimit(c.env, 'portal:membership_lookup', getClientIp(c.req.raw), 45, 60 * 1000)
-  if (!rate.allowed) {
-    c.header('Retry-After', String(rate.retryAfterSeconds))
-    return c.json({ error: `Too many requests. Try again in ${rate.retryAfterSeconds} seconds.` }, 429)
-  }
-
-  const membershipNumber = c.req.param('membershipNumber').trim()
-  if (!membershipNumber) return c.json({ error: 'Membership number is required' }, 400)
-
-  const customer = await findCustomerByMembership(c.env, membershipNumber)
-  if (!customer) return c.json({ error: 'Membership not found' }, 404)
-
-  const db = getDb(c.env)
-  const params = {
-    customerId: customer.id || null,
-    customerName: customer.name || '',
-    customerPhoneNormalized: normalizePhone(customer.phone),
-    membershipNumber: customer.membership_number || membershipNumber,
-  }
-  const salesWhere: string[] = []
-  const returnsWhere: string[] = []
-  const submissionWhere: string[] = []
-
-  if (params.customerId) {
-    salesWhere.push('s.customer_id = @customerId')
-    returnsWhere.push('r.customer_id = @customerId')
-    submissionWhere.push('customer_id = @customerId')
-  }
-  if (params.customerName) {
-    // The name-match branch exists so a walk-in receipt recorded by name only
-    // (no customer_id link) still shows in the customer's own history. It is
-    // ORed with the customer_id scope, so it MUST be restricted to UNLINKED
-    // rows (`customer_id IS NULL`): without that guard a second registered
-    // customer who happens to share a display name has their linked sales and
-    // returns leaked here -- and the phone guard below self-disables for any
-    // looked-up customer with a blank phone, while the returns table has no
-    // phone column at all, so the name alone would cross customers.
-    salesWhere.push(`(
-      s.customer_id IS NULL
-      AND lower(trim(COALESCE(s.customer_name, ''))) = lower(trim(@customerName))
-      AND (
-        @customerPhoneNormalized = ''
-        OR replace(replace(replace(replace(replace(COALESCE(s.customer_phone, ''), ' ', ''), '-', ''), '+', ''), '(', ''), ')', '') LIKE @customerPhoneNormalized || '%'
-      )
-    )`)
-    returnsWhere.push(`(r.customer_id IS NULL AND lower(trim(COALESCE(r.customer_name, ''))) = lower(trim(@customerName)))`)
-  }
-  if (params.membershipNumber) {
-    submissionWhere.push(`lower(trim(COALESCE(membership_number, ''))) = lower(trim(@membershipNumber))`)
-  }
-
-  const salesWhereSql = joinWrappedClauses(salesWhere)
-  const returnsWhereSql = joinWrappedClauses(returnsWhere)
-  const submissionWhereSql = joinWrappedClauses(submissionWhere)
-
-  // SQLite has no STRING_AGG/FILTER (that's Postgres) -- GROUP_CONCAT with
-  // a CASE guard is the direct D1-compatible equivalent.
-  const sales = await db.prepare(`
-    SELECT
-      s.id, s.receipt_number, s.created_at, s.branch_name, s.sale_status, s.payment_method,
-      s.total_usd, s.total_khr, s.tax_usd, s.tax_khr, s.delivery_fee_usd, s.delivery_fee_khr,
-      s.discount_usd, s.discount_khr,
-      COALESCE(s.membership_discount_usd, 0) AS membership_discount_usd,
-      COALESCE(s.membership_discount_khr, 0) AS membership_discount_khr,
-      COALESCE(s.membership_points_redeemed, 0) AS membership_points_redeemed,
-      COALESCE(s.loyalty_accrual, 1) AS loyalty_accrual,
-      GROUP_CONCAT(CASE WHEN si.id IS NOT NULL THEN si.product_name || ' x' || si.quantity END, ', ') AS items_summary
-    FROM sales s
-    LEFT JOIN sale_items si ON si.sale_id = s.id
-    WHERE ${salesWhereSql}
-    GROUP BY s.id
-    ORDER BY s.created_at DESC
-    LIMIT 100
-  `).all(params)
-
-  const returns = await db.prepare(`
-    SELECT
-      r.id, r.return_number, r.receipt_number, r.created_at, r.branch_name, r.reason, r.return_type,
-      r.status, r.total_refund_usd, r.total_refund_khr,
-      GROUP_CONCAT(CASE WHEN ri.id IS NOT NULL THEN ri.product_name || ' x' || ri.quantity END, ', ') AS items_summary
-    FROM returns r
-    LEFT JOIN return_items ri ON ri.return_id = r.id
-    WHERE ${returnsWhereSql}
-    GROUP BY r.id
-    ORDER BY r.created_at DESC
-    LIMIT 100
-  `).all(params)
-
-  // `review_note` (internal moderation note) and `reviewed_by_name` (the staff
-  // member who reviewed it) are staff-only and must NOT appear on this
-  // anonymous surface -- the customer's OWN `note`, `status` and `reward_points`
-  // stay so they can see their submission's outcome. The authenticated
-  // reviewer endpoint (/submissions/review) is where staff read those fields.
-  const submissionRows = await db.prepare(`
-    SELECT id, customer_id, membership_number, customer_name, platform, note, screenshots_json,
-           status, reward_points, reviewed_at, created_at
-    FROM customer_share_submissions
-    WHERE ${submissionWhereSql}
-    ORDER BY created_at DESC
-    LIMIT 100
-  `).all(params)
-  const submissions = normalizePortalSubmissionRows(submissionRows as unknown as Array<Record<string, unknown>>)
-  const adjustments = params.customerId
-    ? await db.prepare(`
-      SELECT id, points, note, created_at
-      FROM loyalty_point_adjustments
-      WHERE customer_id = @customerId
-      ORDER BY created_at DESC
-      LIMIT 100
-    `).all(params)
-    : []
-
-  const settings = await loadSettingsMap(c.env)
-  const config = buildPortalConfig(settings, c.env)
-  const points = summarizePoints(sales as unknown as Array<Record<string, unknown>>, returns as unknown as Array<Record<string, unknown>>, submissions, config, adjustments as unknown as Array<Record<string, unknown>>)
-  const totals = summarizeMembershipTotals(sales as unknown as Array<Record<string, unknown>>, returns as unknown as Array<Record<string, unknown>>)
-
   return c.json({
-    customer,
-    sales,
-    returns,
-    submissions,
-    adjustments,
-    totals,
-    points,
-    config: {
-      publicUrl: config.publicUrl,
-      priceDisplay: config.priceDisplay,
-      translateWidgetEnabled: false,
-      refreshSeconds: config.refreshSeconds,
-      redeemPoints: config.redeemPoints,
-      redeemValueUsd: config.redeemValueUsd,
-      redeemValueKhr: config.redeemValueKhr,
-      membershipInfoText: config.membershipInfoText,
-      submissionEnabled: config.submissionEnabled,
-      submissionRewardPoints: config.submissionRewardPoints,
-      submissionInstructions: config.submissionInstructions,
-      googleMapsEmbed: config.googleMapsEmbed,
-      showGoogleMap: config.showGoogleMap,
-      publicPath: config.publicPath,
-    },
-  })
+    error: 'This feature is not built into the account structure for privacy and security purposes.',
+    code: 'feature_disabled',
+  }, 403)
 })
 
 app.post('/submissions', async (c) => {

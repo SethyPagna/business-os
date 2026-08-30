@@ -71,6 +71,12 @@ const portalRoute = loadReal('routes/portal.ts', {
   '../lib/imageAudit': { enqueueImageNormalization: async () => {} },
   '../lib/promotionRulesSql': { loadActivePromotionRules: async () => [], productPromotedSql: () => '0', productDiscountActiveSql: () => '0', anyRuleAppliesSql: () => '0', singleRuleAppliesSql: () => '0' },
   '../lib/rateLimit': { checkRateLimit: async () => ({ allowed: true, retryAfterSeconds: 0 }), getClientIp: () => '127.0.0.1' },
+  // The membership route is disabled, so these account libs are imported by
+  // portal.ts but never invoked here — stub them so the module loads.
+  '../lib/portalAccounts': { signupPortalAccount: async () => ({ ok: false }), signinPortalAccount: async () => ({ ok: false }) },
+  '../lib/portalSession': { createPortalSession: async () => ({ token: '', expiresAt: '' }), setPortalCookie: () => {}, clearPortalCookie: () => {}, revokePortalSession: async () => {}, getPortalAccount: async () => null },
+  '../lib/portalAuthLockout': { getPortalLockoutState: async () => ({ locked: false, failedCount: 0, retryAfterSeconds: 0 }), recordPortalFailure: async () => ({ locked: false, failedCount: 0, retryAfterSeconds: 0 }), clearPortalLockout: async () => {} },
+  '../lib/phone': { canonicalizePhone: (v) => String(v || '').replace(/\D/g, '') || null },
   '../lib/fileAssets': { buildUniqueStoredName: (n) => n },
   '../lib/media': { sanitizeMediaList: (l) => l },
   '../lib/uploadSecurity': { detectBufferKind: () => null },
@@ -123,29 +129,20 @@ async function main() {
     console.log(`PASS ${label}`)
   }
 
+  // The anonymous membership lookup was DISABLED (§2, Part 533). It used to
+  // return the customer's own sale history; the redaction guarded here (the
+  // staff-only courier cost must never ride along) is now moot because the
+  // endpoint returns NO sale data at all. This test proves the endpoint is
+  // disabled and that the seeded secret can therefore never appear.
   const res = await app.request(`/membership/${encodeURIComponent(MEMBERSHIP)}`, {}, { DB: db, BUSINESS_OS_PUBLIC_URL: 'https://leangbeauty.com' })
-  assert.strictEqual(res.status, 200, `membership lookup should return 200, got ${res.status}`)
+  assert.strictEqual(res.status, 403, `membership lookup must now be disabled (403), got ${res.status}`)
   const body = await res.json()
-
-  check('exactly one sale is returned for the seeded customer', Array.isArray(body.sales) && body.sales.length === 1)
-  const sale = body.sales[0]
-
-  // The customer-charged delivery fee IS part of the customer's own receipt
-  // history -- it must stay.
-  check('charged delivery fee is present (customer sees what THEY paid)', sale.delivery_fee_usd === CHARGED_FEE_USD)
-  check('charged delivery fee (KHR) is present', sale.delivery_fee_khr === CHARGED_FEE_KHR)
-
-  // The staff-only courier cost must be entirely absent -- not null, not 0,
-  // but not a key at all, because the SELECT never names the column.
-  check('delivery_actual_cost_usd is NOT a key on the returned sale', !('delivery_actual_cost_usd' in sale))
-  check('delivery_actual_cost_khr is NOT a key on the returned sale', !('delivery_actual_cost_khr' in sale))
-
-  // Belt-and-suspenders: the secret value must not appear ANYWHERE in the
-  // whole response (customer object, totals, points, etc.), and the column
-  // name must not leak either.
   const serialized = JSON.stringify(body)
-  check('the secret courier-cost value never appears in the full response body', !serialized.includes(String(SECRET_ACTUAL_USD)) && !serialized.includes(String(SECRET_ACTUAL_KHR)))
-  check('the delivery_actual_cost column name never appears in the full response body', !serialized.includes('delivery_actual_cost'))
+
+  check('the disabled response is coded feature_disabled', body.code === 'feature_disabled')
+  check('the disabled response carries no sales', !('sales' in body))
+  check('the secret courier-cost value never appears in the response body', !serialized.includes(String(SECRET_ACTUAL_USD)) && !serialized.includes(String(SECRET_ACTUAL_KHR)))
+  check('the delivery_actual_cost column name never appears in the response body', !serialized.includes('delivery_actual_cost'))
 
   console.log(`\nALL ${passed} CHECKS PASSED`)
 }
