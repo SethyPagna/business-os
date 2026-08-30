@@ -3074,13 +3074,18 @@ production ticks will start pruning the MIGRATION jobs' staged source rows
 raise `import_detail_retention_hours` in settings first if unwanted. Orphan
 cleanup on production stays manual: dry-run the endpoint, back up, then force.
 
-**CLAIMED (in progress, session business-os-v1-f9, Aug 30):** user's Aug-30 UI batch —
-(1) large-screen-only text bump via `--ui-text-scale` media query in `main.css`;
-(2) Branches expanded-branch product-card grid restyle + mobile transfer-card stray
-`<td>` fix (NOT the per-branch stat tiles — stats-strip session owns those);
-(3) `TransferModal.tsx` multi-select selected-area UI + transfer "can't fetch" debug;
-(4) `SaleDetailModal.tsx` scroll/wrap fixes; (5) `receipt/Receipt.tsx` toolbar
-buttons wrapping to multiple rows. Touching only those files + lang packs if needed.
+**DONE (session business-os-v1-f9, Aug 30 — Part 511):** user's Aug-30 UI batch, all
+five items shipped and browser-verified: (1) desktop-only text bump (`--ui-text-scale`
+1.08 ≥1280px / 1.14 ≥1920px); (2) Branches expanded-stock cards restyled (neutral card,
+colored left edge, one row) + mobile transfer-card stray `<td>` fixed; (3) TransferModal
+"can't fetch" ROOT CAUSE fixed (aliveRef never re-armed after StrictMode's simulated
+unmount → every load discarded, pickers stuck on Loading forever) + compact selected
+area (single mode collapses the picker list once picked; multi mode's "N selected" chip
+toggles a selected-only view); (4) SaleDetailModal one-line receipt-number header +
+literal "{status}" in the update button fixed; (5) receipt print-preview toolbar is one
+compact row (icon-only secondaries below sm). NOTE for the user: production still runs
+the Aug-27 build, which also predates 08cdcacf — live transfers falsely report
+"Transfer failed" until the next `npm run deploy:full`. Part 511 has details.
 
 **DONE (session business-os-v1-77, Aug 30): full verification / stress sweep +
 first-wave loophole fixes.** Golden Rule 5 battery ran clean at start (tsc both
@@ -3134,7 +3139,8 @@ up should re-verify against current source first.
 - Inventory `/transfer` moves `branch_stock` between branches and never touches
   `branch_batch_stock` → lot ledger drift, the exact class migration 0081 repaired.
   (×3) `routes/inventory.ts:1665-1687`.
-- Action-history undo applier derives its permission from a client-supplied `entity`;
+- **[CLAIMED: session b9, Aug 30 — my K1 lane]** Action-history undo applier derives
+  its permission from a client-supplied `entity`;
   an unrecognized entity → empty permission → any cashier can run `branch.update` etc.
   with no gate. (×1 auth) `routes/actionHistory.ts:88,148` + `lib/undoAppliers.ts`.
 - `/reset-data`,`/reset-section`,`/finalize-migration`,`/factory-reset` gate on `backup`
