@@ -14898,3 +14898,21 @@ migration **0086** (additive indexes only):
 Verified: `test-migration-chain-fresh-pure` green on the full chain (87
 migrations, FK check clean). **Needs deploy + `migrate` on remote D1
 (0086 pending after this ships).**
+
+## Part 533 (Aug 30 2026, session business-os-v1-b9) — Part-77 MEDIUM fix: manual loyalty awards count at checkout
+
+**Ask:** the loyalty-balance MEDIUM from the findings backlog, adjacent to
+Part 532's index work. `summarizePoints` — the balance POS displays from
+the portal lookup — adds `loyalty_point_adjustments` (manual awards, the
+Contacts "award points" flow), but the checkout-side re-validation in
+routes/sales.ts recomputed earned − deducted − redeemed + rewarded WITHOUT
+that term. A customer whose points came from a manual award saw a
+redeemable balance in POS and was then refused with "Insufficient points
+balance" the moment the cashier tried to redeem. Commit `ab8d172c`: the
+re-validation aggregates the same term with the same sign (adjustments are
+positive awards by CHECK constraint), restoring display/checkout parity —
+per the migration rule that loyalty balances are COMPUTED, never stored,
+every computation site must agree. `test-loyalty-accrual-pure` extended
+with a real-schema award plus parity source locks on BOTH formulas so
+they cannot drift apart again; sale-totals 15 green; tsc clean.
+**Needs deploy** (rides with the b9 batch).
