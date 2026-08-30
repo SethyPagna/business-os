@@ -140,6 +140,17 @@ const env = { DB: {} }
   ok(report.payment_methods.length === 4 && report.delivery_contacts.length === 2,
     'breakdowns ride along in one response')
 
+  // Per-sale drill: one row per receipt in the same scope, and each row's
+  // kernel-computed revenue SUMS to the day's revenue_usd -- the single-source
+  // rule proven per row (never a raw receipt total that includes tax/delivery).
+  const perSaleRevenue = report.sales.reduce((sum, s) => sum + s.revenue_usd, 0)
+  ok(report.sales.length === 5
+    && Math.abs(perSaleRevenue - report.totals.revenue_usd) < 1e-9
+    && report.totals.revenue_usd === 101,
+    'per-sale rows: one per receipt, revenue reconciles to the day total (101)')
+  ok(report.sales.every((s) => s.receipt_number && typeof s.revenue_usd === 'number' && s.payment_method),
+    'each per-sale row carries receipt number, payment method and a numeric revenue')
+
   const branch1 = await kernel.getSalesDayReport(env, D, { branchId: 1 })
   ok(branch1.totals.tx_count === 4 && branch1.totals.gross_sales_usd === 68,
     'branch filter applies to every block of the report')

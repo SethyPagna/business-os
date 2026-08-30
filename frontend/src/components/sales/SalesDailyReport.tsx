@@ -68,6 +68,7 @@ interface DayReport {
     margin_usd: number
   }>
   discounts: { store_usd: number; membership_usd: number; store_tx_count: number; membership_tx_count: number }
+  sales?: Array<{ id: number; receipt_number: string; created_at: string; customer_name: string; payment_method: string; sale_status: string; revenue_usd: number; discount_usd: number; collected_usd: number }>
 }
 
 interface SalesDailyReportProps {
@@ -101,6 +102,18 @@ function displayDay(iso: string): string {
   // Weekday from UTC-noon so no timezone can shift the day.
   const weekday = new Date(`${iso}T12:00:00Z`).toLocaleDateString('en-US', { weekday: 'short' })
   return `${weekday} ${m[2]}/${m[3]}/${m[1]}`
+}
+
+// Just the 24-hour clock for a receipt inside a day drill (the day is already
+// the row's context). D1 stores created_at as UTC 'YYYY-MM-DD HH:MM:SS' with no
+// zone -- treat a bare stamp as UTC, then show the viewer's local time.
+function clockOf(iso: string): string {
+  if (!iso) return ''
+  let s = String(iso).trim()
+  if (s.includes(' ') && !s.includes('T')) s = s.replace(' ', 'T')
+  if (!/[zZ]|[+-]\d\d:?\d\d$/.test(s)) s += 'Z'
+  const d = new Date(s)
+  return Number.isNaN(d.getTime()) ? '' : d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false })
 }
 
 // JS reports minutes WEST of UTC; the kernel wants minutes EAST.
@@ -375,6 +388,34 @@ export default function SalesDailyReport({ t, fmtUSD, active = true, range: exte
           ) : null}
         </div>
       </div>
+
+      {/* Per-sale breakdown for the day (the "break down per sales" ask). Each
+          row's revenue is kernel-computed server-side, so the column sums to
+          the day's Revenue stat above -- never a raw receipt total that would
+          include tax/delivery and fail to reconcile. */}
+      {report.sales && report.sales.length ? (
+        <div className="rounded-lg border border-slate-200 bg-white p-2.5 dark:border-slate-700 dark:bg-slate-900">
+          <div className="mb-2 text-xs font-semibold text-slate-700 dark:text-slate-200">
+            {t('sales') || 'Sales'} <span className="font-normal text-slate-400">({report.sales.length})</span>
+          </div>
+          <div className="max-h-72 overflow-auto">
+            <table className="w-full text-xs">
+              <tbody>
+                {report.sales.map((sale) => (
+                  <tr key={sale.id} className="border-b border-slate-100 last:border-0 dark:border-slate-800">
+                    <td className="py-1.5 pr-2 font-mono font-medium text-blue-600 dark:text-blue-400">{sale.receipt_number}</td>
+                    <td className="hidden py-1.5 pr-2 text-slate-400 sm:table-cell">{clockOf(sale.created_at)}</td>
+                    <td className="max-w-[9rem] truncate py-1.5 pr-2 text-slate-700 dark:text-slate-200">{sale.customer_name || (t('walk_in') || 'Walk-in')}</td>
+                    <td className="hidden py-1.5 pr-2 md:table-cell"><span className="rounded bg-slate-100 px-1.5 py-0.5 text-[11px] text-slate-500 dark:bg-slate-800 dark:text-slate-300">{sale.payment_method}</span></td>
+                    <td className="py-1.5 pr-2 text-right text-rose-500/80">{sale.discount_usd > 0 ? `−${fmtUSD(sale.discount_usd)}` : ''}</td>
+                    <td className={`py-1.5 text-right font-medium ${sale.sale_status === 'cancelled' ? 'text-slate-400 line-through' : 'text-slate-900 dark:text-white'}`}>{fmtUSD(sale.revenue_usd)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      ) : null}
     </div>
   )
 

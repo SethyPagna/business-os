@@ -330,6 +330,22 @@ export interface DeliveryContactTotalsRow {
   last_delivery_at: string | null
 }
 
+// One receipt inside a day's drill. revenue_usd is computed the SAME way the
+// kernel defines revenue (subtotal net of both discounts), so these rows sum
+// to the day's revenue_usd -- the single-source rule applied per row, so the
+// per-sale breakdown can never disagree with the day total above it.
+export interface SalesDayRow {
+  id: number
+  receipt_number: string
+  created_at: string
+  customer_name: string
+  payment_method: string
+  sale_status: string
+  revenue_usd: number
+  discount_usd: number
+  collected_usd: number
+}
+
 export interface SalesDayReport {
   date: string
   totals: SalesTotals
@@ -341,6 +357,8 @@ export interface SalesDayReport {
     store_tx_count: number
     membership_tx_count: number
   }
+  // The individual receipts making up the day (newest first, capped).
+  sales: SalesDayRow[]
 }
 
 export async function getPaymentMethodBreakdown(env: Env, f: SalesFilters): Promise<PaymentMethodBreakdownRow[]> {
@@ -497,7 +515,7 @@ export async function getSalesDayReport(
   const f: SalesFilters = { startDate: day, endDate: day, ...opts }
   const db = getDb(env)
   const { sql: whereSql, params } = whereActiveSales('sales', f)
-  const [totals, paymentMethods, deliveryContacts, discountCounts] = await Promise.all([
+  const [totals, paymentMethods, deliveryContacts, discountCounts, saleRows] = await Promise.all([
     getSalesTotals(env, f),
     getPaymentMethodBreakdown(env, f),
     getDeliveryContactTotals(env, f),
@@ -507,6 +525,23 @@ export async function getSalesDayReport(
       FROM sales
       WHERE ${whereSql}
     `).get<Record<string, number>>(params),
+    // Per-sale rows for the drill. Same date/branch/status/payment scope as
+    // every figure above (whereActiveSales), and revenue computed identically
+    // to deriveTotals so SUM(revenue_usd) == totals.revenue_usd. Capped: a
+    // single day of one shop never approaches 1000 receipts.
+    db.prepare(`
+      SELECT id, receipt_number, created_at,
+             COALESCE(NULLIF(TRIM(customer_name), ''), '') AS customer_name,
+             COALESCE(NULLIF(TRIM(payment_method), ''), 'Unknown') AS payment_method,
+             COALESCE(sale_status, 'completed') AS sale_status,
+             ROUND(COALESCE(subtotal_usd, 0) - COALESCE(discount_usd, 0) - COALESCE(membership_discount_usd, 0), 2) AS revenue_usd,
+             ROUND(COALESCE(discount_usd, 0) + COALESCE(membership_discount_usd, 0), 2) AS discount_usd,
+             ROUND(COALESCE(total_usd, 0) + CASE WHEN COALESCE(delivery_fee_paid_by, 'customer') = 'store' THEN 0 ELSE COALESCE(delivery_fee_usd, 0) END, 2) AS collected_usd
+      FROM sales
+      WHERE ${whereSql}
+      ORDER BY datetime(created_at) DESC, id DESC
+      LIMIT 1000
+    `).all<Record<string, unknown>>(params),
   ])
   return {
     date: day,
@@ -519,6 +554,17 @@ export async function getSalesDayReport(
       store_tx_count: num(discountCounts?.store_tx_count),
       membership_tx_count: num(discountCounts?.membership_tx_count),
     },
+    sales: (saleRows || []).map((r) => ({
+      id: Number(r.id),
+      receipt_number: String(r.receipt_number || ''),
+      created_at: String(r.created_at || ''),
+      customer_name: String(r.customer_name || ''),
+      payment_method: String(r.payment_method || ''),
+      sale_status: String(r.sale_status || 'completed'),
+      revenue_usd: num(r.revenue_usd),
+      discount_usd: num(r.discount_usd),
+      collected_usd: num(r.collected_usd),
+    })),
   }
 }
 
