@@ -456,6 +456,8 @@
   "categories": "Categories",
   "category": "Category",
   "change": "Change",
+  "change_exchange_rate": "Change exchange rate",
+  "change_exchange_rate_placeholder": "Same as exchange rate",
   "change_password": "Change password",
   "changed_fields": "Changed fields",
   "check_again": "Check again",

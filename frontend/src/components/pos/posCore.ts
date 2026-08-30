@@ -571,3 +571,15 @@ export function findCheckoutBlocker(
   if (!Number.isFinite(total) || total < 0) return { code: 'invalid_total' }
   return null
 }
+
+// The USD->KHR exchange rate used for CHANGE handed back to the customer.
+// Change money converts at its own rate, separate from the main rate used for
+// everything else -- the same way loyalty redemption has its own rate
+// (business rule, Aug 31 2026). Uses the dedicated rate only when the setting
+// parses to a positive number; otherwise falls back to the main rate, so an
+// unset / blank / zero / malformed setting silently behaves as "same as the
+// main exchange rate".
+export function resolveChangeExchangeRate(rawSetting: unknown, mainRate: number): number {
+  const parsed = parseFloat(String(rawSetting ?? '').trim())
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : mainRate
+}

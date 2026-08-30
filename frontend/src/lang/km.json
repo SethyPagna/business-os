@@ -456,6 +456,8 @@
   "categories": "ប្រភេទទំនិញ",
   "category": "ប្រភេទ",
   "change": "ប្រាក់អាប់",
+  "change_exchange_rate": "អត្រាប្តូរប្រាក់សម្រាប់ប្រាក់អាប់",
+  "change_exchange_rate_placeholder": "ដូចអត្រាប្តូរប្រាក់",
   "change_password": "ប្ដូរពាក្យសម្ងាត់",
   "changed_fields": "វាលដែលបានផ្លាស់ប្តូរ",
   "check_again": "ពិនិត្យម្ដងទៀត",

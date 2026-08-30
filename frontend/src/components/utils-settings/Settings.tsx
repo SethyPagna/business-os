@@ -1036,6 +1036,7 @@ export default function Settings() {
             {field('currency_usd_symbol', t('currency_usd_symbol'), 'text', '$')}
             {field('currency_khr_symbol', t('currency_khr_symbol'), 'text', '៛')}
             {field('exchange_rate', t('exchange_rate'), 'number', '4100')}
+            {field('change_exchange_rate', t('change_exchange_rate') || 'Change exchange rate', 'number', t('change_exchange_rate_placeholder') || 'Same as exchange rate')}
             {field('tax_rate', t('tax_rate'), 'number', '0')}
             <div>
               <label htmlFor="settings-display-currency" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">{t('display_currency')}</label>

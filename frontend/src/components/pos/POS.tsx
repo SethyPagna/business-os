@@ -49,6 +49,7 @@ import {
   repricePromotionCartLines,
   isSaleRecorded,
   findCheckoutBlocker,
+  resolveChangeExchangeRate,
   type ManualDiscountType,
 } from './posCore.ts'
 import { promotionBadgeForProduct, evaluatePromotionPricing, type PromotionRule } from '../../utils/promotionRules.ts'
@@ -1032,6 +1033,11 @@ export default function POS() {
   const redeemValueUsdStep = Math.max(0, Math.round((parseFloat(asText(settings.customer_portal_redeem_value_usd || '1')) || 1) * 100) / 100)
   const rawRedeemValueKhrStep = Math.max(0, Math.round(parseFloat(asText(settings.customer_portal_redeem_value_khr || String(exchangeRate))) || exchangeRate))
   const redeemValueKhrStep = rawRedeemValueKhrStep === 0 ? 0 : Math.max(1000, Math.ceil(rawRedeemValueKhrStep / 1000) * 1000)
+  // Change (money handed back to the customer) converts at its OWN exchange
+  // rate, separate from the main rate used for everything else -- the same way
+  // loyalty redemption has its own rate (business rule, Aug 31 2026). Falls
+  // back to the main rate until an admin sets change_exchange_rate in Settings.
+  const changeExchangeRate = resolveChangeExchangeRate(settings.change_exchange_rate, exchangeRate)
   const debouncedProductSearch = useDebouncedValue(search, 180)
   const hasProductDiscoveryQuery = useMemo(
     () => String(debouncedProductSearch || '').trim().length > 0 || initialFilter !== 'all',
@@ -2472,7 +2478,9 @@ export default function POS() {
   const paidKhrNum   = activePaymentDetails.reduce((sum, detail) => sum + (parseFloat(detail.khr) || 0), 0)
   const totalPaid    = paidUsdNum + paidKhrNum / exchangeRate
   const changeUsd    = totalPaid - totalUsd
-  const changeKhr    = Math.round(changeUsd * exchangeRate)
+  // Change uses the dedicated change rate (see changeExchangeRate above); the
+  // main rate still governs the amount owed and the customer's KHR payment.
+  const changeKhr    = Math.round(changeUsd * changeExchangeRate)
 
   // Physical-cash cashier figures (business rule, Aug 31 2026): the whole-100៛
   // notes actually collected from / handed back to the customer. Display-only

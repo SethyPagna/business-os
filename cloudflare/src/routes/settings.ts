@@ -151,6 +151,9 @@ const SALES_POLICY_KEYS = new Set([
   'currency_usd_symbol',
   'currency_khr_symbol',
   'exchange_rate',
+  // Separate USD->KHR rate applied only to change handed back to the customer
+  // (business rule, Aug 31 2026). Buckets with the main rate under sales_policy.
+  'change_exchange_rate',
   'tax_rate',
   'display_currency',
   'pos_show_item_discount',
