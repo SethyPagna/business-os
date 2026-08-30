@@ -902,7 +902,7 @@ export default function AuditLog() {
           <PaginationControls
             className="mb-0"
             compact
-            compactPageInput
+            rangeAsPageSize
             page={page}
             pageSize={pageSize}
             totalItems={totalLogs}

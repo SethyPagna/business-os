@@ -1501,8 +1501,9 @@ ${translateOr('delivery_margin', 'Delivery margin')} ${fmtUSD(aDeliveryMargin)} 
         </div>
       ) : null}
 
-      {/* Range selector */}
-      <div className="card p-2.5 sm:p-3">
+      {/* Range selector -- no card wrapper: the range pill and preset chips
+          carry their own borders, so boxing them again was a double card. */}
+      <div className="px-0.5">
         <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:gap-2">
           {/* Label + range value + export all share one row -- the range
               value pill previously grew (flex-1) to fill the row on its own

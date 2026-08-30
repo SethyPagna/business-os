@@ -563,8 +563,10 @@ export default function ProductsImageOnlyView() {
         </div>
       )}
 
-      <div className="mt-3">
+      <div className="mt-3 flex justify-center">
         <PaginationControls
+          compact
+          rangeAsPageSize
           page={page}
           pageSize={pageSize}
           totalItems={total}

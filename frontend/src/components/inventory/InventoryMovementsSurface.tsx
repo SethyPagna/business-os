@@ -289,8 +289,10 @@ export default function InventoryMovementsSurface({
             </div>
           </div>
 
+          <div className="mb-3 flex justify-center">
           <PaginationControls
-            className="mb-3"
+            compact
+            rangeAsPageSize
             page={movementMeta.page}
             pageSize={movementMeta.pageSize}
             totalItems={movementMeta.total}
@@ -299,6 +301,7 @@ export default function InventoryMovementsSurface({
             onPageChange={(page) => setMovementMeta((current) => ({ ...current, page }))}
             onPageSizeChange={(pageSize) => setMovementMeta((current) => ({ ...current, page: 1, pageSize }))}
           />
+          </div>
 
           <div className="space-y-2 sm:hidden">
             {loading ? (
@@ -448,6 +451,9 @@ export default function InventoryMovementsSurface({
                               {groupPage.totalPages > 1 ? (
                                 <PaginationControls
                                   className="mt-3"
+                                  compact
+                                  rangeAsPageSize
+                                  editablePageSizeInput={false}
                                   page={groupPage.page}
                                   pageSize={groupPage.pageSize}
                                   totalItems={groupPage.total}
@@ -645,6 +651,9 @@ export default function InventoryMovementsSurface({
                                       {groupPage.totalPages > 1 ? (
                                         <PaginationControls
                                           className="mt-3"
+                                          compact
+                                          rangeAsPageSize
+                                          editablePageSizeInput={false}
                                           page={groupPage.page}
                                           pageSize={groupPage.pageSize}
                                           totalItems={groupPage.total}

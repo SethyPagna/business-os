@@ -3481,7 +3481,7 @@ function ProductsFullEditor() {
             other child here is shrink-0/icon-only. History moved to the
             header row (ProductsHeaderActions' historySlot); the AND/OR
             toggle was removed (Aug 19 2026), so searchMode stays 'AND'. */}
-        <div className="flex items-center gap-1.5 rounded-2xl border border-slate-200 bg-white/95 px-2 py-2 shadow-sm dark:border-slate-700 dark:bg-slate-900/85">
+        <div className="flex items-center gap-1.5 px-0.5">
             <SearchInput
               id="products-search"
               name="products_search"
@@ -3525,7 +3525,7 @@ function ProductsFullEditor() {
           stretched to fill the row. Still the server-side batchDateFrom/To
           range (date-only, so the time row is off); the picker carries its own
           Clear, and the Filters menu's "Clear all" still resets it too. */}
-      <div className="mb-2 flex items-center gap-2 rounded-2xl border border-slate-200 bg-white/95 px-2.5 py-1.5 shadow-sm dark:border-slate-700 dark:bg-slate-900/85">
+      <div className="mb-2 flex items-center gap-2 px-0.5">
         <DateTimeRangePicker
           t={t}
           showTime={false}
@@ -3916,18 +3916,20 @@ function ProductsFullEditor() {
       {/* Second, non-sticky copy of pagination below the list -- same
           control, same state, just so paging through a long list doesn't
           require scrolling back up to the bar above the search row. */}
-      <PaginationControls
-        page={productPage}
-        pageSize={productSafePageSize}
-        totalItems={productTotal}
-        onPageChange={setProductPage}
-        onPageSizeChange={(nextValue) => { setProductPageSize(nextValue); setProductPage(1) }}
-        pageSizeOptions={PAGE_SIZE_OPTIONS}
-        t={t}
-        compact
-        editablePageSizeInput={false}
-        className="mt-2"
-      />
+      <div className="mt-2 flex justify-center">
+        <PaginationControls
+          page={productPage}
+          pageSize={productSafePageSize}
+          totalItems={productTotal}
+          onPageChange={setProductPage}
+          onPageSizeChange={(nextValue) => { setProductPageSize(nextValue); setProductPage(1) }}
+          pageSizeOptions={PAGE_SIZE_OPTIONS}
+          t={t}
+          compact
+          rangeAsPageSize
+          editablePageSizeInput={false}
+        />
+      </div>
 
       </>)}
 

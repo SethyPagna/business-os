@@ -252,14 +252,18 @@ export default function StockChangeSection({ t }: { t: Translate }) {
       </div>
       {loading ? <p className="text-center text-xs text-gray-400">{tr(t, 'loading', 'Loading')}...</p> : null}
 
-      <PaginationControls
-        page={page}
-        pageSize={PAGE_SIZE}
-        totalItems={total}
-        onPageChange={setPage}
-        editablePageSizeInput={false}
-        t={t}
-      />
+      <div className="flex justify-center">
+        <PaginationControls
+          compact
+          rangeAsPageSize
+          page={page}
+          pageSize={PAGE_SIZE}
+          totalItems={total}
+          onPageChange={setPage}
+          editablePageSizeInput={false}
+          t={t}
+        />
+      </div>
 
       {detail ? (
         <Modal title={`${detail.product_name}`} onClose={() => { setDetail(null); setDetailRows(null) }}>
