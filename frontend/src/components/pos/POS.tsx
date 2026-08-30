@@ -61,6 +61,7 @@ import {
 } from '../../utils/loaders.ts'
 import type { QueryParams } from '../../api/query.ts'
 import { calculateProductDiscount, normalizePriceValue } from '../../utils/pricing.ts'
+import { cashierCollectKhr, cashierChangeKhr } from '../../utils/rielRounding.ts'
 import { aggregateInitialOptions } from '../../utils/initials.ts'
 import AlphaIndexRail from '../shared/AlphaIndexRail'
 import { getKhmerTextProps } from '../../utils/scriptTypography.ts'
@@ -2473,6 +2474,17 @@ export default function POS() {
   const changeUsd    = totalPaid - totalUsd
   const changeKhr    = Math.round(changeUsd * exchangeRate)
 
+  // Physical-cash cashier figures (business rule, Aug 31 2026): the whole-100៛
+  // notes actually collected from / handed back to the customer. Display-only
+  // hints -- the saved sale and printed receipt keep the exact figures above.
+  // Collect rounds UP only for a non-cash payment on a delivery order (a cash
+  // payment or any walk-in is exact); change always rounds DOWN. See
+  // utils/rielRounding.ts.
+  const isWalkInSale = !active.isDelivery
+  const isCashPayment = activePaymentDetails.every((d) => String(d.method || '').trim().toLowerCase() === 'cash')
+  const cashCollectKhr = cashierCollectKhr(totalKhr, { isCashPayment, isWalkIn: isWalkInSale })
+  const cashChangeKhr = cashierChangeKhr(changeKhr)
+
   const handleDiscountUsd = (v: string) => patchActive({ discountType: 'fixed', discountUsd: v, discountKhr: String(CURRENCY.usdToKhr(parseFloat(v) || 0, exchangeRate)) })
   const handleDiscountKhr = (v: string) => patchActive({ discountType: 'fixed', discountKhr: v, discountUsd: String(CURRENCY.khrToUsd(parseFloat(v) || 0, exchangeRate)) })
   const handleDiscountPercent = (v: string) => patchActive({ discountType: 'percent', discountPercent: v })
@@ -3426,6 +3438,18 @@ export default function POS() {
                     {fmtUSD(totalUsd)} <span className="text-xs font-normal text-gray-400">({fmtKHR(totalKhr)})</span>
                   </span>
                 </div>
+                {/* Physical-cash figure: rounded up to 100៛ for a non-cash
+                    delivery only (see rielRounding). Display-only -- the saved
+                    sale and receipt keep the exact total above. */}
+                {cashCollectKhr !== totalKhr && (
+                  <div className="mt-0.5 flex items-center justify-between text-[11px] text-gray-500 dark:text-gray-400">
+                    <span className="inline-flex items-center gap-1">
+                      {t('pos_cash_collect') || 'Collect (cash)'}
+                      <InfoHint text={t('pos_cash_round_hint') || 'Physical cash in whole 100៛ notes. The saved sale and the printed receipt keep the exact amount.'} label={t('pos_cash_collect') || 'Collect (cash)'} />
+                    </span>
+                    <span>{fmtKHR(cashCollectKhr)}</span>
+                  </div>
+                )}
               </div>
 
               {/* Payment method */}
@@ -3486,6 +3510,19 @@ export default function POS() {
                             {t('use_computed') || 'Use computed'}: {fmtUSD(changeUsd)}{changeKhr > 1 ? ` / ${fmtKHR(changeKhr)}` : ''}
                           </button>
                         </div>
+                        {/* Physical-cash change: rounded DOWN to 100៛ (the shop
+                            keeps the sub-100៛ remainder). Display-only -- the
+                            saved/printed change stays exact unless the cashier
+                            types a figure below. */}
+                        {cashChangeKhr > 0 && (
+                          <div className="flex items-center justify-between text-[11px] text-gray-500 dark:text-gray-400">
+                            <span className="inline-flex items-center gap-1">
+                              {t('pos_cash_change') || 'Change (cash)'}
+                              <InfoHint text={t('pos_cash_round_hint') || 'Physical cash in whole 100៛ notes. The saved sale and the printed receipt keep the exact amount.'} label={t('pos_cash_change') || 'Change (cash)'} />
+                            </span>
+                            <span>{fmtKHR(cashChangeKhr)}</span>
+                          </div>
+                        )}
                         <div className="grid grid-cols-2 gap-1.5">
                           <div className="relative">
                             <span className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-gray-400">{usdSymbol}</span>
