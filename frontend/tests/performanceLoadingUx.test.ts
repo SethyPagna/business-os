@@ -581,7 +581,13 @@ assert.match(exportMenu, /import\('\.\/PortalMenu'\)\.then\(\(module\) => module
 assert.match(exportMenu, /defaultOpen=\{openOnLoad\}/, 'ExportMenu first click should open the menu after the PortalMenu chunk loads')
 assert.doesNotMatch(filterMenu, /import PortalMenu from '\.\/PortalMenu'/, 'FilterMenu should not statically import the portal menu positioning code during route startup')
 assert.match(filterMenu, /import LazyPortalMenu from '\.\/LazyPortalMenu'/, 'FilterMenu should route menu positioning through the intent-loaded wrapper')
-assert.match(filterMenu, /grid grid-cols-\[5rem_minmax\(0,1fr\)\]/, 'FilterMenu sections should keep labels and controls in one compact row')
+// Redesign (Aug 30 2026): sections are accordion rows inside the ONE panel --
+// no second popover floats over it (the old per-section flyout stacked two
+// popovers and capped labels at a 5rem grid column). Exactly one
+// LazyPortalMenu usage = the top-level menu itself.
+assert.strictEqual((filterMenu.match(/<LazyPortalMenu/g) || []).length, 1, 'FilterMenu must have exactly one popover layer — sections expand inline (accordion), never as a second floating menu')
+assert.match(filterMenu, /openSectionId/, 'FilterMenu sections should expand inline via accordion state')
+assert.match(filterMenu, /ActiveFilterChips/, 'FilterMenu should surface active picks as chips outside the menu')
 assert.match(filterMenu, /if \(label\.toLowerCase\(\) === 'back'\) return fallback/, 'FilterMenu should replace accidental Back labels with section-specific labels')
 assert.match(appSelect, /data-app-select-button="true"/, 'AppSelect should expose a stable rounded trigger hook for live visual checks')
 assert.match(appSelect, /data-app-select-selected="true"/, 'AppSelect should expose the selected value for live visual checks')
@@ -1182,9 +1188,13 @@ assert.match(
   /withLoaderTimeout\(\s*\(\) => api\.retryImportJob\(action\.jobId\),\s*'Retry import job',\s*IMPORT_TRACKER_RETRY_TIMEOUT_MS,\s*\)/,
   'background import tracker should timeout slow retry actions',
 )
+// Loosened for the confirmStockActions options argument (stock-action jobs
+// carry an explicit confirm flag on approve) and the comment lines the call
+// now carries -- the pinned intent is unchanged: the approve call runs under
+// withLoaderTimeout with the approve-specific timeout.
 assert.match(
   backgroundImportTracker,
-  /withLoaderTimeout\(\s*\(\) => api\.approveImportJob\(action\.jobId\),\s*'Approve import job',\s*IMPORT_TRACKER_APPROVE_TIMEOUT_MS,\s*\)/,
+  /\(\) => api\.approveImportJob\(action\.jobId[^\n]*\),\s*'Approve import job',\s*IMPORT_TRACKER_APPROVE_TIMEOUT_MS,\s*\)/,
   'background import tracker should timeout slow approve actions',
 )
 assert.match(
@@ -1543,9 +1553,11 @@ assert.match(
   /function countActiveFlags\(flags: boolean\[] = \[\]\): number \{[\s\S]*for \(const flag of flags\)/,
   'sales filter badge counts should use one counter helper instead of filter allocations',
 )
+// Sort left the Filters badge when it moved onto the visible SortChip
+// (unified listSort method) -- the count now covers only true filters.
 assert.match(
   sales,
-  /countActiveFlags\(\[statusFilter !== 'all'[\s\S]*salesSortDirection !== 'desc'\]\)/,
+  /countActiveFlags\(\[statusFilter !== 'all'[\s\S]*salesGroupMode !== 'time'\]\)/,
   'sales active filter count should reuse countActiveFlags',
 )
 assert.doesNotMatch(

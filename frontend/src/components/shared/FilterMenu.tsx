@@ -67,6 +67,10 @@ type FilterMenuProps = {
   // to stay both label-first and easy to tap at any breakpoint.
   large?: boolean
   onOpenChange?: ((open: boolean) => void) | null
+  // Renders the active picks as removable chips right after the trigger in
+  // the toolbar row (default on). A call site whose layout can't host inline
+  // chips can opt out; the panel's section summaries still show everything.
+  showActiveChips?: boolean
 }
 
 const SECTION_LABEL_FALLBACKS: Record<string, string> = {
@@ -281,40 +285,67 @@ function collectSectionChips(section: FilterSection): Array<{ key: string; label
     }))
 }
 
-function SelectedFilterChips({ sections }: { sections: FilterSection[] }) {
+// Active picks as removable chips rendered OUTSIDE the menu, as siblings of
+// the trigger in the toolbar row (they flow/wrap with it) -- so what's
+// filtered is visible at a glance without opening anything, matching the
+// SortChip principle of never hiding active state. Capped: past
+// MAX_VISIBLE_CHIPS the rest collapse into one "+n" chip (the panel still
+// shows everything via its section summaries).
+const MAX_VISIBLE_CHIPS = 4
+
+function ActiveFilterChips({ sections }: { sections: FilterSection[] }) {
   const chips = useMemo(
     () => sections.flatMap((section) => collectSectionChips(section)),
     [sections],
   )
   if (!chips.length) return null
+  const visible = chips.slice(0, MAX_VISIBLE_CHIPS)
+  const hidden = chips.length - visible.length
   return (
-    <div className="mb-3 flex min-w-0 flex-wrap gap-1.5 border-b border-slate-100 pb-3 dark:border-slate-800">
-      {chips.map((chip) => (
+    <>
+      {visible.map((chip) => (
         <span
           key={chip.key}
-          className="inline-flex max-w-full items-center gap-1 rounded-full bg-slate-100 px-2 py-1 text-[11px] font-medium text-slate-700 dark:bg-slate-800 dark:text-slate-200"
+          className="inline-flex max-w-[11rem] items-center gap-1 rounded-full border border-primary-200 bg-primary-50 py-1 pl-2.5 pr-1.5 text-[11px] font-semibold text-primary-800 dark:border-primary-700/60 dark:bg-primary-900/30 dark:text-primary-300"
         >
           <span className="min-w-0 truncate">{chip.label}</span>
           <button
             type="button"
             onClick={chip.onRemove}
-            className="shrink-0 text-slate-400 transition hover:text-slate-700 dark:hover:text-slate-100"
+            className="inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-primary-500 transition hover:bg-primary-100 hover:text-primary-800 dark:hover:bg-primary-800/50 dark:hover:text-primary-100"
             aria-label="Remove filter"
           >
             <X className="h-3 w-3" />
           </button>
         </span>
       ))}
-    </div>
+      {hidden > 0 ? (
+        <span className="inline-flex items-center rounded-full bg-slate-100 px-2 py-1 text-[11px] font-semibold text-slate-600 dark:bg-slate-800 dark:text-slate-300">
+          +{hidden}
+        </span>
+      ) : null}
+    </>
   )
 }
 
+// Redesign (Aug 30 2026): each section is an ACCORDION row inside the one
+// panel -- tap the header, its options expand inline right below it; tap
+// another header, it swaps. The previous design floated a SECOND popover
+// over the panel per section (button -> panel -> flyout), which stacked two
+// popovers, hid the other sections' state while adjusting one, and capped
+// every label at a 5rem grid column. One panel, one scroll, no nesting;
+// the header keeps the label (natural width now) with the live summary and
+// a rotating chevron on the right, and lights up when its section has picks.
 function FilterMenuSectionRow({
   section,
   closeMenu,
+  open,
+  onToggle,
 }: {
   section: FilterSection
   closeMenu: CloseMenu
+  open: boolean
+  onToggle: () => void
 }) {
   const options = (section.options || []).filter(Boolean) as FilterOption[]
   const isCustomRender = typeof section.render === 'function'
@@ -323,50 +354,110 @@ function FilterMenuSectionRow({
 
   return (
     <div
-      className="overflow-visible rounded-[1.1rem] bg-slate-50 ring-1 ring-slate-100 dark:bg-slate-800 dark:ring-slate-700"
+      className={`overflow-hidden rounded-[1.1rem] ring-1 transition-colors ${
+        open
+          ? 'bg-white ring-primary-200 dark:bg-slate-900 dark:ring-primary-700/60'
+          : 'bg-slate-50 ring-slate-100 dark:bg-slate-800 dark:ring-slate-700'
+      }`}
       data-filter-menu-section={String(section.id)}
     >
-      <div className="grid grid-cols-[5rem_minmax(0,1fr)] w-full min-w-0 items-center gap-2 px-2.5 py-2">
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-expanded={open}
+        aria-label={typeof section.label === 'string' ? section.label : String(section.id)}
+        className="flex w-full min-w-0 items-center justify-between gap-2 px-3 py-2 text-left"
+      >
         <span
-          className="min-w-0 truncate text-[10px] font-bold uppercase tracking-wide text-gray-500 dark:text-gray-400"
+          className="min-w-0 shrink-0 text-[10px] font-bold uppercase tracking-wide text-gray-500 dark:text-gray-400"
           data-filter-menu-section-label={String(section.id)}
         >
           {resolveSectionLabel(section)}
         </span>
-        {/* Only this pill is the click target -- not the label or the row
-            around it -- and it opens as its own floating flyout (anchored
-            to the pill, positioned via getBoundingClientRect like any other
-            PortalMenu) rather than expanding inline. That way opening a
-            section never pushes the sections below it down the page; it
-            just floats a panel over them, and closes the same way any
-            other popover does (outside click, Escape, or picking it again). */}
-        <LazyPortalMenu
-          align="auto"
-          triggerWrapperClassName="min-w-0 w-full"
-          menuClassName="w-[min(18rem,calc(100vw-2rem))] max-w-[calc(100vw-2rem)] max-h-[70vh] overflow-auto rounded-[1.1rem] border border-slate-200 bg-white p-2.5 shadow-xl shadow-slate-900/10 dark:border-slate-700 dark:bg-slate-900 dark:shadow-black/30"
-          trigger={(
+        <span className="flex min-w-0 items-center gap-1.5">
+          <span
+            className={`min-w-0 truncate text-xs font-semibold ${
+              isActive ? 'text-primary-700 dark:text-primary-300' : 'text-slate-500 dark:text-slate-400'
+            }`}
+          >
+            {isCustomRender ? (summary ?? (typeof section.label === 'string' ? section.label : 'Options')) : summary}
+          </span>
+          <ChevronDown className={`h-3.5 w-3.5 shrink-0 text-slate-400 transition-transform ${open ? 'rotate-180' : ''}`} />
+        </span>
+      </button>
+      {open ? (
+        <div className="border-t border-slate-100 px-2.5 pb-2.5 pt-2 dark:border-slate-700/60">
+          {section.description ? (
+            <p className="mb-1.5 text-[11px] leading-snug text-gray-500 dark:text-gray-400">{section.description}</p>
+          ) : null}
+          {isCustomRender ? section.render!({ closeMenu }) : <SectionOptionList options={options} searchable={!!section.searchable} />}
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
+// Panel body -- owns which section is expanded (one at a time; the section
+// with active picks starts open so a returning user lands where their
+// filters already are, the first section otherwise).
+function FilterMenuPanel({
+  label,
+  sections,
+  onClear,
+  closeMenu,
+}: {
+  label: string
+  sections: FilterSection[]
+  onClear: (() => void) | null
+  closeMenu: CloseMenu
+}) {
+  const [openSectionId, setOpenSectionId] = useState<string | number | null>(() => {
+    const activeSection = sections.find((section) => (
+      typeof section.render === 'function'
+        ? !!section.active
+        : summarizeOptions((section.options || []).filter(Boolean) as FilterOption[]) !== 'All'
+    ))
+    return (activeSection ?? sections[0])?.id ?? null
+  })
+  return (
+    <div className="max-h-[min(32rem,70vh)] overflow-auto rounded-[1.35rem] p-2.5">
+      <div className="mb-2.5 flex items-center justify-between gap-3">
+        <div className="text-sm font-semibold text-gray-900 dark:text-white">{label}</div>
+        <div className="flex items-center gap-2">
+          {typeof onClear === 'function' ? (
             <button
               type="button"
-              aria-label={typeof section.label === 'string' ? section.label : String(section.id)}
-              className={`flex min-w-0 w-full items-center justify-between gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-semibold transition-colors ${
-                isActive
-                  ? 'border-primary-200 bg-primary-50 text-primary-800 dark:border-primary-700/60 dark:bg-primary-900/30 dark:text-primary-300'
-                  : 'border-slate-200 bg-white text-slate-600 dark:border-slate-600 dark:bg-slate-900/60 dark:text-slate-300'
-              }`}
+              className="text-xs font-medium text-primary-700 hover:text-primary-800 dark:text-primary-300 dark:hover:text-primary-200"
+              onClick={() => {
+                onClear()
+                closeMenu()
+              }}
             >
-              <span className="min-w-0 truncate">{isCustomRender ? (summary ?? (typeof section.label === 'string' ? section.label : 'Options')) : summary}</span>
-              <ChevronDown className="h-3.5 w-3.5 shrink-0 transition-transform" />
+              Clear
             </button>
-          )}
-          content={() => (
-            <div>
-              {section.description ? (
-                <p className="mb-1.5 text-[11px] leading-snug text-gray-500 dark:text-gray-400">{section.description}</p>
-              ) : null}
-              {isCustomRender ? section.render!({ closeMenu }) : <SectionOptionList options={options} searchable={!!section.searchable} />}
-            </div>
-          )}
-        />
+          ) : null}
+          <button
+            type="button"
+            className="inline-flex h-7 w-7 items-center justify-center rounded-lg border border-slate-200 text-slate-500 transition-colors hover:border-slate-300 hover:bg-slate-50 hover:text-slate-700 dark:border-slate-700 dark:text-slate-300 dark:hover:border-slate-600 dark:hover:bg-slate-800 dark:hover:text-white"
+            onClick={closeMenu}
+            aria-label={`Close ${label}`}
+            title={`Close ${label}`}
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+      </div>
+
+      <div className="space-y-1.5">
+        {sections.map((section) => (
+          <FilterMenuSectionRow
+            key={section.id}
+            section={section}
+            closeMenu={closeMenu}
+            open={openSectionId === section.id}
+            onToggle={() => setOpenSectionId((current) => (current === section.id ? null : section.id))}
+          />
+        ))}
       </div>
     </div>
   )
@@ -382,11 +473,16 @@ export default function FilterMenu({
   iconOnly = false,
   large = false,
   onOpenChange = null,
+  showActiveChips = true,
 }: FilterMenuProps) {
   const hasActions = typeof onClear === 'function'
   const triggerLabel = activeCount > 0 ? `${label} (${activeCount})` : label
 
   return (
+    // Fragment on purpose: the chips render as SIBLINGS of the trigger, so in
+    // the usual flex-wrap toolbar row they flow right after the Filters button
+    // and wrap naturally -- active state visible without opening the menu.
+    <>
     <LazyPortalMenu
       align="auto"
       menuClassName="w-[min(22rem,calc(100vw-1rem))] max-w-[calc(100vw-1rem)] overflow-hidden rounded-[1.35rem] border border-slate-200 bg-white p-0 shadow-xl shadow-slate-900/10 dark:border-slate-700 dark:bg-slate-900 dark:shadow-black/30"
@@ -438,43 +534,15 @@ export default function FilterMenu({
         </button>
       )}
       content={({ closeMenu }) => (
-        <div className="max-h-[min(32rem,70vh)] overflow-auto rounded-[1.35rem] p-2.5">
-          <div className="mb-3 flex items-center justify-between gap-3">
-            <div className="text-sm font-semibold text-gray-900 dark:text-white">{label}</div>
-            <div className="flex items-center gap-2">
-              {hasActions ? (
-                <button
-                  type="button"
-                  className="text-xs font-medium text-primary-700 hover:text-primary-800 dark:text-primary-300 dark:hover:text-primary-200"
-                  onClick={() => {
-                    onClear?.()
-                    closeMenu()
-                  }}
-                >
-                  Clear
-                </button>
-              ) : null}
-              <button
-                type="button"
-                className="inline-flex h-7 w-7 items-center justify-center rounded-lg border border-slate-200 text-slate-500 transition-colors hover:border-slate-300 hover:bg-slate-50 hover:text-slate-700 dark:border-slate-700 dark:text-slate-300 dark:hover:border-slate-600 dark:hover:bg-slate-800 dark:hover:text-white"
-                onClick={closeMenu}
-                aria-label={`Close ${label}`}
-                title={`Close ${label}`}
-              >
-                <X className="h-4 w-4" />
-              </button>
-            </div>
-          </div>
-
-          <SelectedFilterChips sections={sections.filter(Boolean) as FilterSection[]} />
-
-          <div className="space-y-1.5">
-            {(sections.filter(Boolean) as FilterSection[]).map((section) => (
-              <FilterMenuSectionRow key={section.id} section={section} closeMenu={closeMenu} />
-            ))}
-          </div>
-        </div>
+        <FilterMenuPanel
+          label={label}
+          sections={sections.filter(Boolean) as FilterSection[]}
+          onClear={hasActions ? onClear : null}
+          closeMenu={closeMenu}
+        />
       )}
     />
+    {showActiveChips ? <ActiveFilterChips sections={sections.filter(Boolean) as FilterSection[]} /> : null}
+    </>
   )
 }
