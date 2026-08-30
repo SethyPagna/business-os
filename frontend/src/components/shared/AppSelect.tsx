@@ -21,6 +21,9 @@ type AppSelectProps = {
   menuClassName?: string
   optionClassName?: string
   disabled?: boolean
+  // Ultra-compact hosts (e.g. DateTimeRangePicker's per-endpoint month/year
+  // selects) drop the ▾ chevron entirely -- the label alone is the control.
+  showChevron?: boolean
 }
 
 function optionValue(value: string | number): string {
@@ -39,6 +42,7 @@ export default function AppSelect({
   menuClassName = '',
   optionClassName = '',
   disabled = false,
+  showChevron = true,
 }: AppSelectProps) {
   const [open, setOpen] = useState(false)
   const [position, setPosition] = useState({ top: 0, left: 0, width: 160 })
@@ -178,7 +182,7 @@ export default function AppSelect({
         onKeyDown={handleKeyDown}
       >
         <span className="min-w-0 flex-1 truncate" data-app-select-selected="true">{selectedOption?.label ?? selectedValue}</span>
-        <ChevronDown className={`h-3.5 w-3.5 shrink-0 text-slate-500 transition-transform dark:text-slate-300 ${open ? 'rotate-180' : ''}`} aria-hidden="true" />
+        {showChevron ? <ChevronDown className={`h-3.5 w-3.5 shrink-0 text-slate-500 transition-transform dark:text-slate-300 ${open ? 'rotate-180' : ''}`} aria-hidden="true" /> : null}
       </button>
 
       {open && createPortal(

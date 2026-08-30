@@ -278,7 +278,7 @@ export default function StockInInvoicesSection({ t }: StockInInvoicesSectionProp
           })}
           t={t}
           showTime={false}
-          triggerClassName="flex items-center justify-center gap-2 rounded-lg px-2.5 py-1.5 text-xs"
+          triggerClassName="flex items-center justify-center gap-2 rounded-lg px-2.5 py-1.5"
         />
         {anyFilter ? (
           <button

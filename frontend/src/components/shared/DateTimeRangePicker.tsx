@@ -6,12 +6,16 @@ import ChevronRight from 'lucide-react/dist/esm/icons/chevron-right.js'
 import X from 'lucide-react/dist/esm/icons/x.js'
 import AppSelect from './AppSelect'
 
-// X1 (Part 395), redesigned Aug 30 per user direction: a compact
-// "Start → End" trigger pill, and a panel with manual date inputs, an
-// optional HH:MM–HH:MM time row, TWO month/year select rows (one for the
-// start, one for the end -- replacing the old month/year/quarter chip
-// strips), and a Mon-first calendar range grid with its own ‹ month ›
-// navigation. Closed by the red ✕ or an outside click.
+// X1 (Part 395), redesigned Aug 30 per user direction (twice): a compact
+// "Start → End" trigger pill, and a panel laid out as two ENDPOINT BOXES
+// (Start | → | End), each holding a large editable MM/DD/YYYY date with its
+// own month + year selects underneath -- replacing both the old chip strips
+// AND the first redesign's separate manual-input row + label/select rows.
+// The box whose date the next calendar click will set carries a blue ring
+// (the day-click start→end alternation, made visible); clicking a box moves
+// that focus. Below: an optional HH:MM–HH:MM time row and a Mon-first
+// calendar range grid with its own ‹ month › navigation. Closed by the red
+// ✕ or an outside click.
 //
 // Display format is MM/DD/YYYY on purpose: the stock mockup artwork shows
 // DD/MM placeholders, but mm/dd/yyyy-everywhere is a settled decision
@@ -91,10 +95,6 @@ function lastDayOfMonth(year: number, month1: number): number {
   return new Date(Date.UTC(year, month1, 0)).getUTCDate()
 }
 
-const chipBase = 'rounded-md border px-2.5 py-1.5 text-xs font-medium transition'
-const chipIdle = 'border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800'
-const chipActive = 'border-slate-800 bg-slate-800 text-white dark:border-slate-200 dark:bg-slate-200 dark:text-slate-900'
-
 export default function DateTimeRangePicker({
   value,
   onChange,
@@ -147,23 +147,25 @@ export default function DateTimeRangePicker({
     onChange(next)
   }
 
-  // Day clicks alternate start -> end -> start... via an explicit phase ref
+  // Day clicks alternate start -> end -> start... via an explicit phase
   // instead of inferring from an empty endDate. The old inference broke on
   // parents that never hold an empty end (the Dashboard's onChange ignores
   // blank dates), where every click could only ever move the START -- the
   // reported "pick a day then another and it couldn't change". First click
   // sets a one-day range (start=end=that day, so the parent always sees a
   // complete range); the second click extends it (apply() swaps if it lands
-  // before the start); the third starts over.
-  const pickPhaseRef = useRef<'start' | 'end'>('start')
+  // before the start); the third starts over. State (not a ref) since the
+  // second redesign: the active endpoint box shows a blue ring so the
+  // alternation is visible, and clicking/focusing a box retargets it.
+  const [pickPhase, setPickPhase] = useState<'start' | 'end'>('start')
   const pickDay = (iso: string) => {
-    if (pickPhaseRef.current === 'start') {
+    if (pickPhase === 'start') {
       apply({ startDate: iso, endDate: iso })
-      pickPhaseRef.current = 'end'
+      setPickPhase('end')
       return
     }
     apply({ endDate: iso })
-    pickPhaseRef.current = 'start'
+    setPickPhase('start')
   }
 
   // Start/End month+year select rows (the redesign's replacement for the old
@@ -240,16 +242,83 @@ export default function DateTimeRangePicker({
 
   const hasSelection = isDateTimeRangeActive(value) || Boolean(value.startTime || value.endTime)
 
+  // One endpoint box: START or END label, the date itself as a LARGE editable
+  // MM/DD/YYYY input (bumped from text-xs per user direction "the dates can
+  // be made larger"), and that endpoint's month + year selects underneath.
+  // The box for the endpoint the next calendar click will set carries a blue
+  // ring; mousedown anywhere in a box retargets the click sequence to it.
+  const renderEndpointBox = (which: 'start' | 'end') => {
+    const iso = which === 'start' ? value.startDate : value.endDate
+    const text = which === 'start' ? startText : endText
+    const setText = which === 'start' ? setStartText : setEndText
+    const invalid = which === 'start' ? startInvalid : endInvalid
+    const month1 = iso ? Number(iso.slice(5, 7)) : (which === 'start' ? viewMonth : Number((value.endDate || value.startDate || today).slice(5, 7)))
+    const year = iso ? Number(iso.slice(0, 4)) : (which === 'start' ? viewYear : Number((value.endDate || value.startDate || today).slice(0, 4)))
+    const label = which === 'start' ? (t('range_start') || 'Start') : (t('range_end') || 'End')
+    const active = pickPhase === which
+    return (
+      <div
+        className={`min-w-0 rounded-lg border p-1.5 transition ${invalid
+          ? 'border-red-300 dark:border-red-700'
+          : active
+            ? 'border-blue-400 ring-1 ring-blue-300/70 dark:border-blue-500 dark:ring-blue-600/50'
+            : 'border-slate-200 dark:border-slate-600'}`}
+        onMouseDown={() => setPickPhase(which)}
+      >
+        <div className="text-center text-[10px] font-bold uppercase tracking-wide text-slate-400 dark:text-slate-500">{label}</div>
+        {/* Kept compact on purpose -- the user's "make the dates larger"
+            was about the OUTSIDE trigger pill, not this panel. */}
+        <input
+          className={`w-full min-w-0 bg-transparent text-center text-sm font-semibold outline-none placeholder:font-normal placeholder:text-slate-400 ${invalid ? 'text-red-600 dark:text-red-400' : 'text-slate-900 dark:text-slate-50'}`}
+          placeholder="MM/DD/YYYY"
+          value={text}
+          onChange={(event) => setText(event.target.value)}
+          onBlur={(event) => commitManual(which, event.target.value)}
+          onKeyDown={(event) => { if (event.key === 'Enter') commitManual(which, (event.target as HTMLInputElement).value) }}
+          aria-label={which === 'start' ? (t('range_start') || 'Start date') : (t('range_end') || 'End date')}
+        />
+        {/* Chevron-less, centered selects (user: "remove the down arrows,
+            make these more compact") -- the ▾ ate the label space and made
+            "Aug"/"2026" truncate in these narrow columns. The !-modifiers
+            are required: buttonClassName is APPENDED to AppSelect's base
+            classes, and a plain px-1/text-[11px] only beats the base
+            px-3/text-sm if it happens to come later in the generated CSS
+            (it didn't -- "2026" still ellipsized). */}
+        <div className="mt-1 grid grid-cols-2 gap-1">
+          <AppSelect
+            value={String(month1)}
+            options={monthOptions}
+            onChange={(next) => setEndpointMonthYear(which, Number(next), year)}
+            ariaLabel={`${label} month`}
+            showChevron={false}
+            buttonClassName="w-full justify-center !px-1 !py-0.5 text-center !text-[11px]"
+          />
+          <AppSelect
+            value={String(year)}
+            options={yearOptions}
+            onChange={(next) => setEndpointMonthYear(which, month1, Number(next))}
+            ariaLabel={`${label} year`}
+            showChevron={false}
+            buttonClassName="w-full justify-center !px-1 !py-0.5 text-center !text-[11px]"
+          />
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div ref={rootRef} className={`relative ${className}`}>
+      {/* Trigger pill: text-sm font-semibold base (was text-xs font-medium)
+          -- the user asked for LARGER dates on the OUTSIDE pill specifically
+          (Aug 30), while the panel inside stays compact. */}
       <button
         type="button"
         onClick={() => setOpen((current) => {
           // A fresh open always starts a fresh day-click sequence.
-          if (!current) pickPhaseRef.current = 'start'
+          if (!current) setPickPhase('start')
           return !current
         })}
-        className={`${triggerClassName || 'inline-flex items-center gap-2 rounded-md px-3 py-1.5 sm:gap-2.5 sm:px-4 sm:py-2.5 sm:text-sm sm:min-w-[15rem]'} border text-xs font-medium transition ${hasSelection
+        className={`${triggerClassName || 'inline-flex items-center gap-2 rounded-md px-3 py-1.5 sm:gap-2.5 sm:px-4 sm:py-2.5 sm:min-w-[15rem]'} border text-sm font-semibold transition ${hasSelection
           ? 'border-blue-400 bg-blue-50 text-blue-800 shadow-sm dark:border-blue-600 dark:bg-blue-900/30 dark:text-blue-100'
           : 'border-slate-300 bg-white text-slate-700 hover:border-blue-300 hover:bg-blue-50/50 hover:text-blue-700 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-300 dark:hover:border-blue-600'}`}
         aria-expanded={open}
@@ -273,34 +342,23 @@ export default function DateTimeRangePicker({
 
       {open ? (
         <div
-          className={`absolute top-full z-40 mt-2 w-[21rem] max-w-[92vw] rounded-lg border border-slate-200 bg-white p-3 shadow-xl dark:border-slate-700 dark:bg-slate-900 ${align === 'right' ? 'right-0' : 'left-0'}`}
+          className={`absolute top-full z-40 mt-2 w-[21rem] max-w-[92vw] rounded-lg border border-slate-200 bg-white p-2.5 shadow-xl dark:border-slate-700 dark:bg-slate-900 ${align === 'right' ? 'right-0' : 'left-0'}`}
         >
-          {/* Manual dates + close (mockup row 1) */}
-          <div className="flex items-center gap-2">
-            <div className={`flex min-w-0 flex-1 items-center gap-1 rounded-md border px-2 py-1.5 ${startInvalid || endInvalid ? 'border-red-300 dark:border-red-700' : 'border-slate-200 dark:border-slate-600'}`}>
-              <input
-                className={`w-full min-w-0 bg-transparent text-center text-xs outline-none placeholder:text-slate-400 ${startInvalid ? 'text-red-600 dark:text-red-400' : 'text-slate-800 dark:text-slate-100'}`}
-                placeholder="MM/DD/YYYY"
-                value={startText}
-                onChange={(event) => setStartText(event.target.value)}
-                onBlur={(event) => commitManual('start', event.target.value)}
-                onKeyDown={(event) => { if (event.key === 'Enter') commitManual('start', (event.target as HTMLInputElement).value) }}
-                aria-label={t('range_start') || 'Start date'}
-              />
-              <ArrowRight className="h-5 w-5 shrink-0 text-blue-500 dark:text-blue-400" strokeWidth={2.5} aria-hidden="true" />
-              <input
-                className={`w-full min-w-0 bg-transparent text-center text-xs outline-none placeholder:text-slate-400 ${endInvalid ? 'text-red-600 dark:text-red-400' : 'text-slate-800 dark:text-slate-100'}`}
-                placeholder="MM/DD/YYYY"
-                value={endText}
-                onChange={(event) => setEndText(event.target.value)}
-                onBlur={(event) => commitManual('end', event.target.value)}
-                onKeyDown={(event) => { if (event.key === 'Enter') commitManual('end', (event.target as HTMLInputElement).value) }}
-                aria-label={t('range_end') || 'End date'}
-              />
-            </div>
+          {/* Header: Clear (when anything is set) + the red close ✕. */}
+          <div className="mb-2 flex items-center gap-2">
+            <span className="text-xs font-semibold text-slate-700 dark:text-slate-200">{t('date_time_range') || 'Date range'}</span>
+            {hasSelection ? (
+              <button
+                type="button"
+                className="ml-auto text-xs font-medium text-slate-500 underline-offset-2 hover:text-slate-700 hover:underline dark:text-slate-400 dark:hover:text-slate-200"
+                onClick={() => onChange({ ...EMPTY_DATE_TIME_RANGE })}
+              >
+                {t('clear') || 'Clear'}
+              </button>
+            ) : null}
             <button
               type="button"
-              className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-red-600 text-white hover:bg-red-700"
+              className={`inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-red-600 text-white hover:bg-red-700 ${hasSelection ? '' : 'ml-auto'}`}
               onClick={() => setOpen(false)}
               aria-label={t('close') || 'Close'}
             >
@@ -308,77 +366,33 @@ export default function DateTimeRangePicker({
             </button>
           </div>
 
-          {/* Time range (mockup row 2) */}
+          {/* Start | → | End endpoint boxes (see renderEndpointBox above). */}
+          <div className="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-1.5">
+            {renderEndpointBox('start')}
+            <ArrowRight className="h-5 w-5 shrink-0 text-blue-500 dark:text-blue-400" strokeWidth={2.5} aria-hidden="true" />
+            {renderEndpointBox('end')}
+          </div>
+
+          {/* Time range (optional per surface) */}
           {showTime ? (
-            <div className="mt-2 flex items-center gap-2">
-              <div className="inline-flex items-center gap-1.5 rounded-md border border-slate-200 px-2 py-1.5 dark:border-slate-600">
-                <input
-                  type="time"
-                  className="bg-transparent text-xs text-slate-800 outline-none dark:text-slate-100"
-                  value={value.startTime}
-                  onChange={(event) => apply({ startTime: event.target.value })}
-                  aria-label={t('start_time') || 'Start time'}
-                />
-                <span className="text-slate-400">—</span>
-                <input
-                  type="time"
-                  className="bg-transparent text-xs text-slate-800 outline-none dark:text-slate-100"
-                  value={value.endTime}
-                  onChange={(event) => apply({ endTime: event.target.value })}
-                  aria-label={t('end_time') || 'End time'}
-                />
-              </div>
-              {hasSelection ? (
-                <button
-                  type="button"
-                  className="ml-auto text-xs font-medium text-slate-500 underline-offset-2 hover:text-slate-700 hover:underline dark:text-slate-400 dark:hover:text-slate-200"
-                  onClick={() => onChange({ ...EMPTY_DATE_TIME_RANGE })}
-                >
-                  {t('clear') || 'Clear'}
-                </button>
-              ) : null}
-            </div>
-          ) : hasSelection ? (
-            <div className="mt-2 text-right">
-              <button
-                type="button"
-                className="text-xs font-medium text-slate-500 underline-offset-2 hover:text-slate-700 hover:underline dark:text-slate-400 dark:hover:text-slate-200"
-                onClick={() => onChange({ ...EMPTY_DATE_TIME_RANGE })}
-              >
-                {t('clear') || 'Clear'}
-              </button>
+            <div className="mt-2 flex items-center justify-center gap-1.5 rounded-md border border-slate-200 px-2 py-1.5 dark:border-slate-600">
+              <input
+                type="time"
+                className="bg-transparent text-xs text-slate-800 outline-none dark:text-slate-100"
+                value={value.startTime}
+                onChange={(event) => apply({ startTime: event.target.value })}
+                aria-label={t('start_time') || 'Start time'}
+              />
+              <span className="text-slate-400">—</span>
+              <input
+                type="time"
+                className="bg-transparent text-xs text-slate-800 outline-none dark:text-slate-100"
+                value={value.endTime}
+                onChange={(event) => apply({ endTime: event.target.value })}
+                aria-label={t('end_time') || 'End time'}
+              />
             </div>
           ) : null}
-
-          {/* Start / End rows -- month + year selects per endpoint (the
-              redesign's replacement for the old month/year/quarter chips). */}
-          <div className="mt-3 space-y-1.5">
-            {(['start', 'end'] as const).map((which) => {
-              const iso = which === 'start' ? value.startDate : value.endDate
-              const month1 = iso ? Number(iso.slice(5, 7)) : (which === 'start' ? viewMonth : Number((value.endDate || value.startDate || today).slice(5, 7)))
-              const year = iso ? Number(iso.slice(0, 4)) : (which === 'start' ? viewYear : Number((value.endDate || value.startDate || today).slice(0, 4)))
-              const rowLabel = which === 'start' ? (t('range_start') || 'Start') : (t('range_end') || 'End')
-              return (
-                <div key={which} className="grid grid-cols-[minmax(3.25rem,max-content)_minmax(0,1fr)_minmax(0,5.5rem)] items-center gap-1.5">
-                  <span className="whitespace-nowrap text-[11px] font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">{rowLabel}</span>
-                  <AppSelect
-                    value={String(month1)}
-                    options={monthOptions}
-                    onChange={(next) => setEndpointMonthYear(which, Number(next), year)}
-                    ariaLabel={`${rowLabel} month`}
-                    buttonClassName="w-full px-2.5 py-1.5 text-xs"
-                  />
-                  <AppSelect
-                    value={String(year)}
-                    options={yearOptions}
-                    onChange={(next) => setEndpointMonthYear(which, month1, Number(next))}
-                    ariaLabel={`${rowLabel} year`}
-                    buttonClassName="w-full px-2.5 py-1.5 text-xs"
-                  />
-                </div>
-              )
-            })}
-          </div>
 
           {/* Calendar range grid, Monday-first, with its own ‹ month › nav
               (the chips that used to change the view are gone). */}
