@@ -109,6 +109,33 @@ async function sendRecoveryEmail(env: Env, toEmail: string, link: string): Promi
   }
 }
 
+// The emailed recovery link must land on THIS app, never on a caller-chosen
+// host. `redirectTo` arrives from the UNAUTHENTICATED /password-reset/email
+// endpoint, so before this check anyone who knew a username could have a
+// legit-looking recovery email delivered whose link carried the single-use
+// token to an attacker page in its hash fragment (open redirect -> token
+// theft -> account takeover; Part-77 HIGH, auth audit). A redirectTo on one
+// of the app's own configured origins keeps its origin + pathname (the page
+// the client was on -- query and hash are dropped so nothing else rides
+// into the emailed link); anything else falls back to the admin URL.
+export function resolvePasswordResetBase(env: Env, redirectTo: string): string {
+  const fallback = String(env.BUSINESS_OS_ADMIN_URL || '').replace(/\/$/, '')
+  try {
+    const requested = new URL(String(redirectTo || '').trim())
+    const allowedOrigins = [env.BUSINESS_OS_ADMIN_URL, env.BUSINESS_OS_PUBLIC_URL]
+      .map((value) => {
+        try { return new URL(String(value || '')).origin } catch { return '' }
+      })
+      .filter(Boolean)
+    if (allowedOrigins.includes(requested.origin)) {
+      return `${requested.origin}${requested.pathname}`
+    }
+  } catch {
+    // Not a parseable absolute URL (relative, garbage, empty) -- fall back.
+  }
+  return fallback
+}
+
 // Issues a new recovery link for a user, invalidating any still-live links
 // for the same purpose first (so only the most recently requested link is
 // ever valid).
@@ -143,10 +170,10 @@ export async function issuePasswordResetLink(
 
   // Matches the URL shape Login.tsx already parses: hash fragment
   // access_token + type=recovery, appended to the page the client sent as
-  // redirectTo (its own current origin+pathname).
-  const base = String(redirectTo || '').trim() || ''
-  const separator = base.includes('#') ? '&' : '#'
-  const link = `${base}${separator}access_token=${encodeURIComponent(token)}&type=recovery`
+  // redirectTo (its own current origin+pathname) -- AFTER the origin
+  // allowlist above; an off-app redirectTo becomes the admin URL.
+  const base = resolvePasswordResetBase(env, redirectTo)
+  const link = `${base}#access_token=${encodeURIComponent(token)}&type=recovery`
 
   const { sent } = await sendRecoveryEmail(env, email, link)
   return { issued: true, sent }
