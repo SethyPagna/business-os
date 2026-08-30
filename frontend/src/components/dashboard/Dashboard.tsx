@@ -10,7 +10,7 @@ import RefreshCw from 'lucide-react/dist/esm/icons/refresh-cw.js'
 import MiniStat from './MiniStat'
 import { fmtTime, getBusinessTimezoneOffsetHours } from '../../utils/formatters'
 import { todayStr, offsetDate, businessYear, businessMonth } from '../../utils/dateHelpers'
-import ExportMenu from '../shared/ExportMenu'
+import Download from 'lucide-react/dist/esm/icons/download.js'
 import DateTimeRangePicker, { type DateTimeRange } from '../shared/DateTimeRangePicker'
 import { useIsPageActive } from '../shared/pageActivity'
 import { withLoaderTimeout } from '../../utils/loaders.ts'
@@ -23,6 +23,7 @@ import DollarSign from 'lucide-react/dist/esm/icons/dollar-sign.js'
 import FileText from 'lucide-react/dist/esm/icons/file-text.js'
 
 const ImportReportModal = lazyRetry(() => import('../shared/ImportReportModal'), 'ImportReportModal')
+const ExportChoiceDialog = lazyRetry(() => import('../shared/ExportChoiceDialog'), 'dashboard-export-choices')
 
 const BarChart = lazyRetry(() => import('./charts/BarChart'), 'dashboard-bar-chart')
 const LineChart = lazyRetry(() => import('./charts/LineChart'), 'dashboard-line-chart')
@@ -658,6 +659,7 @@ export default function Dashboard() {
   const [recentImportFiles, setRecentImportFiles] = useState<ImportFileSummary[]>([])
   const [recentImportFilesLoading, setRecentImportFilesLoading] = useState(true)
   const [importReportJobId, setImportReportJobId] = useState<string | null>(null)
+  const [exportChoicesOpen, setExportChoicesOpen] = useState(false)
   const summaryRequestRef = useRef(0)
   const analyticsRequestRef = useRef(0)
   const startupRequestRef = useRef(0)
@@ -1394,35 +1396,49 @@ ${translateOr('delivery_margin', 'Delivery margin')} ${fmtUSD(aDeliveryMargin)} 
     await exportPackage(buildDashboardExportContext())
   }, [buildDashboardExportContext, loadDashboardExportModule])
 
-  const dashboardExportItems = useMemo<DashboardExportItem[]>(() => [
-    { label: t('export_dashboard_package') || 'Export dashboard package', onClick: exportDashboardPackage, color: 'green' },
-    { label: t('export_all_report'), onClick: buildExportAll, color: 'green' },
-    { label: t('export_kpi_summary'), onClick: async () => {
-      const { exportDashboardKpis } = await loadDashboardExportModule()
-      exportDashboardKpis(buildDashboardExportContext())
-    } },
-    { label: t('export_dashboard_calculations') || 'Export dashboard stats and calculations', onClick: exportDashboardStats },
-    'divider',
-    { label: t('export_sales_chart'), onClick: async () => {
-      const { exportDashboardSalesChart } = await loadDashboardExportModule()
-      exportDashboardSalesChart(buildDashboardExportContext())
-    } },
-    { label: t('export_top_products'), onClick: async () => {
-      const { exportDashboardTopProducts } = await loadDashboardExportModule()
-      exportDashboardTopProducts(buildDashboardExportContext())
-    } },
-    { label: t('export_top_customers'), onClick: async () => {
-      const { exportDashboardTopCustomers } = await loadDashboardExportModule()
-      exportDashboardTopCustomers(buildDashboardExportContext())
-    } },
-    { label: t('export_payment_methods'), onClick: async () => {
-      const { exportDashboardPaymentMethods } = await loadDashboardExportModule()
-      exportDashboardPaymentMethods(buildDashboardExportContext())
-    } },
-    { label: t('export_branch_performance'), onClick: async () => {
-      const { exportDashboardBranches } = await loadDashboardExportModule()
-      exportDashboardBranches(buildDashboardExportContext())
-    } },
+  // Grouped for ExportChoiceDialog (the float "which export?" page every
+  // export button opens now): whole-dashboard bundles first, then the
+  // per-section breakdowns.
+  const dashboardExportGroups = useMemo(() => [
+    {
+      id: 'whole',
+      label: t('export_group_whole') || 'Whole dashboard',
+      choices: [
+        { id: 'package', label: t('export_dashboard_package') || 'Export dashboard package', onClick: exportDashboardPackage },
+        { id: 'all', label: t('export_all_report'), onClick: buildExportAll },
+        { id: 'kpis', label: t('export_kpi_summary'), onClick: async () => {
+          const { exportDashboardKpis } = await loadDashboardExportModule()
+          exportDashboardKpis(buildDashboardExportContext())
+        } },
+        { id: 'stats', label: t('export_dashboard_calculations') || 'Export dashboard stats and calculations', onClick: exportDashboardStats },
+      ],
+    },
+    {
+      id: 'sections',
+      label: t('export_group_sections') || 'By section',
+      choices: [
+        { id: 'sales-chart', label: t('export_sales_chart'), onClick: async () => {
+          const { exportDashboardSalesChart } = await loadDashboardExportModule()
+          exportDashboardSalesChart(buildDashboardExportContext())
+        } },
+        { id: 'top-products', label: t('export_top_products'), onClick: async () => {
+          const { exportDashboardTopProducts } = await loadDashboardExportModule()
+          exportDashboardTopProducts(buildDashboardExportContext())
+        } },
+        { id: 'top-customers', label: t('export_top_customers'), onClick: async () => {
+          const { exportDashboardTopCustomers } = await loadDashboardExportModule()
+          exportDashboardTopCustomers(buildDashboardExportContext())
+        } },
+        { id: 'payment-methods', label: t('export_payment_methods'), onClick: async () => {
+          const { exportDashboardPaymentMethods } = await loadDashboardExportModule()
+          exportDashboardPaymentMethods(buildDashboardExportContext())
+        } },
+        { id: 'branches', label: t('export_branch_performance'), onClick: async () => {
+          const { exportDashboardBranches } = await loadDashboardExportModule()
+          exportDashboardBranches(buildDashboardExportContext())
+        } },
+      ],
+    },
   ], [
     buildDashboardExportContext,
     buildExportAll,
@@ -1510,9 +1526,6 @@ ${translateOr('delivery_margin', 'Delivery margin')} ${fmtUSD(aDeliveryMargin)} 
                 triggerClassName="flex w-full items-center justify-center gap-2 rounded-lg px-3.5 py-2"
               />
             </div>
-            {hasPermission('dashboard_export') && (
-              <ExportMenu label={exportLabel} items={dashboardExportItems} iconOnly />
-            )}
           </div>
           <div className="flex min-w-0 flex-1 gap-1 overflow-x-auto pb-0.5 sm:flex-wrap sm:overflow-visible lg:flex-none lg:pb-0">
               {RANGE_PRESETS.map(p => (
@@ -1521,6 +1534,20 @@ ${translateOr('delivery_margin', 'Delivery margin')} ${fmtUSD(aDeliveryMargin)} 
                 {p.label}
               </button>
             ))}
+            {/* Export rides the preset row (moved from beside the range pill)
+                and opens the float export-choices dialog -- no direct
+                downloads off a toolbar menu. */}
+            {hasPermission('dashboard_export') && (
+              <button
+                type="button"
+                onClick={() => setExportChoicesOpen(true)}
+                className="inline-flex min-h-7 items-center gap-1 whitespace-nowrap rounded-md border border-gray-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-gray-600 transition-colors hover:border-blue-300 hover:text-blue-600 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-300 dark:hover:border-blue-500 dark:hover:text-blue-400 sm:min-h-8 sm:px-3 sm:text-xs"
+                aria-label={exportLabel}
+              >
+                <Download className="h-3.5 w-3.5" aria-hidden="true" />
+                {exportLabel}
+              </button>
+            )}
           </div>
         </div>
       </div>
@@ -2338,6 +2365,15 @@ ${translateOr('delivery_margin', 'Delivery margin')} ${fmtUSD(aDeliveryMargin)} 
           </div>
         </div>,
         document.body,
+      )}
+      {exportChoicesOpen && (
+        <Suspense fallback={null}>
+          <ExportChoiceDialog
+            title={exportLabel}
+            groups={dashboardExportGroups}
+            onClose={() => setExportChoicesOpen(false)}
+          />
+        </Suspense>
       )}
       {importReportJobId && (
         <Suspense fallback={null}>
