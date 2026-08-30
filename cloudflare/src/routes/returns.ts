@@ -8,7 +8,7 @@ import { assertUpdatedAtMatch, getExpectedUpdatedAt, writeConflictResponse, Writ
 import { broadcast } from '../durable-objects/broadcastHub'
 import { bumpVersion } from '../lib/cache'
 import { buildLikeAliasClause, tokenizeSearchTermGroups, normalizeSearchText } from '../lib/searchMatch'
-import { receiveBatchStock, removeStockFromBatch, InsufficientBatchStockError, readFifoLotAvailabilityForCart, allocateAcrossLots, decrementBatchStockStatement } from '../lib/productBatches'
+import { receiveBatchStock, removeStockFromBatch, InsufficientBatchStockError, readFifoLotAvailabilityForCart, allocateAcrossLots, decrementBatchStockStatement, decrementBatchStockStrictStatement } from '../lib/productBatches'
 import {
   normalizeStockAction, computeSettlement, assertReplacementsSameName,
   createDamagedLot, reverseDamagedLots, applyReplacementStock, listOpenDamagedLots,
@@ -1166,6 +1166,34 @@ app.post('/supplier', async (c) => {
       db,
       body.items.map((i) => ({ productId: Number(i.product_id), branchId: Number(i.branch_id || body.branch_id || 0) })),
     )
+    // Part-77 (oversell-clamp audit): validate availability BEFORE composing
+    // the deduction — a supplier return can never send back more units than
+    // the branch holds, and the old MAX(0, ...) clamp silently floored the
+    // overshoot instead of refusing it (stock loss with no error). Tracked
+    // cumulatively so two lines of the same product+branch can't each pass
+    // against the same units. The strict (unclamped) decrements below plus
+    // 0058's CHECK(quantity >= 0) then abort the WHOLE atomic batch if a
+    // concurrent sale wins the race between this read and the write.
+    const supplierAvailability = new Map<string, number>()
+    for (const item of body.items) {
+      const qty = toNumber(item.quantity, 0)
+      const itemBranchId = item.branch_id || body.branch_id || null
+      if (!item.product_id || !itemBranchId || !(qty > 0)) continue
+      const availabilityKey = `${item.product_id}:${itemBranchId}`
+      if (!supplierAvailability.has(availabilityKey)) {
+        const stockRow = await db.prepare('SELECT quantity FROM branch_stock WHERE product_id = @product_id AND branch_id = @branch_id')
+          .get<{ quantity: number }>({ product_id: item.product_id, branch_id: itemBranchId })
+        supplierAvailability.set(availabilityKey, Number(stockRow?.quantity) || 0)
+      }
+      const remaining = supplierAvailability.get(availabilityKey)!
+      if (qty > remaining) {
+        const shortName = item.product_name?.trim() || productNameMap.get(Number(item.product_id)) || `product #${item.product_id}`
+        const insufficient = new Error(`Insufficient stock for supplier return of ${shortName}: ${remaining} available at this branch, ${qty} requested`)
+        insufficient.name = 'SupplierReturnStockError'
+        throw insufficient
+      }
+      supplierAvailability.set(availabilityKey, remaining - qty)
+    }
     for (const item of body.items) {
       const qty = toNumber(item.quantity, 0)
       const unitCostUsd = toNumber(item.cost_price_usd ?? item.unit_cost_usd, 0)
@@ -1191,13 +1219,19 @@ app.post('/supplier', async (c) => {
         },
       })
       // Supplier returns leave the branch entirely -- deduct, don't restore.
+      // Strict (unclamped) subtraction: availability was validated above, so
+      // the only way this goes negative is a concurrent consumer winning the
+      // race -- then 0058's CHECK aborts the whole atomic batch instead of
+      // the old MAX(0, ...) clamp silently flooring the overshoot away.
       statements.push({
         sql: `INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (@product_id, @branch_id, 0)
-              ON CONFLICT(product_id, branch_id) DO UPDATE SET quantity = MAX(0, branch_stock.quantity - @quantity)`,
+              ON CONFLICT(product_id, branch_id) DO UPDATE SET quantity = branch_stock.quantity - @quantity`,
         params: { product_id: item.product_id, branch_id: itemBranchId, quantity: qty },
       })
       // Lot-ledger parity: pull the same units out of the product's active lots
-      // FIFO (clamped decrement -- returns keep the clamped version). The shared
+      // FIFO, strict for the same reason as the aggregate above (takes are
+      // bounded by the just-read availability, so only a race can overdraw --
+      // abort, don't clamp). The shared
       // availability is consumed so a second line of the same product at this
       // branch can't double-take a lot; any uncovered remainder is legacy
       // unlotted stock that rides branch_stock alone, matching the bump above.
@@ -1209,7 +1243,7 @@ app.post('/supplier', async (c) => {
         for (const take of takes) {
           const lot = lots.find((entry) => entry.batchId === take.batchId)
           if (lot) lot.available -= take.quantity
-          statements.push(decrementBatchStockStatement(take.batchId, itemBranchId, take.quantity))
+          statements.push(decrementBatchStockStrictStatement(take.batchId, itemBranchId, take.quantity))
         }
       }
       statements.push({
@@ -1241,7 +1275,11 @@ app.post('/supplier', async (c) => {
     await db.batch(statements)
   } catch (error) {
     await db.prepare('DELETE FROM returns WHERE id = ?').run([returnId])
-    return c.json({ error: `Failed to record supplier return items: ${(error as Error).message}` }, 500)
+    // An availability refusal is the caller's input problem (400), not a
+    // server failure -- everything composed after it never ran (the one
+    // atomic batch at the end is all-or-nothing).
+    const status = (error as Error)?.name === 'SupplierReturnStockError' ? 400 : 500
+    return c.json({ error: `Failed to record supplier return items: ${(error as Error).message}` }, status)
   }
 
   await audit(c.env, user?.id ?? null, user?.name ?? null, 'create', 'supplier_return', returnId, { returnNumber, settlement, supplierName: body.supplier_name || null, supplierLossUsd })

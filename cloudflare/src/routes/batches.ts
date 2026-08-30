@@ -319,14 +319,24 @@ app.patch('/:id/branches/:branchId', async (c) => {
     },
   ]
   if (delta !== 0) {
+    // The branch_stock floor is DELIBERATE here (Part-77 clamp audit,
+    // reviewed and kept): this is a stock-take CORRECTION -- the tool an
+    // operator uses precisely when the ledgers have drifted -- and aborting
+    // because the aggregate is lower than the batch delta would make the
+    // repair itself impossible on the data that most needs it. The batch
+    // figure being SET is authoritative; the aggregate floors at zero.
     statements.push({
-      sql: `INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (@productId, @branchId, @delta)
-            ON CONFLICT(product_id, branch_id) DO UPDATE SET quantity = MAX(0, quantity + excluded.quantity)`,
+      sql: `INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (@productId, @branchId, MAX(0, @delta))
+            ON CONFLICT(product_id, branch_id) DO UPDATE SET quantity = MAX(0, quantity + @delta)`,
       params: { productId: batch.productId, branchId, delta },
     })
+    // Re-derive rather than clamp a delta: when the branch_stock update above
+    // DID floor, a +/-delta on stock_quantity would bake the discrepancy into
+    // the product total too -- summing the actual per-branch rows keeps the
+    // denormalized total honest no matter what the floor did.
     statements.push({
-      sql: 'UPDATE products SET stock_quantity = MAX(0, COALESCE(stock_quantity, 0) + @delta), updated_at = CURRENT_TIMESTAMP WHERE id = @productId',
-      params: { productId: batch.productId, delta },
+      sql: 'UPDATE products SET stock_quantity = (SELECT COALESCE(SUM(quantity), 0) FROM branch_stock WHERE product_id = @productId), updated_at = CURRENT_TIMESTAMP WHERE id = @productId',
+      params: { productId: batch.productId },
     })
   }
   await db.batch(statements)

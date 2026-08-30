@@ -198,9 +198,15 @@ export async function applyReplacementStock(db: D1Compat, input: {
     if (input.quantity > available) {
       throw new InsufficientReplacementStockError(input.productName, input.quantity, available)
     }
+    // Strict (unclamped) subtraction (Part-77, oversell-clamp audit): the
+    // check above already validated availability, so the only way this goes
+    // negative is a concurrent consumer winning the read-write race -- then
+    // 0058's CHECK(quantity >= 0) rejects the write (the movement below
+    // never runs) instead of the old MAX(0, ...) clamp handing the customer
+    // units the branch no longer had.
     await db.prepare(`
       INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (@product_id, @branch_id, 0)
-      ON CONFLICT(product_id, branch_id) DO UPDATE SET quantity = MAX(0, branch_stock.quantity - @quantity)
+      ON CONFLICT(product_id, branch_id) DO UPDATE SET quantity = branch_stock.quantity - @quantity
     `).run({ product_id: input.productId, branch_id: input.branchId, quantity: input.quantity })
   }
   await db.prepare(`
