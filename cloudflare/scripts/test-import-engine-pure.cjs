@@ -650,6 +650,26 @@ console.log('PASS resolveRowImagePath matches explicit filenames and falls back 
   console.log('PASS a brand-new imported product seeds every OTHER active branch at 0 stock, not just the branch its CSV row named, matching seedBranchStockForNewProduct\'s existing fix for manual product creation')
 }
 
+// -- Duplicate snapshot quantities: when identity merging turns two source
+// rows into one product at one branch, the finalizer must aggregate both
+// normalized quantities. A plain last-row REPLACE silently lost stock in the
+// production migration. This guards the job-scoped reconciliation, including
+// its exclusion of explicit restock/override rows and opening-lot sync for a
+// product first created by the same import.
+{
+  assert.ok(/export async function reconcileDuplicateProductSnapshotRows/.test(source), 'the product snapshot duplicate reconciler should remain exported for direct behavior testing')
+  const start = source.indexOf('export async function reconcileDuplicateProductSnapshotRows')
+  const end = source.indexOf('async function finalizeImportApply', start)
+  const block = source.slice(start, end)
+  assert.ok(/GROUP BY product_id, branch_id[\s\S]*HAVING COUNT\(\*\) > 1/.test(block), 'only duplicate resolved product+branch groups should be aggregated')
+  assert.ok(/SUM\(quantity\) AS expected_quantity/.test(block), 'duplicate snapshot quantities must SUM rather than let the last row win')
+  assert.ok(/json_extract\(result_json, '\$\.plannedMode'\) IS NULL/.test(block), 'explicit restock/override modes must not be reinterpreted as a snapshot total')
+  assert.ok(/ON CONFLICT\(product_id, branch_id\) DO UPDATE SET quantity = excluded\.quantity/.test(block), 'the grouped snapshot total should replace that branch count exactly')
+  assert.ok(/notes = 'Received via product import'/.test(block), 'new-product opening lots should be synchronized with the grouped snapshot quantity')
+  assert.ok(/snapshotGroupsAggregated/.test(source), 'the completed import summary should expose how many duplicate snapshot groups were corrected')
+  console.log('PASS duplicate product snapshot rows aggregate their quantities per resolved product+branch, exclude movement modes, sync new opening lots, and report the corrected group count')
+}
+
 // -- Everything above this point is synchronous; the new tests below need
 // `await`, which top-level CommonJS (.cjs) doesn't allow -- wrap in an
 // async IIFE and run it.

@@ -115,6 +115,14 @@ const ALL_RESET_CANDIDATE_TABLES = [
   'action_history',
 ]
 
+const ALL_IMPORT_RESET_TABLES = [
+  'import_auto_merges', 'import_sales_commits', 'import_stock_action_guards',
+  'import_stock_action_commits', 'import_stock_action_groups',
+  'import_job_image_renames', 'import_job_image_matches',
+  'import_job_row_signatures', 'import_job_source_rows', 'import_job_errors',
+  'import_job_batches', 'import_job_rows', 'import_job_files', 'import_jobs',
+]
+
 let backupCallLog = []
 let backupShouldFail = false
 let sectionBackupTables = null
@@ -386,6 +394,30 @@ async function main() {
     assert.strictEqual(status, 200, JSON.stringify(json))
     assert.strictEqual(json.success, true, JSON.stringify(json))
     assert.strictEqual(count('file_assets'), 0, 'file_assets should be empty after mode=all, matching the R2 uploads/ wipe it runs alongside')
+  })
+
+  await check('mode=all clears every current import job ledger so a migration rerun starts clean', async () => {
+    seed()
+    rawDbHandle.prepare("INSERT INTO import_jobs (id, type) VALUES ('reset-job', 'products')").run()
+    rawDbHandle.prepare("INSERT INTO import_job_batches (job_id, batch_index) VALUES ('reset-job', 0)").run()
+    rawDbHandle.prepare("INSERT INTO import_job_errors (job_id, message) VALUES ('reset-job', 'old error')").run()
+    rawDbHandle.prepare("INSERT INTO import_job_files (job_id, kind, stored_path) VALUES ('reset-job', 'csv', 'imports/old.csv')").run()
+    rawDbHandle.prepare("INSERT INTO import_job_rows (job_id, phase, row_number, action, result_json) VALUES ('reset-job', 'analyze', 2, 'create', '{}')").run()
+    rawDbHandle.prepare("INSERT INTO import_job_source_rows (job_id, sequence, row_number, data_json) VALUES ('reset-job', 0, 2, '{}')").run()
+    rawDbHandle.prepare("INSERT INTO import_job_row_signatures (job_id, signature, row_number) VALUES ('reset-job', 'sig', 2)").run()
+    rawDbHandle.prepare("INSERT INTO import_job_image_matches (job_id, row_number, image_path) VALUES ('reset-job', 2, '/uploads/old.jpg')").run()
+    rawDbHandle.prepare("INSERT INTO import_job_image_renames (job_id, file_id, new_name) VALUES ('reset-job', 'file-1', 'old.jpg')").run()
+    rawDbHandle.prepare("INSERT INTO import_stock_action_commits (job_id, action_key, action_kind) VALUES ('reset-job', 'action-1', 'add')").run()
+    rawDbHandle.prepare("INSERT INTO import_stock_action_guards (job_id, action_key, guard_key, guard_value) VALUES ('reset-job', 'action-1', 'guard-1', 1)").run()
+    rawDbHandle.prepare("INSERT INTO import_stock_action_groups (job_id, group_key, group_index) VALUES ('reset-job', 'group-1', 0)").run()
+    rawDbHandle.prepare("INSERT INTO import_sales_commits (job_id, group_key, row_number) VALUES ('reset-job', 'sale-1', 2)").run()
+    rawDbHandle.prepare("INSERT INTO import_auto_merges (product_id, row_number, losing_json) VALUES (1, 2, '{}')").run()
+    for (const table of ALL_IMPORT_RESET_TABLES) assert.ok(count(table) > 0, `sanity: ${table} should be seeded before the reset`)
+
+    const { status, json } = await req('POST', '/reset-data', { mode: 'all' })
+    assert.strictEqual(status, 200, JSON.stringify(json))
+    assert.strictEqual(json.success, true, JSON.stringify(json))
+    for (const table of ALL_IMPORT_RESET_TABLES) assert.strictEqual(count(table), 0, `${table} should be empty after mode=all`)
   })
 
   console.log(`\n${passed} PASS, 0 FAIL`)

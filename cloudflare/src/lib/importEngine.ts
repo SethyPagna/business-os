@@ -3849,6 +3849,89 @@ export async function unifyTouchedProductGroups(db: D1Compat, cutoff: string): P
   return changedGroups
 }
 
+type DuplicateProductSnapshotGroup = {
+  product_id: number
+  branch_id: number
+  expected_quantity: number
+  created_in_job: number
+}
+
+// A catalog snapshot may legitimately contain more than one row for the same
+// resolved product at the same branch (for example, two old-system rows that
+// differ only in selling price). Product identity deliberately merges those
+// rows, but the legacy snapshot writer processes them sequentially and uses a
+// branch-stock REPLACE, so the last row used to erase the earlier row's units.
+//
+// Reconcile once, after every chunk is persisted, from the job's own normalized
+// apply results. This is deliberately job-scoped (never adds a prior import),
+// excludes explicit restock/override planned modes, and runs only for product
+// modes whose stock semantics are a full snapshot. New products also have their
+// opening import lot brought to the same grouped quantity, preserving the
+// branch_stock = active branch_batch_stock invariant from the first import.
+export async function reconcileDuplicateProductSnapshotRows(db: D1Compat, jobId: string): Promise<number> {
+  const groups = await db.prepare(`
+    WITH normalized AS MATERIALIZED (
+      SELECT
+        CAST(COALESCE(
+          json_extract(result_json, '$.existingId'),
+          json_extract(result_json, '$.data.__importAssignedId')
+        ) AS INTEGER) AS product_id,
+        CAST(json_extract(result_json, '$.data.branch_id') AS INTEGER) AS branch_id,
+        CAST(COALESCE(json_extract(result_json, '$.data.stock_quantity'), 0) AS REAL) AS quantity,
+        action
+      FROM import_job_rows
+      WHERE job_id = @id
+        AND phase = 'apply'
+        AND action IN ('create', 'update')
+        AND json_extract(result_json, '$.plannedMode') IS NULL
+    )
+    SELECT
+      product_id,
+      branch_id,
+      SUM(quantity) AS expected_quantity,
+      SUM(CASE WHEN action = 'create' THEN 1 ELSE 0 END) AS created_in_job
+    FROM normalized
+    WHERE product_id IS NOT NULL AND branch_id IS NOT NULL
+    GROUP BY product_id, branch_id
+    HAVING COUNT(*) > 1
+  `).all<DuplicateProductSnapshotGroup>({ id: jobId })
+
+  if (!groups.length) return 0
+
+  const branchStatements = groups.map((group) => ({
+    sql: `INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (@productId, @branchId, @quantity)
+          ON CONFLICT(product_id, branch_id) DO UPDATE SET quantity = excluded.quantity`,
+    params: { productId: group.product_id, branchId: group.branch_id, quantity: group.expected_quantity },
+  }))
+  await runD1BatchInChunks(db, branchStatements)
+
+  // Only a product created by this job owns an opening "Received via product
+  // import" lot from this write path. Existing-product snapshot updates have
+  // intentionally never fabricated/rewritten lots, so keep that contract.
+  const openingLotStatements = groups
+    .filter((group) => group.created_in_job > 0)
+    .map((group) => ({
+      sql: `INSERT INTO branch_batch_stock (batch_id, branch_id, quantity)
+            SELECT id, @branchId, @quantity
+            FROM product_batches
+            WHERE variant_product_id = @productId AND notes = 'Received via product import'
+            ORDER BY id ASC LIMIT 1
+            ON CONFLICT(batch_id, branch_id) DO UPDATE SET quantity = excluded.quantity, updated_at = datetime('now')`,
+      params: { productId: group.product_id, branchId: group.branch_id, quantity: group.expected_quantity },
+    }))
+  if (openingLotStatements.length) await runD1BatchInChunks(db, openingLotStatements)
+
+  const productStatements = [...new Set(groups.map((group) => group.product_id))].map((productId) => ({
+    sql: `UPDATE products
+          SET stock_quantity = (SELECT COALESCE(SUM(quantity), 0) FROM branch_stock WHERE product_id = @productId),
+              updated_at = CURRENT_TIMESTAMP
+          WHERE id = @productId`,
+    params: { productId },
+  }))
+  await runD1BatchInChunks(db, productStatements)
+  return groups.length
+}
+
 async function finalizeImportApply(
   db: D1Compat,
   jobId: string,
@@ -3858,6 +3941,7 @@ async function finalizeImportApply(
   queueLatencyMs: number | undefined,
   deactivatedCount: number,
   unifiedGroupCount = 0,
+  aggregatedSnapshotGroupCount = 0,
 ): Promise<{ applied: number; failed: number }> {
   const finalCounts = await db.prepare(`SELECT action, COUNT(*) AS n FROM import_job_rows WHERE job_id = @id AND phase = 'apply' GROUP BY action`)
     .all<{ action: RowAction; n: number }>({ id: jobId })
@@ -3893,6 +3977,7 @@ async function finalizeImportApply(
   summary.total = totalUnits
   if (deactivatedCount > 0) summary.deactivated = deactivatedCount
   if (unifiedGroupCount > 0) summary.groupsUnified = unifiedGroupCount
+  if (aggregatedSnapshotGroupCount > 0) summary.snapshotGroupsAggregated = aggregatedSnapshotGroupCount
   summary.timings = {
     ...priorTimings,
     apply: {
@@ -3941,6 +4026,13 @@ export const STOCK_ACTION_MAX_UNITS = 480
 const STOCK_ACTION_DIRECT_MAX_ROWS = 25000
 const STOCK_ACTION_CLASSIFY_WINDOW = 480
 const STOCK_ACTION_DISPATCH_READ = 400
+// Direct add rows are independent, atomic, and idempotently sealed by
+// applyUnifiedStockAdd. Dispatch a small bounded group concurrently so the
+// continuation is not dominated by one D1 network round-trip at a time.
+// Creates and sale groups stay serial because they have cross-row identity /
+// receipt semantics. Twelve keeps pressure conservative while cutting the
+// wall-clock time of large all-add migration files substantially.
+export const STOCK_ACTION_ADD_CONCURRENCY = 12
 // Pathology guards for the small continuation-state blob: distinct sale
 // groups and poisoned groups are operator-scale numbers; a sheet exceeding
 // these is malformed and fails loudly instead of growing job state.
@@ -4362,6 +4454,23 @@ async function applyStockActionsContinuation(
   let unitsDispatched = 0
   let after = stock.dispatchAfterRow
   let moreRows = true
+  const pendingAdds: Array<Promise<void>> = []
+  const runSingle = async (r: StockActionImportResult) => {
+    try {
+      await dispatchStockActionSingle(db, jobId, r, resolveSupplierId)
+      // The helper mutates r.action for a noop; TS's narrowing from the
+      // caller's guard doesn't see through the call, hence the cast.
+      if ((r.action as RowAction) === 'skip' || r.existingId != null) touched.push(r)
+    } catch (error) {
+      r.action = 'error'
+      r.message = error instanceof Error ? error.message : 'Stock action failed'
+      touched.push(r)
+    }
+  }
+  const flushAdds = async () => {
+    if (!pendingAdds.length) return
+    await Promise.all(pendingAdds.splice(0, pendingAdds.length))
+  }
 
   outer: while (unitsDispatched < STOCK_ACTION_MAX_UNITS) {
     const batch = await db.prepare(`
@@ -4381,6 +4490,7 @@ async function applyStockActionsContinuation(
       if (r.action === 'error' || r.action === 'skip' || !plan) continue // already settled at classify or by an earlier window
 
       if (plan.kind === 'sale' && plan.saleGroupKey && record.group_index != null) {
+        await flushAdds()
         // Dispatch the whole receipt when its FIRST row is reached; later
         // member rows cost nothing. After a crash between the writer's seal
         // and the row re-persist below, the resumed dispatch re-runs the
@@ -4416,19 +4526,19 @@ async function applyStockActionsContinuation(
 
       // Single unit: create / add / noop.
       unitsDispatched += 1
-      try {
-        await dispatchStockActionSingle(db, jobId, r, resolveSupplierId)
-        // The helper mutates r.action for a noop; TS's narrowing from the
-        // guard above doesn't see through the call, hence the cast.
-        if ((r.action as RowAction) === 'skip' || r.existingId != null) touched.push(r)
-      } catch (error) {
-        r.action = 'error'
-        r.message = error instanceof Error ? error.message : 'Stock action failed'
-        touched.push(r)
+      if (plan.kind === 'add') {
+        pendingAdds.push(runSingle(r))
+        if (pendingAdds.length >= STOCK_ACTION_ADD_CONCURRENCY) await flushAdds()
+      } else {
+        // Create/noop paths remain ordered. A create can establish identity
+        // used by a later row, while a noop has no I/O to parallelize.
+        await flushAdds()
+        await runSingle(r)
       }
     }
   }
 
+  await flushAdds()
   stock.dispatchAfterRow = after
   if (touched.length) await persistChunkResults(db, jobId, 'apply', touched, touchedGroupIndex)
   sw.lap('buildAndWriteStatementsMs')
@@ -4473,6 +4583,11 @@ async function applyStockActionsContinuation(
 // leave partial writes (D1 resets the *connection*, not necessarily
 // everything already flushed) with no way to finish the job at all.
 const D1_IMPORT_BATCH_CHUNK_SIZE = 300 // statements per db.batch() call, not rows -- a products row can be 1-3 statements, so this is roughly 100-300 rows/chunk depending on import type. Lower this further if very large imports still hit the CPU-time error.
+// Historical receipts are independent, records-only transactions. The
+// writer gives every receipt a deterministic client_request_id and an
+// import_sales_commits seal, so bounded concurrency is both retry-safe and
+// much faster than paying D1 network latency one receipt at a time.
+export const HISTORICAL_SALES_IMPORT_CONCURRENCY = 12
 
 // onChunkDone (optional) fires after each chunk commits, with how many of
 // the total statements are done so far -- used by runImportApply's main
@@ -5238,14 +5353,22 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
       // Loyalty accrual is the operator's import-time choice (default OFF for
       // historical data). Read it once per chunk from the reviewed policy.
       const accrueLoyalty = getSalesImportAccrueLoyalty(job.policy_json)
-      for (const r of actionable) {
-        await applyHistoricalSaleImport(db, {
-          jobId,
-          rowNumber: r.rowNumber,
-          data: r.data as Record<string, unknown> & { items: Array<Record<string, unknown>>; sale_status: string; receipt_number: string | null; created_at: string | null },
-          nowIso,
-          accrueLoyalty,
-        })
+      for (let offset = 0; offset < actionable.length; offset += HISTORICAL_SALES_IMPORT_CONCURRENCY) {
+        const receiptWindow = actionable.slice(offset, offset + HISTORICAL_SALES_IMPORT_CONCURRENCY)
+        const settled = await Promise.allSettled(receiptWindow.map(async (r) => {
+          await applyHistoricalSaleImport(db, {
+            jobId,
+            rowNumber: r.rowNumber,
+            data: r.data as Record<string, unknown> & { items: Array<Record<string, unknown>>; sale_status: string; receipt_number: string | null; created_at: string | null },
+            nowIso,
+            accrueLoyalty,
+          })
+        }))
+        const failedReceipt = settled.find((outcome): outcome is PromiseRejectedResult => outcome.status === 'rejected')
+        // Wait for the whole bounded window before throwing. Any siblings
+        // that committed are sealed, so the queue's retry safely no-ops
+        // them and resumes the same chunk without duplicate receipts.
+        if (failedReceipt) throw failedReceipt.reason
       }
     }
     sw.lap('salesItemsMs')
@@ -5297,6 +5420,18 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
       deactivatedCount = result.changes || 0
     }
 
+    // Full product snapshots can contain multiple source rows that resolve to
+    // one product+branch. The row writer is intentionally last-write-wins for
+    // an ordinary single-row replacement; at the true end of a multi-row job,
+    // aggregate only those duplicate snapshot groups so no source quantity is
+    // silently erased. Explicit add/override modes are excluded inside the
+    // helper because they are movements, not snapshot counts.
+    let aggregatedSnapshotGroupCount = 0
+    if (job.type === 'products' && (productImportMode === 'merge' || productImportMode === 'replace_all')) {
+      aggregatedSnapshotGroupCount = await reconcileDuplicateProductSnapshotRows(db, jobId)
+      sw.lap('aggregateProductSnapshotMs')
+    }
+
     // D6b group unification -- see unifyTouchedProductGroups. After the
     // replace_all deactivation on purpose: a deactivated row is no longer
     // part of any group and must not vote on its group's category/brand.
@@ -5345,7 +5480,7 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
     // EVERY chunk (not just this last one) -- see runImportAnalyze's
     // finalize step for the same reasoning. Shared so the dedicated
     // stock-actions apply path can never disagree with this one.
-    const outcome = await finalizeImportApply(db, jobId, totalUnits, state.startedAtMs, sw.marks, queueLatencyMs, deactivatedCount, unifiedGroupCount)
+    const outcome = await finalizeImportApply(db, jobId, totalUnits, state.startedAtMs, sw.marks, queueLatencyMs, deactivatedCount, unifiedGroupCount, aggregatedSnapshotGroupCount)
     console.log('[import-timing] apply done', jobId, outcome)
     return outcome
   } catch (error) {

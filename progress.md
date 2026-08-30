@@ -173,7 +173,7 @@ autocorrect — templates, imports, exports and generated files alike.*
   review rows → 73); suppliers 16; delivery contacts 2; all 53 optional-customer
   phones exist. Stock history completed 21,286 total / 21,278 applied / 8 true
   zero-change skips / 0 failed, producing 21,278 movements and 114,277.8 units.
-  The final snapshot is 23,113 units in products, branch stock and the active lot
+  The final snapshot is 23,174 units in products, branch stock and the active lot
   ledger, with zero product×branch differences. The measured file-by-file ledger
   and rerun instructions are in `businessos-migration-aug28/IMPORT-MANIFEST.md`.
 - [x] M3. **CLOSED (Part 375) — every one of the 89 rows is decided: 73 add_as_new,
@@ -3004,7 +3004,7 @@ the switch and its reasoning are recorded in `wrangler.toml`.
 
 ## Current status
 
-**As of Part 487 (Aug 30 2026).** Everything below was really run in this local Windows
+**As of Part 496 (Aug 30 2026).** Everything below was really run in this local Windows
 checkout against the production Worker/D1 where stated. See [Environment
 notes](#environment-notes). Golden Rule 5: a claim here is not evidence; these are the
 commands' actual results from the final migration audit.
@@ -3014,10 +3014,10 @@ commands' actual results from the final migration audit.
 | `frontend` `tsc --noEmit` + real Vite build | **clean / succeeds**; only the pre-existing circular-chunk warning |
 | `cloudflare` `tsc --noEmit` | **clean** |
 | Targeted migration/import/report tests | **green**: lot-ledger 0081 (9), sales/returns search (16), stock-in report suite |
-| Remote D1 migrations | **none pending**; 0080 received-cost and 0081 multi-lot reconciliation are applied |
+| Remote D1 migrations | **none pending**; 0080 received-cost, 0081 multi-lot reconciliation and 0082 normalized sales/returns search are applied |
 | Migration pack | `node validate-pack.cjs` **ALL CHECKS PASSED**, including every recorded row count, encoding/date/identity contract and all 12 CSV↔XLSX twins |
 | Production migration totals | products **6,104**; suppliers **16**; delivery contacts **2**; all **53/53** optional-customer phones present; stock **21,286 total / 21,278 applied / 8 zero-change / 0 failed**; sales **14,913/14,919** with only six documented junk rejects; Fees **4,240** |
-| Production integrity | product stock = branch stock = active lot ledger = **23,113**; product×branch lot differences **0**; `PRAGMA foreign_key_check` empty; active import jobs **0**; `RCP-` sales **0** |
+| Production integrity | product stock = branch stock = active lot ledger = **23,174**; all 31 duplicate source product×branch groups equal their summed source quantities; product×branch lot differences **0**; `PRAGMA foreign_key_check` empty; active import jobs **0**; `RCP-` sales **0** |
 | Stock-In report | **19,914** grouped historical lots / **1,571** invoice-day groups / **114,277.8** units / **$1,361,076.28** recorded cost; dates 2024-07-09 through 2026-08-27, none on 2026-08-28 |
 
 **Part 488 (Aug 30 2026, parallel session):** Reports became its own top-level hub
@@ -6586,10 +6586,14 @@ POS.tsx along the way — no behavior change needed there).
   dark mode clean, public payload carries no supplier/cost/margin/batch fields.
   Fixed out of it: iOS "Add to Home Screen" was saving the storefront as
   "Business OS" (static index.html rebrand gap — commit `fe4261e2`, needs
-  deploy). Flagged-not-fixed (outward-facing/hot files, user's call): mobile
-  header wordmark truncates to "Leang Cos…"; `maximum-scale=1.0` blocks
-  pinch-zoom; ~90 sub-44px touch targets; no `prefers-color-scheme` on first
-  load. Admin-side audit still open.
+  deploy). Also fixed (Part 497, needs deploy): the mobile brand wordmark was
+  clipped to "Leang Cos…" — now wraps on mobile, single-line at sm+ (`c97df6c9`);
+  and `maximum-scale=1.0` blocked pinch-zoom — removed (`d61cf5f9`). Theme
+  default: **user confirmed light stays the first-load default — do NOT auto-honor
+  OS `prefers-color-scheme` dark** (Aug 30; a manual toggle switches it, returning
+  visitors keep their choice). Still open (user's call): ~90 sub-44px touch targets
+  (mostly the A–Z index, dense by design). Admin-side responsive audit still open
+  (needs an admin login).
 - [x] **Full frontend↔backend payload-shape/contract diff** — path+
   method layer confirmed (no 404-on-call bugs across ~210 backend
   routes / ~150 frontend call sites). **Payload-shape diff done in Part

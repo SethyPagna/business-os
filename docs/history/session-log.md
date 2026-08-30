@@ -13174,3 +13174,76 @@ session-log committed via atomic pathspec once peers' edits to them had landed.
 **Needs deploy.** Yes — 0082 applies on the next `migrate:remote` / deploy:full
 (instant `ALTER ADD COLUMN`, no data write); the fold then applies to every new
 sale/return, existing rows unchanged.
+
+## Part 496 (Aug 30 2026) — Product snapshot quantity defect corrected, importer safeguarded, production fully reconciled
+
+**Ask.** Check the full migration order and every expected-versus-actual row,
+fix any wrong import, and state what comes next.
+
+**Defect found and corrected.** The two authoritative product files contain
+12,239 rows whose raw quantities sum to 23,152. Fourteen negative rows total
+-22 and are intentionally clamped to zero, so supported snapshot truth is
+**23,174**. Product identity correctly merges duplicate old-system rows, but
+the legacy branch-stock snapshot writer used last-row-wins after that merge.
+The main file has 31 duplicate resolved product×branch groups; 16 differed
+from their source sum, losing exactly 61 units. Production was corrected from
+23,113 to **23,174** in `branch_stock`, `products.stock_quantity`, and the
+active opening-lot ledger. All 31 groups now equal their source sum.
+
+**Permanent fix.** `reconcileDuplicateProductSnapshotRows` now runs once at
+the end of merge/replace-all product snapshot jobs. It groups the persisted,
+normalized apply results by resolved product+branch, sums only duplicate
+snapshot rows, excludes explicit stock movement modes, synchronizes a new
+product's opening import lot, recomputes product totals, and records
+`snapshotGroupsAggregated` in the job summary. Cloudflare TypeScript and the
+full import-engine tests pass. The fix was deployed from an isolated clean
+worktree (leaving unrelated main-worktree edits untouched), Worker version
+`34abdaec-502b-4b69-ab69-0f54159d54e8`; `/health` returned OK and the version
+is at 100%.
+
+**Full production gates.** Products 6,104; product stock = branch stock =
+active lot stock = 23,174; product-total and product×branch lot mismatches 0;
+suppliers 16; supplier-linked historical groups 7,022; delivery contacts 2;
+customers 4,705; stock movements 21,278 / 114,277.8 units, dates 2024-07-09
+through 2026-08-27 and zero on 2026-08-28; sales 14,913 (3,329 / 7,244 /
+4,340), 35,970 item lines and 58,243 units matching persisted import results;
+`RCP-` sales 0; active import jobs 0; foreign-key check empty. Migration 0082
+was found pending after deployment, inspected as an additive two-column schema
+change, applied successfully, and the remote migration list is now empty.
+
+**Pack instructions.** `IMPORT-MANIFEST.md` now records 23,174 as the
+completion gate, explains negative-row clamping and duplicate-group summing,
+and pins the corrected Worker version required before a fresh Step 1/2/4d
+run. `validate-pack.cjs` now enforces raw 23,152, 14 negative rows / -22,
+normalized 23,174, and 31 duplicate identity+branch groups totaling 110 units;
+the full validator passes. The tail stock file remains verification-only and
+the deferred ledgers remain deliberately unimported rather than double-counted.
+
+## Part 497 (Aug 30 2026, session business-os-v1-0a) — storefront audit follow-ups: pinch-zoom + mobile wordmark
+
+**Ask.** "Continue" — take the cleanest flagged items from the Part 493 storefront
+responsive audit.
+
+**What changed.**
+1. **Pinch-zoom restored** (`frontend/index.html`, `d61cf5f9`): the viewport meta
+   pinned `maximum-scale=1.0`, disabling pinch-to-zoom on both the storefront and
+   admin app (WCAG 1.4.4/1.4.10). Removed it; kept `viewport-fit=cover` for the iOS
+   safe-area.
+2. **Brand wordmark no longer clipped on mobile** (`CatalogPreviewSurface.tsx`,
+   `c97df6c9`): the shared portal header's `[auto_1fr_auto]` grid leaves the centre
+   column ~140px at 375px, so the `truncate`d brand read "Leang Cos…". The wordmark
+   now wraps on mobile (balanced, tight leading, `overflow-wrap:anywhere` so a long
+   token can never overflow) and keeps single-line `truncate` at `sm+`.
+
+**Verified.** `brandIcons`, `performanceLoadingUx`, `portalCatalogDisplay` tests
+PASS; `check:source` parsed 408 files clean. Both edits are className/meta-only and
+type-inert. NOT visually rendered here: localhost routes classify as admin (need
+login) and starting a second dev server risks the peers' node_modules — the wordmark
+change is a safe graceful-degradation swap (worst case: brand shows on two lines
+instead of an ellipsis). Recommend a glance on the storefront after deploy.
+
+**Parallel sessions.** index.html is this session's own file; CatalogPreviewSurface
+was clean before the edit. Both committed via atomic pathspec; peers' import-concurrency
+lane untouched. Part 497 after re-checking max = 496.
+
+**Needs deploy.** Yes — both ship on the next `npm run deploy:full`.
