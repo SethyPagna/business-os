@@ -14006,3 +14006,42 @@ easier to reach via real Undo buttons) before fixing. Commit `bcf58378`:
 Verified: pure test 10/10, cloudflare tsc clean (frontend untouched this
 part). Live click-through still deferred (all three dev ports peer-owned).
 **Needs deploy** (rides with Part 507).
+
+## Part 513 (Aug 30 2026, session business-os-v1-b9) — two more Part-77 auth findings fixed: reset gates + Drive-token leak
+
+Continuation of the Part-77 findings backlog (both claimed in progress.md
+before editing, both re-verified against current source first).
+
+**1. Destructive resets demanded only the EXPORT permission (CRITICAL) —
+`ea3174a3`.** `/reset-data`, `/reset-section`, `/finalize-migration`,
+`/factory-reset` and the forced orphan cleanup all gated on `backup`, the
+export permission that lib/permissions.ts's own note says is deliberately
+safe to hand to more people — so an export-only account could wipe the
+database, and factory-reset's response includes the reseeded admin password,
+making that a full account takeover. The helper (now
+`denyUnlessRestorePermission`) demands `backup_restore` (restore/reset,
+sensitivity: critical — the same line routes/backups.ts's restore branch
+already draws). Deliberately KEPT: the factory-reset password return (it is
+the only path back into the app after a wipe, per its own comment — now
+properly scoped), and verify-integrity/repair-integrity's backup-OR-settings
+gate (a pure read and a guided repair; repair's tier is a flagged question,
+not silently changed). Frontend ResetData.tsx's four pre-flight checks
+mirror the new gate so no button merely 403s.
+`test-reset-permission-gate-pure.cjs` (5 checks).
+
+**2. Drive OAuth tokens reached every logged-in account (HIGH) —
+`31fa9f85`.** GET /api/settings and GET /auth/bootstrap return the whole
+settings table to any authenticated user, and the Drive OAuth flow stores
+`drive_sync_refresh_token` / `drive_sync_access_token` as ordinary settings
+rows. New `lib/settingsSensitive.ts` strips secret-bearing keys (explicit
+Drive keys + the credential suffixes _refresh_token/_access_token/_secret/
+_api_key/_password) from BOTH responses, for everyone including admins — no
+frontend surface reads them (zero references measured; Drive status is
+served as curated fields by lib/googleDrive.ts). Suffix-matched so the next
+integration that stores a credential is covered on day one.
+`test-settings-sensitive-pure.cjs` (5 checks, real transpiled lib).
+
+Verified: both new tests green, cloudflare + frontend tsc clean,
+maintenanceTierPicker / ownedGoogleAuth / settingsRefresh /
+settingsConflictHelpers green. Live click-through still deferred (dev ports
+peer-owned). **Needs deploy** (rides with Parts 507/512).
