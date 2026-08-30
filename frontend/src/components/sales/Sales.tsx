@@ -15,6 +15,8 @@ import type { PortalMenuItem } from '../shared/PortalMenu'
 import FilterMenu from '../shared/FilterMenu'
 import SearchInput from '../shared/SearchInput'
 import ScanSearchButton from '../shared/ScanSearchButton'
+import SortChip from '../shared/SortChip'
+import { loadSortSpec, saveSortSpec, sortRecords, type SortField, type SortSpec } from '../../utils/listSort'
 import ActionHistoryBar from '../shared/ActionHistoryBar'
 import PaginationControls, { clampPage, paginateItems, DEFAULT_PAGE_SIZE } from '../shared/PaginationControls'
 import { ALL_STATUSES, getStatusLabel } from './StatusBadge'
@@ -88,6 +90,18 @@ interface SaleRecord extends Record<string, unknown> {
   total_khr?: number
   net_total_usd?: number
 }
+
+// The page's sort vocabulary (see utils/listSort.ts). Labels are attached
+// in-component (they need `t`); ids/kinds/getters are static. 'date' keeps
+// the existing time-section pipeline; every other field sorts flat.
+const SALES_SORT_FIELD_DEFS = [
+  { id: 'date', kind: 'date' as const, get: (sale: SaleRecord) => sale?.created_at },
+  { id: 'total', kind: 'number' as const, get: (sale: SaleRecord) => sale?.total_usd ?? sale?.total },
+  { id: 'customer', kind: 'text' as const, get: (sale: SaleRecord) => sale?.customer_name },
+  { id: 'cashier', kind: 'text' as const, get: (sale: SaleRecord) => sale?.cashier_name },
+  { id: 'status', kind: 'text' as const, get: (sale: SaleRecord) => sale?.sale_status },
+  { id: 'receipt', kind: 'text' as const, get: (sale: SaleRecord) => sale?.receipt_number },
+]
 
 interface UserOption {
   id?: number | string | null
@@ -263,7 +277,18 @@ export default function Sales() {
   >(null)
   const [cancelSaving, setCancelSaving] = useState(false)
   const [salesGroupMode, setSalesGroupMode] = useState<SalesGroupMode>('time')
-  const [salesSortDirection, setSalesSortDirection] = useState<SortDirection>('desc')
+  // Unified sort (listSort.ts + SortChip): field + direction, visible in the
+  // toolbar instead of hidden in the Filters menu, persisted per page. When
+  // the field is 'date' the existing time-section pipeline runs unchanged;
+  // any other field renders a flat sorted list (time grouping has no meaning
+  // under a by-total or by-cashier ordering).
+  const [salesSortSpec, setSalesSortSpec] = useState<SortSpec>(() => loadSortSpec(
+    'sales:sort',
+    { field: 'date', direction: 'desc' },
+    SALES_SORT_FIELD_DEFS as unknown as ReadonlyArray<SortField<unknown>>,
+  ))
+  useEffect(() => { saveSortSpec('sales:sort', salesSortSpec) }, [salesSortSpec])
+  const salesSortDirection: SortDirection = salesSortSpec.field === 'date' ? salesSortSpec.direction : 'desc'
   const [salesPage, setSalesPage] = useState(1)
   const [salesPageSize, setSalesPageSize] = useState(DEFAULT_PAGE_SIZE)
   const [collapsedSalesSections, setCollapsedSalesSections] = useState<Set<string>>(() => new Set())
@@ -710,19 +735,47 @@ export default function Sales() {
     return matchesSearchTermGroups(haystack, searchTerms, 'AND')
   }), [sales, searchTerms, statusFilter])
 
+  const salesSortFields = useMemo<SortField<SaleRecord>[]>(() => {
+    const labels: Record<string, string> = {
+      date: translateOr('sort_by_date', 'Date', 'កាលបរិច្ឆេទ'),
+      total: translateOr('sort_by_total', 'Total', 'សរុប'),
+      customer: translateOr('customer', 'Customer', 'អតិថិជន'),
+      cashier: translateOr('cashier', 'Cashier', 'អ្នកគិតលុយ'),
+      status: translateOr('status', 'Status', 'ស្ថានភាព'),
+      receipt: translateOr('receipt_number', 'Receipt #', 'លេខវិក្កយបត្រ'),
+    }
+    return SALES_SORT_FIELD_DEFS.map((field) => ({ ...field, label: labels[field.id] || field.id }))
+  }, [translateOr])
+
+  // Flat single-section shape (structurally what buildTimeActionSections
+  // returns) for non-date sorts, where time grouping has no meaning.
+  const buildSortedSection = useCallback((items: SaleRecord[]) => {
+    const label = salesSortFields.find((field) => field.id === salesSortSpec.field)?.label || ''
+    const ids = items.map((sale) => Number(sale?.id)).filter((id) => Number.isFinite(id))
+    return [{
+      id: 'sorted',
+      label,
+      ids,
+      items,
+      groups: [{ id: 'sorted:all', actionKey: 'all', label, ids, items, sortTime: 0, synthetic: true }],
+    }]
+  }, [salesSortFields, salesSortSpec.field])
+
   const allSalesSections = useMemo(
-    () => buildTimeActionSections(filtered, {
-      getDate: (sale) => sale?.created_at,
-      getItemId: (sale) => Number(sale?.id),
-      getActionKey: (sale) => sale?.sale_status || 'completed',
-      getActionLabel: (sale) => getStatusLabel(sale?.sale_status || 'completed', t),
-      year: yearFilter,
-      month: monthFilter,
-      timeMode: timeGroupingMode,
-      groupMode: salesGroupMode,
-      sortDirection: salesSortDirection,
-    }),
-    [filtered, monthFilter, salesGroupMode, salesSortDirection, t, timeGroupingMode, yearFilter],
+    () => salesSortSpec.field !== 'date'
+      ? buildSortedSection(sortRecords(filtered, salesSortSpec, salesSortFields))
+      : buildTimeActionSections(filtered, {
+        getDate: (sale) => sale?.created_at,
+        getItemId: (sale) => Number(sale?.id),
+        getActionKey: (sale) => sale?.sale_status || 'completed',
+        getActionLabel: (sale) => getStatusLabel(sale?.sale_status || 'completed', t),
+        year: yearFilter,
+        month: monthFilter,
+        timeMode: timeGroupingMode,
+        groupMode: salesGroupMode,
+        sortDirection: salesSortDirection,
+      }),
+    [buildSortedSection, filtered, monthFilter, salesGroupMode, salesSortDirection, salesSortFields, salesSortSpec, t, timeGroupingMode, yearFilter],
   )
 
   const allVisibleSales = useMemo(
@@ -732,7 +785,7 @@ export default function Sales() {
 
   useEffect(() => {
     setSalesPage(1)
-  }, [monthFilter, salesGroupMode, salesPageSize, salesSortDirection, search, statusFilter, userFilter, yearFilter])
+  }, [monthFilter, salesGroupMode, salesPageSize, salesSortSpec, search, statusFilter, userFilter, yearFilter])
 
   useEffect(() => {
     setSalesPage((current) => clampPage(current, allVisibleSales.length, salesPageSize))
@@ -744,18 +797,21 @@ export default function Sales() {
   )
 
   const salesSections = useMemo(
-    () => buildTimeActionSections(pagedSales, {
-      getDate: (sale) => sale?.created_at,
-      getItemId: (sale) => Number(sale?.id),
-      getActionKey: (sale) => sale?.sale_status || 'completed',
-      getActionLabel: (sale) => getStatusLabel(sale?.sale_status || 'completed', t),
-      year: yearFilter,
-      month: monthFilter,
-      timeMode: timeGroupingMode,
-      groupMode: salesGroupMode,
-      sortDirection: salesSortDirection,
-    }),
-    [monthFilter, pagedSales, salesGroupMode, salesSortDirection, t, timeGroupingMode, yearFilter],
+    () => salesSortSpec.field !== 'date'
+      // Already flat-sorted upstream; the page slice keeps that order.
+      ? buildSortedSection(pagedSales)
+      : buildTimeActionSections(pagedSales, {
+        getDate: (sale) => sale?.created_at,
+        getItemId: (sale) => Number(sale?.id),
+        getActionKey: (sale) => sale?.sale_status || 'completed',
+        getActionLabel: (sale) => getStatusLabel(sale?.sale_status || 'completed', t),
+        year: yearFilter,
+        month: monthFilter,
+        timeMode: timeGroupingMode,
+        groupMode: salesGroupMode,
+        sortDirection: salesSortDirection,
+      }),
+    [buildSortedSection, monthFilter, pagedSales, salesGroupMode, salesSortDirection, salesSortSpec.field, t, timeGroupingMode, yearFilter],
   )
 
   const visibleSales = useMemo(
@@ -985,24 +1041,23 @@ export default function Sales() {
         { id: 'time-action', label: translateOr('group_by_time_action', 'Time + status', 'ពេលវេលា + ស្ថានភាព'), active: salesGroupMode === 'time+action', onClick: () => setSalesGroupMode('time+action') },
       ],
     },
+    // Sorting moved OUT of this menu onto the visible SortChip in the
+    // toolbar (unified listSort method) -- this section now only carries
+    // the period narrowing it always bundled.
     {
-      id: 'sort',
-      label: translateOr('sort', 'Sort', 'តម្រៀប'),
+      id: 'period',
+      label: translateOr('period', 'Period', 'រយៈពេល'),
       searchable: true,
-      options: [
-        { id: 'desc', label: translateOr('newest_first', 'Newest first', 'ថ្មីបំផុតមុន'), active: salesSortDirection === 'desc', onClick: () => setSalesSortDirection('desc') },
-        { id: 'asc', label: translateOr('oldest_first', 'Oldest first', 'ចាស់បំផុតមុន'), active: salesSortDirection === 'asc', onClick: () => setSalesSortDirection('asc') },
-        ...buildPeriodFilterOptions({
-          yearFilter, setYearFilter, monthFilter, setMonthFilter, availableYears,
-          allTimeLabel: translateOr('all_time', 'All time', 'គ្រប់ពេលវេលា'),
-        }),
-      ],
+      options: buildPeriodFilterOptions({
+        yearFilter, setYearFilter, monthFilter, setMonthFilter, availableYears,
+        allTimeLabel: translateOr('all_time', 'All time', 'គ្រប់ពេលវេលា'),
+      }),
     },
-  ].filter(Boolean)), [availableYears, isAdmin, monthFilter, salesGroupMode, salesSortDirection, statusFilter, t, translateOr, userFilter, userOptions, yearFilter])
+  ].filter(Boolean)), [availableYears, isAdmin, monthFilter, salesGroupMode, statusFilter, t, translateOr, userFilter, userOptions, yearFilter])
 
   const activeSalesFilterCount = useMemo(
-    () => countActiveFlags([statusFilter !== 'all', userFilter !== 'all', yearFilter !== 'all', monthFilter !== 'all', salesGroupMode !== 'time', salesSortDirection !== 'desc']),
-    [monthFilter, salesGroupMode, salesSortDirection, statusFilter, userFilter, yearFilter],
+    () => countActiveFlags([statusFilter !== 'all', userFilter !== 'all', yearFilter !== 'all', monthFilter !== 'all', salesGroupMode !== 'time']),
+    [monthFilter, salesGroupMode, statusFilter, userFilter, yearFilter],
   )
   const showSalesActionGroups = salesGroupMode === 'time+action'
 
@@ -1117,6 +1172,12 @@ export default function Sales() {
               POS.tsx expose a camera-scan shortcut for. Added here (and to
               Returns.tsx) to match; same onDetected={setSearch} wiring. */}
           <ScanSearchButton onDetected={setSearch} t={(key: string) => t(key) || key} />
+          <SortChip
+            spec={salesSortSpec}
+            fields={salesSortFields}
+            onChange={setSalesSortSpec}
+            label={translateOr('sort', 'Sort', 'តម្រៀប')}
+          />
           <FilterMenu
             label={t('filters') || 'Filters'}
             activeCount={activeSalesFilterCount}
@@ -1128,7 +1189,7 @@ export default function Sales() {
               setYearFilter('all')
               setMonthFilter('all')
               setSalesGroupMode('time')
-              setSalesSortDirection('desc')
+              setSalesSortSpec({ field: 'date', direction: 'desc' })
             }}
             mobileIconOnly
           />
