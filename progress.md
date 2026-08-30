@@ -3027,6 +3027,20 @@ the switch and its reasoning are recorded in `wrangler.toml`.
 
 ## Current status
 
+**[CLAIMED — Part 533, storefront-accounts session, Aug 30 2026]: public customer accounts
+(§2).** Building sign-up/sign-in on the public storefront with a real password + auto
+membership ID, disabling the anonymous membership lookup (replaced by a privacy message),
+guest mode kept full-featured, server-persisted cart + new wishlist, admin-Contacts account
+flag, and the "no online payments — contact us" notice. **Lane (disjoint from stats/de-carding/
+picker):** new `cloudflare/migrations/0086_portal_accounts.sql`; new `cloudflare/src/lib/{phone,
+portalAccounts,portalSession,portalAuthLockout}.ts`; `cloudflare/src/routes/portal.ts` (+auth/
+account endpoints, disable membership lookup) and `routes/contacts.ts` (phone_normalized sync +
+account flag); frontend `public-web-api.ts`, `api/portalPublicTransport.ts`, catalog
+`CatalogSecondaryTabs.tsx`/`PublicCatalogPage.tsx`/`portalBucket.ts`/new `CatalogAccountSection.tsx`/
+new `PortalNoPaymentNotice.tsx`, `ProductDetailFlyout.tsx`, admin `contacts/{CustomersTab,
+CustomerFormModal}.tsx`; en/km lang packs (append-only). Plan:
+`C:\Users\mrkl6\.claude\plans\atomic-floating-muffin.md`.
+
 **Part 526 (Aug 30 2026, parallel session): the 25-item refinement batch is DONE in code** — StatsStrip v2 (cards under the range row, actions slot hosting each page's buttons, tighter chips, scrollable folds), Sales top-row consolidation + day grouping + mobile third-row badges, fit-sized Add Fee/New Return in the range rows, Products range-above-search + pager merge + hover button-guide + flat mobile rows with yellow batch badges, Reports single-select All + inline branch + text summaries with "|" + click-to-open floats, date-picker month/year selects in the calendar header, Duplicates decide-all-then-apply + in-place resolve float. See Part 526. **Needs deploy.**
 
 **DONE (session business-os-v1-0b, Aug 30 — Part 519, `ed64958b`+`bf85b94a`+
@@ -3058,12 +3072,11 @@ follow-up shipped and browser-verified — qty sits right beside the product nam
 the expanded-stock cards, and each expanded branch has a debounced server-backed
 product search between the mini stat tiles and the grid (query carried onto Show
 more + post-receive refresh; tiles keep branch-wide numbers during a search).
-**→ STILL OPEN — RELAY TO THE STATS-STRIP SESSION (user, Aug 30, verbatim):** "for
-the range date and the preset should be above the stats... not same row." — i.e. in
-StatsStrip the DateTimeRangePicker + preset chips get their OWN row ABOVE the mini
-stat cards on EVERY page, not sharing one row with them. Dashboard already stacks;
-the other pages must match. Not touched by f9 (your file); coordinator 7b confirmed
-routing.
+**✅ RELAY DELIVERED (verified by coordinator 7b ~23:30):** the user's "range date
+and preset above the stats, not same row" direction shipped in `747c0905`
+(StatsStrip v2 — Row 1: range + presets + page actions; Row 2: the cards, on every
+page). Chain re-checked green after the batch: performanceLoadingUx PASS,
+statsStrip PASS (all 7).
 
 **✅ FIXED by coordinator 7b (Part 520, commit `574ac137`): the red test:utils chain
 on HEAD is GREEN again.** 455ea3c9 had left FIVE stale performanceLoadingUx
@@ -3226,19 +3239,22 @@ up should re-verify against current source first.
   frontend pre-flights mirror it. Password return kept (only path back in, now
   properly scoped). Open sub-question, flagged not changed: should
   `/repair-integrity` (guided repair, currently backup-OR-settings) demand more?
-- **[CREATE-PATH FIXED: session b9, Aug 30 — Part 523, `86125647`, needs deploy;
-  EDIT-path compensation + true atomicity still open]** Returns create applied lot
-  restock + replacement stock OUTSIDE the atomic batch and its catch deleted rows
-  while reversing no stock (phantom/destroyed inventory). Create now keeps a
-  compensation log and the catch reverses every pre-batch write (loudly reporting
-  anything unreversible via audit `return_rollback_incomplete` + the 500 message);
-  also fixed: `return_items` missing from the cleanup (orphans) and dangling
-  movement rows. The PATCH /:id edit path still has the original failure mode.
-  (was ×2: write-path, batch-identity)
+- **[FIXED — both paths: session b9, Aug 30 — Parts 523 + 530, `86125647` +
+  `4fb6d108`, needs deploy]** Returns create AND edit now compensate their pre-batch
+  stock writes on failure (loudly reporting anything unreversible via audit
+  `return_rollback_incomplete` + the 500 message). Edit's even-exchange gate was
+  also HOISTED — it used to 400 AFTER the reversal/re-apply loops committed,
+  corrupting stock on a mere validation refusal. Still open (the shared slice-C
+  class): true cross-step atomicity — post-batch failures degrade future edits'
+  lot precision, never stock. (was ×2: write-path, batch-identity)
 
 **HIGH — data / money / security:**
-- Import apply is not idempotent for products(merge_stock/override_add) and inventory;
-  a redelivered/retried chunk double-applies stock. (×1 pipelines) `lib/importEngine.ts:5097,5344`.
+- **[FIXED: session b9, Aug 30 — Part 531, `5562f84c`, needs deploy]** Import apply
+  idempotency: each additive row (products merge_stock/override_add, inventory) now
+  commits its writes + a guard row in ONE db.batch (generic
+  import_stock_action_guards ledger, action_key='generic_apply' — no new migration);
+  retried chunks pre-read guards and skip applied rows. New group-atomic
+  runD1BatchGroupsInChunks splits CPU-limit batches at group boundaries. (was ×1)
 - **[FIXED: session b9, Aug 30 — Part 513, `31fa9f85`, needs deploy]** `GET /api/settings`
   + `/auth/bootstrap` leaked Google Drive OAuth tokens to any logged-in account. New
   `lib/settingsSensitive.ts` strips secret-bearing keys (explicit + credential
@@ -3248,8 +3264,14 @@ up should re-verify against current source first.
   New `resolvePasswordResetBase` honors only exact BUSINESS_OS_ADMIN_URL /
   BUSINESS_OS_PUBLIC_URL origins (origin+pathname kept, query/hash dropped); everything
   else falls back to the admin URL. (was ×1 auth)
-- OTP verify not bound to the password step and skips device-approval + lockout. (×1)
-  `routes/auth.ts:475`.
+- **[FIXED: session b9, Aug 30 — Part 527, `b158d347`, needs deploy]** OTP verify was a
+  standalone 6-digit login (bare numeric userId, no lockout feed, no device gate). Now:
+  first factor mints a 5-min KV challenge (`lib/otpChallenge.ts`) that /otp/verify
+  demands before any DB read; wrong codes feed the same escalating lockout as wrong
+  passwords; the device-approval gate re-runs at the OTP step with this request's
+  deviceId; response gains role fields (the /login self-sufficiency fix). Operator
+  note: an OTP user mid-login during the deploy re-enters their password once.
+  (was ×1)
 - **[FIXED: session b9, Aug 30 — Part 522, `8963f1a1`, needs deploy]** Chunk recovery
   wiped the app-shell/static caches with no online guard, bricking the offline PWA
   over one uncached page. Recovery now declines offline BEFORE spending the one-shot
@@ -3263,12 +3285,20 @@ up should re-verify against current source first.
   with stock_quantity now re-derived from SUM(branch_stock) instead of a clamped
   delta; dated-count apply reviewed and unchanged (documented deliberate
   reconciliation semantics). (was ×2)
-- Money: KHR totals carry fractional riel to server+receipt; loyalty redeem value
-  `Math.round`ed to whole USD (0.50→1.00, or 0.25→0 while still burning points). (×1
-  frontend) `POS.tsx:1027,2434-2465`.
-- Unpaged full-catalog reads / N+1 on ordinary routes (`/catalog/products` unauth ~174
-  statements, `/inventory/summary`, `/customers` no-paging 220 statements); missing FK
-  indexes (`sales.customer_id`, `returns.sale_id`…); `date(created_at)` defeats date
+- **[FIXED: session b9, Aug 30 — Part 529, `1360a7c8`, needs deploy]** POS money:
+  loyalty redeem value now keeps CENTS ($0.25/step no longer burns points for $0;
+  $0.50 no longer doubles to $1); KHR tax/total/change and payload subtotal round to
+  whole riel. **Flagged for the user, not changed:** `redeemValueKhrStep`'s
+  ceil-to-1000 floor can inflate a configured KHR step (2050 → 3000) — deliberate
+  denominations rule, or the same value-inflation bug class? (was ×1 frontend)
+- **[FK-INDEX SLICE FIXED: session b9, Aug 30 — Part 532, `9dfc7235`, migration 0086,
+  needs deploy + remote migrate; the unpaged-reads/N+1, date(created_at) and
+  REPLACE-chain slices STAY OPEN]** Unpaged full-catalog reads /
+  N+1 on ordinary routes (`/catalog/products` unauth ~174
+  statements, `/inventory/summary`, `/customers` no-paging 220 statements); ~~missing FK
+  indexes~~ (0086 adds sales(customer_id, created_at), returns(sale_id),
+  loyalty_point_adjustments(customer_id) — the other named candidates already had
+  indexes); `date(created_at)` defeats date
   indexes on 36 sites; `inventory/movements` search still builds the depth-~92 REPLACE
   chain (D1 depth-100 risk). (×1 D1-scale) — see report.
 - Receipt/date locale: `Receipt.tsx:309` + 3 duplicated `formatDateTime` use viewer
