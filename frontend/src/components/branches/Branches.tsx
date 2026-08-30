@@ -174,7 +174,7 @@ interface BranchMutationResult {
 interface BranchApi {
   getBranches: () => Promise<unknown>
   getTransfers: (params: Record<string, unknown>) => Promise<unknown>
-  getBranchStock: (branchId: string | number, options: { page: number; pageSize: number; stockState: string }) => Promise<BranchStockState>
+  getBranchStock: (branchId: string | number, options: { page: number; pageSize: number; stockState: string; query?: string }) => Promise<BranchStockState>
   updateBranch: (id: string | number, payload: BranchTransportPayload) => Promise<BranchMutationResult>
   createBranch: (payload: BranchTransportPayload) => Promise<BranchMutationResult>
   deleteBranch: (id: string | number, userId?: string | number, userName?: string) => Promise<BranchMutationResult>
@@ -308,6 +308,12 @@ export default function Branches({ embedded = false }: { embedded?: boolean } = 
   const [selected, setSelected] = useState<BranchRecord | null>(null)
   const [transfers, setTransfers] = useState<StockTransfer[]>([])
   const [branchStocks, setBranchStocks] = useState<Record<string | number, BranchStockState>>({})
+  // Per-branch product search (user, Aug 30): sits between the mini stat
+  // tiles and the product grid inside an expanded branch. Server-backed --
+  // the paged stock endpoint already filters on `query` (name/sku/barcode/
+  // brand/category), so matches aren't limited to the rows already loaded.
+  const [branchStockSearch, setBranchStockSearch] = useState<Record<string, string>>({})
+  const branchSearchTimersRef = useRef<Map<string, number>>(new Map())
   // D4b receive entry point: which product card's "receive" was clicked,
   // and into which branch (preselected in the shared modal).
   const [receiveTarget, setReceiveTarget] = useState<{ product: BranchStockProduct; branchId: string } | null>(null)
@@ -469,6 +475,8 @@ export default function Branches({ embedded = false }: { embedded?: boolean } = 
     if (loadWatchdogRef.current) window.clearTimeout(loadWatchdogRef.current)
     invalidateTrackedRequest(loadRequestRef)
     loadPromiseRef.current = null
+    branchSearchTimersRef.current.forEach((timer) => window.clearTimeout(timer))
+    branchSearchTimersRef.current.clear()
   }, [])
 
   /**
@@ -601,17 +609,23 @@ export default function Branches({ embedded = false }: { embedded?: boolean } = 
     setExpandedBranches((prev) => new Set(prev).add(branchId))
   }
 
+  const getBranchStockQuery = (branchId: string | number): string => (branchStockSearch[String(branchId)] ?? '').trim()
+
   const loadMoreBranchStock = async (branchId: string | number) => {
     const current = branchStocks[branchId]
     if (!current || Array.isArray(current)) return
     const nextPage = Number(current.page || 1) + 1
     if (nextPage > Number(current.totalPages || 1)) return
+    const activeQuery = getBranchStockQuery(branchId)
     try {
       const stock = await withLoaderTimeout(
         () => branchApi.getBranchStock(branchId, {
           page: nextPage,
           pageSize: Number(current.pageSize || 20) || 20,
           stockState: current.stockState || 'positive',
+          // Keep the active search on later pages, or "Show more" would
+          // silently switch back to the unfiltered listing mid-scroll.
+          ...(activeQuery ? { query: activeQuery } : {}),
         }),
         'More branch stock',
         12000,
@@ -621,6 +635,10 @@ export default function Branches({ embedded = false }: { embedded?: boolean } = 
         ...prev,
         [branchId]: {
           ...nextStockPage,
+          // The stat tiles stay branch-wide during a search (see
+          // runBranchStockSearch), so keep whichever summary is displayed
+          // rather than adopting the query-filtered one from this page.
+          summary: current.summary ?? nextStockPage.summary,
           items: [...(current.items || []), ...(nextStockPage.items || [])],
         },
       }))
@@ -629,20 +647,50 @@ export default function Branches({ embedded = false }: { embedded?: boolean } = 
     }
   }
 
+  // Debounced per-branch search: refetch page 1 with the query. The mini
+  // stat tiles deliberately KEEP the branch-wide summary while a search is
+  // active -- the endpoint recomputes its summary under the query filter,
+  // which would make "Total 17" flicker to "Total 2" as someone types.
+  const runBranchStockSearch = async (branchId: string | number, rawQuery: string) => {
+    const query = rawQuery.trim()
+    try {
+      const stock = await withLoaderTimeout(
+        () => branchApi.getBranchStock(branchId, { page: 1, pageSize: 20, stockState: 'positive', ...(query ? { query } : {}) }),
+        'Branch stock search',
+        12000,
+      )
+      setBranchStocks((prev) => {
+        const previous = prev[branchId]
+        const previousSummary = previous && !Array.isArray(previous) ? previous.summary : undefined
+        const next: BranchStockState = Array.isArray(stock) || !query || !previousSummary
+          ? stock
+          : { ...stock, summary: previousSummary }
+        return { ...prev, [branchId]: next }
+      })
+    } catch (error) {
+      notify(getErrorMessage(error, tr('failed_to_load_data', 'Failed to load data')), 'warning')
+    }
+  }
+
+  const handleBranchStockSearchChange = (branchId: string | number, value: string) => {
+    const key = String(branchId)
+    setBranchStockSearch((prev) => ({ ...prev, [key]: value }))
+    const timers = branchSearchTimersRef.current
+    const existing = timers.get(key)
+    if (existing) window.clearTimeout(existing)
+    timers.set(key, window.setTimeout(() => {
+      timers.delete(key)
+      void runBranchStockSearch(branchId, value)
+    }, 350))
+  }
+
   // Refetch page 1 of one branch's stock in place (section stays expanded)
   // -- used after a receive so the new quantity shows without collapsing
   // or nuking every other branch's cache the way the transfer path does.
   const refreshBranchStock = async (branchId: string | number) => {
-    try {
-      const stock = await withLoaderTimeout(
-        () => branchApi.getBranchStock(branchId, { page: 1, pageSize: 20, stockState: 'positive' }),
-        'Branch stock',
-        12000,
-      )
-      setBranchStocks((prev) => ({ ...prev, [branchId]: stock }))
-    } catch (error) {
-      notify(getErrorMessage(error, tr('failed_to_load_data', 'Failed to load data')), 'warning')
-    }
+    // Post-receive refresh routes through the search-aware fetch so an
+    // active per-branch search survives receiving stock into that branch.
+    await runBranchStockSearch(branchId, getBranchStockQuery(branchId))
   }
 
   /**
@@ -1286,9 +1334,28 @@ export default function Branches({ embedded = false }: { embedded?: boolean } = 
                             </button>
                           </div>
 
+                          {/* Per-branch product search (user, Aug 30: "search
+                              function ... above the each branch['s products] and
+                              below the mini sections") -- server-backed, so it
+                              finds products beyond the 20 rows already loaded. */}
+                          <div className="mb-2">
+                            <input
+                              id={`branch-stock-search-${branch.id}`}
+                              name={`branch_stock_search_${branch.id}`}
+                              type="search"
+                              className="input h-9 w-full text-sm sm:max-w-xs"
+                              placeholder={tr('branch_stock_search_placeholder', 'Search products in this branch')}
+                              aria-label={`${tr('branch_stock_search_placeholder', 'Search products in this branch')} — ${branch.name || ''}`}
+                              value={branchStockSearch[String(branch.id)] ?? ''}
+                              onChange={(event) => handleBranchStockSearchChange(branch.id, event.target.value)}
+                            />
+                          </div>
+
                           {inStock.length === 0 ? (
                             <p className="rounded-lg bg-gray-50 py-4 text-center text-sm text-gray-400 dark:bg-gray-700/30">
-                              {tr('no_branch_stock', 'No stock in this branch. Use Transfer or Adjust Stock to add items.')}
+                              {getBranchStockQuery(branch.id)
+                                ? tr('branch_stock_search_no_matches', 'No products in this branch match the search.')
+                                : tr('no_branch_stock', 'No stock in this branch. Use Transfer or Adjust Stock to add items.')}
                             </p>
                           ) : (
                             <>
@@ -1320,7 +1387,11 @@ export default function Branches({ embedded = false }: { embedded?: boolean } = 
                                             : 'border-l-emerald-400 dark:border-l-emerald-500'
                                       }`}
                                     >
-                                      <div className="min-w-0 flex-1">
+                                      {/* Qty sits right AFTER the name (user, Aug 30: "much
+                                          spaces between the name and stock quantity") -- the
+                                          name block no longer stretches (no flex-1), only the
+                                          receive button floats to the card edge (ml-auto). */}
+                                      <div className="min-w-0">
                                         <div className="truncate font-medium text-gray-800 dark:text-gray-200">{product.name}</div>
                                         {product.sku ? <div className="truncate font-mono text-[10px] leading-tight text-gray-400">{product.sku}</div> : null}
                                       </div>
@@ -1337,7 +1408,7 @@ export default function Branches({ embedded = false }: { embedded?: boolean } = 
                                       {canReceiveStock ? (
                                         <button
                                           type="button"
-                                          className="flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full text-gray-400 transition-colors hover:bg-blue-100 hover:text-blue-600 dark:hover:bg-blue-900/40 dark:hover:text-blue-300"
+                                          className="ml-auto flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full text-gray-400 transition-colors hover:bg-blue-100 hover:text-blue-600 dark:hover:bg-blue-900/40 dark:hover:text-blue-300"
                                           title={tr('receive_batch', 'Receive Batch')}
                                           aria-label={`${tr('receive_batch', 'Receive Batch')} — ${product.name || ''}`}
                                           onClick={() => setReceiveTarget({ product, branchId: String(branch.id) })}
