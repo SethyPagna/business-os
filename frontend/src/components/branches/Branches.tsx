@@ -1292,50 +1292,59 @@ export default function Branches({ embedded = false }: { embedded?: boolean } = 
                             </p>
                           ) : (
                             <>
-                              <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4 2xl:grid-cols-5">
+                              {/* One column on phones, wider row-cards after: the row layout
+                                  (name left, qty right) needs the width; 4-5 skinny columns
+                                  truncated every real product name. */}
+                              <div className="grid grid-cols-1 gap-1.5 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
                                 {buildProductGroups(inStock).flatMap((group) => {
                                   const cards = group.rows.map((row) => {
                                     const product = row as unknown as BranchStockProduct
+                                    // Neutral surface + a thin colored left edge and colored qty,
+                                    // replacing the old solid red/yellow card fills -- with real
+                                    // catalog data most rows are low-stock, so the grid rendered
+                                    // as a wall of loud yellow/red blocks (reported as the expanded
+                                    // branch's product info looking "very ugly"). One row per card:
+                                    // name+SKU left, qty right, receive at the edge.
+                                    const cardQty = Number(product.branch_quantity || 0)
+                                    const stockTone = cardQty <= Number(product.out_of_stock_threshold || 0)
+                                      ? 'out'
+                                      : cardQty <= Number(product.low_stock_threshold || 10) ? 'low' : 'ok'
                                     return (
                                     <div
                                       key={product.id}
-                                      className={`rounded-lg border p-2.5 text-xs ${
-                                        Number(product.branch_quantity || 0) <= Number(product.out_of_stock_threshold || 0)
-                                          ? 'border-red-200 bg-red-50 dark:border-red-700 dark:bg-red-900/20'
-                                          : Number(product.branch_quantity || 0) <= Number(product.low_stock_threshold || 10)
-                                            ? 'border-yellow-200 bg-yellow-50 dark:border-yellow-700 dark:bg-yellow-900/20'
-                                            : 'border-gray-100 bg-gray-50 dark:border-gray-700 dark:bg-gray-700/30'
+                                      className={`flex min-w-0 items-center gap-2 rounded-lg border border-gray-200 border-l-4 bg-white px-2 py-1.5 text-xs shadow-sm dark:border-gray-700 dark:bg-gray-800 ${
+                                        stockTone === 'out'
+                                          ? 'border-l-red-400 dark:border-l-red-500'
+                                          : stockTone === 'low'
+                                            ? 'border-l-amber-400 dark:border-l-amber-500'
+                                            : 'border-l-emerald-400 dark:border-l-emerald-500'
                                       }`}
                                     >
-                                      <div className="mb-0.5 flex min-w-0 items-center justify-between gap-1">
-                                        <span className="truncate font-medium text-gray-800 dark:text-gray-200">{product.name}</span>
-                                        {/* D4b: receive stock into THIS branch from right here --
-                                            the same shared ReceiveBatchModal (batch picker +
-                                            received date) every other entry point uses. */}
-                                        {canReceiveStock ? (
-                                          <button
-                                            type="button"
-                                            className="flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full text-gray-400 transition-colors hover:bg-blue-100 hover:text-blue-600 dark:hover:bg-blue-900/40 dark:hover:text-blue-300"
-                                            title={tr('receive_batch', 'Receive Batch')}
-                                            aria-label={`${tr('receive_batch', 'Receive Batch')} — ${product.name || ''}`}
-                                            onClick={() => setReceiveTarget({ product, branchId: String(branch.id) })}
-                                          >
-                                            <Plus className="h-3.5 w-3.5" />
-                                          </button>
-                                        ) : null}
+                                      <div className="min-w-0 flex-1">
+                                        <div className="truncate font-medium text-gray-800 dark:text-gray-200">{product.name}</div>
+                                        {product.sku ? <div className="truncate font-mono text-[10px] leading-tight text-gray-400">{product.sku}</div> : null}
                                       </div>
-                                      <div
-                                        className={`text-sm font-bold ${
-                                          Number(product.branch_quantity || 0) <= Number(product.out_of_stock_threshold || 0)
-                                            ? 'text-red-600'
-                                            : Number(product.branch_quantity || 0) <= Number(product.low_stock_threshold || 10)
-                                              ? 'text-yellow-600'
-                                              : 'text-green-600'
+                                      <span
+                                        className={`shrink-0 whitespace-nowrap text-sm font-bold tabular-nums ${
+                                          stockTone === 'out' ? 'text-red-600 dark:text-red-400' : stockTone === 'low' ? 'text-amber-600 dark:text-amber-400' : 'text-emerald-600 dark:text-emerald-400'
                                         }`}
                                       >
                                         {product.branch_quantity} {product.unit}
-                                      </div>
-                                      {product.sku ? <div className="truncate font-mono text-gray-400">{product.sku}</div> : null}
+                                      </span>
+                                      {/* D4b: receive stock into THIS branch from right here --
+                                          the same shared ReceiveBatchModal (batch picker +
+                                          received date) every other entry point uses. */}
+                                      {canReceiveStock ? (
+                                        <button
+                                          type="button"
+                                          className="flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full text-gray-400 transition-colors hover:bg-blue-100 hover:text-blue-600 dark:hover:bg-blue-900/40 dark:hover:text-blue-300"
+                                          title={tr('receive_batch', 'Receive Batch')}
+                                          aria-label={`${tr('receive_batch', 'Receive Batch')} — ${product.name || ''}`}
+                                          onClick={() => setReceiveTarget({ product, branchId: String(branch.id) })}
+                                        >
+                                          <Plus className="h-3.5 w-3.5" />
+                                        </button>
+                                      ) : null}
                                     </div>
                                     )
                                   })
@@ -1420,7 +1429,7 @@ export default function Branches({ embedded = false }: { embedded?: boolean } = 
                   <span className="badge-green text-xs">{transfer.to_name || 'N/A'}</span>
                 </div>
                 <div className="mt-3 space-y-1 text-xs text-gray-500 dark:text-gray-400">
-                    <td className="px-4 py-2.5 text-xs text-gray-500">{transfer.note || '-'}</td>
+                  <div>{transfer.note || '-'}</div>
                   <div>{transfer.user_name || 'N/A'}</div>
                 </div>
               </div>
