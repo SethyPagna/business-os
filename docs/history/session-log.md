@@ -14371,3 +14371,29 @@ clean at ~21:50 and ~22:00 mid-flight, langKeyIntegrity 3737-key parity PASS.
 **Not done** — the user's StatsStrip LAYOUT direction (range picker + presets on their
 own row ABOVE the cards) stays open on the board for the stats lane; coordinator loop
 continues until all sessions settle.
+
+## Part 519 addendum — Aug 30 2026 (session business-os-v1-0b) — live end-to-end verification done
+
+Part 519's one "not run" item is now closed locally. The preview-server port
+conflict (8787 held by a peer's shared wrangler — community property, not
+killed) was resolved by using the pre-provisioned `worker-dev-b` entry
+(8899); `.claude/launch.json` gained explicit `autoPort: false` on the
+wrangler entries (wrangler ignores the PORT env var — its port only comes
+from `--port`, and `worker-dev` must stay 8787 because the vite `/api`
+proxy targets it) plus a `frontend-b` entry (vite `--port 5175
+--strictPort`) for sessions that find 5173 taken.
+
+Against this session's own wrangler on 8899 (current HEAD, real local D1),
+with a minted local admin session (SHA-256 token row, deleted afterwards):
+
+- `POST /api/sales` → `RCP-20260830-223920` — exactly the Phnom Penh
+  wall-clock second, bracketed by before/after probes computing the
+  expected id.
+- Same-second pair → `RCP-20260830-223950` and `RCP-20260830-223950-2` —
+  the collision suffix ladder confirmed live, not just in the pure test.
+- All 5 test sales were created `awaiting_payment` (no stock/lot effects),
+  then cancelled via `PATCH /:id/status` (all confirmed `cancelled`); the
+  test session row was deleted. Local dev DB left coherent.
+
+The production half of the check (one real POS sale after the next
+`deploy:full`) remains on master-plan item A2 where coordinator 7b filed it.

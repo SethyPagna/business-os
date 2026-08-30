@@ -3050,7 +3050,13 @@ timezone label site (AuditLog, SaleDetailModal, Settings, ServerPage) now
 renders `Asia/Bangkok` as `Asia/Phnom_Penh` via `fmtTimezoneLabel`
 (display-only, same UTC+7). Verified: both tscs, new pure test 7/7 +
 timestampId 3/3 + extended formatters test, actionStability/posCore/offline
-suites, probe SQL on real local D1 — Part 519 has the full list. Found+routed
+suites, probe SQL on real local D1 — Part 519 has the full list. **Live e2e
+verified locally (Part 519 addendum):** real `POST /api/sales` on this
+session's own wrangler (worker-dev-b, 8899) minted `RCP-20260830-223920` at
+the exact Phnom Penh second, and a same-second pair minted
+`…-223950` / `…-223950-2` (collision ladder live); test sales cancelled,
+test session removed. Production A2 spot-check after deploy still stands.
+Found+routed
 (not mine): performanceLoadingUx red on HEAD from `455ea3c9` orphaning
 InventoryStatDetailModal — with coordinator 7b for the stats session.
 
