@@ -4,18 +4,18 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, viewport-fit=cover" />
     <meta name="theme-color" content="#1e3a8a" />
-    <meta name="description" content="Business OS - Offline-first POS, inventory and analytics" />
+    <meta name="description" content="Leang Beauty online store" />
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-    <meta name="apple-mobile-web-app-title" content="Business OS" />
+    <meta name="apple-mobile-web-app-title" content="Leang Beauty" />
     <meta name="format-detection" content="telephone=no" />
     <link rel="manifest" href="/manifest.json" />
     <link rel="icon" type="image/x-icon" href="/favicon.ico?v=business-os" />
     <link rel="icon" type="image/png" sizes="192x192" href="/icon-192.png" />
     <link rel="icon" type="image/png" sizes="512x512" href="/icon-512.png" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
-    <title>Business OS</title>
+    <title>Leang Beauty</title>
     <script>
       (function setInitialBusinessOsRoute() {
         var pathname = String(window.location && window.location.pathname || '/')
@@ -103,6 +103,20 @@
           }
           var appleIcon = document.querySelector('link[rel="apple-touch-icon"]')
           if (appleIcon) appleIcon.setAttribute('href', '/leang-cosmetics-apple-touch-icon-v1.png')
+        } else {
+          // The static <title>/apple-title default to the storefront brand so
+          // iOS "Add to Home Screen" -- which can snapshot the raw HTML title
+          // before this script's public branch runs -- never labels the
+          // customer storefront "Business OS". The admin shell keeps the
+          // internal platform name; reset it here, the same synchronous
+          // pre-paint mechanism the storefront relies on above. Icons and the
+          // manifest stay on their admin static defaults, so only the text
+          // needs resetting.
+          document.title = 'Business OS'
+          var adminAppTitle = document.querySelector('meta[name="apple-mobile-web-app-title"]')
+          if (adminAppTitle) adminAppTitle.setAttribute('content', 'Business OS')
+          var adminDescription = document.querySelector('meta[name="description"]')
+          if (adminDescription) adminDescription.setAttribute('content', 'Business OS - Offline-first POS, inventory and analytics')
         }
       }())
     </script>
