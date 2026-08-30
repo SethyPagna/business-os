@@ -10,6 +10,7 @@ import { generateTotpSecret, verifyTotp } from '../lib/totp'
 import { isAdminControlUser } from '../lib/permissions'
 import { checkRateLimit, getClientIp } from '../lib/rateLimit'
 import { MIN_PASSWORD_LENGTH, passwordTooShort, passwordMinLengthError } from '../lib/passwordPolicy'
+import { stripSensitiveSettings } from '../lib/settingsSensitive'
 import { recordFailedLogin, getLoginLockoutState, clearLoginLockout } from '../lib/loginLockout'
 import { requiresDeviceApproval, checkDeviceTrust } from '../lib/deviceTrust'
 import {
@@ -352,7 +353,11 @@ app.get('/bootstrap', async (c) => {
 
   const db = getDb(c.env)
   const settingsRows = await db.prepare('SELECT key, value FROM settings').all<{ key: string; value: string | null }>()
-  const settings = Object.fromEntries((settingsRows || []).map((row) => [row.key, row.value]))
+  // Same redaction as GET /api/settings -- this bootstrap payload reaches
+  // every logged-in account, and Drive OAuth tokens live in this table.
+  const settings = stripSensitiveSettings(
+    Object.fromEntries((settingsRows || []).map((row) => [row.key, row.value])),
+  )
 
   return c.json({
     user,

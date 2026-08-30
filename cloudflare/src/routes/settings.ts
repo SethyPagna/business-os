@@ -6,6 +6,7 @@ import { hasPermission } from '../lib/permissions'
 import { broadcast } from '../durable-objects/broadcastHub'
 import { bumpVersion } from '../lib/cache'
 import { assertUpdatedAtMatch, getExpectedUpdatedAt, writeConflictResponse, WriteConflictError } from '../lib/conflictControl'
+import { stripSensitiveSettings } from '../lib/settingsSensitive'
 import type { Env } from '../index'
 
 const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser } }>()
@@ -65,7 +66,10 @@ app.get('/', async (c) => {
   const rows = await db.prepare('SELECT key, value FROM settings').all<{ key: string; value: string }>()
   const map: Record<string, string> = {}
   for (const row of rows) map[row.key] = row.value
-  return c.json({ ...map, updatedAt: await getSettingsUpdatedAt(c.env) })
+  // Secret-bearing keys (Drive OAuth tokens etc.) never leave the Worker --
+  // see lib/settingsSensitive.ts. requireAuth alone is not enough here:
+  // every logged-in cashier gets this map.
+  return c.json({ ...stripSensitiveSettings(map), updatedAt: await getSettingsUpdatedAt(c.env) })
 })
 
 // Real, confirmed bug (traced from a live user report of "Portal settings
