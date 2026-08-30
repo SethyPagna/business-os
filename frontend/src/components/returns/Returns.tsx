@@ -14,6 +14,8 @@ import { isBrokenLocalizedString as isBrokenLocalizedStringHook, useApp as useAp
 import { fmtTime } from '../../utils/formatters'
 import ExportMenu from '../shared/ExportMenu'
 import FilterMenu from '../shared/FilterMenu'
+import SortChip from '../shared/SortChip'
+import { loadSortSpec, saveSortSpec, sortRecords, type SortField, type SortSpec } from '../../utils/listSort'
 import ActionHistoryBar from '../shared/ActionHistoryBar'
 import InfoHint from '../shared/InfoHint.tsx'
 import PaginationControls, { paginateItems } from '../shared/PaginationControls'
@@ -102,6 +104,16 @@ interface ReturnRow extends Record<string, unknown> {
   branch_id?: number | string | null
   items?: ReturnItem[] | null
 }
+
+// The page's sort vocabulary (utils/listSort.ts) -- labels attached
+// in-component. 'date' keeps the time-section pipeline; other fields flat.
+const RETURN_SORT_FIELD_DEFS = [
+  { id: 'date', kind: 'date' as const, get: (ret: ReturnRow) => ret?.created_at },
+  { id: 'refund', kind: 'number' as const, get: (ret: ReturnRow) => ret?.total_refund_usd },
+  { id: 'customer', kind: 'text' as const, get: (ret: ReturnRow) => ret?.customer_name || ret?.supplier_name },
+  { id: 'processed_by', kind: 'text' as const, get: (ret: ReturnRow) => ret?.cashier_name },
+  { id: 'type', kind: 'text' as const, get: (ret: ReturnRow) => ret?.return_type },
+]
 
 interface ReturnHistoryPayload extends Record<string, unknown> {
   reason: string
@@ -340,7 +352,14 @@ export default function Returns() {
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [returnGroupMode, setReturnGroupMode] = useState<ReturnGroupMode>('time')
-  const [returnSortDirection, setReturnSortDirection] = useState<SortDirection>('desc')
+  // Unified sort (listSort.ts + SortChip): see Sales.tsx's mirror of this.
+  const [returnSortSpec, setReturnSortSpec] = useState<SortSpec>(() => loadSortSpec(
+    'returns:sort',
+    { field: 'date', direction: 'desc' },
+    RETURN_SORT_FIELD_DEFS as unknown as ReadonlyArray<SortField<unknown>>,
+  ))
+  useEffect(() => { saveSortSpec('returns:sort', returnSortSpec) }, [returnSortSpec])
+  const returnSortDirection: SortDirection = returnSortSpec.field === 'date' ? returnSortSpec.direction : 'desc'
   const [returnPage, setReturnPage] = useState(1)
   const [returnPageSize, setReturnPageSize] = useState(() => getInitialReturnPageSize())
   const [collapsedReturnSections, setCollapsedReturnSections] = useState<Set<string>>(() => new Set())
@@ -654,21 +673,46 @@ export default function Returns() {
     return matchesSearchTermGroups(buildReturnHaystack(ret), searchTerms, 'AND')
   }), [rows, searchTerms, typeFilter])
 
-  const allReturnSections = useMemo<ReturnSection[]>(() => buildTimeActionSections(filtered, {
-    getDate: (ret) => ret?.created_at,
-    getItemId: (ret) => Number(ret?.id),
-    getActionKey: (ret) => getReturnTypeKey(ret),
-    getActionLabel: (ret) => getReturnTypeLabel(ret, tr),
-    year: yearFilter,
-    month: monthFilter,
-    timeMode,
-    groupMode: returnGroupMode,
-    sortDirection: returnSortDirection,
-  }), [filtered, monthFilter, returnGroupMode, returnSortDirection, timeMode, tr, yearFilter])
+  const returnSortFields = useMemo<SortField<ReturnRow>[]>(() => {
+    const labels: Record<string, string> = {
+      date: tr('sort_by_date', 'Date'),
+      refund: tr('sort_by_refund', 'Refund'),
+      customer: tr('customer', 'Customer'),
+      processed_by: tr('processed_by', 'Processed by'),
+      type: tr('type', 'Type'),
+    }
+    return RETURN_SORT_FIELD_DEFS.map((field) => ({ ...field, label: labels[field.id] || field.id }))
+  }, [tr])
+
+  const buildSortedReturnSection = useCallback((items: ReturnRow[]): ReturnSection[] => {
+    const label = returnSortFields.find((field) => field.id === returnSortSpec.field)?.label || ''
+    const ids = items.map((ret) => Number(ret?.id)).filter((id) => Number.isFinite(id))
+    return [{
+      id: 'sorted',
+      label,
+      ids,
+      items,
+      groups: [{ id: 'sorted:all', actionKey: 'all', label, ids, items, sortTime: 0, synthetic: true }],
+    }] as unknown as ReturnSection[]
+  }, [returnSortFields, returnSortSpec.field])
+
+  const allReturnSections = useMemo<ReturnSection[]>(() => returnSortSpec.field !== 'date'
+    ? buildSortedReturnSection(sortRecords(filtered, returnSortSpec, returnSortFields))
+    : buildTimeActionSections(filtered, {
+      getDate: (ret) => ret?.created_at,
+      getItemId: (ret) => Number(ret?.id),
+      getActionKey: (ret) => getReturnTypeKey(ret),
+      getActionLabel: (ret) => getReturnTypeLabel(ret, tr),
+      year: yearFilter,
+      month: monthFilter,
+      timeMode,
+      groupMode: returnGroupMode,
+      sortDirection: returnSortDirection,
+    }), [buildSortedReturnSection, filtered, monthFilter, returnGroupMode, returnSortDirection, returnSortFields, returnSortSpec, timeMode, tr, yearFilter])
 
   useEffect(() => {
     setReturnPage(1)
-  }, [debouncedSearch, monthFilter, returnGroupMode, returnSortDirection, scope, typeFilter, yearFilter])
+  }, [debouncedSearch, monthFilter, returnGroupMode, returnSortSpec, scope, typeFilter, yearFilter])
 
   const allVisibleReturns = useMemo(
     () => allReturnSections.flatMap((section) => section.groups.flatMap((group) => group.items)),
@@ -680,17 +724,20 @@ export default function Returns() {
     [allVisibleReturns, returnPage, returnPageSize],
   )
 
-  const returnSections = useMemo<ReturnSection[]>(() => buildTimeActionSections(pagedReturns, {
-    getDate: (ret) => ret?.created_at,
-    getItemId: (ret) => Number(ret?.id),
-    getActionKey: (ret) => getReturnTypeKey(ret),
-    getActionLabel: (ret) => getReturnTypeLabel(ret, tr),
-    year: yearFilter,
-    month: monthFilter,
-    timeMode,
-    groupMode: returnGroupMode,
-    sortDirection: returnSortDirection,
-  }), [monthFilter, pagedReturns, returnGroupMode, returnSortDirection, timeMode, tr, yearFilter])
+  const returnSections = useMemo<ReturnSection[]>(() => returnSortSpec.field !== 'date'
+    // Already flat-sorted upstream; the page slice keeps that order.
+    ? buildSortedReturnSection(pagedReturns)
+    : buildTimeActionSections(pagedReturns, {
+      getDate: (ret) => ret?.created_at,
+      getItemId: (ret) => Number(ret?.id),
+      getActionKey: (ret) => getReturnTypeKey(ret),
+      getActionLabel: (ret) => getReturnTypeLabel(ret, tr),
+      year: yearFilter,
+      month: monthFilter,
+      timeMode,
+      groupMode: returnGroupMode,
+      sortDirection: returnSortDirection,
+    }), [buildSortedReturnSection, monthFilter, pagedReturns, returnGroupMode, returnSortDirection, returnSortSpec.field, timeMode, tr, yearFilter])
 
   const visibleReturns = useMemo(
     () => returnSections.flatMap((section) => section.groups.flatMap((group) => group.items)),
@@ -874,25 +921,23 @@ export default function Returns() {
           { id: 'time-action', label: tr('group_by_time_action', 'Time + type'), active: returnGroupMode === 'time+action', onClick: () => setReturnGroupMode('time+action') },
         ],
       },
+      // Sorting moved onto the visible SortChip (unified listSort method);
+      // this section keeps only the period narrowing it always bundled.
       {
-        id: 'sort',
-        label: tr('sort', 'Sort'),
+        id: 'period',
+        label: tr('period', 'Period'),
         searchable: true,
-        options: [
-          { id: 'desc', label: tr('newest_first', 'Newest first'), active: returnSortDirection === 'desc', onClick: () => setReturnSortDirection('desc') },
-          { id: 'asc', label: tr('oldest_first', 'Oldest first'), active: returnSortDirection === 'asc', onClick: () => setReturnSortDirection('asc') },
-          ...buildPeriodFilterOptions({
-            yearFilter, setYearFilter, monthFilter, setMonthFilter, availableYears,
-            allTimeLabel: tr('all_time', 'All time'),
-          }),
-        ],
+        options: buildPeriodFilterOptions({
+          yearFilter, setYearFilter, monthFilter, setMonthFilter, availableYears,
+          allTimeLabel: tr('all_time', 'All time'),
+        }),
       },
     ]
-  }, [availableYears, isReturnsFilterMenuOpen, monthFilter, returnGroupMode, returnSortDirection, scope, tr, typeFilter, typeOptions, yearFilter])
+  }, [availableYears, isReturnsFilterMenuOpen, monthFilter, returnGroupMode, scope, tr, typeFilter, typeOptions, yearFilter])
 
   const activeFilterCount = useMemo(
-    () => countActiveFlags([yearFilter !== 'all', monthFilter !== 'all', typeFilter !== 'all', scope !== CUSTOMER_SCOPE, returnGroupMode !== 'time', returnSortDirection !== 'desc']),
-    [monthFilter, returnGroupMode, returnSortDirection, scope, typeFilter, yearFilter],
+    () => countActiveFlags([yearFilter !== 'all', monthFilter !== 'all', typeFilter !== 'all', scope !== CUSTOMER_SCOPE, returnGroupMode !== 'time']),
+    [monthFilter, returnGroupMode, scope, typeFilter, yearFilter],
   )
   const showReturnActionGroups = returnGroupMode === 'time+action'
 
@@ -1046,6 +1091,12 @@ export default function Returns() {
               POS.tsx expose a camera-scan shortcut for. Added here (and to
               Sales.tsx) to match; same onDetected={setSearch} wiring. */}
           <ScanSearchButton onDetected={setSearch} t={(key: string) => t(key) || key} />
+          <SortChip
+            spec={returnSortSpec}
+            fields={returnSortFields}
+            onChange={setReturnSortSpec}
+            label={tr('sort', 'Sort')}
+          />
           <FilterMenu
             label={tr('filters', 'Filters')}
             activeCount={activeFilterCount}
@@ -1057,7 +1108,7 @@ export default function Returns() {
               setMonthFilter('all')
               setTypeFilter('all')
               setReturnGroupMode('time')
-              setReturnSortDirection('desc')
+              setReturnSortSpec({ field: 'date', direction: 'desc' })
             }}
             compact
           />

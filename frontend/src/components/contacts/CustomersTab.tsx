@@ -18,6 +18,8 @@ import type { QueryParams } from '../../api/query.ts'
 import { fmtDateTime24 } from '../../utils/formatters'
 import FilterMenu from '../shared/FilterMenu'
 import SearchInput from '../shared/SearchInput'
+import SortChip from '../shared/SortChip'
+import { loadSortSpec, saveSortSpec, type SortField, type SortSpec } from '../../utils/listSort'
 import ActionHistoryBar from '../shared/ActionHistoryBar'
 import { ThreeDotMenu, DetailModal, ContactTable, buildSelectedSnapshots, countActiveFlags, useContactSelection } from './shared'
 import { withLoaderTimeout } from '../../utils/loaders.ts'
@@ -116,6 +118,17 @@ interface CustomerRow extends Record<string, unknown> {
   points_rewarded?: number | string | null
   points_deducted?: number | string | null
 }
+
+// SortChip vocabulary. This list is SERVER-paged, so both fields are sorted
+// by the API (contacts.ts allowlist: created_at / lower(name)) -- a client
+// sort would only reorder the loaded page. Points deliberately absent: the
+// balance is computed after the page slice, so it can't be honestly
+// server-sorted yet. Grouping follows the field: date -> time sections,
+// name -> A-Z/Khmer alphabet sections.
+const CUSTOMER_SORT_FIELD_DEFS = [
+  { id: 'date', kind: 'date' as const, get: (customer: CustomerRow) => customer?.created_at },
+  { id: 'name', kind: 'text' as const, get: (customer: CustomerRow) => customer?.name },
+]
 
 interface SectionRow extends Record<string, unknown> {
   __kind: 'section'
@@ -261,8 +274,18 @@ function CustomersTab({ t, notify, active = true, initialSearch }: CustomersTabP
   const [yearFilter, setYearFilter] = useState('all')
   const [monthFilter, setMonthFilter] = useState('all')
   const [genderFilter, setGenderFilter] = useState('all')
-  const [sortDirection, setSortDirection] = useState<SortDirection>('desc')
-  const [groupMode, setGroupMode] = useState<CustomerGroupMode>('time')
+  // Unified sort (listSort.ts + SortChip). The spec drives BOTH the server
+  // query's ORDER BY and the grouping style (date -> time sections, name ->
+  // alphabet sections), replacing the old separate direction + group-mode
+  // states.
+  const [customerSortSpec, setCustomerSortSpec] = useState<SortSpec>(() => loadSortSpec(
+    'customers:sort',
+    { field: 'date', direction: 'desc' },
+    CUSTOMER_SORT_FIELD_DEFS as unknown as ReadonlyArray<SortField<unknown>>,
+  ))
+  useEffect(() => { saveSortSpec('customers:sort', customerSortSpec) }, [customerSortSpec])
+  const sortDirection: SortDirection = customerSortSpec.direction
+  const groupMode: CustomerGroupMode = customerSortSpec.field === 'name' ? 'alphabet' : 'time'
   const [collapsedSections, setCollapsedSections] = useState<Set<string>>(() => new Set())
   const [historyReady, setHistoryReady] = useState(false)
   // Y1: the other list pages (Products/POS/Inventory/Sales) debounce
@@ -276,7 +299,12 @@ function CustomersTab({ t, notify, active = true, initialSearch }: CustomersTabP
     search: deferredSearch.trim() || undefined,
     year: yearFilter !== 'all' ? yearFilter : undefined,
     month: yearFilter !== 'all' && monthFilter !== 'all' ? monthFilter : undefined,
-  }), [deferredSearch, monthFilter, yearFilter])
+    // Server-side ORDER BY (see CUSTOMER_SORT_FIELD_DEFS' comment).
+    sort: customerSortSpec.field === 'date' ? 'created' : 'name',
+    dir: customerSortSpec.direction,
+  }), [customerSortSpec, deferredSearch, monthFilter, yearFilter])
+  // A sort change re-orders the whole result set -- start back at page 1.
+  useEffect(() => { setCustomerPage(1) }, [customerSortSpec])
   const customerQuery = useMemo(() => ({
     ...customerFilters,
     page: customerPage,
@@ -346,7 +374,7 @@ function CustomersTab({ t, notify, active = true, initialSearch }: CustomersTabP
       ? buildAlphabetActionSections(filteredByGender, {
         getName: (customer) => customer?.name,
         getItemId: (customer) => Number(customer?.id),
-        sortDirection: 'asc',
+        sortDirection,
       })
       : buildTimeActionSections(filteredByGender, {
         getDate: (customer) => customer?.created_at,
@@ -402,27 +430,25 @@ function CustomersTab({ t, notify, active = true, initialSearch }: CustomersTabP
   // their own Company field (SuppliersTab.tsx) -- that form does expose
   // it and a business identity genuinely applies there.
   const customerColumns = [tr(t, 'name', 'Name'), 'Membership', tr(t, 'loyalty_points', 'Points'), tr(t, 'phone', 'Phone'), tr(t, 'email', 'Email'), tr(t, 'gender', 'Gender'), tr(t, 'col_added', 'Added'), 'Options']
+  const customerSortFields = useMemo<SortField<CustomerRow>[]>(() => {
+    const labels: Record<string, string> = {
+      date: tr(t, 'sort_by_joined', 'Joined'),
+      name: tr(t, 'name', 'Name'),
+    }
+    return CUSTOMER_SORT_FIELD_DEFS.map((field) => ({ ...field, label: labels[field.id] || field.id }))
+  }, [t])
+
   const contactFilterSections = useMemo(() => ([
+    // Sorting (and the A-Z grouping that follows it) moved onto the visible
+    // SortChip; this section keeps the period narrowing it always bundled.
     {
-      id: 'sort',
-      label: tr(t, 'sort', 'Sort'),
+      id: 'period',
+      label: tr(t, 'period', 'Period'),
       searchable: true,
-      options: [
-        { id: 'sort-desc', label: tr(t, 'newest_first', 'Newest first'), active: sortDirection === 'desc', onClick: () => setSortDirection('desc') },
-        { id: 'sort-asc', label: tr(t, 'oldest_first', 'Oldest first'), active: sortDirection === 'asc', onClick: () => setSortDirection('asc') },
-        ...buildPeriodFilterOptions({
-          yearFilter, setYearFilter, monthFilter, setMonthFilter, availableYears,
-          allTimeLabel: tr(t, 'all_time', 'All time'),
-        }),
-      ],
-    },
-    {
-      id: 'group',
-      label: tr(t, 'group_by', 'Group by'),
-      options: [
-        { id: 'group-time', label: tr(t, 'date', 'Date'), active: groupMode === 'time', onClick: () => setGroupMode('time') },
-        { id: 'group-alphabet', label: tr(t, 'alphabetical', 'A-Z / Khmer'), active: groupMode === 'alphabet', onClick: () => setGroupMode('alphabet') },
-      ],
+      options: buildPeriodFilterOptions({
+        yearFilter, setYearFilter, monthFilter, setMonthFilter, availableYears,
+        allTimeLabel: tr(t, 'all_time', 'All time'),
+      }),
     },
     {
       id: 'gender',
@@ -436,7 +462,7 @@ function CustomersTab({ t, notify, active = true, initialSearch }: CustomersTabP
       ],
     },
 
-  ]), [availableYears, genderFilter, groupMode, monthFilter, sortDirection, t, yearFilter])
+  ]), [availableYears, genderFilter, monthFilter, t, yearFilter])
   const displayContactFilterSections = useMemo(() => (
     contactFilterSections.map((section) => {
       if (section.id !== 'group') return section
@@ -450,7 +476,7 @@ function CustomersTab({ t, notify, active = true, initialSearch }: CustomersTabP
       }
     })
   ), [contactFilterSections, t])
-  const activeFilterCount = countActiveFlags([yearFilter !== 'all', monthFilter !== 'all', sortDirection !== 'desc', groupMode !== 'time', genderFilter !== 'all'])
+  const activeFilterCount = countActiveFlags([yearFilter !== 'all', monthFilter !== 'all', genderFilter !== 'all'])
   const hasActiveCustomerSearchOrFilters = deferredSearch.trim().length > 0 || activeFilterCount > 0
   const toggleSectionCollapsed = (sectionId: string) => setCollapsedSections((current) => {
     const next = new Set(current)
@@ -880,6 +906,12 @@ function CustomersTab({ t, notify, active = true, initialSearch }: CustomersTabP
               {tr(t, 'delete_selected_count', 'Delete {count}').replace('{count}', String(selectedIds.size))}
             </button>
           ) : null}
+          <SortChip
+            spec={customerSortSpec}
+            fields={customerSortFields}
+            onChange={setCustomerSortSpec}
+            label={tr(t, 'sort', 'Sort')}
+          />
           <FilterMenu
             label={tr(t, 'filters', 'Filters')}
             activeCount={activeFilterCount}
@@ -887,8 +919,7 @@ function CustomersTab({ t, notify, active = true, initialSearch }: CustomersTabP
             onClear={() => {
               setYearFilter('all')
               setMonthFilter('all')
-              setSortDirection('desc')
-              setGroupMode('time')
+              setCustomerSortSpec({ field: 'date', direction: 'desc' })
               setGenderFilter('all')
             }}
             compact

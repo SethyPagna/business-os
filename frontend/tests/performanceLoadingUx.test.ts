@@ -1078,7 +1078,10 @@ for (const [name, source] of [
   assert.match(source, /<SearchInput\b/, `${name} contacts should use the shared SearchInput component`)
   assert.match(source + searchInputComponent, /autoComplete=/, `${name} contacts should define autocomplete hints`)
   assert.match(source, /buildSelectedSnapshots\([^,]+, ids\)/, `${name} contacts should snapshot bulk selections through the shared Set helper`)
-  assert.match(source, /countActiveFlags\(\[yearFilter !== 'all', monthFilter !== 'all', sortDirection !== 'desc', groupMode !== 'time', genderFilter !== 'all'\]\)/, `${name} contacts should count active filters without temporary filtered arrays`)
+  // Customers moved sort/grouping onto the SortChip (unified listSort), so
+  // its badge counts only true filters; Suppliers/Delivery still carry the
+  // in-menu sort+group flags until their own rollout.
+  assert.match(source, /countActiveFlags\(\[yearFilter !== 'all', monthFilter !== 'all', (?:sortDirection !== 'desc', groupMode !== 'time', )?genderFilter !== 'all'\]\)/, `${name} contacts should count active filters without temporary filtered arrays`)
   assert.match(source, /const failedIdSet = new Set\(failedIds\)/, `${name} contacts should reuse a failed-id Set when filtering deleted snapshots`)
   assert.doesNotMatch(source, /_HISTORY_READY_DELAY_MS|window\.setTimeout\(\(\) => \{\s*setHistoryReady\(true\)/, `${name} contacts should not add a fixed post-load history delay`)
   assert.match(source, /const \[historyReady, setHistoryReady\] = useState\(false\)/, `${name} contacts should have an explicit post-ready action-history gate`)
@@ -2121,9 +2124,11 @@ assert.match(
   /const returnScopeSummary = useMemo\(\(\) => \{[\s\S]*for \(const ret of searchFiltered\)[\s\S]*summary\.supplierStats\.lossUsd \+= toNumericAmount\(ret\.supplier_loss_usd\)[\s\S]*summary\.customerStats\.refundedUsd \+= toNumericAmount\(ret\.total_refund_usd\)/,
   'returns stats should split customer/supplier rows and totals in one pass, from the search-only (not type-filtered) view so switching the type filter does not zero out the other stat tiles',
 )
+// Sort moved onto the SortChip (unified listSort), so the badge counts only
+// true filters now -- direction is no longer one of them.
 assert.match(
   returns,
-  /countActiveFlags\(\[yearFilter !== 'all', monthFilter !== 'all', typeFilter !== 'all', scope !== CUSTOMER_SCOPE, returnGroupMode !== 'time', returnSortDirection !== 'desc'\]\)/,
+  /countActiveFlags\(\[yearFilter !== 'all', monthFilter !== 'all', typeFilter !== 'all', scope !== CUSTOMER_SCOPE, returnGroupMode !== 'time'\]\)/,
   'returns active filter count should avoid temporary filtered boolean arrays',
 )
 assert.doesNotMatch(

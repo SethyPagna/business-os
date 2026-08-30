@@ -6,6 +6,8 @@ import UserPlus from 'lucide-react/dist/esm/icons/user-plus.js'
 import AppSelect from '../shared/AppSelect.tsx'
 import SearchInput from '../shared/SearchInput'
 import FilterMenu from '../shared/FilterMenu'
+import SortChip from '../shared/SortChip'
+import { loadSortSpec, saveSortSpec, sortRecords, type SortField, type SortSpec } from '../../utils/listSort'
 import Modal from '../shared/Modal'
 import PortalMenu, { type PortalMenuItem } from '../shared/PortalMenu'
 import ActionHistoryBar from '../shared/ActionHistoryBar'
@@ -78,6 +80,14 @@ interface UserRecord extends Record<string, unknown> {
   updated_at?: string | null
   has_admin_access?: boolean | number | null
 }
+
+// SortChip vocabulary (utils/listSort.ts) -- this list is loaded whole, so
+// the client sort is authoritative.
+const USER_SORT_FIELD_DEFS = [
+  { id: 'name', kind: 'text' as const, get: (user: UserRecord) => user?.name || user?.username },
+  { id: 'role', kind: 'text' as const, get: (user: UserRecord) => user?.role_name },
+  { id: 'created', kind: 'date' as const, get: (user: UserRecord) => user?.created_at },
+]
 
 interface RoleRecord extends Record<string, unknown> {
   id: EntityId
@@ -358,6 +368,23 @@ export default function Users() {
   // 'all'/'active'/'inactive' values, same FilterMenu section shape).
   const [roleFilter, setRoleFilter] = useState<string>('all')
   const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'inactive'>('all')
+  // Unified sort (listSort.ts + SortChip); full list is client-held, so the
+  // client sort is authoritative here.
+  const [userSortSpec, setUserSortSpec] = useState<SortSpec>(() => loadSortSpec(
+    'users:sort',
+    { field: 'name', direction: 'asc' },
+    USER_SORT_FIELD_DEFS as unknown as ReadonlyArray<SortField<unknown>>,
+  ))
+  useEffect(() => { saveSortSpec('users:sort', userSortSpec) }, [userSortSpec])
+  const userSortFields = useMemo<SortField<UserRecord>[]>(() => {
+    const labels: Record<string, string> = {
+      name: tr('name', 'Name'),
+      role: tr('role', 'Role'),
+      created: tr('col_added', 'Added'),
+    }
+    return USER_SORT_FIELD_DEFS.map((field) => ({ ...field, label: labels[field.id] || field.id }))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [t])
   const [userForm, setUserForm] = useState<UserFormState>(INITIAL_USER_FORM)
   const [roleForm, setRoleForm] = useState<RoleFormState>(INITIAL_ROLE_FORM)
   const [passwordForm, setPasswordForm] = useState<PasswordFormState>({
@@ -588,13 +615,14 @@ export default function Users() {
 
   const filteredUsers = useMemo(() => {
     const query = search.trim().toLowerCase()
-    return users.filter((user) => {
+    const matched = users.filter((user) => {
       if (query && !`${user.name} ${user.username} ${user.phone || ''} ${user.email || ''} ${user.role_name || ''}`.toLowerCase().includes(query)) return false
       if (roleFilter !== 'all' && String(user.role_id ?? '') !== roleFilter) return false
       if (statusFilter !== 'all' && Boolean(user.is_active) !== (statusFilter === 'active')) return false
       return true
     })
-  }, [search, users, roleFilter, statusFilter])
+    return sortRecords(matched, userSortSpec, userSortFields)
+  }, [search, users, roleFilter, statusFilter, userSortFields, userSortSpec])
   const userFilterActiveCount = (roleFilter !== 'all' ? 1 : 0) + (statusFilter !== 'all' ? 1 : 0)
   const userFilterSections = useMemo(() => ([
     {
@@ -1059,13 +1087,21 @@ export default function Users() {
               filtering of its own, so the trigger stays hidden there
               rather than sitting inert. */}
           {tab === 'users' ? (
-            <FilterMenu
-              label={tr('filters', 'Filters')}
-              activeCount={userFilterActiveCount}
-              sections={userFilterSections}
-              onClear={userFilterActiveCount > 0 ? clearUserFilters : null}
-              mobileIconOnly
-            />
+            <>
+              <SortChip
+                spec={userSortSpec}
+                fields={userSortFields}
+                onChange={setUserSortSpec}
+                label={tr('sort', 'Sort')}
+              />
+              <FilterMenu
+                label={tr('filters', 'Filters')}
+                activeCount={userFilterActiveCount}
+                sections={userFilterSections}
+                onClear={userFilterActiveCount > 0 ? clearUserFilters : null}
+                mobileIconOnly
+              />
+            </>
           ) : null}
         </div>
       </div>

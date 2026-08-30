@@ -466,8 +466,19 @@ function registerContactRoutes(config: ContactConfig) {
       })
     }
 
+    // Allowlisted server-side sort (unified SortChip, Aug 30): the list is
+    // server-paged, so ordering must happen HERE to be correct across pages
+    // -- a client-side sort would only reorder the loaded page. Only plain
+    // columns are offered (points_balance is computed after the page slice
+    // by withPoints above, so it cannot be honestly sorted server-side).
+    // Default stays exactly the old lower(name) ASC; `id` breaks ties so
+    // paging never shows a row twice across adjacent pages.
+    const sortColumn = String(query.sort || '') === 'created' ? 'created_at' : 'lower(name)'
+    const sortDir = String(query.dir || '').toLowerCase() === 'desc' ? 'DESC' : 'ASC'
+    const orderSql = `ORDER BY ${sortColumn} ${sortDir}, id ASC`
+
     if (!hasPaging) {
-      const rows = await db.prepare(`SELECT * FROM ${config.table} ${whereSql} ORDER BY lower(name) ASC`).all<Record<string, unknown>>(params)
+      const rows = await db.prepare(`SELECT * FROM ${config.table} ${whereSql} ${orderSql}`).all<Record<string, unknown>>(params)
       return c.json((await withPoints(rows || [])))
     }
 
@@ -476,7 +487,7 @@ function registerContactRoutes(config: ContactConfig) {
     const offset = (page - 1) * pageSize
     const totalRow = await db.prepare(`SELECT COUNT(*) AS count FROM ${config.table} ${whereSql}`).get<{ count: number }>(params)
     const total = totalRow?.count || 0
-    const items = await db.prepare(`SELECT * FROM ${config.table} ${whereSql} ORDER BY lower(name) ASC LIMIT @pageSize OFFSET @offset`).all<Record<string, unknown>>({ ...params, pageSize, offset })
+    const items = await db.prepare(`SELECT * FROM ${config.table} ${whereSql} ${orderSql} LIMIT @pageSize OFFSET @offset`).all<Record<string, unknown>>({ ...params, pageSize, offset })
     return c.json({ items: (await withPoints(items || [])), total, page, pageSize, totalPages: Math.max(1, Math.ceil(total / pageSize)) })
   })
 
