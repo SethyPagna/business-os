@@ -13527,3 +13527,40 @@ verified (stored 401 survives desktop↔mobile transitions and renders at 401).
 
 **Not done.** Deploy. Production's 53 real groups are ALL 2-product pairs, so
 bulk merge can cover any subset the operator selects there.
+
+## Part 504 (Aug 30 2026, session business-os-v1-62) — page-wide rollout: export dialogs, SortChip everywhere it's honest, unified date-range pills
+
+Three slices, per the user's "apply to the whole page / all exports / check all
+pages" directive.
+
+**Exports (`e65efcb2` + `10b86423`).** Audited every export surface: Inventory,
+Returns, Sales, all three Contacts tabs and AuditLog already open a float
+options dialog (ExportOptionsDialog); Products uses its fields modal; the
+DASHBOARD was the one page downloading straight off a toolbar menu. New shared
+ExportChoiceDialog (Modal of tappable report rows, grouped, spinner while an
+async exporter runs, closes when started); the Dashboard's Export button moved
+into the preset date-range row as asked. Live verification caught a real bug —
+the group labels rendered raw keys because t(key)||fallback never falls back in
+this app (missing keys return the key) — fixed with translateOr and re-verified:
+dialog shows WHOLE DASHBOARD / BY SECTION groups, KPI Summary ran with spinner
+and the dialog closed.
+
+**SortChip rollout (`0712bb1c`).** Returns (Date/Refund/Customer/Processed-by/
+Type; flat for non-date), Users (Name/Role/Added, client-authoritative), and
+Customers — which is SERVER-paged, so the chip drives a new allowlisted ORDER BY
+on the contacts list API (created_at / lower(name) + dir, id tiebreak, default
+unchanged); grouping follows the field (date → time sections, name → A-Z/Khmer),
+replacing the old direction+group-mode menu options. Points sort deliberately
+omitted (computed after the page slice — can't be honestly server-sorted). Fees
+left chip-less on purpose: its API has no sort and the list is server-paged; a
+client sort would lie across pages (follow-up: API sort param).
+
+**Date ranges (`a305c8c6`).** Fees' list filter, Inventory movements' custom
+range, and the supplier Stock-In Invoices report all replace their loose raw
+start/end date inputs with the shared DateTimeRangePicker Start → End pill (the
+Dashboard/reports control). Form single-date fields deliberately untouched.
+
+Two structural assertions updated for badge-count changes (sort left the
+Filters badge where it moved to the chip). tsc clean both packages; listSort /
+performanceLoadingUx / returnsLayout / contactSearchFilter green. **Needs
+deploy** (frontend + the contacts ORDER BY backend change).
