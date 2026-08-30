@@ -1131,7 +1131,7 @@ export default function Sales() {
         />
       </div>
 
-      <div className="mb-2 flex justify-end">
+      <div className="mb-2 flex justify-center">
         <PaginationControls
           compact
           rangeAsPageSize

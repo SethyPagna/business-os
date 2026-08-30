@@ -2829,7 +2829,7 @@ export default function POS() {
                 message shown inside the empty-grid state further down --
                 same on-screen duplication as Products.tsx. Removed; the
                 grid's own empty/refreshing state (below) is enough. */}
-            <div className="mb-3 flex justify-end">
+            <div className="mb-3 flex justify-center">
               <PaginationControls
                 page={productPage}
                 pageSize={productPageSize}

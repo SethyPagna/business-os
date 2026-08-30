@@ -1,13 +1,17 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import ArrowRight from 'lucide-react/dist/esm/icons/arrow-right.js'
 import CalendarDays from 'lucide-react/dist/esm/icons/calendar-days.js'
+import ChevronLeft from 'lucide-react/dist/esm/icons/chevron-left.js'
+import ChevronRight from 'lucide-react/dist/esm/icons/chevron-right.js'
 import X from 'lucide-react/dist/esm/icons/x.js'
+import AppSelect from './AppSelect'
 
-// X1 (Part 395): the shared date+time range picker, built to the user's two
-// mockups -- a compact "Start → End" trigger pill, and a panel with manual
-// date inputs, an optional HH:MM–HH:MM time row, month chips, a Mon-first
-// calendar range grid, year chips and quarter quick-ranges, closed by the
-// red ✕ or an outside click.
+// X1 (Part 395), redesigned Aug 30 per user direction: a compact
+// "Start → End" trigger pill, and a panel with manual date inputs, an
+// optional HH:MM–HH:MM time row, TWO month/year select rows (one for the
+// start, one for the end -- replacing the old month/year/quarter chip
+// strips), and a Mon-first calendar range grid with its own ‹ month ›
+// navigation. Closed by the red ✕ or an outside click.
 //
 // Display format is MM/DD/YYYY on purpose: the stock mockup artwork shows
 // DD/MM placeholders, but mm/dd/yyyy-everywhere is a settled decision
@@ -152,50 +156,58 @@ export default function DateTimeRangePicker({
     apply({ endDate: iso })
   }
 
-  const selectMonth = (month1: number) => {
-    // One tap = view AND select that whole month of the view year -- what a
-    // tap on "Aug" means; days refine it afterwards.
-    setViewMonth(month1)
-    apply({ startDate: isoOf(viewYear, month1, 1), endDate: isoOf(viewYear, month1, lastDayOfMonth(viewYear, month1)) })
-  }
-
-  const selectQuarter = (year: number, quarter: number) => {
-    const startMonth = (quarter - 1) * 3 + 1
-    const endMonth = startMonth + 2
-    setViewYear(year)
-    setViewMonth(startMonth)
-    apply({ startDate: isoOf(year, startMonth, 1), endDate: isoOf(year, endMonth, lastDayOfMonth(year, endMonth)) })
+  // Start/End month+year select rows (the redesign's replacement for the old
+  // month/year/quarter chip strips). Picking a month or year moves THAT
+  // endpoint into the chosen month, keeping its day when it fits (clamped to
+  // the month's length -- choosing Feb with the 31st selected lands on the
+  // 28th/29th, never an invalid date). An empty endpoint starts at the 1st
+  // (start) / last day (end) of the chosen month. The calendar view follows
+  // the start endpoint so the grid always shows what was just chosen.
+  const setEndpointMonthYear = (which: 'start' | 'end', month1: number, year: number) => {
+    const current = which === 'start' ? value.startDate : value.endDate
+    const fallbackDay = which === 'start' ? 1 : lastDayOfMonth(year, month1)
+    const day = current ? Math.min(Number(current.slice(8, 10)), lastDayOfMonth(year, month1)) : fallbackDay
+    if (which === 'start') {
+      setViewYear(year)
+      setViewMonth(month1)
+      apply({ startDate: isoOf(year, month1, day) })
+    } else {
+      apply({ endDate: isoOf(year, month1, day) })
+    }
   }
 
   const commitManual = (which: 'start' | 'end', raw: string) => {
     const iso = parseManualDate(raw)
     if (which === 'start') {
-      if (!raw.trim()) { setStartInvalid(false); apply({ startDate: '' }); return }
+      if (!raw.trim()) { setStartInvalid(false); if (value.startDate) apply({ startDate: '' }); return }
       if (!iso) { setStartInvalid(true); return }
       setStartInvalid(false)
-      apply({ startDate: iso })
+      // No-op when unchanged -- a blur re-committing the same text must never
+      // fire a second apply that could race a same-tick day click.
+      if (iso !== value.startDate) apply({ startDate: iso })
     } else {
-      if (!raw.trim()) { setEndInvalid(false); apply({ endDate: '' }); return }
+      if (!raw.trim()) { setEndInvalid(false); if (value.endDate) apply({ endDate: '' }); return }
       if (!iso) { setEndInvalid(true); return }
       setEndInvalid(false)
-      apply({ endDate: iso })
+      if (iso !== value.endDate) apply({ endDate: iso })
     }
   }
 
   const currentYear = Number(today.slice(0, 4))
-  const yearChips = useMemo(() => Array.from({ length: 6 }, (_, i) => currentYear - 5 + i), [currentYear])
-  const quarterChips = useMemo(() => {
-    // The last 6 quarters ending at the current one, mockup-style "Q1 25".
-    const chips: Array<{ year: number; quarter: number; label: string }> = []
-    let year = currentYear
-    let quarter = Math.floor((new Date().getMonth()) / 3) + 1
-    for (let i = 0; i < 6; i += 1) {
-      chips.unshift({ year, quarter, label: `Q${quarter} ${String(year).slice(2)}` })
-      quarter -= 1
-      if (quarter === 0) { quarter = 4; year -= 1 }
-    }
-    return chips
-  }, [currentYear])
+  const yearOptions = useMemo(() => Array.from({ length: 8 }, (_, i) => {
+    const year = currentYear - 6 + i
+    return { value: String(year), label: String(year) }
+  }), [currentYear])
+  const monthOptions = useMemo(() => MONTH_LABELS.map((label, index) => ({ value: String(index + 1), label })), [])
+
+  const stepViewMonth = (delta: number) => {
+    let month = viewMonth + delta
+    let year = viewYear
+    if (month < 1) { month = 12; year -= 1 }
+    if (month > 12) { month = 1; year += 1 }
+    setViewMonth(month)
+    setViewYear(year)
+  }
 
   const calendarCells = useMemo(() => {
     const first = new Date(Date.UTC(viewYear, viewMonth - 1, 1))
@@ -211,9 +223,10 @@ export default function DateTimeRangePicker({
   const inRange = (iso: string) => Boolean(value.startDate && value.endDate && iso >= value.startDate && iso <= value.endDate)
   const isEdge = (iso: string) => iso === value.startDate || iso === value.endDate
 
-  const triggerLabel = value.startDate || value.endDate
-    ? `${displayDate(value.startDate) || '…'} → ${displayDate(value.endDate) || '…'}${showTime && (value.startTime || value.endTime) ? ` · ${value.startTime || '00:00'}–${value.endTime || '23:59'}` : ''}`
-    : null
+  const hasDates = Boolean(value.startDate || value.endDate)
+  const timeSuffix = showTime && (value.startTime || value.endTime)
+    ? ` · ${value.startTime || '00:00'}–${value.endTime || '23:59'}`
+    : ''
 
   const hasSelection = isDateTimeRangeActive(value) || Boolean(value.startTime || value.endTime)
 
@@ -229,12 +242,16 @@ export default function DateTimeRangePicker({
         aria-label={t('date_time_range') || 'Date and time range'}
       >
         <CalendarDays className="h-4 w-4 shrink-0 text-blue-500 dark:text-blue-400" />
-        {triggerLabel ? (
-          <span className="truncate">{triggerLabel}</span>
+        {hasDates ? (
+          <>
+            <span className="truncate">{displayDate(value.startDate) || '…'}</span>
+            <ArrowRight className="h-5 w-5 shrink-0 text-blue-500 dark:text-blue-400" strokeWidth={2.5} />
+            <span className="truncate">{displayDate(value.endDate) || '…'}{timeSuffix}</span>
+          </>
         ) : (
           <>
             <span>{t('range_start') || 'Start Date'}</span>
-            <ArrowRight className="h-4 w-4 shrink-0 text-blue-400" />
+            <ArrowRight className="h-5 w-5 shrink-0 text-blue-500 dark:text-blue-400" strokeWidth={2.5} />
             <span>{t('range_end') || 'End Date'}</span>
           </>
         )}
@@ -256,7 +273,7 @@ export default function DateTimeRangePicker({
                 onKeyDown={(event) => { if (event.key === 'Enter') commitManual('start', (event.target as HTMLInputElement).value) }}
                 aria-label={t('range_start') || 'Start date'}
               />
-              <span className="shrink-0 text-slate-400">-</span>
+              <ArrowRight className="h-5 w-5 shrink-0 text-blue-500 dark:text-blue-400" strokeWidth={2.5} aria-hidden="true" />
               <input
                 className={`w-full min-w-0 bg-transparent text-center text-xs outline-none placeholder:text-slate-400 ${endInvalid ? 'text-red-600 dark:text-red-400' : 'text-slate-800 dark:text-slate-100'}`}
                 placeholder="MM/DD/YYYY"
@@ -319,21 +336,60 @@ export default function DateTimeRangePicker({
             </div>
           ) : null}
 
-          {/* Month chips -- one tap selects that whole month of the view year */}
-          <div className="mt-3 grid grid-cols-6 gap-1.5">
-            {MONTH_LABELS.map((label, index) => {
-              const month1 = index + 1
-              const active = viewMonth === month1
+          {/* Start / End rows -- month + year selects per endpoint (the
+              redesign's replacement for the old month/year/quarter chips). */}
+          <div className="mt-3 space-y-1.5">
+            {(['start', 'end'] as const).map((which) => {
+              const iso = which === 'start' ? value.startDate : value.endDate
+              const month1 = iso ? Number(iso.slice(5, 7)) : (which === 'start' ? viewMonth : Number((value.endDate || value.startDate || today).slice(5, 7)))
+              const year = iso ? Number(iso.slice(0, 4)) : (which === 'start' ? viewYear : Number((value.endDate || value.startDate || today).slice(0, 4)))
+              const rowLabel = which === 'start' ? (t('range_start') || 'Start') : (t('range_end') || 'End')
               return (
-                <button key={label} type="button" className={`${chipBase} ${active ? chipActive : chipIdle}`} onClick={() => selectMonth(month1)}>
-                  {label}
-                </button>
+                <div key={which} className="grid grid-cols-[3.25rem_minmax(0,1fr)_minmax(0,5.5rem)] items-center gap-1.5">
+                  <span className="text-[11px] font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">{rowLabel}</span>
+                  <AppSelect
+                    value={String(month1)}
+                    options={monthOptions}
+                    onChange={(next) => setEndpointMonthYear(which, Number(next), year)}
+                    ariaLabel={`${rowLabel} month`}
+                    buttonClassName="w-full px-2.5 py-1.5 text-xs"
+                  />
+                  <AppSelect
+                    value={String(year)}
+                    options={yearOptions}
+                    onChange={(next) => setEndpointMonthYear(which, month1, Number(next))}
+                    ariaLabel={`${rowLabel} year`}
+                    buttonClassName="w-full px-2.5 py-1.5 text-xs"
+                  />
+                </div>
               )
             })}
           </div>
 
-          {/* Calendar range grid, Monday-first */}
+          {/* Calendar range grid, Monday-first, with its own ‹ month › nav
+              (the chips that used to change the view are gone). */}
           <div className="mt-3 rounded-lg border border-slate-100 p-2 dark:border-slate-700/60">
+            <div className="mb-1 flex items-center justify-between">
+              <button
+                type="button"
+                className="inline-flex h-7 w-7 items-center justify-center rounded-md text-slate-500 hover:bg-slate-100 hover:text-slate-800 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-white"
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={() => stepViewMonth(-1)}
+                aria-label="Previous month"
+              >
+                <ChevronLeft className="h-4 w-4" strokeWidth={2.5} />
+              </button>
+              <span className="text-xs font-semibold text-slate-800 dark:text-slate-100">{MONTH_LABELS[viewMonth - 1]} {viewYear}</span>
+              <button
+                type="button"
+                className="inline-flex h-7 w-7 items-center justify-center rounded-md text-slate-500 hover:bg-slate-100 hover:text-slate-800 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-white"
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={() => stepViewMonth(1)}
+                aria-label="Next month"
+              >
+                <ChevronRight className="h-4 w-4" strokeWidth={2.5} />
+              </button>
+            </div>
             <div className="grid grid-cols-7 text-center text-[11px] font-semibold text-slate-600 dark:text-slate-300">
               {DOW_LABELS.map((label) => <div key={label} className="py-1">{label}</div>)}
             </div>
@@ -342,6 +398,11 @@ export default function DateTimeRangePicker({
                 <button
                   key={cell.iso}
                   type="button"
+                  // preventDefault on mousedown: a day click must never first
+                  // blur the manual input (its blur re-commit raced this very
+                  // click and swallowed the selection -- the reported
+                  // "pick a day, pick another, nothing changes" bug).
+                  onMouseDown={(event) => event.preventDefault()}
                   onClick={() => pickDay(cell.iso)}
                   className={`mx-auto my-0.5 flex h-8 w-8 items-center justify-center rounded-md transition ${isEdge(cell.iso)
                     ? 'bg-slate-800 font-semibold text-white dark:bg-slate-200 dark:text-slate-900'
@@ -356,34 +417,6 @@ export default function DateTimeRangePicker({
                 </button>
               ) : <div key={`lead-${index}`} />)}
             </div>
-          </div>
-
-          {/* Year chips -- switch the view year (selection stays put) */}
-          <div className="mt-3 grid grid-cols-6 gap-1.5">
-            {yearChips.map((year) => (
-              <button key={year} type="button" className={`${chipBase} ${viewYear === year ? chipActive : chipIdle}`} onClick={() => setViewYear(year)}>
-                {year}
-              </button>
-            ))}
-          </div>
-
-          {/* Quarter quick-ranges */}
-          <div className="mt-2 grid grid-cols-6 gap-1.5">
-            {quarterChips.map((chip) => {
-              const startMonth = (chip.quarter - 1) * 3 + 1
-              const active = value.startDate === isoOf(chip.year, startMonth, 1)
-                && value.endDate === isoOf(chip.year, startMonth + 2, lastDayOfMonth(chip.year, startMonth + 2))
-              return (
-                <button
-                  key={chip.label}
-                  type="button"
-                  className={`${chipBase} ${active ? chipActive : chipIdle}`}
-                  onClick={() => selectQuarter(chip.year, chip.quarter)}
-                >
-                  {chip.label}
-                </button>
-              )
-            })}
           </div>
         </div>
       ) : null}

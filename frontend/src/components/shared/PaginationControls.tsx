@@ -147,6 +147,21 @@ export default function PaginationControls({
           <ChevronLeft className="h-4 w-4" strokeWidth={2.5} />
         </button>
         <div className="inline-flex min-w-0 items-center gap-1.5 px-1.5">
+          {/* Order per request: the item-range chip (per-page trigger) FIRST,
+              then the editable page number, then the total page count. */}
+          <PageSizeSelect
+            value={safePageSize}
+            options={pageSizeOptions}
+            onChange={(nextValue) => onPageSizeChange?.(nextValue)}
+            ariaLabel={perPageLabel}
+            allowCustom={editablePageSizeInput}
+            hideCaret
+            buttonContent={`${start.toLocaleString()}-${end.toLocaleString()}`}
+            className="min-w-0"
+            buttonClassName="h-6 rounded-full border border-slate-200 bg-slate-100 px-2.5 py-0 text-xs font-semibold text-slate-800 shadow-none hover:bg-slate-200 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700"
+            menuClassName="min-w-[9rem]"
+            optionClassName="text-xs"
+          />
           {editablePageInput ? (
             <>
               <span className="sr-only">{pageLabel}</span>
@@ -164,19 +179,6 @@ export default function PaginationControls({
           ) : (
             <span className="px-0.5 text-xs font-semibold text-slate-800 dark:text-slate-100">{safePage}</span>
           )}
-          <PageSizeSelect
-            value={safePageSize}
-            options={pageSizeOptions}
-            onChange={(nextValue) => onPageSizeChange?.(nextValue)}
-            ariaLabel={perPageLabel}
-            allowCustom={editablePageSizeInput}
-            hideCaret
-            buttonContent={`${start.toLocaleString()}-${end.toLocaleString()}`}
-            className="min-w-0"
-            buttonClassName="h-6 rounded-full border border-slate-200 bg-slate-100 px-2.5 py-0 text-xs font-semibold text-slate-800 shadow-none hover:bg-slate-200 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700"
-            menuClassName="min-w-[9rem]"
-            optionClassName="text-xs"
-          />
           <span className="shrink-0 whitespace-nowrap text-xs font-semibold text-slate-500 dark:text-slate-400">/ {totalPages}</span>
         </div>
         <button

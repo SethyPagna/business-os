@@ -1404,36 +1404,36 @@ ${translateOr('delivery_margin', 'Delivery margin')} ${fmtUSD(aDeliveryMargin)} 
       id: 'whole',
       label: translateOr('export_group_whole', 'Whole dashboard'),
       choices: [
-        { id: 'package', label: t('export_dashboard_package') || 'Export dashboard package', onClick: exportDashboardPackage },
-        { id: 'all', label: t('export_all_report'), onClick: buildExportAll },
-        { id: 'kpis', label: t('export_kpi_summary'), onClick: async () => {
+        { id: 'package', label: t('export_dashboard_package') || 'Export dashboard package', hint: 'ZIP', onClick: exportDashboardPackage },
+        { id: 'all', label: t('export_all_report'), hint: 'Excel', onClick: buildExportAll },
+        { id: 'kpis', label: t('export_kpi_summary'), hint: 'Excel', onClick: async () => {
           const { exportDashboardKpis } = await loadDashboardExportModule()
           exportDashboardKpis(buildDashboardExportContext())
         } },
-        { id: 'stats', label: t('export_dashboard_calculations') || 'Export dashboard stats and calculations', onClick: exportDashboardStats },
+        { id: 'stats', label: t('export_dashboard_calculations') || 'Export dashboard stats and calculations', hint: 'Excel', onClick: exportDashboardStats },
       ],
     },
     {
       id: 'sections',
       label: translateOr('export_group_sections', 'By section'),
       choices: [
-        { id: 'sales-chart', label: t('export_sales_chart'), onClick: async () => {
+        { id: 'sales-chart', label: t('export_sales_chart'), hint: 'Excel', onClick: async () => {
           const { exportDashboardSalesChart } = await loadDashboardExportModule()
           exportDashboardSalesChart(buildDashboardExportContext())
         } },
-        { id: 'top-products', label: t('export_top_products'), onClick: async () => {
+        { id: 'top-products', label: t('export_top_products'), hint: 'Excel', onClick: async () => {
           const { exportDashboardTopProducts } = await loadDashboardExportModule()
           exportDashboardTopProducts(buildDashboardExportContext())
         } },
-        { id: 'top-customers', label: t('export_top_customers'), onClick: async () => {
+        { id: 'top-customers', label: t('export_top_customers'), hint: 'Excel', onClick: async () => {
           const { exportDashboardTopCustomers } = await loadDashboardExportModule()
           exportDashboardTopCustomers(buildDashboardExportContext())
         } },
-        { id: 'payment-methods', label: t('export_payment_methods'), onClick: async () => {
+        { id: 'payment-methods', label: t('export_payment_methods'), hint: 'Excel', onClick: async () => {
           const { exportDashboardPaymentMethods } = await loadDashboardExportModule()
           exportDashboardPaymentMethods(buildDashboardExportContext())
         } },
-        { id: 'branches', label: t('export_branch_performance'), onClick: async () => {
+        { id: 'branches', label: t('export_branch_performance'), hint: 'Excel', onClick: async () => {
           const { exportDashboardBranches } = await loadDashboardExportModule()
           exportDashboardBranches(buildDashboardExportContext())
         } },
@@ -1528,7 +1528,7 @@ ${translateOr('delivery_margin', 'Delivery margin')} ${fmtUSD(aDeliveryMargin)} 
               />
             </div>
           </div>
-          <div className="flex min-w-0 flex-1 gap-1 overflow-x-auto pb-0.5 sm:flex-wrap sm:overflow-visible lg:flex-none lg:pb-0">
+          <div className="flex min-w-0 flex-1 flex-wrap gap-1">
               {RANGE_PRESETS.map(p => (
                 <button key={p.id} onClick={() => setRangeId(p.id)}
                 className={`min-h-7 whitespace-nowrap rounded-md px-2.5 py-1 text-[11px] font-semibold transition-colors sm:min-h-8 sm:px-3 sm:text-xs ${rangeId===p.id ? 'bg-blue-600 text-white shadow-sm' : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600'}`}>

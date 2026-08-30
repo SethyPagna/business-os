@@ -517,7 +517,7 @@ export default function FeesPage() {
             ))}
           </div>
 
-          <div className="mt-3 flex justify-end">
+          <div className="mt-3 flex justify-center">
             <PaginationControls
               compact
               rangeAsPageSize

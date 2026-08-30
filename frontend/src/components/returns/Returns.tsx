@@ -1117,7 +1117,7 @@ export default function Returns() {
 
       <p className="mb-2 text-xs text-gray-400">{tr('tap_to_view_details', 'Tap a record to view details.')}</p>
 
-      <div className="mb-3 flex justify-end">
+      <div className="mb-3 flex justify-center">
         <PaginationControls
           compact
           rangeAsPageSize

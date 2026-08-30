@@ -400,7 +400,7 @@ export function ContactTable<T extends ContactRow>({
 
   return (
     <>
-      <div className="mb-2 flex justify-end">
+      <div className="mb-2 flex justify-center">
         <PaginationControls
           compact
           rangeAsPageSize
