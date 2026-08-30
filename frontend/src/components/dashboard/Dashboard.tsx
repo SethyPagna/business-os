@@ -1556,11 +1556,11 @@ ${translateOr('delivery_margin', 'Delivery margin')} ${fmtUSD(aDeliveryMargin)} 
 
       {/* Period KPI cards */}
         <div className="rounded-xl border border-blue-100 bg-blue-50/40 p-2 dark:border-blue-900/40 dark:bg-blue-950/20 sm:p-2.5">
-          <div className="mb-1.5 flex items-center gap-2">
-            <span className="text-xs font-semibold text-blue-600 dark:text-blue-400 uppercase tracking-wide">{t('period_stats')}</span>
-            <span className="text-xs bg-blue-600 text-white px-2 py-0.5 rounded-full font-medium">{periodShort}</span>
-            <span className="text-xs text-gray-400 ml-auto hidden sm:inline">{rangeLabel}</span>
-          </div>
+          {/* No "PERIOD STATS + preset pill + range text" header any more
+              (user, Aug 30 2026): the KPIs always cover exactly the selected
+              date range, so the header only restated the range box above it.
+              periodShort/rangeLabel still exist -- exports and the KPI drill
+              panel use them. */}
           {analyticsPending ? (
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-4 sm:gap-2.5">
               {[...Array(8)].map((_, i) => <div key={i} className="card h-16 animate-pulse rounded-xl bg-gray-100 dark:bg-gray-700" />)}
