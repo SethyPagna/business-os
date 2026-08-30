@@ -200,16 +200,29 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
   const [multiProducts, setMultiProducts] = useState<TransferProduct[]>([])
   const [loadingMultiProducts, setLoadingMultiProducts] = useState(false)
   const [selectedQuantities, setSelectedQuantities] = useState<Record<string, string>>({})
+  // Multi mode: view filter that narrows the (whole-catalog) list to just
+  // the checked rows, so the picked set can be reviewed/adjusted in one
+  // screen instead of hunting scattered highlighted rows through thousands.
+  const [showSelectedOnly, setShowSelectedOnly] = useState(false)
   const [savingBulk, setSavingBulk] = useState(false)
   const multiStockRequestRef = useRef(0)
   const multiProductsBranchRef = useRef('')
   const transferBulkInFlightRef = useRef(false)
 
-  useEffect(() => () => {
-    aliveRef.current = false
-    invalidateTrackedRequest(stockRequestRef)
-    invalidateTrackedRequest(multiStockRequestRef)
-    invalidateTrackedRequest(batchRequestRef)
+  useEffect(() => {
+    // Re-arm on mount, not just init-once: StrictMode's dev double-mount runs
+    // this cleanup between the two mounts, and a `useRef(true)` that is never
+    // set back leaves aliveRef false for the whole real lifetime -- every
+    // fetch result (products, batches, bulk list) was then discarded and the
+    // pickers sat on "Loading..." forever. Same mount/cleanup pair the other
+    // aliveRef surfaces (Settings, AuditLog, Sales, ...) already use.
+    aliveRef.current = true
+    return () => {
+      aliveRef.current = false
+      invalidateTrackedRequest(stockRequestRef)
+      invalidateTrackedRequest(multiStockRequestRef)
+      invalidateTrackedRequest(batchRequestRef)
+    }
   }, [])
 
   const branchOptions = useMemo<AppSelectOption[]>(() => [
@@ -408,7 +421,14 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
   // levels has no meaning once fromBranch changes to B.
   useEffect(() => {
     setSelectedQuantities({})
+    setShowSelectedOnly(false)
   }, [fromBranch])
+
+  // An empty selection has nothing for the selected-only view to show --
+  // drop back to the full list rather than an empty-looking picker.
+  useEffect(() => {
+    if (!Object.keys(selectedQuantities).length) setShowSelectedOnly(false)
+  }, [selectedQuantities])
 
   /**
    * 4. Search Filter
@@ -431,14 +451,15 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
    */
   const filteredMulti = useMemo(() => {
     const query = debouncedSearch.trim().toLowerCase()
-    const inStock = multiProducts.filter((product) => Number(product.branch_quantity || 0) > 0)
+    let inStock = multiProducts.filter((product) => Number(product.branch_quantity || 0) > 0)
+    if (showSelectedOnly) inStock = inStock.filter((product) => String(product.id) in selectedQuantities)
     if (!query) return inStock
     return inStock.filter((product) => {
       const name = String(product.name || '').toLowerCase()
       const sku = String(product.sku || '').toLowerCase()
       return name.includes(query) || sku.includes(query)
     })
-  }, [multiProducts, debouncedSearch])
+  }, [multiProducts, debouncedSearch, showSelectedOnly, selectedQuantities])
 
   // Same name/cost/price/barcode grouping every other list surface in the
   // app applies (Products/Inventory/POS/Branches' own stock grid, via
@@ -732,7 +753,7 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
             </div>
           ) : null}
 
-          {fromBranch && mode === 'single' ? (
+          {fromBranch && mode === 'single' && !selectedProduct ? (
             <div>
               <label htmlFor="transfer-product-search" className="mb-1 block text-sm font-semibold text-gray-700 dark:text-gray-300">
                 {t('select_product') || 'Select Product'}
@@ -760,17 +781,13 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
                       setSelectedProduct(product)
                       setQuantity('')
                     }}
-                    className={`flex w-full items-center justify-between px-4 py-2.5 text-left transition-colors ${
-                      selectedProduct?.id === product.id
-                        ? 'bg-blue-50 dark:bg-blue-900/30'
-                        : 'hover:bg-gray-50 dark:hover:bg-gray-700/50'
-                    }`}
+                    className="flex w-full items-center justify-between gap-2 px-4 py-2.5 text-left transition-colors hover:bg-gray-50 dark:hover:bg-gray-700/50"
                   >
-                    <div>
+                    <div className="min-w-0">
                       <span className="text-sm font-medium text-gray-900 dark:text-white">{product.name}</span>
                       {product.sku ? <span className="ml-2 font-mono text-xs text-gray-400">{product.sku}</span> : null}
                     </div>
-                    <span className={`text-sm font-bold ${Number(product.branch_quantity || 0) > 0 ? 'text-green-600' : 'text-red-500'}`}>
+                    <span className={`shrink-0 text-sm font-bold ${Number(product.branch_quantity || 0) > 0 ? 'text-green-600' : 'text-red-500'}`}>
                       {product.branch_quantity} {product.unit}
                     </span>
                   </button>
@@ -780,11 +797,26 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
           ) : null}
 
           {selectedProduct && mode === 'single' ? (
-            <div className="space-y-3 rounded-xl bg-blue-50 p-4 dark:bg-blue-900/20">
-              <div className="flex items-center justify-between">
-                <span className="text-sm font-semibold text-blue-800 dark:text-blue-300">{selectedProduct.name}</span>
-                <span className="text-sm text-gray-500 dark:text-gray-400">
+            // Once a product is picked the search box + result list above
+            // collapse away entirely (this panel replaces them) -- keeping
+            // both stacked made the modal tall enough that quantity/note sat
+            // below the fold, reported as the selected area being "very bad
+            // and large". "Change" clears the pick, restoring the list.
+            <div className="space-y-2.5 rounded-xl bg-blue-50 p-3 dark:bg-blue-900/20">
+              <div className="flex min-w-0 items-center justify-between gap-2">
+                <span className="min-w-0 truncate text-sm font-semibold text-blue-800 dark:text-blue-300">{selectedProduct.name}</span>
+                <span className="flex shrink-0 items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
                   {t('available') || 'Available'}: <strong>{selectedProduct.branch_quantity} {selectedProduct.unit}</strong>
+                  <button
+                    type="button"
+                    className="rounded-lg border border-blue-200 bg-white px-2 py-0.5 text-xs font-medium text-blue-700 transition-colors hover:bg-blue-100 dark:border-blue-800 dark:bg-blue-950/40 dark:text-blue-300 dark:hover:bg-blue-900/50"
+                    onClick={() => {
+                      setSelectedProduct(null)
+                      setQuantity('')
+                    }}
+                  >
+                    {t('transfer_change_product') || 'Change'}
+                  </button>
                 </span>
               </div>
 
@@ -829,50 +861,55 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
                 </div>
               ) : null}
 
-              <div>
-                <label htmlFor="transfer-quantity" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
-                  {t('quantity') || 'Quantity'}
-                </label>
-                <div className="flex items-center gap-2">
-                  <input
-                    id="transfer-quantity"
-                    name="transfer_quantity"
-                    className="input w-40"
-                    type="number"
-                    min="0.01"
-                    max={transferAvailable}
-                    step="any"
-                    value={quantity}
-                    onChange={(event) => setQuantity(event.target.value)}
-                    placeholder="0"
-                    autoFocus
-                    disabled={batchSelectionRequired && !selectedBatchId}
-                    aria-invalid={quantity !== '' && (!Number.isFinite(Number(quantity)) || Number(quantity) <= 0) ? 'true' : 'false'}
-                  />
-                  <span className="text-sm text-gray-500 dark:text-gray-400">{selectedProduct.unit}</span>
-                  <button
-                    className="btn-secondary px-2 py-1.5 text-xs"
-                    type="button"
-                    disabled={batchSelectionRequired && !selectedBatchId}
-                    onClick={() => setQuantity(String(transferAvailable))}
-                  >
-                    {t('all') || 'All'}
-                  </button>
+              {/* Quantity and note share one row from sm up -- stacked they
+                  pushed the panel (and the modal's footer) taller for no
+                  gain; each label sits over its own field either way. */}
+              <div className="grid gap-2.5 sm:grid-cols-[auto,minmax(0,1fr)]">
+                <div>
+                  <label htmlFor="transfer-quantity" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                    {t('quantity') || 'Quantity'}
+                  </label>
+                  <div className="flex items-center gap-2">
+                    <input
+                      id="transfer-quantity"
+                      name="transfer_quantity"
+                      className="input w-28"
+                      type="number"
+                      min="0.01"
+                      max={transferAvailable}
+                      step="any"
+                      value={quantity}
+                      onChange={(event) => setQuantity(event.target.value)}
+                      placeholder="0"
+                      autoFocus
+                      disabled={batchSelectionRequired && !selectedBatchId}
+                      aria-invalid={quantity !== '' && (!Number.isFinite(Number(quantity)) || Number(quantity) <= 0) ? 'true' : 'false'}
+                    />
+                    <span className="text-sm text-gray-500 dark:text-gray-400">{selectedProduct.unit}</span>
+                    <button
+                      className="btn-secondary px-2 py-1.5 text-xs"
+                      type="button"
+                      disabled={batchSelectionRequired && !selectedBatchId}
+                      onClick={() => setQuantity(String(transferAvailable))}
+                    >
+                      {t('all') || 'All'}
+                    </button>
+                  </div>
                 </div>
-              </div>
 
-              <div>
-                <label htmlFor="transfer-note" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
-                  {t('transfer_note') || 'Transfer note'} ({t('optional') || 'Optional'})
-                </label>
-                <input
-                  id="transfer-note"
-                  name="transfer_note"
-                  className="input"
-                  value={note}
-                  onChange={(event) => setNote(event.target.value)}
-                  placeholder={t('transfer_stock_note_placeholder') || 'e.g. Restocking branch 2'}
-                />
+                <div className="min-w-0">
+                  <label htmlFor="transfer-note" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                    {t('transfer_note') || 'Transfer note'} ({t('optional') || 'Optional'})
+                  </label>
+                  <input
+                    id="transfer-note"
+                    name="transfer_note"
+                    className="input"
+                    value={note}
+                    onChange={(event) => setNote(event.target.value)}
+                    placeholder={t('transfer_stock_note_placeholder') || 'e.g. Restocking branch 2'}
+                  />
+                </div>
               </div>
             </div>
           ) : null}
@@ -891,20 +928,34 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
                 onChange={(event) => setSearch(event.target.value)}
               />
 
-              <label className="mb-2 flex items-center gap-2 text-sm font-medium text-gray-700 dark:text-gray-300">
-                <input
-                  type="checkbox"
-                  checked={allFilteredSelected}
-                  onChange={toggleSelectAllFiltered}
-                  disabled={loadingMultiProducts || filteredMulti.length === 0}
-                />
-                {t('transfer_select_all') || 'Select all'}
+              <div className="mb-2 flex flex-wrap items-center gap-2">
+                <label className="flex items-center gap-2 text-sm font-medium text-gray-700 dark:text-gray-300">
+                  <input
+                    type="checkbox"
+                    checked={allFilteredSelected}
+                    onChange={toggleSelectAllFiltered}
+                    disabled={loadingMultiProducts || filteredMulti.length === 0}
+                  />
+                  {t('transfer_select_all') || 'Select all'}
+                </label>
                 {selectedCount > 0 ? (
-                  <span className="text-xs font-normal text-gray-400">
+                  // The count doubles as a view toggle: tap to see ONLY the
+                  // checked rows (review/adjust the whole picked set in one
+                  // screen), tap again for the full list.
+                  <button
+                    type="button"
+                    onClick={() => setShowSelectedOnly((current) => !current)}
+                    aria-pressed={showSelectedOnly}
+                    className={`rounded-full px-2.5 py-0.5 text-xs font-semibold transition-colors ${
+                      showSelectedOnly
+                        ? 'bg-blue-600 text-white'
+                        : 'bg-blue-50 text-blue-700 hover:bg-blue-100 dark:bg-blue-900/30 dark:text-blue-300 dark:hover:bg-blue-900/50'
+                    }`}
+                  >
                     {(t('transfer_selected_count') || '{n} selected').replace('{n}', String(selectedCount))}
-                  </span>
+                  </button>
                 ) : null}
-              </label>
+              </div>
 
               <div className="max-h-64 overflow-auto divide-y divide-gray-100 rounded-xl border border-gray-200 dark:divide-gray-700 dark:border-gray-600">
                 {loadingMultiProducts ? (
