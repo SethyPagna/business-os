@@ -3,7 +3,7 @@ import { getDb } from '../lib/db'
 import { requireAuth, type SessionUser } from '../lib/auth'
 import { audit } from '../lib/audit'
 import { hasPermission, isAdminControlUser, isSensitiveActionHistory, permissionForActionHistory } from '../lib/permissions'
-import { resolveUndoApplier } from '../lib/undoAppliers'
+import { isServerReplayable, resolveUndoApplier } from '../lib/undoAppliers'
 import type { Env } from '../index'
 
 // Ported from backend/src/routes/actionHistory.ts. This replaces the
@@ -96,11 +96,18 @@ function canRecordHistory(user: SessionUser, body: Record<string, unknown>): boo
 }
 
 function mapRow(row: ActionHistoryRow) {
+  const undoPayload = parseJson(row.undo_payload)
+  const redoPayload = parseJson(row.redo_payload)
   return {
     ...row,
     reversible: !!row.reversible,
-    undo_payload: parseJson(row.undo_payload),
-    redo_payload: parseJson(row.redo_payload),
+    undo_payload: undoPayload,
+    redo_payload: redoPayload,
+    // K1 slice 2: tells the client this row's next transition can be replayed
+    // by the Worker (its payload names a registered applier), so a RELOADED
+    // page -- which has no live closure for the row -- can still render a
+    // real Undo/Redo button instead of the inert "Recorded" label.
+    server_replayable: isServerReplayable(row, undoPayload, redoPayload),
   }
 }
 
@@ -211,6 +218,13 @@ async function completeServerHistoryTransition(c: Context<{ Bindings: Env; Varia
   const user = c.get('user')
   const db = getDb(c.env)
   try {
+    // require_applied (K1 slice 2): a caller with NO live closure -- a page
+    // that reloaded since the action -- sets this so the request only
+    // succeeds when the Worker itself replays the reversal. Without the
+    // flag, the pre-existing contract holds: flip the status and hand the
+    // payload back for the caller's own closure to replay.
+    const body = (await c.req.json<Record<string, unknown>>().catch(() => ({}))) as Record<string, unknown>
+    const requireApplied = body?.require_applied === true || ['1', 'true'].includes(String(body?.require_applied || '').toLowerCase())
     const actionId = Number(c.req.param('id') || 0)
     if (!Number.isInteger(actionId) || actionId <= 0) return c.json({ success: false, error: 'Action history item not found' }, 404)
     const existing = await db.prepare('SELECT * FROM action_history WHERE id = @id').get<ActionHistoryRow>({ id: actionId })
@@ -231,6 +245,17 @@ async function completeServerHistoryTransition(c: Context<{ Bindings: Env; Varia
     // applier leaves the action reversible and retryable rather than half-done.
     const payload = direction === 'undo' ? parseJson(existing.undo_payload) : parseJson(existing.redo_payload)
     const applier = resolveUndoApplier(payload)
+    // Refuse BEFORE any status flip: if the caller cannot replay the payload
+    // itself (require_applied) and the Worker cannot either (no registered
+    // applier), flipping the status would record a reversal that never
+    // happened. Nothing changes, so the row stays exactly as reversible as
+    // it was.
+    if (requireApplied && !applier) {
+      return c.json({
+        success: false,
+        error: 'This action was recorded without a server-replayable payload, so it can only be reversed from the tab that performed it.',
+      }, 409)
+    }
     let applied = false
     if (applier) {
       try {

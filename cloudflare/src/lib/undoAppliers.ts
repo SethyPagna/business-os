@@ -78,6 +78,24 @@ export function resolveUndoApplier(payload: Record<string, unknown> | null | und
   return run ? { name, run } : null
 }
 
+// Whether a stored action_history row's NEXT transition can be replayed by the
+// Worker itself: an 'undoable' row's next transition is an undo (replaying its
+// undo_payload), a 'redoable' row's is a redo (redo_payload) -- any other
+// status has no next transition. This is what lets a RELOADED page (no live
+// closure) still offer a real Undo/Redo button for the row: actionability is a
+// property of the stored payload, not of the tab that recorded it.
+export function isServerReplayable(
+  row: { reversible?: unknown; status?: unknown },
+  undoPayload: Record<string, unknown> | null | undefined,
+  redoPayload: Record<string, unknown> | null | undefined,
+): boolean {
+  if (!Number(row?.reversible || 0)) return false
+  const status = String(row?.status || '').toLowerCase()
+  if (status === 'undoable') return !!resolveUndoApplier(undoPayload)
+  if (status === 'redoable') return !!resolveUndoApplier(redoPayload)
+  return false
+}
+
 // Exposed for tests: the set of applier names the Worker can execute today.
 export function registeredUndoAppliers(): string[] {
   return Object.keys(APPLIERS)

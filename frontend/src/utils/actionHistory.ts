@@ -358,6 +358,42 @@ export function useActionHistory({ limit = 10, notify, scope = 'global', enabled
   const undo = useCallback((entryId: string | number | null = null) => runEntry('undo', entryId), [runEntry])
   const redo = useCallback((entryId: string | number | null = null) => runEntry('redo', entryId), [runEntry])
 
+  // K1 slice 2: reverse a SERVER row that has no live closure here -- an
+  // action recorded before this page loaded (or by another tab/user, for an
+  // admin). Only offered by the UI for rows the server marked
+  // server_replayable; require_applied makes that authoritative -- if no
+  // registered applier can replay the payload, the server refuses without
+  // flipping the status, so a reversal is never recorded that didn't happen.
+  // Page data catches up through the applier's own broadcast, so no refresh
+  // closure is needed (there is none to have -- that's the point).
+  const runServerEntry = useCallback(async (direction: ActionDirection, serverId: ActionHistoryId, label = ''): Promise<boolean> => {
+    if (!serverId || busy) return false
+    setBusy(direction)
+    try {
+      const api = await loadActionHistoryTransport()
+      const response = direction === 'undo'
+        ? await api.undoActionHistory(serverId, { require_applied: true })
+        : await api.redoActionHistory(serverId, { require_applied: true })
+      const applied = !!(response && typeof response === 'object' && (response as { applied?: unknown }).applied)
+      refreshServerItems()
+      if (!applied) {
+        notify?.(`Unable to ${direction} that action right now.`, 'error')
+        return false
+      }
+      if (label) notify?.(label)
+      return true
+    } catch (error) {
+      refreshServerItems()
+      notify?.(getErrorMessage(error, `Unable to ${direction} that action right now.`), 'error')
+      return false
+    } finally {
+      setBusy('')
+    }
+  }, [busy, notify, refreshServerItems])
+
+  const undoServer = useCallback((serverId: ActionHistoryId, label = '') => runServerEntry('undo', serverId, label), [runServerEntry])
+  const redoServer = useCallback((serverId: ActionHistoryId, label = '') => runServerEntry('redo', serverId, label), [runServerEntry])
+
   return useMemo(() => ({
     busy,
     canUndo: undoStack.length > 0 && !busy,
@@ -375,5 +411,7 @@ export function useActionHistory({ limit = 10, notify, scope = 'global', enabled
     pushAction,
     undo,
     redo,
-  }), [busy, isAdmin, pushAction, redo, redoStack, refreshServerItems, serverItems, undo, undoStack, userFilter, userOptions])
+    undoServer,
+    redoServer,
+  }), [busy, isAdmin, pushAction, redo, redoServer, redoStack, refreshServerItems, serverItems, undo, undoServer, undoStack, userFilter, userOptions])
 }

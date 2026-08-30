@@ -26,6 +26,11 @@ type HistoryItem = {
   label?: string
   status?: string
   serverId?: string | number | null
+  undo_label?: string | null
+  redo_label?: string | null
+  // Server-computed (K1 slice 2): this row's next transition can be replayed
+  // by the Worker itself, so it is actionable even with no live closure here.
+  server_replayable?: boolean
 }
 
 type UserOption = {
@@ -49,6 +54,8 @@ type ActionHistory = {
   lastRedoLabel?: string
   undo: (id?: string | number) => void
   redo: (id?: string | number) => void
+  undoServer?: (serverId: string | number, label?: string) => void
+  redoServer?: (serverId: string | number, label?: string) => void
 }
 
 type ActionHistoryBarProps = {
@@ -255,7 +262,39 @@ export default function ActionHistoryBar({
                 <span className="rounded-full bg-emerald-100 px-2 py-0.5 font-semibold text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-200">{T('redo', 'Redo')}</span>
               </button>
             ))}
-            {recordedItems.map((item) => (
+            {recordedItems.map((item) => {
+              // K1 slice 2: a server row whose payload the Worker can replay
+              // is a REAL Undo/Redo button even though no live closure exists
+              // in this tab (the whole point -- reversibility survives the
+              // reload). Rows without a server-replayable payload keep the
+              // honest inert "Recorded" treatment below.
+              const direction = item?.status === 'redoable' ? 'redo' : 'undo'
+              const runServer = direction === 'redo' ? history.redoServer : history.undoServer
+              const serverActionable = !!item?.server_replayable
+                && (item?.status === 'undoable' || item?.status === 'redoable')
+                && typeof runServer === 'function'
+                && item?.id != null
+              if (serverActionable) {
+                const doneLabel = (direction === 'redo' ? item.redo_label : item.undo_label) || item.label || ''
+                return (
+                  <button
+                    key={`recorded-${item.id || item.label}`}
+                    type="button"
+                    className="flex w-full items-center justify-between gap-2 rounded-xl px-3 py-2 text-left hover:bg-slate-100 disabled:opacity-50 dark:hover:bg-slate-800"
+                    disabled={!!history.busy}
+                    onClick={() => { closeMenu(); runServer!(item.id!, doneLabel) }}
+                  >
+                    <span className="min-w-0 truncate text-slate-700 dark:text-slate-200" title={item.label}>{item.label}</span>
+                    <span className={direction === 'redo'
+                      ? 'rounded-full bg-emerald-100 px-2 py-0.5 font-semibold text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-200'
+                      : 'rounded-full bg-blue-100 px-2 py-0.5 font-semibold text-blue-700 dark:bg-blue-900/40 dark:text-blue-200'}
+                    >
+                      {direction === 'redo' ? T('redo', 'Redo') : T('undo', 'Undo')}
+                    </span>
+                  </button>
+                )
+              }
+              return (
               <div
                 key={`recorded-${item.id || item.label}`}
                 className="flex w-full items-center justify-between gap-2 rounded-xl px-3 py-2 text-left opacity-70"
@@ -268,7 +307,8 @@ export default function ActionHistoryBar({
                 <span className="min-w-0 truncate text-slate-700 dark:text-slate-200" title={item.label}>{item.label}</span>
                 <span className="rounded-full bg-slate-100 px-2 py-0.5 font-semibold text-slate-600 dark:bg-slate-800 dark:text-slate-300">{formatServerStatus(item, T, false)}</span>
               </div>
-            ))}
+              )
+            })}
           </>
         )}
       />

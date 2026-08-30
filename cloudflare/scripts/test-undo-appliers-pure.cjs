@@ -94,7 +94,7 @@ const undoAppliers = loadModule('lib/undoAppliers.ts', (id) => {
   if (id === './branchWrites') return branchWrites
   return require(id)
 })
-const { resolveUndoApplier, registeredUndoAppliers } = undoAppliers
+const { resolveUndoApplier, registeredUndoAppliers, isServerReplayable } = undoAppliers
 
 let passed = 0
 async function check(name, fn) {
@@ -186,6 +186,39 @@ await check('source lock: routes/branches.ts replays the same write via branchUp
   const routeSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'routes', 'branches.ts'), 'utf8')
   assert.ok(/branchUpdateStatements\(/.test(routeSrc), 'branches.ts must call the shared branchUpdateStatements')
   assert.ok(/from '\.\.\/lib\/branchWrites'/.test(routeSrc), 'branches.ts must import branchWrites')
+})
+
+// --- K1 slice 2: reloaded rows become actionable ---------------------------
+
+await check('isServerReplayable follows the row status to the RIGHT payload and stays false otherwise', () => {
+  const replayable = { applier: 'branch.update', id: 2, fields: { name: 'Shop' } }
+  const notRegistered = { applier: 'not.registered', id: 2 }
+  // undoable rows consult the undo payload, redoable rows the redo payload.
+  assert.strictEqual(isServerReplayable({ reversible: 1, status: 'undoable' }, replayable, null), true)
+  assert.strictEqual(isServerReplayable({ reversible: 1, status: 'undoable' }, null, replayable), false)
+  assert.strictEqual(isServerReplayable({ reversible: 1, status: 'redoable' }, null, replayable), true)
+  assert.strictEqual(isServerReplayable({ reversible: 1, status: 'redoable' }, replayable, null), false)
+  // Unregistered appliers, terminal/recorded statuses and irreversible rows
+  // never read as replayable.
+  assert.strictEqual(isServerReplayable({ reversible: 1, status: 'undoable' }, notRegistered, null), false)
+  assert.strictEqual(isServerReplayable({ reversible: 1, status: 'recorded' }, replayable, replayable), false)
+  assert.strictEqual(isServerReplayable({ reversible: 1, status: 'failed' }, replayable, replayable), false)
+  assert.strictEqual(isServerReplayable({ reversible: 0, status: 'undoable' }, replayable, replayable), false)
+})
+
+await check('source lock: routes/actionHistory.ts stamps server_replayable and refuses require_applied BEFORE the status flip', () => {
+  const routeSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'routes', 'actionHistory.ts'), 'utf8')
+  assert.ok(/isServerReplayable/.test(routeSrc), 'actionHistory.ts must import/use isServerReplayable')
+  assert.ok(/server_replayable:\s*isServerReplayable\(/.test(routeSrc), 'mapRow must stamp server_replayable via the shared helper')
+  // The require_applied refusal must come BEFORE the status-flip UPDATE inside
+  // the transition handler -- refusing after the flip would record a reversal
+  // that never happened.
+  const handlerStart = routeSrc.indexOf('completeServerHistoryTransition')
+  const refusalAt = routeSrc.indexOf('requireApplied && !applier', handlerStart)
+  const statusFlipAt = routeSrc.indexOf('UPDATE action_history SET status = @status, last_error = NULL', handlerStart)
+  assert.ok(refusalAt > -1, 'the require_applied refusal must exist in the transition handler')
+  assert.ok(statusFlipAt > -1, 'expected the transition status-flip UPDATE')
+  assert.ok(refusalAt < statusFlipAt, 'the require_applied refusal must run before the status flip')
 })
 
 }

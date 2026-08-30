@@ -47,19 +47,19 @@ export function updateActionHistory(id: string | number, payload: ActionHistoryP
   )
 }
 
-export function undoActionHistory(id: string | number): Promise<unknown> {
+export function undoActionHistory(id: string | number, payload: ActionHistoryPayload = {}): Promise<unknown> {
   return route(
     `actionHistory:undo:${id}`,
-    () => apiFetch('POST', `/api/action-history/${id}/undo`, getDevicePayload()),
+    () => apiFetch('POST', `/api/action-history/${id}/undo`, { ...getDevicePayload(), ...(payload || {}) }),
     null,
     true,
   )
 }
 
-export function redoActionHistory(id: string | number): Promise<unknown> {
+export function redoActionHistory(id: string | number, payload: ActionHistoryPayload = {}): Promise<unknown> {
   return route(
     `actionHistory:redo:${id}`,
-    () => apiFetch('POST', `/api/action-history/${id}/redo`, getDevicePayload()),
+    () => apiFetch('POST', `/api/action-history/${id}/redo`, { ...getDevicePayload(), ...(payload || {}) }),
     null,
     true,
   )
