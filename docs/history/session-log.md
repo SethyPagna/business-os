@@ -13564,3 +13564,40 @@ Two structural assertions updated for badge-count changes (sort left the
 Filters badge where it moved to the chip). tsc clean both packages; listSort /
 performanceLoadingUx / returnsLayout / contactSearchFilter green. **Needs
 deploy** (frontend + the contacts ORDER BY backend change).
+
+## Part 505 (Aug 30 2026, session business-os-v1-62) — the Aug-30 polish batch: pager, date picker rebuild + two real bugs, blocked buttons root-caused, product-detail batches, Khmer chips
+
+Eight-item user batch, all shipped and live-verified on a second dev server
+(8899; the shared 8787 was held by a peer):
+
+- **Pager** (`8a8757bf`): range chip now FIRST, then page number, then /total;
+  the row is centered on Sales/Returns/Fees/Contacts/POS.
+- **Date picker rebuilt** (`8a8757bf` + `41cb445c`): month/year/quarter chip
+  strips removed; TWO Start/End rows with smart Month (Jan..Dec) + Year
+  selects (day preserved, clamped to month length); calendar gets its own
+  ‹ Aug 2026 › nav; the arrow between Start and End is a proper bold
+  ArrowRight icon. TWO real selection bugs fixed: (1) a day click first
+  blurred the manual input whose re-commit raced and swallowed the click
+  (mousedown preventDefault + no-op unchanged commits); (2) pickDay inferred
+  the end-phase from an empty endDate, but the Dashboard's onChange ignores
+  blank dates so the calendar could never set the END there -- explicit
+  phase ref now alternates start/end/start. Verified live: 05→05/05,
+  31→05..31 (the 31st works), 12 restarts, 03 swaps.
+- **'Various buttons blocked' root-caused** (`eb8f9a1c`): the POS receipt
+  overlay portals to <body>; a receipt left open kept its full-screen
+  z-50 backdrop over EVERY page after switching away (hit-test showed the
+  Sales toolbar BLOCKED by it). Overlay now gated on POS isActive; queue kept.
+- **Khmer chips** (`eb8f9a1c`): hub/section chips wrapped Khmer labels onto
+  two lines mid-chip; whitespace-nowrap on Sales/Branches/Settings hubs,
+  Promotions, SectionSwitcher. Khmer overflow audit of POS/Sales at 375px: 0
+  horizontal overflows; the reported 'zoom' was pane scaling, not the app.
+- **Product detail** (`c42a71ca`): exactly ONE batch surface kept (stack-icon
+  button -> ManageBatchesModal); the 'Batch: latest received date' row
+  removed (post-migration it showed the import-day opening-lot date -- wrong
+  at a glance) with its computation; the folded Batches SectionCard above
+  Stock Changes removed; Stock + Status rows moved after Margin.
+- **Dashboard export** (`8a8757bf`): choice rows show format (Excel/ZIP);
+  preset+Export row wraps instead of going out of bounds.
+
+.claude/launch.json gained worker-dev-b (port 8899) for dual-session preview.
+tsc clean; pagination/product-detail/perf guards green. **Needs deploy.**
