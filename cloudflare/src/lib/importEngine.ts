@@ -1609,6 +1609,15 @@ export async function classifyProducts(
     // exists) and always takes the ordinary create path below.
     const requestedRowMode = lower(str(row._action))
 
+    // Blank money cells on a matched merge row keep the existing values --
+    // see preserveExistingMoneyOnBlankCells' own comment for the measured
+    // 61-product cost wipe this closes. Runs after the detail-rule presets
+    // (money fields aren't in their key list, so there is no overlap) and
+    // respects an explicit reviewer override_replace.
+    if (productImportMode === 'merge' && requestedRowMode !== 'override_replace') {
+      preserveExistingMoneyOnBlankCells(data, match as unknown as Record<string, unknown> | null, row as unknown as Record<string, unknown>)
+    }
+
     // BulkImportModal.tsx's review step lets the reviewer mark an
     // individual row 'skip_row' (IMPORT_DECISION_OPTIONS) without pulling
     // it out of the CSV -- baked into `_action` the same way merge_stock/
@@ -2825,6 +2834,48 @@ function applyFillBlankOnlyMode(data: Record<string, unknown>, match: Record<str
     data[key] = match[key]
     const companion = MULTI_VALUE_COMPANION[key]
     if (companion) data[companion] = match[companion] ?? match[key] ?? null
+  }
+}
+
+// Money columns come out of normalizeImportMoney as 0 whether the CSV cell
+// said "0" or said nothing at all -- and unlike the detail fields above,
+// none of the price/cost columns are covered by the field-rule presets. So
+// in plain 'merge' mode a matched row whose cost cell was simply BLANK wrote
+// that 0 over the product's real cost. Measured on the Aug-30 migration
+// audit: the snapshot file's warehouse twin rows carry blank cost cells, and
+// exactly 61 products (source cost present on the shop row only) had their
+// cost wiped to 0 by the very next row of the same file.
+//
+// The rule this enforces: on a matched row, a blank money cell means "no
+// value provided -- keep what the product already has", never "set to 0".
+// An explicit 0 in the file still lands as 0. Exported for the pure test
+// harness. Only the merge path calls it -- replace_all/replace_columns are
+// deliberately destructive, fill_blank already protects every non-blank
+// existing value, and a reviewer-chosen override_replace is an explicit
+// "take this row's fields as they are".
+export const PRODUCT_MONEY_FIELD_SOURCES: ReadonlyArray<readonly [string, ReadonlyArray<string>]> = [
+  ['selling_price_usd', ['selling_price_usd', 'price_usd']],
+  ['selling_price_khr', ['selling_price_khr', 'price_khr']],
+  ['special_price_usd', ['vip_price_usd', 'special_price_usd']],
+  ['special_price_khr', ['vip_price_khr', 'special_price_khr']],
+  ['cost_price_usd', ['cost_price_usd', 'purchase_price_usd', 'cost_usd']],
+  ['cost_price_khr', ['cost_price_khr', 'purchase_price_khr', 'cost_khr']],
+]
+
+export function preserveExistingMoneyOnBlankCells(
+  data: Record<string, unknown>,
+  match: Record<string, unknown> | null,
+  row: Record<string, unknown>,
+): void {
+  if (!match) return
+  for (const [field, sources] of PRODUCT_MONEY_FIELD_SOURCES) {
+    // The cell counts as provided if ANY accepted header alias carried a
+    // non-blank value -- same alias order the normalizer itself reads.
+    const provided = sources.some((key) => !isBlankFieldValue(row[key]))
+    if (provided) continue
+    const existing = match[field]
+    if (existing === null || existing === undefined) continue
+    data[field] = existing
   }
 }
 

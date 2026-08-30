@@ -1968,6 +1968,88 @@ assert.strictEqual(isD1CpuLimitError(new Error('Network request failed')), false
   console.log('PASS buildDescriptionFromColumns / classifyProducts Customer Portal description-column import mapping (Part 329)')
 }
 
+// preserveExistingMoneyOnBlankCells -- a matched merge row whose money cell
+// is BLANK must keep the product's existing value, never write the
+// normalizer's 0 over it. Measured on the Aug-30 migration audit: the
+// snapshot file's warehouse twin rows carry blank cost cells and wiped 61
+// products' real costs (an explicit "0" in the file must still land as 0).
+{
+  const { classifyProducts, preserveExistingMoneyOnBlankCells } = moduleObj.exports
+  assert.strictEqual(typeof preserveExistingMoneyOnBlankCells, 'function', 'preserveExistingMoneyOnBlankCells should be exported')
+
+  // Pure helper behavior first.
+  {
+    const data = { cost_price_usd: 0, cost_price_khr: 0, selling_price_usd: 45, special_price_usd: 0 }
+    const match = { cost_price_usd: 38, cost_price_khr: 155800, selling_price_usd: 45, special_price_usd: 40 }
+    preserveExistingMoneyOnBlankCells(data, match, { name: 'X', selling_price_usd: '45' })
+    assert.strictEqual(data.cost_price_usd, 38, 'blank cost cell must keep the existing cost')
+    assert.strictEqual(data.cost_price_khr, 155800, 'blank khr cost cell must keep the existing khr cost')
+    assert.strictEqual(data.special_price_usd, 40, 'blank VIP cell on a matched row must keep the existing VIP price')
+    assert.strictEqual(data.selling_price_usd, 45, 'provided selling cell is untouched')
+  }
+  {
+    const data = { cost_price_usd: 0 }
+    preserveExistingMoneyOnBlankCells(data, { cost_price_usd: 38 }, { cost_price_usd: '0' })
+    assert.strictEqual(data.cost_price_usd, 0, 'an EXPLICIT 0 in the file must still land as 0')
+  }
+  {
+    const data = { cost_price_usd: 0 }
+    preserveExistingMoneyOnBlankCells(data, { cost_price_usd: 38 }, { purchase_price_usd: '7.5' })
+    assert.strictEqual(data.cost_price_usd, 0, 'a value under a legacy alias header counts as provided (normalizer already read it)')
+  }
+  {
+    const data = { cost_price_usd: 0 }
+    preserveExistingMoneyOnBlankCells(data, null, {})
+    assert.strictEqual(data.cost_price_usd, 0, 'no match (create path) is a no-op')
+  }
+
+  // End-to-end through the real classify: matched row, blank cost cell.
+  const makeFakeProductsDb = (existingProducts = [], branches = [{ id: 1, name: 'Main Branch', is_default: 1 }]) => ({
+    prepare: (sql) => ({
+      all: async () => {
+        if (/FROM import_job_files/.test(sql)) return []
+        if (/FROM products/.test(sql)) return existingProducts
+        if (/FROM branches/.test(sql)) return branches
+        return []
+      },
+    }),
+  })
+  const existing = {
+    id: 61, sku: 'SKU-COST', barcode: null, name: 'Cost Keeper',
+    cost_price_usd: 38, cost_price_khr: null, selling_price_usd: 45, selling_price_khr: null,
+    category: 'Cat', brand: 'Brand', unit: 'pcs', supplier: null, description: null, low_stock_threshold: 10,
+  }
+  {
+    const db = makeFakeProductsDb([existing])
+    const results = await classifyProducts(db, [{
+      _rowNumber: 1, name: 'Cost Keeper', sku: 'SKU-COST',
+      selling_price_usd: '45', cost_price_usd: '',
+    }], 'job-blank-cost-keeps', null, new Map())
+    assert.strictEqual(results[0].data.cost_price_usd, 38, 'merge: a matched row with a blank cost cell must keep the existing cost, not zero it')
+  }
+  {
+    const db = makeFakeProductsDb([existing])
+    const results = await classifyProducts(db, [{
+      _rowNumber: 1, name: 'Cost Keeper', sku: 'SKU-COST',
+      selling_price_usd: '45', cost_price_usd: '0',
+    }], 'job-explicit-zero-lands', null, new Map())
+    // `=== 0` not strictEqual: normalizeImportMoney('0') yields -0 (round-up
+    // implementation detail; stores as 0.0 in SQLite) and strictEqual is
+    // SameValue, which tells -0 from 0.
+    assert.ok(results[0].data.cost_price_usd === 0, 'merge: an explicit 0 cost in the file must still land as 0')
+  }
+  {
+    const db = makeFakeProductsDb([existing])
+    const results = await classifyProducts(db, [{
+      _rowNumber: 1, name: 'Cost Keeper', sku: 'SKU-COST',
+      selling_price_usd: '45', cost_price_usd: '', _action: 'override_replace',
+    }], 'job-override-respected', null, new Map())
+    assert.ok(results[0].data.cost_price_usd === 0, 'a reviewer-chosen override_replace takes the row as-is (blank -> 0)')
+  }
+
+  console.log('PASS preserveExistingMoneyOnBlankCells -- blank money cells on matched merge rows keep existing values (61-product cost-wipe regression)')
+}
+
 }
 
 runAsyncTests().catch((error) => {
