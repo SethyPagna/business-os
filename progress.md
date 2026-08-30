@@ -1799,9 +1799,15 @@ other" with the Phase-Y items.*
   click-through deferred (peer owns the shared 8787 dev server). **REMAINING:**
   (a) currency-symbol contrast — scattered across many files incl. peer POS
   lanes; needs a coordinated sweep. (b) "Receipt Settings moved into main
-  Settings" — a larger IA change, its own unit. (c) whether to REMOVE Settings
-  from the main nav (leaving it only in the ☰) — a discoverability call for
-  the user.
+  Settings" — a larger IA change, its own unit. (c) **RESOLVED (Part 491, needs
+  deploy):** the user made the call — Settings AND Receipt Settings are removed
+  from the main nav and folded into a full-width, expandable **account row**
+  (Profile / Settings / Receipt Settings / Update / Exit), which SUPERSEDES the
+  Part-2 ☰ menu entirely; the same panel opens as a dropdown from the mobile
+  header avatar so both form factors match. A shared `ACCOUNT_NAV_IDS`
+  (navigationConfig) also drops them from the Settings nav-order/pinning editor.
+  Partly covers (b): Receipt Settings now lives under the account, though not
+  merged INTO the Settings page (that stays its own unit).
 - [~] Z6. **OTP enable broken + buried under the profile page — HIGH
   priority.** **Layering FIXED (Part 426, needs deploy):** the OTP dialog
   rendered inline inside UserProfileModal — a DOM child of its tree,
