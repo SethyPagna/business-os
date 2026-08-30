@@ -14452,3 +14452,30 @@ refusal-before-delete locks), backup suites 10+18+12+1 green, reset 16 +
 finalize 8 + route-permissions + audit-coverage 49 + audit-log-filters 17
 green, cloudflare tsc clean. **Needs deploy** (rides with Parts
 507/512/513/517/518).
+
+## Part 522 (Aug 30 2026, session business-os-v1-b9) — Part-77 HIGH fix: offline chunk failure no longer bricks the PWA
+
+**Ask:** findings-backlog continuation (claimed first, re-verified). A lazy
+page-chunk import fails offline whenever the SW never cached that page's
+bundle — and App.tsx's chunk-recovery path responded by DELETING the
+`business-os-app-shell-*` / `business-os-static-*` caches (the device's only
+copy of the app) and then hard-reloading, which offline can fetch nothing:
+the whole installed PWA bricked over one missing page until connectivity
+returned. Commit `8963f1a1`:
+
+- `triggerChunkRecoveryReload` declines when `navigator.onLine === false`,
+  BEFORE spending the one-shot retry marker — caches kept, marker unspent,
+  so the full recovery (wipe + reload) stays armed for when the device is
+  back online. Recovery's entire mechanism is "refetch the newest
+  HTML/chunk graph", so running it offline was pure destruction with no
+  upside.
+- `lazyWithRetry` honors the declined recovery by falling through to the
+  thrown error — the page-level error UI shows and every cached page keeps
+  working.
+
+Verified: appRefresh, offlineSyncArchitecture, offlineSecurityHardening,
+runtimeErrorClassifier, performanceLoadingUx all green (the last is green
+on HEAD again after coordinator 7b's Part 520); frontend tsc clean apart
+from a peer's in-flight uncommitted StockChangeSection.tsx edit
+(`bucketCell` — attributed via the uncommitted diff, not mine).
+**Needs deploy** (rides with the b9 batch: Parts 507/512/513/517/518/521).
