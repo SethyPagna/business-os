@@ -95,4 +95,28 @@ check('no declared foreign key dangles after the full chain', () => {
   assert.deepStrictEqual(rows, [], `foreign_key_check reported: ${JSON.stringify(rows.slice(0, 5))}`)
 })
 
+check('the portal customer-account tables from 0086 exist with their uniqueness gates', () => {
+  const tables = new Set(
+    sqlite.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all().map((r) => r.name),
+  )
+  for (const t of ['portal_accounts', 'portal_sessions', 'portal_password_resets', 'portal_auth_lockouts']) {
+    assert.ok(tables.has(t), `missing portal table: ${t}`)
+  }
+  // phone is the one-account-per-number gate; membership_id is case-insensitively unique.
+  sqlite.prepare("INSERT INTO portal_accounts (membership_id, name, phone, password_hash) VALUES ('LB-1','A','012345678','h')").run()
+  assert.throws(
+    () => sqlite.prepare("INSERT INTO portal_accounts (membership_id, name, phone, password_hash) VALUES ('LB-2','B','012345678','h')").run(),
+    /UNIQUE constraint failed/,
+    'a second account on the same canonical phone must be refused',
+  )
+  assert.throws(
+    () => sqlite.prepare("INSERT INTO portal_accounts (membership_id, name, phone, password_hash) VALUES (' lb-1 ','C','099999999','h')").run(),
+    /UNIQUE constraint failed/,
+    'membership_id uniqueness must be case- and whitespace-insensitive',
+  )
+  // customers gained the canonical phone key + its partial index.
+  const custCols = sqlite.prepare('PRAGMA table_info(customers)').all().map((r) => r.name)
+  assert.ok(custCols.includes('phone_normalized'), 'customers.phone_normalized missing')
+})
+
 console.log(`\n${passed} checks passed (${migrationFiles.length} migrations in the chain)`)
