@@ -13107,3 +13107,70 @@ re-checking max = 492.
 
 **Needs deploy.** Yes — the fix ships on the next `npm run deploy:full`. iOS
 installs made before then keep their cached "Business OS" name until re-added.
+
+## Part 494 (Aug 30 2026, session business-os-v1-17) — diacritic search restored on Sales/Returns (0082); K1 scoped-out as un-disjointable
+
+**Ask.** Continue progress.md / continue tasks. The board being saturated by
+peers, the user picked two items to pursue: the Part-484 diacritic-search gap
+and K1 (server-level undo/redo).
+
+**Diacritic search — SHIPPED, needs deploy (`36086b8f`).** Root cause (from
+Part 484, re-confirmed by tracing the code): `buildSalesSearchWhere`
+(routes/sales.ts) and its twin in routes/returns.ts build the flat haystack
+from RAW columns yet pass `alreadyNormalized=true` to `buildLikeAliasClause`,
+so `normalizedHaystackSql` emits `lower(COALESCE(expr,''))` with ZERO diacritic
+REPLACE chain — while the typed query IS folded (tokenizeSearchTermGroups →
+normalizeSearchText). So a folded query word ("jose") could never match a
+stored "José": query folded, haystack not. Restoring the fold at query time
+re-crosses D1's depth-100 limit (SQLITE_TOOBIG) — the whole reason 0037 moved
+products to a write-time column. Fixed the same way: **migration 0082** adds
+`sales.search_normalized` + `returns.search_normalized`; the three live INSERT
+sites (sales.ts POST /, returns.ts customer + supplier returns) populate them
+with `normalizeSearchText` of each row's own searchable text fields — the exact
+fold the query uses; the two search builders **PREPEND**
+`COALESCE(…search_normalized,'')` to the UNCHANGED raw haystack. Because the
+blob is additive (added on top of, not in place of, the raw concat), a row
+without a blob — every historical/import row, which the peer-owned importers in
+lib/salesImportCommit.ts / lib/stockActionCommit.ts intentionally do not
+populate — searches EXACTLY as before: no regression, no crash. **No data
+backfill:** Part 484 measured zero existing rows carrying Latin diacritics in
+any flat column, and SQL cannot reproduce normalizeSearchText's NFD/Unicode/
+O→0 fold anyway, so a backfill would be a no-op it cannot even do faithfully;
+the raw fallback covers existing rows and write-time covers all new ones.
+Membership number stays a separate joined term (customers table, digits, no
+fold). Flagged: a future BULK sales/returns importer wanting full fold coverage
+should populate the column the way the live routes do (noted in the migration).
+
+**What was found + verified.** `test-sales-returns-search-pure.cjs` 16 → 19
+checks: the fix is isolated to the mechanism — two sales (and two returns)
+carry the identical accented name "José …", differing only in whether the blob
+is populated, and a folded query finds ONLY the blob-bearing row while the
+NULL-blob row keeps its pre-0082 behavior (still found by ASCII fields). All 19
+PASS. `cloudflare tsc --noEmit` clean; migration applies to isolated sqlite
+(both columns added); `npm run test:import-engine` green (the untouched import
+sales-insert path is unaffected by the nullable column).
+
+**K1 (server-level undo/redo) — NOT started; reported as un-disjointable.**
+Examined the architecture end to end. `action_history` already exists as a
+payload store + status machine (routes/actionHistory.ts), but its own client
+hook is explicit (utils/actionHistory.ts:143-149): the undoable stack holds
+LIVE JS CLOSURES, and "there's no generic way to serialize how to undo this for
+arbitrary actions" — so `undo_payload`/`redo_payload` are almost always `{}`
+today. Making the SERVER replay payloads (the K1 spec) requires every one of
+the ~20 consumer components (products, contacts, branches, inventory, files,
+custom-tables, lookups, returns…) to emit a declarative payload — all
+peer-hot. Building only the server applier framework would be dormant,
+speculative code (Golden Rule: no zombie code). There is no file-disjoint slice
+that delivers K1 end-to-end without touching peer-hot consumers, so it was left
+for the user to direct (worktree vertical slice for one scope, cross-session
+file coordination, or defer).
+
+**Parallel sessions.** File-disjoint unit throughout: new migration 0082,
+sales.ts, returns.ts, the search test — none overlapping the peers' in-flight
+importEngine.ts / system.ts / test-reset-products-pure.cjs lanes. Part number
+taken as max(grep ^## Part)+1 = 494 after Part 493 landed. progress.md +
+session-log committed via atomic pathspec once peers' edits to them had landed.
+
+**Needs deploy.** Yes — 0082 applies on the next `migrate:remote` / deploy:full
+(instant `ALTER ADD COLUMN`, no data write); the fold then applies to every new
+sale/return, existing rows unchanged.
