@@ -3181,6 +3181,18 @@ function ProductsFullEditor() {
               <div className="min-w-0 flex-1">
                 <div {...getKhmerTextProps(productName, 'truncate text-sm font-semibold text-gray-900 dark:text-white')} title={productName}>{productName}</div>
               </div>
+              {/* Batch count rides the name row as a small YELLOW badge
+                  (user, Aug 30: "add number of batches yellow next to the
+                  standalone product rows and child rows"); the truncating
+                  name above can never touch it. */}
+              {Number((p as { batch_count?: number }).batch_count || 0) > 0 ? (
+                <span
+                  className="mt-0.5 inline-flex shrink-0 items-center rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-800 dark:bg-amber-900/40 dark:text-amber-300"
+                  title={`${Number((p as { batch_count?: number }).batch_count || 0)} ${t('batches') || 'batches'}`}
+                >
+                  {Number((p as { batch_count?: number }).batch_count || 0)}
+                </span>
+              ) : null}
             </div>
             {/* min-h matches one chip's height (text-[10px] line ~15px +
                 py-0.5 = 19px) so a product with NO barcode/brand keeps the
@@ -3480,6 +3492,34 @@ function ProductsFullEditor() {
           bg-gray-50/dark:bg-gray-900 matches #app-root's background (the
           page-scroll itself is transparent) so list rows scrolling
           underneath don't show through while this is stuck. */}
+      {/* The "Created" batch-received-date range sits ABOVE the search row
+          (user, Aug 30: "move the start and end date above the search
+          function row") as a fit-to-content pill, not a stretched bar. */}
+      <div className="mb-1.5 flex flex-wrap items-center gap-1.5 px-0.5">
+        <DateTimeRangePicker
+          t={t}
+          showTime={false}
+          value={{ startDate: createdDateFrom, endDate: createdDateTo, startTime: '', endTime: '' }}
+          onChange={(range) => { setCreatedDateFrom(range.startDate); setCreatedDateTo(range.endDate) }}
+        />
+        {/* The pager shares this row ("pages and items per page … better
+            designed") instead of sitting centered on a row of its own. */}
+        <div className="ml-auto flex min-w-0 justify-end">
+          <PaginationControls
+            compact
+            rangeAsPageSize
+            editablePageSizeInput={false}
+            page={productPage}
+            pageSize={productSafePageSize}
+            totalItems={productTotal}
+            onPageChange={setProductPage}
+            onPageSizeChange={(nextValue) => { setProductPageSize(nextValue); setProductPage(1) }}
+            pageSizeOptions={PAGE_SIZE_OPTIONS}
+            t={t}
+          />
+        </div>
+      </div>
+
       <div className="sticky top-0 z-30 -mx-1 bg-gray-50/95 pb-2 pt-2 backdrop-blur dark:bg-gray-900/95 sm:mx-0">
         {/* Y13: a plain page-level search row (the folding "Search &
             Filters" SectionCard wrapper was removed). SearchInput's own
@@ -3522,25 +3562,6 @@ function ProductsFullEditor() {
           </div>
       </div>
 
-      {/* Y13 + Aug-29 rework: the "Created" batch-received-date range. It was
-          a cramped "Created [box] – [box]" whose two bare native date boxes
-          never said which was Start vs End (user, Aug 29: "inbuilt start and
-          end ... made full row"). Now it uses the shared DateTimeRangePicker
-          (X1) — the SAME clean "Start → End" pill + calendar the Dashboard and
-          Sales reports use, so the date range looks identical across the app —
-          stretched to fill the row. Still the server-side batchDateFrom/To
-          range (date-only, so the time row is off); the picker carries its own
-          Clear, and the Filters menu's "Clear all" still resets it too. */}
-      <div className="mb-2 flex items-center gap-2 px-0.5">
-        <DateTimeRangePicker
-          t={t}
-          showTime={false}
-          value={{ startDate: createdDateFrom, endDate: createdDateTo, startTime: '', endTime: '' }}
-          onChange={(range) => { setCreatedDateFrom(range.startDate); setCreatedDateTo(range.endDate) }}
-          className="min-w-0 flex-1"
-          triggerClassName="flex w-full items-center justify-center gap-2 rounded-xl px-3 py-1.5"
-        />
-      </div>
 
         {bulkDeleteJobStatus && (bulkDeleteJobStatus.status === 'pending' || bulkDeleteJobStatus.status === 'processing') && (
           <div className="bulk-toolbar mb-2 flex items-center gap-3 rounded-2xl border px-3 py-2 text-xs sm:rounded-xl">
@@ -3568,14 +3589,11 @@ function ProductsFullEditor() {
             Card chrome only WHILE selecting -- idle, this row holds nothing
             but the self-bordered pager pill, and boxing that again was the
             double-card look (Aug 30 report). */}
-        <div className={`mb-2 ${hasSelected ? 'bulk-toolbar overflow-hidden rounded-2xl border shadow-sm sm:rounded-xl' : ''}`}>
+        {/* Bulk bar renders ONLY while selecting -- the pager moved up into
+            the Created-date row, so idle this row costs zero height. */}
+        <div className={hasSelected ? 'bulk-toolbar mb-2 overflow-hidden rounded-2xl border shadow-sm sm:rounded-xl' : 'hidden'}>
           <div className="px-2 py-2">
             <div className="flex flex-wrap items-center gap-1.5">
-                {/* 11.2 alignment: no always-visible "Select all" here -- the
-                    desktop header checkbox is the select-all in select mode,
-                    like the other five list pages. This slot now just shows
-                    the running "N selected" count while selecting; the pager
-                    (Y20) stays on this row via ml-auto below. */}
                 {hasSelected ? (
                   <span className="inline-flex min-w-0 items-center overflow-hidden rounded-2xl border border-slate-200 bg-white/95 px-2.5 py-1.5 text-[11px] font-medium text-slate-700 shadow-sm dark:border-slate-700 dark:bg-slate-900/85 dark:text-slate-100">
                     <span className="truncate whitespace-nowrap">{productSelectedLabel}</span>
@@ -3586,30 +3604,11 @@ function ProductsFullEditor() {
                     type="button"
                     disabled={bulkActionBusy}
                     onClick={handleBulkDelete}
-                    className="inline-flex h-8 min-w-[4.8rem] shrink-0 items-center justify-center whitespace-nowrap rounded-2xl border border-rose-200 bg-white px-2.5 text-[10px] font-semibold text-rose-700 shadow-sm transition-colors hover:border-rose-300 hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-rose-900/50 dark:bg-slate-950 dark:text-rose-300 dark:hover:border-rose-800 dark:hover:bg-rose-950/20"
+                    className="inline-flex h-8 shrink-0 items-center justify-center whitespace-nowrap rounded-2xl border border-rose-200 bg-white px-2.5 text-[10px] font-semibold text-rose-700 shadow-sm transition-colors hover:border-rose-300 hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-rose-900/50 dark:bg-slate-950 dark:text-rose-300 dark:hover:border-rose-800 dark:hover:bg-rose-950/20"
                   >
                     {productChipLabels.delete}
                   </button>
                 ) : null}
-                {/* Y20: the pagination controls fold into this select-all
-                    row (they used to be a whole separate bar above the
-                    search). Right-aligned via ml-auto; wraps to its own line
-                    on narrow screens. The range chip "1-20" is itself the
-                    per-page dropdown. */}
-                <div className={hasSelected ? 'ml-auto flex min-w-0 justify-end' : 'flex w-full min-w-0 justify-center'}>
-                  <PaginationControls
-                    compact
-                    rangeAsPageSize
-                    editablePageSizeInput={false}
-                    page={productPage}
-                    pageSize={productSafePageSize}
-                    totalItems={productTotal}
-                    onPageChange={setProductPage}
-                    onPageSizeChange={(nextValue) => { setProductPageSize(nextValue); setProductPage(1) }}
-                    pageSizeOptions={PAGE_SIZE_OPTIONS}
-                    t={t}
-                  />
-                </div>
             </div>
           </div>
           {hasSelected ? (
@@ -3966,19 +3965,12 @@ function ProductsFullEditor() {
 
       {/* Duplicates review section -- mirrors the contacts Possible
           Duplicates panel for the product catalog. "Open" on a row jumps
-          back to the listing pre-filtered to that product's name so the
-          reviewer can compare full details by hand. */}
+          resolution happens IN PLACE via the tab's own edit float — it
+          never navigates away (user, Aug 30). */}
       {activeProductSection === 'duplicates' && canMergeDuplicates && (
         <div className="mt-1">
           <Suspense fallback={<div className="py-6 text-center text-sm text-gray-400">{t('loading') || 'Loading'}...</div>}>
-            <ProductDuplicatesTab
-              t={t}
-              notify={notify}
-              onResolve={(term) => {
-                setActiveProductSection('products')
-                setSearch(term)
-              }}
-            />
+            <ProductDuplicatesTab t={t} notify={notify} />
           </Suspense>
         </div>
       )}

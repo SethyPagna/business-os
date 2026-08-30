@@ -1030,34 +1030,28 @@ export default function Returns() {
         t={t}
         range={stripRange}
         onRangeChange={setStripRange}
+        actions={(
+          // Range row hosts the page actions ("one row with the add
+          // buttons"): Export + History fold-fit, then the primary action
+          // sized to content — no more full-width flex-1 stretching.
+          <>
+            <ExportMenu label={tr('export', 'Export')} items={exportItems} triggerClassName="h-8 px-2.5 text-xs" />
+            <ActionHistoryBar history={actionHistory as unknown as ActionHistoryBarHistory} t={t} className="min-w-0" />
+            {scope === SUPPLIER_SCOPE ? (
+              <button onClick={() => setShowSupplierForm(true)} className="inline-flex h-8 shrink-0 items-center gap-1 rounded-lg bg-blue-600 px-2.5 text-xs font-semibold text-white transition-colors hover:bg-blue-700" aria-label={tr('return_to_supplier', 'Return to Supplier')}>
+                <Undo2 className="h-3.5 w-3.5 shrink-0" />
+                <span className="hidden sm:inline">{tr('return_to_supplier', 'Return to Supplier')}</span>
+              </button>
+            ) : (
+              <button onClick={() => setShowCustomerForm(true)} className="inline-flex h-8 shrink-0 items-center gap-1 rounded-lg bg-blue-600 px-2.5 text-xs font-semibold text-white transition-colors hover:bg-blue-700" aria-label={tr('new_return', 'New Return')}>
+                <Undo2 className="h-3.5 w-3.5 shrink-0" />
+                <span className="hidden sm:inline">{tr('new_return', 'New Return')}</span>
+              </button>
+            )}
+          </>
+        )}
       />
 
-      {/* Merged toolbar row: Export/History/the primary New Return action
-          each take an equal share of the row's full width (flex-1, labels
-          always visible) -- previously History alone grew to fill the row
-          (via its wrapper only; the small icon button inside it stayed put)
-          while the primary action sat pinned off on the right behind
-          `ml-auto`, so a wide invisible History button ended up crowding
-          right up against it with barely any gap. Giving every button an
-          equal, bounded share fixes both the dead space and the crowding in
-          one pass. Kept above the search row so Export/New Return/History
-          are the first thing in the flow, with search/filter directly
-          underneath. */}
-      <div className="mb-3 flex min-w-0 items-stretch gap-1.5 overflow-x-auto pb-1">
-        <ExportMenu label={tr('export', 'Export')} items={exportItems} triggerClassName="h-9 w-full flex-1" triggerWrapperClassName="flex-1" />
-        <ActionHistoryBar history={actionHistory as unknown as ActionHistoryBarHistory} t={t} className="min-w-0 flex-1" showLabel />
-        {scope === SUPPLIER_SCOPE ? (
-          <button onClick={() => setShowSupplierForm(true)} className="btn-primary inline-flex h-9 flex-1 items-center justify-center gap-1.5 whitespace-nowrap px-2 text-xs sm:text-sm" aria-label={tr('return_to_supplier', 'Return to Supplier')}>
-            <Undo2 className="h-4 w-4 shrink-0" />
-            <span className="truncate">{tr('return_to_supplier', 'Return to Supplier')}</span>
-          </button>
-        ) : (
-          <button onClick={() => setShowCustomerForm(true)} className="btn-primary inline-flex h-9 flex-1 items-center justify-center gap-1.5 whitespace-nowrap px-2 text-xs sm:text-sm" aria-label={tr('new_return', 'New Return')}>
-            <Undo2 className="h-4 w-4 shrink-0" />
-            <span className="truncate">{tr('new_return', 'New Return')}</span>
-          </button>
-        )}
-      </div>
 
       {/* Search + filter pin to the top of the page's scroll container while
           scrolling -- same `sticky top-2` treatment as Products/Inventory/

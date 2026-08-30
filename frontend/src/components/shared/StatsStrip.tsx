@@ -69,6 +69,7 @@ export default function StatsStrip({
   loading = false,
   range,
   onRangeChange,
+  actions,
   className = '',
 }: {
   cards: StatCardDef[]
@@ -77,6 +78,10 @@ export default function StatsStrip({
   /** Omit both range props to control the range from the page (Dashboard). */
   range?: DateTimeRange
   onRangeChange?: (range: DateTimeRange) => void
+  /** Page actions (Add/Manage buttons) rendered at the RIGHT end of the
+   * range row — "the date start and end date is one row with the add
+   * buttons, to save space" (user, Aug 30). */
+  actions?: ReactNode
   className?: string
 }) {
   const tr = (key: string, fallback: string): string => {
@@ -90,30 +95,34 @@ export default function StatsStrip({
 
   return (
     <div className={`min-w-0 ${className}`}>
-      <div className="flex min-w-0 flex-wrap items-stretch gap-1.5">
-        {range && onRangeChange ? (
-          <div className="flex shrink-0 items-center gap-1">
-            <DateTimeRangePicker value={range} onChange={onRangeChange} t={t} showTime={false} />
-            {PRESETS.map((preset) => (
-              <button
-                key={preset.key}
-                type="button"
-                onClick={() => onRangeChange(statsPresetRange(preset.key))}
-                className={`hidden rounded-md px-2 py-1.5 text-[11px] font-medium transition-colors sm:inline-flex ${
-                  activePreset === preset.key
-                    ? 'bg-slate-800 text-white dark:bg-slate-200 dark:text-slate-900'
-                    : 'bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-zinc-800 dark:text-gray-300 dark:hover:bg-zinc-700'
-                }`}
-              >
-                {tr(preset.langKey, preset.fallback)}
-              </button>
-            ))}
-          </div>
-        ) : null}
+      {/* Row 1: range + presets + page actions. Row 2: the cards — "stats
+          can be below the date range" (user, Aug 30). */}
+      {range && onRangeChange ? (
+        <div className="mb-1.5 flex min-w-0 flex-wrap items-center gap-1">
+          <DateTimeRangePicker value={range} onChange={onRangeChange} t={t} showTime={false} />
+          {PRESETS.map((preset) => (
+            <button
+              key={preset.key}
+              type="button"
+              onClick={() => onRangeChange(statsPresetRange(preset.key))}
+              className={`hidden rounded-md px-1.5 py-1 text-[11px] font-medium transition-colors sm:inline-flex ${
+                activePreset === preset.key
+                  ? 'bg-slate-800 text-white dark:bg-slate-200 dark:text-slate-900'
+                  : 'bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-zinc-800 dark:text-gray-300 dark:hover:bg-zinc-700'
+              }`}
+            >
+              {tr(preset.langKey, preset.fallback)}
+            </button>
+          ))}
+          {actions ? <div className="ml-auto flex min-w-0 items-center gap-1">{actions}</div> : null}
+        </div>
+      ) : actions ? (
+        <div className="mb-1.5 flex min-w-0 flex-wrap items-center justify-end gap-1">{actions}</div>
+      ) : null}
 
-        {/* The cards ride one horizontal line; overflow scrolls sideways
-            instead of stacking rows (phones especially). */}
-        <div className="flex min-w-0 flex-1 gap-1.5 overflow-x-auto pb-0.5">
+      {/* The cards ride one horizontal line; overflow scrolls sideways
+          instead of stacking rows (phones especially). */}
+      <div className="flex min-w-0 gap-1.5 overflow-x-auto pb-0.5">
           {cards.map((card) => {
             const foldable = Boolean(card.details?.length)
             const isOpen = openKey === card.key && foldable
@@ -124,7 +133,7 @@ export default function StatsStrip({
                 disabled={!foldable}
                 aria-expanded={foldable ? isOpen : undefined}
                 onClick={() => setOpenKey((current) => (current === card.key ? null : card.key))}
-                className={`flex shrink-0 flex-col rounded-xl border px-2.5 py-1.5 text-left transition-colors ${
+                className={`flex shrink-0 flex-col rounded-lg border px-2 py-1 text-left transition-colors ${
                   isOpen
                     ? 'border-blue-300 bg-blue-50/70 dark:border-blue-700 dark:bg-blue-950/40'
                     : 'border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-900'
@@ -150,11 +159,10 @@ export default function StatsStrip({
               </button>
             )
           })}
-        </div>
       </div>
 
       {openCard ? (
-        <div className="mt-1.5 rounded-xl border border-blue-200 bg-blue-50/40 px-3 py-2.5 dark:border-blue-900/50 dark:bg-blue-950/20">
+        <div className="mt-1.5 max-h-64 overflow-y-auto rounded-xl border border-blue-200 bg-blue-50/40 px-3 py-2 dark:border-blue-900/50 dark:bg-blue-950/20">
           <div className="mb-1.5 flex items-center gap-1.5">
             <span className="text-[11px] font-semibold uppercase tracking-wide text-blue-700 dark:text-blue-300">{openCard.label}</span>
             {openCard.hint ? (

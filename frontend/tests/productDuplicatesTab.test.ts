@@ -56,6 +56,23 @@ test('the bulk bar reuses the contacts panel\'s shared vocabulary (one review pa
   }
 })
 
+test('groups apply only after EVERY row is decided, with exactly one Keep', () => {
+  // Decide-all-then-apply (user, Aug 30): per-row Keep/Remove decisions,
+  // Apply armed only when the whole group is decided with one keeper.
+  assert.match(src, /const \[decisions, setDecisions\] = useState<Record<number, 'keep' \| 'remove'>>/)
+  assert.match(src, /const everyDecided = cluster\.products\.every\(\(product\) => decisions\[product\.id\]\)/)
+  assert.match(src, /const canApply = Boolean\(keeper\) && everyDecided && removals\.length > 0/)
+  assert.match(src, /onApplyDecisions\(keeper, removals\)/)
+  assert.match(src, /if \(next\[Number\(id\)\] === 'keep'\) delete next\[Number\(id\)\]/, 'picking a new Keep demotes the old keeper to undecided')
+})
+
+test('Resolve edits IN PLACE via a float — the tab never navigates away', () => {
+  assert.match(src, /const \[editTarget, setEditTarget\] = useState<ClusterProduct \| null>/)
+  assert.match(src, /updateProduct\(editTarget\.id, \{/)
+  assert.match(src, /<Modal title=/, 'the edit float is the shared Modal')
+  assert.ok(!src.includes('onResolve'), 'no navigation-out prop remains')
+})
+
 if (failed > 0) {
   console.error(`${failed} test(s) failed`)
   process.exit(1)

@@ -14596,3 +14596,71 @@ Verified: returns batch-restock 10, replace-damaged 10, batches-permission
 8, dated-count apply 7 + route 12, fifo 5, inventory-transfer-lots 4,
 lot-ledger-reconcile 9, stock-ledger 17, stock-action-commit — all green;
 cloudflare tsc clean. **Needs deploy** (rides with the b9 batch).
+
+## Part 526
+
+**Ask.** The user's 25-item refinement batch (Aug 30 evening): stats below the
+date range; fit-not-stretched buttons; Sales' blocked buttons; Add Fee too wide;
+range row hosts add buttons; Reports single-select "All" + branch inline with
+"…" + text summaries with "|" + click-to-open scrollable floats + no wide arrow
+column; date picker month/year into the calendar header; Products range above
+search + pager row redesign + hover guide + mobile batch badges without group
+title rows; Sales mobile third-row status + "…" payment badge + year/month/day
+organization; Duplicates resolve in place + decide-all-then-apply; de-carding
+and scrollability notes.
+
+**What changed.**
+- *StatsStrip v2*: the mini cards moved BELOW the range row; the range row
+  gained an `actions` slot for page buttons; tighter card/chip padding; the
+  fold panel now caps at max-h-64 with its own scroll.
+- *Sales*: the standalone History/Manage bar and the centered pager row are
+  GONE (this was also the "buttons being blocked" surface) — History + the
+  one Manage menu (Import/Export folded) ride the strip's range row; the
+  pager rides the sticky search row. "Click a row for details" deleted. The
+  list organizes BY DAY always (mm/dd/yyyy section headers carry
+  year+month+day). Mobile sale cards: receipt+time row, meta row, then a
+  THIRD row with StatusBadge + a truncating payment badge that can never
+  touch the KHR figure.
+- *Fees*: Add Fee is fit-to-content and lives in the strip's range row; the
+  old wide toolbar copy removed.
+- *Returns*: Export/History/New Return moved into the strip's range row,
+  fit-sized (labels hide below sm).
+- *Products*: the Created range pill moved ABOVE the sticky search row and
+  hosts the pager (ml-auto) — the idle bulk row now costs zero height; the
+  bulk bar renders only while selecting. The header's merged ButtonGuide
+  now OPENS ON HOVER (new `openOnHover` on PortalMenu: mouse-only guard,
+  trigger↔menu hover bridge with a 220ms grace, touch untouched). Mobile
+  list: group TITLE rows removed — every row is a flat card with a YELLOW
+  batch-count badge on the name row (name truncates before it).
+- *Reports*: section picker is SINGLE-select with an explicit "All" chip;
+  the branch select shares the control row and truncates at 9rem with "…";
+  sections de-carded to top/bottom hairlines (full-width content); all
+  three sections dropped their stat tiles for one text summary with "|"
+  dividers; the Sales day drill opens a scrollable Modal FLOAT (chevron
+  column deleted from the grid); Returns/Fees breakdowns (by day/reason/
+  type) open as floats from compact count chips.
+- *DateTimeRangePicker*: the month/year selects moved OUT of the Start/End
+  boxes INTO the calendar header row (‹ [Aug] [2026] ›), driving the view;
+  endpoint boxes keep the editable dates + click-targeting ring;
+  setEndpointMonthYear deleted.
+- *Duplicates*: per-row Keep/Remove decision chips with ONE keeper (a new
+  Keep demotes the old to undecided, never auto-Remove); Apply arms only
+  when every row is decided; Resolve opens an IN-PLACE edit float (name/
+  barcode/cost/price via updateProduct) — the onResolve navigation prop is
+  gone entirely.
+- Lang keys en+km (apply/keep/dup hints/resolve-inline/update_failed).
+
+**Verified.** FE tsc clean; check:source 414; langKeyIntegrity; statsStrip,
+productDuplicatesTab (+2 new pins: decide-all gate, in-place resolve),
+paginationRangeControl, returnsLayout, sectionNavigation, pageScrollRoots,
+dashboardDataReliability, notesWidgetResize, importTemplateRouter,
+testChainCoverage — all PASS. Live: Sales page shows range row → History/
+Manage → cards → sticky search+pager → day-grouped sections; the picker's
+header month select moved the view to Jul; Fees shows the fit Add Fee in the
+range row; Reports shows All/single-select chips + inline branch + de-carded
+sections + the day float with the "|" summary; mobile card third row renders
+Cancelled + N/A on their own line.
+
+**Not done.** Deploy. The broad de-carding sweep and full scrollability audit
+overlap the parallel session's active "de-carding" passes — applied here only
+to surfaces this batch touched (reports sections, strip folds).

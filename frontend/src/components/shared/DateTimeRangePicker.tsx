@@ -168,26 +168,6 @@ export default function DateTimeRangePicker({
     setPickPhase('start')
   }
 
-  // Start/End month+year select rows (the redesign's replacement for the old
-  // month/year/quarter chip strips). Picking a month or year moves THAT
-  // endpoint into the chosen month, keeping its day when it fits (clamped to
-  // the month's length -- choosing Feb with the 31st selected lands on the
-  // 28th/29th, never an invalid date). An empty endpoint starts at the 1st
-  // (start) / last day (end) of the chosen month. The calendar view follows
-  // the start endpoint so the grid always shows what was just chosen.
-  const setEndpointMonthYear = (which: 'start' | 'end', month1: number, year: number) => {
-    const current = which === 'start' ? value.startDate : value.endDate
-    const fallbackDay = which === 'start' ? 1 : lastDayOfMonth(year, month1)
-    const day = current ? Math.min(Number(current.slice(8, 10)), lastDayOfMonth(year, month1)) : fallbackDay
-    if (which === 'start') {
-      setViewYear(year)
-      setViewMonth(month1)
-      apply({ startDate: isoOf(year, month1, day) })
-    } else {
-      apply({ endDate: isoOf(year, month1, day) })
-    }
-  }
-
   const commitManual = (which: 'start' | 'end', raw: string) => {
     const iso = parseManualDate(raw)
     if (which === 'start') {
@@ -277,31 +257,11 @@ export default function DateTimeRangePicker({
           onKeyDown={(event) => { if (event.key === 'Enter') commitManual(which, (event.target as HTMLInputElement).value) }}
           aria-label={which === 'start' ? (t('range_start') || 'Start date') : (t('range_end') || 'End date')}
         />
-        {/* Chevron-less, centered selects (user: "remove the down arrows,
-            make these more compact") -- the ▾ ate the label space and made
-            "Aug"/"2026" truncate in these narrow columns. The !-modifiers
-            are required: buttonClassName is APPENDED to AppSelect's base
-            classes, and a plain px-1/text-[11px] only beats the base
-            px-3/text-sm if it happens to come later in the generated CSS
-            (it didn't -- "2026" still ellipsized). */}
-        <div className="mt-1 grid grid-cols-2 gap-1">
-          <AppSelect
-            value={String(month1)}
-            options={monthOptions}
-            onChange={(next) => setEndpointMonthYear(which, Number(next), year)}
-            ariaLabel={`${label} month`}
-            showChevron={false}
-            buttonClassName="w-full justify-center !px-1 !py-0.5 text-center !text-[11px]"
-          />
-          <AppSelect
-            value={String(year)}
-            options={yearOptions}
-            onChange={(next) => setEndpointMonthYear(which, month1, Number(next))}
-            ariaLabel={`${label} year`}
-            showChevron={false}
-            buttonClassName="w-full justify-center !px-1 !py-0.5 text-center !text-[11px]"
-          />
-        </div>
+        {/* The month/year selects that used to sit here moved into the
+            calendar's own header row (user, Aug 30: "the month and year
+            can move from start to end date to the 'month year row'
+            calendar"). The box stays: label + editable date + the
+            which-endpoint-does-the-next-click-set targeting ring. */}
       </div>
     )
   }
@@ -407,7 +367,28 @@ export default function DateTimeRangePicker({
               >
                 <ChevronLeft className="h-4 w-4" strokeWidth={2.5} />
               </button>
-              <span className="text-xs font-semibold text-slate-800 dark:text-slate-100">{MONTH_LABELS[viewMonth - 1]} {viewYear}</span>
+              {/* Month + Year are SELECTS right here in the calendar header
+                  (user, Aug 30) — changing either retargets the visible
+                  month; day clicks keep setting whichever endpoint box is
+                  ringed. Chevron-less/compact per the earlier direction. */}
+              <span className="flex items-center gap-1">
+                <AppSelect
+                  value={String(viewMonth)}
+                  options={monthOptions}
+                  onChange={(next) => setViewMonth(Number(next))}
+                  ariaLabel={t('month') || 'Month'}
+                  showChevron={false}
+                  buttonClassName="justify-center !px-1.5 !py-0.5 text-center !text-xs font-semibold"
+                />
+                <AppSelect
+                  value={String(viewYear)}
+                  options={yearOptions}
+                  onChange={(next) => setViewYear(Number(next))}
+                  ariaLabel={t('year') || 'Year'}
+                  showChevron={false}
+                  buttonClassName="justify-center !px-1.5 !py-0.5 text-center !text-xs font-semibold"
+                />
+              </span>
               <button
                 type="button"
                 className="inline-flex h-7 w-7 items-center justify-center rounded-md text-slate-500 hover:bg-slate-100 hover:text-slate-800 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-white"

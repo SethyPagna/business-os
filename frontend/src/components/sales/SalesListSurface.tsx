@@ -428,10 +428,8 @@ export default function SalesListSurface({
                                 aria-label={`Select ${sale.receipt_number}`}
                               />
                               ) : null}
-                              <span className="font-mono text-sm font-semibold text-blue-600 dark:text-blue-400">{sale.receipt_number}</span>
-                              <span className="text-xs text-gray-400">{fmtTime(sale.created_at)}</span>
-                              <span className="badge-blue text-xs">{sale.payment_method || 'N/A'}</span>
-                              <StatusBadge status={status} t={t} />
+                              <span className="min-w-0 truncate font-mono text-sm font-semibold text-blue-600 dark:text-blue-400">{sale.receipt_number}</span>
+                              <span className="shrink-0 text-xs text-gray-400">{fmtTime(sale.created_at)}</span>
                             </div>
                             {/* Y17: customer (name + phone) leads the meta line;
                                 tapping the card opens the full detail. */}
@@ -441,6 +439,14 @@ export default function SalesListSurface({
                               {sale.cashier_name ? <span>| {sale.cashier_name}</span> : null}
                               {branchLabel ? <span>| {branchLabel}</span> : null}
                               <span>| {items.length} {t('items')}</span>
+                            </div>
+                            {/* Third row on small screens (user, Aug 30):
+                                status + payment get their OWN line, and the
+                                payment badge truncates with "…" instead of
+                                ever touching the KHR figure at the right. */}
+                            <div className="mt-1 flex min-w-0 items-center gap-1.5">
+                              <StatusBadge status={status} t={t} />
+                              <span className="badge-blue min-w-0 max-w-[9rem] truncate text-xs">{sale.payment_method || 'N/A'}</span>
                             </div>
                           </div>
                           <div className="flex-shrink-0 text-right">

@@ -40,7 +40,6 @@ import {
 import FeeForm, { FEE_TYPE_OPTIONS } from './FeeForm.tsx'
 import StatsStrip, { statsPresetRange, type StatCardDef } from '../shared/StatsStrip.tsx'
 import type { DateTimeRange } from '../shared/DateTimeRangePicker'
-import { primaryToolbarButtonClassName } from '../shared/toolbarButtonStyles'
 
 type TranslateFn = (key: string) => string | undefined
 type NotifyFn = (message: unknown, type?: string, duration?: number) => void
@@ -420,6 +419,19 @@ export default function FeesPage() {
         t={t}
         range={stripRange}
         onRangeChange={setStripRange}
+        actions={(
+          // Fit-to-content, not the wide toolbar-width button ("the add
+          // button for fees are too wide, can make fit") — and it shares
+          // the range row to save a row.
+          <button
+            type="button"
+            className="inline-flex h-8 shrink-0 items-center gap-1 rounded-lg bg-blue-600 px-2.5 text-xs font-semibold text-white transition-colors hover:bg-blue-700"
+            onClick={openAdd}
+          >
+            <Plus className="h-3.5 w-3.5 shrink-0" />
+            {tr('add_fee', 'Add Fee')}
+          </button>
+        )}
       />
 
       <div className="sticky top-2 z-30 -mx-1 mb-4 space-y-3 bg-gray-50/95 pb-2 backdrop-blur dark:bg-gray-900/95 sm:mx-0">
@@ -439,23 +451,8 @@ export default function FeesPage() {
             onClear={() => { setTypeFilter('all'); setFromDate(''); setToDate(''); setBranchFilter('') }}
             compact
           />
-          <button
-            type="button"
-            // Was plain `.btn-primary flex-shrink-0 text-sm` with no
-            // shared sizing -- this was the button named explicitly in
-            // the "manage/add buttons... too wide/long in some places
-            // and too small in others" feedback (Aug 23 2026). Now uses
-            // the same fixed height/padding every other page's primary
-            // toolbar button uses (shared/toolbarButtonStyles.ts), so it
-            // matches Products' "Product" button and Users' "Add user"
-            // instead of falling back to `.btn-primary`'s own bare
-            // min-height and looking undersized next to them.
-            className={primaryToolbarButtonClassName}
-            onClick={openAdd}
-          >
-            <Plus className="h-4 w-4 shrink-0" />
-            <span className="hidden sm:inline">{tr('add_fee', 'Add Fee')}</span>
-          </button>
+          {/* Add Fee moved into the stats strip's range row above ("date
+              start and end date is one row with the add buttons"). */}
         </div>
       </div>
 

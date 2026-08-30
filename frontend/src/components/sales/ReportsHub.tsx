@@ -52,7 +52,10 @@ export default function ReportsHub() {
   const [range, setRange] = useState<DateTimeRange>(() => ({ ...EMPTY_DATE_TIME_RANGE, startDate: monthStartIso(), endDate: todayIso() }))
   const [branchFilter, setBranchFilter] = useState('')
   const [branches, setBranches] = useState<BranchOption[]>([])
-  const [selected, setSelected] = useState<Set<ReportType>>(() => new Set(available.map((entry) => entry.id)))
+  // SINGLE-select with an explicit "All" chip (user, Aug 30: "instead of
+  // selecting all just make an additional 'All' so it is not multi select
+  // but single for the report's options").
+  const [selectedType, setSelectedType] = useState<'all' | ReportType>('all')
 
   useEffect(() => {
     let cancelled = false
@@ -78,56 +81,54 @@ export default function ReportsHub() {
     ...branches.map((branch) => ({ value: branch.id, label: branch.name })),
   ], [branches]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  const toggleType = (id: ReportType) => setSelected((prev) => {
-    const next = new Set(prev)
-    if (next.has(id)) next.delete(id)
-    else next.add(id)
-    return next
-  })
-
   const branchId = branchFilter || undefined
-  const visible = available.filter((entry) => selected.has(entry.id))
+  const visible = selectedType === 'all' ? available : available.filter((entry) => entry.id === selectedType)
+  const typeChips: Array<{ id: 'all' | ReportType; label: string; icon?: ComponentType<{ className?: string }> }> = [
+    { id: 'all', label: trh('all', 'All') },
+    ...available,
+  ]
 
   return (
     <div className="page-scroll flex flex-col space-y-3 p-3 sm:p-6">
-      {/* Shared controls: one range + branch scope for every picked report. */}
-      <div className="sticky top-0 z-20 -mx-1 flex flex-wrap items-center gap-2 bg-gray-50/95 px-1 py-1 backdrop-blur dark:bg-gray-900/95">
+      {/* ONE shared control row: range + type chips + branch — the branch
+          select rides the same row and ellipsizes long names ("branch
+          option can be merged into one row with option, and use '…' when
+          too long"). */}
+      <div className="sticky top-0 z-20 -mx-1 flex flex-wrap items-center gap-1.5 bg-gray-50/95 px-1 py-1 backdrop-blur dark:bg-gray-900/95">
         <DateTimeRangePicker value={range} onChange={setRange} t={t} />
+        <div className="flex flex-wrap items-center gap-1">
+          {typeChips.map(({ id, label, icon: Icon }) => {
+            const on = selectedType === id
+            return (
+              <button
+                key={id}
+                type="button"
+                onClick={() => setSelectedType(id)}
+                aria-pressed={on}
+                className={`inline-flex items-center gap-1 rounded-md border px-2 py-1 text-xs font-medium transition ${on
+                  ? 'border-slate-800 bg-slate-800 text-white dark:border-slate-200 dark:bg-slate-200 dark:text-slate-900'
+                  : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800'}`}
+              >
+                {Icon ? <Icon className="h-3.5 w-3.5" /> : null} {label}
+              </button>
+            )
+          })}
+        </div>
         {branches.length ? (
           <AppSelect
             value={branchFilter}
             options={branchOptions}
             onChange={setBranchFilter}
             ariaLabel={trh('branch', 'Branch')}
-            buttonClassName="py-1.5 text-xs"
+            buttonClassName="max-w-[9rem] truncate py-1 text-xs"
           />
         ) : null}
-        <div className="flex flex-wrap items-center gap-1.5">
-          {available.map(({ id, label, icon: Icon }) => {
-            const on = selected.has(id)
-            return (
-              <button
-                key={id}
-                type="button"
-                onClick={() => toggleType(id)}
-                aria-pressed={on}
-                className={`inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-xs font-medium transition ${on
-                  ? 'border-slate-800 bg-slate-800 text-white dark:border-slate-200 dark:bg-slate-200 dark:text-slate-900'
-                  : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800'}`}
-              >
-                <Icon className="h-3.5 w-3.5" /> {label}
-              </button>
-            )
-          })}
-        </div>
       </div>
 
-      {visible.length === 0 ? (
-        <div className="py-12 text-center text-sm text-slate-400">{trh('reports_pick_type', 'Pick at least one report type above.')}</div>
-      ) : null}
-
       {visible.map(({ id, label, icon: Icon }) => (
-        <section key={id} className="space-y-2 rounded-xl border border-slate-200 bg-white/40 p-3 dark:border-slate-800 dark:bg-slate-900/20">
+        // De-carded (user, Aug 30: inner wraps keep top/bottom hairlines,
+        // drop the side border + padding so content gets the full width).
+        <section key={id} className="space-y-2 border-y border-slate-200 py-2.5 dark:border-slate-800">
           <div className="flex items-center gap-2 text-sm font-semibold text-slate-800 dark:text-slate-100">
             <Icon className="h-4 w-4" /> {label}
           </div>

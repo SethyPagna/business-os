@@ -35,6 +35,11 @@ export type PortalMenuProps = {
   // viewport. This replaces every caller that used to hardcode `right`
   // regardless of where its own button actually landed on each page.
   align?: 'left' | 'right' | 'auto'
+  // Also open on pointer hover (mouse only — touch keeps the tap-to-open
+  // behavior). Used by info/guide popovers so an explanation appears on
+  // hover with no click ("when hover on said functions it will show good
+  // quality … explanation", user Aug 30).
+  openOnHover?: boolean
   content?: ReactNode | ((helpers: PortalContentHelpers) => ReactNode) | null
   menuClassName?: string
   closeOnContentClick?: boolean
@@ -89,12 +94,28 @@ export default function PortalMenu({
   triggerWrapperClassName = '',
   onOpenChange = null,
   compact = false,
+  openOnHover = false,
 }: PortalMenuProps) {
   const [open, setOpen] = useState(defaultOpen)
   const [position, setPosition] = useState({ top: 0, left: 0 })
   const triggerRef = useRef<HTMLDivElement | null>(null)
   const menuRef = useRef<HTMLDivElement | null>(null)
   const frameRef = useRef(0)
+  // Hover-open close timer: leaving the trigger (or the menu) starts it;
+  // re-entering either cancels it, so moving the pointer from trigger to
+  // menu never flickers the menu shut.
+  const hoverCloseTimerRef = useRef<number | null>(null)
+  const cancelHoverClose = () => {
+    if (hoverCloseTimerRef.current !== null) {
+      window.clearTimeout(hoverCloseTimerRef.current)
+      hoverCloseTimerRef.current = null
+    }
+  }
+  const scheduleHoverClose = () => {
+    if (!openOnHover) return
+    cancelHoverClose()
+    hoverCloseTimerRef.current = window.setTimeout(() => setOpen(false), 220)
+  }
 
   const reposition = useCallback(() => {
     if (!triggerRef.current || !document.body.contains(triggerRef.current)) {
@@ -258,6 +279,16 @@ export default function PortalMenu({
       <div
         ref={triggerRef}
         onClickCapture={toggleOpen}
+        // Hover-open (mouse pointers only). Leaving toward the menu keeps
+        // it open — the menu portal carries its own matching mouseleave.
+        onMouseEnter={openOnHover ? () => {
+          // matchMedia guards touch devices, where mouseenter fires
+          // synthetically right before the tap's click and would double-
+          // toggle with onClickCapture.
+          cancelHoverClose()
+          if (window.matchMedia('(hover: hover)').matches && !open) setOpen(true)
+        } : undefined}
+        onMouseLeave={openOnHover ? scheduleHoverClose : undefined}
         className={triggerWrapperClassName}
         style={{ display: 'inline-flex' }}
       >
@@ -268,6 +299,8 @@ export default function PortalMenu({
         <div
           ref={menuRef}
           data-portal-menu-content=""
+          onMouseEnter={openOnHover ? cancelHoverClose : undefined}
+          onMouseLeave={openOnHover ? scheduleHoverClose : undefined}
           onClick={(event) => {
             event.stopPropagation()
             if (closeOnContentClick) setOpen(false)

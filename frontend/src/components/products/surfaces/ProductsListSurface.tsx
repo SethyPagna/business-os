@@ -509,73 +509,16 @@ export default function ProductsListSurface({
               </div>
               {!isCollapsed ? section.groups.map((group) => {
                 const groupCollapsed = collapsedProductGroups.has(group.key)
-                const showGroupRow = group.rows.length > 1
-                // Grouped rows render inside ONE merged card (header + all
-                // rows share the same rounded border/background, rows
-                // separated by a thin top divider rendered by
-                // renderMobileProductCard) instead of a separate header card
-                // plus one boxed card per row -- matches Inventory's mobile
-                // grouped-row treatment (InventoryProductsSurface.tsx) so
-                // Products and Inventory look the same on mobile. Ungrouped
-                // single products are untouched, still their own free-
-                // standing card via the `space-y-2` wrapper below.
+                void groupCollapsed
+                // Small screens skip group TITLE rows entirely (user, Aug
+                // 30: "no need group title rows"): every product — a
+                // standalone or a former child row — renders as its own
+                // flat card, each carrying the yellow batch-count badge
+                // the card itself now draws. Desktop keeps its grouped
+                // table; the group summary/actions stay reachable there.
                 return (
-                  <div
-                    key={group.key}
-                    className={showGroupRow
-                      ? 'overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900/80'
-                      : 'space-y-2'}
-                  >
-                    {showGroupRow ? (
-                      <div className="px-3 py-2" data-product-jump-id={group.anchorId}>
-                        <div className="flex items-start justify-between gap-3">
-                          <label className="flex min-w-0 items-start gap-2">
-                            {selectionModeActive ? (
-                              <input
-                                type="checkbox"
-                                className="mt-1 h-4 w-4 rounded"
-                                checked={isSelectionScopeFullySelected(group.ids)}
-                                ref={(node) => {
-                                  if (node) node.indeterminate = isSelectionScopePartiallySelected(group.ids)
-                                }}
-                                onChange={(event) => toggleSelectionScope(group.ids, event.target.checked)}
-                                aria-label={`Select ${group.name}`}
-                              />
-                            ) : null}
-                            {renderGroupThumbnail ? <span className="mt-0.5 shrink-0">{renderGroupThumbnail(group)}</span> : null}
-                            <button type="button" className="min-w-0 text-left" onClick={() => toggleProductGroup(group.key)}>
-                              <div className="flex items-center gap-1.5">
-                                {groupCollapsed ? <ChevronRight className="h-4 w-4 text-slate-400" /> : <ChevronDown className="h-4 w-4 text-slate-400" />}
-                                <span className="truncate text-sm font-semibold text-slate-900 dark:text-white">{group.name}</span>
-                              </div>
-                              {/* Row count used to sit as its own badge next to the title (above)
-                                  on top of a *second* copy of it here excluded via
-                                  { includeCount: false }. Now it only ever renders once, folded
-                                  into this same summary row as "N options" -- same row as stock/
-                                  branches, same treatment as the desktop table. */}
-                              <div className="mt-1 flex flex-wrap gap-1.5 text-[11px] text-slate-500 dark:text-slate-300">
-                                {getGroupSummaryParts(group).map((part) => (
-                                  <span key={`${group.key}-${part}`} className="rounded-full bg-slate-100 px-2 py-0.5 dark:bg-slate-800">
-                                    {part}
-                                  </span>
-                                ))}
-                              </div>
-                            </button>
-                          </label>
-                          {/* Same three-dot menu (add child row / add image)
-                              as the desktop table's group header -- was
-                              missing here entirely, so phones/small screens
-                              had no way to add a variant or set the group
-                              image from the group row itself. Placed as a
-                              sibling of the label so the outer
-                              `justify-between` pins it to the top-right,
-                              matching the desktop layout's placement next
-                              to its summary pills. */}
-                          {renderGroupActions ? <span className="mt-0.5 shrink-0">{renderGroupActions(group)}</span> : null}
-                        </div>
-                      </div>
-                    ) : null}
-                    {!groupCollapsed || !showGroupRow ? group.rows.map((product) => renderMobileProductCard(product, { indented: showGroupRow })) : null}
+                  <div key={group.key} className="space-y-2" data-product-jump-id={group.anchorId}>
+                    {group.rows.map((product) => renderMobileProductCard(product, { indented: false }))}
                   </div>
                 )
               }) : null}

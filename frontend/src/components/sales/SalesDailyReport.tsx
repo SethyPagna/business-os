@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import ChevronDown from 'lucide-react/dist/esm/icons/chevron-down.js'
-import ChevronRight from 'lucide-react/dist/esm/icons/chevron-right.js'
+import Modal from '../shared/Modal'
 import DateTimeRangePicker, { EMPTY_DATE_TIME_RANGE, type DateTimeRange } from '../shared/DateTimeRangePicker.tsx'
 import { getSalesDailyReport, getSalesDayReport } from '../../api/salesTransport.ts'
 import { ALL_STATUSES, getStatusLabel } from './StatusBadge'
@@ -269,28 +268,23 @@ export default function SalesDailyReport({ t, fmtUSD, active = true, range: exte
   // Newest first -- the day someone is looking for is almost always recent.
   const orderedDays = useMemo(() => [...days].sort((a, b) => (a.date < b.date ? 1 : -1)), [days])
 
-  const statChip = (label: string, value: string, tone = '') => (
-    <div className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 dark:border-slate-700 dark:bg-slate-900">
-      <div className="text-[10px] font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">{label}</div>
-      <div className={`text-sm font-semibold ${tone || 'text-slate-900 dark:text-white'}`}>{value}</div>
-    </div>
-  )
-
   const renderDayDetail = (report: DayReport) => (
-    <div className="space-y-2.5 border-t border-slate-100 bg-slate-50/60 p-2.5 dark:border-slate-800 dark:bg-slate-900/40">
-      {/* Four stats (two on phones): the money line people scan for, with
-          Discounts always visible. Collected + Avg order ride a caption
-          underneath so the tile row stays four wide, not seven. */}
-      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-        {statChip(t('sales') || 'Sales', String(report.totals.tx_count))}
-        {statChip(t('revenue') || 'Revenue', fmtUSD(report.totals.revenue_usd))}
-        {statChip(t('discounts') || 'Discounts', fmtUSD(report.totals.discount_usd), 'text-rose-600 dark:text-rose-400')}
-        {statChip(t('profit') || 'Profit', fmtUSD(report.totals.profit_usd), report.totals.profit_usd < 0 ? 'text-red-600 dark:text-red-400' : 'text-emerald-700 dark:text-emerald-400')}
-      </div>
-      <div className="-mt-1 px-0.5 text-[11px] text-slate-400">
-        {t('collected_total') || 'Collected'}: <span className="font-medium text-slate-500 dark:text-slate-300">{fmtUSD(report.totals.collected_total_usd)}</span>
-        <span className="mx-1.5">·</span>
-        {t('avg_order') || 'Avg order'}: <span className="font-medium text-slate-500 dark:text-slate-300">{fmtUSD(report.totals.avg_order_usd)}</span>
+    <div className="space-y-2.5">
+      {/* Text summary with "|" dividers — reports carry no stat tiles
+          (user, Aug 30: "it doesn't have to have stats, just text summary
+          and '|' vertical line for divisions"). */}
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-slate-500 dark:text-slate-400">
+        <span>{report.totals.tx_count} {t('sales') || 'sales'}</span>
+        <span className="text-slate-300 dark:text-slate-600">|</span>
+        <span>{t('revenue') || 'Revenue'} <b className="text-slate-900 dark:text-white">{fmtUSD(report.totals.revenue_usd)}</b></span>
+        <span className="text-slate-300 dark:text-slate-600">|</span>
+        <span>{t('discounts') || 'Discounts'} <b className="text-rose-600 dark:text-rose-400">{fmtUSD(report.totals.discount_usd)}</b></span>
+        <span className="text-slate-300 dark:text-slate-600">|</span>
+        <span>{t('profit') || 'Profit'} <b className={report.totals.profit_usd < 0 ? 'text-red-600 dark:text-red-400' : 'text-emerald-700 dark:text-emerald-400'}>{fmtUSD(report.totals.profit_usd)}</b></span>
+        <span className="text-slate-300 dark:text-slate-600">|</span>
+        <span>{t('collected_total') || 'Collected'} <b className="text-slate-700 dark:text-slate-200">{fmtUSD(report.totals.collected_total_usd)}</b></span>
+        <span className="text-slate-300 dark:text-slate-600">|</span>
+        <span>{t('avg_order') || 'Avg order'} <b className="text-slate-700 dark:text-slate-200">{fmtUSD(report.totals.avg_order_usd)}</b></span>
       </div>
 
       <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
@@ -470,13 +464,15 @@ export default function SalesDailyReport({ t, fmtUSD, active = true, range: exte
       ) : null}
 
       <div className="card overflow-hidden">
-        <div className="grid grid-cols-[minmax(0,1.4fr)_repeat(4,minmax(0,1fr))_2rem] items-center gap-2 border-b border-slate-100 px-3 py-2 text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:border-slate-800 dark:text-slate-400">
+        {/* No trailing chevron column ("no need so much spacing for arrow
+            it takes so much space") — the whole row is the click target and
+            opens the day FLOAT below. */}
+        <div className="grid grid-cols-[minmax(0,1.4fr)_repeat(4,minmax(0,1fr))] items-center gap-2 border-b border-slate-100 px-3 py-2 text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:border-slate-800 dark:text-slate-400">
           <div>{t('date') || 'Date'}</div>
           <div className="text-right">{t('sales') || 'Sales'}</div>
           <div className="text-right">{t('revenue') || 'Revenue'}</div>
           <div className="hidden text-right sm:block">{t('discounts') || 'Discounts'}</div>
           <div className="text-right">{t('profit') || 'Profit'}</div>
-          <div />
         </div>
         {loading && !days.length ? (
           <div className="space-y-2 p-3">
@@ -484,36 +480,34 @@ export default function SalesDailyReport({ t, fmtUSD, active = true, range: exte
           </div>
         ) : orderedDays.length === 0 ? (
           <div className="px-3 py-8 text-center text-sm text-slate-400">{t('no_sales_in_range') || 'No sales in this range.'}</div>
-        ) : orderedDays.map((day) => {
-          const expanded = expandedDate === day.date
-          return (
-            <div key={day.date} className="border-b border-slate-100 last:border-0 dark:border-slate-800">
-              <button
-                type="button"
-                onClick={() => openDay(day.date)}
-                className={`grid w-full grid-cols-[minmax(0,1.4fr)_repeat(4,minmax(0,1fr))_2rem] items-center gap-2 px-3 py-2.5 text-left text-xs transition hover:bg-blue-50/60 dark:hover:bg-blue-900/10 ${expanded ? 'bg-blue-50/60 dark:bg-blue-900/10' : ''}`}
-                aria-expanded={expanded}
-              >
-                <span className="font-medium text-slate-900 dark:text-white">{displayDay(day.date)}</span>
-                <span className="text-right text-slate-600 dark:text-slate-300">{day.tx_count}</span>
-                <span className="text-right font-medium text-slate-900 dark:text-white">{fmtUSD(day.revenue_usd)}</span>
-                <span className="hidden text-right text-slate-600 dark:text-slate-300 sm:block">{fmtUSD(day.discount_usd)}</span>
-                <span className={`text-right font-medium ${day.profit_usd < 0 ? 'text-red-600 dark:text-red-400' : 'text-emerald-700 dark:text-emerald-400'}`}>{fmtUSD(day.profit_usd)}</span>
-                <span className="justify-self-end text-slate-400">{expanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}</span>
-              </button>
-              {expanded ? (
-                dayLoading ? (
-                  <div className="border-t border-slate-100 p-3 dark:border-slate-800">
-                    <div className="h-24 animate-pulse rounded-xl bg-slate-100 dark:bg-slate-800" />
-                  </div>
-                ) : dayError ? (
-                  <div className="border-t border-slate-100 p-3 text-sm text-red-600 dark:border-slate-800 dark:text-red-400">{dayError}</div>
-                ) : dayReport ? renderDayDetail(dayReport) : null
-              ) : null}
-            </div>
-          )
-        })}
+        ) : orderedDays.map((day) => (
+          <button
+            key={day.date}
+            type="button"
+            onClick={() => openDay(day.date)}
+            className="grid w-full grid-cols-[minmax(0,1.4fr)_repeat(4,minmax(0,1fr))] items-center gap-2 border-b border-slate-100 px-3 py-2.5 text-left text-xs transition last:border-0 hover:bg-blue-50/60 dark:border-slate-800 dark:hover:bg-blue-900/10"
+          >
+            <span className="font-medium text-slate-900 dark:text-white">{displayDay(day.date)}</span>
+            <span className="text-right text-slate-600 dark:text-slate-300">{day.tx_count}</span>
+            <span className="text-right font-medium text-slate-900 dark:text-white">{fmtUSD(day.revenue_usd)}</span>
+            <span className="hidden text-right text-slate-600 dark:text-slate-300 sm:block">{fmtUSD(day.discount_usd)}</span>
+            <span className={`text-right font-medium ${day.profit_usd < 0 ? 'text-red-600 dark:text-red-400' : 'text-emerald-700 dark:text-emerald-400'}`}>{fmtUSD(day.profit_usd)}</span>
+          </button>
+        ))}
       </div>
+
+      {/* Day drill as a scrollable FLOAT (user, Aug 30: "instead of expand
+          and collapse do a click to open float, and scrollable"). The
+          shared Modal's body scrolls; the row list stays put behind it. */}
+      {expandedDate ? (
+        <Modal title={displayDay(expandedDate)} onClose={() => { setExpandedDate(null); setDayReport(null) }} draggable>
+          {dayLoading ? (
+            <div className="h-24 animate-pulse rounded-xl bg-slate-100 dark:bg-slate-800" />
+          ) : dayError ? (
+            <div className="text-sm text-red-600 dark:text-red-400">{dayError}</div>
+          ) : dayReport ? renderDayDetail(dayReport) : null}
+        </Modal>
+      ) : null}
     </div>
   )
 }

@@ -3027,14 +3027,7 @@ the switch and its reasoning are recorded in `wrangler.toml`.
 
 ## Current status
 
-**CLAIMED (in progress, stats-strip session, Aug 30 evening):** the user's 25-item
-refinement batch: StatsStrip layout v2 (cards under the range row, actions slot,
-tighter chips), Sales top-row consolidation into one Manage menu + mobile card
-row fixes + day grouping, Fees add-button fit + row merge, Products range-row
-move + pager redesign + mobile batch badges, Reports single-select/All + text
-summaries + click-to-float drills, DateTimeRangePicker month/year into calendar
-header, Duplicates in-place resolve + decide-then-apply. Touching those files;
-NOT touching cloudflare/src/routes/inventory.ts.
+**Part 526 (Aug 30 2026, parallel session): the 25-item refinement batch is DONE in code** — StatsStrip v2 (cards under the range row, actions slot hosting each page's buttons, tighter chips, scrollable folds), Sales top-row consolidation + day grouping + mobile third-row badges, fit-sized Add Fee/New Return in the range rows, Products range-above-search + pager merge + hover button-guide + flat mobile rows with yellow batch badges, Reports single-select All + inline branch + text summaries with "|" + click-to-open floats, date-picker month/year selects in the calendar header, Duplicates decide-all-then-apply + in-place resolve float. See Part 526. **Needs deploy.**
 
 **DONE (session business-os-v1-0b, Aug 30 — Part 519, `ed64958b`+`bf85b94a`+
 `4833d61b`, needs deploy): receipt-ID datetime format + Phnom Penh timezone
@@ -3082,6 +3075,15 @@ those secondary fetches left Inventory with the rollout), and returnScopeSummary
 (re-pinned to its new one-pass customerRows/supplierRows shape). All absence guards
 kept. Verified: performanceLoadingUx PASS, statsStrip PASS, frontend tsc clean.
 The LAYOUT relay above STAYS OPEN for whoever holds the stats lane.
+
+**✅ INFRA RESOLVED (Aug 30 ~23:15): the 8787 DO-SQLite lock race is over.** 0b shut
+down their 8899 wrangler (whole tree, command line verified before the kill); the
+community 8787 instance is untouched (PID 24588, listening). Crashes BEFORE ~23:15
+(fatal SENTRY_DO SQLITE_BUSY / BUSY_RECOVERY on hot reload — 8787 died 3×) were
+this race, not your code. A crash AFTER now is real again — attribute accordingly.
+Standing rule (also in coordination memory): never point a second wrangler at the
+shared `.wrangler/state` dir — use `--persist-to <own dir>` and shut it down when
+its purpose is served.
 
 **COORDINATION NOTE (session business-os-v1-7b, Aug 30, updated ~22:15 — read-only
 coordinator, touching no product files; re-auditing on a loop until lanes settle).**
@@ -3194,17 +3196,17 @@ decision, so they were flagged rather than guessed (Golden Rule 7). A peer picki
 up should re-verify against current source first.
 
 **CRITICAL — data loss / corruption / privilege:**
-- **[CLAIMED: session b9, Aug 30 — slices A+B (tables + schema guard); slice C
-  (maintenance lock / atomicity) stays open]** Restore DELETEs all tables then
-  re-inserts non-atomically, no lock, no schema-version
-  check; and `BACKUP_TABLES` omits `product_batches`/`branch_batch_stock`/`*_batch_allocations`
-  so every restore (incl. the safety backup a reset takes) leaves the lot ledger empty
-  vs branch_stock. (×3: pipelines, batch-identity, +) `lib/backup.ts:83-118,860-942`.
-  b9's audit: the omission is wider than flagged — `fees`, `loyalty_point_adjustments`,
-  `damaged_stock_lots`, `return_replacement_items`, `promotion_rules`, `user_notes`,
-  duplicate-dismissals, import commit/guard ledgers, share submissions,
-  dated-count actions, `rfid_tags`, `ai_provider_configs`, `pending_actions` are ALL
-  absent from full backups today.
+- **[SLICES A+B FIXED: session b9, Aug 30 — Part 521, `40ed7d90`, needs deploy;
+  SLICE C STILL OPEN]** `BACKUP_TABLES` now carries the lot ledger AND the 17 other
+  silently-dropped tables b9's sweep found (fees, loyalty_point_adjustments,
+  damaged_stock_lots, replacement items, promotion_rules, notes, pending_actions,
+  dismissals, import commit/guard ledgers, …) in FK order, with deliberate
+  exclusions recorded; backups stamp `summary.schemaMigration` and restore REFUSES a
+  newer-schema backup before any delete, reporting `schemaMismatch` +
+  `tablesNotInBackup`. **Slice C open:** restore is still non-atomic
+  DELETE-then-reinsert with no maintenance lock — realistic design is a
+  write-blocking maintenance flag + resumable restore state (import-lease spirit),
+  NOT whole-restore atomicity (impossible in D1 batch limits at this size).
 - **[FIXED: session b9, Aug 30 — Part 518, `07fb7705`, needs deploy]** Inventory
   `/transfer` moved only `branch_stock`, stranding every lot at the source (the 0081
   drift class, ×3 audits). Now auto-allocates FIFO across source lots (same Z0 policy
@@ -3224,9 +3226,15 @@ up should re-verify against current source first.
   frontend pre-flights mirror it. Password return kept (only path back in, now
   properly scoped). Open sub-question, flagged not changed: should
   `/repair-integrity` (guided repair, currently backup-OR-settings) demand more?
-- Returns create/edit apply lot restock + replacement stock OUTSIDE the atomic batch;
-  the catch deletes rows but reverses no stock → phantom or destroyed inventory.
-  (×2: write-path, batch-identity) `routes/returns.ts:745,871,931,1224,1506`.
+- **[CREATE-PATH FIXED: session b9, Aug 30 — Part 523, `86125647`, needs deploy;
+  EDIT-path compensation + true atomicity still open]** Returns create applied lot
+  restock + replacement stock OUTSIDE the atomic batch and its catch deleted rows
+  while reversing no stock (phantom/destroyed inventory). Create now keeps a
+  compensation log and the catch reverses every pre-batch write (loudly reporting
+  anything unreversible via audit `return_rollback_incomplete` + the 500 message);
+  also fixed: `return_items` missing from the cleanup (orphans) and dangling
+  movement rows. The PATCH /:id edit path still has the original failure mode.
+  (was ×2: write-path, batch-identity)
 
 **HIGH — data / money / security:**
 - Import apply is not idempotent for products(merge_stock/override_add) and inventory;
@@ -3242,11 +3250,19 @@ up should re-verify against current source first.
   else falls back to the admin URL. (was ×1 auth)
 - OTP verify not bound to the password step and skips device-approval + lockout. (×1)
   `routes/auth.ts:475`.
-- SW chunk-recovery wipes app-shell+static caches with no `navigator.onLine` guard →
-  bricks the offline PWA. (×1 offline) `App.tsx:359,414`.
-- Several `MAX(0, qty-n)` clamps still hide oversell races (supplier return, replacement
-  stock, batch-branch correction, dated-count remove). (×2) `returns.ts:1098`,
-  `returnsStock.ts:193`, `batches.ts:307`, `datedStockCountApply.ts:50`.
+- **[FIXED: session b9, Aug 30 — Part 522, `8963f1a1`, needs deploy]** Chunk recovery
+  wiped the app-shell/static caches with no online guard, bricking the offline PWA
+  over one uncached page. Recovery now declines offline BEFORE spending the one-shot
+  retry marker (caches kept, recovery stays armed for reconnection); lazyWithRetry
+  falls through to the page-level error UI. (was ×1 offline)
+- **[FIXED: session b9, Aug 30 — Part 525, `97f3fcde`, needs deploy]** The MAX(0)
+  clamp sweep, judged per site: supplier returns gained the missing availability
+  validation (cumulative per product+branch, 400 refusal) + strict decrements
+  (races abort via 0058's CHECK); replacement drain strict (pre-validated);
+  batch-correction floor KEPT deliberately (repair tool must work on drifted data)
+  with stock_quantity now re-derived from SUM(branch_stock) instead of a clamped
+  delta; dated-count apply reviewed and unchanged (documented deliberate
+  reconciliation semantics). (was ×2)
 - Money: KHR totals carry fractional riel to server+receipt; loyalty redeem value
   `Math.round`ed to whole USD (0.50→1.00, or 0.25→0 while still burning points). (×1
   frontend) `POS.tsx:1027,2434-2465`.

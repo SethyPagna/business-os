@@ -30,6 +30,7 @@ export default function ButtonGuidePopover({ title, entries, align = 'auto', tri
     <LazyPortalMenu
       align={align}
       compact
+      openOnHover
       menuClassName="max-h-[70vh] overflow-auto p-3 w-72"
       trigger={(
         <button

@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useState } from 'react'
 import RefreshCw from 'lucide-react/dist/esm/icons/refresh-cw.js'
 import Search from 'lucide-react/dist/esm/icons/search.js'
-import ArrowRightCircle from 'lucide-react/dist/esm/icons/arrow-right-circle.js'
 import EyeOff from 'lucide-react/dist/esm/icons/eye-off.js'
 import Merge from 'lucide-react/dist/esm/icons/merge.js'
 import InfoHint from '../shared/InfoHint.tsx'
 import { ProductImg } from './shared/primitives.tsx'
-import { getPossiblySameProducts, dismissProductDuplicateCluster, mergePossiblySameProducts } from '../../api/productWriteTransport.ts'
+import { getPossiblySameProducts, dismissProductDuplicateCluster, mergePossiblySameProducts, updateProduct } from '../../api/productWriteTransport.ts'
+import Modal from '../shared/Modal'
 
 // Products → Duplicates: the human-review residue the identity rule can't
 // settle on its own. Mirrors the contacts Possible Duplicates panel
@@ -68,7 +68,7 @@ function money(value: number | null | undefined): string {
 }
 
 function ClusterCard({
-  cluster, t, dismissing, merging, selected, selectable, onToggleSelect, onDismiss, onMergeInto, onResolve,
+  cluster, t, dismissing, merging, selected, selectable, onToggleSelect, onDismiss, onApplyDecisions, onEdit,
 }: {
   cluster: Cluster
   t: TranslateFn
@@ -78,24 +78,41 @@ function ClusterCard({
   selectable: boolean
   onToggleSelect: () => void
   onDismiss: () => void
-  onMergeInto: (keeper: ClusterProduct) => void
-  onResolve: (term: string) => void
+  onApplyDecisions: (keeper: ClusterProduct, removals: ClusterProduct[]) => void
+  onEdit: (product: ClusterProduct) => void
 }) {
   const [key, fallback] = SEVERITY_LABEL_KEY[cluster.severity]
-  // Two-tap keeper confirm, same pattern as the contacts panel: first tap
-  // picks the survivor, second tap on the SAME row confirms; tapping
-  // another row restarts the choice.
-  const [pendingKeeperId, setPendingKeeperId] = useState<number | null>(null)
+  // Decide-all-then-apply (user, Aug 30: "only allow changes after all in
+  // one conflict is fully decided, remove, keep, resolve"): every product
+  // in the group takes an explicit Keep/Remove decision; Apply arms only
+  // when EVERY row is decided and exactly ONE row is kept. Editing a row
+  // (the in-place Resolve) never leaves this section.
+  const [decisions, setDecisions] = useState<Record<number, 'keep' | 'remove'>>({})
   const busy = dismissing || merging
 
-  const clickMerge = (product: ClusterProduct) => {
-    if (pendingKeeperId === product.id) {
-      onMergeInto(product)
-      setPendingKeeperId(null)
-    } else {
-      setPendingKeeperId(product.id)
-    }
+  const decide = (productId: number, decision: 'keep' | 'remove') => {
+    setDecisions((current) => {
+      const next: Record<number, 'keep' | 'remove'> = { ...current }
+      if (current[productId] === decision) {
+        delete next[productId]
+        return next
+      }
+      if (decision === 'keep') {
+        // One keeper per group -- picking a new Keep demotes the old one
+        // back to undecided (not auto-Remove; removal stays explicit).
+        for (const id of Object.keys(next)) {
+          if (next[Number(id)] === 'keep') delete next[Number(id)]
+        }
+      }
+      next[productId] = decision
+      return next
+    })
   }
+
+  const keeper = cluster.products.find((product) => decisions[product.id] === 'keep') || null
+  const removals = cluster.products.filter((product) => decisions[product.id] === 'remove')
+  const everyDecided = cluster.products.every((product) => decisions[product.id])
+  const canApply = Boolean(keeper) && everyDecided && removals.length > 0 && !busy
 
   return (
     <div className={`rounded-xl border px-3 py-2.5 transition-shadow ${SEVERITY_STYLE[cluster.severity]} ${busy ? 'opacity-60' : ''} ${selected ? 'ring-2 ring-blue-400 dark:ring-blue-500' : ''}`}>
@@ -127,7 +144,7 @@ function ClusterCard({
       </div>
       <div className="space-y-1.5">
         {cluster.products.map((product) => {
-          const isPendingKeeper = pendingKeeperId === product.id
+          const decision = decisions[product.id]
           return (
             <div key={product.id} className="flex items-center gap-2 text-sm">
               <ProductImg src={product.image_path || ''} alt="" className="h-8 w-8 flex-shrink-0 rounded-lg object-cover" />
@@ -144,48 +161,63 @@ function ClusterCard({
               <div className="flex flex-shrink-0 items-center gap-1">
                 <button
                   type="button"
-                  onClick={() => clickMerge(product)}
+                  onClick={() => decide(product.id, 'keep')}
                   disabled={busy}
-                  title={isPendingKeeper
-                    ? (t('merge_confirm_hint') || 'Tap again to confirm -- the other product(s) merge into this one: stock, lots and images carry over, sales history stays valid')
-                    : (t('merge_into_hint') || 'Keep this one, merge the other(s) into it')}
-                  className={`inline-flex items-center gap-1 rounded-lg px-1.5 py-0.5 text-[11px] font-medium transition disabled:opacity-50 ${
-                    isPendingKeeper
-                      ? 'bg-emerald-600 text-white hover:bg-emerald-700'
-                      : 'text-emerald-700 hover:bg-emerald-50 dark:text-emerald-300 dark:hover:bg-emerald-900/20'
-                  }`}
+                  className={`rounded-md px-1.5 py-0.5 text-[11px] font-medium transition disabled:opacity-50 ${decision === 'keep'
+                    ? 'bg-emerald-600 text-white'
+                    : 'text-emerald-700 hover:bg-emerald-50 dark:text-emerald-300 dark:hover:bg-emerald-900/20'}`}
                 >
-                  <Merge className="h-3 w-3" />
-                  {merging && isPendingKeeper
-                    ? (t('merging') || 'Merging...')
-                    : isPendingKeeper
-                      ? (t('confirm') || 'Confirm')
-                      : (t('keep_this_one') || 'Keep this')}
+                  {t('keep') || 'Keep'}
                 </button>
-                {product.name ? (
-                  <button
-                    type="button"
-                    onClick={() => onResolve(product.name as string)}
-                    title={t('resolve_product_duplicate_hint') || 'Open the product list filtered to this name to compare or edit by hand'}
-                    className="inline-flex items-center gap-1 rounded-lg px-1.5 py-0.5 text-[11px] font-medium text-blue-600 transition hover:bg-blue-50 dark:hover:bg-blue-900/20"
-                  >
-                    <ArrowRightCircle className="h-3 w-3" />
-                    {t('resolve') || 'Open'}
-                  </button>
-                ) : null}
+                <button
+                  type="button"
+                  onClick={() => decide(product.id, 'remove')}
+                  disabled={busy}
+                  className={`rounded-md px-1.5 py-0.5 text-[11px] font-medium transition disabled:opacity-50 ${decision === 'remove'
+                    ? 'bg-rose-600 text-white'
+                    : 'text-rose-600 hover:bg-rose-50 dark:text-rose-300 dark:hover:bg-rose-900/20'}`}
+                >
+                  {t('remove') || 'Remove'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onEdit(product)}
+                  disabled={busy}
+                  title={t('resolve_duplicate_inline_hint') || 'Edit this product right here — name, barcode and prices — without leaving the review'}
+                  className="rounded-md px-1.5 py-0.5 text-[11px] font-medium text-blue-600 transition hover:bg-blue-50 disabled:opacity-50 dark:text-blue-300 dark:hover:bg-blue-900/20"
+                >
+                  {t('resolve') || 'Resolve'}
+                </button>
               </div>
             </div>
           )
         })}
       </div>
+      <div className="mt-2 flex items-center justify-between gap-2 border-t border-black/5 pt-1.5 dark:border-white/10">
+        <span className="text-[11px] text-gray-400">
+          {everyDecided
+            ? (keeper
+              ? `${t('keep') || 'Keep'} "${keeper.name || `#${keeper.id}`}" · ${removals.length} ${t('remove') || 'remove'}`
+              : (t('dup_pick_one_keep') || 'Pick one Keep'))
+            : (t('dup_decide_all_hint') || 'Decide every row (Keep / Remove) to apply')}
+        </span>
+        <button
+          type="button"
+          disabled={!canApply}
+          onClick={() => keeper && onApplyDecisions(keeper, removals)}
+          className="inline-flex items-center gap-1 rounded-md bg-emerald-600 px-2 py-1 text-[11px] font-semibold text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          <Merge className="h-3 w-3" />
+          {merging ? (t('merging') || 'Merging...') : (t('apply') || 'Apply')}
+        </button>
+      </div>
     </div>
   )
 }
 
-export default function ProductDuplicatesTab({ t, notify, onResolve }: {
+export default function ProductDuplicatesTab({ t, notify }: {
   t: TranslateFn
   notify: NotifyFn
-  onResolve: (searchTerm: string) => void
 }) {
   const [clusters, setClusters] = useState<Cluster[]>([])
   const [loading, setLoading] = useState(false)
@@ -257,16 +289,17 @@ export default function ProductDuplicatesTab({ t, notify, onResolve }: {
     }
   }
 
-  // One pair per call (the server merge is keepId+mergeId); a 3+ cluster
-  // folds every non-keeper in sequence, stopping on the first failure so
-  // nothing half-merges silently.
-  const handleMergeInto = async (cluster: Cluster, keeper: ClusterProduct) => {
-    const others = cluster.products.filter((product) => product.id !== keeper.id)
-    if (!others.length) return
+  // Apply the group's explicit decisions (ONE keeper + the rows marked
+  // Remove); one pair per call, stopping on the first failure so nothing
+  // half-merges silently. Undecided rows (in an odd partial state) are
+  // never touched -- but the card only arms Apply when every row is
+  // decided, so normally removals covers the whole rest of the group.
+  const handleApplyDecisions = async (cluster: Cluster, keeper: ClusterProduct, removals: ClusterProduct[]) => {
+    if (!removals.length) return
     const id = clusterKey(cluster)
     setMergingId(id)
     try {
-      for (const other of others) {
+      for (const other of removals) {
         await mergePossiblySameProducts(keeper.id, other.id)
       }
       notify(t('product_duplicate_merged') || 'Merged -- stock, lots and images were carried onto the kept product')
@@ -275,6 +308,42 @@ export default function ProductDuplicatesTab({ t, notify, onResolve }: {
       notify(e instanceof Error ? e.message : (t('merge_duplicate_failed') || 'Could not merge these records'), 'error')
     } finally {
       setMergingId(null)
+    }
+  }
+
+  // In-place Resolve (user, Aug 30: "should not bring you to other
+  // sections ... edit in duplicates right there"): a small float editing
+  // the identity fields the clusters group by. Saving refreshes the sweep
+  // -- a renamed/re-barcoded product simply drops out of its cluster.
+  const [editTarget, setEditTarget] = useState<ClusterProduct | null>(null)
+  const [editForm, setEditForm] = useState<{ name: string; barcode: string; cost: string; price: string }>({ name: '', barcode: '', cost: '', price: '' })
+  const [editSaving, setEditSaving] = useState(false)
+  const openEdit = (product: ClusterProduct) => {
+    setEditTarget(product)
+    setEditForm({
+      name: String(product.name || ''),
+      barcode: String(product.barcode || ''),
+      cost: String(Number(product.cost_price_usd) || 0),
+      price: String(Number(product.selling_price_usd) || 0),
+    })
+  }
+  const saveEdit = async () => {
+    if (!editTarget || editSaving) return
+    setEditSaving(true)
+    try {
+      await updateProduct(editTarget.id, {
+        name: editForm.name.trim(),
+        barcode: editForm.barcode.trim(),
+        cost_price_usd: Number(editForm.cost) || 0,
+        selling_price_usd: Number(editForm.price) || 0,
+      })
+      notify(t('product_updated') || 'Product updated')
+      setEditTarget(null)
+      void load()
+    } catch (e: unknown) {
+      notify(e instanceof Error ? e.message : (t('update_failed') || 'Could not save changes'), 'error')
+    } finally {
+      setEditSaving(false)
     }
   }
 
@@ -482,14 +551,45 @@ export default function ProductDuplicatesTab({ t, notify, onResolve }: {
                   selectable={!bulkBusy}
                   onToggleSelect={() => toggleSelected(id)}
                   onDismiss={() => void handleDismiss(cluster)}
-                  onMergeInto={(keeper) => void handleMergeInto(cluster, keeper)}
-                  onResolve={onResolve}
+                  onApplyDecisions={(keeper, removals) => void handleApplyDecisions(cluster, keeper, removals)}
+                  onEdit={openEdit}
                 />
               )
             })}
           </div>
         </>
       )}
+
+      {editTarget ? (
+        <Modal title={`${t('resolve') || 'Resolve'} — ${editTarget.name || `#${editTarget.id}`}`} onClose={() => setEditTarget(null)} draggable>
+          <div className="space-y-2.5">
+            {([
+              ['name', t('name') || 'Name', 'text'],
+              ['barcode', t('barcode') || 'Barcode', 'text'],
+              ['cost', t('cost_price') || 'Cost (USD)', 'number'],
+              ['price', t('selling_price') || 'Selling price (USD)', 'number'],
+            ] as const).map(([field, label, type]) => (
+              <label key={field} className="block">
+                <span className="mb-0.5 block text-[11px] font-medium text-gray-500 dark:text-gray-400">{label}</span>
+                <input
+                  type={type}
+                  className="input w-full text-sm"
+                  value={editForm[field]}
+                  onChange={(event) => setEditForm((current) => ({ ...current, [field]: event.target.value }))}
+                />
+              </label>
+            ))}
+            <div className="flex justify-end gap-2 pt-1">
+              <button type="button" className="btn-secondary px-3 py-1.5 text-xs" onClick={() => setEditTarget(null)} disabled={editSaving}>
+                {t('cancel') || 'Cancel'}
+              </button>
+              <button type="button" className="btn-primary px-3 py-1.5 text-xs" onClick={() => void saveEdit()} disabled={editSaving}>
+                {editSaving ? (t('saving') || 'Saving...') : (t('save') || 'Save')}
+              </button>
+            </div>
+          </div>
+        </Modal>
+      ) : null}
     </div>
   )
 }
