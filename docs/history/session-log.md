@@ -14801,3 +14801,38 @@ Verified: new `tests/posMoneyRounding.test.ts` 4/4 (wired into the chain),
 posCore, actionStability, testChainCoverage green; frontend tsc clean
 apart from a peer's in-flight uncommitted StockChangeSection edit.
 **Needs deploy** (rides with the b9 batch).
+
+## Part 530 (Aug 30 2026, session business-os-v1-b9) — Part-77 CRITICAL, edit-path slice: return edits compensate their stock writes; the settlement gate hoisted
+
+**Ask:** completes the returns finding Part 523 left half-open. PATCH /:id
+had no failure handling around its stock work at all — and its
+even-exchange validation ran AFTER the reversal and re-apply loops had
+committed their per-lot writes, so a mere 400 refusal corrupted stock (the
+return's lots reversed-and-reapplied while return_items, whose rewrite
+lives in the never-run batch, still described the old state). Commit
+`4fb6d108`:
+
+- **Settlement gate hoisted** above every stock write — it depends only on
+  the new items and the existing replacement rows, so nothing forced it to
+  run late. A blocked edit now refuses with the stock byte-identical.
+- **Compensation log + one catch** around the whole stock stretch, same
+  discipline as the create path (Part 523): restock reversals put back via
+  receiveBatchStock, re-applies pulled back via removeStockFromBatch,
+  freshly created damaged lots deleted (unconsumed by construction), and
+  the ORIGINAL damaged lots re-created faithfully — `reverseDamagedLots`
+  now returns reason/creator alongside the row data, and its consumed-lot
+  validation guarantees quantity_remaining === quantity, so nothing is
+  lost in the round trip. Unreversible writes reach the audit log
+  (`return_rollback_incomplete`, via: edit) and the 500 message.
+- The failed batch also rolls back the return_items rewrite atomically, so
+  the old rows and allocations stay coherent for a retry.
+- **Left open, stated:** post-batch failures (allocation recording,
+  sale-status refresh) leave an edited return with degraded lot precision
+  on FUTURE edits, not corrupted stock — the true cross-step atomicity
+  class (backup slice C, restore lock) that needs a design, not a bigger
+  batch.
+
+Verified: returns batch-restock suite 10 → 11 (the new probe asserts a
+blocked even-exchange edit leaves lot, aggregate and return_items
+untouched), replace-damaged 10, sale-cancel, sales-returns-search 19;
+cloudflare tsc clean. **Needs deploy** (rides with the b9 batch).
