@@ -1,7 +1,7 @@
 import { useMemo, useRef, useState, type MouseEvent } from 'react'
 import { createPortal } from 'react-dom'
 import X from 'lucide-react/dist/esm/icons/x.js'
-import { fmtTime } from '../../utils/formatters.ts'
+import { fmtTime, fmtTimezoneLabel } from '../../utils/formatters.ts'
 import AppSelect from '../shared/AppSelect.tsx'
 import StatusBadge, { ALL_STATUSES, getStatusLabel } from './StatusBadge.tsx'
 
@@ -298,7 +298,7 @@ export default function SaleDetailModal({
                 )}
                 <InfoBlock label={t('branch') || 'Branch'} value={sale.branch_name} />
                 <InfoBlock label={t('status') || 'Status'} value={getStatusLabel(currentStatus, t)} />
-                <InfoBlock label={t('timezone') || 'Timezone'} value={sale.device_tz} mono />
+                <InfoBlock label={t('timezone') || 'Timezone'} value={fmtTimezoneLabel(sale.device_tz)} mono />
                 <InfoBlock label={t('device') || 'Device'} value={sale.device_name} />
               </div>
             </section>

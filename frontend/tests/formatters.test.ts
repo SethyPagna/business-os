@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
-import { fmtCount, fmtDate, fmtShort, fmtTime, parseServerTimestampMs } from '../src/utils/formatters.ts'
+import { fmtCount, fmtDate, fmtShort, fmtTime, fmtTimezoneLabel, parseServerTimestampMs } from '../src/utils/formatters.ts'
 
 let failed = 0
 
@@ -45,6 +45,25 @@ await runTest('Y8: server timestamps parse as UTC regardless of the viewer timez
   const trackerSource = fs.readFileSync(new URL('../src/components/shared/BackgroundImportTracker.tsx', import.meta.url), 'utf8')
   assert.match(trackerSource, /parseServerTimestampMs\(String\(job\?\.updated_at/)
   assert.doesNotMatch(trackerSource, /Date\.parse\(String\(job\?\.updated_at/)
+})
+
+await runTest('timezone labels say Phnom Penh, never Bangkok (user, Aug 30 2026)', () => {
+  // Same UTC+07:00 wall clock -- naming only, values elsewhere untouched.
+  assert.equal(fmtTimezoneLabel('Asia/Bangkok'), 'Asia/Phnom_Penh')
+  assert.equal(fmtTimezoneLabel('Asia/Phnom_Penh'), 'Asia/Phnom_Penh')
+  assert.equal(fmtTimezoneLabel('  Asia/Bangkok  '), 'Asia/Phnom_Penh')
+  assert.equal(fmtTimezoneLabel('Europe/Paris'), 'Europe/Paris')
+  assert.equal(fmtTimezoneLabel(null), '')
+  // Every surface that prints a captured zone routes through the label.
+  const auditLog = fs.readFileSync(new URL('../src/components/utils-settings/AuditLog.tsx', import.meta.url), 'utf8')
+  assert.match(auditLog, /fmtTimezoneLabel\(log\?\.device_tz\)/)
+  const saleDetail = fs.readFileSync(new URL('../src/components/sales/SaleDetailModal.tsx', import.meta.url), 'utf8')
+  assert.match(saleDetail, /fmtTimezoneLabel\(sale\.device_tz\)/)
+  const serverPage = fs.readFileSync(new URL('../src/components/server/ServerPage.tsx', import.meta.url), 'utf8')
+  assert.match(serverPage, /fmtTimezoneLabel\(settings\?\.display_timezone \|\| displayTimezone\)/)
+  assert.match(serverPage, /fmtTimezoneLabel\(deviceTimezone\)/)
+  const settingsPage = fs.readFileSync(new URL('../src/components/utils-settings/Settings.tsx', import.meta.url), 'utf8')
+  assert.match(settingsPage, /fmtTimezoneLabel\(deviceTimezone\)/)
 })
 
 if (failed > 0) {

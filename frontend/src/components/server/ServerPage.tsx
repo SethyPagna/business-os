@@ -18,6 +18,7 @@ import {
   withLoaderTimeout,
 } from '../../utils/loaders.ts'
 import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.ts'
+import { fmtTimezoneLabel } from '../../utils/formatters.ts'
 
 const SERVER_PENDING_SYNC_TIMEOUT_MS = 8000
 const SERVER_DIAGNOSTICS_TIMEOUT_MS = 10000
@@ -274,7 +275,9 @@ function InfoTab({ syncUrl, syncConnected, active = true }: InfoTabProps) {
   }, [])
 
   const fmt = (value: Date | string | number | null | undefined): string => formatDateTime(value)
-  const appliedTimezone = String(settings?.display_timezone || displayTimezone || '')
+  // fmtTimezoneLabel: an Asia/Bangkok value labels itself Asia/Phnom_Penh
+  // (identical UTC+7 clock) -- naming only, formatting stays untouched.
+  const appliedTimezone = fmtTimezoneLabel(settings?.display_timezone || displayTimezone)
   const mode = syncUrl ? (isAutoDetected(syncUrl) ? copy('sync_auto_mode', 'Auto-detected (same origin)', 'រកឃើញស្វ័យប្រវត្តិ (ដែនដើមដូចគ្នា)') : copy('manual', 'Manual', 'កំណត់ដោយដៃ')) : copy('sync_local_only_mode', 'Local (IndexedDB only)', 'មូលដ្ឋានីយ៉ាងតែប៉ុណ្ណោះ (IndexedDB)')
   const ws = syncUrl ? (syncConnected ? copy('connected', 'Connected', 'បានភ្ជាប់') : copy('reconnecting', 'Reconnecting...', 'កំពុងភ្ជាប់ឡើងវិញ...')) : copy('sync_local_only_short', 'Local only', 'មូលដ្ឋានីយ៉ាងតែប៉ុណ្ណោះ')
 
@@ -307,7 +310,7 @@ function InfoTab({ syncUrl, syncConnected, active = true }: InfoTabProps) {
         <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-gray-700 dark:text-gray-300">{copy('sync_client_this_device', 'Client (This Device)', 'ឧបករណ៍នេះ')}</p>
         <StatusRow label={copy('local_time', 'Local time', 'ម៉ោងមូលដ្ឋាន')} value={fmt(clientTime)} mono />
         <StatusRow label={copy('display_timezone', 'Display timezone', 'តំបន់ម៉ោងបង្ហាញ')} value={appliedTimezone} mono />
-        <StatusRow label={copy('device_timezone', 'Device timezone', 'តំបន់ម៉ោងឧបករណ៍')} value={deviceTimezone} mono />
+        <StatusRow label={copy('device_timezone', 'Device timezone', 'តំបន់ម៉ោងឧបករណ៍')} value={fmtTimezoneLabel(deviceTimezone)} mono />
       </div>
 
       {syncUrl ? (

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import { useApp as useAppHook } from '../../AppContext.tsx'
 import { BUSINESS_TIME_ZONE } from '../../constants.ts'
+import { fmtTimezoneLabel } from '../../utils/formatters.ts'
 import ArrowDown from 'lucide-react/dist/esm/icons/arrow-down.js'
 import ArrowUp from 'lucide-react/dist/esm/icons/arrow-up.js'
 import BadgeDollarSign from 'lucide-react/dist/esm/icons/badge-dollar-sign.js'
@@ -1374,7 +1375,7 @@ export default function Settings() {
               <p className="font-semibold text-primary-700 dark:text-primary-300 mb-1">{t('current_device_time')}</p>
               <p className="font-mono text-primary-600 dark:text-primary-400">{formatPreviewDateTime(previewNow)}</p>
               <p className="text-gray-500 mt-1">{t('display_timezone')}: <strong>{selectedDisplayTimezone}</strong></p>
-              <p className="text-gray-500 mt-1">{t('device_timezone')}: <strong>{deviceTimezone}</strong></p>
+              <p className="text-gray-500 mt-1">{t('device_timezone')}: <strong>{fmtTimezoneLabel(deviceTimezone)}</strong></p>
               <p className="text-gray-400 mt-1">{t('timezone_display_note')}</p>
             </div>
           </div>

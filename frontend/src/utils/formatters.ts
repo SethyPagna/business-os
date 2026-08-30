@@ -141,6 +141,20 @@ export function fmtDateTime24(raw: TimestampInput): string {
 }
 
 /**
+ * Display label for a captured IANA timezone. Asia/Bangkok and
+ * Asia/Phnom_Penh share the identical UTC+07:00 wall clock (no DST), and
+ * devices in Cambodia routinely report Asia/Bangkok -- the business is in
+ * Phnom Penh, so the label says so (user, Aug 30 2026: "name the time and
+ * region zone to Phnom Penh...not bangkok...no difference but name
+ * change"). Display-only: stored device_tz values are never rewritten, so
+ * historical rows normalize too.
+ */
+export function fmtTimezoneLabel(raw: unknown): string {
+  const value = String(raw ?? '').trim()
+  return value === 'Asia/Bangkok' ? 'Asia/Phnom_Penh' : value
+}
+
+/**
  * Hours to add to a UTC hour to get the business timezone's wall-clock
  * hour (Asia/Phnom_Penh, see BUSINESS_TIME_ZONE). Computed via Intl rather
  * than hardcoded so it stays correct if BUSINESS_TIME_ZONE ever changes to

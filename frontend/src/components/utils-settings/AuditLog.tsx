@@ -28,6 +28,7 @@ import {
   getAuditLogs as getAuditLogsRequest,
 } from '../../api/auditLogTransport.ts'
 import { buildAuditFieldDiff } from '../../utils/auditLogFieldDiff.ts'
+import { fmtTimezoneLabel } from '../../utils/formatters.ts'
 
 type SortDirection = 'asc' | 'desc'
 type AuditGroupMode = 'time' | 'time+action'
@@ -209,7 +210,8 @@ function auditDeviceLabel(log: AuditLogRow | null | undefined): string {
 }
 
 function auditTimezoneLabel(log: AuditLogRow | null | undefined): string {
-  const captured = String(log?.device_tz || '').trim()
+  // fmtTimezoneLabel: Asia/Bangkok renders as Asia/Phnom_Penh (same UTC+7).
+  const captured = fmtTimezoneLabel(log?.device_tz)
   if (captured) return captured
   const rawTime = String(log?.client_time || log?.created_at || '')
   if (/[+-]00(?::?00)?$/.test(rawTime) || rawTime.endsWith('Z')) return 'UTC'
