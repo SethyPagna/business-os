@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import ArrowRight from 'lucide-react/dist/esm/icons/arrow-right.js'
+import CalendarDays from 'lucide-react/dist/esm/icons/calendar-days.js'
 import X from 'lucide-react/dist/esm/icons/x.js'
 
 // X1 (Part 395): the shared date+time range picker, built to the user's two
@@ -221,17 +222,20 @@ export default function DateTimeRangePicker({
       <button
         type="button"
         onClick={() => setOpen((current) => !current)}
-        className={`${triggerClassName || 'inline-flex items-center gap-2 rounded-md px-3.5 py-1.5'} border text-xs font-medium transition ${hasSelection
-          ? 'border-blue-300 bg-blue-50 text-blue-800 dark:border-blue-700 dark:bg-blue-900/30 dark:text-blue-200'
-          : 'border-slate-300 bg-white text-slate-600 hover:border-slate-400 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-300'}`}
+        className={`${triggerClassName || 'inline-flex items-center gap-2 rounded-md px-3 py-1.5 sm:gap-2.5 sm:px-4 sm:py-2.5 sm:text-sm sm:min-w-[15rem]'} border text-xs font-medium transition ${hasSelection
+          ? 'border-blue-400 bg-blue-50 text-blue-800 shadow-sm dark:border-blue-600 dark:bg-blue-900/30 dark:text-blue-100'
+          : 'border-slate-300 bg-white text-slate-700 hover:border-blue-300 hover:bg-blue-50/50 hover:text-blue-700 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-300 dark:hover:border-blue-600'}`}
         aria-expanded={open}
         aria-label={t('date_time_range') || 'Date and time range'}
       >
-        {triggerLabel || (
+        <CalendarDays className="h-4 w-4 shrink-0 text-blue-500 dark:text-blue-400" />
+        {triggerLabel ? (
+          <span className="truncate">{triggerLabel}</span>
+        ) : (
           <>
-            <span>{t('range_start') || 'Start'}</span>
-            <ArrowRight className="h-3.5 w-3.5 opacity-60" />
-            <span>{t('range_end') || 'End'}</span>
+            <span>{t('range_start') || 'Start Date'}</span>
+            <ArrowRight className="h-4 w-4 shrink-0 text-blue-400" />
+            <span>{t('range_end') || 'End Date'}</span>
           </>
         )}
       </button>

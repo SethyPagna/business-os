@@ -257,25 +257,32 @@ export default function SalesDailyReport({ t, fmtUSD, active = true, range: exte
   const orderedDays = useMemo(() => [...days].sort((a, b) => (a.date < b.date ? 1 : -1)), [days])
 
   const statChip = (label: string, value: string, tone = '') => (
-    <div className="rounded-xl border border-slate-200 bg-white px-3 py-2 dark:border-slate-700 dark:bg-slate-900">
+    <div className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 dark:border-slate-700 dark:bg-slate-900">
       <div className="text-[10px] font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">{label}</div>
       <div className={`text-sm font-semibold ${tone || 'text-slate-900 dark:text-white'}`}>{value}</div>
     </div>
   )
 
   const renderDayDetail = (report: DayReport) => (
-    <div className="space-y-3 border-t border-slate-100 bg-slate-50/60 p-3 dark:border-slate-800 dark:bg-slate-900/40">
-      <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
-        {statChip(t('collected_total') || 'Collected', fmtUSD(report.totals.collected_total_usd))}
-        {statChip(t('revenue') || 'Revenue', fmtUSD(report.totals.revenue_usd))}
-        {statChip(t('profit') || 'Profit', fmtUSD(report.totals.profit_usd), report.totals.profit_usd < 0 ? 'text-red-600 dark:text-red-400' : 'text-emerald-700 dark:text-emerald-400')}
+    <div className="space-y-2.5 border-t border-slate-100 bg-slate-50/60 p-2.5 dark:border-slate-800 dark:bg-slate-900/40">
+      {/* Four stats (two on phones): the money line people scan for, with
+          Discounts always visible. Collected + Avg order ride a caption
+          underneath so the tile row stays four wide, not seven. */}
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
         {statChip(t('sales') || 'Sales', String(report.totals.tx_count))}
-        {statChip(t('avg_order') || 'Avg order', fmtUSD(report.totals.avg_order_usd))}
+        {statChip(t('revenue') || 'Revenue', fmtUSD(report.totals.revenue_usd))}
+        {statChip(t('discounts') || 'Discounts', fmtUSD(report.totals.discount_usd), 'text-rose-600 dark:text-rose-400')}
+        {statChip(t('profit') || 'Profit', fmtUSD(report.totals.profit_usd), report.totals.profit_usd < 0 ? 'text-red-600 dark:text-red-400' : 'text-emerald-700 dark:text-emerald-400')}
+      </div>
+      <div className="-mt-1 px-0.5 text-[11px] text-slate-400">
+        {t('collected_total') || 'Collected'}: <span className="font-medium text-slate-500 dark:text-slate-300">{fmtUSD(report.totals.collected_total_usd)}</span>
+        <span className="mx-1.5">·</span>
+        {t('avg_order') || 'Avg order'}: <span className="font-medium text-slate-500 dark:text-slate-300">{fmtUSD(report.totals.avg_order_usd)}</span>
       </div>
 
-      <div className="grid gap-3 lg:grid-cols-3">
+      <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
         {/* Payment methods */}
-        <div className="rounded-xl border border-slate-200 bg-white p-3 dark:border-slate-700 dark:bg-slate-900">
+        <div className="rounded-lg border border-slate-200 bg-white p-2.5 dark:border-slate-700 dark:bg-slate-900">
           <div className="mb-2 text-xs font-semibold text-slate-700 dark:text-slate-200">{t('payment_methods') || 'Payment methods'}</div>
           {report.payment_methods.length === 0 ? (
             <div className="text-xs text-slate-400">{t('no_data') || 'No data'}</div>
@@ -295,7 +302,7 @@ export default function SalesDailyReport({ t, fmtUSD, active = true, range: exte
         </div>
 
         {/* Discounts */}
-        <div className="rounded-xl border border-slate-200 bg-white p-3 dark:border-slate-700 dark:bg-slate-900">
+        <div className="rounded-lg border border-slate-200 bg-white p-2.5 dark:border-slate-700 dark:bg-slate-900">
           <div className="mb-2 text-xs font-semibold text-slate-700 dark:text-slate-200">{t('discounts') || 'Discounts'}</div>
           <table className="w-full text-xs">
             <tbody>
@@ -322,7 +329,7 @@ export default function SalesDailyReport({ t, fmtUSD, active = true, range: exte
         </div>
 
         {/* Delivery -- charged vs absorbed vs actual, then per courier */}
-        <div className="rounded-xl border border-slate-200 bg-white p-3 dark:border-slate-700 dark:bg-slate-900">
+        <div className="rounded-lg border border-slate-200 bg-white p-2.5 dark:border-slate-700 dark:bg-slate-900">
           <div className="mb-2 text-xs font-semibold text-slate-700 dark:text-slate-200">
             {t('pos_delivery') || 'Delivery'}
             <span className="ml-1.5 font-normal text-slate-400">×{report.totals.delivery_sale_count}</span>
