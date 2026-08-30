@@ -167,12 +167,15 @@ export default function ImportHub({
   return (
     <div className="space-y-4">
       <div className="flex items-center gap-1.5">
+        {/* Short noun title; the routing explanation lives in the InfoHint,
+            not inline — the old sentence-length title wrapped to several
+            lines on phone widths. */}
         <h3 className="text-base font-semibold text-gray-900 dark:text-gray-100">
-          {T('import_hub_title', 'Import — drop your files, we route them')}
+          {T('import_hub_title', 'Import files')}
         </h3>
         <InfoHint
           label={T('import_hub_how', 'How importing works')}
-          text={T('import_hub_sub', 'One combined sheet or separate files per aspect — catalog, stock-in, sales, contacts — together or over several sessions. Each file is recognized by its columns and imported automatically once analyzed; anything with conflicts pauses for your review in the import tracker.')}
+          text={T('import_hub_sub', 'Drop one combined sheet or separate files (catalog, stock-in, sales, contacts) — several at once or over sessions. Each file is recognized by its columns and imports automatically; conflicts pause for review in the import tracker.')}
         />
       </div>
 
@@ -185,7 +188,7 @@ export default function ImportHub({
       >
         <UploadCloud className="w-8 h-8 mx-auto text-gray-400" />
         <p className="mt-2 text-sm font-medium text-gray-700 dark:text-gray-200">
-          {reading ? (T('import_hub_reading', 'Reading files…')) : T('import_hub_drop', 'Drop CSV / Excel files here, or click to choose (multiple allowed)')}
+          {reading ? (T('import_hub_reading', 'Reading files…')) : T('import_hub_drop', 'Drop CSV / Excel files, or click to choose')}
         </p>
       </button>
       <input
@@ -201,11 +204,15 @@ export default function ImportHub({
         <div className="space-y-2">
           {plan.map((entry, index) => (
             <div key={`${entry.name}-${index}`} className="rounded-xl border border-gray-200 dark:border-gray-700 p-3">
+              {/* min-w-0 flex-1 on the name: a flex item won't shrink below
+                  its content without it, so a long file name pushed the row
+                  count and status out of the row on phone widths instead of
+                  truncating. */}
               <div className="flex items-center gap-2 flex-wrap">
                 <FileSpreadsheet className="w-4 h-4 text-gray-400 shrink-0" />
-                <span className="text-sm font-medium truncate">{entry.name}</span>
-                <span className="text-xs text-gray-400">{entry.rowCount} {T('import_hub_rows', 'rows')}</span>
-                <span className={`ml-auto text-xs font-semibold ${
+                <span className="min-w-0 flex-1 text-sm font-medium truncate">{entry.name}</span>
+                <span className="shrink-0 whitespace-nowrap text-xs text-gray-400">{entry.rowCount} {T('import_hub_rows', 'rows')}</span>
+                <span className={`ml-auto shrink-0 text-xs font-semibold ${
                   entry.status === 'queued' ? 'text-emerald-600'
                   : entry.status === 'error' ? 'text-red-600'
                   : entry.status === 'planned' ? 'text-gray-400'
@@ -304,12 +311,12 @@ export default function ImportHub({
 
       <div className="flex items-center justify-between gap-2 pt-1">
         <button type="button" className="text-xs text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 underline" onClick={onUseClassic}>
-          {T('import_hub_classic', 'I know what I’m importing — use the classic screens')}
+          {T('import_hub_classic', 'Use the classic import screens')}
         </button>
         <div className="flex items-center gap-2">
           {done && queuedCount > 0 ? (
             <span className="text-xs text-emerald-600 font-medium">
-              {queuedCount} {T('import_hub_done', 'import(s) queued — they apply automatically once analyzed; only a genuine conflict pauses in the import tracker')}
+              {queuedCount} {T('import_hub_done', 'import(s) applying in the background — conflicts pause in the import tracker')}
             </span>
           ) : null}
           <button type="button" className="btn btn-ghost btn-sm" onClick={onClose} disabled={dispatching}>

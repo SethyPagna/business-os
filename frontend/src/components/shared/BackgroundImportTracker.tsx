@@ -137,7 +137,7 @@ type ImportTrackerApi = {
 }
 
 type ProgressLabels = Partial<Record<
-  'analyzed' | 'rows' | 'reviewReady' | 'analyzingFile' | 'readingFile' | 'cancelled' | 'queued' | 'cancelRequested' | 'finalCleanup' | 'waitingForWorker' | 'readyToAnalyze' | 'startingApply' | 'applyingChanges',
+  'analyzed' | 'rows' | 'reviewReady' | 'analyzingFile' | 'readingFile' | 'cancelled' | 'queued' | 'cancelRequested' | 'finalCleanup' | 'waitingForWorker' | 'readyToAnalyze' | 'startingApply' | 'applyingChanges' | 'failed',
   string
 >>
 
@@ -395,7 +395,7 @@ export function getJobProgressDetails(job: ImportJob, labels: ProgressLabels = {
   if (ACTIVE_STATUSES.has(status) && phase.includes('queued')) {
     return {
       value: 8,
-      label: labels.waitingForWorker || 'Queued - waiting for worker',
+      label: labels.waitingForWorker || 'Waiting for worker',
       indeterminate: true,
     }
   }
@@ -407,11 +407,13 @@ export function getJobProgressDetails(job: ImportJob, labels: ProgressLabels = {
     }
   }
   if (status === 'awaiting_review') {
+    // Just the phase word -- the counts line (getRowsDisplay) already says
+    // "Analyzed N rows", and the header/row renders both side by side, so
+    // repeating the numbers here doubled the text and made the label long
+    // enough to wrap into the title on phone widths.
     return {
       value: 60,
-      label: analyzedRows
-        ? `${labels.analyzed || 'Analyzed'} ${analyzedRows.toLocaleString()} ${labels.rows || 'rows'}`
-        : (labels.reviewReady || 'Review ready'),
+      label: labels.reviewReady || 'Review ready',
       indeterminate: false,
     }
   }
@@ -428,24 +430,26 @@ export function getJobProgressDetails(job: ImportJob, labels: ProgressLabels = {
     // visibly climbs instead of jumping straight to a static "done"-
     // sounding number on the very first chunk.
     if (analyzedRows > 0) {
+      // Phase word only: the live "N / M rows analyzed" cursor already
+      // renders on the counts line right next to this label (getRowsDisplay's
+      // identical-shape branch), so carrying the numbers here too printed
+      // them twice and wrapped the header on phone widths.
       const rowsDone = Number(job?.processed_rows || 0)
       const pct = Math.max(0, Math.min(1, rowsDone / analyzedRows))
       return {
         value: Math.min(58, Math.round(15 + pct * 43)),
-        label: `${labels.analyzingFile || 'Analyzing'} - ${rowsDone.toLocaleString()} / ${analyzedRows.toLocaleString()} ${labels.rows || 'rows'}`,
+        label: labels.analyzingFile || 'Analyzing',
         indeterminate: false,
       }
     }
     // Y8: distinct "Reading file" label for this staging sub-phase -- the
     // classify sub-phase above keeps "Analyzing", so the pipeline now reads
     // "Reading file" -> "Analyzing" instead of "Analyzing file" twice (the
-    // user reported it as two analyze passes).
-    const materializedSoFar = readMaterializedRowsWrittenSoFar(job)
+    // user reported it as two analyze passes). The "N rows read" counter
+    // lives on the counts line (getRowsDisplay), not here.
     return {
       value: 12,
-      label: materializedSoFar
-        ? `${labels.readingFile || 'Reading file'} - ${materializedSoFar.toLocaleString()} ${labels.rows || 'rows'} read`
-        : (labels.readingFile || 'Reading file'),
+      label: labels.readingFile || 'Reading file',
       indeterminate: true,
     }
   }
@@ -468,10 +472,12 @@ export function getJobProgressDetails(job: ImportJob, labels: ProgressLabels = {
     const rowsTotal = Number(job?.total_rows || 0)
     const rowsDone = Number(job?.processed_rows || 0)
     if (rowsTotal > 0 && rowsDone > 0) {
+      // Phase word only -- the counts line shows the same "N / M rows"
+      // cursor (getRowsDisplay's final fallback), so no numbers here.
       const pct = Math.max(0, Math.min(1, rowsDone / rowsTotal))
       return {
         value: Math.min(98, Math.round(65 + pct * 33)),
-        label: `${labels.applyingChanges || 'Applying changes'} - ${rowsDone.toLocaleString()} / ${rowsTotal.toLocaleString()}`,
+        label: labels.applyingChanges || 'Applying changes',
         indeterminate: false,
       }
     }
@@ -504,6 +510,13 @@ export function getJobProgressDetails(job: ImportJob, labels: ProgressLabels = {
   if (status === 'cancelled') {
     return { value: 100, label: labels.cancelled || 'Cancelled', indeterminate: false }
   }
+  // Now that the job row's label no longer carries the phase word (see
+  // getJobLabel), the status chip is the one place "failed" can appear --
+  // the old fall-through here rendered a mid-run percentage ("45%") for a
+  // job that had died, which read as still-working.
+  if (status === 'failed') {
+    return { value: 100, label: labels.failed || 'Failed', indeterminate: false }
+  }
   if (total <= 0) {
     return { value: 0, label: labels.queued || 'Queued', indeterminate: ACTIVE_STATUSES.has(status) }
   }
@@ -513,9 +526,12 @@ export function getJobProgressDetails(job: ImportJob, labels: ProgressLabels = {
 }
 
 function getJobLabel(job: ImportJob): string {
+  // Type only ("Products import"), no "- <phase>" suffix: the status chip
+  // rendered right next to this label already names the phase, so the
+  // suffix said the same thing twice and stretched the row label into the
+  // chip on narrow screens.
   const type = String(job?.type || 'import').replaceAll('_', ' ')
-  const phase = String(job?.phase || job?.status || '').replaceAll('_', ' ')
-  return `${type} import${phase ? ` - ${phase}` : ''}`
+  return `${type.charAt(0).toUpperCase()}${type.slice(1)} import`
 }
 
 // Returns the non-zero result tallies as discrete parts (created / updated /
@@ -561,9 +577,9 @@ function getJobResultParts(job: ImportJob, labels: ResultLabels = {}): string[] 
 // error/stall line renders on its own coloured row (never folded).
 function getJobCountsSummary(
   job: ImportJob,
-  labels: { rows: string; images: string; issues: string; analyzed?: string },
+  labels: { rows: string; images: string; issues: string; analyzed?: string; queued?: string },
 ): string {
-  const parts: string[] = [getRowsDisplay(job, labels.rows, labels.analyzed)]
+  const parts: string[] = [getRowsDisplay(job, labels.rows, labels.analyzed, labels.queued)]
   const totalImages = Number(job?.total_images || 0)
   if (totalImages) {
     parts.push(`${Number(job?.processed_images || 0).toLocaleString()} / ${totalImages.toLocaleString()} ${labels.images}`)
@@ -603,15 +619,17 @@ function getJobTimingSummary(job: ImportJob): string | null {
   return queueWait ? `${total} (${queueWait} queue wait on last chunk)` : total
 }
 
-export function getRowsDisplay(job: ImportJob, rowsLabel: string, analyzedLabel = 'Analyzed'): string {
+export function getRowsDisplay(job: ImportJob, rowsLabel: string, analyzedLabel = 'Analyzed', queuedLabel = 'Queued'): string {
   const status = normalizeJobStatus(job)
   const phase = String(job?.phase || '').toLowerCase()
   const summary = job?.summary || {}
   const analyzedRows = Number(job?.total_rows || summary?.analyzed_rows || summary?.rows || 0)
   if (ACTIVE_STATUSES.has(status) && phase.includes('queued')) {
+    // "Queued", not the old "Waiting for import worker" -- the progress
+    // label beside this line already says "Waiting for worker".
     return analyzedRows
       ? `${analyzedLabel} ${analyzedRows.toLocaleString()} ${rowsLabel}`
-      : 'Waiting for import worker'
+      : queuedLabel
   }
   if (status === 'awaiting_review' && analyzedRows) {
     return `${analyzedLabel} ${analyzedRows.toLocaleString()} ${rowsLabel}`
@@ -1050,7 +1068,7 @@ export default function BackgroundImportTracker() {
   const title = hasAttention
     ? (t('import_needs_review') || 'Import needs review')
     : isActive
-      ? (t('import_running_background') || 'Import running in background')
+      ? (t('import_running_background') || 'Import running')
       : (t('import_finished') || 'Import finished')
   const rowsLabel = t('import_rows_label') || t('rows') || 'rows'
   const imagesLabel = t('import_images_label') || t('images') || 'images'
@@ -1076,10 +1094,11 @@ export default function BackgroundImportTracker() {
     queued: t('queued') || 'Queued',
     cancelRequested: t('import_cancel_requested') || 'Cancel requested',
     finalCleanup: t('import_final_cleanup') || 'Final cleanup',
-    waitingForWorker: t('import_waiting_for_worker') || 'Queued - waiting for worker',
+    waitingForWorker: t('import_waiting_for_worker') || 'Waiting for worker',
     readyToAnalyze: t('import_ready_to_analyze') || 'Ready to analyze',
     startingApply: t('import_starting_apply') || 'Starting apply',
     applyingChanges: t('import_applying_changes') || 'Applying changes',
+    failed: t('failed') || 'Failed',
   }
   const resultLabels = {
     created: t('created') || 'created',
@@ -1157,7 +1176,7 @@ export default function BackgroundImportTracker() {
       openConflictsModal(jobId, CONTACT_JOB_TYPE_LABELS[String(job.type || '')] || 'Contacts')
       notify(
         t('import_review_conflicts_first')
-          || 'This import has possible duplicate names -- review them, then approve.',
+          || 'Possible duplicate names — review them, then approve.',
         'info',
       )
       return
@@ -1188,7 +1207,7 @@ export default function BackgroundImportTracker() {
         IMPORT_TRACKER_APPROVE_TIMEOUT_MS,
       )
       await loadJobs()
-      notify(t('import_apply_started') || 'Import apply started. You can keep using the app.', 'success')
+      notify(t('import_apply_started') || 'Applying in the background.', 'success')
     } catch (error) {
       // The server is the ONE authority on whether product conflicts are
       // genuinely unresolved (its 409 uses the same unresolved-rows query
@@ -1199,7 +1218,7 @@ export default function BackgroundImportTracker() {
       // itself once everything is resolved.
       if ((error as { code?: string } | null)?.code === 'product_conflicts_unresolved') {
         setProductConflictsJobId(jobId)
-        notify(t('import_resolve_product_conflicts') || 'Some product rows need a decision — resolve them and the import continues.', 'info')
+        notify(t('import_resolve_product_conflicts') || 'Some rows need a decision — resolve them to continue.', 'info')
       } else {
         notify(getErrorMessage(error) || (t('import_apply_failed') || 'Could not approve import'), 'error')
       }
@@ -1265,7 +1284,7 @@ export default function BackgroundImportTracker() {
           writeDismissedJobs(next)
           return next
         })
-        notify(t('import_hidden_restart_server') || 'Import hidden locally. Restart/update the server to finish deleting its stored files.', 'warning')
+        notify(t('import_hidden_restart_server') || 'Hidden locally — restart or update the server to finish deleting its files.', 'warning')
         return
       }
       notify(message || (t('import_remove_failed') || 'Could not remove import'), 'error')
@@ -1294,14 +1313,14 @@ export default function BackgroundImportTracker() {
     try {
       const api = getImportTrackerApi()
       await api.dismissImportJob(dismissedId)
-      notify(t('import_hidden') || 'Import hidden from the tracker', 'success')
+      notify(t('import_hidden') || 'Import hidden', 'success')
     } catch (error) {
       // Dismiss already happened locally above, so it's not silently
       // lost -- but unlike the local record, this won't follow the user
       // to another device/browser or survive a cache clear until they
       // dismiss it again there (or it's retried successfully).
       notify(
-        getErrorMessage(error) || (t('import_hidden_local_only') || 'Hidden here for now, but this device could not tell the server -- it may reappear elsewhere.'),
+        getErrorMessage(error) || (t('import_hidden_local_only') || 'Hidden on this device only — it may reappear elsewhere.'),
         'warning',
       )
     }
@@ -1412,13 +1431,17 @@ export default function BackgroundImportTracker() {
           >
             {hasAttention ? <AlertTriangle className="h-4 w-4 flex-shrink-0" /> : isActive ? <Loader2 className="h-4 w-4 flex-shrink-0 animate-spin" /> : <CheckCircle2 className="h-4 w-4 flex-shrink-0" />}
             <div className={`min-w-0 ${compactTracker ? '' : 'flex-1'}`}>
-              <div className="font-semibold">{title}</div>
+              {/* truncate + the nowrap/shrink-0 on the label span: without
+                  either constraint the title and the progress label shared
+                  this row unbounded and wrap-interleaved into each other on
+                  phone widths. */}
+              <div className="truncate font-semibold">{title}</div>
               {/* Y9: terse counts (rows / images / issues) instead of the
                   old prose "<type> import - <phase>" subtitle, whose phase
                   already shows in the status chip to the right. */}
-              {!compactTracker ? <div className="truncate text-xs opacity-80">{getJobCountsSummary(primaryJob, { rows: rowsLabel, images: imagesLabel, issues: issuesLabel, analyzed: progressLabels.analyzed })}</div> : null}
+              {!compactTracker ? <div className="truncate text-xs opacity-80">{getJobCountsSummary(primaryJob, { rows: rowsLabel, images: imagesLabel, issues: issuesLabel, analyzed: progressLabels.analyzed, queued: progressLabels.queued })}</div> : null}
             </div>
-            {!compactTracker ? <span className="text-xs font-semibold">{primaryProgress.label}</span> : null}
+            {!compactTracker ? <span className="flex-shrink-0 whitespace-nowrap text-xs font-semibold">{primaryProgress.label}</span> : null}
           </button>
         </div>
         {!compactTracker ? (
@@ -1486,11 +1509,11 @@ export default function BackgroundImportTracker() {
                       </div>
                     ) : null}
                     <div className="mt-1 text-xs opacity-75">
-                      {getJobCountsSummary(job, { rows: rowsLabel, images: imagesLabel, issues: issuesLabel, analyzed: progressLabels.analyzed })}
+                      {getJobCountsSummary(job, { rows: rowsLabel, images: imagesLabel, issues: issuesLabel, analyzed: progressLabels.analyzed, queued: progressLabels.queued })}
                     </div>
                     {(lastError || isStalledSilently) ? (
                       <div className="mt-1 text-xs font-medium text-amber-700 dark:text-amber-300">
-                        {lastError || (t('import_stalled_no_error') || 'No update in a while -- this import may have stopped. Safe to cancel or remove.')}
+                        {lastError || (t('import_stalled_no_error') || 'No updates for a while — likely stopped; safe to cancel or remove.')}
                       </div>
                     ) : null}
                     {hasFoldableDetails ? (
