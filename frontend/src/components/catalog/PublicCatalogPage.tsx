@@ -1,6 +1,7 @@
 import { Suspense, useEffect, useMemo, useRef, useState } from 'react'
 import type { ClipboardEvent, Dispatch, RefObject, SetStateAction } from 'react'
 import { lazyRetry } from '../../utils/lazyImport.ts'
+import { fmtTime } from '../../utils/formatters.ts'
 import { usePullToRefresh } from '../shared/usePullToRefresh.ts'
 import PullToRefreshIndicator from '../shared/PullToRefreshIndicator.tsx'
 import Bot from 'lucide-react/dist/esm/icons/bot.js'
@@ -507,7 +508,10 @@ function formatDateTime(value: unknown): string {
   if (!value) return '-'
   const raw = String(value)
   const date = new Date(raw.includes('T') ? raw : `${raw}Z`)
-  return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleString()
+  // mm/dd/yyyy + 24-hour in Phnom Penh business time (fmtTime). This is a
+  // customer-facing surface; a bare toLocaleString() rendered whatever locale
+  // and timezone the visitor's device happened to use (dd/mm, 12-hour).
+  return Number.isNaN(date.getTime()) ? String(value) : fmtTime(raw)
 }
 
 function replaceVars(template: unknown, values: Record<string, unknown>): string {

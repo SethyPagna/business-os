@@ -18,6 +18,7 @@ import {
   withLoaderTimeout,
 } from '../../utils/loaders.ts'
 import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.ts'
+import { fmtTime } from '../../utils/formatters.ts'
 import { getCustomers as getLoyaltyCustomers } from '../../api/contactReadTransport.ts'
 import { awardCustomerPoints } from '../../api/contactWriteTransport.ts'
 
@@ -274,7 +275,9 @@ function formatReviewDateTime(value: unknown): string {
   if (!value) return '-'
   const raw = String(value)
   const date = new Date(raw.includes('T') ? raw : `${raw}Z`)
-  return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleString()
+  // mm/dd/yyyy + 24-hour in Phnom Penh business time (fmtTime). A bare
+  // toLocaleString() rendered the viewer's locale + timezone (dd/mm, 12-hour).
+  return Number.isNaN(date.getTime()) ? String(value) : fmtTime(raw)
 }
 
 async function fetchPortalReviewItems(): Promise<unknown> {

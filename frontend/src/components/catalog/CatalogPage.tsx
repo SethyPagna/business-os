@@ -2,6 +2,7 @@ import { Suspense, useDeferredValue, useEffect, useMemo, useRef, useState } from
 import type { ClipboardEvent, Dispatch, RefObject, SetStateAction } from 'react'
 import { lazyRetry } from '../../utils/lazyImport.ts'
 import { fuzzyTextMatches, matchesSearchTermGroups } from '../../utils/searchMatch.ts'
+import { fmtTime } from '../../utils/formatters.ts'
 import { deriveTelegramLink } from '../../utils/socialLinks.ts'
 import Bot from 'lucide-react/dist/esm/icons/bot.js'
 import ExternalLink from 'lucide-react/dist/esm/icons/external-link.js'
@@ -996,7 +997,10 @@ function formatDateTime(value: unknown): string {
   if (!value) return '-'
   const raw = String(value)
   const date = new Date(raw.includes('T') ? raw : `${raw}Z`)
-  return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleString()
+  // mm/dd/yyyy + 24-hour in Phnom Penh business time. A bare toLocaleString()
+  // rendered the VIEWER's locale + timezone (dd/mm, 12-hour) -- the app pins
+  // one numeric format everywhere via fmtTime; this was one of the few strays.
+  return Number.isNaN(date.getTime()) ? String(value) : fmtTime(raw)
 }
 
 /** Render product price text according to selected portal display mode. */
