@@ -30,7 +30,9 @@ import { createLongPressState, type LongPressState } from '../../utils/longPress
 import { buildTimeActionSections, getAvailableYears, getTimeGroupingMode, toggleIdSet } from '../../utils/groupedRecords.ts'
 import { buildPeriodFilterOptions } from '../../utils/periodFilterOptions.ts'
 import { beginKeyedAction, beginSingleAction, finishKeyedAction, finishSingleAction } from '../../utils/actionGuards.ts'
-import { getSales as fetchSales, getSalesStats as fetchSalesStats } from '../../api/salesTransport.ts'
+import { getSales as fetchSales, getSalesStats as fetchSalesStats, getSalesStatsStrip } from '../../api/salesTransport.ts'
+import StatsStrip, { statsPresetRange, type StatCardDef } from '../shared/StatsStrip.tsx'
+import type { DateTimeRange } from '../shared/DateTimeRangePicker.tsx'
 import { getUsers as fetchUsers } from '../../api/userReadTransport.ts'
 import {
   beginTrackedRequest,
@@ -482,6 +484,38 @@ export default function Sales() {
     return () => { cancelled = true }
   }, [loadSalesStats])
 
+  // The foldable stats strip (shared StatsStrip): range-scoped figures with
+  // per-card breakdowns, DEFAULT per-day (today). Deliberately independent
+  // of the list's filters -- the strip answers "how was this period", the
+  // list footer keeps answering "what does this filter match".
+  type SalesStripPayload = {
+    totals?: Record<string, number>
+    by_payment?: Array<{ payment_method?: string; tx_count?: number; collected_usd?: number; total_usd?: number }>
+    by_status?: Array<{ sale_status?: string; count?: number; total_usd?: number }>
+    returns?: { count?: number; refund_usd?: number }
+  }
+  const [stripRange, setStripRange] = useState<DateTimeRange>(() => statsPresetRange('today'))
+  const [stripData, setStripData] = useState<SalesStripPayload | null>(null)
+  const [stripLoading, setStripLoading] = useState(false)
+  const stripRequestRef = useRef(0)
+  const loadStatsStrip = useCallback(async (): Promise<void> => {
+    if (!isActive) return
+    if (!stripRange.startDate || !stripRange.endDate) return
+    const requestId = beginTrackedRequest(stripRequestRef)
+    setStripLoading(true)
+    try {
+      const result = await getSalesStatsStrip({ startDate: stripRange.startDate, endDate: stripRange.endDate })
+      if (!aliveRef.current || !isTrackedRequestCurrent(stripRequestRef, requestId)) return
+      setStripData((result || {}) as SalesStripPayload)
+    } catch {
+      if (!aliveRef.current || !isTrackedRequestCurrent(stripRequestRef, requestId)) return
+      setStripData(null)
+    } finally {
+      if (aliveRef.current && isTrackedRequestCurrent(stripRequestRef, requestId)) setStripLoading(false)
+    }
+  }, [isActive, stripRange.endDate, stripRange.startDate])
+  useEffect(() => { void loadStatsStrip() }, [loadStatsStrip])
+
   useEffect(() => {
     if (!isActive) {
       setHistoryReady(false)
@@ -512,8 +546,9 @@ export default function Sales() {
     if (syncChannel.channel === 'sales' || syncChannel.channel === 'returns') {
       loadSales(true)
       void loadSalesStats() // Z3a: keep the summary aggregate in lockstep with the rows
+      void loadStatsStrip() // the range strip counts the same events
     }
-  }, [isActive, loadSales, loadSalesStats, syncChannel?.channel, syncChannel?.ts])
+  }, [isActive, loadSales, loadSalesStats, loadStatsStrip, syncChannel?.channel, syncChannel?.ts])
   useEffect(() => {
     if (!isActive || !isAdmin || !salesFiltersOpen || userOptionsLoaded) return
     let cancelled = false
@@ -844,17 +879,74 @@ export default function Sales() {
     selectAllRef.current.indeterminate = selectedIds.size > 0 && selectedIds.size < filteredIds.length
   }, [filteredIds.length, selectedIds.size])
 
+  const stripCards = useMemo<StatCardDef[]>(() => {
+    const totals = (stripData?.totals || {}) as Record<string, number>
+    const byStatus = stripData?.by_status || []
+    const byPayment = stripData?.by_payment || []
+    const stripReturns = stripData?.returns || {}
+    const txCount = Number(totals.tx_count) || 0
+    const revenueUsd = Number(totals.revenue_usd) || 0
+    const returnCount = Number(stripReturns.count) || 0
+    const refundUsd = Number(stripReturns.refund_usd) || 0
+    const topPayment = byPayment[0]
+    return [
+      {
+        key: 'sales',
+        label: t('sales') || 'Sales',
+        value: String(txCount),
+        sub: txCount > 0 ? `${translateOr('stats_avg_sale', 'avg')} ${fmtUSD(Number(totals.avg_order_usd) || 0)}` : undefined,
+        hint: translateOr('stats_sales_hint', 'Completed and delivery sales in the range (cancelled and awaiting-payment excluded from money figures). The breakdown counts every status, including those two.'),
+        details: byStatus.map((row) => ({
+          label: getStatusLabel(String(row.sale_status || 'completed'), t),
+          value: `${Number(row.count) || 0} · ${fmtUSD(Number(row.total_usd) || 0)}`,
+        })),
+      },
+      {
+        key: 'revenue',
+        label: t('revenue') || 'Revenue',
+        value: fmtUSD(revenueUsd),
+        tone: 'accent',
+        hint: translateOr('stats_revenue_hint', 'Net revenue = gross sales minus store and membership discounts (before tax and delivery). Collected = what actually changed hands including tax and customer-paid delivery.'),
+        details: [
+          { label: translateOr('stats_gross', 'Gross sales'), value: fmtUSD(Number(totals.gross_sales_usd) || 0) },
+          { label: translateOr('stats_store_discount', 'Store discount'), value: fmtUSD(Number(totals.store_discount_usd) || 0), tone: 'warn' as const },
+          { label: translateOr('stats_member_discount', 'Member discount'), value: fmtUSD(Number(totals.membership_discount_usd) || 0), tone: 'warn' as const },
+          { label: translateOr('stats_tax', 'Tax'), value: fmtUSD(Number(totals.tax_usd) || 0) },
+          { label: translateOr('stats_delivery_fees', 'Delivery fees'), value: fmtUSD(Number(totals.delivery_usd) || 0) },
+          { label: translateOr('stats_collected', 'Collected'), value: fmtUSD(Number(totals.collected_total_usd) || 0), tone: 'ok' as const },
+        ],
+      },
+      {
+        key: 'payments',
+        label: translateOr('stats_payments', 'Payments'),
+        value: topPayment ? String(topPayment.payment_method || 'Unknown') : '—',
+        sub: topPayment ? `${Number(topPayment.tx_count) || 0} · ${fmtUSD(Number(topPayment.collected_usd) || 0)}` : undefined,
+        hint: translateOr('stats_payments_hint', 'Money collected per payment method, including customer-paid delivery fees. The card shows the top method for the range.'),
+        details: byPayment.map((row) => ({
+          label: String(row.payment_method || 'Unknown'),
+          value: `${Number(row.tx_count) || 0} · ${fmtUSD(Number((row as Record<string, unknown>).collected_usd) || 0)}`,
+        })),
+      },
+      {
+        key: 'returns',
+        label: t('returns') || 'Returns',
+        value: String(returnCount),
+        sub: returnCount > 0 ? fmtUSD(refundUsd) : undefined,
+        tone: returnCount > 0 ? ('warn' as const) : undefined,
+        hint: translateOr('stats_returns_hint', 'Customer returns created in the range (cancelled returns excluded). Refunds here are not subtracted from the Revenue card — Revenue matches the Dashboard for the same range.'),
+        details: [
+          { label: t('returns') || 'Returns', value: String(returnCount) },
+          { label: translateOr('stats_refunded', 'Refunded'), value: fmtUSD(refundUsd), tone: returnCount > 0 ? ('crit' as const) : undefined },
+        ],
+      },
+    ]
+  }, [fmtUSD, stripData, t, translateOr])
+
   const revenue = salesStats
     ? salesStats.revenue_usd
     : filtered
         .filter((sale) => !['cancelled', 'awaiting_payment'].includes(sale.sale_status || 'completed'))
         .reduce((sum, sale) => sum + (sale.net_total_usd ?? sale.total_usd ?? 0), 0)
-
-  const pendingRevenue = salesStats
-    ? salesStats.pending_revenue_usd
-    : filtered
-        .filter((sale) => (sale.sale_status || 'completed') === 'awaiting_payment')
-        .reduce((sum, sale) => sum + (sale.total_usd || 0), 0)
 
   const toggleSelected = (saleId: number | string) => {
     const numericId = Number(saleId)
@@ -1209,35 +1301,18 @@ export default function Sales() {
         ) : null}
       </div>
 
-      {filtered.length > 0 ? (
-        <div className="mb-3 flex min-h-10 flex-wrap items-center gap-x-2 gap-y-1 rounded-xl bg-blue-50 px-4 py-2 text-sm dark:bg-blue-900/20">
-          <span className="font-semibold text-blue-700 dark:text-blue-300">{salesStats ? salesStats.total_count : filtered.length} {t('sales') || 'sales'}</span>
-          <span className="text-gray-400">|</span>
-          <span className="font-semibold text-blue-700 dark:text-blue-300">{fmtUSD(revenue)} {t('revenue')}</span>
-          {salesStats?.truncated_in_list ? (
-            <>
-              <span className="text-gray-400">|</span>
-              <span className="text-gray-400 text-xs" title={t('sales_list_truncated_title') || 'More sales match this filter than are shown in the list below; totals above still cover all of them.'}>
-                {t('sales_list_truncated') || 'showing a partial list'}
-              </span>
-            </>
-          ) : null}
-          {statusFilter === 'all' ? (
-            <>
-              <span className="text-gray-400">|</span>
-              <span className="text-green-600 dark:text-green-400">{filtered.filter((sale) => (sale.sale_status || 'completed') === 'completed').length} {t('summary_completed') || 'completed'}</span>
-            </>
-          ) : null}
-          {pendingRevenue > 0 ? (
-            <>
-              <span className="text-gray-400">|</span>
-              <span className="text-yellow-600 dark:text-yellow-400" title={t('awaiting_payment_title') || 'Awaiting Payment not yet counted as revenue'}>
-                {fmtUSD(pendingRevenue)} {t('summary_on_hold') || 'on hold'}
-              </span>
-            </>
-          ) : null}
-        </div>
-      ) : null}
+      {/* The foldable stats strip (shared StatsStrip, the app-wide stats
+          pattern): mini cards over a date range defaulting to TODAY; tapping
+          a card folds open its explanation + breakdown. Range-scoped on
+          purpose — filter-scoped totals stay on the list footer below. */}
+      <StatsStrip
+        className="mb-3"
+        cards={stripCards}
+        loading={stripLoading}
+        t={t}
+        range={stripRange}
+        onRangeChange={setStripRange}
+      />
 
       <p className="mb-2 text-xs text-gray-400">{t('click_for_details') || 'Click a row for details'}</p>
 

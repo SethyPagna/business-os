@@ -7,7 +7,7 @@ import { useMemo } from 'react'
 import { useRef } from 'react'
 import LayoutDashboard from 'lucide-react/dist/esm/icons/layout-dashboard.js'
 import RefreshCw from 'lucide-react/dist/esm/icons/refresh-cw.js'
-import MiniStat from './MiniStat'
+import StatsStrip, { type StatCardDef } from '../shared/StatsStrip.tsx'
 import { fmtTime, getBusinessTimezoneOffsetHours } from '../../utils/formatters'
 import { todayStr, offsetDate, businessYear, businessMonth } from '../../utils/dateHelpers'
 import Download from 'lucide-react/dist/esm/icons/download.js'
@@ -655,7 +655,6 @@ export default function Dashboard() {
   const [showAllExpiring, setShowAllExpiring]   = useState(false)
   const [recentSalesOpen, setRecentSalesOpen]   = useState(false)
   const [recentSaleDetail, setRecentSaleDetail] = useState<DashboardSale | null>(null)
-  const [kpiDetail, setKpiDetail]               = useState<KpiDetail | null>(null)
   const [recentImportFiles, setRecentImportFiles] = useState<ImportFileSummary[]>([])
   const [recentImportFilesLoading, setRecentImportFilesLoading] = useState(true)
   const [importReportJobId, setImportReportJobId] = useState<string | null>(null)
@@ -1095,6 +1094,10 @@ export default function Dashboard() {
     if (key === 'pending' || key === 'draft') return pendingStatusLabel
     return completedStatusLabel
   }, [completedStatusLabel, pendingStatusLabel, refundedStatusLabel])
+
+  // Still serves the Best Hour drill below (openHourDetail). The period
+  // KPI cards no longer use it -- they fold inline via StatsStrip.
+  const [kpiDetail, setKpiDetail] = useState<KpiDetail | null>(null)
 
   const openHourDetail = useCallback((hourStat: DashboardHourRow | null | undefined, rank: number | null = null) => {
     if (!hourStat) return
@@ -1573,27 +1576,28 @@ ${translateOr('delivery_margin', 'Delivery margin')} ${fmtUSD(aDeliveryMargin)} 
               </div>
             </div>
           ) : (
-            <>
-            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-4 sm:gap-2.5">
-              {periodKpis.map((kpi, index) => {
-                const isLastOddCard = periodKpis.length % 2 === 1 && index === periodKpis.length - 1
-                return (
-                <MiniStat
-                  key={kpi.id}
-                  label={kpi.label}
-                  value={kpi.value}
-                  sub={kpi.sub}
-                  color={kpi.color}
-                  trend={kpi.trend}
-                  info={(kpi as { info?: string }).info}
-                  infoLabel={`${String(kpi.label)} - ${translateOr('what_this_means', 'what this means')}`}
-                  onClick={() => setKpiDetail(kpi)}
-                  className={isLastOddCard ? 'col-span-2 sm:col-span-1' : ''}
-                />
-                )
-              })}
-          </div>
-          </>
+            // The foldable stats strip (shared StatsStrip, the app-wide
+            // stats pattern): the same KPI set, but tapping a card folds
+            // its breakdown open INLINE instead of a portal sheet. The
+            // range stays the dashboard's own range card above, so no
+            // range props are passed here.
+            <StatsStrip
+              t={(key: string) => t(key)}
+              cards={periodKpis.map((kpi): StatCardDef => ({
+                key: kpi.id,
+                label: String(kpi.label),
+                value: kpi.value,
+                sub: kpi.sub,
+                trend: kpi.trend,
+                hint: (kpi as { info?: string }).info,
+                tone: /green|emerald/.test(String(kpi.color || '')) ? 'ok'
+                  : /red|rose/.test(String(kpi.color || '')) ? 'crit'
+                    : /amber|orange|yellow/.test(String(kpi.color || '')) ? 'warn'
+                      : /blue|purple|indigo|violet/.test(String(kpi.color || '')) ? 'accent'
+                        : undefined,
+                details: (kpi.details || []).map((row) => ({ label: String(row.label), value: row.value })),
+              }))}
+            />
         )}
       </div>
 

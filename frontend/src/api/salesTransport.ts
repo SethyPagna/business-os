@@ -164,6 +164,16 @@ export function getSalesStats(params: QueryParams = {}): Promise<unknown> {
   )
 }
 
+// Range-scoped figures + fold breakdowns for the Sales page's StatsStrip
+// (routes/sales.ts /stats-strip: kernel totals, payment mix, status mix,
+// the range's customer returns). Plain apiFetch, no fabricated-zero
+// fallback: a failed read should surface as the strip's error/empty state,
+// never as an all-zero day that reads as "no sales".
+export function getSalesStatsStrip(params: { startDate: string; endDate: string; branchId?: string | number }): Promise<unknown> {
+  const query = buildQueryString(params as QueryParams, { skipEmpty: true })
+  return apiFetch('GET', appendQuery('/api/sales/stats-strip', query))
+}
+
 // ---- Phase X (Part 395): daily report + per-courier delivery totals -------
 // No local fallbacks that fabricate zeros: a failed report read should show
 // the error path, never an all-zero report that reads as "no sales".

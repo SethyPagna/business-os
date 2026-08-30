@@ -30,6 +30,7 @@ import {
   createFee as createFeeRequest,
   deleteFee as deleteFeeRequest,
   getFees as getFeesRequest,
+  getFeesReport,
   updateFee as updateFeeRequest,
   type FeeListResult,
   type FeePayload,
@@ -37,6 +38,8 @@ import {
   type FeeType,
 } from '../../api/feesTransport.ts'
 import FeeForm, { FEE_TYPE_OPTIONS } from './FeeForm.tsx'
+import StatsStrip, { statsPresetRange, type StatCardDef } from '../shared/StatsStrip.tsx'
+import type { DateTimeRange } from '../shared/DateTimeRangePicker'
 import { primaryToolbarButtonClassName } from '../shared/toolbarButtonStyles'
 
 type TranslateFn = (key: string) => string | undefined
@@ -199,14 +202,83 @@ export default function FeesPage() {
     if (syncChannel.channel === 'fees') void load(true)
   }, [isActive, load, syncChannel?.channel, syncChannel?.ts])
 
+  // The foldable stats strip (shared StatsStrip, app-wide stats pattern):
+  // range-scoped (default TODAY) with per-card fold breakdowns from
+  // GET /api/fees/report -- by type, and the range's busiest days.
+  type FeesStripPayload = {
+    totals?: { count?: number; amount_usd?: number }
+    days?: Array<{ date?: string; count?: number; amount_usd?: number }>
+    by_type?: Array<{ fee_type?: string; count?: number; amount_usd?: number }>
+  }
+  const [stripRange, setStripRange] = useState<DateTimeRange>(() => statsPresetRange('today'))
+  const [stripData, setStripData] = useState<FeesStripPayload | null>(null)
+  const [stripLoading, setStripLoading] = useState(false)
+  const stripRequestRef = useRef(0)
+  const loadStatsStrip = useCallback(async (): Promise<void> => {
+    if (!isActive || !stripRange.startDate || !stripRange.endDate) return
+    const requestId = ++stripRequestRef.current
+    setStripLoading(true)
+    try {
+      const result = await getFeesReport({ startDate: stripRange.startDate, endDate: stripRange.endDate })
+      if (stripRequestRef.current !== requestId) return
+      setStripData((result || {}) as FeesStripPayload)
+    } catch {
+      if (stripRequestRef.current !== requestId) return
+      setStripData(null)
+    } finally {
+      if (stripRequestRef.current === requestId) setStripLoading(false)
+    }
+  }, [isActive, stripRange.endDate, stripRange.startDate])
+  useEffect(() => { void loadStatsStrip() }, [loadStatsStrip])
+  useEffect(() => {
+    if (!isActive || !syncChannel?.channel) return
+    if (syncChannel.channel === 'fees') void loadStatsStrip()
+  }, [isActive, loadStatsStrip, syncChannel?.channel, syncChannel?.ts])
+
+  const stripCards = useMemo<StatCardDef[]>(() => {
+    const totals = stripData?.totals || {}
+    const byType = stripData?.by_type || []
+    const days = stripData?.days || []
+    const count = Number(totals.count) || 0
+    const amount = Number(totals.amount_usd) || 0
+    return [
+      {
+        key: 'fees',
+        label: tr('fees', 'Fees'),
+        value: String(count),
+        sub: count > 0 ? `${tr('stats_avg_sale', 'avg')} ${fmtUSD(amount / count)}` : undefined,
+        hint: tr('stats_fees_hint', 'Fee records dated inside the range. The breakdown shows how many of each type.'),
+        details: byType.map((row) => {
+          const type = String(row.fee_type || '')
+          const option = FEE_TYPE_OPTIONS.find((candidate) => candidate.value === type)
+          return {
+            label: option ? (t(option.labelKey) || option.fallback) : (type || '—'),
+            value: `${Number(row.count) || 0} · ${fmtUSD(Number(row.amount_usd) || 0)}`,
+          }
+        }),
+      },
+      {
+        key: 'total',
+        label: tr('total', 'Total'),
+        value: fmtUSD(amount),
+        tone: 'accent',
+        hint: tr('stats_fees_total_hint', 'Sum of fee amounts in the range, in USD. The breakdown lists the days with the most fee spend.'),
+        details: days.slice(0, 8).map((day) => {
+          const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(day.date || ''))
+          return {
+            label: m ? `${m[2]}/${m[3]}/${m[1]}` : String(day.date || ''),
+            value: `${Number(day.count) || 0} · ${fmtUSD(Number(day.amount_usd) || 0)}`,
+          }
+        }),
+      },
+    ]
+  }, [fmtUSD, stripData, t, tr])
+
   useEffect(() => () => {
     invalidateTrackedRequest(loadRequestRef)
   }, [])
 
   const fees = result.fees || []
-  const summaryRows = result.summary || []
-  const totalUsd = summaryRows.reduce((sum, row) => sum + Number(row.total_usd || 0), 0)
-  const totalKhr = summaryRows.reduce((sum, row) => sum + Number(row.total_khr || 0), 0)
 
   const feeTypeLabel = useCallback((type: string): string => {
     const option = FEE_TYPE_OPTIONS.find((opt) => opt.value === type)
@@ -337,21 +409,18 @@ export default function FeesPage() {
           not a deliberate design choice. Hint text kept (it's page-usage
           guidance, not a title) but now only rendered when there's nothing
           else to anchor the row, so an empty state doesn't look bare. */}
-      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-        {summaryRows.length === 0 ? (
-          <p className="text-xs text-slate-400 dark:text-slate-500">
-            {tr('fees_page_hint', 'Track tax, delivery, and other charges, optionally matched to a sale.')}
-          </p>
-        ) : <div />}
-        {summaryRows.length > 0 ? (
-          <div className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-500 shadow-sm dark:border-slate-700 dark:bg-slate-900 dark:text-slate-400">
-            <Receipt className="h-3.5 w-3.5 text-slate-400" />
-            <span>{tr('total', 'Total')}:</span>
-            <span className="font-semibold text-slate-700 dark:text-slate-200">{fmtUSD(totalUsd)}</span>
-            {totalKhr > 0 ? <span className="text-slate-400">/ {fmtKHR(totalKhr)}</span> : null}
-          </div>
-        ) : null}
-      </div>
+      {/* The foldable stats strip (shared StatsStrip, the app-wide stats
+          pattern) replaces the old lone Total pill: range-scoped mini cards
+          (default today) whose folds carry the by-type and by-day
+          breakdowns. */}
+      <StatsStrip
+        className="mb-3"
+        cards={stripCards}
+        loading={stripLoading}
+        t={t}
+        range={stripRange}
+        onRangeChange={setStripRange}
+      />
 
       <div className="sticky top-2 z-30 -mx-1 mb-4 space-y-3 bg-gray-50/95 pb-2 backdrop-blur dark:bg-gray-900/95 sm:mx-0">
         <div className="flex min-w-0 flex-wrap items-center gap-1.5 pt-1 sm:flex-nowrap">
