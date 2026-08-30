@@ -14397,3 +14397,58 @@ with a minted local admin session (SHA-256 token row, deleted afterwards):
 
 The production half of the check (one real POS sale after the next
 `deploy:full`) remains on master-plan item A2 where coordinator 7b filed it.
+
+## Part 521 (Aug 30 2026, session business-os-v1-b9) — Part-77 CRITICAL backup fix, slices A+B: full backups carry the lot ledger + schema guard
+
+**Ask:** continuation of the findings backlog (claimed first with the slice
+split recorded). The ×3-flagged backup finding, plus what a full sweep of
+every `CREATE TABLE` in migrations/ against `BACKUP_TABLES` turned up: the
+omission was far wider than flagged. Commits `40ed7d90` (+ `302653fa`
+test fallout from Part 513).
+
+**Slice A — coverage (`BACKUP_TABLES`).** Absent from every full backup
+until now: the whole lot ledger (`product_batches`, `branch_batch_stock`,
+`sale_item_batch_allocations`, `return_item_batch_allocations`),
+`damaged_stock_lots`, **`fees` (4,240 production money records)**,
+**`loyalty_point_adjustments`** (member balances are COMPUTED from these —
+restoring a backup silently changed loyalty balances),
+`return_replacement_items`, `promotion_rules`, `user_notes`,
+`pending_actions` (the review queue), duplicate dismissals (products +
+contacts), `customer_share_submissions`, `dated_stock_count_batch_actions`,
+`rfid_tags`, `ai_provider_configs`, and the import commit/guard ledgers
+(idempotency truth — losing them lets a re-queued chunk re-apply stock).
+All added in FK dependency order (restore deletes in reverse). Deliberate
+exclusions are now RECORDED in the list's comment with reasons: auth
+ephemera (sessions/devices/codes/lockouts — a restore must not resurrect
+sessions), runtime state, regenerable audit/staging, org identity (owned by
+coreDataInvariants), and the dynamic per-custom-table data tables (flagged,
+not silently coverable by a static list).
+
+**Slice B — schema guard.** Backups stamp `summary.schemaMigration` (latest
+applied `d1_migrations` name). Restore's pass 1 (which already streams the
+whole document for headers) now also captures the summary, and BEFORE any
+delete: refuses a backup taken on a NEWER schema than live (the
+column-intersection insert would silently drop the newer columns' data;
+apply migrations first, then restore), reports `schemaMismatch` when live
+is merely newer (legit — new columns fill with defaults), and reports
+`tablesNotInBackup` so restoring an old document says loudly which tables
+kept their live rows instead of reading as a complete restore.
+
+**Slice C — NOT done, stays open in the findings backlog:** restore is
+still a non-atomic DELETE-then-reinsert with no maintenance lock. Honest
+design note for whoever picks it up: whole-restore atomicity is impossible
+inside D1's batch limits at this data size; the realistic hardening is a
+write-blocking maintenance flag (settings/KV) around the restore window +
+resumable restore state, in the spirit of the import lease.
+
+**Fallout fixed (`302653fa`):** my own Part-513 gate change had silently
+broken `test-reset-products-pure` (16) and `test-migration-finalize-pure`
+(8) — their fake operators held only export-grade `backup`. Both now carry
+`backup_restore`, per the new intended contract. Lesson applied: this
+part's verification ran every backup-adjacent suite, not just the new one.
+
+Verified: new `test-backup-coverage-pure.cjs` 7/7 (FK-order +
+refusal-before-delete locks), backup suites 10+18+12+1 green, reset 16 +
+finalize 8 + route-permissions + audit-coverage 49 + audit-log-filters 17
+green, cloudflare tsc clean. **Needs deploy** (rides with Parts
+507/512/513/517/518).
