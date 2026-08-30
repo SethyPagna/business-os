@@ -1024,7 +1024,11 @@ export default function POS() {
   // default-on convention as the notifications toggles in Settings.tsx.
   const showItemDiscountInCart = asText(settings.pos_show_item_discount ?? 'true') !== 'false'
   const redeemPointsStep = Math.max(1, parseInt(asText(settings.customer_portal_redeem_points || '100'), 10) || 100)
-  const redeemValueUsdStep = Math.max(0, Math.round(parseFloat(asText(settings.customer_portal_redeem_value_usd || '1')) || 1))
+  // Cents precision, NOT whole dollars (Part-77, money audit): the old
+  // Math.round here turned a configured $0.50-per-step into $1 (double the
+  // redemption value) and $0.25 into $0 -- the member's points were still
+  // burned (membership_points_redeemed is sent regardless) for a $0 discount.
+  const redeemValueUsdStep = Math.max(0, Math.round((parseFloat(asText(settings.customer_portal_redeem_value_usd || '1')) || 1) * 100) / 100)
   const rawRedeemValueKhrStep = Math.max(0, Math.round(parseFloat(asText(settings.customer_portal_redeem_value_khr || String(exchangeRate))) || exchangeRate))
   const redeemValueKhrStep = rawRedeemValueKhrStep === 0 ? 0 : Math.max(1000, Math.ceil(rawRedeemValueKhrStep / 1000) * 1000)
   const debouncedProductSearch = useDebouncedValue(search, 180)
@@ -2431,11 +2435,16 @@ export default function POS() {
   const discUsd = active.discountType === 'percent'
     ? normalizePriceValue(subtotalUsd * (discountPercentValue / 100), 0)
     : parseFloat(active.discountUsd) || 0
+  // KHR amounts are whole riel end to end (Part-77, money audit): the tax
+  // and change multiplications below used to hand fractional riel to the
+  // checkout payload and the printed receipt. usdToKhr already rounds; the
+  // operator-typed KHR fields are rounded here too so a stray decimal never
+  // rides through.
   const discKhr = active.discountType === 'percent'
     ? normalizePriceValue(subtotalKhr * (discountPercentValue / 100), 0)
-    : (parseFloat(active.discountKhr) || CURRENCY.usdToKhr(discUsd, exchangeRate))
+    : Math.round(parseFloat(active.discountKhr) || CURRENCY.usdToKhr(discUsd, exchangeRate))
   const membershipDiscUsd = parseFloat(active.membershipDiscountUsd) || 0
-  const membershipDiscKhr = parseFloat(active.membershipDiscountKhr) || CURRENCY.usdToKhr(membershipDiscUsd, exchangeRate)
+  const membershipDiscKhr = Math.round(parseFloat(active.membershipDiscountKhr) || CURRENCY.usdToKhr(membershipDiscUsd, exchangeRate))
   const membershipRedeemUnits = Math.max(0, parseInt(active.membershipRedeemUnits || '0', 10) || 0)
   const maxMembershipUnits = Math.max(0, Math.floor((membershipInfo?.points?.balance || 0) / redeemPointsStep))
 
@@ -2443,7 +2452,7 @@ export default function POS() {
   const afterDiscKhr = Math.max(0, subtotalKhr - discKhr - membershipDiscKhr)
 
   const taxUsd       = afterDiscUsd * taxRate
-  const taxKhr       = afterDiscKhr * taxRate
+  const taxKhr       = Math.round(afterDiscKhr * taxRate)
 
   const feeUsd       = parseFloat(active.deliveryFeeUsd) || 0
   const feeKhr       = CURRENCY.usdToKhr(feeUsd, exchangeRate)
@@ -2453,7 +2462,7 @@ export default function POS() {
   const customerFeeKhr = active.isDelivery && active.deliveryFeePaidBy === DELIVERY_FEE_PAYER.CUSTOMER ? feeKhr : 0
 
   const totalUsd     = afterDiscUsd + taxUsd + customerFeeUsd
-  const totalKhr     = afterDiscKhr + taxKhr + customerFeeKhr
+  const totalKhr     = Math.round(afterDiscKhr + taxKhr + customerFeeKhr)
 
   const activePaymentDetails = active.paymentDetails.length
     ? active.paymentDetails
@@ -2462,7 +2471,7 @@ export default function POS() {
   const paidKhrNum   = activePaymentDetails.reduce((sum, detail) => sum + (parseFloat(detail.khr) || 0), 0)
   const totalPaid    = paidUsdNum + paidKhrNum / exchangeRate
   const changeUsd    = totalPaid - totalUsd
-  const changeKhr    = changeUsd * exchangeRate
+  const changeKhr    = Math.round(changeUsd * exchangeRate)
 
   const handleDiscountUsd = (v: string) => patchActive({ discountType: 'fixed', discountUsd: v, discountKhr: String(CURRENCY.usdToKhr(parseFloat(v) || 0, exchangeRate)) })
   const handleDiscountKhr = (v: string) => patchActive({ discountType: 'fixed', discountKhr: v, discountUsd: String(CURRENCY.khrToUsd(parseFloat(v) || 0, exchangeRate)) })
@@ -2612,7 +2621,7 @@ export default function POS() {
         batch_expiry_date: i.batch_expiry_date || null,
         damaged_lot_id:    i.damaged_lot_id || null,
       })),
-      subtotal_usd: subtotalUsd, subtotal_khr: subtotalKhr,
+      subtotal_usd: subtotalUsd, subtotal_khr: Math.round(subtotalKhr),
       discount_usd: discUsd,    discount_khr: discKhr,
       membership_discount_usd: membershipDiscUsd,
       membership_discount_khr: membershipDiscKhr,
