@@ -238,6 +238,21 @@ export default function StockChangeSection({ t }: { t: Translate }) {
         <div className="min-w-48 flex-1 sm:max-w-72">
           <SearchInput id="stock-ledger-search" name="stock_ledger_search" value={search} onChange={setSearch} placeholder={tr(t, 'search', 'Search')} />
         </div>
+        {/* Order (user, Aug 30 2026): the Start → End date range comes FIRST
+            among the filters, THEN supplier (branch sits between only when the
+            business has more than one). Unified Start → End pill -- same
+            control as the Dashboard, Fees, Inventory movements and Audit Log
+            range filters. */}
+        <DateTimeRangePicker
+          value={{ startDate, endDate, startTime: '', endTime: '' }}
+          onChange={(next) => {
+            setStartDate(next.startDate || '')
+            setEndDate(next.endDate || '')
+          }}
+          t={t}
+          showTime={false}
+          triggerClassName="flex items-center justify-center gap-2 rounded-lg px-2.5 py-1.5"
+        />
         {branches.length > 1 ? (
           <AppSelect
             name="stock_ledger_branch"
@@ -262,19 +277,6 @@ export default function StockChangeSection({ t }: { t: Translate }) {
             ]}
           />
         ) : null}
-        {/* Unified Start → End pill (Aug 30 2026) replacing the last two
-            loose native date inputs -- same control as the Dashboard, Fees,
-            Inventory movements and Audit Log range filters. */}
-        <DateTimeRangePicker
-          value={{ startDate, endDate, startTime: '', endTime: '' }}
-          onChange={(next) => {
-            setStartDate(next.startDate || '')
-            setEndDate(next.endDate || '')
-          }}
-          t={t}
-          showTime={false}
-          triggerClassName="flex items-center justify-center gap-2 rounded-lg px-2.5 py-1.5"
-        />
         <span className="ml-auto inline-flex items-center gap-1 text-xs text-gray-400">
           {total}
           {/* The ledger's "what is this" explanation lives behind this info
