@@ -13890,3 +13890,78 @@ click-through of the supplier filter deferred — peers own the shared dev
 server; the kernel behavior is pinned by the pure test instead. Historical sale
 movements stay unattributed by design (no truthful join exists); only new
 writes and the dated-count backfill carry lots.
+
+## Part 511 — Aug 30 2026 — user's UI batch: transfer modal dead-load fix, receipt toolbar one row, desktop text scale (session f9)
+
+**Ask** (verbatim, condensed): "for desktop/large screens text can be made
+larger... only for large screens"; the branch page's expanded branch "shows very
+ugly style products information"; "for sales, when click to view, the text are in
+multiple rows and not scrollable"; on print / print preview "the various texts
+for buttons are in multiple rows. not compact one row"; the branch transfer
+function is "not fully working, and after selecting the products the selected
+area ui are very bad and large... and also not working can't fetch, fix all."
+
+**What changed**
+
+- `TransferModal.tsx` — THE functional bug: the `aliveRef` liveness guard's
+  unmount cleanup set `aliveRef.current = false` but nothing re-armed it on
+  mount. React StrictMode's dev double-mount runs that cleanup between the two
+  mounts, so for the component's whole real lifetime every fetch result
+  (products page, unpaged bulk list, tracked-batch ids, batches) was discarded
+  and both pickers sat on "Loading..." forever — reproduced in the browser
+  (stock request returned 200 while the list never rendered), which is the
+  "not working / can't fetch". Converted the init-once effect to a mount
+  effect that re-arms, the same pattern the other aliveRef surfaces use.
+  Selected-area redesign: picking a product in single mode now COLLAPSES the
+  search+list block (a Change button restores it) and the blue panel tightens
+  (p-3, quantity+note share a row from sm up); in multi mode the "N selected"
+  count is a toggle filtering the list to just the checked rows, reset on
+  branch change / empty selection. New `transfer_change_product` lang key
+  (`change` is the money-change term in Khmer, so it could not be reused).
+- `Branches.tsx` — the mobile transfer-history card contained a literal `<td>`
+  inside a `<div>` (invalid HTML); now a `<div>`. Expanded-branch stock cards
+  restyled: neutral card + thin colored left edge + colored qty instead of
+  solid red/yellow fills (with real data most rows are low-stock, so the grid
+  was a wall of yellow = "very ugly"), one row per card, columns 1/2/3/4.
+- `SaleDetailModal.tsx` — long receipt numbers truncate on one line in the
+  header (title= carries the full value; chip/Print/X stop wrapping). The
+  update button substituted nothing into the `update_to_status` template, so
+  it rendered a literal "{status}"; now replaced properly. (Scrolling itself
+  verified working — `modal-scroll` was already correct in this build.)
+- `receipt/Receipt.tsx` — the preview toolbar is ONE compact row: Open PDF /
+  Image / Back collapse to icon-only below sm (labels return at sm+), language
+  chips get nowrap. Previously grid+wrap stacked the controls into 2-3 rows.
+- `main.css` — `--ui-text-scale` was consumed by every text-size class but
+  never set; media queries now set 1.08 at ≥1280px and 1.14 at ≥1920px, and
+  scale the 10px/11px brackets at those widths. Desktop-only by construction;
+  phones/tablets and layout metrics untouched.
+
+**What was found**
+
+- Production (deployed Aug 27) predates commit 08cdcacf (Aug 29), so on the
+  live site every successful single transfer still reports "Transfer failed"
+  — that alone explains most of "transfer not fully working" as seen on
+  admin.leangbeauty.com. Needs the user's `npm run deploy:full`.
+- Several other modals share TransferModal's missing aliveRef re-arm
+  (InventoryImportModal, PublicCatalogPage, OtpModal, ContactImportModal,
+  SalesImportModal, ProductForm, ReceiptSettings, StockActionImportModal) —
+  spawned as a separate task chip rather than edited here (peer claims).
+
+**Verified** — real browser session against wrangler dev (localhost:8787) +
+vite (5173): transfer modal loads products in both modes after the fix; a
+single-mode batch transfer of 2 pcs Auto Apply Test A Main Store → Branch 2
+succeeded end-to-end and Branch 2's expanded card shows the 2 pcs; receipt
+toolbar is one row at 375px and 1600px; sale-detail header is one row on
+mobile; `--ui-text-scale` computes 1.08 at 1600px. `npx tsc --noEmit` clean
+(the 6 errors present mid-session were a peer's in-flight Inventory.tsx and
+cleared when they finished). `mutationSuccessContract`, `langKeyIntegrity`,
+`receiptTemplate` test files all pass.
+
+**Not done** — production deploy (user-run; every fix above is invisible on
+the live site until then). The aliveRef sibling sweep (task chip). Multi-mode
+bulk transfer not exercised end-to-end in the browser (single-mode was; bulk
+shares the fixed load path and its endpoint returns success:true explicitly).
+Khmer-language visual pass over the receipt toolbar (EN verified; the layout
+is width-independent but Khmer strings were not eyeballed). Ride-along note:
+my `transfer_change_product` en/km keys were committed by a peer's lang-pack
+commit (1f55712e) while staged in the shared tree — content is correct there.
