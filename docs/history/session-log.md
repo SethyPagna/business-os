@@ -14480,7 +14480,12 @@ from a peer's in-flight uncommitted StockChangeSection.tsx edit
 (`bucketCell` — attributed via the uncommitted diff, not mine).
 **Needs deploy** (rides with the b9 batch: Parts 507/512/513/517/518/521).
 
-## Part 516 (Aug 30 2026, session 5752…ec47) — Stock Changes redesigned to day-grouped cards; instructions moved into InfoHints
+## Part 524 (Aug 30 2026, session 5752…ec47) — Stock Changes redesigned to day-grouped cards; instructions moved into InfoHints
+
+> Renumbered from a colliding "Part 516" by coordinator 7b (write-order rule: the
+> later append renumbers — the original 516 at its bare header above is the
+> StatsStrip session's, and progress.md's Part-516 references point there). The
+> docs commit `69465169` says 516 in its message; it means THIS entry.
 
 Commit `bba6a737`. Products → Stock Changes ledger.
 
