@@ -6560,8 +6560,17 @@ POS.tsx along the way — no behavior change needed there).
 - [ ] **QA plan (Tracks A–F)** — see the QA method section below for
   the full standing framework; none of it has live-browser confirmation
   yet.
-- [ ] **Full responsive/mobile audit of every admin + portal page** —
-  not run; `tsc`/tests/build don't catch layout issues.
+- [~] **Full responsive/mobile audit of every admin + portal page** —
+  admin pages not run; `tsc`/tests/build don't catch layout issues.
+  **Public STOREFRONT audited live (Part 493):** no horizontal overflow at
+  375/768/1440, sidebar filters collapse cleanly, PWA manifest install-ready,
+  dark mode clean, public payload carries no supplier/cost/margin/batch fields.
+  Fixed out of it: iOS "Add to Home Screen" was saving the storefront as
+  "Business OS" (static index.html rebrand gap — commit `fe4261e2`, needs
+  deploy). Flagged-not-fixed (outward-facing/hot files, user's call): mobile
+  header wordmark truncates to "Leang Cos…"; `maximum-scale=1.0` blocks
+  pinch-zoom; ~90 sub-44px touch targets; no `prefers-color-scheme` on first
+  load. Admin-side audit still open.
 - [x] **Full frontend↔backend payload-shape/contract diff** — path+
   method layer confirmed (no 404-on-call bugs across ~210 backend
   routes / ~150 frontend call sites). **Payload-shape diff done in Part

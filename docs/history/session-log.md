@@ -13058,3 +13058,52 @@ concurrent work. Test-file-only change; no runtime code touched.
 after re-checking max = 491.
 
 **Needs deploy.** No — test-only.
+
+## Part 493 (Aug 30 2026, session business-os-v1-0a) — iOS storefront installed as "Business OS"; static index.html rebrand gap
+
+**Ask.** Continue progress.md; the user reported that on iOS the Leang Beauty
+storefront was saved to the home screen under the name **"Business OS"**.
+
+**Root cause.** `frontend/index.html` is one shell for both brands (platform =
+Business OS, store = Leang Beauty). Its boot script `setInitialBusinessOsRoute`
+overrides the title/apple-title to "Leang Beauty" for public routes, but iOS
+"Add to Home Screen" can snapshot the raw HTML `<title>` /
+`apple-mobile-web-app-title` **before** that script runs, and those STATIC
+defaults were still "Business OS". The A6 rebrand fixed the runtime Apple title
+but left the static ones — so iOS read the internal platform name for the
+customer storefront.
+
+**What changed.** Flipped the static `<title>`, `apple-mobile-web-app-title`
+and `description` in index.html to the storefront brand so the raw HTML is
+customer-safe regardless of iOS timing, and added an admin branch to
+`setInitialBusinessOsRoute` that resets those three back to "Business OS"
+synchronously before paint (the same pre-paint mechanism the storefront already
+used). Icons and the manifest link stay on their admin static defaults, so only
+the text is reset — the intended audience split is preserved.
+
+**Also (item 6524, storefront portion).** Read-only responsive/PWA audit of the
+LIVE storefront at 375/768/1440 in light+dark: no horizontal overflow at any
+width; sidebar-filters collapse to a Filters button on narrow screens;
+portal-manifest is install-ready (name/short_name Leang Beauty, 192+512
+any+maskable, standalone); public catalog payload carries no supplier/cost/
+margin/batch fields; dark mode renders cleanly. Flagged, not changed (outward-
+facing / hot shared components, left for the user to decide): header wordmark
+truncates to "Leang Cos…" at 375px; `maximum-scale=1.0` disables pinch-zoom
+(WCAG 1.4.4); ~90 sub-44px touch targets (mostly the A–Z index); catalog payload
+exposes internal branch names + exact per-branch counts (intended — the branch
+filter consumes them); no `prefers-color-scheme` honoring on first load. The
+header wordmark + dynamic tab title still read "Leang Cosmetics" because the
+in-place DB org rename ships on the next deploy (A5), confirmed live.
+
+**Verified.** `node tests/brandIcons.test.ts` and
+`node tests/performanceLoadingUx.test.ts` both PASS; running the real edited
+bootstrap yields title/apple-title "Leang Beauty" for leangbeauty.com/ and
+"Business OS" for admin.leangbeauty.com/. Committed `fe4261e2` (index.html
+only; peers' in-flight files untouched via atomic pathspec).
+
+**Parallel sessions.** Chose a file-disjoint unit (index.html) while peers held
+importEngine/system/reset and sales/returns-search lanes; Part 493 after
+re-checking max = 492.
+
+**Needs deploy.** Yes — the fix ships on the next `npm run deploy:full`. iOS
+installs made before then keep their cached "Business OS" name until re-added.
