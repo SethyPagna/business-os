@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { getStockLedger } from '../../api/productReadTransport.ts'
 import { movementColorClass, translateMovementType } from '../inventory/movementGroups.ts'
 import AppSelect from '../shared/AppSelect'
+import DateTimeRangePicker from '../shared/DateTimeRangePicker'
 import Modal from '../shared/Modal'
 import PaginationControls from '../shared/PaginationControls'
 import SearchInput from '../shared/SearchInput'
@@ -216,20 +217,18 @@ export default function StockChangeSection({ t }: { t: Translate }) {
             ]}
           />
         ) : null}
-        <input
-          type="date"
-          className="input h-9 w-auto text-sm"
-          value={startDate}
-          onChange={(event) => setStartDate(event.target.value)}
-          aria-label={tr(t, 'start_date', 'Start date')}
-        />
-        <span className="text-xs text-gray-400">→</span>
-        <input
-          type="date"
-          className="input h-9 w-auto text-sm"
-          value={endDate}
-          onChange={(event) => setEndDate(event.target.value)}
-          aria-label={tr(t, 'end_date', 'End date')}
+        {/* Unified Start → End pill (Aug 30 2026) replacing the last two
+            loose native date inputs -- same control as the Dashboard, Fees,
+            Inventory movements and Audit Log range filters. */}
+        <DateTimeRangePicker
+          value={{ startDate, endDate, startTime: '', endTime: '' }}
+          onChange={(next) => {
+            setStartDate(next.startDate || '')
+            setEndDate(next.endDate || '')
+          }}
+          t={t}
+          showTime={false}
+          triggerClassName="flex items-center justify-center gap-2 rounded-lg px-2.5 py-1.5"
         />
         <span className="text-xs text-gray-400">{total}</span>
       </div>

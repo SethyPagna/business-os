@@ -15,6 +15,7 @@ import ExportMenu from '../shared/ExportMenu'
 import FilterMenu from '../shared/FilterMenu'
 import PaginationControls, { clampPage, DEFAULT_PAGE_SIZE } from '../shared/PaginationControls'
 import { useIsPageActive } from '../shared/pageActivity'
+import DateTimeRangePicker from '../shared/DateTimeRangePicker'
 import { buildTimeActionSections, getAvailableYears, getTimeGroupingMode, toggleIdSet } from '../../utils/groupedRecords.ts'
 import { buildPeriodFilterOptions } from '../../utils/periodFilterOptions.ts'
 import {
@@ -889,15 +890,12 @@ export default function AuditLog() {
           />
         </Suspense>
       ) : null}
-      <div className="mb-3 min-h-[2.75rem]">
+      {/* Centered like every other page's pager pill; the loading skeleton
+          matches the compact pill's footprint instead of the old full-width
+          card row (which flashed a "double card" during load). */}
+      <div className="mb-3 flex min-h-[2.75rem] justify-center">
         {loading && !hasLoadedOnce ? (
-          <div className="flex h-14 animate-pulse items-center justify-between rounded-xl border border-slate-200 bg-white/80 px-3 py-2 shadow-sm dark:border-slate-700 dark:bg-slate-900/70">
-            <div className="h-3 w-40 rounded bg-slate-200 dark:bg-slate-700" />
-            <div className="flex items-center gap-2">
-              <div className="h-8 w-24 rounded-lg bg-slate-200 dark:bg-slate-700" />
-              <div className="h-8 w-28 rounded-lg bg-slate-200 dark:bg-slate-700" />
-            </div>
-          </div>
+          <div className="h-9 w-64 animate-pulse rounded-xl border border-slate-200 bg-white/80 shadow-sm dark:border-slate-700 dark:bg-slate-900/70" />
         ) : (
           <PaginationControls
             className="mb-0"
@@ -966,38 +964,21 @@ export default function AuditLog() {
           />
         </div>
 
-        {/* I2: the explicit start->end date range, mirroring the D2 stock
-            ledger's control -- native date inputs (ISO in/out) joined by an
-            arrow, with an inline clear when active. Its own compact row so it
-            never crowds the search + export + filter row above. */}
-        <div className="flex flex-wrap items-center gap-2 text-xs text-gray-600 dark:text-gray-300">
-          <input
-            type="date"
-            className="input h-8 w-auto text-xs"
-            value={rangeStart}
-            max={rangeEnd || undefined}
-            onChange={(event) => setRangeStart(event.target.value)}
-            aria-label={t('start_date') || 'Start date'}
-          />
-          <span className="text-gray-400" aria-hidden="true">→</span>
-          <input
-            type="date"
-            className="input h-8 w-auto text-xs"
-            value={rangeEnd}
-            min={rangeStart || undefined}
-            onChange={(event) => setRangeEnd(event.target.value)}
-            aria-label={t('end_date') || 'End date'}
-          />
-          {rangeStart || rangeEnd ? (
-            <button
-              type="button"
-              className="font-medium text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
-              onClick={() => { setRangeStart(''); setRangeEnd('') }}
-            >
-              {t('clear') || 'Clear'}
-            </button>
-          ) : null}
-        </div>
+        {/* I2 range row, converted (Aug 30 2026) from two loose native date
+            inputs to the same unified Start → End pill every other surface
+            uses (Dashboard, Fees, Inventory movements, Stock-in invoices) --
+            cross-surface consistency. ISO in/out is unchanged; the pill's
+            own panel handles clearing. */}
+        <DateTimeRangePicker
+          value={{ startDate: rangeStart, endDate: rangeEnd, startTime: '', endTime: '' }}
+          onChange={(next) => {
+            setRangeStart(next.startDate || '')
+            setRangeEnd(next.endDate || '')
+          }}
+          t={t}
+          showTime={false}
+          triggerClassName="flex w-full items-center justify-center gap-2 rounded-lg px-3 py-1.5"
+        />
 
         {selectedLogs.length > 0 ? (
           <div className="bulk-toolbar flex flex-wrap items-center gap-2 rounded-xl border px-3 py-2 text-sm shadow-sm">
