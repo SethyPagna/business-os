@@ -14112,3 +14112,44 @@ beside the name. `npx tsc --noEmit` clean; `langKeyIntegrity` passes.
 **Not done** — the StatsStrip stacked-row change itself (stats session's
 lane). Production deploy still pending (user-run) — Parts 511+514 both
 invisible on the live site until `npm run deploy:full`.
+
+## Part 515 (Aug 30 2026, session 5752…ec47) — date-picker redesign v2, PERIOD STATS header dropped, pill unification, de-carding pass 2
+
+User batch (with one mid-turn correction). Commits `1423eb76`, `d55f3ee8`,
+`69d36bc3`, `87627c75`, `8fb07a15`.
+
+- **DateTimeRangePicker panel, second redesign** (`d55f3ee8`): Start | → |
+  End ENDPOINT BOXES, each with the editable MM/DD/YYYY date and its own
+  month+year selects underneath; the box the next calendar click will set
+  carries a blue ring (pickPhase ref → state), and clicking a box retargets
+  the sequence. Month/year selects are chevron-less (new AppSelect
+  `showChevron` prop) with `!px/!text` overrides — plain appended utilities
+  LOST the CSS-order race to AppSelect's base `px-3 text-sm` and "2026"
+  ellipsized. Header row = title + Clear + red ✕.
+- **User correction mid-turn**: "dates larger" meant the OUTSIDE pill —
+  trigger base is now `text-sm font-semibold` app-wide (per-consumer
+  `text-xs` pins removed from StockInInvoices + Inventory movements); the
+  panel itself went back to compact (h-8 days, w-[21rem]).
+- **Dashboard** (`1423eb76`): PERIOD STATS header row above the KPI cards
+  removed — the KPIs always match the selected range; presets verified live
+  to update the Start→End pill (This Month → 08/01–08/30). NOTE: committed
+  as a single staged HUNK via `git apply --cached` — a peer's StatsStrip
+  refactor is uncommitted in the same file; their WIP stayed out of the
+  commit.
+- **Pill unification** (`69d36bc3`): Audit Log + Products Stock Changes
+  ledger were the last list filters on two bare native date inputs → both
+  now the shared pill. Audit Log pager centered; its loading skeleton now
+  pill-shaped (the old one flashed the full-width card row).
+- **Products mobile card** (`87627c75`): empty barcode/brand chips row now
+  reserves one chip-height (min-h 19px) so the price/qty line never shifts
+  between cards (measured live 19.0 vs 19.2px).
+- **De-carding pass 2** (`8fb07a15`): Files sticky toolbar card → page
+  backdrop + conditional bulk chrome (Products treatment); catalog editor's
+  grey band around its search pill removed.
+
+Verified live on 8899 (build → wrangler restart each time: the dist asset
+watcher dies with EPERM on Windows, and a peer build mid-verification once
+served a broken mid-keystroke Dashboard chunk — "MiniStat is not defined" —
+resolved by rebuilding after their file settled). tsc clean outside the
+peer's in-flight `Inventory.tsx`. **Needs deploy** (with everything since
+Worker 65f7b69d).
