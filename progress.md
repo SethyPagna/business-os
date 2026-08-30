@@ -3024,6 +3024,24 @@ the switch and its reasoning are recorded in `wrangler.toml`.
 
 ## Current status
 
+**DONE (session business-os-v1-0b, Aug 30 — Part 519, `ed64958b`+`bf85b94a`+
+`4833d61b`, needs deploy): receipt-ID datetime format + Phnom Penh timezone
+naming (user, Aug 30).** New receipts/returns mint `RCP-YYYYMMDD-HHMMSS`
+(`RET-`/`SRET-`) in Phnom Penh 24-hour wall clock — server generator
+`cloudflare/src/lib/receiptNumber.ts` (same-second collisions get `-2`,`-3`…)
++ hand-synced client twin `frontend/src/utils/timestampId.ts` (offline sales
+mint the id at queue time from the device clock; old dateless `OFFLINE-` ids
+gone; client-supplied/imported numbers preserved). The compact form is
+identifiers-ONLY: displayed dates stay mm/dd/yyyy 24h, and `Receipt.tsx`'s
+locale-default (12-hour) printed date was fixed to `fmtDateTime24`. Every
+timezone label site (AuditLog, SaleDetailModal, Settings, ServerPage) now
+renders `Asia/Bangkok` as `Asia/Phnom_Penh` via `fmtTimezoneLabel`
+(display-only, same UTC+7). Verified: both tscs, new pure test 7/7 +
+timestampId 3/3 + extended formatters test, actionStability/posCore/offline
+suites, probe SQL on real local D1 — Part 519 has the full list. Found+routed
+(not mine): performanceLoadingUx red on HEAD from `455ea3c9` orphaning
+InventoryStatDetailModal — with coordinator 7b for the stats session.
+
 **DONE (session business-os-v1-f9, Aug 30 — Part 514, `b0f12aad`):** Branches
 follow-up shipped and browser-verified — qty sits right beside the product name in
 the expanded-stock cards, and each expanded branch has a debounced server-backed
@@ -3035,6 +3053,17 @@ StatsStrip the DateTimeRangePicker + preset chips get their OWN row ABOVE the mi
 stat cards on EVERY page, not sharing one row with them. Dashboard already stacks;
 the other pages must match. Not touched by f9 (your file); coordinator 7b confirmed
 routing.
+
+**→ STATS SESSION, URGENT — RED TEST ON HEAD (found by 0b, verified by coordinator
+7b ~22:25):** `tests/performanceLoadingUx.test.ts` FAILS on committed HEAD — your
+455ea3c9 removed every `InventoryStatDetailModal` reference from `Inventory.tsx`,
+so the "click-only lazy chunk" assertion can't match, and
+`inventory/InventoryStatDetailModal.tsx` is now ZOMBIE CODE (nothing imports it —
+Golden Rule violation). Every peer's test:utils run is red until this lands. Either
+re-wire the stat-detail depth into your StatsStrip folds or DELETE the component
+and retire that assertion — bundle it with the layout fix above, one commit. If
+still open at the coordinator's next check (~22:45), 7b will claim and fix it to
+unblock the chain.
 
 **COORDINATION NOTE (session business-os-v1-7b, Aug 30, updated ~22:15 — read-only
 coordinator, touching no product files; re-auditing on a loop until lanes settle).**
@@ -3151,10 +3180,14 @@ up should re-verify against current source first.
   check; and `BACKUP_TABLES` omits `product_batches`/`branch_batch_stock`/`*_batch_allocations`
   so every restore (incl. the safety backup a reset takes) leaves the lot ledger empty
   vs branch_stock. (×3: pipelines, batch-identity, +) `lib/backup.ts:83-118,860-942`.
-- **[CLAIMED: session b9, Aug 30]** Inventory `/transfer` moves `branch_stock` between
-  branches and never touches
-  `branch_batch_stock` → lot ledger drift, the exact class migration 0081 repaired.
-  (×3) `routes/inventory.ts:1665-1687`.
+- **[FIXED: session b9, Aug 30 — Part 518, `07fb7705`, needs deploy]** Inventory
+  `/transfer` moved only `branch_stock`, stranding every lot at the source (the 0081
+  drift class, ×3 audits). Now auto-allocates FIFO across source lots (same Z0 policy
+  as checkout) and moves each take per-lot in the same atomic batch — strict source
+  decrements (race aborts, never mints), same batch ids at the destination, 0084
+  blank-honest movement stamping; uncovered legacy remainder moves on branch_stock
+  alone (drift conserved, never created). No destination identity-merge added
+  (branches.ts has one, inventory never did — asymmetry flagged, not smuggled in).
 - **[FIXED: session b9, Aug 30 — Part 512, `bcf58378`, needs deploy]** Action-history
   undo applier derived its permission from a client-supplied `entity`; an unrecognized
   entity → empty permission → any cashier could run `branch.update` etc. with no gate.
@@ -3177,7 +3210,7 @@ up should re-verify against current source first.
   + `/auth/bootstrap` leaked Google Drive OAuth tokens to any logged-in account. New
   `lib/settingsSensitive.ts` strips secret-bearing keys (explicit + credential
   suffixes) from both responses for everyone; no frontend surface read them.
-- **[FIXED: session b9, Aug 30 — Part 514, `1b4580b6`, needs deploy]** Password-reset
+- **[FIXED: session b9, Aug 30 — Part 517, `1b4580b6`, needs deploy]** Password-reset
   built the link from an unvalidated caller `redirectTo` (open redirect → token theft).
   New `resolvePasswordResetBase` honors only exact BUSINESS_OS_ADMIN_URL /
   BUSINESS_OS_PUBLIC_URL origins (origin+pathname kept, query/hash dropped); everything

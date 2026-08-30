@@ -14266,3 +14266,77 @@ migration 0081 had to repair. Flagged by three independent audits. Commit
 
 Verified: test 4/4, cloudflare tsc clean. **Needs deploy** (rides with
 Parts 507/512/513/517).
+
+## Part 519 — Aug 30 2026 (session business-os-v1-0b) — receipt IDs encode date+time; timezone labeled Phnom Penh
+
+**Ask (verbatim, user, Aug 30):** "For receipt, each sales/receipt can do date
+and time for sales id and identification...'yyyymmddtime-24 hour format' make
+sure even though it is doen like this it is only for receipt id... for proper
+date and time it shows 'mm/dd/yyyy-24 hour format' and this applies to the
+whole system...don't make it wrong or broken. or misinterpreted...also name
+the time and region zone to Phnom Penh...not bangkok...no difference but name
+change."
+
+**What changed:**
+
+- **Receipt/return identifiers now encode the sale's own Phnom Penh
+  date+time** — `RCP-YYYYMMDD-HHMMSS` (returns `RET-`/`SRET-`), 24-hour wall
+  clock, replacing the old opaque `RCP-${Date.now()}-<random>` epoch ids.
+  New `cloudflare/src/lib/receiptNumber.ts`: `businessDateTimeId` (fixed
+  UTC+7, the same convention importEngine's `parseSalesImportDateTime`
+  already documents: Asia/Phnom_Penh, no DST) and
+  `uniqueBusinessDateTimeNumber`, which probes the table for same-second
+  collisions and suffixes `-2`, `-3`, … (short random fallback past a burst
+  cap, so it can never loop). `routes/sales.ts` + both `routes/returns.ts`
+  fallbacks use it; client-supplied numbers (offline replays, imports,
+  compat) are preserved untouched — migrated `NNN@ISO` history keeps its ids.
+- **Frontend twin** `frontend/src/utils/timestampId.ts` (Intl-based,
+  hand-synced with the server copy, h23): offline sales now mint
+  `RCP-<datetime>` at QUEUE time from the device clock instead of the old
+  dateless `OFFLINE-<hash>` ids (the pending-sync UI keys on the
+  `offline_pending` flag, which is what the prefix used to signal — checked
+  no test/UI keys on the prefix); returns transport mints
+  `RET-`/`SRET-<datetime>` instead of `${prefix}-${Date.now()}`. km.json's
+  receipt-search hint example updated to the new shape.
+- **The compact form is ONLY for identifiers** (the user was explicit).
+  Displayed dates stay mm/dd/yyyy + 24-hour — and the one receipt surface
+  that violated that got fixed: `Receipt.tsx` printed `toLocaleString(
+  undefined, ...)` (12-hour AM/PM, day-first on non-US devices); now
+  `fmtDateTime24`.
+- **Timezone naming:** new `fmtTimezoneLabel` in `utils/formatters.ts` maps
+  `Asia/Bangkok` → `Asia/Phnom_Penh` (identical UTC+07:00, display-only,
+  stored `device_tz` never rewritten so historical rows normalize too).
+  Wired into every surface that prints a captured zone: AuditLog rows +
+  detail, SaleDetailModal, Settings device-timezone line, ServerPage
+  display- and device-timezone rows. `BUSINESS_TIME_ZONE` was already
+  `Asia/Phnom_Penh`; formatting/conversion untouched.
+
+**What was found (peer regression, routed not fixed):**
+`tests/performanceLoadingUx.test.ts` fails on committed HEAD ("Inventory
+stat detail modal should stay in a click-only lazy chunk") — commit
+`455ea3c9` (StatsStrip rollout) removed every `InventoryStatDetailModal`
+reference from Inventory.tsx, orphaning the component (zombie code) and the
+assertion. Confirmed on a clean tree, reported to coordinator 7b, who
+verified and routed it to the stats session (URGENT item in Current status).
+
+**Verified (really run):** cloudflare tsc clean; frontend tsc clean;
+`test-receipt-number-pure.cjs` 7/7 PASS (transpiled real run: +7
+conversion, day/year rollover, midnight-as-00, collision ladder, burst
+fallback, route-wiring source lock); `timestampId.test.ts` 3/3;
+`formatters.test.ts` (extended with the Phnom Penh label mapping + all five
+call-site locks) PASS; `actionStability`, `posCore`, `offlineSalesQueue`,
+`swOfflineSaleReplay`, `receiptTemplate`, `langKeyIntegrity`,
+`check:source` (415 files) all PASS; the collision-probe SQL executed
+against the real local D1 (`SELECT 1 AS hit FROM sales WHERE
+receipt_number = ? LIMIT 1` — success, empty). Not run: a live authed
+POST /api/sales end-to-end (no dev server started — peers own the running
+ones; the route wiring is source-locked + type-checked instead).
+
+**Commits:** `ed64958b` (receipt date format), `bf85b94a` (datetime ids),
+`4833d61b` (Phnom Penh labels). **Needs deploy** to reach production.
+
+**Not done:** the peer's performanceLoadingUx/InventoryStatDetailModal
+regression (stats session's lane, routed via 7b); live end-to-end sale
+verification on a running server — worth folding into the next deploy
+checklist (make a POS sale, confirm the receipt id shape and the printed
+date/timezone labels).
