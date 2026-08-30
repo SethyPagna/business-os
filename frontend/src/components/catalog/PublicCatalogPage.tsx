@@ -42,7 +42,9 @@ import type { PromotionRule } from '../../utils/promotionRules.ts'
 import { collapsePortalProductGroups, mergePortalCatalogProducts } from './portalProductGrouping.ts'
 import { normalizeGoogleMapsEmbed } from './portalEditorUtils.ts'
 import { resolveCatalogAssetUrl } from './catalogAssetUrls'
-import { usePortalBucket, formatPortalBucketText, downloadPortalBucketFile } from './portalBucket.ts'
+import { usePortalBucket, usePortalWishlist, formatPortalBucketText, downloadPortalBucketFile } from './portalBucket.ts'
+import { usePortalAccount } from './portalAccount.ts'
+import PortalNoPaymentNotice from './PortalNoPaymentNotice.tsx'
 import { getPortalLanguageText } from './portalLanguagePacks.ts'
 import { ADMIN_MAX_PRODUCT_GALLERY_IMAGES } from '../products/helpers/productGalleryHelpers.ts'
 import {
@@ -65,6 +67,7 @@ import {
 const loadCatalogProductsSection = () => import('./CatalogProductsSection')
 const CatalogProductsSection = lazyRetry(loadCatalogProductsSection, 'public-catalog-products-section')
 const CatalogSecondaryTabs = lazyRetry(() => import('./CatalogSecondaryTabs'), 'public-catalog-secondary-tabs')
+const CatalogAccountSection = lazyRetry(() => import('./CatalogAccountSection'), 'public-catalog-account-section')
 const PortalPromotionsBanner = lazyRetry(() => import('./PortalPromotionsBanner'), 'public-catalog-promotions-banner')
 
 const PUBLIC_PORTAL_BOOTSTRAP_TIMEOUT_MS = 15000
@@ -449,7 +452,11 @@ function getPortalTabs(config: PortalConfig, copy: CopyFunction): PortalTab[] {
   const items = [
     config.showAbout ? { key: 'about', label: copy('about', 'About'), icon: Store } : null,
     config.showCatalog ? { key: 'products', label: copy('products', 'Products'), icon: ShoppingBag } : null,
-    config.showMembership ? { key: 'membership', label: copy('membership', 'Membership'), icon: Ticket } : null,
+    // The Account tab is always available (§2): accounts are a core feature —
+    // guests use everything, an account just remembers the cart + wishlist. The
+    // old anonymous membership lookup that `showMembership` used to gate is
+    // gone; this slot is now the sign-in / sign-up area.
+    { key: 'membership', label: copy('account', 'Account'), icon: Ticket },
     config.showFaq ? { key: 'faq', label: copy('faq', 'FAQ'), icon: HelpCircle } : null,
     config.aiEnabled ? { key: 'ai', label: config.aiTitle || copy('portalAssistant', 'AI assistant'), icon: Bot } : null,
   ]
@@ -641,6 +648,10 @@ export default function PublicCatalogPage() {
   const [translateApplyMessage, setTranslateApplyMessage] = useState('')
   const [translateReady, setTranslateReady] = useState(true)
   const bucket = usePortalBucket()
+  const wishlist = usePortalWishlist()
+  // Storefront account state + cart/wishlist server sync (§2). Guests keep
+  // their list in this browser; signing in mirrors it to the account.
+  const portalAccount = usePortalAccount(bucket, wishlist)
   const [bucketOpen, setBucketOpen] = useState(false)
   // Two independent toggles, not one shared boolean: the drawer's inline
   // "contact us" shortcut and the standalone contact FAB used to both read
@@ -1272,6 +1283,11 @@ export default function PublicCatalogPage() {
         )}
         isInBucket={bucket.hasItem}
         getBucketQty={bucket.getQty}
+        isInWishlist={wishlist.has}
+        onToggleWishlist={(product, priceText) => wishlist.toggle(
+          { id: product.id, name: String(product.name || ''), category: String(product.category || ''), brand: String(product.brand || '') },
+          priceText,
+        )}
       />
     </Suspense>
   ) : null
@@ -1282,7 +1298,23 @@ export default function PublicCatalogPage() {
     </Suspense>
   ) : null
 
-  const secondaryTabSection = activeTab !== 'products' ? (
+  const secondaryTabSection = activeTab === 'membership' ? (
+    <Suspense fallback={<div className="rounded-2xl border border-slate-200 bg-white p-4 text-sm text-slate-500">{copy('loadingPortal', 'Loading customer portal...')}</div>}>
+      <CatalogAccountSection
+        copy={copy}
+        account={portalAccount.account}
+        ready={portalAccount.ready}
+        busy={portalAccount.busy}
+        error={portalAccount.error}
+        signIn={portalAccount.signIn}
+        signUp={portalAccount.signUp}
+        signOut={portalAccount.signOut}
+        clearError={portalAccount.clearError}
+        cartCount={bucket.count}
+        wishlistCount={wishlist.count}
+      />
+    </Suspense>
+  ) : activeTab !== 'products' ? (
     <Suspense fallback={<div className="rounded-2xl border border-slate-200 bg-white p-4 text-sm text-slate-500">{copy('loadingPortal', 'Loading customer portal...')}</div>}>
       <CatalogSecondaryTabs
         tab={activeTab}
@@ -1435,6 +1467,10 @@ export default function PublicCatalogPage() {
             </div>
           </div>
         ) : null}
+
+        <div className="px-5 pt-3">
+          <PortalNoPaymentNotice copy={copy} />
+        </div>
 
         <div className="max-h-[50vh] overflow-y-auto px-5 py-3">
           {bucket.items.length === 0 ? (

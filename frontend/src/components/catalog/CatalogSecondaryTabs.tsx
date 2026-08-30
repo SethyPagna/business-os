@@ -1,6 +1,5 @@
 import type { ClipboardEventHandler, ComponentType, Dispatch, SetStateAction } from 'react'
 import { buildLogoImageStyle } from './logoImageStyle'
-import BadgeDollarSign from 'lucide-react/dist/esm/icons/badge-dollar-sign.js'
 import Bot from 'lucide-react/dist/esm/icons/bot.js'
 import ChevronDown from 'lucide-react/dist/esm/icons/chevron-down.js'
 import ChevronUp from 'lucide-react/dist/esm/icons/chevron-up.js'
@@ -12,13 +11,10 @@ import Mail from 'lucide-react/dist/esm/icons/mail.js'
 import MapPin from 'lucide-react/dist/esm/icons/map-pin.js'
 import Phone from 'lucide-react/dist/esm/icons/phone.js'
 import RotateCcw from 'lucide-react/dist/esm/icons/rotate-ccw.js'
-import Search from 'lucide-react/dist/esm/icons/search.js'
 import Send from 'lucide-react/dist/esm/icons/send.js'
 import ShoppingBag from 'lucide-react/dist/esm/icons/shopping-bag.js'
-import Sparkles from 'lucide-react/dist/esm/icons/sparkles.js'
 import Store from 'lucide-react/dist/esm/icons/store.js'
 import Ticket from 'lucide-react/dist/esm/icons/ticket.js'
-import Upload from 'lucide-react/dist/esm/icons/upload.js'
 import AppSelect, { type AppSelectOption } from '../shared/AppSelect.tsx'
 import { SectionShell, StatusPill, SummaryTile } from './catalogUi'
 
@@ -282,355 +278,28 @@ function normalizePortalColor(value: unknown, fallback: string): string {
   return /^#[0-9a-fA-F]{6}$/.test(raw) ? raw.toLowerCase() : fallback
 }
 
-function CatalogMembershipSection(props: CatalogMembershipSectionProps) {
-  const {
-    copy,
-    formatDateTime,
-    formatPortalPrice,
-    membershipNumber,
-    setMembershipNumber,
-    handleMembershipLookup,
-    membershipLoading,
-    membershipError,
-    membershipData,
-    previewConfig,
-    redeemSummaryText,
-    submissionDraft,
-    setSubmissionDraft,
-    submissionSaving,
-    handleSubmissionPaste,
-    handleSubmitShareProof,
-    handleUploadSubmissionImages,
-    openPortalImage,
-  } = props
-
+function CatalogMembershipSection({ copy }: CatalogMembershipSectionProps) {
+  // The anonymous membership lookup was removed (§2, user request). Typing a
+  // membership number to see purchases/points exposed customer data on a
+  // public surface; a customer's own history now lives behind a real account
+  // instead of an open lookup. This renders the privacy notice in its place
+  // (the storefront Account section carries sign-in / sign-up).
   return (
     <SectionShell
-      title={copy('membershipLookup', 'Membership lookup')}
-      subtitle={copy('membershipLookupHint', 'Customers can view purchases, returns, and points. They cannot edit anything.')}
+      title={copy('membership', 'Membership')}
+      subtitle={copy('membershipDisabledSubtitle', 'Your membership details are kept private.')}
     >
-      <div className="rounded-[28px] border border-slate-200/80 bg-white p-5 text-slate-900 shadow-[0_18px_42px_rgba(148,163,184,0.14)] dark:border-neutral-700/80 dark:bg-neutral-900 dark:text-white dark:shadow-lg">
-        <div className="grid gap-4 lg:grid-cols-[1.6fr,auto]">
-          <label htmlFor="portal-membership-number" className="block">
-            <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500 dark:text-neutral-400">{copy('membership', 'Membership')}</div>
-            <div className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 dark:border-white/10 dark:bg-white/5">
-              <Ticket className="h-5 w-5 text-amber-500 dark:text-amber-300" />
-              <input
-                id="portal-membership-number"
-                name="membership_number"
-                autoComplete="off"
-                className="w-full bg-transparent text-sm text-slate-900 outline-none placeholder:text-slate-400 dark:text-white dark:placeholder:text-neutral-400"
-                placeholder={copy('membershipPlaceholder', 'Enter membership number')}
-                value={membershipNumber}
-                onChange={(event) => setMembershipNumber(event.target.value)}
-                onKeyDown={(event) => {
-                  if (event.key === 'Enter') handleMembershipLookup()
-                }}
-              />
-            </div>
-          </label>
-
-          {/* justify-self-center (not the grid's stretch default) so this
-              stays a normal-sized pill instead of stretching to the full
-              container width below the `lg` breakpoint, where the grid
-              has no explicit column count -- that stretch, combined with
-              the old px-5 py-3 padding, is what made it read as an
-              oversized full-width bar on mobile/tablet. Auto-sized to
-              content at lg+ same as before. */}
-          <button
-            className="inline-flex items-center justify-self-center gap-2 rounded-2xl bg-amber-400 px-4 py-2.5 text-sm font-semibold text-neutral-950 transition hover:bg-amber-300 lg:justify-self-auto"
-            onClick={handleMembershipLookup}
-            disabled={membershipLoading}
-          >
-            <Search className="h-4 w-4" />
-            {membershipLoading ? copy('checkingMembership', 'Checking membership...') : copy('lookup', 'Check membership')}
-          </button>
-        </div>
-
-        {membershipError ? (
-          <div className="mt-4 rounded-2xl border border-rose-300 bg-rose-50 px-4 py-3 text-sm text-rose-600 dark:border-rose-400/30 dark:bg-rose-400/10 dark:text-rose-200">
-            {membershipError}
+      <div className="rounded-[28px] border border-slate-200/80 bg-white p-6 text-slate-700 shadow-[0_18px_42px_rgba(148,163,184,0.14)] dark:border-neutral-700/80 dark:bg-neutral-900 dark:text-neutral-200 dark:shadow-lg">
+        <div className="flex items-start gap-3">
+          <Ticket className="mt-0.5 h-5 w-5 shrink-0 text-amber-500 dark:text-amber-300" />
+          <div className="space-y-1">
+            <div className="text-sm font-semibold text-slate-900 dark:text-white">{copy('membershipPrivacyTitle', 'Membership lookup is off')}</div>
+            <p className="text-sm leading-relaxed">
+              {copy('membershipDisabledMessage', 'This feature is not built into the account structure for privacy and security purposes.')}
+            </p>
           </div>
-        ) : null}
+        </div>
       </div>
-
-      {membershipData ? (
-        <div className="mt-5 space-y-5">
-          <div className="grid gap-4 xl:grid-cols-[1.2fr,1fr]">
-            <SectionShell
-              title={copy('customer', 'Customer')}
-              subtitle={membershipData.customer?.name || ''}
-            >
-              <div className="grid gap-3 sm:grid-cols-2">
-                <div className="rounded-2xl bg-slate-50 p-4 dark:bg-neutral-800/80">
-                  <div className="text-[11px] uppercase tracking-[0.18em] text-slate-400">{copy('membership', 'Membership')}</div>
-                  <div className="mt-2 text-sm font-semibold text-slate-900 dark:text-neutral-100">{membershipData.customer?.membership_number || '-'}</div>
-                </div>
-                <div className="rounded-2xl bg-slate-50 p-4 dark:bg-neutral-800/80">
-                  <div className="text-[11px] uppercase tracking-[0.18em] text-slate-400">{copy('memberSince', 'Member since')}</div>
-                  <div className="mt-2 text-sm font-semibold text-slate-900 dark:text-neutral-100">{formatDateTime(membershipData.customer?.created_at)}</div>
-                </div>
-                {membershipData.customer?.phone ? (
-                  <div className="rounded-2xl bg-slate-50 p-4 dark:bg-neutral-800/80">
-                    <div className="text-[11px] uppercase tracking-[0.18em] text-slate-400">{copy('phone', 'Phone')}</div>
-                    <div className="mt-2 text-sm font-semibold text-slate-900 dark:text-neutral-100">{membershipData.customer.phone}</div>
-                  </div>
-                ) : null}
-                {membershipData.customer?.email ? (
-                  <div className="rounded-2xl bg-slate-50 p-4 dark:bg-neutral-800/80">
-                    <div className="text-[11px] uppercase tracking-[0.18em] text-slate-400">{copy('email', 'Email')}</div>
-                    <div className="mt-2 text-sm font-semibold text-slate-900 dark:text-neutral-100">{membershipData.customer.email}</div>
-                  </div>
-                ) : null}
-                {membershipData.customer?.company ? (
-                  <div className="rounded-2xl bg-slate-50 p-4 dark:bg-neutral-800/80">
-                    <div className="text-[11px] uppercase tracking-[0.18em] text-slate-400">{copy('company', 'Company')}</div>
-                    <div className="mt-2 text-sm font-semibold text-slate-900 dark:text-neutral-100">{membershipData.customer.company}</div>
-                  </div>
-                ) : null}
-                {membershipData.customer?.notes ? (
-                  <div className="rounded-2xl bg-slate-50 p-4 dark:bg-neutral-800/80 sm:col-span-2">
-                    <div className="text-[11px] uppercase tracking-[0.18em] text-slate-400">{copy('note', 'Note')}</div>
-                    <div className="mt-2 text-sm text-slate-700 dark:text-neutral-300">{membershipData.customer.notes}</div>
-                  </div>
-                ) : null}
-              </div>
-            </SectionShell>
-
-            <div className="grid gap-4 sm:grid-cols-2">
-              <SummaryTile
-                icon={Sparkles}
-                label={copy('pointsBalance', 'Point balance')}
-                value={(membershipData.points?.balance || 0).toLocaleString('en-US', { maximumFractionDigits: 2 })}
-                tone="blue"
-              />
-              {previewConfig.showPointValue ? (
-                <SummaryTile
-                  icon={BadgeDollarSign}
-                  label={copy('pointsValue', 'Point value')}
-                  value={formatPortalPrice(membershipData.points?.redeemValueUsd, membershipData.points?.redeemValueKhr, previewConfig)}
-                  tone="green"
-                />
-              ) : null}
-              <SummaryTile
-                icon={Store}
-                label={copy('totalSales', 'Sales total')}
-                value={formatPortalPrice(membershipData.totals?.totalSalesUsd, membershipData.totals?.totalSalesKhr, previewConfig)}
-                tone="dark"
-              />
-              <SummaryTile
-                icon={RotateCcw}
-                label={copy('totalReturns', 'Returns total')}
-                value={formatPortalPrice(membershipData.totals?.totalReturnsUsd, membershipData.totals?.totalReturnsKhr, previewConfig)}
-                tone="amber"
-              />
-              <SummaryTile
-                icon={Store}
-                label={copy('membershipDiscountTotal', 'Membership discounts used')}
-                value={formatPortalPrice(membershipData.totals?.membershipDiscountUsd, membershipData.totals?.membershipDiscountKhr, previewConfig)}
-                tone="dark"
-              />
-              <div className="rounded-[24px] border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-900 sm:col-span-2">
-                <div className="font-semibold">{copy('redeemRule', 'Points can be used in whole units only. Ask staff to apply them during checkout.')}</div>
-                <div className="mt-2">{redeemSummaryText}</div>
-              </div>
-            </div>
-          </div>
-
-          <div className="grid gap-5 xl:grid-cols-2">
-            <SectionShell title={copy('purchaseHistory', 'Purchase history')} subtitle={copy('readOnly', 'Read-only for customers')}>
-              <div className="space-y-3">
-                {membershipData.sales?.length ? membershipData.sales.map((entry) => (
-                  <article key={entry.id} className="rounded-2xl border border-slate-200 bg-slate-50 p-4 dark:border-neutral-700 dark:bg-neutral-800/80">
-                    <div className="flex items-start justify-between gap-3">
-                      <div>
-                        <div className="text-sm font-semibold text-slate-900 dark:text-neutral-100">{entry.receipt_number || `#${entry.id}`}</div>
-                        <div className="mt-1 text-xs text-slate-500 dark:text-neutral-400">
-                          {formatDateTime(entry.created_at)}
-                          {entry.branch_name ? ` | ${entry.branch_name}` : ''}
-                        </div>
-                      </div>
-                      <StatusPill copy={copy} status={entry.payment_status === 'paid' ? 'in_stock' : 'low_stock'} />
-                    </div>
-                    <div className="mt-3 grid gap-3">
-                      <div>
-                        <div className="text-[11px] uppercase tracking-[0.18em] text-slate-400">{copy('items', 'Items')}</div>
-                        <div className="mt-1 text-sm text-slate-700 dark:text-neutral-300">{entry.items_summary || '-'}</div>
-                      </div>
-                      <div className="grid gap-3 sm:grid-cols-2">
-                        <div>
-                          <div className="text-[11px] uppercase tracking-[0.18em] text-slate-400">{copy('branchView', 'Branch view')}</div>
-                          <div className="mt-1 text-sm text-slate-700 dark:text-neutral-300">{entry.branch_name || '-'}</div>
-                        </div>
-                        <div className="text-right">
-                          <div className="text-[11px] uppercase tracking-[0.18em] text-slate-400">{copy('totalSales', 'Sales total')}</div>
-                          <div className="mt-1 text-sm font-semibold text-slate-900 dark:text-neutral-100">{formatPortalPrice(entry.total_usd, entry.total_khr, previewConfig)}</div>
-                        </div>
-                      </div>
-                    </div>
-                  </article>
-                )) : (
-                  <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-6 text-sm text-slate-500 dark:border-neutral-700 dark:bg-neutral-800/60 dark:text-neutral-400">
-                    {copy('noSales', 'No sales found for this membership yet.')}
-                  </div>
-                )}
-              </div>
-            </SectionShell>
-
-            <SectionShell title={copy('returnHistory', 'Return history')} subtitle={copy('readOnly', 'Read-only for customers')}>
-              <div className="space-y-3">
-                {membershipData.returns?.length ? membershipData.returns.map((entry) => (
-                  <article key={entry.id} className="rounded-2xl border border-slate-200 bg-slate-50 p-4 dark:border-neutral-700 dark:bg-neutral-800/80">
-                    <div className="flex items-start justify-between gap-3">
-                      <div>
-                        <div className="text-sm font-semibold text-slate-900 dark:text-neutral-100">{entry.return_number || `#${entry.id}`}</div>
-                        <div className="mt-1 text-xs text-slate-500 dark:text-neutral-400">
-                          {formatDateTime(entry.created_at)}
-                          {entry.branch_name ? ` | ${entry.branch_name}` : ''}
-                        </div>
-                      </div>
-                      <StatusPill copy={copy} status={entry.status === 'cancelled' ? 'out_of_stock' : 'low_stock'} />
-                    </div>
-                    <div className="mt-3 grid gap-3">
-                      <div>
-                        <div className="text-[11px] uppercase tracking-[0.18em] text-slate-400">{copy('items', 'Items')}</div>
-                        <div className="mt-1 text-sm text-slate-700 dark:text-neutral-300">{entry.items_summary || '-'}</div>
-                      </div>
-                      <div className="grid gap-3 sm:grid-cols-2">
-                        <div>
-                          <div className="text-[11px] uppercase tracking-[0.18em] text-slate-400">{copy('reason', 'Reason')}</div>
-                          <div className="mt-1 text-sm text-slate-700 dark:text-neutral-300">{entry.reason || '-'}</div>
-                        </div>
-                        <div className="text-right">
-                          <div className="text-[11px] uppercase tracking-[0.18em] text-slate-400">{copy('refund', 'Refund')}</div>
-                          <div className="mt-1 text-sm font-semibold text-slate-900 dark:text-neutral-100">{formatPortalPrice(entry.total_refund_usd, entry.total_refund_khr, previewConfig)}</div>
-                        </div>
-                      </div>
-                    </div>
-                  </article>
-                )) : (
-                  <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-6 text-sm text-slate-500 dark:border-neutral-700 dark:bg-neutral-800/60 dark:text-neutral-400">
-                    {copy('noReturns', 'No returns found for this membership yet.')}
-                  </div>
-                )}
-              </div>
-            </SectionShell>
-          </div>
-
-          <SectionShell title={copy('shareProofs', 'Share & reward')} subtitle={copy('shareProofsHint', 'Customers can submit screenshots showing they shared the business. Staff reviews and awards points inside Business OS.')}>
-            <div className="grid gap-5 xl:grid-cols-[1.2fr,1fr]">
-              <div className="space-y-4">
-                {previewConfig.submissionInstructions ? (
-                    <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700 dark:border-neutral-700 dark:bg-neutral-800/80 dark:text-neutral-300">
-                    <div className="font-semibold text-slate-900">{copy('submissionInstructions', 'Submission instructions')}</div>
-                    <div className="mt-1">{previewConfig.submissionInstructions}</div>
-                  </div>
-                ) : null}
-                {!previewConfig.submissionEnabled ? (
-                  <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-                    {copy('submissionDisabled', 'Share submissions are currently disabled.')}
-                  </div>
-                ) : null}
-                <div className="grid gap-4 sm:grid-cols-2">
-                  <div>
-                    <label htmlFor="portal-share-platform" className="block text-sm font-medium text-slate-700">{copy('sharePlatform', 'Platform')}</label>
-                    <input id="portal-share-platform" name="share_platform" autoComplete="off" className="input" disabled={!previewConfig.submissionEnabled} value={submissionDraft.platform} placeholder={copy('sharePlatformPlaceholder', 'Facebook post, Instagram story, Telegram status...')} onChange={(event) => setSubmissionDraft((current) => ({ ...current, platform: event.target.value }))} />
-                  </div>
-                  <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600 dark:border-neutral-700 dark:bg-neutral-800/80 dark:text-neutral-300">
-                    <div className="text-[11px] uppercase tracking-[0.18em] text-slate-400">{copy('shareStatus', 'Status')}</div>
-                    <div className="mt-2 font-medium text-slate-900 dark:text-neutral-100">{copy('pending', 'Pending')}</div>
-                  </div>
-                </div>
-                <div>
-                  <label htmlFor="portal-share-note" className="block text-sm font-medium text-slate-700">{copy('shareNote', 'Customer note')}</label>
-                  <textarea
-                    id="portal-share-note"
-                    name="share_note"
-                    autoComplete="off"
-                    className="input min-h-[120px] resize-none"
-                    rows={5}
-                    value={submissionDraft.note}
-                    disabled={!previewConfig.submissionEnabled}
-                    placeholder={copy('sharePaste', 'Paste screenshots here or upload below')}
-                    onChange={(event) => setSubmissionDraft((current) => ({ ...current, note: event.target.value }))}
-                    onPaste={handleSubmissionPaste}
-                  />
-                </div>
-                <div className="flex flex-wrap gap-2 overflow-x-auto pb-1 sm:overflow-visible sm:pb-0">
-                  <button type="button" className="btn-secondary text-sm" disabled={!previewConfig.submissionEnabled} onClick={handleUploadSubmissionImages}>
-                    <Upload className="mr-2 inline h-4 w-4" />
-                    {copy('shareUpload', 'Upload screenshots')}
-                  </button>
-                  <button type="button" className="btn-primary text-sm" disabled={submissionSaving || !previewConfig.submissionEnabled} onClick={handleSubmitShareProof}>
-                    {submissionSaving ? copy('shareSubmitting', 'Submitting...') : copy('shareSubmit', 'Submit for review')}
-                  </button>
-                </div>
-                <div className="grid gap-3 sm:grid-cols-2">
-                  {submissionDraft.screenshots.map((image, index) => (
-                    <div key={`${image.slice(0, 24)}-${index}`} className="overflow-hidden rounded-2xl border border-slate-200 bg-slate-50 dark:border-neutral-700 dark:bg-neutral-800/80">
-                      <button
-                        type="button"
-                        className="block w-full"
-                        onClick={() => openPortalImage(copy('shareProofs', 'Share & reward'), submissionDraft.screenshots, index)}
-                      >
-                        <img src={image} alt={`submission-${index + 1}`} className="h-36 w-full object-cover" />
-                      </button>
-                      <button
-                        type="button"
-                        className="w-full border-t border-slate-200 px-3 py-2 text-xs font-medium text-slate-600 hover:bg-white dark:border-neutral-700 dark:text-neutral-300 dark:hover:bg-neutral-900/70"
-                        onClick={() => setSubmissionDraft((current) => ({ ...current, screenshots: current.screenshots.filter((_, imageIndex) => imageIndex !== index) }))}
-                      >
-                        {copy('clearImage', 'Clear')}
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              <div className="space-y-3">
-                {(membershipData?.submissions?.length || 0) ? (membershipData.submissions || []).map((submission) => (
-                  <article key={submission.id} className="rounded-2xl border border-slate-200 bg-slate-50 p-4 dark:border-neutral-700 dark:bg-neutral-800/80">
-                    <div className="flex items-start justify-between gap-3">
-                      <div>
-                        <div className="text-sm font-semibold text-slate-900 dark:text-neutral-100">{submission.platform || copy('shareProofs', 'Share & reward')}</div>
-                        <div className="mt-1 text-xs text-slate-500 dark:text-neutral-400">{formatDateTime(submission.created_at)}</div>
-                      </div>
-                      <div className="rounded-full bg-white px-3 py-1 text-xs font-semibold text-slate-700 dark:bg-neutral-900 dark:text-neutral-200">
-                        {submission.status === 'approved'
-                          ? copy('shareApproved', 'Approved')
-                          : submission.status === 'rejected'
-                            ? copy('shareRejected', 'Rejected')
-                            : copy('sharePending', 'Pending review')}
-                      </div>
-                    </div>
-                    {submission.note ? <p className="mt-3 text-sm text-slate-700 dark:text-neutral-300">{submission.note}</p> : null}
-                    <div className="mt-3 grid gap-3 sm:grid-cols-2">
-                      {(submission.screenshots || []).map((image, index) => (
-                        <button
-                          key={`${submission.id}-${index}`}
-                          type="button"
-                          className="overflow-hidden rounded-xl border border-slate-200 bg-white dark:border-neutral-700 dark:bg-neutral-900"
-                          onClick={() => openPortalImage(submission.platform || copy('shareProofs', 'Share & reward'), submission.screenshots || [], index)}
-                        >
-                          <img src={image} alt={`submission-${submission.id}-${index + 1}`} className="h-28 w-full object-cover" />
-                        </button>
-                      ))}
-                    </div>
-                    <div className="mt-3 flex flex-wrap gap-3 text-xs text-slate-600 dark:text-neutral-300">
-                      <span>{copy('shareReward', 'Reward')}: {(submission.reward_points || 0).toLocaleString('en-US', { maximumFractionDigits: 2 })} pts</span>
-                      {submission.review_note ? <span>{copy('shareReviewNote', 'Review note')}: {submission.review_note}</span> : null}
-                    </div>
-                  </article>
-                )) : (
-                  <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-6 text-sm text-slate-500 dark:border-neutral-700 dark:bg-neutral-800/60 dark:text-neutral-400">
-                    {copy('noSubmissions', 'No share submissions yet.')}
-                  </div>
-                )}
-              </div>
-            </div>
-          </SectionShell>
-        </div>
-      ) : null}
     </SectionShell>
   )
 }

@@ -6,6 +6,7 @@ import BadgePercent from 'lucide-react/dist/esm/icons/badge-percent.js'
 import Flame from 'lucide-react/dist/esm/icons/flame.js'
 import Medal from 'lucide-react/dist/esm/icons/medal.js'
 import Plus from 'lucide-react/dist/esm/icons/plus.js'
+import Heart from 'lucide-react/dist/esm/icons/heart.js'
 import Search from 'lucide-react/dist/esm/icons/search.js'
 import ShoppingBag from 'lucide-react/dist/esm/icons/shopping-bag.js'
 import Sparkles from 'lucide-react/dist/esm/icons/sparkles.js'
@@ -144,6 +145,10 @@ type CatalogProductsSectionProps = {
   onAddToBucket?: (product: CatalogProduct, priceText?: string) => void
   isInBucket?: (id: string | number) => boolean
   getBucketQty?: (id: string | number) => number
+  // Wishlist (§2: the heart/save toggle). Works for guests (localStorage) and
+  // is mirrored to the account once signed in — the card doesn't care which.
+  isInWishlist?: (id: string | number) => boolean
+  onToggleWishlist?: (product: CatalogProduct, priceText?: string) => void
   // Branch is an internal stock-tracking dimension, not a customer-facing
   // concept -- the branch filter row should only ever appear in the admin's
   // own in-app preview, never on the real public-facing storefront.
@@ -236,6 +241,8 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
     replaceVars,
     onAddToBucket,
     getBucketQty,
+    isInWishlist,
+    onToggleWishlist,
   } = props
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(CATALOG_DEFAULT_PAGE_SIZE)
@@ -780,6 +787,27 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
                   ) : (
                     <div className={`font-semibold text-slate-900 dark:text-neutral-100 ${compactCatalogCards ? 'text-xs' : 'text-sm'}`} aria-hidden="true" />
                   )}
+                  <div className="flex items-center gap-1">
+                  {onToggleWishlist ? (
+                    (() => {
+                      const saved = isInWishlist?.(product.id) ?? false
+                      return (
+                        <button
+                          type="button"
+                          className={`inline-flex shrink-0 items-center justify-center rounded-full p-1.5 transition ${saved ? 'text-rose-500' : 'text-slate-400 hover:text-rose-400 dark:text-neutral-500'}`}
+                          onClick={(event) => {
+                            event.stopPropagation()
+                            onToggleWishlist(product, previewConfig.showPrices ? pricePresentation?.primaryText : undefined)
+                          }}
+                          aria-label={saved ? copy('removeFromWishlist', 'Remove from saved') : copy('addToWishlist', 'Save to wishlist')}
+                          aria-pressed={saved}
+                          title={saved ? copy('removeFromWishlist', 'Remove from saved') : copy('addToWishlist', 'Save to wishlist')}
+                        >
+                          <Heart className={`h-4 w-4 ${saved ? 'fill-current' : ''}`} />
+                        </button>
+                      )
+                    })()
+                  ) : null}
                   {onAddToBucket ? (
                     (() => {
                       const qty = getBucketQty?.(product.id) ?? 0
@@ -813,6 +841,7 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
                       )
                     })()
                   ) : null}
+                  </div>
                 </div>
               </div>
             </article>

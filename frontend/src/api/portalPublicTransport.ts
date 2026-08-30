@@ -108,14 +108,72 @@ export async function searchPortalCatalogProducts(params: QueryParams = {}): Pro
 }
 
 export async function lookupPortalMembership(membershipNumber: string | number): Promise<unknown | null> {
+  // The anonymous membership lookup is DISABLED (§2). The endpoint now returns
+  // 403 feature_disabled; treat that (and 404) as "no data" so any legacy
+  // caller degrades gracefully instead of throwing. The storefront no longer
+  // calls this — the Account section (CatalogAccountSection) replaces it.
   const base = getPortalBaseUrl()
   const value = encodeURIComponent(String(membershipNumber || '').trim())
   const res = await fetchJsonWithTimeout(`${base}/api/portal/membership/${value}`, {
     headers: PORTAL_HEADERS,
   })
-  if (res.status === 404) return null
+  if (res.status === 404 || res.status === 403) return null
   if (!res.ok) throw new Error(`Membership lookup failed: ${res.status}`)
   return res.json()
+}
+
+// ---- Customer accounts (§2) ------------------------------------------------
+// All account calls are same-origin and must carry the bos_portal session
+// cookie, so they send credentials and read/return the JSON body (which
+// carries a friendly `error` string on failure).
+async function portalAuthRequest(path: string, method: 'GET' | 'POST' | 'PUT', body?: PortalPayload): Promise<PortalPayload> {
+  const base = getPortalBaseUrl()
+  const res = await fetchJsonWithTimeout(`${base}${path}`, {
+    method,
+    headers: body ? PORTAL_JSON_HEADERS : PORTAL_HEADERS,
+    credentials: 'include',
+    ...(body ? { body: JSON.stringify(body) } : {}),
+  })
+  const json = await readJsonObject(res)
+  if (!res.ok) {
+    const error = new Error(String(json.error || `Request failed: ${res.status}`)) as Error & { status?: number; code?: unknown }
+    error.status = res.status
+    error.code = json.code
+    throw error
+  }
+  return json
+}
+
+export function signupPortalAccount(payload: PortalPayload): Promise<unknown> {
+  return portalAuthRequest('/api/portal/auth/signup', 'POST', payload)
+}
+
+export function signinPortalAccount(payload: PortalPayload): Promise<unknown> {
+  return portalAuthRequest('/api/portal/auth/signin', 'POST', payload)
+}
+
+export function signoutPortalAccount(): Promise<unknown> {
+  return portalAuthRequest('/api/portal/auth/signout', 'POST', {})
+}
+
+export function getPortalAccountMe(): Promise<unknown> {
+  return portalAuthRequest('/api/portal/auth/me', 'GET')
+}
+
+export function getPortalCart(): Promise<unknown> {
+  return portalAuthRequest('/api/portal/account/cart', 'GET')
+}
+
+export function savePortalCart(items: unknown[]): Promise<unknown> {
+  return portalAuthRequest('/api/portal/account/cart', 'PUT', { items })
+}
+
+export function getPortalWishlist(): Promise<unknown> {
+  return portalAuthRequest('/api/portal/account/wishlist', 'GET')
+}
+
+export function savePortalWishlist(items: unknown[]): Promise<unknown> {
+  return portalAuthRequest('/api/portal/account/wishlist', 'PUT', { items })
 }
 
 export async function createPortalSubmission(payload: PortalPayload = {}): Promise<unknown> {

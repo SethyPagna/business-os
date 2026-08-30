@@ -10,6 +10,15 @@ type PortalMethodName =
   | 'getPortalConfig'
   | 'lookupPortalMembership'
   | 'searchPortalCatalogProducts'
+  // Customer accounts (§2)
+  | 'signupPortalAccount'
+  | 'signinPortalAccount'
+  | 'signoutPortalAccount'
+  | 'getPortalAccountMe'
+  | 'getPortalCart'
+  | 'savePortalCart'
+  | 'getPortalWishlist'
+  | 'savePortalWishlist'
 type PublicPortalMethod = (...args: unknown[]) => Promise<unknown>
 type PublicPortalApi = Record<PortalMethodName, PublicPortalMethod>
 
@@ -38,6 +47,14 @@ const publicApi: PublicPortalApi = {
   getPortalConfig: getPortalMethod('getPortalConfig'),
   lookupPortalMembership: getPortalMethod('lookupPortalMembership'),
   searchPortalCatalogProducts: getPortalMethod('searchPortalCatalogProducts'),
+  signupPortalAccount: getPortalMethod('signupPortalAccount'),
+  signinPortalAccount: getPortalMethod('signinPortalAccount'),
+  signoutPortalAccount: getPortalMethod('signoutPortalAccount'),
+  getPortalAccountMe: getPortalMethod('getPortalAccountMe'),
+  getPortalCart: getPortalMethod('getPortalCart'),
+  savePortalCart: getPortalMethod('savePortalCart'),
+  getPortalWishlist: getPortalMethod('getPortalWishlist'),
+  savePortalWishlist: getPortalMethod('savePortalWishlist'),
 }
 
 if (typeof window !== 'undefined') {
