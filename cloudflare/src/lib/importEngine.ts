@@ -4688,6 +4688,46 @@ export async function runD1BatchInChunks(
   }
 }
 
+// Group-atomic sibling of runD1BatchInChunks (Part-77, pipelines audit):
+// every inner array is a set of statements that must land in the SAME
+// db.batch() call -- used for the additive apply writes whose redelivery
+// guard rides in the group, so "guard present" can never disagree with
+// "stock applied". Packs whole groups up to chunkSize statements per batch,
+// and the CPU-limit split recurses at GROUP boundaries, never through the
+// middle of one; a single group that alone blows the budget re-throws
+// (splitting it would break exactly the atomicity this exists for -- real
+// groups here are <= ~6 statements).
+export async function runD1BatchGroupsInChunks(
+  db: D1Compat,
+  groups: Array<Array<{ sql: string; params: Record<string, unknown> }>>,
+  chunkSize: number = D1_IMPORT_BATCH_CHUNK_SIZE,
+): Promise<void> {
+  const packs: Array<typeof groups> = []
+  let pack: typeof groups = []
+  let packSize = 0
+  for (const group of groups) {
+    if (!group.length) continue
+    if (packSize + group.length > chunkSize && pack.length) {
+      packs.push(pack)
+      pack = []
+      packSize = 0
+    }
+    pack.push(group)
+    packSize += group.length
+  }
+  if (pack.length) packs.push(pack)
+  for (const packedGroups of packs) {
+    try {
+      await db.batch(packedGroups.flat())
+    } catch (error) {
+      if (!isD1CpuLimitError(error) || packedGroups.length <= 1) throw error
+      const mid = Math.ceil(packedGroups.length / 2)
+      await runD1BatchGroupsInChunks(db, packedGroups.slice(0, mid), chunkSize)
+      await runD1BatchGroupsInChunks(db, packedGroups.slice(mid), chunkSize)
+    }
+  }
+}
+
 // Chunked + resumable, mirroring runImportAnalyze above -- see migration
 // 0011's header. Reclassifies each window fresh against LIVE database
 // state (not analyze's cached results) because decisions/policy_json can
@@ -4857,6 +4897,30 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
     sw.lap('resolveBranchesMs')
 
     const statements: Array<{ sql: string; params: Record<string, unknown> }> = []
+    // Redelivery guard for the ADDITIVE apply writes (Part-77, pipelines
+    // audit): the queue is at-least-once and this chunk is NOT one atomic
+    // transaction (runD1BatchInChunks splits it), so a redelivered or
+    // crash-retried chunk used to re-run every merge_stock/override_add
+    // branch_stock increment and every inventory movement/stock delta --
+    // double-applying stock. Each such row's writes now travel as ONE group
+    // (runD1BatchGroupsInChunks -- never split across batches) together
+    // with a guard row in import_stock_action_guards, the same generic
+    // (job_id, action_key, guard_key) ledger the stock-action path already
+    // seals its units with. A retry pre-reads the applied guard keys and
+    // composes nothing for those rows; the guard's PRIMARY KEY is the
+    // backstop if a read somehow races. Idempotent writes (field UPDATEs,
+    // snapshot REPLACEs, creates -- which the signature ledger already
+    // dedupes) stay in the plain `statements` path, re-runnable as before.
+    const GENERIC_APPLY_GUARD_ACTION = 'generic_apply'
+    const guardedGroups: Array<Array<{ sql: string; params: Record<string, unknown> }>> = []
+    const appliedRowGuards = new Set(
+      (await db.prepare(`SELECT guard_key FROM import_stock_action_guards WHERE job_id = @id AND action_key = @ak`)
+        .all<{ guard_key: string }>({ id: jobId, ak: GENERIC_APPLY_GUARD_ACTION })).map((g) => g.guard_key),
+    )
+    const rowGuardStatement = (rowNumber: number) => ({
+      sql: `INSERT INTO import_stock_action_guards (job_id, action_key, guard_key, guard_value) VALUES (@jobId, @actionKey, @guardKey, 1)`,
+      params: { jobId, actionKey: GENERIC_APPLY_GUARD_ACTION, guardKey: `row:${rowNumber}` },
+    })
     const nowIso = new Date().toISOString()
     // 9.2 (Part 421): each in-file auto-merge (a later create row folding
     // into an earlier row's product via the identity signature) is
@@ -5103,13 +5167,19 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
             // named an explicit branch (same guard as the legacy path)
             // and actually carries a positive quantity to add; a zero/
             // blank quantity is a no-op, not a request to zero out stock.
-            if (d.branch_id_explicit && d.branch_id != null && (d.stock_quantity as number) > 0) {
-              statements.push({
+            // Redelivery-guarded (Part-77): these are ADDITIVE writes -- a
+            // re-run doubles stock -- so the whole set travels as one
+            // atomic group with its guard row (see guardedGroups above),
+            // and an already-guarded row composes nothing on a retried
+            // chunk.
+            if (d.branch_id_explicit && d.branch_id != null && (d.stock_quantity as number) > 0 && !appliedRowGuards.has(`row:${r.rowNumber}`)) {
+              const group: Array<{ sql: string; params: Record<string, unknown> }> = [rowGuardStatement(r.rowNumber)]
+              group.push({
                 sql: `INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (@id, @branchId, @qty)
                       ON CONFLICT(product_id, branch_id) DO UPDATE SET quantity = branch_stock.quantity + excluded.quantity`,
                 params: { id: r.existingId, branchId: d.branch_id, qty: d.stock_quantity },
               })
-              statements.push({
+              group.push({
                 sql: `UPDATE products SET stock_quantity = (SELECT COALESCE(SUM(quantity), 0) FROM branch_stock WHERE product_id = @id) WHERE id = @id`,
                 params: { id: r.existingId },
               })
@@ -5125,11 +5195,11 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
                 // stored ones). Name/received-date now stay consistent
                 // across every import that names the same batch, instead
                 // of forking into a new unrelated row each time.
-                statements.push({
+                group.push({
                   sql: `UPDATE product_batches SET received_at = @receivedAt, is_active = 1, updated_at = @updatedAt WHERE id = @id`,
                   params: { id: matchedBatch.id, receivedAt: d.received_date, updatedAt: nowIso },
                 })
-                statements.push({
+                group.push({
                   sql: `INSERT INTO branch_batch_stock (batch_id, branch_id, quantity) VALUES (@batchId, @branchId, @qty)
                         ON CONFLICT(batch_id, branch_id) DO UPDATE SET quantity = quantity + excluded.quantity, updated_at = datetime('now')`,
                   params: { batchId: matchedBatch.id, branchId: d.branch_id, qty: d.stock_quantity },
@@ -5145,7 +5215,7 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
                 // code -- unnamed restocks each stay their own batch, same
                 // as a lot-code-less manual receive always creating a new
                 // one.
-                statements.push({
+                group.push({
                   sql: `INSERT INTO product_batches (id, variant_product_id, batch_key, lot_code, expiry_date, received_at, is_active, notes, batch_number, created_at, updated_at)
                         VALUES (@batchId, @productId, @batchKey, @lotCode, NULL, @receivedAt, 1, @notes, (SELECT COALESCE(MAX(batch_number), 0) + 1 FROM product_batches WHERE variant_product_id = @productId), @createdAt, @createdAt)`,
                   params: {
@@ -5158,7 +5228,7 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
                     createdAt: nowIso,
                   },
                 })
-                statements.push({
+                group.push({
                   sql: `INSERT INTO branch_batch_stock (batch_id, branch_id, quantity) VALUES (@batchId, @branchId, @qty)`,
                   params: { batchId, branchId: d.branch_id, qty: d.stock_quantity },
                 })
@@ -5168,10 +5238,14 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
                 // too, instead of also missing the map (which was only
                 // populated from rows already committed before this
                 // chunk started) and creating yet another duplicate.
+                // (A redelivered chunk reloads the map from the DB at
+                // chunk start, so a guarded-skipped row's lot still
+                // matches for its later siblings.)
                 if (importLotCode) {
                   batchByProductAndLot.set(`${r.existingId}\u0001${lower(importLotCode)}`, { id: batchId, received_at: d.received_date as string })
                 }
               }
+              guardedGroups.push(group)
             }
           } else {
             // Legacy/default: no plannedMode was set (every non-products
@@ -5344,7 +5418,14 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
     } else if (job.type === 'inventory') {
       for (const r of actionable) {
         const d = r.data as Record<string, unknown> & { cost_price_usd?: number; cost_price_khr?: number }
-        statements.push({
+        // Redelivery-guarded, same as the products additive branch above
+        // (Part-77): the movement INSERT duplicates and the stock delta
+        // double-applies on a retried chunk, so each row's writes travel
+        // as one atomic group with a guard, and a guarded row composes
+        // nothing.
+        if (appliedRowGuards.has(`row:${r.rowNumber}`)) continue
+        const group: Array<{ sql: string; params: Record<string, unknown> }> = [rowGuardStatement(r.rowNumber)]
+        group.push({
           sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id, branch_name, movement_type, quantity, reason, created_at) VALUES (@product_id, @product_name, @branch_id, @branch_name, @movement_type, @quantity, @reason, @created_at)`,
           // Honor an imported date (classifyInventory's `movementDate`,
           // spread in via `d.created_at`) when the row supplied one;
@@ -5356,18 +5437,19 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
           // classifyContacts elsewhere in this file.
           params: { ...d, created_at: (d.created_at as string | null | undefined) || nowIso },
         })
-        statements.push({
+        group.push({
           sql: `UPDATE products SET stock_quantity = stock_quantity + @delta, updated_at = @updated_at WHERE id = @id`,
           params: { delta: (d as { signedQuantity: number }).signedQuantity, id: d.product_id, updated_at: nowIso },
         })
         // 'add' rows only -- classifyInventory only ever sets these two
         // fields when a unit cost was actually given in the file.
         if (d.cost_price_usd != null || d.cost_price_khr != null) {
-          statements.push({
+          group.push({
             sql: `UPDATE products SET ${d.cost_price_usd != null ? 'cost_price_usd = @usd' : ''}${d.cost_price_usd != null && d.cost_price_khr != null ? ', ' : ''}${d.cost_price_khr != null ? 'cost_price_khr = @khr' : ''}, updated_at = @updated_at WHERE id = @id`,
             params: { usd: d.cost_price_usd, khr: d.cost_price_khr, id: d.product_id, updated_at: nowIso },
           })
         }
+        guardedGroups.push(group)
       }
     }
 
@@ -5393,6 +5475,12 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
     }
 
     if (statements.length) await runD1BatchInChunks(db, statements)
+    // The guarded additive groups run AFTER the plain statements (their
+    // UPDATEs may reference products the create statements above insert)
+    // and through the group-atomic runner, so each row's guard commits in
+    // the same db.batch() as its stock writes -- see guardedGroups'
+    // declaration comment.
+    if (guardedGroups.length) await runD1BatchGroupsInChunks(db, guardedGroups)
     sw.lap('buildAndWriteStatementsMs')
 
     // Each reviewed receipt is one idempotent D1 transaction: header,
