@@ -168,26 +168,8 @@ export default function ProductDetailModal({
   // Show that count so the Batches affordance appears (and opens the full
   // per-batch view) instead of vanishing at 0.
   const batchCount = visibleBatches.length || Number((p as { batch_count?: unknown }).batch_count || 0)
-  // "Batch" row (replaces the old "Added" row below): the most recently
-  // received batch's date + lot code, falling back to the product's own
-  // created_at only if no batch has a received_at yet (should be rare --
-  // every product gets a "day added" batch at creation, see
-  // getVisibleProductBatches's comment above). Comparing received_at as
-  // plain ISO-ish strings is safe here since D1 stores them sortable
-  // (`YYYY-MM-DD[ T]HH:MM:SS`-shaped), same assumption the rest of this
-  // file already makes when formatting created_at below.
-  const latestBatch = visibleBatches.reduce<typeof visibleBatches[number] | null>((latest, batch) => {
-    const batchStamp = String(batch.received_at || batch.created_at || '')
-    if (!batchStamp) return latest
-    const latestStamp = latest ? String(latest.received_at || latest.created_at || '') : ''
-    return !latest || batchStamp > latestStamp ? batch : latest
-  }, null)
-  const batchDateRaw = String((latestBatch && (latestBatch.received_at || latestBatch.created_at)) || p.created_at || '')
-  const batchDateParsed = batchDateRaw ? new Date(batchDateRaw.includes('T') ? batchDateRaw : `${batchDateRaw}Z`) : null
-  const formattedBatchDate = batchDateParsed && !Number.isNaN(batchDateParsed.getTime())
-    ? batchDateParsed.toLocaleDateString('en-US', { year: 'numeric', month: '2-digit', day: '2-digit' })
-    : ''
-  const latestBatchLotCode = String(latestBatch?.lot_code || '')
+  // (The old "Batch: latest received date" row and its computation were
+  // removed Aug 30 -- see the note where it rendered.)
   const copyBarcode = () => {
     if (!p.barcode || typeof navigator === 'undefined' || !navigator.clipboard) return
     void navigator.clipboard.writeText(String(p.barcode)).catch(() => {})
@@ -278,18 +260,8 @@ export default function ProductDetailModal({
               <div className="min-w-0 space-y-2.5 sm:pr-5">
                 <div className="grid grid-cols-1 gap-y-1.5">
                   {p.supplier ? <Row label={T('label_supplier', 'Supplier')}>{p.supplier}</Row> : null}
-                  <Row label={T('label_stock', 'Stock')}>
-                    <strong className="text-gray-900 dark:text-white">{stockQuantity}</strong>
-                    {p.unit ? (
-                      unitColor ? (
-                        <span className="ml-2 inline-flex rounded-full px-2 py-0.5 text-xs font-semibold" style={{ background: unitColor, color: getContrastingTextColor(unitColor) }}>
-                          {p.unit}
-                        </span>
-                      ) : (
-                        <span className="ml-1">{p.unit}</span>
-                      )
-                    ) : null}
-                  </Row>
+                  {/* Stock + Status moved to the right column after Margin
+                      (Aug 30 ask) -- identity facts stay here. */}
                   {expiryDate ? (
                     <Row label={T('product_expiry_date', 'Expiry')}>
                       <span className={expiryDaysLeft != null && expiryDaysLeft < 0 ? 'text-red-600 dark:text-red-300' : 'text-amber-600 dark:text-amber-300'}>
@@ -305,16 +277,6 @@ export default function ProductDetailModal({
                     </Row>
                   ) : null}
                 </div>
-
-                <Row label={T('status', 'Status')}>
-                  {stockQuantity <= outOfStockThreshold ? (
-                    <span className="badge-red">{T('out_of_stock', 'Out of stock')}</span>
-                  ) : stockQuantity <= lowStockThreshold ? (
-                    <span className="badge-yellow">{T('low_stock', 'Low stock')}</span>
-                  ) : (
-                    <span className="badge-green">{T('in_stock', 'In stock')}</span>
-                  )}
-                </Row>
 
                 {(p.branch_stock || []).length > 0 ? (
                   <div className="border-t border-gray-100 pt-2 dark:border-gray-700">
@@ -361,29 +323,13 @@ export default function ProductDetailModal({
                   </div>
                 ) : null}
 
-                {/* "Added" (the product record's created_at) replaced with
-                    "Batch" -- the most recently received batch's date, which
-                    is what actually changes as stock gets restocked over time;
-                    when a product was first created is far less useful to see
-                    at a glance than when its stock last came in. Falls back to
-                    created_at only if no batch has a received_at set yet. */}
-                {formattedBatchDate ? (
-                  <button
-                    type="button"
-                    onClick={onManageBatches}
-                    disabled={!onManageBatches}
-                    className="flex w-full min-w-0 items-center justify-between gap-2 rounded-lg px-0 py-0.5 text-left transition-colors hover:bg-gray-50 disabled:cursor-default disabled:hover:bg-transparent dark:hover:bg-gray-700/40"
-                  >
-                    <span className="flex min-w-0 gap-2">
-                      <span className="w-20 flex-shrink-0 pt-0.5 text-xs text-gray-400">{T('label_batch', 'Batch')}</span>
-                      <span className="min-w-0 flex-1 text-sm text-gray-800 dark:text-gray-200">
-                        {formattedBatchDate}
-                        {latestBatchLotCode ? <span className="ml-2 text-xs text-gray-400" title={latestBatchLotCode}>{latestBatchLotCode}</span> : null}
-                      </span>
-                    </span>
-                    {onManageBatches ? <ChevronRight className="h-3.5 w-3.5 flex-shrink-0 text-gray-300" /> : null}
-                  </button>
-                ) : null}
+                {/* The "Batch: <latest received date>" row is REMOVED (Aug 30
+                    ask): after the migration every product carries an
+                    import-day opening lot, so "latest received" showed the
+                    import date rather than any real receiving date -- a wrong
+                    detail at a glance. Per-lot dates live behind the Batches
+                    (stack icon) button above, which opens the real per-branch
+                    lot editor. */}
               </div>
 
               {/* Right mini-section: description + the pricing stack. */}
@@ -425,6 +371,28 @@ export default function ProductDetailModal({
                     <span className="ml-2 text-xs text-gray-400">{marginPct.toFixed(1)}%</span>
                   </Row>
                 ) : null}
+                {/* Stock + Status directly after Margin (Aug 30 ask). */}
+                <Row label={T('label_stock', 'Stock')}>
+                  <strong className="text-gray-900 dark:text-white">{stockQuantity}</strong>
+                  {p.unit ? (
+                    unitColor ? (
+                      <span className="ml-2 inline-flex rounded-full px-2 py-0.5 text-xs font-semibold" style={{ background: unitColor, color: getContrastingTextColor(unitColor) }}>
+                        {p.unit}
+                      </span>
+                    ) : (
+                      <span className="ml-1">{p.unit}</span>
+                    )
+                  ) : null}
+                </Row>
+                <Row label={T('status', 'Status')}>
+                  {stockQuantity <= outOfStockThreshold ? (
+                    <span className="badge-red">{T('out_of_stock', 'Out of stock')}</span>
+                  ) : stockQuantity <= lowStockThreshold ? (
+                    <span className="badge-yellow">{T('low_stock', 'Low stock')}</span>
+                  ) : (
+                    <span className="badge-green">{T('in_stock', 'In stock')}</span>
+                  )}
+                </Row>
                 {(specialUsd > 0 || specialKhr > 0) ? (
                   <Row label={T('special_price', 'VIP Price')}>
                     <span className="text-blue-600">{fmtUSD(specialUsd || sellingUsd)}</span>

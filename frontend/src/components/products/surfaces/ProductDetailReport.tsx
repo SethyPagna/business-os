@@ -105,21 +105,11 @@ export default function ProductDetailReport({ productId, t, fmtUSD }: {
     <div className="space-y-2">
       {loadError ? <p className="rounded-lg bg-red-50 px-2.5 py-1.5 text-xs text-red-600 dark:bg-red-900/20 dark:text-red-300">{loadError}</p> : null}
 
-      <SectionCard kind="batches" nested title={`${tr('batches', 'Batches')}${report?.batches?.length ? ` (${report.batches.length})` : ''}`} storageKey="product_detail_batches" defaultOpen={false}>
-        <div className="max-h-56 space-y-1 overflow-y-auto p-2">
-          {(report?.batches || []).map((lot) => (
-            <div key={lot.id} className="flex flex-wrap items-center justify-between gap-x-3 gap-y-0.5 rounded-lg bg-gray-50 px-2.5 py-1.5 text-xs dark:bg-gray-800/60">
-              <span className="font-semibold text-gray-700 dark:text-gray-200">{lot.lot_code || `#${lot.batch_number ?? lot.id}`}</span>
-              <span className="tabular-nums text-gray-600 dark:text-gray-300">{lot.total_qty}</span>
-              <span className="text-gray-400">{lot.received_at ? fmtDate(lot.received_at) : '--'}</span>
-              <span className="text-gray-400">{lot.expiry_date ? `${tr('expiry', 'Expiry')} ${fmtDate(lot.expiry_date)}` : ''}</span>
-              <span className="text-gray-500 dark:text-gray-400">{lot.supplier_name || ''}</span>
-            </div>
-          ))}
-          {report && !report.batches?.length ? <p className="py-2 text-center text-xs text-gray-400">{tr('no_data_found', 'No data found')}</p> : null}
-          {!report ? <p className="py-2 text-center text-xs text-gray-400">{tr('loading', 'Loading')}...</p> : null}
-        </div>
-      </SectionCard>
+      {/* The folded "Batches" SectionCard that sat here (above Stock Changes)
+          was REMOVED per the Aug 30 ask -- the detail sheet keeps exactly ONE
+          batch surface, the stack-icon Batches button, which opens the real
+          per-branch lot editor (ManageBatchesModal). This card duplicated
+          that view with a second, divergent rendering of the same lots. */}
 
       <SectionCard kind="stock" nested title={tr('stock_change_ledger', 'Stock Changes')} storageKey="product_detail_movements" defaultOpen={false}>
         <div className="max-h-64 overflow-y-auto p-2">
