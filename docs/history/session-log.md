@@ -14070,3 +14070,45 @@ whose link landed the token on an attacker host. Commit `1b4580b6`:
 
 Verified: test 5/5, cloudflare tsc clean. **Needs deploy** (rides with
 Parts 507/512/513).
+
+## Part 514 — Aug 30 2026 — Branches follow-up: qty beside name, per-branch stock search; stats-row relay (session f9)
+
+**Ask** (user, follow-up to Part 511): "the products in each branch have much
+spaces between the name and stock quantity. also, there should be a search
+function etc... above the each branch and below the mini sections... also, for
+the range date and the preset should be above the stats... not same row."
+
+**What changed** (`b0f12aad`)
+
+- `Branches.tsx` cards: the name block no longer stretches (flex-1 removed), so
+  the colored quantity sits immediately after the product name; only the
+  receive (+) button floats to the card edge via ml-auto.
+- `Branches.tsx` search: a debounced (350ms) per-branch search input renders
+  between the mini stat tiles and the product grid inside each expanded
+  branch. It is server-backed through the paged stock endpoint's existing
+  `query` filter (name/sku/barcode/brand/category), so matches are not limited
+  to the 20 already-loaded rows; the active query is carried onto "Show more"
+  pages and the post-receive refresh (refreshBranchStock now routes through
+  the search-aware fetch). The stat tiles deliberately KEEP the branch-wide
+  summary while a search is active (the endpoint recomputes summary under the
+  query, which would make Total flicker while typing). Query-aware empty
+  state; per-branch debounce timers cleared on unmount.
+- Lang packs: `branch_stock_search_placeholder` / `branch_stock_search_no_matches`
+  (en+km). Ride-along disclosed in the commit: the stats session's seven
+  uncommitted `stats_*_hint` keys swept in unchanged.
+- The third ask (date range + presets on their OWN row ABOVE the stat cards,
+  not sharing one row) targets `StatsStrip.tsx`, which is the stats-strip
+  session's live uncommitted rollout — NOT touched here. Relayed verbatim at
+  the top of progress.md's Current status and via coordinator 7b, who
+  confirmed routing; Dashboard already renders the stacked layout, the
+  remaining pages are theirs to finish.
+
+**Verified** — browser against local wrangler+vite: typing "gate" in Main
+Store's search fired `GET /api/branches/1/stock?...&query=gate` and the grid
+filtered to the three Gate products while tiles kept branch-wide numbers
+(Total 17 / Value $272); clearing restored the full listing; qty renders
+beside the name. `npx tsc --noEmit` clean; `langKeyIntegrity` passes.
+
+**Not done** — the StatsStrip stacked-row change itself (stats session's
+lane). Production deploy still pending (user-run) — Parts 511+514 both
+invisible on the live site until `npm run deploy:full`.
