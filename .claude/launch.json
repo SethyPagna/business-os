@@ -18,7 +18,24 @@
         "--prefix",
         "frontend"
       ],
-      "port": 5173
+      "port": 5173,
+      "autoPort": false
+    },
+    {
+      "name": "frontend-b",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "run",
+        "dev",
+        "--prefix",
+        "frontend",
+        "--",
+        "--port",
+        "5175",
+        "--strictPort"
+      ],
+      "port": 5175,
+      "autoPort": false
     },
     {
       "name": "worker-dev",
@@ -31,7 +48,8 @@
         "--port",
         "8787"
       ],
-      "port": 8787
+      "port": 8787,
+      "autoPort": false
     },
     {
       "name": "worker-dev-b",
@@ -44,7 +62,8 @@
         "--port",
         "8899"
       ],
-      "port": 8899
+      "port": 8899,
+      "autoPort": false
     }
   ]
 }
