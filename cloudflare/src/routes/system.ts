@@ -76,9 +76,18 @@ app.post('/client-error', async (c) => {
   return c.json({ success: true, reported })
 })
 
-function denyUnlessBackupPermission(c: any) {
+// Every route behind this helper DESTROYS data (reset-data, reset-section,
+// finalize-migration, factory-reset, forced orphan cleanup), so it demands
+// 'backup_restore' (restore/reset, sensitivity: critical) -- NOT 'backup',
+// which is the EXPORT permission that is deliberately safe to hand to more
+// people (see lib/permissions.ts's backup/backup_restore note and
+// routes/backups.ts's restore branch, which draws the same line). Gating
+// these on 'backup' let an export-only account wipe the database -- and
+// factory-reset hands back the reseeded admin password, so that account
+// also got full takeover (Part-77 CRITICAL, auth audit).
+function denyUnlessRestorePermission(c: any) {
   const user = c.get('user')
-  if (!hasPermission(user, 'backup')) return c.json({ error: 'You do not have permission to perform this action' }, 403)
+  if (!hasPermission(user, 'backup_restore')) return c.json({ error: 'You do not have permission to perform this action' }, 403)
   return null
 }
 
@@ -148,7 +157,7 @@ async function rateLimited(c: any, name: string, max: number, windowSeconds: num
 // gap since they delete strictly more than 'products' does.
 // ---------------------------------------------------------------------------
 app.post('/reset-data', async (c) => {
-  const denied = denyUnlessBackupPermission(c)
+  const denied = denyUnlessRestorePermission(c)
   if (denied) return denied
   if (await rateLimited(c, 'reset_data', 5, 600)) {
     return c.json({ error: 'Too many reset attempts. Wait a few minutes and try again.' }, 429)
@@ -522,7 +531,7 @@ const SECTION_CONFIG: Record<ResettableSection, { tables: string[]; label: strin
 }
 
 app.post('/reset-section', async (c) => {
-  const denied = denyUnlessBackupPermission(c)
+  const denied = denyUnlessRestorePermission(c)
   if (denied) return denied
   if (await rateLimited(c, 'reset_section', 10, 600)) {
     return c.json({ error: 'Too many reset attempts. Wait a few minutes and try again.' }, 429)
@@ -609,7 +618,7 @@ const MIGRATION_FINALIZE_STEPS = ['zero_stock', 'park_lots'] as const
 type MigrationFinalizeStep = typeof MIGRATION_FINALIZE_STEPS[number]
 
 app.post('/finalize-migration', async (c) => {
-  const denied = denyUnlessBackupPermission(c)
+  const denied = denyUnlessRestorePermission(c)
   if (denied) return denied
   if (await rateLimited(c, 'finalize_migration', 10, 600)) {
     return c.json({ error: 'Too many attempts. Wait a few minutes and try again.' }, 429)
@@ -703,7 +712,7 @@ app.post('/finalize-migration', async (c) => {
 // plain DELETE from custom_tables would leave orphaned.
 // ---------------------------------------------------------------------------
 app.post('/factory-reset', async (c) => {
-  const denied = denyUnlessBackupPermission(c)
+  const denied = denyUnlessRestorePermission(c)
   if (denied) return denied
   // Matches backend's factory-reset rate limit (2 attempts / 30 minutes) --
   // deliberately tighter than reset-data's 5/10min since this is the more
@@ -780,7 +789,7 @@ app.post('/factory-reset', async (c) => {
 // orphans, so this endpoint is a one-time-ish repair, not a schedule.
 // ---------------------------------------------------------------------------
 app.post('/import-retention/orphans', async (c) => {
-  const denied = denyUnlessBackupPermission(c)
+  const denied = denyUnlessRestorePermission(c)
   if (denied) return denied
   const user = c.get('user')
   const body = (await c.req.json().catch(() => ({}))) as Record<string, unknown>

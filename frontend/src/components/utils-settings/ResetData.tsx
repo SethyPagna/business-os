@@ -346,7 +346,7 @@ function ResetData({ actionHistory = null }: ResetPanelProps) {
   const selected = MODES.find((entry) => entry.id === mode) || MODES[0]
 
   const doReset = async () => {
-    if (!hasPermission('backup')) return notify(T('access_denied', 'No permission'), 'error')
+    if (!hasPermission('backup_restore')) return notify(T('access_denied', 'No permission'), 'error')
     if (!beginSingleAction(resetInFlightRef, { blocked: working })) return
     setWorking(true)
     try {
@@ -551,7 +551,7 @@ function SectionReset({ actionHistory = null }: ResetPanelProps) {
   const whatKept = isProducts ? keptParts.join(', ') : selected.kept
 
   const doReset = async () => {
-    if (!hasPermission('backup')) return notify(T('access_denied', 'No permission'), 'error')
+    if (!hasPermission('backup_restore')) return notify(T('access_denied', 'No permission'), 'error')
     if (!beginSingleAction(sectionResetInFlightRef, { blocked: working })) return
     setWorking(true)
     try {
@@ -641,7 +641,7 @@ function FactoryReset({ actionHistory = null }: ResetPanelProps) {
   const CONFIRM_WORD = 'FACTORY RESET'
 
   async function doFactoryReset() {
-    if (!hasPermission('backup')) return notify(T('access_denied', 'No permission'), 'error')
+    if (!hasPermission('backup_restore')) return notify(T('access_denied', 'No permission'), 'error')
     if (!beginSingleAction(factoryResetInFlightRef, { blocked: working })) return
     setWorking(true)
     try {
@@ -779,7 +779,7 @@ function MigrationFinalize({ actionHistory = null }: ResetPanelProps) {
   const [reimportAck, setReimportAck] = useState(false)
 
   const runStep = async (step: FinalizeStep, onSuccess: () => void) => {
-    if (!hasPermission('backup')) return notify(T('access_denied', 'No permission'), 'error')
+    if (!hasPermission('backup_restore')) return notify(T('access_denied', 'No permission'), 'error')
     if (!beginSingleAction(inFlightRef, { blocked: working })) return
     setWorking(true)
     try {
