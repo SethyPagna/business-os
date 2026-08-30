@@ -14836,3 +14836,43 @@ Verified: returns batch-restock suite 10 → 11 (the new probe asserts a
 blocked even-exchange edit leaves lot, aggregate and return_items
 untouched), replace-damaged 10, sale-cancel, sales-returns-search 19;
 cloudflare tsc clean. **Needs deploy** (rides with the b9 batch).
+
+## Part 531 (Aug 30 2026, session business-os-v1-b9) — Part-77 HIGH fix: import additive applies are redelivery-idempotent
+
+**Ask:** findings-backlog continuation (claimed first). The generic import
+apply chunk (products, inventory, contacts, custom tables) is not one
+transaction — runD1BatchInChunks splits it into ~300-statement batches —
+and the queue is at-least-once, so a redelivered or crash-retried chunk
+re-ran every ADDITIVE write: merge_stock/override_add branch-stock
+increments and lot top-ups doubled, inventory movements duplicated and
+their stock deltas re-added. The stock-action and historical-sales paths
+were already sealed per unit (import_stock_action_commits /
+import_sales_commits); this closes the generic path the same way. Commit
+`5562f84c`:
+
+- Each additive row's writes travel as ONE atomic group LED by a guard row
+  in `import_stock_action_guards` — the generic (job_id, action_key,
+  guard_key) ledger the stock-action path already uses
+  (action_key='generic_apply', guard_key='row:<n>'), so NO new migration.
+  Guard and stock commit in the same db.batch() and can never disagree.
+- A retried chunk pre-reads the applied guard keys once and composes
+  nothing for guarded rows; the guard's PRIMARY KEY is the backstop if a
+  read somehow races (the 0053 single-writer lease already excludes
+  concurrent invocations). A crash mid-chunk retries exactly the
+  unapplied remainder.
+- New `runD1BatchGroupsInChunks`: packs whole groups up to the chunk size,
+  recurses CPU-limit splits at GROUP boundaries (never through one), and a
+  single group that alone blows the budget re-throws rather than break its
+  atomicity. Real groups are ≤ ~6 statements.
+- Idempotent writes stay on the plain re-runnable path unchanged: field
+  UPDATEs, legacy snapshot REPLACEs, and creates (whose duplicate
+  protection is the import_job_row_signatures ledger, per the Part-77
+  audit's own scoping of this finding to merge_stock/override_add +
+  inventory).
+
+Verified: new `test-import-apply-idempotency-pure.cjs` 5/5 (real extracted
+runner behavior — whole-group packing, group-boundary CPU splits,
+oversized-group re-throw — plus composition source locks);
+test-import-engine 28 PASS, import-lease 8, lifecycle-gate, stock-action
+apply + commit, sales-import-commit all green; cloudflare tsc clean.
+**Needs deploy** (rides with the b9 batch).
