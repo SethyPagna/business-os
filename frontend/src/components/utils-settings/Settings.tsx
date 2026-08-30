@@ -29,7 +29,7 @@ import Ticket from 'lucide-react/dist/esm/icons/ticket.js'
 import Trash2 from 'lucide-react/dist/esm/icons/trash-2.js'
 import Users from 'lucide-react/dist/esm/icons/users.js'
 import FontFamilyPicker from './FontFamilyPicker'
-import { DEFAULT_MOBILE_PINNED, NAV_ITEMS, orderNavItems, parseNavSetting } from '../shared/navigationConfig'
+import { ACCOUNT_NAV_IDS, DEFAULT_MOBILE_PINNED, NAV_ITEMS, orderNavItems, parseNavSetting } from '../shared/navigationConfig'
 import SectionSwitcher from '../shared/SectionSwitcher'
 import LoadingWatchdog from '../shared/LoadingWatchdog'
 import AppSelect from '../shared/AppSelect.tsx'
@@ -586,7 +586,10 @@ export default function Settings() {
   }, [user])
 
   const navItems = useMemo<NavItem[]>(
-    () => orderNavItems(NAV_ITEMS, parseNavSetting(toStringValue(form.ui_nav_order), [])) as NavItem[],
+    // Account-expander pages (Settings / Receipt Settings) aren't reorderable
+    // or pinnable nav rows anymore -- they live under the account, so keep
+    // them out of this editor to match what the sidebar actually renders.
+    () => orderNavItems(NAV_ITEMS.filter((item) => !ACCOUNT_NAV_IDS.has(item.id)), parseNavSetting(toStringValue(form.ui_nav_order), [])) as NavItem[],
     [form.ui_nav_order],
   )
   const mobilePinned = useMemo(() => parseNavSetting(toStringValue(form.ui_mobile_pinned), DEFAULT_MOBILE_PINNED).slice(0, 4), [form.ui_mobile_pinned])

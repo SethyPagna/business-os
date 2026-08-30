@@ -24,7 +24,7 @@ import Users from 'lucide-react/dist/esm/icons/users.js'
 import User from 'lucide-react/dist/esm/icons/user.js'
 import ChevronUp from 'lucide-react/dist/esm/icons/chevron-up.js'
 import { useApp as useAppHook } from '../../AppContext.tsx'
-import { DEFAULT_MOBILE_PINNED, NAV_ITEMS as NAV_CONFIG_ITEMS, orderNavItems, parseNavSetting, type NavigationItem, type NavigationPermission } from '../shared/navigationConfig'
+import { ACCOUNT_NAV_IDS, DEFAULT_MOBILE_PINNED, NAV_ITEMS as NAV_CONFIG_ITEMS, orderNavItems, parseNavSetting, type NavigationItem, type NavigationPermission } from '../shared/navigationConfig'
 import { APP_PAGE_INTENT_EVENT } from '../../app/appShellUtils.ts'
 import { lazyRetry } from '../../utils/lazyImport.ts'
 import MinimizedWorkTray from '../shared/MinimizedWorkTray.tsx'
@@ -124,12 +124,6 @@ const ICONS_BY_ID: Record<string, LucideIcon> = {
   settings: Settings,
   server: Server,
 }
-
-// These pages no longer render as their own sidebar nav rows -- they live
-// under the footer account expander (Profile / Settings / Receipt Settings /
-// Update / Exit) instead, per the user's "fold these into the account row"
-// request. Still real pages reachable from there; just not top-level nav.
-const ACCOUNT_NAV_IDS = new Set(['settings', 'receipt_settings'])
 
 function getFallbackLabel(itemId: string, language: string): string {
   void language

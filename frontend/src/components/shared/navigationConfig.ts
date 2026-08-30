@@ -88,6 +88,13 @@ export const NAV_ITEMS: NavigationItem[] = [
 
 export const DEFAULT_MOBILE_PINNED = ['dashboard', 'pos', 'products', 'sales']
 
+// Pages that are still real NAV_ITEMS (so canAccessPage / permissions keep
+// working through their existing ids) but no longer render as their own
+// sidebar nav rows -- they live under the footer account expander instead
+// (Sidebar.tsx). The Settings nav-order/pinning editor excludes them too, so
+// it can't offer to reorder or pin a row that the nav no longer shows.
+export const ACCOUNT_NAV_IDS = new Set(['settings', 'receipt_settings'])
+
 export function parseNavSetting(value: unknown, fallback: string[] = []): string[] {
   try {
     const parsed = typeof value === 'string' ? JSON.parse(value || '[]') : value
