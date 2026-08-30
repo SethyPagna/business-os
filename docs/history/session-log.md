@@ -14664,3 +14664,42 @@ Cancelled + N/A on their own line.
 **Not done.** Deploy. The broad de-carding sweep and full scrollability audit
 overlap the parallel session's active "de-carding" passes — applied here only
 to surfaces this batch touched (reports sections, strip folds).
+
+## Part 526 (Aug 30 2026, session business-os-v1-b9) — Part-77 HIGH fix: OTP verify bound to the first factor
+
+**Ask:** findings-backlog continuation (claimed first, re-verified). POST
+/auth/otp/verify was effectively a standalone 6-digit login: reachable with
+just a guessable numeric userId — never bound to the password (or Google
+identity) step that must precede it — feeding no escalating lockout, and
+re-running no device-approval gate. Commit `b158d347`:
+
+- **Challenge binding.** New `lib/otpChallenge.ts`: both first factors
+  (/login and the OAuth callback) mint a short-lived (5 min) KV challenge
+  bound to the user when they answer `otpRequired`; /otp/verify refuses any
+  request without a live challenge for that exact user, checked BEFORE any
+  DB read so an unbound caller learns nothing. Consumed on SUCCESS only —
+  a mistyped code retries within the window without redoing the password.
+- **Lockout parity.** /otp/verify checks the same escalating per-username
+  lockout /login uses before comparing a code (a locked account gets no
+  compare at all), and every wrong code feeds `recordFailedLogin` — the
+  second factor now counts like a wrong password. Success clears it.
+- **Device gate re-run.** The device-approval check runs at the OTP step
+  with the deviceId THIS request carries — the /login check ran against
+  the login call's deviceId and nothing forced the two to match. Same
+  pending/rejected answers as /login; `authTransport.otpVerify` now sends
+  the persistent deviceId, and Login.tsx handles a
+  `deviceApprovalRequired` answer at the OTP step.
+- **Self-sufficiency ride-along.** The verify response gains
+  role_code/role_permissions for the same reason /login returns them (its
+  own comment documents the offline/dev "No role" bug); OTP-enabled
+  accounts were still exposed to it.
+- Frontend: `pendingOtpChallenge` captured from all three otpRequired
+  answer sites (password login ×2 + OAuth callback) and sent with the code.
+
+Verified: new `test-otp-verify-binding-pure.cjs` 6/6 (real transpiled
+challenge lib on a fake KV + gate-ordering source locks incl.
+challenge-before-DB-read and device-before-session), login-lockout,
+login-identifier, route-permissions, apiHttp, performanceLoadingUx green;
+tsc clean both packages. **Needs deploy** (rides with the b9 batch) — note
+for the operator: after deploy, an OTP user mid-login during the rollout
+gets "sign-in step expired" once and simply re-enters their password.
