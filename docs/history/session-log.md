@@ -14876,3 +14876,25 @@ oversized-group re-throw — plus composition source locks);
 test-import-engine 28 PASS, import-lease 8, lifecycle-gate, stock-action
 apply + commit, sales-import-commit all green; cloudflare tsc clean.
 **Needs deploy** (rides with the b9 batch).
+
+## Part 532 (Aug 30 2026, session business-os-v1-b9) — Part-77, D1-scale FK-index slice: three hot lookups stop table-scanning
+
+**Ask:** the most bounded slice of the D1-scale finding (claimed with the
+slice split recorded — unpaged reads, date(created_at) sites and the
+REPLACE chain stay open). Audited every CREATE INDEX across the migration
+chain against the finding's named columns: most candidates already had
+indexes (fees.sale_id, damaged lots, both allocation tables, sale_items) —
+three genuinely did not, each behind a hot path. Commit `9dfc7235`,
+migration **0086** (additive indexes only):
+
+- `sales (customer_id, created_at DESC)` — customer sales history and the
+  COMPUTED loyalty balance (balance is derived from sales + adjustments on
+  every POS membership lookup, never stored) were scanning all 14,913+
+  sales rows.
+- `returns (sale_id)` — the fully-vs-partially-returned recompute runs on
+  EVERY return create/edit.
+- `loyalty_point_adjustments (customer_id)` — the balance's other half.
+
+Verified: `test-migration-chain-fresh-pure` green on the full chain (87
+migrations, FK check clean). **Needs deploy + `migrate` on remote D1
+(0086 pending after this ships).**
