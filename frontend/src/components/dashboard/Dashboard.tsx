@@ -1402,7 +1402,7 @@ ${translateOr('delivery_margin', 'Delivery margin')} ${fmtUSD(aDeliveryMargin)} 
   const dashboardExportGroups = useMemo(() => [
     {
       id: 'whole',
-      label: t('export_group_whole') || 'Whole dashboard',
+      label: translateOr('export_group_whole', 'Whole dashboard'),
       choices: [
         { id: 'package', label: t('export_dashboard_package') || 'Export dashboard package', onClick: exportDashboardPackage },
         { id: 'all', label: t('export_all_report'), onClick: buildExportAll },
@@ -1415,7 +1415,7 @@ ${translateOr('delivery_margin', 'Delivery margin')} ${fmtUSD(aDeliveryMargin)} 
     },
     {
       id: 'sections',
-      label: t('export_group_sections') || 'By section',
+      label: translateOr('export_group_sections', 'By section'),
       choices: [
         { id: 'sales-chart', label: t('export_sales_chart'), onClick: async () => {
           const { exportDashboardSalesChart } = await loadDashboardExportModule()
@@ -1446,6 +1446,7 @@ ${translateOr('delivery_margin', 'Delivery margin')} ${fmtUSD(aDeliveryMargin)} 
     exportDashboardStats,
     loadDashboardExportModule,
     t,
+    translateOr,
   ])
 
   if (summaryUnavailable) {
