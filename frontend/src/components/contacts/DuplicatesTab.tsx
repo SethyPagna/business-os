@@ -4,10 +4,8 @@ import Search from 'lucide-react/dist/esm/icons/search.js'
 import ArrowRightCircle from 'lucide-react/dist/esm/icons/arrow-right-circle.js'
 import EyeOff from 'lucide-react/dist/esm/icons/eye-off.js'
 import Merge from 'lucide-react/dist/esm/icons/merge.js'
-import Trash2 from 'lucide-react/dist/esm/icons/trash-2.js'
 import { dismissContactDuplicateCluster, getContactDuplicateClusters, mergeContacts } from './contactDuplicates'
 import type { ContactDuplicateCluster, ContactDuplicateClusterEntry, ContactDuplicateSeverity, ContactTableKind } from './contactDuplicates'
-import { deleteCustomer, deleteSupplier, deleteDeliveryContact } from '../../api/contactWriteTransport'
 import SaleLinkConflictsSection from './SaleLinkConflictsSection'
 
 type TranslateFn = (key: string) => string | undefined
@@ -85,28 +83,20 @@ const SEVERITY_TEXT: Record<ContactDuplicateSeverity, string> = {
   name_only: 'text-blue-700 dark:text-blue-300',
 }
 
-const DELETE_BY_TABLE: Record<ContactTableKind, (id: number | string) => Promise<unknown>> = {
-  customers: deleteCustomer,
-  suppliers: deleteSupplier,
-  delivery_contacts: deleteDeliveryContact,
-}
-
 function ClusterCard({
-  cluster, t, table, dismissing, merging, deletingId, selected, selectable, onToggleSelect, onResolve, onDismiss, onMergeInto, onDelete,
+  cluster, t, table, dismissing, merging, selected, selectable, onToggleSelect, onResolve, onDismiss, onMergeInto,
 }: {
   cluster: ContactDuplicateCluster
   t: TranslateFn
   table: ContactTableKind
   dismissing: boolean
   merging: boolean
-  deletingId: number | null
   selected: boolean
   selectable: boolean
   onToggleSelect: () => void
   onResolve: (name: string) => void
   onDismiss: () => void
   onMergeInto: (keeper: ContactDuplicateClusterEntry) => void
-  onDelete: (contact: ContactDuplicateClusterEntry) => void
 }) {
   const [key, fallback] = SEVERITY_LABEL_KEY[cluster.severity]
   // Which contact is about to be kept, once the person has picked one --
@@ -116,28 +106,14 @@ function ClusterCard({
   // acts on ids the panel already fetched moments ago, no extra context
   // to show that a modal would add.
   const [pendingKeeperId, setPendingKeeperId] = useState<number | null>(null)
-  // Same two-tap pattern for delete -- outright removing a record (not a
-  // merge) needs its own confirm step since there's no "undo" here.
-  const [pendingDeleteId, setPendingDeleteId] = useState<number | null>(null)
-  const busy = dismissing || merging || deletingId != null
+  const busy = dismissing || merging
 
   const clickMerge = (contact: ContactDuplicateClusterEntry) => {
-    setPendingDeleteId(null)
     if (pendingKeeperId === contact.id) {
       onMergeInto(contact)
       setPendingKeeperId(null)
     } else {
       setPendingKeeperId(contact.id)
-    }
-  }
-
-  const clickDelete = (contact: ContactDuplicateClusterEntry) => {
-    setPendingKeeperId(null)
-    if (pendingDeleteId === contact.id) {
-      onDelete(contact)
-      setPendingDeleteId(null)
-    } else {
-      setPendingDeleteId(contact.id)
     }
   }
 
@@ -178,6 +154,21 @@ function ClusterCard({
                 <span className="font-medium text-gray-900 dark:text-white">{contact.name || `#${contact.id}`}</span>
                 {contact.phone ? <span className="text-xs text-gray-500 dark:text-gray-400">{contact.phone}</span> : null}
                 {contact.membershipNumber ? <span className="text-xs text-gray-400">{contact.membershipNumber}</span> : null}
+                {/* Linked-history at a glance -- these are exactly what "Keep
+                    this" MOVES onto the survivor on merge (routes/contacts.ts
+                    repoints them), and why a raw delete of a record isn't
+                    offered here: it would orphan them. Only shown when > 0 so
+                    a clean record stays uncluttered. */}
+                {contact.history ? (() => {
+                  const h = contact.history
+                  const chips: string[] = []
+                  if (h.salesCount > 0) chips.push(`${h.salesCount} ${t('sales') || 'Sales'}`)
+                  if (h.returnsCount > 0) chips.push(`${h.returnsCount} ${t('returns') || 'Returns'}`)
+                  if ((h.pointsBalance ?? 0) > 0) chips.push(`${h.pointsBalance} ${t('points') || 'points'}`)
+                  return chips.map((chip) => (
+                    <span key={chip} className="rounded bg-gray-100 px-1 py-0.5 text-[10px] text-gray-500 dark:bg-white/10 dark:text-gray-400">{chip}</span>
+                  ))
+                })() : null}
               </div>
               <div className="flex flex-shrink-0 items-center gap-1">
                 {cluster.contacts.length >= 2 ? (
@@ -213,26 +204,6 @@ function ClusterCard({
                     {t('resolve') || 'Resolve'}
                   </button>
                 ) : null}
-                <button
-                  type="button"
-                  onClick={() => clickDelete(contact)}
-                  disabled={busy}
-                  title={pendingDeleteId === contact.id
-                    ? (t('delete_confirm_hint') || 'Tap again to permanently delete this record')
-                    : (t('delete_duplicate_hint') || 'Permanently delete this record (no merge)')}
-                  className={`inline-flex items-center gap-1 rounded-lg px-1.5 py-0.5 text-[11px] font-medium transition disabled:opacity-50 ${
-                    pendingDeleteId === contact.id
-                      ? 'bg-red-600 text-white hover:bg-red-700'
-                      : 'text-red-600 hover:bg-red-50 dark:text-red-300 dark:hover:bg-red-900/20'
-                  }`}
-                >
-                  <Trash2 className="h-3 w-3" />
-                  {deletingId === contact.id
-                    ? (t('deleting') || 'Deleting...')
-                    : pendingDeleteId === contact.id
-                      ? (t('confirm') || 'Confirm')
-                      : (t('delete') || 'Delete')}
-                </button>
               </div>
             </div>
           )
@@ -266,11 +237,6 @@ export default function DuplicatesTab({ t, notify, active = true, onResolve, inc
   // disabling the whole grid for one action.
   const [dismissingId, setDismissingId] = useState<string | null>(null)
   const [mergingId, setMergingId] = useState<string | null>(null)
-  // Which single contact id is mid-delete, scoped inside whichever cluster
-  // card that belongs to -- deletingClusterId gates the busy state on the
-  // right card, deletingContactId is what ClusterCard checks per-row.
-  const [deletingClusterId, setDeletingClusterId] = useState<string | null>(null)
-  const [deletingContactId, setDeletingContactId] = useState<number | null>(null)
   // Multi-select for bulk actions -- keyed by clusterKey(), same identity
   // dismissingId/mergingId already use. Cleared on table switch and after
   // any bulk action completes (selections referencing a now-gone cluster
@@ -320,18 +286,6 @@ export default function DuplicatesTab({ t, notify, active = true, onResolve, inc
     })
   }
 
-  // After deleting one contact out of a cluster, drop just that contact
-  // from the cluster's list -- if that leaves fewer than 2 contacts, the
-  // cluster no longer represents an actual duplicate, so remove it
-  // entirely instead of showing a single lonely record.
-  const removeContactFromCluster = (id: string, contactId: number) => {
-    setClusters((current) => current
-      .map((cluster) => (clusterKey(table, cluster) === id
-        ? { ...cluster, contacts: cluster.contacts.filter((contact) => contact.id !== contactId) }
-        : cluster))
-      .filter((cluster) => cluster.contacts.length >= 2))
-  }
-
   const handleDismiss = async (cluster: ContactDuplicateCluster) => {
     const id = clusterKey(table, cluster)
     setDismissingId(id)
@@ -367,26 +321,6 @@ export default function DuplicatesTab({ t, notify, active = true, onResolve, inc
       notify(e instanceof Error ? e.message : (t('merge_duplicate_failed') || 'Could not merge these records'), 'error')
     } finally {
       setMergingId(null)
-    }
-  }
-
-  // Outright delete of one record in a cluster -- distinct from Merge:
-  // nothing is kept from the deleted record, and the other contact(s) in
-  // the cluster are untouched. For when one side is just wrong/spurious
-  // data rather than genuinely the same contact as another record.
-  const handleDelete = async (cluster: ContactDuplicateCluster, contact: ContactDuplicateClusterEntry) => {
-    const id = clusterKey(table, cluster)
-    setDeletingClusterId(id)
-    setDeletingContactId(contact.id)
-    try {
-      await DELETE_BY_TABLE[table](contact.id)
-      notify(t('duplicate_deleted') || 'Deleted')
-      removeContactFromCluster(id, contact.id)
-    } catch (e: unknown) {
-      notify(e instanceof Error ? e.message : (t('delete_duplicate_failed') || 'Could not delete this record'), 'error')
-    } finally {
-      setDeletingClusterId(null)
-      setDeletingContactId(null)
     }
   }
 
@@ -650,14 +584,12 @@ export default function DuplicatesTab({ t, notify, active = true, onResolve, inc
                   table={table}
                   dismissing={dismissingId === id}
                   merging={mergingId === id}
-                  deletingId={deletingClusterId === id ? deletingContactId : null}
                   selected={selectedKeys.has(id)}
                   selectable={!bulkBusy}
                   onToggleSelect={() => toggleSelected(id)}
                   onResolve={(name) => onResolve?.(TABLE_TO_TAB[table], name)}
                   onDismiss={() => void handleDismiss(cluster)}
                   onMergeInto={(keeper) => void handleMergeInto(cluster, keeper)}
-                  onDelete={(contact) => void handleDelete(cluster, contact)}
                 />
               )
             })}

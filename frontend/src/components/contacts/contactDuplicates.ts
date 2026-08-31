@@ -23,7 +23,16 @@ export type ContactDuplicateMatch = {
   severity: ContactDuplicateSeverity
 }
 
-export type ContactDuplicateClusterEntry = { id: number; name: string | null; phone: string | null; membershipNumber: string | null }
+// Per-contact "worth knowing before you act" history the /duplicates
+// endpoint attaches to every cluster member (routes/contacts.ts's
+// computeContactHistorySummaryMap). It's what makes "merge into the survivor"
+// tangible in the panel -- the reviewer sees the sales/returns/points that
+// merge will MOVE onto the keeper, which is also why a raw delete of a member
+// isn't offered here (it would orphan exactly these). pointsBalance is
+// customers-only.
+export type ContactDuplicateEntryHistory = { pointsBalance?: number; salesCount: number; returnsCount: number }
+
+export type ContactDuplicateClusterEntry = { id: number; name: string | null; phone: string | null; membershipNumber: string | null; history?: ContactDuplicateEntryHistory | null }
 
 export type ContactDuplicateCluster = {
   type: 'phone' | 'name'
