@@ -62,6 +62,7 @@ const InventoryProductsSurfaceView = InventoryProductsSurface as any
 import { buildMovementGroups, getMovementGroupPage, movementColorClass, movementColorClassForRecord, movementGroupHaystack, translateMovementType } from './movementGroups'
 import { buildStockHealthSegments } from './stockHealthSummary'
 import StatsStrip, { statsPresetRange, type StatCardDef } from '../shared/StatsStrip.tsx'
+import StatsRangeRow from '../shared/StatsRangeRow.tsx'
 import type { DateTimeRange } from '../shared/DateTimeRangePicker'
 import { getSalesStatsStrip } from '../../api/salesTransport.ts'
 import { getReturnsReport } from '../../api/returnsReadTransport.ts'
@@ -3479,13 +3480,20 @@ ${inventoryFeesFormulaText}`,
         // (Products, Stock value) read the filter-scoped stockStats; the
         // money cards are range-scoped (default today) via the sales
         // kernel + returns report, agreeing with Dashboard/Reports.
-        <StatsStrip
-          className="mb-2"
-          cards={stripCards}
-          t={t}
-          range={stripRange}
-          onRangeChange={setStripRange}
-        />
+        //
+        // The Start→End range that scopes those money cards now leads as its
+        // OWN row directly above the strip (user, Aug 31: "fish out the start
+        // date and end date from the stats button ... the start and end date
+        // will also apply to it"). Inventory's stats sit on their own top-level
+        // section chip, so there's no search bar here for the date row to sit
+        // above — it leads the section instead, driving the same stripRange.
+        <div className="mb-2 space-y-1.5">
+          <StatsRangeRow range={stripRange} onRangeChange={setStripRange} t={t} />
+          <StatsStrip
+            cards={stripCards}
+            t={t}
+          />
+        </div>
       ) : null}
       {showInventoryTabs ? (
       <div className="mb-4 flex gap-2 overflow-x-auto border-b border-gray-200 dark:border-gray-700">

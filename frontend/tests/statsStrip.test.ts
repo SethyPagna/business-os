@@ -222,10 +222,15 @@ test('Part 560: the Start→End date row is lifted OUT of the stats fold into a 
   const rangeRow = read('src/components/shared/StatsRangeRow.tsx')
   assert.ok(rangeRow.includes('<DateTimeRangePicker'), 'StatsRangeRow carries the shared Start→End picker')
   assert.ok(rangeRow.includes('range_today') && rangeRow.includes('range_this_year'), 'StatsRangeRow carries the presets')
+  // Sales/Returns/Fees place it above the search bar; Inventory's stats sit on
+  // their own section chip so its row leads the stats section instead — but all
+  // four render the shared row wired to stripRange and drop the props from the
+  // strip.
   for (const rel of [
     'src/components/sales/Sales.tsx',
     'src/components/returns/Returns.tsx',
     'src/components/fees/FeesPage.tsx',
+    'src/components/inventory/Inventory.tsx',
   ]) {
     const src = read(rel)
     // Rendered above the search bar and wired to the strip's range state
