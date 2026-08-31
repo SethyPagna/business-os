@@ -4,7 +4,7 @@ import { requireAuth } from '../lib/auth'
 import type { Env } from '../index'
 import { getSystemJob, listCloudflareBackups, listSystemJobs, storeSystemJob } from '../lib/backup'
 import { buildDriveOauthStartUrl, completeDriveOauth, disconnectDrive, driveSyncStatus, pushBackupToDrive, updateDrivePreferences } from '../lib/googleDrive'
-import { hasPermission, hasAnyPermission, isAdminControlUser } from '../lib/permissions'
+import { hasPermission, hasAnyPermission, isAdminControlUser, getPermissionTier } from '../lib/permissions'
 import { audit } from '../lib/audit'
 import { buildAuditLogFilters } from '../lib/auditLogQuery'
 import { putObject, getObject, deleteObject } from '../lib/r2'
@@ -441,8 +441,14 @@ app.get('/system/bootstrap', (c) => c.json({
 
 app.get('/system/debug/log', (c) => c.json({ entries: [] }))
 app.get('/system/audit-logs', requireAuth, async (c) => {
-  const denied = denyUnless(c, 'audit_log')
-  if (denied) return denied
+  // audit_log view tier (Part 557 slice 7): 'view' sees ONLY the caller's own
+  // entries (own-scoped, matching "audit log shows only for the user"); 'full'
+  // (or an admin-control user) sees everyone's and may filter by user. A 'view'
+  // value fails the old strict denyUnless('audit_log'), so gate on the tier.
+  const user = c.get('user')
+  const tier = getPermissionTier(user, 'audit_log')
+  if (tier === 'none') return c.json({ error: 'You do not have permission to perform this action' }, 403)
+  const ownOnly = tier === 'view'
   const page = Math.max(1, Number.parseInt(c.req.query('page') || '1', 10) || 1)
   const pageSize = Math.min(200, Math.max(1, Number.parseInt(c.req.query('pageSize') || '50', 10) || 50))
   const offset = (page - 1) * pageSize
@@ -451,11 +457,15 @@ app.get('/system/audit-logs', requireAuth, async (c) => {
   // clause builder lives in lib/auditLogQuery.ts so the pure test can run
   // the exact production SQL. COUNT applies the SAME clause, so pagination
   // agrees with the filtered set, not the whole table.
+  //
+  // Own-scoping is enforced HERE by overriding userId with the caller's id
+  // (never trusting the client's userId param for a view user), so it applies
+  // to the COUNT and rows identically.
   const { where, params: filterParams } = buildAuditLogFilters({
     search: c.req.query('search'),
     action: c.req.query('action'),
     entity: c.req.query('entity'),
-    userId: c.req.query('userId'),
+    userId: ownOnly ? String(user?.id ?? '') : c.req.query('userId'),
     startDate: c.req.query('startDate'),
     endDate: c.req.query('endDate'),
   })
@@ -513,7 +523,9 @@ app.get('/system/audit-logs', requireAuth, async (c) => {
       pageSize,
       totalPages: Math.max(1, Math.ceil((totalRow?.count || 0) / pageSize)),
       filters: {
-        users: users || [],
+        // An own-scoped (view) user can only ever see themselves, so never
+        // hand back the full roster of user names as a filter vocabulary.
+        users: ownOnly ? [] : (users || []),
         actions: (actionRows || []).map((row) => row.action),
         entities: (entityRows || []).map((row) => row.entity),
       },

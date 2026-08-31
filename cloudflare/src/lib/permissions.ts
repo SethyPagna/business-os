@@ -147,6 +147,10 @@ export const VIEW_TIER_KEYS = new Set([
   'sales',
   'promotions',
   'review',
+  // audit_log's middle tier is OWN-scoped, not merely read-only: view = see
+  // only your own audit entries, full = see everyone's (+ purge retention).
+  // See routes/compat.ts's /system/audit-logs handler.
+  'audit_log',
 ])
 
 export type PermissionTier = 'full' | 'review' | 'view' | 'none'

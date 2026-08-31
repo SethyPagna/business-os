@@ -490,9 +490,24 @@ export const PERMISSION_SECTIONS: PermissionSection[] = [
     key: 'audit_log',
     tKey: 'perm_section_audit_log',
     label: 'Audit Log',
-    description: 'View-only history of every action across the app.',
+    description: 'None / View only / Full. Read-only action history. View only shows a person their OWN actions; Full shows everyone’s (plus the legacy deleted-sales evidence ledger).',
     permissions: [
-      { key: 'audit_log', tKey: 'perm_audit_log', label: 'Audit log', sensitivity: 'high' },
+      // View-tier section (Part 557 slice 7), where 'view' is OWN-scoped rather
+      // than read-only (the whole page is read-only anyway): 'view' = see only
+      // your own audit entries (routes/compat.ts GET /system/audit-logs forces
+      // userId = self for a view tier); 'full' = see everyone's, and is the only
+      // tier that unlocks the cross-user legacy deleted-sales ledger + the
+      // retention-purge endpoint (both keep strict denyUnless('audit_log')).
+      {
+        key: 'audit_log',
+        tKey: 'perm_audit_log',
+        label: 'Audit log',
+        sensitivity: 'high',
+        tier: true,
+        middleTier: 'view',
+        reviewTKey: 'perm_audit_log_view_desc',
+        reviewDescription: 'View only: see your OWN actions in the audit log. Full Access is required to see every user’s actions and the deleted-sales evidence ledger.',
+      },
     ],
   },
   {

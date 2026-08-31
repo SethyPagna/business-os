@@ -40,12 +40,19 @@ export default function ReviewLogsPage() {
   const { t, getPermissionTier } = useApp()
   const canReview = getPermissionTier('review') !== 'none'
   const canAudit = getPermissionTier('audit_log') !== 'none'
+  // audit_log view tier (Part 557 slice 7): 'view' sees the main Audit Log
+  // scoped to their OWN actions; the legacy deleted-sale ledger is a
+  // cross-user evidence view whose endpoint stays Full-only (denyUnless), so
+  // that chip/section shows only for 'full'.
+  const canAuditAll = getPermissionTier('audit_log') === 'full'
   const [section, setSection] = useState<ReviewLogsSection>(() => initialSection(canReview, canAudit))
 
   const chips: Array<{ key: ReviewLogsSection; label: string; icon: typeof ClipboardCheck; activeColor: string }> = [
     ...(canReview ? [{ key: 'review' as const, label: t('review_queue') || 'Review queue', icon: ClipboardCheck, activeColor: 'text-blue-600' }] : []),
     ...(canAudit ? [
       { key: 'audit' as const, label: t('audit_log') || 'Audit Log', icon: ScrollText, activeColor: 'text-teal-600' },
+    ] : []),
+    ...(canAuditAll ? [
       { key: 'deleted' as const, label: t('legacy_deleted_sales') || 'Deleted sales (old system)', icon: Trash2, activeColor: 'text-rose-600' },
     ] : []),
   ]
@@ -74,7 +81,7 @@ export default function ReviewLogsPage() {
         </div>
       ) : null}
       <Suspense fallback={<p className="p-4 text-sm text-gray-500">{t('loading') || 'Loading'}...</p>}>
-        {section === 'deleted' && canAudit ? (
+        {section === 'deleted' && canAuditAll ? (
           <LegacyDeletedSalesSection />
         ) : section === 'audit' && canAudit ? (
           <AuditLogSection />

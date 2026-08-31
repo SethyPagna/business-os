@@ -3312,6 +3312,7 @@
   "perm_action_tier_blocked": "Already blocked by the selected tier.",
   "perm_all": "Administrator (full access)",
   "perm_audit_log": "Audit Log",
+  "perm_audit_log_view_desc": "View only: see your OWN actions in the audit log. Full Access is required to see every user's actions and the deleted-sales evidence ledger.",
   "perm_backup": "Backup",
   "perm_backup_restore": "Backup restore and reset",
   "perm_branches": "Branches",

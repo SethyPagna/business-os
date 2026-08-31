@@ -17,7 +17,7 @@ const check = (label, fn) => { fn(); passed++; console.log(`PASS ${label}`) }
 
 // --- replicate the model (kept identical to lib/permissions.ts) -----------
 const REVIEW_TIER_KEYS = new Set(['products', 'inventory', 'branches', 'returns', 'fees', 'contacts'])
-const VIEW_TIER_KEYS = new Set(['settings', 'sales', 'promotions', 'review'])
+const VIEW_TIER_KEYS = new Set(['settings', 'sales', 'promotions', 'review', 'audit_log'])
 const merged = (u) => ({ ...JSON.parse(u.role_permissions || '{}'), ...JSON.parse(u.permissions || '{}') })
 const isAdmin = (u) => {
   const un = String(u.username || '').toLowerCase(); const rc = String(u.role_code || '').toLowerCase()
@@ -138,6 +138,30 @@ check("routes/reviewQueue.ts: reader middleware is tier-aware; approve/reject re
   // Both writes individually re-check strict hasPermission('review').
   const strictWrites = src.match(/if \(!hasPermission\(user, 'review'\)\) return c\.json\(\{ error: 'Forbidden' \}, 403\)/g) || []
   assert.ok(strictWrites.length >= 2, `expected >=2 strict review write gates, found ${strictWrites.length}`)
+})
+
+// --- audit_log OWN-scoped view tier (Part 557 slice 7) ---------------------
+const auditViewUser = { username: 'av', role_permissions: JSON.stringify({ audit_log: 'view' }), permissions: '{}' }
+const auditFullUser = { username: 'af', role_permissions: JSON.stringify({ audit_log: true }), permissions: '{}' }
+check("audit_log 'view' -> tier 'view' (own-scoped read)", () => {
+  assert.equal(getPermissionTier(auditViewUser, 'audit_log'), 'view')
+})
+check("hasPermission('audit_log') FALSE for a view user (purge + all-users read stay blocked)", () => {
+  // The retention purge + legacy deleted-sales ledger keep strict
+  // denyUnless('audit_log') = hasPermission === true, which a view value fails.
+  assert.equal(hasPermission(auditViewUser, 'audit_log'), false)
+})
+check("Full audit_log grant -> tier 'full' AND hasPermission true (all users + purge)", () => {
+  assert.equal(getPermissionTier(auditFullUser, 'audit_log'), 'full')
+  assert.equal(hasPermission(auditFullUser, 'audit_log'), true)
+})
+check("routes/compat.ts: audit-logs read is tier-aware + own-scopes view (userId=self)", () => {
+  const src = fs.readFileSync(path.join(__dirname, '..', 'src', 'routes', 'compat.ts'), 'utf8')
+  assert.match(src, /const tier = getPermissionTier\(user, 'audit_log'\)/)
+  assert.match(src, /const ownOnly = tier === 'view'/)
+  assert.match(src, /userId: ownOnly \? String\(user\?\.id \?\? ''\) : c\.req\.query\('userId'\)/)
+  // Purge + deleted-sales ledger stay strict (Full only).
+  assert.match(src, /app\.delete\('\/system\/audit-logs\/retention'[\s\S]*?denyUnless\(c, 'audit_log'\)/)
 })
 check('frontend utils/permissions.ts VIEW_TIER_KEYS matches the backend', () => {
   const feSrc = fs.readFileSync(path.join(__dirname, '..', '..', 'frontend', 'src', 'utils', 'permissions.ts'), 'utf8')
