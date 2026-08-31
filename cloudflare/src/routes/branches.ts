@@ -12,7 +12,7 @@ import { bumpVersion } from '../lib/cache'
 import { audit } from '../lib/audit'
 import { assertUpdatedAtMatch, getExpectedUpdatedAt, writeConflictResponse, WriteConflictError } from '../lib/conflictControl'
 import { findIdentityMatch, findIdentityMatches, type ProductIdentityRow } from '../lib/productIdentity'
-import { decrementBatchStockStatement, incrementBatchStockStatement, resolveDestinationBatch } from '../lib/productBatches'
+import { decrementBatchStockStatement, incrementBatchStockStatement, resolveDestinationBatch, readFifoLotAvailability, allocateAcrossLots } from '../lib/productBatches'
 import { branchUpdateStatements } from '../lib/branchWrites'
 import type { Env } from '../index'
 
@@ -402,6 +402,32 @@ app.post('/transfer', async (c) => {
       decrementBatchStockStatement(sourceBatch.id, fromBranchId, quantity),
       incrementBatchStockStatement(destBatchId, toBranchId, quantity),
     )
+  } else if (!sourceBatch) {
+    // C1 fix: no lot was picked (the multi-select flow never picks one, and
+    // any caller that omits batchId lands here). Moving only branch_stock
+    // above would strand every source lot in place and give the destination
+    // no branch_batch_stock rows -- the per-lot ledger drifts from the branch
+    // total and the moved units lose their lot identity. Auto-allocate the
+    // quantity across the source branch's active lots FIFO -- the SAME policy
+    // inventory.ts POST /transfer uses for an unpicked line -- and move each
+    // take's branch_batch_stock alongside, materializing the matching lot at
+    // the destination (its own lot when same-product, the resolved/cloned lot
+    // when the transfer merges into an identity match). Any `uncovered`
+    // remainder is legacy stock the lot ledger never tracked; it moves on
+    // branch_stock alone, exactly as before. Clamped decrement (not strict) to
+    // match this route's explicit-batch leg and every other transfer/return
+    // caller -- see decrementBatchStockStatement's comment.
+    const sourceLots = await readFifoLotAvailability(db, productId, fromBranchId)
+    const { takes } = allocateAcrossLots(sourceLots, quantity)
+    for (const take of takes) {
+      const destLotId = mergeTarget
+        ? await resolveDestinationBatch(db, { lot_code: take.lotCode, expiry_date: take.expiryDate, notes: null }, destProductId)
+        : take.batchId
+      statements.push(
+        decrementBatchStockStatement(take.batchId, fromBranchId, take.quantity),
+        incrementBatchStockStatement(destLotId, toBranchId, take.quantity),
+      )
+    }
   }
 
   await db.batch(statements)
@@ -646,6 +672,27 @@ app.post('/transfer-bulk', async (c) => {
         decrementBatchStockStatement(sourceBatchForItem.id, fromBranchId, item.quantity),
         incrementBatchStockStatement(destBatchIdForItem, toBranchId, item.quantity),
       )
+    } else if (item.batchId == null) {
+      // C1 fix (mirrors the single /transfer route above): an item with no
+      // picked lot -- every item in the multi-select flow -- must still move
+      // its branch_batch_stock, or a batch-tracked product's per-lot ledger
+      // drifts from the branch total and the destination loses lot identity.
+      // Auto-allocate FIFO across the source branch's active lots and move each
+      // take, materializing the matching destination lot (its own lot when
+      // same-product, the resolved/cloned lot on an identity-match merge). Any
+      // uncovered legacy stock moves on branch_stock alone. Clamped decrement
+      // to match the explicit-batch leg above.
+      const sourceLots = await readFifoLotAvailability(db, item.productId, fromBranchId)
+      const { takes } = allocateAcrossLots(sourceLots, item.quantity)
+      for (const take of takes) {
+        const destLotId = mergeTarget
+          ? await resolveDestinationBatch(db, { lot_code: take.lotCode, expiry_date: take.expiryDate, notes: null }, destProductId)
+          : take.batchId
+        statements.push(
+          decrementBatchStockStatement(take.batchId, fromBranchId, take.quantity),
+          incrementBatchStockStatement(destLotId, toBranchId, take.quantity),
+        )
+      }
     }
   }
 
