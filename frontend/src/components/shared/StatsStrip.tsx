@@ -120,13 +120,17 @@ export default function StatsStrip({
   const [openKey, setOpenKey] = useState<string | null>(null)
   const openCard = cards.find((card) => card.key === openKey && card.details?.length) || null
   const activePreset = range ? activeStatsPreset(range) : null
-  // "If stats are not many like only two" (user, Aug 31): with few cards
-  // the stats row has spare width, so the secondary controls merge THERE
-  // instead of the date row. ≤3 keeps Returns stable across its two
-  // scopes (2 customer cards / 3 supplier cards).
-  const fewCards = cards.length <= 3
-  const rangeRowActions = statsOpen && !fewCards ? rangeActions : null
-  const statsRowActions = statsOpen && fewCards ? rangeActions : null
+  // Row utilization (user, Aug 31, refining the earlier ≤3 split): the point
+  // was never to STRETCH a few stats across the row, nor to strand the
+  // secondary buttons on an otherwise-empty date row. "Just enough for its
+  // own space of stats ... and merge the various buttons in same row." So the
+  // stat cards are always sized to their own content, and the secondary
+  // controls (History / Export / Manage) ALWAYS ride the cards row's spare
+  // width at its tail — for every card count, not just ≤3. A 4-card page
+  // (Sales) had the same dead space a 2-card page did, which is what the
+  // count-based threshold got wrong. The date row is left to just the picker
+  // + presets (the dashboard shape the user pointed to).
+  const statsRowActions = statsOpen ? rangeActions : null
 
   return (
     <div className={`min-w-0 ${className}`}>
@@ -160,11 +164,11 @@ export default function StatsStrip({
       </div>
 
       {statsOpen && range && onRangeChange ? (
-        // The date row gets the FULL row to itself ("start and end date can
-        // do one row fully plus history icon/button — make use of full
-        // row", user Aug 31): range pill + presets (now visible on phones
-        // too — the dedicated row has the width), and on many-card pages
-        // the History/Export controls fill the right end.
+        // The date row carries the picker + its presets, sized to content and
+        // left-aligned (the dashboard shape: picker then preset chips, spare
+        // width trailing). The secondary buttons are NOT here anymore — they
+        // moved to the cards row so the stats aren't marooned beside empty
+        // space (user, Aug 31).
         <div className="mt-1.5 flex min-w-0 flex-wrap items-center gap-1">
           <DateTimeRangePicker value={range} onChange={onRangeChange} t={t} showTime={false} />
           {PRESETS.map((preset) => (
@@ -181,14 +185,19 @@ export default function StatsStrip({
               {tr(preset.langKey, preset.fallback)}
             </button>
           ))}
-          {rangeRowActions ? <div className="ml-auto flex min-w-0 items-center gap-1">{rangeRowActions}</div> : null}
         </div>
       ) : null}
 
-      {statsOpen && statsRowActions ? (
-        // Few-card pages: cards + the secondary controls share ONE row —
-        // the cards keep their tile look, the controls right-align into
-        // the spare width ("just merge with the stats").
+      {statsOpen ? (
+        // ONE cards row for every card count. Each card is sized to its own
+        // content (2-up on phones via w-[calc(50%-…)], ~10rem from sm up),
+        // wrapping — never stretched across a fixed grid that leaves empty
+        // tracks, and never a sideways scroll (user, Aug 31). The secondary
+        // controls ride this same row's trailing spare width (ml-auto) so a
+        // page with only a few stats fills the row with its buttons instead
+        // of showing a big empty gap ("merge the various buttons in same
+        // row"). When the cards themselves fill the width, the buttons simply
+        // wrap to the end of the block.
         <div className="mt-1.5 flex min-w-0 flex-wrap items-stretch gap-1.5">
           {cards.map((card) => {
             const foldable = Boolean(card.details?.length)
@@ -226,51 +235,10 @@ export default function StatsStrip({
               </button>
             )
           })}
-          <div className="ml-auto flex min-w-0 items-center gap-1 self-center">{statsRowActions}</div>
+          {statsRowActions ? (
+            <div className="ml-auto flex min-w-0 flex-wrap items-center justify-end gap-1 self-center">{statsRowActions}</div>
+          ) : null}
         </div>
-      ) : null}
-
-      {statsOpen && !statsRowActions ? (
-      // The cards WRAP — 2 per row on phones, widening with the viewport;
-      // never a sideways scroll (user, Aug 31).
-      <div className="mt-1.5 grid min-w-0 grid-cols-2 gap-1.5 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-6">
-          {cards.map((card) => {
-            const foldable = Boolean(card.details?.length)
-            const isOpen = openKey === card.key && foldable
-            return (
-              <button
-                key={card.key}
-                type="button"
-                disabled={!foldable}
-                aria-expanded={foldable ? isOpen : undefined}
-                onClick={() => setOpenKey((current) => (current === card.key ? null : card.key))}
-                className={`flex min-w-0 flex-col rounded-lg border px-2 py-1 text-left transition-colors ${
-                  isOpen
-                    ? 'border-blue-300 bg-blue-50/70 dark:border-blue-700 dark:bg-blue-950/40'
-                    : 'border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-900'
-                } ${foldable ? 'cursor-pointer hover:border-blue-300 dark:hover:border-blue-700' : 'cursor-default'}`}
-              >
-                <span className="flex items-center gap-1 text-[10.5px] font-medium leading-4 text-gray-500 dark:text-gray-400">
-                  {card.label}
-                  {foldable ? (
-                    <ChevronDown className={`h-3 w-3 shrink-0 text-gray-400 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
-                  ) : null}
-                </span>
-                <span className={`max-w-full truncate text-[15px] font-bold leading-5 tracking-tight ${loading ? 'animate-pulse text-gray-300 dark:text-gray-600' : (card.tone ? VALUE_TONE[card.tone] : 'text-gray-900 dark:text-white')}`}>
-                  {loading ? '···' : card.value}
-                </span>
-                {card.sub ? (
-                  <span className="max-w-full truncate text-[10px] leading-3.5 text-gray-400 dark:text-gray-500">{card.sub}</span>
-                ) : null}
-                {typeof card.trend === 'number' ? (
-                  <span className={`text-[10px] font-semibold leading-3.5 ${card.trend > 0 ? 'text-emerald-600 dark:text-emerald-400' : card.trend < 0 ? 'text-red-500 dark:text-red-400' : 'text-gray-400'}`}>
-                    {card.trend > 0 ? '+' : ''}{card.trend.toFixed(1)}%
-                  </span>
-                ) : null}
-              </button>
-            )
-          })}
-      </div>
       ) : null}
 
       {statsOpen && openCard ? (

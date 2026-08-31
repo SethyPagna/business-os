@@ -85,22 +85,26 @@ test('the whole strip hides behind a click-to-open Stats chip; cards wrap, never
   assert.ok(/const \[statsOpen, setStatsOpen\] = useState\(false\)/.test(strip), 'the stats block defaults FOLDED — click the chip to open')
   assert.ok(strip.includes("tr('stats', 'Stats')"), "the chip label rides the shared 'stats' pack key (translated in both packs)")
   assert.ok(!strip.includes('overflow-x-auto'), 'stats never ride a sideways-scrolling row')
-  assert.ok(strip.includes('grid-cols-2'), 'cards wrap in a grid, 2-up on small screens')
+  // Cards are content-sized and wrap (2-up on phones via a half-width basis,
+  // ~10rem from sm up) rather than stretching across a fixed grid — user,
+  // Aug 31: "just enough for its own space of stats", don't stretch.
+  assert.ok(strip.includes('w-[calc(50%-0.375rem)]') && strip.includes('sm:w-40'), 'cards are content-sized, 2-up on phones, ~10rem from sm')
+  assert.ok(!/grid-cols-\d.*grid-cols-6|xl:grid-cols-6/.test(strip), 'no fixed 6-track grid that strands empty tracks on few-card pages')
 })
 
-test('Part 548: dedicated full-width date row + rangeActions placement rule', () => {
-  // User, Aug 31: "start and end date can do one row fully plus history
-  // icon/button, make use of full row... if stats are not many like only
-  // two, no need merge the history/export buttons in date — just merge
-  // with the stats". The range picker moves OUT of the chip row into its
-  // own row when open (presets visible on phones too — no hidden sm:),
-  // and rangeActions ride the date row on many-card pages / the stats
-  // row on few-card (≤3) pages.
+test('dedicated date row + secondary controls always merge onto the cards row', () => {
+  // User, Aug 31 (refining the earlier ≤3 split): the range picker gets its
+  // own row when open (presets visible on phones too — no hidden sm:), and
+  // the secondary controls (History/Export/Manage) MERGE onto the stat-cards
+  // row's trailing spare width for EVERY card count — "just enough for its
+  // own space of stats ... and merge the various buttons in same row". The
+  // count-based fork is gone (a 4-card page had the same dead space a 2-card
+  // page did), and the buttons no longer sit on an otherwise-empty date row.
   const strip = read('src/components/shared/StatsStrip.tsx')
   assert.ok(strip.includes('rangeActions'), 'the secondary-controls slot exists')
-  assert.ok(/const fewCards = cards\.length <= 3/.test(strip), 'few-card threshold is 3 (keeps Returns stable across its 2/3-card scopes)')
-  assert.ok(/statsOpen && !fewCards \? rangeActions : null/.test(strip), 'many cards -> secondary controls ride the date row')
-  assert.ok(/statsOpen && fewCards \? rangeActions : null/.test(strip), 'few cards -> secondary controls merge into the stats row')
+  assert.ok(!/const fewCards = /.test(strip), 'the count-based few-card fork is gone')
+  assert.ok(/const statsRowActions = statsOpen \? rangeActions : null/.test(strip), 'secondary controls ride the cards row whenever the strip is open')
+  assert.ok(!strip.includes('rangeRowActions'), 'the date row no longer hosts the secondary buttons')
   assert.ok(!/hidden rounded-md.*sm:inline-flex/.test(strip), 'presets no longer hide on phones — the dedicated row has the width')
   // Sales feeds History+Manage through the new slot; Returns feeds
   // Export+History there while its Add button stays a PRIMARY action with
