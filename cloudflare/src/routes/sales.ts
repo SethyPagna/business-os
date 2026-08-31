@@ -513,6 +513,8 @@ app.post('/', async (c) => {
         delivery_actual_cost_usd, delivery_actual_cost_khr,
         loyalty_accrual, sale_status, search_normalized, created_at, updated_at
       ) VALUES (@receipt_number, @client_request_id, @cashier_id, @cashier_name, @branch_id, @branch_name,
+        -- created_at: COALESCE below -- an offline replay's own bounded
+        -- queue-time moment when supplied, the server clock otherwise.
         @customer_id, @customer_name, @customer_phone, @customer_address,
         @payment_method, @payment_details, @payment_currency, @exchange_rate,
         @subtotal_usd, @subtotal_khr, @discount_usd, @discount_khr, @tax_usd, @tax_khr, @total_usd, @total_khr,
