@@ -157,6 +157,15 @@ ship-now batch) was excluded and rides the next deploy — ship-now session:
 say the word here when your batch is committed and green, any session can run
 the worktree deploy per DEPLOY.md.]**
 
+**CLAIMED (in progress, i18n/permissions session, Aug 31, Part 546):** per-action
+permission completion (7.1's remaining half): wiring getActionTier/isActionBlocked
+into the five non-Products routers (inventory.ts, branches.ts, returns.ts, fees.ts,
+contacts.ts) + importJobs.ts (per-type import overrides) + batches.ts (receive), and
+adding the missing action rows (inventory receive/import, contacts import, returns
+settle_difference) to utils/permissionActions.ts so the editor matrix models every
+real button. NOT touching cloudflare/src/routes/sales.ts, portal.ts, or any
+ship-now-claimed frontend page file.
+
 **CLAIMED (in progress, ship-now-fixes session, Aug 31):** the audit's ship-now tier — public portal stock leak (portal.ts + storefront components), storefront admin-voice strings, POS search-wipe on tap, Inventory import/export icon swap, ImportModeWizard z-fix, Dashboard dead hidden blocks, Branches bare-td, CartItem KHR decimals, posCopy(en,en), Returns clear-scope-reset. NOT touching cloudflare/src/routes/sales.ts or api/saleWriteTransport.ts (another session mid-flight there).
 
 *(Live coordination only — session records that used to live here are in the
