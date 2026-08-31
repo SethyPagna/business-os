@@ -88,12 +88,23 @@ Two rules learned the hard way, both from real incidents in this file's own hist
 
 ## Current status
 
+**✅ STAGE 1 COMPLETE — ALL 9 AUDIT REDS RECONCILED, SUITE GREEN, DEPLOYING (user
+authorized the full cycle; coordinator 7b, Aug 31 ~20:30).** Backend **132/132**,
+frontend **148/148** = **280/280 green**; both tscs + production build green;
+88-migration chain green. Fixes committed: 06dab95f (8 stale reds — permissions
+view-tier assertions, batch-guard restore in ManageBatchesModal, StatsRangeRow
+consistency, contacts/returns filter-count) + 78593220 (missing `area` i18n key;
+the stalled DateTimeRangePicker lane's balanced lang keys rode along, its component
+code deliberately NOT committed/deployed). Now: push origin/main → isolated-worktree
+deploy from committed HEAD → live verify. **DEPLOY IN PROGRESS — no other session
+run migrate:remote / wrangler deploy until the all-clear below.**
+
+--- prior audit detail (historical) ---
 **📋 STAGE 1 AUDIT RESULTS — coordinator 7b, Aug 31 ~19:40 (ran against clean HEAD
 in an isolated worktree, so results are the DEPLOY CANDIDATE, not the dirty tree).**
-DEPLOY-READINESS: **HEAD builds and is deployable.** ✅ cloudflare tsc, ✅ frontend
-tsc, ✅ production vite build (exit 0, 17.8s), ✅ fresh 88-migration chain test,
-production build green. **RECONCILIATION PROGRESS: 9 reds → 7 remaining** (backend
-now 130/132 after session 27 fixed the 2 stockRevert harness reds, e4e8c9a3;
+✅ cloudflare tsc, ✅ frontend tsc, ✅ production vite build, ✅ fresh migration
+chain. **RECONCILIATION: 9 reds → 7 → 0** (backend
+130/132 after session 27 fixed the 2 stockRevert harness reds, e4e8c9a3;
 frontend 142/147). **7 remaining reds, NONE a real regression** — 6 STALE tests +1
 trivial i18n bug. Each assigned to its owning lane to reconcile during Stage 1:
 - `test-route-permissions-pure` → **permissions lane (Part 557)**: sales.ts reads
