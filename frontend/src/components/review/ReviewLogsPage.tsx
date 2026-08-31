@@ -1,6 +1,7 @@
 import { Suspense, lazy, useState } from 'react'
 import ClipboardCheck from 'lucide-react/dist/esm/icons/clipboard-check.js'
 import ScrollText from 'lucide-react/dist/esm/icons/scroll-text.js'
+import Trash2 from 'lucide-react/dist/esm/icons/trash-2.js'
 import { useApp as useAppHook } from '../../AppContext.tsx'
 
 // E3 (Part 403): Review + Audit Log merge into ONE "Review & Logs" page --
@@ -9,9 +10,14 @@ import { useApp as useAppHook } from '../../AppContext.tsx'
 // (their permission keys stay 'review' / 'audit_log'; only the standalone
 // audit_log PAGE id retires), and /audit-log deep links land here with the
 // Audit section open.
+//
+// Part 551 adds the third section: the legacy deleted-sale ledger (the old
+// system's deleted cart/bill lines, imported Aug 30 as audit evidence).
+// It is an audit trail, so it shares the audit_log permission.
 
 const ReviewQueueSection = lazy(() => import('./ReviewQueue'))
 const AuditLogSection = lazy(() => import('../utils-settings/AuditLog'))
+const LegacyDeletedSalesSection = lazy(() => import('./LegacyDeletedSalesSection'))
 
 type ReviewLogsAppContext = {
   t: (key: string, fallback?: string) => string
@@ -19,7 +25,7 @@ type ReviewLogsAppContext = {
 }
 const useApp = useAppHook as unknown as () => ReviewLogsAppContext
 
-type ReviewLogsSection = 'review' | 'audit'
+type ReviewLogsSection = 'review' | 'audit' | 'deleted'
 
 function initialSection(canReview: boolean, canAudit: boolean): ReviewLogsSection {
   // Deep link: the old standalone URLs keep meaning what they said.
@@ -36,32 +42,47 @@ export default function ReviewLogsPage() {
   const canAudit = getPermissionTier('audit_log') !== 'none'
   const [section, setSection] = useState<ReviewLogsSection>(() => initialSection(canReview, canAudit))
 
+  const chips: Array<{ key: ReviewLogsSection; label: string; icon: typeof ClipboardCheck; activeColor: string }> = [
+    ...(canReview ? [{ key: 'review' as const, label: t('review_queue') || 'Review queue', icon: ClipboardCheck, activeColor: 'text-blue-600' }] : []),
+    ...(canAudit ? [
+      { key: 'audit' as const, label: t('audit_log') || 'Audit Log', icon: ScrollText, activeColor: 'text-teal-600' },
+      { key: 'deleted' as const, label: t('legacy_deleted_sales') || 'Deleted sales (old system)', icon: Trash2, activeColor: 'text-rose-600' },
+    ] : []),
+  ]
+
   return (
     // Height-filling flex column so the hosted sections' `page-scroll`
     // roots get a bounded height and actually scroll (Y4 regression).
     <div className="flex min-h-0 flex-1 flex-col space-y-3">
-      {canReview && canAudit ? (
+      {chips.length > 1 ? (
         <div className="shrink-0 px-4 pt-4">
-          <div className="inline-flex rounded-xl bg-gray-100 dark:bg-gray-800 p-0.5">
-            <button
-              type="button"
-              onClick={() => setSection('review')}
-              className={`px-3 py-1.5 rounded-lg text-sm font-medium inline-flex items-center gap-1.5 ${section === 'review' ? 'bg-white dark:bg-gray-900 shadow text-blue-600' : 'text-gray-500'}`}
-            >
-              <ClipboardCheck className="w-4 h-4" /> {t('review_queue') || 'Review queue'}
-            </button>
-            <button
-              type="button"
-              onClick={() => setSection('audit')}
-              className={`px-3 py-1.5 rounded-lg text-sm font-medium inline-flex items-center gap-1.5 ${section === 'audit' ? 'bg-white dark:bg-gray-900 shadow text-teal-600' : 'text-gray-500'}`}
-            >
-              <ScrollText className="w-4 h-4" /> {t('audit_log') || 'Audit Log'}
-            </button>
+          <div className="inline-flex flex-wrap rounded-xl bg-gray-100 dark:bg-gray-800 p-0.5">
+            {chips.map((chip) => {
+              const Icon = chip.icon
+              return (
+                <button
+                  key={chip.key}
+                  type="button"
+                  onClick={() => setSection(chip.key)}
+                  className={`px-3 py-1.5 rounded-lg text-sm font-medium inline-flex items-center gap-1.5 ${section === chip.key ? `bg-white dark:bg-gray-900 shadow ${chip.activeColor}` : 'text-gray-500'}`}
+                >
+                  <Icon className="w-4 h-4" /> {chip.label}
+                </button>
+              )
+            })}
           </div>
         </div>
       ) : null}
       <Suspense fallback={<p className="p-4 text-sm text-gray-500">{t('loading') || 'Loading'}...</p>}>
-        {section === 'audit' && canAudit ? <AuditLogSection /> : canReview ? <ReviewQueueSection /> : <AuditLogSection />}
+        {section === 'deleted' && canAudit ? (
+          <LegacyDeletedSalesSection />
+        ) : section === 'audit' && canAudit ? (
+          <AuditLogSection />
+        ) : canReview ? (
+          <ReviewQueueSection />
+        ) : (
+          <AuditLogSection />
+        )}
       </Suspense>
     </div>
   )

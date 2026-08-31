@@ -68,6 +68,14 @@ export function getAuditLogs(params: AuditLogParams = {}): Promise<unknown> {
   )
 }
 
+// The legacy deleted-sale audit ledger (the old system's deleted/abandoned
+// cart lines, preserved as evidence). Read-only and server-gated by
+// audit_log like the audit trail above; no local mirror -- the ledger is
+// historical and never written from the app.
+export function getLegacyDeletedSales(params: QueryParams = {}): Promise<unknown> {
+  return apiFetch('GET', appendQuery('/api/system/legacy-deleted-sales', buildQueryString(params)))
+}
+
 export function deleteAuditLogsRetention(olderThanDays = 30): Promise<unknown> {
   const days = encodeURIComponent(String(olderThanDays))
   return route(

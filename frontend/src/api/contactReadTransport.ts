@@ -185,3 +185,10 @@ export function getStockInInvoiceReport(params: QueryParams = {}): Promise<unkno
 export function getStockInInvoiceLines(params: QueryParams = {}): Promise<unknown> {
   return apiFetch('GET', appendQuery('/api/suppliers/reports/stock-in-invoice-lines', buildQueryString(params)))
 }
+
+// The legacy supplier AP ledger (the old system's account-payable reports,
+// stored as finance history by the Aug-30 migration). Server-gated by
+// contacts_suppliers like the rest of /suppliers.
+export function getSupplierApInvoices(params: QueryParams = {}): Promise<unknown> {
+  return apiFetch('GET', appendQuery('/api/suppliers/reports/ap-invoices', buildQueryString(params)))
+}

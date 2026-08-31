@@ -50,6 +50,7 @@ import type { ContactOption } from './contactOptionUtils'
 const ContactImportModal = lazyRetry(() => import('./ContactImportModal'), 'suppliers-contact-import')
 const SupplierPurchasesModal = lazyRetry(() => import('./SupplierPurchasesModal'), 'suppliers-purchases-modal')
 const StockInInvoicesSection = lazyRetry(() => import('./StockInInvoicesSection'), 'suppliers-stock-in-report')
+const ApInvoicesSection = lazyRetry(() => import('./ApInvoicesSection'), 'suppliers-ap-invoices')
 const ExportOptionsDialog = lazyRetry(() => import('../shared/ExportOptionsDialog'), 'suppliers-export-options')
 const SUPPLIER_MUTATION_TIMEOUT_MS = 12000
 
@@ -1060,6 +1061,25 @@ function SuppliersTab({ t, notify, active = true, initialSearch }: SuppliersTabP
       >
         <Suspense fallback={<div className="py-6 text-center text-sm text-gray-400">{tr('loading', 'Loading...', 'កំពុងផ្ទុក...')}</div>}>
           <StockInInvoicesSection t={t} />
+        </Suspense>
+      </SectionCard>
+
+      {/* Part 551: the legacy supplier AP ledger (the old system's
+          account-payable reports, imported Aug 30 as finance history --
+          1,591 invoices, four still outstanding). Read-only rows, so a flat
+          table; lives here because supplier money is exactly what the
+          contacts_suppliers gate scopes -- the endpoint sits under
+          /suppliers/* on the server. Folded by default, own lazy chunk. */}
+      <SectionCard
+        kind="reports"
+        nested
+        title={tr('ap_invoices', 'Supplier AP Invoices', 'វិក្កយបត្រជំពាក់អ្នកផ្គត់ផ្គង់')}
+        subtitle={tr('ap_invoices_hint', "The old system's account-payable ledger: every supplier invoice with billed, paid and outstanding amounts", 'បញ្ជីជំពាក់អ្នកផ្គត់ផ្គង់ពីប្រព័ន្ធចាស់៖ វិក្កយបត្រនីមួយៗ ជាមួយចំនួនសរុប បានបង់ និងនៅជំពាក់')}
+        storageKey="suppliers_ap_invoices"
+        defaultOpen={false}
+      >
+        <Suspense fallback={<div className="py-6 text-center text-sm text-gray-400">{tr('loading', 'Loading...', 'កំពុងផ្ទុក...')}</div>}>
+          <ApInvoicesSection t={t} />
         </Suspense>
       </SectionCard>
 
