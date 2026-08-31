@@ -11,7 +11,6 @@ import Modal from '../shared/Modal'
 // (total_refund_usd = money refunded to customers) and excludes cancelled.
 
 type TranslateFn = (key: string) => string | undefined
-type MoneyFormatter = (value: number | string) => string
 
 interface ReturnsReport {
   totals: { count: number; refund_usd: number; refund_khr: number }
@@ -22,8 +21,9 @@ interface ReturnsReport {
 
 interface ReturnsReportSectionProps {
   t: TranslateFn
-  fmtUSD: MoneyFormatter
-  fmtKHR: MoneyFormatter
+  /** Display-currency-aware money formatter (usd, khr) -> string, honoring
+   * the display_currency setting. See utils/reportMoney.ts. */
+  fmtMoney: (usd: number, khr?: number) => string
   range: DateTimeRange
   branchId?: string
   active?: boolean
@@ -55,15 +55,7 @@ function normalize(raw: unknown): ReturnsReport {
   }
 }
 
-export default function ReturnsReportSection({ t, fmtUSD, fmtKHR, range, branchId, active = true, titleNode }: ReturnsReportSectionProps) {
-  // Refunds can be USD or KHR; show whichever are present (Part 553) so a
-  // KHR refund no longer reads as "$0.00". No conversion.
-  const moneyPair = (usd: number, khr: number): string => {
-    const parts: string[] = []
-    if (usd) parts.push(fmtUSD(usd))
-    if (khr) parts.push(fmtKHR(khr))
-    return parts.length ? parts.join(' · ') : fmtUSD(0)
-  }
+export default function ReturnsReportSection({ t, fmtMoney, range, branchId, active = true, titleNode }: ReturnsReportSectionProps) {
   const [report, setReport] = useState<ReturnsReport | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
@@ -122,7 +114,7 @@ export default function ReturnsReportSection({ t, fmtUSD, fmtKHR, range, branchI
             <tr key={row.key} className="border-b border-slate-100 last:border-0 dark:border-slate-800">
               <td className="max-w-[12rem] truncate py-1.5 pr-2 text-slate-700 dark:text-slate-200">{row.label}</td>
               <td className="py-1.5 pr-2 text-right text-slate-400">×{row.count}</td>
-              <td className="py-1.5 text-right font-medium text-slate-900 dark:text-white">{moneyPair(row.usd, row.khr)}</td>
+              <td className="py-1.5 text-right font-medium text-slate-900 dark:text-white">{fmtMoney(row.usd, row.khr)}</td>
             </tr>
           ))}
         </tbody>
@@ -175,7 +167,7 @@ export default function ReturnsReportSection({ t, fmtUSD, fmtKHR, range, branchI
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-slate-500 dark:text-slate-400">
         <span>{report?.totals.count ?? 0} {t('returns') || 'returns'}</span>
         <span className="text-slate-300 dark:text-slate-600">|</span>
-        <span>{t('refunds') || 'Refunds'} <b className="text-red-600 dark:text-red-400">{moneyPair(report?.totals.refund_usd ?? 0, report?.totals.refund_khr ?? 0)}</b></span>
+        <span>{t('refunds') || 'Refunds'} <b className="text-red-600 dark:text-red-400">{fmtMoney(report?.totals.refund_usd ?? 0, report?.totals.refund_khr ?? 0)}</b></span>
       </div>
 
       {openTable ? (

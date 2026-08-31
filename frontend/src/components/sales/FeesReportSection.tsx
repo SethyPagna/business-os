@@ -10,7 +10,6 @@ import Modal from '../shared/Modal'
 // effective date a fee is booked to).
 
 type TranslateFn = (key: string) => string | undefined
-type MoneyFormatter = (value: number | string) => string
 
 interface FeesReport {
   totals: { count: number; amount_usd: number; amount_khr: number }
@@ -20,8 +19,9 @@ interface FeesReport {
 
 interface FeesReportSectionProps {
   t: TranslateFn
-  fmtUSD: MoneyFormatter
-  fmtKHR: MoneyFormatter
+  /** Display-currency-aware money formatter (usd, khr) -> string, honoring
+   * the display_currency setting. See utils/reportMoney.ts. */
+  fmtMoney: (usd: number, khr?: number) => string
   range: DateTimeRange
   branchId?: string
   active?: boolean
@@ -52,15 +52,7 @@ function normalize(raw: unknown): FeesReport {
   }
 }
 
-export default function FeesReportSection({ t, fmtUSD, fmtKHR, range, branchId, active = true, titleNode }: FeesReportSectionProps) {
-  // Fees are recorded in EITHER USD or KHR; show whichever are present so a
-  // month of KHR fees no longer reads as "$0.00" (Part 553). No conversion.
-  const moneyPair = (usd: number, khr: number): string => {
-    const parts: string[] = []
-    if (usd) parts.push(fmtUSD(usd))
-    if (khr) parts.push(fmtKHR(khr))
-    return parts.length ? parts.join(' · ') : fmtUSD(0)
-  }
+export default function FeesReportSection({ t, fmtMoney, range, branchId, active = true, titleNode }: FeesReportSectionProps) {
   const [report, setReport] = useState<FeesReport | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
@@ -118,7 +110,7 @@ export default function FeesReportSection({ t, fmtUSD, fmtKHR, range, branchId, 
             <tr key={row.key} className="border-b border-slate-100 last:border-0 dark:border-slate-800">
               <td className="max-w-[12rem] truncate py-1.5 pr-2 text-slate-700 dark:text-slate-200">{row.label}</td>
               <td className="py-1.5 pr-2 text-right text-slate-400">×{row.count}</td>
-              <td className="py-1.5 text-right font-medium text-slate-900 dark:text-white">{moneyPair(row.usd, row.khr)}</td>
+              <td className="py-1.5 text-right font-medium text-slate-900 dark:text-white">{fmtMoney(row.usd, row.khr)}</td>
             </tr>
           ))}
         </tbody>
@@ -173,7 +165,7 @@ export default function FeesReportSection({ t, fmtUSD, fmtKHR, range, branchId, 
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-slate-500 dark:text-slate-400">
         <span>{report?.totals.count ?? 0} {t('fees') || 'fees'}</span>
         <span className="text-slate-300 dark:text-slate-600">|</span>
-        <span>{t('total') || 'Total'} <b className="text-slate-900 dark:text-white">{moneyPair(report?.totals.amount_usd ?? 0, report?.totals.amount_khr ?? 0)}</b></span>
+        <span>{t('total') || 'Total'} <b className="text-slate-900 dark:text-white">{fmtMoney(report?.totals.amount_usd ?? 0, report?.totals.amount_khr ?? 0)}</b></span>
       </div>
 
       {openTable ? (

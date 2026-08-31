@@ -39,6 +39,7 @@ import {
 } from '../../api/feesTransport.ts'
 import FeeForm, { FEE_TYPE_OPTIONS } from './FeeForm.tsx'
 import StatsStrip, { statsPresetRange, type StatCardDef } from '../shared/StatsStrip.tsx'
+import { makeReportMoneyFormatter } from '../../utils/reportMoney.ts'
 import type { DateTimeRange } from '../shared/DateTimeRangePicker'
 
 type TranslateFn = (key: string) => string | undefined
@@ -53,6 +54,9 @@ interface FeesAppContextValue {
   notify: NotifyFn
   fmtUSD: (value: unknown) => string
   fmtKHR: (value: unknown) => string
+  khrToUsd: (value: unknown) => number
+  usdToKhr: (value: unknown) => number
+  displayCurrency: string
 }
 
 interface FeesSyncContextValue {
@@ -96,7 +100,13 @@ function formatFeeDate(value: string | null | undefined): string {
 const EMPTY_RESULT: FeeListResult = { fees: [], total: 0, limit: DEFAULT_PAGE_SIZE, offset: 0, summary: [] }
 
 export default function FeesPage() {
-  const { getPermissionTier, t, notify, fmtUSD, fmtKHR } = useApp()
+  const { getPermissionTier, t, notify, fmtUSD, fmtKHR, khrToUsd, usdToKhr, displayCurrency } = useApp()
+  // Display-currency-aware money formatter (see utils/reportMoney.ts) —
+  // honors the display_currency setting without touching stored data.
+  const fmtMoney = useMemo(
+    () => makeReportMoneyFormatter({ displayCurrency, fmtUSD, fmtKHR, khrToUsd, usdToKhr }),
+    [displayCurrency, fmtUSD, fmtKHR, khrToUsd, usdToKhr],
+  )
   // Fees is the one section where NOTHING is blocked for the Review
   // Required tier -- add and edit apply directly, and delete goes to the
   // approval queue rather than 403ing (routes/fees.ts's
@@ -241,14 +251,6 @@ export default function FeesPage() {
     const count = Number(totals.count) || 0
     const amountUsd = Number(totals.amount_usd) || 0
     const amountKhr = Number(totals.amount_khr) || 0
-    // Fees are recorded in USD OR KHR; show both so a month of KHR fees no
-    // longer reads as "$0.00" (Part 553). No conversion.
-    const moneyPair = (usd: number, khr: number): string => {
-      const parts: string[] = []
-      if (usd) parts.push(fmtUSD(usd))
-      if (khr) parts.push(fmtKHR(khr))
-      return parts.length ? parts.join(' · ') : fmtUSD(0)
-    }
     return [
       {
         key: 'fees',
@@ -260,26 +262,26 @@ export default function FeesPage() {
           const option = FEE_TYPE_OPTIONS.find((candidate) => candidate.value === type)
           return {
             label: option ? (t(option.labelKey) || option.fallback) : (type || '—'),
-            value: `${Number(row.count) || 0} · ${moneyPair(Number(row.amount_usd) || 0, Number(row.amount_khr) || 0)}`,
+            value: `${Number(row.count) || 0} · ${fmtMoney(Number(row.amount_usd) || 0, Number(row.amount_khr) || 0)}`,
           }
         }),
       },
       {
         key: 'total',
         label: tr('total', 'Total'),
-        value: moneyPair(amountUsd, amountKhr),
+        value: fmtMoney(amountUsd, amountKhr),
         tone: 'accent',
         hint: tr('stats_fees_total_hint', 'Sum of fee amounts in the range. Fees are recorded in USD or KHR, so both totals are shown. The breakdown lists the days with the most fee spend.'),
         details: days.slice(0, 8).map((day) => {
           const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(day.date || ''))
           return {
             label: m ? `${m[2]}/${m[3]}/${m[1]}` : String(day.date || ''),
-            value: `${Number(day.count) || 0} · ${moneyPair(Number(day.amount_usd) || 0, Number(day.amount_khr) || 0)}`,
+            value: `${Number(day.count) || 0} · ${fmtMoney(Number(day.amount_usd) || 0, Number(day.amount_khr) || 0)}`,
           }
         }),
       },
     ]
-  }, [fmtUSD, fmtKHR, stripData, t, tr])
+  }, [fmtMoney, stripData, t, tr])
 
   useEffect(() => () => {
     invalidateTrackedRequest(loadRequestRef)

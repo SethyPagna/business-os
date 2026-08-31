@@ -6,6 +6,7 @@ import HandCoins from 'lucide-react/dist/esm/icons/hand-coins.js'
 import { useApp as useAppHook } from '../../AppContext.tsx'
 import DateTimeRangePicker, { EMPTY_DATE_TIME_RANGE, type DateTimeRange } from '../shared/DateTimeRangePicker.tsx'
 import AppSelect, { type AppSelectOption } from '../shared/AppSelect.tsx'
+import { makeReportMoneyFormatter } from '../../utils/reportMoney.ts'
 import SalesDailyReport from './SalesDailyReport'
 import ReturnsReportSection from './ReturnsReportSection'
 import FeesReportSection from './FeesReportSection'
@@ -19,6 +20,9 @@ type ReportsHubAppContext = {
   t: (key: string) => string | undefined
   fmtUSD: (value: number | string) => string
   fmtKHR: (value: number | string) => string
+  khrToUsd: (value: unknown) => number
+  usdToKhr: (value: unknown) => number
+  displayCurrency: string
   getPermissionTier: (key: string) => string
 }
 const useApp = useAppHook as unknown as () => ReportsHubAppContext
@@ -37,8 +41,16 @@ function todayIso(): string {
 }
 
 export default function ReportsHub() {
-  const { t, fmtUSD, fmtKHR, getPermissionTier } = useApp()
+  const { t, fmtUSD, fmtKHR, khrToUsd, usdToKhr, displayCurrency, getPermissionTier } = useApp()
   const trh = (key: string, fallback: string): string => { const v = t(key); return v && v !== key ? v : fallback }
+  // Display-only money formatter honoring the display_currency setting (see
+  // utils/reportMoney.ts): the raw usd+khr amounts stay the single source of
+  // truth, this only changes how they're shown. useMemo so the setting/rate
+  // flowing in re-renders every section's figures.
+  const fmtMoney = useMemo(
+    () => makeReportMoneyFormatter({ displayCurrency, fmtUSD, fmtKHR, khrToUsd, usdToKhr }),
+    [displayCurrency, fmtUSD, fmtKHR, khrToUsd, usdToKhr],
+  )
 
   const canSales = getPermissionTier('sales') !== 'none'
   const canReturns = getPermissionTier('returns') !== 'none'
@@ -143,11 +155,11 @@ export default function ReportsHub() {
         return (
           <section key={id} className="space-y-2 border-y border-slate-200 py-2.5 dark:border-slate-800">
             {id === 'sales' ? (
-              <SalesDailyReport t={t} fmtUSD={fmtUSD} range={range} onRangeChange={setRange} branchId={branchId} embedded active titleNode={titleNode} />
+              <SalesDailyReport t={t} fmtMoney={fmtMoney} range={range} onRangeChange={setRange} branchId={branchId} embedded active titleNode={titleNode} />
             ) : id === 'returns' ? (
-              <ReturnsReportSection t={t} fmtUSD={fmtUSD} fmtKHR={fmtKHR} range={range} branchId={branchId} active titleNode={titleNode} />
+              <ReturnsReportSection t={t} fmtMoney={fmtMoney} range={range} branchId={branchId} active titleNode={titleNode} />
             ) : (
-              <FeesReportSection t={t} fmtUSD={fmtUSD} fmtKHR={fmtKHR} range={range} branchId={branchId} active titleNode={titleNode} />
+              <FeesReportSection t={t} fmtMoney={fmtMoney} range={range} branchId={branchId} active titleNode={titleNode} />
             )}
           </section>
         )

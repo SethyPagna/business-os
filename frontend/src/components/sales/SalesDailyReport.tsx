@@ -15,7 +15,6 @@ import AppSelect, { type AppSelectOption } from '../shared/AppSelect.tsx'
 // with the Dashboard (single-source rule). USD-centric like the kernel.
 
 type TranslateFn = (key: string) => string | undefined
-type MoneyFormatter = (value: number | string) => string
 
 type DailyReportAppContext = { settings?: { pos_payment_methods?: unknown } }
 const useApp = useAppHook as unknown as () => DailyReportAppContext
@@ -74,7 +73,10 @@ interface DayReport {
 
 interface SalesDailyReportProps {
   t: TranslateFn
-  fmtUSD: MoneyFormatter
+  /** Display-currency-aware money formatter (usd, khr?) -> string. Sales
+   * figures are USD-canonical so callers pass just usd; the formatter still
+   * honors the display_currency setting (see utils/reportMoney.ts). */
+  fmtMoney: (usd: number, khr?: number) => string
   active?: boolean
   // Reports hub embeds this with a range + branch owned by the hub. When
   // `range`/`onRangeChange` are passed the range is controlled by the parent;
@@ -131,7 +133,7 @@ function timeParams(range: DateTimeRange): Record<string, string | number> {
   return { startTime: range.startTime, endTime: range.endTime, tzOffsetMinutes: localTzOffsetMinutes() }
 }
 
-export default function SalesDailyReport({ t, fmtUSD, active = true, range: externalRange, onRangeChange, branchId: externalBranchId, embedded = false, titleNode }: SalesDailyReportProps) {
+export default function SalesDailyReport({ t, fmtMoney, active = true, range: externalRange, onRangeChange, branchId: externalBranchId, embedded = false, titleNode }: SalesDailyReportProps) {
   const [internalRange, setInternalRange] = useState<DateTimeRange>(() => ({
     ...EMPTY_DATE_TIME_RANGE,
     startDate: monthStartIso(),
@@ -282,15 +284,15 @@ export default function SalesDailyReport({ t, fmtUSD, active = true, range: exte
       <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-slate-500 dark:text-slate-400">
         <span>{report.totals.tx_count} {t('sales') || 'sales'}</span>
         <span className="text-slate-300 dark:text-slate-600">|</span>
-        <span>{t('revenue') || 'Revenue'} <b className="text-slate-900 dark:text-white">{fmtUSD(report.totals.revenue_usd)}</b></span>
+        <span>{t('revenue') || 'Revenue'} <b className="text-slate-900 dark:text-white">{fmtMoney(report.totals.revenue_usd)}</b></span>
         <span className="text-slate-300 dark:text-slate-600">|</span>
-        <span>{t('discounts') || 'Discounts'} <b className="text-rose-600 dark:text-rose-400">{fmtUSD(report.totals.discount_usd)}</b></span>
+        <span>{t('discounts') || 'Discounts'} <b className="text-rose-600 dark:text-rose-400">{fmtMoney(report.totals.discount_usd)}</b></span>
         <span className="text-slate-300 dark:text-slate-600">|</span>
-        <span>{t('profit') || 'Profit'} <b className={report.totals.profit_usd < 0 ? 'text-red-600 dark:text-red-400' : 'text-emerald-700 dark:text-emerald-400'}>{fmtUSD(report.totals.profit_usd)}</b></span>
+        <span>{t('profit') || 'Profit'} <b className={report.totals.profit_usd < 0 ? 'text-red-600 dark:text-red-400' : 'text-emerald-700 dark:text-emerald-400'}>{fmtMoney(report.totals.profit_usd)}</b></span>
         <span className="text-slate-300 dark:text-slate-600">|</span>
-        <span>{t('collected_total') || 'Collected'} <b className="text-slate-700 dark:text-slate-200">{fmtUSD(report.totals.collected_total_usd)}</b></span>
+        <span>{t('collected_total') || 'Collected'} <b className="text-slate-700 dark:text-slate-200">{fmtMoney(report.totals.collected_total_usd)}</b></span>
         <span className="text-slate-300 dark:text-slate-600">|</span>
-        <span>{t('avg_order') || 'Avg order'} <b className="text-slate-700 dark:text-slate-200">{fmtUSD(report.totals.avg_order_usd)}</b></span>
+        <span>{t('avg_order') || 'Avg order'} <b className="text-slate-700 dark:text-slate-200">{fmtMoney(report.totals.avg_order_usd)}</b></span>
       </div>
 
       <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
@@ -306,7 +308,7 @@ export default function SalesDailyReport({ t, fmtUSD, active = true, range: exte
                   <tr key={method.payment_method} className="border-b border-slate-100 last:border-0 dark:border-slate-800">
                     <td className="py-1.5 pr-2 text-slate-700 dark:text-slate-200">{method.payment_method}</td>
                     <td className="py-1.5 pr-2 text-right text-slate-400">×{method.tx_count}</td>
-                    <td className="py-1.5 text-right font-medium text-slate-900 dark:text-white">{fmtUSD(method.collected_usd)}</td>
+                    <td className="py-1.5 text-right font-medium text-slate-900 dark:text-white">{fmtMoney(method.collected_usd)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -322,22 +324,22 @@ export default function SalesDailyReport({ t, fmtUSD, active = true, range: exte
               <tr className="border-b border-slate-100 dark:border-slate-800">
                 <td className="py-1.5 pr-2 text-slate-700 dark:text-slate-200">{t('store_discount') || 'Store discount'}</td>
                 <td className="py-1.5 pr-2 text-right text-slate-400">×{report.discounts.store_tx_count}</td>
-                <td className="py-1.5 text-right font-medium text-slate-900 dark:text-white">{fmtUSD(report.discounts.store_usd)}</td>
+                <td className="py-1.5 text-right font-medium text-slate-900 dark:text-white">{fmtMoney(report.discounts.store_usd)}</td>
               </tr>
               <tr className="border-b border-slate-100 dark:border-slate-800">
                 <td className="py-1.5 pr-2 text-slate-700 dark:text-slate-200">{t('membership_discount') || 'Membership'}</td>
                 <td className="py-1.5 pr-2 text-right text-slate-400">×{report.discounts.membership_tx_count}</td>
-                <td className="py-1.5 text-right font-medium text-slate-900 dark:text-white">{fmtUSD(report.discounts.membership_usd)}</td>
+                <td className="py-1.5 text-right font-medium text-slate-900 dark:text-white">{fmtMoney(report.discounts.membership_usd)}</td>
               </tr>
               <tr>
                 <td className="py-1.5 pr-2 font-medium text-slate-700 dark:text-slate-200">{t('total') || 'Total'}</td>
                 <td />
-                <td className="py-1.5 text-right font-semibold text-slate-900 dark:text-white">{fmtUSD(report.totals.discount_usd)}</td>
+                <td className="py-1.5 text-right font-semibold text-slate-900 dark:text-white">{fmtMoney(report.totals.discount_usd)}</td>
               </tr>
             </tbody>
           </table>
           <div className="mt-2 border-t border-slate-100 pt-2 text-xs text-slate-500 dark:border-slate-800 dark:text-slate-400">
-            {t('tax') || 'Tax'}: <span className="font-medium text-slate-800 dark:text-slate-100">{fmtUSD(report.totals.tax_usd)}</span>
+            {t('tax') || 'Tax'}: <span className="font-medium text-slate-800 dark:text-slate-100">{fmtMoney(report.totals.tax_usd)}</span>
           </div>
         </div>
 
@@ -351,22 +353,22 @@ export default function SalesDailyReport({ t, fmtUSD, active = true, range: exte
             <tbody>
               <tr className="border-b border-slate-100 dark:border-slate-800">
                 <td className="py-1.5 pr-2 text-slate-700 dark:text-slate-200">{t('delivery_charged') || 'Charged to customers'}</td>
-                <td className="py-1.5 text-right font-medium text-slate-900 dark:text-white">{fmtUSD(report.totals.delivery_usd)}</td>
+                <td className="py-1.5 text-right font-medium text-slate-900 dark:text-white">{fmtMoney(report.totals.delivery_usd)}</td>
               </tr>
               <tr className="border-b border-slate-100 dark:border-slate-800">
                 <td className="py-1.5 pr-2 text-slate-700 dark:text-slate-200">{t('delivery_absorbed') || 'Absorbed by store'}</td>
-                <td className="py-1.5 text-right font-medium text-slate-900 dark:text-white">{fmtUSD(report.totals.store_delivery_usd)}</td>
+                <td className="py-1.5 text-right font-medium text-slate-900 dark:text-white">{fmtMoney(report.totals.store_delivery_usd)}</td>
               </tr>
               <tr className="border-b border-slate-100 dark:border-slate-800">
                 <td className="py-1.5 pr-2 text-slate-700 dark:text-slate-200">
                   {t('delivery_actual_cost') || 'Actual cost paid'}
                   <span className="ml-1 text-slate-400">({report.totals.delivery_actual_cost_count}/{report.totals.delivery_sale_count} {t('recorded') || 'recorded'})</span>
                 </td>
-                <td className="py-1.5 text-right font-medium text-slate-900 dark:text-white">{fmtUSD(report.totals.delivery_actual_cost_usd)}</td>
+                <td className="py-1.5 text-right font-medium text-slate-900 dark:text-white">{fmtMoney(report.totals.delivery_actual_cost_usd)}</td>
               </tr>
               <tr>
                 <td className="py-1.5 pr-2 font-medium text-slate-700 dark:text-slate-200">{t('delivery_margin') || 'Delivery margin'}</td>
-                <td className={`py-1.5 text-right font-semibold ${report.totals.delivery_margin_usd < 0 ? 'text-red-600 dark:text-red-400' : 'text-emerald-700 dark:text-emerald-400'}`}>{fmtUSD(report.totals.delivery_margin_usd)}</td>
+                <td className={`py-1.5 text-right font-semibold ${report.totals.delivery_margin_usd < 0 ? 'text-red-600 dark:text-red-400' : 'text-emerald-700 dark:text-emerald-400'}`}>{fmtMoney(report.totals.delivery_margin_usd)}</td>
               </tr>
             </tbody>
           </table>
@@ -379,7 +381,7 @@ export default function SalesDailyReport({ t, fmtUSD, active = true, range: exte
                     <tr key={`${courier.delivery_contact_id ?? 'name'}:${courier.delivery_contact_name}`} className="border-b border-slate-100 last:border-0 dark:border-slate-800">
                       <td className="max-w-[9rem] truncate py-1 pr-2 text-slate-700 dark:text-slate-200">{courier.delivery_contact_name || (t('no_contact_recorded') || 'No contact recorded')}</td>
                       <td className="py-1 pr-2 text-right text-slate-400">×{courier.deliveries}</td>
-                      <td className="py-1 text-right font-medium text-slate-900 dark:text-white">{fmtUSD(courier.actual_cost_usd)}</td>
+                      <td className="py-1 text-right font-medium text-slate-900 dark:text-white">{fmtMoney(courier.actual_cost_usd)}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -407,8 +409,8 @@ export default function SalesDailyReport({ t, fmtUSD, active = true, range: exte
                     <td className="hidden py-1.5 pr-2 text-slate-400 sm:table-cell">{clockOf(sale.created_at)}</td>
                     <td className="max-w-[9rem] truncate py-1.5 pr-2 text-slate-700 dark:text-slate-200">{sale.customer_name || (t('walk_in') || 'Walk-in')}</td>
                     <td className="hidden py-1.5 pr-2 md:table-cell"><span className="rounded bg-slate-100 px-1.5 py-0.5 text-[11px] text-slate-500 dark:bg-slate-800 dark:text-slate-300">{sale.payment_method}</span></td>
-                    <td className="py-1.5 pr-2 text-right text-rose-500/80">{sale.discount_usd > 0 ? `−${fmtUSD(sale.discount_usd)}` : ''}</td>
-                    <td className={`py-1.5 text-right font-medium ${sale.sale_status === 'cancelled' ? 'text-slate-400 line-through' : 'text-slate-900 dark:text-white'}`}>{fmtUSD(sale.revenue_usd)}</td>
+                    <td className="py-1.5 pr-2 text-right text-rose-500/80">{sale.discount_usd > 0 ? `−${fmtMoney(sale.discount_usd)}` : ''}</td>
+                    <td className={`py-1.5 text-right font-medium ${sale.sale_status === 'cancelled' ? 'text-slate-400 line-through' : 'text-slate-900 dark:text-white'}`}>{fmtMoney(sale.revenue_usd)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -495,9 +497,9 @@ export default function SalesDailyReport({ t, fmtUSD, active = true, range: exte
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-slate-500 dark:text-slate-400">
         <span>{rangeTotals.tx} {t('sales') || 'sales'}</span>
         <span className="text-slate-300 dark:text-slate-600">|</span>
-        <span>{t('revenue') || 'Revenue'} <b className="text-slate-900 dark:text-white">{fmtUSD(rangeTotals.revenue)}</b></span>
+        <span>{t('revenue') || 'Revenue'} <b className="text-slate-900 dark:text-white">{fmtMoney(rangeTotals.revenue)}</b></span>
         <span className="text-slate-300 dark:text-slate-600">|</span>
-        <span>{t('profit') || 'Profit'} <b className={`${rangeTotals.profit < 0 ? 'text-red-600 dark:text-red-400' : 'text-emerald-700 dark:text-emerald-400'}`}>{fmtUSD(rangeTotals.profit)}</b></span>
+        <span>{t('profit') || 'Profit'} <b className={`${rangeTotals.profit < 0 ? 'text-red-600 dark:text-red-400' : 'text-emerald-700 dark:text-emerald-400'}`}>{fmtMoney(rangeTotals.profit)}</b></span>
       </div>
 
       {error ? (
@@ -533,9 +535,9 @@ export default function SalesDailyReport({ t, fmtUSD, active = true, range: exte
           >
             <span className="font-medium text-slate-900 dark:text-white">{displayDay(day.date)}</span>
             <span className="text-right text-slate-600 dark:text-slate-300">{day.tx_count}</span>
-            <span className="text-right font-medium text-slate-900 dark:text-white">{fmtUSD(day.revenue_usd)}</span>
-            <span className="hidden text-right text-slate-600 dark:text-slate-300 sm:block">{fmtUSD(day.discount_usd)}</span>
-            <span className={`text-right font-medium ${day.profit_usd < 0 ? 'text-red-600 dark:text-red-400' : 'text-emerald-700 dark:text-emerald-400'}`}>{fmtUSD(day.profit_usd)}</span>
+            <span className="text-right font-medium text-slate-900 dark:text-white">{fmtMoney(day.revenue_usd)}</span>
+            <span className="hidden text-right text-slate-600 dark:text-slate-300 sm:block">{fmtMoney(day.discount_usd)}</span>
+            <span className={`text-right font-medium ${day.profit_usd < 0 ? 'text-red-600 dark:text-red-400' : 'text-emerald-700 dark:text-emerald-400'}`}>{fmtMoney(day.profit_usd)}</span>
           </button>
         ))}
       </div>
