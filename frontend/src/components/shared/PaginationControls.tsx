@@ -134,7 +134,7 @@ export default function PaginationControls({
     // so the numbers read as one set; the prev/next arrows are the strongest
     // element (darker, bolder stroke, solid hover) so the primary action --
     // paging -- stands out and the disabled edge is unmistakable.
-    const arrowButtonClass = 'inline-flex h-7 w-8 shrink-0 items-center justify-center text-slate-600 transition-colors hover:bg-slate-100 hover:text-slate-900 disabled:cursor-not-allowed disabled:bg-transparent disabled:text-slate-300 dark:text-slate-200 dark:hover:bg-slate-800 dark:hover:text-white dark:disabled:text-slate-600'
+    const arrowButtonClass = 'inline-flex h-7 w-10 shrink-0 items-center justify-center text-slate-600 transition-colors hover:bg-slate-100 hover:text-slate-900 disabled:cursor-not-allowed disabled:bg-transparent disabled:text-slate-300 dark:text-slate-200 dark:hover:bg-slate-800 dark:hover:text-white dark:disabled:text-slate-600'
     return (
       <div className={`inline-flex max-w-full items-center overflow-hidden rounded-full border border-slate-300 bg-white text-xs font-semibold text-slate-800 shadow-sm dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100 ${className}`}>
         <button
@@ -169,7 +169,7 @@ export default function PaginationControls({
                 type="text"
                 inputMode="numeric"
                 aria-label={pageLabel}
-                className="h-7 w-6 border-0 bg-transparent px-0 text-center text-xs font-semibold text-slate-800 outline-none dark:text-slate-100"
+                className="h-7 w-9 border-0 bg-transparent px-0 text-center text-xs font-semibold text-slate-800 outline-none dark:text-slate-100"
                 value={pageDraft}
                 onChange={(event) => setPageDraft(event.target.value.replace(/[^\d]/g, '') || '')}
                 onBlur={(event) => commitPageDraft(event.currentTarget.value)}
@@ -202,7 +202,7 @@ export default function PaginationControls({
             callers don't override it) instead of a fixed wide column -- the
             width that frees up goes to the prev/next buttons below, not to
             growing the row: same h-7 everywhere, just wider touch targets. */}
-        <div className="grid max-w-full grid-cols-[minmax(5.25rem,1fr)_minmax(3.75rem,4.5rem)_minmax(7.5rem,10rem)] items-center gap-1">
+        <div className="grid max-w-full grid-cols-[minmax(5rem,1fr)_minmax(4.5rem,5.5rem)_minmax(9rem,12rem)] items-center gap-1">
           <span className="inline-flex min-w-0 items-center justify-center overflow-hidden text-ellipsis whitespace-nowrap rounded-full bg-slate-50 px-1.5 py-1 font-semibold text-slate-700 dark:bg-slate-800 dark:text-slate-100">
             {start.toLocaleString()}-{end.toLocaleString()} / {total.toLocaleString()}
           </span>
@@ -222,7 +222,7 @@ export default function PaginationControls({
           <div className="inline-flex min-w-0 items-center overflow-hidden rounded-full border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-950">
             <button
               type="button"
-              className="inline-flex h-7 w-9 shrink-0 items-center justify-center text-slate-500 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40 dark:text-slate-300 dark:hover:bg-slate-800"
+              className="inline-flex h-7 w-11 shrink-0 items-center justify-center text-slate-500 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40 dark:text-slate-300 dark:hover:bg-slate-800"
               disabled={safePage <= 1}
               onClick={() => onPageChange?.(safePage - 1)}
               aria-label="Previous page"
@@ -235,7 +235,7 @@ export default function PaginationControls({
                   type="text"
                   inputMode="numeric"
                   aria-label={pageLabel}
-                  className="h-7 w-6 border-0 bg-transparent px-0 text-center text-[11px] font-semibold text-slate-700 outline-none dark:text-slate-100"
+                  className="h-7 w-9 border-0 bg-transparent px-0 text-center text-[11px] font-semibold text-slate-700 outline-none dark:text-slate-100"
                   value={pageDraft}
                   onChange={(event) => {
                     setPageDraft(event.target.value.replace(/[^\d]/g, '') || '')
@@ -252,7 +252,7 @@ export default function PaginationControls({
             )}
             <button
               type="button"
-              className="inline-flex h-7 w-9 shrink-0 items-center justify-center text-slate-500 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40 dark:text-slate-300 dark:hover:bg-slate-800"
+              className="inline-flex h-7 w-11 shrink-0 items-center justify-center text-slate-500 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40 dark:text-slate-300 dark:hover:bg-slate-800"
               disabled={safePage >= totalPages}
               onClick={() => onPageChange?.(safePage + 1)}
               aria-label="Next page"
@@ -279,7 +279,7 @@ export default function PaginationControls({
             onChange={(nextValue) => onPageSizeChange?.(nextValue)}
             ariaLabel={perPageLabel}
             allowCustom={editablePageSizeInput}
-            buttonClassName="h-8 min-w-[4.25rem] rounded-lg px-2 py-1 text-xs font-semibold shadow-none"
+            buttonClassName="h-9 min-w-[5.5rem] rounded-lg px-2.5 py-1 text-xs font-semibold shadow-none"
             menuClassName="min-w-[10rem]"
             optionClassName="text-xs"
           />
@@ -287,7 +287,7 @@ export default function PaginationControls({
         <div className="inline-flex items-center overflow-hidden rounded-lg border border-slate-200 dark:border-slate-700">
           <button
             type="button"
-            className="inline-flex h-8 w-8 items-center justify-center bg-white text-slate-500 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40 dark:bg-slate-950 dark:text-slate-300 dark:hover:bg-slate-800"
+            className="inline-flex h-9 w-11 items-center justify-center bg-white text-slate-500 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40 dark:bg-slate-950 dark:text-slate-300 dark:hover:bg-slate-800"
             disabled={safePage <= 1}
             onClick={() => onPageChange?.(safePage - 1)}
             aria-label="Previous page"
@@ -295,13 +295,13 @@ export default function PaginationControls({
             <ChevronLeft className="h-4 w-4" />
           </button>
           {editablePageInput ? (
-            <div className="inline-flex min-w-24 items-center justify-center gap-1 bg-slate-50 px-3 py-1.5 font-semibold dark:bg-slate-800">
+            <div className="inline-flex min-w-28 items-center justify-center gap-1 bg-slate-50 px-3 py-1.5 font-semibold dark:bg-slate-800">
               <span className="sr-only">{pageLabel}</span>
               <input
                 type="text"
                 inputMode="numeric"
                 aria-label={pageLabel}
-                className="h-5 w-8 border-0 bg-transparent p-0 text-center text-xs font-semibold text-slate-700 outline-none dark:text-slate-100"
+                className="h-5 w-12 border-0 bg-transparent p-0 text-center text-xs font-semibold text-slate-700 outline-none dark:text-slate-100"
                 value={pageDraft}
                 onChange={(event) => setPageDraft(event.target.value.replace(/[^\d]/g, '') || '')}
                 onBlur={(event) => commitPageDraft(event.currentTarget.value)}
@@ -310,13 +310,13 @@ export default function PaginationControls({
               <span className="text-slate-500 dark:text-slate-300">/ {totalPages}</span>
             </div>
           ) : (
-            <span className="min-w-24 bg-slate-50 px-3 py-2 text-center font-semibold dark:bg-slate-800">
+            <span className="min-w-28 bg-slate-50 px-3 py-2 text-center font-semibold dark:bg-slate-800">
               {pageLabel} {safePage} {ofLabel} {totalPages}
             </span>
           )}
           <button
             type="button"
-            className="inline-flex h-8 w-8 items-center justify-center bg-white text-slate-500 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40 dark:bg-slate-950 dark:text-slate-300 dark:hover:bg-slate-800"
+            className="inline-flex h-9 w-11 items-center justify-center bg-white text-slate-500 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40 dark:bg-slate-950 dark:text-slate-300 dark:hover:bg-slate-800"
             disabled={safePage >= totalPages}
             onClick={() => onPageChange?.(safePage + 1)}
             aria-label="Next page"

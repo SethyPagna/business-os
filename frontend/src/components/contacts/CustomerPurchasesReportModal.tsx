@@ -94,7 +94,12 @@ export default function CustomerPurchasesReportModal({ customerId, customerName,
   return (
     <Modal title={`${tr(t, 'customer_purchases', 'Purchases')} -- ${customerName}`} onClose={onClose}>
       <div className="space-y-3">
-        <DateTimeRangePicker value={range} onChange={setRange} t={t} />
+        <DateTimeRangePicker
+          value={range}
+          onChange={setRange}
+          t={t}
+          triggerClassName="flex w-full items-center justify-center gap-2 rounded-lg px-3 py-2"
+        />
 
         {error ? (
           <div className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900/50 dark:bg-red-950/20 dark:text-red-300">

@@ -270,7 +270,15 @@ export default function DateTimeRangePicker({
     <div ref={rootRef} className={`relative ${className}`}>
       {/* Trigger pill: text-sm font-semibold base (was text-xs font-medium)
           -- the user asked for LARGER dates on the OUTSIDE pill specifically
-          (Aug 30), while the panel inside stays compact. */}
+          (Aug 30), while the panel inside stays compact.
+          min-h-10 (2.5rem) is applied on EVERY variant, ahead of any caller
+          triggerClassName, so the Start -> End field is exactly as tall as the
+          shared search bar (`.input`, min-height 2.5rem) and the app's other
+          standard controls (buttons are also min-height 2.5rem) -- user, Aug 31:
+          "on smaller screens ... start and end date fields share the same height
+          as the search bar". It is a height FLOOR only, so it never shrinks a
+          taller caller and never changes width or layout. Callers must therefore
+          NOT set their own min-h on the trigger (it would fight this one). */}
       <button
         type="button"
         onClick={() => setOpen((current) => {
@@ -278,7 +286,7 @@ export default function DateTimeRangePicker({
           if (!current) setPickPhase('start')
           return !current
         })}
-        className={`${triggerClassName || 'inline-flex items-center gap-2 rounded-md px-3 py-1.5 sm:gap-2.5 sm:px-4 sm:py-2.5 sm:min-w-[15rem]'} border text-sm font-semibold transition ${hasSelection
+        className={`min-h-10 ${triggerClassName || 'inline-flex items-center gap-2 rounded-md px-3 py-1.5 sm:gap-2.5 sm:px-4 sm:py-2.5 sm:min-w-[15rem]'} border text-sm font-semibold transition ${hasSelection
           ? 'border-blue-400 bg-blue-50 text-blue-800 shadow-sm dark:border-blue-600 dark:bg-blue-900/30 dark:text-blue-100'
           : 'border-slate-300 bg-white text-slate-700 hover:border-blue-300 hover:bg-blue-50/50 hover:text-blue-700 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-300 dark:hover:border-blue-600'}`}
         aria-expanded={open}

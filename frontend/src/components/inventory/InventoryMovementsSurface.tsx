@@ -261,7 +261,7 @@ export default function InventoryMovementsSurface({
                       }}
                       t={t}
                       showTime={false}
-                      triggerClassName="flex min-h-8 items-center justify-center gap-2 rounded-lg px-2.5 py-1.5 sm:min-h-9"
+                      triggerClassName="flex items-center justify-center gap-2 rounded-lg px-2.5 py-1.5"
                     />
                     {(movementStartDate || movementEndDate) ? (
                       <button
