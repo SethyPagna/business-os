@@ -27,7 +27,9 @@ assert.match(dashboard, /onOpenHour\(hour, index \+ 1\)/, 'dashboard best-hour r
 assert.match(dashboard, /const openInventoryOverview = useCallback\(/, 'dashboard should expose a direct inventory follow-through action')
 assert.match(dashboard, /DASHBOARD_INVENTORY_FOCUS_KEY/, 'dashboard should persist a focused inventory handoff when drilling into stock alerts')
 assert.match(dashboard, /review_in_inventory', 'Review in inventory'/, 'dashboard preview-truncated stock cards should offer an explicit inventory review action')
-assert.match(dashboard, /min-h-7 whitespace-nowrap rounded-md px-2\.5 py-1 text-\[11px\] font-semibold/, 'dashboard range controls should stay compact on mobile')
+assert.match(dashboard, /triggerClassName="flex w-full items-center justify-center gap-2 rounded-lg px-3\.5 py-2"/, 'dashboard date picker should stay compact on mobile')
+assert.match(dashboard, /min-h-7[^"]*px-2\.5 py-1 text-\[11px\] font-semibold/, 'dashboard export control should stay compact on mobile')
+assert.doesNotMatch(dashboard, /RANGE_PRESETS/, 'dashboard should not restore the removed preset-chip controls')
 // Aug 31 2026: the Branches hub's Products slice was removed as redundant
 // with the Products page, so the handoff chain is now: Dashboard writes the
 // inventory-focus key -> BranchesHubPage consumes it and FORWARDS a
