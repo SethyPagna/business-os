@@ -40,6 +40,14 @@ import { maybeRunScheduledImageAudit } from './lib/imageAudit'
 
 export type Env = {
   DB: D1Database
+  // Optional second D1 holding ONLY the bulk import STAGING tables
+  // (import_job_rows, import_job_source_rows) -- see lib/db.ts's D1Compat
+  // .staging field. When bound (production), getDb(env).staging points here so
+  // the hundreds of MB of regenerable per-row import staging never bloat the
+  // operational DB; when absent (local dev, tests, any single-DB deployment),
+  // staging transparently falls back to DB and behaviour is unchanged. Same
+  // optional-binding-with-fallback pattern as BACKUP_QUEUE below.
+  IMPORT_DB?: D1Database
   ASSETS: R2Bucket
   CACHE: KVNamespace
   // Sentry DSN. Optional: absent means reporting is simply skipped, so a

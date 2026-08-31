@@ -105,7 +105,24 @@ class D1CompatStatement {
 }
 
 export class D1Compat {
-  constructor(private readonly d1: D1Database) {}
+  // The database that holds the bulk import STAGING tables
+  // (import_job_rows, import_job_source_rows). Defaults to THIS database, so
+  // every single-DB environment -- local dev, the pure-test harnesses, and
+  // any deployment without the optional IMPORT_DB binding -- behaves exactly
+  // as it did before the split. getDb() below points it at a separate D1
+  // (IMPORT_DB) when that binding exists, which is what keeps the hundreds of
+  // MB of regenerable per-row import staging out of the operational database.
+  // Only the handful of code paths that touch those two staging tables use
+  // db.staging; every other table keeps using db directly, because a
+  // db.batch() is atomic only WITHIN one database and there are no cross-DB
+  // JOINs -- so nothing that must be atomic with, or joined to, operational
+  // data may live here (the import_*_commits/guards idempotency ledgers and
+  // import_auto_merges deliberately stay on the main DB for that reason).
+  staging: D1Compat
+
+  constructor(private readonly d1: D1Database) {
+    this.staging = this
+  }
 
   prepare(sql: string): D1CompatStatement {
     return new D1CompatStatement(this.d1, sql)
@@ -142,8 +159,14 @@ export class D1Compat {
   }
 }
 
-export function getDb(env: { DB: D1Database }): D1Compat {
-  return new D1Compat(env.DB)
+export function getDb(env: { DB: D1Database; IMPORT_DB?: D1Database }): D1Compat {
+  const db = new D1Compat(env.DB)
+  // Route the bulk import staging tables to their own D1 when the optional
+  // IMPORT_DB binding is present (production). Without it, db.staging stays
+  // pointed at the main DB (see the field's comment) and everything works
+  // against a single database exactly as before.
+  if (env.IMPORT_DB) db.staging = new D1Compat(env.IMPORT_DB)
+  return db
 }
 
 // Shared boolean-coercion for DB columns that store 0/1 but can be sent as

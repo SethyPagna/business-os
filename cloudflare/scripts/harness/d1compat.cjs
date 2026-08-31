@@ -82,6 +82,10 @@ class Stmt {
 class D1Compat {
   constructor(db) {
     this.db = db
+    // Mirrors lib/db.ts's D1Compat.staging: the import-staging DB handle,
+    // defaulting to THIS db so the single in-memory database the harness
+    // builds holds every table. Production points it at a separate D1.
+    this.staging = this
   }
   prepare(sql) {
     return new Stmt(this.db, sql)
