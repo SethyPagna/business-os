@@ -57,7 +57,10 @@ type UploadStateMap = Record<string, UploadState>
 interface AppUser {
   id?: string | number
   name?: string
+  username?: string | null
+  role_code?: string | null
   permissions?: string | Record<string, unknown> | null
+  role_permissions?: string | Record<string, unknown> | null
 }
 
 interface SaveSettingsResult {
@@ -578,9 +581,19 @@ export default function Settings() {
   }, [])
 
   const isAdmin = useMemo(() => {
+    // Same semantics as Sales/Inventory/actionHistory admin checks, plus the
+    // role_permissions merge (a role-granted admin carries all:true on
+    // user.role_permissions while user.permissions stays "{}").
     try {
-      const permissions = typeof user?.permissions === 'string' ? JSON.parse(user.permissions) : (user?.permissions || {})
-      return permissions.all
+      const parse = (value: unknown): Record<string, unknown> =>
+        typeof value === 'string' ? JSON.parse(value || '{}') : ((value || {}) as Record<string, unknown>)
+      const merged = {
+        ...parse(user?.role_permissions),
+        ...parse(user?.permissions),
+      }
+      const roleCode = String(user?.role_code || '').toLowerCase()
+      const username = String(user?.username || '').toLowerCase()
+      return username === 'admin' || roleCode === 'admin' || merged.all === true
     } catch {
       return false
     }
