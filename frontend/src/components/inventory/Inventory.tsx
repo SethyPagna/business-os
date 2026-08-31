@@ -31,7 +31,6 @@ import { buildHierarchicalCategoryFilterOptions } from '../shared/CategoryFilter
 import { buildAvailabilityFilterSection } from '../shared/AvailabilityFilterOptions.tsx'
 import { buildIssuesFilterSection } from '../shared/IssuesFilterOptions.tsx'
 import { buildSearchModeFilterSection } from '../shared/SearchModeFilterOptions.tsx'
-import { buildPeriodFilterOptions } from '../../utils/periodFilterOptions.ts'
 import ActionHistoryBar from '../shared/ActionHistoryBar'
 import AppSelect, { type AppSelectOption } from '../shared/AppSelect'
 import PageSizeSelect from '../shared/PageSizeSelect'
@@ -82,7 +81,7 @@ function todayIsoDate(): string {
 import { useIsPageActive } from '../shared/pageActivity'
 import { useActionHistory } from '../../utils/actionHistory.ts'
 import { cloneHistorySnapshot } from '../../utils/historyHelpers.ts'
-import { buildTimeActionSections, getAvailableYears, getTimeGroupingMode, toggleIdSet } from '../../utils/groupedRecords.ts'
+import { buildTimeActionSections, toggleIdSet } from '../../utils/groupedRecords.ts'
 import { aggregateInitialOptions, buildInitialOptionsFromProducts, getInitialKey } from '../../utils/initials.ts'
 import { buildProductCategorySections } from '../../utils/productGrouping.ts'
 import { buildProductGroupPriceLabel, buildProductGroupSummaryParts } from '../products/helpers/productGroupViewHelpers.ts'
@@ -727,9 +726,16 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
   const [userOptions, setUserOptions] = useState<InventoryUserOption[]>([])
   const [movementStartDate, setMovementStartDate] = useState('')
   const [movementEndDate, setMovementEndDate] = useState('')
-  const [showMovementDateFilter, setShowMovementDateFilter] = useState(false)
-  const [movementYearFilter, setMovementYearFilter] = useState('all')
-  const [movementMonthFilter, setMovementMonthFilter] = useState('all')
+  // The Start → End range picker is the ONE date control on Movements now
+  // (user, Aug 31: "remove [All time]; the date is default, and start date
+  // and end date for customizing which is for many sections and pages
+  // already") -- the old "Custom range" toggle + year/month period filter
+  // (with its "All time" option) are gone with their state.
+  //
+  // Checkboxes on movement rows only render in an explicit Select mode
+  // (user, Aug 31: "the check box can be removed... show only in select
+  // mode") -- same principle as the products surface's selectionModeActive.
+  const [movementSelectMode, setMovementSelectMode] = useState(false)
   const [movementGroupMode, setMovementGroupMode] = useState('time')
   const [movementSortDirection, setMovementSortDirection] = useState('desc')
   const [selectedMovementIds, setSelectedMovementIds] = useState<Set<string>>(() => new Set())
@@ -802,10 +808,10 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
   const runInventoryMutation = useCallback((loader: InventoryLoader, label: string): Promise<any> => (
     withLoaderTimeout(loader, label, INVENTORY_STOCK_MUTATION_TIMEOUT_MS)
   ), [])
-  const movementTimeMode = useMemo(
-    () => getTimeGroupingMode(movementYearFilter, movementMonthFilter),
-    [movementMonthFilter, movementYearFilter],
-  )
+  // DAY sections always (user, Aug 31: "the date can be moved as group
+  // wrap... show only time for rows") -- the date lives once on each day's
+  // divider header, so rows need only their clock time.
+  const movementTimeMode = 'day'
   const isAdmin = useMemo(() => {
     const roleCode = String(user?.role_code || '').toLowerCase()
     const username = String(user?.username || '').toLowerCase()
@@ -2413,24 +2419,17 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
       : groups.filter((group) => matchesSearch(movementGroupHaystack(group)))
   }, [filteredMovements, hasServerBackedMovementSearch, matchesSearch])
 
-  const movementYears = useMemo(
-    () => getAvailableYears(groupedMovements, (group) => group?.latest_at || group?.created_at),
-    [groupedMovements],
-  )
-
   const movementSections = useMemo(() => (
     buildTimeActionSections(groupedMovements, {
       getDate: (group) => group?.latest_at || group?.created_at,
       getItemId: (group) => group?.id,
       getActionKey: (group) => group?.movement_type || 'other',
       getActionLabel: (group) => translateMovementType(group?.movement_type, t),
-      year: movementYearFilter,
-      month: movementMonthFilter,
       timeMode: movementTimeMode,
       groupMode: movementGroupMode,
       sortDirection: movementSortDirection,
     })
-  ), [groupedMovements, movementGroupMode, movementMonthFilter, movementSortDirection, movementTimeMode, movementYearFilter, t])
+  ), [groupedMovements, movementGroupMode, movementSortDirection, movementTimeMode, t])
 
   const visibleMovementGroups = useMemo(
     () => movementSections.flatMap((section) => section.groups.flatMap((group) => group.items)),
@@ -2969,15 +2968,12 @@ ${inventoryFeesFormulaText}`,
       if (movementStartDate || movementEndDate) {
         return `${movementStartDate || '...'} - ${movementEndDate || '...'}`
       }
-      if (movementYearFilter !== 'all' || movementMonthFilter !== 'all') {
-        return `${movementYearFilter === 'all' ? 'All years' : movementYearFilter} / ${movementMonthFilter === 'all' ? 'All months' : movementMonthFilter}`
-      }
       return 'All available movement dates'
     }
     // fmtDate, not toLocaleDateString(): the bare form follows the VIEWER's
     // locale and renders dd/mm on non-US devices (app-wide mm/dd/yyyy rule).
     return `${fmtDate(timestamps[0])} - ${fmtDate(timestamps[timestamps.length - 1])}`
-  }, [movementEndDate, movementMonthFilter, movementStartDate, movementYearFilter, visibleMovementGroups])
+  }, [movementEndDate, movementStartDate, visibleMovementGroups])
 
   const visibleMovementQuantity = useMemo(
     () => visibleMovementGroups.reduce((sum, group) => sum + Number(group.totalQuantity || 0), 0),
@@ -3000,10 +2996,12 @@ ${inventoryFeesFormulaText}`,
     movFilter,
     movementDateRangeLabel,
     movementGroupMode,
-    movementMonthFilter,
+    // The year/month period filter is gone (the Start → End range is the one
+    // date control) -- exports keep their fields, permanently un-narrowed.
+    movementMonthFilter: 'all',
     movementSortDirection,
     movementTimeMode,
-    movementYearFilter,
+    movementYearFilter: 'all',
     outStockCount,
     // Range-scoped (the strip's range) since the strip replaced the old
     // all-time client-side sums -- the stats export mirrors what the
@@ -3047,10 +3045,8 @@ ${inventoryFeesFormulaText}`,
     movFilter,
     movementDateRangeLabel,
     movementGroupMode,
-    movementMonthFilter,
     movementSortDirection,
     movementTimeMode,
-    movementYearFilter,
     outStockCount,
     search,
     stockFilter,
@@ -3111,7 +3107,7 @@ ${inventoryFeesFormulaText}`,
         'divider',
         { label: tr('export_visible_movement_groups', `Export visible ${t('movements') || 'movements'}`), onClick: () => exportMovementGroups(visibleMovementGroups) },
         selectedMovementGroups.length ? { label: tr('export_selected_movement_groups', 'Export selected movement groups'), onClick: () => exportMovementGroups(selectedMovementGroups, 'inventory-movements-selected'), color: 'blue' } : null,
-        movementYearFilter !== 'all' || movementMonthFilter !== 'all'
+        movementStartDate || movementEndDate
           ? { label: tr('export_filtered_time_range', 'Export filtered time range'), onClick: () => exportMovementGroups(visibleMovementGroups, 'inventory-movements-filtered') }
           : null,
         branchFilter !== 'all'
@@ -3160,8 +3156,8 @@ ${inventoryFeesFormulaText}`,
     exportMovementGroups,
     filteredSummary,
     movFilter,
-    movementMonthFilter,
-    movementYearFilter,
+    movementEndDate,
+    movementStartDate,
     selectedMovementGroups,
     summary,
     tab,
@@ -3249,20 +3245,17 @@ ${inventoryFeesFormulaText}`,
           ],
         },
         {
+          // Sort only -- the year/month period options (and their default
+          // "All time" pick, which surfaced as a chip next to the Filters
+          // trigger) are gone (user, Aug 31: "remove that, the date is
+          // default, and start date and end date for customizing which is
+          // for many sections and pages already"): the toolbar's Start → End
+          // range picker is the one date control.
           id: 'movement-sort',
           label: t('sort') || 'Sort',
-          searchable: true,
           options: [
             { id: 'desc', label: t('newest_first') || 'Newest first', active: movementSortDirection === 'desc', onClick: () => setMovementSortDirection('desc') },
             { id: 'asc', label: t('oldest_first') || 'Oldest first', active: movementSortDirection === 'asc', onClick: () => setMovementSortDirection('asc') },
-            ...buildPeriodFilterOptions({
-              yearFilter: movementYearFilter,
-              setYearFilter: setMovementYearFilter,
-              monthFilter: movementMonthFilter,
-              setMonthFilter: setMovementMonthFilter,
-              availableYears: movementYears,
-              allTimeLabel: t('all_time') || 'All time',
-            }),
           ],
         },
       ].filter(Boolean)
@@ -3337,11 +3330,8 @@ ${inventoryFeesFormulaText}`,
     issueFilter,
     movFilter,
     movementGroupMode,
-    movementMonthFilter,
     movementSortDirection,
     movementUserFilter,
-    movementYearFilter,
-    movementYears,
     searchMode,
     setSearchMode,
     isAdmin,
@@ -3365,8 +3355,6 @@ ${inventoryFeesFormulaText}`,
         branchFilter !== 'all',
         movFilter !== 'all',
         movementUserFilter !== 'all',
-        movementYearFilter !== 'all',
-        movementMonthFilter !== 'all',
         movementGroupMode !== 'time',
         movementSortDirection !== 'desc',
       ])
@@ -3382,7 +3370,7 @@ ${inventoryFeesFormulaText}`,
       inventoryInitialFilter !== 'all',
       searchMode === 'OR',
     ])
-  }, [branchFilter, brandFilter, catFilter, groupFilter, inventoryInitialFilter, issueFilter, movFilter, movementGroupMode, movementMonthFilter, movementSortDirection, movementUserFilter, movementYearFilter, searchMode, stockFilter, tab])
+  }, [branchFilter, brandFilter, catFilter, groupFilter, inventoryInitialFilter, issueFilter, movFilter, movementGroupMode, movementSortDirection, movementUserFilter, searchMode, stockFilter, tab])
 
   const clearInventoryFilters = useCallback(() => {
     setBranchFilter('all')
@@ -3394,8 +3382,6 @@ ${inventoryFeesFormulaText}`,
     setInventoryInitialFilter('all')
     setMovFilter('all')
     setMovementUserFilter('all')
-    setMovementYearFilter('all')
-    setMovementMonthFilter('all')
     setMovementGroupMode('time')
     setMovementSortDirection('desc')
     setSearchMode('AND')
@@ -3410,6 +3396,14 @@ ${inventoryFeesFormulaText}`,
     (ids = []) => ids.some((id) => selectedMovementIds.has(id)) && !isMovementScopeFullySelected(ids),
     [isMovementScopeFullySelected, selectedMovementIds],
   )
+  const toggleMovementSelectMode = useCallback(() => {
+    setMovementSelectMode((current) => !current)
+  }, [])
+  // Leaving Select mode drops the selection with it -- a hidden selection
+  // that still drives the "N selected" export state would be a trap.
+  useEffect(() => {
+    if (!movementSelectMode) setSelectedMovementIds(new Set())
+  }, [movementSelectMode])
   const showMovementActionGroups = movementGroupMode === 'time+action'
   const sectionStorageKey = 'business-os:inventory:section:v2'
   const showInventoryStats = inventorySection === 'all' || inventorySection === 'stats'
@@ -3836,12 +3830,13 @@ ${inventoryFeesFormulaText}`,
             isMovementScopeFullySelected={isMovementScopeFullySelected}
             isMovementScopePartiallySelected={isMovementScopePartiallySelected}
             loading={(loading && !movementsLoaded) || isMovementsFirstLoad}
-            movementDateRangeLabel={movementDateRangeLabel}
             movementEndDate={movementEndDate}
             movementMeta={movementMeta}
             movementSections={movementSections}
             movementSelectAllRef={movementSelectAllRef}
+            movementSelectMode={movementSelectMode}
             movementStartDate={movementStartDate}
+            onToggleMovementSelectMode={toggleMovementSelectMode}
             openMovementProductDetail={openMovementProductDetail}
             selectedMovementGroups={selectedMovementGroups}
             selectedMovementIds={selectedMovementIds}
@@ -3850,9 +3845,7 @@ ${inventoryFeesFormulaText}`,
             setMovementEndDate={setMovementEndDate}
             setMovementMeta={setMovementMeta}
             setMovementStartDate={setMovementStartDate}
-            setShowMovementDateFilter={setShowMovementDateFilter}
             showMovementActionGroups={showMovementActionGroups}
-            showMovementDateFilter={showMovementDateFilter}
             t={t}
             toggleAllMovementSelection={toggleAllMovementSelection}
             toggleMovementGroup={toggleMovementGroup}
