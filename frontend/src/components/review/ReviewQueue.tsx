@@ -42,6 +42,7 @@ type NotifyFn = (message: unknown, type?: string, duration?: number) => void
 interface ReviewAppContextValue {
   t: TranslateFn
   notify: NotifyFn
+  getPermissionTier: (key: string) => string
 }
 
 interface ReviewSyncContextValue {
@@ -84,7 +85,11 @@ function statusBadgeClass(status: PendingActionStatus): string {
 }
 
 export default function ReviewQueue() {
-  const { t, notify } = useApp()
+  const { t, notify, getPermissionTier } = useApp()
+  // Part 557 slice 5: 'review' is a view-tier section. A View-only grant reads
+  // the pending queue but Approve/Reject are hidden here and refused by the
+  // backend (both re-check strict hasPermission('review')). Full only.
+  const canReview = getPermissionTier('review') === 'full'
   const { syncChannel } = useSync()
   const isActive = useIsPageActive('review')
   const tr = useCallback((key: string, fallback: string): string => {
@@ -151,6 +156,7 @@ export default function ReviewQueue() {
   }, [rows])
 
   const handleApprove = async (row: PendingActionRow) => {
+    if (!canReview) { notify(tr('perm_view_only_generic', 'View only: you do not have permission to make this change.'), 'error'); return }
     if (!beginKeyedAction(actionRef, row.id)) return
     setBusyId(row.id)
     try {
@@ -170,6 +176,7 @@ export default function ReviewQueue() {
   }
 
   const handleReject = async (row: PendingActionRow) => {
+    if (!canReview) { notify(tr('perm_view_only_generic', 'View only: you do not have permission to make this change.'), 'error'); return }
     const reason = window.prompt(tr('reject_reason_prompt', 'Reason for rejecting (optional):')) ?? undefined
     if (reason === undefined) return
     if (!beginKeyedAction(actionRef, row.id)) return
@@ -283,7 +290,7 @@ export default function ReviewQueue() {
                       </pre>
                     ) : null}
                   </div>
-                  {row.status === 'open' ? (
+                  {row.status === 'open' && canReview ? (
                     <div className="flex shrink-0 items-center gap-1">
                       <button
                         type="button"

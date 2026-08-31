@@ -466,12 +466,24 @@ export const PERMISSION_SECTIONS: PermissionSection[] = [
     key: 'review',
     tKey: 'perm_section_review',
     label: 'Review',
-    description: 'The Review/Approval queue for every section’s Review Required tier above. Full Access or None only, same admin-control gate shape as user management.',
+    description: 'None / View only / Full. The Review/Approval queue for every section’s Review Required tier above. View only shows the pending queue read-only; approving and rejecting require Full Access.',
     permissions: [
-      // Review/Approval queue for the Review Required permission tier (see
-      // progress.md's "Permissions UI redesign" item). Full Access/None
-      // only -- no partial tier for this page itself.
-      { key: 'review', tKey: 'perm_review', label: 'Review and approval queue', sensitivity: 'critical' },
+      // View-tier section (Part 557 slice 5): reading the pending queue
+      // (routes/reviewQueue.ts GET / and GET /:id) admits a 'view' grant; the
+      // two writes (POST /:id/approve, /:id/reject) re-check strict
+      // hasPermission('review') (=== true), which a 'view' value fails. The
+      // submitter's own /mine + /:id/resubmit routes never needed 'review' and
+      // are unaffected.
+      {
+        key: 'review',
+        tKey: 'perm_review',
+        label: 'Review and approval queue',
+        sensitivity: 'critical',
+        tier: true,
+        middleTier: 'view',
+        reviewTKey: 'perm_review_view_desc',
+        reviewDescription: 'View only: watch the pending approval queue, but Approve and Reject are hidden and refused. Full Access is required to act on submissions.',
+      },
     ],
   },
   {

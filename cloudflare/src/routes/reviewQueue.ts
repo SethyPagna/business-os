@@ -1,6 +1,6 @@
 import { Hono } from 'hono'
 import { requireAuth, type SessionUser } from '../lib/auth'
-import { hasPermission } from '../lib/permissions'
+import { hasPermission, getPermissionTier } from '../lib/permissions'
 import { audit } from '../lib/audit'
 import { broadcast } from '../durable-objects/broadcastHub'
 import {
@@ -106,10 +106,16 @@ app.post('/:id/resubmit', async (c) => {
   return c.json({ success: true, data: row })
 })
 
-// --- reviewer routes (Full Access to `review` only) -----------------------
+// --- reviewer routes -------------------------------------------------------
+// 'review' is a VIEW_TIER section (Part 557 slice 5): a 'view' grant can READ
+// the pending queue (GET / and GET /:id below) but cannot act on it. This gate
+// admits view OR full (tier != none); the two WRITES (approve/reject) re-check
+// strict hasPermission('review') (=== true) individually, which a 'view' value
+// fails -- so a view reviewer watches the queue without approving anyone's
+// changes (including their own).
 app.use('*', async (c, next) => {
   const user = c.get('user')
-  if (!hasPermission(user, 'review')) return c.json({ error: 'Forbidden' }, 403)
+  if (getPermissionTier(user, 'review') === 'none') return c.json({ error: 'Forbidden' }, 403)
   await next()
 })
 
@@ -135,6 +141,8 @@ app.post('/:id/approve', async (c) => {
   const id = Number(c.req.param('id'))
   if (!Number.isFinite(id)) return c.json({ error: 'Invalid id' }, 400)
   const user = c.get('user')
+  // View-only reviewers can read the queue but not act on it (Part 557 slice 5).
+  if (!hasPermission(user, 'review')) return c.json({ error: 'Forbidden' }, 403)
 
   const row = await getPendingAction(c.env, id)
   if (!row) return c.json({ error: 'Not found' }, 404)
@@ -164,6 +172,8 @@ app.post('/:id/reject', async (c) => {
   const id = Number(c.req.param('id'))
   if (!Number.isFinite(id)) return c.json({ error: 'Invalid id' }, 400)
   const user = c.get('user')
+  // View-only reviewers can read the queue but not act on it (Part 557 slice 5).
+  if (!hasPermission(user, 'review')) return c.json({ error: 'Forbidden' }, 403)
   let reason: string | null = null
   try {
     const body = await c.req.json<{ reason?: string }>()

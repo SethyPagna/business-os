@@ -3355,6 +3355,7 @@
   "perm_returns": "Returns",
   "perm_returns_review_desc": "Under Partial Access, viewing, searching, and creating a return all work directly. Editing an existing return requires Full Access. There is no delete action for returns in this app.",
   "perm_review": "Review and approval queue",
+  "perm_review_view_desc": "View only: watch the pending approval queue, but Approve and Reject are hidden and refused. Full Access is required to act on submissions.",
   "perm_sales": "Sales History",
   "perm_sales_policy": "Sales, return, and financial policy",
   "perm_section_admin": "Administration",

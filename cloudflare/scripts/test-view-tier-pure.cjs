@@ -17,7 +17,7 @@ const check = (label, fn) => { fn(); passed++; console.log(`PASS ${label}`) }
 
 // --- replicate the model (kept identical to lib/permissions.ts) -----------
 const REVIEW_TIER_KEYS = new Set(['products', 'inventory', 'branches', 'returns', 'fees', 'contacts'])
-const VIEW_TIER_KEYS = new Set(['settings', 'sales', 'promotions'])
+const VIEW_TIER_KEYS = new Set(['settings', 'sales', 'promotions', 'review'])
 const merged = (u) => ({ ...JSON.parse(u.role_permissions || '{}'), ...JSON.parse(u.permissions || '{}') })
 const isAdmin = (u) => {
   const un = String(u.username || '').toLowerCase(); const rc = String(u.role_code || '').toLowerCase()
@@ -117,6 +117,27 @@ check("routes/promotions.ts: GET /rules uses requireReadKey (view-aware); writes
   assert.match(src, /app\.post\('\/rules', requireKey\('promotions'\)/)
   assert.match(src, /app\.put\('\/rules\/:id', requireKey\('promotions'\)/)
   assert.match(src, /app\.delete\('\/rules\/:id', requireKey\('promotions'\)/)
+})
+
+// --- Review view-tier (Part 557 slice 5): watch the queue, no approve/reject -
+const reviewViewUser = { username: 'rv', role_permissions: JSON.stringify({ review: 'view' }), permissions: '{}' }
+const reviewFullUser = { username: 'rf', role_permissions: JSON.stringify({ review: true }), permissions: '{}' }
+check("Review 'view' -> tier 'view' (pending queue readable)", () => {
+  assert.equal(getPermissionTier(reviewViewUser, 'review'), 'view')
+})
+check("hasPermission('review') FALSE for a Review view user (approve/reject stay blocked)", () => {
+  assert.equal(hasPermission(reviewViewUser, 'review'), false)
+})
+check("Full Review grant -> tier 'full' AND hasPermission true (approve/reject allowed)", () => {
+  assert.equal(getPermissionTier(reviewFullUser, 'review'), 'full')
+  assert.equal(hasPermission(reviewFullUser, 'review'), true)
+})
+check("routes/reviewQueue.ts: reader middleware is tier-aware; approve/reject re-check strict", () => {
+  const src = fs.readFileSync(path.join(__dirname, '..', 'src', 'routes', 'reviewQueue.ts'), 'utf8')
+  assert.match(src, /getPermissionTier\(user, 'review'\) === 'none'\) return c\.json\(\{ error: 'Forbidden' \}, 403\)/)
+  // Both writes individually re-check strict hasPermission('review').
+  const strictWrites = src.match(/if \(!hasPermission\(user, 'review'\)\) return c\.json\(\{ error: 'Forbidden' \}, 403\)/g) || []
+  assert.ok(strictWrites.length >= 2, `expected >=2 strict review write gates, found ${strictWrites.length}`)
 })
 check('frontend utils/permissions.ts VIEW_TIER_KEYS matches the backend', () => {
   const feSrc = fs.readFileSync(path.join(__dirname, '..', '..', 'frontend', 'src', 'utils', 'permissions.ts'), 'utf8')
