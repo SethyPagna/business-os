@@ -12,6 +12,8 @@ import Plus from 'lucide-react/dist/esm/icons/plus.js'
 import Download from 'lucide-react/dist/esm/icons/download.js'
 import Settings2 from 'lucide-react/dist/esm/icons/settings-2.js'
 import Phone from 'lucide-react/dist/esm/icons/phone.js'
+import List from 'lucide-react/dist/esm/icons/list.js'
+import Receipt from 'lucide-react/dist/esm/icons/receipt.js'
 import { useApp as useAppHook, useSync as useSyncHook } from '../../AppContext.tsx'
 import type { QueryParams } from '../../api/query.ts'
 import { fmtDateTime24 } from '../../utils/formatters'
@@ -22,7 +24,6 @@ import SearchInput from '../shared/SearchInput'
 import ActionHistoryBar from '../shared/ActionHistoryBar'
 import LazyPortalMenu from '../shared/LazyPortalMenu'
 import type { PortalMenuItem } from '../shared/PortalMenu'
-import SectionCard from '../shared/SectionCard'
 import { ThreeDotMenu, DetailModal, ContactTable, buildSelectedSnapshots, countActiveFlags, useContactSelection } from './shared'
 import { DEFAULT_PAGE_SIZE } from '../shared/PaginationControls'
 import { useContactDuplicateFlag } from './useContactDuplicateFlag'
@@ -49,8 +50,10 @@ import type { ContactOption } from './contactOptionUtils'
 
 const ContactImportModal = lazyRetry(() => import('./ContactImportModal'), 'suppliers-contact-import')
 const SupplierPurchasesModal = lazyRetry(() => import('./SupplierPurchasesModal'), 'suppliers-purchases-modal')
-const StockInInvoicesSection = lazyRetry(() => import('./StockInInvoicesSection'), 'suppliers-stock-in-report')
-const ApInvoicesSection = lazyRetry(() => import('./ApInvoicesSection'), 'suppliers-ap-invoices')
+// The Stock-In + AP ledgers merged into one switchable section (its own lazy
+// chunk, which in turn lazy-loads each report). Only fetched when the
+// Invoices section is opened.
+const SupplierInvoicesSection = lazyRetry(() => import('./SupplierInvoicesSection'), 'suppliers-invoices-section')
 const ExportOptionsDialog = lazyRetry(() => import('../shared/ExportOptionsDialog'), 'suppliers-export-options')
 const SUPPLIER_MUTATION_TIMEOUT_MS = 12000
 
@@ -59,6 +62,10 @@ type NotifyFn = (message: string, tone?: string) => void
 type ContactModal = 'form' | 'import' | 'detail' | 'purchases' | null
 type SortDirection = 'asc' | 'desc'
 type SupplierGroupMode = 'time' | 'alphabet'
+// Top-level section of the Suppliers tab: the supplier directory (rows) OR
+// the merged invoice ledgers -- one shown at a time, never stacked in the
+// same scroll (per the app's section-chip layout convention).
+type SupplierSection = 'directory' | 'invoices'
 
 interface AppUser {
   id?: string | number | null
@@ -413,6 +420,7 @@ function SuppliersTab({ t, notify, active = true, initialSearch }: SuppliersTabP
     setSearch(initialSearch)
   }, [initialSearch])
   const [modal, setModal] = useState<ContactModal>(null)
+  const [section, setSection] = useState<SupplierSection>('directory')
   const [selected, setSelected] = useState<SupplierRow | null>(null)
   const [loading, setLoading] = useState(true)
   // Y1: true while ANY load is in flight (incl. silent search refetches)
@@ -909,8 +917,44 @@ function SuppliersTab({ t, notify, active = true, initialSearch }: SuppliersTabP
     }
   }
 
+  const sectionChips: Array<{ key: SupplierSection; label: string; icon: typeof List }> = [
+    { key: 'directory', label: tr('supplier_directory', 'Directory', 'បញ្ជីអ្នកផ្គត់ផ្គង់'), icon: List },
+    { key: 'invoices', label: tr('invoices', 'Invoices', 'វិក្កយបត្រ'), icon: Receipt },
+  ]
+
   return (
     <div className="flex flex-col gap-3">
+      {/* Top-level section chips: the supplier Directory (rows) OR the merged
+          invoice ledgers, one shown at a time. The invoice reports used to be
+          two folded cards stacked below the supplier rows in this same scroll;
+          the user asked for them pulled out into their own section, so this
+          chip row swaps the whole view instead of stacking. */}
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="inline-flex flex-wrap rounded-xl bg-gray-100 p-0.5 dark:bg-gray-800">
+          {sectionChips.map((chip) => {
+            const Icon = chip.icon
+            const isActive = section === chip.key
+            return (
+              <button
+                key={chip.key}
+                type="button"
+                onClick={() => setSection(chip.key)}
+                aria-pressed={isActive}
+                className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium transition-colors ${isActive ? 'bg-white text-blue-600 shadow dark:bg-gray-900 dark:text-blue-400' : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'}`}
+              >
+                <Icon className="h-4 w-4" /> {chip.label}
+              </button>
+            )
+          })}
+        </div>
+      </div>
+
+      {section === 'invoices' ? (
+        <Suspense fallback={<div className="py-6 text-center text-sm text-gray-400">{tr('loading', 'Loading...', 'កំពុងផ្ទុក...')}</div>}>
+          <SupplierInvoicesSection t={t} />
+        </Suspense>
+      ) : (
+      <>
       {/* Manage (Import + Export folded into one dropdown, same pattern
           Products/Delivery/Customers use) / History / Add Supplier --
           History before Manage per the ordering used on those tabs. */}
@@ -1042,46 +1086,6 @@ function SuppliersTab({ t, notify, active = true, initialSearch }: SuppliersTabP
           {loadError}
         </div>
       ) : null}
-
-      {/* D1b: the Stock-In Invoice report -- purchases grouped supplier →
-          received date → product lines, the old system's report rebuilt on
-          batch data (supplier 0062, cost 0065, received totals 0067,
-          receiving branch 0070). Lives on this tab because per-lot costs
-          and supplier spend are exactly what the contacts_suppliers gate
-          already scopes -- both report endpoints sit under /suppliers/* on
-          the server. Folded by default; the report (its own lazy chunk)
-          only loads when opened. */}
-      <SectionCard
-        kind="reports"
-        nested
-        title={tr('stock_in_invoices', 'Stock-In Invoices', 'វិក្កយបត្រស្តុកចូល')}
-        subtitle={tr('stock_in_invoices_hint', 'Every lot received into stock, grouped by supplier and received date', 'គ្រប់ឡុតដែលទទួលចូលស្តុក ដាក់ជាក្រុមតាមអ្នកផ្គត់ផ្គង់ និងថ្ងៃទទួល')}
-        storageKey="suppliers_stock_in_invoices"
-        defaultOpen={false}
-      >
-        <Suspense fallback={<div className="py-6 text-center text-sm text-gray-400">{tr('loading', 'Loading...', 'កំពុងផ្ទុក...')}</div>}>
-          <StockInInvoicesSection t={t} />
-        </Suspense>
-      </SectionCard>
-
-      {/* Part 551: the legacy supplier AP ledger (the old system's
-          account-payable reports, imported Aug 30 as finance history --
-          1,591 invoices, four still outstanding). Read-only rows, so a flat
-          table; lives here because supplier money is exactly what the
-          contacts_suppliers gate scopes -- the endpoint sits under
-          /suppliers/* on the server. Folded by default, own lazy chunk. */}
-      <SectionCard
-        kind="reports"
-        nested
-        title={tr('ap_invoices', 'Supplier AP Invoices', 'វិក្កយបត្រជំពាក់អ្នកផ្គត់ផ្គង់')}
-        subtitle={tr('ap_invoices_hint', "The old system's account-payable ledger: every supplier invoice with billed, paid and outstanding amounts", 'បញ្ជីជំពាក់អ្នកផ្គត់ផ្គង់ពីប្រព័ន្ធចាស់៖ វិក្កយបត្រនីមួយៗ ជាមួយចំនួនសរុប បានបង់ និងនៅជំពាក់')}
-        storageKey="suppliers_ap_invoices"
-        defaultOpen={false}
-      >
-        <Suspense fallback={<div className="py-6 text-center text-sm text-gray-400">{tr('loading', 'Loading...', 'កំពុងផ្ទុក...')}</div>}>
-          <ApInvoicesSection t={t} />
-        </Suspense>
-      </SectionCard>
 
       <ContactTable
         loading={loading}
@@ -1281,6 +1285,8 @@ function SuppliersTab({ t, notify, active = true, initialSearch }: SuppliersTabP
           )
         }}
       />
+      </>
+      )}
 
       {modal === 'form' ? <SupplierForm supplier={selected} onSave={handleSave} onClose={() => { setModal(null); setSelected(null) }} t={t} /> : null}
       {modal === 'import' ? (

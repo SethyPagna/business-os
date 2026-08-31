@@ -12,15 +12,16 @@ type TranslateFn = (key: string) => string | undefined
 type MoneyFormatter = (value: number | string) => string
 
 interface ReturnsReport {
-  totals: { count: number; refund_usd: number }
-  days: Array<{ date: string; count: number; refund_usd: number }>
-  by_reason: Array<{ reason: string; count: number; refund_usd: number }>
-  by_type: Array<{ return_type: string; count: number; refund_usd: number }>
+  totals: { count: number; refund_usd: number; refund_khr: number }
+  days: Array<{ date: string; count: number; refund_usd: number; refund_khr: number }>
+  by_reason: Array<{ reason: string; count: number; refund_usd: number; refund_khr: number }>
+  by_type: Array<{ return_type: string; count: number; refund_usd: number; refund_khr: number }>
 }
 
 interface ReturnsReportSectionProps {
   t: TranslateFn
   fmtUSD: MoneyFormatter
+  fmtKHR: MoneyFormatter
   range: DateTimeRange
   branchId?: string
   active?: boolean
@@ -45,14 +46,22 @@ function normalize(raw: unknown): ReturnsReport {
   const r = (raw || {}) as Partial<ReturnsReport>
   const totals = (r.totals || {}) as ReturnsReport['totals']
   return {
-    totals: { count: num(totals.count), refund_usd: num(totals.refund_usd) },
-    days: Array.isArray(r.days) ? r.days.map((d) => ({ date: String(d.date || ''), count: num(d.count), refund_usd: num(d.refund_usd) })) : [],
-    by_reason: Array.isArray(r.by_reason) ? r.by_reason.map((d) => ({ reason: String(d.reason || ''), count: num(d.count), refund_usd: num(d.refund_usd) })) : [],
-    by_type: Array.isArray(r.by_type) ? r.by_type.map((d) => ({ return_type: String(d.return_type || ''), count: num(d.count), refund_usd: num(d.refund_usd) })) : [],
+    totals: { count: num(totals.count), refund_usd: num(totals.refund_usd), refund_khr: num(totals.refund_khr) },
+    days: Array.isArray(r.days) ? r.days.map((d) => ({ date: String(d.date || ''), count: num(d.count), refund_usd: num(d.refund_usd), refund_khr: num(d.refund_khr) })) : [],
+    by_reason: Array.isArray(r.by_reason) ? r.by_reason.map((d) => ({ reason: String(d.reason || ''), count: num(d.count), refund_usd: num(d.refund_usd), refund_khr: num(d.refund_khr) })) : [],
+    by_type: Array.isArray(r.by_type) ? r.by_type.map((d) => ({ return_type: String(d.return_type || ''), count: num(d.count), refund_usd: num(d.refund_usd), refund_khr: num(d.refund_khr) })) : [],
   }
 }
 
-export default function ReturnsReportSection({ t, fmtUSD, range, branchId, active = true, titleNode }: ReturnsReportSectionProps) {
+export default function ReturnsReportSection({ t, fmtUSD, fmtKHR, range, branchId, active = true, titleNode }: ReturnsReportSectionProps) {
+  // Refunds can be USD or KHR; show whichever are present (Part 553) so a
+  // KHR refund no longer reads as "$0.00". No conversion.
+  const moneyPair = (usd: number, khr: number): string => {
+    const parts: string[] = []
+    if (usd) parts.push(fmtUSD(usd))
+    if (khr) parts.push(fmtKHR(khr))
+    return parts.length ? parts.join(' · ') : fmtUSD(0)
+  }
   const [report, setReport] = useState<ReturnsReport | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
@@ -91,7 +100,7 @@ export default function ReturnsReportSection({ t, fmtUSD, range, branchId, activ
   // click — no stat tiles, no inline card grid).
   const [openTable, setOpenTable] = useState<'days' | 'reasons' | 'types' | null>(null)
 
-  const floatTable = (rows: Array<{ key: string; label: string; count: number; usd: number }>) => (
+  const floatTable = (rows: Array<{ key: string; label: string; count: number; usd: number; khr: number }>) => (
     rows.length === 0 ? (
       <div className="text-xs text-slate-400">{t('no_data') || 'No data'}</div>
     ) : (
@@ -101,7 +110,7 @@ export default function ReturnsReportSection({ t, fmtUSD, range, branchId, activ
             <tr key={row.key} className="border-b border-slate-100 last:border-0 dark:border-slate-800">
               <td className="max-w-[12rem] truncate py-1.5 pr-2 text-slate-700 dark:text-slate-200">{row.label}</td>
               <td className="py-1.5 pr-2 text-right text-slate-400">×{row.count}</td>
-              <td className="py-1.5 text-right font-medium text-slate-900 dark:text-white">{fmtUSD(row.usd)}</td>
+              <td className="py-1.5 text-right font-medium text-slate-900 dark:text-white">{moneyPair(row.usd, row.khr)}</td>
             </tr>
           ))}
         </tbody>
@@ -139,13 +148,12 @@ export default function ReturnsReportSection({ t, fmtUSD, range, branchId, activ
         </span>
       </div>
 
-      {/* Totals on their own line below the title row. */}
+      {/* Totals on their own line below the title row. Both currencies show
+          (Part 553) — a KHR refund used to read as "$0.00". */}
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-slate-500 dark:text-slate-400">
         <span>{report?.totals.count ?? 0} {t('returns') || 'returns'}</span>
         <span className="text-slate-300 dark:text-slate-600">|</span>
-        <span>{t('refunds') || 'Refunds'} <b className="text-red-600 dark:text-red-400">{fmtUSD(report?.totals.refund_usd ?? 0)}</b></span>
-        <span className="text-slate-300 dark:text-slate-600">|</span>
-        <span>{t('avg_refund') || 'Avg refund'} <b className="text-slate-900 dark:text-white">{fmtUSD(report && report.totals.count > 0 ? report.totals.refund_usd / report.totals.count : 0)}</b></span>
+        <span>{t('refunds') || 'Refunds'} <b className="text-red-600 dark:text-red-400">{moneyPair(report?.totals.refund_usd ?? 0, report?.totals.refund_khr ?? 0)}</b></span>
       </div>
 
       {openTable ? (
@@ -155,10 +163,10 @@ export default function ReturnsReportSection({ t, fmtUSD, range, branchId, activ
           draggable
         >
           {openTable === 'days'
-            ? floatTable((report?.days ?? []).map((day) => ({ key: day.date, label: displayDay(day.date), count: day.count, usd: day.refund_usd })))
+            ? floatTable((report?.days ?? []).map((day) => ({ key: day.date, label: displayDay(day.date), count: day.count, usd: day.refund_usd, khr: day.refund_khr })))
             : openTable === 'reasons'
-              ? floatTable((report?.by_reason ?? []).map((row) => ({ key: row.reason, label: row.reason, count: row.count, usd: row.refund_usd })))
-              : floatTable((report?.by_type ?? []).map((row) => ({ key: row.return_type, label: row.return_type, count: row.count, usd: row.refund_usd })))}
+              ? floatTable((report?.by_reason ?? []).map((row) => ({ key: row.reason, label: row.reason, count: row.count, usd: row.refund_usd, khr: row.refund_khr })))
+              : floatTable((report?.by_type ?? []).map((row) => ({ key: row.return_type, label: row.return_type, count: row.count, usd: row.refund_usd, khr: row.refund_khr })))}
         </Modal>
       ) : null}
     </div>

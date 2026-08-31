@@ -496,9 +496,15 @@ app.get('/report', async (c) => {
   const params: Record<string, unknown> = { startDate, endDate, scope }
   if (query.branchId) { clauses.push('branch_id = @branchId'); params.branchId = query.branchId }
   const where = clauses.join(' AND ')
+  // Sum BOTH currencies (Part 553): refunds/compensation/loss can be recorded
+  // in KHR, and a USD-only sum showed "$0.00" for real KHR returns (same class
+  // of bug the fees report had). No conversion -- the UI shows "$X · Y៛".
   const moneySums = `ROUND(COALESCE(SUM(total_refund_usd), 0), 2) AS refund_usd,
+    ROUND(COALESCE(SUM(total_refund_khr), 0), 0) AS refund_khr,
     ROUND(COALESCE(SUM(supplier_compensation_usd), 0), 2) AS compensation_usd,
-    ROUND(COALESCE(SUM(supplier_loss_usd), 0), 2) AS loss_usd`
+    ROUND(COALESCE(SUM(supplier_compensation_khr), 0), 0) AS compensation_khr,
+    ROUND(COALESCE(SUM(supplier_loss_usd), 0), 2) AS loss_usd,
+    ROUND(COALESCE(SUM(supplier_loss_khr), 0), 0) AS loss_khr`
   const [totals, days, byReason, byType] = await Promise.all([
     db.prepare(`SELECT COUNT(*) AS count, ${moneySums} FROM returns WHERE ${where}`).get<Record<string, number>>(params),
     db.prepare(`SELECT date(created_at) AS date, COUNT(*) AS count, ${moneySums} FROM returns WHERE ${where} GROUP BY date(created_at) ORDER BY date(created_at) DESC`).all<Record<string, unknown>>(params),
@@ -507,8 +513,11 @@ app.get('/report', async (c) => {
   ])
   const money = (row: Record<string, unknown> | null | undefined) => ({
     refund_usd: Number(row?.refund_usd || 0),
+    refund_khr: Number(row?.refund_khr || 0),
     compensation_usd: Number(row?.compensation_usd || 0),
+    compensation_khr: Number(row?.compensation_khr || 0),
     loss_usd: Number(row?.loss_usd || 0),
+    loss_khr: Number(row?.loss_khr || 0),
   })
   return c.json({
     startDate,

@@ -175,17 +175,25 @@ app.get('/report', async (c) => {
   const params: Record<string, unknown> = { startDate, endDate }
   if (query.branchId) { clauses.push('f.branch_id = @branchId'); params.branchId = query.branchId }
   const where = clauses.join(' AND ')
+  // Sum BOTH currencies. Fees are recorded in EITHER USD or KHR (never both
+  // on one row -- confirmed in data: 186 USD-only vs 4,054 KHR-only), so a
+  // report that only summed amount_usd showed "$0.00" for a whole month of
+  // real KHR-denominated fees (user report: "fees showing no rows even
+  // though there are many fees"). No conversion is applied -- there is no
+  // per-fee stored rate and the global one can be blank -- so both raw
+  // totals are returned and the UI shows "$X · Y៛".
+  const money = 'ROUND(COALESCE(SUM(amount_usd), 0), 2) AS amount_usd, ROUND(COALESCE(SUM(amount_khr), 0), 0) AS amount_khr'
   const [totals, days, byType] = await Promise.all([
-    db.prepare(`SELECT COUNT(*) AS count, ROUND(COALESCE(SUM(amount_usd), 0), 2) AS amount_usd FROM fees f WHERE ${where}`).get<Record<string, number>>(params),
-    db.prepare(`SELECT f.fee_date AS date, COUNT(*) AS count, ROUND(COALESCE(SUM(amount_usd), 0), 2) AS amount_usd FROM fees f WHERE ${where} GROUP BY f.fee_date ORDER BY f.fee_date DESC`).all<Record<string, unknown>>(params),
-    db.prepare(`SELECT f.fee_type AS fee_type, COUNT(*) AS count, ROUND(COALESCE(SUM(amount_usd), 0), 2) AS amount_usd FROM fees f WHERE ${where} GROUP BY f.fee_type ORDER BY amount_usd DESC`).all<Record<string, unknown>>(params),
+    db.prepare(`SELECT COUNT(*) AS count, ${money} FROM fees f WHERE ${where}`).get<Record<string, number>>(params),
+    db.prepare(`SELECT f.fee_date AS date, COUNT(*) AS count, ${money} FROM fees f WHERE ${where} GROUP BY f.fee_date ORDER BY f.fee_date DESC`).all<Record<string, unknown>>(params),
+    db.prepare(`SELECT f.fee_type AS fee_type, COUNT(*) AS count, ${money} FROM fees f WHERE ${where} GROUP BY f.fee_type ORDER BY amount_usd DESC, amount_khr DESC`).all<Record<string, unknown>>(params),
   ])
   return c.json({
     startDate,
     endDate,
-    totals: { count: Number(totals?.count || 0), amount_usd: Number(totals?.amount_usd || 0) },
-    days: (days || []).map((d) => ({ date: String(d.date || ''), count: Number(d.count || 0), amount_usd: Number(d.amount_usd || 0) })),
-    by_type: (byType || []).map((r) => ({ fee_type: String(r.fee_type || ''), count: Number(r.count || 0), amount_usd: Number(r.amount_usd || 0) })),
+    totals: { count: Number(totals?.count || 0), amount_usd: Number(totals?.amount_usd || 0), amount_khr: Number(totals?.amount_khr || 0) },
+    days: (days || []).map((d) => ({ date: String(d.date || ''), count: Number(d.count || 0), amount_usd: Number(d.amount_usd || 0), amount_khr: Number(d.amount_khr || 0) })),
+    by_type: (byType || []).map((r) => ({ fee_type: String(r.fee_type || ''), count: Number(r.count || 0), amount_usd: Number(r.amount_usd || 0), amount_khr: Number(r.amount_khr || 0) })),
   })
 })
 

@@ -205,9 +205,9 @@ export default function FeesPage() {
   // range-scoped (default TODAY) with per-card fold breakdowns from
   // GET /api/fees/report -- by type, and the range's busiest days.
   type FeesStripPayload = {
-    totals?: { count?: number; amount_usd?: number }
-    days?: Array<{ date?: string; count?: number; amount_usd?: number }>
-    by_type?: Array<{ fee_type?: string; count?: number; amount_usd?: number }>
+    totals?: { count?: number; amount_usd?: number; amount_khr?: number }
+    days?: Array<{ date?: string; count?: number; amount_usd?: number; amount_khr?: number }>
+    by_type?: Array<{ fee_type?: string; count?: number; amount_usd?: number; amount_khr?: number }>
   }
   const [stripRange, setStripRange] = useState<DateTimeRange>(() => statsPresetRange('today'))
   const [stripData, setStripData] = useState<FeesStripPayload | null>(null)
@@ -239,39 +239,47 @@ export default function FeesPage() {
     const byType = stripData?.by_type || []
     const days = stripData?.days || []
     const count = Number(totals.count) || 0
-    const amount = Number(totals.amount_usd) || 0
+    const amountUsd = Number(totals.amount_usd) || 0
+    const amountKhr = Number(totals.amount_khr) || 0
+    // Fees are recorded in USD OR KHR; show both so a month of KHR fees no
+    // longer reads as "$0.00" (Part 553). No conversion.
+    const moneyPair = (usd: number, khr: number): string => {
+      const parts: string[] = []
+      if (usd) parts.push(fmtUSD(usd))
+      if (khr) parts.push(fmtKHR(khr))
+      return parts.length ? parts.join(' · ') : fmtUSD(0)
+    }
     return [
       {
         key: 'fees',
         label: tr('fees', 'Fees'),
         value: String(count),
-        sub: count > 0 ? `${tr('stats_avg_sale', 'avg')} ${fmtUSD(amount / count)}` : undefined,
         hint: tr('stats_fees_hint', 'Fee records dated inside the range. The breakdown shows how many of each type.'),
         details: byType.map((row) => {
           const type = String(row.fee_type || '')
           const option = FEE_TYPE_OPTIONS.find((candidate) => candidate.value === type)
           return {
             label: option ? (t(option.labelKey) || option.fallback) : (type || '—'),
-            value: `${Number(row.count) || 0} · ${fmtUSD(Number(row.amount_usd) || 0)}`,
+            value: `${Number(row.count) || 0} · ${moneyPair(Number(row.amount_usd) || 0, Number(row.amount_khr) || 0)}`,
           }
         }),
       },
       {
         key: 'total',
         label: tr('total', 'Total'),
-        value: fmtUSD(amount),
+        value: moneyPair(amountUsd, amountKhr),
         tone: 'accent',
-        hint: tr('stats_fees_total_hint', 'Sum of fee amounts in the range, in USD. The breakdown lists the days with the most fee spend.'),
+        hint: tr('stats_fees_total_hint', 'Sum of fee amounts in the range. Fees are recorded in USD or KHR, so both totals are shown. The breakdown lists the days with the most fee spend.'),
         details: days.slice(0, 8).map((day) => {
           const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(day.date || ''))
           return {
             label: m ? `${m[2]}/${m[3]}/${m[1]}` : String(day.date || ''),
-            value: `${Number(day.count) || 0} · ${fmtUSD(Number(day.amount_usd) || 0)}`,
+            value: `${Number(day.count) || 0} · ${moneyPair(Number(day.amount_usd) || 0, Number(day.amount_khr) || 0)}`,
           }
         }),
       },
     ]
-  }, [fmtUSD, stripData, t, tr])
+  }, [fmtUSD, fmtKHR, stripData, t, tr])
 
   useEffect(() => () => {
     invalidateTrackedRequest(loadRequestRef)

@@ -18,6 +18,7 @@ import FeesReportSection from './FeesReportSection'
 type ReportsHubAppContext = {
   t: (key: string) => string | undefined
   fmtUSD: (value: number | string) => string
+  fmtKHR: (value: number | string) => string
   getPermissionTier: (key: string) => string
 }
 const useApp = useAppHook as unknown as () => ReportsHubAppContext
@@ -36,7 +37,7 @@ function todayIso(): string {
 }
 
 export default function ReportsHub() {
-  const { t, fmtUSD, getPermissionTier } = useApp()
+  const { t, fmtUSD, fmtKHR, getPermissionTier } = useApp()
   const trh = (key: string, fallback: string): string => { const v = t(key); return v && v !== key ? v : fallback }
 
   const canSales = getPermissionTier('sales') !== 'none'
@@ -144,9 +145,9 @@ export default function ReportsHub() {
             {id === 'sales' ? (
               <SalesDailyReport t={t} fmtUSD={fmtUSD} range={range} onRangeChange={setRange} branchId={branchId} embedded active titleNode={titleNode} />
             ) : id === 'returns' ? (
-              <ReturnsReportSection t={t} fmtUSD={fmtUSD} range={range} branchId={branchId} active titleNode={titleNode} />
+              <ReturnsReportSection t={t} fmtUSD={fmtUSD} fmtKHR={fmtKHR} range={range} branchId={branchId} active titleNode={titleNode} />
             ) : (
-              <FeesReportSection t={t} fmtUSD={fmtUSD} range={range} branchId={branchId} active titleNode={titleNode} />
+              <FeesReportSection t={t} fmtUSD={fmtUSD} fmtKHR={fmtKHR} range={range} branchId={branchId} active titleNode={titleNode} />
             )}
           </section>
         )

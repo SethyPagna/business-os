@@ -11,14 +11,15 @@ type TranslateFn = (key: string) => string | undefined
 type MoneyFormatter = (value: number | string) => string
 
 interface FeesReport {
-  totals: { count: number; amount_usd: number }
-  days: Array<{ date: string; count: number; amount_usd: number }>
-  by_type: Array<{ fee_type: string; count: number; amount_usd: number }>
+  totals: { count: number; amount_usd: number; amount_khr: number }
+  days: Array<{ date: string; count: number; amount_usd: number; amount_khr: number }>
+  by_type: Array<{ fee_type: string; count: number; amount_usd: number; amount_khr: number }>
 }
 
 interface FeesReportSectionProps {
   t: TranslateFn
   fmtUSD: MoneyFormatter
+  fmtKHR: MoneyFormatter
   range: DateTimeRange
   branchId?: string
   active?: boolean
@@ -43,13 +44,21 @@ function normalize(raw: unknown): FeesReport {
   const r = (raw || {}) as Partial<FeesReport>
   const totals = (r.totals || {}) as FeesReport['totals']
   return {
-    totals: { count: num(totals.count), amount_usd: num(totals.amount_usd) },
-    days: Array.isArray(r.days) ? r.days.map((d) => ({ date: String(d.date || ''), count: num(d.count), amount_usd: num(d.amount_usd) })) : [],
-    by_type: Array.isArray(r.by_type) ? r.by_type.map((d) => ({ fee_type: String(d.fee_type || ''), count: num(d.count), amount_usd: num(d.amount_usd) })) : [],
+    totals: { count: num(totals.count), amount_usd: num(totals.amount_usd), amount_khr: num(totals.amount_khr) },
+    days: Array.isArray(r.days) ? r.days.map((d) => ({ date: String(d.date || ''), count: num(d.count), amount_usd: num(d.amount_usd), amount_khr: num(d.amount_khr) })) : [],
+    by_type: Array.isArray(r.by_type) ? r.by_type.map((d) => ({ fee_type: String(d.fee_type || ''), count: num(d.count), amount_usd: num(d.amount_usd), amount_khr: num(d.amount_khr) })) : [],
   }
 }
 
-export default function FeesReportSection({ t, fmtUSD, range, branchId, active = true, titleNode }: FeesReportSectionProps) {
+export default function FeesReportSection({ t, fmtUSD, fmtKHR, range, branchId, active = true, titleNode }: FeesReportSectionProps) {
+  // Fees are recorded in EITHER USD or KHR; show whichever are present so a
+  // month of KHR fees no longer reads as "$0.00" (Part 553). No conversion.
+  const moneyPair = (usd: number, khr: number): string => {
+    const parts: string[] = []
+    if (usd) parts.push(fmtUSD(usd))
+    if (khr) parts.push(fmtKHR(khr))
+    return parts.length ? parts.join(' · ') : fmtUSD(0)
+  }
   const [report, setReport] = useState<FeesReport | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
@@ -87,7 +96,7 @@ export default function FeesReportSection({ t, fmtUSD, range, branchId, active =
   // report section (no stat tiles, "|" dividers, scrollable Modal).
   const [openTable, setOpenTable] = useState<'days' | 'types' | null>(null)
 
-  const floatTable = (rows: Array<{ key: string; label: string; count: number; usd: number }>) => (
+  const floatTable = (rows: Array<{ key: string; label: string; count: number; usd: number; khr: number }>) => (
     rows.length === 0 ? (
       <div className="text-xs text-slate-400">{t('no_data') || 'No data'}</div>
     ) : (
@@ -97,7 +106,7 @@ export default function FeesReportSection({ t, fmtUSD, range, branchId, active =
             <tr key={row.key} className="border-b border-slate-100 last:border-0 dark:border-slate-800">
               <td className="max-w-[12rem] truncate py-1.5 pr-2 text-slate-700 dark:text-slate-200">{row.label}</td>
               <td className="py-1.5 pr-2 text-right text-slate-400">×{row.count}</td>
-              <td className="py-1.5 text-right font-medium text-slate-900 dark:text-white">{fmtUSD(row.usd)}</td>
+              <td className="py-1.5 text-right font-medium text-slate-900 dark:text-white">{moneyPair(row.usd, row.khr)}</td>
             </tr>
           ))}
         </tbody>
@@ -136,13 +145,13 @@ export default function FeesReportSection({ t, fmtUSD, range, branchId, active =
         </span>
       </div>
 
-      {/* Totals on their own line below the title row. */}
+      {/* Totals on their own line below the title row. Both currencies show
+          (Part 553) — fees are recorded in USD OR KHR, so a USD-only total
+          hid every KHR fee as "$0.00". */}
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-slate-500 dark:text-slate-400">
         <span>{report?.totals.count ?? 0} {t('fees') || 'fees'}</span>
         <span className="text-slate-300 dark:text-slate-600">|</span>
-        <span>{t('total') || 'Total'} <b className="text-slate-900 dark:text-white">{fmtUSD(report?.totals.amount_usd ?? 0)}</b></span>
-        <span className="text-slate-300 dark:text-slate-600">|</span>
-        <span>{t('avg_fee') || 'Avg fee'} <b className="text-slate-900 dark:text-white">{fmtUSD(report && report.totals.count > 0 ? report.totals.amount_usd / report.totals.count : 0)}</b></span>
+        <span>{t('total') || 'Total'} <b className="text-slate-900 dark:text-white">{moneyPair(report?.totals.amount_usd ?? 0, report?.totals.amount_khr ?? 0)}</b></span>
       </div>
 
       {openTable ? (
@@ -152,8 +161,8 @@ export default function FeesReportSection({ t, fmtUSD, range, branchId, active =
           draggable
         >
           {openTable === 'days'
-            ? floatTable((report?.days ?? []).map((day) => ({ key: day.date, label: displayDay(day.date), count: day.count, usd: day.amount_usd })))
-            : floatTable((report?.by_type ?? []).map((row) => ({ key: row.fee_type, label: row.fee_type, count: row.count, usd: row.amount_usd })))}
+            ? floatTable((report?.days ?? []).map((day) => ({ key: day.date, label: displayDay(day.date), count: day.count, usd: day.amount_usd, khr: day.amount_khr })))
+            : floatTable((report?.by_type ?? []).map((row) => ({ key: row.fee_type, label: row.fee_type, count: row.count, usd: row.amount_usd, khr: row.amount_khr })))}
         </Modal>
       ) : null}
     </div>
