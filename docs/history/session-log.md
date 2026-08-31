@@ -16448,3 +16448,66 @@ machinery (surface render, bulk toolbar, selection/batch session, its
 InventoryStockModals host — roughly half the file). No entry point remains
 (chip gone, focus redirected, /inventory remapped), but the removal is a
 session-sized surgery of its own — left as an open board item.
+
+## Part 562 (Aug 31 2026, pos-card-price lane) — POS card: dedup grouped counts, highest-price only, Selling/VIP relabel (wholesale deferred)
+
+**Ask.** User, on the POS: the grouped product card shows the option count
+twice — a purple `Groups: N` chip AND a `N options · N total in stock` line
+("same thing shown twice"). Keep the bottom one, rename it
+`Options: N | Total Qty: n`. Drop the `$min – $max` price range, "only keep
+the highest price for selling price". "Show selling and VIP same row bottom …
+VIP just say VIP; when clicked show the vip options click on that to continue."
+"Remove the word price … so Selling N, VIP → VIP Y VIP X, Wholesale → N."
+Add a wholesale (បោះដុំ) price. A follow-up mid-turn message fleshed out the
+wholesale spec (products page: detail-modal only; edit in the form pricing
+section; a "wholesale only > number" NOTE, not automation, with an
+automation on/off toggle defaulting OFF; plus "update permissions for image
+upload only").
+
+**Decision (asked the user first).** Wholesale doesn't exist in the data
+model — products carry only selling / VIP(special) / cost, and the three
+price modes are `selling` / `special` / `promotion`. Building it is a
+DB-migration-plus-many-surfaces feature. Asked; user chose "POS display
+first, wholesale later," so this lane shipped only the display/relabel slice
+and captured the full wholesale spec as a follow-up in progress.md's Current
+status. Also asked how VIP should show on a grouped card; user: selling + a
+plain `VIP` on one row, amount revealed on tap.
+
+**What changed.**
+- `frontend/src/components/pos/POS.tsx` (product grid card): removed the
+  purple `Groups: N` chip (dropped the now-unused `groupName`); the bottom
+  row is now `Options: N | Total Qty: n` (capitalised `choiceLabel`,
+  `posCopy('Total Qty', 'ចំនួនសរុប')`, shown whenever `groupMeta.stockTotal`
+  is non-null). The price line no longer renders a `$min – $max` range —
+  a grouped card shows `groupMeta.maxSellingPriceUsd` (highest), a flat one
+  its own selling price — and it now sits in a flex row beside the plain
+  `VIP` tag so selling + VIP share one row. KHR sub-line preserved for flat
+  products.
+- `frontend/src/components/pos/ProductDetailSheet.tsx`: info-row label
+  `label_selling_price`("Price") → `posCopy('Selling', 'តម្លៃលក់')`; both
+  Selling buttons (flat + grouped-variant) drop "Price" → "Selling"; both
+  VIP reveal buttons now read just `VIP` (was "VIP price") before the first
+  tap reveals the amount. Updated the stale `vipRevealed` comment.
+
+**What was found.** No wholesale price field or price mode anywhere — the
+`wholesale` grep hits are all the English word in unrelated comments. The
+VIP button's pre-reveal label lived in two places (flat + grouped) at
+different indentation; a `replace_all` first caught only the grouped one, so
+the flat copy was fixed separately (verified by grep after).
+
+**Verified.** `npm run typecheck` (tsc --noEmit, all 427 files) — clean.
+`npm run check:source` — PASS (427 files parsed). Diff reviewed. No live POS
+screenshot: the grouped-product grid needs an authenticated, seeded session
+against the worker/D1, and another session's dev server already holds the
+folder; the edits are pure display/label JSX with no data-flow change. HMR
+on the already-running dev server picks these up for anyone with the POS
+open. Commit `e6959534` (two files, path-scoped). progress.md not committed
+(shared checkout — claim visible on disk).
+
+**Not done.** The whole wholesale (បោះដុំ) feature — new persisted
+`wholesale_price_usd/khr` field + migration, product-form pricing input,
+products detail-modal-only display, the "wholesale only > N" note + its
+default-off automation toggle, a `wholesale` POS price mode through
+cart/receipt/sales, and the permission-editor + i18n coverage (incl. the
+"image upload only" permission the user flagged). Full spec is in
+progress.md → Current status → POS-CARD-PRICE LANE follow-up.
