@@ -153,6 +153,8 @@ function makeDb() {
       return Promise.resolve(run())
     },
   }
+  // import staging tables route through D1Compat.staging; single-DB mock -> self.
+  db.staging = db
   return { sqlite, db }
 }
 

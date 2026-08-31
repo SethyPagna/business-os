@@ -12,7 +12,7 @@ import { MAX_IMAGES_PER_PRODUCT, buildImageDisplayName } from '../lib/importImag
 import { bumpVersion } from '../lib/cache'
 import { broadcast } from '../durable-objects/broadcastHub'
 import { canEditImportDecisions, canReplaceImportCsv, retryModeForImportStatus } from '../lib/importLifecycleGate'
-import { importJobFullDeleteStatements } from '../lib/importRetention'
+import { importJobFullDeleteStatements, importJobStagingDeleteStatements } from '../lib/importRetention'
 import { buildImportReviewOrder, buildImportReviewWhere, buildUnresolvedContactReviewWhere, buildUnresolvedProductReviewWhere } from '../lib/importReviewQuery'
 import type { Env } from '../index'
 
@@ -308,11 +308,11 @@ app.get('/:id/review', async (c) => {
   const db = getDb(c.env)
   const actionFilter: RowAction | null = (['create', 'update', 'skip', 'error'] as const).includes(filter as RowAction) ? filter as RowAction : null
   const where = buildImportReviewWhere({ jobId: id, action: actionFilter, query, warningKinds })
-  const totalRow = await db.prepare(`SELECT COUNT(*) AS n FROM import_job_rows WHERE ${where.sql}`)
+  const totalRow = await db.staging.prepare(`SELECT COUNT(*) AS n FROM import_job_rows WHERE ${where.sql}`)
     .get<{ n: number }>(where.params)
   const total = Number(totalRow?.n || 0)
   const offset = (page - 1) * pageSize
-  const rows = await db.prepare(`
+  const rows = await db.staging.prepare(`
     SELECT row_number, action, identifier, result_json
     FROM import_job_rows
     WHERE ${where.sql}
@@ -345,24 +345,24 @@ app.get('/:id/review', async (c) => {
   let unresolvedContactConflicts = 0
   if (contactJob) {
     const unresolvedWhere = buildUnresolvedContactReviewWhere(id, JSON.stringify(decisionsByRowNumber))
-    const unresolvedRow = await db.prepare(`SELECT COUNT(*) AS n FROM import_job_rows WHERE ${unresolvedWhere.sql}`)
+    const unresolvedRow = await db.staging.prepare(`SELECT COUNT(*) AS n FROM import_job_rows WHERE ${unresolvedWhere.sql}`)
       .get<{ n: number }>(unresolvedWhere.params)
     unresolvedContactConflicts = Number(unresolvedRow?.n || 0)
   }
   let unresolvedProductConflicts = 0
   if (String(job.type || '') === 'products') {
     const unresolvedWhere = buildUnresolvedProductReviewWhere(id, JSON.stringify(decisionsByRowNumber))
-    const unresolvedRow = await db.prepare(`SELECT COUNT(*) AS n FROM import_job_rows WHERE ${unresolvedWhere.sql}`)
+    const unresolvedRow = await db.staging.prepare(`SELECT COUNT(*) AS n FROM import_job_rows WHERE ${unresolvedWhere.sql}`)
       .get<{ n: number }>(unresolvedWhere.params)
     unresolvedProductConflicts = Number(unresolvedRow?.n || 0)
   }
 
-  const countRows = await db.prepare(`SELECT action, COUNT(*) AS n FROM import_job_rows WHERE job_id = @id AND phase = 'analyze' GROUP BY action`)
+  const countRows = await db.staging.prepare(`SELECT action, COUNT(*) AS n FROM import_job_rows WHERE job_id = @id AND phase = 'analyze' GROUP BY action`)
     .all<{ action: 'create' | 'update' | 'skip' | 'error'; n: number }>({ id })
   const counts = { create: 0, update: 0, skip: 0, error: 0 }
   for (const row of countRows) counts[row.action] = row.n
 
-  const warnedRow = await db.prepare(
+  const warnedRow = await db.staging.prepare(
     `SELECT COUNT(*) AS n FROM import_job_rows WHERE job_id = @id AND phase = 'analyze' AND action != 'error' AND json_extract(result_json, '$.message') IS NOT NULL`,
   ).get<{ n: number }>({ id })
 
@@ -395,12 +395,12 @@ app.get('/:id/report', async (c) => {
   // re-classifies against live DB state, which can legitimately drift from
   // what was originally imported (see runImportApply's own comment on
   // that) and isn't what a "what happened in this import" report is asking.
-  const rows = await db.prepare(
+  const rows = await db.staging.prepare(
     `SELECT row_number, action, identifier, result_json FROM import_job_rows WHERE job_id = @id AND phase = 'analyze' ORDER BY row_number ASC`,
   ).all<{ row_number: number; action: string; identifier: string | null; result_json: string }>({ id })
   const parsed = rows.map((r) => JSON.parse(r.result_json) as ImportRowResult)
 
-  const countRows = await db.prepare(`SELECT action, COUNT(*) AS n FROM import_job_rows WHERE job_id = @id AND phase = 'analyze' GROUP BY action`)
+  const countRows = await db.staging.prepare(`SELECT action, COUNT(*) AS n FROM import_job_rows WHERE job_id = @id AND phase = 'analyze' GROUP BY action`)
     .all<{ action: 'create' | 'update' | 'skip' | 'error'; n: number }>({ id })
   const counts = { create: 0, update: 0, skip: 0, error: 0 }
   for (const row of countRows) counts[row.action] = row.n
@@ -1102,7 +1102,7 @@ app.post('/:id/approve', async (c) => {
       ? policy.decisionsByRowNumber
       : {}
     const unresolvedWhere = buildUnresolvedContactReviewWhere(id, JSON.stringify(decisions))
-    const unresolved = await getDb(c.env).prepare(`SELECT COUNT(*) AS n FROM import_job_rows WHERE ${unresolvedWhere.sql}`)
+    const unresolved = await getDb(c.env).staging.prepare(`SELECT COUNT(*) AS n FROM import_job_rows WHERE ${unresolvedWhere.sql}`)
       .get<{ n: number }>(unresolvedWhere.params)
     if (Number(unresolved?.n || 0) > 0) {
       await auditImportEvent(c, 'import_job_approve_blocked', id, job, job, {
@@ -1121,7 +1121,7 @@ app.post('/:id/approve', async (c) => {
       ? policy.decisionsByRowNumber
       : {}
     const unresolvedWhere = buildUnresolvedProductReviewWhere(id, JSON.stringify(decisions))
-    const unresolved = await getDb(c.env).prepare(`SELECT COUNT(*) AS n FROM import_job_rows WHERE ${unresolvedWhere.sql}`)
+    const unresolved = await getDb(c.env).staging.prepare(`SELECT COUNT(*) AS n FROM import_job_rows WHERE ${unresolvedWhere.sql}`)
       .get<{ n: number }>(unresolvedWhere.params)
     if (Number(unresolved?.n || 0) > 0) {
       await auditImportEvent(c, 'import_job_approve_blocked', id, job, job, {
@@ -1226,6 +1226,9 @@ async function deleteJobData(c: any, id: string) {
   // leaving signature/commit/guard/group/image-plan rows orphaned forever
   // -- the "orphan staging rows" the K4 Phase-0 audit measured.
   await db.batch(importJobFullDeleteStatements(id))
+  // The two bulk staging tables live on the separate import-staging DB and
+  // cannot ride the batch above (see lib/db.ts / importRetention.ts).
+  await db.staging.batch(importJobStagingDeleteStatements(id))
 }
 
 async function handleDelete(c: any) {

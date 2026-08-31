@@ -410,6 +410,18 @@ app.post('/reset-data', async (c) => {
 
     await db.batch(statements)
 
+    // mode 'all' wipes the import tables in `statements` above; the two BULK
+    // members (import_job_rows, import_job_source_rows) live on the separate
+    // import-staging DB (see lib/db.ts), so the DELETEs above hit only the
+    // main DB's now-empty shells -- clear the real staging on its own DB.
+    // No-op in single-DB environments where db.staging === db.
+    if (mode === 'all') {
+      await db.staging.batch([
+        { sql: `DELETE FROM import_job_rows` },
+        { sql: `DELETE FROM import_job_source_rows` },
+      ])
+    }
+
     const resetSweepErrors: string[] = []
     if (mode === 'all') {
       // Best-effort R2 cleanup -- not part of the atomic D1 batch (R2 has no
@@ -728,6 +740,14 @@ app.post('/factory-reset', async (c) => {
     const droppedCustomTables = await dropAllCustomTables(c.env)
 
     await db.batch(FACTORY_RESET_TABLES.map((table) => ({ sql: `DELETE FROM "${table}"` })))
+    // The two bulk import-staging tables live on the separate import-staging DB
+    // (see lib/db.ts); FACTORY_RESET_TABLES' DELETE of import_job_rows hits only
+    // the main DB's empty shell, so clear the real staging on its own DB. No-op
+    // in single-DB environments.
+    await db.staging.batch([
+      { sql: `DELETE FROM import_job_rows` },
+      { sql: `DELETE FROM import_job_source_rows` },
+    ])
 
     const invariants = await ensureCoreDataInvariants(c.env)
 

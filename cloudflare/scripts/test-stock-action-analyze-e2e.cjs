@@ -53,7 +53,7 @@ const engine = instantiate('importEngine.ts', shim)
 Module._load = originalLoad
 
 function asProductionDb(db) {
-  return {
+  const wrapper = {
     prepare(sql) {
       const stmt = db.prepare(sql)
       return {
@@ -70,6 +70,9 @@ function asProductionDb(db) {
     },
     batch: (statements) => db.batch(statements),
   }
+  // import staging tables route through D1Compat.staging; single-DB mock -> self.
+  wrapper.staging = wrapper
+  return wrapper
 }
 
 function makeAssets(csv) {

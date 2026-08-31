@@ -779,7 +779,7 @@ async function saveMaterializeState(db: D1Compat, jobId: string, state: Material
 // was never materialized yet, so it's safe to call unconditionally on every
 // CSV upload rather than needing the caller to first check.
 export async function resetMaterializeState(db: D1Compat, jobId: string): Promise<void> {
-  await db.prepare(`DELETE FROM import_job_source_rows WHERE job_id = @id`).run({ id: jobId })
+  await db.staging.prepare(`DELETE FROM import_job_source_rows WHERE job_id = @id`).run({ id: jobId })
   await db.prepare(`UPDATE import_jobs SET materialize_state_json = NULL, materialize_done = 0 WHERE id = @id`).run({ id: jobId })
 }
 
@@ -804,7 +804,7 @@ async function ensureSourceRowsMaterialized(env: Env, db: D1Compat, jobId: strin
   // resumed offset wrong. Only affects jobs mid-materialize across a deploy.
   if (state.byteOffset == null) {
     if (state.charOffset !== 0) {
-      await db.prepare(`DELETE FROM import_job_source_rows WHERE job_id = @id`).run({ id: jobId })
+      await db.staging.prepare(`DELETE FROM import_job_source_rows WHERE job_id = @id`).run({ id: jobId })
     }
     state.byteOffset = 0
     state.charOffset = 0
@@ -819,7 +819,7 @@ async function ensureSourceRowsMaterialized(env: Env, db: D1Compat, jobId: strin
   // already have persisted rows without the new inherited key. Restart it
   // once instead of mixing old and new grouping rules in one review seal.
   if (type === 'sales' && state.rowsWritten > 0 && state.salesLastGroupKey === undefined) {
-    await db.prepare(`DELETE FROM import_job_source_rows WHERE job_id = @id`).run({ id: jobId })
+    await db.staging.prepare(`DELETE FROM import_job_source_rows WHERE job_id = @id`).run({ id: jobId })
     state.byteOffset = 0
     state.charOffset = 0
     state.inQuotes = false
@@ -939,7 +939,9 @@ async function ensureSourceRowsMaterialized(env: Env, db: D1Compat, jobId: strin
     })
     sequence += 1
   }
-  if (statements.length) await runD1BatchInChunks(db, statements)
+  // db.staging: import_job_source_rows lives in the import-staging DB (see
+  // lib/db.ts). This batch is staging-only -- nothing operational rides it.
+  if (statements.length) await runD1BatchInChunks(db.staging, statements)
 
   // The byte cursor is what the next range read resumes from. charOffset is
   // still tracked because it is what the parser speaks, but it is now an
@@ -966,7 +968,7 @@ async function fetchMaterializedMeta(db: D1Compat, jobId: string): Promise<{ typ
   if (!job) return null
   const fileRow = await db.prepare(`SELECT original_name FROM import_job_files WHERE job_id = @job_id AND kind = 'csv' ORDER BY id DESC LIMIT 1`)
     .get<{ original_name: string | null }>({ job_id: jobId })
-  const countRow = await db.prepare(`SELECT COUNT(*) AS n FROM import_job_source_rows WHERE job_id = @id`).get<{ n: number }>({ id: jobId })
+  const countRow = await db.staging.prepare(`SELECT COUNT(*) AS n FROM import_job_source_rows WHERE job_id = @id`).get<{ n: number }>({ id: jobId })
   return { type: job.type, policyJson: job.policy_json, fileName: fileRow?.original_name || 'import.csv', totalRows: countRow?.n || 0 }
 }
 
@@ -975,7 +977,7 @@ async function fetchMaterializedMeta(db: D1Compat, jobId: string): Promise<{ typ
 // replacing the old decided.rows.slice(cursor, cursor+N) over a freshly
 // reparsed full file.
 async function readMaterializedWindow(db: D1Compat, jobId: string, cursor: number, limit: number, decisions: Record<string, RowDecision>): Promise<ParsedCsvRow[]> {
-  const rows = await db.prepare(`SELECT data_json FROM import_job_source_rows WHERE job_id = @id AND sequence >= @cursor AND sequence < @end ORDER BY sequence ASC`)
+  const rows = await db.staging.prepare(`SELECT data_json FROM import_job_source_rows WHERE job_id = @id AND sequence >= @cursor AND sequence < @end ORDER BY sequence ASC`)
     .all<{ data_json: string }>({ id: jobId, cursor, end: cursor + limit })
   return rows.map((r) => {
     const row = JSON.parse(r.data_json) as ParsedCsvRow
@@ -993,7 +995,7 @@ async function readMaterializedWindow(db: D1Compat, jobId: string, cursor: numbe
 // wide file could still risk the CPU budget on products/sales imports
 // specifically. Not chunked further in this pass; see progress.md.
 async function readAllMaterializedRows(db: D1Compat, jobId: string, decisions: Record<string, RowDecision>): Promise<ParsedCsvRow[]> {
-  const rows = await db.prepare(`SELECT data_json FROM import_job_source_rows WHERE job_id = @id ORDER BY sequence ASC`).all<{ data_json: string }>({ id: jobId })
+  const rows = await db.staging.prepare(`SELECT data_json FROM import_job_source_rows WHERE job_id = @id ORDER BY sequence ASC`).all<{ data_json: string }>({ id: jobId })
   return rows.map((r) => {
     const row = JSON.parse(r.data_json) as ParsedCsvRow
     return applyDecision(row, decisions[String(row._rowNumber)])
@@ -3110,7 +3112,7 @@ async function saveChunkState(db: D1Compat, jobId: string, cursor: number, state
 // one. See runImportAnalyze/runImportApply's own "is this a fresh start"
 // check for how a fresh run is detected.
 async function resetChunkState(db: D1Compat, jobId: string, phase: 'analyze' | 'apply'): Promise<void> {
-  await db.prepare(`DELETE FROM import_job_rows WHERE job_id = @id AND phase = @phase`).run({ id: jobId, phase })
+  await db.staging.prepare(`DELETE FROM import_job_rows WHERE job_id = @id AND phase = @phase`).run({ id: jobId, phase })
   // The cross-chunk dedupe ledger is per-RUN, not per-file: a fresh analyze
   // must not inherit the previous run's "already seen" marks, or rows would
   // be reported as merging with rows from a run that no longer exists. This
@@ -3283,7 +3285,7 @@ const SALES_GROUP_KEY_SQL = `COALESCE(
  * invocations and written twice.
  */
 async function countSalesGroups(db: D1Compat, jobId: string): Promise<number> {
-  const row = await db.prepare(`
+  const row = await db.staging.prepare(`
     SELECT COUNT(*) AS n FROM (
       SELECT ${SALES_GROUP_KEY_SQL} AS group_key
       FROM import_job_source_rows WHERE job_id = @id
@@ -3314,7 +3316,7 @@ async function readSalesGroupWindow(
   cursor: number,
   limit: number,
 ): Promise<Array<[string, ParsedCsvRow[]]>> {
-  const keyRows = await db.prepare(`
+  const keyRows = await db.staging.prepare(`
     SELECT ${SALES_GROUP_KEY_SQL} AS group_key, MIN(sequence) AS first_seq
     FROM import_job_source_rows WHERE job_id = @id
     GROUP BY group_key
@@ -3328,7 +3330,7 @@ async function readSalesGroupWindow(
   const dataRows: Array<{ group_key: string; data_json: string }> = []
   for (const slice of chunkForBinding(keyRows.map((row) => row.group_key), 1)) {
     const { sql, params } = buildInClause('k', slice)
-    const chunkRows = await db.prepare(`
+    const chunkRows = await db.staging.prepare(`
       SELECT ${SALES_GROUP_KEY_SQL} AS group_key, data_json
       FROM import_job_source_rows
       WHERE job_id = @id AND ${SALES_GROUP_KEY_SQL} IN (${sql})
@@ -3403,7 +3405,9 @@ async function persistChunkResults(db: D1Compat, jobId: string, phase: 'analyze'
       result_json: JSON.stringify(r),
     },
   }))
-  await runD1BatchInChunks(db, statements)
+  // db.staging: import_job_rows lives in the import-staging DB (see
+  // lib/db.ts). Staging-only batch -- the per-row analyze/apply result log.
+  await runD1BatchInChunks(db.staging, statements)
 }
 
 // ---------------------------------------------------------------------------
@@ -3563,7 +3567,7 @@ export async function runImportAnalyze(env: Env, jobId: string, queueLatencyMs?:
       await sealUnifiedStockAnalyzeConflicts(db, jobId)
       sw.lap('sealStockActionConflictsMs')
     }
-    const counts = await db.prepare(`SELECT action, COUNT(*) AS n FROM import_job_rows WHERE job_id = @id AND phase = 'analyze' GROUP BY action`)
+    const counts = await db.staging.prepare(`SELECT action, COUNT(*) AS n FROM import_job_rows WHERE job_id = @id AND phase = 'analyze' GROUP BY action`)
       .all<{ action: RowAction; n: number }>({ id: jobId })
     const byAction: Record<RowAction, number> = { create: 0, update: 0, skip: 0, error: 0 }
     for (const row of counts) byAction[row.action] = row.n
@@ -3578,7 +3582,7 @@ export async function runImportAnalyze(env: Env, jobId: string, queueLatencyMs?:
     // it never actually reported anything beyond what `failed_rows`
     // already did; this is the real count so the tracker widget can show
     // it distinctly from hard errors.
-    const warnedRow = await db.prepare(
+    const warnedRow = await db.staging.prepare(
       `SELECT COUNT(*) AS n FROM import_job_rows WHERE job_id = @id AND phase = 'analyze' AND action != 'error' AND json_extract(result_json, '$.message') IS NOT NULL`,
     ).get<{ n: number }>({ id: jobId })
     const warned = warnedRow?.n || 0
@@ -3920,7 +3924,7 @@ type DuplicateProductSnapshotGroup = {
 // opening import lot brought to the same grouped quantity, preserving the
 // branch_stock = active branch_batch_stock invariant from the first import.
 export async function reconcileDuplicateProductSnapshotRows(db: D1Compat, jobId: string): Promise<number> {
-  const groups = await db.prepare(`
+  const groups = await db.staging.prepare(`
     WITH normalized AS MATERIALIZED (
       SELECT
         CAST(COALESCE(
@@ -3994,7 +3998,7 @@ async function finalizeImportApply(
   unifiedGroupCount = 0,
   aggregatedSnapshotGroupCount = 0,
 ): Promise<{ applied: number; failed: number }> {
-  const finalCounts = await db.prepare(`SELECT action, COUNT(*) AS n FROM import_job_rows WHERE job_id = @id AND phase = 'apply' GROUP BY action`)
+  const finalCounts = await db.staging.prepare(`SELECT action, COUNT(*) AS n FROM import_job_rows WHERE job_id = @id AND phase = 'apply' GROUP BY action`)
     .all<{ action: RowAction; n: number }>({ id: jobId })
   const byAction: Record<RowAction, number> = { create: 0, update: 0, skip: 0, error: 0 }
   for (const row of finalCounts) byAction[row.action] = row.n
@@ -4006,7 +4010,7 @@ async function finalizeImportApply(
   // status (keeps the "Download errors" / "Retry" actions visible after
   // the import finishes).
   const finalStatus = totalFailed > 0 ? 'completed_with_errors' : 'completed'
-  const warnedApplyRow = await db.prepare(
+  const warnedApplyRow = await db.staging.prepare(
     `SELECT COUNT(*) AS n FROM import_job_rows WHERE job_id = @id AND phase = 'apply' AND action != 'error' AND json_extract(result_json, '$.message') IS NOT NULL`,
   ).get<{ n: number }>({ id: jobId })
   const warnedApply = warnedApplyRow?.n || 0
@@ -4239,7 +4243,7 @@ export async function applyStockActionsJob(
     return { applied: 0, failed: 0 }
   }
 
-  const rowCount = await db.prepare(`SELECT COUNT(*) AS n FROM import_job_source_rows WHERE job_id = @id`).get<{ n: number }>({ id: jobId })
+  const rowCount = await db.staging.prepare(`SELECT COUNT(*) AS n FROM import_job_source_rows WHERE job_id = @id`).get<{ n: number }>({ id: jobId })
   const totalRows = Number(rowCount?.n || 0)
   if (!totalRows) throw new Error('No CSV file uploaded for this job')
 
@@ -4524,7 +4528,7 @@ async function applyStockActionsContinuation(
   }
 
   outer: while (unitsDispatched < STOCK_ACTION_MAX_UNITS) {
-    const batch = await db.prepare(`
+    const batch = await db.staging.prepare(`
       SELECT row_number, group_index, result_json FROM import_job_rows
       WHERE job_id = @id AND phase = 'apply' AND row_number > @after
       ORDER BY row_number LIMIT ${STOCK_ACTION_DISPATCH_READ}
@@ -4546,10 +4550,10 @@ async function applyStockActionsContinuation(
         // member rows cost nothing. After a crash between the writer's seal
         // and the row re-persist below, the resumed dispatch re-runs the
         // writer, whose per-group seal makes it a no-op.
-        const minRow = await db.prepare(`SELECT MIN(row_number) AS m FROM import_job_rows WHERE job_id = @id AND phase = 'apply' AND group_index = @gi`)
+        const minRow = await db.staging.prepare(`SELECT MIN(row_number) AS m FROM import_job_rows WHERE job_id = @id AND phase = 'apply' AND group_index = @gi`)
           .get<{ m: number }>({ id: jobId, gi: record.group_index })
         if (Number(minRow?.m) !== record.row_number) continue
-        const memberRows = await db.prepare(`SELECT row_number, result_json FROM import_job_rows WHERE job_id = @id AND phase = 'apply' AND group_index = @gi ORDER BY row_number`)
+        const memberRows = await db.staging.prepare(`SELECT row_number, result_json FROM import_job_rows WHERE job_id = @id AND phase = 'apply' AND group_index = @gi ORDER BY row_number`)
           .all<{ row_number: number; result_json: string }>({ id: jobId, gi: record.group_index })
         const groupResults = memberRows.map((m) => parseRow(m.result_json)).filter((m): m is StockActionImportResult => !!m && !!(m.data as unknown as UnifiedStockResolvedRow)?.plan)
         if (!groupResults.length) continue
@@ -4800,7 +4804,7 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
       return { applied: 0, failed: 0 }
     }
 
-    const totalRows = await db.prepare(`SELECT COUNT(*) AS n FROM import_job_source_rows WHERE job_id = @id`).get<{ n: number }>({ id: jobId })
+    const totalRows = await db.staging.prepare(`SELECT COUNT(*) AS n FROM import_job_source_rows WHERE job_id = @id`).get<{ n: number }>({ id: jobId })
     sw.lap('fetchAndParseMs') // now a COUNT + the getChunkState read below, not a full re-parse -- see ensureSourceRowsMaterialized above
     if (!totalRows?.n) throw new Error('No CSV file uploaded for this job')
     const { cursor, state } = await getChunkState(db, jobId)

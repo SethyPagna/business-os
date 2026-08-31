@@ -8,7 +8,7 @@ import type { D1Compat } from './db'
 import { COST_BATCH_CONFLICT_MESSAGE } from './stockActionResolver'
 
 export async function sealUnifiedStockAnalyzeConflicts(db: D1Compat, jobId: string): Promise<number> {
-  const result = await db.prepare(`
+  const result = await db.staging.prepare(`
     WITH conflict_identities AS (
       SELECT json_extract(result_json, '$.data.identityKey') AS identity_key
       FROM import_job_rows
@@ -55,7 +55,7 @@ export async function sealUnifiedStockAnalyzeConflicts(db: D1Compat, jobId: stri
 }
 
 export async function countUnifiedStockConfirmationRows(db: D1Compat, jobId: string): Promise<number> {
-  const row = await db.prepare(`
+  const row = await db.staging.prepare(`
     SELECT COUNT(DISTINCT rows.row_number) AS n
     FROM import_job_rows rows,
          json_each(COALESCE(json_extract(rows.result_json, '$.warnings'), json('[]'))) warning

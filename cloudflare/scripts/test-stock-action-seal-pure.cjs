@@ -31,6 +31,9 @@ const db = {
     }
   },
 }
+// import_job_rows lives on the import-staging DB (D1Compat.staging). Mirror the
+// real contract: .staging defaults to the same handle in a single-DB setup.
+db.staging = db
 const insert = sqlite.prepare(`INSERT INTO import_job_rows VALUES (@job, 'analyze', @row, @json)`)
 function add(row, identityKey, costPriceUsd, batchLabel, warnings = []) {
   insert.run({
