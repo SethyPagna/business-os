@@ -309,17 +309,35 @@ export default {
       // were a good state; the sweeps behind it write too. The next 6h tick
       // runs normally once maintenance clears.
       if (await getMaintenance(env)) return
-      await maybeRunScheduledBackup(env)
-      await maybeRunScheduledDriveSync(env)
-      await maybeRunScheduledAuditLogRetention(env)
-      // K4: import-artifact retention (24h detail / 7d summary). Swallows
-      // its own errors, so it cannot break the image audit behind it.
-      await maybeRunScheduledImportRetention(env)
-      // Last on purpose: it is the only one of these that is optional to
-      // the business. A backup must never be skipped because an image
-      // sweep ran long, and maybeRunScheduledImageAudit swallows its own
-      // errors so it cannot break the chain either.
-      await maybeRunScheduledImageAudit(env)
+
+      // Each sweep runs in its OWN guard. These used to be a bare await-chain,
+      // so the FIRST step to throw aborted every step behind it -- and the
+      // heaviest, maybeRunScheduledBackup, is exactly the one that starts
+      // throwing once the database grows large (a full backup on a multi-
+      // hundred-MB D1 can hit the CPU / wall-time ceiling, and its create
+      // path is not internally caught). That silently starved import- and
+      // audit-log retention on every tick, so the import staging those sweeps
+      // prune piled up unbounded -- which made the database larger and the
+      // backup even more likely to fail: a self-reinforcing spiral that took
+      // the production DB to ~661 MB, ~65% stale import staging (see
+      // importRetention.ts). Isolating each step means a failing backup can
+      // no longer stop retention from reclaiming the space that lets the next
+      // backup succeed. Order is unchanged (backup first, image-audit last);
+      // independence changes only what a failure does to the steps after it.
+      const runStep = async (label: string, step: () => Promise<unknown>) => {
+        try {
+          await step()
+        } catch (error) {
+          console.error(`[scheduled] ${label} failed`, (error as Error)?.message || error)
+        }
+      }
+      await runStep('backup', () => maybeRunScheduledBackup(env))
+      await runStep('drive-sync', () => maybeRunScheduledDriveSync(env))
+      await runStep('audit-log-retention', () => maybeRunScheduledAuditLogRetention(env))
+      // K4: import-artifact retention (24h detail / 7d summary).
+      await runStep('import-retention', () => maybeRunScheduledImportRetention(env))
+      // Last on purpose: it is the only one of these optional to the business.
+      await runStep('image-audit', () => maybeRunScheduledImageAudit(env))
     })())
   },
 }
