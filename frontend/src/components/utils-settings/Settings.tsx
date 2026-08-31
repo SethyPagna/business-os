@@ -79,6 +79,7 @@ interface AppContextValue {
   user?: AppUser | null
   notify: NotifyFn
   deviceTimezone?: string
+  getPermissionTier: (key: string) => string
 }
 
 interface SettingsApi {
@@ -471,7 +472,12 @@ function SettingsSection({
 }
 
 export default function Settings() {
-  const { t, settings, saveSettings, loadSettings, user, notify, deviceTimezone } = useApp()
+  const { t, settings, saveSettings, loadSettings, user, notify, deviceTimezone, getPermissionTier } = useApp()
+  // Part 557: 'settings' is a view-tier section. A View-only grant can open
+  // this page (reading settings is open to any signed-in user) but cannot
+  // save -- the Save button is disabled and the backend refuses the POST
+  // (strict `settings === true`). Full Access (tier 'full') can save.
+  const canEditSettings = getPermissionTier('settings') === 'full'
   const [pmList, setPmList] = useState<string[]>([])
   const [newPm, setNewPm] = useState('')
   const [form, setForm] = useState<SettingsRecord>({})
@@ -830,6 +836,10 @@ export default function Settings() {
   }
 
   const handleSaveSettings = async () => {
+    if (!canEditSettings) {
+      notify(t('settings_view_only_notice') || 'You have view-only access to Settings. Full Access is required to save changes.', 'error')
+      return
+    }
     if (!beginSingleAction(settingsSaveInFlightRef, { blocked: savingSettings })) return
     if (uploadingImage) {
       finishSingleAction(settingsSaveInFlightRef)
@@ -946,10 +956,18 @@ export default function Settings() {
           onChange={handleSettingsSectionChange}
           storageKey={sectionStorageKey}
         />
-        <button type="button" className="btn-primary inline-flex shrink-0 items-center gap-2 whitespace-nowrap px-4 py-2 text-sm font-medium sm:px-5 sm:py-2.5 sm:text-base" onClick={handleSaveSettings} disabled={savingSettings || uploadingImage}>
-          <Save className="h-4 w-4 sm:h-5 sm:w-5" />
-          <span>{savingSettings ? (t('saving') || 'Saving...') : t('save')}</span>
-        </button>
+        {canEditSettings ? (
+          <button type="button" className="btn-primary inline-flex shrink-0 items-center gap-2 whitespace-nowrap px-4 py-2 text-sm font-medium sm:px-5 sm:py-2.5 sm:text-base" onClick={handleSaveSettings} disabled={savingSettings || uploadingImage}>
+            <Save className="h-4 w-4 sm:h-5 sm:w-5" />
+            <span>{savingSettings ? (t('saving') || 'Saving...') : t('save')}</span>
+          </button>
+        ) : (
+          // View-only grant: no Save button, a plain read-only badge instead
+          // (Part 557). The backend refuses the POST regardless.
+          <span className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-teal-50 px-3 py-2 text-sm font-medium text-teal-700 dark:bg-teal-950/30 dark:text-teal-200">
+            {t('view_only') || 'View only'}
+          </span>
+        )}
       </div>
 
       <LoadingWatchdog

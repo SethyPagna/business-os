@@ -34,7 +34,15 @@ export function parseJsonObject(value: string | null | undefined): Record<string
 // (`=== true`, not just truthy) so that a 'review' string can never be
 // silently read as a full grant by a call site that hasn't been updated to
 // use getPermissionTier() -- see that function's own comment.
-export type PermissionValue = boolean | 'review'
+// A permission value is normally a plain boolean (Full / None). Two string
+// middle tiers exist, each only for the section keys that opt in:
+//   'review' -> writes go to the approval queue (REVIEW_TIER_KEYS)
+//   'view'   -> read-only: the page/data is visible but every write is blocked
+//               (VIEW_TIER_KEYS). Because hasPermission() is strict `=== true`,
+//               a 'view' value already fails every write check that uses it --
+//               the only thing getPermissionTier() adds is letting reads /
+//               page-access see 'view' as "allowed, not none".
+export type PermissionValue = boolean | 'review' | 'view'
 
 export function parsePermissions(user: PermissionUser): Record<string, PermissionValue> {
   return parseJsonObject(user?.permissions) as Record<string, PermissionValue>
@@ -129,7 +137,16 @@ export const REVIEW_TIER_KEYS = new Set([
   'contacts',
 ])
 
-export type PermissionTier = 'full' | 'review' | 'none'
+// Sections whose middle tier is READ-ONLY ('view'): the page and its data are
+// visible, but every write is blocked. Used for coarse admin-ish areas that
+// have no approval-queue workflow but genuinely benefit from a see-but-don't-
+// touch grant (an auditor / trainee role). Keep in sync with the frontend's
+// own VIEW_TIER_KEYS. A key belongs to at most ONE of REVIEW_/VIEW_TIER_KEYS.
+export const VIEW_TIER_KEYS = new Set([
+  'settings',
+])
+
+export type PermissionTier = 'full' | 'review' | 'view' | 'none'
 
 // The tier-aware read every Review-Required-gated write route should use
 // instead of hasPermission() for a REVIEW_TIER_KEYS section: 'full' means
@@ -147,6 +164,7 @@ export function getPermissionTier(user: PermissionUser, key: string | null | und
   const raw = permissions[normalized]
   if (raw === true) return 'full'
   if (raw === 'review' && REVIEW_TIER_KEYS.has(normalized)) return 'review'
+  if (raw === 'view' && VIEW_TIER_KEYS.has(normalized)) return 'view'
   return 'none'
 }
 

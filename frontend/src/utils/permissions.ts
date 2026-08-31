@@ -26,7 +26,7 @@ export function parsePermissionMap(value: unknown): PermissionMap {
 // plain boolean (Full Access / None); the Review Required tier adds a
 // third possible value, the literal string 'review', but ONLY for the
 // section keys in REVIEW_TIER_KEYS below.
-export type PermissionValue = boolean | 'review'
+export type PermissionValue = boolean | 'review' | 'view'
 
 // Keep in sync with cloudflare/src/lib/permissions.ts's REVIEW_TIER_KEYS
 // AND frontend/src/components/users/permissionDefinitions.ts's `tier: true`
@@ -59,7 +59,13 @@ export type PermissionValue = boolean | 'review'
 // left disagreeing until this fix.
 export const REVIEW_TIER_KEYS = new Set<string>(['fees', 'branches', 'products', 'inventory', 'returns', 'contacts'])
 
-export type PermissionTier = 'full' | 'review' | 'none'
+// Sections whose middle tier is READ-ONLY 'view' (see cloudflare/src/lib/
+// permissions.ts's VIEW_TIER_KEYS -- kept in sync). 'view' means the page is
+// visible but every write is blocked; a key belongs to at most ONE of
+// REVIEW_/VIEW_TIER_KEYS.
+export const VIEW_TIER_KEYS = new Set<string>(['settings'])
+
+export type PermissionTier = 'full' | 'review' | 'view' | 'none'
 
 // Tier-aware read for a single merged-permissions map (already
 // role+user-merged -- callers should pass the same merged object
@@ -75,6 +81,7 @@ export function getPermissionTierFromMap(merged: PermissionMap, key: string, isA
   const raw = merged[normalized]
   if (raw === true) return 'full'
   if (raw === 'review' && REVIEW_TIER_KEYS.has(normalized)) return 'review'
+  if (raw === 'view' && VIEW_TIER_KEYS.has(normalized)) return 'view'
   return 'none'
 }
 

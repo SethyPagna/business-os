@@ -209,16 +209,23 @@ export const PERMISSION_ACTIONS: Record<string, PermissionAction[]> = {
   ],
 }
 
-export type PermissionTierValue = 'full' | 'review' | 'none'
+// 'view' (Part 557) is the read-only middle tier for VIEW_TIER_KEYS sections.
+// Those sections carry NO per-action table (their rule is simply: reads work,
+// every write needs Full), so 'view' never actually reaches a defined action
+// row -- it is handled here for exhaustiveness and to fail SAFE (read-shaped
+// actions allowed, everything else blocked).
+export type PermissionTierValue = 'full' | 'review' | 'view' | 'none'
 
 /** The action rows for a permission key, or [] when it has none defined. */
 export function actionsForKey(permissionKey: string): PermissionAction[] {
   return PERMISSION_ACTIONS[permissionKey] || []
 }
 
-/** What `action` does at `tier`. `none` blocks everything. */
+/** What `action` does at `tier`. `none` blocks everything; `view` allows only
+ * the actions a section marks read-safe (review: 'allow'), blocking writes. */
 export function outcomeAt(action: PermissionAction, tier: PermissionTierValue): ActionOutcome {
   if (tier === 'none') return 'block'
+  if (tier === 'view') return action.review === 'allow' ? 'allow' : 'block'
   if (tier === 'review') return action.review
   return action.full ?? 'allow'
 }

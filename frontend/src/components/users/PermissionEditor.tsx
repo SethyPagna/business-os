@@ -1,11 +1,15 @@
 import { useState } from 'react'
 import InfoHint from '../shared/InfoHint.tsx'
 import { PERMISSION_SECTIONS, type PermissionDefinition, type PermissionSection, type PermissionSensitivity } from './permissionDefinitions'
-import { REVIEW_TIER_KEYS, type PermissionValue } from '../../utils/permissions.ts'
+import { REVIEW_TIER_KEYS, VIEW_TIER_KEYS, type PermissionValue } from '../../utils/permissions.ts'
 import { actionOverrideKey, actionsForKey, isActionOverriddenOff, outcomeAt, type ActionOutcome } from '../../utils/permissionActions.ts'
 
 type PermissionState = Record<string, PermissionValue>
-type Tier = 'full' | 'review' | 'none'
+// 'view' (Part 557) is the READ-ONLY middle tier for VIEW_TIER_KEYS sections
+// (Settings, ...): the page is visible but every write is blocked. It sits
+// where 'review' does for REVIEW_TIER_KEYS; a section offers exactly one of
+// the two middle flavors (permissionDefinitions.ts's `middleTier`).
+type Tier = 'full' | 'review' | 'view' | 'none'
 // Section-level picker added per explicit user request ("page permission
 // none, full access, and custom at top -- choose custom to allow check
 // the breakdown permission below"). This is deliberately a UI-only
@@ -46,13 +50,16 @@ function parsePermissionState(permissions: PermissionEditorProps['permissions'])
   }
   if (!value || typeof value !== 'object' || Array.isArray(value)) return {}
   return Object.entries(value as Record<string, unknown>).reduce<PermissionState>((acc, [key, raw]) => {
-    acc[key] = raw === 'review' && REVIEW_TIER_KEYS.has(key) ? 'review' : Boolean(raw)
+    acc[key] = raw === 'review' && REVIEW_TIER_KEYS.has(key) ? 'review'
+      : raw === 'view' && VIEW_TIER_KEYS.has(key) ? 'view'
+        : Boolean(raw)
     return acc
   }, {})
 }
 
 function tierOf(value: PermissionValue | undefined): Tier {
   if (value === 'review') return 'review'
+  if (value === 'view') return 'view'
   if (value) return 'full'
   return 'none'
 }
@@ -166,10 +173,10 @@ export default function PermissionEditor({ permissions, onChange, t }: Permissio
   const sectionGlance = (section: PermissionSection): { label: string; tone: 'full' | 'none' | 'partial' } => {
     const keys = section.permissions
     const granted = keys.filter((permission) => tierOf(perms[permission.key]) !== 'none').length
-    const reviewCount = keys.filter((permission) => tierOf(perms[permission.key]) === 'review').length
+    const middleCount = keys.filter((permission) => ['review', 'view'].includes(tierOf(perms[permission.key]))).length
     if (granted === 0) return { label: translate('none', 'None'), tone: 'none' }
-    if (granted === keys.length && reviewCount === 0) return { label: translate('label_full_access', 'Full Access'), tone: 'full' }
-    if (reviewCount > 0) return { label: translate('review_required', 'Partial Access'), tone: 'partial' }
+    if (granted === keys.length && middleCount === 0) return { label: translate('label_full_access', 'Full Access'), tone: 'full' }
+    if (middleCount > 0) return { label: translate('review_required', 'Partial Access'), tone: 'partial' }
     return { label: `${granted}/${keys.length}`, tone: 'partial' }
   }
   const glanceChipClass = (tone: 'full' | 'none' | 'partial'): string => (
@@ -260,6 +267,7 @@ export default function PermissionEditor({ permissions, onChange, t }: Permissio
     const next: PermissionState = { ...perms }
     if (tier === 'none') delete next[key]
     else if (tier === 'review') next[key] = 'review'
+    else if (tier === 'view') next[key] = 'view'
     else next[key] = true
 
     delete next.all
@@ -384,9 +392,16 @@ export default function PermissionEditor({ permissions, onChange, t }: Permissio
 
                 if (permission.tier) {
                   const tier = tierOf(perms[permission.key])
+                  // The middle option is the section's declared flavor: a
+                  // read-only "View only" (VIEW_TIER_KEYS) or the amber
+                  // "Partial Access" that queues writes (default). Part 557.
+                  const isViewTier = permission.middleTier === 'view'
+                  const middleOption: { value: Tier; label: string } = isViewTier
+                    ? { value: 'view', label: translate('view_only', 'View only') }
+                    : { value: 'review', label: translate('review_required', 'Partial Access') }
                   const tierOptions: { value: Tier; label: string }[] = [
                     { value: 'none', label: translate('none', 'None') },
-                    { value: 'review', label: translate('review_required', 'Partial Access') },
+                    middleOption,
                     { value: 'full', label: translate('label_full_access', 'Full Access') },
                   ]
                   return (
@@ -432,9 +447,11 @@ export default function PermissionEditor({ permissions, onChange, t }: Permissio
                                 tier === option.value
                                   ? option.value === 'review'
                                     ? 'bg-amber-500 text-white'
-                                    : option.value === 'full'
-                                      ? 'bg-blue-600 text-white'
-                                      : 'bg-gray-400 text-white'
+                                    : option.value === 'view'
+                                      ? 'bg-teal-600 text-white'
+                                      : option.value === 'full'
+                                        ? 'bg-blue-600 text-white'
+                                        : 'bg-gray-400 text-white'
                                   : 'bg-white text-gray-600 hover:bg-gray-50 dark:bg-zinc-900 dark:text-gray-300 dark:hover:bg-zinc-800'
                               }`}
                             >
@@ -452,6 +469,10 @@ export default function PermissionEditor({ permissions, onChange, t }: Permissio
                           scope. */}
                       {tier === 'review' ? (
                         <p className="mt-2 rounded-lg bg-amber-50 px-2.5 py-1.5 text-xs text-amber-800 dark:bg-amber-950/30 dark:text-amber-200">
+                          {reviewDescriptionFor(permission)}
+                        </p>
+                      ) : tier === 'view' ? (
+                        <p className="mt-2 rounded-lg bg-teal-50 px-2.5 py-1.5 text-xs text-teal-800 dark:bg-teal-950/30 dark:text-teal-200">
                           {reviewDescriptionFor(permission)}
                         </p>
                       ) : null}

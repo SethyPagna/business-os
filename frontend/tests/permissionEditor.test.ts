@@ -58,21 +58,48 @@ for (const key of ['none', 'review_required', 'label_full_access']) {
 }
 
 // Cross-check permissionDefinitions.ts's `tier: true` flags against
-// utils/permissions.ts's own REVIEW_TIER_KEYS set -- these two are meant
-// to be kept in sync by hand (see both files' comments); this check turns
-// a future drift between them into a failing test instead of a silent
-// looks-wired-but-isn't gap.
+// utils/permissions.ts's tier-key sets. Every tier:true key must appear in
+// exactly one of REVIEW_TIER_KEYS (amber "Partial Access", queues writes) or
+// VIEW_TIER_KEYS (teal "View only", read-only) -- and vice versa. This turns
+// a future drift into a failing test instead of a silent looks-wired-but-isn't
+// gap. Part 557 added the 'view' flavor (Settings).
 const tierFlagKeys = [...definitions.matchAll(/key:\s*'([a-z_]+)'[^}]*tier:\s*true/g)].map((m) => m[1])
-const reviewTierKeysMatch = permissionsUtil.match(/REVIEW_TIER_KEYS = new Set<string>\(\[([^\]]*)\]\)/)
-assert.ok(reviewTierKeysMatch, 'REVIEW_TIER_KEYS set literal not found in utils/permissions.ts')
-const reviewTierKeys = [...(reviewTierKeysMatch?.[1] ?? '').matchAll(/'([a-z_]+)'/g)].map((m) => m[1])
+const setLiteral = (name: string): string[] => {
+  // "export const " prefix so VIEW_TIER_KEYS does not match inside
+  // REVIEW_TIER_KEYS (substring trap).
+  const m = permissionsUtil.match(new RegExp(`export const ${name} = new Set<string>\\(\\[([^\\]]*)\\]\\)`))
+  assert.ok(m, `${name} set literal not found in utils/permissions.ts`)
+  return [...(m?.[1] ?? '').matchAll(/'([a-z_]+)'/g)].map((x) => x[1])
+}
+const reviewTierKeys = setLiteral('REVIEW_TIER_KEYS')
+const viewTierKeys = setLiteral('VIEW_TIER_KEYS')
+// A key is in AT MOST one middle-tier set.
+const overlap = reviewTierKeys.filter((k) => viewTierKeys.includes(k))
+assert.deepEqual(overlap, [], `keys in BOTH REVIEW_ and VIEW_TIER_KEYS: ${overlap.join(', ')}`)
+// Every tier:true section is covered by one of the two sets, and every set
+// member is a tier:true section (a middle-tier key that isn't tier:true would
+// never render its picker).
 assert.deepEqual(
   [...tierFlagKeys].sort(),
-  [...reviewTierKeys].sort(),
-  'permissionDefinitions.ts tier:true keys and utils/permissions.ts REVIEW_TIER_KEYS have drifted apart',
+  [...reviewTierKeys, ...viewTierKeys].sort(),
+  'permissionDefinitions.ts tier:true keys and utils/permissions.ts REVIEW_/VIEW_TIER_KEYS have drifted apart',
 )
+// Each view-tier section declares middleTier: 'view' so the editor renders
+// the teal "View only" option rather than the amber "Partial Access".
+for (const key of viewTierKeys) {
+  assert.match(
+    definitions,
+    new RegExp(`key:\\s*'${key}'[\\s\\S]*?middleTier:\\s*'view'`),
+    `view-tier section '${key}' must declare middleTier: 'view'`,
+  )
+}
 
-console.log('PASS PermissionEditor renders a None/Partial Access/Full Access tier picker for REVIEW_TIER_KEYS permissions, kept in sync with permissionDefinitions.ts')
+for (const key of ['view_only']) {
+  assert.ok(en[key], `English tier-picker label missing: ${key}`)
+  assert.ok(km[key], `Khmer tier-picker label missing: ${key}`)
+}
+
+console.log('PASS PermissionEditor renders None/Partial Access|View only/Full Access tier pickers, kept in sync with REVIEW_/VIEW_TIER_KEYS')
 
 // Per-row explanation, now through the shared InfoHint rather than a 4x4
 // button carrying a `title`. The old affordance was the browser's own black

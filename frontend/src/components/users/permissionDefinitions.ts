@@ -20,6 +20,15 @@ export interface PermissionDefinition {
   // about. PermissionEditor.tsx falls back to the plain Full/None checkbox
   // for every key without this flag.
   tier?: boolean
+  // The flavor of the MIDDLE tier this `tier: true` section offers:
+  //   'review' (default) -> the amber "Partial Access" that queues writes for
+  //                         approval (REVIEW_TIER_KEYS in permissions.ts).
+  //   'view'             -> a teal "View only" -- the page/data is visible but
+  //                         every write is blocked (VIEW_TIER_KEYS). Used for
+  //                         coarse admin areas with no approval queue.
+  // A key is in exactly one of REVIEW_/VIEW_TIER_KEYS; this field just tells
+  // the editor which middle option + label + color to render.
+  middleTier?: 'review' | 'view'
   // Only meaningful alongside `tier: true`. Plain-English explanation of
   // exactly what Review Required restricts for THIS section -- shown via
   // an `i` info tooltip next to the tier picker (PermissionEditor.tsx),
@@ -460,7 +469,21 @@ export const PERMISSION_SECTIONS: PermissionSection[] = [
     label: 'Settings',
     description: "Also covers the standalone Receipt Settings page, which gates on this same grant. The four detail rows below are this page's own finer-grained areas -- each currently mirrors the plain Settings grant one-for-one (see cloudflare/src/lib/permissions.ts) until they're each wired to their own independent check.",
     permissions: [
-      { key: 'settings', tKey: 'perm_settings', label: 'Device and basic settings', sensitivity: 'normal' },
+      // View-tier section (Part 557): reading settings is open to any signed-in
+      // user already (routes/settings.ts GET / strips secrets and serves the
+      // map to every cashier), and saving is gated on a strict `settings ===
+      // true` (POST /), so a 'view' value can SEE settings but every save is
+      // refused. None / View only / Full.
+      {
+        key: 'settings',
+        tKey: 'perm_settings',
+        label: 'Device and basic settings',
+        sensitivity: 'normal',
+        tier: true,
+        middleTier: 'view',
+        reviewTKey: 'perm_settings_view_desc',
+        reviewDescription: 'View only: this person can open Settings and see every value, but the Save button is disabled and any save is refused. Full Access is required to change settings.',
+      },
       { key: 'business_identity', tKey: 'perm_business_identity', label: 'Business identity, logo, public profile', sensitivity: 'high' },
       { key: 'sales_policy', tKey: 'perm_sales_policy', label: 'Sales, return, and financial policy', sensitivity: 'high' },
       { key: 'security_settings', tKey: 'perm_security_settings', label: 'Security and sign-in settings', sensitivity: 'critical' },
