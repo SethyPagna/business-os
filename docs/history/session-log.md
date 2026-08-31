@@ -16511,3 +16511,106 @@ default-off automation toggle, a `wholesale` POS price mode through
 cart/receipt/sales, and the permission-editor + i18n coverage (incl. the
 "image upload only" permission the user flagged). Full spec is in
 progress.md → Current status → POS-CARD-PRICE LANE follow-up.
+
+## Part 563 — Product detail float rework + shared confirm dialog (slice 1)
+
+Two commits this session: `af50009b` (detail float) and `c1097e82` (confirm dialog).
+
+**Ask.** User batch on the Products page: (1) the "click to view detail" float's
+"Stock Changes / Sales / Suppliers" sections "are showing nothing no data";
+(2) move Batches "above them and below status in smaller screens, and together
+in the first half in larger screens"; (3) "for the other options to do like
+batches click to open another float showing the details, instead of clicking to
+expand." Separately, app-wide: "for stock in also do confirm, add product, edit
+etc. also for other actions and changes and buttons for other sections and
+pages... do confirm a double check for all... do deep check."
+
+**What changed.**
+- `surfaces/ProductDetailReport.tsx` — the three folded SectionCards became
+  colored summary PILLS (orange/red/purple, matching SECTION_KIND + the amber
+  Batches button) that open a click-to-view FLOAT modal (z-[60] over the z-50
+  sheet). Each float has honest loading/empty/populated states, and both the
+  report and the ledger transports now surface their fetch error inline.
+- `surfaces/ProductDetailModal.tsx` — Batches button extracted to one element,
+  rendered in two responsive slots: left mini-section on `sm:` ("first half"),
+  and below Status / above the report pills on phones (exactly one visible).
+- `shared/ConfirmDialog.tsx` (new) — one shared compact review dialog on the
+  Modal chrome; summarizes the action (label/value rows) + Confirm/Cancel, with
+  a `danger` variant. The single answer to the "confirm/double-check" ask,
+  chosen with the user (compact review dialog; rollout "core saves + destructive
+  first"). Wired into ProductForm (Add/Edit — promise-based askSaveConfirm gate
+  before the write, mirroring askRenameChoice) and StockAdjustModal (Stock one
+  by one — onAdjust parks the request, commitAdjust writes on confirm). Delete
+  already confirms via DeleteConfirmModal. Zero new i18n keys.
+
+**What was found.** The "no data" is NOT a backend bug: the /detail-report and
+/stock-ledger queries were verified against local D1 (product 5004 has 5
+movements, 5003 has sales) and return rows; response shapes match the client.
+The cause was the old UI swallowing a failed fetch into a silent empty/Loading
+state — now surfaced. Also found: `Inventory.tsx` is currently broken by another
+lane (tsc errors on exportStamp / movementDateRangeLabel) — not touched.
+
+**Verified.** `frontend`: `node tests/sourceSyntaxCheck.ts` (428 files),
+`npx tsc --noEmit` clean for all five changed/added files (the only tsc errors
+in the tree are the peer's in-flight Inventory.tsx), `npx vite build` exit 0
+(ProductDetailReport + ProductDetailSheet chunks bundle). NOT verified: live
+authenticated click-through — impractical here (frontend uses a stored
+cross-origin sync URL + session-cookie login; another chat's dev server already
+runs in this folder; admin password unknown).
+
+**Not done.** Cross-surface stock-in confirm is INCOMPLETE by design (flagged as
+a follow-up chip + progress.md): FastStockInModal, BulkAddStockModal, the
+canonical Branches adjust (Inventory.tsx → InventoryStockModals; do once
+Inventory.tsx is green — the DRY fix is to put the confirm in the shared
+InventoryStockModals and drop the StockAdjustModal-level one), BranchStockAdjuster.
+Then the per-section sweep (Sales/Returns/Fees/Contacts/Users/Promotions/Backup/
+imports) — every mutating Save/Apply, never nav/filter/toggle. progress.md not
+committed (shared).
+
+### Part 562 addendum — cart VIP tag toggle + receipt tier tag (same lane)
+
+**Ask (follow-on, same session).** "Keep the tag [in the cart] … show even in
+receipt … and wholesale as well." Then: "make it show on/off in cart … default
+it will be selected/highlighted, if deselect make sure it is unhighlighted."
+Sequenced: cart/receipt now, wholesale after. Asked the fork; user: the toggle
+is a MARKER only ("Price stays, tag is just a marker") and the receipt tag goes
+"under the item name."
+
+**What changed.** Commit `9c4f9678`.
+- `frontend/src/components/pos/CartItem.tsx`: the VIP label under the item name
+  became a toggle chip, rendered on any line that carries a VIP price
+  (`special_price_usd/khr` — added to the line type; they ride the `...product`
+  spread in addToCart). Highlighted when the line is marked VIP
+  (`price_mode === 'special'`), faded/outlined when not. Clicking calls the new
+  `onToggleTierTag` with `stopPropagation` (the whole row is a details button).
+  Dropped the now-unused `specialPriceLabel`; the promotion label + savings
+  blocks are untouched.
+- `frontend/src/components/pos/POS.tsx`: `toggleTierTag` flips the line's
+  `price_mode` 'special'↔'selling' while leaving applied/base price exactly in
+  place — the price never moves, only the marker. Wired `onToggleTierTag` into
+  CartItem. Line identity stays the stored `cart_line_id`, so flipping the mode
+  never re-keys or merges the line.
+- `frontend/src/components/receipt/Receipt.tsx`: `ReceiptItem` gained
+  `price_mode`/`product_discount_label`; a small tier tag ("VIP", or
+  "Wholesale"/បោះដុំ once the tier exists) prints under the item name, derived
+  from `price_mode`.
+
+**Why no migration.** `price_mode` already persists end to end: the POS
+checkout payload sends it per line, `sale_items` stores it, and the sales list
+query returns it via `SELECT si.*`. So the immediate receipt (built from the
+in-memory payload) and the reprinted one (Sales → `<Receipt>`) both carry it,
+and `printReceipt.ts` clones the same rendered DOM for print/PDF. A deselected
+line arrives as `price_mode='selling'`, so it simply prints no tag — the marker
+semantics fall straight out of the existing column.
+
+**Verified.** `npm run typecheck`, `npm run check:source` (428 files),
+`node tests/receiptTemplate.test.ts` (8/8), `node tests/posCore.test.ts` — all
+green. No live POS/receipt screenshot: showing a VIP cart line + its receipt
+needs an authenticated, seeded session against the worker, and another session's
+dev server holds the folder; the edits are display + a price-preserving state
+flip, all covered by the static + unit suite, and HMR carries them into the
+running dev server. Commit `9c4f9678` (three files, path-scoped).
+
+**Not done.** Wholesale (as in the main Part 562 entry / progress.md follow-up):
+generalise the same toggle + receipt tag to a `wholesale` tier once the field
+exists (Khmer បោះដុំ already wired in Receipt).
