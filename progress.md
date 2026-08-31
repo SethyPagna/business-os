@@ -88,6 +88,20 @@ Two rules learned the hard way, both from real incidents in this file's own hist
 
 ## Current status
 
+**CLAIMED (in progress, i18n/permissions session, Aug 31, Part 548):** Sales-hub
+layout polish per user feedback: StatsStrip gains a dedicated FULL-WIDTH date
+row when open (presets always visible there) + a `rangeActions` slot —
+History/Export ride the date row when a page has many stat cards, and merge
+into the stats row when it has ≤3 (user: "if stats are not many like only two
+... just merge with the stats"); Sales/Returns rewired to the new slots;
+Returns' add buttons get always-visible explicit labels (Add Return / Add
+Supplier Return, new pack keys both languages); SalesDailyReport's range
+totals show Profit on MOBILE too (was `hidden sm:inline` — the reported
+"reports not showing profit near the N sales | Revenue row"). Files:
+shared/StatsStrip.tsx, sales/Sales.tsx, sales/SalesDailyReport.tsx,
+returns/Returns.tsx, lang packs, tests/statsStrip.test.ts. NOT touching
+Inventory.tsx / Dashboard.tsx / FeesPage.tsx layout beyond what's listed.
+
 **[DONE — i18n session, Aug 31 (Part 545): translation-coverage sweep — 340
 missing pack keys added to BOTH en.json and km.json, + a verify:i18n lock.**
 User report: sections/mini-sections/folded layers/import-export text not fully
@@ -227,6 +241,13 @@ admin session) rendered Dashboard/POS/nav in Khmer with new sales showing
 bare YYYYMMDD-HHMMSS ids beside preserved historical RCP- ones. All test
 residue removed from the shared local D1 (roles/users/sessions deleted);
 destructive scenarios ran only against the private copy.]**
+
+**[~ CLAIMED — stats-fold session, Aug 31: StatsStrip layout rework (user ask:
+stats must never scroll sideways in one row — wrap, 2 per row on small screens
+— and the whole stats block folds behind a click-to-open "Stats" chip on every
+section).** Files: `shared/StatsStrip.tsx`, `frontend/tests/statsStrip.test.ts`
+(its one-row-scroll pin inverts), progress.md/session-log. No page files, no
+backend. Disjoint from 7a's read-mostly sweep and c8's sales.ts hunks.]**
 
 **[~ CLAIMED — session business-os-v1-7a, Aug 31 (~10:40): FULL exhaustive
 verification sweep at HEAD (post-Part-547).** User ask: "1000% confirmed backend
