@@ -15700,3 +15700,53 @@ passes - including the 3 files the peer session saw red against my dirty
 tree); test-portal-stock-redaction-pure 6/6; live dev-server pass:
 storefront grid/badges/filter/detail-flyout + admin Customer Portal preview
 all rendering on the redacted payload.
+
+## Part 548 (Aug 31 2026, stats-fold session) — StatsStrip: cards wrap (2-up on phones) + whole strip folds behind a click-to-open Stats chip
+
+**Ask** — "all stats in every sections and mini sections... should not do scroll
+in one row, can do 2 stats per row for smaller screens... stats should be folded
+into stats click to open instead of collapse/expand. so click to open."
+
+**What changed** —
+
+- `frontend/src/components/shared/StatsStrip.tsx` (the ONE stats surface —
+  Sales / Returns / Fees / Inventory-under-Branches / Dashboard all render it,
+  so one edit covers every section; POS/Branches "stats" grep hits are comments
+  only, and the contacts/users `overflow-x-auto` rows are action TOOLBARS, not
+  stats — left alone):
+  - The whole stats block now defaults FOLDED behind a compact "Stats" chip
+    (BarChart3 icon + the existing `stats` pack key, already translated in both
+    packs — no new i18n keys). Clicking opens it; `aria-expanded` announces
+    state; chip takes the preset-chip active styling when open. Row 1 is always
+    just chip + page `actions` (Add/Manage/History stay reachable while
+    folded); when open, the range picker + presets join that same row (keeping
+    the Aug-30 "one row with the add buttons" economy).
+  - The card row is no longer one sideways-scrolling line (`flex … shrink-0 …
+    overflow-x-auto` gone): cards now WRAP in a grid — `grid-cols-2` base
+    (2 per row on phones) widening `sm:3 / md:4 / xl:6`. Value/sub spans got
+    `max-w-full truncate` so long figures ellipsize inside the narrower grid
+    cells instead of bleeding into neighbors.
+  - The per-card fold (one open detail panel at a time) is unchanged, and is
+    gated behind the open strip.
+- `frontend/tests/statsStrip.test.ts`: the old pin literally asserted
+  `overflow-x-auto` ("cards ride one horizontal line and scroll sideways") —
+  the user's Aug-31 direction supersedes it. That assert removed; NEW test pins
+  the new direction: `useState(false)` fold default, the `tr('stats', 'Stats')`
+  chip key, NO `overflow-x-auto` anywhere in the strip, `grid-cols-2` base.
+
+**What was found** — nothing broken; this is a directed layout change. Noted
+that progress.md's pending hunk at commit time was solely this session's claim
+(peers had committed theirs), so a plain path-scoped add was safe.
+
+**Verified** — `node tests/statsStrip.test.ts` 8/8; `npm run verify:i18n` OK;
+full `npm run test:utils` chain (typecheck + ~150 suites) exit 0. Live drive on
+this session's own vite (`frontend-b`, port 5175, stopped after — node_modules
+lock trap): Dashboard folded chip → click → 8 KPI cards wrap, no sideways
+scroll; Sales folded row shows chip + History/Manage, open shows range+presets
+inline, 4 cards, Revenue card fold opens the breakdown panel; mobile viewport
+(375px) shows EXACTLY 2 cards per row with the detail grid 2-col; Branches →
+Stats & Branches (Inventory strip, no actions prop) folds/opens the same way.
+
+**Not done** — the fold state is per-mount (deliberate: pages open compact
+every visit); if the user wants it remembered across visits, add a storage key.
+Deploy: rides the next worktree deploy with peers' batch.

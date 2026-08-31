@@ -242,12 +242,18 @@ bare YYYYMMDD-HHMMSS ids beside preserved historical RCP- ones. All test
 residue removed from the shared local D1 (roles/users/sessions deleted);
 destructive scenarios ran only against the private copy.]**
 
-**[~ CLAIMED — stats-fold session, Aug 31: StatsStrip layout rework (user ask:
-stats must never scroll sideways in one row — wrap, 2 per row on small screens
-— and the whole stats block folds behind a click-to-open "Stats" chip on every
-section).** Files: `shared/StatsStrip.tsx`, `frontend/tests/statsStrip.test.ts`
-(its one-row-scroll pin inverts), progress.md/session-log. No page files, no
-backend. Disjoint from 7a's read-mostly sweep and c8's sales.ts hunks.]**
+**[DONE — stats-fold session, Aug 31 (Part 548, needs deploy — rides the next
+one): StatsStrip layout rework.** User ask: stats must never scroll sideways in
+one row — cards now WRAP in a grid (2 per row on phones, sm:3/md:4/xl:6) — and
+the whole stats block folds behind a click-to-open "Stats" chip (existing
+`stats` pack key, both packs; aria-expanded; page actions stay visible while
+folded; range+presets join the chip row when open). One shared-component edit
+covers Sales/Returns/Fees/Inventory/Dashboard. statsStrip.test.ts's old
+one-row-scroll pin inverted to pin the new direction. Verified: statsStrip 8/8,
+verify:i18n OK, FULL test:utils chain exit 0, live drive on own vite 5175
+(desktop + 375px mobile: exactly 2 cards/row, card folds still work,
+Dashboard/Sales/Branches-Stats all checked; server stopped after). Fold state
+is per-mount by design — say the word for remembered-across-visits.]**
 
 **[~ CLAIMED — session business-os-v1-7a, Aug 31 (~10:40): FULL exhaustive
 verification sweep at HEAD (post-Part-547).** User ask: "1000% confirmed backend

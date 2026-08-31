@@ -74,8 +74,18 @@ test('the strip folds inline: one open card, chevron affordance, breakdown grid'
   const strip = read('src/components/shared/StatsStrip.tsx')
   assert.ok(/setOpenKey\(\(current\) => \(current === card\.key \? null : card\.key\)\)/.test(strip), 'tapping toggles ONE open fold at a time')
   assert.ok(strip.includes('aria-expanded'), 'folding cards announce their state')
-  assert.ok(strip.includes('overflow-x-auto'), 'cards ride one horizontal line and scroll sideways, never stack rows')
   assert.ok(strip.includes('<InfoHint'), 'the fold carries the explanation affordance')
+})
+
+test('the whole strip hides behind a click-to-open Stats chip; cards wrap, never scroll sideways', () => {
+  // User, Aug 31: "should not do scroll in one row, can do 2 stats per
+  // row for smaller screens ... stats should be folded into stats click
+  // to open". This SUPERSEDES the earlier one-horizontal-line pin.
+  const strip = read('src/components/shared/StatsStrip.tsx')
+  assert.ok(/const \[statsOpen, setStatsOpen\] = useState\(false\)/.test(strip), 'the stats block defaults FOLDED — click the chip to open')
+  assert.ok(strip.includes("tr('stats', 'Stats')"), "the chip label rides the shared 'stats' pack key (translated in both packs)")
+  assert.ok(!strip.includes('overflow-x-auto'), 'stats never ride a sideways-scrolling row')
+  assert.ok(strip.includes('grid-cols-2'), 'cards wrap in a grid, 2-up on small screens')
 })
 
 test('old bespoke stat surfaces are really gone (no zombie tile grids)', () => {
