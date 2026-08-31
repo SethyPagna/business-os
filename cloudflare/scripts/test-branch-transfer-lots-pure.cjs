@@ -11,15 +11,17 @@
 // The routes now auto-allocate the no-batchId quantity across the source
 // branch's active lots FIFO (the same Z0 policy checkout / inventory.ts use)
 // and move each take per-lot in the SAME atomic batch, materializing the
-// matching lot at the destination. Unlike inventory.ts's /transfer (STRICT
-// decrement), branches.ts deliberately keeps the CLAMPED decrement its
-// explicit-batch leg and every other transfer/return caller already use
-// (see lib/productBatches.ts decrementBatchStockStatement's comment).
+// matching lot at the destination. The FIFO leg uses the STRICT source
+// decrement, matching inventory.ts's /transfer: the availability read runs
+// OUTSIDE the atomic batch, so a concurrent drain between read and write must
+// abort-and-retry (CHECK(quantity >= 0) violation) rather than let a clamped
+// floor mint per-lot drift at the destination. Each route's explicit-batch
+// leg (a user-picked lot) stays CLAMPED, unchanged.
 //
 // Exercises the REAL transpiled lib/productBatches.ts helpers the routes
 // compose (readFifoLotAvailability, allocateAcrossLots,
-// decrementBatchStockStatement, incrementBatchStockStatement) against real
-// better-sqlite3, plus source locks pinning both routes' wiring.
+// decrementBatchStockStrictStatement, incrementBatchStockStatement) against
+// real better-sqlite3, plus source locks pinning both routes' wiring.
 //
 // Run: node scripts/test-branch-transfer-lots-pure.cjs
 
@@ -50,7 +52,7 @@ const productBatches = loadModule('lib/productBatches.ts', (id) => {
   if (id === './sqlBinding') return sqlBinding
   return require(id)
 })
-const { readFifoLotAvailability, allocateAcrossLots, decrementBatchStockStatement, incrementBatchStockStatement } = productBatches
+const { readFifoLotAvailability, allocateAcrossLots, decrementBatchStockStrictStatement, incrementBatchStockStatement } = productBatches
 
 // Minimal async D1-compatible wrapper over better-sqlite3 (same shape the
 // other *-pure tests use): @named params, and batch() as one transaction.
@@ -123,7 +125,7 @@ function stockQty(db, branchId) {
 // The exact statement composition branches.ts builds for a no-batchId transfer
 // (single or one bulk item) of `quantity` from branch 1 to branch 2: no merge,
 // so the destination keeps the SAME batch ids, and the source decrement is
-// CLAMPED (this route's deliberate choice, unlike inventory.ts's strict one).
+// STRICT (matching inventory.ts's FIFO leg, so a concurrent drain aborts).
 async function composeBranchTransferStatements(db, quantity) {
   const lots = await readFifoLotAvailability(wrapDb(db), 1, 1)
   const { takes, uncovered } = allocateAcrossLots(lots, quantity)
@@ -135,7 +137,7 @@ async function composeBranchTransferStatements(db, quantity) {
       params: { quantity },
     },
     ...takes.flatMap((take) => [
-      decrementBatchStockStatement(take.batchId, 1, take.quantity),
+      decrementBatchStockStrictStatement(take.batchId, 1, take.quantity),
       incrementBatchStockStatement(take.batchId, 2, take.quantity),
     ]),
   ]
@@ -195,7 +197,27 @@ await check('legacy stock the lot ledger never tracked moves on branch_stock alo
   assert.strictEqual(lotQty(db, 101, 2) + lotQty(db, 102, 2), 10, 'same 2-unit legacy gap as the source, nothing new minted')
 })
 
-await check('source lock: BOTH /transfer and /transfer-bulk auto-allocate FIFO for the no-batchId path (clamped, materializing the destination lot)', () => {
+await check('strict decrement makes a concurrent lot drain abort-and-rollback, never minting destination drift', async () => {
+  const db = freshDb()
+  // Availability is read (lot A = 6) and the take built for a transfer of 8...
+  const { statements, takes } = await composeBranchTransferStatements(db, 8)
+  assert.deepStrictEqual(takes.map((t) => [t.batchId, t.quantity]), [[101, 6], [102, 2]])
+  // ...then a concurrent sale drains lot A to 3 before this batch applies. The
+  // take still says "decrement A by 6": strict subtraction underflows past the
+  // CHECK(quantity >= 0) and must abort the WHOLE batch. A clamped decrement
+  // would instead floor A at 0 while the destination still gained 6 -- +3
+  // phantom units, the exact per-lot drift this fix exists to prevent.
+  db.prepare('UPDATE branch_batch_stock SET quantity = 3 WHERE batch_id = 101 AND branch_id = 1').run()
+  await assert.rejects(wrapDb(db).batch(statements), 'strict oversell must reject, not clamp')
+  // Fully rolled back: nothing moved at either branch, destination never minted.
+  assert.strictEqual(lotQty(db, 101, 1), 3, 'source lot A holds the concurrently-drained value')
+  assert.strictEqual(lotQty(db, 102, 1), 4)
+  assert.strictEqual(stockQty(db, 1), 12, 'source branch total unchanged (batch rolled back)')
+  assert.strictEqual(stockQty(db, 2), 0, 'destination branch total unchanged')
+  assert.strictEqual(lotQty(db, 101, 2) + lotQty(db, 102, 2), 0, 'no phantom destination lot minted')
+})
+
+await check('source lock: BOTH /transfer and /transfer-bulk auto-allocate FIFO for the no-batchId path (strict decrement, materializing the destination lot)', () => {
   const src = fs.readFileSync(path.join(__dirname, '..', 'src', 'routes', 'branches.ts'), 'utf8')
 
   const single = routeBody(src, "app.post('/transfer',")
@@ -208,12 +230,16 @@ await check('source lock: BOTH /transfer and /transfer-bulk auto-allocate FIFO f
   assert.ok(/allocateAcrossLots\(sourceLots, item\.quantity\)/.test(bulk), '/transfer-bulk must allocate FIFO across the source lots')
   assert.ok(/incrementBatchStockStatement\(destLotId, toBranchId, take\.quantity\)/.test(bulk), '/transfer-bulk must materialize the destination lot per take')
 
-  // Deliberate: branches.ts transfers stay CLAMPED (not the STRICT sibling
-  // inventory.ts uses) -- guards against a future edit swapping in the strict
-  // form and changing this route's race semantics.
-  assert.ok(/decrementBatchStockStatement\(take\.batchId, fromBranchId, take\.quantity\)/.test(single), '/transfer no-batch decrement must be the clamped statement')
-  assert.ok(/decrementBatchStockStatement\(take\.batchId, fromBranchId, take\.quantity\)/.test(bulk), '/transfer-bulk no-batch decrement must be the clamped statement')
-  assert.ok(!/decrementBatchStockStrictStatement/.test(src), 'branches.ts must not use the strict decrement (transfers keep clamped)')
+  // The FIFO legs use the STRICT decrement (their availability read is outside
+  // the atomic batch, so a concurrent drain must abort-and-retry, not clamp
+  // into per-lot drift). Guards against a future edit swapping the clamped form
+  // back in and silently re-opening the race.
+  assert.ok(/decrementBatchStockStrictStatement\(take\.batchId, fromBranchId, take\.quantity\)/.test(single), '/transfer no-batch decrement must be the STRICT statement')
+  assert.ok(/decrementBatchStockStrictStatement\(take\.batchId, fromBranchId, take\.quantity\)/.test(bulk), '/transfer-bulk no-batch decrement must be the STRICT statement')
+  // ...while each route's EXPLICIT-batch leg (a user-picked lot whose quantity
+  // may legitimately trail the branch total) stays CLAMPED.
+  assert.ok(/decrementBatchStockStatement\(sourceBatch\.id, fromBranchId, quantity\)/.test(single), '/transfer explicit-batch leg stays clamped')
+  assert.ok(/decrementBatchStockStatement\(sourceBatchForItem\.id, fromBranchId, item\.quantity\)/.test(bulk), '/transfer-bulk explicit-batch leg stays clamped')
 })
 
 }

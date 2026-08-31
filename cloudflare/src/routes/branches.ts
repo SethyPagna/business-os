@@ -12,7 +12,7 @@ import { bumpVersion } from '../lib/cache'
 import { audit } from '../lib/audit'
 import { assertUpdatedAtMatch, getExpectedUpdatedAt, writeConflictResponse, WriteConflictError } from '../lib/conflictControl'
 import { findIdentityMatch, findIdentityMatches, type ProductIdentityRow } from '../lib/productIdentity'
-import { decrementBatchStockStatement, incrementBatchStockStatement, resolveDestinationBatch, readFifoLotAvailability, allocateAcrossLots } from '../lib/productBatches'
+import { decrementBatchStockStatement, decrementBatchStockStrictStatement, incrementBatchStockStatement, resolveDestinationBatch, readFifoLotAvailability, allocateAcrossLots } from '../lib/productBatches'
 import { branchUpdateStatements } from '../lib/branchWrites'
 import type { Env } from '../index'
 
@@ -414,9 +414,17 @@ app.post('/transfer', async (c) => {
     // the destination (its own lot when same-product, the resolved/cloned lot
     // when the transfer merges into an identity match). Any `uncovered`
     // remainder is legacy stock the lot ledger never tracked; it moves on
-    // branch_stock alone, exactly as before. Clamped decrement (not strict) to
-    // match this route's explicit-batch leg and every other transfer/return
-    // caller -- see decrementBatchStockStatement's comment.
+    // branch_stock alone, exactly as before. Strict (unclamped) source
+    // decrements, matching inventory.ts /transfer's FIFO leg: readFifoLot-
+    // Availability runs OUTSIDE the db.batch() below, so a concurrent sale
+    // that drains a lot between the read and the write would let a clamped
+    // decrement floor the source at 0 while the destination still gained the
+    // full take -- minting the exact per-lot drift this fix exists to prevent.
+    // Strict instead violates branch_batch_stock's CHECK(quantity >= 0) and
+    // aborts the whole atomic batch, so the transfer cleanly fails and retries
+    // on fresh availability. (The explicit-batch leg above stays clamped: it
+    // decrements a user-picked lot whose quantity may legitimately trail the
+    // branch total under incomplete attribution.)
     const sourceLots = await readFifoLotAvailability(db, productId, fromBranchId)
     const { takes } = allocateAcrossLots(sourceLots, quantity)
     for (const take of takes) {
@@ -424,7 +432,7 @@ app.post('/transfer', async (c) => {
         ? await resolveDestinationBatch(db, { lot_code: take.lotCode, expiry_date: take.expiryDate, notes: null }, destProductId)
         : take.batchId
       statements.push(
-        decrementBatchStockStatement(take.batchId, fromBranchId, take.quantity),
+        decrementBatchStockStrictStatement(take.batchId, fromBranchId, take.quantity),
         incrementBatchStockStatement(destLotId, toBranchId, take.quantity),
       )
     }
@@ -680,8 +688,10 @@ app.post('/transfer-bulk', async (c) => {
       // Auto-allocate FIFO across the source branch's active lots and move each
       // take, materializing the matching destination lot (its own lot when
       // same-product, the resolved/cloned lot on an identity-match merge). Any
-      // uncovered legacy stock moves on branch_stock alone. Clamped decrement
-      // to match the explicit-batch leg above.
+      // uncovered legacy stock moves on branch_stock alone. Strict (unclamped)
+      // source decrement, same rationale as the single /transfer route above:
+      // the FIFO read is outside this batch, so strict makes a concurrent
+      // drain abort-and-retry rather than mint per-lot drift.
       const sourceLots = await readFifoLotAvailability(db, item.productId, fromBranchId)
       const { takes } = allocateAcrossLots(sourceLots, item.quantity)
       for (const take of takes) {
@@ -689,7 +699,7 @@ app.post('/transfer-bulk', async (c) => {
           ? await resolveDestinationBatch(db, { lot_code: take.lotCode, expiry_date: take.expiryDate, notes: null }, destProductId)
           : take.batchId
         statements.push(
-          decrementBatchStockStatement(take.batchId, fromBranchId, take.quantity),
+          decrementBatchStockStrictStatement(take.batchId, fromBranchId, take.quantity),
           incrementBatchStockStatement(destLotId, toBranchId, take.quantity),
         )
       }
