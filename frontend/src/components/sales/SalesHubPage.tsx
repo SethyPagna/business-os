@@ -68,8 +68,15 @@ export default function SalesHubPage() {
     // (Phase Y4 regression).
     <div className="flex min-h-0 flex-1 flex-col space-y-3">
       {visibleTabs.length > 1 ? (
-        <div className="shrink-0 px-4 pt-4">
-          <div className="inline-flex rounded-xl bg-gray-100 dark:bg-gray-800 p-0.5">
+        // Full-width equal tabs so all of Sales/Returns/Fees/Reports FIT on
+        // one row on a phone (user, Aug 31: "the sales page's various
+        // sections are not fit in one row in smaller screens ... touching
+        // edge"). Previously an inline-flex pill sized to content, so 4
+        // icon+label tabs overflowed the viewport and pushed the whole page
+        // wide (Reports fell off the right edge). Now each tab is flex-1 and
+        // its label truncates rather than widening the row.
+        <div className="shrink-0 px-3 pt-4">
+          <div className="flex w-full rounded-xl bg-gray-100 dark:bg-gray-800 p-0.5">
             {visibleTabs.map((tab) => {
               const Icon = tab.icon
               return (
@@ -77,9 +84,9 @@ export default function SalesHubPage() {
                   key={tab.id}
                   type="button"
                   onClick={() => setSection(tab.id)}
-                  className={`px-3 py-1.5 rounded-lg text-sm font-medium inline-flex items-center gap-1.5 whitespace-nowrap ${section === tab.id ? `bg-white dark:bg-gray-900 shadow ${tab.tone}` : 'text-gray-500'}`}
+                  className={`flex-1 min-w-0 justify-center px-1.5 py-1.5 rounded-lg text-xs sm:text-sm font-medium inline-flex items-center gap-1 ${section === tab.id ? `bg-white dark:bg-gray-900 shadow ${tab.tone}` : 'text-gray-500'}`}
                 >
-                  <Icon className="w-4 h-4" /> {tab.label}
+                  <Icon className="w-4 h-4 shrink-0" /> <span className="truncate">{tab.label}</span>
                 </button>
               )
             })}

@@ -94,7 +94,11 @@ export default function ReportsHub() {
           select rides the same row and ellipsizes long names ("branch
           option can be merged into one row with option, and use '…' when
           too long"). */}
-      <div className="sticky top-0 z-20 -mx-1 flex flex-wrap items-center gap-1.5 bg-gray-50/95 px-1 py-1 backdrop-blur dark:bg-gray-900/95">
+      {/* Two tidy rows: the date range on its own, then the type chips with
+          the branch select riding the SAME row (user, Aug 31: "the all
+          branches can be merged into sections so one row") — previously the
+          branch select wrapped to a third line of its own. */}
+      <div className="sticky top-0 z-20 -mx-1 space-y-1.5 bg-gray-50/95 px-1 py-1 backdrop-blur dark:bg-gray-900/95">
         <DateTimeRangePicker value={range} onChange={setRange} t={t} />
         <div className="flex flex-wrap items-center gap-1">
           {typeChips.map(({ id, label, icon: Icon }) => {
@@ -113,34 +117,40 @@ export default function ReportsHub() {
               </button>
             )
           })}
+          {branches.length ? (
+            <AppSelect
+              value={branchFilter}
+              options={branchOptions}
+              onChange={setBranchFilter}
+              ariaLabel={trh('branch', 'Branch')}
+              buttonClassName="ml-auto max-w-[9rem] truncate py-1 text-xs"
+            />
+          ) : null}
         </div>
-        {branches.length ? (
-          <AppSelect
-            value={branchFilter}
-            options={branchOptions}
-            onChange={setBranchFilter}
-            ariaLabel={trh('branch', 'Branch')}
-            buttonClassName="max-w-[9rem] truncate py-1 text-xs"
-          />
-        ) : null}
       </div>
 
-      {visible.map(({ id, label, icon: Icon }) => (
+      {visible.map(({ id, label, icon: Icon }) => {
+        // The section's own controls (Sales' status/method selects, Returns/
+        // Fees' breakdown chips) ride THIS title row (user, Aug 31: "the
+        // sales, returns and fees, sections the card title ... can be moved
+        // to title row") — each section component places its controls
+        // ml-auto beside the title node and drops the totals to a line
+        // below. ReportsHub no longer renders a standalone title row.
+        const titleNode = <><Icon className="h-4 w-4 shrink-0" /> {label}</>
         // De-carded (user, Aug 30: inner wraps keep top/bottom hairlines,
         // drop the side border + padding so content gets the full width).
-        <section key={id} className="space-y-2 border-y border-slate-200 py-2.5 dark:border-slate-800">
-          <div className="flex items-center gap-2 text-sm font-semibold text-slate-800 dark:text-slate-100">
-            <Icon className="h-4 w-4" /> {label}
-          </div>
-          {id === 'sales' ? (
-            <SalesDailyReport t={t} fmtUSD={fmtUSD} range={range} onRangeChange={setRange} branchId={branchId} embedded active />
-          ) : id === 'returns' ? (
-            <ReturnsReportSection t={t} fmtUSD={fmtUSD} range={range} branchId={branchId} active />
-          ) : (
-            <FeesReportSection t={t} fmtUSD={fmtUSD} range={range} branchId={branchId} active />
-          )}
-        </section>
-      ))}
+        return (
+          <section key={id} className="space-y-2 border-y border-slate-200 py-2.5 dark:border-slate-800">
+            {id === 'sales' ? (
+              <SalesDailyReport t={t} fmtUSD={fmtUSD} range={range} onRangeChange={setRange} branchId={branchId} embedded active titleNode={titleNode} />
+            ) : id === 'returns' ? (
+              <ReturnsReportSection t={t} fmtUSD={fmtUSD} range={range} branchId={branchId} active titleNode={titleNode} />
+            ) : (
+              <FeesReportSection t={t} fmtUSD={fmtUSD} range={range} branchId={branchId} active titleNode={titleNode} />
+            )}
+          </section>
+        )
+      })}
     </div>
   )
 }

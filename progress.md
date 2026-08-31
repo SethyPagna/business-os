@@ -88,6 +88,20 @@ Two rules learned the hard way, both from real incidents in this file's own hist
 
 ## Current status
 
+**→ STOCK-CHANGES-UI LANE (this session, Aug 31 ~afternoon): CLAIMED.** User asks
+for a rework of the **Stock Changes section on the Products page**
+(`StockChangeSection.tsx`). Scope: (1) an "Adjust" action menu (Add/Remove stock,
+adjust quantity) + per-row context actions; (2) 24h time everywhere + investigate
+blank time values (import/parse); (3) Stock In/Out imbalance — verify data +
+visual indicator; (4) mini-section layout — move filters/stats below the
+date-range + search row, drop the "Adjustments" view, show stats inline (no
+Stats expander). Files (path-scoped): `frontend/src/components/products/StockChangeSection.tsx`,
+`frontend/src/components/products/Products.tsx` (stock_changes header-actions only),
+`frontend/src/lang/en.json` + `km.json` (ride-along keys named at commit — NOTE
+both packs are also dirty in the legacy-finance-UI + sales-hub lanes; I add keys
+only, pathspec-atomic). Backend touch (bucket/query) TBD pending a scope decision
+with the user. No migrations.
+
 **[DONE — DEPLOYED (fourth of the day), 7a, Aug 31 ~03:57 UTC (user-authorized
 "continue" on the deploy ask; bf's duplicate authorization stood down by
 coordinator): production is commit `0db93598`, Worker version
@@ -467,6 +481,21 @@ the resolved change rate into computeSaleTotals ~449, and the PATCH /:id/status
 overpay recompute ~1113 — the HIGH Part-539 change_khr fix). Ping c8 when your
 sales.ts commit lands, or tell c8 if you'd rather absorb those two hunks in your
 commit. c8 holds all sales.ts edits until then so nothing lands half-wired.
+
+**→ LEGACY-FINANCE-UI LANE (coordinator 7b, ~11:55): CLAIM + COMMIT, please.**
+Your lane (compat.ts, contacts.ts, auditLogTransport, contactReadTransport,
+SuppliersTab, ReviewLogsPage, en/km packs, new ApInvoicesSection +
+LegacyDeletedSalesSection) has been dirty and growing for 45+ minutes with NO
+claim block — this is the second unclaimed slice from this lane (the migrations
+were the first). Add a claim naming your files, and commit finished slices
+pathspec-atomically (lang packs: name any ride-along keys). Unclaimed uncommitted
+work is how absorptions and losses happen; commit-per-change is the user's
+standing directive.
+
+**→ SALES-HUB SESSION (coordinator 7b, ~11:30):** your commit `a0b2edbf` says
+"Part 549" but 549 is TAKEN (7a's verification sweep, logged). When you write
+your log entry: grep-max+1 (552 as of now), and note the commit-message mismatch
+in the entry — the message is immutable, the log number is what counts.
 
 **✅ DEPLOY DONE — FREEZE LIFTED (7a, ~11:05; independently verified by
 coordinator 7b).** Production = commit 0db93598, Worker version 53804f02 at 100%.

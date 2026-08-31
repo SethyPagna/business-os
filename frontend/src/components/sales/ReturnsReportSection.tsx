@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import type { DateTimeRange } from '../shared/DateTimeRangePicker.tsx'
 import { getReturnsReport } from '../../api/returnsReadTransport.ts'
 import Modal from '../shared/Modal'
@@ -24,6 +24,9 @@ interface ReturnsReportSectionProps {
   range: DateTimeRange
   branchId?: string
   active?: boolean
+  /** The Reports-hub section title (icon + label). Rendered on the same row
+   * as this section's breakdown chips; the totals drop to a line below. */
+  titleNode?: ReactNode
 }
 
 function displayDay(iso: string): string {
@@ -49,7 +52,7 @@ function normalize(raw: unknown): ReturnsReport {
   }
 }
 
-export default function ReturnsReportSection({ t, fmtUSD, range, branchId, active = true }: ReturnsReportSectionProps) {
+export default function ReturnsReportSection({ t, fmtUSD, range, branchId, active = true, titleNode }: ReturnsReportSectionProps) {
   const [report, setReport] = useState<ReturnsReport | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
@@ -125,17 +128,24 @@ export default function ReturnsReportSection({ t, fmtUSD, range, branchId, activ
         </div>
       ) : null}
 
+      {/* Title row: title left, breakdown chips ml-auto on the SAME row
+          (Part 552). */}
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+        {titleNode ? <span className="flex items-center gap-2 text-sm font-semibold text-slate-800 dark:text-slate-100">{titleNode}</span> : null}
+        <span className="ml-auto flex items-center gap-1.5">
+          {tableChip('days', t('by_day') || 'By day', report?.days.length ?? 0)}
+          {tableChip('reasons', t('by_reason') || 'By reason', report?.by_reason.length ?? 0)}
+          {tableChip('types', t('by_type') || 'By type', report?.by_type.length ?? 0)}
+        </span>
+      </div>
+
+      {/* Totals on their own line below the title row. */}
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-slate-500 dark:text-slate-400">
         <span>{report?.totals.count ?? 0} {t('returns') || 'returns'}</span>
         <span className="text-slate-300 dark:text-slate-600">|</span>
         <span>{t('refunds') || 'Refunds'} <b className="text-red-600 dark:text-red-400">{fmtUSD(report?.totals.refund_usd ?? 0)}</b></span>
         <span className="text-slate-300 dark:text-slate-600">|</span>
         <span>{t('avg_refund') || 'Avg refund'} <b className="text-slate-900 dark:text-white">{fmtUSD(report && report.totals.count > 0 ? report.totals.refund_usd / report.totals.count : 0)}</b></span>
-        <span className="ml-auto flex items-center gap-1.5">
-          {tableChip('days', t('by_day') || 'By day', report?.days.length ?? 0)}
-          {tableChip('reasons', t('by_reason') || 'By reason', report?.by_reason.length ?? 0)}
-          {tableChip('types', t('by_type') || 'By type', report?.by_type.length ?? 0)}
-        </span>
       </div>
 
       {openTable ? (
