@@ -1153,8 +1153,14 @@ up should re-verify against current source first.
   matters). **`routes/inventory.ts` GET /movements slice also FIXED: session 77,
   Aug 31 — `bd2f0680`, needs deploy** — same sargable form (date() on the param only,
   so a malformed date param behaves identically), proven incl. malformed inputs in
-  `test-inventory-movements-daterange-pure.cjs`. **Still open:** the same rewrite in
-  `sales.ts` list/export, `returns.ts`, `compat.ts`); `inventory/movements` text search
+  `test-inventory-movements-daterange-pure.cjs`. **`compat.ts` Dashboard/Analytics slice
+  also FIXED: session 77, Aug 31 — `9736de07`, needs deploy** — all 10 sales/returns
+  `date(created_at)` filters (both the `= date(@today)` equality and the 8 BETWEEN
+  ranges) made sargable, both shapes proven equivalent incl. malformed inputs in
+  `test-compat-dashboard-daterange-pure.cjs`; the expiry_date alert (per-row bound) and
+  the audit_logs retention delete (no index) were deliberately left. **Still open:** the
+  same rewrite in `sales.ts` list/export and `returns.ts` (both in active lanes));
+  `inventory/movements` text search
   still builds the depth-~92 REPLACE
   chain (D1 depth-100 risk). (×1 D1-scale) — see report.
 - Receipt/date locale: `Receipt.tsx:309` + 3 duplicated `formatDateTime` use viewer
