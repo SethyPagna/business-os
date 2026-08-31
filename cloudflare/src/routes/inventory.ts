@@ -12,6 +12,7 @@ import { bumpVersion } from '../lib/cache'
 import { findIdentityMatch, type ProductIdentityRow } from '../lib/productIdentity'
 import { buildFtsMatchExpression, buildHybridMatchClause, buildIssueStateClauses, buildLikeAliasClause, buildPartialWordMatchClause, buildShortWordFallbackClause, buildTrigramMatchExpression, PRODUCT_SEARCH_COLUMNS, PRODUCTS_FTS_BM25_SQL, runFuzzyFallbackMatch, tokenizeSearchTermGroups, tokenizeSearchWords } from '../lib/searchMatch'
 import { receiveBatchStock, removeStockFromBatch, removeStockAcrossBatches, InsufficientBatchStockError, readFifoLotAvailability, allocateAcrossLots, decrementBatchStockStrictStatement, incrementBatchStockStatement } from '../lib/productBatches'
+import { applyMovementRevert, type RevertMovementRow } from '../lib/stockRevert'
 import { normalizeToIsoDate } from '../lib/batchCode'
 import { parseDatedStockCountEntries, buildDatedStockCountPlan } from '../lib/datedStockCountRoute'
 import { applyDatedStockCountPlan } from '../lib/datedStockCountApply'
@@ -1822,6 +1823,61 @@ app.post('/move-row', async (c) => {
 })
 
 // ---- RFID: functional stubs -- no reader hardware to talk to from a Worker ----
+
+// Part 553: the Stock Change ledger's two per-row write actions (the Products
+// page ledger's row context menu). Both are gated exactly like /adjust --
+// Full Access to Inventory, no review-tier queue -- since they mutate stock
+// or the movement record. Revert lives in lib/stockRevert.ts (pure, driven by
+// test-stock-revert-pure.cjs); this handler is the thin auth + audit wrapper.
+app.post('/movements/:id/revert', async (c) => {
+  const user = c.get('user')
+  if (getActionTier(user, 'inventory', 'adjust') !== 'full') {
+    return c.json({ error: 'Reverting a stock movement requires Full Access to Inventory.' }, 403)
+  }
+  const id = Number.parseInt(String(c.req.param('id') || ''), 10)
+  if (!Number.isFinite(id) || id <= 0) return c.json({ error: 'Invalid movement id' }, 400)
+  const db = getDb(c.env)
+  const mv = await db.prepare(`
+    SELECT id, product_id, product_name, branch_id, branch_name, movement_type, quantity, reason, batch_id
+    FROM inventory_movements WHERE id = @id
+  `).get<RevertMovementRow>({ id })
+  if (!mv) return c.json({ error: 'Stock movement not found' }, 404)
+  const result = await applyMovementRevert(db, mv, { userId: user?.id ?? null, userName: user?.name ?? null })
+  if (!result.ok) return c.json({ error: result.error }, result.status)
+  const productId = Number(mv.product_id) || 0
+  await audit(c.env, user?.id ?? null, user?.name ?? null, 'stock_revert', 'product', productId || null, {
+    movementId: id, movementType: mv.movement_type, revertType: result.revertType, quantity: result.quantity,
+    branchId: Number(mv.branch_id) || null, batchId: mv.batch_id ?? null,
+  })
+  c.executionCtx.waitUntil(broadcast(c.env, 'products', { action: 'update', id: productId }))
+  c.executionCtx.waitUntil(broadcast(c.env, 'inventory', { action: 'adjust', id: productId }))
+  c.executionCtx.waitUntil(bumpVersion(c.env, 'products'))
+  return c.json({ success: true, revertType: result.revertType, quantity: result.quantity, productId, movementId: id })
+})
+
+app.patch('/movements/:id/reason', async (c) => {
+  const user = c.get('user')
+  if (getActionTier(user, 'inventory', 'adjust') !== 'full') {
+    return c.json({ error: 'Editing a stock movement requires Full Access to Inventory.' }, 403)
+  }
+  const id = Number.parseInt(String(c.req.param('id') || ''), 10)
+  if (!Number.isFinite(id) || id <= 0) return c.json({ error: 'Invalid movement id' }, 400)
+  const body = (await c.req.json<Record<string, unknown>>().catch(() => ({}))) as Record<string, unknown>
+  const reason = body.reason != null ? String(body.reason).trim() : ''
+  if (!reason) return c.json({ error: 'A reason is required' }, 400)
+  if (reason.length > 500) return c.json({ error: 'Reason is too long' }, 400)
+  const db = getDb(c.env)
+  const mv = await db.prepare('SELECT id, product_id, reason FROM inventory_movements WHERE id = @id')
+    .get<{ id: number; product_id: number; reason: string | null }>({ id })
+  if (!mv) return c.json({ error: 'Stock movement not found' }, 404)
+  await db.prepare('UPDATE inventory_movements SET reason = @reason WHERE id = @id').run({ id, reason })
+  const productId = Number(mv.product_id) || 0
+  await audit(c.env, user?.id ?? null, user?.name ?? null, 'stock_movement_reason_edit', 'product', productId || null, {
+    movementId: id, from: mv.reason ?? null, to: reason,
+  })
+  c.executionCtx.waitUntil(broadcast(c.env, 'inventory', { action: 'adjust', id: productId }))
+  return c.json({ success: true, id, reason })
+})
 
 app.get('/rfid/status', (c) => c.json({ connected: false, status: 'unconfigured', readers: [] }))
 app.get('/rfid/tags/search', (c) => c.json({ items: [], total: 0, page: 1, pageSize: 20 }))
