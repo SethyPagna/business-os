@@ -84,11 +84,20 @@ Two rules learned the hard way, both from real incidents in this file's own hist
 *(Live coordination only — session records that used to live here are in the
 [DONE — archive](#done--archive).)*
 
-**[~ CLAIMED — session business-os-v1-r2, Aug 31: deploy-pipeline verification +
-run-files update (user ask).** Read-only against Cloudflare (queues list, remote
-migrations list, deploy --dry-run — NO migrate:remote, NO deploy); edits limited
-to run/ + ops/scripts/powershell/ + DEPLOY.md + this board. No product code, no
-migrations. Peers: does not touch the shared 8787 wrangler or local D1.]**
+**[DONE — session business-os-v1-r2, Aug 31: deploy pipeline VERIFIED green +
+run files hardened (`e692a611`, Part 537).** Read-only against Cloudflare, NO
+deploy performed. Measured: remote D1 pending = exactly **0083–0087** (0082 and
+below applied); **all four queues exist** (import, import-dlq, media,
+backup-assets — the wrangler.toml prerequisites are satisfied); `wrangler
+deploy --dry-run` builds with every binding + leangbeauty.com vars; live
+`/health` status=ok; fresh migration chain **8/8 over 88 migrations**. Fixed:
+with-wrangler-auth.cjs now resolves the project-installed wrangler (PATH-loss
+class); verify-local.ps1's $KnownFailing emptied (both exempted tests PASS on
+HEAD — the exemption was masking regressions); DEPLOY.md gained the two missing
+queue prerequisites, secrets:sync in the deploy:full steps, Node 22+, migration
+numbering rules (incl. never rename the historical 0018 pair), and the
+isolated-worktree multi-session deploy method. **The next `npm run deploy:full`
+is safe to run and applies 0083–0087.**]**
 
 **[DONE — session business-os-v1-r2, Aug 31: progress.md board restructure
 (user ask: "done are all moved to done, open are organized, without losing past

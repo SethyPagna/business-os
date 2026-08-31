@@ -15129,3 +15129,58 @@ noted inline, not resolved); the queue one-liners are pointers, not re-verified
 facts; session records inside the archive keep their original (sometimes stale)
 wording, e.g. the pre-Aug-27 "Nothing is deployed" paragraph carries a
 superseded-note instead of an edit.
+
+## Part 537 (Aug 31 2026, session business-os-v1-r2) — deploy pipeline verified green, run files hardened
+
+**Ask:** "make sure deployment are fully correct, also update run files."
+
+**What changed (commit e692a611):**
+- `cloudflare/scripts/with-wrangler-auth.cjs` — resolves `wrangler` to the
+  project-installed CLI (`node_modules/wrangler/bin/wrangler.js` via
+  process.execPath) instead of trusting the shell PATH. Under `npm run` the
+  transient .bin PATH entry made the bare name work, but Windows nested child
+  processes can lose it (a real deploy once stopped after the build this way —
+  sync-secrets.cjs already carried the same workaround), and direct invocation
+  never had it. Non-wrangler commands keep the old shell path.
+- `ops/scripts/powershell/verify-local.ps1` — `$KnownFailing` emptied. Both
+  exempted files (performanceLoadingUx.test.ts, productSearchPagination.test.ts)
+  were re-run and PASS on HEAD (exit 0), so the exemption list was stale and
+  would have silently swallowed the next real regression in either file.
+- `DEPLOY.md` — queue prerequisites now list all four queues wrangler.toml
+  binds consumers to (business-os-import-dlq and business-os-backup-assets were
+  missing from the create list; deploy fails "queue not found" without them);
+  Node 20+ → 22+ (engines pin); deploy:full step list gains the secrets:sync
+  step it actually runs; migration section gains the numbering rules (grep the
+  highest number immediately before committing — 0086 collided twice; and NEVER
+  rename the historical 0018_fees/0018_products_fts pair, wrangler tracks by
+  filename so a rename re-applies it); new "Deploying while other sessions /
+  dev servers are active" section recording the isolated-worktree method.
+- `run/README.md` — full-automation description gains secrets sync + the
+  health URL. `ops/scripts/powershell/full-automation.ps1` — header comment no
+  longer claims the health poll verifies the "freshly deployed version" (the
+  /health version string is a static constant; status=ok is what it checks).
+
+**What was found:** the stale $KnownFailing exemptions; the two missing queue
+prerequisites in DEPLOY.md; the PATH fragility in with-wrangler-auth.cjs;
+the duplicate migration number 0018 (historical, harmless, both applied —
+documented as do-not-rename); /health version constant is static
+(cloudflare-portal-bootstrap-20260728) so health polling can't distinguish
+versions — noted in comments, not changed (product code out of this lane).
+
+**Verified (all really run, read-only against Cloudflare — NO deploy, NO
+migrate:remote):** `wrangler d1 migrations list business-os --remote` → pending
+= exactly 0083_product_duplicate_dismissals … 0087_portal_accounts (0082 and
+below applied); `wrangler queues list` → all four queues exist; `wrangler
+deploy --dry-run` → bundle builds, 275 assets read, every binding + var
+resolves (leangbeauty.com pair); `npm run deploy -- --dry-run` → same, proving
+the npm path through the edited auth wrapper; live GET
+https://admin.leangbeauty.com/health → {"status":"ok"};
+`test-migration-chain-fresh-pure.cjs` → 8/8 checks, 88 migrations from an
+empty DB (0018 duplicate applies cleanly in filename order); both formerly
+"known failing" frontend tests exit 0.
+
+**Not done:** the deploy itself (user-triggered by explicit rule — next
+`npm run deploy:full` applies 0083–0087 and is verified safe to run); bumping
+the static /health version constant (would touch src/index.ts — flagged
+instead); wrangler 4.116.0 → 4.127.1 update available but not taken (lockfile
+pins; upgrading mid-flight is its own change).
