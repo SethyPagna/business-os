@@ -52,7 +52,21 @@ export default function StatsRangeRow({
   const activePreset = activeStatsPreset(range)
   return (
     <div className={`flex min-w-0 flex-wrap items-center gap-1 ${className}`}>
-      <DateTimeRangePicker value={range} onChange={onRangeChange} t={t} showTime={false} />
+      {/* On small screens the Start→End picker takes the WHOLE row (user, Aug 31:
+          "the date range should take the whole row, it looks better that way") --
+          `w-full` makes it a full-width flex item, so the preset chips below wrap
+          onto their own line beneath it; from `sm` up it shrinks back to the
+          compact pill and shares the row with the presets as before. The presets
+          stay grouped with the date here (they belong to the date scope), rather
+          than moving up to the Stats row. */}
+      <DateTimeRangePicker
+        value={range}
+        onChange={onRangeChange}
+        t={t}
+        showTime={false}
+        className="w-full sm:w-auto"
+        triggerClassName="flex w-full items-center justify-center gap-2 rounded-md px-3 py-1.5 sm:inline-flex sm:w-auto sm:justify-start sm:gap-2.5 sm:px-4 sm:py-2.5 sm:min-w-[15rem]"
+      />
       {PRESETS.map((preset) => (
         <button
           key={preset.key}
