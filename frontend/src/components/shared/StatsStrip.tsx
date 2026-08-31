@@ -236,7 +236,13 @@ export default function StatsStrip({
             )
           })}
           {statsRowActions ? (
-            <div className="ml-auto flex min-w-0 flex-wrap items-center justify-end gap-1 self-center">{statsRowActions}</div>
+            // Grouped WITH the cards (not ml-auto to the far edge): with only a
+            // few stats a far-right float leaves a big void framed in the middle
+            // of the row, which reads MORE empty, not less. Sitting the controls
+            // right after the cards keeps stats + their controls one cohesive
+            // block, with ordinary trailing whitespace to the right — balanced,
+            // not excessive (user, Aug 31).
+            <div className="flex min-w-0 flex-wrap items-center gap-1 self-center">{statsRowActions}</div>
           ) : null}
         </div>
       ) : null}
