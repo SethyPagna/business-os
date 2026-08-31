@@ -1227,20 +1227,13 @@ export default function Sales() {
         cards={stripCards}
         loading={stripLoading}
         t={t}
-        // Key figure stays visible beside the Stats chip whether the cards
-        // are folded or open ("stats can show outside button stats", user
-        // Aug 31): sales count · revenue for the strip's range.
-        summary={stripLoading ? '···' : (
-          <>
-            <b className="text-gray-700 dark:text-gray-200">{Number(stripData?.totals?.tx_count) || 0}</b> {t('sales') || 'sales'}
-            <span className="mx-1 text-gray-300 dark:text-gray-600">·</span>
-            <b className="text-gray-700 dark:text-gray-200">{fmtUSD(Number(stripData?.totals?.revenue_usd) || 0)}</b>
-          </>
-        )}
-        // History + Manage are SECONDARY controls: folded they sit on the
-        // chip row as before; open they move to the dedicated full-width
-        // date row (Part 548 — "start and end date can do one row fully
-        // plus history icon/button").
+        // No `summary` beside the Stats chip on Sales: the outside "N sales ·
+        // $revenue" duplicated the strip's own Sales + Revenue cards (user,
+        // Aug 31: "the outside stats is redundant with the stat in the stat
+        // button"). Open the Stats chip to see the same figures.
+        // History + Manage are SECONDARY controls that stay on the Stats-chip
+        // row whether the strip is folded or open — expanding the strip no
+        // longer relocates them (user, Aug 31).
         rangeActions={(
           <>
             <ActionHistoryBar history={actionHistory as unknown as ActionHistoryBarHistory} t={t} className="min-w-0" />
@@ -1322,20 +1315,6 @@ export default function Sales() {
             }}
             mobileIconOnly
           />
-          <PaginationControls
-            compact
-            rangeAsPageSize
-            page={salesPage}
-            pageSize={salesPageSize}
-            totalItems={allVisibleSales.length}
-            label={t('sales') || 'sales'}
-            t={t}
-            onPageChange={setSalesPage}
-            onPageSizeChange={(size) => {
-              setSalesPageSize(size)
-              setSalesPage(1)
-            }}
-          />
         </div>
 
         {selectedSales.length > 0 ? (
@@ -1356,6 +1335,27 @@ export default function Sales() {
             </button>
           </div>
         ) : null}
+      </div>
+
+      {/* Pagination on its own row directly BELOW the search row (user,
+          Aug 31: "page back and forth ... below the search bar row"), matching
+          Returns/Fees in this hub — never on the date row or the search row
+          itself. The list's own footer keeps its pager too. */}
+      <div className="mb-3 flex justify-center">
+        <PaginationControls
+          compact
+          rangeAsPageSize
+          page={salesPage}
+          pageSize={salesPageSize}
+          totalItems={allVisibleSales.length}
+          label={t('sales') || 'sales'}
+          t={t}
+          onPageChange={setSalesPage}
+          onPageSizeChange={(size) => {
+            setSalesPageSize(size)
+            setSalesPage(1)
+          }}
+        />
       </div>
 
 
