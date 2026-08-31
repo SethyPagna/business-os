@@ -2,6 +2,7 @@ import { Hono, type Context } from 'hono'
 import { enqueueImageNormalization } from '../lib/imageAudit'
 import bcrypt from 'bcryptjs'
 import { getDb } from '../lib/db'
+import { cascadeUserRename } from '../lib/userIdentity'
 import { requireAuth, revokeUserSessions, type SessionUser } from '../lib/auth'
 import { audit } from '../lib/audit'
 import { isAdminControlUser } from '../lib/permissions'
@@ -466,6 +467,12 @@ app.put('/users/:id', async (c) => {
       permissions: JSON.stringify(nextPermissions), role_id: body.role_id || null,
       is_active: nextIsActive, deleted_at: markDeleted ? new Date().toISOString() : null, id,
     })
+    // The account id is the source of truth: when the username changes, propagate
+    // it to every denormalized snapshot (cashier_name, movement user_name, etc.)
+    // so the whole system reflects the new name rather than keeping stale copies.
+    if (String(existing.username ?? '').trim() !== username) {
+      await cascadeUserRename(db, Number(id), username)
+    }
     await audit(c.env, actor?.id ?? null, actor?.name ?? null, 'update', 'user', id)
     c.executionCtx.waitUntil(broadcast(c.env, 'users', { action: 'update', id }))
     return c.json({ success: true, ...sanitizeUserRow(await getUserWithRole(c, id)) })
@@ -529,6 +536,11 @@ app.put('/users/:id/profile', async (c) => {
         avatar_path = @avatar, updated_at = CURRENT_TIMESTAMP
       WHERE id = @id
     `).run({ username, name, phone, phone_lookup: phoneLookup, email, avatar: String(body.avatar_path || '').trim() || null, id: targetId })
+    // Propagate a username change to every denormalized snapshot (see the admin
+    // PUT above) -- same id-is-source-of-truth rule on the self-service path.
+    if (String(user.username ?? '').trim() !== username) {
+      await cascadeUserRename(db, Number(targetId), username)
+    }
     await audit(c.env, actor?.id ?? null, actor?.name ?? null, 'update', 'user', targetId, { mode: 'profile' })
     return c.json({ success: true, ...sanitizeUserRow(await getUserWithRole(c, targetId)) })
   } catch (error) {

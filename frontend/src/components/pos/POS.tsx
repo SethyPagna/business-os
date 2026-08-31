@@ -2660,7 +2660,10 @@ export default function POS() {
     const saleData = {
       client_request_id: clientRequestId,
       cashier_id:   user?.id || null,
-      cashier_name: user?.name || '',
+      // Store the USERNAME as the cashier display (cashier_id is the real link).
+      // Keeps new sales consistent with historical ones and with the rename
+      // cascade, which writes the username into cashier_name too.
+      cashier_name: (user as { username?: string } | null | undefined)?.username || user?.name || '',
       customer_name:    active.customer.name    || null,
       customer_id:      active.customer.id      || null,
       customer_membership_number: active.customer.membership_number || null,

@@ -2381,19 +2381,39 @@ export async function classifySales(db: D1Compat, rows: ParsedCsvRow[]): Promise
     if (nameKey) customerByName.set(nameKey, customerByName.has(nameKey) ? null : customer.id)
   }
 
-  // Track F parity, part 70: the same gap existed for `cashier_id` and
-  // `delivery_contact_id` -- both real FK columns a manual checkout
-  // resolves and stores, neither ever read by classifySales even though
-  // `cashier_name` was already a template column. Users have no phone
-  // column worth matching on here (unlike customers), so this is name-only
-  // -- same ambiguous-name-means-no-match rule as customers above, not a
-  // guess. Only active users are eligible; a cashier account that's since
-  // been deactivated shouldn't silently reattach historical sales to it.
-  const cashiers = await db.prepare(`SELECT id, name FROM users WHERE is_active = 1`).all<{ id: number; name: string | null }>()
+  // Cashier matching resolves a row's `cashier_name` to a user account (a real
+  // FK column a manual checkout resolves and stores). Match on BOTH `username`
+  // and `name`, across ALL users: a cashier who has since been deactivated is
+  // still the correct historical attribution (e.g. an inactive "sethyka"
+  // account), so is_active is intentionally NOT filtered here. A key that two
+  // different accounts share stays ambiguous (-> null, never a guess), but the
+  // same account contributing one string as both its username and name is not a
+  // collision. Legacy display names that equal neither username nor name (e.g.
+  // "aza" -> account "Za", "dev-usmart" -> "admin") resolve through the
+  // user_aliases table (migration 0098), which is keyed by the stable user_id so
+  // it keeps working after a username change -- the account id is the source of
+  // truth. Users still have no phone column worth matching on (unlike customers).
+  const cashiers = await db.prepare(`SELECT id, username, name FROM users`).all<{ id: number; username: string | null; name: string | null }>()
   const cashierByName = new Map<string, number | null>()
+  const addCashierKey = (key: string, id: number) => {
+    if (!key) return
+    if (!cashierByName.has(key)) { cashierByName.set(key, id); return }
+    if (cashierByName.get(key) !== id) cashierByName.set(key, null)
+  }
   for (const cashierRow of cashiers) {
-    const nameKey = lower(cashierRow.name)
-    if (nameKey) cashierByName.set(nameKey, cashierByName.has(nameKey) ? null : cashierRow.id)
+    addCashierKey(lower(cashierRow.username), cashierRow.id)
+    addCashierKey(lower(cashierRow.name), cashierRow.id)
+  }
+  const cashierAliasByName = new Map<string, number>()
+  try {
+    const aliases = await db.prepare(`SELECT user_id, alias FROM user_aliases`).all<{ user_id: number; alias: string | null }>()
+    for (const aliasRow of aliases) {
+      const aliasKey = lower(aliasRow.alias)
+      if (aliasKey && !cashierAliasByName.has(aliasKey)) cashierAliasByName.set(aliasKey, aliasRow.user_id)
+    }
+  } catch {
+    // user_aliases may not exist yet on an un-migrated DB; fall back to
+    // username/name matching only.
   }
 
   // delivery_contacts matching mirrors customers exactly (phone first, name
@@ -2487,9 +2507,15 @@ export async function classifySales(db: D1Compat, rows: ParsedCsvRow[]): Promise
       || (rowCustomerNameKey && customerByName.get(rowCustomerNameKey))
       || null
 
-    // Name-only match against active users -- see the cashierByName build
-    // above for why there's no phone fallback here.
-    const matchedCashierId = cashierByName.get(lower(first.cashier_name)) || null
+    // Resolve cashier_name -> user id: a direct username/name match first (an
+    // ambiguous shared name stays null, never a guess), then the alias table for
+    // legacy display names that match neither. See the cashierByName build above.
+    const cashierKey = lower(first.cashier_name)
+    const matchedCashierId = cashierKey
+      ? (cashierByName.has(cashierKey)
+        ? (cashierByName.get(cashierKey) ?? null)
+        : (cashierAliasByName.get(cashierKey) ?? null))
+      : null
 
     // Only resolved/relevant when the row actually says this was a
     // delivery -- an is_delivery-less/falsy row leaves every delivery_*

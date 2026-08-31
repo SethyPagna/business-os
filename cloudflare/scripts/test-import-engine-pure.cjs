@@ -1288,6 +1288,7 @@ assert.strictEqual(isD1CpuLimitError(new Error('Network request failed')), false
     const batches = overrides.batches ?? defaultBatches
     const customers = overrides.customers ?? []
     const users = overrides.users ?? []
+    const userAliases = overrides.userAliases ?? []
     const deliveryContacts = overrides.deliveryContacts ?? []
     return {
       prepare: (sql) => ({
@@ -1296,6 +1297,7 @@ assert.strictEqual(isD1CpuLimitError(new Error('Network request failed')), false
           if (sql.includes('FROM branches')) return branches
           if (sql.includes('FROM product_batches')) return batches
           if (sql.includes('FROM customers')) return customers
+          if (sql.includes('FROM user_aliases')) return userAliases
           if (sql.includes('FROM users')) return users
           if (sql.includes('FROM delivery_contacts')) return deliveryContacts
           return []
@@ -1562,6 +1564,41 @@ assert.strictEqual(isD1CpuLimitError(new Error('Network request failed')), false
     assert.strictEqual(cashierMatch[0].data.cashier_id, 201, 'cashier_name matching an active user resolves cashier_id')
     const cashierNoMatch = await classifySales(db, [row({ receipt_number: 'R-13b', sku: 'SKU-1', quantity: 1, cashier_name: 'Nobody Employed Here' }, 1)], null)
     assert.strictEqual(cashierNoMatch[0].data.cashier_id, null, 'an unmatched cashier_name imports fine with cashier_id null')
+
+    // Cashier identity reconciliation (this lane): resolve cashier_name by
+    // USERNAME and NAME, include INACTIVE users, and fall back to the
+    // user_aliases table for legacy POS display names that equal neither (e.g.
+    // "Aza" -> account "Za"; "Dev-Usmart" -> "admin"). A name two different
+    // accounts share stays ambiguous -> null (never guessed).
+    {
+      const idUsers = [
+        { id: 1, username: 'admin', name: 'Admin', is_active: 1 },
+        { id: 2, username: 'james', name: 'ung sethy pagna', is_active: 1 },
+        { id: 3, username: 'Za', name: 'Oun Raksa', is_active: 1 },
+        { id: 4, username: 'Rath', name: 'Roune Rath', is_active: 1 },
+        { id: 5, username: 'sethyka', name: 'UNG Sethyka', is_active: 0 }, // deactivated, must still match
+        { id: 6, username: 'dup', name: 'Zzz', is_active: 1 },
+        { id: 7, username: 'Yyy', name: 'dup', is_active: 1 }, // makes 'dup' a shared key
+      ]
+      const userAliases = [
+        { user_id: 3, alias: 'aza' },
+        { user_id: 4, alias: 'routh' },
+        { user_id: 2, alias: 'pagna' },
+        { user_id: 1, alias: 'dev-usmart' },
+      ]
+      const idb = makeFakeDb({ users: idUsers, userAliases })
+      const resolve = async (cashierName, n) =>
+        (await classifySales(idb, [row({ receipt_number: `RC-${n}`, sku: 'SKU-1', quantity: 1, cashier_name: cashierName }, 1)], null))[0].data.cashier_id
+
+      assert.strictEqual(await resolve('Aza', 1), 3, 'legacy "Aza" resolves via user_aliases to account "Za" (id 3), matching neither its username nor name')
+      assert.strictEqual(await resolve('Rath', 2), 4, 'a username match wins even when the account name differs ("Roune Rath")')
+      assert.strictEqual(await resolve('Oun Raksa', 3), 3, 'a full-name match still resolves')
+      assert.strictEqual(await resolve('sethyka', 4), 5, 'an INACTIVE user is still matched -- historical cashier attribution must not be dropped')
+      assert.strictEqual(await resolve('routh', 5), 4, 'a legacy spelling variant resolves via alias')
+      assert.strictEqual(await resolve('Dev-Usmart', 6), 1, 'the POS vendor/system account maps to admin via alias')
+      assert.strictEqual(await resolve('Nobody', 7), null, 'an unknown cashier name stays null, never guessed')
+      assert.strictEqual(await resolve('dup', 8), null, 'a key two different accounts share (one username, one name) stays ambiguous -> null')
+    }
 
     // Full money-math sequence: subtotal 1x$10, $2 discount, $1 tax,
     // membership $0.50 off, 4100 exchange rate -> total = 10 - 2 - 0.5 + 1
