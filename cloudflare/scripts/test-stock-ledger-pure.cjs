@@ -101,11 +101,14 @@ assert.deepEqual(seq, [
 ok(true, 'derived before/after matches the hand-computed running balance')
 
 // ---- buckets ---------------------------------------------------------------
+// Part 553: two columns only -- Out when the type is an outflow, In otherwise.
+// The former 'adjustment' bucket folded into In (a merge carry-in genuinely
+// is stock in).
 const buckets = Object.fromEntries(all.items.map((r) => [r.movement_type, r.ledger_bucket]))
 assert.deepEqual(buckets, {
-  add: 'in', sale: 'out', return: 'in', adjustment: 'adjustment', transfer_out: 'out', remove: 'out',
+  add: 'in', sale: 'out', return: 'in', adjustment: 'in', transfer_out: 'out', remove: 'out',
 }, 'each type lands in its ledger column')
-ok(true, 'ledger buckets: add/return=in, sale/transfer_out/remove=out, adjustment=adjustment')
+ok(true, 'ledger buckets: add/return/adjustment=in, sale/transfer_out/remove=out (no separate adjustment column)')
 
 // signed quantities carry direction, magnitudes stay positive
 const signedByType = Object.fromEntries(all.items.map((r) => [r.movement_type, r.signed_quantity]))
@@ -115,10 +118,12 @@ assert.equal(signedByType.return, 1)
 ok(true, 'signed_quantity carries direction (sale -3, add +10, return +1)')
 
 // ---- views -----------------------------------------------------------------
-assert.deepEqual(runLedger({ productId: 9001, view: 'adjustments' }).items.map((r) => r.movement_type), ['adjustment'])
-assert.deepEqual(runLedger({ productId: 9001, view: 'in' }).items.map((r) => r.movement_type).sort(), ['add', 'return'])
+// Part 553: two views only. 'in' now includes the folded 'adjustment'; the
+// retired 'adjustments' value falls through to 'all' (all six rows).
+assert.deepEqual(runLedger({ productId: 9001, view: 'in' }).items.map((r) => r.movement_type).sort(), ['add', 'adjustment', 'return'])
 assert.deepEqual(runLedger({ productId: 9001, view: 'out' }).items.map((r) => r.movement_type).sort(), ['remove', 'sale', 'transfer_out'])
-ok(true, 'views partition the six actions into adjustments/in/out with no overlap')
+assert.equal(runLedger({ productId: 9001, view: 'adjustments' }).total, 6, 'retired "adjustments" view falls back to all')
+ok(true, 'views partition the six actions into in/out with no overlap; adjustment folds into in')
 
 // ---- snapshot honesty ------------------------------------------------------
 const snap = runLedger({ productId: 9002 })
@@ -223,5 +228,45 @@ ok(true, 'supplier filter matches a name-only attributed lot (D1b identity rule)
   assert.deepEqual(got, { 101: 601, 102: null, 103: null })
   ok(true, '0084 backfill: single-lot full-coverage movements gain their batch_id; multi-lot and shortfall rows stay NULL')
 }
+
+// ---- Part 553: completed outflow list + stats summary ----------------------
+// Every outflow string the backend actually writes must bucket as Out, not
+// silently count as In (the reported In/Out imbalance was partly this bug).
+insertProduct(9003, 'Outflow Types', '8800000000035', 0)
+const C = (over) => ({ product_id: 9003, product_name: 'Outflow Types', branch_id: 1, branch_name: 'Main Store', reason: '', user_name: 'tester', ...over })
+insertMovement(C({ id: 20, movement_type: 'move_out', quantity: 2, created_at: '2026-08-20 10:00:00' }))
+insertMovement(C({ id: 21, movement_type: 'damage_out', quantity: 3, created_at: '2026-08-20 11:00:00' }))
+insertMovement(C({ id: 22, movement_type: 'replacement_out', quantity: 1, created_at: '2026-08-20 12:00:00' }))
+insertMovement(C({ id: 23, movement_type: 'out', quantity: 4, created_at: '2026-08-20 13:00:00' }))
+insertMovement(C({ id: 24, movement_type: 'add', quantity: 5, created_at: '2026-08-20 09:00:00' }))
+const cRows = runLedger({ productId: 9003 })
+const cBuckets = Object.fromEntries(cRows.items.map((r) => [r.movement_type, r.ledger_bucket]))
+assert.deepEqual(cBuckets, { move_out: 'out', damage_out: 'out', replacement_out: 'out', out: 'out', add: 'in' },
+  'move_out/damage_out/replacement_out/out all bucket as Out (Part 553 completed list)')
+ok(true, 'completed outflow list: move_out/damage_out/replacement_out/out are Out, not In')
+
+const cSigned = Object.fromEntries(cRows.items.map((r) => [r.movement_type, r.signed_quantity]))
+assert.equal(cSigned.damage_out, -3)
+assert.equal(cSigned.out, -4)
+assert.equal(cSigned.add, 5)
+ok(true, 'newly-listed outflows carry a negative signed_quantity')
+
+function runSummary(filters) {
+  const q = kernel.buildStockLedgerQuery(filters)
+  return db.prepare(q.summarySql).bind(q.params).get()
+}
+const cSummary = runSummary({ productId: 9003 })
+assert.equal(cSummary.in_count, 1)          // the single 'add'
+assert.equal(cSummary.out_count, 4)         // move_out, damage_out, replacement_out, out
+assert.equal(cSummary.in_qty, 5)
+assert.equal(cSummary.out_qty, 2 + 3 + 1 + 4)
+assert.equal(cSummary.total, 5)
+ok(true, 'summary reports In vs Out counts + magnitudes over the base scope')
+
+// The summary ignores the view chip so the In/Out split is always visible.
+const cSummaryOut = runSummary({ productId: 9003, view: 'out' })
+assert.equal(cSummaryOut.in_count, 1)
+assert.equal(cSummaryOut.out_count, 4)
+ok(true, 'summary ignores the selected view (In/Out split always visible)')
 
 console.log(`\nAll ${checks} stock-ledger kernel checks passed`)

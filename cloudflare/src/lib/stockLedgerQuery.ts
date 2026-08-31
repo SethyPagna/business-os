@@ -1,25 +1,38 @@
 // D1 (Part 415): the Stock Change ledger's query kernel -- pure SQL/param
 // building over the EXISTING inventory_movements history, shared by the
 // /products/stock-ledger route and driven directly (compiled, real SQL on
-// real migrations) by test-stock-ledger-pure.cjs. No writes here, ever.
+// real migrations) by test-stock-ledger-pure.cjs. No reads here mutate.
 //
 // Sign semantics MIRROR frontend movementGroups.ts's movementSign(): the
-// types below net stock DOWN, everything else nets UP, quantities are
-// stored as magnitudes. If a movement_type is ever added there, update
-// this list in the same change -- the pure test pins the two lists equal
-// by reading both sources.
-export const LEDGER_OUT_TYPES = ['remove', 'sale', 'supplier_return', 'return_reversal', 'transfer_out', 'row_move_out', 'write_off'] as const
+// types below net stock DOWN, everything else nets UP. `quantity` is stored
+// as a magnitude by MOST writers (a few store a signed value), so the
+// ledger re-derives the sign from movement_type here and the stored sign is
+// irrelevant. If a movement_type is ever added there, update this list in
+// the same change -- the pure test pins the two lists equal by reading both
+// sources.
+//
+// Part 553: the list was COMPLETED. `move_out` (move-row out leg),
+// `damage_out` (damaged goods pulled off sellable stock), `replacement_out`
+// (exchange replacement given out) and the CSV-import `out` string were all
+// missing, so those genuine outflows were mis-counted as Stock In -- part of
+// the reported "70+ in vs very few out" skew was this bug, not just data.
+// `row_move_out` and `write_off` are kept for any legacy rows even though
+// current code writes `move_out` / `return_reversal` instead.
+export const LEDGER_OUT_TYPES = [
+  'remove', 'sale', 'supplier_return', 'return_reversal', 'transfer_out',
+  'row_move_out', 'move_out', 'write_off', 'damage_out', 'replacement_out', 'out',
+] as const
 
-// The ledger's three action columns. 'adjustment' (dated stock-count
-// corrections) and legacy 'set' rows form the Adjustment column; every
-// other type falls to Stock In / Stock Out by sign. Manual modal
-// 'add'/'remove' land in In/Out -- their reasons (damage/lost/wrong/...)
-// are what the spec's Stock Out parenthetical lists, and 'set' has been
-// rewritten into add/remove at the API since D4, so 'set' only matches
-// pre-existing rows.
-export const LEDGER_ADJUSTMENT_TYPES = ['adjustment', 'set'] as const
-
-export type StockLedgerView = 'all' | 'adjustments' | 'in' | 'out'
+// Part 553: the ledger is now a two-column In / Out split (user, Aug 31:
+// "remove the Adjustments mini section since everything seems to move to
+// stock out or stock in"). Every movement classifies as Out when its type is
+// in LEDGER_OUT_TYPES, else In -- so the former 'adjustment'/'set' rows fold
+// into In. That is truthful for the only two writers of those types: a
+// duplicate-merge 'adjustment' is a real stock carry-in, and a legacy batch
+// 'set' correction lost its direction at write time (batches.ts stores
+// Math.abs(delta)), so the ledger can only show the increase its stored
+// magnitude implies -- that write-path sign loss is flagged separately.
+export type StockLedgerView = 'all' | 'in' | 'out'
 
 export type StockLedgerFilters = {
   view?: StockLedgerView
@@ -36,29 +49,37 @@ export type StockLedgerFilters = {
 
 export type StockLedgerQuery = {
   whereSql: string
+  // The same filters WITHOUT the In/Out view predicate. The stats summary
+  // always reports BOTH columns for the current date/search/branch/supplier
+  // scope, regardless of which view chip is selected, so the person can see
+  // the In-vs-Out breakdown that explains an imbalance.
+  baseWhereSql: string
   params: Record<string, unknown>
   countSql: string
   rowsSql: string
+  summarySql: string
 }
 
 const OUT_LIST = LEDGER_OUT_TYPES.map((t) => `'${t}'`).join(', ')
-const ADJUSTMENT_LIST = LEDGER_ADJUSTMENT_TYPES.map((t) => `'${t}'`).join(', ')
+
+// One join clause, shared by every statement below so the row list, the
+// count and the summary can never join differently (the supplier filter and
+// the barcode search both reach through these joins).
+const LEDGER_FROM = `
+    FROM inventory_movements m
+    LEFT JOIN products p ON p.id = m.product_id
+    LEFT JOIN product_batches b ON b.id = m.batch_id`
 
 export function buildStockLedgerQuery(filters: StockLedgerFilters = {}): StockLedgerQuery {
-  const where: string[] = []
+  // Base filters: everything EXCEPT the In/Out view predicate, kept separate
+  // so the stats summary can report both columns over the same scope while
+  // the row list narrows to the selected view.
+  const base: string[] = []
   const params: Record<string, unknown> = {}
-  const view: StockLedgerView = filters.view && ['all', 'adjustments', 'in', 'out'].includes(filters.view) ? filters.view : 'all'
-  if (view === 'adjustments') {
-    where.push(`m.movement_type IN (${ADJUSTMENT_LIST})`)
-  } else if (view === 'in') {
-    where.push(`m.movement_type NOT IN (${ADJUSTMENT_LIST}) AND m.movement_type NOT IN (${OUT_LIST})`)
-  } else if (view === 'out') {
-    where.push(`m.movement_type NOT IN (${ADJUSTMENT_LIST}) AND m.movement_type IN (${OUT_LIST})`)
-  }
   const productId = Number(filters.productId) || 0
   const branchId = Number(filters.branchId) || 0
-  if (productId > 0) { where.push('m.product_id = @productId'); params.productId = productId }
-  if (branchId > 0) { where.push('m.branch_id = @branchId'); params.branchId = branchId }
+  if (productId > 0) { base.push('m.product_id = @productId'); params.productId = productId }
+  if (branchId > 0) { base.push('m.branch_id = @branchId'); params.branchId = branchId }
   // Inclusive calendar-day bounds on the stored timestamp, kept SARGable so
   // idx_inventory_movements_created_pg is actually used instead of a full scan
   // of every movement row: date(m.created_at) would wrap the indexed column
@@ -68,13 +89,13 @@ export function buildStockLedgerQuery(filters: StockLedgerFilters = {}): StockLe
   // old date() form produced (proven in test-stock-ledger-daterange-pure.cjs).
   const startDate = /^\d{4}-\d{2}-\d{2}$/.test(String(filters.startDate || '')) ? String(filters.startDate) : ''
   const endDate = /^\d{4}-\d{2}-\d{2}$/.test(String(filters.endDate || '')) ? String(filters.endDate) : ''
-  if (startDate) { where.push('m.created_at >= @startDate'); params.startDate = startDate }
-  if (endDate) { where.push("m.created_at < date(@endDate, '+1 day')"); params.endDate = endDate }
+  if (startDate) { base.push('m.created_at >= @startDate'); params.startDate = startDate }
+  if (endDate) { base.push("m.created_at < date(@endDate, '+1 day')"); params.endDate = endDate }
   const search = String(filters.search || '').trim().slice(0, 120)
   if (search) {
     // LIKE with ESCAPE, auditLogQuery.ts convention: user text matches
     // literally, % and _ included.
-    where.push(`(m.product_name LIKE @search ESCAPE '\\' OR p.barcode LIKE @search ESCAPE '\\')`)
+    base.push(`(m.product_name LIKE @search ESCAPE '\\' OR p.barcode LIKE @search ESCAPE '\\')`)
     params.search = `%${search.replace(/([\\%_])/g, '\\$1')}%`
   }
   const supplierId = Number(filters.supplierId) || 0
@@ -85,17 +106,27 @@ export function buildStockLedgerQuery(filters: StockLedgerFilters = {}): StockLe
     // was a real suppliers-table match at receive time). Rows without a
     // batch_id cannot match: their lot -- and so their supplier -- was
     // never recorded, and guessing is worse than excluding.
-    where.push(`(b.supplier_id = @supplierId OR (b.supplier_id IS NULL AND b.supplier_name IS NOT NULL
+    base.push(`(b.supplier_id = @supplierId OR (b.supplier_id IS NULL AND b.supplier_name IS NOT NULL
       AND lower(trim(b.supplier_name)) = (SELECT lower(trim(name)) FROM suppliers WHERE id = @supplierId)))`)
     params.supplierId = supplierId
   }
-  const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : ''
+  const baseWhereSql = base.length ? `WHERE ${base.join(' AND ')}` : ''
+
+  // The In/Out view predicate -- 'in' is everything that is NOT an outflow
+  // (so merge carry-ins and legacy adjustments fold into In), 'out' is the
+  // outflow types. Any other value (including the retired 'adjustments')
+  // falls through to 'all'.
+  const view: StockLedgerView = filters.view === 'in' || filters.view === 'out' ? filters.view : 'all'
+  const viewPredicate = view === 'in'
+    ? `m.movement_type NOT IN (${OUT_LIST})`
+    : view === 'out'
+      ? `m.movement_type IN (${OUT_LIST})`
+      : ''
+  const whereClauses = viewPredicate ? [...base, viewPredicate] : base
+  const whereSql = whereClauses.length ? `WHERE ${whereClauses.join(' AND ')}` : ''
 
   const countSql = `
-    SELECT COUNT(*) AS total
-    FROM inventory_movements m
-    LEFT JOIN products p ON p.id = m.product_id
-    LEFT JOIN product_batches b ON b.id = m.batch_id
+    SELECT COUNT(*) AS total${LEDGER_FROM}
     ${whereSql}
   `
 
@@ -116,24 +147,34 @@ export function buildStockLedgerQuery(filters: StockLedgerFilters = {}): StockLe
       m.reason, m.user_name, m.created_at,
       m.batch_id, b.lot_code AS batch_lot_code, b.received_at AS batch_received_at,
       b.supplier_id AS batch_supplier_id, b.supplier_name AS batch_supplier_name,
-      CASE WHEN m.movement_type IN (${ADJUSTMENT_LIST}) THEN 'adjustment'
-           WHEN m.movement_type IN (${OUT_LIST}) THEN 'out'
-           ELSE 'in' END AS ledger_bucket,
+      CASE WHEN m.movement_type IN (${OUT_LIST}) THEN 'out' ELSE 'in' END AS ledger_bucket,
       COALESCE(p.stock_quantity, 0) - COALESCE((
         SELECT SUM(CASE WHEN mn.movement_type IN (${OUT_LIST}) THEN -ABS(COALESCE(mn.quantity, 0)) ELSE ABS(COALESCE(mn.quantity, 0)) END)
         FROM inventory_movements mn
         WHERE mn.product_id = m.product_id
           AND (mn.created_at > m.created_at OR (mn.created_at = m.created_at AND mn.id > m.id))
-      ), 0) AS after_qty
-    FROM inventory_movements m
-    LEFT JOIN products p ON p.id = m.product_id
-    LEFT JOIN product_batches b ON b.id = m.batch_id
+      ), 0) AS after_qty${LEDGER_FROM}
     ${whereSql}
     ORDER BY m.created_at DESC, m.id DESC
     LIMIT @limit OFFSET @offset
   `
 
-  return { whereSql, params, countSql, rowsSql }
+  // Stats summary: one row carrying the In vs Out record counts and
+  // magnitude totals over the BASE scope (it deliberately ignores the view
+  // chip so the split is always visible -- that is what the user wants shown
+  // inline instead of behind a Stats expander). Same joins as the row list
+  // so the supplier/barcode filters resolve identically.
+  const summarySql = `
+    SELECT
+      SUM(CASE WHEN m.movement_type IN (${OUT_LIST}) THEN 0 ELSE 1 END) AS in_count,
+      SUM(CASE WHEN m.movement_type IN (${OUT_LIST}) THEN 1 ELSE 0 END) AS out_count,
+      SUM(CASE WHEN m.movement_type IN (${OUT_LIST}) THEN 0 ELSE ABS(COALESCE(m.quantity, 0)) END) AS in_qty,
+      SUM(CASE WHEN m.movement_type IN (${OUT_LIST}) THEN ABS(COALESCE(m.quantity, 0)) ELSE 0 END) AS out_qty,
+      COUNT(*) AS total${LEDGER_FROM}
+    ${baseWhereSql}
+  `
+
+  return { whereSql, baseWhereSql, params, countSql, rowsSql, summarySql }
 }
 
 // before_qty derivation shared by the route and the test: one place owns

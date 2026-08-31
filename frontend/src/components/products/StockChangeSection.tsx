@@ -18,6 +18,13 @@ import { batchDisplayLabel } from '../../utils/batchLabel.ts'
 // the per-product mini-ledger (D3's absorption of Inventory's
 // view-stock-movement drill into the Products surface): the same endpoint
 // scoped to that product, so both levels always agree.
+//
+// Part 553 (this session): reworked to the two-column In / Out model the
+// user asked for -- the "Adjustments" view is gone (its rows fold into In),
+// the date-range + search row leads and every mini-section (view toggle,
+// filters, the now-always-visible In-vs-Out stats) sits BELOW it, and blank
+// times on legacy/imported rows are shown honestly instead of as a mystery
+// "—" (their date now groups correctly; the time reads "no time recorded").
 
 type LedgerRow = {
   id: number
@@ -32,7 +39,7 @@ type LedgerRow = {
   reason: string | null
   user_name: string | null
   created_at: string
-  ledger_bucket: 'adjustment' | 'in' | 'out'
+  ledger_bucket: 'in' | 'out'
   before_qty: number
   after_qty: number
   // 0084 (D2a): the ONE lot this movement touched, when attributable --
@@ -44,17 +51,30 @@ type LedgerRow = {
   batch_supplier_name: string | null
 }
 
+type LedgerSummary = {
+  inCount: number
+  outCount: number
+  inQty: number
+  outQty: number
+  total: number
+}
+
 type LedgerResponse = {
   items?: LedgerRow[]
   total?: number
   totalPages?: number
+  summary?: LedgerSummary
 }
 
-type LedgerView = 'all' | 'adjustments' | 'in' | 'out'
+// Part 553: two columns only. The old 'adjustments' view was removed (its
+// rows fold into In); 'all' shows everything.
+type LedgerView = 'all' | 'in' | 'out'
 
 type Translate = (key: string) => string
 
 const PAGE_SIZE = 25
+
+const EMPTY_SUMMARY: LedgerSummary = { inCount: 0, outCount: 0, inQty: 0, outQty: 0, total: 0 }
 
 function tr(t: Translate, key: string, fallback: string): string {
   const value = t(key)
@@ -64,6 +84,18 @@ function tr(t: Translate, key: string, fallback: string): string {
 function signedLabel(row: LedgerRow): string {
   const sign = row.signed_quantity > 0 ? '+' : row.signed_quantity < 0 ? '−' : ''
   return `${sign}${Math.abs(row.signed_quantity)}`
+}
+
+// A bare "YYYY-MM-DD" stamp (a legacy/imported movement with no time of
+// day). The DATE still renders -- normalizeTimestampInput now treats it as
+// midnight so day-grouping works -- but its clock would be a fabricated
+// 00:00/07:00, so the time slot honestly reads "no time recorded" instead.
+function isDateOnlyStamp(raw: unknown): boolean {
+  return /^\d{4}-\d{2}-\d{2}$/.test(String(raw ?? '').trim())
+}
+
+function fmtQty(value: number): string {
+  return Number.isFinite(value) ? value.toLocaleString('en-US') : '0'
 }
 
 type BranchOption = { id: number; name: string }
@@ -86,6 +118,7 @@ export default function StockChangeSection({ t }: { t: Translate }) {
   const [endDate, setEndDate] = useState('')
   const [rows, setRows] = useState<LedgerRow[]>([])
   const [total, setTotal] = useState(0)
+  const [summary, setSummary] = useState<LedgerSummary>(EMPTY_SUMMARY)
   const [loading, setLoading] = useState(false)
   const [loadError, setLoadError] = useState('')
   const [detail, setDetail] = useState<LedgerRow | null>(null)
@@ -109,6 +142,7 @@ export default function StockChangeSection({ t }: { t: Translate }) {
       if (requestRef.current !== requestId) return
       setRows(Array.isArray(response?.items) ? response.items : [])
       setTotal(Number(response?.total || 0))
+      setSummary(response?.summary ? { ...EMPTY_SUMMARY, ...response.summary } : EMPTY_SUMMARY)
       setLoadError('')
     } catch (error) {
       if (requestRef.current !== requestId) return
@@ -153,15 +187,17 @@ export default function StockChangeSection({ t }: { t: Translate }) {
     }
   }, [])
 
+  // Part 553: two view chips plus All -- the Adjustment chip is gone (its
+  // rows fold into In).
   const views: Array<{ id: LedgerView; label: string }> = [
     { id: 'all', label: tr(t, 'all', 'All') },
-    { id: 'adjustments', label: tr(t, 'adjustment', 'Adjustment') },
     { id: 'in', label: tr(t, 'stock_in', 'Stock In') },
     { id: 'out', label: tr(t, 'stock_out', 'Stock Out') },
   ]
 
   const beforeLabel = tr(t, 'before_qty', 'Before')
   const afterLabel = tr(t, 'after_qty', 'After')
+  const noTimeLabel = tr(t, 'time_not_recorded', 'Time not recorded (imported record)')
 
   // Branch + supplier folded into the shared FilterMenu (user, Aug 30 2026:
   // "fold supplier and branch into filter menu") instead of two loose selects
@@ -215,44 +251,121 @@ export default function StockChangeSection({ t }: { t: Translate }) {
     return groups
   }, [rows])
 
-  const renderCard = (row: LedgerRow) => (
-    <button
-      key={row.id}
-      type="button"
-      onClick={() => void openDetail(row)}
-      className="flex w-full items-start justify-between gap-3 rounded-xl border border-gray-200 bg-white p-3 text-left shadow-sm transition hover:border-blue-300 hover:bg-blue-50/40 dark:border-gray-700 dark:bg-gray-900 dark:hover:border-blue-700 dark:hover:bg-blue-900/10"
-    >
-      <div className="min-w-0 flex-1">
-        <div className="flex items-center gap-2">
-          {/* Time only -- the day header above carries the date. */}
-          <span className="shrink-0 tabular-nums text-xs font-medium text-gray-400">{fmtClock24(row.created_at)}</span>
-          <span className="truncate text-sm font-semibold text-gray-800 dark:text-gray-100" title={row.product_name}>{row.product_name}</span>
-        </div>
-        <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[11px] text-gray-400">
-          {row.barcode ? <span className="rounded-full bg-gray-100 px-1.5 py-0.5 font-mono text-gray-500 dark:bg-gray-800 dark:text-gray-300">{row.barcode}</span> : null}
-          {row.batch_id ? (
-            <span className="rounded-full bg-gray-100 px-1.5 py-0.5 text-gray-500 dark:bg-gray-800 dark:text-gray-300">
-              {batchDisplayLabel({ id: row.batch_id, lot_code: row.batch_lot_code, received_at: row.batch_received_at })}
+  const renderCard = (row: LedgerRow) => {
+    const dateOnly = isDateOnlyStamp(row.created_at)
+    const clock = dateOnly ? '' : fmtClock24(row.created_at)
+    const timeUnknown = dateOnly || clock === '—' || clock === ''
+    return (
+      <button
+        key={row.id}
+        type="button"
+        onClick={() => void openDetail(row)}
+        className="flex w-full items-start justify-between gap-3 rounded-xl border border-gray-200 bg-white p-3 text-left shadow-sm transition hover:border-blue-300 hover:bg-blue-50/40 dark:border-gray-700 dark:bg-gray-900 dark:hover:border-blue-700 dark:hover:bg-blue-900/10"
+      >
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2">
+            {/* Time only -- the day header above carries the date. A
+                legacy/imported row with no time of day shows a muted marker
+                (with an explanatory tooltip) rather than a fabricated 00:00. */}
+            <span
+              className={`shrink-0 tabular-nums text-xs font-medium ${timeUnknown ? 'text-gray-300 dark:text-gray-600' : 'text-gray-400'}`}
+              title={timeUnknown ? noTimeLabel : undefined}
+            >
+              {timeUnknown ? '––:––' : clock}
             </span>
-          ) : null}
-          {row.branch_name ? <span className="truncate">{row.branch_name}</span> : null}
-          {row.reason ? <span className="truncate text-gray-400" title={row.reason}>· {row.reason}</span> : null}
+            <span className="truncate text-sm font-semibold text-gray-800 dark:text-gray-100" title={row.product_name}>{row.product_name}</span>
+          </div>
+          <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[11px] text-gray-400">
+            {row.barcode ? <span className="rounded-full bg-gray-100 px-1.5 py-0.5 font-mono text-gray-500 dark:bg-gray-800 dark:text-gray-300">{row.barcode}</span> : null}
+            {row.batch_id ? (
+              <span className="rounded-full bg-gray-100 px-1.5 py-0.5 text-gray-500 dark:bg-gray-800 dark:text-gray-300">
+                {batchDisplayLabel({ id: row.batch_id, lot_code: row.batch_lot_code, received_at: row.batch_received_at })}
+              </span>
+            ) : null}
+            {row.branch_name ? <span className="truncate">{row.branch_name}</span> : null}
+            {row.reason ? <span className="truncate text-gray-400" title={row.reason}>· {row.reason}</span> : null}
+          </div>
         </div>
-      </div>
-      <div className="shrink-0 text-right">
-        <span className={`inline-flex items-center gap-1 rounded-lg px-2 py-0.5 text-xs font-semibold ${movementColorClass(row.movement_type, row.signed_quantity)}`}>
-          {signedLabel(row)}
-          <span className="font-normal opacity-80">{translateMovementType(row.movement_type, t)}</span>
-        </span>
-        <div className="mt-1 text-xs tabular-nums text-gray-500 dark:text-gray-400">
-          {row.before_qty} <span className="text-gray-300 dark:text-gray-600">→</span> <span className="font-semibold text-gray-800 dark:text-gray-100">{row.after_qty}</span>
+        <div className="shrink-0 text-right">
+          <span className={`inline-flex items-center gap-1 rounded-lg px-2 py-0.5 text-xs font-semibold ${movementColorClass(row.movement_type, row.signed_quantity)}`}>
+            {signedLabel(row)}
+            <span className="font-normal opacity-80">{translateMovementType(row.movement_type, t)}</span>
+          </span>
+          <div className="mt-1 text-xs tabular-nums text-gray-500 dark:text-gray-400">
+            {row.before_qty} <span className="text-gray-300 dark:text-gray-600">→</span> <span className="font-semibold text-gray-800 dark:text-gray-100">{row.after_qty}</span>
+          </div>
         </div>
-      </div>
-    </button>
-  )
+      </button>
+    )
+  }
+
+  // Always-visible In vs Out stats (user, Aug 31: "stats should be visible
+  // directly without expand/collapse"). Colour-coded so the reported
+  // "70+ in vs very few out" reads at a glance -- and now honest, since the
+  // completed outflow list means damaged/moved/replacement rows finally land
+  // in Out instead of inflating In. Numbers come from the server summary,
+  // computed over the current date/search/branch/supplier scope but ignoring
+  // the In/Out chip, so the split is the same whichever view is selected.
+  const stat = (kind: 'in' | 'out', count: number, qty: number) => {
+    const active = view === kind
+    const isIn = kind === 'in'
+    return (
+      <button
+        type="button"
+        onClick={() => setView(active ? 'all' : kind)}
+        title={isIn ? tr(t, 'stock_in', 'Stock In') : tr(t, 'stock_out', 'Stock Out')}
+        className={`inline-flex items-center gap-1 rounded-lg px-2 py-0.5 text-xs font-semibold transition ${
+          isIn
+            ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-300'
+            : 'bg-rose-50 text-rose-700 dark:bg-rose-900/20 dark:text-rose-300'
+        } ${active ? 'ring-2 ring-inset ' + (isIn ? 'ring-emerald-400 dark:ring-emerald-600' : 'ring-rose-400 dark:ring-rose-600') : 'hover:brightness-95'}`}
+      >
+        <span aria-hidden="true">{isIn ? '↑' : '↓'}</span>
+        <span className="tabular-nums">{count}</span>
+        <span className="font-normal opacity-80">{isIn ? tr(t, 'stock_in', 'Stock In') : tr(t, 'stock_out', 'Stock Out')}</span>
+        <span className="font-normal tabular-nums opacity-60">· {fmtQty(qty)}</span>
+      </button>
+    )
+  }
 
   return (
     <div className="space-y-3">
+      {/* Row 1: the date-range + search bar row. It leads; every mini-section
+          drops BELOW it (user, Aug 31 2026: "move all mini sections (filters,
+          stats, etc.) below the date range and search bar row"). Unified
+          Start → End pill -- the same control as the Dashboard, Fees,
+          Inventory movements and Audit Log range filters. */}
+      <div className="flex flex-wrap items-center gap-2">
+        <DateTimeRangePicker
+          value={{ startDate, endDate, startTime: '', endTime: '' }}
+          onChange={(next) => {
+            setStartDate(next.startDate || '')
+            setEndDate(next.endDate || '')
+          }}
+          t={t}
+          showTime={false}
+          triggerClassName="flex items-center justify-center gap-2 rounded-lg px-2.5 py-1.5"
+        />
+        <div className="min-w-48 flex-1 sm:max-w-96">
+          <SearchInput id="stock-ledger-search" name="stock_ledger_search" value={search} onChange={setSearch} placeholder={tr(t, 'search', 'Search')} />
+        </div>
+        <span className="ml-auto inline-flex items-center gap-1 text-xs text-gray-400">
+          {total}
+          {/* The ledger's "what is this" explanation lives behind this info
+              affordance instead of an inline sentence above the section
+              (density: instructions move into the info toolkit, not the
+              layout). */}
+          <InfoHint
+            label={tr(t, 'stock_change_ledger', 'Stock Changes')}
+            text={tr(t, 'stock_change_ledger_info', 'Read-only. Every recorded stock action — stock in, stock out — with the running balance (before → after) computed from current stock. Tap a card for that product’s full history.')}
+          />
+        </span>
+      </div>
+
+      {/* Row 2: the mini-sections, BELOW the date/search row -- the In/Out/All
+          view toggle, the branch/supplier filter menu, and the
+          always-visible In-vs-Out stats (no Stats expander; the Adjustments
+          column is gone -- everything nets to In or Out). */}
       <div className="flex flex-wrap items-center gap-2">
         <div className="inline-flex rounded-xl bg-gray-100 p-0.5 dark:bg-gray-800">
           {views.map((option) => (
@@ -266,46 +379,19 @@ export default function StockChangeSection({ t }: { t: Translate }) {
             </button>
           ))}
         </div>
-        {/* Order (user, Aug 30 2026): the Start → End date range comes FIRST,
-            then the search bar -- and search is MERGED with the filter menu
-            that now holds branch + supplier (they used to be loose selects on
-            this row). Unified Start → End pill -- same control as the
-            Dashboard, Fees, Inventory movements and Audit Log range filters. */}
-        <DateTimeRangePicker
-          value={{ startDate, endDate, startTime: '', endTime: '' }}
-          onChange={(next) => {
-            setStartDate(next.startDate || '')
-            setEndDate(next.endDate || '')
-          }}
-          t={t}
-          showTime={false}
-          triggerClassName="flex items-center justify-center gap-2 rounded-lg px-2.5 py-1.5"
-        />
-        <div className="flex min-w-48 flex-1 items-center gap-1.5 sm:max-w-96">
-          <div className="min-w-0 flex-1">
-            <SearchInput id="stock-ledger-search" name="stock_ledger_search" value={search} onChange={setSearch} placeholder={tr(t, 'search', 'Search')} />
-          </div>
-          {filterSections.length ? (
-            <FilterMenu
-              label={tr(t, 'filters', 'Filters')}
-              activeCount={(branchId ? 1 : 0) + (supplierId ? 1 : 0)}
-              sections={filterSections}
-              onClear={() => { setBranchId(0); setSupplierId(0) }}
-              mobileIconOnly
-            />
-          ) : null}
-        </div>
-        <span className="ml-auto inline-flex items-center gap-1 text-xs text-gray-400">
-          {total}
-          {/* The ledger's "what is this" explanation lives behind this info
-              affordance instead of an inline sentence above the section
-              (density: instructions move into the info toolkit, not the
-              layout). The section's own switcher/search stay visible. */}
-          <InfoHint
-            label={tr(t, 'stock_change_ledger', 'Stock Changes')}
-            text={tr(t, 'stock_change_ledger_info', 'Read-only. Every recorded stock action — adjustments, stock in, stock out — with the running balance (before → after) computed from current stock. Tap a card for that product’s full history.')}
+        {filterSections.length ? (
+          <FilterMenu
+            label={tr(t, 'filters', 'Filters')}
+            activeCount={(branchId ? 1 : 0) + (supplierId ? 1 : 0)}
+            sections={filterSections}
+            onClear={() => { setBranchId(0); setSupplierId(0) }}
+            mobileIconOnly
           />
-        </span>
+        ) : null}
+        <div className="ml-auto flex items-center gap-1.5">
+          {stat('in', summary.inCount, summary.inQty)}
+          {stat('out', summary.outCount, summary.outQty)}
+        </div>
       </div>
 
       {loadError ? (
@@ -363,7 +449,9 @@ export default function StockChangeSection({ t }: { t: Translate }) {
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
               <div className="rounded-xl bg-gray-50 px-3 py-2 dark:bg-gray-800/60">
                 <div className="text-[11px] uppercase tracking-wide text-gray-400">{tr(t, 'date', 'Date')}</div>
-                <div className="mt-0.5 text-sm font-semibold text-gray-800 dark:text-gray-100">{fmtDateTime24(detail.created_at)}</div>
+                <div className="mt-0.5 text-sm font-semibold text-gray-800 dark:text-gray-100" title={isDateOnlyStamp(detail.created_at) ? noTimeLabel : undefined}>
+                  {isDateOnlyStamp(detail.created_at) ? fmtDate(detail.created_at) : fmtDateTime24(detail.created_at)}
+                </div>
               </div>
               <div className="rounded-xl bg-gray-50 px-3 py-2 dark:bg-gray-800/60">
                 <div className="text-[11px] uppercase tracking-wide text-gray-400">{beforeLabel}</div>
@@ -403,7 +491,9 @@ export default function StockChangeSection({ t }: { t: Translate }) {
                 <div className="max-h-64 space-y-1 overflow-y-auto">
                   {detailRows.map((row) => (
                     <div key={row.id} className={`flex items-center justify-between rounded-lg px-2.5 py-1.5 text-xs ${row.id === detail.id ? 'ring-1 ring-blue-300 dark:ring-blue-700' : ''} bg-gray-50 dark:bg-gray-800/60`}>
-                      <span className="text-gray-400">{fmtDateTime24(row.created_at)}</span>
+                      <span className="text-gray-400" title={isDateOnlyStamp(row.created_at) ? noTimeLabel : undefined}>
+                        {isDateOnlyStamp(row.created_at) ? fmtDate(row.created_at) : fmtDateTime24(row.created_at)}
+                      </span>
                       <span className={`rounded px-1.5 py-0.5 font-semibold ${movementColorClass(row.movement_type, row.signed_quantity)}`}>{signedLabel(row)}</span>
                       <span className="tabular-nums text-gray-500">{row.before_qty} → {row.after_qty}</span>
                     </div>

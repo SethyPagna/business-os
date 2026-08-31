@@ -136,6 +136,15 @@ export function translateMovementType(type: unknown, t?: (key: string) => string
     csv_import: ['import', 'Import'],
     row_move_in: ['movement_type_row_move_in', 'Row move in'],
     row_move_out: ['movement_type_row_move_out', 'Row move out'],
+    // Part 553: the strings the backend actually writes for these effects
+    // (move-row legs, damaged goods, exchange replacements, CSV in/out) --
+    // previously rendered raw/underscored because they were absent here.
+    move_in: ['movement_type_move_in', 'Moved in'],
+    move_out: ['movement_type_move_out', 'Moved out'],
+    damage_out: ['movement_type_damage_out', 'Damaged'],
+    replacement_out: ['movement_type_replacement_out', 'Replacement'],
+    'in': ['stock_in', 'Stock In'],
+    out: ['stock_out', 'Stock Out'],
   }
   const mapped = canonicalKey[key]
   if (mapped) return T(mapped[0], mapped[1])
@@ -145,9 +154,17 @@ export function translateMovementType(type: unknown, t?: (key: string) => string
   return key.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
 }
 
+// Part 553: this down-type list is pinned EQUAL to backend
+// stockLedgerQuery.ts LEDGER_OUT_TYPES by test-stock-ledger-pure.cjs -- edit
+// both in the same change (the test extracts the array below by regex, so
+// keep it a single inline literal right after the key lookup).
+// move_out/damage_out/replacement_out/'out' were added because they are
+// genuine outflows the backend writes (the move-row out leg, damaged goods,
+// exchange replacements, CSV-import removals) that were previously mis-signed
+// as stock IN.
 function movementSign(type: unknown): -1 | 1 {
   const key = String(type || '').toLowerCase()
-  if (['remove', 'sale', 'supplier_return', 'return_reversal', 'transfer_out', 'row_move_out', 'write_off'].includes(key)) return -1
+  if (['remove', 'sale', 'supplier_return', 'return_reversal', 'transfer_out', 'row_move_out', 'move_out', 'write_off', 'damage_out', 'replacement_out', 'out'].includes(key)) return -1
   return 1
 }
 
