@@ -192,3 +192,9 @@ export function getStockInInvoiceLines(params: QueryParams = {}): Promise<unknow
 export function getSupplierApInvoices(params: QueryParams = {}): Promise<unknown> {
   return apiFetch('GET', appendQuery('/api/suppliers/reports/ap-invoices', buildQueryString(params)))
 }
+
+// Customer accounts-receivable ledger (migration 0094) -- the customer-side
+// mirror of the supplier AP read above.
+export function getCustomerReceivables(params: QueryParams = {}): Promise<unknown> {
+  return apiFetch('GET', appendQuery('/api/customers/reports/ar-invoices', buildQueryString(params)))
+}
