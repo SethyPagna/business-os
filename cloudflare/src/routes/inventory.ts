@@ -5,7 +5,7 @@ import { paginateProductFamilies } from '../lib/familyPagination'
 import { getFamilyStockStats } from '../lib/familyStockStats'
 import { requireAuth, type SessionUser } from '../lib/auth'
 import { audit } from '../lib/audit'
-import { getPermissionTier } from '../lib/permissions'
+import { getPermissionTier, getActionTier } from '../lib/permissions'
 import { maybeQueueForReview } from '../lib/reviewGate'
 import { broadcast } from '../durable-objects/broadcastHub'
 import { bumpVersion } from '../lib/cache'
@@ -980,6 +980,11 @@ app.get('/reasons', async (c) => {
 
 app.put('/reasons', async (c) => {
   const user = c.get('user')
+  // Per-action override (Part 546): 'inventory:edit_reasons' switched off
+  // blocks both the direct write and the review-queue path below.
+  if (getActionTier(user, 'inventory', 'edit_reasons') === 'none') {
+    return c.json({ error: 'You do not have permission to perform this action' }, 403)
+  }
   const body = (await c.req.json<Record<string, unknown>>().catch(() => ({}))) as Record<string, unknown>
   const items = normalizeReasons(body.items || body.reasons || [])
 
@@ -1220,7 +1225,7 @@ app.post('/adjust', async (c) => {
   // pass). Explicitly blocked for a review-tier user rather than silently
   // falling through to a full-access write now that the top-level
   // middleware admits review-tier users for reads.
-  if (getPermissionTier(user, 'inventory') === 'review') {
+  if (getActionTier(user, 'inventory', 'adjust') !== 'full') {
     return c.json({ error: 'Stock adjustments require Full Access to Inventory -- Review Required support for this action is not built yet.' }, 403)
   }
   const body = (await c.req.json<Record<string, unknown>>().catch(() => ({}))) as Record<string, unknown>
@@ -1551,7 +1556,7 @@ app.post('/dated-stock-count/resolve', async (c) => {
   // auto-created, see datedStockCountResolve.ts's own header comment),
   // so it's gated the same way /apply already is, not treated as
   // read-only.
-  if (getPermissionTier(user, 'inventory') === 'review') {
+  if (getActionTier(user, 'inventory', 'stock_count') !== 'full') {
     return c.json({ error: 'Dated stock-count import requires Full Access to Inventory -- Review Required support for this action is not built yet.' }, 403)
   }
   const body = (await c.req.json<Record<string, unknown>>().catch(() => ({}))) as Record<string, unknown>
@@ -1581,7 +1586,7 @@ app.post('/dated-stock-count/resolve', async (c) => {
 // broken, failed, forgotten, loss").
 app.post('/dated-stock-count/resolve/apply-decisions', async (c) => {
   const user = c.get('user')
-  if (getPermissionTier(user, 'inventory') === 'review') {
+  if (getActionTier(user, 'inventory', 'stock_count') !== 'full') {
     return c.json({ error: 'Dated stock-count import requires Full Access to Inventory -- Review Required support for this action is not built yet.' }, 403)
   }
   const body = (await c.req.json<Record<string, unknown>>().catch(() => ({}))) as Record<string, unknown>
@@ -1603,7 +1608,7 @@ app.post('/dated-stock-count/resolve/apply-decisions', async (c) => {
 
 app.post('/dated-stock-count/preview', async (c) => {
   const user = c.get('user')
-  if (getPermissionTier(user, 'inventory') === 'review') {
+  if (getActionTier(user, 'inventory', 'stock_count') !== 'full') {
     return c.json({ error: 'Dated stock-count import requires Full Access to Inventory -- Review Required support for this action is not built yet.' }, 403)
   }
   const body = (await c.req.json<Record<string, unknown>>().catch(() => ({}))) as Record<string, unknown>
@@ -1618,7 +1623,7 @@ app.post('/dated-stock-count/preview', async (c) => {
 
 app.post('/dated-stock-count/apply', async (c) => {
   const user = c.get('user')
-  if (getPermissionTier(user, 'inventory') === 'review') {
+  if (getActionTier(user, 'inventory', 'stock_count') !== 'full') {
     return c.json({ error: 'Dated stock-count import requires Full Access to Inventory -- Review Required support for this action is not built yet.' }, 403)
   }
   const body = (await c.req.json<Record<string, unknown>>().catch(() => ({}))) as Record<string, unknown>
@@ -1649,7 +1654,7 @@ app.post('/transfer', async (c) => {
   const user = c.get('user')
   // Same reasoning as /adjust above -- not wired into the review queue
   // yet, explicitly blocked rather than silently allowed through.
-  if (getPermissionTier(user, 'inventory') === 'review') {
+  if (getActionTier(user, 'inventory', 'transfer') !== 'full') {
     return c.json({ error: 'Branch transfers require Full Access to Inventory -- Review Required support for this action is not built yet.' }, 403)
   }
   const body = (await c.req.json<Record<string, unknown>>().catch(() => ({}))) as Record<string, unknown>
@@ -1747,7 +1752,7 @@ app.post('/move-row', async (c) => {
   const user = c.get('user')
   // Same reasoning as /adjust above -- not wired into the review queue
   // yet, explicitly blocked rather than silently allowed through.
-  if (getPermissionTier(user, 'inventory') === 'review') {
+  if (getActionTier(user, 'inventory', 'move_row') !== 'full') {
     return c.json({ error: 'Moving stock between rows requires Full Access to Inventory -- Review Required support for this action is not built yet.' }, 403)
   }
   const body = (await c.req.json<Record<string, unknown>>().catch(() => ({}))) as Record<string, unknown>

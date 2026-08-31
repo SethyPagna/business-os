@@ -62,6 +62,14 @@ const CALL_SHAPES = [
   /\b(?:T|tr|safeT|copy)\(\s*'([a-z][a-z0-9_]*)'/g,
   /\btranslate\(\s*t\s*,\s*'([a-z][a-z0-9_]*)'/g,
   /\bt(?:Prop)?\??\.?\(\s*'([a-z][a-z0-9_]*)'\s*[),]/g,
+  // PermissionEditor-style local wrapper: translate('key', 'Fallback').
+  /\btranslate\(\s*'([a-z][a-z0-9_]*)'\s*,/g,
+  // Data-table translation references (PERMISSION_SECTIONS /
+  // PERMISSION_ACTIONS): tKey: 'perm_...', reviewTKey: 'perm_...'. These
+  // render through translate(action.tKey, ...) at runtime, which no call-
+  // shape scan can see -- catch them at the table instead.
+  /\btKey:\s*'([a-z][a-z0-9_]*)'/g,
+  /\breviewTKey:\s*'([a-z][a-z0-9_]*)'/g,
 ]
 const missing = new Map<string, Set<string>>()
 for (const file of files) {

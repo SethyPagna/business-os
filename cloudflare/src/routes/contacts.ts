@@ -4,7 +4,7 @@ import { chunkForBinding } from '../lib/sqlBinding'
 import { requireAuth, type SessionUser } from '../lib/auth'
 import { audit } from '../lib/audit'
 import { applyRenameCarry } from '../lib/renameCascade'
-import { getPermissionTier, hasPermission, isAdminControlUser } from '../lib/permissions'
+import { getPermissionTier, getActionTier, hasPermission, isAdminControlUser } from '../lib/permissions'
 import { broadcast, type BroadcastChannel } from '../durable-objects/broadcastHub'
 import { assertUpdatedAtMatch, getExpectedUpdatedAt, writeConflictResponse, WriteConflictError } from '../lib/conflictControl'
 import { loadSettingsMap, buildPortalConfig, summarizePoints, type SubmissionRow } from './portal'
@@ -589,6 +589,11 @@ function registerContactRoutes(config: ContactConfig) {
     if (getPermissionTier(user, 'contacts') === 'review') {
       return c.json({ error: `Merging ${config.entity}s requires Full Access to Contacts -- Review Required support for this action is not built.` }, 403)
     }
+    // Per-action override (Part 546): 'contacts:merge' switched off for
+    // this role blocks the action even at Full Access.
+    if (getActionTier(user, 'contacts', 'merge') === 'none') {
+      return c.json({ error: 'You do not have permission to perform this action' }, 403)
+    }
     const body = (await c.req.json<Record<string, unknown>>().catch(() => ({}))) as Record<string, unknown>
     const keepId = Number(body.keepId)
     const mergeId = Number(body.mergeId)
@@ -666,6 +671,10 @@ function registerContactRoutes(config: ContactConfig) {
 
   app.post(config.path, async (c) => {
     const user = c.get('user')
+    // Per-action override (Part 546): 'contacts:add' switched off.
+    if (getActionTier(user, 'contacts', 'add') === 'none') {
+      return c.json({ error: 'You do not have permission to perform this action' }, 403)
+    }
     const body = (await c.req.json<Record<string, unknown>>().catch(() => ({}))) as Record<string, unknown>
     const name = String(body.name || '').trim()
     if (!name) return c.json({ error: 'Name is required' }, 400)
@@ -741,6 +750,11 @@ function registerContactRoutes(config: ContactConfig) {
 
   app.put(`${config.path}/:id`, async (c) => {
     const user = c.get('user')
+    // Per-action override (Part 546): 'contacts:edit' switched off. The
+    // review tier's name-only narrowing below is unchanged.
+    if (getActionTier(user, 'contacts', 'edit') === 'none') {
+      return c.json({ error: 'You do not have permission to perform this action' }, 403)
+    }
     const id = c.req.param('id')
     const body = (await c.req.json<Record<string, unknown>>().catch(() => ({}))) as Record<string, unknown>
     const db = getDb(c.env)
@@ -867,6 +881,10 @@ function registerContactRoutes(config: ContactConfig) {
     if (getPermissionTier(user, 'contacts') === 'review') {
       return c.json({ error: `Deleting a ${config.entity} requires Full Access to Contacts -- Review Required support for this action is not built.` }, 403)
     }
+    // Per-action override (Part 546): 'contacts:delete' switched off.
+    if (getActionTier(user, 'contacts', 'delete') === 'none') {
+      return c.json({ error: 'You do not have permission to perform this action' }, 403)
+    }
 
     const db = getDb(c.env)
     const current = await db.prepare(`SELECT * FROM ${config.table} WHERE id = @id`).get<Record<string, unknown>>({ id })
@@ -906,6 +924,10 @@ function registerContactRoutes(config: ContactConfig) {
     if (tier === 'none') return c.json({ error: 'You do not have permission to perform this action' }, 403)
     if (tier === 'review') {
       return c.json({ error: `Bulk delete requires Full Access to Contacts -- Review Required support for this action is not built.` }, 403)
+    }
+    // Per-action override (Part 546): 'contacts:bulk_delete' switched off.
+    if (getActionTier(user, 'contacts', 'bulk_delete') === 'none') {
+      return c.json({ error: 'You do not have permission to perform this action' }, 403)
     }
 
     const body = (await c.req.json<Record<string, unknown>>().catch(() => ({}))) as Record<string, unknown>

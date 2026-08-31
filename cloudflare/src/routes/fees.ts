@@ -2,7 +2,7 @@ import { Hono } from 'hono'
 import { getDb } from '../lib/db'
 import { requireAuth, type SessionUser } from '../lib/auth'
 import { audit } from '../lib/audit'
-import { getPermissionTier } from '../lib/permissions'
+import { getPermissionTier, getActionTier } from '../lib/permissions'
 import { broadcast } from '../durable-objects/broadcastHub'
 import { assertUpdatedAtMatch, getExpectedUpdatedAt, writeConflictResponse, WriteConflictError } from '../lib/conflictControl'
 import { maybeQueueForReview } from '../lib/reviewGate'
@@ -208,6 +208,10 @@ app.get('/:id', async (c) => {
 // POST /api/fees -- create a fee record.
 app.post('/', async (c) => {
   const user = c.get('user')
+  // Per-action override (Part 546): an admin can switch 'fees:add' off for
+  // a role that otherwise has the fees grant -- getActionTier folds that
+  // narrowing into the ordinary tier answer.
+  if (getActionTier(user, 'fees', 'add') === 'none') return c.json({ error: 'You do not have permission to perform this action' }, 403)
   const db = getDb(c.env)
   const body = await c.req.json().catch(() => ({} as Record<string, unknown>))
 
@@ -241,6 +245,8 @@ app.post('/', async (c) => {
 // every other editable record in this app uses.
 app.put('/:id', async (c) => {
   const user = c.get('user')
+  // Per-action override (Part 546) -- see POST / above.
+  if (getActionTier(user, 'fees', 'edit') === 'none') return c.json({ error: 'You do not have permission to perform this action' }, 403)
   const db = getDb(c.env)
   const id = Number(c.req.param('id'))
   if (!Number.isFinite(id)) return c.json({ error: 'Invalid fee id' }, 400)
@@ -288,6 +294,10 @@ app.put('/:id', async (c) => {
 // stay direct-write regardless of tier, matching that spec exactly.
 app.delete('/:id', async (c) => {
   const user = c.get('user')
+  // Per-action override (Part 546) -- checked before the review-queue
+  // branch below, so 'fees:delete' switched off blocks BOTH the direct
+  // delete and the queue path.
+  if (getActionTier(user, 'fees', 'delete') === 'none') return c.json({ error: 'You do not have permission to perform this action' }, 403)
   const db = getDb(c.env)
   const id = Number(c.req.param('id'))
   if (!Number.isFinite(id)) return c.json({ error: 'Invalid fee id' }, 400)

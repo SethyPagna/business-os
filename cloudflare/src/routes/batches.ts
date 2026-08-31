@@ -2,7 +2,7 @@ import { Hono } from 'hono'
 import { getDb } from '../lib/db'
 import { requireAuth, type SessionUser } from '../lib/auth'
 import { audit } from '../lib/audit'
-import { hasPermission } from '../lib/permissions'
+import { hasPermission, isActionBlocked } from '../lib/permissions'
 import { broadcast } from '../durable-objects/broadcastHub'
 import { bumpVersion } from '../lib/cache'
 import { getTrackedProductIds, listBatchesForProduct, receiveBatchStock } from '../lib/productBatches'
@@ -38,9 +38,12 @@ app.use('*', async (c, next) => {
   // lot VIEW -- read-only by construction (writes stay inventory-only),
   // and note batch rows carry unit_cost_usd, so this grant is the
   // admin's explicit choice to show that.
+  // Writes (receive batch stock, fast stock-in, edit/deactivate a lot)
+  // ride the 'inventory:adjust' per-action override (Part 546) -- the same
+  // action key Branches.tsx's canReceiveStock reads via can().
   const allowed = isRead
     ? (hasPermission(user, 'inventory') || hasPermission(user, 'pos') || hasPermission(user, 'sales') || hasPermission(user, 'products_image_only_show_batches'))
-    : hasPermission(user, 'inventory')
+    : hasPermission(user, 'inventory') && !isActionBlocked(user, 'inventory', 'adjust')
   if (!allowed) return c.json({ error: 'You do not have permission to perform this action' }, 403)
   return next()
 })

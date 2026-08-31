@@ -5,7 +5,7 @@ import type { D1Compat } from '../lib/db'
 import { paginateProductFamilies } from '../lib/familyPagination'
 import { getFamilyStockStats } from '../lib/familyStockStats'
 import { requireAuth, type SessionUser } from '../lib/auth'
-import { getPermissionTier } from '../lib/permissions'
+import { getPermissionTier, getActionTier } from '../lib/permissions'
 import { maybeQueueForReview } from '../lib/reviewGate'
 import { broadcast } from '../durable-objects/broadcastHub'
 import { bumpVersion } from '../lib/cache'
@@ -163,7 +163,9 @@ app.get('/stock-integrity', async (c) => {
 // the same rows this will act on (see buildStockIntegrityPreview's comment).
 app.post('/stock-integrity/repair', async (c) => {
   const user = c.get('user')
-  const tier = getPermissionTier(user, 'branches')
+  // getActionTier (Part 546): folds the 'branches:repair_stock' per-action
+  // override into the tier answer -- switched off reads as 'none'.
+  const tier = getActionTier(user, 'branches', 'repair_stock')
   if (tier === 'none') {
     return c.json({ success: false, error: 'No permission', code: 'forbidden', permission: 'branches' }, 403)
   }
@@ -280,7 +282,8 @@ app.post('/stock-integrity/repair', async (c) => {
 // lot" -- see that function's comment for the full reasoning.
 app.post('/transfer', async (c) => {
   const user = c.get('user')
-  const transferTier = getPermissionTier(user, 'branches')
+  // getActionTier (Part 546): folds the 'branches:transfer' override in.
+  const transferTier = getActionTier(user, 'branches', 'transfer')
   if (transferTier === 'none') {
     return c.json({ error: 'You do not have permission to perform this action' }, 403)
   }
@@ -445,7 +448,8 @@ const MAX_BULK_TRANSFER_ITEMS = 200
 
 app.post('/transfer-bulk', async (c) => {
   const user = c.get('user')
-  const bulkTransferTier = getPermissionTier(user, 'branches')
+  // getActionTier (Part 546): same 'branches:transfer' switch as /transfer.
+  const bulkTransferTier = getActionTier(user, 'branches', 'transfer')
   if (bulkTransferTier === 'none') {
     return c.json({ error: 'You do not have permission to perform this action' }, 403)
   }
@@ -813,7 +817,8 @@ app.get('/:id/stock', async (c) => {
 
 app.post('/', async (c) => {
   const user = c.get('user')
-  if (getPermissionTier(user, 'branches') === 'none') {
+  // getActionTier (Part 546): folds the 'branches:add' override in.
+  if (getActionTier(user, 'branches', 'add') === 'none') {
     return c.json({ error: 'You do not have permission to perform this action' }, 403)
   }
   const body = await c.req.json<BranchInput>()
@@ -893,7 +898,8 @@ app.post('/', async (c) => {
 
 app.put('/:id', async (c) => {
   const user = c.get('user')
-  if (getPermissionTier(user, 'branches') === 'none') {
+  // getActionTier (Part 546): folds the 'branches:edit' override in.
+  if (getActionTier(user, 'branches', 'edit') === 'none') {
     return c.json({ error: 'You do not have permission to perform this action' }, 403)
   }
   const id = c.req.param('id')
@@ -940,7 +946,8 @@ app.put('/:id', async (c) => {
 
 app.delete('/:id', async (c) => {
   const user = c.get('user')
-  if (getPermissionTier(user, 'branches') === 'none') {
+  // getActionTier (Part 546): folds the 'branches:delete' override in.
+  if (getActionTier(user, 'branches', 'delete') === 'none') {
     return c.json({ error: 'You do not have permission to perform this action' }, 403)
   }
   const id = c.req.param('id')

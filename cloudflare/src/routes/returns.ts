@@ -3,7 +3,7 @@ import { getDb } from '../lib/db'
 import { selectInChunks } from '../lib/sqlBinding'
 import { requireAuth, type SessionUser } from '../lib/auth'
 import { audit } from '../lib/audit'
-import { getPermissionTier } from '../lib/permissions'
+import { getPermissionTier, getActionTier } from '../lib/permissions'
 import { assertUpdatedAtMatch, getExpectedUpdatedAt, writeConflictResponse, WriteConflictError } from '../lib/conflictControl'
 import { broadcast } from '../durable-objects/broadcastHub'
 import { bumpVersion } from '../lib/cache'
@@ -539,6 +539,11 @@ app.get('/:id', async (c) => {
 app.post('/', async (c) => {
   const db = getDb(c.env)
   const user = c.get('user')
+  // Per-action override (Part 546): 'returns:add' switched off for this
+  // role blocks creating returns even though the tier admits them.
+  if (getActionTier(user, 'returns', 'add') === 'none') {
+    return c.json({ error: 'You do not have permission to perform this action' }, 403)
+  }
   const body = await c.req.json<{
     items: ReturnItemInput[]
     sale_id?: number
@@ -659,7 +664,10 @@ app.post('/', async (c) => {
     if (settlement.evenExchangeBlocked) {
       return c.json({ error: `This is not an even exchange -- the replacement differs from the returned value by $${settlement.diffUsd.toFixed(2)}. Choose "settle the price difference" (full access), or adjust quantities/prices until the totals match.`, code: 'uneven_exchange' }, 400)
     }
-    if (settlement.needsFullAccess && getPermissionTier(user, 'returns') !== 'full') {
+    // getActionTier, not getPermissionTier (Part 546): the
+    // 'returns:settle_difference' per-action override can switch this off
+    // for a role even at Full Access.
+    if (settlement.needsFullAccess && getActionTier(user, 'returns', 'settle_difference') !== 'full') {
       return c.json({ error: 'Settling a price difference on a replacement requires Full Access to Returns.' }, 403)
     }
     settlementMode = settlement.mode
@@ -1044,6 +1052,11 @@ app.post('/', async (c) => {
 app.post('/supplier', async (c) => {
   const db = getDb(c.env)
   const user = c.get('user')
+  // Per-action override (Part 546): supplier returns are the same 'add'
+  // action as customer returns -- one switch covers both create routes.
+  if (getActionTier(user, 'returns', 'add') === 'none') {
+    return c.json({ error: 'You do not have permission to perform this action' }, 403)
+  }
   const body = await c.req.json<{
     items: Array<{ product_id: number; product_name?: string; quantity: number; cost_price_usd?: number; cost_price_khr?: number; unit_cost_usd?: number; unit_cost_khr?: number; branch_id?: number }>
     branch_id?: number
@@ -1312,6 +1325,10 @@ app.patch('/:id', async (c) => {
   // users at all.
   if (getPermissionTier(user, 'returns') === 'review') {
     return c.json({ error: 'Editing a return requires Full Access to Returns -- Review Required support for this action is not built yet.' }, 403)
+  }
+  // Per-action override (Part 546): 'returns:edit' switched off.
+  if (getActionTier(user, 'returns', 'edit') === 'none') {
+    return c.json({ error: 'You do not have permission to perform this action' }, 403)
   }
   const body = await c.req.json<{
     items?: ReturnItemInput[]

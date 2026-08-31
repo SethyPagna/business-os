@@ -157,14 +157,44 @@ ship-now batch) was excluded and rides the next deploy — ship-now session:
 say the word here when your batch is committed and green, any session can run
 the worktree deploy per DEPLOY.md.]**
 
-**CLAIMED (in progress, i18n/permissions session, Aug 31, Part 546):** per-action
-permission completion (7.1's remaining half): wiring getActionTier/isActionBlocked
-into the five non-Products routers (inventory.ts, branches.ts, returns.ts, fees.ts,
-contacts.ts) + importJobs.ts (per-type import overrides) + batches.ts (receive), and
-adding the missing action rows (inventory receive/import, contacts import, returns
-settle_difference) to utils/permissionActions.ts so the editor matrix models every
-real button. NOT touching cloudflare/src/routes/sales.ts, portal.ts, or any
-ship-now-claimed frontend page file.
+**[DONE — i18n/permissions session, Aug 31 (Part 546, needs deploy): per-action
+permission overrides enforced on ALL six review-tier sections + the editor
+matrix now models every real button, translated.** 7.1's remaining half: the
+permission editor let an admin switch any section's action off per role and
+the UI hid the button (can()), but the BACKEND honored the switch only in
+products.ts — for inventory/branches/returns/fees/contacts a direct API call
+sailed past the override. Wired getActionTier/isActionBlocked into every
+per-action gate: fees add/edit/delete; contacts add/edit/delete/bulk_delete/
+merge; returns add (both POST / and /supplier), edit, and the NEW
+settle_difference action (the needsFullAccess site now reads the action
+tier, so 'returns:settle_difference' can be switched off even at Full
+Access); branches add/edit/delete/transfer(+bulk)/repair_stock (tier reads
+swapped to getActionTier — none/review branches unchanged); inventory
+edit_reasons/adjust/transfer/move_row/stock_count (the review-403s became
+`getActionTier(...) !== 'full'`, same review behavior + override folded in);
+batches.ts writes (receive/fast stock-in/manage lots) ride
+'inventory:adjust', the SAME key Branches.tsx's canReceiveStock already
+reads; importJobs.ts maps each import type to its section's ':import'
+switch (products / contacts / inventory+stock_actions; sales has no matrix)
+and 'products:import_replace_all' can be switched off on top of
+destructive_delete. New matrix rows: inventory 'import', contacts 'import',
+returns 'settle_difference'; 'adjust' relabeled 'Adjust / receive stock'.
+tKeys made UNIQUE per section+action (a shared 'perm_act_add' would have
+rendered one section's label on every sibling the moment the packs
+translated it) and ALL permissions-UI strings added to BOTH packs (65 keys:
+41 action rows + outcome badges + section headers reusing the sidebar's own
+km names) — the editor matrix previously rendered English-only in Khmer
+mode because translate(action.tKey,...) is invisible to call-site scanners;
+verify-i18n.ts now also scans translate('k',...)/tKey:/reviewTKey: shapes.
+Honest scope: pages that don't yet consult can() for the newly-wired
+actions (fees buttons, returns settle checkbox, contact add/edit forms)
+show a control that 403s with a clear message when overridden off — the
+documented safe-direction gap; UI hiding can follow per page. Verified:
+permissionActions/permissionEditor/permissions/langKeyIntegrity green,
+route-permissions/review-gate/batches-permission (8/8, source-guard shape
+kept)/audit-coverage (48)/reset-permission-gate/review-submitter/
+import-review-query pure tests green, verify:i18n OK (4162 keys), both
+tscs clean.]**
 
 **CLAIMED (in progress, ship-now-fixes session, Aug 31):** the audit's ship-now tier — public portal stock leak (portal.ts + storefront components), storefront admin-voice strings, POS search-wipe on tap, Inventory import/export icon swap, ImportModeWizard z-fix, Dashboard dead hidden blocks, Branches bare-td, CartItem KHR decimals, posCopy(en,en), Returns clear-scope-reset. NOT touching cloudflare/src/routes/sales.ts or api/saleWriteTransport.ts (another session mid-flight there).
 
@@ -6788,7 +6818,7 @@ snapshot.]**
 - **DONE in code, needs deploy/live verification:** unified stock-action import (§12 + its §13 slice — analyze, persisted row review, confirmation, FIFO/oversell-safe apply, lifecycle seal and Free-plan bounds).
 - **DONE in code, needs deploy/live verification:** §13 two-screen structure for Stock Actions, Contacts, Sales, Inventory **and Products/image-only**; each real upload starts one queued analyze and one persisted review/confirm screen owns the decision.
 - **DONE in code, needs migrations/deploy/live verification:** smart sales import/export core (11.29, Part 369) — compact multi-line inheritance, strict time, safe matching, shared round-trip contract, permissions/bounds, atomic idempotent receipt apply and return restock.
-- **IN PROGRESS / partial:** Drive backup (manifest checkpoint done; referenced asset-folder mirror open) · image pipeline (role cap done; quality/provider audit open) · per-action permissions (7.1 — narrows-only, Products routes only) · selection-column behavior (11.1/11.2 — Products done, other pages open).
+- **IN PROGRESS / partial:** Drive backup (manifest checkpoint done; referenced asset-folder mirror open) · image pipeline (role cap done; quality/provider audit open) · per-action permissions (7.1 — narrows-only; ALL six review-tier sections' routes enforce overrides since Part 546) · selection-column behavior (11.1/11.2 — Products done, other pages open).
 - **TO DO (specced, not started):** compact/top-layer stats UI on all pages (11.26) · customer delivery charge vs restricted actual cost/margin (11.27, including the sales import/export extension) · manual historical batch entry + barcode rules (11.28) · commission/service schema/business rule · server-level undo/redo (3.1) · public-portal polish (§5) · Returns replace + damaged-stock chooser (11.12/11.13) · remaining POS SP/VIP/damage picker · identity rename-regroup (9.1/9.2). Full ordered list: [Open work — ORDERED](#open-work--ordered).
 
 ## DONE this session (Parts 346–353) — do not redo

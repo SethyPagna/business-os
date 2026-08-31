@@ -2,7 +2,7 @@ import { Hono } from 'hono'
 import { enqueueImageNormalization } from '../lib/imageAudit'
 import { getDb } from '../lib/db'
 import { requireAuth, type SessionUser } from '../lib/auth'
-import { hasPermission, hasAnyPermission } from '../lib/permissions'
+import { hasPermission, hasAnyPermission, isActionBlocked } from '../lib/permissions'
 import { audit } from '../lib/audit'
 import { sanitizeOriginalFileName, buildUniqueStoredName, getMediaType } from '../lib/fileAssets'
 import { validateUploadedBuffer } from '../lib/uploadSecurity'
@@ -62,12 +62,29 @@ async function getJob(env: Env, id: string) {
   return getDb(env).prepare(`SELECT * FROM import_jobs WHERE id = @id`).get<Record<string, unknown>>({ id })
 }
 
+// Per-action override (Part 546): which `section:import` switch governs an
+// import type. Sales imports have no per-action matrix (the 'sales' key is
+// Full/None with no action table), so they map to nothing here.
+function importActionSection(type: string): string | null {
+  const normalized = String(type || 'products').trim().toLowerCase()
+  if (['customers', 'suppliers', 'delivery_contacts'].includes(normalized)) return 'contacts'
+  if (normalized === 'inventory' || normalized === 'stock_actions') return 'inventory'
+  if (normalized === 'sales') return null
+  return 'products'
+}
+
 async function requireImportPermission(c: any, job: Record<string, unknown> | undefined, bodyType?: string) {
   const user = c.get('user')
   const type = (job?.type as string) || bodyType || 'products'
   const missingPermission = permissionsForType(type).find((permission) => !hasPermission(user, permission))
   if (missingPermission) {
     return c.json({ success: false, error: 'No permission', code: 'forbidden', permission: missingPermission }, 403)
+  }
+  // A role with the full grant can still have this import type's
+  // `section:import` action switched off in the permission editor.
+  const overrideSection = importActionSection(type)
+  if (overrideSection && isActionBlocked(user, overrideSection, 'import')) {
+    return c.json({ success: false, error: 'No permission', code: 'forbidden', permission: `${overrideSection}:import` }, 403)
   }
   return null
 }
@@ -212,6 +229,11 @@ app.post('/', async (c) => {
   if (type === 'products' && (requestedImportMode === 'replace_all' || requestedImportMode === 'replace_columns')) {
     if (!hasPermission(user, 'destructive_delete')) {
       return c.json({ success: false, error: 'No permission', code: 'forbidden', permission: 'destructive_delete' }, 403)
+    }
+    // Per-action override (Part 546): 'products:import_replace_all' can be
+    // switched off for a role even when destructive_delete is granted.
+    if (isActionBlocked(user, 'products', 'import_replace_all')) {
+      return c.json({ success: false, error: 'No permission', code: 'forbidden', permission: 'products:import_replace_all' }, 403)
     }
   }
 
