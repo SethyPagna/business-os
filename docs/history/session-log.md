@@ -15079,3 +15079,53 @@ disabled).
   community 8787 instance's workerd children may have been killed too (its
   wrangler manager respawns them) — heads-up to that session.
 - NEEDS DEPLOY: migration 0087 + all code. Not deployed this session.
+
+## Part 536 (Aug 31 2026, session business-os-v1-r2) — progress.md restructure: done into one archive, open organized
+
+**Ask:** "Check the current status of progress.md what is done vs what is not
+clean them so done are all moved to done. open are organized. without losing
+past actions. make it clear."
+
+**What changed:** progress.md only (commit 3f314668; claim 9d5d75f5). The file
+had five generations of queues interleaved (Part-370 master plan, task board,
+"Open work — ORDERED", the pre-Part-370 "Open" backlog, Aug-25 request batches)
+with ~150 finished items still sitting inside them. New order: intro/how-to →
+Status snapshot → Current status (live coordination only) → OPEN — the queue
+(one-line index of every open item) → master-plan phases holding ONLY open items
+(22: A2, A4a, B1, D2b, D3, D5a, F3, K1, K4, K6, K7, M6, N1b, N1c, N3, N3a, P7-f,
+Y4, Y16, Z1b, Z5, Z6, Z7 — P7 counted via its P7-f remainder) → still-open task
+board rows (4) → Part-77 verification findings → refreshed "Needs the user" →
+pre-Part-370 leftovers (incl. 5 Aug-25 asks the master plan never absorbed:
+currency-rule regression test, stories/posts, promotions wired-vs-stubbed audit,
+Drive asset mirror, Khmer key cleanup) → spec library (Open work — ORDERED,
+verbatim) → reference (Golden Rules…Environment, Connected services, Tests &
+Security, helpers) → DONE — archive (136 master-plan items grouped by phase,
+35 board rows, umbrella boxes, all Current-status session records Parts 370–535,
+Parts 346–353 block, old-backlog [x] items, Aug-25 batch records, Part 346/341
+writeups, Older completed work). Where a recorded-open row was demonstrably
+closed by a later master-plan item, it moved to the archive with a bracketed
+supersession note (import-correctness→R1/D6b, Add/Sale-absorbs→§12,
+image-auto-wire→2.3, CPU-limits→Parts 346–353+M4, large-screen alignment→4.1,
+public-accounts-deferred→Part 535); rows merely PARTLY done stayed open with
+pointer notes. Live coordination blocks (7b coordinator note, c8 claim + infra
+note, 8787 standing rule) preserved verbatim; the resolved 0086/0087 collision
+warning moved to the archive with a RESOLVED note.
+
+**How:** Node script (scratchpad restructure.cjs) — text-anchor slicing (peers
+were committing concurrently; line numbers drifted mid-session), checkbox-block
+partitioning per phase, table-row partitioning by status cell, CRLF preserved.
+
+**Verified:** the script's loss check — every non-empty content line of the old
+file is present in the new one (exact match, or contained for the 9 annotated
+table rows / 2 rewritten how-to pointer lines; '## Open' heading retitled) —
+LOSS CHECK PASSED. Unicode spot-check byte-identical (frontend↔backend line);
+no BOM introduced. Anchors kept: #golden-rules, #open-work--ordered, phase
+headings, §-spec sections (archived duplicates demoted to #### to avoid anchor
+collisions).
+
+**Not done:** no reconciliation of contradictory recorded statuses beyond
+flagging (e.g. K7 lists 10.2 open while the board records it fixed Part 394 —
+noted inline, not resolved); the queue one-liners are pointers, not re-verified
+facts; session records inside the archive keep their original (sometimes stale)
+wording, e.g. the pre-Aug-27 "Nothing is deployed" paragraph carries a
+superseded-note instead of an edit.
