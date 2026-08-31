@@ -207,13 +207,16 @@ check('originals are never deleted by the audit', async () => {
 
 check('the audit cannot break the backup chain', async () => {
   // It runs last, and swallows its own errors, because a backup must never be
-  // skipped because an image sweep failed.
-  assert.match(index, /\.then\(\(\) => maybeRunScheduledImageAudit\(env\)\)/)
-  const chain = index.slice(index.indexOf('maybeRunScheduledBackup(env)'))
-  assert.ok(
-    chain.indexOf('maybeRunScheduledImageAudit') > chain.indexOf('maybeRunScheduledAuditLogRetention'),
-    'the image audit must run last',
-  )
+  // skipped because an image sweep failed. (Part 544 rewrote scheduled() from
+  // a .then() chain to sequential awaits in one waitUntil'd async block; the
+  // ORDER is the invariant, so that is what gets pinned now.)
+  const scheduled = index.slice(index.indexOf('async scheduled('))
+  const backupAt = scheduled.indexOf('await maybeRunScheduledBackup(env)')
+  const retentionAt = scheduled.indexOf('await maybeRunScheduledAuditLogRetention(env)')
+  const auditAt = scheduled.indexOf('await maybeRunScheduledImageAudit(env)')
+  assert.ok(backupAt >= 0, 'the backup must run in the scheduled tick')
+  assert.ok(retentionAt > backupAt, 'audit-log retention must run after the backup')
+  assert.ok(auditAt > retentionAt, 'the image audit must run last')
   assert.match(audit, /catch \(error\) \{\s*\n\s*console\.error\('\[image-audit\] pass failed'/)
 })
 

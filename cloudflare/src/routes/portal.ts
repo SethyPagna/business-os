@@ -402,15 +402,16 @@ async function attachPortalStockStatus(env: Env, products: Array<Record<string, 
   const ids = Array.from(new Set(products.map((p) => Number(p.id)).filter((id) => Number.isFinite(id) && id > 0)))
   if (!ids.length) return products
   const db = getDb(env)
-  const [branchRows, thresholdSettings] = await Promise.all([
+  const [branchRows, thresholdRows] = await Promise.all([
     db.prepare(`
       SELECT id FROM branches WHERE is_active = 1 ORDER BY is_default DESC, id ASC
     `).all<{ id: number }>(),
     db.prepare(`
       SELECT key, value FROM settings
       WHERE key IN ('customer_portal_stock_threshold_mode', 'customer_portal_low_stock_threshold', 'customer_portal_out_of_stock_threshold')
-    `).all<{ key: string; value: string }>().then((rows) => Object.fromEntries((rows || []).map((row) => [row.key, row.value]))),
+    `).all<{ key: string; value: string }>(),
   ])
+  const thresholdSettings = Object.fromEntries((thresholdRows || []).map((row) => [row.key, row.value]))
   const useGlobalThresholds = String(thresholdSettings.customer_portal_stock_threshold_mode || '') === 'global'
   const globalLow = Number(thresholdSettings.customer_portal_low_stock_threshold ?? 10)
   const globalOut = Number(thresholdSettings.customer_portal_out_of_stock_threshold ?? 0)
