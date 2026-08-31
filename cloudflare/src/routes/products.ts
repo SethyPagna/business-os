@@ -16,6 +16,7 @@ import { validateUploadedBuffer } from '../lib/uploadSecurity'
 import { checkRateLimit, getClientIp } from '../lib/rateLimit'
 import { audit } from '../lib/audit'
 import { findDuplicateProductGroups, findPossiblySameProductClusters, normalizeProductClusterKey } from '../lib/productIdentity'
+import { registerMergeFold, recordMergeUndoSnapshot, type MergeReversal } from '../lib/undoAppliers'
 import { attachBatchCounts } from '../lib/productBatches'
 import { maybeQueueForReview } from '../lib/reviewGate'
 import { assertUpdatedAtMatch, getExpectedUpdatedAt, writeConflictResponse, WriteConflictError } from '../lib/conflictControl'
@@ -2156,7 +2157,7 @@ app.post('/unwire-images', async (c) => {
 // POST /possible-duplicates/merge, so the two paths can never drift.
 // Callers recompute the keeper's denormalized stock_quantity afterwards
 // (once per group / once per pair) and bump caches.
-async function foldDuplicateProductInto(
+export async function foldDuplicateProductInto(
   env: Env,
   db: ReturnType<typeof getDb>,
   user: SessionUser | null,
@@ -2173,6 +2174,7 @@ async function foldDuplicateProductInto(
   movementsReparented: number
   reparentedSaleItemIds: number[]
   reparentedMovementIds: number[]
+  reversal: MergeReversal
 }> {
   const canonicalId = canonical.id
   const canonicalName = canonical.name
@@ -2186,11 +2188,24 @@ async function foldDuplicateProductInto(
   let nextCanonicalBatchNumber = canonicalBatchRows.reduce((max, b) => Math.max(max, Number(b.batch_number) || 0), 0) + 1
 
   const stockRows = await db
+    .prepare('SELECT branch_id, quantity, rfid_confirmed_qty FROM branch_stock WHERE product_id = @id')
+    .all<{ branch_id: number; quantity: number; rfid_confirmed_qty: number | null }>({ id: dup.id })
+  // Keeper's branch_stock BEFORE the fold, captured so undo can restore it
+  // exactly. The fold adds the dup's per-branch quantity into the keeper (and
+  // may create a keeper row for a branch it had none in), so subtracting on
+  // undo alone could leave a phantom zero row -- restoring the captured
+  // before-image instead is exact.
+  const canonicalStockBefore = await db
     .prepare('SELECT branch_id, quantity FROM branch_stock WHERE product_id = @id')
-    .all<{ branch_id: number; quantity: number }>({ id: dup.id })
+    .all<{ branch_id: number; quantity: number }>({ id: canonicalId })
+  // Keeper's image_path BEFORE the fold: the fold adopts the dup's image only
+  // when the keeper had none, so undo restores this captured value verbatim.
+  const canonicalBefore = await db
+    .prepare('SELECT image_path FROM products WHERE id = @id')
+    .get<{ image_path: string | null }>({ id: canonicalId })
   const dupBatchRows = await db
-    .prepare('SELECT id, batch_key FROM product_batches WHERE variant_product_id = @id')
-    .all<{ id: number; batch_key: string }>({ id: dup.id })
+    .prepare('SELECT id, batch_key, batch_number FROM product_batches WHERE variant_product_id = @id')
+    .all<{ id: number; batch_key: string; batch_number: number | null }>({ id: dup.id })
   // Images were the one thing this merge silently threw away: branch_stock,
   // inventory_movements and product_batches were all carried over, but the
   // duplicate's gallery (product_images) and its image_path were left
@@ -2240,10 +2255,12 @@ async function foldDuplicateProductInto(
   // by path, since two duplicates of one product very often reference the
   // same stored object.
   let imagesMovedThisDup = 0
+  const imagesMovedPaths: string[] = []
   for (const image of dupImageRows) {
     const imagePath = String(image.image_path || '')
     if (!imagePath || canonicalImagePaths.has(imagePath)) continue
     canonicalImagePaths.add(imagePath)
+    imagesMovedPaths.push(imagePath)
     statements.push({
       sql: 'INSERT INTO product_images (product_id, image_path, sort_order) VALUES (@canonicalId, @path, @order)',
       params: { canonicalId, path: imagePath, order: nextCanonicalImageOrder },
@@ -2278,12 +2295,28 @@ async function foldDuplicateProductInto(
   // number for as long as it stays on the same product).
   let batchesMovedThisDup = 0
   let batchesFoldedThisDup = 0
+  // Reverse-spec captures for the batch disposition: a REPOINTED batch is
+  // reversed by pointing it back at the dup with its original number; a FOLDED
+  // batch is reversed by reactivating it, re-inserting its branch_batch_stock,
+  // and restoring the keeper batch's branch_batch_stock to its before-image
+  // (each keeper batch is folded into at most once here -- dup batch_keys are
+  // unique per product -- so its before-image is captured exactly once).
+  const repointedBatches: Array<{ id: number; batchNumber: number | null }> = []
+  const foldedBatches: Array<{
+    dupBatchId: number
+    keeperBatchId: number
+    dupStockBefore: Array<{ branch_id: number; quantity: number }>
+    keeperStockBefore: Array<{ branch_id: number; quantity: number }>
+  }> = []
   for (const batchRow of dupBatchRows) {
     const existingCanonicalBatchId = canonicalBatchIdByKey.get(batchRow.batch_key)
     if (existingCanonicalBatchId) {
       const dupBatchStockRows = await db
         .prepare('SELECT branch_id, quantity FROM branch_batch_stock WHERE batch_id = @id')
         .all<{ branch_id: number; quantity: number }>({ id: batchRow.id })
+      const keeperBatchStockBefore = await db
+        .prepare('SELECT branch_id, quantity FROM branch_batch_stock WHERE batch_id = @id')
+        .all<{ branch_id: number; quantity: number }>({ id: existingCanonicalBatchId })
       for (const bbs of dupBatchStockRows) {
         const qty = Number(bbs.quantity) || 0
         if (!qty) continue
@@ -2295,6 +2328,12 @@ async function foldDuplicateProductInto(
       }
       statements.push({ sql: 'DELETE FROM branch_batch_stock WHERE batch_id = @id', params: { id: batchRow.id } })
       statements.push({ sql: 'UPDATE product_batches SET is_active = 0, updated_at = CURRENT_TIMESTAMP WHERE id = @id', params: { id: batchRow.id } })
+      foldedBatches.push({
+        dupBatchId: batchRow.id,
+        keeperBatchId: existingCanonicalBatchId,
+        dupStockBefore: dupBatchStockRows.map((r) => ({ branch_id: r.branch_id, quantity: Number(r.quantity) || 0 })),
+        keeperStockBefore: keeperBatchStockBefore.map((r) => ({ branch_id: r.branch_id, quantity: Number(r.quantity) || 0 })),
+      })
       batchesFoldedThisDup += 1
     } else {
       statements.push({
@@ -2303,6 +2342,7 @@ async function foldDuplicateProductInto(
       })
       canonicalBatchIdByKey.set(batchRow.batch_key, batchRow.id)
       nextCanonicalBatchNumber += 1
+      repointedBatches.push({ id: batchRow.id, batchNumber: batchRow.batch_number })
       batchesMovedThisDup += 1
     }
   }
@@ -2328,6 +2368,15 @@ async function foldDuplicateProductInto(
 
   await db.batch(statements)
 
+  // The stock-fold inserted one 'adjustment' inventory_movement per branch on
+  // the keeper; capture their ids now (right after the batch, when exactly this
+  // fold's rows carry the dup-specific reason fragment -- the dup is now
+  // inactive and cannot be re-merged, so no other rows can match) so undo
+  // deletes those exact rows by id rather than by a fragile reason match.
+  const adjustmentMovementIds = (await db
+    .prepare(`SELECT id FROM inventory_movements WHERE product_id = @keeperId AND movement_type = 'adjustment' AND reason LIKE @frag`)
+    .all<{ id: number }>({ keeperId: canonicalId, frag: `%(#${dup.id}) into this product%` })).map((r) => Number(r.id))
+
   await audit(env, user?.id ?? null, user?.name ?? null, 'merge_duplicate', 'product', dup.id, {
     productName: dup.name,
     mergedIntoProductId: canonicalId,
@@ -2350,8 +2399,34 @@ async function foldDuplicateProductInto(
     movementsReparented: reparentedMovementIds.length,
     reparentedSaleItemIds,
     reparentedMovementIds,
+    // Everything undo needs to restore both products to their exact pre-fold
+    // state. Consumed by the 'product.merge' applier (lib/undoAppliers.ts) via
+    // the undo_snapshots side table; see makeMergeReversal() for the shape.
+    reversal: {
+      keeperId: canonicalId,
+      keeperName: canonicalName,
+      dupId: dup.id,
+      dupName: dup.name ?? null,
+      keeperImagePathBefore: canonicalBefore?.image_path ?? null,
+      keeperStockBefore: canonicalStockBefore.map((r) => ({ branch_id: r.branch_id, quantity: Number(r.quantity) || 0 })),
+      dupStockBefore: stockRows.map((r) => ({ branch_id: r.branch_id, quantity: Number(r.quantity) || 0, rfid_confirmed_qty: Number(r.rfid_confirmed_qty) || 0 })),
+      dupImagesBefore: dupImageRows.map((r) => ({ image_path: String(r.image_path), sort_order: r.sort_order == null ? null : Number(r.sort_order) })),
+      imagesMovedToKeeper: imagesMovedPaths,
+      repointedBatches,
+      foldedBatches,
+      reparentedSaleItemIds,
+      reparentedMovementIds,
+      adjustmentMovementIds,
+      mergeContext,
+    },
   }
 }
+
+// Hand the fold to the undo/redo registry so the 'product.merge' applier can
+// re-run this exact production merge on REDO, without the lib importing this
+// route module (which would be a lib->route dependency and an import cycle,
+// since this file imports MergeReversal from there). See lib/undoAppliers.ts.
+registerMergeFold(foldDuplicateProductInto)
 
 app.get('/merge-duplicates/preview', async (c) => {
   const user = c.get('user')
@@ -2568,10 +2643,18 @@ app.post('/possible-duplicates/merge', async (c) => {
     .prepare('UPDATE products SET stock_quantity = (SELECT COALESCE(SUM(quantity), 0) FROM branch_stock WHERE product_id = @id), updated_at = CURRENT_TIMESTAMP WHERE id = @id')
     .run({ id: keeper.id })
 
+  // Record the merge as a reload-durable undoable/redoable action. The heavy
+  // reversal snapshot goes to undo_snapshots; a small action_history row points
+  // at it, so the reviewer (or an admin) can undo this exact merge later from
+  // any tab. Recorded only for this reviewer-triggered single-pair merge, not
+  // the whole-catalog auto-merge of provably-identical rows.
+  const undoRecord = await recordMergeUndoSnapshot(c.env, user, stats.reversal)
+
   c.executionCtx.waitUntil(bumpVersion(c.env, 'products'))
   c.executionCtx.waitUntil(broadcast(c.env, 'products', { action: 'update' }))
   c.executionCtx.waitUntil(broadcast(c.env, 'inventory', { action: 'update' }))
-  return c.json({ success: true, keptId: keeper.id, mergedId: dup.id, ...stats })
+  const { reversal: _reversal, reparentedSaleItemIds: _si, reparentedMovementIds: _mi, ...publicStats } = stats
+  return c.json({ success: true, keptId: keeper.id, mergedId: dup.id, actionHistoryId: undoRecord.actionHistoryId, ...publicStats })
 })
 
 // GET /api/products/zero-quantity-candidates -- read-only scan for the

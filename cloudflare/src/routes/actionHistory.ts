@@ -3,7 +3,7 @@ import { getDb } from '../lib/db'
 import { requireAuth, type SessionUser } from '../lib/auth'
 import { audit } from '../lib/audit'
 import { getPermissionTier, hasPermission, isAdminControlUser, isSensitiveActionHistory, permissionForActionHistory } from '../lib/permissions'
-import { isServerReplayable, resolveUndoApplier } from '../lib/undoAppliers'
+import { isServerReplayable, resolveUndoApplier, applierPermissionTier } from '../lib/undoAppliers'
 import type { Env } from '../index'
 
 // Ported from backend/src/routes/actionHistory.ts. This replaces the
@@ -91,7 +91,7 @@ function canOperateHistoryRow(user: SessionUser, row: ActionHistoryRow | null | 
 function canUseNamedAppliers(user: SessionUser, payloads: Array<unknown>): boolean {
   for (const raw of payloads) {
     const applier = resolveUndoApplier(raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : null)
-    if (applier && getPermissionTier(user, applier.permission) !== 'full') return false
+    if (applier && applierPermissionTier(user, applier) !== 'full') return false
   }
   return true
 }
@@ -128,7 +128,7 @@ function mapRow(row: ActionHistoryRow, user: SessionUser) {
     reversible: !!row.reversible,
     undo_payload: undoPayload,
     redo_payload: redoPayload,
-    server_replayable: !!(applier && getPermissionTier(user, applier.permission) === 'full'),
+    server_replayable: !!(applier && applierPermissionTier(user, applier) === 'full'),
   }
 }
 
@@ -271,7 +271,7 @@ async function completeServerHistoryTransition(c: Context<{ Bindings: Env; Varia
     // rows written before this gate existed, or by a user since demoted,
     // must not replay on the strength of the row alone). Runs before any
     // status flip so a refusal changes nothing.
-    if (applier && getPermissionTier(user, applier.permission) !== 'full') {
+    if (applier && applierPermissionTier(user, applier) !== 'full') {
       return c.json({ success: false, error: 'You do not have permission to perform this action' }, 403)
     }
     // Refuse BEFORE any status flip: if the caller cannot replay the payload

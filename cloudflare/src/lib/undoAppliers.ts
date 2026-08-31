@@ -4,6 +4,7 @@ import { getDb } from './db'
 import { audit } from './audit'
 import { broadcast } from '../durable-objects/broadcastHub'
 import { branchUpdateStatements } from './branchWrites'
+import { getActionTier, getPermissionTier, type PermissionTier } from './permissions'
 
 // Server-side undo/redo appliers (K1). The action_history store has always
 // held an undo_payload / redo_payload per recorded action, but historically
@@ -36,16 +37,234 @@ export interface UndoApplierContext {
 
 export type UndoApplier = (payload: Record<string, unknown>, ctx: UndoApplierContext) => Promise<void>
 
-// Every applier declares the permission section its replay writes under.
-// This -- the server-side registry -- is the AUTHORITY the route checks at
-// both record and operate time, never the row's client-supplied entity/scope
-// (the Part-77 CRITICAL finding: an unrecognized entity derived an empty
-// permission and gated nothing, so any account could store a payload naming
-// 'branch.update' under scope 'global' and have the Worker write branches
-// for it). A replay is a DIRECT write with no review queue, so the required
-// tier is FULL: a review-tier user's forward edit is queued for approval,
-// and their undo must not be the one path that writes the section directly.
-type UndoApplierDef = { permission: string; run: UndoApplier }
+// Every applier declares the permission section its replay writes under, and
+// optionally the granular ACTION within that section (merge_duplicates, say),
+// so an applier is gated exactly as tightly as the live route it mirrors --
+// never merely by the coarse section tier when the forward action itself is
+// action-gated. This -- the server-side registry -- is the AUTHORITY the route
+// checks at both record and operate time, never the row's client-supplied
+// entity/scope (the Part-77 CRITICAL finding: an unrecognized entity derived an
+// empty permission and gated nothing, so any account could store a payload
+// naming 'branch.update' under scope 'global' and have the Worker write
+// branches for it). A replay is a DIRECT write with no review queue, so the
+// required tier is FULL: a review-tier user's forward edit is queued for
+// approval, and their undo must not be the one path that writes the section
+// directly.
+type UndoApplierDef = { permission: string; action?: string; run: UndoApplier }
+
+// The effective tier THIS user has over an applier's replay: the granular
+// action tier when the applier declares one, else the coarse section tier.
+// The single place the three gate sites (record, map, operate) agree on how
+// an applier's permission is evaluated, so they can never drift.
+export function applierPermissionTier(user: SessionUser, applier: { permission: string; action?: string }): PermissionTier {
+  return applier.action
+    ? getActionTier(user, applier.permission, applier.action)
+    : getPermissionTier(user, applier.permission)
+}
+
+// ---------------------------------------------------------------------------
+// product.merge -- reload-durable undo/redo for a duplicate-product merge.
+//
+// A merge (routes/products.ts foldDuplicateProductInto) folds a duplicate into
+// a keeper: it sums branch stock, re-points/folds batches, carries images, and
+// re-parents the dup's sale_items + inventory_movements, then soft-deletes the
+// dup. Reversing that touches an unbounded number of rows, so the reversal
+// snapshot lives in the undo_snapshots side table (0097), not the 20 KB
+// action_history payload -- the action_history row carries only
+// { applier: 'product.merge', snapshot_id }.
+//
+// UNDO restores both products to their exact pre-merge state from the captured
+// snapshot. REDO re-runs the SAME production fold (no second copy of the merge
+// SQL) -- deterministic because undo restored the exact pre-merge state -- and
+// overwrites the snapshot with the fresh reversal it returns. The dup is only
+// ever soft-deleted, so its id is stable across the whole undo/redo cycle.
+// ---------------------------------------------------------------------------
+
+export interface MergeReversal {
+  keeperId: number
+  keeperName: string | null
+  dupId: number
+  dupName: string | null
+  mergeContext: string
+  keeperImagePathBefore: string | null
+  keeperStockBefore: Array<{ branch_id: number; quantity: number }>
+  dupStockBefore: Array<{ branch_id: number; quantity: number; rfid_confirmed_qty: number }>
+  dupImagesBefore: Array<{ image_path: string; sort_order: number | null }>
+  imagesMovedToKeeper: string[]
+  repointedBatches: Array<{ id: number; batchNumber: number | null }>
+  foldedBatches: Array<{
+    dupBatchId: number
+    keeperBatchId: number
+    dupStockBefore: Array<{ branch_id: number; quantity: number }>
+    keeperStockBefore: Array<{ branch_id: number; quantity: number }>
+  }>
+  reparentedSaleItemIds: number[]
+  reparentedMovementIds: number[]
+  adjustmentMovementIds: number[]
+}
+
+// The forward fold lives in routes/products.ts; rather than have this lib
+// import a route module (a lib->route dependency, and a require cycle since the
+// route imports MergeReversal from here), the route REGISTERS the fold at
+// module load and the redo path calls it through this seam.
+export type MergeFoldFn = (
+  env: Env,
+  db: ReturnType<typeof getDb>,
+  user: SessionUser | null,
+  canonical: { id: number; name: string | null },
+  dup: { id: number; name: string | null; image_path?: string | null },
+  branchNameById: Map<number, string>,
+  mergeContext: string,
+) => Promise<{ reversal: MergeReversal }>
+
+let mergeFoldFn: MergeFoldFn | null = null
+export function registerMergeFold(fn: MergeFoldFn): void {
+  mergeFoldFn = fn
+}
+
+function chunk<T>(arr: T[], size: number): T[][] {
+  const out: T[][] = []
+  for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size))
+  return out
+}
+
+const intIds = (arr: unknown): number[] =>
+  (Array.isArray(arr) ? arr : []).map(Number).filter((n) => Number.isInteger(n) && n > 0)
+
+// Record a completed merge as an undoable/redoable action: the large reversal
+// goes to undo_snapshots, and a small action_history row points at it. Returns
+// both ids so the merge endpoint can hand the action id back to the client.
+export async function recordMergeUndoSnapshot(
+  env: Env,
+  user: SessionUser | null,
+  reversal: MergeReversal,
+): Promise<{ snapshotId: number; actionHistoryId: number }> {
+  const db = getDb(env)
+  const snap = await db.prepare(`
+    INSERT INTO undo_snapshots (kind, status, payload_json, created_by_id, created_by_name)
+    VALUES ('product.merge', 'applied', @payload, @byId, @byName)
+  `).run({ payload: JSON.stringify(reversal), byId: user?.id ?? null, byName: user?.name ?? null })
+  const snapshotId = Number(snap.lastInsertRowid ?? 0)
+  const payload = JSON.stringify({ applier: 'product.merge', snapshot_id: snapshotId })
+  const keeperName = reversal.keeperName || `#${reversal.keeperId}`
+  const dupName = reversal.dupName || `#${reversal.dupId}`
+  const hist = await db.prepare(`
+    INSERT INTO action_history (
+      scope, entity, entity_id, label, undo_label, redo_label, reversible, status,
+      undo_payload, redo_payload, created_by_id, created_by_name
+    ) VALUES ('products', 'product', @entityId, @label, @undoLabel, @redoLabel, 1, 'undoable',
+              @payload, @payload, @byId, @byName)
+  `).run({
+    entityId: String(reversal.dupId),
+    label: `Merged "${dupName}" into "${keeperName}"`,
+    undoLabel: `Undo merge of "${dupName}"`,
+    redoLabel: `Redo merge of "${dupName}"`,
+    payload,
+    byId: user?.id ?? null,
+    byName: user?.name ?? null,
+  })
+  return { snapshotId, actionHistoryId: Number(hist.lastInsertRowid ?? 0) }
+}
+
+// Restore both products to their exact pre-merge state from the snapshot.
+async function applyMergeReversal(env: Env, r: MergeReversal): Promise<void> {
+  const db = getDb(env)
+  const keeperId = Number(r.keeperId)
+  const dupId = Number(r.dupId)
+  if (!Number.isInteger(keeperId) || keeperId <= 0 || !Number.isInteger(dupId) || dupId <= 0) {
+    throw new Error('This merge cannot be undone: its saved details are missing a product id.')
+  }
+  const [keeper, dupRow] = await Promise.all([
+    db.prepare('SELECT id FROM products WHERE id = ?').get<{ id: number }>([keeperId]),
+    db.prepare('SELECT id FROM products WHERE id = ?').get<{ id: number }>([dupId]),
+  ])
+  if (!keeper) throw new Error('The product this merge kept no longer exists, so the merge cannot be undone.')
+  if (!dupRow) throw new Error('The merged-away product record no longer exists, so the merge cannot be undone.')
+
+  const stmts: Array<{ sql: string; params?: Record<string, unknown> }> = []
+
+  // 1. Reactivate the merged-away product; restore keeper's image_path.
+  stmts.push({ sql: 'UPDATE products SET is_active = 1, updated_at = CURRENT_TIMESTAMP WHERE id = @dupId', params: { dupId } })
+  stmts.push({ sql: 'UPDATE products SET image_path = @path, updated_at = CURRENT_TIMESTAMP WHERE id = @keeperId', params: { keeperId, path: r.keeperImagePathBefore ?? null } })
+
+  // 2. branch_stock, for exactly the branches the fold touched (the dup's):
+  //    the keeper keeps its row and we UPDATE only quantity back (preserving
+  //    rfid_confirmed_qty, which delete+reinsert would wipe), or DELETE the row
+  //    the fold created for a branch it had none in; the dup's deleted rows are
+  //    re-inserted with their captured quantity AND rfid_confirmed_qty.
+  const keeperQtyByBranch = new Map((r.keeperStockBefore || []).map((x) => [Number(x.branch_id), Number(x.quantity) || 0]))
+  for (const d of (r.dupStockBefore || [])) {
+    const b = Number(d.branch_id)
+    if (keeperQtyByBranch.has(b)) {
+      stmts.push({ sql: 'UPDATE branch_stock SET quantity = @q WHERE product_id = @keeperId AND branch_id = @b', params: { keeperId, b, q: keeperQtyByBranch.get(b) } })
+    } else {
+      stmts.push({ sql: 'DELETE FROM branch_stock WHERE product_id = @keeperId AND branch_id = @b', params: { keeperId, b } })
+    }
+    stmts.push({ sql: 'DELETE FROM branch_stock WHERE product_id = @dupId AND branch_id = @b', params: { dupId, b } })
+    stmts.push({ sql: 'INSERT INTO branch_stock (product_id, branch_id, quantity, rfid_confirmed_qty) VALUES (@dupId, @b, @q, @rfid)', params: { dupId, b, q: Number(d.quantity) || 0, rfid: Number(d.rfid_confirmed_qty) || 0 } })
+  }
+
+  // 3. inventory_movements: delete the fold's adjustment rows (by captured id,
+  //    or by the dup-specific reason fragment for a snapshot from before ids
+  //    were captured); move the re-parented history back to the dup.
+  const adjIds = intIds(r.adjustmentMovementIds)
+  if (adjIds.length) {
+    for (const grp of chunk(adjIds, 400)) stmts.push({ sql: `DELETE FROM inventory_movements WHERE id IN (${grp.join(',')})` })
+  } else {
+    stmts.push({ sql: `DELETE FROM inventory_movements WHERE product_id = @keeperId AND movement_type = 'adjustment' AND reason LIKE @frag`, params: { keeperId, frag: `%(#${dupId}) into this product%` } })
+  }
+  for (const grp of chunk(intIds(r.reparentedMovementIds), 400)) {
+    stmts.push({ sql: `UPDATE inventory_movements SET product_id = @dupId WHERE id IN (${grp.join(',')})`, params: { dupId } })
+  }
+
+  // 4. sale_items back to the dup.
+  for (const grp of chunk(intIds(r.reparentedSaleItemIds), 400)) {
+    stmts.push({ sql: `UPDATE sale_items SET product_id = @dupId WHERE id IN (${grp.join(',')})`, params: { dupId } })
+  }
+
+  // 5. product_images: pull the moved paths off the keeper, restore the dup's
+  //    gallery (the fold had deleted every dup image row).
+  const movedPaths = (r.imagesMovedToKeeper || []).map(String).filter(Boolean)
+  for (const grp of chunk(movedPaths, 50)) {
+    if (!grp.length) continue
+    const placeholders = grp.map((_, i) => `@p${i}`).join(',')
+    const params: Record<string, unknown> = { keeperId }
+    grp.forEach((p, i) => { params[`p${i}`] = p })
+    stmts.push({ sql: `DELETE FROM product_images WHERE product_id = @keeperId AND image_path IN (${placeholders})`, params })
+  }
+  for (const img of (r.dupImagesBefore || [])) {
+    stmts.push({ sql: 'INSERT INTO product_images (product_id, image_path, sort_order) VALUES (@dupId, @path, @order)', params: { dupId, path: String(img.image_path), order: img.sort_order == null ? 0 : Number(img.sort_order) } })
+  }
+
+  // 6. product_batches: point the re-pointed batches back at the dup with their
+  //    original number; reactivate each folded batch, re-insert its per-branch
+  //    stock, and restore the keeper batch's stock for the folded branches.
+  for (const b of (r.repointedBatches || [])) {
+    stmts.push({ sql: 'UPDATE product_batches SET variant_product_id = @dupId, batch_number = @num, updated_at = CURRENT_TIMESTAMP WHERE id = @id', params: { dupId, num: b.batchNumber == null ? null : Number(b.batchNumber), id: Number(b.id) } })
+  }
+  for (const fb of (r.foldedBatches || [])) {
+    const dupBatchId = Number(fb.dupBatchId)
+    const keeperBatchId = Number(fb.keeperBatchId)
+    stmts.push({ sql: 'UPDATE product_batches SET is_active = 1, updated_at = CURRENT_TIMESTAMP WHERE id = @id', params: { id: dupBatchId } })
+    const keeperBBefore = new Map((fb.keeperStockBefore || []).map((x) => [Number(x.branch_id), Number(x.quantity) || 0]))
+    for (const d of (fb.dupStockBefore || [])) {
+      const b = Number(d.branch_id)
+      if (keeperBBefore.has(b)) {
+        stmts.push({ sql: 'UPDATE branch_batch_stock SET quantity = @q, updated_at = CURRENT_TIMESTAMP WHERE batch_id = @kb AND branch_id = @b', params: { kb: keeperBatchId, b, q: keeperBBefore.get(b) } })
+      } else {
+        stmts.push({ sql: 'DELETE FROM branch_batch_stock WHERE batch_id = @kb AND branch_id = @b', params: { kb: keeperBatchId, b } })
+      }
+      stmts.push({ sql: 'DELETE FROM branch_batch_stock WHERE batch_id = @db AND branch_id = @b', params: { db: dupBatchId, b } })
+      stmts.push({ sql: 'INSERT INTO branch_batch_stock (batch_id, branch_id, quantity, updated_at) VALUES (@db, @b, @q, CURRENT_TIMESTAMP)', params: { db: dupBatchId, b, q: Number(d.quantity) || 0 } })
+    }
+  }
+
+  // 7. Recompute both products' denormalized stock_quantity from the truth.
+  stmts.push({ sql: 'UPDATE products SET stock_quantity = (SELECT COALESCE(SUM(quantity), 0) FROM branch_stock WHERE product_id = @keeperId), updated_at = CURRENT_TIMESTAMP WHERE id = @keeperId', params: { keeperId } })
+  stmts.push({ sql: 'UPDATE products SET stock_quantity = (SELECT COALESCE(SUM(quantity), 0) FROM branch_stock WHERE product_id = @dupId), updated_at = CURRENT_TIMESTAMP WHERE id = @dupId', params: { dupId } })
+
+  await db.batch(stmts)
+}
 
 const APPLIERS: Record<string, UndoApplierDef> = {
   // Payload shape: { applier: 'branch.update', id, fields: { name, location,
@@ -83,15 +302,77 @@ const APPLIERS: Record<string, UndoApplierDef> = {
       await broadcast(ctx.env, 'branches', { action: 'update', id })
     },
   },
+  // Payload shape: { applier: 'product.merge', snapshot_id }. Both the undo_
+  // and redo_payload are identical -- the applier is direction-aware and the
+  // heavy reversal data lives in undo_snapshots[snapshot_id], not the payload.
+  // Gated by the SAME granular action as the live merge (products ->
+  // merge_duplicates), full tier, at record and operate time.
+  'product.merge': {
+    permission: 'products',
+    action: 'merge_duplicates',
+    run: async (payload, ctx) => {
+      const db = getDb(ctx.env)
+      const snapshotId = Number(payload.snapshot_id || 0)
+      if (!Number.isInteger(snapshotId) || snapshotId <= 0) {
+        throw new Error('This merge cannot be replayed: its saved snapshot reference is missing.')
+      }
+      const snap = await db
+        .prepare('SELECT id, status, payload_json FROM undo_snapshots WHERE id = ? AND kind = ?')
+        .get<{ id: number; status: string; payload_json: string }>([snapshotId, 'product.merge'])
+      if (!snap) throw new Error('The saved details for this merge are no longer available, so it cannot be reversed.')
+      let reversal: MergeReversal
+      try {
+        reversal = JSON.parse(snap.payload_json) as MergeReversal
+      } catch (_) {
+        throw new Error('The saved details for this merge are unreadable, so it cannot be reversed.')
+      }
+
+      if (ctx.direction === 'undo') {
+        if (String(snap.status) !== 'applied') throw new Error('This merge has already been undone.')
+        await applyMergeReversal(ctx.env, reversal)
+        await db.prepare("UPDATE undo_snapshots SET status = 'reversed', updated_at = CURRENT_TIMESTAMP WHERE id = @id").run({ id: snapshotId })
+      } else {
+        if (String(snap.status) !== 'reversed') throw new Error('This merge is already in place; there is nothing to redo.')
+        if (!mergeFoldFn) throw new Error('This merge cannot be redone in the current server build.')
+        const keeperId = Number(reversal.keeperId)
+        const dupId = Number(reversal.dupId)
+        const [keeper, dupRow] = await Promise.all([
+          db.prepare('SELECT id, name, is_active FROM products WHERE id = ?').get<{ id: number; name: string | null; is_active: number }>([keeperId]),
+          db.prepare('SELECT id, name, image_path, is_active FROM products WHERE id = ?').get<{ id: number; name: string | null; image_path: string | null; is_active: number }>([dupId]),
+        ])
+        if (!keeper || !dupRow) throw new Error('One of the two products no longer exists, so the merge cannot be redone.')
+        if (!keeper.is_active || !dupRow.is_active) throw new Error('One of the two products is no longer active, so the merge cannot be redone.')
+        const branchRows = await db.prepare('SELECT id, name FROM branches').all<{ id: number; name: string }>({})
+        const { reversal: fresh } = await mergeFoldFn(
+          ctx.env, db, ctx.user,
+          { id: keeperId, name: keeper.name },
+          { id: dupId, name: dupRow.name, image_path: dupRow.image_path },
+          new Map<number, string>(branchRows.map((b) => [b.id, b.name])),
+          reversal.mergeContext || 'redo merge',
+        )
+        await db.prepare('UPDATE products SET stock_quantity = (SELECT COALESCE(SUM(quantity), 0) FROM branch_stock WHERE product_id = @id), updated_at = CURRENT_TIMESTAMP WHERE id = @id').run({ id: keeperId })
+        await db.prepare("UPDATE undo_snapshots SET status = 'applied', payload_json = @payload, updated_at = CURRENT_TIMESTAMP WHERE id = @id").run({ payload: JSON.stringify(fresh), id: snapshotId })
+      }
+
+      await audit(
+        ctx.env, ctx.user?.id ?? null, ctx.user?.name ?? null,
+        ctx.direction === 'undo' ? 'action_undo' : 'action_redo',
+        'product', reversal.dupId,
+        { via: 'undo_applier', applier: 'product.merge', keeperId: reversal.keeperId },
+      )
+      await broadcast(ctx.env, 'products', { action: 'update' })
+      await broadcast(ctx.env, 'inventory', { action: 'update' })
+    },
+  },
 }
 
 // Returns the applier a payload opts into, or null when the payload names no
 // registered applier (the fall-through-to-client-replay case).
-export function resolveUndoApplier(payload: Record<string, unknown> | null | undefined): { name: string; permission: string; run: UndoApplier } | null {
+export function resolveUndoApplier(payload: Record<string, unknown> | null | undefined): { name: string; permission: string; action?: string; run: UndoApplier } | null {
   if (!payload || typeof payload !== 'object') return null
   const name = typeof payload.applier === 'string' ? payload.applier : ''
   const def = name ? APPLIERS[name] : undefined
-  return def ? { name, permission: def.permission, run: def.run } : null
+  return def ? { name, permission: def.permission, action: def.action, run: def.run } : null
 }
 
 // Whether a stored action_history row's NEXT transition can be replayed by the

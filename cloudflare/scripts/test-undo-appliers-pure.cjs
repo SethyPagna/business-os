@@ -92,6 +92,11 @@ const undoAppliers = loadModule('lib/undoAppliers.ts', (id) => {
   if (id === './audit') return { audit: async () => {} }
   if (id === '../durable-objects/broadcastHub') return { broadcast: async () => {} }
   if (id === './branchWrites') return branchWrites
+  // undoAppliers now derives an applier's effective tier through permissions
+  // (getActionTier for action-gated appliers like product.merge, else
+  // getPermissionTier); the source-lock checks below read the real source, so
+  // these stubs only need to let the module load.
+  if (id === './permissions') return { getActionTier: () => 'full', getPermissionTier: () => 'full' }
   return require(id)
 })
 const { resolveUndoApplier, registeredUndoAppliers, isServerReplayable } = undoAppliers
@@ -211,18 +216,28 @@ await check('appliers declare their own permission and it is the branches sectio
   assert.strictEqual(resolved?.permission, 'branches')
 })
 
+await check('the product.merge applier is registered and gated on the granular merge_duplicates action', () => {
+  assert.ok(registeredUndoAppliers().includes('product.merge'), 'product.merge must be a registered applier')
+  const resolved = resolveUndoApplier({ applier: 'product.merge', snapshot_id: 1 })
+  assert.strictEqual(resolved?.permission, 'products')
+  // Unlike branch.update (coarse section), the merge replay is gated by the
+  // SAME granular action as the live merge, so a user with products=full but
+  // merge_duplicates blocked cannot undo/redo a merge.
+  assert.strictEqual(resolved?.action, 'merge_duplicates')
+})
+
 await check('source lock: the applier permission gate (full tier) guards BOTH record and operate, before any status flip or replay', () => {
   const routeSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'routes', 'actionHistory.ts'), 'utf8')
   // Record time: canRecordHistory must consult the applier registry, not
   // only the client-supplied entity/scope.
   assert.ok(/canUseNamedAppliers\(user, \[body\.undo_payload, body\.redo_payload\]\)/.test(routeSrc),
     'canRecordHistory must gate payloads naming a registered applier')
-  assert.ok(/getPermissionTier\(user, applier\.permission\) !== 'full'/.test(routeSrc),
-    'the applier gate must demand the FULL tier of the applier-declared permission')
+  assert.ok(/applierPermissionTier\(user, applier\) !== 'full'/.test(routeSrc),
+    'the applier gate must demand the FULL tier of the applier-declared permission (via applierPermissionTier, which honours an action-gated applier)')
   // Operate time: the gate must sit inside the transition handler BEFORE the
   // status-flip UPDATE (and therefore before applier.run, which follows it).
   const handlerStart = routeSrc.indexOf('completeServerHistoryTransition')
-  const operateGateAt = routeSrc.indexOf("getPermissionTier(user, applier.permission) !== 'full'", handlerStart)
+  const operateGateAt = routeSrc.indexOf("applierPermissionTier(user, applier) !== 'full'", handlerStart)
   const applierRunAt = routeSrc.indexOf('applier.run(payload', handlerStart)
   const statusFlipAt = routeSrc.indexOf('UPDATE action_history SET status = @status, last_error = NULL', handlerStart)
   assert.ok(operateGateAt > -1, 'the operate-time applier permission gate must exist in the transition handler')
@@ -236,7 +251,7 @@ await check('source lock: routes/actionHistory.ts stamps server_replayable and r
   assert.ok(/const replayable = isServerReplayable\(row, undoPayload, redoPayload\)/.test(routeSrc), 'mapRow must derive replayability from the shared helper')
   // ...ANDed with the requesting user's full tier on the applier-declared
   // permission, so the UI is never offered a button the operate gate refuses.
-  assert.ok(/server_replayable: !!\(applier && getPermissionTier\(user, applier\.permission\) === 'full'\)/.test(routeSrc), 'mapRow must AND replayability with the user\'s tier on the applier permission')
+  assert.ok(/server_replayable: !!\(applier && applierPermissionTier\(user, applier\) === 'full'\)/.test(routeSrc), 'mapRow must AND replayability with the user\'s tier on the applier permission')
   // The require_applied refusal must come BEFORE the status-flip UPDATE inside
   // the transition handler -- refusing after the flip would record a reversal
   // that never happened.
