@@ -22,6 +22,7 @@ import FilterMenu from '../shared/FilterMenu'
 import SearchInput from '../shared/SearchInput'
 import ActionHistoryBar from '../shared/ActionHistoryBar'
 import { ThreeDotMenu, DetailModal, ContactTable, buildSelectedSnapshots, countActiveFlags, useContactSelection } from './shared'
+import { DEFAULT_PAGE_SIZE } from '../shared/PaginationControls'
 import { useContactDuplicateFlag } from './useContactDuplicateFlag'
 import DuplicateFlagBanner from './DuplicateFlagBanner'
 import { withLoaderTimeout } from '../../utils/loaders.ts'
@@ -462,6 +463,10 @@ function DeliveryTab({ t, notify, active = true, initialSearch }: DeliveryTabPro
   const [genderFilter, setGenderFilter] = useState('all')
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc')
   const [groupMode, setGroupMode] = useState<DeliveryGroupMode>('time')
+  // Server paging state -- see deliveryQuery below (Part-77 parity finding).
+  const [deliveryPage, setDeliveryPage] = useState(1)
+  const [deliveryPageSize, setDeliveryPageSize] = useState(DEFAULT_PAGE_SIZE)
+  const [deliveryTotal, setDeliveryTotal] = useState(0)
   const [collapsedSections, setCollapsedSections] = useState<Set<string>>(() => new Set())
   const [historyReady, setHistoryReady] = useState(false)
   // Y1: same shared 180ms debounce as the other list pages (was only
@@ -474,7 +479,20 @@ function DeliveryTab({ t, notify, active = true, initialSearch }: DeliveryTabPro
     search: deferredSearch.trim() || undefined,
     year: yearFilter !== 'all' ? yearFilter : undefined,
     month: yearFilter !== 'all' && monthFilter !== 'all' ? monthFilter : undefined,
-  }), [deferredSearch, monthFilter, yearFilter])
+    // Server-side ORDER BY + paging -- same wiring and reasoning as
+    // SuppliersTab.tsx's supplierQuery (Part-77 parity finding).
+    sort: groupMode === 'alphabet' ? 'name' : 'created',
+    dir: groupMode === 'alphabet' ? 'asc' : sortDirection,
+    page: deliveryPage,
+    pageSize: deliveryPageSize,
+  }), [deferredSearch, deliveryPage, deliveryPageSize, groupMode, monthFilter, sortDirection, yearFilter])
+  // Reset to page 1 whenever the result set is re-scoped; self-heal a page
+  // stranded past the last one -- see SuppliersTab.tsx's twin comments.
+  useEffect(() => { setDeliveryPage(1) }, [deferredSearch, groupMode, monthFilter, sortDirection, yearFilter])
+  const deliveryTotalPages = Math.max(1, Math.ceil(Math.max(0, Number(deliveryTotal || 0)) / Math.max(1, Number(deliveryPageSize || 1))))
+  useEffect(() => {
+    if (deliveryPage > deliveryTotalPages) setDeliveryPage(deliveryTotalPages)
+  }, [deliveryPage, deliveryTotalPages])
 
   // Same fix as CustomersTab.tsx's own filteredBySearch (see its comment):
   // the server's delivery_contacts_fts search (part 108) is typo/joiner/
@@ -641,7 +659,17 @@ function DeliveryTab({ t, notify, active = true, initialSearch }: DeliveryTabPro
       try {
         const data = await withLoaderTimeout(() => getDeliveryApi().getDeliveryContacts(deliveryQuery), label, 20000)
         if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
-        setContacts(normalizeDeliveryRows(data))
+        const rows = normalizeDeliveryRows(data)
+        setContacts(rows)
+        // Paged response envelope -- same extraction as SuppliersTab.tsx.
+        const payload = data && typeof data === 'object' && !Array.isArray(data)
+          ? data as { total?: unknown; page?: unknown; pageSize?: unknown }
+          : null
+        setDeliveryTotal(Number(payload?.total || rows.length || 0))
+        if (payload) {
+          setDeliveryPage(Number(payload.page || deliveryPage) || 1)
+          setDeliveryPageSize(Number(payload.pageSize || deliveryPageSize) || deliveryPageSize)
+        }
         loadedOnceRef.current = true
         setLoadError('')
       } catch (error: unknown) {
@@ -669,7 +697,7 @@ function DeliveryTab({ t, notify, active = true, initialSearch }: DeliveryTabPro
     })
     loadPromiseRef.current = wrappedPromise
     return wrappedPromise
-  }, [clearLoadWatchdog, deliveryQuery, notify, tr])
+  }, [clearLoadWatchdog, deliveryPage, deliveryPageSize, deliveryQuery, notify, tr])
   useEffect(() => {
     if (!active) {
       setHistoryReady(false)
@@ -999,7 +1027,11 @@ function DeliveryTab({ t, notify, active = true, initialSearch }: DeliveryTabPro
         columns={deliveryColumns}
         selectAll={selectAllProp}
         selectionModeActive={selectionModeActive}
-        totalCount={visibleContacts.length}
+        totalCount={deliveryTotal || visibleContacts.length}
+        page={deliveryPage}
+        pageSize={deliveryPageSize}
+        onPageChange={setDeliveryPage}
+        onPageSizeChange={setDeliveryPageSize}
         onRetry={() => load({ silent: false, label: 'Delivery contacts retry' })}
         loadingLabel={tr('loading_delivery_contacts', 'Loading delivery contacts...')}
         loadingDetails={tr('contacts_loading_details', 'Fetching delivery contacts, filters, and grouped sections.')}

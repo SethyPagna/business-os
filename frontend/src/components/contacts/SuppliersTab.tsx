@@ -24,6 +24,7 @@ import LazyPortalMenu from '../shared/LazyPortalMenu'
 import type { PortalMenuItem } from '../shared/PortalMenu'
 import SectionCard from '../shared/SectionCard'
 import { ThreeDotMenu, DetailModal, ContactTable, buildSelectedSnapshots, countActiveFlags, useContactSelection } from './shared'
+import { DEFAULT_PAGE_SIZE } from '../shared/PaginationControls'
 import { useContactDuplicateFlag } from './useContactDuplicateFlag'
 import DuplicateFlagBanner from './DuplicateFlagBanner'
 import { withLoaderTimeout } from '../../utils/loaders.ts'
@@ -423,6 +424,10 @@ function SuppliersTab({ t, notify, active = true, initialSearch }: SuppliersTabP
   const [genderFilter, setGenderFilter] = useState('all')
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc')
   const [groupMode, setGroupMode] = useState<SupplierGroupMode>('time')
+  // Server paging state -- see supplierQuery below (Part-77 parity finding).
+  const [supplierPage, setSupplierPage] = useState(1)
+  const [supplierPageSize, setSupplierPageSize] = useState(DEFAULT_PAGE_SIZE)
+  const [supplierTotal, setSupplierTotal] = useState(0)
   const [collapsedSections, setCollapsedSections] = useState<Set<string>>(() => new Set())
   const [historyReady, setHistoryReady] = useState(false)
   // Y1: same shared 180ms debounce as the other list pages (was only
@@ -435,7 +440,30 @@ function SuppliersTab({ t, notify, active = true, initialSearch }: SuppliersTabP
     search: deferredSearch.trim() || undefined,
     year: yearFilter !== 'all' ? yearFilter : undefined,
     month: yearFilter !== 'all' && monthFilter !== 'all' ? monthFilter : undefined,
-  }), [deferredSearch, monthFilter, yearFilter])
+    // Server-side ORDER BY + paging (Part-77 parity finding): the shared
+    // contacts list handler has supported sort/dir/page/pageSize since the
+    // CustomersTab wiring; this tab used to fetch every row unpaged and
+    // only reorder client-side, which stops being honest the moment the
+    // list outgrows one fetch. Alphabet grouping reads best A→Z regardless
+    // of the date-sort toggle, matching the client section builder.
+    sort: groupMode === 'alphabet' ? 'name' : 'created',
+    dir: groupMode === 'alphabet' ? 'asc' : sortDirection,
+    page: supplierPage,
+    pageSize: supplierPageSize,
+  }), [deferredSearch, groupMode, monthFilter, sortDirection, supplierPage, supplierPageSize, yearFilter])
+  // A search/filter/sort change re-scopes the whole result set -- start
+  // back at page 1 (the sibling resets on sort; filters are included here
+  // deliberately so a filter applied from page 3 can't land on an empty
+  // page).
+  useEffect(() => { setSupplierPage(1) }, [deferredSearch, groupMode, monthFilter, sortDirection, yearFilter])
+  const supplierTotalPages = Math.max(1, Math.ceil(Math.max(0, Number(supplierTotal || 0)) / Math.max(1, Number(supplierPageSize || 1))))
+  // Same self-heal as CustomersTab/Products/Inventory (see the CustomersTab
+  // comment): the server clamps `page` to [1, 100000], not to the query's
+  // real totalPages, so deleting the last rows of a later page would strand
+  // the view on an empty page.
+  useEffect(() => {
+    if (supplierPage > supplierTotalPages) setSupplierPage(supplierTotalPages)
+  }, [supplierPage, supplierTotalPages])
 
   // Same fix as CustomersTab.tsx's own filteredBySearch (see its comment):
   // the server's suppliers_fts search (part 108) is typo/joiner/order-
@@ -612,7 +640,19 @@ function SuppliersTab({ t, notify, active = true, initialSearch }: SuppliersTabP
       try {
         const data = await withLoaderTimeout(() => getSupplierApi().getSuppliers(supplierQuery), label, 20000)
         if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
-        setSuppliers(normalizeSupplierRows(data))
+        const rows = normalizeSupplierRows(data)
+        setSuppliers(rows)
+        // Paged response envelope ({items,total,page,pageSize}) -- same
+        // extraction the Customers sibling does; a bare-array response
+        // (older cache shapes) falls back to the row count.
+        const payload = data && typeof data === 'object' && !Array.isArray(data)
+          ? data as { total?: unknown; page?: unknown; pageSize?: unknown }
+          : null
+        setSupplierTotal(Number(payload?.total || rows.length || 0))
+        if (payload) {
+          setSupplierPage(Number(payload.page || supplierPage) || 1)
+          setSupplierPageSize(Number(payload.pageSize || supplierPageSize) || supplierPageSize)
+        }
         loadedOnceRef.current = true
         setLoadError('')
       } catch (error: unknown) {
@@ -640,7 +680,7 @@ function SuppliersTab({ t, notify, active = true, initialSearch }: SuppliersTabP
     })
     loadPromiseRef.current = wrappedPromise
     return wrappedPromise
-  }, [clearLoadWatchdog, notify, supplierQuery, tr])
+  }, [clearLoadWatchdog, notify, supplierPage, supplierPageSize, supplierQuery, tr])
 
   useEffect(() => {
     if (!active) {
@@ -1030,7 +1070,11 @@ function SuppliersTab({ t, notify, active = true, initialSearch }: SuppliersTabP
         columns={supplierColumns}
         selectAll={selectAllProp}
         selectionModeActive={selectionModeActive}
-        totalCount={visibleSuppliers.length}
+        totalCount={supplierTotal || visibleSuppliers.length}
+        page={supplierPage}
+        pageSize={supplierPageSize}
+        onPageChange={setSupplierPage}
+        onPageSizeChange={setSupplierPageSize}
         onRetry={() => load({ silent: false, label: 'Suppliers retry' })}
         loadingLabel={tr('loading_suppliers', 'Loading suppliers...')}
         loadingDetails={tr('contacts_loading_details', 'Fetching suppliers, filters, and grouped sections.')}
