@@ -16019,3 +16019,48 @@ receipt text; creating them (Step-3c style) is optional.
 **Not done** — no UI click-through this session (DB-level + engine-level
 verification only; the prior session verified UI); supplier-AP and
 deleted-sale ledgers still have no dedicated screens (M6).
+
+## Part 552 (Aug 31 2026, session business-os-v1-1e) — the two invisible ledgers get screens: Supplier AP Invoices + Deleted sales (old system)
+
+**Ask** — "Continue" after Part 551. The audit's one product gap (also named in
+the user's own summary): migration 0088's supplier-AP and deleted-sale ledgers
+were stored in production with no way to see them.
+
+**Shipped (b480d8a8 backend · 32e0e44f frontend · e900b46e i18n, needs deploy)**
+- `GET /api/suppliers/reports/ap-invoices` + **Supplier AP Invoices**
+  SectionCard on Contacts → Suppliers (below Stock-In Invoices, folded,
+  lazy): 1,591 legacy invoices, branch/supplier/status/date filters,
+  billed/paid/outstanding totals strip, Outstanding/Paid chips. Under
+  /suppliers/* so the existing contacts_suppliers gate covers it front and
+  back — no new permission key needed.
+- `GET /api/system/legacy-deleted-sales` + **Deleted sales (old system)** as
+  the third chip on Review & Logs (audit_log gate, same as the Audit Log it
+  sits beside; fail-loud on db errors): search/cashier/Bangkok-date filters,
+  events/lines/units/value totals, per-line reasons + invoice/ref; the
+  9,999,999 row shows as stored (audit evidence); unlinked products are
+  tagged "not in catalog", undated rows "Not recorded".
+- 22 i18n keys × both packs (en + km), inserted at sorted positions;
+  ReviewLogsPage's chip row generalized to N sections.
+- Date rule: both endpoints filter and both screens display the BUSINESS
+  (Bangkok) calendar day of stored UTC instants. Caught live: fmtDateOnly's
+  UTC slice showed 08/26 for an invoice whose Bangkok day is 08/27 —
+  switched to fmtDate; filter and display now agree.
+
+**Verified (Golden Rule 5)** — both tsc clean; vite build; live E2E on an
+isolated worker (state copied via --persist-to, sessions minted per the
+Part-546 recipe): seeded rows return exact totals under every filter
+combination incl. Bangkok date bounds; pos-only user 403, anonymous 401 on
+both endpoints; real-browser click-through of both screens (screenshots in
+session). Local dev D1 keeps the seeded audit rows (harmless test data in
+the isolated copy only — the shared state dir was never touched).
+
+**Peer note** — `npm run test:utils` fails at clean HEAD in
+frontend/tests/performanceLoadingUx.test.ts ("sales active filter count
+should reuse countActiveFlags"): the pattern the test expects left
+Sales.tsx in a0b2edbf (Part 549, sales-hub session). Attributed by
+git-show at 0db93598 (present) vs a0b2edbf (missing); not fixed here —
+the sales-hub session owns Sales.tsx and is mid-edit on that file set.
+
+**Not done** — deploy (screens reach production on the next
+`npm run deploy:full`); export buttons on either ledger; the M6 deferred
+imports (stock_adjustments/drawer_sessions/po_invoices) remain open.
