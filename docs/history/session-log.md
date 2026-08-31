@@ -16064,3 +16064,48 @@ the sales-hub session owns Sales.tsx and is mid-edit on that file set.
 **Not done** — deploy (screens reach production on the next
 `npm run deploy:full`); export buttons on either ledger; the M6 deferred
 imports (stock_adjustments/drawer_sessions/po_invoices) remain open.
+
+## Part 555 (Aug 31 2026, session business-os-v1-1e) — Conflicts: duplicates sections renamed, sale-link conflicts join them
+
+**Ask** — user: "for the ambiguous and optional new contacts just put it in
+conflict section... and rename it to conflicts instead of duplicates...
+same for products duplicate section, so they can deal with more issues."
+
+**Shipped (89bb1de7 backend · d906a537 frontend · i18n rode in ab7653e0,
+needs deploy)**
+- **Renames:** the Contacts "Possible Duplicates" tab and the Products
+  "Duplicates" section chip are now **Conflicts** in both packs — done as
+  lang-VALUE changes so the in-flight Products.tsx lanes stayed untouched.
+  These sections are the standing home for data-quality issues from now on.
+- **Sale links** — a fourth chip inside the Contacts Conflicts tab, showing
+  the audit's two open issue classes computed LIVE (so new occurrences keep
+  surfacing): (1) sales linked to a customer whose phone differs from the
+  phone on the sale (amber; the two audit finds 4353 "Sakura" and 4370
+  "Yaa" appear here, 4370 suggesting Roth Na who owns that phone), and
+  (2) sales naming a customer with no contact record (blue; the 8 optional
+  supplemental customers + the ~40 historical unlinked groups appear here).
+  Actions: two-tap **Relink** to the phone-suggested contact,
+  **Create contact & link** (membership number + phone_normalized set),
+  **Link to existing** when the phone now matches exactly one contact,
+  and keep-current/**Ignore** dismissals persisted in the 0034 ledger
+  under link_mismatch/link_missing types. Writes are Full-Access-gated,
+  audited, broadcast; zero-stripped phone matching throughout.
+
+**Verified (Golden Rule 5)** — tsc both projects (peer in-flight files
+excluded by ownership), vite build; live E2E on the isolated worker:
+seeded a mismatch trio + two missing groups, exercised Relink /
+Create-and-link / Link-to-existing through the real browser and asserted
+sales.customer_id, the created contact row and the three audit_logs rows
+after each; dismissal persisted server-side; pos-only 403 / anonymous 401
+on all four routes; Contacts tab + Products chip verified renamed on
+screen.
+
+**Coordination** — my conflicts i18n keys + renames were absorbed into the
+products lane's ab7653e0 during the shared-index window (verified intact;
+recorded in 89bb1de7's message per protocol). My 8931 wrangler stack is
+fully torn down; a lesson re-learned: TaskStop kills the bash wrapper but
+NOT the node wrangler child — kill the node parent by command line, else
+an orphan workerd keeps the port and serves stale code.
+
+**Not done** — deploy; bulk actions on conflict groups; the deferred M6
+ledgers.
