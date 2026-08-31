@@ -2,6 +2,17 @@ import { Hono } from 'hono'
 import type { Env } from '../index'
 import { requireAuth, type SessionUser } from '../lib/auth'
 import { audit } from '../lib/audit'
+import { hasFullLibraryAccess, canWireProductImages } from './files'
+
+// The chunked upload below materializes a file_assets row via the DO, exactly
+// like POST /api/files/upload -- so it must enforce the SAME library gate that
+// route does. Without it, an authenticated non-library user (e.g. POS- or
+// sales-only) could create library assets through this offline path, bypassing
+// files.ts's check (the H2 bypass). The DO itself has no session context and
+// cannot check, so the gate lives here at the Worker route, before proxying.
+function ensureLibraryUploadAccess(user: SessionUser): boolean {
+  return hasFullLibraryAccess(user) || canWireProductImages(user)
+}
 
 // Ported from backend/src/routes/sync.ts. Read this before touching it --
 // the design is NOT "real-time multi-device sync" -- there's no live
@@ -241,6 +252,9 @@ export function createSyncRoute(mainApp: Hono<{ Bindings: Env }>) {
   // ../durable-objects/syncUploadSession.ts for why a DO fits this
   // specific piece even though the outbox above doesn't need one.
   app.post('/files/chunks/init', async (c) => {
+    if (!ensureLibraryUploadAccess(c.get('user'))) {
+      return c.json({ error: 'Uploading to the library requires Full Access to Library.' }, 403)
+    }
     const rawBody = await c.req.text()
     let uploadId = 'unknown'
     try {
@@ -254,6 +268,9 @@ export function createSyncRoute(mainApp: Hono<{ Bindings: Env }>) {
   })
 
   app.post('/files/chunks/:uploadId/chunk', async (c) => {
+    if (!ensureLibraryUploadAccess(c.get('user'))) {
+      return c.json({ error: 'Uploading to the library requires Full Access to Library.' }, 403)
+    }
     const uploadId = c.req.param('uploadId')
     const stub = c.env.SYNC_UPLOADS.get(c.env.SYNC_UPLOADS.idFromName(uploadId))
     const upstream = await stub.fetch('https://sync-upload/chunk', { method: 'POST', body: await c.req.text(), headers: { 'content-type': 'application/json' } })
@@ -261,6 +278,9 @@ export function createSyncRoute(mainApp: Hono<{ Bindings: Env }>) {
   })
 
   app.post('/files/chunks/:uploadId/complete', async (c) => {
+    if (!ensureLibraryUploadAccess(c.get('user'))) {
+      return c.json({ error: 'Uploading to the library requires Full Access to Library.' }, 403)
+    }
     const uploadId = c.req.param('uploadId')
     const stub = c.env.SYNC_UPLOADS.get(c.env.SYNC_UPLOADS.idFromName(uploadId))
     const upstream = await stub.fetch('https://sync-upload/complete', { method: 'POST' })

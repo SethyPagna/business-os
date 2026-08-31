@@ -39,10 +39,15 @@ app.use('*', requireAuth)
 // `library`. This does not widen what that upload can be used for beyond
 // "adds one asset to file_assets" -- it does not grant list/rename/delete,
 // which stay Full-Access-only below.
-function hasFullLibraryAccess(user: SessionUser): boolean {
+// Exported so the offline chunked-upload path (routes/sync.ts) can enforce the
+// EXACT same library gate this route does. The root cause of that path's
+// library bypass (H2) was this logic living as a private helper here, so the
+// sync entry point had nothing to share and silently omitted the check. files.ts
+// stays the single owner of the rule; sync.ts imports it rather than re-deriving.
+export function hasFullLibraryAccess(user: SessionUser): boolean {
   return getPermissionTier(user, 'library') === 'full' || hasPermission(user, 'settings')
 }
-function canWireProductImages(user: SessionUser): boolean {
+export function canWireProductImages(user: SessionUser): boolean {
   return getPermissionTier(user, 'products') !== 'none' || hasPermission(user, 'products_image_only')
 }
 
