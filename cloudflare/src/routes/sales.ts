@@ -22,7 +22,7 @@ import {
   type SaleItemAllocation,
 } from '../lib/saleTransitions'
 import { buildLikeAliasClause, tokenizeSearchTermGroups, normalizeSearchText } from '../lib/searchMatch'
-import { computeSaleTotals, round2 } from '../lib/saleTotals'
+import { computeSaleTotals, resolveChangeExchangeRate, round2 } from '../lib/saleTotals'
 import { uniqueBusinessDateTimeNumber } from '../lib/receiptNumber'
 import { sanitizeClientCreatedAt } from '../lib/clientTimestamp'
 import type { Env } from '../index'
@@ -345,6 +345,13 @@ app.post('/', async (c) => {
   // earned/deducted/redeemed/rewarded balance portal.ts's summarizePoints
   // uses, scoped to this customer, right before spending it.
   const exchangeRate = Number(body.exchange_rate) || 4100
+  // Part 534: KHR change converts at its own configured rate. Read the
+  // SETTING (not a client field) so the stored change_khr matches what the
+  // POS displayed from the same setting.
+  const changeRateRow = await db.prepare(
+    `SELECT value FROM settings WHERE key = 'change_exchange_rate'`,
+  ).get<{ value: string }>()
+  const changeExchangeRateSetting = changeRateRow?.value
   let customer: { id: number; name: string | null; membership_number: string | null } | null = null
   if (body.customer_id) {
     customer = await db.prepare('SELECT id, name, membership_number FROM customers WHERE id = ?').get([body.customer_id]) || null
@@ -459,6 +466,7 @@ app.post('/', async (c) => {
     deliveryFeeUsd,
     deliveryFeePaidBy,
     exchangeRate,
+    changeExchangeRate: changeExchangeRateSetting,
     rawAmountPaidUsd: body.amount_paid_usd,
     rawAmountPaidKhr: body.amount_paid_khr,
   })
@@ -1107,7 +1115,11 @@ app.patch('/:id/status', async (c) => {
     const methodSummary = Array.from(new Set(effectiveDetails.map((detail) => detail.method))).join(' + ')
     const rate = Number(sale.exchange_rate) > 0 ? Number(sale.exchange_rate) : 4100
     const paidCombinedUsd = paidUsd + paidKhr / rate
-    const overpayUsd = round2(Math.max(0, paidCombinedUsd - (Number(sale.total_usd) || 0)))
+    // Exact overpay kept for the riel conversion below -- same
+    // order-of-operations rule as lib/saleTotals.ts (round2 first shifts
+    // whole tens of riel off what the cashier was shown).
+    const overpayExactUsd = Math.max(0, paidCombinedUsd - (Number(sale.total_usd) || 0))
+    const overpayUsd = round2(overpayExactUsd)
     updates.push(
       'payment_method = @payment_method',
       'payment_details = @payment_details',
@@ -1123,7 +1135,12 @@ app.patch('/:id/status', async (c) => {
     updateParams.amount_paid_usd = paidUsd
     updateParams.amount_paid_khr = paidKhr
     updateParams.change_usd = overpayUsd
-    updateParams.change_khr = Math.round(overpayUsd * rate)
+    // Same Part-534 rule as sale creation: KHR change converts at the
+    // configured change rate, falling back to this sale's own rate.
+    const changeRateRow = await db.prepare(
+      `SELECT value FROM settings WHERE key = 'change_exchange_rate'`,
+    ).get<{ value: string }>()
+    updateParams.change_khr = Math.round(overpayExactUsd * resolveChangeExchangeRate(changeRateRow?.value, rate))
   }
   if (saleStatus === 'cancelled') {
     updates.push(

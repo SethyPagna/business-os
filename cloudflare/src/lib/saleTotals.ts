@@ -53,6 +53,12 @@ export type SaleTotalsInput = {
   /** 'customer' or 'store'; anything else is treated as store-absorbed. */
   deliveryFeePaidBy: string
   exchangeRate: number
+  /**
+   * The raw `change_exchange_rate` SETTING (Part 534: change money converts
+   * at its own rate). Absent/blank/non-positive falls back to exchangeRate,
+   * so callers can pass the settings value straight through.
+   */
+  changeExchangeRate?: unknown
   /** Raw request value -- may be absent, null, 0, or non-numeric. */
   rawAmountPaidUsd: unknown
   /** Raw request value -- may be absent, null, 0, or non-numeric. */
@@ -104,8 +110,26 @@ export function computeSaleTotals(input: SaleTotalsInput): SaleTotals {
     ? Math.round(Math.max(0, Number(input.rawAmountPaidKhr)))
     : 0
 
-  const changeUsd = round2(amountPaidUsd + amountPaidKhr / exchangeRate - totalUsd)
-  const changeKhr = Math.round(changeUsd * exchangeRate)
+  // Payment converts at the MAIN rate; the KHR change handed back converts
+  // at the dedicated change rate (Part 534) -- the same split POS.tsx
+  // displays, so the stored row can't disagree with what the cashier was
+  // told to hand over. The KHR conversion uses the EXACT overpay, not the
+  // cent-rounded changeUsd: rounding first shifts whole tens of riel
+  // (2.2051 * 4000 = 8,820 displayed vs round2 first = 2.21 * 4000 = 8,840).
+  const changeUsdExact = amountPaidUsd + amountPaidKhr / exchangeRate - totalUsd
+  const changeUsd = round2(changeUsdExact)
+  const changeKhr = Math.round(changeUsdExact * resolveChangeExchangeRate(input.changeExchangeRate, exchangeRate))
 
   return { customerDeliveryFeeUsd, totalUsd, totalKhr, amountPaidUsd, amountPaidKhr, changeUsd, changeKhr }
+}
+
+/**
+ * Resolve the `change_exchange_rate` setting against the sale's main rate.
+ * Hand-synced twin of frontend posCore.ts's resolveChangeExchangeRate (same
+ * pairing discipline as receiptNumber.ts <-> timestampId.ts): blank, absent
+ * or non-positive means "same as exchange rate".
+ */
+export function resolveChangeExchangeRate(rawSetting: unknown, mainRate: number): number {
+  const parsed = parseFloat(String(rawSetting ?? '').trim())
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : mainRate
 }

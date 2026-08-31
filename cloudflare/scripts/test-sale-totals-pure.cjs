@@ -177,6 +177,60 @@ check('round2 has exactly one definition in the codebase path under test', () =>
   assert.ok(/round2 \} from '\.\.\/lib\/saleTotals'|computeSaleTotals, round2 \}/.test(salesSrc), 'sales.ts should import round2 from lib/saleTotals')
 })
 
+// ---- Part 539/534: KHR change converts at the dedicated change rate ----
+// Live probe that motivated this: POS displayed 8,820 riel of change at a
+// configured change rate of 4000, but the stored row said 9,061 (the main
+// 4100 rate) -- the books disagreed with what the cashier handed over.
+const { resolveChangeExchangeRate } = require(path.join(tmpDir, 'saleTotals.js'))
+
+check('changeKhr uses the configured change rate; payment still converts at the main rate', () => {
+  // $9.99 total, 50,000 riel tendered at main 4100: exact overpay 2.2051...,
+  // changeUsd stores 2.21, but the riel conversion uses the EXACT value at
+  // the 4000 change rate -- 8,820, matching what POS.tsx displays. Rounding
+  // to cents first would store 8,840 (a fresh 20-riel books-vs-hand gap).
+  const t = computeSaleTotals({
+    ...base, subtotalUsd: 9.99, exchangeRate: 4100, changeExchangeRate: '4000',
+    rawAmountPaidUsd: 0, rawAmountPaidKhr: 50000,
+  })
+  const exactChange = 50000 / 4100 - 9.99
+  assert.equal(t.changeUsd, round2(exactChange))
+  assert.equal(t.changeKhr, Math.round(exactChange * 4000), 'change must convert the EXACT overpay at 4000')
+  assert.equal(t.changeKhr, 8820)
+  assert.notEqual(t.changeKhr, Math.round(t.changeUsd * 4000), 'round2-first would give 8,840 -- the display mismatch this pins out')
+  assert.equal(t.totalKhr, Math.round(9.99 * 4100), 'the total itself stays on the main rate')
+})
+
+check('blank/absent/zero change rate falls back to the main rate (pre-534 behavior)', () => {
+  const exactChange = 50000 / 4100 - 9.99
+  for (const raw of ['', undefined, null, '0', '-5', 'abc']) {
+    const t = computeSaleTotals({
+      ...base, subtotalUsd: 9.99, exchangeRate: 4100, changeExchangeRate: raw,
+      rawAmountPaidUsd: 0, rawAmountPaidKhr: 50000,
+    })
+    // 9,041 -- the same number POS displays at the fallback rate (the old
+    // round2-first server stored 9,061 for this sale).
+    assert.equal(t.changeKhr, Math.round(exactChange * 4100), `raw=${String(raw)} must fall back to 4100`)
+  }
+  assert.equal(resolveChangeExchangeRate('4000', 4100), 4000)
+  assert.equal(resolveChangeExchangeRate(' ', 4100), 4100)
+})
+
+check('routes/sales.ts feeds the change rate to BOTH write paths (create + deferred-payment settle)', () => {
+  assert.ok(/changeExchangeRate: changeExchangeRateSetting/.test(salesSrc), 'POST / must pass the setting into computeSaleTotals')
+  assert.ok(/Math\.round\(overpayExactUsd \* resolveChangeExchangeRate\(changeRateRow\?\.value, rate\)\)/.test(salesSrc), 'PATCH /:id/status must convert the EXACT overpay at the change rate')
+  assert.ok(!/updateParams\.change_khr = Math\.round\(overpayUsd \* rate\)/.test(salesSrc), 'the main-rate-only overpay conversion must be gone')
+})
+
+// Frontend parity: the server twin must stay byte-identical in behavior to
+// posCore.ts's resolveChangeExchangeRate (hand-synced pair).
+check('resolveChangeExchangeRate matches the frontend twin line for line', () => {
+  const frontendSrc = fs.readFileSync(path.join(cloudflareRoot, '..', 'frontend', 'src', 'components', 'pos', 'posCore.ts'), 'utf8')
+  const bodyRe = /const parsed = parseFloat\(String\(rawSetting \?\? ''\)\.trim\(\)\)\s*\n\s*return Number\.isFinite\(parsed\) && parsed > 0 \? parsed : mainRate/
+  const backendSrc = fs.readFileSync(srcPath, 'utf8')
+  assert.ok(bodyRe.test(frontendSrc), 'frontend resolveChangeExchangeRate body changed -- re-sync the pair')
+  assert.ok(bodyRe.test(backendSrc), 'backend resolveChangeExchangeRate body changed -- re-sync the pair')
+})
+
 fs.rmSync(tmpDir, { recursive: true, force: true })
 console.log(`\n${passed} check(s) passed.`)
 if (process.exitCode) console.log('SOME CHECKS FAILED')
