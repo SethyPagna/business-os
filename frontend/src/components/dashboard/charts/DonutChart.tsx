@@ -7,6 +7,13 @@ type DonutDatum = Record<string, unknown>
 interface DonutChartProps {
   data?: DonutDatum[]
   valueKey: string
+  // The donut carries its own compact legend to the right of the ring. Callers
+  // that render their own richer legend beside the chart (e.g. the dashboard
+  // Payment Method card, which lists name + % + count) pass showLegend={false}
+  // so the two legends don't duplicate; the viewBox then tightens to just the
+  // ring so it centres instead of leaving the legend column blank. Defaults to
+  // true so the exported-report donut keeps its self-contained legend.
+  showLegend?: boolean
 }
 
 interface DonutSlice {
@@ -19,14 +26,16 @@ interface DonutSlice {
 
 const CHART_COLORS = ['#2563eb', '#16a34a', '#ea580c', '#7c3aed', '#dc2626', '#0891b2', '#0f766e']
 
-export default function DonutChart({ data, valueKey }: DonutChartProps) {
+export default function DonutChart({ data, valueKey, showLegend = true }: DonutChartProps) {
   const [hoveredIdx, setHoveredIdx] = useState<number | null>(null)
   if (!data?.length) return <NoData />
 
   const total = data.reduce((sum, datum) => sum + (Number(datum[valueKey]) || 0), 0)
   if (!total) return <NoData />
 
-  const W = 260
+  // Without the legend the ring is all that's drawn, so crop the viewBox to it
+  // (it spans x 16..124) and centre it rather than leaving the legend column.
+  const W = showLegend ? 260 : 140
   const H = 140
   const cx = 70
   const cy = 70
@@ -95,7 +104,7 @@ export default function DonutChart({ data, valueKey }: DonutChartProps) {
         <text x={cx} y={cy - 6} textAnchor="middle" fontSize="13" fontWeight="600" fill="currentColor" className="text-slate-700 dark:text-slate-200" style={{ color: '#374151' }}>{slices.length}</text>
         <text x={cx} y={cy + 10} textAnchor="middle" fontSize="10" fill="currentColor" className="text-slate-400 dark:text-slate-400" style={{ color: '#9ca3af' }}>methods</text>
 
-        {slices.map((slice, index) => {
+        {showLegend && slices.map((slice, index) => {
           const label = String(slice.raw.payment_method || slice.raw.name || `#${index + 1}`)
           const short = label.length > 10 ? `${label.slice(0, 10)}...` : label
           return (

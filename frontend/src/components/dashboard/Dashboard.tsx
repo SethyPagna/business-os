@@ -316,6 +316,18 @@ const EMPTY_DASHBOARD_ANALYTICS: DashboardAnalytics = {
 }
 const DASHBOARD_INVENTORY_FOCUS_KEY = 'bos:dashboard:inventory-focus'
 
+// Shared list-body sizing for the dashboard's list cards (recent sales, top
+// products/customers, low/out of stock, expiry, branches, imports, payment).
+// The user asked for cards that hold a stable height instead of each card
+// being as tall as its own data: a short list left a big empty gap while its
+// row-mate (the analytics chart, best-hour heatmap, low-stock list) ran much
+// taller. Grid already stretches every card in a row to the tallest; this makes
+// the LIST inside a card grow to fill that stretched height (flex-1), with a
+// min so an all-list row still has a sensible floor and a max + scroll so one
+// very long list can't blow the row out. Net effect: cards line up, each shows
+// as many rows as fit, and the rest stay reachable by scrolling in place.
+const CARD_LIST_BODY = 'flex-1 min-h-[12rem] max-h-[18rem] overflow-y-auto'
+
 function getDashboardFilterStorageKey(user?: AppUser | null): string {
   const userKey = user?.id || user?.username || user?.email || 'guest'
   return `${DASHBOARD_FILTER_STORAGE_PREFIX}${userKey}`
@@ -388,42 +400,57 @@ function getSaleStatusTone(status: unknown): string {
   return 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300'
 }
 
-function PaymentMethodCard({ analytics, analyticsPending, analyticsUnavailable, analyticsError, translateOr }: {
+function PaymentMethodCard({ analytics, analyticsPending, analyticsUnavailable, analyticsError, translateOr, fmtUSD, onOpen }: {
   analytics: DashboardAnalytics | null
   analyticsPending: boolean
   analyticsUnavailable: boolean
   analyticsError: string
   translateOr: (key: string, fallback: string, khmerFallback?: string) => string
+  fmtUSD: FormatMoneyFn
+  onOpen: (payment: DashboardPaymentRow) => void
 }) {
   const payments = analytics?.byPayment || []
   const total = payments.reduce((sum, row) => sum + (row.revenue_usd || 0), 0)
-  const colors = ['#2563eb', '#16a34a', '#ea580c', '#7c3aed', '#dc2626', '#0891b2']
+  // Same ramp DonutChart paints its wedges with, so each legend dot lines up
+  // with its ring slice.
+  const colors = ['#2563eb', '#16a34a', '#ea580c', '#7c3aed', '#dc2626', '#0891b2', '#0f766e']
   return (
-    <div className="card p-3 sm:p-4">
+    <div className="card flex flex-col p-3 sm:p-4">
       <h2 className="mb-3 text-base font-semibold text-gray-900 dark:text-white">{translateOr('payment_method', 'Payment Method', 'វិធីទូទាត់')}</h2>
       {analyticsPending ? <div className="h-28 animate-pulse rounded-xl bg-gray-100 dark:bg-gray-700" /> : analyticsUnavailable ? (
         <div className="flex h-28 items-center justify-center rounded-xl border border-amber-200 bg-amber-50/60 px-3 text-center text-xs text-amber-900 dark:border-amber-800/70 dark:bg-amber-950/20 dark:text-amber-100">{analyticsError || 'Analytics unavailable for this range.'}</div>
+      ) : !payments.length ? (
+        <p className="flex flex-1 items-center justify-center py-8 text-center text-xs text-gray-400">{translateOr('no_data', 'No data found', 'រកមិនឃើញទិន្នន័យ')}</p>
       ) : (
-        <>
-          <Suspense fallback={<ChartFallback className="h-28" />}>
-            <DonutChart data={payments} valueKey="revenue_usd" />
-          </Suspense>
-          <div className="mt-2 max-h-32 space-y-1 overflow-auto">
+        // A SINGLE legend, beside the ring (donut left, detail right). The card
+        // used to draw the ring's own legend AND a second list under it -- the
+        // same data twice (user: "showing two sets of same data"). This keeps
+        // one richer legend: dot, method, collected amount, share %, and count.
+        <div className="flex flex-1 flex-col items-center gap-3 sm:flex-row sm:items-center">
+          <div className="w-full max-w-[8.5rem] shrink-0">
+            <Suspense fallback={<ChartFallback className="h-28" />}>
+              <DonutChart data={payments} valueKey="revenue_usd" showLegend={false} />
+            </Suspense>
+          </div>
+          <div className="min-h-0 w-full flex-1 space-y-0.5 self-stretch overflow-y-auto sm:max-h-44">
             {payments.map((payment, index) => {
-              const percent = total > 0 ? ((payment.revenue_usd || 0) / total * 100).toFixed(1) : 0
+              const percent = total > 0 ? ((payment.revenue_usd || 0) / total * 100).toFixed(1) : '0.0'
               return (
-                <div key={`${payment.payment_method || payment.method || 'payment'}-${index}`} className="flex items-center justify-between text-xs">
+                <button key={`${payment.payment_method || payment.method || 'payment'}-${index}`} type="button" onClick={() => onOpen(payment)} className="flex w-full items-center justify-between gap-2 rounded-lg px-1.5 py-1 text-left text-xs transition hover:bg-slate-50 dark:hover:bg-slate-800/50">
                   <div className="flex min-w-0 items-center gap-1.5">
                     <div className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: colors[index % colors.length] }} />
-                    <span className="max-w-20 truncate text-gray-600 dark:text-gray-400">{payment.payment_method || payment.method}</span>
+                    <span className="truncate text-gray-600 dark:text-gray-400">{payment.payment_method || payment.method}</span>
                   </div>
-                  <div className="shrink-0 text-right"><span className="font-medium text-gray-900 dark:text-white">{percent}%</span><span className="ml-1 text-gray-400">({payment.count})</span></div>
-                </div>
+                  <div className="flex shrink-0 items-baseline gap-1.5 text-right">
+                    <span className="font-semibold text-gray-900 dark:text-white">{fmtUSD(payment.revenue_usd || 0)}</span>
+                    <span className="text-gray-500 dark:text-gray-400">{percent}%</span>
+                    <span className="text-gray-400">({payment.count})</span>
+                  </div>
+                </button>
               )
             })}
-            {!payments.length ? <p className="py-2 text-center text-xs text-gray-400">{translateOr('no_data', 'No data found', 'រកមិនឃើញទិន្នន័យ')}</p> : null}
           </div>
-        </>
+        </div>
       )}
     </div>
   )
@@ -441,10 +468,10 @@ function RecentSalesCard({ summary, t, translateOr, fmtUSD, fmtKHR, formatStatus
 }) {
   const sales = summary?.recent_sales || []
   return (
-    <div className="card">
+    <div className="card flex flex-col">
       <div className="border-b border-gray-100 p-3 sm:p-4 dark:border-gray-700"><h2 className="font-semibold text-gray-900 dark:text-white">{t('sales') || 'Sales'}</h2></div>
-      <div className="divide-y divide-gray-100 dark:divide-gray-700">
-        {!sales.length ? <p className="p-4 text-center text-sm text-gray-400">{translateOr('no_data', 'No data found', 'រកមិនឃើញទិន្នន័យ')}</p> : sales.slice(0, 5).map((sale) => (
+      <div className={`divide-y divide-gray-100 dark:divide-gray-700 ${CARD_LIST_BODY}`}>
+        {!sales.length ? <p className="p-4 text-center text-sm text-gray-400">{translateOr('no_data', 'No data found', 'រកមិនឃើញទិន្នន័យ')}</p> : sales.map((sale) => (
           <button key={sale.id} type="button" className="flex w-full items-center justify-between gap-2 px-3 py-2.5 text-left transition hover:bg-slate-50 dark:hover:bg-slate-800/50 sm:px-4" onClick={() => onOpenSale(sale)}>
             <div className="min-w-0"><p className="truncate text-sm font-medium text-gray-700 dark:text-gray-300">{sale.receipt_number}</p><p className="truncate text-xs text-gray-400">{compactDashboardMetaParts([fmtTime(sale.created_at), sale.branch_name, sale.customer_name]).join(' | ')}</p></div>
             <div className="shrink-0 text-right"><span className="font-semibold text-green-600">{fmtUSD(sale.total_usd || sale.total || 0)}</span>{(sale.total_khr || 0) > 0 ? <div className="text-xs text-gray-400">{fmtKHR(sale.total_khr || 0)}</div> : null}<div className={`mt-1 inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold ${getSaleStatusTone(sale.sale_status)}`}>{formatStatus(sale.sale_status)}</div></div>
@@ -456,57 +483,49 @@ function RecentSalesCard({ summary, t, translateOr, fmtUSD, fmtKHR, formatStatus
   )
 }
 
-function BranchPerformanceCard({ analytics, analyticsPending, analyticsUnavailable, analyticsError, showAll, setShowAll, t, translateOr, fmtUSD }: {
+function BranchPerformanceCard({ analytics, analyticsPending, analyticsUnavailable, analyticsError, t, translateOr, fmtUSD, onOpen }: {
   analytics: DashboardAnalytics | null
   analyticsPending: boolean
   analyticsUnavailable: boolean
   analyticsError: string
-  showAll: boolean
-  setShowAll: (next: boolean | ((current: boolean) => boolean)) => void
   t: TranslateFn
   translateOr: (key: string, fallback: string, khmerFallback?: string) => string
   fmtUSD: FormatMoneyFn
+  onOpen: (branch: DashboardBranchRow) => void
 }) {
   const all = analytics?.byBranch || []
-  const visible = showAll ? all : all.slice(0, 4)
   const colors = ['#2563eb', '#16a34a', '#ea580c', '#7c3aed', '#0891b2']
   const maxRevenue = Math.max(...all.map((branch) => branch.revenue_usd || 0), 0.01)
-  return <div className="card p-3 sm:p-4">
+  return <div className="card flex flex-col p-3 sm:p-4">
     <h2 className="mb-3 text-base font-semibold text-gray-900 dark:text-white">{t('branch_performance')}</h2>
-    {analyticsPending ? <div className="h-28 animate-pulse rounded-xl bg-gray-100 dark:bg-gray-700" /> : analyticsUnavailable ? <div className="flex h-28 items-center justify-center rounded-xl border border-amber-200 bg-amber-50/60 px-3 text-center text-xs text-amber-900 dark:border-amber-800/70 dark:bg-amber-950/20 dark:text-amber-100">{analyticsError || 'Analytics unavailable for this range.'}</div> : <>
-      <div className="space-y-2">
-        {!all.length ? <p className="py-4 text-center text-xs text-gray-400">{translateOr('no_data', 'No data found', 'រកមិនឃើញទិន្នន័យ')}</p> : visible.map((branch, index) => {
+    {analyticsPending ? <div className="h-28 animate-pulse rounded-xl bg-gray-100 dark:bg-gray-700" /> : analyticsUnavailable ? <div className="flex h-28 items-center justify-center rounded-xl border border-amber-200 bg-amber-50/60 px-3 text-center text-xs text-amber-900 dark:border-amber-800/70 dark:bg-amber-950/20 dark:text-amber-100">{analyticsError || 'Analytics unavailable for this range.'}</div> : (
+      <div className={`space-y-1 ${CARD_LIST_BODY}`}>
+        {!all.length ? <p className="py-4 text-center text-xs text-gray-400">{translateOr('no_data', 'No data found', 'រកមិនឃើញទិន្នន័យ')}</p> : all.map((branch, index) => {
           const percent = ((branch.revenue_usd || 0) / maxRevenue * 100).toFixed(0)
-          return <div key={`${branch.branch_id || branch.branch_name || 'branch'}-${index}`}><div className="mb-0.5 flex justify-between text-xs"><span className="max-w-28 truncate text-gray-600 dark:text-gray-400">{branch.branch_name}</span><span className="font-medium text-gray-900 dark:text-white">{fmtUSD(branch.revenue_usd || 0)}</span></div><div className="h-2 overflow-hidden rounded-full bg-gray-100 dark:bg-gray-700"><div className="h-full rounded-full" style={{ width: `${percent}%`, background: colors[index % colors.length] }} /></div><div className="mt-0.5 text-right text-xs text-gray-400">{branch.count} {t('sale')}</div></div>
+          return <button key={`${branch.branch_id || branch.branch_name || 'branch'}-${index}`} type="button" onClick={() => onOpen(branch)} className="block w-full rounded-xl px-2 py-1.5 text-left transition hover:bg-slate-50 dark:hover:bg-slate-800/50"><div className="mb-0.5 flex justify-between text-xs"><span className="max-w-28 truncate text-gray-600 dark:text-gray-400">{branch.branch_name}</span><span className="font-medium text-gray-900 dark:text-white">{fmtUSD(branch.revenue_usd || 0)}</span></div><div className="h-2 overflow-hidden rounded-full bg-gray-100 dark:bg-gray-700"><div className="h-full rounded-full" style={{ width: `${percent}%`, background: colors[index % colors.length] }} /></div><div className="mt-0.5 text-right text-xs text-gray-400">{branch.count} {t('sale')}</div></button>
         })}
       </div>
-      {all.length > 4 ? <button onClick={() => setShowAll((current) => !current)} className="mt-2 w-full py-1 text-xs text-blue-600 hover:underline dark:text-blue-400">{showAll ? t('show_less') : `${t('view_all')} ${all.length} ${t('branches')}`}</button> : null}
-    </>}
+    )}
   </div>
 }
 
-function ExpiryAlertsCard({ summary, showAll, setShowAll, translateOr }: {
+function ExpiryAlertsCard({ summary, translateOr, onOpen }: {
   summary: DashboardSummary | null
-  showAll: boolean
-  setShowAll: (next: boolean | ((current: boolean) => boolean)) => void
   translateOr: (key: string, fallback: string, khmerFallback?: string) => string
+  onOpen: (item: DashboardProduct) => void
 }) {
   const items = summary?.expiring_products || []
-  const visible = showAll ? items : items.slice(0, 5)
-  return <div className="card">
+  return <div className="card flex flex-col">
     <div className="flex items-center justify-between border-b border-gray-100 p-3 sm:p-4 dark:border-gray-700"><h2 className="font-semibold text-gray-900 dark:text-white">{translateOr('product_expiry_alerts', 'Expiry alerts', 'ការជូនដំណឹងផុតកំណត់')}</h2>{items.length ? <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-medium text-amber-700 dark:bg-amber-900/30 dark:text-amber-300">{items.length}</span> : null}</div>
-    <div className="divide-y divide-gray-100 dark:divide-gray-700">{!items.length ? <p className="p-4 text-center text-sm text-gray-400">{translateOr('no_data', 'No data found', 'រកមិនឃើញទិន្នន័យ')}</p> : visible.map((item) => <div key={item.id} className="flex items-center justify-between gap-2 px-3 py-2.5 sm:px-4"><div className="min-w-0"><p className="truncate text-sm text-gray-700 dark:text-gray-300">{item.name}</p>{item.category ? <p className="text-xs text-gray-400">{item.category}</p> : null}</div><span className={Number(item.days_until_expiry || 0) < 0 ? 'badge-red' : 'badge-yellow'}>{item.expiry_date}</span></div>)}</div>
-    {items.length > 5 ? <div className="border-t border-gray-100 px-4 py-2 dark:border-gray-700"><button onClick={() => setShowAll((current) => !current)} className="w-full py-0.5 text-xs text-blue-600 hover:underline dark:text-blue-400">{showAll ? 'Show less' : `View all ${items.length} items`}</button></div> : null}
+    <div className={`divide-y divide-gray-100 dark:divide-gray-700 ${CARD_LIST_BODY}`}>{!items.length ? <p className="p-4 text-center text-sm text-gray-400">{translateOr('no_data', 'No data found', 'រកមិនឃើញទិន្នន័យ')}</p> : items.map((item) => <button key={item.id} type="button" onClick={() => onOpen(item)} className="flex w-full items-center justify-between gap-2 px-3 py-2.5 text-left transition hover:bg-slate-50 dark:hover:bg-slate-800/50 sm:px-4"><div className="min-w-0"><p className="truncate text-sm text-gray-700 dark:text-gray-300">{item.name}</p>{item.category ? <p className="truncate text-xs text-gray-400">{item.category}</p> : null}</div><span className={`shrink-0 ${Number(item.days_until_expiry || 0) < 0 ? 'badge-red' : 'badge-yellow'}`}>{item.expiry_date}</span></button>)}</div>
   </div>
 }
 
-function BestHourCard({ analytics, analyticsPending, analyticsUnavailable, analyticsError, showAll, setShowAll, t, translateOr, fmtUSD, onOpenHour }: {
+function BestHourCard({ analytics, analyticsPending, analyticsUnavailable, analyticsError, t, translateOr, fmtUSD, onOpenHour }: {
   analytics: DashboardAnalytics | null
   analyticsPending: boolean
   analyticsUnavailable: boolean
   analyticsError: string
-  showAll: boolean
-  setShowAll: (next: boolean | ((current: boolean) => boolean)) => void
   t: TranslateFn
   translateOr: (key: string, fallback: string, khmerFallback?: string) => string
   fmtUSD: FormatMoneyFn
@@ -527,13 +546,11 @@ function BestHourCard({ analytics, analyticsPending, analyticsUnavailable, analy
   const maxCount = Math.max(...Object.values(merged).map((hour) => hour.count || 0), 1)
   const allHours = Array.from({ length: 24 }, (_, hour) => merged[hour] || { hour, count: 0, revenue_usd: 0 })
   const busyHours = Object.values(merged).filter((hour) => (hour.count || 0) > 0).sort((left, right) => (right.count || 0) - (left.count || 0))
-  const visible = showAll ? busyHours : busyHours.slice(0, 3)
-  return <div className="card p-3 sm:p-4">
+  return <div className="card flex flex-col p-3 sm:p-4">
     <div className="mb-3 flex items-center justify-between gap-2"><h2 className="text-base font-semibold text-gray-900 dark:text-white">{t('best_hour')}</h2><span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-medium text-slate-500 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300">{translateOr('tap_to_view', 'Tap to view')}</span></div>
     {analyticsPending ? <div className="h-28 animate-pulse rounded-xl bg-gray-100 dark:bg-gray-700" /> : analyticsUnavailable ? <div className="flex h-28 items-center justify-center rounded-xl border border-amber-200 bg-amber-50/60 px-3 text-center text-xs text-amber-900 dark:border-amber-800/70 dark:bg-amber-950/20 dark:text-amber-100">{analyticsError || 'Analytics unavailable for this range.'}</div> : <>
       <div className="relative mb-3"><div className="grid gap-px" style={{ gridTemplateColumns: 'repeat(24,1fr)' }}>{allHours.map((hour) => { const opacity = (hour.count || 0) === 0 ? 0.06 : 0.12 + (hour.count || 0) / maxCount * 0.88; return <button key={hour.hour} type="button" title={`${String(hour.hour).padStart(2, '0')}:00 - ${hour.count} ${t('sale')}(s), ${fmtUSD(hour.revenue_usd)}`} aria-label={`${translateOr('best_hour', 'Best hour')} ${formatDashboardHourLabel(hour.hour)}`} className="rounded-sm transition hover:ring-2 hover:ring-blue-300 dark:hover:ring-blue-700" style={{ height: 40, background: `rgba(37,99,235,${opacity.toFixed(2)})` }} onClick={() => onOpenHour(hour, busyHours.findIndex((item) => item.hour === hour.hour) + 1 || null)} /> })}</div><div className="relative mt-1 flex h-[18px] text-[11px] font-medium text-gray-400">{[0, 6, 12, 18, 23].map((hour) => <span key={hour} className="absolute" style={{ left: `${hour / 23 * 100}%`, transform: 'translateX(-50%)' }}>{formatDashboardHourLabel(hour).replace(' ', '')}</span>)}</div></div>
-      <div className="space-y-1">{!visible.length ? <p className="text-center text-xs text-gray-400">{translateOr('no_data', 'No data found', 'រកមិនឃើញទិន្នន័យ')}</p> : visible.map((hour, index) => <button key={hour.hour} type="button" className="flex w-full items-center justify-between rounded-xl border border-gray-100 bg-gray-50 px-3 py-2 text-left transition hover:border-blue-200 hover:bg-blue-50/60 dark:border-gray-700 dark:bg-gray-900/40 dark:hover:border-blue-800 dark:hover:bg-blue-950/20" onClick={() => onOpenHour(hour, index + 1)}><div><div className="text-sm font-semibold text-gray-800 dark:text-gray-100">{`#${index + 1} ${formatDashboardHourLabel(hour.hour)}`}</div><div className="text-[11px] text-gray-500 dark:text-gray-400">{String(hour.hour).padStart(2, '0')}:00 - {String((Number(hour.hour) + 1) % 24).padStart(2, '0')}:00</div></div><div className="text-right"><div className="text-sm font-semibold text-gray-900 dark:text-white">{hour.count} {t('sale')}{hour.count !== 1 ? 's' : ''}</div><div className="text-[11px] text-green-600 dark:text-green-400">{fmtUSD(hour.revenue_usd)}</div></div></button>)}</div>
-      {busyHours.length > 3 ? <button onClick={() => setShowAll((current) => !current)} className="mt-2 w-full py-1 text-xs text-blue-600 hover:underline dark:text-blue-400">{showAll ? t('show_less') : `${t('view_all')} ${busyHours.length} ${t('hours') || 'hours'}`}</button> : null}
+      <div className={`space-y-1 ${CARD_LIST_BODY}`}>{!busyHours.length ? <p className="text-center text-xs text-gray-400">{translateOr('no_data', 'No data found', 'រកមិនឃើញទិន្នន័យ')}</p> : busyHours.map((hour, index) => <button key={hour.hour} type="button" className="flex w-full items-center justify-between rounded-xl border border-gray-100 bg-gray-50 px-3 py-2 text-left transition hover:border-blue-200 hover:bg-blue-50/60 dark:border-gray-700 dark:bg-gray-900/40 dark:hover:border-blue-800 dark:hover:bg-blue-950/20" onClick={() => onOpenHour(hour, index + 1)}><div><div className="text-sm font-semibold text-gray-800 dark:text-gray-100">{`#${index + 1} ${formatDashboardHourLabel(hour.hour)}`}</div><div className="text-[11px] text-gray-500 dark:text-gray-400">{String(hour.hour).padStart(2, '0')}:00 - {String((Number(hour.hour) + 1) % 24).padStart(2, '0')}:00</div></div><div className="text-right"><div className="text-sm font-semibold text-gray-900 dark:text-white">{hour.count} {t('sale')}{hour.count !== 1 ? 's' : ''}</div><div className="text-[11px] text-green-600 dark:text-green-400">{fmtUSD(hour.revenue_usd)}</div></div></button>)}</div>
     </>}
   </div>
 }
@@ -659,15 +676,11 @@ export default function Dashboard() {
   const [customEnd, setCustomEnd]     = useState(() => initialFilterPrefs?.customEnd || todayStr())
   const [activeChart, setActiveChart] = useState<DashboardChartMode>('revenue')
   const [topMode, setTopMode]         = useState<DashboardTopMode>('revenue')
-  const [showAllCustomers, setShowAllCustomers] = useState(false)
-  const [showAllProducts, setShowAllProducts]   = useState(false)
   const [customerDetail, setCustomerDetail]     = useState<DashboardCustomer | null>(null)
   const [productDetail, setProductDetail]       = useState<DashboardProduct | null>(null)
-  const [showAllBranches, setShowAllBranches]   = useState(false)
-  const [showAllHours, setShowAllHours]         = useState(false)
-  const [showAllLowStock, setShowAllLowStock]   = useState(false)
-  const [showAllOutStock, setShowAllOutStock]   = useState(false)
-  const [showAllExpiring, setShowAllExpiring]   = useState(false)
+  // Every list card fills its row height and scrolls in place (see
+  // CARD_LIST_BODY) instead of a per-card show-all toggle, so those show-all
+  // flags were removed.
   const [recentSalesOpen, setRecentSalesOpen]   = useState(false)
   const [recentSaleDetail, setRecentSaleDetail] = useState<DashboardSale | null>(null)
   const [recentImportFiles, setRecentImportFiles] = useState<ImportFileSummary[]>([])
@@ -1132,6 +1145,55 @@ export default function Dashboard() {
       ].filter(Boolean) as Array<{ label: ReactNode; value: ReactNode }>,
     })
   }, [fmtUSD, translateOr])
+
+  // Row-level drills for the cards whose rows weren't clickable before
+  // (branches, payment methods, expiry alerts). Each reuses the generic
+  // kpiDetail panel below. Branches/payment stay period metrics (the panel's
+  // default period subtitle fits); expiry passes its own subtitle since an
+  // item's expiry date has nothing to do with the selected sales range.
+  const openBranchDetail = useCallback((branch: DashboardBranchRow) => {
+    const branches = analytics?.byBranch || []
+    const totalRevenue = branches.reduce((sum, row) => sum + (row.revenue_usd || 0), 0)
+    const share = totalRevenue > 0 ? ((branch.revenue_usd || 0) / totalRevenue) * 100 : 0
+    setKpiDetail({
+      id: `branch-${branch.branch_id || branch.branch_name || 'branch'}`,
+      label: branch.branch_name || translateOr('branch', 'Branch'),
+      details: [
+        { label: translateOr('revenue', 'Revenue'), value: fmtUSD(branch.revenue_usd || 0) },
+        { label: translateOr('transactions', 'Transactions'), value: Number(branch.count ?? branch.tx_count ?? 0) },
+        { label: translateOr('share_of_total', 'Share of total', 'ចំណែក'), value: `${share.toFixed(1)}%` },
+      ],
+    })
+  }, [analytics?.byBranch, fmtUSD, translateOr])
+
+  const openPaymentDetail = useCallback((payment: DashboardPaymentRow) => {
+    const payments = analytics?.byPayment || []
+    const totalRevenue = payments.reduce((sum, row) => sum + (row.revenue_usd || 0), 0)
+    const share = totalRevenue > 0 ? ((payment.revenue_usd || 0) / totalRevenue) * 100 : 0
+    setKpiDetail({
+      id: `payment-${payment.payment_method || payment.method || 'payment'}`,
+      label: payment.payment_method || payment.method || translateOr('payment_method', 'Payment Method', 'វិធីទូទាត់'),
+      details: [
+        { label: translateOr('revenue', 'Revenue'), value: fmtUSD(payment.revenue_usd || 0) },
+        { label: translateOr('transactions', 'Transactions'), value: Number(payment.count || 0) },
+        { label: translateOr('share_of_total', 'Share of total', 'ចំណែក'), value: `${share.toFixed(1)}%` },
+      ],
+    })
+  }, [analytics?.byPayment, fmtUSD, translateOr])
+
+  const openExpiryDetail = useCallback((item: DashboardProduct) => {
+    const days = Number(item.days_until_expiry ?? NaN)
+    setKpiDetail({
+      id: `expiry-${item.id ?? item.name ?? 'item'}`,
+      label: item.name || translateOr('product', 'Product'),
+      sub: translateOr('product_expiry_alerts', 'Expiry alerts', 'ការជូនដំណឹងផុតកំណត់'),
+      details: [
+        { label: t('category') || 'Category', value: item.category || '--' },
+        { label: translateOr('expiry_date', 'Expiry date'), value: item.expiry_date || '--' },
+        Number.isFinite(days) ? { label: translateOr('days_until_expiry', 'Days until expiry'), value: days < 0 ? `${Math.abs(days)} ${translateOr('days_overdue', 'overdue')}` : days } : null,
+      ].filter(Boolean) as Array<{ label: ReactNode; value: ReactNode }>,
+    })
+  }, [t, translateOr])
 
   const periodKpis = useMemo(() => ([
       {
@@ -1738,8 +1800,6 @@ ${translateOr('delivery_margin', 'Delivery margin')} ${fmtUSD(aDeliveryMargin)} 
           analyticsPending={analyticsPending}
           analyticsUnavailable={analyticsUnavailable}
           analyticsError={analyticsError}
-          showAll={showAllHours}
-          setShowAll={setShowAllHours}
           t={t}
           translateOr={translateOr}
           fmtUSD={fmtUSD}
@@ -1747,7 +1807,7 @@ ${translateOr('delivery_margin', 'Delivery margin')} ${fmtUSD(aDeliveryMargin)} 
         />
 
         {/* Top Products */}
-        <div className="card p-3 sm:p-4">
+        <div className="card flex flex-col p-3 sm:p-4">
           <div className="flex min-w-0 flex-col items-start gap-2 mb-3 sm:flex-row sm:items-center sm:justify-between">
             <h2 className="min-w-0 text-base font-semibold text-gray-900 dark:text-white">{t('top_products')}</h2>
             <div className="max-w-full overflow-x-auto pb-0.5">
@@ -1781,9 +1841,9 @@ ${translateOr('delivery_margin', 'Delivery margin')} ${fmtUSD(aDeliveryMargin)} 
             <div className="flex h-28 items-center justify-center rounded-xl border border-amber-200 bg-amber-50/60 px-3 text-center text-xs text-amber-900 dark:border-amber-800/70 dark:bg-amber-950/20 dark:text-amber-100">{analyticsError || 'Analytics unavailable for this range.'}</div>
           ) : (
             <>
-              <div className="space-y-1.5">
+              <div className={`space-y-1.5 ${CARD_LIST_BODY}`}>
                 {topList.length === 0 ? <p className="text-xs text-gray-400 text-center py-4">{translateOr('no_data', 'No data found', 'រកមិនឃើញទិន្នន័យ')}</p>
-                : (showAllProducts ? topList : topList.slice(0,4)).map((p,i) => {
+                : topList.map((p,i) => {
                   const maxVal = topMode==='qty' ? topList[0]?.qty_sold||1 : topList[0]?.revenue_usd||1
                   const val    = topMode==='qty' ? p.qty_sold || 0 : p.revenue_usd || 0
                   const pct    = (val/maxVal*100).toFixed(0)
@@ -1812,11 +1872,6 @@ ${translateOr('delivery_margin', 'Delivery margin')} ${fmtUSD(aDeliveryMargin)} 
                   )
                 })}
               </div>
-              {topList.length > 4 && (
-                <button onClick={() => setShowAllProducts(v=>!v)} className="mt-2 w-full text-xs text-blue-600 dark:text-blue-400 hover:underline py-1">
-                  {showAllProducts ? t('show_less') : `${t('view_all')} ${topList.length} ${t('products')}`}
-                </button>
-              )}
             </>
           )}
         </div>
@@ -1824,9 +1879,9 @@ ${translateOr('delivery_margin', 'Delivery margin')} ${fmtUSD(aDeliveryMargin)} 
         {/* Top Customers */}
         {(() => {
           const customers = analytics?.topCustomers || []
-          const visible   = showAllCustomers ? customers : customers.slice(0,4)
+          const visible   = customers
           return (
-            <div className="card p-3 sm:p-4">
+            <div className="card flex flex-col p-3 sm:p-4">
               <div className="flex items-center justify-between mb-3">
                 <h2 className="text-base font-semibold text-gray-900 dark:text-white">{t('top_customers')}</h2>
                 <span className="text-[10px] text-gray-400 bg-gray-100 dark:bg-gray-700 px-2 py-0.5 rounded-full">{t('net_of_returns')}</span>
@@ -1839,7 +1894,7 @@ ${translateOr('delivery_margin', 'Delivery margin')} ${fmtUSD(aDeliveryMargin)} 
                     ? <p className="text-xs text-gray-400 text-center py-4">{t('no_named_customers')}</p>
                     : (
                       <>
-                        <div className="space-y-1.5">
+                        <div className={`space-y-1.5 ${CARD_LIST_BODY}`}>
                           {visible.map((c,i) => {
                             const maxRev = customers[0]?.net_revenue_usd || 1
                             const pct = Math.max(2,((c.net_revenue_usd || 0)/maxRev*100)).toFixed(0)
@@ -1866,11 +1921,6 @@ ${translateOr('delivery_margin', 'Delivery margin')} ${fmtUSD(aDeliveryMargin)} 
                             )
                           })}
                         </div>
-                        {customers.length > 4 && (
-                          <button onClick={() => setShowAllCustomers(v=>!v)} className="mt-2 w-full text-xs text-blue-600 dark:text-blue-400 hover:underline py-1">
-                            {showAllCustomers ? t('show_less') : `${t('view_all')} ${customers.length} ${t('customers')}`}
-                          </button>
-                        )}
                       </>
                     )}
                 </>
@@ -1885,20 +1935,20 @@ ${translateOr('delivery_margin', 'Delivery margin')} ${fmtUSD(aDeliveryMargin)} 
       <section className={`${mobileSection === 'inventory' ? '' : 'hidden'} lg:block`}>
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-5">
         {/* Best Hour */}
-        <ExpiryAlertsCard summary={summary} showAll={showAllExpiring} setShowAll={setShowAllExpiring} translateOr={translateOr} />
+        <ExpiryAlertsCard summary={summary} translateOr={translateOr} onOpen={openExpiryDetail} />
 
         {/* Low Stock */}
-        <div className="card">
+        <div className="card flex flex-col">
           <div className="p-3 sm:p-4 border-b border-gray-100 dark:border-gray-700 flex items-center justify-between">
             <h2 className="font-semibold text-gray-900 dark:text-white">{t('low_stock_items')}</h2>
             {lowStockCount > 0 && (
               <span className="text-[10px] bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-300 px-2 py-0.5 rounded-full font-medium">{lowStockCount}</span>
             )}
           </div>
-          <div className="divide-y divide-gray-100 dark:divide-gray-700">
+          <div className={`divide-y divide-gray-100 dark:divide-gray-700 ${CARD_LIST_BODY}`}>
             {!summary?.low_stock?.length
               ? <p className="p-4 text-sm text-gray-400 text-center">{t('in_stock')}</p>
-              : (showAllLowStock ? summary.low_stock : summary.low_stock.slice(0,5)).map(p => (
+              : summary.low_stock.map(p => (
                 <button
                   key={p.id}
                   type="button"
@@ -1906,20 +1956,13 @@ ${translateOr('delivery_margin', 'Delivery margin')} ${fmtUSD(aDeliveryMargin)} 
                   onClick={() => setProductDetail({ ...p, insightType: 'low_stock' })}
                 >
                   <div className="min-w-0">
-                    <p className="text-sm text-gray-700 dark:text-gray-300">{p.name}</p>
-                    {p.category && <p className="text-xs text-gray-400">{p.category}</p>}
+                    <p className="truncate text-sm text-gray-700 dark:text-gray-300">{p.name}</p>
+                    {p.category && <p className="truncate text-xs text-gray-400">{p.category}</p>}
                   </div>
-                  <span className="badge-yellow">{p.stock_quantity} {p.unit}</span>
+                  <span className="badge-yellow shrink-0">{p.stock_quantity} {p.unit}</span>
                 </button>
               ))}
           </div>
-          {(summary?.low_stock?.length||0) > 5 && !lowStockPreviewTruncated && (
-            <div className="px-4 py-2 border-t border-gray-100 dark:border-gray-700">
-              <button onClick={() => setShowAllLowStock(v=>!v)} className="w-full text-xs text-blue-600 dark:text-blue-400 hover:underline py-0.5">
-                {showAllLowStock ? t('show_less') : `${t('view_all')} ${summary!.low_stock.length} ${t('items')}`}
-              </button>
-            </div>
-          )}
           {lowStockPreviewTruncated ? (
             <div className="border-t border-gray-100 px-4 py-2 dark:border-gray-700">
               <div className="flex items-center justify-between gap-3 rounded-xl bg-slate-50 px-3 py-2 text-[11px] text-slate-600 dark:bg-slate-800/60 dark:text-slate-300">
@@ -1933,17 +1976,17 @@ ${translateOr('delivery_margin', 'Delivery margin')} ${fmtUSD(aDeliveryMargin)} 
         </div>
 
         {/* Out Of Stock */}
-        <div className="card">
+        <div className="card flex flex-col">
           <div className="p-3 sm:p-4 border-b border-gray-100 dark:border-gray-700 flex items-center justify-between">
             <h2 className="font-semibold text-gray-900 dark:text-white">{t('out_of_stock') || 'Out of stock'}</h2>
             {outOfStockCount > 0 && (
               <span className="rounded-full bg-red-100 px-2 py-0.5 text-[10px] font-medium text-red-700 dark:bg-red-900/30 dark:text-red-300">{outOfStockCount}</span>
             )}
           </div>
-          <div className="divide-y divide-gray-100 dark:divide-gray-700">
+          <div className={`divide-y divide-gray-100 dark:divide-gray-700 ${CARD_LIST_BODY}`}>
             {!summary?.out_of_stock?.length
               ? <p className="p-4 text-sm text-gray-400 text-center">{t('in_stock')}</p>
-              : (showAllOutStock ? summary.out_of_stock : summary.out_of_stock.slice(0,5)).map(p => (
+              : summary.out_of_stock.map(p => (
                 <button
                   key={p.id}
                   type="button"
@@ -1952,19 +1995,12 @@ ${translateOr('delivery_margin', 'Delivery margin')} ${fmtUSD(aDeliveryMargin)} 
                 >
                   <div className="min-w-0">
                     <p className="truncate text-sm text-gray-700 dark:text-gray-300">{p.name}</p>
-                    {p.category && <p className="text-xs text-gray-400">{p.category}</p>}
+                    {p.category && <p className="truncate text-xs text-gray-400">{p.category}</p>}
                   </div>
-                  <span className="badge-red">{p.stock_quantity} {p.unit}</span>
+                  <span className="badge-red shrink-0">{p.stock_quantity} {p.unit}</span>
                 </button>
               ))}
           </div>
-          {(summary?.out_of_stock?.length||0) > 5 && !outOfStockPreviewTruncated && (
-            <div className="px-4 py-2 border-t border-gray-100 dark:border-gray-700">
-              <button onClick={() => setShowAllOutStock(v=>!v)} className="w-full text-xs text-blue-600 dark:text-blue-400 hover:underline py-0.5">
-                {showAllOutStock ? t('show_less') : `${t('view_all')} ${summary!.out_of_stock.length} ${t('items')}`}
-              </button>
-            </div>
-          )}
           {outOfStockPreviewTruncated ? (
             <div className="border-t border-gray-100 px-4 py-2 dark:border-gray-700">
               <div className="flex items-center justify-between gap-3 rounded-xl bg-slate-50 px-3 py-2 text-[11px] text-slate-600 dark:bg-slate-800/60 dark:text-slate-300">
@@ -1983,11 +2019,10 @@ ${translateOr('delivery_margin', 'Delivery margin')} ${fmtUSD(aDeliveryMargin)} 
           analyticsPending={analyticsPending}
           analyticsUnavailable={analyticsUnavailable}
           analyticsError={analyticsError}
-          showAll={showAllBranches}
-          setShowAll={setShowAllBranches}
           t={t}
           translateOr={translateOr}
           fmtUSD={fmtUSD}
+          onOpen={openBranchDetail}
         />
 
         {/* Recent imports -- a general list of the last few imported files
@@ -2008,14 +2043,14 @@ ${translateOr('delivery_margin', 'Delivery margin')} ${fmtUSD(aDeliveryMargin)} 
             that fetch ever failed silently -- reported as "the card
             sometimes disappears". Matches the same
             loading/empty/populated three-way the rest of the file uses. */}
-        <div className="card">
+        <div className="card flex flex-col">
           <div className="p-3 sm:p-4 border-b border-gray-100 dark:border-gray-700 flex items-center justify-between">
             <h2 className="font-semibold text-gray-900 dark:text-white flex items-center gap-1.5">
               <FileText className="w-4 h-4 text-slate-400" />
               {translateOr('recent_imports', 'Recent imports')}
             </h2>
           </div>
-          <div className="divide-y divide-gray-100 dark:divide-gray-700">
+          <div className={`divide-y divide-gray-100 dark:divide-gray-700 ${CARD_LIST_BODY}`}>
             {recentImportFilesLoading
               ? <p className="p-4 text-sm text-gray-400 text-center">{translateOr('loading', 'Loading...', 'កំពុងផ្ទុក...')}</p>
               : recentImportFiles.length === 0
@@ -2052,6 +2087,8 @@ ${translateOr('delivery_margin', 'Delivery margin')} ${fmtUSD(aDeliveryMargin)} 
           analyticsUnavailable={analyticsUnavailable}
           analyticsError={analyticsError}
           translateOr={translateOr}
+          fmtUSD={fmtUSD}
+          onOpen={openPaymentDetail}
         />
       </div>
       </section>
@@ -2263,7 +2300,7 @@ ${translateOr('delivery_margin', 'Delivery margin')} ${fmtUSD(aDeliveryMargin)} 
             <div className="flex items-center justify-between border-b border-gray-200 p-4 dark:border-gray-700">
               <div>
                 <h2 className="font-bold text-gray-900 dark:text-white">{kpiDetail.label}</h2>
-                <p className="text-xs text-gray-400 mt-1">{periodShort}</p>
+                <p className="text-xs text-gray-400 mt-1">{kpiDetail.sub ?? periodShort}</p>
               </div>
               <button onClick={() => setKpiDetail(null)} className="text-gray-400 hover:text-gray-600 text-sm w-8 h-8 flex items-center justify-center">{closeLabel}</button>
             </div>
