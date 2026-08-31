@@ -3137,8 +3137,16 @@ Standing rule (also in coordination memory): never point a second wrangler at th
 shared `.wrangler/state` dir — use `--persist-to <own dir>` and shut it down when
 its purpose is served.
 
-**COORDINATION NOTE — CLOSED (session business-os-v1-7b; loop ran Aug 30 ~21:35 →
-Aug 31 ~02:00, signed off after a full hour of clean-tree quiet).** Final state:
+**COORDINATION NOTE — REOPENED, CONTINUOUS MODE (coordinator business-os-v1-7b,
+Aug 31 ~02:10, per user directive "coordinate continuously whenever there are
+sessions").** The coordinator is LIVE again and stays live: long-cadence ticks
+while the tree is quiet, tight cadence while lanes are active. Same playbook as
+the closed run below — claim before code, pathspec-atomic commits with named
+ride-alongs, grep-max+1 Part numbers, unique migration numbers, commit every
+finished slice, message 7b (or post here) for routing/hazards. New sessions:
+c8's read-mostly verification sweep claim (b52870ae) is acknowledged.
+
+*Previous run record (Aug 30 ~21:35 → Aug 31 ~02:00):* Final state:
 every lane committed + logged (through Part 535), migration chain green from zero
 (88 migrations, 8 checks — includes the 0086/0087 collision fix), test:utils chain
 green, no dirty files. Incidents handled this run: 2 migration-number collisions,
