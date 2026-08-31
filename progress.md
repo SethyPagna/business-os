@@ -88,6 +88,18 @@ Two rules learned the hard way, both from real incidents in this file's own hist
 
 ## Current status
 
+**→ DASHBOARD-RESPONSIVE LANE (a2, Aug 31 ~afternoon): CLAIMED.** User asks for two
+mobile-responsiveness fixes on the **Dashboard** (`Dashboard.tsx`): (1) keep the
+**Export** button on the SAME row as the preset time chips on small screens (it
+currently drops onto its own row when the presets wrap); (2) auto-convert the long
+stack of card sections into a **tabbed section switcher on small screens** (chips:
+Overview / Top performers / Inventory & activity — one group shown at a time) so the
+mobile dashboard isn't one long scroll, while lg+ keeps the full grid. Files
+(path-scoped, single file): `frontend/src/components/dashboard/Dashboard.tsx` ONLY.
+NO lang-pack edits — group/chip labels use the file's own `translateOr` inline
+(same pattern as RANGE_PRESETS), so en/km.json are untouched. No backend, no
+migrations. Dashboard.tsx is disjoint from every other live lane.
+
 **→ STOREFRONT-ACCOUNT-UI LANE (this session, Aug 31 ~afternoon): CLAIMED.** User
 correction to the §2 storefront-account work (commit `4c77c42b`): (1) keep the
 membership lookup but **disabled** — guests see "You are currently in GUEST mode.
@@ -115,8 +127,12 @@ Stats expander). Files (path-scoped): `frontend/src/components/products/StockCha
 `frontend/src/components/products/Products.tsx` (stock_changes header-actions only),
 `frontend/src/lang/en.json` + `km.json` (ride-along keys named at commit — NOTE
 both packs are also dirty in the legacy-finance-UI + sales-hub lanes; I add keys
-only, pathspec-atomic). Backend touch (bucket/query) TBD pending a scope decision
-with the user. No migrations.
+only, pathspec-atomic). Backend: user confirmed FULL scope — Adjust menu writes via existing
+`adjustStock`; new endpoints for **Revert** (compensating counter-movement, keeps
+the ledger append-only) + **Edit reason** (UPDATE inventory_movements.reason),
+both permission-gated (`cloudflare/src/routes/products.ts` or `inventory.ts`).
+Also reclassifying In/Out by net sign so the Adjustments bucket can be dropped
+(`cloudflare/src/lib/stockLedgerQuery.ts`). No migrations.
 
 **[DONE — DEPLOYED (fourth of the day), 7a, Aug 31 ~03:57 UTC (user-authorized
 "continue" on the deploy ask; bf's duplicate authorization stood down by
@@ -621,6 +637,14 @@ IDs) or the section linked. Statuses: **[~]** = in progress / partly done,
   archive-folder paths, zero-insensitive phone links, driver only on delivery);
   two 1-row production corrections (4362 customer link, 4361 driver unlink).
   Open for user: ambiguous name-links 4353/4370; 8 optional new contacts.
+  **Follow-through DONE (Part 552, session 1e, needs deploy):** both stored-but-
+  invisible ledgers now have read-only screens — **Supplier AP Invoices** on
+  Contacts → Suppliers (contacts_suppliers gate) and **Deleted sales (old
+  system)** as the third Review & Logs chip (audit_log gate); live-E2E'd on an
+  isolated worker incl. 403/401 gate probes. *Peer note: `test:utils` fails at
+  clean HEAD in performanceLoadingUx.test.ts ("sales active filter count should
+  reuse countActiveFlags") — the pattern left Sales.tsx in `a0b2edbf` (Part 549,
+  sales-hub lane); attributed by git-show, left for that lane to reconcile.*
 
 ### In progress / partly done
 
