@@ -9,6 +9,8 @@
 // pipeline, so the hub adds routing, not new commit paths). The classic
 // per-type screens stay one click away and unchanged.
 import { Suspense, useState } from 'react'
+import Modal from '../../shared/Modal.tsx'
+import InfoHint from '../../shared/InfoHint.tsx'
 import { lazyRetry } from '../../../utils/lazyImport.ts'
 import type { ProductImportTopMode } from './ProductImportModeTabs'
 
@@ -31,18 +33,30 @@ export default function ImportModeWizard({ onClose, onDone, t }: ImportModeWizar
   const [screen, setScreen] = useState<'hub' | 'classic'>('hub')
 
   if (screen === 'hub') {
+    // Shared Modal (portalled, z-[1050]) instead of a hand-rolled z-50
+    // overlay: the old sheet rendered BELOW BackgroundImportTracker's
+    // chip/panel (z-[1000]), so the tracker could bury the very hub that
+    // just queued the jobs. The hub's title/hint live in the Modal header
+    // now (the hub itself renders body content only).
     return (
-      <div className="fixed inset-0 z-50 bg-black/60 flex items-end sm:items-center justify-center p-0 sm:p-4">
-        <div className="bg-white dark:bg-gray-800 rounded-t-2xl sm:rounded-2xl shadow-2xl w-full sm:max-w-2xl max-h-[90vh] overflow-y-auto p-4">
-          <Suspense fallback={null}>
-            <ImportHub
-              t={t}
-              onUseClassic={() => setScreen('classic')}
-              onClose={() => { onDone(); onClose() }}
-            />
-          </Suspense>
-        </div>
-      </div>
+      <Modal
+        title={t('import_hub_title', 'Import files')}
+        headerExtra={(
+          <InfoHint
+            label={t('import_hub_how', 'How importing works')}
+            text={t('import_hub_sub', 'Drop one combined sheet or separate files (catalog, stock-in, sales, contacts) — several at once or over sessions. Each file is recognized by its columns and imports automatically; conflicts pause for review in the import tracker.')}
+          />
+        )}
+        onClose={() => { onDone(); onClose() }}
+      >
+        <Suspense fallback={null}>
+          <ImportHub
+            t={t}
+            onUseClassic={() => setScreen('classic')}
+            onClose={() => { onDone(); onClose() }}
+          />
+        </Suspense>
+      </Modal>
     )
   }
 

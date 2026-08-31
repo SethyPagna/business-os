@@ -53,7 +53,12 @@ test('ImportModeWizard is only a mode owner; it does not render a duplicate setu
   assert.ok(src.includes('StockActionImportModal'), 'wires in the server-backed modal')
   assert.ok(src.includes('BulkImportModal'), 'wires in the real product/image importer')
   assert.ok(!/import\(['"]\.\/AddSaleImportModal['"]\)/.test(src), 'no longer launches the retired client-side AddSaleImportModal')
-  assert.ok(!src.includes('<Modal'), 'wrapper must not create a second modal screen')
+  // The hub screen rides the SHARED Modal (portalled, z-[1050]) purely as
+  // window chrome -- the old hand-rolled z-50 overlay rendered BELOW the
+  // BackgroundImportTracker (z-[1000]) and got buried by it. What stays
+  // banned is duplicating the importers' own setup/upload controls here.
+  assert.ok(src.includes('<Modal'), 'hub chrome must be the shared portalled Modal, not a hand-rolled overlay')
+  assert.ok(!src.includes('fixed inset-0 z-50'), 'no hand-rolled z-50 overlay -- it stacked below the import tracker')
   assert.ok(!src.includes('Upload file &'), 'wrapper must not render a fake upload handoff')
   assert.ok(!src.includes('TemplateUploadInfo'), 'wrapper must not duplicate the real template/information controls')
 })

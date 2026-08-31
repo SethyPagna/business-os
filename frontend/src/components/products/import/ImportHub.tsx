@@ -164,21 +164,11 @@ export default function ImportHub({
     }
   }), [plan])
 
+  // Title + how-it-works InfoHint moved into the shared Modal header the
+  // wizard now wraps this in (ImportModeWizard.tsx) -- this component
+  // renders body content only.
   return (
     <div className="space-y-4">
-      <div className="flex items-center gap-1.5">
-        {/* Short noun title; the routing explanation lives in the InfoHint,
-            not inline — the old sentence-length title wrapped to several
-            lines on phone widths. */}
-        <h3 className="text-base font-semibold text-gray-900 dark:text-gray-100">
-          {T('import_hub_title', 'Import files')}
-        </h3>
-        <InfoHint
-          label={T('import_hub_how', 'How importing works')}
-          text={T('import_hub_sub', 'Drop one combined sheet or separate files (catalog, stock-in, sales, contacts) — several at once or over sessions. Each file is recognized by its columns and imports automatically; conflicts pause for review in the import tracker.')}
-        />
-      </div>
-
       <button
         type="button"
         onClick={() => inputRef.current?.click()}
