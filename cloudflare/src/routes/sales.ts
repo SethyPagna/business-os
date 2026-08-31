@@ -3,7 +3,15 @@ import { getDb } from '../lib/db'
 import { chunkForBinding, selectInChunks } from '../lib/sqlBinding'
 import { requireAuth, type SessionUser } from '../lib/auth'
 import { audit } from '../lib/audit'
-import { hasPermission, hasAnyPermission } from '../lib/permissions'
+import { hasPermission, hasAnyPermission, getPermissionTier } from '../lib/permissions'
+
+// Sales is a VIEW_TIER section (Part 557 slice 2): a 'view' grant can READ
+// every sales list/stat/report but perform no writes. Reads use this
+// (tier != none = view OR full); writes keep the strict hasPermission('sales')
+// (=== true), which a 'view' value already fails, so no write route changes.
+function canReadSales(user: SessionUser): boolean {
+  return getPermissionTier(user, 'sales') !== 'none'
+}
 import { assertUpdatedAtMatch, getExpectedUpdatedAt, writeConflictResponse, WriteConflictError } from '../lib/conflictControl'
 import { bumpVersion } from '../lib/cache'
 import { getCustomerSalesTotals, getDeliveryContactTotals, getPaymentMethodBreakdown, getSalesDayReport, getSalesPeriodSeries, getSalesTotals } from '../lib/salesAnalytics'
@@ -1477,7 +1485,8 @@ app.get('/', async (c) => {
   // Listing/browsing sale history is the Sales page's own core feature
   // (gated on 'sales' in the frontend) -- a POS-only cashier shouldn't be
   // able to pull the full transaction history via direct API access either.
-  if (!hasPermission(user, 'sales')) {
+  // canReadSales admits a 'view' grant (read-only); writes below stay strict.
+  if (!canReadSales(user)) {
     return c.json({ error: 'You do not have permission to perform this action' }, 403)
   }
   const db = getDb(c.env)
@@ -1630,7 +1639,7 @@ app.get('/stats', async (c) => {
   const query = c.req.query()
   const user = c.get('user')
   // Matches GET / above -- same 'sales'-gated data, just aggregated.
-  if (!hasPermission(user, 'sales')) {
+  if (!canReadSales(user)) {
     return c.json({ error: 'You do not have permission to perform this action' }, 403)
   }
   const db = getDb(c.env)
@@ -1740,7 +1749,7 @@ app.get('/stats', async (c) => {
 // was this period", the list header keeps answering "what does this filter
 // match".
 app.get('/stats-strip', async (c) => {
-  if (!hasPermission(c.get('user'), 'sales')) {
+  if (!canReadSales(c.get('user'))) {
     return c.json({ error: 'You do not have permission to perform this action' }, 403)
   }
   const query = c.req.query()
@@ -1792,7 +1801,7 @@ app.get('/stats-strip', async (c) => {
 // in the range (the report section's list), straight from the shared
 // salesAnalytics kernel so every figure agrees with the Dashboard and /stats.
 app.get('/daily-report', async (c) => {
-  if (!hasPermission(c.get('user'), 'sales')) {
+  if (!canReadSales(c.get('user'))) {
     return c.json({ error: 'You do not have permission to perform this action' }, 403)
   }
   const query = c.req.query()
@@ -1820,7 +1829,7 @@ app.get('/daily-report', async (c) => {
 // whole route sits behind the sales permission, and the portal/receipt
 // surfaces never call it (C2's redaction scope).
 app.get('/day-report', async (c) => {
-  if (!hasPermission(c.get('user'), 'sales')) {
+  if (!canReadSales(c.get('user'))) {
     return c.json({ error: 'You do not have permission to perform this action' }, 403)
   }
   const query = c.req.query()
@@ -1845,7 +1854,7 @@ app.get('/day-report', async (c) => {
 // belongs to contacts-granted staff, and the figures are the same ones the
 // sales surfaces already show them per sale.
 app.get('/delivery-contact-report', async (c) => {
-  if (!hasAnyPermission(c.get('user'), ['sales', 'contacts'])) {
+  if (!canReadSales(c.get('user')) && !hasPermission(c.get('user'), 'contacts')) {
     return c.json({ error: 'You do not have permission to perform this action' }, 403)
   }
   const query = c.req.query()
@@ -1870,7 +1879,7 @@ app.get('/delivery-contact-report', async (c) => {
 // customer leg of the per-contact drills. Same sales-OR-contacts gate as
 // the courier report (the Customers tab lives behind 'contacts').
 app.get('/customer-report', async (c) => {
-  if (!hasAnyPermission(c.get('user'), ['sales', 'contacts'])) {
+  if (!canReadSales(c.get('user')) && !hasPermission(c.get('user'), 'contacts')) {
     return c.json({ error: 'You do not have permission to perform this action' }, 403)
   }
   const query = c.req.query()
@@ -1907,7 +1916,7 @@ app.get('/customer-report', async (c) => {
 // a real implementation -- so this is a fresh build against ExportModal's
 // actual field usage, not a port.
 app.get('/export', async (c) => {
-  if (!hasPermission(c.get('user'), 'sales')) {
+  if (!canReadSales(c.get('user'))) {
     return c.json({ error: 'You do not have permission to perform this action' }, 403)
   }
   const db = getDb(c.env)

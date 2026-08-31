@@ -17,7 +17,7 @@ const check = (label, fn) => { fn(); passed++; console.log(`PASS ${label}`) }
 
 // --- replicate the model (kept identical to lib/permissions.ts) -----------
 const REVIEW_TIER_KEYS = new Set(['products', 'inventory', 'branches', 'returns', 'fees', 'contacts'])
-const VIEW_TIER_KEYS = new Set(['settings'])
+const VIEW_TIER_KEYS = new Set(['settings', 'sales'])
 const merged = (u) => ({ ...JSON.parse(u.role_permissions || '{}'), ...JSON.parse(u.permissions || '{}') })
 const isAdmin = (u) => {
   const un = String(u.username || '').toLowerCase(); const rc = String(u.role_code || '').toLowerCase()
@@ -54,16 +54,47 @@ check("None reads as tier 'none'", () => {
   assert.equal(getPermissionTier(noneUser, 'settings'), 'none')
 })
 check("'view' on a NON-view key is ignored -> 'none' (no accidental grant)", () => {
-  const u = { username: 'x', role_permissions: JSON.stringify({ sales: 'view' }), permissions: '{}' }
-  assert.equal(getPermissionTier(u, 'sales'), 'none')
+  // 'dashboard' is coarse Full/None only -- never a view-tier key.
+  const u = { username: 'x', role_permissions: JSON.stringify({ dashboard: 'view' }), permissions: '{}' }
+  assert.equal(getPermissionTier(u, 'dashboard'), 'none')
+})
+
+// --- Sales view-tier (Part 557 slice 2): reads visible, writes refused -----
+const salesViewUser = { username: 'sv', role_permissions: JSON.stringify({ sales: 'view' }), permissions: '{}' }
+const salesFullUser = { username: 'sf', role_permissions: JSON.stringify({ sales: true }), permissions: '{}' }
+check("Sales 'view' -> tier 'view' (list/stats/reports/export readable)", () => {
+  assert.equal(getPermissionTier(salesViewUser, 'sales'), 'view')
+})
+check("hasPermission('sales') FALSE for a Sales view user (status/customer/import writes stay blocked)", () => {
+  assert.equal(hasPermission(salesViewUser, 'sales'), false)
+})
+check("Full Sales grant -> tier 'full' AND hasPermission true (writes allowed)", () => {
+  assert.equal(getPermissionTier(salesFullUser, 'sales'), 'full')
+  assert.equal(hasPermission(salesFullUser, 'sales'), true)
+})
+check("canReadSales() shape: tier !== 'none' for view AND full, but 'none' for no grant", () => {
+  // Mirrors routes/sales.ts canReadSales(): getPermissionTier(user,'sales') !== 'none'.
+  const canRead = (u) => getPermissionTier(u, 'sales') !== 'none'
+  assert.equal(canRead(salesViewUser), true)
+  assert.equal(canRead(salesFullUser), true)
+  assert.equal(canRead(noneUser), false)
 })
 
 // --- source guards: sets in sync, and the value type includes 'view' ------
-check("lib/permissions.ts declares VIEW_TIER_KEYS + handles 'view'", () => {
+check("lib/permissions.ts declares VIEW_TIER_KEYS (settings + sales) + handles 'view'", () => {
   const src = fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'permissions.ts'), 'utf8')
-  assert.match(src, /export const VIEW_TIER_KEYS = new Set\(\[[\s\S]*'settings'/)
+  const m = src.match(/export const VIEW_TIER_KEYS = new Set(?:<string>)?\(\[([^\]]*)\]\)/)
+  assert.ok(m, 'backend VIEW_TIER_KEYS set literal not found')
+  const beKeys = [...m[1].matchAll(/'([a-z_]+)'/g)].map((x) => x[1]).sort()
+  assert.deepEqual(beKeys, [...VIEW_TIER_KEYS].sort(), 'backend VIEW_TIER_KEYS drifted from this test')
   assert.match(src, /raw === 'view' && VIEW_TIER_KEYS\.has\(normalized\)\) return 'view'/)
   assert.match(src, /PermissionValue = boolean \| 'review' \| 'view'/)
+})
+check("routes/sales.ts read gates use canReadSales() (view-aware) while writes stay strict", () => {
+  const src = fs.readFileSync(path.join(__dirname, '..', 'src', 'routes', 'sales.ts'), 'utf8')
+  assert.match(src, /function canReadSales\([\s\S]*getPermissionTier\(user, 'sales'\) !== 'none'/)
+  // The two write gates must remain strict hasPermission('sales').
+  assert.match(src, /if \(!hasPermission\(user, 'sales'\)\)/)
 })
 check('frontend utils/permissions.ts VIEW_TIER_KEYS matches the backend', () => {
   const feSrc = fs.readFileSync(path.join(__dirname, '..', '..', 'frontend', 'src', 'utils', 'permissions.ts'), 'utf8')

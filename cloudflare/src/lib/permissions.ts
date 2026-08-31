@@ -144,6 +144,7 @@ export const REVIEW_TIER_KEYS = new Set([
 // own VIEW_TIER_KEYS. A key belongs to at most ONE of REVIEW_/VIEW_TIER_KEYS.
 export const VIEW_TIER_KEYS = new Set([
   'settings',
+  'sales',
 ])
 
 export type PermissionTier = 'full' | 'review' | 'view' | 'none'

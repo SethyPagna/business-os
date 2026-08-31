@@ -329,9 +329,24 @@ export const PERMISSION_SECTIONS: PermissionSection[] = [
     key: 'sales',
     tKey: 'perm_section_sales',
     label: 'Sales',
-    description: 'Full Access or None only -- no partial tier.',
+    description: 'None / View only / Full. View only shows every sale, stat, report and export but blocks writes (cancel, change status, edit customer, import).',
     permissions: [
-      { key: 'sales', tKey: 'perm_sales', label: 'Sales', sensitivity: 'high' },
+      // View-tier section (Part 557 slice 2): all sales READS
+      // (list/stats/reports/export) admit a 'view' grant; the writes
+      // (routes/sales.ts PATCH /:id/status, /:id/customer, and the import
+      // job) stay strict hasPermission('sales'), which a 'view' value fails.
+      // Creating a sale is separate -- POS checkout carries its own 'pos'
+      // grant, so a view-sales cashier still can't ring one up here.
+      {
+        key: 'sales',
+        tKey: 'perm_sales',
+        label: 'Sales',
+        sensitivity: 'high',
+        tier: true,
+        middleTier: 'view',
+        reviewTKey: 'perm_sales_view_desc',
+        reviewDescription: 'View only: see every sale, stat, report and export, but Cancel, change status, edit customer, and Import are hidden and refused. Full Access is required to change or import sales.',
+      },
     ],
   },
   {

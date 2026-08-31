@@ -124,6 +124,7 @@ interface AppContextValue {
   fmtKHR: MoneyFormatter
   notify: NotifyFn
   user?: AppUser | null
+  getPermissionTier: (key: string) => string
 }
 
 interface SyncContextValue {
@@ -229,7 +230,11 @@ function buildSaleExportRows(rows: SaleRecord[] = []): Array<Record<string, unkn
 }
 
 export default function Sales() {
-  const { t, settings, fmtUSD, fmtKHR, notify, user } = useApp()
+  const { t, settings, fmtUSD, fmtKHR, notify, user, getPermissionTier } = useApp()
+  // Part 557 slice 2: 'sales' is a view-tier section. A View-only grant reads
+  // the list/stats/reports/export but every write (cancel, change status, edit
+  // customer, import) is hidden here and refused by the backend. Full only.
+  const canEditSales = getPermissionTier('sales') === 'full'
   const { syncChannel } = useSync()
   const isActive = useIsPageActive('sales')
   const [sales, setSales] = useState<SaleRecord[]>([])
@@ -593,6 +598,14 @@ export default function Sales() {
   // `extra` also carries the Y10 payment payload when SaleDetailModal
   // completes an awaiting-payment sale (payment_method/amount_paid_*).
   const handleStatusChange = async (saleId: number | string, newStatus: string, notes = '', recordHistory = true, extra: SaleCancelPayload | Record<string, unknown> | null = null): Promise<boolean> => {
+    // View-only (Part 557): status changes are Full-Access only. The backend
+    // already refuses these (PATCH /:id/status checks hasPermission strictly),
+    // so this is the matching client guard -- keeps a view user from firing a
+    // request that can only 403.
+    if (!canEditSales) {
+      notify?.(translateOr('perm_view_only_action', 'View only: you do not have permission to change sales.'), 'error')
+      return false
+    }
     const numericId = Number(saleId)
     if (!Number.isFinite(numericId)) return false
     const previousSale = sales.find((entry) => Number(entry?.id || 0) === numericId)
@@ -653,6 +666,13 @@ export default function Sales() {
   }
 
   const handleAttachMembership = async (saleId: number | string, membershipNumber: string): Promise<boolean> => {
+    // View-only (Part 557): linking a membership edits the sale's customer,
+    // which the backend gates behind Full sales access (PATCH /:id/customer);
+    // refuse client-side too.
+    if (!canEditSales) {
+      notify?.(translateOr('perm_view_only_action', 'View only: you do not have permission to change sales.'), 'error')
+      return false
+    }
     const numericId = Number(saleId)
     if (!Number.isFinite(numericId)) return false
     const actionKey = String(numericId)
@@ -1041,6 +1061,12 @@ export default function Sales() {
   }, [loadSales, runSaleStatusMutation])
 
   const handleBulkStatusUpdate = async (nextStatus: string, extra: SaleCancelPayload | null = null) => {
+    // View-only (Part 557): bulk status writes are Full-Access only, mirroring
+    // handleStatusChange and the backend's strict PATCH gate.
+    if (!canEditSales) {
+      notify?.(translateOr('perm_view_only_action', 'View only: you do not have permission to change sales.'), 'error')
+      return
+    }
     if (!selectedSales.length || !beginSingleAction(bulkStatusInFlightRef, { blocked: !!bulkStatusSaving })) return
     // Bulk-cancel needs the shared reason first -- one dialog for the
     // whole batch (lost fees stay per-sale and are not offered here).
@@ -1234,8 +1260,14 @@ export default function Sales() {
                 </button>
               )}
               items={([
-                { label: translateOr('import', 'Import'), onClick: () => setShowImport(true), color: 'blue', icon: <Download className="h-4 w-4 shrink-0" /> },
-                'divider' as const,
+                // Import writes sales, so it is Full-Access only (Part 557);
+                // Export stays a read and is always offered.
+                ...(canEditSales
+                  ? [
+                      { label: translateOr('import', 'Import'), onClick: () => setShowImport(true), color: 'blue', icon: <Download className="h-4 w-4 shrink-0" /> },
+                      'divider' as const,
+                    ]
+                  : []),
                 ...(salesExportItems || [])
                   .filter((item): item is PortalMenuItem => Boolean(item))
                   .map((item) => (item === 'divider' ? item : { ...item, icon: item.icon ?? <Upload className="h-4 w-4 shrink-0" /> })),
@@ -1310,9 +1342,15 @@ export default function Sales() {
           <div className="bulk-toolbar flex flex-wrap items-center gap-1.5 rounded-xl border px-2.5 py-2 text-sm shadow-sm">
             <span className="rounded-full bg-blue-100 px-2.5 py-1 text-xs font-semibold text-blue-700 dark:bg-blue-900/40 dark:text-blue-200">{selectedSales.length}</span>
             <button type="button" className="btn-secondary px-2.5 py-1 text-xs" onClick={handleExportSelected}>{translateOr('export', 'Export')}</button>
-            <button type="button" className="btn-secondary px-2.5 py-1 text-xs" onClick={() => handleBulkStatusUpdate('completed')} disabled={!!bulkStatusSaving}>{bulkStatusSaving === 'completed' ? translateOr('saving', 'Saving...') : translateOr('done', 'Done')}</button>
-            <button type="button" className="btn-secondary px-2.5 py-1 text-xs" onClick={() => handleBulkStatusUpdate('awaiting_delivery')} disabled={!!bulkStatusSaving}>{bulkStatusSaving === 'awaiting_delivery' ? translateOr('saving', 'Saving...') : translateOr('pos_delivery', 'Delivery')}</button>
-            <button type="button" className="btn-secondary px-2.5 py-1 text-xs" onClick={() => handleBulkStatusUpdate('cancelled')} disabled={!!bulkStatusSaving}>{bulkStatusSaving === 'cancelled' ? translateOr('saving', 'Saving...') : translateOr('cancel', 'Cancel')}</button>
+            {/* Bulk status writes are Full-Access only (Part 557): View-only
+                keeps selection for Export, but the status buttons are hidden. */}
+            {canEditSales ? (
+              <>
+                <button type="button" className="btn-secondary px-2.5 py-1 text-xs" onClick={() => handleBulkStatusUpdate('completed')} disabled={!!bulkStatusSaving}>{bulkStatusSaving === 'completed' ? translateOr('saving', 'Saving...') : translateOr('done', 'Done')}</button>
+                <button type="button" className="btn-secondary px-2.5 py-1 text-xs" onClick={() => handleBulkStatusUpdate('awaiting_delivery')} disabled={!!bulkStatusSaving}>{bulkStatusSaving === 'awaiting_delivery' ? translateOr('saving', 'Saving...') : translateOr('pos_delivery', 'Delivery')}</button>
+                <button type="button" className="btn-secondary px-2.5 py-1 text-xs" onClick={() => handleBulkStatusUpdate('cancelled')} disabled={!!bulkStatusSaving}>{bulkStatusSaving === 'cancelled' ? translateOr('saving', 'Saving...') : translateOr('cancel', 'Cancel')}</button>
+              </>
+            ) : null}
             <button type="button" className="ml-auto rounded-lg px-2 py-1 text-xs font-medium text-gray-500 hover:bg-white/70 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-slate-700/60 dark:hover:text-gray-200" onClick={() => setSelectedIds(new Set<number>())}>
               {translateOr('clear', 'Clear')}
             </button>
@@ -1369,8 +1407,10 @@ export default function Sales() {
             sale={detailSale}
             settings={settings}
             onClose={() => setDetailSale(null)}
-            onStatusChange={handleStatusChange}
-            onAttachMembership={handleAttachMembership}
+            // View-only (Part 557): omit the write callbacks so the modal hides
+            // its status buttons and membership form entirely.
+            onStatusChange={canEditSales ? handleStatusChange : undefined}
+            onAttachMembership={canEditSales ? handleAttachMembership : undefined}
             onPrint={(sale) => setSelectedSale(sale as SaleRecord)}
             t={t}
             fmtUSD={fmtUSD}

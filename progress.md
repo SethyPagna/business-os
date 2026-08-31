@@ -88,21 +88,40 @@ Two rules learned the hard way, both from real incidents in this file's own hist
 
 ## Current status
 
-**→ STATS-DATE-ROW LANE (session 50, Aug 31, Part 559): CLAIMED.** User: "fish out
+**→ POS-CARD-PRICE LANE (Aug 31, Part 562 grep-max+1; number races expected): CLAIMED / in progress.**
+User (POS product grid card + detail sheet): the grouped card shows the option count twice —
+a purple `Groups: N` chip AND a `N options · N total in stock` line — "same thing shown
+twice; keep the bottom, rename it `Options: N | Total Qty: n`". Remove the `$min – $max`
+price range, "only keep the highest price for selling price". Show "selling and VIP same
+row bottom … VIP just say VIP; when clicked show the VIP options, click to continue" (grid
+shows the selling price + a plain `VIP` tag on one row; the amount still reveals in the
+detail sheet). Relabel: drop the word "Price" → `Selling` (detail sheet row + Selling
+button). Wholesale (បោះដុំ) price is DEFERRED per user (chose "POS display first, wholesale
+later") — it needs a new persisted field/DB migration, tracked as a separate follow-up.
+Files (path-scoped): frontend/src/components/pos/POS.tsx, frontend/src/components/pos/ProductDetailSheet.tsx.
+progress.md NOT committed by this lane (shared checkout — claim visible on disk).
+
+**→ STATS-DATE-ROW LANE (session 50, Aug 31, Part 560): DONE (needs deploy — rides
+the next one). Commits `3772f08f` (Sales/Returns/Fees + new StatsRangeRow + test),
+`f87a8422` (Inventory), log `886b2239`.** User: "fish out
 the start date and end date from the stats button ... right above the search bar row
 ... applies to all section, mini sections, and pages ... stats can be placed at the
 top ... the start and end date will also apply to it." So the Start→End range picker
 (+ presets) is lifted OUT of the folded StatsStrip and becomes its own always-visible
-row directly above the search bar; StatsStrip keeps the chip/cards/summary/actions and
-no longer renders the picker. New shared `shared/StatsRangeRow.tsx` (the picker +
-Today/7d/Month/Year presets, reused everywhere). Files (path-scoped): frontend
-shared/{StatsStrip.tsx,StatsRangeRow.tsx}, sales/Sales.tsx, returns/Returns.tsx,
-fees/FeesPage.tsx, inventory/Inventory.tsx (its stats live on their own section chip,
-so the row sits above the strip there), tests/statsStrip.test.ts (rides the
-report-currency lane's orphaned working-tree edit — noted). NO lang/perm changes
-(preset keys already exist). NOT touching Dashboard (its range is already a separate
-card + peer rewrite in flight) or DateTimeRangePicker (peer rewrite in flight — used
-as-is).
+row directly above the search bar; StatsStrip is left backward-compatible (its inner
+date row only renders when a caller still passes range/onRangeChange), so pages
+migrate independently across sessions. New shared `shared/StatsRangeRow.tsx` (the
+picker + Today/7d/Month/Year presets, reused everywhere). Migrated: Sales, Returns,
+Fees (row above search) + Inventory (its stats live on their own section chip, so the
+row leads the stats section directly above the strip — done AFTER the Part-559
+movements lane committed Inventory.tsx clean). Dashboard already keeps its range as a
+separate card (passes no range) so it needed nothing. Files (path-scoped): frontend
+shared/StatsRangeRow.tsx, sales/Sales.tsx, returns/Returns.tsx, fees/FeesPage.tsx,
+inventory/Inventory.tsx, tests/statsStrip.test.ts (rode the report-currency lane's
+orphaned working-tree edit into `3772f08f` — noted). NO lang/perm changes (preset
+keys already exist). StatsStrip.tsx + DateTimeRangePicker.tsx untouched. Follow-up:
+once every caller drops range/onRangeChange, delete StatsStrip's now-dormant inner
+date row.
 
 **[DONE (slice 1 of N) + VERIFIED LIVE — permissions-granularity session, Aug 31
 (Part 557, commit `7fa62811`): read-only `view` tier + Settings wired.** First a
@@ -124,11 +143,43 @@ the POST 403s. Editor renders a teal None/View only/Full picker (middleTier:'vie
 model + front/back set sync; permissionEditor test now checks REVIEW_ vs VIEW_TIER
 coverage; full frontend suite green for these files (the 2 tsc errors in the tree
 are a peer's in-flight StatsStrip API change, not this slice).
-**STILL OPEN (next slices, same "highest-risk first" plan):** wire **Sales** and
+**STILL OPEN (next slices, same "highest-risk first" plan):** wire
 **Users** to view-tier (Users needs care — its writes currently gate on
 `isAdminControlUser`, a privilege-escalation boundary that view-only can extend
 safely but Full must not loosen without the anti-escalation guards). POS is likely
 not meaningful as view-only (it's a checkout surface).]**
+
+**[DONE (slice 2 of N) + VERIFIED LIVE — permissions-granularity session, Aug 31
+(Part 557 slice 2): read-only `view` tier extended to Sales.** `'sales'` added to
+VIEW_TIER_KEYS (both `cloudflare/src/lib/permissions.ts` and
+`frontend/src/utils/permissions.ts`). Backend: new `canReadSales(user)` =
+`getPermissionTier(user,'sales') !== 'none'`; all 8 sales READ routes
+(`GET /`, `/stats`, `/stats-strip`, `/daily-report`, `/day-report`, `/export`, and
+the two dual `sales`-OR-`contacts` reports `/delivery-contact-report` +
+`/customer-report`) now admit a `view` grant, while the 3 writes stay strict —
+`POST /` create keeps `hasAnyPermission(['pos','sales'])`, `PATCH /:id/status` and
+`PATCH /:id/customer` keep `hasPermission(user,'sales')` (=== true), which a `view`
+value fails. Static-audited all 11 route decls: every one gated, no read left
+open, no write loosened. Frontend `Sales.tsx`: `canEditSales =
+getPermissionTier('sales')==='full'` guards `handleStatusChange`,
+`handleBulkStatusUpdate`, `handleAttachMembership` (all notify+return early), hides
+the bulk Done/Delivery/Cancel buttons (Export+Clear stay), hides Import in the
+Manage menu (Export stays), and passes `onStatusChange`/`onAttachMembership` to
+`SaleDetailModal` only when Full (the modal already null-guards them, so the status
+controls + membership form vanish). Editor row marked `tier:true middleTier:'view'`
+with `perm_sales_view_desc`; `perm_sales_view_desc` + `perm_view_only_action` added
+to BOTH packs (en.json committed by a peer already carrying both; km.json in this
+commit). **Verified LIVE vs the real worker (isolated `wrangler dev` on :8799 over a
+private D1 copy, three minted sessions):** sales='view' user → `GET /api/sales` 200
+returning real sale rows, `/stats`+`/stats-strip`+`/daily-report`+`/export`+
+`/delivery-contact-report` 200, `PATCH /:id/status` 403, `PATCH /:id/customer` 403,
+and sale 13 stayed `completed` (blocked writes mutated nothing); no-grant user →
+403 on every sales endpoint; full user (sales:true) → reads 200 and `PATCH status`
+400-not-403 (passed the gate); no cookie → 401. `test-view-tier-pure` grown to 12
+checks (Sales tier + `canReadSales` shape + a routes/sales.ts source-guard);
+frontend+cloudflare tsc green; permissions/permissionActions/permissionEditor/
+langKeyIntegrity + `verify:i18n` (4254 keys both packs) all green.
+**STILL OPEN:** Users view-tier (the delicate `isAdminControlUser` slice).]**
 
 **→ FILTER-CHIPS-LANE (this session, Aug 31): CLAIMED.** User: the sales filter
 menu (and every other) renders the CHOSEN filters as removable chips OUTSIDE the
@@ -143,8 +194,45 @@ and `products/{CreatedDateFilterOptions,AutoMergedFilterOptions}`. Files
 (path-scoped): frontend shared/FilterMenu.tsx + those 6 producers +
 products/helpers/productMenuHelpers.ts (comment only). No lang/perm changes.
 
+**→ ADD-STOCK-MERGE LANE (this session, Aug 31 ~evening, third batch): DONE —
+commit `2b49ba47` (message says Part 560; log entry is Part 561 — number
+race with the stats-date-row lane). fe tsc clean right after the edits (a
+later rerun fails only in the filter/sales lane's mid-save Sales.tsx);
+check:source + all named suites green; dashboardDataReliability re-pinned to
+the new hub→Products drill chain. Needs deploy (rides the next one).
+**OPEN FOLLOW-UP filed:** excise Inventory.tsx's now-dormant products-slice
+machinery (no entry point remains: hub chip removed, dashboard focus
+redirected to the Products page, /inventory remapped to Stats & Branches) —
+roughly half of Inventory.tsx incl. its InventoryProductsSurface render,
+bulk toolbar, selection/batch session, and the InventoryStockModals host;
+session-sized surgery, do NOT attempt as a ride-along.** User clarification on the Part-559 Add menu: "Stock one by one" and
+"Fast stock-in" merge into ONE **Add Stock** entry (fast stock-in already
+covers one-by-one; menu = Add Stock + Add New Product); the adjust design
+stays the complete Branches-page one (StockAdjustModal renders
+InventoryStockModals verbatim — confirmed, no change needed); and the
+Branches hub's **Products section chip is REMOVED as redundant** with the
+Products page — the hub forwards the Dashboard stock-card drill (the
+`bos:dashboard:inventory-focus` products payload) to the Products page via a
+new `bos:dashboard:products-focus` key (stockFilter carried over;
+Dashboard.tsx NOT touched — it's dirty in a peer lane), old `/inventory` URLs
+land on Stats & Branches, and Inventory.tsx's now-dead focus-consumption
+effect is removed. Deep excision of Inventory.tsx's dormant products-slice
+machinery is NOT this batch (filed as follow-up — it's ~half the file and
+peers are active). Files (path-scoped):
+`frontend/src/components/branches/BranchesHubPage.tsx`,
+`frontend/src/components/inventory/Inventory.tsx`,
+`frontend/src/components/products/{Products}.tsx`,
+`frontend/src/components/products/surfaces/HeaderActions.tsx`,
+`frontend/src/lang/{en,km}.json` (add add_stock_menu_hint; remove this
+session's now-unused stock_one_by_one*/fast_stockin_hint keys).
+
 **→ MOVEMENTS-AND-ADD-MENU LANE (this session, Aug 31 ~evening, second batch):
-CLAIMED.** User batch: (1) Branches-hub Movements section rework
+DONE — commits `677716ca` (movements rework) + `c94771b9` (Add menu) + log
+entry Part 559; lang keys swept into the permissions lane's `7fa62811` by the
+shared-tree race (verified in HEAD). fe tsc clean, check:source 427 files,
+all named suites green individually; performanceLoadingUx still fails on the
+filter/sales lane's dirty Sales.tsx (theirs, at HEAD it passes that
+expectation). Needs deploy (rides the next one).** User batch: (1) Branches-hub Movements section rework
 (`InventoryMovementsSurface.tsx` + Inventory.tsx movement state): drop the
 "Custom range" toggle + "All time" year/month period options (the standard
 Start→End DateTimeRangePicker becomes the always-visible date control),
@@ -827,6 +915,15 @@ e12dc2c7 says "Part 552" but 1e LOGGED 552 one minute earlier (the ledger
 screens). Your log entry = grep-max+1 at write time (553+ now) with the mismatch
 noted — and please STOP pre-baking Part numbers into commit messages (this is the
 second collision: a0b2edbf said 549, also taken).
+
+**🔴 PERMISSIONS/I18N SESSION — YOUR "PART 557" IS WRONG AND COLLIDES (coordinator
+7b, ~14:40, third protocol miss from this lane):** the stock-changes-UI lane LOGGED
+`## Part 557` in docs/history/session-log.md before your 653d36ea board block used
+the same number. Your view-tier record must renumber to grep-max+1 (561 as of now)
+in your board block AND get a real session-log entry — same for your still-missing
+545/546 entries. Every one of your docs commits (5493ca42, 45ce3b4f-adjacent
+pattern, 653d36ea) has touched only this board while labeled `docs(log)`. Read the
+protocol item below; the log file is the numbering authority.
 
 **📌 SESSION-LOG PROTOCOL SLIPPING — Part numbers with NO log entry (coordinator
 7b, updated ~14:10, measured with `git log -S`): 545 (i18n), 546 (permissions),
