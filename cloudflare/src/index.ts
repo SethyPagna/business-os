@@ -27,6 +27,7 @@ import batchesRoute from './routes/batches'
 import feesRoute from './routes/fees'
 import reviewQueueRoute from './routes/reviewQueue'
 import { createSyncRoute } from './routes/sync'
+import { getSessionUser } from './lib/auth'
 import { ensureCoreDataInvariantsOnce } from './lib/coreDataInvariants'
 import { getMaintenance, isMaintenanceGatedRequest } from './lib/maintenance'
 import { reportError } from './lib/errorReporting'
@@ -244,9 +245,27 @@ app.get('/health', (c) => c.json({ status: 'ok', version: 'cloudflare-portal-boo
 // the WebSocket entirely inside the isolate (accept/ping-pong only, no
 // server-initiated push); routes that write data now call broadcast() from
 // durable-objects/broadcastHub.ts to push a live update to every open tab.
-app.get('/ws', (c) => {
+app.get('/ws', async (c) => {
   if (c.req.header('Upgrade') !== 'websocket') {
     return c.text('Expected WebSocket upgrade', 426)
+  }
+  // Session-gate the live event bus. Without this, ANY anonymous client could
+  // upgrade and then receive every `sync:update` broadcast frame -- a
+  // mutation-metadata side-channel (entity ids, changed-setting key names,
+  // brand renames, deleted-row ids across every channel). The browser client
+  // only ever opens this with a staff session and already treats close code
+  // 4001 as "invalid_session, stop reconnecting" (frontend/src/api/websocket.ts);
+  // that gate was intended but never ported to the Worker. Refuse an
+  // unauthenticated upgrade by completing the handshake and immediately closing
+  // 4001, so the client surfaces "sign in again" instead of reconnect-storming
+  // on a generic 1006 failure. The public storefront never opens /ws.
+  const user = await getSessionUser(c)
+  if (!user) {
+    const pair = new WebSocketPair()
+    const server = pair[1]
+    server.accept()
+    server.close(4001, 'invalid_session')
+    return new Response(null, { status: 101, webSocket: pair[0] })
   }
   const id = c.env.BROADCAST_HUB.idFromName('global')
   const stub = c.env.BROADCAST_HUB.get(id)

@@ -63,4 +63,17 @@ const read = (...p) => fs.readFileSync(path.join(__dirname, '..', ...p), 'utf8')
   console.log('PASS H2 routes/sync.ts chunk upload enforces the same library gate as files.ts /upload')
 }
 
+// ---- M1: /ws must be session-gated, closing 4001 on unauth ----
+{
+  const index = read('src', 'index.ts')
+  assert.match(index, /import \{ getSessionUser \} from '\.\/lib\/auth'/, 'M1: index.ts must import getSessionUser')
+  // The handler must be async and resolve the staff session.
+  assert.match(index, /app\.get\('\/ws', async \(c\) =>[\s\S]{0,900}?getSessionUser\(c\)/, 'M1: /ws must resolve the session via getSessionUser')
+  // No session -> close 4001 (the code the client special-cases as invalid_session).
+  assert.match(index, /app\.get\('\/ws', async \(c\) =>[\s\S]{0,1100}?if \(!user\)[\s\S]{0,260}?close\(4001/, 'M1: /ws must close 4001 when there is no session')
+  // The BroadcastHub proxy must only be reached AFTER the session check.
+  assert.match(index, /getSessionUser\(c\)[\s\S]{0,400}?BROADCAST_HUB\.idFromName\('global'\)/, 'M1: the BroadcastHub proxy must come AFTER the session check, not before')
+  console.log('PASS M1 index.ts /ws is session-gated and closes 4001 for unauthenticated clients')
+}
+
 console.log('\nAll security-batch regression checks passed.')
