@@ -129,7 +129,17 @@ the Sales-page `/stats` header and the Reports analytics kernel to **ONE canonic
   DECONFLICT: date lane may commit business-day FIRST (built+green), then revenue lands as the next commit
   on clean files (same owner, or handed off) — both in HEAD before 7b certifies. Avoids concurrent edits.
 
-**→ CASHIER-IDENTITY RECONCILIATION lane (Sep 1, this session — CLAIMED, in progress).**
+**✅ CASHIER-IDENTITY RECONCILIATION lane (Sep 1, this session — DONE, committed `1378e07a` + `69673fbc`, NOT deployed / Stage-1).**
+Delivered: importEngine cashier map keys on username+name over ALL users (incl. inactive) with
+alias fallback; `userIdentity.ts` `cascadeUserRename` rewrites 14 id-linked user-name snapshots
+(excludes `audit_logs`), wired into both PUT user routes; POS sends username+cashier_id; migration
+`0098_user_aliases` (id-keyed, env-safe seed); migration `0099_legacy_cashier_identity_backfill`
+(adds `legacy_deleted_sale_items.cashier_id`, backfills 2,234 deleted-items + 40 Aug-30 "Aza" sales
+→ Za/id3, idempotent, cohort-scoped); import-aug30 canonical resolver + fail-loud; import-aug31 → Rath.
+Verified: backend tsc clean; import + cascade pure tests pass; 0099 local-SQLite 11 checks + idempotent.
+§5 Conflicts = no-op (no conflicts surface stores user identity). Gated apply order + post-checks in
+`ops/scripts/migration/CASHIER-IDENTITY-RECONCILIATION.md`. NO remote write this session.
+Original claim (kept for provenance):
 User: legacy POS cashier names must map to the real user accounts ("aza" = user `Za`,
 routh=`Rath`, pagna=`james`, sethyka=`sethyka`, Dev-Usmart=`admin`), matching by
 **username incl. inactive**; **display the username**; the account **id is the source
