@@ -16329,3 +16329,64 @@ now provided via Stock one by one; flag if the form's stock tab should
 also swap); movement day headers repeat across server pages (same accepted
 behavior as the Stock Changes ledger); the movements list still paginates
 groups (movementMeta) rather than days.
+
+## Part 560 (Aug 31 2026, stats-date-row lane, session 50) — lift the Start→End date row out of the stats button into a shared StatsRangeRow above the search bar
+
+**Ask:** "fish out the start date and end date from the stats button ... this
+should be right above the search bar row ... make sure this applies to all
+section, mini sections, and pages ... stats can be placed at the top ... but of
+course the start and end date will also apply to it [the stats]."
+
+**What changed:**
+- New `frontend/src/components/shared/StatsRangeRow.tsx` — the dedicated
+  Start→End date-range row: the shared `DateTimeRangePicker` (showTime off) plus
+  the Today / 7 Days / This Month / This Year preset chips, i.e. the exact markup
+  the folded `StatsStrip` used to render for its internal date row, extracted
+  verbatim so relocating it changed placement only, not look. Optional trailing
+  `actions` slot. Reused by every list page for that row (cross-surface rule).
+- `sales/Sales.tsx`, `returns/Returns.tsx`, `fees/FeesPage.tsx` — each now
+  renders `<StatsRangeRow range={stripRange} onRangeChange={setStripRange} t={t}/>`
+  as the FIRST child of its pinned (sticky) search wrapper, directly above the
+  search bar, and stops passing `range`/`onRangeChange` into `<StatsStrip>`. The
+  Stats chip stays at the top; its cards still read the same `stripRange`. Returns'
+  sticky wrapper gained `space-y-2` (it had none); each page's search row lost its
+  now-redundant `pt-1` (moved onto the date row). No page-data-filter semantics
+  changed — `stripRange` still scopes only the stats strip, exactly as before; the
+  separate list Period/date filters in the Filters menus were left alone.
+- `StatsStrip.tsx` — DELIBERATELY UNCHANGED. Its date row is already guarded by
+  `statsOpen && range && onRangeChange`, so a caller that stops passing those
+  props simply gets no internal date row, while callers that still pass them keep
+  working. Keeping the component backward-compatible lets the many parallel
+  sessions migrate their pages independently instead of forcing a lockstep
+  breaking API change across a 45-session checkout.
+- `tests/statsStrip.test.ts` — new Part-560 pin asserting StatsRangeRow carries
+  the picker + presets and that Sales/Returns/Fees render it wired to `stripRange`
+  while no longer passing the multi-line range props into StatsStrip.
+
+**What was found:** a peer session (Part 559, "movements-and-add-menu lane") was
+live-editing `inventory/Inventory.tsx` during this work — the git tree showed
+Inventory dirty with a Movements date-filter rework (Start→End becomes the one
+date control, select-mode checkboxes, day grouping) that it does NOT own the
+StatsStrip call in. Because Inventory's stats live on their OWN top-level section
+chip (`inventorySection === 'stats'`/`'all'`) rather than above a search bar, and
+because committing Inventory.tsx would have absorbed that peer's incomplete work,
+Inventory's migration was DELEGATED to that lane (messaged). Dashboard already
+keeps its range as a separate card (passes no range to StatsStrip) so it needed
+nothing. This is why "all pages" landed as Sales/Returns/Fees here + a hand-off
+for Inventory rather than one sweep.
+
+**Verified:** `npx tsc --noEmit -p tsconfig.json` → 0 errors (whole frontend,
+incl. the peer's current Inventory.tsx); `node tests/statsStrip.test.ts` → all
+pass incl. the new Part-560 pin; `node tests/sourceSyntaxCheck.ts` → 427 files
+parsed OK (covers the new component). NOT verified live in-browser: a peer's dev
+server is running in this checkout and starting a second one risks the shared
+node_modules / wrangler-state contention documented in project-traps, so
+browser verification of the relocated row is deferred to the shared session.
+Commit `3772f08f` (5 files, path-scoped). Rides along the report-currency lane's
+orphaned `statsStrip.test.ts` working-tree edit (its Part 553/554 fmtMoney pin,
+matching the already-committed reportMoney.ts) so it stops floating.
+
+**Not done:** Inventory's stats-section date row (delegated to the Part-559
+lane); live browser verification (shared dev server); once every caller has
+migrated off StatsStrip's `range`/`onRangeChange`, a follow-up should delete the
+now-dormant internal date row + its DateTimeRangePicker import from StatsStrip.
