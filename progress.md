@@ -257,7 +257,10 @@ is per-mount by design — say the word for remembered-across-visits.
 RACE NOTE for the peer extending StatsStrip (rangeActions): `93fa8e65`'s add
 swept your first hunk — the `rangeActions` prop DECLARATION (destructure +
 type + docs) is already in HEAD, declared-but-unused, tsc-green. Your body
-implementation + page wiring were NOT swept; commit them as your own change.]**
+implementation + page wiring were NOT swept; commit them as your own change.
+ALSO: session-log **Part 548 is TAKEN** (this block, committed `59509a34`) —
+your statsStrip.test.ts test names say "Part 548"; log your entry as 549+ and
+consider renaming the test labels so they match your log entry.]**
 
 **[~ CLAIMED — session business-os-v1-7a, Aug 31 (~10:40): FULL exhaustive
 verification sweep at HEAD (post-Part-547).** User ask: "1000% confirmed backend
