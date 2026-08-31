@@ -16930,3 +16930,84 @@ columns ... saves the need to go back and forth multiple pages." Then, to the
   sensitive; `sales.credit_due_date` is in place for it.
 - Column chooser on Sales/Products/Contacts tables (hot; need columns-array refactor).
 - Aug-31/AR migration remains PREPARED, NOT applied (user chose "do all", not "apply").
+
+## Part 574 (Aug 31 2026, D1-bloat + R2-backup-lifecycle lane, grep-max+1; number races expected) — D1 shrunk 661 MB → 92 MB, R2 multipart lifecycle fixed, import staging isolated to a second D1
+
+User report: "D1 seems to get very high in size; R2 backups don't auto-delete on
+deploy, some are ongoing and can't delete; D1 allows multiple databases — can we
+be smarter/faster?" Investigated the live production account (D1 49795be9, R2
+business-os-assets) before changing anything.
+
+**Diagnosis (grounded in live numbers).** The operational D1 was **661 MB**, and
+**~65% of it was stale import STAGING**: `import_job_rows` 244,716 rows / ~246 MB
++ `import_job_source_rows` 214,573 rows / ~185 MB. Real business data was small
+(sales 14,939; sale_items 36,027; products 6,104; customers 4,705). Root causes:
+(1) the `import_retention_last_run` setting was ABSENT — the 24h retention sweep
+had never completed a run; the `scheduled()` handler ran every sweep in one
+un-guarded `await` chain, so a heavy backup throw on the large DB aborted the
+chain before retention ran (audit-log retention last succeeded Aug 26, right
+before the big Aug-29 imports — a self-reinforcing spiral). (2) `completed_with_
+errors` was missing from importRetention's `TERMINAL_STATUS_SQL`, so exactly the
+heaviest, most-retried imports were never eligible. (3) 35,869 orphan source rows
+(parent job already deleted). R2 "ongoing / can't delete" = incomplete multipart
+uploads from backup runs killed mid-stream (neither `complete()` nor `abort()`
+ran) — invisible to `list()`, unremovable by `delete()`; only an R2 lifecycle
+rule clears them. Backups run on the 6h CRON, NOT on deploy — the "every deploy"
+correlation is coincidental.
+
+**Tier 1 — stop the leak (deployed? NO — needs deploy).** `index.ts`: each
+scheduled sweep now runs in its own try/catch (a failing backup can no longer
+starve retention). `importRetention.ts`: added `completed_with_errors` to the
+terminal-status set, with a regression case in `test-import-retention-pure.cjs`.
+
+**Tier 2 — reclaim + R2 (LIVE now).** Dropped the 244k-row `import_job_rows` from
+`BACKUP_TABLES` (it alone made a full backup large enough to approach the CPU/
+wall-time ceiling). One-time live purge via the Cloudflare MCP of terminal-job
+staging + orphans (scoped so no active/awaiting_review job could be caught):
+**661 MB → 92 MB**, operational data verified intact (all 21 job summaries kept,
+`details_pruned_at` stamped). R2 lifecycle: replaced the default 7-day
+"abort incomplete multipart uploads" rule with a **3-day** one
+(`backup-mpu-abort-3d`) — done live via wrangler.
+
+**Tier 3 — isolate import staging into a second D1 (code COMPLETE + committed +
+all tests green; NEEDS DEPLOY + a real test import to confirm end-to-end).** User
+chose this explicitly over deferral ("more organized... i can have like 10
+databases... maximize efficiency and speed and performance"). Introduced
+`D1Compat.staging` (lib/db.ts) — an optional handle that points at a new
+`IMPORT_DB` binding when present and falls back to the main DB otherwise (same
+pattern as `BACKUP_QUEUE`), so single-DB environments (local dev, pure tests) are
+unchanged. Provisioned D1 **business-os-import** (uuid 5c667470-…, APAC),
+schema in `migrations-import/0001_import_staging.sql` (applied to the remote
+import DB; `migrate:import:remote` wired into `deploy:full`). Routed every access
+to the two bulk tables through `db.staging`: importEngine (materialize/analyze/
+apply reads+writes+batches), stockActionSeal (conflict seal), routes/importJobs
+(review-UI reads + per-job delete), routes/system (explicit `db.staging` clears
+after the mode='all' data reset and factory reset). importRetention split the two
+tables out of `importJobDetailDeleteStatements` into a dedicated
+`importJobStagingDeleteStatements` run on `db.staging`, and made
+`cleanOrphanImportStaging` cross-DB-aware (reads live job ids from the main DB,
+computes orphans in code — a `NOT IN (SELECT id FROM import_jobs)` subquery can't
+cross databases). Verified NO runtime query JOINs or atomically batches these two
+tables with operational data (the idempotency ledgers that DO — import_*_commits/
+guards, import_auto_merges — deliberately stay on the main DB). The main-DB shells
+are kept EMPTY as a reversible fallback (not dropped).
+
+**Not done / needs the user.**
+- **DEPLOY required** for all code (Tiers 1, 2a, 3) to take effect. `npm run
+  deploy:full` now also runs `migrate:import:remote`. The one-time purge (Tier 2b)
+  and the R2 rule (Tier 2c) are already live and independent of deploy.
+- **Post-deploy: run one real test import** and confirm it lands in IMPORT_DB and
+  the review/apply UI works — single-DB pure tests cannot exercise the actual
+  two-DB split (db.staging === db there).
+- Dropping the empty main-DB `import_job_rows`/`import_job_source_rows` shells is
+  optional and deferred until the split is confirmed in production (the reset
+  paths were written to no longer depend on those tables existing).
+
+Files (path-scoped, DISJOINT from all frontend lanes): `cloudflare/src/{index.ts,
+lib/db.ts,lib/importEngine.ts,lib/importRetention.ts,lib/stockActionSeal.ts,
+routes/importJobs.ts,routes/system.ts}`, `cloudflare/wrangler.toml`,
+`cloudflare/package.json`, `cloudflare/migrations-import/0001_import_staging.sql`,
+`cloudflare/scripts/{harness/d1compat.cjs,test-stock-action-seal-pure.cjs,
+test-stock-action-analyze-e2e.cjs,test-stock-action-apply-pure.cjs,
+test-import-retention-pure.cjs}`, `DEPLOY.md`. Committed in ordered slices
+(c8fb1753, c0ef6859, f2e5c3a6, 74e019fd + the Tier 1/2 commits).
