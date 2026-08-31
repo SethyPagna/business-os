@@ -88,6 +88,13 @@ Two rules learned the hard way, both from real incidents in this file's own hist
 
 ## Current status
 
+**[~ DEPLOY IN FLIGHT — r2, Aug 31 (third of the day): shipping committed HEAD
+from an isolated worktree** (r2's Part-541 offline sale-moment fix + c8's three
+committed sargable-date perf slices; NO new migrations). Uncommitted peer work
+(compat.ts, the ship-now batch below) is EXCLUDED by the worktree method and
+rides the next deploy. Do NOT run `migrate:remote`/`wrangler deploy` until this
+flips to DONE.]**
+
 **CLAIMED (in progress, ship-now-fixes session, Aug 31):** the audit's ship-now tier — public portal stock leak (portal.ts + storefront components), storefront admin-voice strings, POS search-wipe on tap, Inventory import/export icon swap, ImportModeWizard z-fix, Dashboard dead hidden blocks, Branches bare-td, CartItem KHR decimals, posCopy(en,en), Returns clear-scope-reset. NOT touching cloudflare/src/routes/sales.ts or api/saleWriteTransport.ts (another session mid-flight there).
 
 *(Live coordination only — session records that used to live here are in the
