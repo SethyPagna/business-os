@@ -443,11 +443,12 @@ export default function Receipt({ sale, settings = {}, onClose, _previewMode }: 
                 <div data-receipt-cell="name" className="min-w-0 overflow-hidden whitespace-normal break-words font-semibold leading-snug">
                   <div data-receipt-main="true">
                     {item.product_name || item.name}
+                    {/* Tier tag kept INLINE with the name (user: compact, don't
+                        take extra space) -- a tiny marker beside the title, like
+                        the SKU chip, not its own line. */}
+                    {tierTag ? <span className="ml-1 text-[10px] font-semibold text-emerald-700">{tierTag}</span> : null}
                     {tpl.show_item_sku && item.sku ? <span className="ml-1 text-[10px] text-gray-500">[{item.sku}]</span> : null}
                   </div>
-                  {tierTag ? (
-                    <div data-receipt-subline="true" className="text-[10px] font-semibold text-emerald-700">{tierTag}</div>
-                  ) : null}
                   {tpl.show_item_unit_price && qty > 1 ? (
                     <div data-receipt-subline="true" className="text-[10px] font-normal text-gray-500">
                       {fmtUSD(unitUsd)} x {qty}
