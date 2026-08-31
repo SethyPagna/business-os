@@ -528,10 +528,14 @@ IDs) or the section linked. Statuses: **[~]** = in progress / partly done,
   import round-trip, R2 keeps exactly 2 finalized sets.
 - [ ] **A3 follow-through** — connect Google Drive in Settings → Backup (now possible
   post-deploy), then confirm backup files actually appear in Drive.
-- [~] **M-audit (Aug-30 legacy reports)** — independent source-vs-production
-  reconciliation of the `27th-30th` report pack (importer `import-aug30-legacy-reports.mjs`,
-  commit `2708188a`) + restore source-level rerunnability (files moved to
-  `Downloads/27th-30th/`). *(claimed by session business-os-v1-1e, Aug 31)*
+- [x] **M-audit (Aug-30 legacy reports)** — **DONE Aug 31 (Part 551, session 1e).**
+  Independent source-vs-production reconciliation of the `27th-30th` report pack:
+  all 14,939 receipt signatures + dates exact, 79/79 supplemental lines exact,
+  stock 23,115 on all three ledgers with 0 mismatches/negatives/FK errors, AP /
+  deleted / transfers / fees all equal source. Importer fixed (`aa66334b`:
+  archive-folder paths, zero-insensitive phone links, driver only on delivery);
+  two 1-row production corrections (4362 customer link, 4361 driver unlink).
+  Open for user: ambiguous name-links 4353/4370; 8 optional new contacts.
 
 ### In progress / partly done
 
