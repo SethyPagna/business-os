@@ -88,6 +88,45 @@ Two rules learned the hard way, both from real incidents in this file's own hist
 
 ## Current status
 
+**📋 STAGE 1 AUDIT RESULTS — coordinator 7b, Aug 31 ~19:40 (ran against clean HEAD
+in an isolated worktree, so results are the DEPLOY CANDIDATE, not the dirty tree).**
+DEPLOY-READINESS: **HEAD builds and is deployable.** ✅ cloudflare tsc, ✅ frontend
+tsc, ✅ production vite build (exit 0, 17.8s), ✅ fresh 88-migration chain test,
+✅ 128/132 backend pure tests, ✅ 142/147 frontend tests = **270/279 green**.
+**9 red tests, ALL confirmed on clean HEAD (not dirty-lane artifacts). Verified:
+NONE is a real regression — 8 are STALE tests whose lane refactored past the
+assertion, +1 is a trivial real i18n bug.** Each assigned to its owning lane to
+reconcile during Stage 1:
+- `test-route-permissions-pure` → **permissions lane (Part 557)**: sales.ts reads
+  moved to `canReadSales`/`getPermissionTier`; enforcement INTACT (sales.ts:1857/1882).
+  Update the assertion to the view-tier API. (Security test — confirm intent.)
+- `test-promotion-rules-pure` → **permissions lane (Part 557)**: `requireReadKey`
+  replaced `requireKey` on GET /rules; enforcement intact. Update assertion.
+- `test-adjust-received-date-pure` + `test-supplier-attribution-pure` → **stock-ledger
+  lane (Part 553)**: harness can't resolve the real, existing `lib/stockRevert.ts`
+  (added Part 553). Add stockRevert to the test loader's module shim.
+- `autoMergedFacet.test.ts` → **products lane**: `onRemove` handler shape changed;
+  update the regex.
+- `performanceLoadingUx.test.ts` → **contacts-filter lane**: `countActiveFlags`
+  gained/changed a `genderFilter` flag; update the assertion.
+- `statsStrip.test.ts` → **stats/StatsRangeRow lane (Part 560)**: asserts Inventory
+  no longer threads range into StatsStrip, but the cards still need it; test
+  over-asserts the Part-560 migration. Reconcile the assertion.
+- `actionStability.test.ts` → **inventory lane**: wants `batchInventoryInFlightRef`;
+  Inventory has `adjustStockInFlightRef`/`transferStockInFlightRef` (lines 529-530,
+  shared beginSingleAction guards) — guard intent INTACT, name changed. Update.
+- `langKeyIntegrity.test.ts` → **REAL minor bug (contacts/DeliveryTab lane):** key
+  `'area'` missing from BOTH packs. `DeliveryTab.tsx:303` does `t('area') || 'Area'`,
+  but a missing key makes `t()` return the truthy string `'area'`, so `|| 'Area'`
+  never fires and the UI shows lowercase "area". FIX = add `"area"` to en.json + km.json
+  (en:"Area", km: proper). NOTE: en/km are currently DIRTY with the DateTimeRangePicker
+  lane's keys — whoever fixes must coordinate that shared-file edit (memory rule 12).
+Coordinator did NOT self-fix: security tests need owner sign-off, and the lang fix
+sits in dirty shared packs. **Stage 1 exit criterion: these 9 reds reconciled →
+suite green → then HOLD for the user's Stage-2 go.**
+
+---
+
 **🛑🛑 STAGE 1 — SESSION RECONCILIATION + COMPREHENSIVE AUDIT TOWARD DEPLOY (user
 directive via coordinator 7b, Aug 31 ~19:00). ALL SESSIONS READ THIS FIRST.** The
 user has put the whole fleet into **Stage 1**. This is a STABILIZE-AND-VERIFY phase,
@@ -138,6 +177,27 @@ Archive the 31st files into `Downloads/businessos-migration-aug28` + `Downloads/
 project_deploy; also must be reviewed first because native Aug-31 POS sales may already exist →
 double-count risk). Files (path-scoped, DISJOINT from all lanes): `frontend/src/styles/main.css`,
 `ops/scripts/migration/**`, `cloudflare/migrations/00NN_legacy_customer_receivables.sql`.
+
+**→ AR-CREDIT + DATA-VISIBILITY + EXCEL-COLUMNS LANE (Aug 31, Part 573 grep-max+1; number races expected): CLAIMED / in progress.**
+User: "do all" of the 3 audited threads (see `docs/DATA-VISIBILITY-AND-CREDIT-AUDIT.md`),
+"don't let it conflict or duplicate too much." Building disjoint-first to dodge the hot lanes.
+(A) **Customer credit / AR**: model the "on credit" state (completed sale that carries an
+outstanding balance + optional due date — distinct from `awaiting_payment` which withholds
+stock) and surface a customer Receivables view mirroring the supplier `ApInvoicesSection`.
+Reuses migration 0094's `customer_receivables`. (B) **Fill visible data gaps**: complete the
+now-FREE `SaleDetailModal` (delivery fee, split-tender, actual delivery cost, payment currency,
+KHR amounts) + add a Returns status badge. (C) **Excel-style column chooser**: NEW shared
+column-visibility model + chooser (reusing the `exportOptions.ts` pattern), first wired into
+the FREE Returns list. Files (path-scoped, DISJOINT from every active lane — NOT touching
+Products.tsx/Sales.tsx/contacts/shared.tsx/StatsRangeRow/App.tsx/product surfaces/index.ts,
+and NOT re-taking migration 0095 which lane 572 owns):
+BACKEND — `cloudflare/migrations/0096_sales_credit_due_date.sql`, `cloudflare/src/routes/sales.ts`,
+`cloudflare/src/routes/contacts.ts` (add customer-AR read beside the supplier-AP one).
+FRONTEND (new files + free files) — `frontend/src/components/shared/{ColumnChooser.tsx,useColumnPreferences.ts}`,
+`frontend/src/components/contacts/ArInvoicesSection.tsx`, `frontend/src/components/sales/SaleDetailModal.tsx`,
+`frontend/src/components/returns/{ReturnsListSurface.tsx,ReturnDetailModal.tsx}`,
+`frontend/src/api/contactReadTransport.ts`, lang packs via a SEPARATE careful merge if needed.
+Aug-31/AR migration remains PREPARED, NOT applied (user chose "do all", not "apply").
 
 **→ D1-BLOAT + R2-BACKUP-LIFECYCLE LANE (Aug 31, Part 572 grep-max+1; number races expected): CLAIMED / in progress. BACKEND-ONLY, disjoint from every frontend lane.**
 User report: "D1 gets very high in size; R2 backups don't auto-delete on deploy, some are ongoing and can't delete; can we use multiple D1s to be smarter/faster?" Live diagnosis (prod D1 49795be9): DB = **661 MB**, of which **import_job_rows (244,716 rows / 246 MB) + import_job_source_rows (214,573 rows / 185 MB) ≈ 65%** is stale import STAGING that the 24h retention sweep should have pruned but never has. Root causes: (1) `import_retention_last_run` setting is ABSENT — the sweep has never completed a run; the scheduled() handler runs every sweep in ONE unguarded await-chain (`index.ts:305`) so a heavy backup throw on the 661 MB DB aborts the chain before retention runs (audit-retention last succeeded Aug 26, right before the big Aug-29 imports). (2) `completed_with_errors` is missing from importRetention's TERMINAL_STATUS_SQL, so those jobs' details are never eligible (5 jobs = 30k+51k rows). (3) 35,869 ORPHAN source rows (parent job already deleted). (4) R2 "ongoing/can't delete" = incomplete multipart uploads from backup runs killed mid-stream (no complete()/abort() ran) — invisible to list(), unremovable by delete(); needs an R2 lifecycle rule. Backups run on the 6h CRON, NOT on deploy (the "every deploy" correlation is coincidental). Plan (all 3 tiers, user-approved): **T1** per-step try/catch in `index.ts` scheduled() + add `completed_with_errors` to `importRetention.ts`. **T2** drop `import_job_rows` from BACKUP_TABLES in `backup.ts`; one-time live purge of terminal-job staging + orphans (~450 MB reclaimed); R2 lifecycle rule "abort incomplete multipart uploads after 3 days" (bucket setting via wrangler, not code). **T3** isolate the two bulk staging tables into a SECOND D1 (`IMPORT_DB`) — surgical, only tables never in an atomic db.batch with operational writes (verified first). Files (path-scoped, DISJOINT from all lanes): `cloudflare/src/index.ts`, `cloudflare/src/lib/importRetention.ts`, `cloudflare/src/lib/backup.ts`, `cloudflare/wrangler.toml`, `cloudflare/src/lib/importEngine.ts`, `cloudflare/migrations/0095+*` (+ possible second migrations dir for IMPORT_DB). No frontend/lang/perm changes.
