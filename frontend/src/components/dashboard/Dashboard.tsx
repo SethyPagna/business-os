@@ -432,19 +432,26 @@ function PaymentMethodCard({ analytics, analyticsPending, analyticsUnavailable, 
               <DonutChart data={payments} valueKey="revenue_usd" showLegend={false} />
             </Suspense>
           </div>
-          <div className="min-h-0 w-full flex-1 space-y-0.5 self-stretch overflow-y-auto sm:max-h-44">
+          <div className="min-h-0 w-full min-w-0 flex-1 space-y-0.5 self-stretch overflow-y-auto sm:max-h-44">
             {payments.map((payment, index) => {
               const percent = total > 0 ? ((payment.revenue_usd || 0) / total * 100).toFixed(1) : '0.0'
               return (
-                <button key={`${payment.payment_method || payment.method || 'payment'}-${index}`} type="button" onClick={() => onOpen(payment)} className="flex w-full items-center justify-between gap-2 rounded-lg px-1.5 py-1 text-left text-xs transition hover:bg-slate-50 dark:hover:bg-slate-800/50">
+                // min-w-0 on both the legend column above and this row lets the
+                // method label truncate and keeps the (shrink-0) amount/%/count
+                // cluster pinned inside the card. Without it the flex column kept
+                // its content's intrinsic width and the numbers bled past the
+                // card's right edge on the narrow 1/3-width dashboard tile
+                // (user: "the legend is being over bounds"). Cluster tightened
+                // (gap-1, tabular-nums, smaller %/count) to compact the space.
+                <button key={`${payment.payment_method || payment.method || 'payment'}-${index}`} type="button" onClick={() => onOpen(payment)} className="flex w-full min-w-0 items-center justify-between gap-2 rounded-lg px-1.5 py-1 text-left text-xs transition hover:bg-slate-50 dark:hover:bg-slate-800/50">
                   <div className="flex min-w-0 items-center gap-1.5">
                     <div className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: colors[index % colors.length] }} />
                     <span className="truncate text-gray-600 dark:text-gray-400">{payment.payment_method || payment.method}</span>
                   </div>
-                  <div className="flex shrink-0 items-baseline gap-1.5 text-right">
+                  <div className="flex shrink-0 items-baseline gap-1 whitespace-nowrap text-right tabular-nums">
                     <span className="font-semibold text-gray-900 dark:text-white">{fmtUSD(payment.revenue_usd || 0)}</span>
-                    <span className="text-gray-500 dark:text-gray-400">{percent}%</span>
-                    <span className="text-gray-400">({payment.count})</span>
+                    <span className="text-[11px] text-gray-500 dark:text-gray-400">{percent}%</span>
+                    <span className="text-[11px] text-gray-400">({payment.count})</span>
                   </div>
                 </button>
               )
@@ -1081,6 +1088,17 @@ export default function Dashboard() {
   const netRevenueLabel = translateOr('net_revenue', 'Net Revenue')
   const refundsLabel = translateOr('refunds', 'Refunds')
   const salesCountLabel = translateOr('sales_count', 'Sales Count')
+  // Profit-vs-COGS labels. This tab used to pass its three LineChart lines with
+  // NO `label`, so the chart tooltip fell back to the raw field keys
+  // (`revenue_usd`/`cost_usd`/`profit_usd`) -- the only analytics tab that did,
+  // which is why the user saw untranslated data on this chart while Revenue
+  // Flow (which passes labels) read correctly. Defined once here and reused for
+  // both the chart line labels and the legend chips below, all guarded via
+  // translateOr so a missing/loading lang pack never surfaces a raw key.
+  const profitVsCogsLabel = translateOr('profit_vs_cogs', 'Profit vs COGS', 'ចំណេញ vs ថ្លៃទំនិញ')
+  const profitRevenueLabel = translateOr('revenue', 'Revenue', 'ចំណូល')
+  const cogsLabel = translateOr('cogs', 'COGS', 'តម្លៃទំនិញដែលបានលក់')
+  const estProfitLabel = translateOr('profit', 'Est. Profit', 'ប្រាក់ចំណេញ')
   const stockValueFormulaText = translateOr('dashboard_formula_stock_value', 'Stock value = quantity on hand x unit cost')
   const revenueFormulaText = translateOr('dashboard_formula_revenue', 'Net revenue = Gross sales - Discounts - Refunds')
   const collectedFormulaText = translateOr('dashboard_formula_collected_total', 'Collected total = Net revenue + Tax + Delivery')
@@ -1720,7 +1738,7 @@ ${translateOr('delivery_margin', 'Delivery margin')} ${fmtUSD(aDeliveryMargin)} 
               <div className="flex min-w-0 gap-1 overflow-x-auto">
               {([
                 ['revenue', revenueFlowLabel],
-                ['profit', t('profit_vs_cogs')],
+                ['profit', profitVsCogsLabel],
                 ['volume', salesCountLabel],
               ] satisfies Array<[DashboardChartMode, string]>).map(([id,lbl]) => (
                 <button key={id} onClick={() => setActiveChart(id)}
@@ -1752,12 +1770,12 @@ ${translateOr('delivery_margin', 'Delivery margin')} ${fmtUSD(aDeliveryMargin)} 
           ) : activeChart === 'profit' ? (
             <>
               <Suspense fallback={<ChartFallback />}>
-                <LineChart data={chartRenderData} lines={[{ key:'revenue_usd', color:'#2563eb' },{ key:'cost_usd', color:'#dc2626' },{ key:'profit_usd', color:'#16a34a' }]} />
+                <LineChart data={chartRenderData} lines={[{ key:'revenue_usd', color:'#2563eb', label: profitRevenueLabel },{ key:'cost_usd', color:'#dc2626', label: cogsLabel },{ key:'profit_usd', color:'#16a34a', label: estProfitLabel }]} />
               </Suspense>
               <div className="mt-1.5 flex flex-wrap items-center gap-3">
-                <div className="inline-flex items-center gap-2 rounded-full bg-slate-50 px-2.5 py-1 dark:bg-slate-800/70"><div className="h-2 w-4 rounded-full bg-blue-600"/><span className="text-sm font-semibold text-slate-600 dark:text-slate-200">{t('revenue')}</span></div>
-                <div className="inline-flex items-center gap-2 rounded-full bg-slate-50 px-2.5 py-1 dark:bg-slate-800/70"><div className="h-2 w-4 rounded-full bg-red-600"/><span className="text-sm font-semibold text-slate-600 dark:text-slate-200">{t('cogs')}</span></div>
-                <div className="inline-flex items-center gap-2 rounded-full bg-slate-50 px-2.5 py-1 dark:bg-slate-800/70"><div className="h-2 w-4 rounded-full bg-green-600"/><span className="text-sm font-semibold text-slate-600 dark:text-slate-200">{t('profit')}</span></div>
+                <div className="inline-flex items-center gap-2 rounded-full bg-slate-50 px-2.5 py-1 dark:bg-slate-800/70"><div className="h-2 w-4 rounded-full bg-blue-600"/><span className="text-sm font-semibold text-slate-600 dark:text-slate-200">{profitRevenueLabel}</span></div>
+                <div className="inline-flex items-center gap-2 rounded-full bg-slate-50 px-2.5 py-1 dark:bg-slate-800/70"><div className="h-2 w-4 rounded-full bg-red-600"/><span className="text-sm font-semibold text-slate-600 dark:text-slate-200">{cogsLabel}</span></div>
+                <div className="inline-flex items-center gap-2 rounded-full bg-slate-50 px-2.5 py-1 dark:bg-slate-800/70"><div className="h-2 w-4 rounded-full bg-green-600"/><span className="text-sm font-semibold text-slate-600 dark:text-slate-200">{estProfitLabel}</span></div>
               </div>
             </>
           ) : (
