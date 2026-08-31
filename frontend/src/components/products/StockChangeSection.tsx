@@ -1,13 +1,19 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useApp } from '../../AppContext'
 import { getStockLedger } from '../../api/productReadTransport.ts'
 import { revertStockMovement, editStockMovementReason } from '../../api/inventoryWriteTransport.ts'
+
+// The full-featured adjust modal (batch, price-lock, reasons) reused from the
+// Inventory/Branches page -- lazy so its weight only loads when the person
+// actually opens the Adjust menu, not on every Stock Changes view.
+const StockAdjustModal = lazy(() => import('./forms/StockAdjustModal'))
 import { movementColorClass, translateMovementType } from '../inventory/movementGroups.ts'
 import DateTimeRangePicker from '../shared/DateTimeRangePicker'
 import FilterMenu, { type FilterSection } from '../shared/FilterMenu'
 import Modal from '../shared/Modal'
 import PaginationControls from '../shared/PaginationControls'
 import SearchInput from '../shared/SearchInput'
+import ScanSearchButton from '../shared/ScanSearchButton'
 import InfoHint from '../shared/InfoHint'
 import { useDebouncedValue } from '../../utils/useDebouncedValue.ts'
 import { fmtDate, fmtClock24, fmtDateTime24 } from '../../utils/formatters'
@@ -135,6 +141,9 @@ export default function StockChangeSection({ t }: { t: Translate }) {
   const [rowBusy, setRowBusy] = useState(false)
   const [editingReason, setEditingReason] = useState<string | null>(null)
   const [confirmRevert, setConfirmRevert] = useState(false)
+  // Adjust menu (Add / Remove / Adjust quantity) -> opens the reused modal.
+  const [adjustMenuOpen, setAdjustMenuOpen] = useState(false)
+  const [adjustType, setAdjustType] = useState<'add' | 'remove' | 'set' | null>(null)
   const requestRef = useRef(0)
 
   const load = useCallback(async () => {
@@ -386,12 +395,49 @@ export default function StockChangeSection({ t }: { t: Translate }) {
 
   return (
     <div className="space-y-3">
+      {/* Rows 1+2 pin together while the ledger scrolls (user, Aug 31: "the
+          search bar row and the date both can be pinned and stick ... for
+          all sections and pages") -- same sticky treatment as the Products
+          listing's own search row above this section. */}
+      <div className="sticky top-0 z-30 -mx-1 space-y-3 bg-gray-50/95 px-1 pb-2 pt-1 backdrop-blur dark:bg-gray-900/95 sm:mx-0 sm:px-0">
       {/* Row 1: the date-range + search bar row. It leads; every mini-section
           drops BELOW it (user, Aug 31 2026: "move all mini sections (filters,
           stats, etc.) below the date range and search bar row"). Unified
           Start → End pill -- the same control as the Dashboard, Fees,
           Inventory movements and Audit Log range filters. */}
       <div className="flex flex-wrap items-center gap-2">
+        {/* Primary action: replaces the catalog "Add Product" button on this
+            section (user, Aug 31). Opens the COMPLETE adjust modal reused from
+            the Inventory/Branches page, preset to the chosen operation. */}
+        {canAdjust ? (
+          <div className="relative">
+            <button
+              type="button"
+              onClick={() => setAdjustMenuOpen((open) => !open)}
+              className="inline-flex items-center gap-1 rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700"
+            >
+              {tr(t, 'adjust', 'Adjust')}
+              <span aria-hidden="true" className="text-xs opacity-80">▾</span>
+            </button>
+            {adjustMenuOpen ? (
+              <>
+                <div className="fixed inset-0 z-10" onClick={() => setAdjustMenuOpen(false)} />
+                <div className="absolute left-0 z-20 mt-1 w-44 overflow-hidden rounded-xl border border-gray-200 bg-white py-1 shadow-lg dark:border-gray-700 dark:bg-gray-900">
+                  {([['add', 'add_stock', 'Add Stock'], ['remove', 'remove_stock', 'Remove Stock'], ['set', 'adjust_quantity', 'Adjust Quantity']] as Array<['add' | 'remove' | 'set', string, string]>).map(([type, key, fallback]) => (
+                    <button
+                      key={type}
+                      type="button"
+                      onClick={() => { setAdjustType(type); setAdjustMenuOpen(false) }}
+                      className="block w-full px-3 py-1.5 text-left text-sm text-gray-700 hover:bg-gray-50 dark:text-gray-200 dark:hover:bg-gray-800"
+                    >
+                      {tr(t, key, fallback)}
+                    </button>
+                  ))}
+                </div>
+              </>
+            ) : null}
+          </div>
+        ) : null}
         <DateTimeRangePicker
           value={{ startDate, endDate, startTime: '', endTime: '' }}
           onChange={(next) => {
@@ -405,6 +451,10 @@ export default function StockChangeSection({ t }: { t: Translate }) {
         <div className="min-w-48 flex-1 sm:max-w-96">
           <SearchInput id="stock-ledger-search" name="stock_ledger_search" value={search} onChange={setSearch} placeholder={tr(t, 'search', 'Search')} />
         </div>
+        {/* The barcode scanner rides the ledger search too (user, Aug 31:
+            "bring the barcode scanner back") -- scanning a product fills the
+            search box, same as the Products / POS / Inventory search rows. */}
+        <ScanSearchButton onDetected={setSearch} t={t} />
         <span className="ml-auto inline-flex items-center gap-1 text-xs text-gray-400">
           {total}
           {/* The ledger's "what is this" explanation lives behind this info
@@ -444,10 +494,16 @@ export default function StockChangeSection({ t }: { t: Translate }) {
             mobileIconOnly
           />
         ) : null}
-        <div className="ml-auto flex items-center gap-1.5">
-          {stat('in', summary.inCount, summary.inQty)}
-          {stat('out', summary.outCount, summary.outQty)}
-        </div>
+      </div>
+      </div>
+
+      {/* The In/Out totals get their own row DIRECTLY above the list (user,
+          Aug 31: "the total rows ... can be moved to above the rows, below
+          the current placement") -- out of the pinned toolbar, leading the
+          data they summarize. */}
+      <div className="flex flex-wrap items-center gap-1.5">
+        {stat('in', summary.inCount, summary.inQty)}
+        {stat('out', summary.outCount, summary.outQty)}
       </div>
 
       {loadError ? (
@@ -611,6 +667,17 @@ export default function StockChangeSection({ t }: { t: Translate }) {
             </div>
           </div>
         </Modal>
+      ) : null}
+
+      {adjustType ? (
+        <Suspense fallback={null}>
+          <StockAdjustModal
+            initialType={adjustType}
+            t={t}
+            onClose={() => setAdjustType(null)}
+            onDone={() => { setAdjustType(null); void load() }}
+          />
+        </Suspense>
       ) : null}
     </div>
   )
