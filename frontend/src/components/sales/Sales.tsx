@@ -370,11 +370,17 @@ export default function Sales() {
   const salesDateRange = useMemo(() => {
     const startDate = String(stripRange.startDate || '').trim()
     const endDate = String(stripRange.endDate || '').trim()
-    const out: { startDate?: string; endDate?: string } = {}
+    const startTime = String(stripRange.startTime || '').trim()
+    const endTime = String(stripRange.endTime || '').trim()
+    const out: { startDate?: string; endDate?: string; startTime?: string; endTime?: string } = {}
     if (startDate) out.startDate = startDate
     if (endDate) out.endDate = endDate
+    if (/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(startTime) && /^(?:[01]\d|2[0-3]):[0-5]\d$/.test(endTime)) {
+      out.startTime = startTime
+      out.endTime = endTime
+    }
     return out
-  }, [stripRange.startDate, stripRange.endDate])
+  }, [stripRange.endDate, stripRange.endTime, stripRange.startDate, stripRange.startTime])
 
   const clearLoadWatchdog = useCallback(() => {
     window.clearTimeout(loadWatchdogRef.current)
@@ -512,7 +518,12 @@ export default function Sales() {
     const requestId = beginTrackedRequest(stripRequestRef)
     setStripLoading(true)
     try {
-      const result = await getSalesStatsStrip({ startDate: stripRange.startDate, endDate: stripRange.endDate })
+      const result = await getSalesStatsStrip({
+        startDate: stripRange.startDate,
+        endDate: stripRange.endDate,
+        startTime: stripRange.startTime,
+        endTime: stripRange.endTime,
+      })
       if (!aliveRef.current || !isTrackedRequestCurrent(stripRequestRef, requestId)) return
       setStripData((result || {}) as SalesStripPayload)
     } catch {
@@ -521,7 +532,7 @@ export default function Sales() {
     } finally {
       if (aliveRef.current && isTrackedRequestCurrent(stripRequestRef, requestId)) setStripLoading(false)
     }
-  }, [isActive, stripRange.endDate, stripRange.startDate])
+  }, [isActive, stripRange.endDate, stripRange.endTime, stripRange.startDate, stripRange.startTime])
   useEffect(() => { void loadStatsStrip() }, [loadStatsStrip])
 
   useEffect(() => {
@@ -841,7 +852,7 @@ export default function Sales() {
 
   useEffect(() => {
     setSalesPage(1)
-  }, [stripRange.startDate, stripRange.endDate, salesPageSize, salesSortSpec, search, statusFilter, userFilter])
+  }, [stripRange.startDate, stripRange.endDate, stripRange.startTime, stripRange.endTime, salesPageSize, salesSortSpec, search, statusFilter, userFilter])
 
   useEffect(() => {
     setSalesPage((current) => clampPage(current, allVisibleSales.length, salesPageSize))
@@ -1287,7 +1298,7 @@ export default function Sales() {
             (user, Aug 31: "fish out the start date and end date from the stats
             button ... right above the search bar row"). Same range state
             (stripRange) still feeds the strip's cards. */}
-        <StatsRangeRow className="pt-1" range={stripRange} onRangeChange={setStripRange} t={t} />
+        <StatsRangeRow className="pt-1" range={stripRange} onRangeChange={setStripRange} t={t} showTime />
         <div className="flex flex-wrap items-center gap-2">
           <SearchInput
             id="sales-search"

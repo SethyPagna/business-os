@@ -886,16 +886,11 @@ assert.match(dashboard, /function ChartFallback/, 'Dashboard chart Suspense fall
 assert.doesNotMatch(dashboardChartNoData, /AppContext|useApp/, 'dashboard chart empty states should not import AppContext and pull auth/bootstrap code into the chart chunk')
 assert.match(dashboard, /lucide-react\/dist\/esm\/icons\/layout-dashboard\.js/, 'Dashboard should use direct Lucide icon modules instead of the app-wide barrel')
 assert.doesNotMatch(dashboard, /Upload \} from 'lucide-react'/, 'Dashboard should not keep unused startup icon imports')
-// The four range presets live in the preset array; range_custom moved into
-// the pill-label map when the standalone Custom preset chip was removed (Y19,
-// Part 431 -- the shared DateTimeRangePicker Start->End pill is now the custom
-// editor). Each range label is still guarded via translateOr wherever it
-// renders, so assert that directly per key rather than pinning a source-order
-// sequence of `label:` entries -- same rationale as the card labels below,
-// and robust to the harmless extraction/reorder.
-for (const rangeKey of ['range_today', 'range_7d', 'range_this_month', 'range_this_year', 'range_custom']) {
-  assert.match(dashboard, new RegExp(`translateOr\\('${rangeKey}',`), `Dashboard ${rangeKey} label should use a guarded translation instead of exposing the raw key during language-pack loading`)
-}
+// Preset chips were removed from Dashboard. The remaining Today label still
+// uses the guarded translation fallback, and the retired labels must not leave
+// hidden controls behind.
+assert.match(dashboard, /translateOr\('range_today', 'Today'/, 'Dashboard Today label should use a guarded translation fallback')
+assert.doesNotMatch(dashboard, /RANGE_PRESETS|range_7d|range_this_month|range_this_year|range_custom/, 'Dashboard should not retain the removed preset-chip implementation')
 // These labels now live in separate reusable dashboard cards after the
 // requested card-order changes. Check each guarded translation directly;
 // requiring a source-order relationship between cards would make this test
@@ -907,7 +902,7 @@ for (const rangeKey of ['range_today', 'range_7d', 'range_this_month', 'range_th
 // doesNotMatch still keeps period_label from being rendered as a raw t() key.)
 assert.match(dashboard, /translateOr\('payment_method', 'Payment Method'/, 'Dashboard payment-method label should use a guarded translation')
 assert.match(dashboard, /translateOr\('no_data', 'No data found'/, 'Dashboard empty states should use guarded translations')
-assert.doesNotMatch(dashboard, /t\('(range_today|range_7d|range_this_month|range_this_year|range_custom|period_label|payment_method|no_data)'\)/, 'Dashboard should not render raw translation keys for visible range, payment, or empty-state labels')
+assert.doesNotMatch(dashboard, /t\('(range_today|period_label|payment_method|no_data)'\)/, 'Dashboard should not render raw translation keys for visible range, payment, or empty-state labels')
 
 assert.match(inventory, /inventory-history-row/, 'inventory history controls should live on their own row')
 assert.doesNotMatch(inventory, /<ActionHistoryBar history=\{actionHistory\} className="shrink-0"/, 'inventory filter/search row should not contain inline ActionHistoryBar')

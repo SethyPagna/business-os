@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import Modal from '../shared/Modal'
-import DateTimeRangePicker, { EMPTY_DATE_TIME_RANGE, type DateTimeRange } from '../shared/DateTimeRangePicker.tsx'
+import DateTimeRangePicker, { todayDateTimeRange, type DateTimeRange } from '../shared/DateTimeRangePicker.tsx'
 import { getDeliveryContactReport } from '../../api/salesTransport.ts'
 
 // X3 (Part 395): "delivery can also check expenses of delivery by contact" --
@@ -40,21 +40,8 @@ function money(value: unknown): string {
   return `$${(Number(value) || 0).toFixed(2)}`
 }
 
-function yearStartIso(): string {
-  return `${new Date().getFullYear()}-01-01`
-}
-
-function todayIso(): string {
-  const now = new Date()
-  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
-}
-
 export default function DeliveryContactReportModal({ contactId, contactName, t, onClose }: DeliveryContactReportModalProps) {
-  const [range, setRange] = useState<DateTimeRange>(() => ({
-    ...EMPTY_DATE_TIME_RANGE,
-    startDate: yearStartIso(),
-    endDate: todayIso(),
-  }))
+  const [range, setRange] = useState<DateTimeRange>(() => todayDateTimeRange())
   const [row, setRow] = useState<DeliveryContactReportRow | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')

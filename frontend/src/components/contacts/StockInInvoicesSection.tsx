@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import ChevronDown from 'lucide-react/dist/esm/icons/chevron-down.js'
 import AppSelect from '../shared/AppSelect.tsx'
-import DateTimeRangePicker from '../shared/DateTimeRangePicker'
+import DateTimeRangePicker, { todayDateTimeRange } from '../shared/DateTimeRangePicker'
 import { fmtDateOnly } from '../../utils/formatters'
 import { getStockInInvoiceLines, getStockInInvoiceReport } from '../../api/contactReadTransport.ts'
 
@@ -95,8 +95,8 @@ export default function StockInInvoicesSection({ t }: StockInInvoicesSectionProp
   const tr = (key: string, fallback: string): string => t(key) || fallback
   const [branchId, setBranchId] = useState('all')
   const [supplierKey, setSupplierKey] = useState('all')
-  const [fromDate, setFromDate] = useState('')
-  const [toDate, setToDate] = useState('')
+  const [fromDate, setFromDate] = useState(() => todayDateTimeRange().startDate)
+  const [toDate, setToDate] = useState(() => todayDateTimeRange().endDate)
   const [page, setPage] = useState(1)
   const [refreshToken, setRefreshToken] = useState(0)
   const [data, setData] = useState<ReportPayload | null>(null)

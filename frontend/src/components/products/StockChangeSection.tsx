@@ -16,7 +16,7 @@ const FastStockInModal = lazy(() => import('../inventory/FastStockInModal'))
 // exports").
 const ExportRangeDialog = lazy(() => import('../shared/ExportRangeDialog'))
 import { movementColorClass, translateMovementType } from '../inventory/movementGroups.ts'
-import DateTimeRangePicker from '../shared/DateTimeRangePicker'
+import DateTimeRangePicker, { todayDateTimeRange } from '../shared/DateTimeRangePicker'
 import FilterMenu, { type FilterSection } from '../shared/FilterMenu'
 import Modal from '../shared/Modal'
 import PaginationControls from '../shared/PaginationControls'
@@ -155,8 +155,8 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
   const [branches, setBranches] = useState<BranchOption[]>([])
   const [supplierId, setSupplierId] = useState(0)
   const [suppliers, setSuppliers] = useState<Array<{ id: number; name: string }>>([])
-  const [startDate, setStartDate] = useState('')
-  const [endDate, setEndDate] = useState('')
+  const [startDate, setStartDate] = useState(() => todayDateTimeRange().startDate)
+  const [endDate, setEndDate] = useState(() => todayDateTimeRange().endDate)
   const [rows, setRows] = useState<LedgerRow[]>([])
   const [total, setTotal] = useState(0)
   const [summary, setSummary] = useState<LedgerSummary>(EMPTY_SUMMARY)

@@ -23,7 +23,8 @@ test('statsPresetRange: today is a single-day range (the app-wide default)', () 
   const range = statsPresetRange('today', now)
   assert.equal(range.startDate, '2026-08-30')
   assert.equal(range.endDate, '2026-08-30')
-  assert.equal(range.startTime, '')
+  assert.equal(range.startTime, '00:00')
+  assert.equal(range.endTime, '23:59')
 })
 
 test('statsPresetRange: 7d spans exactly seven calendar days ending today', () => {
@@ -46,6 +47,20 @@ test('activeStatsPreset round-trips every preset and rejects a custom range', ()
     assert.equal(activeStatsPreset(statsPresetRange(preset, now), now), preset)
   }
   assert.equal(activeStatsPreset({ startDate: '2026-08-01', endDate: '2026-08-15', startTime: '', endTime: '' }, now), null)
+})
+
+test('date/time controls default to today and expose time only where endpoints honor it', () => {
+  const picker = read('src/components/shared/DateTimeRangePicker.tsx')
+  assert.match(picker, /todayDateTimeRange[\s\S]{0,220}startTime: '00:00'[\s\S]{0,80}endTime: '23:59'/, 'the shared default spans the complete current day')
+  assert.ok((picker.match(/inputMode="numeric"/g) || []).length === 2, 'the shared picker uses two explicit 24-hour HH:MM fields')
+
+  const sales = read('src/components/sales/Sales.tsx')
+  assert.match(sales, /<StatsRangeRow[^>]*showTime/, 'Sales exposes the 24-hour control')
+  assert.match(sales, /getSalesStatsStrip\(\{[\s\S]{0,180}startTime: stripRange\.startTime[\s\S]{0,80}endTime: stripRange\.endTime/, 'Sales threads the selected time window into its stats request')
+
+  const reports = read('src/components/sales/ReportsHub.tsx')
+  assert.ok(reports.includes("showTime={selectedType === 'sales'}"), 'the Reports hub exposes time only for its timestamp-backed Sales report')
+  assert.match(reports, /selectedType !==?= 'sales'|selectedType === 'sales'/, 'the Reports hub guards the Sales-only time behavior')
 })
 
 // ---- rollout pins (cross-file) --------------------------------------------
@@ -116,7 +131,7 @@ test('secondary controls stay on the Stats-chip row whether the strip is folded 
   // Row 1 renders the secondary controls then the primary actions, together,
   // regardless of open state.
   assert.ok(/\{rangeActions\}\s*\{actions\}/.test(strip), 'row 1 renders rangeActions + actions together on the chip row')
-  assert.ok(!/hidden rounded-md.*sm:inline-flex/.test(strip), 'presets no longer hide on phones — the dedicated row has the width')
+  assert.ok(!strip.includes('PRESETS.map'), 'the shared strip no longer renders preset chips')
   // Sales feeds History+Manage through the slot; Returns feeds Export+History
   // there while its Add button stays a PRIMARY action with an always-visible
   // label.
@@ -260,7 +275,7 @@ test('Part 560: the Start→End date row is lifted OUT of the stats fold into a 
   // button ... this should be right above the search bar row ... make sure
   // this applies to all section, mini sections, and pages ... stats can be
   // placed at the top ... but of course the start and end date will also
-  // apply to it." The picker + presets moved into the shared StatsRangeRow,
+  // apply to it." The picker moved into the shared StatsRangeRow,
   // which each list page renders directly above its search bar (inside the
   // pinned wrapper, per the sticky search+date rule); the page stops passing
   // range/onRangeChange to StatsStrip and keeps feeding the strip's cards
@@ -271,7 +286,7 @@ test('Part 560: the Start→End date row is lifted OUT of the stats fold into a 
   // that owns that file.
   const rangeRow = read('src/components/shared/StatsRangeRow.tsx')
   assert.ok(rangeRow.includes('<DateTimeRangePicker'), 'StatsRangeRow carries the shared Start→End picker')
-  assert.ok(rangeRow.includes('range_today') && rangeRow.includes('range_this_year'), 'StatsRangeRow carries the presets')
+  assert.ok(!rangeRow.includes('PRESETS.map'), 'StatsRangeRow does not render preset chips')
   // Sales/Returns/Fees place it above the search bar; Inventory's stats sit on
   // their own section chip so its row leads the stats section instead — but all
   // four render the shared row wired to stripRange and drop the props from the

@@ -43,7 +43,7 @@ import { buildMovementGroups, getMovementGroupPage, movementColorClass, movement
 import { buildStockHealthSegments } from './stockHealthSummary'
 import StatsStrip, { statsPresetRange, type StatCardDef } from '../shared/StatsStrip.tsx'
 import StatsRangeRow from '../shared/StatsRangeRow.tsx'
-import type { DateTimeRange } from '../shared/DateTimeRangePicker'
+import { todayDateTimeRange, type DateTimeRange } from '../shared/DateTimeRangePicker'
 import { getSalesStatsStrip } from '../../api/salesTransport.ts'
 import { getReturnsReport } from '../../api/returnsReadTransport.ts'
 
@@ -465,8 +465,8 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
   const [movFilter,     setMovFilter]     = useState('all')
   const [movementUserFilter, setMovementUserFilter] = useState('all')
   const [userOptions, setUserOptions] = useState<InventoryUserOption[]>([])
-  const [movementStartDate, setMovementStartDate] = useState('')
-  const [movementEndDate, setMovementEndDate] = useState('')
+  const [movementStartDate, setMovementStartDate] = useState(() => todayDateTimeRange().startDate)
+  const [movementEndDate, setMovementEndDate] = useState(() => todayDateTimeRange().endDate)
   // The Start → End range picker is the ONE date control on Movements now
   // (user, Aug 31: "remove [All time]; the date is default, and start date
   // and end date for customizing which is for many sections and pages

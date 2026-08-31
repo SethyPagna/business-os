@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import AppSelect from '../shared/AppSelect.tsx'
-import DateTimeRangePicker from '../shared/DateTimeRangePicker'
+import DateTimeRangePicker, { todayDateTimeRange } from '../shared/DateTimeRangePicker'
 import SearchInput from '../shared/SearchInput'
 import { fmtDateTime24 } from '../../utils/formatters'
 import { getLegacyDeletedSales } from '../../api/auditLogTransport.ts'
@@ -61,8 +61,8 @@ export default function LegacyDeletedSalesSection() {
   const tr = (key: string, fallback: string): string => t(key) || fallback
   const [search, setSearch] = useState('')
   const [cashier, setCashier] = useState('all')
-  const [fromDate, setFromDate] = useState('')
-  const [toDate, setToDate] = useState('')
+  const [fromDate, setFromDate] = useState(() => todayDateTimeRange().startDate)
+  const [toDate, setToDate] = useState(() => todayDateTimeRange().endDate)
   const [page, setPage] = useState(1)
   const [refreshToken, setRefreshToken] = useState(0)
   const [data, setData] = useState<DeletedPayload | null>(null)

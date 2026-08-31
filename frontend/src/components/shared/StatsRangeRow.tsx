@@ -1,6 +1,5 @@
 import { type ReactNode } from 'react'
 import DateTimeRangePicker, { type DateTimeRange } from './DateTimeRangePicker.tsx'
-import { statsPresetRange, activeStatsPreset, type StatsPresetKey } from './statsStripPresets.ts'
 
 // The dedicated Start→End date-range row (user, Aug 31: "fish out the start
 // date and end date from the stats button ... right above the search bar row
@@ -12,10 +11,10 @@ import { statsPresetRange, activeStatsPreset, type StatsPresetKey } from './stat
 // renders THIS component for that row so the control reads identically
 // app-wide (the cross-surface rule).
 //
-// It carries the compact Start → End pill (the shared DateTimeRangePicker)
-// plus the Today / 7 Days / This Month / This Year preset chips that snap the
-// range — the same markup the strip used to render, verbatim, so relocating
-// it changed placement only, not look. A page adopts it by rendering
+// It carries the compact Start → End date/time pill (the shared
+// DateTimeRangePicker). The old Today / 7 Days / This Month / This Year preset
+// chips were removed at the user's direction; every page starts on today and
+// the picker is the one place to change the range. A page adopts it by rendering
 // <StatsRangeRow> above its search bar and no longer passing range/
 // onRangeChange to <StatsStrip> (StatsStrip only draws its own internal date
 // row when a caller still passes those, which keeps not-yet-migrated callers
@@ -24,18 +23,12 @@ import { statsPresetRange, activeStatsPreset, type StatsPresetKey } from './stat
 
 type TranslateFn = (key: string) => string | undefined
 
-const PRESETS: Array<{ key: StatsPresetKey; langKey: string; fallback: string }> = [
-  { key: 'today', langKey: 'range_today', fallback: 'Today' },
-  { key: '7d', langKey: 'range_7d', fallback: '7 Days' },
-  { key: 'month', langKey: 'range_this_month', fallback: 'This Month' },
-  { key: 'year', langKey: 'range_this_year', fallback: 'This Year' },
-]
-
 export default function StatsRangeRow({
   range,
   onRangeChange,
   t,
   actions,
+  showTime = false,
   className = '',
 }: {
   range: DateTimeRange
@@ -43,30 +36,23 @@ export default function StatsRangeRow({
   t: TranslateFn
   /** Fit-sized trailing controls (e.g. an Add button) that share the row. */
   actions?: ReactNode
+  /** Enable only when the backing endpoint stores timestamps and honors the
+   * time bounds. Date-only ledgers must not advertise a fake time filter. */
+  showTime?: boolean
   className?: string
 }) {
-  const tr = (key: string, fallback: string): string => {
-    const value = t(key)
-    return value && value !== key ? value : fallback
-  }
-  const activePreset = activeStatsPreset(range)
   return (
     <div className={`flex min-w-0 flex-wrap items-center gap-1 ${className}`}>
-      <DateTimeRangePicker value={range} onChange={onRangeChange} t={t} showTime={false} />
-      {PRESETS.map((preset) => (
-        <button
-          key={preset.key}
-          type="button"
-          onClick={() => onRangeChange(statsPresetRange(preset.key))}
-          className={`inline-flex rounded-md px-1.5 py-1 text-[11px] font-medium transition-colors ${
-            activePreset === preset.key
-              ? 'bg-slate-800 text-white dark:bg-slate-200 dark:text-slate-900'
-              : 'bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-zinc-800 dark:text-gray-300 dark:hover:bg-zinc-700'
-          }`}
-        >
-          {tr(preset.langKey, preset.fallback)}
-        </button>
-      ))}
+      {/* On small screens the Start→End picker takes the whole row; from `sm`
+          up it shrinks back to the compact pill. */}
+      <DateTimeRangePicker
+        value={range}
+        onChange={onRangeChange}
+        t={t}
+        showTime={showTime}
+        className="w-full sm:w-auto"
+        triggerClassName="flex w-full items-center justify-center gap-2 rounded-md px-3 py-1.5 sm:inline-flex sm:w-auto sm:justify-start sm:gap-2.5 sm:px-4 sm:py-2.5 sm:min-w-[21rem]"
+      />
       {actions ? (
         <div className="ml-auto flex min-w-0 flex-wrap items-center justify-end gap-1">{actions}</div>
       ) : null}

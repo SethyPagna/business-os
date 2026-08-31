@@ -53,14 +53,6 @@ export interface StatCardDef {
 }
 
 export { statsPresetRange, activeStatsPreset, type StatsPresetKey } from './statsStripPresets.ts'
-import { statsPresetRange, activeStatsPreset, type StatsPresetKey } from './statsStripPresets.ts'
-
-const PRESETS: Array<{ key: StatsPresetKey; langKey: string; fallback: string }> = [
-  { key: 'today', langKey: 'range_today', fallback: 'Today' },
-  { key: '7d', langKey: 'range_7d', fallback: '7 Days' },
-  { key: 'month', langKey: 'range_this_month', fallback: 'This Month' },
-  { key: 'year', langKey: 'range_this_year', fallback: 'This Year' },
-]
 
 const VALUE_TONE: Record<NonNullable<StatCardDef['tone']>, string> = {
   ok: 'text-emerald-600 dark:text-emerald-400',
@@ -124,7 +116,6 @@ export default function StatsStrip({
   // ONE fold open at a time; tapping the open card closes it.
   const [openKey, setOpenKey] = useState<string | null>(null)
   const openCard = cards.find((card) => card.key === openKey && card.details?.length) || null
-  const activePreset = range ? activeStatsPreset(range) : null
   // Closing the strip dismisses any open card float too, so reopening the
   // strip doesn't silently resurface a detail dialog the user had moved past.
   useEffect(() => {
@@ -170,16 +161,14 @@ export default function StatsStrip({
       </div>
 
       {statsOpen && range && onRangeChange ? (
-        // The date row carries the picker + its presets, sized to content and
-        // left-aligned (the dashboard shape: picker then preset chips, spare
-        // width trailing). The secondary buttons live on the chip row above,
+        // The date row carries the one range picker, sized to content and
+        // left-aligned. The secondary buttons live on the chip row above,
         // not here — expanding the strip never moves them (user, Aug 31).
         <div className="mt-1.5 flex min-w-0 flex-wrap items-center gap-1">
           {/* Same full-width-on-small-screens treatment as StatsRangeRow (user,
               Aug 31: "the date range should take the whole row" on small
               screens): the picker is a full-width flex item below `sm`, so the
-              preset chips wrap onto their own line beneath it, then it settles
-              back to the compact pill from `sm` up. Kept identical to
+              control settles back to the compact pill from `sm` up. Kept identical to
               StatsRangeRow so the inline (Inventory/Dashboard) and lifted-out
               (Sales/Returns/Fees) date rows read the same. */}
           <DateTimeRangePicker
@@ -188,22 +177,8 @@ export default function StatsStrip({
             t={t}
             showTime={false}
             className="w-full sm:w-auto"
-            triggerClassName="flex w-full items-center justify-center gap-2 rounded-md px-3 py-1.5 sm:inline-flex sm:w-auto sm:justify-start sm:gap-2.5 sm:px-4 sm:py-2.5 sm:min-w-[15rem]"
+            triggerClassName="flex w-full items-center justify-center gap-2 rounded-md px-3 py-1.5 sm:inline-flex sm:w-auto sm:justify-start sm:gap-2.5 sm:px-4 sm:py-2.5 sm:min-w-[21rem]"
           />
-          {PRESETS.map((preset) => (
-            <button
-              key={preset.key}
-              type="button"
-              onClick={() => onRangeChange(statsPresetRange(preset.key))}
-              className={`inline-flex rounded-md px-1.5 py-1 text-[11px] font-medium transition-colors ${
-                activePreset === preset.key
-                  ? 'bg-slate-800 text-white dark:bg-slate-200 dark:text-slate-900'
-                  : 'bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-zinc-800 dark:text-gray-300 dark:hover:bg-zinc-700'
-              }`}
-            >
-              {tr(preset.langKey, preset.fallback)}
-            </button>
-          ))}
         </div>
       ) : null}
 

@@ -15,7 +15,7 @@ import ExportMenu from '../shared/ExportMenu'
 import FilterMenu from '../shared/FilterMenu'
 import PaginationControls, { clampPage, DEFAULT_PAGE_SIZE } from '../shared/PaginationControls'
 import { useIsPageActive } from '../shared/pageActivity'
-import DateTimeRangePicker from '../shared/DateTimeRangePicker'
+import DateTimeRangePicker, { todayDateTimeRange } from '../shared/DateTimeRangePicker'
 import { buildTimeActionSections, getAvailableYears, getTimeGroupingMode, toggleIdSet } from '../../utils/groupedRecords.ts'
 import { buildPeriodFilterOptions } from '../../utils/periodFilterOptions.ts'
 import {
@@ -340,8 +340,8 @@ export default function AuditLog() {
   // the year/month period chips stay as the grouping period and as the
   // fallback date range when no explicit range is typed. Native date inputs
   // carry ISO yyyy-mm-dd, exactly the shape the server already accepts.
-  const [rangeStart, setRangeStart] = useState('')
-  const [rangeEnd, setRangeEnd] = useState('')
+  const [rangeStart, setRangeStart] = useState(() => todayDateTimeRange().startDate)
+  const [rangeEnd, setRangeEnd] = useState(() => todayDateTimeRange().endDate)
   const [actionFilter, setActionFilter] = useState('all')
   // I2: filter by the record's entity ("page"/area) -- entity or legacy
   // table_name server-side, comma-joined multi-select like action/user.

@@ -14,7 +14,7 @@ import Boxes from 'lucide-react/dist/esm/icons/boxes.js'
 import { isBrokenLocalizedString, useApp, useSync } from '../../AppContext'
 import Modal from '../shared/Modal'
 import AlphaIndexRail from '../shared/AlphaIndexRail'
-import DateTimeRangePicker from '../shared/DateTimeRangePicker'
+import DateTimeRangePicker, { todayDateTimeRange } from '../shared/DateTimeRangePicker'
 import FilterMenu from '../shared/FilterMenu'
 import PortalMenu from '../shared/PortalMenu'
 import AppSelect from '../shared/AppSelect'
@@ -664,8 +664,8 @@ function ProductsFullEditor() {
   // 9.2: 'all' | 'auto' -- server-side facet over auto_merged_count.
   const [mergedFilter, setMergedFilter] = useState('all')
   const [promotionRules, setPromotionRules] = useState<PromotionRule[]>([])
-  const [createdDateFrom, setCreatedDateFrom] = useState('')
-  const [createdDateTo, setCreatedDateTo] = useState('')
+  const [createdDateFrom, setCreatedDateFrom] = useState(() => todayDateTimeRange().startDate)
+  const [createdDateTo, setCreatedDateTo] = useState(() => todayDateTimeRange().endDate)
   // Y15: the page is chip-sectioned like Promotions -- a switcher in the
   // header flips between the product listing and the Stock Changes ledger,
   // which used to be a folded card at the bottom of the same scroll.

@@ -6,7 +6,7 @@ import HandCoins from 'lucide-react/dist/esm/icons/hand-coins.js'
 import ChevronDown from 'lucide-react/dist/esm/icons/chevron-down.js'
 import Check from 'lucide-react/dist/esm/icons/check.js'
 import { useApp as useAppHook } from '../../AppContext.tsx'
-import DateTimeRangePicker, { EMPTY_DATE_TIME_RANGE, type DateTimeRange } from '../shared/DateTimeRangePicker.tsx'
+import DateTimeRangePicker, { todayDateTimeRange, type DateTimeRange } from '../shared/DateTimeRangePicker.tsx'
 import AppSelect, { type AppSelectOption } from '../shared/AppSelect.tsx'
 import LazyPortalMenu from '../shared/LazyPortalMenu'
 import { makeReportMoneyFormatter } from '../../utils/reportMoney.ts'
@@ -33,16 +33,6 @@ const useApp = useAppHook as unknown as () => ReportsHubAppContext
 interface BranchOption { id: string; name: string }
 type ReportType = 'sales' | 'returns' | 'fees'
 
-function monthStartIso(): string {
-  const now = new Date()
-  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`
-}
-
-function todayIso(): string {
-  const now = new Date()
-  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
-}
-
 export default function ReportsHub() {
   const { t, fmtUSD, fmtKHR, khrToUsd, usdToKhr, displayCurrency, getPermissionTier } = useApp()
   const trh = (key: string, fallback: string): string => { const v = t(key); return v && v !== key ? v : fallback }
@@ -65,13 +55,24 @@ export default function ReportsHub() {
     canFees ? { id: 'fees' as const, label: trh('fees', 'Expenses'), icon: HandCoins } : null,
   ].filter(Boolean) as Array<{ id: ReportType; label: string; icon: ComponentType<{ className?: string }> }>), [canSales, canReturns, canFees, t]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  const [range, setRange] = useState<DateTimeRange>(() => ({ ...EMPTY_DATE_TIME_RANGE, startDate: monthStartIso(), endDate: todayIso() }))
+  const [range, setRange] = useState<DateTimeRange>(() => todayDateTimeRange())
   const [branchFilter, setBranchFilter] = useState('')
   const [branches, setBranches] = useState<BranchOption[]>([])
   // SINGLE-select with an explicit "All" chip (user, Aug 30: "instead of
   // selecting all just make an additional 'All' so it is not multi select
   // but single for the report's options").
   const [selectedType, setSelectedType] = useState<'all' | ReportType>('all')
+
+  // Returns and Expenses are date-only ledgers. If a user narrows Sales to a
+  // time window and then leaves that report, restore full-day bounds so no
+  // hidden time filter survives while the 24-hour control is intentionally
+  // absent (including the mixed "All" view).
+  useEffect(() => {
+    if (selectedType === 'sales') return
+    setRange((current) => current.startTime === '00:00' && current.endTime === '23:59'
+      ? current
+      : { ...current, startTime: '00:00', endTime: '23:59' })
+  }, [selectedType])
 
   useEffect(() => {
     let cancelled = false
@@ -118,7 +119,7 @@ export default function ReportsHub() {
           doesn't push down other details"). The branch select rides the same
           row and ellipsizes long names. */}
       <div className="sticky top-0 z-20 -mx-1 flex flex-wrap items-center gap-1.5 bg-gray-50/95 px-1 py-1 backdrop-blur dark:bg-gray-900/95">
-        <DateTimeRangePicker value={range} onChange={setRange} t={t} />
+        <DateTimeRangePicker value={range} onChange={setRange} t={t} showTime={selectedType === 'sales'} />
         <LazyPortalMenu
           align="auto"
           trigger={(

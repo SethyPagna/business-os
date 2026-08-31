@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import Download from 'lucide-react/dist/esm/icons/download.js'
 import Modal from '../shared/Modal'
 import { downloadCSV } from '../../utils/csv.ts'
-import DateTimeRangePicker, { EMPTY_DATE_TIME_RANGE, type DateTimeRange } from '../shared/DateTimeRangePicker.tsx'
+import DateTimeRangePicker, { todayDateTimeRange, type DateTimeRange } from '../shared/DateTimeRangePicker.tsx'
 import { getSalesDailyReport, getSalesDayReport } from '../../api/salesTransport.ts'
 import { ALL_STATUSES, getStatusLabel } from './StatusBadge'
 import { useApp as useAppHook } from '../../AppContext.tsx'
@@ -93,16 +93,6 @@ interface SalesDailyReportProps {
   titleNode?: ReactNode
 }
 
-function monthStartIso(): string {
-  const now = new Date()
-  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`
-}
-
-function todayIso(): string {
-  const now = new Date()
-  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
-}
-
 function displayDay(iso: string): string {
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso)
   if (!m) return iso
@@ -134,11 +124,7 @@ function timeParams(range: DateTimeRange): Record<string, string | number> {
 }
 
 export default function SalesDailyReport({ t, fmtMoney, active = true, range: externalRange, onRangeChange, branchId: externalBranchId, embedded = false, titleNode }: SalesDailyReportProps) {
-  const [internalRange, setInternalRange] = useState<DateTimeRange>(() => ({
-    ...EMPTY_DATE_TIME_RANGE,
-    startDate: monthStartIso(),
-    endDate: todayIso(),
-  }))
+  const [internalRange, setInternalRange] = useState<DateTimeRange>(() => todayDateTimeRange())
   const range = externalRange ?? internalRange
   const setRange = onRangeChange ?? setInternalRange
   const [days, setDays] = useState<DayRow[]>([])

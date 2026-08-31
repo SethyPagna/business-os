@@ -7,15 +7,31 @@ import X from 'lucide-react/dist/esm/icons/x.js'
 import AppSelect from './AppSelect'
 
 // X1 (Part 395), redesigned Aug 30 per user direction (twice): a compact
-// "Start → End" trigger pill, and a panel laid out as two ENDPOINT BOXES
+// trigger pill, and a panel laid out as two ENDPOINT BOXES
 // (Start | → | End), each holding a large editable MM/DD/YYYY date with its
 // own month + year selects underneath -- replacing both the old chip strips
 // AND the first redesign's separate manual-input row + label/select rows.
 // The box whose date the next calendar click will set carries a blue ring
 // (the day-click start→end alternation, made visible); clicking a box moves
-// that focus. Below: an optional HH:MM–HH:MM time row and a Mon-first
+// that focus. Below: an optional 24-hour HH:MM–HH:MM time row and a Mon-first
 // calendar range grid with its own ‹ month › navigation. Closed by the red
 // ✕ or an outside click.
+//
+// The trigger pill never spells out the words "Start Date"/"End Date"
+// (user, Aug 31): it always reads MM/DD/YYYY → MM/DD/YYYY -- the literal
+// display format as a placeholder when empty, the real dates once picked --
+// and appends each endpoint's own 24-hour HH:MM once a time is set.
+//
+// Times are entered and shown in 24-hour HH:MM on purpose. The native
+// <input type="time"> was dropped because it renders 12-hour AM/PM under the
+// pinned en-US locale, which fights the app-wide 24-hour convention; the row
+// is now a pair of plain HH:MM text fields normalized to 24-hour on commit.
+//
+// The month + year selects in the calendar header are AppSelects whose menu
+// is portaled to <body>. The panel's own outside-click closer therefore
+// explicitly ignores clicks that land inside an [data-app-select-menu] popup
+// -- otherwise picking a month or year (a click outside rootRef) would slam
+// the whole panel shut before the navigation could take effect.
 //
 // Display format is MM/DD/YYYY on purpose: the stock mockup artwork shows
 // DD/MM placeholders, but mm/dd/yyyy-everywhere is a settled decision
@@ -67,6 +83,12 @@ function isoOf(year: number, month1: number, day: number): string {
   return `${year}-${pad2(month1)}-${pad2(day)}`
 }
 
+/** App-wide initial range: the current local business day, in full. */
+export function todayDateTimeRange(now = new Date()): DateTimeRange {
+  const today = isoOf(now.getFullYear(), now.getMonth() + 1, now.getDate())
+  return { startDate: today, endDate: today, startTime: '00:00', endTime: '23:59' }
+}
+
 function displayDate(iso: string): string {
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso)
   return m ? `${m[2]}/${m[3]}/${m[1]}` : ''
@@ -84,6 +106,33 @@ function parseManualDate(raw: string): string | null {
   if (month < 1 || month > 12 || day < 1 || year < 1970 || year > 2999) return null
   if (day > new Date(Date.UTC(year, month, 0)).getUTCDate()) return null
   return isoOf(year, month, day)
+}
+
+// Accepts 24-hour time typed loosely -- "14:30", "1430", "930", "9", "9:5" --
+// and normalizes to "HH:MM" (00:00–23:59). Returns '' to clear on empty input,
+// or null when the text can't be read as a valid 24-hour time (so the caller
+// can snap the field back to its stored value rather than store garbage).
+function normalizeTime(raw: string): string | null {
+  const s = raw.trim()
+  if (!s) return ''
+  let hour: number
+  let minute: number
+  const colon = /^(\d{1,2}):(\d{1,2})$/.exec(s)
+  if (colon) {
+    hour = Number(colon[1])
+    minute = Number(colon[2])
+  } else if (/^\d{3,4}$/.test(s)) {
+    const p = s.padStart(4, '0')
+    hour = Number(p.slice(0, 2))
+    minute = Number(p.slice(2))
+  } else if (/^\d{1,2}$/.test(s)) {
+    hour = Number(s)
+    minute = 0
+  } else {
+    return null
+  }
+  if (hour > 23 || minute > 59) return null
+  return `${pad2(hour)}:${pad2(minute)}`
 }
 
 function todayIso(): string {
@@ -115,6 +164,10 @@ export default function DateTimeRangePicker({
   const [endText, setEndText] = useState(() => displayDate(value.endDate))
   const [startInvalid, setStartInvalid] = useState(false)
   const [endInvalid, setEndInvalid] = useState(false)
+  // Time text mirrors the value but stays editable mid-keystroke (like the
+  // date fields) so a half-typed "14" never commits before the ":30".
+  const [startTimeText, setStartTimeText] = useState(() => value.startTime)
+  const [endTimeText, setEndTimeText] = useState(() => value.endTime)
 
   useEffect(() => {
     setStartText(displayDate(value.startDate))
@@ -128,9 +181,20 @@ export default function DateTimeRangePicker({
   }, [value.startDate, value.endDate])
 
   useEffect(() => {
+    setStartTimeText(value.startTime)
+    setEndTimeText(value.endTime)
+  }, [value.startTime, value.endTime])
+
+  useEffect(() => {
     if (!open) return undefined
     const onDown = (event: MouseEvent) => {
-      if (rootRef.current && !rootRef.current.contains(event.target as Node)) setOpen(false)
+      const target = event.target as Element | null
+      // A click inside a portaled AppSelect popup (the month/year menus render
+      // to <body>, outside rootRef) must NOT close the panel -- otherwise
+      // choosing a month or year slams the whole picker shut before the
+      // navigation lands.
+      if (target && typeof target.closest === 'function' && target.closest('[data-app-select-menu]')) return
+      if (rootRef.current && !rootRef.current.contains(target as Node)) setOpen(false)
     }
     document.addEventListener('mousedown', onDown)
     return () => document.removeEventListener('mousedown', onDown)
@@ -185,11 +249,34 @@ export default function DateTimeRangePicker({
     }
   }
 
+  const commitTime = (which: 'start' | 'end', raw: string) => {
+    const norm = normalizeTime(raw)
+    if (norm === null) {
+      // Unparseable -- snap the field back to the stored value.
+      if (which === 'start') setStartTimeText(value.startTime)
+      else setEndTimeText(value.endTime)
+      return
+    }
+    if (which === 'start') {
+      setStartTimeText(norm)
+      if (norm !== value.startTime) apply({ startTime: norm })
+    } else {
+      setEndTimeText(norm)
+      if (norm !== value.endTime) apply({ endTime: norm })
+    }
+  }
+
   const currentYear = Number(today.slice(0, 4))
-  const yearOptions = useMemo(() => Array.from({ length: 8 }, (_, i) => {
-    const year = currentYear - 6 + i
-    return { value: String(year), label: String(year) }
-  }), [currentYear])
+  // A generous back-window (10y) plus next year, and ALWAYS the year actually
+  // in view -- so chevron-navigating past the window still leaves the Year
+  // select showing (and freely re-selectable to) the real viewed year rather
+  // than silently falling back to the first option.
+  const yearOptions = useMemo(() => {
+    const years = new Set<number>()
+    for (let year = currentYear - 10; year <= currentYear + 1; year += 1) years.add(year)
+    years.add(viewYear)
+    return Array.from(years).sort((a, b) => a - b).map((year) => ({ value: String(year), label: String(year) }))
+  }, [currentYear, viewYear])
   const monthOptions = useMemo(() => MONTH_LABELS.map((label, index) => ({ value: String(index + 1), label })), [])
 
   const stepViewMonth = (delta: number) => {
@@ -215,12 +302,16 @@ export default function DateTimeRangePicker({
   const inRange = (iso: string) => Boolean(value.startDate && value.endDate && iso >= value.startDate && iso <= value.endDate)
   const isEdge = (iso: string) => iso === value.startDate || iso === value.endDate
 
-  const hasDates = Boolean(value.startDate || value.endDate)
-  const timeSuffix = showTime && (value.startTime || value.endTime)
-    ? ` · ${value.startTime || '00:00'}–${value.endTime || '23:59'}`
-    : ''
-
   const hasSelection = isDateTimeRangeActive(value) || Boolean(value.startTime || value.endTime)
+
+  // Trigger labels: always the literal MM/DD/YYYY format -- as a placeholder
+  // when a side is empty, as the real date once picked -- never the words
+  // "Start Date"/"End Date" (user, Aug 31). Each side carries its own 24-hour
+  // HH:MM once any time is set (the unset side defaults to the day's edges,
+  // matching the panel's old suffix).
+  const showTimes = showTime && Boolean(value.startTime || value.endTime)
+  const startTriggerLabel = `${displayDate(value.startDate) || 'MM/DD/YYYY'}${showTimes ? ` ${value.startTime || '00:00'}` : ''}`
+  const endTriggerLabel = `${displayDate(value.endDate) || 'MM/DD/YYYY'}${showTimes ? ` ${value.endTime || '23:59'}` : ''}`
 
   // One endpoint box: START or END label, the date itself as a LARGE editable
   // MM/DD/YYYY input (bumped from text-xs per user direction "the dates can
@@ -293,19 +384,9 @@ export default function DateTimeRangePicker({
         aria-label={t('date_time_range') || 'Date and time range'}
       >
         <CalendarDays className="h-4 w-4 shrink-0 text-blue-500 dark:text-blue-400" />
-        {hasDates ? (
-          <>
-            <span className="truncate">{displayDate(value.startDate) || '…'}</span>
-            <ArrowRight className="h-5 w-5 shrink-0 text-blue-500 dark:text-blue-400" strokeWidth={2.5} />
-            <span className="truncate">{displayDate(value.endDate) || '…'}{timeSuffix}</span>
-          </>
-        ) : (
-          <>
-            <span>{t('range_start') || 'Start Date'}</span>
-            <ArrowRight className="h-5 w-5 shrink-0 text-blue-500 dark:text-blue-400" strokeWidth={2.5} />
-            <span>{t('range_end') || 'End Date'}</span>
-          </>
-        )}
+        <span className={`truncate ${hasSelection ? '' : 'text-slate-400 dark:text-slate-500'}`}>{startTriggerLabel}</span>
+        <ArrowRight className="h-5 w-5 shrink-0 text-blue-500 dark:text-blue-400" strokeWidth={2.5} />
+        <span className={`truncate ${hasSelection ? '' : 'text-slate-400 dark:text-slate-500'}`}>{endTriggerLabel}</span>
       </button>
 
       {open ? (
@@ -341,24 +422,35 @@ export default function DateTimeRangePicker({
             {renderEndpointBox('end')}
           </div>
 
-          {/* Time range (optional per surface) */}
+          {/* Time range (optional per surface). Plain 24-hour HH:MM text
+              fields -- NOT <input type="time">, which renders 12-hour AM/PM
+              under the pinned en-US locale. Normalized on blur/Enter. */}
           {showTime ? (
             <div className="mt-2 flex items-center justify-center gap-1.5 rounded-md border border-slate-200 px-2 py-1.5 dark:border-slate-600">
               <input
-                type="time"
-                className="bg-transparent text-xs text-slate-800 outline-none dark:text-slate-100"
-                value={value.startTime}
-                onChange={(event) => apply({ startTime: event.target.value })}
+                inputMode="numeric"
+                maxLength={5}
+                className="w-14 bg-transparent text-center text-xs tabular-nums text-slate-800 outline-none placeholder:text-slate-400 dark:text-slate-100"
+                placeholder="HH:MM"
+                value={startTimeText}
+                onChange={(event) => setStartTimeText(event.target.value)}
+                onBlur={(event) => commitTime('start', event.target.value)}
+                onKeyDown={(event) => { if (event.key === 'Enter') commitTime('start', (event.target as HTMLInputElement).value) }}
                 aria-label={t('start_time') || 'Start time'}
               />
               <span className="text-slate-400">—</span>
               <input
-                type="time"
-                className="bg-transparent text-xs text-slate-800 outline-none dark:text-slate-100"
-                value={value.endTime}
-                onChange={(event) => apply({ endTime: event.target.value })}
+                inputMode="numeric"
+                maxLength={5}
+                className="w-14 bg-transparent text-center text-xs tabular-nums text-slate-800 outline-none placeholder:text-slate-400 dark:text-slate-100"
+                placeholder="HH:MM"
+                value={endTimeText}
+                onChange={(event) => setEndTimeText(event.target.value)}
+                onBlur={(event) => commitTime('end', event.target.value)}
+                onKeyDown={(event) => { if (event.key === 'Enter') commitTime('end', (event.target as HTMLInputElement).value) }}
                 aria-label={t('end_time') || 'End time'}
               />
+              <span className="ml-1 text-[10px] font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">24h</span>
             </div>
           ) : null}
 

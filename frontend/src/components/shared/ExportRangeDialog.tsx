@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import Modal from './Modal'
-import DateTimeRangePicker from './DateTimeRangePicker'
+import DateTimeRangePicker, { todayDateTimeRange } from './DateTimeRangePicker'
 
 // The shared range step in front of an export (user, Aug 31: "do the date
 // range for all the exports... if the page with export also has start/end
@@ -31,7 +31,10 @@ export default function ExportRangeDialog({
     const value = t(key)
     return value && value !== key ? value : fallback
   }
-  const [range, setRange] = useState<ExportRange>({ startDate: initial.startDate || '', endDate: initial.endDate || '' })
+  const [range, setRange] = useState<ExportRange>(() => {
+    const today = todayDateTimeRange()
+    return { startDate: initial.startDate || today.startDate, endDate: initial.endDate || today.endDate }
+  })
   const [busy, setBusy] = useState(false)
 
   const run = async () => {

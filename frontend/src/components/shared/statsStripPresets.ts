@@ -12,7 +12,7 @@ export interface DateTimeRange {
   endTime: string
 }
 
-const EMPTY_DATE_TIME_RANGE: DateTimeRange = { startDate: '', endDate: '', startTime: '', endTime: '' }
+const FULL_DAY_TIMES = { startTime: '00:00', endTime: '23:59' }
 
 export type StatsPresetKey = 'today' | '7d' | 'month' | 'year'
 
@@ -24,22 +24,23 @@ function isoDay(d: Date): string {
   return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`
 }
 
-/** Date-only range for a preset. */
+/** Full-day range for a legacy preset/default. The UI no longer renders
+ * preset chips, but existing callers use `today` as their initial range. */
 export function statsPresetRange(preset: StatsPresetKey, now = new Date()): DateTimeRange {
   const end = isoDay(now)
-  if (preset === 'today') return { ...EMPTY_DATE_TIME_RANGE, startDate: end, endDate: end }
+  if (preset === 'today') return { ...FULL_DAY_TIMES, startDate: end, endDate: end }
   if (preset === '7d') {
     const start = new Date(now)
     start.setDate(start.getDate() - 6)
-    return { ...EMPTY_DATE_TIME_RANGE, startDate: isoDay(start), endDate: end }
+    return { ...FULL_DAY_TIMES, startDate: isoDay(start), endDate: end }
   }
   if (preset === 'month') {
-    return { ...EMPTY_DATE_TIME_RANGE, startDate: `${now.getFullYear()}-${pad2(now.getMonth() + 1)}-01`, endDate: end }
+    return { ...FULL_DAY_TIMES, startDate: `${now.getFullYear()}-${pad2(now.getMonth() + 1)}-01`, endDate: end }
   }
-  return { ...EMPTY_DATE_TIME_RANGE, startDate: `${now.getFullYear()}-01-01`, endDate: end }
+  return { ...FULL_DAY_TIMES, startDate: `${now.getFullYear()}-01-01`, endDate: end }
 }
 
-/** Which preset (if any) the current range equals — highlights its chip. */
+/** Which legacy preset (if any) the current range equals. */
 export function activeStatsPreset(range: DateTimeRange, now = new Date()): StatsPresetKey | null {
   const presets: StatsPresetKey[] = ['today', '7d', 'month', 'year']
   for (const preset of presets) {

@@ -9,7 +9,7 @@ import LayoutDashboard from 'lucide-react/dist/esm/icons/layout-dashboard.js'
 import RefreshCw from 'lucide-react/dist/esm/icons/refresh-cw.js'
 import StatsStrip, { type StatCardDef } from '../shared/StatsStrip.tsx'
 import { fmtTime, getBusinessTimezoneOffsetHours } from '../../utils/formatters'
-import { todayStr, offsetDate, businessYear, businessMonth } from '../../utils/dateHelpers'
+import { todayStr } from '../../utils/dateHelpers'
 import Download from 'lucide-react/dist/esm/icons/download.js'
 import DateTimeRangePicker, { type DateTimeRange } from '../shared/DateTimeRangePicker'
 import { useIsPageActive } from '../shared/pageActivity'
@@ -223,12 +223,6 @@ interface DashboardFilterPrefs {
   customEnd: string
 }
 
-interface DashboardRangePreset {
-  id: DashboardRangeId
-  label: string
-  getRange: (() => { start: string; end: string; gran: DashboardGranularity }) | null
-}
-
 interface KpiDetail {
   id: string
   label: ReactNode
@@ -344,8 +338,8 @@ function readDashboardFilterPrefs(storageKeys: string | string[]): DashboardFilt
       const parsed = JSON.parse(raw)
       if (!parsed || typeof parsed !== 'object') continue
       return {
-        rangeId: typeof parsed.rangeId === 'string' ? normalizeDashboardRangeId(parsed.rangeId) : 'month',
-        customStart: typeof parsed.customStart === 'string' ? parsed.customStart : offsetDate(-29),
+        rangeId: typeof parsed.rangeId === 'string' ? normalizeDashboardRangeId(parsed.rangeId) : 'custom',
+        customStart: typeof parsed.customStart === 'string' ? parsed.customStart : todayStr(),
         customEnd: typeof parsed.customEnd === 'string' ? parsed.customEnd : todayStr(),
       }
     }
@@ -370,7 +364,7 @@ function normalizeDashboardRangeId(rangeId: unknown): DashboardRangeId {
   if (rangeId === '30d') return 'month'
   if (rangeId === '90d') return 'year'
   if (rangeId === 'today' || rangeId === '7d' || rangeId === 'month' || rangeId === 'year' || rangeId === 'custom') return rangeId
-  return 'month'
+  return 'custom'
 }
 
 function compactDashboardMetaParts(parts: unknown[] = []): string[] {
@@ -649,19 +643,8 @@ export default function Dashboard() {
     [dashboardFilterStorageKeys],
   )
 
-  // Range presets use guarded translations so loading or missing language packs never show raw keys.
-  const RANGE_PRESETS: DashboardRangePreset[] = [
-    { id: 'today',  label: translateOr('range_today', 'Today', 'ថ្ងៃនេះ'),      getRange: () => ({ start: todayStr(), end: todayStr(), gran: 'day' }) },
-    { id: '7d',     label: translateOr('range_7d', '7 Days', '៧ ថ្ងៃ'),          getRange: () => ({ start: offsetDate(-6), end: todayStr(), gran: 'day' }) },
-    { id: 'month',  label: translateOr('range_this_month', 'This Month', 'ខែនេះ'),  getRange: () => ({ start: `${businessYear()}-${String(businessMonth()).padStart(2,'0')}-01`, end: todayStr(), gran: 'day' }) },
-    { id: 'year',   label: translateOr('range_this_year', 'This Year', 'ឆ្នាំនេះ'),   getRange: () => ({ start: `${businessYear()}-01-01`, end: todayStr(), gran: 'month' }) },
-    // Y19: the separate "Custom" chip is gone -- the Start → End pill below IS
-    // the custom editor. 'custom' stays a valid rangeId (set when the pill is
-    // edited); it just no longer renders as a preset button.
-  ]
-
   // Small-screen section chips. Labels use translateOr (the same guarded-
-  // fallback path RANGE_PRESETS uses) so no lang-pack edit is needed: 'overview'
+  // fallback path uses) so no lang-pack edit is needed: 'overview'
   // and 'inventory' reuse existing pack keys, and the "top performers" chip
   // carries its own English + Khmer fallback inline.
   const MOBILE_SECTIONS: Array<{ id: DashboardMobileSection; label: string }> = [
@@ -677,9 +660,11 @@ export default function Dashboard() {
   const [silentRefresh, setSilentRefresh] = useState(false)
   const [summaryError, setSummaryError] = useState('')
   const [analyticsError, setAnalyticsError] = useState('')
-  const [rangeId, setRangeId]     = useState<DashboardRangeId>(() => normalizeDashboardRangeId(initialFilterPrefs?.rangeId || 'month'))
-  const [customStart, setCustomStart] = useState(() => initialFilterPrefs?.customStart || offsetDate(-29))
-  const [customEnd, setCustomEnd]     = useState(() => initialFilterPrefs?.customEnd || todayStr())
+  // Preset chips are gone. A legacy saved preset deliberately migrates to the
+  // new app-wide default (today); a range the user explicitly edited remains.
+  const [rangeId, setRangeId]     = useState<DashboardRangeId>('custom')
+  const [customStart, setCustomStart] = useState(() => initialFilterPrefs?.rangeId === 'custom' ? (initialFilterPrefs.customStart || todayStr()) : todayStr())
+  const [customEnd, setCustomEnd]     = useState(() => initialFilterPrefs?.rangeId === 'custom' ? (initialFilterPrefs.customEnd || todayStr()) : todayStr())
   const [activeChart, setActiveChart] = useState<DashboardChartMode>('revenue')
   const [topMode, setTopMode]         = useState<DashboardTopMode>('revenue')
   const [customerDetail, setCustomerDetail]     = useState<DashboardCustomer | null>(null)
@@ -735,13 +720,8 @@ export default function Dashboard() {
   }, [navigateTo])
 
   const getCurrentDashboardRange = useCallback(() => {
-    const preset = RANGE_PRESETS.find(r => r.id === rangeId)
-    if (preset?.getRange) {
-      const range = preset.getRange()
-      return { start: range.start, end: range.end, granularity: range.gran }
-    }
     return { start: customStart, end: customEnd, granularity: 'day' as DashboardGranularity }
-  }, [customEnd, customStart, rangeId]) // eslint-disable-line
+  }, [customEnd, customStart])
 
   const loadDashboardStartup = useCallback(async () => {
     const requestId = beginTrackedRequest(startupRequestRef)
@@ -862,9 +842,9 @@ export default function Dashboard() {
     if (filterStorageKeyRef.current === dashboardFilterStorageKey) return
     filterStorageKeyRef.current = dashboardFilterStorageKey
     const nextPrefs = readDashboardFilterPrefs([dashboardFilterStorageKey, DASHBOARD_FILTER_STORAGE_FALLBACK_KEY])
-    setRangeId(normalizeDashboardRangeId(nextPrefs?.rangeId || 'month'))
-    setCustomStart(nextPrefs?.customStart || offsetDate(-29))
-    setCustomEnd(nextPrefs?.customEnd || todayStr())
+    setRangeId('custom')
+    setCustomStart(nextPrefs?.rangeId === 'custom' ? (nextPrefs.customStart || todayStr()) : todayStr())
+    setCustomEnd(nextPrefs?.rangeId === 'custom' ? (nextPrefs.customEnd || todayStr()) : todayStr())
   }, [dashboardFilterStorageKey])
 
   useEffect(() => {
@@ -1108,21 +1088,12 @@ export default function Dashboard() {
   const revenueExampleText = `${fmtUSD(aRevenue)} = ${fmtUSD(aGrossSales)} - ${fmtUSD(aDiscounts)} - ${fmtUSD(aRefundUsd)}`
   const collectedExampleText = `${fmtUSD(aRevenue + aTax + aDelivery)} = ${fmtUSD(aRevenue)} + ${fmtUSD(aTax)} + ${fmtUSD(aDelivery)}`
   const rangeLabel = (() => {
-    const p = RANGE_PRESETS.find(r => r.id === rangeId)
-    if (p?.getRange) { const r = p.getRange(); return `${r.start} - ${r.end}` }
     return `${customStart} - ${customEnd}`
   })()
 
-  const periodShort = (() => {
-    const map = {
-      today: translateOr('range_today', 'Today'),
-      '7d': translateOr('range_7d', 'Last 7 days'),
-      month: translateOr('range_this_month', 'This month'),
-      year: translateOr('range_this_year', 'This year'),
-      custom: translateOr('range_custom', 'Custom'),
-    }
-    return map[rangeId] || `${customStart} - ${customEnd}`
-  })()
+  const periodShort = customStart === todayStr() && customEnd === todayStr()
+    ? translateOr('range_today', 'Today')
+    : `${customStart} - ${customEnd}`
   const lowShortLabel = translateOr('low_stock_short', 'Low')
   const outShortLabel = translateOr('out_of_stock_short', 'Out')
   const matchStockShortLabel = translateOr('matching_stock_short', 'Matching')
@@ -1602,18 +1573,17 @@ ${translateOr('delivery_margin', 'Delivery margin')} ${fmtUSD(aDeliveryMargin)} 
         </div>
       ) : null}
 
-      {/* Range selector -- no card wrapper: the range pill and preset chips
-          carry their own borders, so boxing them again was a double card. */}
+      {/* Range selector -- one picker, no preset chips. */}
       <div className="px-0.5">
         <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:gap-2">
           {/* Label + range value + export all share one row -- the range
               value pill previously grew (flex-1) to fill the row on its own
               with nothing but blank pill background to its right; export
               now sits in that same slack space instead of getting its own
-              near-empty row below the preset pills. */}
+              near-empty row below the date picker. */}
           <div className="flex min-w-0 items-center gap-2 lg:max-w-[22rem]">
-            {/* Y19: the Start → End box both SHOWS the effective range (preset
-                or custom) and IS the custom editor -- editing it switches to
+            {/* Y19: the Start → End box both SHOWS the effective range and IS
+                the custom editor -- editing it switches to
                 the 'custom' rangeId. No "Range:" label: the rectangular,
                 full-width box reads as the range on its own. */}
             <div className="min-w-0 flex-1">
@@ -1630,21 +1600,7 @@ ${translateOr('delivery_margin', 'Delivery margin')} ${fmtUSD(aDeliveryMargin)} 
               />
             </div>
           </div>
-          {/* Presets + Export share one row. Export is a shrink-0 sibling
-              pinned to the END of the row (items-start), NOT the last item
-              inside the wrapping preset group -- so when the preset chips wrap
-              on a narrow phone they wrap among themselves in the flex-1 group
-              to Export's left, and Export always stays on the preset row's top
-              line instead of dropping onto a lonely row of its own below. */}
-          <div className="flex min-w-0 flex-1 items-start gap-1">
-            <div className="flex min-w-0 flex-1 flex-wrap gap-1">
-              {RANGE_PRESETS.map(p => (
-                <button key={p.id} onClick={() => setRangeId(p.id)}
-                className={`min-h-7 whitespace-nowrap rounded-md px-2.5 py-1 text-[11px] font-semibold transition-colors sm:min-h-8 sm:px-3 sm:text-xs ${rangeId===p.id ? 'bg-blue-600 text-white shadow-sm' : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600'}`}>
-                {p.label}
-              </button>
-            ))}
-            </div>
+          <div className="flex min-w-0 flex-1 items-start justify-end gap-1">
             {/* Opens the float export-choices dialog -- no direct downloads
                 off a toolbar menu. */}
             {hasPermission('dashboard_export') && (
