@@ -88,6 +88,51 @@ Two rules learned the hard way, both from real incidents in this file's own hist
 
 ## Current status
 
+**CLAIMED (in progress, permissions-granularity session, Aug 31, Part 557):** adding
+a real `view` tier (None / View only / Full) to the permission model and wiring the
+coarse "Full/None-only" sections to it, highest-risk first, ONE section per commit
+(Settings first, then Sales, then Users). Backend security audit already done +
+clean (all 182 mutating handlers gated). Files this slice: cloudflare/src/lib/
+permissions.ts, cloudflare/src/routes/settings.ts, frontend utils/permissions.ts,
+components/users/{permissionDefinitions.ts,PermissionEditor.tsx},
+utils-settings/Settings.tsx, lang packs. NOT touching the peer-contended
+StatsStrip/contacts/Dashboard/DateTimeRangePicker files.
+
+**→ FILTER-CHIPS-LANE (this session, Aug 31): CLAIMED.** User: the sales filter
+menu (and every other) renders the CHOSEN filters as removable chips OUTSIDE the
+menu, in the same toolbar row as the search bar + Filters button — remove that
+everywhere; chosen options should show ONLY inside the menu (they already do, via
+each section's collapsed summary + checked rows). Fix is in the shared
+`shared/FilterMenu.tsx`: drop the `ActiveFilterChips` outside-render + its
+`showActiveChips` prop, `collectSectionChips`, `MAX_VISIBLE_CHIPS`, and the
+`activeChips` field on `FilterSection`; then remove the now-dead `activeChips`
+producers in `shared/{AvailabilityFilterOptions,IssuesFilterOptions,PromotionsFilterOptions,SearchModeFilterOptions}`
+and `products/{CreatedDateFilterOptions,AutoMergedFilterOptions}`. Files
+(path-scoped): frontend shared/FilterMenu.tsx + those 6 producers +
+products/helpers/productMenuHelpers.ts (comment only). No lang/perm changes.
+
+**→ EXPENSES-LANE (this session, Aug 31 ~evening): CLAIMED.** User batch: (1) fee
+labels become SAVED/reusable — new `GET /api/fees/labels` (distinct labels +
+dominant type), FeeForm suggests them and auto-picks the type, word-limit on the
+label (≤6 words / 60 chars, both ends); (2) Fees section renamed **Expenses**
+(en+km value edits on the fees\* keys incl. perm\_section\_fees — permission editor
+rides the same keys); (3) fees list rows: ONE Amount column (reportMoney pair),
+receipt-style sale chip, blank-not-"--" cells; (4) DATA FIX on remote D1: 6 rows
+(ids 4241–4246, Aug 28–30) typed 'expense' with delivery-company labels
+(Grab/Virak Buntam/J&T/Capital Express) → 'delivery'; (5) sticky search+date
+rows: Products date row joins its sticky wrapper; StockChangeSection rows pin
+too; (6) StockChangeSection: In/Out totals move to their own row directly above
+the list + ScanSearchButton returns beside its search (**working-tree-only
+ride-along — file stays UNCOMMITTED, a peer's STOCK-CHANGES-UI lane holds it
+mid-flight with a lazy import of a not-yet-existing forms/StockAdjustModal**);
+(7) Conflicts (product duplicates tab): long product names click-to-expand
+instead of dead "..." truncation. Files (path-scoped): cloudflare
+routes/fees.ts; frontend api/feesTransport.ts, fees/{FeesPage,FeeForm}.tsx,
+products/{Products,ProductDuplicatesTab}.tsx, lang/en.json+km.json (value edits
+on fee keys + add-only new keys; packs also dirty in peer lanes),
+sales/{SalesHubPage,ReportsHub,FeesReportSection}.tsx fallback strings only.
+progress.md claim visible on disk; code commits pathspec-atomic.
+
 **[DONE + VERIFIED LIVE — UI-density session, Aug 31 (Part 556; commit `521efcd9`
 says "554"): report money now honors the `display_currency` setting (USD / KHR /
 BOTH), display-only.** User asked to make report currency a settings option but
@@ -273,6 +318,20 @@ reports); ADD-only keys to `frontend/src/lang/en.json` + `km.json` (`supplier_di
 `invoices`, `supplier_invoices`, `supplier_invoices_hint` — both packs also dirty in
 peer lanes, so pathspec-atomic add). `StockInInvoicesSection.tsx` / `ApInvoicesSection.tsx`
 reused UNCHANGED. No backend, no migrations. progress.md not committed by this lane.
+
+**→ PROMOTIONS-REDESIGN LANE (this session, Aug 31 ~afternoon): CLAIMED.** User:
+"the promotions design are very bad, the sections are also very bad, make better
+design for promotion page." Fix: the two stacked SectionCards (Promotion rules +
+Per-product discounts) violate the section-org rule (never stack in one scroll) →
+replace with a FLAT top-level section-chip row **Rules · Discounts · Loyalty**
+(permission-filtered, one shown at a time, matching the Phase-E hub pattern), plus
+polished cards (colored badge chip, real status pill Live/Scheduled/Ended/Paused,
+scope + date), and inline stat tiles. All existing functionality preserved (rule
+create/edit/delete, per-product discounts, loyalty embed, both modals, permission
+gates). Files (path-scoped, single component + lang): `frontend/src/components/
+promotions/PromotionsPage.tsx`; ADD-only keys to `frontend/src/lang/en.json` +
+`km.json` (both packs dirty in peer lanes → pathspec-atomic). No backend, no
+migrations. progress.md not committed by this lane.
 
 **[DONE — DEPLOYED (fourth of the day), 7a, Aug 31 ~03:57 UTC (user-authorized
 "continue" on the deploy ask; bf's duplicate authorization stood down by
