@@ -3,6 +3,7 @@ import Modal from '../../shared/Modal'
 import SearchInput from '../../shared/SearchInput'
 import InventoryStockModals from '../../inventory/InventoryStockModals'
 import InventoryReasonManagerModal from '../../inventory/InventoryReasonManagerModal'
+import ConfirmDialog, { type ConfirmReviewItem } from '../../shared/ConfirmDialog'
 import { type AppSelectOption } from '../../shared/AppSelect'
 import { useApp } from '../../../AppContext'
 import { searchProducts } from '../../../api/productReadTransport.ts'
@@ -266,6 +267,11 @@ export default function StockAdjustModal({ initialType = 'add', onClose, onDone,
   }))
   const [adjustSaving, setAdjustSaving] = useState(false)
   const submitRef = useRef(false)
+  // Part 563: the built, validated adjustment request awaiting the operator's
+  // explicit confirm. onAdjust validates + builds the request and parks it
+  // here (opening the review dialog); commitAdjust does the actual write once
+  // the dialog is confirmed. null = no confirm pending.
+  const [pendingAdjust, setPendingAdjust] = useState<Parameters<typeof adjustStock>[0] | null>(null)
 
   // Initialize adjustForm exactly like Inventory.openAdjust once a product
   // is picked (pricingLocked true, prices from the product, branch = default).
@@ -361,6 +367,14 @@ export default function StockAdjustModal({ initialType = 'add', onClose, onDone,
         if (qty > totalQty) { notify(`Cannot remove ${qty} - only ${totalQty} available`, 'error'); return }
       }
     }
+    // Part 563: don't write yet -- park the validated request and open the
+    // review dialog. commitAdjust runs the actual write once confirmed.
+    setPendingAdjust(adjustmentRequest)
+  }, [selectedProduct, adjustSaving, adjustForm, user, notify, tr])
+
+  const commitAdjust = useCallback(async () => {
+    const adjustmentRequest = pendingAdjust
+    if (!adjustmentRequest) return
     // Single-flight guard: a double-submit must never issue two writes.
     if (!beginSingleAction(submitRef, { blocked: adjustSaving })) return
     setAdjustSaving(true)
@@ -368,9 +382,12 @@ export default function StockAdjustModal({ initialType = 'add', onClose, onDone,
       const res = await adjustStock(adjustmentRequest) as { success?: boolean; error?: string } | undefined
       if (res?.success !== false) {
         notify(tr('stock_updated', 'Stock updated'))
+        setPendingAdjust(null)
         onDone()
         onClose()
       } else {
+        // Keep the review dialog open on a rejected write so the operator can
+        // fix the reason/quantity and retry rather than losing the request.
         notify(res?.error || 'Adjustment failed', 'error')
       }
     } catch (error: unknown) {
@@ -379,7 +396,7 @@ export default function StockAdjustModal({ initialType = 'add', onClose, onDone,
       finishSingleAction(submitRef)
       setAdjustSaving(false)
     }
-  }, [selectedProduct, adjustSaving, adjustForm, user, notify, tr, onDone, onClose])
+  }, [pendingAdjust, adjustSaving, notify, tr, onDone, onClose])
 
   // Step 1: product picker.
   if (!selectedProduct) {
@@ -436,6 +453,27 @@ export default function StockAdjustModal({ initialType = 'add', onClose, onDone,
     label: branch.is_default ? `${branch.name || branch.id} (${tr('default', 'default')})` : String(branch.name || branch.id),
   }))
 
+  // Compact review rows for the confirm dialog, read from the parked request
+  // (so they match exactly what will be written, not the live form).
+  const buildAdjustReviewItems = (): ConfirmReviewItem[] => {
+    const req = pendingAdjust
+    if (!req) return []
+    const reqType = String(req.type || '')
+    const typeLabel = reqType === 'remove' ? tr('remove', 'Remove') : reqType === 'set' ? tr('set', 'Set') : tr('add', 'Add')
+    const reqBranchId = req.branchId != null ? Number(req.branchId) : null
+    const branchName = reqBranchId ? (branches.find((b) => Number(b.id) === reqBranchId)?.name || String(reqBranchId)) : '--'
+    const items: ConfirmReviewItem[] = [
+      { label: tr('type', 'Type'), value: typeLabel },
+      { label: tr('quantity', 'Quantity'), value: `${Number(req.quantity || 0)}${product.unit ? ` ${product.unit}` : ''}` },
+      { label: tr('branch', 'Branch'), value: branchName },
+    ]
+    const reqReason = String(req.reason || '').trim()
+    if (reqReason) items.push({ label: tr('reason', 'Reason'), value: reqReason })
+    const reqSupplier = String(req.supplierName || '').trim()
+    if (reqSupplier) items.push({ label: tr('supplier', 'Supplier'), value: reqSupplier })
+    return items
+  }
+
   return (
     <>
       <InventoryStockModals
@@ -487,6 +525,19 @@ export default function StockAdjustModal({ initialType = 'add', onClose, onDone,
         t={t}
         tr={tr}
       />
+      {pendingAdjust ? (
+        <ConfirmDialog
+          t={t}
+          title={tr('adjust_stock', 'Adjust stock')}
+          message={String(pendingAdjust.productName || product.name || '')}
+          items={buildAdjustReviewItems()}
+          confirmLabel={tr('confirm', 'Confirm')}
+          working={adjustSaving}
+          workingLabel={tr('saving', 'Saving...')}
+          onConfirm={commitAdjust}
+          onClose={() => { if (!adjustSaving) setPendingAdjust(null) }}
+        />
+      ) : null}
     </>
   )
 }

@@ -14,6 +14,7 @@ import { MarginCard, DualPriceInput, parseNumericInput, sanitizeNumericInput } f
 import BranchStockAdjuster from './BranchStockAdjuster'
 import { calculateProductDiscount, formatPriceNumber, normalizePriceValue } from '../../../utils/pricing.ts'
 import RenameCascadeModal, { type RenameCascadeChoice, type RenameCascadeRequest } from '../../shared/RenameCascadeModal.tsx'
+import ConfirmDialog, { type ConfirmReviewItem } from '../../shared/ConfirmDialog.tsx'
 import { getRenameImpact, renameBrandEverywhere } from '../../../api/renameCascadeTransport.ts'
 import { classifyCreateMatches, type CreateMatchVerdict, type CreateMatchCandidate } from '../helpers/productCreateMatch.ts'
 import { readWorkDraft, scheduleWorkDraftWrite, clearWorkDraft } from '../../../utils/workDrafts.ts'
@@ -670,6 +671,32 @@ export default function ProductForm({
     resolve?.(choice)
   }
 
+  // Part 563: the final "confirm / double-check" gate the save flow awaits
+  // before writing, using the shared ConfirmDialog. Same promise-based pattern
+  // as askRenameChoice above -- saveForm opens it and blocks on the choice.
+  const [saveConfirmOpen, setSaveConfirmOpen] = useState(false)
+  const saveConfirmResolveRef = useRef<((ok: boolean) => void) | null>(null)
+  const askSaveConfirm = () => new Promise<boolean>((resolve) => {
+    saveConfirmResolveRef.current = resolve
+    setSaveConfirmOpen(true)
+  })
+  const resolveSaveConfirm = (ok: boolean) => {
+    setSaveConfirmOpen(false)
+    const resolve = saveConfirmResolveRef.current
+    saveConfirmResolveRef.current = null
+    resolve?.(ok)
+  }
+  // Compact review rows for the save confirm dialog.
+  const saveReviewItems = (): ConfirmReviewItem[] => {
+    const items: ConfirmReviewItem[] = [
+      { label: tr('label_selling_price', 'Selling Price'), value: `${usdSymbol}${Number(form.selling_price_usd || 0).toFixed(2)}` },
+      { label: tr('label_cost', 'Cost'), value: `${usdSymbol}${Number(form.cost_price_usd || 0).toFixed(2)}` },
+    ]
+    const barcode = String(form.barcode || '').trim()
+    if (barcode) items.push({ label: tr('barcode', 'Barcode'), value: barcode })
+    return items
+  }
+
   // F1 (Part 408): CREATE mode live-searches the catalog while the name/
   // barcode is typed and speaks the identity rule BEFORE create -- the
   // structured verdict modal offers go-back / add-as-child / proceed-as-new
@@ -970,6 +997,12 @@ export default function ProductForm({
         } catch { /* preview unavailable -- brand changes on this row only */ }
       }
     }
+    // Part 563: final review before committing -- the shared confirm dialog
+    // summarizes the product being added/saved and gates the write. Mirrors
+    // the promise-based askRenameChoice/askCreateVerdict pattern above; a
+    // Cancel returns to the still-open form with nothing written.
+    const confirmedSave = await askSaveConfirm()
+    if (!confirmedSave) { saveInFlightRef.current = false; return }
     setSaving(true)
     try {
       await Promise.resolve(onSave(payload))
@@ -1489,6 +1522,19 @@ export default function ProductForm({
           </> : null}
 
           <RenameCascadeModal request={renameRequest} busy={saving} t={(key, fallback) => t(key) || fallback || key} onChoose={handleRenameChoice} />
+          {saveConfirmOpen ? (
+            <ConfirmDialog
+              t={t}
+              title={isCreateMode ? tr('add_product', 'Add Product') : tr('save_changes', 'Save Changes')}
+              message={String(form.name || '').trim() || (isCreateMode ? tr('add_product', 'Add Product') : tr('save_changes', 'Save Changes'))}
+              items={saveReviewItems()}
+              confirmLabel={isCreateMode ? tr('add_product', 'Add Product') : tr('save', 'Save')}
+              working={saving}
+              workingLabel={tr('saving', 'Saving...')}
+              onConfirm={() => resolveSaveConfirm(true)}
+              onClose={() => resolveSaveConfirm(false)}
+            />
+          ) : null}
       {/* G1 (Part 391): the per-product discount editor MOVED to the
               Promotions page (user: "per-product discounts manage in
               Promotions, labels stay visible in Products"). The product
