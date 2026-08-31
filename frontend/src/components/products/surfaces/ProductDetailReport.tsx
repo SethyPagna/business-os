@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import X from 'lucide-react/dist/esm/icons/x.js'
 import ChevronRight from 'lucide-react/dist/esm/icons/chevron-right.js'
+import ChevronDown from 'lucide-react/dist/esm/icons/chevron-down.js'
 import History from 'lucide-react/dist/esm/icons/history.js'
 import TrendingUp from 'lucide-react/dist/esm/icons/trending-up.js'
 import Users from 'lucide-react/dist/esm/icons/users.js'
@@ -107,8 +108,11 @@ const SECTION_PILL: Record<Exclude<OpenSection, null>, { icon: LucideIcon; pill:
   },
 }
 
-export default function ProductDetailReport({ productId, t, fmtUSD }: {
+export default function ProductDetailReport({ productId, barcode, t, fmtUSD }: {
   productId: number
+  // Shown in each float's compact title so you can see WHICH product's changes
+  // you are looking at (user ask: "the title ... also have barcode").
+  barcode?: string
   t: Translate
   fmtUSD: (value: unknown) => string
 }) {
@@ -118,6 +122,10 @@ export default function ProductDetailReport({ productId, t, fmtUSD }: {
   const [salesMode, setSalesMode] = useState<'by_day' | 'by_month'>('by_day')
   const [loadError, setLoadError] = useState('')
   const [openSection, setOpenSection] = useState<OpenSection>(null)
+  // Which stock-change row is expanded to its full name/value detail in place
+  // (user ask: rows are too spread out; click to open the change's detail --
+  // the source movement + its reference -- as compact label/value pairs).
+  const [openMovementId, setOpenMovementId] = useState<number | null>(null)
 
   const tr = (key: string, fallback: string): string => {
     const value = t(key)
@@ -233,21 +241,48 @@ export default function ProductDetailReport({ productId, t, fmtUSD }: {
         <p className="py-2 text-center text-xs text-gray-400">{tr('loading', 'Loading')}...</p>
       ) : (
         <>
-          {movements.map((row) => (
-            <div key={row.id} className="flex items-center justify-between gap-2 rounded-lg bg-gray-50 px-2.5 py-1.5 text-xs dark:bg-gray-800/60">
-              <span className="whitespace-nowrap text-gray-400">{fmtDateTime24(row.created_at)}</span>
-              <span className={`rounded px-1.5 py-0.5 font-semibold ${movementColorClass(row.movement_type, row.signed_quantity)}`}>
-                {signed(row)} {translateMovementType(row.movement_type, t as (key: string) => string)}
-              </span>
-              <span className="tabular-nums text-gray-500">{row.before_qty} → {row.after_qty}</span>
-              {row.batch_id ? (
-                <span className="whitespace-nowrap rounded bg-amber-50 px-1.5 py-0.5 text-amber-700 dark:bg-amber-900/20 dark:text-amber-300">
-                  {batchDisplayLabel({ id: row.batch_id, lot_code: row.batch_lot_code, received_at: row.batch_received_at })}
-                </span>
-              ) : null}
-              <span className="max-w-40 truncate text-gray-400" title={row.reason || ''}>{row.reason || ''}</span>
-            </div>
-          ))}
+          {movements.map((row) => {
+            const expanded = openMovementId === row.id
+            const typeLabel = translateMovementType(row.movement_type, t as (key: string) => string)
+            const batchLabel = row.batch_id
+              ? batchDisplayLabel({ id: row.batch_id, lot_code: row.batch_lot_code, received_at: row.batch_received_at })
+              : null
+            return (
+              <div key={row.id}>
+                {/* Compact clickable row: date + change + before->after packed
+                    left (not spread), the reason truncates, a chevron marks it
+                    as openable. Click reveals the full name/value detail. */}
+                <button
+                  type="button"
+                  onClick={() => setOpenMovementId(expanded ? null : row.id)}
+                  className="flex w-full items-center gap-2 rounded-lg bg-gray-50 px-2 py-1 text-left text-[11px] transition-colors hover:bg-gray-100 dark:bg-gray-800/60 dark:hover:bg-gray-800"
+                >
+                  <span className="w-[84px] shrink-0 whitespace-nowrap text-gray-400">{fmtDateTime24(row.created_at)}</span>
+                  <span className={`shrink-0 rounded px-1 py-0.5 font-semibold ${movementColorClass(row.movement_type, row.signed_quantity)}`}>
+                    {signed(row)} {typeLabel}
+                  </span>
+                  <span className="shrink-0 tabular-nums text-gray-500">{row.before_qty}→{row.after_qty}</span>
+                  <span className="min-w-0 flex-1 truncate text-gray-400" title={row.reason || ''}>{row.reason || ''}</span>
+                  <ChevronDown className={`h-3 w-3 shrink-0 text-gray-300 transition-transform ${expanded ? 'rotate-180' : ''}`} />
+                </button>
+                {expanded ? (
+                  <div className="mt-0.5 rounded-lg bg-gray-100/70 px-2.5 py-1.5 text-[11px] dark:bg-gray-800/40">
+                    <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5">
+                      <dt className="text-gray-400">{tr('date', 'Date')}</dt>
+                      <dd className="text-gray-700 dark:text-gray-200">{fmtDateTime24(row.created_at)}</dd>
+                      <dt className="text-gray-400">{tr('label_change', 'Change')}</dt>
+                      <dd className={`font-semibold ${row.signed_quantity > 0 ? 'text-green-600 dark:text-green-300' : row.signed_quantity < 0 ? 'text-red-600 dark:text-red-300' : 'text-gray-600'}`}>{signed(row)} {typeLabel}</dd>
+                      <dt className="text-gray-400">{tr('before_after', 'Before → After')}</dt>
+                      <dd className="tabular-nums text-gray-700 dark:text-gray-200">{row.before_qty} → {row.after_qty}</dd>
+                      {batchLabel ? (<><dt className="text-gray-400">{tr('batch', 'Batch')}</dt><dd className="text-amber-700 dark:text-amber-300">{batchLabel}</dd></>) : null}
+                      {row.reference_id ? (<><dt className="text-gray-400">{tr('source', 'Source')}</dt><dd className="text-gray-700 dark:text-gray-200">{typeLabel} #{row.reference_id}</dd></>) : null}
+                      {row.reason ? (<><dt className="text-gray-400">{tr('reason', 'Reason')}</dt><dd className="text-gray-700 dark:text-gray-200">{row.reason}</dd></>) : null}
+                    </dl>
+                  </div>
+                ) : null}
+              </div>
+            )
+          })}
           {!movements.length ? <p className="py-2 text-center text-gray-400">{tr('no_data_found', 'No data found')}</p> : null}
           {movements.length < movementsTotal ? (
             <button
@@ -329,13 +364,17 @@ export default function ProductDetailReport({ productId, t, fmtUSD }: {
             className="flex max-h-[85vh] w-full flex-col overflow-hidden rounded-t-2xl bg-white shadow-2xl sm:max-h-[80vh] sm:max-w-lg sm:rounded-2xl dark:bg-gray-800 pb-[env(safe-area-inset-bottom)] sm:pb-0"
             onClick={(event) => event.stopPropagation()}
           >
-            {/* Compact title bar (user ask): a single line, tighter vertical
-                padding than the old p-4 so the header stops eating the pane. */}
-            <div className="flex items-center justify-between gap-2 border-b border-gray-200 px-3 py-2 dark:border-gray-700">
-              <p className="truncate text-sm font-semibold text-gray-900 dark:text-white">
-                {active.title}
-                {active.count > 0 ? <span className="ml-1.5 text-xs font-normal text-gray-400">({active.count})</span> : null}
-              </p>
+            {/* Compact title bar (user ask): smaller title on its own line with
+                the product barcode beneath it for context, tighter padding than
+                the old p-4 so the header stops eating the pane. */}
+            <div className="flex items-center justify-between gap-2 border-b border-gray-200 px-3 py-1.5 dark:border-gray-700">
+              <div className="min-w-0">
+                <p className="truncate text-xs font-semibold text-gray-900 dark:text-white">
+                  {active.title}
+                  {active.count > 0 ? <span className="ml-1 font-normal text-gray-400">({active.count})</span> : null}
+                </p>
+                {barcode ? <p className="truncate font-mono text-[10px] leading-tight text-gray-400">{barcode}</p> : null}
+              </div>
               <button
                 type="button"
                 onClick={() => setOpenSection(null)}

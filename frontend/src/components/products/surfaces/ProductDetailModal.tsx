@@ -453,7 +453,7 @@ export default function ProductDetailModal({
             {Number(p.id) > 0 ? (
               <div className="mt-2.5 border-t border-gray-100 pt-2 dark:border-gray-700">
                 <Suspense fallback={<p className="py-2 text-center text-xs text-gray-400">...</p>}>
-                  <ProductDetailReport productId={Number(p.id)} t={t || (() => undefined)} fmtUSD={fmtUSD} />
+                  <ProductDetailReport productId={Number(p.id)} barcode={p.barcode} t={t || (() => undefined)} fmtUSD={fmtUSD} />
                 </Suspense>
               </div>
             ) : null}
