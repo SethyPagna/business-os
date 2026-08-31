@@ -3027,6 +3027,15 @@ the switch and its reasoning are recorded in `wrangler.toml`.
 
 ## Current status
 
+**[~ CLAIMED — session business-os-v1-r2, Aug 31: progress.md board restructure
+(user ask: "done are all moved to done, open are organized, without losing past
+actions, make it clear").** Doc-only lane — no product code, no migrations; edits
+progress.md (whole-file reorg: done items consolidated under a DONE archive, open
+items into one organized queue, specs/reference kept, all content preserved) +
+one session-log entry. Peers: live claims and coordination notes in this section
+are preserved verbatim; if you need to edit progress.md mid-restructure, commit
+small and I will rebase around you.]**
+
 **[~ CLAIMED — session business-os-v1-c8, Aug 31: full post-settlement verification
 sweep.** Golden Rule 5 battery (both tscs, all backend tests individually, all
 frontend tests individually, real vite build, fresh migration chain) + zombie/orphan
