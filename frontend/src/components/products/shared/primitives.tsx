@@ -311,7 +311,14 @@ function DragScrollText({ children, className = '', title, lang }: {
       ref={ref}
       title={title}
       lang={lang}
-      className={`overflow-x-auto whitespace-nowrap [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden ${className}`}
+      // touch-action: pan-x lets a finger pan this strip horizontally even
+      // though the scroll ancestors (.page-scroll / body) set
+      // `touch-action: pan-y pinch-zoom` — without it the browser refuses the
+      // horizontal gesture on touch, so a long product name could not be
+      // swiped to read (user, Sep 1 2026, on a phone). Mouse panning is
+      // handled by the pointer handlers above; this only re-enables the
+      // native touch scroll the onPointerDown handler defers to.
+      className={`overflow-x-auto whitespace-nowrap [touch-action:pan-x] [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden ${className}`}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={endDrag}
