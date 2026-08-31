@@ -7,6 +7,10 @@ import { revertStockMovement, editStockMovementReason } from '../../api/inventor
 // Inventory/Branches page -- lazy so its weight only loads when the person
 // actually opens the Adjust menu, not on every Stock Changes view.
 const StockAdjustModal = lazy(() => import('./forms/StockAdjustModal'))
+// The shipment receiver, same one the Branches page offers -- reachable from
+// this section's Adjust menu too (user, Aug 31: "for fast stock in do that
+// for products pages and all sections").
+const FastStockInModal = lazy(() => import('../inventory/FastStockInModal'))
 import { movementColorClass, translateMovementType } from '../inventory/movementGroups.ts'
 import DateTimeRangePicker from '../shared/DateTimeRangePicker'
 import FilterMenu, { type FilterSection } from '../shared/FilterMenu'
@@ -144,6 +148,7 @@ export default function StockChangeSection({ t }: { t: Translate }) {
   // Adjust menu (Add / Remove / Adjust quantity) -> opens the reused modal.
   const [adjustMenuOpen, setAdjustMenuOpen] = useState(false)
   const [adjustType, setAdjustType] = useState<'add' | 'remove' | 'set' | null>(null)
+  const [fastStockInOpen, setFastStockInOpen] = useState(false)
   const requestRef = useRef(0)
 
   const load = useCallback(async () => {
@@ -433,6 +438,18 @@ export default function StockChangeSection({ t }: { t: Translate }) {
                       {tr(t, key, fallback)}
                     </button>
                   ))}
+                  {/* Fast stock-in joins every stock entry point (user,
+                      Aug 31: "for fast stock in do that for products pages
+                      and all sections") -- the same shipment receiver the
+                      Branches page offers. */}
+                  <div className="my-1 border-t border-gray-100 dark:border-gray-800" />
+                  <button
+                    type="button"
+                    onClick={() => { setFastStockInOpen(true); setAdjustMenuOpen(false) }}
+                    className="block w-full px-3 py-1.5 text-left text-sm font-medium text-blue-600 hover:bg-blue-50 dark:text-blue-300 dark:hover:bg-blue-900/20"
+                  >
+                    {tr(t, 'fast_stockin_title', 'Fast stock-in')}
+                  </button>
                 </div>
               </>
             ) : null}
@@ -676,6 +693,19 @@ export default function StockChangeSection({ t }: { t: Translate }) {
             t={t}
             onClose={() => setAdjustType(null)}
             onDone={() => { setAdjustType(null); void load() }}
+          />
+        </Suspense>
+      ) : null}
+
+      {fastStockInOpen ? (
+        <Suspense fallback={null}>
+          <FastStockInModal
+            branchOptions={branches.map((branch) => ({ value: String(branch.id), label: branch.name || String(branch.id) }))}
+            defaultBranchId={branchId || null}
+            tr={(key: string, fallback = key) => tr(t, key, fallback)}
+            notify={(message: string, kind?: string) => app.notify(message, kind)}
+            onClose={() => setFastStockInOpen(false)}
+            onDone={() => { void load() }}
           />
         </Suspense>
       ) : null}

@@ -142,6 +142,11 @@ const ManageBrandsModal = lazyRetry(() => import('./lookups/ManageBrandsModal'),
 const ManageUnitsModal = lazyRetry(() => import('./lookups/ManageUnitsModal'), 'products-manage-units-modal')
 const ImportModeWizard = lazyRetry(() => import('./import/ImportModeWizard'), 'products-bulk-import-wizard')
 const BulkAddStockModal = lazyRetry(() => import('./forms/BulkAddStockModal'), 'products-bulk-add-stock-modal')
+// The Add button's two stock options (user, Aug 31: "Stock one by one, fast
+// stockin, and add new product"): the complete Branches-page adjust design
+// (StockAdjustModal reuses InventoryStockModals) and the shipment receiver.
+const StockAdjustModal = lazyRetry(() => import('./forms/StockAdjustModal'), 'products-stock-adjust-modal')
+const FastStockInModal = lazyRetry(() => import('../inventory/FastStockInModal'), 'products-fast-stock-in-modal')
 const VariantFormModal = lazyRetry(() => import('./forms/VariantFormModal'), 'products-variant-form-modal')
 const ProductForm = lazyRetry(() => import('./forms/ProductForm'), 'products-product-form')
 const ProductDetailModal = lazyRetry(() => import('./surfaces/ProductDetailModal'), 'products-product-detail-modal')
@@ -615,6 +620,10 @@ function ProductsFullEditor() {
   // (getActionTier(user, 'products', 'image')), so hiding the entry for
   // anyone else keeps the menu honest instead of offering a 403.
   const canWireImages = can('products', 'image')
+  // The Add menu's stock flows write through the Inventory adjust/receive
+  // kernels, so they gate on the SAME action the Branches-page adjust and
+  // fast stock-in check -- not on products:add.
+  const canAdjustInventoryStock = can('inventory', 'adjust')
   const { syncChannel } = useProductsSync()
   const productApi = getProductApi()
   const isActive = useIsPageActive('products')
@@ -657,6 +666,11 @@ function ProductsFullEditor() {
   // header flips between the product listing and the Stock Changes ledger,
   // which used to be a folded card at the bottom of the same scroll.
   const [activeProductSection, setActiveProductSection] = useState<'products' | 'stock_changes' | 'duplicates'>('products')
+  // Which of the Add menu's two stock flows is open (null = neither) --
+  // Stock one by one is the complete Branches-page adjust modal, Fast
+  // stock-in the shipment receiver. Add New Product keeps the existing
+  // `modal === 'form'` path.
+  const [addStockFlow, setAddStockFlow] = useState<'stock_one' | 'fast_stockin' | null>(null)
   const [productSortDirection, setProductSortDirection] = useState<ProductSortDirection>('name_asc')
   const [search,       setSearch]       = useState('')
   // AND/OR toggle restored (Aug 20 2026), reachable from inside the Filter
@@ -3567,6 +3581,11 @@ function ProductsFullEditor() {
                with its own "Adjust" menu (user, Aug 31) -> drop onAdd there;
                HeaderActions hides any undefined-handler control. */
             onAdd={canAddProduct && activeProductSection !== 'stock_changes' ? ()=>{setSelected(null);setFormInitialTab('basic');setModal('form')} : undefined}
+            // Stock one by one / Fast stock-in ride the same Add menu (user,
+            // Aug 31: "should show three options"). Hidden on the Stock
+            // Changes section, which carries its own Adjust menu.
+            onStockOneByOne={canAdjustInventoryStock && activeProductSection !== 'stock_changes' ? () => setAddStockFlow('stock_one') : undefined}
+            onFastStockIn={canAdjustInventoryStock && activeProductSection !== 'stock_changes' ? () => setAddStockFlow('fast_stockin') : undefined}
             onMergeDuplicates={canMergeDuplicates ? openMergeDuplicatesReview : undefined}
             onZeroQuantityCleanup={canZeroQuantityCleanup ? openZeroQuantityCleanup : undefined}
             onWireImages={canWireImages ? openWireImages : undefined}
@@ -4084,6 +4103,31 @@ function ProductsFullEditor() {
           </Suspense>
         </div>
       )}
+
+      {/* Add-menu stock flows (any section) -- the complete Branches-page
+          adjust design for one product, and the fast shipment receiver. */}
+      {addStockFlow === 'stock_one' ? (
+        <Suspense fallback={null}>
+          <StockAdjustModal
+            initialType="add"
+            t={t}
+            onClose={() => setAddStockFlow(null)}
+            onDone={() => { setAddStockFlow(null); void load(true) }}
+          />
+        </Suspense>
+      ) : null}
+      {addStockFlow === 'fast_stockin' ? (
+        <Suspense fallback={null}>
+          <FastStockInModal
+            branchOptions={branches.map((branch) => ({ value: String(branch.id), label: String(branch.name || branch.id) }))}
+            defaultBranchId={null}
+            tr={tr}
+            notify={notify}
+            onClose={() => setAddStockFlow(null)}
+            onDone={() => { void load(true) }}
+          />
+        </Suspense>
+      ) : null}
 
       {/* Duplicates review section -- mirrors the contacts Possible
           Duplicates panel for the product catalog. "Open" on a row jumps

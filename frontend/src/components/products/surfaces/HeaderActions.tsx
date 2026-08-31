@@ -1,4 +1,6 @@
 import PackagePlus from 'lucide-react/dist/esm/icons/package-plus.js'
+import Boxes from 'lucide-react/dist/esm/icons/boxes.js'
+import Zap from 'lucide-react/dist/esm/icons/zap.js'
 import Settings2 from 'lucide-react/dist/esm/icons/settings-2.js'
 import FolderTree from 'lucide-react/dist/esm/icons/folder-tree.js'
 import Award from 'lucide-react/dist/esm/icons/award.js'
@@ -32,6 +34,14 @@ type ProductsHeaderActionsProps = {
   onImport?: () => void
   onExport?: () => void
   onAdd?: () => void
+  // With either of these two wired, the Add button becomes a 3-option menu
+  // (user, Aug 31: "for the add icon ... should show three options, Stock
+  // one by one, fast stockin, and add new product"): Stock one by one opens
+  // the complete Branches-page adjust modal for one product, Fast stock-in
+  // opens the shipment receiver. Left unwired (other embedders, or no
+  // inventory-adjust grant) the button stays the plain Add-product action.
+  onStockOneByOne?: () => void
+  onFastStockIn?: () => void
   // Retroactive catalog cleanup: folds already-imported products that are
   // really the same item (differ only by which branch's stock landed on
   // which row) into one. Optional so pages embedding this header outside
@@ -77,6 +87,8 @@ export default function ProductsHeaderActions({
   onImport,
   onExport,
   onAdd,
+  onStockOneByOne,
+  onFastStockIn,
   onMergeDuplicates,
   onZeroQuantityCleanup,
   onWireImages,
@@ -97,6 +109,11 @@ export default function ProductsHeaderActions({
   const exportHint = tr('export_button_hint', 'Download products as a customizable XLSX file')
   const productLabel = tr('product', 'Product')
   const productHint = tr('add_product_button_hint', 'Create a new product from scratch')
+  const stockOneByOneLabel = tr('stock_one_by_one', 'Stock one by one')
+  const stockOneByOneHint = tr('stock_one_by_one_hint', 'Adjust one product’s stock with the full batch-aware form')
+  const fastStockInLabel = tr('fast_stockin_title', 'Fast stock-in')
+  const fastStockInHint = tr('fast_stockin_hint', 'Receive a whole shipment fast — one shared header, then product after product')
+  const addNewProductLabel = tr('add_new_product', 'Add New Product')
   const mergeDuplicatesLabel = tr('merge_duplicate_products', 'Merge duplicate products')
   const mergeDuplicatesHint = tr('merge_duplicates_button_hint', 'Combine branch-only duplicate rows of the same item into one')
   const wireImagesLabel = tr('wire_images_title', 'Wire images to products')
@@ -134,6 +151,15 @@ export default function ProductsHeaderActions({
   const manageItems: PortalMenuItem[] = [lookupItems, transferItems, cleanupItems]
     .filter((group) => group.length > 0)
     .flatMap((group, index) => (index === 0 ? group : ['divider' as const, ...group]))
+
+  // The Add button's menu, in the user's stated order: stock the existing
+  // catalog first (one by one, then the fast shipment receiver), create a
+  // brand-new product last.
+  const addMenuItems: PortalMenuItem[] = [
+    ...(onStockOneByOne ? [{ label: stockOneByOneLabel, onClick: onStockOneByOne, icon: <Boxes className={iconClass} /> }] : []),
+    ...(onFastStockIn ? [{ label: fastStockInLabel, onClick: onFastStockIn, color: 'blue' as const, icon: <Zap className={iconClass} /> }] : []),
+    ...(onAdd ? [{ label: addNewProductLabel, onClick: onAdd, color: 'green' as const, icon: <PackagePlus className={iconClass} /> }] : []),
+  ]
 
   // flex-1 at the narrowest widths (matches the old mobile grid's equal-
   // share sizing so three buttons stay easy to tap edge-to-edge); from sm
@@ -181,6 +207,8 @@ export default function ProductsHeaderActions({
           ...(onMergeDuplicates ? [{ icon: <Merge className={iconClass} />, label: mergeDuplicatesLabel, description: mergeDuplicatesHint }] : []),
           ...(onWireImages ? [{ icon: <ImagePlus className={iconClass} />, label: wireImagesLabel, description: wireImagesHint }] : []),
           ...(onZeroQuantityCleanup ? [{ icon: <Trash2 className={iconClass} />, label: zeroQuantityCleanupLabel, description: zeroQuantityCleanupHint }] : []),
+          ...(onStockOneByOne ? [{ icon: <Boxes className={iconClass} />, label: stockOneByOneLabel, description: stockOneByOneHint }] : []),
+          ...(onFastStockIn ? [{ icon: <Zap className={iconClass} />, label: fastStockInLabel, description: fastStockInHint }] : []),
           ...(onAdd ? [{ icon: <PackagePlus className={iconClass} />, label: productLabel, description: productHint }] : []),
           ...(historySlot ? [{ label: historyLabel, description: historyHint }] : []),
         ]}
@@ -214,10 +242,30 @@ export default function ProductsHeaderActions({
           items={manageItems}
         />
       ) : null}
-      {onAdd ? (
+      {addMenuItems.length > 1 ? (
+        <LazyPortalMenu
+          align="auto"
+          trigger={(
+            <button
+              type="button"
+              className={primaryToolbarButtonClassName}
+              aria-haspopup="true"
+              aria-label={productLabel}
+              title={productHint}
+            >
+              <PackagePlus className="h-4 w-4 shrink-0" />
+              <span className="min-w-0 truncate">{productLabel}</span>
+            </button>
+          )}
+          items={addMenuItems}
+        />
+      ) : addMenuItems.length === 1 ? (
+        // Only one add-flavored action permitted -- a one-item menu is just
+        // an extra click, so the button IS that action (usually plain
+        // Add product, exactly the pre-menu behavior).
         <button
           type="button"
-          onClick={onAdd}
+          onClick={(addMenuItems[0] as { onClick?: () => void }).onClick}
           className={primaryToolbarButtonClassName}
           aria-label={productLabel}
           title={productHint}
