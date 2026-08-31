@@ -172,6 +172,28 @@ test('Part 552: report section controls ride the title row; hub tabs fit; branch
   assert.ok(shell.includes('<span className="truncate">{tab.label}</span>'), 'tab labels truncate rather than widen the row')
 })
 
+test('Part 553: report sections show both currencies + a CSV export action', () => {
+  // Fees/returns are recorded in USD OR KHR; the sections must render both
+  // (moneyPair) so KHR money never reads as "$0.00", and each section must
+  // offer an Export action (user: "no actions to choose export etc").
+  for (const rel of [
+    'src/components/sales/FeesReportSection.tsx',
+    'src/components/sales/ReturnsReportSection.tsx',
+  ]) {
+    const src = read(rel)
+    assert.ok(src.includes('const moneyPair ='), `${rel} renders both currencies via moneyPair`)
+    assert.ok(src.includes('fmtKHR'), `${rel} receives fmtKHR`)
+    assert.ok(src.includes('downloadCSV('), `${rel} exports CSV`)
+    assert.ok(/onClick=\{exportCsv\}/.test(src), `${rel} wires an Export button`)
+  }
+  // Sales report also exports; its money is already USD-canonical.
+  const sales = read('src/components/sales/SalesDailyReport.tsx')
+  assert.ok(sales.includes('downloadCSV(') && /onClick=\{exportCsv\}/.test(sales), 'Sales report exports CSV')
+  // The hub threads fmtKHR into the money-bearing sections.
+  const hub = read('src/components/sales/ReportsHub.tsx')
+  assert.ok(hub.includes('fmtKHR={fmtKHR}'), 'ReportsHub passes fmtKHR to the sections')
+})
+
 test('old bespoke stat surfaces are really gone (no zombie tile grids)', () => {
   assert.ok(!read('src/components/returns/Returns.tsx').includes('ReturnStatTile'), 'Returns tile grid removed')
   const inventory = read('src/components/inventory/Inventory.tsx')

@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import Download from 'lucide-react/dist/esm/icons/download.js'
 import Modal from '../shared/Modal'
+import { downloadCSV } from '../../utils/csv.ts'
 import DateTimeRangePicker, { EMPTY_DATE_TIME_RANGE, type DateTimeRange } from '../shared/DateTimeRangePicker.tsx'
 import { getSalesDailyReport, getSalesDayReport } from '../../api/salesTransport.ts'
 import { ALL_STATUSES, getStatusLabel } from './StatusBadge'
@@ -419,6 +421,19 @@ export default function SalesDailyReport({ t, fmtUSD, active = true, range: exte
 
   const hasFilter = Boolean(statusFilter || paymentFilter || (!embedded && branchFilter))
 
+  // Export the range's per-day sales series as CSV (user, Aug 31: "no
+  // actions to choose export etc").
+  const exportCsv = useCallback(() => {
+    const rows = [...days]
+      .sort((a, b) => (a.date < b.date ? 1 : -1))
+      .map((d) => ({
+        date: d.date, sales: d.tx_count, revenue_usd: d.revenue_usd,
+        discount_usd: d.discount_usd, profit_usd: d.profit_usd,
+      }))
+    if (!rows.length) return
+    downloadCSV(`sales-report-${range.startDate || 'all'}_${range.endDate || 'all'}.csv`, rows)
+  }, [days, range.startDate, range.endDate])
+
   return (
     <div className="space-y-3">
       {/* Title row (Part 552): the section title sits left and the compact
@@ -429,6 +444,16 @@ export default function SalesDailyReport({ t, fmtUSD, active = true, range: exte
         {!embedded ? <DateTimeRangePicker value={range} onChange={setRange} t={t} /> : null}
         {titleNode ? <span className="flex items-center gap-2 text-sm font-semibold text-slate-800 dark:text-slate-100">{titleNode}</span> : null}
         <span className="ml-auto flex flex-wrap items-center gap-1.5">
+          <button
+            type="button"
+            onClick={exportCsv}
+            disabled={!days.length}
+            title={t('export') || 'Export'}
+            aria-label={t('export') || 'Export'}
+            className="inline-flex h-7 items-center gap-1 rounded-md border border-slate-200 bg-white px-2 text-[11px] font-medium text-slate-600 transition hover:border-blue-300 hover:text-blue-700 disabled:opacity-40 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300 dark:hover:border-blue-700"
+          >
+            <Download className="h-3 w-3" /> {t('export') || 'Export'}
+          </button>
           <AppSelect
             value={statusFilter}
             options={statusOptions}

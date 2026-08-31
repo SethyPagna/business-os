@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
+import Download from 'lucide-react/dist/esm/icons/download.js'
 import type { DateTimeRange } from '../shared/DateTimeRangePicker.tsx'
 import { getFeesReport } from '../../api/feesTransport.ts'
+import { downloadCSV } from '../../utils/csv.ts'
 import Modal from '../shared/Modal'
 
 // Fees report section for the Reports hub. Range + branch are owned by the
@@ -96,6 +98,16 @@ export default function FeesReportSection({ t, fmtUSD, fmtKHR, range, branchId, 
   // report section (no stat tiles, "|" dividers, scrollable Modal).
   const [openTable, setOpenTable] = useState<'days' | 'types' | null>(null)
 
+  // Export the range's per-day fee series as CSV (user, Aug 31: "no actions
+  // to choose export etc"). Both currency columns are included.
+  const exportCsv = useCallback(() => {
+    const rows = (report?.days ?? []).map((d) => ({
+      date: d.date, count: d.count, amount_usd: d.amount_usd, amount_khr: d.amount_khr,
+    }))
+    if (!rows.length) return
+    downloadCSV(`fees-report-${range.startDate || 'all'}_${range.endDate || 'all'}.csv`, rows)
+  }, [report, range.startDate, range.endDate])
+
   const floatTable = (rows: Array<{ key: string; label: string; count: number; usd: number; khr: number }>) => (
     rows.length === 0 ? (
       <div className="text-xs text-slate-400">{t('no_data') || 'No data'}</div>
@@ -128,6 +140,16 @@ export default function FeesReportSection({ t, fmtUSD, fmtKHR, range, branchId, 
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
         {titleNode ? <span className="flex items-center gap-2 text-sm font-semibold text-slate-800 dark:text-slate-100">{titleNode}</span> : null}
         <span className="ml-auto flex items-center gap-1.5">
+          <button
+            type="button"
+            onClick={exportCsv}
+            disabled={!(report?.days?.length)}
+            title={t('export') || 'Export'}
+            aria-label={t('export') || 'Export'}
+            className="inline-flex items-center gap-1 rounded-md border border-slate-200 bg-white px-2 py-1 text-[11px] font-medium text-slate-600 transition hover:border-blue-300 hover:text-blue-700 disabled:opacity-40 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300 dark:hover:border-blue-700"
+          >
+            <Download className="h-3 w-3" /> {t('export') || 'Export'}
+          </button>
           <button
             type="button"
             onClick={() => setOpenTable('days')}
