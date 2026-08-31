@@ -16264,3 +16264,68 @@ fixed-height scroll cards; fee_type option label "Expense" kept as-is
 inside the renamed Expenses section (km reads ចំណាយ for both — flag if the
 user wants a distinct word); the 926 imported rows labeled "no_category"
 left untouched.
+
+## Part 559 (Aug 31 2026, movements-and-add-menu lane, same session as Part 558) — Movements section rework + the Products Add menu (Stock one by one / Fast stock-in / Add New Product)
+
+**Ask (second user batch):** (1) "The product section of branch page i want
+the adjust design in there in the products page"; (2) movements section: "the
+custom range can use the start and end date", "the check box can be
+removed...show only in select mode", "the date can be moved as group
+wrap...show only time for rows"; (3) "group records seem to show many names
+in one row... multiple mini rows in the expand part... for expanded do excel
+style... there are no such things as group parent, all products are child row
+if same name and system auto create a group title"; (4) "branch movement has
+a all time next to filter menu, remove that, the date is default, and start
+date and end date for customizing"; (5) "for fast stock in do that for
+products pages and all sections"; (6) "the add icon... should show three
+options, Stock one by one, fast stockin, and add new product".
+
+**What changed:**
+
+- `677716ca` Inventory.tsx + InventoryMovementsSurface.tsx — the Movements
+  rework: always-visible Start→End range picker (Custom-range toggle, its
+  chip, and the year/month period filter with its "All time" default all
+  REMOVED, state and filter-menu options included; exports keep their
+  fields permanently un-narrowed); DAY sections (`timeMode: 'day'`) so the
+  date sits on the divider and rows carry only fmtClock24 time; a new
+  Select mode (toolbar toggle, new `movementSelectMode` state) gating every
+  checkbox, selection cleared on exit; system-made group titles
+  (`movementGroupTitle`: single shared product name, else "N products")
+  replacing the many-name productSummary in collapsed rows; the expanded
+  view is ONE excel-style bordered child-record table (#, product, qty,
+  cost, branch, user, time, reason) shared by mobile + desktop, replacing
+  stacked mini-cards and the 220px side panel (reference/recorded-at now a
+  one-line meta row); the dead empty "View" column dropped.
+- `c94771b9` Products.tsx + surfaces/HeaderActions.tsx +
+  StockChangeSection.tsx — the Add button opens a 3-option menu in the
+  user's order: **Stock one by one** (forms/StockAdjustModal — the complete
+  Branches-page adjust design, satisfying ask #1's entry point), **Fast
+  stock-in** (inventory/FastStockInModal reused, branchOptions from the
+  page's own branches state), **Add New Product** (existing form). Both
+  stock options gate on `inventory:adjust`; unwired embedders keep the
+  plain button; exactly one wired action renders as a direct button (no
+  one-item menu). Fast stock-in also joins the Stock Changes section's
+  Adjust menu (honors its branch filter).
+- lang packs en+km — add-only keys `title`, `movement`,
+  `movement_select_mode_hint`, `stock_one_by_one(+_hint)`,
+  `add_new_product`, `fast_stockin_hint`; **swept into the permissions
+  lane's `7fa62811` by the shared-tree race** (verified in HEAD; one key
+  first landed inside a nested object off a bad anchor and was moved to top
+  level before parity checks).
+
+**Verified:** fe tsc clean (exit 0); check:source 427 files;
+inventoryMovementGroups / inventorySelectionMode / inventoryRfidSection /
+inventoryMobileCardLayout / groupedRecords / fastStockIn /
+productMenuHelpers / pageScrollRoots / statsStrip / langKeyIntegrity /
+testChainCoverage all PASS individually. NOT verified live-in-browser
+(admin UI behind auth — standing caveat). performanceLoadingUx.test.ts
+fails on Sales.tsx `salesGroupMode` expectations — Sales.tsx is dirty in a
+peer lane's working tree (at HEAD both file and test agree; 5 hits) —
+peer-owned, unchanged by this lane.
+
+**Not done:** ProductForm's embedded per-branch BranchStockAdjuster left
+as-is (the ask's entry point reading was the page-level Adjust design,
+now provided via Stock one by one; flag if the form's stock tab should
+also swap); movement day headers repeat across server pages (same accepted
+behavior as the Stock Changes ledger); the movements list still paginates
+groups (movementMeta) rather than days.
