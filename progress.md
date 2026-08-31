@@ -94,6 +94,21 @@ Two rules learned the hard way, both from real incidents in this file's own hist
 
 ## Current status
 
+**✅ DEPLOYED & VERIFIED LIVE — security batch + branch-transfer C1 (Part 577, Aug 31 ~17:15 UTC).**
+Production = commit `d558dcfb`, Worker Version `30e8a9b3-ee79-4c57-b732-cd63c2dc2cd6`. Shipped the
+3 security fixes (H1 products `/rename-brand` Full `manage_lookups` gate, H2 offline chunked-upload
+library gate on sync.ts, M1 `/ws` session-gate closing 4001) + C1 branch-transfer FIFO fix
+(bulk/single no-batchId transfers now move per-lot `branch_batch_stock` and materialize the
+destination lot — was stranding source lots and drifting the per-lot ledger; branch totals/POS were
+never affected) + C1 strict-decrement hardening (concurrent drain aborts instead of minting drift,
+matching inventory.ts). `deploy:full` exit 0; migrate:remote / migrate:import:remote were no-ops
+(zero new .sql in `34e0228f..d558dcfb`). Certified committed HEAD in an isolated worktree first
+(both tscs, vite build, 120/125 pure tests; the 5 "fails" were line-ending brittleness in
+source-lock regexes on the CRLF checkout — every locked symbol grep-verified present). Live:
+admin+storefront `/health` 200, `/ws` unauth → 426 (M1 handler alive/gated), admin root 200.
+**main HEAD has since advanced past `d558dcfb` (other lanes) — that later work is NOT in this deploy.**
+See session-log Part 577.
+
 **✅ STAGE 1 COMPLETE — ALL 9 AUDIT REDS RECONCILED, SUITE GREEN, DEPLOYING (user
 authorized the full cycle; coordinator 7b, Aug 31 ~20:30).** Backend **132/132**,
 frontend **148/148** = **280/280 green**; both tscs + production build green;

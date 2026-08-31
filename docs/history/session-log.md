@@ -17124,3 +17124,69 @@ public stock leak sealed (stock_status + branch_availability only). Both remote 
 rework + AppContext/Returns/Sales/StatsRangeRow/permissionDefinitions consumer edits) stays
 uncommitted, green but un-reviewed — left for its owner or a review session; it does NOT
 deploy (deploy shipped committed HEAD). Stage 2 remains user-gated.
+
+## Part 577 — Security batch + branch-transfer C1 deployed & verified live (Aug 31, coordinator, ~17:15 UTC)
+
+**Ask** — Standing deploy mandate ("make sure everything is captured, summarized, and done
+accordingly... do this in repeat") plus this session's explicit choices: "Deploy now — I drive"
+(sole deploy driver) and "Fix branch-transfer first, ship both" (write the C1 fix, then deploy
+the security batch + C1 together in one clean deploy from committed HEAD).
+
+**What changed (shipped)** — deploy range `34e0228f..d558dcfb`, Worker Version
+`30e8a9b3-ee79-4c57-b732-cd63c2dc2cd6`:
+- Security H1 (`0853a5df`): products.ts `/rename-brand` gated on Full `manage_lookups` (was
+  reachable at the review tier, mirroring the pre-existing `/lookups/replace` rule).
+- Security H2 (`579023e6`): the three offline chunked-upload routes in sync.ts
+  (`/files/chunks/init|:uploadId/chunk|:uploadId/complete`) enforce the same library-access
+  predicate as files.ts `/upload`; files.ts now exports
+  `hasFullLibraryAccess`/`canWireProductImages`, sync.ts shares them via `ensureLibraryUploadAccess`.
+- Security M1 (`cf0b6448`): index.ts `/ws` is async + session-gated via `getSessionUser`,
+  closing `4001` (invalid_session) before proxying to the BroadcastHub DO.
+- C1 (`cf000ff5`): branches.ts POST `/transfer` and `/transfer-bulk` auto-allocate a
+  no-batchId transfer across the source branch's active lots FIFO (`readFifoLotAvailability`
+  + `allocateAcrossLots`) and move each take's `branch_batch_stock`, materializing the matching
+  destination lot. Before: a no-batchId item (every item in the multi-select TransferModal flow)
+  moved only `branch_stock`, stranding source lots and creating no destination lot rows — per-lot
+  ledger drift + lost lot identity (branch totals/POS unaffected). Same class of drift migration
+  0081 repaired for the inventory route.
+- C1 strict hardening (`d558dcfb`): the two FIFO legs use `decrementBatchStockStrictStatement`,
+  matching inventory.ts:1713. The FIFO read runs OUTSIDE the `db.batch()`, so a concurrent drain
+  between read and write would let a clamped decrement floor the source at 0 while the destination
+  still gained the full take — re-minting the exact drift C1 fixes. Strict instead aborts the batch
+  (CHECK quantity>=0) and retries on fresh availability. Explicit-batch legs stay clamped. Adopted
+  after peer `ab` flagged it under the multi-angle mandate; verified against the inventory.ts source.
+- Regression lock: `scripts/test-branch-transfer-lots-pure.cjs` — real-SQLite FIFO +
+  destination-lot materialization + drift conservation + a new concurrent-drain-aborts behavioral
+  check; source locks pin strict on both FIFO legs, clamped on both explicit legs.
+
+**What was found** —
+- My initial C1 verdict ("sound") was wrong: I had verified inventory.ts `/transfer` (correct code,
+  wrong endpoint); the bulk TransferModal calls branches.ts `/transfer-bulk`, which had no FIFO
+  fallback. Caught by re-verifying the actual client→server path before accepting.
+- The isolated-worktree certification surfaced 5 "failing" pure tests (security-batch, fees,
+  loyalty-accrual, products-stock-clamp, sales-analytics). All 5 were LINE-ENDING artifacts: a
+  fresh worktree checkout is CRLF, and these source-lock/transpile tests use line-ending-sensitive
+  regexes (M1's bounded `[\s\S]{0,900}?`, sales-analytics' `\n`-anchored import strip). Every locked
+  symbol was grep-verified present in committed HEAD (M1 /ws gate, fees `round2`, products
+  `clampNegativeStockQuantity` import, `accrueLoyalty`); tsc×2, vite build, and the other 120 pure
+  tests were green. Not a HEAD defect.
+- Duplicate migration number 0018 (`0018_fees.sql` + `0018_products_fts.sql`, both committed Aug 25,
+  applied since) — pre-existing, harmless (D1 tracks applied by full filename), deliberately NOT
+  renamed (renaming an applied migration would re-apply it). Flagged for fleet awareness only.
+
+**Verified** — Isolated worktree at committed HEAD `d558dcfb`: cloudflare tsc exit 0, frontend tsc
+exit 0 (the broken-HEAD check — committed HEAD does NOT depend on the 6 uncommitted frontend files),
+vite build exit 0, 120/125 pure tests green (5 = CRLF artifacts, symbols confirmed present),
+branch-transfer strict test 4/4. Deploy: `deploy:full` exit 0 (typecheck → build → migrate:remote →
+migrate:import:remote → secrets:sync → deploy); both migrates no-ops (zero new .sql in range). Live:
+admin.leangbeauty.com + leangbeauty.com `/health` 200 `{"status":"ok"}`, `/ws` unauth GET 426 (M1
+handler alive + upgrade-gated), admin root 200. Worktree torn down (junctions `rmdir`'d first, real
+node_modules intact).
+
+**Not done** — main HEAD advanced to `d8976f79` (later lanes) during/after the deploy; that work is
+NOT in this deploy. Post-deploy follow-ups carried by peer `ab`: revenue kernel-vs-/stats
+definitional consistency (product decision), `/stats` non-sargable date filter (perf, DB-PERF lane),
+timezone UTC-vs-business-day convention. The 5 brittle line-ending-sensitive pure tests should be
+hardened (make source-lock regexes CRLF-agnostic) so worktree certification stops false-flagging —
+flagged, not fixed here. The 6 dirty frontend files (DateTimeRangePicker lane churn) remain another
+lane's uncommitted work.
