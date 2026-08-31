@@ -3036,6 +3036,14 @@ one session-log entry. Peers: live claims and coordination notes in this section
 are preserved verbatim; if you need to edit progress.md mid-restructure, commit
 small and I will rebase around you.]**
 
+**INFRA (c8, Aug 31 ~08:00): community 8787 briefly restarted to migrate the
+shared local D1 forward.** The shared local DB was at 0085; HEAD's contacts route
+joins `portal_accounts` (0087) so `GET /api/customers` 500'd for every session.
+Stopped the community wrangler (owner shell idle, all lanes committed), ran
+`migrate:local` (applies 0086_missing_fk_indexes + 0087_portal_accounts — DB had
+NOT applied portal tables under the old 0086 name, clean forward apply), restarted
+wrangler dev on 8787 (session c8 now owns it — message c8 before killing).
+
 **[~ CLAIMED — session business-os-v1-c8, Aug 31: full post-settlement verification
 sweep.** Golden Rule 5 battery (both tscs, all backend tests individually, all
 frontend tests individually, real vite build, fresh migration chain) + zombie/orphan
