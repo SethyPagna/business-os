@@ -222,6 +222,28 @@ export function unwireProductImages(productIds: Array<string | number>): Promise
   )
 }
 
+// D5 (Part 578, item 3): attribute a supplier to a product's unattributed
+// (supplier_id NULL) lots after the fact -- the "stays linkable later" case
+// from migration 0062. Routed like every other real mutation; the server
+// records it as one undoable/redoable action (surfaced by the Products page's
+// ActionHistoryBar). batchIds narrows to specific lots; omit to take every
+// unattributed lot the product has.
+export function backfillProductSupplier(
+  productId: string | number,
+  supplierId: number,
+  batchIds?: Array<number>,
+): Promise<{ success?: boolean; updated?: number; actionHistoryId?: number | null; error?: string } | null> {
+  return route(
+    'products:backfillSupplier',
+    () => apiFetch('POST', `/api/products/${encodeId(productId)}/suppliers/backfill`, {
+      supplierId,
+      ...(Array.isArray(batchIds) ? { batchIds } : {}),
+    }) as Promise<{ success?: boolean; updated?: number; actionHistoryId?: number | null; error?: string }>,
+    null,
+    true,
+  )
+}
+
 export function bulkImportProducts(payload: ProductPayload = {}): Promise<unknown> {
   return route(
     'products:bulkImport',

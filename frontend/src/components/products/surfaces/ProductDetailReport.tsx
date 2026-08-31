@@ -10,6 +10,8 @@ import { getProductDetailReport, getStockLedger, getProductSalesDetail, getProdu
 import { movementColorClass, translateMovementType } from '../../inventory/movementGroups.ts'
 import { fmtDate, fmtDateTime24 } from '../../../utils/formatters'
 import { batchDisplayLabel } from '../../../utils/batchLabel.ts'
+import { useApp } from '../../../AppContext'
+import AttributeSupplierModal from './AttributeSupplierModal.tsx'
 
 // D3 (Part 422; reworked Part 563): the detail page's report sections, per
 // the user's Aug-28 spec -- movement history WITH the running balance, sales
@@ -44,6 +46,7 @@ type LotRow = {
   batch_number: number | null
   received_at: string | null
   expiry_date: string | null
+  supplier_id: number | null
   supplier_name: string | null
   total_qty: number
 }
@@ -123,6 +126,13 @@ export default function ProductDetailReport({ productId, barcode, t, fmtUSD }: {
   t: Translate
   fmtUSD: (value: unknown) => string
 }) {
+  // Supplier attribution (item 3) is a product edit; notify surfaces the result.
+  const { can, notify } = useApp() as { can: (section: string, action: string) => boolean; notify: (message: unknown, type?: string) => void }
+  const canAttributeSupplier = can('products', 'edit')
+  const [attributeOpen, setAttributeOpen] = useState(false)
+  // Bumped after a backfill to re-pull the detail report so the Suppliers/
+  // Batches numbers reflect the new attribution without a full remount.
+  const [reportReloadKey, setReportReloadKey] = useState(0)
   const [report, setReport] = useState<DetailReport | null>(null)
   const [movements, setMovements] = useState<LedgerRow[] | null>(null)
   const [movementsTotal, setMovementsTotal] = useState(0)
@@ -170,7 +180,7 @@ export default function ProductDetailReport({ productId, barcode, t, fmtUSD }: {
       .catch(() => setSupplierDrill((prev) => ({ ...prev, [supplierKey]: 'error' })))
   }
 
-  const tr = (key: string, fallback: string): string => {
+  const tr = (key: string, fallback = ''): string => {
     const value = t(key)
     return value && value !== key ? value : fallback
   }
@@ -202,7 +212,7 @@ export default function ProductDetailReport({ productId, barcode, t, fmtUSD }: {
         setLoadError((prev) => prev || (error instanceof Error ? error.message : String(error)))
       })
     return () => { cancelled = true }
-  }, [productId])
+  }, [productId, reportReloadKey])
 
   const salesRows = useMemo(() => {
     const rows = salesMode === 'by_day' ? report?.sales?.by_day : report?.sales?.by_month
@@ -394,8 +404,30 @@ export default function ProductDetailReport({ productId, barcode, t, fmtUSD }: {
     </div>
   )
 
+  // Lots this product carries that were never linked to a supplier
+  // (supplier_id NULL) -- both blank lots and name-only lots that matched no
+  // supplier at receive time. These are what the backfill (item 3) attributes.
+  const unattributedLots = useMemo(
+    () => (report?.batches || []).filter((lot) => lot.supplier_id == null),
+    [report],
+  )
+
   const suppliersBody: ReactNode = (
     <div className="space-y-1">
+      {canAttributeSupplier && unattributedLots.length > 0 ? (
+        <div className="flex items-center justify-between gap-2 rounded-lg bg-amber-50 px-2.5 py-1.5 text-[11px] text-amber-800 dark:bg-amber-950/30 dark:text-amber-200">
+          <span className="min-w-0">
+            {unattributedLots.length} {tr('lots_without_supplier_lc', 'lot(s) have no supplier')}
+          </span>
+          <button
+            type="button"
+            onClick={() => setAttributeOpen(true)}
+            className="shrink-0 rounded-md bg-amber-600 px-2 py-1 font-semibold text-white transition-colors hover:bg-amber-700"
+          >
+            {tr('attribute_supplier', 'Attribute supplier')}
+          </button>
+        </div>
+      ) : null}
       {(report?.suppliers || []).map((supplier) => {
         const open = openSupplierKey === supplier.supplier_key
         const drill = supplierDrill[supplier.supplier_key]
@@ -490,6 +522,23 @@ export default function ProductDetailReport({ productId, barcode, t, fmtUSD }: {
             <div className="min-h-0 flex-1 overflow-auto p-3">{active.body}</div>
           </div>
         </div>
+      ) : null}
+
+      {attributeOpen ? (
+        <AttributeSupplierModal
+          productId={productId}
+          lots={unattributedLots.map((lot) => ({
+            id: lot.id,
+            lot_code: lot.lot_code,
+            batch_number: lot.batch_number,
+            received_at: lot.received_at,
+            supplier_name: lot.supplier_name,
+          }))}
+          tr={tr}
+          notify={notify}
+          onClose={() => setAttributeOpen(false)}
+          onDone={() => setReportReloadKey((key) => key + 1)}
+        />
       ) : null}
     </div>
   )
