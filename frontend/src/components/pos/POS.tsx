@@ -2915,9 +2915,8 @@ export default function POS() {
                 const groupProduct = hasVariantChoices(p)
                 const groupMeta: ProductGroupMeta | null = p.__groupMeta || null
                 const choiceLabel = groupMeta?.groupKind === 'variant'
-                  ? posCopy('variants', 'ជម្រើសផ្សេងៗ')
-                  : posCopy('options', 'ជម្រើស')
-                const groupName = t('groups') || 'Groups'
+                  ? posCopy('Variants', 'ជម្រើសផ្សេងៗ')
+                  : posCopy('Options', 'ជម្រើស')
                 const stock   = getDisplayStock(p)
                 const variantInStock = variants.some((variant) => getDisplayStock(variant) > asNumber(variant.out_of_stock_threshold))
                 const inStock = groupProduct ? variantInStock : stock > asNumber(p.out_of_stock_threshold)
@@ -2946,35 +2945,32 @@ export default function POS() {
                       {getPrimaryProductImage(p) ? <ProductImage src={getPrimaryProductImage(p)} alt={p.__displayName || p.name} className="w-full h-full object-cover" /> : <ImageOff className="h-5 w-5 text-gray-400" />}
                       <ProductDiscountBadge product={p} exchangeRate={exchangeRate} fmtUSD={fmtUSD} label={posCopy('Discounts', 'ការបញ្ចុះតម្លៃ')} promotionRules={promotionRules} />
                     </button>
-                    <div className="flex items-start justify-between gap-2">
-                      <p {...getKhmerTextProps(p.__displayName || p.name, 'text-xs font-medium text-gray-900 dark:text-white leading-tight mb-1 line-clamp-2')}>
-                        {p.__displayName || p.name}
-                        {/* P4: the operator's own memory-aid tag chip */}
-                        {String(p.tag_label || '').trim() ? (
-                          <span className="ml-1 inline-flex items-center rounded-full bg-sky-100 px-1.5 py-0.5 align-middle text-[9px] font-semibold text-sky-700 dark:bg-sky-900/30 dark:text-sky-300">{String(p.tag_label).trim()}</span>
-                        ) : null}
-                      </p>
-                      {groupProduct ? (
-                        <span
-                          className="inline-flex flex-shrink-0 items-center rounded-full bg-purple-100 px-2 py-0.5 text-[10px] font-semibold text-purple-700 dark:bg-purple-900/30 dark:text-purple-300"
-                          aria-label={`${variants.length} ${choiceLabel}`}
-                        >
-                          {groupName}: {variants.length}
-                        </span>
+                    {/* The purple "Groups: N" chip that used to sit here was
+                        removed (user): it duplicated the "Options: N" count now
+                        shown on the bottom row below — same number twice. */}
+                    <p {...getKhmerTextProps(p.__displayName || p.name, 'text-xs font-medium text-gray-900 dark:text-white leading-tight mb-1 line-clamp-2')}>
+                      {p.__displayName || p.name}
+                      {/* P4: the operator's own memory-aid tag chip */}
+                      {String(p.tag_label || '').trim() ? (
+                        <span className="ml-1 inline-flex items-center rounded-full bg-sky-100 px-1.5 py-0.5 align-middle text-[9px] font-semibold text-sky-700 dark:bg-sky-900/30 dark:text-sky-300">{String(p.tag_label).trim()}</span>
+                      ) : null}
+                    </p>
+                    {/* Selling price + a plain VIP tag on ONE row (user: "show
+                        selling and VIP same row bottom … VIP just say VIP"). A
+                        grouped card shows the HIGHEST option price (user: "only
+                        keep the highest price for selling price") — the old
+                        $min–$max range is gone. The VIP AMOUNT stays off the
+                        grid on purpose (user, Aug 28): the tag only says a VIP
+                        price exists; the number reveals in the detail sheet. */}
+                    <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                      <span className="text-sm font-bold text-blue-600">
+                        {fmtUSD(groupProduct ? (groupMeta?.maxSellingPriceUsd || asNumber(p.selling_price_usd)) : asNumber(p.selling_price_usd))}
+                      </span>
+                      {asNumber(p.special_price_usd) > 0 || asNumber(p.special_price_khr) > 0 ? (
+                        <span {...getKhmerTextProps(t('special_price') || 'VIP', 'text-[11px] font-medium text-emerald-600 dark:text-emerald-400')}>{t('special_price') || 'VIP'}</span>
                       ) : null}
                     </div>
-                    <p className="text-sm font-bold text-blue-600">
-                      {groupProduct && groupMeta?.minSellingPriceUsd !== groupMeta?.maxSellingPriceUsd
-                        ? `${fmtUSD(groupMeta?.minSellingPriceUsd || 0)} - ${fmtUSD(groupMeta?.maxSellingPriceUsd || 0)}`
-                        : fmtUSD(p.selling_price_usd)}
-                    </p>
                     {asNumber(p.selling_price_khr) > 0 && !groupProduct ? <p className="text-xs text-gray-400">{fmtKHR(asNumber(p.selling_price_khr))}</p> : null}
-                    {asNumber(p.special_price_usd) > 0 || asNumber(p.special_price_khr) > 0 ? (
-                      // The VIP AMOUNT is deliberately not printed on the grid
-                      // (user, Aug 28): the chip says a VIP price exists; the
-                      // number reveals on request in the detail sheet.
-                      <p {...getKhmerTextProps(t('special_price') || 'Special', 'text-[11px] font-medium text-emerald-600 dark:text-emerald-400')}>{t('special_price') || 'VIP'}</p>
-                    ) : null}
                     {promoBadge.active ? (
                       <p className="text-[11px] font-semibold" style={{ color: promoBadge.badge_color || '#e11d48' }}>
                         {promoBadge.kind === 'quantity_hint'
@@ -2987,14 +2983,13 @@ export default function POS() {
                         amber/yellow when low, emerald when healthy. Group products have
                         no single qty to color against (variants can each differ), so
                         they keep the neutral gray style. */}
-                    {/* Options count + total-in-stock used to be two
-                        separate rows (each product card growing a line
-                        taller for no reason); merged into one compact row
-                        with a middle dot separator, same info, less
-                        vertical space. */}
+                    {/* Grouped card's bottom row (user): "Options: N | Total
+                        Qty: n" — the single home for the option count (the
+                        removed purple chip's duplicate) and the summed stock.
+                        A flat product keeps its coloured "qty unit". */}
                     <p {...getKhmerTextProps(groupProduct ? choiceLabel : p.unit, `text-xs mt-0.5 font-medium ${groupProduct ? 'text-gray-400 font-normal' : !inStock ? 'text-red-500' : stock <= (asNumber(p.low_stock_threshold) || 10) ? 'text-yellow-500' : 'text-emerald-500'}`)}>
                       {groupProduct
-                        ? `${variants.length} ${choiceLabel}${groupMeta?.stockTotal ? ` · ${groupMeta.stockTotal} ${posCopy('total in stock', 'ស្តុកសរុប')}` : ''}`
+                        ? `${choiceLabel}: ${variants.length}${groupMeta?.stockTotal != null ? ` | ${posCopy('Total Qty', 'ចំនួនសរុប')}: ${groupMeta.stockTotal}` : ''}`
                         : `${stock} ${p.unit}`}
                     </p>
                     {expiryInfo && expiryInfo.status !== 'ok' ? (
