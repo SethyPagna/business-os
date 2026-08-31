@@ -1502,10 +1502,28 @@ function PageSlot({ accessDenied, activePageId, canAccessPage, pageId }: PageSlo
   )
 }
 
+// A customer visiting the storefront must never see the admin's
+// "Business OS / Loading this workspace view..." splash (that's what
+// PageLoader renders -- admin chrome). While the catalog chunk streams in,
+// keep the surface quiet and unbranded: just the storefront's own neutral
+// background, so the page effectively loads in the background and the visitor
+// only ever sees the store. Same public-surface rule that keeps admin/internal
+// framing off every customer-facing page.
+function PublicCatalogFallback() {
+  return (
+    <div
+      className="min-h-screen bg-white dark:bg-slate-950"
+      role="status"
+      aria-live="polite"
+      aria-label="Loading catalog"
+    />
+  )
+}
+
 function PublicCatalogView() {
   return (
     <PageErrorBoundary pageId="catalog-public">
-      <Suspense fallback={<PageLoader />}>
+      <Suspense fallback={<PublicCatalogFallback />}>
         <CatalogPage publicView />
       </Suspense>
     </PageErrorBoundary>
