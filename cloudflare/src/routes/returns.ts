@@ -1,7 +1,7 @@
 import { Hono } from 'hono'
 import { getDb } from '../lib/db'
 import { selectInChunks } from '../lib/sqlBinding'
-import { localDayLowerBound, localDayUpperBoundExclusive, localDateExpr, localDateRangeClause } from '../lib/businessDateWindow'
+import { localDateAtOrAfter, localDateAtOrBefore, localDateExpr, localDateRangeClause } from '../lib/businessDateWindow'
 import { requireAuth, type SessionUser } from '../lib/auth'
 import { audit } from '../lib/audit'
 import { getPermissionTier, getActionTier } from '../lib/permissions'
@@ -351,8 +351,8 @@ app.get('/', async (c) => {
 
   const where: string[] = ['1=1']
   const params: Record<string, unknown> = { limit }
-  if (query.startDate) { where.push(`r.created_at >= ${localDayLowerBound('@startDate')}`); params.startDate = query.startDate }
-  if (query.endDate) { where.push(`r.created_at < ${localDayUpperBoundExclusive('@endDate')}`); params.endDate = query.endDate }
+  if (query.startDate) { where.push(localDateAtOrAfter('r.created_at')); params.startDate = query.startDate }
+  if (query.endDate) { where.push(localDateAtOrBefore('r.created_at')); params.endDate = query.endDate }
   if (query.saleId) { where.push('r.sale_id = @saleId'); params.saleId = query.saleId }
   if (scope !== 'all') { where.push(`COALESCE(r.return_scope, 'customer') = @scope`); params.scope = scope }
   if (typeValues.length === 1) {

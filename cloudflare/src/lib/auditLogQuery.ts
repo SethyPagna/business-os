@@ -10,10 +10,16 @@
 // Contract with the page's FilterMenu: `action`, `entity` and `userId` are
 // COMMA-SEPARATED multi-values (toggleMultiValue joins selections with ','),
 // matched case-insensitively; `entity` matches either the `entity` or the
-// legacy `table_name` column; dates are inclusive YYYY-MM-DD against
-// date(created_at) -- server truth, deliberately not the device-supplied
-// client_time. Search is a LIKE over the human-searchable columns with %/_
-// escaped, so a literal "100%" in a details payload is findable as typed.
+// legacy `table_name` column; dates are inclusive YYYY-MM-DD against the LOCAL
+// (UTC+7 / Cambodia) calendar date of the stored-UTC created_at -- server
+// truth, deliberately not the device-supplied client_time, but bucketed in the
+// fixed business timezone so a 00:30-local event filters onto its local day
+// (see businessDateWindow.ts). audit_logs has no created_at index, so this stays
+// a column-wrapping date() (no sargable rewrite is possible or worth it here).
+// Search is a LIKE over the human-searchable columns with %/_ escaped, so a
+// literal "100%" in a details payload is findable as typed.
+
+import { localDateExpr } from './businessDateWindow'
 
 export type AuditLogFilterInput = {
   search?: string
@@ -77,11 +83,11 @@ export function buildAuditLogFilters(input: AuditLogFilterInput): AuditLogFilter
 
   if (isIsoDay(input.startDate)) {
     params.startDate = input.startDate
-    clauses.push('date(created_at) >= @startDate')
+    clauses.push(`${localDateExpr('created_at')} >= @startDate`)
   }
   if (isIsoDay(input.endDate)) {
     params.endDate = input.endDate
-    clauses.push('date(created_at) <= @endDate')
+    clauses.push(`${localDateExpr('created_at')} <= @endDate`)
   }
 
   const searchTerm = String(input.search || '').trim()

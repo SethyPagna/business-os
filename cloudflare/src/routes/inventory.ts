@@ -1,5 +1,6 @@
 import { Hono } from 'hono'
 import { getDb } from '../lib/db'
+import { localDateAtOrAfter, localDateAtOrBefore } from '../lib/businessDateWindow'
 import { attachBatchCounts } from '../lib/productBatches'
 import { paginateProductFamilies } from '../lib/familyPagination'
 import { getFamilyStockStats } from '../lib/familyStockStats'
@@ -923,18 +924,17 @@ app.get('/movements', async (c) => {
   const startDate = String(query.startDate || query.start_date || '').trim()
   if (startDate) {
     params.startDate = startDate
-    // SARGable so idx_inventory_movements_created_pg is used instead of a full
-    // scan: date() stays on the PARAM only (a constant), never on the column.
-    // date(@startDate) is NULL for a malformed date -- identical to the old
-    // date(created_at) >= date(@startDate), which also excluded everything then.
-    where.push('created_at >= date(@startDate)')
+    // Local (UTC+7) calendar day. The date()-normalized bound is shape-agnostic
+    // (inventory_movements.created_at is a MIX of ISO 'T'/'Z' and space forms) and
+    // is AND-ed with a sargable date-only floor so idx_inventory_movements_created_pg
+    // is still used instead of a full scan. See businessDateWindow.ts.
+    where.push(localDateAtOrAfter('created_at'))
   }
   const endDate = String(query.endDate || query.end_date || '').trim()
   if (endDate) {
     params.endDate = endDate
-    // `< date(@endDate,'+1 day')` admits all of the end day and excludes the
-    // next -- same row set as the old date(created_at) <= date(@endDate).
-    where.push("created_at < date(@endDate, '+1 day')")
+    // Admits all of the local end day and excludes the next local day.
+    where.push(localDateAtOrBefore('created_at'))
   }
 
   const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : ''

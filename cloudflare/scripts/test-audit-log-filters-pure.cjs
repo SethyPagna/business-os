@@ -30,11 +30,16 @@ function ok(cond, label) {
 }
 
 // ---- compile the real module ----------------------------------------------
+// auditLogQuery.ts imports ./businessDateWindow (the UTC+7 helpers), so copy
+// that dependency in too -- it is pure (no further imports) so the two files
+// compile in isolation.
 const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'audit-log-query-'))
 const tsPath = path.join(tmpDir, 'auditLogQuery.ts')
+const winPath = path.join(tmpDir, 'businessDateWindow.ts')
 fs.writeFileSync(tsPath, fs.readFileSync(path.join(cloudflareRoot, 'src', 'lib', 'auditLogQuery.ts'), 'utf8'))
+fs.writeFileSync(winPath, fs.readFileSync(path.join(cloudflareRoot, 'src', 'lib', 'businessDateWindow.ts'), 'utf8'))
 const tscBin = path.join(cloudflareRoot, 'node_modules', 'typescript', 'bin', 'tsc')
-execSync(`node ${tscBin} --module commonjs --target es2020 --outDir ${tmpDir} ${tsPath}`, { cwd: tmpDir, stdio: 'inherit' })
+execSync(`node ${tscBin} --module commonjs --target es2020 --outDir ${tmpDir} ${tsPath} ${winPath}`, { cwd: tmpDir, stdio: 'inherit' })
 const { buildAuditLogFilters } = require(path.join(tmpDir, 'auditLogQuery.js'))
 
 // ---- real schema ----------------------------------------------------------
@@ -104,9 +109,23 @@ function run(input, page = 1, pageSize = 50) {
   ok(total === 5, 'garbage userIds are dropped, not turned into an impossible filter')
 }
 {
-  const { items, total } = run({ startDate: '2026-08-10', endDate: '2026-08-20' })
-  ok(total === 3 && items.every((r) => r.created_at >= '2026-08-10' && r.created_at <= '2026-08-21'),
-    'date range is inclusive on both ends against date(created_at)')
+  const { total } = run({ startDate: '2026-08-10', endDate: '2026-08-20' })
+  // The five seed rows are all at 09:00Z (16:00 local, same calendar day), so
+  // the range [08-10, 08-20] still selects r2/r3/r4 under local bucketing.
+  ok(total === 3, 'date range is inclusive on both ends (local UTC+7 calendar date)')
+}
+{
+  // Boundary proof that the range buckets in UTC+7, not UTC: two events at
+  // 18:00Z are the NEXT local day (01:00 local). A is local Aug 10 (in range)
+  // but UTC Aug 9 (out); B is local Aug 21 (out) but UTC Aug 20 (in) -- so the
+  // local filter includes A and excludes B, flipping both vs a UTC filter.
+  const a = insert.run({ user_id: 9, user_name: 'edgeA', action: 'x', entity: 'e', entity_id: '1', details: null, table_name: 'e', record_id: '1', new_value: null, device_name: 'd', created_at: '2026-08-09T18:00:00.000Z' }).lastInsertRowid
+  const b = insert.run({ user_id: 9, user_name: 'edgeB', action: 'x', entity: 'e', entity_id: '2', details: null, table_name: 'e', record_id: '2', new_value: null, device_name: 'd', created_at: '2026-08-20T18:00:00.000Z' }).lastInsertRowid
+  const { items } = run({ startDate: '2026-08-10', endDate: '2026-08-20', userId: '9' })
+  const ids = items.map((r) => r.id)
+  ok(ids.includes(a) && !ids.includes(b),
+    'range buckets in UTC+7: an 18:00Z event counts on its local (next) day, flipping both edges vs UTC')
+  db.prepare('DELETE FROM audit_logs WHERE id IN (?, ?)').run(a, b)
 }
 {
   const { items, total } = run({ search: '100%' })
@@ -132,6 +151,11 @@ function run(input, page = 1, pageSize = 50) {
 }
 
 // ---- wiring pins ----------------------------------------------------------
+const auditSrc = fs.readFileSync(path.join(cloudflareRoot, 'src', 'lib', 'auditLogQuery.ts'), 'utf8')
+ok(/\$\{localDateExpr\('created_at'\)\} >= @startDate/.test(auditSrc) && /\$\{localDateExpr\('created_at'\)\} <= @endDate/.test(auditSrc),
+  'auditLogQuery.ts buckets the date filter on the LOCAL (UTC+7) calendar date')
+ok(!/date\(created_at\) >= @startDate/.test(auditSrc),
+  'auditLogQuery.ts no longer buckets the date filter in UTC')
 const compatSrc = fs.readFileSync(path.join(cloudflareRoot, 'src', 'routes', 'compat.ts'), 'utf8')
 ok(compatSrc.includes('buildAuditLogFilters({'), 'compat.ts builds the clause from the request')
 ok(/SELECT COUNT\(\*\) AS count FROM audit_logs \$\{where\}/.test(compatSrc),

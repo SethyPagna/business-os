@@ -33,7 +33,7 @@ import { buildLikeAliasClause, tokenizeSearchTermGroups, normalizeSearchText } f
 import { computeSaleTotals, resolveChangeExchangeRate, round2 } from '../lib/saleTotals'
 import { uniqueBusinessDateTimeNumber } from '../lib/receiptNumber'
 import { sanitizeClientCreatedAt } from '../lib/clientTimestamp'
-import { localDayLowerBound, localDayUpperBoundExclusive, localDateRangeClause } from '../lib/businessDateWindow'
+import { localDateAtOrAfter, localDateAtOrBefore, localDateRangeClause } from '../lib/businessDateWindow'
 import type { Env } from '../index'
 
 const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser } }>()
@@ -1495,8 +1495,8 @@ app.get('/', async (c) => {
   const where: string[] = ['1=1']
   const params: Record<string, unknown> = {}
 
-  if (query.startDate) { where.push(`s.created_at >= ${localDayLowerBound('@startDate')}`); params.startDate = query.startDate }
-  if (query.endDate) { where.push(`s.created_at < ${localDayUpperBoundExclusive('@endDate')}`); params.endDate = query.endDate }
+  if (query.startDate) { where.push(localDateAtOrAfter('s.created_at')); params.startDate = query.startDate }
+  if (query.endDate) { where.push(localDateAtOrBefore('s.created_at')); params.endDate = query.endDate }
   if (query.cashier) { where.push('s.cashier_name LIKE @cashier'); params.cashier = `%${query.cashier}%` }
   // Exact-id lookup -- there's still no separate GET /:id route (see this
   // file's own comment above), but a caller that already has a specific
@@ -1647,8 +1647,8 @@ app.get('/stats', async (c) => {
 
   const where: string[] = ['1=1']
   const params: Record<string, unknown> = {}
-  if (query.startDate) { where.push(`s.created_at >= ${localDayLowerBound('@startDate')}`); params.startDate = query.startDate }
-  if (query.endDate) { where.push(`s.created_at < ${localDayUpperBoundExclusive('@endDate')}`); params.endDate = query.endDate }
+  if (query.startDate) { where.push(localDateAtOrAfter('s.created_at')); params.startDate = query.startDate }
+  if (query.endDate) { where.push(localDateAtOrBefore('s.created_at')); params.endDate = query.endDate }
   if (query.cashier) { where.push('s.cashier_name LIKE @cashier'); params.cashier = `%${query.cashier}%` }
   if (query.userId) {
     const permissions = (() => { try { return JSON.parse(user?.permissions || '{}') } catch { return {} } })()
@@ -1711,13 +1711,21 @@ app.get('/stats', async (c) => {
   // and NULL mean completed, so a blank status keeps counting as revenue
   // rather than silently dropping out of the total. A plain COALESCE alone
   // would leave '' unmatched and quietly lose those sales.
+  //
+  // Revenue basis = NET SALES (subtotal net of both discounts), minus customer
+  // refunds -- the canonical definition (user directive Sep 1 2026), computed
+  // byte-for-byte identically to salesAnalytics.ts's deriveTotals so this header
+  // and the Reports kernel/Dashboard can never disagree. Tax and delivery fees
+  // are pass-through, NOT revenue, so total_usd (which folds tax in) is no
+  // longer the base here. Awaiting-payment (unpaid credit) uses the same net
+  // basis but is reported separately as pending, never folded into revenue.
   const totals = await db.prepare(`
     SELECT
       COUNT(*) AS total_count,
       COALESCE(SUM(CASE WHEN COALESCE(NULLIF(s.sale_status, ''), 'completed') NOT IN ('cancelled', 'awaiting_payment')
-        THEN COALESCE(s.total_usd, 0) - COALESCE(r.refund_usd, 0) ELSE 0 END), 0) AS revenue_usd,
+        THEN (COALESCE(s.subtotal_usd, 0) - COALESCE(s.discount_usd, 0) - COALESCE(s.membership_discount_usd, 0)) - COALESCE(r.refund_usd, 0) ELSE 0 END), 0) AS revenue_usd,
       COALESCE(SUM(CASE WHEN COALESCE(NULLIF(s.sale_status, ''), 'completed') = 'awaiting_payment'
-        THEN COALESCE(s.total_usd, 0) ELSE 0 END), 0) AS pending_revenue_usd
+        THEN (COALESCE(s.subtotal_usd, 0) - COALESCE(s.discount_usd, 0) - COALESCE(s.membership_discount_usd, 0)) ELSE 0 END), 0) AS pending_revenue_usd
     FROM sales s
     LEFT JOIN customers c ON c.id = s.customer_id
     LEFT JOIN (
@@ -1925,8 +1933,8 @@ app.get('/export', async (c) => {
 
   const where: string[] = ['1=1']
   const params: Record<string, unknown> = {}
-  if (query.startDate) { where.push(`s.created_at >= ${localDayLowerBound('@startDate')}`); params.startDate = query.startDate }
-  if (query.endDate) { where.push(`s.created_at < ${localDayUpperBoundExclusive('@endDate')}`); params.endDate = query.endDate }
+  if (query.startDate) { where.push(localDateAtOrAfter('s.created_at')); params.startDate = query.startDate }
+  if (query.endDate) { where.push(localDateAtOrBefore('s.created_at')); params.endDate = query.endDate }
   if (query.branchId) { where.push('s.branch_id = @branchId'); params.branchId = query.branchId }
 
   const emptySummary = {

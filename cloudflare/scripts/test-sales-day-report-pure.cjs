@@ -38,8 +38,11 @@ const kernelSrc = fs.readFileSync(path.join(cloudflareRoot, 'src', 'lib', 'sales
   .replace("import type { Env } from '../index'", 'type Env = unknown')
 assert.ok(kernelSrc.includes('__testDb') && kernelSrc.includes('type Env = unknown'), 'both import shims applied')
 fs.writeFileSync(path.join(tmpDir, 'salesAnalytics.ts'), kernelSrc)
+// salesAnalytics.ts imports ./businessDateWindow (the UTC+7 helpers); copy that
+// pure dependency in so the isolated strict compile resolves and emits it.
+fs.writeFileSync(path.join(tmpDir, 'businessDateWindow.ts'), fs.readFileSync(path.join(cloudflareRoot, 'src', 'lib', 'businessDateWindow.ts'), 'utf8'))
 const tscBin = path.join(cloudflareRoot, 'node_modules', 'typescript', 'bin', 'tsc')
-execSync(`node ${tscBin} --module commonjs --target es2022 --strict --skipLibCheck --outDir ${tmpDir} ${path.join(tmpDir, 'salesAnalytics.ts')}`, { cwd: tmpDir, stdio: 'inherit' })
+execSync(`node ${tscBin} --module commonjs --target es2022 --strict --skipLibCheck --outDir ${tmpDir} ${path.join(tmpDir, 'salesAnalytics.ts')} ${path.join(tmpDir, 'businessDateWindow.ts')}`, { cwd: tmpDir, stdio: 'inherit' })
 
 // ---- real schema ----------------------------------------------------------
 const initSql = fs.readFileSync(path.join(cloudflareRoot, 'migrations', '0001_init.sql'), 'utf8')

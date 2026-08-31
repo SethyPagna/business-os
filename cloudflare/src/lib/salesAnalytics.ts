@@ -40,8 +40,7 @@ import {
   localDateExpr,
   localMonthExpr,
   localWeekExpr,
-  localDayLowerBound,
-  localDayUpperBoundExclusive,
+  localDateRangeClause,
 } from './businessDateWindow'
 
 export interface SalesFilters {
@@ -132,15 +131,14 @@ function round2(n: number): number {
 function whereActiveSales(alias: string, f: SalesFilters) {
   const params: Record<string, unknown> = { startDate: f.startDate, endDate: f.endDate }
   const clauses = [
-    // Sargable local-day range, bucketed in the fixed business timezone UTC+7
-    // (Cambodia) -- created_at is stored UTC, so the local day [startDate,
-    // endDate] maps to the UTC half-open interval [startDate 00:00 -7h,
-    // (endDate+1) 00:00 -7h). Shifting the BOUNDS (not date()-wrapping the
-    // column) keeps the predicate SARGable, so SQLite still uses
-    // idx_sales_created_pg instead of full-scanning every sale on every
-    // date-filtered report. See businessDateWindow.ts; equivalence + index-use
-    // proven in test-sales-analytics-daterange-pure.cjs.
-    `${alias}.created_at >= ${localDayLowerBound('@startDate')} AND ${alias}.created_at < ${localDayUpperBoundExclusive('@endDate')}`,
+    // Local-day range, bucketed in the fixed business timezone UTC+7 (Cambodia).
+    // created_at is stored UTC in a MIX of ISO and space shapes (all sales are
+    // ISO), so the day is taken through date(created_at,'+7h') -- shape-agnostic,
+    // unlike a raw string compare against a datetime bound -- with a sargable
+    // date-only pre-filter that keeps idx_sales_created_pg usable. See
+    // businessDateWindow.ts; correctness + index-use proven in
+    // test-sales-analytics-daterange-pure.cjs.
+    localDateRangeClause(`${alias}.created_at`),
   ]
   // Status: an explicit filter wins over the default hide-cancelled guard, so
   // a caller asking for 'cancelled' actually gets cancelled sales. Bound as a

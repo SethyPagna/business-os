@@ -22,11 +22,14 @@ function ok(cond, label) {
   console.log(`PASS ${label}`)
 }
 
-// ---- compile the real kernel (zero imports -- compiles verbatim) ----------
+// ---- compile the real kernel (only local import: businessDateWindow) -------
 const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'stock-ledger-'))
 fs.copyFileSync(path.join(cloudflareRoot, 'src', 'lib', 'stockLedgerQuery.ts'), path.join(tmpDir, 'stockLedgerQuery.ts'))
+// stockLedgerQuery.ts imports ./businessDateWindow (the UTC+7 helpers); copy that
+// pure dependency in so the isolated compile resolves and emits it.
+fs.copyFileSync(path.join(cloudflareRoot, 'src', 'lib', 'businessDateWindow.ts'), path.join(tmpDir, 'businessDateWindow.ts'))
 execSync(
-  `npx tsc "${path.join(tmpDir, 'stockLedgerQuery.ts')}" --outDir "${tmpDir}" --module commonjs --target es2022 --strict --skipLibCheck`,
+  `npx tsc "${path.join(tmpDir, 'stockLedgerQuery.ts')}" "${path.join(tmpDir, 'businessDateWindow.ts')}" --outDir "${tmpDir}" --module commonjs --target es2022 --strict --skipLibCheck`,
   { cwd: cloudflareRoot, stdio: 'pipe' },
 )
 const kernel = require(path.join(tmpDir, 'stockLedgerQuery.js'))

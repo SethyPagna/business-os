@@ -18,6 +18,8 @@
 // the reported "70+ in vs very few out" skew was this bug, not just data.
 // `row_move_out` and `write_off` are kept for any legacy rows even though
 // current code writes `move_out` / `return_reversal` instead.
+import { localDateAtOrAfter, localDateAtOrBefore } from './businessDateWindow'
+
 export const LEDGER_OUT_TYPES = [
   'remove', 'sale', 'supplier_return', 'return_reversal', 'transfer_out',
   'row_move_out', 'move_out', 'write_off', 'damage_out', 'replacement_out', 'out',
@@ -80,17 +82,18 @@ export function buildStockLedgerQuery(filters: StockLedgerFilters = {}): StockLe
   const branchId = Number(filters.branchId) || 0
   if (productId > 0) { base.push('m.product_id = @productId'); params.productId = productId }
   if (branchId > 0) { base.push('m.branch_id = @branchId'); params.branchId = branchId }
-  // Inclusive calendar-day bounds on the stored timestamp, kept SARGable so
-  // idx_inventory_movements_created_pg is actually used instead of a full scan
-  // of every movement row: date(m.created_at) would wrap the indexed column
-  // and force the scan. `m.created_at >= @startDate` admits any time on the
-  // start day, and `m.created_at < date(@endDate,'+1 day')` admits all of the
-  // end day and excludes the next -- the same same-day-inclusive row set the
-  // old date() form produced (proven in test-stock-ledger-daterange-pure.cjs).
+  // Inclusive LOCAL (UTC+7) calendar-day bounds on the stored-UTC timestamp.
+  // date(m.created_at,'+7 hours') is the shape-agnostic precise check
+  // (inventory_movements.created_at is a MIX of ISO 'T'/'Z' and space forms, and
+  // a raw string comparison would misfile the ISO rows); it is AND-ed with a
+  // sargable date-only pre-filter on the raw column so
+  // idx_inventory_movements_created_pg is still used instead of a full scan of
+  // every movement row (see businessDateWindow.ts; proven in
+  // test-stock-ledger-daterange-pure.cjs).
   const startDate = /^\d{4}-\d{2}-\d{2}$/.test(String(filters.startDate || '')) ? String(filters.startDate) : ''
   const endDate = /^\d{4}-\d{2}-\d{2}$/.test(String(filters.endDate || '')) ? String(filters.endDate) : ''
-  if (startDate) { base.push('m.created_at >= @startDate'); params.startDate = startDate }
-  if (endDate) { base.push("m.created_at < date(@endDate, '+1 day')"); params.endDate = endDate }
+  if (startDate) { base.push(localDateAtOrAfter('m.created_at')); params.startDate = startDate }
+  if (endDate) { base.push(localDateAtOrBefore('m.created_at')); params.endDate = endDate }
   const search = String(filters.search || '').trim().slice(0, 120)
   if (search) {
     // LIKE with ESCAPE, auditLogQuery.ts convention: user text matches
