@@ -15,7 +15,10 @@ const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const path = require('node:path')
 
-const read = (...p) => fs.readFileSync(path.join(__dirname, '..', ...p), 'utf8')
+// Source-lock distances and newline anchors describe code, not the host
+// checkout convention. Normalize CRLF so isolated Windows worktrees certify
+// the same source shape as the shared LF checkout.
+const read = (...p) => fs.readFileSync(path.join(__dirname, '..', ...p), 'utf8').replace(/\r\n/g, '\n')
 
 // ---- H1: /rename-brand must require Full manage_lookups, not edit!=='none' ----
 {

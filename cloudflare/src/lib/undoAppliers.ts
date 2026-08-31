@@ -271,6 +271,8 @@ async function applyMergeReversal(env: Env, r: MergeReversal): Promise<void> {
   const movedPaths = (r.imagesMovedToKeeper || []).map(String).filter(Boolean)
   for (const grp of chunk(movedPaths, 50)) {
     if (!grp.length) continue
+    // sql-bound-params: bounded by construction -- this loop caps each group
+    // at 50 image paths, plus keeperId, safely below D1's 100-bind ceiling.
     const placeholders = grp.map((_, i) => `@p${i}`).join(',')
     const params: Record<string, unknown> = { keeperId }
     grp.forEach((p, i) => { params[`p${i}`] = p })

@@ -10,7 +10,7 @@ const assert = require('node:assert/strict')
 const Database = require('better-sqlite3')
 const { loadAll } = require('./harness/load_migrations.cjs')
 
-const read = (rel) => fs.readFileSync(path.join(__dirname, '..', 'src', rel), 'utf8')
+const read = (rel) => fs.readFileSync(path.join(__dirname, '..', 'src', rel), 'utf8').replace(/\r\n/g, '\n')
 
 // ---- 1. Schema: column exists, defaults to 1 ----
 const sqlite = new Database(':memory:')
@@ -85,7 +85,7 @@ assert.match(engine, /accrueLoyalty,\n\s*\}\)/, 'apply loop threads accrueLoyalt
 assert.match(salesRoute, /loyalty_accrual: body\.loyalty_accrual === false \? 0 : 1/, 'POS route: only an explicit false opts out')
 const contacts = read(path.join('routes', 'contacts.ts'))
 assert.match(contacts, /COALESCE\(loyalty_accrual, 1\) AS loyalty_accrual/, 'contacts feeds the flag into summarizePoints')
-const pos = fs.readFileSync(path.join(__dirname, '..', '..', 'frontend', 'src', 'components', 'pos', 'POS.tsx'), 'utf8')
+const pos = fs.readFileSync(path.join(__dirname, '..', '..', 'frontend', 'src', 'components', 'pos', 'POS.tsx'), 'utf8').replace(/\r\n/g, '\n')
 assert.match(pos, /loyalty_accrual: active\.loyaltyAccrual !== false/, 'POS checkout sends the flag with on-by-default semantics')
 
 // ---- Part-77 (MEDIUM): manual awards count at CHECKOUT, not just in the

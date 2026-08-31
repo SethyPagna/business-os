@@ -23,7 +23,9 @@ const ts = require('typescript')
 const assert = require('assert')
 
 const sourcePath = path.join(__dirname, '..', 'src', 'lib', 'productWrites.ts')
-const source = fs.readFileSync(sourcePath, 'utf8')
+// Normalize checkout line endings before the source-shape regexes below.
+// Fresh Windows worktrees are CRLF; the production TypeScript is identical.
+const source = fs.readFileSync(sourcePath, 'utf8').replace(/\r\n/g, '\n')
 
 function extractFunction(name) {
   // Matches "export function <name>(...) {" through its matching closing

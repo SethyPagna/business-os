@@ -85,7 +85,7 @@ function makeDb() {
     CREATE TABLE branches (id INTEGER PRIMARY KEY, name TEXT, is_active INTEGER DEFAULT 1);
     CREATE TABLE customers (id INTEGER PRIMARY KEY, name TEXT, phone TEXT);
     CREATE TABLE delivery_contacts (id INTEGER PRIMARY KEY, name TEXT, phone TEXT);
-    CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, is_active INTEGER DEFAULT 1);
+    CREATE TABLE users (id INTEGER PRIMARY KEY, username TEXT, name TEXT, is_active INTEGER DEFAULT 1);
     CREATE TABLE product_batches (id INTEGER PRIMARY KEY AUTOINCREMENT, variant_product_id INTEGER,
       batch_key TEXT, lot_code TEXT, expiry_date TEXT, received_at TEXT, is_active INTEGER DEFAULT 1,
       notes TEXT, batch_number INTEGER, supplier_id INTEGER, supplier_name TEXT, unit_cost_usd REAL,
