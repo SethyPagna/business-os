@@ -84,6 +84,14 @@ Two rules learned the hard way, both from real incidents in this file's own hist
 *(Live coordination only — session records that used to live here are in the
 [DONE — archive](#done--archive).)*
 
+**[~ DEPLOY IN FLIGHT — session business-os-v1-r2, Aug 31 (user-authorized:
+"continue, deploy").** Deploying from an ISOLATED git worktree at committed
+HEAD `242c2b75` (the user's chosen multi-session method) — the shared tree,
+node_modules and the 8787 wrangler are untouched; peers do NOT need to pause.
+**Do NOT run `migrate:remote` or `wrangler deploy` concurrently** until this
+block flips to DONE. Applies migrations 0083–0087 to remote D1. All commits
+through `242c2b75` are pushed to GitHub (origin/main).]**
+
 **[DONE — session business-os-v1-r2, Aug 31: deploy pipeline VERIFIED green +
 run files hardened (`e692a611`, Part 537).** Read-only against Cloudflare, NO
 deploy performed. Measured: remote D1 pending = exactly **0083–0087** (0082 and
