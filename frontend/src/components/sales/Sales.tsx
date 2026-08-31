@@ -1235,7 +1235,10 @@ export default function Sales() {
         // longer relocates them (user, Aug 31).
         rangeActions={(
           <>
-            <ActionHistoryBar history={actionHistory as unknown as ActionHistoryBarHistory} t={t} className="min-w-0" />
+            {/* dense: pin History to a true 32px so it matches the h-8 Manage
+                button beside it on the Stats row (btn-secondary's 40px
+                min-height would otherwise make it taller). */}
+            <ActionHistoryBar history={actionHistory as unknown as ActionHistoryBarHistory} t={t} className="min-w-0" dense />
             <LazyPortalMenu
               align="auto"
               menuClassName="max-h-[70vh] overflow-auto"

@@ -10,6 +10,7 @@ import RotateCcw from 'lucide-react/dist/esm/icons/rotate-ccw.js'
 import SearchInput from '../shared/SearchInput'
 import ScanSearchButton from '../shared/ScanSearchButton'
 import Undo2 from 'lucide-react/dist/esm/icons/undo-2.js'
+import Plus from 'lucide-react/dist/esm/icons/plus.js'
 import { isBrokenLocalizedString as isBrokenLocalizedStringHook, useApp as useAppHook, useSync as useSyncHook } from '../../AppContext.tsx'
 import { fmtTime } from '../../utils/formatters'
 import ExportMenu from '../shared/ExportMenu'
@@ -277,6 +278,22 @@ function getInitialReturnPageSize(): number {
   return 50
 }
 
+// The "Add Return" button's icon: a return arrow (Undo2) with a small "+"
+// built onto its empty top-right corner (user, Aug 31: "an add icon built on
+// the icon ... similar to Add product's add icon product icon" — the Products
+// page's PackagePlus). lucide has no ready-made return-plus glyph, so it is
+// composed from the return arrow plus an overlaid Plus, both line-drawn in the
+// same white stroke as the button's text. Undo2's arrowhead sits on the left
+// and its loop curves down the bottom-right, leaving the top-right corner
+// empty — so the "+" lands in clear space rather than muddying the arrow.
+function ReturnPlusIcon({ className = '' }: { className?: string }) {
+  return (
+    <span className={`relative inline-flex shrink-0 items-center justify-center ${className}`}>
+      <Undo2 className="h-full w-full" />
+      <Plus className="absolute -right-1 -top-1 h-2.5 w-2.5" strokeWidth={3.5} />
+    </span>
+  )
+}
 
 export default function Returns() {
   const { can, t, fmtUSD, fmtKHR, notify, user } = useApp()
@@ -1031,22 +1048,29 @@ export default function Returns() {
         rangeActions={(
           <>
             <ExportMenu label={tr('export', 'Export')} items={exportItems} triggerClassName="h-8 px-2.5 text-xs" />
-            <ActionHistoryBar history={actionHistory as unknown as ActionHistoryBarHistory} t={t} className="min-w-0" />
+            {/* dense: pin History to a true 32px so it matches the h-8 Export
+                button beside it on the Stats row (btn-secondary's 40px
+                min-height would otherwise make it taller). */}
+            <ActionHistoryBar history={actionHistory as unknown as ActionHistoryBarHistory} t={t} className="min-w-0" dense />
           </>
         )}
         actions={(
           // The PRIMARY add action: explicit, always-visible label ("make
           // add button clear... add return", Part 548 — the label used to
           // vanish below the sm breakpoint, leaving a bare icon).
+          // Icon = the composite return+"+" glyph (ReturnPlusIcon); the visible
+          // word is the short noun ("Return" / "Supplier Return"), mirroring the
+          // Products "Add product" button which shows just "Product" beside its
+          // PackagePlus. The full "Add …" phrasing stays as the aria-label/title.
           scope === SUPPLIER_SCOPE ? (
-            <button onClick={() => setShowSupplierForm(true)} className="inline-flex h-8 shrink-0 items-center gap-1 rounded-lg bg-blue-600 px-2.5 text-xs font-semibold text-white transition-colors hover:bg-blue-700" aria-label={tr('add_supplier_return', 'Add Supplier Return')}>
-              <Undo2 className="h-3.5 w-3.5 shrink-0" />
-              <span>{tr('add_supplier_return', 'Add Supplier Return')}</span>
+            <button onClick={() => setShowSupplierForm(true)} className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg bg-blue-600 px-2.5 text-xs font-semibold text-white transition-colors hover:bg-blue-700" aria-label={tr('add_supplier_return', 'Add Supplier Return')} title={tr('add_supplier_return', 'Add Supplier Return')}>
+              <ReturnPlusIcon className="h-4 w-4" />
+              <span>{tr('supplier_return', 'Supplier Return')}</span>
             </button>
           ) : (
-            <button onClick={() => setShowCustomerForm(true)} className="inline-flex h-8 shrink-0 items-center gap-1 rounded-lg bg-blue-600 px-2.5 text-xs font-semibold text-white transition-colors hover:bg-blue-700" aria-label={tr('add_return', 'Add Return')}>
-              <Undo2 className="h-3.5 w-3.5 shrink-0" />
-              <span>{tr('add_return', 'Add Return')}</span>
+            <button onClick={() => setShowCustomerForm(true)} className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg bg-blue-600 px-2.5 text-xs font-semibold text-white transition-colors hover:bg-blue-700" aria-label={tr('add_return', 'Add Return')} title={tr('add_return', 'Add Return')}>
+              <ReturnPlusIcon className="h-4 w-4" />
+              <span>{tr('return', 'Return')}</span>
             </button>
           )
         )}
