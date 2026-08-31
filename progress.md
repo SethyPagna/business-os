@@ -194,6 +194,23 @@ green. Audit of ALL conflict surfaces now closed: contacts merge (repoints, `165
 "Remove" is already a merge (`mergePossiblySameProducts` → soft-deactivate + carry stock/lots/images, no
 orphan), so the only open products item (repoint historical sales onto the keeper for unified reporting)
 stays with lane 578. General Customers/Suppliers per-record delete left untouched (separate intentional feature).
+Follow-up 2 (Sep 1, same lane — DONE, committed `30210c86` contacts-duplicates + `5767a532` sale-links, Stage-1 /
+NOT deployed): user added "and can always be resolved in conflict." Since the only non-merge resolution is "keep"
+(a 0034 `contact_duplicate_dismissals` marker), that keep had to be REVERSIBLE — a kept conflict must always be
+reopenable and then merged/resolved, never a one-way hide. Implemented the same reopen pattern on both Contacts-tab
+conflict surfaces: **(a) duplicate clusters** — `lib/contactDuplicates.ts` `findDuplicateContactClusters` accepts
+`{includeDismissed}` + flags kept clusters `dismissed:true` (open-first sort), new `undismissDuplicateCluster`
+(phone: exact delete; name: casing/spacing-tolerant delete via `normalizeContactName`); route GET `/duplicates`
+parses `includeDismissed` + new POST `/duplicates/undismiss`; `DuplicatesTab.tsx` gains a "Show kept" toggle,
+"Kept" badge and Reopen action. **(b) sale-link conflicts** — route GET `/customers/link-conflicts` accepts
+`?includeDismissed=1` + flags each mismatch/missing group `dismissed:1`, new POST `/customers/link-conflicts/undismiss`
+(exact delete on the same `customer_id|phone_key` / `lower(name)|phone_key` key the dismiss stored);
+`SaleLinkConflictsSection.tsx` gains the Show-kept/Kept/Reopen UI; transport gains `getSaleLinkConflicts({includeDismissed})`
++ `undismissSaleLinkConflict`. 7 shared lang keys added both packs (Khmer verified). Two round-trip tests on the real
+migration chain prove keep→reopen is reversible and the modified SQL is valid: `test-contact-duplicate-reopen-pure.cjs`
+(7/7) + `test-sale-link-conflict-reopen-pure.cjs` (9/9). **STILL OPEN for full consistency: Products duplicates tab
+(ProductDuplicatesTab) needs the same reopen wiring — it lives in `routes/products.ts`, peer-owned by lane 578, so
+flagged here, NOT edited from this lane.**
 
 **→ SMALL-SCREEN PRODUCTS-CARD lane (Sep 1, session 88 [ad9ece] — CLAIMED, in progress).**
 User (on a phone): the product-name text on the small-screen product CARD can't be
