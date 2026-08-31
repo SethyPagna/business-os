@@ -15403,3 +15403,12 @@ before logging (the collision class the how-to warns about).
 
 **Not done:** deploy of these two commits (next in this session); the A2
 POS-sale live check now expects the bare id format.
+
+**Deploy addendum (same session, ~01:55 UTC):** shipped as Worker version
+`10da6184-680e-46d2-be04-34dcabb8cd07` from HEAD `0414f46b` via the isolated
+worktree (bos-deploy-540, removed after) — npm ci ×2 / both tscs / build
+32.55s green, migrate:remote a verified no-op ("No migrations to apply", still
+0087), secrets synced, deploy OK with all domains/cron/queue bindings. Live:
+admin /health ok, storefront 200, portal bootstrap 200, and c8's `0efd04bc`
+rode along — /api/catalog now returns 404 in production. New sales mint the
+bare id from this version on.

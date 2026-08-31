@@ -91,10 +91,13 @@ Two rules learned the hard way, both from real incidents in this file's own hist
 *(Live coordination only — session records that used to live here are in the
 [DONE — archive](#done--archive).)*
 
-**[~ DEPLOY IN FLIGHT — r2, Aug 31 (second of the day): shipping HEAD `0414f46b`
-from an isolated worktree** (r2's Part-540 receipt/locale fixes + c8's `0efd04bc`
-catalog-endpoint removal; NO new migrations — remote stays at 0087). Do NOT run
-`migrate:remote`/`wrangler deploy` until this flips to DONE.]**
+**[DONE — DEPLOYED (second of the day), r2, Aug 31: production is now
+`0414f46b`, Worker version `10da6184-680e-46d2-be04-34dcabb8cd07`.** Ships r2's
+Part-540 receipt/locale fixes + c8's `0efd04bc` catalog-endpoint removal. No
+migrations (remote stays at 0087; migrate ran as a verified no-op). Live checks:
+admin /health ok, storefront 200, **/api/catalog now 404** (the removal is
+live), portal bootstrap 200. Worktree removed; freeze LIFTED. New sales now
+mint bare `YYYYMMDD-HHMMSS` receipt ids.]**
 
 **[DONE — session business-os-v1-r2, Aug 31 (Part 540, `c41d4d81` + `dcb2e120`):
 receipt ids lose the `RCP` prefix (user: "Receipt no need RCP") + the
