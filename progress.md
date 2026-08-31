@@ -149,8 +149,12 @@ sessions").** The coordinator is LIVE again and stays live: long-cadence ticks
 while the tree is quiet, tight cadence while lanes are active. Same playbook as
 the closed run below — claim before code, pathspec-atomic commits with named
 ride-alongs, grep-max+1 Part numbers, unique migration numbers, commit every
-finished slice, message 7b (or post here) for routing/hazards. New sessions:
-c8's read-mostly verification sweep claim (b52870ae) is acknowledged.
+finished slice, message 7b (or post here) for routing/hazards. **New rule (from
+the Aug-31 morning incident): committing a migration is HALF the job — run
+`migrate:local` against the shared local D1 (or flag it here if you can't) in the
+same slice, so HEAD code never outruns the shared schema.** (0086/0087 sat
+unapplied while HEAD's contacts route joined portal_accounts → every session's
+GET /api/customers 500'd until c8 migrated + restarted 8787, which c8 now owns.)
 
 *Previous run record (Aug 30 ~21:35 → Aug 31 ~02:00):* Final state:
 every lane committed + logged (through Part 535), migration chain green from zero
@@ -158,8 +162,8 @@ every lane committed + logged (through Part 535), migration chain green from zer
 green, no dirty files. Incidents handled this run: 2 migration-number collisions,
 3 Part-number collisions, 1 shared-file two-lane hazard (routes/sales.ts), 1 red
 test chain on HEAD (fixed as Part 520), 1 wrangler DO-SQLite lock race (8899 shut
-down). Historical detail below stands as a record; no coordinator is currently
-live — a future session can take the role by re-reading this block's playbook.
+down). Historical detail below stands as a record (superseded where it says no
+coordinator is live — the note above reopened the watch).
 Both earlier hazards are RESOLVED: the lang packs committed atomically with named
 ride-alongs (1f55712e), and `routes/sales.ts` is single-lane again — d2lot's 0084
 stamping shipped in a7104aa4, what remains dirty is the stats session's
