@@ -15931,8 +15931,11 @@ sort, statsStrip, posMoneyRounding, changeExchangeRate, batchFailLoud - 10/10)
 -> migrate:remote VERIFIED NO-OP -> secrets:sync (RESEND + CLOUDINARY pushed,
 APP_ENCRYPTION_KEY blank-skipped) -> wrangler deploy. Production Worker
 version `53804f02-e25d-4909-bd78-cc4deac2c10b` at 100% (deployments list
-confirms newest = mine; one stray 045233f1 34s earlier = bf's partial run,
-superseded). Live checks: /health ok, storefront 200, /api/products unauth
+confirms newest = mine; the 045233f1 entry 34s earlier was FIRST recorded as
+bf's partial run, then CORRECTED on bf's deployment-log evidence, re-verified
+by 7a: its Source is "Secret Change" — i.e. 7a's own secrets:sync push
+preceding the deploy, same shape as the 02:13 pipeline; bf ran zero remote
+mutations). Live checks: /health ok, storefront 200, /api/products unauth
 401, /api/catalog 404, portal bootstrap 200, and the seal census on
 /api/portal/catalog/products: 50 rows of ONLY stock_status +
 branch_availability, ZERO stock_quantity / thresholds / branch_stock.

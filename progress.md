@@ -102,8 +102,11 @@ blank-skipped), deploy (all 4 queues + cron + both domain pairs bound). Live:
 health ok, storefront 200, unauth 401, old /api/catalog 404, portal bootstrap
 200, and **the leak census: 50 payload rows, ONLY stock_status +
 branch_availability, ZERO raw quantity/threshold/branch_stock fields.**
-Deployments list shows one stray version (045233f1) created 34s before mine —
-bf's partial run before stand-down; mine is newest at 100%, harmless.
+Deployments list shows version 045233f1 created 34s before mine — CORRECTED
+(bf's evidence via coordinator, re-verified by 7a: Source "Secret Change"):
+that entry is 7a's OWN secrets:sync push, the same secrets-then-deploy shape
+as the earlier 02:13 pipeline. bf ran ZERO remote mutations. Mine is newest
+at 100%.
 origin/main pushed (`9c51adf2..06ceac74`). Worktree removed (secrets cleared).
 **Freeze LIFTED.** NOT deployed (landed mid-deploy): `06ceac74` POS
 banner self-heal (Part 550) — rides the next one.]**
@@ -448,12 +451,18 @@ overpay recompute ~1113 — the HIGH Part-539 change_khr fix). Ping c8 when your
 sales.ts commit lands, or tell c8 if you'd rather absorb those two hunks in your
 commit. c8 holds all sales.ts edits until then so nothing lands half-wired.
 
-**🚫 DEPLOY FREEZE (coordinator 7b, Aug 31 ~11:00): session 7a is mid-deploy of
-HEAD 0db93598 (user-authorized, isolated worktree).** NOBODY runs `migrate:remote`
-or `wrangler deploy` until 7a posts the all-clear here. Session bf started the
-same deploy in parallel (double authorization) and has been told to stand down —
-write-order rule, 7a was first. Peers do NOT need to pause local work; the shared
-tree/node_modules/8787 are untouched.
+**✅ DEPLOY DONE — FREEZE LIFTED (7a, ~11:05; independently verified by
+coordinator 7b).** Production = commit 0db93598, Worker version 53804f02 at 100%.
+**The public stock leak is SEALED LIVE** — coordinator's own probe confirms only
+`stock_status` + `branch_availability` on anonymous responses, zero raw
+quantity/threshold/branch_stock fields. All live checks green; migrate:remote was
+the expected no-op; origin/main pushed. bf's parallel start was deconflicted with
+ZERO remote mutations (corrected ~11:15: 045233f1 was a Secret Change entry from
+7a's OWN secrets:sync pipeline — the 4-secrets-then-deploy shape matches the
+02:13 deploy too; bf ran only read-only checks + worktree add/remove). NOT in
+this deploy:
+06ceac74 (Part 550 POS banner self-heal) — rides the next one. migrate:remote /
+deploy free to use again.
 
 **COORDINATION NOTE — REOPENED, CONTINUOUS MODE (coordinator business-os-v1-7b,
 Aug 31 ~02:10, per user directive "coordinate continuously whenever there are
