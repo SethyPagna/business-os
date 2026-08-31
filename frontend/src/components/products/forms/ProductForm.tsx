@@ -86,6 +86,8 @@ interface ProductFormState extends GroupCandidate {
   selling_price_khr?: EditableNumber
   special_price_usd?: EditableNumber
   special_price_khr?: EditableNumber
+  wholesale_price_usd?: EditableNumber
+  wholesale_price_khr?: EditableNumber
   discount_enabled?: number | boolean
   discount_type?: 'percent' | 'fixed' | string
   discount_percent?: EditableNumber
@@ -117,6 +119,8 @@ interface ProductSavePayload extends ProductFormState {
   selling_price_khr: number
   special_price_usd: number
   special_price_khr: number
+  wholesale_price_usd: number
+  wholesale_price_khr: number
   discount_enabled: 0 | 1
   discount_type: 'percent' | 'fixed'
   discount_percent: number
@@ -380,6 +384,8 @@ export default function ProductForm({
       selling_price_khr: 0,
       special_price_usd: 0,
       special_price_khr: 0,
+      wholesale_price_usd: 0,
+      wholesale_price_khr: 0,
       discount_enabled: 0,
       discount_type: 'percent',
       discount_percent: 0,
@@ -573,6 +579,11 @@ export default function ProductForm({
       // A product with no VIP price loads blank/0 and stays that way.
       special_price_usd: editablePrice(initialForm.special_price_usd),
       special_price_khr: editablePrice(initialForm.special_price_khr),
+      // Wholesale price is its own optional field, same rule as VIP above:
+      // loads blank/0 when unset and stays that way, never borrowing the
+      // selling price.
+      wholesale_price_usd: editablePrice(initialForm.wholesale_price_usd),
+      wholesale_price_khr: editablePrice(initialForm.wholesale_price_khr),
       discount_enabled: Number(initialForm.discount_enabled || 0),
       discount_type: initialForm.discount_type || 'percent',
       discount_percent: editablePrice(initialForm.discount_percent || 0),
@@ -941,6 +952,8 @@ export default function ProductForm({
       // untouched VIP price is never clobbered with the selling price.
       special_price_usd: normalizePriceValue(parseNumericInput(form.special_price_usd)),
       special_price_khr: normalizePriceValue(parseNumericInput(form.special_price_khr)),
+      wholesale_price_usd: normalizePriceValue(parseNumericInput(form.wholesale_price_usd)),
+      wholesale_price_khr: normalizePriceValue(parseNumericInput(form.wholesale_price_khr)),
       discount_enabled: form.discount_enabled ? 1 : 0,
       discount_type: form.discount_type === 'fixed' ? 'fixed' : 'percent',
       discount_percent: normalizePriceValue(parseNumericInput(form.discount_percent)),
@@ -1513,6 +1526,31 @@ export default function ProductForm({
                   }
                 }}
               onKhrChange={(value) => setField('special_price_khr', value)}
+              usdSymbol={usdSymbol}
+              khrSymbol={khrSymbol}
+              exchangeRate={exchangeRate}
+              t={t}
+            />
+          </div>
+
+          <div className="rounded-xl border border-indigo-100 bg-indigo-50 p-4 dark:border-indigo-800 dark:bg-indigo-900/10">
+            <div className="mb-3">
+              <p className="text-sm font-bold text-indigo-700 dark:text-indigo-400">{tr('wholesale_price', 'Wholesale', 'បោះដុំ')}</p>
+              <p className="text-xs text-indigo-600 dark:text-indigo-500">{tr('wholesale_price_hint', 'Bulk / wholesale price, selectable at POS like the VIP tier.', 'តម្លៃបោះដុំ អាចជ្រើសនៅ POS ដូចតម្លៃ VIP។')}</p>
+            </div>
+            <DualPriceInput
+              labelUsd={tr('wholesale_price_usd_full', 'Wholesale (USD)', 'បោះដុំ (USD)')}
+              labelKhr={tr('wholesale_price_khr_full', 'Wholesale (KHR)', 'បោះដុំ (KHR)')}
+              valueUsd={form.wholesale_price_usd}
+              valueKhr={form.wholesale_price_khr}
+                onUsdChange={(value) => {
+                  setField('wholesale_price_usd', value)
+                  if (!String(form.wholesale_price_khr ?? '').trim()) {
+                    const converted = normalizePriceValue(parseNumericInput(value) * exchangeRate)
+                    setField('wholesale_price_khr', value === '' ? '' : formatPriceNumber(converted))
+                  }
+                }}
+              onKhrChange={(value) => setField('wholesale_price_khr', value)}
               usdSymbol={usdSymbol}
               khrSymbol={khrSymbol}
               exchangeRate={exchangeRate}

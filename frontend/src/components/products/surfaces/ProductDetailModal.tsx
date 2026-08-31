@@ -61,6 +61,8 @@ type ProductDetailProduct = {
   selling_price_khr?: unknown
   special_price_usd?: unknown
   special_price_khr?: unknown
+  wholesale_price_usd?: unknown
+  wholesale_price_khr?: unknown
   discount_badge_color?: string
   discount_label?: string
   expiry_date?: string
@@ -132,6 +134,8 @@ export default function ProductDetailModal({
   const sellingUsd = Number(p.selling_price_usd || 0)
   const specialUsd = Number(p.special_price_usd || 0)
   const specialKhr = Number(p.special_price_khr || 0)
+  const wholesaleUsd = Number(p.wholesale_price_usd || 0)
+  const wholesaleKhr = Number(p.wholesale_price_khr || 0)
   const sellingKhr = Number(p.selling_price_khr || 0)
   const stockQuantity = Number(p.stock_quantity || 0)
   const outOfStockThreshold = Number(p.out_of_stock_threshold || 0)
@@ -409,6 +413,12 @@ export default function ProductDetailModal({
                   <Row label={T('special_price', 'VIP Price')}>
                     <span className="text-blue-600">{fmtUSD(specialUsd || sellingUsd)}</span>
                     {(specialKhr > 0 || sellingKhr > 0) ? <span className="ml-2 text-xs text-gray-400">{fmtKHR(specialKhr || sellingKhr)}</span> : null}
+                  </Row>
+                ) : null}
+                {(wholesaleUsd > 0 || wholesaleKhr > 0) ? (
+                  <Row label={T('wholesale_price', 'Wholesale')}>
+                    <span className="text-indigo-600 dark:text-indigo-300">{fmtUSD(wholesaleUsd)}</span>
+                    {wholesaleKhr > 0 ? <span className="ml-2 text-xs text-gray-400">{fmtKHR(wholesaleKhr)}</span> : null}
                   </Row>
                 ) : null}
                 {promotion.active ? (

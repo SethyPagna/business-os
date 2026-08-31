@@ -1,21 +1,25 @@
-import { useState, type ReactNode } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import BarChart3 from 'lucide-react/dist/esm/icons/bar-chart-3.js'
 import ChevronDown from 'lucide-react/dist/esm/icons/chevron-down.js'
-import DateTimeRangePicker, { type DateTimeRange, EMPTY_DATE_TIME_RANGE } from './DateTimeRangePicker.tsx'
+import DateTimeRangePicker, { type DateTimeRange } from './DateTimeRangePicker.tsx'
 import InfoHint from './InfoHint.tsx'
+import Modal from './Modal.tsx'
 
 // THE stats surface for data pages (user, Aug 30: "for each of data full
 // pages ... mini stats cards folded in them, to explain and show more
 // stats ... based on date range. default per day ... do so for all
 // pages"). The WHOLE stats block is folded behind a "Stats" chip —
 // "stats should be folded into stats click to open" (user, Aug 31) —
-// so a page opens compact: one row with the Stats chip and the page
-// actions, nothing else. Clicking the chip opens the range row and the
-// mini stat cards; the cards WRAP instead of scrolling sideways —
-// "should not do scroll in one row, can do 2 stats per row for smaller
-// screens" (user, Aug 31) — 2-up on phones, widening with the
-// viewport. Tapping a card folds open ONE detail panel below the grid
-// carrying that figure's explanation and its breakdown rows. The strip
+// so a page opens compact: one row with the Stats chip, its secondary
+// controls (History/Manage), and the page actions — all of which stay on
+// that row whether the strip is folded or open. Clicking the chip opens
+// the range row and the mini stat cards BELOW it; the cards WRAP instead
+// of scrolling sideways — "should not do scroll in one row, can do 2 stats
+// per row for smaller screens" (user, Aug 31) — 2-up on phones, widening
+// with the viewport. Tapping a card opens ONE detail FLOAT (a Modal
+// layered above the page) carrying that figure's explanation and its
+// breakdown rows, rather than an inline panel that pushes the list down
+// (user, Aug 31: "click to show details … a float above layer"). The strip
 // is driven by a date range whose default is per-day (today). Every
 // data page renders THIS component rather than its own tile grid, so
 // stats read identically app-wide (the cross-surface rule); pages with
@@ -120,24 +124,25 @@ export default function StatsStrip({
   const [openKey, setOpenKey] = useState<string | null>(null)
   const openCard = cards.find((card) => card.key === openKey && card.details?.length) || null
   const activePreset = range ? activeStatsPreset(range) : null
-  // Row utilization (user, Aug 31, refining the earlier ≤3 split): the point
-  // was never to STRETCH a few stats across the row, nor to strand the
-  // secondary buttons on an otherwise-empty date row. "Just enough for its
-  // own space of stats ... and merge the various buttons in same row." So the
-  // stat cards are always sized to their own content, and the secondary
-  // controls (History / Export / Manage) ALWAYS ride the cards row's spare
-  // width at its tail — for every card count, not just ≤3. A 4-card page
-  // (Sales) had the same dead space a 2-card page did, which is what the
-  // count-based threshold got wrong. The date row is left to just the picker
-  // + presets (the dashboard shape the user pointed to).
-  const statsRowActions = statsOpen ? rangeActions : null
+  // Closing the strip dismisses any open card float too, so reopening the
+  // strip doesn't silently resurface a detail dialog the user had moved past.
+  useEffect(() => {
+    if (!statsOpen) setOpenKey(null)
+  }, [statsOpen])
+  // The secondary controls (History / Manage / Export) ALWAYS stay on the
+  // Stats-chip row (row 1), whether the strip is folded or open (user, Aug 31:
+  // "move [the buttons] to same row as the stats so when stat button expands
+  // it doesn't affect"). They used to relocate onto the cards row on expand,
+  // which shifted them under the user mid-interaction; anchoring them to the
+  // chip row keeps them put. The date row and cards row therefore carry only
+  // their own content.
 
   return (
     <div className={`min-w-0 ${className}`}>
-      {/* Row 1 (always): the Stats chip + the PRIMARY page actions. While
-          folded, the secondary controls (History/Export) sit here too so
-          everything stays reachable; opening the strip moves them to the
-          date row (or the stats row on few-card pages). */}
+      {/* Row 1 (always): the Stats chip + the secondary controls (History/
+          Manage/Export) + the PRIMARY page actions. Everything on this row
+          stays put whether the strip is folded or open — expanding the strip
+          only adds rows BELOW it, it never relocates these controls. */}
       <div className="flex min-w-0 flex-wrap items-center gap-1">
         <button
           type="button"
@@ -155,9 +160,9 @@ export default function StatsStrip({
         {summary ? (
           <span className="min-w-0 truncate text-[11px] text-gray-500 dark:text-gray-400">{summary}</span>
         ) : null}
-        {(!statsOpen && rangeActions) || actions ? (
+        {rangeActions || actions ? (
           <div className="ml-auto flex min-w-0 flex-wrap items-center justify-end gap-1">
-            {!statsOpen ? rangeActions : null}
+            {rangeActions}
             {actions}
           </div>
         ) : null}
@@ -166,9 +171,8 @@ export default function StatsStrip({
       {statsOpen && range && onRangeChange ? (
         // The date row carries the picker + its presets, sized to content and
         // left-aligned (the dashboard shape: picker then preset chips, spare
-        // width trailing). The secondary buttons are NOT here anymore — they
-        // moved to the cards row so the stats aren't marooned beside empty
-        // space (user, Aug 31).
+        // width trailing). The secondary buttons live on the chip row above,
+        // not here — expanding the strip never moves them (user, Aug 31).
         <div className="mt-1.5 flex min-w-0 flex-wrap items-center gap-1">
           <DateTimeRangePicker value={range} onChange={onRangeChange} t={t} showTime={false} />
           {PRESETS.map((preset) => (
@@ -192,12 +196,11 @@ export default function StatsStrip({
         // ONE cards row for every card count. Each card is sized to its own
         // content (2-up on phones via w-[calc(50%-…)], ~10rem from sm up),
         // wrapping — never stretched across a fixed grid that leaves empty
-        // tracks, and never a sideways scroll (user, Aug 31). The secondary
-        // controls ride this same row's trailing spare width (ml-auto) so a
-        // page with only a few stats fills the row with its buttons instead
-        // of showing a big empty gap ("merge the various buttons in same
-        // row"). When the cards themselves fill the width, the buttons simply
-        // wrap to the end of the block.
+        // tracks, and never a sideways scroll (user, Aug 31). A card with a
+        // breakdown opens it as a FLOAT (Modal) above the page rather than an
+        // inline panel that pushes the list down (user, Aug 31: "instead of
+        // expand options … click to show details another page … a float above
+        // layer so it doesn't push down other details").
         <div className="mt-1.5 flex min-w-0 flex-wrap items-stretch gap-1.5">
           {cards.map((card) => {
             const foldable = Boolean(card.details?.length)
@@ -235,35 +238,34 @@ export default function StatsStrip({
               </button>
             )
           })}
-          {statsRowActions ? (
-            // Grouped WITH the cards (not ml-auto to the far edge): with only a
-            // few stats a far-right float leaves a big void framed in the middle
-            // of the row, which reads MORE empty, not less. Sitting the controls
-            // right after the cards keeps stats + their controls one cohesive
-            // block, with ordinary trailing whitespace to the right — balanced,
-            // not excessive (user, Aug 31).
-            <div className="flex min-w-0 flex-wrap items-center gap-1 self-center">{statsRowActions}</div>
-          ) : null}
         </div>
       ) : null}
 
       {statsOpen && openCard ? (
-        <div className="mt-1.5 max-h-64 overflow-y-auto rounded-xl border border-blue-200 bg-blue-50/40 px-3 py-2 dark:border-blue-900/50 dark:bg-blue-950/20">
-          <div className="mb-1.5 flex items-center gap-1.5">
-            <span className="text-[11px] font-semibold uppercase tracking-wide text-blue-700 dark:text-blue-300">{openCard.label}</span>
-            {openCard.hint ? (
-              <InfoHint label={openCard.label} text={openCard.hint} />
-            ) : null}
-          </div>
-          <div className="grid grid-cols-2 gap-x-4 gap-y-1 sm:grid-cols-3 lg:grid-cols-4">
+        // The breakdown opens as a floating dialog (Modal, portalled to
+        // document.body) so it layers ABOVE the page instead of expanding
+        // inline and shoving the list down (user, Aug 31). Closing it or the
+        // ✕ clears the open card.
+        <Modal
+          title={(
+            <span className="flex items-center gap-1.5">
+              <span className="text-base font-bold text-gray-900 dark:text-white">{openCard.label}</span>
+              {openCard.hint ? <InfoHint label={openCard.label} text={openCard.hint} /> : null}
+            </span>
+          )}
+          onClose={() => setOpenKey(null)}
+          size="sm"
+          draggable
+        >
+          <div className="grid grid-cols-2 gap-x-4 gap-y-1 sm:grid-cols-3">
             {(openCard.details || []).map((detail, index) => (
-              <div key={`${detail.label}-${index}`} className="flex min-w-0 items-baseline justify-between gap-2 border-b border-blue-100/70 py-0.5 last:border-b-0 dark:border-blue-900/30">
+              <div key={`${detail.label}-${index}`} className="flex min-w-0 items-baseline justify-between gap-2 border-b border-gray-100 py-1 last:border-b-0 dark:border-gray-700">
                 <span className="truncate text-[11px] text-gray-500 dark:text-gray-400">{detail.label}</span>
                 <span className={`whitespace-nowrap text-xs font-semibold tabular-nums ${detail.tone ? DETAIL_TONE[detail.tone] : 'text-gray-800 dark:text-gray-100'}`}>{detail.value}</span>
               </div>
             ))}
           </div>
-        </div>
+        </Modal>
       ) : null}
     </div>
   )

@@ -3,9 +3,12 @@ import type { ComponentType } from 'react'
 import BadgeDollarSign from 'lucide-react/dist/esm/icons/badge-dollar-sign.js'
 import RotateCcw from 'lucide-react/dist/esm/icons/rotate-ccw.js'
 import HandCoins from 'lucide-react/dist/esm/icons/hand-coins.js'
+import ChevronDown from 'lucide-react/dist/esm/icons/chevron-down.js'
+import Check from 'lucide-react/dist/esm/icons/check.js'
 import { useApp as useAppHook } from '../../AppContext.tsx'
 import DateTimeRangePicker, { EMPTY_DATE_TIME_RANGE, type DateTimeRange } from '../shared/DateTimeRangePicker.tsx'
 import AppSelect, { type AppSelectOption } from '../shared/AppSelect.tsx'
+import LazyPortalMenu from '../shared/LazyPortalMenu'
 import { makeReportMoneyFormatter } from '../../utils/reportMoney.ts'
 import SalesDailyReport from './SalesDailyReport'
 import ReturnsReportSection from './ReturnsReportSection'
@@ -100,46 +103,54 @@ export default function ReportsHub() {
     { id: 'all', label: trh('all', 'All') },
     ...available,
   ]
+  // The current selection labels the single "view by" dropdown trigger below.
+  const selectedChip = typeChips.find((chip) => chip.id === selectedType) || typeChips[0]
+  const SelectedIcon = selectedChip.icon
 
   return (
     <div className="page-scroll flex flex-col space-y-3 p-3 sm:p-6">
-      {/* ONE shared control row: range + type chips + branch — the branch
-          select rides the same row and ellipsizes long names ("branch
-          option can be merged into one row with option, and use '…' when
-          too long"). */}
-      {/* Two tidy rows: the date range on its own, then the type chips with
-          the branch select riding the SAME row (user, Aug 31: "the all
-          branches can be merged into sections so one row") — previously the
-          branch select wrapped to a third line of its own. */}
-      <div className="sticky top-0 z-20 -mx-1 space-y-1.5 bg-gray-50/95 px-1 py-1 backdrop-blur dark:bg-gray-900/95">
+      {/* ONE shared control row: range + the "view by" dropdown + branch, all
+          on a single row (user, Aug 31: "the options view by can be into one
+          button to expand then choose"). The type picker used to spill four
+          inline chips across the row; it now collapses into one button whose
+          menu FLOATS above the page (LazyPortalMenu → body portal) so choosing
+          a view never reflows the rows below it ("a float above layer so it
+          doesn't push down other details"). The branch select rides the same
+          row and ellipsizes long names. */}
+      <div className="sticky top-0 z-20 -mx-1 flex flex-wrap items-center gap-1.5 bg-gray-50/95 px-1 py-1 backdrop-blur dark:bg-gray-900/95">
         <DateTimeRangePicker value={range} onChange={setRange} t={t} />
-        <div className="flex flex-wrap items-center gap-1">
-          {typeChips.map(({ id, label, icon: Icon }) => {
-            const on = selectedType === id
-            return (
-              <button
-                key={id}
-                type="button"
-                onClick={() => setSelectedType(id)}
-                aria-pressed={on}
-                className={`inline-flex items-center gap-1 rounded-md border px-2 py-1 text-xs font-medium transition ${on
-                  ? 'border-slate-800 bg-slate-800 text-white dark:border-slate-200 dark:bg-slate-200 dark:text-slate-900'
-                  : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800'}`}
-              >
-                {Icon ? <Icon className="h-3.5 w-3.5" /> : null} {label}
-              </button>
-            )
-          })}
-          {branches.length ? (
-            <AppSelect
-              value={branchFilter}
-              options={branchOptions}
-              onChange={setBranchFilter}
-              ariaLabel={trh('branch', 'Branch')}
-              buttonClassName="ml-auto max-w-[9rem] truncate py-1 text-xs"
-            />
-          ) : null}
-        </div>
+        <LazyPortalMenu
+          align="auto"
+          trigger={(
+            <button
+              type="button"
+              className="inline-flex items-center gap-1.5 rounded-md border border-slate-200 bg-white px-2 py-1 text-xs font-medium text-slate-700 transition hover:border-slate-300 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
+              aria-label={trh('view', 'View')}
+            >
+              {SelectedIcon ? <SelectedIcon className="h-3.5 w-3.5 shrink-0" /> : null}
+              <span className="text-slate-400 dark:text-slate-500">{trh('view', 'View')}</span>
+              <span className="truncate">{selectedChip.label}</span>
+              <ChevronDown className="h-3.5 w-3.5 shrink-0 text-slate-400" />
+            </button>
+          )}
+          items={typeChips.map(({ id, label, icon: Icon }) => ({
+            label,
+            onClick: () => setSelectedType(id),
+            color: selectedType === id ? 'blue' : 'gray',
+            icon: selectedType === id
+              ? <Check className="h-4 w-4" />
+              : (Icon ? <Icon className="h-4 w-4" /> : <span className="inline-block h-4 w-4" />),
+          }))}
+        />
+        {branches.length ? (
+          <AppSelect
+            value={branchFilter}
+            options={branchOptions}
+            onChange={setBranchFilter}
+            ariaLabel={trh('branch', 'Branch')}
+            buttonClassName="ml-auto max-w-[9rem] truncate py-1 text-xs"
+          />
+        ) : null}
       </div>
 
       {visible.map(({ id, label, icon: Icon }) => {

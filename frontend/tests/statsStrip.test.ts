@@ -70,11 +70,19 @@ test('every data page renders the ONE shared StatsStrip, defaulting to today', (
   assert.ok(dashboard.includes('periodKpis.map((kpi): StatCardDef'), 'the KPI set feeds the strip cards')
 })
 
-test('the strip folds inline: one open card, chevron affordance, breakdown grid', () => {
+test('a card opens ONE breakdown as a float (Modal) above the page, not an inline panel', () => {
+  // User, Aug 31: "for the one stat by one stat, instead of expand options …
+  // click to show details another page … a float above layer so it doesn't
+  // push down other details." The breakdown moved out of the inline blue
+  // panel into a Modal (portalled to document.body), so opening it layers
+  // above the list instead of shoving it down.
   const strip = read('src/components/shared/StatsStrip.tsx')
-  assert.ok(/setOpenKey\(\(current\) => \(current === card\.key \? null : card\.key\)\)/.test(strip), 'tapping toggles ONE open fold at a time')
-  assert.ok(strip.includes('aria-expanded'), 'folding cards announce their state')
-  assert.ok(strip.includes('<InfoHint'), 'the fold carries the explanation affordance')
+  assert.ok(/setOpenKey\(\(current\) => \(current === card\.key \? null : card\.key\)\)/.test(strip), 'tapping toggles ONE open card at a time')
+  assert.ok(strip.includes('aria-expanded'), 'the cards announce their state')
+  assert.ok(strip.includes('<InfoHint'), 'the float carries the explanation affordance')
+  assert.ok(/import Modal from '\.\/Modal\.tsx'/.test(strip), 'the strip imports the shared Modal')
+  assert.ok(/statsOpen && openCard \?/.test(strip) && strip.includes('<Modal'), 'the open card renders its breakdown inside a Modal float')
+  assert.ok(!strip.includes('max-h-64 overflow-y-auto rounded-xl border border-blue-200'), 'the old inline breakdown panel is gone')
 })
 
 test('the whole strip hides behind a click-to-open Stats chip; cards wrap, never scroll sideways', () => {
@@ -92,23 +100,26 @@ test('the whole strip hides behind a click-to-open Stats chip; cards wrap, never
   assert.ok(!/grid-cols-\d.*grid-cols-6|xl:grid-cols-6/.test(strip), 'no fixed 6-track grid that strands empty tracks on few-card pages')
 })
 
-test('dedicated date row + secondary controls always merge onto the cards row', () => {
-  // User, Aug 31 (refining the earlier ≤3 split): the range picker gets its
-  // own row when open (presets visible on phones too — no hidden sm:), and
-  // the secondary controls (History/Export/Manage) MERGE onto the stat-cards
-  // row's trailing spare width for EVERY card count — "just enough for its
-  // own space of stats ... and merge the various buttons in same row". The
-  // count-based fork is gone (a 4-card page had the same dead space a 2-card
-  // page did), and the buttons no longer sit on an otherwise-empty date row.
+test('secondary controls stay on the Stats-chip row whether the strip is folded or open', () => {
+  // User, Aug 31 (superseding the earlier "merge onto the cards row" pin):
+  // "move [the buttons] to same row as the stats so when stat button expands
+  // it doesn't affect." The secondary controls (History/Manage/Export) now
+  // ALWAYS live on the Stats-chip row (row 1); expanding the strip only adds
+  // the date + cards rows BELOW, it never relocates the buttons. The old
+  // statsRowActions relocation is gone, and so is the count-based few-card
+  // fork before it.
   const strip = read('src/components/shared/StatsStrip.tsx')
   assert.ok(strip.includes('rangeActions'), 'the secondary-controls slot exists')
   assert.ok(!/const fewCards = /.test(strip), 'the count-based few-card fork is gone')
-  assert.ok(/const statsRowActions = statsOpen \? rangeActions : null/.test(strip), 'secondary controls ride the cards row whenever the strip is open')
-  assert.ok(!strip.includes('rangeRowActions'), 'the date row no longer hosts the secondary buttons')
+  assert.ok(!/statsRowActions/.test(strip), 'the buttons no longer relocate onto the cards row on expand')
+  assert.ok(!strip.includes('rangeRowActions'), 'the date row does not host the secondary buttons either')
+  // Row 1 renders the secondary controls then the primary actions, together,
+  // regardless of open state.
+  assert.ok(/\{rangeActions\}\s*\{actions\}/.test(strip), 'row 1 renders rangeActions + actions together on the chip row')
   assert.ok(!/hidden rounded-md.*sm:inline-flex/.test(strip), 'presets no longer hide on phones — the dedicated row has the width')
-  // Sales feeds History+Manage through the new slot; Returns feeds
-  // Export+History there while its Add button stays a PRIMARY action with
-  // an always-visible label.
+  // Sales feeds History+Manage through the slot; Returns feeds Export+History
+  // there while its Add button stays a PRIMARY action with an always-visible
+  // label.
   assert.ok(read('src/components/sales/Sales.tsx').includes('rangeActions={('), 'Sales wires History/Manage as rangeActions')
   const returns = read('src/components/returns/Returns.tsx')
   assert.ok(returns.includes('rangeActions={('), 'Returns wires Export/History as rangeActions')
@@ -132,12 +143,15 @@ test('Part 549/552: the Sales report status/method filters are compact chip-sele
   assert.ok(report.includes('options={statusOptions}') && report.includes('options={paymentOptions}'), 'both selects render')
 })
 
-test('Part 549: the Sales section shows an always-visible summary + a leaner toolbar', () => {
+test('Part 564: Sales drops the redundant outside summary; toolbar stays lean', () => {
   const sales = read('src/components/sales/Sales.tsx')
   const strip = read('src/components/shared/StatsStrip.tsx')
-  // "stats can show outside button stats" -> a summary line beside the chip.
-  assert.ok(strip.includes('summary'), 'StatsStrip exposes a summary slot')
-  assert.ok(sales.includes('summary={'), 'Sales feeds the strip a summary (count · revenue)')
+  // StatsStrip keeps the optional summary slot for pages that want it, but
+  // Sales no longer feeds one: "the outside stats is redundant with the stat
+  // in the stat button" (user, Aug 31) — the "N sales · $rev" beside the chip
+  // duplicated the strip's own Sales + Revenue cards, so it's gone.
+  assert.ok(strip.includes('summary'), 'StatsStrip still exposes an optional summary slot')
+  assert.ok(!sales.includes('summary={'), 'Sales no longer passes a redundant summary to the strip')
   // Sort folded INTO the Filters menu; the standalone SortChip is gone.
   assert.ok(!sales.includes('SortChip'), 'the toolbar SortChip is removed (sort lives in the Filters menu)')
   assert.ok(/id: 'sort'/.test(sales), 'the Filters menu carries a Sort section')
