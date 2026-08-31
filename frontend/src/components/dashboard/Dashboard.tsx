@@ -38,6 +38,11 @@ type DashboardGranularity = 'day' | 'week' | 'month'
 type DashboardChartMode = 'revenue' | 'profit' | 'volume'
 type DashboardTopMode = 'revenue' | 'qty'
 type InventoryStockFocus = 'all' | 'low' | 'out'
+// Small-screen section switcher: the dashboard's cards are split into three
+// tabbed groups shown one at a time on phones/tablets (< lg), so the page is
+// not one long scroll of every card. lg+ ignores this and renders every group
+// as the normal grid (see the `lg:block` on each group section).
+type DashboardMobileSection = 'overview' | 'performers' | 'inventory'
 type DashboardMetricValue = string | number | boolean | null | undefined
 type DashboardMetricMap = Record<string, number | undefined>
 type DashboardExportItem = 'divider' | {
@@ -632,6 +637,16 @@ export default function Dashboard() {
     // edited); it just no longer renders as a preset button.
   ]
 
+  // Small-screen section chips. Labels use translateOr (the same guarded-
+  // fallback path RANGE_PRESETS uses) so no lang-pack edit is needed: 'overview'
+  // and 'inventory' reuse existing pack keys, and the "top performers" chip
+  // carries its own English + Khmer fallback inline.
+  const MOBILE_SECTIONS: Array<{ id: DashboardMobileSection; label: string }> = [
+    { id: 'overview',   label: translateOr('overview', 'Overview', 'ទិដ្ឋភាពរួម') },
+    { id: 'performers', label: translateOr('dashboard_group_performers', 'Top performers', 'ការលក់កំពូល') },
+    { id: 'inventory',  label: translateOr('dashboard_group_inventory', 'Inventory & activity', 'ស្តុក និងសកម្មភាព') },
+  ]
+
   const [summary, setSummary]     = useState<DashboardSummary | null>(null)
   const [analytics, setAnalytics] = useState<DashboardAnalytics | null>(null)
   const [loading, setLoading]     = useState(true)
@@ -659,6 +674,10 @@ export default function Dashboard() {
   const [recentImportFilesLoading, setRecentImportFilesLoading] = useState(true)
   const [importReportJobId, setImportReportJobId] = useState<string | null>(null)
   const [exportChoicesOpen, setExportChoicesOpen] = useState(false)
+  // Which card group the small-screen switcher is showing (ignored at lg+,
+  // where every group renders together). Defaults to the overview group so a
+  // phone opens on the chart + recent sales rather than an empty pane.
+  const [mobileSection, setMobileSection] = useState<DashboardMobileSection>('overview')
   const summaryRequestRef = useRef(0)
   const analyticsRequestRef = useRef(0)
   const startupRequestRef = useRef(0)
@@ -1532,21 +1551,28 @@ ${translateOr('delivery_margin', 'Delivery margin')} ${fmtUSD(aDeliveryMargin)} 
               />
             </div>
           </div>
-          <div className="flex min-w-0 flex-1 flex-wrap gap-1">
+          {/* Presets + Export share one row. Export is a shrink-0 sibling
+              pinned to the END of the row (items-start), NOT the last item
+              inside the wrapping preset group -- so when the preset chips wrap
+              on a narrow phone they wrap among themselves in the flex-1 group
+              to Export's left, and Export always stays on the preset row's top
+              line instead of dropping onto a lonely row of its own below. */}
+          <div className="flex min-w-0 flex-1 items-start gap-1">
+            <div className="flex min-w-0 flex-1 flex-wrap gap-1">
               {RANGE_PRESETS.map(p => (
                 <button key={p.id} onClick={() => setRangeId(p.id)}
                 className={`min-h-7 whitespace-nowrap rounded-md px-2.5 py-1 text-[11px] font-semibold transition-colors sm:min-h-8 sm:px-3 sm:text-xs ${rangeId===p.id ? 'bg-blue-600 text-white shadow-sm' : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600'}`}>
                 {p.label}
               </button>
             ))}
-            {/* Export rides the preset row (moved from beside the range pill)
-                and opens the float export-choices dialog -- no direct
-                downloads off a toolbar menu. */}
+            </div>
+            {/* Opens the float export-choices dialog -- no direct downloads
+                off a toolbar menu. */}
             {hasPermission('dashboard_export') && (
               <button
                 type="button"
                 onClick={() => setExportChoicesOpen(true)}
-                className="inline-flex min-h-7 items-center gap-1 whitespace-nowrap rounded-md border border-gray-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-gray-600 transition-colors hover:border-blue-300 hover:text-blue-600 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-300 dark:hover:border-blue-500 dark:hover:text-blue-400 sm:min-h-8 sm:px-3 sm:text-xs"
+                className="inline-flex shrink-0 min-h-7 items-center gap-1 whitespace-nowrap rounded-md border border-gray-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-gray-600 transition-colors hover:border-blue-300 hover:text-blue-600 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-300 dark:hover:border-blue-500 dark:hover:text-blue-400 sm:min-h-8 sm:px-3 sm:text-xs"
                 aria-label={exportLabel}
               >
                 <Download className="h-3.5 w-3.5" aria-hidden="true" />
@@ -1601,7 +1627,29 @@ ${translateOr('delivery_margin', 'Delivery margin')} ${fmtUSD(aDeliveryMargin)} 
         )}
       </div>
 
+      {/* Small-screen section switcher -- splits the long card stack into
+          three tabbed groups shown one at a time (< lg), so a phone opens on a
+          compact dashboard instead of scrolling through every card. Hidden at
+          lg+, where each group's `lg:block` forces every group to render as the
+          normal grid. Full-width segmented chips (flex-1); overflow-x-auto is a
+          safety valve for long translated labels. */}
+      <div className="lg:hidden flex gap-1 overflow-x-auto" role="tablist" aria-label={t('dashboard') || 'Dashboard'}>
+        {MOBILE_SECTIONS.map(s => (
+          <button
+            key={s.id}
+            type="button"
+            role="tab"
+            aria-selected={mobileSection === s.id}
+            onClick={() => setMobileSection(s.id)}
+            className={`min-h-8 flex-1 whitespace-nowrap rounded-md px-3 py-1.5 text-xs font-semibold transition-colors ${mobileSection === s.id ? 'bg-blue-600 text-white shadow-sm' : 'bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600'}`}
+          >
+            {s.label}
+          </button>
+        ))}
+      </div>
+
       {/* Charts */}
+      <section className={`${mobileSection === 'overview' ? '' : 'hidden'} lg:block`}>
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-5">
         <div className="lg:col-span-2 card p-3 sm:p-3.5">
           <div className="mb-1.5 flex flex-col gap-1.5 sm:flex-row sm:items-center sm:justify-between">
@@ -1671,6 +1719,7 @@ ${translateOr('delivery_margin', 'Delivery margin')} ${fmtUSD(aDeliveryMargin)} 
           onViewMore={() => setRecentSalesOpen(true)}
         />
       </div>
+      </section>
 
       {/* Branches, products, and customers. Deliberately 3 columns on large
           screens, not 4 -- this row only ever renders 3 real cards
@@ -1681,6 +1730,7 @@ ${translateOr('delivery_margin', 'Delivery margin')} ${fmtUSD(aDeliveryMargin)} 
           screens instead of giving the 3 real cards room to breathe
           (user-reported: "the row of top product, best hour, top customer
           can take more space in large screens"). */}
+      <section className={`${mobileSection === 'performers' ? '' : 'hidden'} lg:block`}>
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-5">
         {/* Branch */}
         <BestHourCard
@@ -1829,8 +1879,10 @@ ${translateOr('delivery_margin', 'Delivery margin')} ${fmtUSD(aDeliveryMargin)} 
           )
         })()}
       </div>
+      </section>
 
       {/* Hours, low stock, and recent activity */}
+      <section className={`${mobileSection === 'inventory' ? '' : 'hidden'} lg:block`}>
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-5">
         {/* Best Hour */}
         <ExpiryAlertsCard summary={summary} showAll={showAllExpiring} setShowAll={setShowAllExpiring} translateOr={translateOr} />
@@ -2002,6 +2054,7 @@ ${translateOr('delivery_margin', 'Delivery margin')} ${fmtUSD(aDeliveryMargin)} 
           translateOr={translateOr}
         />
       </div>
+      </section>
 
       {recentSalesOpen ? (
         <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-0 sm:items-center sm:p-4" onClick={() => setRecentSalesOpen(false)}>
