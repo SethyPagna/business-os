@@ -47,6 +47,21 @@ export function localHourExpr(col: string): string {
   return `strftime('%H', ${col}, '${BUSINESS_TZ_FORWARD}')`
 }
 
+/** Local (UTC+7) wall-clock minute ('HH:MM') of a UTC timestamp column. */
+export function localTimeExpr(col: string): string {
+  return `strftime('%H:%M', ${col}, '${BUSINESS_TZ_FORWARD}')`
+}
+
+/**
+ * "`col`'s local (UTC+7) time is within [startParam, endParam]". The SQL
+ * handles both an ordinary daytime window and an overnight window such as
+ * 22:00-02:00 without relying on a viewer-supplied timezone.
+ */
+export function localTimeRangeClause(col: string, startParam = '@startTime', endParam = '@endTime'): string {
+  const localTime = localTimeExpr(col)
+  return `((${startParam} <= ${endParam} AND ${localTime} BETWEEN ${startParam} AND ${endParam}) OR (${startParam} > ${endParam} AND (${localTime} >= ${startParam} OR ${localTime} <= ${endParam})))`
+}
+
 /** Local (UTC+7) year-month bucket of a UTC timestamp column. */
 export function localMonthExpr(col: string): string {
   return `strftime('%Y-%m', ${col}, '${BUSINESS_TZ_FORWARD}')`

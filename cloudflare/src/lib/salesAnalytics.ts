@@ -40,11 +40,11 @@
 import { getDb } from './db'
 import type { Env } from '../index'
 import {
-  BUSINESS_TZ_FORWARD,
   localDateExpr,
   localMonthExpr,
   localWeekExpr,
   localDateRangeClause,
+  localTimeRangeClause,
 } from './businessDateWindow'
 
 export interface SalesFilters {
@@ -215,21 +215,14 @@ function whereActiveSales(alias: string, f: SalesFilters) {
     clauses.push(`${alias}.branch_id = @branchId`)
     params.branchId = f.branchId
   }
-  const validTime = (v: unknown): v is string => typeof v === 'string' && /^\d{2}:\d{2}$/.test(v)
+  const validTime = (v: unknown): v is string => typeof v === 'string' && /^(?:[01]\d|2[0-3]):[0-5]\d$/.test(v)
   if (validTime(f.startTime) && validTime(f.endTime)) {
     // The time-of-day window is interpreted in the FIXED business timezone
     // (UTC+7), NOT the viewer's offset -- created_at is stored UTC, so shift by
     // +7h before taking time(). f.tzOffsetMinutes is deliberately ignored.
-    params.tzModifier = BUSINESS_TZ_FORWARD
     params.startTime = f.startTime
     params.endTime = f.endTime
-    const localTime = `time(datetime(${alias}.created_at, @tzModifier))`
-    if (f.startTime <= f.endTime) {
-      clauses.push(`${localTime} BETWEEN @startTime AND @endTime`)
-    } else {
-      // Overnight window (e.g. 22:00–02:00) wraps around midnight.
-      clauses.push(`(${localTime} >= @startTime OR ${localTime} <= @endTime)`)
-    }
+    clauses.push(localTimeRangeClause(`${alias}.created_at`))
   }
   return { sql: clauses.join(' AND '), params }
 }

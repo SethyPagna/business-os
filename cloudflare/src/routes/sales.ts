@@ -33,11 +33,28 @@ import { buildLikeAliasClause, tokenizeSearchTermGroups, normalizeSearchText } f
 import { computeSaleTotals, resolveChangeExchangeRate, round2 } from '../lib/saleTotals'
 import { uniqueBusinessDateTimeNumber } from '../lib/receiptNumber'
 import { sanitizeClientCreatedAt } from '../lib/clientTimestamp'
-import { localDateAtOrAfter, localDateAtOrBefore, localDateRangeClause } from '../lib/businessDateWindow'
+import { localDateAtOrAfter, localDateAtOrBefore, localDateRangeClause, localTimeRangeClause } from '../lib/businessDateWindow'
 import type { Env } from '../index'
 
 const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser } }>()
 app.use('*', requireAuth)
+
+const LOCAL_TIME_RE = /^(?:[01]\d|2[0-3]):[0-5]\d$/
+
+function appendLocalTimeRange(
+  query: Record<string, string>,
+  clauses: string[],
+  params: Record<string, unknown>,
+  timestampColumn: string,
+): { startTime: string; endTime: string } | null {
+  const startTime = String(query.startTime || '').trim()
+  const endTime = String(query.endTime || '').trim()
+  if (!LOCAL_TIME_RE.test(startTime) || !LOCAL_TIME_RE.test(endTime)) return null
+  clauses.push(localTimeRangeClause(timestampColumn))
+  params.startTime = startTime
+  params.endTime = endTime
+  return { startTime, endTime }
+}
 
 // Valid lifecycle values for sales.sale_status, and which of them hold stock
 // deducted, now live in lib/salesStatus.ts -- used by both POST / (initial
@@ -1497,6 +1514,7 @@ app.get('/', async (c) => {
 
   if (query.startDate) { where.push(localDateAtOrAfter('s.created_at')); params.startDate = query.startDate }
   if (query.endDate) { where.push(localDateAtOrBefore('s.created_at')); params.endDate = query.endDate }
+  appendLocalTimeRange(query, where, params, 's.created_at')
   if (query.cashier) { where.push('s.cashier_name LIKE @cashier'); params.cashier = `%${query.cashier}%` }
   // Exact-id lookup -- there's still no separate GET /:id route (see this
   // file's own comment above), but a caller that already has a specific
@@ -1649,6 +1667,7 @@ app.get('/stats', async (c) => {
   const params: Record<string, unknown> = {}
   if (query.startDate) { where.push(localDateAtOrAfter('s.created_at')); params.startDate = query.startDate }
   if (query.endDate) { where.push(localDateAtOrBefore('s.created_at')); params.endDate = query.endDate }
+  appendLocalTimeRange(query, where, params, 's.created_at')
   if (query.cashier) { where.push('s.cashier_name LIKE @cashier'); params.cashier = `%${query.cashier}%` }
   if (query.userId) {
     const permissions = (() => { try { return JSON.parse(user?.permissions || '{}') } catch { return {} } })()
@@ -1768,12 +1787,26 @@ app.get('/stats-strip', async (c) => {
     return c.json({ error: 'startDate and endDate (YYYY-MM-DD) are required' }, 400)
   }
   const db = getDb(c.env)
-  const filters = { startDate, endDate, branchId: query.branchId || null }
+  const startTime = String(query.startTime || '').trim()
+  const endTime = String(query.endTime || '').trim()
+  const hasTimeRange = LOCAL_TIME_RE.test(startTime) && LOCAL_TIME_RE.test(endTime)
+  const filters = {
+    startDate,
+    endDate,
+    branchId: query.branchId || null,
+    startTime: hasTimeRange ? startTime : null,
+    endTime: hasTimeRange ? endTime : null,
+  }
   const rangeParams: Record<string, unknown> = { startDate, endDate }
   // Status mix counts EVERY status (the kernel's whereActiveSales excludes
   // cancelled/awaiting on purpose for money figures; the mix card exists
   // precisely to show those too).
   const statusClauses = [localDateRangeClause('created_at')]
+  if (hasTimeRange) {
+    statusClauses.push(localTimeRangeClause('created_at'))
+    rangeParams.startTime = startTime
+    rangeParams.endTime = endTime
+  }
   if (query.branchId) { statusClauses.push('branch_id = @branchId'); rangeParams.branchId = query.branchId }
   const [totals, byPayment, byStatus, returnsRow] = await Promise.all([
     getSalesTotals(c.env, filters),
@@ -1790,6 +1823,7 @@ app.get('/stats-strip', async (c) => {
       SELECT COUNT(*) AS count, ROUND(COALESCE(SUM(total_refund_usd), 0), 2) AS refund_usd
       FROM returns
       WHERE ${localDateRangeClause('created_at')}
+        ${hasTimeRange ? `AND ${localTimeRangeClause('created_at')}` : ''}
         AND COALESCE(return_scope, 'customer') = 'customer'
         AND COALESCE(status, 'completed') <> 'cancelled'
         ${query.branchId ? 'AND branch_id = @branchId' : ''}
@@ -1798,6 +1832,8 @@ app.get('/stats-strip', async (c) => {
   return c.json({
     startDate,
     endDate,
+    startTime: hasTimeRange ? startTime : null,
+    endTime: hasTimeRange ? endTime : null,
     totals,
     by_payment: byPayment,
     by_status: byStatus || [],

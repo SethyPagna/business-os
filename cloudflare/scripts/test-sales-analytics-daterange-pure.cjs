@@ -39,6 +39,7 @@ const OLD_FRAGILE = `created_at >= datetime(@startDate, '-7 hours') AND created_
 // The shipped hybrid local-day (UTC+7) form -- must match what
 // businessDateWindow.ts's localDateRangeClause('created_at') builds.
 const NEW_LOCAL = `date(created_at, '+7 hours') >= @startDate AND created_at >= date(@startDate, '-1 day') AND date(created_at, '+7 hours') <= @endDate AND created_at < date(@endDate, '+1 day')`
+const NEW_LOCAL_TIME = `((@startTime <= @endTime AND strftime('%H:%M', created_at, '+7 hours') BETWEEN @startTime AND @endTime) OR (@startTime > @endTime AND (strftime('%H:%M', created_at, '+7 hours') >= @startTime OR strftime('%H:%M', created_at, '+7 hours') <= @endTime)))`
 
 const db = new Database(':memory:')
 db.exec(`
@@ -72,6 +73,15 @@ const check = (label, cond) => { assert.ok(cond, label); passed++; console.log(`
 
 function idsFor(clause, startDate, endDate) {
   return db.prepare(`SELECT id FROM sales WHERE ${clause} ORDER BY id`).all({ startDate, endDate }).map((r) => r.id)
+}
+
+function idsForTime(startTime, endTime) {
+  return db.prepare(`SELECT id FROM sales WHERE ${NEW_LOCAL} AND ${NEW_LOCAL_TIME} ORDER BY id`).all({
+    startDate: '2026-08-01',
+    endDate: '2026-08-31',
+    startTime,
+    endTime,
+  }).map((r) => r.id)
 }
 
 // Full-month range, bucketed in UTC+7 -- both space and ISO edge rows land right.
@@ -131,6 +141,17 @@ function idsFor(clause, startDate, endDate) {
   check('empty range selects nothing', idsFor(NEW_LOCAL, '2026-01-01', '2026-01-31').length === 0)
 }
 
+// Optional time-of-day filtering uses the same fixed UTC+7 wall clock for
+// every timestamp shape and supports a window that wraps past midnight.
+{
+  check('daytime window selects the local-noon row only',
+    JSON.stringify(idsForTime('11:00', '13:00')) === JSON.stringify([3]))
+  check('overnight window selects late-night and early-morning rows across both timestamp shapes',
+    JSON.stringify(idsForTime('23:00', '01:00')) === JSON.stringify([2, 4, 5, 20, 21]))
+  check('full-day 00:00-23:59 includes every second of the final minute',
+    JSON.stringify(idsForTime('00:00', '23:59')) === JSON.stringify([2, 3, 4, 5, 20, 21]))
+}
+
 // Index use: the hybrid predicate's sargable date-only pre-filter keeps the
 // created_at index usable.
 {
@@ -157,12 +178,23 @@ function idsFor(clause, startDate, endDate) {
   check('businessDateWindow.ts precise check normalizes the column via date(col, +7h)', /date\(\$\{col\}, '\$\{BUSINESS_TZ_FORWARD\}'\)/.test(win))
   check('businessDateWindow.ts at-or-after has a sargable date-only floor date(param, -1 day)', /\$\{col\} >= date\(\$\{param\}, '-1 day'\)/.test(win))
   check('businessDateWindow.ts at-or-before has a sargable date-only ceiling date(param, +1 day)', /\$\{col\} < date\(\$\{param\}, '\+1 day'\)/.test(win))
+  check('businessDateWindow.ts builds UTC+7 time windows with ordinary and overnight branches',
+    /export function localTimeRangeClause/.test(win) && /\$\{startParam\} > \$\{endParam\}/.test(win))
 
   const src = fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'salesAnalytics.ts'), 'utf8')
   check('salesAnalytics.ts buckets the date window via the shared localDateRangeClause helper',
     /localDateRangeClause\(`\$\{alias\}\.created_at`\)/.test(src))
   check('salesAnalytics.ts no longer compares created_at against the raw UTC date bounds',
     !/created_at >= @startDate AND \$\{alias\}\.created_at < date\(@endDate, '\+1 day'\)/.test(src))
+  check('salesAnalytics.ts uses the shared UTC+7 time-window helper',
+    /localTimeRangeClause\(`\$\{alias\}\.created_at`\)/.test(src))
+
+  const route = fs.readFileSync(path.join(__dirname, '..', 'src', 'routes', 'sales.ts'), 'utf8')
+  check('Sales list and header stats append the same shared UTC+7 time window',
+    (route.match(/appendLocalTimeRange\(query, where, params, 's\.created_at'\)/g) || []).length >= 2)
+  check('Sales stats strip applies time filtering to status and return breakdowns too',
+    /statusClauses\.push\(localTimeRangeClause\('created_at'\)\)/.test(route)
+      && /hasTimeRange \? `AND \$\{localTimeRangeClause\('created_at'\)\}`/.test(route))
 }
 
 console.log(`\nALL ${passed} CHECKS PASSED`)
