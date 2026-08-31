@@ -69,6 +69,42 @@ interface SaleDetail {
   cancelled_by_name?: string | null
   status_before_cancel?: string | null
   cancel_fee_id?: number | string | null
+  // Payment + delivery + KHR fields the admin detail view now surfaces. All
+  // are already returned by GET /api/sales (SELECT s.*); the audit flagged
+  // them as captured-but-shown-only-on-the-printable-receipt.
+  subtotal_khr?: number | string | null
+  discount_khr?: number | string | null
+  tax_khr?: number | string | null
+  change_khr?: number | string | null
+  exchange_rate?: number | string | null
+  payment_currency?: string | null
+  payment_details?: string | Array<{ method?: string | null; amount_usd?: number | string | null; amount_khr?: number | string | null }> | null
+  is_delivery?: number | null
+  delivery_fee_usd?: number | string | null
+  delivery_fee_khr?: number | string | null
+  delivery_actual_cost_usd?: number | string | null
+  delivery_actual_cost_khr?: number | string | null
+  delivery_contact_name?: string | null
+  delivery_contact_phone?: string | null
+  delivery_contact_address?: string | null
+  credit_due_date?: string | null
+}
+
+type ParsedPayment = { method: string; amount_usd: number; amount_khr: number }
+
+function parsePaymentDetails(raw: SaleDetail['payment_details']): ParsedPayment[] {
+  const list = Array.isArray(raw)
+    ? raw
+    : typeof raw === 'string' && raw.trim()
+      ? (() => { try { const v = JSON.parse(raw); return Array.isArray(v) ? v : [] } catch { return [] } })()
+      : []
+  return list
+    .map((entry) => ({
+      method: String((entry as { method?: unknown })?.method ?? '').trim(),
+      amount_usd: Number((entry as { amount_usd?: unknown })?.amount_usd) || 0,
+      amount_khr: Number((entry as { amount_khr?: unknown })?.amount_khr) || 0,
+    }))
+    .filter((entry) => entry.method && (entry.amount_usd > 0 || entry.amount_khr > 0))
 }
 
 interface SaleDetailModalProps {
@@ -176,6 +212,19 @@ export default function SaleDetailModal({
   const amountPaidUsd = toNumber(sale.amount_paid_usd)
   const amountPaidKhr = toNumber(sale.amount_paid_khr)
   const changeUsd = toNumber(sale.change_usd)
+  const changeKhr = toNumber(sale.change_khr)
+  const discountKhr = toNumber(sale.discount_khr)
+  const taxKhr = toNumber(sale.tax_khr)
+  const deliveryFeeUsd = toNumber(sale.delivery_fee_usd)
+  const deliveryFeeKhr = toNumber(sale.delivery_fee_khr)
+  const deliveryActualCostUsd = toNumber(sale.delivery_actual_cost_usd)
+  const deliveryActualCostKhr = toNumber(sale.delivery_actual_cost_khr)
+  const isDelivery = !!toNumber(sale.is_delivery) || !!String(sale.delivery_contact_name || '').trim()
+  const paymentCurrency = String(sale.payment_currency || '').trim()
+  const paymentDetails = parsePaymentDetails(sale.payment_details)
+  // Outstanding balance: an on-credit / partially-paid sale (amount_paid below
+  // total). Shown so the admin detail no longer hides "still owed".
+  const outstandingUsd = Math.max(0, Math.round((totalUsd - amountPaidUsd) * 100) / 100)
 
   // Y10: an awaiting-payment sale with nothing recorded gets its payment
   // entered HERE, at completion time -- the whole point of the status.
@@ -296,6 +345,22 @@ export default function SaleDetailModal({
                 ) : (
                   <InfoBlock label={t('payment_method') || 'Payment method'} value={sale.payment_method} badge />
                 )}
+                {paymentCurrency && paymentCurrency.toUpperCase() !== 'USD' ? (
+                  <InfoBlock label={translateOr('payment_currency', 'Payment currency', 'រូបិយប័ណ្ណទូទាត់')} value={paymentCurrency} />
+                ) : null}
+                {paymentDetails.length > 1 ? (
+                  <div>
+                    <div className="mb-1 text-xs text-gray-400">{translateOr('payment_breakdown', 'Payment breakdown', 'ការបំបែកការទូទាត់')}</div>
+                    <div className="space-y-0.5 text-sm text-gray-800 dark:text-gray-200">
+                      {paymentDetails.map((detail, index) => (
+                        <div key={`${detail.method}-${index}`} className="flex justify-between gap-3">
+                          <span className="truncate">{detail.method}</span>
+                          <span className="shrink-0 tabular-nums">{fmtUSD(detail.amount_usd)}{detail.amount_khr > 0 ? ` · ${fmtKHR(detail.amount_khr)}` : ''}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
                 <InfoBlock label={t('branch') || 'Branch'} value={sale.branch_name} />
                 <InfoBlock label={t('status') || 'Status'} value={getStatusLabel(currentStatus, t)} />
                 <InfoBlock label={t('timezone') || 'Timezone'} value={fmtTimezoneLabel(sale.device_tz)} mono />
@@ -340,6 +405,19 @@ export default function SaleDetailModal({
               </div>
             </section>
 
+            {isDelivery ? (
+              <section className="rounded-xl border border-gray-200 p-3 dark:border-gray-700">
+                <div className="mb-3 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                  {translateOr('delivery', 'Delivery', 'ការដឹកជញ្ជូន')}
+                </div>
+                <div className="grid gap-3">
+                  <InfoBlock label={translateOr('driver', 'Driver', 'អ្នកបើកបរ')} value={sale.delivery_contact_name} />
+                  <InfoBlock label={t('phone') || 'Phone'} value={sale.delivery_contact_phone} />
+                  <InfoBlock label={t('address') || 'Address'} value={sale.delivery_contact_address} />
+                </div>
+              </section>
+            ) : null}
+
             <section className="rounded-xl border border-gray-200 p-3 dark:border-gray-700">
               <div className="mb-3 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
                 {t('totals') || 'Totals'}
@@ -349,6 +427,7 @@ export default function SaleDetailModal({
                 {baseDiscountUsd > 0 ? (
                   <div className="flex justify-between text-red-600 dark:text-red-400"><span>{t('discount') || 'Store discount'}</span><span>-{fmtUSD(baseDiscountUsd)}</span></div>
                 ) : null}
+                {discountKhr > 0 ? <div className="text-right text-xs text-gray-400">-{fmtKHR(discountKhr)}</div> : null}
                 {membershipDiscountUsd > 0 ? (
                   <div className="flex justify-between text-emerald-600 dark:text-emerald-400">
                     <span>{t('membership_discount') || 'Membership discount'}</span>
@@ -367,6 +446,11 @@ export default function SaleDetailModal({
                 {taxUsd > 0 ? (
                   <div className="flex justify-between"><span>{t('tax') || 'Tax'}</span><span>{fmtUSD(taxUsd)}</span></div>
                 ) : null}
+                {taxKhr > 0 ? <div className="text-right text-xs text-gray-400">{fmtKHR(taxKhr)}</div> : null}
+                {deliveryFeeUsd > 0 || deliveryFeeKhr > 0 ? (
+                  <div className="flex justify-between"><span>{translateOr('delivery_fee', 'Delivery fee', 'ថ្លៃដឹកជញ្ជូន')}</span><span>{fmtUSD(deliveryFeeUsd)}</span></div>
+                ) : null}
+                {deliveryFeeKhr > 0 ? <div className="text-right text-xs text-gray-400">{fmtKHR(deliveryFeeKhr)}</div> : null}
                 {refundUsd > 0 ? (
                   <div className="flex justify-between text-orange-600 dark:text-orange-400">
                     <span>{t('returns_refunded') || 'Refunded by returns'}</span>
@@ -385,10 +469,24 @@ export default function SaleDetailModal({
                     <span>{fmtUSD(amountPaidUsd)}</span>
                   </div>
                 ) : null}
+                {amountPaidKhr > 0 ? <div className="text-right text-xs text-gray-400">{fmtKHR(amountPaidKhr)}</div> : null}
+                {outstandingUsd > 0 && currentStatus !== 'cancelled' ? (
+                  <div className="flex justify-between text-xs font-semibold text-amber-600 dark:text-amber-400">
+                    <span>{translateOr('outstanding_balance', 'Outstanding (on credit)', 'នៅជំពាក់')}{sale.credit_due_date ? ` · ${translateOr('due', 'due', 'កំណត់')} ${String(sale.credit_due_date).slice(0, 10)}` : ''}</span>
+                    <span>{fmtUSD(outstandingUsd)}</span>
+                  </div>
+                ) : null}
                 {changeUsd > 0 ? (
                   <div className="flex justify-between text-xs text-blue-600 dark:text-blue-400">
                     <span>{t('change') || 'Change'}</span>
                     <span>{fmtUSD(changeUsd)}</span>
+                  </div>
+                ) : null}
+                {changeKhr > 0 ? <div className="text-right text-xs text-gray-400">{fmtKHR(changeKhr)}</div> : null}
+                {deliveryActualCostUsd > 0 || deliveryActualCostKhr > 0 ? (
+                  <div className="mt-1 flex justify-between border-t border-dashed border-gray-200 pt-1 text-xs text-gray-500 dark:border-gray-700 dark:text-gray-400">
+                    <span>{translateOr('delivery_actual_cost', 'Actual delivery cost', 'ថ្លៃដឹកជញ្ជូនពិត')}</span>
+                    <span>{fmtUSD(deliveryActualCostUsd)}{deliveryActualCostKhr > 0 ? ` · ${fmtKHR(deliveryActualCostKhr)}` : ''}</span>
                   </div>
                 ) : null}
               </div>
