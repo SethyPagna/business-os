@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
-import type { MouseEventHandler, TouchEventHandler } from 'react'
+import type { MouseEventHandler, TouchEventHandler, ReactNode, PointerEvent as ReactPointerEvent } from 'react'
 import AlertTriangle from 'lucide-react/dist/esm/icons/alert-triangle.js'
+import ChevronDown from 'lucide-react/dist/esm/icons/chevron-down.js'
 import ImageOff from 'lucide-react/dist/esm/icons/image-off.js'
 import { resolvePublicAssetUrl } from '../../../utils/publicAssetUrls.ts'
+import { containsKhmerScript, withKhmerTextClass } from '../../../utils/scriptTypography.ts'
 
 const BROKEN_PRODUCT_IMAGE_RETRY_MS = 5 * 60 * 1000
 const brokenProductImageUrls = new Map<string, number>()
@@ -257,4 +259,105 @@ function DualPriceInput({ labelUsd, labelKhr, valueUsd, valueKhr, onUsdChange, o
   )
 }
 
-export { ProductImg, ProductImagePlaceholder, MarginCard, DualPriceInput, sanitizeNumericInput, parseNumericInput }
+// Single-line text a user can pan horizontally to read the full value
+// when it overflows, in place of a hard `truncate` (user, Aug 31 2026:
+// "for long names do a scroll -- don't show the scroll icon, just built
+// in when they touch or click hold move on the name"). Used on the
+// small-screen product card so a long product name stays fully
+// readable without opening the detail.
+//
+//  - Touch: the browser's own overflow-x panning handles it, and the
+//    events keep bubbling so the card's tap-to-open / long-press-to-
+//    select gestures still work -- a pan past tolerance simply cancels
+//    them (see utils/longPress.ts), which is exactly right, since a pan
+//    is neither a tap nor a hold.
+//  - Mouse: click-drag is wired up manually below (native overflow-x
+//    does not drag-scroll with a mouse), and its press/click events are
+//    stopped from reaching the card so dragging to read never opens the
+//    detail flyout or trips select mode.
+//  - The scrollbar itself is hidden on every engine (WebKit/Blink,
+//    Firefox, old Edge) so only the text moves, no chrome.
+function DragScrollText({ children, className = '', title, lang }: {
+  children: ReactNode
+  className?: string
+  title?: string
+  lang?: 'km'
+}) {
+  const ref = useRef<HTMLDivElement>(null)
+  const drag = useRef({ active: false, startX: 0, scrollLeft: 0, moved: false })
+
+  const onPointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (event.pointerType === 'touch') return // native scroll handles touch
+    const el = ref.current
+    if (!el || el.scrollWidth <= el.clientWidth) return // nothing to pan
+    drag.current = { active: true, startX: event.clientX, scrollLeft: el.scrollLeft, moved: false }
+    try { el.setPointerCapture(event.pointerId) } catch { /* pre-pointer-capture browsers */ }
+  }
+  const onPointerMove = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const el = ref.current
+    if (!drag.current.active || !el) return
+    const dx = event.clientX - drag.current.startX
+    if (Math.abs(dx) > 3) drag.current.moved = true
+    el.scrollLeft = drag.current.scrollLeft - dx
+  }
+  const endDrag = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (!drag.current.active) return
+    drag.current.active = false
+    try { ref.current?.releasePointerCapture(event.pointerId) } catch { /* ignore */ }
+  }
+
+  return (
+    <div
+      ref={ref}
+      title={title}
+      lang={lang}
+      className={`overflow-x-auto whitespace-nowrap [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden ${className}`}
+      onPointerDown={onPointerDown}
+      onPointerMove={onPointerMove}
+      onPointerUp={endDrag}
+      onPointerCancel={endDrag}
+      // Keep MOUSE presses off the card gesture (touch is left to bubble
+      // so tap-to-open still works); swallow the click that ends a real
+      // drag so panning to read never opens the detail.
+      onMouseDown={(event) => event.stopPropagation()}
+      onMouseUp={(event) => event.stopPropagation()}
+      onClickCapture={(event) => { if (drag.current.moved) { event.stopPropagation(); drag.current.moved = false } }}
+    >
+      {children}
+    </div>
+  )
+}
+
+// Inline, tap-to-toggle description for the small-screen product card
+// (user, Aug 31 2026: "for description as well can expand and
+// collapse"). Collapsed to two lines by default so it never dominates
+// the card; tapping expands to the full text and collapses it back.
+// Renders nothing when there is no description. Its press/click events
+// are kept off the card so toggling never opens the product detail or
+// trips select mode (see the card's long-press handlers in
+// Products.tsx / utils/longPress.ts).
+function ExpandableDescription({ text, className = '' }: {
+  text: string
+  className?: string
+}) {
+  const [open, setOpen] = useState(false)
+  const value = String(text || '').trim()
+  if (!value) return null
+  const km = containsKhmerScript(value)
+  return (
+    <button
+      type="button"
+      lang={km ? 'km' : undefined}
+      title={value}
+      onClick={(event) => { event.stopPropagation(); setOpen((prev) => !prev) }}
+      onMouseDown={(event) => event.stopPropagation()}
+      onTouchStart={(event) => event.stopPropagation()}
+      className={`mt-1 flex w-full items-start gap-1 text-left text-[11px] leading-snug text-gray-500 dark:text-gray-400 ${className}`}
+    >
+      <ChevronDown className={`mt-px h-3 w-3 flex-shrink-0 transition-transform ${open ? 'rotate-180' : ''}`} />
+      <span className={withKhmerTextClass(value, open ? 'min-w-0 whitespace-pre-wrap break-words' : 'min-w-0 line-clamp-2')}>{value}</span>
+    </button>
+  )
+}
+
+export { ProductImg, ProductImagePlaceholder, MarginCard, DualPriceInput, DragScrollText, ExpandableDescription, sanitizeNumericInput, parseNumericInput }

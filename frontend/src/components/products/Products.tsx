@@ -21,7 +21,7 @@ import PageSizeSelect from '../shared/PageSizeSelect'
 import SearchInput from '../shared/SearchInput'
 import ScanSearchButton from '../shared/ScanSearchButton'
 import PaginationControls, { PAGE_SIZE_OPTIONS, DEFAULT_PAGE_SIZE } from '../shared/PaginationControls'
-import { ProductImg, ProductImagePlaceholder } from './shared/primitives'
+import { ProductImg, ProductImagePlaceholder, DragScrollText, ExpandableDescription } from './shared/primitives'
 import ProductsListSurface, { ROW_TEXT_GUTTER } from './surfaces/ProductsListSurface'
 import MergeDuplicatesReviewModal from './MergeDuplicatesReviewModal'
 import type { MergeDuplicatesPreviewGroup } from './MergeDuplicatesReviewModal'
@@ -3301,7 +3301,7 @@ function ProductsFullEditor() {
           {indented ? null : (
             <div className="relative flex-shrink-0">
               {thumbnailState.hasImage
-                ? <ProductImg src={thumbnailState.thumbnail} alt={productName} className="h-16 w-16 rounded-xl bg-slate-50 object-contain p-0.5 cursor-zoom-in dark:bg-slate-800" onClick={(e) => { e.stopPropagation(); openLightbox(thumbnailState.gallery, 0, productName) }}
+                ? <ProductImg src={thumbnailState.thumbnail} alt={productName} className="h-20 w-20 rounded-xl bg-slate-50 object-contain p-0.5 cursor-zoom-in dark:bg-slate-800" onClick={(e) => { e.stopPropagation(); openLightbox(thumbnailState.gallery, 0, productName) }}
                 // Stopping only the CLICK left the row still opening its
                 // detail flyout behind the lightbox: the row's long-press
                 // handlers bind mousedown/touchstart (utils/longPress.ts),
@@ -3310,14 +3310,17 @@ function ProductsFullEditor() {
                 // AND the detail at once. Stop the gesture at its start.
                 onMouseDown={(e) => e.stopPropagation()}
                 onTouchStart={(e) => e.stopPropagation()} />
-                : <ProductImagePlaceholder className="h-16 w-16 rounded-xl" />}
+                : <ProductImagePlaceholder className="h-20 w-20 rounded-xl" />}
               <ProductDiscountBadge product={p} promotion={promotion} fmtUSD={fmtUSD} label={tr('discounts', 'Discounts')} overlay />
             </div>
           )}
           <div className="flex-1 min-w-0">
             <div className="flex items-start justify-between gap-2">
               <div className="min-w-0 flex-1">
-                <div {...getKhmerTextProps(productName, 'truncate text-sm font-semibold text-gray-900 dark:text-white')} title={productName}>{productName}</div>
+                {/* Long names pan horizontally (touch drag / mouse click-drag)
+                    instead of hard-truncating, with no visible scrollbar --
+                    see DragScrollText (user, Aug 31 2026). */}
+                <DragScrollText {...getKhmerTextProps(productName, 'text-sm font-semibold text-gray-900 dark:text-white')} title={productName}>{productName}</DragScrollText>
               </div>
               {/* Batch count rides the name row as a small YELLOW badge
                   (user, Aug 30: "add number of batches yellow next to the
@@ -3418,6 +3421,10 @@ function ProductsFullEditor() {
               <span className={withKhmerTextClass(unitName, `inline-flex min-w-0 max-w-full items-center whitespace-nowrap font-medium ${stockStatusTextClass}`)}>{String(qty || 0)}{renderUnitChip(unitName)}</span>
             </div>
             <ProductBatchPreview product={p} branchId={branchFilter} tr={tr} compact />
+            {/* Description folds into a two-line preview that taps open to
+                the full text and back -- see ExpandableDescription (user,
+                Aug 31 2026). Renders nothing when the product has none. */}
+            <ExpandableDescription text={String(p.description || '')} />
             {dupInfo ? (
               <DuplicateResolverControl
                 tr={tr}
@@ -3444,9 +3451,9 @@ function ProductsFullEditor() {
   // showed up was liable to change just from reordering/adding variants.
   // Uploading is still done from the lead product's own edit form -- this
   // only changes which image the collapsed header reflects.
-  // Mobile-first sizing (h-16 w-16, matching a standalone card's own
-  // image -- see renderMobileProductCard; trimmed from h-20 on Aug 29 so the
-  // card doesn't grow too tall on small screens) that adjusts at the
+  // Mobile-first sizing (h-20 w-20, matching a standalone card's own
+  // image -- see renderMobileProductCard; enlarged from h-16 on Aug 31 to
+  // use the card's spare vertical space) that adjusts at the
   // `sm:` breakpoint where the desktop table takes over (its row image is
   // the larger h-14 w-14, and this header sits inline next to the group
   // title/chevron rather than as its own block, so it stays a touch smaller
@@ -3455,8 +3462,8 @@ function ProductsFullEditor() {
   const renderGroupThumbnail = useCallback((group: { rows?: ProductRecord[]; leadProduct?: ProductRecord }) => {
     const state = buildGroupThumbnailState(group.rows, group.leadProduct)
     return state.hasImage
-      ? <ProductImg src={state.thumbnail} alt={String(group.leadProduct?.name || group.rows?.[0]?.name || '')} className="h-16 w-16 rounded-xl bg-slate-50 object-contain p-0.5 cursor-zoom-in sm:h-12 sm:w-12 sm:rounded-lg dark:bg-slate-800" onClick={(event) => { event.stopPropagation(); openLightbox(state.gallery, 0, String(group.leadProduct?.name || group.rows?.[0]?.name || '')) }} />
-      : <ProductImagePlaceholder className="h-16 w-16 rounded-xl sm:h-12 sm:w-12 sm:rounded-lg" compact />
+      ? <ProductImg src={state.thumbnail} alt={String(group.leadProduct?.name || group.rows?.[0]?.name || '')} className="h-20 w-20 rounded-xl bg-slate-50 object-contain p-0.5 cursor-zoom-in sm:h-12 sm:w-12 sm:rounded-lg dark:bg-slate-800" onClick={(event) => { event.stopPropagation(); openLightbox(state.gallery, 0, String(group.leadProduct?.name || group.rows?.[0]?.name || '')) }} />
+      : <ProductImagePlaceholder className="h-20 w-20 rounded-xl sm:h-12 sm:w-12 sm:rounded-lg" compact />
   }, [openLightbox])
 
   // Group-title three-dot menu: "Add child row" (opens the variant modal,
