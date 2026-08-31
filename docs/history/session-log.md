@@ -16392,3 +16392,59 @@ the already-committed reportMoney.ts) so it stops floating.
 **Not done:** live browser verification (shared dev server); once every caller
 has migrated off StatsStrip's `range`/`onRangeChange`, a follow-up should delete
 the now-dormant internal date row + its DateTimeRangePicker import from StatsStrip.
+
+## Part 561 (Aug 31 2026, add-stock-merge lane, same session as Parts 558–559) — ONE Add Stock flow; the Branches hub drops its redundant Products section
+
+**Ask (user clarification on Part 559's Add menu):** "by stock one by one this
+is meant as product add stock in manual one by one as for fast stock in it has
+the one supplier and batch applies to all etc... the fast stockin can also do
+one by one... actually, can be merged into one Add stock function... regarding
+the design of the adjust stock, the one in branch page products section has a
+complete design and requirements for adjust stock, use that design. then i
+think the products section of inventory page can then be removed..."
+
+**What changed** (commit `2b49ba47`; message says "Part 560" — number taken by
+the stats-date-row lane while in flight, races expected):
+
+- **Add menu merged to two options**: Add Stock (the fast stock-in shipment
+  receiver — its shared header + line-by-line entry covers one product or
+  many) + Add New Product. HeaderActions' onStockOneByOne/onFastStockIn props
+  collapsed into one `onAddStock`; Products.tsx no longer opens
+  StockAdjustModal directly.
+- **Adjust design requirement re-confirmed, no change needed**:
+  StockAdjustModal (the Stock Changes section's Adjust menu) literally
+  renders `InventoryStockModals` — the complete Branches-page design (batch
+  picker, price lock, supplier attribution, saved reasons) — verified by
+  reading the component, not assumed.
+- **Branches hub Products chip REMOVED** (BranchesHubPage.tsx): redundant now
+  that the Products page carries the complete adjust design, Add Stock, and
+  the Stock Changes ledger. Handoff chain rewired WITHOUT touching
+  Dashboard.tsx (dirty in a peer lane): Dashboard still writes
+  `bos:dashboard:inventory-focus` → the hub is now the key's SOLE consumer
+  (Inventory.tsx's consumption effect deleted along with the key const) and
+  forwards a 'products' drill to the Products PAGE via a new
+  `bos:dashboard:products-focus` key carrying the stock filter →
+  Products.tsx consumes it (applies low/out/in_stock to its availability
+  filter, opens the products section). Old `/inventory` URLs land on
+  Stats & Branches. The hub's unreachable hostSection 'products' fallback
+  became 'movements'.
+- Lang packs: `add_stock_menu_hint` added en+km; Part-559's now-unused
+  `stock_one_by_one`, `stock_one_by_one_hint`, `fast_stockin_hint` removed
+  from both packs (no code references — grepped first).
+- `dashboardDataReliability.test.ts` re-pinned from "Inventory consumes the
+  handoff" to the new hub→Products chain.
+
+**Verified:** fe tsc clean immediately after the source edits (exit 0); a
+later rerun fails ONLY in Sales.tsx (TS1005 at a peer's mid-save edit —
+Sales.tsx is dirty in the filter/sales lane; none of this lane's files
+error). check:source 427 files PASS; langKeyIntegrity (4,24x shared keys),
+dashboardDataReliability, fastStockIn, inventorySelectionMode,
+pageScrollRoots, navigationConfig, testChainCoverage all PASS. NOT verified
+live-in-browser (auth — standing caveat); the Dashboard low/out-of-stock
+card → Products-page filtered drill deserves a click-test after deploy.
+
+**Not done:** deep excision of Inventory.tsx's now-dormant products-slice
+machinery (surface render, bulk toolbar, selection/batch session, its
+InventoryStockModals host — roughly half the file). No entry point remains
+(chip gone, focus redirected, /inventory remapped), but the removal is a
+session-sized surgery of its own — left as an open board item.
