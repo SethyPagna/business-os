@@ -3510,14 +3510,11 @@ function ProductsFullEditor() {
           History used to sit separately in the search row below -- both
           folded into HeaderActions.tsx. */}
       <div className="mb-3 flex min-w-0 flex-wrap items-center gap-2 pt-3 sm:pt-6">
-        {/* Small screens hide the page title -- the section switcher below
-            already carries "Products" (and Stock Changes), so an <h1> saying
-            the same word is wasted vertical space on a phone (user, Aug 29:
-            "small screens no need page title as sections cover them"). Kept
-            on sm+ as the semantic page heading. */}
-        <h1 className="hidden shrink-0 text-lg font-semibold text-slate-900 dark:text-slate-100 sm:block">
-          {t('products') || 'Products'}
-        </h1>
+        {/* No page <h1> here: the section switcher below already labels the
+            page ("Products" / "Stock Changes" / "Duplicates"), so a separate
+            heading repeating "Products" was redundant on EVERY screen, not just
+            phones (user, Aug 31: "product page still use title page in addition
+            to the section ... remove that"). */}
         {/* Y15: section switcher (Products | Stock Changes), same pill
             pattern as the Promotions page. Stock Changes stops being a
             folded card at the bottom of the listing and becomes its own
