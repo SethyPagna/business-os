@@ -262,18 +262,22 @@ ALSO: session-log **Part 548 is TAKEN** (this block, committed `59509a34`) —
 your statsStrip.test.ts test names say "Part 548"; log your entry as 549+ and
 consider renaming the test labels so they match your log entry.]**
 
-**[~ CLAIMED — session business-os-v1-7a, Aug 31 (~10:40): FULL exhaustive
-verification sweep at HEAD (post-Part-547).** User ask: "1000% confirmed backend
-and frontend matches, data matches, no hidden/broken/corrupted/stale, UI/UX fully
-correct, compact and working, all devices, all conflicts". Scope: Golden-Rule-5
-battery (both tscs, backend suites individually, frontend suites individually,
-real vite build), backend↔frontend API contract matrix, migration chain from
-zero, local+remote D1 data-integrity probes (read-only), live UI drive on
-desktop+mobile viewports, i18n/permissions verifiers, public-surface audit.
-READ-MOSTLY: no product code edits planned; any defect found gets flagged here
-with expected-vs-actual, not silently fixed, unless trivially mine to fix in an
-unclaimed file. Will NOT touch: routes/sales.ts (c8 holds hunks), the legacy
-migration lane's untracked files, 8787 wrangler (c8 owns it).]**
+**[DONE — session business-os-v1-7a, Aug 31 (Part 549, `28b45f94` +
+`da7dd0b7` + `3a0a7cb2`, needs deploy): FULL exhaustive verification sweep at
+HEAD.** Battery: backend 128/128 individually (fixed the 2 HEAD-red suites the
+544/547 rewrites left), frontend 146/146 individually, both tscs, vite build,
+verify:i18n 4162 keys OK. Agents swept the full API contract matrix (335
+routes ↔ ~240 call sites), schema-vs-code (92 migrations, 1,323 SQL literals,
+ZERO executable mismatches), static UI layering. Remote prod D1 probed
+read-only: ALL integrity probes 0 (orphans/negatives/dups), batch-identity
+invariant EXACT over 12,208 pairs. Live drive desktop+mobile incl. full POS
+sale (stored change_khr == display — 543 verified in the write path). NEW
+security fix: **portal AI chat leaked raw stock_quantity to anonymous
+visitors** (portalAi.ts, bypassed the 547 seal) — fixed + pinned. Also
+removed 3 phantom BACKUP_TABLES entries. **PRODUCTION STILL SERVES THE
+PRE-547 STOCK LEAK — the next deploy seals it; recommend deploying the
+542–549 batch now.** New defects flagged → [Open defects — Part-549](#open-defects--part-549-verification-sweep-7a-aug-31);
+full evidence in session-log Part 549.]**
 
 **DONE (ship-now-fixes session, Aug 31, Part 547):** the audit's ship-now tier shipped - public portal stock leak sealed (server-computed stock_status/branch_availability, raw quantities+thresholds redacted, global threshold mode now honored), storefront admin-voice strings -> shopper voice, StatusPill raw-key fallback fixed, PublicCatalogPage StrictMode aliveRef fix, POS search-wipe desktop-only, 45 posCopy Khmer translations, Inventory icon swap, Import Hub -> shared Modal (z-fix), Dashboard dead hidden blocks deleted, CartItem KHR decimals, Returns scope no longer a filter. All suites green; see session-log Part 547.
 
@@ -390,6 +394,14 @@ correct) + `ops/repair_aug30_teddy_tint_identity.sql` + `ops/scripts/migration/`
 all still UNCLAIMED and uncommitted. Please add a claim block and commit finished
 slices — this is now the largest unclaimed work in the tree. Next free migration
 number is 0092.**
+**[7a correction, ~11:00: 0092 is TAKEN —
+`0092_legacy_inventory_effect_guard_idempotency.sql` exists untracked in the
+legacy lane. Measured, not inferred: shared local D1 `d1_migrations` = 93 rows,
+latest 0092; and `wrangler d1 migrations list --remote` reports NONE pending,
+i.e. 0088–0092 are ALREADY APPLIED to remote production D1 (schema ahead of the
+deployed 08868840 Worker — forward-safe). **Next free migration number is
+0093.** Legacy lane: the claim-block + commit request above still stands, now
+for FOUR migrations.]**
 
 **→ OFFLINE-TIMESTAMP SESSION (unclaimed lane, routes/sales.ts +
 saleWriteTransport.ts + new lib/clientTimestamp.ts + pure test — coordinator 7b,
@@ -531,6 +543,45 @@ class · unpaged reads/N+1 + `date(created_at)` on 36 sites + movements-search R
 chain · receipt/date locale duplicates (main date fixed Part 519) · MEDIUM list
 (review-tier bypasses, offline-sale timestamps, import-review parity, failed-job
 "Queued 0%", Suppliers/Delivery sort/pagination).
+
+### Open defects — Part-549 verification sweep (7a, Aug 31)
+
+Full detail + file:line evidence in session-log Part 549. Fixed in-sweep:
+portalAi raw-stock leak (`da7dd0b7`), 2 HEAD-red suites (`28b45f94`), phantom
+BACKUP_TABLES (`3a0a7cb2`). Still open:
+
+- **HIGH (money UX):** mouse-wheel over a focused number input silently changes
+  the value — reproduced live in POS (payment $20→$19 while scrolling the
+  panel). Class fix: blur-on-wheel (or wheel preventDefault) on the shared
+  number inputs; POS payment/discount fields first.
+- **HIGH (layering):** InfoHint portals at z-[1000] but shared Modal is
+  z-[1050] — every InfoHint inside any Modal renders its tooltip BEHIND the
+  modal (ImportModeWizard, ExportFieldsModal, StockChangeSection, Branches,
+  Products, ProductDuplicatesTab). One-line fix candidate: InfoHint → z-[1055].
+- **MEDIUM (layering):** RenameCascadeModal (z-60) + InventoryReasonManagerModal
+  (z-50) open BURIED under their own shared-Modal hosts; tracker/notes/
+  notification family (z-1000..1010) still floats over every non-shared-Modal
+  dialog (Part 547 fixed Import Hub only — ~19 inline `fixed inset-0` overlays
+  remain, enumerated in Part 549); Sidebar.tsx:498 mobile account-menu backdrop
+  is inside the transformed header (covers only the header strip).
+- **MEDIUM (dates):** viewer-locale/timezone survivors: App.tsx:1253 sync
+  banner; Branches.tsx:270, Backup.tsx:708, AuditLog.tsx:164/184,
+  inventoryExport.ts:119 (no timeZone pin); recordFilters.ts:59 UTC-midnight
+  day-shift; bare-number `.toLocaleString()` digit grouping incl. printed
+  receipts (EU machines render 4.100).
+- **MEDIUM (perf):** 7 non-sargable `date(created_at)` WHERE sites survive
+  (returns.ts:492 reports; sales.ts:1758/1774 stats-strip — c8's file;
+  audit-log retention ×3); `audit_logs` has NO indexes at all.
+- **LOW:** POS touch targets under 40px (new-order 24px, split-payment remove
+  28px; InfoHint trigger 20px app-wide); 10 unguarded fetch-then-setState
+  sites (DeviceApprovals worst) + 6 uncleaned timers; 65
+  window.confirm/prompt/alert sites vs styled-modal house rule; contact
+  bulk-import transports call a removed route (latent 404, legacy window.api
+  only); AppBootstrapPayload declares 2 never-sent fields.
+- **Zombie-lane feed:** ~28 uncalled backend routes + 4 compat import-jobs
+  routes shadowed by the real router + portal_password_resets table (flow
+  never built) + RFID stub tables — enumerated in Part 549 for the existing
+  dedicated zombie session.
 
 ### Open defects — Part-539 verification sweep (c8, Aug 31)
 

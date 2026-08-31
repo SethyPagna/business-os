@@ -15750,3 +15750,129 @@ Stats & Branches (Inventory strip, no actions prop) folds/opens the same way.
 **Not done** — the fold state is per-mount (deliberate: pages open compact
 every visit); if the user wants it remembered across visits, add a storage key.
 Deploy: rides the next worktree deploy with peers' batch.
+
+## Part 549 (Aug 31 2026, session business-os-v1-7a) — full exhaustive verification sweep at HEAD (post-547): 3 fixes, contract/schema/UI audits, live drive, remote data probes
+
+**Ask** — "go fully, 1000% confirmed that backend and frontend matches, data
+matches, no hidden, no broken, no corrupted, no stale, no temporary
+correct/working then gone, no not matches, no blocked, no not responsive, know
+devices, know all possible conflicts and resolutions... know UI/UX actually
+fully correct, compact and working, no blocking, wrong layers".
+
+**What changed** (three commits, all pathspec-scoped):
+
+- `28b45f94` — the two HEAD-red backend suites fixed. test-image-pipeline-pure
+  pinned the OLD `.then()` scheduled-chain syntax; Part 544 rewrote scheduled()
+  to sequential awaits in one waitUntil'd block — the INVARIANT (backup first,
+  image audit last, errors swallowed) still holds in index.ts:305-323, so the
+  check now pins the ORDER, not the syntax. routes/portal.ts's
+  attachPortalStockStatus (Part 547) used the codebase's only `.all().then()`;
+  the shared d1compat harness returns rows synchronously so the suite 500'd —
+  restructured to await + transform, behavior-identical on real D1 (lib/db.ts
+  .all() resolves to rows).
+- `da7dd0b7` — **SECURITY: portal AI chat leaked raw stock_quantity.**
+  buildRecommendationPayloads (lib/portalAi.ts:319) shipped the candidate's
+  internal raw stock_quantity verbatim in POST /api/portal/ai/chat responses to
+  anonymous visitors — the exact field class attachPortalStockStatus redacts on
+  every catalog surface; the AI path bypassed it. Now ships the same coarse
+  stock_status the catalog cards serve. No renderer read the raw field
+  (CatalogSecondaryTabs, FilesResponsesTab checked). New pinned check in
+  test-portal-ai-scoring-pure locks the boundary (17/17).
+- `3a0a7cb2` — BACKUP_TABLES carried 3 phantom entries (promotion_product_links,
+  portal_faqs, portal_business_profile) that exist in NO migration —
+  tableExists() skipped them every backup, dead config reading as coverage.
+  Removed; coverage test updated with the why.
+
+**What was found** (audits: API contract matrix agent over 335 routes/~240 call
+sites; schema-vs-code agent over 92 migrations/1,323 SQL literals; static UI
+agent over frontend/src; live drive; remote D1 probes):
+
+- LIVE PRODUCTION STILL LEAKS raw stock: prod runs pre-547 code —
+  GET leangbeauty.com/api/portal/catalog/products serves
+  stock_quantity/low_stock_threshold/out_of_stock_threshold on every item
+  (probed live, expected redacted vs actual raw). **The next deploy seals it**;
+  everything committed through this Part rides it.
+- Remote D1 is AHEAD of deployed code: wrangler d1 migrations list --remote
+  = none pending, i.e. 0088–0092 (legacy lane + system_flags) are already
+  APPLIED to production while the Worker is still 08868840. Forward-safe
+  (new tables unused by old code), but the coordination note saying "remote at
+  0087 / next free number 0092" was stale — 0092 exists and is applied
+  everywhere local+remote.
+- Remote production data integrity CLEAN (read-only probes, expected 0 = actual
+  0 on all): neg_branch_stock 0, neg_lot_stock 0, dup_receipts 0,
+  orphan_sale_items 0, orphan_lot_rows 0, orphan_branch_stock 0,
+  orphan_allocations 0, **stock_lot_mismatch_pairs 0 / abs delta 0 over all
+  12,208 (product,branch) pairs** (batch-identity invariant holds exactly),
+  alloc-vs-quantity mismatches 0. Counts: 6,104 products / 14,939 sales /
+  36,027 sale_items / 4,705 customers / 26,018 lots / 21,375 movements /
+  4,248 fees; DB 692.94 MB. Local dev D1: integrity_check ok,
+  foreign_key_check 0 violations.
+- Schema⇄code: ZERO mismatches both directions that execute (0 bad
+  table/column refs, 0 INSERT arity/NOT-NULL defects, clean replay of all 92
+  migrations from zero). One-directional rot only: portal_password_resets
+  (0087) referenced by nothing — flow never built; RFID tables behind 501
+  stubs; google_drive_sync_entries untouched by googleDrive.ts; 7 surviving
+  non-sargable date() sites (returns.ts:492+4 reports, sales.ts:1758/1774
+  stats-strip — c8's file, audit_logs retention x3 — audit_logs has NO indexes
+  at all); compat.ts:249 expiry check inherently non-sargable.
+- Contract matrix: every live frontend call has a matching backend route
+  EXCEPT the known-dead custom-tables cluster (6 routes defined but router
+  never mounted; page orphaned — already on the zombie lane) and 3 contact
+  bulk-import latent 404s (backend stub deliberately removed; only legacy
+  window.api re-exports call them). ~28 backend routes have no caller
+  (candidates for the zombie lane, enumerated in the audit), 4 compat
+  import-jobs routes are unreachable (shadowed by the real router). Field-level
+  on the 15 heavy routes: clean except the portalAi leak (fixed above) and 2
+  cosmetic never-sent fields in AppBootstrapPayload's type.
+- Live drive (desktop + 375×812 mobile, wrangler 8787): login/session OK,
+  Dashboard/Products/StockChanges/Branches/POS/Sales/Contacts/ReviewQueue/
+  Library/Promotions/PortalEditor/Settings all render, zero app-request
+  errors (asset ERR_FAILED bursts were the tab's own service worker gone
+  stale after this session's vite build swapped dist/ — cleared SW+caches,
+  documented trap confirmed twice). Full POS sale driven end to end: receipt
+  20260831-103826 (bare id, mm/dd 24h, rate 4,100), change $7.50 →
+  30,750៛ stored EXACTLY as displayed (c8's Part-543 fix verified in the
+  write path), allocation carries batch 9103, branch_stock AND lot stock
+  11→10 in lockstep, movement stamped batch_id, created_at stored UTC
+  (03:38Z = 10:38 Phnom Penh). Dark theme applies on save and reverts
+  cleanly (light default preserved). Mobile: bottom nav, 2-up POS grid,
+  stat strip scrolls, no horizontal overflow.
+- NEW UI defects (static audit + live, board has the one-liners):
+  (1) **wheel-over-focused-number-input silently changes money** — scrolling
+  the POS panel decremented the payment field $20→$19 live; class applies to
+  every number input; (2) **InfoHint (z-1000) renders BEHIND shared Modal
+  (z-1050)** — any in-modal InfoHint tooltip is invisible
+  (ImportModeWizard/ExportFieldsModal/StockChangeSection + more);
+  (3) Sidebar.tsx:498 mobile account-menu backdrop sits inside the
+  transformed header so it only covers the header strip; (4) RenameCascadeModal
+  (z-60) and InventoryReasonManagerModal (z-50) open BURIED under their own
+  Modal hosts; (5) tracker/notes/notification family (z-1000..1010) still
+  floats over every non-shared-Modal dialog (Part-547 fixed Import Hub only);
+  (6) date/locale survivors: App.tsx:1253 sync banner (viewer locale+TZ),
+  Branches.tsx:270 / Backup.tsx:708 / AuditLog.tsx:164,184 /
+  inventoryExport.ts:119 (no timeZone pin), recordFilters.ts:59 UTC-midnight
+  day-shift, + bare number .toLocaleString() digit-grouping cluster incl.
+  printed receipts; (7) sub-40px touch targets: POS new-order 24px,
+  split-payment remove 28px, InfoHint trigger 20px app-wide; (8) 10 unguarded
+  fetch-then-setState sites (DeviceApprovals worst) + 6 uncleaned timers;
+  (9) 65 native window.confirm/prompt/alert sites vs house styled-modal rule.
+- Sidebar active-state "lag" seen on screenshots was NOT a bug (DOM check:
+  active class correct; lingering focus ring on the previously clicked row).
+- inventory_movements.total_cost_usd stays 0 on sale movements (writer never
+  sets it); UI renders the sub-line only when >0, so not user-visible.
+
+**Verified** — full battery at HEAD this session: cloudflare tsc clean ×3 runs,
+frontend tsc clean, backend **126/128 → 128/128** individually after the two
+fixes (final full re-run green), frontend **146/146** individually, real vite
+build 47.13s, verify:i18n OK (4162 keys), verify:public-runtime built,
+check:source 418 files PASS, all 9 portal-loading suites green, backup battery
+green. Every remote probe ran read-only.
+
+**Not done** — the deploy that seals the live leak (recommended NOW — Parts
+542–549 all ride it; user authorization per DEPLOY.md worktree method);
+the new UI-defect batch above (board one-liners added, most sit in peers'
+active lanes: POS, returns modals, shared InfoHint/Modal); the ~28 zombie
+routes + custom-tables cluster (existing dedicated-lane item — audit
+enumeration linked); date() perf tail incl. audit_logs indexes; offline paths
+verified by pinned suites only (swOfflineSaleReplay/offlineSalesQueue/
+offlineSyncArchitecture/offlineSecurityHardening green), not live-simulated.
