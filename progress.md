@@ -94,6 +94,20 @@ Two rules learned the hard way, both from real incidents in this file's own hist
 
 ## Current status
 
+**→ SMALL-SCREEN PRODUCTS-CARD lane (Sep 1, session 88 [ad9ece] — CLAIMED, in progress).**
+User (on a phone): the product-name text on the small-screen product CARD can't be
+swiped horizontally to read the rest. Disjoint edit — `products/shared/primitives.tsx`
+ONLY: `DragScrollText` gains `touch-action: pan-x` so the name strip pans by touch (an
+ancestor `.page-scroll`/body `touch-action: pan-y` was blocking horizontal touch-pan).
+Deliberately NOT touching `Products.tsx` (owned by lane 569): the user's other card ask
+— hide the inline mobile-card description (remove `<ExpandableDescription>` at
+`Products.tsx:3442` + drop it from the line-25 import) — is SURFACED here for lane 569
+to fold in. The "official product name just copies the shop name" ask (confirmed:
+6030/6031 products have the official-name line == shop name) is a READ-ONLY web-research
+pilot (Abercrombie, ids 1-8) presented for user approval — no DB writes, Stage-1
+respected (no deploy). Supplier-blank on all 6104 is already owned by CATALOG-INTEGRITY
+lane 578 — not duplicated here.
+
 **→ DATE/TIME UX UNIFICATION LANE (Sep 1, this session — CLAIMED, in progress).**
 User ask (verbatim intent): default the Start/End range to the PRESENT DAY on all
 pages (dashboard, products, sales, branch, …); REMOVE the preset chips; the Expenses
@@ -9217,4 +9231,6 @@ POS.tsx along the way — no behavior change needed there).
   feature (removed in Part 230, user's call). Reusable tooling saved to
   `ops/scripts/contract-diff/`.
 
-**→ DASHBOARD-ANALYTICS-I18N + PAYMENT-LEGEND LANE (session-59, Sep 1): IN PROGRESS. Scope = frontend/src/components/dashboard/Dashboard.tsx ONLY (disjoint; file is clean/unclaimed). Fixing (T1) Profit-vs-COGS chart series labels rendering raw keys revenue_usd/cost_usd/profit_usd in the LineChart tooltip (no `label` passed — the one tab that omits it); switching that tab's legend chips + tab label to guarded translateOr for parity with the Revenue-Flow tab. (T2) Payment-Method legend overflowing the card's right edge (legend flex column missing min-w-0, shrink-0 number cluster can't be bounded) — add min-w-0 + compact the amount/percent/count cluster. NOT touching branch/sales/analytics DATA (that's the production-D1 corruption lane other sessions own — "Leang Cosmetic Shop" stray branch → merge into `shop`; warehouse legitimately absent from sales-by-branch; gross_sales_usd / calc correctness = backend analytics lane). Card-height (max-h-[18rem] fill cap) left untouched pending user clarification — screenshots cropped at annotation box.**
+**→ DASHBOARD-ANALYTICS-I18N + PAYMENT-LEGEND + CARD-SIZING LANE (session-59, Sep 1): DONE (code), frontend/src/components/dashboard/Dashboard.tsx ONLY (disjoint). (T1) Profit-vs-COGS chart series labels rendered raw keys revenue_usd/cost_usd/profit_usd (LineChart tooltip, the one tab passing no `label`) — now guarded translateOr labels reused for chart + legend chips + tab title (commit 1872a52e). (T2) Payment-Method legend overflowed the card edge (legend flex column missing min-w-0) — added min-w-0 + compacted the amount/%/count cluster (commit 1872a52e). (T3) Card height revised per user: cards now FIT-THE-SHORTEST not fill-to-tallest — grid rows use items-start (no stretch) + compact CARD_LIST_BODY band (min-h-[8rem] max-h-[16rem]); card titles trimmed modestly (header padding + mb-3→mb-2).**
+
+**CORRECTION (session-59, after coordinator 7b's read-only prod D1 verification): my earlier data-corruption claims in this note were REFUTED against CURRENT production and are WITHDRAWN — DO NOT act on them. Prod has EXACTLY two branches (Warehouse id1 + Shop id2), all 14,939 sales on Shop, ZERO NULL branch_id, subtotal_usd populated (SUM=$1,873,656.34, gross-sales computes fine). There is NO "Leang Cosmetic Shop" stray branch to merge and NO missing-subtotal problem — merging/deleting a branch here would DAMAGE clean prod. My false premises came from the LOCAL miniflare set (Main Store/Branch 2 + NULL branch_id = harmless dev data) plus the user's screenshot, which appears to predate a consolidation (or is a stale view). Canonical two-branch model (shop rings sales, warehouse doesn't) is CONFIRMED. Still-UNVERIFIED user-reported items (missing timestamps, supplier/stock inconsistencies, naming drift) need the SAME direct-prod verification before anyone acts.**
