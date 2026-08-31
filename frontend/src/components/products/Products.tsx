@@ -3657,22 +3657,6 @@ function ProductsFullEditor() {
             value={{ startDate: createdDateFrom, endDate: createdDateTo, startTime: '', endTime: '' }}
             onChange={(range) => { setCreatedDateFrom(range.startDate); setCreatedDateTo(range.endDate) }}
           />
-          {/* The pager shares this row ("pages and items per page … better
-              designed") instead of sitting centered on a row of its own. */}
-          <div className="ml-auto flex min-w-0 justify-end">
-            <PaginationControls
-              compact
-              rangeAsPageSize
-              editablePageSizeInput={false}
-              page={productPage}
-              pageSize={productSafePageSize}
-              totalItems={productTotal}
-              onPageChange={setProductPage}
-              onPageSizeChange={(nextValue) => { setProductPageSize(nextValue); setProductPage(1) }}
-              pageSizeOptions={PAGE_SIZE_OPTIONS}
-              t={t}
-            />
-          </div>
         </div>
         {/* Y13: a plain page-level search row (the folding "Search &
             Filters" SectionCard wrapper was removed). SearchInput's own
@@ -3715,6 +3699,24 @@ function ProductsFullEditor() {
           </div>
       </div>
 
+      {/* Pagination sits BELOW the search row (user, Aug 31: "page back and
+          forth, items per page and pages ... below the search bar row", never
+          between the date range and the search row). The matching compact
+          pager stays at the end of the list. */}
+      <div className="mb-2 flex justify-end px-0.5">
+        <PaginationControls
+          compact
+          rangeAsPageSize
+          editablePageSizeInput={false}
+          page={productPage}
+          pageSize={productSafePageSize}
+          totalItems={productTotal}
+          onPageChange={setProductPage}
+          onPageSizeChange={(nextValue) => { setProductPageSize(nextValue); setProductPage(1) }}
+          pageSizeOptions={PAGE_SIZE_OPTIONS}
+          t={t}
+        />
+      </div>
 
         {bulkDeleteJobStatus && (bulkDeleteJobStatus.status === 'pending' || bulkDeleteJobStatus.status === 'processing') && (
           <div className="bulk-toolbar mb-2 flex items-center gap-3 rounded-2xl border px-3 py-2 text-xs sm:rounded-xl">

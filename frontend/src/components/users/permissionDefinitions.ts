@@ -157,11 +157,24 @@ export const PERMISSION_SECTIONS: PermissionSection[] = [
     key: 'promotions',
     tKey: 'perm_section_promotions',
     label: 'Promotions',
-    description: 'Managing promotion rules and per-product discounts on the Promotions page. Reading active promotions (POS pricing, storefront display) needs no grant -- every logged-in user prices with the same rules.',
+    description: 'None / View only / Full. View only shows the promotion rule list but blocks creating, editing or deleting rules. Reading active promotions (POS pricing, storefront display) needs no grant -- every logged-in user prices with the same rules. (Per-product discounts self-gate on the Products permission, not this one.)',
     permissions: [
-      // Full Access / None only -- a promotion is storefront-wide pricing;
-      // there is no meaningful "review" middle tier for it today.
-      { key: 'promotions', tKey: 'perm_promotions', label: 'Promotions', sensitivity: 'high' },
+      // View-tier section (Part 557 slice 4): the promotion RULE list read
+      // (routes/promotions.ts GET /rules) admits a 'view' grant; every write
+      // (POST/PUT/DELETE /rules) stays strict requireKey('promotions')
+      // (hasPermission === true), which a 'view' value fails. Reading the
+      // ACTIVE rule set (/rules/active) needs no grant at all -- POS/storefront
+      // pricing is not "managing promotions".
+      {
+        key: 'promotions',
+        tKey: 'perm_promotions',
+        label: 'Promotions',
+        sensitivity: 'high',
+        tier: true,
+        middleTier: 'view',
+        reviewTKey: 'perm_promotions_view_desc',
+        reviewDescription: 'View only: see the promotion rule list, but New rule, edit and delete are hidden and refused. Full Access is required to manage promotions.',
+      },
     ],
   },
   {
