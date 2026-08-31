@@ -36,7 +36,11 @@ function ok(cond, label) {
 }
 
 const files = fs.readdirSync(routesDir).filter((f) => f.endsWith('.ts'))
-ok(files.length >= 30, `route directory enumerates (${files.length} files)`)
+// Floor was 30 until 0efd04bc deliberately DELETED routes/catalog.ts (the
+// dead, ungated storefront endpoint) -- 29 is the real count since. The
+// floor exists to catch "dir moved / enumeration silently empty", so it
+// follows deliberate deletions down rather than pinning a stale census.
+ok(files.length >= 29, `route directory enumerates (${files.length} files)`)
 
 // Mutation-handler detection. Matches app.post( / app.patch( / app.put( /
 // app.delete( registrations, not R2/KV method names like ASSETS.put(...) --
