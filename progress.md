@@ -90,6 +90,15 @@ Two rules learned the hard way, both from real incidents in this file's own hist
 *(Live coordination only — session records that used to live here are in the
 [DONE — archive](#done--archive).)*
 
+**[~ CLAIMED — session business-os-v1-r2, Aug 31: receipt ids lose the `RCP`
+prefix (user: "Receipt no need RCP") + adjacent receipt-locale fixes.** Footprint:
+lib/receiptNumber.ts + routes/sales.ts mint site, saleWriteTransport offline mint,
+POS fallback, ReceiptPreview sample, NewReturnModal placeholder, the two pinning
+tests. RET-/SRET- return prefixes KEPT (only RCP was named; returns stay
+distinguishable from sales) — flagged, not guessed. Historical RCP-/imported ids
+preserved untouched (X0). Peers: routes/sales.ts is single-lane per the last
+coordination note — shout if that changed.]**
+
 **[DONE — DEPLOYED, session business-os-v1-r2, Aug 31 ~01:32 UTC (user-authorized:
 "continue, deploy"), Part 538.** Production is now commit `242c2b75`, Worker version
 `a5e5023b-9fcb-417c-be0d-a67acbf265ef`. Method: isolated git worktree at committed
