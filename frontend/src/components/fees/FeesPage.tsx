@@ -254,9 +254,9 @@ export default function FeesPage() {
     return [
       {
         key: 'fees',
-        label: tr('fees', 'Fees'),
+        label: tr('fees', 'Expenses'),
         value: String(count),
-        hint: tr('stats_fees_hint', 'Fee records dated inside the range. The breakdown shows how many of each type.'),
+        hint: tr('stats_fees_hint', 'Expense records dated inside the range. The breakdown shows how many of each type.'),
         details: byType.map((row) => {
           const type = String(row.fee_type || '')
           const option = FEE_TYPE_OPTIONS.find((candidate) => candidate.value === type)
@@ -271,7 +271,7 @@ export default function FeesPage() {
         label: tr('total', 'Total'),
         value: fmtMoney(amountUsd, amountKhr),
         tone: 'accent',
-        hint: tr('stats_fees_total_hint', 'Sum of fee amounts in the range. Fees are recorded in USD or KHR, so both totals are shown. The breakdown lists the days with the most fee spend.'),
+        hint: tr('stats_fees_total_hint', 'Sum of expense amounts in the range. Expenses are recorded in USD or KHR, so both totals are shown. The breakdown lists the days with the most spend.'),
         details: days.slice(0, 8).map((day) => {
           const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(day.date || ''))
           return {
@@ -306,14 +306,14 @@ export default function FeesPage() {
           'fees:update',
           FEES_MUTATION_TIMEOUT_MS,
         )
-        notify(tr('fee_updated', 'Fee updated'), 'success')
+        notify(tr('fee_updated', 'Expense updated'), 'success')
       } else {
         await withLoaderTimeout(
           () => createFeeRequest(payload),
           'fees:create',
           FEES_MUTATION_TIMEOUT_MS,
         )
-        notify(tr('fee_created', 'Fee added'), 'success')
+        notify(tr('fee_created', 'Expense added'), 'success')
       }
       await load(true)
     } catch (error) {
@@ -333,7 +333,7 @@ export default function FeesPage() {
   }
 
   const handleDelete = async (fee: FeeRecord) => {
-    if (!window.confirm(tr('delete_fee_confirm', 'Delete this fee record? This cannot be undone.'))) return
+    if (!window.confirm(tr('delete_fee_confirm', 'Delete this expense record? This cannot be undone.'))) return
     if (!beginKeyedAction(deleteActionRef, fee.id)) return
     setDeletingId(fee.id)
     try {
@@ -342,7 +342,7 @@ export default function FeesPage() {
         'fees:delete',
         FEES_MUTATION_TIMEOUT_MS,
       )
-      notify(tr('fee_deleted', 'Fee deleted'), 'success')
+      notify(tr('fee_deleted', 'Expense deleted'), 'success')
       await load(true)
     } catch (error) {
       notify(error instanceof Error ? error.message : String(error || ''), 'error')
@@ -360,7 +360,7 @@ export default function FeesPage() {
   const filterSections = useMemo(() => ([
     {
       id: 'type',
-      label: tr('fee_type', 'Fee Type'),
+      label: tr('fee_type', 'Type'),
       options: [
         { id: 'all', label: tr('all_types', 'All Types'), active: typeFilter === 'all', onClick: () => setTypeFilter('all') },
         ...FEE_TYPE_OPTIONS.map((opt): FilterOption => ({
@@ -439,7 +439,7 @@ export default function FeesPage() {
             onClick={openAdd}
           >
             <Plus className="h-3.5 w-3.5 shrink-0" />
-            {tr('add_fee', 'Add Fee')}
+            {tr('add_fee', 'Add Expense')}
           </button>
         )}
       />
@@ -451,7 +451,7 @@ export default function FeesPage() {
             name="fees_search"
             value={search}
             onChange={setSearch}
-            placeholder={tr('search_fees_placeholder', 'Search fees by label or notes')}
+            placeholder={tr('search_fees_placeholder', 'Search expenses by label or notes')}
             className="min-w-0 flex-1"
           />
           <FilterMenu
@@ -484,29 +484,34 @@ export default function FeesPage() {
       ) : fees.length === 0 ? (
         <div className="flex flex-col items-center gap-2 py-16 text-center text-sm text-slate-400">
           <Receipt className="h-8 w-8 text-slate-300" />
-          <span>{tr('no_fees', 'No fees recorded yet.')}</span>
+          <span>{tr('no_fees', 'No expenses recorded yet.')}</span>
           <button
             type="button"
             onClick={openAdd}
             className="inline-flex items-center gap-1 rounded-full bg-blue-50 px-3 py-1.5 text-xs font-medium text-blue-700 hover:bg-blue-100 dark:bg-blue-950 dark:text-blue-300"
           >
             <Plus className="h-3.5 w-3.5" />
-            {tr('add_fee', 'Add Fee')}
+            {tr('add_fee', 'Add Expense')}
           </button>
         </div>
       ) : (
         <>
+          {/* One Amount column (display-currency aware, the raw USD/KHR pair
+              folded by reportMoney) and one Details column (receipt-style
+              sale chip + branch, stacked, simply BLANK when unset) replace
+              the old USD / KHR / Sale ID / Branch four-some -- almost every
+              imported row has no branch, no sale and only one currency, so
+              that layout was mostly "--" cells (user: "no need such weird
+              not consistent breakdown"). */}
           <div className="hidden overflow-x-auto rounded-xl border border-slate-200 dark:border-slate-700 sm:block">
-            <table className="min-w-[860px] w-full text-sm">
+            <table className="min-w-[680px] w-full text-sm">
               <thead className="bg-slate-50 text-left text-xs font-medium uppercase tracking-wide text-slate-400 dark:bg-slate-800/60 dark:text-slate-500">
                 <tr>
                   <th className="px-3 py-2">{tr('date', 'Date')}</th>
-                  <th className="px-3 py-2">{tr('fee_type', 'Fee Type')}</th>
+                  <th className="px-3 py-2">{tr('type', 'Type')}</th>
                   <th className="px-3 py-2">{tr('fee_label', 'Label')}</th>
-                  <th className="px-3 py-2 text-right">{tr('amount_usd', 'Amount (USD)')}</th>
-                  <th className="px-3 py-2 text-right">{tr('amount_khr', 'Amount (KHR)')}</th>
-                  <th className="px-3 py-2">{tr('fee_matched_sale_id', 'Matched Sale ID (optional)')}</th>
-                  <th className="px-3 py-2">{tr('branch', 'Branch')}</th>
+                  <th className="px-3 py-2 text-right">{tr('amount', 'Amount')}</th>
+                  <th className="px-3 py-2">{tr('details', 'Details')}</th>
                   <th className="px-3 py-2 text-right">{tr('actions', 'Actions')}</th>
                 </tr>
               </thead>
@@ -519,14 +524,22 @@ export default function FeesPage() {
                         {feeTypeLabel(fee.fee_type)}
                       </span>
                     </td>
-                    <td className="px-3 py-2 text-slate-700 dark:text-slate-200">{fee.label || '--'}</td>
-                    <td className="px-3 py-2 text-right font-medium text-slate-700 dark:text-slate-200">{fee.amount_usd ? fmtUSD(fee.amount_usd) : '--'}</td>
-                    <td className="px-3 py-2 text-right text-slate-500 dark:text-slate-400">{fee.amount_khr ? fmtKHR(fee.amount_khr) : '--'}</td>
-                    <td className="px-3 py-2 text-slate-500 dark:text-slate-400">
-                      {fee.sale_receipt_number || fee.sale_id || '--'}
+                    <td className="px-3 py-2 text-slate-700 dark:text-slate-200">{fee.label || ''}</td>
+                    <td className="px-3 py-2 whitespace-nowrap text-right font-medium text-slate-700 dark:text-slate-200">
+                      {fmtMoney(Number(fee.amount_usd) || 0, Number(fee.amount_khr) || 0)}
                     </td>
-                    <td className="px-3 py-2 text-slate-500 dark:text-slate-400">
-                      {fee.branch_name || '--'}
+                    <td className="px-3 py-2">
+                      <div className="flex flex-col items-start gap-0.5">
+                        {fee.sale_receipt_number || fee.sale_id ? (
+                          <span className="inline-flex items-center gap-1 rounded-md border border-slate-200 bg-slate-50 px-1.5 py-0.5 font-mono text-[11px] text-slate-500 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300">
+                            <Receipt className="h-3 w-3 shrink-0" />
+                            {fee.sale_receipt_number || `#${fee.sale_id}`}
+                          </span>
+                        ) : null}
+                        {fee.branch_name ? (
+                          <span className="text-xs text-slate-400">{fee.branch_name}</span>
+                        ) : null}
+                      </div>
                     </td>
                     <td className="px-3 py-2">
                       <div className="flex items-center justify-end gap-1">
@@ -585,9 +598,16 @@ export default function FeesPage() {
                     </button>
                   </div>
                 </div>
-                <div className="mt-2 flex items-center justify-between text-sm">
-                  <span className="font-semibold text-slate-700 dark:text-slate-200">{fee.amount_usd ? fmtUSD(fee.amount_usd) : '--'}</span>
-                  {fee.amount_khr ? <span className="text-slate-400">{fmtKHR(fee.amount_khr)}</span> : null}
+                <div className="mt-2 flex items-center justify-between gap-2 text-sm">
+                  <span className="font-semibold text-slate-700 dark:text-slate-200">
+                    {fmtMoney(Number(fee.amount_usd) || 0, Number(fee.amount_khr) || 0)}
+                  </span>
+                  {fee.sale_receipt_number || fee.sale_id ? (
+                    <span className="inline-flex min-w-0 items-center gap-1 rounded-md border border-slate-200 bg-slate-50 px-1.5 py-0.5 font-mono text-[11px] text-slate-500 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300">
+                      <Receipt className="h-3 w-3 shrink-0" />
+                      <span className="truncate">{fee.sale_receipt_number || `#${fee.sale_id}`}</span>
+                    </span>
+                  ) : null}
                 </div>
               </div>
             ))}
@@ -609,7 +629,7 @@ export default function FeesPage() {
       )}
 
       {modal === 'form' ? (
-        <Modal title={selected ? tr('edit_fee', 'Edit Fee') : tr('add_fee', 'Add Fee')} onClose={closeModal} size="sm">
+        <Modal title={selected ? tr('edit_fee', 'Edit Expense') : tr('add_fee', 'Add Expense')} onClose={closeModal} size="sm">
           <FeeForm
             fee={selected}
             labelSuggestions={[...new Set(fees.map((row) => String(row.label || '').trim()).filter(Boolean))].sort()}

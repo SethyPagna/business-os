@@ -1,0 +1,89 @@
+// Fee/expense label caps: FeeForm.tsx clamps the label live (6 words /
+// 60 chars) and routes/fees.ts enforces the same cap server-side. This
+// test pins BOTH the client clamp's behavior and the client<->server cap
+// parity, extracting the pure functions from source the same way the
+// cloudflare pure tests do (FeeForm.tsx builds a React component at module
+// load, so importing it here is not an option).
+//
+// Run: node tests/feeLabelClamp.test.ts
+import assert from 'node:assert/strict'
+import fs from 'node:fs'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
+import ts from 'typescript'
+
+const here = path.dirname(fileURLToPath(import.meta.url))
+const clientSource = fs.readFileSync(path.join(here, '..', 'src', 'components', 'fees', 'FeeForm.tsx'), 'utf8')
+const serverSource = fs.readFileSync(path.join(here, '..', '..', 'cloudflare', 'src', 'routes', 'fees.ts'), 'utf8')
+
+function extractFunction(source: string, name: string): string {
+  const re = new RegExp(`function ${name}\\([\\s\\S]*?\\n\\}`)
+  const match = source.match(re)
+  assert.ok(match, `${name} not found -- source may have changed`)
+  return match![0]
+}
+
+function extractNumericConst(source: string, name: string): number {
+  const re = new RegExp(`const ${name} = (\\d+)`)
+  const match = source.match(re)
+  assert.ok(match, `${name} not found -- source may have changed`)
+  return Number(match![1])
+}
+
+const clientWords = extractNumericConst(clientSource, 'FEE_LABEL_MAX_WORDS')
+const clientChars = extractNumericConst(clientSource, 'FEE_LABEL_MAX_CHARS')
+
+const combined = `const FEE_LABEL_MAX_WORDS = ${clientWords}\nconst FEE_LABEL_MAX_CHARS = ${clientChars}\n`
+  + extractFunction(clientSource, 'clampFeeLabel') + '\n'
+  + extractFunction(clientSource, 'feeLabelWordCount') + '\n'
+  + 'export { clampFeeLabel, feeLabelWordCount }\n'
+
+const { outputText } = ts.transpileModule(combined, {
+  compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 },
+  fileName: 'fee-label-clamp.ts',
+})
+const moduleObj: { exports: Record<string, (value: string) => string | number> } = { exports: {} }
+new Function('exports', outputText)(moduleObj.exports)
+const clampFeeLabel = moduleObj.exports.clampFeeLabel as (value: string) => string
+const feeLabelWordCount = moduleObj.exports.feeLabelWordCount as (value: string) => number
+
+let passed = 0
+function check(name: string, fn: () => void): void {
+  fn()
+  passed += 1
+  console.log(`PASS ${name}`)
+}
+
+check('client and server enforce the SAME word/char caps', () => {
+  assert.strictEqual(extractNumericConst(serverSource, 'FEE_LABEL_MAX_WORDS'), clientWords)
+  assert.strictEqual(extractNumericConst(serverSource, 'FEE_LABEL_MAX_CHARS'), clientChars)
+})
+
+check('clampFeeLabel cuts a sentence down to the word cap', () => {
+  assert.strictEqual(
+    clampFeeLabel('one two three four five six seven eight nine'),
+    'one two three four five six',
+  )
+})
+
+check('clampFeeLabel keeps a trailing space (a word in progress) but trims the lead', () => {
+  assert.strictEqual(clampFeeLabel('Grab '), 'Grab ')
+  assert.strictEqual(clampFeeLabel('   Grab'), 'Grab')
+})
+
+check('clampFeeLabel enforces the char cap (bounds unspaced Khmer too)', () => {
+  assert.strictEqual(clampFeeLabel('a'.repeat(200)).length, clientChars)
+  // Short real labels round-trip untouched.
+  for (const label of ['Capital Express', 'ទឹកភ្លើង', 'J&T Express', 'ប្រាក់ខែបុគ្គលិក']) {
+    assert.strictEqual(clampFeeLabel(label), label)
+  }
+})
+
+check('feeLabelWordCount counts words, ignoring extra whitespace', () => {
+  assert.strictEqual(feeLabelWordCount(''), 0)
+  assert.strictEqual(feeLabelWordCount('  '), 0)
+  assert.strictEqual(feeLabelWordCount(' a  b '), 2)
+  assert.strictEqual(feeLabelWordCount('one two three four five six'), 6)
+})
+
+console.log(`\nfeeLabelClamp: ${passed} check(s) passed.`)

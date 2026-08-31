@@ -79,6 +79,24 @@ export function getFees(params: FeeListParams = {}): Promise<FeeListResult> {
   ) as Promise<FeeListResult>
 }
 
+// Every distinct saved label with its usage count and dominant fee type,
+// most-used first (GET /api/fees/labels). FeeForm offers these as
+// suggestions and auto-picks the dominant type when a known label is chosen.
+export type FeeLabelSuggestion = {
+  label: string
+  uses: number
+  fee_type: FeeType
+}
+
+export function getFeeLabels(): Promise<{ labels: FeeLabelSuggestion[] }> {
+  return route(
+    'fees:labels',
+    () => apiFetch('GET', '/api/fees/labels'),
+    () => ({ labels: [] }),
+    { raceLocalFallback: false },
+  ) as Promise<{ labels: FeeLabelSuggestion[] }>
+}
+
 export function getFee(id: number): Promise<{ fee: FeeRecord }> {
   // The channel string is BOTH the 20s read-cache key and the in-flight
   // dedupe key in route(); a constant 'fees:get-one' made every id share one

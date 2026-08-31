@@ -3,7 +3,7 @@ import { useApp as useAppHook } from '../../AppContext.tsx'
 import AppSelect from '../shared/AppSelect.tsx'
 import SearchInput from '../shared/SearchInput.tsx'
 import { normalizePriceValue } from '../../utils/pricing.ts'
-import type { FeeRecord, FeeType } from '../../api/feesTransport.ts'
+import { getFeeLabels, type FeeLabelSuggestion, type FeeRecord, type FeeType } from '../../api/feesTransport.ts'
 
 // Add/edit form for a single fee record.
 //
@@ -52,6 +52,35 @@ export const FEE_TYPE_OPTIONS: { value: FeeType; labelKey: string; fallback: str
 ]
 
 export type FeeBranchOption = { id: number | string; name: string | null; is_active?: boolean }
+
+// Labels are reusable tags, not prose -- the same 6-word/60-char cap the
+// server enforces (routes/fees.ts's normalizeFeeLabel), clamped live here
+// so a whole sentence can't even be typed. Khmer has no spaces, so the
+// char cap is what bounds an unspaced Khmer label.
+export const FEE_LABEL_MAX_WORDS = 6
+export const FEE_LABEL_MAX_CHARS = 60
+
+export function clampFeeLabel(value: string): string {
+  // Only the leading edge is trimmed while typing -- a trailing space is a
+  // word in progress, and collapsing it would make the space key look dead.
+  const str = value.replace(/^\s+/, '')
+  const words = str.split(/(\s+)/) // keep separators so spacing is preserved
+  let count = 0
+  let out = ''
+  for (const part of words) {
+    if (/^\s+$/.test(part)) { out += count >= FEE_LABEL_MAX_WORDS ? '' : part; continue }
+    if (!part) continue
+    if (count >= FEE_LABEL_MAX_WORDS) break
+    out += part
+    count += 1
+  }
+  return out.slice(0, FEE_LABEL_MAX_CHARS)
+}
+
+export function feeLabelWordCount(value: string): number {
+  const str = value.trim()
+  return str ? str.split(/\s+/).length : 0
+}
 
 // Lazy-loaded the same way Products.tsx/NewSupplierReturnModal.tsx pull
 // branchTransport -- this form only needs the list once per mount, not
@@ -115,6 +144,18 @@ export default function FeeForm({ fee, labelSuggestions = [], onSave, onClose }:
   const [saving, setSaving] = useState(false)
   const [touched, setTouched] = useState(false)
   const [branches, setBranches] = useState<FeeBranchOption[]>([])
+  // Saved labels from the server (every distinct label ever used, with its
+  // dominant fee type) -- the page-derived `labelSuggestions` prop stays as
+  // the instant seed / offline fallback until this arrives.
+  const [savedLabels, setSavedLabels] = useState<FeeLabelSuggestion[] | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    getFeeLabels()
+      .then((result) => { if (!cancelled && Array.isArray(result?.labels)) setSavedLabels(result.labels) })
+      .catch(() => { /* datalist just keeps the page-derived seed */ })
+    return () => { cancelled = true }
+  }, [])
 
   // Matched-sale search-and-attach state. `selectedSale` is the row shown
   // once a sale is picked (or, on edit, once the already-set sale_id has
@@ -266,13 +307,13 @@ export default function FeeForm({ fee, labelSuggestions = [], onSave, onClose }:
       <div className="grid grid-cols-[minmax(0,9rem)_minmax(0,1fr)] gap-3">
         <div>
           <label htmlFor="fee-type" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
-            {t('fee_type') || 'Fee Type'} *
+            {t('fee_type') || 'Type'} *
           </label>
           <AppSelect
             id="fee-type"
             value={form.fee_type}
             buttonClassName="w-full"
-            ariaLabel={t('fee_type') || 'Fee Type'}
+            ariaLabel={t('fee_type') || 'Type'}
             options={FEE_TYPE_OPTIONS.map((opt) => ({ value: opt.value, label: t(opt.labelKey) || opt.fallback }))}
             onChange={(value) => set('fee_type', value as FeeType)}
           />
@@ -286,12 +327,30 @@ export default function FeeForm({ fee, labelSuggestions = [], onSave, onClose }:
             className="input"
             list="fee-label-suggestions"
             value={form.label}
-            onChange={(event) => set('label', event.target.value)}
-            placeholder={t('fee_label_placeholder') || 'e.g. Delivery charge, Phnom Penh weekend rush'}
-            maxLength={200}
+            onChange={(event) => {
+              // Clamp live to the shared label cap, and when the text lands
+              // exactly on a saved label, adopt that label's dominant fee
+              // type -- picking "Grab" from the list should not leave the
+              // type sitting on whatever the previous entry used (real rows
+              // were saved as 'expense' with delivery-company labels).
+              const next = clampFeeLabel(event.target.value)
+              const match = savedLabels?.find((s) => s.label.toLowerCase() === next.trim().toLowerCase())
+              setForm((prev) => ({ ...prev, label: next, fee_type: match ? match.fee_type : prev.fee_type }))
+            }}
+            placeholder={t('fee_label_placeholder') || 'e.g. Delivery charge, Staff salary'}
+            maxLength={FEE_LABEL_MAX_CHARS}
+            title={t('fee_label_limit_hint') || `Short reusable tag — up to ${FEE_LABEL_MAX_WORDS} words. Details go in Notes.`}
           />
+          {feeLabelWordCount(form.label) >= FEE_LABEL_MAX_WORDS - 1 ? (
+            <p className="mt-0.5 text-right text-[11px] text-gray-400">
+              {feeLabelWordCount(form.label)}/{FEE_LABEL_MAX_WORDS}
+            </p>
+          ) : null}
           <datalist id="fee-label-suggestions">
-            {labelSuggestions.map((label) => <option key={label} value={label} />)}
+            {(savedLabels?.length
+              ? savedLabels.map((s) => s.label)
+              : labelSuggestions
+            ).map((label) => <option key={label} value={label} />)}
           </datalist>
         </div>
       </div>
@@ -406,7 +465,7 @@ export default function FeeForm({ fee, labelSuggestions = [], onSave, onClose }:
           against the bottom edge; px-5 pb-5 pt-4 puts it back inside the bar. */}
       <div className="sticky bottom-0 -mx-5 -mb-5 flex gap-3 border-t border-gray-200 bg-white px-5 pb-5 pt-4 dark:border-gray-700 dark:bg-gray-800">
         <button className="btn-primary flex-1" type="submit" disabled={saving}>
-          {saving ? (t('saving') || 'Saving...') : (t('save_fee') || 'Save Fee')}
+          {saving ? (t('saving') || 'Saving...') : (t('save_fee') || 'Save Expense')}
         </button>
         <button className="btn-secondary" type="button" onClick={onClose}>
           {t('cancel') || 'Cancel'}

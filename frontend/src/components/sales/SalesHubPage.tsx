@@ -55,7 +55,7 @@ export default function SalesHubPage() {
   const tabs: Array<{ id: SalesHubSection; label: string; icon: typeof BadgeDollarSign; allowed: boolean; tone: string }> = [
     { id: 'sales', label: trh('sales', 'Sales'), icon: BadgeDollarSign, allowed: canSales, tone: 'text-blue-600' },
     { id: 'returns', label: trh('returns', 'Returns'), icon: RotateCcw, allowed: canReturns, tone: 'text-amber-600' },
-    { id: 'fees', label: trh('fees', 'Fees'), icon: HandCoins, allowed: canFees, tone: 'text-emerald-600' },
+    { id: 'fees', label: trh('fees', 'Expenses'), icon: HandCoins, allowed: canFees, tone: 'text-emerald-600' },
     { id: 'reports', label: trh('reports', 'Reports'), icon: BarChart3, allowed: canReports, tone: 'text-indigo-600' },
   ]
   const visibleTabs = tabs.filter((tab) => tab.allowed)

@@ -59,7 +59,7 @@ export default function ReportsHub() {
   const available = useMemo<Array<{ id: ReportType; label: string; icon: ComponentType<{ className?: string }> }>>(() => ([
     canSales ? { id: 'sales' as const, label: trh('sales', 'Sales'), icon: BadgeDollarSign } : null,
     canReturns ? { id: 'returns' as const, label: trh('returns', 'Returns'), icon: RotateCcw } : null,
-    canFees ? { id: 'fees' as const, label: trh('fees', 'Fees'), icon: HandCoins } : null,
+    canFees ? { id: 'fees' as const, label: trh('fees', 'Expenses'), icon: HandCoins } : null,
   ].filter(Boolean) as Array<{ id: ReportType; label: string; icon: ComponentType<{ className?: string }> }>), [canSales, canReturns, canFees, t]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const [range, setRange] = useState<DateTimeRange>(() => ({ ...EMPTY_DATE_TIME_RANGE, startDate: monthStartIso(), endDate: todayIso() }))

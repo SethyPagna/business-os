@@ -163,7 +163,7 @@ export default function FeesReportSection({ t, fmtMoney, range, branchId, active
           (Part 553) — fees are recorded in USD OR KHR, so a USD-only total
           hid every KHR fee as "$0.00". */}
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-slate-500 dark:text-slate-400">
-        <span>{report?.totals.count ?? 0} {t('fees') || 'fees'}</span>
+        <span>{report?.totals.count ?? 0} {t('fees') || 'expenses'}</span>
         <span className="text-slate-300 dark:text-slate-600">|</span>
         <span>{t('total') || 'Total'} <b className="text-slate-900 dark:text-white">{fmtMoney(report?.totals.amount_usd ?? 0, report?.totals.amount_khr ?? 0)}</b></span>
       </div>
