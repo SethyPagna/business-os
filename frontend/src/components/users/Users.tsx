@@ -9,6 +9,7 @@ import FilterMenu from '../shared/FilterMenu'
 import SortChip from '../shared/SortChip'
 import { loadSortSpec, saveSortSpec, sortRecords, type SortField, type SortSpec } from '../../utils/listSort'
 import Modal from '../shared/Modal'
+import ConfirmDialog, { type ConfirmReviewItem } from '../shared/ConfirmDialog.tsx'
 import PortalMenu, { type PortalMenuItem } from '../shared/PortalMenu'
 import ActionHistoryBar from '../shared/ActionHistoryBar'
 import { fmtDate } from '../../utils/formatters'
@@ -393,6 +394,12 @@ export default function Users() {
     confirmPassword: '',
   })
   const [saving, setSaving] = useState(false)
+  // Part 563: the user-save review dialog is open (handleSaveUser validated +
+  // opened it; commitSaveUser writes on confirm).
+  const [userConfirmOpen, setUserConfirmOpen] = useState(false)
+  // Reset that flag whenever the user modal is not open, so a stale "open" flag
+  // can't resurface the dialog the next time the modal is opened.
+  useEffect(() => { if (modal !== 'editUser') setUserConfirmOpen(false) }, [modal])
   const [passwordSaving, setPasswordSaving] = useState(false)
   const [deletingRoleId, setDeletingRoleId] = useState<EntityId | null>(null)
   const saveUserInFlightRef = useRef(false)
@@ -774,8 +781,14 @@ export default function Users() {
       notify(tr('role_required_new_user', 'Choose a role for the new user'), 'error')
       return
     }
-    if (!beginSingleAction(saveUserInFlightRef, { blocked: saving })) return
+    // Part 563: everything validated -- open the review dialog. commitSaveUser
+    // runs the actual create/update on confirm.
+    setUserConfirmOpen(true)
+  }
 
+  const commitSaveUser = async () => {
+    if (!beginSingleAction(saveUserInFlightRef, { blocked: saving })) return
+    setUserConfirmOpen(false)
     setSaving(true)
     try {
       const payload = {
@@ -829,6 +842,20 @@ export default function Users() {
       finishSingleAction(saveUserInFlightRef)
       setSaving(false)
     }
+  }
+
+  const buildUserReviewItems = (): ConfirmReviewItem[] => {
+    const items: ConfirmReviewItem[] = [
+      { label: tr('username', 'Username'), value: userForm.username.trim() },
+    ]
+    const roleName = roles.find((role) => Number(role.id) === Number(userForm.role_id))?.name
+    if (roleName || userForm.role_id) items.push({ label: tr('role', 'Role'), value: roleName || String(userForm.role_id) })
+    const phone = userForm.phone.trim()
+    if (phone) items.push({ label: tr('phone', 'Phone'), value: phone })
+    const email = userForm.email.trim()
+    if (email) items.push({ label: tr('email', 'Email'), value: email })
+    items.push({ label: tr('status', 'Status'), value: userForm.is_active ? (t('active') || 'Active') : (t('inactive') || 'Inactive') })
+    return items
   }
 
   const handleResetPassword = async () => {
@@ -1339,6 +1366,20 @@ export default function Users() {
               <button type="button" className="btn-primary" onClick={handleSaveUser} disabled={saving}>{saving ? (t('loading') || 'Saving...') : (t('save') || 'Save')}</button>
             </div>
           </div>
+          {userConfirmOpen ? (
+            <ConfirmDialog
+              t={t}
+              title={selectedUser ? tr('edit_user', 'Edit User') : tr('add_user', 'Add User')}
+              message={userForm.name.trim()}
+              items={buildUserReviewItems()}
+              confirmLabel={selectedUser ? (t('save') || 'Save') : tr('add_user', 'Add User')}
+              cancelLabel={t('cancel') || 'Cancel'}
+              working={saving}
+              workingLabel={t('loading') || 'Saving...'}
+              onConfirm={commitSaveUser}
+              onClose={() => { if (!saving) setUserConfirmOpen(false) }}
+            />
+          ) : null}
         </Modal>
       ) : null}
 
