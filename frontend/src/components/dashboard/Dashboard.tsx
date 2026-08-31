@@ -1695,44 +1695,6 @@ ${translateOr('delivery_margin', 'Delivery margin')} ${fmtUSD(aDeliveryMargin)} 
           fmtUSD={fmtUSD}
           onOpenHour={openHourDetail}
         />
-        <div className="hidden">
-          <h2 className="mb-3 text-base font-semibold text-gray-900 dark:text-white">{t('branch_performance')}</h2>
-          {analyticsPending ? <div className="h-28 animate-pulse bg-gray-100 dark:bg-gray-700 rounded-xl" /> : analyticsUnavailable ? (
-            <div className="flex h-28 items-center justify-center rounded-xl border border-amber-200 bg-amber-50/60 px-3 text-center text-xs text-amber-900 dark:border-amber-800/70 dark:bg-amber-950/20 dark:text-amber-100">{analyticsError || 'Analytics unavailable for this range.'}</div>
-          ) : (() => {
-            const all = analytics?.byBranch || []
-            const COLORS = ['#2563eb','#16a34a','#ea580c','#7c3aed','#0891b2']
-            const maxRev = Math.max(...all.map(b=>b.revenue_usd||0), 0.01)
-            const vis = showAllBranches ? all : all.slice(0,4)
-            return (
-              <>
-                <div className="space-y-2">
-                  {all.length === 0 ? <p className="text-xs text-gray-400 text-center py-4">{translateOr('no_data', 'No data found', 'រកមិនឃើញទិន្នន័យ')}</p>
-                  : vis.map((b,i) => {
-                    const pct = ((b.revenue_usd||0)/maxRev*100).toFixed(0)
-                    return (
-                      <div key={i}>
-                        <div className="flex justify-between text-xs mb-0.5">
-                          <span className="text-gray-600 dark:text-gray-400 truncate max-w-28">{b.branch_name}</span>
-                          <span className="font-medium text-gray-900 dark:text-white">{fmtUSD(b.revenue_usd||0)}</span>
-                        </div>
-                        <div className="h-2 bg-gray-100 dark:bg-gray-700 rounded-full overflow-hidden">
-                          <div className="h-full rounded-full" style={{ width:`${pct}%`, background:COLORS[i%COLORS.length] }} />
-                        </div>
-                        <div className="text-right text-xs text-gray-400 mt-0.5">{b.count} {t('sale')}</div>
-                      </div>
-                    )
-                  })}
-                </div>
-                {all.length > 4 && (
-                  <button onClick={() => setShowAllBranches(v=>!v)} className="mt-2 w-full text-xs text-blue-600 dark:text-blue-400 hover:underline py-1">
-                    {showAllBranches ? t('show_less') : `${t('view_all')} ${all.length} ${t('branches')}`}
-                  </button>
-                )}
-              </>
-            )
-          })()}
-        </div>
 
         {/* Top Products */}
         <div className="card p-3 sm:p-4">
@@ -1872,84 +1834,6 @@ ${translateOr('delivery_margin', 'Delivery margin')} ${fmtUSD(aDeliveryMargin)} 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-5">
         {/* Best Hour */}
         <ExpiryAlertsCard summary={summary} showAll={showAllExpiring} setShowAll={setShowAllExpiring} translateOr={translateOr} />
-        <div className="hidden">
-          <div className="mb-3 flex items-center justify-between gap-2">
-            <h2 className="text-base font-semibold text-gray-900 dark:text-white">{t('best_hour')}</h2>
-            <span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-medium text-slate-500 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300">
-              {translateOr('tap_to_view', 'Tap to view')}
-            </span>
-          </div>
-          {analyticsPending ? <div className="h-28 animate-pulse bg-gray-100 dark:bg-gray-700 rounded-xl" /> : analyticsUnavailable ? (
-            <div className="flex h-28 items-center justify-center rounded-xl border border-amber-200 bg-amber-50/60 px-3 text-center text-xs text-amber-900 dark:border-amber-800/70 dark:bg-amber-950/20 dark:text-amber-100">{analyticsError || 'Analytics unavailable for this range.'}</div>
-          ) : (() => {
-            const hourly: DashboardHourRow[] = analytics?.hourlyDist || []
-            const tzOff  = getBusinessTimezoneOffsetHours()
-            const merged: Record<number, DashboardHourRow> = {}
-            hourly.forEach(h => {
-              const lh = ((Math.round(Number.parseInt(String(h.hour),10)+tzOff))%24+24)%24
-              if (!merged[lh]) merged[lh] = { hour:lh, count:0, revenue_usd:0 }
-              const bucket = merged[lh]
-              bucket.count = (bucket.count || 0) + (Number(h.count)||0)
-              bucket.revenue_usd = (bucket.revenue_usd || 0) + (Number.parseFloat(String(h.revenue_usd || 0))||0)
-            })
-            const maxCount   = Math.max(...Object.values(merged).map(h=>h.count || 0), 1)
-            const allHours   = Array.from({length:24},(_,i) => merged[i]||{hour:i,count:0,revenue_usd:0})
-            const sortedBusy = Object.values(merged).filter(h=>(h.count || 0)>0).sort((a,b)=>(b.count || 0)-(a.count || 0))
-            const visH = showAllHours ? sortedBusy : sortedBusy.slice(0,3)
-            return (
-              <>
-                <div className="relative mb-3">
-                  <div className="grid gap-px" style={{ gridTemplateColumns:'repeat(24,1fr)' }}>
-                    {allHours.map(h => {
-                      const op = (h.count || 0)===0 ? 0.06 : 0.12+(h.count || 0)/maxCount*0.88
-                      return (
-                        <button
-                          key={h.hour}
-                          type="button"
-                          title={`${String(h.hour).padStart(2,'0')}:00 - ${h.count} ${t('sale')}(s), ${fmtUSD(h.revenue_usd)}`}
-                          aria-label={`${translateOr('best_hour', 'Best hour')} ${formatDashboardHourLabel(h.hour)}`}
-                          className="rounded-sm transition hover:ring-2 hover:ring-blue-300 dark:hover:ring-blue-700"
-                          style={{ height:40, background:`rgba(37,99,235,${op.toFixed(2)})` }}
-                          onClick={() => openHourDetail(h, sortedBusy.findIndex((item) => item.hour === h.hour) + 1 || null)}
-                        />
-                      )
-                    })}
-                  </div>
-                  <div className="mt-1 flex text-[11px] font-medium text-gray-400" style={{ position:'relative', height:18 }}>
-                    {[0,6,12,18,23].map(h => (
-                      <span key={h} style={{ position:'absolute', left:`${(h/23)*100}%`, transform:'translateX(-50%)' }}>{formatDashboardHourLabel(h).replace(' ', '')}</span>
-                    ))}
-                  </div>
-                </div>
-                <div className="space-y-1">
-                  {visH.length===0 && <p className="text-xs text-gray-400 text-center">{translateOr('no_data', 'No data found', 'រកមិនឃើញទិន្នន័យ')}</p>}
-                  {visH.map((h,i) => (
-                    <button
-                      key={h.hour}
-                      type="button"
-                      className="flex w-full items-center justify-between rounded-xl border border-gray-100 bg-gray-50 px-3 py-2 text-left transition hover:border-blue-200 hover:bg-blue-50/60 dark:border-gray-700 dark:bg-gray-900/40 dark:hover:border-blue-800 dark:hover:bg-blue-950/20"
-                      onClick={() => openHourDetail(h, i + 1)}
-                    >
-                      <div>
-                        <div className="text-sm font-semibold text-gray-800 dark:text-gray-100">{`#${i + 1} ${formatDashboardHourLabel(h.hour)}`}</div>
-                        <div className="text-[11px] text-gray-500 dark:text-gray-400">{String(h.hour).padStart(2,'0')}:00 - {String((Number(h.hour) + 1) % 24).padStart(2,'0')}:00</div>
-                      </div>
-                      <div className="text-right">
-                        <div className="text-sm font-semibold text-gray-900 dark:text-white">{h.count} {t('sale')}{h.count!==1?'s':''}</div>
-                        <div className="text-[11px] text-green-600 dark:text-green-400">{fmtUSD(h.revenue_usd)}</div>
-                      </div>
-                    </button>
-                  ))}
-                </div>
-                {sortedBusy.length > 3 && (
-                  <button onClick={() => setShowAllHours(v=>!v)} className="mt-2 w-full text-xs text-blue-600 dark:text-blue-400 hover:underline py-1">
-                    {showAllHours ? t('show_less') : `${t('view_all')} ${sortedBusy.length} ${t('hours')||'hours'}`}
-                  </button>
-                )}
-              </>
-            )
-          })()}
-        </div>
 
         {/* Low Stock */}
         <div className="card">
@@ -2053,36 +1937,6 @@ ${translateOr('delivery_margin', 'Delivery margin')} ${fmtUSD(aDeliveryMargin)} 
           translateOr={translateOr}
           fmtUSD={fmtUSD}
         />
-        <div className="hidden">
-          <div className="p-3 sm:p-4 border-b border-gray-100 dark:border-gray-700 flex items-center justify-between">
-            <h2 className="font-semibold text-gray-900 dark:text-white">{translateOr('product_expiry_alerts', 'Expiry alerts', 'ការជូនដំណឹងផុតកំណត់')}</h2>
-            {(summary?.expiring_products?.length||0) > 0 && (
-              <span className="text-[10px] bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 px-2 py-0.5 rounded-full font-medium">{summary!.expiring_products.length}</span>
-            )}
-          </div>
-          <div className="divide-y divide-gray-100 dark:divide-gray-700">
-            {!summary?.expiring_products?.length
-              ? <p className="p-4 text-sm text-gray-400 text-center">{translateOr('no_data', 'No data found', 'រកមិនឃើញទិន្នន័យ')}</p>
-              : (showAllExpiring ? summary.expiring_products : summary.expiring_products.slice(0,5)).map(p => (
-                <div key={p.id} className="flex items-center justify-between gap-2 px-3 sm:px-4 py-2.5">
-                  <div className="min-w-0">
-                    <p className="truncate text-sm text-gray-700 dark:text-gray-300">{p.name}</p>
-                    {p.category && <p className="text-xs text-gray-400">{p.category}</p>}
-                  </div>
-                  <span className={Number(p.days_until_expiry || 0) < 0 ? 'badge-red' : 'badge-yellow'}>
-                    {p.expiry_date}
-                  </span>
-                </div>
-              ))}
-          </div>
-          {(summary?.expiring_products?.length||0) > 5 && (
-            <div className="px-4 py-2 border-t border-gray-100 dark:border-gray-700">
-              <button onClick={() => setShowAllExpiring(v=>!v)} className="w-full text-xs text-blue-600 dark:text-blue-400 hover:underline py-0.5">
-                {showAllExpiring ? t('show_less') : `${t('view_all')} ${summary!.expiring_products.length} ${t('items')}`}
-              </button>
-            </div>
-          )}
-        </div>
 
         {/* Recent imports -- a general list of the last few imported files
             (any type, any outcome), so it's discoverable and clickable the

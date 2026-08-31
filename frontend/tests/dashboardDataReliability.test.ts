@@ -18,7 +18,11 @@ assert.match(dashboard, /Analytics unavailable/, 'dashboard should distinguish a
 assert.doesNotMatch(dashboard, /PortalMenu/, 'dashboard detail rows should open directly without an extra menu step')
 assert.match(dashboard, /setProductDetail\(\{ \.\.\.p, insightType: 'low_stock' \}\)/, 'dashboard low-stock rows should open direct item details')
 assert.match(dashboard, /setProductDetail\(\{ \.\.\.p, insightType: 'out_of_stock' \}\)/, 'dashboard out-of-stock rows should open direct item details')
-assert.match(dashboard, /openHourDetail\(h, i \+ 1\)/, 'dashboard best-hour rows should open a detail view')
+// Re-anchored to the LIVE BestHourCard wiring: the old `openHourDetail(h,
+// i + 1)` string lived only inside a dead `className="hidden"` copy of the
+// section, which is now deleted (the pin was passing on zombie markup).
+assert.match(dashboard, /onOpenHour=\{openHourDetail\}/, 'dashboard best-hour card should be wired to the hour detail view')
+assert.match(dashboard, /onOpenHour\(hour, index \+ 1\)/, 'dashboard best-hour rows should open a detail view')
 assert.match(dashboard, /const openInventoryOverview = useCallback\(/, 'dashboard should expose a direct inventory follow-through action')
 assert.match(dashboard, /DASHBOARD_INVENTORY_FOCUS_KEY/, 'dashboard should persist a focused inventory handoff when drilling into stock alerts')
 assert.match(dashboard, /review_in_inventory', 'Review in inventory'/, 'dashboard preview-truncated stock cards should offer an explicit inventory review action')
