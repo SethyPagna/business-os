@@ -244,6 +244,9 @@ function CustomersTab({ t, notify, active = true, initialSearch }: CustomersTabP
   // 'block'.
   const canDeleteContact = can('contacts', 'delete')
   const canBulkDeleteContacts = can('contacts', 'bulk_delete')
+  // Client-side export gated by the modeled 'contacts:export' action, matching
+  // the Suppliers/Delivery tabs and the Products precedent.
+  const canExportContacts = can('contacts', 'export')
 
   const { syncChannel } = useSync()
   const loadRequestRef = useRef(0)
@@ -832,7 +835,7 @@ function CustomersTab({ t, notify, active = true, initialSearch }: CustomersTabP
           )}
           items={([
             { label: tr(t, 'import_contacts', 'Import'), onClick: () => setModal('import'), color: 'blue', icon: <Download className="h-4 w-4 shrink-0" /> },
-            {
+            ...(canExportContacts ? [{
               label: tr(t, 'export', 'Export'),
               color: 'green',
               icon: <Upload className="h-4 w-4 shrink-0" />,
@@ -855,7 +858,7 @@ function CustomersTab({ t, notify, active = true, initialSearch }: CustomersTabP
                 })
                 setExportDialog({ rows, baseName: 'customers' })
               },
-            },
+            }] : []),
           ] as PortalMenuItem[])}
         />
         <button

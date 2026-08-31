@@ -381,6 +381,10 @@ function SuppliersTab({ t, notify, active = true, initialSearch }: SuppliersTabP
   // 'block'.
   const canDeleteContact = can('contacts', 'delete')
   const canBulkDeleteContacts = can('contacts', 'bulk_delete')
+  // Export is assembled client-side from already-loaded rows; gating it
+  // enforces the stated policy (review-tier cannot export) and matches the
+  // modeled 'contacts:export' action + the Products/Customers/Delivery tabs.
+  const canExportContacts = can('contacts', 'export')
 
   const { syncChannel } = useSync()
   const loadRequestRef = useRef(0)
@@ -977,7 +981,7 @@ function SuppliersTab({ t, notify, active = true, initialSearch }: SuppliersTabP
           )}
           items={([
             { label: tr('import_contacts', 'Import', 'នាំចូល'), onClick: () => setModal('import'), color: 'blue', icon: <Download className="h-4 w-4 shrink-0" /> },
-            {
+            ...(canExportContacts ? [{
               label: tr('export', 'Export', 'នាំចេញ'),
               color: 'green',
               icon: <Upload className="h-4 w-4 shrink-0" />,
@@ -1011,7 +1015,7 @@ function SuppliersTab({ t, notify, active = true, initialSearch }: SuppliersTabP
                 // fixed xlsx download.
                 setExportDialog({ rows, baseName: 'suppliers' })
               },
-            },
+            }] : []),
           ] as PortalMenuItem[])}
         />
         <button

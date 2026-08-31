@@ -197,6 +197,15 @@ export const PERMISSION_ACTIONS: Record<string, PermissionAction[]> = {
     // routes/importJobs.ts: the customers/suppliers/delivery_contacts
     // import types -- strict full-grant checks there.
     { key: 'import', tKey: 'perm_act_contacts_import', label: 'Import contacts', review: 'block' },
+    // Export on all three contact tabs (Customers/Suppliers/Delivery) was,
+    // like the Products export before it, gated by NOTHING. Same honest
+    // scope as the Products note above: export is assembled client-side from
+    // rows ALREADY loaded into the page (each tab's visibleContacts), never
+    // from the server, and a review-tier user may legitimately view those
+    // rows -- so hiding the button enforces the stated policy but is NOT a
+    // confidentiality boundary. Modeled here so it is no longer the one
+    // contact-tab control absent from the permission editor.
+    { key: 'export', tKey: 'perm_act_contacts_export', label: 'Export', review: 'block' },
   ],
 }
 

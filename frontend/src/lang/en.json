@@ -61,6 +61,7 @@
   "perm_act_contacts_delete": "Delete contact",
   "perm_act_contacts_edit": "Edit contact (name only)",
   "perm_act_contacts_import": "Import contacts",
+  "perm_act_contacts_export": "Export",
   "perm_act_contacts_merge": "Merge duplicates",
   "perm_act_contacts_view": "View and search",
   "perm_act_fees_add": "Add fee",

@@ -427,6 +427,9 @@ function DeliveryTab({ t, notify, active = true, initialSearch }: DeliveryTabPro
   // 'block'.
   const canDeleteContact = can('contacts', 'delete')
   const canBulkDeleteContacts = can('contacts', 'bulk_delete')
+  // Client-side export gated by the modeled 'contacts:export' action, matching
+  // the Customers/Suppliers tabs and the Products precedent.
+  const canExportContacts = can('contacts', 'export')
 
   const { syncChannel } = useSync()
   const loadRequestRef = useRef(0)
@@ -920,7 +923,7 @@ function DeliveryTab({ t, notify, active = true, initialSearch }: DeliveryTabPro
           )}
           items={([
             { label: tr('import_contacts', 'Import', 'នាំចូល'), onClick: () => setModal('import'), color: 'blue', icon: <Download className="h-4 w-4 shrink-0" /> },
-            {
+            ...(canExportContacts ? [{
               label: tr('export', 'Export', 'នាំចេញ'),
               color: 'green',
               icon: <Upload className="h-4 w-4 shrink-0" />,
@@ -944,7 +947,7 @@ function DeliveryTab({ t, notify, active = true, initialSearch }: DeliveryTabPro
                 // fixed xlsx download.
                 setExportDialog({ rows, baseName: 'delivery-contacts' })
               },
-            },
+            }] : []),
           ] as PortalMenuItem[])}
         />
         <button

@@ -61,6 +61,7 @@
   "perm_act_contacts_delete": "លុបទំនាក់ទំនង",
   "perm_act_contacts_edit": "កែប្រែទំនាក់ទំនង (តែឈ្មោះ)",
   "perm_act_contacts_import": "នាំចូលទំនាក់ទំនង",
+  "perm_act_contacts_export": "នាំចេញ",
   "perm_act_contacts_merge": "បញ្ចូលគ្នាទិន្នន័យស្ទួន",
   "perm_act_contacts_view": "មើល និងស្វែងរក",
   "perm_act_fees_add": "បន្ថែមថ្លៃសេវា",
