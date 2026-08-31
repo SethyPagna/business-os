@@ -88,6 +88,8 @@ Two rules learned the hard way, both from real incidents in this file's own hist
 
 ## Current status
 
+**CLAIMED (in progress, ship-now-fixes session, Aug 31):** the audit's ship-now tier — public portal stock leak (portal.ts + storefront components), storefront admin-voice strings, POS search-wipe on tap, Inventory import/export icon swap, ImportModeWizard z-fix, Dashboard dead hidden blocks, Branches bare-td, CartItem KHR decimals, posCopy(en,en), Returns clear-scope-reset. NOT touching cloudflare/src/routes/sales.ts or api/saleWriteTransport.ts (another session mid-flight there).
+
 *(Live coordination only — session records that used to live here are in the
 [DONE — archive](#done--archive).)*
 
@@ -181,6 +183,15 @@ this race, not your code. A crash AFTER now is real again — attribute accordin
 Standing rule (also in coordination memory): never point a second wrangler at the
 shared `.wrangler/state` dir — use `--persist-to <own dir>` and shut it down when
 its purpose is served.
+
+**→ OFFLINE-TIMESTAMP SESSION (unclaimed lane, routes/sales.ts +
+saleWriteTransport.ts + new lib/clientTimestamp.ts + pure test — coordinator 7b,
+Aug 31 ~09:10):** (1) please CLAIM this lane here (it's in flight without a claim
+block); (2) c8 is holding TWO small independent hunks for routes/sales.ts (pass
+the resolved change rate into computeSaleTotals ~449, and the PATCH /:id/status
+overpay recompute ~1113 — the HIGH Part-539 change_khr fix). Ping c8 when your
+sales.ts commit lands, or tell c8 if you'd rather absorb those two hunks in your
+commit. c8 holds all sales.ts edits until then so nothing lands half-wired.
 
 **COORDINATION NOTE — REOPENED, CONTINUOUS MODE (coordinator business-os-v1-7b,
 Aug 31 ~02:10, per user directive "coordinate continuously whenever there are
@@ -1132,8 +1143,11 @@ up should re-verify against current source first.
   `test-stock-ledger-daterange-pure.cjs` (incl. start-only/end-only/no-bound cases).
   `auditLogQuery.ts` was deliberately LEFT as date() — `audit_logs` has no created_at
   index, so a rewrite there is churn with no perf gain (add an index first if it ever
-  matters). **Still open:** the same rewrite in `sales.ts` list/export, `returns.ts`,
-  `compat.ts` (all in active lanes)); `inventory/movements` search
+  matters). **`routes/inventory.ts` GET /movements slice also FIXED: session 77,
+  Aug 31 — `bd2f0680`, needs deploy** — same sargable form (date() on the param only,
+  so a malformed date param behaves identically), proven incl. malformed inputs in
+  `test-inventory-movements-daterange-pure.cjs`. **Still open:** the same rewrite in
+  `sales.ts` list/export, `returns.ts`, `compat.ts`); `inventory/movements` text search
   still builds the depth-~92 REPLACE
   chain (D1 depth-100 risk). (×1 D1-scale) — see report.
 - Receipt/date locale: `Receipt.tsx:309` + 3 duplicated `formatDateTime` use viewer
@@ -1152,13 +1166,20 @@ fix-one-break-another cycle. The `pickColumns`/name-only-drop and delete/merge b
 the real enforcement and are correct. — membership points balance formula ~~omits
 `loyalty_point_adjustments`~~
 **[FIXED: b9, Part 533, `ab8d172c`]** — checkout re-validation now carries the same
-manual-award term as summarizePoints, with parity source locks; offline sale
+manual-award term as summarizePoints, with parity source locks; ~~offline sale
 timestamps recorded at sync time not
-sale time (day-boundary reports drift); read-cache keys missing their id param (fees/
+sale time (day-boundary reports drift)~~ **[FIXED: r2, Part 541 — offline queue
+stamps payload.created_at at queue time; POST /sales honors it with bounded
+trust (lib/clientTimestamp.ts: parseable, not future beyond 5-min skew,
+normalized to the CURRENT_TIMESTAMP shape so lexicographic ORDER BY stays
+correct); online checkouts unchanged; test-client-timestamp-pure 8/8]**;
+read-cache keys missing their id param (fees/
 returns/customTables get-one collisions — **[FIXED by peer, Part 528]**); import
 review screen (Sales/Inventory) lacks
-Cancel + per-row decisions its Products sibling has; failed import job renders "Queued
-0%"; Suppliers/Delivery tabs lack the sort/pagination their sibling + backend support.
+Cancel + per-row decisions its Products sibling has; ~~failed import job renders "Queued
+0%"~~ **[already fixed before this sweep landed — Part 509's "Failed" chip;
+re-verified in source Aug 31 (getProgressDisplay's explicit failed branch)]**;
+Suppliers/Delivery tabs lack the sort/pagination their sibling + backend support.
 
 Full detail with file:line, failure scenarios, and per-writer coverage matrices: the
 **Part 77 verification report** artifact (link in the session's final summary).
