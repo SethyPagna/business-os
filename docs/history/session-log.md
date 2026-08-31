@@ -15486,3 +15486,80 @@ deploy with their batch. Remaining Part-77 opens after this: import-review
 screen parity (likely reshaped by the one-screen import preference — assess
 against Part 501 before building), restore slice C, returns cross-step
 atomicity, unpaged/N+1 remainder (c8's active lane).
+
+## Part 543 (chat, Aug 31 2026, session business-os-v1-c8) — Part-539 defect fixes: change-rate money integrity, POS branch mismatch, settings wipe, key warning
+
+Continuation of the Part-539 sweep ("Continue"): the flagged defects are now
+FIXED as isolated commits, each with a pinned test and (where reachable) a live
+expected-vs-actual probe on the local wrangler+Vite app.
+
+**1. HIGH — stored change_khr now matches the POS display (`c5fa79aa`).**
+`computeSaleTotals` gains a `changeExchangeRate` input (the raw SETTING,
+server-read in routes/sales.ts — never a client field) and a server
+`resolveChangeExchangeRate` twin of posCore.ts's (hand-synced pair with a
+regex parity lock in the pure test). The KHR conversion uses the EXACT
+overpay, not the cent-rounded change_usd — rounding first shifted whole tens
+of riel (probe trail on the local DB, all three sales paid 50,000៛ on $9.99
+at main 4100 / change rate 4000: pre-fix stored **9,061**; rate-honored but
+round2-first stored **8,840**; final fix stores **8,820** = exactly what POS
+displays). Both write paths wired: POST / and PATCH /:id/status's
+deferred-payment settle (exact-overpay + change rate there too).
+test-sale-totals-pure now 19 checks (4 new: the 8,820 pin, fallback parity
+with the old display 9,041, both-write-paths source lock, frontend-twin
+parity). Migration chain re-run green. STILL OPEN (data-model decision): the
+resolved change rate is not stamped on the sale row, so historical rows
+can't be re-derived if the setting changes later.
+
+**2. MEDIUM — POS card badge vs lot sheet branch mismatch (`9c9c9424`).**
+POS now hands ProductDetailSheet the SAME branch the card badge resolved
+(`primaryBranchFilterId ?? pickBestBranchId(detailProduct)`) instead of
+letting the sheet fall back to branchOptions[0] (alphabetical — "Branch 2"
+beat "Main Store"). Verified live twice: the sheet's lot picker now queries
+branchId=1 and offers the 3-pc Main-Store lot the card advertised, and a
+real checkout booked Main Store. Pinned in posCore.test.ts. The cashier can
+still switch branches in the sheet.
+
+**3. MEDIUM — mid-session settings wipe, the ROOT CAUSE of Part 539's
+"Settings form shows blank while the server holds 4000" (`1abe9fec`).**
+Not a hydration bug: fresh-load hydration verified fine. The culprit is
+`applyBootstrapPayload`, which REPLACED context settings with the bootstrap
+payload's blob unconditionally — and the offline / invalid-session /
+auth-recovery bootstrap fallbacks legitimately carry `settings: {}`. One
+mid-session recovery event wiped every server setting from context (POS
+rates, payment methods, receipt settings all silently revert to defaults;
+the Settings form re-hydrates from the wiped copy). Now keeps current
+settings when the payload brought none — the same guard loadSettings already
+had, with its comment pointing at this exact failure shape. Pinned in
+appShellUtils.test.ts.
+
+**4. LOW — React "unique key" warning on the storefront product grid.** The
+product map returned a keyless bare `<>` fragment with keys on its CHILDREN
+where the reconciler never sees them; now a `<Fragment key={product.id}>`.
+NOTE: committed as a ride-along in the catalog lane's next commit — the fix
+sits in CatalogProductsSection.tsx which that active lane holds dirty
+(hunks at lines 1/691/852; verified surviving their edits).
+
+**Verification state at write time:** test-sale-totals-pure 19/19,
+posCore 10/10, appShellUtils all green, migration-chain-fresh green, both
+tscs clean over every file EXCEPT peers' mid-edit files (untracked
+lib/maintenance.ts syntax error = the restore-slice-C lane's in-flight work,
+attributed not fixed; catalog-lane files similarly in flux). Live probes ran
+against this session's community 8787 (restarted once more after a silent
+exit — see the Current-status infra note).
+
+**Local dev DB test artifacts (disclosed, not production):** three probe
+sales — `RCP-20260831-081431` (change_khr 9,061, the pre-fix evidence),
+`20260831-092647` (8,840, mid-fix), `20260831-093055` (8,820, post-fix) —
+plus portal account "C8 Sweep Tester"/LCMN-KC543RW0 and one wishlist item
+from Part 539. The permission classifier blocks this session from cancelling
+sales; any session (or the user, one click in Sales) can cancel them.
+change_exchange_rate was restored to unset after each probe.
+
+**Still open from the Part-539 list:** storefront signup's native
+window.confirm (UX); POS needs a reload to pick up settings changes;
+aiProviderId in public /config; membership-existence oracle on
+POST /portal/submissions; the zombie/orphan cleanup lane; change-rate
+stamping on the sale row (above). Peers are independently closing other
+Part-77/539 items (movements-search REPLACE chain closed `ca3828e7`,
+restore slice C claimed with 0088, sargable date sweeps, offline-sale
+timestamps `c8a27e8f`).

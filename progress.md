@@ -354,27 +354,31 @@ chain · receipt/date locale duplicates (main date fixed Part 519) · MEDIUM lis
 
 ### Open defects — Part-539 verification sweep (c8, Aug 31)
 
-Full detail + live expected-vs-actual probes in session-log Part 539:
+Full detail + live expected-vs-actual probes in session-log Part 539; fixes in
+Part 543:
 
-- **HIGH (money):** server recomputes `change_khr` at the MAIN rate
-  (`cloudflare/src/lib/saleTotals.ts:107-108`), ignoring the Part-534 change
-  rate the POS displayed — stored sale/receipt says 9,061៛ where the cashier
-  was told 8,820៛ (live probe). Change rate also not stamped on the sale row.
-  LIVE IN PRODUCTION since the Part-538 deploy (harmless while
-  change_exchange_rate stays unset — it currently is).
-- **MEDIUM (POS):** card stock badge (pickBestBranchId → default branch) and
-  the lot sheet's fallback branch (`branchOptions[0]` sorted alphabetically,
-  `ProductDetailSheet.tsx:321-326`) resolve DIFFERENT branches — card showed
-  3 pcs (Main Store) while the sheet silently offered/booked Branch 2's lot.
-- **MEDIUM (settings):** Settings form never hydrates a stored
-  `change_exchange_rate` — field renders blank while the server holds a value
-  POS actively uses; admins can't see or clear it from the UI.
+- ~~**HIGH (money)**~~ **[FIXED: c8, Part 543, `c5fa79aa`, needs deploy]** —
+  `change_khr` now converts the EXACT overpay at the server-read
+  change_exchange_rate on BOTH write paths (create + deferred-payment settle);
+  live probe stores 8,820៛ == the POS display (was 9,061). Pure test 19/19
+  incl. a frontend-twin parity lock. STILL OPEN (data-model decision): the
+  resolved change rate isn't stamped on the sale row.
+- ~~**MEDIUM (POS)**~~ **[FIXED: c8, Part 543, `9c9c9424`, needs deploy]** —
+  the sheet now preselects the SAME branch the card badge resolved; verified
+  live (lot picker queries the default branch, checkout books it).
+- ~~**MEDIUM (settings)**~~ **[ROOT-CAUSED + FIXED: c8, Part 543, `1abe9fec`,
+  needs deploy]** — not a hydration bug: `applyBootstrapPayload` wiped live
+  context settings whenever a fallback bootstrap (offline / invalid-session /
+  auth-recovery) delivered `settings:{}`. Now keeps current settings when the
+  payload brought none (loadSettings' own guard, applied here too).
 - **LOW:** POS needs a reload to pick up settings changes; storefront signup's
   blank-membership reminder is a native `window.confirm` (silently aborts in
-  embedded/webview contexts; house style is styled modals); React key warning
-  in CatalogProductsSection; `aiProviderId` internal id in public portal
-  /config; membership-existence oracle on POST /portal/submissions (404 vs
-  success, rate-limited).
+  embedded/webview contexts; house style is styled modals); ~~React key warning
+  in CatalogProductsSection~~ **[FIXED in-tree by c8 — keyed Fragment on the
+  product map; riding as a NAMED ride-along in the active catalog lane's next
+  commit (hunks at lines 1/691/852)]**; `aiProviderId` internal id in public
+  portal /config; membership-existence oracle on POST /portal/submissions
+  (404 vs success, rate-limited).
 - **Zombie/orphan cleanup lane (Golden Rule 6, needs one dedicated session):**
   custom-tables cluster (unmounted route + unimported component + transport),
   DatedStockReconciliationModal chain (+ BulkImportModal's dead "choose Dated
