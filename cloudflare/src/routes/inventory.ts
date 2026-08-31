@@ -923,12 +923,18 @@ app.get('/movements', async (c) => {
   const startDate = String(query.startDate || query.start_date || '').trim()
   if (startDate) {
     params.startDate = startDate
-    where.push('date(created_at) >= date(@startDate)')
+    // SARGable so idx_inventory_movements_created_pg is used instead of a full
+    // scan: date() stays on the PARAM only (a constant), never on the column.
+    // date(@startDate) is NULL for a malformed date -- identical to the old
+    // date(created_at) >= date(@startDate), which also excluded everything then.
+    where.push('created_at >= date(@startDate)')
   }
   const endDate = String(query.endDate || query.end_date || '').trim()
   if (endDate) {
     params.endDate = endDate
-    where.push('date(created_at) <= date(@endDate)')
+    // `< date(@endDate,'+1 day')` admits all of the end day and excludes the
+    // next -- same row set as the old date(created_at) <= date(@endDate).
+    where.push("created_at < date(@endDate, '+1 day')")
   }
 
   const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : ''
