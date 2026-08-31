@@ -88,18 +88,53 @@ Two rules learned the hard way, both from real incidents in this file's own hist
 
 ## Current status
 
-**→ POS-CARD-PRICE LANE (Aug 31, Part 562 grep-max+1; number races expected): CLAIMED / in progress.**
-User (POS product grid card + detail sheet): the grouped card shows the option count twice —
+**→ PRODUCT-DETAIL-FLOAT LANE (Aug 31, Part 563 grep-max+1; number races expected): CLAIMED / in progress.**
+User batch on the Products-page "click to view detail" float: (1) the detail float's
+Stock Changes / Sales / Suppliers sections show "no data" (backend verified CORRECT —
+local D1 report/ledger queries return rows; root cause is the current UI swallows a
+fetch failure into a silent empty/Loading state, so the rewrite surfaces errors); (2)
+reposition the Batches button — below Status and above the report sections on small
+screens, kept in the first half (left column) on large screens; (3) convert Stock
+Changes / Sales / Suppliers from click-to-EXPAND SectionCards into click-to-open FLOAT
+modals, like the existing Batches button. Files (path-scoped, DISJOINT from active
+Products.tsx/HeaderActions/StockChangeSection lanes):
+`frontend/src/components/products/surfaces/{ProductDetailModal,ProductDetailReport}.tsx`.
+No lang/perm changes (all keys — stock_change_ledger/sales/suppliers/batches/etc. —
+already in both packs). Separately, the user asked for confirm/double-check dialogs on
+stock-in/add-product/edit and "all" actions app-wide — NOT in this lane (huge,
+cross-cutting, collides with active lanes); flagged to the user for scoping.
+
+**→ POS-CARD-PRICE LANE (Aug 31, Part 562 grep-max+1; number races expected): DONE — display
+slice (needs deploy — rides the next one). Commit `e6959534`.** typecheck + check:source green.
+User (POS product grid card + detail sheet): the grouped card showed the option count twice —
 a purple `Groups: N` chip AND a `N options · N total in stock` line — "same thing shown
-twice; keep the bottom, rename it `Options: N | Total Qty: n`". Remove the `$min – $max`
-price range, "only keep the highest price for selling price". Show "selling and VIP same
-row bottom … VIP just say VIP; when clicked show the VIP options, click to continue" (grid
-shows the selling price + a plain `VIP` tag on one row; the amount still reveals in the
-detail sheet). Relabel: drop the word "Price" → `Selling` (detail sheet row + Selling
-button). Wholesale (បោះដុំ) price is DEFERRED per user (chose "POS display first, wholesale
-later") — it needs a new persisted field/DB migration, tracked as a separate follow-up.
-Files (path-scoped): frontend/src/components/pos/POS.tsx, frontend/src/components/pos/ProductDetailSheet.tsx.
-progress.md NOT committed by this lane (shared checkout — claim visible on disk).
+twice; keep the bottom, rename it `Options: N | Total Qty: n`". Removed the `$min – $max`
+price range, "only keep the highest price for selling price" (grouped card now shows
+`groupMeta.maxSellingPriceUsd`). Show "selling and VIP same row bottom … VIP just say VIP;
+when clicked show the VIP options, click to continue" — grid now shows the selling price + a
+plain `VIP` tag on one row; the amount still reveals on tap in the detail sheet. Relabel:
+dropped the word "Price" → `Selling` (detail-sheet info row + Selling buttons); VIP reveal
+button now reads just `VIP` (was "VIP price"). Files (path-scoped, committed): POS.tsx,
+ProductDetailSheet.tsx. progress.md NOT committed by this lane (claim visible on disk).
+
+FOLLOW-UP — WHOLESALE (បោះដុំ) PRICE, deferred by user ("POS display first, wholesale
+later"). Full spec captured (mid-turn, Aug 31) for whoever picks it up:
+- New persisted per-product field `wholesale_price_usd/khr` (DB migration + backend
+  read/write in products.ts, product form save payload, backup/import column sets).
+- Product FORM: a Wholesale input in the pricing section (edit button), alongside
+  selling/VIP/cost.
+- Products PAGE: do NOT show wholesale in the list — only inside the "click to view detail"
+  modal ("for better display").
+- A free-text NOTE field like "wholesale only > {number}" (min qty). This is a NOTE, not
+  automation — it does not auto-switch price. Provide an automation on/off toggle in the
+  pricing section, DEFAULT OFF (when on, it could auto-apply wholesale above the qty; off =
+  the note is informational only).
+- POS: a Wholesale button/tier like VIP (price mode `wholesale`), flowing into cart +
+  receipt + sales; "remove the word price" → label just `Wholesale` (and the cart shows the
+  chosen tier as an adjustable Selling price "for easier understanding").
+- PERMISSIONS: model/enforce the new wholesale field in the permission editor + i18n both
+  packs (per i18n-permissions-coverage). User also flagged "update permissions for image
+  upload only" — confirm/wire an image-upload-only permission tier while touching perms.
 
 **→ STATS-DATE-ROW LANE (session 50, Aug 31, Part 560): DONE (needs deploy — rides
 the next one). Commits `3772f08f` (Sales/Returns/Fees + new StatsRangeRow + test),
@@ -180,6 +215,37 @@ checks (Sales tier + `canReadSales` shape + a routes/sales.ts source-guard);
 frontend+cloudflare tsc green; permissions/permissionActions/permissionEditor/
 langKeyIntegrity + `verify:i18n` (4254 keys both packs) all green.
 **STILL OPEN:** Users view-tier (the delicate `isAdminControlUser` slice).]**
+
+**[DONE (slice 3 of N) + VERIFIED LIVE — permissions-granularity session, Aug 31
+(Part 557 slice 3): Users section = admin-only, fake `users` toggle REMOVED.**
+Audit finding: the `users` permission key is checked NOWHERE on the backend —
+every route in `cloudflare/src/routes/users.ts` (reads AND writes: `GET /users`,
+`/roles`, `/users/:id/profile`, create/update/delete users+roles, password
+reset) gates on `isAdminControlUser(actor)` (reserved `admin` username / `admin`
+role code / explicit `permissions.all`), and `Users.tsx`'s own `canManage` is
+`hasPermission('all')`. So granting a non-admin `users:true` ("Full") was a FAKE
+control — the Settings→Users section appeared but `load()` short-circuits on
+`!canManage`, showing an empty, no-op panel while every API call 403s. **User
+chose (AskUserQuestion): keep Users admin-only and remove the decorative toggle**
+(vs a read-only view tier, or loosening writes to non-admins with anti-escalation
+guards). Frontend-only, zero backend change (backend was already correct):
+removed the `users` section from `permissionDefinitions.ts` (so admins can no
+longer grant a non-functional `users` permission); `SettingsHubPage` `canUsers`
+now `hasPermission('all')` (was `getPermissionTier('users') !== 'none'`, which a
+stale grant could satisfy); `AppContext` settings page-access dropped its dead
+`users` disjunct (backup-or-admin only). `perm_users`/`perm_section_users` left
+in both packs (now unreferenced, harmless — not worth churning the peer-managed
+lang files). **Verified LIVE vs the real worker (isolated `wrangler dev` :8798,
+private D1, two minted sessions):** `users:true` non-admin → 403 on `GET /users`,
+`GET /roles`, `POST /users`, `PUT /roles/2` (the fake control, proven); admin →
+200 on `GET /users`+`/roles` returning the real roster. Frontend tsc clean for my
+files (the 4 Inventory.tsx tsc errors + 2 `verify:i18n` misses are a peer's
+in-flight movements-export WIP, not this slice); permissionEditor/permissions/
+langKeyIntegrity green.
+**View-tier plan status:** Settings ✓, Sales ✓, Users → resolved as admin-only ✓.
+POS is a checkout surface (not meaningful as view-only). Remaining coarse
+Full/None sections (dashboard, customer_portal, promotions, review, audit_log,
+backup) could take a view tier later if the user wants it.]**
 
 **→ FILTER-CHIPS-LANE (this session, Aug 31): CLAIMED.** User: the sales filter
 menu (and every other) renders the CHOSEN filters as removable chips OUTSIDE the
@@ -915,6 +981,13 @@ e12dc2c7 says "Part 552" but 1e LOGGED 552 one minute earlier (the ledger
 screens). Your log entry = grep-max+1 at write time (553+ now) with the mismatch
 noted — and please STOP pre-baking Part numbers into commit messages (this is the
 second collision: a0b2edbf said 549, also taken).
+
+**→ DASHBOARD LANE (coordinator 7b, updated ~15:30):** diff inspection shows this
+is ACTIVE mid-build work (Payment Method card rework, 235 lines and growing;
+DonutChart gains a backward-compatible `showLegend` prop) — not abandoned, so no
+forced action. Still: ~2 hours dirty with no claim block is against protocol.
+Add a one-line claim here, and commit the first green slice rather than one big
+bang — the DonutChart prop change is already commit-ready on its own.
 
 **🔴 PERMISSIONS/I18N SESSION — YOUR "PART 557" IS WRONG AND COLLIDES (coordinator
 7b, ~14:40, third protocol miss from this lane):** the stock-changes-UI lane LOGGED

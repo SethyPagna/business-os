@@ -17,6 +17,7 @@ const BackupSection = lazy(() => import('./Backup'))
 type SettingsHubAppContext = {
   t: (key: string, fallback?: string) => string
   getPermissionTier: (key: string) => string
+  hasPermission: (key: string) => boolean
 }
 const useApp = useAppHook as unknown as () => SettingsHubAppContext
 
@@ -34,7 +35,7 @@ function initialSection(canSettings: boolean, canUsers: boolean, canBackup: bool
 }
 
 export default function SettingsHubPage() {
-  const { t, getPermissionTier } = useApp()
+  const { t, getPermissionTier, hasPermission } = useApp()
   // The settings SECTION door matches the old page's own nuances: the
   // narrower per-field grants (business_identity / sales_policy /
   // drive_credentials) open Settings too -- Settings.tsx self-gates which
@@ -43,7 +44,12 @@ export default function SettingsHubPage() {
     || getPermissionTier('business_identity') !== 'none'
     || getPermissionTier('sales_policy') !== 'none'
     || getPermissionTier('drive_credentials') !== 'none'
-  const canUsers = getPermissionTier('users') !== 'none'
+  // Users management is admin-only (Part 557 slice 3): the whole
+  // routes/users.ts surface gates on isAdminControlUser and Users.tsx's
+  // canManage is hasPermission('all'), so the section door must match --
+  // gating on the (backend-unchecked) `users` key would show a stale grant
+  // holder an empty, no-op section. hasPermission('all') === isAdminControlUser.
+  const canUsers = hasPermission('all')
   const canBackup = getPermissionTier('backup') !== 'none'
   const [section, setSection] = useState<SettingsHubSection>(() => initialSection(canSettings, canUsers, canBackup))
 

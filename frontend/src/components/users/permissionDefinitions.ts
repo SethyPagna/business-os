@@ -437,25 +437,25 @@ export const PERMISSION_SECTIONS: PermissionSection[] = [
       { key: 'contacts_suppliers', tKey: 'perm_contacts_suppliers', label: 'Suppliers section', sensitivity: 'high' },
     ],
   },
-  {
-    key: 'users',
-    tKey: 'perm_section_users',
-    label: 'Users',
-    description: "Full Access or None only, same as today's `all`-gated behavior (confirmed correct in Part 131's audit).",
-    permissions: [
-      { key: 'users', tKey: 'perm_users', label: 'Users and roles', sensitivity: 'critical' },
-    ],
-  },
+  // Users & roles management is DELIBERATELY admin-only (Part 557 slice 3):
+  // every route in cloudflare/src/routes/users.ts gates on
+  // isAdminControlUser(actor) (the reserved `admin` username, the `admin`
+  // role code, or an explicit `permissions.all` grant) -- the plain `users`
+  // permission key is checked NOWHERE on the backend, and Users.tsx's own
+  // canManage is hasPermission('all'). A per-role `users` toggle here would
+  // therefore be a fake control: granting it to a non-admin showed the empty
+  // Users section but every read/write was refused. So there is no `users`
+  // section in this editor -- managing users requires the Admin role, and
+  // SettingsHubPage gates the section on hasPermission('all') to match.
   {
     key: 'review',
     tKey: 'perm_section_review',
     label: 'Review',
-    description: "The Review/Approval queue for every section's Review Required tier above. Full Access or None only, same gate shape as Users.",
+    description: 'The Review/Approval queue for every section’s Review Required tier above. Full Access or None only, same admin-control gate shape as user management.',
     permissions: [
       // Review/Approval queue for the Review Required permission tier (see
       // progress.md's "Permissions UI redesign" item). Full Access/None
-      // only, same gate shape as `users` above -- no partial tier for this
-      // page itself.
+      // only -- no partial tier for this page itself.
       { key: 'review', tKey: 'perm_review', label: 'Review and approval queue', sensitivity: 'critical' },
     ],
   },

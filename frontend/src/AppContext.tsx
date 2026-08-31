@@ -2044,7 +2044,10 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
     // section still self-gates on its own key inside, so this widens the
     // door, never the controls.
     if (pageId === 'review' && getPermissionTier('audit_log') !== 'none') return true
-    if (pageId === 'settings' && (getPermissionTier('users') !== 'none' || getPermissionTier('backup') !== 'none')) return true
+    // Users is admin-only now (Part 557 slice 3) -- it carries no per-role
+    // `users` grant, so only the backup section can open Settings for a
+    // non-admin here; admins reach it via the tier-aware check above.
+    if (pageId === 'settings' && getPermissionTier('backup') !== 'none') return true
     // E2: returns and fees retired as standalone pages into the Sales hub,
     // same contract as above -- a returns- or fees-only grant still opens
     // the Sales page, whose sections self-gate on their own keys inside.
