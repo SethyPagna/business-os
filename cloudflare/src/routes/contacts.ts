@@ -1307,6 +1307,101 @@ app.get('/suppliers/reports/stock-in-invoice-lines', async (c) => {
   })
 })
 
+// The legacy supplier AP ledger (migration 0088): the old system's
+// account-payable reports, stored verbatim as finance history -- AP rows
+// never create stock receipts or fees. Read-only. Sits under /suppliers/*
+// so requireSupplierAccess (contacts_suppliers) gates it like every other
+// supplier-money surface. Dates are stored UTC; filters compare the
+// organization's Bangkok calendar day (+7h), matching how they display.
+app.get('/suppliers/reports/ap-invoices', async (c) => {
+  const db = getDb(c.env)
+  const query = c.req.query()
+  const page = clampInt(query.page, 1, 1, 100000)
+  const pageSize = clampInt(query.page_size, 25, 1, 100)
+
+  const conditions: string[] = []
+  const params: Record<string, unknown> = {}
+  const branch = String(query.branch || '').trim()
+  if (branch === 'warehouse' || branch === 'shop') {
+    conditions.push('si.source_branch = @branch')
+    params.branch = branch
+  }
+  const supplier = String(query.supplier || '').trim()
+  if (supplier && supplier !== 'all') {
+    conditions.push('lower(trim(si.supplier_name)) = lower(trim(@supplier))')
+    params.supplier = supplier
+  }
+  const status = String(query.status || '').trim()
+  if (status === 'outstanding') conditions.push('si.outstanding_balance_usd > 0')
+  else if (status === 'paid') conditions.push('si.outstanding_balance_usd <= 0')
+  const from = String(query.from || '').slice(0, 10)
+  const to = String(query.to || '').slice(0, 10)
+  if (from) { conditions.push("date(si.invoice_date, '+7 hours') >= @from"); params.from = from }
+  if (to) { conditions.push("date(si.invoice_date, '+7 hours') <= @to"); params.to = to }
+  const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : ''
+
+  type ApRow = {
+    id: number; source_branch: string; legacy_id: number; supplier_id: number | null
+    supplier_name: string; invoice_no: string | null; invoice_date: string; due_date: string | null
+    term_days: number; taxable_amount_usd: number; vat_amount_usd: number
+    total_amount_usd: number; amount_paid_usd: number; outstanding_balance_usd: number; status: string
+  }
+  type ApTotals = {
+    invoices: number; total_usd: number; paid_usd: number
+    outstanding_usd: number; outstanding_count: number
+  }
+  const [invoices, totals, suppliers] = await Promise.all([
+    db.prepare(`
+      SELECT si.id, si.source_branch, si.legacy_id, si.supplier_id, si.supplier_name,
+             si.invoice_no, si.invoice_date, si.due_date, si.term_days,
+             si.taxable_amount_usd, si.vat_amount_usd, si.total_amount_usd,
+             si.amount_paid_usd, si.outstanding_balance_usd, si.status
+      FROM supplier_invoices si
+      ${where}
+      ORDER BY si.invoice_date DESC, si.id DESC
+      LIMIT @limit OFFSET @offset
+    `).all<ApRow>({ ...params, limit: pageSize, offset: (page - 1) * pageSize }),
+    db.prepare(`
+      SELECT COUNT(*) AS invoices,
+             COALESCE(SUM(si.total_amount_usd), 0) AS total_usd,
+             COALESCE(SUM(si.amount_paid_usd), 0) AS paid_usd,
+             COALESCE(SUM(si.outstanding_balance_usd), 0) AS outstanding_usd,
+             SUM(CASE WHEN si.outstanding_balance_usd > 0 THEN 1 ELSE 0 END) AS outstanding_count
+      FROM supplier_invoices si ${where}
+    `).get<ApTotals>(params),
+    db.prepare(`
+      SELECT lower(trim(supplier_name)) AS key, MAX(trim(supplier_name)) AS name, COUNT(*) AS invoice_count
+      FROM supplier_invoices
+      GROUP BY lower(trim(supplier_name))
+      ORDER BY name COLLATE NOCASE ASC
+      LIMIT 300
+    `).all<{ key: string; name: string; invoice_count: number }>(),
+  ])
+
+  const round2 = (value: unknown): number => Math.round((Number(value) || 0) * 100) / 100
+  return c.json({
+    invoices: invoices.map((row) => ({
+      ...row,
+      taxable_amount_usd: round2(row.taxable_amount_usd),
+      vat_amount_usd: round2(row.vat_amount_usd),
+      total_amount_usd: round2(row.total_amount_usd),
+      amount_paid_usd: round2(row.amount_paid_usd),
+      outstanding_balance_usd: round2(row.outstanding_balance_usd),
+    })),
+    totals: {
+      invoices: Number(totals?.invoices) || 0,
+      total_usd: round2(totals?.total_usd),
+      paid_usd: round2(totals?.paid_usd),
+      outstanding_usd: round2(totals?.outstanding_usd),
+      outstanding_count: Number(totals?.outstanding_count) || 0,
+    },
+    page,
+    page_size: pageSize,
+    total_invoices: Number(totals?.invoices) || 0,
+    meta: { suppliers },
+  })
+})
+
 // Administrator-only manual point awards. A ledger event is created instead
 // of mutating a balance column, preserving the same calculable/auditable
 // model used for sales, returns, and approved share rewards.

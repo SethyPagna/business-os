@@ -549,6 +549,106 @@ app.delete('/system/audit-logs/retention', requireAuth, async (c) => {
   await audit(c.env, user?.id ?? null, user?.name ?? user?.username ?? null, 'audit_log_retention_delete', 'audit_log', null, { olderThanDays, cutoffDate: cutoff, deleted })
   return c.json({ ok: true, deleted })
 })
+// The legacy deleted-sale audit ledger (migration 0088): every line the old
+// system's cashiers deleted from a cart or bill, preserved verbatim as
+// evidence -- these rows never touched sales or stock. Read-only, gated by
+// audit_log like the audit trail it sits beside on Review & Logs. Timestamps
+// are stored UTC; date filters compare the Bangkok calendar day (+7h).
+app.get('/system/legacy-deleted-sales', requireAuth, async (c) => {
+  const denied = denyUnless(c, 'audit_log')
+  if (denied) return denied
+  const query = c.req.query()
+  const page = Math.max(1, Number.parseInt(query.page || '1', 10) || 1)
+  const pageSize = Math.min(200, Math.max(1, Number.parseInt(query.page_size || '50', 10) || 50))
+
+  const conditions: string[] = []
+  const params: Record<string, unknown> = {}
+  const cashier = String(query.cashier || '').trim()
+  if (cashier && cashier !== 'all') {
+    conditions.push("lower(trim(COALESCE(d.cashier_name, d.deleted_by, ''))) = lower(trim(@cashier))")
+    params.cashier = cashier
+  }
+  const search = String(query.search || '').trim().toLowerCase()
+  if (search) {
+    conditions.push(`(
+      lower(COALESCE(d.product_name, '')) LIKE @search
+      OR lower(COALESCE(d.source_product_name, '')) LIKE @search
+      OR lower(COALESCE(d.source_code, '')) LIKE @search
+      OR lower(COALESCE(d.invoice_no, '')) LIKE @search
+      OR lower(COALESCE(d.reference_no, '')) LIKE @search
+      OR lower(COALESCE(d.deletion_reason, '')) LIKE @search
+      OR lower(COALESCE(d.bill_delete_reason, '')) LIKE @search
+    )`)
+    params.search = `%${search}%`
+  }
+  // A date bound requires a recorded deletion time (a range filter that
+  // quietly matched undated rows would misreport; they stay reachable with
+  // no date filter set).
+  const from = String(query.from || '').slice(0, 10)
+  const to = String(query.to || '').slice(0, 10)
+  if (from) { conditions.push("d.deleted_at IS NOT NULL AND date(d.deleted_at, '+7 hours') >= @from"); params.from = from }
+  if (to) { conditions.push("d.deleted_at IS NOT NULL AND date(d.deleted_at, '+7 hours') <= @to"); params.to = to }
+  const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : ''
+
+  try {
+    const db = getDb(c.env)
+    type DeletedRow = {
+      id: number; event_key: string; event_started_at: string | null; event_ended_at: string | null
+      invoice_no: string | null; reference_no: string | null; cashier_name: string | null
+      bill_delete_reason: string | null; deleted_at: string | null; deleted_by: string | null
+      deletion_reason: string | null; product_id: number | null; source_product_name: string
+      product_name: string | null; source_code: string | null; quantity: number
+      unit_price_usd: number; discount_raw: string | null; total_usd: number
+    }
+    type DeletedTotals = { events: number; lines: number; units: number; value_usd: number }
+    const [rows, totals, cashiers] = await Promise.all([
+      db.prepare(`
+        SELECT d.id, d.event_key, d.event_started_at, d.event_ended_at, d.invoice_no, d.reference_no,
+               d.cashier_name, d.bill_delete_reason, d.deleted_at, d.deleted_by, d.deletion_reason,
+               d.product_id, d.source_product_name, d.product_name, d.source_code,
+               d.quantity, d.unit_price_usd, d.discount_raw, d.total_usd
+        FROM legacy_deleted_sale_items d
+        ${where}
+        ORDER BY d.deleted_at DESC, d.id DESC
+        LIMIT @limit OFFSET @offset
+      `).all<DeletedRow>({ ...params, limit: pageSize, offset: (page - 1) * pageSize }),
+      db.prepare(`
+        SELECT COUNT(DISTINCT d.event_key) AS events, COUNT(*) AS lines,
+               COALESCE(SUM(d.quantity), 0) AS units, COALESCE(SUM(d.total_usd), 0) AS value_usd
+        FROM legacy_deleted_sale_items d ${where}
+      `).get<DeletedTotals>(params),
+      db.prepare(`
+        SELECT lower(trim(COALESCE(cashier_name, deleted_by, ''))) AS key,
+               MAX(trim(COALESCE(cashier_name, deleted_by, ''))) AS name, COUNT(*) AS line_count
+        FROM legacy_deleted_sale_items
+        WHERE trim(COALESCE(cashier_name, deleted_by, '')) <> ''
+        GROUP BY lower(trim(COALESCE(cashier_name, deleted_by, '')))
+        ORDER BY name COLLATE NOCASE ASC
+        LIMIT 100
+      `).all<{ key: string; name: string; line_count: number }>(),
+    ])
+    const round2 = (value: unknown): number => Math.round((Number(value) || 0) * 100) / 100
+    return c.json({
+      items: rows || [],
+      totals: {
+        events: Number(totals?.events) || 0,
+        lines: Number(totals?.lines) || 0,
+        units: Math.round((Number(totals?.units) || 0) * 1000) / 1000,
+        value_usd: round2(totals?.value_usd),
+      },
+      page,
+      page_size: pageSize,
+      total_lines: Number(totals?.lines) || 0,
+      meta: { cashiers },
+    })
+  } catch (error) {
+    // Same fail-loud rule as /system/audit-logs above: a db error must not
+    // render as an empty ledger.
+    const message = error instanceof Error ? error.message : 'Failed to load the deleted-sale ledger'
+    return c.json({ error: message }, 500)
+  }
+})
+
 app.get('/system/integration-doctor', requireAuth, async (c) => {
   const denied = denyUnless(c, 'backup', 'settings')
   if (denied) return denied
