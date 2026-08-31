@@ -15941,3 +15941,81 @@ mutations). Live checks: /health ok, storefront 200, /api/products unauth
 branch_availability, ZERO stock_quantity / thresholds / branch_stock.
 origin/main pushed 9c51adf2..06ceac74. Worktree removed. NOT in this deploy:
 06ceac74 (Part 550 POS banner self-heal, landed mid-sequence) - rides next.
+
+## Part 551 (Aug 31 2026, session business-os-v1-1e) — M-audit: independent reconciliation of the Aug-30 legacy-report migration
+
+**Ask** — user re-supplied the nine Aug 27–30 legacy reports (now in
+`Downloads/27th-30th/`), stated the migration (commit `2708188a`) is complete
+and must not be re-imported, and left the verification checklist standing:
+inventory every workbook, map to app tables, reconcile expected vs actual,
+document imported / skipped / reference-only rows.
+
+**Method (all expected values recomputed from source, never trusted)** — every
+workbook re-parsed fresh (sheets, headers, aggregates); per-receipt signatures
+for ALL history rebuilt from `report-invoice-detail.xls` (56MB, 40,341 rows) +
+the period detail, receipt identifiers resolved via the Aug-28 pack CSVs; then
+compared row-for-row against remote production (read-only battery + a
+14,939-receipt dump + a 79-line dump).
+
+**Expected vs actual — everything matches**
+- Sales: 14,939 = 14,939 distinct receipts (0 dups); 0 `RCP-`; per-year
+  3,329/7,244/4,366 (Bangkok dates). All 14,939 per-receipt signatures
+  (line count, units, revenue) equal source; 0 date mismatches (40
+  supplemental exact to the second — 4376@2026-08-30 = 18:10 Bangkok).
+- The 6 absent receipts are exactly the documented junk: 206/207/208/209
+  @2024-07-30 (1-line $0 test receipts) + 2338@2024-11-18 ($44) +
+  2356@2024-11-19 ($176) — 10 lines, 10 units, $220 total. 36,027 imported
+  lines = 36,037 source-backed corrections − those 10.
+- All 79 supplemental sale lines equal source on qty/price/base/discount/
+  cost, branch 2, 57 new lines batch-linked; headers (cashier Aza, payment,
+  delivery fees, credit/commission notes) equal source.
+- Stock: products = branch = active-lot = **23,115**; 0 product×branch or
+  branch×lot mismatches, 0 negatives, 0 FK violations; Charlotte Hollywood
+  2.5 Fair id 900 = Warehouse 0 / Shop 2 with exactly one −1 sale (4359) and
+  one ±3 transfer pair; Dior stock-ins exist once (Step-4 history) — the
+  stock-in report added nothing, as designed.
+- Transfers 12 groups / 20 rows / 117 units; effects 97 rows, net −59.
+- AP: 1,591 invoices, 1,311,701.4626 total / 1,311,212.4626 paid / 489.00
+  outstanding on exactly source rows 28, 244 (ចែ USA), 325 (Dane japan),
+  526 (naomi) — all supplier-linked, warehouse outstanding 0.
+- Deleted-items ledger: 618 events / 2,234 lines / 4,630 units /
+  $10,156,840.41 incl. the preserved 9,999,999 audit row; range runs to
+  Aug 31 08:54 Bangkok (file exported 09:00 that morning — old system's
+  final two deletions are in the ledger, correctly).
+- Fees: 8 new rows KHR 195,500 match per-row (label/date/notes/Bangkok→UTC
+  times); the 3 Aug-27 rows (60,500) exist once, un-duplicated.
+- Summary reports reconcile as summaries: 96 units = 82 product + 14
+  delivery; 3,410.60 = 3,355 + 55.60 = ABA 1,036.50 + Credit 2,374.10 =
+  Walk-In 388 + driver 1 3,022.60. Old stock report's ending 23,156 differs
+  from production 23,115 by its own period arithmetic (begin drift +61 vs
+  template, −23 pre-cutoff sales, +3 transfer-in double-count) — never
+  imported, correctly.
+- Zero organic post-migration activity existed during the audit, so the
+  measured totals are pure migration state.
+
+**Findings fixed (importer `aa66334b` + two 1-row production corrections)**
+1. Importer paths broke once the reports were archived into `27th-30th/` —
+   now falls back there (folder also holds a copy of the 56MB all-time
+   report, so it is a self-contained rerun archive).
+2. Phone links were leading-zero-sensitive: reports print `70856070`,
+   contacts store `070856070`. Fixed (zero-stripped, unambiguous-only), and
+   sale 16725 (4362@2026-08-29 "Srey Pich") linked to customer 23331
+   "Srey Pich (Page)" — was NULL, per the phone-first matching rule.
+3. Walk-in 4361@2026-08-29 was linked to driver 1 (importer hardcoded the
+   link; `contacts.ts:434` counts deliveries WITHOUT an is_delivery filter,
+   so it inflated driver 1). Importer now links only delivery receipts;
+   sale 16724's contact link nulled (was id 3 / "driver 1").
+   Read-only importer re-run after the fixes: every gate passes,
+   saleDateCorrections 0 — fully idempotent against production.
+
+**Flagged, deliberately untouched** — 4353 "Sakura" and 4370 "Yaa" are
+name-links whose source phones differ from the linked contact's phone
+(4370's source phone actually belongs to contact "Roth Na") — ambiguous in
+the old system itself; user to adjudicate. 8 supplemental customers
+(Asa Icool, soy chiva, EEvee Dee, MK Cambodia, Samphors San, Srey mab,
+oun phil rigo, Chan Nathy) have no contact record — name+phone preserved as
+receipt text; creating them (Step-3c style) is optional.
+
+**Not done** — no UI click-through this session (DB-level + engine-level
+verification only; the prior session verified UI); supplier-AP and
+deleted-sale ledgers still have no dedicated screens (M6).
