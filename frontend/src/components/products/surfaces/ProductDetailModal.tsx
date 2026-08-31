@@ -187,6 +187,30 @@ export default function ProductDetailModal({
     </div>
   )
 
+  // Click-to-view row, same pattern as Inventory's own ProductDetailModal
+  // "View stock history" row -- a summary count plus a chevron that opens the
+  // full live-fetched, per-branch batch editor (ManageBatchesModal), rather
+  // than rendering every batch inline in this already-dense pane. Extracted to
+  // one element so it can render in TWO responsive slots (Part 563 ask): the
+  // left mini-section on wide screens ("first half"), and -- on phones, where
+  // the two mini-sections stack -- below the Status row and above the report
+  // pills instead. Only one slot is ever visible (the other is display:none),
+  // so both call the same onManageBatches with no conflict.
+  const batchesButton = batchCount ? (
+    <button
+      type="button"
+      onClick={onManageBatches}
+      disabled={!onManageBatches}
+      className="flex w-full items-center justify-between gap-2 rounded-lg bg-amber-50/70 px-2.5 py-1.5 text-left text-xs text-amber-700 transition-colors hover:bg-amber-50 disabled:cursor-default disabled:opacity-100 dark:bg-amber-950/20 dark:text-amber-200 dark:hover:bg-amber-950/30"
+    >
+      <span className="flex items-center gap-1.5">
+        <Layers className="h-3.5 w-3.5" />
+        {T('batches', 'Batches')} <span className="text-amber-500/80 dark:text-amber-300/70">({batchCount})</span>
+      </span>
+      {onManageBatches ? <ChevronRight className="h-3.5 w-3.5 flex-shrink-0" /> : null}
+    </button>
+  ) : null
+
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-0 sm:items-center sm:p-4" onClick={onClose}>
       <div className="flex max-h-modal-88 w-full flex-col rounded-t-2xl bg-white shadow-2xl sm:max-w-5xl sm:rounded-2xl dark:bg-gray-800 pb-[env(safe-area-inset-bottom)] sm:pb-0" onClick={(event) => event.stopPropagation()}>
@@ -301,25 +325,13 @@ export default function ProductDetailModal({
                   </div>
                 ) : null}
 
-                {batchCount ? (
-                  <div className="border-t border-gray-100 pt-2 dark:border-gray-700">
-                    {/* Click-to-view row, same pattern as Inventory's own
-                        ProductDetailModal "View stock history" row -- a summary
-                        count plus a chevron that opens the full live-fetched,
-                        per-branch batch editor (ManageBatchesModal), rather than
-                        rendering every batch inline in this already-dense pane. */}
-                    <button
-                      type="button"
-                      onClick={onManageBatches}
-                      disabled={!onManageBatches}
-                      className="flex w-full items-center justify-between gap-2 rounded-lg bg-amber-50/70 px-2.5 py-1.5 text-left text-xs text-amber-700 transition-colors hover:bg-amber-50 disabled:cursor-default disabled:opacity-100 dark:bg-amber-950/20 dark:text-amber-200 dark:hover:bg-amber-950/30"
-                    >
-                      <span className="flex items-center gap-1.5">
-                        <Layers className="h-3.5 w-3.5" />
-                        {T('batches', 'Batches')} <span className="text-amber-500/80 dark:text-amber-300/70">({batchCount})</span>
-                      </span>
-                      {onManageBatches ? <ChevronRight className="h-3.5 w-3.5 flex-shrink-0" /> : null}
-                    </button>
+                {/* Wide screens only: Batches stays in the first-half (left)
+                    mini-section. On phones this slot is display:none and the
+                    button re-appears below Status (see the sm:hidden slot after
+                    the grid). */}
+                {batchesButton ? (
+                  <div className="hidden border-t border-gray-100 pt-2 dark:border-gray-700 sm:block">
+                    {batchesButton}
                   </div>
                 ) : null}
 
@@ -411,11 +423,23 @@ export default function ProductDetailModal({
               </div>
             </div>
 
-            {/* D3 (Part 422): the report sections per the user's detail-page
-                spec -- folded SectionCards. Now spans the FULL pane width
-                beneath both mini-sections rather than sitting inside the left
-                data column. Needs a real product id (a just-created optimistic
-                row without one simply doesn't render the reports yet). */}
+            {/* Phones only (Part 563 ask): the two mini-sections have stacked
+                by here, so Status has just rendered above -- drop Batches in
+                right below it and above the report pills. The wide-screen copy
+                lives in the left mini-section (sm:block there / sm:hidden here),
+                so exactly one shows. */}
+            {batchesButton ? (
+              <div className="mt-2.5 border-t border-gray-100 pt-2 dark:border-gray-700 sm:hidden">
+                {batchesButton}
+              </div>
+            ) : null}
+
+            {/* D3 (Part 422; pills Part 563): the report sections per the
+                user's detail-page spec -- now click-to-open FLOAT pills (Stock
+                Changes / Sales / Suppliers), spanning the FULL pane width
+                beneath both mini-sections. Needs a real product id (a
+                just-created optimistic row without one simply doesn't render
+                the reports yet). */}
             {Number(p.id) > 0 ? (
               <div className="mt-2.5 border-t border-gray-100 pt-2 dark:border-gray-700">
                 <Suspense fallback={<p className="py-2 text-center text-xs text-gray-400">...</p>}>
