@@ -167,6 +167,11 @@ type CatalogPreviewConfig = {
 type CatalogEditorSurfaceContext = {
   aboutBlocks: CatalogAboutBlock[]
   activeEditorSection: EditorSectionKey
+  // Part 557 slice 8: the display tab bundles portal CONFIG (customer_portal)
+  // and the POSTS editor (portal_posts); these gate the two halves so a
+  // limited role only sees the part it can save.
+  canEditConfig: boolean
+  canEditPosts: boolean
   addAboutBlock: (type: string) => void
   addAiFaqStarterSet: () => void
   addFaqItem: () => void
@@ -251,6 +256,8 @@ function CatalogEditorSurfaceContent() {
   const {
     aboutBlocks,
     activeEditorSection,
+    canEditConfig,
+    canEditPosts,
     addAboutBlock,
     addAiFaqStarterSet,
     addFaqItem,
@@ -351,8 +358,13 @@ function CatalogEditorSurfaceContent() {
         <div className="space-y-5 dark:[&_.border-slate-200]:border-slate-700 dark:[&_.border-slate-300]:border-slate-700 dark:[&_.bg-white]:bg-slate-950/80 dark:[&_.bg-slate-50]:bg-slate-900/60 dark:[&_.bg-slate-100]:bg-slate-800 dark:[&_.text-slate-900]:text-slate-100 dark:[&_.text-slate-700]:text-slate-200 dark:[&_.text-slate-600]:text-slate-300 dark:[&_.text-slate-500]:text-slate-400 dark:[&_.text-slate-400]:text-slate-500 dark:[&_.input]:border-slate-700 dark:[&_.input]:bg-slate-950 dark:[&_.input]:text-slate-100 dark:[&_.input]:placeholder:text-slate-500 dark:[&_video]:bg-slate-950">
           <div id="portal-section-display" className={`rounded-2xl border border-slate-200 bg-slate-50 p-4 ${activeEditorSection === 'display' ? '' : 'hidden'}`}>
             <div className="mb-2 text-sm font-semibold text-slate-900">{copy('display', 'Display settings')}</div>
-            <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">{copy('displayVisibilityGroup', 'Catalog & page visibility')}</div>
+            {canEditConfig ? (
+              <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">{copy('displayVisibilityGroup', 'Catalog & page visibility')}</div>
+            ) : null}
             <div className="grid gap-3">
+              {/* Catalog/display config toggles (customer_portal). display:contents keeps them
+                  as direct grid items when shown; hidden removes them for a posts-only role. */}
+              <div className={canEditConfig ? 'contents' : 'hidden'}>
               <label className="flex items-center justify-between rounded-2xl border border-slate-200 bg-white px-4 py-3">
                 <span className="text-sm font-medium text-slate-700">{copy('showCatalog', 'Show product catalog')}</span>
                 <input id="portal-show-catalog" name="customer_portal_show_catalog" type="checkbox" checked={!!editorDraft.customer_portal_show_catalog} onChange={(event) => setDraft('customer_portal_show_catalog', event.target.checked)} />
@@ -583,7 +595,9 @@ function CatalogEditorSurfaceContent() {
                   </div>
                 )}
               </div>
-
+              </div>
+              {/* Promotions and posts editor (portal_posts) */}
+              {canEditPosts ? (
               <div className="mt-5 rounded-2xl border border-slate-200 bg-white p-4">
                 <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
                   <div>
@@ -768,8 +782,11 @@ function CatalogEditorSurfaceContent() {
                   )}
                 </div>
               </div>
+              ) : null}
             </div>
-            <p className="mt-2 text-xs text-slate-500">{copy('syncSpeedHint', 'Lower values refresh faster but create more requests. Internal preview still reacts to sync events immediately.')}</p>
+            {canEditConfig ? (
+              <p className="mt-2 text-xs text-slate-500">{copy('syncSpeedHint', 'Lower values refresh faster but create more requests. Internal preview still reacts to sync events immediately.')}</p>
+            ) : null}
           </div>
 
           <div id="portal-section-about" className={`rounded-2xl border border-slate-200 bg-slate-50 p-4 ${activeEditorSection === 'about' ? '' : 'hidden'}`}>

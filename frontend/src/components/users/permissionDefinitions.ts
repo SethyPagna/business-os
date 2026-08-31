@@ -148,9 +148,19 @@ export const PERMISSION_SECTIONS: PermissionSection[] = [
     key: 'customer_portal',
     tKey: 'perm_section_customer_portal',
     label: 'Customer Portal',
-    description: 'Covers both the public Customer Portal page and the Loyalty Points page.',
+    description: 'The storefront editor, broken into per-area grants (Part 557) so a role can be given exactly the content it should manage. Reading the public portal needs no grant; each grant below opens the Customer Portal page and unlocks only its own area. Holding full Settings is a superset of all four.',
     permissions: [
-      { key: 'customer_portal', tKey: 'perm_customer_portal', label: 'Customer Portal', sensitivity: 'normal' },
+      // Per-area write grants -- mirror cloudflare/src/routes/settings.ts's
+      // PORTAL_*_KEYS buckets. Each is plain Full/None (no tier): the editor
+      // section + its save self-gate on the matching key, and the backend
+      // POST /settings rejects any customer_portal_* key the caller lacks.
+      { key: 'portal_posts', tKey: 'perm_portal_posts', label: 'Manage posts & promos', sensitivity: 'normal' },
+      { key: 'portal_faq', tKey: 'perm_portal_faq', label: 'Manage FAQ', sensitivity: 'normal' },
+      { key: 'portal_about', tKey: 'perm_portal_about', label: 'Manage About section', sensitivity: 'normal' },
+      // The catch-all "portal config": branding, media, theme, catalog display,
+      // social links, AI assistant, maps, translations, publishing, loyalty,
+      // and submission moderation.
+      { key: 'customer_portal', tKey: 'perm_customer_portal', label: 'Manage portal config', sensitivity: 'normal' },
     ],
   },
   {

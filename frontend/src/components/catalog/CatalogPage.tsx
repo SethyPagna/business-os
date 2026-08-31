@@ -4,6 +4,7 @@ import { lazyRetry } from '../../utils/lazyImport.ts'
 import { fuzzyTextMatches, matchesSearchTermGroups } from '../../utils/searchMatch.ts'
 import { fmtTime } from '../../utils/formatters.ts'
 import { deriveTelegramLink } from '../../utils/socialLinks.ts'
+import { canWriteSettingKey } from '../../utils/portalPermissions.ts'
 import Bot from 'lucide-react/dist/esm/icons/bot.js'
 import ExternalLink from 'lucide-react/dist/esm/icons/external-link.js'
 import Facebook from 'lucide-react/dist/esm/icons/facebook.js'
@@ -1380,7 +1381,17 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
   const mediaUploadOriginalValuesRef = useRef(new Map<string, string>())
   const aliveRef = useRef(true)
 
-  const canEdit = !publicView && hasPermission('settings')
+  // Part 557 slice 8: the storefront editor is broken into per-area write
+  // grants. A grant is satisfied by the specific key OR the broad `settings`
+  // grant (admin folds into hasPermission upstream), mirroring the backend.
+  const canWritePortalArea = (permission: string) => !publicView && (hasPermission(permission) || hasPermission('settings'))
+  const canEditConfig = canWritePortalArea('customer_portal')
+  const canEditPosts = canWritePortalArea('portal_posts')
+  const canEditFaq = canWritePortalArea('portal_faq')
+  const canEditAbout = canWritePortalArea('portal_about')
+  // The editor renders if the user can manage ANY portal area; each section +
+  // the save below then self-gate on the specific area.
+  const canEdit = canEditConfig || canEditPosts || canEditFaq || canEditAbout
   const previewConfig = useMemo(
     () => (canEdit ? applyDraft(config, editorDraft) : config),
     [canEdit, config, editorDraft]
@@ -2691,7 +2702,12 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
       // save touches was ACTUALLY changed by someone else before silently
       // resubmitting -- see settingsTransport.ts's saveSettingsOnce.
       const baselineSettings = buildDraft(config)
-      const result = await saveSettings({
+      // Per-area enforcement (Part 557 slice 8): only send keys THIS user may
+      // write. A posts-only editor cannot persist FAQ/About/config even though
+      // the draft object below is built whole; the backend independently
+      // rejects any unauthorized key, and this keeps a limited save from
+      // 403ing on an unrelated field it never touched.
+      const fullSavePayload: Record<string, unknown> = {
         business_name: editorDraft.business_name || '',
         business_phone: editorDraft.business_phone || '',
         business_email: editorDraft.business_email || '',
@@ -2781,7 +2797,11 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
         customer_portal_submission_enabled: editorDraft.customer_portal_submission_enabled ? 'true' : 'false',
         customer_portal_submission_reward_points: String(Math.max(0, Math.floor(toNumber(editorDraft.customer_portal_submission_reward_points, previewConfig.submissionRewardPoints || 5)))),
         customer_portal_submission_instructions: editorDraft.customer_portal_submission_instructions || '',
-      }, { baselineSettings }) as LegacyCatalogRecord
+      }
+      const savePayload = Object.fromEntries(
+        Object.entries(fullSavePayload).filter(([key]) => canWriteSettingKey(key, hasPermission)),
+      )
+      const result = await saveSettings(savePayload, { baselineSettings }) as LegacyCatalogRecord
       if (result?.conflict) {
         notify(copy('portalSettingsConflict', 'Portal settings changed on another device. Review the latest values in Settings, then retry your save.'), 'error')
         return
@@ -3303,19 +3323,32 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
   }
 
   const editorPanel = canEdit ? (() => {
+    // Per-area tab gating (Part 557 slice 8): a section tab shows only if the
+    // user can manage that area. The display tab carries the config toggles
+    // (customer_portal) AND the posts editor (portal_posts), so it shows for
+    // either; CatalogEditorSurface then hides the half the user can't edit.
     const editorSections: EditorSection[] = [
-      ['portal-section-branding', 'branding', copy('businessInfo', 'Business details')],
-      ['portal-section-media', 'media', copy('mediaSection', 'Media')],
-      ['portal-section-display', 'display', copy('display', 'Display settings')],
-      ['portal-section-about', 'about', copy('about', 'About')],
-      ['portal-section-faq', 'faq', copy('faqSection', 'FAQ editor')],
-      ['portal-section-assistant', 'assistant', copy('portalAssistant', 'AI assistant')],
-      ['portal-section-publish', 'publish', copy('portalPublishing', 'Publishing')],
-      ['portal-section-submissions', 'submissions', copy('portalSubmissionSettings', 'Submission settings')],
+      ...(canEditConfig ? [['portal-section-branding', 'branding', copy('businessInfo', 'Business details')] as EditorSection] : []),
+      ...(canEditConfig ? [['portal-section-media', 'media', copy('mediaSection', 'Media')] as EditorSection] : []),
+      ...((canEditConfig || canEditPosts) ? [['portal-section-display', 'display', copy('display', 'Display settings')] as EditorSection] : []),
+      ...(canEditAbout ? [['portal-section-about', 'about', copy('about', 'About')] as EditorSection] : []),
+      ...(canEditFaq ? [['portal-section-faq', 'faq', copy('faqSection', 'FAQ editor')] as EditorSection] : []),
+      ...(canEditConfig ? [['portal-section-assistant', 'assistant', copy('portalAssistant', 'AI assistant')] as EditorSection] : []),
+      ...(canEditConfig ? [['portal-section-publish', 'publish', copy('portalPublishing', 'Publishing')] as EditorSection] : []),
+      ...(canEditConfig ? [['portal-section-submissions', 'submissions', copy('portalSubmissionSettings', 'Submission settings')] as EditorSection] : []),
     ]
+    // A limited role's default tab must be one it can actually see -- otherwise
+    // it would land on (say) the branding section content with no tab and no
+    // way to save it. Fall back to the first available section.
+    const availableSectionIds = editorSections.map((section) => section[1])
+    const effectiveEditorSection = availableSectionIds.includes(activeEditorSection)
+      ? activeEditorSection
+      : (availableSectionIds[0] || 'branding')
     const editorContextValue = {
       aboutBlocks,
-      activeEditorSection,
+      activeEditorSection: effectiveEditorSection,
+      canEditConfig,
+      canEditPosts,
       addAboutBlock,
       addAiFaqStarterSet,
       addFaqItem,

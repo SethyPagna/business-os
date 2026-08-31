@@ -1318,7 +1318,17 @@ app.post('/submissions', async (c) => {
   return c.json({ success: true, id: result.lastInsertRowid })
 })
 
+// Submission moderation is "portal config" (Part 557 slice 8): the reviewer
+// queue + approve/reject belong to the storefront-config grant. Reading the
+// queue previously checked only requireAuth (any logged-in user could read the
+// moderation queue -- a gap); it now requires the same grant as acting on it.
+// `settings` (or admin) stays a superset so existing admins are unaffected.
+function canManagePortalSubmissions(user: SessionUser): boolean {
+  return hasPermission(user, 'customer_portal') || hasPermission(user, 'settings')
+}
+
 app.get('/submissions/review', requireAuth, async (c) => {
+  if (!canManagePortalSubmissions(c.get('user'))) return c.json({ error: 'Forbidden' }, 403)
   const rows = await getDb(c.env).prepare(`
     SELECT id, customer_id, membership_number, customer_name, platform, note, screenshots_json,
            status, reward_points, review_note, reviewed_by_id, reviewed_by_name, reviewed_at, created_at
@@ -1332,7 +1342,7 @@ app.get('/submissions/review', requireAuth, async (c) => {
 
 app.patch('/submissions/:id/review', requireAuth, async (c) => {
   const user = c.get('user')
-  if (!hasPermission(user, 'settings')) return c.json({ error: 'Forbidden' }, 403)
+  if (!canManagePortalSubmissions(user)) return c.json({ error: 'Forbidden' }, 403)
 
   const id = c.req.param('id')
   const body = await c.req.json<Record<string, unknown>>().catch(() => ({} as Record<string, unknown>))

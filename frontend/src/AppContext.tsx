@@ -2024,6 +2024,11 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
     // 'review'-tier user out of the page entirely, same class of bug the
     // backend's own permissions.ts comment warns callers about.
     if (getPermissionTier(required) !== 'none') return true
+    // Part 557 slice 8: the storefront editor (catalog page) is split into
+    // per-area write grants. Any of posts/FAQ/About opens the page -- the
+    // config grant is already covered by the `customer_portal` check above --
+    // and CatalogPage then self-gates each section to what the role can save.
+    if (pageId === 'catalog' && (hasPermission('portal_posts') || hasPermission('portal_faq') || hasPermission('portal_about'))) return true
     // 'products_image_only' (Part 241): a restricted role with no real
     // `products` tier of its own still needs into the Products page --
     // it just gets the lightweight image-only view once there (see

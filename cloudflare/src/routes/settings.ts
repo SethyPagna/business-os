@@ -160,10 +160,52 @@ const SALES_POLICY_KEYS = new Set([
   'pos_payment_methods',
 ])
 
+// Customer-portal content buckets (Part 557 slice 8): the storefront editor is
+// broken into per-area grants so a role (e.g. an employee) can be given exactly
+// the areas it should manage. Posts/FAQ/About each get their own key; every
+// OTHER customer_portal_* key (branding, theme, catalog display, social, AI,
+// maps, translations, publish, loyalty, submissions) falls under the catch-all
+// `customer_portal` "portal config" grant. Like the buckets above, holding the
+// broad `settings` grant (or admin) satisfies any of these, so no existing
+// Settings admin regresses.
+const PORTAL_POSTS_KEYS = new Set([
+  'customer_portal_promo_items',
+  'customer_portal_promotions_title',
+  'customer_portal_promotions_intro',
+  'customer_portal_show_promotions',
+])
+const PORTAL_FAQ_KEYS = new Set([
+  'customer_portal_faq_items',
+  'customer_portal_faq_title',
+  'customer_portal_show_faq',
+])
+const PORTAL_ABOUT_KEYS = new Set([
+  'customer_portal_about_title',
+  'customer_portal_about_content',
+  'customer_portal_about_blocks',
+  'customer_portal_show_about',
+])
+
 function settingsBucketPermissionFor(key: string): string | null {
   if (BUSINESS_IDENTITY_KEYS.has(key)) return 'business_identity'
   if (SALES_POLICY_KEYS.has(key)) return 'sales_policy'
+  if (PORTAL_POSTS_KEYS.has(key)) return 'portal_posts'
+  if (PORTAL_FAQ_KEYS.has(key)) return 'portal_faq'
+  if (PORTAL_ABOUT_KEYS.has(key)) return 'portal_about'
+  // Every remaining storefront-editor key is "portal config".
+  if (key.startsWith('customer_portal_')) return 'customer_portal'
   return null
+}
+
+// Human labels for the bucket error message, so a rejected save names the exact
+// grant the caller is missing rather than a bare permission key.
+const SETTINGS_BUCKET_LABELS: Record<string, string> = {
+  business_identity: 'Business identity',
+  sales_policy: 'Sales policy',
+  portal_posts: 'Manage portal posts',
+  portal_faq: 'Manage portal FAQ',
+  portal_about: 'Manage portal About',
+  customer_portal: 'Manage portal config',
 }
 
 app.post('/', async (c) => {
@@ -193,7 +235,7 @@ app.post('/', async (c) => {
     const bucket = settingsBucketPermissionFor(missingBucket)
     return c.json({
       error: bucket
-        ? `You do not have permission to change "${missingBucket}" (requires ${bucket === 'business_identity' ? 'Business identity' : 'Sales policy'} access or full Settings access).`
+        ? `You do not have permission to change "${missingBucket}" (requires ${SETTINGS_BUCKET_LABELS[bucket] || bucket} access or full Settings access).`
         : 'You do not have permission to perform this action',
     }, 403)
   }
