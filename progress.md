@@ -94,6 +94,21 @@ Two rules learned the hard way, both from real incidents in this file's own hist
 
 ## Current status
 
+**→ DATE/TIME UX UNIFICATION LANE (Sep 1, this session — CLAIMED, in progress).**
+User ask (verbatim intent): default the Start/End range to the PRESENT DAY on all
+pages (dashboard, products, sales, branch, …); REMOVE the preset chips; the Expenses
+(Fees) section is missing an Export button+functions — add it; the Sales report's
+time control should apply to EVERY start/end date picker, in 24-hour format (not 12h
+AM/PM), with ONE combined date+time icon (no redundant time icon); and fix data
+wiring — "it shows wrong and incomplete data." This lane OWNS/continues the stalled
+DateTimeRangePicker lane's shared files and centralizes the change:
+`components/shared/StatsRangeRow.tsx` (drop presets, enable time) +
+`DateTimeRangePicker.tsx` (already 24h) + `statsStripPresets.ts`, plus
+`fees/FeesPage.tsx` (export) and per-page default-today / data-wiring fixes. Dashboard
+(`dashboard/Dashboard.tsx`) has its OWN preset/rangeId model and is co-held by
+session-59's analytics-i18n lane — coordinate before editing it. Path-scoped commits
+only; lang packs name their ride-alongs.
+
 **✅ DEPLOYED & VERIFIED LIVE — security batch + branch-transfer C1 (Part 577, Aug 31 ~17:15 UTC).**
 Production = commit `d558dcfb`, Worker Version `30e8a9b3-ee79-4c57-b732-cd63c2dc2cd6`. Shipped the
 3 security fixes (H1 products `/rename-brand` Full `manage_lookups` gate, H2 offline chunked-upload
