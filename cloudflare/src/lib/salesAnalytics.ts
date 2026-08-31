@@ -20,16 +20,20 @@
 //                                 a real cost, not collected from anyone)
 //   sale_items.cost_price_usd * quantity = COGS for that line
 //
-// Definitions used everywhere below:
-//   gross_sales_usd   = SUM(subtotal_usd)                     -- pre-discount
+// Definitions used everywhere below (canonical revenue = NET SALES, user
+// directive Sep 1 2026 -- see the "Canonical revenue" block further down):
+//   gross_sales_usd   = SUM(subtotal_usd)                     -- pre-discount, all sales
 //   discount_usd      = store_discount_usd + membership_discount_usd
-//   revenue_usd        = gross_sales_usd - discount_usd         -- "Net revenue"
-//                         (matches how Inventory/Products define revenue:
-//                         item price net of discounts, excluding tax/delivery)
-//   collected_total_usd = revenue_usd + tax_usd + delivery_usd  -- what actually
-//                         changed hands with the customer (delivery_usd here
-//                         is customer-paid delivery only)
-//   cost_usd           = SUM(sale_items.cost_price_usd * quantity)
+//   revenue_usd        = SUM over RECOGNIZED sales (neither cancelled nor
+//                         awaiting_payment) of (subtotal - store discount -
+//                         membership discount), minus customer refunds --
+//                         "Net sales", excluding tax and delivery
+//   pending_revenue_usd = the same net basis for awaiting_payment (unpaid
+//                         credit) sales -- NOT revenue until paid
+//   collected_total_usd = revenue_usd + tax_usd + delivery_usd  -- secondary
+//                         "total collected": what actually changed hands with
+//                         the customer (delivery_usd = customer-paid only)
+//   cost_usd           = SUM(sale_items.cost_price_usd * quantity) over recognized sales
 //   profit_usd         = revenue_usd - cost_usd - store_delivery_usd
 //                         (store-absorbed delivery is a real cost, so it comes
 //                         out of profit even though it never touched revenue)
@@ -87,7 +91,16 @@ export interface SalesTotals {
   delivery_actual_cost_count: number
   delivery_sale_count: number
   delivery_margin_usd: number
+  // Canonical revenue = NET SALES (user directive Sep 1 2026): subtotal net of
+  // both discounts, minus customer refunds, over RECOGNIZED sales only (neither
+  // cancelled nor awaiting_payment). Tax and delivery fees are NOT revenue.
+  refund_usd: number
   revenue_usd: number
+  // Unpaid credit (awaiting_payment) is NOT revenue -- it is surfaced here as a
+  // separate figure on the same net basis, and only becomes revenue once paid.
+  pending_revenue_usd: number
+  // Secondary "total collected" figure (Option 3): recognized revenue plus the
+  // tax and customer-paid delivery fee actually taken in. Never the headline.
   collected_total_usd: number
   cost_usd: number
   profit_usd: number
@@ -112,7 +125,7 @@ export function emptySalesTotals(): SalesTotals {
     tx_count: 0, gross_sales_usd: 0, store_discount_usd: 0, membership_discount_usd: 0,
     discount_usd: 0, tax_usd: 0, delivery_usd: 0, store_delivery_usd: 0,
     delivery_actual_cost_usd: 0, delivery_actual_cost_count: 0, delivery_sale_count: 0, delivery_margin_usd: 0,
-    revenue_usd: 0, collected_total_usd: 0, cost_usd: 0, profit_usd: 0, avg_order_usd: 0,
+    refund_usd: 0, revenue_usd: 0, pending_revenue_usd: 0, collected_total_usd: 0, cost_usd: 0, profit_usd: 0, avg_order_usd: 0,
   }
 }
 
@@ -124,6 +137,46 @@ function num(v: unknown): number {
 function round2(n: number): number {
   return Math.round(n * 100) / 100
 }
+
+// ---- Canonical revenue = NET SALES (user directive, Sep 1 2026) ------------
+// One definition, used identically by every surface below so the Sales-page
+// header and the Reports kernel can never disagree:
+//   revenue = SUM over RECOGNIZED sales of (subtotal - store discount -
+//             membership discount) - customer refunds
+// A RECOGNIZED sale is neither cancelled nor awaiting_payment. Tax and delivery
+// fees are excluded from revenue; unpaid credit (awaiting_payment) is surfaced
+// separately as pending_revenue and only becomes revenue once paid. These are
+// SQL-fragment builders (never user input) so string-building them is safe.
+// `p` is the table-alias prefix for the `sales` row, e.g. '', 's.' or 'sales.'.
+//
+// The status is normalised exactly as GET /api/sales/stats does --
+// COALESCE(NULLIF(...,''),'completed') -- so a blank status counts as completed
+// on BOTH surfaces and the two revenue numbers converge to the byte.
+function saleStatusExpr(p: string): string { return `COALESCE(NULLIF(${p}sale_status, ''), 'completed')` }
+function recognizedExpr(p: string): string { return `${saleStatusExpr(p)} NOT IN ('cancelled', 'awaiting_payment')` }
+function awaitingExpr(p: string): string { return `${saleStatusExpr(p)} = 'awaiting_payment'` }
+// Net sale value (subtotal minus both discounts) -- tax and delivery excluded.
+function netSaleExpr(p: string): string {
+  return `(COALESCE(${p}subtotal_usd, 0) - COALESCE(${p}discount_usd, 0) - COALESCE(${p}membership_discount_usd, 0))`
+}
+// The delivery fee the CUSTOMER paid (a store-absorbed fee was never collected).
+function customerDeliveryFeeExpr(p: string): string {
+  return `CASE WHEN COALESCE(${p}delivery_fee_paid_by, 'customer') = 'store' THEN 0 ELSE COALESCE(${p}delivery_fee_usd, 0) END`
+}
+// The delivery fee the SHOP absorbed (customer not charged) -- a cost, not revenue.
+function storeDeliveryExpr(p: string): string {
+  return `CASE WHEN COALESCE(${p}delivery_fee_paid_by, 'customer') = 'store' THEN COALESCE(${p}delivery_fee_usd, 0) ELSE 0 END`
+}
+// Pre-aggregated customer refunds per sale (non-cancelled customer returns), so
+// a sale carrying two returns still subtracts once. Refunds attribute to the
+// SALE's date bucket via sale_id -- identical to GET /api/sales/stats. Join it
+// as `rf` and read COALESCE(rf.refund_usd, 0).
+const CUSTOMER_REFUND_JOIN = `LEFT JOIN (
+      SELECT sale_id, SUM(total_refund_usd) AS refund_usd
+      FROM returns
+      WHERE COALESCE(status, 'completed') <> 'cancelled' AND COALESCE(return_scope, 'customer') = 'customer'
+      GROUP BY sale_id
+    ) rf ON rf.sale_id = `
 
 // Builds the shared WHERE clause + bound params for "active sales in this
 // date range (and optional branch)". `alias` lets callers use this against
@@ -197,16 +250,27 @@ async function salesLevelTotals(env: Env, f: SalesFilters) {
            COALESCE(SUM(CASE WHEN delivery_fee_paid_by = 'store' THEN delivery_fee_usd ELSE 0 END), 0) AS store_delivery_usd,
            COALESCE(SUM(delivery_actual_cost_usd), 0) AS delivery_actual_cost_usd,
            COALESCE(SUM(CASE WHEN delivery_actual_cost_usd IS NOT NULL THEN 1 ELSE 0 END), 0) AS delivery_actual_cost_count,
-           COALESCE(SUM(CASE WHEN COALESCE(is_delivery, 0) = 1 THEN 1 ELSE 0 END), 0) AS delivery_sale_count
+           COALESCE(SUM(CASE WHEN COALESCE(is_delivery, 0) = 1 THEN 1 ELSE 0 END), 0) AS delivery_sale_count,
+           -- Canonical net-sales revenue components (recognized = not cancelled/awaiting):
+           COALESCE(SUM(CASE WHEN ${recognizedExpr('')} THEN ${netSaleExpr('')} ELSE 0 END), 0) AS recognized_net_usd,
+           COALESCE(SUM(CASE WHEN ${awaitingExpr('')} THEN ${netSaleExpr('')} ELSE 0 END), 0) AS pending_revenue_usd,
+           COALESCE(SUM(CASE WHEN ${recognizedExpr('')} THEN tax_usd ELSE 0 END), 0) AS recognized_tax_usd,
+           COALESCE(SUM(CASE WHEN ${recognizedExpr('')} THEN ${customerDeliveryFeeExpr('')} ELSE 0 END), 0) AS recognized_delivery_usd,
+           COALESCE(SUM(CASE WHEN ${recognizedExpr('')} THEN ${storeDeliveryExpr('')} ELSE 0 END), 0) AS recognized_store_delivery_usd,
+           COALESCE(SUM(CASE WHEN ${recognizedExpr('')} THEN COALESCE(rf.refund_usd, 0) ELSE 0 END), 0) AS refund_usd
     FROM sales
+    ${CUSTOMER_REFUND_JOIN}sales.id
     WHERE ${whereSql}
   `).get<Record<string, number>>(params)
   return row || {}
 }
 
 // Item-level cost aggregate. Joins to sales only to apply the date/branch/
-// cancelled filter -- the summed field itself (cost_price_usd * quantity)
-// is per-item, so there's no fan-out to worry about here.
+// status filter -- the summed field itself (cost_price_usd * quantity)
+// is per-item, so there's no fan-out to worry about here. COGS is counted over
+// RECOGNIZED sales only (excludes awaiting_payment as well as cancelled), so
+// profit = recognized revenue - recognized cost stays a matched pair -- unpaid
+// credit contributes neither revenue nor cost until it is paid.
 async function salesCost(env: Env, f: SalesFilters): Promise<number> {
   const db = getDb(env)
   const { sql: whereSql, params } = whereActiveSales('s', f)
@@ -214,7 +278,7 @@ async function salesCost(env: Env, f: SalesFilters): Promise<number> {
     SELECT COALESCE(SUM(si.cost_price_usd * si.quantity), 0) AS cost_usd
     FROM sale_items si
     JOIN sales s ON s.id = si.sale_id
-    WHERE ${whereSql}
+    WHERE ${whereSql} AND ${recognizedExpr('s.')}
   `).get<{ cost_usd: number }>(params)
   return num(row?.cost_usd)
 }
@@ -229,9 +293,23 @@ export function deriveTotals(level: Record<string, number>, costUsd: number): Sa
   const deliveryUsd = num(level.delivery_usd)
   const storeDeliveryUsd = num(level.store_delivery_usd)
   const deliveryActualCostUsd = num(level.delivery_actual_cost_usd)
-  const revenueUsd = grossSalesUsd - discountUsd
-  const collectedTotalUsd = revenueUsd + taxUsd + deliveryUsd
-  const profitUsd = revenueUsd - costUsd - storeDeliveryUsd
+  // Canonical revenue = NET SALES over recognized sales, minus customer refunds
+  // (user directive Sep 1 2026). The `recognized_*` fields exclude awaiting_payment
+  // (unpaid credit) and cancelled; when a caller doesn't supply them we fall back
+  // to the old gross-minus-discount basis so no other consumer of deriveTotals
+  // silently zeroes out. gross_sales_usd / tax_usd / delivery_usd stay the full
+  // display line items and are intentionally NOT changed.
+  const hasRecognized = level.recognized_net_usd !== undefined && level.recognized_net_usd !== null
+  const recognizedNetUsd = hasRecognized ? num(level.recognized_net_usd) : grossSalesUsd - discountUsd
+  const refundUsd = num(level.refund_usd)
+  const pendingRevenueUsd = num(level.pending_revenue_usd)
+  const recognizedTaxUsd = hasRecognized ? num(level.recognized_tax_usd) : taxUsd
+  const recognizedDeliveryUsd = hasRecognized ? num(level.recognized_delivery_usd) : deliveryUsd
+  const recognizedStoreDeliveryUsd = hasRecognized ? num(level.recognized_store_delivery_usd) : storeDeliveryUsd
+  const revenueUsd = recognizedNetUsd - refundUsd
+  // "Total collected" (secondary): recognized revenue + tax + customer delivery fee.
+  const collectedTotalUsd = revenueUsd + recognizedTaxUsd + recognizedDeliveryUsd
+  const profitUsd = revenueUsd - costUsd - recognizedStoreDeliveryUsd
   return {
     tx_count: txCount,
     gross_sales_usd: round2(grossSalesUsd),
@@ -247,7 +325,9 @@ export function deriveTotals(level: Record<string, number>, costUsd: number): Sa
     // Margin over the CHARGED fees: what customers paid for delivery minus
     // what the couriers were actually paid.
     delivery_margin_usd: round2(deliveryUsd - deliveryActualCostUsd),
+    refund_usd: round2(refundUsd),
     revenue_usd: round2(revenueUsd),
+    pending_revenue_usd: round2(pendingRevenueUsd),
     collected_total_usd: round2(collectedTotalUsd),
     cost_usd: round2(costUsd),
     profit_usd: round2(profitUsd),
@@ -285,8 +365,16 @@ export async function getSalesPeriodSeries(env: Env, f: SalesFilters, granularit
              COALESCE(SUM(membership_discount_usd), 0) AS membership_discount_usd,
              COALESCE(SUM(tax_usd), 0) AS tax_usd,
              COALESCE(SUM(CASE WHEN COALESCE(delivery_fee_paid_by, 'customer') = 'store' THEN 0 ELSE delivery_fee_usd END), 0) AS delivery_usd,
-             COALESCE(SUM(CASE WHEN delivery_fee_paid_by = 'store' THEN delivery_fee_usd ELSE 0 END), 0) AS store_delivery_usd
+             COALESCE(SUM(CASE WHEN delivery_fee_paid_by = 'store' THEN delivery_fee_usd ELSE 0 END), 0) AS store_delivery_usd,
+             -- Same canonical net-sales revenue basis as the headline, so the
+             -- per-period trend sums back to getSalesTotals' revenue_usd.
+             COALESCE(SUM(CASE WHEN ${recognizedExpr('')} THEN ${netSaleExpr('')} ELSE 0 END), 0) AS recognized_net_usd,
+             COALESCE(SUM(CASE WHEN ${recognizedExpr('')} THEN tax_usd ELSE 0 END), 0) AS recognized_tax_usd,
+             COALESCE(SUM(CASE WHEN ${recognizedExpr('')} THEN ${customerDeliveryFeeExpr('')} ELSE 0 END), 0) AS recognized_delivery_usd,
+             COALESCE(SUM(CASE WHEN ${recognizedExpr('')} THEN ${storeDeliveryExpr('')} ELSE 0 END), 0) AS recognized_store_delivery_usd,
+             COALESCE(SUM(CASE WHEN ${recognizedExpr('')} THEN COALESCE(rf.refund_usd, 0) ELSE 0 END), 0) AS refund_usd
       FROM sales
+      ${CUSTOMER_REFUND_JOIN}sales.id
       WHERE ${whereLevel}
       GROUP BY ${periodExprS}
     `).all<Record<string, number> & { period: string }>(paramsLevel),
@@ -295,7 +383,7 @@ export async function getSalesPeriodSeries(env: Env, f: SalesFilters, granularit
              COALESCE(SUM(si.cost_price_usd * si.quantity), 0) AS cost_usd
       FROM sale_items si
       JOIN sales s ON s.id = si.sale_id
-      WHERE ${whereCost}
+      WHERE ${whereCost} AND ${recognizedExpr('s.')}
       GROUP BY ${periodExprJoined}
     `).all<{ period: string; cost_usd: number }>(paramsCost),
   ])
@@ -348,9 +436,11 @@ export interface DeliveryContactTotalsRow {
 }
 
 // One receipt inside a day's drill. revenue_usd is computed the SAME way the
-// kernel defines revenue (subtotal net of both discounts), so these rows sum
-// to the day's revenue_usd -- the single-source rule applied per row, so the
-// per-sale breakdown can never disagree with the day total above it.
+// kernel defines revenue -- net sale (subtotal minus both discounts) minus this
+// sale's own customer refunds, and 0 for a non-recognized (awaiting_payment /
+// cancelled) sale -- so these rows sum to the day's revenue_usd. The
+// single-source rule applied per row: the per-sale breakdown can never disagree
+// with the day total above it.
 export interface SalesDayRow {
   id: number
   receipt_number: string
@@ -547,14 +637,19 @@ export async function getSalesDayReport(
     // to deriveTotals so SUM(revenue_usd) == totals.revenue_usd. Capped: a
     // single day of one shop never approaches 1000 receipts.
     db.prepare(`
-      SELECT id, receipt_number, created_at,
+      SELECT sales.id AS id, receipt_number, created_at,
              COALESCE(NULLIF(TRIM(customer_name), ''), '') AS customer_name,
              COALESCE(NULLIF(TRIM(payment_method), ''), 'Unknown') AS payment_method,
              COALESCE(sale_status, 'completed') AS sale_status,
-             ROUND(COALESCE(subtotal_usd, 0) - COALESCE(discount_usd, 0) - COALESCE(membership_discount_usd, 0), 2) AS revenue_usd,
+             -- Canonical net-sales revenue, per sale: recognized sales only
+             -- (awaiting_payment / cancelled contribute 0), net of THIS sale's
+             -- own customer refunds -- identical basis to deriveTotals, so
+             -- SUM(revenue_usd) over the day == totals.revenue_usd.
+             ROUND(CASE WHEN ${recognizedExpr('')} THEN ${netSaleExpr('')} - COALESCE(rf.refund_usd, 0) ELSE 0 END, 2) AS revenue_usd,
              ROUND(COALESCE(discount_usd, 0) + COALESCE(membership_discount_usd, 0), 2) AS discount_usd,
              ROUND(COALESCE(total_usd, 0) + CASE WHEN COALESCE(delivery_fee_paid_by, 'customer') = 'store' THEN 0 ELSE COALESCE(delivery_fee_usd, 0) END, 2) AS collected_usd
       FROM sales
+      ${CUSTOMER_REFUND_JOIN}sales.id
       WHERE ${whereSql}
       ORDER BY datetime(created_at) DESC, id DESC
       LIMIT 1000
