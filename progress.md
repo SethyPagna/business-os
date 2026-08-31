@@ -126,8 +126,13 @@ the Sales-page `/stats` header and the Reports analytics kernel to **ONE canonic
   (`delivery_actual_cost_count`). Full spec in memory `canonical-revenue-definition`.
 - **DEPLOY:** 7b is sole driver, HOLDING for ONE coherent data-correctness batch once business-day +
   revenue are committed + green (certified worktree at committed HEAD). I hold all deploy/migrate/secrets.
-  DECONFLICT: date lane may commit business-day FIRST (built+green), then revenue lands as the next commit
-  on clean files (same owner, or handed off) — both in HEAD before 7b certifies. Avoids concurrent edits.
+  UPDATE (session 62): backend business-day work has LANDED (committed `efcf21e3` — kernel/sales/returns/
+  compat/products bucket UTC+7; only `auditLogQuery.ts` + `stockLedgerQuery.ts` still dirty, unrelated to
+  revenue). `salesAnalytics.ts` + `sales.ts` are now CLEAN, so **session 62 is IMPLEMENTING the revenue
+  reconciliation now** (net-sales canonical def) on `salesAnalytics.ts` `salesLevelTotals`/`deriveTotals`
+  + `sales.ts` `/stats` revenue query (also sales.ts:2049 per-product `total_usd`→net, secondary) —
+  path-scoped commit + real-SQLite convergence test, then ping 7b. **DATE LANE: hand off the
+  `salesAnalytics.ts`/`sales.ts` REVENUE lines to 62; coordinate before re-touching them.**
 
 **✅ CASHIER-IDENTITY RECONCILIATION lane (Sep 1, this session — DONE, committed `1378e07a` + `69673fbc`, NOT deployed / Stage-1).**
 Delivered: importEngine cashier map keys on username+name over ALL users (incl. inactive) with
