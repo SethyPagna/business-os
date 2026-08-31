@@ -17,7 +17,7 @@ import { validateUploadedBuffer } from '../lib/uploadSecurity'
 import { checkRateLimit, getClientIp } from '../lib/rateLimit'
 import { audit } from '../lib/audit'
 import { findDuplicateProductGroups, findPossiblySameProductClusters, normalizeProductClusterKey } from '../lib/productIdentity'
-import { registerMergeFold, recordMergeUndoSnapshot, type MergeReversal } from '../lib/undoAppliers'
+import { registerMergeFold, recordMergeUndoSnapshot, recordBulkMergeUndoSnapshot, type MergeReversal } from '../lib/undoAppliers'
 import { attachBatchCounts } from '../lib/productBatches'
 import { maybeQueueForReview } from '../lib/reviewGate'
 import { assertUpdatedAtMatch, getExpectedUpdatedAt, writeConflictResponse, WriteConflictError } from '../lib/conflictControl'
@@ -2532,6 +2532,10 @@ app.post('/merge-duplicates', async (c) => {
     mergedNames: (string | null)[]
   }> = []
   let mergedProductsCount = 0
+  // Every fold's reversal, in application order, so the whole run can be undone
+  // (and redone) as ONE action -- see recordBulkMergeUndoSnapshot below. Kept
+  // server-side only; never returned in the response (it's large).
+  const reversals: MergeReversal[] = []
 
   for (const group of groups) {
     const canonicalId = group.canonical.id
@@ -2546,13 +2550,14 @@ app.post('/merge-duplicates', async (c) => {
     // folds into -- batches an earlier one already moved (the same
     // "growing set" the old per-group snapshot provided).
     for (const dup of group.duplicates) {
-      await foldDuplicateProductInto(
+      const { reversal } = await foldDuplicateProductInto(
         c.env, db, user,
         { id: canonicalId, name: canonicalName },
         dup,
         branchNameById,
         'branch-only duplicate cleanup',
       )
+      reversals.push(reversal)
       mergedIds.push(dup.id)
       mergedNames.push(dup.name)
       mergedProductsCount += 1
@@ -2570,10 +2575,21 @@ app.post('/merge-duplicates', async (c) => {
     groupSummaries.push({ canonicalId, canonicalName, mergedIds, mergedNames })
   }
 
+  // Record the whole run as ONE undoable/redoable action (the big reversal set
+  // goes to undo_snapshots; a small action_history row points at it). Done
+  // synchronously before responding so the returned actionHistoryId is real.
+  const undoRecord = await recordBulkMergeUndoSnapshot(c.env, user, reversals)
+
   c.executionCtx.waitUntil(bumpVersion(c.env, 'products'))
   c.executionCtx.waitUntil(broadcast(c.env, 'products', { action: 'update' }))
   c.executionCtx.waitUntil(broadcast(c.env, 'inventory', { action: 'update' }))
-  return c.json({ success: true, mergedGroups: groups.length, mergedProducts: mergedProductsCount, groups: groupSummaries })
+  return c.json({
+    success: true,
+    mergedGroups: groups.length,
+    mergedProducts: mergedProductsCount,
+    groups: groupSummaries,
+    actionHistoryId: undoRecord?.actionHistoryId ?? null,
+  })
 })
 
 // ---------------------------------------------------------------------------

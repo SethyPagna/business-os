@@ -166,6 +166,50 @@ export async function recordMergeUndoSnapshot(
   return { snapshotId, actionHistoryId: Number(hist.lastInsertRowid ?? 0) }
 }
 
+// Bulk variant: the whole-catalog POST /merge-duplicates folds MANY duplicates
+// (across many keepers) in one run, and the person expects to undo the whole
+// cleanup with one click -- not hunt down N separate history rows, and not risk
+// undoing them out of order (a later fold in a group folds into batches an
+// earlier fold already moved onto the keeper, so the reversals are ORDER-
+// DEPENDENT). So the run is recorded as ONE composite action: every per-fold
+// reversal, in application order, in a single undo_snapshots row, behind one
+// action_history row. Undo replays them in REVERSE; redo re-runs the folds
+// FORWARD (see the 'product.merge.bulk' applier). Records nothing (returns
+// null) when the run folded nothing, so an empty cleanup leaves no dead row.
+export async function recordBulkMergeUndoSnapshot(
+  env: Env,
+  user: SessionUser | null,
+  reversals: MergeReversal[],
+): Promise<{ snapshotId: number; actionHistoryId: number } | null> {
+  const list = Array.isArray(reversals) ? reversals.filter((r) => r && Number(r.dupId) > 0) : []
+  if (!list.length) return null
+  const db = getDb(env)
+  const snap = await db.prepare(`
+    INSERT INTO undo_snapshots (kind, status, payload_json, created_by_id, created_by_name)
+    VALUES ('product.merge.bulk', 'applied', @payload, @byId, @byName)
+  `).run({ payload: JSON.stringify({ reversals: list }), byId: user?.id ?? null, byName: user?.name ?? null })
+  const snapshotId = Number(snap.lastInsertRowid ?? 0)
+  const payload = JSON.stringify({ applier: 'product.merge.bulk', snapshot_id: snapshotId })
+  const n = list.length
+  const noun = n === 1 ? 'duplicate product' : 'duplicate products'
+  const hist = await db.prepare(`
+    INSERT INTO action_history (
+      scope, entity, entity_id, label, undo_label, redo_label, reversible, status,
+      undo_payload, redo_payload, created_by_id, created_by_name
+    ) VALUES ('products', 'product', @entityId, @label, @undoLabel, @redoLabel, 1, 'undoable',
+              @payload, @payload, @byId, @byName)
+  `).run({
+    entityId: String(list[0].keeperId),
+    label: `Merged ${n} ${noun}`,
+    undoLabel: `Undo merge of ${n} ${noun}`,
+    redoLabel: `Redo merge of ${n} ${noun}`,
+    payload,
+    byId: user?.id ?? null,
+    byName: user?.name ?? null,
+  })
+  return { snapshotId, actionHistoryId: Number(hist.lastInsertRowid ?? 0) }
+}
+
 // Restore both products to their exact pre-merge state from the snapshot.
 async function applyMergeReversal(env: Env, r: MergeReversal): Promise<void> {
   const db = getDb(env)
@@ -266,6 +310,59 @@ async function applyMergeReversal(env: Env, r: MergeReversal): Promise<void> {
   await db.batch(stmts)
 }
 
+// Undo a whole bulk merge: replay each fold's reversal in REVERSE application
+// order. Order matters -- a later fold in a group folded into batches an
+// earlier fold had already moved onto the keeper, so peeling the newest fold
+// first restores the keeper to the exact state the next-oldest reversal was
+// captured against. Each reversal runs in its own batch (validating the two
+// products still exist); a cleanup undo is a rare admin op, not a hot path.
+async function applyBulkMergeReversal(env: Env, reversals: MergeReversal[]): Promise<void> {
+  for (let i = reversals.length - 1; i >= 0; i--) {
+    await applyMergeReversal(env, reversals[i])
+  }
+}
+
+// Redo a whole bulk merge: re-run the SAME production folds in FORWARD order
+// (deterministic because undo restored the exact pre-bulk state), then recompute
+// each distinct keeper's denormalized stock_quantity once. Returns the fresh
+// reversals so the snapshot can be overwritten for a future undo. Mirrors the
+// single 'product.merge' redo, extended across the run.
+async function redoBulkMergeFolds(
+  env: Env,
+  user: SessionUser | null,
+  reversals: MergeReversal[],
+): Promise<MergeReversal[]> {
+  if (!mergeFoldFn) throw new Error('This merge cannot be redone in the current server build.')
+  const db = getDb(env)
+  const branchRows = await db.prepare('SELECT id, name FROM branches').all<{ id: number; name: string }>({})
+  const branchNameById = new Map<number, string>(branchRows.map((b) => [b.id, b.name]))
+  const fresh: MergeReversal[] = []
+  const keeperIds = new Set<number>()
+  for (const r of reversals) {
+    const keeperId = Number(r.keeperId)
+    const dupId = Number(r.dupId)
+    const [keeper, dupRow] = await Promise.all([
+      db.prepare('SELECT id, name, is_active FROM products WHERE id = ?').get<{ id: number; name: string | null; is_active: number }>([keeperId]),
+      db.prepare('SELECT id, name, image_path, is_active FROM products WHERE id = ?').get<{ id: number; name: string | null; image_path: string | null; is_active: number }>([dupId]),
+    ])
+    if (!keeper || !dupRow) throw new Error('One of the merged products no longer exists, so this merge cannot be redone.')
+    if (!keeper.is_active || !dupRow.is_active) throw new Error('One of the merged products is no longer active, so this merge cannot be redone.')
+    const { reversal: one } = await mergeFoldFn!(
+      env, db, user,
+      { id: keeperId, name: keeper.name },
+      { id: dupId, name: dupRow.name, image_path: dupRow.image_path },
+      branchNameById,
+      r.mergeContext || 'redo merge',
+    )
+    fresh.push(one)
+    keeperIds.add(keeperId)
+  }
+  for (const keeperId of keeperIds) {
+    await db.prepare('UPDATE products SET stock_quantity = (SELECT COALESCE(SUM(quantity), 0) FROM branch_stock WHERE product_id = @id), updated_at = CURRENT_TIMESTAMP WHERE id = @id').run({ id: keeperId })
+  }
+  return fresh
+}
+
 const APPLIERS: Record<string, UndoApplierDef> = {
   // Payload shape: { applier: 'branch.update', id, fields: { name, location,
   // phone, manager, notes, is_default, is_active } }. The undo_payload carries
@@ -359,6 +456,54 @@ const APPLIERS: Record<string, UndoApplierDef> = {
         ctx.direction === 'undo' ? 'action_undo' : 'action_redo',
         'product', reversal.dupId,
         { via: 'undo_applier', applier: 'product.merge', keeperId: reversal.keeperId },
+      )
+      await broadcast(ctx.env, 'products', { action: 'update' })
+      await broadcast(ctx.env, 'inventory', { action: 'update' })
+    },
+  },
+  // Payload shape: { applier: 'product.merge.bulk', snapshot_id }. The snapshot
+  // holds { reversals: MergeReversal[] } -- every fold from one whole-catalog
+  // POST /merge-duplicates run, in application order. UNDO replays them in
+  // reverse (applyBulkMergeReversal); REDO re-runs the folds forward
+  // (redoBulkMergeFolds) and overwrites the snapshot with the fresh reversals.
+  // Same granular gate as the single merge (products -> merge_duplicates, full).
+  'product.merge.bulk': {
+    permission: 'products',
+    action: 'merge_duplicates',
+    run: async (payload, ctx) => {
+      const db = getDb(ctx.env)
+      const snapshotId = Number(payload.snapshot_id || 0)
+      if (!Number.isInteger(snapshotId) || snapshotId <= 0) {
+        throw new Error('This merge cannot be replayed: its saved snapshot reference is missing.')
+      }
+      const snap = await db
+        .prepare('SELECT id, status, payload_json FROM undo_snapshots WHERE id = ? AND kind = ?')
+        .get<{ id: number; status: string; payload_json: string }>([snapshotId, 'product.merge.bulk'])
+      if (!snap) throw new Error('The saved details for this merge are no longer available, so it cannot be reversed.')
+      let reversals: MergeReversal[]
+      try {
+        const parsed = JSON.parse(snap.payload_json) as { reversals?: MergeReversal[] }
+        reversals = Array.isArray(parsed?.reversals) ? parsed.reversals : []
+      } catch (_) {
+        throw new Error('The saved details for this merge are unreadable, so it cannot be reversed.')
+      }
+      if (!reversals.length) throw new Error('This merge has no saved folds to replay.')
+
+      if (ctx.direction === 'undo') {
+        if (String(snap.status) !== 'applied') throw new Error('This merge has already been undone.')
+        await applyBulkMergeReversal(ctx.env, reversals)
+        await db.prepare("UPDATE undo_snapshots SET status = 'reversed', updated_at = CURRENT_TIMESTAMP WHERE id = @id").run({ id: snapshotId })
+      } else {
+        if (String(snap.status) !== 'reversed') throw new Error('This merge is already in place; there is nothing to redo.')
+        const fresh = await redoBulkMergeFolds(ctx.env, ctx.user, reversals)
+        await db.prepare("UPDATE undo_snapshots SET status = 'applied', payload_json = @payload, updated_at = CURRENT_TIMESTAMP WHERE id = @id").run({ payload: JSON.stringify({ reversals: fresh }), id: snapshotId })
+      }
+
+      await audit(
+        ctx.env, ctx.user?.id ?? null, ctx.user?.name ?? null,
+        ctx.direction === 'undo' ? 'action_undo' : 'action_redo',
+        'product', reversals[0]?.keeperId ?? null,
+        { via: 'undo_applier', applier: 'product.merge.bulk', count: reversals.length },
       )
       await broadcast(ctx.env, 'products', { action: 'update' })
       await broadcast(ctx.env, 'inventory', { action: 'update' })

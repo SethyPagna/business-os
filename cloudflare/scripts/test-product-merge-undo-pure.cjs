@@ -193,6 +193,23 @@ function fingerprint(d1, keeperId, dupId, batchIds) {
   }
 }
 
+// Generic fingerprint over any set of products + batches (bulk scenario).
+function fingerprintMany(d1, productIds, batchIds) {
+  const q = (sql, ...a) => d1.db.prepare(sql).all(...a)
+  const pids = `(${productIds.join(',')})`
+  const bids = `(${batchIds.join(',')})`
+  return {
+    products: q(`SELECT id, is_active, image_path, stock_quantity FROM products WHERE id IN ${pids} ORDER BY id`),
+    branch_stock: q(`SELECT product_id, branch_id, quantity, rfid_confirmed_qty FROM branch_stock WHERE product_id IN ${pids} ORDER BY product_id, branch_id`),
+    product_images: q(`SELECT product_id, image_path, sort_order FROM product_images WHERE product_id IN ${pids} ORDER BY product_id, image_path`),
+    product_batches: q(`SELECT id, variant_product_id, batch_number, is_active FROM product_batches WHERE id IN ${bids} ORDER BY id`),
+    branch_batch_stock: q(`SELECT batch_id, branch_id, quantity FROM branch_batch_stock WHERE batch_id IN ${bids} ORDER BY batch_id, branch_id`),
+    sale_items: q(`SELECT id, product_id FROM sale_items WHERE product_id IN ${pids} ORDER BY id`),
+    movements_owner: q(`SELECT id, product_id FROM inventory_movements WHERE product_id IN ${pids} AND movement_type <> 'adjustment' ORDER BY id`),
+    movement_total: q(`SELECT COUNT(*) AS n FROM inventory_movements`)[0].n,
+  }
+}
+
 let passed = 0
 async function check(name, fn) { await fn(); passed += 1; console.log(`  ✓ ${name}`) }
 
@@ -312,7 +329,141 @@ async function run() {
     assert.match(appliersSrc, /DELETE FROM inventory_movements WHERE id IN/)
   })
 
+}
+
+// --------------------------------------------------------------------------
+// Bulk composite: the whole-catalog POST /merge-duplicates folds MANY dups in
+// ONE run and records ONE undoable action (recordBulkMergeUndoSnapshot +
+// the 'product.merge.bulk' applier). This proves the ORDER-DEPENDENT round-
+// trip: within group A, dup 202's '2027' batch folds into the very batch dup
+// 201 just repointed onto the keeper, so undo MUST replay in reverse and redo
+// forward. Exact F0/F1 fingerprints across undo -> redo -> undo prove it.
+// --------------------------------------------------------------------------
+async function runBulk() {
+  console.log('\n-- bulk composite merge (whole-catalog cleanup) --')
+  const d1 = openDb(loadAll())
+  const undo = loadUndoAppliers(d1)
+  undo.registerMergeFold((env, _db, _user, keeper, dup, branchNameById, ctx) => foldForward(d1, keeper, dup, branchNameById, ctx))
+  const run1 = (sql, p) => d1.db.prepare(sql).run(p == null ? {} : p)
+
+  // Group A: keeper 100 <- dups 201, 202 (in that order). Group B: keeper 300 <- dup 301.
+  const PIDS = [100, 201, 202, 300, 301]
+  const BIDS = [6000, 6001, 6002, 6003, 6100, 6101, 6102]
+  run1(`INSERT INTO branches (id, name) VALUES (1,'B1'),(2,'B2'),(3,'B3')`)
+  run1(`INSERT INTO products (id, name, is_active, image_path, stock_quantity) VALUES
+    (100,'KeeperA',1,'ka.jpg',8),(201,'DupA1',1,'d1.jpg',11),(202,'DupA2',1,'d2.jpg',3),
+    (300,'KeeperB',1,'kb.jpg',6),(301,'DupB1',1,'d3.jpg',10)`)
+  run1(`INSERT INTO branch_stock (product_id, branch_id, quantity, rfid_confirmed_qty) VALUES
+    (100,1,5,2),(100,2,3,0),(201,1,4,1),(201,3,7,0),(202,2,2,0),(202,3,1,0),
+    (300,1,6,3),(301,2,8,0),(301,3,2,1)`)
+  run1(`INSERT INTO product_images (product_id, image_path, sort_order) VALUES
+    (100,'ka.jpg',0),(201,'g1.jpg',0),(202,'g2.jpg',0),(300,'kb.jpg',0),(301,'g3.jpg',0)`)
+  // 6001 (201/'2027') repoints onto 100; 6002 (202/'2027') then folds into 6001; 6003 (202/'2028') repoints.
+  // 6101 (301/'2030') folds into keeper batch 6100; 6102 (301/'2031') repoints.
+  run1(`INSERT INTO product_batches (id, variant_product_id, batch_key, batch_number, is_active) VALUES
+    (6000,100,'2026',1,1),(6001,201,'2027',1,1),(6002,202,'2027',1,1),(6003,202,'2028',1,1),
+    (6100,300,'2030',1,1),(6101,301,'2030',1,1),(6102,301,'2031',1,1)`)
+  run1(`INSERT INTO branch_batch_stock (batch_id, branch_id, quantity) VALUES
+    (6000,1,5),(6001,1,4),(6001,2,2),(6002,1,1),(6002,3,1),(6003,3,1),
+    (6100,1,6),(6101,1,6),(6102,2,8)`)
+  run1(`INSERT INTO sales (id) VALUES (910),(911)`)
+  run1(`INSERT INTO sale_items (id, sale_id, product_id, product_name, quantity) VALUES
+    (720,910,201,'DupA1',1),(721,910,202,'DupA2',2),(722,911,301,'DupB1',1)`)
+  run1(`INSERT INTO inventory_movements (id, product_id, product_name, branch_id, movement_type, quantity, reason) VALUES
+    (820,201,'DupA1',1,'sale',-1,'legacy'),(821,202,'DupA2',3,'received',1,'legacy'),(822,301,'DupB1',2,'received',8,'legacy')`)
+
+  const branchNameById = new Map([[1, 'B1'], [2, 'B2'], [3, 'B3']])
+  const F0 = fingerprintMany(d1, PIDS, BIDS)
+
+  // Drive the forward run exactly as the route does: fold each dup in order,
+  // collect reversals, recompute each keeper, then record ONE composite action.
+  const plan = [
+    { keeper: { id: 100, name: 'KeeperA' }, dup: { id: 201, name: 'DupA1', image_path: 'd1.jpg' } },
+    { keeper: { id: 100, name: 'KeeperA' }, dup: { id: 202, name: 'DupA2', image_path: 'd2.jpg' } },
+    { keeper: { id: 300, name: 'KeeperB' }, dup: { id: 301, name: 'DupB1', image_path: 'd3.jpg' } },
+  ]
+  const reversals = []
+  for (const step of plan) {
+    const res = await foldForward(d1, step.keeper, step.dup, branchNameById, 'branch-only duplicate cleanup')
+    reversals.push(res.reversal)
+  }
+  for (const kid of [100, 300]) run1('UPDATE products SET stock_quantity = (SELECT COALESCE(SUM(quantity),0) FROM branch_stock WHERE product_id = @id) WHERE id = @id', { id: kid })
+  const F1 = fingerprintMany(d1, PIDS, BIDS)
+
+  let snapshotId, actionHistoryId
+
+  await check('the order-dependent fold actually happened (202 folded into the batch 201 repointed onto the keeper)', async () => {
+    // dup 202's '2027' batch (6002) is soft-deleted, folded into 6001 (now on 100)
+    assert.equal(d1.db.prepare('SELECT is_active FROM product_batches WHERE id=6002').get().is_active, 0)
+    assert.equal(d1.db.prepare('SELECT variant_product_id FROM product_batches WHERE id=6001').get().variant_product_id, 100)
+    // 6001 branch 1 now holds 201's 4 + 202's 1 = 5
+    assert.equal(d1.db.prepare('SELECT quantity q FROM branch_batch_stock WHERE batch_id=6001 AND branch_id=1').get().q, 5)
+    // all three dups soft-deleted; all their sale_items re-parented
+    assert.equal(d1.db.prepare('SELECT COUNT(*) n FROM products WHERE id IN (201,202,301) AND is_active=0').get().n, 3)
+    assert.equal(d1.db.prepare('SELECT COUNT(*) n FROM sale_items WHERE product_id IN (201,202,301)').get().n, 0)
+  })
+
+  await check('recordBulkMergeUndoSnapshot stores ONE snapshot + ONE small action_history row for the whole run', async () => {
+    const rec = await undo.recordBulkMergeUndoSnapshot({}, { id: 42, name: 'Merger' }, reversals)
+    snapshotId = rec.snapshotId; actionHistoryId = rec.actionHistoryId
+    assert.ok(snapshotId > 0 && actionHistoryId > 0)
+    const snap = d1.db.prepare('SELECT kind, status, payload_json FROM undo_snapshots WHERE id = ?').get(snapshotId)
+    assert.equal(snap.kind, 'product.merge.bulk'); assert.equal(snap.status, 'applied')
+    assert.equal(JSON.parse(snap.payload_json).reversals.length, 3)
+    const hist = d1.db.prepare('SELECT scope, entity, reversible, status, label, undo_payload FROM action_history WHERE id = ?').get(actionHistoryId)
+    assert.equal(hist.scope, 'products'); assert.equal(hist.reversible, 1); assert.equal(hist.status, 'undoable')
+    assert.equal(hist.label, 'Merged 3 duplicate products')
+    assert.ok(hist.undo_payload.length < 200, 'action_history payload must stay small (points at the snapshot)')
+    assert.equal(JSON.parse(hist.undo_payload).applier, 'product.merge.bulk')
+    // exactly one composite history row for the whole run -- not three
+    assert.equal(d1.db.prepare('SELECT COUNT(*) n FROM action_history').get().n, 1)
+  })
+
+  const applier = undo.resolveUndoApplier({ applier: 'product.merge.bulk', snapshot_id: snapshotId })
+  assert.ok(applier, 'product.merge.bulk applier must resolve')
+  assert.equal(applier.action, 'merge_duplicates')
+
+  await check('UNDO replays reversals in REVERSE and restores every product to the exact pre-bulk state', async () => {
+    await applier.run({ applier: 'product.merge.bulk', snapshot_id: snapshotId }, { env: {}, user: { id: 42 }, direction: 'undo' })
+    assert.deepEqual(fingerprintMany(d1, PIDS, BIDS), F0)
+    assert.equal(d1.db.prepare('SELECT status FROM undo_snapshots WHERE id=?').get(snapshotId).status, 'reversed')
+    // no adjustment rows leaked onto either keeper
+    assert.equal(d1.db.prepare(`SELECT COUNT(*) n FROM inventory_movements WHERE product_id IN (100,300) AND movement_type='adjustment'`).get().n, 0)
+  })
+
+  await check('REDO re-runs the folds FORWARD and reproduces the exact merged state', async () => {
+    await applier.run({ applier: 'product.merge.bulk', snapshot_id: snapshotId }, { env: {}, user: { id: 42 }, direction: 'redo' })
+    assert.deepEqual(fingerprintMany(d1, PIDS, BIDS), F1)
+    assert.equal(d1.db.prepare('SELECT status FROM undo_snapshots WHERE id=?').get(snapshotId).status, 'applied')
+    assert.equal(JSON.parse(d1.db.prepare('SELECT payload_json FROM undo_snapshots WHERE id=?').get(snapshotId).payload_json).reversals.length, 3)
+  })
+
+  await check('UNDO -> REDO -> UNDO is stable and leaves no orphaned rows', async () => {
+    await applier.run({ applier: 'product.merge.bulk', snapshot_id: snapshotId }, { env: {}, user: { id: 42 }, direction: 'undo' })
+    assert.deepEqual(fingerprintMany(d1, PIDS, BIDS), F0)
+    assert.equal(d1.db.prepare('SELECT COUNT(*) n FROM inventory_movements').get().n, F0.movement_total)
+  })
+
+  await check('double-undo of the bulk action is refused (status guard)', async () => {
+    await assert.rejects(
+      applier.run({ applier: 'product.merge.bulk', snapshot_id: snapshotId }, { env: {}, user: { id: 42 }, direction: 'undo' }),
+      /already been undone/,
+    )
+  })
+
+  // Source guard: the REAL bulk route must capture reversals and record them.
+  const productsSrc = fs.readFileSync(path.join(cloudflareRoot, 'src', 'routes', 'products.ts'), 'utf8')
+  await check('products.ts bulk route captures each fold reversal and records ONE composite undo', async () => {
+    assert.match(productsSrc, /const \{ reversal \} = await foldDuplicateProductInto\(/)
+    assert.match(productsSrc, /reversals\.push\(reversal\)/)
+    assert.match(productsSrc, /recordBulkMergeUndoSnapshot\(c\.env, user, reversals\)/)
+  })
+}
+
+async function main() {
+  await run()
+  await runBulk()
   console.log(`\n${passed} check(s) passed.`)
 }
 
-run().catch((err) => { console.error(err); process.exitCode = 1 })
+main().catch((err) => { console.error(err); process.exitCode = 1 })

@@ -226,6 +226,15 @@ await check('the product.merge applier is registered and gated on the granular m
   assert.strictEqual(resolved?.action, 'merge_duplicates')
 })
 
+await check('the product.merge.bulk applier (whole-catalog cleanup) is registered and gated identically', () => {
+  assert.ok(registeredUndoAppliers().includes('product.merge.bulk'), 'product.merge.bulk must be a registered applier')
+  const resolved = resolveUndoApplier({ applier: 'product.merge.bulk', snapshot_id: 1 })
+  assert.strictEqual(resolved?.permission, 'products')
+  // Same granular gate as the single merge -- the bulk undo/redo is just the
+  // composite of the same folds, so it must demand the SAME merge_duplicates action.
+  assert.strictEqual(resolved?.action, 'merge_duplicates')
+})
+
 await check('source lock: the applier permission gate (full tier) guards BOTH record and operate, before any status flip or replay', () => {
   const routeSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'routes', 'actionHistory.ts'), 'utf8')
   // Record time: canRecordHistory must consult the applier registry, not
