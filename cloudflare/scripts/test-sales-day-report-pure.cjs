@@ -54,6 +54,11 @@ function lift(tableName) {
 const db = new Database(':memory:')
 db.exec(lift('sales'))
 db.exec(lift('sale_items'))
+// getSalesTotals now LEFT JOINs a per-sale customer-refund subquery over the
+// `returns` table (net-sales revenue is stated net of customer refunds). Provide
+// the real returns schema so that SQL resolves; this suite seeds no returns, so
+// refund_usd is 0 and the payment/delivery assertions below are unaffected.
+db.exec(lift('returns'))
 db.exec('ALTER TABLE sales ADD COLUMN delivery_actual_cost_usd REAL')
 db.exec('ALTER TABLE sales ADD COLUMN delivery_actual_cost_khr REAL')
 
