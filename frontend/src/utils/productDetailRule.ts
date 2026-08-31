@@ -51,6 +51,36 @@ export function normalizeProductGroupName(value: unknown): string {
   return String(value ?? '').trim().replace(/\s+/g, ' ').toLowerCase()
 }
 
+/**
+ * FUZZY name key -- a stronger normalization than normalizeProductGroupName,
+ * for surfacing "same item, different name" duplicates a human should review
+ * (NEVER for auto-merge). On top of trim/collapse/lowercase it:
+ *   - strips diacritics (café == cafe),
+ *   - turns every run of non-alphanumeric into a token break, so punctuation
+ *     and separators stop mattering (Setting-Spray == Setting Spray,
+ *     L'Oreal == L Oreal),
+ *   - sorts the resulting tokens and drops duplicate tokens, so word ORDER
+ *     stops mattering (Day Face Cream == Cream Face Day).
+ *
+ * Deliberately precision-over-recall: it does NOT split digit/letter runs
+ * (so "100ml" and "100 ml" stay different, as do genuinely different sizes),
+ * drop "noise"/unit words, or do edit-distance matching -- each of those
+ * would over-merge distinct SKUs into one review cluster. What it catches is
+ * the common real case: the same name re-typed with different punctuation,
+ * spacing, accents or word order. Returns '' for a name with no alphanumerics.
+ */
+export function normalizeProductFuzzyName(value: unknown): string {
+  const base = String(value ?? '')
+    .normalize('NFKD')
+    .replace(/[̀-ͯ]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim()
+  if (!base) return ''
+  const tokens = base.split(/\s+/).filter(Boolean)
+  return [...new Set(tokens)].sort().join(' ')
+}
+
 /** Integer cents, so float noise from CSV round-tripping can't fake a difference. */
 function cents(value: unknown): number {
   return Math.round((Number(value) || 0) * 100)
