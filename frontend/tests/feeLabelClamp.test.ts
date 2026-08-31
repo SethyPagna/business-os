@@ -15,6 +15,8 @@ import ts from 'typescript'
 const here = path.dirname(fileURLToPath(import.meta.url))
 const clientSource = fs.readFileSync(path.join(here, '..', 'src', 'components', 'fees', 'FeeForm.tsx'), 'utf8')
 const serverSource = fs.readFileSync(path.join(here, '..', '..', 'cloudflare', 'src', 'routes', 'fees.ts'), 'utf8')
+const feesPageSource = fs.readFileSync(path.join(here, '..', 'src', 'components', 'fees', 'FeesPage.tsx'), 'utf8').replace(/\r\n/g, '\n')
+const feesTransportSource = fs.readFileSync(path.join(here, '..', 'src', 'api', 'feesTransport.ts'), 'utf8').replace(/\r\n/g, '\n')
 
 function extractFunction(source: string, name: string): string {
   const re = new RegExp(`function ${name}\\([\\s\\S]*?\\n\\}`)
@@ -84,6 +86,32 @@ check('feeLabelWordCount counts words, ignoring extra whitespace', () => {
   assert.strictEqual(feeLabelWordCount('  '), 0)
   assert.strictEqual(feeLabelWordCount(' a  b '), 2)
   assert.strictEqual(feeLabelWordCount('one two three four five six'), 6)
+})
+
+check('Expenses export covers visible, filtered-all, and all-record scopes with paginated loading', () => {
+  const builderSource = extractFunction(feesPageSource, 'buildFeeExportRows')
+  const transpiled = ts.transpileModule(`${builderSource}\nmodule.exports = { buildFeeExportRows }`, {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 },
+  }).outputText
+  const exportModule: { exports: { buildFeeExportRows?: (rows: unknown[], label: (type: string) => string) => Array<Record<string, unknown>> } } = { exports: {} }
+  new Function('exports', 'module', transpiled)(exportModule.exports, exportModule)
+  const rows = exportModule.exports.buildFeeExportRows!([{
+    fee_date: '2026-09-01', fee_type: 'delivery', label: 'Grab', amount_usd: 2.5,
+    amount_khr: 0, sale_receipt_number: 'R-7', branch_name: 'Shop', notes: 'Courier',
+    created_by_name: 'Dara', created_at: '2026-09-01T02:00:00Z',
+  }], (type) => type.toUpperCase())
+  assert.deepStrictEqual(rows, [{
+    date: '2026-09-01', type: 'DELIVERY', label: 'Grab', amount_usd: 2.5,
+    amount_khr: 0, sale_receipt: 'R-7', branch: 'Shop', notes: 'Courier',
+    created_by: 'Dara', created_at: '2026-09-01T02:00:00Z',
+  }])
+  assert.match(feesTransportSource, /export async function getAllFeesForExport/)
+  assert.match(feesTransportSource, /const PAGE = 500/)
+  assert.match(feesTransportSource, /offset \+= PAGE/)
+  assert.match(feesPageSource, /openFeeExport\('visible'\)/)
+  assert.match(feesPageSource, /openFeeExport\('filtered'\)/)
+  assert.match(feesPageSource, /openFeeExport\('all'\)/)
+  assert.match(feesPageSource, /<ExportOptionsDialog/)
 })
 
 console.log(`\nfeeLabelClamp: ${passed} check(s) passed.`)

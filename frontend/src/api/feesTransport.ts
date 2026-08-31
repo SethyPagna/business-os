@@ -79,6 +79,45 @@ export function getFees(params: FeeListParams = {}): Promise<FeeListResult> {
   ) as Promise<FeeListResult>
 }
 
+// Fetch EVERY expense record matching the given filters (for CSV export),
+// paginating past the server's 500-row cap (routes/fees.ts clamps limit to
+// 500). Two deliberate choices keep the result complete and correct:
+//   - It calls apiFetch directly, NOT getFees()/route(). route()'s 20s read
+//     cache and in-flight dedupe are keyed on the CONSTANT 'fees:get' channel
+//     (ignoring limit/offset), so a rapid page-by-page loop through getFees()
+//     would keep returning the first page -- silent truncation. apiFetch has
+//     no such cache, and its GET dedupe key includes the offset in the path,
+//     so every page is a distinct request.
+//   - The loop is driven by the server's reported `total`, so it stops exactly
+//     when every matching row has been gathered and never truncates a real
+//     set; a page ceiling derived from that same total guards against a
+//     malformed response spinning forever.
+export async function getAllFeesForExport(
+  params: Omit<FeeListParams, 'limit' | 'offset'> = {},
+  onProgress?: (loaded: number, total: number) => void,
+): Promise<FeeRecord[]> {
+  const PAGE = 500
+  const all: FeeRecord[] = []
+  let offset = 0
+  let total = 0
+  let pagesRemaining = 1
+  do {
+    const query = buildQueryString({ ...params, limit: PAGE, offset } as QueryParams)
+    const result = (await apiFetch('GET', appendQuery('/api/fees', query))) as FeeListResult | null
+    const rows = Array.isArray(result?.fees) ? result!.fees : []
+    if (offset === 0) {
+      total = Number(result?.total) || rows.length
+      pagesRemaining = Math.max(1, Math.ceil(total / PAGE))
+    }
+    all.push(...rows)
+    onProgress?.(all.length, total)
+    offset += PAGE
+    pagesRemaining -= 1
+    if (rows.length < PAGE) break // server ran out early -- nothing more to page
+  } while (all.length < total && pagesRemaining > 0)
+  return all
+}
+
 // Every distinct saved label with its usage count and dominant fee type,
 // most-used first (GET /api/fees/labels). FeeForm offers these as
 // suggestions and auto-picks the dominant type when a known label is chosen.

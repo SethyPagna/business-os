@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { FeeBranchOption } from './FeeForm.tsx'
 
 type BranchModule = typeof import('../../api/branchTransport.ts')
@@ -28,6 +28,7 @@ import { isWriteConflictError } from '../../api/http.ts'
 import {
   createFee as createFeeRequest,
   deleteFee as deleteFeeRequest,
+  getAllFeesForExport,
   getFees as getFeesRequest,
   getFeesReport,
   updateFee as updateFeeRequest,
@@ -39,8 +40,13 @@ import {
 import FeeForm, { FEE_TYPE_OPTIONS } from './FeeForm.tsx'
 import StatsStrip, { statsPresetRange, type StatCardDef } from '../shared/StatsStrip.tsx'
 import StatsRangeRow from '../shared/StatsRangeRow.tsx'
+import ExportMenu from '../shared/ExportMenu.tsx'
 import { makeReportMoneyFormatter } from '../../utils/reportMoney.ts'
 import type { DateTimeRange } from '../shared/DateTimeRangePicker'
+import { columnsFromRows } from '../../utils/exportOptions.ts'
+import { lazyRetry } from '../../utils/lazyImport.ts'
+
+const ExportOptionsDialog = lazyRetry(() => import('../shared/ExportOptionsDialog'), 'fees-export-options')
 
 type TranslateFn = (key: string) => string | undefined
 type NotifyFn = (message: unknown, type?: string, duration?: number) => void
@@ -99,6 +105,21 @@ function formatFeeDate(value: string | null | undefined): string {
 
 const EMPTY_RESULT: FeeListResult = { fees: [], total: 0, limit: DEFAULT_PAGE_SIZE, offset: 0, summary: [] }
 
+export function buildFeeExportRows(rows: FeeRecord[], feeTypeLabel: (type: string) => string): Array<Record<string, unknown>> {
+  return rows.map((fee) => ({
+    date: fee.fee_date || '',
+    type: feeTypeLabel(fee.fee_type),
+    label: fee.label || '',
+    amount_usd: Number(fee.amount_usd) || 0,
+    amount_khr: Number(fee.amount_khr) || 0,
+    sale_receipt: fee.sale_receipt_number || '',
+    branch: fee.branch_name || '',
+    notes: fee.notes || '',
+    created_by: fee.created_by_name || '',
+    created_at: fee.created_at || '',
+  }))
+}
+
 export default function FeesPage() {
   const { getPermissionTier, t, notify, fmtUSD, fmtKHR, khrToUsd, usdToKhr, displayCurrency } = useApp()
   // Display-currency-aware money formatter (see utils/reportMoney.ts) —
@@ -147,9 +168,11 @@ export default function FeesPage() {
   const [modal, setModal] = useState<FeeModal>(null)
   const [selected, setSelected] = useState<FeeRecord | null>(null)
   const [deletingId, setDeletingId] = useState<number | null>(null)
+  const [exportDialog, setExportDialog] = useState<{ rows: Array<Record<string, unknown>>; baseName: string } | null>(null)
 
   const loadRequestRef = useRef(0)
   const deleteActionRef = useRef<Set<string>>(new Set())
+  const exportInFlightRef = useRef(false)
 
   const load = useCallback(async (silent = false) => {
     const requestId = beginTrackedRequest(loadRequestRef)
@@ -297,6 +320,42 @@ export default function FeesPage() {
     return option ? (t(option.labelKey) || option.fallback) : type
   }, [t])
 
+  const openFeeExport = useCallback(async (
+    scope: 'visible' | 'filtered' | 'all',
+  ): Promise<void> => {
+    if (exportInFlightRef.current) return
+    exportInFlightRef.current = true
+    try {
+      const sourceRows = scope === 'visible'
+        ? fees
+        : await getAllFeesForExport(scope === 'filtered' ? {
+          search: search.trim() || undefined,
+          fee_type: typeFilter !== 'all' ? typeFilter : undefined,
+          from: stripRange.startDate || undefined,
+          to: stripRange.endDate || undefined,
+          branch_id: branchFilter || undefined,
+        } : {})
+      if (!sourceRows.length) {
+        notify(tr('no_data_to_export', 'No data to export'), 'error')
+        return
+      }
+      setExportDialog({
+        rows: buildFeeExportRows(sourceRows, feeTypeLabel),
+        baseName: scope === 'all' ? 'expenses-all' : scope === 'filtered' ? 'expenses-filtered' : 'expenses-visible',
+      })
+    } catch (error) {
+      notify(error instanceof Error ? error.message : String(error || ''), 'error')
+    } finally {
+      exportInFlightRef.current = false
+    }
+  }, [branchFilter, feeTypeLabel, fees, notify, search, stripRange.endDate, stripRange.startDate, tr, typeFilter])
+
+  const exportItems = useMemo(() => ([
+    { label: tr('export_visible', 'Export visible page'), onClick: () => { void openFeeExport('visible') } },
+    { label: tr('export_filtered_time_range', 'Export all matching filters'), onClick: () => { void openFeeExport('filtered') } },
+    { label: tr('export_all', 'Export all expenses'), onClick: () => { void openFeeExport('all') } },
+  ]), [openFeeExport, tr])
+
   const openAdd = () => { setSelected(null); setModal('form') }
   const openEdit = (fee: FeeRecord) => { setSelected(fee); setModal('form') }
   const closeModal = () => { setModal(null); setSelected(null) }
@@ -409,6 +468,9 @@ export default function FeesPage() {
         cards={stripCards}
         loading={stripLoading}
         t={t}
+        rangeActions={(
+          <ExportMenu label={tr('export', 'Export')} items={exportItems} triggerClassName="h-8 px-2.5 text-xs" />
+        )}
         actions={(
           // Fit-to-content, not the wide toolbar-width button ("the add
           // button for fees are too wide, can make fit") — and it shares
@@ -423,6 +485,21 @@ export default function FeesPage() {
           </button>
         )}
       />
+
+      {exportDialog ? (
+        <Suspense fallback={null}>
+          <ExportOptionsDialog
+            title={tr('export_options_title', 'Export options')}
+            fileBaseName={exportDialog.baseName}
+            columns={columnsFromRows(exportDialog.rows)}
+            rows={exportDialog.rows}
+            rememberKey="expenses"
+            t={t}
+            notify={notify}
+            onClose={() => setExportDialog(null)}
+          />
+        </Suspense>
+      ) : null}
 
       <div className="sticky top-2 z-30 -mx-1 mb-4 space-y-3 bg-gray-50/95 pb-2 backdrop-blur dark:bg-gray-900/95 sm:mx-0">
         {/* The Start→End range that scopes the stats strip above now leads
