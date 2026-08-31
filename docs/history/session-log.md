@@ -16614,3 +16614,76 @@ running dev server. Commit `9c4f9678` (three files, path-scoped).
 **Not done.** Wholesale (as in the main Part 562 entry / progress.md follow-up):
 generalise the same toggle + receipt tag to a `wholesale` tier once the field
 exists (Khmer បោះដុំ already wired in Receipt).
+
+## Part 564 (Aug 31 2026, products-slice-excision lane, same session as Parts 558/559/561) — Inventory's dormant products slice excised; ranged exports everywhere; full movement history in the product detail
+
+**Ask ("do so" on the Part-561 follow-up, plus):** excise Inventory.tsx's
+dormant products machinery; "make sure you copy the stock movement history
+into products page view detail when clicked... make sure they have the
+correct functions"; "the exports make sure the branch section has the export
+for these as well and can range the date start and end date to choose as
+well. do the date range for all the exports... it will default shows that
+start/end date, but you can edit but first shown is that".
+
+**What changed** (commits say "Part 562" — 562/563 were taken by the
+pos-card-price and detail-float lanes while in flight; races expected):
+
+- **The excision** (`0ede…`/first commit of this lane + peer sweep):
+  Inventory.tsx 4,033 → ~2,500 lines. Gone: the products list surface
+  render, bulk toolbar + batch session (InventoryBatchModal.tsx and
+  InventoryProductsSurface.tsx DELETED with their two tests, chain
+  updated), selection/long-press/reveal/alpha-rail machinery, products
+  pagination + initials/metadata reads, product filter sections, the
+  summary catalog load + pinned-row re-insert, the year-month leftovers,
+  and the catalog exports that quietly exported EMPTY rows from the
+  movements tab (the catalog never loaded there — removing beats silently
+  exporting nothing). Stats totals now read server stockStats only.
+  Method: iterated `tsc --noUnusedLocals` scans as the dead-code finder +
+  a TypeScript-parser-based declaration remover; normal tsc kept green
+  between every round.
+- **Kept working for Movements** (the "correct functions" ask): the
+  per-product detail modal + its stock-history preview, and the complete
+  adjust / transfer / manage-batches / saved-reasons modals it opens.
+  Adjust now targets the opened product (variant-family switching went
+  with the catalog; the Products page's StockAdjustModal is the
+  multi-product entry). Movement product clicks always fetch by id.
+- **Ranged exports** — new shared `ExportRangeDialog` (Start→End seeded
+  from the page's own range, editable; empty = everything): (1) Movements
+  Export opens it; unchanged range exports the visible groups, an edited
+  range fetches that window server-side (pageSize 20k) with the list's
+  activity/user filters applied and truncation NOTIFIED; menu slimmed to
+  Export movements… + Export selected. (2) NEW Stats & Branches Export
+  (StatsRangeRow actions slot) → ranged stats CSV from fresh kernel +
+  returns reads plus current shelf stats. (3) NEW Stock Changes Export
+  (Products page) → walks /stock-ledger (server clamp raised 100→1000,
+  swept into the wholesale lane's `46217e43`) honoring the section's
+  search/branch/supplier/view filters, truncation notified.
+- **Product detail movement history**: the Stock Changes float (peer's
+  Part-563 pill design) gains **Load more** — 30-row pages, id-deduped,
+  until the ledger total is exhausted, with an "N/M" progress label.
+- Tests re-pinned: performanceLoadingUx (removed products-slice pins;
+  also repaired the sales countActiveFlags pin left stale by Part 549's
+  committed group-by-status removal), inventoryRfidSection (dropped
+  parseInventoryTimestamp pins). Lang packs +4 keys (swept into a peer
+  commit; verified in HEAD).
+
+**Verified:** fe tsc clean (the only errors during the batch were a peer's
+mid-save ProductForm wholesale work — none in this lane's files); cf tsc
+clean; check:source 427 files; performanceLoadingUx / inventoryRfidSection /
+inventoryMovementGroups / dashboardDataReliability / testChainCoverage /
+productDetailSections / stockHealthSummary / exportOptions /
+productDetailRuleParity / pageScrollRoots / navigationConfig / fastStockIn
+all PASS. NOT verified live-in-browser (auth — standing caveat); the
+Movements detail modal's adjust/transfer flows and all three ranged exports
+deserve click-tests after deploy. langKeyIntegrity currently fails on a
+peer's mid-save `t('area')` in DeliveryTab.tsx (key not yet added — their
+lane); statsStrip fails against the peer's mid-save StatsStrip.tsx — both
+pass on this lane's files.
+
+**Not done:** inventoryExport.ts still exports the now-unused catalog/stats
+collectors (module-level, typed, harmless — trim when that module is next
+touched); notification product anchors (`#product-<id>`, pageId
+'inventory'→branches) lost their scroll-highlight target with the products
+list — clicking one lands on Stats & Branches; repointing
+routes/notifications.ts at the Products page with a matching hash consumer
+is a small open item.
