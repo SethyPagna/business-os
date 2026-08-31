@@ -16370,10 +16370,12 @@ date control, select-mode checkboxes, day grouping) that it does NOT own the
 StatsStrip call in. Because Inventory's stats live on their OWN top-level section
 chip (`inventorySection === 'stats'`/`'all'`) rather than above a search bar, and
 because committing Inventory.tsx would have absorbed that peer's incomplete work,
-Inventory's migration was DELEGATED to that lane (messaged). Dashboard already
-keeps its range as a separate card (passes no range to StatsStrip) so it needed
-nothing. This is why "all pages" landed as Sales/Returns/Fees here + a hand-off
-for Inventory rather than one sweep.
+Inventory's migration was initially deferred to avoid absorbing that work; once
+that lane committed (Part 559, Inventory.tsx clean at HEAD), Inventory was
+migrated here too in a second commit (`f87a8422`) — its date row leads the stats
+section directly above the strip since there is no search bar on that section.
+Dashboard already keeps its range as a separate card (passes no range to
+StatsStrip) so it needed nothing.
 
 **Verified:** `npx tsc --noEmit -p tsconfig.json` → 0 errors (whole frontend,
 incl. the peer's current Inventory.tsx); `node tests/statsStrip.test.ts` → all
@@ -16382,11 +16384,11 @@ parsed OK (covers the new component). NOT verified live in-browser: a peer's dev
 server is running in this checkout and starting a second one risks the shared
 node_modules / wrangler-state contention documented in project-traps, so
 browser verification of the relocated row is deferred to the shared session.
-Commit `3772f08f` (5 files, path-scoped). Rides along the report-currency lane's
-orphaned `statsStrip.test.ts` working-tree edit (its Part 553/554 fmtMoney pin,
-matching the already-committed reportMoney.ts) so it stops floating.
+Commits `3772f08f` (Sales/Returns/Fees + StatsRangeRow + test) and `f87a8422`
+(Inventory). `3772f08f` rides along the report-currency lane's orphaned
+`statsStrip.test.ts` working-tree edit (its Part 553/554 fmtMoney pin, matching
+the already-committed reportMoney.ts) so it stops floating.
 
-**Not done:** Inventory's stats-section date row (delegated to the Part-559
-lane); live browser verification (shared dev server); once every caller has
-migrated off StatsStrip's `range`/`onRangeChange`, a follow-up should delete the
-now-dormant internal date row + its DateTimeRangePicker import from StatsStrip.
+**Not done:** live browser verification (shared dev server); once every caller
+has migrated off StatsStrip's `range`/`onRangeChange`, a follow-up should delete
+the now-dormant internal date row + its DateTimeRangePicker import from StatsStrip.
