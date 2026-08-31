@@ -88,6 +88,26 @@ Two rules learned the hard way, both from real incidents in this file's own hist
 
 ## Current status
 
+**[DONE — DEPLOYED (fourth of the day), 7a, Aug 31 ~03:57 UTC (user-authorized
+"continue" on the deploy ask; bf's duplicate authorization stood down by
+coordinator): production is commit `0db93598`, Worker version
+`53804f02-e25d-4909-bd78-cc4deac2c10b` at 100%.** Ships everything 542–549:
+BOTH public stock-leak seals (catalog 547 + AI-chat da7dd0b7), c8's change_khr
+money fixes (543), restore-maintenance lock (544), i18n sweep (545), per-action
+permission enforcement (546), ship-now tier (547), sales-hub 548, and the 549
+sweep fixes. Method: isolated worktree at 0db93598 — npm ci ×2, both tscs,
+build 19.38s, 10-suite checkpoint all green, migrate:remote VERIFIED NO-OP
+(0088–0092 were already applied), secrets:sync (2 pushed, encryption key
+blank-skipped), deploy (all 4 queues + cron + both domain pairs bound). Live:
+health ok, storefront 200, unauth 401, old /api/catalog 404, portal bootstrap
+200, and **the leak census: 50 payload rows, ONLY stock_status +
+branch_availability, ZERO raw quantity/threshold/branch_stock fields.**
+Deployments list shows one stray version (045233f1) created 34s before mine —
+bf's partial run before stand-down; mine is newest at 100%, harmless.
+origin/main pushed (`9c51adf2..06ceac74`). Worktree removed (secrets cleared).
+**Freeze LIFTED.** NOT deployed (landed mid-deploy): `06ceac74` POS
+banner self-heal (Part 550) — rides the next one.]**
+
 **[DONE — stats-fold session, Aug 31 (Part 550, needs deploy — rides the next
 one): POS batch-tracking banner self-heals.** User pasted the "Batch and
 expiry tracking could not be loaded…" banner. Diagnosis: prod healthy at check

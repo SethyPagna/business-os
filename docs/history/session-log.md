@@ -15919,3 +15919,22 @@ after.
 error-notify handling (modal context, not a persistent banner — different
 recovery shape, deliberately untouched). If the user wants the banner text to
 distinguish "you are offline" from "server hiccup", say the word.
+
+### Part 549 addendum — the deploy (7a, Aug 31 ~03:57 UTC)
+
+User authorized via "continue" on the deploy ask (push notification + terminal
+ask both pointed at it); coordinator deconflicted a duplicate authorization in
+session bf (bf stood down, write-order). Isolated worktree at `0db93598`:
+npm ci x2 -> both tscs -> vite build 19.38s -> checkpoint (migration-chain
+fresh, both portal redaction suites, backup coverage, image pipeline, catalog
+sort, statsStrip, posMoneyRounding, changeExchangeRate, batchFailLoud - 10/10)
+-> migrate:remote VERIFIED NO-OP -> secrets:sync (RESEND + CLOUDINARY pushed,
+APP_ENCRYPTION_KEY blank-skipped) -> wrangler deploy. Production Worker
+version `53804f02-e25d-4909-bd78-cc4deac2c10b` at 100% (deployments list
+confirms newest = mine; one stray 045233f1 34s earlier = bf's partial run,
+superseded). Live checks: /health ok, storefront 200, /api/products unauth
+401, /api/catalog 404, portal bootstrap 200, and the seal census on
+/api/portal/catalog/products: 50 rows of ONLY stock_status +
+branch_availability, ZERO stock_quantity / thresholds / branch_stock.
+origin/main pushed 9c51adf2..06ceac74. Worktree removed. NOT in this deploy:
+06ceac74 (Part 550 POS banner self-heal, landed mid-sequence) - rides next.
