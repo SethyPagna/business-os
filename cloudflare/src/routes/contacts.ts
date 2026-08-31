@@ -1610,19 +1610,29 @@ app.get('/customers/link-conflicts', async (c) => {
   const salePhone = PHONE_KEY_SQL('s.customer_phone')
   const custPhone = PHONE_KEY_SQL('c.phone')
   const anyCustPhone = PHONE_KEY_SQL('c2.phone')
+  // "Show kept" -- bring back groups previously kept-as-is (dismissed) too,
+  // flagged `dismissed:1`, so a wrongly-kept sale-link conflict can be
+  // reopened and resolved. Default stays open-conflicts-only.
+  const includeDismissed = ['1', 'true', 'yes'].includes(String(c.req.query('includeDismissed') || '').toLowerCase())
 
   type MismatchRow = {
     customer_id: number; customer_name: string | null; customer_phone: string | null
     sale_phone: string; phone_key: string; sale_name: string | null
     sale_count: number; first_at: string; last_at: string; total_usd: number
     phone_owner_count: number; suggested_id: number | null; suggested_name: string | null; suggested_phone: string | null
+    dismissed: number
   }
   const mismatches = await db.prepare(`
     SELECT g.*,
       (SELECT COUNT(*) FROM customers c2 WHERE ${anyCustPhone} = g.phone_key) AS phone_owner_count,
       (SELECT c2.id FROM customers c2 WHERE ${anyCustPhone} = g.phone_key LIMIT 1) AS suggested_id,
       (SELECT c2.name FROM customers c2 WHERE ${anyCustPhone} = g.phone_key LIMIT 1) AS suggested_name,
-      (SELECT c2.phone FROM customers c2 WHERE ${anyCustPhone} = g.phone_key LIMIT 1) AS suggested_phone
+      (SELECT c2.phone FROM customers c2 WHERE ${anyCustPhone} = g.phone_key LIMIT 1) AS suggested_phone,
+      EXISTS (
+        SELECT 1 FROM contact_duplicate_dismissals d
+        WHERE d.contact_table = 'customers' AND d.cluster_type = 'link_mismatch'
+          AND d.cluster_value = g.customer_id || '|' || g.phone_key
+      ) AS dismissed
     FROM (
       SELECT s.customer_id, c.name AS customer_name, c.phone AS customer_phone,
              MAX(trim(s.customer_phone)) AS sale_phone, ${salePhone} AS phone_key,
@@ -1633,11 +1643,11 @@ app.get('/customers/link-conflicts', async (c) => {
       WHERE ${salePhone} <> '' AND ${salePhone} <> ${custPhone}
       GROUP BY s.customer_id, ${salePhone}
     ) g
-    WHERE NOT EXISTS (
+    ${includeDismissed ? '' : `WHERE NOT EXISTS (
       SELECT 1 FROM contact_duplicate_dismissals d
       WHERE d.contact_table = 'customers' AND d.cluster_type = 'link_mismatch'
         AND d.cluster_value = g.customer_id || '|' || g.phone_key
-    )
+    )`}
     ORDER BY g.last_at DESC
     LIMIT 200
   `).all<MismatchRow>({})
@@ -1646,13 +1656,19 @@ app.get('/customers/link-conflicts', async (c) => {
     name: string; phone: string; phone_key: string
     sale_count: number; first_at: string; last_at: string; total_usd: number
     phone_owner_count: number; suggested_id: number | null; suggested_name: string | null; suggested_phone: string | null
+    dismissed: number
   }
   const missing = await db.prepare(`
     SELECT g.*,
       (SELECT COUNT(*) FROM customers c2 WHERE g.phone_key <> '' AND ${anyCustPhone} = g.phone_key) AS phone_owner_count,
       (SELECT c2.id FROM customers c2 WHERE g.phone_key <> '' AND ${anyCustPhone} = g.phone_key LIMIT 1) AS suggested_id,
       (SELECT c2.name FROM customers c2 WHERE g.phone_key <> '' AND ${anyCustPhone} = g.phone_key LIMIT 1) AS suggested_name,
-      (SELECT c2.phone FROM customers c2 WHERE g.phone_key <> '' AND ${anyCustPhone} = g.phone_key LIMIT 1) AS suggested_phone
+      (SELECT c2.phone FROM customers c2 WHERE g.phone_key <> '' AND ${anyCustPhone} = g.phone_key LIMIT 1) AS suggested_phone,
+      EXISTS (
+        SELECT 1 FROM contact_duplicate_dismissals d
+        WHERE d.contact_table = 'customers' AND d.cluster_type = 'link_missing'
+          AND d.cluster_value = lower(g.name) || '|' || g.phone_key
+      ) AS dismissed
     FROM (
       SELECT MAX(trim(COALESCE(s.customer_name,''))) AS name,
              MAX(trim(COALESCE(s.customer_phone,''))) AS phone,
@@ -1664,11 +1680,11 @@ app.get('/customers/link-conflicts', async (c) => {
         AND (trim(COALESCE(s.customer_name,'')) <> '' OR trim(COALESCE(s.customer_phone,'')) <> '')
       GROUP BY lower(trim(COALESCE(s.customer_name,''))), ${salePhone}
     ) g
-    WHERE NOT EXISTS (
+    ${includeDismissed ? '' : `WHERE NOT EXISTS (
       SELECT 1 FROM contact_duplicate_dismissals d
       WHERE d.contact_table = 'customers' AND d.cluster_type = 'link_missing'
         AND d.cluster_value = lower(g.name) || '|' || g.phone_key
-    )
+    )`}
     ORDER BY g.sale_count DESC, g.last_at DESC
     LIMIT 200
   `).all<MissingRow>({})
@@ -1766,6 +1782,25 @@ app.post('/customers/link-conflicts/dismiss', async (c) => {
     ON CONFLICT(contact_table, cluster_type, cluster_value) DO UPDATE SET
       dismissed_by_id = @byId, dismissed_by_name = @byName, dismissed_at = CURRENT_TIMESTAMP
   `).run({ kind, value, byId: user?.id ?? null, byName: user?.name ?? null })
+  return c.json({ ok: true })
+})
+
+// Reopen a kept-as-is sale-link conflict group -- the inverse of the dismiss
+// above, dropping the ledger marker so the group returns to the live sweep and
+// can be relinked/resolved. Keeping a conflict is never a one-way hide. The
+// cluster_value is the exact key the sweep dismissed with (mismatch:
+// customer_id|phone_key, missing: lower(name)|phone_key), so an exact-match
+// delete is right here.
+app.post('/customers/link-conflicts/undismiss', async (c) => {
+  const body = (await c.req.json<Record<string, unknown>>().catch(() => ({}))) as Record<string, unknown>
+  const kind = body.kind === 'mismatch' ? 'link_mismatch' : body.kind === 'missing' ? 'link_missing' : null
+  const value = String(body.value || '').trim()
+  if (!kind || !value) return c.json({ error: 'kind ("mismatch" or "missing") and value are required' }, 400)
+  const db = getDb(c.env)
+  await db.prepare(`
+    DELETE FROM contact_duplicate_dismissals
+    WHERE contact_table = 'customers' AND cluster_type = @kind AND cluster_value = @value
+  `).run({ kind, value })
   return c.json({ ok: true })
 })
 

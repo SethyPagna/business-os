@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState } from 'react'
 import RefreshCw from 'lucide-react/dist/esm/icons/refresh-cw.js'
+import RotateCcw from 'lucide-react/dist/esm/icons/rotate-ccw.js'
 import EyeOff from 'lucide-react/dist/esm/icons/eye-off.js'
 import Link2 from 'lucide-react/dist/esm/icons/link-2.js'
 import UserPlus from 'lucide-react/dist/esm/icons/user-round-plus.js'
 import { fmtDate } from '../../utils/formatters'
 import {
-  dismissSaleLinkConflict, getSaleLinkConflicts, relinkConflictSales, resolveMissingContact,
+  dismissSaleLinkConflict, undismissSaleLinkConflict, getSaleLinkConflicts, relinkConflictSales, resolveMissingContact,
 } from './contactDuplicates'
 import type { SaleLinkConflicts, SaleLinkMismatch, SaleLinkMissing } from './contactDuplicates'
 
@@ -40,6 +41,10 @@ export default function SaleLinkConflictsSection({ t, notify }: { t: TranslateFn
   // key of the card whose action awaits its confirming second tap.
   const [pendingKey, setPendingKey] = useState<string | null>(null)
   const [busyKey, setBusyKey] = useState<string | null>(null)
+  // Reveal kept-as-is (dismissed) groups so they can be reopened -- keeping a
+  // conflict is reversible, never a one-way hide. Off by default; flipping it
+  // re-fetches with includeDismissed.
+  const [showKept, setShowKept] = useState(false)
   const aliveRef = useRef(true)
 
   useEffect(() => {
@@ -47,11 +52,11 @@ export default function SaleLinkConflictsSection({ t, notify }: { t: TranslateFn
     return () => { aliveRef.current = false }
   }, [])
 
-  const load = async () => {
+  const load = async (includeDismissed: boolean) => {
     setLoading(true)
     setError('')
     try {
-      const result = await getSaleLinkConflicts()
+      const result = await getSaleLinkConflicts({ includeDismissed })
       if (aliveRef.current) setData(result)
     } catch (e: unknown) {
       if (aliveRef.current) setError(e instanceof Error ? e.message : tr('link_conflicts_failed', 'Could not load sale-link conflicts'))
@@ -59,7 +64,7 @@ export default function SaleLinkConflictsSection({ t, notify }: { t: TranslateFn
       if (aliveRef.current) setLoading(false)
     }
   }
-  useEffect(() => { void load() }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { void load(showKept) }, [showKept]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const dropMismatch = (key: string) => setData((current) => (current ? { ...current, mismatches: current.mismatches.filter((row) => mismatchKey(row) !== key) } : current))
   const dropMissing = (key: string) => setData((current) => (current ? { ...current, missing: current.missing.filter((row) => missingKey(row) !== key) } : current))
@@ -118,6 +123,26 @@ export default function SaleLinkConflictsSection({ t, notify }: { t: TranslateFn
     }
   }
 
+  // Reopen a kept group -- drop the keep marker and flip it back to open in
+  // place (dismissed:0), so it stays visible with its resolve/relink actions.
+  // Only reachable from the "Show kept" view.
+  const handleReopen = async (kind: 'mismatch' | 'missing', key: string) => {
+    setBusyKey(key)
+    try {
+      await undismissSaleLinkConflict(kind, key)
+      setData((current) => {
+        if (!current) return current
+        if (kind === 'mismatch') return { ...current, mismatches: current.mismatches.map((row) => (mismatchKey(row) === key ? { ...row, dismissed: 0 } : row)) }
+        return { ...current, missing: current.missing.map((row) => (missingKey(row) === key ? { ...row, dismissed: 0 } : row)) }
+      })
+      notify(tr('duplicate_reopened', 'Reopened -- back in the review queue'))
+    } catch (e: unknown) {
+      notify(e instanceof Error ? e.message : tr('reopen_duplicate_failed', 'Could not reopen this cluster'), 'error')
+    } finally {
+      setBusyKey(null)
+    }
+  }
+
   const money = (value: unknown): string => `$${(Number(value) || 0).toFixed(2)}`
   const mismatches = data?.mismatches || []
   const missing = data?.missing || []
@@ -134,7 +159,20 @@ export default function SaleLinkConflictsSection({ t, notify }: { t: TranslateFn
           {tr('link_conflicts_hint', 'Sales whose customer link disagrees with the phone printed on the receipt, and sales naming a customer that has no contact record. Resolve or dismiss each group.')}
         </p>
         <button
-          onClick={() => void load()}
+          type="button"
+          onClick={() => setShowKept((v) => !v)}
+          title={tr('show_kept_hint', 'Show clusters you kept (marked not-a-duplicate) so they can be reopened')}
+          className={`inline-flex items-center gap-1 rounded-lg px-2 py-1.5 text-[11px] font-medium transition-colors ${
+            showKept
+              ? 'bg-slate-950 text-white dark:bg-white dark:text-slate-950'
+              : 'bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-zinc-800 dark:text-gray-300 dark:hover:bg-zinc-700'
+          }`}
+        >
+          <RotateCcw className="h-3 w-3" />
+          {tr('show_kept', 'Show kept')}
+        </button>
+        <button
+          onClick={() => void load(showKept)}
           disabled={loading}
           className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium text-blue-600 hover:bg-blue-50 disabled:opacity-50 dark:hover:bg-blue-900/20"
         >
@@ -163,16 +201,32 @@ export default function SaleLinkConflictsSection({ t, notify }: { t: TranslateFn
             return (
               <div key={`mm-${key}`} className={`rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 dark:border-amber-900/40 dark:bg-amber-950/30 ${busy ? 'opacity-60' : ''}`}>
                 <div className="mb-1.5 flex items-center justify-between gap-2">
-                  <span className="text-xs font-semibold text-amber-800 dark:text-amber-300">{tr('link_mismatch_title', 'Phone differs from linked contact')}</span>
-                  <button
-                    type="button"
-                    onClick={() => void handleDismiss('mismatch', key)}
-                    disabled={busy}
-                    title={tr('keep_current_link', 'Keep current link')}
-                    className="rounded-lg p-1 text-gray-400 transition hover:bg-black/5 hover:text-gray-600 disabled:opacity-50 dark:hover:bg-white/10 dark:hover:text-gray-200"
-                  >
-                    <EyeOff className="h-3.5 w-3.5" />
-                  </button>
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-xs font-semibold text-amber-800 dark:text-amber-300">{tr('link_mismatch_title', 'Phone differs from linked contact')}</span>
+                    {row.dismissed ? <span className="rounded bg-gray-200 px-1.5 py-0.5 text-[10px] font-medium text-gray-600 dark:bg-white/10 dark:text-gray-300">{tr('kept', 'Kept')}</span> : null}
+                  </div>
+                  {row.dismissed ? (
+                    <button
+                      type="button"
+                      onClick={() => void handleReopen('mismatch', key)}
+                      disabled={busy}
+                      title={tr('reopen_duplicate', 'Reopen -- put this back in the review queue to merge or resolve')}
+                      className="inline-flex items-center gap-1 rounded-lg px-1.5 py-1 text-[11px] font-medium text-blue-600 transition hover:bg-blue-50 disabled:opacity-50 dark:text-blue-300 dark:hover:bg-blue-900/20"
+                    >
+                      <RotateCcw className="h-3.5 w-3.5" />
+                      {tr('reopen', 'Reopen')}
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => void handleDismiss('mismatch', key)}
+                      disabled={busy}
+                      title={tr('keep_current_link', 'Keep current link')}
+                      className="rounded-lg p-1 text-gray-400 transition hover:bg-black/5 hover:text-gray-600 disabled:opacity-50 dark:hover:bg-white/10 dark:hover:text-gray-200"
+                    >
+                      <EyeOff className="h-3.5 w-3.5" />
+                    </button>
+                  )}
                 </div>
                 <div className="space-y-0.5 text-sm">
                   <div className="font-medium text-gray-900 dark:text-white">{row.sale_name || row.sale_phone}
@@ -219,16 +273,32 @@ export default function SaleLinkConflictsSection({ t, notify }: { t: TranslateFn
             return (
               <div key={`ms-${key}`} className={`rounded-xl border border-blue-200 bg-blue-50 px-3 py-2.5 dark:border-blue-900/40 dark:bg-blue-950/30 ${busy ? 'opacity-60' : ''}`}>
                 <div className="mb-1.5 flex items-center justify-between gap-2">
-                  <span className="text-xs font-semibold text-blue-700 dark:text-blue-300">{tr('link_missing_title', 'No matching contact')}</span>
-                  <button
-                    type="button"
-                    onClick={() => void handleDismiss('missing', key)}
-                    disabled={busy}
-                    title={tr('ignore_group', 'Ignore')}
-                    className="rounded-lg p-1 text-gray-400 transition hover:bg-black/5 hover:text-gray-600 disabled:opacity-50 dark:hover:bg-white/10 dark:hover:text-gray-200"
-                  >
-                    <EyeOff className="h-3.5 w-3.5" />
-                  </button>
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-xs font-semibold text-blue-700 dark:text-blue-300">{tr('link_missing_title', 'No matching contact')}</span>
+                    {row.dismissed ? <span className="rounded bg-gray-200 px-1.5 py-0.5 text-[10px] font-medium text-gray-600 dark:bg-white/10 dark:text-gray-300">{tr('kept', 'Kept')}</span> : null}
+                  </div>
+                  {row.dismissed ? (
+                    <button
+                      type="button"
+                      onClick={() => void handleReopen('missing', key)}
+                      disabled={busy}
+                      title={tr('reopen_duplicate', 'Reopen -- put this back in the review queue to merge or resolve')}
+                      className="inline-flex items-center gap-1 rounded-lg px-1.5 py-1 text-[11px] font-medium text-blue-600 transition hover:bg-blue-50 disabled:opacity-50 dark:text-blue-300 dark:hover:bg-blue-900/20"
+                    >
+                      <RotateCcw className="h-3.5 w-3.5" />
+                      {tr('reopen', 'Reopen')}
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => void handleDismiss('missing', key)}
+                      disabled={busy}
+                      title={tr('ignore_group', 'Ignore')}
+                      className="rounded-lg p-1 text-gray-400 transition hover:bg-black/5 hover:text-gray-600 disabled:opacity-50 dark:hover:bg-white/10 dark:hover:text-gray-200"
+                    >
+                      <EyeOff className="h-3.5 w-3.5" />
+                    </button>
+                  )}
                 </div>
                 <div className="space-y-0.5 text-sm">
                   <div className="font-medium text-gray-900 dark:text-white">{row.name || row.phone}

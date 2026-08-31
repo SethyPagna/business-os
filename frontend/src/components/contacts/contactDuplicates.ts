@@ -179,6 +179,9 @@ export type SaleLinkMismatch = {
   suggested_id: number | null
   suggested_name: string | null
   suggested_phone: string | null
+  // 1 when this group was previously kept-as-is (dismissed) and only surfaced
+  // because the section asked to include kept groups -- shows a Reopen action.
+  dismissed?: number
 }
 
 export type SaleLinkMissing = {
@@ -193,12 +196,16 @@ export type SaleLinkMissing = {
   suggested_id: number | null
   suggested_name: string | null
   suggested_phone: string | null
+  dismissed?: number
 }
 
 export type SaleLinkConflicts = { mismatches: SaleLinkMismatch[]; missing: SaleLinkMissing[] }
 
-export async function getSaleLinkConflicts(): Promise<SaleLinkConflicts> {
-  const result = await apiFetch('GET', '/api/customers/link-conflicts') as Partial<SaleLinkConflicts> | null
+export async function getSaleLinkConflicts(opts: { includeDismissed?: boolean } = {}): Promise<SaleLinkConflicts> {
+  const path = opts.includeDismissed
+    ? '/api/customers/link-conflicts?includeDismissed=1'
+    : '/api/customers/link-conflicts'
+  const result = await apiFetch('GET', path) as Partial<SaleLinkConflicts> | null
   return {
     mismatches: Array.isArray(result?.mismatches) ? result!.mismatches! : [],
     missing: Array.isArray(result?.missing) ? result!.missing! : [],
@@ -215,4 +222,12 @@ export async function resolveMissingContact(payload: { name: string; phone: stri
 
 export async function dismissSaleLinkConflict(kind: 'mismatch' | 'missing', value: string): Promise<void> {
   await apiFetch('POST', '/api/customers/link-conflicts/dismiss', { kind, value })
+}
+
+// Reopen a kept-as-is sale-link conflict group (routes/contacts.ts's POST
+// .../link-conflicts/undismiss) -- drops the keep marker so the group returns
+// to the live sweep and can be relinked/resolved. Keeping is never a one-way
+// hide.
+export async function undismissSaleLinkConflict(kind: 'mismatch' | 'missing', value: string): Promise<void> {
+  await apiFetch('POST', '/api/customers/link-conflicts/undismiss', { kind, value })
 }
