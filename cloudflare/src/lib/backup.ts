@@ -105,9 +105,16 @@ export function selectAssetsToCopy(
 // ai_response_logs (logs), organizations/organization_groups (owned and
 // reseeded by coreDataInvariants -- restoring an old org identity row would
 // fight its PREVIOUS_IDENTITIES adoption), business_os_migration_status
-// (live migration bookkeeping), import_job_source_rows/
+// (live migration bookkeeping), import_job_rows/import_job_source_rows/
 // import_job_row_signatures/import_job_image_matches/import_job_image_renames
-// (bulky regenerable staging the K4 retention sweep prunes),
+// (bulky regenerable staging the K4 retention sweep prunes -- import_job_rows,
+// the per-row analyze/apply RESULT log, was originally IN this list and on
+// production reached 244k rows / ~246MB, which alone made the streamed backup
+// manifest large enough to push a full scheduled backup toward the CPU /
+// wall-time ceiling; it is the 24h detail tier, not business data, and its
+// re-apply safety lives in the separately-kept import_*_commits/guards
+// idempotency ledgers, so dropping it costs a restore neither correctness nor
+// idempotency),
 // system_flags (0089 -- the restore MAINTENANCE flag lives there precisely
 // so the restore that sets it cannot delete it; backing it up would restore
 // a stale "maintenance on" state), and the per-custom-table data tables
@@ -155,7 +162,6 @@ export const BACKUP_TABLES = [
   'import_jobs',
   'import_job_files',
   'import_job_batches',
-  'import_job_rows',
   'import_job_errors',
   'import_auto_merges',
   'import_sales_commits',
