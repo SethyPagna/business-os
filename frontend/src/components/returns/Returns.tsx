@@ -975,9 +975,13 @@ export default function Returns() {
     ]
   }, [availableYears, isReturnsFilterMenuOpen, monthFilter, returnGroupMode, scope, tr, typeFilter, typeOptions, yearFilter])
 
+  // Scope (customer vs supplier) is a VIEW, not a filter: it's a mandatory
+  // one-of-two with no neutral "all", so being on the supplier view must
+  // not light up "Filters (1)" -- and Clear must not teleport the user
+  // back to the customer view (see FilterMenu onClear below).
   const activeFilterCount = useMemo(
-    () => countActiveFlags([yearFilter !== 'all', monthFilter !== 'all', typeFilter !== 'all', scope !== CUSTOMER_SCOPE, returnGroupMode !== 'time']),
-    [monthFilter, returnGroupMode, scope, typeFilter, yearFilter],
+    () => countActiveFlags([yearFilter !== 'all', monthFilter !== 'all', typeFilter !== 'all', returnGroupMode !== 'time']),
+    [monthFilter, returnGroupMode, typeFilter, yearFilter],
   )
   const showReturnActionGroups = returnGroupMode === 'time+action'
 
@@ -1087,7 +1091,6 @@ export default function Returns() {
             sections={filterSections}
             onOpenChange={setIsReturnsFilterMenuOpen}
             onClear={() => {
-              setScope(CUSTOMER_SCOPE)
               setYearFilter('all')
               setMonthFilter('all')
               setTypeFilter('all')

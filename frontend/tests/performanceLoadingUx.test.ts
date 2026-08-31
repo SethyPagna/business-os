@@ -2106,10 +2106,12 @@ assert.match(
   'returns stats should split customer/supplier rows and totals in one pass, from the search-only (not type-filtered) view so switching the type filter does not zero out the other stat tiles',
 )
 // Sort moved onto the SortChip (unified listSort), so the badge counts only
-// true filters now -- direction is no longer one of them.
+// true filters now -- direction is no longer one of them, and neither is
+// scope (customer vs supplier is a mandatory one-of-two VIEW with no
+// neutral, so being on the supplier view must not light up "Filters (1)").
 assert.match(
   returns,
-  /countActiveFlags\(\[yearFilter !== 'all', monthFilter !== 'all', typeFilter !== 'all', scope !== CUSTOMER_SCOPE, returnGroupMode !== 'time'\]\)/,
+  /countActiveFlags\(\[yearFilter !== 'all', monthFilter !== 'all', typeFilter !== 'all', returnGroupMode !== 'time'\]\)/,
   'returns active filter count should avoid temporary filtered boolean arrays',
 )
 assert.doesNotMatch(
