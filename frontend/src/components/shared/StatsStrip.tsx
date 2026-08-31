@@ -215,12 +215,15 @@ export default function StatsStrip({
                 className={`flex w-[calc(50%-0.375rem)] min-w-0 flex-col rounded-lg border px-2 py-1 text-left transition-colors sm:w-40 ${
                   isOpen
                     ? 'border-blue-300 bg-blue-50/70 dark:border-blue-600 dark:bg-blue-950/50'
-                    // Dark mode: neutral-800 (== the app's --dm-card #262626, its
-                    // standard elevated-panel colour) with a neutral-600 border.
-                    // The old dark:bg-gray-900 sat at nearly the page colour, so
-                    // the cards vanished into the background — user: "dark mode ...
-                    // stats is not noticeable".
-                    : 'border-gray-200 bg-white dark:border-neutral-600 dark:bg-neutral-800'
+                    // Dark mode: reference --dm-card (#262626) DIRECTLY, the app's
+                    // elevated-panel colour used by every .card. The old
+                    // dark:bg-gray-900 sat at nearly the page colour so the cards
+                    // vanished (user: "dark mode ... stats is not noticeable"); and
+                    // a plain dark:bg-neutral-800 would NOT work either — main.css
+                    // deliberately remaps dark:bg-*-800 to the RECESSED --dm-input
+                    // and dark:bg-*-900 to --dm-page, so only the var reference
+                    // lands on the elevated tone with a proper border.
+                    : 'border-gray-200 bg-white dark:border-[var(--dm-border-strong)] dark:bg-[var(--dm-card)]'
                 } ${foldable ? 'cursor-pointer hover:border-blue-300 dark:hover:border-blue-500' : 'cursor-default'}`}
               >
                 <span className="flex items-center gap-1 text-[10.5px] font-medium leading-4 text-gray-500 dark:text-gray-400">
