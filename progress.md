@@ -128,11 +128,25 @@ the Sales-page `/stats` header and the Reports analytics kernel to **ONE canonic
   revenue are committed + green (certified worktree at committed HEAD). I hold all deploy/migrate/secrets.
   UPDATE (session 62): backend business-day work has LANDED (committed `efcf21e3` — kernel/sales/returns/
   compat/products bucket UTC+7; only `auditLogQuery.ts` + `stockLedgerQuery.ts` still dirty, unrelated to
-  revenue). `salesAnalytics.ts` + `sales.ts` are now CLEAN, so **session 62 is IMPLEMENTING the revenue
-  reconciliation now** (net-sales canonical def) on `salesAnalytics.ts` `salesLevelTotals`/`deriveTotals`
-  + `sales.ts` `/stats` revenue query (also sales.ts:2049 per-product `total_usd`→net, secondary) —
-  path-scoped commit + real-SQLite convergence test, then ping 7b. **DATE LANE: hand off the
-  `salesAnalytics.ts`/`sales.ts` REVENUE lines to 62; coordinate before re-touching them.**
+  revenue).
+  ✅ **REVENUE RECONCILIATION DONE (session 62, committed `9354f1ce`) — HEAD is coherent, both surfaces
+  on the canonical net-sales definition.** The `/stats` header change (routes/sales.ts: revenue +
+  pending base → `subtotal − discount − membership_discount`, minus customer refunds) had already
+  landed bundled into the date commit `67b8e3b9`. Commit `9354f1ce` brings the KERNEL to the
+  byte-identical basis: `salesLevelTotals` emits `recognized_net / pending / recognized tax /
+  recognized (customer & store) delivery / refund` via a pre-aggregated returns join (same
+  `COALESCE(NULLIF(sale_status,''),'completed')` normalization as `/stats`); `deriveTotals` computes
+  `revenue = recognized net − customer refunds`, splits `awaiting_payment` into `pending_revenue_usd`,
+  exposes secondary `collected_total_usd`, and keeps profit = revenue − recognized COGS − store
+  delivery. Trend (`getSalesPeriodSeries`) + per-sale drill (`getSalesDayReport`) feed the same fields
+  through the shared `deriveTotals`, so the SUM invariant holds. NEW pure test
+  `test-sales-revenue-convergence-pure.cjs` runs the REAL compiled kernel vs the REAL `/stats` SELECT
+  (extracted from source) over one mixed dataset and proves both == the hand-computed net-sales number
+  (16 checks). tsc clean; existing analytics + daterange pure tests green.
+  FOLLOW-UP (deferred, documented): sales.ts:2049 + `getProductSalesBreakdown` per-product revenue is
+  still `SUM(sale_items.total_usd)` — a different (per-line) granularity, not the sale-level header↔kernel
+  convergence; left as-is (whole-sale discounts can't be cleanly allocated per product without a rule).
+  **DATE LANE handed back: the `salesAnalytics.ts`/`sales.ts` revenue lines are now settled at HEAD.**
 
 **✅ GOOGLE-DRIVE OAUTH-URL bugfix (Sep 1, this session — DONE, committed `3820a971`, deployable).**
 `ERR Google Drive connection failed: Google Drive connection failed`. Root cause: `Backup.tsx`
