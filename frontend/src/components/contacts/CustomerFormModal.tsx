@@ -11,6 +11,7 @@ import type { ContactOption } from './contactOptionUtils'
 import { generateCustomerMembershipNumber } from './customerMembershipNumber'
 import { useContactDuplicateFlag } from './useContactDuplicateFlag'
 import DuplicateFlagBanner from './DuplicateFlagBanner'
+import ConfirmDialog, { type ConfirmReviewItem } from '../shared/ConfirmDialog.tsx'
 
 type TranslateFn = (key: string) => string | undefined
 
@@ -124,7 +125,11 @@ export default function CustomerFormModal({ customer, onSave, onClose, t }: Cust
   })
   const [saving, setSaving] = useState(false)
   const [localError, setLocalError] = useState('')
+  // Part 563: the review dialog is open (handleSubmit validated + opened it;
+  // commitCustomer calls onSave on confirm).
+  const [confirmOpen, setConfirmOpen] = useState(false)
   const duplicateMatches = useContactDuplicateFlag('customers', form.name, form.phone, customer?.id)
+  const exactMatch = duplicateMatches.find((match) => match.severity === 'exact_match')
 
   const setField = <Key extends keyof CustomerFormState>(key: Key, value: CustomerFormState[Key]) => setForm((current) => ({ ...current, [key]: value }))
   const addOption = () => setOptions((current) => {
@@ -133,7 +138,11 @@ export default function CustomerFormModal({ customer, onSave, onClose, t }: Cust
   })
   const removeOption = (index: number) => setOptions((current) => current.filter((_, itemIndex) => itemIndex !== index))
   const updateOption = (index: number, nextOption: ContactOption) => setOptions((current) => current.map((item, itemIndex) => (itemIndex === index ? nextOption : item)))
-  const handleSubmit = async () => {
+  // Part 563: validate, then open the review dialog. commitCustomer calls
+  // onSave once confirmed. The old exact-duplicate window.confirm() is folded
+  // INTO the review dialog (danger note when an exact match exists) so there is
+  // one on-brand confirmation instead of a native popup plus a save.
+  const handleSubmit = () => {
     if (saving) return
     const name = String(form.name || '').trim()
     const membershipNumber = String(form.membership_number || '').trim()
@@ -150,11 +159,26 @@ export default function CustomerFormModal({ customer, onSave, onClose, t }: Cust
       setLocalError(`This phone number already belongs to "${phoneConflict.name}". Each phone number can only be used by one customer.`)
       return
     }
-    const exactMatch = duplicateMatches.find((match) => match.severity === 'exact_match')
-    if (exactMatch && !window.confirm(`"${exactMatch.name}" already has this exact name and phone number. Create a separate customer record anyway?`)) {
-      return
-    }
     setLocalError('')
+    setConfirmOpen(true)
+  }
+
+  const buildCustomerReviewItems = (): ConfirmReviewItem[] => {
+    const items: ConfirmReviewItem[] = [
+      { label: tr(t, 'membership_number', 'Membership number'), value: String(form.membership_number || '').trim().toUpperCase() },
+    ]
+    const phone = String(form.phone || '').trim()
+    if (phone) items.push({ label: tr(t, 'phone_number', 'Phone Number'), value: phone })
+    const email = String(form.email || '').trim()
+    if (email) items.push({ label: tr(t, 'email', 'Email'), value: email })
+    return items
+  }
+
+  const commitCustomer = async () => {
+    if (saving) return
+    setConfirmOpen(false)
+    const name = String(form.name || '').trim()
+    const membershipNumber = String(form.membership_number || '').trim()
     setSaving(true)
     try {
       await Promise.resolve(onSave({
@@ -281,6 +305,22 @@ export default function CustomerFormModal({ customer, onSave, onClose, t }: Cust
           <button className="btn-secondary" onClick={onClose} disabled={saving}>{tr(t, 'cancel', 'Cancel')}</button>
         </div>
       </div>
+      {confirmOpen ? (
+        <ConfirmDialog
+          t={t}
+          title={customer ? tr(t, 'edit_customer', 'Edit Customer') : tr(t, 'add_customer', 'Add Customer')}
+          message={String(form.name || '').trim()}
+          items={buildCustomerReviewItems()}
+          note={exactMatch ? `"${exactMatch.name}" ${tr(t, 'customer_exact_duplicate_confirm', 'already has this exact name and phone number. Create a separate customer record anyway?')}` : undefined}
+          danger={!!exactMatch}
+          confirmLabel={customer ? tr(t, 'save', 'Save') : tr(t, 'add_customer', 'Add Customer')}
+          cancelLabel={tr(t, 'cancel', 'Cancel')}
+          working={saving}
+          workingLabel={tr(t, 'saving', 'Saving...')}
+          onConfirm={commitCustomer}
+          onClose={() => { if (!saving) setConfirmOpen(false) }}
+        />
+      ) : null}
     </Modal>
   )
 }

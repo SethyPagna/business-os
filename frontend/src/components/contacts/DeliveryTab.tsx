@@ -17,6 +17,7 @@ import { useApp as useAppHook, useSync as useSyncHook } from '../../AppContext.t
 import type { QueryParams } from '../../api/query.ts'
 import { fmtDateTime24 } from '../../utils/formatters'
 import Modal from '../shared/Modal'
+import ConfirmDialog, { type ConfirmReviewItem } from '../shared/ConfirmDialog.tsx'
 import AppSelect from '../shared/AppSelect.tsx'
 import FilterMenu from '../shared/FilterMenu'
 import SearchInput from '../shared/SearchInput'
@@ -261,6 +262,7 @@ function DeliveryForm({ contact, onSave, onClose, t }: DeliveryFormProps) {
   })
   const [saving, setSaving] = useState(false)
   const [localError, setLocalError] = useState('')
+  const [confirmOpen, setConfirmOpen] = useState(false)
   const set = (key: keyof DeliveryPayload, value: string) => setForm((current) => ({ ...current, [key]: value }))
   const addOption = () => setOptions((current) => {
     if (current.length >= CONTACT_OPTION_LIMIT) return current
@@ -277,21 +279,37 @@ function DeliveryForm({ contact, onSave, onClose, t }: DeliveryFormProps) {
     livePrimaryOption.phone || form.phone || '',
     contact?.id,
   )
-  const handleSave = async () => {
+  const exactMatch = duplicateMatches.find((match) => match.severity === 'exact_match')
+
+  // Part 563: validate, then open the review dialog; commitDelivery saves on
+  // confirm. The exact-duplicate window.confirm() is folded into the dialog
+  // (danger note) instead of a separate native popup.
+  const handleSave = () => {
     if (saving) return
-    const primaryOption = getPrimaryContactOption(options, {
-      fallback: { name: form.name || '', phone: form.phone || '', area: form.area || '' },
-    })
     const phoneConflict = duplicateMatches.find((match) => match.severity === 'phone_conflict')
     if (phoneConflict) {
       setLocalError(`This phone number already belongs to "${phoneConflict.name}". Each phone number can only be used by one delivery contact.`)
       return
     }
-    const exactMatch = duplicateMatches.find((match) => match.severity === 'exact_match')
-    if (exactMatch && !window.confirm(`"${exactMatch.name}" already has this exact name and phone number. Create a separate delivery contact anyway?`)) {
-      return
-    }
     setLocalError('')
+    setConfirmOpen(true)
+  }
+
+  const buildDeliveryReviewItems = (): ConfirmReviewItem[] => {
+    const items: ConfirmReviewItem[] = []
+    const phone = (livePrimaryOption.phone || form.phone || '').trim()
+    if (phone) items.push({ label: t('phone_number') || 'Phone', value: phone })
+    const area = (livePrimaryOption.area || form.area || '').trim()
+    if (area) items.push({ label: t('area') || 'Area', value: area })
+    return items
+  }
+
+  const commitDelivery = async () => {
+    if (saving) return
+    setConfirmOpen(false)
+    const primaryOption = getPrimaryContactOption(options, {
+      fallback: { name: form.name || '', phone: form.phone || '', area: form.area || '' },
+    })
     setSaving(true)
     try {
       await Promise.resolve(onSave({
@@ -383,6 +401,22 @@ function DeliveryForm({ contact, onSave, onClose, t }: DeliveryFormProps) {
           <button type="button" className="btn-secondary" onClick={onClose} disabled={saving}>{t('cancel')}</button>
         </div>
       </div>
+      {confirmOpen ? (
+        <ConfirmDialog
+          t={t}
+          title={contact ? 'Edit Delivery Contact' : 'Add Delivery Contact'}
+          message={(livePrimaryOption.name || form.name || '').trim()}
+          items={buildDeliveryReviewItems()}
+          note={exactMatch ? `"${exactMatch.name}" already has this exact name and phone number. Create a separate delivery contact anyway?` : undefined}
+          danger={!!exactMatch}
+          confirmLabel={t('save') || 'Save'}
+          cancelLabel={t('cancel') || 'Cancel'}
+          working={saving}
+          workingLabel={t('saving') || 'Saving...'}
+          onConfirm={commitDelivery}
+          onClose={() => { if (!saving) setConfirmOpen(false) }}
+        />
+      ) : null}
     </Modal>
   )
 }

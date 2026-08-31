@@ -18,6 +18,7 @@ import { useApp as useAppHook, useSync as useSyncHook } from '../../AppContext.t
 import type { QueryParams } from '../../api/query.ts'
 import { fmtDateTime24 } from '../../utils/formatters'
 import Modal from '../shared/Modal'
+import ConfirmDialog, { type ConfirmReviewItem } from '../shared/ConfirmDialog.tsx'
 import AppSelect from '../shared/AppSelect.tsx'
 import FilterMenu from '../shared/FilterMenu'
 import SearchInput from '../shared/SearchInput'
@@ -219,8 +220,10 @@ function SupplierForm({ supplier, onSave, onClose, t }: SupplierFormProps) {
   })
   const [saving, setSaving] = useState(false)
   const [localError, setLocalError] = useState('')
+  const [confirmOpen, setConfirmOpen] = useState(false)
   const primaryOptionPhone = getPrimaryContactOption(options).phone || form.phone || ''
   const duplicateMatches = useContactDuplicateFlag('suppliers', form.name || '', primaryOptionPhone, supplier?.id)
+  const exactMatch = duplicateMatches.find((match) => match.severity === 'exact_match')
   const set = (key: keyof SupplierPayload, value: string) => setForm((current) => ({ ...current, [key]: value }))
   const addOption = () => setOptions((current) => {
     if (current.length >= CONTACT_OPTION_LIMIT) return current
@@ -228,18 +231,34 @@ function SupplierForm({ supplier, onSave, onClose, t }: SupplierFormProps) {
   })
   const updateOption = (index: number, nextOption: ContactOption) => setOptions((current) => current.map((option, itemIndex) => (itemIndex === index ? nextOption : option)))
   const removeOption = (index: number) => setOptions((current) => current.filter((_, itemIndex) => itemIndex !== index))
-  const handleSubmit = async () => {
+  // Part 563: validate, then open the review dialog; commitSupplier saves on
+  // confirm. The exact-duplicate window.confirm() is folded into the dialog
+  // (danger note) instead of a separate native popup.
+  const handleSubmit = () => {
     if (saving) return
     const phoneConflict = duplicateMatches.find((match) => match.severity === 'phone_conflict')
     if (phoneConflict) {
       setLocalError(`This phone number already belongs to "${phoneConflict.name}". Each phone number can only be used by one supplier.`)
       return
     }
-    const exactMatch = duplicateMatches.find((match) => match.severity === 'exact_match')
-    if (exactMatch && !window.confirm(`"${exactMatch.name}" already has this exact name and phone number. Create a separate supplier record anyway?`)) {
-      return
-    }
     setLocalError('')
+    setConfirmOpen(true)
+  }
+
+  const buildSupplierReviewItems = (): ConfirmReviewItem[] => {
+    const items: ConfirmReviewItem[] = []
+    const company = String(form.company || '').trim()
+    if (company) items.push({ label: t('company') || 'Company', value: company })
+    const phone = primaryOptionPhone.trim()
+    if (phone) items.push({ label: t('phone_number') || 'Phone', value: phone })
+    const email = String(getPrimaryContactOption(options).email || form.email || '').trim()
+    if (email) items.push({ label: t('email') || 'Email', value: email })
+    return items
+  }
+
+  const commitSupplier = async () => {
+    if (saving) return
+    setConfirmOpen(false)
     setSaving(true)
     try {
       const primaryOption = getPrimaryContactOption(options)
@@ -366,6 +385,22 @@ function SupplierForm({ supplier, onSave, onClose, t }: SupplierFormProps) {
           <button className="btn-secondary" onClick={onClose} disabled={saving}>{t('cancel')}</button>
         </div>
       </div>
+      {confirmOpen ? (
+        <ConfirmDialog
+          t={t}
+          title={supplier ? (t('edit_supplier') || 'Edit Supplier') : (t('add_supplier') || 'Add Supplier')}
+          message={String(form.name || '').trim()}
+          items={buildSupplierReviewItems()}
+          note={exactMatch ? `"${exactMatch.name}" already has this exact name and phone number. Create a separate supplier record anyway?` : undefined}
+          danger={!!exactMatch}
+          confirmLabel={supplier ? (t('save') || 'Save') : (t('add_supplier') || 'Add Supplier')}
+          cancelLabel={t('cancel') || 'Cancel'}
+          working={saving}
+          workingLabel={t('saving') || 'Saving...'}
+          onConfirm={commitSupplier}
+          onClose={() => { if (!saving) setConfirmOpen(false) }}
+        />
+      ) : null}
     </Modal>
   )
 }
