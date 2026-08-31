@@ -452,7 +452,11 @@ export default function SalesDailyReport({ t, fmtUSD, active = true, range: exte
         <div className="ml-auto flex flex-wrap items-center gap-3 text-xs text-slate-500 dark:text-slate-400">
           <span>{rangeTotals.tx} {t('sales') || 'sales'}</span>
           <span>{t('revenue') || 'Revenue'}: <span className="font-semibold text-slate-900 dark:text-white">{fmtUSD(rangeTotals.revenue)}</span></span>
-          <span className="hidden sm:inline">{t('profit') || 'Profit'}: <span className={`font-semibold ${rangeTotals.profit < 0 ? 'text-red-600 dark:text-red-400' : 'text-emerald-700 dark:text-emerald-400'}`}>{fmtUSD(rangeTotals.profit)}</span></span>
+          {/* Visible on EVERY viewport (Part 548): this was `hidden
+              sm:inline`, so phones showed "N sales | Revenue" with no
+              Profit — the exact "reports are not showing profit near the
+              n sales | Revenue row" report. */}
+          <span>{t('profit') || 'Profit'}: <span className={`font-semibold ${rangeTotals.profit < 0 ? 'text-red-600 dark:text-red-400' : 'text-emerald-700 dark:text-emerald-400'}`}>{fmtUSD(rangeTotals.profit)}</span></span>
         </div>
       </div>
 

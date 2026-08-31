@@ -1195,7 +1195,11 @@ export default function Sales() {
         t={t}
         range={stripRange}
         onRangeChange={setStripRange}
-        actions={(
+        // History + Manage are SECONDARY controls: folded they sit on the
+        // chip row as before; open they move to the dedicated full-width
+        // date row (Part 548 — "start and end date can do one row fully
+        // plus history icon/button").
+        rangeActions={(
           <>
             <ActionHistoryBar history={actionHistory as unknown as ActionHistoryBarHistory} t={t} className="min-w-0" />
             <LazyPortalMenu

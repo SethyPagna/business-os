@@ -88,6 +88,38 @@ test('the whole strip hides behind a click-to-open Stats chip; cards wrap, never
   assert.ok(strip.includes('grid-cols-2'), 'cards wrap in a grid, 2-up on small screens')
 })
 
+test('Part 548: dedicated full-width date row + rangeActions placement rule', () => {
+  // User, Aug 31: "start and end date can do one row fully plus history
+  // icon/button, make use of full row... if stats are not many like only
+  // two, no need merge the history/export buttons in date — just merge
+  // with the stats". The range picker moves OUT of the chip row into its
+  // own row when open (presets visible on phones too — no hidden sm:),
+  // and rangeActions ride the date row on many-card pages / the stats
+  // row on few-card (≤3) pages.
+  const strip = read('src/components/shared/StatsStrip.tsx')
+  assert.ok(strip.includes('rangeActions'), 'the secondary-controls slot exists')
+  assert.ok(/const fewCards = cards\.length <= 3/.test(strip), 'few-card threshold is 3 (keeps Returns stable across its 2/3-card scopes)')
+  assert.ok(/statsOpen && !fewCards \? rangeActions : null/.test(strip), 'many cards -> secondary controls ride the date row')
+  assert.ok(/statsOpen && fewCards \? rangeActions : null/.test(strip), 'few cards -> secondary controls merge into the stats row')
+  assert.ok(!/hidden rounded-md.*sm:inline-flex/.test(strip), 'presets no longer hide on phones — the dedicated row has the width')
+  // Sales feeds History+Manage through the new slot; Returns feeds
+  // Export+History there while its Add button stays a PRIMARY action with
+  // an always-visible label.
+  assert.ok(read('src/components/sales/Sales.tsx').includes('rangeActions={('), 'Sales wires History/Manage as rangeActions')
+  const returns = read('src/components/returns/Returns.tsx')
+  assert.ok(returns.includes('rangeActions={('), 'Returns wires Export/History as rangeActions')
+  assert.ok(returns.includes("tr('add_return', 'Add Return')"), 'Returns add button says Add Return')
+  assert.ok(returns.includes("tr('add_supplier_return', 'Add Supplier Return')"), 'supplier scope says Add Supplier Return')
+  assert.ok(!/hidden sm:inline">\{tr\('add_return'/.test(returns), 'the add label never hides on phones')
+})
+
+test('Part 548: the Reports range totals show Profit on every viewport', () => {
+  const report = read('src/components/sales/SalesDailyReport.tsx')
+  const totalsRow = report.slice(report.indexOf('rangeTotals.tx'), report.indexOf('rangeTotals.profit') + 200)
+  assert.ok(totalsRow.includes('rangeTotals.profit'), 'Profit renders beside N sales | Revenue')
+  assert.ok(!/hidden sm:inline[^>]*>\{t\('profit'\)/.test(report), 'Profit is not hidden below the sm breakpoint')
+})
+
 test('old bespoke stat surfaces are really gone (no zombie tile grids)', () => {
   assert.ok(!read('src/components/returns/Returns.tsx').includes('ReturnStatTile'), 'Returns tile grid removed')
   const inventory = read('src/components/inventory/Inventory.tsx')

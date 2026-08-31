@@ -1034,25 +1034,31 @@ export default function Returns() {
         t={t}
         range={stripRange}
         onRangeChange={setStripRange}
-        actions={(
-          // Range row hosts the page actions ("one row with the add
-          // buttons"): Export + History fold-fit, then the primary action
-          // sized to content — no more full-width flex-1 stretching.
+        // Export + History are SECONDARY controls (Part 548): Returns has
+        // only 2-3 stat cards, so when the strip is open they merge into
+        // the STATS row's spare width rather than the date row ("if stats
+        // are not many like only two ... just merge with the stats").
+        rangeActions={(
           <>
             <ExportMenu label={tr('export', 'Export')} items={exportItems} triggerClassName="h-8 px-2.5 text-xs" />
             <ActionHistoryBar history={actionHistory as unknown as ActionHistoryBarHistory} t={t} className="min-w-0" />
-            {scope === SUPPLIER_SCOPE ? (
-              <button onClick={() => setShowSupplierForm(true)} className="inline-flex h-8 shrink-0 items-center gap-1 rounded-lg bg-blue-600 px-2.5 text-xs font-semibold text-white transition-colors hover:bg-blue-700" aria-label={tr('return_to_supplier', 'Return to Supplier')}>
-                <Undo2 className="h-3.5 w-3.5 shrink-0" />
-                <span className="hidden sm:inline">{tr('return_to_supplier', 'Return to Supplier')}</span>
-              </button>
-            ) : (
-              <button onClick={() => setShowCustomerForm(true)} className="inline-flex h-8 shrink-0 items-center gap-1 rounded-lg bg-blue-600 px-2.5 text-xs font-semibold text-white transition-colors hover:bg-blue-700" aria-label={tr('new_return', 'New Return')}>
-                <Undo2 className="h-3.5 w-3.5 shrink-0" />
-                <span className="hidden sm:inline">{tr('new_return', 'New Return')}</span>
-              </button>
-            )}
           </>
+        )}
+        actions={(
+          // The PRIMARY add action: explicit, always-visible label ("make
+          // add button clear... add return", Part 548 — the label used to
+          // vanish below the sm breakpoint, leaving a bare icon).
+          scope === SUPPLIER_SCOPE ? (
+            <button onClick={() => setShowSupplierForm(true)} className="inline-flex h-8 shrink-0 items-center gap-1 rounded-lg bg-blue-600 px-2.5 text-xs font-semibold text-white transition-colors hover:bg-blue-700" aria-label={tr('add_supplier_return', 'Add Supplier Return')}>
+              <Undo2 className="h-3.5 w-3.5 shrink-0" />
+              <span>{tr('add_supplier_return', 'Add Supplier Return')}</span>
+            </button>
+          ) : (
+            <button onClick={() => setShowCustomerForm(true)} className="inline-flex h-8 shrink-0 items-center gap-1 rounded-lg bg-blue-600 px-2.5 text-xs font-semibold text-white transition-colors hover:bg-blue-700" aria-label={tr('add_return', 'Add Return')}>
+              <Undo2 className="h-3.5 w-3.5 shrink-0" />
+              <span>{tr('add_return', 'Add Return')}</span>
+            </button>
+          )
         )}
       />
 
