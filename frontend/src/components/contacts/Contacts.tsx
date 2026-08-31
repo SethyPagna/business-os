@@ -43,7 +43,7 @@ const TABS = (t: TranslateFn): ContactTabDefinition[] => [
   { id: 'customers', label: t('customers') || 'Customers', icon: Users },
   { id: 'suppliers', label: t('suppliers') || 'Suppliers', icon: Warehouse },
   { id: 'delivery', label: t('pos_delivery') || 'Delivery', icon: Truck },
-  { id: 'duplicates', label: t('possible_duplicates') || 'Possible Duplicates', icon: AlertTriangle },
+  { id: 'duplicates', label: t('possible_duplicates') || 'Conflicts', icon: AlertTriangle },
 ]
 
 const loadCustomersTab = async (): Promise<{ CustomersTab: ComponentType<ContactTabProps> }> => (
@@ -199,7 +199,7 @@ export default function Contacts() {
         </Suspense>
       ) : null}
       {tab === 'duplicates' ? (
-        <Suspense fallback={<ContactTabFallback t={t} label={t('possible_duplicates') || 'possible duplicates'} />}>
+        <Suspense fallback={<ContactTabFallback t={t} label={t('possible_duplicates') || 'conflicts'} />}>
           <DuplicatesTab t={t} notify={notify} active={isActive} onResolve={resolveContact} includeSuppliers={canSeeSuppliers} />
         </Suspense>
       ) : null}

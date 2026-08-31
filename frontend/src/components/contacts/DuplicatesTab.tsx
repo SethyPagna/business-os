@@ -8,6 +8,7 @@ import Trash2 from 'lucide-react/dist/esm/icons/trash-2.js'
 import { dismissContactDuplicateCluster, getContactDuplicateClusters, mergeContacts } from './contactDuplicates'
 import type { ContactDuplicateCluster, ContactDuplicateClusterEntry, ContactDuplicateSeverity, ContactTableKind } from './contactDuplicates'
 import { deleteCustomer, deleteSupplier, deleteDeliveryContact } from '../../api/contactWriteTransport'
+import SaleLinkConflictsSection from './SaleLinkConflictsSection'
 
 type TranslateFn = (key: string) => string | undefined
 type NotifyFn = (message: string, tone?: string) => void
@@ -251,6 +252,10 @@ export default function DuplicatesTab({ t, notify, active = true, onResolve, inc
     { id: 'delivery_contacts', label: t('delivery_contacts_tab') || 'Delivery Contacts' },
   ]
   const [table, setTable] = useState<ContactTableKind>('customers')
+  // The tab is "Conflicts" now (user direction, Aug 31), not just
+  // duplicates -- this flag switches to its fourth section, sale-link
+  // conflicts, which has its own component and data source.
+  const [saleLinksActive, setSaleLinksActive] = useState(false)
   const [clusters, setClusters] = useState<ContactDuplicateCluster[]>([])
   const [loading, setLoading] = useState(false)
   const [loaded, setLoaded] = useState(false)
@@ -486,9 +491,9 @@ export default function DuplicatesTab({ t, notify, active = true, onResolve, inc
         {TABLES.map((entry) => (
           <button
             key={entry.id}
-            onClick={() => setTable(entry.id)}
+            onClick={() => { setSaleLinksActive(false); setTable(entry.id) }}
             className={`rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${
-              table === entry.id
+              !saleLinksActive && table === entry.id
                 ? 'bg-blue-600 text-white'
                 : 'bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-zinc-800 dark:text-gray-300 dark:hover:bg-zinc-700'
             }`}
@@ -497,15 +502,29 @@ export default function DuplicatesTab({ t, notify, active = true, onResolve, inc
           </button>
         ))}
         <button
-          onClick={() => void load(table)}
-          disabled={loading}
-          className="ml-auto inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium text-blue-600 hover:bg-blue-50 disabled:opacity-50 dark:hover:bg-blue-900/20"
+          onClick={() => setSaleLinksActive(true)}
+          className={`rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${
+            saleLinksActive
+              ? 'bg-blue-600 text-white'
+              : 'bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-zinc-800 dark:text-gray-300 dark:hover:bg-zinc-700'
+          }`}
         >
-          <RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} />
-          {t('refresh') || 'Refresh'}
+          {t('link_conflicts_section') || 'Sale links'}
         </button>
+        {saleLinksActive ? null : (
+          <button
+            onClick={() => void load(table)}
+            disabled={loading}
+            className="ml-auto inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium text-blue-600 hover:bg-blue-50 disabled:opacity-50 dark:hover:bg-blue-900/20"
+          >
+            <RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} />
+            {t('refresh') || 'Refresh'}
+          </button>
+        )}
       </div>
 
+      {saleLinksActive ? <SaleLinkConflictsSection t={t} notify={notify} /> : (
+      <>
       <p className="text-xs text-gray-400">
         {replaceVars(t('duplicates_tab_hint') || 'Groups of {table} that share a phone number or an exact name -- most often from records entered before duplicate checking existed. This is a review list only; edit or merge the records from the {table} tab.', {
           table: activeTableLabel.toLowerCase(),
@@ -644,6 +663,8 @@ export default function DuplicatesTab({ t, notify, active = true, onResolve, inc
             })}
           </div>
         </>
+      )}
+      </>
       )}
     </div>
   )

@@ -115,3 +115,62 @@ export async function mergeContacts(
     true,
   )
 }
+
+// ---- Sale-link conflicts (the Conflicts tab's fourth section) ----------
+// Sales whose customer link disagrees with the phone printed on the sale,
+// and sales naming a customer that has no contact record at all (see
+// routes/contacts.ts GET /customers/link-conflicts). Same no-cache
+// rationale as the duplicate sweeps above: this is a live review list.
+
+export type SaleLinkMismatch = {
+  customer_id: number
+  customer_name: string | null
+  customer_phone: string | null
+  sale_phone: string
+  phone_key: string
+  sale_name: string | null
+  sale_count: number
+  first_at: string
+  last_at: string
+  total_usd: number
+  phone_owner_count: number
+  suggested_id: number | null
+  suggested_name: string | null
+  suggested_phone: string | null
+}
+
+export type SaleLinkMissing = {
+  name: string
+  phone: string
+  phone_key: string
+  sale_count: number
+  first_at: string
+  last_at: string
+  total_usd: number
+  phone_owner_count: number
+  suggested_id: number | null
+  suggested_name: string | null
+  suggested_phone: string | null
+}
+
+export type SaleLinkConflicts = { mismatches: SaleLinkMismatch[]; missing: SaleLinkMissing[] }
+
+export async function getSaleLinkConflicts(): Promise<SaleLinkConflicts> {
+  const result = await apiFetch('GET', '/api/customers/link-conflicts') as Partial<SaleLinkConflicts> | null
+  return {
+    mismatches: Array.isArray(result?.mismatches) ? result!.mismatches! : [],
+    missing: Array.isArray(result?.missing) ? result!.missing! : [],
+  }
+}
+
+export async function relinkConflictSales(payload: { customer_id: number; phone_key: string; target_customer_id: number }): Promise<{ relinked?: number }> {
+  return await apiFetch('POST', '/api/customers/link-conflicts/relink', payload) as { relinked?: number }
+}
+
+export async function resolveMissingContact(payload: { name: string; phone: string; phone_key: string; target_customer_id?: number }): Promise<{ customer_id?: number; created?: boolean; linked?: number }> {
+  return await apiFetch('POST', '/api/customers/link-conflicts/resolve-missing', payload) as { customer_id?: number; created?: boolean; linked?: number }
+}
+
+export async function dismissSaleLinkConflict(kind: 'mismatch' | 'missing', value: string): Promise<void> {
+  await apiFetch('POST', '/api/customers/link-conflicts/dismiss', { kind, value })
+}
