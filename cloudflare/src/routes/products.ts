@@ -2164,7 +2164,16 @@ async function foldDuplicateProductInto(
   dup: { id: number; name: string | null; image_path?: string | null },
   branchNameById: Map<number, string>,
   mergeContext: string,
-): Promise<{ batchesMoved: number; batchesFolded: number; imagesMoved: number; quantityMoved: number }> {
+): Promise<{
+  batchesMoved: number
+  batchesFolded: number
+  imagesMoved: number
+  quantityMoved: number
+  salesReparented: number
+  movementsReparented: number
+  reparentedSaleItemIds: number[]
+  reparentedMovementIds: number[]
+}> {
   const canonicalId = canonical.id
   const canonicalName = canonical.name
   // Snapshot the keeper's current batch set at call time; a group caller
@@ -2298,6 +2307,25 @@ async function foldDuplicateProductInto(
     }
   }
 
+  // Re-parent the duplicate's transactional history onto the keeper so the
+  // survivor's Sales section and Stock Changes ledger show the COMPLETE
+  // history. Previously these rows stayed attached to the now-deactivated
+  // dup id and silently dropped out of the keeper's per-product reports --
+  // the one thing this fold still left behind (sales especially: the
+  // detail-report Sales query keys on sale_items.product_id, so a merged
+  // duplicate's sales vanished from the keeper). The line-item product_name
+  // is left exactly as-sold (historical receipt fidelity); only the
+  // product_id owner moves. Captured first (the ids, not just counts) so the
+  // merge is reversible: undo re-parents these exact rows back to the dup.
+  const reparentedSaleItemIds = (await db
+    .prepare('SELECT id FROM sale_items WHERE product_id = @id')
+    .all<{ id: number }>({ id: dup.id })).map((r) => Number(r.id))
+  const reparentedMovementIds = (await db
+    .prepare('SELECT id FROM inventory_movements WHERE product_id = @id')
+    .all<{ id: number }>({ id: dup.id })).map((r) => Number(r.id))
+  statements.push({ sql: 'UPDATE sale_items SET product_id = @canonicalId WHERE product_id = @dupId', params: { canonicalId, dupId: dup.id } })
+  statements.push({ sql: 'UPDATE inventory_movements SET product_id = @canonicalId WHERE product_id = @dupId', params: { canonicalId, dupId: dup.id } })
+
   await db.batch(statements)
 
   await audit(env, user?.id ?? null, user?.name ?? null, 'merge_duplicate', 'product', dup.id, {
@@ -2309,9 +2337,20 @@ async function foldDuplicateProductInto(
     // Recorded so a merge that moved imagery is visible in the audit log
     // rather than being an invisible side effect.
     imagesMoved: imagesMovedThisDup,
+    salesReparented: reparentedSaleItemIds.length,
+    movementsReparented: reparentedMovementIds.length,
   })
 
-  return { batchesMoved: batchesMovedThisDup, batchesFolded: batchesFoldedThisDup, imagesMoved: imagesMovedThisDup, quantityMoved }
+  return {
+    batchesMoved: batchesMovedThisDup,
+    batchesFolded: batchesFoldedThisDup,
+    imagesMoved: imagesMovedThisDup,
+    quantityMoved,
+    salesReparented: reparentedSaleItemIds.length,
+    movementsReparented: reparentedMovementIds.length,
+    reparentedSaleItemIds,
+    reparentedMovementIds,
+  }
 }
 
 app.get('/merge-duplicates/preview', async (c) => {
