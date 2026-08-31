@@ -651,7 +651,12 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
         }}
       />
 
-      <div className={`grid gap-x-4 gap-y-8 sm:gap-x-6 sm:gap-y-10 ${productGridClass}`}>
+      {/* Tighter vertical rhythm on phones so more products show per screen
+          (user, Aug 31: "minimized for better useability ... same for public
+          portal"): the row gap was 32px (gap-y-8) on mobile, which left the
+          2-up grid feeling sparse and big. 16px on phones, easing back up at
+          the sm/tablet breakpoint. Column count stays the store's config. */}
+      <div className={`grid gap-x-4 gap-y-4 sm:gap-x-6 sm:gap-y-8 ${productGridClass}`}>
         {loadingProducts ? (
           Array.from({ length: Math.min(4, effectivePageSize || 4) }).map((_, index) => (
             <div key={`portal-product-skeleton-${index}`}>
