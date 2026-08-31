@@ -15,7 +15,7 @@ import Package from 'lucide-react/dist/esm/icons/package.js'
 import Settings2 from 'lucide-react/dist/esm/icons/settings-2.js'
 import { isBrokenLocalizedString, useApp, useSync } from '../../AppContext'
 import { APP_NAVIGATION_EVENT } from '../../app/pathRouting.ts'
-import { fmtTime } from '../../utils/formatters'
+import { fmtDate, fmtTime } from '../../utils/formatters'
 import { calculateProductDiscount } from '../../utils/pricing.ts'
 import { matchesSearchTermGroups } from '../../utils/searchMatch.ts'
 import { useDebouncedValue } from '../../utils/useDebouncedValue.ts'
@@ -2974,7 +2974,9 @@ ${inventoryFeesFormulaText}`,
       }
       return 'All available movement dates'
     }
-    return `${timestamps[0].toLocaleDateString()} - ${timestamps[timestamps.length - 1].toLocaleDateString()}`
+    // fmtDate, not toLocaleDateString(): the bare form follows the VIEWER's
+    // locale and renders dd/mm on non-US devices (app-wide mm/dd/yyyy rule).
+    return `${fmtDate(timestamps[0])} - ${fmtDate(timestamps[timestamps.length - 1])}`
   }, [movementEndDate, movementMonthFilter, movementStartDate, movementYearFilter, visibleMovementGroups])
 
   const visibleMovementQuantity = useMemo(

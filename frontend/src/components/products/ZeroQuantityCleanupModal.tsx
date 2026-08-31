@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { fmtDate } from '../../utils/formatters.ts'
 import Trash2 from 'lucide-react/dist/esm/icons/trash-2.js'
 import Loader2 from 'lucide-react/dist/esm/icons/loader-2.js'
 import AlertCircle from 'lucide-react/dist/esm/icons/alert-circle.js'
@@ -146,7 +147,9 @@ export default function ZeroQuantityCleanupModal({
   const formatZeroSince = (value: string | null): string => {
     if (!value) return T('unknown', 'Unknown')
     if (formatDate) return formatDate(value)
-    try { return new Date(value).toLocaleDateString() } catch (_) { return value }
+    // Shared mm/dd/yyyy formatter -- bare toLocaleDateString() follows the
+    // viewer's locale (dd/mm on non-US devices).
+    try { const d = new Date(value); return Number.isNaN(d.getTime()) ? value : fmtDate(d) } catch (_) { return value }
   }
 
   return (

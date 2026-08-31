@@ -1,4 +1,5 @@
 import Modal from './Modal'
+import { fmtDateTime24 } from '../../utils/formatters.ts'
 
 type ConflictEntity = 'settings' | 'sale' | 'return' | 'user' | 'role' | string
 type ConflictRecord = Record<string, unknown>
@@ -47,7 +48,9 @@ function formatConflictTime(value: unknown): string {
   if (!value) return 'Unknown'
   const date = new Date(String(value))
   if (Number.isNaN(date.getTime())) return String(value)
-  return date.toLocaleString()
+  // Shared mm/dd/yyyy 24-hour formatter -- bare toLocaleString() followed
+  // the viewer's locale/timezone (dd/mm + 12-hour on non-US devices).
+  return fmtDateTime24(date)
 }
 
 function valueToString(value: unknown): string {

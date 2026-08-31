@@ -1,6 +1,7 @@
 import { Suspense, memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ButtonHTMLAttributes, ComponentType, ReactNode } from 'react'
 import { lazyRetry } from '../../utils/lazyImport.ts'
+import { fmtDateTime24 } from '../../utils/formatters.ts'
 import ArchiveRestore from 'lucide-react/dist/esm/icons/archive-restore.js'
 import CheckCircle2 from 'lucide-react/dist/esm/icons/check-circle-2.js'
 import Cloud from 'lucide-react/dist/esm/icons/cloud.js'
@@ -425,7 +426,7 @@ function JobProgressCard({ job, copy, onClear, onCancel }: JobProgressCardProps)
           {elapsed || job.updated_at ? (
             <div className="mt-1 text-xs opacity-80">
               {elapsed ? `${copy('job_elapsed', 'Elapsed')}: ${elapsed}` : ''}
-              {job.updated_at ? ` / ${copy('job_updated', 'Updated')}: ${new Date(job.updated_at).toLocaleTimeString()}` : ''}
+              {job.updated_at ? ` / ${copy('job_updated', 'Updated')}: ${fmtDateTime24(job.updated_at)}` : ''}
             </div>
           ) : null}
           {metrics.currentFile || metrics.currentTable || metrics.filesTotal || metrics.retryCount || metrics.totalBytes ? (

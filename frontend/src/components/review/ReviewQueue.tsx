@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { fmtDateTime24 } from '../../utils/formatters.ts'
 import CheckCircle2 from 'lucide-react/dist/esm/icons/check-circle-2.js'
 import ClipboardCheck from 'lucide-react/dist/esm/icons/clipboard-check.js'
 import XCircle from 'lucide-react/dist/esm/icons/x-circle.js'
@@ -62,7 +63,9 @@ function formatDateTime(value: string | null | undefined): string {
   if (!value) return '--'
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return String(value)
-  return date.toLocaleString('en-US', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
+  // Shared mm/dd/yyyy 24-hour formatter -- the old en-US call without
+  // hour12:false rendered 12-hour AM/PM (Part-77 finding).
+  return fmtDateTime24(date)
 }
 
 function formatPayload(row: PendingActionRow): string {

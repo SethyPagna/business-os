@@ -1,5 +1,6 @@
 import type { ChangeEvent, ComponentProps, ComponentType, ReactNode } from 'react'
 import { lazyRetry } from '../../utils/lazyImport.ts'
+import { fmtDateTime24 } from '../../utils/formatters.ts'
 import { Suspense, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react'
 import CheckSquare from 'lucide-react/dist/esm/icons/check-square.js'
 import Copy from 'lucide-react/dist/esm/icons/copy.js'
@@ -556,10 +557,10 @@ function formatDateTime(value: string | number | Date | null | undefined): strin
   if (!value) return '-'
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return String(value)
-  return new Intl.DateTimeFormat(undefined, {
-    dateStyle: 'medium',
-    timeStyle: 'short',
-  }).format(date)
+  // mm/dd/yyyy + 24-hour Phnom Penh via the shared formatter -- the viewer-
+  // locale Intl form rendered dd/mm + 12-hour on non-US devices (Part-77
+  // finding, cross-surface date rule).
+  return fmtDateTime24(date)
 }
 
 function formatFileSize(bytes: number | string | null | undefined): string {
