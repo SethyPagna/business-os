@@ -15412,3 +15412,41 @@ worktree (bos-deploy-540, removed after) — npm ci ×2 / both tscs / build
 admin /health ok, storefront 200, portal bootstrap 200, and c8's `0efd04bc`
 rode along — /api/catalog now returns 404 in production. New sales mint the
 bare id from this version on.
+
+## Part 541 (Aug 31 2026, session business-os-v1-r2) — offline sales keep their sale moment (Part-77 finding closed)
+
+**Ask:** "continue" (the fixes lane).
+
+**What changed (commit c8a27e8f):** the Part-77 MEDIUM finding "offline sale
+timestamps recorded at sync time not sale time (day-boundary reports drift)"
+is fixed end to end. The offline queue (saleWriteTransport.queueOfflineSale)
+stamps payload.created_at at QUEUE time — the same moment the receipt id
+already encodes — and POST /api/sales honors it with bounded trust via new
+`cloudflare/src/lib/clientTimestamp.ts` (sanitizeClientCreatedAt: string only,
+must parse, not in the future beyond a 5-minute device-skew allowance, no
+lower bound since a device can be offline for days). The value is normalized
+to SQLite's CURRENT_TIMESTAMP shape ("YYYY-MM-DD HH:MM:SS", UTC) — NOT raw
+ISO, because "T" > " " lexicographically and sales queries ORDER BY
+created_at as strings, so a mixed format would pin ISO rows after every
+same-day server row. The INSERT uses COALESCE(@created_at, CURRENT_TIMESTAMP);
+updated_at stays server-clock; online checkouts send no created_at and are
+byte-for-byte unchanged; the trust level matches the client-supplied receipt
+numbers the route already preserves.
+
+**Also re-verified, not re-fixed:** the sibling finding "failed import job
+renders Queued 0%" was already closed by Part 509's "Failed" chip
+(BackgroundImportTracker.getProgressDisplay has an explicit failed branch) —
+the findings list now says so instead of advertising it as open.
+
+**Verified (all really run):** new `test-client-timestamp-pure.cjs` 8/8
+(normalization shape + lexicographic-sort property, UTC offset fold, future
+clamp at the exact skew boundary, days-old accepted, garbage/non-string
+fallback, source locks on the route COALESCE and the queue-time stamp);
+11 sales-adjacent backend suites green; both tscs clean; 146/146 frontend
+test files individually.
+
+**Not done:** deploy (next in this session); the remaining Part-77 MEDIUMs
+(import-review screen parity for Sales/Inventory; Suppliers/Delivery tab
+sort/pagination) stay open; the big slices (restore maintenance lock, returns
+cross-step atomicity, unpaged/N+1 remainder) stay open — peer c8 holds the
+sargable-date slice (3c36bfba).
