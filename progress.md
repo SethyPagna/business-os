@@ -104,15 +104,31 @@ report-currency lane's orphaned working-tree edit — noted). NO lang/perm chang
 card + peer rewrite in flight) or DateTimeRangePicker (peer rewrite in flight — used
 as-is).
 
-**CLAIMED (in progress, permissions-granularity session, Aug 31, Part 557):** adding
-a real `view` tier (None / View only / Full) to the permission model and wiring the
-coarse "Full/None-only" sections to it, highest-risk first, ONE section per commit
-(Settings first, then Sales, then Users). Backend security audit already done +
-clean (all 182 mutating handlers gated). Files this slice: cloudflare/src/lib/
-permissions.ts, cloudflare/src/routes/settings.ts, frontend utils/permissions.ts,
-components/users/{permissionDefinitions.ts,PermissionEditor.tsx},
-utils-settings/Settings.tsx, lang packs. NOT touching the peer-contended
-StatsStrip/contacts/Dashboard/DateTimeRangePicker files.
+**[DONE (slice 1 of N) + VERIFIED LIVE — permissions-granularity session, Aug 31
+(Part 557, commit `7fa62811`): read-only `view` tier + Settings wired.** First a
+FULL backend security audit: all 182 mutating handlers across 29 route files are
+gated — the ~54 a crude scan flagged are false positives (helper guards like
+`denyUnlessRestorePermission`/`denyUnless`/`requireKey`/`requireImportPermission`,
+router-wide middleware, `isAdminControlUser`, self-scoped notes, public-by-design
+portal/auth, or the sync outbox delegating to the real routes). **No backend
+loopholes.** Then the granularity work the user asked for: a real `view` tier
+(VIEW_TIER_KEYS) alongside `review` — page/data visible, every write blocked.
+Because hasPermission() is strict `=== true`, a 'view' value already fails every
+existing write gate with ZERO per-route change; getPermissionTier() just newly
+reports 'view' so reads/page-access see it. **Settings** wired as slice 1: read is
+already open to any signed-in user, save is a strict `hasPermission('settings')`
+POST, so a view grant sees every value but Save becomes a "View only" badge and
+the POST 403s. Editor renders a teal None/View only/Full picker (middleTier:'view').
+**Verified LIVE vs the real worker:** settings='view' user → GET /api/settings 200
+(read), POST /api/settings 403 (save). New `test-view-tier-pure` (7 checks) pins the
+model + front/back set sync; permissionEditor test now checks REVIEW_ vs VIEW_TIER
+coverage; full frontend suite green for these files (the 2 tsc errors in the tree
+are a peer's in-flight StatsStrip API change, not this slice).
+**STILL OPEN (next slices, same "highest-risk first" plan):** wire **Sales** and
+**Users** to view-tier (Users needs care — its writes currently gate on
+`isAdminControlUser`, a privilege-escalation boundary that view-only can extend
+safely but Full must not loosen without the anti-escalation guards). POS is likely
+not meaningful as view-only (it's a checkout surface).]**
 
 **→ FILTER-CHIPS-LANE (this session, Aug 31): CLAIMED.** User: the sales filter
 menu (and every other) renders the CHOSEN filters as removable chips OUTSIDE the
