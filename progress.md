@@ -3,6 +3,12 @@
 The control document for this project. **Read this file top-to-bottom at the start of
 every session**; it is deliberately kept short enough that this is realistic.
 
+> **Running multiple sessions on this checkout?** Invoke the **`/fleet-coordination`** skill
+> ([`.claude/skills/fleet-coordination/`](.claude/skills/fleet-coordination/SKILL.md)) — the standing
+> playbook for session roles, conflict-prevention on the shared git index, the verify-before-trust
+> confirmation layers, the staged commit→push→deploy cycle (Stage 1 vs Stage 2), live testing, and
+> the ≤300K compaction rule.
+
 The per-session narrative log is **not** in this file. It lives in
 [`docs/history/session-log.md`](docs/history/session-log.md) — ~6,600 lines and growing,
 which is exactly why it was moved out. Consult it when you need the reasoning behind a
