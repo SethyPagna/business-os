@@ -10,7 +10,7 @@ import { maybeQueueForReview } from '../lib/reviewGate'
 import { broadcast } from '../durable-objects/broadcastHub'
 import { bumpVersion } from '../lib/cache'
 import { findIdentityMatch, type ProductIdentityRow } from '../lib/productIdentity'
-import { buildFtsMatchExpression, buildHybridMatchClause, buildIssueStateClauses, buildPartialWordMatchClause, buildShortWordFallbackClause, buildTrigramMatchExpression, expandAliasCandidates, normalizedHaystackSql, PRODUCT_SEARCH_COLUMNS, PRODUCTS_FTS_BM25_SQL, runFuzzyFallbackMatch, tokenizeSearchTermGroups, tokenizeSearchWords } from '../lib/searchMatch'
+import { buildFtsMatchExpression, buildHybridMatchClause, buildIssueStateClauses, buildLikeAliasClause, buildPartialWordMatchClause, buildShortWordFallbackClause, buildTrigramMatchExpression, PRODUCT_SEARCH_COLUMNS, PRODUCTS_FTS_BM25_SQL, runFuzzyFallbackMatch, tokenizeSearchTermGroups, tokenizeSearchWords } from '../lib/searchMatch'
 import { receiveBatchStock, removeStockFromBatch, removeStockAcrossBatches, InsufficientBatchStockError, readFifoLotAvailability, allocateAcrossLots, decrementBatchStockStrictStatement, incrementBatchStockStatement } from '../lib/productBatches'
 import { normalizeToIsoDate } from '../lib/batchCode'
 import { parseDatedStockCountEntries, buildDatedStockCountPlan } from '../lib/datedStockCountRoute'
@@ -891,32 +891,31 @@ app.get('/movements', async (c) => {
   const terms = splitSearchTerms(query.search || query.q || '')
   if (terms.length) {
     const mode = String(query.searchMode || query.search_mode || 'AND').toUpperCase() === 'OR' ? 'OR' : 'AND'
-    // Same normalizedHaystackSql/expandAliasCandidates treatment as the
-    // product filters above and routes/products.ts's buildSearchFilters --
-    // this is the "view stock history" movement-log search, not a product
-    // search, so it stays scoped to the movement's own fields
-    // (product_name/branch_name/user_name/movement_type/reason), matching
-    // its existing (narrower) field set.
-    const productNameSql = normalizedHaystackSql("COALESCE(product_name, '')")
-    const branchNameSql = normalizedHaystackSql("COALESCE(branch_name, '')")
-    const userNameSql = normalizedHaystackSql("COALESCE(user_name, '')")
-    const movementTypeSql = normalizedHaystackSql("COALESCE(movement_type, '')")
-    const reasonSql = normalizedHaystackSql("COALESCE(reason, '')")
-    const termClauses: string[] = []
-    terms.forEach((term, index) => {
-      const candidateClauses = expandAliasCandidates(term).map((candidate, candidateIndex) => {
-        const key = `search${index}_${candidateIndex}`
-        params[key] = `%${candidate}%`
-        return `(
-          ${productNameSql} LIKE @${key}
-          OR ${branchNameSql} LIKE @${key}
-          OR ${userNameSql} LIKE @${key}
-          OR ${movementTypeSql} LIKE @${key}
-          OR ${reasonSql} LIKE @${key}
-        )`
-      })
-      termClauses.push(`(${candidateClauses.join(' OR ')})`)
-    })
+    // The "view stock history" movement-log search, scoped to the movement's
+    // own fields (product_name/branch_name/user_name/movement_type/reason).
+    //
+    // This mirrors buildSalesSearchWhere (routes/sales.ts): ONE shallow
+    // concatenated haystack + buildLikeAliasClause per word with
+    // alreadyNormalizedCols=true. Previously each of the five columns was wrapped
+    // in normalizedHaystackSql's default ~78-level diacritic REPLACE chain, then
+    // ORed across the five and ANDed across up to eight words -- an expression
+    // tree that measured ~90 levels deep and risked D1's hard depth-100
+    // statement limit (SQLITE_TOOBIG) at production movement volume, the exact
+    // class of failure migration 0037 fixed for products and 0082 for
+    // sales/returns. splitSearchTerms already diacritic-folds the query words,
+    // and each word matches independently, so multi-word queries still work.
+    //
+    // Diacritic PARITY with Sales/Returns (their write-time search_normalized
+    // column, migration 0082) is a flagged follow-up: inventory_movements has 33
+    // scattered INSERT sites and no shared writer, and movement text is a
+    // denormalized copy of product names (measured ~0 Latin diacritics in Part
+    // 484), so the practical loss is nil and the crash risk is what mattered.
+    const movementHaystack = `(
+      COALESCE(product_name, '') || ' ' || COALESCE(branch_name, '') || ' ' ||
+      COALESCE(user_name, '') || ' ' || COALESCE(movement_type, '') || ' ' ||
+      COALESCE(reason, '')
+    )`
+    const termClauses = terms.map((term, index) => buildLikeAliasClause(term, [movementHaystack], params, `search${index}`, true))
     where.push(`(${termClauses.join(` ${mode} `)})`)
   }
 
