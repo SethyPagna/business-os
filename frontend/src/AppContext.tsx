@@ -299,7 +299,7 @@ const CORE_ENGLISH_PACK: TranslationPack = {
   offline_mode_ready_sync: 'Server is back online. Offline actions can sync now.',
   page: 'Page',
   pending: 'pending',
-  point_of_sale: 'Point of Sale',
+  point_of_sale: 'POS',
   pos_delivery: 'Delivery',
   previous: 'Previous',
   product: 'Product',

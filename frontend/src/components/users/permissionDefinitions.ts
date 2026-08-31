@@ -190,10 +190,10 @@ export const PERMISSION_SECTIONS: PermissionSection[] = [
   {
     key: 'pos',
     tKey: 'perm_section_pos',
-    label: 'Point of Sale',
+    label: 'POS',
     description: 'Full Access or None only -- no partial tier for checkout itself.',
     permissions: [
-      { key: 'pos', tKey: 'perm_pos', label: 'Point of Sale', sensitivity: 'normal' },
+      { key: 'pos', tKey: 'perm_pos', label: 'POS', sensitivity: 'normal' },
     ],
   },
   {
