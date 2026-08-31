@@ -2,6 +2,18 @@ import { Fragment, useEffect, useState, type CSSProperties, type ReactNode, type
 import ChevronDown from 'lucide-react/dist/esm/icons/chevron-down.js'
 import ChevronRight from 'lucide-react/dist/esm/icons/chevron-right.js'
 import { consumeLongPressClick, createLongPressHandlers, type LongPressState } from '../../utils/longPress.ts'
+import ColumnChooser from '../shared/ColumnChooser.tsx'
+import { useColumnPreferences } from '../shared/useColumnPreferences.ts'
+import type { TableColumnDef } from '../shared/columnPreferences.ts'
+
+// Optional (toggleable) large-screen columns for the returns list. Stable
+// module-level identity so useColumnPreferences doesn't churn; labels are
+// translated at render for the chooser only. Status (default on) fills the
+// audit gap where the returns list had no status column.
+const RETURN_OPTIONAL_COLUMNS: TableColumnDef[] = [
+  { key: 'status', label: 'Status' },
+  { key: 'cashier', label: 'Cashier', defaultVisible: false },
+]
 
 const deferredMobileCardStyle: CSSProperties = {
   contentVisibility: 'auto',
@@ -28,6 +40,7 @@ interface ReturnRecord {
   customer_name?: string
   reason?: string
   status?: string
+  cashier_name?: string
 }
 
 interface ReturnGroup {
@@ -154,6 +167,9 @@ export default function ReturnsListSurface({
   const [isMobileViewport, setIsMobileViewport] = useState(() => detectMobileViewport())
   // 11.1: the checkbox column only takes space in select mode.
   const selectCellPad = selectionModeActive ? 'px-3' : 'px-0'
+  const cols = useColumnPreferences('returns', RETURN_OPTIONAL_COLUMNS)
+  const columnCount = 8 + cols.visibleCount
+  const chooserColumns = RETURN_OPTIONAL_COLUMNS.map((column) => ({ ...column, label: tr(column.key, column.label) }))
 
   useEffect(() => {
     if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return undefined
@@ -172,6 +188,9 @@ export default function ReturnsListSurface({
     <>
       {!isMobileViewport ? (
       <div className="card overflow-hidden">
+        <div className="hidden items-center justify-end gap-2 border-b border-gray-100 px-3 py-1.5 lg:flex dark:border-gray-700">
+          <ColumnChooser columns={chooserColumns} isVisible={cols.isVisible} toggle={cols.toggle} reset={cols.reset} label={tr('columns', 'Columns')} resetLabel={tr('reset', 'Reset')} />
+        </div>
         <div className="overflow-x-auto">
           <table className="w-full min-w-[760px] text-sm">
             <thead className="sticky top-0 z-10 bg-gray-50 dark:bg-gray-700/50">
@@ -194,6 +213,8 @@ export default function ReturnsListSurface({
                 <th className="px-4 py-3 text-left font-semibold text-gray-600 dark:text-gray-400">{scope === SUPPLIER_SCOPE ? tr('supplier', 'Supplier') : tr('customer', 'Customer')}</th>
                 <th className="px-4 py-3 text-left font-semibold text-gray-600 dark:text-gray-400">{tr('reason', 'Reason')}</th>
                 <th className="px-4 py-3 text-left font-semibold text-gray-600 dark:text-gray-400">{tr('type', 'Type')}</th>
+                {cols.isVisible('status') ? <th className="px-4 py-3 text-left font-semibold text-gray-600 dark:text-gray-400">{tr('status', 'Status')}</th> : null}
+                {cols.isVisible('cashier') ? <th className="px-4 py-3 text-left font-semibold text-gray-600 dark:text-gray-400">{tr('cashier', 'Cashier')}</th> : null}
                 <th className="px-4 py-3 text-right font-semibold text-gray-600 dark:text-gray-400">{tr('amount', 'Amount')}</th>
               </tr>
             </thead>
@@ -201,7 +222,7 @@ export default function ReturnsListSurface({
               {loading ? (
                 <ReturnsDesktopSkeletonRows />
               ) : filtered.length === 0 ? (
-                <tr><td colSpan={8} className="py-10 text-center text-gray-400">{tr('no_returns_found', 'No returns found.')}</td></tr>
+                <tr><td colSpan={columnCount} className="py-10 text-center text-gray-400">{tr('no_returns_found', 'No returns found.')}</td></tr>
               ) : returnSections.map((section) => {
                 const isCollapsed = collapsedReturnSections.has(section.id)
                 // Money-counting count (cancelled returns excluded), so the
@@ -210,7 +231,7 @@ export default function ReturnsListSurface({
                 return (
                   <Fragment key={section.id}>
                     <tr className="bg-slate-100/90 dark:bg-slate-800/80">
-                      <td colSpan={8} className="px-4 py-2">
+                      <td colSpan={columnCount} className="px-4 py-2">
                         <div className="flex flex-wrap items-center justify-between gap-3 text-xs">
                           <label className="inline-flex items-center gap-2 font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
                             {selectionModeActive ? (
@@ -241,7 +262,7 @@ export default function ReturnsListSurface({
                       <Fragment key={group.id}>
                         {showReturnActionGroups ? (
                           <tr className="bg-slate-50/80 dark:bg-slate-900/30">
-                            <td colSpan={8} className="px-6 py-2">
+                            <td colSpan={columnCount} className="px-6 py-2">
                               <div className="flex flex-wrap items-center gap-3 text-xs">
                                 <label className="inline-flex items-center gap-2 font-medium text-slate-600 dark:text-slate-300">
                                   {selectionModeActive ? (
@@ -314,6 +335,14 @@ export default function ReturnsListSurface({
                               <td className="px-4 py-2.5">
                                 <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-700 dark:bg-zinc-700 dark:text-gray-200">{typeLabel}</span>
                               </td>
+                              {cols.isVisible('status') ? (
+                                <td className="px-4 py-2.5">
+                                  <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${(ret.status || 'completed') === 'cancelled' ? 'bg-gray-100 text-gray-500 dark:bg-zinc-700 dark:text-gray-400' : 'bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300'}`}>{tr(`status_${ret.status || 'completed'}`, ret.status || 'completed')}</span>
+                                </td>
+                              ) : null}
+                              {cols.isVisible('cashier') ? (
+                                <td className="px-4 py-2.5 text-xs text-gray-500 dark:text-gray-400">{ret.cashier_name || '-'}</td>
+                              ) : null}
                               <td className="px-4 py-2.5 text-right">{renderAmount(ret)}</td>
                             </tr>
                           )
