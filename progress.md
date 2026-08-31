@@ -88,6 +88,22 @@ Two rules learned the hard way, both from real incidents in this file's own hist
 
 ## Current status
 
+**[DONE — stats-fold session, Aug 31 (Part 550, needs deploy — rides the next
+one): POS batch-tracking banner self-heals.** User pasted the "Batch and
+expiry tracking could not be loaded…" banner. Diagnosis: prod healthy at check
+time (health 200, endpoint 401s unauth as designed) — the failure was
+transient (3 deploys today / connection blip) but STUCK because the lookup
+only refired on branch change or manual Try again. Fix (pos/POS.tsx only):
+while failed, auto-retry on browser 'online' + 45s safety interval + any
+stock-relevant sync push (reconnect refresh dispatches these → recovery is
+usually instant); fail-loud semantics untouched, Try again kept.
+batchFailLoud.test.ts pins all three retry paths (11/11). Live E2E proven on
+own vite 5175: fetch-patched the endpoint to fail → exact reported banner;
+unpatched + real 'online' event → banner cleared ITSELF in <2.5s, no click.
+posCore/focus-split/tsc green. Also confirmed the user's restated stats-grid
+ask (2/3/4+ per row, readable) is already satisfied by Part 548's ramp, which
+the rangeActions rework preserved — no further stats change.]**
+
 **CLAIMED (in progress, i18n/permissions session, Aug 31, Part 548):** Sales-hub
 layout polish per user feedback: StatsStrip gains a dedicated FULL-WIDTH date
 row when open (presets always visible there) + a `rangeActions` slot —
@@ -411,6 +427,13 @@ the resolved change rate into computeSaleTotals ~449, and the PATCH /:id/status
 overpay recompute ~1113 — the HIGH Part-539 change_khr fix). Ping c8 when your
 sales.ts commit lands, or tell c8 if you'd rather absorb those two hunks in your
 commit. c8 holds all sales.ts edits until then so nothing lands half-wired.
+
+**🚫 DEPLOY FREEZE (coordinator 7b, Aug 31 ~11:00): session 7a is mid-deploy of
+HEAD 0db93598 (user-authorized, isolated worktree).** NOBODY runs `migrate:remote`
+or `wrangler deploy` until 7a posts the all-clear here. Session bf started the
+same deploy in parallel (double authorization) and has been told to stand down —
+write-order rule, 7a was first. Peers do NOT need to pause local work; the shared
+tree/node_modules/8787 are untouched.
 
 **COORDINATION NOTE — REOPENED, CONTINUOUS MODE (coordinator business-os-v1-7b,
 Aug 31 ~02:10, per user directive "coordinate continuously whenever there are

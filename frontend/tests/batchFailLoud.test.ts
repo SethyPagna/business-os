@@ -93,6 +93,27 @@ check('POS surfaces the failure to the cashier instead of failing silently', () 
   )
 })
 
+check('the failed lookup self-heals -- retry is never left to the manual Try again button alone', () => {
+  // User report (Aug 31): the banner appeared (transient failure -- deploy
+  // blip / dropped connection) and then STAYED, because the lookup only
+  // refired on a branch change or the banner's own Try again. While the
+  // flag is up POS must retry by itself: browser 'online', a slow safety
+  // interval (covers online-the-whole-time server blips), and any
+  // stock-relevant sync push (reconnect refresh dispatches these).
+  assert.ok(
+    /window\.addEventListener\('online', retry\)/.test(pos),
+    'coming back online should retry the tracked-batch lookup',
+  )
+  assert.ok(
+    /window\.setInterval\(retry, /.test(pos),
+    'a safety interval should retry while the banner is up',
+  )
+  assert.ok(
+    /\['inventory', 'products', 'sales', 'branches'\]\.includes\(channel\)/.test(pos),
+    'stock-relevant sync pushes (incl. reconnect refresh) should retry immediately',
+  )
+})
+
 // ---- the detail sheet must separate "no lots" from "couldn't load lots" ----
 const sheet = src('components', 'pos', 'ProductDetailSheet.tsx')
 

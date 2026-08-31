@@ -1856,6 +1856,38 @@ export default function POS() {
     return () => { cancelled = true }
   }, [primaryBranchFilterId, batchTrackingReloadKey])
 
+  // Self-heal for that lookup (user report, Aug 31: the amber "Batch and
+  // expiry tracking could not be loaded" banner was showing). The failure
+  // itself is usually transient — a worker redeploy blip or a dropped
+  // connection — but the effect above only refires on a branch change or
+  // the banner's manual Try again, so one failed request pinned the
+  // banner (and the slower check-every-item flow) for the rest of the
+  // session. While failed, retry without being asked: when the browser
+  // comes back online, and on a slow safety interval that also covers
+  // online-the-whole-time blips (deploys) where no 'online' event ever
+  // fires. Success clears the flag via the effect above, which unmounts
+  // this one.
+  useEffect(() => {
+    if (!trackedBatchLoadFailed) return
+    const retry = () => setBatchTrackingReloadKey((key) => key + 1)
+    window.addEventListener('online', retry)
+    const timer = window.setInterval(retry, 45_000)
+    return () => { window.removeEventListener('online', retry); window.clearInterval(timer) }
+  }, [trackedBatchLoadFailed])
+
+  // ...and retry immediately on any stock-relevant sync push: reconnects
+  // dispatch these for every channel (http.ts dispatchGlobalDataRefresh),
+  // so the moment the server is reachable again this fires without
+  // waiting out the interval. Re-running on flag flip alone costs at most
+  // one duplicate GET.
+  useEffect(() => {
+    if (!trackedBatchLoadFailed || !syncChannel) return
+    const channel = String(syncChannel.channel || '')
+    if (['inventory', 'products', 'sales', 'branches'].includes(channel)) {
+      setBatchTrackingReloadKey((key) => key + 1)
+    }
+  }, [trackedBatchLoadFailed, syncChannel])
+
   // Derived filter lists from products
   const posSuppliers = useMemo(
     () => buildProductSupplierOptions(productFilterMeta.suppliers),

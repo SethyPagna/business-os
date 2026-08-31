@@ -15876,3 +15876,46 @@ routes + custom-tables cluster (existing dedicated-lane item — audit
 enumeration linked); date() perf tail incl. audit_logs indexes; offline paths
 verified by pinned suites only (swOfflineSaleReplay/offlineSalesQueue/
 offlineSyncArchitecture/offlineSecurityHardening green), not live-simulated.
+
+## Part 550 (Aug 31 2026, stats-fold session) — POS batch-tracking banner self-heals instead of sticking until Try again
+
+**Ask** — user pasted the POS banner verbatim: "Batch and expiry tracking could
+not be loaded, so lot selection cannot be skipped. Check each item before
+selling." (Their message also restated the stats-grid direction — 2/3/4+ per
+row, readability first — which Part 548's `grid-cols-2 sm:3 md:4 xl:6` ramp
+already satisfies and the Part-549-adjacent rangeActions rework preserved;
+confirmed on disk, no further stats change needed.)
+
+**What was found** — the banner itself is CORRECT fail-loud design (Part ~516
+batchFailLoud work): a failed tracked-batch lookup must not read as "nothing is
+tracked". The defect is recovery: `getTrackedBatchProductIds` only refires on a
+branch-filter change or the banner's manual Try again, so ONE transient failure
+(three worker deploys happened today; any dropped connection does it too)
+pinned the banner + the slower route-everything-through-the-detail-sheet flow
+for the rest of the session. Production checked healthy at diagnosis time
+(/health 200; the endpoint 401s unauth as designed, i.e. alive, not 500ing),
+and the read gate correctly admits pos/sales/inventory/image-only-batches
+roles — so transient-then-stuck is the whole story.
+
+**What changed** — `frontend/src/components/pos/POS.tsx` only: two small
+effects active ONLY while `trackedBatchLoadFailed` — (1) retry on the
+browser's `online` event + a 45s safety interval (covers online-the-whole-time
+server blips where no online event ever fires); (2) immediate retry on any
+stock-relevant sync push ('inventory'/'products'/'sales'/'branches') — http.ts
+dispatchGlobalDataRefresh dispatches exactly these on reconnect, so recovery
+is usually instant. Success clears the flag via the existing load effect;
+the manual Try again button stays. `frontend/tests/batchFailLoud.test.ts`
+gained a check pinning all three retry paths.
+
+**Verified** — batchFailLoud 11/11, posCore + posSearchFocusEffectSplit green,
+frontend tsc clean. LIVE E2E on this session's own vite 5175 (against c8's
+worker on 8787, reads only): patched window.fetch to reject ONLY
+tracked-product-ids, entered POS → the exact reported banner rendered;
+restored fetch + dispatched a real `online` event → banner CLEARED ITSELF in
+<2.5s with no click on Try again; POS back to one-tap adds. Server stopped
+after.
+
+**Not done** — TransferModal's use of the same lookup keeps its own
+error-notify handling (modal context, not a persistent banner — different
+recovery shape, deliberately untouched). If the user wants the banner text to
+distinguish "you are offline" from "server hiccup", say the word.
