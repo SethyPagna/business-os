@@ -41,6 +41,7 @@ interface SalesSection {
   id: string
   label: string
   ids: number[]
+  items: SaleRecord[]
   groups: SalesGroup[]
 }
 
@@ -56,6 +57,12 @@ interface SalesListSurfaceProps {
   isSelectionScopePartiallySelected: (ids: number[]) => boolean
   loading: boolean
   revenue: number
+  /** Count of sales that contribute to `revenue` (cancelled + awaiting-payment
+   * excluded) — the reconciled headline count shown in the footer. */
+  revenueCount: number
+  /** Predicate: does this sale count toward the money shown? Used to make the
+   * day-group header counts money-counting too, so they sum to the footer. */
+  isCountedSale: (sale: SaleRecord) => boolean
   salesSections: SalesSection[]
   selectAllRef: RefObject<HTMLInputElement>
   selectedIds: Set<number>
@@ -91,6 +98,8 @@ export default function SalesListSurface({
   isSelectionScopePartiallySelected,
   loading,
   revenue,
+  revenueCount,
+  isCountedSale,
   salesSections,
   selectAllRef,
   selectedIds,
@@ -164,6 +173,9 @@ export default function SalesListSurface({
                 <tr><td colSpan={11} className="py-10 text-center text-gray-400">{t('no_data')}</td></tr>
               ) : salesSections.map((section) => {
                 const isCollapsed = collapsedSalesSections.has(section.id)
+                // Money-counting count for the day header (cancelled + awaiting
+                // excluded), so the per-day counts sum to the footer total.
+                const countedCount = section.items.filter(isCountedSale).length
                 return (
                   <Fragment key={section.id}>
                     <tr className="bg-slate-100/90 dark:bg-slate-800/80">
@@ -183,7 +195,7 @@ export default function SalesListSurface({
                             />
                             ) : null}
                             <span>{section.label}</span>
-                            <span className="text-slate-400">{section.ids.length} sale{section.ids.length === 1 ? '' : 's'}</span>
+                            <span className="text-slate-400">{countedCount} sale{countedCount === 1 ? '' : 's'}</span>
                           </label>
                           <button
                             type="button"
@@ -299,7 +311,7 @@ export default function SalesListSurface({
           </table>
         </div>
         <div className="border-t border-gray-100 px-4 py-2 text-xs text-gray-400 dark:border-gray-700">
-          {filtered.length} {t('sales')} | {fmtUSD(revenue)}
+          {revenueCount} {t('sales')} | {fmtUSD(revenue)}
         </div>
       </div>
 
@@ -339,6 +351,7 @@ export default function SalesListSurface({
           <div className="py-10 text-center text-gray-400">{t('no_data')}</div>
         ) : salesSections.map((section) => {
           const isCollapsed = collapsedSalesSections.has(section.id)
+          const countedCount = section.items.filter(isCountedSale).length
           return (
             <div key={section.id} className="space-y-2">
               <div className="rounded-xl bg-slate-100 px-3 py-2 dark:bg-slate-800/70">
@@ -357,7 +370,7 @@ export default function SalesListSurface({
                     />
                     ) : null}
                     <span>{section.label}</span>
-                    <span className="normal-case tracking-normal text-slate-400">{section.ids.length}</span>
+                    <span className="normal-case tracking-normal text-slate-400">{countedCount}</span>
                   </label>
                   <button type="button" className="inline-flex shrink-0 items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-medium text-slate-500 hover:bg-white/70 hover:text-slate-700 dark:text-slate-300 dark:hover:bg-slate-700/60 dark:hover:text-white" onClick={() => toggleSalesSection(section.id)}>
                     {isCollapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}

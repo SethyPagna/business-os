@@ -22,10 +22,9 @@ import PaginationControls, { paginateItems } from '../shared/PaginationControls'
 import { useIsPageActive } from '../shared/pageActivity'
 import { useActionHistory } from '../../utils/actionHistory.ts'
 import { cloneHistorySnapshot } from '../../utils/historyHelpers.ts'
-import { buildTimeActionSections, getAvailableYears, getTimeGroupingMode, toggleIdSet } from '../../utils/groupedRecords.ts'
+import { buildTimeActionSections, toggleIdSet } from '../../utils/groupedRecords.ts'
 import { createLongPressState, type LongPressState } from '../../utils/longPress.ts'
 import { exportColumnLabel } from '../../utils/exportOptions.ts'
-import { buildPeriodFilterOptions } from '../../utils/periodFilterOptions.ts'
 import {
   beginTrackedRequest,
   invalidateTrackedRequest,
@@ -165,6 +164,7 @@ interface ReturnSection {
   id: string
   label: string
   ids: number[]
+  items: ReturnRow[]
   groups: ReturnGroup[]
 }
 
@@ -304,8 +304,11 @@ export default function Returns() {
   const [scope, setScope] = useState<ReturnScope>(CUSTOMER_SCOPE)
   const [rows, setRows] = useState<ReturnRow[]>([])
   const [search, setSearch] = useState('')
-  const [yearFilter, setYearFilter] = useState('all')
-  const [monthFilter, setMonthFilter] = useState('all')
+  // ONE date scope for the whole page (user, Aug 31: "drive list + stats
+  // together"): the Start→End range row above the search bar drives BOTH the
+  // stats strip AND the returns list — no separate year/month period control.
+  // Default today; the list groups by day. (Strip data state is further down.)
+  const [stripRange, setStripRange] = useState<DateTimeRange>(() => statsPresetRange('today'))
   const [typeFilter, setTypeFilter] = useState('all')
   const [selectedIds, setSelectedIds] = useState<Set<number>>(() => new Set())
   // 11.1/11.2 (B6): same selection model as Products/Inventory/Sales --
@@ -355,25 +358,24 @@ export default function Returns() {
   // useDeferredValue-for-local-filter + separate-hand-rolled-350ms-debounce-
   // for-the-fetch pattern, not something specific to Sales.
   const debouncedSearch = useDebouncedValue(search, 180)
-  const timeMode = useMemo(() => getTimeGroupingMode(yearFilter, monthFilter), [monthFilter, yearFilter])
+  // Day-based grouping always now that the date scope is a Start→End window
+  // filtered server-side (the year/month client grouping retired with the
+  // year/month filter).
+  const timeMode = 'day' as const
   const returnsDateRange = useMemo(() => {
-    if (yearFilter === 'all') return {}
-    const year = Number(yearFilter)
-    if (!Number.isFinite(year)) return {}
-    const month = monthFilter !== 'all' ? Number(monthFilter) : null
-    if (month && Number.isFinite(month)) {
-      const start = new Date(Date.UTC(year, month - 1, 1))
-      const end = new Date(Date.UTC(year, month, 0))
-      return {
-        startDate: start.toISOString().slice(0, 10),
-        endDate: end.toISOString().slice(0, 10),
-      }
-    }
-    return {
-      startDate: `${year}-01-01`,
-      endDate: `${year}-12-31`,
-    }
-  }, [monthFilter, yearFilter])
+    const startDate = String(stripRange.startDate || '').trim()
+    const endDate = String(stripRange.endDate || '').trim()
+    const out: { startDate?: string; endDate?: string } = {}
+    if (startDate) out.startDate = startDate
+    if (endDate) out.endDate = endDate
+    return out
+  }, [stripRange.startDate, stripRange.endDate])
+
+  // A return "counts" toward the refund figures only if it isn't cancelled:
+  // the list GET returns cancelled returns too, but every refund total (strip
+  // + report) excludes them, so the day-group counts must exclude them as well
+  // to reconcile (user, Aug 31: "count only what the money counts").
+  const isCountedReturn = useCallback((ret: ReturnRow) => String((ret as { status?: string })?.status || 'completed') !== 'cancelled', [])
 
   const clearLoadWatchdog = useCallback(() => {
     if (loadWatchdogRef.current != null) {
@@ -476,7 +478,7 @@ export default function Returns() {
     by_reason?: Array<ReturnsStripRow & { reason?: string }>
     by_type?: Array<ReturnsStripRow & { return_type?: string }>
   }
-  const [stripRange, setStripRange] = useState<DateTimeRange>(() => statsPresetRange('today'))
+  // `stripRange` (the single page date scope) is declared near the top.
   const [stripData, setStripData] = useState<ReturnsStripPayload | null>(null)
   const [stripLoading, setStripLoading] = useState(false)
   const stripRequestRef = useRef(0)
@@ -683,11 +685,6 @@ export default function Returns() {
     }
   }, [actionHistory, fetchReturnSnapshot, loadReturns, restoreReturnSnapshot])
 
-  const availableYears = useMemo(
-    () => getAvailableYears(rows, (ret) => ret?.created_at),
-    [rows],
-  )
-
   const typeOptions = useMemo(() => {
     const options = new Map<string, string>()
     rows.forEach((ret) => {
@@ -779,16 +776,18 @@ export default function Returns() {
       getItemId: (ret) => Number(ret?.id),
       getActionKey: (ret) => getReturnTypeKey(ret),
       getActionLabel: (ret) => getReturnTypeLabel(ret, tr),
-      year: yearFilter,
-      month: monthFilter,
+      // Date narrowing happens server-side via returnsDateRange now, so the
+      // client grouper only buckets by day (year/month 'all').
+      year: 'all',
+      month: 'all',
       timeMode,
       groupMode: returnGroupMode,
       sortDirection: returnSortDirection,
-    }), [buildSortedReturnSection, filtered, monthFilter, returnGroupMode, returnSortDirection, returnSortFields, returnSortSpec, timeMode, tr, yearFilter])
+    }), [buildSortedReturnSection, filtered, returnGroupMode, returnSortDirection, returnSortFields, returnSortSpec, timeMode, tr])
 
   useEffect(() => {
     setReturnPage(1)
-  }, [debouncedSearch, monthFilter, returnGroupMode, returnSortSpec, scope, typeFilter, yearFilter])
+  }, [debouncedSearch, stripRange.startDate, stripRange.endDate, returnGroupMode, returnSortSpec, scope, typeFilter])
 
   const allVisibleReturns = useMemo(
     () => allReturnSections.flatMap((section) => section.groups.flatMap((group) => group.items)),
@@ -808,12 +807,12 @@ export default function Returns() {
       getItemId: (ret) => Number(ret?.id),
       getActionKey: (ret) => getReturnTypeKey(ret),
       getActionLabel: (ret) => getReturnTypeLabel(ret, tr),
-      year: yearFilter,
-      month: monthFilter,
+      year: 'all',
+      month: 'all',
       timeMode,
       groupMode: returnGroupMode,
       sortDirection: returnSortDirection,
-    }), [buildSortedReturnSection, monthFilter, pagedReturns, returnGroupMode, returnSortDirection, returnSortSpec.field, timeMode, tr, yearFilter])
+    }), [buildSortedReturnSection, pagedReturns, returnGroupMode, returnSortDirection, returnSortSpec.field, timeMode, tr])
 
   const visibleReturns = useMemo(
     () => returnSections.flatMap((section) => section.groups.flatMap((group) => group.items)),
@@ -924,11 +923,11 @@ export default function Returns() {
     { label: tr('export_visible_returns', 'Export visible returns', 'នាំចេញការត្រឡប់ដែលកំពុងបង្ហាញ'), onClick: () => exportVisible(visibleReturns, `returns-${scope}`) },
     selectedReturns.length ? { label: tr('export_selected_returns', 'Export selected returns', 'នាំចេញការត្រឡប់ដែលបានជ្រើស'), onClick: exportSelected, color: 'blue' } : null,
     typeFilter !== 'all' ? { label: tr('export_filtered_type', `Export ${typeOptions.find(([id]) => id === typeFilter)?.[1] || typeFilter}`, `នាំចេញតាមប្រភេទ ${typeOptions.find(([id]) => id === typeFilter)?.[1] || typeFilter}`), onClick: () => exportVisible(filtered, `returns-${typeFilter}`) } : null,
-    yearFilter !== 'all' || monthFilter !== 'all' ? { label: tr('export_filtered_time_range', 'Export filtered time range', 'នាំចេញតាមចន្លោះពេលដែលបានតម្រង'), onClick: () => exportVisible(filtered, 'returns-filtered') } : null,
+    (stripRange.startDate || stripRange.endDate) ? { label: tr('export_filtered_time_range', 'Export filtered time range', 'នាំចេញតាមចន្លោះពេលដែលបានតម្រង'), onClick: () => exportVisible(filtered, 'returns-filtered') } : null,
     scope !== CUSTOMER_SCOPE
       ? { label: tr('export_supplier_returns', 'Export supplier returns', 'នាំចេញការត្រឡប់ទៅអ្នកផ្គត់ផ្គង់'), onClick: () => exportVisible(supplierRows, 'returns-supplier') }
       : { label: tr('export_customer_returns', 'Export customer returns', 'នាំចេញការត្រឡប់ពីអតិថិជន'), onClick: () => exportVisible(customerRows, 'returns-customer') },
-  ].filter(Boolean)), [customerRows, exportSelected, exportVisible, filtered, monthFilter, scope, selectedReturns.length, supplierRows, tr, typeFilter, typeOptions, visibleReturns, yearFilter])
+  ].filter(Boolean)), [customerRows, exportSelected, exportVisible, filtered, stripRange.startDate, stripRange.endDate, scope, selectedReturns.length, supplierRows, tr, typeFilter, typeOptions, visibleReturns])
 
   const filterSections = useMemo(() => {
     if (!isReturnsFilterMenuOpen) return []
@@ -962,27 +961,19 @@ export default function Returns() {
           { id: 'time-action', label: tr('group_by_time_action', 'Time + type'), active: returnGroupMode === 'time+action', onClick: () => setReturnGroupMode('time+action') },
         ],
       },
-      // Sorting moved onto the visible SortChip (unified listSort method);
-      // this section keeps only the period narrowing it always bundled.
-      {
-        id: 'period',
-        label: tr('period', 'Period'),
-        searchable: true,
-        options: buildPeriodFilterOptions({
-          yearFilter, setYearFilter, monthFilter, setMonthFilter, availableYears,
-          allTimeLabel: tr('all_time', 'All time'),
-        }),
-      },
+      // The period filter is gone from this menu: the Start→End range row above
+      // the search bar (stripRange) is the single date scope now and drives the
+      // list directly, so a second date control here would only disagree.
     ]
-  }, [availableYears, isReturnsFilterMenuOpen, monthFilter, returnGroupMode, scope, tr, typeFilter, typeOptions, yearFilter])
+  }, [isReturnsFilterMenuOpen, returnGroupMode, scope, tr, typeFilter, typeOptions])
 
   // Scope (customer vs supplier) is a VIEW, not a filter: it's a mandatory
   // one-of-two with no neutral "all", so being on the supplier view must
   // not light up "Filters (1)" -- and Clear must not teleport the user
   // back to the customer view (see FilterMenu onClear below).
   const activeFilterCount = useMemo(
-    () => countActiveFlags([yearFilter !== 'all', monthFilter !== 'all', typeFilter !== 'all', returnGroupMode !== 'time']),
-    [monthFilter, returnGroupMode, typeFilter, yearFilter],
+    () => countActiveFlags([typeFilter !== 'all', returnGroupMode !== 'time']),
+    [returnGroupMode, typeFilter],
   )
   const showReturnActionGroups = returnGroupMode === 'time+action'
 
@@ -1102,8 +1093,6 @@ export default function Returns() {
             sections={filterSections}
             onOpenChange={setIsReturnsFilterMenuOpen}
             onClear={() => {
-              setYearFilter('all')
-              setMonthFilter('all')
               setTypeFilter('all')
               setReturnGroupMode('time')
               setReturnSortSpec({ field: 'date', direction: 'desc' })
@@ -1141,6 +1130,7 @@ export default function Returns() {
         loading={loading}
         normalizeScope={normalizeScope}
         renderAmount={renderAmount as ReturnsListSurfaceProps['renderAmount']}
+        isCountedReturn={isCountedReturn as ReturnsListSurfaceProps['isCountedReturn']}
         returnSections={returnSections as ReturnsListSurfaceProps['returnSections']}
         scope={scope}
         selectAllRef={selectAllRef as ReturnsListSurfaceProps['selectAllRef']}

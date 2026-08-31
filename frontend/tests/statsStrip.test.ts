@@ -155,10 +155,46 @@ test('Part 564: Sales drops the redundant outside summary; toolbar stays lean', 
   // Sort folded INTO the Filters menu; the standalone SortChip is gone.
   assert.ok(!sales.includes('SortChip'), 'the toolbar SortChip is removed (sort lives in the Filters menu)')
   assert.ok(/id: 'sort'/.test(sales), 'the Filters menu carries a Sort section')
-  // Group-by dropped; Period is a start/end date range, not year/month.
+  // Group-by dropped; the Period date filter is gone entirely — the Start→End
+  // range row (StatsRangeRow → stripRange) is the single date scope and drives
+  // the list directly now (user, Aug 31: "drive list + stats together"). There
+  // is no second date control folded into the Filters menu.
   assert.ok(!/id: 'grouping'/.test(sales), 'the Group-by filter section is gone')
   assert.ok(!sales.includes('buildPeriodFilterOptions'), 'the year/month Period options are gone')
-  assert.ok(/id: 'period'[\s\S]{0,200}DateTimeRangePicker/.test(sales), 'Period is a start/end date-range picker')
+  assert.ok(!/id: 'period'/.test(sales), 'the separate Period date filter is gone — the date row drives the list')
+  // The list reads the SAME stripRange the strip does (one shared date scope).
+  assert.ok(/salesDateRange[\s\S]{0,220}stripRange\.startDate/.test(sales), 'the Sales list is scoped by stripRange, not a separate list range')
+})
+
+test('Part 564: the top date range drives the LIST too on Sales/Returns/Fees (one date scope)', () => {
+  // User, Aug 31: "the number of sales/fees/returns don't match the arrange by
+  // date and actual display" → "drive list + stats together". Each page's list
+  // fetch is now scoped by the SAME stripRange the strip uses, and the old
+  // per-page list date control is gone (Sales listRange, Returns year/month,
+  // Fees from/to).
+  const sales = read('src/components/sales/Sales.tsx')
+  assert.ok(!/const \[listRange/.test(sales), 'Sales no longer keeps a separate listRange')
+  const returns = read('src/components/returns/Returns.tsx')
+  assert.ok(!/\[yearFilter/.test(returns) && !/\[monthFilter/.test(returns), 'Returns no longer keeps year/month filters')
+  assert.ok(/returnsDateRange[\s\S]{0,220}stripRange\.startDate/.test(returns), 'the Returns list is scoped by stripRange')
+  const fees = read('src/components/fees/FeesPage.tsx')
+  assert.ok(!/const \[fromDate/.test(fees) && !/const \[toDate/.test(fees), 'Fees no longer keeps from/to date state')
+  assert.ok(/from: stripRange\.startDate/.test(fees), 'the Fees list is scoped by stripRange')
+})
+
+test('Part 564: headline + day-group counts count only what the money counts', () => {
+  // User, Aug 31: "count only what the money counts." Cancelled (and, for
+  // sales, awaiting-payment) records still appear in the list but are excluded
+  // from every count shown, so the count reconciles with the money and with
+  // the stats strip (which already excludes them).
+  const sales = read('src/components/sales/Sales.tsx')
+  assert.ok(/isCountedSale[\s\S]{0,160}cancelled[\s\S]{0,60}awaiting_payment/.test(sales), 'Sales defines the money-counting predicate')
+  assert.ok(/revenueCount[\s\S]{0,60}filter\(isCountedSale\)/.test(sales), 'Sales computes the reconciled headline count')
+  const salesSurface = read('src/components/sales/SalesListSurface.tsx')
+  assert.ok(salesSurface.includes('{revenueCount}'), 'the Sales footer shows the money-counting count')
+  assert.ok(/section\.items\.filter\(isCountedSale\)/.test(salesSurface), 'Sales day headers show the money-counting count')
+  const returnsSurface = read('src/components/returns/ReturnsListSurface.tsx')
+  assert.ok(/section\.items\.filter\(isCountedReturn\)/.test(returnsSurface), 'Returns day headers exclude cancelled from the count')
 })
 
 test('Part 552: report section controls ride the title row; hub tabs fit; branch merges', () => {

@@ -27,6 +27,7 @@ interface ReturnRecord {
   supplier_name?: string
   customer_name?: string
   reason?: string
+  status?: string
 }
 
 interface ReturnGroup {
@@ -40,6 +41,7 @@ interface ReturnSection {
   id: string
   label: string
   ids: number[]
+  items: ReturnRecord[]
   groups: ReturnGroup[]
 }
 
@@ -53,6 +55,11 @@ interface ReturnsListSurfaceProps {
   loading: boolean
   normalizeScope: (scope?: string) => string
   renderAmount: (ret: ReturnRecord) => ReactNode
+  /** Predicate: does this return count toward the refund money shown?
+   * Cancelled returns are excluded from the refund figures, so they are
+   * excluded from the day-group counts too — keeping the count reconciled
+   * with the money (user, Aug 31: "count only what the money counts"). */
+  isCountedReturn: (ret: ReturnRecord) => boolean
   returnSections: ReturnSection[]
   scope: string
   selectAllRef: RefObject<HTMLInputElement>
@@ -125,6 +132,7 @@ export default function ReturnsListSurface({
   loading,
   normalizeScope,
   renderAmount,
+  isCountedReturn,
   returnSections,
   scope,
   selectAllRef,
@@ -196,6 +204,9 @@ export default function ReturnsListSurface({
                 <tr><td colSpan={8} className="py-10 text-center text-gray-400">{tr('no_returns_found', 'No returns found.')}</td></tr>
               ) : returnSections.map((section) => {
                 const isCollapsed = collapsedReturnSections.has(section.id)
+                // Money-counting count (cancelled returns excluded), so the
+                // per-day counts reconcile with the refund figures.
+                const countedCount = section.items.filter(isCountedReturn).length
                 return (
                   <Fragment key={section.id}>
                     <tr className="bg-slate-100/90 dark:bg-slate-800/80">
@@ -217,7 +228,7 @@ export default function ReturnsListSurface({
                             <span>{section.label}</span>
                           </label>
                           <div className="flex items-center gap-3">
-                            <span className="text-slate-400">{section.ids.length}</span>
+                            <span className="text-slate-400">{countedCount}</span>
                             <button type="button" className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-medium text-slate-500 hover:bg-white/70 hover:text-slate-700 dark:text-slate-300 dark:hover:bg-slate-700/60 dark:hover:text-white" onClick={() => toggleReturnSection(section.id)}>
                               {isCollapsed ? <ChevronRight className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
                               {isCollapsed ? (t('expand') || 'Expand') : (t('collapse') || 'Collapse')}
@@ -326,6 +337,7 @@ export default function ReturnsListSurface({
           <div className="py-10 text-center text-gray-400">{tr('no_returns_found', 'No returns found.')}</div>
         ) : returnSections.map((section) => {
           const isCollapsed = collapsedReturnSections.has(section.id)
+          const countedCount = section.items.filter(isCountedReturn).length
           return (
             <div key={section.id} className="space-y-2">
               <div className="rounded-xl bg-slate-100 px-3 py-2 dark:bg-slate-800/70">
@@ -344,7 +356,7 @@ export default function ReturnsListSurface({
                     />
                     ) : null}
                     <span>{section.label}</span>
-                    <span className="normal-case tracking-normal text-slate-400">{section.ids.length}</span>
+                    <span className="normal-case tracking-normal text-slate-400">{countedCount}</span>
                   </label>
                   <div className="flex items-center gap-1">
                     <button type="button" className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-medium text-slate-500 hover:bg-white/70 hover:text-slate-700 dark:text-slate-300 dark:hover:bg-slate-700/60 dark:hover:text-white" onClick={() => toggleReturnSection(section.id)}>

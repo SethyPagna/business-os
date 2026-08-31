@@ -13,7 +13,6 @@ import Receipt from 'lucide-react/dist/esm/icons/receipt.js'
 import Trash2 from 'lucide-react/dist/esm/icons/trash-2.js'
 import { useApp as useAppHook, useSync as useSyncHook } from '../../AppContext.tsx'
 import Modal from '../shared/Modal'
-import DateTimeRangePicker from '../shared/DateTimeRangePicker'
 import SearchInput from '../shared/SearchInput'
 import FilterMenu, { type FilterOption } from '../shared/FilterMenu'
 import PaginationControls, { PAGE_SIZE_OPTIONS, DEFAULT_PAGE_SIZE } from '../shared/PaginationControls'
@@ -134,8 +133,12 @@ export default function FeesPage() {
 
   const [search, setSearch] = useState('')
   const [typeFilter, setTypeFilter] = useState<FeeTypeFilter>('all')
-  const [fromDate, setFromDate] = useState('')
-  const [toDate, setToDate] = useState('')
+  // ONE date scope for the whole page (user, Aug 31: "drive list + stats
+  // together"): the Start→End range row above the search bar drives BOTH the
+  // stats strip AND the expenses list — there is no separate Filters-menu date
+  // range that could disagree with it. Default today. (Strip data state is
+  // declared further down.)
+  const [stripRange, setStripRange] = useState<DateTimeRange>(() => statsPresetRange('today'))
   const [branchFilter, setBranchFilter] = useState('')
   const [branches, setBranches] = useState<FeeBranchOption[]>([])
   const [page, setPage] = useState(1)
@@ -157,8 +160,8 @@ export default function FeesPage() {
         () => getFeesRequest({
           search: search.trim() || undefined,
           fee_type: typeFilter !== 'all' ? typeFilter : undefined,
-          from: fromDate || undefined,
-          to: toDate || undefined,
+          from: stripRange.startDate || undefined,
+          to: stripRange.endDate || undefined,
           branch_id: branchFilter || undefined,
           limit: pageSize,
           offset: (page - 1) * pageSize,
@@ -177,7 +180,7 @@ export default function FeesPage() {
         setHasLoadedOnce(true)
       }
     }
-  }, [search, typeFilter, fromDate, toDate, branchFilter, page, pageSize])
+  }, [search, typeFilter, stripRange.startDate, stripRange.endDate, branchFilter, page, pageSize])
 
   useEffect(() => {
     if (!isActive) return
@@ -189,7 +192,7 @@ export default function FeesPage() {
   // page.
   useEffect(() => {
     setPage(1)
-  }, [search, typeFilter, fromDate, toDate, branchFilter])
+  }, [search, typeFilter, stripRange.startDate, stripRange.endDate, branchFilter])
 
   // Branch list for the filter dropdown -- loaded once, independent of
   // isActive/load() so the filter menu has options even before the fees
@@ -220,7 +223,6 @@ export default function FeesPage() {
     days?: Array<{ date?: string; count?: number; amount_usd?: number; amount_khr?: number }>
     by_type?: Array<{ fee_type?: string; count?: number; amount_usd?: number; amount_khr?: number }>
   }
-  const [stripRange, setStripRange] = useState<DateTimeRange>(() => statsPresetRange('today'))
   const [stripData, setStripData] = useState<FeesStripPayload | null>(null)
   const [stripLoading, setStripLoading] = useState(false)
   const stripRequestRef = useRef(0)
@@ -354,8 +356,8 @@ export default function FeesPage() {
   }
 
   const activeFilterCount = useMemo(
-    () => [typeFilter !== 'all', !!fromDate, !!toDate, !!branchFilter].filter(Boolean).length,
-    [typeFilter, fromDate, toDate, branchFilter],
+    () => [typeFilter !== 'all', !!branchFilter].filter(Boolean).length,
+    [typeFilter, branchFilter],
   )
 
   const filterSections = useMemo(() => ([
@@ -372,30 +374,9 @@ export default function FeesPage() {
         })),
       ],
     },
-    {
-      id: 'date',
-      label: tr('date', 'Date'),
-      summary: fromDate || toDate
-        ? `${fromDate || '…'} – ${toDate || '…'}`
-        : tr('all_time', 'All time'),
-      active: !!fromDate || !!toDate,
-      // Unified range control (same Start → End pill the Dashboard/reports
-      // use) instead of two loose raw date inputs.
-      render: () => (
-        <div className="p-1">
-          <DateTimeRangePicker
-            value={{ startDate: fromDate, endDate: toDate, startTime: '', endTime: '' }}
-            onChange={(range) => {
-              setFromDate(range.startDate || '')
-              setToDate(range.endDate || '')
-            }}
-            t={t}
-            showTime={false}
-            triggerClassName="flex w-full items-center justify-center gap-2 rounded-lg px-3 py-2"
-          />
-        </div>
-      ),
-    },
+    // The date filter is gone from this menu: the Start→End range row above
+    // the search bar (stripRange) is the single date scope now and drives the
+    // list directly, so a second date control here would only disagree with it.
     {
       id: 'branch',
       label: tr('branch', 'Branch'),
@@ -409,7 +390,7 @@ export default function FeesPage() {
         })),
       ],
     },
-  ]), [tr, t, typeFilter, fromDate, toDate, branchFilter, branches])
+  ]), [tr, t, typeFilter, branchFilter, branches])
 
   return (
     <div className="page-scroll flex flex-col p-3 sm:p-6">
@@ -463,7 +444,7 @@ export default function FeesPage() {
             label={tr('filters', 'Filters')}
             activeCount={activeFilterCount}
             sections={filterSections}
-            onClear={() => { setTypeFilter('all'); setFromDate(''); setToDate(''); setBranchFilter('') }}
+            onClear={() => { setTypeFilter('all'); setBranchFilter('') }}
             compact
           />
           {/* Add Fee moved into the stats strip's range row above ("date

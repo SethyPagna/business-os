@@ -31,7 +31,7 @@ import { beginKeyedAction, beginSingleAction, finishKeyedAction, finishSingleAct
 import { getSales as fetchSales, getSalesStats as fetchSalesStats, getSalesStatsStrip } from '../../api/salesTransport.ts'
 import StatsStrip, { statsPresetRange, type StatCardDef } from '../shared/StatsStrip.tsx'
 import StatsRangeRow from '../shared/StatsRangeRow.tsx'
-import DateTimeRangePicker, { type DateTimeRange } from '../shared/DateTimeRangePicker.tsx'
+import { type DateTimeRange } from '../shared/DateTimeRangePicker.tsx'
 import { getUsers as fetchUsers } from '../../api/userReadTransport.ts'
 import {
   beginTrackedRequest,
@@ -244,11 +244,13 @@ export default function Sales() {
   const [userOptions, setUserOptions] = useState<UserOption[]>([])
   const [salesFiltersOpen, setSalesFiltersOpen] = useState(false)
   const [userOptionsLoaded, setUserOptionsLoaded] = useState(false)
-  // Period narrowing is a start→end date range (user, Aug 31: "for the
-  // period that can use the start date and end date") — the same
-  // DateTimeRangePicker Fees folds into its Filters menu, replacing the old
-  // year/month dropdowns. Empty = all time (the previous 'all' default).
-  const [listRange, setListRange] = useState<DateTimeRange>({ startDate: '', endDate: '', startTime: '', endTime: '' })
+  // ONE date scope for the whole page (user, Aug 31: "drive list + stats
+  // together"): the Start→End range row above the search bar drives BOTH the
+  // stats strip AND the receipts list — there is no separate hidden Period
+  // filter any more. Defaults to today; changing it re-scopes the list, its
+  // day-group counts, and the strip in lockstep, so every count agrees with
+  // the dates shown. (The strip's data state is declared further down.)
+  const [stripRange, setStripRange] = useState<DateTimeRange>(() => statsPresetRange('today'))
   const [selectedIds, setSelectedIds] = useState<Set<number>>(() => new Set())
   // The by-day report moved out to its own top-level Reports hub section
   // (ReportsHub.tsx); Sales now shows only the receipts list.
@@ -362,14 +364,17 @@ export default function Sales() {
     if (value && value !== key) return value
     return settings?.language === 'km' ? cleanFallback(fallbackEn, fallbackKm) : fallbackEn
   }, [cleanFallback, settings?.language, t])
+  // The list, its unbounded stats aggregate, and the strip all read this ONE
+  // range now — so the receipts shown, the footer count, and the strip cards
+  // always describe the same window.
   const salesDateRange = useMemo(() => {
-    const startDate = String(listRange.startDate || '').trim()
-    const endDate = String(listRange.endDate || '').trim()
+    const startDate = String(stripRange.startDate || '').trim()
+    const endDate = String(stripRange.endDate || '').trim()
     const out: { startDate?: string; endDate?: string } = {}
     if (startDate) out.startDate = startDate
     if (endDate) out.endDate = endDate
     return out
-  }, [listRange.startDate, listRange.endDate])
+  }, [stripRange.startDate, stripRange.endDate])
 
   const clearLoadWatchdog = useCallback(() => {
     window.clearTimeout(loadWatchdogRef.current)
@@ -489,16 +494,15 @@ export default function Sales() {
   }, [loadSalesStats])
 
   // The foldable stats strip (shared StatsStrip): range-scoped figures with
-  // per-card breakdowns, DEFAULT per-day (today). Deliberately independent
-  // of the list's filters -- the strip answers "how was this period", the
-  // list footer keeps answering "what does this filter match".
+  // per-card breakdowns. It reads the SAME `stripRange` the list reads
+  // (declared near the top), so the strip and the list always describe the
+  // one date window — no second, independent range.
   type SalesStripPayload = {
     totals?: Record<string, number>
     by_payment?: Array<{ payment_method?: string; tx_count?: number; collected_usd?: number; total_usd?: number }>
     by_status?: Array<{ sale_status?: string; count?: number; total_usd?: number }>
     returns?: { count?: number; refund_usd?: number }
   }
-  const [stripRange, setStripRange] = useState<DateTimeRange>(() => statsPresetRange('today'))
   const [stripData, setStripData] = useState<SalesStripPayload | null>(null)
   const [stripLoading, setStripLoading] = useState(false)
   const stripRequestRef = useRef(0)
@@ -837,7 +841,7 @@ export default function Sales() {
 
   useEffect(() => {
     setSalesPage(1)
-  }, [listRange.startDate, listRange.endDate, salesPageSize, salesSortSpec, search, statusFilter, userFilter])
+  }, [stripRange.startDate, stripRange.endDate, salesPageSize, salesSortSpec, search, statusFilter, userFilter])
 
   useEffect(() => {
     setSalesPage((current) => clampPage(current, allVisibleSales.length, salesPageSize))
@@ -959,11 +963,21 @@ export default function Sales() {
     ]
   }, [fmtUSD, stripData, t, translateOr])
 
+  // A sale "counts" toward the headline figures only when it contributes to
+  // the money shown: cancelled and awaiting-payment sales are excluded from
+  // revenue, so they must be excluded from the "N sales" count too (user,
+  // Aug 31: "count only what the money counts"). Those rows still render in
+  // the list — they just don't inflate the count.
+  const isCountedSale = useCallback((sale: SaleRecord) => !['cancelled', 'awaiting_payment'].includes(String(sale?.sale_status || 'completed')), [])
+
   const revenue = salesStats
     ? salesStats.revenue_usd
-    : filtered
-        .filter((sale) => !['cancelled', 'awaiting_payment'].includes(sale.sale_status || 'completed'))
-        .reduce((sum, sale) => sum + (sale.net_total_usd ?? sale.total_usd ?? 0), 0)
+    : filtered.filter(isCountedSale).reduce((sum, sale) => sum + (sale.net_total_usd ?? sale.total_usd ?? 0), 0)
+
+  // The headline count must reconcile with `revenue`: count only the sales
+  // that contribute to it, so the footer never reads "12 sales | $67.47" when
+  // only 6 of those 12 produced the $67.47.
+  const revenueCount = useMemo(() => filtered.filter(isCountedSale).length, [filtered, isCountedSale])
 
   const toggleSelected = (saleId: number | string) => {
     const numericId = Number(saleId)
@@ -1112,10 +1126,10 @@ export default function Sales() {
     { label: translateOr('export_visible_sales', 'Export visible sales', 'នាំចេញការលក់ដែលកំពុងបង្ហាញ'), onClick: () => exportVisibleSales(filtered, 'sales-visible') },
     selectedSales.length ? { label: translateOr('export_selected_sales', 'Export selected sales', 'នាំចេញការលក់ដែលបានជ្រើស'), onClick: handleExportSelected, color: 'blue' } : null,
     statusFilter !== 'all' ? { label: translateOr('export_filtered_status', `Export ${getStatusLabel(statusFilter, t)}`, `នាំចេញតាមស្ថានភាព ${getStatusLabel(statusFilter, t)}`), onClick: () => exportVisibleSales(filtered, `sales-${statusFilter}`) } : null,
-    (listRange.startDate || listRange.endDate) ? { label: translateOr('export_filtered_time_range', 'Export filtered time range', 'នាំចេញតាមចន្លោះពេលដែលបានតម្រង'), onClick: () => exportVisibleSales(filtered, 'sales-filtered') } : null,
+    (stripRange.startDate || stripRange.endDate) ? { label: translateOr('export_filtered_time_range', 'Export filtered time range', 'នាំចេញតាមចន្លោះពេលដែលបានតម្រង'), onClick: () => exportVisibleSales(filtered, 'sales-filtered') } : null,
     'divider',
     { label: translateOr('export_detailed_sales_report', 'Detailed sales report', 'របាយការណ៍លម្អិតការលក់'), onClick: () => setShowExport(true), color: 'green' },
-  ].filter(Boolean) as Array<PortalMenuItem | null | false>), [exportVisibleSales, filtered, handleExportSelected, listRange.startDate, listRange.endDate, selectedSales.length, statusFilter, t, translateOr])
+  ].filter(Boolean) as Array<PortalMenuItem | null | false>), [exportVisibleSales, filtered, handleExportSelected, stripRange.startDate, stripRange.endDate, selectedSales.length, statusFilter, t, translateOr])
 
   const salesFilterSections = useMemo(() => ([
     {
@@ -1162,30 +1176,15 @@ export default function Sales() {
         { id: 'total-asc', label: translateOr('sort_total_low', 'Total: low → high', 'សរុប៖ តិច → ច្រើន'), active: salesSortSpec.field === 'total' && salesSortSpec.direction === 'asc', onClick: () => setSalesSortSpec({ field: 'total', direction: 'asc' }) },
       ],
     },
-    // Period is now a start→end date range folded into this menu, the same
-    // control Fees uses ("for the period that can use the start date and
-    // end date") — the old year/month dropdowns are gone.
-    {
-      id: 'period',
-      label: translateOr('period', 'Period', 'រយៈពេល'),
-      active: !!(listRange.startDate || listRange.endDate),
-      render: () => (
-        <div className="p-1">
-          <DateTimeRangePicker
-            value={listRange}
-            onChange={setListRange}
-            t={t}
-            showTime={false}
-            triggerClassName="flex w-full items-center justify-center gap-2 rounded-lg px-3 py-2"
-          />
-        </div>
-      ),
-    },
-  ].filter(Boolean)), [isAdmin, listRange, salesSortSpec, statusFilter, t, translateOr, userFilter, userOptions])
+    // The Period date filter is gone from this menu: the Start→End range row
+    // above the search bar (StatsRangeRow → stripRange) is the single date
+    // scope now and drives the list directly, so a second date control here
+    // would just be a way to disagree with it (user, Aug 31).
+  ].filter(Boolean)), [isAdmin, salesSortSpec, statusFilter, t, translateOr, userFilter, userOptions])
 
   const activeSalesFilterCount = useMemo(
-    () => countActiveFlags([statusFilter !== 'all', userFilter !== 'all', !!(listRange.startDate || listRange.endDate), !(salesSortSpec.field === 'date' && salesSortSpec.direction === 'desc')]),
-    [listRange.startDate, listRange.endDate, salesSortSpec.direction, salesSortSpec.field, statusFilter, userFilter],
+    () => countActiveFlags([statusFilter !== 'all', userFilter !== 'all', !(salesSortSpec.field === 'date' && salesSortSpec.direction === 'desc')]),
+    [salesSortSpec.direction, salesSortSpec.field, statusFilter, userFilter],
   )
   // Group-by-status is gone (Part 549) — the list always groups by day.
   const showSalesActionGroups = false
@@ -1310,7 +1309,6 @@ export default function Sales() {
             onClear={() => {
               setStatusFilter('all')
               setUserFilter('all')
-              setListRange({ startDate: '', endDate: '', startTime: '', endTime: '' })
               setSalesSortSpec({ field: 'date', direction: 'desc' })
             }}
             mobileIconOnly
@@ -1371,6 +1369,8 @@ export default function Sales() {
         isSelectionScopePartiallySelected={isSelectionScopePartiallySelected}
         loading={loading}
         revenue={revenue}
+        revenueCount={revenueCount}
+        isCountedSale={isCountedSale as SalesListSurfaceProps['isCountedSale']}
         salesSections={salesSections as SalesListSurfaceProps['salesSections']}
         selectAllRef={selectAllRef as SalesListSurfaceProps['selectAllRef']}
         selectedIds={selectedIds}
