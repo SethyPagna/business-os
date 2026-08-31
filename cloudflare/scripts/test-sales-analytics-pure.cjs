@@ -18,10 +18,12 @@ const src = fs.readFileSync(srcPath, 'utf8')
 // Strip the two type-only imports (getDb/Env) so this file can run
 // standalone under plain Node without pulling in the Hono/D1 stack, then
 // transpile with the TypeScript compiler already used elsewhere in this
-// repo's test scripts.
+// repo's test scripts. The line-end is matched as \r?\n so the strip works on a
+// CRLF checkout too (git autocrlf hands Windows worktrees CRLF); without it the
+// import survives and the compiled JS fails with "Cannot find module './db'".
 const stripped = ('// @ts-nocheck\n' + src)
-  .replace(/^import \{ getDb \} from '\.\/db'\n/m, '')
-  .replace(/^import type \{ Env \} from '\.\.\/index'\n/m, '')
+  .replace(/^import \{ getDb \} from '\.\/db'\r?\n/m, '')
+  .replace(/^import type \{ Env \} from '\.\.\/index'\r?\n/m, '')
   .replace(/env: Env/g, 'env')
 
 const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'sales-analytics-'))
