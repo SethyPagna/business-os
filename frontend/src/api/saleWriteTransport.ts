@@ -47,13 +47,14 @@ function localTable(db: LocalDb, tableName: string): Table<LocalRow, IndexableTy
 }
 
 // Offline sales mint their receipt id at QUEUE time from the device clock
-// -- the sale's own moment, not the later sync -- in the same
-// RCP-YYYYMMDD-HHMMSS shape the server mints online (user, Aug 30 2026:
-// receipt ids encode date+time). The id rides the replayed payload, so the
-// server keeps it; the pending-sync UI reads the sale row's
-// offline_pending flag, which is what the old OFFLINE- prefix signaled.
+// -- the sale's own moment, not the later sync -- in the same bare
+// YYYYMMDD-HHMMSS shape the server mints online (user, Aug 30 2026:
+// receipt ids encode date+time; Aug 31 2026: "Receipt no need RCP" -- no
+// prefix). The id rides the replayed payload, so the server keeps it; the
+// pending-sync UI reads the sale row's offline_pending flag, which is what
+// the old OFFLINE- prefix signaled.
 function buildOfflineSaleReceiptNumber(): string {
-  return `RCP-${businessDateTimeId()}`
+  return businessDateTimeId()
 }
 
 function isRetryableOfflineSaleError(error: unknown): boolean {

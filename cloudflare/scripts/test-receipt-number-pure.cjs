@@ -1,7 +1,9 @@
-// Regression test for lib/receiptNumber.ts -- the RCP-/RET-/SRET- id
+// Regression test for lib/receiptNumber.ts -- the receipt/return id
 // generator (user, Aug 30 2026: receipt ids encode the sale's own
 // date+time as YYYYMMDD-HHMMSS, 24-hour, Phnom Penh wall clock; that
-// compact form is ONLY for identifiers, never for displayed dates).
+// compact form is ONLY for identifiers, never for displayed dates.
+// Aug 31 2026: "Receipt no need RCP" -- sales mint the BARE id with an
+// EMPTY prefix; returns keep RET-/SRET- so they stay distinguishable).
 //
 // Run: node scripts/test-receipt-number-pure.cjs
 const assert = require('node:assert/strict')
@@ -59,31 +61,37 @@ check('bare call uses the current clock and matches the id shape', () => {
 })
 
 ;(async () => {
-  await checkAsync('no collision keeps the bare timestamp id', async () => {
-    const id = await uniqueBusinessDateTimeNumber('RCP', async () => false)
-    assert.match(id, /^RCP-\d{8}-\d{6}$/)
+  await checkAsync('an EMPTY prefix mints the bare timestamp id -- no leading dash, no RCP', async () => {
+    const id = await uniqueBusinessDateTimeNumber('', async () => false)
+    assert.match(id, /^\d{8}-\d{6}$/)
   })
 
-  await checkAsync('same-second collisions take -2, -3, ... suffixes', async () => {
+  await checkAsync('a named prefix (returns) still prepends with one dash', async () => {
+    const id = await uniqueBusinessDateTimeNumber('RET', async () => false)
+    assert.match(id, /^RET-\d{8}-\d{6}$/)
+  })
+
+  await checkAsync('same-second collisions take -2, -3, ... suffixes (bare id too)', async () => {
     const taken = new Set()
-    const first = await uniqueBusinessDateTimeNumber('RCP', async (c) => taken.has(c))
+    const first = await uniqueBusinessDateTimeNumber('', async (c) => taken.has(c))
     taken.add(first)
-    const second = await uniqueBusinessDateTimeNumber('RCP', async (c) => taken.has(c))
+    const second = await uniqueBusinessDateTimeNumber('', async (c) => taken.has(c))
     taken.add(second)
-    const third = await uniqueBusinessDateTimeNumber('RCP', async (c) => taken.has(c))
+    const third = await uniqueBusinessDateTimeNumber('', async (c) => taken.has(c))
     assert.equal(second, `${first}-2`)
     assert.equal(third, `${first}-3`)
   })
 
   await checkAsync('a pathological burst falls back to a random suffix instead of looping', async () => {
-    const id = await uniqueBusinessDateTimeNumber('RCP', async (c) => !/-[A-Z0-9]{4}$/.test(c))
-    assert.match(id, /^RCP-\d{8}-\d{6}-[A-Z0-9]{4}$/)
+    const id = await uniqueBusinessDateTimeNumber('', async (c) => !/-[A-Z0-9]{4}$/.test(c))
+    assert.match(id, /^\d{8}-\d{6}-[A-Z0-9]{4}$/)
   })
 
-  await checkAsync('routes actually use the generator (sales RCP, returns RET/SRET), old Date.now ids gone', async () => {
+  await checkAsync('routes actually use the generator (sales BARE id, returns RET/SRET), old Date.now ids gone', async () => {
     const salesRoute = fs.readFileSync(path.join(cloudflareRoot, 'src', 'routes', 'sales.ts'), 'utf8')
     const returnsRoute = fs.readFileSync(path.join(cloudflareRoot, 'src', 'routes', 'returns.ts'), 'utf8')
-    assert.match(salesRoute, /await uniqueBusinessDateTimeNumber\(\s*'RCP',/)
+    assert.match(salesRoute, /await uniqueBusinessDateTimeNumber\(\s*'',/)
+    assert.doesNotMatch(salesRoute, /uniqueBusinessDateTimeNumber\(\s*'RCP'/)
     assert.match(returnsRoute, /await uniqueBusinessDateTimeNumber\(\s*'RET',/)
     assert.match(returnsRoute, /await uniqueBusinessDateTimeNumber\(\s*'SRET',/)
     assert.doesNotMatch(salesRoute, /RCP-\$\{Date\.now\(\)\}/)

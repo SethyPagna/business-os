@@ -47,9 +47,11 @@ await runTest('client and server generators stay hand-synced and wired in', () =
   assert.match(serverLib, /export function businessDateTimeId/)
   assert.match(serverLib, /export async function uniqueBusinessDateTimeNumber/)
   assert.match(serverLib, /7 \* 60 \* 60 \* 1000/)
-  // Offline sales mint RCP-<datetime> (no more dateless OFFLINE- ids)...
+  // Offline sales mint the BARE <datetime> id (user, Aug 31 2026: "Receipt
+  // no need RCP"; no more dateless OFFLINE- ids either)...
   const saleWrite = readFrontend('src/api/saleWriteTransport.ts')
-  assert.match(saleWrite, /return `RCP-\$\{businessDateTimeId\(\)\}`/)
+  assert.match(saleWrite, /return businessDateTimeId\(\)/)
+  assert.doesNotMatch(saleWrite, /`RCP-\$\{/)
   assert.doesNotMatch(saleWrite, /`OFFLINE-\$\{/)
   // ...and returns mint RET-/SRET-<datetime> instead of Date.now() ids.
   const returnsTransport = readFrontend('src/api/returnsTransport.ts')

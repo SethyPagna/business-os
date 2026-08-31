@@ -478,11 +478,13 @@ app.post('/', async (c) => {
       ? []
       : [{ method: String(body.payment_method || 'Cash').trim().slice(0, 80) || 'Cash', amount_usd: amountPaidUsd, amount_khr: amountPaidKhr }]
   const paymentMethod = Array.from(new Set(effectivePaymentDetails.map((detail) => detail.method))).join(' + ')
-  // RCP-YYYYMMDD-HHMMSS in Phnom Penh wall-clock time -- the receipt id
-  // encodes the sale's own date+time (user, Aug 30 2026). Client-provided
-  // numbers (offline replays, imports) are preserved untouched.
+  // YYYYMMDD-HHMMSS in Phnom Penh wall-clock time -- the receipt id encodes
+  // the sale's own date+time (user, Aug 30 2026), with NO prefix (user,
+  // Aug 31 2026: "Receipt no need RCP"; returns keep RET-/SRET-).
+  // Client-provided numbers (offline replays, imports) are preserved
+  // untouched -- historical RCP- ids stay as minted.
   const receiptNumber = body.receipt_number?.trim() || await uniqueBusinessDateTimeNumber(
-    'RCP',
+    '',
     async (candidate) => !!(await db.prepare('SELECT 1 AS hit FROM sales WHERE receipt_number = ? LIMIT 1').get([candidate])),
   )
 

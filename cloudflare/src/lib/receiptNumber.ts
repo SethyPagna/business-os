@@ -1,8 +1,11 @@
-// Receipt/return-number generation: PREFIX-YYYYMMDD-HHMMSS (user, Aug 30
-// 2026: "each sales/receipt can do date and time for sales id and
-// identification ... yyyymmdd + 24-hour time"). The compact date form is
-// ONLY for these identifiers -- displayed dates stay mm/dd/yyyy 24-hour
-// app-wide (frontend/src/utils/formatters.ts).
+// Receipt/return-number generation: YYYYMMDD-HHMMSS, optionally prefixed
+// (user, Aug 30 2026: "each sales/receipt can do date and time for sales id
+// and identification ... yyyymmdd + 24-hour time"; Aug 31: "Receipt no need
+// RCP" -- sales receipts mint the BARE timestamp id, empty prefix). Returns
+// keep RET-/SRET- so a return number stays distinguishable from the sale
+// receipt it references. The compact date form is ONLY for these
+// identifiers -- displayed dates stay mm/dd/yyyy 24-hour app-wide
+// (frontend/src/utils/formatters.ts).
 //
 // The encoded wall clock is Asia/Phnom_Penh (UTC+07:00, no DST), the app's
 // canonical business timezone -- the same fixed-offset convention as
@@ -31,7 +34,8 @@ export async function uniqueBusinessDateTimeNumber(
   prefix: string,
   exists: (candidate: string) => Promise<boolean>,
 ): Promise<string> {
-  const base = `${prefix}-${businessDateTimeId()}`
+  // Empty prefix = the bare timestamp id (sales receipts); no leading dash.
+  const base = prefix ? `${prefix}-${businessDateTimeId()}` : businessDateTimeId()
   let candidate = base
   for (let n = 2; await exists(candidate); n++) {
     if (n > 10) return `${base}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`

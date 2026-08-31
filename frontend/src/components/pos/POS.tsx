@@ -54,6 +54,7 @@ import {
 } from './posCore.ts'
 import { promotionBadgeForProduct, evaluatePromotionPricing, type PromotionRule } from '../../utils/promotionRules.ts'
 import { getClientDeviceInfo } from '../../utils/deviceInfo'
+import { businessDateTimeId } from '../../utils/timestampId.ts'
 import {
   beginTrackedRequest,
   invalidateTrackedRequest,
@@ -2694,7 +2695,7 @@ export default function POS() {
       // the real signal: an id (or an explicit success) and no error.
       if (isSaleRecorded(result)) {
         checkoutRequestIdsRef.current.delete(orderKey)
-        const receiptNumber = result.receiptNumber || result.receipt_number || `RCP-${Date.now()}`
+        const receiptNumber = result.receiptNumber || result.receipt_number || businessDateTimeId()
         setReceiptQueue(q => [...q, { ...saleData, id: result.id, receiptNumber, created_at: new Date().toISOString() }])
         if (resolvedActiveId) closeOrder(resolvedActiveId)
         void loadCatalogData('POS catalog after checkout')

@@ -71,7 +71,7 @@ export default function ReceiptPreview({ tpl, settings }: ReceiptPreviewProps) {
 
   const exchangeRate = parseFloat(String(settings.exchange_rate || '4100'))
   const fakeSale = {
-    receipt_number: 'RCP-PREVIEW-0001',
+    receipt_number: '20260831-143000',
     cashier_name: 'Demo Cashier',
     payment_method: 'Cash',
     created_at: new Date().toISOString(),

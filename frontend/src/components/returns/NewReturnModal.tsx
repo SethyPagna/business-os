@@ -519,7 +519,7 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify }: N
                   {T('search_receipt_or_id','Receipt Number or Sale ID')}
                 </label>
                 <div className="flex gap-2">
-                  <input className="input flex-1" placeholder={T('search_receipt_or_id','e.g. RCP-1234567-ABCD')}
+                  <input className="input flex-1" placeholder={T('search_receipt_or_id','e.g. 20260831-143000')}
                     value={searchQuery} onChange={e => setSearchQuery(e.target.value)}
                     onKeyDown={e => e.key === 'Enter' && handleSearch()} autoFocus />
                   <button onClick={handleSearch} disabled={searching || !searchQuery.trim()}
