@@ -393,6 +393,30 @@ dashboard/audit_log/customer_portal (not clean view-tier candidates).]**
 Review. Admin-only (no view tier, by decision) = Users. Not clean view-tier
 candidates (would be fake) = dashboard, audit_log, customer_portal, backup, POS.]**
 
+**[GRANULAR-BREAKDOWN LANE (Part 557 slice 7+, this session): user re-scoped the
+5 "not view-tier" sections — wants real per-function/action grants so roles like
+"employee" can be managed clearly.** Audit of the 5:
+- **dashboard** — ALREADY granular: `dashboard` (page access) + `dashboard_export`
+  (independent export toggle). "Hidden from employee" = just don't grant `dashboard`.
+  No backend calls; pure frontend page/export gating. No change needed.
+- **pos** — ALREADY grantable: `pos` lets an employee ring sales (POST /api/sales =
+  hasAnyPermission(['pos','sales'])). "POS full access to employee" already works.
+- **backup** — ALREADY `backup` (export, high) + `backup_restore` (critical). Stays
+  restricted. No change.
+- **audit_log** — DONE + VERIFIED LIVE (slice 7, commit 3035bc0e): own-vs-all view
+  tier. `view` = see your OWN audit entries (backend forces userId=self, no name
+  leak, purge blocked); `full` = everyone's + deleted-sales ledger + (admin) purge.
+  Matches user's "audit log shows only for the user, admin shows all." Live :8795:
+  view total=3 own + ?userId=999 bypass still own=3; full total=67; none 403.
+- **customer_portal** — DESIGN DECISION PENDING (asked user). Finding: `customer_portal`
+  is TODAY a page-VISIBILITY gate only; ALL portal content (posts/FAQ/about/promos/
+  branding/theme/catalog-display/loyalty/submissions) is saved via POST /settings
+  gated on the `settings` permission (settings.ts bucket fallthrough), so a
+  customer_portal-only user sees an editor whose every save 403s (a fake control).
+  Options put to user: (A) one real "manage portal content" key, (B) content-vs-
+  config split (employee edits posts/FAQ/about, config stays admin), (C) fully
+  granular per-area keys.]**
+
 **→ FILTER-CHIPS-LANE (this session, Aug 31): CLAIMED.** User: the sales filter
 menu (and every other) renders the CHOSEN filters as removable chips OUTSIDE the
 menu, in the same toolbar row as the search bar + Filters button — remove that
