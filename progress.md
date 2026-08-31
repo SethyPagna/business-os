@@ -772,7 +772,16 @@ IDs) or the section linked. Statuses: **[~]** = in progress / partly done,
   deleted / transfers / fees all equal source. Importer fixed (`aa66334b`:
   archive-folder paths, zero-insensitive phone links, driver only on delivery);
   two 1-row production corrections (4362 customer link, 4361 driver unlink).
-  Open for user: ambiguous name-links 4353/4370; 8 optional new contacts.
+  ~~Open for user: ambiguous name-links 4353/4370; 8 optional new contacts.~~
+  **→ resolved into the app (Part 555, session 1e, needs deploy):** the
+  duplicates surfaces are renamed **Conflicts** (Contacts tab + Products
+  section chip, both packs) and the Contacts Conflicts tab gained a
+  **Sale links** section listing exactly these issues live — phone-mismatch
+  links (4353/4370 appear there with a suggested relink) and
+  missing-contact sales (the 8 optional customers + historical unlinked
+  groups) with Relink / Create-and-link / Link-to-existing / dismiss
+  actions. Conflicts sections are the standing home for future
+  data-quality issue types.
   **Follow-through DONE (Part 552, session 1e, needs deploy):** both stored-but-
   invisible ledgers now have read-only screens — **Supplier AP Invoices** on
   Contacts → Suppliers (contacts_suppliers gate) and **Deleted sales (old
