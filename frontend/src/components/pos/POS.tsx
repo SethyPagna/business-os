@@ -3037,6 +3037,29 @@ export default function POS() {
                 </div>
               )}
             </div>
+            {/* A second pager at the BOTTOM of the scrollable grid (user
+                request): after scrolling through a page of product cards you
+                can go next/prev or change the page / per-page size without
+                scrolling back up to the top pager. Only shown when there is
+                more than one page so it never clutters a short grid. */}
+            {productTotal > productPageSize ? (
+              <div className="mt-3 flex justify-center">
+                <PaginationControls
+                  page={productPage}
+                  pageSize={productPageSize}
+                  totalItems={productTotal}
+                  label={productCountLabel}
+                  t={t}
+                  compact
+                  rangeAsPageSize
+                  onPageChange={setProductPage}
+                  onPageSizeChange={(size) => {
+                    setProductPageSize(size)
+                    setProductPage(1)
+                  }}
+                />
+              </div>
+            ) : null}
           </div>
 
           <AlphaIndexRail letters={visibleInitialLetters} onJump={jumpToInitial} label={t('jump_to_letter') || 'Jump to letter'} />
