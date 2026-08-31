@@ -318,15 +318,14 @@ const DASHBOARD_INVENTORY_FOCUS_KEY = 'bos:dashboard:inventory-focus'
 
 // Shared list-body sizing for the dashboard's list cards (recent sales, top
 // products/customers, low/out of stock, expiry, branches, imports, payment).
-// The user asked for cards that hold a stable height instead of each card
-// being as tall as its own data: a short list left a big empty gap while its
-// row-mate (the analytics chart, best-hour heatmap, low-stock list) ran much
-// taller. Grid already stretches every card in a row to the tallest; this makes
-// the LIST inside a card grow to fill that stretched height (flex-1), with a
-// min so an all-list row still has a sensible floor and a max + scroll so one
-// very long list can't blow the row out. Net effect: cards line up, each shows
-// as many rows as fit, and the rest stay reachable by scrolling in place.
-const CARD_LIST_BODY = 'flex-1 min-h-[12rem] max-h-[18rem] overflow-y-auto'
+// The user REVISED the height rule (Sep 1): cards should be COMPACT and fit the
+// SHORTEST card in their row, NOT balloon up to a tall sibling (the analytics
+// chart, the best-hour heatmap). So the card grid rows below use items-start (no
+// stretch-to-tallest) and each list body clamps to a compact band -- a low min
+// floor so a short list stays short, and a max + scroll so a long one can't run
+// the card tall. flex-1 is kept so a card that IS structurally tall (best-hour:
+// fixed heatmap + list) still lets its list take the remaining height.
+const CARD_LIST_BODY = 'flex-1 min-h-[8rem] max-h-[16rem] overflow-y-auto'
 
 function getDashboardFilterStorageKey(user?: AppUser | null): string {
   const userKey = user?.id || user?.username || user?.email || 'guest'
@@ -416,7 +415,7 @@ function PaymentMethodCard({ analytics, analyticsPending, analyticsUnavailable, 
   const colors = ['#2563eb', '#16a34a', '#ea580c', '#7c3aed', '#dc2626', '#0891b2', '#0f766e']
   return (
     <div className="card flex flex-col p-3 sm:p-4">
-      <h2 className="mb-3 text-base font-semibold text-gray-900 dark:text-white">{translateOr('payment_method', 'Payment Method', 'វិធីទូទាត់')}</h2>
+      <h2 className="mb-2 text-base font-semibold text-gray-900 dark:text-white">{translateOr('payment_method', 'Payment Method', 'វិធីទូទាត់')}</h2>
       {analyticsPending ? <div className="h-28 animate-pulse rounded-xl bg-gray-100 dark:bg-gray-700" /> : analyticsUnavailable ? (
         <div className="flex h-28 items-center justify-center rounded-xl border border-amber-200 bg-amber-50/60 px-3 text-center text-xs text-amber-900 dark:border-amber-800/70 dark:bg-amber-950/20 dark:text-amber-100">{analyticsError || 'Analytics unavailable for this range.'}</div>
       ) : !payments.length ? (
@@ -476,7 +475,7 @@ function RecentSalesCard({ summary, t, translateOr, fmtUSD, fmtKHR, formatStatus
   const sales = summary?.recent_sales || []
   return (
     <div className="card flex flex-col">
-      <div className="border-b border-gray-100 p-3 sm:p-4 dark:border-gray-700"><h2 className="font-semibold text-gray-900 dark:text-white">{t('sales') || 'Sales'}</h2></div>
+      <div className="border-b border-gray-100 px-3 py-2.5 sm:px-4 dark:border-gray-700"><h2 className="font-semibold text-gray-900 dark:text-white">{t('sales') || 'Sales'}</h2></div>
       <div className={`divide-y divide-gray-100 dark:divide-gray-700 ${CARD_LIST_BODY}`}>
         {!sales.length ? <p className="p-4 text-center text-sm text-gray-400">{translateOr('no_data', 'No data found', 'រកមិនឃើញទិន្នន័យ')}</p> : sales.map((sale) => (
           <button key={sale.id} type="button" className="flex w-full items-center justify-between gap-2 px-3 py-2.5 text-left transition hover:bg-slate-50 dark:hover:bg-slate-800/50 sm:px-4" onClick={() => onOpenSale(sale)}>
@@ -504,7 +503,7 @@ function BranchPerformanceCard({ analytics, analyticsPending, analyticsUnavailab
   const colors = ['#2563eb', '#16a34a', '#ea580c', '#7c3aed', '#0891b2']
   const maxRevenue = Math.max(...all.map((branch) => branch.revenue_usd || 0), 0.01)
   return <div className="card flex flex-col p-3 sm:p-4">
-    <h2 className="mb-3 text-base font-semibold text-gray-900 dark:text-white">{t('branch_performance')}</h2>
+    <h2 className="mb-2 text-base font-semibold text-gray-900 dark:text-white">{t('branch_performance')}</h2>
     {analyticsPending ? <div className="h-28 animate-pulse rounded-xl bg-gray-100 dark:bg-gray-700" /> : analyticsUnavailable ? <div className="flex h-28 items-center justify-center rounded-xl border border-amber-200 bg-amber-50/60 px-3 text-center text-xs text-amber-900 dark:border-amber-800/70 dark:bg-amber-950/20 dark:text-amber-100">{analyticsError || 'Analytics unavailable for this range.'}</div> : (
       <div className={`space-y-1 ${CARD_LIST_BODY}`}>
         {!all.length ? <p className="py-4 text-center text-xs text-gray-400">{translateOr('no_data', 'No data found', 'រកមិនឃើញទិន្នន័យ')}</p> : all.map((branch, index) => {
@@ -523,7 +522,7 @@ function ExpiryAlertsCard({ summary, translateOr, onOpen }: {
 }) {
   const items = summary?.expiring_products || []
   return <div className="card flex flex-col">
-    <div className="flex items-center justify-between border-b border-gray-100 p-3 sm:p-4 dark:border-gray-700"><h2 className="font-semibold text-gray-900 dark:text-white">{translateOr('product_expiry_alerts', 'Expiry alerts', 'ការជូនដំណឹងផុតកំណត់')}</h2>{items.length ? <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-medium text-amber-700 dark:bg-amber-900/30 dark:text-amber-300">{items.length}</span> : null}</div>
+    <div className="flex items-center justify-between border-b border-gray-100 px-3 py-2.5 sm:px-4 dark:border-gray-700"><h2 className="font-semibold text-gray-900 dark:text-white">{translateOr('product_expiry_alerts', 'Expiry alerts', 'ការជូនដំណឹងផុតកំណត់')}</h2>{items.length ? <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-medium text-amber-700 dark:bg-amber-900/30 dark:text-amber-300">{items.length}</span> : null}</div>
     <div className={`divide-y divide-gray-100 dark:divide-gray-700 ${CARD_LIST_BODY}`}>{!items.length ? <p className="p-4 text-center text-sm text-gray-400">{translateOr('no_data', 'No data found', 'រកមិនឃើញទិន្នន័យ')}</p> : items.map((item) => <button key={item.id} type="button" onClick={() => onOpen(item)} className="flex w-full items-center justify-between gap-2 px-3 py-2.5 text-left transition hover:bg-slate-50 dark:hover:bg-slate-800/50 sm:px-4"><div className="min-w-0"><p className="truncate text-sm text-gray-700 dark:text-gray-300">{item.name}</p>{item.category ? <p className="truncate text-xs text-gray-400">{item.category}</p> : null}</div><span className={`shrink-0 ${Number(item.days_until_expiry || 0) < 0 ? 'badge-red' : 'badge-yellow'}`}>{item.expiry_date}</span></button>)}</div>
   </div>
 }
@@ -554,7 +553,7 @@ function BestHourCard({ analytics, analyticsPending, analyticsUnavailable, analy
   const allHours = Array.from({ length: 24 }, (_, hour) => merged[hour] || { hour, count: 0, revenue_usd: 0 })
   const busyHours = Object.values(merged).filter((hour) => (hour.count || 0) > 0).sort((left, right) => (right.count || 0) - (left.count || 0))
   return <div className="card flex flex-col p-3 sm:p-4">
-    <div className="mb-3 flex items-center justify-between gap-2"><h2 className="text-base font-semibold text-gray-900 dark:text-white">{t('best_hour')}</h2><span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-medium text-slate-500 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300">{translateOr('tap_to_view', 'Tap to view')}</span></div>
+    <div className="mb-2 flex items-center justify-between gap-2"><h2 className="text-base font-semibold text-gray-900 dark:text-white">{t('best_hour')}</h2><span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-medium text-slate-500 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300">{translateOr('tap_to_view', 'Tap to view')}</span></div>
     {analyticsPending ? <div className="h-28 animate-pulse rounded-xl bg-gray-100 dark:bg-gray-700" /> : analyticsUnavailable ? <div className="flex h-28 items-center justify-center rounded-xl border border-amber-200 bg-amber-50/60 px-3 text-center text-xs text-amber-900 dark:border-amber-800/70 dark:bg-amber-950/20 dark:text-amber-100">{analyticsError || 'Analytics unavailable for this range.'}</div> : <>
       <div className="relative mb-3"><div className="grid gap-px" style={{ gridTemplateColumns: 'repeat(24,1fr)' }}>{allHours.map((hour) => { const opacity = (hour.count || 0) === 0 ? 0.06 : 0.12 + (hour.count || 0) / maxCount * 0.88; return <button key={hour.hour} type="button" title={`${String(hour.hour).padStart(2, '0')}:00 - ${hour.count} ${t('sale')}(s), ${fmtUSD(hour.revenue_usd)}`} aria-label={`${translateOr('best_hour', 'Best hour')} ${formatDashboardHourLabel(hour.hour)}`} className="rounded-sm transition hover:ring-2 hover:ring-blue-300 dark:hover:ring-blue-700" style={{ height: 40, background: `rgba(37,99,235,${opacity.toFixed(2)})` }} onClick={() => onOpenHour(hour, busyHours.findIndex((item) => item.hour === hour.hour) + 1 || null)} /> })}</div><div className="relative mt-1 flex h-[18px] text-[11px] font-medium text-gray-400">{[0, 6, 12, 18, 23].map((hour) => <span key={hour} className="absolute" style={{ left: `${hour / 23 * 100}%`, transform: 'translateX(-50%)' }}>{formatDashboardHourLabel(hour).replace(' ', '')}</span>)}</div></div>
       <div className={`space-y-1 ${CARD_LIST_BODY}`}>{!busyHours.length ? <p className="text-center text-xs text-gray-400">{translateOr('no_data', 'No data found', 'រកមិនឃើញទិន្នន័យ')}</p> : busyHours.map((hour, index) => <button key={hour.hour} type="button" className="flex w-full items-center justify-between rounded-xl border border-gray-100 bg-gray-50 px-3 py-2 text-left transition hover:border-blue-200 hover:bg-blue-50/60 dark:border-gray-700 dark:bg-gray-900/40 dark:hover:border-blue-800 dark:hover:bg-blue-950/20" onClick={() => onOpenHour(hour, index + 1)}><div><div className="text-sm font-semibold text-gray-800 dark:text-gray-100">{`#${index + 1} ${formatDashboardHourLabel(hour.hour)}`}</div><div className="text-[11px] text-gray-500 dark:text-gray-400">{String(hour.hour).padStart(2, '0')}:00 - {String((Number(hour.hour) + 1) % 24).padStart(2, '0')}:00</div></div><div className="text-right"><div className="text-sm font-semibold text-gray-900 dark:text-white">{hour.count} {t('sale')}{hour.count !== 1 ? 's' : ''}</div><div className="text-[11px] text-green-600 dark:text-green-400">{fmtUSD(hour.revenue_usd)}</div></div></button>)}</div>
@@ -1730,7 +1729,7 @@ ${translateOr('delivery_margin', 'Delivery margin')} ${fmtUSD(aDeliveryMargin)} 
 
       {/* Charts */}
       <section className={`${mobileSection === 'overview' ? '' : 'hidden'} lg:block`}>
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-5">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-5 lg:items-start">
         <div className="lg:col-span-2 card p-3 sm:p-3.5">
           <div className="mb-1.5 flex flex-col gap-1.5 sm:flex-row sm:items-center sm:justify-between">
             <h2 className="text-lg font-bold tracking-tight text-gray-900 dark:text-white">{t('analytics')}</h2>
@@ -1811,7 +1810,7 @@ ${translateOr('delivery_margin', 'Delivery margin')} ${fmtUSD(aDeliveryMargin)} 
           (user-reported: "the row of top product, best hour, top customer
           can take more space in large screens"). */}
       <section className={`${mobileSection === 'performers' ? '' : 'hidden'} lg:block`}>
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-5">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-5 items-start">
         {/* Branch */}
         <BestHourCard
           analytics={analytics}
@@ -1826,7 +1825,7 @@ ${translateOr('delivery_margin', 'Delivery margin')} ${fmtUSD(aDeliveryMargin)} 
 
         {/* Top Products */}
         <div className="card flex flex-col p-3 sm:p-4">
-          <div className="flex min-w-0 flex-col items-start gap-2 mb-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex min-w-0 flex-col items-start gap-2 mb-2 sm:flex-row sm:items-center sm:justify-between">
             <h2 className="min-w-0 text-base font-semibold text-gray-900 dark:text-white">{t('top_products')}</h2>
             <div className="max-w-full overflow-x-auto pb-0.5">
             {/* Segmented-control style aligned with the Analytics tabs
@@ -1900,7 +1899,7 @@ ${translateOr('delivery_margin', 'Delivery margin')} ${fmtUSD(aDeliveryMargin)} 
           const visible   = customers
           return (
             <div className="card flex flex-col p-3 sm:p-4">
-              <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center justify-between mb-2">
                 <h2 className="text-base font-semibold text-gray-900 dark:text-white">{t('top_customers')}</h2>
                 <span className="text-[10px] text-gray-400 bg-gray-100 dark:bg-gray-700 px-2 py-0.5 rounded-full">{t('net_of_returns')}</span>
               </div>
@@ -1951,13 +1950,13 @@ ${translateOr('delivery_margin', 'Delivery margin')} ${fmtUSD(aDeliveryMargin)} 
 
       {/* Hours, low stock, and recent activity */}
       <section className={`${mobileSection === 'inventory' ? '' : 'hidden'} lg:block`}>
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-5">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-5 items-start">
         {/* Best Hour */}
         <ExpiryAlertsCard summary={summary} translateOr={translateOr} onOpen={openExpiryDetail} />
 
         {/* Low Stock */}
         <div className="card flex flex-col">
-          <div className="p-3 sm:p-4 border-b border-gray-100 dark:border-gray-700 flex items-center justify-between">
+          <div className="px-3 py-2.5 sm:px-4 border-b border-gray-100 dark:border-gray-700 flex items-center justify-between">
             <h2 className="font-semibold text-gray-900 dark:text-white">{t('low_stock_items')}</h2>
             {lowStockCount > 0 && (
               <span className="text-[10px] bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-300 px-2 py-0.5 rounded-full font-medium">{lowStockCount}</span>
