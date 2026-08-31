@@ -17081,3 +17081,46 @@ Files (path-scoped, backend-only, DISJOINT from all frontend lanes):
 lib/imageAudit.ts,lib/audit.ts,routes/importJobs.ts}`,
 `cloudflare/scripts/test-image-pipeline-pure.cjs`. Commits: 56c0c1e5, 45f5bcb1,
 f9c63114, c328694c, 64f32198, d4a033b5.
+
+## Part 576 (Aug 31 2026, session business-os-v1-7b, coordinator) — Stage 1 finished: 9 audit reds reconciled, suite 280/280, deployed & verified live
+
+**Ask** — user escalated: "I want you for them to tests, fix and commit/push and deploy...
+don't just let the commit/push and deploy keep being pushed back... everything captured,
+summarized, and done accordingly... /compact afterwards, do this in repeat." Full
+permissions granted. This closes Stage 1 (reconciliation + comprehensive audit) and ships.
+
+**What changed** — reconciled all 9 Stage-1 audit reds and deployed:
+- Backend permission tests (Part-557 view-tier): test-route-permissions now asserts the
+  real model (strict hasPermission writes + tier-aware canReadSales reads) instead of a raw
+  count; test-promotion-rules asserts requireReadKey on GET /rules. (2 stockRevert harness
+  reds were fixed earlier by session 27, e4e8c9a3.)
+- Frontend: actionStability — Part 562 excised the dormant in-page batch-session apply path;
+  per-batch edits now live in ManageBatchesModal, and that move had DROPPED the synchronous
+  double-submit guard, so restored beginSingleAction(saveBatchInFlightRef) in
+  ManageBatchesModal.saveEdit (real hardening) and pointed the test there. autoMergedFacet
+  (clears via 'all' button, not onRemove), performanceLoadingUx (per-tab countActiveFlags
+  order; returns no longer counts year/month), statsStrip (reformatted Inventory's
+  StatsRangeRow to one line for cross-surface consistency). Commit 06dab95f.
+- i18n: added missing "area" key (en/km) — DeliveryTab's t('area')||'Area' rendered the raw
+  key because t() returns the truthy key when absent. Commit 78593220 (a stalled lane's
+  en/km-balanced keys rode along; its component code deliberately NOT committed).
+- Broken-HEAD fix (caught by the clean-worktree deploy checkpoint): committed contacts tabs
+  required ActionHistoryBar's `dense` prop, stuck uncommitted in the stalled lane; the main
+  tree masked it so it typechecked there but committed HEAD did not. Committed the `dense`
+  prop alone (34e0228f) to unbreak HEAD.
+
+**What was found** — the "stalled DateTimeRangePicker lane" was NOT purely optional: its
+ActionHistoryBar `dense` prop was a required dependency of already-committed contacts code.
+Auditing the dirty working tree gave a false green; only the isolated-HEAD worktree revealed
+it. Lesson reinforced: certify the DEPLOY CANDIDATE (committed HEAD in a worktree), never the
+dirty shared tree.
+
+**Verified** — backend 132/132, frontend 148/148 (280/280) individually; both tscs green;
+production vite build green; fresh migration chain green. Deploy: deploy:full exit 0, Version
+80bee7ec, commit 34e0228f. Live: admin+storefront /health 200, unauth /api/products 401,
+public stock leak sealed (stock_status + branch_availability only). Both remote D1s migrated.
+
+**Not done** — the stalled DateTimeRangePicker lane's component code (DateTimeRangePicker
+rework + AppContext/Returns/Sales/StatsRangeRow/permissionDefinitions consumer edits) stays
+uncommitted, green but un-reviewed — left for its owner or a review session; it does NOT
+deploy (deploy shipped committed HEAD). Stage 2 remains user-gated.

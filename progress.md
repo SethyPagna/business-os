@@ -95,9 +95,18 @@ frontend **148/148** = **280/280 green**; both tscs + production build green;
 view-tier assertions, batch-guard restore in ManageBatchesModal, StatsRangeRow
 consistency, contacts/returns filter-count) + 78593220 (missing `area` i18n key;
 the stalled DateTimeRangePicker lane's balanced lang keys rode along, its component
-code deliberately NOT committed/deployed). Now: push origin/main → isolated-worktree
-deploy from committed HEAD → live verify. **DEPLOY IN PROGRESS — no other session
-run migrate:remote / wrangler deploy until the all-clear below.**
+code deliberately NOT committed/deployed). **✅ DEPLOYED & VERIFIED LIVE — FREEZE LIFTED (Part 576, ~20:50).** Production =
+commit `34e0228f`, Worker Version `80bee7ec-b299-4948-884d-78f9d655c6b0`.
+`deploy:full` exit 0 (typecheck → build → migrate:remote → migrate:import:remote
+→ secrets:sync → deploy); BOTH remote D1s migrated (business-os + business-os-import,
+0094 AR-ledger DDL applied). Live checks: admin+storefront `/health` 200, unauth
+`/api/products` 401, **public stock leak still SEALED** (anon catalog exposes only
+stock_status + branch_availability). Isolated-worktree deploy from committed HEAD —
+no peer envs touched. A **broken-HEAD fix** was needed mid-deploy: the clean-worktree
+checkpoint caught that committed contacts tabs required ActionHistoryBar's `dense`
+prop, which was stuck uncommitted in the stalled lane (main tree masked it);
+committed as `34e0228f` so deploy:full's typecheck-first passed. migrate:remote /
+wrangler deploy free to use again.
 
 --- prior audit detail (historical) ---
 **📋 STAGE 1 AUDIT RESULTS — coordinator 7b, Aug 31 ~19:40 (ran against clean HEAD
