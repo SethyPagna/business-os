@@ -88,19 +88,109 @@ Two rules learned the hard way, both from real incidents in this file's own hist
 
 ## Current status
 
-**→ DASHBOARD-RESPONSIVE LANE (a2, Aug 31 ~afternoon): CLAIMED.** User asks for two
-mobile-responsiveness fixes on the **Dashboard** (`Dashboard.tsx`): (1) keep the
-**Export** button on the SAME row as the preset time chips on small screens (it
-currently drops onto its own row when the presets wrap); (2) auto-convert the long
-stack of card sections into a **tabbed section switcher on small screens** (chips:
-Overview / Top performers / Inventory & activity — one group shown at a time) so the
-mobile dashboard isn't one long scroll, while lg+ keeps the full grid. Files
-(path-scoped, single file): `frontend/src/components/dashboard/Dashboard.tsx` ONLY.
-NO lang-pack edits — group/chip labels use the file's own `translateOr` inline
-(same pattern as RANGE_PRESETS), so en/km.json are untouched. No backend, no
-migrations. Dashboard.tsx is disjoint from every other live lane.
+**[DONE + VERIFIED LIVE — UI-density session, Aug 31 (Part 554; commits say
+"553" — minted before a peer took it, Part races expected): the Reports hub
+was dropping KHR money and had no export.** Root cause found in data: fees are
+recorded in EITHER USD or KHR (186 USD-only vs **4,054 KHR-only**), and the
+fees/returns `/report` endpoints SUM(amount_usd)/SUM(total_refund_usd) ONLY —
+so a whole month of KHR fees reported as **"$0.00"** despite 109 of them (user:
+"the fees showing no rows even though there are many fees"). Fixes: (1) fees
+`/report` + returns `/report` now sum BOTH currencies (amount_khr,
+total_refund_khr + supplier compensation/loss KHR) across totals/days/by_type;
+(2) the report sections + the Fees-page stats strip render a "$X · Y៛" pair
+(no conversion — one currency per row, and the global rate can be blank), with
+fmtKHR threaded through ReportsHub; (3) each section (Sales/Returns/Fees) gets
+an **Export** CSV button on its title row (shared downloadCSV). Date scoping
+verified consistent: fees scope by `fee_date BETWEEN`, returns by
+`date(created_at) BETWEEN`, sales by the kernel range — all inclusive, all
+range-scoped (the user's "make sure start/end date scope correctly" concern —
+confirmed correct, not a bug; the empty Returns is genuinely 0 returns in
+local data). **Verified LIVE against a real worker (private D1 copy + shared
+8787 hot-reload):** GET /api/fees/report Aug-2026 returns amount_khr
+**1,839,300** (matches the DB), the Reports UI renders "109 Fees | Total
+1,839,300.00៛", all 3 Export buttons render, and the Fees export produces a
+real CSV ("date,count,amount_usd,amount_khr" → "2026-08-27,3,0,60500"). New
+pure regression test (test-report-currency-pure) runs the exact report SQL on
+a SQLite fixture asserting both currencies + range scoping; fe+cf tsc clean;
+statsStrip/returnsLayout/exportOptions/langKeyIntegrity green; verify:i18n OK.
+Commits `f5cb27e3` (KHR fix) + `f559a113` (export). Files: cloudflare
+routes/fees.ts, routes/returns.ts, scripts/test-report-currency-pure.cjs;
+frontend sales/{SalesDailyReport,ReturnsReportSection,FeesReportSection,
+ReportsHub}.tsx, fees/FeesPage.tsx, tests/statsStrip.test.ts.]**
 
-**→ STOREFRONT-ACCOUNT-UI LANE (this session, Aug 31 ~afternoon): CLAIMED.** User
+**[DONE (committed `ee509e7a`, needs deploy — rides the next one) — UI-density
+session, Aug 31 (Part 553, grep-max+1; Part races expected): date-range trigger
+height + pagination-control widths.** Owns ONLY, path-scoped:
+`frontend/src/components/shared/PaginationControls.tsx`,
+`frontend/src/components/shared/DateTimeRangePicker.tsx`,
+`frontend/src/components/inventory/InventoryMovementsSurface.tsx`,
+`frontend/src/components/contacts/DeliveryContactReportModal.tsx`,
+`frontend/src/components/contacts/CustomerPurchasesReportModal.tsx`. Changes:
+(1) PaginationControls — widen the page-number input, prev/next buttons and the
+per-page dropdown across all three layouts (user: "increase the width for better
+usability"). (2) DateTimeRangePicker — the trigger gets a base `min-h-10` (2.5rem)
+so the Start→End field matches the search bar / the app's standard 40px control
+height on every surface (user: "start and end date fields share the same height as
+the search bar on smaller screens"); non-breaking — a height floor only. (3) The
+two contact report modals go full-row (`w-full` trigger); InventoryMovements' now
+-redundant explicit `min-h-8/9` dropped so the central height governs. NOT touched
+(other lanes / recent per-surface user decisions — flagged for the user): StatsStrip
+(Part-552 pill+presets one row), Products (Aug-30 pager-shares-row), ReportsHub /
+SalesDailyReport (sales lane dirty), ApInvoices / StockIn / LegacyDeleted (legacy
+lane) — those keep their inline pill width but still get the central height fix.
+progress.md is NOT committed by this lane (shared checkout — the claim is visible on
+disk); code commits are pathspec-atomic.]**
+
+**→ DUPLICATE-PRODUCT-HANDLING LANE (this session, Aug 31 ~afternoon): DONE (needs
+deploy — rides the next one). Commits `bdce01e5` (feature) + `ab7653e0` (i18n).**
+Verified: frontend typecheck, check:source (423 files), production build (25.8s),
+langKeyIntegrity (en/km parity), and a NEW 7-case unit test (tests/
+exactDuplicateProducts.test.ts, wired into test:utils) — plus productDuplicatesTab/
+productGrouping/mergeSameDetailRows suites still green (Resolve still shows on
+non-exact clusters). NOT verified live in-browser: the admin Products page is
+behind auth (no creds; entering them is disallowed) and seeding the shared local
+D1 on :8787 would disrupt the peer session verifying there — the backend
+endpoint/transport contract was confirmed by reading the route + transport instead.
+User should click-test: a real same-barcode+same-name pair should show a
+"Duplicate" badge with Keep this / Keep both (no row-open), and the Duplicates tab
+should hide Resolve on those exact clusters.
+User spec item #3 "Duplicate Product Handling": when products are EXACT duplicates
+(same real barcode + same name), (a) do not show the "Manage"/"Product" affordance
+(the row's click-to-detail edit flow), and (b) offer an inline "Keep this" (merge
+others in) + "Keep both" (dismiss) resolver. Confirmed with user: BOTH surfaces
+(product list rows + the Duplicates review tab), action = Merge (Keep both maps to
+existing dismiss, kept as the false-positive escape hatch). Single source of truth:
+the server's `GET /api/products/possible-duplicates` clusters (already the tab's
+data) — a `same_barcode` cluster whose members share a normalized name = exact dup.
+Files (path-scoped): NEW `frontend/src/utils/exactDuplicateProducts.ts`, NEW
+`frontend/src/components/products/DuplicateResolverControl.tsx`; EDIT
+`frontend/src/components/products/Products.tsx` (row renderers + a duplicate-cluster
+fetch/memo + merge/dismiss handlers — DISJOINT from the stock_changes header-actions
+region other lanes touch), `frontend/src/components/products/ProductDuplicatesTab.tsx`
+(hide Resolve on exact clusters), `frontend/src/lang/en.json` + `km.json` (ADD keys
+only, pathspec-atomic — both packs also dirty in peer lanes). Permission: reuses
+existing `can('products','merge_duplicates')`. No backend, no migrations.
+
+**→ DASHBOARD-RESPONSIVE LANE (a2, Aug 31 ~afternoon): DONE — committed `6a143929`
+(needs deploy — rides the next one).** Two small-screen Dashboard fixes, one file
+(`Dashboard.tsx`, +58/-5): (1) **Export** is now a `shrink-0` sibling pinned to the
+end of an `items-start` flex row, so it stays on the preset-chip row even when the
+chips wrap (was the last item INSIDE the wrapping group → dropped to a lonely row on
+narrow phones); (2) a **mobile section switcher** (`lg:hidden` chips: Overview / Top
+performers / Inventory & activity) shows ONE card group at a time under lg, each
+group `<section>`-wrapped with `${sel?'':'hidden'} lg:block` so lg+ still renders
+every group as the normal grid (desktop layout unchanged). New `mobileSection`
+state + `MOBILE_SECTIONS` (labels via `translateOr`, no lang-pack edit). Verified
+with the app's REAL compiled Tailwind in a throwaway harness at 375 / 300 (wrap
+case — Export held the row) / 1280px, plus JS assertions (chips hidden + all groups
+`display:block` at ≥1024) and `dashboardDataReliability` test PASS + frontend tsc
+clean. NOTE for a peer committing progress.md next: this DONE note is a ride-along
+in the shared working tree (I committed only Dashboard.tsx pathspec-atomically to
+avoid absorbing others' coordination text). Dashboard.tsx was disjoint from every
+other live lane.
+
+**→ STOREFRONT-ACCOUNT-UI LANE (this session, Aug 31 ~afternoon): DONE — committed
+`4055b9a6` (needs deploy, rides the next one).** User
 correction to the §2 storefront-account work (commit `4c77c42b`): (1) keep the
 membership lookup but **disabled** — guests see "You are currently in GUEST mode.
 This feature is not enabled in Guest mode for privacy and security purposes.";
@@ -133,6 +223,29 @@ the ledger append-only) + **Edit reason** (UPDATE inventory_movements.reason),
 both permission-gated (`cloudflare/src/routes/products.ts` or `inventory.ts`).
 Also reclassifying In/Out by net sign so the Adjustments bucket can be dropped
 (`cloudflare/src/lib/stockLedgerQuery.ts`). No migrations.
+
+**→ SUPPLIER-INVOICES-MERGE LANE (this session, Aug 31 ~afternoon): DONE — in HEAD
+(code swept into peer commit `f5cb27e3` by a race; lang keys in `ab7653e0`). tsc 0
+errors; live-verified on frontend-b (Directory/Invoices chips swap; both reports
+render full detail).** User
+asks to MERGE the supplier Stock-In Invoices + Supplier AP Invoices into one place
+("show correct and full details from both, what is missing from one is shown as a
+whole") AND to move it into a **separate section, not stacked in the suppliers-rows
+scroll**. Data reality: `supplier_invoices` (AP ledger, migration 0088) has NO join
+key to stock batches — the migration comment is explicit ("AP rows must not
+manufacture stock receipts"), and the two are different granularities (AP = one flat
+invoice doc; stock-in = one supplier-day group of received lines). So a fabricated
+row-union is impossible/wrong; the merge is a single **Invoices** section that holds
+BOTH reports switchable by a mini-chip, each keeping its complete column set (full
+detail from both). Shape (honors ui-section-organization memory): SuppliersTab gets a
+top-level section-chip row **Directory | Invoices** (one at a time); the two stacked
+`SectionCard`s move OUT of the directory scroll into the new merged section. Files
+(path-scoped): NEW `frontend/src/components/contacts/SupplierInvoicesSection.tsx`;
+EDIT `frontend/src/components/contacts/SuppliersTab.tsx` (section-chip row + move the
+reports); ADD-only keys to `frontend/src/lang/en.json` + `km.json` (`supplier_directory`,
+`invoices`, `supplier_invoices`, `supplier_invoices_hint` — both packs also dirty in
+peer lanes, so pathspec-atomic add). `StockInInvoicesSection.tsx` / `ApInvoicesSection.tsx`
+reused UNCHANGED. No backend, no migrations. progress.md not committed by this lane.
 
 **[DONE — DEPLOYED (fourth of the day), 7a, Aug 31 ~03:57 UTC (user-authorized
 "continue" on the deploy ask; bf's duplicate authorization stood down by
@@ -546,6 +659,29 @@ were the first). Add a claim naming your files, and commit finished slices
 pathspec-atomically (lang packs: name any ride-along keys). Unclaimed uncommitted
 work is how absorptions and losses happen; commit-per-change is the user's
 standing directive.
+
+**✅ CROSS-LANE TSC BREAK RESOLVED (~13:20):** the fees lane shipped the
+coordinated slice (f5cb27e3 — and it was a real bug: KHR-denominated fees/returns
+money rendered $0.00). Frontend tsc re-verified GREEN by coordinator.
+
+**📌 STANDING RULE — Part numbers are assigned at LOG time, never in commit
+messages (coordinator 7b, after the THIRD pre-bake collision):** a0b2edbf said
+549 (taken), e12dc2c7 said 552 (taken), and now ee509e7a AND f5cb27e3 both say
+553. Commit messages are immutable; the session log is the authority. Current
+state: highest logged = 552. The two "553" committers reconcile at log time —
+first to log takes 553, the other takes 554 and notes the mismatch.
+
+**→ SALES-HUB SESSION, second number mismatch (coordinator 7b, ~13:10):** your
+e12dc2c7 says "Part 552" but 1e LOGGED 552 one minute earlier (the ledger
+screens). Your log entry = grep-max+1 at write time (553+ now) with the mismatch
+noted — and please STOP pre-baking Part numbers into commit messages (this is the
+second collision: a0b2edbf said 549, also taken).
+
+**→ I18N/PERMISSIONS SESSION(S): backfill session-log entries for Parts 545 and
+546.** Your records went to this board only — `git log -S` proves no "Part
+545"/"Part 546" header was ever added to docs/history/session-log.md, though
+your commits (13fe5fa6, 62cf0072, addendum 5493ca42) reserve the numbers. The
+log keeps the numbers; write the entries so the record isn't board-only.
 
 **→ SALES-HUB SESSION (coordinator 7b, ~11:30):** your commit `a0b2edbf` says
 "Part 549" but 549 is TAKEN (7a's verification sweep, logged). When you write
