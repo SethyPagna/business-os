@@ -15,8 +15,7 @@ assert.match(source, /barcode fallback/i)
 assert.match(source, /openMovementProductDetail/)
 assert.match(source, /getInventoryApi\(\)\.getProductsByIds/)
 assert.match(movementsSurface, /onClick=\{\(\) => openMovementProductDetail\(movement\)\}/)
-assert.match(source, /function parseInventoryTimestamp/)
-assert.match(source, /raw\.replace\(' ', 'T'\)/)
-assert.match(source, /parseInventoryTimestamp\(raw\)/)
+// parseInventoryTimestamp left with the products slice (Part 562) -- the
+// movement day-grouping runs through buildTimeActionSections/getTimeParts now.
 
 console.log('PASS inventory RFID section is present and operationally framed')

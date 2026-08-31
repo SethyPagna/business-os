@@ -60,7 +60,6 @@ const mainCss = fs.readFileSync(new URL('../src/styles/main.css', import.meta.ur
 const publicPortalCss = fs.readFileSync(new URL('../src/styles/public-portal.css', import.meta.url), 'utf8')
 const inventory = fs.readFileSync(new URL('../src/components/inventory/Inventory.tsx', import.meta.url), 'utf8')
 const inventoryStockModals = fs.readFileSync(new URL('../src/components/inventory/InventoryStockModals.tsx', import.meta.url), 'utf8')
-const inventoryBatchModal = fs.readFileSync(new URL('../src/components/inventory/InventoryBatchModal.tsx', import.meta.url), 'utf8')
 const inventoryReasonManagerModal = fs.readFileSync(new URL('../src/components/inventory/InventoryReasonManagerModal.tsx', import.meta.url), 'utf8')
 const inventoryExport = fs.readFileSync(new URL('../src/components/inventory/inventoryExport.ts', import.meta.url), 'utf8')
 const backup = fs.readFileSync(new URL('../src/components/utils-settings/Backup.tsx', import.meta.url), 'utf8')
@@ -155,8 +154,8 @@ for (const [name, source] of [
 
 assert.match(
   inventory,
-  /<LoadingWatchdog\s+loading=\{loading && !isProductsFirstLoad && !isMovementsFirstLoad\}[\s\S]*timeoutMs=\{8000\}/,
-  'Inventory should not show a delayed watchdog card on top of the first product or movement loading shell',
+  /<LoadingWatchdog\s+loading=\{loading && !isMovementsFirstLoad\}[\s\S]*timeoutMs=\{8000\}/,
+  'Inventory should not show a delayed watchdog card on top of the first movement loading shell',
 )
 assert.doesNotMatch(
   inventory,
@@ -922,8 +921,6 @@ assert.doesNotMatch(inventory, /INVENTORY_HISTORY_READY_DELAY_MS|window\.setTime
 assert.match(inventory, /const \[historyReady, setHistoryReady\] = useState\(false\)/, 'Inventory should have an explicit post-ready action-history gate')
 assert.match(inventory, /useActionHistory\(\{ limit: 10, notify, scope: 'inventory', enabled: historyReady, user \}\)/, 'Inventory should not fetch server action history during first route load and should pass user without importing AppContext inside the hook')
 assert.match(inventory, /if \(!loadedOnceRef\.current \|\| loading\) return undefined[\s\S]*setHistoryReady\(true\)[\s\S]*return undefined/, 'Inventory should enable history immediately after the first inventory data load settles')
-assert.match(inventory, /import InventoryProductsSurface from '\.\/InventoryProductsSurface'/, 'Inventory products surface should render from the route chunk instead of adding a first-paint subchunk waterfall')
-assert.doesNotMatch(inventory, /const InventoryProductsSurface = lazy\(\(\) => import\('\.\/InventoryProductsSurface'\)\)/, 'Inventory products surface should not suspend behind a second component chunk after the route loads')
 assert.doesNotMatch(inventory, /loading_inventory_products/, 'Inventory products surface should not show a route-subchunk loading placeholder after data is available')
 assert.doesNotMatch(inventory, /setTimeout\(\(\) => setInitialInventoryMobileFullListReady\(true\), 140\)/, 'Inventory mobile product data should not be held behind a fixed visual reveal delay')
 assert.doesNotMatch(viteConfig, /inventory:\s*\[[\s\S]*'InventoryProductsSurface'/, 'Inventory products surface should not be a separate eager preload request')
@@ -932,9 +929,7 @@ assert.match(viteConfig, /inventory:\s*\[\s*'Inventory',\s*'inventory-api',\s*'p
 assert.match(inventory, /const InventoryStockModals = lazyRetry\(\(\) => import\('\.\/InventoryStockModals'\), 'inventory-stock-modals'\) as any/, 'Inventory stock modals should stay in a click-only lazy chunk')
 assert.doesNotMatch(inventory, /<h2 className="font-bold text-gray-900 dark:text-white">\{t\('adjust_stock'\)\}<\/h2>/, 'Inventory should not keep stock adjust modal markup in the first route chunk')
 assert.match(inventoryStockModals, /export default function InventoryStockModals/, 'Inventory stock modal markup should live in the lazy stock modal component')
-assert.match(inventory, /const InventoryBatchModal = lazyRetry\(\(\) => import\('\.\/InventoryBatchModal'\), 'inventory-batch-modal'\) as any/, 'Inventory batch modal should stay in a click-only lazy chunk')
 assert.doesNotMatch(inventory, /<h2 className="font-bold text-gray-900 dark:text-white">\{tr\('inventory_batch_session', 'Batch session'\)\}<\/h2>/, 'Inventory should not keep batch session modal markup in the first route chunk')
-assert.match(inventoryBatchModal, /export default function InventoryBatchModal/, 'Inventory batch modal markup should live in the lazy batch modal component')
 assert.match(inventory, /const InventoryReasonManagerModal = lazyRetry\(\(\) => import\('\.\/InventoryReasonManagerModal'\), 'inventory-reason-manager-modal'\) as any/, 'Inventory saved-reasons manager should stay in a click-only lazy chunk')
 assert.doesNotMatch(inventory, /<h2 className="font-bold text-gray-900 dark:text-white">\{tr\('saved_reasons', 'Saved reasons'\)\}<\/h2>/, 'Inventory should not keep saved-reasons manager markup in the first route chunk')
 assert.match(inventoryReasonManagerModal, /export default function InventoryReasonManagerModal/, 'Inventory saved-reasons manager markup should live in the lazy reason manager component')
@@ -1565,9 +1560,11 @@ assert.match(
 )
 // Sort left the Filters badge when it moved onto the visible SortChip
 // (unified listSort method) -- the count now covers only true filters.
+// Re-anchored (Part 562): group-by-status left Sales in Part 549, so the
+// count's last member is now the non-default sort, not salesGroupMode.
 assert.match(
   sales,
-  /countActiveFlags\(\[statusFilter !== 'all'[\s\S]*salesGroupMode !== 'time'\]\)/,
+  /countActiveFlags\(\[statusFilter !== 'all'[\s\S]*salesSortSpec\.direction === 'desc'\)\]\)/,
   'sales active filter count should reuse countActiveFlags',
 )
 assert.doesNotMatch(
@@ -1620,11 +1617,8 @@ assert.match(
   /const INVENTORY_STATS_TIMEOUT_MS = 12000/,
   'inventory primary stats should use an explicit timeout',
 )
-assert.match(
-  inventory,
-  /const INVENTORY_PRODUCTS_TIMEOUT_MS = 12000/,
-  'inventory product summary should use an explicit timeout',
-)
+// INVENTORY_PRODUCTS_TIMEOUT_MS left with the products slice (Part 562) --
+// the Products PAGE owns the catalog read and its timeout now.
 assert.match(
   inventory,
   /const INVENTORY_MOVEMENTS_TIMEOUT_MS = 15000/,
@@ -1664,31 +1658,8 @@ assert.match(
   /withLoaderTimeout\(\s*\(\) => getInventoryApi\(\)\.getInventoryStats\(statsQuery\),\s*'Inventory stats',\s*INVENTORY_STATS_TIMEOUT_MS,\s*\)/,
   'inventory primary stats should timeout slow stats reads',
 )
-assert.match(
-  inventory,
-  /const canBootstrapProducts = needsProductSummary && !needsStatsData && !needsMovementData && !needsRfidData/,
-  'inventory product startup should use the combined bootstrap only for the product section first window',
-)
-assert.match(
-  inventory,
-  /withLoaderTimeout\(\s*\(\) => \{[\s\S]*getInventoryBootstrap\(productQuery\)[\s\S]*'Inventory bootstrap',\s*INVENTORY_PRODUCTS_TIMEOUT_MS,\s*\)/,
-  'inventory product bootstrap should timeout slow product startup reads',
-)
-assert.match(
-  inventory,
-  /const INVENTORY_METADATA_READ_DELAY_MS = 120/,
-  'inventory filter metadata should have a named post-paint delay',
-)
-assert.match(
-  inventory,
-  /window\.requestIdleCallback\(task, \{ timeout: INVENTORY_METADATA_IDLE_TIMEOUT_MS \}\)/,
-  'inventory filter metadata should wait for idle time instead of competing with first paint',
-)
-assert.match(
-  inventory,
-  /inventoryMetadataCancelRef\.current = scheduleInventoryMetadataRead\(\(\) => \{[\s\S]*searchInventoryProducts\(metadataQuery\)/,
-  'inventory metadata-only product search should be scheduled after the primary product load commits',
-)
+// The combined product bootstrap + idle metadata read left with the
+// products slice (Part 562) -- the Products PAGE owns catalog startup now.
 assert.match(
   inventory,
   /withLoaderTimeout\(\s*\(\) => getInventoryApi\(\)\.getInventoryMovements\(\{[\s\S]*page: movementMeta\.page,[\s\S]*pageSize: movementMeta\.pageSize,[\s\S]*\}\),\s*'Inventory movements',\s*INVENTORY_MOVEMENTS_TIMEOUT_MS,\s*\)/,
@@ -1721,11 +1692,6 @@ assert.match(
 )
 assert.match(
   inventory,
-  /const summaryById = useMemo\(\(\) => new Map\(/,
-  'inventory should index product summary rows used by adjustment and movement detail flows',
-)
-assert.match(
-  inventory,
   /const defaultTransferDestinationBySourceId = useMemo\(\(\) => \{/,
   'inventory should precompute default transfer destinations instead of scanning branches for every transfer draft',
 )
@@ -1746,11 +1712,6 @@ assert.match(
 )
 assert.match(
   inventory,
-  /summaryById\.get\(Number\(adjustForm\.product_id \|\| adjustModal\?\.id\)\)/,
-  'inventory adjustment should resolve target products from the indexed summary map',
-)
-assert.match(
-  inventory,
   /const selectedBranchStockById = new Map\(/,
   'inventory adjustment should index selected product branch stock once per submit',
 )
@@ -1766,25 +1727,8 @@ assert.doesNotMatch(
 )
 assert.match(
   inventory,
-  /const visibleInventoryStats = useMemo\(\(\) => \{[\s\S]*for \(const product of filteredSummary\)/,
-  'inventory visible stats should aggregate filtered products in one memoized pass',
-)
-assert.match(
-  inventory,
   /const searchTerms: string\[\] = useMemo\(\(\) => \([\s\S]*\), \[deferredSearch\]\)/,
   'inventory search terms should be memoized so unrelated UI state does not rebuild search arrays',
-)
-// groupFilter/parentProductIds are intentionally absent from both the
-// filter body and this dependency list — see filteredSummary's own
-// comment in Inventory.tsx. The server's groupState filter already
-// scopes "grouped" across the whole catalog before `summary` (this page)
-// arrives, so a client-side recheck using only this page's parentProductIds
-// would drop rows the server had already confirmed were grouped (the same
-// Groups-filter incident already fixed for POS.tsx and Products.tsx).
-assert.match(
-  inventory,
-  /const filteredSummary = useMemo\(\(\) => summary\.filter[\s\S]*\), \[brandFilter, catFilter, hasServerBackedProductSearch, issueFilter, matchesSearch, productHay, stockFilter, summary\]\)/,
-  'inventory product filtering should stay memoized before grouping visible sections, without re-checking groupFilter client-side',
 )
 assert.match(
   inventory,
@@ -1811,70 +1755,10 @@ assert.match(
   /const selectedMovementGroups = useMemo\(\s*\(\) => visibleMovementGroups\.filter\(\(group\) => selectedMovementIds\.has\(group\.id\)\),\s*\[selectedMovementIds, visibleMovementGroups\],\s*\)/,
   'inventory selected movement groups should stay memoized for export and movement rendering',
 )
-assert.match(
-  inventory,
-  /stockStats\?\.net_sold_qty\s*\?\?\s*visibleInventoryStats\.netSoldQty/,
-  'inventory net-sold fallback should reuse the visible stats accumulator',
-)
-assert.match(
-  inventory,
-  /const visibleInventoryProductIds = useMemo(?:<[^>]+>)?\([\s\S]*visibleInventoryProducts\.reduce/,
-  'inventory product selection should precompute visible ids once per visible list',
-)
-assert.match(
-  inventory,
-  /setSelectedProductIds\(new Set\(visibleInventoryProductIds\)\)/,
-  'inventory select-all should reuse the precomputed visible id list',
-)
-assert.match(
-  inventory,
-  /function normalizeFiniteIdsFrom(?:<[^>]+>)?\(items(?:: [^=]+)? = \[\],[\s\S]*items\.reduce/,
-  'inventory selection ids should be normalized through a single helper pass',
-)
-assert.match(
-  inventory,
-  /function normalizeFiniteIds\(ids(?:: [^=]+)? = \[\]\)(?:: [^{]+)? \{[\s\S]*return normalizeFiniteIdsFrom\(ids\)/,
-  'inventory selection scope ids should use the shared normalization helper',
-)
-assert.match(
-  inventory,
-  /const normalized = normalizeFiniteIds\(ids\)[\s\S]*toggleIdSet\(current, normalized, checked\)/,
-  'inventory selection scope toggles should reuse normalized ids',
-)
-assert.match(
-  inventory,
-  /function countSelectedIds\(ids(?:: [^=]+)? = \[\], selectedIds(?:: [^=]+)? = new Set\(\)\)(?:: [^{]+)? \{[\s\S]*for \(const id of ids\)/,
-  'inventory partial selection counts should use one counter helper instead of filter allocations',
-)
-assert.match(
-  inventory,
-  /const selectedCount = countSelectedIds\(normalized, selectedProductIds\)/,
-  'inventory partial selection should reuse countSelectedIds',
-)
-assert.match(
-  inventory,
-  /setSelectedProductIds\(new Set\(normalizeFiniteIdsFrom\(failedItems, \(item\) => item\.productId\)\)\)/,
-  'inventory batch failure recovery should reuse shared id normalization',
-)
-assert.match(
-  `${inventory}\n${inventoryBatchModal}`,
-  /function buildDestinationProductOptions\(products(?:: [^=]+)? = \[\], excludedProductId(?:: [^,]+)?, placeholder(?:: [^)]+)?\)(?:: [^{]+)? \{[\s\S]*const options(?:: [^=]+)? = \[\{ value: '', label: placeholder \}\][\s\S]*for \(const product of products\)[\s\S]*if \(Number\.isFinite\(excludedId\) && id === excludedId\) continue[\s\S]*options\.push/,
-  'inventory destination product options should skip excluded products without a filtered allocation',
-)
-assert.match(
-  inventoryBatchModal,
-  /buildDestinationProductOptions\(summary, item\.productId/,
-  'inventory batch move destination selector should reuse the destination option renderer',
-)
 assert.doesNotMatch(
   inventory,
   /ids\.map\(\(id\) => Number\(id\)\)\.filter\(\(id\) => Number\.isFinite\(id\)\)/,
   'inventory selection scope should not repeat map/filter id normalization',
-)
-assert.doesNotMatch(
-  `${inventory}\n${inventoryBatchModal}`,
-  /summary\.filter\(\(product\) => Number\(product\.id\) !== Number\((?:moveModal\.id|item\.productId)\)\)\.map/,
-  'inventory destination selectors should not allocate filtered summary arrays during render',
 )
 assert.doesNotMatch(
   inventory,
@@ -1895,16 +1779,6 @@ assert.doesNotMatch(
   inventory,
   /\]\.filter\(Boolean\)\.length/,
   'inventory should not allocate filter-count arrays for active filter badges',
-)
-assert.doesNotMatch(
-  inventory,
-  /filteredSummary\.reduce\(\(s, p\) => s \+ Math\.max\(0, p\.(?:qty_sold|revenue_usd|cogs_usd|store_discount_usd|membership_discount_usd)/,
-  'inventory visible financial fallbacks should not repeatedly reduce filtered products',
-)
-assert.match(
-  inventory,
-  /summaryById\.get\(productId\)/,
-  'inventory movement detail should resolve products from the indexed summary map before falling back to API reads',
 )
 assert.doesNotMatch(
   inventory,

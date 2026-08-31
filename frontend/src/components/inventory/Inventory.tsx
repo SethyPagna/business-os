@@ -1,45 +1,26 @@
 // Main Inventory page sub-components imported from sibling files.
 
-import { Fragment, Suspense, useState, useEffect, useLayoutEffect, useCallback, useMemo, useRef } from 'react'
-import type { Dispatch, ReactNode, RefObject, SetStateAction } from 'react'
-import ArrowRightLeft from 'lucide-react/dist/esm/icons/arrow-right-left.js'
-import Boxes from 'lucide-react/dist/esm/icons/boxes.js'
-import ChevronDown from 'lucide-react/dist/esm/icons/chevron-down.js'
-import ChevronLeft from 'lucide-react/dist/esm/icons/chevron-left.js'
-import ChevronRight from 'lucide-react/dist/esm/icons/chevron-right.js'
+import { Suspense, useState, useEffect, useCallback, useMemo, useRef } from 'react'
+import type { ReactNode } from 'react'
 import ClipboardList from 'lucide-react/dist/esm/icons/clipboard-list.js'
-import Download from 'lucide-react/dist/esm/icons/download.js'
 import Zap from 'lucide-react/dist/esm/icons/zap.js'
+import Download from 'lucide-react/dist/esm/icons/download.js'
 import Upload from 'lucide-react/dist/esm/icons/upload.js'
-import Package from 'lucide-react/dist/esm/icons/package.js'
 import Settings2 from 'lucide-react/dist/esm/icons/settings-2.js'
 import { isBrokenLocalizedString, useApp, useSync } from '../../AppContext'
-import { APP_NAVIGATION_EVENT } from '../../app/pathRouting.ts'
-import { fmtDate, fmtTime } from '../../utils/formatters'
-import { calculateProductDiscount } from '../../utils/pricing.ts'
+import { fmtTime } from '../../utils/formatters'
 import { matchesSearchTermGroups } from '../../utils/searchMatch.ts'
 import { useDebouncedValue } from '../../utils/useDebouncedValue.ts'
-import AlphaIndexRail from '../shared/AlphaIndexRail'
-import InfoHint from '../shared/InfoHint.tsx'
 import LazyPortalMenu from '../shared/LazyPortalMenu'
 import type { PortalMenuItem } from '../shared/PortalMenu'
 import FilterMenu from '../shared/FilterMenu'
 import SearchInput from '../shared/SearchInput'
-import ScanSearchButton from '../shared/ScanSearchButton'
-import { toggleMultiValue, toggleMultiValues, isMultiActive, matchesMulti, parseMultiValues } from '../../utils/multiSelect'
-import { buildHierarchicalCategoryFilterOptions } from '../shared/CategoryFilterOptions.tsx'
-import { buildAvailabilityFilterSection } from '../shared/AvailabilityFilterOptions.tsx'
-import { buildIssuesFilterSection } from '../shared/IssuesFilterOptions.tsx'
-import { buildSearchModeFilterSection } from '../shared/SearchModeFilterOptions.tsx'
+import { toggleMultiValue, isMultiActive, matchesMulti, parseMultiValues } from '../../utils/multiSelect'
 import ActionHistoryBar from '../shared/ActionHistoryBar'
-import AppSelect, { type AppSelectOption } from '../shared/AppSelect'
-import PageSizeSelect from '../shared/PageSizeSelect'
-import PaginationControls, { PAGE_SIZE_OPTIONS, clampPage, DEFAULT_PAGE_SIZE } from '../shared/PaginationControls'
+import PaginationControls, { clampPage } from '../shared/PaginationControls'
 import SectionSwitcher from '../shared/SectionSwitcher'
 import LoadingWatchdog from '../shared/LoadingWatchdog'
 import { TOOLBAR_BUTTON_WIDTH, manageToolbarButtonClassName } from '../shared/toolbarButtonStyles'
-import InventoryProductsSurface from './InventoryProductsSurface'
-import { createLongPressHandlers, createLongPressState, consumeLongPressClick, type LongPressState } from '../../utils/longPress.ts'
 import { columnsFromRows } from '../../utils/exportOptions.ts'
 import { lazyRetry } from '../../utils/lazyImport.ts'
 const ProductDetailModal = lazyRetry(() => import('./ProductDetailModal'), 'inventory-product-detail-modal') as any
@@ -52,12 +33,11 @@ const FastStockInModal = lazyRetry(() => import('./FastStockInModal'), 'inventor
 // utils/minimizedWork.ts -- event for a mounted host, pending for a
 // fresh mount).
 import { RESTORE_WORK_EVENT, consumePendingRestore, markRestoreHandled, minimizeWork } from '../../utils/minimizedWork.ts'
-const InventoryBatchModal = lazyRetry(() => import('./InventoryBatchModal'), 'inventory-batch-modal') as any
 const ExportOptionsDialog = lazyRetry(() => import('../shared/ExportOptionsDialog'), 'inventory-export-options') as any
 const ManageBatchesModal = lazyRetry(() => import('./ManageBatchesModal'), 'inventory-manage-batches-modal') as any
 const InventoryReasonManagerModal = lazyRetry(() => import('./InventoryReasonManagerModal'), 'inventory-reason-manager-modal') as any
 const ProductHistoryPreviewModal = lazyRetry(() => import('./ProductHistoryPreviewModal'), 'inventory-product-history-preview-modal') as any
-const InventoryProductsSurfaceView = InventoryProductsSurface as any
+const ExportRangeDialog = lazyRetry(() => import('../shared/ExportRangeDialog'), 'inventory-export-range-dialog') as any
 
 import { buildMovementGroups, getMovementGroupPage, movementColorClass, movementColorClassForRecord, movementGroupHaystack, translateMovementType } from './movementGroups'
 import { buildStockHealthSegments } from './stockHealthSummary'
@@ -83,12 +63,6 @@ import { useIsPageActive } from '../shared/pageActivity'
 import { useActionHistory } from '../../utils/actionHistory.ts'
 import { cloneHistorySnapshot } from '../../utils/historyHelpers.ts'
 import { buildTimeActionSections, toggleIdSet } from '../../utils/groupedRecords.ts'
-import { aggregateInitialOptions, buildInitialOptionsFromProducts, getInitialKey } from '../../utils/initials.ts'
-import { buildProductCategorySections } from '../../utils/productGrouping.ts'
-import { buildProductGroupPriceLabel, buildProductGroupSummaryParts } from '../products/helpers/productGroupViewHelpers.ts'
-import { buildBatchPreview } from '../../utils/productBatches.ts'
-import { batchDisplayLabel } from '../../utils/batchLabel.ts'
-import { runConcurrentTasks } from '../../utils/bulkOps.ts'
 import { pruneSelectionToVisibleIds } from '../../utils/rowSelection.ts'
 import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.ts'
 import { isApiVersionMismatchError } from '../../api/http.ts'
@@ -105,7 +79,6 @@ import {
 type LegacyInventoryRecord = Record<string, any>
 type InventoryId = number | string
 type Translator = (key: string) => string | undefined
-type TranslationWithFallback = (key: string, fallbackEn?: string, fallbackKm?: string) => string
 type MoneyFormatter = (value: number) => string
 type InventoryLoader<T = any> = () => Promise<T>
 
@@ -144,8 +117,6 @@ type InventoryReason = {
   type: InventoryReasonType
   label: string
 }
-
-type InventoryReasonGroups = Record<InventoryReasonType, InventoryReason[]>
 
 type InventoryUserOption = {
   id: InventoryId
@@ -202,26 +173,6 @@ type TransferForm = {
   reason: string
 }
 
-type InventoryBatchLine = LegacyInventoryRecord & {
-  product?: InventoryProduct
-  productId: InventoryId
-  action: string
-  quantity: InventoryFormValue
-  branch_id?: InventoryId | ''
-  reason?: string
-  note?: string
-}
-
-type InventoryBatch = {
-  items: InventoryBatchLine[]
-} | null
-
-type SectionOption = {
-  value: string
-  label: ReactNode
-  hint?: string
-}
-
 type InventoryAppContext = {
   // Per-action gate (utils/permissionActions.ts) -- the same table the admin
   // permission editor renders, so a control's visibility here always matches
@@ -263,24 +214,6 @@ let rfidTransportPromise: Promise<RfidTransportModule> | null = null
 let userReadTransportPromise: Promise<UserReadTransportModule> | null = null
 let inventoryWriteTransportPromise: Promise<InventoryWriteTransportModule> | null = null
 let inventoryExportModulePromise: Promise<InventoryExportModule> | null = null
-
-function scheduleInventoryMetadataRead(task: () => void): () => void {
-  if (typeof window === 'undefined') return () => {}
-  let idleId: number | null = null
-  const timerId = window.setTimeout(() => {
-    if (typeof window.requestIdleCallback === 'function') {
-      idleId = window.requestIdleCallback(task, { timeout: INVENTORY_METADATA_IDLE_TIMEOUT_MS })
-      return
-    }
-    task()
-  }, INVENTORY_METADATA_READ_DELAY_MS)
-  return () => {
-    window.clearTimeout(timerId)
-    if (idleId !== null && typeof window.cancelIdleCallback === 'function') {
-      window.cancelIdleCallback(idleId)
-    }
-  }
-}
 
 function loadBranchTransport(): Promise<BranchTransportModule> {
   if (!branchTransportPromise) branchTransportPromise = import('../../api/branchTransport.ts')
@@ -351,25 +284,10 @@ const INVENTORY_USER_OPTIONS_TIMEOUT_MS = 8000
 const INVENTORY_REASONS_TIMEOUT_MS = 8000
 const INVENTORY_BRANCHES_TIMEOUT_MS = 8000
 const INVENTORY_STATS_TIMEOUT_MS = 12000
-const INVENTORY_PRODUCTS_TIMEOUT_MS = 12000
 const INVENTORY_MOVEMENTS_TIMEOUT_MS = 15000
 const INVENTORY_RFID_TIMEOUT_MS = 8000
 const INVENTORY_PRODUCT_DETAIL_TIMEOUT_MS = 10000
 const INVENTORY_STOCK_MUTATION_TIMEOUT_MS = 12000
-const INVENTORY_METADATA_READ_DELAY_MS = 120
-const INVENTORY_METADATA_IDLE_TIMEOUT_MS = 800
-
-function normalizeFiniteIdsFrom<T>(items: T[] = [], getValue: (value: T) => unknown = (value) => value): number[] {
-  return items.reduce((normalized, item) => {
-    const id = Number(getValue(item))
-    if (Number.isFinite(id)) normalized.push(id)
-    return normalized
-  }, [] as number[])
-}
-
-function normalizeFiniteIds(ids: unknown[] = []): number[] {
-  return normalizeFiniteIdsFrom(ids)
-}
 
 function countActiveFlags(flags: unknown[] = []): number {
   let count = 0
@@ -377,120 +295,6 @@ function countActiveFlags(flags: unknown[] = []): number {
     if (flag) count += 1
   }
   return count
-}
-
-function countSelectedIds(ids: InventoryId[] = [], selectedIds: Set<InventoryId> = new Set()): number {
-  let count = 0
-  for (const id of ids) {
-    if (selectedIds.has(id)) count += 1
-  }
-  return count
-}
-
-const INVENTORY_MOBILE_INITIAL_ITEM_LIMIT = 4
-
-function limitInventorySectionsForMobile(sections: LegacyInventoryRecord[] = [], maxItems = INVENTORY_MOBILE_INITIAL_ITEM_LIMIT): LegacyInventoryRecord[] {
-  const limit = Math.max(1, Number(maxItems || INVENTORY_MOBILE_INITIAL_ITEM_LIMIT))
-  let remaining = limit
-  const limitedSections = []
-  for (const section of sections) {
-    if (remaining <= 0) break
-    const nextGroups = []
-    for (const group of section?.groups || []) {
-      if (remaining <= 0) break
-      const groupItems = Array.isArray(group?.items) ? group.items : []
-      if (!groupItems.length) continue
-      const visibleItems = groupItems.slice(0, remaining)
-      remaining -= visibleItems.length
-      nextGroups.push({
-        ...group,
-        items: visibleItems,
-      })
-    }
-    if (!nextGroups.length) continue
-    limitedSections.push({
-      ...section,
-      groups: nextGroups,
-    })
-  }
-  return limitedSections
-}
-
-function parseInventoryTimestamp(value: unknown): Date | null {
-  if (!value) return null
-  const raw = String(value).trim()
-  if (!raw) return null
-  const normalizedBase = raw.includes('T') ? raw : raw.replace(' ', 'T')
-  let normalized = `${normalizedBase}Z`
-  if (/Z$/i.test(normalizedBase)) normalized = normalizedBase
-  else if (/[+-]\d{2}:\d{2}$/i.test(normalizedBase)) normalized = normalizedBase
-  else if (/[+-]\d{4}$/i.test(normalizedBase)) normalized = normalizedBase.replace(/([+-]\d{2})(\d{2})$/i, '$1:$2')
-  else if (/[+-]\d{2}$/i.test(normalizedBase)) normalized = `${normalizedBase}:00`
-  const parsed = new Date(normalized)
-  return Number.isNaN(parsed.getTime()) ? null : parsed
-}
-
-function InventoryDiscountBadge({ product, fmtUSD, t }: { product: InventoryProduct; fmtUSD: MoneyFormatter; t: Translator }) {
-  const promotion = calculateProductDiscount(product as any)
-  if (!promotion.active) return null
-  const label = product?.discount_label || (typeof t === 'function' ? (t('discounts') || 'Discounts') : 'Discounts')
-  return (
-    <span className="inline-flex max-w-[10rem] truncate rounded-full bg-rose-50 px-1.5 py-0.5 text-[10px] font-bold text-rose-700 ring-1 ring-rose-100 dark:bg-rose-950/40 dark:text-rose-200 dark:ring-rose-900/60" title={`${label} ${fmtUSD(promotion.applied_price_usd || 0)}`}>
-      {label} {fmtUSD(promotion.applied_price_usd || 0)}
-    </span>
-  )
-}
-
-function InventoryBatchPreview({
-  product,
-  branchId = 'all',
-  t,
-  compact = false,
-}: {
-  product: InventoryProduct
-  branchId?: InventoryId | null
-  t: Translator
-  compact?: boolean
-}) {
-  const preview = buildBatchPreview(product as any, branchId ?? undefined, { limit: compact ? 2 : 3 })
-  const label = (key: string, fallback: string) => (typeof t === 'function' ? (t(key) || fallback) : fallback)
-  if (!preview.totalCount) return null
-  return (
-    <div className={`flex flex-wrap items-center gap-1 ${compact ? 'mt-1' : 'mt-1.5'}`}>
-      {preview.items.map((batch) => {
-        // Z1a: a date-derived lot code (MMDDYYYY, e.g. "08242026") reads as
-        // its mm/dd/yyyy date; only a genuine custom code stays a code. This
-        // is the SAME batchDisplayLabel treatment the Products page pill uses
-        // (surfaces/ProductRowParts.tsx), so the batch identifier reads
-        // identically on both pages instead of "08242026" here vs
-        // "08/24/2026" there. Expiry/quantity are unchanged and still match
-        // ProductRowParts (both render expiry_date verbatim).
-        const lotLabel = batchDisplayLabel(
-          {
-            id: String(batch.id ?? batch.batch_id ?? 'batch'),
-            lot_code: (batch.lot_code as string) ?? null,
-            received_at: (batch.received_at as string) ?? null,
-            batch_number: (batch.batch_number as number) ?? null,
-          },
-          label('batch', 'Batch'),
-        )
-        return (
-        <span
-          key={`${product?.id || 'product'}-inv-batch-${batch.id || batch.batch_id}`}
-          className="inline-flex max-w-[13rem] items-center truncate rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-medium text-amber-700 ring-1 ring-amber-100 dark:bg-amber-950/30 dark:text-amber-200 dark:ring-amber-900/50"
-          title={`${lotLabel} / ${String(batch.expiry_date || label('no_expiry', 'No expiry'))} / ${String(batch.quantity ?? '')}`}
-        >
-          {lotLabel} / {String(batch.expiry_date || label('no_expiry', 'No expiry'))} / {String(batch.quantity ?? '')}
-        </span>
-        )
-      })}
-      {preview.extraCount ? (
-        <span className="inline-flex rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-300">
-          +{preview.extraCount}
-        </span>
-      ) : null}
-    </div>
-  )
 }
 
 const RFID_INVENTORY_WORKFLOWS = [
@@ -568,14 +372,6 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
     if (isKhmer && !isBrokenLocalizedString(fallbackKm)) return fallbackKm
     return fallbackEn
   }, [isKhmer, t])
-  const filterLabel = useCallback((key: string, fallback: string) => {
-    const value = typeof t === 'function' ? t(key) : ''
-    const normalized = String(value || '').trim().toLowerCase()
-    if (!value || value === key || isBrokenLocalizedString(value)) return fallback
-    if (normalized === 'back') return fallback
-    return value
-  }, [t])
-  const [summary,       setSummary]       = useState<InventoryProduct[]>([])
   const [stockStats,    setStockStats]    = useState<InventoryStats>(null)
   const [stockStatsLoaded, setStockStatsLoaded] = useState(false)
   const [statsRefreshError, setStatsRefreshError] = useState('')
@@ -653,61 +449,6 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
   // resets below waits out the pause.
   const debouncedSearch = useDebouncedValue(search, 180)
   const deferredSearch = String(debouncedSearch || '').trim()
-  const [brandFilter,   setBrandFilter]   = useState('all')
-  // Comma-joined multi-value string (matches movementUserFilter/movFilter's
-  // shape above), not a plain 'all'/single-category string -- lets the
-  // Category filter menu below select several categories (or a whole
-  // "Main - Sub" hierarchical group) at once. See utils/multiSelect.ts.
-  const [catFilter,     setCatFilter]     = useState('all')
-  const [stockFilter,   setStockFilter]   = useState('all')
-  const [groupFilter,   setGroupFilter]   = useState('all') // all | group | standalone
-  // Comma-joined multi-value string (matches catFilter's shape) -- several
-  // issue keys can be selected at once, OR'd together. See
-  // IssuesFilterOptions.tsx and searchMatch.ts's ISSUE_STATE_KEYS.
-  const [issueFilter,   setIssueFilter]   = useState('all')
-  const [inventoryProductPage, setInventoryProductPage] = useState(1)
-  const [inventoryProductPageSize, setInventoryProductPageSize] = useState(DEFAULT_PAGE_SIZE)
-  const [inventoryProductPageDraft, setInventoryProductPageDraft] = useState('1')
-  const [inventoryProductTotal, setInventoryProductTotal] = useState(0)
-  const [inventoryProductsLoaded, setInventoryProductsLoaded] = useState(false)
-  const [initialInventoryDesktopRevealReady, setInitialInventoryDesktopRevealReady] = useState(false)
-  const [initialInventoryMobileRevealReady, setInitialInventoryMobileRevealReady] = useState(false)
-  const [initialInventoryMobileFullListReady, setInitialInventoryMobileFullListReady] = useState(false)
-  const [isInventoryMobileViewport, setIsInventoryMobileViewport] = useState(() => {
-    if (typeof window === 'undefined') return false
-    return window.innerWidth < 640
-  })
-  const [inventoryInitialFilter, setInventoryInitialFilter] = useState('all')
-  const [inventoryInitials, setInventoryInitials] = useState<LegacyInventoryRecord[]>([])
-  const [cachedInventoryInitialOptions, setCachedInventoryInitialOptions] = useState<LegacyInventoryRecord[]>([])
-  const [inventoryProductFilters, setInventoryProductFilters] = useState<{ brands: string[]; categories: string[] }>({ brands: [], categories: [] })
-  const [selectedProductIds, setSelectedProductIds] = useState<Set<number>>(() => new Set())
-  // Checkboxes/section-select-all only render once this is true, matching
-  // Products.tsx's part-77/part-190 pattern: press-and-hold (long-press) a
-  // row to enter select mode by selecting it, tap a row's checkbox to
-  // toggle it directly once select mode is already active, and select mode
-  // ends automatically once the last item is deselected. Previously
-  // Inventory always rendered a checkbox on every row/section/group
-  // regardless of whether anything was selected -- reported as "Inventory
-  // page still using checkboxes" once Products moved to this pattern.
-  const selectionModeActive = selectedProductIds.size > 0
-  // One long-press timer/start-point slot per visible row, keyed by
-  // product id -- same reasoning as Products.tsx's own
-  // longPressStateByRowIdRef: InventoryProductsSurface renders a row once
-  // per item inside a .map(), not as its own mounted component, so this
-  // can't be a plain useRef living inside the row-render code itself. Kept
-  // here (owned by Inventory.tsx, the parent) and handed down as a getter
-  // so InventoryProductsSurface doesn't need its own separate copy.
-  const longPressStateByRowIdRef = useRef<Map<number, LongPressState>>(new Map())
-  const getInventoryLongPressState = useCallback((rowId: number): LongPressState => {
-    const existing = longPressStateByRowIdRef.current.get(rowId)
-    if (existing) return existing
-    const created = createLongPressState()
-    longPressStateByRowIdRef.current.set(rowId, created)
-    return created
-  }, [])
-  const [inventoryBatch, setInventoryBatch] = useState<InventoryBatch>(null)
-  const [batchApplying, setBatchApplying] = useState(false)
   const [rfidStatus, setRfidStatus] = useState<LegacyInventoryRecord | null>(null)
   const [tab,           setTab]           = useState<string>(hostSection && hostSection !== 'stats' ? hostSection : 'products')
   const [inventorySection, setInventorySection] = useState<string>(hostSection || 'products')
@@ -749,8 +490,6 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
   const [expandedMovementGroups, setExpandedMovementGroups] = useState<Set<string>>(() => new Set())
   const [expandedMovementPages, setExpandedMovementPages] = useState<Record<string, number>>({})
   const [collapsedMovementSections, setCollapsedMovementSections] = useState<Set<string>>(() => new Set())
-  const [collapsedInventorySections, setCollapsedInventorySections] = useState<Set<string>>(() => new Set())
-  const [collapsedInventoryGroups, setCollapsedInventoryGroups] = useState<Set<string>>(() => new Set())
   const [loading,       setLoading]       = useState(true)
   const [loadError,     setLoadError]     = useState<string | null>(null)
   const [adjustSaving,  setAdjustSaving]  = useState(false)
@@ -776,20 +515,6 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
   const [savingReasons, setSavingReasons] = useState(false)
   const [historyReady, setHistoryReady] = useState(false)
   const movementSelectAllRef = useRef<HTMLInputElement | null>(null)
-  // Same "edited-but-filtered-out row stays visible until re-search" fix
-  // Products.tsx already has (see its own pinnedEditedProductsRef comment,
-  // parts 133/139) -- a silent load(true) after a stock adjust/transfer
-  // would otherwise drop a row the person just changed if it no longer
-  // matches the active filters (e.g. an out-of-stock filter after zeroing
-  // a branch's quantity). Only populated for the two mutation paths where
-  // the resulting branch_stock is fully computable client-side from the
-  // request + previous snapshot (single-branch adjust; two-branch
-  // transfer) -- deliberately NOT used for multi-batch auto-drain removals
-  // or anything where the server's own stock math isn't a simple, known
-  // delta, matching the same caution Products.tsx's handleBulkChangeBranch
-  // note documents for its own unsafe-to-approximate case. Cleared when
-  // the person changes the search box themselves (see handleSearchChange).
-  const pinnedEditedInventoryRef = useRef<Map<number, InventoryProduct>>(new Map())
   const loadRequestRef = useRef(0)
   const loadedOnceRef = useRef(false)
   const loadWatchdogRef = useRef<number | null>(null)
@@ -803,7 +528,6 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
   const inventoryUsersPromiseRef = useRef<Promise<InventoryUserOption[]> | null>(null)
   const adjustStockInFlightRef = useRef(false)
   const transferStockInFlightRef = useRef(false)
-  const batchInventoryInFlightRef = useRef(false)
   const actionHistory = useActionHistory({ limit: 10, notify, scope: 'inventory', enabled: historyReady, user })
   const runInventoryMutation = useCallback((loader: InventoryLoader, label: string): Promise<any> => (
     withLoaderTimeout(loader, label, INVENTORY_STOCK_MUTATION_TIMEOUT_MS)
@@ -840,9 +564,6 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
       branchId !== firstBranchId ? firstBranchId : secondBranchId,
     ]))
   }, [branches])
-  const summaryById = useMemo(() => new Map(
-    (Array.isArray(summary) ? summary : []).map((product) => [Number(product?.id || 0), product]),
-  ), [summary])
   const getBranchLabel = useCallback((branchId: InventoryId | null | undefined, fallback = '') => (
     branchesById.get(String(branchId))?.name || fallback || String(branchId || '')
   ), [branchesById])
@@ -884,17 +605,7 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
     move: inventoryReasons.filter((item) => item?.type === 'move'),
   }), [inventoryReasons])
 
-  // Still used by InventoryBatchModal's per-line "move" action (a batch
-  // session can write off/move individual lines) even though the old
-  // standalone single-product Move Stock modal is gone -- unrelated
-  // features that happened to share a reason type.
-  const moveReasonOptions = useMemo(() => [
-    { value: '', label: tr('choose_reason', 'Choose a reason') },
-    ...reasonsByType.move.map((entry) => ({ value: entry.label, label: entry.label })),
-  ], [reasonsByType.move, tr])
-
   const needsStatsData = inventorySection === 'all' || inventorySection === 'stats'
-  const needsProductSummary = inventorySection === 'products' || (inventorySection === 'all' && tab === 'products')
   const needsMovementData = inventorySection === 'movements' || (inventorySection === 'all' && tab === 'movements')
   const needsRfidData = inventorySection === 'rfid' || (inventorySection === 'all' && tab === 'rfid')
 
@@ -974,76 +685,18 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
           ? { userId: parseMultiValues(movementUserFilter)[0] }
           : {}),
       }
-      const productQuery = {
-        ...branchOpts,
-        page: inventoryProductPage,
-        pageSize: inventoryProductPageSize,
-        query: deferredSearch,
-        searchMode,
-        // No searchFields override (was hard-coded to 'name', which
-        // forced a name-only match server-side -- see products.ts's
-        // buildSearchFilters / this file's appendInventoryProductFilters
-        // for the full field list this now searches instead).
-        brand: brandFilter,
-        category: catFilter,
-        stockState: stockFilter,
-        groupState: groupFilter,
-        initial: inventoryInitialFilter,
-        // "Issues" quick filter -- see buildIssueStateClauses in
-        // cloudflare/src/lib/searchMatch.ts. Multi-value, OR'd.
-        issueState: issueFilter === 'all' ? '' : issueFilter,
-        // First load fetches initials/filters inline (single round trip) so the alphabet
-        // bar is complete on first paint. Later loads (pagination/filtering/silent
-        // refresh) keep this cheap and let the deferred metadata-only fetch refresh it.
-        metadata: loadedOnceRef.current ? '0' : '1',
-      }
       const statsQuery = {
         branchId: branchOpts.branchId,
         query: deferredSearch,
         searchMode,
-        brand: brandFilter,
-        category: catFilter,
-        stockState: stockFilter,
-        groupState: groupFilter,
-        initial: inventoryInitialFilter,
-        issueState: issueFilter === 'all' ? '' : issueFilter,
       }
-      const canBootstrapProducts = needsProductSummary && !needsStatsData && !needsMovementData && !needsRfidData
-      const loadInventoryBootstrap = () => withLoaderTimeout(
-        () => {
-          const inventoryApi = getInventoryApi()
-          if (typeof inventoryApi.getInventoryBootstrap === 'function') {
-            return inventoryApi.getInventoryBootstrap(productQuery)
-          }
-          return Promise.all([
-            inventoryApi.getBranches(),
-            inventoryApi.searchInventoryProducts(productQuery),
-          ]).then(([branchesResult, productsResult]) => ({
-            branches: branchesResult,
-            products: productsResult,
-          }))
-        },
-        'Inventory bootstrap',
-        INVENTORY_PRODUCTS_TIMEOUT_MS,
-      )
       try {
         const primaryLoaders = {
-          ...(canBootstrapProducts ? {
-            bootstrap: loadInventoryBootstrap,
-          } : {
-            branches: () => withLoaderTimeout(
-              () => getInventoryApi().getBranches(),
-              'Inventory branches',
-              INVENTORY_BRANCHES_TIMEOUT_MS,
-            ),
-            ...(needsProductSummary ? {
-              summary: () => withLoaderTimeout(
-                () => getInventoryApi().searchInventoryProducts(productQuery),
-                'Inventory products',
-                INVENTORY_PRODUCTS_TIMEOUT_MS,
-              ),
-            } : {}),
-          }),
+          branches: () => withLoaderTimeout(
+            () => getInventoryApi().getBranches(),
+            'Inventory branches',
+            INVENTORY_BRANCHES_TIMEOUT_MS,
+          ),
           ...(needsStatsData ? {
             stats: () => withLoaderTimeout(
               () => getInventoryApi().getInventoryStats(statsQuery),
@@ -1075,52 +728,16 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
           } : {}),
         }
         const result = await settleLoaderMap(primaryLoaders) as LegacyInventoryRecord
-        const bootstrapResult = result.values.bootstrap
-        const sumResult = bootstrapResult && !Array.isArray(bootstrapResult)
-          ? bootstrapResult.products
-          : result.values.summary
         const statsResult = result.values.stats
-        const sum = Array.isArray(sumResult) ? sumResult : (Array.isArray(sumResult?.items) ? sumResult.items : [])
         const movs = result.values.movements
         const rfid = result.values.rfid
-        const brs = bootstrapResult && !Array.isArray(bootstrapResult)
-          ? bootstrapResult.branches
-          : result.values.branches
+        const brs = result.values.branches
 
         if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
         const versionMismatchError = Object.values(result.errors || {}).find(isApiVersionMismatchError) as Error | undefined
         if (versionMismatchError) {
           setLoadError(versionMismatchError.message)
           throw versionMismatchError
-        }
-        if (needsProductSummary && Array.isArray(sum)) {
-          // Re-insert any pinned just-adjusted/transferred rows the fresh
-          // server page no longer contains -- see pinnedEditedInventoryRef's
-          // own comment. Same shape as Products.tsx's identical re-insert
-          // in its own load().
-          if (pinnedEditedInventoryRef.current.size) {
-            const presentIds = new Set(sum.map((p: InventoryProduct) => Number(p.id)))
-            const missingPinned = Array.from(pinnedEditedInventoryRef.current.entries())
-              .filter(([id]) => !presentIds.has(id))
-              .map(([, snapshot]) => snapshot)
-            setSummary(missingPinned.length ? [...sum, ...missingPinned] : sum)
-          } else {
-            setSummary(sum || [])
-          }
-          setInventoryProductsLoaded(true)
-          if (sumResult && !Array.isArray(sumResult)) {
-            setInventoryProductTotal(Number(sumResult.total || 0))
-            setInventoryProductPage(Number(sumResult.page || inventoryProductPage) || 1)
-            setInventoryProductPageSize(Number(sumResult.pageSize || inventoryProductPageSize) || inventoryProductPageSize)
-            if (Array.isArray(sumResult.initials)) {
-              setInventoryInitials(sumResult.initials)
-            }
-            if (sumResult.filters && typeof sumResult.filters === 'object') {
-              setInventoryProductFilters(sumResult.filters)
-            }
-          } else {
-            setInventoryProductTotal(sum.length)
-          }
         }
         if (needsStatsData && statsResult?.item) {
           setStockStats(statsResult.item)
@@ -1169,31 +786,6 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
         loadedOnceRef.current = true
         setLoadError(null)
 
-        if (needsProductSummary && typeof window !== 'undefined' && productQuery.metadata !== '1') {
-          if (inventoryMetadataCancelRef.current) inventoryMetadataCancelRef.current()
-          const metadataQuery = {
-            ...productQuery,
-            page: 1,
-            pageSize: 1,
-            metadata: '1',
-            metadataOnly: '1',
-          }
-          inventoryMetadataCancelRef.current = scheduleInventoryMetadataRead(() => {
-            inventoryMetadataCancelRef.current = null
-            void getInventoryApi().searchInventoryProducts(metadataQuery)
-              .then((metadataResult: any) => {
-                if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
-                if (Array.isArray(metadataResult?.initials)) {
-                  setInventoryInitials(metadataResult.initials)
-                }
-                if (metadataResult?.filters && typeof metadataResult.filters === 'object') {
-                  setInventoryProductFilters(metadataResult.filters)
-                }
-              })
-              .catch(() => {})
-          })
-        }
-
         // (The old needsStatsData secondary fetch -- getReturns({scope:'all'})
         // summed client-side plus the dashboard summary for tax/delivery --
         // is gone: the range-driven stats strip reads those figures
@@ -1227,26 +819,17 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
     return wrappedPromise
   }, [
     branchFilter,
-    brandFilter,
-    catFilter,
     deferredSearch,
-    groupFilter,
-    inventoryInitialFilter,
-    inventoryProductPage,
-    inventoryProductPageSize,
     isAdmin,
-    issueFilter,
     movementUserFilter,
     movementStartDate,
     movementEndDate,
     movementMeta.page,
     movementMeta.pageSize,
     needsMovementData,
-    needsProductSummary,
     needsRfidData,
     needsStatsData,
     searchMode,
-    stockFilter,
     tr,
   ])
   useEffect(() => {
@@ -1278,27 +861,6 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
     setHistoryReady(true)
     return undefined
   }, [isActive, loading])
-  // The Dashboard stock-card focus payload is consumed by BranchesHubPage
-  // now (it forwards a 'products' drill to the Products PAGE -- the hub's
-  // products slice was removed as redundant, Aug 31 2026), so the old
-  // consumption effect here is gone.
-  // Per-product notification click-to-focus: routes/notifications.ts's
-  // inventory section sets `anchor: 'product-<id>'`, which AppContext's
-  // navigateTo() turns into a `#product-<id>` URL hash before dispatching
-  // APP_NAVIGATION_EVENT (see Users.tsx's identical `#devices` pattern for
-  // precedent). This page can already be mounted when that navigation
-  // happens, so check the hash on mount too, not just on the event.
-  const [focusProductId, setFocusProductId] = useState<number | null>(null)
-  useEffect(() => {
-    if (!isActive) return undefined
-    const applyHashFocus = () => {
-      const match = /^#product-(\d+)$/.exec(window.location.hash)
-      if (match) setFocusProductId(Number(match[1]))
-    }
-    applyHashFocus()
-    window.addEventListener(APP_NAVIGATION_EVENT, applyHashFocus)
-    return () => window.removeEventListener(APP_NAVIGATION_EVENT, applyHashFocus)
-  }, [isActive])
   useEffect(() => {
     if (!isActive || reasonManager.open !== true) return
     void ensureInventoryReasonsLoaded()
@@ -1376,54 +938,10 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
     if (branchFilter !== 'all') return product.display_quantity ?? product.stock_quantity ?? 0
     return product.stock_quantity ?? 0
   }, [branchFilter])
-  // Builds the pinned-row snapshot for pinnedEditedInventoryRef -- see that
-  // ref's own comment for why only these two mutation shapes (a known set
-  // of per-branch deltas) are safe to compute here rather than guessed at.
-  // Mirrors the exact fields routes/inventory.ts's bootstrap/summary query
-  // derives server-side: `stock_quantity` (real total across all branches)
-  // and `display_quantity` (the currently-filtered branch's quantity, or
-  // the same total when no branch filter is active -- see that route's
-  // own `display_quantity` comment for the two query shapes this mirrors).
-  const buildPinnedInventorySnapshot = useCallback((
-    product: InventoryProduct,
-    changes: { branchId: number; delta: number }[],
-  ): InventoryProduct => {
-    const branchStockById = new Map(
-      (Array.isArray(product.branch_stock) ? product.branch_stock : [])
-        .map((entry) => [Number(entry?.branch_id || 0), { ...entry }]),
-    )
-    let totalDelta = 0
-    for (const { branchId, delta } of changes) {
-      totalDelta += delta
-      const existing = branchStockById.get(branchId)
-      if (existing) {
-        existing.quantity = Math.max(0, Number(existing.quantity || 0) + delta)
-      } else if (delta > 0) {
-        branchStockById.set(branchId, { branch_id: branchId, quantity: delta })
-      }
-    }
-    const nextStockQuantity = Math.max(0, Number(product.stock_quantity || 0) + totalDelta)
-    const filterBranchId = branchFilter !== 'all' ? Number(branchFilter) : null
-    const nextDisplayQuantity = filterBranchId != null
-      ? Number(branchStockById.get(filterBranchId)?.quantity ?? product.display_quantity ?? 0)
-      : nextStockQuantity
-    return {
-      ...product,
-      branch_stock: Array.from(branchStockById.values()),
-      stock_quantity: nextStockQuantity,
-      display_quantity: nextDisplayQuantity,
-    }
-  }, [branchFilter])
-  const adjustTargetOptions = useMemo(() => {
-    if (!adjustModal) return []
-    const selectedId = Number(adjustModal.id || 0)
-    const familyRootId = Number(adjustModal.parent_id || selectedId)
-    return summary.filter((product) => {
-      const productId = Number(product?.id || 0)
-      const parentId = Number(product?.parent_id || 0)
-      return productId === selectedId || productId === familyRootId || parentId === familyRootId
-    })
-  }, [adjustModal, summary])
+  // Single adjust target: the product the modal was opened from. The
+  // variant-family switcher went with the products catalog -- the Products
+  // page's own StockAdjustModal is the multi-product entry point now.
+  const adjustTargetOptions = useMemo(() => (adjustModal ? [adjustModal] : []), [adjustModal])
   const adjustTargetSelectOptions = useMemo(() => adjustTargetOptions.map((product) => ({
     value: String(product.id),
     label: `${product.name}${product.parent_id ? ' (Variant)' : product.is_group ? ' (Group)' : ''}`,
@@ -1448,9 +966,7 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
     { value: '', label: chooseBranchLabel },
     ...branchSelectOptions,
   ], [branchSelectOptions, chooseBranchLabel])
-  const adjustCurrentQuantity = adjustModal
-    ? getStockQty(summaryById.get(Number(adjustForm.product_id || adjustModal.id)) || adjustModal)
-    : 0
+  const adjustCurrentQuantity = adjustModal ? getStockQty(adjustModal) : 0
   // Resolved against the *currently selected* adjust target (not just the
   // row the modal was opened from) so switching the "Adjust target" picker
   // (adjustTargetOptions.length > 1) updates the displayed locked price too
@@ -1460,13 +976,10 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
   // never get refreshed on a target switch (those only matter once
   // unlocked, as edit-starting-point values, not as a display source).
   const adjustCurrentPricing = adjustModal
-    ? (() => {
-        const selected = summaryById.get(Number(adjustForm.product_id || adjustModal.id)) || adjustModal
-        return {
-          selling_price_usd: Number(selected?.selling_price_usd) || 0,
-          selling_price_khr: Number(selected?.selling_price_khr) || 0,
-        }
-      })()
+    ? {
+        selling_price_usd: Number(adjustModal?.selling_price_usd) || 0,
+        selling_price_khr: Number(adjustModal?.selling_price_khr) || 0,
+      }
     : { selling_price_usd: 0, selling_price_khr: 0 }
 
   const handleAdjust = async () => {
@@ -1481,7 +994,7 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
       notify(tr('adjust_reason_required', 'A reason is required for this stock adjustment.'), 'error')
       return
     }
-    const selectedAdjustProduct = summaryById.get(Number(adjustForm.product_id || adjustModal?.id)) || adjustModal
+    const selectedAdjustProduct = adjustModal
     if (!selectedAdjustProduct) return notify('Select a product first', 'error')
     const previousSnapshot = cloneHistorySnapshot(selectedAdjustProduct)
     const numericBranchId = adjustForm.branch_id ? parseInt(String(adjustForm.branch_id), 10) : null
@@ -1589,29 +1102,6 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
         // (possibly 'new') batchId.
         const resolvedBatchId = (res as { batchId?: number | null } | null)?.batchId ?? null
         const inverseBatchId = resolvedBatchId != null ? resolvedBatchId : adjustmentRequest.batchId
-        // Pin only when the resolved branch/delta is fully known: a
-        // specific branch was named (not the server's default-branch
-        // fallback, since we can't see which branch that resolved to
-        // without it echoing one back that matches what we asked for),
-        // the mutation actually landed on the same row we started from
-        // (not redirected to a newly-created sibling via unlockPricing),
-        // and something actually changed (a same-value 'set' is a
-        // real no-op server-side, nothing to pin).
-        const adjustRes = res as { branchId?: number; movementType?: string; quantity?: number; productId?: number; createdSibling?: boolean } | null
-        if (
-          numericBranchId
-          && adjustRes?.branchId === numericBranchId
-          && adjustRes?.productId === selectedAdjustProduct.id
-          && !adjustRes?.createdSibling
-          && Number(adjustRes?.quantity) > 0
-          && (adjustRes?.movementType === 'add' || adjustRes?.movementType === 'remove')
-        ) {
-          const delta = adjustRes.movementType === 'add' ? Number(adjustRes.quantity) : -Number(adjustRes.quantity)
-          pinnedEditedInventoryRef.current.set(
-            Number(selectedAdjustProduct.id),
-            buildPinnedInventorySnapshot(selectedAdjustProduct, [{ branchId: numericBranchId, delta }]),
-          )
-        }
         actionHistory.pushAction({
           label: `Adjust stock for ${previousSnapshot?.name || adjustModal?.name || 'product'}`,
           undo: async () => {
@@ -1622,18 +1112,11 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
                 : { ...adjustmentRequest, type: 'remove', batchId: inverseBatchId, unlockPricing: false, reason: `Undo: ${adjustmentRequest.reason || 'inventory adjustment'}` }
             const undoResult = await runInventoryMutation(() => getInventoryApi().adjustStock(inverseRequest), 'Undo inventory adjustment')
             if (undoResult?.success === false) throw new Error(undoResult?.error || 'Failed to undo stock adjustment')
-            // Clear rather than recompute: a reverted row should follow
-            // fresh server truth on the next load, not keep showing the
-            // pre-undo pinned snapshot (which would be wrong if the
-            // reverted row genuinely no longer matches the active
-            // filters -- see pinnedEditedInventoryRef's own comment).
-            pinnedEditedInventoryRef.current.delete(Number(selectedAdjustProduct.id))
             await load(true)
           },
           redo: async () => {
             const redoResult = await runInventoryMutation(() => getInventoryApi().adjustStock({ ...adjustmentRequest, batchId: inverseBatchId, reason: `Redo: ${adjustmentRequest.reason || 'inventory adjustment'}` }), 'Redo inventory adjustment')
             if (redoResult?.success === false) throw new Error(redoResult?.error || 'Failed to redo stock adjustment')
-            pinnedEditedInventoryRef.current.delete(Number(selectedAdjustProduct.id))
             await load(true)
           },
         })
@@ -1655,7 +1138,6 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
   // longer matches should behave like any other non-matching row again.
   // Same pattern as Products.tsx's handleSearchInputChange.
   const handleSearchChange = useCallback((value: string) => {
-    pinnedEditedInventoryRef.current.clear()
     setSearch(value)
   }, [])
 
@@ -1765,11 +1247,6 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
 
   const openMovementProductDetail = useCallback(async (movement: InventoryMovement) => {
     const productId = Number(movement?.product_id || 0)
-    const current = productId ? summaryById.get(productId) : null
-    if (current) {
-      setDetailProduct(current)
-      return
-    }
     if (productId && getInventoryApi().getProductsByIds) {
       try {
         const result = await withLoaderTimeout(
@@ -1797,7 +1274,7 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
         quantity: Number(movement.quantity || 0),
       }] : [],
     })
-  }, [summaryById, t])
+  }, [t])
 
 
   const handleTransferStock = async () => {
@@ -1833,7 +1310,6 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
 
     setTransferSaving(true)
     try {
-      const previousSnapshot = cloneHistorySnapshot(transferModal)
       const result = await runInventoryMutation(() => getInventoryApi().transferInventoryStock({
         productId: transferModal.id,
         fromBranchId: transferForm.from_branch_id,
@@ -1844,17 +1320,6 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
         userName: user?.name || user?.username,
       }), 'Transfer inventory stock')
       if (result?.success === false) throw new Error(result?.error || tr('stock_transfer_failed', 'Stock transfer failed'))
-      // A transfer's from/to branches and quantity are exactly what this
-      // form already validated and sent -- both branches are known and
-      // named by the person, unlike adjust's default-branch fallback
-      // case, so this is safe to pin unconditionally on success.
-      pinnedEditedInventoryRef.current.set(
-        Number(transferModal.id),
-        buildPinnedInventorySnapshot(transferModal, [
-          { branchId: Number(transferForm.from_branch_id), delta: -quantity },
-          { branchId: Number(transferForm.to_branch_id), delta: quantity },
-        ]),
-      )
       actionHistory.pushAction({
         label: `${tr('transfer', 'Transfer')}: ${transferModal.name}`,
         undo: async () => {
@@ -1868,9 +1333,6 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
             userName: user?.name || user?.username,
           }), 'Undo inventory stock transfer')
           if (undoResult?.success === false) throw new Error(undoResult?.error || tr('undo_failed', 'Undo failed'))
-          // Same reasoning as the adjust undo/redo above: clear rather
-          // than recompute, so a reverted row follows fresh server truth.
-          pinnedEditedInventoryRef.current.delete(Number(transferModal.id))
           await load(true)
         },
         redo: async () => {
@@ -1884,7 +1346,6 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
             userName: user?.name || user?.username,
           }), 'Redo inventory stock transfer')
           if (redoResult?.success === false) throw new Error(redoResult?.error || tr('redo_failed', 'Redo failed'))
-          pinnedEditedInventoryRef.current.delete(Number(transferModal.id))
           await load(true)
         },
       })
@@ -1919,261 +1380,16 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
     matchesSearchTermGroups(hay, searchTerms, searchMode)
   ), [searchMode, searchTerms])
 
-  // Matches POS.tsx's own local haystack and the server's own
-  // PRODUCT_SEARCH_COLUMNS (cloudflare/src/lib/searchMatch.ts) --
-  // name/sku/barcode only. In practice this re-filter is a no-op today
-  // (see hasServerBackedProductSearch below: it only runs when there ISN'T
-  // a server-backed search, and an empty searchTerms list always passes
-  // matchesSearch anyway), but keeping it correct rather than silently
-  // wrong if that ever changes, and matches the same fix already made to
-  // Products.tsx's filterProductsForPage/POS.tsx's own re-filter.
-  const productHay = useCallback((p: InventoryProduct): string => (
-    `${p.name||''} ${p.sku||''} ${p.barcode||''}`.toLowerCase()
-  ), [])
-
   const movHay = useCallback((m: InventoryMovement): string => (
     `${m.product_name||''} ${m.branch_name||''} ${m.reason||''} ${m.user_name||''} ${m.movement_type||''} ${m.reference_id||''} ${m.lot_code||''} ${m.expiry_date||''} ${m.created_at||''}`.toLowerCase()
   ), [])
 
-  const hasServerBackedProductSearch = !!searchTerms.length
-  // groupFilter is intentionally NOT re-applied as an exclusionary check
-  // here (same fix, same root cause, as productFilterHelpers.ts's
-  // filterProductsForPage on the Products page, and originally POS.tsx's
-  // visibleProductCards -- see either comment for the full incident
-  // writeup). `summary` is only ever the current server page, but the
-  // server's own groupState filter (appendInventoryProductFilters in
-  // cloudflare/src/routes/inventory.ts) already scopes "grouped" across the
-  // whole active catalog, including same-name rows with no is_group/
-  // parent_id set. A client-side recheck using only this page's own
-  // is_group/parent_id fields (the removed `parentProductIds` set) has no
-  // way to see that broader relationship, so it would drop rows the server
-  // had already confirmed were grouped -- exactly what caused the "Groups
-  // filter not showing/refreshing" symptom this project's history already
-  // root-caused once for POS; this page had the same latent bug, just not
-  // yet reported.
-  const filteredSummary = useMemo(() => summary.filter((p: InventoryProduct) => {
-    if (!hasServerBackedProductSearch && !matchesSearch(productHay(p))) return false
-    const normalizedBrandFilter = String(brandFilter || '').trim().replace(/\s+/g, ' ').toLowerCase()
-    const normalizedProductBrand = String(p.brand || '').trim().replace(/\s+/g, ' ').toLowerCase()
-    if (normalizedBrandFilter !== 'all' && normalizedProductBrand !== normalizedBrandFilter) return false
-    // Category -- new filter, same client-side-recheck shape as the
-    // brand check above it (redundant with the server's own category
-    // WHERE clause today, kept for the same reason productHay's widened
-    // haystack above is). matchesMulti handles the comma-joined multi-
-    // value shape (and the 'all' sentinel) the same way movFilter/
-    // movementUserFilter already do elsewhere in this file.
-    if (!matchesMulti(catFilter, p.category)) return false
-    // "Issues" -- same scoped key set and OR semantics as
-    // productFilterHelpers.ts's productHasIssue (Products.tsx) and
-    // buildIssueStateClauses (searchMatch.ts); kept as a small local check
-    // here rather than importing across pages, same reasoning as the
-    // brand/category re-checks above it.
-    if (issueFilter !== 'all' && issueFilter) {
-      const issueKeys = parseMultiValues(issueFilter)
-      const outThresholdForIssue = p.out_of_stock_threshold || 0
-      const hasIssue = issueKeys.some((key) => {
-        switch (key) {
-          case 'out_of_stock': return getStockQty(p) <= outThresholdForIssue
-          case 'no_image': return !String(p.image_path || '').trim()
-          case 'no_barcode': return !String(p.barcode || '').trim()
-          case 'no_category': return !String(p.category || '').trim()
-          case 'no_price': return Number(p.selling_price_usd || 0) <= 0 && Number(p.selling_price_khr || 0) <= 0
-          default: return false
-        }
-      })
-      if (!hasIssue) return false
-    }
-    // 'in_stock' means positive stock (includes both low and healthy) --
-    // 'healthy' is the stricter subset above the low-stock threshold. This
-    // used to conflate the two (in_stock required qty above low_stock_
-    // threshold, same bucket 'healthy' now covers), matching backend
-    // semantics in routes/products.ts / routes/branches.ts.
-    const qty = getStockQty(p)
-    const outThreshold = p.out_of_stock_threshold || 0
-    const lowThreshold = p.low_stock_threshold || 10
-    if (stockFilter === 'low')      return qty > outThreshold && qty <= lowThreshold
-    if (stockFilter === 'out')      return qty <= outThreshold
-    if (stockFilter === 'in_stock') return qty > outThreshold
-    if (stockFilter === 'healthy')  return qty > lowThreshold
-    return true
-  }), [brandFilter, catFilter, hasServerBackedProductSearch, issueFilter, matchesSearch, productHay, stockFilter, summary])
 
-  const inventoryProductsById = useMemo(
-    () => new Map(summary.map((product) => [Number(product?.id || 0), product])),
-    [summary],
-  )
-
-  // Category-first sectioning, same decided ask as Products.tsx (see that
-  // file's productSections comment): category header first A-Z, name A-Z
-  // within category, rail jumps by category initial.
-  const inventoryProductSections = useMemo(
-    () => buildProductCategorySections(filteredSummary, {
-      productsById: inventoryProductsById,
-      sortDirection: 'asc',
-      uncategorizedLabel: t('uncategorized') || 'Uncategorized',
-    }),
-    [filteredSummary, inventoryProductsById, t],
-  )
-
-  const visibleInventoryProducts = useMemo(
-    () => inventoryProductSections.flatMap((section) => section.items),
-    [inventoryProductSections],
-  )
-  const visibleInventoryProductIds = useMemo<number[]>(
-    () => visibleInventoryProducts.reduce((ids, product) => {
-      const id = Number(product?.id)
-      if (Number.isFinite(id)) ids.push(id)
-      return ids
-    }, [] as number[]),
-    [visibleInventoryProducts],
-  )
-  const visibleInventoryProductsSignature = useMemo(
-    () => visibleInventoryProductIds.join(','),
-    [visibleInventoryProductIds],
-  )
-  const initialMobileInventorySections = useMemo(
-    () => limitInventorySectionsForMobile(inventoryProductSections, INVENTORY_MOBILE_INITIAL_ITEM_LIMIT),
-    [inventoryProductSections],
-  )
-
-  // Vertical A-Z jump rail wiring (Aug 19 2026 UI request) -- same
-  // replacement as Products.tsx's AlphaIndexRail: jump to a section
-  // instead of filtering it. Unlike Products.tsx, Inventory never had any
-  // jump-target plumbing to begin with (only the filter), so this is new:
-  // maps each section's own letter label to its section id (already a
-  // stable, unique `product-letter:${letter}` string from
-  // buildProductGroupSections), and jumps by querying the
-  // data-inventory-jump-id now rendered on each section header in
-  // InventoryProductsSurface.tsx (both the desktop <tr> and mobile <div>
-  // section headers).
-  const inventoryJumpTargetIdsByLetter = useMemo(() => {
-    const targets = new Map<string, string>()
-    inventoryProductSections.forEach((section) => {
-      if (collapsedInventorySections.has(section.id)) return
-      // Key by the section label's own initial letter, not the raw label --
-      // now that sections are category-named ("Perfume") rather than a bare
-      // letter, this maps down to the rail's A-Z key ("P"). Sections arrive
-      // pre-sorted A-Z, so the first section seen per initial is always the
-      // alphabetically-earliest one; the `has()` guard keeps that one
-      // instead of a later same-initial category overwriting it.
-      const key = getInitialKey(section.label)
-      if (targets.has(key)) return
-      targets.set(key, section.id)
-    })
-    return targets
-  }, [collapsedInventorySections, inventoryProductSections])
-  const inventoryVisibleLetters = useMemo(
-    () => [...inventoryJumpTargetIdsByLetter.keys()].sort((a, b) => a.localeCompare(b)),
-    [inventoryJumpTargetIdsByLetter],
-  )
-  const jumpToInventoryLetter = useCallback((letter: string) => {
-    const targetId = inventoryJumpTargetIdsByLetter.get(String(letter || '').toUpperCase())
-    if (!targetId) return
-    const node = document.querySelector(`[data-inventory-jump-id="${targetId}"]`)
-    if (!(node instanceof HTMLElement)) return
-    const scrollParent = node.closest('.page-scroll') as HTMLElement | null
-    const offset = 96
-    if (scrollParent) {
-      const delta = node.getBoundingClientRect().top - scrollParent.getBoundingClientRect().top - offset
-      scrollParent.scrollTo({ top: Math.max(0, scrollParent.scrollTop + delta), behavior: 'smooth' })
-      return
-    }
-    const top = node.getBoundingClientRect().top + window.scrollY - offset
-    window.scrollTo({ top: Math.max(0, top), behavior: 'smooth' })
-  }, [inventoryJumpTargetIdsByLetter])
-
-  useEffect(() => {
-    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return undefined
-    const media = window.matchMedia('(max-width: 639px)')
-    const syncViewport = (event: MediaQueryList | MediaQueryListEvent) => {
-      setIsInventoryMobileViewport(Boolean(event?.matches))
-    }
-    syncViewport(media)
-    if (typeof media.addEventListener === 'function') {
-      media.addEventListener('change', syncViewport)
-      return () => media.removeEventListener('change', syncViewport)
-    }
-    if (typeof media.addListener === 'function') {
-      media.addListener(syncViewport)
-      return () => media.removeListener(syncViewport)
-    }
-    return undefined
-  }, [])
-
-  useEffect(() => {
-    if (initialInventoryDesktopRevealReady || loading) return
-    setInitialInventoryDesktopRevealReady(true)
-    return undefined
-  }, [initialInventoryDesktopRevealReady, loadError, loading, visibleInventoryProducts.length, visibleInventoryProductsSignature])
-
-  useEffect(() => {
-    if (initialInventoryMobileRevealReady) return
-    const showingProductsForReveal = inventorySection === 'products' || (inventorySection === 'all' && tab === 'products')
-    if (!showingProductsForReveal) {
-      setInitialInventoryMobileRevealReady(true)
-      return
-    }
-    if (showingProductsForReveal && !inventoryProductsLoaded && !loadError) return
-    setInitialInventoryMobileRevealReady(true)
-  }, [
-    initialInventoryMobileRevealReady,
-    inventoryProductsLoaded,
-    inventorySection,
-    loadError,
-    tab,
-  ])
-
-  useLayoutEffect(() => {
-    setInitialInventoryMobileFullListReady(false)
-  }, [inventorySection, tab, visibleInventoryProductsSignature])
-
-  useEffect(() => {
-    const showingProductsForReveal = inventorySection === 'products' || (inventorySection === 'all' && tab === 'products')
-    if (!isActive || !showingProductsForReveal || !initialInventoryMobileRevealReady || initialInventoryMobileFullListReady || !visibleInventoryProducts.length) return
-    if (visibleInventoryProducts.length <= INVENTORY_MOBILE_INITIAL_ITEM_LIMIT) {
-      setInitialInventoryMobileFullListReady(true)
-      return
-    }
-    setInitialInventoryMobileFullListReady(true)
-    return undefined
-  }, [
-    initialInventoryMobileFullListReady,
-    initialInventoryMobileRevealReady,
-    isActive,
-    inventorySection,
-    tab,
-    visibleInventoryProducts.length,
-    visibleInventoryProductsSignature,
-  ])
-
-  useEffect(() => {
-    setInventoryProductPage(1)
-  }, [branchFilter, brandFilter, catFilter, deferredSearch, groupFilter, inventoryInitialFilter, issueFilter, searchMode, stockFilter, tab])
 
   useEffect(() => {
     setMovementMeta((current) => ({ ...current, page: 1 }))
     if (needsMovementData) setMovementsLoaded(false)
   }, [branchFilter, deferredSearch, movementEndDate, movementStartDate, movementUserFilter, needsMovementData, searchMode])
-
-  useEffect(() => {
-    if (!isActive || !loadedOnceRef.current || !needsProductSummary) return
-    load(true, { force: true }).catch(() => {})
-  }, [
-    branchFilter,
-    brandFilter,
-    catFilter,
-    deferredSearch,
-    groupFilter,
-    inventoryInitialFilter,
-    inventoryProductPage,
-    inventoryProductPageSize,
-    isActive,
-    issueFilter,
-    load,
-    needsProductSummary,
-    searchMode,
-    stockFilter,
-  ])
 
   useEffect(() => {
     if (!isActive || !loadedOnceRef.current || !needsMovementData) return
@@ -2192,202 +1408,6 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
     searchMode,
   ])
 
-  useEffect(() => {
-    const validIds = new Set(visibleInventoryProductIds)
-    setSelectedProductIds((current) => pruneSelectionToVisibleIds(current, validIds))
-  }, [visibleInventoryProductIds])
-
-  const toggleSelectedProduct = useCallback((productId: InventoryId) => {
-    const numericId = Number(productId)
-    if (!Number.isFinite(numericId)) return
-    setSelectedProductIds((current) => toggleIdSet(current, [numericId], !current.has(numericId)))
-  }, [])
-
-  const toggleSelectAllProducts = useCallback((checked: boolean) => {
-    if (!checked) {
-      setSelectedProductIds(new Set())
-      return
-    }
-    setSelectedProductIds(new Set(visibleInventoryProductIds))
-  }, [visibleInventoryProductIds])
-
-  const selectedProducts = useMemo<InventoryProduct[]>(
-    () => visibleInventoryProducts.filter((product) => selectedProductIds.has(Number(product.id))) as InventoryProduct[],
-    [selectedProductIds, visibleInventoryProducts],
-  )
-  const hasSelectedProducts = selectedProducts.length > 0
-
-  const buildBatchDraft = useCallback((product: InventoryProduct): InventoryBatchLine => {
-    const defaultBranchId = branchFilter !== 'all'
-      ? String(branchFilter)
-      : defaultBranch?.id?.toString() || ''
-    const branchStock = Array.isArray(product?.branch_stock) ? product.branch_stock : []
-    const firstStockBranch = branchStock.find((item: LegacyInventoryRecord) => Number(item?.quantity || 0) > 0)?.branch_id
-    const defaultSourceId = branchFilter !== 'all'
-      ? String(branchFilter)
-      : String(firstStockBranch || defaultBranch?.id || '')
-    const defaultDestinationId = String(
-      defaultTransferDestinationBySourceId.get(defaultSourceId) || '',
-    )
-    return {
-      id: Number(product.id),
-      productId: Number(product.id),
-      productName: product.name,
-      unit: product.unit || '',
-      quantity: '1',
-      action: 'adjust',
-      adjustType: 'add',
-      branchId: defaultBranchId,
-      fromBranchId: defaultSourceId,
-      toBranchId: defaultDestinationId !== defaultSourceId ? defaultDestinationId : '',
-      reason: '',
-      note: '',
-      moveMode: 'existing',
-      destinationProductId: '',
-      destinationName: `${product.name} - ${tr('damaged', 'Damaged')}`,
-      sellingPriceUsd: product.selling_price_usd || '',
-      specialPriceUsd: product.special_price_usd || '',
-      discountEnabled: false,
-      discountType: 'percent',
-      discountPercent: '',
-      discountAmountUsd: '',
-      unitCostUsd: product.purchase_price_usd || product.cost_price_usd || 0,
-      unitCostKhr: product.purchase_price_khr || 0,
-      stockQty: getStockQty(product),
-      error: '',
-    }
-  }, [branchFilter, defaultBranch, defaultTransferDestinationBySourceId, getStockQty, tr])
-
-  const openInventoryBatchSession = useCallback(() => {
-    if (!selectedProducts.length) return
-    void ensureInventoryReasonsLoaded()
-    setInventoryBatch({
-      items: selectedProducts.map((product) => buildBatchDraft(product)),
-    })
-  }, [buildBatchDraft, ensureInventoryReasonsLoaded, selectedProducts])
-
-  const updateInventoryBatchLine = useCallback((productId: InventoryId, patch: Partial<InventoryBatchLine>) => {
-    setInventoryBatch((current) => {
-      if (!current?.items?.length) return current
-      return {
-        ...current,
-        items: current.items.map((item) => (
-          Number(item.productId) === Number(productId)
-            ? { ...item, ...patch, error: patch?.error ?? '' }
-            : item
-        )),
-      }
-    })
-  }, [])
-
-  const removeInventoryBatchLine = useCallback((productId: InventoryId) => {
-    const numericId = Number(productId)
-    setInventoryBatch((current) => {
-      if (!current?.items?.length) return current
-      const nextItems = current.items.filter((item) => Number(item.productId) !== numericId)
-      return nextItems.length ? { ...current, items: nextItems } : null
-    })
-    setSelectedProductIds((current) => {
-      const next = new Set(current)
-      next.delete(numericId)
-      return next
-    })
-  }, [])
-
-  const applyInventoryBatchSession = useCallback(async () => {
-    if (batchApplying || !inventoryBatch?.items?.length) return
-    if (!beginSingleAction(batchInventoryInFlightRef, { blocked: batchApplying })) return
-    if (!window.confirm(tr('confirm_apply_inventory_batch'))) {
-      finishSingleAction(batchInventoryInFlightRef)
-      return
-    }
-    setBatchApplying(true)
-    try {
-      const applyRun = await runConcurrentTasks(inventoryBatch.items, async (item: InventoryBatchLine) => {
-        const quantity = Number.parseFloat(String(item.quantity))
-        if (!Number.isFinite(quantity) || quantity <= 0) {
-          throw new Error(tr('invalid_quantity', 'Invalid quantity'))
-        }
-        if (item.action === 'adjust') {
-          const result = await runInventoryMutation(() => getInventoryApi().adjustStock({
-            productId: item.productId,
-            productName: item.productName,
-            type: item.adjustType,
-            quantity,
-            reason: item.reason || tr('inventory_adjustment', 'Inventory adjustment'),
-            branchId: item.branchId,
-            unitCostUsd: item.unitCostUsd,
-            unitCostKhr: item.unitCostKhr,
-          }), 'Batch adjust inventory stock')
-          if (result?.success === false) throw new Error(result?.error || tr('adjust_failed', 'Adjustment failed'))
-        } else if (item.action === 'transfer') {
-          const result = await runInventoryMutation(() => getInventoryApi().transferInventoryStock({
-            productId: item.productId,
-            fromBranchId: item.fromBranchId,
-            toBranchId: item.toBranchId,
-            quantity,
-            reason: item.reason,
-          }), 'Batch transfer inventory stock')
-          if (result?.success === false) throw new Error(result?.error || tr('transfer_failed', 'Transfer failed'))
-        } else if (item.action === 'move') {
-          const request: LegacyInventoryRecord = {
-            sourceProductId: item.productId,
-            destinationProductId: item.moveMode === 'existing' ? Number(item.destinationProductId || 0) : null,
-            branchId: item.branchId,
-            quantity,
-            reason: item.reason || 'broken',
-            note: item.note || '',
-          }
-          if (item.moveMode === 'new') {
-            request.destinationProduct = {
-              name: item.destinationName,
-              selling_price_usd: item.sellingPriceUsd,
-              special_price_usd: item.specialPriceUsd,
-              discount_enabled: !!item.discountEnabled,
-              discount_type: item.discountType,
-              discount_percent: item.discountPercent,
-              discount_amount_usd: item.discountAmountUsd,
-            }
-          }
-          const result = await runInventoryMutation(() => getInventoryApi().moveStockRow(request), 'Batch move inventory stock')
-          if (result?.success === false) throw new Error(result?.error || tr('stock_move_failed', 'Stock move failed'))
-        }
-      })
-      const failedItems = applyRun.failures.map((entry: LegacyInventoryRecord) => ({
-        ...(entry.item || {}),
-        error: entry?.error?.message || tr('save_failed', 'Save failed'),
-      }))
-      const successCount = applyRun.successes.length
-      await load(true)
-      if (!failedItems.length) {
-        setInventoryBatch(null)
-        setSelectedProductIds(new Set())
-        notify(
-          successCount === 1
-            ? tr('batch_inventory_done_one', 'Applied inventory update.')
-            // Same missing-.replace('{count}', ...) bug as the two selected-
-            // count labels above, found in the same audit pass -- the
-            // stored translation is the literal string "{count} inventory
-            // updates applied." in both en/km, so without this the toast
-            // showed "{count}" verbatim instead of the actual number.
-            : tr('batch_inventory_done_many', `${successCount} inventory updates applied.`).replace('{count}', String(successCount)),
-        )
-        return
-      }
-      setInventoryBatch({ items: failedItems })
-      setSelectedProductIds(new Set(normalizeFiniteIdsFrom(failedItems, (item) => item.productId)))
-      notify(
-        tr(
-          'batch_inventory_partial_failure',
-          `${successCount} applied, ${failedItems.length} need review.`,
-        ),
-        'warning',
-      )
-    } finally {
-      finishSingleAction(batchInventoryInFlightRef)
-      setBatchApplying(false)
-    }
-  }, [batchApplying, inventoryBatch, load, notify, runInventoryMutation, tr])
 
   const hasServerBackedMovementSearch = !!searchTerms.length
   const filteredMovements = useMemo(() => movements.filter(m => {
@@ -2519,42 +1539,10 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
       movementColorClass(group.movement_type, Number(group.signedQuantity || 0)),
     [],
   )
-
-  // Stats from backend SQL already net out returned quantities and revenue.
-  const visibleInventoryStats = useMemo(() => {
-    const stats = {
-      stockValueUsd: 0,
-      lowStock: 0,
-      outOfStock: 0,
-      inStock: 0,
-      netSoldQty: 0,
-      revenueUsd: 0,
-      cogsUsd: 0,
-      storeDiscountUsd: 0,
-      membershipDiscountUsd: 0,
-    }
-    for (const product of filteredSummary) {
-      const qty = getStockQty(product)
-      const outThreshold = product.out_of_stock_threshold || 0
-      stats.stockValueUsd += product.stock_value_usd || 0
-      if (qty > 0 && qty <= product.low_stock_threshold) stats.lowStock += 1
-      if (qty <= outThreshold) stats.outOfStock += 1
-      if (qty > outThreshold) stats.inStock += 1
-      stats.netSoldQty += Math.max(0, product.qty_sold || 0)
-      stats.revenueUsd += Math.max(0, product.revenue_usd || 0)
-      stats.cogsUsd += Math.max(0, product.cogs_usd || 0)
-      stats.storeDiscountUsd += Math.max(0, product.store_discount_usd || 0)
-      stats.membershipDiscountUsd += Math.max(0, product.membership_discount_usd || 0)
-    }
-    return stats
-  }, [filteredSummary, getStockQty])
-  const visibleTotalValue = visibleInventoryStats.stockValueUsd
-  const visibleLowStockCount = visibleInventoryStats.lowStock
-  const visibleOutStockCount = visibleInventoryStats.outOfStock
-  const totalValue = Number(stockStats?.stock_value_usd ?? visibleTotalValue)
-  const lowStockCount = Number(stockStats?.low_stock ?? visibleLowStockCount)
-  const outStockCount = Number(stockStats?.out_of_stock ?? visibleOutStockCount)
-  const inStockCount = Number(stockStats?.in_stock ?? visibleInventoryStats.inStock)
+  const totalValue = Number(stockStats?.stock_value_usd || 0)
+  const lowStockCount = Number(stockStats?.low_stock || 0)
+  const outStockCount = Number(stockStats?.out_of_stock || 0)
+  const inStockCount = Number(stockStats?.in_stock || 0)
   // Strict subset of inStockCount (above the low-stock threshold, not just
   // above zero/out-of-stock) -- see familyStockStats.ts's own `healthy`
   // column comment for why this is now split out from in_stock rather than
@@ -2564,35 +1552,7 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
   // stale/missing stockStats just means the "Healthy" line doesn't render
   // yet, not a wrong total anywhere else on the page.
   const healthyCount = Number(stockStats?.healthy ?? Math.max(0, inStockCount - lowStockCount))
-  const totalProducts = Number(
-    stockStats?.total_products
-    ?? (inventoryProductsLoaded ? inventoryProductTotal : null)
-    ?? summary.length,
-  )
-  const totalQtySold = Number(
-    stockStats?.net_sold_qty
-    ?? visibleInventoryStats.netSoldQty,
-  )
-  const totalRevenue = Number(
-    stockStats?.revenue_usd
-    ?? visibleInventoryStats.revenueUsd,
-  )
-  const totalCOGS = Number(
-    stockStats?.cogs_usd
-    ?? visibleInventoryStats.cogsUsd,
-  )
-  const totalStoreDiscounts = Number(
-    stockStats?.store_discount_usd
-    ?? visibleInventoryStats.storeDiscountUsd,
-  )
-  const totalMembershipDiscounts = Number(
-    stockStats?.membership_discount_usd
-    ?? visibleInventoryStats.membershipDiscountUsd,
-  )
-  const totalProfit   = totalRevenue - totalCOGS
-  const inventoryProductSafePageSize = Math.max(1, Number(inventoryProductPageSize || DEFAULT_PAGE_SIZE))
-  const inventoryProductSafePage = clampPage(inventoryProductPage, totalProducts, inventoryProductSafePageSize)
-  const inventoryProductTotalPages = Math.max(1, Math.ceil(Math.max(0, Number(totalProducts || 0)) / inventoryProductSafePageSize))
+  const totalProducts = Number(stockStats?.total_products || 0)
 
   // Same class of bug as Products.tsx (see the comment there): the backend's
   // /products bootstrap endpoint clamps `page` to [1, 100000], not to the
@@ -2604,108 +1564,8 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
   // raw `inventoryProductPage` used in the fetch (below) can end up past
   // inventoryProductTotalPages and get stuck showing an empty grid under a
   // clamped-looking "page N of N" label. Self-heal it client-side instead.
-  useEffect(() => {
-    if (inventoryProductPage > inventoryProductTotalPages) {
-      setInventoryProductPage(inventoryProductTotalPages)
-    }
-  }, [inventoryProductPage, inventoryProductTotalPages])
-
-  const inventoryProductStart = totalProducts ? (((inventoryProductSafePage - 1) * inventoryProductSafePageSize) + 1) : 0
-  const inventoryProductEnd = totalProducts ? Math.min(totalProducts, inventoryProductSafePage * inventoryProductSafePageSize) : 0
-  const inventoryProductSummaryLabel = totalProducts
-    ? `${inventoryProductStart.toLocaleString()}-${inventoryProductEnd.toLocaleString()} / ${Number(totalProducts || 0).toLocaleString()}`
-    : (loading && needsProductSummary && !inventoryProductsLoaded ? tr('loading', 'Loading') : '0 / 0')
-  // Both delegate to the same shared helper Products.tsx uses
-  // (productGroupViewHelpers.ts) rather than reimplementing the min/max
-  // price and count/stock/branches logic a second time -- this used to be
-  // its own near-duplicate copy that had drifted to not include a branches
-  // part at all.
-  const getInventoryGroupPriceLabel = useCallback((group: LegacyInventoryRecord) => {
-    return buildProductGroupPriceLabel(group, (value: unknown) => fmtUSD(Number(value)))
-  }, [fmtUSD])
-  const getInventoryGroupSummaryParts = useCallback((group: LegacyInventoryRecord, { includeCount = true }: { includeCount?: boolean } = {}) => {
-    return buildProductGroupSummaryParts(group, {
-      includeCount,
-      t: (key: string) => t(key) || key,
-      fmtUSD: (value: unknown) => fmtUSD(Number(value)),
-    })
-  }, [fmtUSD, t])
-  const inventoryControlLabels = useMemo(() => ({
-    // tr() is a plain key lookup, no {count} interpolation (see
-    // AppContext.tsx's t()) -- the stored translation is the literal
-    // string "{count} selected" in both en/km, so it must be substituted
-    // by hand, same fix and same root cause as Products.tsx's identical
-    // productSelectedLabel bug found in the same audit pass.
-    selected: tr('inventory_selected_count', `${selectedProducts.length} selected`).replace('{count}', String(selectedProducts.length)),
-    batch: tr('inventory_batch_session', 'Batch'),
-    reasons: tr('saved_reasons', 'Reasons'),
-  }), [selectedProducts.length, tr])
-  useEffect(() => {
-    setCollapsedInventorySections((current) => {
-      const validIds = new Set(inventoryProductSections.map((section) => section.id))
-      const next = new Set([...current].filter((id) => validIds.has(id)))
-      return next.size === current.size ? current : next
-    })
-  }, [inventoryProductSections])
-  useEffect(() => {
-    setCollapsedInventoryGroups((current) => {
-      const validIds = new Set(inventoryProductSections.flatMap((section) => section.groups.map((group) => group.key)))
-      const next = new Set([...current].filter((id) => validIds.has(id)))
-      return next.size === current.size ? current : next
-    })
-  }, [inventoryProductSections])
-  const isInventorySelectionScopeFullySelected = useCallback((ids: unknown[] = []) => {
-    const normalized = normalizeFiniteIds(ids)
-    return normalized.length > 0 && normalized.every((id) => selectedProductIds.has(id))
-  }, [selectedProductIds])
-  const isInventorySelectionScopePartiallySelected = useCallback((ids: unknown[] = []) => {
-    const normalized = normalizeFiniteIds(ids)
-    if (!normalized.length) return false
-    const selectedCount = countSelectedIds(normalized, selectedProductIds)
-    return selectedCount > 0 && selectedCount < normalized.length
-  }, [selectedProductIds])
-  const toggleInventorySelectionScope = useCallback((ids: unknown[] = [], checked: boolean) => {
-    const normalized = normalizeFiniteIds(ids)
-    setSelectedProductIds((current) => toggleIdSet(current, normalized, checked))
-  }, [])
-  const toggleInventorySection = useCallback((sectionId: string) => {
-    setCollapsedInventorySections((current) => {
-      const next = new Set(current)
-      if (next.has(sectionId)) next.delete(sectionId)
-      else next.add(sectionId)
-      return next
-    })
-  }, [])
-  const toggleInventoryGroup = useCallback((groupKey: string) => {
-    setCollapsedInventoryGroups((current) => {
-      const next = new Set(current)
-      if (next.has(groupKey)) next.delete(groupKey)
-      else next.add(groupKey)
-      return next
-    })
-  }, [])
-  useEffect(() => {
-    setInventoryProductPageDraft(String(inventoryProductSafePage))
-  }, [inventoryProductSafePage])
-  const commitInventoryProductPageDraft = useCallback(() => {
-    const parsed = Number.parseInt(String(inventoryProductPageDraft || '').trim(), 10)
-    if (!Number.isFinite(parsed)) {
-      setInventoryProductPageDraft(String(inventoryProductSafePage))
-      return
-    }
-    const nextPage = Math.min(inventoryProductTotalPages, Math.max(1, parsed))
-    setInventoryProductPage(nextPage)
-    setInventoryProductPageDraft(String(nextPage))
-  }, [inventoryProductPageDraft, inventoryProductSafePage, inventoryProductTotalPages])
-  const cycleInventoryProductPageSize = useCallback(() => {
-    const currentIndex = PAGE_SIZE_OPTIONS.findIndex((option) => Number(option) === Number(inventoryProductSafePageSize))
-    const nextIndex = currentIndex >= 0 ? (currentIndex + 1) % PAGE_SIZE_OPTIONS.length : 0
-    setInventoryProductPageSize(PAGE_SIZE_OPTIONS[nextIndex])
-    setInventoryProductPage(1)
-  }, [inventoryProductSafePageSize])
   const inventoryThresholdFormulaText = tr('inventory_formula_thresholds', 'Low/Out counts are derived from stock thresholds')
   const inventoryStockValueFormulaText = tr('inventory_formula_stock_value', 'Stock value = positive quantity x effective cost for all matching stock, not just the visible page')
-  const inventoryProfitFormulaText = tr('inventory_formula_profit', 'Profit = Revenue - COGS')
   const inventoryDiscountFormulaText = tr('inventory_formula_discounts', 'Discount totals show store-funded and membership-funded reductions allocated across sold items.')
   const inventoryFeesFormulaText = tr('inventory_formula_fees', 'Fees collected combines sales tax and delivery fees captured on completed sales.')
   const statsValue = (value: ReactNode) => (stockStatsLoaded ? value : '...')
@@ -2738,9 +1598,6 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
   const outShortLabel = tr('out_of_stock_short', 'Out')
   const healthyShortLabel = tr('healthy_stock_short', 'Healthy')
   const matchStockShortLabel = tr('matching_stock_short', 'Matching')
-  const afterReturnsShortLabel = tr('after_returns_short', 'After ret.')
-  const storeDiscountShortLabel = tr('store_discounts_short', 'Store')
-  const memberShortLabel = tr('membership_short', 'Mem')
   const taxShortLabel = tr('tax_short', 'Tax')
   const deliveryShortLabel = tr('delivery_short', 'Del')
   const customerShortLabel = tr('customer_returns_short', 'Cust')
@@ -2889,76 +1746,10 @@ ${inventoryFeesFormulaText}`,
       ],
     },
   )
-  const inventoryBrands = useMemo(() => (
-    (Array.isArray(inventoryProductFilters.brands) && inventoryProductFilters.brands.length
-      ? inventoryProductFilters.brands
-      : [...new Set(summary.map((p) => String(p.brand || '').trim()).filter(Boolean))]
-    ).sort((a, b) => a.localeCompare(b))
-  ), [inventoryProductFilters.brands, summary])
-  // New -- same derivation as inventoryBrands above (server metadata when
-  // available, falling back to whatever's on the current page), for the
-  // Category filter section this page previously didn't have at all.
-  const inventoryCategories = useMemo(() => (
-    (Array.isArray(inventoryProductFilters.categories) && inventoryProductFilters.categories.length
-      ? inventoryProductFilters.categories
-      : [...new Set(summary.map((p) => String(p.category || '').trim()).filter(Boolean))]
-    ).sort((a, b) => a.localeCompare(b))
-  ), [inventoryProductFilters.categories, summary])
-  const apiInventoryInitialOptions = useMemo(
-    () => aggregateInitialOptions(Array.isArray(inventoryInitials) ? inventoryInitials : []).filter((item) => (
-      item?.type === 'latin' || item?.type === 'number' || item?.type === 'khmer'
-    )),
-    [inventoryInitials],
-  )
-  const derivedInventoryInitialOptions = useMemo(
-    () => buildInitialOptionsFromProducts(Array.isArray(summary) ? summary : []),
-    [summary],
-  )
-  const inventoryInitialOptions = useMemo(() => {
-    if (apiInventoryInitialOptions.length) return apiInventoryInitialOptions
-    if (derivedInventoryInitialOptions.length) return derivedInventoryInitialOptions
-    return cachedInventoryInitialOptions
-  }, [apiInventoryInitialOptions, cachedInventoryInitialOptions, derivedInventoryInitialOptions])
-  useEffect(() => {
-    if (apiInventoryInitialOptions.length) {
-      setCachedInventoryInitialOptions((current) => {
-        const serializedCurrent = JSON.stringify(current)
-        const serializedNext = JSON.stringify(apiInventoryInitialOptions)
-        return serializedCurrent === serializedNext ? current : apiInventoryInitialOptions
-      })
-      return
-    }
-    if (derivedInventoryInitialOptions.length) {
-      setCachedInventoryInitialOptions((current) => {
-        if (current.length) return current
-        return derivedInventoryInitialOptions
-      })
-    }
-  }, [apiInventoryInitialOptions, derivedInventoryInitialOptions])
   const selectedMovementGroups = useMemo(
     () => visibleMovementGroups.filter((group) => selectedMovementIds.has(group.id)),
     [selectedMovementIds, visibleMovementGroups],
   )
-  const exportStamp = useMemo(() => new Date().toISOString().slice(0, 10), [])
-  const movementDateRangeLabel = useMemo(() => {
-    const timestamps = visibleMovementGroups
-      .map((group) => group.latest_at || group.items?.[0]?.created_at || '')
-      .map((raw) => {
-        return parseInventoryTimestamp(raw)
-      })
-      .filter((date): date is Date => Boolean(date))
-      .sort((left, right) => left.getTime() - right.getTime())
-    if (!timestamps.length) {
-      if (movementStartDate || movementEndDate) {
-        return `${movementStartDate || '...'} - ${movementEndDate || '...'}`
-      }
-      return 'All available movement dates'
-    }
-    // fmtDate, not toLocaleDateString(): the bare form follows the VIEWER's
-    // locale and renders dd/mm on non-US devices (app-wide mm/dd/yyyy rule).
-    return `${fmtDate(timestamps[0])} - ${fmtDate(timestamps[timestamps.length - 1])}`
-  }, [movementEndDate, movementStartDate, visibleMovementGroups])
-
   const visibleMovementQuantity = useMemo(
     () => visibleMovementGroups.reduce((sum, group) => sum + Number(group.totalQuantity || 0), 0),
     [visibleMovementGroups],
@@ -2967,187 +1758,115 @@ ${inventoryFeesFormulaText}`,
     () => visibleMovementGroups.reduce((sum, group) => sum + Number(group.items?.length || group.recordCount || 0), 0),
     [visibleMovementGroups],
   )
-  const buildInventoryExportScope = useCallback(() => ({
-    branchFilter,
-    brandFilter,
-    exportStamp,
-    filteredSummary,
-    fmtUSD,
-    getBranchLabel,
-    getStockQty,
-    inStockCount,
-    lowStockCount,
-    movFilter,
-    movementDateRangeLabel,
-    movementGroupMode,
-    // The year/month period filter is gone (the Start → End range is the one
-    // date control) -- exports keep their fields, permanently un-narrowed.
-    movementMonthFilter: 'all',
-    movementSortDirection,
-    movementTimeMode,
-    movementYearFilter: 'all',
-    outStockCount,
-    // Range-scoped (the strip's range) since the strip replaced the old
-    // all-time client-side sums -- the stats export mirrors what the
-    // strip shows.
-    returnStats: {
-      count: stripCustomerReturnCount,
-      refund_usd: stripRefunded,
-      refund_khr: 0,
-      items: 0,
-      restock: stripRestocked,
-      supplier_count: stripSupplierReturnCount,
-      supplier_compensation_usd: Number(suppReturnTotals.compensation_usd) || 0,
-      supplier_loss_usd: stripSupplierLoss,
-    },
-    search,
-    stockFilter,
-    tab,
-    taxDelivery: { tax: stripTax, delivery: stripDeliveryFees, deliveryCount: stripDeliveryCount },
-    totalCOGS,
-    totalMembershipDiscounts,
-    totalProducts,
-    totalProfit,
-    totalQtySold,
-    totalRevenue,
-    totalStoreDiscounts,
-    totalValue,
-    tr,
-    visibleMovementGroups,
-    visibleMovementQuantity,
-    visibleMovementRecordCount,
-  }), [
-    branchFilter,
-    brandFilter,
-    exportStamp,
-    filteredSummary,
-    fmtUSD,
-    getBranchLabel,
-    getStockQty,
-    inStockCount,
-    lowStockCount,
-    movFilter,
-    movementDateRangeLabel,
-    movementGroupMode,
-    movementSortDirection,
-    movementTimeMode,
-    outStockCount,
-    search,
-    stockFilter,
-    stripCustomerReturnCount,
-    stripDeliveryCount,
-    stripDeliveryFees,
-    stripRefunded,
-    stripRestocked,
-    stripSupplierLoss,
-    stripSupplierReturnCount,
-    stripTax,
-    suppReturnTotals,
-    tab,
-    totalCOGS,
-    totalMembershipDiscounts,
-    totalProducts,
-    totalProfit,
-    totalQtySold,
-    totalRevenue,
-    totalStoreDiscounts,
-    totalValue,
-    tr,
-    visibleMovementGroups,
-    visibleMovementQuantity,
-    visibleMovementRecordCount,
-  ])
-
-  // H1+X5 (Part 405): the three list-style exports open the shared options
-  // dialog (column chooser remembered per kind + CSV/Excel/PDF) with rows
-  // from the module's own collectors -- one row shape per kind, whichever
-  // path downloads. The zip package export below keeps its direct build.
+  // H1+X5 (Part 405): movement exports open the shared options dialog
+  // (column chooser remembered per kind + CSV/Excel/PDF) with rows from the
+  // export module's collector. The old products-catalog exports (summary /
+  // low-stock / out-of-stock / full package / stats) left with the products
+  // slice -- the Products PAGE owns catalog exports, and the Stats &
+  // Branches section carries its own ranged stats export now. They were
+  // also quietly exporting EMPTY rows from this tab (the catalog was never
+  // loaded here) -- removing beats silently exporting nothing.
   const [exportDialog, setExportDialog] = useState<{ rows: Array<Record<string, unknown>>; baseName: string; rememberKey: string } | null>(null)
   const exportMovementGroups = useCallback(async (groups: LegacyInventoryRecord[], filePrefix = 'inventory-movements') => {
     const exportModule = await loadInventoryExportModule()
     setExportDialog({ rows: exportModule.collectInventoryMovementRows(groups), baseName: filePrefix, rememberKey: 'inventory-movements' })
   }, [])
 
-  const exportInventorySummary = useCallback(async (productsToExport: InventoryProduct[] = filteredSummary, filePrefix = 'inventory') => {
-    const exportModule = await loadInventoryExportModule()
-    setExportDialog({ rows: exportModule.collectInventorySummaryRows(buildInventoryExportScope(), productsToExport), baseName: filePrefix, rememberKey: 'inventory-summary' })
-  }, [buildInventoryExportScope, filteredSummary])
+  // Ranged movement export (user, Aug 31: "do the date range for all the
+  // exports... it will default shows that start/end date, but you can
+  // edit"): the Export click opens a Start→End prompt seeded with the
+  // page's own range. Unchanged range exports exactly the visible groups;
+  // an edited range fetches that window server-side (the /movements
+  // endpoint accepts pageSize up to 50k) and applies the same activity/user
+  // filters the visible list applies.
+  const [movementExportRange, setMovementExportRange] = useState<{ startDate: string; endDate: string } | null>(null)
+  const runRangedMovementExport = useCallback(async (range: { startDate: string; endDate: string }) => {
+    const sameRange = (range.startDate || '') === (movementStartDate || '') && (range.endDate || '') === (movementEndDate || '')
+    if (sameRange) {
+      await exportMovementGroups(visibleMovementGroups, 'inventory-movements')
+      return
+    }
+    const result = await withLoaderTimeout(
+      () => getInventoryApi().getInventoryMovements({
+        ...(branchFilter !== 'all' ? { branchId: parseInt(branchFilter, 10) } : {}),
+        search: deferredSearch || undefined,
+        searchMode,
+        startDate: range.startDate || undefined,
+        endDate: range.endDate || undefined,
+        page: 1,
+        pageSize: 20000,
+      }),
+      'Inventory movements export',
+      INVENTORY_MOVEMENTS_TIMEOUT_MS,
+    ) as { items?: InventoryMovement[]; total?: number } | InventoryMovement[]
+    const items = Array.isArray(result) ? result : (Array.isArray(result?.items) ? result.items : [])
+    const total = Array.isArray(result) ? items.length : Number(result?.total || items.length)
+    if (total > items.length) {
+      // No silent caps -- say exactly how much of the range made it out.
+      notify(tr('export_truncated', `Export capped at ${items.length} of ${total} records — narrow the range for the rest.`), 'warning')
+    }
+    const filtered = items.filter((m) => matchesMulti(movFilter, m.movement_type) && matchesMulti(movementUserFilter, m.user_id))
+    await exportMovementGroups(buildMovementGroups(filtered), 'inventory-movements-range')
+  }, [branchFilter, deferredSearch, exportMovementGroups, movFilter, movementEndDate, movementStartDate, movementUserFilter, notify, searchMode, tr, visibleMovementGroups])
 
-  const exportInventoryStats = useCallback(async (filePrefix = 'inventory-stats') => {
-    const exportModule = await loadInventoryExportModule()
-    setExportDialog({ rows: exportModule.collectInventoryStatsRows(buildInventoryExportScope()), baseName: filePrefix, rememberKey: 'inventory-stats' })
-  }, [buildInventoryExportScope])
-
-  const exportInventoryPackage = useCallback(async (mode = tab) => {
-    const exportModule = await loadInventoryExportModule()
-    await exportModule.exportInventoryPackage(buildInventoryExportScope(), mode)
-  }, [buildInventoryExportScope, tab])
+  // Ranged stats export for the Stats & Branches section (user, Aug 31:
+  // "make sure the branch section has the export for these as well and can
+  // range the date start and end date to choose as well"): a compact CSV of
+  // the section's own numbers, fetched fresh for the chosen range (kernel +
+  // returns reports -- the same reads the strip itself uses). The shelf
+  // figures (products / stock value / low / out) come from the live
+  // stockStats and are labelled as current-state, not range-scoped.
+  const [statsExportRange, setStatsExportRange] = useState<{ startDate: string; endDate: string } | null>(null)
+  const runRangedStatsExport = useCallback(async (range: { startDate: string; endDate: string }) => {
+    const startDate = range.startDate || stripRange.startDate || ''
+    const endDate = range.endDate || stripRange.endDate || ''
+    const dates = { startDate, endDate }
+    const [kernel, customer, supplier] = await Promise.all([
+      getSalesStatsStrip(dates).catch(() => null),
+      getReturnsReport({ ...dates, scope: 'customer' }).catch(() => null),
+      getReturnsReport({ ...dates, scope: 'supplier' }).catch(() => null),
+    ]) as Array<Record<string, any> | null>
+    const totals = (kernel?.totals || {}) as Record<string, number>
+    const cust = (customer?.totals || {}) as Record<string, number>
+    const supp = (supplier?.totals || {}) as Record<string, number>
+    const { downloadCSV } = await import('../../utils/csv.ts')
+    downloadCSV(`inventory-stats-${startDate || 'all'}-${endDate || 'all'}.csv`, [
+      { metric: 'range_start', value: startDate || 'all' },
+      { metric: 'range_end', value: endDate || 'all' },
+      { metric: 'products_current', value: totalProducts },
+      { metric: 'in_stock_current', value: inStockCount },
+      { metric: 'low_stock_current', value: lowStockCount },
+      { metric: 'out_of_stock_current', value: outStockCount },
+      { metric: 'stock_value_usd_current', value: totalValue },
+      { metric: 'revenue_usd', value: Number(totals.revenue_usd) || 0 },
+      { metric: 'cogs_usd', value: Number(totals.cost_usd) || 0 },
+      { metric: 'profit_usd', value: Number(totals.profit_usd) || 0 },
+      { metric: 'gross_sales_usd', value: Number(totals.gross_sales_usd) || 0 },
+      { metric: 'store_discount_usd', value: Number(totals.store_discount_usd) || 0 },
+      { metric: 'membership_discount_usd', value: Number(totals.membership_discount_usd) || 0 },
+      { metric: 'tax_usd', value: Number(totals.tax_usd) || 0 },
+      { metric: 'delivery_usd', value: Number(totals.delivery_usd) || 0 },
+      { metric: 'delivery_sale_count', value: Number(totals.delivery_sale_count) || 0 },
+      { metric: 'customer_returns', value: Number(cust.count) || 0 },
+      { metric: 'customer_refund_usd', value: Number(cust.refund_usd) || 0 },
+      { metric: 'supplier_returns', value: Number(supp.count) || 0 },
+      { metric: 'supplier_loss_usd', value: Number(supp.loss_usd) || 0 },
+    ])
+  }, [inStockCount, lowStockCount, outStockCount, stripRange.endDate, stripRange.startDate, totalProducts, totalValue])
 
   const inventoryExportItems = useMemo<any[]>(() => {
-    if (tab === 'movements') {
-      return [
-        { label: tr('export_full_inventory_package', 'Export full inventory package'), onClick: () => exportInventoryPackage('movements'), color: 'green' },
-        { label: tr('export_inventory_stats', 'Export inventory stats and calculations'), onClick: () => exportInventoryStats('inventory-stats') },
-        'divider',
-        { label: tr('export_visible_movement_groups', `Export visible ${t('movements') || 'movements'}`), onClick: () => exportMovementGroups(visibleMovementGroups) },
-        selectedMovementGroups.length ? { label: tr('export_selected_movement_groups', 'Export selected movement groups'), onClick: () => exportMovementGroups(selectedMovementGroups, 'inventory-movements-selected'), color: 'blue' } : null,
-        movementStartDate || movementEndDate
-          ? { label: tr('export_filtered_time_range', 'Export filtered time range'), onClick: () => exportMovementGroups(visibleMovementGroups, 'inventory-movements-filtered') }
-          : null,
-        branchFilter !== 'all'
-          ? { label: tr('export_filtered_branch_movements', 'Export filtered branch movements'), onClick: () => exportMovementGroups(visibleMovementGroups, 'inventory-movements-branch') }
-          : null,
-        movFilter !== 'all'
-          ? { label: tr('export_filtered_activity_type', 'Export filtered activity type'), onClick: () => exportMovementGroups(visibleMovementGroups, `inventory-movements-${movFilter}`) }
-          : null,
-        'divider',
-        { label: tr('export_inventory_summary', 'Export inventory summary'), onClick: () => exportInventorySummary(summary, 'inventory-summary') },
-        { label: tr('export_low_stock_summary', 'Export low-stock summary'), onClick: () => exportInventorySummary(summary.filter((product) => {
-          const qty = getStockQty(product)
-          return qty > (product.out_of_stock_threshold || 0) && qty <= (product.low_stock_threshold || 10)
-        }), 'inventory-low-stock') },
-        { label: tr('export_out_of_stock_summary', 'Export out-of-stock summary'), onClick: () => exportInventorySummary(summary.filter((product) => getStockQty(product) <= (product.out_of_stock_threshold || 0)), 'inventory-out-of-stock') },
-      ].filter(Boolean)
-    }
-
+    if (tab !== 'movements') return []
     return [
-      { label: tr('export_full_inventory_package', 'Export full inventory package'), onClick: () => exportInventoryPackage('products'), color: 'green' },
-      { label: tr('export_inventory_stats', 'Export inventory stats and calculations'), onClick: () => exportInventoryStats('inventory-stats') },
-      'divider',
-      { label: tr('export_visible_products', 'Export visible products'), onClick: () => exportInventorySummary(filteredSummary, 'inventory-products-visible') },
-      branchFilter !== 'all'
-        ? { label: tr('export_filtered_branch_products', 'Export filtered branch products'), onClick: () => exportInventorySummary(filteredSummary, 'inventory-products-branch') }
+      {
+        label: tr('export_movements_range', `Export ${t('movements') || 'movements'}…`),
+        onClick: () => setMovementExportRange({ startDate: movementStartDate, endDate: movementEndDate }),
+        color: 'green',
+      },
+      selectedMovementGroups.length
+        ? { label: tr('export_selected_movement_groups', 'Export selected movement groups'), onClick: () => exportMovementGroups(selectedMovementGroups, 'inventory-movements-selected'), color: 'blue' }
         : null,
-      stockFilter !== 'all'
-        ? { label: tr('export_filtered_stock_state', 'Export filtered stock state'), onClick: () => exportInventorySummary(filteredSummary, `inventory-products-${stockFilter}`) }
-        : null,
-      brandFilter !== 'all'
-        ? { label: tr('export_filtered_brand', 'Export filtered brand'), onClick: () => exportInventorySummary(filteredSummary, `inventory-products-brand`) }
-        : null,
-      { label: tr('export_full_inventory_summary', 'Export full inventory summary'), onClick: () => exportInventorySummary(summary, 'inventory-summary') },
-      { label: tr('export_low_stock_summary', 'Export low-stock summary'), onClick: () => exportInventorySummary(summary.filter((product) => {
-        const qty = getStockQty(product)
-        return qty > (product.out_of_stock_threshold || 0) && qty <= (product.low_stock_threshold || 10)
-      }), 'inventory-low-stock') },
-      { label: tr('export_out_of_stock_summary', 'Export out-of-stock summary'), onClick: () => exportInventorySummary(summary.filter((product) => getStockQty(product) <= (product.out_of_stock_threshold || 0)), 'inventory-out-of-stock') },
     ].filter(Boolean)
-  }, [
-    branchFilter,
-    brandFilter,
-    exportInventoryPackage,
-    exportInventoryStats,
-    exportInventorySummary,
-    exportMovementGroups,
-    filteredSummary,
-    movFilter,
-    movementEndDate,
-    movementStartDate,
-    selectedMovementGroups,
-    summary,
-    tab,
-    t,
-    visibleMovementGroups,
-  ])
+  }, [exportMovementGroups, movementEndDate, movementStartDate, selectedMovementGroups, tab, t, tr])
 
   const inventoryFilterSections = useMemo(() => {
     if (tab === 'rfid') {
@@ -3245,85 +1964,19 @@ ${inventoryFeesFormulaText}`,
       ].filter(Boolean)
     }
 
-    return [
-      // Matches the Products menu principle (G1b, pinned in
-      // productMenuHelpers.test.ts): everyday facets first — availability,
-      // then category, then brand — with the diagnostic/mode controls
-      // (Issues, AND/OR search mode) at the end.
-      buildAvailabilityFilterSection({
-        t,
-        branches,
-        stockFilter,
-        setStockFilter,
-        groupFilter,
-        setGroupFilter,
-        branchFilter,
-        setBranchFilter,
-      }),
-      // Inventory previously had no Category filter section at all
-      // (Products/POS both do), even though the underlying data always
-      // had a category column. Multi-select + hierarchical "Main - Sub"
-      // grouping, same shape/behavior as Products and POS -- see
-      // components/shared/CategoryFilterOptions.tsx.
-      inventoryCategories.length ? {
-        id: 'category',
-        label: filterLabel('category', 'Category'),
-        searchable: true,
-        options: [
-          { id: 'category-all', label: filterLabel('all_categories', 'All categories'), active: catFilter === 'all', onClick: () => setCatFilter('all') },
-          ...buildHierarchicalCategoryFilterOptions({
-            categoryNames: inventoryCategories,
-            isSelected: (value) => isMultiActive(catFilter, value, true),
-            onToggle: (values, checked) => setCatFilter(toggleMultiValues(catFilter, values, checked)),
-          }),
-        ],
-      } : null,
-      inventoryBrands.length ? {
-        id: 'brand',
-        label: filterLabel('brand', 'Brand'),
-        searchable: true,
-        options: [
-          { id: 'brand-all', label: filterLabel('all_brands', 'All brands'), active: brandFilter === 'all', onClick: () => setBrandFilter('all') },
-          ...inventoryBrands.map((brand) => ({
-            id: `brand-${brand}`,
-            label: brand,
-            active: brandFilter === brand,
-            onClick: () => setBrandFilter(brandFilter === brand ? 'all' : brand),
-          })),
-        ],
-      } : null,
-      buildIssuesFilterSection({
-        t,
-        issueFilter,
-        setIssueFilter,
-      }),
-      buildSearchModeFilterSection({
-        t,
-        searchMode,
-        setSearchMode,
-      }),
-    ].filter(Boolean)
+    // The products tab is gone (the Products PAGE owns the catalog) --
+    // there is no default facet set left.
+    return []
   }, [
     branchFilter,
     branches,
-    brandFilter,
-    catFilter,
-    groupFilter,
-    inventoryBrands,
-    inventoryCategories,
-    issueFilter,
     movFilter,
     movementGroupMode,
     movementSortDirection,
     movementUserFilter,
-    searchMode,
-    setSearchMode,
     isAdmin,
-    filterLabel,
-    stockFilter,
     t,
     tab,
-    tr,
     userOptions,
   ])
 
@@ -3344,26 +1997,11 @@ ${inventoryFeesFormulaText}`,
       ])
     }
 
-    return countActiveFlags([
-      branchFilter !== 'all',
-      brandFilter !== 'all',
-      catFilter !== 'all',
-      groupFilter !== 'all',
-      stockFilter !== 'all',
-      issueFilter !== 'all',
-      inventoryInitialFilter !== 'all',
-      searchMode === 'OR',
-    ])
-  }, [branchFilter, brandFilter, catFilter, groupFilter, inventoryInitialFilter, issueFilter, movFilter, movementGroupMode, movementSortDirection, movementUserFilter, searchMode, stockFilter, tab])
+    return 0
+  }, [branchFilter, movFilter, movementGroupMode, movementSortDirection, movementUserFilter, tab])
 
   const clearInventoryFilters = useCallback(() => {
     setBranchFilter('all')
-    setBrandFilter('all')
-    setCatFilter('all')
-    setGroupFilter('all')
-    setStockFilter('all')
-    setIssueFilter('all')
-    setInventoryInitialFilter('all')
     setMovFilter('all')
     setMovementUserFilter('all')
     setMovementGroupMode('time')
@@ -3393,25 +2031,15 @@ ${inventoryFeesFormulaText}`,
   const showInventoryStats = inventorySection === 'all' || inventorySection === 'stats'
   const showInventorySections = inventorySection === 'all' || ['products', 'movements', 'rfid'].includes(inventorySection)
   const showInventoryTabs = inventorySection === 'all'
-  const showProductsSection = showInventorySections && tab === 'products'
   const showMovementsSection = showInventorySections && tab === 'movements'
   const showRfidSection = showInventorySections && tab === 'rfid'
-  const inventoryProductControlsRevealReady = isInventoryMobileViewport
-    ? initialInventoryMobileRevealReady
-    : initialInventoryDesktopRevealReady
-  const shouldReserveInventoryInitialBar = showProductsSection && (
-    !inventoryProductsLoaded
-    || inventoryInitialOptions.length > 0
-    || cachedInventoryInitialOptions.length > 0
-  )
   const isMovementsFirstLoad = showMovementsSection && needsMovementData && !movementsLoaded
-  const isProductsFirstLoad = showProductsSection && needsProductSummary && !inventoryProductsLoaded
   const selectInventorySection = (nextSection: string) => {
     setInventorySection(nextSection)
     if (['products', 'movements', 'rfid'].includes(nextSection)) setTab(nextSection)
   }
 
-  if (loadError && !loading && !summary.length && !movements.length) {
+  if (loadError && !loading && !movements.length) {
     return (
       <div className="flex-1 flex flex-col items-center justify-center gap-4 p-8">
         <div className="text-4xl">!</div>
@@ -3442,10 +2070,10 @@ ${inventoryFeesFormulaText}`,
       )}
 
       <LoadingWatchdog
-        loading={loading && !isProductsFirstLoad && !isMovementsFirstLoad}
+        loading={loading && !isMovementsFirstLoad}
         timeoutMs={8000}
         label={t('loading') || 'Loading...'}
-        details={tab === 'rfid' ? 'Checking RFID status, tag mappings, and inventory data.' : 'Loading products, stock, and movement summaries.'}
+        details={tab === 'rfid' ? 'Checking RFID status, tag mappings, and inventory data.' : 'Loading stock stats and movement summaries.'}
         onRetry={() => load(false)}
         className="mb-3"
       />
@@ -3471,7 +2099,24 @@ ${inventoryFeesFormulaText}`,
         // section chip, so there's no search bar here for the date row to sit
         // above — it leads the section instead, driving the same stripRange.
         <div className="mb-2 space-y-1.5">
-          <StatsRangeRow range={stripRange} onRangeChange={setStripRange} t={t} />
+          <StatsRangeRow
+            range={stripRange}
+            onRangeChange={setStripRange}
+            t={t}
+            actions={(
+              // Ranged stats export -- the dialog opens seeded with the
+              // section's own Start → End range (user, Aug 31).
+              <button
+                type="button"
+                className="inline-flex h-7 items-center gap-1 rounded-lg border border-slate-200 bg-white px-2 text-[11px] font-medium text-slate-600 transition hover:border-slate-300 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800"
+                onClick={() => setStatsExportRange({ startDate: stripRange.startDate || '', endDate: stripRange.endDate || '' })}
+                title={tr('export', 'Export')}
+              >
+                <Download className="h-3.5 w-3.5 shrink-0" />
+                {tr('export', 'Export')}
+              </button>
+            )}
+          />
           <StatsStrip
             cards={stripCards}
             t={t}
@@ -3480,7 +2125,7 @@ ${inventoryFeesFormulaText}`,
       ) : null}
       {showInventoryTabs ? (
       <div className="mb-4 flex gap-2 overflow-x-auto border-b border-gray-200 dark:border-gray-700">
-        {([['products', t('products') || 'Products'], ['movements', t('movements') || 'Movements'], ['rfid', 'RFID']] as [string, string][]).map(([id,label]) => (
+        {([['movements', t('movements') || 'Movements'], ['rfid', 'RFID']] as [string, string][]).map(([id,label]) => (
           <button key={id} onClick={() => setTab(id)}
             className={`px-3 py-2 text-sm font-medium border-b-2 transition-colors -mb-px ${tab===id ? 'border-blue-600 text-blue-600 dark:text-blue-400' : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700'}`}>
             {label}
@@ -3537,109 +2182,11 @@ ${inventoryFeesFormulaText}`,
             // icon convention as HeaderActions; these two were swapped.
             { label: tr('import', 'Import'), onClick: () => setShowImport(true), color: 'blue', icon: <Upload className="h-4 w-4 shrink-0" /> },
             { label: tr('fast_stockin_title', 'Fast stock-in'), onClick: () => setShowFastStockIn(true), color: 'green', icon: <Zap className="h-4 w-4 shrink-0" /> },
-            ...(showProductsSection
-              ? [
-                'divider' as const,
-                ...(inventoryExportItems || [])
-                  .filter((item): item is PortalMenuItem => Boolean(item))
-                  .map((item) => (item === 'divider' ? item : { ...item, icon: item.icon ?? <Download className="h-4 w-4 shrink-0" /> })),
-              ]
-              : []),
           ] as PortalMenuItem[])}
         />
       </div>
       ) : null}
 
-      {/* Items-per-page / page-number bar for the Products tab -- deliberately
-          NOT part of the sticky group below (Aug 11 2026 UI-polish request:
-          pin search / select-all / bulk-action bar on scroll, but leave
-          pagination out of it so it scrolls away normally). Used to be
-          bundled into the same sticky card as select-all below it; split
-          out so toggling page size or jumping pages doesn't require a
-          control that's permanently glued to the top of the screen -- same
-          split Products.tsx uses, kept in sync here for parity. */}
-      {showProductsSection ? (
-        <div className="relative mb-2 -mx-1 overflow-hidden rounded-2xl border border-slate-200 bg-white/95 px-2 py-1.5 shadow-sm dark:border-slate-700 dark:bg-slate-900/85 sm:mx-0">
-          <div className={inventoryProductControlsRevealReady ? '' : 'invisible'}>
-            <div className="grid min-w-0 grid-cols-[minmax(5.2rem,1fr)_minmax(6.4rem,7.6rem)_minmax(6.9rem,9.4rem)] items-center gap-1.5">
-              <span className="inline-flex min-w-0 items-center justify-center overflow-hidden text-ellipsis whitespace-nowrap rounded-full bg-slate-50 px-2 py-1 text-[10px] font-medium text-slate-700 dark:bg-slate-800 dark:text-slate-100">
-                {inventoryProductSummaryLabel}
-              </span>
-              <div className="flex min-w-0 items-center gap-1">
-              <PageSizeSelect
-                value={inventoryProductSafePageSize}
-                options={PAGE_SIZE_OPTIONS}
-                onChange={(nextValue) => {
-                  setInventoryProductPageSize(nextValue)
-                  setInventoryProductPage(1)
-                }}
-                // Matches routes/inventory.ts's clampInt(query.pageSize,
-                // 20, 1, 100) for the product-search endpoint this
-                // control drives -- see the matching note on
-                // Products.tsx's PageSizeSelect.
-                maxValue={100}
-                ariaLabel={`${t('per_page') || 'per page'} ${inventoryProductSafePageSize}`}
-                className="h-7 w-full min-w-0"
-                buttonClassName="h-7 w-full rounded-full px-2 py-0 pl-2 pr-1.5 text-[10px] font-semibold shadow-none"
-                menuClassName="min-w-[9rem]"
-                optionClassName="text-xs"
-              />
-              </div>
-              <div className="inline-flex h-7 min-w-0 items-center overflow-hidden rounded-full border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-950">
-                <button
-                  type="button"
-                  className="inline-flex h-7 w-6 shrink-0 items-center justify-center text-slate-500 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40 dark:text-slate-300 dark:hover:bg-slate-800"
-                  disabled={inventoryProductSafePage <= 1}
-                  onClick={() => setInventoryProductPage(inventoryProductSafePage - 1)}
-                  aria-label="Previous page"
-                >
-                  <ChevronLeft className="h-3.5 w-3.5" />
-                </button>
-                <input
-                  type="text"
-                  inputMode="numeric"
-                  aria-label={t('page') || 'Page'}
-                  className="h-7 min-w-0 flex-1 border-0 bg-transparent px-0 text-center text-[10px] font-semibold text-slate-700 outline-none dark:text-slate-100"
-                  value={inventoryProductPageDraft}
-                  onChange={(event) => setInventoryProductPageDraft(event.target.value.replace(/[^\d]/g, '') || '')}
-                  onBlur={commitInventoryProductPageDraft}
-                  onKeyDown={(event) => {
-                    if (event.key === 'Enter') {
-                      event.preventDefault()
-                      commitInventoryProductPageDraft()
-                      event.currentTarget.blur()
-                    } else if (event.key === 'Escape') {
-                      setInventoryProductPageDraft(String(inventoryProductSafePage))
-                      event.currentTarget.blur()
-                    }
-                  }}
-                />
-                <span className="pr-1.5 text-[10px] font-semibold text-slate-500 dark:text-slate-300">
-                  / {inventoryProductTotalPages}
-                </span>
-                <button
-                  type="button"
-                  className="inline-flex h-7 w-6 shrink-0 items-center justify-center text-slate-500 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40 dark:text-slate-300 dark:hover:bg-slate-800"
-                  disabled={inventoryProductSafePage >= inventoryProductTotalPages}
-                  onClick={() => setInventoryProductPage(inventoryProductSafePage + 1)}
-                  aria-label="Next page"
-                >
-                  <ChevronRight className="h-3.5 w-3.5" />
-                </button>
-              </div>
-            </div>
-          </div>
-          {!inventoryProductControlsRevealReady ? (
-            <div className="pointer-events-none absolute inset-0 flex items-center px-2 py-1.5">
-              <div className="grid w-full min-w-0 grid-cols-[minmax(5.7rem,1fr)_3.35rem_minmax(6.9rem,9.4rem)] items-center gap-1.5">
-                <div className="h-5 rounded-full bg-slate-100 dark:bg-slate-800" />
-                <div className="h-7 rounded-full bg-slate-100 dark:bg-slate-800" />
-                <div className="h-7 rounded-full bg-slate-100 dark:bg-slate-800" />
-              </div>
-            </div>
-          ) : null}
-        </div>
-      ) : null}
 
       {/* Search bar, select-all, and bulk-action bar all pin to the top of
           the page's scroll container while scrolling (same Aug 11 2026
@@ -3669,17 +2216,12 @@ ${inventoryFeesFormulaText}`,
               ariaLabel="Inventory search"
               value={search}
               onChange={handleSearchChange}
-              placeholder={tab === 'products'
-                ? tr('search_terms_placeholder', 'Search divide by comma, any order: name, barcode, SKU')
-                : tab === 'rfid'
-                  ? tr('search_rfid_placeholder', 'Search RFID sessions, EPC / TID, reader, or product mapping')
-                  : `${t('search') || 'Search'} ${t('movements') || 'Movements'}`}
+              placeholder={tab === 'rfid'
+                ? tr('search_rfid_placeholder', 'Search RFID sessions, EPC / TID, reader, or product mapping')
+                : `${t('search') || 'Search'} ${t('movements') || 'Movements'}`}
               className="min-w-[3.5rem] flex-1"
               inputClassName="text-sm"
             />
-            {tab === 'products' && (
-              <ScanSearchButton onDetected={setSearch} t={(key: string) => t(key) || key} />
-            )}
             {/* AND/OR toggle removed (Aug 19 2026 UI request) -- search is
                 always 'AND' now, same change as Products.tsx/POS.tsx. */}
             <FilterMenu
@@ -3692,56 +2234,10 @@ ${inventoryFeesFormulaText}`,
           </div>
         </div>
 
-        {/* 11.2 (B6): the standing "Select all (N)" toolbar control is gone.
-            The bulk toolbar only exists while something IS selected (enter
-            select mode by long-pressing a row); select-all lives on the
-            desktop table's column-header checkbox, and mobile keeps its
-            per-section checkboxes. */}
-        {showProductsSection && hasSelectedProducts ? (
-          <div className="bulk-toolbar relative overflow-hidden rounded-2xl border shadow-sm sm:rounded-xl">
-            <div>
-              <div className="px-2 py-2">
-                <div className="grid items-center gap-1.5 grid-cols-[minmax(0,1fr)_4.25rem_4.6rem]">
-                  <span className="inline-flex min-w-0 flex-1 items-center gap-2 overflow-hidden rounded-2xl border border-slate-200 bg-white/95 px-2.5 py-1.5 text-[11px] font-medium text-slate-700 shadow-sm dark:border-slate-700 dark:bg-slate-900/85 dark:text-slate-100">
-                    <span className="overflow-hidden text-ellipsis whitespace-nowrap">
-                      {inventoryControlLabels.selected}
-                    </span>
-                  </span>
-                  {hasSelectedProducts ? (
-                    <>
-                      <button
-                        type="button"
-                        className="inline-flex h-7 min-w-[4.25rem] shrink-0 items-center justify-center rounded-xl border border-slate-300 bg-white px-2 text-[10px] font-semibold text-slate-900 transition hover:border-slate-400 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40 dark:border-slate-600 dark:bg-slate-950 dark:text-white dark:hover:border-slate-500 dark:hover:bg-slate-900"
-                        disabled={!hasSelectedProducts}
-                        onClick={openInventoryBatchSession}
-                        title={tr(
-                          'inventory_batch_hint',
-                          'Select products, review each line in one session, then apply all stock changes together.',
-                        )}
-                        aria-label={inventoryControlLabels.batch}
-                      >
-                        {inventoryControlLabels.batch}
-                      </button>
-                      <button
-                        type="button"
-                        className="inline-flex h-7 min-w-[4.6rem] shrink-0 items-center justify-center rounded-xl border border-slate-300 bg-white px-2 text-[10px] font-semibold text-slate-900 transition hover:border-slate-400 hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-950 dark:text-white dark:hover:border-slate-500 dark:hover:bg-slate-900"
-                        onClick={() => setReasonManager({ open: true, type: 'adjust' })}
-                        title={inventoryControlLabels.reasons}
-                        aria-label={inventoryControlLabels.reasons}
-                      >
-                        {inventoryControlLabels.reasons}
-                      </button>
-                    </>
-                  ) : null}
-                </div>
-              </div>
-            </div>
-          </div>
-        ) : null}
       </div>
       ) : null}
 
-      {showInventorySections && !showProductsSection && (tab === 'rfid' || isMovementsFirstLoad) ? (
+      {showInventorySections && (tab === 'rfid' || isMovementsFirstLoad) ? (
       <p className="text-xs text-gray-400 mb-2">
         {tab === 'rfid'
           ? `RFID inventory for ${rfidGatewayStatus.branchName} - reader gateway, tag mapping, sessions, and barcode fallback`
@@ -3749,57 +2245,12 @@ ${inventoryFeesFormulaText}`,
       </p>
       ) : null}
 
-      {/* Products */}
-      {showProductsSection && (
-        <>
-          {/* Horizontal A-Z filter bar removed (Aug 19 2026 UI request) --
-              same change as Products.tsx: replaced with the vertical
-              AlphaIndexRail rendered further down, which jumps to a
-              section instead of narrowing the list to one letter.
-              shouldReserveInventoryInitialBar / inventoryInitialOptions /
-              cachedInventoryInitialOptions and their loading-skeleton
-              reservation removed with it -- nothing else in this file
-              referenced them. */}
-          <InventoryProductsSurfaceView
-            InventoryBatchPreview={InventoryBatchPreview}
-            InventoryDiscountBadge={InventoryDiscountBadge}
-            branchFilter={branchFilter}
-            branches={branches}
-            collapsedInventoryGroups={collapsedInventoryGroups}
-            collapsedInventorySections={collapsedInventorySections}
-            fmtKHR={fmtKHR}
-            fmtUSD={fmtUSD}
-            focusProductId={focusProductId}
-            onFocusHandled={() => setFocusProductId(null)}
-            getInventoryGroupSummaryParts={getInventoryGroupSummaryParts}
-            getStockQty={getStockQty}
-            initialDesktopRevealReady={initialInventoryDesktopRevealReady}
-            initialMobileFullListReady={initialInventoryMobileFullListReady}
-            initialMobileRevealReady={initialInventoryMobileRevealReady}
-            initialMobileInventorySections={initialMobileInventorySections}
-            inventoryProductSections={inventoryProductSections}
-            isInventorySelectionScopeFullySelected={isInventorySelectionScopeFullySelected}
-            isInventorySelectionScopePartiallySelected={isInventorySelectionScopePartiallySelected}
-            loading={loading && isProductsFirstLoad}
-            openAdjust={canAdjustStock ? openAdjust : undefined}
-            selectedProductIds={selectedProductIds}
-            selectionModeActive={selectionModeActive}
-            selectAllChecked={visibleInventoryProducts.length > 0 && selectedProductIds.size === visibleInventoryProducts.length}
-            selectAllIndeterminate={selectedProductIds.size > 0 && selectedProductIds.size < visibleInventoryProducts.length}
-            onToggleSelectAll={toggleSelectAllProducts}
-            getInventoryLongPressState={getInventoryLongPressState}
-            setDetailProduct={setDetailProduct}
-            showProductsSection={showProductsSection}
-            t={t}
-            toggleInventoryGroup={toggleInventoryGroup}
-            toggleInventorySection={toggleInventorySection}
-            toggleInventorySelectionScope={toggleInventorySelectionScope}
-            toggleSelectedProduct={toggleSelectedProduct}
-            visibleInventoryProducts={visibleInventoryProducts}
-          />
-          <AlphaIndexRail letters={inventoryVisibleLetters} onJump={jumpToInventoryLetter} label={t('jump_to_letter') || 'Jump to letter'} />
-        </>
-      )}
+      {/* The products LIST section is gone (user, Aug 31: "the products
+          section of inventory page can then be removed") -- the Products
+          PAGE carries the catalog now. What stays here is everything the
+          Movements section still needs: the per-product detail modal (with
+          its stock-history preview), the complete adjust/transfer/batches
+          modals it opens, and the movement exports. */}
       {/* Movements */}
       {showMovementsSection ? (
         <Suspense fallback={<div className="rounded-2xl border border-slate-200 bg-white/90 px-4 py-8 text-center text-sm text-slate-500 shadow-sm dark:border-slate-700 dark:bg-slate-900/80 dark:text-slate-300">{tr('loading_inventory_movements', 'Loading inventory movements...', 'Loading inventory movements...')}</div>}>
@@ -3937,27 +2388,6 @@ ${inventoryFeesFormulaText}`,
         </Suspense>
       ) : null}
 
-      {inventoryBatch?.items?.length ? (
-        <Suspense fallback={null}>
-          <InventoryBatchModal
-            batchApplying={batchApplying}
-            branchSelectOptions={branchSelectOptions}
-            branchWithPlaceholderOptions={branchWithPlaceholderOptions}
-            inventoryBatch={inventoryBatch}
-            moveReasonOptions={moveReasonOptions}
-            onApply={applyInventoryBatchSession}
-            onClose={() => setInventoryBatch(null)}
-            onRemoveLine={removeInventoryBatchLine}
-            onUpdateLine={updateInventoryBatchLine}
-            reasonsByType={reasonsByType}
-            setReasonManager={setReasonManager}
-            summary={summary}
-            t={t}
-            tr={tr}
-          />
-        </Suspense>
-      ) : null}
-
       {manageBatchesModal ? (
         <Suspense fallback={null}>
           <ManageBatchesModal
@@ -4028,6 +2458,32 @@ ${inventoryFeesFormulaText}`,
           />
         </Suspense>
       )}
+
+      {/* Ranged export prompts -- each opens seeded with its surface's own
+          Start → End range (user, Aug 31: "do the date range for all the
+          exports"). */}
+      {movementExportRange ? (
+        <Suspense fallback={null}>
+          <ExportRangeDialog
+            initial={movementExportRange}
+            title={`${tr('export', 'Export')} — ${t('movements') || 'Movements'}`}
+            t={t}
+            onClose={() => setMovementExportRange(null)}
+            onExport={runRangedMovementExport}
+          />
+        </Suspense>
+      ) : null}
+      {statsExportRange ? (
+        <Suspense fallback={null}>
+          <ExportRangeDialog
+            initial={statsExportRange}
+            title={`${tr('export', 'Export')} — ${tr('stats', 'Stats')}`}
+            t={t}
+            onClose={() => setStatsExportRange(null)}
+            onExport={runRangedStatsExport}
+          />
+        </Suspense>
+      ) : null}
     </div>
   )
 }
