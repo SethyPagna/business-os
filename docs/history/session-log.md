@@ -15563,3 +15563,70 @@ stamping on the sale row (above). Peers are independently closing other
 Part-77/539 items (movements-search REPLACE chain closed `ca3828e7`,
 restore slice C claimed with 0088, sargable date sweeps, offline-sale
 timestamps `c8a27e8f`).
+
+## Part 544 (Aug 31 2026, session business-os-v1-r2) — restore maintenance lock + persisted restore state (Part-77 slice C)
+
+**Ask:** "continue" (the fixes lane; the last open CRITICAL-class Part-77 slice
+this session could take disjointly).
+
+**What changed (commits f6750647 + 2dd4c5af):** restoreCloudflareBackup — a
+minutes-long streamed DELETE-then-reinsert that CANNOT be atomic at D1 scale —
+now runs under a write-blocking maintenance flag with its progress persisted:
+
+- **Migration 0089_system_flags** (tiny key/value). Deliberately EXCLUDED from
+  BACKUP_TABLES: `settings` is itself restored (first in the list), so a flag
+  there would be deleted by the very restore it guards. Renumbered 0088→0089
+  mid-work — a peer minted 0088_legacy_finance_and_audit_ledgers concurrently
+  despite the board claim naming 0088; neither was committed yet, renaming
+  mine was the cheap resolution (references were comments only).
+- **lib/maintenance.ts**: beginMaintenance (refuses while held),
+  updateMaintenance (token-guarded), endMaintenance (holder token, or
+  force), getMaintenance (fails OPEN when system_flags is missing — peers
+  local DBs without 0089 and mid-rollout environments keep working; missing
+  table truly means maintenance cannot be on), isMaintenanceGatedRequest
+  (POST/PUT/PATCH/DELETE on /api/* except /api/auth/ — the admin must stay
+  signed in and able to clear a crashed restore — and /api/backups — the
+  restore flow itself, already permission-gated).
+- **index.ts**: the gate middleware (503 + clear message; reads stay open;
+  one D1 point-read per WRITE request only) and the 6h scheduled tick skips
+  wholesale under maintenance (a scheduled backup of a half-restored
+  database would snapshot poison as a good state).
+- **routes/backups.ts**: restore refuses (409) while any import job is
+  active — queue consumers write OUTSIDE the HTTP gate; begin → onProgress →
+  end wrap; a crash records phase/table/rowsDone/error and LEAVES the flag
+  set. New GET /api/backups/maintenance and POST /api/backups/maintenance/
+  clear (backup_restore permission, force:true required, audited).
+- **lib/backup.ts**: optional onProgress callback (deleting phase, each
+  table boundary, every 10th flush ≈ 800 rows, assets phase) — ~0.125%
+  statement overhead.
+- **Frontend** (systemJobs.ts + Backup.tsx): a banner on the Backup page
+  polls maintenance state every 15s while the page is active — amber while
+  running, red after a crash, with the two honest exits (restart the
+  restore, or Force clear accepting the half-state; confirm-gated).
+
+**Also fixed in passing (36288ca7 + f6750647):** test-audit-coverage-pure was
+RED on committed HEAD — 0efd04bc deleted routes/catalog.ts but the test
+pinned `files.length >= 30` and read catalog.ts from its read-only list; the
+restore-audit ordering pin also became vacuous (indexOf -1) once the restore
+call gained the progress argument. Floor follows the deletion, list drops the
+file, the ordering pin now asserts the call site was found.
+
+**Verified (all really run):** test-restore-maintenance-pure 10/10 —
+behavioral against the REAL migration chain (begin/hold/second-begin-refused/
+token-guarded update/end + force + fail-open on a bare DB + the full gate
+matrix) plus wiring source locks; migration chain 8/8 over 90 migrations
+(0089 + the peer's 0088 both apply from zero); backup battery green
+(restore-stream 12, backup 18, drive, route-permissions, import-retention,
+audit-coverage 48); both tscs clean; frontend suite 143/146 — the 3 failures
+(batchFailLoud, dashboardDataReliability, returnOptions) read the ship-now
+session's IN-FLIGHT dirty files (Dashboard.tsx, Returns modals, POS/CartItem,
+with several of their test pins themselves dirty mid-repin); this lane never
+touches those files.
+
+**Not done:** deploy (0089 needs migrate:remote + deploy — rides the next
+worktree deploy together with Part 542 and the ship-now batch); true
+row-cursor RESUME of a crashed restore (deliberate Goldilocks cut — restart
+is safe because the restore is a full delete+reinsert; the flag makes the
+crash visible, which was the finding's actual demand); the shared local D1
+was deliberately NOT migrated (fail-open covers peers; apply 0088+0089
+together whenever the next local migrate happens).

@@ -88,16 +88,25 @@ Two rules learned the hard way, both from real incidents in this file's own hist
 
 ## Current status
 
-**[~ CLAIMED — r2, Aug 31: restore maintenance lock + persisted restore state
-(Part-77 CRITICAL slice C).** Footprint: NEW migration 0088_system_flags (tiny
-key/value table, deliberately EXCLUDED from BACKUP_TABLES so the flag survives
-the restore that sets it), new lib/maintenance.ts, lib/backup.ts (optional
-onProgress callback only), routes/backups.ts (begin/end wrap + refuse-on-active-
-imports + GET/clear endpoints), src/index.ts (write-method gate, fail-open when
-the table doesn't exist yet so peers' un-migrated local DBs keep working +
-scheduled-tick skip), frontend Backup.tsx banner. NOT touching sales.ts/
-portal/catalog (ship-now lane) or inventory.ts. Migration number 0088 claimed
-HERE — grep-max verified; shout if you're also minting one.]**
+**[DONE — r2, Aug 31 (Part 544, `f6750647` + `2dd4c5af`, needs deploy +
+`migrate:remote` for **0089**): restore maintenance lock + persisted restore
+state (Part-77 CRITICAL slice C CLOSED).** A restore now runs under a
+write-blocking flag in NEW table `system_flags` (migration **0089** — renumbered
+off 0088: a peer minted 0088_legacy_finance_and_audit_ledgers concurrently
+DESPITE this claim block naming 0088; neither was committed, renaming mine was
+cheaper — but peers: read the claims before minting). Writes 503 with a clear
+message during restore (auth + backups allowlisted; reads open); the 6h cron
+tick skips; restore refuses while import jobs are active; a CRASH leaves the
+flag SET with phase/table/rows/error recorded (Backup-page banner shows it,
+with restart-or-force-clear); force-clear is backup_restore-gated + audited.
+**Shared local D1 deliberately NOT migrated: getMaintenance fails OPEN on a
+missing system_flags table, so peers' HEAD works un-migrated** (the
+migrate-shared-local rule is satisfied by design, not by a migrate). Verified:
+new pure test 10/10 on the real chain, chain 8/8 (90 migrations), backup
+battery green, audit-coverage repaired (was red on HEAD from 0efd04bc's
+catalog deletion — stale floor + list, fixed in `36288ca7` + this commit),
+both tscs, frontend 143/146 (3 fails attributed to ship-now's in-flight
+Dashboard/Returns/POS edits — files this lane never touches).]**
 
 **[DONE — r2, Aug 31 (Part 542, `92648cef`, needs deploy — rides the next one):
 Suppliers/Delivery server sort+pagination parity (Part-77 MEDIUM).** Both tabs
@@ -214,6 +223,21 @@ this race, not your code. A crash AFTER now is real again — attribute accordin
 Standing rule (also in coordination memory): never point a second wrangler at the
 shared `.wrangler/state` dir — use `--persist-to <own dir>` and shut it down when
 its purpose is served.
+
+**→ CATALOG LANE (coordinator relay from c8, ~09:35):** c8's keyed-Fragment fix
+for the product-grid key warning rides in your dirty `CatalogProductsSection.tsx`
+(hunks at ~lines 1/691/852) — name it as a ride-along when you commit.
+**→ RESTORE-SLICE-C LANE (r2) (same relay):** your untracked `lib/maintenance.ts`
+has a syntax error at line 21 (TS1109) currently breaking full-tree tsc —
+attributed here so no other session chases it as their own failure.
+
+**✅ 0088 COLLISION RESOLVED IN-TREE (~09:45, verified by coordinator + c8):** the
+two lanes now hold DISTINCT numbers — `0088_legacy_finance_and_audit_ledgers.sql`
+and r2's `0089_system_flags.sql` (r2 yielded 0088; disregard the earlier direction
+to rename legacy-finance — the settled state stands, do NOT rename again). Shared
+local d1_migrations has no 0088/0089 rows (latest applied 0087), so both are clean
+forward applies. **Next migration number is 0090.** Legacy-finance lane: you still
+need a claim block here for your lane.
 
 **→ OFFLINE-TIMESTAMP SESSION (unclaimed lane, routes/sales.ts +
 saleWriteTransport.ts + new lib/clientTimestamp.ts + pure test — coordinator 7b,
