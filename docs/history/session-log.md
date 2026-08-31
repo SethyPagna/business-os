@@ -17190,3 +17190,36 @@ timezone UTC-vs-business-day convention. The 5 brittle line-ending-sensitive pur
 hardened (make source-lock regexes CRLF-agnostic) so worktree certification stops false-flagging —
 flagged, not fixed here. The 6 dirty frontend files (DateTimeRangePicker lane churn) remain another
 lane's uncommitted work.
+
+## Part 578 (Sep 1 2026, Claude→Codex recovery) — audited paused sessions, repaired broken committed HEAD, completed date/time + Expenses export lane
+
+**Ask** — inspect Claude's sessions and commits, continue its paused files, and follow the repository
+fleet-coordination skill. The user explicitly confirmed Claude had paused every file and authorized
+this session to take ownership of all of them.
+
+**Handoff audit** — fetched/pruned all remotes; no unmerged origin topic branch existed. `main` was
+33 commits ahead of `origin/main` at takeover. Claude's deploy worktree was stale at `607fd9d7` and
+was not used; another old Claude worktree/branch (`c1f3c3a3`, Part 412) remains unmerged and was not
+silently folded into current work. `progress.md` identified the seven dirty frontend files as the
+stalled DateTimeRangePicker lane plus small POS/history label work. No push or deployment was run.
+
+**Recovered atomic commits** —
+- `077127fd` restores frontend/backend product identity-rule parity missing from Part 578 item 5.
+- `cb456096` makes the committed-HEAD test harness stable in fresh CRLF worktrees (five source locks
+  plus the missing `users.username` fixture), resolving six false/fixture reds found only in isolation.
+- `5f1fbb7d` aligns POS fallback labels with the language packs.
+- `389d76e3` compacts Sales/Returns history controls and clarifies the add-return action.
+- `ee1483a2` adds Expenses CSV/Excel/PDF export for visible rows, all matching rows, or all expenses,
+  with complete paginated retrieval rather than the route-cache-limited first page.
+- `b23c2264` centralizes fixed-UTC+7 `HH:MM` SQL filtering and applies it to the Sales list, aggregate
+  header, stats strip, status mix, return breakdown, and analytics reports. It supports overnight
+  windows and compares minute buckets so `23:59` includes the final 59 seconds.
+- `65fcd70b` completes the frontend date/time lane: today defaults across every Start/End picker,
+  preset-chip removal (including Dashboard), explicit 24-hour fields, one date/time trigger icon,
+  and real Sales time transport. Date-only ledgers intentionally hide time controls.
+
+**Verification before this log commit** — cloudflare TypeScript green; frontend TypeScript green;
+UTC+7 date-window 26/26; Sales day-report kernel 26/26; frontend stats-strip source locks green;
+performance/loading source locks green; source syntax 434/434. The fleet skill's final gate is still
+the full verifier against the exact final committed HEAD in the isolated audit worktree; that is the
+next action. Stage 2 remains user-gated, so deploy/migrate/secrets remain untouched.

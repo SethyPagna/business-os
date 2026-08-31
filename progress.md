@@ -255,7 +255,7 @@ pilot (Abercrombie, ids 1-8) presented for user approval — no DB writes, Stage
 respected (no deploy). Supplier-blank on all 6104 is already owned by CATALOG-INTEGRITY
 lane 578 — not duplicated here.
 
-**→ DATE/TIME UX UNIFICATION LANE (Sep 1, this session — CLAIMED, in progress).**
+**→ DATE/TIME UX UNIFICATION LANE (Sep 1, Claude→Codex handoff — DONE in code; final Stage-1 certification next, no deploy).**
 User ask (verbatim intent): default the Start/End range to the PRESENT DAY on all
 pages (dashboard, products, sales, branch, …); REMOVE the preset chips; the Expenses
 (Fees) section is missing an Export button+functions — add it; the Sales report's
@@ -294,9 +294,16 @@ only; lang packs name their ride-alongs.
   `test-sales-day-report-pure` + the 4 `loadReal` harnesses fail (harnesses ONLY — product code compiles
   clean at `11ffeff1`). **Deploy driver (7b): advance deploy-wt from `11ffeff1` → `1c3fa481` before
   certifying/deploying**, else the isolate-compile suite false-alarms on the tz batch.
-- **NEXT — Slice 2 (frontend, NOT STARTED):** default-today on every Start/End picker; remove preset
-  chips (`StatsRangeRow` + Dashboard `RANGE_PRESETS`/StatsStrip); `showTime=true` everywhere in 24h with
-  one combined date+time icon; Fees/Expenses Export; coordinate `Dashboard.tsx` with session-59.
+- **✅ Slice 2 recovered and completed:** `ee1483a2` adds complete paginated Expenses export flows;
+  `b23c2264` gives the Sales list, header stats, stats strip, reports, status mix, and return breakdown
+  one shared fixed-UTC+7 `HH:MM` filter (ordinary + overnight ranges, with the full `23:59` minute
+  included); `65fcd70b` defaults every Start/End picker to today, removes StatsRangeRow/StatsStrip and
+  Dashboard preset chips, supplies explicit 24-hour fields with one combined date/time trigger icon,
+  and threads Sales times through transport. Time controls render only on real timestamp-backed
+  surfaces (Sales and the contact delivery/purchase reports); date-only ledgers remain date-only so
+  the UI never advertises a filter their APIs cannot honor. Targeted gates green: both TypeScript
+  projects, source syntax 434/434, stats-strip/performance source locks, UTC+7 date-window 26/26,
+  and Sales day-report kernel 26/26. Exact committed-HEAD full certification is the final Stage-1 gate.
 
 **✅ DEPLOYED & VERIFIED LIVE — security batch + branch-transfer C1 (Part 577, Aug 31 ~17:15 UTC).**
 Production = commit `d558dcfb`, Worker Version `30e8a9b3-ee79-4c57-b732-cd63c2dc2cd6`. Shipped the
@@ -501,6 +508,13 @@ Aug-31/AR migration remains PREPARED, NOT applied (user chose "do all", not "app
 User report: "D1 gets very high in size; R2 backups don't auto-delete on deploy, some are ongoing and can't delete; can we use multiple D1s to be smarter/faster?" Live diagnosis (prod D1 49795be9): DB = **661 MB**, of which **import_job_rows (244,716 rows / 246 MB) + import_job_source_rows (214,573 rows / 185 MB) ≈ 65%** is stale import STAGING that the 24h retention sweep should have pruned but never has. Root causes: (1) `import_retention_last_run` setting is ABSENT — the sweep has never completed a run; the scheduled() handler runs every sweep in ONE unguarded await-chain (`index.ts:305`) so a heavy backup throw on the 661 MB DB aborts the chain before retention runs (audit-retention last succeeded Aug 26, right before the big Aug-29 imports). (2) `completed_with_errors` is missing from importRetention's TERMINAL_STATUS_SQL, so those jobs' details are never eligible (5 jobs = 30k+51k rows). (3) 35,869 ORPHAN source rows (parent job already deleted). (4) R2 "ongoing/can't delete" = incomplete multipart uploads from backup runs killed mid-stream (no complete()/abort() ran) — invisible to list(), unremovable by delete(); needs an R2 lifecycle rule. Backups run on the 6h CRON, NOT on deploy (the "every deploy" correlation is coincidental). Plan (all 3 tiers, user-approved): **T1** per-step try/catch in `index.ts` scheduled() + add `completed_with_errors` to `importRetention.ts`. **T2** drop `import_job_rows` from BACKUP_TABLES in `backup.ts`; one-time live purge of terminal-job staging + orphans (~450 MB reclaimed); R2 lifecycle rule "abort incomplete multipart uploads after 3 days" (bucket setting via wrangler, not code). **T3** isolate the two bulk staging tables into a SECOND D1 (`IMPORT_DB`) — surgical, only tables never in an atomic db.batch with operational writes (verified first). Files (path-scoped, DISJOINT from all lanes): `cloudflare/src/index.ts`, `cloudflare/src/lib/importRetention.ts`, `cloudflare/src/lib/backup.ts`, `cloudflare/wrangler.toml`, `cloudflare/src/lib/importEngine.ts`, `cloudflare/migrations/0095+*` (+ possible second migrations dir for IMPORT_DB). No frontend/lang/perm changes.
 
 **→ CATALOG-INTEGRITY LANE (Sep 1, Part 578 grep-max+1; number races expected): CLAIMED / in progress.**
+**→ CODEX BROKEN-HEAD PARITY REPAIR (Sep 1): DONE.** Isolated committed-HEAD certification at
+`79e4c763` found `productDetailRuleParity.test.ts` red because Part 578 item 5 added
+`normalizeProductFuzzyName` only to the canonical backend copy. `077127fd` restored the frontend/
+backend identity-rule mirror. The next full isolated run then exposed six worktree-only harness
+failures (five CRLF-sensitive source locks plus one incomplete fixture); `cb456096` made those tests
+checkout-stable without changing production behavior. Targeted parity + all six repaired harnesses
+are green. No deploy/migrate/secrets actions.
 User (after a live prod-data audit — 107 duplicate clusters; 44% of products show no supplier;
 73% of lots supplier-blank) approved all 4 remediation fixes IN ORDER, each with FULL undo/redo:
 (2) product merge must re-parent sale_items + historical inventory_movements onto the survivor
