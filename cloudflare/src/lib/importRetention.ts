@@ -85,12 +85,27 @@ export function importJobDetailDeleteStatements(jobId: string): JobScopedStateme
   return [
     { sql: `DELETE FROM import_job_errors WHERE job_id = @id`, params },
     { sql: `DELETE FROM import_job_batches WHERE job_id = @id`, params },
-    { sql: `DELETE FROM import_job_rows WHERE job_id = @id`, params }, // chunked analyze/apply's persisted per-row results -- see migration 0011
-    { sql: `DELETE FROM import_job_source_rows WHERE job_id = @id`, params }, // materialized parsed CSV rows -- see migration 0012
     { sql: `DELETE FROM import_job_row_signatures WHERE job_id = @id`, params },
     { sql: `DELETE FROM import_job_image_matches WHERE job_id = @id`, params },
     { sql: `DELETE FROM import_job_image_renames WHERE job_id = @id`, params },
     { sql: `DELETE FROM import_stock_action_groups WHERE job_id = @id`, params },
+  ]
+}
+
+// The two BULK staging tables live in the import-staging DB (D1Compat.staging
+// -- see lib/db.ts), which is a SEPARATE D1 in production, so their deletes
+// can NOT ride the same atomic db.batch() as the main-DB detail statements
+// above. Every caller runs this list against db.staging (a no-op extra batch
+// in single-DB environments, where db.staging === db). Kept a distinct list,
+// not folded into the detail builder, precisely so a cross-DB batch can never
+// be constructed by accident:
+//   import_job_rows        -- chunked analyze/apply's persisted per-row results (migration 0011)
+//   import_job_source_rows -- materialized parsed CSV rows (migration 0012)
+export function importJobStagingDeleteStatements(jobId: string): JobScopedStatement[] {
+  const params = { id: jobId }
+  return [
+    { sql: `DELETE FROM import_job_rows WHERE job_id = @id`, params },
+    { sql: `DELETE FROM import_job_source_rows WHERE job_id = @id`, params },
   ]
 }
 
@@ -112,14 +127,12 @@ export function importJobFullDeleteStatements(jobId: string): JobScopedStatement
   ]
 }
 
-// Every job-scoped table, for the orphan report/cleanup below. Kept next
-// to the two lists above so a new job-scoped table gets added to all
-// three in one edit.
+// Job-scoped tables that live on the MAIN DB, for the orphan report/cleanup
+// below. Kept next to the delete builders above so a new job-scoped table
+// gets added in one place.
 const JOB_SCOPED_TABLES = [
   'import_job_errors',
   'import_job_batches',
-  'import_job_rows',
-  'import_job_source_rows',
   'import_job_row_signatures',
   'import_job_image_matches',
   'import_job_image_renames',
@@ -129,6 +142,13 @@ const JOB_SCOPED_TABLES = [
   'import_stock_action_guards',
   'import_job_files',
 ] as const
+
+// Job-scoped tables that live on the IMPORT-STAGING DB (D1Compat.staging).
+// Their orphan check cannot use a `job_id NOT IN (SELECT id FROM import_jobs)`
+// subquery, because import_jobs is on the OTHER database and D1 has no
+// cross-database queries -- cleanOrphanImportStaging handles them by reading
+// the live job ids from the main DB first and filtering in code.
+const STAGING_JOB_SCOPED_TABLES = ['import_job_rows', 'import_job_source_rows'] as const
 
 async function getSettingValue(env: Env, key: string): Promise<string | null> {
   const db = getDb(env)
@@ -229,6 +249,11 @@ export async function maybeRunScheduledImportRetention(env: Env): Promise<Import
         // from the job's own finish time, not from this sweep's visit.
         { sql: `UPDATE import_jobs SET details_pruned_at = CURRENT_TIMESTAMP, chunk_state_json = NULL, materialize_state_json = NULL WHERE id = @id`, params: { id: job.id } },
       ])
+      // The two bulk staging tables live on the separate import-staging DB and
+      // cannot ride the batch above -- delete them there. This is the ONLY
+      // delete of those tables (they were removed from the detail builder), so
+      // it is not redundant even in single-DB environments (db.staging === db).
+      await db.staging.batch(importJobStagingDeleteStatements(job.id))
       detailPruned += 1
     }
 
@@ -250,6 +275,9 @@ export async function maybeRunScheduledImportRetention(env: Env): Promise<Import
       r2Deleted += r2.deleted
       r2Errors.push(...r2.errors)
       await db.batch(importJobFullDeleteStatements(job.id))
+      // Bulk staging tables on the separate import-staging DB (see the detail
+      // tier above for why this is its own batch).
+      await db.staging.batch(importJobStagingDeleteStatements(job.id))
       summaryDeleted += 1
     }
 
@@ -295,6 +323,30 @@ export async function cleanOrphanImportStaging(env: Env, options: { apply: boole
     ).get<{ n: number }>()
     tables[table] = row?.n ?? 0
   }
+
+  // The bulk staging tables live on the separate import-staging DB (see
+  // lib/db.ts). import_jobs is on the MAIN DB and D1 has no cross-database
+  // queries, so the `NOT IN (SELECT id FROM import_jobs)` subquery used above
+  // cannot run here. Read the live job ids once from the main DB, then group
+  // each staging table by job_id on its own DB and treat every group whose id
+  // is not live as orphaned -- bounded by the (small) number of distinct jobs,
+  // not by row count.
+  const liveJobRows = await db.prepare(`SELECT id FROM import_jobs`).all<{ id: string }>()
+  const liveJobIds = new Set(liveJobRows.map((r) => String(r.id)))
+  const stagingOrphanJobIds: Record<string, string[]> = {}
+  for (const table of STAGING_JOB_SCOPED_TABLES) {
+    const grouped = await db.staging.prepare(`SELECT job_id, COUNT(*) AS n FROM ${table} GROUP BY job_id`).all<{ job_id: string; n: number }>()
+    const orphanIds: string[] = []
+    let count = 0
+    for (const group of grouped) {
+      if (liveJobIds.has(String(group.job_id))) continue
+      orphanIds.push(String(group.job_id))
+      count += Number(group.n) || 0
+    }
+    stagingOrphanJobIds[table] = orphanIds
+    tables[table] = count
+  }
+
   // Orphaned raw files: only ever the unlinked ones -- a Library-linked
   // object belongs to the Library row, not the import job.
   const orphanFiles = await db.prepare(`
@@ -313,5 +365,14 @@ export async function cleanOrphanImportStaging(env: Env, options: { apply: boole
       sql: `DELETE FROM ${table} WHERE job_id NOT IN (SELECT id FROM import_jobs)`,
     })),
   )
+  // Delete the staging-DB orphans by their explicit (already-computed) job ids,
+  // since a cross-database subquery is not available there.
+  const stagingDeletes: JobScopedStatement[] = []
+  for (const table of STAGING_JOB_SCOPED_TABLES) {
+    for (const jobId of stagingOrphanJobIds[table]) {
+      stagingDeletes.push({ sql: `DELETE FROM ${table} WHERE job_id = @id`, params: { id: jobId } })
+    }
+  }
+  if (stagingDeletes.length) await db.staging.batch(stagingDeletes)
   return { applied: true, tables, r2Keys: r2Keys.length, r2Deleted: r2.deleted, r2Errors: r2.errors.length ? r2.errors : undefined }
 }
