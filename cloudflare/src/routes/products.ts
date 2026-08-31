@@ -463,6 +463,7 @@ async function expandSearchResultsToNameSiblings(env: Env, items: Array<Record<s
       SELECT p.id, p.name, p.sku, p.barcode, p.category, p.brand, p.unit, p.description,
              p.selling_price_usd, p.selling_price_khr,
              p.special_price_usd, p.special_price_khr,
+             p.wholesale_price_usd, p.wholesale_price_khr,
              p.cost_price_usd, p.cost_price_khr, p.stock_quantity, p.low_stock_threshold,
              p.out_of_stock_threshold, p.image_path, p.is_active, p.supplier, p.parent_id,
              p.is_group, p.discount_enabled, p.discount_type, p.discount_percent,
@@ -566,6 +567,7 @@ async function searchProductsPayload(env: Env, query: Record<string, string>, op
   const selectColumns = `p.id, p.name, p.sku, p.barcode, p.category, p.brand, p.unit, p.description,
            p.selling_price_usd, p.selling_price_khr,
            p.special_price_usd, p.special_price_khr,
+           p.wholesale_price_usd, p.wholesale_price_khr,
            p.cost_price_usd, p.cost_price_khr, p.stock_quantity, p.low_stock_threshold,
            p.out_of_stock_threshold, p.image_path, p.is_active, p.supplier, p.parent_id,
            p.is_group, p.discount_enabled, p.discount_type, p.discount_percent,
@@ -1119,7 +1121,10 @@ app.get('/stock-ledger', async (c) => {
   }
   const query = c.req.query()
   const page = Math.max(1, Number(query.page) || 1)
-  const pageSize = Math.min(100, Math.max(1, Number(query.pageSize) || 50))
+  // 1000-cap (was 100): the Stock Changes CSV export walks pages of this
+  // endpoint for a chosen date range -- 10x fewer round trips per export,
+  // still bounded. Interactive views keep asking for 25-100.
+  const pageSize = Math.min(1000, Math.max(1, Number(query.pageSize) || 50))
   const ledger = buildStockLedgerQuery({
     view: String(query.view || 'all') as StockLedgerView,
     productId: Number(query.productId) || 0,

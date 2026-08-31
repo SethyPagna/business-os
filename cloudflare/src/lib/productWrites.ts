@@ -339,6 +339,10 @@ export const IMAGE_ONLY_OPTIONAL_FIELDS: Record<string, readonly string[]> = {
   // can let this role check the shelf price while keeping VIP terms private,
   // or grant both for the "view everything, touch nothing" arrangement.
   products_image_only_show_vip: ['special_price_usd', 'special_price_khr'],
+  // Wholesale price is its own grant too (same reasoning as VIP above): an org
+  // can expose the shelf price while keeping wholesale terms private, or grant
+  // any combination of the three tiers to the image-only role independently.
+  products_image_only_show_wholesale: ['wholesale_price_usd', 'wholesale_price_khr'],
   products_image_only_show_barcode: ['barcode'],
   products_image_only_show_category: ['category'],
   products_image_only_show_brand: ['brand'],

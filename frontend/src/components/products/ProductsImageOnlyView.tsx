@@ -51,6 +51,8 @@ interface ImageOnlyProduct {
   selling_price_khr?: number | string | null
   special_price_usd?: number | string | null
   special_price_khr?: number | string | null
+  wholesale_price_usd?: number | string | null
+  wholesale_price_khr?: number | string | null
   barcode?: string | null
   category?: string | null
   brand?: string | null
@@ -148,6 +150,10 @@ export default function ProductsImageOnlyView() {
   // hasPermission() itself is already a cheap map lookup.
   const showPrice = hasPermission('products_image_only_show_price')
   const showVip = hasPermission('products_image_only_show_vip')
+  // Wholesale shows in the DETAIL panel only (not the card list), matching the
+  // "wholesale only in click-to-view detail" preference and keeping the card
+  // compact.
+  const showWholesale = hasPermission('products_image_only_show_wholesale')
   const showBarcode = hasPermission('products_image_only_show_barcode')
   const showCategory = hasPermission('products_image_only_show_category')
   const showBrand = hasPermission('products_image_only_show_brand')
@@ -627,6 +633,15 @@ export default function ProductsImageOnlyView() {
                   <dd className="text-right text-emerald-700 dark:text-emerald-300">
                     {fmtUSD(detailsProduct.special_price_usd)}
                     {Number(detailsProduct.special_price_khr || 0) > 0 ? ` · ${fmtKHR(detailsProduct.special_price_khr)}` : ''}
+                  </dd>
+                </div>
+              ) : null}
+              {showWholesale && (Number(detailsProduct.wholesale_price_usd || 0) > 0 || Number(detailsProduct.wholesale_price_khr || 0) > 0) ? (
+                <div className="flex justify-between gap-3 py-2">
+                  <dt className="text-gray-500 dark:text-gray-400">{t('wholesale_price') || 'Wholesale'}</dt>
+                  <dd className="text-right text-indigo-700 dark:text-indigo-300">
+                    {fmtUSD(detailsProduct.wholesale_price_usd)}
+                    {Number(detailsProduct.wholesale_price_khr || 0) > 0 ? ` · ${fmtKHR(detailsProduct.wholesale_price_khr)}` : ''}
                   </dd>
                 </div>
               ) : null}
