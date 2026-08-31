@@ -24,13 +24,15 @@
 
 import type { Env } from '../index'
 import { getDb } from './db'
-import { listObjects } from './r2'
 import { recordAnalytics } from './analytics'
 import { consumeQuota } from './quotaGuard'
 import { IMAGE_MAX_BYTES, needsOptimization, optimizeImage } from './imagePipeline'
 
 /** Objects examined per sweep. Bounded so the cron tick stays predictable. */
 const SWEEP_BATCH = 400
+/** KV key holding the rolling R2 list cursor so successive sweeps cover the
+ *  WHOLE uploads/ prefix instead of re-scanning the first SWEEP_BATCH keys. */
+const IMAGE_AUDIT_CURSOR_KEY = 'system-cursor:image-audit-sweep'
 /** Images re-encoded per pass. Small on purpose -- this is the metered half. */
 const REPROCESS_BATCH = 25
 
@@ -55,10 +57,18 @@ export async function sweepImageAudit(env: Env): Promise<SweepResult> {
   let examined = 0
   let oversized = 0
 
-  const objects = await listObjects(env.ASSETS, 'uploads/')
+  // Rotating cursor (persisted in KV, same pattern as backup.ts's asset-copy
+  // cursor). The sweep used to listObjects('uploads/') -- which fully paginates
+  // -- then .slice(0, SWEEP_BATCH), so it re-examined only the lexicographically
+  // first 400 keys every 6h forever; on a library larger than 400 objects
+  // everything past them was never recorded oversized and never reprocessed.
+  // Reading ONE cursored page and advancing the cursor makes successive ticks
+  // walk the whole library and wrap.
+  const priorCursor = (await env.CACHE.get(IMAGE_AUDIT_CURSOR_KEY)) || undefined
+  const page = await env.ASSETS.list({ prefix: 'uploads/', cursor: priorCursor, limit: SWEEP_BATCH })
   const statements: Array<{ sql: string; params: Record<string, unknown> }> = []
 
-  for (const object of objects.slice(0, SWEEP_BATCH)) {
+  for (const object of page.objects || []) {
     const key = String(object.key || '')
     if (!IMAGE_KEY_RE.test(key)) continue
     examined += 1
@@ -95,8 +105,13 @@ export async function sweepImageAudit(env: Env): Promise<SweepResult> {
     ON CONFLICT(id) DO UPDATE SET last_run_at = CURRENT_TIMESTAMP, swept = @swept
   `).run({ swept: examined })
 
+  // Advance the cursor; clear it at the end of the listing so the next tick
+  // wraps to the start of uploads/ and keeps coverage rolling.
+  if (page.truncated && page.cursor) await env.CACHE.put(IMAGE_AUDIT_CURSOR_KEY, page.cursor)
+  else await env.CACHE.delete(IMAGE_AUDIT_CURSOR_KEY)
+
   recordAnalytics(env, { kind: 'image_audit_sweep', labels: [], values: [examined, oversized] })
-  return { examined, oversized, done: objects.length <= SWEEP_BATCH }
+  return { examined, oversized, done: !page.truncated }
 }
 
 export type ReprocessResult = {

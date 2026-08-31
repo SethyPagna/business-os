@@ -130,10 +130,22 @@ export async function maybeRunScheduledAuditLogRetention(env: Env): Promise<{ sk
     return { skipped: true, reason: 'ran-recently' }
   }
   const retentionDays = await getAuditLogRetentionDays(env)
-  const cutoff = new Date(Date.now() - retentionDays * 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
+  // Compare the RAW created_at column against a full 'YYYY-MM-DD HH:MM:SS'
+  // cutoff. The old `date(created_at) < @cutoff` wrapped the column in a
+  // function, which defeats any index on created_at and forces a full-table
+  // scan, and it deleted in ONE unbounded statement -- on a large backlog that
+  // can exceed D1's per-statement CPU/row budget and throw every run, so the
+  // table never shrinks. Batch by id (audit_logs has an integer id) so each
+  // statement stays bounded; D1 has no `DELETE ... LIMIT`, hence the sub-select.
+  const cutoff = new Date(Date.now() - retentionDays * 24 * 60 * 60 * 1000).toISOString().slice(0, 19).replace('T', ' ')
   const db = getDb(env)
-  const result = await db.prepare('DELETE FROM audit_logs WHERE date(created_at) < @cutoff').run({ cutoff })
-  const deleted = result.changes ?? 0
+  let deleted = 0
+  for (;;) {
+    const result = await db.prepare('DELETE FROM audit_logs WHERE id IN (SELECT id FROM audit_logs WHERE created_at < @cutoff LIMIT 5000)').run({ cutoff })
+    const n = result.changes ?? 0
+    deleted += n
+    if (n < 5000) break
+  }
   await setSettingValue(env, AUDIT_LOG_RETENTION_LAST_RUN_KEY, new Date().toISOString())
   if (deleted > 0) {
     await audit(env, null, null, 'audit_log_retention_auto_delete', 'audit_log', null, { retentionDays, cutoffDate: cutoff, deleted })
