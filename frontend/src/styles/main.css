@@ -40,6 +40,13 @@ body[data-public-portal='true'] {
   touch-action: pan-y pinch-zoom;
 }
 
+/* Khmer line-heights (user, Aug 31: "khmer versions are not compact enough...
+   sales page etc... the rows"). The km line boxes were set loose (1.68-1.82) for
+   legibility; that inflated every row's height in the whole-app Khmer UI. Tighten
+   the km line-heights toward the Latin baseline while leaving the font-SIZES and
+   the earlier legibility floors (Z7/Aug-29) untouched -- line-height is what drives
+   row height, so this compacts rows without shrinking or lightening the glyphs.
+   Values stay above Latin (~1.33) so stacked coeng subscripts never clip. */
 body.lang-km,
 body.lang-km button,
 body.lang-km input,
@@ -50,7 +57,7 @@ body.lang-km th,
 body.lang-km td {
   font-family: "Noto Sans Khmer", "Khmer OS Siemreap", "Battambang", "Khmer OS", sans-serif;
   font-weight: 400;
-  line-height: 1.82;
+  line-height: 1.5;
   letter-spacing: 0;
   text-rendering: optimizeLegibility;
   font-feature-settings: "kern" 1, "liga" 1;
@@ -64,7 +71,7 @@ body.lang-km td {
   text-rendering: optimizeLegibility;
   font-feature-settings: "kern" 1, "liga" 1;
   font-kerning: normal;
-  line-height: 1.68;
+  line-height: 1.5;
   font-synthesis: none;
 }
 
@@ -75,7 +82,7 @@ body:not(.lang-km) .khmer-text {
 body:not(.lang-km) .khmer-text.text-xs,
 body:not(.lang-km) .khmer-text.text-\[10px\],
 body:not(.lang-km) .khmer-text.text-\[11px\] {
-  line-height: 1.58;
+  line-height: 1.45;
 }
 
 body.lang-km:not([data-public-portal='true']) button,
@@ -104,7 +111,7 @@ body.lang-km:not([data-public-portal='true']) nav.safe-area-inset-bottom button 
 body.lang-km:not([data-public-portal='true']) .fixed.bottom-16 button,
 body.lang-km:not([data-public-portal='true']) .fixed.bottom-16 button span {
   font-weight: 600 !important;
-  line-height: 1.55;
+  line-height: 1.4;
 }
 
 body.lang-km:not([data-public-portal='true']) .app-topbar .font-medium,
@@ -115,22 +122,22 @@ body.lang-km:not([data-public-portal='true']) .app-topbar .font-bold {
 
 body.lang-km .text-xs {
   font-size: calc(0.79rem * var(--ui-text-scale, 1)) !important;
-  line-height: 1.68 !important;
+  line-height: 1.45 !important;
 }
 
 body.lang-km .text-sm {
   font-size: calc(0.92rem * var(--ui-text-scale, 1)) !important;
-  line-height: 1.72 !important;
+  line-height: 1.48 !important;
 }
 
 body.lang-km .text-base {
   font-size: calc(1.02rem * var(--ui-text-scale, 1)) !important;
-  line-height: 1.8 !important;
+  line-height: 1.52 !important;
 }
 
 body.lang-km .text-lg {
   font-size: calc(1.16rem * var(--ui-text-scale, 1)) !important;
-  line-height: 1.72 !important;
+  line-height: 1.48 !important;
 }
 
 body.lang-km h1,
@@ -141,14 +148,14 @@ body.lang-km h5,
 body.lang-km h6,
 body.lang-km .page-title,
 body.lang-km .section-title {
-  line-height: 1.48;
+  line-height: 1.38;
 }
 
 body.lang-km input,
 body.lang-km textarea,
 body.lang-km select,
 body.lang-km .input {
-  line-height: 1.65;
+  line-height: 1.45;
 }
 
 /* Z7 (user, Aug 29): Khmer glyphs have thinner strokes than Latin, so the
