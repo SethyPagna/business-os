@@ -113,6 +113,26 @@ the Products/Inventory lanes): `frontend/src/components/shared/StatsStrip.tsx`,
 button-stays-put + detail-floats changes apply to every data page (Returns/Inventory/
 Fees/Dashboard) — cross-surface-consistent by design. No new i18n keys (reuse `view`).
 
+**→ DATE-SCOPE + COUNT-RECONCILIATION LANE (Aug 31, Part 564 follow-up): DONE, verified.**
+User: "the number of sales, fees, returns don't match the arrange by date and actual
+display." Root cause found: on Sales/Returns/Expenses the prominent Start→End date row
+(stripRange) drove ONLY the stats strip, while the LIST used its own separate date
+control (Sales listRange/Period, Returns year+month, Fees fromDate/toDate) defaulting to
+all-time — so the row said "Today" but the list showed every date, and the strip/list/
+report counts diverged. Also the list "N sales | $rev" counted cancelled + awaiting-
+payment while the money excluded them. Fixes (chosen WITH the user via AskUserQuestion —
+"drive list + stats together" + "count only what the money counts"): ONE date scope
+(stripRange) now drives BOTH list and strip on all three pages; the separate Period/
+year-month/from-to filters are removed; list defaults to Today. Headline + day-group
+counts are money-counting (Sales excludes cancelled+awaiting; Returns excludes cancelled
+— its list GET includes cancelled while the refund kernel excludes them). Files:
+`frontend/src/components/sales/{Sales,SalesListSurface}.tsx`,
+`frontend/src/components/fees/FeesPage.tsx`,
+`frontend/src/components/returns/{Returns,ReturnsListSurface}.tsx`. tsc clean; verified
+live — Sales "Today" → 4 sales/$42.47, "This Month" → footer "6 Sales | $67.47" with
+08/30's 5 cancelled shown as a "0 SALES" day; Fees/Returns lists now honor the date row.
+Frontend-only (client counts; the current dataset is well under any page cap).
+
 **→ PRODUCT-DETAIL-FLOAT LANE (Aug 31, Part 563 grep-max+1; number races expected): CLAIMED / in progress.**
 User batch on the Products-page "click to view detail" float: (1) the detail float's
 Stock Changes / Sales / Suppliers sections show "no data" (backend verified CORRECT —
@@ -408,14 +428,31 @@ candidates (would be fake) = dashboard, audit_log, customer_portal, backup, POS.
   leak, purge blocked); `full` = everyone's + deleted-sales ledger + (admin) purge.
   Matches user's "audit log shows only for the user, admin shows all." Live :8795:
   view total=3 own + ?userId=999 bypass still own=3; full total=67; none 403.
-- **customer_portal** — DESIGN DECISION PENDING (asked user). Finding: `customer_portal`
-  is TODAY a page-VISIBILITY gate only; ALL portal content (posts/FAQ/about/promos/
-  branding/theme/catalog-display/loyalty/submissions) is saved via POST /settings
-  gated on the `settings` permission (settings.ts bucket fallthrough), so a
-  customer_portal-only user sees an editor whose every save 403s (a fake control).
-  Options put to user: (A) one real "manage portal content" key, (B) content-vs-
-  config split (employee edits posts/FAQ/about, config stays admin), (C) fully
-  granular per-area keys.]**
+- **customer_portal** — DONE + VERIFIED LIVE (slice 8, commit 7ff2eff0). User chose
+  FULLY GRANULAR. `customer_portal` was a page-visibility gate only (all portal
+  content saved via POST /settings on the `settings` grant -> customer_portal-only
+  users saw an editor whose every save 403'd, a fake control). Split into 4 real
+  per-area write grants: **portal_posts** (posts/promos), **portal_faq**, **portal_about**,
+  and **customer_portal** repurposed as the "portal config" catch-all (branding, media,
+  theme, catalog display, social, AI, maps, translations, publish, loyalty, submissions
+  — also fixes the loyalty-editor fake control). Backend settings.ts buckets the
+  customer_portal_* keys (settingsBucketPermissionFor); the all-or-nothing POST /settings
+  accepts a key on bucket-grant OR `settings` (superset) OR admin, so no Settings admin
+  regresses. portal.ts submission moderation moved settings->customer_portal and the
+  review-LIST read gained a gate it lacked (was requireAuth-only). Frontend: new
+  utils/portalPermissions.ts mirrors the buckets; CatalogPage per-area canEdit flags +
+  save-payload filtering + section-tab filtering; CatalogEditorSurface gates the display
+  tab's config toggles vs the posts editor (display:contents wrapper); AppContext opens
+  the catalog page for any portal grant. Editor shows 4 grants; perm_portal_posts/faq/
+  about + updated perm_customer_portal both packs. **Verified LIVE (:8794):** portal_posts
+  -> posts 200, faq/about/config 403; portal_faq -> faq 200, posts 403; customer_portal
+  -> config+loyalty 200, posts/faq 403; settings -> all 200; none -> 403; submissions
+  review 200 config/settings, 403 posts/none. test-portal-buckets-pure 7/7 (incl. be<->fe
+  key-set sync); front+back tsc + permissionEditor + parity green.
+
+**GRANULAR-BREAKDOWN LANE — COMPLETE:** all 5 of the "not view-tier" sections resolved.
+dashboard/pos/backup were already granular (no change). audit_log got own-vs-all (slice
+7). customer_portal got 4 per-area grants (slice 8). No fake controls anywhere.]**
 
 **→ FILTER-CHIPS-LANE (this session, Aug 31): CLAIMED.** User: the sales filter
 menu (and every other) renders the CHOSEN filters as removable chips OUTSIDE the
