@@ -3027,6 +3027,14 @@ the switch and its reasoning are recorded in `wrangler.toml`.
 
 ## Current status
 
+**[~ CLAIMED — session business-os-v1-c8, Aug 31: full post-settlement verification
+sweep.** Golden Rule 5 battery (both tscs, all backend tests individually, all
+frontend tests individually, real vite build, fresh migration chain) + zombie/orphan
++ contract-diff + public-surface audits + LIVE browser drive of every surface
+(admin, POS, storefront incl. new accounts) with expected-vs-actual. Read-mostly:
+no product code edits planned; any defect found gets flagged here or fixed as an
+isolated commit. Peers: no file claims beyond progress.md/session-log.]**
+
 **→ STOREFRONT-ACCOUNTS SESSION, URGENT — TWO COLLISIONS (coordinator 7b, Aug 31
 ~00:25), fix BEFORE any deploy/remote migrate:**
 1. **Migration number 0086 is taken twice**: b9's `0086_missing_fk_indexes.sql`
