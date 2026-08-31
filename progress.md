@@ -134,6 +134,14 @@ the Sales-page `/stats` header and the Reports analytics kernel to **ONE canonic
   path-scoped commit + real-SQLite convergence test, then ping 7b. **DATE LANE: hand off the
   `salesAnalytics.ts`/`sales.ts` REVENUE lines to 62; coordinate before re-touching them.**
 
+**✅ GOOGLE-DRIVE OAUTH-URL bugfix (Sep 1, this session — DONE, committed `3820a971`, deployable).**
+`ERR Google Drive connection failed: Google Drive connection failed`. Root cause: `Backup.tsx`
+"Start connection" read `result?.authUrl`, but `POST /api/system/drive-sync/oauth/start` returns
+`{ url }` (same shape as SSO `/api/auth/oauth/start`, which login reads as `result.url`). `authUrl`
+was always undefined, so a SUCCESSFUL start hit `if (!authUrl) throw` → the doubled message. Fixed
+the frontend to read `result?.url` (+ method type); backend never returned `authUrl` (git history),
+so no server change. Verified: frontend tsc clean, `backupJobs.test.ts` passes. One-file, path-scoped.
+
 **✅ CASHIER-IDENTITY RECONCILIATION lane (Sep 1, this session — DONE, committed `1378e07a` + `69673fbc`, NOT deployed / Stage-1).**
 Delivered: importEngine cashier map keys on username+name over ALL users (incl. inactive) with
 alias fallback; `userIdentity.ts` `cascadeUserRename` rewrites 14 id-linked user-name snapshots
