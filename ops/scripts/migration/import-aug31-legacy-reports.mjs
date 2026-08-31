@@ -233,6 +233,17 @@ for (const row of invoiceRows) {
 const driver = deliveryContacts.find((row) => norm(row.name) === 'driver 1') || null
 if (!driver) throw new Error('Production delivery contact "driver 1" is missing')
 
+// report-user-31st proves Rath (username "rath", id 4) was the sole cashier that
+// day, so the 14 Aug-31 sales are attributed to that account by id -- resolved
+// LIVE from users (never a hard-coded id) so the script is environment-safe. The
+// display name is the username, matching importEngine / the POS. Falls back to
+// the real name in case the username was later changed.
+const users = queryRows('SELECT id,username,name FROM users ORDER BY id')
+const cashierRath = users.find((row) => norm(row.username) === 'rath')
+  || users.find((row) => norm(row.name) === 'roune rath')
+  || null
+if (!cashierRath) throw new Error('Aug-31 cashier "Rath" (username rath) is missing from users -- cannot attribute sales')
+
 function receiptModel(receipt, rows) {
   const first = rows[0]
   const productLines = rows.filter((row) => norm(row.Product) !== 'delivery service')
@@ -350,7 +361,7 @@ for (const sale of saleModels) {
     delivery_contact_name,delivery_contact_phone,delivery_contact_address,delivery_fee_usd,delivery_fee_khr,delivery_fee_paid_by,
     sale_status,notes,items,loyalty_accrual,created_at,updated_at,client_request_id
   ) VALUES (
-    ${sql(sale.receipt)},NULL,'Old system',2,'Leang Cosmetic Shop',${sale.customer?.id || 'NULL'},${sql(sale.customerName)},${sql(sale.customerPhone)},NULL,
+    ${sql(sale.receipt)},${cashierRath.id},${sql(cashierRath.username)},2,'Leang Cosmetic Shop',${sale.customer?.id || 'NULL'},${sql(sale.customerName)},${sql(sale.customerPhone)},NULL,
     ${sql(sale.paymentMethod)},'USD',${sqlNum(sale.exchangeRate)},${sqlNum(sale.subtotal)},0,0,0,0,0,
     ${sqlNum(sale.subtotal)},${Math.round(sale.subtotal * sale.exchangeRate)},${sqlNum(sale.amountPaid)},0,0,0,${sale.isDelivery},${sale.isDelivery ? driver.id : 'NULL'},
     ${sale.isDelivery ? sql(driver.name) : 'NULL'},NULL,NULL,${sqlNum(sale.deliveryFee)},0,'customer','completed',${sql(sale.notes)},'[]',0,

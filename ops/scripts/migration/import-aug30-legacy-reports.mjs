@@ -309,7 +309,21 @@ if (unexpectedExisting.length) throw new Error(`New-period receipts already exis
 const missingOverlap = overlapReceipts.filter(([receipt]) => !existingReceipts.has(receipt)).map(([receipt]) => receipt)
 if (missingOverlap.length) throw new Error(`Expected overlap receipts are missing: ${missingOverlap.join(', ')}`)
 
-const cashier = users.find((row) => norm(row.username) === 'aza' || norm(row.name) === 'aza') || null
+// Canonical cashier resolution (username -> name -> alias), matching
+// importEngine. The legacy report's cashier is the nickname "Aza", which equals
+// NO username ("aza" != username "Za") and no name, so it resolves only through
+// the user_aliases table (alias aza -> user "Za", id 3). Resolving by id keeps
+// it correct even if that account is later renamed. user_aliases may be absent
+// on an un-migrated DB, so its lookup is guarded.
+const cashierAliases = (() => {
+  try { return queryRows('SELECT user_id, alias FROM user_aliases') } catch { return [] }
+})()
+const cashierKey = 'aza'
+const cashierAliasUserId = cashierAliases.find((row) => norm(row.alias) === cashierKey)?.user_id ?? null
+const cashier = users.find((row) => norm(row.username) === cashierKey || norm(row.name) === cashierKey)
+  || (cashierAliasUserId != null ? users.find((row) => row.id === cashierAliasUserId) : null)
+  || null
+if (!cashier) throw new Error('Aug-30 cashier "Aza" did not resolve to a user (expected alias aza -> "Za")')
 const driver = deliveryContacts.find((row) => norm(row.name) === 'driver 1') || null
 if (!driver) throw new Error('Production delivery contact "driver 1" is missing')
 
@@ -532,7 +546,7 @@ for (let offset = 0; offset < correctionInserts.length; offset += 400) {
 
 // Repair exact check-out times/cashier on the 14 already-imported overlap receipts.
 for (const sale of overlapModels) {
-  statements.push(`UPDATE sales SET created_at=${sql(sale.createdAt)}, updated_at=CURRENT_TIMESTAMP, cashier_id=${cashier?.id || 'NULL'}, cashier_name='Aza' WHERE receipt_number=${sql(sale.receipt)};`)
+  statements.push(`UPDATE sales SET created_at=${sql(sale.createdAt)}, updated_at=CURRENT_TIMESTAMP, cashier_id=${cashier.id}, cashier_name=${sql(cashier.username)} WHERE receipt_number=${sql(sale.receipt)};`)
 }
 
 for (const sale of newSaleModels) {
@@ -544,7 +558,7 @@ for (const sale of newSaleModels) {
     delivery_contact_name,delivery_contact_phone,delivery_contact_address,delivery_fee_usd,delivery_fee_khr,delivery_fee_paid_by,
     sale_status,notes,items,loyalty_accrual,created_at,updated_at,client_request_id
   ) VALUES (
-    ${sql(sale.receipt)},${cashier?.id || 'NULL'},'Aza',2,'Leang Cosmetic Shop',${sale.customer?.id || 'NULL'},${sql(sale.customerName)},${sql(sale.customerPhone)},NULL,
+    ${sql(sale.receipt)},${cashier.id},${sql(cashier.username)},2,'Leang Cosmetic Shop',${sale.customer?.id || 'NULL'},${sql(sale.customerName)},${sql(sale.customerPhone)},NULL,
     ${sql(sale.paymentMethod)},'USD',${sqlNum(sale.exchangeRate)},${sqlNum(sale.subtotal)},0,0,0,0,0,
     ${sqlNum(sale.subtotal)},${Math.round(sale.subtotal * sale.exchangeRate)},${sqlNum(sale.amountPaid)},0,0,0,${sale.isDelivery},${sale.isDelivery ? driver.id : 'NULL'},
     ${sale.isDelivery ? sql(driver.name) : 'NULL'},NULL,NULL,${sqlNum(sale.deliveryFee)},0,'customer','completed',${sql(sale.notes)},'[]',0,
