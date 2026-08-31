@@ -152,7 +152,7 @@ export default function ProductDetailFlyout({ view, copy, onClose, shopName, con
               the image itself opens the lightbox, where the photos can be
               viewed on their own without the rest of the page. The thumbnail
               strip below stays as a direct way to jump to a specific photo. */}
-          <div className="relative aspect-square w-full bg-slate-100 dark:bg-neutral-800">
+          <div className="relative aspect-[4/3] max-h-[22rem] w-full bg-slate-100 dark:bg-neutral-800 sm:max-h-[26rem]">
             {activeImage ? (
               <button
                 type="button"
@@ -160,7 +160,7 @@ export default function ProductDetailFlyout({ view, copy, onClose, shopName, con
                 onClick={() => setLightboxOpen(true)}
                 aria-label={copy('viewImages', 'View images')}
               >
-                <CatalogProductImage src={activeImage} alt={product.name || ''} className="h-full w-full object-cover" />
+                <CatalogProductImage src={activeImage} alt={product.name || ''} className="h-full w-full object-contain" />
               </button>
             ) : (
               <div className="flex h-full items-center justify-center text-slate-300">

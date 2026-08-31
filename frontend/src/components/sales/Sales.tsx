@@ -1220,7 +1220,7 @@ export default function Sales() {
   }
 
   return (
-    <div className="page-scroll flex flex-col p-3 sm:p-6">
+    <div className="page-scroll flex flex-col px-3 pb-3 pt-0 sm:px-6 sm:pb-6 sm:pt-0">
       {/* Import/Manage/History action row. The Sales daily/reports view moved
           out to its own top-level Reports hub section (ReportsHub.tsx), so
           Sales now shows only the receipts list. Import/Export each take an
@@ -1292,7 +1292,7 @@ export default function Sales() {
           search row, which pinned the bar but let the search box scroll
           away. Pagination now lives above this group instead of below it,
           matching Products/Inventory's order. */}
-      <div className="sticky top-2 z-30 -mx-1 space-y-2 bg-gray-50/95 pb-2 backdrop-blur dark:bg-gray-900/95 sm:mx-0">
+      <div className="sticky top-0 z-30 -mx-1 space-y-2 bg-gray-50/95 pb-2 pt-2 backdrop-blur dark:bg-gray-900/95 sm:mx-0">
         {/* The Start→End range that scopes the stats strip above now leads
             this pinned toolbar as its own row, directly above the search bar
             (user, Aug 31: "fish out the start date and end date from the stats
@@ -1329,8 +1329,10 @@ export default function Sales() {
           />
         </div>
 
-        {selectedSales.length > 0 ? (
-          <div className="bulk-toolbar flex flex-wrap items-center gap-1.5 rounded-xl border px-2.5 py-2 text-sm shadow-sm">
+      </div>
+
+      {selectedSales.length > 0 ? (
+          <div className="bulk-toolbar mb-2 flex flex-wrap items-center gap-1.5 rounded-xl border px-2.5 py-2 text-sm shadow-sm">
             <span className="rounded-full bg-blue-100 px-2.5 py-1 text-xs font-semibold text-blue-700 dark:bg-blue-900/40 dark:text-blue-200">{selectedSales.length}</span>
             <button type="button" className="btn-secondary px-2.5 py-1 text-xs" onClick={handleExportSelected}>{translateOr('export', 'Export')}</button>
             {/* Bulk status writes are Full-Access only (Part 557): View-only
@@ -1347,7 +1349,6 @@ export default function Sales() {
             </button>
           </div>
         ) : null}
-      </div>
 
       {/* Pagination on its own row directly BELOW the search row (user,
           Aug 31: "page back and forth ... below the search bar row"), matching
@@ -1399,6 +1400,10 @@ export default function Sales() {
         toggleSelectAll={toggleSelectAll}
         toggleSelectionScope={toggleSelectionScope}
       />
+
+      <div className="mt-3 flex justify-center">
+        <PaginationControls compact rangeAsPageSize page={salesPage} pageSize={salesPageSize} totalItems={allVisibleSales.length} label={t('sales') || 'sales'} t={t} onPageChange={setSalesPage} onPageSizeChange={(size) => { setSalesPageSize(size); setSalesPage(1) }} />
+      </div>
 
       {exportDialog ? (
         <Suspense fallback={null}>

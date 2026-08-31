@@ -41,7 +41,7 @@ import ChevronRight from 'lucide-react/dist/esm/icons/chevron-right.js'
 // read as indentation; the checkbox column stays tight at 2rem for its 1rem
 // box.
 const SELECT_COL_WIDTH = '2rem'
-const IMAGE_COL_WIDTH = '4.5rem'
+const IMAGE_COL_WIDTH = '5rem'
 /** Padding between the image column and the start of any title text. */
 export const ROW_TEXT_GUTTER = 'px-2'
 // A grouped child row does NOT get a text indent: it aligns exactly with

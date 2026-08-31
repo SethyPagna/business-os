@@ -6,7 +6,8 @@ import DateTimeRangePicker, { todayDateTimeRange, type DateTimeRange } from '../
 import { getSalesDailyReport, getSalesDayReport } from '../../api/salesTransport.ts'
 import { ALL_STATUSES, getStatusLabel } from './StatusBadge'
 import { useApp as useAppHook } from '../../AppContext.tsx'
-import AppSelect, { type AppSelectOption } from '../shared/AppSelect.tsx'
+import type { AppSelectOption } from '../shared/AppSelect.tsx'
+import FilterMenu from '../shared/FilterMenu.tsx'
 
 // X2 (Part 395): the Sales "by day" report -- a range-scoped list of days,
 // each expanding into its full breakdown (payment methods, delivery incl.
@@ -408,6 +409,23 @@ export default function SalesDailyReport({ t, fmtMoney, active = true, range: ex
   )
 
   const hasFilter = Boolean(statusFilter || paymentFilter || (!embedded && branchFilter))
+  const reportFilterSections = useMemo(() => [
+    {
+      id: 'status', label: t('status') || 'Status', options: statusOptions.map((option) => ({
+        id: option.value, label: option.label, active: statusFilter === option.value, onClick: () => setStatusFilter(option.value),
+      })),
+    },
+    {
+      id: 'payment', label: t('payment_method') || 'Payment method', options: paymentOptions.map((option) => ({
+        id: option.value, label: option.label, active: paymentFilter === option.value, onClick: () => setPaymentFilter(option.value),
+      })),
+    },
+    !embedded && branches.length ? {
+      id: 'branch', label: t('branch') || 'Branch', options: branchOptions.map((option) => ({
+        id: option.value, label: option.label, active: branchFilter === option.value, onClick: () => setBranchFilter(option.value),
+      })),
+    } : null,
+  ], [branchFilter, branchOptions, branches.length, embedded, paymentFilter, paymentOptions, statusFilter, statusOptions, t])
 
   // Export the range's per-day sales series as CSV (user, Aug 31: "no
   // actions to choose export etc").
@@ -442,38 +460,13 @@ export default function SalesDailyReport({ t, fmtMoney, active = true, range: ex
           >
             <Download className="h-3 w-3" /> {t('export') || 'Export'}
           </button>
-          <AppSelect
-            value={statusFilter}
-            options={statusOptions}
-            onChange={setStatusFilter}
-            ariaLabel={t('status') || 'Status'}
-            buttonClassName="h-7 py-0 px-2 text-[11px]"
+          <FilterMenu
+            label={t('options') || 'Options'}
+            activeCount={hasFilter ? [statusFilter, paymentFilter, !embedded ? branchFilter : ''].filter(Boolean).length : 0}
+            sections={reportFilterSections}
+            onClear={() => { setStatusFilter(''); setPaymentFilter(''); setBranchFilter('') }}
+            compact
           />
-          <AppSelect
-            value={paymentFilter}
-            options={paymentOptions}
-            onChange={setPaymentFilter}
-            ariaLabel={t('payment_method') || 'Payment method'}
-            buttonClassName="h-7 py-0 px-2 text-[11px]"
-          />
-          {!embedded && branches.length ? (
-            <AppSelect
-              value={branchFilter}
-              options={branchOptions}
-              onChange={setBranchFilter}
-              ariaLabel={t('branch') || 'Branch'}
-              buttonClassName="h-7 py-0 px-2 text-[11px]"
-            />
-          ) : null}
-          {hasFilter ? (
-            <button
-              type="button"
-              onClick={() => { setStatusFilter(''); setPaymentFilter(''); setBranchFilter('') }}
-              className="font-medium text-blue-600 underline-offset-2 hover:underline dark:text-blue-400"
-            >
-              {t('clear') || 'Clear'}
-            </button>
-          ) : null}
         </span>
       </div>
 

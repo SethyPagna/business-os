@@ -1225,7 +1225,7 @@ export default function Dashboard() {
 ${translateOr('revenue_short', 'Revenue')} ${fmtUSD(aRevenue)} = ${translateOr('gross_revenue', 'Gross')} ${fmtUSD(aGrossSales)} − ${translateOr('discounts', 'Discounts')} ${fmtUSD(aDiscounts)}`,
       label: translateOr('revenue', 'Revenue'),
       value: fmtUSD(aRevenue),
-      sub: `${grossShortLabel} ${fmtUSD(aGrossSales)}`,
+      sub: aGrossSales !== aRevenue ? `${grossShortLabel} ${fmtUSD(aGrossSales)}` : `${translateOr('net_revenue', 'Net revenue')} ${fmtUSD(aRevenue)}`,
       color: 'text-green-600',
       trend: calcTrend(aRevenue, aPrevRevenue),
       // Slimmed (user, Aug 29 -- "too many folded stats inside, i want it
@@ -1234,7 +1234,7 @@ ${translateOr('revenue_short', 'Revenue')} ${fmtUSD(aRevenue)} = ${translateOr('
       // Delivery card below (which also makes the outer count EVEN at 8).
       details: [
         { label: translateOr('revenue', 'Net revenue'), value: fmtUSD(aRevenue) },
-        { label: translateOr('gross_revenue', 'Gross revenue'), value: fmtUSD(aGrossSales) },
+        ...(aGrossSales !== aRevenue ? [{ label: translateOr('gross_revenue', 'Gross revenue'), value: fmtUSD(aGrossSales) }] : []),
         { label: translateOr('discounts', 'Discounts'), value: fmtUSD(aDiscounts) },
         { label: translateOr('total_refunded', 'Refunds'), value: fmtUSD(aRefundUsd) },
         { label: translateOr('tax_collected', 'Tax'), value: fmtUSD(aTax) },
@@ -1271,7 +1271,7 @@ ${translateOr('profit_margin', 'Margin')} = ${translateOr('gross_profit', 'Profi
       // headlines its own card) -- the profit formula's own parts remain.
       details: [
         { label: translateOr('est_profit', 'Est. profit'), value: fmtUSD(aProfit) },
-        { label: translateOr('cogs', 'COGS'), value: fmtUSD(aCost) },
+        { label: `${translateOr('cost_price', 'Cost price')} (${translateOr('cogs', 'COGS')})`, value: fmtUSD(aCost) },
         { label: translateOr('store_paid_delivery', 'Store-paid delivery'), value: fmtUSD(aStoreDelivery) },
         { label: translateOr('profit_margin', 'Profit margin'), value: aRevenue > 0 ? `${((aProfit / aRevenue) * 100).toFixed(2)}%` : '0.00%' },
       ],

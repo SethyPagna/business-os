@@ -1173,6 +1173,10 @@ export default function Returns() {
         visibleIds={visibleIds}
       />
 
+      <div className="mt-3 flex justify-center">
+        <PaginationControls compact rangeAsPageSize page={returnPage} pageSize={returnPageSize} totalItems={allVisibleReturns.length} label={tr('returns_count', 'returns')} t={t} onPageChange={setReturnPage} onPageSizeChange={(size) => { setReturnPageSize(size); setReturnPage(1) }} />
+      </div>
+
       {exportDialog ? (
         <Suspense fallback={null}>
           <ExportOptionsDialog

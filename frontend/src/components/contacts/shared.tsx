@@ -465,6 +465,23 @@ export function ContactTable<T extends ContactRow>({
       <div className="space-y-2 md:hidden">
         {pagedRows.map((row) => renderCard?.(row))}
       </div>
+      <div className="mt-3 flex justify-center">
+        <PaginationControls
+          compact
+          rangeAsPageSize
+          page={activePage}
+          pageSize={activePageSize}
+          totalItems={totalItems}
+          label={typeof t === 'function' ? (t('records') || 'records') : 'records'}
+          t={t}
+          onPageChange={usingControlledPagination ? onControlledPageChange : setPage}
+          onPageSizeChange={(size) => {
+            if (usingControlledPagination) { onControlledPageSizeChange?.(size); onControlledPageChange?.(1); return }
+            setPageSize(size)
+            setPage(1)
+          }}
+        />
+      </div>
     </>
   )
 }

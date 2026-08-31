@@ -123,10 +123,10 @@ export default function SalesListSurface({
 
   return (
     <>
-      <div className="card hidden flex-col sm:flex sm:max-h-[42rem] sm:overflow-hidden">
-        <div className="min-h-0 flex-1 overflow-auto">
+      <div className="card hidden overflow-hidden sm:block">
+        <div className="overflow-x-auto">
           <table className="w-full text-sm" style={{ minWidth: 760 }}>
-            <thead className="sticky top-0 bg-gray-50 dark:bg-gray-700/50">
+            <thead className="bg-gray-50 dark:bg-gray-700/50">
               <tr>
                 <th className={`${selectionModeActive ? 'w-10' : 'w-0'} ${selectCellPad} py-3`}>
                   {selectionModeActive ? (

@@ -225,12 +225,10 @@ export default function StatsStrip({
                 <span className={`max-w-full truncate text-[15px] font-bold leading-5 tracking-tight ${loading ? 'animate-pulse text-gray-300 dark:text-gray-600' : (card.tone ? VALUE_TONE[card.tone] : 'text-gray-900 dark:text-white')}`}>
                   {loading ? '···' : card.value}
                 </span>
-                {card.sub ? (
-                  <span className="max-w-full truncate text-[10px] leading-3.5 text-gray-400 dark:text-gray-500">{card.sub}</span>
-                ) : null}
-                {typeof card.trend === 'number' ? (
-                  <span className={`text-[10px] font-semibold leading-3.5 ${card.trend > 0 ? 'text-emerald-600 dark:text-emerald-400' : card.trend < 0 ? 'text-red-500 dark:text-red-400' : 'text-gray-400'}`}>
-                    {card.trend > 0 ? '+' : ''}{card.trend.toFixed(1)}%
+                {card.sub || typeof card.trend === 'number' ? (
+                  <span className="flex min-w-0 items-center gap-1 text-[10px] leading-3.5">
+                    {card.sub ? <span className="min-w-0 truncate text-gray-400 dark:text-gray-500">{card.sub}</span> : null}
+                    {typeof card.trend === 'number' ? <span className={`shrink-0 font-semibold ${card.trend > 0 ? 'text-emerald-600 dark:text-emerald-400' : card.trend < 0 ? 'text-red-500 dark:text-red-400' : 'text-gray-400'}`}>{card.trend > 0 ? '+' : ''}{card.trend.toFixed(1)}%</span> : null}
                   </span>
                 ) : null}
               </button>

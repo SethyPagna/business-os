@@ -93,6 +93,8 @@ export default function PaginationControls({
   const ofLabel = typeof t === 'function' ? (t('of') || 'of') : 'of'
   const perPageLabel = typeof t === 'function' ? (t('per_page') || 'per page') : 'per page'
   const showingLabel = typeof t === 'function' ? (t('showing') || 'Showing') : 'Showing'
+  const backLabel = typeof t === 'function' ? (t('back') || 'Back') : 'Back'
+  const nextLabel = typeof t === 'function' ? (t('next') || 'Next') : 'Next'
   const [pageDraft, setPageDraft] = useState(String(safePage))
 
   useEffect(() => {
@@ -134,7 +136,7 @@ export default function PaginationControls({
     // so the numbers read as one set; the prev/next arrows are the strongest
     // element (darker, bolder stroke, solid hover) so the primary action --
     // paging -- stands out and the disabled edge is unmistakable.
-    const arrowButtonClass = 'inline-flex h-7 w-10 shrink-0 items-center justify-center text-slate-600 transition-colors hover:bg-slate-100 hover:text-slate-900 disabled:cursor-not-allowed disabled:bg-transparent disabled:text-slate-300 dark:text-slate-200 dark:hover:bg-slate-800 dark:hover:text-white dark:disabled:text-slate-600'
+    const arrowButtonClass = 'inline-flex h-7 shrink-0 items-center gap-0.5 px-2 text-slate-600 transition-colors hover:bg-slate-100 hover:text-slate-900 disabled:cursor-not-allowed disabled:bg-transparent disabled:text-slate-300 dark:text-slate-200 dark:hover:bg-slate-800 dark:hover:text-white dark:disabled:text-slate-600'
     return (
       <div className={`inline-flex max-w-full items-center overflow-hidden rounded-full border border-slate-300 bg-white text-xs font-semibold text-slate-800 shadow-sm dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100 ${className}`}>
         <button
@@ -142,9 +144,10 @@ export default function PaginationControls({
           className={arrowButtonClass}
           disabled={safePage <= 1}
           onClick={() => onPageChange?.(safePage - 1)}
-          aria-label="Previous page"
+          aria-label={backLabel}
         >
           <ChevronLeft className="h-4 w-4" strokeWidth={2.5} />
+          <span>{backLabel}</span>
         </button>
         <div className="inline-flex min-w-0 items-center gap-1.5 px-1.5">
           {/* Order per request: the item-range chip (per-page trigger) FIRST,
@@ -186,8 +189,9 @@ export default function PaginationControls({
           className={arrowButtonClass}
           disabled={safePage >= totalPages}
           onClick={() => onPageChange?.(safePage + 1)}
-          aria-label="Next page"
+          aria-label={nextLabel}
         >
+          <span>{nextLabel}</span>
           <ChevronRight className="h-4 w-4" strokeWidth={2.5} />
         </button>
       </div>
@@ -202,7 +206,7 @@ export default function PaginationControls({
             callers don't override it) instead of a fixed wide column -- the
             width that frees up goes to the prev/next buttons below, not to
             growing the row: same h-7 everywhere, just wider touch targets. */}
-        <div className="grid max-w-full grid-cols-[minmax(5rem,1fr)_minmax(4.5rem,5.5rem)_minmax(9rem,12rem)] items-center gap-1">
+        <div className="grid max-w-full grid-cols-[minmax(5rem,1fr)_minmax(4.5rem,5.5rem)_minmax(12rem,14rem)] items-center gap-1">
           <span className="inline-flex min-w-0 items-center justify-center overflow-hidden text-ellipsis whitespace-nowrap rounded-full bg-slate-50 px-1.5 py-1 font-semibold text-slate-700 dark:bg-slate-800 dark:text-slate-100">
             {start.toLocaleString()}-{end.toLocaleString()} / {total.toLocaleString()}
           </span>
@@ -222,12 +226,13 @@ export default function PaginationControls({
           <div className="inline-flex min-w-0 items-center overflow-hidden rounded-full border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-950">
             <button
               type="button"
-              className="inline-flex h-7 w-11 shrink-0 items-center justify-center text-slate-500 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40 dark:text-slate-300 dark:hover:bg-slate-800"
+              className="inline-flex h-7 shrink-0 items-center gap-0.5 px-2 text-slate-500 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40 dark:text-slate-300 dark:hover:bg-slate-800"
               disabled={safePage <= 1}
               onClick={() => onPageChange?.(safePage - 1)}
-              aria-label="Previous page"
+              aria-label={backLabel}
             >
               <ChevronLeft className="h-4 w-4" />
+              <span>{backLabel}</span>
             </button>
             {compactPageInput ? (
               <div className="inline-flex min-w-0 flex-1 items-center justify-center gap-1 px-1 text-[11px] font-semibold text-slate-700 dark:text-slate-100">
@@ -252,11 +257,12 @@ export default function PaginationControls({
             )}
             <button
               type="button"
-              className="inline-flex h-7 w-11 shrink-0 items-center justify-center text-slate-500 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40 dark:text-slate-300 dark:hover:bg-slate-800"
+              className="inline-flex h-7 shrink-0 items-center gap-0.5 px-2 text-slate-500 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40 dark:text-slate-300 dark:hover:bg-slate-800"
               disabled={safePage >= totalPages}
               onClick={() => onPageChange?.(safePage + 1)}
-              aria-label="Next page"
+              aria-label={nextLabel}
             >
+              <span>{nextLabel}</span>
               <ChevronRight className="h-4 w-4" />
             </button>
           </div>
@@ -287,12 +293,13 @@ export default function PaginationControls({
         <div className="inline-flex items-center overflow-hidden rounded-lg border border-slate-200 dark:border-slate-700">
           <button
             type="button"
-            className="inline-flex h-9 w-11 items-center justify-center bg-white text-slate-500 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40 dark:bg-slate-950 dark:text-slate-300 dark:hover:bg-slate-800"
+            className="inline-flex h-9 items-center gap-0.5 bg-white px-3 text-slate-500 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40 dark:bg-slate-950 dark:text-slate-300 dark:hover:bg-slate-800"
             disabled={safePage <= 1}
             onClick={() => onPageChange?.(safePage - 1)}
-            aria-label="Previous page"
+            aria-label={backLabel}
           >
             <ChevronLeft className="h-4 w-4" />
+            <span>{backLabel}</span>
           </button>
           {editablePageInput ? (
             <div className="inline-flex min-w-28 items-center justify-center gap-1 bg-slate-50 px-3 py-1.5 font-semibold dark:bg-slate-800">
@@ -316,11 +323,12 @@ export default function PaginationControls({
           )}
           <button
             type="button"
-            className="inline-flex h-9 w-11 items-center justify-center bg-white text-slate-500 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40 dark:bg-slate-950 dark:text-slate-300 dark:hover:bg-slate-800"
+            className="inline-flex h-9 items-center gap-0.5 bg-white px-3 text-slate-500 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40 dark:bg-slate-950 dark:text-slate-300 dark:hover:bg-slate-800"
             disabled={safePage >= totalPages}
             onClick={() => onPageChange?.(safePage + 1)}
-            aria-label="Next page"
+            aria-label={nextLabel}
           >
+            <span>{nextLabel}</span>
             <ChevronRight className="h-4 w-4" />
           </button>
         </div>

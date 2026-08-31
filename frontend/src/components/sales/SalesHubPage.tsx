@@ -66,7 +66,7 @@ export default function SalesHubPage() {
     // roots only scroll when they get a bounded height from a flex parent.
     // A plain block root here left every section clipped and unscrollable
     // (Phase Y4 regression).
-    <div className="flex min-h-0 flex-1 flex-col space-y-3">
+    <div className="flex min-h-0 flex-1 flex-col">
       {visibleTabs.length > 1 ? (
         // Full-width equal tabs so all of Sales/Returns/Fees/Reports FIT on
         // one row on a phone (user, Aug 31: "the sales page's various
@@ -75,7 +75,7 @@ export default function SalesHubPage() {
         // icon+label tabs overflowed the viewport and pushed the whole page
         // wide (Reports fell off the right edge). Now each tab is flex-1 and
         // its label truncates rather than widening the row.
-        <div className="shrink-0 px-3 pt-4">
+        <div className="shrink-0 px-3 pt-0">
           <div className="flex w-full rounded-xl bg-gray-100 dark:bg-gray-800 p-0.5">
             {visibleTabs.map((tab) => {
               const Icon = tab.icon

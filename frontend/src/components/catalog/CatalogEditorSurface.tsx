@@ -382,10 +382,6 @@ function CatalogEditorSurfaceContent() {
                 </button>
               </div>
               <label className="flex items-center justify-between rounded-2xl border border-slate-200 bg-white px-4 py-3">
-                <span className="text-sm font-medium text-slate-700">{copy('showMembership', 'Show membership lookup')}</span>
-                <input id="portal-show-membership" name="customer_portal_show_membership" type="checkbox" checked={!!editorDraft.customer_portal_show_membership} onChange={(event) => setDraft('customer_portal_show_membership', event.target.checked)} />
-              </label>
-              <label className="flex items-center justify-between rounded-2xl border border-slate-200 bg-white px-4 py-3">
                 <span className="text-sm font-medium text-slate-700">{copy('showAbout', 'Show about section')}</span>
                 <input id="portal-show-about" name="customer_portal_show_about" type="checkbox" checked={!!editorDraft.customer_portal_show_about} onChange={(event) => setDraft('customer_portal_show_about', event.target.checked)} />
               </label>

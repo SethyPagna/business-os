@@ -3090,7 +3090,7 @@ function ProductsFullEditor() {
             title's. */}
         <td className="px-2 py-2">
           {indented ? null : thumbnailState.hasImage
-            ? <ProductImg src={thumbnailState.thumbnail} alt={productName} className="h-14 w-14 rounded-lg bg-slate-50 object-contain p-0.5 cursor-zoom-in hover:ring-2 hover:ring-primary-400 dark:bg-slate-800" onClick={(e) => { e.stopPropagation(); openLightbox(thumbnailState.gallery, 0, productName) }}
+            ? <ProductImg src={thumbnailState.thumbnail} alt={productName} className="h-16 w-16 rounded-lg bg-slate-50 object-contain p-0.5 cursor-zoom-in hover:ring-2 hover:ring-primary-400 dark:bg-slate-800" onClick={(e) => { e.stopPropagation(); openLightbox(thumbnailState.gallery, 0, productName) }}
                 // Stopping only the CLICK left the row still opening its
                 // detail flyout behind the lightbox: the row's long-press
                 // handlers bind mousedown/touchstart (utils/longPress.ts),
@@ -3099,7 +3099,7 @@ function ProductsFullEditor() {
                 // AND the detail at once. Stop the gesture at its start.
                 onMouseDown={(e) => e.stopPropagation()}
                 onTouchStart={(e) => e.stopPropagation()} />
-            : <ProductImagePlaceholder className="h-14 w-14 rounded-lg" compact />}
+            : <ProductImagePlaceholder className="h-16 w-16 rounded-lg" compact />}
         </td>
         {/* Name rail (col 3): child rows align EXACTLY with the group
             title -- no text indent. A child row leaves its image cell empty
@@ -3178,7 +3178,7 @@ function ProductsFullEditor() {
           {sellingKhr > 0 && <div className="text-xs text-gray-400">{fmtKHR(sellingKhr)}</div>}
           {specialUsd > 0 || specialKhr > 0 ? (
             <div className="mt-0.5 text-[10px] text-primary-600 dark:text-primary-400">
-              Special {fmtUSD(specialUsd || sellingUsd)}
+              VIP {fmtUSD(specialUsd || sellingUsd)}
               {specialKhr > 0 ? ` / ${fmtKHR(specialKhr)}` : ''}
             </div>
           ) : null}
@@ -3190,7 +3190,7 @@ function ProductsFullEditor() {
         </td>
         <td className="px-3 py-2 text-right hidden lg:table-cell">
           {costUsd > 0 && sellingUsd > 0
-            ? <div><div className={`font-medium text-xs ${marginUsd >= 0 ? 'text-primary-600' : 'text-yellow-600'}`}>{fmtUSD(marginUsd)}</div><div className="text-xs text-gray-400">{marginPct.toFixed(1)}%</div></div>
+            ? <div><div className={`font-medium text-xs ${marginUsd >= 0 ? 'text-blue-600 dark:text-blue-400' : 'text-yellow-600'}`}>{fmtUSD(marginUsd)}</div><div className="text-xs text-blue-500/80 dark:text-blue-400/80">{marginPct.toFixed(1)}%</div></div>
             : <span className="text-gray-300">N/A</span>}
         </td>
         <td className="px-3 py-2 text-right">

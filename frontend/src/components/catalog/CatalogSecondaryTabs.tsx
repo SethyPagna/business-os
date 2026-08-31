@@ -367,7 +367,7 @@ function CatalogAboutSection(props: CatalogAboutSectionProps) {
       >
         <div
           data-portal-about-hero="true"
-          className="relative h-28 sm:h-44"
+          className="relative h-20 sm:h-28"
           style={hasCover ? undefined : {
             backgroundColor: heroGradientStart,
             backgroundImage: bannerBackground,
@@ -377,7 +377,7 @@ function CatalogAboutSection(props: CatalogAboutSectionProps) {
         />
 
         <div className={`relative px-5 pb-5 sm:px-8 sm:pb-8 ${hasCover ? 'bg-white/90 backdrop-blur-sm dark:bg-neutral-900/85' : ''}`}>
-          <div className="-mt-9 flex flex-wrap items-end gap-4 sm:-mt-12 sm:gap-5">
+          <div className="-mt-7 flex flex-wrap items-end gap-3 sm:-mt-9 sm:gap-4">
             <div
               className="flex shrink-0 items-center justify-center overflow-hidden rounded-full border-4 border-white bg-white shadow-[0_12px_28px_rgba(15,23,42,0.18)] dark:border-neutral-900"
               style={{ height: `${logoSizePx}px`, width: `${logoSizePx}px` }}

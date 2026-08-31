@@ -3,7 +3,7 @@
 // Callers place it on the table's header row; wrap it in `hidden lg:…` if the
 // surface only offers extra columns on large screens (the intended use).
 import { useEffect, useRef, useState } from 'react'
-import Columns from 'lucide-react/dist/esm/icons/columns-3.js'
+import MoreVertical from 'lucide-react/dist/esm/icons/more-vertical.js'
 import Check from 'lucide-react/dist/esm/icons/check.js'
 import type { TableColumnDef } from './columnPreferences.ts'
 
@@ -12,7 +12,7 @@ interface ColumnChooserProps {
   isVisible: (key: string) => boolean
   toggle: (key: string) => void
   reset: () => void
-  /** Button label; defaults to "Columns". */
+  /** Button label used as the accessible name / tooltip. */
   label?: string
   resetLabel?: string
   className?: string
@@ -46,12 +46,11 @@ export default function ColumnChooser({ columns, isVisible, toggle, reset, label
         onClick={() => setOpen((value) => !value)}
         aria-haspopup="true"
         aria-expanded={open}
-        className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-2.5 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700"
+        className="inline-flex h-7 w-7 items-center justify-center rounded-md text-gray-500 hover:bg-gray-100 hover:text-gray-800 dark:text-gray-400 dark:hover:bg-gray-700 dark:hover:text-gray-100"
         title={label}
       >
-        <Columns className="h-3.5 w-3.5" />
-        <span>{label}</span>
-        <span className="rounded bg-gray-100 px-1 text-[10px] tabular-nums text-gray-500 dark:bg-gray-700 dark:text-gray-400">{shownCount}/{columns.length}</span>
+        <MoreVertical className="h-4 w-4" />
+        <span className="sr-only">{label} ({shownCount}/{columns.length})</span>
       </button>
       {open ? (
         <div className="absolute right-0 z-20 mt-1 w-52 rounded-xl border border-gray-200 bg-white p-1.5 shadow-lg dark:border-gray-700 dark:bg-gray-800">

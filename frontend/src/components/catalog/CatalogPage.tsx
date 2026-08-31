@@ -15,7 +15,6 @@ import MapPin from 'lucide-react/dist/esm/icons/map-pin.js'
 import Send from 'lucide-react/dist/esm/icons/send.js'
 import ShoppingBag from 'lucide-react/dist/esm/icons/shopping-bag.js'
 import Store from 'lucide-react/dist/esm/icons/store.js'
-import Ticket from 'lucide-react/dist/esm/icons/ticket.js'
 import type { LucideIcon } from 'lucide-react'
 import { useIsPageActive } from '../shared/pageActivity'
 import { clampPage } from '../shared/PaginationControls'
@@ -646,7 +645,6 @@ function getPortalTabs(config: PortalConfig, copy?: CopyFunction | null): Portal
   const items = [
     config?.showAbout ? { key: 'about', label: copy?.('about', 'About') || 'About', icon: Store } : null,
     config?.showCatalog ? { key: 'products', label: copy?.('products', 'Products') || 'Products', icon: ShoppingBag } : null,
-    config?.showMembership ? { key: 'membership', label: copy?.('membership', 'Membership') || 'Membership', icon: Ticket } : null,
     config?.showFaq ? { key: 'faq', label: copy?.('faq', 'FAQ') || 'FAQ', icon: HelpCircle } : null,
     config?.aiEnabled ? { key: 'ai', label: config?.aiTitle || copy?.('portalAssistant', 'AI assistant') || 'AI assistant', icon: Bot } : null,
   ]
@@ -749,7 +747,8 @@ function buildDraft(config: PortalConfig): PortalDraft {
     customer_portal_language: config.languageSetting || 'auto',
     customer_portal_translate_widget_enabled: !!config.translateWidgetEnabled,
     customer_portal_show_catalog: !!config.showCatalog,
-    customer_portal_show_membership: !!config.showMembership,
+    // Membership history belongs to the authenticated Account profile only.
+    customer_portal_show_membership: false,
     customer_portal_show_prices: !!config.showPrices,
     customer_portal_show_out_of_stock_products: !!config.showOutOfStockProducts,
     customer_portal_show_stock_status: config.showStockStatus !== false,
@@ -896,7 +895,7 @@ function applyDraft(config: PortalConfig, draft: PortalDraft): PortalConfig {
     languageSetting,
     translateWidgetEnabled: toBoolean(draft.customer_portal_translate_widget_enabled, config.translateWidgetEnabled),
     showCatalog: toBoolean(draft.customer_portal_show_catalog, config.showCatalog),
-    showMembership: toBoolean(draft.customer_portal_show_membership, config.showMembership),
+    showMembership: false,
     showPrices: toBoolean(draft.customer_portal_show_prices, config.showPrices),
     showOutOfStockProducts: toBoolean(draft.customer_portal_show_out_of_stock_products, config.showOutOfStockProducts ?? true),
     showStockStatus: toBoolean(draft.customer_portal_show_stock_status, config.showStockStatus ?? true),
@@ -2630,7 +2629,6 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
       }
       if (
         !editorDraft.customer_portal_show_catalog
-        && !editorDraft.customer_portal_show_membership
         && !editorDraft.customer_portal_show_about
         && !editorDraft.customer_portal_show_faq
         && !editorDraft.customer_portal_ai_enabled
@@ -2674,7 +2672,7 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
 
       const sanitizedLogoImage = sanitizePortalMediaValue(editorDraft.customer_portal_logo_image, previewConfig.logoImage || '')
       const sanitizedFaviconImage = sanitizePortalMediaValue(editorDraft.customer_portal_favicon_image, previewConfig.faviconImage || '')
-      const sanitizedCoverImage = sanitizePortalMediaValue(editorDraft.customer_portal_cover_image, previewConfig.coverImage || '')
+      const sanitizedCoverImage = sanitizePortalMediaValue(editorDraft.customer_portal_cover_image, previewConfig.businessCover || '')
       const previewAboutBlockMap = new Map<string, PortalMediaBlock>((previewConfig.aboutBlocks || []).map((block: PortalMediaBlock) => [String(block?.id || ''), block]))
       const sanitizedAboutBlocks = aboutBlocks.map((block: PortalMediaBlock) => ({
         ...block,
@@ -2768,7 +2766,7 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
         customer_portal_language: editorDraft.customer_portal_language || 'auto',
         customer_portal_translate_widget_enabled: editorDraft.customer_portal_translate_widget_enabled ? 'true' : 'false',
     customer_portal_show_catalog: editorDraft.customer_portal_show_catalog ? 'true' : 'false',
-    customer_portal_show_membership: editorDraft.customer_portal_show_membership ? 'true' : 'false',
+    customer_portal_show_membership: 'false',
     customer_portal_show_prices: editorDraft.customer_portal_show_prices ? 'true' : 'false',
     customer_portal_show_out_of_stock_products: editorDraft.customer_portal_show_out_of_stock_products ? 'true' : 'false',
     customer_portal_show_stock_status: editorDraft.customer_portal_show_stock_status ? 'true' : 'false',
