@@ -129,6 +129,19 @@ export function getProductDetailReport(productId: number | string, params: Query
   return apiFetch('GET', appendQuery(`/api/products/${encodeURIComponent(String(productId))}/detail-report`, query))
 }
 
+// Drill-downs for the detail report's Sales and Suppliers rows: the individual
+// sales of a product within one day/month, and the batches one supplier
+// delivered for this product. Fetched on demand when a row is opened, so kept
+// off the cached path like the report/ledger above.
+export function getProductSalesDetail(productId: number | string, period: string, mode: 'day' | 'month'): Promise<unknown> {
+  const query = buildQueryString({ period, mode })
+  return apiFetch('GET', appendQuery(`/api/products/${encodeURIComponent(String(productId))}/sales-detail`, query))
+}
+export function getProductSupplierPurchases(productId: number | string, supplierKey: string): Promise<unknown> {
+  const query = buildQueryString({ supplierKey })
+  return apiFetch('GET', appendQuery(`/api/products/${encodeURIComponent(String(productId))}/supplier-purchases`, query))
+}
+
 // D1: the Stock Change ledger read. Deliberately NOT routed through the
 // cached-query path -- a ledger must reflect the write that just happened,
 // and the section refetches on open/page/view changes anyway.

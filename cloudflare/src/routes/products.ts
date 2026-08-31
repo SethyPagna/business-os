@@ -1100,6 +1100,73 @@ app.get('/:id/detail-report', async (c) => {
   })
 })
 
+// Drill-downs for the product detail report's Sales and Suppliers rows (user
+// ask: each summary row opens the deeper detail in place). Same read gate as
+// /detail-report above: a products OR inventory grant. Both are READ-ONLY and
+// product-scoped, and their filters mirror /detail-report's own aggregates so
+// the drilled numbers can never disagree with the row that opened them.
+function canReadProductDetail(user: SessionUser): boolean {
+  return getPermissionTier(user, 'products') !== 'none' || getPermissionTier(user, 'inventory') !== 'none'
+}
+
+// Individual sales of this product within ONE day or month (the period a row on
+// the sales breakdown represents). Grouped one row per sale so the sum of qty
+// equals the breakdown row's qty. Non-cancelled only, matching the aggregate's
+// default (whereActiveSales in getProductSalesBreakdown).
+app.get('/:id/sales-detail', async (c) => {
+  const user = c.get('user')
+  if (!canReadProductDetail(user)) return c.json({ error: 'You do not have permission to perform this action' }, 403)
+  const productId = Number(c.req.param('id')) || 0
+  if (!productId) return c.json({ error: 'Product not found' }, 404)
+  const mode = c.req.query('mode') === 'month' ? 'month' : 'day'
+  const period = String(c.req.query('period') || '').trim()
+  const periodOk = mode === 'month' ? /^\d{4}-\d{2}$/.test(period) : /^\d{4}-\d{2}-\d{2}$/.test(period)
+  if (!periodOk) return c.json({ error: 'A valid period is required' }, 400)
+  const periodExpr = mode === 'month' ? "strftime('%Y-%m', s.created_at)" : "date(s.created_at)"
+  const rows = await getDb(c.env).prepare(`
+    SELECT s.id, s.receipt_number, s.created_at, s.customer_name,
+           COALESCE(SUM(si.quantity), 0) AS qty,
+           COALESCE(SUM(si.total_usd), 0) AS revenue_usd
+    FROM sale_items si
+    JOIN sales s ON s.id = si.sale_id
+    WHERE si.product_id = @productId
+      AND COALESCE(s.sale_status, 'completed') <> 'cancelled'
+      AND ${periodExpr} = @period
+    GROUP BY s.id
+    ORDER BY s.created_at DESC
+    LIMIT 200
+  `).all<Record<string, unknown>>({ productId, period })
+  return c.json({ period, mode, sales: rows || [] })
+})
+
+// The batches/lots ONE supplier delivered for this product. supplierKey is the
+// same COALESCE('id:'||supplier_id, 'name:'||lower(trim(supplier_name))) key the
+// /detail-report supplier rows are grouped by, so this returns exactly that
+// group's lots.
+app.get('/:id/supplier-purchases', async (c) => {
+  const user = c.get('user')
+  if (!canReadProductDetail(user)) return c.json({ error: 'You do not have permission to perform this action' }, 403)
+  const productId = Number(c.req.param('id')) || 0
+  if (!productId) return c.json({ error: 'Product not found' }, 404)
+  const supplierKey = String(c.req.query('supplierKey') || '').trim()
+  if (!supplierKey) return c.json({ error: 'A supplier is required' }, 400)
+  const rows = await getDb(c.env).prepare(`
+    SELECT pb.id, pb.lot_code, pb.batch_number, pb.received_at, pb.expiry_date,
+           pb.unit_cost_usd, pb.supplier_name,
+           COALESCE(bbs.qty, 0) AS total_qty
+    FROM product_batches pb
+    LEFT JOIN (
+      SELECT batch_id, SUM(quantity) AS qty FROM branch_batch_stock GROUP BY batch_id
+    ) bbs ON bbs.batch_id = pb.id
+    WHERE pb.variant_product_id = @productId
+      AND pb.is_active = 1
+      AND COALESCE('id:' || pb.supplier_id, 'name:' || lower(trim(pb.supplier_name))) = @supplierKey
+    ORDER BY pb.received_at DESC, pb.id DESC
+    LIMIT 100
+  `).all<Record<string, unknown>>({ productId, supplierKey })
+  return c.json({ supplierKey, purchases: rows || [] })
+})
+
 // D1 (Part 415): the Products page's Stock Change ledger -- one row per
 // recorded action with a derived running balance. READ-ONLY over the
 // EXISTING inventory_movements history; no new write path. Lives under

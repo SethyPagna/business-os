@@ -6,7 +6,7 @@ import History from 'lucide-react/dist/esm/icons/history.js'
 import TrendingUp from 'lucide-react/dist/esm/icons/trending-up.js'
 import Users from 'lucide-react/dist/esm/icons/users.js'
 import type { LucideIcon } from 'lucide-react'
-import { getProductDetailReport, getStockLedger } from '../../../api/productReadTransport.ts'
+import { getProductDetailReport, getStockLedger, getProductSalesDetail, getProductSupplierPurchases } from '../../../api/productReadTransport.ts'
 import { movementColorClass, translateMovementType } from '../../inventory/movementGroups.ts'
 import { fmtDate, fmtDateTime24 } from '../../../utils/formatters'
 import { batchDisplayLabel } from '../../../utils/batchLabel.ts'
@@ -81,6 +81,13 @@ type LedgerRow = {
   batch_received_at?: string | null
 }
 
+// Drill-down rows: the individual sales in a period, and the lots one supplier
+// delivered for this product (fetched on demand when a summary row is opened).
+type SaleDetailRow = { id: number; receipt_number: string | null; created_at: string; customer_name: string | null; qty: number; revenue_usd: number }
+type PurchaseRow = { id: number; lot_code: string | null; batch_number: number | null; received_at: string | null; expiry_date: string | null; unit_cost_usd: number | null; supplier_name: string | null; total_qty: number }
+// Per-key drill cache: an array once loaded, or a loading/error sentinel.
+type DrillCache<T> = Record<string, T[] | 'loading' | 'error'>
+
 // Which float is open. `null` = none; the parent detail sheet stays interactive
 // behind it (the float is a separate z-[60] overlay above the z-50 sheet).
 type OpenSection = 'movements' | 'sales' | 'suppliers' | null
@@ -126,6 +133,42 @@ export default function ProductDetailReport({ productId, barcode, t, fmtUSD }: {
   // (user ask: rows are too spread out; click to open the change's detail --
   // the source movement + its reference -- as compact label/value pairs).
   const [openMovementId, setOpenMovementId] = useState<number | null>(null)
+  // Sales / supplier rows expand IN PLACE to their deeper detail (user ask):
+  // a sales row -> the individual sales in that period; a supplier row -> the
+  // lots that supplier delivered for this product. Each fetches on first open
+  // and caches by key so re-opening is instant.
+  const [openSalesKey, setOpenSalesKey] = useState<string | null>(null)
+  const [salesDrill, setSalesDrill] = useState<DrillCache<SaleDetailRow>>({})
+  const [openSupplierKey, setOpenSupplierKey] = useState<string | null>(null)
+  const [supplierDrill, setSupplierDrill] = useState<DrillCache<PurchaseRow>>({})
+
+  const toggleSalesRow = (period: string) => {
+    const apiMode = salesMode === 'by_month' ? 'month' : 'day'
+    const key = `${apiMode}:${period}`
+    if (openSalesKey === key) { setOpenSalesKey(null); return }
+    setOpenSalesKey(key)
+    if (salesDrill[key]) return
+    setSalesDrill((prev) => ({ ...prev, [key]: 'loading' }))
+    getProductSalesDetail(productId, period, apiMode)
+      .then((res) => {
+        const rows = (res as { sales?: SaleDetailRow[] })?.sales
+        setSalesDrill((prev) => ({ ...prev, [key]: Array.isArray(rows) ? rows : [] }))
+      })
+      .catch(() => setSalesDrill((prev) => ({ ...prev, [key]: 'error' })))
+  }
+
+  const toggleSupplierRow = (supplierKey: string) => {
+    if (openSupplierKey === supplierKey) { setOpenSupplierKey(null); return }
+    setOpenSupplierKey(supplierKey)
+    if (supplierDrill[supplierKey]) return
+    setSupplierDrill((prev) => ({ ...prev, [supplierKey]: 'loading' }))
+    getProductSupplierPurchases(productId, supplierKey)
+      .then((res) => {
+        const rows = (res as { purchases?: PurchaseRow[] })?.purchases
+        setSupplierDrill((prev) => ({ ...prev, [supplierKey]: Array.isArray(rows) ? rows : [] }))
+      })
+      .catch(() => setSupplierDrill((prev) => ({ ...prev, [supplierKey]: 'error' })))
+  }
 
   const tr = (key: string, fallback: string): string => {
     const value = t(key)
@@ -308,13 +351,43 @@ export default function ProductDetailReport({ productId, barcode, t, fmtUSD }: {
         <button type="button" onClick={() => setSalesMode('by_month')} className={`rounded-md px-2 py-1 font-medium ${salesMode === 'by_month' ? 'bg-white text-blue-600 shadow dark:bg-gray-900' : 'text-gray-500'}`}>{tr('monthly', 'Monthly')}</button>
       </div>
       <div className="space-y-1">
-        {salesRows.map((row) => (
-          <div key={row.period} className="flex items-center justify-between rounded-lg bg-gray-50 px-2.5 py-1.5 text-xs dark:bg-gray-800/60">
-            <span className="text-gray-500">{salesMode === 'by_day' ? fmtDate(row.period) : row.period}</span>
-            <span className="tabular-nums font-semibold text-gray-700 dark:text-gray-200">×{row.qty}</span>
-            <span className="tabular-nums text-gray-500">{fmtUSD(row.revenue_usd)}</span>
-          </div>
-        ))}
+        {salesRows.map((row) => {
+          const apiMode = salesMode === 'by_month' ? 'month' : 'day'
+          const key = `${apiMode}:${row.period}`
+          const open = openSalesKey === key
+          const drill = salesDrill[key]
+          return (
+            <div key={row.period}>
+              {/* Click a period row to open the individual sales it aggregates. */}
+              <button type="button" onClick={() => toggleSalesRow(row.period)} className="flex w-full items-center justify-between gap-2 rounded-lg bg-gray-50 px-2.5 py-1.5 text-left text-xs transition-colors hover:bg-gray-100 dark:bg-gray-800/60 dark:hover:bg-gray-800">
+                <span className="text-gray-500">{salesMode === 'by_day' ? fmtDate(row.period) : row.period}</span>
+                <span className="flex items-center gap-2">
+                  <span className="tabular-nums font-semibold text-gray-700 dark:text-gray-200">×{row.qty}</span>
+                  <span className="tabular-nums text-gray-500">{fmtUSD(row.revenue_usd)}</span>
+                  <ChevronDown className={`h-3 w-3 shrink-0 text-gray-300 transition-transform ${open ? 'rotate-180' : ''}`} />
+                </span>
+              </button>
+              {open ? (
+                <div className="mt-0.5 space-y-0.5 rounded-lg bg-gray-100/70 px-2 py-1.5 text-[11px] dark:bg-gray-800/40">
+                  {drill === 'loading' || drill === undefined ? (
+                    <p className="py-1 text-center text-gray-400">{tr('loading', 'Loading')}...</p>
+                  ) : drill === 'error' ? (
+                    <p className="py-1 text-center text-red-500">{tr('load_failed', 'Failed to load')}</p>
+                  ) : !drill.length ? (
+                    <p className="py-1 text-center text-gray-400">{tr('no_data_found', 'No data found')}</p>
+                  ) : drill.map((sale) => (
+                    <div key={sale.id} className="flex items-center justify-between gap-2">
+                      <span className="min-w-0 flex-1 truncate font-mono text-gray-500" title={sale.customer_name || ''}>{sale.receipt_number || `#${sale.id}`}</span>
+                      <span className="shrink-0 whitespace-nowrap text-gray-400">{fmtDateTime24(sale.created_at)}</span>
+                      <span className="shrink-0 tabular-nums font-semibold text-gray-700 dark:text-gray-200">×{sale.qty}</span>
+                      <span className="shrink-0 tabular-nums text-gray-500">{fmtUSD(sale.revenue_usd)}</span>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+          )
+        })}
         {report && !salesRows.length ? <p className="py-2 text-center text-xs text-gray-400">{tr('no_data_found', 'No data found')}</p> : null}
         {!report ? <p className="py-2 text-center text-xs text-gray-400">{tr('loading', 'Loading')}...</p> : null}
       </div>
@@ -323,18 +396,46 @@ export default function ProductDetailReport({ productId, barcode, t, fmtUSD }: {
 
   const suppliersBody: ReactNode = (
     <div className="space-y-1">
-      {(report?.suppliers || []).map((supplier) => (
-        <div key={supplier.supplier_key} className="rounded-lg bg-gray-50 px-2.5 py-1.5 text-xs dark:bg-gray-800/60">
-          <div className="flex items-center justify-between gap-2">
-            <span className="font-semibold text-gray-700 dark:text-gray-200">{supplier.supplier_name || tr('unknown', 'Unknown')}</span>
-            <span className="tabular-nums text-gray-500">{supplier.lot_count} {tr('batches', 'Batches').toLowerCase()} · {supplier.current_qty}</span>
+      {(report?.suppliers || []).map((supplier) => {
+        const open = openSupplierKey === supplier.supplier_key
+        const drill = supplierDrill[supplier.supplier_key]
+        return (
+          <div key={supplier.supplier_key}>
+            {/* Click a supplier to open the lots it delivered for THIS product. */}
+            <button type="button" onClick={() => toggleSupplierRow(supplier.supplier_key)} className="w-full rounded-lg bg-gray-50 px-2.5 py-1.5 text-left text-xs transition-colors hover:bg-gray-100 dark:bg-gray-800/60 dark:hover:bg-gray-800">
+              <div className="flex items-center justify-between gap-2">
+                <span className="min-w-0 truncate font-semibold text-gray-700 dark:text-gray-200">{supplier.supplier_name || tr('unknown', 'Unknown')}</span>
+                <span className="flex shrink-0 items-center gap-2">
+                  <span className="tabular-nums text-gray-500">{supplier.lot_count} {tr('batches', 'Batches').toLowerCase()} · {supplier.current_qty}</span>
+                  <ChevronDown className={`h-3 w-3 shrink-0 text-gray-300 transition-transform ${open ? 'rotate-180' : ''}`} />
+                </span>
+              </div>
+              <div className="mt-0.5 flex items-center justify-between text-[11px] text-gray-400">
+                <span>{supplier.first_received_at ? fmtDate(supplier.first_received_at) : '--'} → {supplier.last_received_at ? fmtDate(supplier.last_received_at) : '--'}</span>
+                {supplier.lots_without_cost > 0 ? <span>{supplier.lots_without_cost} {tr('lots_without_cost', 'without cost')}</span> : null}
+              </div>
+            </button>
+            {open ? (
+              <div className="mt-0.5 space-y-0.5 rounded-lg bg-gray-100/70 px-2 py-1.5 text-[11px] dark:bg-gray-800/40">
+                {drill === 'loading' || drill === undefined ? (
+                  <p className="py-1 text-center text-gray-400">{tr('loading', 'Loading')}...</p>
+                ) : drill === 'error' ? (
+                  <p className="py-1 text-center text-red-500">{tr('load_failed', 'Failed to load')}</p>
+                ) : !drill.length ? (
+                  <p className="py-1 text-center text-gray-400">{tr('no_data_found', 'No data found')}</p>
+                ) : drill.map((lot) => (
+                  <div key={lot.id} className="flex items-center justify-between gap-2">
+                    <span className="min-w-0 flex-1 truncate text-gray-500">{batchDisplayLabel({ id: lot.id, lot_code: lot.lot_code, received_at: lot.received_at })}</span>
+                    <span className="shrink-0 whitespace-nowrap text-gray-400">{lot.received_at ? fmtDate(lot.received_at) : '--'}</span>
+                    <span className="shrink-0 tabular-nums font-semibold text-gray-700 dark:text-gray-200">×{lot.total_qty}</span>
+                    <span className="shrink-0 tabular-nums text-gray-500">{lot.unit_cost_usd != null ? fmtUSD(lot.unit_cost_usd) : '--'}</span>
+                  </div>
+                ))}
+              </div>
+            ) : null}
           </div>
-          <div className="mt-0.5 flex items-center justify-between text-[11px] text-gray-400">
-            <span>{supplier.first_received_at ? fmtDate(supplier.first_received_at) : '--'} → {supplier.last_received_at ? fmtDate(supplier.last_received_at) : '--'}</span>
-            {supplier.lots_without_cost > 0 ? <span>{supplier.lots_without_cost} {tr('lots_without_cost', 'without cost')}</span> : null}
-          </div>
-        </div>
-      ))}
+        )
+      })}
       {report && !report.suppliers?.length ? <p className="py-2 text-center text-xs text-gray-400">{tr('no_data_found', 'No data found')}</p> : null}
       {!report ? <p className="py-2 text-center text-xs text-gray-400">{tr('loading', 'Loading')}...</p> : null}
     </div>
