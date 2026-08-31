@@ -808,17 +808,29 @@ export async function pruneCloudflareBackups(env: Env, keep = CLOUDFLARE_BACKUP_
   const deleteBackupSet = async (item: typeof backups[number]) => {
     const backupName = item.name.replace(/\.json$/, '')
     const backupPrefix = `${CLOUDFLARE_BACKUP_PREFIX}${backupName}/`
-    const keys = [item.key]
+    // Delete the FOLDER (assets/ + state.json) BEFORE the manifest. The old
+    // order deleted the manifest first and, if listObjects then failed, left
+    // the whole <name>/assets/ folder behind with no manifest -- and because
+    // listCloudflareBackups only enumerates top-level .json manifests, that
+    // folder became permanently invisible to every future prune. On production
+    // this stranded 21 backup folders (~220 MB). Folder-first means: if the
+    // folder listing/delete fails, the manifest survives so the set stays fully
+    // listable and is retried next prune; a manifest left without its folder is
+    // harmless and self-heals (next prune lists an empty folder and drops it).
+    // pruneOrphanedBackupFolders() below is the backstop for any that slipped
+    // through under the old code.
     try {
       const objects = await listObjects(env.ASSETS, backupPrefix)
-      keys.push(...objects.map((object) => object.key))
+      const folderKeys = objects.map((object) => object.key)
+      for (let offset = 0; offset < folderKeys.length; offset += 500) {
+        await env.ASSETS.delete(folderKeys.slice(offset, offset + 500))
+      }
     } catch (_) {
-      // The manifest is still deleted below; a later orphan sweep can
-      // remove an unreachable folder if listing itself was unavailable.
+      // Listing the folder failed -- leave the manifest in place so the set
+      // stays reachable and is retried next prune. Do NOT orphan the folder.
+      return
     }
-    for (let offset = 0; offset < keys.length; offset += 500) {
-      await env.ASSETS.delete(keys.slice(offset, offset + 500))
-    }
+    await env.ASSETS.delete(item.key)
   }
 
   // Only finalized backups count toward the retention promise. A new
@@ -838,12 +850,70 @@ export async function pruneCloudflareBackups(env: Env, keep = CLOUDFLARE_BACKUP_
     staleRemoved.push(item.key)
   }
 
+  // Backstop: sweep backup FOLDERS whose manifest is gone. listCloudflareBackups
+  // (and therefore everything above) only enumerates top-level <name>.json
+  // manifests, so a <name>/assets/ folder left without its manifest -- by the
+  // old delete order, a listObjects hiccup, or any partial delete -- is
+  // invisible to normal retention and accumulates one set every backup forever.
+  // This catches them by prefix instead of trusting the manifest list.
+  let orphanRemoved: string[] = []
+  try {
+    orphanRemoved = await pruneOrphanedBackupFolders(env)
+  } catch (error) {
+    console.error('[backup] orphan-folder sweep failed', error)
+  }
+
   return {
     kept: finalized.slice(0, Math.max(0, keep)),
     removed,
     incomplete: incomplete.filter((item) => !staleRemoved.includes(item.key)),
     staleRemoved,
+    orphanRemoved,
   }
+}
+
+// Deletes backup FOLDERS (backups/cloudflare/<name>/…) that have no
+// corresponding top-level <name>.json manifest. Such a folder cannot be
+// restored (restore needs the manifest) and is unreachable by
+// listCloudflareBackups/pruneCloudflareBackups, so nothing else ever removes
+// it. A real in-progress backup always writes its manifest BEFORE any folder
+// object (see writeBackupDocument), so a manifest-less folder is already an
+// orphan; a short grace window on the folder's newest object guards only
+// against list-ordering races, never against a legitimate live backup.
+async function pruneOrphanedBackupFolders(env: Env): Promise<string[]> {
+  const ORPHAN_FOLDER_GRACE_MS = 60 * 60 * 1000 // 1h
+  const manifests = new Set<string>()
+  const folders = new Map<string, { keys: string[]; newestMs: number }>()
+  let cursor: string | undefined
+  do {
+    const page = await env.ASSETS.list({ prefix: CLOUDFLARE_BACKUP_PREFIX, cursor, limit: 1000 })
+    for (const object of page.objects || []) {
+      const rest = object.key.slice(CLOUDFLARE_BACKUP_PREFIX.length)
+      const slash = rest.indexOf('/')
+      if (slash === -1) {
+        if (rest.endsWith('.json')) manifests.add(rest.replace(/\.json$/, ''))
+        continue
+      }
+      const name = rest.slice(0, slash)
+      const entry = folders.get(name) || { keys: [], newestMs: 0 }
+      entry.keys.push(object.key)
+      const ms = object.uploaded?.getTime?.() || 0
+      if (ms > entry.newestMs) entry.newestMs = ms
+      folders.set(name, entry)
+    }
+    cursor = page.truncated ? page.cursor : undefined
+  } while (cursor)
+
+  const removed: string[] = []
+  for (const [name, entry] of folders) {
+    if (manifests.has(name)) continue // has a manifest -> a known backup; normal retention owns it
+    if (entry.newestMs && Date.now() - entry.newestMs < ORPHAN_FOLDER_GRACE_MS) continue // too fresh; guard the race
+    for (let offset = 0; offset < entry.keys.length; offset += 500) {
+      await env.ASSETS.delete(entry.keys.slice(offset, offset + 500))
+    }
+    removed.push(name)
+  }
+  return removed
 }
 
 export async function maybeRunScheduledBackup(env: Env) {
