@@ -88,12 +88,15 @@ Two rules learned the hard way, both from real incidents in this file's own hist
 
 ## Current status
 
-**[~ DEPLOY IN FLIGHT — r2, Aug 31 (third of the day): shipping committed HEAD
-from an isolated worktree** (r2's Part-541 offline sale-moment fix + c8's three
-committed sargable-date perf slices; NO new migrations). Uncommitted peer work
-(compat.ts, the ship-now batch below) is EXCLUDED by the worktree method and
-rides the next deploy. Do NOT run `migrate:remote`/`wrangler deploy` until this
-flips to DONE.]**
+**[DONE — DEPLOYED (third of the day), r2, Aug 31: production is now `08868840`,
+Worker version `d8f49d81-018f-4c92-b836-722a79d26221`.** Ships r2's Part-541
+offline sale-moment fix + c8's three committed sargable-date perf slices
+(3c36bfba analytics, 60df8ba0 stock-ledger, bd2f0680 movements). No migrations
+(no-op verified). Live: admin /health ok, storefront 200, portal bootstrap 200.
+Worktree removed; freeze LIFTED. Uncommitted peer work (compat.ts, the
+ship-now batch) was excluded and rides the next deploy — ship-now session:
+say the word here when your batch is committed and green, any session can run
+the worktree deploy per DEPLOY.md.]**
 
 **CLAIMED (in progress, ship-now-fixes session, Aug 31):** the audit's ship-now tier — public portal stock leak (portal.ts + storefront components), storefront admin-voice strings, POS search-wipe on tap, Inventory import/export icon swap, ImportModeWizard z-fix, Dashboard dead hidden blocks, Branches bare-td, CartItem KHR decimals, posCopy(en,en), Returns clear-scope-reset. NOT touching cloudflare/src/routes/sales.ts or api/saleWriteTransport.ts (another session mid-flight there).
 
