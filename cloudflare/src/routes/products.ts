@@ -12,6 +12,7 @@ import { sanitizeMediaList } from '../lib/media'
 import { buildInClause, chunkForBinding, selectInChunks } from '../lib/sqlBinding'
 import { attachBeforeQty, buildStockLedgerQuery, type StockLedgerView } from '../lib/stockLedgerQuery'
 import { getProductSalesBreakdown } from '../lib/salesAnalytics'
+import { localDateExpr, localMonthExpr } from '../lib/businessDateWindow'
 import { validateUploadedBuffer } from '../lib/uploadSecurity'
 import { checkRateLimit, getClientIp } from '../lib/rateLimit'
 import { audit } from '../lib/audit'
@@ -1123,7 +1124,10 @@ app.get('/:id/sales-detail', async (c) => {
   const period = String(c.req.query('period') || '').trim()
   const periodOk = mode === 'month' ? /^\d{4}-\d{2}$/.test(period) : /^\d{4}-\d{2}-\d{2}$/.test(period)
   if (!periodOk) return c.json({ error: 'A valid period is required' }, 400)
-  const periodExpr = mode === 'month' ? "strftime('%Y-%m', s.created_at)" : "date(s.created_at)"
+  // Local (UTC+7) period, matching getProductSalesBreakdown's local buckets so
+  // the drill-down's @period key (a breakdown row's local day/month) resolves to
+  // the same rows -- a UTC period here would mismatch on the local-day edges.
+  const periodExpr = mode === 'month' ? localMonthExpr('s.created_at') : localDateExpr('s.created_at')
   const rows = await getDb(c.env).prepare(`
     SELECT s.id, s.receipt_number, s.created_at, s.customer_name,
            COALESCE(SUM(si.quantity), 0) AS qty,

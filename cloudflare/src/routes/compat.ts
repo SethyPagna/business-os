@@ -11,6 +11,7 @@ import { putObject, getObject, deleteObject } from '../lib/r2'
 import { getGoogleLoginPublicConfig } from '../lib/googleOauth'
 import { getSalesTotals, getSalesPeriodSeries, previousPeriodFilters } from '../lib/salesAnalytics'
 import { getFamilyStockStats } from '../lib/familyStockStats'
+import { businessToday, localDateRangeClause, localTodayRangeClause, localHourExpr } from '../lib/businessDateWindow'
 
 const app = new Hono<{ Bindings: Env; Variables: { user: any } }>()
 
@@ -147,7 +148,9 @@ function clampInt(value: unknown, fallback: number, min: number, max: number): n
 }
 
 function dateRange(query: Record<string, string>) {
-  const today = new Date().toISOString().slice(0, 10)
+  // Default range is the current business-timezone (UTC+7) day, not the UTC day
+  // -- the latter names yesterday during Cambodia's 00:00-07:00.
+  const today = businessToday()
   return {
     startDate: String(query.startDate || today).slice(0, 10),
     endDate: String(query.endDate || today).slice(0, 10),
@@ -200,7 +203,6 @@ function emptyAnalytics() {
 
 async function dashboardSummary(env: Env) {
   const db = getDb(env)
-  const today = new Date().toISOString().slice(0, 10)
   // Family-aware counts (see familyStockStats.ts) so this dashboard tile
   // agrees with the family-grouped pagination total on Products/Inventory
   // -- previously a flat COUNT(*)/SUM() here counted every variant row (and
@@ -210,8 +212,8 @@ async function dashboardSummary(env: Env) {
     db.prepare(`
       SELECT COUNT(*) AS count, COALESCE(SUM(total_usd), 0) AS total_usd, COALESCE(SUM(total_khr), 0) AS total_khr
       FROM sales
-      WHERE created_at >= date(@today) AND created_at < date(@today, '+1 day') AND COALESCE(sale_status, 'completed') <> 'cancelled'
-    `).get({ today }),
+      WHERE ${localTodayRangeClause('created_at')} AND COALESCE(sale_status, 'completed') <> 'cancelled'
+    `).get({}),
     db.prepare(`
       SELECT COALESCE(SUM(total_usd), 0) AS total_usd, COALESCE(SUM(total_khr), 0) AS total_khr
       FROM sales
@@ -220,8 +222,8 @@ async function dashboardSummary(env: Env) {
     db.prepare(`
       SELECT COUNT(*) AS count, COALESCE(SUM(total_refund_usd), 0) AS total_usd
       FROM returns
-      WHERE created_at >= date(@today) AND created_at < date(@today, '+1 day') AND COALESCE(status, 'completed') <> 'cancelled'
-    `).get({ today }),
+      WHERE ${localTodayRangeClause('created_at')} AND COALESCE(status, 'completed') <> 'cancelled'
+    `).get({}),
     getFamilyStockStats({
       db,
       joinSql: '',
@@ -305,14 +307,14 @@ async function dashboardAnalytics(env: Env, query: Record<string, string>) {
     db.prepare(`
       SELECT COUNT(*) AS count, COALESCE(SUM(total_refund_usd), 0) AS refund_usd
       FROM returns
-      WHERE created_at >= date(@startDate) AND created_at < date(@endDate, '+1 day')
+      WHERE ${localDateRangeClause('created_at')}
         AND COALESCE(status, 'completed') <> 'cancelled'
     `).get(params),
     db.prepare(`
       SELECT COUNT(*) AS count, COALESCE(SUM(supplier_compensation_usd), 0) AS supplier_compensation_usd,
              COALESCE(SUM(supplier_loss_usd), 0) AS supplier_loss_usd
       FROM returns
-      WHERE created_at >= date(@startDate) AND created_at < date(@endDate, '+1 day')
+      WHERE ${localDateRangeClause('created_at')}
         AND COALESCE(return_scope, 'customer') = 'supplier'
         AND COALESCE(status, 'completed') <> 'cancelled'
     `).get(params),
@@ -320,7 +322,7 @@ async function dashboardAnalytics(env: Env, query: Record<string, string>) {
       SELECT COALESCE(payment_method, 'Unknown') AS method, COALESCE(payment_method, 'Unknown') AS payment_method,
              COUNT(*) AS count, COALESCE(SUM(total_usd), 0) AS revenue_usd
       FROM sales
-      WHERE created_at >= date(@startDate) AND created_at < date(@endDate, '+1 day')
+      WHERE ${localDateRangeClause('created_at')}
         AND COALESCE(sale_status, 'completed') <> 'cancelled'
       GROUP BY COALESCE(payment_method, 'Unknown')
       ORDER BY revenue_usd DESC
@@ -329,7 +331,7 @@ async function dashboardAnalytics(env: Env, query: Record<string, string>) {
       SELECT branch_id, COALESCE(branch_name, 'Unassigned') AS branch_name,
              COUNT(*) AS tx_count, COUNT(*) AS count, COALESCE(SUM(total_usd), 0) AS revenue_usd
       FROM sales
-      WHERE created_at >= date(@startDate) AND created_at < date(@endDate, '+1 day')
+      WHERE ${localDateRangeClause('created_at')}
         AND COALESCE(sale_status, 'completed') <> 'cancelled'
       GROUP BY branch_id, COALESCE(branch_name, 'Unassigned')
       ORDER BY revenue_usd DESC
@@ -338,7 +340,7 @@ async function dashboardAnalytics(env: Env, query: Record<string, string>) {
       SELECT si.product_id, si.product_name, SUM(si.quantity) AS qty_sold, SUM(si.total_usd) AS revenue_usd
       FROM sale_items si
       JOIN sales s ON s.id = si.sale_id
-      WHERE s.created_at >= date(@startDate) AND s.created_at < date(@endDate, '+1 day')
+      WHERE ${localDateRangeClause('s.created_at')}
         AND COALESCE(s.sale_status, 'completed') <> 'cancelled'
       GROUP BY si.product_id, si.product_name
       ORDER BY revenue_usd DESC
@@ -348,7 +350,7 @@ async function dashboardAnalytics(env: Env, query: Record<string, string>) {
       SELECT si.product_id, si.product_name, SUM(si.quantity) AS qty_sold, SUM(si.total_usd) AS revenue_usd
       FROM sale_items si
       JOIN sales s ON s.id = si.sale_id
-      WHERE s.created_at >= date(@startDate) AND s.created_at < date(@endDate, '+1 day')
+      WHERE ${localDateRangeClause('s.created_at')}
         AND COALESCE(s.sale_status, 'completed') <> 'cancelled'
       GROUP BY si.product_id, si.product_name
       ORDER BY qty_sold DESC
@@ -361,18 +363,18 @@ async function dashboardAnalytics(env: Env, query: Record<string, string>) {
              COALESCE(SUM(membership_discount_usd), 0) AS membership_discount_usd,
              COALESCE(SUM(subtotal_usd) - SUM(discount_usd) - SUM(membership_discount_usd), 0) AS net_revenue_usd
       FROM sales
-      WHERE created_at >= date(@startDate) AND created_at < date(@endDate, '+1 day')
+      WHERE ${localDateRangeClause('created_at')}
         AND COALESCE(sale_status, 'completed') <> 'cancelled'
       GROUP BY COALESCE(customer_name, 'Walk-in')
       ORDER BY net_revenue_usd DESC
       LIMIT 20
     `).all(params),
     db.prepare(`
-      SELECT CAST(strftime('%H', created_at) AS INTEGER) AS hour, COUNT(*) AS count, COALESCE(SUM(total_usd), 0) AS revenue_usd
+      SELECT CAST(${localHourExpr('created_at')} AS INTEGER) AS hour, COUNT(*) AS count, COALESCE(SUM(total_usd), 0) AS revenue_usd
       FROM sales
-      WHERE created_at >= date(@startDate) AND created_at < date(@endDate, '+1 day')
+      WHERE ${localDateRangeClause('created_at')}
         AND COALESCE(sale_status, 'completed') <> 'cancelled'
-      GROUP BY CAST(strftime('%H', created_at) AS INTEGER)
+      GROUP BY CAST(${localHourExpr('created_at')} AS INTEGER)
       ORDER BY hour ASC
     `).all(params),
   ])

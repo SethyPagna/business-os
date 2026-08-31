@@ -37,6 +37,20 @@ export function localDateExpr(col: string): string {
   return `date(${col}, '${BUSINESS_TZ_FORWARD}')`
 }
 
+/** Local (UTC+7) hour-of-day ('00'..'23') of a UTC timestamp column. */
+export function localHourExpr(col: string): string {
+  return `strftime('%H', ${col}, '${BUSINESS_TZ_FORWARD}')`
+}
+
+/**
+ * SQL expression for the CURRENT calendar date in the business timezone
+ * (UTC+7). `date('now')` alone yields the UTC date, so during Cambodia's
+ * 00:00-07:00 (still the previous UTC day) it would name yesterday.
+ */
+export function localTodayExpr(): string {
+  return `date('now', '${BUSINESS_TZ_FORWARD}')`
+}
+
 /** Local (UTC+7) year-month bucket of a UTC timestamp column. */
 export function localMonthExpr(col: string): string {
   return `strftime('%Y-%m', ${col}, '${BUSINESS_TZ_FORWARD}')`
@@ -71,4 +85,23 @@ export function localDayUpperBoundExclusive(param = '@endDate'): string {
  */
 export function localDateRangeClause(col: string, startParam = '@startDate', endParam = '@endDate'): string {
   return `${col} >= ${localDayLowerBound(startParam)} AND ${col} < ${localDayUpperBoundExclusive(endParam)}`
+}
+
+/**
+ * Sargable "`col` falls on the CURRENT local (UTC+7) day" clause, with the
+ * "today" boundary taken in the business timezone (so a 00:30-local sale, which
+ * is 17:30 UTC the previous day, still counts as today). Needs no bound param.
+ */
+export function localTodayRangeClause(col: string): string {
+  return `${col} >= ${localDayLowerBound(localTodayExpr())} AND ${col} < ${localDayUpperBoundExclusive(localTodayExpr())}`
+}
+
+/**
+ * The current calendar date in the business timezone (UTC+7), 'YYYY-MM-DD', for
+ * JS-side "today" DEFAULTS (e.g. an omitted date-range param). Mirrors
+ * receiptNumber.ts's BUSINESS_UTC_OFFSET_MS; `new Date().toISOString()` alone
+ * gives the UTC date, which names yesterday during Cambodia's 00:00-07:00.
+ */
+export function businessToday(nowMs: number = Date.now()): string {
+  return new Date(nowMs + BUSINESS_UTC_OFFSET_MINUTES * 60 * 1000).toISOString().slice(0, 10)
 }
