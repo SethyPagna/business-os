@@ -72,7 +72,8 @@ Two rules learned the hard way, both from real incidents in this file's own hist
   Settings → Backup, which is only possible post-deploy — A3). Verified at deploy
   time, read-only: both `/health` ok, storefront 200 with Leang branding,
   `/api/products` unauth → 401, portal bootstrap 200, remote migrations list empty.
-  Still owed (user-facing writes): one POS sale confirming `RCP-YYYYMMDD-HHMMSS` +
+  Still owed (user-facing writes): one POS sale confirming the bare `YYYYMMDD-HHMMSS`
+  receipt id (no RCP — user, Aug 31; shipped Part 540) +
   Phnom Penh labels, storefront iPhone install, import round-trip, R2 keeps exactly
   2 finalized sets, reset-data.
 - **Sessions are coordinated.** Coordinator 7b is live in continuous mode; c8 is
@@ -90,14 +91,18 @@ Two rules learned the hard way, both from real incidents in this file's own hist
 *(Live coordination only — session records that used to live here are in the
 [DONE — archive](#done--archive).)*
 
-**[~ CLAIMED — session business-os-v1-r2, Aug 31: receipt ids lose the `RCP`
-prefix (user: "Receipt no need RCP") + adjacent receipt-locale fixes.** Footprint:
-lib/receiptNumber.ts + routes/sales.ts mint site, saleWriteTransport offline mint,
-POS fallback, ReceiptPreview sample, NewReturnModal placeholder, the two pinning
-tests. RET-/SRET- return prefixes KEPT (only RCP was named; returns stay
-distinguishable from sales) — flagged, not guessed. Historical RCP-/imported ids
-preserved untouched (X0). Peers: routes/sales.ts is single-lane per the last
-coordination note — shout if that changed.]**
+**[DONE — session business-os-v1-r2, Aug 31 (Part 540, `c41d4d81` + `dcb2e120`):
+receipt ids lose the `RCP` prefix (user: "Receipt no need RCP") + the
+viewer-locale datetime sweep.** Sales now mint BARE `YYYYMMDD-HHMMSS` (server
+route, offline client mint, POS fallback, preview/placeholder samples);
+RET-/SRET- return prefixes KEPT (only RCP was named; returns stay
+distinguishable) — flagged, not guessed; historical RCP-/imported ids untouched
+(X0). Plus the Part-77 locale finding finished as a CLASS sweep: FilesPage,
+ReviewQueue, Inventory range label, Backup job time, ZeroQuantityCleanupModal,
+portalBucket share text, WriteConflictModal all route through
+fmtDate/fmtDateTime24 (no viewer-locale dd/mm or 12-hour renders remain).
+Verified: both tscs, receipt test 8/8, timestampId 3/3, 9 sales-adjacent
+backend suites, **146/146 frontend test files individually**.]**
 
 **[DONE — DEPLOYED, session business-os-v1-r2, Aug 31 ~01:32 UTC (user-authorized:
 "continue, deploy"), Part 538.** Production is now commit `242c2b75`, Worker version
@@ -228,7 +233,8 @@ IDs) or the section linked. Statuses: **[~]** = in progress / partly done,
 - [~] **A2** — live-verification checklist. Done read-only at deploy time (/health ×2,
   storefront 200, /api/products 401-gate, portal bootstrap 200, migrations list
   empty). REMAINING (user-facing writes): reset-data, a POS sale with lots confirming
-  `RCP-YYYYMMDD-HHMMSS` receipt ids + Phnom Penh labels, storefront iPhone install,
+  bare `YYYYMMDD-HHMMSS` receipt ids (no RCP — Part 540) + Phnom Penh labels,
+  storefront iPhone install,
   import round-trip, R2 keeps exactly 2 finalized sets.
 - [ ] **A3 follow-through** — connect Google Drive in Settings → Backup (now possible
   post-deploy), then confirm backup files actually appear in Drive.
@@ -362,7 +368,8 @@ template editor. *(Public customer accounts left this list — built as Part 535
 - [ ] A2. Live-verify the deploy checklist: reset-data, /api/products, POS sale with lots,
   storefront iPhone install (delete old shortcut first), import round-trip, R2 keeps
   exactly 2 finalized sets. *(Added Aug 30, Part 519 / session 0b via coordinator:)*
-  make one POS sale and confirm live — receipt id is `RCP-YYYYMMDD-HHMMSS` Phnom Penh
+  make one POS sale and confirm live — receipt id is the bare `YYYYMMDD-HHMMSS`
+  (no RCP prefix — user, Aug 31, Part 540) Phnom Penh
   wall clock, printed receipt date is mm/dd/yyyy 24-hour, and every timezone label
   reads Phnom Penh (never Bangkok).
 

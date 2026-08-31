@@ -15360,3 +15360,46 @@ frontend call sites vs 289 backend routes — no real orphan endpoints beyond
 the known-unmounted customTables; the 12 body-shape hits are the tool's known
 heuristic blind spots (spread bodies, deviceId read from header fallback)
 plus /api/auth/login's organization/clientTime extras (read via helpers).
+
+## Part 540 (Aug 31 2026, session business-os-v1-r2) — receipt ids drop the RCP prefix + viewer-locale datetime sweep
+
+**Ask:** "Receipt no need 'RCP', and continue fixes."
+
+**What changed (commits c41d4d81 + dcb2e120):**
+- Sale receipt ids are now the BARE `YYYYMMDD-HHMMSS` (Phnom Penh, 24-hour) —
+  `uniqueBusinessDateTimeNumber` accepts an empty prefix without a leading
+  dash; the sales route mints with the empty prefix; the offline client mint
+  (`saleWriteTransport.buildOfflineSaleReceiptNumber`) returns
+  `businessDateTimeId()` bare; POS's display fallback replaces
+  `RCP-Date.now()` with `businessDateTimeId()`; ReceiptPreview sample and
+  NewReturnModal placeholder show the new shape. **Returns keep RET-/SRET-**
+  (only RCP was named; a return number must stay distinguishable from the
+  sale receipt it references) — flagged, not guessed. Historical `RCP-…` and
+  client-supplied/imported ids are preserved untouched (X0).
+- The Part-77 "receipt/date locale" finding finished as a CLASS sweep (cross-
+  surface rule): FilesPage.formatDateTime (viewer-locale Intl → fmtDateTime24),
+  ReviewQueue.formatDateTime (en-US without hour12:false = 12-hour AM/PM →
+  fmtDateTime24), Inventory movement-range label (toLocaleDateString →
+  fmtDate), Backup job "Updated" (toLocaleTimeString → fmtDateTime24),
+  ZeroQuantityCleanupModal fallback (→ fmtDate), portalBucket customer share
+  text (→ fmtDateTime24), WriteConflictModal (→ fmtDateTime24). AuditLog/
+  Backup/AppContext local helpers already pinned en-US 24-hour — unchanged.
+  A repo-wide grep finds no remaining viewer-locale date/time renders in
+  frontend/src (all other toLocaleString hits are number formatting).
+
+**Verified (all really run):** cloudflare tsc clean; frontend tsc clean;
+test-receipt-number-pure 8/8 (two new checks: empty prefix mints bare id with
+no leading dash; named prefix still joins with one dash; the source lock now
+asserts the sales route passes the empty prefix and REFUSES a reintroduced
+RCP); timestampId.test 3/3 (re-pinned to the bare mint, refuses RCP-template);
+posCore green; 9 sales-adjacent backend suites green (loyalty-accrual,
+returns-batch-restock, sale-cancel, sales-returns-search, route-permissions,
+returns-replace-damaged, sales-oversell-strict, sale-totals,
+currency-snapshot); **146/146 frontend test files individually, 0 failures**.
+
+**Numbering note:** this session's board edits briefly said Part 539; c8
+logged Part 539 (verification sweep) first — renumbered to 540 per grep-max+1
+before logging (the collision class the how-to warns about).
+
+**Not done:** deploy of these two commits (next in this session); the A2
+POS-sale live check now expects the bare id format.
