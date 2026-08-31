@@ -196,7 +196,7 @@ kept)/audit-coverage (48)/reset-permission-gate/review-submitter/
 import-review-query pure tests green, verify:i18n OK (4162 keys), both
 tscs clean.]**
 
-**CLAIMED (in progress, ship-now-fixes session, Aug 31):** the audit's ship-now tier — public portal stock leak (portal.ts + storefront components), storefront admin-voice strings, POS search-wipe on tap, Inventory import/export icon swap, ImportModeWizard z-fix, Dashboard dead hidden blocks, Branches bare-td, CartItem KHR decimals, posCopy(en,en), Returns clear-scope-reset. NOT touching cloudflare/src/routes/sales.ts or api/saleWriteTransport.ts (another session mid-flight there).
+**DONE (ship-now-fixes session, Aug 31, Part 547):** the audit's ship-now tier shipped - public portal stock leak sealed (server-computed stock_status/branch_availability, raw quantities+thresholds redacted, global threshold mode now honored), storefront admin-voice strings -> shopper voice, StatusPill raw-key fallback fixed, PublicCatalogPage StrictMode aliveRef fix, POS search-wipe desktop-only, 45 posCopy Khmer translations, Inventory icon swap, Import Hub -> shared Modal (z-fix), Dashboard dead hidden blocks deleted, CartItem KHR decimals, Returns scope no longer a filter. All suites green; see session-log Part 547.
 
 *(Live coordination only — session records that used to live here are in the
 [DONE — archive](#done--archive).)*

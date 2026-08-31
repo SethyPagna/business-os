@@ -15630,3 +15630,73 @@ is safe because the restore is a full delete+reinsert; the flag makes the
 crash visible, which was the finding's actual demand); the shared local D1
 was deliberately NOT migrated (fail-open covers peers; apply 0088+0089
 together whenever the next local migrate happens).
+
+## Part 547 - the design audit's ship-now tier: public stock leak sealed + nine correctness/polish fixes (Aug 31)
+
+**CRITICAL - public storefront stock redaction (the audit's top finding).**
+The portal bootstrap HTML and every /catalog/products/search response
+embedded raw stock_quantity, low/out-of-stock thresholds, and a per-branch
+quantity ledger (branch_stock) for every product - internal inventory intel
+any visitor could read. routes/portal.ts's attachPortalBranchStock is now
+attachPortalStockStatus: it computes a coarse `stock_status`
+(in|low|out_of_stock) plus `branch_availability` [{branch_id, status}]
+server-side - honoring customer_portal_stock_threshold_mode='global', which
+the live site previously IGNORED (client-side math never received the
+setting) - then rest-destructures the raw fields OFF the payload. Branch
+id+name stay public deliberately (store locations powering the "available
+at branch" filter). The AI path's existing allowlist is unchanged. Frontend:
+one shared resolvePortalStockStatus (portalCatalogDisplay.ts) replaces the
+three per-page getBranchQty/getStockStatus copies; legacy quantity math kept
+only as fallback for editor-preview drafts and pre-deploy caches;
+mergePortalCatalogProducts now combines statuses across branch-duplicate
+rows (most-available wins, per branch too - conservative, never overstates).
+Locked by cloudflare/scripts/test-portal-stock-redaction-pure.cjs (6 pins)
++ new resolver/merge/branch-match tests in portalCatalogDisplay.test.ts and
+portalProductGrouping.test.ts. Live-verified on dev worker: bootstrap and
+search JSON carry NO stock_quantity/thresholds/branch_stock anywhere;
+storefront badges + Low Stock filter verified end-to-end (14/14 filtered
+cards, statuses agree with the SQL filter).
+
+**Found while verifying, fixed:** (1) StatusPill's fallback was the copy
+KEY itself - storefronts without copy overrides showed shoppers literal
+"lowStock" on every card badge; real human fallbacks now. (2) A React 18
+StrictMode footgun in PublicCatalogPage: the unmount-only effect set
+aliveRef=false during StrictMode's simulated unmount and nothing re-armed
+it, so in dev EVERY fetch .then bailed silently - search/filter/pagination
+responses never applied and "Refreshing..." never cleared (production was
+unaffected; re-arm on mount fixes dev).
+
+**The rest of the ship-now tier:** storefront admin-voice strings rewritten
+in shopper voice (products subtitle, promo hint, "Search products"
+placeholder, About fallback, FAQ hint + new faqEmptyState); POS search wipe
++ refocus now desktop-only (scanner flow) so mobile taps keep the result
+list; 45 posCopy(en,en) no-ops across POS.tsx/ProductDetailSheet.tsx got
+real Khmer (only the deliberate 'VIP' remains) + hardcoded Hide/Show ->
+t(); Inventory Manage menu icons unswapped (Import=Upload, Export=Download,
+matching HeaderActions); ImportModeWizard's hand-rolled z-50 overlay ->
+shared portalled Modal (z-[1050]) so BackgroundImportTracker (z-[1000]) can
+no longer bury the Import Hub (hub title/InfoHint moved into the Modal
+header); Dashboard's three dead className="hidden" blocks deleted (146
+lines of zombie markup - one pin was passing on the dead copy and got
+re-anchored to the live BestHourCard); CartItem's KHR price input
+.toFixed(2) -> .toFixed(0) (the one decimal-riel holdout); Returns scope
+(customer|supplier) no longer counts as "Filters (1)" nor gets reset by
+Clear (it is a mandatory one-of-two view, not a filter). Branches bare-td
+and the CatalogProductsSection keyless fragment were already fixed on disk
+by peer sessions; the Fragment-key change rides this session's commit of
+that file.
+
+**Test pins corrected for the Khmer fix:** batchFailLoud counted "No lots
+available" literals assuming the posCopy(en,en) duplication (/2), and
+returnOptions expected >=4 "Damage (from returns)" literals for the same
+reason - both now count posCopy KEY occurrences. stockActionImportModel's
+"no <Modal in wizard" pin inverted into "hub chrome MUST be the shared
+Modal, no hand-rolled z-50"; performanceLoadingUx's Returns filter-count
+pin updated for the scope removal.
+
+**Verified (all really run):** both tscs clean (the one FE error is a peer
+session's in-flight Backup.tsx); frontend test:utils fully GREEN (810
+passes - including the 3 files the peer session saw red against my dirty
+tree); test-portal-stock-redaction-pure 6/6; live dev-server pass:
+storefront grid/badges/filter/detail-flyout + admin Customer Portal preview
+all rendering on the redacted payload.
