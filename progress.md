@@ -88,6 +88,17 @@ Two rules learned the hard way, both from real incidents in this file's own hist
 
 ## Current status
 
+**[~ CLAIMED — r2, Aug 31: restore maintenance lock + persisted restore state
+(Part-77 CRITICAL slice C).** Footprint: NEW migration 0088_system_flags (tiny
+key/value table, deliberately EXCLUDED from BACKUP_TABLES so the flag survives
+the restore that sets it), new lib/maintenance.ts, lib/backup.ts (optional
+onProgress callback only), routes/backups.ts (begin/end wrap + refuse-on-active-
+imports + GET/clear endpoints), src/index.ts (write-method gate, fail-open when
+the table doesn't exist yet so peers' un-migrated local DBs keep working +
+scheduled-tick skip), frontend Backup.tsx banner. NOT touching sales.ts/
+portal/catalog (ship-now lane) or inventory.ts. Migration number 0088 claimed
+HERE — grep-max verified; shout if you're also minting one.]**
+
 **[DONE — r2, Aug 31 (Part 542, `92648cef`, needs deploy — rides the next one):
 Suppliers/Delivery server sort+pagination parity (Part-77 MEDIUM).** Both tabs
 now send sort/dir/page/pageSize to the shared contacts handler and render the
