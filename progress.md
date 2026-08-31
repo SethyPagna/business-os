@@ -88,6 +88,31 @@ Two rules learned the hard way, both from real incidents in this file's own hist
 
 ## Current status
 
+**→ PUBLIC-LOADER LANE (Aug 31, Part 565 grep-max+1; number races expected): CLAIMED / in progress.**
+User: the public storefront also flashes the admin **"Business OS / Loading this workspace
+view..."** splash (`App.tsx` `PageLoader`) — "this can be built-in background backend no
+need to show." Fix (path-scoped, DISJOINT from every other lane): `frontend/src/App.tsx`
+only — `PublicCatalogView` no longer uses the admin `PageLoader` as its Suspense fallback;
+it uses a new quiet, unbranded `PublicCatalogFallback` (neutral storefront background, no
+"Business OS"/"workspace" wording) so the catalog chunk streams in silently in the
+background. The admin `PageLoader` is untouched (still used for admin `PageSlot`/Login).
+The standalone storefront root (`PublicCatalogRoot` → "Loading catalog...") already never
+showed the workspace splash and is unchanged. Per public-surface rule (customer pages
+never expose admin/internal framing). progress.md claim visible on disk; code commit
+path-scoped to App.tsx.
+
+**→ STATS-HEADER-FLOAT LANE (Aug 31, Part 564 grep-max+1; number races expected): CLAIMED / in progress.**
+User batch on the Sales stats header + Reports controls: (1) keep History/Manage on the
+SAME row as the Stats chip always (never relocate when the strip expands); (2) drop the
+redundant "N sales · $rev" summary beside the Stats chip on Sales (duplicates the Sales
+stat card); (3) stat-card detail: instead of an inline expand that pushes content down,
+click opens a FLOAT (Modal) above the layer; (4) Reports "view by" type chips collapse
+into ONE floating dropdown button on the control row. Files (path-scoped, DISJOINT from
+the Products/Inventory lanes): `frontend/src/components/shared/StatsStrip.tsx`,
+`frontend/src/components/sales/{Sales,ReportsHub}.tsx`. StatsStrip is shared, so the
+button-stays-put + detail-floats changes apply to every data page (Returns/Inventory/
+Fees/Dashboard) — cross-surface-consistent by design. No new i18n keys (reuse `view`).
+
 **→ PRODUCT-DETAIL-FLOAT LANE (Aug 31, Part 563 grep-max+1; number races expected): CLAIMED / in progress.**
 User batch on the Products-page "click to view detail" float: (1) the detail float's
 Stock Changes / Sales / Suppliers sections show "no data" (backend verified CORRECT —
@@ -100,12 +125,35 @@ modals, like the existing Batches button. Files (path-scoped, DISJOINT from acti
 Products.tsx/HeaderActions/StockChangeSection lanes):
 `frontend/src/components/products/surfaces/{ProductDetailModal,ProductDetailReport}.tsx`.
 No lang/perm changes (all keys — stock_change_ledger/sales/suppliers/batches/etc. —
-already in both packs). Separately, the user asked for confirm/double-check dialogs on
-stock-in/add-product/edit and "all" actions app-wide — NOT in this lane (huge,
-cross-cutting, collides with active lanes); flagged to the user for scoping.
+already in both packs). Commit `af50009b`.
+
+**CONFIRM-DIALOG slice 1 — DONE, commit `c1097e82`.** User asked for
+confirm/double-check dialogs on stock-in/add-product/edit and "all" mutating
+actions app-wide. Scoped WITH the user: chose ONE shared **compact review
+dialog** (summarizes what's about to happen; Confirm/Cancel) and rollout order
+"core saves + destructive first." Done: new `shared/ConfirmDialog.tsx`
+(Modal-based, translated, `danger` variant); wired **Add/Edit product**
+(ProductForm.saveForm, promise-based askSaveConfirm gate before the write) and
+**Stock-in "Stock one by one"** (forms/StockAdjustModal: onAdjust parks the
+validated request, new commitAdjust writes on confirm). Delete already confirms
+via DeleteConfirmModal. Zero new i18n keys (all reused). tsc-clean for these
+files; vite build clean.
+**REMAINING (next slices — NAMED so nothing is silently carved out, per the
+cross-surface-consistency rule):** the sibling STOCK-IN surfaces still lack the
+confirm — inventory/FastStockInModal, products/forms/BulkAddStockModal, the
+canonical Branches adjust (Inventory.tsx → InventoryStockModals; **Inventory.tsx
+is currently BROKEN by a peer lane — tsc errors on exportStamp/
+movementDateRangeLabel — so leave it until it settles**), and
+products/forms/BranchStockAdjuster. The DRY fix for the adjust flow is to move
+the confirm into the shared InventoryStockModals so Products+Branches share it
+(would then REMOVE the StockAdjustModal-level one to avoid double-confirm) —
+deferred because InventoryStockModals' callers are mid-surgery. Then the
+per-section sweep: Sales, Returns, Fees, Contacts, Users, Promotions, Backup/
+reset, imports — every mutating Save/Apply, never nav/filter/toggle controls.
 
 **→ POS-CARD-PRICE LANE (Aug 31, Part 562 grep-max+1; number races expected): DONE — display
-slice (needs deploy — rides the next one). Commit `e6959534`.** typecheck + check:source green.
+slice `e6959534` + cart/receipt VIP-tag slice `9c4f9678` (needs deploy — rides the next one).**
+typecheck + check:source + receiptTemplate + posCore tests green.
 User (POS product grid card + detail sheet): the grouped card showed the option count twice —
 a purple `Groups: N` chip AND a `N options · N total in stock` line — "same thing shown
 twice; keep the bottom, rename it `Options: N | Total Qty: n`". Removed the `$min – $max`
@@ -116,6 +164,20 @@ plain `VIP` tag on one row; the amount still reveals on tap in the detail sheet.
 dropped the word "Price" → `Selling` (detail-sheet info row + Selling buttons); VIP reveal
 button now reads just `VIP` (was "VIP price"). Files (path-scoped, committed): POS.tsx,
 ProductDetailSheet.tsx. progress.md NOT committed by this lane (claim visible on disk).
+
+CART/RECEIPT VIP-TAG SLICE (`9c4f9678`). User: keep the tier tag in the cart, make it a
+toggle (default selected/highlighted, deselect → unhighlight), and show it on the receipt
+too (VIP now, Wholesale later). Decision (asked): the toggle is a MARKER only — it never
+changes the price. CartItem's VIP label is now a toggle chip shown on any line carrying a
+VIP price; highlighted when the line is marked VIP (price_mode 'special'). POS's
+`toggleTierTag` flips price_mode 'special'↔'selling' WITHOUT touching applied/base price
+(number stays put; cart_line_id keeps line identity so no re-key/merge). Receipt prints a
+small tag under the item name from the persisted price_mode — NO migration (price_mode
+already round-trips on the checkout payload and the sale_items row via `SELECT si.*`, and
+printReceipt clones the same DOM for print/PDF, so immediate + reprinted + printed receipts
+all carry it). Files (committed): CartItem.tsx, POS.tsx, receipt/Receipt.tsx. When wholesale
+lands, generalise the toggle + receipt tag to price_mode 'wholesale' (Khmer បោះដុំ already
+wired in Receipt).
 
 FOLLOW-UP — WHOLESALE (បោះដុំ) PRICE, deferred by user ("POS display first, wholesale
 later"). Full spec captured (mid-turn, Aug 31) for whoever picks it up:
@@ -246,6 +308,39 @@ langKeyIntegrity green.
 POS is a checkout surface (not meaningful as view-only). Remaining coarse
 Full/None sections (dashboard, customer_portal, promotions, review, audit_log,
 backup) could take a view tier later if the user wants it.]**
+
+**[DONE (slice 4 of N) + VERIFIED LIVE — permissions-granularity session, Aug 31
+(Part 557 slice 4): read-only `view` tier extended to Promotions.** Audit of the
+6 remaining coarse Full/None sections first: **dashboard** and **audit_log** are
+inherently read-only (no writes under their key -- a view tier would be view==full
+fake), **customer_portal**'s admin write gates on `settings` not the key (no clean
+split), so those 3 stay Full/None; **review**, **promotions**, **backup** genuinely
+support a read/write split. Wired **promotions** (clearest): `'promotions'` added to
+VIEW_TIER_KEYS (front+back). Backend `routes/promotions.ts` gains `requireReadKey`
+(admits tier != none) on `GET /rules` (the rule-list read); every write
+(`POST/PUT/DELETE /rules`) keeps strict `requireKey('promotions')`; `/rules/active`
+stays public (POS/storefront pricing needs no grant). `PromotionsPage.tsx`:
+`canManagePromotions = tier==='full'` guards saveRule/removeRule/openNewRule/
+openEditRule and hides the New-rule + per-row edit/delete controls; a view user sees
+the rule list read-only. Also fixed a PRE-EXISTING fake control found in passing --
+the Discounts sub-section edits per-product discounts via `updateProduct` (backend
+`'products'` gate) but was coupled to `canPromotions`, so a promotions user without
+products saw a discount editor that 403'd; it now self-gates on
+`canManageDiscounts = getPermissionTier('products') !== 'none'` (its real gate).
+Editor row marked `tier:true middleTier:'view'`; `perm_promotions_view_desc` +
+`perm_view_only_generic` added to BOTH packs. **Verified LIVE (isolated wrangler
+dev :8797, private D1, three sessions):** promotions='view' → `GET /rules` 200 +
+`/rules/active` 200, `POST/PUT/DELETE /rules` 403; no-grant → `/rules` 403 but
+public `/rules/active` 200; full → read 200 + `POST` 400-not-403 (passed gate).
+`test-view-tier-pure` grown to 16 checks; cloudflare tsc + permissionEditor/
+langKeyIntegrity green; my files frontend-tsc clean (the Inventory.tsx +
+ExportRangeDialog i18n/tsc misses are peers' in-flight work). NOTE: peers held
+permissionDefinitions.ts + en/km.json mid-edit (a `products_image_only_show_wholesale`
+toggle + `wholesale_price`); this commit was patch-isolated to my hunks only, leaving
+their bits unstaged in the shared tree.
+**STILL OPEN (genuine view-tier candidates):** **review** (see the approval queue vs
+approve/reject) and **backup** (see backup list/status vs export/restore) -- both
+marginal use cases; ask before wiring.]**
 
 **→ FILTER-CHIPS-LANE (this session, Aug 31): CLAIMED.** User: the sales filter
 menu (and every other) renders the CHOSEN filters as removable chips OUTSIDE the
