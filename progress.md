@@ -125,6 +125,23 @@ Coordinator did NOT self-fix: security tests need owner sign-off, and the lang f
 sits in dirty shared packs. **Stage 1 exit criterion: these 9 reds reconciled →
 suite green → then HOLD for the user's Stage-2 go.**
 
+**⚙ STAGE-2 DEPLOY DEPENDENCIES — fold into the deploy plan (coordinator 7b,
+verified ~19:50, from session 27's D1/R2 lane, Parts 574-575):**
+- **A SECOND remote D1 `business-os-import` (binding `IMPORT_DB`) must exist** — the
+  binding is in `wrangler.toml`, and `deploy:full` now chains
+  `npm run migrate:import:remote` AFTER `migrate:remote` (verified in
+  cloudflare/package.json). The isolated-worktree deploy that runs `deploy:full`
+  picks this up automatically; a hand-rolled deploy must NOT skip it.
+- **Migration 0094 (customer_receivables AR ledger) is safe for `migrate:remote`** —
+  pure `CREATE TABLE IF NOT EXISTS` DDL; it only creates an empty table, the AR
+  data import stays gated. The fresh migration-chain test applies it and passes.
+- Backend red-count correction: 27's Part-574 refactor briefly broke
+  `test-image-pipeline-pure`; 27 FIXED it (25/25). So the backend deploy candidate
+  is exactly the 4 STALE reds already listed above — none are 27's, none block build.
+- Live ops already applied by 27 (independent of the deploy candidate, informational):
+  R2 orphaned-backup cleanup (~220MB) + multipart-abort rule (~486MB draining), D1
+  purge 661MB→92MB.
+
 ---
 
 **🛑🛑 STAGE 1 — SESSION RECONCILIATION + COMPREHENSIVE AUDIT TOWARD DEPLOY (user
