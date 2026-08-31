@@ -968,8 +968,11 @@ function SuppliersTab({ t, notify, active = true, initialSearch }: SuppliersTabP
           two folded cards stacked below the supplier rows in this same scroll;
           the user asked for them pulled out into their own section, so this
           chip row swaps the whole view instead of stacking. */}
-      <div className="flex flex-wrap items-center gap-2">
-        <div className="inline-flex flex-wrap rounded-xl bg-gray-100 p-0.5 dark:bg-gray-800">
+      {/* Compact one-row "mini section" chips (user, Part 567: "for sections
+          make them one row, mini sections") -- tighter padding + text than the
+          old px-3/py-1.5/text-sm pills, kept on a single scrollable line. */}
+      <div className="flex items-center gap-2 overflow-x-auto">
+        <div className="inline-flex flex-nowrap rounded-xl bg-gray-100 p-0.5 dark:bg-gray-800">
           {sectionChips.map((chip) => {
             const Icon = chip.icon
             const isActive = section === chip.key
@@ -979,9 +982,9 @@ function SuppliersTab({ t, notify, active = true, initialSearch }: SuppliersTabP
                 type="button"
                 onClick={() => setSection(chip.key)}
                 aria-pressed={isActive}
-                className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium transition-colors ${isActive ? 'bg-white text-blue-600 shadow dark:bg-gray-900 dark:text-blue-400' : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'}`}
+                className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-lg px-2.5 py-1 text-xs font-medium transition-colors ${isActive ? 'bg-white text-blue-600 shadow dark:bg-gray-900 dark:text-blue-400' : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'}`}
               >
-                <Icon className="h-4 w-4" /> {chip.label}
+                <Icon className="h-3.5 w-3.5" /> {chip.label}
               </button>
             )
           })}
@@ -998,14 +1001,14 @@ function SuppliersTab({ t, notify, active = true, initialSearch }: SuppliersTabP
           Products/Delivery/Customers use) / History / Add Supplier --
           History before Manage per the ordering used on those tabs. */}
       <div className="flex min-w-0 items-stretch gap-1.5 overflow-x-auto pb-1">
-        <ActionHistoryBar history={actionHistory as unknown as ActionHistoryBarHistory} t={t} className="min-w-0 flex-1" showLabel />
+        <ActionHistoryBar history={actionHistory as unknown as ActionHistoryBarHistory} t={t} className="min-w-0 flex-1" showLabel dense />
         <LazyPortalMenu
           align="auto"
           triggerWrapperClassName="min-w-0 flex-1"
           trigger={(
             <button
               type="button"
-              className="inline-flex h-9 w-full items-center justify-center gap-1.5 rounded-xl border border-slate-300 bg-white px-2 text-xs font-semibold text-slate-700 shadow-sm transition-colors hover:border-blue-400 hover:bg-blue-50/60 hover:text-blue-700 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 dark:hover:border-blue-500 dark:hover:bg-slate-700/80 dark:hover:text-blue-300 sm:text-sm"
+              className="inline-flex h-8 w-full items-center justify-center gap-1.5 rounded-xl border border-slate-300 bg-white px-2 text-xs font-semibold text-slate-700 shadow-sm transition-colors hover:border-blue-400 hover:bg-blue-50/60 hover:text-blue-700 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 dark:hover:border-blue-500 dark:hover:bg-slate-700/80 dark:hover:text-blue-300 sm:text-sm"
               aria-haspopup="true"
               aria-label={tr('manage', 'Manage', 'គ្រប់គ្រង')}
               title={tr('manage', 'Manage', 'គ្រប់គ្រង')}
@@ -1054,7 +1057,7 @@ function SuppliersTab({ t, notify, active = true, initialSearch }: SuppliersTabP
           ] as PortalMenuItem[])}
         />
         <button
-          className="inline-flex h-9 flex-1 items-center justify-center gap-1.5 rounded-xl border border-blue-700 bg-blue-600 px-2 text-xs font-semibold text-white shadow-sm transition-colors hover:bg-blue-700 hover:border-blue-800 sm:text-sm"
+          className="inline-flex h-8 min-w-0 flex-1 items-center justify-center gap-1.5 rounded-xl border border-blue-700 bg-blue-600 px-2 text-xs font-semibold text-white shadow-sm transition-colors hover:bg-blue-700 hover:border-blue-800 sm:text-sm"
           onClick={() => { setSelected(null); setModal('form') }}
           title={tr('add_supplier', 'Add Supplier', 'បន្ថែមអ្នកផ្គត់ផ្គង់')}
           aria-label={tr('add_supplier', 'Add Supplier', 'បន្ថែមអ្នកផ្គត់ផ្គង់')}

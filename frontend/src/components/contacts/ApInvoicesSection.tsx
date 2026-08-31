@@ -135,7 +135,9 @@ export default function ApInvoicesSection({ t }: ApInvoicesSectionProps) {
 
   return (
     <div className="space-y-3 p-3">
-      <div className="flex flex-wrap items-center gap-2">
+      {/* Part 567: filters kept to a single scrollable line (user: "the
+          filters options one row") rather than wrapping. */}
+      <div className="flex flex-nowrap items-center gap-2 overflow-x-auto">
         <AppSelect
           ariaLabel={tr('branch', 'Branch')}
           value={branch}

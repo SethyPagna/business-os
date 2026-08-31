@@ -89,15 +89,17 @@ export default function SupplierPurchasesModal({ supplierId, supplierName, fetch
           <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:border-amber-900/60 dark:bg-amber-900/20 dark:text-amber-200">{error}</div>
         ) : (
           <>
-            <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
+            {/* Part 567: 4 stat cells, not 5 (user: "the stats can be 4 stats
+                not 5... made more compact"). Batches and Products -- both plain
+                counts -- share one cell so nothing is dropped. */}
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
               {[
-                [tr('purchase_batches', 'Batches'), String(totals.batches ?? 0)],
-                [tr('products', 'Products'), String(totals.products ?? 0)],
+                [`${tr('purchase_batches', 'Batches')} / ${tr('products', 'Products')}`, `${totals.batches ?? 0} / ${totals.products ?? 0}`],
                 [tr('units_received', 'Units received'), qty(totals.units_received)],
                 [tr('purchase_cost', 'Purchase cost'), money(totals.cost_usd)],
                 [tr('credit_open', 'On credit'), `${money(totals.credit_open_usd)} (${totals.credit_batches ?? 0})`],
               ].map(([label, value]) => (
-                <div key={label} className="rounded-xl border border-gray-200 px-3 py-2 dark:border-gray-700">
+                <div key={label} className="rounded-xl border border-gray-200 px-3 py-1.5 dark:border-gray-700">
                   <div className="text-[11px] text-gray-400">{label}</div>
                   <div className="text-sm font-semibold text-gray-900 dark:text-white">{value}</div>
                 </div>

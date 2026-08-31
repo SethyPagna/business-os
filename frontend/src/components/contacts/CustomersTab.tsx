@@ -18,7 +18,6 @@ import type { QueryParams } from '../../api/query.ts'
 import { fmtDateTime24 } from '../../utils/formatters'
 import FilterMenu from '../shared/FilterMenu'
 import SearchInput from '../shared/SearchInput'
-import SortChip from '../shared/SortChip'
 import { loadSortSpec, saveSortSpec, type SortField, type SortSpec } from '../../utils/listSort'
 import ActionHistoryBar from '../shared/ActionHistoryBar'
 import { ThreeDotMenu, DetailModal, ContactTable, buildSelectedSnapshots, countActiveFlags, useContactSelection } from './shared'
@@ -122,7 +121,8 @@ interface CustomerRow extends Record<string, unknown> {
   portal_account?: { membershipId: string; createdAt: string | null } | null
 }
 
-// SortChip vocabulary. This list is SERVER-paged, so both fields are sorted
+// Sort vocabulary (driven by the filter-menu Sort/Group sections). This list
+// is SERVER-paged, so both fields are sorted
 // by the API (contacts.ts allowlist: created_at / lower(name)) -- a client
 // sort would only reorder the loaded page. Points deliberately absent: the
 // balance is computed after the page slice, so it can't be honestly
@@ -280,10 +280,11 @@ function CustomersTab({ t, notify, active = true, initialSearch }: CustomersTabP
   const [yearFilter, setYearFilter] = useState('all')
   const [monthFilter, setMonthFilter] = useState('all')
   const [genderFilter, setGenderFilter] = useState('all')
-  // Unified sort (listSort.ts + SortChip). The spec drives BOTH the server
-  // query's ORDER BY and the grouping style (date -> time sections, name ->
-  // alphabet sections), replacing the old separate direction + group-mode
-  // states.
+  // Unified sort (listSort.ts spec, now driven from the filter menu -- Part
+  // 567 moved the "arrange by" controls off the visible SortChip and into the
+  // FilterMenu Sort/Group sections). The spec drives BOTH the server query's
+  // ORDER BY and the grouping style (date -> time sections, name -> alphabet
+  // sections), replacing the old separate direction + group-mode states.
   const [customerSortSpec, setCustomerSortSpec] = useState<SortSpec>(() => loadSortSpec(
     'customers:sort',
     { field: 'date', direction: 'desc' },
@@ -436,17 +437,32 @@ function CustomersTab({ t, notify, active = true, initialSearch }: CustomersTabP
   // their own Company field (SuppliersTab.tsx) -- that form does expose
   // it and a business identity genuinely applies there.
   const customerColumns = [tr(t, 'name', 'Name'), 'Membership', tr(t, 'loyalty_points', 'Points'), tr(t, 'phone', 'Phone'), tr(t, 'email', 'Email'), tr(t, 'gender', 'Gender'), tr(t, 'col_added', 'Added'), 'Options']
-  const customerSortFields = useMemo<SortField<CustomerRow>[]>(() => {
-    const labels: Record<string, string> = {
-      date: tr(t, 'sort_by_joined', 'Joined'),
-      name: tr(t, 'name', 'Name'),
-    }
-    return CUSTOMER_SORT_FIELD_DEFS.map((field) => ({ ...field, label: labels[field.id] || field.id }))
-  }, [t])
 
   const contactFilterSections = useMemo(() => ([
-    // Sorting (and the A-Z grouping that follows it) moved onto the visible
-    // SortChip; this section keeps the period narrowing it always bundled.
+    // Part 567: the "arrange by" controls moved OFF the visible SortChip and
+    // INTO the filter menu (user: "for customer move arrange by options to the
+    // filter menu"), matching how Suppliers/Delivery already carry sort +
+    // group inside their FilterMenu. Both still drive the single
+    // `customerSortSpec` (server ORDER BY + section grouping), so persistence
+    // and paging behaviour are unchanged -- only the control's home moved.
+    {
+      id: 'sort',
+      label: tr(t, 'sort', 'Sort'),
+      searchable: true,
+      options: [
+        { id: 'sort-desc', label: tr(t, 'newest_first', 'Newest first'), active: customerSortSpec.direction === 'desc', onClick: () => setCustomerSortSpec((current) => ({ ...current, direction: 'desc' })) },
+        { id: 'sort-asc', label: tr(t, 'oldest_first', 'Oldest first'), active: customerSortSpec.direction === 'asc', onClick: () => setCustomerSortSpec((current) => ({ ...current, direction: 'asc' })) },
+      ],
+    },
+    {
+      id: 'group',
+      label: tr(t, 'group_by', 'Group by'),
+      options: [
+        { id: 'group-time', label: tr(t, 'date', 'Date'), active: customerSortSpec.field === 'date', onClick: () => setCustomerSortSpec((current) => ({ ...current, field: 'date' })) },
+        { id: 'group-alphabet', label: 'A-Z / ខ្មែរ', active: customerSortSpec.field === 'name', onClick: () => setCustomerSortSpec((current) => ({ ...current, field: 'name' })) },
+      ],
+    },
+    // This section keeps the period narrowing it always bundled.
     {
       id: 'period',
       label: tr(t, 'period', 'Period'),
@@ -468,7 +484,7 @@ function CustomersTab({ t, notify, active = true, initialSearch }: CustomersTabP
       ],
     },
 
-  ]), [availableYears, genderFilter, monthFilter, t, yearFilter])
+  ]), [availableYears, customerSortSpec, genderFilter, monthFilter, t, yearFilter])
   const displayContactFilterSections = useMemo(() => (
     contactFilterSections.map((section) => {
       if (section.id !== 'group') return section
@@ -482,7 +498,7 @@ function CustomersTab({ t, notify, active = true, initialSearch }: CustomersTabP
       }
     })
   ), [contactFilterSections, t])
-  const activeFilterCount = countActiveFlags([yearFilter !== 'all', monthFilter !== 'all', genderFilter !== 'all'])
+  const activeFilterCount = countActiveFlags([yearFilter !== 'all', monthFilter !== 'all', genderFilter !== 'all', customerSortSpec.direction !== 'desc', customerSortSpec.field !== 'date'])
   const hasActiveCustomerSearchOrFilters = deferredSearch.trim().length > 0 || activeFilterCount > 0
   const toggleSectionCollapsed = (sectionId: string) => setCollapsedSections((current) => {
     const next = new Set(current)
@@ -817,14 +833,14 @@ function CustomersTab({ t, notify, active = true, initialSearch }: CustomersTabP
           Export into one Manage menu leaves more room for each remaining
           button's label at narrow widths. */}
       <div className="flex min-w-0 items-stretch gap-1.5 overflow-x-auto pb-1">
-        <ActionHistoryBar history={actionHistory as unknown as ActionHistoryBarHistory} summaryMode="compact" t={t} className="min-w-0 flex-1" showLabel />
+        <ActionHistoryBar history={actionHistory as unknown as ActionHistoryBarHistory} summaryMode="compact" t={t} className="min-w-0 flex-1" showLabel dense />
         <LazyPortalMenu
           align="auto"
           triggerWrapperClassName="min-w-0 flex-1"
           trigger={(
             <button
               type="button"
-              className="inline-flex h-9 w-full items-center justify-center gap-1.5 rounded-xl border border-slate-300 bg-white px-2 text-xs font-semibold text-slate-700 shadow-sm transition-colors hover:border-blue-400 hover:bg-blue-50/60 hover:text-blue-700 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 dark:hover:border-blue-500 dark:hover:bg-slate-700/80 dark:hover:text-blue-300 sm:text-sm"
+              className="inline-flex h-8 w-full items-center justify-center gap-1.5 rounded-xl border border-slate-300 bg-white px-2 text-xs font-semibold text-slate-700 shadow-sm transition-colors hover:border-blue-400 hover:bg-blue-50/60 hover:text-blue-700 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 dark:hover:border-blue-500 dark:hover:bg-slate-700/80 dark:hover:text-blue-300 sm:text-sm"
               aria-haspopup="true"
               aria-label={tr(t, 'manage', 'Manage')}
               title={tr(t, 'manage', 'Manage')}
@@ -862,7 +878,7 @@ function CustomersTab({ t, notify, active = true, initialSearch }: CustomersTabP
           ] as PortalMenuItem[])}
         />
         <button
-          className="inline-flex h-9 flex-1 items-center justify-center gap-1.5 rounded-xl border border-blue-700 bg-blue-600 px-2 text-xs font-semibold text-white shadow-sm transition-colors hover:bg-blue-700 hover:border-blue-800 sm:text-sm"
+          className="inline-flex h-8 min-w-0 flex-1 items-center justify-center gap-1.5 rounded-xl border border-blue-700 bg-blue-600 px-2 text-xs font-semibold text-white shadow-sm transition-colors hover:bg-blue-700 hover:border-blue-800 sm:text-sm"
           onClick={() => { setSelected(null); setModal('form') }}
           title={tr(t, 'add_customer', 'Add Customer')}
           aria-label={tr(t, 'add_customer', 'Add Customer')}
@@ -912,16 +928,10 @@ function CustomersTab({ t, notify, active = true, initialSearch }: CustomersTabP
               {tr(t, 'delete_selected_count', 'Delete {count}').replace('{count}', String(selectedIds.size))}
             </button>
           ) : null}
-          <SortChip
-            spec={customerSortSpec}
-            fields={customerSortFields}
-            onChange={setCustomerSortSpec}
-            label={tr(t, 'sort', 'Sort')}
-          />
           <FilterMenu
             label={tr(t, 'filters', 'Filters')}
             activeCount={activeFilterCount}
-      sections={displayContactFilterSections}
+            sections={displayContactFilterSections}
             onClear={() => {
               setYearFilter('all')
               setMonthFilter('all')

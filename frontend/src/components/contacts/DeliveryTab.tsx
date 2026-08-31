@@ -939,14 +939,14 @@ function DeliveryTab({ t, notify, active = true, initialSearch }: DeliveryTabPro
           Products.tsx uses) / History / Add Delivery -- History before
           Manage per the ordering used on Products. */}
       <div className="flex min-w-0 items-stretch gap-1.5 overflow-x-auto pb-1">
-        <ActionHistoryBar history={actionHistory as unknown as ActionHistoryBarHistory} t={t} className="min-w-0 flex-1" showLabel />
+        <ActionHistoryBar history={actionHistory as unknown as ActionHistoryBarHistory} t={t} className="min-w-0 flex-1" showLabel dense />
         <LazyPortalMenu
           align="auto"
           triggerWrapperClassName="min-w-0 flex-1"
           trigger={(
             <button
               type="button"
-              className="inline-flex h-9 w-full items-center justify-center gap-1.5 rounded-xl border border-slate-300 bg-white px-2 text-xs font-semibold text-slate-700 shadow-sm transition-colors hover:border-blue-400 hover:bg-blue-50/60 hover:text-blue-700 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 dark:hover:border-blue-500 dark:hover:bg-slate-700/80 dark:hover:text-blue-300 sm:text-sm"
+              className="inline-flex h-8 w-full items-center justify-center gap-1.5 rounded-xl border border-slate-300 bg-white px-2 text-xs font-semibold text-slate-700 shadow-sm transition-colors hover:border-blue-400 hover:bg-blue-50/60 hover:text-blue-700 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 dark:hover:border-blue-500 dark:hover:bg-slate-700/80 dark:hover:text-blue-300 sm:text-sm"
               aria-haspopup="true"
               aria-label={tr('manage', 'Manage', 'គ្រប់គ្រង')}
               title={tr('manage', 'Manage', 'គ្រប់គ្រង')}
@@ -985,7 +985,7 @@ function DeliveryTab({ t, notify, active = true, initialSearch }: DeliveryTabPro
           ] as PortalMenuItem[])}
         />
         <button
-          className="inline-flex h-9 flex-1 items-center justify-center gap-1.5 rounded-xl border border-blue-700 bg-blue-600 px-2 text-xs font-semibold text-white shadow-sm transition-colors hover:bg-blue-700 hover:border-blue-800 sm:text-sm"
+          className="inline-flex h-8 min-w-0 flex-1 items-center justify-center gap-1.5 rounded-xl border border-blue-700 bg-blue-600 px-2 text-xs font-semibold text-white shadow-sm transition-colors hover:bg-blue-700 hover:border-blue-800 sm:text-sm"
           onClick={() => { setSelected(null); setModal('form') }}
           title={tr('add_delivery_contact', 'Add Delivery', 'បន្ថែមអ្នកដឹកជញ្ជូន')}
           aria-label={tr('add_delivery_contact', 'Add Delivery', 'បន្ថែមអ្នកដឹកជញ្ជូន')}

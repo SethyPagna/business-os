@@ -245,8 +245,10 @@ export default function StockInInvoicesSection({ t }: StockInInvoicesSectionProp
 
   return (
     <div className="space-y-3 p-3">
-      {/* The report's standard filter row: branch · supplier · date range. */}
-      <div className="flex flex-wrap items-center gap-2">
+      {/* The report's standard filter row: branch · supplier · date range.
+          Part 567: kept to a single scrollable line (user: "the filters
+          options one row") rather than wrapping to two. */}
+      <div className="flex flex-nowrap items-center gap-2 overflow-x-auto">
         <AppSelect
           ariaLabel={tr('branch', 'Branch')}
           value={branchId}
@@ -304,15 +306,17 @@ export default function StockInInvoicesSection({ t }: StockInInvoicesSectionProp
         <div className="py-8 text-center text-sm text-gray-400">{tr('loading', 'Loading...')}</div>
       ) : (
         <>
-          <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
+          {/* Part 567: 4 stat cells, not 5 (user: "the stats can be 4 stats
+              not 5... made more compact"). Invoices and Lines -- both plain
+              counts -- share one cell so nothing is dropped. */}
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
             {[
-              [tr('stock_in_invoices_count', 'Invoices'), String(totals.invoices ?? 0)],
-              [tr('invoice_lines', 'Lines'), String(totals.lines ?? 0)],
+              [`${tr('stock_in_invoices_count', 'Invoices')} / ${tr('invoice_lines', 'Lines')}`, `${totals.invoices ?? 0} / ${totals.lines ?? 0}`],
               [tr('units_received', 'Units received'), qty(totals.units_received)],
               [tr('purchase_cost', 'Purchase cost'), money(totals.cost_usd)],
               [tr('credit_open', 'On credit'), String(totals.credit_lines ?? 0)],
             ].map(([label, value]) => (
-              <div key={label} className="rounded-xl border border-gray-200 px-3 py-2 dark:border-gray-700">
+              <div key={label} className="rounded-xl border border-gray-200 px-3 py-1.5 dark:border-gray-700">
                 <div className="text-[11px] text-gray-400">{label}</div>
                 <div className="text-sm font-semibold text-gray-900 dark:text-white">{value}</div>
               </div>

@@ -49,8 +49,8 @@ export default function SupplierInvoicesSection({ t }: SupplierInvoicesSectionPr
           the selected report's own filter row, the same shape ReviewLogsPage
           uses for its sections. Both ledgers stay complete; the chip just
           picks which one fills the area. */}
-      <div className="flex flex-wrap items-center gap-2">
-        <div className="inline-flex flex-wrap rounded-xl bg-gray-100 p-0.5 dark:bg-gray-800">
+      <div className="flex items-center gap-2 overflow-x-auto">
+        <div className="inline-flex flex-nowrap rounded-xl bg-gray-100 p-0.5 dark:bg-gray-800">
           {chips.map((chip) => {
             const Icon = chip.icon
             const isActive = view === chip.key
@@ -60,9 +60,9 @@ export default function SupplierInvoicesSection({ t }: SupplierInvoicesSectionPr
                 type="button"
                 onClick={() => setView(chip.key)}
                 aria-pressed={isActive}
-                className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium transition-colors ${isActive ? `bg-white shadow dark:bg-gray-900 ${chip.activeColor}` : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'}`}
+                className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-lg px-2.5 py-1 text-xs font-medium transition-colors ${isActive ? `bg-white shadow dark:bg-gray-900 ${chip.activeColor}` : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'}`}
               >
-                <Icon className="h-4 w-4" /> {chip.label}
+                <Icon className="h-3.5 w-3.5" /> {chip.label}
               </button>
             )
           })}

@@ -250,15 +250,19 @@ export function DetailModal({ item, fields = [], onEdit, onDelete, onClose, t, e
 
   return (
     <Modal title={title} onClose={onClose}>
-      <div className="space-y-3">
+      <div className="space-y-2.5">
+        {/* Compact detail rows (user, Part 567: "the details when click to
+            view needs to be made more compact") -- narrower label column and
+            tighter vertical padding than the old 140px / py-2 layout, so more
+            fields fit without scrolling. */}
         <div className="max-h-[60vh] overflow-y-auto rounded-xl border border-gray-200 dark:border-zinc-700">
           {fields.map(([label, value], index) => (
             <div
               key={`${String(label)}-${index}`}
-              className="grid grid-cols-[140px,1fr] gap-3 border-b border-gray-100 px-3 py-2 text-sm last:border-b-0 dark:border-zinc-800"
+              className="grid grid-cols-[112px,1fr] gap-2 border-b border-gray-100 px-3 py-1.5 text-[13px] last:border-b-0 dark:border-zinc-800"
             >
               <div className="font-medium text-gray-500 dark:text-gray-400">{label || '-'}</div>
-              <div className="whitespace-pre-line text-gray-800 dark:text-gray-200">{value || '-'}</div>
+              <div className="whitespace-pre-line break-words text-gray-800 dark:text-gray-200">{value || '-'}</div>
             </div>
           ))}
         </div>
