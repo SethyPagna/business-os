@@ -10,6 +10,7 @@ import PackageSearch from 'lucide-react/dist/esm/icons/package-search.js'
 import MoreVertical from 'lucide-react/dist/esm/icons/more-vertical.js'
 import Plus from 'lucide-react/dist/esm/icons/plus.js'
 import ImagePlus from 'lucide-react/dist/esm/icons/image-plus.js'
+import Boxes from 'lucide-react/dist/esm/icons/boxes.js'
 import { isBrokenLocalizedString, useApp, useSync } from '../../AppContext'
 import Modal from '../shared/Modal'
 import AlphaIndexRail from '../shared/AlphaIndexRail'
@@ -32,6 +33,10 @@ import type { WireImageChange, WireImagesPreview } from './WireImagesReviewModal
 import DeleteConfirmModal from './DeleteConfirmModal'
 import { summarizeDeleteImpact } from '../../utils/deleteImpactSummary'
 import ProductsHeaderActions from './surfaces/HeaderActions'
+import LazyPortalMenu from '../shared/LazyPortalMenu'
+import type { PortalMenuItem } from '../shared/PortalMenu'
+import { primaryToolbarButtonClassName } from '../shared/toolbarButtonStyles'
+import type { StockChangeHeaderActions } from './StockChangeSection'
 import {
   ProductBatchPreview,
   ProductDetailsCell,
@@ -665,6 +670,11 @@ function ProductsFullEditor() {
   // header flips between the product listing and the Stock Changes ledger,
   // which used to be a folded card at the bottom of the same scroll.
   const [activeProductSection, setActiveProductSection] = useState<'products' | 'stock_changes' | 'duplicates'>('products')
+  // Stock Changes section's header-row actions (Adjust menu + ledger export),
+  // registered up by StockChangeSection so they render on THIS page's header
+  // row beside info/History/Manage (user, Aug 31). null when that section is
+  // not mounted, so the header controls disappear with it.
+  const [ledgerActions, setLedgerActions] = useState<StockChangeHeaderActions | null>(null)
   // The Add menu's merged Add Stock flow (the shipment receiver). Add New
   // Product keeps the existing `modal === 'form'` path.
   const [addStockOpen, setAddStockOpen] = useState(false)
@@ -3599,15 +3609,25 @@ function ProductsFullEditor() {
             onManageBrands={canManageLookups ? ()=>setModal('brands') : undefined}
             onManageUnits={canManageLookups ? ()=>setModal('units') : undefined}
             onImport={canImportProducts ? ()=>setModal('bulk') : undefined}
-            onExport={canExportProducts ? () => {
-              // Default to the richest scope available each time the
-              // panel opens: Selected (if anything's checked) beats
-              // Filtered (if filters are narrowing the list) beats the
-              // plain visible/full list -- same "most likely to be what
-              // was meant" ordering buildProductExportScopes returns.
-              setExportScopeId(productExportScopes[0]?.id || 'visible')
-              setExportFieldsOpen(true)
-            } : undefined}
+            /* Export is context-aware. On the Stock Changes section it runs
+               the LEDGER CSV export (folded up out of the section body, user
+               Aug 31: "fold into the export ... remove the whole thing"),
+               kept ungated exactly as the section's loose button was so no
+               role loses it. Everywhere else it opens the product export
+               panel, gated by canExportProducts. */
+            onExport={
+              activeProductSection === 'stock_changes'
+                ? (ledgerActions ? () => ledgerActions?.runExport() : undefined)
+                : (canExportProducts ? () => {
+                    // Default to the richest scope available each time the
+                    // panel opens: Selected (if anything's checked) beats
+                    // Filtered (if filters are narrowing the list) beats the
+                    // plain visible/full list -- same "most likely to be what
+                    // was meant" ordering buildProductExportScopes returns.
+                    setExportScopeId(productExportScopes[0]?.id || 'visible')
+                    setExportFieldsOpen(true)
+                  } : undefined)
+            }
             /* Stock Changes section replaces the catalog "Add Product" button
                with its own "Adjust" menu (user, Aug 31) -> drop onAdd there;
                HeaderActions hides any undefined-handler control. */
@@ -3625,6 +3645,38 @@ function ProductsFullEditor() {
             ) : (
               <div className="h-9 min-w-0 flex-1 sm:flex-none sm:min-w-[6.5rem]" aria-hidden="true" />
             )}
+            /* Stock Changes' primary "Adjust" action rides the header row here
+               (user, Aug 31: "Adjust should be moved to same row as the info
+               toolkit, History and Manage"). Its menu opens the section's own
+               modals via the registered callbacks; the section body no longer
+               renders this button. A portal menu (not a bare absolute one) so
+               it can't be clipped by the header row's horizontal overflow. */
+            primaryActionSlot={
+              activeProductSection === 'stock_changes' && ledgerActions?.canAdjust ? (
+                <LazyPortalMenu
+                  align="auto"
+                  trigger={(
+                    <button
+                      type="button"
+                      className={primaryToolbarButtonClassName}
+                      aria-haspopup="true"
+                      aria-label={tr('adjust', 'Adjust')}
+                      title={tr('adjust', 'Adjust')}
+                    >
+                      <Boxes className="h-4 w-4 shrink-0" />
+                      <span className="min-w-0 truncate">{tr('adjust', 'Adjust')}</span>
+                    </button>
+                  )}
+                  items={[
+                    { label: tr('add_stock', 'Add Stock'), onClick: () => ledgerActions?.openAdjust('add'), color: 'blue', icon: <Boxes className="h-4 w-4 shrink-0" /> },
+                    { label: tr('remove_stock', 'Remove Stock'), onClick: () => ledgerActions?.openAdjust('remove') },
+                    { label: tr('adjust_quantity', 'Adjust Quantity'), onClick: () => ledgerActions?.openAdjust('set') },
+                    'divider',
+                    { label: tr('fast_stockin_title', 'Fast stock-in'), onClick: () => ledgerActions?.openFastStockIn(), color: 'blue' },
+                  ] as PortalMenuItem[]}
+                />
+              ) : null
+            }
             t={t}
           />
         </div>
@@ -4130,7 +4182,7 @@ function ProductsFullEditor() {
               behind an InfoHint next to the total (density: instructions go
               into the info toolkit, not inline above the layout). */}
           <Suspense fallback={<div className="py-6 text-center text-sm text-gray-400">{t('loading') || 'Loading'}...</div>}>
-            <StockChangeSection t={t} />
+            <StockChangeSection t={t} onRegisterActions={setLedgerActions} />
           </Suspense>
         </div>
       )}

@@ -26,7 +26,6 @@ import InfoHint from '../shared/InfoHint'
 import { useDebouncedValue } from '../../utils/useDebouncedValue.ts'
 import { fmtDate, fmtClock24, fmtDateTime24 } from '../../utils/formatters'
 import { batchDisplayLabel } from '../../utils/batchLabel.ts'
-import Download from 'lucide-react/dist/esm/icons/download.js'
 
 // D1 (Part 415): the user's Stock Change ledger on the Products page --
 // one row per recorded action over the EXISTING movement history, with the
@@ -117,7 +116,27 @@ function fmtQty(value: number): string {
 
 type BranchOption = { id: number; name: string }
 
-export default function StockChangeSection({ t }: { t: Translate }) {
+// The Stock Changes section's header-row actions, registered UP to Products.tsx
+// so its "Adjust" menu and ledger export render on the page header row beside
+// info/History/Manage (user, Aug 31) instead of in this section's body. The
+// modals and the ledger's live filter state stay in this component -- only the
+// trigger UI is lifted, via these stable callbacks.
+export type StockChangeHeaderActions = {
+  canAdjust: boolean
+  openAdjust: (type: 'add' | 'remove' | 'set') => void
+  openFastStockIn: () => void
+  runExport: () => void
+}
+
+type StockChangeSectionProps = {
+  t: Translate
+  // Called with the action set on mount (and whenever it changes), and with
+  // null on unmount so Products.tsx can drop the header controls when this
+  // section is not shown.
+  onRegisterActions?: (actions: StockChangeHeaderActions | null) => void
+}
+
+export default function StockChangeSection({ t, onRegisterActions }: StockChangeSectionProps) {
   // Row write actions (revert / edit reason) reuse the same app context the
   // rest of the Products page reads -- can() gates them exactly as the server
   // does (Inventory adjust access), notify() surfaces the result.
@@ -151,7 +170,8 @@ export default function StockChangeSection({ t }: { t: Translate }) {
   const [editingReason, setEditingReason] = useState<string | null>(null)
   const [confirmRevert, setConfirmRevert] = useState(false)
   // Adjust menu (Add / Remove / Adjust quantity) -> opens the reused modal.
-  const [adjustMenuOpen, setAdjustMenuOpen] = useState(false)
+  // The trigger button/menu now lives on the page header row (Products.tsx);
+  // this state drives which modal that menu opens.
   const [adjustType, setAdjustType] = useState<'add' | 'remove' | 'set' | null>(null)
   const [fastStockInOpen, setFastStockInOpen] = useState(false)
   const [exportRange, setExportRange] = useState<{ startDate: string; endDate: string } | null>(null)
@@ -307,6 +327,26 @@ export default function StockChangeSection({ t }: { t: Translate }) {
     }
   }, [detail, editingReason, app, t, load])
 
+  // Header-row action bridge (user, Aug 31): the Adjust menu + ledger export
+  // moved onto the page header row, rendered by Products.tsx. Its trigger
+  // callbacks are registered here. runExport must open with THIS section's
+  // current Start -> End range, so it reads the latest range from a ref rather
+  // than closing over a stale value (which would let the export dialog seed
+  // itself with whatever the range was when the section first mounted).
+  const rangeRef = useRef({ startDate, endDate })
+  useEffect(() => { rangeRef.current = { startDate, endDate } }, [startDate, endDate])
+  const openExport = useCallback(() => setExportRange({ ...rangeRef.current }), [])
+  useEffect(() => {
+    if (!onRegisterActions) return
+    onRegisterActions({
+      canAdjust,
+      openAdjust: (type) => setAdjustType(type),
+      openFastStockIn: () => setFastStockInOpen(true),
+      runExport: openExport,
+    })
+    return () => onRegisterActions(null)
+  }, [onRegisterActions, canAdjust, openExport])
+
   // Part 553: two view chips plus All -- the Adjustment chip is gone (its
   // rows fold into In).
   const views: Array<{ id: LedgerView; label: string }> = [
@@ -459,52 +499,11 @@ export default function StockChangeSection({ t }: { t: Translate }) {
           drops BELOW it (user, Aug 31 2026: "move all mini sections (filters,
           stats, etc.) below the date range and search bar row"). Unified
           Start → End pill -- the same control as the Dashboard, Fees,
-          Inventory movements and Audit Log range filters. */}
+          Inventory movements and Audit Log range filters. The section's Adjust
+          menu and ledger export now live on the page header row above (see
+          Products.tsx / HeaderActions' primaryActionSlot), so this row leads
+          straight with the date range. */}
       <div className="flex flex-wrap items-center gap-2">
-        {/* Primary action: replaces the catalog "Add Product" button on this
-            section (user, Aug 31). Opens the COMPLETE adjust modal reused from
-            the Inventory/Branches page, preset to the chosen operation. */}
-        {canAdjust ? (
-          <div className="relative">
-            <button
-              type="button"
-              onClick={() => setAdjustMenuOpen((open) => !open)}
-              className="inline-flex items-center gap-1 rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700"
-            >
-              {tr(t, 'adjust', 'Adjust')}
-              <span aria-hidden="true" className="text-xs opacity-80">▾</span>
-            </button>
-            {adjustMenuOpen ? (
-              <>
-                <div className="fixed inset-0 z-10" onClick={() => setAdjustMenuOpen(false)} />
-                <div className="absolute left-0 z-20 mt-1 w-44 overflow-hidden rounded-xl border border-gray-200 bg-white py-1 shadow-lg dark:border-gray-700 dark:bg-gray-900">
-                  {([['add', 'add_stock', 'Add Stock'], ['remove', 'remove_stock', 'Remove Stock'], ['set', 'adjust_quantity', 'Adjust Quantity']] as Array<['add' | 'remove' | 'set', string, string]>).map(([type, key, fallback]) => (
-                    <button
-                      key={type}
-                      type="button"
-                      onClick={() => { setAdjustType(type); setAdjustMenuOpen(false) }}
-                      className="block w-full px-3 py-1.5 text-left text-sm text-gray-700 hover:bg-gray-50 dark:text-gray-200 dark:hover:bg-gray-800"
-                    >
-                      {tr(t, key, fallback)}
-                    </button>
-                  ))}
-                  {/* Fast stock-in joins every stock entry point (user,
-                      Aug 31: "for fast stock in do that for products pages
-                      and all sections") -- the same shipment receiver the
-                      Branches page offers. */}
-                  <div className="my-1 border-t border-gray-100 dark:border-gray-800" />
-                  <button
-                    type="button"
-                    onClick={() => { setFastStockInOpen(true); setAdjustMenuOpen(false) }}
-                    className="block w-full px-3 py-1.5 text-left text-sm font-medium text-blue-600 hover:bg-blue-50 dark:text-blue-300 dark:hover:bg-blue-900/20"
-                  >
-                    {tr(t, 'fast_stockin_title', 'Fast stock-in')}
-                  </button>
-                </div>
-              </>
-            ) : null}
-          </div>
-        ) : null}
         <DateTimeRangePicker
           value={{ startDate, endDate, startTime: '', endTime: '' }}
           onChange={(next) => {
@@ -522,29 +521,11 @@ export default function StockChangeSection({ t }: { t: Translate }) {
             "bring the barcode scanner back") -- scanning a product fills the
             search box, same as the Products / POS / Inventory search rows. */}
         <ScanSearchButton onDetected={setSearch} t={t} />
-        <span className="ml-auto inline-flex items-center gap-1 text-xs text-gray-400">
-          {/* Ranged CSV export -- the dialog opens seeded with this row's own
-              Start → End range (user, Aug 31: "do the date range for all the
-              exports"). */}
-          <button
-            type="button"
-            onClick={() => setExportRange({ startDate, endDate })}
-            className="rounded-lg p-1 text-gray-400 transition hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-gray-800 dark:hover:text-gray-200"
-            title={tr(t, 'export', 'Export')}
-            aria-label={tr(t, 'export', 'Export')}
-          >
-            <Download className="h-3.5 w-3.5" />
-          </button>
-          {total}
-          {/* The ledger's "what is this" explanation lives behind this info
-              affordance instead of an inline sentence above the section
-              (density: instructions move into the info toolkit, not the
-              layout). */}
-          <InfoHint
-            label={tr(t, 'stock_change_ledger', 'Stock Changes')}
-            text={tr(t, 'stock_change_ledger_info', 'Read-only. Every recorded stock action — stock in, stock out — with the running balance (before → after) computed from current stock. Tap a card for that product’s full history.')}
-          />
-        </span>
+        {/* The loose "↓ <total> ⓘ" export affordance that used to sit at the
+            end of this row was removed (user, Aug 31: "remove the whole thing")
+            -- the ledger CSV export is now folded into the page header's
+            Manage → Export (context-aware on this section, via the registered
+            runExport above). The running total stays on the pagination row. */}
       </div>
 
       {/* Row 2: the mini-sections, BELOW the date/search row -- the In/Out/All

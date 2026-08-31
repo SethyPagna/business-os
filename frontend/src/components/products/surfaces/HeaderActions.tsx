@@ -59,6 +59,13 @@ type ProductsHeaderActionsProps = {
   // with the page that already manages it. Row collapses to two buttons
   // (Manage / Add product) for any embedding that doesn't pass one.
   historySlot?: ReactNode
+  // A section-specific primary action rendered at the end of this row, where
+  // the Add button normally sits. The Stock Changes section passes its
+  // "Adjust" menu here (user, Aug 31: "Adjust should be moved to same row as
+  // the info toolkit, History and Manage") so its primary action lives on the
+  // page header row instead of a separate row in the section body below. Left
+  // unset (the Products listing, other embedders) the row is unchanged.
+  primaryActionSlot?: ReactNode
   t: Translate
 }
 
@@ -91,6 +98,7 @@ export default function ProductsHeaderActions({
   onZeroQuantityCleanup,
   onWireImages,
   historySlot = null,
+  primaryActionSlot = null,
   t,
 }: ProductsHeaderActionsProps) {
   const tr = (key: string, fallback: string) => {
@@ -267,6 +275,7 @@ export default function ProductsHeaderActions({
           <span className="min-w-0 truncate">{productLabel}</span>
         </button>
       ) : null}
+      {primaryActionSlot}
     </div>
   )
 }
