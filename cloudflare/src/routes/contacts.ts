@@ -1402,6 +1402,107 @@ app.get('/suppliers/reports/ap-invoices', async (c) => {
   })
 })
 
+// Customer accounts-receivable ledger (migration 0094): the customer-side
+// mirror of the supplier AP report above. Read-only; AR rows never rewrite a
+// sale's payment or move stock. Sits under /customers/* so the general
+// contacts gate covers it, matching the other customer report endpoints.
+// Resilient to the ledger not being applied yet -- returns an empty payload
+// rather than erroring, so the section renders "no receivables" until then.
+app.get('/customers/reports/ar-invoices', async (c) => {
+  const db = getDb(c.env)
+  const query = c.req.query()
+  const page = clampInt(query.page, 1, 1, 100000)
+  const pageSize = clampInt(query.page_size, 25, 1, 100)
+  const round2 = (value: unknown): number => Math.round((Number(value) || 0) * 100) / 100
+
+  const ledgerExists = await db
+    .prepare("SELECT 1 AS ok FROM sqlite_master WHERE type='table' AND name='customer_receivables' LIMIT 1")
+    .get<{ ok: number }>()
+  if (!ledgerExists) {
+    return c.json({
+      invoices: [], totals: { invoices: 0, total_usd: 0, paid_usd: 0, outstanding_usd: 0, outstanding_count: 0 },
+      page, page_size: pageSize, total_invoices: 0, meta: { customers: [] }, ledger_ready: false,
+    })
+  }
+
+  const conditions: string[] = []
+  const params: Record<string, unknown> = {}
+  const customer = String(query.customer || '').trim()
+  if (customer && customer !== 'all') {
+    conditions.push('lower(trim(cr.customer_name)) = lower(trim(@customer))')
+    params.customer = customer
+  }
+  const status = String(query.status || '').trim()
+  if (status === 'outstanding') conditions.push('cr.outstanding_balance_usd > 0')
+  else if (status === 'overpaid') conditions.push('cr.outstanding_balance_usd < 0')
+  else if (status === 'settled') conditions.push('cr.outstanding_balance_usd = 0')
+  const from = String(query.from || '').slice(0, 10)
+  const to = String(query.to || '').slice(0, 10)
+  if (from) { conditions.push("date(cr.invoice_date, '+7 hours') >= @from"); params.from = from }
+  if (to) { conditions.push("date(cr.invoice_date, '+7 hours') <= @to"); params.to = to }
+  const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : ''
+
+  type ArRow = {
+    id: number; legacy_id: number; customer_id: number | null; customer_code: string | null
+    customer_name: string; invoice_no: string | null; invoice_date: string
+    taxable_amount_usd: number; vat_amount_usd: number; total_amount_usd: number
+    amount_paid_usd: number; outstanding_balance_usd: number; status: string
+  }
+  type ArTotals = {
+    invoices: number; total_usd: number; paid_usd: number
+    outstanding_usd: number; outstanding_count: number
+  }
+  const [invoices, totals, customers] = await Promise.all([
+    db.prepare(`
+      SELECT cr.id, cr.legacy_id, cr.customer_id, cr.customer_code, cr.customer_name,
+             cr.invoice_no, cr.invoice_date, cr.taxable_amount_usd, cr.vat_amount_usd,
+             cr.total_amount_usd, cr.amount_paid_usd, cr.outstanding_balance_usd, cr.status
+      FROM customer_receivables cr
+      ${where}
+      ORDER BY cr.invoice_date DESC, cr.id DESC
+      LIMIT @limit OFFSET @offset
+    `).all<ArRow>({ ...params, limit: pageSize, offset: (page - 1) * pageSize }),
+    db.prepare(`
+      SELECT COUNT(*) AS invoices,
+             COALESCE(SUM(cr.total_amount_usd), 0) AS total_usd,
+             COALESCE(SUM(cr.amount_paid_usd), 0) AS paid_usd,
+             COALESCE(SUM(cr.outstanding_balance_usd), 0) AS outstanding_usd,
+             SUM(CASE WHEN cr.outstanding_balance_usd > 0 THEN 1 ELSE 0 END) AS outstanding_count
+      FROM customer_receivables cr ${where}
+    `).get<ArTotals>(params),
+    db.prepare(`
+      SELECT lower(trim(customer_name)) AS key, MAX(trim(customer_name)) AS name, COUNT(*) AS invoice_count
+      FROM customer_receivables
+      GROUP BY lower(trim(customer_name))
+      ORDER BY name COLLATE NOCASE ASC
+      LIMIT 300
+    `).all<{ key: string; name: string; invoice_count: number }>(),
+  ])
+
+  return c.json({
+    invoices: invoices.map((row) => ({
+      ...row,
+      taxable_amount_usd: round2(row.taxable_amount_usd),
+      vat_amount_usd: round2(row.vat_amount_usd),
+      total_amount_usd: round2(row.total_amount_usd),
+      amount_paid_usd: round2(row.amount_paid_usd),
+      outstanding_balance_usd: round2(row.outstanding_balance_usd),
+    })),
+    totals: {
+      invoices: Number(totals?.invoices) || 0,
+      total_usd: round2(totals?.total_usd),
+      paid_usd: round2(totals?.paid_usd),
+      outstanding_usd: round2(totals?.outstanding_usd),
+      outstanding_count: Number(totals?.outstanding_count) || 0,
+    },
+    page,
+    page_size: pageSize,
+    total_invoices: Number(totals?.invoices) || 0,
+    meta: { customers },
+    ledger_ready: true,
+  })
+})
+
 // ---- Sale-link conflicts (the Conflicts tab's fourth section) ----------
 // Two data-quality issues the migration audit surfaced, computed live so
 // new occurrences keep appearing: (1) sales linked to a customer whose
