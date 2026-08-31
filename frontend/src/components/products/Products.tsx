@@ -3394,10 +3394,15 @@ function ProductsFullEditor() {
                 // card it shows as JUST the number, colour-coded (primary/blue)
                 // with no text label -- the colour distinguishes it from selling
                 // (green) and cost (red) on this compact one-line price row
-                // (user, Aug 29 2026). The desktop table row keeps its own labelling.
-                <span className="whitespace-nowrap font-medium text-primary-700 dark:text-primary-400">
-                  {fmtUSD(specialUsd)}
-                </span>
+                // (user, Aug 29 2026). A "|" separates it from the selling price
+                // beside it, matching the cost/qty dividers on this same row
+                // (user, Aug 31). The desktop table row keeps its own labelling.
+                <>
+                  <span className="text-gray-300 dark:text-gray-600">|</span>
+                  <span className="whitespace-nowrap font-medium text-primary-700 dark:text-primary-400">
+                    {fmtUSD(specialUsd)}
+                  </span>
+                </>
               ) : null}
               {promotion.active ? (
                 <span className="whitespace-nowrap font-medium text-rose-600 dark:text-rose-300">
