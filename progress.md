@@ -88,6 +88,13 @@ Two rules learned the hard way, both from real incidents in this file's own hist
 
 ## Current status
 
+**[~ CLAIMED — r2, Aug 31: Suppliers/Delivery server sort+pagination parity
+(Part-77 MEDIUM).** Footprint: frontend contacts/SuppliersTab.tsx +
+DeliveryTab.tsx ONLY (wire the page/pageSize/sort/dir params the shared
+contacts list handler already supports + the ContactTable pager props the
+Customers sibling passes). No backend changes. Not touching CustomersTab or
+portal files (ship-now session's lane).]**
+
 **[DONE — DEPLOYED (third of the day), r2, Aug 31: production is now `08868840`,
 Worker version `d8f49d81-018f-4c92-b836-722a79d26221`.** Ships r2's Part-541
 offline sale-moment fix + c8's three committed sargable-date perf slices
