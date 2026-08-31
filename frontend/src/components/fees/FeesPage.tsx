@@ -39,6 +39,7 @@ import {
 } from '../../api/feesTransport.ts'
 import FeeForm, { FEE_TYPE_OPTIONS } from './FeeForm.tsx'
 import StatsStrip, { statsPresetRange, type StatCardDef } from '../shared/StatsStrip.tsx'
+import StatsRangeRow from '../shared/StatsRangeRow.tsx'
 import { makeReportMoneyFormatter } from '../../utils/reportMoney.ts'
 import type { DateTimeRange } from '../shared/DateTimeRangePicker'
 
@@ -427,8 +428,6 @@ export default function FeesPage() {
         cards={stripCards}
         loading={stripLoading}
         t={t}
-        range={stripRange}
-        onRangeChange={setStripRange}
         actions={(
           // Fit-to-content, not the wide toolbar-width button ("the add
           // button for fees are too wide, can make fit") — and it shares
@@ -445,7 +444,13 @@ export default function FeesPage() {
       />
 
       <div className="sticky top-2 z-30 -mx-1 mb-4 space-y-3 bg-gray-50/95 pb-2 backdrop-blur dark:bg-gray-900/95 sm:mx-0">
-        <div className="flex min-w-0 flex-wrap items-center gap-1.5 pt-1 sm:flex-nowrap">
+        {/* The Start→End range that scopes the stats strip above now leads
+            this pinned toolbar as its own row, directly above the search bar
+            (user, Aug 31: "fish out the start date and end date from the stats
+            button ... right above the search bar row"). Same range state
+            (stripRange) still feeds the strip's cards. */}
+        <StatsRangeRow className="pt-1" range={stripRange} onRangeChange={setStripRange} t={t} />
+        <div className="flex min-w-0 flex-wrap items-center gap-1.5 sm:flex-nowrap">
           <SearchInput
             id="fees-search"
             name="fees_search"

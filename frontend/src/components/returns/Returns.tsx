@@ -40,6 +40,7 @@ import {
   getReturnsReport,
 } from '../../api/returnsReadTransport.ts'
 import StatsStrip, { statsPresetRange, type StatCardDef } from '../shared/StatsStrip.tsx'
+import StatsRangeRow from '../shared/StatsRangeRow.tsx'
 import type { DateTimeRange } from '../shared/DateTimeRangePicker'
 import ReturnsListSurface from './ReturnsListSurface'
 const ReturnDetailModal = lazyRetry(() => import('./ReturnDetailModal'), 'returns-detail-modal')
@@ -1032,8 +1033,6 @@ export default function Returns() {
         cards={stripCards}
         loading={stripLoading}
         t={t}
-        range={stripRange}
-        onRangeChange={setStripRange}
         // Export + History are SECONDARY controls (Part 548): Returns has
         // only 2-3 stat cards, so when the strip is open they merge into
         // the STATS row's spare width rather than the date row ("if stats
@@ -1071,8 +1070,14 @@ export default function Returns() {
           lives per-section inside ReturnsListSurface, and the "N selected"
           banner above the stat cards already has its own fixed position
           above them -- so only the search+filter row needs the wrapper. */}
-      <div className="sticky top-2 z-30 -mx-1 bg-gray-50/95 pb-2 backdrop-blur dark:bg-gray-900/95 sm:mx-0">
-        <div className="flex flex-wrap items-center gap-2 pt-1">
+      <div className="sticky top-2 z-30 -mx-1 space-y-2 bg-gray-50/95 pb-2 backdrop-blur dark:bg-gray-900/95 sm:mx-0">
+        {/* The Start→End range that scopes the stats strip above now leads
+            this pinned toolbar as its own row, directly above the search bar
+            (user, Aug 31: "fish out the start date and end date from the stats
+            button ... right above the search bar row"). Same range state
+            (stripRange) still feeds the strip's cards. */}
+        <StatsRangeRow className="pt-1" range={stripRange} onRangeChange={setStripRange} t={t} />
+        <div className="flex flex-wrap items-center gap-2">
           <SearchInput
             id="returns-search"
             name="returns_search"

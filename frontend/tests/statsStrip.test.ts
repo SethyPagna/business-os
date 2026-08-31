@@ -176,26 +176,26 @@ test('Part 552: report section controls ride the title row; hub tabs fit; branch
   assert.ok(shell.includes('<span className="truncate">{tab.label}</span>'), 'tab labels truncate rather than widen the row')
 })
 
-test('Part 553: report sections show both currencies + a CSV export action', () => {
-  // Fees/returns are recorded in USD OR KHR; the sections must render both
-  // (moneyPair) so KHR money never reads as "$0.00", and each section must
-  // offer an Export action (user: "no actions to choose export etc").
+test('Part 553/554: report sections render display-currency money + a CSV export', () => {
+  // Money now flows through the display-currency-aware fmtMoney (Part 554,
+  // utils/reportMoney.ts) so a KHR fee never reads as "$0.00" and the
+  // display_currency setting is honored. Each section also offers an Export
+  // action (user: "no actions to choose export etc"). Deeper reportMoney
+  // behavior is pinned in tests/reportMoney.test.ts.
   for (const rel of [
     'src/components/sales/FeesReportSection.tsx',
     'src/components/sales/ReturnsReportSection.tsx',
   ]) {
     const src = read(rel)
-    assert.ok(src.includes('const moneyPair ='), `${rel} renders both currencies via moneyPair`)
-    assert.ok(src.includes('fmtKHR'), `${rel} receives fmtKHR`)
+    assert.ok(src.includes('fmtMoney('), `${rel} renders money via fmtMoney`)
     assert.ok(src.includes('downloadCSV('), `${rel} exports CSV`)
     assert.ok(/onClick=\{exportCsv\}/.test(src), `${rel} wires an Export button`)
   }
-  // Sales report also exports; its money is already USD-canonical.
   const sales = read('src/components/sales/SalesDailyReport.tsx')
   assert.ok(sales.includes('downloadCSV(') && /onClick=\{exportCsv\}/.test(sales), 'Sales report exports CSV')
-  // The hub threads fmtKHR into the money-bearing sections.
+  // The hub threads the display-currency fmtMoney into every section.
   const hub = read('src/components/sales/ReportsHub.tsx')
-  assert.ok(hub.includes('fmtKHR={fmtKHR}'), 'ReportsHub passes fmtKHR to the sections')
+  assert.ok(hub.includes('fmtMoney={fmtMoney}'), 'ReportsHub passes fmtMoney to the sections')
 })
 
 test('old bespoke stat surfaces are really gone (no zombie tile grids)', () => {
@@ -203,6 +203,40 @@ test('old bespoke stat surfaces are really gone (no zombie tile grids)', () => {
   const inventory = read('src/components/inventory/Inventory.tsx')
   assert.ok(!inventory.includes('InventoryStatDetailModal'), 'Inventory stat drill modal removed')
   assert.ok(!inventory.includes("getReturns({ scope: 'all' })"), 'the all-rows client-side returns sum is gone (range endpoints instead)')
+})
+
+test('Part 560: the Start→End date row is lifted OUT of the stats fold into a StatsRangeRow above the search bar', () => {
+  // User, Aug 31: "fish out the start date and end date from the stats
+  // button ... this should be right above the search bar row ... make sure
+  // this applies to all section, mini sections, and pages ... stats can be
+  // placed at the top ... but of course the start and end date will also
+  // apply to it." The picker + presets moved into the shared StatsRangeRow,
+  // which each list page renders directly above its search bar (inside the
+  // pinned wrapper, per the sticky search+date rule); the page stops passing
+  // range/onRangeChange to StatsStrip and keeps feeding the strip's cards
+  // from the SAME stripRange state. StatsStrip is left backward-compatible on
+  // purpose (its internal date row still renders for a caller that passes the
+  // props) so pages migrate one at a time across parallel sessions —
+  // Inventory's stats live on their own section chip and migrate in the lane
+  // that owns that file.
+  const rangeRow = read('src/components/shared/StatsRangeRow.tsx')
+  assert.ok(rangeRow.includes('<DateTimeRangePicker'), 'StatsRangeRow carries the shared Start→End picker')
+  assert.ok(rangeRow.includes('range_today') && rangeRow.includes('range_this_year'), 'StatsRangeRow carries the presets')
+  for (const rel of [
+    'src/components/sales/Sales.tsx',
+    'src/components/returns/Returns.tsx',
+    'src/components/fees/FeesPage.tsx',
+  ]) {
+    const src = read(rel)
+    // Rendered above the search bar and wired to the strip's range state
+    // (single-line StatsRangeRow form).
+    assert.ok(/<StatsRangeRow[^>]*range=\{stripRange\}[^>]*onRangeChange=\{setStripRange\}/.test(src), `${rel} renders StatsRangeRow wired to stripRange`)
+    // The strip on these pages no longer owns the range: the old multi-line
+    // `range={stripRange}` / `onRangeChange={setStripRange}` prop pair passed
+    // into <StatsStrip> (each on its own line) is gone. The new StatsRangeRow
+    // form keeps both on ONE line, so this only catches the removed strip props.
+    assert.ok(!/range=\{stripRange\}\s*\n\s*onRangeChange=\{setStripRange\}/.test(src), `${rel} no longer passes the range into StatsStrip`)
+  }
 })
 
 if (failed > 0) {
