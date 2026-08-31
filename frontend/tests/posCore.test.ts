@@ -166,6 +166,26 @@ await runTest('special price mode prefers special prices and falls back to selli
   assert.equal(selling.applied_price_usd, 12)
 })
 
+await runTest('wholesale price mode prefers wholesale prices and falls back to selling prices', () => {
+  const wholesale = resolveCartPriceValues(
+    { selling_price_usd: 12, selling_price_khr: 49200, wholesale_price_usd: 9, wholesale_price_khr: 36900 },
+    'wholesale',
+    4100,
+  )
+  assert.equal(wholesale.price_mode, 'wholesale')
+  assert.equal(wholesale.applied_price_usd, 9)
+  assert.equal(wholesale.applied_price_khr, 36900)
+
+  // No wholesale price set -> the tier is not honored; falls back to selling.
+  const noWholesale = resolveCartPriceValues(
+    { selling_price_usd: 12, selling_price_khr: 49200, wholesale_price_usd: 0, wholesale_price_khr: 0 },
+    'wholesale',
+    4100,
+  )
+  assert.equal(noWholesale.price_mode, 'selling')
+  assert.equal(noWholesale.applied_price_usd, 12)
+})
+
 await runTest('promotion price mode applies active product discounts and preserves metadata', () => {
   const promotion = resolveCartPriceValues(
     {

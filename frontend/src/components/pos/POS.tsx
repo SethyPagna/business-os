@@ -239,6 +239,8 @@ type ProductRecord = Record<string, unknown> & {
   sku?: string
   special_price_khr?: string | number
   special_price_usd?: string | number
+  wholesale_price_khr?: string | number
+  wholesale_price_usd?: string | number
   stock_quantity?: string | number
   supplier?: string
   unit?: string
@@ -2417,19 +2419,20 @@ export default function POS() {
     })
   }
 
-  // The VIP tier chip in the cart is a MARKER toggle (user): it flips only
-  // whether this line is recorded/printed as VIP, never the price. Default on
-  // (the line was added at the VIP tier); deselecting drops it to plain
-  // 'selling' while keeping applied/base price exactly, so the number stays
-  // put and the receipt simply stops printing the "VIP" tag (the receipt
+  // A tier chip in the cart (VIP or wholesale) is a MARKER toggle (user): it
+  // flips only whether this line is recorded/printed as that tier, never the
+  // price. Default on (the line was added at that tier); deselecting drops it
+  // to plain 'selling' while keeping applied/base price exactly, so the number
+  // stays put and the receipt simply stops printing the tag (the receipt
   // derives the tag from the persisted price_mode). Re-selecting restores the
-  // mark. Cart line identity is the stored cart_line_id, so flipping price_mode
-  // never re-keys or merges the line.
-  const toggleTierTag = (cartLineId: string | number) => {
+  // mark; picking the other tier just moves the single price_mode value. Cart
+  // line identity is the stored cart_line_id, so flipping price_mode never
+  // re-keys or merges the line.
+  const toggleTierTag = (cartLineId: string | number, tier: 'special' | 'wholesale') => {
     patchActive({
       cart: active.cart.map((item) => {
         if (getCartLineId(item) !== cartLineId) return item
-        const nextMode = String(item.price_mode || 'selling') === 'special' ? 'selling' : 'special'
+        const nextMode = String(item.price_mode || 'selling') === tier ? 'selling' : tier
         return { ...item, price_mode: nextMode }
       }),
     })

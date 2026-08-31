@@ -26,12 +26,14 @@ interface CartLineItem {
   // when a special price or promotion is in effect.
   selling_price_usd?: string | number
   selling_price_khr?: string | number
-  // VIP (special) price carried from the source product onto the line, so
-  // the cart can still offer the VIP tier-tag toggle after it's been
-  // deselected back to a plain 'selling' line (the price stays put; only
-  // the marker flips). See onToggleTierTag below.
+  // VIP (special) and wholesale prices carried from the source product onto
+  // the line, so the cart can still offer each tier-tag toggle after it's been
+  // deselected back to a plain 'selling' line (the price stays put; only the
+  // marker flips). See onToggleTierTag below.
   special_price_usd?: string | number
   special_price_khr?: string | number
+  wholesale_price_usd?: string | number
+  wholesale_price_khr?: string | number
   manual_discount_type?: ManualDiscountType | null
   manual_discount_value?: number
   manual_discount_usd?: number
@@ -61,11 +63,12 @@ interface CartItemProps {
   onPriceChange: (lineId: string | number, kind: MoneyKind, value: string) => void
   onDiscountChange: (lineId: string | number, type: ManualDiscountType | null, value: string) => void
   onBranchChange: (lineId: string | number, branchId: string) => void
-  // Flips the line's VIP tier MARKER on/off (user). It only toggles whether
-  // the line is recorded/printed as VIP -- the price is never touched -- so
-  // deselecting leaves the exact number in place and just stops the tag
-  // printing on the receipt. Only offered on lines that carry a VIP price.
-  onToggleTierTag: (lineId: string | number) => void
+  // Flips a line's tier MARKER (VIP or wholesale) on/off (user). It only
+  // toggles whether the line is recorded/printed as that tier -- the price is
+  // never touched -- so deselecting leaves the exact number in place and just
+  // stops the tag printing on the receipt. Only offered on lines that carry
+  // the corresponding tier price.
+  onToggleTierTag: (lineId: string | number, tier: 'special' | 'wholesale') => void
   onRemove: (lineId: string | number) => void
   onShowDetails: () => void
   fmtUSD: CurrencyFormatter
@@ -103,12 +106,15 @@ export default function CartItem({
   showItemDiscount = true,
 }: CartItemProps) {
   const lineId = item.cart_line_id || item.id
-  // The line carries a VIP price -> offer the VIP tier-tag toggle. Kept
+  // Each tier the line carries a price for gets its own marker chip, kept
   // separate from `price_mode` so the chip stays visible (just unhighlighted)
-  // after the marker is switched off. "VIP" reads the same in both packs
-  // (matches the POS grid/detail sheet), so it needs no lang key.
+  // after the marker is switched off. "VIP" reads the same in both packs;
+  // "Wholesale" uses the shared wholesale_price key (matches the POS
+  // grid/detail sheet).
   const hasVipPrice = Number(item.special_price_usd || 0) > 0 || Number(item.special_price_khr || 0) > 0
   const vipTagActive = item.price_mode === 'special'
+  const hasWholesalePrice = Number(item.wholesale_price_usd || 0) > 0 || Number(item.wholesale_price_khr || 0) > 0
+  const wholesaleTagActive = item.price_mode === 'wholesale'
   const promotionPriceLabel = item.product_discount_label || translate(t, 'promotion_price', 'Discount price')
   const savings = showItemDiscount ? computeCartLineSavings(item) : null
 
@@ -129,25 +135,45 @@ export default function CartItem({
       <div className="mb-2 flex items-start justify-between gap-1.5">
         <div className="mr-1 min-w-0 flex-1">
           <p {...getKhmerTextProps(item.name, 'leading-snug text-sm font-semibold text-gray-900 dark:text-white')}>{item.name}</p>
-          {/* VIP tier tag as an on/off toggle (user): default selected/
-              highlighted; deselecting only unhighlights it and drops the tag
-              from the receipt -- the price never changes. Shown on any line
-              that carries a VIP price so it can be re-selected after being
-              switched off. stopPropagation so tapping the chip doesn't open
-              the line's detail sheet (the whole row is a button). */}
-          {hasVipPrice ? (
-            <button
-              type="button"
-              aria-pressed={vipTagActive}
-              onClick={(event) => { event.stopPropagation(); onToggleTierTag(lineId) }}
-              className={`mt-0.5 inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-semibold leading-none transition-colors ${
-                vipTagActive
-                  ? 'border-emerald-500 bg-emerald-500 text-white shadow-sm'
-                  : 'border-emerald-300 bg-transparent text-emerald-500 opacity-60 hover:opacity-100 dark:border-emerald-700 dark:text-emerald-400'
-              }`}
-            >
-              VIP
-            </button>
+          {/* Tier tags (VIP / Wholesale) as on/off toggles (user): default
+              selected/highlighted; deselecting only unhighlights the chip and
+              drops the tag from the receipt -- the price never changes. Shown
+              on any line that carries that tier's price so it can be
+              re-selected after being switched off. stopPropagation so tapping a
+              chip doesn't open the line's detail sheet (the whole row is a
+              button). Only one tier can be the active mark at a time (price_mode
+              is a single value), so picking one clears the other's highlight. */}
+          {hasVipPrice || hasWholesalePrice ? (
+            <div className="mt-0.5 flex flex-wrap items-center gap-1">
+              {hasVipPrice ? (
+                <button
+                  type="button"
+                  aria-pressed={vipTagActive}
+                  onClick={(event) => { event.stopPropagation(); onToggleTierTag(lineId, 'special') }}
+                  className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-semibold leading-none transition-colors ${
+                    vipTagActive
+                      ? 'border-emerald-500 bg-emerald-500 text-white shadow-sm'
+                      : 'border-emerald-300 bg-transparent text-emerald-500 opacity-60 hover:opacity-100 dark:border-emerald-700 dark:text-emerald-400'
+                  }`}
+                >
+                  VIP
+                </button>
+              ) : null}
+              {hasWholesalePrice ? (
+                <button
+                  type="button"
+                  aria-pressed={wholesaleTagActive}
+                  onClick={(event) => { event.stopPropagation(); onToggleTierTag(lineId, 'wholesale') }}
+                  className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-semibold leading-none transition-colors ${
+                    wholesaleTagActive
+                      ? 'border-indigo-500 bg-indigo-500 text-white shadow-sm'
+                      : 'border-indigo-300 bg-transparent text-indigo-500 opacity-60 hover:opacity-100 dark:border-indigo-700 dark:text-indigo-400'
+                  }`}
+                >
+                  {translate(t, 'wholesale_price', 'Wholesale')}
+                </button>
+              ) : null}
+            </div>
           ) : null}
           {item.price_mode === 'promotion' ? (
             <div {...getKhmerTextProps(promotionPriceLabel, 'mt-0.5 text-[10px] font-semibold text-rose-600 dark:text-rose-300')}>{promotionPriceLabel}</div>

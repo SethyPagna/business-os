@@ -10,6 +10,8 @@ export type ProductRecord = ProductGroupRecord & {
   parent_id?: unknown
   special_price_usd?: unknown
   special_price_khr?: unknown
+  wholesale_price_usd?: unknown
+  wholesale_price_khr?: unknown
   selling_price_usd?: unknown
   selling_price_khr?: unknown
   discount_type?: unknown
@@ -35,7 +37,7 @@ type CartPriceValues = {
   // apply a discount, then change branch again) doesn't compound.
   base_price_usd: number
   base_price_khr: number
-  price_mode: 'selling' | 'special' | 'promotion'
+  price_mode: 'selling' | 'special' | 'wholesale' | 'promotion'
   product_discount_type?: string
   product_discount_label?: string
   product_discount_usd?: number
@@ -150,7 +152,7 @@ const INACTIVE_CART_LINE_SAVINGS: CartLineSavings = {
  */
 export function computeCartLineSavings(item: CartLineSavingsInput | null | undefined): CartLineSavings {
   const priceMode = String(item?.price_mode || 'selling')
-  if (priceMode !== 'special' && priceMode !== 'promotion') return INACTIVE_CART_LINE_SAVINGS
+  if (priceMode !== 'special' && priceMode !== 'wholesale' && priceMode !== 'promotion') return INACTIVE_CART_LINE_SAVINGS
   const compareAtUsd = normalizePriceValue(item?.selling_price_usd || 0, 0)
   const compareAtKhr = normalizePriceValue(item?.selling_price_khr || 0, 0)
   const baseUsd = normalizePriceValue((item?.base_price_usd ?? item?.applied_price_usd) || 0, 0)
@@ -339,6 +341,21 @@ export function resolveCartPriceValues(
       base_price_usd: appliedUsd,
       base_price_khr: appliedKhr,
       price_mode: 'special',
+    }
+  }
+  // Wholesale mirrors the VIP/special branch exactly -- a third fixed tier the
+  // cashier picks at POS, priced from the product's own wholesale_price (never
+  // borrowing selling unless the KHR side is blank, same fallback as special).
+  const useWholesale = priceMode === 'wholesale' && (normalizeNumber(product?.wholesale_price_usd) > 0 || normalizeNumber(product?.wholesale_price_khr) > 0)
+  if (useWholesale) {
+    const appliedUsd = normalizePriceValue(product?.wholesale_price_usd ?? product?.selling_price_usd ?? 0, 0)
+    const appliedKhr = normalizePriceValue(product?.wholesale_price_khr ?? product?.selling_price_khr ?? usdToKhr(appliedUsd, exchangeRate), 0)
+    return {
+      applied_price_usd: appliedUsd,
+      applied_price_khr: appliedKhr,
+      base_price_usd: appliedUsd,
+      base_price_khr: appliedKhr,
+      price_mode: 'wholesale',
     }
   }
   const sellingUsd = normalizePriceValue(product?.selling_price_usd || 0, 0)

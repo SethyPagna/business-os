@@ -77,6 +77,8 @@ type ProductRecord = Record<string, unknown> & {
   sku?: string
   special_price_khr?: string | number
   special_price_usd?: string | number
+  wholesale_price_khr?: string | number
+  wholesale_price_usd?: string | number
   stock_quantity?: string | number
   supplier?: string
   unit?: string
@@ -543,7 +545,10 @@ export default function ProductDetailSheet({
           ) : null)}
           <div className="flex gap-3"><span className="text-xs text-gray-400 w-24 flex-shrink-0 pt-0.5">{posCopy('Selling', 'តម្លៃលក់')}</span><div><span className="font-bold text-blue-600">{fmtUSD(asNumber(product.selling_price_usd))}</span>{asNumber(product.selling_price_khr) > 0 ? <span className="text-xs text-gray-400 ml-2">{fmtKHR(asNumber(product.selling_price_khr))}</span> : null}</div></div>
           {asNumber(product.special_price_usd) > 0 || asNumber(product.special_price_khr) > 0 ? (
-            <div className="flex gap-3"><span className="text-xs text-gray-400 w-24 flex-shrink-0 pt-0.5">{t('special_price') || 'VIP'}</span><div><span className="font-bold text-emerald-600">{fmtUSD(asNumber(product.special_price_usd || product.selling_price_usd || 0))}</span>{asNumber(product.special_price_khr || product.selling_price_khr || 0) > 0 ? <span className="text-xs text-gray-400 ml-2">{fmtKHR(asNumber(product.special_price_khr || product.selling_price_khr || 0))}</span> : null}</div></div>
+            <div className="flex gap-3"><span className="text-xs text-gray-400 w-24 flex-shrink-0 pt-0.5">{posCopy('VIP', 'VIP')}</span><div><span className="font-bold text-emerald-600">{fmtUSD(asNumber(product.special_price_usd || product.selling_price_usd || 0))}</span>{asNumber(product.special_price_khr || product.selling_price_khr || 0) > 0 ? <span className="text-xs text-gray-400 ml-2">{fmtKHR(asNumber(product.special_price_khr || product.selling_price_khr || 0))}</span> : null}</div></div>
+          ) : null}
+          {asNumber(product.wholesale_price_usd) > 0 || asNumber(product.wholesale_price_khr) > 0 ? (
+            <div className="flex gap-3"><span className="text-xs text-gray-400 w-24 flex-shrink-0 pt-0.5">{posCopy('Wholesale', 'បោះដុំ')}</span><div><span className="font-bold text-indigo-600">{fmtUSD(asNumber(product.wholesale_price_usd || 0))}</span>{asNumber(product.wholesale_price_khr || 0) > 0 ? <span className="text-xs text-gray-400 ml-2">{fmtKHR(asNumber(product.wholesale_price_khr || 0))}</span> : null}</div></div>
           ) : null}
           {promotion.active ? (
             <div className="flex gap-3"><span className="text-xs text-gray-400 w-24 flex-shrink-0 pt-0.5">{posCopy('Discounts', 'ការបញ្ចុះតម្លៃ')}</span><div><span className="font-bold text-rose-600">{fmtUSD(promotion.applied_price_usd || 0)}</span>{(promotion.applied_price_khr || 0) > 0 ? <span className="text-xs text-gray-400 ml-2">{fmtKHR(promotion.applied_price_khr || 0)}</span> : null}</div></div>
@@ -738,6 +743,15 @@ export default function ProductDetailSheet({
                           : posCopy('VIP', 'VIP')}
                       </button>
                     ) : null}
+                    {asNumber(effectiveVariant.wholesale_price_usd) > 0 || asNumber(effectiveVariant.wholesale_price_khr) > 0 ? (
+                      <button
+                        className="btn-secondary flex-1 text-xs border-indigo-200 text-indigo-700 dark:border-indigo-800 dark:text-indigo-200"
+                        disabled={!effectiveVariantInStock || !batchReadyToSell}
+                        onClick={() => closeAfterAdd(effectiveVariant, 'wholesale')}
+                      >
+                        {`${posCopy('Wholesale', 'បោះដុំ')} ${fmtUSD(asNumber(effectiveVariant.wholesale_price_usd || 0))}`}
+                      </button>
+                    ) : null}
                     {effectiveVariantPromotion.active ? (
                       <button className="btn-secondary flex-1 text-xs border-rose-200 text-rose-700 dark:border-rose-800 dark:text-rose-200" disabled={!effectiveVariantInStock || !batchReadyToSell} onClick={() => closeAfterAdd(effectiveVariant, 'promotion')}>
                         {effectiveVariantPromoBadge.kind === 'quantity_hint'
@@ -827,6 +841,15 @@ export default function ProductDetailSheet({
                   {vipRevealed[`p${product.id}`]
                     ? `${posCopy('VIP', 'VIP')} ${fmtUSD(asNumber(product.special_price_usd || product.selling_price_usd || 0))}`
                     : posCopy('VIP', 'VIP')}
+                </button>
+              ) : null}
+              {asNumber(product.wholesale_price_usd) > 0 || asNumber(product.wholesale_price_khr) > 0 ? (
+                <button
+                  className="btn-secondary flex-1 border-indigo-200 text-indigo-700 dark:border-indigo-800 dark:text-indigo-200"
+                  disabled={displayedStock <= asNumber(product.out_of_stock_threshold) || !batchReadyToSell}
+                  onClick={() => closeAfterAdd(product, 'wholesale')}
+                >
+                  {`${posCopy('Wholesale', 'បោះដុំ')} ${fmtUSD(asNumber(product.wholesale_price_usd || 0))}`}
                 </button>
               ) : null}
             </div>
