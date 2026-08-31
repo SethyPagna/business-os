@@ -96,6 +96,9 @@ const FAKE_USER = { id: 1, username: 'tester', name: 'Test User', permissions: J
 // endpoints' dependencies are stubbed inert (never called by these checks).
 const inventoryRoute = loadReal('routes/inventory.ts', {
   '../lib/db': { getDb: () => db },
+  // routes/inventory.ts buckets movement dates in UTC+7 through the pure
+  // businessDateWindow helpers; provide the real module so its date SQL resolves.
+  '../lib/businessDateWindow': loadReal('lib/businessDateWindow.ts'),
   '../lib/productBatches': productBatches,
   '../lib/batchCode': batchCode,
   '../lib/sqlBinding': sqlBinding,

@@ -28,8 +28,11 @@ const stripped = ('// @ts-nocheck\n' + src)
   // Replace the D1 db import with a shim: getDb(env) returns the sqlite handle
   // the test passes in. better-sqlite3's prepare().get()/.all() are the same
   // call shape the kernel uses (await on a sync value is a no-op).
-  .replace(/^import \{ getDb \} from '\.\/db'\n/m, 'const getDb = (env) => env.__db\n')
-  .replace(/^import type \{ Env \} from '\.\.\/index'\n/m, '')
+  // Match the line end as \r?\n so the strip works on a CRLF checkout too (git
+  // autocrlf hands Windows worktrees CRLF, including the deploy-cert worktree);
+  // otherwise the import survives and the compile fails on "Cannot find './db'".
+  .replace(/^import \{ getDb \} from '\.\/db'\r?\n/m, 'const getDb = (env) => env.__db\n')
+  .replace(/^import type \{ Env \} from '\.\.\/index'\r?\n/m, '')
   .replace(/env: Env/g, 'env')
 
 const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'sales-revenue-conv-'))

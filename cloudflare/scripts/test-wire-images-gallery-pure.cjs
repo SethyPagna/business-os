@@ -99,6 +99,9 @@ const FAKE_USER = { id: 1, username: 'tester', name: 'Test User', permissions: J
 
 const productsRoute = loadReal('routes/products.ts', {
   '../lib/db': { getDb: () => dbShim },
+  // routes/products.ts buckets the sales drill-down in UTC+7 through the pure
+  // businessDateWindow helpers; provide the real module so its date SQL resolves.
+  '../lib/businessDateWindow': loadReal('lib/businessDateWindow.ts'),
   '../lib/auth': { requireAuth: async (c, next) => { c.set('user', FAKE_USER); return next() } },
   '../lib/permissions': {
     hasPermission: () => true,
@@ -126,6 +129,11 @@ const productsRoute = loadReal('routes/products.ts', {
   // D6 rename engine stubbed inert -- this test asserts image wiring;
   // test-rename-cascade-pure.cjs covers the real engine on real sqlite.
   '../lib/renameCascade': { computeRenameImpact: async () => ({}), applyRenameCarry: async () => ({ products: 0, batches: 0 }) },
+  // Part 578 (2b): products.ts registers a merge-fold + records duplicate-merge
+  // undo snapshots; this test asserts image wiring and never hits the merge
+  // routes. registerMergeFold runs at module load, so it must be a callable
+  // no-op. (Added by 7651025a -- the loader wasn't updated for the new import.)
+  '../lib/undoAppliers': { registerMergeFold: () => {}, recordMergeUndoSnapshot: async () => null, recordBulkMergeUndoSnapshot: async () => null, recordSupplierBackfillSnapshot: async () => null },
 
   '../lib/cache': { cachedJsonResponse: async (_r, _c, _v, _t, producer) => producer(), getVersion: async () => '0', bumpVersion: async () => {} },
   '../lib/rateLimit': { checkRateLimit: async () => ({ allowed: true }), getClientIp: () => '127.0.0.1' },

@@ -91,6 +91,9 @@ const FAKE_USER = { id: 1, username: 'tester', name: 'Test User', permissions: J
 
 const returnsRoute = loadReal('routes/returns.ts', {
   '../lib/db': { getDb: () => db },
+  // routes/returns.ts buckets return dates in UTC+7 through the pure
+  // businessDateWindow helpers; provide the real module so its date SQL resolves.
+  '../lib/businessDateWindow': loadReal('lib/businessDateWindow.ts'),
   // Real, pure -- its chunking is what keeps these reads inside D1's
   // 100-bound-parameter limit, so a stub would test the stub.
   '../lib/sqlBinding': loadReal('lib/sqlBinding.ts'),
