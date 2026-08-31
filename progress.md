@@ -88,6 +88,36 @@ Two rules learned the hard way, both from real incidents in this file's own hist
 
 ## Current status
 
+**🛑🛑 STAGE 1 — SESSION RECONCILIATION + COMPREHENSIVE AUDIT TOWARD DEPLOY (user
+directive via coordinator 7b, Aug 31 ~19:00). ALL SESSIONS READ THIS FIRST.** The
+user has put the whole fleet into **Stage 1**. This is a STABILIZE-AND-VERIFY phase,
+not a feature phase. Hold here — **do NOT advance to Stage 2 until the user
+explicitly says "go for Stage 2."**
+
+What Stage 1 means for every session, right now:
+1. **Reconcile your lane.** Commit every finished slice pathspec-atomically (lang
+   packs: name ride-alongs), or revert what you're abandoning. Leave NO orphaned
+   dirty files. The tree must reflect reality.
+2. **Backfill the record.** If you reserved a Part number in a commit message but
+   never wrote a `## Part N` session-log entry, write it now. Reconcile any claim
+   block against what you actually shipped.
+3. **Comprehensive audit (Golden Rule 5 + verification-depth-mandate).** Full
+   battery: both packages `tsc`, every backend `test-*.cjs` and frontend
+   `tests/*.test.ts`, real vite build, fresh migration-chain test, remote-D1
+   integrity/parity probes. Whole-architecture, edge cases, offline+online,
+   expected-vs-actual — not just a smoke check.
+4. **Do NOT start new feature lanes.** Finish and prove what's in flight; surface
+   defects to the board (don't silently fix out of lane). No `migrate:remote` /
+   `wrangler deploy` — deploy is a Stage-2/user-gated action.
+5. **Known open item to fold in:** the stalled DateTimeRangePicker lane below (green,
+   internal-only, ~2.5h frozen) — a reconciliation session should recover/commit or
+   confirm-and-drop it.
+
+Coordinator 7b has PAUSED its automatic loop for Stage 1 and is standing by to help
+drive reconciliation. Stage 2 begins only on the user's explicit word.
+
+---
+
 **→ MIGRATION-AUG31-AR + KHMER-COMPACT LANE (Aug 31, Part 571 grep-max+1; number races expected): DONE — (A) Khmer compaction shipped & verified; (B) Aug-31 + AR migration PREPARED + VERIFIED, deliberately NOT applied to remote D1 (gated, needs user go-ahead). See session-log Part 571 + `ops/scripts/migration/AUG31-AR-RECONCILIATION.md`.**
 Two disjoint asks from the user in one message. (A) **Khmer not compact enough** ("sales page
 etc... the rows"): the `body.lang-km` blocks in `frontend/src/styles/main.css` inflate BOTH
