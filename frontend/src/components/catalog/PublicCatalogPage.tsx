@@ -16,7 +16,8 @@ import Send from 'lucide-react/dist/esm/icons/send.js'
 import Globe from 'lucide-react/dist/esm/icons/globe.js'
 import ShoppingBag from 'lucide-react/dist/esm/icons/shopping-bag.js'
 import Store from 'lucide-react/dist/esm/icons/store.js'
-import Ticket from 'lucide-react/dist/esm/icons/ticket.js'
+import Heart from 'lucide-react/dist/esm/icons/heart.js'
+import UserIcon from 'lucide-react/dist/esm/icons/user.js'
 import ClipboardList from 'lucide-react/dist/esm/icons/clipboard-list.js'
 import X from 'lucide-react/dist/esm/icons/x.js'
 import Trash2 from 'lucide-react/dist/esm/icons/trash-2.js'
@@ -457,11 +458,9 @@ function getPortalTabs(config: PortalConfig, copy: CopyFunction): PortalTab[] {
   const items = [
     config.showAbout ? { key: 'about', label: copy('about', 'About'), icon: Store } : null,
     config.showCatalog ? { key: 'products', label: copy('products', 'Products'), icon: ShoppingBag } : null,
-    // The Account tab is always available (§2): accounts are a core feature —
-    // guests use everything, an account just remembers the cart + wishlist. The
-    // old anonymous membership lookup that `showMembership` used to gate is
-    // gone; this slot is now the sign-in / sign-up area.
-    { key: 'membership', label: copy('account', 'Account'), icon: Ticket },
+    // Account (sign-in / sign-up / profile) is no longer a nav tab — it moved
+    // to a top-bar icon that opens a slide-in drawer, alongside Wishlist (user
+    // correction to §2). Nav tabs are now About · Products · FAQ · AI.
     config.showFaq ? { key: 'faq', label: copy('faq', 'FAQ'), icon: HelpCircle } : null,
     config.aiEnabled ? { key: 'ai', label: config.aiTitle || copy('portalAssistant', 'AI assistant'), icon: Bot } : null,
   ]
@@ -601,7 +600,10 @@ export default function PublicCatalogPage() {
   const [categories, setCategories] = useState<CatalogOption[]>(() => normalizeCatalogOptions(cachedPortal?.categories))
   const [brands, setBrands] = useState<string[]>(() => normalizeBrandOptions(cachedPortal?.brands))
   const [branches, setBranches] = useState<CatalogOption[]>(() => normalizeCatalogOptions(cachedPortal?.branches))
-  const [activeTab, setActiveTab] = useState(() => resolvePortalActiveTab({ ...DEFAULT_PUBLIC_CONFIG, ...(cachedPortal?.config || {}) }, (key, fallback = '') => fallback, 'products'))
+  // Default landing tab is About (user request): leangbeauty.com opens on the
+  // store's About page. resolvePortalActiveTab falls back to the first visible
+  // tab if About is turned off in config.
+  const [activeTab, setActiveTab] = useState(() => resolvePortalActiveTab({ ...DEFAULT_PUBLIC_CONFIG, ...(cachedPortal?.config || {}) }, (key, fallback = '') => fallback, 'about'))
   const [search, setSearch] = useState('')
   const deferredSearch = useMemo(() => search.trim(), [search])
   const [categoryFilter, setCategoryFilter] = useState<string[]>([])
@@ -643,6 +645,11 @@ export default function PublicCatalogPage() {
   // their list in this browser; signing in mirrors it to the account.
   const portalAccount = usePortalAccount(bucket, wishlist)
   const [bucketOpen, setBucketOpen] = useState(false)
+  // Account (profile / sign-in) and Wishlist each open as a slide-in drawer
+  // from their own top-bar icon (user request), same overlay pattern as the
+  // cart bucket drawer below.
+  const [accountOpen, setAccountOpen] = useState(false)
+  const [wishlistOpen, setWishlistOpen] = useState(false)
   // Two independent toggles, not one shared boolean: the drawer's inline
   // "contact us" shortcut and the standalone contact FAB used to both read
   // and write the same `contactOpen` state. That meant tapping the
@@ -1294,23 +1301,7 @@ export default function PublicCatalogPage() {
     </Suspense>
   ) : null
 
-  const secondaryTabSection = activeTab === 'membership' ? (
-    <Suspense fallback={<div className="rounded-2xl border border-slate-200 bg-white p-4 text-sm text-slate-500">{copy('loadingPortal', 'Loading customer portal...')}</div>}>
-      <CatalogAccountSection
-        copy={copy}
-        account={portalAccount.account}
-        ready={portalAccount.ready}
-        busy={portalAccount.busy}
-        error={portalAccount.error}
-        signIn={portalAccount.signIn}
-        signUp={portalAccount.signUp}
-        signOut={portalAccount.signOut}
-        clearError={portalAccount.clearError}
-        cartCount={bucket.count}
-        wishlistCount={wishlist.count}
-      />
-    </Suspense>
-  ) : activeTab !== 'products' ? (
+  const secondaryTabSection = activeTab !== 'products' ? (
     <Suspense fallback={<div className="rounded-2xl border border-slate-200 bg-white p-4 text-sm text-slate-500">{copy('loadingPortal', 'Loading customer portal...')}</div>}>
       <CatalogSecondaryTabs
         tab={activeTab}
@@ -1550,6 +1541,128 @@ export default function PublicCatalogPage() {
     </div>
   ) : null
 
+  // Account drawer: the top-bar profile icon opens this. It reuses the same
+  // CatalogAccountSection body that used to be a nav tab (sign in / sign up /
+  // signed-in profile + the now-disabled membership lookup), just presented as
+  // a slide-in drawer with its own header instead.
+  const accountDrawer = accountOpen ? (
+    <div className="fixed inset-0 z-[60] flex items-end justify-center bg-slate-950/50 backdrop-blur-sm sm:items-center" onClick={() => setAccountOpen(false)}>
+      <div
+        className="max-h-modal-85 w-full max-w-md overflow-hidden rounded-t-3xl bg-white pb-[env(safe-area-inset-bottom)] shadow-2xl dark:bg-neutral-900 sm:rounded-3xl sm:pb-0"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4 dark:border-neutral-800">
+          <div className="flex items-center gap-2">
+            <UserIcon className="h-5 w-5 text-slate-700 dark:text-neutral-200" />
+            <div className="text-sm font-semibold text-slate-900 dark:text-neutral-100">{copy('account', 'Account')}</div>
+          </div>
+          <button
+            type="button"
+            className="rounded-full p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
+            onClick={() => setAccountOpen(false)}
+            aria-label={copy('close', 'Close')}
+          >
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+        <div className="max-h-[70vh] overflow-y-auto px-5 py-4">
+          <Suspense fallback={<div className="rounded-2xl border border-slate-200 bg-white p-4 text-sm text-slate-500 dark:border-neutral-800 dark:bg-neutral-900 dark:text-neutral-400">{copy('loadingPortal', 'Loading customer portal...')}</div>}>
+            <CatalogAccountSection
+              copy={copy}
+              account={portalAccount.account}
+              ready={portalAccount.ready}
+              busy={portalAccount.busy}
+              error={portalAccount.error}
+              signIn={portalAccount.signIn}
+              signUp={portalAccount.signUp}
+              signOut={portalAccount.signOut}
+              clearError={portalAccount.clearError}
+              cartCount={bucket.count}
+              wishlistCount={wishlist.count}
+            />
+          </Suspense>
+        </div>
+      </div>
+    </div>
+  ) : null
+
+  // Wishlist drawer: the top-bar heart icon opens this. Saved products (the
+  // heart toggle on each product card) with a shortcut to move one into the
+  // cart "My List". No payment here either — same shortlist model as the cart.
+  const wishlistDrawer = wishlistOpen ? (
+    <div className="fixed inset-0 z-[60] flex items-end justify-center bg-slate-950/50 backdrop-blur-sm sm:items-center" onClick={() => setWishlistOpen(false)}>
+      <div
+        className="max-h-modal-85 w-full max-w-md overflow-hidden rounded-t-3xl bg-white pb-[env(safe-area-inset-bottom)] shadow-2xl dark:bg-neutral-900 sm:rounded-3xl sm:pb-0"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4 dark:border-neutral-800">
+          <div className="flex items-center gap-2">
+            <Heart className="h-5 w-5 text-rose-500" />
+            <div className="text-sm font-semibold text-slate-900 dark:text-neutral-100">{copy('wishlistTitle', 'Wishlist', 'បញ្ជីចង់បាន')}</div>
+          </div>
+          <button
+            type="button"
+            className="rounded-full p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
+            onClick={() => setWishlistOpen(false)}
+            aria-label={copy('close', 'Close')}
+          >
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+        <div className="max-h-[60vh] overflow-y-auto px-5 py-3">
+          {wishlist.items.length === 0 ? (
+            <div className="py-10 text-center text-sm text-slate-400 dark:text-neutral-500">
+              {copy('wishlistEmpty', 'Your wishlist is empty. Tap the heart on products you love.', 'បញ្ជីចង់បានរបស់អ្នកនៅទទេ។ ចុចរូបបេះដូងលើផលិតផលដែលអ្នកចូលចិត្ត។')}
+            </div>
+          ) : (
+            <ul className="space-y-3">
+              {wishlist.items.map((item) => {
+                const inList = bucket.hasItem(item.id)
+                return (
+                  <li key={item.id} className="flex items-start justify-between gap-3 border-b border-slate-50 pb-3 last:border-0 dark:border-neutral-800/60">
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate text-sm font-medium text-slate-900 dark:text-neutral-100">{item.name}</div>
+                      {item.priceText ? <div className="text-xs text-slate-400 dark:text-neutral-500">{item.priceText}</div> : null}
+                    </div>
+                    <div className="flex shrink-0 items-center gap-1.5">
+                      <button
+                        type="button"
+                        className="inline-flex items-center gap-1 rounded-full bg-slate-900 px-2.5 py-1.5 text-xs font-semibold text-white transition hover:bg-slate-700 dark:bg-white dark:text-neutral-950 dark:hover:bg-neutral-200"
+                        onClick={() => bucket.add({ id: item.id, name: item.name, category: item.category, brand: item.brand }, item.priceText)}
+                      >
+                        <ClipboardList className="h-3.5 w-3.5" />
+                        {inList ? copy('inList', 'In list', 'ក្នុងបញ្ជី') : copy('addToList', 'Add', 'បន្ថែម')}
+                      </button>
+                      <button
+                        type="button"
+                        className="flex h-7 w-7 items-center justify-center rounded-full text-rose-400 transition hover:bg-rose-50 hover:text-rose-600 dark:hover:bg-rose-950/40"
+                        onClick={() => wishlist.remove(item.id)}
+                        aria-label={copy('removeFromWishlist', 'Remove', 'លុបចេញ')}
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  </li>
+                )
+              })}
+            </ul>
+          )}
+        </div>
+        {wishlist.items.length > 0 ? (
+          <div className="border-t border-slate-100 px-5 py-4 dark:border-neutral-800">
+            <button
+              type="button"
+              className="w-full text-center text-xs font-medium text-slate-400 transition hover:text-rose-500 dark:text-neutral-500"
+              onClick={wishlist.clear}
+            >
+              {copy('clearWishlist', 'Clear all', 'សម្អាតទាំងអស់')}
+            </button>
+          </div>
+        ) : null}
+      </div>
+    </div>
+  ) : null
+
   // Swipe-down-to-refresh: attached to a plain wrapping div around this
   // whole page (see the `ref={publicPageRootRef}` on the return below) --
   // touch events bubble, so this only needs to be an ancestor of wherever
@@ -1564,7 +1677,7 @@ export default function PublicCatalogPage() {
   // gallery/lightbox or either drawer/popover is open, so a pull-down
   // gesture inside one of those (which have their own pinch/pan/scroll
   // handling) is never mistaken for a page-level refresh pull.
-  const pullToRefreshEnabled = !productGalleryView.open && !portalImageView.open && !bucketOpen && !contactOpen && !filePicker.open
+  const pullToRefreshEnabled = !productGalleryView.open && !portalImageView.open && !bucketOpen && !contactOpen && !filePicker.open && !accountOpen && !wishlistOpen
   const { pullDistance: publicPullDistance, refreshing: publicPullRefreshing } = usePullToRefresh(
     publicPageRootRef,
     () => {
@@ -1659,6 +1772,8 @@ export default function PublicCatalogPage() {
     {contactFab}
     {contactPopover}
     {bucketDrawer}
+    {accountDrawer}
+    {wishlistDrawer}
     <PullToRefreshIndicator pullDistance={publicPullDistance} refreshing={publicPullRefreshing} />
     <CatalogPreviewSurface
       publicView
@@ -1675,6 +1790,10 @@ export default function PublicCatalogPage() {
       portalTabs={portalTabs}
       activeTab={activeTab}
       setActiveTab={(key) => setActiveTab(resolvePortalActiveTab(displayConfig, copy, key))}
+      onOpenAccount={() => setAccountOpen(true)}
+      onOpenWishlist={() => setWishlistOpen(true)}
+      wishlistCount={wishlist.count}
+      accountSignedIn={!!portalAccount.account}
       publicPortalNavRef={publicPortalNavRef as RefObject<HTMLElement>}
       publicPortalNavPinned={false}
       publicPortalNavMetrics={{ left: 0, width: 0, height: 0 }}

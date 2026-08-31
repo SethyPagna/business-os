@@ -4,8 +4,10 @@ import { lazyRetry } from '../../utils/lazyImport.ts'
 import ArrowDown from 'lucide-react/dist/esm/icons/arrow-down.js'
 import ArrowUp from 'lucide-react/dist/esm/icons/arrow-up.js'
 import Globe from 'lucide-react/dist/esm/icons/globe.js'
+import Heart from 'lucide-react/dist/esm/icons/heart.js'
 import Moon from 'lucide-react/dist/esm/icons/moon.js'
 import Sun from 'lucide-react/dist/esm/icons/sun.js'
+import User from 'lucide-react/dist/esm/icons/user.js'
 import LazyPortalMenu from '../shared/LazyPortalMenu'
 import CatalogProductImage from './catalogImages'
 import type { ProductDetailViewState } from './ProductDetailFlyout'
@@ -99,6 +101,13 @@ type CatalogPreviewSurfaceProps = {
   publicPortalNavRef: RefObject<HTMLElement>
   publicPortalNavPinned: boolean
   publicPortalNavMetrics: PortalNavMetrics
+  // Top-bar Account + Wishlist icons (public storefront only). Wired by
+  // PublicCatalogPage; the admin editor preview (CatalogPage.tsx) omits them,
+  // so the icons simply don't render there.
+  onOpenAccount?: () => void
+  onOpenWishlist?: () => void
+  wishlistCount?: number
+  accountSignedIn?: boolean
   headerLinks?: HeaderLink[]
   catalogSection: ReactNode
   secondaryTabSection: ReactNode
@@ -157,6 +166,10 @@ export default function CatalogPreviewSurface({
   publicPortalNavRef,
   publicPortalNavPinned,
   publicPortalNavMetrics,
+  onOpenAccount,
+  onOpenWishlist,
+  wishlistCount = 0,
+  accountSignedIn = false,
   headerLinks = [],
   catalogSection,
   secondaryTabSection,
@@ -330,6 +343,37 @@ export default function CatalogPreviewSurface({
                     ) : null}
                   </div>
                   <div className="flex flex-wrap items-center justify-end gap-1">
+                    {/* Wishlist + Account live in the top bar (public storefront
+                        only — the admin editor preview doesn't wire these
+                        handlers, so they don't render there). Each opens its own
+                        slide-in drawer. */}
+                    {onOpenWishlist ? (
+                      <button
+                        type="button"
+                        className="relative inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-slate-700 transition hover:bg-slate-100 dark:text-neutral-200 dark:hover:bg-neutral-800"
+                        onClick={onOpenWishlist}
+                        aria-label={copy('wishlistTitle', 'Wishlist')}
+                        title={copy('wishlistTitle', 'Wishlist')}
+                      >
+                        <Heart className="h-[18px] w-[18px]" />
+                        {wishlistCount > 0 ? (
+                          <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-rose-500 px-1 text-[10px] font-bold leading-none text-white">
+                            {wishlistCount}
+                          </span>
+                        ) : null}
+                      </button>
+                    ) : null}
+                    {onOpenAccount ? (
+                      <button
+                        type="button"
+                        className={`inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full transition hover:bg-slate-100 dark:hover:bg-neutral-800 ${accountSignedIn ? 'text-emerald-600 dark:text-emerald-300' : 'text-slate-700 dark:text-neutral-200'}`}
+                        onClick={onOpenAccount}
+                        aria-label={copy('account', 'Account')}
+                        title={copy('account', 'Account')}
+                      >
+                        <User className="h-[18px] w-[18px]" />
+                      </button>
+                    ) : null}
                     {displayConfig.translateWidgetEnabled ? (
                       <LazyPortalMenu
                         align="right"
