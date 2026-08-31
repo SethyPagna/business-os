@@ -214,9 +214,14 @@ export default function StatsStrip({
                 onClick={() => setOpenKey((current) => (current === card.key ? null : card.key))}
                 className={`flex w-[calc(50%-0.375rem)] min-w-0 flex-col rounded-lg border px-2 py-1 text-left transition-colors sm:w-40 ${
                   isOpen
-                    ? 'border-blue-300 bg-blue-50/70 dark:border-blue-700 dark:bg-blue-950/40'
-                    : 'border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-900'
-                } ${foldable ? 'cursor-pointer hover:border-blue-300 dark:hover:border-blue-700' : 'cursor-default'}`}
+                    ? 'border-blue-300 bg-blue-50/70 dark:border-blue-600 dark:bg-blue-950/50'
+                    // Dark mode: neutral-800 (== the app's --dm-card #262626, its
+                    // standard elevated-panel colour) with a neutral-600 border.
+                    // The old dark:bg-gray-900 sat at nearly the page colour, so
+                    // the cards vanished into the background — user: "dark mode ...
+                    // stats is not noticeable".
+                    : 'border-gray-200 bg-white dark:border-neutral-600 dark:bg-neutral-800'
+                } ${foldable ? 'cursor-pointer hover:border-blue-300 dark:hover:border-blue-500' : 'cursor-default'}`}
               >
                 <span className="flex items-center gap-1 text-[10.5px] font-medium leading-4 text-gray-500 dark:text-gray-400">
                   {card.label}
