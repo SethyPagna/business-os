@@ -109,11 +109,25 @@ the Sales-page `/stats` header and the Reports analytics kernel to **ONE canonic
   `deriveTotals`, `sales.ts` `/stats` `revenue_usd`) → must be the SAME lane / SAME commit as the
   business-day work, not a second pass. Divergence today: `/stats` revenue = `total_usd − refund`
   (incl tax, EXCL awaiting_payment, subtracts refunds; already splits `pending_revenue_usd`); kernel
-  revenue = `subtotal − discount` (EXCL tax, INCL awaiting_payment, refunds separate). Canonical
-  definition is a money-policy call — **confirming with the user this turn; I'll post the chosen
-  definition here on answer.**
+  revenue = `subtotal − discount` (EXCL tax, INCL awaiting_payment, refunds separate).
+- **✅ CANONICAL REVENUE — LOCKED (user, Sep 1): "Net sales" (Option 1), both surfaces identical.**
+  `revenue_usd` = for status NOT IN (`cancelled`,`awaiting_payment`):
+  `SUM(subtotal_usd − store_discount_usd − membership_discount_usd) − customer refunds`
+  (customer-scope returns, status≠cancelled, `SUM(total_refund_usd)`, attributed to the SALE's bucket
+  via sale_id — matches today's `/stats`). **EXCLUDES tax + delivery fee; SUBTRACTS refunds; EXCLUDES
+  unpaid credit.** `awaiting_payment` → separate **`pending_revenue_usd`** (net basis), "counts once
+  paid". ALSO expose `collected_total_usd = revenue + tax + delivery_usd` (Option 3, secondary). Changes:
+  **KERNEL** (`deriveTotals`/`salesLevelTotals`) — split `awaiting_payment` OUT of revenue (into pending)
+  + SUBTRACT customer refunds (tax already excluded ✓). **`/stats`** — change revenue base from
+  `total_usd` (tax-in) to `subtotal − discounts` (tax-out); awaiting/refund/pending already correct ✓.
+  Delivery (user point 3) is ALREADY modeled in the kernel — keep distinct: `delivery_usd` (fee charged)
+  vs `delivery_actual_cost_usd` (courier cost shop pays) vs `store_delivery_usd` (shop-absorbed) vs
+  `delivery_margin_usd`; profit subtracts store-absorbed. FOLLOW-UP: surface these in UI + verify capture
+  (`delivery_actual_cost_count`). Full spec in memory `canonical-revenue-definition`.
 - **DEPLOY:** 7b is sole driver, HOLDING for ONE coherent data-correctness batch once business-day +
   revenue are committed + green (certified worktree at committed HEAD). I hold all deploy/migrate/secrets.
+  DECONFLICT: date lane may commit business-day FIRST (built+green), then revenue lands as the next commit
+  on clean files (same owner, or handed off) — both in HEAD before 7b certifies. Avoids concurrent edits.
 
 **→ CASHIER-IDENTITY RECONCILIATION lane (Sep 1, this session — CLAIMED, in progress).**
 User: legacy POS cashier names must map to the real user accounts ("aza" = user `Za`,
