@@ -1124,8 +1124,18 @@ up should re-verify against current source first.
 - Receipt/date locale: `Receipt.tsx:309` + 3 duplicated `formatDateTime` use viewer
   locale (dd/mm + 12h) violating the mm/dd + 24h rule. (×1 cross-surface).
 
-**MEDIUM (representative):** review-tier bypass on fees PUT / contacts create / returns
-create; ~~membership points balance formula omits `loyalty_point_adjustments`~~
+**MEDIUM (representative):** ~~review-tier bypass on fees PUT / contacts create / returns
+create~~ **[NOT A BUG — verified session 77, Aug 31: intentional, documented per-section
+tier specs. DO NOT gate these.]** The auth-matrix audit flagged these against a generic
+"Review Required must queue every write" assumption, but each section's spec is explicit
+and narrower: Fees = "everything allowed directly EXCEPT delete" (fees.ts:284-288, only
+delete is queued); Contacts = "view + add directly, name-only edit" (contacts.ts:859-860,
+so create is deliberately direct and only delete/merge are blocked); Returns = create
+allowed, PATCH edit blocked (the Part-154 pattern the contacts comment cites). Gating the
+create/edit paths would REGRESS the intended Partial-Access behaviour — the exact
+fix-one-break-another cycle. The `pickColumns`/name-only-drop and delete/merge blocks are
+the real enforcement and are correct. — membership points balance formula ~~omits
+`loyalty_point_adjustments`~~
 **[FIXED: b9, Part 533, `ab8d172c`]** — checkout re-validation now carries the same
 manual-award term as summarizePoints, with parity source locks; offline sale
 timestamps recorded at sync time not
