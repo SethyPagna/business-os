@@ -1,10 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import type { MouseEventHandler, TouchEventHandler, ReactNode, PointerEvent as ReactPointerEvent } from 'react'
 import AlertTriangle from 'lucide-react/dist/esm/icons/alert-triangle.js'
-import ChevronDown from 'lucide-react/dist/esm/icons/chevron-down.js'
 import ImageOff from 'lucide-react/dist/esm/icons/image-off.js'
 import { resolvePublicAssetUrl } from '../../../utils/publicAssetUrls.ts'
-import { containsKhmerScript, withKhmerTextClass } from '../../../utils/scriptTypography.ts'
 
 const BROKEN_PRODUCT_IMAGE_RETRY_MS = 5 * 60 * 1000
 const brokenProductImageUrls = new Map<string, number>()
@@ -335,36 +333,4 @@ function DragScrollText({ children, className = '', title, lang }: {
   )
 }
 
-// Inline, tap-to-toggle description for the small-screen product card
-// (user, Aug 31 2026: "for description as well can expand and
-// collapse"). Collapsed to two lines by default so it never dominates
-// the card; tapping expands to the full text and collapses it back.
-// Renders nothing when there is no description. Its press/click events
-// are kept off the card so toggling never opens the product detail or
-// trips select mode (see the card's long-press handlers in
-// Products.tsx / utils/longPress.ts).
-function ExpandableDescription({ text, className = '' }: {
-  text: string
-  className?: string
-}) {
-  const [open, setOpen] = useState(false)
-  const value = String(text || '').trim()
-  if (!value) return null
-  const km = containsKhmerScript(value)
-  return (
-    <button
-      type="button"
-      lang={km ? 'km' : undefined}
-      title={value}
-      onClick={(event) => { event.stopPropagation(); setOpen((prev) => !prev) }}
-      onMouseDown={(event) => event.stopPropagation()}
-      onTouchStart={(event) => event.stopPropagation()}
-      className={`mt-1 flex w-full items-start gap-1 text-left text-[11px] leading-snug text-gray-500 dark:text-gray-400 ${className}`}
-    >
-      <ChevronDown className={`mt-px h-3 w-3 flex-shrink-0 transition-transform ${open ? 'rotate-180' : ''}`} />
-      <span className={withKhmerTextClass(value, open ? 'min-w-0 whitespace-pre-wrap break-words' : 'min-w-0 line-clamp-2')}>{value}</span>
-    </button>
-  )
-}
-
-export { ProductImg, ProductImagePlaceholder, MarginCard, DualPriceInput, DragScrollText, ExpandableDescription, sanitizeNumericInput, parseNumericInput }
+export { ProductImg, ProductImagePlaceholder, MarginCard, DualPriceInput, DragScrollText, sanitizeNumericInput, parseNumericInput }

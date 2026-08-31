@@ -22,7 +22,7 @@ import PageSizeSelect from '../shared/PageSizeSelect'
 import SearchInput from '../shared/SearchInput'
 import ScanSearchButton from '../shared/ScanSearchButton'
 import PaginationControls, { PAGE_SIZE_OPTIONS, DEFAULT_PAGE_SIZE } from '../shared/PaginationControls'
-import { ProductImg, ProductImagePlaceholder, DragScrollText, ExpandableDescription } from './shared/primitives'
+import { ProductImg, ProductImagePlaceholder, DragScrollText } from './shared/primitives'
 import ProductsListSurface, { ROW_TEXT_GUTTER } from './surfaces/ProductsListSurface'
 import MergeDuplicatesReviewModal from './MergeDuplicatesReviewModal'
 import type { MergeDuplicatesPreviewGroup } from './MergeDuplicatesReviewModal'
@@ -3436,10 +3436,10 @@ function ProductsFullEditor() {
               <span className={withKhmerTextClass(unitName, `inline-flex min-w-0 max-w-full items-center whitespace-nowrap font-medium ${stockStatusTextClass}`)}>{String(qty || 0)}{renderUnitChip(unitName)}</span>
             </div>
             <ProductBatchPreview product={p} branchId={branchFilter} tr={tr} compact />
-            {/* Description folds into a two-line preview that taps open to
-                the full text and back -- see ExpandableDescription (user,
-                Aug 31 2026). Renders nothing when the product has none. */}
-            <ExpandableDescription text={String(p.description || '')} />
+            {/* Description is intentionally NOT shown on the small-screen list
+                card (user, Sep 1 2026: "only hide in the default view, keep it
+                in click-to-view details") -- it stays available in the product
+                detail modal opened on tap (ProductDetailModal). */}
             {dupInfo ? (
               <DuplicateResolverControl
                 tr={tr}
