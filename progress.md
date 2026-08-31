@@ -94,6 +94,20 @@ Two rules learned the hard way, both from real incidents in this file's own hist
 
 ## Current status
 
+**→ CASHIER-IDENTITY RECONCILIATION lane (Sep 1, this session — CLAIMED, in progress).**
+User: legacy POS cashier names must map to the real user accounts ("aza" = user `Za`,
+routh=`Rath`, pagna=`james`, sethyka=`sethyka`, Dev-Usmart=`admin`), matching by
+**username incl. inactive**; **display the username**; the account **id is the source
+of truth** so a username change must **cascade through the whole system** (not just
+users); Dev-Usmart→admin(1). Root cause: `importEngine.ts` cashier lookup keyed only on
+active `users.name`, so no legacy name ever linked (live: 0 sales have cashier_id).
+OWNS (disjoint from the DATE/TIME + PRODUCTS lanes): `cloudflare/src/lib/importEngine.ts`,
+new `cloudflare/src/lib/userIdentity.ts` (rename cascade), `cloudflare/src/routes/users.ts`
+(wire cascade into both PUT routes), `frontend/src/components/pos/POS.tsx` (send username +
+cashier_id), the two `ops/scripts/migration/import-aug3*-legacy-reports.mjs`, and **reserves
+migration numbers 0098 (`user_aliases`) + 0099 (`legacy_deleted_sale_items.cashier_id`)**.
+Scope = code + gated backfill SQL, **NO remote write** (Stage-1). Path-scoped commits only.
+
 **✅ CONTACT-MERGE DATA-MOVEMENT lane (Sep 1, session ca [7f222b] — DONE, committed `1655ea1e`, NOT deployed / Stage-1).**
 User: "make sure conflict when decision/action is made merges and moves the sales, returns, and other
 data where its previous link was at … check all the resolve/conflicts." Audited every resolve/Conflicts
