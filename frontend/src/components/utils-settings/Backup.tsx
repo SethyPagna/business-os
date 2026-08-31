@@ -183,7 +183,7 @@ interface BackupApi {
   cancelSystemJob?(jobId: string | number, reason: string): Promise<{ item?: BackupJob } | BackupJob>
   getGoogleDriveSyncStatus?(): Promise<{ item?: DriveSyncStatus; unavailable?: boolean; cooldownUntil?: number | string }>
   saveGoogleDriveSyncPreferences?(payload: Record<string, unknown>): Promise<{ item?: DriveSyncStatus }>
-  startGoogleDriveSyncOauth?(payload: Record<string, unknown>): Promise<{ authUrl?: string }>
+  startGoogleDriveSyncOauth?(payload: Record<string, unknown>): Promise<{ url?: string }>
   queueGoogleDriveSyncNow?(): Promise<QueuedJobResponse>
   disconnectGoogleDriveSync?(): Promise<unknown>
   forgetGoogleDriveSyncCredentials?(payload: { confirm: boolean }): Promise<unknown>
@@ -1150,7 +1150,11 @@ function GoogleDriveSyncSection({ t, notify, active = true, actionHistory = null
         'Start Google Drive connection',
         DRIVE_SYNC_OAUTH_TIMEOUT_MS,
       )
-      const authUrl = result?.authUrl
+      // The backend returns the consent URL as `url` (same shape as the SSO
+      // /api/auth/oauth/start endpoint). Reading `authUrl` here always yielded
+      // undefined, so a *successful* start still threw -- surfacing as the
+      // doubled "Google Drive connection failed: Google Drive connection failed".
+      const authUrl = result?.url
       if (!authUrl) throw new Error(copy('drive_sync_connect_failed', 'Google Drive connection failed'))
       actionHistory?.pushAction?.({
         scope: 'backup',
