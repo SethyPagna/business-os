@@ -24,6 +24,7 @@ import {
 import { buildLikeAliasClause, tokenizeSearchTermGroups, normalizeSearchText } from '../lib/searchMatch'
 import { computeSaleTotals, round2 } from '../lib/saleTotals'
 import { uniqueBusinessDateTimeNumber } from '../lib/receiptNumber'
+import { sanitizeClientCreatedAt } from '../lib/clientTimestamp'
 import type { Env } from '../index'
 
 const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser } }>()
@@ -106,6 +107,9 @@ app.post('/', async (c) => {
   }
   const body = await c.req.json<{
     items: SaleItemInput[]
+    // Offline replays only: the sale's queue-time moment, honored with
+    // bounded trust (lib/clientTimestamp.ts). Online checkouts omit it.
+    created_at?: unknown
     branch_id?: number
     cashier_id?: number
     cashier_name?: string
@@ -487,6 +491,12 @@ app.post('/', async (c) => {
     '',
     async (candidate) => !!(await db.prepare('SELECT 1 AS hit FROM sales WHERE receipt_number = ? LIMIT 1').get([candidate])),
   )
+  // An offline replay carries the sale's own queue-time moment (stamped in
+  // saleWriteTransport); honored with bounded trust so day-ranged reports
+  // put the sale on the day it happened, not the day it synced. Online
+  // checkouts send no created_at and keep the server clock. See
+  // lib/clientTimestamp.ts for the bounds and the storage format.
+  const clientCreatedAt = sanitizeClientCreatedAt(body.created_at)
 
   // isDelivery / deliveryFeeUsd / deliveryFeeKhr / deliveryFeePaidBy are
   // computed with the totals above, since the customer-paid portion is part
@@ -521,10 +531,11 @@ app.post('/', async (c) => {
         @is_delivery, @delivery_contact_id, @delivery_contact_name, @delivery_contact_phone, @delivery_contact_address,
         @delivery_fee_usd, @delivery_fee_khr, @delivery_fee_paid_by,
         @delivery_actual_cost_usd, @delivery_actual_cost_khr,
-        @loyalty_accrual, @sale_status, @search_normalized, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+        @loyalty_accrual, @sale_status, @search_normalized, COALESCE(@created_at, CURRENT_TIMESTAMP), CURRENT_TIMESTAMP)
     `)
     .run({
       receipt_number: receiptNumber,
+      created_at: clientCreatedAt,
       client_request_id: clientRequestId,
       cashier_id: body.cashier_id || null,
       cashier_name: body.cashier_name || null,

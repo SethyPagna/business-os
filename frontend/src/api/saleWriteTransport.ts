@@ -118,6 +118,11 @@ async function queueOfflineSale(payload: SalePayload, reason = 'server_offline')
   const now = new Date().toISOString()
   const receiptNumber = buildOfflineSaleReceiptNumber()
   salePayload.receipt_number = salePayload.receipt_number || receiptNumber
+  // The sale's own moment, stamped at QUEUE time like the receipt id above.
+  // The replayed payload carries it to POST /api/sales, whose bounded
+  // sanitizeClientCreatedAt puts the sale on the day it happened instead of
+  // the day it synced (online checkouts send no created_at).
+  salePayload.created_at = asText(salePayload.created_at) || now
   const localId = await putOfflineSaleMirror(salePayload, receiptNumber)
   const row = {
     id: salePayload.client_request_id,
