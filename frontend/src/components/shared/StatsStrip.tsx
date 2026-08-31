@@ -79,6 +79,7 @@ export default function StatsStrip({
   onRangeChange,
   actions,
   rangeActions,
+  summary,
   className = '',
 }: {
   cards: StatCardDef[]
@@ -100,6 +101,11 @@ export default function StatsStrip({
    * stats row instead ("if stats are not many like only two, no need merge
    * the history/export buttons in date, just merge with the stats"). */
   rangeActions?: ReactNode
+  /** A one-line headline (e.g. "42 sales · $1,204") shown next to the Stats
+   * chip and visible whether the cards are folded or open — "stats can show
+   * outside button stats" (user, Aug 31): the key figure stays on screen
+   * without opening the fold. */
+  summary?: ReactNode
   className?: string
 }) {
   const tr = (key: string, fallback: string): string => {
@@ -142,6 +148,9 @@ export default function StatsStrip({
           <BarChart3 className="h-3.5 w-3.5 shrink-0" />
           {tr('stats', 'Stats')}
         </button>
+        {summary ? (
+          <span className="min-w-0 truncate text-[11px] text-gray-500 dark:text-gray-400">{summary}</span>
+        ) : null}
         {(!statsOpen && rangeActions) || actions ? (
           <div className="ml-auto flex min-w-0 flex-wrap items-center justify-end gap-1">
             {!statsOpen ? rangeActions : null}

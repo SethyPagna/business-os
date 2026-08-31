@@ -120,6 +120,37 @@ test('Part 548: the Reports range totals show Profit on every viewport', () => {
   assert.ok(!/hidden sm:inline[^>]*>\{t\('profit'\)/.test(report), 'Profit is not hidden below the sm breakpoint')
 })
 
+test('Part 549: the Sales report filters are compact chips on the totals row (like Returns/Fees)', () => {
+  const report = read('src/components/sales/SalesDailyReport.tsx')
+  // Both the totals and the status/method selects live in ONE flex row with
+  // "|" dividers, matching ReturnsReportSection/FeesReportSection density
+  // (user: "statuses and methods button can be like returns and fees,
+  // compact in one row"). The selects are the compact h-7 size, not the old
+  // full-height dropdowns that wrapped the totals to a second line.
+  assert.ok(report.includes("buttonClassName=\"h-7 py-0 px-2 text-[11px]\""), 'status/method use the compact chip-select size')
+  // The compact filters right-align (ml-auto) after the totals inside the
+  // same flex row: totals text first, then the status select.
+  const rowStart = report.indexOf('rangeTotals.tx')
+  const filterCluster = report.indexOf('ml-auto flex flex-wrap items-center gap-1.5', rowStart)
+  assert.ok(rowStart > -1 && filterCluster > rowStart, 'the compact filter cluster follows the totals inside the one row')
+  assert.ok(report.indexOf('options={statusOptions}', filterCluster) > filterCluster, 'the status select sits in that cluster')
+})
+
+test('Part 549: the Sales section shows an always-visible summary + a leaner toolbar', () => {
+  const sales = read('src/components/sales/Sales.tsx')
+  const strip = read('src/components/shared/StatsStrip.tsx')
+  // "stats can show outside button stats" -> a summary line beside the chip.
+  assert.ok(strip.includes('summary'), 'StatsStrip exposes a summary slot')
+  assert.ok(sales.includes('summary={'), 'Sales feeds the strip a summary (count · revenue)')
+  // Sort folded INTO the Filters menu; the standalone SortChip is gone.
+  assert.ok(!sales.includes('SortChip'), 'the toolbar SortChip is removed (sort lives in the Filters menu)')
+  assert.ok(/id: 'sort'/.test(sales), 'the Filters menu carries a Sort section')
+  // Group-by dropped; Period is a start/end date range, not year/month.
+  assert.ok(!/id: 'grouping'/.test(sales), 'the Group-by filter section is gone')
+  assert.ok(!sales.includes('buildPeriodFilterOptions'), 'the year/month Period options are gone')
+  assert.ok(/id: 'period'[\s\S]{0,200}DateTimeRangePicker/.test(sales), 'Period is a start/end date-range picker')
+})
+
 test('old bespoke stat surfaces are really gone (no zombie tile grids)', () => {
   assert.ok(!read('src/components/returns/Returns.tsx').includes('ReturnStatTile'), 'Returns tile grid removed')
   const inventory = read('src/components/inventory/Inventory.tsx')

@@ -15,7 +15,6 @@ import type { PortalMenuItem } from '../shared/PortalMenu'
 import FilterMenu from '../shared/FilterMenu'
 import SearchInput from '../shared/SearchInput'
 import ScanSearchButton from '../shared/ScanSearchButton'
-import SortChip from '../shared/SortChip'
 import { loadSortSpec, saveSortSpec, sortRecords, type SortField, type SortSpec } from '../../utils/listSort'
 import ActionHistoryBar from '../shared/ActionHistoryBar'
 import PaginationControls, { clampPage, paginateItems, DEFAULT_PAGE_SIZE } from '../shared/PaginationControls'
@@ -27,12 +26,11 @@ import { useActionHistory } from '../../utils/actionHistory.ts'
 import { runConcurrentTasks } from '../../utils/bulkOps.ts'
 import { pruneSelectionToVisibleIds } from '../../utils/rowSelection.ts'
 import { createLongPressState, type LongPressState } from '../../utils/longPress.ts'
-import { buildTimeActionSections, getAvailableYears, getTimeGroupingMode, toggleIdSet } from '../../utils/groupedRecords.ts'
-import { buildPeriodFilterOptions } from '../../utils/periodFilterOptions.ts'
+import { buildTimeActionSections, getTimeGroupingMode, toggleIdSet } from '../../utils/groupedRecords.ts'
 import { beginKeyedAction, beginSingleAction, finishKeyedAction, finishSingleAction } from '../../utils/actionGuards.ts'
 import { getSales as fetchSales, getSalesStats as fetchSalesStats, getSalesStatsStrip } from '../../api/salesTransport.ts'
 import StatsStrip, { statsPresetRange, type StatCardDef } from '../shared/StatsStrip.tsx'
-import type { DateTimeRange } from '../shared/DateTimeRangePicker.tsx'
+import DateTimeRangePicker, { type DateTimeRange } from '../shared/DateTimeRangePicker.tsx'
 import { getUsers as fetchUsers } from '../../api/userReadTransport.ts'
 import {
   beginTrackedRequest,
@@ -240,8 +238,11 @@ export default function Sales() {
   const [userOptions, setUserOptions] = useState<UserOption[]>([])
   const [salesFiltersOpen, setSalesFiltersOpen] = useState(false)
   const [userOptionsLoaded, setUserOptionsLoaded] = useState(false)
-  const [yearFilter, setYearFilter] = useState('all')
-  const [monthFilter, setMonthFilter] = useState('all')
+  // Period narrowing is a start→end date range (user, Aug 31: "for the
+  // period that can use the start date and end date") — the same
+  // DateTimeRangePicker Fees folds into its Filters menu, replacing the old
+  // year/month dropdowns. Empty = all time (the previous 'all' default).
+  const [listRange, setListRange] = useState<DateTimeRange>({ startDate: '', endDate: '', startTime: '', endTime: '' })
   const [selectedIds, setSelectedIds] = useState<Set<number>>(() => new Set())
   // The by-day report moved out to its own top-level Reports hub section
   // (ReportsHub.tsx); Sales now shows only the receipts list.
@@ -277,12 +278,16 @@ export default function Sales() {
     | null
   >(null)
   const [cancelSaving, setCancelSaving] = useState(false)
-  const [salesGroupMode, setSalesGroupMode] = useState<SalesGroupMode>('time')
-  // Unified sort (listSort.ts + SortChip): field + direction, visible in the
-  // toolbar instead of hidden in the Filters menu, persisted per page. When
-  // the field is 'date' the existing time-section pipeline runs unchanged;
-  // any other field renders a flat sorted list (time grouping has no meaning
-  // under a by-total or by-cashier ordering).
+  // Group-by dropped (user, Aug 31: "the group by seems a bit redundant
+  // with the arrange by") — the list always groups by day; sorting by a
+  // non-date field flattens it. Kept as a const so the grouping pipeline
+  // below reads unchanged.
+  const salesGroupMode: SalesGroupMode = 'time'
+  // Unified sort (listSort.ts): field + direction, folded into the Filters
+  // menu (Part 549), persisted per page. When the field is 'date' the
+  // existing time-section pipeline runs unchanged; any other field renders
+  // a flat sorted list (time grouping has no meaning under a by-total
+  // ordering).
   const [salesSortSpec, setSalesSortSpec] = useState<SortSpec>(() => loadSortSpec(
     'sales:sort',
     { field: 'date', direction: 'desc' },
@@ -352,23 +357,13 @@ export default function Sales() {
     return settings?.language === 'km' ? cleanFallback(fallbackEn, fallbackKm) : fallbackEn
   }, [cleanFallback, settings?.language, t])
   const salesDateRange = useMemo(() => {
-    if (yearFilter === 'all') return {}
-    const year = Number(yearFilter)
-    if (!Number.isFinite(year)) return {}
-    const month = monthFilter !== 'all' ? Number(monthFilter) : null
-    if (month && Number.isFinite(month)) {
-      const start = new Date(Date.UTC(year, month - 1, 1))
-      const end = new Date(Date.UTC(year, month, 0))
-      return {
-        startDate: start.toISOString().slice(0, 10),
-        endDate: end.toISOString().slice(0, 10),
-      }
-    }
-    return {
-      startDate: `${year}-01-01`,
-      endDate: `${year}-12-31`,
-    }
-  }, [monthFilter, yearFilter])
+    const startDate = String(listRange.startDate || '').trim()
+    const endDate = String(listRange.endDate || '').trim()
+    const out: { startDate?: string; endDate?: string } = {}
+    if (startDate) out.startDate = startDate
+    if (endDate) out.endDate = endDate
+    return out
+  }, [listRange.startDate, listRange.endDate])
 
   const clearLoadWatchdog = useCallback(() => {
     window.clearTimeout(loadWatchdogRef.current)
@@ -730,11 +725,6 @@ export default function Sales() {
     }
   }
 
-  const availableYears = useMemo(
-    () => getAvailableYears(sales, (sale) => sale?.created_at),
-    [sales],
-  )
-
   // Comma-separated groups, same syntax/tokenizer Products.tsx/POS.tsx use
   // (buildProductSearchTerms) and the same syntax routes/sales.ts's
   // buildSalesSearchWhere now parses server-side (tokenizeSearchTermGroups)
@@ -744,8 +734,8 @@ export default function Sales() {
   const searchTerms = useMemo(() => buildProductSearchTerms(debouncedSearch), [debouncedSearch])
   // Year/month narrowing happens downstream in buildTimeActionSections (see
   // allSalesSections below, which is given `year`/`month` directly) -- this
-  // filter only ever checks status and search text, so monthFilter/
-  // yearFilter were never read here. Keeping them out of the dependency
+  // filter only ever checks status and search text, so the period range
+  // was never read here. Keeping it out of the dependency
   // list avoids recomputing (and reallocating) this array on every date
   // filter change for no behavioral difference.
   const filtered = useMemo(() => sales.filter((sale) => {
@@ -807,13 +797,16 @@ export default function Sales() {
         getItemId: (sale) => Number(sale?.id),
         getActionKey: (sale) => sale?.sale_status || 'completed',
         getActionLabel: (sale) => getStatusLabel(sale?.sale_status || 'completed', t),
-        year: yearFilter,
-        month: monthFilter,
+        // All-time day grouping: the actual date narrowing happens
+        // server-side via salesDateRange, so the client grouper is never
+        // asked to also filter by year/month (that Period picker is gone).
+        year: 'all',
+        month: 'all',
         timeMode: timeGroupingMode,
         groupMode: salesGroupMode,
         sortDirection: salesSortDirection,
       }),
-    [buildSortedSection, filtered, monthFilter, salesGroupMode, salesSortDirection, salesSortFields, salesSortSpec, t, timeGroupingMode, yearFilter],
+    [buildSortedSection, filtered, salesGroupMode, salesSortDirection, salesSortFields, salesSortSpec, t, timeGroupingMode],
   )
 
   const allVisibleSales = useMemo(
@@ -823,7 +816,7 @@ export default function Sales() {
 
   useEffect(() => {
     setSalesPage(1)
-  }, [monthFilter, salesGroupMode, salesPageSize, salesSortSpec, search, statusFilter, userFilter, yearFilter])
+  }, [listRange.startDate, listRange.endDate, salesPageSize, salesSortSpec, search, statusFilter, userFilter])
 
   useEffect(() => {
     setSalesPage((current) => clampPage(current, allVisibleSales.length, salesPageSize))
@@ -843,13 +836,13 @@ export default function Sales() {
         getItemId: (sale) => Number(sale?.id),
         getActionKey: (sale) => sale?.sale_status || 'completed',
         getActionLabel: (sale) => getStatusLabel(sale?.sale_status || 'completed', t),
-        year: yearFilter,
-        month: monthFilter,
+        year: 'all',
+        month: 'all',
         timeMode: timeGroupingMode,
         groupMode: salesGroupMode,
         sortDirection: salesSortDirection,
       }),
-    [buildSortedSection, monthFilter, pagedSales, salesGroupMode, salesSortDirection, salesSortSpec.field, t, timeGroupingMode, yearFilter],
+    [buildSortedSection, pagedSales, salesGroupMode, salesSortDirection, salesSortSpec.field, t, timeGroupingMode],
   )
 
   const visibleSales = useMemo(
@@ -1092,10 +1085,10 @@ export default function Sales() {
     { label: translateOr('export_visible_sales', 'Export visible sales', 'នាំចេញការលក់ដែលកំពុងបង្ហាញ'), onClick: () => exportVisibleSales(filtered, 'sales-visible') },
     selectedSales.length ? { label: translateOr('export_selected_sales', 'Export selected sales', 'នាំចេញការលក់ដែលបានជ្រើស'), onClick: handleExportSelected, color: 'blue' } : null,
     statusFilter !== 'all' ? { label: translateOr('export_filtered_status', `Export ${getStatusLabel(statusFilter, t)}`, `នាំចេញតាមស្ថានភាព ${getStatusLabel(statusFilter, t)}`), onClick: () => exportVisibleSales(filtered, `sales-${statusFilter}`) } : null,
-    yearFilter !== 'all' || monthFilter !== 'all' ? { label: translateOr('export_filtered_time_range', 'Export filtered time range', 'នាំចេញតាមចន្លោះពេលដែលបានតម្រង'), onClick: () => exportVisibleSales(filtered, 'sales-filtered') } : null,
+    (listRange.startDate || listRange.endDate) ? { label: translateOr('export_filtered_time_range', 'Export filtered time range', 'នាំចេញតាមចន្លោះពេលដែលបានតម្រង'), onClick: () => exportVisibleSales(filtered, 'sales-filtered') } : null,
     'divider',
     { label: translateOr('export_detailed_sales_report', 'Detailed sales report', 'របាយការណ៍លម្អិតការលក់'), onClick: () => setShowExport(true), color: 'green' },
-  ].filter(Boolean) as Array<PortalMenuItem | null | false>), [exportVisibleSales, filtered, handleExportSelected, monthFilter, selectedSales.length, statusFilter, t, translateOr, yearFilter])
+  ].filter(Boolean) as Array<PortalMenuItem | null | false>), [exportVisibleSales, filtered, handleExportSelected, listRange.startDate, listRange.endDate, selectedSales.length, statusFilter, t, translateOr])
 
   const salesFilterSections = useMemo(() => ([
     {
@@ -1128,33 +1121,47 @@ export default function Sales() {
         }).filter((option) => option.id !== 'user-'),
       ],
     } : null,
+    // Sort folds INTO this menu (user, Aug 31: "the arrange by can be
+    // folded into filter menu") — the toolbar keeps only Search + Scan +
+    // Filters. Date/Total are the two meaningful orderings; Cashier stays a
+    // FILTER (the 'user' section above), never a sort ("same for cashier").
     {
-      id: 'grouping',
-      label: translateOr('group_by', 'Group by', 'ដាក់ជាក្រុមតាម'),
+      id: 'sort',
+      label: translateOr('sort', 'Sort', 'តម្រៀប'),
       options: [
-        { id: 'time', label: translateOr('group_by_time', 'Time only', 'ពេលវេលាប៉ុណ្ណោះ'), active: salesGroupMode === 'time', onClick: () => setSalesGroupMode('time') },
-        { id: 'time-action', label: translateOr('group_by_time_action', 'Time + status', 'ពេលវេលា + ស្ថានភាព'), active: salesGroupMode === 'time+action', onClick: () => setSalesGroupMode('time+action') },
+        { id: 'date-desc', label: translateOr('sort_newest_first', 'Newest first', 'ថ្មីៗមុន'), active: salesSortSpec.field === 'date' && salesSortSpec.direction === 'desc', onClick: () => setSalesSortSpec({ field: 'date', direction: 'desc' }) },
+        { id: 'date-asc', label: translateOr('sort_oldest_first', 'Oldest first', 'ចាស់ៗមុន'), active: salesSortSpec.field === 'date' && salesSortSpec.direction === 'asc', onClick: () => setSalesSortSpec({ field: 'date', direction: 'asc' }) },
+        { id: 'total-desc', label: translateOr('sort_total_high', 'Total: high → low', 'សរុប៖ ច្រើន → តិច'), active: salesSortSpec.field === 'total' && salesSortSpec.direction === 'desc', onClick: () => setSalesSortSpec({ field: 'total', direction: 'desc' }) },
+        { id: 'total-asc', label: translateOr('sort_total_low', 'Total: low → high', 'សរុប៖ តិច → ច្រើន'), active: salesSortSpec.field === 'total' && salesSortSpec.direction === 'asc', onClick: () => setSalesSortSpec({ field: 'total', direction: 'asc' }) },
       ],
     },
-    // Sorting moved OUT of this menu onto the visible SortChip in the
-    // toolbar (unified listSort method) -- this section now only carries
-    // the period narrowing it always bundled.
+    // Period is now a start→end date range folded into this menu, the same
+    // control Fees uses ("for the period that can use the start date and
+    // end date") — the old year/month dropdowns are gone.
     {
       id: 'period',
       label: translateOr('period', 'Period', 'រយៈពេល'),
-      searchable: true,
-      options: buildPeriodFilterOptions({
-        yearFilter, setYearFilter, monthFilter, setMonthFilter, availableYears,
-        allTimeLabel: translateOr('all_time', 'All time', 'គ្រប់ពេលវេលា'),
-      }),
+      active: !!(listRange.startDate || listRange.endDate),
+      render: () => (
+        <div className="p-1">
+          <DateTimeRangePicker
+            value={listRange}
+            onChange={setListRange}
+            t={t}
+            showTime={false}
+            triggerClassName="flex w-full items-center justify-center gap-2 rounded-lg px-3 py-2"
+          />
+        </div>
+      ),
     },
-  ].filter(Boolean)), [availableYears, isAdmin, monthFilter, salesGroupMode, statusFilter, t, translateOr, userFilter, userOptions, yearFilter])
+  ].filter(Boolean)), [isAdmin, listRange, salesSortSpec, statusFilter, t, translateOr, userFilter, userOptions])
 
   const activeSalesFilterCount = useMemo(
-    () => countActiveFlags([statusFilter !== 'all', userFilter !== 'all', yearFilter !== 'all', monthFilter !== 'all', salesGroupMode !== 'time']),
-    [monthFilter, salesGroupMode, statusFilter, userFilter, yearFilter],
+    () => countActiveFlags([statusFilter !== 'all', userFilter !== 'all', !!(listRange.startDate || listRange.endDate), !(salesSortSpec.field === 'date' && salesSortSpec.direction === 'desc')]),
+    [listRange.startDate, listRange.endDate, salesSortSpec.direction, salesSortSpec.field, statusFilter, userFilter],
   )
-  const showSalesActionGroups = salesGroupMode === 'time+action'
+  // Group-by-status is gone (Part 549) — the list always groups by day.
+  const showSalesActionGroups = false
 
   if (selectedSale) {
     return (
@@ -1195,6 +1202,16 @@ export default function Sales() {
         t={t}
         range={stripRange}
         onRangeChange={setStripRange}
+        // Key figure stays visible beside the Stats chip whether the cards
+        // are folded or open ("stats can show outside button stats", user
+        // Aug 31): sales count · revenue for the strip's range.
+        summary={stripLoading ? '···' : (
+          <>
+            <b className="text-gray-700 dark:text-gray-200">{Number(stripData?.totals?.tx_count) || 0}</b> {t('sales') || 'sales'}
+            <span className="mx-1 text-gray-300 dark:text-gray-600">·</span>
+            <b className="text-gray-700 dark:text-gray-200">{fmtUSD(Number(stripData?.totals?.revenue_usd) || 0)}</b>
+          </>
+        )}
         // History + Manage are SECONDARY controls: folded they sit on the
         // chip row as before; open they move to the dedicated full-width
         // date row (Part 548 — "start and end date can do one row fully
@@ -1253,12 +1270,8 @@ export default function Sales() {
               POS.tsx expose a camera-scan shortcut for. Added here (and to
               Returns.tsx) to match; same onDetected={setSearch} wiring. */}
           <ScanSearchButton onDetected={setSearch} t={(key: string) => t(key) || key} />
-          <SortChip
-            spec={salesSortSpec}
-            fields={salesSortFields}
-            onChange={setSalesSortSpec}
-            label={translateOr('sort', 'Sort', 'តម្រៀប')}
-          />
+          {/* Sort folded into the Filters menu (Part 549) — the toolbar is
+              just Search + Scan + Filters now. */}
           <FilterMenu
             label={t('filters') || 'Filters'}
             activeCount={activeSalesFilterCount}
@@ -1267,9 +1280,7 @@ export default function Sales() {
             onClear={() => {
               setStatusFilter('all')
               setUserFilter('all')
-              setYearFilter('all')
-              setMonthFilter('all')
-              setSalesGroupMode('time')
+              setListRange({ startDate: '', endDate: '', startTime: '', endTime: '' })
               setSalesSortSpec({ field: 'date', direction: 'desc' })
             }}
             mobileIconOnly

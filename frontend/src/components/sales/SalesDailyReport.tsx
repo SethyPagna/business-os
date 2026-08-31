@@ -413,51 +413,62 @@ export default function SalesDailyReport({ t, fmtUSD, active = true, range: exte
     </div>
   )
 
+  const hasFilter = Boolean(statusFilter || paymentFilter || (!embedded && branchFilter))
+
   return (
     <div className="space-y-3">
-      <div className="flex flex-wrap items-center gap-2">
+      {/* ONE compact row like the Returns/Fees report sections (user, Aug
+          31: "statuses and methods button can be like returns and fees,
+          compact in one row ... same row as total summaries"): the text
+          totals lead with "|" dividers, and the status/method (+branch when
+          standalone) filters right-align as small chip-selects instead of
+          the old full-size dropdowns that wrapped the totals onto a second
+          line. */}
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-slate-500 dark:text-slate-400">
         {!embedded ? <DateTimeRangePicker value={range} onChange={setRange} t={t} /> : null}
-        <AppSelect
-          value={statusFilter}
-          options={statusOptions}
-          onChange={setStatusFilter}
-          ariaLabel={t('status') || 'Status'}
-          buttonClassName="py-1.5 text-xs"
-        />
-        <AppSelect
-          value={paymentFilter}
-          options={paymentOptions}
-          onChange={setPaymentFilter}
-          ariaLabel={t('payment_method') || 'Payment method'}
-          buttonClassName="py-1.5 text-xs"
-        />
-        {!embedded && branches.length ? (
+        <span>{rangeTotals.tx} {t('sales') || 'sales'}</span>
+        <span className="text-slate-300 dark:text-slate-600">|</span>
+        <span>{t('revenue') || 'Revenue'} <b className="text-slate-900 dark:text-white">{fmtUSD(rangeTotals.revenue)}</b></span>
+        <span className="text-slate-300 dark:text-slate-600">|</span>
+        {/* Profit shows on EVERY viewport (Part 548): it was `hidden
+            sm:inline`, so phones showed "N sales | Revenue" with no Profit
+            — the reported "reports not showing profit near the n sales |
+            Revenue row". */}
+        <span>{t('profit') || 'Profit'} <b className={`${rangeTotals.profit < 0 ? 'text-red-600 dark:text-red-400' : 'text-emerald-700 dark:text-emerald-400'}`}>{fmtUSD(rangeTotals.profit)}</b></span>
+        <span className="ml-auto flex flex-wrap items-center gap-1.5">
           <AppSelect
-            value={branchFilter}
-            options={branchOptions}
-            onChange={setBranchFilter}
-            ariaLabel={t('branch') || 'Branch'}
-            buttonClassName="py-1.5 text-xs"
+            value={statusFilter}
+            options={statusOptions}
+            onChange={setStatusFilter}
+            ariaLabel={t('status') || 'Status'}
+            buttonClassName="h-7 py-0 px-2 text-[11px]"
           />
-        ) : null}
-        {(statusFilter || paymentFilter || (!embedded && branchFilter)) ? (
-          <button
-            type="button"
-            onClick={() => { setStatusFilter(''); setPaymentFilter(''); setBranchFilter('') }}
-            className="text-xs font-medium text-blue-600 underline-offset-2 hover:underline dark:text-blue-400"
-          >
-            {t('clear') || 'Clear'}
-          </button>
-        ) : null}
-        <div className="ml-auto flex flex-wrap items-center gap-3 text-xs text-slate-500 dark:text-slate-400">
-          <span>{rangeTotals.tx} {t('sales') || 'sales'}</span>
-          <span>{t('revenue') || 'Revenue'}: <span className="font-semibold text-slate-900 dark:text-white">{fmtUSD(rangeTotals.revenue)}</span></span>
-          {/* Visible on EVERY viewport (Part 548): this was `hidden
-              sm:inline`, so phones showed "N sales | Revenue" with no
-              Profit — the exact "reports are not showing profit near the
-              n sales | Revenue row" report. */}
-          <span>{t('profit') || 'Profit'}: <span className={`font-semibold ${rangeTotals.profit < 0 ? 'text-red-600 dark:text-red-400' : 'text-emerald-700 dark:text-emerald-400'}`}>{fmtUSD(rangeTotals.profit)}</span></span>
-        </div>
+          <AppSelect
+            value={paymentFilter}
+            options={paymentOptions}
+            onChange={setPaymentFilter}
+            ariaLabel={t('payment_method') || 'Payment method'}
+            buttonClassName="h-7 py-0 px-2 text-[11px]"
+          />
+          {!embedded && branches.length ? (
+            <AppSelect
+              value={branchFilter}
+              options={branchOptions}
+              onChange={setBranchFilter}
+              ariaLabel={t('branch') || 'Branch'}
+              buttonClassName="h-7 py-0 px-2 text-[11px]"
+            />
+          ) : null}
+          {hasFilter ? (
+            <button
+              type="button"
+              onClick={() => { setStatusFilter(''); setPaymentFilter(''); setBranchFilter('') }}
+              className="font-medium text-blue-600 underline-offset-2 hover:underline dark:text-blue-400"
+            >
+              {t('clear') || 'Clear'}
+            </button>
+          ) : null}
+        </span>
       </div>
 
       {error ? (

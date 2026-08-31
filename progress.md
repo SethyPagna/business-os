@@ -127,19 +127,36 @@ posCore/focus-split/tsc green. Also confirmed the user's restated stats-grid
 ask (2/3/4+ per row, readable) is already satisfied by Part 548's ramp, which
 the rangeActions rework preserved — no further stats change.]**
 
-**CLAIMED (in progress, i18n/permissions session, Aug 31, Part 548):** Sales-hub
-layout polish per user feedback: StatsStrip gains a dedicated FULL-WIDTH date
-row when open (presets always visible there) + a `rangeActions` slot —
-History/Export ride the date row when a page has many stat cards, and merge
-into the stats row when it has ≤3 (user: "if stats are not many like only two
-... just merge with the stats"); Sales/Returns rewired to the new slots;
-Returns' add buttons get always-visible explicit labels (Add Return / Add
-Supplier Return, new pack keys both languages); SalesDailyReport's range
-totals show Profit on MOBILE too (was `hidden sm:inline` — the reported
-"reports not showing profit near the N sales | Revenue row"). Files:
-shared/StatsStrip.tsx, sales/Sales.tsx, sales/SalesDailyReport.tsx,
-returns/Returns.tsx, lang packs, tests/statsStrip.test.ts. NOT touching
-Inventory.tsx / Dashboard.tsx / FeesPage.tsx layout beyond what's listed.
+**[DONE + VERIFIED LIVE — i18n/permissions session, Aug 31 (Part 552; the
+commits say "548/549" — minted before a peer took those numbers, kept as-is
+per the Part-race convention): sales-hub layout polish, all user feedback
+across two rounds.** StatsStrip: the date picker moved to its OWN full-width
+row when open (presets now show on phones too — the dedicated row has the
+width); new `rangeActions` slot carries History/Export/Manage, riding the
+date row on many-card pages and merging into the stats row on few-card (≤3)
+pages ("if stats are not many ... just merge with the stats"); new `summary`
+slot shows a one-line "N sales · $revenue" beside the Stats chip, visible
+folded or open ("stats can show outside button stats"). Returns' add buttons
+got always-visible explicit labels (Add Return / Add Supplier Return, both
+packs). SalesDailyReport: the range totals show **Profit** on every viewport
+(was `hidden sm:inline` → invisible on the phone layout — the reported
+"reports not showing profit near the N sales | Revenue row"), and the
+status/method filters are now compact chip-selects on the totals row,
+matching the Returns/Fees one-row format. Sales LIST toolbar (user chose
+"fold Sort in + drop redundant"): the standalone SortChip is gone — Sort
+folds into the Filters menu (Newest/Oldest/Total high↔low), toolbar is now
+just Search + Scan + Filters; Group-by removed (always day-grouped); the
+year/month Period dropdown replaced by a start→end DateTimeRangePicker inside
+Filters (the same control Fees uses); Cashier kept as a FILTER only, never a
+sort. **Verified LIVE in the running app (Khmer, seeded admin session):** the
+Sales section renders "ស្ថិតិ · 4 ការលក់ · $42.47" summary beside the chip;
+the Filters menu shows Status / User / Sort / Period(date-range) and NO
+Group-by; the Reports Sales row renders "7 ការលក់ | ចំណូល $77.97 |
+ប្រាក់ចំណេញ $62.97" with compact status/method selects. Full frontend suite
+green (typecheck + ~146 files); new Part-548/549 pins in
+tests/statsStrip.test.ts. Files: shared/StatsStrip.tsx, sales/Sales.tsx,
+sales/SalesDailyReport.tsx, returns/Returns.tsx, lang packs,
+tests/statsStrip.test.ts. Untouched: Inventory/Dashboard/FeesPage layout.]**
 
 **[DONE — i18n session, Aug 31 (Part 545): translation-coverage sweep — 340
 missing pack keys added to BOTH en.json and km.json, + a verify:i18n lock.**
