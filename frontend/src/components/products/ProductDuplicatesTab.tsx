@@ -21,7 +21,7 @@ import Modal from '../shared/Modal'
 type TranslateFn = (key: string) => string | undefined
 type NotifyFn = (message: string, tone?: string) => void
 
-type Severity = 'same_barcode' | 'same_name'
+type Severity = 'same_barcode' | 'same_name' | 'similar_name'
 
 type ClusterProduct = {
   id: number
@@ -34,7 +34,7 @@ type ClusterProduct = {
 }
 
 type Cluster = {
-  type: 'barcode' | 'name'
+  type: 'barcode' | 'name' | 'similar'
   value: string
   severity: Severity
   products: ClusterProduct[]
@@ -43,16 +43,19 @@ type Cluster = {
 const SEVERITY_STYLE: Record<Severity, string> = {
   same_barcode: 'border-amber-200 bg-amber-50 dark:border-amber-900/40 dark:bg-amber-950/30',
   same_name: 'border-blue-200 bg-blue-50 dark:border-blue-900/40 dark:bg-blue-950/30',
+  similar_name: 'border-violet-200 bg-violet-50 dark:border-violet-900/40 dark:bg-violet-950/30',
 }
 
 const SEVERITY_TEXT: Record<Severity, string> = {
   same_barcode: 'text-amber-800 dark:text-amber-300',
   same_name: 'text-blue-700 dark:text-blue-300',
+  similar_name: 'text-violet-700 dark:text-violet-300',
 }
 
 const SEVERITY_LABEL_KEY: Record<Severity, [string, string]> = {
   same_barcode: ['product_dup_same_barcode', 'Same barcode'],
   same_name: ['product_dup_same_name', 'Same name'],
+  similar_name: ['product_dup_similar_name', 'Similar name'],
 }
 
 function clusterKey(cluster: Cluster): string {
@@ -460,7 +463,7 @@ export default function ProductDuplicatesTab({ t, notify }: {
   }), [clusters, normalizedSearch, severityFilter])
 
   const counts = useMemo(() => {
-    const result = { same_barcode: 0, same_name: 0 }
+    const result: Record<Severity, number> = { same_barcode: 0, same_name: 0, similar_name: 0 }
     for (const cluster of clusters) result[cluster.severity] += 1
     return result
   }, [clusters])
@@ -470,10 +473,10 @@ export default function ProductDuplicatesTab({ t, notify }: {
       <div className="flex flex-wrap items-center gap-1.5">
         <InfoHint
           label={t('product_duplicates_how') || 'How this review works'}
-          text={t('product_duplicates_hint') || 'Products that share one real barcode (strong same-item evidence — but an EDP/EDT pair or two shades can genuinely share one) or one display name with different barcodes (usually genuinely different SKUs). Keep this = the other rows merge into it: stock, lots and photos carry over, old sales stay valid. Dismiss = reviewed, genuinely different items — it stays dismissed for everyone.'}
+          text={t('product_duplicates_hint') || 'Products that share one real barcode (strong same-item evidence — but an EDP/EDT pair or two shades can genuinely share one), one display name with different barcodes (usually genuinely different SKUs), or a similar name — the same name re-typed with different punctuation, accents or word order, each with its own barcode. Keep this = the other rows merge into it: stock, lots and photos carry over, old sales stay valid. Dismiss = reviewed, genuinely different items — it stays dismissed for everyone.'}
         />
         <div className="flex items-center gap-1">
-          {(['all', 'same_barcode', 'same_name'] as const).map((severity) => {
+          {(['all', 'same_barcode', 'same_name', 'similar_name'] as const).map((severity) => {
             const [key, fallback] = severity === 'all' ? ['all_severities', 'All'] : SEVERITY_LABEL_KEY[severity]
             return (
               <button
