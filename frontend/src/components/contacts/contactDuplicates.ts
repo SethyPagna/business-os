@@ -39,6 +39,12 @@ export type ContactDuplicateCluster = {
   value: string
   severity: ContactDuplicateSeverity
   contacts: ContactDuplicateClusterEntry[]
+  // True only for a cluster returned by an includeDismissed sweep that was
+  // previously "kept" (dismissed as not-a-duplicate). The panel shows these
+  // under "Show kept" with a Reopen action (undismissContactDuplicateCluster)
+  // so keeping a conflict is never a one-way door -- it can always be
+  // reopened and resolved.
+  dismissed?: boolean
 }
 
 const TABLE_ENDPOINT: Record<ContactTableKind, string> = {
@@ -78,10 +84,18 @@ export async function checkContactDuplicate(
   }
 }
 
-// Whole-table sweep for an admin "Possible Duplicates" review panel.
-export async function getContactDuplicateClusters(table: ContactTableKind): Promise<ContactDuplicateCluster[]> {
+// Whole-table sweep for an admin "Possible Duplicates" review panel. Pass
+// includeDismissed to also bring back already-kept clusters (flagged
+// `dismissed:true`) for the "Show kept" view, where they can be reopened.
+export async function getContactDuplicateClusters(
+  table: ContactTableKind,
+  opts: { includeDismissed?: boolean } = {},
+): Promise<ContactDuplicateCluster[]> {
   try {
-    const result = await apiFetch('GET', `${TABLE_ENDPOINT[table]}/duplicates`)
+    const path = opts.includeDismissed
+      ? `${TABLE_ENDPOINT[table]}/duplicates?includeDismissed=1`
+      : `${TABLE_ENDPOINT[table]}/duplicates`
+    const result = await apiFetch('GET', path)
     return Array.isArray(result?.clusters) ? result.clusters : []
   } catch {
     return []
@@ -103,6 +117,25 @@ export async function dismissContactDuplicateCluster(
   await route(
     `contactDuplicates:${table}:dismiss`,
     () => apiFetch('POST', `${TABLE_ENDPOINT[table]}/duplicates/dismiss`, { type: cluster.type, value: cluster.value }),
+    null,
+    true,
+  )
+}
+
+// Reopens a previously-kept (dismissed) cluster: the inverse of
+// dismissContactDuplicateCluster (routes/contacts.ts's POST
+// .../duplicates/undismiss). Drops the dismissal marker so the cluster
+// returns to the open review queue and can be merged/resolved -- keeping a
+// conflict is always reversible, never a one-way hide. A real write the panel
+// needs confirmed (it moves the cluster from the kept list back to open on
+// success), so it goes through route() like dismiss does.
+export async function undismissContactDuplicateCluster(
+  table: ContactTableKind,
+  cluster: { type: 'phone' | 'name'; value: string },
+): Promise<void> {
+  await route(
+    `contactDuplicates:${table}:undismiss`,
+    () => apiFetch('POST', `${TABLE_ENDPOINT[table]}/duplicates/undismiss`, { type: cluster.type, value: cluster.value }),
     null,
     true,
   )

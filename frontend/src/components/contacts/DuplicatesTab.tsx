@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from 'react'
 import RefreshCw from 'lucide-react/dist/esm/icons/refresh-cw.js'
+import RotateCcw from 'lucide-react/dist/esm/icons/rotate-ccw.js'
 import Search from 'lucide-react/dist/esm/icons/search.js'
 import ArrowRightCircle from 'lucide-react/dist/esm/icons/arrow-right-circle.js'
 import EyeOff from 'lucide-react/dist/esm/icons/eye-off.js'
 import Merge from 'lucide-react/dist/esm/icons/merge.js'
-import { dismissContactDuplicateCluster, getContactDuplicateClusters, mergeContacts } from './contactDuplicates'
+import { dismissContactDuplicateCluster, undismissContactDuplicateCluster, getContactDuplicateClusters, mergeContacts } from './contactDuplicates'
 import type { ContactDuplicateCluster, ContactDuplicateClusterEntry, ContactDuplicateSeverity, ContactTableKind } from './contactDuplicates'
 import SaleLinkConflictsSection from './SaleLinkConflictsSection'
 
@@ -84,7 +85,7 @@ const SEVERITY_TEXT: Record<ContactDuplicateSeverity, string> = {
 }
 
 function ClusterCard({
-  cluster, t, table, dismissing, merging, selected, selectable, onToggleSelect, onResolve, onDismiss, onMergeInto,
+  cluster, t, table, dismissing, merging, selected, selectable, onToggleSelect, onResolve, onDismiss, onReopen, onMergeInto,
 }: {
   cluster: ContactDuplicateCluster
   t: TranslateFn
@@ -96,6 +97,7 @@ function ClusterCard({
   onToggleSelect: () => void
   onResolve: (name: string) => void
   onDismiss: () => void
+  onReopen: () => void
   onMergeInto: (keeper: ContactDuplicateClusterEntry) => void
 }) {
   const [key, fallback] = SEVERITY_LABEL_KEY[cluster.severity]
@@ -131,18 +133,37 @@ function ClusterCard({
             />
           ) : null}
           <span className={`text-xs font-semibold ${SEVERITY_TEXT[cluster.severity]}`}>{t(key) || fallback}</span>
+          {cluster.dismissed ? (
+            <span className="rounded bg-gray-200 px-1.5 py-0.5 text-[10px] font-medium text-gray-600 dark:bg-white/10 dark:text-gray-300">{t('kept') || 'Kept'}</span>
+          ) : null}
         </div>
         <div className="flex items-center gap-1">
           <span className="text-[11px] text-gray-400">{cluster.type === 'phone' ? cluster.value : `"${cluster.value}"`}</span>
-          <button
-            type="button"
-            onClick={onDismiss}
-            disabled={busy}
-            title={t('dismiss_duplicate') || 'Dismiss -- I\'ve reviewed this, not actually a duplicate'}
-            className="rounded-lg p-1 text-gray-400 transition hover:bg-black/5 hover:text-gray-600 disabled:opacity-50 dark:hover:bg-white/10 dark:hover:text-gray-200"
-          >
-            <EyeOff className="h-3.5 w-3.5" />
-          </button>
+          {cluster.dismissed ? (
+            // A kept cluster is reopenable, never a one-way hide -- Reopen drops
+            // the "not a duplicate" marker so it re-enters the open queue and
+            // can be merged/resolved after all.
+            <button
+              type="button"
+              onClick={onReopen}
+              disabled={busy}
+              title={t('reopen_duplicate') || 'Reopen -- put this back in the review queue to merge or resolve'}
+              className="inline-flex items-center gap-1 rounded-lg px-1.5 py-1 text-[11px] font-medium text-blue-600 transition hover:bg-blue-50 disabled:opacity-50 dark:text-blue-300 dark:hover:bg-blue-900/20"
+            >
+              <RotateCcw className="h-3.5 w-3.5" />
+              {t('reopen') || 'Reopen'}
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={onDismiss}
+              disabled={busy}
+              title={t('dismiss_duplicate') || 'Dismiss -- I\'ve reviewed this, not actually a duplicate'}
+              className="rounded-lg p-1 text-gray-400 transition hover:bg-black/5 hover:text-gray-600 disabled:opacity-50 dark:hover:bg-white/10 dark:hover:text-gray-200"
+            >
+              <EyeOff className="h-3.5 w-3.5" />
+            </button>
+          )}
         </div>
       </div>
       <div className="space-y-1">
@@ -232,6 +253,11 @@ export default function DuplicatesTab({ t, notify, active = true, onResolve, inc
   const [loaded, setLoaded] = useState(false)
   const [search, setSearch] = useState('')
   const [severityFilter, setSeverityFilter] = useState<ContactDuplicateSeverity | 'all'>('all')
+  // Reveal already-kept (dismissed) clusters alongside the open queue so a
+  // wrongly-kept conflict can be reopened and resolved -- "keep" is never a
+  // one-way hide. Off by default (the queue leads with what still needs a
+  // decision); flipping it re-fetches with includeDismissed.
+  const [showKept, setShowKept] = useState(false)
   // Keyed by clusterKey() -- which single cluster card is mid-dismiss or
   // mid-merge, so only that one card shows a busy state instead of
   // disabling the whole grid for one action.
@@ -244,10 +270,10 @@ export default function DuplicatesTab({ t, notify, active = true, onResolve, inc
   const [selectedKeys, setSelectedKeys] = useState<Set<string>>(() => new Set())
   const [bulkBusy, setBulkBusy] = useState(false)
 
-  const load = async (targetTable: ContactTableKind) => {
+  const load = async (targetTable: ContactTableKind, includeDismissed: boolean) => {
     setLoading(true)
     try {
-      const result = await getContactDuplicateClusters(targetTable)
+      const result = await getContactDuplicateClusters(targetTable, { includeDismissed })
       setClusters(result)
       setLoaded(true)
     } catch {
@@ -259,15 +285,16 @@ export default function DuplicatesTab({ t, notify, active = true, onResolve, inc
 
   useEffect(() => {
     if (!active) return
-    void load(table)
+    void load(table, showKept)
     setSelectedKeys(new Set())
-    // Intentionally only re-runs on table switch, not every `active` flip --
-    // this is a manual-refresh review panel (see the Refresh button), not a
-    // live-synced list like the other three tabs, so re-fetching every time
-    // the page regains focus would be wasted work for data that only
-    // changes when someone actually edits a contact.
+    // Re-runs on table switch AND when "Show kept" flips (that toggle needs a
+    // fresh sweep to pull the dismissed clusters in). Deliberately NOT on
+    // every `active` flip -- this is a manual-refresh review panel (see the
+    // Refresh button), not a live-synced list like the other three tabs, so
+    // re-fetching every time the page regains focus would be wasted work for
+    // data that only changes when someone actually edits a contact.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [table])
+  }, [table, showKept])
 
   // Removes a cluster from the current table's list without a full
   // reload -- used after both Dismiss (the cluster is gone from GET
@@ -294,6 +321,25 @@ export default function DuplicatesTab({ t, notify, active = true, onResolve, inc
       removeCluster(id)
     } catch (e: unknown) {
       notify(e instanceof Error ? e.message : (t('dismiss_duplicate_failed') || 'Could not dismiss this duplicate'), 'error')
+    } finally {
+      setDismissingId(null)
+    }
+  }
+
+  // Reopen a kept cluster -- drops the dismissal marker so it re-enters the
+  // open review queue. Flipped in place (dismissed:false) rather than removed,
+  // so it stays visible with its full merge/dismiss actions right where the
+  // reviewer is looking; the "Kept" badge and Reopen action swap back to a
+  // normal open cluster. Only reachable from the "Show kept" view.
+  const handleReopen = async (cluster: ContactDuplicateCluster) => {
+    const id = clusterKey(table, cluster)
+    setDismissingId(id)
+    try {
+      await undismissContactDuplicateCluster(table, { type: cluster.type, value: cluster.value })
+      setClusters((current) => current.map((c) => (clusterKey(table, c) === id ? { ...c, dismissed: false } : c)))
+      notify(t('duplicate_reopened') || 'Reopened -- back in the review queue')
+    } catch (e: unknown) {
+      notify(e instanceof Error ? e.message : (t('reopen_duplicate_failed') || 'Could not reopen this cluster'), 'error')
     } finally {
       setDismissingId(null)
     }
@@ -447,7 +493,7 @@ export default function DuplicatesTab({ t, notify, active = true, onResolve, inc
         </button>
         {saleLinksActive ? null : (
           <button
-            onClick={() => void load(table)}
+            onClick={() => void load(table, showKept)}
             disabled={loading}
             className="ml-auto inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium text-blue-600 hover:bg-blue-50 disabled:opacity-50 dark:hover:bg-blue-900/20"
           >
@@ -499,6 +545,21 @@ export default function DuplicatesTab({ t, notify, active = true, onResolve, inc
             )
           })}
         </div>
+        {/* Reveal kept (dismissed) clusters so they can be reopened -- keeping
+            a conflict is reversible, never a one-way hide. */}
+        <button
+          type="button"
+          onClick={() => setShowKept((v) => !v)}
+          title={t('show_kept_hint') || 'Show clusters you kept (marked not-a-duplicate) so they can be reopened'}
+          className={`inline-flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-medium transition-colors ${
+            showKept
+              ? 'bg-slate-950 text-white dark:bg-white dark:text-slate-950'
+              : 'bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-zinc-800 dark:text-gray-300 dark:hover:bg-zinc-700'
+          }`}
+        >
+          <RotateCcw className="h-3 w-3" />
+          {t('show_kept') || 'Show kept'}
+        </button>
       </div>
 
       {loading && !loaded ? (
@@ -589,6 +650,7 @@ export default function DuplicatesTab({ t, notify, active = true, onResolve, inc
                   onToggleSelect={() => toggleSelected(id)}
                   onResolve={(name) => onResolve?.(TABLE_TO_TAB[table], name)}
                   onDismiss={() => void handleDismiss(cluster)}
+                  onReopen={() => void handleReopen(cluster)}
                   onMergeInto={(keeper) => void handleMergeInto(cluster, keeper)}
                 />
               )

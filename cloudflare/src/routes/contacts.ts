@@ -12,6 +12,7 @@ import {
   findContactDuplicates,
   findDuplicateContactClusters,
   dismissDuplicateCluster,
+  undismissDuplicateCluster,
   collectContactPhones,
   formatPhoneP8,
   type ContactDuplicateMatch,
@@ -558,7 +559,11 @@ function registerContactRoutes(config: ContactConfig) {
   // records entered or imported before this feature existed).
   app.get(`${config.path}/duplicates`, async (c) => {
     const db = getDb(c.env)
-    const clusters = await findDuplicateContactClusters(db, config.table, config.optionMode)
+    // The panel asks for kept (dismissed) clusters too when the reviewer flips
+    // "Show kept" -- those come back flagged `dismissed:true` so a wrongly-kept
+    // conflict can be reopened and resolved. Default stays open-conflicts-only.
+    const includeDismissed = ['1', 'true', 'yes'].includes(String(c.req.query('includeDismissed') || '').toLowerCase())
+    const clusters = await findDuplicateContactClusters(db, config.table, config.optionMode, { includeDismissed })
     // Attach each contact's "worth knowing before you act" history summary
     // (loyalty points balance for customers, past sales/returns counts for
     // any table) so the review panel can warn a reviewer before they
@@ -586,6 +591,21 @@ function registerContactRoutes(config: ContactConfig) {
     if (!type || !value) return c.json({ error: 'type ("phone" or "name") and value are required' }, 400)
     const db = getDb(c.env)
     await dismissDuplicateCluster(db, config.table, type, value, { id: user?.id ?? null, name: user?.name ?? null })
+    return c.json({ ok: true })
+  })
+
+  // The inverse of dismiss: drops the "reviewed, not a duplicate" marker so
+  // the cluster returns to the open review queue and can be merged/resolved
+  // after all. This is what keeps a "keep" (dismiss) decision reversible --
+  // a kept conflict is never a one-way hide, it can always be reopened and
+  // resolved. Same cluster identity ({type, value}) the panel dismissed with.
+  app.post(`${config.path}/duplicates/undismiss`, async (c) => {
+    const body = (await c.req.json<Record<string, unknown>>().catch(() => ({}))) as Record<string, unknown>
+    const type = body.type === 'phone' ? 'phone' : body.type === 'name' ? 'name' : null
+    const value = String(body.value || '').trim()
+    if (!type || !value) return c.json({ error: 'type ("phone" or "name") and value are required' }, 400)
+    const db = getDb(c.env)
+    await undismissDuplicateCluster(db, config.table, type, value)
     return c.json({ ok: true })
   })
 

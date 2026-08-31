@@ -195,6 +195,13 @@ export type ContactDuplicateCluster = {
   value: string
   severity: ContactDuplicateSeverity
   contacts: ContactDuplicateClusterEntry[]
+  // Set only when a sweep was asked to include already-kept clusters
+  // (findDuplicateContactClusters's includeDismissed option). A kept cluster
+  // is one someone marked "reviewed, not a duplicate" -- it's hidden from the
+  // default queue but never gone: the panel can reveal it and REOPEN it (see
+  // undismissDuplicateCluster) so a wrongly-kept conflict can always be
+  // resolved later, never a one-way door.
+  dismissed?: boolean
 }
 
 // Persists a "reviewed, not actually a duplicate" decision for one cluster
@@ -218,6 +225,35 @@ export async function dismissDuplicateCluster(
   `).run({ table, type, value, dismissedById: reviewer.id ?? null, dismissedByName: reviewer.name ?? null })
 }
 
+// The inverse of dismissDuplicateCluster: drops the "reviewed, not a
+// duplicate" marker so the cluster returns to the open review queue and can
+// be merged/resolved after all. This is what makes "keep" (dismiss) a
+// reversible decision rather than a one-way hide -- a kept conflict can
+// always be reopened and resolved. Phone clusters match on the exact stored
+// (already-normalized) digits; NAME clusters match on the normalized name
+// the same way findDuplicateContactClusters filters, because the stored
+// dismissal keeps whatever display casing the panel showed at dismiss time
+// while a later reopen sends the current display name -- comparing raw would
+// miss a row that only differs in casing.
+export async function undismissDuplicateCluster(
+  db: D1Compat,
+  table: ContactDuplicateTable,
+  type: 'phone' | 'name',
+  value: string,
+): Promise<void> {
+  if (type === 'phone') {
+    await db.prepare(`DELETE FROM contact_duplicate_dismissals WHERE contact_table = @table AND cluster_type = 'phone' AND cluster_value = @value`).run({ table, value })
+    return
+  }
+  const rows = await db.prepare(`SELECT cluster_value FROM contact_duplicate_dismissals WHERE contact_table = @table AND cluster_type = 'name'`).all<{ cluster_value: string }>({ table })
+  const target = normalizeContactName(value)
+  for (const row of rows) {
+    if (normalizeContactName(row.cluster_value) === target) {
+      await db.prepare(`DELETE FROM contact_duplicate_dismissals WHERE contact_table = @table AND cluster_type = 'name' AND cluster_value = @value`).run({ table, value: row.cluster_value })
+    }
+  }
+}
+
 // Proactive whole-table sweep for the admin "Possible Duplicates" review
 // panel -- surfaces clusters already sitting in the data (most commonly
 // from records entered or imported before this feature existed) instead
@@ -231,7 +267,9 @@ export async function findDuplicateContactClusters(
   db: D1Compat,
   table: ContactDuplicateTable,
   mode: ContactOptionMode = 'address',
+  options: { includeDismissed?: boolean } = {},
 ): Promise<ContactDuplicateCluster[]> {
+  const includeDismissed = options.includeDismissed === true
   const [rows, dismissalRows] = await Promise.all([
     db.prepare(`SELECT ${candidateColumns(table)} FROM ${table} ORDER BY id ASC`).all<ContactDuplicateCandidateRow>({}),
     db.prepare(`SELECT cluster_type, cluster_value FROM contact_duplicate_dismissals WHERE contact_table = @table`).all<{ cluster_type: string; cluster_value: string }>({ table }),
@@ -262,17 +300,26 @@ export async function findDuplicateContactClusters(
 
   const clusters: ContactDuplicateCluster[] = []
   for (const [phone, group] of byPhone) {
-    if (dismissed.has(`phone\u0001${phone}`)) continue
+    const isDismissed = dismissed.has(`phone${phone}`)
+    if (isDismissed && !includeDismissed) continue
     const distinct = [...new Map(group.map((row) => [row.id, row])).values()]
     if (distinct.length < 2) continue
     const names = new Set(distinct.map((row) => normalizeContactName(row.name)))
-    clusters.push({ type: 'phone', value: phone, severity: names.size > 1 ? 'phone_conflict' : 'exact_match', contacts: distinct.map(toEntry) })
+    clusters.push({ type: 'phone', value: phone, severity: names.size > 1 ? 'phone_conflict' : 'exact_match', contacts: distinct.map(toEntry), ...(isDismissed ? { dismissed: true } : {}) })
   }
   for (const [nameKey, group] of byName) {
     if (group.length < 2) continue
-    if (dismissed.has(`name\u0001${nameKey}`)) continue
-    clusters.push({ type: 'name', value: group[0].name || nameKey, severity: 'name_only', contacts: group.map(toEntry) })
+    const isDismissed = dismissed.has(`name${nameKey}`)
+    if (isDismissed && !includeDismissed) continue
+    clusters.push({ type: 'name', value: group[0].name || nameKey, severity: 'name_only', contacts: group.map(toEntry), ...(isDismissed ? { dismissed: true } : {}) })
   }
-  // Worst-first, same ordering the single-record check uses.
-  return clusters.sort((a, b) => SEVERITY_RANK[a.severity] - SEVERITY_RANK[b.severity])
+  // Open conflicts first (worst-first within each), then the kept ones last
+  // when they were asked for -- the queue leads with what still needs a
+  // decision, with reopenable history trailing behind it.
+  return clusters.sort((a, b) => {
+    const ad = a.dismissed ? 1 : 0
+    const bd = b.dismissed ? 1 : 0
+    if (ad !== bd) return ad - bd
+    return SEVERITY_RANK[a.severity] - SEVERITY_RANK[b.severity]
+  })
 }
