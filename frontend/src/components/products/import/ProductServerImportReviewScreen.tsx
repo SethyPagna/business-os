@@ -170,7 +170,7 @@ export default function ProductServerImportReviewScreen({ jobId, jobRevision, t,
     // authority (it 409s on unresolved conflicts), so it need not wait for the
     // review rows to have loaded first.
     if (!auto && unresolved > 0) {
-      notify(tr('product_import_resolve_first', `Resolve ${unresolved} flagged row(s) before importing.`), 'error')
+      notify(tr('product_import_resolve_first', 'Resolve {n} flagged row(s) before importing.').replace('{n}', String(unresolved)), 'error')
       return
     }
     if (!beginSingleAction(approvalRef)) return

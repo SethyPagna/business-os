@@ -88,6 +88,35 @@ Two rules learned the hard way, both from real incidents in this file's own hist
 
 ## Current status
 
+**[DONE — i18n session, Aug 31 (Part 545): translation-coverage sweep — 340
+missing pack keys added to BOTH en.json and km.json, + a verify:i18n lock.**
+User report: sections/mini-sections/folded layers/import-export text not fully
+translated. Root cause was never km values — the packs were in full parity —
+but keys referenced in components that existed in NEITHER pack, so the UI
+rendered the in-code English fallback (or, through the `t(key)||fallback`
+wrapper shape, the raw snake_case key) in BOTH languages. Swept every lookup
+shape (t/T/tr/safeT/copy/translate(t,·)/tProp) against the FLATTENED packs:
+batch 1 = 133 keys (BulkImportModal review+modes, DatedStockReconciliationModal
+wizard, ResetData finalize-migration wizard, NewReturnModal even-exchange
+mini-section, receipt-settings KHR field labels, ImportHub, product detail
+surfaces, `point_of_sale` core key); batch 2 = 197 keys (contact-import
+conflicts modal, ProductForm create-match/group-lock dialogs, both server
+import review screens, StockActionImportModal, FastStockInModal,
+Manage/ReceiveBatches, FilesPage delete flow, Users/Login/Returns/ExportModal);
+batch 3 = 10 keys (Part-544 restore-maintenance strings, added minutes after
+r2 shipped them mid-sweep). Khmer follows existing pack vocabulary. One code
+line: ProductServerImportReviewScreen's resolve-first notice now reads a
+`{n}` pack key so the count survives translation. Also fixed km
+`search_receipt_hint`'s stale "RCP-" example (Part-540 follow-through). NEW
+`ops/scripts/frontend/verify-i18n.ts` — package.json's `verify:i18n` had
+pointed at a file that never existed; it now FAILS on any referenced key
+missing from the packs, on pack drift, and on CORE_ENGLISH_PACK keys absent
+from km.json, so a future section/button can't ship untranslated silently.
+Verified: verify:i18n OK (4097 keys / 418 files), langKeyIntegrity PASS (909
+bare-t() + parity; its coverage NOTE dropped 197→0), formatters/timestampId
+green, frontend tsc clean. Lang packs + one component line only — no peer
+files touched.]**
+
 **[DONE — r2, Aug 31 (Part 544, `f6750647` + `2dd4c5af`, needs deploy +
 `migrate:remote` for **0089**): restore maintenance lock + persisted restore
 state (Part-77 CRITICAL slice C CLOSED).** A restore now runs under a
