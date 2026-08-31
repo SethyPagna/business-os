@@ -1096,8 +1096,14 @@ up should re-verify against current source first.
 - **[FK-INDEX SLICE FIXED: session b9, Aug 30 — Part 532, `9dfc7235`, migration 0086,
   needs deploy + remote migrate; the unpaged-reads/N+1, date(created_at) and
   REPLACE-chain slices STAY OPEN]** Unpaged full-catalog reads /
-  N+1 on ordinary routes (`/catalog/products` unauth ~174
-  statements, `/inventory/summary`, `/customers` no-paging 220 statements); ~~missing FK
+  N+1 on ordinary routes (~~`/catalog/products` unauth ~174 statements~~
+  **[FIXED: session 77, Aug 31 — `0efd04bc`, needs deploy]** — that route was a
+  dead, unauthenticated, ungated DUPLICATE of the gated `/portal/catalog/*`
+  storefront; nothing called it (0 imports / 0 call sites verified), so it was
+  removed entirely — route file, index.ts mount, and 3 dead frontend transports —
+  closing both the unbounded-unauth-read and the portal-gate-bypass audit findings;
+  `test-no-ungated-catalog-pure.cjs` locks it out. Still open here:
+  `/inventory/summary`, `/customers` no-paging 220 statements); ~~missing FK
   indexes~~ (0086 adds sales(customer_id, created_at), returns(sale_id),
   loyalty_point_adjustments(customer_id) — the other named candidates already had
   indexes); `date(created_at)` defeats date
