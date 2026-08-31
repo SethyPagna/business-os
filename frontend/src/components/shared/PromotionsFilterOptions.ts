@@ -60,9 +60,6 @@ export function buildPromotionsFilterSection({
     label: T('promotions', 'Promotions'),
     summary: activeOption ? activeOption.label : T('all', 'All'),
     active: Boolean(activeOption),
-    activeChips: activeOption
-      ? [{ id: activeOption.id, label: activeOption.label, onRemove: () => setPromoFilter('all') }]
-      : [],
     options,
   }
 }

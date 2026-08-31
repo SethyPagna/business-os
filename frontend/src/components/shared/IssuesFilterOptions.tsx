@@ -69,11 +69,6 @@ export function buildIssuesFilterSection({
     label: T('issues', 'Issues'),
     summary,
     active,
-    activeChips: activeKeys.map((key) => ({
-      id: key,
-      label: issueLabels[key],
-      onRemove: () => setIssueFilter(toggleMultiValue(issueFilter, key)),
-    })),
     options,
   }
 }

@@ -60,9 +60,6 @@ export function buildSearchModeFilterSection({
     // same convention every other section here uses for its own default.
     summary: searchMode,
     active: searchMode === 'OR',
-    activeChips: searchMode === 'OR'
-      ? [{ id: 'search_mode', label: T('or_filter', 'OR'), onRemove: () => setSearchMode('AND') }]
-      : [],
     render: () => <SectionOptionList options={options} />,
   }
 }

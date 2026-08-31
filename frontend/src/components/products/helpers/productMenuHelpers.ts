@@ -70,8 +70,8 @@ interface LocalFilterSection {
 // A section is either one this file builds itself (LocalFilterSection --
 // plain options list) or a pre-built one handed in from a .tsx caller (the
 // hierarchical category rows, or the merged Availability section) which
-// carries the shared FilterMenu.tsx shape (`render`, `summary`,
-// `activeChips`, etc.) -- see availabilitySection below.
+// carries the shared FilterMenu.tsx shape (`render`, `summary`, `active`,
+// etc.) -- see availabilitySection below.
 type FilterSection = LocalFilterSection | SharedFilterSection
 
 

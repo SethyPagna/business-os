@@ -586,7 +586,12 @@ assert.match(filterMenu, /import LazyPortalMenu from '\.\/LazyPortalMenu'/, 'Fil
 // LazyPortalMenu usage = the top-level menu itself.
 assert.strictEqual((filterMenu.match(/<LazyPortalMenu/g) || []).length, 1, 'FilterMenu must have exactly one popover layer — sections expand inline (accordion), never as a second floating menu')
 assert.match(filterMenu, /openSectionId/, 'FilterMenu sections should expand inline via accordion state')
-assert.match(filterMenu, /ActiveFilterChips/, 'FilterMenu should surface active picks as chips outside the menu')
+// Chosen filters show only INSIDE the menu now (each section's collapsed
+// summary + the trigger's active count). The removable "active pick" chips
+// that used to render OUTSIDE the trigger, in the toolbar row beside the
+// search box, were removed (user, Aug 31 2026) so nothing spills out next to
+// the Filters button.
+assert.doesNotMatch(filterMenu, /ActiveFilterChips/, 'FilterMenu must not surface active picks as chips outside the menu — chosen filters live inside the menu only')
 assert.match(filterMenu, /if \(label\.toLowerCase\(\) === 'back'\) return fallback/, 'FilterMenu should replace accidental Back labels with section-specific labels')
 assert.match(appSelect, /data-app-select-button="true"/, 'AppSelect should expose a stable rounded trigger hook for live visual checks')
 assert.match(appSelect, /data-app-select-selected="true"/, 'AppSelect should expose the selected value for live visual checks')

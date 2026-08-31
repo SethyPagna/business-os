@@ -83,22 +83,12 @@ export function buildAvailabilityFilterSection({
   ].filter((label): label is string => typeof label === 'string')
   const availabilitySummary = activeLabels.length ? activeLabels.join(' \u00b7 ') : T('all', 'All')
   const availabilityActive = stockFilter !== 'all' || normalizedGroupFilter !== 'all' || branchFilter !== 'all'
-  // Feeds the top-of-panel removable chip row (see FilterMenu.tsx's
-  // SelectedFilterChips) -- this section uses a custom `render`, so unlike
-  // a plain options list its active picks aren't auto-derivable and have to
-  // be supplied explicitly.
-  const availabilityChips = [
-    stockFilter !== 'all' ? { id: 'stock', label: stockOptions.find((o) => o.active && o.id !== 'all')?.label, onRemove: () => setStockFilter('all') } : null,
-    normalizedGroupFilter !== 'all' ? { id: 'group', label: groupOptions.find((o) => o.active && o.id !== 'all')?.label, onRemove: () => setGroupFilter?.('all') } : null,
-    branchFilter !== 'all' ? { id: 'branch', label: branchOptions.find((o) => o.active && o.id !== 'all')?.label, onRemove: () => setBranchFilter('all') } : null,
-  ].filter((chip): chip is { id: string; label: string; onRemove: () => void } => !!chip && typeof chip.label === 'string')
 
   return {
     id: 'availability',
     label: T('availability', 'Availability'),
     summary: availabilitySummary,
     active: availabilityActive,
-    activeChips: availabilityChips,
     render: () => (
       // Capped and independently scrolled (rather than trusting the
       // popover's own cap alone) so on a short/tablet screen the combined

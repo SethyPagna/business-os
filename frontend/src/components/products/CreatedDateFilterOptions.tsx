@@ -52,14 +52,6 @@ export function buildCreatedDateFilterSection({
     label: T('created', 'Created'),
     summary,
     active,
-    activeChips: active ? [{
-      id: 'created',
-      label: summary,
-      onRemove: () => {
-        setCreatedDateFrom('')
-        setCreatedDateTo('')
-      },
-    }] : [],
     render: () => (
       <div className="space-y-2 p-2">
         <div>

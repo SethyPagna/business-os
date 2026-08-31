@@ -35,13 +35,6 @@ export type FilterSection = {
   // own summary text and active flag here instead.
   summary?: ReactNode
   active?: boolean
-  // For custom `render` sections only: same reason as `summary` above --
-  // a render section's active picks aren't a plain FilterOption[], so they
-  // can't be auto-derived for the top-of-panel chip row (see
-  // SelectedFilterChips below). Supply the currently-active picks here as
-  // removable chips if the section should participate in that row; a
-  // render section that omits this just won't contribute any chips.
-  activeChips?: Array<{ id: string | number; label: ReactNode; onRemove: () => void }>
 }
 
 // Below this option count a search box adds friction rather than removing
@@ -67,10 +60,6 @@ type FilterMenuProps = {
   // to stay both label-first and easy to tap at any breakpoint.
   large?: boolean
   onOpenChange?: ((open: boolean) => void) | null
-  // Renders the active picks as removable chips right after the trigger in
-  // the toolbar row (default on). A call site whose layout can't host inline
-  // chips can opt out; the panel's section summaries still show everything.
-  showActiveChips?: boolean
 }
 
 const SECTION_LABEL_FALLBACKS: Record<string, string> = {
@@ -248,86 +237,6 @@ export function SectionOptionList({
   )
 }
 
-// Selected picks shown as removable chips at the top of the panel, outside
-// (above) every individual section's own flyout -- same pattern as the
-// public catalog's PortalFilterCombobox, which always shows its picks as
-// x-able chips under the trigger without needing to open the dropdown.
-// The admin FilterMenu used to only ever show what's selected once you
-// opened a given section's flyout; this surfaces everything active, across
-// every section, in one glance right under the "Filters" header.
-function collectSectionChips(section: FilterSection): Array<{ key: string; label: ReactNode; onRemove: () => void }> {
-  if (section.render) {
-    return (section.activeChips || []).map((chip) => ({
-      key: `${section.id}-${chip.id}`,
-      label: chip.label,
-      onRemove: chip.onRemove,
-    }))
-  }
-  const options = (section.options || []).filter(Boolean) as FilterOption[]
-  // First entry in a plain options list is always the "All" pseudo-option
-  // (see summarizeOptions/SectionOptionList) -- never a real pick, so it's
-  // excluded the same way SectionOptionList excludes it from its own list.
-  const [, ...restOptions] = options
-  return restOptions
-    .filter((option) => option.active && option.onClick)
-    // A hierarchical category group's parent row (id `catgroup-*`, see
-    // CategoryFilterOptions.tsx) shows itself as active as soon as ANY of
-    // its children is picked -- that's deliberate for the checkbox itself
-    // (so the parent visibly reflects a partial selection), but it isn't a
-    // distinct selected value and shouldn't also get its own chip here:
-    // picking 3 "Haircare - X" children should show 3 chips, not those 3
-    // plus a 4th "Haircare" chip for the parent.
-    .filter((option) => !String(option.id).startsWith('catgroup-'))
-    .map((option) => ({
-      key: `${section.id}-${option.id}`,
-      label: option.title && typeof option.label !== 'string' ? option.title : option.label,
-      onRemove: () => option.onClick?.(),
-    }))
-}
-
-// Active picks as removable chips rendered OUTSIDE the menu, as siblings of
-// the trigger in the toolbar row (they flow/wrap with it) -- so what's
-// filtered is visible at a glance without opening anything, matching the
-// SortChip principle of never hiding active state. Capped: past
-// MAX_VISIBLE_CHIPS the rest collapse into one "+n" chip (the panel still
-// shows everything via its section summaries).
-const MAX_VISIBLE_CHIPS = 4
-
-function ActiveFilterChips({ sections }: { sections: FilterSection[] }) {
-  const chips = useMemo(
-    () => sections.flatMap((section) => collectSectionChips(section)),
-    [sections],
-  )
-  if (!chips.length) return null
-  const visible = chips.slice(0, MAX_VISIBLE_CHIPS)
-  const hidden = chips.length - visible.length
-  return (
-    <>
-      {visible.map((chip) => (
-        <span
-          key={chip.key}
-          className="inline-flex max-w-[11rem] items-center gap-1 rounded-full border border-primary-200 bg-primary-50 py-1 pl-2.5 pr-1.5 text-[11px] font-semibold text-primary-800 dark:border-primary-700/60 dark:bg-primary-900/30 dark:text-primary-300"
-        >
-          <span className="min-w-0 truncate">{chip.label}</span>
-          <button
-            type="button"
-            onClick={chip.onRemove}
-            className="inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-primary-500 transition hover:bg-primary-100 hover:text-primary-800 dark:hover:bg-primary-800/50 dark:hover:text-primary-100"
-            aria-label="Remove filter"
-          >
-            <X className="h-3 w-3" />
-          </button>
-        </span>
-      ))}
-      {hidden > 0 ? (
-        <span className="inline-flex items-center rounded-full bg-slate-100 px-2 py-1 text-[11px] font-semibold text-slate-600 dark:bg-slate-800 dark:text-slate-300">
-          +{hidden}
-        </span>
-      ) : null}
-    </>
-  )
-}
-
 // Redesign (Aug 30 2026): each section is an ACCORDION row inside the one
 // panel -- tap the header, its options expand inline right below it; tap
 // another header, it swaps. The previous design floated a SECOND popover
@@ -473,16 +382,17 @@ export default function FilterMenu({
   iconOnly = false,
   large = false,
   onOpenChange = null,
-  showActiveChips = true,
 }: FilterMenuProps) {
   const hasActions = typeof onClear === 'function'
   const triggerLabel = activeCount > 0 ? `${label} (${activeCount})` : label
 
+  // Active picks show only INSIDE the menu now -- each section's collapsed row
+  // carries its own summary ("2 selected", a date range, "OR", etc.) and the
+  // trigger shows the total count. The active picks used to ALSO render as
+  // removable chips outside the trigger, in the toolbar row next to the search
+  // box; that was removed (user, Aug 31 2026) so the row stays just Search +
+  // the Filters button and nothing spills out beside it.
   return (
-    // Fragment on purpose: the chips render as SIBLINGS of the trigger, so in
-    // the usual flex-wrap toolbar row they flow right after the Filters button
-    // and wrap naturally -- active state visible without opening the menu.
-    <>
     <LazyPortalMenu
       align="auto"
       menuClassName="w-[min(22rem,calc(100vw-1rem))] max-w-[calc(100vw-1rem)] overflow-hidden rounded-[1.35rem] border border-slate-200 bg-white p-0 shadow-xl shadow-slate-900/10 dark:border-slate-700 dark:bg-slate-900 dark:shadow-black/30"
@@ -542,7 +452,5 @@ export default function FilterMenu({
         />
       )}
     />
-    {showActiveChips ? <ActiveFilterChips sections={sections.filter(Boolean) as FilterSection[]} /> : null}
-    </>
   )
 }

@@ -34,11 +34,6 @@ export function buildAutoMergedFilterSection({
     label: T('auto_merged', 'Auto-merged'),
     summary: active ? activeLabel : T('all', 'All'),
     active,
-    activeChips: active ? [{
-      id: 'auto_merged',
-      label: activeLabel,
-      onRemove: () => setMergedFilter('all'),
-    }] : [],
     render: () => (
       <div className="space-y-1 p-2">
         <p className="px-1 text-[11px] text-gray-400 dark:text-gray-500">
