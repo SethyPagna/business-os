@@ -1402,6 +1402,185 @@ app.get('/suppliers/reports/ap-invoices', async (c) => {
   })
 })
 
+// ---- Sale-link conflicts (the Conflicts tab's fourth section) ----------
+// Two data-quality issues the migration audit surfaced, computed live so
+// new occurrences keep appearing: (1) sales linked to a customer whose
+// phone differs from the phone printed on the sale (the old system's
+// name-links could attach the wrong person), and (2) sales carrying a
+// customer name/phone that matches no contact record at all. Rows are
+// grouped, and a group stays hidden once dismissed (reusing the 0034
+// dismissal ledger with its own cluster types, so a dismissal survives
+// devices exactly like duplicate dismissals do).
+//
+// Phone comparison is zero-stripped digits ('70856070' == '070856070') --
+// the same rule the legacy importer now applies (Part 551).
+const PHONE_KEY_SQL = (column: string): string =>
+  `ltrim(replace(replace(replace(replace(trim(COALESCE(${column},'')),' ',''),'-',''),'(',''),')',''),'0')`
+
+app.get('/customers/link-conflicts', async (c) => {
+  const db = getDb(c.env)
+  const salePhone = PHONE_KEY_SQL('s.customer_phone')
+  const custPhone = PHONE_KEY_SQL('c.phone')
+  const anyCustPhone = PHONE_KEY_SQL('c2.phone')
+
+  type MismatchRow = {
+    customer_id: number; customer_name: string | null; customer_phone: string | null
+    sale_phone: string; phone_key: string; sale_name: string | null
+    sale_count: number; first_at: string; last_at: string; total_usd: number
+    phone_owner_count: number; suggested_id: number | null; suggested_name: string | null; suggested_phone: string | null
+  }
+  const mismatches = await db.prepare(`
+    SELECT g.*,
+      (SELECT COUNT(*) FROM customers c2 WHERE ${anyCustPhone} = g.phone_key) AS phone_owner_count,
+      (SELECT c2.id FROM customers c2 WHERE ${anyCustPhone} = g.phone_key LIMIT 1) AS suggested_id,
+      (SELECT c2.name FROM customers c2 WHERE ${anyCustPhone} = g.phone_key LIMIT 1) AS suggested_name,
+      (SELECT c2.phone FROM customers c2 WHERE ${anyCustPhone} = g.phone_key LIMIT 1) AS suggested_phone
+    FROM (
+      SELECT s.customer_id, c.name AS customer_name, c.phone AS customer_phone,
+             MAX(trim(s.customer_phone)) AS sale_phone, ${salePhone} AS phone_key,
+             MAX(trim(COALESCE(s.customer_name,''))) AS sale_name,
+             COUNT(*) AS sale_count, MIN(s.created_at) AS first_at, MAX(s.created_at) AS last_at,
+             ROUND(COALESCE(SUM(s.total_usd),0),2) AS total_usd
+      FROM sales s JOIN customers c ON c.id = s.customer_id
+      WHERE ${salePhone} <> '' AND ${salePhone} <> ${custPhone}
+      GROUP BY s.customer_id, ${salePhone}
+    ) g
+    WHERE NOT EXISTS (
+      SELECT 1 FROM contact_duplicate_dismissals d
+      WHERE d.contact_table = 'customers' AND d.cluster_type = 'link_mismatch'
+        AND d.cluster_value = g.customer_id || '|' || g.phone_key
+    )
+    ORDER BY g.last_at DESC
+    LIMIT 200
+  `).all<MismatchRow>({})
+
+  type MissingRow = {
+    name: string; phone: string; phone_key: string
+    sale_count: number; first_at: string; last_at: string; total_usd: number
+    phone_owner_count: number; suggested_id: number | null; suggested_name: string | null; suggested_phone: string | null
+  }
+  const missing = await db.prepare(`
+    SELECT g.*,
+      (SELECT COUNT(*) FROM customers c2 WHERE g.phone_key <> '' AND ${anyCustPhone} = g.phone_key) AS phone_owner_count,
+      (SELECT c2.id FROM customers c2 WHERE g.phone_key <> '' AND ${anyCustPhone} = g.phone_key LIMIT 1) AS suggested_id,
+      (SELECT c2.name FROM customers c2 WHERE g.phone_key <> '' AND ${anyCustPhone} = g.phone_key LIMIT 1) AS suggested_name,
+      (SELECT c2.phone FROM customers c2 WHERE g.phone_key <> '' AND ${anyCustPhone} = g.phone_key LIMIT 1) AS suggested_phone
+    FROM (
+      SELECT MAX(trim(COALESCE(s.customer_name,''))) AS name,
+             MAX(trim(COALESCE(s.customer_phone,''))) AS phone,
+             ${salePhone} AS phone_key,
+             COUNT(*) AS sale_count, MIN(s.created_at) AS first_at, MAX(s.created_at) AS last_at,
+             ROUND(COALESCE(SUM(s.total_usd),0),2) AS total_usd
+      FROM sales s
+      WHERE s.customer_id IS NULL
+        AND (trim(COALESCE(s.customer_name,'')) <> '' OR trim(COALESCE(s.customer_phone,'')) <> '')
+      GROUP BY lower(trim(COALESCE(s.customer_name,''))), ${salePhone}
+    ) g
+    WHERE NOT EXISTS (
+      SELECT 1 FROM contact_duplicate_dismissals d
+      WHERE d.contact_table = 'customers' AND d.cluster_type = 'link_missing'
+        AND d.cluster_value = lower(g.name) || '|' || g.phone_key
+    )
+    ORDER BY g.sale_count DESC, g.last_at DESC
+    LIMIT 200
+  `).all<MissingRow>({})
+
+  return c.json({ mismatches, missing })
+})
+
+// Repoint a mismatch group's sales at another customer (typically the one
+// that actually owns the sales' phone number). Full Access only -- this
+// rewrites sale history links, the same class of write as a merge.
+app.post('/customers/link-conflicts/relink', async (c) => {
+  const user = c.get('user')
+  if (getPermissionTier(user, 'contacts') !== 'full') {
+    return c.json({ error: 'Relinking sales requires Full Access to Contacts.' }, 403)
+  }
+  const body = (await c.req.json<Record<string, unknown>>().catch(() => ({}))) as Record<string, unknown>
+  const currentId = Number(body.customer_id)
+  const phoneKey = String(body.phone_key || '').trim()
+  const targetId = Number(body.target_customer_id)
+  if (!Number.isFinite(currentId) || !Number.isFinite(targetId) || !phoneKey || currentId === targetId) {
+    return c.json({ error: 'customer_id, phone_key and a different target_customer_id are required' }, 400)
+  }
+  const db = getDb(c.env)
+  const target = await db.prepare('SELECT id, name FROM customers WHERE id = ?').get<{ id: number; name: string | null }>([targetId])
+  if (!target) return c.json({ error: 'Target customer not found.' }, 404)
+  const result = await db.prepare(`
+    UPDATE sales SET customer_id = @targetId, updated_at = CURRENT_TIMESTAMP
+    WHERE customer_id = @currentId AND ${PHONE_KEY_SQL('customer_phone')} = @phoneKey
+  `).run({ targetId, currentId, phoneKey })
+  const changed = Number((result as { meta?: { changes?: number } })?.meta?.changes ?? (result as { changes?: number })?.changes ?? 0)
+  await audit(c.env, user?.id ?? null, user?.name ?? null, 'relink_sales', 'customer', targetId, {
+    fromCustomerId: currentId, phoneKey, salesRelinked: changed,
+  })
+  c.executionCtx.waitUntil(broadcast(c.env, 'customers', { action: 'relink', id: targetId }))
+  return c.json({ ok: true, relinked: changed, target })
+})
+
+// Resolve a missing-contact group: link its sales to an existing customer,
+// or create a new contact from the sale's own name/phone and link to that.
+app.post('/customers/link-conflicts/resolve-missing', async (c) => {
+  const user = c.get('user')
+  if (getPermissionTier(user, 'contacts') !== 'full') {
+    return c.json({ error: 'Creating or linking contacts requires Full Access to Contacts.' }, 403)
+  }
+  const body = (await c.req.json<Record<string, unknown>>().catch(() => ({}))) as Record<string, unknown>
+  const name = String(body.name || '').trim()
+  const phone = String(body.phone || '').trim()
+  const phoneKey = String(body.phone_key || '').trim()
+  const requestedTarget = Number(body.target_customer_id)
+  if (!name && !phone) return c.json({ error: 'The group’s name or phone is required' }, 400)
+  const db = getDb(c.env)
+
+  let targetId: number
+  let created = false
+  if (Number.isFinite(requestedTarget) && requestedTarget > 0) {
+    const target = await db.prepare('SELECT id FROM customers WHERE id = ?').get<{ id: number }>([requestedTarget])
+    if (!target) return c.json({ error: 'Target customer not found.' }, 404)
+    targetId = target.id
+  } else {
+    const membership = await generateMembershipNumber(c.env)
+    const inserted = await db.prepare(`
+      INSERT INTO customers (name, phone, phone_normalized, membership_number, created_at, updated_at)
+      VALUES (@name, @phone, @phoneNormalized, @membership, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+    `).run({ name: name || phone, phone: phone || null, phoneNormalized: canonicalizePhone(phone), membership })
+    targetId = Number((inserted as { lastInsertRowid?: number | bigint }).lastInsertRowid ?? (inserted as { meta?: { last_row_id?: number } })?.meta?.last_row_id)
+    created = true
+  }
+
+  const result = await db.prepare(`
+    UPDATE sales SET customer_id = @targetId, updated_at = CURRENT_TIMESTAMP
+    WHERE customer_id IS NULL
+      AND lower(trim(COALESCE(customer_name,''))) = lower(@name)
+      AND ${PHONE_KEY_SQL('customer_phone')} = @phoneKey
+  `).run({ targetId, name, phoneKey })
+  const changed = Number((result as { meta?: { changes?: number } })?.meta?.changes ?? (result as { changes?: number })?.changes ?? 0)
+  await audit(c.env, user?.id ?? null, user?.name ?? null, created ? 'create_and_link_sales' : 'link_sales', 'customer', targetId, {
+    name, phone, salesLinked: changed, createdContact: created,
+  })
+  c.executionCtx.waitUntil(broadcast(c.env, 'customers', { action: created ? 'create' : 'update', id: targetId }))
+  return c.json({ ok: true, customer_id: targetId, created, linked: changed })
+})
+
+// Keep-as-is / ignore for one conflict group -- persisted through the 0034
+// dismissal ledger under this feature's own cluster types.
+app.post('/customers/link-conflicts/dismiss', async (c) => {
+  const user = c.get('user')
+  const body = (await c.req.json<Record<string, unknown>>().catch(() => ({}))) as Record<string, unknown>
+  const kind = body.kind === 'mismatch' ? 'link_mismatch' : body.kind === 'missing' ? 'link_missing' : null
+  const value = String(body.value || '').trim()
+  if (!kind || !value) return c.json({ error: 'kind ("mismatch" or "missing") and value are required' }, 400)
+  const db = getDb(c.env)
+  await db.prepare(`
+    INSERT INTO contact_duplicate_dismissals (contact_table, cluster_type, cluster_value, dismissed_by_id, dismissed_by_name, dismissed_at)
+    VALUES ('customers', @kind, @value, @byId, @byName, CURRENT_TIMESTAMP)
+    ON CONFLICT(contact_table, cluster_type, cluster_value) DO UPDATE SET
+      dismissed_by_id = @byId, dismissed_by_name = @byName, dismissed_at = CURRENT_TIMESTAMP
+  `).run({ kind, value, byId: user?.id ?? null, byName: user?.name ?? null })
+  return c.json({ ok: true })
+})
+
 // Administrator-only manual point awards. A ledger event is created instead
 // of mutating a balance column, preserving the same calculable/auditable
 // model used for sales, returns, and approved share rewards.
