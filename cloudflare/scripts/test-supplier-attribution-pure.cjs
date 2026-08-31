@@ -118,6 +118,9 @@ const inventoryRoute = loadReal('routes/inventory.ts', {
   '../lib/datedStockCountApply': { applyDatedStockCountPlan: async () => ({}) },
   '../lib/datedStockCountResolve': { parseRawDatedCountRows: () => [], resolveDatedStockCountRows: async () => [] },
   '../lib/datedStockCountDecisions': { applyDatedStockCountDecisions: async () => ({}) },
+  // Part 553 added the movement-revert path to inventory.ts; these tests do not
+  // exercise revert, so an empty stub is honest (type import is compile-erased).
+  '../lib/stockRevert': { applyMovementRevert: async () => ({}) },
 })
 const app = inventoryRoute.default
 
