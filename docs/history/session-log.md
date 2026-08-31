@@ -16687,3 +16687,188 @@ touched); notification product anchors (`#product-<id>`, pageId
 list — clicking one lands on Stats & Branches; repointing
 routes/notifications.ts at the Products page with a matching hash consumer
 is a small open item.
+
+## Part 563 (addendum) — Confirm-dialog rollout, slices 2–4
+
+Continuation of the Part-563 "confirm / double-check before committing" work
+(after the user said "keep going what can be done"). Four more commits:
+`7ea96da9`, `d8547648`, `97566c6a` (slice 1 was `c1097e82`).
+
+**Ask.** "keep going what can be done" — extend the shared ConfirmDialog to the
+remaining safely-reachable mutating-save surfaces (avoiding files dirty in peer
+lanes).
+
+**What changed.**
+- Slice 2 (`7ea96da9`): Bulk stock-in (BulkAddStockModal) + per-branch adjuster
+  (BranchStockAdjuster). Each handleSave now validates → opens ConfirmDialog; a
+  new commitX runs the per-product / per-row adjustStock loop on confirm.
+- Slice 3 (`d8547648`): Contacts create/edit — CustomerFormModal, SuppliersTab's
+  SupplierForm, DeliveryTab's DeliveryForm. Each exact-duplicate window.confirm()
+  is folded INTO the dialog as a red danger note (three native popups retired).
+- Slice 4 (`97566c6a`): Users create/edit — Users.tsx handleSaveUser splits into
+  validate→confirm and commitSaveUser (which keeps the undo/redo action-history
+  pin). A useEffect clears the confirm flag when the editUser modal isn't open.
+
+**What was found.** FastStockInModal is the wrong shape for a review dialog — it
+commits per line by design (the "fast" rapid-entry path), so it was deliberately
+left un-wired. The canonical Branches adjust routes through Inventory.tsx (dirty
+in a peer lane) → shared InventoryStockModals; deferred (tracked as a follow-up
+chip) — the DRY fix is to put the confirm in InventoryStockModals and drop the
+StockAdjustModal-level one to avoid a double-confirm. One real bug caught and
+fixed in-session: the Users reset effect first compared modal to 'user' but the
+UsersModal union uses 'editUser' (tsc TS2367) — corrected before commit.
+
+**Verified.** Per slice: `node tests/sourceSyntaxCheck.ts` + `npx tsc --noEmit`
+clean for the changed files (0 total errors after the editUser fix) + `npx vite
+build` exit 0 (BulkAddStockModal, ProductForm, CustomerFormModal, SuppliersTab,
+DeliveryTab, Users chunks bundle). Zero new i18n keys across all slices. NOT
+verified: live authenticated click-through (same environment constraints as the
+main Part-563 entry).
+
+**Not done.** The per-section sweep continues: canonical Branches adjust
+(InventoryStockModals, when Inventory.tsx settles), Sales/Returns/Fees/Promotions
+(dirty in peer lanes), Settings save, imports, POS sale (speed-sensitive — decide
+with user). Backup reset is already tier-confirmed. progress.md + session-log not
+committed (shared).
+
+### Part 562 addendum 2 — wholesale (បោះដុំ) price tier (same lane, uncommitted log per shared-file mode)
+
+**Ask.** User: add a wholesale price. Fleshed out mid-turn — products page shows
+it only in click-to-view detail; editable in the form's pricing section; a
+"wholesale only > N" NOTE (not automation) with a default-off automation
+toggle; "update permissions for image upload only". Sequenced after the cart
+work; "continue … keep it compact for receipt."
+
+**What shipped (3 commits).** A fourth price tier alongside selling/VIP/cost.
+- `46217e43` backend/perms: migration 0093 adds wholesale_price_usd/khr
+  (DEFAULT 0), APPLIED to local D1 and verified queryable. products.ts SELECTs
+  (list + detail/bootstrap) carry it → Products page, detail modal, POS
+  catalog; write path unchanged (cleanPayload writes any body key matching a
+  real column); portal SELECTs still exclude it. New independent
+  products_image_only_show_wholesale grant end-to-end (field map, editor
+  definition + alsoClearsKeys, Product Viewer preset, both packs, field-map
+  test) — this is the "image upload only" permission the user flagged;
+  ProductsImageOnlyView shows wholesale in the DETAIL panel only.
+- `1a921e88` form/detail: indigo Wholesale DualPriceInput in the form pricing
+  section (state/defaults/initial/save wired); Products detail modal shows a
+  Wholesale row (detail only, not the list).
+- `c766c47e` POS: posCore resolveCartPriceValues 'wholesale' branch (+unit
+  test) mirroring 'special'; price_mode union + computeCartLineSavings extended;
+  ProductDetailSheet Wholesale add button (flat + grouped) + info row, VIP
+  info-row label trimmed to "VIP"; CartItem tier chip generalised to VIP +
+  Wholesale (onToggleTierTag(lineId, tier)); POS toggleTierTag(tier) flips
+  price_mode↔selling without touching price. Receipt already prints the
+  Wholesale/បោះដុំ tag from price_mode (cart/receipt slice).
+- Also `4c5aa535`: receipt tier tag moved inline beside the item name (compact,
+  user).
+
+**Decisions.** Wholesale cart chip is a MARKER (price never changes), same as
+VIP — only one tier marks a line at a time (price_mode is one value). Wholesale
+add button shows its price directly (no VIP-style two-tap reveal) — reveal was a
+VIP-specific ask. No migration was needed for the receipt tag (price_mode
+round-trips already).
+
+**Verified.** migration applied + `SELECT wholesale_price_usd,khr` returns 0/0;
+cloudflare + frontend typecheck (sole error is another session's Users.tsx
+UsersModal refactor, unrelated); posCore (incl. new wholesale case),
+check:source, langKeyIntegrity, permission, and image-only field-map tests all
+green. No live POS screenshot — needs an authed seeded POS session I can't
+reach; local D1 now has the columns so the app won't error.
+
+**Not done.** The "wholesale only > N" note + default-off auto-apply toggle
+(ambiguous data model — free-text note vs. structured min-qty + wholesale_auto;
+needs the user's call + a 2nd migration). Peripheral wholesale wiring: CSV
+import mapping, inventory clone, explicit-column backup — additive,
+non-breaking, tracked in progress.md.
+
+## Part 570 (Aug 31 2026, parallel session) — Stats detail float: one row per breakdown item + reveal-on-clip tooltip
+
+The stat-card breakdown float (the Modal opened by tapping a card in the shared
+`StatsStrip`) used to lay its detail rows out in a cramped `grid-cols-2
+sm:grid-cols-3` grid, so in the `size="sm"` modal two-to-three label:value pairs
+shared each line and long labels (Store discount, Member discount, payment-method
+names) truncated to "…" with no way to read the full text. Per the user ("each
+stats instead of a two columns can do a one row … and for the details if it is
+too long and used '…' then when click or hover it should show info"):
+
+- The float now renders **one detail per full-width row** (`flex flex-col`), label
+  left / value right, so each item has the whole modal width and most labels stop
+  clipping outright.
+- New shared `TruncatedText.tsx` wraps the label: a one-line truncating span that,
+  **only when the text is actually clipped**, becomes interactive and reveals the
+  full value in a portalled tooltip on hover AND click/tap (the same dual-path,
+  Escape/outside-tap-to-close behaviour as `InfoHint`, since hover alone is dead on
+  touch). Overflow is detected on mount (`useLayoutEffect`) and on element resize
+  (`ResizeObserver`); when the text fits it renders as a plain span with no cursor
+  or affordance, so unclipped rows are untouched.
+
+Only `StatsStrip.tsx` (the detail-float block) changed plus the new component;
+`typecheck` clean, `statsStrip.test.ts` relevant cases green (the one failing case
+is another lane's unrelated Part-560 `Inventory.tsx` range-migration assertion).
+Verified live: float shows one row per item; a forced clip flips the label to
+cursor-help + `tabindex=0` and a hover renders the tooltip with the full label.
+
+## Part 571 — Khmer row compaction + Aug-31/AR migration (prepared, gated)
+
+**Ask** — Two things in one message: (1) "khmer versions are not compact
+enough...sales page etc... the rows"; (2) fold the Aug-31 import files + the new
+"AR report all time" into the migration folder, "make sure you don't lose any
+details ... 100% clear and correct. do deep go deep ... not wrong, not hidden,
+broken." Picked a disjoint lane (main.css + ops/scripts/migration + a new
+migration) — none of the hot Sales/Contacts/Products frontend lanes.
+
+**What changed**
+- `frontend/src/styles/main.css` — the whole-app Khmer UI (`body.lang-km`) set
+  line boxes loose (base 1.82; `.text-xs/sm/base/lg` 1.68/1.72/1.80/1.72) which
+  inflated every row's height. Tightened those to 1.45–1.52 (base 1.5), leaving
+  font-SIZES and the Aug-29 legibility floors alone. Rows drop ~9%; glyphs are
+  unchanged. (Committed 76b3c9fd.)
+- `cloudflare/migrations/0094_legacy_customer_receivables.sql` — new AR ledger
+  table mirroring `supplier_invoices` (0088).
+- `ops/scripts/migration/import-aug31-legacy-reports.mjs` — generates SQL for the
+  14 new Aug-31 sales (4377–4390), 2 Aug-31 expenses, and the 13,243-row all-time
+  customer AR ledger. Default = read-only audit + local SQL; `--apply` gated.
+- `ops/scripts/migration/AUG31-AR-RECONCILIATION.md` — full write-up.
+- Archived the 31st + AR source reports into `Downloads/27th-30th/`; added an
+  "Incremental extensions" pointer to `Downloads/businessos-migration-aug28/IMPORT-MANIFEST.md`.
+  (Migration bits committed 6f5d76dd.)
+
+**What was found**
+- The applied Aug-30 import books every legacy sale FULLY PAID (`amount_paid =
+  grand total`, credit only in `notes`). Customer **receivables** had no home,
+  so real outstanding balances were being dropped: **61 unpaid invoices
+  ($7,397.10)** + **367 overpaid (−$98,742.52)**, net **−$91,345.42**. The AR
+  report is exactly that missing ledger.
+- Aug-31 sales (invoices 4377–4390) were never imported (applied max = 4376).
+  Live check: **0 sales exist on 2026-08-31** → no double-count risk.
+- The AR report and `report-invoice-detail-31st` corroborate each other exactly
+  (same 14 Aug-31 invoices, same $547.50, per-invoice credit === outstanding).
+  The item report's "33 items" = 24 product units + 9 delivery lines. The two AR
+  exports carry identical invoice data (row diff = 0); the plain one is redundant.
+- Bug found + fixed while dry-running: a per-line `NOT EXISTS` guard on the
+  sale_items insert silently dropped the 2nd+ line of every multi-line sale
+  (14 rows instead of 20). Fixed to insert all of a sale's lines in one statement.
+
+**Verified**
+- Khmer: real CSS cascade at localhost:5188 → `.text-xs` line-height 1.45 (was
+  1.68), `.text-sm` 1.48; injected Khmer rows (coeng ្ក ្រ ្ច ្ជ ្ត) render with
+  no clipping.
+- Every source total hard-gated in the generator (14 sales · 4377–4390 · 24 units
+  · $530 goods · $17.5 delivery · $147 credit · 2 expenses / 17,200 KHR · 13,243
+  AR rows · $1,730,636.803 / $1,821,982.2188 / −$91,345.4158).
+- AR ledger dry-run in local SQLite, applied TWICE → 13,243 rows, totals match to
+  4 dp, idempotent.
+- Sales+expense dry-run in local SQLite with the real 0088 trigger, applied TWICE
+  → 14 sales / 20 items / 24 units / 20 effects (−24) / 20 movements / stock −24 /
+  2 fees; identical on rerun (idempotent). SQL integrity: valid ISO dates,
+  balanced quotes, 852 Khmer names + 25 apostrophes escaped.
+- All D1 access this session was read-only (`rows_written: 0`).
+
+**Not done**
+- **NOT applied to remote D1** — deliberate, user-gated. Apply path is in the
+  reconciliation doc (`d1 migrations apply` then the script with `--apply`).
+- Historical `sale.amount_paid` NOT retro-fitted from AR (out of scope; would
+  diverge from the applied 4351–4376 cohort). `customer_receivables` has no admin
+  UI yet (a customer-AR section mirroring supplier `ApInvoicesSection` is the
+  natural follow-up). Khmer end-to-end on the live Sales page in km left for the
+  user to eyeball (mechanism proven).

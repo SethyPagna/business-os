@@ -88,6 +88,100 @@ Two rules learned the hard way, both from real incidents in this file's own hist
 
 ## Current status
 
+**→ MIGRATION-AUG31-AR + KHMER-COMPACT LANE (Aug 31, Part 571 grep-max+1; number races expected): DONE — (A) Khmer compaction shipped & verified; (B) Aug-31 + AR migration PREPARED + VERIFIED, deliberately NOT applied to remote D1 (gated, needs user go-ahead). See session-log Part 571 + `ops/scripts/migration/AUG31-AR-RECONCILIATION.md`.**
+Two disjoint asks from the user in one message. (A) **Khmer not compact enough** ("sales page
+etc... the rows"): the `body.lang-km` blocks in `frontend/src/styles/main.css` inflate BOTH
+line-height (1.68/1.72/1.80) and font-size (.text-xs→0.79rem etc.) app-wide, so every row is
+taller in Khmer. Fix = tighten the km line-heights toward the Latin baseline (keep font-sizes/
+legibility — the user's Z7/Aug-29 legibility floors stay) so rows compact. ONE shared CSS file,
+uncontested by every active frontend lane. (B) **Migration update + deep verify**: user added
+Aug-31 day reports + `account-receivable-report all time.xls` (customer AR, 13,244 invoices)
+and wants the migration folder rolled forward to the 31st with "no details lost, 100% correct,
+nothing hidden/broken". Found: the applied Aug-30 import books every legacy sale as FULLY PAID
+(`amountPaid = Grand Total`), keeping credit only as a free-text note — so customer outstanding
+balances are lost today. Plan (additive, does NOT disturb the already-applied 0088–0092 / aug30
+script): a NEW `ops/scripts/migration/import-aug31-legacy-reports.mjs` for the incremental Aug-31
+day + a NEW `cloudflare/migrations/00NN_legacy_customer_receivables.sql` ledger that stores the
+AR report faithfully (mirrors 0088 supplier_invoices; AR rows must NOT rewrite sale payments).
+Archive the 31st files into `Downloads/businessos-migration-aug28` + `Downloads/27th-30th`.
+**Prepare + deep-verify only this session — NO writes to remote D1** (apply is user-gated per
+project_deploy; also must be reviewed first because native Aug-31 POS sales may already exist →
+double-count risk). Files (path-scoped, DISJOINT from all lanes): `frontend/src/styles/main.css`,
+`ops/scripts/migration/**`, `cloudflare/migrations/00NN_legacy_customer_receivables.sql`.
+
+**→ STOCK-CHANGES-HEADER-CONSOLIDATE LANE (Aug 31, Part 569 grep-max+1; number races expected): CLAIMED / in progress.**
+User batch on the Products page → Stock Changes section (from an annotated screenshot):
+(1) the page's info toolkit (`shared/ButtonGuidePopover.tsx`, the "?"/ⓘ that explains every
+header button) is too long — make it more compact so the panel is shorter; (2) the section's
+"Adjust" button must move UP onto the header row beside the info/History/Manage buttons
+(currently it sits in the section body's first row); (3) the loose export affordance in the
+section (the `↓ <total> ⓘ` span) is redundant with Manage → Export — remove that whole span
+and FOLD the ledger CSV export into the header's Manage → Export (context-aware on this
+section). Approach: an imperative-handle bridge — `StockChangeSection` registers
+`{ canAdjust, openAdjust, openFastStockIn, runExport }` up to `Products.tsx` via a new
+`onRegisterActions` prop (modals + ledger filter state STAY in the section; no giant lift);
+`HeaderActions` gains an optional `primaryActionSlot` rendered where Add sits; `Products.tsx`
+renders the Adjust menu there on the stock_changes section and points `onExport` at the
+ledger export when that section is active. Files (path-scoped, DISJOINT from the
+PRODUCT-DETAIL-FLOAT lane which owns products/surfaces/{ProductDetailModal,ProductDetailReport}):
+`frontend/src/components/shared/ButtonGuidePopover.tsx`,
+`frontend/src/components/products/surfaces/HeaderActions.tsx`,
+`frontend/src/components/products/StockChangeSection.tsx`,
+`frontend/src/components/products/Products.tsx`. No lang/perm changes (all keys — adjust/
+add_stock/remove_stock/adjust_quantity/fast_stockin_title/export — already in both packs).
+
+**→ DETAIL-POPUP-LABEL-SIZE LANE (Aug 31, Part 568 grep-max+1; number races expected): DONE.**
+User: the label text INSIDE detail-popup action buttons ("purchases, edits, actions, and
+many more") is too big and inconsistent — wants ONE unified, smaller label size across the
+click-to-view detail popups. Chosen WITH the user via AskUserQuestion ("Detail popups
+everywhere" + "shrink title too"). Audited every detail popup: Returns' `ReturnDetailModal`
+(title `text-base`, buttons `text-xs`) and Inventory's `ProductDetailModal` (`text-xs
+sm:text-sm`) already sit at the compact standard; the contacts `DetailModal` is being
+compacted by the CONTACTS-COMPACT lane (567) and the Products-surface detail float by the
+PRODUCT-DETAIL-FLOAT lane (563) — both OFF-LIMITS here. The only unclaimed outlier was
+`sales/SaleDetailModal.tsx`, whose three action buttons (membership Save, un-cancel,
+status Save) used `text-sm` while its own Print button + the sibling popups use `text-xs`.
+Fix: those three `text-sm` → `text-xs`. Titles in scope were already compact (`text-base`
+/ bare 14px `font-bold`); the only oversized modal title (`text-lg` in shared `Modal.tsx`)
+is used by the contacts DetailModal + form modals, so left to lane 567 / out of scope.
+File (path-scoped, DISJOINT from every active lane): `frontend/src/components/sales/
+SaleDetailModal.tsx`. No lang/perm changes. progress.md claim visible on disk; code commit
+path-scoped to SaleDetailModal.tsx.
+
+**→ CONTACTS-COMPACT LANE (Aug 31, Part 567 grep-max+1; number races expected): CLAIMED / in progress.**
+User batch on the Contacts page (Customers / Suppliers / Delivery): (1) the click-to-view
+DETAIL float is made more compact (shared `contacts/shared.tsx` `DetailModal` — tighter
+label column + row padding); (2) Customers moves its visible "arrange by" SortChip INTO the
+FilterMenu (new Sort + Group-by sections wired to the existing `customerSortSpec`; SortChip
+removed from that tab only — it stays a shared component used elsewhere); (3) the
+Manage/History/Add action-row buttons are made the SAME height + more compact on all three
+tabs (History gets `dense` so its `.btn-secondary` min-height:40px stops overriding — true
+h-8/32px; Manage+Add h-9→h-8; Add gains `min-w-0` so it shrinks instead of forcing overflow);
+(4) section + mini-section chips (Suppliers Directory/Invoices, SupplierInvoicesSection
+Stock-In/AP) made compact one-row pills; (5) supplier Purchases + Stock-In invoice reports
+cut 5 stats → 4 (two count cells merged, no data dropped) and their filter rows kept to one
+line; (6) the Delivery action buttons no longer overlap on small screens (same min-w-0/h-8
+fix). Files (path-scoped, DISJOINT from the Sales/Returns lanes):
+`frontend/src/components/contacts/{shared,CustomersTab,SuppliersTab,DeliveryTab,
+SupplierPurchasesModal,SupplierInvoicesSection,StockInInvoicesSection}.tsx`. No lang/perm
+changes (all keys already in both packs); ActionHistoryBar's `dense` prop already on disk
+(SALES lane) — used, not edited.
+
+**→ SALES-HEADER-ROW-POLISH LANE (Aug 31, Part 566 grep-max+1; number races expected): CLAIMED / in progress.**
+User batch on the Sales-page section headers (Sales/Returns/Expenses): (1) on smaller
+screens the Start→End date-range picker takes the WHOLE row — the Today/7d/Month/Year
+preset chips stay grouped with the date but wrap to the line beneath it (never move to the
+Stats row); (2) the History button must be the same height as its neighbours — it renders
+40px because `.btn-secondary`'s `min-height:2.5rem` overrides its `h-8`, taller than the
+h-8 Export/Manage/Add buttons beside it, so it gets a `dense` mode forcing a true 32px;
+(3) the Returns "Add Return" button becomes a composite icon (a return glyph with a small
+"+" built on it, mirroring Products' PackagePlus) with the short word "Return" /
+"Supplier Return" (new i18n keys `return`, `supplier_return`). Export/History/Add stay on
+the Stats row (already true across all three sections — kept consistent). Files
+(path-scoped, DISJOINT from other lanes): `frontend/src/components/shared/{StatsRangeRow,
+ActionHistoryBar}.tsx`, `frontend/src/components/returns/Returns.tsx`,
+`frontend/src/components/sales/Sales.tsx`, `frontend/src/lang/{en,km}.json`.
+
 **→ PUBLIC-LOADER LANE (Aug 31, Part 565 grep-max+1; number races expected): CLAIMED / in progress.**
 User: the public storefront also flashes the admin **"Business OS / Loading this workspace
 view..."** splash (`App.tsx` `PageLoader`) — "this can be built-in background backend no
@@ -1208,12 +1302,40 @@ screens). Your log entry = grep-max+1 at write time (553+ now) with the mismatch
 noted — and please STOP pre-baking Part numbers into commit messages (this is the
 second collision: a0b2edbf said 549, also taken).
 
-**→ DASHBOARD LANE (coordinator 7b, updated ~15:30):** diff inspection shows this
-is ACTIVE mid-build work (Payment Method card rework, 235 lines and growing;
-DonutChart gains a backward-compatible `showLegend` prop) — not abandoned, so no
-forced action. Still: ~2 hours dirty with no claim block is against protocol.
-Add a one-line claim here, and commit the first green slice rather than one big
-bang — the DonutChart prop change is already commit-ready on its own.
+**⚠ DATETIMERANGEPICKER-REWORK LANE — STALLED, GREEN, AT RISK (coordinator 7b,
+updated ~18:25).** The unclaimed ~154-line `DateTimeRangePicker.tsx` rework (+
+consumer adaptations in Returns/Sales/StatsRangeRow/ActionHistoryBar, small
+AppContext/permissionDefinitions touches) has now been dirty ~90 min and its diff
+STOPPED GROWING ~20 min ago — same signature as the dashboard lane whose session
+had stopped. Coordinator facts for whoever recovers it: (1) **frontend tsc is
+FULLY GREEN with this rework in the tree** — the state is coherent and landable,
+not mid-break; (2) **no peer has touched DateTimeRangePicker since 18:00**, so it
+has NOT been absorbed yet — but it will be the moment any lane path-scopes that
+hot shared file (memory rule 12). RECOVERY IS SAFE from a build standpoint; a
+recovering session should verify it's functionally complete (a 154-line picker
+rework may be type-valid yet visually half-wired) before logging it as done.
+Coordinator 7b is read-mostly and will NOT self-commit product code — flagging
+for the owner (if still live) or a recovery session. If you ARE the owner: commit
+your green slice NOW.
+UPDATE ~18:50: the picker diff is byte-frozen ~2h (stalled), BUT the atomicity
+hazard is DISPROVEN — the picker changes are purely INTERNAL (debounced
+time-commit on blur/Enter, yearOptions rework; NO exported-prop change), and the
+Returns/Sales/StatsRangeRow/ActionHistoryBar edits are independent UI tweaks, not
+consumers of a new picker API. So each file compiles standalone: a partial sweep
+won't break HEAD. Risk is now only mild attribution churn, not a build break.
+Still worth recovering/committing, but no longer urgent.
+
+**✅ MIGRATION 0094 CLEAN (coordinator 7b, ~18:50):** legacy lane's new
+`0094_legacy_customer_receivables.sql` is sequential and collision-free (0093 =
+wholesale committed, 0094 = legacy new). Next free is 0095. Numbering discipline
+held this round.
+
+**✅ DASHBOARD LANE RESOLVED (coordinator 7b, ~17:10):** the long-dirty Payment
+Method / DonutChart refactor (dirty ~2h, its session stopped) was RECOVERED, not
+lost — committed as `f3615e30 chore(dashboard): recover orphaned refactor from a
+stopped session`. This is the commit-per-change safety net working: a stopped
+session's uncommitted work got picked up and landed rather than vanishing. Files
+are clean again.
 
 **🔴 PERMISSIONS/I18N SESSION — YOUR "PART 557" IS WRONG AND COLLIDES (coordinator
 7b, ~14:40, third protocol miss from this lane):** the stock-changes-UI lane LOGGED
