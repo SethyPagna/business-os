@@ -2,7 +2,8 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 
 const dashboard = fs.readFileSync(new URL('../src/components/dashboard/Dashboard.tsx', import.meta.url), 'utf8')
-const inventory = fs.readFileSync(new URL('../src/components/inventory/Inventory.tsx', import.meta.url), 'utf8')
+const branchesHub = fs.readFileSync(new URL('../src/components/branches/BranchesHubPage.tsx', import.meta.url), 'utf8')
+const products = fs.readFileSync(new URL('../src/components/products/Products.tsx', import.meta.url), 'utf8')
 const methods = fs.readFileSync(new URL('../src/api/methods.ts', import.meta.url), 'utf8')
 
 assert.doesNotMatch(methods, /getDashboard[\s\S]{0,120}\(\)\s*=>\s*\(\{\}\)/, 'dashboard reads should not fall back to an empty object that looks like real data')
@@ -27,8 +28,15 @@ assert.match(dashboard, /const openInventoryOverview = useCallback\(/, 'dashboar
 assert.match(dashboard, /DASHBOARD_INVENTORY_FOCUS_KEY/, 'dashboard should persist a focused inventory handoff when drilling into stock alerts')
 assert.match(dashboard, /review_in_inventory', 'Review in inventory'/, 'dashboard preview-truncated stock cards should offer an explicit inventory review action')
 assert.match(dashboard, /min-h-7 whitespace-nowrap rounded-md px-2\.5 py-1 text-\[11px\] font-semibold/, 'dashboard range controls should stay compact on mobile')
-assert.match(inventory, /sessionStorage\.getItem\(DASHBOARD_INVENTORY_FOCUS_KEY\)/, 'inventory should consume dashboard handoff focus when navigating from stock previews')
-assert.match(inventory, /setInventorySection\('products'\)/, 'inventory dashboard handoff should reset the section to products')
-assert.match(inventory, /setTab\('products'\)/, 'inventory dashboard handoff should reset the tab to products')
+// Aug 31 2026: the Branches hub's Products slice was removed as redundant
+// with the Products page, so the handoff chain is now: Dashboard writes the
+// inventory-focus key -> BranchesHubPage consumes it and FORWARDS a
+// 'products' drill to the Products page (carrying the stock filter) via the
+// products-focus key -> Products.tsx consumes that and applies the filter.
+assert.match(branchesHub, /sessionStorage\.getItem\(DASHBOARD_INVENTORY_FOCUS_KEY\)/, 'the Branches hub should consume the dashboard stock-drill handoff')
+assert.match(branchesHub, /bos:dashboard:products-focus/, 'the Branches hub should forward a products drill to the Products page')
+assert.match(branchesHub, /navigateTo\('products'\)/, 'the Branches hub should navigate the forwarded drill to the Products page')
+assert.match(products, /bos:dashboard:products-focus/, 'the Products page should consume the forwarded dashboard stock drill')
+assert.match(products, /setStockFilter\(stockState\)/, 'the Products page should apply the forwarded stock filter')
 
 console.log('PASS dashboard data reliability guards')

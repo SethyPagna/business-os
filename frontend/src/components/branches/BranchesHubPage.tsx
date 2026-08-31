@@ -1,7 +1,6 @@
 import { Suspense, lazy, useEffect, useState } from 'react'
 import BarChart3 from 'lucide-react/dist/esm/icons/bar-chart-3.js'
 import Building2 from 'lucide-react/dist/esm/icons/building-2.js'
-import Package from 'lucide-react/dist/esm/icons/package.js'
 import ArrowLeftRight from 'lucide-react/dist/esm/icons/arrow-left-right.js'
 import Radio from 'lucide-react/dist/esm/icons/radio.js'
 import { useApp as useAppHook } from '../../AppContext.tsx'
@@ -12,10 +11,11 @@ import { useIsPageActive } from '../shared/pageActivity'
 // and Inventory.tsx under every chip, re-sliced through its OWN internal
 // section system (inventorySection: stats/products/movements/rfid predates
 // this merge) via the hostSection prop. The board named three sections
-// ("Stats & Branches" / "Movements" / "RFID"); Products is kept as a
-// fourth chip because Inventory's product-stock slice has no other home
-// and "nothing lost" outranks the section count -- FLAGGED in the log
-// rather than silently dropped. The standalone 'inventory' PAGE id
+// ("Stats & Branches" / "Movements" / "RFID"); Products was kept as a
+// fourth chip until Aug 31 2026, when the user removed it as redundant --
+// the Products PAGE now carries the complete adjust design, the merged Add
+// Stock flow, and the Stock Changes ledger, so the slice finally has a
+// better home. The standalone 'inventory' PAGE id
 // retires; the 'inventory' permission key lives on and gates the three
 // inventory-backed chips, while the branch list self-gates on 'branches'.
 //
@@ -35,6 +35,7 @@ const InventorySection = lazy(() => import('../inventory/Inventory.tsx'))
 type BranchesHubAppContext = {
   t: (key: string, fallback?: string) => string
   getPermissionTier: (key: string) => string
+  navigateTo: (pageId: string) => void
 }
 const useApp = useAppHook as unknown as () => BranchesHubAppContext
 
@@ -61,19 +62,21 @@ function peekDashboardFocusSection(): BranchesHubSection | '' {
 function initialSection(canBranchList: boolean, canInventory: boolean): BranchesHubSection {
   if (typeof window !== 'undefined' && canInventory) {
     const focus = peekDashboardFocusSection()
-    if (focus) return focus
-    const segment = String(window.location.pathname || '').toLowerCase()
-    // Old /inventory URLs open Inventory's old default slice (products).
-    if (segment.includes('inventory')) return 'products'
+    // A 'products' focus no longer opens a hub slice -- that section was
+    // removed as redundant with the Products page (user, Aug 31); the
+    // isActive effect below forwards the drill there instead.
+    if (focus && focus !== 'products') return focus
+    // Old /inventory URLs land on the merged Stats & Branches section --
+    // the hub's products slice they used to open is gone.
   }
   // Default landing is the merged "Stats & Branches" section for everyone (it
   // renders whichever halves the viewer may see). Only a Dashboard stock-card
-  // handoff or an old /inventory URL (both handled above) opens a slice.
+  // handoff (handled above) opens a slice.
   return 'stats'
 }
 
 export default function BranchesHubPage() {
-  const { t, getPermissionTier } = useApp()
+  const { t, getPermissionTier, navigateTo } = useApp()
   // t() returns the KEY on a miss (stale/failed pack) -- guard so chips fall back to readable English, never snake_case keys.
   const trh = (key: string, fallback: string): string => { const v = t(key); return v && v !== key ? v : fallback }
   const canBranchList = getPermissionTier('branches') !== 'none'
@@ -86,9 +89,34 @@ export default function BranchesHubPage() {
   const isActive = useIsPageActive('branches')
   useEffect(() => {
     if (!isActive || !canInventory || typeof window === 'undefined') return
-    const focus = peekDashboardFocusSection()
-    if (focus) setSection(focus)
-  }, [isActive, canInventory])
+    const raw = window.sessionStorage.getItem(DASHBOARD_INVENTORY_FOCUS_KEY)
+    if (!raw) return
+    let payload: { section?: unknown; stockFilter?: unknown } = {}
+    try {
+      payload = JSON.parse(raw) as { section?: unknown; stockFilter?: unknown }
+    } catch {
+      window.sessionStorage.removeItem(DASHBOARD_INVENTORY_FOCUS_KEY)
+      return
+    }
+    const focus = String(payload?.section || '')
+    // The hub is the key's sole consumer now (Inventory.tsx's own
+    // consumption effect was removed with the products slice) -- always
+    // clear it once read so a stale payload can't re-fire later.
+    window.sessionStorage.removeItem(DASHBOARD_INVENTORY_FOCUS_KEY)
+    if (focus === 'products') {
+      // The hub's products slice was removed as redundant with the Products
+      // page (user, Aug 31) -- forward the Dashboard stock-card drill there,
+      // carrying the stock filter, instead of opening a chip that no longer
+      // exists. Dashboard.tsx still writes the OLD key/page untouched (it is
+      // mid-flight in another lane).
+      try {
+        window.sessionStorage.setItem('bos:dashboard:products-focus', JSON.stringify({ stockFilter: payload?.stockFilter }))
+      } catch { /* storage full/blocked -- the drill just loses its filter */ }
+      navigateTo('products')
+      return
+    }
+    if (focus === 'movements' || focus === 'rfid') setSection(focus)
+  }, [isActive, canInventory, navigateTo])
 
   const tabs: Array<{ id: BranchesHubSection; label: string; icon: typeof Building2; allowed: boolean; tone: string }> = [
     // "Stats & Branches" is ONE section again (user, Aug 29: "merge stats and
@@ -100,7 +128,11 @@ export default function BranchesHubPage() {
     // slices. Allowed to anyone with EITHER grant; the render shows only the
     // halves the viewer may see.
     { id: 'stats', label: `${trh('stats', 'Stats')} & ${trh('branches', 'Branches')}`, icon: BarChart3, allowed: canInventory || canBranchList, tone: 'text-sky-600' },
-    { id: 'products', label: trh('products', 'Products'), icon: Package, allowed: canInventory, tone: 'text-teal-600' },
+    // The Products chip was REMOVED (user, Aug 31: "the products section of
+    // inventory page can then be removed") -- redundant since the Products
+    // page carries the complete adjust design, the Add Stock flow, and the
+    // Stock Changes ledger. Dashboard stock-card drills forward to the
+    // Products page (see the focus effect above).
     { id: 'movements', label: trh('movements', 'Movements'), icon: ArrowLeftRight, allowed: canInventory, tone: 'text-violet-600' },
     { id: 'rfid', label: trh('rfid', 'RFID'), icon: Radio, allowed: canInventory, tone: 'text-emerald-600' },
   ]
@@ -161,7 +193,7 @@ export default function BranchesHubPage() {
           // page -- unchanged from before.
           <div className="flex min-h-0 flex-1 flex-col">
             <InventorySection
-              hostSection={active === 'products' || active === 'movements' || active === 'rfid' ? active : 'products'}
+              hostSection={active === 'movements' || active === 'rfid' ? active : 'movements'}
               onHostSectionChange={(next) => setSection(next)}
             />
           </div>

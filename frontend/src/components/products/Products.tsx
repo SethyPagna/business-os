@@ -142,10 +142,9 @@ const ManageBrandsModal = lazyRetry(() => import('./lookups/ManageBrandsModal'),
 const ManageUnitsModal = lazyRetry(() => import('./lookups/ManageUnitsModal'), 'products-manage-units-modal')
 const ImportModeWizard = lazyRetry(() => import('./import/ImportModeWizard'), 'products-bulk-import-wizard')
 const BulkAddStockModal = lazyRetry(() => import('./forms/BulkAddStockModal'), 'products-bulk-add-stock-modal')
-// The Add button's two stock options (user, Aug 31: "Stock one by one, fast
-// stockin, and add new product"): the complete Branches-page adjust design
-// (StockAdjustModal reuses InventoryStockModals) and the shipment receiver.
-const StockAdjustModal = lazyRetry(() => import('./forms/StockAdjustModal'), 'products-stock-adjust-modal')
+// The Add button's merged "Add Stock" flow (user, Aug 31: "the fast stockin
+// can also do one by one... can be merged into one Add stock function") --
+// the shipment receiver covers a whole delivery AND a single product.
 const FastStockInModal = lazyRetry(() => import('../inventory/FastStockInModal'), 'products-fast-stock-in-modal')
 const VariantFormModal = lazyRetry(() => import('./forms/VariantFormModal'), 'products-variant-form-modal')
 const ProductForm = lazyRetry(() => import('./forms/ProductForm'), 'products-product-form')
@@ -666,11 +665,29 @@ function ProductsFullEditor() {
   // header flips between the product listing and the Stock Changes ledger,
   // which used to be a folded card at the bottom of the same scroll.
   const [activeProductSection, setActiveProductSection] = useState<'products' | 'stock_changes' | 'duplicates'>('products')
-  // Which of the Add menu's two stock flows is open (null = neither) --
-  // Stock one by one is the complete Branches-page adjust modal, Fast
-  // stock-in the shipment receiver. Add New Product keeps the existing
-  // `modal === 'form'` path.
-  const [addStockFlow, setAddStockFlow] = useState<'stock_one' | 'fast_stockin' | null>(null)
+  // The Add menu's merged Add Stock flow (the shipment receiver). Add New
+  // Product keeps the existing `modal === 'form'` path.
+  const [addStockOpen, setAddStockOpen] = useState(false)
+  // Dashboard stock-card drills land HERE now (the Branches hub's redundant
+  // Products slice was removed, Aug 31): BranchesHubPage forwards the old
+  // inventory-focus payload as this key, carrying the stock filter.
+  useEffect(() => {
+    if (!isActive || typeof window === 'undefined') return
+    const raw = window.sessionStorage.getItem('bos:dashboard:products-focus')
+    if (!raw) return
+    try {
+      const payload = JSON.parse(raw) as { stockFilter?: unknown }
+      const stockState = String(payload?.stockFilter || '')
+      if (stockState === 'low' || stockState === 'out' || stockState === 'in_stock') {
+        setStockFilter(stockState)
+      }
+      setActiveProductSection('products')
+    } catch {
+      // Malformed handoff -- keep the current view state.
+    } finally {
+      window.sessionStorage.removeItem('bos:dashboard:products-focus')
+    }
+  }, [isActive])
   const [productSortDirection, setProductSortDirection] = useState<ProductSortDirection>('name_asc')
   const [search,       setSearch]       = useState('')
   // AND/OR toggle restored (Aug 20 2026), reachable from inside the Filter
@@ -3578,11 +3595,9 @@ function ProductsFullEditor() {
                with its own "Adjust" menu (user, Aug 31) -> drop onAdd there;
                HeaderActions hides any undefined-handler control. */
             onAdd={canAddProduct && activeProductSection !== 'stock_changes' ? ()=>{setSelected(null);setFormInitialTab('basic');setModal('form')} : undefined}
-            // Stock one by one / Fast stock-in ride the same Add menu (user,
-            // Aug 31: "should show three options"). Hidden on the Stock
-            // Changes section, which carries its own Adjust menu.
-            onStockOneByOne={canAdjustInventoryStock && activeProductSection !== 'stock_changes' ? () => setAddStockFlow('stock_one') : undefined}
-            onFastStockIn={canAdjustInventoryStock && activeProductSection !== 'stock_changes' ? () => setAddStockFlow('fast_stockin') : undefined}
+            // The merged Add Stock flow rides the same Add menu. Hidden on
+            // the Stock Changes section, which carries its own Adjust menu.
+            onAddStock={canAdjustInventoryStock && activeProductSection !== 'stock_changes' ? () => setAddStockOpen(true) : undefined}
             onMergeDuplicates={canMergeDuplicates ? openMergeDuplicatesReview : undefined}
             onZeroQuantityCleanup={canZeroQuantityCleanup ? openZeroQuantityCleanup : undefined}
             onWireImages={canWireImages ? openWireImages : undefined}
@@ -4101,26 +4116,16 @@ function ProductsFullEditor() {
         </div>
       )}
 
-      {/* Add-menu stock flows (any section) -- the complete Branches-page
-          adjust design for one product, and the fast shipment receiver. */}
-      {addStockFlow === 'stock_one' ? (
-        <Suspense fallback={null}>
-          <StockAdjustModal
-            initialType="add"
-            t={t}
-            onClose={() => setAddStockFlow(null)}
-            onDone={() => { setAddStockFlow(null); void load(true) }}
-          />
-        </Suspense>
-      ) : null}
-      {addStockFlow === 'fast_stockin' ? (
+      {/* The Add menu's merged Add Stock flow (any section) -- the shipment
+          receiver, which covers a whole delivery and a single product. */}
+      {addStockOpen ? (
         <Suspense fallback={null}>
           <FastStockInModal
             branchOptions={branches.map((branch) => ({ value: String(branch.id), label: String(branch.name || branch.id) }))}
             defaultBranchId={null}
             tr={tr}
             notify={notify}
-            onClose={() => setAddStockFlow(null)}
+            onClose={() => setAddStockOpen(false)}
             onDone={() => { void load(true) }}
           />
         </Suspense>

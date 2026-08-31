@@ -347,7 +347,6 @@ function getInventoryApi(): InventoryApi {
   }
 }
 
-const DASHBOARD_INVENTORY_FOCUS_KEY = 'bos:dashboard:inventory-focus'
 const INVENTORY_USER_OPTIONS_TIMEOUT_MS = 8000
 const INVENTORY_REASONS_TIMEOUT_MS = 8000
 const INVENTORY_BRANCHES_TIMEOUT_MS = 8000
@@ -1279,26 +1278,10 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
     setHistoryReady(true)
     return undefined
   }, [isActive, loading])
-  useEffect(() => {
-    if (!isActive || typeof window === 'undefined') return
-    const raw = window.sessionStorage.getItem(DASHBOARD_INVENTORY_FOCUS_KEY)
-    if (!raw) return
-    try {
-      const nextFocus = JSON.parse(raw)
-      if (nextFocus?.section === 'products') {
-        setInventorySection('products')
-        onHostSectionChange?.('products')
-      }
-      if (nextFocus?.tab === 'products') setTab('products')
-      if (typeof nextFocus?.stockFilter === 'string' && nextFocus.stockFilter) {
-        setStockFilter(nextFocus.stockFilter)
-      }
-    } catch {
-      // Ignore malformed handoff payloads and keep the current view state.
-    } finally {
-      window.sessionStorage.removeItem(DASHBOARD_INVENTORY_FOCUS_KEY)
-    }
-  }, [isActive])
+  // The Dashboard stock-card focus payload is consumed by BranchesHubPage
+  // now (it forwards a 'products' drill to the Products PAGE -- the hub's
+  // products slice was removed as redundant, Aug 31 2026), so the old
+  // consumption effect here is gone.
   // Per-product notification click-to-focus: routes/notifications.ts's
   // inventory section sets `anchor: 'product-<id>'`, which AppContext's
   // navigateTo() turns into a `#product-<id>` URL hash before dispatching
