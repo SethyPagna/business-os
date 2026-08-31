@@ -17,7 +17,7 @@ import { validateUploadedBuffer } from '../lib/uploadSecurity'
 import { checkRateLimit, getClientIp } from '../lib/rateLimit'
 import { audit } from '../lib/audit'
 import { findDuplicateProductGroups, findPossiblySameProductClusters, normalizeProductClusterKey } from '../lib/productIdentity'
-import { registerMergeFold, recordMergeUndoSnapshot, recordBulkMergeUndoSnapshot, type MergeReversal } from '../lib/undoAppliers'
+import { registerMergeFold, recordMergeUndoSnapshot, recordBulkMergeUndoSnapshot, recordSupplierBackfillSnapshot, type MergeReversal } from '../lib/undoAppliers'
 import { attachBatchCounts } from '../lib/productBatches'
 import { maybeQueueForReview } from '../lib/reviewGate'
 import { assertUpdatedAtMatch, getExpectedUpdatedAt, writeConflictResponse, WriteConflictError } from '../lib/conflictControl'
@@ -1170,6 +1170,69 @@ app.get('/:id/supplier-purchases', async (c) => {
     LIMIT 100
   `).all<Record<string, unknown>>({ productId, supplierKey })
   return c.json({ supplierKey, purchases: rows || [] })
+})
+
+// D5 (Part 578, item 3): attribute a supplier to this product's UNATTRIBUTED
+// lots after the fact. Supplier attribution lives on the lot (0062); a lot whose
+// name never matched a suppliers row at receive time keeps supplier_id NULL and
+// "stays linkable later" -- this is that later linking. Only lots with
+// supplier_id IS NULL are touched (never re-attributes an already-linked lot);
+// when batchIds is given, the set is narrowed to those (still NULL-only). Fully
+// undoable/redoable via the supplier.backfill applier -- the reversal (each
+// lot's prior supplier_id/_name) goes to undo_snapshots, a small action_history
+// row points at it. Gated by the products EDIT action (attributing a lot's
+// supplier is a product edit), full tier -- the same tier the applier demands.
+app.post('/:id/suppliers/backfill', async (c) => {
+  const user = c.get('user')
+  if (getActionTier(user, 'products', 'edit') !== 'full') {
+    return c.json({ error: 'You do not have permission to perform this action' }, 403)
+  }
+  const productId = Number(c.req.param('id')) || 0
+  if (!productId) return c.json({ error: 'Product not found' }, 404)
+  const body = await c.req.json().catch(() => ({})) as { supplierId?: unknown; batchIds?: unknown }
+  const supplierId = Number(body.supplierId) || 0
+  if (supplierId <= 0) return c.json({ error: 'A supplier is required' }, 400)
+  const db = getDb(c.env)
+  const supplier = await db.prepare('SELECT id, name FROM suppliers WHERE id = ?').get<{ id: number; name: string }>([supplierId])
+  if (!supplier) return c.json({ error: 'Supplier not found' }, 404)
+
+  // Optional narrowing to specific lots (still NULL-only below). Non-integer
+  // entries are dropped; an explicitly empty list means "nothing selected".
+  const rawIds = Array.isArray(body.batchIds) ? body.batchIds : null
+  const wantIds = rawIds == null ? null : rawIds.map(Number).filter((n) => Number.isInteger(n) && n > 0)
+  if (wantIds != null && wantIds.length === 0) {
+    return c.json({ success: true, updated: 0, actionHistoryId: null })
+  }
+  const narrow = wantIds != null ? ` AND id IN (${wantIds.join(',')})` : ''
+
+  // The lots this backfill will touch: this product's active, still-
+  // unattributed lots (optionally narrowed to the chosen ids). Capture each
+  // lot's prior attribution for the reversal.
+  const targets = await db.prepare(
+    `SELECT id, supplier_id, supplier_name FROM product_batches
+     WHERE variant_product_id = @productId AND is_active = 1 AND supplier_id IS NULL${narrow}`,
+  ).all<{ id: number; supplier_id: number | null; supplier_name: string | null }>({ productId })
+  if (!targets.length) {
+    return c.json({ success: true, updated: 0, actionHistoryId: null })
+  }
+  const ids = targets.map((t) => Number(t.id))
+  await db.prepare(
+    `UPDATE product_batches SET supplier_id = @supplierId, supplier_name = @name, updated_at = CURRENT_TIMESTAMP
+     WHERE id IN (${ids.join(',')})`,
+  ).run({ supplierId, name: supplier.name })
+
+  const undoRecord = await recordSupplierBackfillSnapshot(c.env, user, {
+    productId,
+    supplierId,
+    supplierName: supplier.name,
+    lots: targets.map((t) => ({ id: Number(t.id), prevSupplierId: t.supplier_id == null ? null : Number(t.supplier_id), prevSupplierName: t.supplier_name ?? null })),
+  })
+
+  await audit(c.env, user?.id ?? null, user?.name ?? null, 'supplier_backfill', 'product', productId, { supplierId, lots: ids.length })
+  c.executionCtx.waitUntil(bumpVersion(c.env, 'products'))
+  c.executionCtx.waitUntil(broadcast(c.env, 'products', { action: 'update' }))
+  c.executionCtx.waitUntil(broadcast(c.env, 'inventory', { action: 'update' }))
+  return c.json({ success: true, updated: ids.length, actionHistoryId: undoRecord?.actionHistoryId ?? null })
 })
 
 // D1 (Part 415): the Products page's Stock Change ledger -- one row per

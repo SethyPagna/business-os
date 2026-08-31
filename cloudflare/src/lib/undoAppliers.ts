@@ -363,6 +363,94 @@ async function redoBulkMergeFolds(
   return fresh
 }
 
+// ---------------------------------------------------------------------------
+// supplier.backfill -- reload-durable undo/redo for attributing a supplier to a
+// product's blank/name-only lots after the fact.
+//
+// Supplier attribution lives on the LOT (product_batches.supplier_id/_name,
+// migration 0062): matched by exact normalized name at receive time, so a name
+// that had no suppliers-table match then keeps supplier_id NULL and "stays
+// linkable later". This action does that later linking -- it sets supplier_id
+// (+ the supplier's canonical name) on the chosen unattributed lots. UNDO
+// restores each lot's exact prior (supplier_id, supplier_name); REDO re-applies
+// the current canonical name for the supplier. The lot set is bounded per
+// product but the reversal still lives in undo_snapshots (0097) for the same
+// reason the merge does -- the action_history payload stays a tiny pointer.
+// ---------------------------------------------------------------------------
+export interface SupplierBackfillReversal {
+  productId: number
+  supplierId: number
+  supplierName: string | null
+  lots: Array<{ id: number; prevSupplierId: number | null; prevSupplierName: string | null }>
+}
+
+// Record a completed backfill as one undoable/redoable action.
+export async function recordSupplierBackfillSnapshot(
+  env: Env,
+  user: SessionUser | null,
+  reversal: SupplierBackfillReversal,
+): Promise<{ snapshotId: number; actionHistoryId: number } | null> {
+  const lots = Array.isArray(reversal.lots) ? reversal.lots.filter((l) => Number(l.id) > 0) : []
+  if (!lots.length) return null
+  const db = getDb(env)
+  const snap = await db.prepare(`
+    INSERT INTO undo_snapshots (kind, status, payload_json, created_by_id, created_by_name)
+    VALUES ('supplier.backfill', 'applied', @payload, @byId, @byName)
+  `).run({ payload: JSON.stringify({ ...reversal, lots }), byId: user?.id ?? null, byName: user?.name ?? null })
+  const snapshotId = Number(snap.lastInsertRowid ?? 0)
+  const payload = JSON.stringify({ applier: 'supplier.backfill', snapshot_id: snapshotId })
+  const supplierName = reversal.supplierName || `#${reversal.supplierId}`
+  const n = lots.length
+  const noun = n === 1 ? 'lot' : 'lots'
+  const hist = await db.prepare(`
+    INSERT INTO action_history (
+      scope, entity, entity_id, label, undo_label, redo_label, reversible, status,
+      undo_payload, redo_payload, created_by_id, created_by_name
+    ) VALUES ('products', 'product', @entityId, @label, @undoLabel, @redoLabel, 1, 'undoable',
+              @payload, @payload, @byId, @byName)
+  `).run({
+    entityId: String(reversal.productId),
+    label: `Attributed ${n} ${noun} to "${supplierName}"`,
+    undoLabel: `Undo supplier attribution of ${n} ${noun}`,
+    redoLabel: `Redo supplier attribution of ${n} ${noun}`,
+    payload,
+    byId: user?.id ?? null,
+    byName: user?.name ?? null,
+  })
+  return { snapshotId, actionHistoryId: Number(hist.lastInsertRowid ?? 0) }
+}
+
+// UNDO: restore each lot's exact prior attribution.
+async function applySupplierBackfillUndo(env: Env, r: SupplierBackfillReversal): Promise<void> {
+  const db = getDb(env)
+  const stmts = (r.lots || [])
+    .filter((l) => Number(l.id) > 0)
+    .map((l) => ({
+      sql: 'UPDATE product_batches SET supplier_id = @sid, supplier_name = @sname, updated_at = CURRENT_TIMESTAMP WHERE id = @id',
+      params: { id: Number(l.id), sid: l.prevSupplierId == null ? null : Number(l.prevSupplierId), sname: l.prevSupplierName ?? null },
+    }))
+  if (stmts.length) await db.batch(stmts)
+}
+
+// REDO: re-apply the supplier to the same lots, using the supplier's CURRENT
+// canonical name (mirrors the forward action, which stamps the name at write
+// time). Refuses if the supplier no longer exists -- guessing a name is worse.
+async function applySupplierBackfillRedo(env: Env, r: SupplierBackfillReversal): Promise<string | null> {
+  const db = getDb(env)
+  const supplierId = Number(r.supplierId)
+  const supplier = await db.prepare('SELECT id, name FROM suppliers WHERE id = ?').get<{ id: number; name: string }>([supplierId])
+  if (!supplier) throw new Error('That supplier no longer exists, so this attribution cannot be redone.')
+  const name = supplier.name
+  const stmts = (r.lots || [])
+    .filter((l) => Number(l.id) > 0)
+    .map((l) => ({
+      sql: 'UPDATE product_batches SET supplier_id = @sid, supplier_name = @sname, updated_at = CURRENT_TIMESTAMP WHERE id = @id',
+      params: { id: Number(l.id), sid: supplierId, sname: name },
+    }))
+  if (stmts.length) await db.batch(stmts)
+  return name
+}
+
 const APPLIERS: Record<string, UndoApplierDef> = {
   // Payload shape: { applier: 'branch.update', id, fields: { name, location,
   // phone, manager, notes, is_default, is_active } }. The undo_payload carries
@@ -504,6 +592,56 @@ const APPLIERS: Record<string, UndoApplierDef> = {
         ctx.direction === 'undo' ? 'action_undo' : 'action_redo',
         'product', reversals[0]?.keeperId ?? null,
         { via: 'undo_applier', applier: 'product.merge.bulk', count: reversals.length },
+      )
+      await broadcast(ctx.env, 'products', { action: 'update' })
+      await broadcast(ctx.env, 'inventory', { action: 'update' })
+    },
+  },
+  // Payload shape: { applier: 'supplier.backfill', snapshot_id }. The snapshot
+  // holds a SupplierBackfillReversal (the lots + each lot's prior attribution).
+  // Gated by the products edit action (attributing a lot's supplier IS a product
+  // edit), full tier, at record and operate time -- same authority model as the
+  // merge appliers above.
+  'supplier.backfill': {
+    permission: 'products',
+    action: 'edit',
+    run: async (payload, ctx) => {
+      const db = getDb(ctx.env)
+      const snapshotId = Number(payload.snapshot_id || 0)
+      if (!Number.isInteger(snapshotId) || snapshotId <= 0) {
+        throw new Error('This attribution cannot be replayed: its saved snapshot reference is missing.')
+      }
+      const snap = await db
+        .prepare('SELECT id, status, payload_json FROM undo_snapshots WHERE id = ? AND kind = ?')
+        .get<{ id: number; status: string; payload_json: string }>([snapshotId, 'supplier.backfill'])
+      if (!snap) throw new Error('The saved details for this attribution are no longer available, so it cannot be reversed.')
+      let reversal: SupplierBackfillReversal
+      try {
+        reversal = JSON.parse(snap.payload_json) as SupplierBackfillReversal
+      } catch (_) {
+        throw new Error('The saved details for this attribution are unreadable, so it cannot be reversed.')
+      }
+
+      if (ctx.direction === 'undo') {
+        if (String(snap.status) !== 'applied') throw new Error('This attribution has already been undone.')
+        await applySupplierBackfillUndo(ctx.env, reversal)
+        await db.prepare("UPDATE undo_snapshots SET status = 'reversed', updated_at = CURRENT_TIMESTAMP WHERE id = @id").run({ id: snapshotId })
+      } else {
+        if (String(snap.status) !== 'reversed') throw new Error('This attribution is already in place; there is nothing to redo.')
+        const name = await applySupplierBackfillRedo(ctx.env, reversal)
+        // Keep the snapshot's cached name current for a future undo's label.
+        if (name != null && name !== reversal.supplierName) {
+          await db.prepare("UPDATE undo_snapshots SET payload_json = @payload, updated_at = CURRENT_TIMESTAMP WHERE id = @id")
+            .run({ payload: JSON.stringify({ ...reversal, supplierName: name }), id: snapshotId })
+        }
+        await db.prepare("UPDATE undo_snapshots SET status = 'applied', updated_at = CURRENT_TIMESTAMP WHERE id = @id").run({ id: snapshotId })
+      }
+
+      await audit(
+        ctx.env, ctx.user?.id ?? null, ctx.user?.name ?? null,
+        ctx.direction === 'undo' ? 'action_undo' : 'action_redo',
+        'product', reversal.productId ?? null,
+        { via: 'undo_applier', applier: 'supplier.backfill', supplierId: reversal.supplierId, lots: (reversal.lots || []).length },
       )
       await broadcast(ctx.env, 'products', { action: 'update' })
       await broadcast(ctx.env, 'inventory', { action: 'update' })

@@ -235,6 +235,15 @@ await check('the product.merge.bulk applier (whole-catalog cleanup) is registere
   assert.strictEqual(resolved?.action, 'merge_duplicates')
 })
 
+await check('the supplier.backfill applier is registered and gated on the products edit action', () => {
+  assert.ok(registeredUndoAppliers().includes('supplier.backfill'), 'supplier.backfill must be a registered applier')
+  const resolved = resolveUndoApplier({ applier: 'supplier.backfill', snapshot_id: 1 })
+  assert.strictEqual(resolved?.permission, 'products')
+  // Attributing a lot's supplier is a product edit, so the replay demands the
+  // SAME granular products/edit action (full tier) the live route gates on.
+  assert.strictEqual(resolved?.action, 'edit')
+})
+
 await check('source lock: the applier permission gate (full tier) guards BOTH record and operate, before any status flip or replay', () => {
   const routeSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'routes', 'actionHistory.ts'), 'utf8')
   // Record time: canRecordHistory must consult the applier registry, not
