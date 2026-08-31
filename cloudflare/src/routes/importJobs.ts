@@ -158,7 +158,7 @@ app.get('/queue/status', async (c) => {
 // so this is a no-op write on every poll after the first for a given job.
 const STALLED_IMPORT_JOB_REAP_MINUTES = 20
 
-async function reapStalledImportJobs(env: Env): Promise<void> {
+export async function reapStalledImportJobs(env: Env): Promise<void> {
   const db = getDb(env)
   await db.prepare(`
     UPDATE import_jobs
@@ -1225,10 +1225,14 @@ async function deleteJobData(c: any, id: string) {
   // real leak: the inline list this replaced deleted only six tables,
   // leaving signature/commit/guard/group/image-plan rows orphaned forever
   // -- the "orphan staging rows" the K4 Phase-0 audit measured.
-  await db.batch(importJobFullDeleteStatements(id))
-  // The two bulk staging tables live on the separate import-staging DB and
-  // cannot ride the batch above (see lib/db.ts / importRetention.ts).
+  // Staging children (separate import-staging DB) FIRST, then the parent
+  // import_jobs row. A db.batch is atomic only within one D1, so deleting the
+  // parent first and then failing the staging call (thrown, or isolate killed
+  // between them) would strand the staging rows with no parent -- an orphan no
+  // automatic sweep reaches. Staging-first means a mid-failure leaves the job
+  // reachable, and retention re-cleans it (a staging re-delete is a no-op).
   await db.staging.batch(importJobStagingDeleteStatements(id))
+  await db.batch(importJobFullDeleteStatements(id))
 }
 
 async function handleDelete(c: any) {
