@@ -1126,10 +1126,14 @@ up should re-verify against current source first.
   shared `whereActiveSales` filter is now the sargable `created_at >= @start AND
   created_at < date(@end,'+1 day')`, index-backed and row-set-identical to the old
   form, proven across boundary cases in `test-sales-analytics-daterange-pure.cjs`;
-  the by-day GROUP BY date() expressions are correct and untouched. **Still open:**
-  the same rewrite in `sales.ts` list/export, `returns.ts`, `stockLedgerQuery.ts`,
-  `auditLogQuery.ts`, `compat.ts`, and `inventory/movements` — the last two files are
-  cold, the sales/returns ones are in active lanes); `inventory/movements` search
+  the by-day GROUP BY date() expressions are correct and untouched. **`stockLedgerQuery.ts`
+  slice also FIXED: session 77, Aug 31 — `60df8ba0`, needs deploy** — same sargable
+  rewrite, now uses `idx_inventory_movements_created_pg`, proven in
+  `test-stock-ledger-daterange-pure.cjs` (incl. start-only/end-only/no-bound cases).
+  `auditLogQuery.ts` was deliberately LEFT as date() — `audit_logs` has no created_at
+  index, so a rewrite there is churn with no perf gain (add an index first if it ever
+  matters). **Still open:** the same rewrite in `sales.ts` list/export, `returns.ts`,
+  `compat.ts` (all in active lanes)); `inventory/movements` search
   still builds the depth-~92 REPLACE
   chain (D1 depth-100 risk). (×1 D1-scale) — see report.
 - Receipt/date locale: `Receipt.tsx:309` + 3 duplicated `formatDateTime` use viewer
