@@ -31,13 +31,25 @@ function extractConst(name) {
   return match[0]
 }
 
+// The label caps are plain numeric consts (no closing paren), so
+// extractConst's `[\s\S]*?\)` pattern would overrun -- pull them by line.
+function extractNumericConst(name) {
+  const re = new RegExp(`const ${name} = \\d+`)
+  const match = source.match(re)
+  if (!match) throw new Error(`${name} not found in fees.ts -- source may have changed`)
+  return match[0]
+}
+
 const combinedSource = extractConst('FEE_TYPES') + '\n'
+  + extractNumericConst('FEE_LABEL_MAX_WORDS') + '\n'
+  + extractNumericConst('FEE_LABEL_MAX_CHARS') + '\n'
   + extractFunction('round2') + '\n'
   + extractFunction('toNumber') + '\n'
   + extractFunction('normalizeFeeType') + '\n'
   + extractFunction('normalizeText') + '\n'
+  + extractFunction('normalizeFeeLabel') + '\n'
   + extractFunction('normalizeDate') + '\n'
-  + 'export { round2, toNumber, normalizeFeeType, normalizeText, normalizeDate }\n'
+  + 'export { round2, toNumber, normalizeFeeType, normalizeText, normalizeFeeLabel, normalizeDate }\n'
 
 const { outputText } = ts.transpileModule(combinedSource, {
   compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 },
@@ -45,7 +57,7 @@ const { outputText } = ts.transpileModule(combinedSource, {
 })
 const moduleObj = { exports: {} }
 new Function('exports', outputText)(moduleObj.exports)
-const { round2, toNumber, normalizeFeeType, normalizeText, normalizeDate } = moduleObj.exports
+const { round2, toNumber, normalizeFeeType, normalizeText, normalizeFeeLabel, normalizeDate } = moduleObj.exports
 
 let passed = 0
 function check(name, fn) {
@@ -91,6 +103,25 @@ check('normalizeDate accepts valid dates, falls back to now on garbage', () => {
   assert.ok(!Number.isNaN(Date.parse(fallback)), 'fallback should be a valid ISO date')
   const fallbackEmpty = normalizeDate('')
   assert.ok(!Number.isNaN(Date.parse(fallbackEmpty)), 'empty input should fall back to a valid date')
+})
+
+check('normalizeFeeLabel trims, collapses whitespace, empties to null', () => {
+  assert.strictEqual(normalizeFeeLabel('  Grab  '), 'Grab')
+  assert.strictEqual(normalizeFeeLabel('Capital   Express'), 'Capital Express')
+  assert.strictEqual(normalizeFeeLabel('   '), null)
+  assert.strictEqual(normalizeFeeLabel(undefined), null)
+  assert.strictEqual(normalizeFeeLabel(42), null)
+})
+
+check('normalizeFeeLabel caps at 6 words / 60 chars (sentences cannot be saved)', () => {
+  assert.strictEqual(
+    normalizeFeeLabel('one two three four five six seven eight'),
+    'one two three four five six',
+  )
+  assert.strictEqual(normalizeFeeLabel('a'.repeat(200)), 'a'.repeat(60))
+  // Khmer has no spaces, so only the char cap bounds it -- and short Khmer
+  // labels round-trip untouched.
+  assert.strictEqual(normalizeFeeLabel('ទឹកភ្លើង'), 'ទឹកភ្លើង')
 })
 
 console.log(`\n${passed} check(s) passed.`)

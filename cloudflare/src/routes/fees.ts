@@ -78,6 +78,22 @@ function normalizeText(value: unknown, maxLength = 500): string | null {
   return str.length > maxLength ? str.slice(0, maxLength) : str
 }
 
+// Labels are reusable tags (the /labels endpoint below feeds them back as
+// suggestions), so a whole sentence typed into one poisons the suggestion
+// list forever. Cap: 6 whitespace-separated words / 60 chars, enforced on
+// BOTH ends (FeeForm clamps live; this guards imports and raw API calls).
+// Khmer script has no spaces, so the word cap is effectively latin-only --
+// the char cap is what bounds an unspaced Khmer sentence.
+export const FEE_LABEL_MAX_WORDS = 6
+export const FEE_LABEL_MAX_CHARS = 60
+
+export function normalizeFeeLabel(value: unknown): string | null {
+  const str = typeof value === 'string' ? value.trim().replace(/\s+/g, ' ') : ''
+  if (!str) return null
+  const words = str.split(' ').slice(0, FEE_LABEL_MAX_WORDS).join(' ')
+  return words.length > FEE_LABEL_MAX_CHARS ? words.slice(0, FEE_LABEL_MAX_CHARS).trim() : words
+}
+
 function normalizeDate(value: unknown): string {
   const str = typeof value === 'string' ? value.trim() : ''
   const parsed = str ? new Date(str) : new Date()
@@ -197,6 +213,34 @@ app.get('/report', async (c) => {
   })
 })
 
+// GET /api/fees/labels -- every distinct saved label with its usage count
+// and dominant fee type, most-used first. Feeds FeeForm's label suggestions
+// so a recurring expense ("Grab", "ទឹកភ្លើង") is picked, not retyped -- and
+// the dominant type lets the form auto-select the right fee type when a
+// known label is chosen (six real rows were saved as 'expense' while
+// carrying delivery-company labels before this existed). Registered before
+// /:id so 'labels' is not eaten by the id param route.
+app.get('/labels', async (c) => {
+  const db = getDb(c.env)
+  const rows = await db.prepare(`
+    SELECT f.label AS label, COUNT(*) AS uses,
+      (SELECT f2.fee_type FROM fees f2 WHERE f2.label = f.label
+        GROUP BY f2.fee_type ORDER BY COUNT(*) DESC, f2.fee_type LIMIT 1) AS fee_type
+    FROM fees f
+    WHERE f.label IS NOT NULL AND TRIM(f.label) <> ''
+    GROUP BY f.label
+    ORDER BY uses DESC, f.label
+    LIMIT 300
+  `).all<{ label: string; uses: number; fee_type: string }>()
+  return c.json({
+    labels: (rows || []).map((r) => ({
+      label: String(r.label || ''),
+      uses: Number(r.uses) || 0,
+      fee_type: normalizeFeeType(r.fee_type),
+    })),
+  })
+})
+
 // GET /api/fees/:id
 app.get('/:id', async (c) => {
   const db = getDb(c.env)
@@ -224,7 +268,7 @@ app.post('/', async (c) => {
   const body = await c.req.json().catch(() => ({} as Record<string, unknown>))
 
   const feeType = normalizeFeeType(body.fee_type ?? body.feeType)
-  const label = normalizeText(body.label, 200)
+  const label = normalizeFeeLabel(body.label)
   const amountUsd = round2(Math.max(toNumber(body.amount_usd ?? body.amountUsd), 0))
   const amountKhr = round2(Math.max(toNumber(body.amount_khr ?? body.amountKhr), 0))
   const feeDate = normalizeDate(body.fee_date ?? body.feeDate)
@@ -274,7 +318,7 @@ app.put('/:id', async (c) => {
   }
 
   const feeType = body.fee_type !== undefined || body.feeType !== undefined ? normalizeFeeType(body.fee_type ?? body.feeType) : existing.fee_type
-  const label = body.label !== undefined ? normalizeText(body.label, 200) : existing.label
+  const label = body.label !== undefined ? normalizeFeeLabel(body.label) : existing.label
   const amountUsd = body.amount_usd !== undefined || body.amountUsd !== undefined ? round2(Math.max(toNumber(body.amount_usd ?? body.amountUsd), 0)) : existing.amount_usd
   const amountKhr = body.amount_khr !== undefined || body.amountKhr !== undefined ? round2(Math.max(toNumber(body.amount_khr ?? body.amountKhr), 0)) : existing.amount_khr
   const feeDate = body.fee_date !== undefined || body.feeDate !== undefined ? normalizeDate(body.fee_date ?? body.feeDate) : existing.fee_date
