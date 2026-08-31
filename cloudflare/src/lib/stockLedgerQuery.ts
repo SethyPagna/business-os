@@ -59,13 +59,17 @@ export function buildStockLedgerQuery(filters: StockLedgerFilters = {}): StockLe
   const branchId = Number(filters.branchId) || 0
   if (productId > 0) { where.push('m.product_id = @productId'); params.productId = productId }
   if (branchId > 0) { where.push('m.branch_id = @branchId'); params.branchId = branchId }
-  // Inclusive calendar-day bounds on the stored timestamp, the same shape
-  // auditLogQuery.ts uses -- date(created_at) never excludes a same-day
-  // row over its time component.
+  // Inclusive calendar-day bounds on the stored timestamp, kept SARGable so
+  // idx_inventory_movements_created_pg is actually used instead of a full scan
+  // of every movement row: date(m.created_at) would wrap the indexed column
+  // and force the scan. `m.created_at >= @startDate` admits any time on the
+  // start day, and `m.created_at < date(@endDate,'+1 day')` admits all of the
+  // end day and excludes the next -- the same same-day-inclusive row set the
+  // old date() form produced (proven in test-stock-ledger-daterange-pure.cjs).
   const startDate = /^\d{4}-\d{2}-\d{2}$/.test(String(filters.startDate || '')) ? String(filters.startDate) : ''
   const endDate = /^\d{4}-\d{2}-\d{2}$/.test(String(filters.endDate || '')) ? String(filters.endDate) : ''
-  if (startDate) { where.push('date(m.created_at) >= @startDate'); params.startDate = startDate }
-  if (endDate) { where.push('date(m.created_at) <= @endDate'); params.endDate = endDate }
+  if (startDate) { where.push('m.created_at >= @startDate'); params.startDate = startDate }
+  if (endDate) { where.push("m.created_at < date(@endDate, '+1 day')"); params.endDate = endDate }
   const search = String(filters.search || '').trim().slice(0, 120)
   if (search) {
     // LIKE with ESCAPE, auditLogQuery.ts convention: user text matches
