@@ -828,7 +828,21 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
     }
     writeStoredRuntimeDescriptor(runtimeDescriptor)
 
-    const mergedSettings = mergeSettingsWithDeviceOverrides(safePayload?.settings || {})
+    // Same guard loadSettings has: the offline / invalid-session / recovery
+    // bootstrap fallbacks legitimately carry `settings: {}` — replacing live
+    // server settings with that empty blob mid-session silently reverts every
+    // settings-driven surface to defaults (POS exchange rates, payment
+    // methods, receipt settings) and blanks the Settings form. Keep what we
+    // already have unless the payload actually brought settings.
+    const payloadSettings = safePayload?.settings && typeof safePayload.settings === 'object'
+      ? safePayload.settings as AppSettings
+      : {}
+    const currentSettings = settingsRef.current && typeof settingsRef.current === 'object'
+      ? settingsRef.current
+      : {}
+    const mergedSettings = mergeSettingsWithDeviceOverrides(
+      Object.keys(payloadSettings).length ? payloadSettings : currentSettings,
+    )
 
     setSettings(mergedSettings)
     if (mergedSettings.login_session_duration) {

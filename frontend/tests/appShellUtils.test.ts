@@ -129,6 +129,25 @@ runTest('Khmer buttons use a stronger but not extra-bold weight', () => {
   assert.match(source, /font-weight:\s*600 !important/)
 })
 
+// Part 539: the offline / invalid-session / auth-recovery bootstrap fallbacks
+// carry `settings: {}`; applyBootstrapPayload used to REPLACE live context
+// settings with that empty blob mid-session, silently reverting every
+// settings-driven surface (POS exchange rates, payment methods, receipts) to
+// defaults and blanking the Settings form. Pin the keep-current guard — the
+// same rule loadSettings already applies to empty payloads.
+runTest('applyBootstrapPayload keeps live settings when the payload brought none', () => {
+  assert.match(
+    appContextSource,
+    /Object\.keys\(payloadSettings\)\.length \? payloadSettings : currentSettings/,
+    'an empty bootstrap settings blob must not replace non-empty live settings',
+  )
+  assert.doesNotMatch(
+    appContextSource,
+    /mergeSettingsWithDeviceOverrides\(safePayload\?\.settings \|\| \{\}\)/,
+    'the unguarded wipe-on-empty merge must be gone',
+  )
+})
+
 if (failed > 0) {
   process.exitCode = 1
 }
