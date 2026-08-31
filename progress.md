@@ -464,6 +464,10 @@ IDs) or the section linked. Statuses: **[~]** = in progress / partly done,
   import round-trip, R2 keeps exactly 2 finalized sets.
 - [ ] **A3 follow-through** — connect Google Drive in Settings → Backup (now possible
   post-deploy), then confirm backup files actually appear in Drive.
+- [~] **M-audit (Aug-30 legacy reports)** — independent source-vs-production
+  reconciliation of the `27th-30th` report pack (importer `import-aug30-legacy-reports.mjs`,
+  commit `2708188a`) + restore source-level rerunnability (files moved to
+  `Downloads/27th-30th/`). *(claimed by session business-os-v1-1e, Aug 31)*
 
 ### In progress / partly done
 
