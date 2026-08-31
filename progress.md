@@ -138,7 +138,21 @@ admin+storefront `/health` 200, `/ws` unauth → 426 (M1 handler alive/gated), a
 **main HEAD has since advanced past `d558dcfb` (other lanes) — that later work is NOT in this deploy.**
 See session-log Part 577.
 
-**⚠ PROD DATA VERIFIED CLEAN on the branch/sales/gross-sales claims (coordinator 7b, Sep 1 ~00:45 UTC, read-only prod D1 SELECTs — re-verify before acting, this is a snapshot not ground truth).** A peer relayed three "production data-corruption" findings; direct prod query REFUTES all three: (1) `branches` has exactly two — `Warehouse`(1) + `Shop`(2); NO stray "Leang Cosmetic Shop" branch exists (already canonical — do NOT "merge a stray branch", there is none to merge). (2) All 14,939 sales are on branch_id=2 (Shop); ZERO NULL branch_id; zero on Warehouse. (3) `subtotal_usd` is populated (0 null, 4 zero-or-null of 14,939, SUM=$1,873,656.34) so gross_sales_usd (salesAnalytics.ts:274 = COALESCE(SUM(subtotal_usd),0)) computes fine. The local miniflare D1 is a different, messy dev set (harmless). **Any session picking up a "prod data-corruption" fix must re-run read-only prod SELECTs first — acting on the stray-branch premise would corrupt already-clean prod.** Broader systemic claims (missing timestamps, supplier/stock drift) are unverified — verify against prod directly before acting.
+**DEPLOY QUEUE since Part 577 `d558dcfb` (coordinator 7b, Sep 1 ~01:05 UTC) — HOLDING this tick.**
+3 self-contained frontend fixes are deploy-ready: dashboard fit-shortest card heights `a29d2e27`,
+dashboard Profit/COGS i18n + payment-legend `1872a52e`, small-screen product-name touch-pan
+`2d5f1c8f`. The only backend commit — merge re-parents `sale_items`+`inventory_movements` onto the
+survivor `c44a4520` (Part 578 item 2a) — is HELD: its undo/redo slice (item 2b) is being written
+UNCOMMITTED in the working tree right now (a `reversal` object wired to `lib/undoAppliers.ts` +
+`undo_snapshots`). Shipping the re-parent ahead of its undo would half-ship a fix the user approved
+"with full undo/redo", and races the active lane owner. **NOTE for any session that runs cloudflare
+tsc on the dirty tree: the error `'reversal' does not exist in type` at products.ts:2394 is that
+in-progress uncommitted slice, NOT a broken HEAD — committed HEAD `c44a4520` compiles clean
+(`git show HEAD:…/products.ts` has no `reversal`). Don't false-alarm.** Next deploy trigger:
+catalog-integrity lane completes item 2 (undo migration `0097` committed) + green committed HEAD →
+batch the 3 UI fixes + complete catalog item 2 in one certified-worktree deploy.
+
+**⚠ PROD DATA VERIFIED CLEAN on the branch/sales/gross-sales claims (coordinator 7b, Sep 1 ~00:45 UTC, read-only prod D1 SELECTs — re-verify before acting, this is a snapshot not ground truth).** A peer relayed three "production data-corruption" findings; direct prod query REFUTES all three: (1) `branches` has exactly two — `Warehouse`(1) + `Shop`(2); NO stray "Leang Cosmetic Shop" branch exists (already canonical — do NOT "merge a stray branch", there is none to merge). (2) All 14,939 sales are on branch_id=2 (Shop); ZERO NULL branch_id; zero on Warehouse. (3) `subtotal_usd` is populated (0 null, 4 zero-or-null of 14,939, SUM=$1,873,656.34) so gross_sales_usd (salesAnalytics.ts:274 = COALESCE(SUM(subtotal_usd),0)) computes fine. The local miniflare D1 is a different, messy dev set (harmless). **Any session picking up a "prod data-corruption" fix must re-run read-only prod SELECTs first — acting on the stray-branch premise would corrupt already-clean prod.** Follow-up (Sep 1 ~01:05 UTC): the "missing timestamps" claim is ALSO refuted — `sales` 0/14,939 missing `created_at`, `inventory_movements` 0/21,375 missing; basic stock integrity clean (0 negative `branch_stock`, 0 negative `branch_batch_stock`, 0 unnamed of 6,104 products). SIX specific corruption claims now all refuted against live prod (stray branch, NULL branch_id, subtotal, timestamps, negative stock, unnamed products) — the reports read like stale screenshots or the messy local miniflare set, not production. Only the vaguer supplier-attribution + naming-convention drift remain unverified; they need a concrete offending record from the user before any audit, and NO prod mutation without an explicit user request.
 
 **✅ STAGE 1 COMPLETE — ALL 9 AUDIT REDS RECONCILED, SUITE GREEN, DEPLOYING (user
 authorized the full cycle; coordinator 7b, Aug 31 ~20:30).** Backend **132/132**,
