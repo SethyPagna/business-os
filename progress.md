@@ -88,6 +88,36 @@ Two rules learned the hard way, both from real incidents in this file's own hist
 
 ## Current status
 
+**→ STOREFRONT-ACCOUNT-UI LANE (this session, Aug 31 ~afternoon): CLAIMED.** User
+correction to the §2 storefront-account work (commit `4c77c42b`): (1) keep the
+membership lookup but **disabled** — guests see "You are currently in GUEST mode.
+This feature is not enabled in Guest mode for privacy and security purposes.";
+(2) default `leangbeauty.com` landing = **About** page (not Products); (3) move
+**Account (profile) sign-in/up** out of the nav tabs into a **top-bar icon** that
+opens a slide-in drawer (good design), nav tabs become About·Products·FAQ·AI;
+(4) **Wishlist** gets its own top-bar icon + drawer too. Files (path-scoped,
+storefront-only): `frontend/src/components/catalog/PublicCatalogPage.tsx`,
+`frontend/src/components/catalog/CatalogPreviewSurface.tsx` (adds optional
+storefront-only header-icon props; admin `CatalogPage.tsx` untouched),
+`frontend/src/components/catalog/CatalogAccountSection.tsx`. NO edits to
+`en.json`/`km.json` (dirty in other lanes) — new strings ship as inline `copy()`
+en+km fallbacks. Shared `CatalogSecondaryTabs.CatalogMembershipSection` left as-is
+(admin preview still renders it). No backend, no migrations.
+
+**→ STOCK-CHANGES-UI LANE (this session, Aug 31 ~afternoon): CLAIMED.** User asks
+for a rework of the **Stock Changes section on the Products page**
+(`StockChangeSection.tsx`). Scope: (1) an "Adjust" action menu (Add/Remove stock,
+adjust quantity) + per-row context actions; (2) 24h time everywhere + investigate
+blank time values (import/parse); (3) Stock In/Out imbalance — verify data +
+visual indicator; (4) mini-section layout — move filters/stats below the
+date-range + search row, drop the "Adjustments" view, show stats inline (no
+Stats expander). Files (path-scoped): `frontend/src/components/products/StockChangeSection.tsx`,
+`frontend/src/components/products/Products.tsx` (stock_changes header-actions only),
+`frontend/src/lang/en.json` + `km.json` (ride-along keys named at commit — NOTE
+both packs are also dirty in the legacy-finance-UI + sales-hub lanes; I add keys
+only, pathspec-atomic). Backend touch (bucket/query) TBD pending a scope decision
+with the user. No migrations.
+
 **[DONE — DEPLOYED (fourth of the day), 7a, Aug 31 ~03:57 UTC (user-authorized
 "continue" on the deploy ask; bf's duplicate authorization stood down by
 coordinator): production is commit `0db93598`, Worker version
@@ -157,6 +187,29 @@ green (typecheck + ~146 files); new Part-548/549 pins in
 tests/statsStrip.test.ts. Files: shared/StatsStrip.tsx, sales/Sales.tsx,
 sales/SalesDailyReport.tsx, returns/Returns.tsx, lang packs,
 tests/statsStrip.test.ts. Untouched: Inventory/Dashboard/FeesPage layout.]**
+
+**[DONE + VERIFIED LIVE — same session, Aug 31 (Part 552, round 3, image
+feedback): three small-screen fixes to the Sales hub + Reports.** (A) The hub
+tab strip (Sales/Returns/Fees/Reports) is now full-width **flex-1 equal tabs**
+with truncating labels — it was a content-sized inline-flex pill, so on a
+phone the 4 icon+label tabs overflowed the viewport and pushed the page wide
+("Reports" fell off the right edge = "not fit in one row ... touching edge").
+(B) In Reports, the **branch select merges into the type-chips row** ([All]
+[Sales][Returns][Fees] + [All Branches]) instead of wrapping to its own third
+line. (C) Each **report section's controls ride its title row**: the section
+title (icon+label) moved OUT of ReportsHub and INTO each section component via
+a new `titleNode` prop, so Sales' status/method selects and Returns'/Fees'
+By-day/reason/type chips sit ml-auto beside the title, and the "N | Revenue |
+Profit" totals drop to the line below ("the sales, returns and fees sections
+the card title can be moved to title row"). Verified LIVE at a 375px mobile
+viewport (Khmer, seeded admin): all 4 tabs fit one row with Reports selected
+and not clipped; គ្រប់សាខា (All Branches) rides the chips row; the Sales title
+row shows ស្ថានភាពទាំងអស់/គ្រប់វិធីទូទាត់ and the Returns title row shows
+តាមថ្ងៃ/តាមមូលហេតុ/តាមប្រភេទ, totals beneath each. fe tsc clean, verify:i18n OK
+(4190/420), statsStrip + returnsLayout + navigationConfig green; new Part-552
+pins. Files: sales/SalesHubPage.tsx, sales/ReportsHub.tsx,
+sales/SalesDailyReport.tsx, sales/ReturnsReportSection.tsx,
+sales/FeesReportSection.tsx, tests/statsStrip.test.ts.]**
 
 **[DONE — i18n session, Aug 31 (Part 545): translation-coverage sweep — 340
 missing pack keys added to BOTH en.json and km.json, + a verify:i18n lock.**
@@ -467,6 +520,21 @@ the resolved change rate into computeSaleTotals ~449, and the PATCH /:id/status
 overpay recompute ~1113 — the HIGH Part-539 change_khr fix). Ping c8 when your
 sales.ts commit lands, or tell c8 if you'd rather absorb those two hunks in your
 commit. c8 holds all sales.ts edits until then so nothing lands half-wired.
+
+**→ LEGACY-FINANCE-UI LANE (coordinator 7b, ~11:55): CLAIM + COMMIT, please.**
+Your lane (compat.ts, contacts.ts, auditLogTransport, contactReadTransport,
+SuppliersTab, ReviewLogsPage, en/km packs, new ApInvoicesSection +
+LegacyDeletedSalesSection) has been dirty and growing for 45+ minutes with NO
+claim block — this is the second unclaimed slice from this lane (the migrations
+were the first). Add a claim naming your files, and commit finished slices
+pathspec-atomically (lang packs: name any ride-along keys). Unclaimed uncommitted
+work is how absorptions and losses happen; commit-per-change is the user's
+standing directive.
+
+**→ SALES-HUB SESSION (coordinator 7b, ~11:30):** your commit `a0b2edbf` says
+"Part 549" but 549 is TAKEN (7a's verification sweep, logged). When you write
+your log entry: grep-max+1 (552 as of now), and note the commit-message mismatch
+in the entry — the message is immutable, the log number is what counts.
 
 **✅ DEPLOY DONE — FREEZE LIFTED (7a, ~11:05; independently verified by
 coordinator 7b).** Production = commit 0db93598, Worker version 53804f02 at 100%.

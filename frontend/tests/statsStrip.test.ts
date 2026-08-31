@@ -120,20 +120,12 @@ test('Part 548: the Reports range totals show Profit on every viewport', () => {
   assert.ok(!/hidden sm:inline[^>]*>\{t\('profit'\)/.test(report), 'Profit is not hidden below the sm breakpoint')
 })
 
-test('Part 549: the Sales report filters are compact chips on the totals row (like Returns/Fees)', () => {
+test('Part 549/552: the Sales report status/method filters are compact chip-selects', () => {
   const report = read('src/components/sales/SalesDailyReport.tsx')
-  // Both the totals and the status/method selects live in ONE flex row with
-  // "|" dividers, matching ReturnsReportSection/FeesReportSection density
-  // (user: "statuses and methods button can be like returns and fees,
-  // compact in one row"). The selects are the compact h-7 size, not the old
-  // full-height dropdowns that wrapped the totals to a second line.
+  // Compact h-7 chip-selects (not the old full-height dropdowns), matching
+  // the Returns/Fees report density.
   assert.ok(report.includes("buttonClassName=\"h-7 py-0 px-2 text-[11px]\""), 'status/method use the compact chip-select size')
-  // The compact filters right-align (ml-auto) after the totals inside the
-  // same flex row: totals text first, then the status select.
-  const rowStart = report.indexOf('rangeTotals.tx')
-  const filterCluster = report.indexOf('ml-auto flex flex-wrap items-center gap-1.5', rowStart)
-  assert.ok(rowStart > -1 && filterCluster > rowStart, 'the compact filter cluster follows the totals inside the one row')
-  assert.ok(report.indexOf('options={statusOptions}', filterCluster) > filterCluster, 'the status select sits in that cluster')
+  assert.ok(report.includes('options={statusOptions}') && report.includes('options={paymentOptions}'), 'both selects render')
 })
 
 test('Part 549: the Sales section shows an always-visible summary + a leaner toolbar', () => {
@@ -149,6 +141,35 @@ test('Part 549: the Sales section shows an always-visible summary + a leaner too
   assert.ok(!/id: 'grouping'/.test(sales), 'the Group-by filter section is gone')
   assert.ok(!sales.includes('buildPeriodFilterOptions'), 'the year/month Period options are gone')
   assert.ok(/id: 'period'[\s\S]{0,200}DateTimeRangePicker/.test(sales), 'Period is a start/end date-range picker')
+})
+
+test('Part 552: report section controls ride the title row; hub tabs fit; branch merges', () => {
+  // Each report section places its controls on the hub-provided title row
+  // (user: "the sales, returns and fees, sections the card title can be
+  // moved to title row"): the section owns a `titleNode` prop and ReportsHub
+  // stops rendering a standalone title.
+  for (const rel of [
+    'src/components/sales/SalesDailyReport.tsx',
+    'src/components/sales/ReturnsReportSection.tsx',
+    'src/components/sales/FeesReportSection.tsx',
+  ]) {
+    const src = read(rel)
+    assert.ok(/titleNode\??: ReactNode/.test(src), `${rel} accepts a titleNode`)
+    assert.ok(src.includes('{titleNode}'), `${rel} renders the titleNode on its control row`)
+  }
+  const hub = read('src/components/sales/ReportsHub.tsx')
+  assert.ok(hub.includes('titleNode={titleNode}'), 'ReportsHub passes the title into each section')
+  assert.ok(!/<Icon className="h-4 w-4" \/> \{label\}/.test(hub), 'ReportsHub no longer renders its own standalone section title row')
+  // The branch select rides the type-chips row, not its own line.
+  assert.ok(/typeChips\.map[\s\S]{0,900}branches\.length \? \(\s*<AppSelect/.test(hub), 'the branch select sits inside the type-chips row')
+
+  // The hub tab row fits one row on phones: full-width equal (flex-1) tabs
+  // with truncating labels, not a content-sized inline-flex pill that
+  // overflowed the viewport ("not fit in one row ... touching edge").
+  const shell = read('src/components/sales/SalesHubPage.tsx')
+  assert.ok(shell.includes('flex w-full rounded-xl'), 'the tab strip is full-width')
+  assert.ok(/flex-1 min-w-0 justify-center/.test(shell), 'each tab is an equal flex-1 cell')
+  assert.ok(shell.includes('<span className="truncate">{tab.label}</span>'), 'tab labels truncate rather than widen the row')
 })
 
 test('old bespoke stat surfaces are really gone (no zombie tile grids)', () => {

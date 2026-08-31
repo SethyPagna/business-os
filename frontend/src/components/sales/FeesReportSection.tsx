@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import type { DateTimeRange } from '../shared/DateTimeRangePicker.tsx'
 import { getFeesReport } from '../../api/feesTransport.ts'
 import Modal from '../shared/Modal'
@@ -22,6 +22,9 @@ interface FeesReportSectionProps {
   range: DateTimeRange
   branchId?: string
   active?: boolean
+  /** The Reports-hub section title (icon + label). Rendered on the same row
+   * as this section's breakdown chips; the totals drop to a line below. */
+  titleNode?: ReactNode
 }
 
 function displayDay(iso: string): string {
@@ -46,7 +49,7 @@ function normalize(raw: unknown): FeesReport {
   }
 }
 
-export default function FeesReportSection({ t, fmtUSD, range, branchId, active = true }: FeesReportSectionProps) {
+export default function FeesReportSection({ t, fmtUSD, range, branchId, active = true, titleNode }: FeesReportSectionProps) {
   const [report, setReport] = useState<FeesReport | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
@@ -111,12 +114,10 @@ export default function FeesReportSection({ t, fmtUSD, range, branchId, active =
         </div>
       ) : null}
 
-      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-slate-500 dark:text-slate-400">
-        <span>{report?.totals.count ?? 0} {t('fees') || 'fees'}</span>
-        <span className="text-slate-300 dark:text-slate-600">|</span>
-        <span>{t('total') || 'Total'} <b className="text-slate-900 dark:text-white">{fmtUSD(report?.totals.amount_usd ?? 0)}</b></span>
-        <span className="text-slate-300 dark:text-slate-600">|</span>
-        <span>{t('avg_fee') || 'Avg fee'} <b className="text-slate-900 dark:text-white">{fmtUSD(report && report.totals.count > 0 ? report.totals.amount_usd / report.totals.count : 0)}</b></span>
+      {/* Title row: the section title (from the hub) sits left, the
+          breakdown chips ride ml-auto on the SAME row (Part 552). */}
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+        {titleNode ? <span className="flex items-center gap-2 text-sm font-semibold text-slate-800 dark:text-slate-100">{titleNode}</span> : null}
         <span className="ml-auto flex items-center gap-1.5">
           <button
             type="button"
@@ -133,6 +134,15 @@ export default function FeesReportSection({ t, fmtUSD, range, branchId, active =
             {t('by_type') || 'By type'} <span className="text-slate-400">{report?.by_type.length ?? 0}</span>
           </button>
         </span>
+      </div>
+
+      {/* Totals on their own line below the title row. */}
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-slate-500 dark:text-slate-400">
+        <span>{report?.totals.count ?? 0} {t('fees') || 'fees'}</span>
+        <span className="text-slate-300 dark:text-slate-600">|</span>
+        <span>{t('total') || 'Total'} <b className="text-slate-900 dark:text-white">{fmtUSD(report?.totals.amount_usd ?? 0)}</b></span>
+        <span className="text-slate-300 dark:text-slate-600">|</span>
+        <span>{t('avg_fee') || 'Avg fee'} <b className="text-slate-900 dark:text-white">{fmtUSD(report && report.totals.count > 0 ? report.totals.amount_usd / report.totals.count : 0)}</b></span>
       </div>
 
       {openTable ? (

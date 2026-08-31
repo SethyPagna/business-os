@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import Modal from '../shared/Modal'
 import DateTimeRangePicker, { EMPTY_DATE_TIME_RANGE, type DateTimeRange } from '../shared/DateTimeRangePicker.tsx'
 import { getSalesDailyReport, getSalesDayReport } from '../../api/salesTransport.ts'
@@ -83,6 +83,10 @@ interface SalesDailyReportProps {
   onRangeChange?: (range: DateTimeRange) => void
   branchId?: string
   embedded?: boolean
+  /** The Reports-hub section title (icon + label). Rendered on the same row
+   * as this section's status/method filters; the totals drop to a line
+   * below. */
+  titleNode?: ReactNode
 }
 
 function monthStartIso(): string {
@@ -125,7 +129,7 @@ function timeParams(range: DateTimeRange): Record<string, string | number> {
   return { startTime: range.startTime, endTime: range.endTime, tzOffsetMinutes: localTzOffsetMinutes() }
 }
 
-export default function SalesDailyReport({ t, fmtUSD, active = true, range: externalRange, onRangeChange, branchId: externalBranchId, embedded = false }: SalesDailyReportProps) {
+export default function SalesDailyReport({ t, fmtUSD, active = true, range: externalRange, onRangeChange, branchId: externalBranchId, embedded = false, titleNode }: SalesDailyReportProps) {
   const [internalRange, setInternalRange] = useState<DateTimeRange>(() => ({
     ...EMPTY_DATE_TIME_RANGE,
     startDate: monthStartIso(),
@@ -417,24 +421,13 @@ export default function SalesDailyReport({ t, fmtUSD, active = true, range: exte
 
   return (
     <div className="space-y-3">
-      {/* ONE compact row like the Returns/Fees report sections (user, Aug
-          31: "statuses and methods button can be like returns and fees,
-          compact in one row ... same row as total summaries"): the text
-          totals lead with "|" dividers, and the status/method (+branch when
-          standalone) filters right-align as small chip-selects instead of
-          the old full-size dropdowns that wrapped the totals onto a second
-          line. */}
+      {/* Title row (Part 552): the section title sits left and the compact
+          status/method (+branch when standalone) chip-selects ride ml-auto
+          on the SAME row — "the sales ... sections the card title can be
+          moved to title row". The totals drop to their own line below. */}
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-slate-500 dark:text-slate-400">
         {!embedded ? <DateTimeRangePicker value={range} onChange={setRange} t={t} /> : null}
-        <span>{rangeTotals.tx} {t('sales') || 'sales'}</span>
-        <span className="text-slate-300 dark:text-slate-600">|</span>
-        <span>{t('revenue') || 'Revenue'} <b className="text-slate-900 dark:text-white">{fmtUSD(rangeTotals.revenue)}</b></span>
-        <span className="text-slate-300 dark:text-slate-600">|</span>
-        {/* Profit shows on EVERY viewport (Part 548): it was `hidden
-            sm:inline`, so phones showed "N sales | Revenue" with no Profit
-            — the reported "reports not showing profit near the n sales |
-            Revenue row". */}
-        <span>{t('profit') || 'Profit'} <b className={`${rangeTotals.profit < 0 ? 'text-red-600 dark:text-red-400' : 'text-emerald-700 dark:text-emerald-400'}`}>{fmtUSD(rangeTotals.profit)}</b></span>
+        {titleNode ? <span className="flex items-center gap-2 text-sm font-semibold text-slate-800 dark:text-slate-100">{titleNode}</span> : null}
         <span className="ml-auto flex flex-wrap items-center gap-1.5">
           <AppSelect
             value={statusFilter}
@@ -469,6 +462,17 @@ export default function SalesDailyReport({ t, fmtUSD, active = true, range: exte
             </button>
           ) : null}
         </span>
+      </div>
+
+      {/* Totals on their own line below the title row. Profit shows on
+          EVERY viewport (Part 548) — it was `hidden sm:inline`, so phones
+          showed "N sales | Revenue" with no Profit. */}
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-slate-500 dark:text-slate-400">
+        <span>{rangeTotals.tx} {t('sales') || 'sales'}</span>
+        <span className="text-slate-300 dark:text-slate-600">|</span>
+        <span>{t('revenue') || 'Revenue'} <b className="text-slate-900 dark:text-white">{fmtUSD(rangeTotals.revenue)}</b></span>
+        <span className="text-slate-300 dark:text-slate-600">|</span>
+        <span>{t('profit') || 'Profit'} <b className={`${rangeTotals.profit < 0 ? 'text-red-600 dark:text-red-400' : 'text-emerald-700 dark:text-emerald-400'}`}>{fmtUSD(rangeTotals.profit)}</b></span>
       </div>
 
       {error ? (
