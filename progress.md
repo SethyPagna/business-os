@@ -138,13 +138,18 @@ Stopped the community wrangler (owner shell idle, all lanes committed), ran
 NOT applied portal tables under the old 0086 name, clean forward apply), restarted
 wrangler dev on 8787 (session c8 now owns it — message c8 before killing).
 
-**[~ CLAIMED — session business-os-v1-c8, Aug 31: full post-settlement verification
-sweep.** Golden Rule 5 battery (both tscs, all backend tests individually, all
-frontend tests individually, real vite build, fresh migration chain) + zombie/orphan
-+ contract-diff + public-surface audits + LIVE browser drive of every surface
-(admin, POS, storefront incl. new accounts) with expected-vs-actual. Read-mostly:
-no product code edits planned; any defect found gets flagged here or fixed as an
-isolated commit. Peers: no file claims beyond progress.md/session-log.]**
+**[DONE — session business-os-v1-c8, Aug 31, Part 539: full post-settlement
+verification sweep.** Battery green at HEAD: both tscs, backend 119/119
+individually, frontend 146/146 individually, real vite build, full test:utils
+chain exit 0 — after fixing two Part-534 test-infra breaks (`8b1a86f5`) and the
+Settings role-admin bug (`b93be08d`, Business/Security sections rendered empty
+for role-granted admins); both fixes made the Part-538 deploy. Live-drove every
+admin page + POS checkout + storefront accounts (signup→badge chain verified
+end-to-end), desktop + 375×812, zero app-request errors, no overflow.
+Public-surface audit CLEAN (2 LOW flags). NEW defects flagged — see
+[Open defects — Part-539](#open-defects--part-539-verification-sweep-c8-aug-31):
+the HIGH one is stored `change_khr` diverging from the displayed change when a
+dedicated change rate is set. Full evidence: session-log Part 539.]****
 
 **✅ INFRA RESOLVED (Aug 30 ~23:15): the 8787 DO-SQLite lock race is over.** 0b shut
 down their 8899 wrangler (whole tree, command line verified before the kill); the
@@ -281,6 +286,39 @@ class · unpaged reads/N+1 + `date(created_at)` on 36 sites + movements-search R
 chain · receipt/date locale duplicates (main date fixed Part 519) · MEDIUM list
 (review-tier bypasses, offline-sale timestamps, import-review parity, failed-job
 "Queued 0%", Suppliers/Delivery sort/pagination).
+
+### Open defects — Part-539 verification sweep (c8, Aug 31)
+
+Full detail + live expected-vs-actual probes in session-log Part 539:
+
+- **HIGH (money):** server recomputes `change_khr` at the MAIN rate
+  (`cloudflare/src/lib/saleTotals.ts:107-108`), ignoring the Part-534 change
+  rate the POS displayed — stored sale/receipt says 9,061៛ where the cashier
+  was told 8,820៛ (live probe). Change rate also not stamped on the sale row.
+  LIVE IN PRODUCTION since the Part-538 deploy (harmless while
+  change_exchange_rate stays unset — it currently is).
+- **MEDIUM (POS):** card stock badge (pickBestBranchId → default branch) and
+  the lot sheet's fallback branch (`branchOptions[0]` sorted alphabetically,
+  `ProductDetailSheet.tsx:321-326`) resolve DIFFERENT branches — card showed
+  3 pcs (Main Store) while the sheet silently offered/booked Branch 2's lot.
+- **MEDIUM (settings):** Settings form never hydrates a stored
+  `change_exchange_rate` — field renders blank while the server holds a value
+  POS actively uses; admins can't see or clear it from the UI.
+- **LOW:** POS needs a reload to pick up settings changes; storefront signup's
+  blank-membership reminder is a native `window.confirm` (silently aborts in
+  embedded/webview contexts; house style is styled modals); React key warning
+  in CatalogProductsSection; `aiProviderId` internal id in public portal
+  /config; membership-existence oracle on POST /portal/submissions (404 vs
+  success, rate-limited).
+- **Zombie/orphan cleanup lane (Golden Rule 6, needs one dedicated session):**
+  custom-tables cluster (unmounted route + unimported component + transport),
+  DatedStockReconciliationModal chain (+ BulkImportModal's dead "choose Dated
+  Reconciliation" button), `lib/businessMetrics.ts`, `__lightbox_test_entry.tsx`,
+  `utils/index.ts` barrel, PublicCatalogPage dead membership machinery (props
+  threaded into CatalogSecondaryTabs that no section consumes); duplicates:
+  users.ts normalizePhoneLookup, 3× escapeHtml, localDb.ts dead CSV exports.
+  Removals must retire the tests pinning them (datedStockReconciliationModal,
+  productReplaceImportPlan noted test-only since Part 319).
 
 ### Flagged, not guessed / needs a decision
 

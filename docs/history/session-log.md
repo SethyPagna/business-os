@@ -15235,3 +15235,128 @@ for the user or an explicitly-authorized session; connecting Google Drive in
 Settings → Backup (A3 follow-through, now actionable); the static /health
 version constant still reads cloudflare-portal-bootstrap-20260728 (flagged in
 Part 537, unchanged).
+
+## Part 539 (chat, Aug 31 2026, session business-os-v1-c8) — full post-settlement verification sweep
+
+The user asked for a deep verification of everything the parallel sessions
+shipped (Parts ~499–535): "make sure all are working, responsive, fully
+functional, matches expected vs actual, buttons working, no ui block, not out
+of bounds, no zombie, orphan etc". Read-mostly sweep; two isolated fixes and
+one infra action below. Everything here really ran in this checkout.
+
+**Golden Rule 5 battery (all green at HEAD after the two fixes below):**
+- `cloudflare` tsc --noEmit: clean. `frontend` tsc --noEmit: clean.
+- Backend: **119/119** `test-*.cjs` run individually, all PASS.
+- Frontend: **146/146** `tests/*.test.ts` run individually, all PASS —
+  after fixing two breaks the Part-534 money lane left on HEAD:
+  posMoneyRounding pinned the pre-534 `changeUsd * exchangeRate` formula
+  (source moved to the dedicated `changeExchangeRate`), and the lane's two new
+  tests (changeExchangeRate, rielRounding) were never appended to test:utils
+  (testChainCoverage caught it). Fixed + committed `8b1a86f5`; full
+  `npm run test:utils` chain re-run at sweep end: **exit 0**.
+- Real `vite build`: succeeds (~1m30s). check:source OK. verify:public-runtime OK.
+- Migration numbering: 88 files, max 0087, no gaps; only duplicate number is
+  the historical 0018 pair (known/accepted, DEPLOY.md now pins it).
+
+**Infra (coordinator-approved):** the shared local D1 was at 0085 while HEAD's
+contacts route joins `portal_accounts` (0087) → `GET /api/customers` 500'd for
+every session on 8787. Stopped the community wrangler, `migrate:local` applied
+0086+0087 cleanly (verified d1_migrations rows + table exists + customers 200),
+restarted 8787 (c8 owns it). Lesson recorded in the coordination playbook by 7b.
+
+**Fixed (isolated commits):**
+- `8b1a86f5` fix(tests) — the two money-lane test-infra breaks above.
+- `b93be08d` fix(settings) — Settings.tsx's `isAdmin` parsed only
+  `user.permissions` (`"{}"` for a role-granted admin) and ignored
+  `role_permissions` — the EXACT bug class AppContext's getMergedPermissionsRaw
+  comment documents. Business/Currency/POS/Security sections rendered EMPTY for
+  the seeded admin. Now merges role+user permissions with the same
+  username/role_code fallback its Sales/Inventory/actionHistory siblings use.
+  Verified live: sections render. Both fixes are ancestors of the Part-538
+  production deploy (`242c2b75`).
+
+**Live browser verification (wrangler 8787 + Vite 5173, desktop and 375×812):**
+every nav page driven with console/network watched — Dashboard, POS, Products,
+Branches hub, Sales (+Returns/Fees/Reports chips), Contacts, Review & Logs,
+Library, Promotions, Settings, portal editor (/catalog), public storefront
+(/shop). After the 0087 migration every app request is 200; the only non-200s
+were this sweep's own malformed probes correctly refused with 400. No
+horizontal overflow anywhere at 375×812; bottom nav present; storefront
+defaults LIGHT. The raw-i18n-keys flash on first Dashboard paint is the
+designed two-stage language loading (core pack sync, full pack async) — keys
+verified present in both packs and resolved after load.
+
+**Expected-vs-actual probes (the money model, Part 534):**
+- Change at fallback (change rate unset, main 4100): paid 50,000៛ on $9.99 →
+  computed change **$2.21 / 9,041៛** (50000−40959, whole riel ✓), cash hint
+  **9,000៛** (100-riel floor ✓).
+- Set change_exchange_rate=4000 via Settings UI (persists ✓): same payment →
+  computed change **8,820៛** (round(2.2051×4000) ✓), cash hint **8,800៛** ✓.
+- Full checkout committed (status modal renders all 3 options): batch-first
+  lot picker enforced, receipt `RCP-20260831-081431` (Phnom Penh format ✓),
+  stock identity after the sale EXACT: product 4 = branch_stock 3+1 = active
+  lot ledger 4, and the sale drained the same lot it displayed (B2: 2→1).
+- Setting restored to unset afterwards.
+
+**Storefront customer accounts (§2/Part 535) verified live end-to-end:**
+/shop → Account tab → privacy notice + no-payment notice render → sign-up
+(name/phone/password) → auto membership id `LCMN-KC543RW0`, session cookie,
+wishlist heart persists server-side (GET /account/wishlist returns the item,
+survives reload), admin Contacts row gains the **Account** badge with
+matching membership + phone_normalized synced. Membership lookup: 403 for
+everyone (verified in code by the leak audit).
+
+**Public-surface leak audit (subagent, every portal endpoint read end-to-end):
+CLEAN across all 6 areas** — portal payload allowlists (no cost/supplier/notes
+anywhere), auth hardening (generic errors + dummy-bcrypt timing guard, HttpOnly
+hashed-token cookie, admin↔portal session isolation), receipts, cart/wishlist
+IDOR-safe (cookie-bound ids only), guest→account merge can't absorb another
+account. Two LOW flags: `aiProviderId` (internal id) in public /config;
+membership-existence oracle on POST /submissions (404 vs success, rate-limited).
+
+**New defects found (flagged, not guessed — see the board's Part-539 list):**
+1. **HIGH (money):** the server ignores the client's change and recomputes
+   `change_khr = round(change_usd × MAIN rate)` (`lib/saleTotals.ts:107-108`) —
+   with a change rate configured, the stored sale (and receipt) disagrees with
+   what POS displayed and the cashier handed over (probe: displayed 8,820៛,
+   stored **9,061៛**). The change rate is also not stamped on the sale row, so
+   the true handed amount is unrecoverable. Backend behavioral fix → flagged.
+2. **MEDIUM (POS):** card badge and lot sheet resolve DIFFERENT branches —
+   badge uses pickBestBranchId (prefers the default branch), the sheet's
+   fallback is `branchOptions[0]` sorted ALPHABETICALLY
+   (`ProductDetailSheet.tsx:321-326`), so "Branch 2" beats "Main Store": card
+   said 3 pcs (B1) while the sheet silently offered/booked B2's 2-pc lot —
+   the exact mismatch class the sheet's own comment says it was built to stop.
+3. **MEDIUM (settings):** the Settings form doesn't hydrate a stored
+   `change_exchange_rate` (field renders blank while the server holds 4000;
+   POS meanwhile uses it) — an admin can't see or clear the configured value.
+4. **LOW:** POS needs a reload to pick up a settings change; storefront signup
+   uses native `window.confirm` for the blank-membership reminder (invisible
+   in embedded/webview contexts — silently aborts submit; app style elsewhere
+   is styled modals); React key warning in CatalogProductsSection lists.
+5. **Zombie/orphan audit (subagent, full import-graph over 418 frontend files
+   + 123 worker files):** confirmed orphans — the custom-tables cluster (BOTH
+   sides: unmounted `routes/customTables.ts`, unimported CustomTables.tsx +
+   customTablesTransport.ts; recorded removed Part 230 but files remain),
+   DatedStockReconciliationModal + mapping + its dead transport chain (and
+   BulkImportModal still ADVERTISES "choose Dated Reconciliation" via a button
+   that only closes), `lib/businessMetrics.ts`, `__lightbox_test_entry.tsx`,
+   `utils/index.ts` barrel, and PublicCatalogPage's dead membership-lookup
+   state machinery (bigger than the Part-535 note: props threaded into
+   CatalogSecondaryTabs that no section consumes). Accidental duplicates:
+   users.ts's normalizePhoneLookup vs lib/contactDuplicates.normalizePhone,
+   3× private escapeHtml, localDb.ts dead CSV exports. Golden Rule 6 says
+   wire-or-remove: left for a dedicated cleanup lane (removals touch tests
+   that pin them; listed so nothing is silently forgotten).
+
+**Test data left in the LOCAL dev DB (not production):** sale
+`RCP-20260831-081431` (completed, $9.99, 1× Auto Apply Test A from B2 —
+cancel via Sales UI if unwanted; the permission classifier blocked this
+session from cancelling it), portal account "C8 Sweep Tester"
+(LCMN-KC543RW0, phone 012999888) + its customer row + 1 wishlist item.
+
+**Contract diff (ops tooling, paths patched to the current layout):** 246
+frontend call sites vs 289 backend routes — no real orphan endpoints beyond
+the known-unmounted customTables; the 12 body-shape hits are the tool's known
+heuristic blind spots (spread bodies, deviceId read from header fallback)
+plus /api/auth/login's organization/clientTime extras (read via helpers).
