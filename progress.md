@@ -84,6 +84,12 @@ Two rules learned the hard way, both from real incidents in this file's own hist
 *(Live coordination only — session records that used to live here are in the
 [DONE — archive](#done--archive).)*
 
+**[~ CLAIMED — session business-os-v1-r2, Aug 31: deploy-pipeline verification +
+run-files update (user ask).** Read-only against Cloudflare (queues list, remote
+migrations list, deploy --dry-run — NO migrate:remote, NO deploy); edits limited
+to run/ + ops/scripts/powershell/ + DEPLOY.md + this board. No product code, no
+migrations. Peers: does not touch the shared 8787 wrangler or local D1.]**
+
 **[DONE — session business-os-v1-r2, Aug 31: progress.md board restructure
 (user ask: "done are all moved to done, open are organized, without losing past
 actions, make it clear").** Doc-only; no product code touched. All completed work
