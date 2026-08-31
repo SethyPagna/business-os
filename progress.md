@@ -269,6 +269,34 @@ DateTimeRangePicker lane's shared files and centralizes the change:
 (`dashboard/Dashboard.tsx`) has its OWN preset/rangeId model and is co-held by
 session-59's analytics-i18n lane — coordinate before editing it. Path-scoped commits
 only; lang packs name their ride-alongs.
+- **✅ BACKEND HALF (Slice 1) COMMITTED + CERTIFIED GREEN — the "wrong/incomplete data" root cause.**
+  The data-wiring complaint was a genuine **UTC+7 bucketing + ISO-format data-loss bug**, now fixed
+  format-robust and landed. Commits: `67b8e3b9` (fix(dates): format-robust UTC+7 day bucketing across
+  ALL backend date filters — `salesAnalytics.ts` kernel, `routes/sales.ts` `/`·`/stats`·`/export`,
+  `returns.ts`, `inventory.ts` `/movements`, `stockLedgerQuery.ts`, `auditLogQuery.ts`, all via the
+  single source `lib/businessDateWindow.ts`) + harness repairs `11ffeff1` (CRLF-tolerant import-strip),
+  `74bd4ae6` (lift the `returns` table so session-62's CUSTOMER_REFUND_JOIN resolves), `1c3fa481`
+  (add `businessDateWindow` — and peer `undoAppliers` — to the isolate-compile loader override maps).
+  **WHY the hybrid redesign:** the earlier `date(col)`-only form did a raw STRING compare against a
+  space-formatted bound; at string pos 10 ISO `'T'`(0x54) sorts AFTER `' '`(0x20), so ISO end-edge rows
+  were silently DROPPED (prod `sales.created_at` is 100% ISO; `inventory_movements` is MIXED). New form
+  AND-s a shape-agnostic `date(col,'+7 hours')` day check with a redundant **sargable** date-only
+  pre-filter on the raw column (`col >= date(@p,'-1 day')` / `< date(@p,'+1 day')`) — index stays usable,
+  no valid row excluded. Pure query change, **NO migration** (zero 0097/0098/0099 collision).
+- **✅ CERTIFIED: committed HEAD `1c3fa481` is GREEN** — cloudflare tsc clean + all 17 affected pure
+  tests pass, verified on BOTH LF and an isolated **CRLF** worktree at the exact committed commit (dirty
+  working tree is a false signal — did not trust it). Revenue reconciliation is session-62's, already
+  layered cleanly on top (`9354f1ce`); my date hunks in `salesAnalytics.ts` were surgically partial-staged
+  so their uncommitted revenue block was never captured.
+- **⚠ DEPLOY-WT IS STALE + RED — driver must advance.** `git worktree list` shows the deploy worktree
+  `deploy-wt` parked at `11ffeff1`. That commit is RED in the test suite: the returns-table
+  (`74bd4ae6`) and businessDateWindow-loader (`1c3fa481`) harness fixes land AFTER it, so at `11ffeff1`
+  `test-sales-day-report-pure` + the 4 `loadReal` harnesses fail (harnesses ONLY — product code compiles
+  clean at `11ffeff1`). **Deploy driver (7b): advance deploy-wt from `11ffeff1` → `1c3fa481` before
+  certifying/deploying**, else the isolate-compile suite false-alarms on the tz batch.
+- **NEXT — Slice 2 (frontend, NOT STARTED):** default-today on every Start/End picker; remove preset
+  chips (`StatsRangeRow` + Dashboard `RANGE_PRESETS`/StatsStrip); `showTime=true` everywhere in 24h with
+  one combined date+time icon; Fees/Expenses Export; coordinate `Dashboard.tsx` with session-59.
 
 **✅ DEPLOYED & VERIFIED LIVE — security batch + branch-transfer C1 (Part 577, Aug 31 ~17:15 UTC).**
 Production = commit `d558dcfb`, Worker Version `30e8a9b3-ee79-4c57-b732-cd63c2dc2cd6`. Shipped the
