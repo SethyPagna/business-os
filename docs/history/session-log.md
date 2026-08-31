@@ -15450,3 +15450,39 @@ test files individually.
 sort/pagination) stay open; the big slices (restore maintenance lock, returns
 cross-step atomicity, unpaged/N+1 remainder) stay open — peer c8 holds the
 sargable-date slice (3c36bfba).
+
+## Part 542 (Aug 31 2026, session business-os-v1-r2) — Suppliers/Delivery server sort+pagination parity
+
+**Ask:** "continue" (the fixes lane; Part-77 MEDIUM parity finding).
+
+**What changed (commit 92648cef, frontend-only):** SuppliersTab.tsx and
+DeliveryTab.tsx now use the server sort+paging the shared contacts list
+handler has supported since the CustomersTab wiring (routes/contacts.ts
+config-driven GET: allowlisted sort column, dir, page clamp, pageSize clamp,
+{items,total,page,pageSize} envelope; suppliers and delivery_contacts run the
+SAME handler as customers). Each tab sends sort='created' (date grouping) or
+'name' asc (alphabet grouping) + dir + page + pageSize (DEFAULT_PAGE_SIZE 20),
+reads the envelope's total/page/pageSize back, passes the
+controlled-pagination props to the shared ContactTable pager (the Y20 folded
+pager Customers already renders), resets to page 1 whenever
+search/filter/sort re-scopes the result set (deliberately broader than the
+sibling's sort-only reset — a filter applied from page 3 can't land on an
+empty page), and self-heals a page stranded past the last one (the server
+clamps page to [1,100000], not to real totalPages — same documented gap as
+CustomersTab/Products/Inventory). Export stays page-scoped, matching the
+sibling. Other getSuppliers/getDeliveryContacts callers (SupplierPickerField's
+fields=names read, duplicate sweeps) send no page params and keep the
+handler's unpaged branch.
+
+**Verified:** frontend tsc clean; 146/146 frontend test files individually
+(third all-green sweep today). Not browser-driven live: the pager is the
+same shared ContactTable machinery Customers runs in production, wired with
+identical props; production data today is one page anyway (16 suppliers /
+2 delivery contacts).
+
+**Not done:** deploy — deliberately NOT shipped solo; the ship-now session is
+mid-batch (sales.ts/portal files dirty) and this rides the next worktree
+deploy with their batch. Remaining Part-77 opens after this: import-review
+screen parity (likely reshaped by the one-screen import preference — assess
+against Part 501 before building), restore slice C, returns cross-step
+atomicity, unpaged/N+1 remainder (c8's active lane).

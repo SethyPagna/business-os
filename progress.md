@@ -88,12 +88,15 @@ Two rules learned the hard way, both from real incidents in this file's own hist
 
 ## Current status
 
-**[~ CLAIMED — r2, Aug 31: Suppliers/Delivery server sort+pagination parity
-(Part-77 MEDIUM).** Footprint: frontend contacts/SuppliersTab.tsx +
-DeliveryTab.tsx ONLY (wire the page/pageSize/sort/dir params the shared
-contacts list handler already supports + the ContactTable pager props the
-Customers sibling passes). No backend changes. Not touching CustomersTab or
-portal files (ship-now session's lane).]**
+**[DONE — r2, Aug 31 (Part 542, `92648cef`, needs deploy — rides the next one):
+Suppliers/Delivery server sort+pagination parity (Part-77 MEDIUM).** Both tabs
+now send sort/dir/page/pageSize to the shared contacts handler and render the
+ContactTable pager exactly as the Customers sibling does (page-1 reset on any
+re-scope + the stranded-page self-heal). Frontend-only; other
+getSuppliers/getDeliveryContacts callers keep their unpaged shape. Verified:
+fe tsc clean, 146/146 frontend test files. Deliberately NOT deployed solo —
+the ship-now session is mid-batch on sales.ts/portal files; this rides the
+next worktree deploy with their batch.]**
 
 **[DONE — DEPLOYED (third of the day), r2, Aug 31: production is now `08868840`,
 Worker version `d8f49d81-018f-4c92-b836-722a79d26221`.** Ships r2's Part-541
@@ -1202,7 +1205,9 @@ review screen (Sales/Inventory) lacks
 Cancel + per-row decisions its Products sibling has; ~~failed import job renders "Queued
 0%"~~ **[already fixed before this sweep landed — Part 509's "Failed" chip;
 re-verified in source Aug 31 (getProgressDisplay's explicit failed branch)]**;
-Suppliers/Delivery tabs lack the sort/pagination their sibling + backend support.
+~~Suppliers/Delivery tabs lack the sort/pagination their sibling + backend
+support~~ **[FIXED: r2, Part 542, `92648cef` — both tabs wire
+sort/dir/page/pageSize + the ContactTable pager, mirroring CustomersTab]**.
 
 Full detail with file:line, failure scenarios, and per-writer coverage matrices: the
 **Part 77 verification report** artifact (link in the session's final summary).
