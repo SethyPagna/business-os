@@ -17,6 +17,28 @@ export function adjustStock(payload: InventoryPayload = {}): Promise<unknown> {
   )
 }
 
+// Part 553: the Stock Change ledger's per-row write actions (Products page
+// ledger row context menu). Both hit the inventory movement endpoints gated on
+// Full Access to Inventory. Revert posts a compensating counter-movement;
+// editReason updates just the movement's reason text.
+export function revertStockMovement(id: number): Promise<unknown> {
+  return route(
+    'inventory:movement:revert',
+    () => apiFetch('POST', `/api/inventory/movements/${id}/revert`, { ...getDevicePayload() }),
+    null,
+    true,
+  )
+}
+
+export function editStockMovementReason(id: number, reason: string): Promise<unknown> {
+  return route(
+    'inventory:movement:reason',
+    () => apiFetch('PATCH', `/api/inventory/movements/${id}/reason`, { ...getDevicePayload(), reason }),
+    null,
+    true,
+  )
+}
+
 export function transferInventoryStock(payload: InventoryPayload = {}): Promise<unknown> {
   return route(
     'inventory:transfer',

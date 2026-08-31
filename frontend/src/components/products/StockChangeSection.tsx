@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useApp } from '../../AppContext'
 import { getStockLedger } from '../../api/productReadTransport.ts'
+import { revertStockMovement, editStockMovementReason } from '../../api/inventoryWriteTransport.ts'
 import { movementColorClass, translateMovementType } from '../inventory/movementGroups.ts'
 import DateTimeRangePicker from '../shared/DateTimeRangePicker'
 import FilterMenu, { type FilterSection } from '../shared/FilterMenu'
@@ -101,6 +103,11 @@ function fmtQty(value: number): string {
 type BranchOption = { id: number; name: string }
 
 export default function StockChangeSection({ t }: { t: Translate }) {
+  // Row write actions (revert / edit reason) reuse the same app context the
+  // rest of the Products page reads -- can() gates them exactly as the server
+  // does (Inventory adjust access), notify() surfaces the result.
+  const app = useApp() as { can: (section: string, action: string) => boolean; notify: (message: string, type?: string) => void }
+  const canAdjust = app.can('inventory', 'adjust')
   const [view, setView] = useState<LedgerView>('all')
   const [page, setPage] = useState(1)
   const [search, setSearch] = useState('')
@@ -123,6 +130,11 @@ export default function StockChangeSection({ t }: { t: Translate }) {
   const [loadError, setLoadError] = useState('')
   const [detail, setDetail] = useState<LedgerRow | null>(null)
   const [detailRows, setDetailRows] = useState<LedgerRow[] | null>(null)
+  // Row context actions on the open detail: an inline reason editor and a
+  // two-step revert confirm. rowBusy blocks both while a write is in flight.
+  const [rowBusy, setRowBusy] = useState(false)
+  const [editingReason, setEditingReason] = useState<string | null>(null)
+  const [confirmRevert, setConfirmRevert] = useState(false)
   const requestRef = useRef(0)
 
   const load = useCallback(async () => {
@@ -179,6 +191,8 @@ export default function StockChangeSection({ t }: { t: Translate }) {
   const openDetail = useCallback(async (row: LedgerRow) => {
     setDetail(row)
     setDetailRows(null)
+    setEditingReason(null)
+    setConfirmRevert(false)
     try {
       const response = await getStockLedger({ productId: row.product_id, page: 1, pageSize: 20 }) as LedgerResponse
       setDetailRows(Array.isArray(response?.items) ? response.items : [])
@@ -186,6 +200,48 @@ export default function StockChangeSection({ t }: { t: Translate }) {
       setDetailRows([])
     }
   }, [])
+
+  const closeDetail = useCallback(() => {
+    setDetail(null); setDetailRows(null); setEditingReason(null); setConfirmRevert(false)
+  }, [])
+
+  // Revert: post the compensating counter-movement, then refresh the list (the
+  // reverted row stays -- the ledger is append-only -- and the new counter-
+  // movement appears). Close the detail so the person sees the updated list.
+  const doRevert = useCallback(async () => {
+    if (!detail) return
+    setRowBusy(true)
+    try {
+      const res = await revertStockMovement(detail.id) as { success?: boolean; error?: string } | undefined
+      if (res && res.success === false) throw new Error(res.error || tr(t, 'revert_failed', 'Revert failed'))
+      app.notify(tr(t, 'movement_reverted', 'Change reverted'))
+      closeDetail()
+      void load()
+    } catch (error) {
+      app.notify(error instanceof Error ? error.message : tr(t, 'unknown_error', 'Something went wrong'), 'error')
+    } finally {
+      setRowBusy(false)
+    }
+  }, [detail, app, t, closeDetail, load])
+
+  const saveReason = useCallback(async () => {
+    if (!detail || editingReason == null) return
+    const next = editingReason.trim()
+    if (!next) { app.notify(tr(t, 'reason_required', 'A reason is required'), 'error'); return }
+    setRowBusy(true)
+    try {
+      const res = await editStockMovementReason(detail.id, next) as { success?: boolean; error?: string } | undefined
+      if (res && res.success === false) throw new Error(res.error || tr(t, 'update_failed', 'Update failed'))
+      app.notify(tr(t, 'reason_updated', 'Reason updated'))
+      setDetail((current) => (current ? { ...current, reason: next } : current))
+      setEditingReason(null)
+      void load()
+    } catch (error) {
+      app.notify(error instanceof Error ? error.message : tr(t, 'unknown_error', 'Something went wrong'), 'error')
+    } finally {
+      setRowBusy(false)
+    }
+  }, [detail, editingReason, app, t, load])
 
   // Part 553: two view chips plus All -- the Adjustment chip is gone (its
   // rows fold into In).
@@ -444,7 +500,7 @@ export default function StockChangeSection({ t }: { t: Translate }) {
       </div>
 
       {detail ? (
-        <Modal title={`${detail.product_name}`} onClose={() => { setDetail(null); setDetailRows(null) }}>
+        <Modal title={`${detail.product_name}`} onClose={closeDetail}>
           <div className="space-y-3">
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
               <div className="rounded-xl bg-gray-50 px-3 py-2 dark:bg-gray-800/60">
@@ -483,6 +539,57 @@ export default function StockChangeSection({ t }: { t: Translate }) {
               <span>{detail.branch_name || '--'}</span>
               <span>{detail.user_name || '--'}</span>
             </div>
+            {/* Row context actions -- Edit reason + Revert -- only for a user
+                with Inventory adjust access (the server enforces the same).
+                Revert is a two-step inline confirm; its "what it does" note
+                (append-only, which types qualify) lives behind the InfoHint. */}
+            {canAdjust ? (
+              editingReason == null ? (
+                <div className="flex flex-wrap items-center gap-2 border-t border-gray-100 pt-2 dark:border-gray-800">
+                  <button
+                    type="button"
+                    disabled={rowBusy}
+                    onClick={() => setEditingReason(detail.reason || '')}
+                    className="rounded-lg border border-gray-200 px-2.5 py-1 text-xs font-medium text-gray-600 hover:bg-gray-50 disabled:opacity-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
+                  >
+                    {tr(t, 'edit_reason', 'Edit reason')}
+                  </button>
+                  {confirmRevert ? (
+                    <span className="inline-flex items-center gap-1.5 text-xs">
+                      <span className="text-gray-500 dark:text-gray-400">{tr(t, 'confirm_revert', 'Revert this change?')}</span>
+                      <button type="button" disabled={rowBusy} onClick={() => void doRevert()} className="rounded-lg bg-rose-600 px-2.5 py-1 font-medium text-white hover:bg-rose-700 disabled:opacity-50">{tr(t, 'revert', 'Revert')}</button>
+                      <button type="button" disabled={rowBusy} onClick={() => setConfirmRevert(false)} className="rounded-lg border border-gray-200 px-2.5 py-1 text-gray-600 dark:border-gray-700 dark:text-gray-300">{tr(t, 'cancel', 'Cancel')}</button>
+                    </span>
+                  ) : (
+                    <button
+                      type="button"
+                      disabled={rowBusy}
+                      onClick={() => setConfirmRevert(true)}
+                      className="rounded-lg border border-rose-200 px-2.5 py-1 text-xs font-medium text-rose-600 hover:bg-rose-50 disabled:opacity-50 dark:border-rose-900/50 dark:text-rose-300 dark:hover:bg-rose-900/20"
+                    >
+                      {tr(t, 'revert', 'Revert')}
+                    </button>
+                  )}
+                  <InfoHint
+                    label={tr(t, 'revert', 'Revert')}
+                    text={tr(t, 'revert_info', 'Posts a compensating opposite movement — nothing is deleted, and the revert itself appears in the history. Only manual stock changes and imports can be reverted; sales, returns and transfers must be undone from their own records.')}
+                  />
+                </div>
+              ) : (
+                <div className="flex items-center gap-2 border-t border-gray-100 pt-2 dark:border-gray-800">
+                  <input
+                    autoFocus
+                    value={editingReason}
+                    onChange={(event) => setEditingReason(event.target.value)}
+                    className="input flex-1 text-sm"
+                    placeholder={tr(t, 'reason', 'Reason')}
+                    onKeyDown={(event) => { if (event.key === 'Enter') void saveReason() }}
+                  />
+                  <button type="button" disabled={rowBusy} onClick={() => void saveReason()} className="btn-primary px-3 py-1 text-xs disabled:opacity-50">{tr(t, 'save', 'Save')}</button>
+                  <button type="button" disabled={rowBusy} onClick={() => setEditingReason(null)} className="rounded-lg border border-gray-200 px-2.5 py-1 text-xs text-gray-600 dark:border-gray-700 dark:text-gray-300">{tr(t, 'cancel', 'Cancel')}</button>
+                </div>
+              )
+            ) : null}
             <div>
               <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-gray-400">{tr(t, 'stock_change_ledger', 'Stock Changes')}</div>
               {detailRows === null ? (
