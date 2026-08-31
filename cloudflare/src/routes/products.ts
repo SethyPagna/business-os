@@ -1480,7 +1480,14 @@ app.get('/rename-impact', async (c) => {
 // value means simply typing the new brand on new products).
 app.post('/rename-brand', async (c) => {
   const user = c.get('user')
-  if (getActionTier(user, 'products', 'edit') === 'none') {
+  // A brand "rename" is a catalog-wide cascade over every product carrying it
+  // -- that is lookup management, so it requires the same Full `manage_lookups`
+  // grant as its sibling POST /lookups/replace, NOT merely `edit !== 'none'`.
+  // The edit check let a Review Required products user through (edit -> 'review',
+  // not 'none') and applied the rename immediately, bypassing the review queue
+  // their ordinary PUT /:id edits go through. See permissionActions.ts and the
+  // /lookups/replace gate below.
+  if (getActionTier(user, 'products', 'manage_lookups') !== 'full') {
     return c.json({ error: 'You do not have permission to perform this action' }, 403)
   }
   const body = (await c.req.json<Record<string, unknown>>().catch(() => ({}))) as Record<string, unknown>
