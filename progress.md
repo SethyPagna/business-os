@@ -1173,9 +1173,18 @@ up should re-verify against current source first.
   `test-compat-dashboard-daterange-pure.cjs`; the expiry_date alert (per-row bound) and
   the audit_logs retention delete (no index) were deliberately left. **Still open:** the
   same rewrite in `sales.ts` list/export and `returns.ts` (both in active lanes));
-  `inventory/movements` text search
-  still builds the depth-~92 REPLACE
-  chain (D1 depth-100 risk). (×1 D1-scale) — see report.
+  ~~`inventory/movements` text search still builds the depth-~92 REPLACE chain (D1
+  depth-100 risk)~~ **[FIXED: session 77, Aug 31 — `ca3828e7`, needs deploy]** — the
+  five per-column ~78-level diacritic folds were replaced by ONE shallow concatenated
+  haystack + `buildLikeAliasClause(..., alreadyNormalizedCols=true)`, mirroring
+  buildSalesSearchWhere; the new clause has ZERO `replace()` (was hundreds), proven
+  in `test-inventory-movements-search-depth-pure.cjs` alongside preserved
+  case-insensitive/multi-word/OR matching. **Follow-up flagged (not done):** full
+  diacritic PARITY with Sales/Returns needs a write-time `inventory_movements.search_normalized`
+  column (0082 pattern) populated in JS — but movements has 33 scattered INSERT sites
+  and no shared writer, and movement text is a denormalized copy of product names
+  (Part-484 measured ~0 Latin diacritics), so the practical loss is nil. (×1 D1-scale)
+  — see report.
 - Receipt/date locale: `Receipt.tsx:309` + 3 duplicated `formatDateTime` use viewer
   locale (dd/mm + 12h) violating the mm/dd + 24h rule. (×1 cross-surface).
 
