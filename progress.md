@@ -101,7 +101,7 @@ showed the workspace splash and is unchanged. Per public-surface rule (customer 
 never expose admin/internal framing). progress.md claim visible on disk; code commit
 path-scoped to App.tsx.
 
-**→ STATS-HEADER-FLOAT LANE (Aug 31, Part 564 grep-max+1; number races expected): CLAIMED / in progress.**
+**→ STATS-HEADER-FLOAT LANE (Aug 31, Part 564 grep-max+1; number races expected): DONE (changes swept into peer commits; verified live on the frontend-c preview).**
 User batch on the Sales stats header + Reports controls: (1) keep History/Manage on the
 SAME row as the Stats chip always (never relocate when the strip expands); (2) drop the
 redundant "N sales · $rev" summary beside the Stats chip on Sales (duplicates the Sales
@@ -127,33 +127,40 @@ Products.tsx/HeaderActions/StockChangeSection lanes):
 No lang/perm changes (all keys — stock_change_ledger/sales/suppliers/batches/etc. —
 already in both packs). Commit `af50009b`.
 
-**CONFIRM-DIALOG slice 1 — DONE, commit `c1097e82`.** User asked for
-confirm/double-check dialogs on stock-in/add-product/edit and "all" mutating
-actions app-wide. Scoped WITH the user: chose ONE shared **compact review
-dialog** (summarizes what's about to happen; Confirm/Cancel) and rollout order
-"core saves + destructive first." Done: new `shared/ConfirmDialog.tsx`
-(Modal-based, translated, `danger` variant); wired **Add/Edit product**
-(ProductForm.saveForm, promise-based askSaveConfirm gate before the write) and
-**Stock-in "Stock one by one"** (forms/StockAdjustModal: onAdjust parks the
-validated request, new commitAdjust writes on confirm). Delete already confirms
-via DeleteConfirmModal. Zero new i18n keys (all reused). tsc-clean for these
-files; vite build clean.
-**REMAINING (next slices — NAMED so nothing is silently carved out, per the
-cross-surface-consistency rule):** the sibling STOCK-IN surfaces still lack the
-confirm — inventory/FastStockInModal, products/forms/BulkAddStockModal, the
-canonical Branches adjust (Inventory.tsx → InventoryStockModals; **Inventory.tsx
-is currently BROKEN by a peer lane — tsc errors on exportStamp/
-movementDateRangeLabel — so leave it until it settles**), and
-products/forms/BranchStockAdjuster. The DRY fix for the adjust flow is to move
-the confirm into the shared InventoryStockModals so Products+Branches share it
-(would then REMOVE the StockAdjustModal-level one to avoid double-confirm) —
-deferred because InventoryStockModals' callers are mid-surgery. Then the
-per-section sweep: Sales, Returns, Fees, Contacts, Users, Promotions, Backup/
-reset, imports — every mutating Save/Apply, never nav/filter/toggle controls.
+**CONFIRM-DIALOG rollout — 4 slices done.** User asked for confirm/double-check
+dialogs on stock-in/add-product/edit and "all" mutating actions app-wide. Scoped
+WITH the user: ONE shared **compact review dialog** (`shared/ConfirmDialog.tsx`,
+Modal-based, translated, `danger` variant, summarizes what's about to happen +
+Confirm/Cancel) and rollout order "core saves + destructive first."
+- Slice 1 (`c1097e82`): the primitive + **Add/Edit product** (ProductForm.saveForm,
+  promise-based askSaveConfirm gate) + **Stock-in "Stock one by one"**
+  (forms/StockAdjustModal: onAdjust parks the request, commitAdjust writes on confirm).
+- Slice 2 (`7ea96da9`): **Bulk stock-in** (BulkAddStockModal) + **per-branch adjuster**
+  (BranchStockAdjuster). FastStockInModal deliberately NOT wired — commits per line by
+  design (the "fast" path), a per-line confirm would defeat it.
+- Slice 3 (`d8547648`): **Contacts create/edit** — customer / supplier / delivery
+  (CustomerFormModal, SuppliersTab, DeliveryTab); each folds its exact-duplicate
+  window.confirm() INTO the dialog as a danger note (3 native popups retired).
+- Slice 4 (`97566c6a`): **Users create/edit** — Users.tsx handleSaveUser splits
+  validate→confirm / commitSaveUser (+ a reset effect so a stale flag can't resurface
+  the dialog); summary shows username/role/phone/email/status.
+Delete already confirms via DeleteConfirmModal. Zero new i18n keys. Each slice: tsc-clean
+for its files + vite build clean.
+**REMAINING (NAMED so nothing is silently carved out, per cross-surface-consistency):**
+the CANONICAL Branches adjust (Inventory.tsx → shared InventoryStockModals) — DRY fix is
+to put the confirm in InventoryStockModals and REMOVE the StockAdjustModal-level one to
+avoid double-confirm; deferred because Inventory.tsx is dirty in a peer lane (can't
+verify). Then the rest of the per-section sweep: Sales/Returns/Fees/Promotions (dirty in
+peer lanes — wait), Settings save, imports, POS sale (speed-sensitive — decide with user).
+Backup reset is already tier-confirmed. A follow-up chip tracks the sibling stock-in
+surfaces.
 
-**→ POS-CARD-PRICE LANE (Aug 31, Part 562 grep-max+1; number races expected): DONE — display
-slice `e6959534` + cart/receipt VIP-tag slice `9c4f9678` (needs deploy — rides the next one).**
-typecheck + check:source + receiptTemplate + posCore tests green.
+**→ POS-CARD-PRICE + WHOLESALE LANE (Aug 31, Part 562 grep-max+1; number races expected):
+DONE — display `e6959534` + cart/receipt VIP-tag `9c4f9678` + receipt-compact `4c5aa535`
++ wholesale backend `46217e43` + wholesale form/detail `1a921e88` + wholesale POS `c766c47e`
+(needs deploy — rides the next one; migration 0093 applied to LOCAL D1 already).**
+typecheck (only error is another session's Users.tsx WIP) + check:source + receiptTemplate
++ posCore (incl. new wholesale case) + langKeyIntegrity + permission + image-only tests green.
 User (POS product grid card + detail sheet): the grouped card showed the option count twice —
 a purple `Groups: N` chip AND a `N options · N total in stock` line — "same thing shown
 twice; keep the bottom, rename it `Options: N | Total Qty: n`". Removed the `$min – $max`
@@ -179,24 +186,35 @@ all carry it). Files (committed): CartItem.tsx, POS.tsx, receipt/Receipt.tsx. Wh
 lands, generalise the toggle + receipt tag to price_mode 'wholesale' (Khmer បោះដុំ already
 wired in Receipt).
 
-FOLLOW-UP — WHOLESALE (បោះដុំ) PRICE, deferred by user ("POS display first, wholesale
-later"). Full spec captured (mid-turn, Aug 31) for whoever picks it up:
-- New persisted per-product field `wholesale_price_usd/khr` (DB migration + backend
-  read/write in products.ts, product form save payload, backup/import column sets).
-- Product FORM: a Wholesale input in the pricing section (edit button), alongside
-  selling/VIP/cost.
-- Products PAGE: do NOT show wholesale in the list — only inside the "click to view detail"
-  modal ("for better display").
-- A free-text NOTE field like "wholesale only > {number}" (min qty). This is a NOTE, not
-  automation — it does not auto-switch price. Provide an automation on/off toggle in the
-  pricing section, DEFAULT OFF (when on, it could auto-apply wholesale above the qty; off =
-  the note is informational only).
-- POS: a Wholesale button/tier like VIP (price mode `wholesale`), flowing into cart +
-  receipt + sales; "remove the word price" → label just `Wholesale` (and the cart shows the
-  chosen tier as an adjustable Selling price "for easier understanding").
-- PERMISSIONS: model/enforce the new wholesale field in the permission editor + i18n both
-  packs (per i18n-permissions-coverage). User also flagged "update permissions for image
-  upload only" — confirm/wire an image-upload-only permission tier while touching perms.
+WHOLESALE (បោះដុំ) PRICE TIER — DONE (3 slices, committed above). A fourth per-product price
+tier alongside selling / VIP(special) / cost:
+- migration 0093: additive `wholesale_price_usd/khr` on products (DEFAULT 0). APPLIED to
+  local D1 (`migrate:local`, verified queryable); prod applies it via `migrate:remote` in
+  deploy:full BEFORE the code deploys, so the new `p.wholesale_price_usd` SELECTs are safe.
+  ⚠️ Other local worker-dev sessions must run `npm run migrate:local` (in cloudflare/) after
+  pulling, or the products/POS endpoint 500s on the missing column.
+- products.ts: wholesale added to both product SELECTs (list + detail/bootstrap → Products
+  page, detail modal, POS catalog). Write path needs no change (cleanPayload writes any
+  body key matching a real column). Portal SELECTs still exclude it (off public surfaces).
+- Product FORM: indigo Wholesale DualPriceInput in the pricing section (state/defaults/
+  initial/save all wired). Products detail modal shows a Wholesale row (detail only, not the
+  list). POS ProductDetailSheet: a Wholesale add button (flat + grouped) + info row; cart
+  shows a Wholesale marker chip (toggle, same rules as VIP); Receipt prints "Wholesale"/
+  បោះដុំ from price_mode. posCore resolveCartPriceValues gained a 'wholesale' branch (+test).
+- PERMISSIONS: `products_image_only_show_wholesale` grant added end-to-end (field map,
+  editor definition + alsoClearsKeys, Product Viewer preset, both lang packs, field-map
+  test). This IS the "update permissions for image upload only" the user flagged.
+- i18n: `wholesale_price` = "Wholesale"/"បោះដុំ" (both packs); form/POS labels use inline
+  tr()/posCopy() with Khmer.
+
+STILL DEFERRED (needs the user, or a follow-up):
+- The "wholesale only > {N}" NOTE + its DEFAULT-OFF auto-apply toggle. Data model is
+  ambiguous (free-text note vs. structured min-qty + `wholesale_auto` flag) — needs the
+  user's call before a second migration. NOT built.
+- Peripheral surfaces not yet carrying wholesale: CSV import mapping (importEngine, like the
+  vip_price_usd map), the inventory clone (inventory.ts:~1083 copies special_price, not
+  wholesale), and any explicit-column backup/export. Additive, non-breaking (wholesale just
+  stays 0 there until wired).
 
 **→ STATS-DATE-ROW LANE (session 50, Aug 31, Part 560): DONE (needs deploy — rides
 the next one). Commits `3772f08f` (Sales/Returns/Fees + new StatsRangeRow + test),
@@ -342,6 +360,39 @@ their bits unstaged in the shared tree.
 approve/reject) and **backup** (see backup list/status vs export/restore) -- both
 marginal use cases; ask before wiring.]**
 
+**[DONE (slice 5 of N) + VERIFIED LIVE — permissions-granularity session, Aug 31
+(Part 557 slice 5): read-only `view` tier extended to Review (approval queue).**
+`'review'` added to VIEW_TIER_KEYS (front+back). Backend `routes/reviewQueue.ts`:
+the reader middleware (which gated the whole queue) now admits `getPermissionTier
+!== 'none'` (view OR full), so a view grant can read the pending queue (`GET /`,
+`GET /:id`); the two writes (`POST /:id/approve`, `/:id/reject`) each re-check
+strict `hasPermission('review')` (=== true), which a `view` value fails. The
+submitter's own `/mine` + `/:id/resubmit` routes were never review-gated and are
+untouched. `ReviewQueue.tsx`: `canReview = tier==='full'` guards
+handleApprove/handleReject and hides the per-row Approve/Reject buttons; the queue
+list still renders read-only (ReviewLogsPage already gates the section on tier !=
+none). Editor row `tier:true middleTier:'view'`; `perm_review_view_desc` in both
+packs. **Verified LIVE (isolated wrangler dev :8796, 3 real pending rows):**
+review='view' → `GET /api/review` 200 (real queue rows) + `GET /:id` 200,
+`POST /:id/approve` 403, `POST /:id/reject` 403; no-grant → 403; full → read 200 +
+`POST /999999/approve` 404-not-403 (gate passed). `test-view-tier-pure` 20/20;
+cloudflare tsc + my frontend files clean. Committed `b30e5765`.
+
+**[NOT WIRED — Backup stays Full/None (Part 557 slice 6, deliberately abandoned):**
+Backend split IS clean (list/maintenance reads vs create/restore writes), but the
+frontend **Backup panel bundles many independently-gated write tools** — export,
+restore, maintenance-clear, Google Drive OAuth (save/connect/sync/disconnect/
+forget), doctor, and job cancel/clear — across THREE keys (`backup`,
+`backup_restore`, `drive_credentials`). A clean view tier would need every one of
+those gated; a partial job leaves fake controls (buttons that 403), which the
+project forbids. Disproportionate to backup's marginal value, so the backend +
+frontend edits were reverted and backup remains Full/None. Same disposition as
+dashboard/audit_log/customer_portal (not clean view-tier candidates).]**
+
+**View-tier program — FINAL:** wired & verified live = Settings, Sales, Promotions,
+Review. Admin-only (no view tier, by decision) = Users. Not clean view-tier
+candidates (would be fake) = dashboard, audit_log, customer_portal, backup, POS.]**
+
 **→ FILTER-CHIPS-LANE (this session, Aug 31): CLAIMED.** User: the sales filter
 menu (and every other) renders the CHOSEN filters as removable chips OUTSIDE the
 menu, in the same toolbar row as the search bar + Filters button — remove that
@@ -354,6 +405,25 @@ producers in `shared/{AvailabilityFilterOptions,IssuesFilterOptions,PromotionsFi
 and `products/{CreatedDateFilterOptions,AutoMergedFilterOptions}`. Files
 (path-scoped): frontend shared/FilterMenu.tsx + those 6 producers +
 products/helpers/productMenuHelpers.ts (comment only). No lang/perm changes.
+
+**→ PRODUCTS-SLICE-EXCISION LANE (this session, Aug 31 ~late, fourth batch):
+DONE — commits `b6f3ef7a` (excision + ranged movement/stats exports; the four
+file deletions + the /stock-ledger 1000-cap were swept into peer commits
+`b0f96c9f`/`46217e43` by shared-tree races) + `03d8fcac` (Stock Changes
+ranged CSV export + detail-float movement-history Load more) + `c5f6906c`
+(log, Part 564; code commits say 562 — number races). RESOLVES the open
+follow-up below: Inventory.tsx 4,033→~2,500 lines, dormant products slice
+gone (InventoryProductsSurface.tsx + InventoryBatchModal.tsx + their two
+tests DELETED, chain updated), Movements keeps the per-product detail with
+its history preview + complete adjust/transfer/batches modals. NEW shared
+ExportRangeDialog: every export (Movements / Stats & Branches / Stock
+Changes) opens a Start→End step seeded from the page's own range, editable,
+truncation always notified. fe+cf tsc clean; all named suites green on this
+lane's files (langKeyIntegrity/statsStrip fail only on the contacts and
+stats lanes' mid-save dirty files). Needs deploy (rides the next one).
+Small leftovers in the Part-564 log entry: inventoryExport.ts's unused
+catalog collectors; notification #product- anchors land on Stats & Branches
+now (repoint at the Products page later).**
 
 **→ ADD-STOCK-MERGE LANE (this session, Aug 31 ~evening, third batch): DONE —
 commit `2b49ba47` (message says Part 560; log entry is Part 561 — number
