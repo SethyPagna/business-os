@@ -253,7 +253,11 @@ one-row-scroll pin inverted to pin the new direction. Verified: statsStrip 8/8,
 verify:i18n OK, FULL test:utils chain exit 0, live drive on own vite 5175
 (desktop + 375px mobile: exactly 2 cards/row, card folds still work,
 Dashboard/Sales/Branches-Stats all checked; server stopped after). Fold state
-is per-mount by design — say the word for remembered-across-visits.]**
+is per-mount by design — say the word for remembered-across-visits.
+RACE NOTE for the peer extending StatsStrip (rangeActions): `93fa8e65`'s add
+swept your first hunk — the `rangeActions` prop DECLARATION (destructure +
+type + docs) is already in HEAD, declared-but-unused, tsc-green. Your body
+implementation + page wiring were NOT swept; commit them as your own change.]**
 
 **[~ CLAIMED — session business-os-v1-7a, Aug 31 (~10:40): FULL exhaustive
 verification sweep at HEAD (post-Part-547).** User ask: "1000% confirmed backend
