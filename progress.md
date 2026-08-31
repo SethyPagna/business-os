@@ -92,19 +92,19 @@ Two rules learned the hard way, both from real incidents in this file's own hist
 in an isolated worktree, so results are the DEPLOY CANDIDATE, not the dirty tree).**
 DEPLOY-READINESS: **HEAD builds and is deployable.** ✅ cloudflare tsc, ✅ frontend
 tsc, ✅ production vite build (exit 0, 17.8s), ✅ fresh 88-migration chain test,
-✅ 128/132 backend pure tests, ✅ 142/147 frontend tests = **270/279 green**.
-**9 red tests, ALL confirmed on clean HEAD (not dirty-lane artifacts). Verified:
-NONE is a real regression — 8 are STALE tests whose lane refactored past the
-assertion, +1 is a trivial real i18n bug.** Each assigned to its owning lane to
-reconcile during Stage 1:
+production build green. **RECONCILIATION PROGRESS: 9 reds → 7 remaining** (backend
+now 130/132 after session 27 fixed the 2 stockRevert harness reds, e4e8c9a3;
+frontend 142/147). **7 remaining reds, NONE a real regression** — 6 STALE tests +1
+trivial i18n bug. Each assigned to its owning lane to reconcile during Stage 1:
 - `test-route-permissions-pure` → **permissions lane (Part 557)**: sales.ts reads
   moved to `canReadSales`/`getPermissionTier`; enforcement INTACT (sales.ts:1857/1882).
   Update the assertion to the view-tier API. (Security test — confirm intent.)
 - `test-promotion-rules-pure` → **permissions lane (Part 557)**: `requireReadKey`
   replaced `requireKey` on GET /rules; enforcement intact. Update assertion.
-- `test-adjust-received-date-pure` + `test-supplier-attribution-pure` → **stock-ledger
-  lane (Part 553)**: harness can't resolve the real, existing `lib/stockRevert.ts`
-  (added Part 553). Add stockRevert to the test loader's module shim.
+- ✅ DONE `test-adjust-received-date-pure` + `test-supplier-attribution-pure` →
+  session 27 (e4e8c9a3) added the `applyMovementRevert` stub to both harnesses'
+  inventory stub maps (Part 553's revert import is compile-erased in these
+  receive/adjust harnesses). Both green.
 - `autoMergedFacet.test.ts` → **products lane**: `onRemove` handler shape changed;
   update the regex.
 - `performanceLoadingUx.test.ts` → **contacts-filter lane**: `countActiveFlags`
