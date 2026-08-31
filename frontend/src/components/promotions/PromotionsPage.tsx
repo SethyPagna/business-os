@@ -168,6 +168,17 @@ export default function PromotionsPage() {
   // G2 section gates: the page door admits either grant (see
   // AppContext.canAccessPage); each section still needs its own.
   const canPromotions = getPermissionTier('promotions') !== 'none'
+  // Part 557 slice 4: 'promotions' is a view-tier section. A View-only grant
+  // reads the rule list but every write (new/edit/delete rule) is hidden here
+  // and refused by the backend (writes keep requireKey('promotions')). Full only.
+  const canManagePromotions = getPermissionTier('promotions') === 'full'
+  // The Discounts sub-section edits PER-PRODUCT discounts via updateProduct(),
+  // which the backend gates on 'products' (not 'promotions'). It was coupled to
+  // canPromotions, so a promotions user without products access saw a discount
+  // editor whose every save 403'd -- a fake control this view-tier slice would
+  // otherwise widen to view users. Gate it on its REAL capability instead: the
+  // products tier (review or full can write; review queues for approval).
+  const canManageDiscounts = getPermissionTier('products') !== 'none'
   const canLoyalty = getPermissionTier('customer_portal') !== 'none'
   const [activeSection, setActiveSection] = useState<PromotionsSection>(canPromotions ? 'rules' : 'loyalty')
   const [rules, setRules] = useState<PromotionRuleRow[]>([])
@@ -243,9 +254,13 @@ export default function PromotionsPage() {
     return () => window.clearTimeout(timer)
   }, [pickerQuery, productQuery, draft])
 
-  const openNewRule = () => { setPickerQuery(''); setPickerResults([]); setDraft({ ...EMPTY_RULE }) }
+  const openNewRule = () => {
+    if (!canManagePromotions) return
+    setPickerQuery(''); setPickerResults([]); setDraft({ ...EMPTY_RULE })
+  }
 
   const openEditRule = (row: PromotionRuleRow) => {
+    if (!canManagePromotions) return
     const rule = row.normalized
     if (!rule) return
     setPickerQuery('')
@@ -287,6 +302,7 @@ export default function PromotionsPage() {
   }
 
   const saveRule = async () => {
+    if (!canManagePromotions) { notify(t('perm_view_only_generic') || 'View only: you do not have permission to make this change.', 'error'); return }
     if (!draft || savingRule) return
     const payload: PromotionRuleWrite = {
       title: draft.title.trim(),
@@ -323,6 +339,7 @@ export default function PromotionsPage() {
   }
 
   const removeRule = async (row: PromotionRuleRow) => {
+    if (!canManagePromotions) { notify(t('perm_view_only_generic') || 'View only: you do not have permission to make this change.', 'error'); return }
     const rule = row.normalized
     const label = rule?.title || `#${row.id}`
     if (!window.confirm((t('promo_rule_delete_confirm') || 'Delete promotion "{name}"? Prices return to normal immediately.').replace('{name}', label))) return
@@ -336,6 +353,7 @@ export default function PromotionsPage() {
   }
 
   const openDiscountEditor = (product: ProductLite) => {
+    if (!canManageDiscounts) return
     setDiscountDraft({
       product,
       discount_enabled: Boolean(product.discount_enabled),
@@ -351,6 +369,7 @@ export default function PromotionsPage() {
   }
 
   const saveDiscount = async () => {
+    if (!canManageDiscounts) { notify(t('perm_view_only_generic') || 'View only: you do not have permission to make this change.', 'error'); return }
     if (!discountDraft || savingDiscount) return
     setSavingDiscount(true)
     try {
@@ -427,6 +446,10 @@ export default function PromotionsPage() {
   const sectionChips: SectionChip[] = [
     ...(canPromotions ? [
       { key: 'rules' as const, label: t('promo_tab_rules') || 'Rules', icon: BadgePercent, activeColor: 'text-rose-600 dark:text-rose-400' },
+    ] : []),
+    // Discounts self-gates on 'products' (its real backend gate), not the
+    // promotions grant -- see canManageDiscounts above.
+    ...(canManageDiscounts ? [
       { key: 'discounts' as const, label: t('promo_tab_discounts') || 'Discounts', icon: Percent, activeColor: 'text-indigo-600 dark:text-indigo-400' },
     ] : []),
     ...(canLoyalty ? [
@@ -489,9 +512,11 @@ export default function PromotionsPage() {
                   text={t('promo_rules_section_sub') || 'Buy-more deals, % off and fixed savings across products, a category or a brand. POS and the storefront price with the same rules.'}
                 />
               </div>
-              <button type="button" className="btn btn-primary btn-sm inline-flex items-center gap-1" onClick={openNewRule}>
-                <Plus className="h-4 w-4" /> {t('promo_new_rule') || 'New rule'}
-              </button>
+              {canManagePromotions ? (
+                <button type="button" className="btn btn-primary btn-sm inline-flex items-center gap-1" onClick={openNewRule}>
+                  <Plus className="h-4 w-4" /> {t('promo_new_rule') || 'New rule'}
+                </button>
+              ) : null}
             </div>
 
             {/* Stats sit BELOW the toolbar row, shown inline (never behind an expander). */}
@@ -509,9 +534,11 @@ export default function PromotionsPage() {
               <div className="rounded-2xl border border-dashed border-gray-200 py-10 text-center dark:border-gray-800">
                 <BadgePercent className="mx-auto mb-2 h-8 w-8 text-gray-300 dark:text-gray-600" />
                 <p className="text-sm text-gray-500">{t('promo_no_rules') || 'No promotion rules yet. Create one to put a deal on the storefront and POS.'}</p>
-                <button type="button" className="btn btn-primary btn-sm mt-3 inline-flex items-center gap-1" onClick={openNewRule}>
-                  <Plus className="h-4 w-4" /> {t('promo_new_rule') || 'New rule'}
-                </button>
+                {canManagePromotions ? (
+                  <button type="button" className="btn btn-primary btn-sm mt-3 inline-flex items-center gap-1" onClick={openNewRule}>
+                    <Plus className="h-4 w-4" /> {t('promo_new_rule') || 'New rule'}
+                  </button>
+                ) : null}
               </div>
             ) : (
               <div className="space-y-2">
@@ -545,14 +572,16 @@ export default function PromotionsPage() {
                           {window ? <span className="inline-flex items-center gap-1"><CalendarClock className="h-3 w-3" />{window}</span> : null}
                         </div>
                       </div>
-                      <div className="flex shrink-0 items-center gap-1">
-                        <button type="button" className="rounded-lg p-1.5 text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-700 dark:hover:bg-gray-800 dark:hover:text-gray-200" onClick={() => openEditRule(row)} aria-label={t('edit') || 'Edit'}>
-                          <Pencil className="h-4 w-4" />
-                        </button>
-                        <button type="button" className="rounded-lg p-1.5 text-gray-400 transition-colors hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-900/20" onClick={() => removeRule(row)} aria-label={t('delete') || 'Delete'}>
-                          <Trash2 className="h-4 w-4" />
-                        </button>
-                      </div>
+                      {canManagePromotions ? (
+                        <div className="flex shrink-0 items-center gap-1">
+                          <button type="button" className="rounded-lg p-1.5 text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-700 dark:hover:bg-gray-800 dark:hover:text-gray-200" onClick={() => openEditRule(row)} aria-label={t('edit') || 'Edit'}>
+                            <Pencil className="h-4 w-4" />
+                          </button>
+                          <button type="button" className="rounded-lg p-1.5 text-gray-400 transition-colors hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-900/20" onClick={() => removeRule(row)} aria-label={t('delete') || 'Delete'}>
+                            <Trash2 className="h-4 w-4" />
+                          </button>
+                        </div>
+                      ) : null}
                     </div>
                   )
                 })}
@@ -561,7 +590,7 @@ export default function PromotionsPage() {
           </div>
         ) : null}
 
-        {activeSection === 'discounts' && canPromotions ? (
+        {activeSection === 'discounts' && canManageDiscounts ? (
           <div className="space-y-3">
             {/* The search box is this section's own toolbar row -- it comes
                 first; the stats and list drop underneath it. */}

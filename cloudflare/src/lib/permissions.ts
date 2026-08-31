@@ -145,6 +145,7 @@ export const REVIEW_TIER_KEYS = new Set([
 export const VIEW_TIER_KEYS = new Set([
   'settings',
   'sales',
+  'promotions',
 ])
 
 export type PermissionTier = 'full' | 'review' | 'view' | 'none'

@@ -17,7 +17,7 @@ const check = (label, fn) => { fn(); passed++; console.log(`PASS ${label}`) }
 
 // --- replicate the model (kept identical to lib/permissions.ts) -----------
 const REVIEW_TIER_KEYS = new Set(['products', 'inventory', 'branches', 'returns', 'fees', 'contacts'])
-const VIEW_TIER_KEYS = new Set(['settings', 'sales'])
+const VIEW_TIER_KEYS = new Set(['settings', 'sales', 'promotions'])
 const merged = (u) => ({ ...JSON.parse(u.role_permissions || '{}'), ...JSON.parse(u.permissions || '{}') })
 const isAdmin = (u) => {
   const un = String(u.username || '').toLowerCase(); const rc = String(u.role_code || '').toLowerCase()
@@ -95,6 +95,28 @@ check("routes/sales.ts read gates use canReadSales() (view-aware) while writes s
   assert.match(src, /function canReadSales\([\s\S]*getPermissionTier\(user, 'sales'\) !== 'none'/)
   // The two write gates must remain strict hasPermission('sales').
   assert.match(src, /if \(!hasPermission\(user, 'sales'\)\)/)
+})
+
+// --- Promotions view-tier (Part 557 slice 4): read rule list, no manage -----
+const promoViewUser = { username: 'pv', role_permissions: JSON.stringify({ promotions: 'view' }), permissions: '{}' }
+const promoFullUser = { username: 'pf', role_permissions: JSON.stringify({ promotions: true }), permissions: '{}' }
+check("Promotions 'view' -> tier 'view' (GET /rules readable)", () => {
+  assert.equal(getPermissionTier(promoViewUser, 'promotions'), 'view')
+})
+check("hasPermission('promotions') FALSE for a Promotions view user (create/edit/delete stay blocked)", () => {
+  assert.equal(hasPermission(promoViewUser, 'promotions'), false)
+})
+check("Full Promotions grant -> tier 'full' AND hasPermission true (manage allowed)", () => {
+  assert.equal(getPermissionTier(promoFullUser, 'promotions'), 'full')
+  assert.equal(hasPermission(promoFullUser, 'promotions'), true)
+})
+check("routes/promotions.ts: GET /rules uses requireReadKey (view-aware); writes keep requireKey", () => {
+  const src = fs.readFileSync(path.join(__dirname, '..', 'src', 'routes', 'promotions.ts'), 'utf8')
+  assert.match(src, /const requireReadKey =[\s\S]*getPermissionTier\(c\.get\('user'\), key\) === 'none'/)
+  assert.match(src, /app\.get\('\/rules', requireReadKey\('promotions'\)/)
+  assert.match(src, /app\.post\('\/rules', requireKey\('promotions'\)/)
+  assert.match(src, /app\.put\('\/rules\/:id', requireKey\('promotions'\)/)
+  assert.match(src, /app\.delete\('\/rules\/:id', requireKey\('promotions'\)/)
 })
 check('frontend utils/permissions.ts VIEW_TIER_KEYS matches the backend', () => {
   const feSrc = fs.readFileSync(path.join(__dirname, '..', '..', 'frontend', 'src', 'utils', 'permissions.ts'), 'utf8')

@@ -10,6 +10,7 @@ import { dateToBatchCode } from '../../../utils/batchCode.ts'
 // Per the standing rule that this form's stock UI should look and behave
 // like Inventory's rather than growing its own parallel version of it.
 import InventoryReasonManagerModal from '../../inventory/InventoryReasonManagerModal.tsx'
+import ConfirmDialog, { type ConfirmReviewItem } from '../../shared/ConfirmDialog.tsx'
 import SupplierPickerField from '../../shared/SupplierPickerField.tsx'
 
 const BRANCH_STOCK_ADJUSTMENT_TIMEOUT_MS = 12000
@@ -154,6 +155,9 @@ export default function BranchStockAdjuster({ product, branches, user, onDone, t
   // and picker UI as Inventory's own "Adjust stock" modal, instead of a
   // plain datalist.
   const [reason, setReason] = useState('')
+  // Part 563: the review dialog is open (handleSave validated + opened it;
+  // commitBranch runs the per-branch-row writes on confirm).
+  const [confirmOpen, setConfirmOpen] = useState(false)
   const [inventoryReasons, setInventoryReasons] = useState<InventoryReason[]>([])
   const [reasonManager, setReasonManager] = useState<ReasonManagerState>({ open: false, type: 'adjust' })
   const [reasonDraft, setReasonDraft] = useState('')
@@ -230,15 +234,21 @@ export default function BranchStockAdjuster({ product, branches, user, onDone, t
     )))
   }
 
-  const handleSave = async () => {
-    const changes = rows
-      .map((row, index) => ({ row, index }))
-      .filter(({ row }) => row.delta !== '' && parseStockDelta(row.delta) >= 0)
+  // The rows about to be submitted (a delta typed, non-negative). One place
+  // owns this so validate, the review summary, and the write all agree.
+  const pendingChanges = () => rows
+    .map((row, index) => ({ row, index }))
+    .filter(({ row }) => row.delta !== '' && parseStockDelta(row.delta) >= 0)
+
+  // Part 563: validate, then open the review dialog. commitBranch runs the
+  // actual per-row writes once the operator confirms.
+  const handleSave = () => {
+    if (saving) return
+    const changes = pendingChanges()
     if (!changes.length) return
-    // Mirrors Inventory.tsx's onAdjust / InventoryStockModals.tsx's
-    // transfer form -- a stock change with no documented cause is blocked
-    // client-side here too, backing up routes/inventory.ts's /adjust
-    // requiring `reason` for every call.
+    // Mirrors Inventory.tsx's onAdjust / InventoryStockModals.tsx's transfer
+    // form -- a stock change with no documented cause is blocked client-side
+    // here too, backing up routes/inventory.ts's /adjust requiring `reason`.
     if (!reason.trim()) {
       setMsg(T('adjust_reason_required', 'A reason is required for this stock adjustment.', 'ត្រូវការមូលហេតុសម្រាប់ការកែស្តុកនេះ'))
       return
@@ -262,6 +272,27 @@ export default function BranchStockAdjuster({ product, branches, user, onDone, t
         return
       }
     }
+    setMsg(null)
+    setConfirmOpen(true)
+  }
+
+  const buildBranchReviewItems = (): ConfirmReviewItem[] => {
+    const items: ConfirmReviewItem[] = pendingChanges().map(({ row }) => {
+      const typeLabel = row.type === 'remove' ? T('remove', 'Remove', 'ដក') : row.type === 'set' ? T('set', 'Set', 'កំណត់') : T('add', 'Add', 'បន្ថែម')
+      return {
+        label: row.branchName,
+        value: `${typeLabel} ${parseStockDelta(row.delta)}${product.unit ? ` ${product.unit}` : ''}`,
+      }
+    })
+    const trimmedReason = reason.trim()
+    if (trimmedReason) items.push({ label: T('reason', 'Reason', 'មូលហេតុ'), value: trimmedReason })
+    return items
+  }
+
+  const commitBranch = async () => {
+    setConfirmOpen(false)
+    const changes = pendingChanges()
+    if (!changes.length) return
     if (!beginSingleAction(saveInFlightRef, { blocked: saving })) return
 
     setSaving(true)
@@ -381,6 +412,20 @@ export default function BranchStockAdjuster({ product, branches, user, onDone, t
         t={t || (() => undefined)}
         tr={(key, fallbackEn, fallbackKm) => T(key, fallbackEn ?? key, fallbackKm)}
       />
+      {confirmOpen ? (
+        <ConfirmDialog
+          t={t || (() => undefined)}
+          title={T('apply_stock_changes', 'Apply Stock Changes', 'អនុវត្តការផ្លាស់ប្តូរស្តុក')}
+          message={String(product.name || '')}
+          items={buildBranchReviewItems()}
+          confirmLabel={T('apply_stock_changes', 'Apply Stock Changes', 'អនុវត្តការផ្លាស់ប្តូរស្តុក')}
+          cancelLabel={T('cancel', 'Cancel', 'បោះបង់')}
+          working={saving}
+          workingLabel={T('loading', 'Loading...', 'កំពុងរក្សាទុក...')}
+          onConfirm={commitBranch}
+          onClose={() => { if (!saving) setConfirmOpen(false) }}
+        />
+      ) : null}
     </div>
   )
 }

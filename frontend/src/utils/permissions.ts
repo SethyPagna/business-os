@@ -63,7 +63,7 @@ export const REVIEW_TIER_KEYS = new Set<string>(['fees', 'branches', 'products',
 // permissions.ts's VIEW_TIER_KEYS -- kept in sync). 'view' means the page is
 // visible but every write is blocked; a key belongs to at most ONE of
 // REVIEW_/VIEW_TIER_KEYS.
-export const VIEW_TIER_KEYS = new Set<string>(['settings', 'sales'])
+export const VIEW_TIER_KEYS = new Set<string>(['settings', 'sales', 'promotions'])
 
 export type PermissionTier = 'full' | 'review' | 'view' | 'none'
 

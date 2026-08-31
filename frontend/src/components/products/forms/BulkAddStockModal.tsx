@@ -19,6 +19,7 @@ import { getInventoryReasons, saveInventoryReasons } from '../../../api/methods.
 // behavior visible/confirmable instead of leaving it silent.
 import InventoryReasonManagerModal from '../../inventory/InventoryReasonManagerModal.tsx'
 import SupplierPickerField from '../../shared/SupplierPickerField.tsx'
+import ConfirmDialog, { type ConfirmReviewItem } from '../../shared/ConfirmDialog.tsx'
 import { dateToBatchCode } from '../../../utils/batchCode.ts'
 
 const BULK_ADD_STOCK_MUTATION_TIMEOUT_MS = 12000
@@ -160,6 +161,9 @@ export default function BulkAddStockModal({ productIds, products, branches, user
   const [saving, setSaving] = useState(false)
   const [msg, setMsg] = useState<string | null>(null)
   const [reason, setReason] = useState('')
+  // Part 563: the review dialog is open (handleSave validated + opened it;
+  // commitBulk runs the per-product writes on confirm).
+  const [confirmOpen, setConfirmOpen] = useState(false)
   const [inventoryReasons, setInventoryReasons] = useState<InventoryReason[]>([])
   const [reasonManager, setReasonManager] = useState<ReasonManagerState>({ open: false, type: 'adjust' })
   const [reasonDraft, setReasonDraft] = useState('')
@@ -236,22 +240,42 @@ export default function BulkAddStockModal({ productIds, products, branches, user
     set: t('set') || 'Set',
   }
 
-  const handleSave = async () => {
+  // Part 563: validate, then open the review dialog. commitBulk runs the
+  // actual per-product writes once the operator confirms.
+  const handleSave = () => {
+    if (saving) return
+    if (parseQuantity(qty, action) === null) { setMsg('Enter a valid quantity'); return }
+    // Same rule BranchStockAdjuster.tsx/Inventory.tsx already enforce for
+    // every other stock-adjustment surface -- routes/inventory.ts's /adjust
+    // requires `reason` server-side too, this just fails fast client-side with
+    // a clear message instead of a per-product server error.
+    if (!reason.trim()) { setMsg(t('adjust_reason_required') || 'A reason is required for this stock adjustment.'); return }
+    setMsg(null)
+    setConfirmOpen(true)
+  }
+
+  const buildBulkReviewItems = (): ConfirmReviewItem[] => {
+    // Matches the branch dropdown's own label for the branchless option.
+    const branchName = branchId ? (branches.find((b) => String(b.id) === String(branchId))?.name || String(branchId)) : 'Global (no branch)'
+    const items: ConfirmReviewItem[] = [
+      { label: t('type') || 'Type', value: actionLabels[action] },
+      { label: t('products') || 'Products', value: String(selectedProducts.length) },
+      { label: t('quantity') || 'Quantity', value: String(qty || 0) },
+      { label: t('branch') || 'Branch', value: branchName },
+    ]
+    const trimmedReason = reason.trim()
+    if (trimmedReason) items.push({ label: t('reason') || 'Reason', value: trimmedReason })
+    if (action === 'add' && supplierName.trim()) items.push({ label: t('supplier') || 'Supplier', value: supplierName.trim() })
+    return items
+  }
+
+  const commitBulk = async () => {
+    setConfirmOpen(false)
     if (!beginSingleAction(saveInFlightRef, { blocked: saving })) return
     const amount = parseQuantity(qty, action)
     if (amount === null) {
       finishSingleAction(saveInFlightRef)
       setMsg('Enter a valid quantity')
-      return
-    }
-    // Same rule BranchStockAdjuster.tsx/Inventory.tsx already enforce for
-    // every other stock-adjustment surface -- routes/inventory.ts's
-    // /adjust requires `reason` server-side too, this just fails fast
-    // client-side with a clear message instead of a per-product server
-    // error.
-    if (!reason.trim()) {
-      finishSingleAction(saveInFlightRef)
-      setMsg(t('adjust_reason_required') || 'A reason is required for this stock adjustment.')
       return
     }
     setSaving(true)
@@ -453,6 +477,19 @@ export default function BulkAddStockModal({ productIds, products, branches, user
         t={t}
         tr={(key: string, fallbackEn?: string) => t(key) || fallbackEn || key}
       />
+      {confirmOpen ? (
+        <ConfirmDialog
+          t={(key: string) => t(key)}
+          title={t('adjust_stock') || 'Adjust stock'}
+          message={t('adjust_stock_bulk_desc') || 'This will apply the same change to each selected product.'}
+          items={buildBulkReviewItems()}
+          confirmLabel={`${actionLabels[action]} ${qty || 0} ${action === 'set' ? '' : 'to each'}`.trim()}
+          working={saving}
+          workingLabel={t('saving') || 'Saving...'}
+          onConfirm={commitBulk}
+          onClose={() => { if (!saving) setConfirmOpen(false) }}
+        />
+      ) : null}
     </div>
   )
 }
