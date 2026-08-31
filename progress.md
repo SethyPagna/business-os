@@ -94,6 +94,22 @@ Two rules learned the hard way, both from real incidents in this file's own hist
 
 ## Current status
 
+**✅ CONTACT-MERGE DATA-MOVEMENT lane (Sep 1, session ca [7f222b] — DONE, committed `1655ea1e`, NOT deployed / Stage-1).**
+User: "make sure conflict when decision/action is made merges and moves the sales, returns, and other
+data where its previous link was at … check all the resolve/conflicts." Audited every resolve/Conflicts
+flow. The contacts `/merge` endpoint DELETES the loser, so un-repointed FKs were silently orphaned.
+Closed the gaps in `cloudflare/src/routes/contacts.ts` merge handler (BACKEND-ONLY, no migration): customers
+now also repoint **portal_accounts.contact_id** (0087) + **customer_receivables** (0094 AR ledger, id + name
+carry); suppliers now also repoint **product_batches.supplier_id/supplier_name** (0062) + **supplier_invoices**
+(0088 AP ledger, id + name carry); delivery already complete. Legacy ledgers guarded by table-existence check.
+New `scripts/test-contact-merge-repoints-pure.cjs` (7 checks, all green) proves full movement on the real
+migration chain + guards the route still issues every repoint. Findings surfaced for OTHER lanes (NOT taken
+here): (a) the PRODUCT merge leaves old sales/movements on the deactivated dup — already OWNED by CATALOG-
+INTEGRITY lane 578 (products.ts item 2). (b) The sale-link relink/resolve-missing conflict resolvers move
+`sales` only; `returns` cannot join (no `customer_phone` column to disambiguate a per-phone relink) — returns
+instead follow through the merge path, which is correct. Disjoint from all active frontend lanes and from 578's
+products.ts.
+
 **→ SMALL-SCREEN PRODUCTS-CARD lane (Sep 1, session 88 [ad9ece] — CLAIMED, in progress).**
 User (on a phone): the product-name text on the small-screen product CARD can't be
 swiped horizontally to read the rest. Disjoint edit — `products/shared/primitives.tsx`
