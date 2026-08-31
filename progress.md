@@ -222,9 +222,24 @@ parses `includeDismissed` + new POST `/duplicates/undismiss`; `DuplicatesTab.tsx
 `SaleLinkConflictsSection.tsx` gains the Show-kept/Kept/Reopen UI; transport gains `getSaleLinkConflicts({includeDismissed})`
 + `undismissSaleLinkConflict`. 7 shared lang keys added both packs (Khmer verified). Two round-trip tests on the real
 migration chain prove keep→reopen is reversible and the modified SQL is valid: `test-contact-duplicate-reopen-pure.cjs`
-(7/7) + `test-sale-link-conflict-reopen-pure.cjs` (9/9). **STILL OPEN for full consistency: Products duplicates tab
-(ProductDuplicatesTab) needs the same reopen wiring — it lives in `routes/products.ts`, peer-owned by lane 578, so
-flagged here, NOT edited from this lane.**
+(7/7) + `test-sale-link-conflict-reopen-pure.cjs` (9/9). Also re-verified no regression: langKeyIntegrity (4288 shared
+keys, 7 new keys carry real Khmer), sourceSyntaxCheck (434 files), contact-merge-repoints + productDuplicatesTab tests
+all green.
+**STILL OPEN for full consistency — Products duplicates tab reopen (ready-to-implement handoff).** The products
+"possibly same" review has a server-persisted dismiss (`POST /possible-duplicates/dismiss` → `product_duplicate_dismissals`
+0035) but NO includeDismissed + NO undismiss, so a kept products cluster is a one-way hide (violates "can always be
+resolved"). Integration map (verified Sep 1): the sweep is `findPossiblySameProductClusters(db)` in
+**`cloudflare/src/lib/productIdentity.ts:175` (CLEAN, editable)** — add an `{includeDismissed}` option + flag kept
+clusters `dismissed:true`, mirroring `lib/contactDuplicates.ts`. Frontend **`ProductDuplicatesTab.tsx` +
+`api/productWriteTransport.ts` (both CLEAN, editable)** — add a Show-kept toggle / Kept badge / Reopen action +
+`undismissProductDuplicateCluster` + `getPossiblySameProducts({includeDismissed})`; reuse the SAME 7 lang keys (no new
+keys). The ONLY blocked file is the route **`cloudflare/src/routes/products.ts` (peer-dirty, lane 578)** — needs the
+GET `/possible-duplicates` to read `includeDismissed` (~line 2684) + a new `POST /possible-duplicates/undismiss` (exact
+delete on `product_duplicate_dismissals`, mirroring the contacts/`sale-link` undismiss at 2693). Because the route is the
+integration point and cannot be partially-staged out of a peer's hot file here, the whole reopen must land in ONE lane
+that owns products.ts (lane 578 or a later session) — do NOT ship the clean lib/frontend halves alone (they'd call a
+404 endpoint = broken/zombie code). Whoever lands it should add a `test-product-duplicate-reopen-pure.cjs` round-trip
+like the two above.
 
 **→ SMALL-SCREEN PRODUCTS-CARD lane (Sep 1, session 88 [ad9ece] — CLAIMED, in progress).**
 User (on a phone): the product-name text on the small-screen product CARD can't be
