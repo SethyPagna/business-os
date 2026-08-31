@@ -546,24 +546,32 @@ await runTest('inventory adjust, transfer, and batch actions use shared guards a
   // Note: the standalone single-product "Move Stock" modal (moveModal/
   // moveForm/moveSaving/moveStockInFlightRef/openMove/handleMoveStock) was
   // removed -- Add Stock's unlock-pricing path (resolveAddStockTarget on
-  // the backend) now covers what it used to require a second manual step
-  // for. moveStockRow itself is still real and still guarded: it's called
-  // from the batch-apply path for per-line "move" actions within a batch
-  // session (see the batch assertion below), not from a standalone modal.
+  // the backend) now covers what it used to require a second manual step for.
+  // Part 562 also excised the dormant in-page "batch session" apply path
+  // (batchApplying/batchInventoryInFlightRef); per-batch editing now lives in
+  // the standalone ManageBatchesModal, which carries its OWN synchronous save
+  // guard (asserted in the ManageBatchesModal block below). So Inventory.tsx
+  // itself keeps exactly the two live write guards: adjust and transfer.
   assert.match(source, /import \{ beginSingleAction, finishSingleAction \} from '\.\.\/\.\.\/utils\/actionGuards\.ts'/)
   assert.match(source, /const INVENTORY_STOCK_MUTATION_TIMEOUT_MS = 12000/)
   assert.match(source, /const adjustStockInFlightRef = useRef\(false\)/)
   assert.match(source, /const transferStockInFlightRef = useRef\(false\)/)
-  assert.match(source, /const batchInventoryInFlightRef = useRef\(false\)/)
   assert.doesNotMatch(source, /moveStockInFlightRef|moveSaving|moveModal|moveForm|openMove\(|handleMoveStock/, 'standalone Move Stock modal should stay removed')
+  assert.doesNotMatch(source, /batchInventoryInFlightRef|batchApplying/, 'the dormant in-page batch-session apply path should stay excised (Part 562)')
   assert.match(source, /const runInventoryMutation = useCallback\(\(loader: InventoryLoader, label: string\): Promise<any> => \([\s\S]*withLoaderTimeout\(loader, label, INVENTORY_STOCK_MUTATION_TIMEOUT_MS\)/)
   assert.match(source, /if \(!beginSingleAction\(adjustStockInFlightRef, \{ blocked: adjustSaving \}\)\) return/)
   assert.match(source, /if \(!beginSingleAction\(transferStockInFlightRef, \{ blocked: transferSaving \}\)\) return/)
-  assert.match(source, /if \(!beginSingleAction\(batchInventoryInFlightRef, \{ blocked: batchApplying \}\)\) return/)
   assert.match(source, /finally \{[\s\S]*finishSingleAction\(adjustStockInFlightRef\)[\s\S]*setAdjustSaving\(false\)/)
   assert.match(source, /finally \{[\s\S]*finishSingleAction\(transferStockInFlightRef\)[\s\S]*setTransferSaving\(false\)/)
-  assert.match(source, /finally \{[\s\S]*finishSingleAction\(batchInventoryInFlightRef\)[\s\S]*setBatchApplying\(false\)/)
-  assert.ok(mutationLines.length >= 3, 'inventory should still call adjust/move/transfer stock mutation APIs (move now only from the batch path)')
+  assert.ok(mutationLines.length >= 2, 'inventory should still call adjust + transfer stock mutation APIs through the bounded runInventoryMutation wrapper')
+
+  // ManageBatchesModal owns per-batch edits since Part 562 relocated them out
+  // of Inventory; its save must keep a synchronous ref guard (state alone is
+  // async and can double-fire).
+  const manageBatches = readFrontend('src/components/inventory/ManageBatchesModal.tsx')
+  assert.match(manageBatches, /const saveBatchInFlightRef = useRef\(false\)/, 'ManageBatchesModal must keep a synchronous batch-save guard')
+  assert.match(manageBatches, /if \(!beginSingleAction\(saveBatchInFlightRef, \{ blocked: savingId != null \}\)\) return/, 'ManageBatchesModal.saveEdit must gate on the ref guard')
+  assert.match(manageBatches, /finally \{[\s\S]*finishSingleAction\(saveBatchInFlightRef\)/, 'ManageBatchesModal.saveEdit must release the guard in finally')
   assert.ok(
     mutationLines.every((line) => line.includes('runInventoryMutation')),
     `unbounded inventory mutation lines:\n${mutationLines.filter((line) => !line.includes('runInventoryMutation')).join('\n')}`,

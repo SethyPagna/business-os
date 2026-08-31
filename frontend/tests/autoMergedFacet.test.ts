@@ -27,9 +27,11 @@ const sectionSource = readFileSync(new URL('../src/components/products/AutoMerge
 runTest('9.2: the section is a real two-state facet whose chip clears back to all', () => {
   assert.match(sectionSource, /id: 'auto_merged',/)
   assert.match(sectionSource, /const active = mergedFilter === 'auto'/)
-  // the active chip removes back to 'all' -- never to an empty string the
-  // server would read differently
-  assert.match(sectionSource, /onRemove: \(\) => setMergedFilter\('all'\)/)
+  // the chip clears back to 'all' -- never to an empty string the server
+  // would read differently. The section renders both options through the one
+  // setter (clicking 'all' clears); Products' clear-all also calls
+  // setMergedFilter('all') (asserted below), so 'all' is the only reset value.
+  assert.match(sectionSource, /onClick=\{\(\) => setMergedFilter\(value\)\}/)
   // both options render through the one setter
   assert.match(sectionSource, /\['all', T\('all', 'All'\)\],\s+\['auto', activeLabel\],/)
 })

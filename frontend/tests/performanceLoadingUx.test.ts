@@ -1083,7 +1083,10 @@ for (const [name, source] of [
   // Customers moved sort/grouping onto the SortChip (unified listSort), so
   // its badge counts only true filters; Suppliers/Delivery still carry the
   // in-menu sort+group flags until their own rollout.
-  assert.match(source, /countActiveFlags\(\[yearFilter !== 'all', monthFilter !== 'all', (?:sortDirection !== 'desc', groupMode !== 'time', )?genderFilter !== 'all'\]\)/, `${name} contacts should count active filters without temporary filtered arrays`)
+  // Order/extra flags differ per tab (Customers moved sort onto SortChip;
+  // Suppliers/Delivery still carry in-menu sort+group), so match year+month+
+  // gender in the countActiveFlags call without pinning the exact tail.
+  assert.match(source, /countActiveFlags\(\[yearFilter !== 'all', monthFilter !== 'all'[^\]]*genderFilter !== 'all'[^\]]*\]\)/, `${name} contacts should count active filters without temporary filtered arrays`)
   assert.match(source, /const failedIdSet = new Set\(failedIds\)/, `${name} contacts should reuse a failed-id Set when filtering deleted snapshots`)
   assert.doesNotMatch(source, /_HISTORY_READY_DELAY_MS|window\.setTimeout\(\(\) => \{\s*setHistoryReady\(true\)/, `${name} contacts should not add a fixed post-load history delay`)
   assert.match(source, /const \[historyReady, setHistoryReady\] = useState\(false\)/, `${name} contacts should have an explicit post-ready action-history gate`)
@@ -1988,9 +1991,11 @@ assert.match(
 // true filters now -- direction is no longer one of them, and neither is
 // scope (customer vs supplier is a mandatory one-of-two VIEW with no
 // neutral, so being on the supplier view must not light up "Filters (1)").
+// year/month moved into the always-visible StatsRangeRow (no longer in-menu
+// filters), so the badge now counts only the true menu filters: type + group.
 assert.match(
   returns,
-  /countActiveFlags\(\[yearFilter !== 'all', monthFilter !== 'all', typeFilter !== 'all', returnGroupMode !== 'time'\]\)/,
+  /countActiveFlags\(\[typeFilter !== 'all', returnGroupMode !== 'time'\]\)/,
   'returns active filter count should avoid temporary filtered boolean arrays',
 )
 assert.doesNotMatch(

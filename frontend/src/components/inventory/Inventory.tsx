@@ -2100,8 +2100,7 @@ ${inventoryFeesFormulaText}`,
         // above — it leads the section instead, driving the same stripRange.
         <div className="mb-2 space-y-1.5">
           <StatsRangeRow
-            range={stripRange}
-            onRangeChange={setStripRange}
+            range={stripRange} onRangeChange={setStripRange}
             t={t}
             actions={(
               // Ranged stats export -- the dialog opens seeded with the

@@ -99,9 +99,17 @@ const { hasPermission, hasAnyPermission, isAdminControlUser } = lib
 {
   const salesSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'routes', 'sales.ts'), 'utf8')
   assert.match(salesSrc, /hasAnyPermission\(c\.get\('user'\), \['pos', 'sales'\]\)/, 'POST / (create sale) must check hasAnyPermission([pos, sales])')
-  const salesPermissionChecks = salesSrc.match(/hasPermission\(c\.get\('user'\), 'sales'\)|hasPermission\(user, 'sales'\)/g) || []
-  assert.ok(salesPermissionChecks.length >= 4, `expected at least 4 hasPermission(..., 'sales') call sites in sales.ts (GET /, GET /stats, PATCH /:id/status, PATCH /:id/customer), found ${salesPermissionChecks.length}`)
-  console.log('PASS routes/sales.ts still gates create (pos-or-sales) and list/stats/status/customer (sales) behind real permission checks')
+  // Part 557 view-tier: sales READS moved from the strict hasPermission('sales')
+  // boolean to the tier-aware canReadSales() (getPermissionTier(...,'sales') !==
+  // 'none') so a read-only 'view' grant can list/report without a write grant;
+  // WRITES (status, customer) stay strict. Assert both gates exist and are wired,
+  // which is a stronger check than the old raw hasPermission count.
+  const salesWriteChecks = salesSrc.match(/hasPermission\(c\.get\('user'\), 'sales'\)|hasPermission\(user, 'sales'\)/g) || []
+  assert.ok(salesWriteChecks.length >= 2, `expected >= 2 strict hasPermission(..., 'sales') WRITE gates in sales.ts (PATCH /:id/status, PATCH /:id/customer), found ${salesWriteChecks.length}`)
+  assert.match(salesSrc, /function canReadSales\(user: SessionUser\): boolean \{\s*return getPermissionTier\(user, 'sales'\) !== 'none'/, 'sales.ts must define the tier-aware read gate canReadSales(getPermissionTier !== none)')
+  const salesReadChecks = salesSrc.match(/canReadSales\(/g) || []
+  assert.ok(salesReadChecks.length >= 6, `expected sales.ts reads gated by canReadSales() at multiple sites, found ${salesReadChecks.length}`)
+  console.log('PASS routes/sales.ts gates create (pos-or-sales), writes (strict sales), and reads (tier-aware canReadSales)')
 }
 {
   const returnsSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'routes', 'returns.ts'), 'utf8')

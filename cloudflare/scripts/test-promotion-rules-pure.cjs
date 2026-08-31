@@ -129,8 +129,10 @@ const pass = (msg) => { checks++; console.log('PASS ' + msg) }
 {
   const promoSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'routes', 'promotions.ts'), 'utf8')
   assert.match(promoSrc, /app\.get\('\/rules\/active', async/, "/rules/active must stay open to any authenticated user (POS cashiers price with it) -- no requireKey")
+  // Part 557 view-tier: GET /rules moved to the tier-aware requireReadKey (a
+  // read-only 'view' grant can list rules); writes stay strict requireKey.
   for (const pin of [
-    /app\.get\('\/rules', requireKey\('promotions'\)/,
+    /app\.get\('\/rules', requireReadKey\('promotions'\)/,
     /app\.post\('\/rules', requireKey\('promotions'\)/,
     /app\.put\('\/rules\/:id', requireKey\('promotions'\)/,
     /app\.delete\('\/rules\/:id', requireKey\('promotions'\)/,

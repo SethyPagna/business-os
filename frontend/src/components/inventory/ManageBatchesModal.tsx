@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { fmtDateOnly } from '../../utils/formatters'
 import X from 'lucide-react/dist/esm/icons/x.js'
@@ -9,6 +9,7 @@ import { deactivateBatch, getProductBatches, updateBatch, updateBatchBranchQuant
 import { getInventoryMovements } from '../../api/inventoryTransport.ts'
 import { batchDisplayLabel } from '../../utils/batchLabel.ts'
 import { dateToBatchCode } from '../../utils/batchCode.ts'
+import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.ts'
 
 type DayMovement = {
   id?: number | string
@@ -83,6 +84,11 @@ export default function ManageBatchesModal({
   const [editingId, setEditingId] = useState<InventoryId | null>(null)
   const [draft, setDraft] = useState<{ expiryDate: string; receivedAt: string; notes: string; quantity: string }>({ expiryDate: '', receivedAt: '', notes: '', quantity: '' })
   const [savingId, setSavingId] = useState<InventoryId | null>(null)
+  // Synchronous double-submit guard for the batch edit save. State (savingId)
+  // updates asynchronously, so two fast clicks can both pass a state check
+  // before it settles; the ref flips synchronously. (Restores the guard that
+  // moved out of Inventory.tsx when Part 562 relocated batch management here.)
+  const saveBatchInFlightRef = useRef(false)
   // Drill level: null = the batch list; a yyyy-mm-dd date = that day's
   // movement detail (with times). Back always returns to the list.
   const [dayDetail, setDayDetail] = useState<string | null>(null)
@@ -149,6 +155,7 @@ export default function ManageBatchesModal({
   const cancelEdit = () => setEditingId(null)
 
   const saveEdit = async (batch: ProductBatch) => {
+    if (!beginSingleAction(saveBatchInFlightRef, { blocked: savingId != null })) return
     setSavingId(batch.id)
     try {
       const res = await updateBatch(batch.id, {
@@ -184,6 +191,7 @@ export default function ManageBatchesModal({
     } catch (e: unknown) {
       notify(e instanceof Error ? e.message : tr('update_failed', 'Update failed'), 'error')
     } finally {
+      finishSingleAction(saveBatchInFlightRef)
       setSavingId(null)
     }
   }
