@@ -53,8 +53,16 @@ const IMPORT_RETENTION_MAX_JOBS_PER_TIER = 20
 
 // Terminal = the statuses every writer settles on and nothing resumes
 // from without an explicit /retry (queue.ts, importEngine.ts,
-// routes/importJobs.ts write exactly these three).
-const TERMINAL_STATUS_SQL = `('completed', 'failed', 'cancelled')`
+// routes/importJobs.ts write exactly these four).
+//
+// completed_with_errors was MISSING here originally, which is why the
+// heaviest real imports never had their staging pruned: importEngine marks
+// any job with at least one failed row 'completed_with_errors' (not plain
+// 'completed' -- see finalizeApply), and routes/notifications.ts already
+// treats ('completed','completed_with_errors') as the finished-import set.
+// A partial-error import is exactly the large, retried kind that leaves the
+// most staging behind, so excluding it defeated the sweep's whole purpose.
+const TERMINAL_STATUS_SQL = `('completed', 'completed_with_errors', 'failed', 'cancelled')`
 
 // finished_at is CURRENT_TIMESTAMP at every site that sets it, but the
 // tracker's /cancel path flips status without stamping it -- COALESCE to

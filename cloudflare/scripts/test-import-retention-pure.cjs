@@ -126,19 +126,28 @@ async function main() {
     seedDetail(db, 'fresh-done')
     seedJob(db, 'review-old', 'awaiting_review', 10 * DAY)
     seedDetail(db, 'review-old')
+    // Regression (Part 572): a partial-error import (any failed row) is
+    // marked 'completed_with_errors' -- a TERMINAL status that was originally
+    // MISSING from the sweep's filter, so exactly the heaviest, most-retried
+    // real imports never had their staging pruned. It must be treated like a
+    // plain 'completed'.
+    seedJob(db, 'old-errored', 'completed_with_errors', 2 * DAY)
+    seedDetail(db, 'old-errored')
 
     const result = await retention.maybeRunScheduledImportRetention({ ASSETS: bucket })
     assert.strictEqual(result.skipped, false)
-    assert.strictEqual(result.detailPruned, 1, `expected exactly old-done pruned, got ${result.detailPruned}`)
+    assert.strictEqual(result.detailPruned, 2, `expected old-done + old-errored pruned, got ${result.detailPruned}`)
     assert.strictEqual(result.summaryDeleted, 0, 'nothing is 7d old with a terminal status')
 
     for (const table of DETAIL_TABLES) {
       assert.strictEqual(count(db, table, 'old-done'), 0, `${table} not purged for old-done`)
+      assert.strictEqual(count(db, table, 'old-errored'), 0, `${table} not purged for completed_with_errors`)
       assert.ok(count(db, table, 'fresh-done') > 0, `${table} wrongly purged for fresh-done`)
       assert.ok(count(db, table, 'review-old') > 0, `${table} wrongly purged for awaiting_review`)
     }
     for (const table of SUMMARY_TABLES) {
       assert.ok(count(db, table, 'old-done') > 0, `${table} must survive the 24h tier`)
+      assert.ok(count(db, table, 'old-errored') > 0, `${table} must survive the 24h tier`)
     }
     const job = db.prepare(`SELECT details_pruned_at, chunk_state_json, materialize_state_json, summary_json FROM import_jobs WHERE id = 'old-done'`).get({})
     assert.ok(job, 'summary row must survive the 24h tier')
@@ -146,7 +155,11 @@ async function main() {
     assert.strictEqual(job.chunk_state_json, null, 'chunk_state_json not cleared')
     assert.strictEqual(job.materialize_state_json, null, 'materialize_state_json not cleared')
     assert.strictEqual(job.summary_json, '{"created":1}', 'summary_json must be untouched')
-    assert.deepStrictEqual(bucket.deletedKeys, ['imports/old-done/raw.csv'], 'only the UNLINKED raw file may be deleted')
+    assert.deepStrictEqual(
+      [...bucket.deletedKeys].sort(),
+      ['imports/old-done/raw.csv', 'imports/old-errored/raw.csv'],
+      'only the UNLINKED raw files of the two pruned terminal jobs may be deleted',
+    )
     assert.strictEqual(auditEvents.length, 1)
     assert.strictEqual(auditEvents[0].action, 'import_retention_auto_clean')
   })
