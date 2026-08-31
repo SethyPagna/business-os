@@ -26,16 +26,22 @@ const pack = path.join(downloads, 'businessos-migration-aug28')
 const require = createRequire(import.meta.url)
 const XLSX = require(path.join(repo, 'frontend/node_modules/xlsx'))
 
+// The report files originally sat loose in Downloads; they are archived in
+// Downloads/27th-30th now. Accept either location so source-level reruns work.
+const reportFile = (name) => {
+  const loose = path.join(downloads, name)
+  return fs.existsSync(loose) ? loose : path.join(downloads, '27th-30th', name)
+}
 const files = {
-  invoice: path.join(downloads, 'report-invoice-detail 27th-30th.xls'),
-  invoiceFull: path.join(downloads, 'report-invoice-detail.xls'),
-  transfer: path.join(downloads, 'stock branch transfer.xls'),
-  stockIn: path.join(downloads, 'stock-in-report-stockin-27th-30th.xlsx'),
-  stockReport: path.join(downloads, 'stock-report-27th-30.xlsx'),
-  expense: path.join(downloads, 'report-expense-income-27th-30th.xls'),
-  payableWarehouse: path.join(downloads, 'warehouse-account-payable-report-all.xls'),
-  payableShop: path.join(downloads, 'shop-account-payable-report-all.xls'),
-  deleted: path.join(downloads, 'deleted items-all time.xls'),
+  invoice: reportFile('report-invoice-detail 27th-30th.xls'),
+  invoiceFull: reportFile('report-invoice-detail.xls'),
+  transfer: reportFile('stock branch transfer.xls'),
+  stockIn: reportFile('stock-in-report-stockin-27th-30th.xlsx'),
+  stockReport: reportFile('stock-report-27th-30.xlsx'),
+  expense: reportFile('report-expense-income-27th-30th.xls'),
+  payableWarehouse: reportFile('warehouse-account-payable-report-all.xls'),
+  payableShop: reportFile('shop-account-payable-report-all.xls'),
+  deleted: reportFile('deleted items-all time.xls'),
   mapping: path.join(pack, 'reference/product_mapping.csv'),
   mappingReview: path.join(pack, 'reference/product_mapping_review_VERIFIED.csv'),
   sales2024: path.join(pack, 'sales-import-2024.csv'),
@@ -253,7 +259,16 @@ function resolveProduct(sourceName, sourceCode = '', { preferSold = false } = {}
   return direct.length === 1 ? direct[0] : null
 }
 
-const customerByPhone = new Map(customers.filter((row) => digits(row.phone)).map((row) => [digits(row.phone), row]))
+// The legacy reports print Cambodian numbers without the leading 0 that the
+// contact book stores ('70856070' vs '070856070'), so compare zero-stripped
+// keys — and only link a key that identifies exactly one customer.
+const phoneKey = (value) => digits(value).replace(/^0+/, '')
+const customersByPhone = new Map()
+for (const row of customers.filter((candidate) => phoneKey(candidate.phone))) {
+  const key = phoneKey(row.phone)
+  if (!customersByPhone.has(key)) customersByPhone.set(key, [])
+  customersByPhone.get(key).push(row)
+}
 const customersByName = new Map()
 for (const row of customers) {
   const key = norm(row.name)
@@ -261,7 +276,8 @@ for (const row of customers) {
   customersByName.get(key).push(row)
 }
 function resolveCustomer(name, phone) {
-  if (digits(phone) && customerByPhone.has(digits(phone))) return customerByPhone.get(digits(phone))
+  const byPhone = phoneKey(phone) ? customersByPhone.get(phoneKey(phone)) || [] : []
+  if (byPhone.length === 1) return byPhone[0]
   const named = customersByName.get(norm(name)) || []
   return named.length === 1 ? named[0] : null
 }
@@ -530,8 +546,8 @@ for (const sale of newSaleModels) {
   ) VALUES (
     ${sql(sale.receipt)},${cashier?.id || 'NULL'},'Aza',2,'Leang Cosmetic Shop',${sale.customer?.id || 'NULL'},${sql(sale.customerName)},${sql(sale.customerPhone)},NULL,
     ${sql(sale.paymentMethod)},'USD',${sqlNum(sale.exchangeRate)},${sqlNum(sale.subtotal)},0,0,0,0,0,
-    ${sqlNum(sale.subtotal)},${Math.round(sale.subtotal * sale.exchangeRate)},${sqlNum(sale.amountPaid)},0,0,0,${sale.isDelivery},${driver.id},
-    ${sql(driver.name)},NULL,NULL,${sqlNum(sale.deliveryFee)},0,'customer','completed',${sql(sale.notes)},'[]',0,
+    ${sqlNum(sale.subtotal)},${Math.round(sale.subtotal * sale.exchangeRate)},${sqlNum(sale.amountPaid)},0,0,0,${sale.isDelivery},${sale.isDelivery ? driver.id : 'NULL'},
+    ${sale.isDelivery ? sql(driver.name) : 'NULL'},NULL,NULL,${sqlNum(sale.deliveryFee)},0,'customer','completed',${sql(sale.notes)},'[]',0,
     ${sql(sale.createdAt)},${sql(sale.createdAt)},${sql(clientRequestId)}
   );`)
 }
