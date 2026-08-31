@@ -16180,3 +16180,87 @@ lane's large sticky-header rework — my one-liner rides with them; the running 
 already shows it). `11b5c9ff` names its ride-alongs: `StockChangeSection.tsx`'s
 ScanSearchButton (another lane) and the lang packs' Fees/Expenses-rename keys
 (~28, another lane).
+
+## Part 558 (Aug 31 2026, expenses lane) — Fees becomes Expenses: saved reusable labels, label cap, one-Amount rows, sticky date rows, Conflicts name expand
+
+**Ask (one user batch):** (1) "For fees labels make save labels...so it can be
+searched again with label and choose label when making fees... also do word
+count limit for label so user can't just write a whole sentence"; (2) "the
+search bar row and the date both can be pinned and stick... do so for all
+sections and pages"; (3) stock-changes "total rows... moved to above the
+rows... below the current placement"; (4) "bring the barcode scanner back";
+(5) Conflicts: "if product name is long it uses '...' and can't click to view
+details"; (6) "fees section i think that can be named to Expense"; (7) "many
+rows are using the type called expense when it should be delivery as label
+shows various delivery companies"; (8) rows "showing empty for branch, usd,
+sale id... no need such weird not consistent breakdown".
+
+**What changed** (commits say "Part 557" — minted before the stock-changes
+lane took 557 in the log; races expected):
+
+- `4974367a` cloudflare routes/fees.ts + scripts/test-fees-pure.cjs — new
+  `GET /api/fees/labels` (distinct labels + uses + dominant fee_type, before
+  /:id) and `normalizeFeeLabel` (6 words / 60 chars, POST+PUT) with test
+  coverage.
+- `03ef42ab` frontend — FeeForm suggests server labels (page-derived seed as
+  fallback), live `clampFeeLabel` + n/6 counter, and auto-selects the
+  dominant type when the label matches a saved one; FeesPage rows collapse
+  USD/KHR/Sale/Branch into ONE display-currency Amount (reportMoney pair) +
+  a Details cell (receipt-style chip + branch, blank when unset); fallbacks
+  renamed to Expense; NEW tests/feeLabelClamp.test.ts (pins clamp behavior +
+  client<->server cap parity) wired into test:utils, along with the
+  previously-UNWIRED reportMoney.test.ts from Part 556 (testChainCoverage
+  had been failing on it).
+- lang packs en+km — all fees* user-facing values renamed to
+  Expenses/ចំណាយ incl. perm_section_fees + perm_act_fees_* (permission
+  editor rides the same keys); new fee_label_limit_hint. **Swept into the
+  stock-changes lane's `11b5c9ff` by the shared-tree race** (verified in
+  HEAD; langKeyIntegrity green, 4244 shared keys).
+- `babad03f` Products.tsx — the Created date-range + pager row moved INSIDE
+  the sticky wrapper so date + search pin together. Sweep result for the
+  rest of the app: Sales/Returns/Fees already pin search with the date
+  filter inside the pinned FilterMenu; AuditLog/Inventory/Branches/Users/
+  Contacts/Files already pin; nothing else was missing.
+- StockChangeSection.tsx (**working-tree ride-along, committed by the peer's
+  `11b5c9ff`**) — rows 1+2 (Adjust/date/search + view/filters) wrapped
+  sticky; In/Out total pills moved OUT of the toolbar to their own row
+  directly above the day-grouped list; ScanSearchButton added beside the
+  ledger search (the "barcode scanner back" ask — Products/POS/Inventory/
+  Returns/Sales all still had theirs; this section had none).
+- `823edc9a` ProductDuplicatesTab.tsx — long product names and the cluster
+  value chip toggle to full wrapped text on click/tap (hover-only titles
+  were unreachable on touch, and exact clusters deliberately hide edit).
+- **DATA FIX on remote D1**: 6 rows (ids 4241–4246, Aug 28–30) typed
+  'expense' with delivery-company labels (Grab ×2, Virak Buntam ×2, J&T,
+  Capital Express) → 'delivery'. UPDATE guarded on id+type+label;
+  changes=6; verified delivery 3130→3136, expense 1118→1112. Local D1 copy
+  predates those rows (nothing to fix). The FeeForm auto-type is the
+  prevention for this class.
+
+**What was found:** the "many rows typed expense that should be delivery" is
+NOT the 4,240-row import (its types are correct in both DBs) — it was 6
+recent MANUAL rows where staff typed a delivery company but left the type
+dropdown; the labels endpoint's dominant-type data (22 distinct labels,
+Grab→delivery etc., verified against local D1) now auto-corrects that at
+entry time.
+
+**Verified:** fe tsc clean ×2 (before + after peer FilterMenu churn), cf tsc
+clean, check:source 426 files, test-fees-pure 7 checks, feeLabelClamp 5
+checks, langKeyIntegrity / statsStrip / productDuplicatesTab /
+permissionEditor / permissions / permissionActions / navigationConfig /
+reportMoney / testChainCoverage all PASS individually. Labels SQL run
+against the real local D1 sqlite (22 labels, dominant types correct).
+Remote UPDATE verified by before/after GROUP BY counts. NOT verified
+live-in-browser: admin UI behind auth (no creds; entering them is
+disallowed) — standing caveat. Full test:utils chain currently STOPS at
+performanceLoadingUx.test.ts on ActiveFilterChips/salesGroupMode
+expectations against FilterMenu.tsx/Sales.tsx — files owned dirty by the
+in-flight filter-rework peer lane, untouched by this lane, failing
+identically without my changes.
+
+**Not done:** the "in-card scrolling like large-screen fees" remark was
+satisfied via the sticky rows rather than restructuring pages into
+fixed-height scroll cards; fee_type option label "Expense" kept as-is
+inside the renamed Expenses section (km reads ចំណាយ for both — flag if the
+user wants a distinct word); the 926 imported rows labeled "no_category"
+left untouched.
