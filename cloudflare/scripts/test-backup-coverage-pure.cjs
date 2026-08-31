@@ -88,7 +88,9 @@ check('FK dependency order holds: every child sits after every parent it referen
   before('returns', 'return_items')
   before('products', 'product_images')
   before('promotions', 'promotion_rules')
-  before('promotions', 'promotion_product_links')
+  // promotion_product_links / portal_faqs / portal_business_profile were
+  // removed from BACKUP_TABLES: no migration ever created them, so their
+  // entries backed up nothing (7a sweep, Aug 31).
   before('users', 'user_notes')
   before('customers', 'customer_share_submissions')
 })
