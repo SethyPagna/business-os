@@ -1,6 +1,6 @@
 import type { D1Compat } from './db'
 import { buildInClause, selectInChunks } from './sqlBinding'
-import { productDetailSignature, normalizeProductGroupName } from './productDetailRule'
+import { productDetailSignature, normalizeProductGroupName, normalizeProductFuzzyName } from './productDetailRule'
 
 // Applies THE product identity rule (lib/productDetailRule.ts) at branch-
 // transfer, add-stock and merge-duplicates time, so those paths reach the
@@ -135,11 +135,18 @@ export type ProductDuplicateGroup = {
 //  - same_name: two+ active products sharing a display name (name_key)
 //    with DIFFERENT barcodes -- usually genuinely distinct SKUs (shades /
 //    scents), listed for a glance, never auto-merged.
+//  - similar_name: two+ active products whose names collapse to the SAME
+//    FUZZY key (normalizeProductFuzzyName: diacritics/punctuation/word-order
+//    ignored) but to DIFFERENT exact name_keys -- the "same item, re-typed
+//    under a slightly different name, each with its own barcode" case the user
+//    reported. This is the weakest evidence of the three (a fuzzy name match,
+//    not an exact name or a shared barcode), so it sorts last and, like the
+//    others, is only ever surfaced for a human to merge or dismiss.
 // Nothing here merges anything; the routes let the reviewer merge one
 // pair at a time or dismiss a cluster (product_duplicate_dismissals,
 // migration 0083 -- same persistence model as the contacts panel).
 
-export type PossiblySameSeverity = 'same_barcode' | 'same_name'
+export type PossiblySameSeverity = 'same_barcode' | 'same_name' | 'similar_name'
 
 export type PossiblySameProductEntry = {
   id: number
@@ -152,7 +159,7 @@ export type PossiblySameProductEntry = {
 }
 
 export type PossiblySameProductCluster = {
-  type: 'barcode' | 'name'
+  type: 'barcode' | 'name' | 'similar'
   value: string
   severity: PossiblySameSeverity
   products: PossiblySameProductEntry[]
@@ -164,12 +171,30 @@ export type PossiblySameProductCluster = {
 // cluster.
 const MIN_REAL_BARCODE_LENGTH = 4
 
-// Dismissals are stored NORMALIZED (trimmed barcode / name_key) so the
-// same cluster matches its dismissal regardless of the display casing the
+// The in-memory dismissal-lookup key: `<type><DELIM><value>`. The delimiter is
+// U+0001 (an ASCII control char that can never appear in a barcode or a
+// normalized name), and it is REQUIRED -- without it type 'name' + value 'x'
+// would collide with type 'na' + value 'mex'. Every key -- the ones built from
+// the dismissals table AND the ones each cluster loop tests -- goes through
+// this one helper, so a new cluster type can never silently forget the
+// delimiter (which would read as "dismissal silently does nothing"). Written as
+// String.fromCharCode(1) rather than a literal control char so the source stays
+// legible and greppable.
+const DISMISS_DELIM = String.fromCharCode(1)
+const dismissKey = (type: string, value: string): string => `${type}${DISMISS_DELIM}${value}`
+
+// Dismissals are stored NORMALIZED (trimmed barcode / name_key / fuzzy key) so
+// the same cluster matches its dismissal regardless of the display casing the
 // panel happened to show at dismiss time -- the same rule the contacts
-// panel applies (contactDuplicates.ts's normalized dismissal compare).
-export function normalizeProductClusterKey(type: 'barcode' | 'name', value: unknown): string {
-  return type === 'barcode' ? String(value ?? '').trim() : normalizeProductGroupName(value)
+// panel applies (contactDuplicates.ts's normalized dismissal compare). Each
+// cluster type normalizes with the SAME function the sweep keys that type by,
+// so a value the panel echoes back (a display name, say) folds to the exact
+// stored key: 'barcode' -> trimmed barcode, 'name' -> name_key, 'similar' ->
+// fuzzy key.
+export function normalizeProductClusterKey(type: 'barcode' | 'name' | 'similar', value: unknown): string {
+  if (type === 'barcode') return String(value ?? '').trim()
+  if (type === 'similar') return normalizeProductFuzzyName(value)
+  return normalizeProductGroupName(value)
 }
 
 export async function findPossiblySameProductClusters(db: D1Compat): Promise<PossiblySameProductCluster[]> {
@@ -183,10 +208,11 @@ export async function findPossiblySameProductClusters(db: D1Compat): Promise<Pos
     db.prepare(`SELECT cluster_type, cluster_value FROM product_duplicate_dismissals`)
       .all<{ cluster_type: string; cluster_value: string }>({}),
   ])
-  const dismissed = new Set(dismissalRows.map((row) => `${row.cluster_type}${row.cluster_value}`))
+  const dismissed = new Set(dismissalRows.map((row) => dismissKey(row.cluster_type, row.cluster_value)))
 
   const byBarcode = new Map<string, (PossiblySameProductEntry & { name_key: string | null })[]>()
   const byNameKey = new Map<string, (PossiblySameProductEntry & { name_key: string | null })[]>()
+  const byFuzzyKey = new Map<string, (PossiblySameProductEntry & { name_key: string | null })[]>()
   for (const row of rows) {
     const barcode = String(row.barcode || '').trim()
     if (barcode.length >= MIN_REAL_BARCODE_LENGTH) {
@@ -196,6 +222,11 @@ export async function findPossiblySameProductClusters(db: D1Compat): Promise<Pos
     if (row.name_key) {
       if (!byNameKey.has(row.name_key)) byNameKey.set(row.name_key, [])
       byNameKey.get(row.name_key)!.push(row)
+    }
+    const fuzzyKey = normalizeProductFuzzyName(row.name)
+    if (fuzzyKey) {
+      if (!byFuzzyKey.has(fuzzyKey)) byFuzzyKey.set(fuzzyKey, [])
+      byFuzzyKey.get(fuzzyKey)!.push(row)
     }
   }
 
@@ -208,12 +239,12 @@ export async function findPossiblySameProductClusters(db: D1Compat): Promise<Pos
   const clusters: PossiblySameProductCluster[] = []
   for (const [barcode, group] of byBarcode) {
     if (group.length < 2) continue
-    if (dismissed.has(`barcode${barcode}`)) continue
+    if (dismissed.has(dismissKey('barcode', barcode))) continue
     clusters.push({ type: 'barcode', value: barcode, severity: 'same_barcode', products: group.map(toEntry) })
   }
   for (const [nameKey, group] of byNameKey) {
     if (group.length < 2) continue
-    if (dismissed.has(`name${nameKey}`)) continue
+    if (dismissed.has(dismissKey('name', nameKey))) continue
     // A name group whose members all share one real barcode IS the barcode
     // cluster above -- listing it twice would make one decision look like
     // two. Groups with mixed/placeholder barcodes still show here.
@@ -221,9 +252,27 @@ export async function findPossiblySameProductClusters(db: D1Compat): Promise<Pos
     if (barcodes.size === 1 && [...barcodes][0].length >= MIN_REAL_BARCODE_LENGTH) continue
     clusters.push({ type: 'name', value: group[0].name || nameKey, severity: 'same_name', products: group.map(toEntry) })
   }
-  // Worst-first: a shared real barcode is far stronger same-item evidence
-  // than a shared display name.
-  return clusters.sort((a, b) => (a.severity === b.severity ? 0 : a.severity === 'same_barcode' ? -1 : 1))
+  for (const [fuzzyKey, group] of byFuzzyKey) {
+    if (group.length < 2) continue
+    if (dismissed.has(dismissKey('similar', fuzzyKey))) continue
+    // Only NEW evidence: a fuzzy group whose members all share ONE exact
+    // name_key is already the same_name cluster above (that one name_key
+    // trivially yields one fuzzy key), and one that all shares ONE real
+    // barcode is the same_barcode cluster -- surfacing either again would
+    // split one decision into two. The similar_name row exists for the case
+    // neither catches: DIFFERENT exact names (>=2 name_keys) that only a
+    // fuzzier read (diacritics/punctuation/word-order ignored) sees as one
+    // item -- the "renamed, own barcode" duplicate the user reported.
+    const nameKeys = new Set(group.map((row) => row.name_key || ''))
+    if (nameKeys.size < 2) continue
+    const barcodes = new Set(group.map((row) => String(row.barcode || '').trim()))
+    if (barcodes.size === 1 && [...barcodes][0].length >= MIN_REAL_BARCODE_LENGTH) continue
+    clusters.push({ type: 'similar', value: group[0].name || fuzzyKey, severity: 'similar_name', products: group.map(toEntry) })
+  }
+  // Worst-first: a shared real barcode is the strongest same-item evidence, a
+  // shared exact display name next, a fuzzy-only name match the weakest.
+  const rank: Record<PossiblySameSeverity, number> = { same_barcode: 0, same_name: 1, similar_name: 2 }
+  return clusters.sort((a, b) => rank[a.severity] - rank[b.severity])
 }
 
 export async function findDuplicateProductGroups(db: D1Compat): Promise<ProductDuplicateGroup[]> {

@@ -2696,9 +2696,9 @@ app.post('/possible-duplicates/dismiss', async (c) => {
     return c.json({ error: 'You do not have permission to perform this action' }, 403)
   }
   const body = await c.req.json().catch(() => ({})) as { type?: string; value?: string }
-  const type = body.type === 'barcode' || body.type === 'name' ? body.type : null
+  const type = body.type === 'barcode' || body.type === 'name' || body.type === 'similar' ? body.type : null
   const value = type ? normalizeProductClusterKey(type, body.value) : ''
-  if (!type || !value) return c.json({ error: 'type (barcode|name) and value are required' }, 400)
+  if (!type || !value) return c.json({ error: 'type (barcode|name|similar) and value are required' }, 400)
   await getDb(c.env).prepare(`
     INSERT INTO product_duplicate_dismissals (cluster_type, cluster_value, dismissed_by_id, dismissed_by_name, dismissed_at)
     VALUES (@type, @value, @byId, @byName, CURRENT_TIMESTAMP)
