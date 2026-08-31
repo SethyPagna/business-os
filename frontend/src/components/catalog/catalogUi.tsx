@@ -73,16 +73,19 @@ export function SummaryTile({ icon: Icon, label, value, tone = 'dark' }: Summary
 
 /** Stock status badge component for product and membership cards. */
 export function StatusPill({ status, copy }: StatusPillProps) {
-  const labelKey = status === 'out_of_stock'
-    ? 'outOfStock'
+  // Real human fallbacks: the fallback used to be the copy KEY itself, so
+  // any storefront without a configured copy override showed shoppers the
+  // literal camelCase key ("lowStock") on every card badge.
+  const [labelKey, fallback] = status === 'out_of_stock'
+    ? ['outOfStock', 'Out of Stock']
     : status === 'low_stock'
-      ? 'lowStock'
-      : 'inStock'
+      ? ['lowStock', 'Low Stock']
+      : ['inStock', 'In Stock']
 
   return (
     <span className={`inline-flex items-center gap-1.5 rounded-full bg-white/95 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide shadow-sm backdrop-blur dark:bg-neutral-900/90 ${statusClass(status)}`}>
       <span className={`h-1.5 w-1.5 rounded-full ${statusDotClass(status)}`} />
-      {copy(labelKey, labelKey)}
+      {copy(labelKey, fallback)}
     </span>
   )
 }

@@ -37,7 +37,7 @@ import { deriveMessengerLink, deriveTelegramLink, derivePhoneCallLink, deriveWha
 import CatalogPreviewSurface from './CatalogPreviewSurface'
 import type { ProductDetailViewState } from './ProductDetailFlyout'
 import { CATALOG_DEFAULT_PAGE_SIZE } from './catalogPagination'
-import { getPortalGridClass, getPortalMobileGridClass, buildPortalPricePresentation } from './portalCatalogDisplay.ts'
+import { getPortalGridClass, getPortalMobileGridClass, buildPortalPricePresentation, resolvePortalStockStatus } from './portalCatalogDisplay.ts'
 import type { PromotionRule } from '../../utils/promotionRules.ts'
 import { collapsePortalProductGroups, mergePortalCatalogProducts } from './portalProductGrouping.ts'
 import { normalizeGoogleMapsEmbed } from './portalEditorUtils.ts'
@@ -102,6 +102,11 @@ type CatalogProduct = LooseRecord & {
   sku?: string
   image_path?: string
   image_gallery?: unknown[]
+  // Server-computed availability (routes/portal.ts attachPortalStockStatus).
+  // Raw quantities/thresholds are redacted server-side; the legacy fields
+  // below them may still appear in pre-deploy localStorage snapshots only.
+  stock_status?: string
+  branch_availability?: Array<{ branch_id?: string | number | null; status?: string }>
   branch_stock?: Array<{ branch_id?: string | number | null; quantity?: string | number | null }>
   stock_quantity?: string | number | null
 }
@@ -468,21 +473,6 @@ function resolvePortalActiveTab(config: PortalConfig, copy: CopyFunction, curren
   return tabs.some((item) => item.key === current) ? current : (tabs[0]?.key || 'products')
 }
 
-function getBranchQty(product: CatalogProduct, branchId: unknown): number {
-  if (!branchId || branchId === 'all') return Number(product.stock_quantity || 0)
-  const match = (product.branch_stock || []).find((entry) => String(entry.branch_id) === String(branchId))
-  return Number(match?.quantity || 0)
-}
-
-function getStockStatus(product: CatalogProduct, qty: unknown, config: Record<string, unknown> = {}): string {
-  const quantity = Number(qty || 0)
-  const useGlobal = config.stockThresholdMode === 'global'
-  const outThreshold = Number(useGlobal ? config.outOfStockThreshold : product.out_of_stock_threshold || 0)
-  const lowThreshold = Number(useGlobal ? config.lowStockThreshold : product.low_stock_threshold || 10)
-  if (quantity <= outThreshold) return 'out_of_stock'
-  if (quantity <= lowThreshold) return 'low_stock'
-  return 'in_stock'
-}
 
 function normalizeProductGallery(product: CatalogProduct | null | undefined): string[] {
   const source = Array.isArray(product?.image_gallery) ? product.image_gallery : (product?.image_path ? [product.image_path] : [])
@@ -941,10 +931,19 @@ export default function PublicCatalogPage() {
     }
   }, [brandFilter, branchFilter, categoryFilter, config.showCatalog, config.showStockStatus, deferredSearch, loading, productInitial, productPage, productPageSize, products.length, promoOnly, stockFilter])
 
-  useEffect(() => () => {
-    aliveRef.current = false
-    invalidateTrackedRequest(requestRef)
-    invalidateTrackedRequest(productRequestRef)
+  // Re-arm on mount, not just tear down: React 18 StrictMode (dev) runs
+  // mount -> cleanup (simulated unmount) -> mount again on the SAME refs.
+  // A cleanup-only effect left aliveRef stuck at false after the simulated
+  // unmount, so in dev every fetch's `.then` bailed silently forever --
+  // the grid never applied search/filter/pagination responses and
+  // "Refreshing..." never cleared. Production (no double-invoke) hid it.
+  useEffect(() => {
+    aliveRef.current = true
+    return () => {
+      aliveRef.current = false
+      invalidateTrackedRequest(requestRef)
+      invalidateTrackedRequest(productRequestRef)
+    }
   }, [])
 
   const displayConfig = useMemo<PortalConfig>(() => ({ ...DEFAULT_PUBLIC_CONFIG, ...config }), [config])
@@ -1211,8 +1210,7 @@ export default function PublicCatalogPage() {
   // itself, so the flyout shows numbers consistent with the card that was
   // clicked.
   const openProductDetail = (product: CatalogProduct) => {
-    const qty = getBranchQty(product, selectedStockBranch)
-    const status = getStockStatus(product, qty, displayConfig)
+    const status = resolvePortalStockStatus(product, selectedStockBranch, displayConfig)
     const gallery = normalizeProductGallery(product)
     const pricePresentation = displayConfig.showPrices
       ? buildPortalPricePresentation(product, displayConfig, formatPortalPrice, portalPromotionRules)
@@ -1269,8 +1267,6 @@ export default function PublicCatalogPage() {
         promotionsTitle={displayConfig.promotionsTitle}
         promotionsIntro={displayConfig.promotionsIntro}
         selectedStockBranch={selectedStockBranch}
-        getBranchQty={getBranchQty}
-        getStockStatus={getStockStatus}
         normalizeProductGallery={normalizeProductGallery}
         openProductGallery={openProductGallery}
         openProductDetail={openProductDetail}

@@ -44,6 +44,7 @@ import {
   normalizeRecommendedProductIds,
   productMatchesPortalBranches,
   buildPortalPricePresentation,
+  resolvePortalStockStatus,
 } from './portalCatalogDisplay.ts'
 import type { ProductDetailViewState } from './ProductDetailFlyout'
 import { buildProductSearchTerms } from '../products/helpers/productFilterHelpers.ts'
@@ -121,6 +122,10 @@ type CatalogProduct = LegacyCatalogRecord & {
   sku?: string
   image_path?: string
   image_gallery?: unknown[]
+  // Server-computed availability (routes/portal.ts attachPortalStockStatus);
+  // the raw quantity fields below only survive in legacy/local snapshots.
+  stock_status?: string
+  branch_availability?: Array<{ branch_id?: string | number | null; status?: string }>
   branch_stock?: Array<{ branch_id?: string | number | null; quantity?: string | number | null }>
   stock_quantity?: string | number | null
 }
@@ -931,24 +936,6 @@ function applyDraft(config: PortalConfig, draft: PortalDraft): PortalConfig {
     submissionRewardPoints: Math.max(0, Math.floor(toNumber(draft.customer_portal_submission_reward_points, config.submissionRewardPoints))),
     submissionInstructions: draft.customer_portal_submission_instructions || config.submissionInstructions,
   }
-}
-
-/** Resolve the visible quantity using selected branch filter. */
-function getBranchQty(product: CatalogProduct, branchId: unknown): number {
-  if (!branchId || branchId === 'all') return Number(product.stock_quantity || 0)
-  const match = (product.branch_stock || []).find((entry) => String(entry.branch_id) === String(branchId))
-  return Number(match?.quantity || 0)
-}
-
-/** Compute stock badge state from product quantity and thresholds. */
-function getStockStatus(product: CatalogProduct, qty: unknown, config: PortalConfig = {}) {
-  const quantity = Number(qty || 0)
-  const useGlobal = config.stockThresholdMode === 'global'
-  const outThreshold = Number(useGlobal ? config.outOfStockThreshold : product.out_of_stock_threshold || 0)
-  const lowThreshold = Number(useGlobal ? config.lowStockThreshold : product.low_stock_threshold || 10)
-  if (quantity <= outThreshold) return 'out_of_stock'
-  if (quantity <= lowThreshold) return 'low_stock'
-  return 'in_stock'
 }
 
 /** Build the full display gallery; only admins can write positions 4-5. */
@@ -2253,8 +2240,7 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
       if (!productMatchesPortalBranches(product, branchFilter)) return false
 
       const statusBranch = branchFilter.length === 1 ? branchFilter[0] : 'all'
-      const qty = getBranchQty(product, statusBranch)
-      const status = getStockStatus(product, qty, displayConfig)
+      const status = resolvePortalStockStatus(product, statusBranch, displayConfig)
       if (displayConfig.showStockStatus !== false && stockFilter.length && !stockFilter.includes(status)) return false
       if (!displayConfig.showOutOfStockProducts && status === 'out_of_stock') return false
 
@@ -3117,8 +3103,7 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
   }, [products, recommendedProductSearchTerm])
 
   const openProductDetail = (product: CatalogProduct) => {
-    const qty = getBranchQty(product, selectedStockBranch)
-    const status = getStockStatus(product, qty, displayConfig)
+    const status = resolvePortalStockStatus(product, selectedStockBranch, displayConfig)
     const gallery = normalizeProductGallery(product)
     const pricePresentation = displayConfig.showPrices
       ? buildPortalPricePresentation(product, displayConfig, formatPortalPrice)
@@ -3170,8 +3155,6 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
     promotionsTitle: displayConfig.promotionsTitle,
     promotionsIntro: displayConfig.promotionsIntro,
     selectedStockBranch,
-    getBranchQty,
-    getStockStatus,
     normalizeProductGallery,
     openProductGallery,
     openProductDetail,

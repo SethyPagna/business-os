@@ -9,6 +9,8 @@ import {
   normalizeRecommendedProductIds,
   productMatchesPortalBranches,
   shouldShowStockStatus,
+  resolvePortalStockStatus,
+  combinePortalStockStatus,
 } from '../src/components/catalog/portalCatalogDisplay.ts'
 
 const tailwindConfig = fs.readFileSync(new URL('../tailwind.config.ts', import.meta.url), 'utf8')
@@ -168,6 +170,66 @@ runTest('both stock-status render sites (filter pills + card badge) delegate to 
   assert.match(catalogProductsSectionSource, /shouldShowStockStatus\(previewConfig\)\s*\?\s*\(\s*<div className="rounded-\[1\.1rem\]/, 'stock-status filter-pill row should use the shared helper')
   assert.match(catalogProductsSectionSource, /shouldShowStockStatus\(previewConfig\)\s*\?\s*\(\s*<div className="absolute right-3 top-3">\s*<StatusPill/, 'card StatusPill badge should use the shared helper')
   assert.doesNotMatch(catalogProductsSectionSource, /previewConfig\.showStockStatus !== false/, 'no inline !== false check should remain now that the toggle is centralized')
+})
+
+// --- Server-computed stock status (public leak fix) ---------------------
+// The portal payload ships stock_status/branch_availability instead of raw
+// quantities+thresholds (routes/portal.ts attachPortalStockStatus). The
+// resolver must read those first and only fall back to quantity math for
+// legacy rows (editor preview drafts, pre-deploy caches).
+
+runTest('resolvePortalStockStatus prefers the server-computed whole-store status', () => {
+  assert.equal(resolvePortalStockStatus({ stock_status: 'low_stock', stock_quantity: 999 }, 'all'), 'low_stock')
+  assert.equal(resolvePortalStockStatus({ stock_status: 'in_stock' }), 'in_stock')
+})
+
+runTest('resolvePortalStockStatus reads per-branch availability, missing branch = out of stock', () => {
+  const product = {
+    stock_status: 'in_stock',
+    branch_availability: [
+      { branch_id: 1, status: 'in_stock' },
+      { branch_id: 2, status: 'out_of_stock' },
+    ],
+  }
+  assert.equal(resolvePortalStockStatus(product, 1), 'in_stock')
+  assert.equal(resolvePortalStockStatus(product, '2'), 'out_of_stock')
+  // Server-shaped row with no entry for the asked branch: no stock row there.
+  assert.equal(resolvePortalStockStatus(product, 99), 'out_of_stock')
+})
+
+runTest('resolvePortalStockStatus legacy fallback keeps the historical badge math', () => {
+  const legacy = { stock_quantity: 5, low_stock_threshold: 10, out_of_stock_threshold: 0, branch_stock: [{ branch_id: 3, quantity: 0 }] }
+  assert.equal(resolvePortalStockStatus(legacy, 'all'), 'low_stock')
+  assert.equal(resolvePortalStockStatus(legacy, 3), 'out_of_stock')
+  assert.equal(resolvePortalStockStatus({ stock_quantity: 50 }, 'all'), 'in_stock', 'defaults: out=0, low=10')
+  assert.equal(
+    resolvePortalStockStatus({ stock_quantity: 5, low_stock_threshold: 10 }, 'all', { stockThresholdMode: 'global', lowStockThreshold: 2, outOfStockThreshold: 0 }),
+    'in_stock',
+    'global threshold mode still honored on legacy rows',
+  )
+})
+
+runTest('combinePortalStockStatus takes the most-available status and defaults unknowns to out', () => {
+  assert.equal(combinePortalStockStatus('out_of_stock', 'low_stock'), 'low_stock')
+  assert.equal(combinePortalStockStatus('in_stock', 'low_stock'), 'in_stock')
+  assert.equal(combinePortalStockStatus(undefined, undefined), 'out_of_stock')
+  assert.equal(combinePortalStockStatus('nonsense', 'low_stock'), 'low_stock')
+})
+
+runTest('the storefront no longer ships raw stock math -- components resolve via the shared helper', () => {
+  assert.match(catalogProductsSectionSource, /resolvePortalStockStatus\(product, selectedStockBranch, previewConfig\)/)
+  assert.match(publicCatalogPageSource, /resolvePortalStockStatus\(product, selectedStockBranch, displayConfig\)/)
+  assert.match(catalogPageSource, /resolvePortalStockStatus\(product, statusBranch, displayConfig\)/)
+  assert.doesNotMatch(publicCatalogPageSource, /function getStockStatus/, 'PublicCatalogPage must not keep its own quantity-based copy')
+  assert.doesNotMatch(catalogPageSource, /function getStockStatus/, 'CatalogPage must not keep its own quantity-based copy')
+})
+
+runTest('productMatchesPortalBranches understands redacted branch_availability rows', () => {
+  const served = { branch_availability: [{ branch_id: 1, status: 'in_stock' }, { branch_id: 2, status: 'out_of_stock' }] }
+  assert.equal(productMatchesPortalBranches(served, ['1']), true)
+  assert.equal(productMatchesPortalBranches(served, ['2']), false, 'out at that branch = not available there')
+  const legacy = { branch_stock: [{ branch_id: 4, quantity: 2 }] }
+  assert.equal(productMatchesPortalBranches(legacy, ['4']), true)
 })
 
 if (failed > 0) {

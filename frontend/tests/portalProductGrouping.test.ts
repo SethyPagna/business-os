@@ -89,6 +89,30 @@ await runTest('mergePortalCatalogProducts handles an empty/missing product list'
   assert.deepEqual(mergePortalCatalogProducts([]), [])
 })
 
+await runTest('merged branch-duplicate rows combine server stock statuses (most available wins, per branch too)', () => {
+  // Server-shaped rows (post-leak-fix payload: statuses, no quantities).
+  // Row 1 is out everywhere except branch 1; row 2 carries branch 2. The
+  // one merged card must not inherit only the lead row's availability.
+  const products = [
+    {
+      id: 1, name: 'Rose Serum 30ml', selling_price_usd: 18, barcode: 'A',
+      stock_status: 'out_of_stock',
+      branch_availability: [{ branch_id: 1, status: 'low_stock' }, { branch_id: 2, status: 'out_of_stock' }],
+    },
+    {
+      id: 2, name: 'Rose Serum 30ml', selling_price_usd: 18, barcode: 'A',
+      stock_status: 'in_stock',
+      branch_availability: [{ branch_id: 1, status: 'out_of_stock' }, { branch_id: 2, status: 'in_stock' }],
+    },
+  ]
+  const result = mergePortalCatalogProducts(products)
+  assert.equal(result.length, 1)
+  assert.equal(result[0].stock_status, 'in_stock')
+  const byBranch = new Map((result[0].branch_availability || []).map((entry: { branch_id?: unknown; status?: string }) => [String(entry.branch_id), entry.status]))
+  assert.equal(byBranch.get('1'), 'low_stock')
+  assert.equal(byBranch.get('2'), 'in_stock')
+})
+
 if (failed > 0) {
   process.exitCode = 1
 }

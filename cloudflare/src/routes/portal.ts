@@ -365,28 +365,55 @@ function portalVisibleProductFilter(showOutOfStockProducts: boolean): string {
 const PORTAL_BRAND_SORT_KEY_SQL = "CASE WHEN trim(COALESCE(p.brand, '')) = '' THEN '1' ELSE '0' END || lower(trim(COALESCE(p.brand, '')))"
 
 
-// Ported from routes/products.ts's attachBranchStock so the public portal's
-// product rows carry the same per-branch breakdown the admin catalog does.
-// Without this, the portal never had branch_stock at all, which meant two
-// gaps: (1) the branch filter pills in buildPortalProductFilters could
-// narrow *which* products matched, but the returned rows never showed
-// *which* branch(es) actually carried them, and (2) mergeSameDetailRows
-// (see below) had nothing to combine -- a product imported/created once
-// per branch (same name/price/etc, different row per branch) rendered as
-// several visually-identical storefront cards instead of one card with
-// stock spread across branches, exactly the duplicate-row symptom this
-// pass is fixing.
-async function attachPortalBranchStock(env: Env, products: Array<Record<string, unknown>>) {
+// SECURITY BOUNDARY (public storefront payload). This helper is the LAST
+// step before product rows reach shoppers, and it does two jobs:
+//
+// 1. Computes what the storefront is actually allowed to know about stock:
+//    a per-product `stock_status` ('in_stock'|'low_stock'|'out_of_stock')
+//    plus `branch_availability` [{branch_id, status}] so the branch filter
+//    and per-branch badge keep working (a shopper may ask "is this at the
+//    branch near me" -- the ANSWER is public, the ledger is not). The rule
+//    mirrors the storefront's historical badge math exactly: out when
+//    qty <= out_of_stock_threshold (default 0), low when qty <=
+//    low_stock_threshold (default 10), else in -- honoring the merchant's
+//    customer_portal_stock_threshold_mode='global' setting, which the old
+//    client-side computation silently ignored on the live site.
+//
+// 2. REDACTS the raw fields the computation consumed: stock_quantity,
+//    low_stock_threshold, out_of_stock_threshold, and the old per-branch
+//    quantity array (branch_stock) never leave the server. Exact counts and
+//    reorder thresholds are internal inventory intel (see the AI path's
+//    matching allowlist below) -- they were previously embedded verbatim in
+//    the public bootstrap HTML and every search response.
+//
+// Chunked for D1's 100-bound-parameter ceiling, and branches read once
+// instead of per chunk -- see routes/products.ts's attachBranchStock,
+// which this is the portal-side port of and which took GET /api/products
+// down in production with exactly this unbounded `IN (...)`.
+type PortalStockStatus = 'in_stock' | 'low_stock' | 'out_of_stock'
+
+function portalStockStatusFor(quantity: number, outThreshold: number, lowThreshold: number): PortalStockStatus {
+  if (quantity <= outThreshold) return 'out_of_stock'
+  if (quantity <= lowThreshold) return 'low_stock'
+  return 'in_stock'
+}
+
+async function attachPortalStockStatus(env: Env, products: Array<Record<string, unknown>>) {
   const ids = Array.from(new Set(products.map((p) => Number(p.id)).filter((id) => Number.isFinite(id) && id > 0)))
   if (!ids.length) return products
   const db = getDb(env)
-  // Chunked for D1's 100-bound-parameter ceiling, and branches read once
-  // instead of per chunk -- see routes/products.ts's attachBranchStock,
-  // which this is the portal-side port of and which took GET /api/products
-  // down in production with exactly this unbounded `IN (...)`.
-  const branchRows = await db.prepare(`
-    SELECT id, name FROM branches WHERE is_active = 1 ORDER BY is_default DESC, id ASC
-  `).all<{ id: number; name: string }>()
+  const [branchRows, thresholdSettings] = await Promise.all([
+    db.prepare(`
+      SELECT id FROM branches WHERE is_active = 1 ORDER BY is_default DESC, id ASC
+    `).all<{ id: number }>(),
+    db.prepare(`
+      SELECT key, value FROM settings
+      WHERE key IN ('customer_portal_stock_threshold_mode', 'customer_portal_low_stock_threshold', 'customer_portal_out_of_stock_threshold')
+    `).all<{ key: string; value: string }>().then((rows) => Object.fromEntries((rows || []).map((row) => [row.key, row.value]))),
+  ])
+  const useGlobalThresholds = String(thresholdSettings.customer_portal_stock_threshold_mode || '') === 'global'
+  const globalLow = Number(thresholdSettings.customer_portal_low_stock_threshold ?? 10)
+  const globalOut = Number(thresholdSettings.customer_portal_out_of_stock_threshold ?? 0)
   const stockRows = await selectInChunks(ids, 0, (chunk) => {
     const { sql, params } = buildInClause('id', chunk)
     return db.prepare(`
@@ -398,18 +425,26 @@ async function attachPortalBranchStock(env: Env, products: Array<Record<string, 
   const quantityByProductBranch = new Map<string, number>()
   for (const row of stockRows) quantityByProductBranch.set(`${row.product_id}:${row.branch_id}`, row.quantity)
 
-  const byProduct = new Map<number, Array<{ branch_id: number; branch_name: string; quantity: number }>>()
-  for (const id of ids) {
-    byProduct.set(id, branchRows.map((branch) => ({
-      branch_id: branch.id,
-      branch_name: branch.name,
-      quantity: quantityByProductBranch.get(`${id}:${branch.id}`) || 0,
-    })))
-  }
-  return products.map((product) => ({
-    ...product,
-    branch_stock: byProduct.get(Number(product.id)) || [],
-  }))
+  return products.map((product) => {
+    const {
+      stock_quantity: rawQuantity,
+      low_stock_threshold: rawLow,
+      out_of_stock_threshold: rawOut,
+      branch_stock: _neverServed,
+      ...publicFields
+    } = product
+    const outThreshold = useGlobalThresholds ? (Number.isFinite(globalOut) ? globalOut : 0) : Number(rawOut || 0)
+    const lowThreshold = useGlobalThresholds ? (Number.isFinite(globalLow) ? globalLow : 10) : Number(rawLow || 10)
+    const productId = Number(product.id)
+    return {
+      ...publicFields,
+      stock_status: portalStockStatusFor(Number(rawQuantity || 0), outThreshold, lowThreshold),
+      branch_availability: branchRows.map((branch) => ({
+        branch_id: branch.id,
+        status: portalStockStatusFor(quantityByProductBranch.get(`${productId}:${branch.id}`) || 0, outThreshold, lowThreshold),
+      })),
+    }
+  })
 }
 
 async function buildPortalMeta(env: Env, showOutOfStockProducts: boolean) {
@@ -434,6 +469,10 @@ async function buildPortalMeta(env: Env, showOutOfStockProducts: boolean) {
       GROUP BY lower(trim(p.brand))
       ORDER BY lower(name) ASC
     `).all<{ name: string }>(),
+    // Branch id+name is deliberately public: these are the shop's store
+    // locations, and they power the storefront's "available at branch"
+    // filter. Everything else about a branch (its stock ledger, per-branch
+    // quantities) stays server-side -- see attachPortalStockStatus.
     db.prepare('SELECT id, name FROM branches WHERE is_active = 1 ORDER BY is_default DESC, lower(name) ASC').all<{ id: number; name: string }>(),
   ])
   return {
@@ -487,7 +526,7 @@ async function buildPortalCatalog(env: Env, showOutOfStockProducts: boolean) {
   const items = snapshot.items
   const total = snapshot.total
   const portalRules = snapshotRules
-  const itemsWithBranchStock = await attachPortalBranchStock(env, (items || []) as Array<Record<string, unknown>>)
+  const itemsWithStockStatus = await attachPortalStockStatus(env, (items || []) as Array<Record<string, unknown>>)
   // Two things were wrong here, and both made the storefront's A-Z rail
   // disagree with what the page below it actually shows.
   //
@@ -519,7 +558,7 @@ async function buildPortalCatalog(env: Env, showOutOfStockProducts: boolean) {
     ORDER BY value ASC
   `).all<{ value: string; count: number }>()
   return {
-    items: itemsWithBranchStock,
+    items: itemsWithStockStatus,
     total,
     page,
     pageSize,
@@ -1710,12 +1749,13 @@ async function runPortalProductSearch(c: { env: Env; req: { query(): Record<stri
     }
   }
 
-  // Same branch_stock attachment as buildPortalCatalog's initial load --
-  // this is the endpoint every filter/page/search change actually hits, so
-  // leaving it out here would mean branch_stock (and the duplicate-row
-  // merge below that depends on it) only ever worked on the very first,
-  // unfiltered page load.
-  const itemsWithBranchStock = await attachPortalBranchStock(c.env, (items || []) as Array<Record<string, unknown>>)
+  // Same stock-status attachment (and raw-field REDACTION -- see the
+  // SECURITY BOUNDARY comment on attachPortalStockStatus) as
+  // buildPortalCatalog's initial load -- this is the endpoint every
+  // filter/page/search change actually hits, so leaving it out here would
+  // re-leak raw quantities/thresholds on every interaction after the first
+  // page load.
+  const itemsWithStockStatus = await attachPortalStockStatus(c.env, (items || []) as Array<Record<string, unknown>>)
 
   // Alphabet-bar counts scoped to the SAME filters as the main query above
   // (with `initial` itself forced to 'all', so the bar shows every letter
@@ -1740,7 +1780,7 @@ async function runPortalProductSearch(c: { env: Env; req: { query(): Record<stri
   `).all<{ value: string; count: number }>(initialsParams)
 
   return {
-    items: itemsWithBranchStock,
+    items: itemsWithStockStatus,
     total,
     page,
     pageSize,

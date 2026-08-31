@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { Fragment, useEffect, useMemo, useState } from 'react'
 import type { Dispatch, SetStateAction } from 'react'
 import ArrowRight from 'lucide-react/dist/esm/icons/arrow-right.js'
 import BadgeCheck from 'lucide-react/dist/esm/icons/badge-check.js'
@@ -17,7 +17,7 @@ import CatalogPaginationControls, { CATALOG_DEFAULT_PAGE_SIZE, paginateCatalogIt
 import { SectionShell, StatusPill } from './catalogUi'
 import PortalFilterCombobox from './PortalFilterCombobox'
 import PortalPromoStrip from './PortalPromoStrip.tsx'
-import { buildPortalHighlightBadges, buildPortalPricePresentation, shouldShowStockStatus } from './portalCatalogDisplay.ts'
+import { buildPortalHighlightBadges, buildPortalPricePresentation, resolvePortalStockStatus, shouldShowStockStatus } from './portalCatalogDisplay.ts'
 import { isProductPromoted, type PromotionRule } from '../../utils/promotionRules.ts'
 import { aggregateInitialOptions, getInitialKey } from '../../utils/initials.ts'
 import { getKhmerTextProps } from '../../utils/scriptTypography.ts'
@@ -51,6 +51,13 @@ type PortalPreviewConfig = {
   showProductDescription?: boolean
   showProductDiscount?: boolean
   showStockStatus?: boolean
+  // Legacy-fallback threshold config for resolvePortalStockStatus (only
+  // consulted for rows that still carry raw quantities -- editor preview
+  // drafts and pre-deploy caches; live rows arrive with server-computed
+  // statuses).
+  stockThresholdMode?: string
+  lowStockThreshold?: unknown
+  outOfStockThreshold?: unknown
 }
 
 type CatalogProduct = Record<string, unknown> & {
@@ -128,8 +135,6 @@ type CatalogProductsSectionProps = {
   promotionsTitle?: string
   promotionsIntro?: string
   selectedStockBranch?: unknown
-  getBranchQty: (product: CatalogProduct, selectedBranch: unknown) => number
-  getStockStatus: (product: CatalogProduct, quantity: number, config: PortalPreviewConfig) => string
   normalizeProductGallery: (product: CatalogProduct) => string[]
   openProductGallery: (product: CatalogProduct, startIndex: number) => void
   // Opens the new Details flyout (images/description-sections/price/add-to-
@@ -231,8 +236,6 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
     promotionsTitle = '',
     promotionsIntro = '',
     selectedStockBranch,
-    getBranchQty,
-    getStockStatus,
     normalizeProductGallery,
     openProductGallery,
     openProductDetail,
@@ -451,7 +454,7 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
   return (
     <SectionShell
       title={copy('products', 'Products')}
-      subtitle={copy('liveCatalog', 'Live inventory, customer-safe details only.')}
+      subtitle={copy('liveCatalog', 'Browse our products and check availability.')}
     >
       {/* Desktop (lg+): an always-visible left rail replaces the click-to-
           open Filters button/panel used below `lg` -- no popover needed
@@ -495,7 +498,7 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
               name="product_search"
               autoComplete="off"
               className="min-w-0 flex-1 bg-transparent text-sm text-slate-700 outline-none placeholder:text-slate-400 dark:text-neutral-100"
-              placeholder={copy('searchPlaceholder', 'Search by name, barcode, or SKU')}
+              placeholder={copy('searchPlaceholder', 'Search products')}
               value={search}
               onChange={(event) => setSearch(event.target.value)}
             />
@@ -544,7 +547,7 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
         <div className="mb-5 space-y-3">
           <div className="flex flex-col gap-1 px-1">
             <div className="text-lg font-semibold text-slate-900 dark:text-neutral-100">{promotionsTitle || copy('promotionsSectionFallback', 'Featured offers')}</div>
-            <div className="text-sm text-slate-500 dark:text-neutral-400">{promotionsIntro || copy('promotionsSectionHint', 'Display offers, announcements, or editor posts ahead of searchable products.')}</div>
+            <div className="text-sm text-slate-500 dark:text-neutral-400">{promotionsIntro || copy('promotionsSectionHint', 'Our latest offers and announcements.')}</div>
           </div>
           <div className="grid gap-4 lg:grid-cols-2">
             {visiblePromotionItems.map((item) => (
@@ -662,8 +665,10 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
           ))
         ) : null}
         {pagedProducts.map((product, index) => {
-          const qty = getBranchQty(product, selectedStockBranch)
-          const status = getStockStatus(product, qty, previewConfig)
+          // Server-computed status (see portalCatalogDisplay.ts's resolver
+          // and its SECURITY BOUNDARY note) -- raw quantities/thresholds no
+          // longer reach the storefront payload.
+          const status = resolvePortalStockStatus(product, selectedStockBranch, previewConfig)
           const gallery = normalizeProductGallery(product)
           const primaryImage = gallery[0] || ''
           const highlightBadges = buildPortalHighlightBadges(product, previewConfig, copy, promotionRules)
@@ -680,12 +685,12 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
           const categoryHeaderLabel = categoryHeaderAt.get(index)
 
           return (
-            <>
+            // The mapped element is this Fragment, so IT carries the key --
+            // keys on the children below never reached React's reconciler
+            // (the "unique key" warning on this list).
+            <Fragment key={product.id}>
               {categoryHeaderLabel ? (
-                <div
-                  key={`category-header-${product.id}`}
-                  className="col-span-full flex items-center gap-3 pt-2 first:pt-0"
-                >
+                <div className="col-span-full flex items-center gap-3 pt-2 first:pt-0">
                   <h3 className="text-sm font-semibold uppercase tracking-wide text-slate-500 dark:text-neutral-400">
                     {categoryHeaderLabel}
                   </h3>
@@ -693,7 +698,6 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
                 </div>
               ) : null}
               <article
-                key={product.id}
                 data-product-card="true"
                 className={`group overflow-hidden bg-transparent transition duration-200 ${openProductDetail ? 'cursor-pointer' : ''}`}
                 onClick={() => openProductDetail?.(product)}
@@ -845,7 +849,7 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
                 </div>
               </div>
             </article>
-            </>
+            </Fragment>
           )
         })}
       </div>

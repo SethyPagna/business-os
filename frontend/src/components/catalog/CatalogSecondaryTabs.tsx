@@ -321,7 +321,10 @@ function CatalogAboutSection(props: CatalogAboutSectionProps) {
   const previewBusinessName = String(previewConfig.businessName || '').trim()
   const showBrandLabel = previewBusinessName && previewTitle && previewBusinessName.toLowerCase() !== previewTitle.toLowerCase()
   const aboutTitle = previewConfig.aboutTitle || copy('about', 'About')
-  const fallbackStory = copy('portalAboutFallback', 'Add your business story in the editor so customers can quickly learn about your brand.')
+  // Shopper-voiced fallback: this renders on the PUBLIC About tab when the
+  // merchant hasn't written a story yet -- it must never read like an
+  // instruction to the merchant (standing public-surface rule).
+  const fallbackStory = copy('portalAboutFallback', 'Welcome to our store.')
   const storyText = String(previewConfig.aboutContent || fallbackStory).trim()
   const heroTitle = previewTitle || aboutTitle
   const introText = String(previewConfig.intro || storyText || fallbackStory).trim()
@@ -580,7 +583,7 @@ function CatalogFaqSection(props: CatalogFaqSectionProps) {
   return (
     <SectionShell
       title={previewConfig.faqTitle || copy('faq', 'FAQ')}
-      subtitle={copy('faqHint', 'Add your most common customer questions here. Customers can open each answer one by one.')}
+      subtitle={copy('faqHint', 'Quick answers to common questions.')}
     >
       <div className="grid items-start gap-4 sm:grid-cols-2">
         {publicFaqItems.length ? publicFaqItems.map((item, index) => {
@@ -614,7 +617,7 @@ function CatalogFaqSection(props: CatalogFaqSectionProps) {
           )
         }) : (
           <div className="rounded-[28px] border border-dashed border-slate-300 bg-slate-50 p-6 text-sm text-slate-500 dark:border-neutral-700 dark:bg-neutral-800/60 dark:text-neutral-400 sm:col-span-2">
-            {copy('faqHint', 'Add your most common customer questions here. Customers can open each answer one by one.')}
+            {copy('faqEmptyState', 'No questions yet. Contact us any time and we are happy to help.')}
           </div>
         )}
       </div>

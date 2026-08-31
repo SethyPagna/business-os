@@ -1,9 +1,12 @@
 import { buildProductGroups, mergeSameDetailRows, type ProductRecord } from '../../utils/productGrouping.ts'
+import { combinePortalStockStatus } from './portalCatalogDisplay.ts'
 
 type LooseRecord = Record<string, any>
 export type CatalogProduct = LooseRecord & {
   id: string | number
   name?: string
+  stock_status?: string
+  branch_availability?: Array<{ branch_id?: string | number | null; status?: string }>
   branch_stock?: Array<{ branch_id?: string | number | null; quantity?: string | number | null }>
   stock_quantity?: string | number | null
 }
@@ -39,7 +42,42 @@ export function collapsePortalProductGroups(products: CatalogProduct[]): Catalog
   }).filter(Boolean)
 }
 
+// The portal payload carries server-computed stock_status/branch_availability
+// instead of raw quantities (routes/portal.ts attachPortalStockStatus), so
+// the shared mergeSameDetailRows (which sums quantities for admin surfaces)
+// can't combine availability across a branch-duplicated cluster -- the
+// merged row would just inherit the lead row's status. Combine statuses
+// here instead: the card badge takes the MOST available status across the
+// merged rows (per branch too), so a product any row still carries never
+// shows as out of stock. Deliberately conservative the other way -- two
+// low-stock rows stay "low" even if their combined total would clear the
+// threshold, which never overstates availability.
+function combineMergedStockStatus(merged: CatalogProduct[], sourceById: Map<string, CatalogProduct>): CatalogProduct[] {
+  return merged.map((row) => {
+    const mergedIds: unknown[] = Array.isArray(row.__mergedProductIds) ? row.__mergedProductIds : []
+    if (mergedIds.length <= 1 || typeof row.stock_status !== 'string') return row
+    const cluster = mergedIds.map((id) => sourceById.get(String(id))).filter(Boolean) as CatalogProduct[]
+    if (cluster.length <= 1) return row
+    const statusByBranch = new Map<string, string>()
+    let overall: string = 'out_of_stock'
+    for (const item of cluster) {
+      overall = combinePortalStockStatus(overall, item.stock_status)
+      for (const entry of (Array.isArray(item.branch_availability) ? item.branch_availability : [])) {
+        const key = String(entry?.branch_id)
+        statusByBranch.set(key, combinePortalStockStatus(statusByBranch.get(key), entry?.status))
+      }
+    }
+    return {
+      ...row,
+      stock_status: overall,
+      branch_availability: [...statusByBranch.entries()].map(([branchId, status]) => ({ branch_id: Number(branchId), status })),
+    }
+  })
+}
+
 export function mergePortalCatalogProducts(products: unknown): CatalogProduct[] {
-  const deduped = mergeSameDetailRows(Array.isArray(products) ? products as CatalogProduct[] : []) as unknown as CatalogProduct[]
-  return collapsePortalProductGroups(deduped)
+  const source = Array.isArray(products) ? products as CatalogProduct[] : []
+  const deduped = mergeSameDetailRows(source) as unknown as CatalogProduct[]
+  const sourceById = new Map(source.map((item) => [String(item?.id), item]))
+  return collapsePortalProductGroups(combineMergedStockStatus(deduped, sourceById))
 }

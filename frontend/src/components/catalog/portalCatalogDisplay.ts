@@ -79,6 +79,76 @@ export function shouldShowStockStatus(config: { showStockStatus?: boolean } = {}
   return config.showStockStatus !== false
 }
 
+export type PortalStockStatus = 'in_stock' | 'low_stock' | 'out_of_stock'
+
+interface PortalStockConfig {
+  stockThresholdMode?: string
+  lowStockThreshold?: unknown
+  outOfStockThreshold?: unknown
+}
+
+// Higher = more available. Used when several server rows merge into one
+// storefront card: the combined badge takes the MOST available status, so
+// a product that any branch/row still carries never shows as out of stock.
+const PORTAL_STOCK_STATUS_RANK: Record<PortalStockStatus, number> = {
+  out_of_stock: 0,
+  low_stock: 1,
+  in_stock: 2,
+}
+
+function normalizePortalStockStatus(value: unknown): PortalStockStatus | null {
+  return value === 'in_stock' || value === 'low_stock' || value === 'out_of_stock' ? value : null
+}
+
+export function combinePortalStockStatus(a: unknown, b: unknown): PortalStockStatus {
+  const left = normalizePortalStockStatus(a) || 'out_of_stock'
+  const right = normalizePortalStockStatus(b) || 'out_of_stock'
+  return PORTAL_STOCK_STATUS_RANK[right] > PORTAL_STOCK_STATUS_RANK[left] ? right : left
+}
+
+// SECURITY BOUNDARY (public storefront): the portal API no longer ships raw
+// stock_quantity / per-branch quantities / low- and out-of-stock thresholds
+// to shoppers -- it ships a server-computed `stock_status` plus per-branch
+// `branch_availability` statuses (routes/portal.ts attachPortalStockStatus).
+// This resolver reads those first. The quantity/threshold math below it is
+// a LEGACY FALLBACK only, for payloads that still carry raw fields: the
+// admin editor's own preview drafts and pre-deploy localStorage snapshots.
+export function resolvePortalStockStatus(
+  product: PortalProduct = {},
+  branchId: unknown = 'all',
+  config: PortalStockConfig = {},
+): PortalStockStatus {
+  const wholeStore = !branchId || branchId === 'all'
+  if (wholeStore) {
+    const served = normalizePortalStockStatus(product?.stock_status)
+    if (served) return served
+  } else {
+    const availability = Array.isArray(product?.branch_availability) ? product.branch_availability : []
+    const entry = availability.find((row) => String((row as PortalProduct | null | undefined)?.branch_id) === String(branchId))
+    if (entry) {
+      const served = normalizePortalStockStatus((entry as PortalProduct).status)
+      if (served) return served
+    } else if (normalizePortalStockStatus(product?.stock_status)) {
+      // Server-shaped payload but no entry for this branch: no stock row
+      // there at all.
+      return 'out_of_stock'
+    }
+  }
+  // Legacy quantity math -- byte-for-byte the rule the storefront always
+  // used (and the rule the server now applies before redacting).
+  const quantity = wholeStore
+    ? Number(product?.stock_quantity || 0)
+    : Number((Array.isArray(product?.branch_stock) ? product.branch_stock : [])
+        .find((entry) => String((entry as PortalProduct | null | undefined)?.branch_id) === String(branchId))
+        ?.quantity as number | string | null | undefined || 0)
+  const useGlobal = config.stockThresholdMode === 'global'
+  const outThreshold = Number(useGlobal ? config.outOfStockThreshold : (product?.out_of_stock_threshold as number | string | null | undefined) || 0)
+  const lowThreshold = Number(useGlobal ? config.lowStockThreshold : (product?.low_stock_threshold as number | string | null | undefined) || 10)
+  if (quantity <= outThreshold) return 'out_of_stock'
+  if (quantity <= lowThreshold) return 'low_stock'
+  return 'in_stock'
+}
+
 export function getPortalGridClass(desktopColumns: unknown): string {
   const normalized = Math.min(10, Math.max(2, Math.round(Number(desktopColumns || 4))))
   if (normalized === 2) return 'lg:grid-cols-2'
@@ -102,6 +172,16 @@ export function getPortalMobileGridClass(mobileColumns: unknown): string {
 
 export function productMatchesPortalBranches(product: PortalProduct = {}, branchFilter: unknown): boolean {
   if (!Array.isArray(branchFilter) || !branchFilter.length) return true
+  // Server-shaped rows carry redacted per-branch statuses; a branch matches
+  // when the product isn't out of stock there. Legacy rows (editor preview
+  // drafts, pre-deploy caches) keep the old entry-existence check.
+  const availability = Array.isArray(product?.branch_availability) ? product.branch_availability : []
+  if (availability.length) {
+    return branchFilter.some((branchId) => availability.some((entry) => (
+      String((entry as PortalProduct | null | undefined)?.branch_id) === String(branchId)
+      && (entry as PortalProduct | null | undefined)?.status !== 'out_of_stock'
+    )))
+  }
   const branchStock = Array.isArray(product?.branch_stock) ? product.branch_stock : []
   return branchFilter.some((branchId) => (
     branchStock.some((entry) => String((entry as PortalProduct | null | undefined)?.branch_id) === String(branchId))
