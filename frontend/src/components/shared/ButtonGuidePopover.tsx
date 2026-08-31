@@ -31,7 +31,7 @@ export default function ButtonGuidePopover({ title, entries, align = 'auto', tri
       align={align}
       compact
       openOnHover
-      menuClassName="max-h-[70vh] overflow-auto p-3 w-72"
+      menuClassName="max-h-[60vh] overflow-auto p-2.5 w-72"
       trigger={(
         <button
           type="button"
@@ -48,15 +48,19 @@ export default function ButtonGuidePopover({ title, entries, align = 'auto', tri
       )}
       content={() => (
         <div>
-          <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">{title}</p>
-          <div className="space-y-2.5">
+          <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">{title}</p>
+          {/* Compact rows (user, Aug 31: the guide "is too long ... can be made
+              shorter"): label + one-line description share a row, tight leading,
+              small gaps, so many entries fit without a tall scrolling panel. */}
+          <div className="space-y-1.5">
             {entries.map((entry, index) => (
-              <div key={index} className="flex items-start gap-2">
-                {entry.icon ? <span className="mt-0.5 shrink-0 text-gray-500 dark:text-gray-400">{entry.icon}</span> : null}
-                <div className="min-w-0">
-                  <p className="text-sm font-medium text-gray-800 dark:text-gray-100">{entry.label}</p>
-                  <p className="text-xs text-gray-500 dark:text-gray-400">{entry.description}</p>
-                </div>
+              <div key={index} className="flex items-baseline gap-1.5 leading-tight">
+                {entry.icon ? <span className="shrink-0 self-start text-gray-400 dark:text-gray-500">{entry.icon}</span> : null}
+                <p className="min-w-0 text-xs text-gray-500 dark:text-gray-400">
+                  <span className="font-semibold text-gray-800 dark:text-gray-100">{entry.label}</span>
+                  <span className="text-gray-300 dark:text-gray-600"> — </span>
+                  {entry.description}
+                </p>
               </div>
             ))}
           </div>
