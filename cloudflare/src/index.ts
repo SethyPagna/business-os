@@ -35,8 +35,10 @@ import { handleImportQueue, handleImportDeadLetterQueue, handleMediaQueue, handl
 import { maybeRunScheduledBackup } from './lib/backup'
 import { maybeRunScheduledDriveSync } from './lib/googleDrive'
 import { maybeRunScheduledAuditLogRetention } from './lib/audit'
-import { maybeRunScheduledImportRetention } from './lib/importRetention'
+import { maybeRunScheduledImportRetention, cleanOrphanImportStaging } from './lib/importRetention'
 import { maybeRunScheduledImageAudit } from './lib/imageAudit'
+import { maybeRunScheduledEphemeralRetention } from './lib/ephemeralRetention'
+import { reapStalledImportJobs } from './routes/importJobs'
 
 export type Env = {
   DB: D1Database
@@ -342,8 +344,22 @@ export default {
       await runStep('backup', () => maybeRunScheduledBackup(env))
       await runStep('drive-sync', () => maybeRunScheduledDriveSync(env))
       await runStep('audit-log-retention', () => maybeRunScheduledAuditLogRetention(env))
+      // Reap stalled import jobs into a terminal status BEFORE retention runs,
+      // so a job stuck in analyzing/applying (e.g. a killed queue invocation)
+      // is pruned this same tick. Previously this ran ONLY on the Import Jobs
+      // screen's GET, so a stalled job held its full staging until someone
+      // happened to open that page.
+      await runStep('reap-stalled-imports', () => reapStalledImportJobs(env))
       // K4: import-artifact retention (24h detail / 7d summary).
       await runStep('import-retention', () => maybeRunScheduledImportRetention(env))
+      // Drain orphan staging automatically (rows whose parent import_jobs row
+      // is already gone) -- previously reachable only via a manual, force-only
+      // admin endpoint, so orphans accumulated with no automatic drain.
+      await runStep('orphan-staging-cleanup', () => cleanOrphanImportStaging(env, { apply: true }))
+      // Prune ephemeral / log / expired-auth tables (rate_limit_events,
+      // sessions, verification_codes, lockouts, ai_response_logs, action_history)
+      // that had no automatic retention at all before the Aug-31 audit.
+      await runStep('ephemeral-retention', () => maybeRunScheduledEphemeralRetention(env))
       // Last on purpose: it is the only one of these optional to the business.
       await runStep('image-audit', () => maybeRunScheduledImageAudit(env))
     })())
