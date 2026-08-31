@@ -147,3 +147,34 @@ data-availability one. Buckets: **List**, **Detail/Receipt**, **Not shown**.
 
 These overlap hot frontend lanes (Sales/Products/Contacts/Returns), so
 implementation must be coordinated per the parallel-session rules.
+
+---
+
+## Implementation status (Part 573 — user said "do all")
+
+Built disjoint-first to avoid the hot lanes. Shipped + verified:
+
+- **A (backend model + read):** migration `0096_sales_credit_due_date.sql`;
+  `GET /customers/reports/ar-invoices` (`contacts.ts`, mirrors the AP endpoint,
+  resilient if the ledger isn't applied). Worker typecheck + endpoint SQL verified
+  in local sqlite against the 13,243-row ledger.
+- **A (UI):** `contacts/ArInvoicesSection.tsx` + `getCustomerReceivables` transport
+  — a customer Receivables view (owed/credit/paid buckets, filters, column chooser).
+  Typecheck clean. **NOT mounted** (its home `CustomersTab.tsx` is owned by the
+  active contacts lane) — a one-line mount is the follow-up.
+- **B:** `SaleDetailModal` now shows delivery fee / actual cost / split-tender /
+  payment currency / KHR amounts / an Outstanding (on-credit) line; Returns list
+  gained a **Status** column.
+- **C:** shared `columnPreferences.ts` (unit-tested) + `useColumnPreferences` +
+  `ColumnChooser`; wired live into the Returns list (Status default-on, Cashier
+  optional) — verified in-browser: chooser toggles columns and remembers per
+  surface. Also wired into the AR section.
+
+Deferred (all to avoid conflict / need another lane's files):
+- **Mount** `ArInvoicesSection` into the Customers tab (contacts lane owns it).
+- **i18n keys** for the new labels in `lang/{en,km}.json` (Sales lane owns the
+  packs) — labels use English fallbacks meanwhile.
+- **POS "create an on-credit sale"** entry UX (partial tender + due date) —
+  design-sensitive; `sales.credit_due_date` is in place for it.
+- **Column chooser on Sales/Products/Contacts tables** — those tables are in hot
+  lanes and need refactoring into a columns array first.

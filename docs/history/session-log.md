@@ -16872,3 +16872,61 @@ migration) — none of the hot Sales/Contacts/Products frontend lanes.
   UI yet (a customer-AR section mirroring supplier `ApInvoicesSection` is the
   natural follow-up). Khmer end-to-end on the live Sales page in km left for the
   user to eyeball (mechanism proven).
+
+## Part 573 — Customer credit/AR + data-visibility fills + excel-style column chooser
+
+**Ask** — User, after the AR migration: "we have the awaiting payment, but haven't
+really considered the on credit meaning they receive but haven't paid"; plus "go
+deep investigating the data in app ... any columns missing, data not shown"; plus
+"excel style columns are good for larger screens, with ability to show extra
+columns ... saves the need to go back and forth multiple pages." Then, to the
+3-thread audit: "do all. don't let it conflict or duplicate too much."
+
+**What was found (investigation, committed as `docs/DATA-VISIBILITY-AND-CREDIT-AUDIT.md`)**
+- `awaiting_payment` is a HELD order (stock NOT deducted; only completed +
+  awaiting_delivery deduct — `lib/salesStatus.ts`) and POS forces full tender for
+  every other status (`POS.tsx:2613`). So "on credit" (goods released + balance
+  owed) has no representation. The supplier side has a full credit model
+  (`payment_status`/`credit_due_date`, `credit_open_usd`, AP UI); the customer
+  side has none — which is why the AR report had no home.
+- Sales data captured but not shown (agent-audited + spot-verified): the admin
+  `SaleDetailModal` was USD-only and omitted delivery fee, actual delivery cost,
+  split-tender, payment_currency, and every KHR amount; `sale_items` batch/lot +
+  per-line cost + manual-discount trail are invisible. Returns list had no status
+  column. Products/Customers hide several fields.
+- No shared data-grid exists; every table is bespoke JSX. The export column-chooser
+  (`utils/exportOptions.ts`) is the reusable model to mirror on-screen.
+
+**What changed (all disjoint-first to avoid the hot Sales/Products/Contacts lanes)**
+- BACKEND: migration `0096_sales_credit_due_date.sql`; `GET /customers/reports/
+  ar-invoices` in `contacts.ts` (mirrors the AP endpoint; owed/overpaid/settled
+  buckets; resilient if `customer_receivables` unapplied).
+- `sales/SaleDetailModal.tsx`: surface delivery fee (+KHR), actual delivery cost,
+  split-tender breakdown, payment currency, KHR sub-lines, a Delivery section, and
+  an Outstanding (on-credit) line.
+- `shared/columnPreferences.ts` (+ unit test) + `useColumnPreferences` +
+  `ColumnChooser`: per-surface, localStorage-remembered, large-screen column
+  visibility. Wired live into `returns/ReturnsListSurface.tsx` (Status default-on,
+  Cashier optional; dynamic colSpan).
+- `contacts/ArInvoicesSection.tsx` + `getCustomerReceivables` transport: the
+  customer Receivables view, using the column chooser. **Built but NOT mounted.**
+
+**Verified**
+- Worker `tsc` clean; AR endpoint SQL (totals, outstanding filter, +7h Bangkok
+  date filter) run in local sqlite against the real 13,243-row ledger → 14/$547.5
+  Aug-31 slice, −$91,345.42 outstanding.
+- Frontend `tsc` clean after every edit; `columnPreferences.test.ts` PASS (added
+  to the test chain).
+- In-browser (localhost:5188): Returns → Columns chooser renders on lg, Status
+  column shows by default, toggling Cashier adds the column + persists
+  `bos_table_columns_returns`; no runtime errors from the change (only backend
+  ERR_CONNECTION_REFUSED, expected — worker not run).
+
+**Not done (deferred to avoid conflict / need another lane's files)**
+- Mount `ArInvoicesSection` in the Customers tab (contacts lane owns `CustomersTab.tsx`).
+- i18n keys for the new labels in `lang/{en,km}.json` (Sales lane owns the packs);
+  labels use English fallbacks meanwhile.
+- POS "create an on-credit sale" entry UX (partial tender + due date) — design-
+  sensitive; `sales.credit_due_date` is in place for it.
+- Column chooser on Sales/Products/Contacts tables (hot; need columns-array refactor).
+- Aug-31/AR migration remains PREPARED, NOT applied (user chose "do all", not "apply").

@@ -178,7 +178,7 @@ project_deploy; also must be reviewed first because native Aug-31 POS sales may 
 double-count risk). Files (path-scoped, DISJOINT from all lanes): `frontend/src/styles/main.css`,
 `ops/scripts/migration/**`, `cloudflare/migrations/00NN_legacy_customer_receivables.sql`.
 
-**→ AR-CREDIT + DATA-VISIBILITY + EXCEL-COLUMNS LANE (Aug 31, Part 573 grep-max+1; number races expected): CLAIMED / in progress.**
+**→ AR-CREDIT + DATA-VISIBILITY + EXCEL-COLUMNS LANE (Aug 31, Part 573 grep-max+1; number races expected): DONE (disjoint-first; some wiring deferred to avoid hot-lane conflict). Shipped: migration 0096 + customer-AR endpoint; SaleDetailModal gap-fill; Returns Status column + shared excel-style ColumnChooser (verified live); ArInvoicesSection built (unmounted — CustomersTab is hot). Deferred: mount AR section, i18n keys (lang packs hot), POS on-credit entry, chooser on hot tables. Detail: `docs/DATA-VISIBILITY-AND-CREDIT-AUDIT.md` + session-log Part 573.**
 User: "do all" of the 3 audited threads (see `docs/DATA-VISIBILITY-AND-CREDIT-AUDIT.md`),
 "don't let it conflict or duplicate too much." Building disjoint-first to dodge the hot lanes.
 (A) **Customer credit / AR**: model the "on credit" state (completed sale that carries an
