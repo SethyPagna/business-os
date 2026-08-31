@@ -14,6 +14,7 @@ import {
   storeSystemJob,
   validateCloudflareBackup,
 } from '../lib/backup'
+import { beginMaintenance, endMaintenance, getMaintenance, updateMaintenance } from '../lib/maintenance'
 
 const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser } }>()
 
@@ -61,6 +62,38 @@ app.get('/', async (c) => {
       destination: 'R2 business-os-assets/backups/cloudflare/',
     },
   })
+})
+
+// Maintenance state (slice C). GET is under the router-wide `backup` gate --
+// seeing that a restore is running isn't destructive. Clearing is: it lets
+// writes back into a possibly half-restored database, so it demands the
+// same `backup_restore` permission as the restore itself, and an explicit
+// force flag so no client clears it as a reflex.
+app.get('/maintenance', async (c) => {
+  const maintenance = await getMaintenance(c.env)
+  return c.json({ maintenance })
+})
+
+app.post('/maintenance/clear', async (c) => {
+  const user = c.get('user')
+  if (!hasPermission(user, 'backup_restore')) {
+    return c.json({ error: 'You do not have permission to perform this action' }, 403)
+  }
+  const body = (await c.req.json<{ force?: boolean }>().catch(() => ({}))) as { force?: boolean }
+  const maintenance = await getMaintenance(c.env)
+  if (!maintenance) return c.json({ cleared: true, wasSet: false })
+  if (body.force !== true) {
+    return c.json({
+      error: 'Clearing maintenance re-opens writes on a database whose restore did not finish. '
+        + 'Pass force: true only if you accept the half-restored state (or restart the restore instead).',
+      maintenance,
+    }, 400)
+  }
+  await endMaintenance(c.env, null, { force: true })
+  await audit(c.env, user.id, user.username || null, 'update', 'backup', 'maintenance-clear', {
+    cleared_state: maintenance,
+  })
+  return c.json({ cleared: true, wasSet: true })
 })
 
 app.post('/', async (c) => {
@@ -129,7 +162,39 @@ app.post('/', async (c) => {
         }))
         return c.json({ job_id: job.id, item: job })
       }
-      const restore = await restoreCloudflareBackup(c.env, sourceDir)
+      // Slice C (Part-77): the restore runs under a write-blocking
+      // maintenance flag (lib/maintenance.ts + the index.ts gate) with its
+      // progress persisted into the flag -- a crash mid-restore leaves
+      // maintenance ON, pointing at exactly where it died, instead of a
+      // silently half-restored database serving writes. Refused while any
+      // import job is active: import queue consumers write outside the HTTP
+      // gate, so an in-flight apply would interleave with the restore.
+      const activeImports = await c.env.DB.prepare(
+        "SELECT COUNT(*) AS n FROM import_jobs WHERE status IN ('pending','queued','running','analyzing','approved','applying','cancelling')",
+      ).first<{ n: number }>().catch(() => null)
+      if (Number(activeImports?.n || 0) > 0) {
+        return c.json({
+          error: `${activeImports!.n} import job(s) are still active. Wait for them to finish (or cancel them) before restoring -- their queued writes would interleave with the restore.`,
+        }, 409)
+      }
+      const maintenance = await beginMaintenance(c.env, {
+        backupKey: sourceDir,
+        startedBy: user.username || String(user.id || 'unknown'),
+      })
+      let restore: Awaited<ReturnType<typeof restoreCloudflareBackup>>
+      try {
+        restore = await restoreCloudflareBackup(c.env, sourceDir, async (progress) => {
+          await updateMaintenance(c.env, maintenance.token, progress)
+        })
+      } catch (error) {
+        // Leave maintenance SET -- the database is half-restored and must
+        // not quietly serve writes. Record where it died; the admin either
+        // restarts the restore (safe: full delete+reinsert) or force-clears.
+        const message = error instanceof Error ? error.message : 'Restore failed'
+        await updateMaintenance(c.env, maintenance.token, { phase: 'failed', error: message })
+        throw error
+      }
+      await endMaintenance(c.env, maintenance.token)
       // The whole database just rolled back to this backup -- the single most
       // consequential action in the app, and until now the one with no trail.
       await audit(c.env, user.id, user.username || null, 'restore', 'backup', sourceDir, {

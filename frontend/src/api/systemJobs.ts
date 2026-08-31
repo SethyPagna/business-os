@@ -103,3 +103,26 @@ export async function queueBackupFolderRestore(sourceDir: string): Promise<Recor
 export async function importBackupFolder(sourceDir: string): Promise<Record<string, unknown>> {
   return queueBackupFolderRestore(sourceDir)
 }
+
+// Restore maintenance (Part-77 slice C): while a restore runs -- or after
+// one crashed -- the server refuses ordinary writes and this state says
+// where it stands. Clear is force-only by design (server-enforced too).
+export type RestoreMaintenanceState = {
+  mode?: string
+  phase?: string
+  table?: string
+  rowsDone?: number
+  error?: string
+  backupKey?: string
+  startedAt?: string
+  startedBy?: string
+  updatedAt?: string
+} | null
+
+export async function getBackupMaintenance(): Promise<{ maintenance: RestoreMaintenanceState }> {
+  return apiFetch('GET', '/api/backups/maintenance') as Promise<{ maintenance: RestoreMaintenanceState }>
+}
+
+export async function clearBackupMaintenance(): Promise<Record<string, unknown>> {
+  return apiFetch('POST', '/api/backups/maintenance/clear', { force: true }, SYNC.REQUEST_TIMEOUT_MS) as Promise<Record<string, unknown>>
+}

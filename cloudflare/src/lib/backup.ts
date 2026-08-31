@@ -107,9 +107,12 @@ export function selectAssetsToCopy(
 // fight its PREVIOUS_IDENTITIES adoption), business_os_migration_status
 // (live migration bookkeeping), import_job_source_rows/
 // import_job_row_signatures/import_job_image_matches/import_job_image_renames
-// (bulky regenerable staging the K4 retention sweep prunes), and the
-// per-custom-table data tables (dynamic DDL -- flagged in progress.md, not
-// silently coverable by a static list).
+// (bulky regenerable staging the K4 retention sweep prunes),
+// system_flags (0089 -- the restore MAINTENANCE flag lives there precisely
+// so the restore that sets it cannot delete it; backing it up would restore
+// a stale "maintenance on" state), and the per-custom-table data tables
+// (dynamic DDL -- flagged in progress.md, not silently coverable by a
+// static list).
 export const BACKUP_TABLES = [
   'settings',
   'roles',
@@ -918,7 +921,14 @@ async function openBackupStream(env: Env, key: string): Promise<ReadableStream<U
   return object.body
 }
 
-export async function restoreCloudflareBackup(env: Env, source: string) {
+// onProgress (optional): called at phase changes, table boundaries and every
+// few row batches -- routes/backups.ts persists it into the maintenance
+// flag's state so a crashed restore shows exactly where it died. Errors from
+// the callback are deliberately not caught: if progress cannot be recorded,
+// the restore's crash-visibility contract is already broken.
+export type RestoreProgress = { phase: 'deleting' | 'inserting' | 'assets'; table?: string; rowsDone?: number }
+
+export async function restoreCloudflareBackup(env: Env, source: string, onProgress?: (progress: RestoreProgress) => Promise<void>) {
   const key = resolveBackupKey(source)
 
   // Streaming restore (10.1). The old path called object.json() -- the ENTIRE
@@ -970,7 +980,7 @@ export async function restoreCloudflareBackup(env: Env, source: string) {
   if (backupMigrationNumber != null && liveMigrationNumber != null && backupMigrationNumber > liveMigrationNumber) {
     throw new Error(
       `This backup was taken on a newer database schema (${backupMigration}) than this deployment has applied (${liveMigration}). `
-      + 'Apply the pending migrations first, then restore -- restoring now would silently drop the newer columns’ data.',
+      + 'Apply the pending migrations first, then restore -- restoring now would silently drop the newer columns??data.',
     )
   }
   const schemaMismatch = backupMigration && liveMigration && backupMigration !== liveMigration
@@ -991,6 +1001,7 @@ export async function restoreCloudflareBackup(env: Env, source: string) {
   const orderedTables: string[] = BACKUP_TABLES.filter((t) => presentTables.includes(t))
 
   let statementCount = 0
+  await onProgress?.({ phase: 'deleting' })
   for (const table of [...orderedTables].reverse()) {
     await env.DB.prepare(`DELETE FROM ${qid(table)}`).run()
     statementCount += 1
@@ -1006,16 +1017,34 @@ export async function restoreCloudflareBackup(env: Env, source: string) {
   let r2Meta: BackupPayload['r2'] | null = null
   let summaryMeta: BackupPayload['summary'] | null = null
 
+  // Progress throttle: report every 10th flush (~800 rows) rather than each
+  // one -- the maintenance-state write behind onProgress is one extra D1
+  // statement, and per-flush reporting would add ~1.25% statement overhead
+  // for no extra crash-visibility.
+  let tableRowsDone = 0
+  let flushesSinceProgress = 0
+
   const flush = async () => {
     if (!batch.length) return
     await env.DB.batch(batch)
     statementCount += batch.length
+    tableRowsDone += batch.length
     batch = []
+    flushesSinceProgress += 1
+    if (flushesSinceProgress >= 10) {
+      flushesSinceProgress = 0
+      await onProgress?.({ phase: 'inserting', table: restoreTable || undefined, rowsDone: tableRowsDone })
+    }
   }
 
   for await (const ev of streamBackupEvents(await openBackupStream(env, key))) {
     if (ev.type === 'table') {
       await flush()
+      if (orderedTables.includes(ev.table)) {
+        tableRowsDone = 0
+        flushesSinceProgress = 0
+        await onProgress?.({ phase: 'inserting', table: ev.table, rowsDone: 0 })
+      }
       restoreTable = ''
       if (!orderedTables.includes(ev.table)) { insertSql = ''; insertColumns = []; continue }
       let liveColumns = liveColumnsCache.get(ev.table)
@@ -1039,6 +1068,7 @@ export async function restoreCloudflareBackup(env: Env, source: string) {
     }
   }
   await flush()
+  await onProgress?.({ phase: 'assets' })
 
   // Restore whichever asset bytes this backup actually copied (best-effort;
   // see createCloudflareBackup's MAX_ASSET_BYTES_PER_BACKUP cap). A backup

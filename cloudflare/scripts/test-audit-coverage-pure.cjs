@@ -66,7 +66,10 @@ for (const { file, src } of withMutations) {
 // Rule 2 -- the read-only four are actually read-only (no mutation handlers
 // AND no direct writes). If one of these grows a write path, this fails and
 // forces the audit decision to be made rather than silently skipped.
-const EXPECTED_READ_ONLY = ['catalog.ts', 'notifications.ts', 'organizations.ts', 'runtime.ts']
+// catalog.ts left this list when 0efd04bc deleted the route file outright
+// (the dead, ungated storefront endpoint) -- the strongest form of staying
+// read-only.
+const EXPECTED_READ_ONLY = ['notifications.ts', 'organizations.ts', 'runtime.ts']
 for (const file of EXPECTED_READ_ONLY) {
   const src = fs.readFileSync(path.join(routesDir, file), 'utf8')
   ok(!MUTATION_RE.test(src), `${file} stays read-only (no mutation handlers)`)
@@ -78,7 +81,12 @@ for (const file of EXPECTED_READ_ONLY) {
 const backups = fs.readFileSync(path.join(routesDir, 'backups.ts'), 'utf8')
 ok(/audit\([^)]*'create',\s*'backup'/.test(backups), 'backups.ts audits backup creation')
 ok(/audit\([^)]*'restore',\s*'backup'/.test(backups), 'backups.ts audits the destructive restore')
-ok(backups.indexOf("'restore', 'backup'") > backups.indexOf('restoreCloudflareBackup(c.env, sourceDir)'),
+// The call gained a progress callback (slice C, Part 543) -- match the
+// call-site prefix, and assert it was actually FOUND so a future rename
+// can't turn this into a vacuous indexOf(-1) comparison.
+const restoreCallAt = backups.indexOf('restoreCloudflareBackup(c.env, sourceDir')
+ok(restoreCallAt >= 0, 'backups.ts calls restoreCloudflareBackup at the restore branch')
+ok(backups.indexOf("'restore', 'backup'") > restoreCallAt,
   'backups.ts restore audit sits after the restore actually ran')
 
 const filesRoute = fs.readFileSync(path.join(routesDir, 'files.ts'), 'utf8')

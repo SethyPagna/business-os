@@ -28,6 +28,7 @@ import feesRoute from './routes/fees'
 import reviewQueueRoute from './routes/reviewQueue'
 import { createSyncRoute } from './routes/sync'
 import { ensureCoreDataInvariantsOnce } from './lib/coreDataInvariants'
+import { getMaintenance, isMaintenanceGatedRequest } from './lib/maintenance'
 import { reportError } from './lib/errorReporting'
 import { serveObject } from './lib/r2'
 import { handleImportQueue, handleImportDeadLetterQueue, handleMediaQueue, handleBackupQueue } from './queue'
@@ -168,6 +169,27 @@ app.use('*', async (c, next) => {
   return next()
 })
 
+// Restore maintenance gate (Part-77 slice C, lib/maintenance.ts): while a
+// backup restore streams its DELETE-then-reinsert, every state-changing
+// /api request except auth and the restore flow itself is refused with 503
+// -- a write that interleaves with a half-restored database corrupts it
+// (and would itself be clobbered or orphaned). Reads stay open: browsing a
+// mid-restore snapshot is harmless and the admin needs the UI alive. Costs
+// one D1 point-read per WRITE request only (GETs skip it); a missing
+// system_flags table (pre-0089 local DB) fails open inside getMaintenance.
+app.use('/api/*', async (c, next) => {
+  if (isMaintenanceGatedRequest(c.req.method, c.req.path)) {
+    const maintenance = await getMaintenance(c.env)
+    if (maintenance) {
+      return c.json({
+        error: 'A backup restore is in progress. The system is read-only until it finishes.',
+        maintenance: { mode: maintenance.mode, phase: maintenance.phase, startedAt: maintenance.startedAt },
+      }, 503)
+    }
+  }
+  return next()
+})
+
 // Baseline security headers on every response. Previously none of these
 // were set at all -- the app relied entirely on Cloudflare's own edge
 // defaults. These are conservative (won't break the SPA/API split this
@@ -281,19 +303,23 @@ export default {
     }
   },
   async scheduled(_controller: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
-    ctx.waitUntil(
-      maybeRunScheduledBackup(env)
-        .then(() => maybeRunScheduledDriveSync(env))
-        .then(() => maybeRunScheduledAuditLogRetention(env))
-        // K4: import-artifact retention (24h detail / 7d summary). Swallows
-        // its own errors, so it cannot break the image audit behind it.
-        .then(() => maybeRunScheduledImportRetention(env))
-        // Last on purpose: it is the only one of these that is optional to
-        // the business. A backup must never be skipped because an image
-        // sweep ran long, and maybeRunScheduledImageAudit swallows its own
-        // errors so it cannot break the chain either.
-        .then(() => maybeRunScheduledImageAudit(env))
-        .then(() => undefined),
-    )
+    ctx.waitUntil((async () => {
+      // Restore maintenance: skip the whole tick. A scheduled backup taken
+      // DURING a restore would snapshot the half-restored database as if it
+      // were a good state; the sweeps behind it write too. The next 6h tick
+      // runs normally once maintenance clears.
+      if (await getMaintenance(env)) return
+      await maybeRunScheduledBackup(env)
+      await maybeRunScheduledDriveSync(env)
+      await maybeRunScheduledAuditLogRetention(env)
+      // K4: import-artifact retention (24h detail / 7d summary). Swallows
+      // its own errors, so it cannot break the image audit behind it.
+      await maybeRunScheduledImportRetention(env)
+      // Last on purpose: it is the only one of these that is optional to
+      // the business. A backup must never be skipped because an image
+      // sweep ran long, and maybeRunScheduledImageAudit swallows its own
+      // errors so it cannot break the chain either.
+      await maybeRunScheduledImageAudit(env)
+    })())
   },
 }

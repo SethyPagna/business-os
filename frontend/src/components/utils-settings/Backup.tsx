@@ -29,6 +29,7 @@ import PageHeader from '../shared/PageHeader'
 import ActionHistoryBar from '../shared/ActionHistoryBar'
 import SectionSwitcher from '../shared/SectionSwitcher'
 import LoadingWatchdog from '../shared/LoadingWatchdog'
+import { clearBackupMaintenance, getBackupMaintenance, type RestoreMaintenanceState } from '../../api/systemJobs.ts'
 
 type TranslateFn = (key: string) => string
 type NotifyFn = (message: string, type?: string) => void
@@ -252,6 +253,77 @@ const isBrokenLocalizedString = isBrokenLocalizedStringHook as (value: unknown) 
 
 function getBackupApi(): BackupApi {
   return (window as unknown as { api: BackupApi }).api
+}
+
+// Slice C (Part-77): while a restore runs -- or after one CRASHED -- the
+// server holds a write-blocking maintenance flag with the restore's last
+// recorded position. This banner makes that state visible (it is otherwise
+// only "every save fails with a 503"), and offers the two honest exits:
+// restart the restore (safe: full delete+reinsert) or force-clear, which
+// accepts the half-restored state. Renders nothing while maintenance is off.
+function RestoreMaintenanceBanner({ copy, notify }: { copy: CopyFn; notify: NotifyFn }) {
+  const [state, setState] = useState<RestoreMaintenanceState>(null)
+  const [clearing, setClearing] = useState(false)
+  // Same page id the GoogleDriveSyncSection below uses -- Backup renders
+  // under the Settings hub.
+  const pageActive = useIsPageActive('settings')
+  useEffect(() => {
+    if (!pageActive) return undefined
+    let alive = true
+    const poll = async () => {
+      try {
+        const result = await getBackupMaintenance()
+        if (alive) setState(result?.maintenance || null)
+      } catch { /* transient -- keep the last known state */ }
+    }
+    void poll()
+    const timer = window.setInterval(poll, 15000)
+    return () => { alive = false; window.clearInterval(timer) }
+  }, [pageActive])
+  if (!state) return null
+  const failed = state.phase === 'failed'
+  const detail = [
+    state.phase ? `${copy('restore_phase', 'Phase')}: ${state.phase}` : '',
+    state.table ? `${copy('restore_table', 'Table')}: ${state.table}${state.rowsDone ? ` (${state.rowsDone} rows)` : ''}` : '',
+    state.startedAt ? `${copy('restore_started', 'Started')}: ${fmtDateTime24(state.startedAt)} (${state.startedBy || '?'})` : '',
+    state.error ? `${copy('restore_error', 'Error')}: ${state.error}` : '',
+  ].filter(Boolean).join(' · ')
+  const handleClear = async () => {
+    if (clearing) return
+    if (!window.confirm(copy(
+      'restore_maintenance_clear_confirm',
+      'Force-clear restore maintenance? Writes re-open on a database whose restore did NOT finish. Restart the restore instead if you can.',
+    ))) return
+    setClearing(true)
+    try {
+      await clearBackupMaintenance()
+      setState(null)
+      notify(copy('restore_maintenance_cleared', 'Maintenance cleared -- writes are open again'), 'warning')
+    } catch (error) {
+      notify(getErrorMessage(error, copy('unknown_error', 'Unknown error')), 'error')
+    } finally {
+      setClearing(false)
+    }
+  }
+  return (
+    <div className={`flex flex-wrap items-center gap-2 rounded-xl border px-3 py-2 text-sm ${failed
+      ? 'border-red-300 bg-red-50 text-red-800 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-200'
+      : 'border-amber-300 bg-amber-50 text-amber-800 dark:border-amber-900/60 dark:bg-amber-900/20 dark:text-amber-200'}`}
+    >
+      <ShieldAlert className="h-4 w-4 shrink-0" />
+      <span className="font-semibold">
+        {failed
+          ? copy('restore_maintenance_failed', 'A restore CRASHED mid-way -- the database is read-only and half-restored')
+          : copy('restore_maintenance_running', 'Restore in progress -- the system is read-only')}
+      </span>
+      {detail ? <span className="min-w-0 flex-1 truncate text-xs opacity-90" title={detail}>{detail}</span> : null}
+      {failed ? (
+        <button type="button" className="btn-secondary whitespace-nowrap text-xs" onClick={handleClear} disabled={clearing}>
+          {clearing ? copy('working', 'Working...') : copy('restore_maintenance_clear', 'Force clear (accept half-state)')}
+        </button>
+      ) : null}
+    </div>
+  )
 }
 
 function getErrorMessage(error: unknown, fallback: string): string {
@@ -1695,6 +1767,7 @@ export default function Backup() {
           subtitle={copy('backup_page_subtitle', 'Create, restore, and verify full Business OS backups.', 'បង្កើត ស្ដារ និងពិនិត្យ backup Business OS ពេញលេញ។')}
           historySlot={<ActionHistoryBar history={actionHistory} className="flex-shrink-0" t={t} showLabel />}
         />
+        <RestoreMaintenanceBanner copy={copy} notify={notify} />
         {/* Sections get their own full-width row now that History sits next
             to the page-guide icon in PageHeader's row above (per explicit
             user direction: the icon explaining what this page does, then
