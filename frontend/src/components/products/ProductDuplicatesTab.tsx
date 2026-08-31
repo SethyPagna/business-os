@@ -6,6 +6,7 @@ import Merge from 'lucide-react/dist/esm/icons/merge.js'
 import InfoHint from '../shared/InfoHint.tsx'
 import { ProductImg } from './shared/primitives.tsx'
 import { getPossiblySameProducts, dismissProductDuplicateCluster, mergePossiblySameProducts, updateProduct } from '../../api/productWriteTransport.ts'
+import { normalizeProductGroupName } from '../../utils/productGrouping.ts'
 import Modal from '../shared/Modal'
 
 // Products → Duplicates: the human-review residue the identity rule can't
@@ -58,6 +59,18 @@ function clusterKey(cluster: Cluster): string {
   return `${cluster.type}:${cluster.value}`
 }
 
+// An EXACT duplicate cluster (user spec item #3): products that share BOTH a
+// real barcode AND the same name. Only a barcode cluster can qualify (a name
+// cluster has, by definition, differing barcodes), and only when EVERY member
+// normalizes to one name. For these the per-row Resolve (edit) button is
+// hidden -- editing another copy of a proven duplicate is exactly what the
+// Keep this / Keep both decision replaces.
+function clusterIsExact(cluster: Cluster): boolean {
+  if (cluster.type !== 'barcode') return false
+  const names = new Set(cluster.products.map((product) => normalizeProductGroupName(product.name || '')))
+  return names.size === 1 && !names.has('')
+}
+
 function replaceVars(template: string, values: Record<string, unknown>): string {
   return template.replace(/\{(\w+)\}/g, (_match, key) => String(values?.[key] ?? ''))
 }
@@ -68,7 +81,7 @@ function money(value: number | null | undefined): string {
 }
 
 function ClusterCard({
-  cluster, t, dismissing, merging, selected, selectable, onToggleSelect, onDismiss, onApplyDecisions, onEdit,
+  cluster, t, dismissing, merging, selected, selectable, isExact, onToggleSelect, onDismiss, onApplyDecisions, onEdit,
 }: {
   cluster: Cluster
   t: TranslateFn
@@ -76,6 +89,9 @@ function ClusterCard({
   merging: boolean
   selected: boolean
   selectable: boolean
+  // Same barcode AND same name -> the Resolve (edit) button is hidden; the
+  // Keep this / Keep both decision is the only sane next step (spec item #3).
+  isExact: boolean
   onToggleSelect: () => void
   onDismiss: () => void
   onApplyDecisions: (keeper: ClusterProduct, removals: ClusterProduct[]) => void
@@ -179,15 +195,17 @@ function ClusterCard({
                 >
                   {t('remove') || 'Remove'}
                 </button>
-                <button
-                  type="button"
-                  onClick={() => onEdit(product)}
-                  disabled={busy}
-                  title={t('resolve_duplicate_inline_hint') || 'Edit this product right here — name, barcode and prices — without leaving the review'}
-                  className="rounded-md px-1.5 py-0.5 text-[11px] font-medium text-blue-600 transition hover:bg-blue-50 disabled:opacity-50 dark:text-blue-300 dark:hover:bg-blue-900/20"
-                >
-                  {t('resolve') || 'Resolve'}
-                </button>
+                {isExact ? null : (
+                  <button
+                    type="button"
+                    onClick={() => onEdit(product)}
+                    disabled={busy}
+                    title={t('resolve_duplicate_inline_hint') || 'Edit this product right here — name, barcode and prices — without leaving the review'}
+                    className="rounded-md px-1.5 py-0.5 text-[11px] font-medium text-blue-600 transition hover:bg-blue-50 disabled:opacity-50 dark:text-blue-300 dark:hover:bg-blue-900/20"
+                  >
+                    {t('resolve') || 'Resolve'}
+                  </button>
+                )}
               </div>
             </div>
           )
@@ -549,6 +567,7 @@ export default function ProductDuplicatesTab({ t, notify }: {
                   merging={mergingId === id}
                   selected={selectedKeys.has(id)}
                   selectable={!bulkBusy}
+                  isExact={clusterIsExact(cluster)}
                   onToggleSelect={() => toggleSelected(id)}
                   onDismiss={() => void handleDismiss(cluster)}
                   onApplyDecisions={(keeper, removals) => void handleApplyDecisions(cluster, keeper, removals)}

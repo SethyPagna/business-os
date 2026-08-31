@@ -127,6 +127,9 @@ import { buildIssuesFilterSection } from '../shared/IssuesFilterOptions.tsx'
 import { buildPromotionsFilterSection } from '../shared/PromotionsFilterOptions.ts'
 import type { PromotionRule } from '../../utils/promotionRules.ts'
 import type { BulkDeleteJobStatus } from '../../api/productWriteTransport.ts'
+import { getPossiblySameProducts, mergePossiblySameProducts, dismissProductDuplicateCluster } from '../../api/productWriteTransport.ts'
+import { buildExactDuplicateIndex, extractDuplicateClusters, findRowDuplicateInfo, type ExactDuplicateInfo } from '../../utils/exactDuplicateProducts.ts'
+import DuplicateResolverControl from './DuplicateResolverControl.tsx'
 
 const ManageCategoriesModal = lazyRetry(() => import('./lookups/ManageCategoriesModal'), 'products-manage-categories-modal')
 // Part 241: the restricted image-only view, split out so the wrapper
@@ -741,6 +744,13 @@ function ProductsFullEditor() {
   const [bulkActionBusy, setBulkActionBusy] = useState(false)
   const [mergeDuplicatesBusy, setMergeDuplicatesBusy] = useState(false)
   const [mergeDuplicatesReviewOpen, setMergeDuplicatesReviewOpen] = useState(false)
+  // Exact-duplicate (same real barcode + same name) flagging for the list
+  // rows -- user spec item #3. Single source of truth is the server sweep
+  // the Duplicates review tab already uses (see utils/exactDuplicateProducts).
+  // dupResolverBusyKey holds the exact-duplicate group key currently merging/
+  // dismissing so its row's buttons show a spinner without freezing the rest.
+  const [duplicateClusters, setDuplicateClusters] = useState<unknown[]>([])
+  const [dupResolverBusyKey, setDupResolverBusyKey] = useState<string | null>(null)
   const [zeroQuantityCleanupOpen, setZeroQuantityCleanupOpen] = useState(false)
   const [zeroQuantityCleanupBusy, setZeroQuantityCleanupBusy] = useState(false)
   const [wireImagesOpen, setWireImagesOpen] = useState(false)
@@ -1677,6 +1687,85 @@ function ProductsFullEditor() {
       setMergeDuplicatesBusy(false)
     }
   }
+
+  // --- Exact-duplicate (same barcode + same name) flagging for list rows ---
+  // (user spec item #3). Reuses the SAME server sweep the Duplicates review
+  // tab renders (GET /api/products/possible-duplicates) as the single source
+  // of truth, refined to the members that also share a name. Refetch whenever
+  // the loaded catalog's identity fields change -- any load() replaces
+  // `products`, so a product edited/merged/deleted elsewhere updates the flags
+  // without a manual refresh (the signature ignores unrelated churn so a
+  // silent poll returning the same rows doesn't refetch). Gated by the same
+  // permission as the Duplicates tab and the merge tool.
+  const productDuplicateSignature = useMemo(
+    () => (canMergeDuplicates
+      ? products.map((p) => `${p.id}:${String(p.barcode ?? '')}:${String(p.name ?? '')}`).join('|')
+      : ''),
+    [products, canMergeDuplicates],
+  )
+
+  const refreshDuplicateClusters = useCallback(async () => {
+    if (!canMergeDuplicates) { setDuplicateClusters([]); return }
+    try {
+      const payload = await getPossiblySameProducts()
+      setDuplicateClusters(extractDuplicateClusters(payload))
+    } catch {
+      // Non-fatal: flags simply don't appear this pass. The Duplicates tab
+      // stays the authoritative review surface and shows its own error.
+    }
+  }, [canMergeDuplicates])
+
+  useEffect(() => {
+    void refreshDuplicateClusters()
+    // productDuplicateSignature is the intended trigger; refreshDuplicateClusters
+    // is stable per canMergeDuplicates.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [productDuplicateSignature, refreshDuplicateClusters])
+
+  const exactDuplicateIndex = useMemo(
+    () => (canMergeDuplicates
+      ? buildExactDuplicateIndex(extractDuplicateClusters(duplicateClusters))
+      : new Map<number, ExactDuplicateInfo>()),
+    [duplicateClusters, canMergeDuplicates],
+  )
+
+  // "Keep this": fold the OTHER members of this exact-duplicate group into the
+  // chosen record (one pair per call, stopping on first failure so nothing
+  // half-merges silently), then reload and re-sweep.
+  const handleDuplicateKeepThis = useCallback(async (keepId: number, info: ExactDuplicateInfo) => {
+    if (dupResolverBusyKey) return
+    const others = info.members.filter((m) => Number(m.id) !== Number(keepId))
+    if (!others.length) return
+    setDupResolverBusyKey(info.key)
+    try {
+      for (const other of others) {
+        await mergePossiblySameProducts(keepId, other.id)
+      }
+      notify(t('product_duplicate_merged') || 'Merged — stock, lots and images were carried onto the kept product')
+      await load(true)
+      await refreshDuplicateClusters()
+    } catch (e) {
+      notify(getErrorMessage(e, t('merge_duplicate_failed') || 'Could not merge these records'), 'error')
+    } finally {
+      setDupResolverBusyKey(null)
+    }
+  }, [dupResolverBusyKey, load, notify, refreshDuplicateClusters, t])
+
+  // "Keep both": dismiss the barcode cluster (these are genuinely different
+  // items), so the sweep stops flagging it -- the false-positive escape hatch.
+  const handleDuplicateKeepBoth = useCallback(async (info: ExactDuplicateInfo) => {
+    if (dupResolverBusyKey) return
+    setDupResolverBusyKey(info.key)
+    try {
+      await dismissProductDuplicateCluster('barcode', info.barcode)
+      notify(t('product_duplicate_kept_both') || 'Kept both — no longer flagged as duplicates')
+      await refreshDuplicateClusters()
+    } catch (e) {
+      notify(getErrorMessage(e, t('dismiss_duplicate_failed') || 'Could not update this duplicate'), 'error')
+    } finally {
+      setDupResolverBusyKey(null)
+    }
+  }, [dupResolverBusyKey, notify, refreshDuplicateClusters, t])
 
   // Review-before-delete cleanup for products that have sat at 0 stock
   // across every branch for a while (progress.md part 91's spec, built
@@ -2897,6 +2986,11 @@ function ProductsFullEditor() {
     // single id for ordinary, unmerged rows.
     const rowScopeIds = p.__mergedProductIds?.length ? p.__mergedProductIds : [productId]
     const rowSelected = isSelectionScopeFullySelected(rowScopeIds)
+    // Exact duplicate (same real barcode + same name, per the server sweep)?
+    // If so, the row's normal click-to-detail "Manage/Product" flow is
+    // suppressed (user spec item #3) -- the inline resolver below is the only
+    // action until it's kept-one/kept-both.
+    const dupInfo = findRowDuplicateInfo(exactDuplicateIndex, productId, rowScopeIds)
     // Long-press/click-hold enters select mode by selecting this row;
     // once select mode is active (selectionModeActive, derived from
     // selectedIds.size), the row's own onClick below toggles selection
@@ -2908,7 +3002,7 @@ function ProductsFullEditor() {
     const longPress = createLongPressHandlers(rowLongPressState, {
       disabled: selectionModeActive,
       onLongPress: () => toggleSelectionScope(rowScopeIds, true),
-      onClick: () => setDetailProduct(p),
+      onClick: () => { if (!dupInfo) setDetailProduct(p) },
     })
     // The native `click` that follows this same press-release still
     // fires once selectionModeActive flips true and swaps this element's
@@ -3007,6 +3101,16 @@ function ProductsFullEditor() {
               {p.is_group ? <span className="text-xs px-1.5 py-0.5 rounded-full bg-purple-100 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400">group</span> : null}
               {p.parent_id ? <span className="text-xs px-1.5 py-0.5 rounded-full bg-primary-100 dark:bg-primary-900/30 text-primary-600 dark:text-primary-400">variant</span> : null}
             </div>
+            {dupInfo ? (
+              <DuplicateResolverControl
+                tr={tr}
+                memberCount={dupInfo.members.length}
+                busy={dupResolverBusyKey === dupInfo.key}
+                disabled={!canMergeDuplicates}
+                onKeepThis={() => void handleDuplicateKeepThis(Number(productId), dupInfo)}
+                onKeepBoth={() => void handleDuplicateKeepBoth(dupInfo)}
+              />
+            ) : null}
           </div>
         </td>
         {/* border-l here (freed-up space between the Name and Details
@@ -3069,7 +3173,7 @@ function ProductsFullEditor() {
         </td>
       </tr>
     )
-  }, [branchFilter, branchNameById, catMap, exchangeRate, fmtKHR, fmtUSD, getBranchQty, getBranchSummaryLabel, getBrandColor, getLongPressState, isSelectionScopeFullySelected, isSelectionScopePartiallySelected, openLightbox, promotionRules, renderMetaPill, renderUnitChip, selectionModeActive, t, toggleSelectionScope, tr])
+  }, [branchFilter, branchNameById, catMap, exchangeRate, fmtKHR, fmtUSD, getBranchQty, getBranchSummaryLabel, getBrandColor, getLongPressState, isSelectionScopeFullySelected, isSelectionScopePartiallySelected, openLightbox, promotionRules, renderMetaPill, renderUnitChip, selectionModeActive, t, toggleSelectionScope, tr, exactDuplicateIndex, dupResolverBusyKey, canMergeDuplicates, handleDuplicateKeepThis, handleDuplicateKeepBoth])
 
   const renderMobileProductCard = useCallback((p: ProductRecord, { indented = false }: { indented?: boolean } = {}) => {
     const productId = p.id ?? 0
@@ -3094,6 +3198,9 @@ function ProductsFullEditor() {
     const thumbnailState = buildProductThumbnailState(p)
     const rowScopeIds = p.__mergedProductIds?.length ? p.__mergedProductIds : [productId]
     const rowSelected = isSelectionScopeFullySelected(rowScopeIds)
+    // Exact duplicate? -> suppress click-to-detail, show the inline resolver
+    // (same rule as renderDesktopProductRow; user spec item #3).
+    const dupInfo = findRowDuplicateInfo(exactDuplicateIndex, productId, rowScopeIds)
 
     // Grouped child rows (indented) share the group's single merged card
     // (wrapper rendered by ProductsListSurface) instead of each getting its
@@ -3113,7 +3220,7 @@ function ProductsFullEditor() {
     const longPress = createLongPressHandlers(rowLongPressState, {
       disabled: selectionModeActive,
       onLongPress: () => toggleSelectionScope(rowScopeIds, true),
-      onClick: () => setDetailProduct(p),
+      onClick: () => { if (!dupInfo) setDetailProduct(p) },
     })
     // Same ghost-click guard as renderDesktopProductRow -- see its
     // comment and utils/longPress.ts's consumeLongPressClick for why
@@ -3275,11 +3382,21 @@ function ProductsFullEditor() {
               <span className={withKhmerTextClass(unitName, `inline-flex min-w-0 max-w-full items-center whitespace-nowrap font-medium ${stockStatusTextClass}`)}>{String(qty || 0)}{renderUnitChip(unitName)}</span>
             </div>
             <ProductBatchPreview product={p} branchId={branchFilter} tr={tr} compact />
+            {dupInfo ? (
+              <DuplicateResolverControl
+                tr={tr}
+                memberCount={dupInfo.members.length}
+                busy={dupResolverBusyKey === dupInfo.key}
+                disabled={!canMergeDuplicates}
+                onKeepThis={() => void handleDuplicateKeepThis(Number(productId), dupInfo)}
+                onKeepBoth={() => void handleDuplicateKeepBoth(dupInfo)}
+              />
+            ) : null}
           </div>
         </div>
       </div>
     )
-  }, [branchFilter, catMap, exchangeRate, fmtUSD, getBranchQty, getBrandColor, getLongPressState, isSelectionScopeFullySelected, isSelectionScopePartiallySelected, openLightbox, promotionRules, renderUnitChip, selectionModeActive, t, toggleSelectionScope, tr])
+  }, [branchFilter, catMap, exchangeRate, fmtUSD, getBranchQty, getBrandColor, getLongPressState, isSelectionScopeFullySelected, isSelectionScopePartiallySelected, openLightbox, promotionRules, renderUnitChip, selectionModeActive, t, toggleSelectionScope, tr, exactDuplicateIndex, dupResolverBusyKey, canMergeDuplicates, handleDuplicateKeepThis, handleDuplicateKeepBoth])
 
   // One unified thumbnail for a whole name-group (see the `indented`
   // branches just above, which omit each row's own image once a group
