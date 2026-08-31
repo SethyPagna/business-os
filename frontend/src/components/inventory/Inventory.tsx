@@ -3548,14 +3548,16 @@ ${inventoryFeesFormulaText}`,
             </button>
           )}
           items={([
-            { label: tr('import', 'Import'), onClick: () => setShowImport(true), color: 'blue', icon: <Download className="h-4 w-4 shrink-0" /> },
+            // Import = Upload (data INTO the app), Export = Download -- same
+            // icon convention as HeaderActions; these two were swapped.
+            { label: tr('import', 'Import'), onClick: () => setShowImport(true), color: 'blue', icon: <Upload className="h-4 w-4 shrink-0" /> },
             { label: tr('fast_stockin_title', 'Fast stock-in'), onClick: () => setShowFastStockIn(true), color: 'green', icon: <Zap className="h-4 w-4 shrink-0" /> },
             ...(showProductsSection
               ? [
                 'divider' as const,
                 ...(inventoryExportItems || [])
                   .filter((item): item is PortalMenuItem => Boolean(item))
-                  .map((item) => (item === 'divider' ? item : { ...item, icon: item.icon ?? <Upload className="h-4 w-4 shrink-0" /> })),
+                  .map((item) => (item === 'divider' ? item : { ...item, icon: item.icon ?? <Download className="h-4 w-4 shrink-0" /> })),
               ]
               : []),
           ] as PortalMenuItem[])}
