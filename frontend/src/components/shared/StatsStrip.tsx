@@ -4,6 +4,7 @@ import ChevronDown from 'lucide-react/dist/esm/icons/chevron-down.js'
 import DateTimeRangePicker, { type DateTimeRange } from './DateTimeRangePicker.tsx'
 import InfoHint from './InfoHint.tsx'
 import Modal from './Modal.tsx'
+import TruncatedText from './TruncatedText.tsx'
 
 // THE stats surface for data pages (user, Aug 30: "for each of data full
 // pages ... mini stats cards folded in them, to explain and show more
@@ -174,7 +175,21 @@ export default function StatsStrip({
         // width trailing). The secondary buttons live on the chip row above,
         // not here — expanding the strip never moves them (user, Aug 31).
         <div className="mt-1.5 flex min-w-0 flex-wrap items-center gap-1">
-          <DateTimeRangePicker value={range} onChange={onRangeChange} t={t} showTime={false} />
+          {/* Same full-width-on-small-screens treatment as StatsRangeRow (user,
+              Aug 31: "the date range should take the whole row" on small
+              screens): the picker is a full-width flex item below `sm`, so the
+              preset chips wrap onto their own line beneath it, then it settles
+              back to the compact pill from `sm` up. Kept identical to
+              StatsRangeRow so the inline (Inventory/Dashboard) and lifted-out
+              (Sales/Returns/Fees) date rows read the same. */}
+          <DateTimeRangePicker
+            value={range}
+            onChange={onRangeChange}
+            t={t}
+            showTime={false}
+            className="w-full sm:w-auto"
+            triggerClassName="flex w-full items-center justify-center gap-2 rounded-md px-3 py-1.5 sm:inline-flex sm:w-auto sm:justify-start sm:gap-2.5 sm:px-4 sm:py-2.5 sm:min-w-[15rem]"
+          />
           {PRESETS.map((preset) => (
             <button
               key={preset.key}
@@ -265,10 +280,15 @@ export default function StatsStrip({
           size="sm"
           draggable
         >
-          <div className="grid grid-cols-2 gap-x-4 gap-y-1 sm:grid-cols-3">
+          {/* ONE detail per row, full width (user, Aug 31: "each stats instead
+              of a two columns can do a one row"). The label takes the row's
+              spare width and truncates; a clipped label reveals its full text
+              on hover/click via TruncatedText, so the "…" is never a dead end.
+              The value stays whole on the right. */}
+          <div className="flex flex-col">
             {(openCard.details || []).map((detail, index) => (
               <div key={`${detail.label}-${index}`} className="flex min-w-0 items-baseline justify-between gap-2 border-b border-gray-100 py-1 last:border-b-0 dark:border-gray-700">
-                <span className="truncate text-[11px] text-gray-500 dark:text-gray-400">{detail.label}</span>
+                <TruncatedText text={detail.label} className="min-w-0 flex-1 text-[11px] text-gray-500 dark:text-gray-400" />
                 <span className={`whitespace-nowrap text-xs font-semibold tabular-nums ${detail.tone ? DETAIL_TONE[detail.tone] : 'text-gray-800 dark:text-gray-100'}`}>{detail.value}</span>
               </div>
             ))}
