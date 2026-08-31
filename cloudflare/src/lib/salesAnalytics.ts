@@ -122,7 +122,15 @@ function round2(n: number): number {
 function whereActiveSales(alias: string, f: SalesFilters) {
   const params: Record<string, unknown> = { startDate: f.startDate, endDate: f.endDate }
   const clauses = [
-    `date(${alias}.created_at) BETWEEN date(@startDate) AND date(@endDate)`,
+    // Sargable range instead of date(created_at) BETWEEN date(start) AND
+    // date(end): wrapping the column in date() makes the predicate
+    // non-SARGable, so SQLite ignores idx_sales_created_pg and full-scans
+    // every sale on every date-filtered report -- the same cost for a one-day
+    // report as an all-time one. `>= @startDate` admits any time on the start
+    // day; `< date(@endDate,'+1 day')` admits all of the end day and excludes
+    // the next. Identical row set to the old form for space- and T-separated
+    // timestamps and NULLs, proven in test-sales-analytics-daterange-pure.cjs.
+    `${alias}.created_at >= @startDate AND ${alias}.created_at < date(@endDate, '+1 day')`,
   ]
   // Status: an explicit filter wins over the default hide-cancelled guard, so
   // a caller asking for 'cancelled' actually gets cancelled sales. Bound as a
