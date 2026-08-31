@@ -124,6 +124,8 @@ admin+storefront `/health` 200, `/ws` unauth → 426 (M1 handler alive/gated), a
 **main HEAD has since advanced past `d558dcfb` (other lanes) — that later work is NOT in this deploy.**
 See session-log Part 577.
 
+**⚠ PROD DATA VERIFIED CLEAN on the branch/sales/gross-sales claims (coordinator 7b, Sep 1 ~00:45 UTC, read-only prod D1 SELECTs — re-verify before acting, this is a snapshot not ground truth).** A peer relayed three "production data-corruption" findings; direct prod query REFUTES all three: (1) `branches` has exactly two — `Warehouse`(1) + `Shop`(2); NO stray "Leang Cosmetic Shop" branch exists (already canonical — do NOT "merge a stray branch", there is none to merge). (2) All 14,939 sales are on branch_id=2 (Shop); ZERO NULL branch_id; zero on Warehouse. (3) `subtotal_usd` is populated (0 null, 4 zero-or-null of 14,939, SUM=$1,873,656.34) so gross_sales_usd (salesAnalytics.ts:274 = COALESCE(SUM(subtotal_usd),0)) computes fine. The local miniflare D1 is a different, messy dev set (harmless). **Any session picking up a "prod data-corruption" fix must re-run read-only prod SELECTs first — acting on the stray-branch premise would corrupt already-clean prod.** Broader systemic claims (missing timestamps, supplier/stock drift) are unverified — verify against prod directly before acting.
+
 **✅ STAGE 1 COMPLETE — ALL 9 AUDIT REDS RECONCILED, SUITE GREEN, DEPLOYING (user
 authorized the full cycle; coordinator 7b, Aug 31 ~20:30).** Backend **132/132**,
 frontend **148/148** = **280/280 green**; both tscs + production build green;
