@@ -88,6 +88,22 @@ Two rules learned the hard way, both from real incidents in this file's own hist
 
 ## Current status
 
+**→ STATS-DATE-ROW LANE (session 50, Aug 31, Part 559): CLAIMED.** User: "fish out
+the start date and end date from the stats button ... right above the search bar row
+... applies to all section, mini sections, and pages ... stats can be placed at the
+top ... the start and end date will also apply to it." So the Start→End range picker
+(+ presets) is lifted OUT of the folded StatsStrip and becomes its own always-visible
+row directly above the search bar; StatsStrip keeps the chip/cards/summary/actions and
+no longer renders the picker. New shared `shared/StatsRangeRow.tsx` (the picker +
+Today/7d/Month/Year presets, reused everywhere). Files (path-scoped): frontend
+shared/{StatsStrip.tsx,StatsRangeRow.tsx}, sales/Sales.tsx, returns/Returns.tsx,
+fees/FeesPage.tsx, inventory/Inventory.tsx (its stats live on their own section chip,
+so the row sits above the strip there), tests/statsStrip.test.ts (rides the
+report-currency lane's orphaned working-tree edit — noted). NO lang/perm changes
+(preset keys already exist). NOT touching Dashboard (its range is already a separate
+card + peer rewrite in flight) or DateTimeRangePicker (peer rewrite in flight — used
+as-is).
+
 **CLAIMED (in progress, permissions-granularity session, Aug 31, Part 557):** adding
 a real `view` tier (None / View only / Full) to the permission model and wiring the
 coarse "Full/None-only" sections to it, highest-risk first, ONE section per commit
@@ -111,7 +127,38 @@ and `products/{CreatedDateFilterOptions,AutoMergedFilterOptions}`. Files
 (path-scoped): frontend shared/FilterMenu.tsx + those 6 producers +
 products/helpers/productMenuHelpers.ts (comment only). No lang/perm changes.
 
-**→ EXPENSES-LANE (this session, Aug 31 ~evening): CLAIMED.** User batch: (1) fee
+**→ MOVEMENTS-AND-ADD-MENU LANE (this session, Aug 31 ~evening, second batch):
+CLAIMED.** User batch: (1) Branches-hub Movements section rework
+(`InventoryMovementsSurface.tsx` + Inventory.tsx movement state): drop the
+"Custom range" toggle + "All time" year/month period options (the standard
+Start→End DateTimeRangePicker becomes the always-visible date control),
+checkboxes hidden behind a new Select mode, sections become DAY groups (date
+on the divider, rows show time only), movement-group rows get a system
+auto-title (single product name, else "N products") instead of many names in
+one row, and the expanded view becomes ONE excel-style bordered table of
+child record rows (no parent-record pretence); (2) Products page Add button
+becomes a 3-option menu — Stock one by one (opens forms/StockAdjustModal, the
+complete Branches-page adjust design), Fast stock-in (reuses
+inventory/FastStockInModal), Add new product — via new optional props on
+`surfaces/HeaderActions.tsx`; Fast stock-in also joins the Stock Changes
+section's Adjust menu. Files (path-scoped):
+`frontend/src/components/inventory/{Inventory,InventoryMovementsSurface}.tsx`,
+`frontend/src/components/products/{Products,StockChangeSection}.tsx`,
+`frontend/src/components/products/surfaces/HeaderActions.tsx`,
+`frontend/src/lang/{en,km}.json` (ADD keys only; packs also dirty in peer
+lanes). NOT touching FilterMenu.tsx / *FilterOptions (filter-rework lane owns
+them dirty); the movements filter-menu edits live in Inventory.tsx only.
+progress.md not committed by this lane.
+
+**→ EXPENSES-LANE (this session, Aug 31 ~evening): DONE — commits `4974367a`
+(backend) `03ef42ab` (frontend) `babad03f` (Products sticky) `823edc9a`
+(Conflicts) `a2957de5` (log, Part 558; code commits say 557 — number race);
+lang packs + StockChangeSection swept into the stock-changes lane's
+`11b5c9ff` by the shared-tree race (verified in HEAD). Remote D1 data fix
+applied+verified (6 rows expense→delivery, ids 4241–4246). fe+cf tsc clean;
+all per-file suites green; test:utils chain currently stops at
+performanceLoadingUx on the filter-rework lane's dirty FilterMenu.tsx —
+theirs, not this lane's. Needs deploy (rides the next one).** User batch: (1) fee
 labels become SAVED/reusable — new `GET /api/fees/labels` (distinct labels +
 dominant type), FeeForm suggests them and auto-picks the type, word-limit on the
 label (≤6 words / 60 chars, both ends); (2) Fees section renamed **Expenses**
@@ -278,23 +325,25 @@ storefront-only header-icon props; admin `CatalogPage.tsx` untouched),
 en+km fallbacks. Shared `CatalogSecondaryTabs.CatalogMembershipSection` left as-is
 (admin preview still renders it). No backend, no migrations.
 
-**→ STOCK-CHANGES-UI LANE (this session, Aug 31 ~afternoon): CLAIMED.** User asks
-for a rework of the **Stock Changes section on the Products page**
-(`StockChangeSection.tsx`). Scope: (1) an "Adjust" action menu (Add/Remove stock,
-adjust quantity) + per-row context actions; (2) 24h time everywhere + investigate
-blank time values (import/parse); (3) Stock In/Out imbalance — verify data +
-visual indicator; (4) mini-section layout — move filters/stats below the
-date-range + search row, drop the "Adjustments" view, show stats inline (no
-Stats expander). Files (path-scoped): `frontend/src/components/products/StockChangeSection.tsx`,
-`frontend/src/components/products/Products.tsx` (stock_changes header-actions only),
-`frontend/src/lang/en.json` + `km.json` (ride-along keys named at commit — NOTE
-both packs are also dirty in the legacy-finance-UI + sales-hub lanes; I add keys
-only, pathspec-atomic). Backend: user confirmed FULL scope — Adjust menu writes via existing
-`adjustStock`; new endpoints for **Revert** (compensating counter-movement, keeps
-the ledger append-only) + **Edit reason** (UPDATE inventory_movements.reason),
-both permission-gated (`cloudflare/src/routes/products.ts` or `inventory.ts`).
-Also reclassifying In/Out by net sign so the Adjustments bucket can be dropped
-(`cloudflare/src/lib/stockLedgerQuery.ts`). No migrations.
+**→ STOCK-CHANGES-UI LANE (this session, Aug 31): DONE — in HEAD (4 commits,
+`f28bf61d`, `24e8fae5`, `7df406a6`, `11b5c9ff`; logged as Part 557, commits say
+"Part 553").** Products-page Stock Changes rework: two-column In/Out (Adjustments
+folded into In), **completed `LEDGER_OUT_TYPES`** (move_out/damage_out/
+replacement_out/out were mis-counted as In — real bug), always-visible colour-coded
+In/Out stats (new server `summary`), date+search row leads with mini-sections
+below, honest date-only time handling. Backend endpoints `POST /inventory/
+movements/:id/revert` (append-only compensating movement, new pure-tested
+`lib/stockRevert.ts`) + `PATCH …/reason`, both Full-Inventory gated; row actions
+in the ledger detail modal. New `forms/StockAdjustModal.tsx` = the "Adjust" menu
+reusing the COMPLETE `InventoryStockModals` (not BranchStockAdjuster). Verified:
+both tscs clean, pure tests 21/8/11, verify:i18n OK, langKeyIntegrity green. NOT
+live-browser-verified (shared checkout, active lanes). **Left uncommitted on
+purpose:** the one-line `Products.tsx` `onAdd` gate (hide catalog Add-Product on
+this section) — that file holds another lane's sticky-header rework, so my
+one-liner rides with them (running app already shows it). `11b5c9ff` names its
+ride-alongs (ScanSearchButton + the Fees-rename lane's ~28 lang keys). **Peers:
+please pick up my `Products.tsx` `onAdd` one-liner when you commit that file, and
+the `batches.ts` `set`-sign write bug (task chip spawned).**
 
 **→ SUPPLIER-INVOICES-MERGE LANE (this session, Aug 31 ~afternoon): DONE — in HEAD
 (code swept into peer commit `f5cb27e3` by a race; lang keys in `ab7653e0`). tsc 0
@@ -763,16 +812,17 @@ screens). Your log entry = grep-max+1 at write time (553+ now) with the mismatch
 noted — and please STOP pre-baking Part numbers into commit messages (this is the
 second collision: a0b2edbf said 549, also taken).
 
-**📌 SESSION-LOG PROTOCOL SLIPPING — four Part numbers have NO log entry
-(coordinator 7b, ~13:45, measured with `git log -S`): 545, 546, 553, 554.** Their
-records live on this board only — 8b3c67c6 even says "docs(log): Part 554" while
-touching ONLY progress.md. The project rule separates the two files: the BOARD is
-the queue, `docs/history/session-log.md` is the narrative log AND the numbering
-authority — board-only records are why numbers keep double-minting. Owners of
-545 (i18n), 546 (permissions), 553 (stock-ledger lane — four commits reference
-it), 554 (reports lane): append a real `## Part N` entry to the session log, even
-a short one pointing at your board block. Until backfilled, grep-max+1 UNDERCOUNTS
-— check this list too before minting.
+**📌 SESSION-LOG PROTOCOL SLIPPING — Part numbers with NO log entry (coordinator
+7b, updated ~14:10, measured with `git log -S`): 545 (i18n), 546 (permissions),
+554 + 556 (reports lane — BOTH your "docs(log)" commits 8b3c67c6/45ce3b4f touched
+only this board), and 553 is now permanently VACANT (the stock-ledger lane
+correctly renumbered its entry to 557 — do not reuse 553).** The BOARD is the
+queue; `docs/history/session-log.md` is the narrative log and the numbering
+authority — board-only records are why numbers keep double-minting, and a commit
+labeled `docs(log)` that edits only progress.md is mislabeled. Owners: append a
+real `## Part N` entry to the session log, even a short one pointing at your
+board block. Until backfilled, grep-max+1 UNDERCOUNTS — check this list too
+before minting.
 
 **→ SALES-HUB SESSION (coordinator 7b, ~11:30):** your commit `a0b2edbf` says
 "Part 549" but 549 is TAKEN (7a's verification sweep, logged). When you write
@@ -935,6 +985,33 @@ IDs) or the section linked. Statuses: **[~]** = in progress / partly done,
 - [ ] **N3** — colored SectionCard rows page-by-page, app-wide (after N3a's palette
   confirmation).
 - [ ] **Fast loading / perf** — the task board's measured pass; same work as K7.
+
+### Flagged for future sessions — Part 559 (filter-chips session, Aug 31)
+
+Found while removing the FilterMenu outside-the-menu chips (Part 559, commit
+`a04dd099`). Both are OUTSIDE that lane and were left for their owning sessions —
+recorded here so they don't rot:
+
+- **Stale test, RED at committed HEAD (needs a one-line fix).**
+  `frontend/tests/performanceLoadingUx.test.ts` (~line 1568) asserts the sales
+  active-filter-count regex
+  `countActiveFlags([statusFilter !== 'all' ... salesGroupMode !== 'time'])`, but
+  `frontend/src/components/sales/Sales.tsx:1160` no longer has the
+  `salesGroupMode !== 'time'` flag — its own comment says "the count now covers
+  only true filters". So `node --test tests/performanceLoadingUx.test.ts` fails
+  at HEAD, independent of any working-tree edit. Fix: update the regex to the
+  current four-flag call (status · user · date-range · sort-not-default). A
+  background task chip was also raised for this.
+- **Caution — the shared working tree keeps passing through non-compiling
+  intermediate states.** During Part 559, `npx tsc --noEmit` over the whole
+  `frontend/` tree was red at different moments in different peer lanes: first
+  `users/PermissionEditor.tsx` + `AppContext.tsx` (`TS2345: "view" not
+  assignable to PermissionTierValue`), later `shared/StatsStrip.tsx` mid-refactor
+  (`DateTimeRangePicker`/`PRESETS`/`DateTimeRange` not yet defined). These are
+  in-flight lanes, not defects. Lesson for any session here: run `tsc` scoped to
+  your OWN files, judge your work by those, and never `git add -A` / "commit
+  everything" — you would sweep another lane's half-written, non-compiling code
+  onto `main`. Path-scoped adds only.
 
 ### Open defects — Part-77 verification sweep
 
