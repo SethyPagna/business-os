@@ -11,6 +11,10 @@ const StockAdjustModal = lazy(() => import('./forms/StockAdjustModal'))
 // this section's Adjust menu too (user, Aug 31: "for fast stock in do that
 // for products pages and all sections").
 const FastStockInModal = lazy(() => import('../inventory/FastStockInModal'))
+// The shared range step in front of an export -- defaults to this section's
+// own Start → End range (user, Aug 31: "do the date range for all the
+// exports").
+const ExportRangeDialog = lazy(() => import('../shared/ExportRangeDialog'))
 import { movementColorClass, translateMovementType } from '../inventory/movementGroups.ts'
 import DateTimeRangePicker from '../shared/DateTimeRangePicker'
 import FilterMenu, { type FilterSection } from '../shared/FilterMenu'
@@ -22,6 +26,7 @@ import InfoHint from '../shared/InfoHint'
 import { useDebouncedValue } from '../../utils/useDebouncedValue.ts'
 import { fmtDate, fmtClock24, fmtDateTime24 } from '../../utils/formatters'
 import { batchDisplayLabel } from '../../utils/batchLabel.ts'
+import Download from 'lucide-react/dist/esm/icons/download.js'
 
 // D1 (Part 415): the user's Stock Change ledger on the Products page --
 // one row per recorded action over the EXISTING movement history, with the
@@ -149,6 +154,7 @@ export default function StockChangeSection({ t }: { t: Translate }) {
   const [adjustMenuOpen, setAdjustMenuOpen] = useState(false)
   const [adjustType, setAdjustType] = useState<'add' | 'remove' | 'set' | null>(null)
   const [fastStockInOpen, setFastStockInOpen] = useState(false)
+  const [exportRange, setExportRange] = useState<{ startDate: string; endDate: string } | null>(null)
   const requestRef = useRef(0)
 
   const load = useCallback(async () => {
@@ -218,6 +224,50 @@ export default function StockChangeSection({ t }: { t: Translate }) {
   const closeDetail = useCallback(() => {
     setDetail(null); setDetailRows(null); setEditingReason(null); setConfirmRevert(false)
   }, [])
+
+  // Ranged CSV export of the ledger, honoring the section's current search/
+  // branch/supplier/view filters. Walks /stock-ledger pages (1000/page,
+  // 10-page cap) and says so honestly if the range holds more.
+  const runLedgerExport = useCallback(async (range: { startDate: string; endDate: string }) => {
+    const pageSize = 1000
+    const maxPages = 10
+    const rows: LedgerRow[] = []
+    let grandTotal = 0
+    for (let exportPage = 1; exportPage <= maxPages; exportPage += 1) {
+      const response = await getStockLedger({
+        view,
+        page: exportPage,
+        pageSize,
+        search: debouncedSearch || undefined,
+        branchId: branchId || undefined,
+        startDate: range.startDate || undefined,
+        endDate: range.endDate || undefined,
+        supplierId: supplierId || undefined,
+      }) as LedgerResponse
+      const items = Array.isArray(response?.items) ? response.items : []
+      grandTotal = Number(response?.total || 0)
+      rows.push(...items)
+      if (rows.length >= grandTotal || items.length < pageSize) break
+    }
+    if (grandTotal > rows.length) {
+      app.notify(tr(t, 'export_truncated', `Export capped at ${rows.length} of ${grandTotal} records — narrow the range for the rest.`), 'warning')
+    }
+    const { downloadCSV } = await import('../../utils/csv.ts')
+    downloadCSV(`stock-changes-${range.startDate || 'all'}-${range.endDate || 'all'}.csv`, rows.map((row) => ({
+      date: isDateOnlyStamp(row.created_at) ? fmtDate(row.created_at) : fmtDateTime24(row.created_at),
+      product: row.product_name,
+      barcode: row.barcode || '',
+      branch: row.branch_name || '',
+      type: row.movement_type,
+      quantity: row.signed_quantity,
+      before: row.before_qty,
+      after: row.after_qty,
+      batch: row.batch_id ? batchDisplayLabel({ id: row.batch_id, lot_code: row.batch_lot_code, received_at: row.batch_received_at }) : '',
+      supplier: row.batch_supplier_name || '',
+      reason: row.reason || '',
+      user: row.user_name || '',
+    })))
+  }, [app, branchId, debouncedSearch, supplierId, t, view])
 
   // Revert: post the compensating counter-movement, then refresh the list (the
   // reverted row stays -- the ledger is append-only -- and the new counter-
@@ -473,6 +523,18 @@ export default function StockChangeSection({ t }: { t: Translate }) {
             search box, same as the Products / POS / Inventory search rows. */}
         <ScanSearchButton onDetected={setSearch} t={t} />
         <span className="ml-auto inline-flex items-center gap-1 text-xs text-gray-400">
+          {/* Ranged CSV export -- the dialog opens seeded with this row's own
+              Start → End range (user, Aug 31: "do the date range for all the
+              exports"). */}
+          <button
+            type="button"
+            onClick={() => setExportRange({ startDate, endDate })}
+            className="rounded-lg p-1 text-gray-400 transition hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-gray-800 dark:hover:text-gray-200"
+            title={tr(t, 'export', 'Export')}
+            aria-label={tr(t, 'export', 'Export')}
+          >
+            <Download className="h-3.5 w-3.5" />
+          </button>
           {total}
           {/* The ledger's "what is this" explanation lives behind this info
               affordance instead of an inline sentence above the section
@@ -693,6 +755,18 @@ export default function StockChangeSection({ t }: { t: Translate }) {
             t={t}
             onClose={() => setAdjustType(null)}
             onDone={() => { setAdjustType(null); void load() }}
+          />
+        </Suspense>
+      ) : null}
+
+      {exportRange ? (
+        <Suspense fallback={null}>
+          <ExportRangeDialog
+            initial={exportRange}
+            title={`${tr(t, 'export', 'Export')} — ${tr(t, 'stock_change_ledger', 'Stock Changes')}`}
+            t={t}
+            onClose={() => setExportRange(null)}
+            onExport={runLedgerExport}
           />
         </Suspense>
       ) : null}

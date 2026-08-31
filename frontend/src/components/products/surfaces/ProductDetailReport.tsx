@@ -169,6 +169,30 @@ export default function ProductDetailReport({ productId, t, fmtUSD }: {
 
   const signed = (row: LedgerRow): string => `${row.signed_quantity > 0 ? '+' : row.signed_quantity < 0 ? '−' : ''}${Math.abs(row.signed_quantity)}`
 
+  // The FULL movement history is reachable from this detail (user, Aug 31:
+  // "make sure you copy the stock movement history into products page view
+  // detail") -- Load more appends 30-row pages until the ledger total is
+  // exhausted.
+  const [movementsLoadingMore, setMovementsLoadingMore] = useState(false)
+  const loadMoreMovements = async () => {
+    if (movementsLoadingMore || movements === null) return
+    setMovementsLoadingMore(true)
+    try {
+      const nextPage = Math.floor(movements.length / 30) + 1
+      const response = await getStockLedger({ productId, page: nextPage, pageSize: 30 }) as { items?: LedgerRow[]; total?: number }
+      const rows = Array.isArray(response?.items) ? response.items : []
+      setMovements((current) => {
+        const seen = new Set((current || []).map((row) => row.id))
+        return [...(current || []), ...rows.filter((row) => !seen.has(row.id))]
+      })
+      if (response?.total != null) setMovementsTotal(Number(response.total) || 0)
+    } catch {
+      // Keep what already loaded; the button stays for a retry.
+    } finally {
+      setMovementsLoadingMore(false)
+    }
+  }
+
   const movementsLoading = movements === null
   const reportLoading = report === null
 
@@ -225,6 +249,18 @@ export default function ProductDetailReport({ productId, t, fmtUSD }: {
             </div>
           ))}
           {!movements.length ? <p className="py-2 text-center text-gray-400">{tr('no_data_found', 'No data found')}</p> : null}
+          {movements.length < movementsTotal ? (
+            <button
+              type="button"
+              onClick={() => void loadMoreMovements()}
+              disabled={movementsLoadingMore}
+              className="w-full rounded-lg border border-dashed border-gray-200 py-1.5 text-center text-xs text-gray-500 transition hover:bg-gray-50 disabled:opacity-50 dark:border-gray-700 dark:text-gray-400 dark:hover:bg-gray-800"
+            >
+              {movementsLoadingMore
+                ? `${tr('loading', 'Loading')}...`
+                : `${tr('load_more', 'Load more')} (${movements.length}/${movementsTotal})`}
+            </button>
+          ) : null}
         </>
       )}
     </div>
