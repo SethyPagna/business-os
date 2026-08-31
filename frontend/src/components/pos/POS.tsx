@@ -3659,7 +3659,7 @@ export default function POS() {
             fmtKHR={fmtKHR}
             asNumber={asNumber}
             posCopy={posCopy}
-            activeBranchId={primaryBranchFilterId}
+            activeBranchId={primaryBranchFilterId ?? pickBestBranchId(detailProduct)}
             trackedBatchProductIds={trackedBatchProductIds}
             getDisplayStock={getDisplayStock}
             getPrimaryProductImage={getPrimaryProductImage}

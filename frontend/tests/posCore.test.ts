@@ -463,6 +463,21 @@ await runTest('POS checkout uses isSaleRecorded and the cart blocker, not `resul
   assert.match(pos, /findCheckoutBlocker\(active\.cart/, 'the pre-submit cart guardrail must be wired in')
 })
 
+// ---------------------------------------------------------------------------
+// Wiring: the detail sheet must preselect the SAME branch the card badge
+// resolved (Part 539 finding: the sheet's own fallback was branchOptions[0],
+// alphabetical, so the card said "3 pcs" from the default branch while the
+// sheet silently offered/booked a different branch's lots).
+// ---------------------------------------------------------------------------
+await runTest('ProductDetailSheet preselects the card badge branch, not alphabetical-first', () => {
+  const pos = fs.readFileSync(new URL('../src/components/pos/POS.tsx', import.meta.url), 'utf8')
+  assert.match(
+    pos,
+    /activeBranchId=\{primaryBranchFilterId \?\? pickBestBranchId\(detailProduct\)\}/,
+    'the sheet must be handed the branch the card resolved (filter first, else pickBestBranchId)',
+  )
+})
+
 if (failed > 0) {
   process.exitCode = 1
   console.error(`\n${failed} posCore test(s) failed`)

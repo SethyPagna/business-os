@@ -182,8 +182,12 @@ interface ProductDetailSheetProps {
   fmtKHR: CurrencyFormatter
   asNumber: (value: unknown) => number
   posCopy: PosCopy
-  // The cashier's currently-filtered POS branch, if any -- used only to
-  // preselect Step 1 below; the cashier can still pick a different branch.
+  // The branch the POS card's own stock badge resolved to (the branch filter
+  // when one is set, else pickBestBranchId's choice) -- used only to preselect
+  // Step 1 below; the cashier can still pick a different branch. It MUST be
+  // the same branch the card number came from: the sheet's old fallback was
+  // branchOptions[0] (alphabetical), which routinely disagreed with the card
+  // and silently offered/booked a different branch's lots.
   activeBranchId?: string | number | null
   // Every product id that carries active batch/expiry tracking (see
   // POS.tsx's trackedBatchProductIds) -- forces a lot-picker step before
