@@ -17011,3 +17011,73 @@ routes/importJobs.ts,routes/system.ts}`, `cloudflare/wrangler.toml`,
 test-stock-action-analyze-e2e.cjs,test-stock-action-apply-pure.cjs,
 test-import-retention-pure.cjs}`, `DEPLOY.md`. Committed in ordered slices
 (c8fb1753, c0ef6859, f2e5c3a6, 74e019fd + the Tier 1/2 commits).
+
+## Part 575 (Aug 31 2026, D1/R2-bloat lane — DEEP recurrence pass, session 27, grep-max+1) — R2 was 777 MB (only 9 MB real); found + fixed every recurrence source
+
+User pushed back: the bloat had been raised before and prior fixes (incl. this
+lane's Part 574) hadn't held — "go deep." Ran a live R2 census (Cloudflare API,
+token from .wrangler-auth.local) + three parallel code-audit agents (R2 writers,
+D1 growth, recurrence root cause). The user then read the R2 dashboard: **777 MB**.
+
+**R2 reconciliation (777 MB, only ~9 MB real user data):**
+- **21 ORPHANED backup folders — 219.7 MB (852 objects).** THE dominant leak, and
+  a bug Part 574 never touched. `listCloudflareBackups` enumerates only top-level
+  `<name>.json` manifests, so a `<name>/assets/` copy folder left WITHOUT its
+  manifest (old manifest-first delete order + a listObjects hiccup) is invisible
+  to every prune forever; one set stranded every 6h. deleteBackupSet's own comment
+  promised an "orphan sweep" that was never written.
+- **~486 MB incomplete MULTIPART upload parts** — the 777-vs-291 gap. Not listable
+  objects (why the object census + `wrangler bucket info` both showed ~300 MB), but
+  they count toward bucket size. From backups of the BLOATED DB failing mid-stream
+  (when import_job_rows was still in BACKUP_TABLES the manifest was hundreds of MB).
+- 40 MB stranded import CSVs + 23 MB two stale assetless manifests + 9 MB real uploads.
+
+**D1 recurrence (agent findings): the ONLY cron retention was audit_logs + import
+staging.** Every other growing table had no automatic cleanup — ~6 would re-bloat:
+rate_limit_events (1 row/allowed request, none deleted), user_sessions/portal_sessions
+(soft-revoke only; live: 99 rows / 93 prunable), verification_codes, lockouts,
+trusted_devices, ai_response_logs, action_history. Plus: image-audit re-scanned only
+the first 400 R2 keys forever (no cursor); audit-log delete was unbounded + index-
+hostile (`date(created_at)`); the stalled-job reaper ran only on a UI GET; and
+**Part 574's own Tier-3 split manufactured new orphans** (parent deleted on main DB,
+then staging children on the separate DB — a cross-DB mid-failure orphans them).
+
+**Live one-time cleanups (applied via API/wrangler, independent of deploy):**
+- Deleted the 21 orphaned backup folders — **219.7 MB reclaimed, 0 failures.**
+- Tightened the incomplete-multipart abort rule 3d → **1 day** to drain the ~486 MB.
+- (D1 already 92 MB from Part 574's purge.)
+
+**Code fixes (committed; take effect on the Stage-2 deploy):**
+- `backup.ts`: new `pruneOrphanedBackupFolders()` prefix sweep (backstop for
+  manifest-less folders) + deleteBackupSet now deletes the FOLDER before the
+  manifest so a failure can't orphan assets.
+- `importRetention.ts` + `routes/importJobs.ts`: delete staging children BEFORE the
+  parent (fixes the Part-574 cross-DB orphan hazard).
+- NEW `lib/ephemeralRetention.ts` + `index.ts`: scheduled retention for
+  rate_limit_events / sessions / verification_codes / lockouts / trusted_devices /
+  ai_response_logs / action_history (bounded id-batches; SQL validated against the
+  live schema), plus the stalled-import reaper and a bounded orphan-staging cleanup
+  now run ON THE CRON (not UI-gated / manual-only).
+- `imageAudit.ts`: rolling KV cursor so the sweep walks the whole uploads/ prefix.
+- `audit.ts`: batched, index-friendly audit-log delete.
+- `test-image-pipeline-pure.cjs`: updated the scheduled-chain assertion to the
+  runStep form (a red I had introduced in Part 574's Tier-1 refactor; 25/25 green).
+
+**Verification:** cloudflare tsc clean; full backend suite 128/132 — the 4 fails are
+7b's confirmed STALE reds owned by the permissions (557) + stock-ledger (553) lanes,
+none from this lane. Coordinated with coordinator 7b (Stage 1).
+
+**Not done / deferred (documented for the user, lower impact):** FTS `optimize`
+pass; portal-screenshot GC (public/unauthenticated writer, no file_assets row —
+latent, currently 0 rows); uploads/ orphan GC on product-image/avatar replacement;
+inventory_movements long-window retention / drop from BACKUP_TABLES (it's an audit
+ledger — judgment call); audit_logs details/new_value dedup + a created_at index.
+**DEPLOY is the Stage-2 / user gate — NOT run here.** `npm run deploy:full` (now
+incl. `migrate:import:remote`) activates every code fix; then run one real import to
+confirm the second-D1 split end-to-end.
+
+Files (path-scoped, backend-only, DISJOINT from all frontend lanes):
+`cloudflare/src/{index.ts,lib/backup.ts,lib/importRetention.ts,lib/ephemeralRetention.ts,
+lib/imageAudit.ts,lib/audit.ts,routes/importJobs.ts}`,
+`cloudflare/scripts/test-image-pipeline-pure.cjs`. Commits: 56c0c1e5, 45f5bcb1,
+f9c63114, c328694c, 64f32198, d4a033b5.
