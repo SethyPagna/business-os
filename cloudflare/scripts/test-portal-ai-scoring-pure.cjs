@@ -283,4 +283,27 @@ check('parseAssistantPayload defaults off_topic to false for a legacy/malformed 
   assert.strictEqual(result.off_topic, false)
 })
 
+check('the public recommendation payload NEVER carries a raw stock count -- only the coarse status', () => {
+  // POST /api/portal/ai/chat returns these objects verbatim to an anonymous
+  // visitor. The candidate keeps raw stock_quantity internally (so ground
+  // truth never routes through the model), but the payload built from it
+  // must ship the same coarse stock_status the catalog cards serve --
+  // shipping the raw count bypassed attachPortalStockStatus's redaction.
+  const [candidate] = selectCandidateProducts(
+    [product({ id: 9, name: 'Redaction Check', stock_quantity: 7, out_of_stock_threshold: 0, low_stock_threshold: 10 })],
+    {},
+    '',
+  )
+  const raw = JSON.stringify({
+    summary: 'match',
+    off_topic: false,
+    recommendations: [{ product_id: 9, name: 'Redaction Check', reason: 'fits' }],
+  })
+  const result = parseAssistantPayload(raw, new Map([[9, candidate]]), 'disclaimer')
+  assert.strictEqual(result.recommendations.length, 1)
+  const payload = result.recommendations[0]
+  assert.ok(!('stock_quantity' in payload), 'raw stock_quantity must not reach the public AI chat response')
+  assert.strictEqual(payload.stock_status, 'low_stock')
+})
+
 console.log(`\n${checks} check(s) passed.`)

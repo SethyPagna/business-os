@@ -316,7 +316,12 @@ function buildRecommendationPayloads(recommendations: AnyRow[] = [], candidatesB
       image_gallery: product.image_gallery || [],
       selling_price_usd: product.selling_price_usd,
       selling_price_khr: product.selling_price_khr,
-      stock_quantity: product.stock_quantity,
+      // SECURITY BOUNDARY: this object goes verbatim to the anonymous
+      // visitor via POST /api/portal/ai/chat. The raw stock_quantity on the
+      // candidate is internal-only (see toPromptCandidate); the public side
+      // gets the same coarse status the catalog cards serve -- shipping the
+      // raw count here bypassed the attachPortalStockStatus redaction.
+      stock_status: product.stock_status,
       reason: trim(item?.reason),
       fit_summary: trim(item?.fit_summary),
       how_to_use: trim(item?.how_to_use),
