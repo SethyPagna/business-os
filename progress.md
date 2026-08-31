@@ -196,6 +196,51 @@ kept)/audit-coverage (48)/reset-permission-gate/review-submitter/
 import-review-query pure tests green, verify:i18n OK (4162 keys), both
 tscs clean.]**
 
+**[VERIFIED LIVE — i18n/permissions session, Aug 31 (Part 546 addendum): 66/66
+end-to-end scenarios green against a REAL running worker.** Not source checks:
+an isolated `wrangler dev --local --persist-to <private D1 copy>` was driven
+over real HTTP with real minted sessions (six purpose-built roles: full /
+all-overrides-off / review / none / settle-only-off / replace-only-off), and
+the DB was inspected after every call. Proven for real: every override 403s
+on all six sections AND leaves ZERO rows behind (fee/contact/return counts
+unchanged on each 403); full-tier writes actually land (fee created 201 +
+row, edited + row changed, deleted + row gone); review tier behaves per
+spec end to end (fee add applies directly; fee delete queues an OPEN
+pending_actions row while the fee survives; admin approve then REALLY
+deletes it; branch create queues with NO branch row; admin reject leaves
+none; contacts review edit updates name while the submitted phone is
+dropped and the response flags partial); returns settle-difference blocks a
+settle-off role with 403 + no rows on an UNEVEN exchange while the SAME
+role's EVEN exchange still completes (return + replacement rows written),
+and full-tier uneven-with-mode records settlement_mode='price_difference'
+with the exact ±diff; uneven WITHOUT the mode is 400 uneven_exchange;
+batches writes 403 under inventory:adjust-off while reads stay open;
+import-jobs 403 with the precise `section:import` marker per type and
+replace_all blocks on its own override even with destructive_delete
+granted. Also this run: full frontend suite green (typecheck + ~146 files),
+cloudflare pure battery 126/128 — the 2 reds (test-image-pipeline-pure,
+test-portal-catalog-sort-pure) FAIL AT d4197913 TOO (before this session's
+commits; pre-existing, peers' domain — flagged, not mine to fix blind).
+Khmer proven at runtime: AppContext's exact flatten+t() resolves real
+Khmer for all four key batches, and the live app (vite -> worker, seeded
+admin session) rendered Dashboard/POS/nav in Khmer with new sales showing
+bare YYYYMMDD-HHMMSS ids beside preserved historical RCP- ones. All test
+residue removed from the shared local D1 (roles/users/sessions deleted);
+destructive scenarios ran only against the private copy.]**
+
+**[~ CLAIMED — session business-os-v1-7a, Aug 31 (~10:40): FULL exhaustive
+verification sweep at HEAD (post-Part-547).** User ask: "1000% confirmed backend
+and frontend matches, data matches, no hidden/broken/corrupted/stale, UI/UX fully
+correct, compact and working, all devices, all conflicts". Scope: Golden-Rule-5
+battery (both tscs, backend suites individually, frontend suites individually,
+real vite build), backend↔frontend API contract matrix, migration chain from
+zero, local+remote D1 data-integrity probes (read-only), live UI drive on
+desktop+mobile viewports, i18n/permissions verifiers, public-surface audit.
+READ-MOSTLY: no product code edits planned; any defect found gets flagged here
+with expected-vs-actual, not silently fixed, unless trivially mine to fix in an
+unclaimed file. Will NOT touch: routes/sales.ts (c8 holds hunks), the legacy
+migration lane's untracked files, 8787 wrangler (c8 owns it).]**
+
 **DONE (ship-now-fixes session, Aug 31, Part 547):** the audit's ship-now tier shipped - public portal stock leak sealed (server-computed stock_status/branch_availability, raw quantities+thresholds redacted, global threshold mode now honored), storefront admin-voice strings -> shopper voice, StatusPill raw-key fallback fixed, PublicCatalogPage StrictMode aliveRef fix, POS search-wipe desktop-only, 45 posCopy Khmer translations, Inventory icon swap, Import Hub -> shared Modal (z-fix), Dashboard dead hidden blocks deleted, CartItem KHR decimals, Returns scope no longer a filter. All suites green; see session-log Part 547.
 
 *(Live coordination only — session records that used to live here are in the
@@ -304,8 +349,13 @@ two lanes now hold DISTINCT numbers — `0088_legacy_finance_and_audit_ledgers.s
 and r2's `0089_system_flags.sql` (r2 yielded 0088; disregard the earlier direction
 to rename legacy-finance — the settled state stands, do NOT rename again). Shared
 local d1_migrations has no 0088/0089 rows (latest applied 0087), so both are clean
-forward applies. **Next migration number is 0090.** Legacy-finance lane: you still
-need a claim block here for your lane.
+forward applies. **Legacy lane (updated ~10:25): your lane has GROWN to THREE
+untracked migrations (0088 legacy_finance_and_audit_ledgers, 0090
+legacy_inventory_effect_stock_guard, 0091 legacy_sale_date_corrections — numbering
+correct) + `ops/repair_aug30_teddy_tint_identity.sql` + `ops/scripts/migration/`,
+all still UNCLAIMED and uncommitted. Please add a claim block and commit finished
+slices — this is now the largest unclaimed work in the tree. Next free migration
+number is 0092.**
 
 **→ OFFLINE-TIMESTAMP SESSION (unclaimed lane, routes/sales.ts +
 saleWriteTransport.ts + new lib/clientTimestamp.ts + pure test — coordinator 7b,
