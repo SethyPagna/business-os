@@ -326,7 +326,7 @@ export default function SaleDetailModal({
                     />
                     <button
                       type="button"
-                      className="btn-primary whitespace-nowrap text-sm"
+                      className="btn-primary whitespace-nowrap text-xs"
                       disabled={membershipSaving || !String(membershipNumber || '').trim()}
                       onClick={handleMembershipAttach}
                     >
@@ -471,7 +471,7 @@ export default function SaleDetailModal({
               {onStatusChange ? (
                 <button
                   type="button"
-                  className="btn-secondary mt-3 w-full text-sm"
+                  className="btn-secondary mt-3 w-full text-xs"
                   disabled={statusSaving}
                   onClick={async () => {
                     // Un-cancel: the backend only accepts the status the
@@ -581,7 +581,7 @@ export default function SaleDetailModal({
               ) : null}
               <button
                 type="button"
-                className="btn-primary mt-3 w-full text-sm"
+                className="btn-primary mt-3 w-full text-xs"
                 disabled={statusSaving || newStatus === currentStatus}
                 onClick={handleStatusUpdate}
               >
