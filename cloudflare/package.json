@@ -15,9 +15,11 @@
     "test:zip-reader": "node scripts/test-zip-reader.cjs",
     "migrate:local": "node scripts/with-wrangler-auth.cjs wrangler d1 migrations apply business-os --local",
     "migrate:remote": "node scripts/with-wrangler-auth.cjs wrangler d1 migrations apply business-os --remote",
+    "migrate:import:local": "node scripts/with-wrangler-auth.cjs wrangler d1 migrations apply business-os-import --local",
+    "migrate:import:remote": "node scripts/with-wrangler-auth.cjs wrangler d1 migrations apply business-os-import --remote",
     "deploy": "node scripts/with-wrangler-auth.cjs wrangler deploy",
     "secrets:sync": "node scripts/sync-secrets.cjs",
-    "deploy:full": "npm run typecheck && npm run build:frontend && npm run migrate:remote && npm run secrets:sync && npm run deploy",
+    "deploy:full": "npm run typecheck && npm run build:frontend && npm run migrate:remote && npm run migrate:import:remote && npm run secrets:sync && npm run deploy",
     "d1:shell:local": "node scripts/with-wrangler-auth.cjs wrangler d1 execute business-os --local --command",
     "d1:shell:remote": "node scripts/with-wrangler-auth.cjs wrangler d1 execute business-os --remote --command"
   },

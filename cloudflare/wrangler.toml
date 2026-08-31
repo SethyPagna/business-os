@@ -84,6 +84,30 @@ database_name = "business-os"
 database_id = "49795be9-eabe-43f1-8e16-b86faed60cb1"
 migrations_dir = "migrations"
 
+# Import-staging database (Part 572). Holds ONLY the two bulk, regenerable
+# import staging tables (import_job_rows + import_job_source_rows) -- measured
+# Aug 31 2026 at ~431 MB, ~65% of a 661 MB operational DB, all of it transient
+# per-import scratch. Splitting it out keeps the operational DB (and therefore
+# its backup time and page-cache pressure) small and stable. Co-located in
+# APAC with the DB above and the Worker.
+#
+# OPTIONAL by design on Env (index.ts, same pattern as BACKUP_QUEUE): the app
+# reaches these two tables ONLY through getDb(env).staging (lib/db.ts's
+# D1Compat.staging), which points here when this binding exists and falls back
+# to DB when it does not -- so local dev, the pure-test harnesses, and any
+# single-DB deployment keep working unchanged. Safe because a db.batch() is
+# atomic only within one D1 and D1 has no cross-database JOINs: these two
+# tables are never batched-atomically-with, nor JOINed to, operational tables
+# (the idempotency ledgers that ARE must stay on DB -- see migrations-import/).
+#
+# Migrations for THIS database live in migrations-import/ and are applied with
+# `npm run migrate:import:remote`; `migrate:remote` only touches business-os.
+[[d1_databases]]
+binding = "IMPORT_DB"
+database_name = "business-os-import"
+database_id = "5c667470-920b-4cb1-bbc9-67d0d919c965"
+migrations_dir = "migrations-import"
+
 [[r2_buckets]]
 binding = "ASSETS"
 bucket_name = "business-os-assets"

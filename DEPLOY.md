@@ -24,6 +24,7 @@ There's nothing else to deploy — no Docker image, no separate server process.
 
   ```sh
   wrangler d1 create business-os
+  wrangler d1 create business-os-import   # import staging (binding IMPORT_DB)
   wrangler kv namespace create CACHE
   wrangler r2 bucket create business-os-assets
   wrangler queues create business-os-import
@@ -44,9 +45,10 @@ There's nothing else to deploy — no Docker image, no separate server process.
 cd frontend && npm install && cd ..
 cd cloudflare && npm install && cd ..
 
-# 2. Apply D1 migrations to the remote database
+# 2. Apply D1 migrations to the remote databases (operational + import-staging)
 cd cloudflare
 npm run migrate:remote
+npm run migrate:import:remote
 
 # 3. Build the frontend and deploy the Worker
 cd ../frontend && npm run build && cd ../cloudflare
@@ -75,10 +77,11 @@ npm run deploy:full
 ```
 
 `npm run deploy:full` (defined in `cloudflare/package.json`) runs, in order:
-typecheck the Worker → build the frontend → apply remote D1 migrations →
-sync secrets (`cloudflare/.dev.vars` → Cloudflare, allowlisted keys only) →
-`wrangler deploy`. This is the command to run for a normal "I changed some
-code, ship it" redeploy.
+typecheck the Worker → build the frontend → apply remote D1 migrations for the
+operational DB (`migrate:remote`) → apply them for the import-staging DB
+(`migrate:import:remote`) → sync secrets (`cloudflare/.dev.vars` → Cloudflare,
+allowlisted keys only) → `wrangler deploy`. This is the command to run for a
+normal "I changed some code, ship it" redeploy.
 
 ### One-command release (Windows)
 
