@@ -144,6 +144,19 @@ INTEGRITY lane 578 (products.ts item 2). (b) The sale-link relink/resolve-missin
 `sales` only; `returns` cannot join (no `customer_phone` column to disambiguate a per-phone relink) — returns
 instead follow through the merge path, which is correct. Disjoint from all active frontend lanes and from 578's
 products.ts.
+Follow-up (Sep 1, same lane — DONE, committed `6e73b8b8`, Stage-1 / NOT deployed): user ruled "delete not
+possible … can keep with note or to survivor" for the Conflicts tab. Removed the per-record **Delete (no
+merge)** action from `frontend/src/components/contacts/DuplicatesTab.tsx` (it repointed nothing and would
+orphan a record's sales/returns/ledger history) along with its state/handlers/`DELETE_BY_TABLE`/transport
+imports (no zombie code). The two resolutions are now **merge-into-survivor** ("Keep this", moves all links)
+or **keep-both** (cluster Dismiss marker); each member now also shows its linked-history counts
+(sales/returns/points from `/duplicates` `history`) so the reviewer sees what a merge will move. Typed the
+new `history` on `contactDuplicates.ts`'s cluster entry. Frontend tsc + sourceSyntaxCheck + related tests
+green. Audit of ALL conflict surfaces now closed: contacts merge (repoints, `1655ea1e`) + contacts delete
+(removed, `6e73b8b8`) done; sale-link resolvers verified sales-only-is-correct; PRODUCT duplicates tab's
+"Remove" is already a merge (`mergePossiblySameProducts` → soft-deactivate + carry stock/lots/images, no
+orphan), so the only open products item (repoint historical sales onto the keeper for unified reporting)
+stays with lane 578. General Customers/Suppliers per-record delete left untouched (separate intentional feature).
 
 **→ SMALL-SCREEN PRODUCTS-CARD lane (Sep 1, session 88 [ad9ece] — CLAIMED, in progress).**
 User (on a phone): the product-name text on the small-screen product CARD can't be
