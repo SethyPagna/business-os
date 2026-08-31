@@ -181,6 +181,21 @@ in-progress uncommitted slice, NOT a broken HEAD — committed HEAD `c44a4520` c
 (`git show HEAD:…/products.ts` has no `reversal`). Don't false-alarm.** Next deploy trigger:
 catalog-integrity lane completes item 2 (undo migration `0097` committed) + green committed HEAD →
 batch the 3 UI fixes + complete catalog item 2 in one certified-worktree deploy.
+⤷ UPDATE (Sep 1 ~01:20 UTC, coordinator 7b — supersedes the trigger above): scope grew. The
+user gave a fresh directive (relayed by session-62): proceed with revenue-definition reconciliation
+AND **Phnom Penh business-day report bucketing** ("timezone and data are all Phnom Penh time" =
+fixed UTC+7, matching the standing memory directive) — a REQUIRED data-correctness fix and the
+likely root cause of the user's "calculations are not correct" complaint (morning sales currently
+mis-bucket). A lane is implementing it NOW (uncommitted: `cloudflare/src/lib/businessDateWindow.ts`
+new + `salesAnalytics.ts`/`routes/sales.ts`/`importEngine.ts`/`Sales.tsx` dirty; no committed board
+claim / owner unattributed in git yet). Deploying the ready cosmetic+merge batch ahead of this would
+ship everything EXCEPT the fix for the user's actual complaint, then force an immediate re-deploy.
+NEW deploy trigger: the Phnom Penh business-day + revenue-reconciliation fix is COMMITTED + green
+committed HEAD → then deploy ONE coherent data-correctness batch (timezone/revenue fix + the two
+already-committed merge fixes `c44a4520`/`1655ea1e` + the 3 UI fixes). Part 577 security+C1 is
+already live (nothing since is deployed). If the user instead wants the ready batch shipped
+immediately regardless of the timezone fix, that's a two-stage deploy I can drive — default is the
+single coherent batch.
 
 **⚠ PROD DATA VERIFIED CLEAN on the branch/sales/gross-sales claims (coordinator 7b, Sep 1 ~00:45 UTC, read-only prod D1 SELECTs — re-verify before acting, this is a snapshot not ground truth).** A peer relayed three "production data-corruption" findings; direct prod query REFUTES all three: (1) `branches` has exactly two — `Warehouse`(1) + `Shop`(2); NO stray "Leang Cosmetic Shop" branch exists (already canonical — do NOT "merge a stray branch", there is none to merge). (2) All 14,939 sales are on branch_id=2 (Shop); ZERO NULL branch_id; zero on Warehouse. (3) `subtotal_usd` is populated (0 null, 4 zero-or-null of 14,939, SUM=$1,873,656.34) so gross_sales_usd (salesAnalytics.ts:274 = COALESCE(SUM(subtotal_usd),0)) computes fine. The local miniflare D1 is a different, messy dev set (harmless). **Any session picking up a "prod data-corruption" fix must re-run read-only prod SELECTs first — acting on the stray-branch premise would corrupt already-clean prod.** Follow-up (Sep 1 ~01:05 UTC): the "missing timestamps" claim is ALSO refuted — `sales` 0/14,939 missing `created_at`, `inventory_movements` 0/21,375 missing; basic stock integrity clean (0 negative `branch_stock`, 0 negative `branch_batch_stock`, 0 unnamed of 6,104 products). SIX specific corruption claims now all refuted against live prod (stray branch, NULL branch_id, subtotal, timestamps, negative stock, unnamed products) — the reports read like stale screenshots or the messy local miniflare set, not production. Only the vaguer supplier-attribution + naming-convention drift remain unverified; they need a concrete offending record from the user before any audit, and NO prod mutation without an explicit user request.
 
