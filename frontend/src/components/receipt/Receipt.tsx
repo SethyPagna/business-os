@@ -35,6 +35,13 @@ interface ReceiptItem {
   // per-line discount (list − charged) as (-$x.xx).
   base_price_usd?: number | string | null
   product_discount_usd?: number | string | null
+  // The line's price tier -- comes straight through on the stored sale_items
+  // row (the list query SELECTs si.*) and on the POS in-memory checkout
+  // payload, so the receipt can print a small tier tag ("VIP" / "Wholesale")
+  // under the item name. Absent or 'selling' -> no tag. Toggled per line in
+  // the cart (the VIP marker), so a deselected line arrives here as 'selling'.
+  price_mode?: string | null
+  product_discount_label?: string | null
 }
 
 interface ReceiptSale {
@@ -420,6 +427,16 @@ export default function Receipt({ sale, settings = {}, onClose, _previewMode }: 
             && originalUnitUsd > unitUsd + 0.005
             && item.applied_price_usd != null
           const itemSavingsUsd = hasItemDiscount ? (originalUnitUsd - unitUsd) * qty : 0
+          // Price-tier tag printed under the item name (user). Derived from
+          // the persisted price_mode, so a VIP line the cashier left marked
+          // prints "VIP" and one they deselected (recorded as 'selling') prints
+          // nothing. "VIP" is identical in both packs; Wholesale carries its
+          // Khmer បោះដុំ for the forthcoming wholesale tier.
+          const tierTag = item.price_mode === 'special'
+            ? 'VIP'
+            : item.price_mode === 'wholesale'
+              ? (lang === 'km' ? 'បោះដុំ' : 'Wholesale')
+              : ''
           return (
             <div key={`${item.product_id || item.id || index}-${index}`} className="py-1.5">
               <div data-receipt-line="true" className="grid grid-cols-[minmax(0,1fr)_2.8rem_minmax(4.6rem,auto)] items-start gap-x-2">
@@ -428,6 +445,9 @@ export default function Receipt({ sale, settings = {}, onClose, _previewMode }: 
                     {item.product_name || item.name}
                     {tpl.show_item_sku && item.sku ? <span className="ml-1 text-[10px] text-gray-500">[{item.sku}]</span> : null}
                   </div>
+                  {tierTag ? (
+                    <div data-receipt-subline="true" className="text-[10px] font-semibold text-emerald-700">{tierTag}</div>
+                  ) : null}
                   {tpl.show_item_unit_price && qty > 1 ? (
                     <div data-receipt-subline="true" className="text-[10px] font-normal text-gray-500">
                       {fmtUSD(unitUsd)} x {qty}

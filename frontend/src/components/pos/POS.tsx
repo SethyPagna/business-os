@@ -2417,6 +2417,24 @@ export default function POS() {
     })
   }
 
+  // The VIP tier chip in the cart is a MARKER toggle (user): it flips only
+  // whether this line is recorded/printed as VIP, never the price. Default on
+  // (the line was added at the VIP tier); deselecting drops it to plain
+  // 'selling' while keeping applied/base price exactly, so the number stays
+  // put and the receipt simply stops printing the "VIP" tag (the receipt
+  // derives the tag from the persisted price_mode). Re-selecting restores the
+  // mark. Cart line identity is the stored cart_line_id, so flipping price_mode
+  // never re-keys or merges the line.
+  const toggleTierTag = (cartLineId: string | number) => {
+    patchActive({
+      cart: active.cart.map((item) => {
+        if (getCartLineId(item) !== cartLineId) return item
+        const nextMode = String(item.price_mode || 'selling') === 'special' ? 'selling' : 'special'
+        return { ...item, price_mode: nextMode }
+      }),
+    })
+  }
+
   const updateItemBranch = (cartLineId: string | number, branchId: string) => {
     const nextBranchId = branchId ? parseInt(branchId, 10) : null
     const item = active.cart.find((entry) => getCartLineId(entry) === cartLineId)
@@ -3163,7 +3181,7 @@ export default function POS() {
                   {active.cart.map(item => (
                     <CartItem key={item.cart_line_id || `${item.id}-${item.price_mode || 'selling'}-${item.branch_id || 'none'}`} item={item} branches={branches} t={t}
                       onQtyChange={updateQty} onPriceChange={updatePrice} onDiscountChange={updateDiscount}
-                      onBranchChange={updateItemBranch}
+                      onBranchChange={updateItemBranch} onToggleTierTag={toggleTierTag}
                       onRemove={id => patchActive({ cart: active.cart.filter(i => getCartLineId(i) !== id) })}
                       onShowDetails={() => { const p = productsById.get(Number(item.id)); if (p) setDetailProduct(p) }}
                       fmtUSD={fmtUSD} fmtKHR={fmtKHR} usdSymbol={usdSymbol} khrSymbol={khrSymbol}
