@@ -660,9 +660,15 @@ body:has([data-page-bg])      { background-color: var(--ui-page-bg) !important; 
 .max-h-modal-85 { max-height: 85vh; max-height: 85dvh; }
 .max-h-modal-88 { max-height: 88vh; max-height: 88dvh; }
 
-/* POS product grid */
-.pos-product-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(150px,1fr)); gap:8px; }
-@media (min-width:480px) { .pos-product-grid { grid-template-columns:repeat(auto-fill,minmax(160px,1fr)); gap:10px; } }
+/* POS product grid. Denser on phones (user, Aug 31: "pos products section is
+   showing one whole product display for small screens ... should be minimized
+   for better useability"): the square-image cards were 2-up and ~234px tall on
+   a 375px phone, so only ~6 products showed at once. A ~112px min track fits 3
+   columns from ~360px up, so a cashier scans ~2x more products per screen; the
+   tracks still grow to 1fr so they never look cramped, and mid/large screens
+   keep the comfortable ~150px cards. */
+.pos-product-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(100px,1fr)); gap:6px; }
+@media (min-width:480px) { .pos-product-grid { grid-template-columns:repeat(auto-fill,minmax(140px,1fr)); gap:8px; } }
 @media (min-width:768px) { .pos-product-grid { grid-template-columns:repeat(auto-fill,minmax(150px,1fr)); gap:12px; } }
 
 /* Receipt print */
