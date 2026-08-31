@@ -36,7 +36,8 @@ check('loyalty redeem USD step keeps cents precision, never whole-dollar roundin
 check('KHR tax, total and change are whole riel', () => {
   assert.match(pos, /const taxKhr\s+= Math\.round\(afterDiscKhr \* taxRate\)/, 'taxKhr must round')
   assert.match(pos, /const totalKhr\s+= Math\.round\(afterDiscKhr \+ taxKhr \+ customerFeeKhr\)/, 'totalKhr must round')
-  assert.match(pos, /const changeKhr\s+= Math\.round\(changeUsd \* exchangeRate\)/, 'changeKhr must round')
+  // Part 534: change converts at its own dedicated rate, still whole riel.
+  assert.match(pos, /const changeKhr\s+= Math\.round\(changeUsd \* changeExchangeRate\)/, 'changeKhr must round (at the dedicated change rate)')
 })
 
 check('the checkout payload sends whole-riel subtotal and rounded KHR discounts', () => {
