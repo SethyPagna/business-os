@@ -35,19 +35,29 @@
 //                         out of profit even though it never touched revenue)
 import { getDb } from './db'
 import type { Env } from '../index'
+import {
+  BUSINESS_TZ_FORWARD,
+  localDateExpr,
+  localMonthExpr,
+  localWeekExpr,
+  localDayLowerBound,
+  localDayUpperBoundExclusive,
+} from './businessDateWindow'
 
 export interface SalesFilters {
   startDate: string
   endDate: string
   branchId?: string | number | null
-  // Phase X: optional time-of-day window ('HH:MM'), evaluated in the
-  // VIEWER's local time -- created_at is stored UTC, so the client sends
-  // its offset (minutes east of UTC, e.g. Phnom Penh = 420) and the clause
-  // shifts before comparing. A window that crosses midnight (start > end,
-  // e.g. 22:00–02:00) wraps. Callers that don't pass these (Dashboard,
-  // /stats) are byte-for-byte unchanged.
+  // Optional time-of-day window ('HH:MM'), evaluated in the FIXED business
+  // timezone UTC+7 (Cambodia) -- created_at is stored UTC, so the clause shifts
+  // by +7h before comparing (see businessDateWindow.ts). A window that crosses
+  // midnight (start > end, e.g. 22:00–02:00) wraps. Callers that don't pass
+  // these (Dashboard, /stats) are byte-for-byte unchanged.
   startTime?: string | null
   endTime?: string | null
+  // Accepted for backward compatibility but IGNORED: the business is a single
+  // fixed timezone, so a viewer-supplied offset must never re-anchor the data
+  // (user, Sep 1 2026: "based on UTC+7 ... all Cambodia ... not other timezone").
   tzOffsetMinutes?: number | null
   // Optional report filters (Reports view). Absent on every existing caller
   // (Dashboard, /stats, per-contact drills), so those stay byte-for-byte
@@ -122,15 +132,15 @@ function round2(n: number): number {
 function whereActiveSales(alias: string, f: SalesFilters) {
   const params: Record<string, unknown> = { startDate: f.startDate, endDate: f.endDate }
   const clauses = [
-    // Sargable range instead of date(created_at) BETWEEN date(start) AND
-    // date(end): wrapping the column in date() makes the predicate
-    // non-SARGable, so SQLite ignores idx_sales_created_pg and full-scans
-    // every sale on every date-filtered report -- the same cost for a one-day
-    // report as an all-time one. `>= @startDate` admits any time on the start
-    // day; `< date(@endDate,'+1 day')` admits all of the end day and excludes
-    // the next. Identical row set to the old form for space- and T-separated
-    // timestamps and NULLs, proven in test-sales-analytics-daterange-pure.cjs.
-    `${alias}.created_at >= @startDate AND ${alias}.created_at < date(@endDate, '+1 day')`,
+    // Sargable local-day range, bucketed in the fixed business timezone UTC+7
+    // (Cambodia) -- created_at is stored UTC, so the local day [startDate,
+    // endDate] maps to the UTC half-open interval [startDate 00:00 -7h,
+    // (endDate+1) 00:00 -7h). Shifting the BOUNDS (not date()-wrapping the
+    // column) keeps the predicate SARGable, so SQLite still uses
+    // idx_sales_created_pg instead of full-scanning every sale on every
+    // date-filtered report. See businessDateWindow.ts; equivalence + index-use
+    // proven in test-sales-analytics-daterange-pure.cjs.
+    `${alias}.created_at >= ${localDayLowerBound('@startDate')} AND ${alias}.created_at < ${localDayUpperBoundExclusive('@endDate')}`,
   ]
   // Status: an explicit filter wins over the default hide-cancelled guard, so
   // a caller asking for 'cancelled' actually gets cancelled sales. Bound as a
@@ -156,10 +166,10 @@ function whereActiveSales(alias: string, f: SalesFilters) {
   }
   const validTime = (v: unknown): v is string => typeof v === 'string' && /^\d{2}:\d{2}$/.test(v)
   if (validTime(f.startTime) && validTime(f.endTime)) {
-    // Clamp the offset to real-world bounds; the modifier string is built
-    // HERE from the validated integer, never from raw input.
-    const offset = Math.max(-720, Math.min(840, Math.trunc(Number(f.tzOffsetMinutes) || 0)))
-    params.tzModifier = `${offset >= 0 ? '+' : ''}${offset} minutes`
+    // The time-of-day window is interpreted in the FIXED business timezone
+    // (UTC+7), NOT the viewer's offset -- created_at is stored UTC, so shift by
+    // +7h before taking time(). f.tzOffsetMinutes is deliberately ignored.
+    params.tzModifier = BUSINESS_TZ_FORWARD
     params.startTime = f.startTime
     params.endTime = f.endTime
     const localTime = `time(datetime(${alias}.created_at, @tzModifier))`
@@ -258,12 +268,13 @@ export async function getSalesTotals(env: Env, f: SalesFilters): Promise<SalesTo
 // fan-out-avoidance reasoning as getSalesTotals above, just bucketed.
 export async function getSalesPeriodSeries(env: Env, f: SalesFilters, granularity: 'day' | 'week' | 'month'): Promise<SalesPeriodRow[]> {
   const db = getDb(env)
-  const periodExprS = granularity === 'month' ? "strftime('%Y-%m', sales.created_at)"
-    : granularity === 'week' ? "strftime('%Y-W%W', sales.created_at)"
-      : 'date(sales.created_at)'
-  const periodExprJoined = granularity === 'month' ? "strftime('%Y-%m', s.created_at)"
-    : granularity === 'week' ? "strftime('%Y-W%W', s.created_at)"
-      : 'date(s.created_at)'
+  // Buckets are the LOCAL (UTC+7) day/week/month, matching the date window.
+  const periodExprS = granularity === 'month' ? localMonthExpr('sales.created_at')
+    : granularity === 'week' ? localWeekExpr('sales.created_at')
+      : localDateExpr('sales.created_at')
+  const periodExprJoined = granularity === 'month' ? localMonthExpr('s.created_at')
+    : granularity === 'week' ? localWeekExpr('s.created_at')
+      : localDateExpr('s.created_at')
 
   const { sql: whereLevel, params: paramsLevel } = whereActiveSales('sales', f)
   const { sql: whereCost, params: paramsCost } = whereActiveSales('s', f)
@@ -630,7 +641,7 @@ export async function getProductSalesBreakdown(
     }))
   }
   return {
-    by_day: await run("date(s.created_at)"),
-    by_month: await run("strftime('%Y-%m', s.created_at)"),
+    by_day: await run(localDateExpr('s.created_at')),
+    by_month: await run(localMonthExpr('s.created_at')),
   }
 }

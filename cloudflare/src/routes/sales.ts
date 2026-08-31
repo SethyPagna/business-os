@@ -33,6 +33,7 @@ import { buildLikeAliasClause, tokenizeSearchTermGroups, normalizeSearchText } f
 import { computeSaleTotals, resolveChangeExchangeRate, round2 } from '../lib/saleTotals'
 import { uniqueBusinessDateTimeNumber } from '../lib/receiptNumber'
 import { sanitizeClientCreatedAt } from '../lib/clientTimestamp'
+import { localDayLowerBound, localDayUpperBoundExclusive, localDateRangeClause } from '../lib/businessDateWindow'
 import type { Env } from '../index'
 
 const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser } }>()
@@ -1494,8 +1495,8 @@ app.get('/', async (c) => {
   const where: string[] = ['1=1']
   const params: Record<string, unknown> = {}
 
-  if (query.startDate) { where.push('date(s.created_at) >= @startDate'); params.startDate = query.startDate }
-  if (query.endDate) { where.push('date(s.created_at) <= @endDate'); params.endDate = query.endDate }
+  if (query.startDate) { where.push(`s.created_at >= ${localDayLowerBound('@startDate')}`); params.startDate = query.startDate }
+  if (query.endDate) { where.push(`s.created_at < ${localDayUpperBoundExclusive('@endDate')}`); params.endDate = query.endDate }
   if (query.cashier) { where.push('s.cashier_name LIKE @cashier'); params.cashier = `%${query.cashier}%` }
   // Exact-id lookup -- there's still no separate GET /:id route (see this
   // file's own comment above), but a caller that already has a specific
@@ -1646,8 +1647,8 @@ app.get('/stats', async (c) => {
 
   const where: string[] = ['1=1']
   const params: Record<string, unknown> = {}
-  if (query.startDate) { where.push('date(s.created_at) >= @startDate'); params.startDate = query.startDate }
-  if (query.endDate) { where.push('date(s.created_at) <= @endDate'); params.endDate = query.endDate }
+  if (query.startDate) { where.push(`s.created_at >= ${localDayLowerBound('@startDate')}`); params.startDate = query.startDate }
+  if (query.endDate) { where.push(`s.created_at < ${localDayUpperBoundExclusive('@endDate')}`); params.endDate = query.endDate }
   if (query.cashier) { where.push('s.cashier_name LIKE @cashier'); params.cashier = `%${query.cashier}%` }
   if (query.userId) {
     const permissions = (() => { try { return JSON.parse(user?.permissions || '{}') } catch { return {} } })()
@@ -1764,7 +1765,7 @@ app.get('/stats-strip', async (c) => {
   // Status mix counts EVERY status (the kernel's whereActiveSales excludes
   // cancelled/awaiting on purpose for money figures; the mix card exists
   // precisely to show those too).
-  const statusClauses = ['date(created_at) BETWEEN date(@startDate) AND date(@endDate)']
+  const statusClauses = [localDateRangeClause('created_at')]
   if (query.branchId) { statusClauses.push('branch_id = @branchId'); rangeParams.branchId = query.branchId }
   const [totals, byPayment, byStatus, returnsRow] = await Promise.all([
     getSalesTotals(c.env, filters),
@@ -1780,7 +1781,7 @@ app.get('/stats-strip', async (c) => {
     db.prepare(`
       SELECT COUNT(*) AS count, ROUND(COALESCE(SUM(total_refund_usd), 0), 2) AS refund_usd
       FROM returns
-      WHERE date(created_at) BETWEEN date(@startDate) AND date(@endDate)
+      WHERE ${localDateRangeClause('created_at')}
         AND COALESCE(return_scope, 'customer') = 'customer'
         AND COALESCE(status, 'completed') <> 'cancelled'
         ${query.branchId ? 'AND branch_id = @branchId' : ''}
@@ -1924,8 +1925,8 @@ app.get('/export', async (c) => {
 
   const where: string[] = ['1=1']
   const params: Record<string, unknown> = {}
-  if (query.startDate) { where.push('date(s.created_at) >= @startDate'); params.startDate = query.startDate }
-  if (query.endDate) { where.push('date(s.created_at) <= @endDate'); params.endDate = query.endDate }
+  if (query.startDate) { where.push(`s.created_at >= ${localDayLowerBound('@startDate')}`); params.startDate = query.startDate }
+  if (query.endDate) { where.push(`s.created_at < ${localDayUpperBoundExclusive('@endDate')}`); params.endDate = query.endDate }
   if (query.branchId) { where.push('s.branch_id = @branchId'); params.branchId = query.branchId }
 
   const emptySummary = {

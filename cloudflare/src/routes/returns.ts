@@ -1,6 +1,7 @@
 import { Hono } from 'hono'
 import { getDb } from '../lib/db'
 import { selectInChunks } from '../lib/sqlBinding'
+import { localDayLowerBound, localDayUpperBoundExclusive, localDateExpr, localDateRangeClause } from '../lib/businessDateWindow'
 import { requireAuth, type SessionUser } from '../lib/auth'
 import { audit } from '../lib/audit'
 import { getPermissionTier, getActionTier } from '../lib/permissions'
@@ -350,8 +351,8 @@ app.get('/', async (c) => {
 
   const where: string[] = ['1=1']
   const params: Record<string, unknown> = { limit }
-  if (query.startDate) { where.push('date(r.created_at) >= @startDate'); params.startDate = query.startDate }
-  if (query.endDate) { where.push('date(r.created_at) <= @endDate'); params.endDate = query.endDate }
+  if (query.startDate) { where.push(`r.created_at >= ${localDayLowerBound('@startDate')}`); params.startDate = query.startDate }
+  if (query.endDate) { where.push(`r.created_at < ${localDayUpperBoundExclusive('@endDate')}`); params.endDate = query.endDate }
   if (query.saleId) { where.push('r.sale_id = @saleId'); params.saleId = query.saleId }
   if (scope !== 'all') { where.push(`COALESCE(r.return_scope, 'customer') = @scope`); params.scope = scope }
   if (typeValues.length === 1) {
@@ -489,7 +490,7 @@ app.get('/report', async (c) => {
   // Reports hub (customer) and the Returns page's scope-aware stats strip.
   const scope = String(query.scope || 'customer') === 'supplier' ? 'supplier' : 'customer'
   const clauses = [
-    'date(created_at) BETWEEN date(@startDate) AND date(@endDate)',
+    localDateRangeClause('created_at'),
     `COALESCE(return_scope, 'customer') = @scope`,
     `COALESCE(status, 'completed') <> 'cancelled'`,
   ]
@@ -507,7 +508,7 @@ app.get('/report', async (c) => {
     ROUND(COALESCE(SUM(supplier_loss_khr), 0), 0) AS loss_khr`
   const [totals, days, byReason, byType] = await Promise.all([
     db.prepare(`SELECT COUNT(*) AS count, ${moneySums} FROM returns WHERE ${where}`).get<Record<string, number>>(params),
-    db.prepare(`SELECT date(created_at) AS date, COUNT(*) AS count, ${moneySums} FROM returns WHERE ${where} GROUP BY date(created_at) ORDER BY date(created_at) DESC`).all<Record<string, unknown>>(params),
+    db.prepare(`SELECT ${localDateExpr('created_at')} AS date, COUNT(*) AS count, ${moneySums} FROM returns WHERE ${where} GROUP BY ${localDateExpr('created_at')} ORDER BY ${localDateExpr('created_at')} DESC`).all<Record<string, unknown>>(params),
     db.prepare(`SELECT COALESCE(NULLIF(TRIM(reason), ''), '—') AS reason, COUNT(*) AS count, ${moneySums} FROM returns WHERE ${where} GROUP BY COALESCE(NULLIF(TRIM(reason), ''), '—') ORDER BY refund_usd DESC, count DESC`).all<Record<string, unknown>>(params),
     db.prepare(`SELECT COALESCE(NULLIF(TRIM(return_type), ''), 'restock') AS return_type, COUNT(*) AS count, ${moneySums} FROM returns WHERE ${where} GROUP BY COALESCE(NULLIF(TRIM(return_type), ''), 'restock') ORDER BY count DESC`).all<Record<string, unknown>>(params),
   ])
