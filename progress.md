@@ -62,13 +62,19 @@ Two rules learned the hard way, both from real incidents in this file's own hist
 
 ## Status snapshot — Aug 31 2026
 
-- **The gate is a deploy.** Production still runs the Aug-27 build. Everything from
-  Parts 371–535 — migrations 0059–0087 (incl. 0080 supplier-cost backfill, 0081
-  lot-ledger reconcile, 0087 portal accounts), the b9 security/correctness batch,
-  StatsStrip v2, the Part-526 refinement batch, storefront customer accounts and every
-  item below marked "needs deploy" — is committed and waiting on the user running
-  `npm run deploy:full` (from `cloudflare/`). After it ships, A2's live-verification
-  checklist applies.
+- **DEPLOYED Aug 31 2026 (~01:32 UTC), version `a5e5023b`, from commit `242c2b75`
+  (Part 538).** Everything from Parts 371–537 is LIVE — migrations 0083–0087 applied
+  to remote D1 (0059–0082 were already applied; **none pending now**), the b9
+  security/correctness batch, StatsStrip v2, the Part-526 refinement batch, storefront
+  customer accounts, all of it. Every "needs deploy" marker below dated on or before
+  Aug 31 is therefore SHIPPED — read them as "live, pending A2 verification".
+- **The gate is now A2's live verification** (plus connecting Google Drive in
+  Settings → Backup, which is only possible post-deploy — A3). Verified at deploy
+  time, read-only: both `/health` ok, storefront 200 with Leang branding,
+  `/api/products` unauth → 401, portal bootstrap 200, remote migrations list empty.
+  Still owed (user-facing writes): one POS sale confirming `RCP-YYYYMMDD-HHMMSS` +
+  Phnom Penh labels, storefront iPhone install, import round-trip, R2 keeps exactly
+  2 finalized sets, reset-data.
 - **Sessions are coordinated.** Coordinator 7b is live in continuous mode; c8 is
   running a read-mostly verification sweep; r2 restructured this file. Claims and
   hazards live in [Current status](#current-status).
@@ -84,13 +90,19 @@ Two rules learned the hard way, both from real incidents in this file's own hist
 *(Live coordination only — session records that used to live here are in the
 [DONE — archive](#done--archive).)*
 
-**[~ DEPLOY IN FLIGHT — session business-os-v1-r2, Aug 31 (user-authorized:
-"continue, deploy").** Deploying from an ISOLATED git worktree at committed
-HEAD `242c2b75` (the user's chosen multi-session method) — the shared tree,
-node_modules and the 8787 wrangler are untouched; peers do NOT need to pause.
-**Do NOT run `migrate:remote` or `wrangler deploy` concurrently** until this
-block flips to DONE. Applies migrations 0083–0087 to remote D1. All commits
-through `242c2b75` are pushed to GitHub (origin/main).]**
+**[DONE — DEPLOYED, session business-os-v1-r2, Aug 31 ~01:32 UTC (user-authorized:
+"continue, deploy"), Part 538.** Production is now commit `242c2b75`, Worker version
+`a5e5023b-9fcb-417c-be0d-a67acbf265ef`. Method: isolated git worktree at committed
+HEAD (shared tree/node_modules/8787 wrangler untouched; worktree removed after,
+clearing the copied secret files). Sequence, all green: npm ci ×2 → both tscs →
+vite build (19.85s) → `migrate:remote` (0083–0087 each ✅, **none pending after**) →
+secrets:sync (4 pushed, APP_ENCRYPTION_KEY blank-skipped) → `wrangler deploy`
+(185 assets updated, both custom domains + dpdns zone routes + cron + all 4 queue
+bindings) → live checks (both /health ok; storefront 200 "Leang"; /api/products
+unauth 401; portal bootstrap 200). GitHub origin/main is pushed and current.
+The migrate/deploy concurrency freeze is LIFTED. Next: A2's user-facing checks
+(POS sale receipt-id, iPhone install, import round-trip, R2 retention, reset-data)
+and Settings → Backup → connect Google Drive (A3).]**
 
 **[DONE — session business-os-v1-r2, Aug 31: deploy pipeline VERIFIED green +
 run files hardened (`e692a611`, Part 537).** Read-only against Cloudflare, NO
@@ -196,14 +208,21 @@ IDs) or the section linked. Statuses: **[~]** = in progress / partly done,
 
 ### Now / gate
 
-- **Deploy** — `npm run deploy:full` (user action; see [Needs the user](#needs-the-user-not-code)).
-- [ ] **A2** — post-deploy live-verification checklist (reset-data, /api/products, POS
-  sale with lots, storefront install, import round-trip, R2 retention, `RCP-` receipt
-  ids + Phnom Penh labels).
+- ~~**Deploy**~~ — **DONE Aug 31 (Part 538): production is `242c2b75` / Worker version
+  `a5e5023b`; migrations 0083–0087 applied, none pending.** See the deploy record in
+  [Current status](#current-status).
+- [~] **A2** — live-verification checklist. Done read-only at deploy time (/health ×2,
+  storefront 200, /api/products 401-gate, portal bootstrap 200, migrations list
+  empty). REMAINING (user-facing writes): reset-data, a POS sale with lots confirming
+  `RCP-YYYYMMDD-HHMMSS` receipt ids + Phnom Penh labels, storefront iPhone install,
+  import round-trip, R2 keeps exactly 2 finalized sets.
+- [ ] **A3 follow-through** — connect Google Drive in Settings → Backup (now possible
+  post-deploy), then confirm backup files actually appear in Drive.
 
 ### In progress / partly done
 
-- [~] **A4a** — Paid-plan re-basing (cpu_ms + queue batch size) rides the next deploy.
+- [x] **A4a** — Paid-plan re-basing (cpu_ms + queue batch size) — SHIPPED with the
+  Aug-31 deploy.
 - [~] **B1** — stats polish remainder: verify no old tooltip call sites remain, 5.3
   detail-panel responsiveness, 5.4 metric symmetry. *(Re-check against StatsStrip v2,
   Parts 516/526 — likely partly overtaken.)*
@@ -1058,11 +1077,10 @@ Full detail with file:line, failure scenarios, and per-writer coverage matrices:
 
 ## Needs the user, not code
 
-1. **Deploy** — `npm run deploy:full` from `cloudflare/`. Production still runs the
-   Aug-27 build; migrations 0059–0087 and every "needs deploy" item wait on this.
-   *(Updated Aug 31 — the old note here predated the Aug-27 deploy.)*
-2. **After deploy: connect Google Drive** in Settings → Backup (A3 measured the mirror
-   was never connected), then confirm backup files appear in Drive.
+1. ~~**Deploy**~~ — **DONE Aug 31 (Part 538, session r2, user-authorized):** production
+   is `242c2b75` / version `a5e5023b`, migrations through 0087 applied, GitHub pushed.
+2. **Connect Google Drive** in Settings → Backup — NOW ACTIONABLE post-deploy (A3
+   measured the mirror was never connected), then confirm backup files appear in Drive.
 3. **Resend** — verify a real sending domain (@leangbeauty.com) and set
    `RESEND_FROM_EMAIL` in `wrangler.toml`; until then password-reset email silently
    does nothing.

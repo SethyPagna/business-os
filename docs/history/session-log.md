@@ -15184,3 +15184,54 @@ empty DB (0018 duplicate applies cleanly in filename order); both formerly
 the static /health version constant (would touch src/index.ts — flagged
 instead); wrangler 4.116.0 → 4.127.1 update available but not taken (lockfile
 pins; upgrading mid-flight is its own change).
+
+## Part 538 (Aug 31 2026, session business-os-v1-r2) — PRODUCTION DEPLOY: Parts 371–537 shipped, migrations 0083–0087 applied
+
+**Ask:** "continue, deploy and commits are in github."
+
+**What changed:** production, not the repo. Deployed commit `242c2b75` as Worker
+version `a5e5023b-9fcb-417c-be0d-a67acbf265ef` (~01:32 UTC). Also pushed
+origin/main to GitHub first (was 43 commits behind at 747c0905; now current).
+
+**Method (the user's chosen multi-session-safe pattern):** isolated git worktree
+at committed HEAD (`git worktree add --detach C:\...\bos-deploy-537 242c2b75`),
+gitignored `.wrangler-auth.local` + `.dev.vars` copied in, deploy freeze posted
+to progress.md + pushed BEFORE starting (no concurrent migrate:remote/deploy),
+worktree force-removed after (clears the copied secrets). The shared tree,
+node_modules and c8's 8787 wrangler were never touched; no peer paused.
+
+**Sequence, each step verified before the next:**
+- Checkpoint (all green before anything irreversible): npm ci frontend (278
+  pkgs) + cloudflare (43 pkgs), tsc clean both, vite build 19.85s.
+- `migrate:remote`: 0083_product_duplicate_dismissals, 0084_movements_batch_id,
+  0085_import_job_details_pruned, 0086_missing_fk_indexes, 0087_portal_accounts
+  — each ✅; migrations list afterwards: "No migrations to apply".
+- `secrets:sync`: GOOGLE_LOGIN_CLIENT_SECRET, GOOGLE_DRIVE_CLIENT_SECRET,
+  RESEND_API_KEY, CLOUDINARY_API_SECRET pushed OK; APP_ENCRYPTION_KEY blank-skipped.
+- `wrangler deploy`: 185 new/changed assets (85 unchanged), Worker startup 25ms,
+  triggers deployed — leangbeauty.com + admin.leangbeauty.com custom domains,
+  both legacy dpdns zone routes, cron 0 */6, producers+consumers for all four
+  queues (import, import-dlq, media, backup-assets).
+
+**Verified live (read-only):** GET /health on BOTH hosts → status ok;
+storefront / → HTTP 200, 27,176 bytes, Leang branding present; /api/products
+unauthenticated → 401 (auth gate + routing working); /api/portal/bootstrap →
+HTTP 200, 87,763 bytes (D1 reads through the new build); remote migrations
+list → empty.
+
+**What this ships:** everything Parts 371–537 that was marked "needs deploy" —
+the b9 security batch (backup tables/restore refusal, transfer lot allocation,
+undo permission gates, reset gates, returns rollback, import idempotency,
+settings token redaction, open-redirect fix, OTP hardening, offline-PWA cache
+guard, MAX(0) clamp sweep, POS money rounding, FK indexes), 0080/0081/0082 were
+already live, StatsStrip v2 + Part-526 UI batch, storefront customer accounts
+(0087), receipt-ID format + Phnom Penh labels, Paid-plan re-basing (A4a), and
+the rest of the master-plan [x] backlog.
+
+**Not done:** A2's user-facing checks (one real POS sale to confirm
+RCP-YYYYMMDD-HHMMSS + timezone labels, storefront iPhone install, import
+round-trip, R2 exact-two retention, reset-data) — writes to production, left
+for the user or an explicitly-authorized session; connecting Google Drive in
+Settings → Backup (A3 follow-through, now actionable); the static /health
+version constant still reads cloudflare-portal-bootstrap-20260728 (flagged in
+Part 537, unchanged).
