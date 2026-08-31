@@ -72,6 +72,17 @@ type ActionHistoryBarProps = {
   // screens to save space). Off by default so dense toolbars stay
   // icon-only, opt in on rows that have room -- e.g. Backup's section row.
   showLabel?: boolean
+  // Force the trigger to a true 32px (h-8) height. The button is built on
+  // .btn-secondary, whose `min-height: 2.5rem` (40px) otherwise WINS over the
+  // `h-8` set below -- so by default History renders 40px, matching the 40px
+  // Manage/Add toolbar buttons it sits beside in the Products header. In the
+  // StatsStrip's compact rangeActions strip, though, its neighbours (Export/
+  // Manage/Add) are h-8 = 32px, so History looked taller than everything next
+  // to it (user, Aug 31: "the history button height need to be same height as
+  // other buttons"). `dense` adds `min-h-8`, which (being a utility, emitted in
+  // a later layer than the .btn-secondary component rule) overrides that
+  // min-height and pins the button to a real 32px.
+  dense?: boolean
 }
 
 function formatHistoryList(items: HistoryItem[] = []) {
@@ -103,6 +114,7 @@ export default function ActionHistoryBar({
   className = '',
   t,
   showLabel = false,
+  dense = false,
 }: ActionHistoryBarProps) {
   const [open, setOpen] = useState(false)
   const [previewOpen, setPreviewOpen] = useState(false)
@@ -176,8 +188,8 @@ export default function ActionHistoryBar({
               // var(--dm-card) in dark mode, the same raised surface every
               // card/input/other toolbar button uses.
               showLabel
-                ? 'btn-secondary inline-flex h-8 w-full shrink-0 items-center justify-center gap-1.5 px-2.5 text-xs font-semibold'
-                : 'btn-secondary inline-flex h-8 w-full min-w-8 items-center justify-center gap-1.5 px-1.5'
+                ? `btn-secondary inline-flex h-8 ${dense ? 'min-h-8 ' : ''}w-full shrink-0 items-center justify-center gap-1.5 px-2.5 text-xs font-semibold`
+                : `btn-secondary inline-flex h-8 ${dense ? 'min-h-8 ' : ''}w-full min-w-8 items-center justify-center gap-1.5 px-1.5`
             }
             onMouseEnter={() => { clearPreviewTimer(); if (!open) setPreviewOpen(true) }}
             onMouseLeave={() => { previewTimerRef.current = setTimeout(() => setPreviewOpen(false), 150) }}
