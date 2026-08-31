@@ -91,6 +91,11 @@ Two rules learned the hard way, both from real incidents in this file's own hist
 *(Live coordination only — session records that used to live here are in the
 [DONE — archive](#done--archive).)*
 
+**[~ DEPLOY IN FLIGHT — r2, Aug 31 (second of the day): shipping HEAD `0414f46b`
+from an isolated worktree** (r2's Part-540 receipt/locale fixes + c8's `0efd04bc`
+catalog-endpoint removal; NO new migrations — remote stays at 0087). Do NOT run
+`migrate:remote`/`wrangler deploy` until this flips to DONE.]**
+
 **[DONE — session business-os-v1-r2, Aug 31 (Part 540, `c41d4d81` + `dcb2e120`):
 receipt ids lose the `RCP` prefix (user: "Receipt no need RCP") + the
 viewer-locale datetime sweep.** Sales now mint BARE `YYYYMMDD-HHMMSS` (server
