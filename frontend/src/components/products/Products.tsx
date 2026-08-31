@@ -3563,7 +3563,10 @@ function ProductsFullEditor() {
               setExportScopeId(productExportScopes[0]?.id || 'visible')
               setExportFieldsOpen(true)
             } : undefined}
-            onAdd={canAddProduct ? ()=>{setSelected(null);setFormInitialTab('basic');setModal('form')} : undefined}
+            /* Stock Changes section replaces the catalog "Add Product" button
+               with its own "Adjust" menu (user, Aug 31) -> drop onAdd there;
+               HeaderActions hides any undefined-handler control. */
+            onAdd={canAddProduct && activeProductSection !== 'stock_changes' ? ()=>{setSelected(null);setFormInitialTab('basic');setModal('form')} : undefined}
             onMergeDuplicates={canMergeDuplicates ? openMergeDuplicatesReview : undefined}
             onZeroQuantityCleanup={canZeroQuantityCleanup ? openZeroQuantityCleanup : undefined}
             onWireImages={canWireImages ? openWireImages : undefined}
@@ -3612,32 +3615,34 @@ function ProductsFullEditor() {
       {/* The "Created" batch-received-date range sits ABOVE the search row
           (user, Aug 30: "move the start and end date above the search
           function row") as a fit-to-content pill, not a stretched bar. */}
-      <div className="mb-1.5 flex flex-wrap items-center gap-1.5 px-0.5">
-        <DateTimeRangePicker
-          t={t}
-          showTime={false}
-          value={{ startDate: createdDateFrom, endDate: createdDateTo, startTime: '', endTime: '' }}
-          onChange={(range) => { setCreatedDateFrom(range.startDate); setCreatedDateTo(range.endDate) }}
-        />
-        {/* The pager shares this row ("pages and items per page … better
-            designed") instead of sitting centered on a row of its own. */}
-        <div className="ml-auto flex min-w-0 justify-end">
-          <PaginationControls
-            compact
-            rangeAsPageSize
-            editablePageSizeInput={false}
-            page={productPage}
-            pageSize={productSafePageSize}
-            totalItems={productTotal}
-            onPageChange={setProductPage}
-            onPageSizeChange={(nextValue) => { setProductPageSize(nextValue); setProductPage(1) }}
-            pageSizeOptions={PAGE_SIZE_OPTIONS}
-            t={t}
-          />
-        </div>
-      </div>
-
       <div className="sticky top-0 z-30 -mx-1 bg-gray-50/95 pb-2 pt-2 backdrop-blur dark:bg-gray-900/95 sm:mx-0">
+        {/* The date-range row rides INSIDE the sticky wrapper now (user,
+            Aug 31: "the search bar row and the date both can be pinned and
+            stick so when scrolling it shows") -- both rows pin together. */}
+        <div className="mb-1.5 flex flex-wrap items-center gap-1.5 px-0.5">
+          <DateTimeRangePicker
+            t={t}
+            showTime={false}
+            value={{ startDate: createdDateFrom, endDate: createdDateTo, startTime: '', endTime: '' }}
+            onChange={(range) => { setCreatedDateFrom(range.startDate); setCreatedDateTo(range.endDate) }}
+          />
+          {/* The pager shares this row ("pages and items per page … better
+              designed") instead of sitting centered on a row of its own. */}
+          <div className="ml-auto flex min-w-0 justify-end">
+            <PaginationControls
+              compact
+              rangeAsPageSize
+              editablePageSizeInput={false}
+              page={productPage}
+              pageSize={productSafePageSize}
+              totalItems={productTotal}
+              onPageChange={setProductPage}
+              onPageSizeChange={(nextValue) => { setProductPageSize(nextValue); setProductPage(1) }}
+              pageSizeOptions={PAGE_SIZE_OPTIONS}
+              t={t}
+            />
+          </div>
+        </div>
         {/* Y13: a plain page-level search row (the folding "Search &
             Filters" SectionCard wrapper was removed). SearchInput's own
             `min-w-0 flex-1` default handles narrow-screen shrink; every
