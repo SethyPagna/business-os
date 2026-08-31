@@ -20,7 +20,10 @@
 #       so production always has whatever's in your local .dev.vars
 #    7. `wrangler deploy`
 #    8. Poll the real public Workers URL's /health endpoint until it
-#       reports the freshly deployed version (or timeout)
+#       reports status=ok (or timeout). NOTE: /health's version string is a
+#       static constant in src/index.ts, so this confirms the Worker is
+#       serving and healthy -- it cannot by itself prove WHICH version is
+#       live. wrangler deploy's own success is the versioning signal.
 #
 #  Steps 5-7 authenticate automatically via cloudflare/.wrangler-auth.local
 #  (CLOUDFLARE_API_TOKEN / CLOUDFLARE_ACCOUNT_ID) if that file exists --

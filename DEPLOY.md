@@ -11,7 +11,9 @@ There's nothing else to deploy — no Docker image, no separate server process.
 
 ## Prerequisites (one-time)
 
-- Node.js 20+ and npm.
+- Node.js 22+ and npm (`cloudflare/package.json` pins `engines.node >= 22`;
+  the frontend test files are also run directly with `node`, which needs
+  Node's native TypeScript support).
 - A Cloudflare account with Workers, D1, R2, Queues, and KV enabled.
 - `npx wrangler login` (or a Cloudflare API token with Workers/D1/R2/KV/Queues
   edit permissions + zone permission for the two Worker routes) — done once
@@ -25,10 +27,15 @@ There's nothing else to deploy — no Docker image, no separate server process.
   wrangler kv namespace create CACHE
   wrangler r2 bucket create business-os-assets
   wrangler queues create business-os-import
+  wrangler queues create business-os-import-dlq
   wrangler queues create business-os-media
+  wrangler queues create business-os-backup-assets
   ```
 
-  then copy the returned IDs into `cloudflare/wrangler.toml`.
+  then copy the returned IDs into `cloudflare/wrangler.toml`. All four queues
+  must exist **before** `wrangler deploy` — the config binds consumers to every
+  one of them and deploy fails with "queue not found" otherwise. (Verified
+  Aug 31 2026: all four exist on this account, so the current setup deploys.)
 
 ## Fresh install (new machine / new checkout)
 
@@ -69,6 +76,7 @@ npm run deploy:full
 
 `npm run deploy:full` (defined in `cloudflare/package.json`) runs, in order:
 typecheck the Worker → build the frontend → apply remote D1 migrations →
+sync secrets (`cloudflare/.dev.vars` → Cloudflare, allowlisted keys only) →
 `wrangler deploy`. This is the command to run for a normal "I changed some
 code, ship it" redeploy.
 
@@ -102,7 +110,17 @@ its tests, and builds, before deciding to cut a release.
 ## Database migrations
 
 Migrations live in `cloudflare/migrations/`. To add one, create the next
-numbered `NNNN_description.sql` file, then:
+numbered `NNNN_description.sql` file — and with parallel sessions active,
+**check the highest existing number immediately before committing** (numbers
+have collided twice: two sessions both wrote an `0086_*`; the later writer
+renamed to `0087` and had to fix `d1_migrations` bookkeeping by hand). One
+historical duplicate exists on purpose: `0018_fees.sql` and
+`0018_products_fts.sql` share a number, both applied everywhere long ago.
+**Do not rename either** — wrangler tracks migrations by FILENAME, so a rename
+makes every database think the renamed file is a new pending migration and
+re-runs it. The fresh-chain test (`cloudflare/scripts/
+test-migration-chain-fresh-pure.cjs`) proves the full chain, duplicates
+included, applies cleanly from an empty database. Then:
 
 ```sh
 cd cloudflare
@@ -125,6 +143,26 @@ If you ever need to manually inspect or fix migration state:
 ```sh
 npm run d1:shell:remote -- "SELECT * FROM d1_migrations ORDER BY id DESC LIMIT 5"
 ```
+
+## Deploying while other sessions / dev servers are active
+
+This checkout is often shared by several concurrent Claude/dev sessions with
+uncommitted work in the tree. Two hazards, and the chosen answer to both:
+
+- `npm ci` (the pipeline's install step) deletes `node_modules` wholesale and
+  dies with a misleading EPERM if a dev server (vite / `wrangler dev`'s
+  workerd) still holds a native binary open. `full-automation.ps1` stops
+  repo-local dev servers and retries with `npm install`, but peers' servers
+  die with them.
+- `wrangler deploy` ships the **working tree** — uncommitted peer code would
+  go to production unreviewed.
+
+The chosen method when the tree isn't clean: **deploy from committed HEAD via
+an isolated git worktree** — `git worktree add --detach <path> HEAD`, copy the
+gitignored `cloudflare/.wrangler-auth.local` and `cloudflare/.dev.vars` into
+it, run the pipeline there, then `git worktree remove --force <path>` (which
+also clears the copied secret files). Peers' local environments are untouched;
+just make sure nobody else runs `migrate:remote` or `deploy` concurrently.
 
 ## Rolling back
 

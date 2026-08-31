@@ -15,11 +15,13 @@
 #    3. Typecheck the frontend and the Cloudflare Worker (`tsc --noEmit`)
 #    4. Run the pure-logic test suites: the frontend's tests\*.test.ts
 #       files (run individually via `node`, no vitest/build step needed)
-#       and cloudflare\scripts\test-*.cjs. Two frontend test files
-#       (performanceLoadingUx.test.ts, productSearchPagination.test.ts)
-#       have pre-existing failures unrelated to any one change -- see
-#       progress.md's Environment notes -- so those two are reported but
-#       don't fail the run; a failure anywhere else does.
+#       and cloudflare\scripts\test-*.cjs. The $KnownFailing list below
+#       can exempt named test files with pre-existing failures (reported
+#       but not fatal); it is EMPTY as of Aug 31 2026 -- the two files it
+#       used to carry (performanceLoadingUx.test.ts,
+#       productSearchPagination.test.ts) were re-run and PASS on HEAD, so
+#       leaving them exempt would have silently swallowed real
+#       regressions. Any failure now fails the run.
 #    5. Build the frontend (`vite build`) -- proves the bundle actually
 #       compiles; this is the last step full-automation.ps1 also runs
 #       before it starts touching Cloudflare (remote migrations, secrets,
@@ -149,12 +151,12 @@ Invoke-Step "Typecheck Cloudflare Worker" {
 }
 
 # ---- 4. Run pure-logic test suites -------------------------------------------
-# Known pre-existing, unrelated failures -- see progress.md's Environment
-# notes. Reported, but don't fail the run on their own; anything else does.
-$KnownFailing = @(
-  'performanceLoadingUx.test.ts',
-  'productSearchPagination.test.ts'
-)
+# Known pre-existing, unrelated failures: reported, but don't fail the run
+# on their own; anything else does. EMPTY on purpose (verified Aug 31 2026:
+# the two former entries pass on HEAD) -- only add a file here with evidence
+# the failure predates your change, and remove it as soon as it's fixed, or
+# it will mask the next real regression in that file.
+$KnownFailing = @()
 
 Write-Step "Run frontend test suite (tests\*.test.ts)"
 $TestsDir = Join-Path $FrontendDir 'tests'

@@ -56,13 +56,27 @@ if (commandArgs.length === 0) {
 }
 
 const env = { ...process.env, ...loaded }
-const [cmd, ...args] = commandArgs
+let [cmd, ...args] = commandArgs
+
+// Resolve `wrangler` to the project-installed CLI and run it through THIS
+// node, instead of trusting the shell to find it on PATH. Under `npm run`,
+// node_modules/.bin is on PATH so the bare name works -- but nested child
+// processes on Windows can lose that transient entry (a real full-deploy
+// once stopped after the build exactly this way; sync-secrets.cjs carries
+// the same workaround), and running this script directly outside npm never
+// had it. Resolving the .js bin also needs no shell on Windows, so the
+// quoting path below is only kept for non-wrangler commands.
+const WRANGLER_BIN = path.join(__dirname, '..', 'node_modules', 'wrangler', 'bin', 'wrangler.js')
+if ((cmd === 'wrangler' || cmd === 'wrangler.cmd') && fs.existsSync(WRANGLER_BIN)) {
+  args = [WRANGLER_BIN, ...args]
+  cmd = process.execPath
+}
 
 function quoteForWindowsShell(arg) {
   return `"${String(arg).replace(/"/g, '""')}"`
 }
 
-const useShell = process.platform === 'win32'
+const useShell = process.platform === 'win32' && cmd !== process.execPath
 const result = useShell
   ? spawnSync([cmd, ...args].map(quoteForWindowsShell).join(' '), [], { stdio: 'inherit', env, shell: true })
   : spawnSync(cmd, args, { stdio: 'inherit', env, shell: false })

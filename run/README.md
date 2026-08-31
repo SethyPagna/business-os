@@ -4,8 +4,10 @@ Business OS runs entirely on Cloudflare now - there is no local server to
 start or stop, and no Docker. This folder only holds:
 
 - `run\full-automation.bat` - full release pipeline: typecheck, build the
-  frontend, apply remote D1 migrations, `wrangler deploy`, then a live
-  health check against the real Workers URL. See
+  frontend, apply remote D1 migrations, sync secrets (`cloudflare\.dev.vars`
+  -> Cloudflare, allowlisted keys only), `wrangler deploy`, then a live
+  health check against the real Workers URL
+  (`https://admin.leangbeauty.com/health`). See
   `ops\scripts\powershell\full-automation.ps1` and `..\DEPLOY.md`.
 - `run\verify-local.bat` - local-only check, no Cloudflare/wrangler steps:
   remove known stray files, install frontend + Cloudflare Worker
