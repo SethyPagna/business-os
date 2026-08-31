@@ -268,6 +268,18 @@ function conflictResult(error: unknown) {
   return null
 }
 
+// Whether an optional/legacy table exists yet. The AR/AP ledgers ship in
+// late migrations (supplier_invoices 0088, customer_receivables 0094), so a
+// merge must repoint them WHEN present without throwing on a DB where they
+// have not been applied -- the same resilience the ar/ap read endpoints
+// already carry (see /customers/reports/ar-invoices).
+async function hasTable(db: ReturnType<typeof getDb>, name: string): Promise<boolean> {
+  const row = await db
+    .prepare("SELECT 1 AS ok FROM sqlite_master WHERE type='table' AND name = @name LIMIT 1")
+    .get<{ ok: number }>({ name })
+  return Boolean(row)
+}
+
 // Bulk points computation for the admin side (customer list + points
 // summary report). portal.ts's summarizePoints() already does this
 // correctly, but only ever for a single customer at a time (the public
@@ -632,12 +644,13 @@ function registerContactRoutes(config: ContactConfig) {
     // repointed by value, using the merged supplier's own name captured
     // above before its row is deleted.
     if (config.table === 'customers') {
+      const mergedNameLower = String(merged.name || '').trim().toLowerCase()
       await db.batch([
         { sql: `UPDATE sales SET customer_id = @keepId WHERE customer_id = @mergeId`, params: { keepId, mergeId } },
         { sql: `UPDATE returns SET customer_id = @keepId WHERE customer_id = @mergeId`, params: { keepId, mergeId } },
         { sql: `UPDATE customer_share_submissions SET customer_id = @keepId WHERE customer_id = @mergeId`, params: { keepId, mergeId } },
-        // Was missing until this session -- loyalty_point_adjustments has
-        // no FK/CASCADE (confirmed against migrations/0028), so without
+        // Was missing until an earlier session -- loyalty_point_adjustments
+        // has no FK/CASCADE (confirmed against migrations/0028), so without
         // this repoint, merging a customer who had ever been manually
         // awarded points silently orphaned those adjustment rows the
         // moment `mergeId`'s row was deleted below: computeCustomerPointsMap
@@ -646,16 +659,70 @@ function registerContactRoutes(config: ContactConfig) {
         // would vanish from the survivor's balance instead of carrying
         // over, with no error and no record of what was lost.
         { sql: `UPDATE loyalty_point_adjustments SET customer_id = @keepId WHERE customer_id = @mergeId`, params: { keepId, mergeId } },
+        // Storefront account link (portal_accounts.contact_id, migration
+        // 0087). It has no FK/CASCADE, so a merge that deletes `mergeId`
+        // below would leave that customer's storefront account pointing at a
+        // now-deleted contacts row: the membership badge would drop off the
+        // survivor's customer row (the list joins portal_accounts on
+        // contact_id) and staff portal-reset could never find the account.
+        // Repoint it to the keeper.
+        { sql: `UPDATE portal_accounts SET contact_id = @keepId, updated_at = CURRENT_TIMESTAMP WHERE contact_id = @mergeId`, params: { keepId, mergeId } },
       ])
+      // Customer AR ledger (migration 0094): id-attributed invoices follow
+      // the keeper, and the display name is carried over too so the
+      // name-grouped AR report (which buckets by customer_name, not id --
+      // see /customers/reports/ar-invoices) shows the merged-away customer's
+      // receivables under the survivor rather than under an orphaned name.
+      // The importer stores customer_id only when it could match a contact
+      // (import-aug31-legacy-reports.mjs: `r.customer?.id || NULL`), so the
+      // NULL-id rows named exactly like the merged contact are moved by name
+      // as well -- otherwise they would strand under a name with no contact.
+      if (await hasTable(db, 'customer_receivables')) {
+        const arStatements: Array<{ sql: string; params: Record<string, unknown> }> = [
+          { sql: `UPDATE customer_receivables SET customer_id = @keepId, customer_name = @keeperName WHERE customer_id = @mergeId`, params: { keepId, mergeId, keeperName: keeper.name } },
+        ]
+        if (mergedNameLower) {
+          arStatements.push({ sql: `UPDATE customer_receivables SET customer_name = @keeperName WHERE customer_id IS NULL AND lower(trim(customer_name)) = @mergedNameLower`, params: { keeperName: keeper.name, mergedNameLower } })
+        }
+        await db.batch(arStatements)
+      }
     } else if (config.table === 'suppliers') {
       const mergedName = String(merged.name || '')
+      const mergedNameLower = mergedName.trim().toLowerCase()
       const statements: Array<{ sql: string; params: Record<string, unknown> }> = [
         { sql: `UPDATE returns SET supplier_id = @keepId WHERE supplier_id = @mergeId`, params: { keepId, mergeId } },
+        // Purchase lots (product_batches, migration 0062): id-attributed lots
+        // follow the keeper. The supplier batch/cost drilldown reads by
+        // supplier_id (contacts.ts supplier-lots query: `pb.supplier_id = @id
+        // OR (supplier_id IS NULL AND supplier_name = @name)`), so an
+        // un-repointed lot would drop off the survivor's supplier detail.
+        // The name is carried too so the id: and name: aggregation keys stay
+        // consistent (products.ts supplier-cost grouping).
+        { sql: `UPDATE product_batches SET supplier_id = @keepId, supplier_name = @keeperName WHERE supplier_id = @mergeId`, params: { keepId, mergeId, keeperName: keeper.name } },
       ]
       if (mergedName) {
         statements.push({ sql: `UPDATE products SET supplier = @keeperName WHERE supplier = @mergedName`, params: { keeperName: keeper.name, mergedName } })
+        // Name-only lots (supplier typed free-text, supplier_id NULL) move by
+        // name exactly the way products.supplier does above and the way
+        // renameCascade.ts already carries a supplier rename -- otherwise a
+        // merge would consolidate the id-linked lots but strand the free-text
+        // ones under the merged-away name.
+        statements.push({ sql: `UPDATE product_batches SET supplier_name = @keeperName WHERE supplier_id IS NULL AND lower(trim(supplier_name)) = @mergedNameLower`, params: { keeperName: keeper.name, mergedNameLower } })
       }
       await db.batch(statements)
+      // Supplier AP ledger (migration 0088): same shape as the customer AR
+      // ledger above -- id-attributed invoices follow the keeper (name
+      // carried), and the NULL-id rows the import could not attribute move by
+      // name, so the name-grouped AP report (/suppliers .../ap-invoices)
+      // consolidates onto the survivor.
+      if (mergedName && await hasTable(db, 'supplier_invoices')) {
+        await db.batch([
+          { sql: `UPDATE supplier_invoices SET supplier_id = @keepId, supplier_name = @keeperName WHERE supplier_id = @mergeId`, params: { keepId, mergeId, keeperName: keeper.name } },
+          { sql: `UPDATE supplier_invoices SET supplier_name = @keeperName WHERE supplier_id IS NULL AND lower(trim(supplier_name)) = @mergedNameLower`, params: { keeperName: keeper.name, mergedNameLower } },
+        ])
+      } else if (await hasTable(db, 'supplier_invoices')) {
+        await db.prepare(`UPDATE supplier_invoices SET supplier_id = @keepId WHERE supplier_id = @mergeId`).run({ keepId, mergeId })
+      }
     } else if (config.table === 'delivery_contacts') {
       await db.batch([
         { sql: `UPDATE sales SET delivery_contact_id = @keepId WHERE delivery_contact_id = @mergeId`, params: { keepId, mergeId } },
