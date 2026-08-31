@@ -543,14 +543,6 @@ export const replaceProductLookupValues = async (payload = {}) => {
   const { replaceProductLookupValues: replaceProductLookupValuesRequest } = await loadProductReadTransport()
   return replaceProductLookupValuesRequest(payload)
 }
-export async function getCatalogMeta() {
-  const module = await loadPortalTransport()
-  return module.getCatalogMeta()
-}
-export async function getCatalogProducts() {
-  const module = await loadPortalTransport()
-  return module.getCatalogProducts()
-}
 export async function getPortalConfig() {
   const module = await loadPortalTransport()
   return module.getPortalConfig()

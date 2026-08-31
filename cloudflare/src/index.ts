@@ -6,7 +6,6 @@ import salesRoute from './routes/sales'
 import authRoute from './routes/auth'
 import filesRoute from './routes/files'
 import branchesRoute from './routes/branches'
-import catalogRoute from './routes/catalog'
 import promotionsRoute from './routes/promotions'
 import backupsRoute from './routes/backups'
 import lookupsRoute from './routes/lookups'
@@ -240,7 +239,6 @@ app.route('/api/auth', authRoute)
 app.route('/api/auth/devices', devicesRoute)
 app.route('/api/files', filesRoute)
 app.route('/api/branches', branchesRoute)
-app.route('/api/catalog', catalogRoute)
 app.route('/api/promotions', promotionsRoute)
 app.route('/api/backups', backupsRoute)
 app.route('/api', lookupsRoute)

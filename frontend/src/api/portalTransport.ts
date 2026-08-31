@@ -28,14 +28,6 @@ async function fetchPortalJson(path: string, errorLabel: string): Promise<unknow
   return res.json()
 }
 
-export function getCatalogMeta(): Promise<unknown> {
-  return fetchPortalJson('/api/catalog/meta', 'Catalog meta')
-}
-
-export function getCatalogProducts(): Promise<unknown> {
-  return fetchPortalJson('/api/catalog/products', 'Catalog products')
-}
-
 export function getPortalConfig(): Promise<unknown> {
   return fetchPortalJson('/api/portal/config', 'Portal config')
 }
