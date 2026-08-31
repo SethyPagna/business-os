@@ -329,7 +329,9 @@ export default function ProductDetailReport({ productId, t, fmtUSD }: {
             className="flex max-h-[85vh] w-full flex-col overflow-hidden rounded-t-2xl bg-white shadow-2xl sm:max-h-[80vh] sm:max-w-lg sm:rounded-2xl dark:bg-gray-800 pb-[env(safe-area-inset-bottom)] sm:pb-0"
             onClick={(event) => event.stopPropagation()}
           >
-            <div className="flex items-center justify-between border-b border-gray-200 p-4 dark:border-gray-700">
+            {/* Compact title bar (user ask): a single line, tighter vertical
+                padding than the old p-4 so the header stops eating the pane. */}
+            <div className="flex items-center justify-between gap-2 border-b border-gray-200 px-3 py-2 dark:border-gray-700">
               <p className="truncate text-sm font-semibold text-gray-900 dark:text-white">
                 {active.title}
                 {active.count > 0 ? <span className="ml-1.5 text-xs font-normal text-gray-400">({active.count})</span> : null}
@@ -338,21 +340,14 @@ export default function ProductDetailReport({ productId, t, fmtUSD }: {
                 type="button"
                 onClick={() => setOpenSection(null)}
                 aria-label={tr('close', 'Close')}
-                className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full text-gray-400 hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-gray-700 dark:hover:text-gray-200"
+                className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full text-gray-400 hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-gray-700 dark:hover:text-gray-200"
               >
                 <X className="h-4 w-4" />
               </button>
             </div>
+            {/* The header X is the single close affordance -- the old
+                full-width footer "Close" button was a duplicate (user ask). */}
             <div className="min-h-0 flex-1 overflow-auto p-3">{active.body}</div>
-            <div className="border-t border-gray-200 p-3 dark:border-gray-700">
-              <button
-                type="button"
-                onClick={() => setOpenSection(null)}
-                className="w-full rounded-full border border-gray-200 px-4 py-2 text-sm font-medium text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-700"
-              >
-                {tr('close', 'Close')}
-              </button>
-            </div>
           </div>
         </div>
       ) : null}

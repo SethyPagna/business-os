@@ -415,11 +415,9 @@ export default function ManageBatchesModal({
           })}
         </div>
 
-        <div className="flex items-center justify-end gap-2 border-t border-gray-200 p-4 dark:border-gray-700">
-          <button type="button" className="btn-secondary text-sm" onClick={closeIfIdle} disabled={!!savingId}>
-            {t('close') || 'Close'}
-          </button>
-        </div>
+        {/* The header X is the single close affordance -- the old footer
+            "Close" button duplicated it (user ask); edits here auto-save per
+            row, so there was no other footer action to keep. */}
       </div>
     </div>,
     document.body,

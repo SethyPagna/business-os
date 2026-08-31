@@ -3299,9 +3299,14 @@ function ProductsFullEditor() {
               (rather than rendering it empty) lets the parent's gap-3
               close the space up instead of leaving a gap-sized empty box. */}
           {indented ? null : (
-            <div className="relative flex-shrink-0">
+            // The thumbnail fills the card's VERTICAL space at a fixed NARROW
+            // width (user, Aug 31: "take advantage of space = up/down, not the
+            // empty right side" -- a wide square ate the room barcode/brand/
+            // price need). self-stretch grows it to the card's height; w-16
+            // keeps it narrow so the text column keeps its width.
+            <div className="relative flex-shrink-0 self-stretch">
               {thumbnailState.hasImage
-                ? <ProductImg src={thumbnailState.thumbnail} alt={productName} className="h-20 w-20 rounded-xl bg-slate-50 object-contain p-0.5 cursor-zoom-in dark:bg-slate-800" onClick={(e) => { e.stopPropagation(); openLightbox(thumbnailState.gallery, 0, productName) }}
+                ? <ProductImg src={thumbnailState.thumbnail} alt={productName} className="h-full min-h-[5rem] w-16 rounded-xl bg-slate-50 object-contain p-0.5 cursor-zoom-in dark:bg-slate-800" onClick={(e) => { e.stopPropagation(); openLightbox(thumbnailState.gallery, 0, productName) }}
                 // Stopping only the CLICK left the row still opening its
                 // detail flyout behind the lightbox: the row's long-press
                 // handlers bind mousedown/touchstart (utils/longPress.ts),
@@ -3310,7 +3315,7 @@ function ProductsFullEditor() {
                 // AND the detail at once. Stop the gesture at its start.
                 onMouseDown={(e) => e.stopPropagation()}
                 onTouchStart={(e) => e.stopPropagation()} />
-                : <ProductImagePlaceholder className="h-20 w-20 rounded-xl" />}
+                : <ProductImagePlaceholder className="h-full min-h-[5rem] w-16 rounded-xl" />}
               <ProductDiscountBadge product={p} promotion={promotion} fmtUSD={fmtUSD} label={tr('discounts', 'Discounts')} overlay />
             </div>
           )}
@@ -3462,8 +3467,8 @@ function ProductsFullEditor() {
   const renderGroupThumbnail = useCallback((group: { rows?: ProductRecord[]; leadProduct?: ProductRecord }) => {
     const state = buildGroupThumbnailState(group.rows, group.leadProduct)
     return state.hasImage
-      ? <ProductImg src={state.thumbnail} alt={String(group.leadProduct?.name || group.rows?.[0]?.name || '')} className="h-20 w-20 rounded-xl bg-slate-50 object-contain p-0.5 cursor-zoom-in sm:h-12 sm:w-12 sm:rounded-lg dark:bg-slate-800" onClick={(event) => { event.stopPropagation(); openLightbox(state.gallery, 0, String(group.leadProduct?.name || group.rows?.[0]?.name || '')) }} />
-      : <ProductImagePlaceholder className="h-20 w-20 rounded-xl sm:h-12 sm:w-12 sm:rounded-lg" compact />
+      ? <ProductImg src={state.thumbnail} alt={String(group.leadProduct?.name || group.rows?.[0]?.name || '')} className="h-20 w-16 rounded-xl bg-slate-50 object-contain p-0.5 cursor-zoom-in sm:h-12 sm:w-12 sm:rounded-lg dark:bg-slate-800" onClick={(event) => { event.stopPropagation(); openLightbox(state.gallery, 0, String(group.leadProduct?.name || group.rows?.[0]?.name || '')) }} />
+      : <ProductImagePlaceholder className="h-20 w-16 rounded-xl sm:h-12 sm:w-12 sm:rounded-lg" compact />
   }, [openLightbox])
 
   // Group-title three-dot menu: "Add child row" (opens the variant modal,
