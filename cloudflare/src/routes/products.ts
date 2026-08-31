@@ -1025,6 +1025,21 @@ app.get('/filters', async (c) => {
   return c.json(await loadProductFilters(c.env, c.req.query()))
 })
 
+// D4 (Part 578, item 4): a lot's supplier IDENTITY, resolving a name-only lot
+// (supplier_id NULL) to the suppliers row its recorded name matches -- the same
+// match-only rule D5a applied at receive time, and stockLedgerQuery.ts:112 uses
+// when filtering by a supplier. Without this resolution one real supplier splits
+// on the detail report into an 'id:5' group (id-attributed lots) and a
+// 'name:acme' group (name-only lots that never got linked), double-counting the
+// supplier. Resolving name -> id at read time collapses both into one 'id:5'
+// group. ORDER BY id keeps the pick deterministic if two rows ever share a name;
+// a name with no supplier match falls through to the legacy 'name:' key so an
+// unlinked supplier still shows as its own row (not silently merged into another).
+const RESOLVED_SUPPLIER_ID_SQL =
+  `COALESCE(pb.supplier_id, (SELECT s.id FROM suppliers s WHERE lower(trim(s.name)) = lower(trim(pb.supplier_name)) ORDER BY s.id LIMIT 1))`
+const SUPPLIER_KEY_SQL =
+  `COALESCE('id:' || (${RESOLVED_SUPPLIER_ID_SQL}), 'name:' || lower(trim(pb.supplier_name)))`
+
 // D3 (Part 422): the product detail page's report read -- per-supplier
 // totals from batch attribution plus the sales breakdown (kernel). One
 // round trip for the detail modal's Suppliers and Sales sections; the
@@ -1053,8 +1068,8 @@ app.get('/:id/detail-report', async (c) => {
   // fabricated zero total presented as complete.
   const suppliers = await db.prepare(`
     SELECT
-      COALESCE('id:' || pb.supplier_id, 'name:' || lower(trim(pb.supplier_name))) AS supplier_key,
-      MAX(pb.supplier_id) AS supplier_id,
+      ${SUPPLIER_KEY_SQL} AS supplier_key,
+      MAX(${RESOLVED_SUPPLIER_ID_SQL}) AS supplier_id,
       COALESCE(MAX(CASE WHEN pb.supplier_id IS NOT NULL THEN pb.supplier_name END), MAX(pb.supplier_name)) AS supplier_name,
       COUNT(*) AS lot_count,
       COALESCE(SUM(bbs.qty), 0) AS current_qty,
@@ -1145,9 +1160,10 @@ app.get('/:id/sales-detail', async (c) => {
 })
 
 // The batches/lots ONE supplier delivered for this product. supplierKey is the
-// same COALESCE('id:'||supplier_id, 'name:'||lower(trim(supplier_name))) key the
-// /detail-report supplier rows are grouped by, so this returns exactly that
-// group's lots.
+// same resolved key (SUPPLIER_KEY_SQL) the /detail-report supplier rows are
+// grouped by -- a name-only lot resolves to its matching supplier's id -- so this
+// returns exactly that group's lots, including the name-only lots that D4 folded
+// into an id-attributed supplier row.
 app.get('/:id/supplier-purchases', async (c) => {
   const user = c.get('user')
   if (!canReadProductDetail(user)) return c.json({ error: 'You do not have permission to perform this action' }, 403)
@@ -1165,7 +1181,7 @@ app.get('/:id/supplier-purchases', async (c) => {
     ) bbs ON bbs.batch_id = pb.id
     WHERE pb.variant_product_id = @productId
       AND pb.is_active = 1
-      AND COALESCE('id:' || pb.supplier_id, 'name:' || lower(trim(pb.supplier_name))) = @supplierKey
+      AND ${SUPPLIER_KEY_SQL} = @supplierKey
     ORDER BY pb.received_at DESC, pb.id DESC
     LIMIT 100
   `).all<Record<string, unknown>>({ productId, supplierKey })
