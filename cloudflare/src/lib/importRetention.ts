@@ -241,6 +241,19 @@ export async function maybeRunScheduledImportRetention(env: Env): Promise<Import
       const r2 = await deleteUnlinkedJobFiles(env, job.id)
       r2Deleted += r2.deleted
       r2Errors.push(...r2.errors)
+      // Delete the two bulk staging tables (separate import-staging DB) FIRST,
+      // then stamp details_pruned_at on the main DB. Order matters across the
+      // two databases: a db.batch is atomic only within ONE D1, so if the
+      // staging call failed AFTER details_pruned_at were stamped, those rows
+      // would be marked pruned yet still present -- an invisible orphan the
+      // detail tier (details_pruned_at IS NULL) can never re-select. Doing
+      // staging first means a mid-failure (a thrown call, or the isolate killed
+      // between the two) leaves details_pruned_at unset, so the job is simply
+      // re-selected next tick and retried (a staging re-delete is a no-op).
+      // This is the ONLY delete of those tables (they were removed from the
+      // detail builder), so it is not redundant even in single-DB envs
+      // (db.staging === db).
+      await db.staging.batch(importJobStagingDeleteStatements(job.id))
       await db.batch([
         ...importJobDetailDeleteStatements(job.id),
         // chunk_state_json/materialize_state_json are continuation state a
@@ -249,11 +262,6 @@ export async function maybeRunScheduledImportRetention(env: Env): Promise<Import
         // from the job's own finish time, not from this sweep's visit.
         { sql: `UPDATE import_jobs SET details_pruned_at = CURRENT_TIMESTAMP, chunk_state_json = NULL, materialize_state_json = NULL WHERE id = @id`, params: { id: job.id } },
       ])
-      // The two bulk staging tables live on the separate import-staging DB and
-      // cannot ride the batch above -- delete them there. This is the ONLY
-      // delete of those tables (they were removed from the detail builder), so
-      // it is not redundant even in single-DB environments (db.staging === db).
-      await db.staging.batch(importJobStagingDeleteStatements(job.id))
       detailPruned += 1
     }
 
@@ -274,10 +282,12 @@ export async function maybeRunScheduledImportRetention(env: Env): Promise<Import
       const r2 = await deleteUnlinkedJobFiles(env, job.id)
       r2Deleted += r2.deleted
       r2Errors.push(...r2.errors)
-      await db.batch(importJobFullDeleteStatements(job.id))
-      // Bulk staging tables on the separate import-staging DB (see the detail
-      // tier above for why this is its own batch).
+      // Staging children on the separate import-staging DB FIRST, then the
+      // parent import_jobs row -- so a cross-DB mid-failure leaves a still-
+      // reachable job that retention re-selects and retries, never an orphaned
+      // staging set with no parent (see the detail tier for the full rationale).
       await db.staging.batch(importJobStagingDeleteStatements(job.id))
+      await db.batch(importJobFullDeleteStatements(job.id))
       summaryDeleted += 1
     }
 
