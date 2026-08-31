@@ -88,6 +88,33 @@ Two rules learned the hard way, both from real incidents in this file's own hist
 
 ## Current status
 
+**[DONE + VERIFIED LIVE — UI-density session, Aug 31 (Part 556; commit `521efcd9`
+says "554"): report money now honors the `display_currency` setting (USD / KHR /
+BOTH), display-only.** User asked to make report currency a settings option but
+STRESSED it must not break/change data and must be lossless on revert ("just one
+source of truth but shown differently based on the settings ... this is different
+from the exchange rates for sale and change"). The `display_currency` setting
+ALREADY existed (Settings page, drives formatPrice) — the reports just didn't use
+it. New `utils/reportMoney.ts` formatter, threaded as `fmtMoney(usd, khr?)` through
+ReportsHub into all three report sections + the Fees stats strip. Invariant: the
+raw stored amounts (fees amount_usd+amount_khr, returns refund_usd+refund_khr,
+sales revenue_usd) are the ONE source of truth; the formatter NEVER mutates or
+persists and NEVER chains a converted value — every render recomputes from the raw
+pair, so USD↔KHR↔BOTH↔USD is byte-identical on return. BOTH shows each raw amount
+as-is ("$X · Y៛", no conversion); USD/KHR fold the other currency in at the MAIN
+rate for DISPLAY only (separate from exchange_rate/change_exchange_rate). **Verified
+LIVE (shared 5175/8787, real settings toggles):** the same fees row (usd=0,
+khr=1,839,300) rendered "1,839,300.00៛" (BOTH), "$448.61" (USD, =1839300/4100),
+"1,839,300.00៛" (KHR); Sales $77.97 → 319,677.00៛ under KHR; and the DB fees
+stayed BYTE-IDENTICAL (usd=0, khr=1,839,300) across every switch — data never
+touched. New pure test `reportMoney.test.ts` pins the three modes + the
+lossless-round-trip + no-mutation invariants; fe tsc clean; statsStrip +
+report-currency-pure green. Files: frontend utils/reportMoney.ts,
+sales/{ReportsHub,SalesDailyReport,ReturnsReportSection,FeesReportSection}.tsx,
+fees/FeesPage.tsx, tests/reportMoney.test.ts. (statsStrip.test.ts's Part-553 pin
+was updated in the WORKING TREE only — not staged — since a peer holds that file
+mid-flight with StatsStrip.tsx.)]**
+
 **[DONE + VERIFIED LIVE — UI-density session, Aug 31 (Part 554; commits say
 "553" — minted before a peer took it, Part races expected): the Reports hub
 was dropping KHR money and had no export.** Root cause found in data: fees are
@@ -677,11 +704,16 @@ screens). Your log entry = grep-max+1 at write time (553+ now) with the mismatch
 noted — and please STOP pre-baking Part numbers into commit messages (this is the
 second collision: a0b2edbf said 549, also taken).
 
-**→ I18N/PERMISSIONS SESSION(S): backfill session-log entries for Parts 545 and
-546.** Your records went to this board only — `git log -S` proves no "Part
-545"/"Part 546" header was ever added to docs/history/session-log.md, though
-your commits (13fe5fa6, 62cf0072, addendum 5493ca42) reserve the numbers. The
-log keeps the numbers; write the entries so the record isn't board-only.
+**📌 SESSION-LOG PROTOCOL SLIPPING — four Part numbers have NO log entry
+(coordinator 7b, ~13:45, measured with `git log -S`): 545, 546, 553, 554.** Their
+records live on this board only — 8b3c67c6 even says "docs(log): Part 554" while
+touching ONLY progress.md. The project rule separates the two files: the BOARD is
+the queue, `docs/history/session-log.md` is the narrative log AND the numbering
+authority — board-only records are why numbers keep double-minting. Owners of
+545 (i18n), 546 (permissions), 553 (stock-ledger lane — four commits reference
+it), 554 (reports lane): append a real `## Part N` entry to the session log, even
+a short one pointing at your board block. Until backfilled, grep-max+1 UNDERCOUNTS
+— check this list too before minting.
 
 **→ SALES-HUB SESSION (coordinator 7b, ~11:30):** your commit `a0b2edbf` says
 "Part 549" but 549 is TAKEN (7a's verification sweep, logged). When you write
