@@ -1512,11 +1512,19 @@ function PageSlot({ accessDenied, activePageId, canAccessPage, pageId }: PageSlo
 function PublicCatalogFallback() {
   return (
     <div
-      className="min-h-screen bg-white dark:bg-slate-950"
+      className="flex min-h-screen items-center justify-center bg-white dark:bg-slate-950"
       role="status"
       aria-live="polite"
       aria-label="Loading catalog"
-    />
+    >
+      {/* Just the shared unbranded spinner (the .business-os-initial-spinner
+          ring lives in index.html's <head> style block for the page's whole
+          lifetime) -- deliberately WITHOUT the "Business OS / Loading this
+          workspace view..." title+copy that PageLoader renders, so a customer
+          sees a quiet loading ring on the storefront background, never admin
+          branding. */}
+      <div className="business-os-initial-spinner" aria-hidden="true" />
+    </div>
   )
 }
 
