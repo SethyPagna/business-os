@@ -1243,7 +1243,7 @@ export default function POS() {
       } catch (error) {
         if (!isTrackedRequestCurrent(catalogRequestRef, requestId)) return null
         console.error('[POS] catalog load failed:', getErrorMessage(error))
-        setCatalogLoadError(getErrorMessage(error, posCopy('Could not load products', 'Could not load products')))
+        setCatalogLoadError(getErrorMessage(error, posCopy('Could not load products', 'មិនអាចផ្ទុកទំនិញបានទេ')))
         return null
       } finally {
         if (isTrackedRequestCurrent(catalogRequestRef, requestId)) {
@@ -2272,18 +2272,20 @@ export default function POS() {
       } as CartLineRecord]
     }
     patchActive({ cart: newCart })
-    sessionStorage.removeItem('pos_search')
-    setSearch('')
-    // Refocus the search box after adding an item only on desktop -- this
-    // exists for the barcode-scanner workflow (scan -> item added ->
-    // search cleared -> ready for the next scan without touching the
-    // keyboard). On mobile there's no physical scanner/keyboard driving
-    // this: refocusing a text input there pops the on-screen keyboard on
-    // every single product tap, which is what the "keyboard shows up
-    // every time I tap a product" report was. Gated on the same
-    // `isDesktopViewport` media-query flag already used elsewhere in this
-    // file for other desktop-only behavior.
-    if (isDesktopViewport) searchRef.current?.focus()
+    // Clear + refocus the search only on desktop -- both exist for the
+    // barcode-scanner workflow (scan -> item added -> search cleared ->
+    // ready for the next scan without touching the keyboard). On mobile
+    // there's no scanner: wiping the search on every product tap threw
+    // away the result list a cashier was still adding from (tap one of
+    // three matching serums -> list gone -> retype), and refocusing pops
+    // the on-screen keyboard on every tap (the "keyboard shows up every
+    // time I tap a product" report). Gated on the same `isDesktopViewport`
+    // media-query flag already used elsewhere in this file.
+    if (isDesktopViewport) {
+      sessionStorage.removeItem('pos_search')
+      setSearch('')
+      searchRef.current?.focus()
+    }
   }
 
   const updateQty = (cartLineId: string | number, qty: number) => {
@@ -2826,7 +2828,7 @@ export default function POS() {
                   onClick={() => { setTrackedBatchLoadFailed(false); setBatchTrackingReloadKey((key) => key + 1) }}
                   className="rounded-lg bg-amber-600 px-3 py-1 text-xs font-medium text-white hover:bg-amber-700"
                 >
-                  {posCopy('Try again', 'Try again')}
+                  {posCopy('Try again', 'ព្យាយាមម្តងទៀត')}
                 </button>
               </div>
             )}
@@ -2842,12 +2844,12 @@ export default function POS() {
             {initialFilter !== 'all' && (
               <div className="mb-3 flex items-center gap-2">
                 <span className="badge-blue inline-flex items-center gap-1.5 text-xs">
-                  {(posCopy('Letter', 'Letter'))}: {initialFilter}
+                  {(posCopy('Letter', 'អក្សរ'))}: {initialFilter}
                   <button
                     type="button"
                     className="ml-0.5 rounded-full px-1 font-bold hover:bg-blue-700/20"
                     onClick={() => setPersistedInitial('all')}
-                    aria-label={posCopy('Clear letter filter', 'Clear letter filter')}
+                    aria-label={posCopy('Clear letter filter', 'សម្អាតត្រងអក្សរ')}
                   >
                     ×
                   </button>
@@ -2881,8 +2883,8 @@ export default function POS() {
                 const groupProduct = hasVariantChoices(p)
                 const groupMeta: ProductGroupMeta | null = p.__groupMeta || null
                 const choiceLabel = groupMeta?.groupKind === 'variant'
-                  ? posCopy('variants', 'variants')
-                  : posCopy('options', 'options')
+                  ? posCopy('variants', 'ជម្រើសផ្សេងៗ')
+                  : posCopy('options', 'ជម្រើស')
                 const groupName = t('groups') || 'Groups'
                 const stock   = getDisplayStock(p)
                 const variantInStock = variants.some((variant) => getDisplayStock(variant) > asNumber(variant.out_of_stock_threshold))
@@ -2907,10 +2909,10 @@ export default function POS() {
                       type="button"
                       className="relative w-full aspect-square rounded-lg bg-gray-100 dark:bg-gray-700 flex items-center justify-center mb-2 overflow-hidden"
                       onClick={(event) => { event.stopPropagation(); openImageLightbox(p, 0) }}
-                      aria-label={posCopy('Preview product images', 'Preview product images')}
+                      aria-label={posCopy('Preview product images', 'មើលរូបភាពទំនិញ')}
                     >
                       {getPrimaryProductImage(p) ? <ProductImage src={getPrimaryProductImage(p)} alt={p.__displayName || p.name} className="w-full h-full object-cover" /> : <ImageOff className="h-5 w-5 text-gray-400" />}
-                      <ProductDiscountBadge product={p} exchangeRate={exchangeRate} fmtUSD={fmtUSD} label={posCopy('Discounts', 'Discounts')} promotionRules={promotionRules} />
+                      <ProductDiscountBadge product={p} exchangeRate={exchangeRate} fmtUSD={fmtUSD} label={posCopy('Discounts', 'ការបញ្ចុះតម្លៃ')} promotionRules={promotionRules} />
                     </button>
                     <div className="flex items-start justify-between gap-2">
                       <p {...getKhmerTextProps(p.__displayName || p.name, 'text-xs font-medium text-gray-900 dark:text-white leading-tight mb-1 line-clamp-2')}>
@@ -2944,8 +2946,8 @@ export default function POS() {
                     {promoBadge.active ? (
                       <p className="text-[11px] font-semibold" style={{ color: promoBadge.badge_color || '#e11d48' }}>
                         {promoBadge.kind === 'quantity_hint'
-                          ? ((promoBadge.show_title && promoBadge.title) || `${posCopy('Buy', 'Buy')} ${promoBadge.min_quantity}+`)
-                          : `${(promoBadge.show_title && promoBadge.title) || p.discount_label || posCopy('Discounts', 'Discounts')} ${fmtUSD(evaluatePromotionPricing(p, 1, promotionRules, exchangeRate).unit_price_usd)}`}
+                          ? ((promoBadge.show_title && promoBadge.title) || `${posCopy('Buy', 'ទិញ')} ${promoBadge.min_quantity}+`)
+                          : `${(promoBadge.show_title && promoBadge.title) || p.discount_label || posCopy('Discounts', 'ការបញ្ចុះតម្លៃ')} ${fmtUSD(evaluatePromotionPricing(p, 1, promotionRules, exchangeRate).unit_price_usd)}`}
                       </p>
                     ) : null}
                     {/* Colored qty+unit instead of a separate "Out of Stock" label --
@@ -2960,7 +2962,7 @@ export default function POS() {
                         vertical space. */}
                     <p {...getKhmerTextProps(groupProduct ? choiceLabel : p.unit, `text-xs mt-0.5 font-medium ${groupProduct ? 'text-gray-400 font-normal' : !inStock ? 'text-red-500' : stock <= (asNumber(p.low_stock_threshold) || 10) ? 'text-yellow-500' : 'text-emerald-500'}`)}>
                       {groupProduct
-                        ? `${variants.length} ${choiceLabel}${groupMeta?.stockTotal ? ` · ${groupMeta.stockTotal} ${posCopy('total in stock', 'total in stock')}` : ''}`
+                        ? `${variants.length} ${choiceLabel}${groupMeta?.stockTotal ? ` · ${groupMeta.stockTotal} ${posCopy('total in stock', 'ស្តុកសរុប')}` : ''}`
                         : `${stock} ${p.unit}`}
                     </p>
                     {expiryInfo && expiryInfo.status !== 'ok' ? (
@@ -2983,18 +2985,18 @@ export default function POS() {
                         onClick={() => void loadCatalogData('POS catalog retry', { forceMetadata: true })}
                         className="px-4 py-1.5 rounded-lg bg-blue-600 text-white text-sm font-medium hover:bg-blue-700"
                       >
-                        {posCopy('Try again', 'Try again')}
+                        {posCopy('Try again', 'ព្យាយាមម្តងទៀត')}
                       </button>
                     </div>
                   ) : hasActivePosFilters ? (
                     <div className="flex flex-col items-center gap-2">
-                      <p>{posCopy('No products match your filters', 'No products match your filters')}</p>
+                      <p>{posCopy('No products match your filters', 'គ្មានទំនិញត្រូវនឹងការត្រងទេ')}</p>
                       <button
                         type="button"
                         onClick={clearAllPosFilters}
                         className="px-4 py-1.5 rounded-lg bg-blue-600 text-white text-sm font-medium hover:bg-blue-700"
                       >
-                        {posCopy('Clear filters', 'Clear filters')}
+                        {posCopy('Clear filters', 'សម្អាតត្រង')}
                       </button>
                     </div>
                   ) : (
@@ -3161,7 +3163,7 @@ export default function POS() {
                   {active.customer.name
                     ? <span className="text-blue-600 truncate max-w-[120px]">{active.customer.name}</span>
                     : <span className="text-gray-400">({t('optional')||'optional'})</span>}
-                  <span className="ml-auto text-[10px] text-gray-400">{showCustomer ? 'Hide' : 'Show'}</span>
+                  <span className="ml-auto text-[10px] text-gray-400">{showCustomer ? t('hide') : t('show')}</span>
                 </button>
                 <button onClick={() => setShowAddCustomer(true)} className="ml-2 text-xs text-blue-500 hover:text-blue-700 font-medium whitespace-nowrap">{t('add_new')||'+ New'}</button>
               </div>
@@ -3343,7 +3345,7 @@ export default function POS() {
                   <span>{t('pos_delivery')||t('delivery_fees')||'Delivery'}</span>
                   {active.isDelivery && active.selectedDelivery?.name && <span className="text-orange-500 truncate max-w-[80px]">{active.selectedDelivery.name}</span>}
                   {active.isDelivery && feeUsd > 0 && <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${active.deliveryFeePaidBy === DELIVERY_FEE_PAYER.CUSTOMER ? 'bg-orange-100 text-orange-700' : 'bg-blue-100 text-blue-700'}`}>{fmtUSD(feeUsd)}</span>}
-                  <span className="ml-auto text-[10px] text-gray-400">{showDelivery ? 'Hide' : 'Show'}</span>
+                  <span className="ml-auto text-[10px] text-gray-400">{showDelivery ? t('hide') : t('show')}</span>
                 </button>
                 {/* Toggle switch */}
                 <button onClick={() => { patchActive({ isDelivery: !active.isDelivery }); if (!active.isDelivery) setShowDelivery(true) }}

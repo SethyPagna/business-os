@@ -102,10 +102,14 @@ check('the lot picker distinguishes a load failure from an empty result', () => 
     /\) : batchesError \? \(/.test(sheet),
     'the picker should render the error branch before the "No lots available" branch',
   )
-  const noLots = (sheet.match(/No lots available at this branch/g) || []).length
+  // Count render SITES via the posCopy key (the English first argument).
+  // The old `/ 2` accounted for posCopy('X', 'X') duplicating the literal
+  // per site; the Khmer no-op fix made the second argument real Khmer, so
+  // the literal now appears exactly once per site.
+  const noLots = (sheet.match(/posCopy\('No lots available at this branch'/g) || []).length
   const errorBranches = (sheet.match(/\) : batchesError \? \(/g) || []).length
   assert.equal(
-    errorBranches, noLots / 2,
+    errorBranches, noLots,
     'every "No lots available" render site needs its own preceding error branch',
   )
 })

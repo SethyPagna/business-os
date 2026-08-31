@@ -204,7 +204,9 @@ export default function CartItem({
             className="input w-full py-1 pr-5 text-xs"
             type="number"
             step="any"
-            value={normalizePriceValue((item.base_price_khr ?? item.applied_price_khr) || 0).toFixed(2)}
+            // KHR is a whole-riel currency everywhere else in the app --
+            // showing 4100.00 here was the one decimal-riel holdout.
+            value={normalizePriceValue((item.base_price_khr ?? item.applied_price_khr) || 0).toFixed(0)}
             onChange={(event) => onPriceChange(lineId, 'khr', event.target.value)}
           />
           <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-xs text-gray-400">{khrSymbol}</span>

@@ -107,8 +107,11 @@ runTest('K2/11.9: the POS damage source option is wired end to end', () => {
   assert.match(sheetSource, /const displayedStock = selectedDamagedLot/)
   // the selection travels with the add
   assert.match(sheetSource, /onAddToCart\(nextProduct, priceMode, buildBatchSelection\(\), effectiveBranchId, buildDamagedSelection\(\)\)/)
-  // the Damage section renders in BOTH flows (group + flat)
-  assert.equal((sheetSource.match(/Damage \(from returns\)/g) || []).length >= 4, true)
+  // the Damage section renders in BOTH flows (group + flat). Counted via
+  // the posCopy key (English first arg): the old `>= 4` relied on the
+  // posCopy('X', 'X') no-op duplicating the literal per site, which the
+  // Khmer translation pass fixed.
+  assert.equal((sheetSource.match(/posCopy\('Damage \(from returns\)'/g) || []).length >= 2, true)
 
   const posSource = readFileSync(new URL('../src/components/pos/POS.tsx', import.meta.url), 'utf8')
   // capped by the lot, merges only with the same lot's line, and the
