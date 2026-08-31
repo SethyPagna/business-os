@@ -94,6 +94,27 @@ Two rules learned the hard way, both from real incidents in this file's own hist
 
 ## Current status
 
+**⏳ COORDINATOR (session 62) — TIMEZONE + REVENUE reconciliation, two locked decisions (user, Sep 1).**
+User reaffirmed BOTH: (1) "the timezone and data are all Phnom Penh time" → fixed **UTC+7 business-day**
+bucketing is a REQUIRED data-correctness fix (standing memory directive + reaffirmed), and (2) reconcile
+the Sales-page `/stats` header and the Reports analytics kernel to **ONE canonical revenue definition**.
+- **Business-day half is BUILT + verified-aligned** (uncommitted date lane, read all diffs): new
+  `cloudflare/src/lib/businessDateWindow.ts` (fixed +420 min, sargable bound-shift, **ignores** viewer
+  `tzOffsetMinutes`) + `salesAnalytics.ts` (kernel buckets +7h; `tzOffsetMinutes` now ignored) +
+  `sales.ts` (`/`, `/stats`, `/stats-strip`, `/export`: non-sargable `date(created_at)` → sargable
+  business-day bounds — this ALSO fixes the `/stats` full-scan perf bug) + `returns.ts` (same). **Pure
+  query changes, NO migration** → zero 0097 collision with the catalog undo lane. **DATE-LANE OWNER:
+  please post your board claim.**
+- **Revenue-reconciliation half is NOT done yet** and lands in these SAME files (`salesAnalytics.ts`
+  `deriveTotals`, `sales.ts` `/stats` `revenue_usd`) → must be the SAME lane / SAME commit as the
+  business-day work, not a second pass. Divergence today: `/stats` revenue = `total_usd − refund`
+  (incl tax, EXCL awaiting_payment, subtracts refunds; already splits `pending_revenue_usd`); kernel
+  revenue = `subtotal − discount` (EXCL tax, INCL awaiting_payment, refunds separate). Canonical
+  definition is a money-policy call — **confirming with the user this turn; I'll post the chosen
+  definition here on answer.**
+- **DEPLOY:** 7b is sole driver, HOLDING for ONE coherent data-correctness batch once business-day +
+  revenue are committed + green (certified worktree at committed HEAD). I hold all deploy/migrate/secrets.
+
 **→ CASHIER-IDENTITY RECONCILIATION lane (Sep 1, this session — CLAIMED, in progress).**
 User: legacy POS cashier names must map to the real user accounts ("aza" = user `Za`,
 routh=`Rath`, pagna=`james`, sethyka=`sethyka`, Dev-Usmart=`admin`), matching by
@@ -368,6 +389,21 @@ cloudflare/src/lib/productIdentity.ts, cloudflare/migrations/0097_* (undo snapsh
 by D1-bloat, 0096 taken), a NEW frontend supplier-backfill modal + its api transport (new files,
 NOT Products.tsx). Lang keys named at commit if any. Read-only prod queries used for the audit; no
 prod data mutated by this lane (merges/backfills are user-triggered actions the code enables).
+
+**→ SUPPLIER-SOURCE-DATA handoff for the CATALOG-INTEGRITY lane (session b7eb, Sep 1; user
+asked this session to "check files in downloads/migration and make sure everything is
+identified"):** the migration source
+`Downloads/businessos-migration-aug28/later/stock_in_invoice_lines.csv` attributes a REAL
+supplier to **100% of its 7,340 received lines — 3,484 distinct barcodes, 16 suppliers, ZERO
+blank** (bong long, ចែ USA, srey now, j secrat, canada, dane japan, lang, japen, utb, malaysia,
+kaka, naomi, autralia, srun, france, piset). So the 18,996 supplier-blank DB lots are an
+import-CARRY gap, NOT lost data — the backfill can AUTO-attribute by barcode from this file, not
+only prompt the user. **819 barcodes were received from ≥2 suppliers over time** (legitimate
+multi-supplier products — this is the id:+name: split fix (4) is about; don't collapse them).
+`po_invoices.csv` supplier is invoice-level only (no barcode, 1,613/3,204 blank).
+`sold_by_supplier_summary.csv` "(no supplier recorded)" = 4,705 SOLD lines is the sales-side
+Unknown bucket. Only products with NO stock-in receipt at all (~2,620 of 6,104) are genuine
+"Unknown". Analysis is read-only (scratchpad `supplier_match.mjs`); no code/data touched by b7eb.
 
 **→ STOCK-CHANGES-HEADER-CONSOLIDATE LANE (Aug 31, Part 569 grep-max+1; number races expected): CLAIMED / in progress.**
 User batch on the Products page → Stock Changes section (from an annotated screenshot):
