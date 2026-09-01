@@ -118,13 +118,15 @@ const SECTION_PILL: Record<Exclude<OpenSection, null>, { icon: LucideIcon; pill:
   },
 }
 
-export default function ProductDetailReport({ productId, barcode, t, fmtUSD }: {
+export default function ProductDetailReport({ productId, barcode, t, fmtUSD, compactDesktop = false }: {
   productId: number
   // Shown in each float's compact title so you can see WHICH product's changes
   // you are looking at (user ask: "the title ... also have barcode").
   barcode?: string
   t: Translate
   fmtUSD: (value: unknown) => string
+  /** Lay the three summary actions beside Batches in the product detail sheet. */
+  compactDesktop?: boolean
 }) {
   // Supplier attribution (item 3) is a product edit; notify surfaces the result.
   const { can, notify } = useApp() as { can: (section: string, action: string) => boolean; notify: (message: unknown, type?: string) => void }
@@ -481,12 +483,14 @@ export default function ProductDetailReport({ productId, barcode, t, fmtUSD }: {
   const active = openSection ? floats[openSection] : null
 
   return (
-    <div className="space-y-1.5">
+    <div className={`space-y-1.5 ${compactDesktop ? 'sm:col-span-3' : ''}`}>
       {loadError ? <p className="rounded-lg bg-red-50 px-2.5 py-1.5 text-xs text-red-600 dark:bg-red-900/20 dark:text-red-300">{loadError}</p> : null}
 
-      <Pill section="movements" label={tr('stock_change_ledger', 'Stock Changes')} count={movementsTotal} loading={movementsLoading} />
-      <Pill section="sales" label={tr('sales', 'Sales')} count={salesTxCount} loading={reportLoading} />
-      <Pill section="suppliers" label={tr('suppliers', 'Suppliers')} count={suppliersCount} loading={reportLoading} />
+      <div className={compactDesktop ? 'space-y-1.5 sm:grid sm:grid-cols-3 sm:gap-1.5 sm:space-y-0' : 'space-y-1.5'}>
+        <Pill section="movements" label={tr('stock_change_ledger', 'Stock Changes')} count={movementsTotal} loading={movementsLoading} />
+        <Pill section="sales" label={tr('sales', 'Sales')} count={salesTxCount} loading={reportLoading} />
+        <Pill section="suppliers" label={tr('suppliers', 'Suppliers')} count={suppliersCount} loading={reportLoading} />
+      </div>
 
       {active ? (
         <div

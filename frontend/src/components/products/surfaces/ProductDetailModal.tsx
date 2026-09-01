@@ -329,16 +329,6 @@ export default function ProductDetailModal({
                   </div>
                 ) : null}
 
-                {/* Wide screens only: Batches stays in the first-half (left)
-                    mini-section. On phones this slot is display:none and the
-                    button re-appears below Status (see the sm:hidden slot after
-                    the grid). */}
-                {batchesButton ? (
-                  <div className="hidden border-t border-gray-100 pt-2 dark:border-gray-700 sm:block">
-                    {batchesButton}
-                  </div>
-                ) : null}
-
                 {/* The "Batch: <latest received date>" row is REMOVED (Aug 30
                     ask): after the migration every product carries an
                     import-day opening lot, so "latest received" showed the
@@ -452,9 +442,15 @@ export default function ProductDetailModal({
                 the reports yet). */}
             {Number(p.id) > 0 ? (
               <div className="mt-2.5 border-t border-gray-100 pt-2 dark:border-gray-700">
-                <Suspense fallback={<p className="py-2 text-center text-xs text-gray-400">...</p>}>
-                  <ProductDetailReport productId={Number(p.id)} barcode={p.barcode} t={t || (() => undefined)} fmtUSD={fmtUSD} />
-                </Suspense>
+                {/* On large screens Batches and its three related drills are
+                    one four-column action row. Phones keep Batches above and
+                    the report actions stacked, preserving comfortable taps. */}
+                <div className="sm:grid sm:grid-cols-4 sm:items-stretch sm:gap-1.5">
+                  {batchesButton ? <div className="hidden sm:block">{batchesButton}</div> : null}
+                  <Suspense fallback={<p className="py-2 text-center text-xs text-gray-400 sm:col-span-3">...</p>}>
+                    <ProductDetailReport productId={Number(p.id)} barcode={p.barcode} t={t || (() => undefined)} fmtUSD={fmtUSD} compactDesktop />
+                  </Suspense>
+                </div>
               </div>
             ) : null}
           </div>
