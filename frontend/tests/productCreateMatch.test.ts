@@ -32,16 +32,17 @@ runTest('F1: same name + same barcode is an exact twin and cannot proceed as new
   assert.equal(verdict.canonicalName, 'Aloe Vera Gel')
 })
 
-runTest('F1: same name + different barcode is a name match with a child-row expectation', () => {
+runTest('F1: same name + different barcode joins the virtual same-name group', () => {
   const verdict = classifyCreateMatches({ name: '  ALOE  vera gel ', barcode: '111222' }, rows)
   assert.equal(verdict.kind, 'name_match')
-  assert.equal(verdict.allowProceedAsNew, true)
+  assert.equal(verdict.allowProceedAsNew, false)
   assert.equal(verdict.groupRows.length, 2)
   assert.equal(verdict.canonicalName, 'Aloe Vera Gel')
-  // before -> after arrow lines exist for both choices
-  assert.match(verdict.beforeAfter.child, /2 rows/)
-  assert.match(verdict.beforeAfter.child, /3 rows/)
-  assert.match(verdict.beforeAfter.asNew, /separate new product/)
+  // The added row is a peer in the same virtual name group; there is no
+  // stored parent/child relationship or separate choice for this case.
+  assert.match(verdict.beforeAfter.group, /2 rows/)
+  assert.match(verdict.beforeAfter.group, /3 rows/)
+  assert.equal(verdict.beforeAfter.asNew, '')
 })
 
 runTest('F1: price similarity is advisory only, flagged on a name match', () => {
@@ -50,8 +51,8 @@ runTest('F1: price similarity is advisory only, flagged on a name match', () => 
   assert.equal(withPrice.priceMatches, true)
   const differentPrice = classifyCreateMatches({ name: 'Aloe Vera Gel', selling_price_usd: 9.99 }, rows)
   assert.equal(differentPrice.priceMatches, false)
-  // advisory never blocks: allowProceedAsNew stays true either way
-  assert.equal(withPrice.allowProceedAsNew, true)
+  // Price is advisory; the same normalized name still joins its group.
+  assert.equal(withPrice.allowProceedAsNew, false)
 })
 
 runTest('F1: different name + same barcode is a barcode match, legal but flagged', () => {
@@ -80,11 +81,11 @@ runTest('F1: ProductForm live-searches in create mode and gates submit on the ve
   assert.match(productFormSource, /if \(isCreateMode && createVerdict\.kind\)/)
   assert.match(productFormSource, /const choice = await askCreateVerdict\(\)/)
   assert.match(productFormSource, /if \(choice === 'back'\) return/)
-  // 'add as child' adopts the group's canonical spelling
-  assert.match(productFormSource, /if \(choice === 'child' && createVerdict\.canonicalName\)/)
+  // Grouping adopts the canonical spelling without storing a parent/child link.
+  assert.match(productFormSource, /if \(choice === 'group' && createVerdict\.canonicalName\)/)
   // the inline panel and the modal both exist
   assert.match(productFormSource, /create_match_twin_hint/)
-  assert.match(productFormSource, /create_match_child_button/)
+  assert.match(productFormSource, /create_match_group_button/)
   // 'proceed as new' is withheld for an exact twin
   assert.match(productFormSource, /\{createVerdict\.allowProceedAsNew \? \(/)
 })

@@ -5,6 +5,7 @@ import ChevronLeft from 'lucide-react/dist/esm/icons/chevron-left.js'
 import ChevronRight from 'lucide-react/dist/esm/icons/chevron-right.js'
 import X from 'lucide-react/dist/esm/icons/x.js'
 import AppSelect from './AppSelect'
+import { activeStatsPreset, statsPresetRange, type StatsPresetKey } from './statsStripPresets.ts'
 
 // X1 (Part 395), redesigned Aug 30 per user direction (twice): a compact
 // trigger pill, and a panel laid out as two ENDPOINT BOXES
@@ -84,9 +85,8 @@ function isoOf(year: number, month1: number, day: number): string {
 }
 
 /** App-wide initial range: the current local business day, in full. */
-export function todayDateTimeRange(now = new Date()): DateTimeRange {
-  const today = isoOf(now.getFullYear(), now.getMonth() + 1, now.getDate())
-  return { startDate: today, endDate: today, startTime: '00:00', endTime: '23:59' }
+export function todayDateTimeRange(now?: Date): DateTimeRange {
+  return statsPresetRange('today', now)
 }
 
 function displayDate(iso: string): string {
@@ -136,8 +136,7 @@ function normalizeTime(raw: string): string | null {
 }
 
 function todayIso(): string {
-  const now = new Date()
-  return isoOf(now.getFullYear(), now.getMonth() + 1, now.getDate())
+  return statsPresetRange('today').startDate
 }
 
 function lastDayOfMonth(year: number, month1: number): number {
@@ -303,6 +302,27 @@ export default function DateTimeRangePicker({
   const isEdge = (iso: string) => iso === value.startDate || iso === value.endDate
 
   const hasSelection = isDateTimeRangeActive(value) || Boolean(value.startTime || value.endTime)
+  const activePreset = activeStatsPreset(value)
+  const quickRangeLabel = (key: string, fallback: string) => {
+    const label = t(key)
+    return label && label !== key ? label : fallback
+  }
+  const quickRanges: Array<{ id: StatsPresetKey; label: string }> = [
+    { id: 'all', label: quickRangeLabel('all_time', 'All time') },
+    { id: 'today', label: quickRangeLabel('today', 'Today') },
+    { id: '7d', label: quickRangeLabel('last_7_days', 'Last 7 days') },
+    { id: 'week', label: quickRangeLabel('this_week', 'This week') },
+    { id: 'month', label: quickRangeLabel('this_month', 'This month') },
+    { id: 'year', label: quickRangeLabel('this_year', 'This year') },
+  ]
+  const applyQuickRange = (preset: StatsPresetKey) => {
+    const next = statsPresetRange(preset)
+    onChange(showTime ? next : { ...next, startTime: '', endTime: '' })
+    const anchor = next.startDate || today
+    setViewYear(Number(anchor.slice(0, 4)))
+    setViewMonth(Number(anchor.slice(5, 7)))
+    setPickPhase('start')
+  }
 
   // Trigger labels: always the literal MM/DD/YYYY format -- as a placeholder
   // when a side is empty, as the real date once picked -- never the words
@@ -454,8 +474,7 @@ export default function DateTimeRangePicker({
             </div>
           ) : null}
 
-          {/* Calendar range grid, Monday-first, with its own ‹ month › nav
-              (the chips that used to change the view are gone). */}
+          {/* Calendar range grid, Monday-first, with its own ‹ month › nav. */}
           <div className="mt-3 rounded-lg border border-slate-100 p-2 dark:border-slate-700/60">
             <div className="mb-1 flex items-center justify-between">
               <button
@@ -525,6 +544,27 @@ export default function DateTimeRangePicker({
                   {cell.day}
                 </button>
               ) : <div key={`lead-${index}`} />)}
+            </div>
+          </div>
+
+          {/* Quick ranges live inside the opened date/time control—not as a
+              second toolbar outside it. They sit below the calendar so manual
+              endpoint selection remains the primary interaction. */}
+          <div className="mt-2 border-t border-slate-100 pt-2 dark:border-slate-700/60">
+            <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">{quickRangeLabel('quick_range', 'Quick range')}</div>
+            <div className="flex flex-wrap gap-1">
+              {quickRanges.map((preset) => (
+                <button
+                  key={preset.id}
+                  type="button"
+                  onClick={() => applyQuickRange(preset.id)}
+                  className={`rounded-md border px-2 py-1 text-[11px] font-medium transition ${activePreset === preset.id
+                    ? 'border-blue-500 bg-blue-600 text-white dark:border-blue-400 dark:bg-blue-500 dark:text-white'
+                    : 'border-slate-200 bg-white text-slate-600 hover:border-blue-300 hover:text-blue-700 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-300 dark:hover:border-blue-500 dark:hover:text-blue-200'}`}
+                >
+                  {preset.label}
+                </button>
+              ))}
             </div>
           </div>
         </div>

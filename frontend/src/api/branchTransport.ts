@@ -79,10 +79,11 @@ export function getBranchStock(id: string | number, params: QueryParams = {}): P
   )
 }
 
-export function getTransfers(): Promise<unknown> {
+export function getTransfers(params: QueryParams = {}): Promise<unknown> {
+  const query = buildQueryString(params)
   return route(
-    'transfers:get',
-    () => apiFetch('GET', '/api/transfers'),
+    `transfers:get:${query}`,
+    () => apiFetch('GET', appendQuery('/api/transfers', query)),
     async () => {
       const { getLocalDb } = await import('./lazyLocalDb.ts')
       const db = await getLocalDb()

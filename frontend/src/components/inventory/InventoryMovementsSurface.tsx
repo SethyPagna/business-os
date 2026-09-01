@@ -2,7 +2,6 @@ import { Fragment } from 'react'
 import type { ComponentType, Dispatch, RefObject, SetStateAction } from 'react'
 import ChevronDown from 'lucide-react/dist/esm/icons/chevron-down.js'
 import ChevronRight from 'lucide-react/dist/esm/icons/chevron-right.js'
-import Info from 'lucide-react/dist/esm/icons/info.js'
 import ListChecks from 'lucide-react/dist/esm/icons/list-checks.js'
 import ExportMenu from '../shared/ExportMenu'
 import DateTimeRangePicker from '../shared/DateTimeRangePicker'
@@ -216,7 +215,6 @@ export default function InventoryMovementsSurface({
   visibleMovementQuantity,
   visibleMovementRecordCount,
 }: InventoryMovementsSurfaceProps) {
-  const movementInfo = tr('grouped_movement_history_desc', 'Related stock changes are bundled into one activity so sales, returns, imports, and transfers are easier to review.')
   // Every data column of the desktop table, for the day/action header rows
   // to span; +1 while the Select-mode checkbox column exists.
   const desktopColumnCount = movementSelectMode ? 8 : 7
@@ -304,32 +302,13 @@ export default function InventoryMovementsSurface({
 
   return (
         <>
-          {/* Single compact toolbar card. The Start → End range picker is
-              ALWAYS visible now -- the old "Custom range" toggle and its
-              summary chip are gone (user, Aug 31: "the date is default, and
-              start date and end date for customizing which is for many
-              sections and pages already"). The Select toggle turns the
-              row/section checkboxes on and off. */}
+          {/* Compact movement controls. The date range is optional, so the
+              page opens with the complete history rather than only today. */}
           <div className="mb-3 rounded-2xl border border-gray-200 bg-white p-2.5 dark:border-gray-700 dark:bg-gray-800/60">
             <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-              <div className="inline-flex shrink-0 items-center gap-1.5 text-sm font-semibold text-gray-900 dark:text-white">
-                {/* Part 207: info icon moved before the label, same
-                    reordering as PermissionEditor.tsx/InventoryStockModals.tsx. */}
-                <button
-                  type="button"
-                  className="inline-flex h-5 w-5 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-500 transition hover:border-blue-200 hover:text-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-500/30 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300 dark:hover:border-blue-800 dark:hover:text-blue-300"
-                  title={movementInfo}
-                  aria-label={movementInfo}
-                >
-                  <Info className="h-3.5 w-3.5" />
-                </button>
-                <span>{tr('grouped_movement_history', 'Grouped movement history')}</span>
-              </div>
-              <div className="shrink-0 whitespace-nowrap text-xs text-gray-500 dark:text-gray-400">
-                {visibleMovementGroups.length} {tr('groups', 'groups')} · {visibleMovementRecordCount} {tr('records', 'records')} · {visibleMovementQuantity} {tr('quantity', 'quantity')}
-              </div>
-
-              <div className="ml-auto flex min-w-0 flex-wrap items-center justify-end gap-1.5">
+              {/* Keep the actionable controls at the left, as in the supplied
+                  layout. The redundant history heading/count block is removed. */}
+              <div className="flex min-w-0 flex-wrap items-center gap-1.5">
                 {movementSelectMode && selectedMovementGroups.length > 0 ? (
                   <div className="inline-flex items-center gap-2 rounded-xl border border-blue-200 bg-blue-50 px-2.5 py-1 text-xs dark:border-blue-900/40 dark:bg-blue-900/20">
                     <span className="font-semibold text-blue-700 dark:text-blue-300">{selectedMovementGroups.length} {tr('selected', 'selected')}</span>

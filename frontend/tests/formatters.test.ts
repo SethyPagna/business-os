@@ -40,6 +40,10 @@ await runTest('Y8: server timestamps parse as UTC regardless of the viewer timez
   assert.equal(parseServerTimestampMs('2026-08-28 14:33:20'), Date.parse('2026-08-28T14:33:20Z'))
   assert.equal(parseServerTimestampMs('2026-08-28T14:33:20Z'), Date.parse('2026-08-28T14:33:20Z'))
   assert.equal(parseServerTimestampMs('2026-08-28T14:33:20+07:00'), Date.parse('2026-08-28T07:33:20Z'))
+  // DATE-ONLY values end in "-DD". They must be recognized before the
+  // short-offset parser or 2026-09-01 becomes the invalid 2026-09-01:00.
+  assert.equal(parseServerTimestampMs('2026-09-01'), Date.parse('2026-09-01T00:00:00Z'))
+  assert.notEqual(fmtDate('2026-09-01'), '—')
   assert.ok(Number.isNaN(parseServerTimestampMs('')), 'empty input stays NaN for the caller to handle')
   // The import tracker's staleness check must use the UTC-aware parser.
   const trackerSource = fs.readFileSync(new URL('../src/components/shared/BackgroundImportTracker.tsx', import.meta.url), 'utf8')

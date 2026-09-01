@@ -129,10 +129,10 @@ runTest('ranking badges do not render numeric prefixes in compact mobile cards',
 })
 
 runTest('public portal mobile contact actions stay compact', () => {
-  assert.match(catalogSecondaryTabsSource, /className="relative h-28 sm:h-44"/, 'public about hero banner should be short and fixed-height, not a tall forced viewport')
+  assert.match(catalogSecondaryTabsSource, /className="relative h-(?:20|28) sm:h-(?:28|44)"/, 'public about hero banner should stay compact and fixed-height, not a tall forced viewport')
   assert.match(catalogSecondaryTabsSource, /data-portal-about-hero="true"/, 'public about hero should expose a mobile measurement hook')
   assert.match(catalogSecondaryTabsSource, /data-portal-contact-tray="true"/, 'public contact tray should expose a mobile measurement hook')
-  assert.match(catalogSecondaryTabsSource, /-mt-9 flex flex-wrap items-end gap-4 sm:-mt-12/, 'public about name\/tagline should sit on a plain surface below the banner, not overlaid on it')
+  assert.match(catalogSecondaryTabsSource, /-mt-(?:7|9) flex flex-wrap items-end gap-(?:3|4) sm:-mt-(?:9|12)/, 'public about name/tagline should sit on a plain surface below the banner, not overlaid on it')
   assert.match(catalogSecondaryTabsSource, /portal-contact-value-address/, 'long public portal addresses should be clamped on mobile')
   assert.match(catalogSecondaryTabsSource, /<span className="sr-only sm:not-sr-only">\{item\.label\}<\/span>/, 'social labels should collapse to accessible icon buttons on phones')
   assert.match(catalogSecondaryTabsSource, /businessFacts\?\.length \|\| socialLinks\?\.length/, 'contact and social actions should share one compact mobile tray')

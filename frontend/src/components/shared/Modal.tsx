@@ -34,10 +34,10 @@ export default function Modal({ title, onClose, children, wide, size, draggable,
   const [offset, setOffset] = useState({ x: 0, y: 0 })
   const dragRef = useRef<{ startX: number; startY: number; originX: number; originY: number } | null>(null)
   const panelRef = useRef<HTMLDivElement>(null)
-  // Keeps at least this many px of the panel overlapping the viewport on
-  // every side, so a drag can never push the whole modal (header included)
-  // off-screen with no way to grab it back short of closing and reopening.
-  const DRAG_VISIBLE_MARGIN = 48
+  // Keep the whole panel inside the visible viewport whenever it fits. The
+  // former 48px "still grabbable" rule allowed almost the entire analytics
+  // dialog to be dragged beyond an iPhone edge.
+  const DRAG_EDGE_MARGIN = 8
 
   const handlePointerDown = (e: PointerEvent<HTMLDivElement>) => {
     if (!draggable) return
@@ -63,12 +63,19 @@ export default function Modal({ title, onClose, children, wide, size, draggable,
       // untransformed ("home") position to clamp against, then re-derive it.
       const homeLeft = rect.left - offset.x
       const homeTop = rect.top - offset.y
-      const minX = DRAG_VISIBLE_MARGIN - homeLeft - rect.width
-      const maxX = window.innerWidth - DRAG_VISIBLE_MARGIN - homeLeft
-      const minY = DRAG_VISIBLE_MARGIN - homeTop - rect.height
-      const maxY = window.innerHeight - DRAG_VISIBLE_MARGIN - homeTop
-      nextX = Math.min(Math.max(nextX, minX), maxX)
-      nextY = Math.min(Math.max(nextY, minY), maxY)
+      const viewport = window.visualViewport
+      const viewportWidth = viewport?.width || window.innerWidth
+      const viewportHeight = viewport?.height || window.innerHeight
+      const minX = DRAG_EDGE_MARGIN - homeLeft
+      const maxX = viewportWidth - DRAG_EDGE_MARGIN - homeLeft - rect.width
+      const minY = DRAG_EDGE_MARGIN - homeTop
+      const maxY = viewportHeight - DRAG_EDGE_MARGIN - homeTop - rect.height
+      nextX = rect.width <= viewportWidth - (DRAG_EDGE_MARGIN * 2)
+        ? Math.min(Math.max(nextX, minX), maxX)
+        : 0
+      nextY = rect.height <= viewportHeight - (DRAG_EDGE_MARGIN * 2)
+        ? Math.min(Math.max(nextY, minY), maxY)
+        : 0
     }
     setOffset({ x: nextX, y: nextY })
   }
@@ -110,10 +117,10 @@ export default function Modal({ title, onClose, children, wide, size, draggable,
     // both, but deliberately still below App.tsx's toast layer (z-[1100])
     // -- a toast confirming an action taken while a modal is open should
     // stay visible on top of it, not get hidden behind the backdrop.
-    <div className="pointer-events-auto fixed inset-0 bg-black/50 flex items-start sm:items-center justify-center z-[1050] overflow-y-auto p-4 py-8 sm:py-4">
+    <div className="modal-viewport-safe pointer-events-auto fixed inset-0 bg-black/50 flex items-start sm:items-center justify-center z-[1050] overflow-y-auto sm:p-4">
       <div
         ref={panelRef}
-        className={`bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full ${widthClass} max-h-modal-92 flex flex-col fade-in my-auto`}
+        className={`modal-panel-safe bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full ${widthClass} flex flex-col fade-in my-auto`}
         style={draggable && (offset.x || offset.y) ? { transform: `translate(${offset.x}px, ${offset.y}px)` } : undefined}
       >
         <div
@@ -165,4 +172,3 @@ export default function Modal({ title, onClose, children, wide, size, draggable,
   if (typeof document === 'undefined') return node
   return createPortal(node, document.body)
 }
-

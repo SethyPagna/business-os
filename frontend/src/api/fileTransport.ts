@@ -65,7 +65,7 @@ type FileUploadPayload = {
 // definitions of "compressed enough" for one library, and the tighter one
 // applied to the images the user actually looks at most.
 //
-// There is now ONE budget for every stored image (the 300-350KB band in
+// There is now ONE budget for every stored image (the shared quality-preserving image budget in
 // utils/imageCompression.ts's DEFAULT_COMPRESS_OPTIONS), so the Library no
 // longer overrides anything. Kept as an explicit named export rather than
 // deleted so FilesPage.tsx's call site still reads as a deliberate choice,

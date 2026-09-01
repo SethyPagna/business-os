@@ -78,6 +78,19 @@ await runTest('print export normalizes receipt root width inside paper frame', (
   assert.match(source, /normalizeReceiptContentWidth\(cloneElementWithInlineStyles\(content\)\)/)
 })
 
+
+await runTest('thermal print keeps configured margins inside paper and uses one measured page', () => {
+  const source = fs.readFileSync(new URL('../src/utils/printReceipt.ts', import.meta.url), 'utf8')
+  assert.match(source, /const measuredHeightMm = renderedHeightPx \* \(widthMm \/ renderedWidthPx\)/)
+  assert.match(source, /const pageHeightMm = fixedHeightMm \?\? Math\.max\(1, measuredHeightMm \+ 1\)/)
+  assert.match(source, /size: \$\{widthMm\}mm \$\{pageHeightMm\.toFixed\(2\)\}mm;/)
+  assert.match(source, /clone\.style\.minWidth = `\$\{widthMm\}mm`/)
+  assert.doesNotMatch(source, /clone\.style\.padding = '0'/)
+  assert.doesNotMatch(source, /node\.style\.width = `\$\{widthMm\}mm`[\s\S]{0,120}node\.style\.maxWidth = `\$\{widthMm\}mm`/)
+  assert.match(source, /\.receipt-frame > \*[\s\S]*page-break-inside: avoid/)
+  assert.match(source, /root\.style\.margin = '0'/)
+})
+
 await runTest('receipt export supports PNG image download from the same rendered receipt', () => {
   const utilSource = fs.readFileSync(new URL('../src/utils/printReceipt.ts', import.meta.url), 'utf8')
   const receiptSource = fs.readFileSync(new URL('../src/components/receipt/Receipt.tsx', import.meta.url), 'utf8')

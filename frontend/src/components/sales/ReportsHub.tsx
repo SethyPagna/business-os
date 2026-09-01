@@ -6,7 +6,7 @@ import HandCoins from 'lucide-react/dist/esm/icons/hand-coins.js'
 import ChevronDown from 'lucide-react/dist/esm/icons/chevron-down.js'
 import Check from 'lucide-react/dist/esm/icons/check.js'
 import { useApp as useAppHook } from '../../AppContext.tsx'
-import DateTimeRangePicker, { todayDateTimeRange, type DateTimeRange } from '../shared/DateTimeRangePicker.tsx'
+import DateTimeRangePicker, { EMPTY_DATE_TIME_RANGE, type DateTimeRange } from '../shared/DateTimeRangePicker.tsx'
 import AppSelect, { type AppSelectOption } from '../shared/AppSelect.tsx'
 import LazyPortalMenu from '../shared/LazyPortalMenu'
 import { makeReportMoneyFormatter } from '../../utils/reportMoney.ts'
@@ -55,7 +55,7 @@ export default function ReportsHub({ embedded = false }: { embedded?: boolean })
     canFees ? { id: 'fees' as const, label: trh('fees', 'Expenses'), icon: HandCoins } : null,
   ].filter(Boolean) as Array<{ id: ReportType; label: string; icon: ComponentType<{ className?: string }> }>), [canSales, canReturns, canFees, t]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  const [range, setRange] = useState<DateTimeRange>(() => todayDateTimeRange())
+  const [range, setRange] = useState<DateTimeRange>(() => ({ ...EMPTY_DATE_TIME_RANGE }))
   const [branchFilter, setBranchFilter] = useState('')
   const [branches, setBranches] = useState<BranchOption[]>([])
   // SINGLE-select with an explicit "All" chip (user, Aug 30: "instead of

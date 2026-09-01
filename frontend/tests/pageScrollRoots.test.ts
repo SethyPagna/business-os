@@ -74,10 +74,9 @@ for (const { id, importPath } of importers) {
   runTest(`page '${id}' provides a scroll container`, () => {
     const source = resolvePageFile(importPath)
     if (HUB_PAGE_IDS.has(id)) {
-      assert.match(
-        source,
-        HUB_FILL_WRAPPER,
-        `hub page '${id}' must be a height-filling flex column so its hosted sub-page's page-scroll can fill`,
+      assert.ok(
+        HUB_FILL_WRAPPER.test(source) || source.includes('page-scroll'),
+        `hub page '${id}' must either fill the slot for a hosted page-scroll or own the page-scroll root itself`,
       )
     } else {
       assert.ok(

@@ -228,7 +228,7 @@ export default function StatsStrip({
                 {card.sub || typeof card.trend === 'number' ? (
                   <span className="flex min-w-0 items-center gap-1 text-[10px] leading-3.5">
                     {card.sub ? <span className="min-w-0 truncate text-gray-400 dark:text-gray-500">{card.sub}</span> : null}
-                    {typeof card.trend === 'number' ? <span className={`shrink-0 font-semibold ${card.trend > 0 ? 'text-emerald-600 dark:text-emerald-400' : card.trend < 0 ? 'text-red-500 dark:text-red-400' : 'text-gray-400'}`}>{card.trend > 0 ? '+' : ''}{card.trend.toFixed(1)}%</span> : null}
+                    {typeof card.trend === 'number' ? <span title={tr('trend_previous_period', 'Change compared with the previous equal-length period')} aria-label={`${card.trend.toFixed(1)}% ${tr('trend_previous_period', 'change compared with the previous equal-length period')}`} className={`shrink-0 font-semibold ${card.trend > 0 ? 'text-emerald-600 dark:text-emerald-400' : card.trend < 0 ? 'text-red-500 dark:text-red-400' : 'text-gray-400'}`}>{card.trend > 0 ? '+' : ''}{card.trend.toFixed(1)}% <span className="font-normal text-gray-400">{tr('vs_previous_short', 'vs prev')}</span></span> : null}
                   </span>
                 ) : null}
               </button>
@@ -259,6 +259,11 @@ export default function StatsStrip({
               on hover/click via TruncatedText, so the "…" is never a dead end.
               The value stays whole on the right. */}
           <div className="flex flex-col">
+            {typeof openCard.trend === 'number' ? (
+              <div className="mb-2 rounded-lg border border-blue-100 bg-blue-50 px-3 py-2 text-[11px] text-blue-800 dark:border-blue-900 dark:bg-blue-950/40 dark:text-blue-200">
+                <strong>{openCard.trend > 0 ? '+' : ''}{openCard.trend.toFixed(1)}%</strong> {tr('trend_explanation', 'change compared with the immediately previous period of the same length. Formula: (current − previous) ÷ previous × 100.')}
+              </div>
+            ) : null}
             {(openCard.details || []).map((detail, index) => (
               <div key={`${detail.label}-${index}`} className="flex min-w-0 items-baseline justify-between gap-2 border-b border-gray-100 py-1 last:border-b-0 dark:border-gray-700">
                 <TruncatedText text={detail.label} className="min-w-0 flex-1 text-[11px] text-gray-500 dark:text-gray-400" />

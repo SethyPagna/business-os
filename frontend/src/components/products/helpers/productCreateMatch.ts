@@ -1,47 +1,38 @@
-// F1 (Part 408): "Add Product = new products only." While the operator
-// types a NEW product's name/barcode, the existing catalog is searched
-// live; anything matching raises a STRUCTURED verdict before create --
-// the identity rule spoken at the moment it matters, not a 409 after the
-// fact. Pure: the form fetches candidates, this classifies them.
+// Add Product live identity guidance.
 //
-// The identity rule (permanent, see cloudflare lib/productIdentity):
-//   same name + same barcode      -> the SAME product (twin; create blocked)
-//   same name + different barcode -> a CHILD ROW of that name group
-//   different name + same barcode -> a separate product (legal, flagged)
+// Product grouping is intentionally VIRTUAL and name-based:
+//   - every database row is an ordinary product row
+//   - rows with the same normalized name are wrapped under one group title
+//   - there is no stored parent product, parent_id, or is_group requirement
+//
+// Identity guidance while creating:
+//   same name + same barcode      -> exact twin; create blocked
+//   same name + different barcode -> another ordinary row in that name group
+//   different name + same barcode -> legal separate product; flag for review
 
 export interface CreateMatchCandidate {
   id: number | string
   name?: string
   barcode?: string | null
   selling_price_usd?: unknown
-  is_group?: unknown
-  parent_id?: unknown
 }
 
 export type CreateMatchKind =
-  | 'exact_twin'        // same name + same barcode -- creating is forbidden
-  | 'name_match'        // same name, different/absent barcode -- child row expected
-  | 'barcode_match'     // same barcode, different name -- legal but worth a look
+  | 'exact_twin'
+  | 'name_match'
+  | 'barcode_match'
   | null
 
 export interface CreateMatchVerdict {
   kind: CreateMatchKind
-  // the single closest existing product for the headline
   primary: CreateMatchCandidate | null
-  // every same-name row (the group this would join as a child)
   groupRows: CreateMatchCandidate[]
-  // the group's canonical name (first row's exact casing) -- "add as
-  // child" adopts THIS spelling so the new row lands inside the group
-  // instead of forking a near-miss name
   canonicalName: string
-  // advisory only (user: "price similarity is advisory"): same name+price
-  // but different barcode strengthens the child recommendation
   priceMatches: boolean
-  // before -> after arrow lines for the confirm step
-  beforeAfter: { child: string; asNew: string }
-  // 'proceed as new' is withheld for an exact twin -- the backend blocks
-  // it anyway (duplicate_product 409); offering the button would promise
-  // something the identity rule forbids
+  beforeAfter: { group: string; asNew: string }
+  // Only a DIFFERENT-NAME barcode match has a meaningful separate choice.
+  // A same-name row is automatically grouped by name, so presenting
+  // "separate" there would promise behavior the UI cannot produce.
   allowProceedAsNew: boolean
 }
 
@@ -57,8 +48,13 @@ export function classifyCreateMatches(
   const typedPrice = Number(typed.selling_price_usd) || 0
 
   const none: CreateMatchVerdict = {
-    kind: null, primary: null, groupRows: [], canonicalName: '',
-    priceMatches: false, beforeAfter: { child: '', asNew: '' }, allowProceedAsNew: true,
+    kind: null,
+    primary: null,
+    groupRows: [],
+    canonicalName: '',
+    priceMatches: false,
+    beforeAfter: { group: '', asNew: '' },
+    allowProceedAsNew: true,
   }
   if (!typedName && !typedBarcode) return none
 
@@ -75,7 +71,7 @@ export function classifyCreateMatches(
       canonicalName: canonical,
       priceMatches: false,
       beforeAfter: {
-        child: `${canonical} (${nameRows.length}) → ${canonical} (${nameRows.length}) — no new row; this IS that product`,
+        group: `${canonical} (${nameRows.length}) → no new row; this exact name + barcode already exists`,
         asNew: '',
       },
       allowProceedAsNew: false,
@@ -92,10 +88,11 @@ export function classifyCreateMatches(
       canonicalName: canonical,
       priceMatches,
       beforeAfter: {
-        child: `${canonical} (${nameRows.length} ${nameRows.length === 1 ? 'row' : 'rows'}) → ${canonical} (${nameRows.length + 1} rows — this one joins as a child)`,
-        asNew: `${canonical} (${nameRows.length}) stays · a separate new product is created beside it`,
+        group: `${canonical} (${nameRows.length} ${nameRows.length === 1 ? 'row' : 'rows'}) → ${canonical} (${nameRows.length + 1} rows under the same automatic group title)`,
+        asNew: '',
       },
-      allowProceedAsNew: true,
+      // Same normalized name always wraps under the same group title.
+      allowProceedAsNew: false,
     }
   }
 
@@ -109,8 +106,8 @@ export function classifyCreateMatches(
       canonicalName: matchName,
       priceMatches: false,
       beforeAfter: {
-        child: `${matchName} → this row joins under "${matchName}" (adopting that name)`,
-        asNew: `"${matchName}" keeps barcode ${normBarcode(match.barcode)} · your new product shares it as a separate item`,
+        group: `Use "${matchName}" → the new ordinary row wraps under that same-name group title`,
+        asNew: `Keep your different name → a separate product row shares barcode ${normBarcode(match.barcode)}`,
       },
       allowProceedAsNew: true,
     }

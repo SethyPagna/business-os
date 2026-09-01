@@ -16,7 +16,7 @@ const FastStockInModal = lazy(() => import('../inventory/FastStockInModal'))
 // exports").
 const ExportRangeDialog = lazy(() => import('../shared/ExportRangeDialog'))
 import { movementColorClass, translateMovementType } from '../inventory/movementGroups.ts'
-import DateTimeRangePicker, { todayDateTimeRange } from '../shared/DateTimeRangePicker'
+import DateTimeRangePicker from '../shared/DateTimeRangePicker'
 import FilterMenu, { type FilterSection } from '../shared/FilterMenu'
 import Modal from '../shared/Modal'
 import PaginationControls from '../shared/PaginationControls'
@@ -53,6 +53,7 @@ type LedgerRow = {
   quantity: number
   signed_quantity: number
   reason: string | null
+  reference_id?: number | string | null
   user_name: string | null
   created_at: string
   ledger_bucket: 'in' | 'out'
@@ -155,8 +156,8 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
   const [branches, setBranches] = useState<BranchOption[]>([])
   const [supplierId, setSupplierId] = useState(0)
   const [suppliers, setSuppliers] = useState<Array<{ id: number; name: string }>>([])
-  const [startDate, setStartDate] = useState(() => todayDateTimeRange().startDate)
-  const [endDate, setEndDate] = useState(() => todayDateTimeRange().endDate)
+  const [startDate, setStartDate] = useState('')
+  const [endDate, setEndDate] = useState('')
   const [rows, setRows] = useState<LedgerRow[]>([])
   const [total, setTotal] = useState(0)
   const [summary, setSummary] = useState<LedgerSummary>(EMPTY_SUMMARY)
@@ -436,13 +437,14 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
             <span className="truncate text-sm font-semibold text-gray-800 dark:text-gray-100" title={row.product_name}>{row.product_name}</span>
           </div>
           <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[11px] text-gray-400">
-            {row.barcode ? <span className="rounded-full bg-gray-100 px-1.5 py-0.5 font-mono text-gray-500 dark:bg-gray-800 dark:text-gray-300">{row.barcode}</span> : null}
             {row.batch_id ? (
               <span className="rounded-full bg-gray-100 px-1.5 py-0.5 text-gray-500 dark:bg-gray-800 dark:text-gray-300">
                 {batchDisplayLabel({ id: row.batch_id, lot_code: row.batch_lot_code, received_at: row.batch_received_at })}
               </span>
             ) : null}
+            {row.batch_supplier_name ? <span className="truncate font-medium text-gray-500 dark:text-gray-300">{row.batch_supplier_name}</span> : null}
             {row.branch_name ? <span className="truncate">{row.branch_name}</span> : null}
+            {row.user_name ? <span className="truncate">· {row.user_name}</span> : null}
             {row.reason ? <span className="truncate text-gray-400" title={row.reason}>· {row.reason}</span> : null}
           </div>
         </div>
@@ -643,6 +645,12 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
                 <span className="text-[11px] uppercase tracking-wide text-gray-400">{tr(t, 'batch', 'Batch')}: </span>
                 {batchDisplayLabel({ id: detail.batch_id, lot_code: detail.batch_lot_code, received_at: detail.batch_received_at })}
                 {detail.batch_supplier_name ? <span className="text-gray-400"> · {detail.batch_supplier_name}</span> : null}
+              </p>
+            ) : null}
+            {detail.barcode ? (
+              <p className="rounded-xl bg-gray-50 px-3 py-2 text-sm text-gray-600 dark:bg-gray-800/60 dark:text-gray-300">
+                <span className="text-[11px] uppercase tracking-wide text-gray-400">{tr(t, 'barcode', 'Barcode')}: </span>
+                <span className="font-mono">{detail.barcode}</span>
               </p>
             ) : null}
             {detail.reason ? (

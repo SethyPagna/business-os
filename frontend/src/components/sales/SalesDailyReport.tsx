@@ -2,12 +2,11 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import Download from 'lucide-react/dist/esm/icons/download.js'
 import Modal from '../shared/Modal'
 import { downloadCSV } from '../../utils/csv.ts'
-import DateTimeRangePicker, { todayDateTimeRange, type DateTimeRange } from '../shared/DateTimeRangePicker.tsx'
+import DateTimeRangePicker, { EMPTY_DATE_TIME_RANGE, type DateTimeRange } from '../shared/DateTimeRangePicker.tsx'
 import { getSalesDailyReport, getSalesDayReport } from '../../api/salesTransport.ts'
 import { ALL_STATUSES, getStatusLabel } from './StatusBadge'
 import { useApp as useAppHook } from '../../AppContext.tsx'
-import type { AppSelectOption } from '../shared/AppSelect.tsx'
-import FilterMenu from '../shared/FilterMenu.tsx'
+import AppSelect, { type AppSelectOption } from '../shared/AppSelect.tsx'
 
 // X2 (Part 395): the Sales "by day" report -- a range-scoped list of days,
 // each expanding into its full breakdown (payment methods, delivery incl.
@@ -125,7 +124,7 @@ function timeParams(range: DateTimeRange): Record<string, string | number> {
 }
 
 export default function SalesDailyReport({ t, fmtMoney, active = true, range: externalRange, onRangeChange, branchId: externalBranchId, embedded = false, titleNode }: SalesDailyReportProps) {
-  const [internalRange, setInternalRange] = useState<DateTimeRange>(() => todayDateTimeRange())
+  const [internalRange, setInternalRange] = useState<DateTimeRange>(() => ({ ...EMPTY_DATE_TIME_RANGE }))
   const range = externalRange ?? internalRange
   const setRange = onRangeChange ?? setInternalRange
   const [days, setDays] = useState<DayRow[]>([])
@@ -201,15 +200,14 @@ export default function SalesDailyReport({ t, fmtMoney, active = true, range: ex
   ], [branches, t])
 
   const load = useCallback(async () => {
-    if (!range.startDate || !range.endDate) return
     const requestId = requestRef.current + 1
     requestRef.current = requestId
     setLoading(true)
     setError('')
     try {
       const result = await getSalesDailyReport({
-        startDate: range.startDate,
-        endDate: range.endDate,
+        ...(range.startDate ? { startDate: range.startDate } : {}),
+        ...(range.endDate ? { endDate: range.endDate } : {}),
         ...timeParams(range),
         ...filterParams,
       }) as { days?: DayRow[] } | null
@@ -409,23 +407,6 @@ export default function SalesDailyReport({ t, fmtMoney, active = true, range: ex
   )
 
   const hasFilter = Boolean(statusFilter || paymentFilter || (!embedded && branchFilter))
-  const reportFilterSections = useMemo(() => [
-    {
-      id: 'status', label: t('status') || 'Status', options: statusOptions.map((option) => ({
-        id: option.value, label: option.label, active: statusFilter === String(option.value), onClick: () => setStatusFilter(String(option.value)),
-      })),
-    },
-    {
-      id: 'payment', label: t('payment_method') || 'Payment method', options: paymentOptions.map((option) => ({
-        id: option.value, label: option.label, active: paymentFilter === String(option.value), onClick: () => setPaymentFilter(String(option.value)),
-      })),
-    },
-    !embedded && branches.length ? {
-      id: 'branch', label: t('branch') || 'Branch', options: branchOptions.map((option) => ({
-        id: option.value, label: option.label, active: branchFilter === String(option.value), onClick: () => setBranchFilter(String(option.value)),
-      })),
-    } : null,
-  ], [branchFilter, branchOptions, branches.length, embedded, paymentFilter, paymentOptions, statusFilter, statusOptions, t])
 
   // Export the range's per-day sales series as CSV (user, Aug 31: "no
   // actions to choose export etc").
@@ -460,13 +441,38 @@ export default function SalesDailyReport({ t, fmtMoney, active = true, range: ex
           >
             <Download className="h-3 w-3" /> {t('export') || 'Export'}
           </button>
-          <FilterMenu
-            label={t('options') || 'Options'}
-            activeCount={hasFilter ? [statusFilter, paymentFilter, !embedded ? branchFilter : ''].filter(Boolean).length : 0}
-            sections={reportFilterSections}
-            onClear={() => { setStatusFilter(''); setPaymentFilter(''); setBranchFilter('') }}
-            compact
+          <AppSelect
+            value={statusFilter}
+            options={statusOptions}
+            onChange={(value) => setStatusFilter(String(value))}
+            ariaLabel={t('status') || 'Status'}
+            buttonClassName="h-7 py-0 px-2 text-[11px]"
           />
+          <AppSelect
+            value={paymentFilter}
+            options={paymentOptions}
+            onChange={(value) => setPaymentFilter(String(value))}
+            ariaLabel={t('payment_method') || 'Payment method'}
+            buttonClassName="h-7 py-0 px-2 text-[11px]"
+          />
+          {!embedded && branches.length ? (
+            <AppSelect
+              value={branchFilter}
+              options={branchOptions}
+              onChange={(value) => setBranchFilter(String(value))}
+              ariaLabel={t('branch') || 'Branch'}
+              buttonClassName="h-7 py-0 px-2 text-[11px]"
+            />
+          ) : null}
+          {hasFilter ? (
+            <button
+              type="button"
+              onClick={() => { setStatusFilter(''); setPaymentFilter(''); setBranchFilter('') }}
+              className="font-medium text-blue-600 underline-offset-2 hover:underline dark:text-blue-400"
+            >
+              {t('clear') || 'Clear'}
+            </button>
+          ) : null}
         </span>
       </div>
 

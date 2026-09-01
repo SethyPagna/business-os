@@ -1,3 +1,4 @@
+import { todayStr } from '../../../utils/dateHelpers.ts'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { beginSingleAction, finishSingleAction } from '../../../utils/actionGuards.ts'
 import { withLoaderTimeout } from '../../../utils/loaders.ts'
@@ -24,10 +25,9 @@ import { dateToBatchCode } from '../../../utils/batchCode.ts'
 
 const BULK_ADD_STOCK_MUTATION_TIMEOUT_MS = 12000
 
-// Same helper (and same UTC-day convention) as every other received-date
-// default (ReceiveBatchModal, BranchStockAdjuster, Inventory's Adjust).
+// All received-date defaults use the fixed Cambodia business calendar day.
 function todayIsoDate(): string {
-  return new Date().toISOString().slice(0, 10)
+  return todayStr()
 }
 
 type Translate = (key: string) => string | undefined

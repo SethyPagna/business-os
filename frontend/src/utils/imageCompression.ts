@@ -97,11 +97,12 @@ function drawDownscaled(
 
 export const DEFAULT_COMPRESS_OPTIONS: Required<Pick<CompressImageOptions, 'maxDimension' | 'quality' | 'minSavingsRatio' | 'maxBytes' | 'targetBytes'>> = {
   maxDimension: 2560,
-  quality: 0.92,
+  quality: 0.94,
   minSavingsRatio: 0.05,
-  // THE BAND: land between 300KB and 350KB. 350KB is a hard ceiling nothing
-  // may cross; 300KB is a floor, because landing far below the cap throws
-  // away image quality for storage nobody asked to save.
+  // Keep new product/library images close to the upload ceiling rather than
+  // crushing them far below it. The Worker accepts 1MB as the normal fast
+  // path, so 900KB leaves transport/header safety room while preserving much
+  // more detail than the former 300-350KB band.
   //
   // The previous 180KB/140KB pair (and the Library page's even tighter
   // 70KB/40KB override) were not the real problem on their own -- the
@@ -117,8 +118,8 @@ export const DEFAULT_COMPRESS_OPTIONS: Required<Pick<CompressImageOptions, 'maxD
   // below targetBytes therefore means the source genuinely could not
   // produce more bytes at full quality and full dimension (a small or very
   // flat image), not that the algorithm gave up early.
-  maxBytes: 350 * 1024,
-  targetBytes: 300 * 1024,
+  maxBytes: 900 * 1024,
+  targetBytes: 820 * 1024,
 }
 
 /** Hard ceiling for any stored image, in bytes. Nothing may exceed this. */
@@ -126,7 +127,7 @@ export const IMAGE_SIZE_CEILING_BYTES = DEFAULT_COMPRESS_OPTIONS.maxBytes
 /** Desired floor. Landing below this is acceptable ONLY when the source cannot produce more. */
 export const IMAGE_SIZE_FLOOR_BYTES = DEFAULT_COMPRESS_OPTIONS.targetBytes
 
-const COMPRESSIBLE_MIME = new Set(['image/jpeg', 'image/jpg', 'image/png', 'image/webp'])
+const COMPRESSIBLE_MIME = new Set(['image/jpeg', 'image/jpg', 'image/png', 'image/webp', 'image/avif', 'image/heic', 'image/heif'])
 
 function supportsCanvasCompression(): boolean {
   return typeof document !== 'undefined' && typeof document.createElement === 'function'
@@ -136,8 +137,12 @@ function supportsCanvasCompression(): boolean {
 export function isCompressibleImageFile(file: Pick<File, 'type' | 'name'>): boolean {
   const mime = (file.type || '').toLowerCase()
   if (COMPRESSIBLE_MIME.has(mime)) return true
+  // Treat other still-image MIME types as candidates too: if this browser can
+  // decode them, Canvas can convert them to WebP/JPEG. Animated GIF/SVG are
+  // excluded because flattening them would change semantics.
+  if (mime.startsWith('image/') && mime !== 'image/gif' && mime !== 'image/svg+xml') return true
   // Some browsers/OSes hand us images with no MIME type set; fall back to extension.
-  return /\.(jpe?g|png|webp)$/i.test(file.name || '')
+  return /\.(jpe?g|png|webp|avif|heic|heif)$/i.test(file.name || '')
 }
 
 /** Pure sizing helper -- kept separate from the DOM/Canvas calls so it is unit-testable in Node. */
@@ -154,45 +159,43 @@ export function computeTargetDimensions(
   return { width: Math.max(1, Math.round(width * scale)), height: Math.max(1, Math.round(height * scale)), scaled: true }
 }
 
-// Quality ladder tried at each dimension before stepping the dimension
-// down. Front-loaded with the caller's own starting quality (~0.92) so a
-// source that's already small/simple often exits on the very first
-// attempt with no visible loss at all; the later steps only ever run for
-// images that didn't make budget at a higher quality.
-const QUALITY_STEPS = [0.92, 0.8, 0.68, 0.55, 0.42]
-// Each dimension round shrinks the longest edge by 25% from the previous
-// round -- big enough to meaningfully cut bytes (pixel count drops
-// ~44% per round), small enough that a product/POS photo is still sharp
-// well past the floor below.
-const DIMENSION_SHRINK_FACTOR = 0.75
-// Never resize a photo smaller than this on its longest edge, no matter
-// how far over the byte cap the source is -- past this point further
-// shrinking reads as genuinely low-resolution, not just "compressed",
-// for the product-card/lightbox/POS-grid sizes this app displays images
-// at. A source that still can't hit maxBytes at this floor + the lowest
-// quality step ships as the smallest attempt found rather than looping
-// forever chasing an unreachable target.
-const MIN_DIMENSION_FLOOR = 480
-const MAX_DIMENSION_ROUNDS = 3
+// Compression order is deliberately dimension-first. For product photos a
+// slightly smaller high-quality WebP generally looks better than a full-size
+// image crushed to low encoder quality. We therefore try high quality at each
+// progressively smaller dimension, then only lower quality at the final
+// dimension if a pathological/detail-dense image still misses the byte cap.
+const PRIMARY_QUALITY = 0.94
+const QUALITY_FALLBACK_STEPS = [0.88, 0.8, 0.7, 0.6, 0.5, 0.4, 0.3, 0.22, 0.16]
+const DIMENSION_SHRINK_FACTOR = 0.8
+// Emergency floor only. The loop stops at the FIRST result under the cap, so
+// normal photos never reach this size; it exists for unusually noisy/detail-
+// dense camera images that would otherwise still exceed 1MB after a 640px
+// encode and get rejected downstream.
+const MIN_DIMENSION_FLOOR = 320
+const MAX_DIMENSION_ROUNDS = 16
 
 /**
  * Builds the ordered list of (maxDimension, quality) attempts
- * compressImageFile walks through until one lands at or under
- * targetBytes/maxBytes. Pure and DOM-free so it's directly unit-testable
- * (see tests/imageCompressionPlan.test.ts) -- the actual Canvas encode
- * loop in compressImageFile just walks whatever this returns.
+ * compressImageFile walks through until one lands at or under maxBytes.
+ * The ladder always reaches MIN_DIMENSION_FLOOR, so a camera photo cannot
+ * stop after only a few rounds and remain above the server budget. Because
+ * the first under-cap result wins, the emergency floor is used only when
+ * every larger, higher-quality attempt really failed the byte ceiling.
  */
-export function buildCompressionPlan(initialMaxDimension: number): Array<{ maxDimension: number; quality: number }> {
-  const plan: Array<{ maxDimension: number; quality: number }> = []
+export function buildCompressionPlan(initialMaxDimension: number, initialQuality = PRIMARY_QUALITY): Array<{ maxDimension: number; quality: number }> {
+  const dimensions: number[] = []
   let dim = Math.max(MIN_DIMENSION_FLOOR, Math.round(initialMaxDimension) || DEFAULT_COMPRESS_OPTIONS.maxDimension)
-  const seenDimensions = new Set<number>()
   for (let round = 0; round < MAX_DIMENSION_ROUNDS; round += 1) {
-    if (seenDimensions.has(dim)) break
-    seenDimensions.add(dim)
-    for (const quality of QUALITY_STEPS) plan.push({ maxDimension: dim, quality })
+    if (dimensions.includes(dim)) break
+    dimensions.push(dim)
     if (dim <= MIN_DIMENSION_FLOOR) break
     dim = Math.max(MIN_DIMENSION_FLOOR, Math.round(dim * DIMENSION_SHRINK_FACTOR))
   }
+  if (dimensions[dimensions.length - 1] !== MIN_DIMENSION_FLOOR) dimensions.push(MIN_DIMENSION_FLOOR)
+
+  const firstQuality = Math.min(0.98, Math.max(0.5, Number(initialQuality) || PRIMARY_QUALITY))
+  const plan = dimensions.map((maxDimension) => ({ maxDimension, quality: firstQuality }))
+  for (const quality of QUALITY_FALLBACK_STEPS) plan.push({ maxDimension: MIN_DIMENSION_FLOOR, quality })
   return plan
 }
 
@@ -215,16 +218,22 @@ export function buildCompressedFileName(originalName: string, renameTo: string |
 }
 
 async function loadBitmap(file: File): Promise<{ width: number; height: number; source: ImageBitmap | HTMLImageElement }> {
+  // createImageBitmap is fast and memory-efficient when the browser supports
+  // the source codec, but some Safari/HEIC combinations expose the function
+  // and still reject the decode. Fall through to <img> instead of treating
+  // that first decoder failure as "compression impossible".
   if (typeof createImageBitmap === 'function') {
-    const bitmap = await createImageBitmap(file)
-    return { width: bitmap.width, height: bitmap.height, source: bitmap }
+    try {
+      const bitmap = await createImageBitmap(file)
+      return { width: bitmap.width, height: bitmap.height, source: bitmap }
+    } catch { /* try the DOM image decoder below */ }
   }
   const url = URL.createObjectURL(file)
   try {
     const img = await new Promise<HTMLImageElement>((resolve, reject) => {
       const element = new Image()
       element.onload = () => resolve(element)
-      element.onerror = () => reject(new Error('Could not read image for compression'))
+      element.onerror = () => reject(new Error('Could not decode image for compression'))
       element.src = url
     })
     return { width: img.naturalWidth, height: img.naturalHeight, source: img }
@@ -293,7 +302,7 @@ export async function compressImageFile(file: File, options: CompressImageOption
 
   try {
     const { width, height, source } = await loadBitmap(file)
-    const plan = buildCompressionPlan(opts.maxDimension)
+    const plan = buildCompressionPlan(opts.maxDimension, opts.quality)
 
     let best: { blob: Blob; mime: string; ext: 'webp' | 'jpg' } | null = null
     let canvas: HTMLCanvasElement | null = null
@@ -369,7 +378,11 @@ export async function compressImageFile(file: File, options: CompressImageOption
     if (canvas) { canvas.width = 0; canvas.height = 0 }
 
     if (!best) return renameFileIfRequested(file, opts.renameTo)
-    // Never ship something bigger than what was already there.
+    // Never ship something bigger than what was already there. If an extreme
+    // source still misses maxBytes even at the emergency floor, return the
+    // smallest re-encode rather than the original giant camera file; the
+    // upload route has a second server-side normalization ladder and can then
+    // finish the job without blaming the operator.
     if (best.blob.size >= file.size) return renameFileIfRequested(file, opts.renameTo)
 
     // A source that's already small and within maxDimension only gets

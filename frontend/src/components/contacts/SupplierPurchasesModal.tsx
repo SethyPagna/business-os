@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import Modal from '../shared/Modal'
 import { fmtDateOnly } from '../../utils/formatters'
+import PaginationControls, { DEFAULT_PAGE_SIZE } from '../shared/PaginationControls.tsx'
 
 type TranslateFn = (key: string) => string | undefined
 
@@ -29,12 +30,16 @@ type PurchasesPayload = {
     batches_without_cost?: number
   }
   batches?: PurchaseBatch[]
+  page?: number
+  page_size?: number
+  total_batches?: number
+  total_pages?: number
 }
 
 type SupplierPurchasesModalProps = {
   supplierId: number | string
   supplierName: string
-  fetchPurchases: (id: number | string) => Promise<unknown>
+  fetchPurchases: (id: number | string, params?: { page?: number; page_size?: number }) => Promise<unknown>
   onClose: () => void
   t: TranslateFn
 }
@@ -49,15 +54,21 @@ export default function SupplierPurchasesModal({ supplierId, supplierName, fetch
   const [data, setData] = useState<PurchasesPayload | null>(null)
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(true)
+  const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE)
   const aliveRef = useRef(true)
 
   const tr = (key: string, fallback: string): string => t(key) || fallback
 
   useEffect(() => {
+    setPage(1)
+  }, [supplierId])
+
+  useEffect(() => {
     aliveRef.current = true
     setLoading(true)
     setError('')
-    fetchPurchases(supplierId)
+    fetchPurchases(supplierId, { page, page_size: pageSize })
       .then((result) => {
         if (!aliveRef.current) return
         setData((result || {}) as PurchasesPayload)
@@ -73,7 +84,7 @@ export default function SupplierPurchasesModal({ supplierId, supplierName, fetch
       aliveRef.current = false
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [supplierId])
+  }, [supplierId, page, pageSize])
 
   const totals = data?.totals || {}
   const batches = Array.isArray(data?.batches) ? data!.batches! : []
@@ -152,6 +163,16 @@ export default function SupplierPurchasesModal({ supplierId, supplierName, fetch
                 </table>
               </div>
             )}
+            <PaginationControls
+              page={Number(data?.page || page)}
+              pageSize={Number(data?.page_size || pageSize)}
+              totalItems={Number(data?.total_batches ?? totals.batches ?? 0)}
+              onPageChange={setPage}
+              onPageSizeChange={(next) => { setPageSize(next); setPage(1) }}
+              label={tr('purchase_batches', 'batches')}
+              t={t}
+              compact
+            />
           </>
         )}
         <button type="button" className="btn-primary w-full" onClick={onClose}>{t('close') || 'Close'}</button>

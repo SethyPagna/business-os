@@ -11,7 +11,6 @@ import AlertTriangleIcon from 'lucide-react/dist/esm/icons/alert-triangle.js'
 import Modal from '../../shared/Modal'
 import AppSelect, { type AppSelectOption } from '../../shared/AppSelect.tsx'
 import { MarginCard, DualPriceInput, parseNumericInput, sanitizeNumericInput } from '../shared/primitives'
-import BranchStockAdjuster from './BranchStockAdjuster'
 import { calculateProductDiscount, formatPriceNumber, normalizePriceValue } from '../../../utils/pricing.ts'
 import RenameCascadeModal, { type RenameCascadeChoice, type RenameCascadeRequest } from '../../shared/RenameCascadeModal.tsx'
 import ConfirmDialog, { type ConfirmReviewItem } from '../../shared/ConfirmDialog.tsx'
@@ -35,7 +34,7 @@ const PRODUCT_FORM_IMAGE_UPLOAD_TIMEOUT_MS = 30000
 type EntityId = string | number
 type EditableNumber = string | number | null | undefined
 type ProductFormTab = 'basic' | 'pricing' | 'stock' | 'expiry'
-type ScannerField = 'sku' | 'barcode'
+type ScannerField = 'barcode'
 type Translate = (key: string) => string
 
 interface CategoryOption {
@@ -66,7 +65,6 @@ interface ProductUser {
 interface GroupCandidate {
   id?: EntityId | null
   name?: string | null
-  parent_id?: EntityId | null
 }
 
 interface SupplierOption {
@@ -77,7 +75,6 @@ interface SupplierOption {
 
 interface ProductFormState extends GroupCandidate {
   name?: string
-  sku?: string
   barcode?: string
   category?: string
   brand?: string
@@ -111,7 +108,6 @@ interface ProductFormState extends GroupCandidate {
   image_gallery?: unknown[]
   branch_stock?: Array<{ branch_id?: EntityId | null; quantity?: unknown }>
   branch_id?: EntityId | ''
-  is_group?: number | boolean | null
 }
 
 interface ProductSavePayload extends ProductFormState {
@@ -139,8 +135,6 @@ interface ProductSavePayload extends ProductFormState {
   expiry_alert_days: number
   image_gallery: string[]
   image_path: string
-  is_group: 0 | 1
-  parent_id: number | null
 }
 
 interface ProductImageUploadResult {
@@ -207,6 +201,69 @@ interface PickImageFilesOptions {
 interface NumericInputOptions {
   allowDecimal?: boolean
   allowNegative?: boolean
+}
+
+interface SuggestionTextInputProps {
+  id: string
+  name: string
+  value: string
+  options: string[]
+  onChange: (value: string) => void
+  placeholder?: string
+  ariaLabel: string
+}
+
+// Free-text catalog field with the same interaction model as Supplier:
+// operators may type a brand/category/unit that does not exist yet, while
+// existing values remain one-tap suggestions. This deliberately avoids a
+// select-only control because catalog detail values are not closed enums.
+function SuggestionTextInput({ id, name, value, options, onChange, placeholder, ariaLabel }: SuggestionTextInputProps) {
+  const [open, setOpen] = useState(false)
+  const normalized = String(value || '').trim().toLowerCase()
+  const matches = useMemo(() => {
+    const seen = new Set<string>()
+    const unique: string[] = []
+    for (const raw of options || []) {
+      const option = String(raw || '').trim()
+      const key = option.toLowerCase()
+      if (!option || seen.has(key)) continue
+      seen.add(key)
+      if (!normalized || key.includes(normalized)) unique.push(option)
+    }
+    return unique
+  }, [normalized, options])
+
+  return (
+    <div className="relative">
+      <input
+        id={id}
+        name={name}
+        className="input w-full"
+        value={value}
+        onFocus={() => setOpen(true)}
+        onBlur={() => window.setTimeout(() => setOpen(false), 120)}
+        onChange={(event) => { onChange(event.target.value); setOpen(true) }}
+        placeholder={placeholder}
+        aria-label={ariaLabel}
+        autoComplete="off"
+      />
+      {open && matches.length ? (
+        <div className="absolute left-0 right-0 top-full z-30 mt-1 max-h-44 overflow-auto rounded-xl border border-gray-200 bg-white shadow-xl dark:border-zinc-600 dark:bg-zinc-800">
+          {matches.map((option) => (
+            <button
+              key={option.toLowerCase()}
+              type="button"
+              className="block w-full px-3 py-2 text-left text-sm text-gray-800 hover:bg-blue-50 dark:text-gray-200 dark:hover:bg-blue-900/20"
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={() => { onChange(option); setOpen(false) }}
+            >
+              {option}
+            </button>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  )
 }
 
 const FilePickerModal = lazyRetry(async () => ({
@@ -375,7 +432,6 @@ export default function ProductForm({
     }
     return {
       name: '',
-      sku: '',
       barcode: '',
       category: '',
       brand: '',
@@ -408,17 +464,8 @@ export default function ProductForm({
       image_path: '',
       image_gallery: [],
       branch_id: defaultBranchId,
-      is_group: 0,
-      parent_id: null,
     }
   }, [product, units, defaultBranchId])
-
-  const availableGroupParents = useMemo(() => (
-    (Array.isArray(groupCandidates) ? groupCandidates : [])
-      .filter((candidate) => Number(candidate?.id || 0) !== currentProductId)
-      .filter((candidate) => !Number(candidate?.parent_id || 0))
-      .sort((left, right) => String(left?.name || '').localeCompare(String(right?.name || ''), undefined, { sensitivity: 'base' }))
-  ), [currentProductId, groupCandidates])
 
   const [form, setForm] = useState<ProductFormState>(initialForm)
   // Always retain/display a pre-existing admin gallery. The ordinary-user
@@ -444,8 +491,7 @@ export default function ProductForm({
   // not the live-edited form.name -- the lock question is "does this
   // product currently belong to a name-based group", which is a fact about
   // what's already saved, not about whatever the person is mid-typing.
-  // Uses groupCandidates (the same list availableGroupParents above already
-  // filters) rather than a separate fetch: any OTHER product in that list
+  // Uses groupCandidates rather than a separate fetch: any OTHER product in that list
   // sharing this product's exact name (case/whitespace-insensitive) means
   // the app's own name-based grouping (see routes/products.ts and
   // productGrouping.ts's resolveGroupKey) already treats this row as part
@@ -462,7 +508,7 @@ export default function ProductForm({
   // wins" tie-break the identity rule uses everywhere else, so every surface
   // independently agrees on which row that is without needing a stored flag.
   //
-  // Child rows therefore do not get their own uploader: the Choose File /
+  // Non-image-source rows therefore do not get their own uploader: the Choose File /
   // Take Photo / Open Files controls are hidden for them and the group's
   // images are managed from the group title instead (Products.tsx's
   // renderGroupActions "Add image", which opens THIS form for the lead).
@@ -470,7 +516,7 @@ export default function ProductForm({
   // and the group header would show whichever row happened to be lead --
   // the other six silently invisible.
   //
-  // Renaming a child out of the group makes it a standalone product, at
+  // Renaming a row out of the group makes it a standalone product, at
   // which point this recomputes and it regains its own uploader. That falls
   // out of name-based grouping rather than needing its own code path, which
   // is exactly why the name is the group axis.
@@ -497,8 +543,9 @@ export default function ProductForm({
   }, [groupCandidates, initialForm.name, currentProductId])
   const groupPosition = groupMembers.indexOf(currentProductId ?? -1) + 1
 
-  // True when this row is a CHILD of a name group: the group owns the photos
-  // and this row is not the owner.
+  // True when this row belongs to a same-name group but another peer row is
+  // the deterministic image source for the virtual group title. There is no
+  // stored parent/child relation -- every row remains an ordinary product row.
   const imagesOwnedByGroupLead = groupImageOwnerId != null && groupImageOwnerId !== currentProductId
 
   // Unlocked only for this open/edit session -- resets on every tab-reset
@@ -518,41 +565,9 @@ export default function ProductForm({
     return isKhmer ? fallbackKm : fallbackEn
   }
 
-  const categoryOptions = useMemo<AppSelectOption[]>(() => {
-    const currentCategory = String(form.category || '')
-    const options: AppSelectOption[] = [
-      { value: '', label: tr('category', 'Category', 'ប្រភេទ') },
-      ...categories.map((category) => ({ value: category.name, label: category.name })),
-    ]
-    if (currentCategory && !options.some((option) => String(option.value) === currentCategory)) {
-      options.splice(1, 0, { value: currentCategory, label: currentCategory })
-    }
-    return options
-  }, [categories, form.category])
-
-  const unitOptions = useMemo<AppSelectOption[]>(() => {
-    const currentUnit = String(form.unit || 'pcs')
-    const options = units.map((unit) => ({ value: unit.name, label: unit.name }))
-    if (currentUnit && !options.some((option) => String(option.value) === currentUnit)) {
-      return [{ value: currentUnit, label: currentUnit }, ...options]
-    }
-    return options
-  }, [form.unit, units])
-
-  const parentGroupOptions = useMemo<AppSelectOption[]>(() => {
-    const currentParentId = form.parent_id ? String(form.parent_id) : ''
-    const options: AppSelectOption[] = [
-      { value: '', label: tr('group_parent_none', 'No group parent (standalone or root item)', 'គ្មានក្រុមមេ (ឯករាជ្យ ឬ ជាឫសក្រុម)') },
-      ...availableGroupParents.map((candidate) => ({
-        value: String(candidate.id || ''),
-        label: candidate.name || tr('unnamed_group', 'Unnamed group', 'ក្រុមគ្មានឈ្មោះ'),
-      })),
-    ]
-    if (currentParentId && !options.some((option) => String(option.value) === currentParentId)) {
-      options.splice(1, 0, { value: currentParentId, label: tr('current_group_parent', 'Current group parent', 'ក្រុមមេបច្ចុប្បន្ន') })
-    }
-    return options
-  }, [availableGroupParents, form.parent_id])
+  const categorySuggestionOptions = useMemo(() => categories.map((category) => String(category.name || '').trim()).filter(Boolean), [categories])
+  const unitSuggestionOptions = useMemo(() => units.map((unit) => String(unit.name || '').trim()).filter(Boolean), [units])
+  const brandSuggestionOptions = useMemo(() => (brandOptions || []).map((brand) => String(brand || '').trim()).filter(Boolean), [brandOptions])
 
   const initialBranchOptions = useMemo<AppSelectOption[]>(() => {
     const currentBranchId = form.branch_id ? String(form.branch_id) : ''
@@ -597,7 +612,6 @@ export default function ProductForm({
       expiry_alert_days: editablePrice(initialForm.expiry_alert_days ?? 30),
       cost_price_usd: editablePrice(initialForm.cost_price_usd),
       cost_price_khr: editablePrice(initialForm.cost_price_khr),
-      parent_id: initialForm.parent_id ? Number(initialForm.parent_id) : null,
     })
     setImageList(normalizeGallery(initialForm, ADMIN_MAX_PRODUCT_GALLERY_IMAGES))
     // Defense-in-depth on top of the Products.tsx memoization fix (see
@@ -710,12 +724,13 @@ export default function ProductForm({
 
   // F1 (Part 408): CREATE mode live-searches the catalog while the name/
   // barcode is typed and speaks the identity rule BEFORE create -- the
-  // structured verdict modal offers go-back / add-as-child / proceed-as-new
-  // (as-new withheld for an exact twin, which the backend refuses anyway).
+  // structured verdict modal offers go-back / group-by-name / separate-name
+  // choices where they actually differ. Same-name rows always wrap together
+  // under the virtual group title; there is no stored parent/child link.
   const isCreateMode = !product?.id
   const [createMatches, setCreateMatches] = useState<CreateMatchCandidate[]>([])
   const [createVerdictOpen, setCreateVerdictOpen] = useState(false)
-  const createVerdictResolveRef = useRef<((choice: 'back' | 'child' | 'new') => void) | null>(null)
+  const createVerdictResolveRef = useRef<((choice: 'back' | 'group' | 'new') => void) | null>(null)
   const createMatchSeqRef = useRef(0)
   const createMatchAckRef = useRef('')
   const createVerdict: CreateMatchVerdict = useMemo(
@@ -749,11 +764,11 @@ export default function ProductForm({
     return () => window.clearTimeout(timer)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isCreateMode, form.name, form.barcode])
-  const askCreateVerdict = () => new Promise<'back' | 'child' | 'new'>((resolve) => {
+  const askCreateVerdict = () => new Promise<'back' | 'group' | 'new'>((resolve) => {
     createVerdictResolveRef.current = resolve
     setCreateVerdictOpen(true)
   })
-  const resolveCreateVerdict = (choice: 'back' | 'child' | 'new') => {
+  const resolveCreateVerdict = (choice: 'back' | 'group' | 'new') => {
     setCreateVerdictOpen(false)
     const resolve = createVerdictResolveRef.current
     createVerdictResolveRef.current = null
@@ -922,16 +937,17 @@ export default function ProductForm({
       return
     }
     // F1: the page-by-page confirm -- a matching name/barcode stops the
-    // create ONCE per exact typed identity and asks. 'child' adopts the
-    // matched group's canonical spelling so the new row joins the group
-    // instead of forking a near-miss; 'new' proceeds deliberately (never
-    // offered for an exact twin); 'back' returns to editing.
+    // create ONCE per exact typed identity and asks. 'group' adopts the
+    // matched same-name group's canonical spelling; grouping then happens
+    // automatically from the name only. No parent/group IDs are written.
+    // 'new' keeps a different typed name where that is actually possible;
+    // 'back' returns to editing.
     if (isCreateMode && createVerdict.kind) {
       const ackKey = `${String(form.name || '').trim().toLowerCase()}|${String(form.barcode || '').trim()}`
       if (createMatchAckRef.current !== ackKey) {
         const choice = await askCreateVerdict()
         if (choice === 'back') return
-        if (choice === 'child' && createVerdict.canonicalName) {
+        if (choice === 'group' && createVerdict.canonicalName) {
           setField('name', createVerdict.canonicalName)
           form.name = createVerdict.canonicalName
         }
@@ -943,8 +959,21 @@ export default function ProductForm({
       return
     }
     saveInFlightRef.current = true
+    // Manual create/edit never owns SKU or any stored parent/group flags.
+    // Strip legacy fields that may still be present on an older product
+    // object before building the payload. Same-name grouping is virtual and
+    // automatic in the list layer; every saved row is an ordinary product.
+    const {
+      sku: _ignoredSku,
+      parent_id: _ignoredParentId,
+      is_group: _ignoredIsGroup,
+      ...manualForm
+    } = form as ProductFormState & { sku?: unknown; parent_id?: unknown; is_group?: unknown }
+    void _ignoredSku
+    void _ignoredParentId
+    void _ignoredIsGroup
     const payload: ProductSavePayload = {
-      ...form,
+      ...manualForm,
       selling_price_usd: normalizePriceValue(parseNumericInput(form.selling_price_usd)),
       selling_price_khr: normalizePriceValue(parseNumericInput(form.selling_price_khr)),
       // No `?? selling` fallback -- see the load above. Whatever is in the
@@ -975,8 +1004,6 @@ export default function ProductForm({
       // caller's 3/5 action limit.
       image_gallery: imageList.slice(0, ADMIN_MAX_PRODUCT_GALLERY_IMAGES),
       image_path: imageList[0] || '',
-      is_group: form.parent_id ? 0 : (Number(form.is_group) ? 1 : 0),
-      parent_id: form.parent_id ? Number(form.parent_id) : null,
     }
     // D6: renaming an EXISTING product that shares its name with siblings
     // asks whether the whole group carries (9.1's regroup) or only this
@@ -1047,7 +1074,6 @@ export default function ProductForm({
   }
 
   const scanningLabel = tr('scanner_state_starting', 'Opening camera...', 'កំពុងបើកកាមេរ៉ា...')
-  const scanSkuLabel = tr('scan_sku', 'Scan SKU', 'ស្កេន SKU')
   const scanBarcodeLabel = tr('scan_barcode', 'Scan barcode', 'ស្កេនបាកូដ')
 
   const tabs: Array<{ id: ProductFormTab; label: string }> = [
@@ -1114,7 +1140,8 @@ export default function ProductForm({
               )}
             </div>
             {imagesOwnedByGroupLead ? (
-              /* Child row of a name group: the group is one product to the
+              /* Same-name row whose virtual group title uses another peer
+                 row as its image source: the group is one product to the
                  customer and carries one set of photos, managed from the
                  group title. Explaining that here beats hiding the section
                  outright -- otherwise the uploader simply vanishes with no
@@ -1249,13 +1276,9 @@ export default function ProductForm({
                   {createVerdict.priceMatches ? ` · ${tr('create_match_price_hint', 'same price too', 'តម្លៃដូចគ្នាដែរ')}` : ''}
                 </p>
               ) : null}
-              {/* Which group this row belongs to, and where in it.
-                  The "Group parent" dropdown further down only knows about
-                  parent_id, which name-grouped rows do not have -- so for a
-                  row that visibly sits under a group header it said "No group
-                  parent", which reads as "this is standalone" and is exactly
-                  wrong. Name IS the grouping, so it is stated here, next to
-                  the field that determines it. */}
+              {/* Group membership is automatic and name-based. There is no
+                  editable group-parent field: rows with the same normalized
+                  name are wrapped under the same group title. */}
               {isGroupedProduct && groupMembers.length > 1 ? (
                 <p className="mt-1 rounded-lg bg-slate-50 px-2.5 py-1.5 text-xs text-slate-600 dark:bg-slate-800/60 dark:text-slate-300">
                   {tr('part_of_group', 'Part of the group', 'ជាផ្នែកនៃក្រុម')}
@@ -1288,30 +1311,30 @@ export default function ProductForm({
                 </p>
               ) : null)}
             </div>
-            <div>
-              {/* P4: the operator's own short memory-aid chip -- free text,
-                  shown next to the name in Products/POS, filterable. */}
-              <label htmlFor="product-tag-label" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">{t('tag_label') || 'Tag'}</label>
+            <div className="max-w-[13rem]">
+              {/* Compact optional memory-aid: intentionally smaller than the
+                  catalog identity/detail fields below. */}
+              <label htmlFor="product-tag-label" className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{t('tag_label') || 'Tag'}</label>
               <input
                 id="product-tag-label"
                 name="product_tag_label"
-                className="input w-full"
+                className="input h-8 w-full text-sm"
                 value={(form.tag_label as string) || ''}
                 onChange={(event) => setField('tag_label', event.target.value)}
-                placeholder={t('tag_label_placeholder') || 'Your own short label (optional)'}
+                placeholder={t('tag_label_placeholder') || 'Short label (optional)'}
                 maxLength={40}
                 autoComplete="off"
               />
             </div>
             <div>
-              <label htmlFor="product-sku" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">{t('sku')}</label>
+              <label htmlFor="product-barcode" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">{t('barcode')}</label>
               <div className="flex gap-2">
                 <input
-                  id="product-sku"
-                  name="product_sku"
+                  id="product-barcode"
+                  name="product_barcode"
                   className="input flex-1"
-                  value={form.sku || ''}
-                  onChange={(event) => setField('sku', event.target.value)}
+                  value={form.barcode || ''}
+                  onChange={(event) => setField('barcode', event.target.value)}
                   autoCapitalize="off"
                   autoCorrect="off"
                   spellCheck={false}
@@ -1319,81 +1342,50 @@ export default function ProductForm({
                 <button
                   type="button"
                   className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg border border-gray-300 bg-white text-gray-600 transition-colors hover:border-blue-400 hover:bg-blue-50 hover:text-blue-700 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-300 dark:hover:border-blue-500 dark:hover:bg-blue-900/30 dark:hover:text-blue-300"
-                  onClick={() => openScanner('sku')}
-                  title={scannerLaunchingField === 'sku' ? scanningLabel : scanSkuLabel}
-                  aria-label={scanSkuLabel}
+                  onClick={() => openScanner('barcode')}
+                  title={scannerLaunchingField === 'barcode' ? scanningLabel : scanBarcodeLabel}
+                  aria-label={scanBarcodeLabel}
                   disabled={saving || !!scannerLaunchingField}
                 >
-                  <ScanLine className={`h-4 w-4 ${scannerLaunchingField === 'sku' ? 'animate-pulse' : ''}`} />
+                  <ScanLine className={`h-4 w-4 ${scannerLaunchingField === 'barcode' ? 'animate-pulse' : ''}`} />
                 </button>
               </div>
             </div>
             <div>
               <label htmlFor="product-category" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">{tr('category', 'Category', 'ប្រភេទ')}</label>
-              <AppSelect
+              <SuggestionTextInput
                 id="product-category"
                 name="product_category"
                 value={form.category || ''}
-                options={categoryOptions}
+                options={categorySuggestionOptions}
                 onChange={(value) => setField('category', value)}
+                placeholder={tr('type_or_select_category', 'Type or select category...', 'វាយ ឬជ្រើសរើសប្រភេទ...')}
                 ariaLabel={tr('category', 'Category', 'ប្រភេទ')}
-                className="w-full"
-                buttonClassName="input h-auto w-full"
               />
             </div>
             <div>
               <label htmlFor="product-brand" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">{tr('brand', 'Brand', 'ម៉ាក')}</label>
-              <input
+              <SuggestionTextInput
                 id="product-brand"
                 name="product_brand"
-                className="input"
-                list="product-brand-options"
                 value={form.brand || ''}
-                onChange={(event) => setField('brand', event.target.value)}
-                placeholder={tr('brand', 'Brand', 'ម៉ាក')}
+                options={brandSuggestionOptions}
+                onChange={(value) => setField('brand', value)}
+                placeholder={tr('type_or_select_brand', 'Type or select brand...', 'វាយ ឬជ្រើសរើសម៉ាក...')}
+                ariaLabel={tr('brand', 'Brand', 'ម៉ាក')}
               />
-              <datalist id="product-brand-options">
-                {(brandOptions || []).map((brand) => (
-                  <option key={brand} value={brand} />
-                ))}
-              </datalist>
             </div>
             <div>
               <label htmlFor="product-unit" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">{t('unit')}</label>
-              <AppSelect
+              <SuggestionTextInput
                 id="product-unit"
                 name="product_unit"
-                value={form.unit || 'pcs'}
-                options={unitOptions}
+                value={form.unit || ''}
+                options={unitSuggestionOptions}
                 onChange={(value) => setField('unit', value)}
+                placeholder={tr('type_or_select_unit', 'Type or select unit...', 'វាយ ឬជ្រើសរើសឯកតា...')}
                 ariaLabel={t('unit') || 'Unit'}
-                className="w-full"
-                buttonClassName="input h-auto w-full"
               />
-            </div>
-            <div>
-              <label htmlFor="product-parent-group" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
-                {tr('group_parent', 'Group Parent', 'ក្រុមមេ')}
-              </label>
-              <AppSelect
-                id="product-parent-group"
-                name="product_parent_group"
-                value={form.parent_id || ''}
-                options={parentGroupOptions}
-                onChange={(value) => {
-                  const nextParentId = value ? Number(value) : null
-                  setField('parent_id', nextParentId)
-                  if (nextParentId) setField('is_group', 0)
-                }}
-                ariaLabel={tr('group_parent', 'Group Parent', 'ក្រុមមេ')}
-                className="w-full"
-                buttonClassName="input h-auto w-full"
-              />
-              <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                {form.parent_id
-                  ? tr('group_parent_child_hint', 'This product will stay as a child variant inside the selected group.', 'ផលិតផលនេះនឹងនៅជាវ៉ារ្យ៉ង់កូននៅក្នុងក្រុមដែលបានជ្រើស។')
-                  : tr('group_parent_none_hint', 'Leave blank to keep this product standalone or make it the root of a group.', 'ទុកឲ្យទទេ ដើម្បីរក្សាផលិតផលនេះឯករាជ្យ ឬជាឫសរបស់ក្រុម។')}
-              </p>
             </div>
             <div className="relative">
               <label htmlFor="product-supplier" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">{tr('supplier', 'Supplier', 'អ្នកផ្គត់ផ្គង់')}</label>
@@ -1431,23 +1423,6 @@ export default function ProductForm({
             <div className="col-span-2">
               <label htmlFor="product-description" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">{t('description')}</label>
               <textarea id="product-description" name="product_description" className="input resize-none" rows={2} value={form.description || ''} onChange={(event) => setField('description', event.target.value)} />
-            </div>
-            <div className="col-span-2 rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 dark:border-gray-700 dark:bg-gray-800/70">
-              <label className="flex cursor-pointer items-center gap-2 text-sm font-medium text-gray-700 dark:text-gray-300">
-                <input
-                  type="checkbox"
-                  className="h-4 w-4 rounded"
-                  checked={Number(form.is_group) === 1}
-                  onChange={(event) => setField('is_group', event.target.checked ? 1 : 0)}
-                  disabled={!!form.parent_id}
-                />
-                {tr('product_group_parent', 'Treat this item as a group parent', 'កំណត់ផលិតផលនេះជា​ក្រុមមេ')}
-              </label>
-              <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                {form.parent_id
-                  ? tr('variant_child_hint', 'This product is already a variant inside another group.', 'ផលិតផលនេះជា variant នៅក្នុងក្រុមមួយរួចហើយ។')
-                  : tr('group_parent_hint', 'Group parents help you organize related variants with different costs, suppliers, or prices.', 'ក្រុមមេជួយរៀបចំ variant ដែលមានថ្លៃដើម អ្នកផ្គត់ផ្គង់ ឬតម្លៃលក់ខុសគ្នា។')}
-              </p>
             </div>
           </div>
         </div>
@@ -1603,14 +1578,10 @@ export default function ProductForm({
                   Save with no reason, no per-branch breakdown, and no
                   inventory_movements trail -- silently overwriting
                   products.stock_quantity out from under the real source of
-                  truth (SUM(branch_stock.quantity)) that BranchStockAdjuster
-                  just below this field already keeps in sync properly
-                  (reason required, batch required, tracked). Locked to
-                  read-only here so the ONLY way to change an existing
-                  product's quantity is through that adjuster's guarded
-                  flow; still freely editable for a brand-new product
-                  (no history to protect yet, no adjuster rendered until
-                  after the product exists). */}
+                  truth (SUM(branch_stock.quantity)). Locked to read-only
+                  here so an existing product is changed only through the
+                  separate tracked Adjust stock flow; still editable for a
+                  brand-new product before inventory history exists. */}
               <input
                 id="product-stock-quantity"
                 name="product_stock_quantity"
@@ -1627,8 +1598,8 @@ export default function ProductForm({
                 <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
                   {tr(
                     'product_stock_quantity_locked_hint',
-                    'Total across all branches. Use "Adjust stock" below to change it -- a reason is required.',
-                    'ចំនួនសរុបគ្រប់សាខា។ ប្រើ "លៃតម្រូវស្តុក" ខាងក្រោមដើម្បីផ្លាស់ប្តូរ — ត្រូវការហេតុផល។',
+                    'Total across all branches. Use the separate Adjust stock action to change it.',
+                    'ចំនួនសរុបគ្រប់សាខា។ ប្រើសកម្មភាព លៃតម្រូវស្តុក ដាច់ដោយឡែកដើម្បីផ្លាស់ប្តូរ។',
                   )}
                 </p>
               ) : null}
@@ -1708,57 +1679,26 @@ export default function ProductForm({
             </div>
           ) : null}
 
-          {/* Stock tab reorg: branch (+ its reason field, both inside
-              BranchStockAdjuster) first, barcode last -- moved here from
-              the Basic tab's identity grid so the whole "what stock is
-              this, where, why, and how do I scan it" flow reads top to
-              bottom as branch -> reason -> barcode, per the Aug 21 2026
-              ask to organize the Stock section that way (mirroring the
-              per-branch adjustment reason work). Barcode itself is still
-              a plain product-level field (not per-branch) -- only its
-              position in the form moved, not its meaning or how it's
-              saved/scanned. */}
           {activeTab === 'stock' && product && branches.length > 0 ? (
-            <BranchStockAdjuster
-              product={{
-                ...product,
-                id: product.id || currentProductId,
-                name: product.name || '',
-                cost_price_usd: parseNumericInput(product.cost_price_usd),
-                cost_price_khr: parseNumericInput(product.cost_price_khr),
-              }}
-              branches={branches}
-              user={user}
-              onDone={onSave}
-              t={t}
-            />
-          ) : null}
-
-          {activeTab === 'stock' ? <div>
-            <label htmlFor="product-barcode" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">{t('barcode')}</label>
-            <div className="flex gap-2">
-              <input
-                id="product-barcode"
-                name="product_barcode"
-                className="input flex-1"
-                value={form.barcode || ''}
-                onChange={(event) => setField('barcode', event.target.value)}
-                autoCapitalize="off"
-                autoCorrect="off"
-                spellCheck={false}
-              />
-              <button
-                type="button"
-                className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg border border-gray-300 bg-white text-gray-600 transition-colors hover:border-blue-400 hover:bg-blue-50 hover:text-blue-700 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-300 dark:hover:border-blue-500 dark:hover:bg-blue-900/30 dark:hover:text-blue-300"
-                onClick={() => openScanner('barcode')}
-                title={scannerLaunchingField === 'barcode' ? scanningLabel : scanBarcodeLabel}
-                aria-label={scanBarcodeLabel}
-                disabled={saving || !!scannerLaunchingField}
-              >
-                <ScanLine className={`h-4 w-4 ${scannerLaunchingField === 'barcode' ? 'animate-pulse' : ''}`} />
-              </button>
+            <div>
+              <p className="mb-2 text-sm font-medium text-gray-700 dark:text-gray-300">{tr('branch', 'Branch', 'សាខា')}</p>
+              <div className="space-y-2">
+                {branches.map((branch) => {
+                  const row = (Array.isArray(form.branch_stock) ? form.branch_stock : []).find((entry) => String(entry?.branch_id ?? '') === String(branch.id))
+                  const quantity = Number(row?.quantity || 0)
+                  return (
+                    <div key={String(branch.id)} className="flex items-center justify-between rounded-lg border border-gray-200 px-3 py-2 text-sm dark:border-gray-700">
+                      <span className="min-w-0 truncate text-gray-700 dark:text-gray-300">{branch.name}</span>
+                      <span className="ml-3 tabular-nums font-semibold text-gray-900 dark:text-gray-100">{quantity}</span>
+                    </div>
+                  )
+                })}
+              </div>
+              <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
+                {tr('adjust_stock_separate_hint', 'To change quantity, use the separate Adjust stock action.', 'ដើម្បីផ្លាស់ប្តូរចំនួន សូមប្រើសកម្មភាព លៃតម្រូវស្តុក ដាច់ដោយឡែក។')}
+              </p>
             </div>
-          </div> : null}
+          ) : null}
         </div>
       ) : null}
 
@@ -1820,7 +1760,7 @@ export default function ProductForm({
           {scannerField ? (
             <BarcodeScannerModal
               open={!!scannerField}
-              title={scannerField === 'sku' ? scanSkuLabel : scanBarcodeLabel}
+              title={scanBarcodeLabel}
               onClose={closeScanner}
               onDetected={applyScannedValue}
               t={t}
@@ -1848,8 +1788,8 @@ export default function ProductForm({
                   {createVerdict.kind === 'exact_twin'
                     ? tr('create_match_twin_body', 'An identical product already exists — same name and same barcode. Go back and adjust, or open the existing product instead.', 'ផលិតផលដូចគ្នាបេះបិទមានរួចហើយ — ឈ្មោះ និងបាកូដដូចគ្នា។ ត្រឡប់ក្រោយ ហើយកែសម្រួល ឬបើកផលិតផលដែលមានស្រាប់ជំនួសវិញ។')
                     : createVerdict.kind === 'name_match'
-                      ? tr('create_match_name_body', 'A product with this exact name already exists. Saving will add this as a child row of that group.', 'ផលិតផលដែលមានឈ្មោះដូចគ្នាបេះបិទមានរួចហើយ។ ការរក្សាទុកនឹងបន្ថែមវាជាជួរកូននៃក្រុមនោះ។')
-                      : tr('create_match_barcode_body', 'This barcode already belongs to "{name}". Join that group (adopting its name), or keep this as a separate product that shares the barcode.', 'បាកូដនេះជារបស់ "{name}" រួចហើយ។ ចូលរួមក្រុមនោះ (ដោយយកឈ្មោះរបស់វា) ឬរក្សាវាជាផលិតផលដាច់ដោយឡែកដែលប្រើបាកូដរួមគ្នា។').replace('{name}', createVerdict.canonicalName)}
+                      ? tr('create_match_name_body', 'A product with this exact name already exists. Saving adds another ordinary row under the same automatic group title.', 'ផលិតផលដែលមានឈ្មោះដូចគ្នាបេះបិទមានរួចហើយ។ ការរក្សាទុកនឹងបន្ថែមជួរផលិតផលធម្មតាមួយទៀតក្រោមចំណងជើងក្រុមស្វ័យប្រវត្តិដូចគ្នា។')
+                      : tr('create_match_barcode_body', 'This barcode already belongs to "{name}". Use that same name to wrap this row under the same automatic group title, or keep your different name as a separate product.', 'បាកូដនេះជារបស់ "{name}" រួចហើយ។ ប្រើឈ្មោះដូចគ្នា ដើម្បីឲ្យជួរនេះត្រូវបានរុំក្រោមចំណងជើងក្រុមស្វ័យប្រវត្តិដូចគ្នា ឬរក្សាឈ្មោះផ្សេងរបស់អ្នកជាផលិតផលដាច់ដោយឡែក។').replace('{name}', createVerdict.canonicalName)}
                 </p>
                 {createVerdict.priceMatches ? (
                   <p className="text-xs">
@@ -1858,10 +1798,10 @@ export default function ProductForm({
                 ) : null}
               </div>
             </div>
-            {createVerdict.beforeAfter.child || (createVerdict.allowProceedAsNew && createVerdict.beforeAfter.asNew) ? (
+            {createVerdict.beforeAfter.group || (createVerdict.allowProceedAsNew && createVerdict.beforeAfter.asNew) ? (
               <div className="space-y-1 rounded-lg bg-slate-50 p-3 text-xs text-slate-600 dark:bg-slate-800/60 dark:text-slate-300">
-                {createVerdict.beforeAfter.child ? (
-                  <p><span className="font-semibold">{tr('create_match_child_label', 'As a child:', 'ជាកូន៖')}</span> {createVerdict.beforeAfter.child}</p>
+                {createVerdict.beforeAfter.group ? (
+                  <p><span className="font-semibold">{tr('create_match_group_label', 'Grouped by name:', 'ដាក់ជាក្រុមតាមឈ្មោះ៖')}</span> {createVerdict.beforeAfter.group}</p>
                 ) : null}
                 {createVerdict.allowProceedAsNew && createVerdict.beforeAfter.asNew ? (
                   <p><span className="font-semibold">{tr('create_match_new_label', 'As new:', 'ជាថ្មី៖')}</span> {createVerdict.beforeAfter.asNew}</p>
@@ -1880,9 +1820,9 @@ export default function ProductForm({
                 <button
                   type="button"
                   className="rounded-lg bg-amber-600 px-4 py-2 text-sm text-white hover:bg-amber-700"
-                  onClick={() => resolveCreateVerdict('child')}
+                  onClick={() => resolveCreateVerdict('group')}
                 >
-                  {tr('create_match_child_button', 'Add as child of "{name}"', 'បន្ថែមជាកូននៃ "{name}"').replace('{name}', createVerdict.canonicalName)}
+                  {tr('create_match_group_button', 'Use name "{name}" and group automatically', 'ប្រើឈ្មោះ "{name}" ហើយដាក់ជាក្រុមដោយស្វ័យប្រវត្តិ').replace('{name}', createVerdict.canonicalName)}
                 </button>
               ) : null}
               {createVerdict.allowProceedAsNew ? (

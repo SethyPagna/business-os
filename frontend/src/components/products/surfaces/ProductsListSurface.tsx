@@ -509,16 +509,82 @@ export default function ProductsListSurface({
               </div>
               {!isCollapsed ? section.groups.map((group) => {
                 const groupCollapsed = collapsedProductGroups.has(group.key)
-                void groupCollapsed
-                // Small screens skip group TITLE rows entirely (user, Aug
-                // 30: "no need group title rows"): every product — a
-                // standalone or a former child row — renders as its own
-                // flat card, each carrying the yellow batch-count badge
-                // the card itself now draws. Desktop keeps its grouped
-                // table; the group summary/actions stay reachable there.
+                // Keep the exact same grouping model on every viewport:
+                // same-name rows are peer product rows wrapped by a virtual
+                // group title. On mobile we used to flatten these rows into
+                // independent cards, which made an existing group disappear
+                // below the `sm` breakpoint even though desktop still showed
+                // it. Only groups with more than one DISPLAY row get a
+                // wrapper; a one-row group remains an ordinary product card.
+                const showGroupRow = group.rows.length > 1
+                if (!showGroupRow) {
+                  return (
+                    <div key={group.key} data-product-jump-id={group.anchorId}>
+                      {group.rows.map((product) => renderMobileProductCard(product, { indented: false }))}
+                    </div>
+                  )
+                }
+
                 return (
-                  <div key={group.key} className="space-y-2" data-product-jump-id={group.anchorId}>
-                    {group.rows.map((product) => renderMobileProductCard(product, { indented: false }))}
+                  <div
+                    key={group.key}
+                    className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900/70"
+                    data-product-jump-id={group.anchorId}
+                    {...(bindGroupHold ? bindGroupHold(group) : {})}
+                  >
+                    <div className="flex min-w-0 items-stretch gap-3 bg-slate-50/90 px-3 py-2.5 dark:bg-slate-800/75">
+                      {selectionModeActive ? (
+                        <div className="flex shrink-0 items-start pt-1">
+                          <input
+                            type="checkbox"
+                            className="h-4 w-4 rounded"
+                            checked={isSelectionScopeFullySelected(group.ids)}
+                            ref={(node) => {
+                              if (node) node.indeterminate = isSelectionScopePartiallySelected(group.ids)
+                            }}
+                            onChange={(event) => toggleSelectionScope(group.ids, event.target.checked)}
+                            aria-label={`Select ${group.name}`}
+                          />
+                        </div>
+                      ) : null}
+                      <div className="flex shrink-0 items-center justify-center">
+                        {renderGroupThumbnail ? renderGroupThumbnail(group) : null}
+                      </div>
+                      <div className="flex min-w-0 flex-1 flex-col justify-center">
+                        <div className="flex min-w-0 items-start justify-between gap-2">
+                          <button
+                            type="button"
+                            className="min-w-0 flex-1 break-words text-left text-sm font-semibold text-slate-800 dark:text-slate-100"
+                            onClick={() => toggleProductGroup(group.key)}
+                          >
+                            {group.name}
+                          </button>
+                          <div className="flex shrink-0 items-center gap-1">
+                            {renderGroupActions ? renderGroupActions(group) : null}
+                            <button
+                              type="button"
+                              className="rounded-lg p-1.5 text-slate-500 hover:bg-white hover:text-slate-700 dark:text-slate-300 dark:hover:bg-slate-700 dark:hover:text-white"
+                              onClick={() => toggleProductGroup(group.key)}
+                              aria-label={groupCollapsed ? (t('expand') || 'Expand') : (t('collapse') || 'Collapse')}
+                            >
+                              {groupCollapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                            </button>
+                          </div>
+                        </div>
+                        <div className="mt-1 flex min-w-0 flex-wrap gap-1 text-[10px] text-slate-500 dark:text-slate-300">
+                          {getGroupSummaryParts(group).map((part) => (
+                            <span key={`${group.key}-mobile-${part}`} className="max-w-full truncate rounded-full bg-white px-1.5 py-0.5 dark:bg-slate-700">
+                              {part}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                    {!groupCollapsed ? (
+                      <div className="bg-white dark:bg-slate-900/70">
+                        {group.rows.map((product) => renderMobileProductCard(product, { indented: true }))}
+                      </div>
+                    ) : null}
                   </div>
                 )
               }) : null}

@@ -142,6 +142,7 @@ export default function BarcodeScannerModal({
   const lastScanAtRef = useRef(0)
   const [manualValue, setManualValue] = useState('')
   const [status, setStatus] = useState<ScannerStatus>('idle')
+  const statusRef = useRef<ScannerStatus>('idle')
   const [error, setError] = useState('')
   const [permissionState, setPermissionState] = useState<ScannerPermissionState>('unknown')
   const [photoBusy, setPhotoBusy] = useState(false)
@@ -179,6 +180,8 @@ export default function BarcodeScannerModal({
   }), [tr, hideManualEntry])
 
   const promptDismissedMessage = tr('scan_prompt_dismissed', 'The camera prompt was dismissed. Tap below to try again, or enter the code manually.', 'សំណើសុំកាមេរ៉ាត្រូវបានបិទចោល។ ចុចខាងក្រោមដើម្បីសាកម្ដងទៀត ឬបញ្ចូលកូដដោយដៃ។')
+
+  useEffect(() => { statusRef.current = status }, [status])
 
   const cleanup = useCallback((): void => {
     startTokenRef.current = 0
@@ -415,6 +418,24 @@ export default function BarcodeScannerModal({
     }
   }, [cleanup, open, prepareScanner])
 
+  // iOS can keep a PWA page mounted while it is backgrounded or while the
+  // user switches away. Stop every camera track immediately in that state;
+  // resume only when this modal is still open and the page becomes visible.
+  useEffect(() => {
+    if (!open || typeof document === 'undefined') return undefined
+    const handleVisibility = () => {
+      if (document.visibilityState === 'hidden') cleanup()
+      else void prepareScanner()
+    }
+    const handlePageHide = () => cleanup()
+    document.addEventListener('visibilitychange', handleVisibility)
+    window.addEventListener('pagehide', handlePageHide)
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibility)
+      window.removeEventListener('pagehide', handlePageHide)
+    }
+  }, [cleanup, open, prepareScanner])
+
   useEffect(() => {
     if (!open) return undefined
     let cancelled = false
@@ -428,10 +449,10 @@ export default function BarcodeScannerModal({
         return
       }
       setPermissionState(nextState)
-      if (nextState === 'granted' && status !== 'scanning' && status !== 'starting') {
+      if (nextState === 'granted' && statusRef.current !== 'scanning' && statusRef.current !== 'starting') {
         startCamera({ preserveManualValue: true })
       }
-      if (nextState === 'denied' && status === 'scanning') {
+      if (nextState === 'denied' && statusRef.current === 'scanning') {
         cleanup()
         setStatus('blocked')
         setError(labels.cameraPermissionBlocked)
@@ -448,7 +469,7 @@ export default function BarcodeScannerModal({
       permissionCleanupRef.current?.()
       permissionCleanupRef.current = () => {}
     }
-  }, [cleanup, labels.cameraDocumentBlocked, labels.cameraPermissionBlocked, open, startCamera, status])
+  }, [cleanup, labels.cameraDocumentBlocked, labels.cameraPermissionBlocked, open, startCamera])
 
   if (!open) return null
 
@@ -622,4 +643,3 @@ export default function BarcodeScannerModal({
     </Modal>
   )
 }
-

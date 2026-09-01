@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import Modal from '../shared/Modal'
-import DateTimeRangePicker, { todayDateTimeRange, type DateTimeRange } from '../shared/DateTimeRangePicker.tsx'
+import DateTimeRangePicker, { EMPTY_DATE_TIME_RANGE, type DateTimeRange } from '../shared/DateTimeRangePicker.tsx'
 import { getCustomerSalesReport } from '../../api/salesTransport.ts'
 
 // X4 (Part 395): the customer leg of the per-contact drills -- purchase
@@ -37,7 +37,7 @@ function money(value: unknown): string {
 }
 
 export default function CustomerPurchasesReportModal({ customerId, customerName, t, onClose }: CustomerPurchasesReportModalProps) {
-  const [range, setRange] = useState<DateTimeRange>(() => todayDateTimeRange())
+  const [range, setRange] = useState<DateTimeRange>(() => ({ ...EMPTY_DATE_TIME_RANGE }))
   const [totals, setTotals] = useState<CustomerSalesTotals | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')

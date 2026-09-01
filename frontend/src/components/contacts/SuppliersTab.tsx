@@ -37,7 +37,6 @@ import { buildPeriodFilterOptions } from '../../utils/periodFilterOptions.ts'
 import { useActionHistory } from '../../utils/actionHistory.ts'
 import { cloneHistorySnapshot, extractHistoryResultId } from '../../utils/historyHelpers.ts'
 import { runConcurrentTasks } from '../../utils/bulkOps.ts'
-import { fuzzyTextMatches } from '../../utils/searchMatch.ts'
 import { useDebouncedValue } from '../../utils/useDebouncedValue.ts'
 import {
   CONTACT_OPTION_LIMIT,
@@ -476,6 +475,7 @@ function SuppliersTab({ t, notify, active = true, initialSearch }: SuppliersTabP
   const [supplierPage, setSupplierPage] = useState(1)
   const [supplierPageSize, setSupplierPageSize] = useState(DEFAULT_PAGE_SIZE)
   const [supplierTotal, setSupplierTotal] = useState(0)
+  const [availableYears, setAvailableYears] = useState<string[]>([])
   const [collapsedSections, setCollapsedSections] = useState<Set<string>>(() => new Set())
   const [historyReady, setHistoryReady] = useState(false)
   // Y1: same shared 180ms debounce as the other list pages (was only
@@ -488,6 +488,7 @@ function SuppliersTab({ t, notify, active = true, initialSearch }: SuppliersTabP
     search: deferredSearch.trim() || undefined,
     year: yearFilter !== 'all' ? yearFilter : undefined,
     month: yearFilter !== 'all' && monthFilter !== 'all' ? monthFilter : undefined,
+    gender: genderFilter !== 'all' ? genderFilter : undefined,
     // Server-side ORDER BY + paging (Part-77 parity finding): the shared
     // contacts list handler has supported sort/dir/page/pageSize since the
     // CustomersTab wiring; this tab used to fetch every row unpaged and
@@ -498,12 +499,12 @@ function SuppliersTab({ t, notify, active = true, initialSearch }: SuppliersTabP
     dir: groupMode === 'alphabet' ? 'asc' : sortDirection,
     page: supplierPage,
     pageSize: supplierPageSize,
-  }), [deferredSearch, groupMode, monthFilter, sortDirection, supplierPage, supplierPageSize, yearFilter])
+  }), [deferredSearch, genderFilter, groupMode, monthFilter, sortDirection, supplierPage, supplierPageSize, yearFilter])
   // A search/filter/sort change re-scopes the whole result set -- start
   // back at page 1 (the sibling resets on sort; filters are included here
   // deliberately so a filter applied from page 3 can't land on an empty
   // page).
-  useEffect(() => { setSupplierPage(1) }, [deferredSearch, groupMode, monthFilter, sortDirection, yearFilter])
+  useEffect(() => { setSupplierPage(1) }, [deferredSearch, genderFilter, groupMode, monthFilter, sortDirection, yearFilter])
   const supplierTotalPages = Math.max(1, Math.ceil(Math.max(0, Number(supplierTotal || 0)) / Math.max(1, Number(supplierPageSize || 1))))
   // Same self-heal as CustomersTab/Products/Inventory (see the CustomersTab
   // comment): the server clamps `page` to [1, 100000], not to the query's
@@ -513,50 +514,27 @@ function SuppliersTab({ t, notify, active = true, initialSearch }: SuppliersTabP
     if (supplierPage > supplierTotalPages) setSupplierPage(supplierTotalPages)
   }, [supplierPage, supplierTotalPages])
 
-  // Same fix as CustomersTab.tsx's own filteredBySearch (see its comment):
-  // the server's suppliers_fts search (part 108) is typo/joiner/order-
-  // tolerant, this literal `.includes()` chain was not, so it could hide a
-  // supplier the server correctly matched. Switched to the shared
-  // `fuzzyTextMatches` over a joined haystack matching suppliers_fts's own
-  // column set (name, phone, email, company, contact_person).
-  const filteredBySearch = useMemo(() => suppliers.filter((supplier) => (
-    fuzzyTextMatches(
-      [supplier.name, supplier.phone, supplier.email, supplier.company, supplier.contact_person].join(' '),
-      deferredSearch,
-    )
-  )), [deferredSearch, suppliers])
-
-  // Same same-page gender narrowing as CustomersTab.tsx (see its comment
-  // -- no server-side gender query param on GET /suppliers).
-  const filteredByGender = useMemo(
-    () => (genderFilter === 'all' ? filteredBySearch : filteredBySearch.filter((supplier) => (
-      genderFilter === 'unspecified' ? !supplier.gender : supplier.gender === genderFilter
-    ))),
-    [filteredBySearch, genderFilter],
-  )
-
+  // Search, date, and gender are server-side before paging. Do not narrow
+  // the current page again in the browser; doing so makes valid rows on other
+  // pages unreachable and can contradict the FTS match set.
   const timeMode = useMemo(() => getTimeGroupingMode(yearFilter, monthFilter), [monthFilter, yearFilter])
-  const availableYears = useMemo(
-    () => getAvailableYears(filteredByGender, (supplier) => supplier?.created_at),
-    [filteredByGender],
-  )
   const filteredSections = useMemo(() => (
     groupMode === 'alphabet'
-      ? buildAlphabetActionSections(filteredByGender, {
+      ? buildAlphabetActionSections(suppliers, {
         getName: (supplier) => supplier?.name,
         getItemId: (supplier) => Number(supplier?.id),
         sortDirection: 'asc',
       })
-      : buildTimeActionSections(filteredByGender, {
+      : buildTimeActionSections(suppliers, {
         getDate: (supplier) => supplier?.created_at,
         getItemId: (supplier) => Number(supplier?.id),
-        year: yearFilter,
-        month: monthFilter,
+        year: 'all',
+        month: 'all',
         timeMode,
         groupMode: 'time',
         sortDirection,
       })
-  ), [filteredByGender, groupMode, monthFilter, sortDirection, timeMode, yearFilter])
+  ), [groupMode, sortDirection, suppliers, timeMode])
 
   useEffect(() => {
     setCollapsedSections((current) => new Set([...current].filter((id) => filteredSections.some((section) => section.id === id))))
@@ -694,12 +672,18 @@ function SuppliersTab({ t, notify, active = true, initialSearch }: SuppliersTabP
         // extraction the Customers sibling does; a bare-array response
         // (older cache shapes) falls back to the row count.
         const payload = data && typeof data === 'object' && !Array.isArray(data)
-          ? data as { total?: unknown; page?: unknown; pageSize?: unknown }
+          ? data as { total?: unknown; page?: unknown; pageSize?: unknown; availableYears?: unknown }
           : null
         setSupplierTotal(Number(payload?.total || rows.length || 0))
         if (payload) {
           setSupplierPage(Number(payload.page || supplierPage) || 1)
           setSupplierPageSize(Number(payload.pageSize || supplierPageSize) || supplierPageSize)
+          const years = Array.isArray(payload.availableYears)
+            ? payload.availableYears.map((value) => String(value)).filter((value) => /^\d{4}$/.test(value))
+            : getAvailableYears(rows, (supplier) => supplier?.created_at)
+          setAvailableYears(years)
+        } else {
+          setAvailableYears(getAvailableYears(rows, (supplier) => supplier?.created_at))
         }
         loadedOnceRef.current = true
         setLoadError('')
@@ -1388,7 +1372,7 @@ function SuppliersTab({ t, notify, active = true, initialSearch }: SuppliersTabP
           <SupplierPurchasesModal
             supplierId={selected.id as number}
             supplierName={String(selected.name || '')}
-            fetchPurchases={async (id) => (await loadContactReadTransportModule()).getSupplierPurchases(id)}
+            fetchPurchases={async (id, params) => (await loadContactReadTransportModule()).getSupplierPurchases(id, params)}
             onClose={() => setModal('detail')}
             t={t}
           />

@@ -1,3 +1,4 @@
+import { todayStr } from '../../utils/dateHelpers.ts'
 // Main Inventory page sub-components imported from sibling files.
 
 import { Suspense, useState, useEffect, useCallback, useMemo, useRef } from 'react'
@@ -15,6 +16,7 @@ import LazyPortalMenu from '../shared/LazyPortalMenu'
 import type { PortalMenuItem } from '../shared/PortalMenu'
 import FilterMenu from '../shared/FilterMenu'
 import SearchInput from '../shared/SearchInput'
+import ScanSearchButton from '../shared/ScanSearchButton'
 import { toggleMultiValue, isMultiActive, matchesMulti, parseMultiValues } from '../../utils/multiSelect'
 import ActionHistoryBar from '../shared/ActionHistoryBar'
 import PaginationControls, { clampPage } from '../shared/PaginationControls'
@@ -41,9 +43,9 @@ const ExportRangeDialog = lazyRetry(() => import('../shared/ExportRangeDialog'),
 
 import { buildMovementGroups, getMovementGroupPage, movementColorClass, movementColorClassForRecord, movementGroupHaystack, translateMovementType } from './movementGroups'
 import { buildStockHealthSegments } from './stockHealthSummary'
-import StatsStrip, { statsPresetRange, type StatCardDef } from '../shared/StatsStrip.tsx'
+import StatsStrip, { type StatCardDef } from '../shared/StatsStrip.tsx'
 import StatsRangeRow from '../shared/StatsRangeRow.tsx'
-import { todayDateTimeRange, type DateTimeRange } from '../shared/DateTimeRangePicker'
+import { type DateTimeRange } from '../shared/DateTimeRangePicker'
 import { getSalesStatsStrip } from '../../api/salesTransport.ts'
 import { getReturnsReport } from '../../api/returnsReadTransport.ts'
 
@@ -54,10 +56,9 @@ import { getReturnsReport } from '../../api/returnsReadTransport.ts'
 // place to read it from.
 const DEFAULT_ADD_QUANTITY = 1
 
-// Same helper (and same UTC-day convention) as ReceiveBatchModal's default
-// received date -- every entry point must agree on what "today" means.
+// All received-date defaults use the fixed Cambodia business calendar day.
 function todayIsoDate(): string {
-  return new Date().toISOString().slice(0, 10)
+  return todayStr()
 }
 import { useIsPageActive } from '../shared/pageActivity'
 import { useActionHistory } from '../../utils/actionHistory.ts'
@@ -388,7 +389,7 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
   // Dashboard and Reports for the same dates.
   type InventoryStripKernel = { totals?: Record<string, number> }
   type InventoryStripReturns = { totals?: { count?: number; refund_usd?: number; compensation_usd?: number; loss_usd?: number }; by_type?: Array<{ return_type?: string; count?: number }> }
-  const [stripRange, setStripRange] = useState<DateTimeRange>(() => statsPresetRange('today'))
+  const [stripRange, setStripRange] = useState<DateTimeRange>(() => ({ startDate: '', endDate: '', startTime: '', endTime: '' }))
   const [stripKernel, setStripKernel] = useState<InventoryStripKernel | null>(null)
   const [stripCustomerReturns, setStripCustomerReturns] = useState<InventoryStripReturns | null>(null)
   const [stripSupplierReturns, setStripSupplierReturns] = useState<InventoryStripReturns | null>(null)
@@ -465,8 +466,10 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
   const [movFilter,     setMovFilter]     = useState('all')
   const [movementUserFilter, setMovementUserFilter] = useState('all')
   const [userOptions, setUserOptions] = useState<InventoryUserOption[]>([])
-  const [movementStartDate, setMovementStartDate] = useState(() => todayDateTimeRange().startDate)
-  const [movementEndDate, setMovementEndDate] = useState(() => todayDateTimeRange().endDate)
+  // Movements opens across all time. A pre-filled "today" range hid older
+  // history before the person had chosen to filter it.
+  const [movementStartDate, setMovementStartDate] = useState('')
+  const [movementEndDate, setMovementEndDate] = useState('')
   // The Start → End range picker is the ONE date control on Movements now
   // (user, Aug 31: "remove [All time]; the date is default, and start date
   // and end date for customizing which is for many sections and pages
@@ -2221,6 +2224,7 @@ ${inventoryFeesFormulaText}`,
               className="min-w-[3.5rem] flex-1"
               inputClassName="text-sm"
             />
+            <ScanSearchButton onDetected={handleSearchChange} t={(key) => t(key) || key} />
             {/* AND/OR toggle removed (Aug 19 2026 UI request) -- search is
                 always 'AND' now, same change as Products.tsx/POS.tsx. */}
             <FilterMenu

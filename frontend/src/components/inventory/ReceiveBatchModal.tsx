@@ -1,3 +1,4 @@
+import { todayStr } from '../../utils/dateHelpers.ts'
 import { useEffect, useRef, useState } from 'react'
 import X from 'lucide-react/dist/esm/icons/x.js'
 import { registerDirtyWork } from '../../utils/dirtyWork.ts'
@@ -8,7 +9,7 @@ import { batchDisplayLabel } from '../../utils/batchLabel.ts'
 import SupplierPickerField from '../shared/SupplierPickerField.tsx'
 
 function todayIsoDate(): string {
-  return new Date().toISOString().slice(0, 10)
+  return todayStr()
 }
 
 type InventoryId = number | string

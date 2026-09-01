@@ -199,16 +199,35 @@ export type SaleLinkMissing = {
   dismissed?: number
 }
 
-export type SaleLinkConflicts = { mismatches: SaleLinkMismatch[]; missing: SaleLinkMissing[] }
+export type SaleLinkConflictPage = { page: number; total: number; totalPages: number }
+export type SaleLinkConflicts = {
+  mismatches: SaleLinkMismatch[]
+  missing: SaleLinkMissing[]
+  pagination?: {
+    pageSize: number
+    mismatches: SaleLinkConflictPage
+    missing: SaleLinkConflictPage
+  }
+}
 
-export async function getSaleLinkConflicts(opts: { includeDismissed?: boolean } = {}): Promise<SaleLinkConflicts> {
-  const path = opts.includeDismissed
-    ? '/api/customers/link-conflicts?includeDismissed=1'
-    : '/api/customers/link-conflicts'
+export async function getSaleLinkConflicts(opts: {
+  includeDismissed?: boolean
+  mismatchPage?: number
+  missingPage?: number
+  pageSize?: number
+} = {}): Promise<SaleLinkConflicts> {
+  const params = new URLSearchParams()
+  if (opts.includeDismissed) params.set('includeDismissed', '1')
+  if (opts.mismatchPage) params.set('mismatchPage', String(opts.mismatchPage))
+  if (opts.missingPage) params.set('missingPage', String(opts.missingPage))
+  if (opts.pageSize) params.set('pageSize', String(opts.pageSize))
+  const query = params.toString()
+  const path = `/api/customers/link-conflicts${query ? `?${query}` : ''}`
   const result = await apiFetch('GET', path) as Partial<SaleLinkConflicts> | null
   return {
     mismatches: Array.isArray(result?.mismatches) ? result!.mismatches! : [],
     missing: Array.isArray(result?.missing) ? result!.missing! : [],
+    pagination: result?.pagination,
   }
 }
 

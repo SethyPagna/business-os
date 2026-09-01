@@ -1438,7 +1438,7 @@ assert.match(
 // branchSummary loader removed with the stat cards (see the note above).
 assert.match(
   branches,
-  /withLoaderTimeout\(\s*\(\) => branchApi\.getTransfers\(\{\}\),\s*'Branch transfers',\s*BRANCH_TRANSFERS_TIMEOUT_MS,\s*\)/,
+  /withLoaderTimeout\(\s*\(\) => branchApi\.getTransfers\(\{[\s\S]*?startDate:[\s\S]*?endDate:[\s\S]*?\}\),\s*'Branch transfers',\s*BRANCH_TRANSFERS_TIMEOUT_MS,\s*\)/,
   'branch transfer history should timeout slow reads',
 )
 assert.match(

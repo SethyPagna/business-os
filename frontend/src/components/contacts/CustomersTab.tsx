@@ -29,7 +29,6 @@ import { buildPeriodFilterOptions } from '../../utils/periodFilterOptions.ts'
 import { useActionHistory } from '../../utils/actionHistory.ts'
 import { cloneHistorySnapshot, extractHistoryResultId } from '../../utils/historyHelpers.ts'
 import { runConcurrentTasks } from '../../utils/bulkOps.ts'
-import { fuzzyTextMatches } from '../../utils/searchMatch.ts'
 import { useDebouncedValue } from '../../utils/useDebouncedValue.ts'
 import {
   CONTACT_OPTION_LIMIT,
@@ -158,6 +157,7 @@ interface ApiListResponse {
   total?: unknown
   page?: unknown
   pageSize?: unknown
+  availableYears?: unknown
 }
 
 type ActionHistoryBarHistory = ComponentProps<typeof ActionHistoryBar>['history']
@@ -277,6 +277,7 @@ function CustomersTab({ t, notify, active = true, initialSearch }: CustomersTabP
   const [customerPage, setCustomerPage] = useState(1)
   const [customerPageSize, setCustomerPageSize] = useState(DEFAULT_PAGE_SIZE)
   const [customerTotal, setCustomerTotal] = useState(0)
+  const [availableYears, setAvailableYears] = useState<string[]>([])
   const [yearFilter, setYearFilter] = useState('all')
   const [monthFilter, setMonthFilter] = useState('all')
   const [genderFilter, setGenderFilter] = useState('all')
@@ -306,10 +307,11 @@ function CustomersTab({ t, notify, active = true, initialSearch }: CustomersTabP
     search: deferredSearch.trim() || undefined,
     year: yearFilter !== 'all' ? yearFilter : undefined,
     month: yearFilter !== 'all' && monthFilter !== 'all' ? monthFilter : undefined,
+    gender: genderFilter !== 'all' ? genderFilter : undefined,
     // Server-side ORDER BY (see CUSTOMER_SORT_FIELD_DEFS' comment).
     sort: customerSortSpec.field === 'date' ? 'created' : 'name',
     dir: customerSortSpec.direction,
-  }), [customerSortSpec, deferredSearch, monthFilter, yearFilter])
+  }), [customerSortSpec, deferredSearch, genderFilter, monthFilter, yearFilter])
   // A sort change re-orders the whole result set -- start back at page 1.
   useEffect(() => { setCustomerPage(1) }, [customerSortSpec])
   const customerQuery = useMemo(() => ({
@@ -337,62 +339,32 @@ function CustomersTab({ t, notify, active = true, initialSearch }: CustomersTabP
 
   // Was a literal `.toLowerCase().includes(query)` check per field -- real,
   // confirmed gap: routes/contacts.ts's own customer search (part 108) now
-  // runs through customers_fts (typo/joiner/diacritic-tolerant, same FTS5
-  // machinery products.ts uses), so the server can return a customer this
-  // literal substring check then silently dropped from the visible list on
-  // this client-side re-filter pass -- e.g. a typo'd query the server's FTS5
-  // matched via its own tolerance, or "sokha dara" matching a customer named
-  // "Dara Sokha" (word order), neither of which a plain `.includes()` can
-  // ever satisfy. Same class of bug the Products/POS/Sales/Returns re-filter
-  // comments already document (this pass must stay at least as permissive as
-  // the server's own match set, never stricter) -- those pages were already
-  // fixed; this one and Suppliers/Delivery below were not. Switched to the
-  // shared `fuzzyTextMatches` (searchMatch.ts) over a single joined
-  // haystack, matching the fields customers_fts indexes.
-  const filteredBySearch = useMemo(() => customers.filter((customer) => (
-    fuzzyTextMatches(
-      [customer.name, customer.phone, customer.email, customer.membership_number, customer.address].join(' '),
-      deferredSearch,
-    )
-  )), [customers, deferredSearch])
-
-  // Client-side gender filter -- there's no server-side gender query param
-  // (contacts.ts's GET /customers doesn't filter by it), so this narrows
-  // the already-paginated page's worth of rows the same way the search
-  // re-filter above does. Good enough for a same-page toggle; a person
-  // filtering by gender across the *whole* customer list, not just the
-  // current page, still needs to page through -- a real limitation worth
-  // a server-side `gender` query param in a future session if this comes
-  // up as more than a same-page narrowing tool.
-  const filteredByGender = useMemo(
-    () => (genderFilter === 'all' ? filteredBySearch : filteredBySearch.filter((customer) => (
-      genderFilter === 'unspecified' ? !customer.gender : customer.gender === genderFilter
-    ))),
-    [filteredBySearch, genderFilter],
-  )
-
+  // Search, date, and gender are all applied by the D1 query BEFORE LIMIT/OFFSET.
+  // Never re-filter a server page in the browser: doing so can hide a valid
+  // FTS match or make a whole page look empty while matching records exist on
+  // later pages. The client only groups the already-authoritative page rows.
   const timeMode = useMemo(() => getTimeGroupingMode(yearFilter, monthFilter), [monthFilter, yearFilter])
-  const availableYears = useMemo(
-    () => getAvailableYears(filteredByGender, (customer) => customer?.created_at),
-    [filteredByGender],
-  )
   const filteredSections = useMemo(() => (
     groupMode === 'alphabet'
-      ? buildAlphabetActionSections(filteredByGender, {
+      ? buildAlphabetActionSections(customers, {
         getName: (customer) => customer?.name,
         getItemId: (customer) => Number(customer?.id),
         sortDirection,
       })
-      : buildTimeActionSections(filteredByGender, {
+      : buildTimeActionSections(customers, {
         getDate: (customer) => customer?.created_at,
         getItemId: (customer) => Number(customer?.id),
-        year: yearFilter,
-        month: monthFilter,
+        // D1 already scopes year/month across the whole result set. Keeping
+        // these at "all" prevents device-timezone parsing from narrowing the
+        // page a second time around UTC+7 midnight. `timeMode` still controls
+        // whether the visible groups are year/month/day sections.
+        year: 'all',
+        month: 'all',
         timeMode,
         groupMode: 'time',
         sortDirection,
       })
-  ), [filteredByGender, groupMode, monthFilter, sortDirection, timeMode, yearFilter])
+  ), [customers, groupMode, sortDirection, timeMode])
 
   useEffect(() => {
     setCollapsedSections((current) => new Set([...current].filter((id) => filteredSections.some((section) => section.id === id))))
@@ -571,6 +543,12 @@ function CustomersTab({ t, notify, active = true, initialSearch }: CustomersTabP
         if (payload) {
           setCustomerPage(Number(payload.page || customerPage) || 1)
           setCustomerPageSize(Number(payload.pageSize || customerPageSize) || customerPageSize)
+          const years = Array.isArray(payload.availableYears)
+            ? payload.availableYears.map((value) => String(value)).filter((value) => /^\d{4}$/.test(value))
+            : getAvailableYears(items, (customer) => customer?.created_at)
+          setAvailableYears(years)
+        } else {
+          setAvailableYears(getAvailableYears(items, (customer) => customer?.created_at))
         }
         loadedOnceRef.current = true
         setLoadError('')

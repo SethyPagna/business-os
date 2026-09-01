@@ -73,7 +73,7 @@ export default function SalesHubPage() {
         // icon+label tabs overflowed the viewport and pushed the whole page
         // wide (Reports fell off the right edge). Now each tab is flex-1 and
         // its label truncates rather than widening the row.
-        <div className="shrink-0 px-3 pt-0">
+        <div className="shrink-0 px-3 pt-4 sm:pt-5">
           <div className="flex w-full rounded-xl bg-gray-100 dark:bg-gray-800 p-0.5">
             {visibleTabs.map((tab) => {
               const Icon = tab.icon

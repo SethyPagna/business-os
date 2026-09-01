@@ -63,7 +63,12 @@ function cellToText(cell: XLSX.CellObject | undefined): string {
       return cell.v ? 'TRUE' : 'FALSE'
     case 'd': {
       const date = cell.v as Date
-      return Number.isNaN(date.getTime()) ? '' : date.toISOString().slice(0, 10)
+      if (Number.isNaN(date.getTime())) return ''
+      // Excel date cells are calendar values, not UTC instants. Converting a
+      // local-midnight cell through toISOString() can shift it to the previous
+      // day on UTC+ timezones. Preserve the calendar fields exactly as SheetJS
+      // decoded them so an imported 09/01 remains 2026-09-01 everywhere.
+      return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
     }
     default:
       // 's' (shared string) / 'str' (formula result string) -- exact

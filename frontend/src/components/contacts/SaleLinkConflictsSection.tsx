@@ -5,6 +5,7 @@ import EyeOff from 'lucide-react/dist/esm/icons/eye-off.js'
 import Link2 from 'lucide-react/dist/esm/icons/link-2.js'
 import UserPlus from 'lucide-react/dist/esm/icons/user-round-plus.js'
 import { fmtDate } from '../../utils/formatters'
+import PaginationControls, { DEFAULT_PAGE_SIZE } from '../shared/PaginationControls'
 import {
   dismissSaleLinkConflict, undismissSaleLinkConflict, getSaleLinkConflicts, relinkConflictSales, resolveMissingContact,
 } from './contactDuplicates'
@@ -45,6 +46,9 @@ export default function SaleLinkConflictsSection({ t, notify }: { t: TranslateFn
   // conflict is reversible, never a one-way hide. Off by default; flipping it
   // re-fetches with includeDismissed.
   const [showKept, setShowKept] = useState(false)
+  const [mismatchPage, setMismatchPage] = useState(1)
+  const [missingPage, setMissingPage] = useState(1)
+  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE)
   const aliveRef = useRef(true)
 
   useEffect(() => {
@@ -56,15 +60,21 @@ export default function SaleLinkConflictsSection({ t, notify }: { t: TranslateFn
     setLoading(true)
     setError('')
     try {
-      const result = await getSaleLinkConflicts({ includeDismissed })
-      if (aliveRef.current) setData(result)
+      const result = await getSaleLinkConflicts({ includeDismissed, mismatchPage, missingPage, pageSize })
+      if (aliveRef.current) {
+        setData(result)
+        const mismatchLast = result.pagination?.mismatches.totalPages || 1
+        const missingLast = result.pagination?.missing.totalPages || 1
+        if (mismatchPage > mismatchLast) setMismatchPage(mismatchLast)
+        if (missingPage > missingLast) setMissingPage(missingLast)
+      }
     } catch (e: unknown) {
       if (aliveRef.current) setError(e instanceof Error ? e.message : tr('link_conflicts_failed', 'Could not load sale-link conflicts'))
     } finally {
       if (aliveRef.current) setLoading(false)
     }
   }
-  useEffect(() => { void load(showKept) }, [showKept]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { void load(showKept) }, [showKept, mismatchPage, missingPage, pageSize]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const dropMismatch = (key: string) => setData((current) => (current ? { ...current, mismatches: current.mismatches.filter((row) => mismatchKey(row) !== key) } : current))
   const dropMissing = (key: string) => setData((current) => (current ? { ...current, missing: current.missing.filter((row) => missingKey(row) !== key) } : current))
@@ -78,6 +88,7 @@ export default function SaleLinkConflictsSection({ t, notify }: { t: TranslateFn
       const result = await relinkConflictSales({ customer_id: row.customer_id, phone_key: row.phone_key, target_customer_id: Number(row.suggested_id) })
       notify(replaceVars(tr('sales_relinked_toast', 'Relinked {count} sale(s)'), { count: result?.relinked ?? row.sale_count }))
       dropMismatch(key)
+      void load(showKept)
     } catch (e: unknown) {
       notify(e instanceof Error ? e.message : tr('link_conflicts_failed', 'Could not load sale-link conflicts'), 'error')
     } finally {
@@ -103,6 +114,7 @@ export default function SaleLinkConflictsSection({ t, notify }: { t: TranslateFn
         { count: result?.linked ?? row.sale_count },
       ))
       dropMissing(key)
+      void load(showKept)
     } catch (e: unknown) {
       notify(e instanceof Error ? e.message : tr('link_conflicts_failed', 'Could not load sale-link conflicts'), 'error')
     } finally {
@@ -116,6 +128,7 @@ export default function SaleLinkConflictsSection({ t, notify }: { t: TranslateFn
       await dismissSaleLinkConflict(kind, key)
       if (kind === 'mismatch') dropMismatch(key)
       else dropMissing(key)
+      void load(showKept)
     } catch (e: unknown) {
       notify(e instanceof Error ? e.message : tr('link_conflicts_failed', 'Could not load sale-link conflicts'), 'error')
     } finally {
@@ -160,7 +173,11 @@ export default function SaleLinkConflictsSection({ t, notify }: { t: TranslateFn
         </p>
         <button
           type="button"
-          onClick={() => setShowKept((v) => !v)}
+          onClick={() => {
+            setMismatchPage(1)
+            setMissingPage(1)
+            setShowKept((v) => !v)
+          }}
           title={tr('show_kept_hint', 'Show clusters you kept (marked not-a-duplicate) so they can be reopened')}
           className={`inline-flex items-center gap-1 rounded-lg px-2 py-1.5 text-[11px] font-medium transition-colors ${
             showKept
@@ -180,6 +197,33 @@ export default function SaleLinkConflictsSection({ t, notify }: { t: TranslateFn
           {tr('refresh', 'Refresh')}
         </button>
       </div>
+
+      {data?.pagination ? (
+        <div className="flex flex-wrap items-center gap-2">
+          <PaginationControls
+            page={data.pagination.mismatches.page}
+            pageSize={data.pagination.pageSize}
+            totalItems={data.pagination.mismatches.total}
+            onPageChange={setMismatchPage}
+            onPageSizeChange={(next) => { setPageSize(next); setMismatchPage(1); setMissingPage(1) }}
+            label={tr('link_mismatches', 'link mismatches')}
+            t={t}
+            compact
+            rangeAsPageSize
+          />
+          <PaginationControls
+            page={data.pagination.missing.page}
+            pageSize={data.pagination.pageSize}
+            totalItems={data.pagination.missing.total}
+            onPageChange={setMissingPage}
+            onPageSizeChange={(next) => { setPageSize(next); setMismatchPage(1); setMissingPage(1) }}
+            label={tr('missing_contacts', 'missing contacts')}
+            t={t}
+            compact
+            rangeAsPageSize
+          />
+        </div>
+      ) : null}
 
       {error ? (
         <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:border-amber-900/60 dark:bg-amber-900/20 dark:text-amber-200">{error}</div>

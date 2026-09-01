@@ -123,6 +123,9 @@ export function translateMovementType(type: unknown, t?: (key: string) => string
   const key = String(type || '').toLowerCase()
   const T = (k: string, fallback: string): string => (typeof t === 'function' ? t(k) : undefined) || fallback
   const canonicalKey: Record<string, [string, string]> = {
+    add: ['add_stock', 'Add Stock'],
+    remove: ['remove_stock', 'Remove Stock'],
+    set: ['adjust_quantity', 'Adjust Quantity'],
     sale: ['sale', 'Sale'],
     purchase: ['purchase', 'Purchase'],
     adjustment: ['adjustment', 'Adjustment'],

@@ -29,10 +29,10 @@ runTest('F2: the shipment header is entered once and rides every line', () => {
   // the same field siblings every add-stock surface uses (D5a rule)
   assert.match(modalSource, /import SupplierPickerField, \{ type SupplierChoice \} from '\.\.\/shared\/SupplierPickerField\.tsx'/)
   // F3 slice 1: initializers became draft-aware -- the saved shipment
-  // header wins over the defaults on reopen, today/paid stay the
-  // first-open defaults.
-  assert.match(modalSource, /const \[receivedDate, setReceivedDate\] = useState<string>\(draft\?\.receivedDate \|\| todayMmDdYyyy\(\)\)/)
-  assert.match(modalSource, /const \[paymentStatus, setPaymentStatus\] = useState<'paid' \| 'credit'>\(draft\?\.paymentStatus \|\| 'paid'\)/)
+  // header wins over a reopened-session seed; dates intentionally start
+  // blank so the app never silently filters/records a preset day.
+  assert.match(modalSource, /draft\?\.receivedDate \|\| initialHeader\?\.receivedDate \|\| ''/)
+  assert.match(modalSource, /draft\?\.paymentStatus \|\| initialHeader\?\.paymentStatus \|\| 'paid'/)
   // every Add sends the header fields with the line
   assert.match(modalSource, /receivedDate: receivedDate\.trim\(\) \|\| null/)
   assert.match(modalSource, /supplierId: supplier\.supplierId/)
@@ -41,20 +41,30 @@ runTest('F2: the shipment header is entered once and rides every line', () => {
   assert.match(modalSource, /paymentStatus === 'credit' && !creditDueDate\.trim\(\)/)
 })
 
-runTest('F2: Add writes ONE receiveBatchStock through the D4 kernel and continues', () => {
+runTest('F2: Add queues editable lines; completion writes through the one D4 kernel', () => {
   // the shared transport is the only write path -- no parallel writes
   assert.match(modalSource, /import \{ receiveBatchStock \} from '\.\.\/\.\.\/api\/batchesTransport\.ts'/)
   assert.doesNotMatch(modalSource, /apiFetch|fetch\(/)
   assert.equal((modalSource.match(/receiveBatchStock\(/g) || []).length, 1) // exactly one call site
-  // each line's outcome is recorded visibly -- success with its lot code,
-  // failure with the error -- so there is never a silent partial write
-  assert.match(modalSource, /ok: true,\s+detail: result\?\.lotCode/)
-  assert.match(modalSource, /ok: false,\s+detail: message/)
+  assert.match(modalSource, /status: 'queued'/)
+  assert.match(modalSource, /const editLine = \(line: ReceivedLine\)/)
+  assert.match(modalSource, /const removeLine = \(key: string\)/)
+  assert.match(modalSource, /status: 'saved', detail: result\?\.lotCode/)
+  assert.match(modalSource, /status: 'error', detail: message/)
   // Add clears the line and refocuses for the next product
   assert.match(modalSource, /const resetLine = \(\) => \{/)
   assert.match(modalSource, /searchInputRef\.current\?\.focus\(\)/)
   // Enter in the qty field is the fast path
-  assert.match(modalSource, /if \(event\.key === 'Enter'\) void addLine\(\)/)
+  assert.match(modalSource, /if \(event\.key === 'Enter'\) addLine\(\)/)
+})
+
+runTest('changed cost offers and uses the existing price-variant path', () => {
+  assert.match(modalSource, /import \{ adjustStock \} from '\.\.\/\.\.\/api\/inventoryWriteTransport\.tsx?'/)
+  assert.match(modalSource, /setCreatePriceVariant\(costChanged\(picked, next\)\)/, 'a changed cost enables the safe variant choice by default')
+  assert.match(modalSource, /create_price_variant.*Create\/use a price variant/, 'the choice is visible beside the edited cost')
+  assert.match(modalSource, /unlockPricing: true/)
+  assert.match(modalSource, /pricing: pricingForVariant\(line\.product, Number\(line\.unitCost\)\)/)
+  assert.match(modalSource, /sessionId: sessionIdRef\.current/, 'variant receipts remain in the same stock-in session')
 })
 
 runTest('F2: the modal portals, guards mid-save closes, and Done refreshes only after real writes', () => {

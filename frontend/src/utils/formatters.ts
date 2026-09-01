@@ -13,22 +13,17 @@ function normalizeTimestampInput(raw: TimestampInput): string {
   const value = String(raw).trim()
   if (!value) return ''
   const normalizedBase = value.includes('T') ? value : value.replace(' ', 'T')
+  // Check DATE-ONLY before offset suffixes. A valid date such as 2026-09-01
+  // also ends in "-01", which otherwise looks like a short timezone
+  // offset and becomes the invalid string "2026-09-01:00". Imported and
+  // legacy date-only rows must stay a real calendar date.
+  if (/^\d{4}-\d{2}-\d{2}$/.test(normalizedBase)) return `${normalizedBase}T00:00:00Z`
   if (/Z$/i.test(normalizedBase)) return normalizedBase
   if (/[+-]\d{2}:\d{2}$/i.test(normalizedBase)) return normalizedBase
   if (/[+-]\d{4}$/i.test(normalizedBase)) {
     return normalizedBase.replace(/([+-]\d{2})(\d{2})$/i, '$1:$2')
   }
   if (/[+-]\d{2}$/i.test(normalizedBase)) return `${normalizedBase}:00`
-  // A bare date with no time -- a legacy/imported "YYYY-MM-DD" movement row
-  // (e.g. the 0088 legacy-effects trigger copies occurred_at through
-  // verbatim) -- must NOT become "YYYY-MM-DDZ": that is not a valid
-  // date-time string, so new Date() rejected it and every formatter fell
-  // back to "—" (the blank date AND time the Stock Changes ledger showed for
-  // migrated rows -- the day-group header went blank too). Treat it as
-  // midnight UTC so at least the DATE renders; a caller that wants to show
-  // "time not recorded" rather than a fabricated 00:00 checks the raw value
-  // itself (see StockChangeSection's ledgerClock).
-  if (/^\d{4}-\d{2}-\d{2}$/.test(normalizedBase)) return `${normalizedBase}T00:00:00Z`
   return `${normalizedBase}Z`
 }
 

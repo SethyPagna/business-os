@@ -81,8 +81,8 @@ runTest('the merged pager keeps the editable page number and total-page count', 
   // "/ totalPages", bracketed by the prev/next arrows.
   assert.match(branch, /onKeyDown=\{handlePageInputKeyDown\}/, 'the current page must stay editable')
   assert.match(branch, /\/ \{totalPages\}/, 'the total page count must be shown')
-  assert.match(branch, /aria-label="Previous page"/, 'a previous-page control must exist')
-  assert.match(branch, /aria-label="Next page"/, 'a next-page control must exist')
+  assert.match(branch, /aria-label=\{backLabel\}/, 'a localized previous-page control must exist')
+  assert.match(branch, /aria-label=\{nextLabel\}/, 'a localized next-page control must exist')
 })
 
 runTest('PageSizeSelect renders buttonContent over the size, but only when given', () => {

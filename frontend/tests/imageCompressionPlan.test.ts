@@ -12,32 +12,27 @@ function runCase(name: string, fn: () => void): void {
 // This is the ladder compressImageFile walks (dimension round x quality
 // step) until a result lands at/under targetBytes/maxBytes.
 
-const QUALITY_STEPS_COUNT = 5 // [0.92, 0.8, 0.68, 0.55, 0.42]
-const MIN_DIMENSION_FLOOR = 480
+const PRIMARY_QUALITY = 0.94
+const QUALITY_FALLBACK_COUNT = 9
+const MIN_DIMENSION_FLOOR = 320
 
 {
-  // A large source gets 3 dimension rounds (2560 -> 1920 -> 1440), each
-  // with the full quality ladder, since none of those rounds hit the
-  // floor -- so the plan should have 3 * 5 = 15 steps.
+  // Large sources now walk dimensions all the way to the floor at high
+  // quality before sacrificing encoder quality. This is both more robust
+  // (no early stop while still over budget) and more visually conservative.
   const plan = buildCompressionPlan(2560)
-  assert.equal(plan.length, 3 * QUALITY_STEPS_COUNT, 'three dimension rounds x five quality steps for a large starting dimension')
-  assert.deepEqual(
-    plan.slice(0, QUALITY_STEPS_COUNT).map((step) => step.maxDimension),
-    Array(QUALITY_STEPS_COUNT).fill(2560),
-    'first round keeps the caller-provided starting dimension across every quality step',
-  )
-  assert.equal(plan[0].quality, 0.92, 'first attempt uses the highest quality step')
-  assert.ok(plan[QUALITY_STEPS_COUNT].maxDimension < 2560, 'second round shrinks the dimension from the first round')
+  const primary = plan.filter((step) => step.quality === PRIMARY_QUALITY)
+  assert.equal(primary[0].maxDimension, 2560, 'first attempt uses the requested max dimension')
+  assert.equal(primary[0].quality, PRIMARY_QUALITY, 'first attempt uses high quality')
+  assert.equal(primary.at(-1)?.maxDimension, MIN_DIMENSION_FLOOR, 'dimension ladder must reach the floor')
+  assert.equal(plan.length, primary.length + QUALITY_FALLBACK_COUNT, 'quality fallback runs only after the full dimension ladder')
 }
 
 {
-  // A source that starts already at/under the floor should get exactly one
-  // round (the floor itself) -- there's nowhere smaller to step down to,
-  // so the plan should stop instead of repeating the same dimension.
-  const plan = buildCompressionPlan(400)
+  const plan = buildCompressionPlan(200)
   const dimensions = new Set(plan.map((step) => step.maxDimension))
   assert.deepEqual([...dimensions], [MIN_DIMENSION_FLOOR], 'a starting dimension under the floor is clamped up to the floor, once')
-  assert.equal(plan.length, QUALITY_STEPS_COUNT, 'only the quality ladder runs once nothing more can be shrunk dimension-wise')
+  assert.equal(plan.length, 1 + QUALITY_FALLBACK_COUNT, 'the floor gets one high-quality attempt plus the fallback quality ladder')
 }
 
 {
@@ -67,9 +62,9 @@ console.log('PASS imageCompression buildCompressionPlan ladder')
 // both the band and the descending-plan property the selection depends on.
 {
   const KB = 1024
-  runCase('the stored-image budget is the agreed 300-350KB band', () => {
-    assert.equal(DEFAULT_COMPRESS_OPTIONS.maxBytes, 350 * KB, 'hard ceiling must be 350KB')
-    assert.equal(DEFAULT_COMPRESS_OPTIONS.targetBytes, 300 * KB, 'floor must be 300KB')
+  runCase('the stored-image budget preserves quality while staying below the 1MB fast-path ceiling', () => {
+    assert.equal(DEFAULT_COMPRESS_OPTIONS.maxBytes, 900 * KB, 'hard ceiling must stay safely below 1MB')
+    assert.equal(DEFAULT_COMPRESS_OPTIONS.targetBytes, 820 * KB, 'quality target should stay close to the ceiling')
     assert.ok(
       DEFAULT_COMPRESS_OPTIONS.targetBytes < DEFAULT_COMPRESS_OPTIONS.maxBytes,
       'the floor must sit below the ceiling or the band is meaningless',

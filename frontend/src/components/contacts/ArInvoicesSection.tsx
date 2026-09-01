@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import AppSelect from '../shared/AppSelect.tsx'
-import DateTimeRangePicker, { todayDateTimeRange } from '../shared/DateTimeRangePicker'
+import DateTimeRangePicker from '../shared/DateTimeRangePicker'
 import ColumnChooser from '../shared/ColumnChooser.tsx'
 import { useColumnPreferences } from '../shared/useColumnPreferences.ts'
 import type { TableColumnDef } from '../shared/columnPreferences.ts'
@@ -69,8 +69,8 @@ export default function ArInvoicesSection({ t }: ArInvoicesSectionProps) {
   const tr = (key: string, fallback: string): string => t(key) || fallback
   const [customer, setCustomer] = useState('all')
   const [status, setStatus] = useState('all')
-  const [fromDate, setFromDate] = useState(() => todayDateTimeRange().startDate)
-  const [toDate, setToDate] = useState(() => todayDateTimeRange().endDate)
+  const [fromDate, setFromDate] = useState('')
+  const [toDate, setToDate] = useState('')
   const [page, setPage] = useState(1)
   const [refreshToken, setRefreshToken] = useState(0)
   const [data, setData] = useState<ArPayload | null>(null)

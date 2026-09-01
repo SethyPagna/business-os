@@ -66,10 +66,16 @@ interface SalesExportData {
   sales?: CsvRow[]
   truncated?: boolean
   total_matching?: number
+  snapshot_max_id?: number | null
+  has_more?: boolean
+  next_cursor?: { created_at?: string; id?: number } | null
 }
 
 interface SalesExportApi {
-  getSalesExport: (params: { startDate: string; endDate: string; format?: 'csv' }) => Promise<SalesExportData | string>
+  getSalesExport: (params: {
+    startDate: string; endDate: string; format?: 'csv'; detailsOnly?: string; pageSize?: string
+    snapshotMaxId?: string; afterCreatedAt?: string; afterId?: string
+  }) => Promise<SalesExportData | string>
 }
 
 function getSalesExportApi(): SalesExportApi {
@@ -180,15 +186,33 @@ export default function ExportModal({ onClose, t, fmtUSD }: ExportModalProps) {
     try {
       const dates = validateDates()
       setLoading(true)
-      const data = await withLoaderTimeout(
-        () => getSalesExportApi().getSalesExport({ startDate: dates.start, endDate: dates.end, format: 'csv' }),
+      const api = getSalesExportApi()
+      const first = await withLoaderTimeout(
+        () => api.getSalesExport({ startDate: dates.start, endDate: dates.end, detailsOnly: 'true', pageSize: '500' }),
         'Sales export CSV',
         SALES_EXPORT_CSV_TIMEOUT_MS,
       )
-      if (typeof data !== 'string' && data.truncated) {
-        throw new Error(tr('sales_export_truncated_blocked', 'This range exceeds the safe 5,000-sale export bound. Narrow the dates so the file is complete.'))
+      if (typeof first === 'string') throw new Error(tr('error_loading_export', 'Error loading export'))
+      const rows = [...(first.sales || [])]
+      let page = first
+      while (page.has_more) {
+        const cursor = page.next_cursor
+        if (!cursor?.created_at || !cursor.id || !page.snapshot_max_id) {
+          throw new Error(tr('sales_export_cursor_stalled', 'Sales export could not advance to the next page safely.'))
+        }
+        const next = await withLoaderTimeout(
+          () => api.getSalesExport({
+            startDate: dates.start, endDate: dates.end, detailsOnly: 'true', pageSize: '500',
+            snapshotMaxId: String(page.snapshot_max_id), afterCreatedAt: cursor.created_at, afterId: String(cursor.id),
+          }),
+          'Sales export CSV page',
+          SALES_EXPORT_CSV_TIMEOUT_MS,
+        )
+        if (typeof next === 'string') throw new Error(tr('error_loading_export', 'Error loading export'))
+        rows.push(...(next.sales || []))
+        page = next
       }
-      const csvText = typeof data === 'string' ? data : buildCsvFallback(data)
+      const csvText = buildCsvFallback({ ...first, sales: rows })
       downloadCsvBlob(csvText, dates)
     } catch (error) {
       alert(getErrorMessage(error, tr('export_error', 'Export error')))

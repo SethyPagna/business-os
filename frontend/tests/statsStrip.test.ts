@@ -3,7 +3,8 @@
 // stats ... based on date range. default per day ... do so for all
 // pages"). Tests the pure range-preset helpers, then pins the rollout:
 // every data page renders the SAME shared component (never a bespoke tile
-// grid again), defaulting to the per-day (today) range.
+// grid again). Sales/Returns/Fees/Reports start all-time; operational stock
+// views may still choose Today explicitly.
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
@@ -18,7 +19,7 @@ function test(name: string, fn: () => void): void {
   try { fn(); console.log(`PASS ${name}`) } catch (e) { failed += 1; console.error(`FAIL ${name}`); console.error(e) }
 }
 
-test('statsPresetRange: today is a single-day range (the app-wide default)', () => {
+test('statsPresetRange: today is a single-day quick-range preset', () => {
   const now = new Date(2026, 7, 30) // Aug 30 2026 local
   const range = statsPresetRange('today', now)
   assert.equal(range.startDate, '2026-08-30')
@@ -41,18 +42,32 @@ test('statsPresetRange: month/year anchor to the 1st, and survive month rollover
   assert.equal(statsPresetRange('7d', now).startDate, '2025-12-28')
 })
 
+test('statsPresetRange: this week starts on Monday and ends today', () => {
+  const sunday = new Date(2026, 7, 30)
+  assert.equal(statsPresetRange('week', sunday).startDate, '2026-08-24')
+  const wednesday = new Date(2026, 7, 26)
+  assert.equal(statsPresetRange('week', wednesday).startDate, '2026-08-24')
+  assert.equal(statsPresetRange('week', wednesday).endDate, '2026-08-26')
+})
+
 test('activeStatsPreset round-trips every preset and rejects a custom range', () => {
-  const now = new Date(2026, 7, 30)
-  for (const preset of ['today', '7d', 'month', 'year'] as const) {
+  // Wednesday avoids the inherent Sunday overlap between "This week" and
+  // "Last 7 days"; the active state is derived from dates alone.
+  const now = new Date(2026, 7, 26)
+  for (const preset of ['all', 'today', '7d', 'week', 'month', 'year'] as const) {
     assert.equal(activeStatsPreset(statsPresetRange(preset, now), now), preset)
   }
   assert.equal(activeStatsPreset({ startDate: '2026-08-01', endDate: '2026-08-15', startTime: '', endTime: '' }, now), null)
 })
 
-test('date/time controls default to today and expose time only where endpoints honor it', () => {
+test('date/time picker owns all-time/today presets and exposes time only where endpoints honor it', () => {
   const picker = read('src/components/shared/DateTimeRangePicker.tsx')
-  assert.match(picker, /todayDateTimeRange[\s\S]{0,220}startTime: '00:00'[\s\S]{0,80}endTime: '23:59'/, 'the shared default spans the complete current day')
+  const presets = read('src/components/shared/statsStripPresets.ts')
+  assert.ok(picker.includes("{ id: 'all'") && picker.includes("{ id: 'today'"), 'All time and Today live inside the shared picker')
+  assert.ok(presets.includes("timeZone: 'Asia/Phnom_Penh'"), 'real quick-range math is anchored to Cambodia business time')
+  assert.deepEqual(statsPresetRange('all'), { startDate: '', endDate: '', startTime: '', endTime: '' }, 'All time is the blank/unfiltered range')
   assert.ok((picker.match(/inputMode="numeric"/g) || []).length === 2, 'the shared picker uses two explicit 24-hour HH:MM fields')
+  assert.ok(picker.includes('Quick range') && picker.includes('quickRanges.map'), 'quick presets are folded into the opened date/time picker')
 
   const sales = read('src/components/sales/Sales.tsx')
   assert.match(sales, /<StatsRangeRow[^>]*showTime/, 'Sales exposes the 24-hour control')
@@ -64,7 +79,7 @@ test('date/time controls default to today and expose time only where endpoints h
 })
 
 // ---- rollout pins (cross-file) --------------------------------------------
-test('every data page renders the ONE shared StatsStrip, defaulting to today', () => {
+test('data pages render the ONE shared StatsStrip and begin all-time', () => {
   const pages: Array<[string, string]> = [
     ['Sales', 'src/components/sales/Sales.tsx'],
     ['Returns', 'src/components/returns/Returns.tsx'],
@@ -74,8 +89,11 @@ test('every data page renders the ONE shared StatsStrip, defaulting to today', (
   for (const [label, rel] of pages) {
     const src = read(rel)
     assert.ok(src.includes('<StatsStrip'), `${label} must render the shared strip`)
-    assert.ok(src.includes("statsPresetRange('today')"), `${label} must default its strip range to per-day (today)`)
+    assert.ok(src.includes("startDate: '', endDate: ''") || src.includes('EMPTY_DATE_TIME_RANGE'), `${label} starts unfiltered instead of silently limiting records to today`)
   }
+  const reports = read('src/components/sales/ReportsHub.tsx')
+  assert.ok(reports.includes('EMPTY_DATE_TIME_RANGE'), 'Reports hub starts all-time and relies on picker presets')
+  assert.ok(!reports.includes('todayDateTimeRange()'), 'Reports hub must not force a standalone Today range')
   // Dashboard keeps its own range card, so it passes cards only -- but it
   // must still be the SAME component, not the old MiniStat grid or the
   // KPI portal sheet for period cards.

@@ -3,6 +3,9 @@
   "version": "6.0.0",
   "private": true,
   "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
   "scripts": {
     "dev": "vite",
     "prebuild": "npm run build:public-runtime",
@@ -28,7 +31,7 @@
     "@ffmpeg/core": "^0.11.0",
     "@ffmpeg/ffmpeg": "^0.11.6",
     "@fontsource/noto-sans-khmer": "^5.2.8",
-    "@zxing/browser": "^0.2.0",
+    "@zxing/browser": "0.2.0",
     "@zxing/library": "^0.22.0",
     "dexie": "^3.2.7",
     "lucide-react": "^0.344.0",

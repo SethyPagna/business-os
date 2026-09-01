@@ -1,12 +1,14 @@
+import { todayStr } from '../../../utils/dateHelpers.ts'
 import { useCallback, useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from 'react'
 import Modal from '../../shared/Modal'
 import SearchInput from '../../shared/SearchInput'
+import ScanSearchButton from '../../shared/ScanSearchButton'
 import InventoryStockModals from '../../inventory/InventoryStockModals'
 import InventoryReasonManagerModal from '../../inventory/InventoryReasonManagerModal'
 import ConfirmDialog, { type ConfirmReviewItem } from '../../shared/ConfirmDialog'
 import { type AppSelectOption } from '../../shared/AppSelect'
 import { useApp } from '../../../AppContext'
-import { searchProducts } from '../../../api/productReadTransport.ts'
+import { getProductsByIds, searchProducts } from '../../../api/productReadTransport.ts'
 import { adjustStock } from '../../../api/inventoryWriteTransport.ts'
 import { getBranches } from '../../../api/branchTransport.ts'
 import { getInventoryReasons, saveInventoryReasons } from '../../../api/methods.ts'
@@ -105,6 +107,7 @@ type Branch = {
 
 type StockAdjustModalProps = {
   initialType?: 'add' | 'remove' | 'set'
+  initialProduct?: Record<string, any> | null
   onClose: () => void
   onDone: () => void
   t: (key: string) => string
@@ -121,10 +124,9 @@ type AppContextSlice = {
   notify: (message: unknown, type?: string, duration?: number) => void
 }
 
-// Same UTC-day convention every other received-date default uses
-// (ReceiveBatchModal, BranchStockAdjuster, Inventory's Adjust).
+// All received-date defaults use the fixed Cambodia business calendar day.
 function todayIsoDate(): string {
-  return new Date().toISOString().slice(0, 10)
+  return todayStr()
 }
 
 function stockQtyOf(product?: Record<string, any> | null): number {
@@ -134,7 +136,7 @@ function stockQtyOf(product?: Record<string, any> | null): number {
   return Number(product.stock_quantity || 0)
 }
 
-export default function StockAdjustModal({ initialType = 'add', onClose, onDone, t }: StockAdjustModalProps) {
+export default function StockAdjustModal({ initialType = 'add', initialProduct = null, onClose, onDone, t }: StockAdjustModalProps) {
   const { fmtUSD, fmtKHR, usdSymbol, user, notify } = useApp() as AppContextSlice
 
   const isKhmer = /[ក-៿]/.test(t('cancel') || '')
@@ -145,7 +147,8 @@ export default function StockAdjustModal({ initialType = 'add', onClose, onDone,
   }, [t, isKhmer])
 
   // --- product picker (step 1) ---
-  const [selectedProduct, setSelectedProduct] = useState<PickedProduct | null>(null)
+  const initialPickedProduct = initialProduct?.id != null ? initialProduct as PickedProduct : null
+  const [selectedProduct, setSelectedProduct] = useState<PickedProduct | null>(initialPickedProduct)
   const [search, setSearch] = useState('')
   const debouncedSearch = useDebouncedValue(search, 200)
   const [results, setResults] = useState<PickedProduct[]>([])
@@ -302,6 +305,29 @@ export default function StockAdjustModal({ initialType = 'add', onClose, onDone,
     })
   }, [defaultBranch, initialType])
 
+  // When opened from a product detail card, skip the product-picker step and
+  // refresh that exact row with branch_stock/images/batches before adjustment.
+  // This makes the floating Adjust Stock action authoritative even if the
+  // detail card itself came from a lighter paged product row.
+  useEffect(() => {
+    const initial = initialProduct
+    const id = initial?.id
+    if (!initial || id == null) return
+    let cancelled = false
+    getProductsByIds([id])
+      .then((raw) => {
+        if (cancelled) return
+        const rows = Array.isArray(raw)
+          ? raw
+          : Array.isArray((raw as { items?: unknown })?.items)
+            ? (raw as { items: PickedProduct[] }).items
+            : []
+        selectProduct((rows[0] as PickedProduct | undefined) || initial as PickedProduct)
+      })
+      .catch(() => { if (!cancelled) selectProduct(initial as PickedProduct) })
+    return () => { cancelled = true }
+  }, [initialProduct?.id, selectProduct])
+
   // onAdjust: replicates Inventory.handleAdjust's validation + payload build
   // EXACTLY, minus the undo/redo action-history pinning (omitted here).
   const onAdjust = useCallback(async () => {
@@ -403,13 +429,18 @@ export default function StockAdjustModal({ initialType = 'add', onClose, onDone,
     return (
       <Modal title={tr('adjust_pick_product', 'Choose a product to adjust')} onClose={onClose} size="sm">
         <div className="space-y-3">
-          <SearchInput
-            id="stock-adjust-product-search"
-            value={search}
-            onChange={setSearch}
-            placeholder={t('search')}
-            autoFocus
-          />
+          <div className="flex gap-2">
+            <div className="min-w-0 flex-1">
+              <SearchInput
+                id="stock-adjust-product-search"
+                value={search}
+                onChange={setSearch}
+                placeholder={t('search')}
+                autoFocus
+              />
+            </div>
+            <ScanSearchButton onDetected={setSearch} t={t} showLabel />
+          </div>
           {searching && !results.length ? (
             <div className="py-6 text-center text-sm text-gray-400">{t('loading')}</div>
           ) : !results.length ? (

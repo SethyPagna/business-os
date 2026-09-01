@@ -201,7 +201,8 @@ export default function VariantFormModal({ parent, units, branches, user, onClos
       const response = await runVariantMutation(() => getProductVariantApi().createProductVariant({
         client_request_id: clientRequestId,
         ...form,
-        parent_id: parent.id,
+        // Name is the only grouping key. Every created row stays ordinary;
+        // matching names are wrapped by the virtual group title in the UI.
         selling_price_usd: normalizePriceValue(parseNumericInput(form.selling_price_usd)),
         selling_price_khr: normalizePriceValue(parseNumericInput(form.selling_price_khr)),
         special_price_usd: normalizePriceValue(parseNumericInput(form.special_price_usd ?? form.selling_price_usd)),
@@ -229,8 +230,8 @@ export default function VariantFormModal({ parent, units, branches, user, onClos
         clientRequestId,
         snapshot: {
           ...form,
-          parent_id: parent.id,
-          is_group: 0,
+          // Name is the only grouping key. Every created row stays ordinary;
+          // matching names are wrapped by the virtual group title in the UI.
           stock_quantity: parseNumericInput(form.stock_quantity),
           selling_price_usd: normalizePriceValue(parseNumericInput(form.selling_price_usd)),
           selling_price_khr: normalizePriceValue(parseNumericInput(form.selling_price_khr)),
@@ -279,13 +280,6 @@ export default function VariantFormModal({ parent, units, branches, user, onClos
                 ).split('{parent}').join(parent.name)}
               </p>
             ) : null}
-          </div>
-
-          <div>
-            <label htmlFor="variant-form-sku" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
-              {t('sku') || 'SKU'}
-            </label>
-            <input id="variant-form-sku" name="variant_sku" className="input" value={form.sku} onChange={(event) => setField('sku', event.target.value)} />
           </div>
 
           <div>

@@ -151,6 +151,15 @@ runTest('11.1: the checkbox column only takes space in select mode', () => {
   assert.match(products, /<td className=\{`\$\{selectionModeActive \? 'px-2' : 'px-0'\} py-2`\} onClick=/, 'the product row checkbox cell collapses out of select mode')
 })
 
+runTest('mobile keeps same-name products inside the grouped UI instead of flattening them', () => {
+  assert.match(surface, /const showGroupRow = group\.rows\.length > 1/, 'mobile and desktop must both decide grouping from the number of display rows')
+  assert.ok(!/Small screens skip group TITLE rows entirely/.test(surface), 'the old mobile-only flattening path must stay removed')
+  assert.match(surface, /renderMobileProductCard\(product, \{ indented: true \}\)/, 'rows inside a mobile group render as grouped rows')
+  assert.match(surface, /renderGroupThumbnail \? renderGroupThumbnail\(group\) : null/, 'mobile group header keeps the shared group thumbnail')
+  assert.match(surface, /getGroupSummaryParts\(group\)\.map/, 'mobile group header exposes the same group summary information')
+  assert.match(surface, /onClick=\{\(\) => toggleProductGroup\(group\.key\)\}/, 'mobile group header can expand and collapse')
+})
+
 runTest('11.3: hold-to-select is wired onto the group title row', () => {
   assert.match(surface, /\{\.\.\.\(bindGroupHold \? bindGroupHold\(group\) : \{\}\)\}/, 'the group header <tr> spreads the hold handlers')
   assert.match(products, /const bindGroupHold = useCallback/, 'Products.tsx defines bindGroupHold')

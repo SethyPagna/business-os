@@ -1,3 +1,4 @@
+import { todayStr } from '../../utils/dateHelpers.ts'
 import type { FilterSection } from '../shared/FilterMenu'
 
 // "Created" filter section for the Products page -- a real date range sent
@@ -24,9 +25,6 @@ export interface BuildCreatedDateFilterSectionParams {
   setCreatedDateTo: (value: string) => void
 }
 
-function todayIso(): string {
-  return new Date().toISOString().slice(0, 10)
-}
 
 export function buildCreatedDateFilterSection({
   t,
@@ -77,7 +75,7 @@ export function buildCreatedDateFilterSection({
             className="input"
             value={createdDateTo}
             min={createdDateFrom || undefined}
-            max={todayIso()}
+            max={todayStr()}
             onChange={(event) => setCreatedDateTo(event.target.value)}
           />
         </div>

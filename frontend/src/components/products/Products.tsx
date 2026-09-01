@@ -14,7 +14,6 @@ import Boxes from 'lucide-react/dist/esm/icons/boxes.js'
 import { isBrokenLocalizedString, useApp, useSync } from '../../AppContext'
 import Modal from '../shared/Modal'
 import AlphaIndexRail from '../shared/AlphaIndexRail'
-import DateTimeRangePicker, { todayDateTimeRange } from '../shared/DateTimeRangePicker'
 import FilterMenu from '../shared/FilterMenu'
 import PortalMenu from '../shared/PortalMenu'
 import AppSelect from '../shared/AppSelect'
@@ -142,6 +141,7 @@ const ManageCategoriesModal = lazyRetry(() => import('./lookups/ManageCategories
 // bundle for a user who will only ever see this lightweight surface.
 const ProductsImageOnlyView = lazyRetry(() => import('./ProductsImageOnlyView.tsx'), 'products-image-only-view')
 const StockChangeSection = lazyRetry(() => import('./StockChangeSection.tsx'), 'products-stock-change-section')
+const StockInSessionsSection = lazyRetry(() => import('./StockInSessionsSection.tsx'), 'products-stock-in-sessions-section')
 const ProductDuplicatesTab = lazyRetry(() => import('./ProductDuplicatesTab.tsx'), 'products-duplicates-tab')
 const ManageBrandsModal = lazyRetry(() => import('./lookups/ManageBrandsModal'), 'products-manage-brands-modal')
 const ManageUnitsModal = lazyRetry(() => import('./lookups/ManageUnitsModal'), 'products-manage-units-modal')
@@ -153,6 +153,7 @@ const BulkAddStockModal = lazyRetry(() => import('./forms/BulkAddStockModal'), '
 const FastStockInModal = lazyRetry(() => import('../inventory/FastStockInModal'), 'products-fast-stock-in-modal')
 const VariantFormModal = lazyRetry(() => import('./forms/VariantFormModal'), 'products-variant-form-modal')
 const ProductForm = lazyRetry(() => import('./forms/ProductForm'), 'products-product-form')
+const StockAdjustModal = lazyRetry(() => import('./forms/StockAdjustModal'), 'products-stock-adjust-modal')
 const ProductDetailModal = lazyRetry(() => import('./surfaces/ProductDetailModal'), 'products-product-detail-modal')
 // Reused as-is from Inventory's own batches surface (see ManageBatchesModal.tsx)
 // rather than duplicated -- the "click to view/manage batches" affordance the
@@ -664,12 +665,15 @@ function ProductsFullEditor() {
   // 9.2: 'all' | 'auto' -- server-side facet over auto_merged_count.
   const [mergedFilter, setMergedFilter] = useState('all')
   const [promotionRules, setPromotionRules] = useState<PromotionRule[]>([])
-  const [createdDateFrom, setCreatedDateFrom] = useState(() => todayDateTimeRange().startDate)
-  const [createdDateTo, setCreatedDateTo] = useState(() => todayDateTimeRange().endDate)
+  // The Products section has no date filter. Keep these empty compatibility
+  // values for the shared query/export helpers, so product results are never
+  // silently restricted to the current day.
+  const [createdDateFrom, setCreatedDateFrom] = useState('')
+  const [createdDateTo, setCreatedDateTo] = useState('')
   // Y15: the page is chip-sectioned like Promotions -- a switcher in the
   // header flips between the product listing and the Stock Changes ledger,
   // which used to be a folded card at the bottom of the same scroll.
-  const [activeProductSection, setActiveProductSection] = useState<'products' | 'stock_changes' | 'duplicates'>('products')
+  const [activeProductSection, setActiveProductSection] = useState<'products' | 'stock_changes' | 'stock_in_sessions' | 'duplicates'>('products')
   // Stock Changes section's header-row actions (Adjust menu + ledger export),
   // registered up by StockChangeSection so they render on THIS page's header
   // row beside info/History/Manage (user, Aug 31). null when that section is
@@ -766,6 +770,7 @@ function ProductsFullEditor() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
   const [detailProduct,setDetailProduct]= useState<ProductRecord | null>(null)
+  const [adjustStockProduct, setAdjustStockProduct] = useState<ProductRecord | null>(null)
   // `toModalProduct(selected)` used to be called inline in the ProductForm
   // JSX below -- a plain function returning a new object literal on every
   // render of Products.tsx, not just when `selected` itself changes. That
@@ -3139,8 +3144,6 @@ function ProductsFullEditor() {
                   ask. Child rows under a group keep font-medium, same as
                   before. */}
               <div {...getKhmerTextProps(productName, `min-w-0 break-words text-gray-900 dark:text-white ${indented ? 'font-medium' : 'font-semibold'}`)}>{productName}</div>
-              {p.is_group ? <span className="text-xs px-1.5 py-0.5 rounded-full bg-purple-100 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400">group</span> : null}
-              {p.parent_id ? <span className="text-xs px-1.5 py-0.5 rounded-full bg-primary-100 dark:bg-primary-900/30 text-primary-600 dark:text-primary-400">variant</span> : null}
             </div>
             {dupInfo ? (
               <DuplicateResolverControl
@@ -3523,7 +3526,7 @@ function ProductsFullEditor() {
         triggerWrapperClassName="shrink-0"
         trigger={<button type="button" className="flex h-8 w-8 items-center justify-center rounded-full text-slate-400 hover:bg-white hover:text-slate-600 dark:hover:bg-slate-700 dark:hover:text-slate-200" aria-label={tr('more_actions', 'More actions')}><MoreVertical className="h-4 w-4" /></button>}
         items={[
-          !lead.parent_id && { label: tr('add_variant', 'Add variant'), icon: <Plus className="h-3.5 w-3.5" />, onClick: () => setVariantModal(lead) },
+          { label: tr('add_variant', 'Add variant'), icon: <Plus className="h-3.5 w-3.5" />, onClick: () => setVariantModal(lead) },
           { label: tr('add_image', 'Add image'), icon: <ImagePlus className="h-3.5 w-3.5" />, onClick: () => openProductFormTab(lead, 'basic') },
         ]}
       />
@@ -3578,6 +3581,15 @@ function ProductsFullEditor() {
           >
             {tr('stock_change_ledger', 'Stock Changes', 'ការផ្លាស់ប្តូរស្តុក')}
           </button>
+          {canAdjustInventoryStock ? (
+            <button
+              type="button"
+              onClick={() => setActiveProductSection('stock_in_sessions')}
+              className={`rounded-lg px-3 py-1.5 text-sm font-medium transition-colors ${activeProductSection === 'stock_in_sessions' ? 'bg-white text-primary-600 shadow dark:bg-gray-900' : 'text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'}`}
+            >
+              {tr('stock_in_sessions', 'Stock-in Sessions', 'វគ្គបញ្ចូលស្តុក')}
+            </button>
+          ) : null}
           {/* Duplicates review (possibly-same residue) -- same section-chip
               pattern, gated by the same permission as the merge tool since
               its actions are the same kind of merge. */}
@@ -3631,7 +3643,7 @@ function ProductsFullEditor() {
             /* Stock Changes section replaces the catalog "Add Product" button
                with its own "Adjust" menu (user, Aug 31) -> drop onAdd there;
                HeaderActions hides any undefined-handler control. */
-            onAdd={canAddProduct && activeProductSection !== 'stock_changes' ? ()=>{setSelected(null);setFormInitialTab('basic');setModal('form')} : undefined}
+            onAdd={canAddProduct && activeProductSection !== 'stock_changes' && activeProductSection !== 'stock_in_sessions' ? ()=>{setSelected(null);setFormInitialTab('basic');setModal('form')} : undefined}
             // The merged Add Stock flow rides the same Add menu. Hidden on
             // the Stock Changes section, which carries its own Adjust menu.
             onAddStock={canAdjustInventoryStock && activeProductSection !== 'stock_changes' ? () => setAddStockOpen(true) : undefined}
@@ -3712,21 +3724,7 @@ function ProductsFullEditor() {
           bg-gray-50/dark:bg-gray-900 matches #app-root's background (the
           page-scroll itself is transparent) so list rows scrolling
           underneath don't show through while this is stuck. */}
-      {/* The "Created" batch-received-date range sits ABOVE the search row
-          (user, Aug 30: "move the start and end date above the search
-          function row") as a fit-to-content pill, not a stretched bar. */}
       <div className="sticky top-0 z-30 -mx-1 bg-gray-50/95 pb-2 pt-2 backdrop-blur dark:bg-gray-900/95 sm:mx-0">
-        {/* The date-range row rides INSIDE the sticky wrapper now (user,
-            Aug 31: "the search bar row and the date both can be pinned and
-            stick so when scrolling it shows") -- both rows pin together. */}
-        <div className="mb-1.5 flex flex-wrap items-center gap-1.5 px-0.5">
-          <DateTimeRangePicker
-            t={t}
-            showTime={false}
-            value={{ startDate: createdDateFrom, endDate: createdDateTo, startTime: '', endTime: '' }}
-            onChange={(range) => { setCreatedDateFrom(range.startDate); setCreatedDateTo(range.endDate) }}
-          />
-        </div>
         {/* Y13: a plain page-level search row (the folding "Search &
             Filters" SectionCard wrapper was removed). SearchInput's own
             `min-w-0 flex-1` default handles narrow-screen shrink; every
@@ -3759,7 +3757,7 @@ function ProductsFullEditor() {
                 competing for room in this already-busy search row. */}
             <FilterMenu
               label={t('filters') || 'Filters'}
-              activeCount={activeFilters - (createdDateFrom ? 1 : 0) - (createdDateTo ? 1 : 0)}
+              activeCount={activeFilters}
               sections={productFilterSections}
               onClear={clearAllFilters}
               onOpenChange={setIsProductFilterMenuOpen}
@@ -3772,7 +3770,7 @@ function ProductsFullEditor() {
           forth, items per page and pages ... below the search bar row", never
           between the date range and the search row). The matching compact
           pager stays at the end of the list. */}
-      <div className="mb-2 flex justify-end px-0.5">
+      <div className="mb-2 flex justify-center px-0.5">
         <PaginationControls
           compact
           rangeAsPageSize
@@ -4187,6 +4185,14 @@ function ProductsFullEditor() {
         </div>
       )}
 
+      {activeProductSection === 'stock_in_sessions' && canAdjustInventoryStock ? (
+        <div className="mt-1">
+          <Suspense fallback={<div className="py-6 text-center text-sm text-gray-400">{t('loading') || 'Loading'}...</div>}>
+            <StockInSessionsSection t={t} notify={notify} branches={branches} onChanged={() => void load(true)} />
+          </Suspense>
+        </div>
+      ) : null}
+
       {/* The Add menu's merged Add Stock flow (any section) -- the shipment
           receiver, which covers a whole delivery and a single product. */}
       {addStockOpen ? (
@@ -4232,8 +4238,8 @@ function ProductsFullEditor() {
             fmtKHR={fmtKHR}
             t={t}
             onEdit={()=>{setDetailProduct(null);openProductFormTab(detailProduct, 'basic')}}
-            onAddVariant={!detailProduct.parent_id ? () => { setVariantModal(detailProduct); setDetailProduct(null) } : undefined}
-            onAdjustStock={() => { setDetailProduct(null); openProductFormTab(detailProduct, 'stock') }}
+            onAddVariant={() => { setVariantModal(detailProduct); setDetailProduct(null) }}
+            onAdjustStock={() => { setDetailProduct(null); setAdjustStockProduct(detailProduct) }}
             onClose={()=>setDetailProduct(null)}
             onImageClick={(src, gallery, startIndex = 0) => {
               const sourceGallery = buildProductLightboxGalleryInput(src, gallery)
@@ -4243,6 +4249,17 @@ function ProductsFullEditor() {
           />
         </Suspense>
       )}
+
+      {adjustStockProduct ? (
+        <Suspense fallback={null}>
+          <StockAdjustModal
+            initialProduct={adjustStockProduct}
+            t={t}
+            onClose={() => setAdjustStockProduct(null)}
+            onDone={() => { setAdjustStockProduct(null); void load(true) }}
+          />
+        </Suspense>
+      ) : null}
 
       {manageBatchesProduct ? (
         <Suspense fallback={null}>
@@ -4343,7 +4360,6 @@ function ProductsFullEditor() {
             groupCandidates={products.map((product) => ({
               id: product.id,
               name: String(product.name || ''),
-              parent_id: product.parent_id || null,
             }))}
             initialTab={formInitialTab}
             onSave={(payload) => handleSaveWithGallery((payload || {}) as unknown as ProductRecord)}

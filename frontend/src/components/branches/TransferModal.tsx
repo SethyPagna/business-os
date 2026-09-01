@@ -46,6 +46,8 @@ type TransferProduct = {
 
 type TransferStockResponse = {
   items?: TransferProduct[]
+  page?: number
+  totalPages?: number
 }
 
 type TransferResult = {
@@ -163,6 +165,9 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
   const [note, setNote] = useState('')
   const [saving, setSaving] = useState(false)
   const [loadingProducts, setLoadingProducts] = useState(false)
+  const [loadingMoreProducts, setLoadingMoreProducts] = useState(false)
+  const [singleStockPage, setSingleStockPage] = useState(1)
+  const [singleStockTotalPages, setSingleStockTotalPages] = useState(1)
   const stockRequestRef = useRef(0)
   const productsBranchRef = useRef('')
   const transferInFlightRef = useRef(false)
@@ -246,39 +251,53 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
    * 3.1 Refresh product list each time source branch changes.
    */
   useEffect(() => {
+    if (mode !== 'single') return undefined
     if (!fromBranch) {
       invalidateTrackedRequest(stockRequestRef)
       productsBranchRef.current = ''
       setLoadingProducts(false)
+      setLoadingMoreProducts(false)
       setProducts([])
+      setSingleStockPage(1)
+      setSingleStockTotalPages(1)
       setSelectedProduct(null)
       setQuantity('')
       return undefined
     }
 
     const requestId = beginTrackedRequest(stockRequestRef)
-    if (productsBranchRef.current !== String(fromBranch)) {
-      setProducts([])
+    const branchChanged = productsBranchRef.current !== String(fromBranch)
+    if (branchChanged) {
       setSelectedProduct(null)
       setQuantity('')
     }
+    // Single-transfer used to fetch only the first 50 branch-stock rows and
+    // search that local slice. Search now goes to D1, and the unsearched list
+    // is explicitly pageable, so every positive-stock product is reachable.
+    setProducts([])
+    setSingleStockPage(1)
+    setSingleStockTotalPages(1)
     setLoadingProducts(true)
     async function loadStock() {
       try {
         const stock = await withLoaderTimeout<unknown>(
-          () => getTransferApi().getBranchStock(Number.parseInt(fromBranch, 10), { page: 1, pageSize: 50, stockState: 'positive' }),
+          () => getTransferApi().getBranchStock(Number.parseInt(fromBranch, 10), {
+            page: 1,
+            pageSize: TRANSFER_STOCK_PAGE_SIZE,
+            stockState: 'positive',
+            ...(debouncedSearch.trim() ? { query: debouncedSearch.trim() } : {}),
+          }),
           'Branch stock for transfer',
           TRANSFER_STOCK_LOAD_TIMEOUT_MS,
         )
         if (!aliveRef.current || !isTrackedRequestCurrent(stockRequestRef, requestId)) return
+        const response = stock as TransferStockResponse
         productsBranchRef.current = String(fromBranch)
         setProducts(normalizeTransferStockRows(stock))
-        setSelectedProduct(null)
-        setQuantity('')
+        setSingleStockPage(Number(response?.page || 1) || 1)
+        setSingleStockTotalPages(Math.max(1, Number(response?.totalPages || 1) || 1))
       } catch (error) {
         if (!aliveRef.current || !isTrackedRequestCurrent(stockRequestRef, requestId)) return
-        setSelectedProduct(null)
-        setQuantity('')
         notify(getErrorMessage(error, t('failed_to_load_data') || 'Failed to load data'), 'error')
       } finally {
         if (!aliveRef.current || !isTrackedRequestCurrent(stockRequestRef, requestId)) return
@@ -290,7 +309,41 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
     return () => {
       invalidateTrackedRequest(stockRequestRef)
     }
-  }, [fromBranch])
+  }, [fromBranch, mode, debouncedSearch])
+
+  const loadMoreSingleProducts = async () => {
+    if (!fromBranch || loadingProducts || loadingMoreProducts || singleStockPage >= singleStockTotalPages) return
+    const nextPage = singleStockPage + 1
+    const requestId = beginTrackedRequest(stockRequestRef)
+    setLoadingMoreProducts(true)
+    try {
+      const stock = await withLoaderTimeout<unknown>(
+        () => getTransferApi().getBranchStock(Number.parseInt(fromBranch, 10), {
+          page: nextPage,
+          pageSize: TRANSFER_STOCK_PAGE_SIZE,
+          stockState: 'positive',
+          ...(debouncedSearch.trim() ? { query: debouncedSearch.trim() } : {}),
+        }),
+        'More branch stock for transfer',
+        TRANSFER_STOCK_LOAD_TIMEOUT_MS,
+      )
+      if (!aliveRef.current || !isTrackedRequestCurrent(stockRequestRef, requestId)) return
+      const response = stock as TransferStockResponse
+      const nextRows = normalizeTransferStockRows(stock)
+      setProducts((current) => {
+        const byId = new Map(current.map((product) => [String(product.id), product]))
+        nextRows.forEach((product) => byId.set(String(product.id), product))
+        return Array.from(byId.values())
+      })
+      setSingleStockPage(Number(response?.page || nextPage) || nextPage)
+      setSingleStockTotalPages(Math.max(1, Number(response?.totalPages || singleStockTotalPages) || 1))
+    } catch (error) {
+      if (!aliveRef.current || !isTrackedRequestCurrent(stockRequestRef, requestId)) return
+      notify(getErrorMessage(error, t('failed_to_load_data') || 'Failed to load data'), 'error')
+    } finally {
+      if (aliveRef.current && isTrackedRequestCurrent(stockRequestRef, requestId)) setLoadingMoreProducts(false)
+    }
+  }
 
   /**
    * 3.1b Batch-tracking lookup -- refreshed alongside the product list
@@ -434,15 +487,10 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
    * 4. Search Filter
    * 4.1 Keeps in-stock list visible when search is empty.
    */
-  const filtered = useMemo(() => {
-    const query = search.trim().toLowerCase()
-    if (!query) return products.filter((product) => Number(product.branch_quantity || 0) > 0)
-    return products.filter((product) => {
-      const name = String(product.name || '').toLowerCase()
-      const sku = String(product.sku || '').toLowerCase()
-      return name.includes(query) || sku.includes(query)
-    })
-  }, [products, search])
+  const filtered = useMemo(
+    () => products.filter((product) => Number(product.branch_quantity || 0) > 0),
+    [products],
+  )
 
   /**
    * 4.2 Multi-mode search filter -- same rules as 4.1 (hide zero-stock rows
@@ -792,6 +840,16 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
                     </span>
                   </button>
                 ))}
+                {!loadingProducts && singleStockPage < singleStockTotalPages ? (
+                  <button
+                    type="button"
+                    className="w-full px-4 py-2.5 text-center text-xs font-semibold text-blue-600 transition-colors hover:bg-blue-50 disabled:opacity-50 dark:text-blue-300 dark:hover:bg-blue-900/20"
+                    disabled={loadingMoreProducts}
+                    onClick={() => { void loadMoreSingleProducts() }}
+                  >
+                    {loadingMoreProducts ? `${t('loading') || 'Loading'}...` : (t('show_more') || 'Show more')}
+                  </button>
+                ) : null}
               </div>
             </div>
           ) : null}

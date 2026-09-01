@@ -39,9 +39,9 @@ import {
   getReturns as fetchReturns,
   getReturnsReport,
 } from '../../api/returnsReadTransport.ts'
-import StatsStrip, { statsPresetRange, type StatCardDef } from '../shared/StatsStrip.tsx'
+import StatsStrip, { type StatCardDef } from '../shared/StatsStrip.tsx'
 import StatsRangeRow from '../shared/StatsRangeRow.tsx'
-import type { DateTimeRange } from '../shared/DateTimeRangePicker'
+import { EMPTY_DATE_TIME_RANGE, type DateTimeRange } from '../shared/DateTimeRangePicker'
 import ReturnsListSurface from './ReturnsListSurface'
 const ReturnDetailModal = lazyRetry(() => import('./ReturnDetailModal'), 'returns-detail-modal')
 const EditReturnModal = lazyRetry(() => import('./EditReturnModal'), 'returns-edit-modal')
@@ -324,8 +324,9 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
   // ONE date scope for the whole page (user, Aug 31: "drive list + stats
   // together"): the Start→End range row above the search bar drives BOTH the
   // stats strip AND the returns list — no separate year/month period control.
-  // Default today; the list groups by day. (Strip data state is further down.)
-  const [stripRange, setStripRange] = useState<DateTimeRange>(() => statsPresetRange('today'))
+  // Starts all-time. Quick choices (Today / 7 days / week / month / year)
+  // live inside the shared date/time picker so there is one range control.
+  const [stripRange, setStripRange] = useState<DateTimeRange>(() => ({ ...EMPTY_DATE_TIME_RANGE }))
   const [typeFilter, setTypeFilter] = useState('all')
   const [selectedIds, setSelectedIds] = useState<Set<number>>(() => new Set())
   // 11.1/11.2 (B6): same selection model as Products/Inventory/Sales --
@@ -485,7 +486,7 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
   }, [isActive, loadReturns, syncChannel?.channel, syncChannel?.ts])
 
   // The foldable stats strip (shared StatsStrip, app-wide stats pattern):
-  // range-scoped (default TODAY), scope-aware -- customer returns show
+  // range-scoped (all-time by default), scope-aware -- customer returns show
   // refunds + type mix, supplier cases show compensation vs business loss.
   // Fold breakdowns come from GET /api/returns/report (same kernel the
   // Reports hub reads, so figures always agree).
@@ -500,11 +501,15 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
   const [stripLoading, setStripLoading] = useState(false)
   const stripRequestRef = useRef(0)
   const loadStatsStrip = useCallback(async (): Promise<void> => {
-    if (!isActive || !stripRange.startDate || !stripRange.endDate) return
+    if (!isActive) return
     const requestId = ++stripRequestRef.current
     setStripLoading(true)
     try {
-      const result = await getReturnsReport({ startDate: stripRange.startDate, endDate: stripRange.endDate, scope })
+      const result = await getReturnsReport({
+        ...(stripRange.startDate ? { startDate: stripRange.startDate } : {}),
+        ...(stripRange.endDate ? { endDate: stripRange.endDate } : {}),
+        scope,
+      })
       if (stripRequestRef.current !== requestId) return
       setStripData((result || {}) as ReturnsStripPayload)
     } catch {

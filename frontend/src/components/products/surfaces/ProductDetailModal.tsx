@@ -255,13 +255,8 @@ export default function ProductDetailModal({
                     separator moves onto the FOLLOWING items so the line
                     never opens with a stray dot when a product has no
                     barcode or SKU. */}
-                {p.barcode ? (
-                  <button type="button" className="max-w-[140px] truncate font-mono underline-offset-2 hover:text-blue-600 hover:underline" onClick={copyBarcode} title={T('copy_barcode', 'Copy barcode')}>
-                    {p.barcode}
-                  </button>
-                ) : null}
                 {p.sku ? <span className="max-w-[100px] truncate font-mono" title={p.sku}>{p.sku}</span> : null}
-                {p.category ? <span className="max-w-[110px] truncate" title={p.category}>{p.barcode || p.sku ? '· ' : ''}{p.category}</span> : null}
+                {p.category ? <span className="max-w-[110px] truncate" title={p.category}>{p.sku ? '· ' : ''}{p.category}</span> : null}
                 {p.brand ? <span className="max-w-[110px] truncate" title={p.brand}>&middot; {p.brand}</span> : null}
               </div>
             </div>
@@ -287,6 +282,8 @@ export default function ProductDetailModal({
               {/* Left mini-section: the compact identity + stock facts. */}
               <div className="min-w-0 space-y-2.5 sm:pr-5">
                 <div className="grid grid-cols-1 gap-y-1.5">
+                  {p.barcode ? <Row label={T('barcode', 'Barcode')}><button type="button" className="max-w-full truncate font-mono underline-offset-2 hover:text-blue-600 hover:underline" onClick={copyBarcode} title={T('copy_barcode', 'Copy barcode')}>{p.barcode}</button></Row> : null}
+                  {p.sku ? <Row label={T('sku', 'SKU')}><span className="font-mono">{p.sku}</span></Row> : null}
                   {p.supplier ? <Row label={T('label_supplier', 'Supplier')}>{p.supplier}</Row> : null}
                   {/* Stock + Status moved to the right column after Margin
                       (Aug 30 ask) -- identity facts stay here. */}

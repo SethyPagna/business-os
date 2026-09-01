@@ -45,6 +45,13 @@ type ReceiptFallbackLine = {
   kind: 'text' | 'center' | 'row' | 'item'
 }
 
+type PrintableReceiptLayout = {
+  markup: string
+  widthMm: number
+  pageHeightMm: number
+  continuousRoll: boolean
+}
+
 function parsePrintNumber(value: unknown, fallback: number): number {
   const parsed = Number.parseFloat(String(value ?? ''))
   return Number.isFinite(parsed) ? parsed : fallback
@@ -270,8 +277,12 @@ function normalizePrintableRoot(root: unknown, widthMm: number): HTMLElement | n
   root.style.width = `${widthMm}mm`
   root.style.maxWidth = `${widthMm}mm`
   root.style.minHeight = '0'
-  root.style.margin = '0 auto'
+  // Print is anchored to the physical paper origin. Centering is useful in
+  // the on-screen preview, but on a printer it can combine with driver
+  // unprintable-area offsets and clip the left edge of narrow thermal paper.
+  root.style.margin = '0'
   root.style.boxSizing = 'border-box'
+  root.style.overflow = 'visible'
   root.style.background = '#ffffff'
   return root
 }
@@ -797,32 +808,46 @@ async function withReceiptElement<T>(
   }
 }
 
-async function createPrintableReceiptMarkup(content: ReceiptContent, options: ReceiptPrintOptions = {}): Promise<string> {
+async function createPrintableReceiptMarkup(content: ReceiptContent, options: ReceiptPrintOptions = {}): Promise<PrintableReceiptLayout> {
   const printSettings = options.printSettings || getPrintSettings()
   const widthMm = options.paperWidthMm || getPaperWidthMm(printSettings)
   return withReceiptElement(content, widthMm, async (host) => {
     await waitForElementAssets(host)
+
+    // Measure the COMPLETE printable host (including the configured receipt
+    // margins). CSS physical units are resolved consistently inside this host,
+    // so deriving mm from its actual width avoids hard-coding a px/mm ratio and
+    // keeps the page height matched to the exact receipt DOM.
+    const hostRect = host.getBoundingClientRect()
+    const renderedWidthPx = Math.max(1, hostRect.width || host.offsetWidth || host.scrollWidth)
+    const renderedHeightPx = Math.max(1, host.scrollHeight || hostRect.height || host.offsetHeight)
+    const measuredHeightMm = renderedHeightPx * (widthMm / renderedWidthPx)
+    const fixedHeightMm = getPaperHeightMm(printSettings)
+    const continuousRoll = fixedHeightMm == null
+    // A tiny tail allowance prevents sub-pixel/driver rounding from spilling a
+    // one-page thermal receipt onto a second blank/cut page. It is deliberately
+    // applied only to continuous rolls; fixed cards/sheets keep their exact size.
+    const pageHeightMm = fixedHeightMm ?? Math.max(1, measuredHeightMm + 1)
+
     const clone = normalizePrintableRoot(cloneElementWithInlineStyles(host), widthMm)
     if (!clone) throw new Error('Receipt preview element is unavailable')
+    // IMPORTANT: keep the host padding. Those are the user's configured print
+    // margins and they belong INSIDE the 80mm paper width. The previous print
+    // path zeroed this padding and then forced the nested receipt back to 80mm,
+    // creating an over-wide tree that could clip on the left/right.
     normalizeReceiptContentWidth(clone)
-    clone.style.padding = '0'
     clone.style.width = `${widthMm}mm`
     clone.style.maxWidth = `${widthMm}mm`
-    clone.querySelectorAll('[data-receipt-export-root="true"]').forEach((node) => {
-      if (!(node instanceof HTMLElement)) return
-      node.style.width = `${widthMm}mm`
-      node.style.maxWidth = `${widthMm}mm`
-    })
+    clone.style.minWidth = `${widthMm}mm`
     clone.querySelectorAll('canvas, video').forEach((node) => node.remove())
     await inlineImageNodeSources(clone)
     await inlineStyleAssetUrls(clone)
-    return clone.outerHTML
+    return { markup: clone.outerHTML, widthMm, pageHeightMm, continuousRoll }
   }, printSettings)
 }
 
-function buildPrintablePreviewDocument(markup: string, options: ReceiptPrintOptions = {}): string {
-  const printSettings = options.printSettings || getPrintSettings()
-  const widthMm = options.paperWidthMm || getPaperWidthMm(printSettings)
+function buildPrintablePreviewDocument(layout: PrintableReceiptLayout, options: ReceiptPrintOptions = {}): string {
+  const { markup, widthMm, pageHeightMm } = layout
   const title = options.title === '' ? '' : (options.title || 'Receipt')
   const toolbarTitle = title || 'Receipt Preview'
   const note = options.note ? `<div class="receipt-note">${escapeHtml(options.note)}</div>` : ''
@@ -934,20 +959,57 @@ function buildPrintablePreviewDocument(markup: string, options: ReceiptPrintOpti
         overflow-wrap: anywhere;
         word-break: break-word;
       }
+      @page {
+        size: ${widthMm}mm ${pageHeightMm.toFixed(2)}mm;
+        margin: 0;
+      }
       @media print {
-        @page { margin: 0; }
-        body {
+        html, body {
+          margin: 0 !important;
+          padding: 0 !important;
+          width: ${widthMm}mm !important;
+          min-width: ${widthMm}mm !important;
+          max-width: ${widthMm}mm !important;
+          height: ${pageHeightMm.toFixed(2)}mm !important;
+          min-height: ${pageHeightMm.toFixed(2)}mm !important;
           background: #ffffff;
+          overflow: visible !important;
           -webkit-print-color-adjust: exact;
           print-color-adjust: exact;
         }
-        .receipt-shell { padding: 0; }
+        .receipt-shell {
+          width: ${widthMm}mm !important;
+          min-width: ${widthMm}mm !important;
+          max-width: ${widthMm}mm !important;
+          margin: 0 !important;
+          padding: 0 !important;
+          overflow: visible !important;
+        }
         .receipt-toolbar, .receipt-note { display: none !important; }
+        .receipt-stage {
+          display: block !important;
+          width: ${widthMm}mm !important;
+          max-width: ${widthMm}mm !important;
+          margin: 0 !important;
+          padding: 0 !important;
+          overflow: visible !important;
+        }
         .receipt-frame {
-          width: auto;
-          padding: 0;
+          width: ${widthMm}mm !important;
+          min-width: ${widthMm}mm !important;
+          max-width: ${widthMm}mm !important;
+          margin: 0 !important;
+          padding: 0 !important;
           border-radius: 0;
           box-shadow: none;
+          overflow: visible !important;
+          break-inside: avoid-page;
+          page-break-inside: avoid;
+        }
+        .receipt-frame > * {
+          margin: 0 !important;
+          break-inside: avoid-page;
+          page-break-inside: avoid;
         }
       }
     </style>
@@ -990,8 +1052,8 @@ function attachPrintablePreviewActions(previewWindow: Window | null, { autoPrint
 }
 
 export async function openPrintableReceiptPreview(content: ReceiptContent, options: ReceiptPrintOptions = {}) {
-  const markup = await createPrintableReceiptMarkup(content, options)
-  const html = buildPrintablePreviewDocument(markup, options)
+  const layout = await createPrintableReceiptMarkup(content, options)
+  const html = buildPrintablePreviewDocument(layout, options)
   const previewWindow = window.open('', '_blank')
   if (!previewWindow) throw new Error('Popup blocked. Allow popups for this page and try again.')
   previewWindow.document.open()

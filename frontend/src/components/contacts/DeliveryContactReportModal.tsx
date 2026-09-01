@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import Modal from '../shared/Modal'
-import DateTimeRangePicker, { todayDateTimeRange, type DateTimeRange } from '../shared/DateTimeRangePicker.tsx'
+import DateTimeRangePicker, { EMPTY_DATE_TIME_RANGE, type DateTimeRange } from '../shared/DateTimeRangePicker.tsx'
 import { getDeliveryContactReport } from '../../api/salesTransport.ts'
 
 // X3 (Part 395): "delivery can also check expenses of delivery by contact" --
@@ -41,7 +41,7 @@ function money(value: unknown): string {
 }
 
 export default function DeliveryContactReportModal({ contactId, contactName, t, onClose }: DeliveryContactReportModalProps) {
-  const [range, setRange] = useState<DateTimeRange>(() => todayDateTimeRange())
+  const [range, setRange] = useState<DateTimeRange>(() => ({ ...EMPTY_DATE_TIME_RANGE }))
   const [row, setRow] = useState<DeliveryContactReportRow | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')

@@ -339,8 +339,8 @@ function readDashboardFilterPrefs(storageKeys: string | string[]): DashboardFilt
       if (!parsed || typeof parsed !== 'object') continue
       return {
         rangeId: typeof parsed.rangeId === 'string' ? normalizeDashboardRangeId(parsed.rangeId) : 'custom',
-        customStart: typeof parsed.customStart === 'string' ? parsed.customStart : todayStr(),
-        customEnd: typeof parsed.customEnd === 'string' ? parsed.customEnd : todayStr(),
+        customStart: typeof parsed.customStart === 'string' ? parsed.customStart : '',
+        customEnd: typeof parsed.customEnd === 'string' ? parsed.customEnd : '',
       }
     }
     return null
@@ -663,8 +663,8 @@ export default function Dashboard() {
   // Preset chips are gone. A legacy saved preset deliberately migrates to the
   // new app-wide default (today); a range the user explicitly edited remains.
   const [rangeId, setRangeId]     = useState<DashboardRangeId>('custom')
-  const [customStart, setCustomStart] = useState(() => initialFilterPrefs?.rangeId === 'custom' ? (initialFilterPrefs.customStart || todayStr()) : todayStr())
-  const [customEnd, setCustomEnd]     = useState(() => initialFilterPrefs?.rangeId === 'custom' ? (initialFilterPrefs.customEnd || todayStr()) : todayStr())
+  const [customStart, setCustomStart] = useState(() => initialFilterPrefs?.rangeId === 'custom' ? (initialFilterPrefs.customStart || '') : '')
+  const [customEnd, setCustomEnd]     = useState(() => initialFilterPrefs?.rangeId === 'custom' ? (initialFilterPrefs.customEnd || '') : '')
   const [activeChart, setActiveChart] = useState<DashboardChartMode>('revenue')
   const [topMode, setTopMode]         = useState<DashboardTopMode>('revenue')
   const [customerDetail, setCustomerDetail]     = useState<DashboardCustomer | null>(null)
@@ -843,8 +843,8 @@ export default function Dashboard() {
     filterStorageKeyRef.current = dashboardFilterStorageKey
     const nextPrefs = readDashboardFilterPrefs([dashboardFilterStorageKey, DASHBOARD_FILTER_STORAGE_FALLBACK_KEY])
     setRangeId('custom')
-    setCustomStart(nextPrefs?.rangeId === 'custom' ? (nextPrefs.customStart || todayStr()) : todayStr())
-    setCustomEnd(nextPrefs?.rangeId === 'custom' ? (nextPrefs.customEnd || todayStr()) : todayStr())
+    setCustomStart(nextPrefs?.rangeId === 'custom' ? (nextPrefs.customStart || '') : '')
+    setCustomEnd(nextPrefs?.rangeId === 'custom' ? (nextPrefs.customEnd || '') : '')
   }, [dashboardFilterStorageKey])
 
   useEffect(() => {
@@ -1591,8 +1591,8 @@ ${translateOr('delivery_margin', 'Delivery margin')} ${fmtUSD(aDeliveryMargin)} 
                 value={{ startDate: getCurrentDashboardRange().start, endDate: getCurrentDashboardRange().end, startTime: '', endTime: '' } as DateTimeRange}
                 onChange={(r) => {
                   setRangeId('custom')
-                  if (r.startDate) setCustomStart(r.startDate)
-                  if (r.endDate) setCustomEnd(r.endDate)
+                  setCustomStart(r.startDate || '')
+                  setCustomEnd(r.endDate || '')
                 }}
                 t={t}
                 showTime={false}
@@ -2268,8 +2268,8 @@ ${translateOr('delivery_margin', 'Delivery margin')} ${fmtUSD(aDeliveryMargin)} 
       )}
       {/* KPI drill panel -- portaled, see the product detail note. */}
       {kpiDetail && createPortal(
-        <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-0 sm:items-center sm:p-4" onClick={() => setKpiDetail(null)}>
-          <div className="flex max-h-modal-85 w-full flex-col rounded-t-2xl bg-white shadow-2xl dark:bg-gray-800 sm:max-w-sm sm:rounded-2xl pb-[env(safe-area-inset-bottom)] sm:pb-0" onClick={(event) => event.stopPropagation()}>
+        <div className="modal-viewport-safe fixed inset-0 z-[1050] flex items-end justify-center bg-black/50 sm:items-center" onClick={() => setKpiDetail(null)}>
+          <div className="modal-panel-safe flex w-full flex-col rounded-2xl bg-white shadow-2xl dark:bg-gray-800 sm:max-w-sm" onClick={(event) => event.stopPropagation()}>
             <div className="flex items-center justify-between border-b border-gray-200 p-4 dark:border-gray-700">
               <div>
                 <h2 className="font-bold text-gray-900 dark:text-white">{kpiDetail.label}</h2>

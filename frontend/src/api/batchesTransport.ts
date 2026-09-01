@@ -47,6 +47,7 @@ export type ReceiveBatchPayload = {
   unitCostUsd?: number | null
   paymentStatus?: 'paid' | 'credit' | null
   creditDueDate?: string | null
+  sessionId?: number | null
 }
 
 // The lot a cashier picked at checkout for a batch-tracked product -- see
@@ -137,6 +138,7 @@ export function receiveBatchStock(payload: ReceiveBatchPayload): Promise<{ succe
       unit_cost_usd: payload.unitCostUsd ?? null,
       payment_status: payload.paymentStatus || null,
       credit_due_date: payload.creditDueDate || null,
+      session_id: payload.sessionId ?? null,
     }),
     null,
     true,
@@ -148,12 +150,16 @@ export function receiveBatchStock(payload: ReceiveBatchPayload): Promise<{ succe
 // more separately-editable lot code -- correcting receivedAt recomputes
 // the batch's code automatically server-side (see cloudflare/src/lib/
 // batchCode.ts's dateToBatchCode).
-export function updateBatch(id: number | string, patch: { expiryDate?: string | null; notes?: string | null; isActive?: boolean; receivedAt?: string | null; expectedUpdatedAt?: string | null }): Promise<{ success: boolean }> {
+export function updateBatch(id: number | string, patch: { expiryDate?: string | null; notes?: string | null; isActive?: boolean; receivedAt?: string | null; supplierId?: number | null; supplierName?: string | null; expectedUpdatedAt?: string | null }): Promise<{ success: boolean }> {
   const body: Record<string, unknown> = {}
   if (patch.expiryDate !== undefined) body.expiry_date = patch.expiryDate || null
   if (patch.notes !== undefined) body.notes = patch.notes || null
   if (patch.isActive !== undefined) body.is_active = patch.isActive
   if (patch.receivedAt !== undefined) body.received_at = patch.receivedAt || null
+  if (patch.supplierName !== undefined || patch.supplierId !== undefined) {
+    body.supplier_name = patch.supplierName || null
+    body.supplier_id = patch.supplierId ?? null
+  }
   // Sent through so the server can reject a stale edit (conflictControl).
   if (patch.expectedUpdatedAt) body.expectedUpdatedAt = patch.expectedUpdatedAt
   return route(

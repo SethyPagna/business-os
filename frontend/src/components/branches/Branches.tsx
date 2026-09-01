@@ -11,10 +11,13 @@ import Upload from 'lucide-react/dist/esm/icons/upload.js'
 import Trash2 from 'lucide-react/dist/esm/icons/trash-2.js'
 import Warehouse from 'lucide-react/dist/esm/icons/warehouse.js'
 import { useApp as useAppHook, useSync as useSyncHook } from '../../AppContext.tsx'
+import type { QueryParams } from '../../api/query.ts'
 import Modal from '../shared/Modal'
 import InfoHint from '../shared/InfoHint.tsx'
 import ActionHistoryBar from '../shared/ActionHistoryBar'
 import FilterMenu from '../shared/FilterMenu'
+import DateTimeRangePicker from '../shared/DateTimeRangePicker'
+import PaginationControls, { clampPage, DEFAULT_PAGE_SIZE } from '../shared/PaginationControls'
 import { useIsPageActive } from '../shared/pageActivity'
 import BranchForm from './BranchForm'
 import { useActionHistory } from '../../utils/actionHistory.ts'
@@ -163,6 +166,14 @@ interface StockTransfer {
   user_name?: string | null
 }
 
+interface BranchTransferPage {
+  items?: StockTransfer[]
+  total?: number | string
+  page?: number | string
+  pageSize?: number | string
+  totalPages?: number | string
+}
+
 interface BranchMutationResult {
   success?: boolean
   error?: string
@@ -173,7 +184,7 @@ interface BranchMutationResult {
 
 interface BranchApi {
   getBranches: () => Promise<unknown>
-  getTransfers: (params: Record<string, unknown>) => Promise<unknown>
+  getTransfers: (params: QueryParams) => Promise<unknown>
   getBranchStock: (branchId: string | number, options: { page: number; pageSize: number; stockState: string; query?: string }) => Promise<BranchStockState>
   updateBranch: (id: string | number, payload: BranchTransportPayload) => Promise<BranchMutationResult>
   createBranch: (payload: BranchTransportPayload) => Promise<BranchMutationResult>
@@ -214,7 +225,7 @@ const ExportOptionsDialog = lazyRetry(() => import('../shared/ExportOptionsDialo
 function getBranchApi(): BranchApi {
   return {
     getBranches: getBranchesRequest,
-    getTransfers: () => getTransfersRequest(),
+    getTransfers: (params) => getTransfersRequest(params),
     getBranchStock: (branchId, options) => getBranchStockRequest(branchId, options) as Promise<BranchStockState>,
     updateBranch: (id, payload) => updateBranchRequest(id, payload) as Promise<BranchMutationResult>,
     createBranch: (payload) => createBranchRequest(payload) as Promise<BranchMutationResult>,
@@ -307,6 +318,9 @@ export default function Branches({ embedded = false }: { embedded?: boolean } = 
   const [modal, setModal] = useState<BranchModal>(null)
   const [selected, setSelected] = useState<BranchRecord | null>(null)
   const [transfers, setTransfers] = useState<StockTransfer[]>([])
+  const [transferTotal, setTransferTotal] = useState(0)
+  const [transferPage, setTransferPage] = useState(1)
+  const [transferPageSize, setTransferPageSize] = useState(DEFAULT_PAGE_SIZE)
   const [branchStocks, setBranchStocks] = useState<Record<string | number, BranchStockState>>({})
   // Per-branch product search (user, Aug 30): sits between the mini stat
   // tiles and the product grid inside an expanded branch. Server-backed --
@@ -341,6 +355,9 @@ export default function Branches({ embedded = false }: { embedded?: boolean } = 
   const [branchStatusFilter, setBranchStatusFilter] = useState<'all' | 'active' | 'inactive'>('all')
   const [transferFromFilter, setTransferFromFilter] = useState<string>('all')
   const [transferToFilter, setTransferToFilter] = useState<string>('all')
+  // Transfer history is all-time unless a date range is explicitly selected.
+  const [transferStartDate, setTransferStartDate] = useState('')
+  const [transferEndDate, setTransferEndDate] = useState('')
   const [statDetail, setStatDetail] = useState<StatDetail | null>(null)
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
@@ -390,7 +407,14 @@ export default function Branches({ embedded = false }: { embedded?: boolean } = 
         }
         if (tab === 'transfers') {
           tasks.transfers = () => withLoaderTimeout(
-            () => branchApi.getTransfers({}),
+            () => branchApi.getTransfers({
+              startDate: transferStartDate || undefined,
+              endDate: transferEndDate || undefined,
+              fromBranchId: transferFromFilter !== 'all' ? transferFromFilter : undefined,
+              toBranchId: transferToFilter !== 'all' ? transferToFilter : undefined,
+              page: transferPage,
+              pageSize: transferPageSize,
+            }),
             'Branch transfers',
             BRANCH_TRANSFERS_TIMEOUT_MS,
           )
@@ -399,7 +423,16 @@ export default function Branches({ embedded = false }: { embedded?: boolean } = 
 
         if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return null
         if (Array.isArray(result.values.branches)) setBranches(result.values.branches.filter(isBranchRecord))
-        if (Array.isArray(result.values.transfers)) setTransfers(result.values.transfers.filter(isTransferRecord))
+        if (Array.isArray(result.values.transfers)) {
+          const rows = result.values.transfers.filter(isTransferRecord)
+          setTransfers(rows)
+          setTransferTotal(rows.length)
+        } else if (result.values.transfers && typeof result.values.transfers === 'object') {
+          const pageResult = result.values.transfers as BranchTransferPage
+          const rows = Array.isArray(pageResult.items) ? pageResult.items.filter(isTransferRecord) : []
+          setTransfers(rows)
+          setTransferTotal(Math.max(0, Number(pageResult.total) || 0))
+        }
 
         if (!result.hasAnySuccess) {
           throw new Error(getFirstLoaderError(result.errors, tr('failed_to_load_data', 'Failed to load data')))
@@ -434,7 +467,7 @@ export default function Branches({ embedded = false }: { embedded?: boolean } = 
     loadPromiseRef.current = wrappedPromise
     loadPromiseModeRef.current = requestedMode
     return wrappedPromise
-  }, [branchApi, notify, tr, tab])
+  }, [branchApi, notify, transferEndDate, transferFromFilter, transferPage, transferPageSize, transferStartDate, transferToFilter, tr, tab])
 
   useEffect(() => {
     if (!isActive) {
@@ -496,12 +529,19 @@ export default function Branches({ embedded = false }: { embedded?: boolean } = 
   const visibleBranches = useMemo(() => branches.filter((branch) => (
     branchStatusFilter === 'all' ? true : branchStatusFilter === 'active' ? Boolean(branch.is_active) : !branch.is_active
   )), [branches, branchStatusFilter])
-  const visibleTransfers = useMemo(() => transfers.filter((transferItem) => (
-    (transferFromFilter === 'all' || String(transferItem.from_branch_id ?? '') === transferFromFilter)
-    && (transferToFilter === 'all' || String(transferItem.to_branch_id ?? '') === transferToFilter)
-  )), [transfers, transferFromFilter, transferToFilter])
+  // Transfer filters are applied in D1 before pagination. Do not re-filter
+  // the returned page in the browser: besides hiding valid rows from a page,
+  // slicing the raw UTC timestamp here would disagree with the backend's
+  // required Cambodia UTC+7 business-day boundary around midnight.
+  const visibleTransfers = transfers
+  const transferTotalCount = tab === 'transfers' ? transferTotal : 0
+  useEffect(() => {
+    setTransferPage((current) => clampPage(current, transferTotalCount, transferPageSize))
+  }, [transferPageSize, transferTotalCount])
+
   const branchFilterActiveCount = (branchStatusFilter !== 'all' ? 1 : 0)
     + (transferFromFilter !== 'all' ? 1 : 0) + (transferToFilter !== 'all' ? 1 : 0)
+    + (transferStartDate ? 1 : 0) + (transferEndDate ? 1 : 0)
   const branchFilterSections = useMemo(() => (
     tab === 'branches'
       ? [{
@@ -519,12 +559,12 @@ export default function Branches({ embedded = false }: { embedded?: boolean } = 
             label: tr('from_branch', 'From'),
             searchable: true,
             options: [
-              { id: 'all', label: tr('all', 'All'), active: transferFromFilter === 'all', onClick: () => setTransferFromFilter('all') },
+              { id: 'all', label: tr('all', 'All'), active: transferFromFilter === 'all', onClick: () => { setTransferFromFilter('all'); setTransferPage(1) } },
               ...transferBranchOptions.map((branch) => ({
                 id: branch.id,
                 label: branch.name,
                 active: transferFromFilter === String(branch.id),
-                onClick: () => setTransferFromFilter(String(branch.id)),
+                onClick: () => { setTransferFromFilter(String(branch.id)); setTransferPage(1) },
               })),
             ],
           },
@@ -533,12 +573,12 @@ export default function Branches({ embedded = false }: { embedded?: boolean } = 
             label: tr('to_branch', 'To'),
             searchable: true,
             options: [
-              { id: 'all', label: tr('all', 'All'), active: transferToFilter === 'all', onClick: () => setTransferToFilter('all') },
+              { id: 'all', label: tr('all', 'All'), active: transferToFilter === 'all', onClick: () => { setTransferToFilter('all'); setTransferPage(1) } },
               ...transferBranchOptions.map((branch) => ({
                 id: branch.id,
                 label: branch.name,
                 active: transferToFilter === String(branch.id),
-                onClick: () => setTransferToFilter(String(branch.id)),
+                onClick: () => { setTransferToFilter(String(branch.id)); setTransferPage(1) },
               })),
             ],
           },
@@ -548,6 +588,9 @@ export default function Branches({ embedded = false }: { embedded?: boolean } = 
     setBranchStatusFilter('all')
     setTransferFromFilter('all')
     setTransferToFilter('all')
+    setTransferStartDate('')
+    setTransferEndDate('')
+    setTransferPage(1)
   }, [])
   const selectedCount = selectedIds.size
   useEffect(() => {
@@ -1108,13 +1151,28 @@ export default function Branches({ embedded = false }: { embedded?: boolean } = 
             ))}
           </div>
           <div className="mb-1">
-            <FilterMenu
-              label={tr('filters', 'Filters')}
-              activeCount={branchFilterActiveCount}
-              sections={branchFilterSections}
-              onClear={branchFilterActiveCount > 0 ? clearBranchFilters : null}
-              compact
-            />
+            <div className="flex flex-wrap items-center justify-end gap-1.5">
+              {tab === 'transfers' ? (
+                <DateTimeRangePicker
+                  t={t}
+                  showTime={false}
+                  value={{ startDate: transferStartDate, endDate: transferEndDate, startTime: '', endTime: '' }}
+                  onChange={(range) => {
+                    setTransferStartDate(range.startDate || '')
+                    setTransferEndDate(range.endDate || '')
+                    setTransferPage(1)
+                  }}
+                  triggerClassName="flex items-center justify-center gap-2 rounded-lg px-2.5 py-1.5"
+                />
+              ) : null}
+              <FilterMenu
+                label={tr('filters', 'Filters')}
+                activeCount={branchFilterActiveCount}
+                sections={branchFilterSections}
+                onClear={branchFilterActiveCount > 0 ? clearBranchFilters : null}
+                compact
+              />
+            </div>
           </div>
         </div>
       </div>
@@ -1476,6 +1534,19 @@ export default function Branches({ embedded = false }: { embedded?: boolean } = 
 
       {tab === 'transfers' ? (
         <>
+          <div className="mb-3 flex justify-center">
+            <PaginationControls
+              compact
+              rangeAsPageSize
+              page={transferPage}
+              pageSize={transferPageSize}
+              totalItems={transferTotalCount}
+              label={tr('transfers', 'transfers')}
+              t={t}
+              onPageChange={setTransferPage}
+              onPageSizeChange={(size) => { setTransferPageSize(size); setTransferPage(1) }}
+            />
+          </div>
           <div className="space-y-2 sm:hidden">
             {loading && !transfers.length ? (
               <div className="card py-10 text-center text-gray-400">{tr('loading', 'Loading...')}</div>
@@ -1543,8 +1614,23 @@ export default function Branches({ embedded = false }: { embedded?: boolean } = 
             </table>
           </div>
           <div className="border-t border-gray-100 px-4 py-2 text-xs text-gray-400 dark:border-gray-700">
-            {tr('transfers_count', '{n} transfers').replace('{n}', String(visibleTransfers.length))}
+            {transferTotalCount > visibleTransfers.length
+              ? `${visibleTransfers.length} / ${transferTotalCount} ${tr('transfers', 'transfers')}`
+              : tr('transfers_count', '{n} transfers').replace('{n}', String(visibleTransfers.length))}
           </div>
+        </div>
+        <div className="mt-3 flex justify-center">
+          <PaginationControls
+            compact
+            rangeAsPageSize
+            page={transferPage}
+            pageSize={transferPageSize}
+            totalItems={transferTotalCount}
+            label={tr('transfers', 'transfers')}
+            t={t}
+            onPageChange={setTransferPage}
+            onPageSizeChange={(size) => { setTransferPageSize(size); setTransferPage(1) }}
+          />
         </div>
         </>
       ) : null}

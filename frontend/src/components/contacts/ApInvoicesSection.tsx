@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import AppSelect from '../shared/AppSelect.tsx'
-import DateTimeRangePicker, { todayDateTimeRange } from '../shared/DateTimeRangePicker'
+import DateTimeRangePicker from '../shared/DateTimeRangePicker'
 // fmtDate, not fmtDateOnly: these are full UTC instants converted from the
 // old system's Bangkok wall clock, so the calendar day must be read in the
 // business timezone (an fmtDateOnly UTC slice would show the previous day
@@ -62,8 +62,8 @@ export default function ApInvoicesSection({ t }: ApInvoicesSectionProps) {
   const [branch, setBranch] = useState('all')
   const [supplier, setSupplier] = useState('all')
   const [status, setStatus] = useState('all')
-  const [fromDate, setFromDate] = useState(() => todayDateTimeRange().startDate)
-  const [toDate, setToDate] = useState(() => todayDateTimeRange().endDate)
+  const [fromDate, setFromDate] = useState('')
+  const [toDate, setToDate] = useState('')
   const [page, setPage] = useState(1)
   const [refreshToken, setRefreshToken] = useState(0)
   const [data, setData] = useState<ApPayload | null>(null)

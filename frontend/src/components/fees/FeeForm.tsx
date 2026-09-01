@@ -4,6 +4,7 @@ import AppSelect from '../shared/AppSelect.tsx'
 import SearchInput from '../shared/SearchInput.tsx'
 import { normalizePriceValue } from '../../utils/pricing.ts'
 import { getFeeLabels, type FeeLabelSuggestion, type FeeRecord, type FeeType } from '../../api/feesTransport.ts'
+import { todayStr } from '../../utils/dateHelpers.ts'
 
 // Add/edit form for a single fee record.
 //
@@ -103,9 +104,6 @@ export type FeeFormState = {
   notes: string
 }
 
-function todayIso(): string {
-  return new Date().toISOString().slice(0, 10)
-}
 
 export function feeToFormState(fee?: FeeRecord | null): FeeFormState {
   return {
@@ -113,7 +111,7 @@ export function feeToFormState(fee?: FeeRecord | null): FeeFormState {
     label: fee?.label || '',
     amount_usd: fee ? String(fee.amount_usd ?? 0) : '',
     amount_khr: fee ? String(fee.amount_khr ?? 0) : '',
-    fee_date: fee?.fee_date || todayIso(),
+    fee_date: fee?.fee_date || todayStr(),
     sale_id: fee?.sale_id != null ? String(fee.sale_id) : '',
     branch_id: fee?.branch_id != null ? String(fee.branch_id) : '',
     notes: fee?.notes || '',

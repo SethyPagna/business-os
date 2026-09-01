@@ -1,9 +1,7 @@
 import { Suspense, useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import type { ComponentProps } from 'react'
-import { toggleMultiValue, isMultiActive, matchesMulti } from '../../utils/multiSelect'
+import { toggleMultiValue, isMultiActive } from '../../utils/multiSelect'
 import { useDebouncedValue } from '../../utils/useDebouncedValue.ts'
-import { buildProductSearchTerms } from '../../utils/searchTerms.ts'
-import { matchesSearchTermGroups } from '../../utils/searchMatch.ts'
 import ShoppingBag from 'lucide-react/dist/esm/icons/shopping-bag.js'
 import Download from 'lucide-react/dist/esm/icons/download.js'
 import Upload from 'lucide-react/dist/esm/icons/upload.js'
@@ -15,9 +13,9 @@ import type { PortalMenuItem } from '../shared/PortalMenu'
 import FilterMenu from '../shared/FilterMenu'
 import SearchInput from '../shared/SearchInput'
 import ScanSearchButton from '../shared/ScanSearchButton'
-import { loadSortSpec, saveSortSpec, sortRecords, type SortField, type SortSpec } from '../../utils/listSort'
+import { loadSortSpec, saveSortSpec, type SortField, type SortSpec } from '../../utils/listSort'
 import ActionHistoryBar from '../shared/ActionHistoryBar'
-import PaginationControls, { clampPage, paginateItems, DEFAULT_PAGE_SIZE } from '../shared/PaginationControls'
+import PaginationControls, { clampPage, DEFAULT_PAGE_SIZE } from '../shared/PaginationControls'
 import { ALL_STATUSES, getStatusLabel } from './StatusBadge'
 import type { SaleCancelPayload } from './CancelSaleModal'
 import { getClientDeviceInfo } from '../../utils/deviceInfo'
@@ -29,9 +27,9 @@ import { createLongPressState, type LongPressState } from '../../utils/longPress
 import { buildTimeActionSections, getTimeGroupingMode, toggleIdSet } from '../../utils/groupedRecords.ts'
 import { beginKeyedAction, beginSingleAction, finishKeyedAction, finishSingleAction } from '../../utils/actionGuards.ts'
 import { getSales as fetchSales, getSalesStats as fetchSalesStats, getSalesStatsStrip } from '../../api/salesTransport.ts'
-import StatsStrip, { statsPresetRange, type StatCardDef } from '../shared/StatsStrip.tsx'
+import StatsStrip, { type StatCardDef } from '../shared/StatsStrip.tsx'
 import StatsRangeRow from '../shared/StatsRangeRow.tsx'
-import { type DateTimeRange } from '../shared/DateTimeRangePicker.tsx'
+import { EMPTY_DATE_TIME_RANGE, type DateTimeRange } from '../shared/DateTimeRangePicker.tsx'
 import { getUsers as fetchUsers } from '../../api/userReadTransport.ts'
 import {
   beginTrackedRequest,
@@ -247,10 +245,9 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
   // ONE date scope for the whole page (user, Aug 31: "drive list + stats
   // together"): the Start→End range row above the search bar drives BOTH the
   // stats strip AND the receipts list — there is no separate hidden Period
-  // filter any more. Defaults to today; changing it re-scopes the list, its
-  // day-group counts, and the strip in lockstep, so every count agrees with
-  // the dates shown. (The strip's data state is declared further down.)
-  const [stripRange, setStripRange] = useState<DateTimeRange>(() => statsPresetRange('today'))
+  // filter. Receipts initially show all time; quick ranges are chosen inside
+  // the opened date/time picker rather than silently pre-filtering to Today.
+  const [stripRange, setStripRange] = useState<DateTimeRange>(() => ({ ...EMPTY_DATE_TIME_RANGE }))
   const [selectedIds, setSelectedIds] = useState<Set<number>>(() => new Set())
   // The by-day report moved out to its own top-level Reports hub section
   // (ReportsHub.tsx); Sales now shows only the receipts list.
@@ -413,6 +410,10 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
           ...(statusFilter !== 'all' ? { status: statusFilter } : {}),
           ...(debouncedSearch ? { search: debouncedSearch } : {}),
           ...salesDateRange,
+          page: salesPage,
+          limit: salesPageSize,
+          sortBy: salesSortSpec.field,
+          sortDir: salesSortSpec.direction,
         }
         const result = await withLoaderTimeout(() => fetchSales(params), 'Sales', 20000)
         if (!aliveRef.current || !isTrackedRequestCurrent(loadRequestRef, requestId)) return
@@ -450,7 +451,7 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
     })
     loadPromiseRef.current = wrappedPromise
     return wrappedPromise
-  }, [clearLoadWatchdog, debouncedSearch, isAdmin, salesDateRange, statusFilter, translateOr, userFilter])
+  }, [clearLoadWatchdog, debouncedSearch, isAdmin, salesDateRange, salesPage, salesPageSize, salesSortSpec.direction, salesSortSpec.field, statusFilter, translateOr, userFilter])
 
   useEffect(() => {
     latestLoadRef.current = loadSales
@@ -460,7 +461,7 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
   // `sales` above is capped at the list endpoint's page limit, so the
   // header figures below read from this instead of reducing over `sales`
   // directly once a filtered range has more matching rows than that cap.
-  const [salesStats, setSalesStats] = useState<{ revenue_usd: number; pending_revenue_usd: number; total_count: number; truncated_in_list: boolean } | null>(null)
+  const [salesStats, setSalesStats] = useState<{ revenue_usd: number; pending_revenue_usd: number; total_count: number; revenue_count: number; truncated_in_list: boolean } | null>(null)
 
   // Z3a: the summary aggregate must refresh whenever a sale's status changes,
   // not only when a filter changes. Extracted into a callable so the sync
@@ -485,6 +486,7 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
         revenue_usd: Number(row.revenue_usd) || 0,
         pending_revenue_usd: Number(row.pending_revenue_usd) || 0,
         total_count: Number(row.total_count) || 0,
+        revenue_count: Number(row.revenue_count) || 0,
         truncated_in_list: Boolean(row.truncated_in_list),
       })
     } catch {
@@ -514,7 +516,11 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
   const stripRequestRef = useRef(0)
   const loadStatsStrip = useCallback(async (): Promise<void> => {
     if (!isActive) return
-    if (!stripRange.startDate || !stripRange.endDate) return
+    if (!stripRange.startDate || !stripRange.endDate) {
+      setStripData(null)
+      setStripLoading(false)
+      return
+    }
     const requestId = beginTrackedRequest(stripRequestRef)
     setStripLoading(true)
     try {
@@ -761,43 +767,11 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
     }
   }
 
-  // Comma-separated groups, same syntax/tokenizer Products.tsx/POS.tsx use
-  // (buildProductSearchTerms) and the same syntax routes/sales.ts's
-  // buildSalesSearchWhere now parses server-side (tokenizeSearchTermGroups)
-  // -- built from `debouncedSearch`, not raw `search`, so this local
-  // re-filter settles on the same cadence as the server fetch below (see
-  // debouncedSearch's own comment for the bug this fixes).
-  const searchTerms = useMemo(() => buildProductSearchTerms(debouncedSearch), [debouncedSearch])
-  // Year/month narrowing happens downstream in buildTimeActionSections (see
-  // allSalesSections below, which is given `year`/`month` directly) -- this
-  // filter only ever checks status and search text, so the period range
-  // was never read here. Keeping it out of the dependency
-  // list avoids recomputing (and reallocating) this array on every date
-  // filter change for no behavioral difference.
-  const filtered = useMemo(() => sales.filter((sale) => {
-    if (!matchesMulti(statusFilter, sale.sale_status || 'completed')) return false
-    if (!searchTerms.length) return true
-    // Mirrors routes/sales.ts's buildSalesSearchWhere as closely as this
-    // page's already-loaded data allows: every flat sale-level column it
-    // searches (now including customer_phone, missing from this haystack
-    // before even though the server already searched it -- a pre-existing
-    // gap, not something this session's backend change introduced) plus
-    // each line item's product_name/sku. Deliberately NOT barcode/brand --
-    // GET /api/sales only returns raw sale_items columns to the client
-    // (see SaleItemRecord), and neither column lives on sale_items itself
-    // (both are snapshotted on products, joined in only inside the
-    // server's own search query) -- so a barcode/brand search still
-    // narrows correctly once the debounced server response lands, it just
-    // can't narrow the *local* pre-response preview the same way a
-    // receipt number or product name can. Same fuzzy/typo/diacritic/
-    // alias-aware matcher (matchesSearchTermGroups) Products.tsx/POS.tsx/
-    // Inventory.tsx already use, AND-only (no searchMode toggle exists on
-    // this page yet, matching the server's own AND default).
-    const items = Array.isArray(sale.items) ? sale.items : []
-    const itemHaystack = items.map((item) => `${item?.product_name || ''} ${item?.sku || ''}`).join(' ')
-    const haystack = `${sale.receipt_number || ''} ${sale.cashier_name || ''} ${sale.customer_name || ''} ${sale.customer_phone || ''} ${sale.payment_method || ''} ${sale.notes || ''} ${sale.customer_membership_number || ''} ${getSaleBranchLabel(sale) || ''} ${itemHaystack}`
-    return matchesSearchTermGroups(haystack, searchTerms, 'AND')
-  }), [sales, searchTerms, statusFilter])
+  // Search, status, date, cashier, sorting, and pagination are authoritative
+  // on the server. Re-filtering a server page here used a different search
+  // vocabulary (it cannot see current product brand/barcode joins) and could
+  // hide valid rows that the database had deliberately returned.
+  const filtered = sales
 
   const salesSortFields = useMemo<SortField<SaleRecord>[]>(() => {
     const labels: Record<string, string> = {
@@ -827,7 +801,7 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
 
   const allSalesSections = useMemo(
     () => salesSortSpec.field !== 'date'
-      ? buildSortedSection(sortRecords(filtered, salesSortSpec, salesSortFields))
+      ? buildSortedSection(filtered)
       : buildTimeActionSections(filtered, {
         getDate: (sale) => sale?.created_at,
         getItemId: (sale) => Number(sale?.id),
@@ -854,14 +828,16 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
     setSalesPage(1)
   }, [stripRange.startDate, stripRange.endDate, stripRange.startTime, stripRange.endTime, salesPageSize, salesSortSpec, search, statusFilter, userFilter])
 
-  useEffect(() => {
-    setSalesPage((current) => clampPage(current, allVisibleSales.length, salesPageSize))
-  }, [allVisibleSales.length, salesPageSize])
+  const totalSalesCount = salesStats?.total_count ?? allVisibleSales.length
 
-  const pagedSales = useMemo(
-    () => paginateItems(allVisibleSales, salesPage, salesPageSize),
-    [allVisibleSales, salesPage, salesPageSize],
-  )
+  useEffect(() => {
+    setSalesPage((current) => clampPage(current, totalSalesCount, salesPageSize))
+  }, [salesPageSize, totalSalesCount])
+
+  // GET /api/sales already returns exactly this database page. Slicing it a
+  // second time made page 2 empty and was the original reason history beyond
+  // the first server cap could never be reached.
+  const pagedSales = allVisibleSales
 
   const salesSections = useMemo(
     () => salesSortSpec.field !== 'date'
@@ -988,7 +964,8 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
   // The headline count must reconcile with `revenue`: count only the sales
   // that contribute to it, so the footer never reads "12 sales | $67.47" when
   // only 6 of those 12 produced the $67.47.
-  const revenueCount = useMemo(() => filtered.filter(isCountedSale).length, [filtered, isCountedSale])
+  const revenueCount = salesStats?.revenue_count
+    ?? filtered.filter(isCountedSale).length
 
   const toggleSelected = (saleId: number | string) => {
     const numericId = Number(saleId)
@@ -1360,7 +1337,7 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
           rangeAsPageSize
           page={salesPage}
           pageSize={salesPageSize}
-          totalItems={allVisibleSales.length}
+          totalItems={totalSalesCount}
           label={t('sales') || 'sales'}
           t={t}
           onPageChange={setSalesPage}
@@ -1402,7 +1379,7 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
       />
 
       <div className="mt-3 flex justify-center">
-        <PaginationControls compact rangeAsPageSize page={salesPage} pageSize={salesPageSize} totalItems={allVisibleSales.length} label={t('sales') || 'sales'} t={t} onPageChange={setSalesPage} onPageSizeChange={(size) => { setSalesPageSize(size); setSalesPage(1) }} />
+        <PaginationControls compact rangeAsPageSize page={salesPage} pageSize={salesPageSize} totalItems={totalSalesCount} label={t('sales') || 'sales'} t={t} onPageChange={setSalesPage} onPageSizeChange={(size) => { setSalesPageSize(size); setSalesPage(1) }} />
       </div>
 
       {exportDialog ? (

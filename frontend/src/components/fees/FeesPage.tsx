@@ -38,11 +38,11 @@ import {
   type FeeType,
 } from '../../api/feesTransport.ts'
 import FeeForm, { FEE_TYPE_OPTIONS } from './FeeForm.tsx'
-import StatsStrip, { statsPresetRange, type StatCardDef } from '../shared/StatsStrip.tsx'
+import StatsStrip, { type StatCardDef } from '../shared/StatsStrip.tsx'
 import StatsRangeRow from '../shared/StatsRangeRow.tsx'
 import ExportMenu from '../shared/ExportMenu.tsx'
 import { makeReportMoneyFormatter } from '../../utils/reportMoney.ts'
-import type { DateTimeRange } from '../shared/DateTimeRangePicker'
+import { EMPTY_DATE_TIME_RANGE, type DateTimeRange } from '../shared/DateTimeRangePicker'
 import { columnsFromRows } from '../../utils/exportOptions.ts'
 import { lazyRetry } from '../../utils/lazyImport.ts'
 
@@ -92,9 +92,6 @@ const FEES_MUTATION_TIMEOUT_MS = 12000
 type FeeModal = 'form' | null
 type FeeTypeFilter = FeeType | 'all'
 
-function todayIso(): string {
-  return new Date().toISOString().slice(0, 10)
-}
 
 function formatFeeDate(value: string | null | undefined): string {
   if (!value) return '--'
@@ -157,9 +154,9 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
   // ONE date scope for the whole page (user, Aug 31: "drive list + stats
   // together"): the Start→End range row above the search bar drives BOTH the
   // stats strip AND the expenses list — there is no separate Filters-menu date
-  // range that could disagree with it. Default today. (Strip data state is
-  // declared further down.)
-  const [stripRange, setStripRange] = useState<DateTimeRange>(() => statsPresetRange('today'))
+  // range that could disagree with it. Starts all-time; presets are inside
+  // the shared date/time picker. (Strip data state is declared further down.)
+  const [stripRange, setStripRange] = useState<DateTimeRange>(() => ({ ...EMPTY_DATE_TIME_RANGE }))
   const [branchFilter, setBranchFilter] = useState('')
   const [branches, setBranches] = useState<FeeBranchOption[]>([])
   const [page, setPage] = useState(1)
@@ -239,7 +236,7 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
   }, [isActive, load, syncChannel?.channel, syncChannel?.ts])
 
   // The foldable stats strip (shared StatsStrip, app-wide stats pattern):
-  // range-scoped (default TODAY) with per-card fold breakdowns from
+  // range-scoped (all-time by default) with per-card fold breakdowns from
   // GET /api/fees/report -- by type, and the range's busiest days.
   type FeesStripPayload = {
     totals?: { count?: number; amount_usd?: number; amount_khr?: number }
@@ -250,11 +247,14 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
   const [stripLoading, setStripLoading] = useState(false)
   const stripRequestRef = useRef(0)
   const loadStatsStrip = useCallback(async (): Promise<void> => {
-    if (!isActive || !stripRange.startDate || !stripRange.endDate) return
+    if (!isActive) return
     const requestId = ++stripRequestRef.current
     setStripLoading(true)
     try {
-      const result = await getFeesReport({ startDate: stripRange.startDate, endDate: stripRange.endDate })
+      const result = await getFeesReport({
+        ...(stripRange.startDate ? { startDate: stripRange.startDate } : {}),
+        ...(stripRange.endDate ? { endDate: stripRange.endDate } : {}),
+      })
       if (stripRequestRef.current !== requestId) return
       setStripData((result || {}) as FeesStripPayload)
     } catch {

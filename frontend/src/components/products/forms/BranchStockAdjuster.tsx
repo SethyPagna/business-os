@@ -1,3 +1,4 @@
+import { todayStr } from '../../../utils/dateHelpers.ts'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { beginSingleAction, finishSingleAction } from '../../../utils/actionGuards.ts'
 import { withLoaderTimeout } from '../../../utils/loaders.ts'
@@ -15,10 +16,9 @@ import SupplierPickerField from '../../shared/SupplierPickerField.tsx'
 
 const BRANCH_STOCK_ADJUSTMENT_TIMEOUT_MS = 12000
 
-// Same helper (and same UTC-day convention) as ReceiveBatchModal's default
-// received date -- the two entry points must agree on what "today" means.
+// All received-date defaults use the fixed Cambodia business calendar day.
 function todayIsoDate(): string {
-  return new Date().toISOString().slice(0, 10)
+  return todayStr()
 }
 
 type Translate = (key: string) => string | undefined
