@@ -481,8 +481,9 @@ app.get('/report', async (c) => {
   const query = c.req.query()
   const startDate = String(query.startDate || '').slice(0, 10)
   const endDate = String(query.endDate || '').slice(0, 10)
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate) || !/^\d{4}-\d{2}-\d{2}$/.test(endDate)) {
-    return c.json({ error: 'startDate and endDate (YYYY-MM-DD) are required' }, 400)
+  const validDate = (value: string) => /^\d{4}-\d{2}-\d{2}$/.test(value)
+  if ((startDate && !validDate(startDate)) || (endDate && !validDate(endDate))) {
+    return c.json({ error: 'startDate/endDate must use YYYY-MM-DD' }, 400)
   }
   // scope=supplier reports return-to-supplier cases (compensation / business
   // loss) with the SAME response shape -- customer rows simply carry zero in
@@ -490,11 +491,12 @@ app.get('/report', async (c) => {
   // Reports hub (customer) and the Returns page's scope-aware stats strip.
   const scope = String(query.scope || 'customer') === 'supplier' ? 'supplier' : 'customer'
   const clauses = [
-    localDateRangeClause('created_at'),
     `COALESCE(return_scope, 'customer') = @scope`,
     `COALESCE(status, 'completed') <> 'cancelled'`,
   ]
-  const params: Record<string, unknown> = { startDate, endDate, scope }
+  const params: Record<string, unknown> = { scope }
+  if (startDate) { clauses.push(localDateAtOrAfter('created_at')); params.startDate = startDate }
+  if (endDate) { clauses.push(localDateAtOrBefore('created_at')); params.endDate = endDate }
   if (query.branchId) { clauses.push('branch_id = @branchId'); params.branchId = query.branchId }
   const where = clauses.join(' AND ')
   // Sum BOTH currencies (Part 553): refunds/compensation/loss can be recorded
@@ -1049,7 +1051,11 @@ app.post('/', async (c) => {
   await audit(c.env, user?.id ?? null, user?.name ?? null, 'create', 'return', returnId, { returnNumber, saleId: body.sale_id || null, reason: body.reason })
   c.executionCtx.waitUntil(broadcast(c.env, 'inventory', { action: 'return', id: returnId }))
   c.executionCtx.waitUntil(broadcast(c.env, 'products', { action: 'update' }))
-  c.executionCtx.waitUntil(bumpVersion(c.env, 'products'))
+  c.executionCtx.waitUntil(Promise.all([
+    bumpVersion(c.env, 'products'),
+    bumpVersion(c.env, 'returns'),
+    bumpVersion(c.env, 'sales'),
+  ]))
   c.executionCtx.waitUntil(broadcast(c.env, 'returns', { action: 'create', id: returnId }))
   c.executionCtx.waitUntil(broadcast(c.env, 'sales', { action: 'update', id: body.sale_id || null }))
   return c.json({ id: returnId, returnNumber })
@@ -1308,7 +1314,11 @@ app.post('/supplier', async (c) => {
   await audit(c.env, user?.id ?? null, user?.name ?? null, 'create', 'supplier_return', returnId, { returnNumber, settlement, supplierName: body.supplier_name || null, supplierLossUsd })
   c.executionCtx.waitUntil(broadcast(c.env, 'inventory', { action: 'supplier_return', id: returnId }))
   c.executionCtx.waitUntil(broadcast(c.env, 'products', { action: 'update' }))
-  c.executionCtx.waitUntil(bumpVersion(c.env, 'products'))
+  c.executionCtx.waitUntil(Promise.all([
+    bumpVersion(c.env, 'products'),
+    bumpVersion(c.env, 'returns'),
+    bumpVersion(c.env, 'sales'),
+  ]))
   c.executionCtx.waitUntil(broadcast(c.env, 'returns', { action: 'create', id: returnId }))
   return c.json({ id: returnId, returnNumber })
 })
@@ -1792,7 +1802,11 @@ app.patch('/:id', async (c) => {
   await audit(c.env, user?.id ?? null, user?.name ?? null, 'update', 'return', id, { reason: body.reason })
   c.executionCtx.waitUntil(broadcast(c.env, 'inventory', { action: 'return_edit', id: Number(id) }))
   c.executionCtx.waitUntil(broadcast(c.env, 'products', { action: 'update' }))
-  c.executionCtx.waitUntil(bumpVersion(c.env, 'products'))
+  c.executionCtx.waitUntil(Promise.all([
+    bumpVersion(c.env, 'products'),
+    bumpVersion(c.env, 'returns'),
+    bumpVersion(c.env, 'sales'),
+  ]))
   c.executionCtx.waitUntil(broadcast(c.env, 'returns', { action: 'update', id: Number(id) }))
   if (existing.sale_id) {
     c.executionCtx.waitUntil(broadcast(c.env, 'sales', { action: 'update', id: existing.sale_id }))

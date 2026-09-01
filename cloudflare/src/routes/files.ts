@@ -1,5 +1,6 @@
 import { Hono } from 'hono'
 import { enqueueImageNormalization } from '../lib/imageAudit'
+import { optimizeImage, IMAGE_MAX_BYTES } from '../lib/imagePipeline'
 import { getDb } from '../lib/db'
 import { requireAuth, type SessionUser } from '../lib/auth'
 import { hasPermission, getPermissionTier } from '../lib/permissions'
@@ -96,6 +97,11 @@ function isPathReferencedInSettings(values: readonly { value: string }[], public
 // just renamed to a unique key and filed into the library like any other
 // asset, and are NOT covered by this image-only cap.
 const MAX_IMAGE_UPLOAD_BYTES = 1 * 1024 * 1024
+// If browser-side Canvas cannot decode/compress a phone format, keep the
+// interaction working. Oversized images first get an inline Cloudflare/
+// Cloudinary normalization attempt; if no provider is currently available,
+// accept a bounded original and let the existing media queue normalize it.
+const MAX_IMAGE_FALLBACK_BYTES = 12 * 1024 * 1024
 const MAX_UPLOAD_BYTES = 25 * 1024 * 1024
 
 // View is unconditional (see comment above) -- no permission check beyond
@@ -221,16 +227,32 @@ app.post('/upload', async (c) => {
     return c.json({ error: (error as Error).message }, 400)
   }
 
+  let storedBuffer = buffer
+  let storedMimeType = mimeType
+  let normalizedInline = false
   if (mediaType === 'image' && buffer.byteLength > MAX_IMAGE_UPLOAD_BYTES) {
-    return c.json({ error: 'Image is too large to save (over 1MB after your browser attempted to compress it). Please try again, or pick a smaller/simpler source photo.' }, 400)
+    if (buffer.byteLength > MAX_IMAGE_FALLBACK_BYTES) {
+      return c.json({ error: 'Image exceeds the upload safety limit.' }, 400)
+    }
+    // Second-chance compression: browser Canvas may fail on HEIC/HEIF or on
+    // a device under memory pressure. Try the server provider ladder before
+    // deciding what to persist. This converts to AVIF/WebP and steps down
+    // dimensions/quality until it fits the same ~900KB storage target.
+    const optimized = await optimizeImage(c.env, buffer.buffer, originalName)
+    if (optimized.ok && optimized.bytes && Number(optimized.byteSize || optimized.bytes.byteLength) <= IMAGE_MAX_BYTES) {
+      storedBuffer = new Uint8Array(optimized.bytes)
+      storedMimeType = optimized.contentType || mimeType
+      normalizedInline = true
+    }
   }
 
   const storedName = buildUniqueStoredName(originalName)
   const objectKey = `uploads/${storedName}`
-  await c.env.ASSETS.put(objectKey, buffer, { httpMetadata: { contentType: mimeType } })
-  // K3: fresh image uploads normalize via the media queue within seconds
-  // (the 6h sweep stays the safety net); videos wait on the container path.
-  if (mediaType === 'image') await enqueueImageNormalization(c.env, objectKey)
+  await c.env.ASSETS.put(objectKey, storedBuffer, { httpMetadata: { contentType: storedMimeType } })
+  // If inline normalization was unavailable, the existing queue gets another
+  // chance asynchronously. Do not reject the user's photo merely because a
+  // browser codec/provider was unavailable at this moment.
+  if (mediaType === 'image' && !normalizedInline) await enqueueImageNormalization(c.env, objectKey)
 
   const publicPath = `/uploads/${storedName}`
   const db = getDb(c.env)
@@ -244,24 +266,21 @@ app.post('/upload', async (c) => {
     original_name: originalName,
     stored_name: storedName,
     public_path: publicPath,
-    mime_type: mimeType,
+    mime_type: storedMimeType,
     media_type: mediaType,
-    byte_size: buffer.byteLength,
+    byte_size: storedBuffer.byteLength,
     created_by_id: user?.id ?? null,
     created_by_name: user?.name ?? null,
-    // 'not_applicable_no_sharp' for images specifically flags that this path
-    // does not compress (unlike the Docker path, where an image landing
-    // here would normally show 'optimized' or 'already_within_budget') --
-    // callers that display this status should not assume the two backends
-    // mean the same thing by it.
-    optimization_status: mediaType === 'image' ? 'not_applicable_no_sharp' : 'not_applicable',
+    optimization_status: mediaType === 'image'
+      ? (normalizedInline ? 'optimized_inline' : 'queued_for_normalization')
+      : 'not_applicable',
   })
 
   const asset = await db.prepare('SELECT * FROM file_assets WHERE id = ?').get([insert.lastInsertRowid])
   await audit(c.env, user.id, user.username || null, 'upload', 'file', insert.lastInsertRowid, {
     original_name: originalName,
     media_type: mediaType,
-    byte_size: buffer.byteLength,
+    byte_size: storedBuffer.byteLength,
   })
   c.executionCtx.waitUntil(broadcast(c.env, 'files', { action: 'upload', id: insert.lastInsertRowid }))
   return c.json(asset)

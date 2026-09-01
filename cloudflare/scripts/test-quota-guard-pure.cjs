@@ -109,9 +109,9 @@ check('under budget, the version advances in KV as before', async () => {
   const { bumpVersion } = await loadCache()
   const ctx = freshEnv()
   await bumpVersion(ctx.env, 'products')
-  assert.equal(await ctx.env.CACHE.get('v:products'), '1')
+  assert.equal(await ctx.env.CACHE.get('v2:products'), '1')
   await bumpVersion(ctx.env, 'products')
-  assert.equal(await ctx.env.CACHE.get('v:products'), '2', 'each bump advances it')
+  assert.equal(await ctx.env.CACHE.get('v2:products'), '2', 'each bump advances it')
   assert.equal(ctx.stats().kvDeletes, 0, 'no fallback while there is headroom')
 })
 
@@ -130,7 +130,7 @@ check('once KV is critical the version STILL advances, via D1', async () => {
     .get({})
   assert.ok(row && Number(row.version) >= 1, 'the bump must land in D1 rather than being dropped')
   assert.equal(ctx.stats().kvWrites, before, 'no further KV writes are spent once critical')
-  assert.equal(await ctx.env.CACHE.get('v:products'), null, 'the KV key is removed so readers fall through to D1')
+  assert.equal(await ctx.env.CACHE.get('v2:products'), null, 'the KV key is removed so readers fall through to D1')
 })
 
 check('after crossing over, readers get the D1 version, not a stale KV one', async () => {
@@ -139,14 +139,52 @@ check('after crossing over, readers get the D1 version, not a stale KV one', asy
   const ctx = freshEnv()
   await bumpVersion(ctx.env, 'products')
   const kvVersion = await getVersionWithFallback(ctx.env, 'products')
-  assert.equal(kvVersion, '1', 'KV is preferred while it is present')
+  assert.equal(kvVersion, 'k2:1', 'KV is preferred while it is present and carries the new cache-key generation')
 
   await consumeQuota(ctx.env, 'kv_write', 950)
   await bumpVersion(ctx.env, 'products')
   await bumpVersion(ctx.env, 'products')
   const d1Version = await getVersionWithFallback(ctx.env, 'products')
-  assert.equal(d1Version, '2', 'reads now come from D1 and keep advancing')
+  assert.equal(d1Version, 'd2:3', 'reads now come from D1, preserve the KV handoff count, and keep advancing')
   assert.notEqual(d1Version, kvVersion, 'the version genuinely changed -- otherwise caches would never invalidate')
+})
+
+check('D1 handoff is permanent even after the quota window resets', async () => {
+  const { bumpVersion, getVersionWithFallback } = await loadCache()
+  const { consumeQuota } = await loadQuotaGuard()
+  const ctx = freshEnv()
+
+  await bumpVersion(ctx.env, 'products')
+  await bumpVersion(ctx.env, 'products')
+  assert.equal(await ctx.env.CACHE.get('v2:products'), '2')
+
+  await consumeQuota(ctx.env, 'kv_write', 950)
+  await bumpVersion(ctx.env, 'products')
+  const afterHandoff = await ctx.db
+    .prepare(`SELECT version FROM cache_versions WHERE namespace = 'products'`)
+    .get({})
+  assert.equal(Number(afterHandoff?.version), 3, 'D1 starts strictly after the last KV version')
+  assert.equal(await getVersionWithFallback(ctx.env, 'products'), 'd2:3')
+
+  const writesAtHandoff = ctx.stats().kvWrites
+  // Simulate tomorrow: KV quota is healthy again. D1 mode must remain
+  // authoritative and must not recreate the KV key at 1.
+  await ctx.db.prepare(`UPDATE quota_usage SET window_key = '2000-01-01' WHERE resource = 'kv_write'`).run({})
+  await bumpVersion(ctx.env, 'products')
+
+  const next = await ctx.db
+    .prepare(`SELECT version FROM cache_versions WHERE namespace = 'products'`)
+    .get({})
+  assert.equal(Number(next?.version), 4, 'D1 keeps advancing after quota rollover')
+  assert.equal(await ctx.env.CACHE.get('v2:products'), null, 'KV version key must stay absent after handoff')
+  assert.equal(ctx.stats().kvWrites, writesAtHandoff, 'D1 mode must not resume spending KV writes')
+  assert.equal(await getVersionWithFallback(ctx.env, 'products'), 'd2:4')
+})
+
+check('cached product reads use the D1-aware version source', async () => {
+  const source = fs.readFileSync(path.join(cloudflareRoot, 'src', 'routes', 'products.ts'), 'utf8')
+  assert.match(source, /getVersionWithFallback\(c\.env, 'products'\)/, 'product search/lookup reads must see D1 fallback versions')
+  assert.doesNotMatch(source, /getVersion\(c\.env\.CACHE, 'products'\)/, 'direct KV-only version reads bypass permanent D1 mode')
 })
 
 check('an unexpected KV write failure also falls back rather than going stale', async () => {

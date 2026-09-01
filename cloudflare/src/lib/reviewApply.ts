@@ -22,6 +22,7 @@ import { audit } from './audit'
 import { broadcast } from '../durable-objects/broadcastHub'
 import { bumpVersion } from './cache'
 import { insertRow, updateRow, defaultBranchId, syncProductImageGallery, seedBranchStockForNewProduct, seedInitialBatchForNewProduct } from './productWrites'
+import { branchUpdateStatements } from './branchWrites'
 import type { PendingActionRow } from './pendingActions'
 import type { Env } from '../index'
 
@@ -243,27 +244,9 @@ registerApplier('branches', 'update', 'branch', async (env, row, reviewer) => {
   const db = getDb(env)
   const current = await db.prepare('SELECT id FROM branches WHERE id = @id').get<{ id: number }>({ id })
   if (!current) return
-  // Same shared toDbBool as the create applier just above -- see that
-  // comment.
-  const defaultFlag = toDbBool(body.is_default, 0)
-  const activeFlag = toDbBool(body.is_active, 1)
-  const statements: Array<{ sql: string; params?: Record<string, unknown> }> = []
-  if (defaultFlag) statements.push({ sql: 'UPDATE branches SET is_default = 0' })
-  statements.push({
-    sql: `UPDATE branches SET name=@name, location=@location, phone=@phone, manager=@manager, notes=@notes,
-          is_default=@is_default, is_active=@is_active, updated_at=CURRENT_TIMESTAMP WHERE id=@id`,
-    params: {
-      name: body.name,
-      location: body.location || null,
-      phone: body.phone || null,
-      manager: body.manager || null,
-      notes: body.notes || null,
-      is_default: defaultFlag,
-      is_active: activeFlag,
-      id,
-    },
-  })
-  await db.batch(statements)
+  // Route and review-approved writes share the same cascade: a branch rename
+  // must update all id-linked display snapshots in both paths.
+  await db.batch(branchUpdateStatements(id, body))
   await audit(env, reviewer.id, reviewer.name, 'update', 'branch', id, { name: body.name })
   await broadcast(env, 'branches', { action: 'update', id })
 })

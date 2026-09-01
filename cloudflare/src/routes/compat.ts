@@ -11,7 +11,7 @@ import { putObject, getObject, deleteObject } from '../lib/r2'
 import { getGoogleLoginPublicConfig } from '../lib/googleOauth'
 import { getSalesTotals, getSalesPeriodSeries, previousPeriodFilters } from '../lib/salesAnalytics'
 import { getFamilyStockStats } from '../lib/familyStockStats'
-import { businessToday, localDateRangeClause, localTodayRangeClause, localHourExpr } from '../lib/businessDateWindow'
+import { businessToday, localDateAtOrAfter, localDateAtOrBefore, localDateRangeClause, localTodayRangeClause, localHourExpr } from '../lib/businessDateWindow'
 
 const app = new Hono<{ Bindings: Env; Variables: { user: any } }>()
 
@@ -148,11 +148,12 @@ function clampInt(value: unknown, fallback: number, min: number, max: number): n
 }
 
 function dateRange(query: Record<string, string>) {
-  // Default range is the current business-timezone (UTC+7) day, not the UTC day
-  // -- the latter names yesterday during Cambodia's 00:00-07:00.
+  // An empty dashboard range means all recorded history. The UI no longer
+  // silently presets Today; explicit picker values still use the same local
+  // business-day SQL below.
   const today = businessToday()
   return {
-    startDate: String(query.startDate || today).slice(0, 10),
+    startDate: String(query.startDate || '2000-01-01').slice(0, 10),
     endDate: String(query.endDate || today).slice(0, 10),
     granularity: ['week', 'month'].includes(String(query.granularity || 'day')) ? String(query.granularity) : 'day',
   }
@@ -638,7 +639,6 @@ app.get('/system/legacy-deleted-sales', requireAuth, async (c) => {
         WHERE trim(COALESCE(cashier_name, deleted_by, '')) <> ''
         GROUP BY lower(trim(COALESCE(cashier_name, deleted_by, '')))
         ORDER BY name COLLATE NOCASE ASC
-        LIMIT 100
       `).all<{ key: string; name: string; line_count: number }>(),
     ])
     const round2 = (value: unknown): number => Math.round((Number(value) || 0) * 100) / 100
@@ -943,15 +943,77 @@ app.get('/import-jobs/:id/review', async (c) => {
 app.get('/transfers', async (c) => {
   const denied = denyUnless(c, 'inventory', 'branches')
   if (denied) return denied
-  const rows = await getDb(c.env).prepare(`
-    SELECT st.*, b1.name AS from_name, b2.name AS to_name
+
+  const query = c.req.query()
+  const startDate = String(query.startDate || '').trim()
+  const endDate = String(query.endDate || '').trim()
+  const fromBranchId = String(query.fromBranchId || query.from_branch_id || '').trim()
+  const toBranchId = String(query.toBranchId || query.to_branch_id || '').trim()
+  const clauses: string[] = ['1=1']
+  const bindings: Record<string, unknown> = {}
+
+  // Transfer timestamps are stored in UTC. Every other business-day report
+  // uses the fixed Cambodia UTC+7 helpers; using raw date(created_at) here
+  // misclassified transfers made between 00:00 and 06:59 local time.
+  if (/^\d{4}-\d{2}-\d{2}$/.test(startDate)) {
+    clauses.push(localDateAtOrAfter('st.created_at'))
+    bindings.startDate = startDate
+  }
+  if (/^\d{4}-\d{2}-\d{2}$/.test(endDate)) {
+    clauses.push(localDateAtOrBefore('st.created_at'))
+    bindings.endDate = endDate
+  }
+  if (fromBranchId && /^\d+$/.test(fromBranchId)) {
+    clauses.push('st.from_branch_id = @fromBranchId')
+    bindings.fromBranchId = Number(fromBranchId)
+  }
+  if (toBranchId && /^\d+$/.test(toBranchId)) {
+    clauses.push('st.to_branch_id = @toBranchId')
+    bindings.toBranchId = Number(toBranchId)
+  }
+
+  const where = `WHERE ${clauses.join(' AND ')}`
+  const db = getDb(c.env)
+  const hasPaging = Object.prototype.hasOwnProperty.call(query, 'page') || Object.prototype.hasOwnProperty.call(query, 'pageSize')
+
+  if (!hasPaging) {
+    // Compatibility shape for any older client that still expects a bare
+    // array. The current Branches page always requests paging, so no UI data
+    // is hidden behind this legacy safety cap.
+    const rows = await db.prepare(`
+      SELECT st.*, st.notes AS note, b1.name AS from_name, b2.name AS to_name
+      FROM stock_transfers st
+      LEFT JOIN branches b1 ON b1.id = st.from_branch_id
+      LEFT JOIN branches b2 ON b2.id = st.to_branch_id
+      ${where}
+      ORDER BY st.created_at DESC, st.id DESC
+      LIMIT 500
+    `).all(bindings)
+    return c.json(rows || [])
+  }
+
+  const page = clampInt(query.page, 1, 1, 100000)
+  const pageSize = clampInt(query.pageSize, 20, 1, 200)
+  const offset = (page - 1) * pageSize
+  const countRow = await db.prepare(`SELECT COUNT(*) AS count FROM stock_transfers st ${where}`).get<{ count: number }>(bindings)
+  const total = Number(countRow?.count || 0)
+  const items = await db.prepare(`
+    SELECT st.*, st.notes AS note, b1.name AS from_name, b2.name AS to_name
     FROM stock_transfers st
     LEFT JOIN branches b1 ON b1.id = st.from_branch_id
     LEFT JOIN branches b2 ON b2.id = st.to_branch_id
+    ${where}
     ORDER BY st.created_at DESC, st.id DESC
-    LIMIT 500
-  `).all()
-  return c.json(rows || [])
+    LIMIT @pageSize OFFSET @offset
+  `).all({ ...bindings, pageSize, offset })
+
+  return c.json({
+    items: items || [],
+    total,
+    page,
+    pageSize,
+    totalPages: Math.max(1, Math.ceil(total / pageSize)),
+  })
 })
 
 export default app

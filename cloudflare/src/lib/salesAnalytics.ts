@@ -44,12 +44,14 @@ import {
   localMonthExpr,
   localWeekExpr,
   localDateRangeClause,
+  localDateAtOrAfter,
+  localDateAtOrBefore,
   localTimeRangeClause,
 } from './businessDateWindow'
 
 export interface SalesFilters {
-  startDate: string
-  endDate: string
+  startDate?: string | null
+  endDate?: string | null
   branchId?: string | number | null
   // Optional time-of-day window ('HH:MM'), evaluated in the FIXED business
   // timezone UTC+7 (Cambodia) -- created_at is stored UTC, so the clause shifts
@@ -70,6 +72,11 @@ export interface SalesFilters {
   // the same normalized label the payment-method breakdown groups by.
   status?: string | null
   paymentMethod?: string | null
+  // Optional immutable upper bound used by paged exports. Sales IDs are
+  // monotonic, so page 1 can freeze a snapshot and every aggregate/detail
+  // query in later pages stays on the same receipt set even while new sales
+  // are being created. Absent for normal reports/dashboard paths.
+  maxSaleId?: number | null
 }
 
 export interface SalesTotals {
@@ -182,17 +189,22 @@ const CUSTOMER_REFUND_JOIN = `LEFT JOIN (
 // date range (and optional branch)". `alias` lets callers use this against
 // either a bare `sales` table or an aliased `s` in a join.
 function whereActiveSales(alias: string, f: SalesFilters) {
-  const params: Record<string, unknown> = { startDate: f.startDate, endDate: f.endDate }
-  const clauses = [
-    // Local-day range, bucketed in the fixed business timezone UTC+7 (Cambodia).
-    // created_at is stored UTC in a MIX of ISO and space shapes (all sales are
-    // ISO), so the day is taken through date(created_at,'+7h') -- shape-agnostic,
-    // unlike a raw string compare against a datetime bound -- with a sargable
-    // date-only pre-filter that keeps idx_sales_created_pg usable. See
-    // businessDateWindow.ts; correctness + index-use proven in
-    // test-sales-analytics-daterange-pure.cjs.
-    localDateRangeClause(`${alias}.created_at`),
-  ]
+  const params: Record<string, unknown> = {}
+  const clauses: string[] = []
+  // Local-day range, bucketed in the fixed business timezone UTC+7 (Cambodia).
+  // Both endpoints are optional so the Reports hub can represent true all-time
+  // (or a one-sided range) without inventing a fake historical boundary.
+  if (f.startDate && f.endDate) {
+    params.startDate = f.startDate
+    params.endDate = f.endDate
+    clauses.push(localDateRangeClause(`${alias}.created_at`))
+  } else if (f.startDate) {
+    params.startDate = f.startDate
+    clauses.push(localDateAtOrAfter(`${alias}.created_at`))
+  } else if (f.endDate) {
+    params.endDate = f.endDate
+    clauses.push(localDateAtOrBefore(`${alias}.created_at`))
+  }
   // Status: an explicit filter wins over the default hide-cancelled guard, so
   // a caller asking for 'cancelled' actually gets cancelled sales. Bound as a
   // param -- never interpolated -- so an arbitrary value is injection-safe and
@@ -214,6 +226,10 @@ function whereActiveSales(alias: string, f: SalesFilters) {
   if (f.branchId) {
     clauses.push(`${alias}.branch_id = @branchId`)
     params.branchId = f.branchId
+  }
+  if (Number.isSafeInteger(Number(f.maxSaleId)) && Number(f.maxSaleId) > 0) {
+    clauses.push(`${alias}.id <= @maxSaleId`)
+    params.maxSaleId = Number(f.maxSaleId)
   }
   const validTime = (v: unknown): v is string => typeof v === 'string' && /^(?:[01]\d|2[0-3]):[0-5]\d$/.test(v)
   if (validTime(f.startTime) && validTime(f.endTime)) {

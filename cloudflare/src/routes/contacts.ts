@@ -24,6 +24,8 @@ import { revokePortalSessionsForAccount } from '../lib/portalSession'
 import bcrypt from 'bcryptjs'
 import { buildContactMatchClause } from '../lib/contactSearch'
 import { createBulkDeleteJob, getBulkDeleteJob, reapStalledBulkDeleteJobs, type BulkDeleteEntityType } from '../lib/bulkDeleteEngine'
+import { bumpVersion, cachedJsonResponse, getVersionWithFallback } from '../lib/cache'
+import { localDateAtOrAfter, localDateAtOrBefore, localDateExpr } from '../lib/businessDateWindow'
 import type { Env } from '../index'
 
 // Customers, suppliers, and delivery contacts, ported from
@@ -111,6 +113,15 @@ const DELIVERY_CONTACTS: ContactConfig = {
 }
 
 const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser } }>()
+const CONTACT_READ_CACHE_TTL_SECONDS = 20
+
+async function getContactReadCacheVersion(env: Env, table: ContactTable): Promise<string> {
+  // Customer rows include a computed loyalty balance derived from sales, so
+  // that list must turn over on either a customer edit or a sale mutation.
+  const namespaces = table === 'customers' ? ['customers', 'sales'] : [table]
+  const versions = await Promise.all(namespaces.map((namespace) => getVersionWithFallback(env, namespace)))
+  return versions.map((version, index) => `${namespaces[index]}:${version}`).join('|')
+}
 // Scoped to the three path prefixes this router actually owns, NOT '*'.
 // See index.ts: this router is mounted at the bare `/api` prefix, so a
 // `app.use('*', ...)` here registers as `/api/*` middleware and runs for
@@ -461,12 +472,21 @@ function registerContactRoutes(config: ContactConfig) {
     // on the suppliers table (see requireSupplierAccess above), so keep it
     // to exactly those two columns.
     if (String(query.fields || '') === 'names') {
-      const rows = await db.prepare(`SELECT id, name FROM ${config.table} ORDER BY lower(name) ASC`).all<Record<string, unknown>>()
+      const version = await getContactReadCacheVersion(c.env, config.table)
+      const rows = await cachedJsonResponse(c.req.raw, c.executionCtx, version, CONTACT_READ_CACHE_TTL_SECONDS, () =>
+        db.prepare(`SELECT id, name FROM ${config.table} ORDER BY lower(name) ASC`).all<Record<string, unknown>>(),
+      )
       return c.json(rows)
     }
     const hasPaging = Object.prototype.hasOwnProperty.call(query, 'page') || Object.prototype.hasOwnProperty.call(query, 'pageSize')
     const search = String(query.search || query.q || '').trim().toLowerCase()
-    const where: string[] = []
+    // `baseWhere` contains filters that should also constrain the year facet.
+    // Date filters are added only to `where` so the year picker can still show
+    // every year available for the current search/gender scope instead of
+    // collapsing to the year that is already selected. This is important on a
+    // server-paged list: deriving filter choices from one 20-row page hides
+    // valid years and makes records on other pages unreachable.
+    const baseWhere: string[] = []
     const params: Record<string, unknown> = {}
     // Was a `lower(COALESCE(col, '')) LIKE '%term%'` OR-chain across every
     // searchable column (same full-scan cost migrations/0018_products_fts.sql
@@ -478,10 +498,37 @@ function registerContactRoutes(config: ContactConfig) {
     // had a comma-groups AND/OR UI, just one free-text phrase).
     const contactMatch = buildContactMatchClause(config.table, search, 'search')
     if (contactMatch) {
-      where.push(contactMatch.sql)
+      baseWhere.push(contactMatch.sql)
       Object.assign(params, contactMatch.params)
     }
+
+    const gender = String(query.gender || '').trim().toLowerCase()
+    if (gender === 'unspecified') {
+      baseWhere.push(`trim(COALESCE(gender, '')) = ''`)
+    } else if (gender === 'male' || gender === 'female' || gender === 'other') {
+      baseWhere.push(`lower(trim(COALESCE(gender, ''))) = @gender`)
+      params.gender = gender
+    }
+
+    const facetParams = { ...params }
+    const where = [...baseWhere]
+    const year = String(query.year || '').trim()
+    const monthRaw = String(query.month || '').trim()
+    const yearValid = /^\d{4}$/.test(year)
+    const monthNumber = Number(monthRaw)
+    const monthValid = yearValid && Number.isInteger(monthNumber) && monthNumber >= 1 && monthNumber <= 12
+    if (yearValid) {
+      const month = monthValid ? monthNumber : null
+      const startMonth = month ?? 1
+      const endMonth = month ?? 12
+      const lastDay = new Date(Date.UTC(Number(year), endMonth, 0)).getUTCDate()
+      params.filterStartDate = `${year}-${String(startMonth).padStart(2, '0')}-01`
+      params.filterEndDate = `${year}-${String(endMonth).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`
+      where.push(localDateAtOrAfter('created_at', '@filterStartDate'))
+      where.push(localDateAtOrBefore('created_at', '@filterEndDate'))
+    }
     const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : ''
+    const facetWhereSql = baseWhere.length ? `WHERE ${baseWhere.join(' AND ')}` : ''
 
     // Only the customers table has a loyalty-points concept -- suppliers
     // and delivery_contacts skip this entirely.
@@ -523,17 +570,32 @@ function registerContactRoutes(config: ContactConfig) {
     const orderSql = `ORDER BY ${sortColumn} ${sortDir}, id ASC`
 
     if (!hasPaging) {
-      const rows = await db.prepare(`SELECT * FROM ${config.table} ${whereSql} ${orderSql}`).all<Record<string, unknown>>(params)
-      return c.json((await withPoints(rows || [])))
+      const version = await getContactReadCacheVersion(c.env, config.table)
+      const payload = await cachedJsonResponse(c.req.raw, c.executionCtx, version, CONTACT_READ_CACHE_TTL_SECONDS, async () => {
+        const rows = await db.prepare(`SELECT * FROM ${config.table} ${whereSql} ${orderSql}`).all<Record<string, unknown>>(params)
+        return withPoints(rows || [])
+      })
+      return c.json(payload)
     }
 
     const page = clampInt(query.page, 1, 1, 100000)
     const pageSize = clampInt(query.pageSize, 20, 1, 200)
     const offset = (page - 1) * pageSize
-    const totalRow = await db.prepare(`SELECT COUNT(*) AS count FROM ${config.table} ${whereSql}`).get<{ count: number }>(params)
-    const total = totalRow?.count || 0
-    const items = await db.prepare(`SELECT * FROM ${config.table} ${whereSql} ${orderSql} LIMIT @pageSize OFFSET @offset`).all<Record<string, unknown>>({ ...params, pageSize, offset })
-    return c.json({ items: (await withPoints(items || [])), total, page, pageSize, totalPages: Math.max(1, Math.ceil(total / pageSize)) })
+    const version = await getContactReadCacheVersion(c.env, config.table)
+    const payload = await cachedJsonResponse(c.req.raw, c.executionCtx, version, CONTACT_READ_CACHE_TTL_SECONDS, async () => {
+      const [totalRow, items, yearRows] = await Promise.all([
+        db.prepare(`SELECT COUNT(*) AS count FROM ${config.table} ${whereSql}`).get<{ count: number }>(params),
+        db.prepare(`SELECT * FROM ${config.table} ${whereSql} ${orderSql} LIMIT @pageSize OFFSET @offset`).all<Record<string, unknown>>({ ...params, pageSize, offset }),
+        db.prepare(`SELECT DISTINCT substr(${localDateExpr('created_at')}, 1, 4) AS year FROM ${config.table} ${facetWhereSql} ORDER BY year DESC`).all<Record<string, unknown>>(facetParams),
+      ])
+      const total = totalRow?.count || 0
+      const availableYears = [...new Set((yearRows || [])
+        .map((row) => String(row.year || ''))
+        .filter((value) => /^\d{4}$/.test(value)))]
+        .sort((left, right) => Number(right) - Number(left))
+      return { items: (await withPoints(items || [])), total, page, pageSize, totalPages: Math.max(1, Math.ceil(total / pageSize)), availableYears }
+    })
+    return c.json(payload)
   })
 
   // Live pre-submit check, called (debounced) while the form's name/phone
@@ -563,6 +625,11 @@ function registerContactRoutes(config: ContactConfig) {
     // "Show kept" -- those come back flagged `dismissed:true` so a wrongly-kept
     // conflict can be reopened and resolved. Default stays open-conflicts-only.
     const includeDismissed = ['1', 'true', 'yes'].includes(String(c.req.query('includeDismissed') || '').toLowerCase())
+  const pageSize = clampInt(c.req.query('pageSize'), 50, 1, 100)
+  const mismatchPage = clampInt(c.req.query('mismatchPage'), 1, 1, 100000)
+  const missingPage = clampInt(c.req.query('missingPage'), 1, 1, 100000)
+  const mismatchOffset = (mismatchPage - 1) * pageSize
+  const missingOffset = (missingPage - 1) * pageSize
     const clusters = await findDuplicateContactClusters(db, config.table, config.optionMode, { includeDismissed })
     // Attach each contact's "worth knowing before you act" history summary
     // (loyalty points balance for customers, past sales/returns counts for
@@ -752,6 +819,7 @@ function registerContactRoutes(config: ContactConfig) {
     await db.prepare(`DELETE FROM ${config.table} WHERE id = @id`).run({ id: mergeId })
     await audit(c.env, user?.id ?? null, user?.name ?? null, 'merge', config.entity, keepId, { mergedId: mergeId, mergedName: merged.name, backfilled: Object.keys(backfill) })
     c.executionCtx.waitUntil(broadcast(c.env, config.channel, { action: 'merge', id: keepId, mergedId: mergeId }))
+    c.executionCtx.waitUntil(bumpVersion(c.env, config.table))
     const refreshed = await db.prepare(`SELECT * FROM ${config.table} WHERE id = @id`).get<Record<string, unknown>>({ id: keepId })
     return c.json({ contact: refreshed })
   })
@@ -803,6 +871,7 @@ function registerContactRoutes(config: ContactConfig) {
     const id = result.lastInsertRowid
     await audit(c.env, user?.id ?? null, user?.name ?? null, 'create', config.entity, id, { name })
     c.executionCtx.waitUntil(broadcast(c.env, config.channel, { action: 'create', id }))
+    c.executionCtx.waitUntil(bumpVersion(c.env, config.table))
     const item = await db.prepare(`SELECT * FROM ${config.table} WHERE id = @id`).get({ id })
     return c.json(item)
   })
@@ -938,8 +1007,45 @@ function registerContactRoutes(config: ContactConfig) {
         WHERE id = @id
       `).run({ ...payload, id })
     }
+
+    // Stable ids are the authority for display snapshots. Keep every row
+    // already linked to this exact contact synchronized, while deliberately
+    // leaving NULL-id/name-only rows untouched: those are the genuine
+    // conflicts that must stay visible for review instead of being guessed.
+    const nameChanged = String(current.name || '') !== name
+    const phoneChanged = config.table === 'customers'
+      && Object.prototype.hasOwnProperty.call(payload, 'phone')
+      && String(current.phone || '') !== String(payload.phone || '')
+    const addressChanged = config.table === 'customers'
+      && Object.prototype.hasOwnProperty.call(payload, 'address')
+      && String(current.address || '') !== String(payload.address || '')
+    if (nameChanged || phoneChanged || addressChanged) {
+      if (config.table === 'customers') {
+        const customerPhone = Object.prototype.hasOwnProperty.call(payload, 'phone') ? payload.phone : current.phone
+        const customerAddress = Object.prototype.hasOwnProperty.call(payload, 'address') ? payload.address : current.address
+        await db.batch([
+          { sql: `UPDATE sales SET customer_name = @name, customer_phone = @phone, customer_address = @address WHERE customer_id = @id`, params: { id, name, phone: customerPhone ?? null, address: customerAddress ?? null } },
+          { sql: `UPDATE returns SET customer_name = @name WHERE customer_id = @id`, params: { id, name } },
+          { sql: `UPDATE customer_share_submissions SET customer_name = @name WHERE customer_id = @id`, params: { id, name } },
+        ])
+        if (await hasTable(db, 'customer_receivables')) {
+          await db.prepare(`UPDATE customer_receivables SET customer_name = @name WHERE customer_id = @id`).run({ id, name })
+        }
+      } else if (config.table === 'suppliers' && nameChanged) {
+        await db.batch([
+          { sql: `UPDATE returns SET supplier_name = @name WHERE supplier_id = @id`, params: { id, name } },
+          { sql: `UPDATE product_batches SET supplier_name = @name WHERE supplier_id = @id`, params: { id, name } },
+        ])
+        if (await hasTable(db, 'supplier_invoices')) {
+          await db.prepare(`UPDATE supplier_invoices SET supplier_name = @name WHERE supplier_id = @id`).run({ id, name })
+        }
+      } else if (config.table === 'delivery_contacts' && nameChanged) {
+        await db.prepare(`UPDATE sales SET delivery_contact_name = @name WHERE delivery_contact_id = @id`).run({ id, name })
+      }
+    }
     await audit(c.env, user?.id ?? null, user?.name ?? null, 'update', config.entity, id, { name })
     c.executionCtx.waitUntil(broadcast(c.env, config.channel, { action: 'update', id }))
+    c.executionCtx.waitUntil(bumpVersion(c.env, config.table))
     const item = await db.prepare(`SELECT * FROM ${config.table} WHERE id = @id`).get({ id })
     // `partial`/`partialFields` are additive -- every existing caller reads
     // specific known fields off this response (id, name, etc.) or just
@@ -994,6 +1100,7 @@ function registerContactRoutes(config: ContactConfig) {
     await db.prepare(`DELETE FROM ${config.table} WHERE id = @id`).run({ id })
     await audit(c.env, user?.id ?? null, user?.name ?? null, 'delete', config.entity, id, { name: current.name })
     c.executionCtx.waitUntil(broadcast(c.env, config.channel, { action: 'delete', id }))
+    c.executionCtx.waitUntil(bumpVersion(c.env, config.table))
     return c.json({})
   })
 
@@ -1101,59 +1208,76 @@ app.get('/suppliers/:id/purchases', async (c) => {
   const supplier = await db.prepare('SELECT id, name FROM suppliers WHERE id = ?').get<{ id: number; name: string | null }>([id])
   if (!supplier) return c.json({ error: 'Supplier not found' }, 404)
 
+  const query = c.req.query()
+  const page = clampInt(query.page, 1, 1, 100000)
+  const pageSize = clampInt(query.page_size ?? query.pageSize, 50, 1, 200)
+  const offset = (page - 1) * pageSize
+  const params = { id, name: String(supplier.name || '').trim().toLowerCase() }
+  const supplierWhere = `(
+    pb.supplier_id = @id
+    OR (pb.supplier_id IS NULL AND pb.supplier_name IS NOT NULL AND lower(trim(pb.supplier_name)) = @name)
+  )`
+
+  // Totals are calculated across the COMPLETE supplier history, independently
+  // of the visible page. The old endpoint capped the row array at 1,000 and
+  // derived every headline number from that array, so both the table and its
+  // totals silently became wrong for long-running suppliers.
+  const totalsRow = await db.prepare(`
+    SELECT COUNT(*) AS batches,
+           COUNT(DISTINCT pb.variant_product_id) AS products,
+           COALESCE(SUM(CASE WHEN pb.received_quantity IS NOT NULL THEN pb.received_quantity ELSE 0 END), 0) AS units_received,
+           COALESCE(SUM(CASE WHEN pb.received_cost_usd IS NOT NULL THEN pb.received_cost_usd ELSE 0 END), 0) AS cost_usd,
+           COALESCE(SUM(CASE WHEN pb.payment_status = 'credit' AND pb.received_cost_usd IS NOT NULL THEN pb.received_cost_usd ELSE 0 END), 0) AS credit_open_usd,
+           SUM(CASE WHEN pb.payment_status = 'credit' THEN 1 ELSE 0 END) AS credit_batches,
+           SUM(CASE WHEN pb.received_cost_usd IS NULL THEN 1 ELSE 0 END) AS batches_without_cost
+    FROM product_batches pb
+    WHERE ${supplierWhere}
+  `).get<{
+    batches: number; products: number; units_received: number; cost_usd: number
+    credit_open_usd: number; credit_batches: number; batches_without_cost: number
+  }>(params)
+
   const batches = await db.prepare(`
     SELECT pb.id, pb.batch_number, pb.lot_code, pb.received_at, pb.received_quantity,
            pb.unit_cost_usd, pb.received_cost_usd, pb.payment_status, pb.credit_due_date, pb.is_active,
            p.id AS product_id, p.name AS product_name,
-           COALESCE(SUM(bbs.quantity), 0) AS remaining_quantity
+           COALESCE(bbs.remaining_quantity, 0) AS remaining_quantity
     FROM product_batches pb
     JOIN products p ON p.id = pb.variant_product_id
-    LEFT JOIN branch_batch_stock bbs ON bbs.batch_id = pb.id
-    WHERE pb.supplier_id = @id
-       OR (pb.supplier_id IS NULL AND pb.supplier_name IS NOT NULL AND lower(trim(pb.supplier_name)) = @name)
-    GROUP BY pb.id
+    LEFT JOIN (
+      SELECT batch_id, SUM(quantity) AS remaining_quantity
+      FROM branch_batch_stock
+      GROUP BY batch_id
+    ) bbs ON bbs.batch_id = pb.id
+    WHERE ${supplierWhere}
     ORDER BY pb.received_at DESC, pb.id DESC
-    LIMIT 1000
+    LIMIT @limit OFFSET @offset
   `).all<{
     id: number; batch_number: number | null; lot_code: string | null; received_at: string | null
     received_quantity: number | null; unit_cost_usd: number | null; received_cost_usd: number | null; payment_status: string | null
     credit_due_date: string | null; is_active: number | null
     product_id: number; product_name: string | null; remaining_quantity: number
-  }>({ id, name: String(supplier.name || '').trim().toLowerCase() })
+  }>({ ...params, limit: pageSize, offset })
 
-  const totals = {
-    batches: batches.length,
-    products: new Set(batches.map((b) => b.product_id)).size,
-    units_received: 0,
-    // Purchase cost only where BOTH received qty and unit cost are known --
-    // batches_without_cost says how many lots the total cannot see, rather
-    // than quietly pretending they cost 0.
-    cost_usd: 0,
-    credit_open_usd: 0,
-    credit_batches: 0,
-    batches_without_cost: 0,
-  }
-  for (const batch of batches) {
-    const received = Number(batch.received_quantity)
-    // 0080: spend comes from the lot's recorded money, not from re-deriving
-    // it as quantity x unit_cost_usd. unit_cost_usd is first-attribution, so
-    // that form valued a same-day second receipt at the first receipt's
-    // price -- overstating this exact figure by 11.5% on the migrated data.
-    const recordedCost = Number(batch.received_cost_usd)
-    if (Number.isFinite(received) && batch.received_quantity != null) totals.units_received += received
-    if (batch.received_cost_usd != null && Number.isFinite(recordedCost)) {
-      const cost = recordedCost
-      totals.cost_usd += cost
-      if (batch.payment_status === 'credit') totals.credit_open_usd += cost
-    } else {
-      totals.batches_without_cost += 1
-    }
-    if (batch.payment_status === 'credit') totals.credit_batches += 1
-  }
-  totals.cost_usd = Math.round(totals.cost_usd * 100) / 100
-  totals.credit_open_usd = Math.round(totals.credit_open_usd * 100) / 100
-
-  return c.json({ supplier, totals, batches })
+  const round2 = (value: unknown): number => Math.round((Number(value) || 0) * 100) / 100
+  const totalBatches = Number(totalsRow?.batches) || 0
+  return c.json({
+    supplier,
+    totals: {
+      batches: totalBatches,
+      products: Number(totalsRow?.products) || 0,
+      units_received: Number(totalsRow?.units_received) || 0,
+      cost_usd: round2(totalsRow?.cost_usd),
+      credit_open_usd: round2(totalsRow?.credit_open_usd),
+      credit_batches: Number(totalsRow?.credit_batches) || 0,
+      batches_without_cost: Number(totalsRow?.batches_without_cost) || 0,
+    },
+    batches: batches || [],
+    page,
+    page_size: pageSize,
+    total_batches: totalBatches,
+    total_pages: Math.max(1, Math.ceil(totalBatches / pageSize)),
+  })
 })
 
 // D1b: the Stock-In Invoice report -- purchases grouped supplier → invoice
@@ -1307,7 +1431,6 @@ app.get('/suppliers/reports/stock-in-invoices', async (c) => {
       WHERE t.supplier_key <> 'none'
       GROUP BY t.supplier_key
       ORDER BY name COLLATE NOCASE ASC
-      LIMIT 300
     `).all<{ key: string; name: string | null }>(),
   ])
 
@@ -1461,7 +1584,6 @@ app.get('/suppliers/reports/ap-invoices', async (c) => {
       FROM supplier_invoices
       GROUP BY lower(trim(supplier_name))
       ORDER BY name COLLATE NOCASE ASC
-      LIMIT 300
     `).all<{ key: string; name: string; invoice_count: number }>(),
   ])
 
@@ -1562,7 +1684,6 @@ app.get('/customers/reports/ar-invoices', async (c) => {
       FROM customer_receivables
       GROUP BY lower(trim(customer_name))
       ORDER BY name COLLATE NOCASE ASC
-      LIMIT 300
     `).all<{ key: string; name: string; invoice_count: number }>(),
   ])
 
@@ -1614,6 +1735,14 @@ app.get('/customers/link-conflicts', async (c) => {
   // flagged `dismissed:1`, so a wrongly-kept sale-link conflict can be
   // reopened and resolved. Default stays open-conflicts-only.
   const includeDismissed = ['1', 'true', 'yes'].includes(String(c.req.query('includeDismissed') || '').toLowerCase())
+  // Each conflict class is paged independently. The old LIMIT 200 made old
+  // sale-link conflicts unreachable and could make the review queue look
+  // clean while rows still existed. Counts are computed independently below.
+  const pageSize = clampInt(c.req.query('pageSize'), 50, 1, 100)
+  const mismatchPage = clampInt(c.req.query('mismatchPage'), 1, 1, 1_000_000)
+  const missingPage = clampInt(c.req.query('missingPage'), 1, 1, 1_000_000)
+  const mismatchOffset = (mismatchPage - 1) * pageSize
+  const missingOffset = (missingPage - 1) * pageSize
 
   type MismatchRow = {
     customer_id: number; customer_name: string | null; customer_phone: string | null
@@ -1649,8 +1778,8 @@ app.get('/customers/link-conflicts', async (c) => {
         AND d.cluster_value = g.customer_id || '|' || g.phone_key
     )`}
     ORDER BY g.last_at DESC
-    LIMIT 200
-  `).all<MismatchRow>({})
+    LIMIT @limit OFFSET @offset
+  `).all<MismatchRow>({ limit: pageSize, offset: mismatchOffset })
 
   type MissingRow = {
     name: string; phone: string; phone_key: string
@@ -1686,10 +1815,49 @@ app.get('/customers/link-conflicts', async (c) => {
         AND d.cluster_value = lower(g.name) || '|' || g.phone_key
     )`}
     ORDER BY g.sale_count DESC, g.last_at DESC
-    LIMIT 200
-  `).all<MissingRow>({})
+    LIMIT @limit OFFSET @offset
+  `).all<MissingRow>({ limit: pageSize, offset: missingOffset })
 
-  return c.json({ mismatches, missing })
+  const [mismatchCountRow, missingCountRow] = await Promise.all([
+    db.prepare(`
+      SELECT COUNT(*) AS total FROM (
+        SELECT s.customer_id, ${salePhone} AS phone_key
+        FROM sales s JOIN customers c ON c.id = s.customer_id
+        WHERE ${salePhone} <> '' AND ${salePhone} <> ${custPhone}
+        GROUP BY s.customer_id, ${salePhone}
+      ) g
+      ${includeDismissed ? '' : `WHERE NOT EXISTS (
+        SELECT 1 FROM contact_duplicate_dismissals d
+        WHERE d.contact_table = 'customers' AND d.cluster_type = 'link_mismatch'
+          AND d.cluster_value = g.customer_id || '|' || g.phone_key
+      )`}
+    `).get<{ total: number }>(),
+    db.prepare(`
+      SELECT COUNT(*) AS total FROM (
+        SELECT lower(trim(COALESCE(s.customer_name,''))) AS name_key, ${salePhone} AS phone_key
+        FROM sales s
+        WHERE s.customer_id IS NULL
+          AND (trim(COALESCE(s.customer_name,'')) <> '' OR trim(COALESCE(s.customer_phone,'')) <> '')
+        GROUP BY lower(trim(COALESCE(s.customer_name,''))), ${salePhone}
+      ) g
+      ${includeDismissed ? '' : `WHERE NOT EXISTS (
+        SELECT 1 FROM contact_duplicate_dismissals d
+        WHERE d.contact_table = 'customers' AND d.cluster_type = 'link_missing'
+          AND d.cluster_value = g.name_key || '|' || g.phone_key
+      )`}
+    `).get<{ total: number }>(),
+  ])
+  const mismatchTotal = Number(mismatchCountRow?.total) || 0
+  const missingTotal = Number(missingCountRow?.total) || 0
+  return c.json({
+    mismatches,
+    missing,
+    pagination: {
+      pageSize,
+      mismatches: { page: mismatchPage, total: mismatchTotal, totalPages: Math.max(1, Math.ceil(mismatchTotal / pageSize)) },
+      missing: { page: missingPage, total: missingTotal, totalPages: Math.max(1, Math.ceil(missingTotal / pageSize)) },
+    },
+  })
 })
 
 // Repoint a mismatch group's sales at another customer (typically the one
@@ -1719,6 +1887,7 @@ app.post('/customers/link-conflicts/relink', async (c) => {
     fromCustomerId: currentId, phoneKey, salesRelinked: changed,
   })
   c.executionCtx.waitUntil(broadcast(c.env, 'customers', { action: 'relink', id: targetId }))
+  c.executionCtx.waitUntil(bumpVersion(c.env, 'customers'))
   return c.json({ ok: true, relinked: changed, target })
 })
 
@@ -1764,6 +1933,7 @@ app.post('/customers/link-conflicts/resolve-missing', async (c) => {
     name, phone, salesLinked: changed, createdContact: created,
   })
   c.executionCtx.waitUntil(broadcast(c.env, 'customers', { action: created ? 'create' : 'update', id: targetId }))
+  c.executionCtx.waitUntil(bumpVersion(c.env, 'customers'))
   return c.json({ ok: true, customer_id: targetId, created, linked: changed })
 })
 
@@ -1832,6 +2002,7 @@ app.post('/customers/:id/points', async (c) => {
     note,
   })
   c.executionCtx.waitUntil(broadcast(c.env, 'customers', { action: 'award_points', id: customerId }))
+  c.executionCtx.waitUntil(bumpVersion(c.env, 'customers'))
   return c.json({ success: true, id: result.lastInsertRowid, customer_id: customerId, points: Number(points.toFixed(2)) }, 201)
 })
 

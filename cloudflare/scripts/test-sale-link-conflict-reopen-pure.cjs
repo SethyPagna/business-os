@@ -188,6 +188,9 @@ const transportSrc = fs.readFileSync(path.join(__dirname, '..', '..', 'frontend'
 check('route still exposes link-conflicts undismiss + includeDismissed', () => {
   assert.ok(/link-conflicts\/undismiss/.test(routeSrc), 'undismiss route present')
   assert.ok(/link_mismatch/.test(routeSrc) && /link_missing/.test(routeSrc), 'both cluster types wired')
+  assert.ok(/mismatchPage/.test(routeSrc) && /missingPage/.test(routeSrc) && /pageSize/.test(routeSrc), 'both conflict classes expose real server pagination')
+  assert.ok(/LIMIT @limit OFFSET @offset/.test(routeSrc), 'conflict rows are page-bounded rather than hard-capped')
+  assert.ok(/pagination:\s*\{/.test(routeSrc), 'response returns authoritative pagination metadata')
   assert.ok(/includeDismissed \? '' :/.test(routeSrc), 'GET filters open-only unless includeDismissed')
 })
 

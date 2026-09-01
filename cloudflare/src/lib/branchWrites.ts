@@ -20,10 +20,27 @@ export interface BranchWriteFields {
   is_active?: unknown
 }
 
+// When a branch is renamed, the id remains the durable relationship and the
+// human-readable name snapshots must follow it.  Otherwise old/imported sales
+// can keep a label for a branch that no longer exists even though their
+// branch_id is correct.  Read the canonical name back from `branches` after
+// the row update, rather than trusting the request body, so this stays safe
+// for replay/undo callers too.
+function branchNameSnapshotStatements(id: string | number): Array<{ sql: string; params?: Record<string, unknown> }> {
+  const params = { id }
+  return [
+    { sql: `UPDATE sales SET branch_name=(SELECT name FROM branches WHERE id=@id), updated_at=CURRENT_TIMESTAMP WHERE branch_id=@id AND COALESCE(branch_name,'')<>(SELECT name FROM branches WHERE id=@id)`, params },
+    { sql: `UPDATE inventory_movements SET branch_name=(SELECT name FROM branches WHERE id=@id) WHERE branch_id=@id AND COALESCE(branch_name,'')<>(SELECT name FROM branches WHERE id=@id)`, params },
+    { sql: `UPDATE returns SET branch_name=(SELECT name FROM branches WHERE id=@id) WHERE branch_id=@id AND COALESCE(branch_name,'')<>(SELECT name FROM branches WHERE id=@id)`, params },
+    { sql: `UPDATE stock_row_moves SET branch_name=(SELECT name FROM branches WHERE id=@id) WHERE branch_id=@id AND COALESCE(branch_name,'')<>(SELECT name FROM branches WHERE id=@id)`, params },
+  ]
+}
+
 // Mirrors the route's own statement shape exactly: when the row is being made
 // the default, every other row's is_default is cleared first, then the single
-// UPDATE writes the editable columns. Returns the statements for a db.batch();
-// the caller owns the batch so it can bundle audit/broadcast side effects.
+// UPDATE writes the editable columns and re-syncs id-linked name snapshots.
+// Returns the statements for a db.batch(); the caller owns the batch so it can
+// bundle audit/broadcast side effects.
 export function branchUpdateStatements(id: string | number, fields: BranchWriteFields): Array<{ sql: string; params?: Record<string, unknown> }> {
   const defaultFlag = toDbBool(fields.is_default, 0)
   const activeFlag = toDbBool(fields.is_active, 1)
@@ -43,5 +60,6 @@ export function branchUpdateStatements(id: string | number, fields: BranchWriteF
       id,
     },
   })
+  statements.push(...branchNameSnapshotStatements(id))
   return statements
 }

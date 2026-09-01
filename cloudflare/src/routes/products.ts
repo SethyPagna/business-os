@@ -2,7 +2,7 @@ import { Hono } from 'hono'
 import { enqueueImageNormalization } from '../lib/imageAudit'
 import { getDb } from '../lib/db'
 import { paginateProductFamilies } from '../lib/familyPagination'
-import { cachedJsonResponse, getVersion, bumpVersion } from '../lib/cache'
+import { cachedJsonResponse, getVersionWithFallback, bumpVersion } from '../lib/cache'
 import { matchLibraryImagesStrict } from '../lib/importImageMatch'
 import { requireAuth, type SessionUser } from '../lib/auth'
 import { hasPermission, getPermissionTier, getActionTier, getMergedPermissions, isAdminControlUser } from '../lib/permissions'
@@ -40,6 +40,26 @@ import {
 import type { Env } from '../index'
 
 const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser } }>()
+
+async function syncLinkedProductNameSnapshots(env: Env, productIds: number[], productName: string): Promise<void> {
+  if (!productIds.length) return
+  const db = getDb(env)
+  for (const ids of chunkForBinding([...new Set(productIds)], 1)) {
+    const placeholders = ids.map(() => '?').join(',')
+    // Update only rows carrying a stable product id. Name-only/null-id rows
+    // remain untouched so ambiguous legacy conflicts stay visible for review.
+    await db.batch([
+      { sql: `UPDATE sale_items SET product_name = ? WHERE product_id IN (${placeholders})`, params: [productName, ...ids] },
+      { sql: `UPDATE inventory_movements SET product_name = ? WHERE product_id IN (${placeholders})`, params: [productName, ...ids] },
+      { sql: `UPDATE return_items SET product_name = ? WHERE product_id IN (${placeholders})`, params: [productName, ...ids] },
+      { sql: `UPDATE stock_transfers SET product_name = ? WHERE product_id IN (${placeholders})`, params: [productName, ...ids] },
+      { sql: `UPDATE damaged_stock_lots SET product_name = ? WHERE product_id IN (${placeholders})`, params: [productName, ...ids] },
+      { sql: `UPDATE return_replacement_items SET product_name = ? WHERE product_id IN (${placeholders})`, params: [productName, ...ids] },
+      { sql: `UPDATE stock_row_moves SET source_product_name = ? WHERE source_product_id IN (${placeholders})`, params: [productName, ...ids] },
+      { sql: `UPDATE stock_row_moves SET destination_product_name = ? WHERE destination_product_id IN (${placeholders})`, params: [productName, ...ids] },
+    ])
+  }
+}
 // The real backend requires auth on GET /api/products/search (this is
 // internal admin/POS catalog search) -- a real, confirmed gap: an earlier
 // version of this port left it fully public. GET /api/portal/catalog/
@@ -288,11 +308,11 @@ async function loadProductFilters(env: Env, query: Record<string, string> = {}) 
   // (reported as duplicate/near-duplicate options in the Brand filter).
   // MIN() over each normalized group picks one deterministic casing.
   const [brands, categories, units, suppliers, tags, initials] = await Promise.all([
-    db.prepare(`SELECT MIN(trim(p.brand)) AS value FROM products p ${joinSql(variants.brands)} ${sql(variants.brands)} AND trim(COALESCE(p.brand, '')) <> '' GROUP BY lower(trim(p.brand)) ORDER BY lower(value) ASC LIMIT 500`).all<{ value: string }>(variants.brands.params),
-    db.prepare(`SELECT MIN(trim(p.category)) AS value FROM products p ${joinSql(variants.categories)} ${sql(variants.categories)} AND trim(COALESCE(p.category, '')) <> '' GROUP BY lower(trim(p.category)) ORDER BY lower(value) ASC LIMIT 500`).all<{ value: string }>(variants.categories.params),
-    db.prepare(`SELECT MIN(trim(p.unit)) AS value FROM products p ${joinSql(variants.units)} ${sql(variants.units)} AND trim(COALESCE(p.unit, '')) <> '' GROUP BY lower(trim(p.unit)) ORDER BY lower(value) ASC LIMIT 500`).all<{ value: string }>(variants.units.params),
-    db.prepare(`SELECT MIN(trim(p.supplier)) AS value FROM products p ${joinSql(variants.suppliers)} ${sql(variants.suppliers)} AND trim(COALESCE(p.supplier, '')) <> '' GROUP BY lower(trim(p.supplier)) ORDER BY lower(value) ASC LIMIT 500`).all<{ value: string }>(variants.suppliers.params),
-    db.prepare(`SELECT MIN(trim(p.tag_label)) AS value FROM products p ${joinSql(variants.tags)} ${sql(variants.tags)} AND trim(COALESCE(p.tag_label, '')) <> '' GROUP BY lower(trim(p.tag_label)) ORDER BY lower(value) ASC LIMIT 500`).all<{ value: string }>(variants.tags.params),
+    db.prepare(`SELECT MIN(trim(p.brand)) AS value FROM products p ${joinSql(variants.brands)} ${sql(variants.brands)} AND trim(COALESCE(p.brand, '')) <> '' GROUP BY lower(trim(p.brand)) ORDER BY lower(value) ASC`).all<{ value: string }>(variants.brands.params),
+    db.prepare(`SELECT MIN(trim(p.category)) AS value FROM products p ${joinSql(variants.categories)} ${sql(variants.categories)} AND trim(COALESCE(p.category, '')) <> '' GROUP BY lower(trim(p.category)) ORDER BY lower(value) ASC`).all<{ value: string }>(variants.categories.params),
+    db.prepare(`SELECT MIN(trim(p.unit)) AS value FROM products p ${joinSql(variants.units)} ${sql(variants.units)} AND trim(COALESCE(p.unit, '')) <> '' GROUP BY lower(trim(p.unit)) ORDER BY lower(value) ASC`).all<{ value: string }>(variants.units.params),
+    db.prepare(`SELECT MIN(trim(p.supplier)) AS value FROM products p ${joinSql(variants.suppliers)} ${sql(variants.suppliers)} AND trim(COALESCE(p.supplier, '')) <> '' GROUP BY lower(trim(p.supplier)) ORDER BY lower(value) ASC`).all<{ value: string }>(variants.suppliers.params),
+    db.prepare(`SELECT MIN(trim(p.tag_label)) AS value FROM products p ${joinSql(variants.tags)} ${sql(variants.tags)} AND trim(COALESCE(p.tag_label, '')) <> '' GROUP BY lower(trim(p.tag_label)) ORDER BY lower(value) ASC`).all<{ value: string }>(variants.tags.params),
     db.prepare(`
       SELECT upper(substr(trim(p.name), 1, 1)) AS initial,
              COUNT(DISTINCT COALESCE(NULLIF(p.name_key, ''), CAST(p.id AS TEXT))) AS count
@@ -974,7 +994,7 @@ app.get('/search', async (c) => {
   const denial = productSurfaceDenialReason(user, surface)
   if (denial) return c.json({ error: denial }, 403)
 
-  const version = await getVersion(c.env.CACHE, 'products')
+  const version = await getVersionWithFallback(c.env, 'products')
   const payload = await cachedJsonResponse(c.req.raw, c.executionCtx, version, 20, async () => {
     return searchProductsWithIndexFallback(c.env, query)
   })
@@ -1649,6 +1669,8 @@ app.put('/:id', async (c) => {
       return c.json(scientificBarcodeError(nextBarcodeText), 400)
     }
   }
+  let renamedProductIds: number[] = []
+  let renamedProductName: string | null = null
   if (body.name !== undefined || body.barcode !== undefined) {
     const current = await getDb(c.env).prepare('SELECT name, barcode FROM products WHERE id = @id').get<{ name: string; barcode: string | null }>({ id })
     const nextName = body.name !== undefined ? String(body.name || '').trim() : String(current?.name || '')
@@ -1666,6 +1688,20 @@ app.put('/:id', async (c) => {
     // first -- the ordinary row update below then writes this row like
     // any other edit. Only-this-row (the old behavior, a deliberate
     // split) is the default when the flag is absent.
+    const isNameChange = body.name !== undefined
+      && Boolean(current?.name)
+      && String(current?.name || '') !== nextName
+    if (isNameChange) {
+      renamedProductName = nextName
+      if (body.__rename_scope === 'group') {
+        const groupRows = await getDb(c.env)
+          .prepare('SELECT id FROM products WHERE name_key = @nameKey AND is_active = 1')
+          .all<{ id: number }>({ nameKey: String(current?.name || '').trim().toLowerCase() })
+        renamedProductIds = groupRows.map((row) => Number(row.id)).filter(Number.isFinite)
+      } else {
+        renamedProductIds = [Number(id)].filter(Number.isFinite)
+      }
+    }
     if (body.__rename_scope === 'group' && body.name !== undefined && current?.name) {
       const fromName = String(current.name || '').trim()
       if (fromName && fromName.toLowerCase() !== nextName.toLowerCase()) {
@@ -1727,6 +1763,9 @@ app.put('/:id', async (c) => {
   // is not an error.
   const item = await getDb(c.env).prepare('SELECT * FROM products WHERE id = @id').get({ id })
   if (!item) return c.json({ error: 'Product not found or unchanged' }, 404)
+  if (renamedProductName && renamedProductIds.length) {
+    await syncLinkedProductNameSnapshots(c.env, renamedProductIds, renamedProductName)
+  }
   if ('image_gallery' in body) {
     // validateImageGalleryPayload already proved this is either inside the
     // caller's limit or a preservation-only edit of an existing admin
@@ -3100,7 +3139,7 @@ app.get('/lookups/usage', async (c) => {
       brandLibrary = []
     }
 
-    const version = await getVersion(c.env.CACHE, 'products')
+    const version = await getVersionWithFallback(c.env, 'products')
     return c.json({
       success: true,
       snapshotVersion: version,
@@ -3117,16 +3156,13 @@ app.get('/lookups/usage', async (c) => {
 // route can't compress on the server the way the old Docker backend did.
 // The frontend now compresses/resizes images with Canvas before they're
 // ever sent here (see frontend/src/utils/imageCompression.ts), targeting
-// 180KB per image. This cap is a safety net, not the primary size
-// control -- but it's deliberately tight (1MB, not the old 8MB) rather
-// than a generic abuse ceiling: a source image that genuinely tried
-// compressImageFile's full plan (down to its 480px/lowest-quality floor)
-// realistically never lands anywhere near 1MB, so anything over this
-// line means compression didn't run at all (the client is offline/old,
-// or hit a bug like the 'data:' upload path that skipped compression
-// entirely until this session) -- reject with a clear message instead of
-// silently accepting an oversized file into R2/D1.
-const MAX_PRODUCT_IMAGE_UPLOAD_BYTES = 1 * 1024 * 1024
+// The browser normally converts/resizes product photos below ~900KB. This
+// 12MB bound is a fallback for codecs/devices where Canvas cannot decode the
+// selected source (notably some HEIC paths): accept the photo, enqueue the
+// existing on-upload Cloudflare image normalizer, and keep the user flow
+// working instead of blaming the operator for browser compression failure.
+// It remains bounded to protect Worker memory/request abuse.
+const MAX_PRODUCT_IMAGE_UPLOAD_BYTES = 12 * 1024 * 1024
 
 // POST /api/products/upload-image -- ported from routes/products.ts's
 // upload-image handler. Functionally the same upload files.ts's POST
@@ -3160,7 +3196,7 @@ app.post('/upload-image', async (c) => {
     return c.json({ success: false, error: (error as Error).message }, 400)
   }
   if (buffer.byteLength > MAX_PRODUCT_IMAGE_UPLOAD_BYTES) {
-    return c.json({ success: false, error: 'Image is too large to save (over 1MB after your browser attempted to compress it). Please try again, or pick a smaller/simpler source photo.' }, 400)
+    return c.json({ success: false, error: 'Image could not be normalized within the upload safety limit.' }, 400)
   }
 
   const storedName = buildUniqueStoredName(originalName)

@@ -147,7 +147,7 @@ export function buildStockLedgerQuery(filters: StockLedgerFilters = {}): StockLe
       m.id, m.product_id, m.product_name, p.barcode, p.unit,
       m.branch_id, m.branch_name, m.movement_type, ABS(COALESCE(m.quantity, 0)) AS quantity,
       CASE WHEN m.movement_type IN (${OUT_LIST}) THEN -ABS(COALESCE(m.quantity, 0)) ELSE ABS(COALESCE(m.quantity, 0)) END AS signed_quantity,
-      m.reason, m.user_name, m.created_at,
+      m.reason, m.reference_id, m.user_name, m.created_at,
       m.batch_id, b.lot_code AS batch_lot_code, b.received_at AS batch_received_at,
       b.supplier_id AS batch_supplier_id, b.supplier_name AS batch_supplier_name,
       CASE WHEN m.movement_type IN (${OUT_LIST}) THEN 'out' ELSE 'in' END AS ledger_bucket,

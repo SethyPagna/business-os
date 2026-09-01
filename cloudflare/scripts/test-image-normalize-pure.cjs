@@ -47,7 +47,7 @@ function loadReal(relPath, requireOverrides = {}) {
   return moduleObj.exports
 }
 
-const CEILING = 350 * 1024
+const CEILING = 900 * 1024
 
 let passed = 0
 async function check(name, fn) {
@@ -98,29 +98,29 @@ async function run() {
   await check('an oversized image optimizes: written back smaller, upserted optimized', async () => {
     const smaller = new ArrayBuffer(200 * 1024)
     const { env, audit, store } = makeEnv(db, { optimizeResult: { ok: true, bytes: smaller, byteSize: smaller.byteLength, contentType: 'image/webp', provider: 'cloudflare' } })
-    store.set('uploads/big.png', new ArrayBuffer(500 * 1024))
+    store.set('uploads/big.png', new ArrayBuffer(1024 * 1024))
     const outcome = await audit.normalizeStoredImage(env, 'uploads/big.png')
     assert.equal(outcome, 'optimized')
     assert.equal(store.get('uploads/big.png').byteLength, 200 * 1024)
     const row = await db.prepare(`SELECT status, byte_size, original_size, optimized_at FROM image_audit WHERE key = 'uploads/big.png'`).get()
     assert.equal(row.status, 'optimized')
     assert.equal(row.byte_size, 200 * 1024)
-    assert.equal(row.original_size, 500 * 1024)
+    assert.equal(row.original_size, 1024 * 1024)
     assert.ok(row.optimized_at)
   })
 
   await check('a not-smaller result is never stored (no_saving), a failure leaves bytes untouched', async () => {
-    const bigger = new ArrayBuffer(600 * 1024)
+    const bigger = new ArrayBuffer(1200 * 1024)
     const grew = makeEnv(db, { optimizeResult: { ok: true, bytes: bigger, byteSize: bigger.byteLength, provider: 'cloudinary' } })
-    grew.store.set('uploads/grew.jpg', new ArrayBuffer(400 * 1024))
+    grew.store.set('uploads/grew.jpg', new ArrayBuffer(1024 * 1024))
     assert.equal(await grew.audit.normalizeStoredImage(grew.env, 'uploads/grew.jpg'), 'skipped')
-    assert.equal(grew.store.get('uploads/grew.jpg').byteLength, 400 * 1024)
+    assert.equal(grew.store.get('uploads/grew.jpg').byteLength, 1024 * 1024)
     assert.equal((await db.prepare(`SELECT reason FROM image_audit WHERE key = 'uploads/grew.jpg'`).get()).reason, 'no_saving')
 
     const failed = makeEnv(db) // ladder answers binding_absent
-    failed.store.set('uploads/stuck.jpg', new ArrayBuffer(400 * 1024))
+    failed.store.set('uploads/stuck.jpg', new ArrayBuffer(1024 * 1024))
     assert.equal(await failed.audit.normalizeStoredImage(failed.env, 'uploads/stuck.jpg'), 'failed')
-    assert.equal(failed.store.get('uploads/stuck.jpg').byteLength, 400 * 1024)
+    assert.equal(failed.store.get('uploads/stuck.jpg').byteLength, 1024 * 1024)
     const row = await db.prepare(`SELECT status, reason FROM image_audit WHERE key = 'uploads/stuck.jpg'`).get()
     assert.equal(row.status, 'failed')
     assert.equal(row.reason, 'binding_absent')
@@ -160,7 +160,7 @@ async function run() {
     }
     // files.ts only enqueues IMAGES (videos wait on the container path)
     const filesSource = fs.readFileSync(path.join(cloudflareRoot, 'src', 'routes', 'files.ts'), 'utf8')
-    assert.match(filesSource, /if \(mediaType === 'image'\) await enqueueImageNormalization/)
+    assert.match(filesSource, /if \(mediaType === 'image' && !normalizedInline\) await enqueueImageNormalization/)
     // import staging keys stay out of the uploads/ audit scope
     const importSource = fs.readFileSync(path.join(cloudflareRoot, 'src', 'routes', 'importJobs.ts'), 'utf8')
     assert.match(importSource, /if \(addToLibrary\) await enqueueImageNormalization/)

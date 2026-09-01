@@ -115,6 +115,13 @@ function freshDb() {
     notes TEXT, is_default INTEGER DEFAULT 0, is_active INTEGER DEFAULT 1,
     updated_at TEXT
   )`)
+  // Branch names are denormalized display snapshots in these id-linked
+  // history tables.  Keep the fixture aligned with the real schema so a
+  // branch rename verifies its cascade rather than merely the branch row.
+  db.exec(`CREATE TABLE sales (branch_id INTEGER, branch_name TEXT, updated_at TEXT);
+           CREATE TABLE inventory_movements (branch_id INTEGER, branch_name TEXT);
+           CREATE TABLE returns (branch_id INTEGER, branch_name TEXT);
+           CREATE TABLE stock_row_moves (branch_id INTEGER, branch_name TEXT);`)
   return db
 }
 
@@ -140,6 +147,18 @@ await check('branchUpdateStatements restores prior field values (an undo of an e
   const undoFields = { name: 'Shop', location: 'Old Loc', phone: '012', manager: 'Alice', notes: 'orig', is_default: 0, is_active: 1 }
   runStatements(db, branchUpdateStatements(2, undoFields))
   assert.deepStrictEqual(readBranch(db, 2), { name: 'Shop', location: 'Old Loc', phone: '012', manager: 'Alice', notes: 'orig', is_default: 0, is_active: 1 })
+})
+
+await check('branchUpdateStatements keeps every id-linked branch-name snapshot canonical', () => {
+  const db = freshDb()
+  db.prepare(`INSERT INTO branches (id, name, is_active) VALUES (2, 'Old Shop', 1)`).run()
+  for (const table of ['sales', 'inventory_movements', 'returns', 'stock_row_moves']) {
+    db.prepare(`INSERT INTO ${table} (branch_id, branch_name) VALUES (2, 'Old Shop')`).run()
+  }
+  runStatements(db, branchUpdateStatements(2, { name: 'Shop', is_active: 1 }))
+  for (const table of ['sales', 'inventory_movements', 'returns', 'stock_row_moves']) {
+    assert.strictEqual(db.prepare(`SELECT branch_name FROM ${table} WHERE branch_id=2`).get().branch_name, 'Shop')
+  }
 })
 
 await check('branchUpdateStatements reapplies later values (a redo) and clears other defaults only when is_default is set', () => {

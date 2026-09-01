@@ -6,6 +6,7 @@ import { getPermissionTier, getActionTier } from '../lib/permissions'
 import { broadcast } from '../durable-objects/broadcastHub'
 import { assertUpdatedAtMatch, getExpectedUpdatedAt, writeConflictResponse, WriteConflictError } from '../lib/conflictControl'
 import { maybeQueueForReview } from '../lib/reviewGate'
+import { businessToday } from '../lib/businessDateWindow'
 import type { Env } from '../index'
 
 // Standalone Fees page (migrations/0018_fees.sql) -- manual-entry fee
@@ -96,9 +97,15 @@ export function normalizeFeeLabel(value: unknown): string | null {
 
 function normalizeDate(value: unknown): string {
   const str = typeof value === 'string' ? value.trim() : ''
-  const parsed = str ? new Date(str) : new Date()
-  const safe = Number.isNaN(parsed.getTime()) ? new Date() : parsed
-  return safe.toISOString().slice(0, 10)
+  // fee_date is a business CALENDAR date. Preserve an explicit YYYY-MM-DD
+  // literally; do not round-trip it through UTC. If omitted/invalid, default
+  // to Cambodia's current business day rather than the UTC day.
+  if (/^\d{4}-\d{2}-\d{2}$/.test(str)) return str
+  if (str) {
+    const parsed = new Date(str)
+    if (!Number.isNaN(parsed.getTime())) return businessToday(parsed.getTime())
+  }
+  return businessToday()
 }
 
 // GET /api/fees -- list, newest fee_date first, with optional filters.
@@ -184,13 +191,16 @@ app.get('/report', async (c) => {
   const query = c.req.query()
   const startDate = String(query.startDate || '').slice(0, 10)
   const endDate = String(query.endDate || '').slice(0, 10)
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate) || !/^\d{4}-\d{2}-\d{2}$/.test(endDate)) {
-    return c.json({ error: 'startDate and endDate (YYYY-MM-DD) are required' }, 400)
+  const validDate = (value: string) => /^\d{4}-\d{2}-\d{2}$/.test(value)
+  if ((startDate && !validDate(startDate)) || (endDate && !validDate(endDate))) {
+    return c.json({ error: 'startDate/endDate must use YYYY-MM-DD' }, 400)
   }
-  const clauses = ['f.fee_date BETWEEN @startDate AND @endDate']
-  const params: Record<string, unknown> = { startDate, endDate }
+  const clauses: string[] = []
+  const params: Record<string, unknown> = {}
+  if (startDate) { clauses.push('f.fee_date >= @startDate'); params.startDate = startDate }
+  if (endDate) { clauses.push('f.fee_date <= @endDate'); params.endDate = endDate }
   if (query.branchId) { clauses.push('f.branch_id = @branchId'); params.branchId = query.branchId }
-  const where = clauses.join(' AND ')
+  const where = clauses.length ? clauses.join(' AND ') : '1=1'
   // Sum BOTH currencies. Fees are recorded in EITHER USD or KHR (never both
   // on one row -- confirmed in data: 186 USD-only vs 4,054 KHR-only), so a
   // report that only summed amount_usd showed "$0.00" for a whole month of
@@ -230,7 +240,6 @@ app.get('/labels', async (c) => {
     WHERE f.label IS NOT NULL AND TRIM(f.label) <> ''
     GROUP BY f.label
     ORDER BY uses DESC, f.label
-    LIMIT 300
   `).all<{ label: string; uses: number; fee_type: string }>()
   return c.json({
     labels: (rows || []).map((r) => ({

@@ -18,12 +18,21 @@ const sourcePath = path.join(__dirname, '..', 'src', 'routes', 'fees.ts')
 // Normalize checkout line endings before the source-shape regexes below.
 // Fresh Windows worktrees are CRLF; the production TypeScript is identical.
 const source = fs.readFileSync(sourcePath, 'utf8').replace(/\r\n/g, '\n')
+const businessDateSource = fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'businessDateWindow.ts'), 'utf8').replace(/\r\n/g, '\n')
 
 function extractFunction(name) {
   const re = new RegExp(`function ${name}\\([\\s\\S]*?\\n\\}\\n`)
   const match = source.match(re)
   if (!match) throw new Error(`${name} not found in fees.ts -- source may have changed`)
   return match[0]
+}
+
+
+function extractBusinessDateSupport() {
+  const offsetMatch = businessDateSource.match(/export const BUSINESS_UTC_OFFSET_MINUTES = \d+/)
+  const functionMatch = businessDateSource.match(/export function businessToday\([\s\S]*?\n\}/)
+  if (!offsetMatch || !functionMatch) throw new Error('businessToday support not found in businessDateWindow.ts')
+  return `${offsetMatch[0].replace('export ', '')}\n${functionMatch[0].replace('export ', '')}`
 }
 
 function extractConst(name) {
@@ -42,7 +51,8 @@ function extractNumericConst(name) {
   return match[0]
 }
 
-const combinedSource = extractConst('FEE_TYPES') + '\n'
+const combinedSource = extractBusinessDateSupport() + '\n'
+  + extractConst('FEE_TYPES') + '\n'
   + extractNumericConst('FEE_LABEL_MAX_WORDS') + '\n'
   + extractNumericConst('FEE_LABEL_MAX_CHARS') + '\n'
   + extractFunction('round2') + '\n'
@@ -99,8 +109,9 @@ check('normalizeText trims, empties to null, and caps length', () => {
   assert.strictEqual(normalizeText('abcdef', 3), 'abc')
 })
 
-check('normalizeDate accepts valid dates, falls back to now on garbage', () => {
+check('normalizeDate preserves date-only values and falls back to Cambodia business today', () => {
   assert.strictEqual(normalizeDate('2026-01-15'), '2026-01-15')
+  assert.strictEqual(normalizeDate('2026-08-31T17:30:00Z'), '2026-09-01', 'UTC evening maps to the next Cambodia calendar day')
   const fallback = normalizeDate('not-a-date')
   assert.ok(!Number.isNaN(Date.parse(fallback)), 'fallback should be a valid ISO date')
   const fallbackEmpty = normalizeDate('')

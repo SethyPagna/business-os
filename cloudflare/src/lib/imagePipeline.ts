@@ -3,7 +3,7 @@
 // THE PROBLEM THIS SOLVES
 //
 // New uploads are already handled in the browser (utils/imageCompression.ts:
-// 300-350KB band, stepped downscaling, WebP). But images ALREADY in R2 --
+// ~820-900KB quality-preserving band, stepped downscaling, WebP). But images ALREADY in R2 --
 // the MB-sized ones uploaded before any of that existed -- have never had a
 // server-side path, because this Worker had no image processing at all. That
 // is the whole reason the backfill could not be built.
@@ -39,9 +39,9 @@ import { consumeQuota, readQuota } from './quotaGuard'
 import { recordAnalytics } from './analytics'
 
 /** Hard ceiling. Mirrors the browser's IMAGE_SIZE_CEILING_BYTES. */
-export const IMAGE_MAX_BYTES = 350 * 1024
+export const IMAGE_MAX_BYTES = 900 * 1024
 /** Floor. Landing far below the cap throws away quality nobody asked to save. */
-export const IMAGE_TARGET_BYTES = 300 * 1024
+export const IMAGE_TARGET_BYTES = 820 * 1024
 /** Longest edge for a stored image, matching the browser pipeline. */
 export const IMAGE_MAX_DIMENSION = 2560
 

@@ -377,7 +377,6 @@ async function getInventoryProductMetadata(env: Env, query: InventoryFilterQuery
         AND COALESCE(trim(p.brand), '') != ''
       GROUP BY lower(trim(p.brand))
       ORDER BY value COLLATE NOCASE ASC
-      LIMIT 500
     `).all<{ value: string }>(brandMetaFilters.params),
     // Categories -- previously not queried at all here (see this
     // function's other new comment on the category WHERE clause above);
@@ -392,7 +391,6 @@ async function getInventoryProductMetadata(env: Env, query: InventoryFilterQuery
         AND COALESCE(trim(p.category), '') != ''
       GROUP BY lower(trim(p.category))
       ORDER BY value COLLATE NOCASE ASC
-      LIMIT 500
     `).all<{ value: string }>(categoryMetaFilters.params),
     db.prepare(`
       SELECT substr(trim(p.name), 1, 1) AS value, COUNT(*) AS count
@@ -1254,6 +1252,15 @@ app.post('/adjust', async (c) => {
   // the pickers always send both. Ignored for 'remove'.
   const supplierId = Number.isSafeInteger(Number(body.supplierId)) && Number(body.supplierId) > 0 ? Number(body.supplierId) : null
   const supplierName = body.supplierName != null ? String(body.supplierName).trim() || null : null
+  // Fast stock-in can use this same endpoint when a changed cost should
+  // resolve to a sibling variant. Preserve all receipt/session metadata so
+  // choosing a variant does not make that line disappear from its session.
+  const expiryDate = body.expiryDate != null ? String(body.expiryDate).trim() || null : null
+  const unitCostUsd = body.unitCostUsd != null && Number.isFinite(Number(body.unitCostUsd)) ? Number(body.unitCostUsd) : null
+  const paymentStatus = body.paymentStatus === 'paid' || body.paymentStatus === 'credit' ? body.paymentStatus : null
+  const creditDueDate = body.creditDueDate != null ? String(body.creditDueDate).trim() || null : null
+  const sessionId = Number.isSafeInteger(Number(body.sessionId)) && Number(body.sessionId) > 0 ? Number(body.sessionId) : null
+  if (paymentStatus === 'credit' && !creditDueDate) return c.json({ error: 'A credit purchase needs its due date' }, 400)
   // `unlockPricing` is an explicit flag from the frontend, not inferred by
   // diffing -- see InventoryStockModals.tsx's "Lock current pricing"
   // toggle. Locked (the default) skips the identity lookup below entirely
@@ -1330,8 +1337,8 @@ app.post('/adjust', async (c) => {
       discountPercent: pricing.discount_percent != null ? Number(pricing.discount_percent) || 0 : Number(source.discount_percent) || 0,
       discountAmountUsd: pricing.discount_amount_usd != null ? Number(pricing.discount_amount_usd) || 0 : Number(source.discount_amount_usd) || 0,
       discountAmountKhr: pricing.discount_amount_khr != null ? Number(pricing.discount_amount_khr) || 0 : Number(source.discount_amount_khr) || 0,
-      costUsd: pricing.cost_usd != null ? Number(pricing.cost_usd) || 0 : Number(source.purchase_price_usd) || 0,
-      costKhr: pricing.cost_khr != null ? Number(pricing.cost_khr) || 0 : Number(source.purchase_price_khr) || 0,
+      costUsd: pricing.cost_usd != null ? Number(pricing.cost_usd) || 0 : Number(source.cost_price_usd) || 0,
+      costKhr: pricing.cost_khr != null ? Number(pricing.cost_khr) || 0 : Number(source.cost_price_khr) || 0,
       barcode: pricing.barcode != null ? (String(pricing.barcode).trim() || null) : source.barcode,
     }
     const resolved = await resolveAddStockTarget(c.env, source, overrides)
@@ -1401,6 +1408,7 @@ app.post('/adjust', async (c) => {
   const movementType = type
   let batchNumber: number | null = null
   let resolvedBatchId: number | null = batchIdRequested
+  let lotCode: string | null = null
   if (type === 'add') {
     delta = quantity
   } else {
@@ -1424,14 +1432,19 @@ app.post('/adjust', async (c) => {
         // explicit-batchId top-up keeps the lot's own received_at (first
         // attribution sticks, enforced inside receiveBatchStock).
         receivedDate,
+        expiryDate,
         // D5a: attribution for the created lot, or a fill where the topped-
         // up lot's supplier is still NULL -- never a rewrite (COALESCE
         // inside receiveBatchStock).
         supplierId,
         supplierName,
+        unitCostUsd,
+        paymentStatus,
+        creditDueDate,
       })
       batchNumber = received.batchNumber
       resolvedBatchId = received.batchId
+      lotCode = received.lotCode
     } catch (err) {
       return c.json({ error: err instanceof Error ? err.message : 'Failed to receive batch stock' }, 400)
     }
@@ -1473,8 +1486,8 @@ app.post('/adjust', async (c) => {
 
   if (delta !== 0) {
     await db.prepare(`
-      INSERT INTO inventory_movements (product_id, product_name, branch_id, branch_name, movement_type, quantity, reason, user_id, user_name, created_at, batch_id)
-      VALUES (@productId, @productName, @branchId, @branchName, @movementType, @quantity, @reason, @userId, @userName, CURRENT_TIMESTAMP, @batchId)
+      INSERT INTO inventory_movements (product_id, product_name, branch_id, branch_name, movement_type, quantity, reason, reference_id, user_id, user_name, created_at, batch_id)
+      VALUES (@productId, @productName, @branchId, @branchName, @movementType, @quantity, @reason, @referenceId, @userId, @userName, CURRENT_TIMESTAMP, @batchId)
     `).run({
       productId: targetProductId,
       productName: targetProductName,
@@ -1485,6 +1498,7 @@ app.post('/adjust', async (c) => {
       reason: createdSibling
         ? `${reason ? `${reason} - ` : ''}Auto-created row (pricing differs from ${product.name})`
         : setToNote ? `${reason} (${setToNote})` : reason,
+      referenceId: sessionId,
       userId: user?.id ?? null,
       userName: user?.name ?? null,
       // 0084: the lot this adjust touched -- the received/topped lot on
@@ -1526,6 +1540,7 @@ app.post('/adjust', async (c) => {
     createdSibling,
     batchNumber,
     batchId: resolvedBatchId,
+    lotCode,
     autoBatchDrainIds,
   })
 })

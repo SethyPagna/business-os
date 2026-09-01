@@ -305,6 +305,32 @@ async function main() {
     assert.ok(!/INSERT\s+INTO\s+products\b/i.test(transferSrc), 'a transfer never creates a product row (so it cannot mint a new barcode either)')
   })
 
+  await check('fast stock-in changed cost creates a same-name variant and keeps receipt/session metadata', async () => {
+    seed()
+    rawDb.prepare('UPDATE products SET cost_price_usd = 1, purchase_price_usd = 1, selling_price_usd = 4 WHERE id = 1').run()
+    const { status, json } = await req('POST', '/adjust', {
+      productId: 1, type: 'add', quantity: 7, reason: 'Stock-in session', branchId: 1,
+      unlockPricing: true, receivedDate: '2026-08-20', expiryDate: '2027-08-20',
+      unitCostUsd: 2.5, paymentStatus: 'paid', sessionId: 98765,
+      supplierName: 'Variant Supplier',
+      pricing: { selling_price_usd: 4, cost_usd: 2.5, cost_khr: 0, barcode: 'B123' },
+    })
+    assert.strictEqual(status, 200, JSON.stringify(json))
+    assert.strictEqual(json.createdSibling, true)
+    assert.notStrictEqual(json.productId, 1)
+    const sibling = rawDb.prepare('SELECT name, cost_price_usd, stock_quantity FROM products WHERE id = ?').get([json.productId])
+    assert.strictEqual(sibling.name, 'Widget')
+    assert.strictEqual(sibling.cost_price_usd, 2.5)
+    assert.strictEqual(sibling.stock_quantity, 7)
+    const batch = rawDb.prepare('SELECT expiry_date, unit_cost_usd, supplier_name FROM product_batches WHERE variant_product_id = ?').get([json.productId])
+    assert.strictEqual(batch.expiry_date, '2027-08-20')
+    assert.strictEqual(batch.unit_cost_usd, 2.5)
+    assert.strictEqual(batch.supplier_name, 'Variant Supplier')
+    const movement = rawDb.prepare('SELECT reference_id, product_id FROM inventory_movements ORDER BY id DESC LIMIT 1').get()
+    assert.strictEqual(movement.reference_id, 98765)
+    assert.strictEqual(movement.product_id, json.productId)
+  })
+
   await check('move-row drains the source lots and receives a fresh lot on the destination (no ledger drift)', async () => {
     seed()
     rawDb.prepare("INSERT INTO products (id, name, is_active, stock_quantity) VALUES (2, 'Destination', 1, 0)").run()

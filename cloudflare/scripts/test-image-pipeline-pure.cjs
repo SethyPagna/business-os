@@ -1,6 +1,6 @@
 // The image provider ladder, and the audit that feeds it.
 //
-// New uploads have been inside the 300-350KB band since the browser pipeline
+// New uploads target the shared sub-1MB quality band since the browser pipeline
 // was fixed. Objects ALREADY in R2 were never touched, because this Worker
 // had no server-side image processing at all until the Images binding was
 // added. That is what this covers.
@@ -58,11 +58,11 @@ const check = (name, fn) => tests.push({ name, fn })
 check('the band matches the browser pipeline exactly', async () => {
   // Two ceilings that disagree would mean a file passing one path and failing
   // the other, depending only on where it entered the system.
-  assert.match(pipeline, /IMAGE_MAX_BYTES = 350 \* 1024/)
-  assert.match(pipeline, /IMAGE_TARGET_BYTES = 300 \* 1024/)
+  assert.match(pipeline, /IMAGE_MAX_BYTES = 900 \* 1024/)
+  assert.match(pipeline, /IMAGE_TARGET_BYTES = 820 \* 1024/)
   const browser = fs.readFileSync(path.join(cloudflareRoot, '..', 'frontend', 'src', 'utils', 'imageCompression.ts'), 'utf8')
-  assert.match(browser, /maxBytes: 350 \* 1024/, 'browser ceiling must be the same number')
-  assert.match(browser, /targetBytes: 300 \* 1024/, 'browser floor must be the same number')
+  assert.match(browser, /maxBytes: 900 \* 1024/, 'browser ceiling must be the same number')
+  assert.match(browser, /targetBytes: 820 \* 1024/, 'browser target must be the same number')
 })
 
 check('AVIF is tried before WebP', async () => {

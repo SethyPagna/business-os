@@ -158,6 +158,7 @@ const batchCode = loadReal('lib/batchCode.ts')
 // treatment as batchCode.ts above, not left to fall through to node's
 // own require() (which can't resolve a bare .ts file).
 const searchMatch = loadReal('lib/searchMatch.ts')
+const branchWrites = loadReal('lib/branchWrites.ts', { './db': { toDbBool } })
 const productWrites = loadReal('lib/productWrites.ts', {
   ...dbStub,
   './media': { sanitizeMediaList: (list) => (Array.isArray(list) ? list : []) },
@@ -177,6 +178,7 @@ const reviewApply = loadReal('lib/reviewApply.ts', {
   ...broadcastStub,
   './pendingActions': pendingActions,
   './productWrites': productWrites,
+  './branchWrites': branchWrites,
   './cache': { bumpVersion: async () => {} },
   '../index': {},
 })

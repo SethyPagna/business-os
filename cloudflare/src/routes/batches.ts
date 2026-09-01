@@ -116,6 +116,7 @@ app.post('/', async (c) => {
     unit_cost_usd?: number | null
     payment_status?: string | null
     credit_due_date?: string | null
+    session_id?: number | null
   }
   const body = await c.req.json<ReceiveBody>().catch(() => ({} as ReceiveBody))
 
@@ -167,8 +168,8 @@ app.post('/', async (c) => {
   // other stock addition, so this doesn't become a receipt that's visible
   // in the batch ledger and the audit log but invisible in Stock History.
   await db.prepare(`
-    INSERT INTO inventory_movements (product_id, product_name, branch_id, branch_name, movement_type, quantity, reason, user_id, user_name, created_at, batch_id)
-    VALUES (@productId, @productName, @branchId, @branchName, 'add', @quantity, @reason, @userId, @userName, CURRENT_TIMESTAMP, @batchId)
+    INSERT INTO inventory_movements (product_id, product_name, branch_id, branch_name, movement_type, quantity, reason, reference_id, user_id, user_name, created_at, batch_id)
+    VALUES (@productId, @productName, @branchId, @branchName, 'add', @quantity, @reason, @referenceId, @userId, @userName, CURRENT_TIMESTAMP, @batchId)
   `).run({
     productId,
     productName: product.name,
@@ -176,6 +177,7 @@ app.post('/', async (c) => {
     branchName: branch?.name || null,
     quantity,
     reason: `Batch receipt (${lotCode})`,
+    referenceId: Number.isSafeInteger(Number(body.session_id)) && Number(body.session_id) > 0 ? Number(body.session_id) : null,
     userId: user?.id ?? null,
     userName: user?.name ?? null,
     batchId,

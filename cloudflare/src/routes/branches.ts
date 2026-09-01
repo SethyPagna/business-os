@@ -1,6 +1,6 @@
 import { Hono } from 'hono'
 import { getDb, toDbBool } from '../lib/db'
-import { buildInClause, selectInChunks } from '../lib/sqlBinding'
+import { buildInClause, chunkForBinding, selectInChunks } from '../lib/sqlBinding'
 import type { D1Compat } from '../lib/db'
 import { paginateProductFamilies } from '../lib/familyPagination'
 import { getFamilyStockStats } from '../lib/familyStockStats'
@@ -25,18 +25,51 @@ async function getDefaultBranch(db: D1Compat) {
   return db.prepare(`SELECT id, name FROM branches WHERE is_active = 1 ORDER BY is_default DESC, id ASC LIMIT 1`).get<{ id: number; name: string }>()
 }
 
-// Same misplaced-stock preview/confirm shape as the original: computing the
-// exact same hash server-side for both the GET (preview) and POST (repair)
-// calls means a repair can only run against the rows that were actually
-// shown to the person who confirmed it -- if stock changed in between
-// (another sale, another transfer), the token won't match and the repair
-// is rejected rather than silently moving different rows than reviewed.
-async function buildStockIntegrityPreview(rows: Array<{ product_id: number; branch_id: number; quantity: number }>, defaultBranchId: number) {
-  const payloadRows = rows.map((r) => [r.product_id, r.branch_id, r.quantity])
-  let totalQuantity = 0
-  for (const row of rows) totalQuantity += Number(row.quantity || 0)
-  const previewToken = await sha256Hex(`${defaultBranchId}:${JSON.stringify(payloadRows)}`)
-  return { previewToken, totalQuantity }
+// Stock-integrity preview token. Branch placement is deliberately NOT part of
+// the definition of an error: positive stock in any active branch is valid
+// after a transfer/receive. The integrity invariant is instead:
+//   1) an active product with stock must have at least one branch_stock row;
+//   2) products.stock_quantity must equal the sum of ALL branch_stock rows.
+// The token hashes the exact inconsistent rows, so a repair cannot apply to a
+// different stock state than the one the caller reviewed.
+type StockIntegrityIssue = {
+  product_id: number
+  product_name: string
+  stored_quantity: number
+  branch_quantity: number
+  branch_rows: number
+  issue_type: 'missing_branch_stock' | 'total_mismatch'
+}
+
+async function buildStockIntegrityPreview(rows: StockIntegrityIssue[], defaultBranchId: number | null) {
+  const payloadRows = rows.map((r) => [r.product_id, r.issue_type, r.stored_quantity, r.branch_quantity, r.branch_rows])
+  let totalAbsoluteDifference = 0
+  for (const row of rows) totalAbsoluteDifference += Math.abs(Number(row.stored_quantity || 0) - Number(row.branch_quantity || 0))
+  const previewToken = await sha256Hex(`${defaultBranchId ?? 'none'}:${JSON.stringify(payloadRows)}`)
+  return { previewToken, totalAbsoluteDifference }
+}
+
+async function readStockIntegrityIssues(db: D1Compat): Promise<StockIntegrityIssue[]> {
+  const rows = await db.prepare(`
+    SELECT p.id AS product_id, p.name AS product_name,
+           COALESCE(p.stock_quantity, 0) AS stored_quantity,
+           COALESCE(SUM(bs.quantity), 0) AS branch_quantity,
+           COUNT(bs.id) AS branch_rows
+    FROM products p
+    LEFT JOIN branch_stock bs ON bs.product_id = p.id
+    WHERE p.is_active = 1
+    GROUP BY p.id, p.name, p.stock_quantity
+    HAVING (COUNT(bs.id) = 0 AND ABS(COALESCE(p.stock_quantity, 0)) > 0.000001)
+        OR (COUNT(bs.id) > 0 AND ABS(COALESCE(p.stock_quantity, 0) - COALESCE(SUM(bs.quantity), 0)) > 0.000001)
+    ORDER BY p.name COLLATE NOCASE ASC, p.id ASC
+  `).all<{ product_id: number; product_name: string; stored_quantity: number; branch_quantity: number; branch_rows: number }>()
+  return rows.map((row) => ({
+    ...row,
+    stored_quantity: Number(row.stored_quantity) || 0,
+    branch_quantity: Number(row.branch_quantity) || 0,
+    branch_rows: Number(row.branch_rows) || 0,
+    issue_type: Number(row.branch_rows) > 0 ? 'total_mismatch' : 'missing_branch_stock',
+  }))
 }
 
 const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser } }>()
@@ -118,116 +151,117 @@ app.get('/summary', async (c) => {
   })
 })
 
-// GET /api/branches/stock-integrity -- was stubbed to always return an
-// empty result (`{ ok: true, issues: [], items: [] }`), which is why the
-// "repair" screen always showed nothing to fix even on databases that
-// genuinely had stock parked in the wrong branch. Ported from
-// backend/src/routes/branches.ts's real implementation: finds stock sitting
-// in any non-default branch and previews moving it back to the default branch.
+// GET /api/branches/stock-integrity -- checks objective stock invariants.
+// IMPORTANT: stock in a non-default branch is legitimate and is never an
+// integrity issue. Earlier code treated every such row as "misplaced" and
+// could move valid transferred/received inventory back to Main.
 app.get('/stock-integrity', async (c) => {
-  // Read-only preview -- tier-aware, same reasoning as GET /summary above.
   if (getPermissionTier(c.get('user'), 'branches') === 'none') {
     return c.json({ success: false, error: 'No permission', code: 'forbidden', permission: 'branches' }, 403)
   }
   const db = getDb(c.env)
   const defaultBranch = await getDefaultBranch(db)
-  if (!defaultBranch) return c.json({ success: true, defaultBranch: null, issues: [], preview_token: null })
-
-  const rows = await db.prepare(`
-    SELECT bs.product_id, p.name AS product_name, bs.branch_id, b.name AS branch_name, bs.quantity,
-           COALESCE(default_bs.quantity, 0) AS default_quantity
-    FROM branch_stock bs
-    JOIN products p ON p.id = bs.product_id
-    JOIN branches b ON b.id = bs.branch_id
-    LEFT JOIN branch_stock default_bs ON default_bs.product_id = bs.product_id AND default_bs.branch_id = @defaultBranchId
-    WHERE bs.branch_id != @defaultBranchId
-      AND COALESCE(bs.quantity, 0) > 0
-      AND p.is_active = 1
-    ORDER BY b.name COLLATE NOCASE ASC, p.name COLLATE NOCASE ASC
-    LIMIT 5000
-  `).all<{ product_id: number; product_name: string; branch_id: number; branch_name: string; quantity: number; default_quantity: number }>({ defaultBranchId: defaultBranch.id })
-
-  const preview = await buildStockIntegrityPreview(rows, defaultBranch.id)
+  const issues = await readStockIntegrityIssues(db)
+  const preview = await buildStockIntegrityPreview(issues, defaultBranch?.id ?? null)
+  const missingBranchRows = issues.filter((row) => row.issue_type === 'missing_branch_stock').length
+  const totalMismatches = issues.length - missingBranchRows
   return c.json({
     success: true,
-    defaultBranch,
-    issues: rows,
-    summary: { misplacedRows: rows.length, totalQuantity: preview.totalQuantity },
+    defaultBranch: defaultBranch || null,
+    issues,
+    summary: {
+      issueRows: issues.length,
+      missingBranchRows,
+      totalMismatches,
+      totalAbsoluteDifference: preview.totalAbsoluteDifference,
+    },
     preview_token: preview.previewToken,
   })
 })
 
-// POST /api/branches/stock-integrity/repair -- moves misplaced stock into
-// the default branch. Requires the caller to re-submit the exact
-// preview_token the GET above just returned, as confirmation they reviewed
-// the same rows this will act on (see buildStockIntegrityPreview's comment).
+// POST /api/branches/stock-integrity/repair -- repairs only the objective
+// invariants above. It NEVER relocates stock between existing branches. For a
+// legacy active product that has stock_quantity but no branch_stock row at
+// all, the quantity is preserved by assigning that otherwise-unplaced stock
+// to the current default branch (the same invariant used by coreDataInvariants).
+// Existing branch allocations are left untouched; only the product's
+// denormalized total is reconciled to their sum.
 app.post('/stock-integrity/repair', async (c) => {
   const user = c.get('user')
-  // getActionTier (Part 546): folds the 'branches:repair_stock' per-action
-  // override into the tier answer -- switched off reads as 'none'.
   const tier = getActionTier(user, 'branches', 'repair_stock')
   if (tier === 'none') {
     return c.json({ success: false, error: 'No permission', code: 'forbidden', permission: 'branches' }, 403)
   }
-  // Deliberately NOT queued for review, unlike create/update below. This
-  // moves real stock quantities between branches based on a preview token
-  // tied to the exact state at preview time (see buildStockIntegrityPreview's
-  // comment) -- the same "live-state dependency at apply time" reasoning
-  // inventory.ts's adjust/transfer/move-row and returns.ts's PATCH /:id
-  // are already deliberately left un-queued for. Blocked outright for
-  // Review Required rather than left silently reachable as Full Access.
   if (tier === 'review') {
-    return c.json({ success: false, error: 'Repairing misplaced stock requires Full Access to Branches -- Review Required support for this action is not built.', code: 'forbidden', permission: 'branches' }, 403)
+    return c.json({ success: false, error: 'Repairing stock integrity requires Full Access to Branches -- Review Required support for this action is not built.', code: 'forbidden', permission: 'branches' }, 403)
   }
+
   const db = getDb(c.env)
   const defaultBranch = await getDefaultBranch(db)
-  if (!defaultBranch) return c.json({ success: false, error: 'Default branch required' }, 400)
-
-  const rows = await db.prepare(`
-    SELECT bs.product_id, bs.branch_id, bs.quantity
-    FROM branch_stock bs
-    JOIN products p ON p.id = bs.product_id
-    WHERE bs.branch_id != @defaultBranchId
-      AND COALESCE(bs.quantity, 0) > 0
-      AND p.is_active = 1
-    ORDER BY bs.product_id ASC, bs.branch_id ASC
-  `).all<{ product_id: number; branch_id: number; quantity: number }>({ defaultBranchId: defaultBranch.id })
-
-  const preview = await buildStockIntegrityPreview(rows, defaultBranch.id)
+  const issues = await readStockIntegrityIssues(db)
+  const preview = await buildStockIntegrityPreview(issues, defaultBranch?.id ?? null)
   const body = await c.req.json<Record<string, unknown>>().catch(() => ({} as Record<string, unknown>))
   if (!body?.confirm || body?.preview_token !== preview.previewToken) {
     return c.json({ success: false, error: 'Run stock integrity check first, then confirm the matching preview token.' }, 400)
   }
-  if (!rows.length) return c.json({ success: true, movedRows: 0, productCount: 0 })
+  if (!issues.length) return c.json({ success: true, repairedRows: 0, productCount: 0 })
+
+  const missingIssues = issues.filter((row) => row.issue_type === 'missing_branch_stock')
+  if (missingIssues.length && !defaultBranch) {
+    return c.json({ success: false, error: 'A default branch is required to place legacy stock that has no branch assignment.' }, 400)
+  }
 
   const statements: Array<{ sql: string; params?: Record<string, unknown> }> = []
-  const touched = new Set<number>()
-  for (const row of rows) {
-    statements.push({
-      sql: `INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (@productId, @branchId, @quantity)
-            ON CONFLICT(product_id, branch_id) DO UPDATE SET quantity = quantity + excluded.quantity`,
-      params: { productId: row.product_id, branchId: defaultBranch.id, quantity: Number(row.quantity || 0) },
-    })
-    statements.push({
-      sql: `UPDATE branch_stock SET quantity = 0 WHERE product_id = @productId AND branch_id = @branchId`,
-      params: { productId: row.product_id, branchId: row.branch_id },
-    })
-    touched.add(row.product_id)
+  if (missingIssues.length && defaultBranch) {
+    // Scope the write to the exact product IDs represented in the confirmed
+    // preview. A concurrent new legacy row must not get swept into a repair
+    // the caller never reviewed. Chunking respects D1's 100-binding ceiling.
+    for (const chunk of chunkForBinding(missingIssues.map((row) => row.product_id), 1)) {
+      const ids = buildInClause('missingId', chunk)
+      statements.push({
+        sql: `INSERT INTO branch_stock (product_id, branch_id, quantity)
+              SELECT p.id, @branchId, MAX(0, COALESCE(p.stock_quantity, 0))
+              FROM products p
+              WHERE p.id IN (${ids.sql})
+                AND p.is_active = 1
+                AND ABS(COALESCE(p.stock_quantity, 0)) > 0.000001
+                AND NOT EXISTS (SELECT 1 FROM branch_stock bs WHERE bs.product_id = p.id)
+              ON CONFLICT(product_id, branch_id) DO NOTHING`,
+        params: { ...ids.params, branchId: defaultBranch.id },
+      })
+    }
   }
-  for (const productId of touched) {
+  // Reconcile only the exact confirmed issue IDs. This never changes
+  // branch_stock quantities or branch placement; if stock changed after the
+  // preview, the product total simply follows the current authoritative sum.
+  for (const chunk of chunkForBinding(issues.map((row) => row.product_id))) {
+    const ids = buildInClause('issueId', chunk)
     statements.push({
-      sql: `UPDATE products SET stock_quantity = (SELECT COALESCE(SUM(quantity), 0) FROM branch_stock WHERE product_id = @productId), updated_at = CURRENT_TIMESTAMP WHERE id = @productId`,
-      params: { productId },
+      sql: `UPDATE products
+            SET stock_quantity = (SELECT COALESCE(SUM(bs.quantity), 0) FROM branch_stock bs WHERE bs.product_id = products.id),
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id IN (${ids.sql})
+              AND is_active = 1
+              AND EXISTS (SELECT 1 FROM branch_stock bs WHERE bs.product_id = products.id)
+              AND ABS(COALESCE(stock_quantity, 0) - (SELECT COALESCE(SUM(bs.quantity), 0) FROM branch_stock bs WHERE bs.product_id = products.id)) > 0.000001`,
+      params: ids.params,
     })
   }
   await db.batch(statements)
 
-  await audit(c.env, user?.id ?? null, user?.name ?? null, 'repair', 'branch_stock_integrity', defaultBranch.id, { movedRows: rows.length, defaultBranchId: defaultBranch.id })
+  const remaining = await readStockIntegrityIssues(db)
+  const repairedRows = Math.max(0, issues.length - remaining.length)
+  await audit(c.env, user?.id ?? null, user?.name ?? null, 'repair', 'branch_stock_integrity', null, {
+    repairedRows,
+    beforeIssues: issues.length,
+    remainingIssues: remaining.length,
+    preservedBranchAllocations: true,
+  })
   c.executionCtx.waitUntil(broadcast(c.env, 'branches', { action: 'repair' }))
   c.executionCtx.waitUntil(broadcast(c.env, 'products', { action: 'update' }))
   c.executionCtx.waitUntil(bumpVersion(c.env, 'products'))
   c.executionCtx.waitUntil(broadcast(c.env, 'inventory', { action: 'update' }))
-  return c.json({ success: true, movedRows: rows.length, productCount: touched.size })
+  return c.json({ success: remaining.length === 0, repairedRows, productCount: repairedRows, remainingIssues: remaining.length })
 })
 
 // NOTE: a GET /transfers/list route (transfer *history*, distinct from

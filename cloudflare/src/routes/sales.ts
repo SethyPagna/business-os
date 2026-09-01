@@ -13,7 +13,7 @@ function canReadSales(user: SessionUser): boolean {
   return getPermissionTier(user, 'sales') !== 'none'
 }
 import { assertUpdatedAtMatch, getExpectedUpdatedAt, writeConflictResponse, WriteConflictError } from '../lib/conflictControl'
-import { bumpVersion } from '../lib/cache'
+import { bumpVersion, cachedJsonResponse, getVersionWithFallback } from '../lib/cache'
 import { getCustomerSalesTotals, getDeliveryContactTotals, getPaymentMethodBreakdown, getSalesDayReport, getSalesPeriodSeries, getSalesTotals } from '../lib/salesAnalytics'
 import { allocateAcrossLots, decrementBatchStockStatement, decrementBatchStockStrictStatement, readFifoLotAvailabilityForCart, type FifoLotTake } from '../lib/productBatches'
 import { VALID_SALE_STATUSES, STOCK_DEDUCTED_STATUSES } from '../lib/salesStatus'
@@ -38,6 +38,18 @@ import type { Env } from '../index'
 
 const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser } }>()
 app.use('*', requireAuth)
+
+const SALES_READ_CACHE_TTL_SECONDS = 20
+
+async function getSalesReadCacheVersion(env: Env): Promise<string> {
+  // The list/search payload also exposes current customer membership data and
+  // current product barcode/category data, while refund totals come from
+  // returns. Fold each low-cardinality KV version into one Cache API key so a
+  // write to any dependency makes the old response unreachable immediately.
+  const namespaces = ['sales', 'returns', 'customers', 'products'] as const
+  const versions = await Promise.all(namespaces.map((namespace) => getVersionWithFallback(env, namespace)))
+  return versions.map((version, index) => `${namespaces[index]}:${version}`).join('|')
+}
 
 const LOCAL_TIME_RE = /^(?:[01]\d|2[0-3]):[0-5]\d$/
 
@@ -874,7 +886,10 @@ app.post('/', async (c) => {
   // immediately instead of waiting out the TTL -- this write path deducts
   // products.stock_quantity above but wasn't bumping the version, so a
   // browsed-then-cached product list could show pre-sale stock for up to 20s.
-  c.executionCtx.waitUntil(bumpVersion(c.env, 'products'))
+  c.executionCtx.waitUntil(Promise.all([
+    bumpVersion(c.env, 'products'),
+    bumpVersion(c.env, 'sales'),
+  ]))
 
   return c.json({
     id: saleId,
@@ -1295,7 +1310,10 @@ app.patch('/:id/status', async (c) => {
   })
   // Same cache-invalidation reasoning as POST / above -- a status change
   // here can deduct or restore stock.
-  c.executionCtx.waitUntil(bumpVersion(c.env, 'products'))
+  c.executionCtx.waitUntil(Promise.all([
+    bumpVersion(c.env, 'products'),
+    bumpVersion(c.env, 'sales'),
+  ]))
 
   const updated = await db.prepare('SELECT id, sale_status, updated_at FROM sales WHERE id = ?').get<{ id: number; sale_status: string; updated_at: string }>([id])
   const payload = updated || { id: Number(id), sale_status: saleStatus }
@@ -1367,6 +1385,11 @@ app.patch('/:id/customer', async (c) => {
     membership_number: customer?.membership_number ?? null,
     cleared: shouldClear,
   })
+
+  c.executionCtx.waitUntil(Promise.all([
+    bumpVersion(c.env, 'sales'),
+    bumpVersion(c.env, 'returns'),
+  ]))
 
   const updated = await db.prepare('SELECT id, customer_id, customer_name, updated_at FROM sales WHERE id = ?').get<{ id: number; customer_id: number | null; customer_name: string | null; updated_at: string }>([saleId])
   return c.json({
@@ -1581,65 +1604,84 @@ app.get('/', async (c) => {
   const searchClause = buildSalesSearchWhere(query, params)
   if (searchClause) where.push(searchClause)
 
-  const limit = Math.min(Number.parseInt(String(query.limit || '100'), 10) || 100, 500)
+  const limit = Math.max(1, Math.min(Number.parseInt(String(query.limit || '100'), 10) || 100, 200))
+  const page = Math.max(1, Number.parseInt(String(query.page || '1'), 10) || 1)
+  const offset = (page - 1) * limit
   params.limit = limit
+  params.offset = offset
 
-  const sales = await db.prepare(`
-    SELECT s.*, c.membership_number AS customer_membership_number
-    FROM sales s
-    LEFT JOIN customers c ON c.id = s.customer_id
-    WHERE ${where.join(' AND ')}
-    ORDER BY s.created_at DESC
-    LIMIT @limit
-  `).all<SaleRow>(params)
+  const sortExpressions: Record<string, string> = {
+    date: 's.created_at',
+    total: 'COALESCE(s.total_usd, 0)',
+    customer: "COALESCE(s.customer_name, '') COLLATE NOCASE",
+    cashier: "COALESCE(s.cashier_name, '') COLLATE NOCASE",
+    status: "COALESCE(s.sale_status, '') COLLATE NOCASE",
+    receipt: "COALESCE(s.receipt_number, '') COLLATE NOCASE",
+  }
+  const sortExpression = sortExpressions[String(query.sortBy || 'date')] || sortExpressions.date
+  const sortDirection = String(query.sortDir || 'desc').toLowerCase() === 'asc' ? 'ASC' : 'DESC'
+  const orderSql = `${sortExpression} ${sortDirection}, s.id ${sortDirection}`
 
-  if (sales.length === 0) return c.json([])
+  const cacheVersion = await getSalesReadCacheVersion(c.env)
+  const payload = await cachedJsonResponse(c.req.raw, c.executionCtx, cacheVersion, SALES_READ_CACHE_TTL_SECONDS, async () => {
+
+    const sales = await db.prepare(`
+      SELECT s.*, c.membership_number AS customer_membership_number
+      FROM sales s
+      LEFT JOIN customers c ON c.id = s.customer_id
+      WHERE ${where.join(' AND ')}
+      ORDER BY ${orderSql}
+      LIMIT @limit OFFSET @offset
+    `).all<SaleRow>(params)
+
+    if (sales.length === 0) return []
 
   // `limit` above allows up to 500 sales, and D1 refuses a statement with
   // more than 100 bound parameters -- the Sales page's own list read was
   // one `?limit=101` away from the same crash GET /api/products hit.
-  const saleIds = sales.map((s) => s.id)
+    const saleIds = sales.map((s) => s.id)
 
-  const itemRows = await selectInChunks(saleIds, 0, (chunk) => db.prepare(`
-    SELECT si.*, b.name AS branch_name, p.barcode AS barcode, p.category AS category
-    FROM sale_items si
-    LEFT JOIN branches b ON b.id = si.branch_id
-    LEFT JOIN products p ON p.id = si.product_id
-    WHERE si.sale_id IN (${chunk.map(() => '?').join(',')})
-    ORDER BY si.id ASC
-  `).all<{ sale_id: number; [key: string]: unknown }>(chunk))
-  const itemsBySale = new Map<number, unknown[]>()
-  for (const row of itemRows) {
-    if (!itemsBySale.has(row.sale_id)) itemsBySale.set(row.sale_id, [])
-    itemsBySale.get(row.sale_id)!.push(row)
-  }
+    const itemRows = await selectInChunks(saleIds, 0, (chunk) => db.prepare(`
+      SELECT si.*, b.name AS branch_name, p.barcode AS barcode, p.category AS category
+      FROM sale_items si
+      LEFT JOIN branches b ON b.id = si.branch_id
+      LEFT JOIN products p ON p.id = si.product_id
+      WHERE si.sale_id IN (${chunk.map(() => '?').join(',')})
+      ORDER BY si.id ASC
+    `).all<{ sale_id: number; [key: string]: unknown }>(chunk))
+    const itemsBySale = new Map<number, unknown[]>()
+    for (const row of itemRows) {
+      if (!itemsBySale.has(row.sale_id)) itemsBySale.set(row.sale_id, [])
+      itemsBySale.get(row.sale_id)!.push(row)
+    }
 
   // GROUP BY sale_id, and every row for one sale lands in the chunk that
   // holds that sale's id -- so a chunked aggregate is still a complete
   // aggregate per sale, with no cross-chunk re-summing needed.
-  const refundRows = await selectInChunks(saleIds, 0, (chunk) => db.prepare(`
-    SELECT sale_id, COUNT(*) AS return_count, COALESCE(SUM(total_refund_usd), 0) AS refund_usd, COALESCE(SUM(total_refund_khr), 0) AS refund_khr
-    FROM returns
-    WHERE sale_id IN (${chunk.map(() => '?').join(',')}) AND COALESCE(status, 'completed') != 'cancelled' AND COALESCE(return_scope, 'customer') = 'customer'
-    GROUP BY sale_id
-  `).all<{ sale_id: number; return_count: number; refund_usd: number; refund_khr: number }>(chunk))
-  const refundsBySale = new Map(refundRows.map((r) => [r.sale_id, r]))
+    const refundRows = await selectInChunks(saleIds, 0, (chunk) => db.prepare(`
+      SELECT sale_id, COUNT(*) AS return_count, COALESCE(SUM(total_refund_usd), 0) AS refund_usd, COALESCE(SUM(total_refund_khr), 0) AS refund_khr
+      FROM returns
+      WHERE sale_id IN (${chunk.map(() => '?').join(',')}) AND COALESCE(status, 'completed') != 'cancelled' AND COALESCE(return_scope, 'customer') = 'customer'
+      GROUP BY sale_id
+    `).all<{ sale_id: number; return_count: number; refund_usd: number; refund_khr: number }>(chunk))
+    const refundsBySale = new Map(refundRows.map((r) => [r.sale_id, r]))
 
-  const payload = sales.map((sale) => {
-    const refund = refundsBySale.get(sale.id)
-    const refundUsd = refund?.refund_usd || 0
-    const refundKhr = refund?.refund_khr || 0
-    return {
-      ...sale,
-      items: itemsBySale.get(sale.id) || [],
-      refund_usd: refundUsd,
-      refund_khr: refundKhr,
-      return_count: refund?.return_count || 0,
-      total_discount_usd: (sale.discount_usd || 0) + (sale.membership_discount_usd || 0),
-      total_discount_khr: (sale.discount_khr || 0) + (sale.membership_discount_khr || 0),
-      net_total_usd: (sale.total_usd || 0) - refundUsd,
-      net_total_khr: (sale.total_khr || 0) - refundKhr,
-    }
+    return sales.map((sale) => {
+      const refund = refundsBySale.get(sale.id)
+      const refundUsd = refund?.refund_usd || 0
+      const refundKhr = refund?.refund_khr || 0
+      return {
+        ...sale,
+        items: itemsBySale.get(sale.id) || [],
+        refund_usd: refundUsd,
+        refund_khr: refundKhr,
+        return_count: refund?.return_count || 0,
+        total_discount_usd: (sale.discount_usd || 0) + (sale.membership_discount_usd || 0),
+        total_discount_khr: (sale.discount_khr || 0) + (sale.membership_discount_khr || 0),
+        net_total_usd: (sale.total_usd || 0) - refundUsd,
+        net_total_khr: (sale.total_khr || 0) - refundKhr,
+      }
+    })
   })
 
   return c.json(payload)
@@ -1738,9 +1780,12 @@ app.get('/stats', async (c) => {
   // are pass-through, NOT revenue, so total_usd (which folds tax in) is no
   // longer the base here. Awaiting-payment (unpaid credit) uses the same net
   // basis but is reported separately as pending, never folded into revenue.
-  const totals = await db.prepare(`
+  const cacheVersion = await getSalesReadCacheVersion(c.env)
+  const payload = await cachedJsonResponse(c.req.raw, c.executionCtx, cacheVersion, SALES_READ_CACHE_TTL_SECONDS, async () => {
+    const totals = await db.prepare(`
     SELECT
       COUNT(*) AS total_count,
+      COALESCE(SUM(CASE WHEN COALESCE(NULLIF(s.sale_status, ''), 'completed') NOT IN ('cancelled', 'awaiting_payment') THEN 1 ELSE 0 END), 0) AS revenue_count,
       COALESCE(SUM(CASE WHEN COALESCE(NULLIF(s.sale_status, ''), 'completed') NOT IN ('cancelled', 'awaiting_payment')
         THEN (COALESCE(s.subtotal_usd, 0) - COALESCE(s.discount_usd, 0) - COALESCE(s.membership_discount_usd, 0)) - COALESCE(r.refund_usd, 0) ELSE 0 END), 0) AS revenue_usd,
       COALESCE(SUM(CASE WHEN COALESCE(NULLIF(s.sale_status, ''), 'completed') = 'awaiting_payment'
@@ -1754,18 +1799,20 @@ app.get('/stats', async (c) => {
       GROUP BY sale_id
     ) r ON r.sale_id = s.id
     WHERE ${where.join(' AND ')}
-  `).get<{ total_count: number; revenue_usd: number; pending_revenue_usd: number }>(params)
+  `).get<{ total_count: number; revenue_count: number; revenue_usd: number; pending_revenue_usd: number }>(params)
 
-  const totalCount = Number(totals?.total_count) || 0
-  const listLimit = Math.min(Number.parseInt(String(query.limit || '100'), 10) || 100, 500)
-  return c.json({
-    total_count: totalCount,
-    revenue_usd: round2(Number(totals?.revenue_usd) || 0),
-    pending_revenue_usd: round2(Number(totals?.pending_revenue_usd) || 0),
-    // Tells the caller whether the list endpoint (with the same filters)
-    // would have been cut off, so the UI can show "N+ more not shown" etc.
-    truncated_in_list: totalCount > listLimit,
+    const totalCount = Number(totals?.total_count) || 0
+    const listLimit = Math.max(1, Math.min(Number.parseInt(String(query.limit || '100'), 10) || 100, 200))
+    return {
+      total_count: totalCount,
+      revenue_count: Number(totals?.revenue_count) || 0,
+      revenue_usd: round2(Number(totals?.revenue_usd) || 0),
+      pending_revenue_usd: round2(Number(totals?.pending_revenue_usd) || 0),
+      // This now means "more pages exist", not "the data was discarded".
+      truncated_in_list: totalCount > listLimit,
+    }
   })
+  return c.json(payload)
 })
 
 // GET /api/sales/stats-strip?startDate&endDate&branchId -- the Sales page's
@@ -1808,37 +1855,41 @@ app.get('/stats-strip', async (c) => {
     rangeParams.endTime = endTime
   }
   if (query.branchId) { statusClauses.push('branch_id = @branchId'); rangeParams.branchId = query.branchId }
-  const [totals, byPayment, byStatus, returnsRow] = await Promise.all([
-    getSalesTotals(c.env, filters),
-    getPaymentMethodBreakdown(c.env, filters),
-    db.prepare(`
-      SELECT COALESCE(NULLIF(TRIM(sale_status), ''), 'completed') AS sale_status,
-             COUNT(*) AS count, ROUND(COALESCE(SUM(total_usd), 0), 2) AS total_usd
-      FROM sales
-      WHERE ${statusClauses.join(' AND ')}
-      GROUP BY COALESCE(NULLIF(TRIM(sale_status), ''), 'completed')
-      ORDER BY count DESC
-    `).all<{ sale_status: string; count: number; total_usd: number }>(rangeParams),
-    db.prepare(`
-      SELECT COUNT(*) AS count, ROUND(COALESCE(SUM(total_refund_usd), 0), 2) AS refund_usd
-      FROM returns
-      WHERE ${localDateRangeClause('created_at')}
-        ${hasTimeRange ? `AND ${localTimeRangeClause('created_at')}` : ''}
-        AND COALESCE(return_scope, 'customer') = 'customer'
-        AND COALESCE(status, 'completed') <> 'cancelled'
-        ${query.branchId ? 'AND branch_id = @branchId' : ''}
-    `).get<{ count: number; refund_usd: number }>(rangeParams),
-  ])
-  return c.json({
-    startDate,
-    endDate,
-    startTime: hasTimeRange ? startTime : null,
-    endTime: hasTimeRange ? endTime : null,
-    totals,
-    by_payment: byPayment,
-    by_status: byStatus || [],
-    returns: { count: Number(returnsRow?.count || 0), refund_usd: Number(returnsRow?.refund_usd || 0) },
+  const cacheVersion = await getSalesReadCacheVersion(c.env)
+  const payload = await cachedJsonResponse(c.req.raw, c.executionCtx, cacheVersion, SALES_READ_CACHE_TTL_SECONDS, async () => {
+    const [totals, byPayment, byStatus, returnsRow] = await Promise.all([
+      getSalesTotals(c.env, filters),
+      getPaymentMethodBreakdown(c.env, filters),
+      db.prepare(`
+        SELECT COALESCE(NULLIF(TRIM(sale_status), ''), 'completed') AS sale_status,
+               COUNT(*) AS count, ROUND(COALESCE(SUM(total_usd), 0), 2) AS total_usd
+        FROM sales
+        WHERE ${statusClauses.join(' AND ')}
+        GROUP BY COALESCE(NULLIF(TRIM(sale_status), ''), 'completed')
+        ORDER BY count DESC
+      `).all<{ sale_status: string; count: number; total_usd: number }>(rangeParams),
+      db.prepare(`
+        SELECT COUNT(*) AS count, ROUND(COALESCE(SUM(total_refund_usd), 0), 2) AS refund_usd
+        FROM returns
+        WHERE ${localDateRangeClause('created_at')}
+          ${hasTimeRange ? `AND ${localTimeRangeClause('created_at')}` : ''}
+          AND COALESCE(return_scope, 'customer') = 'customer'
+          AND COALESCE(status, 'completed') <> 'cancelled'
+          ${query.branchId ? 'AND branch_id = @branchId' : ''}
+      `).get<{ count: number; refund_usd: number }>(rangeParams),
+    ])
+    return {
+      startDate,
+      endDate,
+      startTime: hasTimeRange ? startTime : null,
+      endTime: hasTimeRange ? endTime : null,
+      totals,
+      by_payment: byPayment,
+      by_status: byStatus || [],
+      returns: { count: Number(returnsRow?.count || 0), refund_usd: Number(returnsRow?.refund_usd || 0) },
+    }
   })
+  return c.json(payload)
 })
 
 // ---- Phase X (Part 395): the daily report ---------------------------------
@@ -1852,12 +1903,13 @@ app.get('/daily-report', async (c) => {
   const query = c.req.query()
   const startDate = String(query.startDate || '').slice(0, 10)
   const endDate = String(query.endDate || '').slice(0, 10)
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate) || !/^\d{4}-\d{2}-\d{2}$/.test(endDate)) {
-    return c.json({ error: 'startDate and endDate (YYYY-MM-DD) are required' }, 400)
+  const validDate = (value: string) => /^\d{4}-\d{2}-\d{2}$/.test(value)
+  if ((startDate && !validDate(startDate)) || (endDate && !validDate(endDate))) {
+    return c.json({ error: 'startDate/endDate must use YYYY-MM-DD' }, 400)
   }
   const days = await getSalesPeriodSeries(c.env, {
-    startDate,
-    endDate,
+    startDate: startDate || null,
+    endDate: endDate || null,
     branchId: query.branchId || null,
     status: query.status || null,
     paymentMethod: query.paymentMethod || null,
@@ -1949,60 +2001,70 @@ app.get('/customer-report', async (c) => {
   return c.json({ startDate, endDate, customerId, totals })
 })
 
-// GET /api/sales/export -- accounting summary + detail rows for a date
-// range, consumed by ExportModal.tsx (both "Preview Summary" and
-// "Export CSV", the latter falling back to client-side CSV generation
-// from this same JSON when the response isn't already a raw CSV string --
-// see buildCsvFallback() there). This was a hardcoded-empty stub
-// (`{ items: [], rows: [], totals: {} }`) that never matched the shape
-// ExportModal actually reads (`period`/`summary`/`by_status`/`by_product`/
-// `sales`), so both buttons silently showed nothing. No legacy version to
-// port from -- the archived backend snapshot has the identical stub, not
-// a real implementation -- so this is a fresh build against ExportModal's
-// actual field usage, not a port.
+// GET /api/sales/export -- complete, snapshot-stable accounting export.
+// Detail rows are keyset-paged so large ranges never rely on one unbounded
+// Worker response. Page 1 freezes `snapshot_max_id`; later requests reuse it
+// plus `next_cursor`, so newly-created/backdated sales cannot shift, duplicate,
+// or disappear between pages. Summary aggregates are computed over the whole
+// frozen snapshot and only need to be requested on page 1.
 app.get('/export', async (c) => {
   if (!canReadSales(c.get('user'))) {
     return c.json({ error: 'You do not have permission to perform this action' }, 403)
   }
   const db = getDb(c.env)
   const query = c.req.query()
-
-  const where: string[] = ['1=1']
-  const params: Record<string, unknown> = {}
-  if (query.startDate) { where.push(localDateAtOrAfter('s.created_at')); params.startDate = query.startDate }
-  if (query.endDate) { where.push(localDateAtOrBefore('s.created_at')); params.endDate = query.endDate }
-  if (query.branchId) { where.push('s.branch_id = @branchId'); params.branchId = query.branchId }
-
-  const emptySummary = {
-    total_transactions: 0,
-    completed_transactions: 0,
-    revenue_usd: 0,
-    cogs_usd: 0,
-    gross_profit_usd: 0,
-    gross_margin_pct: 0,
-    total_discounts_usd: 0,
-    total_tax_usd: 0,
-    total_delivery_usd: 0,
-    total_refunds_usd: 0,
-    net_revenue_usd: 0,
-    avg_order_usd: 0,
+  const clamp = (raw: unknown, fallback: number, min: number, max: number): number => {
+    const n = Number(raw)
+    return Number.isFinite(n) ? Math.max(min, Math.min(max, Math.trunc(n))) : fallback
   }
-  const period = { start: query.startDate || null, end: query.endDate || null }
+  const detailLimit = clamp(query.pageSize, 250, 1, 500)
+  const detailsOnly = ['1', 'true', 'yes'].includes(String(query.detailsOnly || '').toLowerCase())
 
-  const sales = await db.prepare(`
-    SELECT s.id, s.receipt_number, s.created_at, s.branch_name, s.cashier_name,
-           s.customer_name, s.customer_phone, s.customer_address,
-           s.payment_method, s.payment_currency, s.exchange_rate, s.sale_status,
-           s.subtotal_usd, s.subtotal_khr, s.discount_usd, s.discount_khr,
-           s.membership_discount_usd, s.membership_discount_khr, s.membership_points_redeemed,
-           s.tax_usd, s.amount_paid_usd, s.amount_paid_khr,
-           s.is_delivery, s.delivery_contact_name, s.delivery_contact_phone, s.delivery_contact_address,
-           s.delivery_fee_usd, s.delivery_fee_khr, s.delivery_fee_paid_by, s.total_usd, s.total_khr, s.notes
-    FROM sales s
-    WHERE ${where.join(' AND ')}
-    ORDER BY s.created_at ASC
-    LIMIT 5000
-  `).all<{
+  const baseWhere: string[] = ['1=1']
+  const baseParams: Record<string, unknown> = {}
+  if (query.startDate) { baseWhere.push(localDateAtOrAfter('s.created_at')); baseParams.startDate = query.startDate }
+  if (query.endDate) { baseWhere.push(localDateAtOrBefore('s.created_at')); baseParams.endDate = query.endDate }
+  if (query.branchId) { baseWhere.push('s.branch_id = @branchId'); baseParams.branchId = query.branchId }
+
+  const requestedSnapshot = Number(query.snapshotMaxId)
+  let snapshotMaxId = Number.isSafeInteger(requestedSnapshot) && requestedSnapshot > 0 ? requestedSnapshot : 0
+  if (!snapshotMaxId) {
+    const snapshotRow = await db.prepare(`
+      SELECT MAX(s.id) AS max_id
+      FROM sales s
+      WHERE ${baseWhere.join(' AND ')}
+    `).get<{ max_id: number | null }>(baseParams)
+    snapshotMaxId = Number(snapshotRow?.max_id) || 0
+  }
+
+  const period = { start: query.startDate || null, end: query.endDate || null }
+  const emptySummary = {
+    total_transactions: 0, completed_transactions: 0, revenue_usd: 0,
+    cogs_usd: 0, gross_profit_usd: 0, gross_margin_pct: 0,
+    total_discounts_usd: 0, total_tax_usd: 0, total_delivery_usd: 0,
+    total_refunds_usd: 0, net_revenue_usd: 0, avg_order_usd: 0,
+  }
+  if (!snapshotMaxId) {
+    return c.json({
+      period, summary: detailsOnly ? undefined : emptySummary,
+      by_status: detailsOnly ? undefined : [], by_product: detailsOnly ? undefined : [],
+      sales: [], total_matching: 0, snapshot_max_id: null, has_more: false, next_cursor: null, truncated: false,
+    })
+  }
+
+  const snapshotWhere = [...baseWhere, 's.id <= @snapshotMaxId']
+  const snapshotParams: Record<string, unknown> = { ...baseParams, snapshotMaxId }
+  const detailWhere = [...snapshotWhere]
+  const detailParams: Record<string, unknown> = { ...snapshotParams }
+  const afterCreatedAt = String(query.afterCreatedAt || '').trim()
+  const afterId = Number(query.afterId)
+  if (afterCreatedAt && Number.isSafeInteger(afterId) && afterId > 0) {
+    detailWhere.push(`(datetime(s.created_at) > datetime(@afterCreatedAt) OR (datetime(s.created_at) = datetime(@afterCreatedAt) AND s.id > @afterId))`)
+    detailParams.afterCreatedAt = afterCreatedAt
+    detailParams.afterId = afterId
+  }
+
+  type ExportSaleRow = {
     id: number; receipt_number: string | null; created_at: string; branch_name: string | null
     cashier_name: string | null; customer_name: string | null; customer_phone: string | null; customer_address: string | null
     payment_method: string | null; payment_currency: string | null; exchange_rate: number | null; sale_status: string | null
@@ -2012,124 +2074,60 @@ app.get('/export', async (c) => {
     is_delivery: number | null; delivery_contact_name: string | null; delivery_contact_phone: string | null; delivery_contact_address: string | null
     delivery_fee_usd: number | null; delivery_fee_khr: number | null; delivery_fee_paid_by: string | null
     total_usd: number | null; total_khr: number | null; notes: string | null
-  }>(params)
-
-  // Real gap fixed this session: this route caps its own detail-row query
-  // at 5000 (below the CPU/response-size budget of a single request), but
-  // `total_transactions`/`completed_transactions`/`by_status` below used
-  // to be derived from that same capped `sales` array -- so a date range
-  // with more than 5000 matching sales silently under-reported its own
-  // headline transaction counts and status breakdown, with nothing in the
-  // response telling the caller rows were missing. `revenue_usd`/`cogs_usd`/
-  // etc. were already correct regardless (getSalesTotals below runs its
-  // own uncapped query), so only the count-shaped fields were wrong.
-  // Fixed by computing the true totals from a separate uncapped COUNT/
-  // GROUP BY query, and surfacing `truncated`/`total_matching` so the
-  // caller (ExportModal.tsx) can warn the person their date range has
-  // more sales than the detail rows/CSV actually contain.
-  const totalMatchingRow = await db.prepare(`
-    SELECT COUNT(*) AS total,
-           SUM(CASE WHEN COALESCE(s.sale_status, 'completed') = 'completed' THEN 1 ELSE 0 END) AS completed
-    FROM sales s
-    WHERE ${where.join(' AND ')}
-  `).get<{ total: number; completed: number }>(params)
-  const totalMatching = totalMatchingRow?.total || 0
-  const truncated = totalMatching > sales.length
-
-  if (sales.length === 0) {
-    return c.json({ period, summary: emptySummary, by_status: [], by_product: [], sales: [], truncated: false, total_matching: 0 })
   }
 
-  const saleIds = sales.map((s) => s.id)
-  const exportItems = await selectInChunks(saleIds, 0, (chunk) => db.prepare(`
-    SELECT si.*, p.barcode AS barcode
-    FROM sale_items si
-    LEFT JOIN products p ON p.id = si.product_id
-    WHERE si.sale_id IN (${chunk.map(() => '?').join(',')})
-    ORDER BY si.id ASC
-  `).all<{ sale_id: number; [key: string]: unknown }>(chunk))
+  // Read one extra sale so `has_more` is authoritative without an OFFSET or
+  // another COUNT on every details-only page.
+  const pageRows = await db.prepare(`
+    SELECT s.id, s.receipt_number, s.created_at, s.branch_name, s.cashier_name,
+           s.customer_name, s.customer_phone, s.customer_address,
+           s.payment_method, s.payment_currency, s.exchange_rate, s.sale_status,
+           s.subtotal_usd, s.subtotal_khr, s.discount_usd, s.discount_khr,
+           s.membership_discount_usd, s.membership_discount_khr, s.membership_points_redeemed,
+           s.tax_usd, s.amount_paid_usd, s.amount_paid_khr,
+           s.is_delivery, s.delivery_contact_name, s.delivery_contact_phone, s.delivery_contact_address,
+           s.delivery_fee_usd, s.delivery_fee_khr, s.delivery_fee_paid_by, s.total_usd, s.total_khr, s.notes
+    FROM sales s
+    WHERE ${detailWhere.join(' AND ')}
+    ORDER BY datetime(s.created_at) ASC, s.id ASC
+    LIMIT @detailLimit
+  `).all<ExportSaleRow>({ ...detailParams, detailLimit: detailLimit + 1 })
+  const hasMore = pageRows.length > detailLimit
+  const sales = hasMore ? pageRows.slice(0, detailLimit) : pageRows
+  const lastSale = sales[sales.length - 1] || null
+  const nextCursor = hasMore && lastSale ? { created_at: lastSale.created_at, id: lastSale.id } : null
+
+  const saleIds = sales.map((sale) => sale.id)
+  const exportItems = saleIds.length
+    ? await selectInChunks(saleIds, 0, (chunk) => db.prepare(`
+        SELECT si.*, p.barcode AS barcode
+        FROM sale_items si
+        LEFT JOIN products p ON p.id = si.product_id
+        WHERE si.sale_id IN (${chunk.map(() => '?').join(',')})
+        ORDER BY si.id ASC
+      `).all<{ sale_id: number; [key: string]: unknown }>(chunk))
+    : []
   const exportItemsBySale = new Map<number, Array<Record<string, unknown>>>()
   for (const item of exportItems) {
     if (!exportItemsBySale.has(item.sale_id)) exportItemsBySale.set(item.sale_id, [])
     exportItemsBySale.get(item.sale_id)!.push(item)
   }
-  // Cancelled sales are kept in the detail rows and the by-status
-  // breakdown (so the report can show they happened), but excluded from
-  // revenue/COGS/top-products, same convention as "active" vs "cancelled"
-  // elsewhere in this file (e.g. STOCK_DEDUCTED_STATUSES above).
-  const activeSales = sales.filter((s) => s.sale_status !== 'cancelled')
-  const activeSaleIds = activeSales.map((s) => s.id)
 
-  const refundRows = activeSaleIds.length
-    ? await selectInChunks(saleIds, 0, (chunk) => db.prepare(`
-        SELECT sale_id, COALESCE(SUM(total_refund_usd), 0) AS refund_usd
-        FROM returns
-        WHERE sale_id IN (${chunk.map(() => '?').join(',')}) AND COALESCE(status, 'completed') != 'cancelled' AND COALESCE(return_scope, 'customer') = 'customer'
-        GROUP BY sale_id
-      `).all<{ sale_id: number; refund_usd: number }>(chunk))
-    : []
-  const refundsBySale = new Map(refundRows.map((r) => [r.sale_id, r.refund_usd || 0]))
-
-  // Shared model (lib/salesAnalytics.ts) for revenue/COGS/profit -- keeps
-  // this summary's numbers consistent with the Dashboard's, which
-  // previously disagreed (this route summed sales.total_usd, which
-  // includes tax, as if it were margin; the shared model excludes tax and
-  // delivery from "revenue" the same way Inventory/Products define it).
-  const salesTotals = await getSalesTotals(c.env, {
-    startDate: query.startDate || period.start || sales[0].created_at.slice(0, 10),
-    endDate: query.endDate || period.end || sales[sales.length - 1].created_at.slice(0, 10),
-    branchId: query.branchId || null,
-  })
-
-  const byProduct: Array<{ product_id: number | null; product_name: string | null; qty_sold: number; revenue_usd: number }> = []
-  if (activeSaleIds.length) {
-    // The only aggregate here that chunking really does change: a product
-    // can appear in sale_items rows spread across several chunks, and
-    // `ORDER BY ... LIMIT 100` per chunk would rank partial sums. So the
-    // per-chunk groups are re-summed per product, and only then ranked and
-    // truncated -- the top-100 is computed over the whole period, exactly
-    // as the single-statement version did.
-    const chunkRows = await selectInChunks(activeSaleIds, 0, (chunk) => db.prepare(`
-      SELECT product_id, product_name, COALESCE(SUM(quantity), 0) AS qty_sold, COALESCE(SUM(total_usd), 0) AS revenue_usd
-      FROM sale_items
-      WHERE sale_id IN (${chunk.map(() => '?').join(',')})
-      GROUP BY product_id, product_name
-    `).all<{ product_id: number | null; product_name: string | null; qty_sold: number; revenue_usd: number }>(chunk))
-    const totalsByProduct = new Map<string, { product_id: number | null; product_name: string | null; qty_sold: number; revenue_usd: number }>()
-    for (const row of chunkRows) {
-      const key = `${row.product_id ?? 'null'}:${row.product_name ?? ''}`
-      const running = totalsByProduct.get(key)
-      if (running) {
-        running.qty_sold += Number(row.qty_sold) || 0
-        running.revenue_usd += Number(row.revenue_usd) || 0
-      } else {
-        totalsByProduct.set(key, { product_id: row.product_id, product_name: row.product_name, qty_sold: Number(row.qty_sold) || 0, revenue_usd: Number(row.revenue_usd) || 0 })
-      }
-    }
-    const productRows = [...totalsByProduct.values()]
-      .sort((a, b) => b.revenue_usd - a.revenue_usd)
-      .slice(0, 100)
-    byProduct.push(...productRows.map((r) => ({ ...r, qty_sold: round2(r.qty_sold), revenue_usd: round2(r.revenue_usd) })))
-  }
-
-  let totalRefundsUsd = 0
-  const detailRows = sales.flatMap((s) => {
-    const refundUsd = refundsBySale.get(s.id) || 0
-    totalRefundsUsd += refundUsd
-    const storedItems = exportItemsBySale.get(s.id) || []
+  const detailRows = sales.flatMap((sale) => {
+    const storedItems = exportItemsBySale.get(sale.id) || []
     const items = storedItems.length ? storedItems : [{}]
     return items.map((item, index) => ({
-      receipt_number: index === 0 ? s.receipt_number : '',
-      sale_date: index === 0 ? s.created_at : '',
-      sale_status: index === 0 ? s.sale_status : '',
-      payment_method: index === 0 ? s.payment_method : '',
-      payment_currency: index === 0 ? s.payment_currency : '',
-      exchange_rate: index === 0 ? s.exchange_rate : '',
-      branch: index === 0 ? s.branch_name : '',
-      customer_name: index === 0 ? s.customer_name : '',
-      customer_phone: index === 0 ? s.customer_phone : '',
-      customer_address: index === 0 ? s.customer_address : '',
-      cashier_name: index === 0 ? s.cashier_name : '',
+      receipt_number: index === 0 ? sale.receipt_number : '',
+      sale_date: index === 0 ? sale.created_at : '',
+      sale_status: index === 0 ? sale.sale_status : '',
+      payment_method: index === 0 ? sale.payment_method : '',
+      payment_currency: index === 0 ? sale.payment_currency : '',
+      exchange_rate: index === 0 ? sale.exchange_rate : '',
+      branch: index === 0 ? sale.branch_name : '',
+      customer_name: index === 0 ? sale.customer_name : '',
+      customer_phone: index === 0 ? sale.customer_phone : '',
+      customer_address: index === 0 ? sale.customer_address : '',
+      cashier_name: index === 0 ? sale.cashier_name : '',
       name: item.product_name ?? '', sku: item.sku ?? '', barcode: item.barcode ?? '', quantity: item.quantity ?? 1,
       unit_price_usd: item.applied_price_usd ?? 0, unit_price_khr: item.applied_price_khr ?? 0,
       base_price_usd: item.base_price_usd ?? item.applied_price_usd ?? 0,
@@ -2140,69 +2138,97 @@ app.get('/export', async (c) => {
       manual_discount_usd: item.manual_discount_usd ?? 0, manual_discount_khr: item.manual_discount_khr ?? 0,
       cost_price_usd: item.cost_price_usd ?? 0, cost_price_khr: item.cost_price_khr ?? 0,
       batch_label: item.batch_label ?? '', returned_quantity: item.returned_quantity ?? '',
-      discount_usd: index === 0 ? s.discount_usd : '', discount_khr: index === 0 ? s.discount_khr : '',
-      tax_usd: index === 0 ? s.tax_usd : '', amount_paid_usd: index === 0 ? s.amount_paid_usd : '', amount_paid_khr: index === 0 ? s.amount_paid_khr : '',
-      membership_discount_usd: index === 0 ? s.membership_discount_usd : '', membership_discount_khr: index === 0 ? s.membership_discount_khr : '',
-      membership_points_redeemed: index === 0 ? s.membership_points_redeemed : '',
-      is_delivery: index === 0 ? s.is_delivery : '', delivery_contact_name: index === 0 ? s.delivery_contact_name : '',
-      delivery_contact_phone: index === 0 ? s.delivery_contact_phone : '', delivery_contact_address: index === 0 ? s.delivery_contact_address : '',
-      delivery_fee_usd: index === 0 ? s.delivery_fee_usd : '', delivery_fee_khr: index === 0 ? s.delivery_fee_khr : '',
-      delivery_fee_paid_by: index === 0 ? s.delivery_fee_paid_by : '', notes: index === 0 ? s.notes : '',
+      discount_usd: index === 0 ? sale.discount_usd : '', discount_khr: index === 0 ? sale.discount_khr : '',
+      tax_usd: index === 0 ? sale.tax_usd : '', amount_paid_usd: index === 0 ? sale.amount_paid_usd : '', amount_paid_khr: index === 0 ? sale.amount_paid_khr : '',
+      membership_discount_usd: index === 0 ? sale.membership_discount_usd : '', membership_discount_khr: index === 0 ? sale.membership_discount_khr : '',
+      membership_points_redeemed: index === 0 ? sale.membership_points_redeemed : '',
+      is_delivery: index === 0 ? sale.is_delivery : '', delivery_contact_name: index === 0 ? sale.delivery_contact_name : '',
+      delivery_contact_phone: index === 0 ? sale.delivery_contact_phone : '', delivery_contact_address: index === 0 ? sale.delivery_contact_address : '',
+      delivery_fee_usd: index === 0 ? sale.delivery_fee_usd : '', delivery_fee_khr: index === 0 ? sale.delivery_fee_khr : '',
+      delivery_fee_paid_by: index === 0 ? sale.delivery_fee_paid_by : '', notes: index === 0 ? sale.notes : '',
     }))
   })
 
-  // Real gap fixed alongside the truncation fix above: `totalRefundsUsd`
-  // (used for the summary's `total_refunds_usd`/`net_revenue_usd`) was
-  // summed from `refundsBySale`, which is only built for the capped
-  // `sales` page -- under truncation this silently missed every refund
-  // on a sale past the 5000-row cap, the same under-reporting bug as
-  // `total_transactions`/`by_status` above. Recomputed here via a direct
-  // uncapped query joined against the same date/branch WHERE clause,
-  // rather than the capped in-memory map, so the summary total is correct
-  // regardless of how many sales matched.
-  const totalRefundsRow = truncated
-    ? await db.prepare(`
-        SELECT COALESCE(SUM(r.total_refund_usd), 0) AS total
-        FROM returns r
-        JOIN sales s ON s.id = r.sale_id
-        WHERE ${where.join(' AND ')}
-          AND COALESCE(s.sale_status, 'completed') != 'cancelled'
-          AND COALESCE(r.status, 'completed') != 'cancelled'
-          AND COALESCE(r.return_scope, 'customer') = 'customer'
-      `).get<{ total: number }>(params)
-    : null
-  if (truncated) totalRefundsUsd = totalRefundsRow?.total || 0
+  if (detailsOnly) {
+    return c.json({
+      period, sales: detailRows, snapshot_max_id: snapshotMaxId,
+      has_more: hasMore, next_cursor: nextCursor, truncated: false,
+    })
+  }
 
-  // by_status now comes from an uncapped SQL GROUP BY over the whole
-  // matching range (not the capped in-memory `sales` array above) --
-  // otherwise a range with >5000 sales would silently under-report status
-  // counts/revenue for whichever statuses happened to fall past the cap.
-  const byStatusRows = await db.prepare(`
-    SELECT COALESCE(s.sale_status, 'completed') AS status, COUNT(*) AS count, COALESCE(SUM(s.total_usd), 0) AS revenue
+  const totalMatchingRow = await db.prepare(`
+    SELECT COUNT(*) AS total,
+           SUM(CASE WHEN COALESCE(s.sale_status, 'completed') = 'completed' THEN 1 ELSE 0 END) AS completed
     FROM sales s
-    WHERE ${where.join(' AND ')}
+    WHERE ${snapshotWhere.join(' AND ')}
+  `).get<{ total: number; completed: number }>(snapshotParams)
+  const totalMatching = Number(totalMatchingRow?.total) || 0
+
+  const salesTotals = await getSalesTotals(c.env, {
+    startDate: query.startDate || null,
+    endDate: query.endDate || null,
+    branchId: query.branchId || null,
+    maxSaleId: snapshotMaxId,
+  })
+
+  // Full-snapshot ranking. This must not be derived from the current detail
+  // page or a product can disappear simply because its receipts are on a later
+  // export page. Top-100 is an explicit ranking output, not a hidden history.
+  const byProduct = await db.prepare(`
+    SELECT si.product_id, si.product_name,
+           COALESCE(SUM(si.quantity), 0) AS qty_sold,
+           COALESCE(SUM(si.total_usd), 0) AS revenue_usd
+    FROM sale_items si
+    JOIN sales s ON s.id = si.sale_id
+    WHERE ${snapshotWhere.join(' AND ')}
+      AND COALESCE(s.sale_status, 'completed') <> 'cancelled'
+    GROUP BY si.product_id, si.product_name
+    ORDER BY revenue_usd DESC, qty_sold DESC
+    LIMIT 100
+  `).all<{ product_id: number | null; product_name: string | null; qty_sold: number; revenue_usd: number }>(snapshotParams)
+
+  const byStatusRows = await db.prepare(`
+    SELECT COALESCE(s.sale_status, 'completed') AS status, COUNT(*) AS count,
+           COALESCE(SUM(s.total_usd), 0) AS revenue
+    FROM sales s
+    WHERE ${snapshotWhere.join(' AND ')}
     GROUP BY COALESCE(s.sale_status, 'completed')
-  `).all<{ status: string; count: number; revenue: number }>(params)
-  const byStatus = byStatusRows.map((r) => ({ status: r.status, count: r.count, revenue: round2(r.revenue || 0) }))
+  `).all<{ status: string; count: number; revenue: number }>(snapshotParams)
 
-  const netRevenueUsd = salesTotals.revenue_usd - totalRefundsUsd
-
+  // Canonical SalesTotals.revenue_usd is already NET of customer refunds.
+  // Export's accounting view displays the pre-refund net-sales line, refunds,
+  // then the canonical net revenue so the visible equation is exact:
+  //     Revenue - Refunds = Net Revenue
+  // The old export subtracted refunds from salesTotals.revenue_usd a second
+  // time, understating net revenue whenever any return existed.
+  const totalRefundsUsd = salesTotals.refund_usd
+  const revenueBeforeRefunds = round2(salesTotals.revenue_usd + totalRefundsUsd)
+  const netRevenueUsd = salesTotals.revenue_usd
   const summary = {
     total_transactions: totalMatching,
-    completed_transactions: totalMatchingRow?.completed || 0,
-    revenue_usd: salesTotals.revenue_usd,
+    completed_transactions: Number(totalMatchingRow?.completed) || 0,
+    revenue_usd: revenueBeforeRefunds,
     cogs_usd: salesTotals.cost_usd,
     gross_profit_usd: salesTotals.profit_usd,
-    gross_margin_pct: salesTotals.revenue_usd > 0 ? round2((salesTotals.profit_usd / salesTotals.revenue_usd) * 100) : 0,
+    gross_margin_pct: netRevenueUsd > 0 ? round2((salesTotals.profit_usd / netRevenueUsd) * 100) : 0,
     total_discounts_usd: salesTotals.discount_usd,
     total_tax_usd: salesTotals.tax_usd,
     total_delivery_usd: salesTotals.delivery_usd,
-    total_refunds_usd: round2(totalRefundsUsd),
-    net_revenue_usd: round2(netRevenueUsd),
+    total_refunds_usd: totalRefundsUsd,
+    net_revenue_usd: netRevenueUsd,
     avg_order_usd: salesTotals.avg_order_usd,
   }
 
-  return c.json({ period, summary, by_status: byStatus, by_product: byProduct, sales: detailRows, truncated, total_matching: totalMatching })
+  return c.json({
+    period, summary,
+    by_status: byStatusRows.map((row) => ({ status: row.status, count: Number(row.count) || 0, revenue: round2(Number(row.revenue) || 0) })),
+    by_product: byProduct.map((row) => ({ ...row, qty_sold: round2(Number(row.qty_sold) || 0), revenue_usd: round2(Number(row.revenue_usd) || 0) })),
+    sales: detailRows,
+    total_matching: totalMatching,
+    snapshot_max_id: snapshotMaxId,
+    has_more: hasMore,
+    next_cursor: nextCursor,
+    truncated: false,
+  })
 })
-
 export default app
