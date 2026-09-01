@@ -3,8 +3,9 @@ chcp 65001 >nul 2>&1
 setlocal
 
 REM ==========================================================================
-REM  Runs the full Cloudflare release pipeline in one step: typecheck ->
-REM  build frontend -> apply remote D1 migrations -> wrangler deploy -> live
+REM  Runs the full Cloudflare release pipeline in one step: install -> local
+REM  typechecks + regression tests -> build frontend -> migrate BOTH production
+REM  D1 databases -> sync secrets -> wrangler deploy -> live
 REM  health check against the real Workers URL. Intended for cutting a new
 REM  release and deploying it in one command. See
 REM  ops\scripts\powershell\full-automation.ps1 for the implementation.

@@ -13,9 +13,11 @@
 #    2. Install dependencies for the frontend and Cloudflare Worker
 #       (`npm ci` when a lockfile exists, so a declared-but-not-installed
 #       dependency fails loudly here instead of two steps later at typecheck)
-#    3. Typecheck the Cloudflare Worker and the frontend
+#    3. Run the full local release gate: frontend + Worker typechecks and
+#       both regression suites. Any failure stops the release before remote work.
 #    4. Build the frontend (output consumed by wrangler as [assets])
-#    5. Apply any pending D1 migrations to the REMOTE database
+#    5. Apply pending migrations to BOTH remote D1 databases: the primary
+#       business-os database and the business-os-import staging database
 #    6. Push secrets from cloudflare/.dev.vars to Cloudflare (wrangler secret put),
 #       so production always has whatever's in your local .dev.vars
 #    7. `wrangler deploy`
@@ -68,7 +70,12 @@ function Invoke-Step {
     [Parameter(Mandatory)] [scriptblock]$Action
   )
   Write-Step $Name
-  & $Action
+  try {
+    & $Action
+  } catch {
+    Write-Err "$Name failed: $($_.Exception.Message)"
+    exit 1
+  }
   if ($LASTEXITCODE -ne 0) {
     Write-Err "$Name failed (exit code $LASTEXITCODE)."
     exit $LASTEXITCODE
@@ -96,6 +103,24 @@ $HealthTimeoutSec = if ($env:BUSINESS_OS_HEALTH_TIMEOUT_SEC) { [int]$env:BUSINES
 Write-Host "Business OS full automation (Cloudflare)" -ForegroundColor Yellow
 Write-Host "Repo root:   $Root"
 Write-Host "Health URL:  $HealthUrl"
+
+# The frontend barcode stack requires Node 24+ (@zxing/library 0.22.x declares
+# that engine). Fail before npm mutates node_modules so an older runtime cannot
+# produce a half-installed release tree or a later, harder-to-diagnose build
+# failure.
+Invoke-Step "Check Node.js runtime (24+)" {
+  $nodeCommand = Get-Command node -ErrorAction SilentlyContinue
+  if (-not $nodeCommand) { throw "Node.js is not installed or is not on PATH." }
+  $nodeVersion = (& node -p "process.versions.node").Trim()
+  if ($LASTEXITCODE -ne 0 -or -not $nodeVersion) { throw "Could not read the Node.js version." }
+  $nodeMajor = [int](($nodeVersion -split '\.')[0])
+  if ($nodeMajor -lt 24) {
+    throw "Node.js 24 or newer is required; found v$nodeVersion. Upgrade Node.js, reopen the terminal, and run again."
+  }
+  Write-Host "  Node.js v$nodeVersion" -ForegroundColor DarkGray
+  $global:LASTEXITCODE = 0
+}
+
 
 # ---- 1. Remove known stray/archived files -----------------------------------
 # Copying an updated repo over an EXISTING folder (unzip/tar-extract without
@@ -231,17 +256,30 @@ if ($env:BUSINESS_OS_SKIP_INSTALL -eq '1') {
   Install-Deps $CloudflareDir "cloudflare"
 }
 
-# ---- 3. Typecheck -----------------------------------------------------------
-Invoke-Step "Typecheck frontend" {
-  Push-Location $FrontendDir
-  npm run typecheck
-  Pop-Location
+# ---- 3. Full local pre-deploy verification ---------------------------------
+# Reuse verify-local.ps1 as the single source of truth for release-blocking
+# typechecks and pure-logic regression tests. Dependencies were installed in
+# step 2 and the production build still happens in step 4, so skip those two
+# duplicate operations inside the child verifier. A failed test exits non-zero
+# here and stops the release BEFORE any remote D1 migration, secret write, or
+# Worker deploy can occur.
+$VerifyLocalScript = Join-Path $Root 'ops\scripts\powershell\verify-local.ps1'
+if (-not (Test-Path $VerifyLocalScript)) {
+  Write-Err "Local verification script not found at $VerifyLocalScript"
+  exit 1
 }
-
-Invoke-Step "Typecheck Cloudflare Worker" {
-  Push-Location $CloudflareDir
-  npm run typecheck
-  Pop-Location
+Invoke-Step "Pre-deploy verification (typechecks + regression tests)" {
+  $previousSkipInstall = $env:BUSINESS_OS_SKIP_INSTALL
+  $previousSkipBuild = $env:BUSINESS_OS_SKIP_BUILD
+  try {
+    $env:BUSINESS_OS_SKIP_INSTALL = '1'
+    $env:BUSINESS_OS_SKIP_BUILD = '1'
+    $PowerShellExe = (Get-Process -Id $PID).Path
+    & $PowerShellExe -NoProfile -ExecutionPolicy Bypass -File $VerifyLocalScript
+  } finally {
+    $env:BUSINESS_OS_SKIP_INSTALL = $previousSkipInstall
+    $env:BUSINESS_OS_SKIP_BUILD = $previousSkipBuild
+  }
 }
 
 # ---- 4. Build frontend ------------------------------------------------------
@@ -251,28 +289,40 @@ Invoke-Step "Build frontend" {
   Pop-Location
 }
 
-# ---- 5. Apply pending remote D1 migrations -------------------------------------
-Invoke-Step "Apply remote D1 migrations" {
+# ---- 5. Apply pending operational D1 migrations -------------------------------
+Invoke-Step "Apply remote D1 migrations (business-os)" {
   Push-Location $CloudflareDir
   npm run migrate:remote
   Pop-Location
 }
 
-# ---- 6. Push secrets from .dev.vars to Cloudflare ------------------------------
+# IMPORT_DB is a separate production D1 database with its own migrations_dir
+# (migrations-import/). Skipping this step can deploy Worker code that expects a
+# newer staging schema while business-os-import is still old. package.json's
+# deploy:full already applies both databases; keep the one-click .bat pipeline
+# equally complete.
+# ---- 6. Apply pending import-staging D1 migrations ----------------------------
+Invoke-Step "Apply remote D1 migrations (business-os-import)" {
+  Push-Location $CloudflareDir
+  npm run migrate:import:remote
+  Pop-Location
+}
+
+# ---- 7. Push secrets from .dev.vars to Cloudflare ------------------------------
 Invoke-Step "Sync secrets (.dev.vars -> Cloudflare)" {
   Push-Location $CloudflareDir
   npm run secrets:sync
   Pop-Location
 }
 
-# ---- 7. Deploy the Worker -------------------------------------------------------
+# ---- 8. Deploy the Worker -------------------------------------------------------
 Invoke-Step "wrangler deploy" {
   Push-Location $CloudflareDir
   npm run deploy
   Pop-Location
 }
 
-# ---- 8. Live health check against the real Workers URL ------------------------
+# ---- 9. Live health check against the real Workers URL ------------------------
 Write-Step "Health check: $HealthUrl (timeout ${HealthTimeoutSec}s)"
 $deadline = (Get-Date).AddSeconds($HealthTimeoutSec)
 $lastError = $null

@@ -70,7 +70,12 @@ function Invoke-Step {
     [Parameter(Mandatory)] [scriptblock]$Action
   )
   Write-Step $Name
-  & $Action
+  try {
+    & $Action
+  } catch {
+    Write-Err "$Name failed: $($_.Exception.Message)"
+    exit 1
+  }
   if ($LASTEXITCODE -ne 0) {
     Write-Err "$Name failed (exit code $LASTEXITCODE)."
     exit $LASTEXITCODE
@@ -98,6 +103,24 @@ if (-not (Test-Path $FrontendDir)) {
 
 Write-Host "Business OS local verify (no Cloudflare/wrangler steps)" -ForegroundColor Yellow
 Write-Host "Repo root: $Root"
+
+# The frontend barcode stack requires Node 24+ (@zxing/library 0.22.x declares
+# that engine). Fail before npm mutates node_modules so an older runtime cannot
+# produce a half-installed release tree or a later, harder-to-diagnose build
+# failure.
+Invoke-Step "Check Node.js runtime (24+)" {
+  $nodeCommand = Get-Command node -ErrorAction SilentlyContinue
+  if (-not $nodeCommand) { throw "Node.js is not installed or is not on PATH." }
+  $nodeVersion = (& node -p "process.versions.node").Trim()
+  if ($LASTEXITCODE -ne 0 -or -not $nodeVersion) { throw "Could not read the Node.js version." }
+  $nodeMajor = [int](($nodeVersion -split '\.')[0])
+  if ($nodeMajor -lt 24) {
+    throw "Node.js 24 or newer is required; found v$nodeVersion. Upgrade Node.js, reopen the terminal, and run again."
+  }
+  Write-Host "  Node.js v$nodeVersion" -ForegroundColor DarkGray
+  $global:LASTEXITCODE = 0
+}
+
 
 # ---- 1. Remove known stray/archived files -----------------------------------
 # Kept in sync with full-automation.ps1's list by hand -- duplicated rather
@@ -184,7 +207,7 @@ foreach ($file in $TestFiles) {
   # turned back on early since Pop-Location/the next iteration don't
   # depend on it.
   $ErrorActionPreference = 'Continue'
-  $output = node $file.FullName 2>&1
+  $output = node --experimental-strip-types $file.FullName 2>&1
   $exit = $LASTEXITCODE
   $ErrorActionPreference = 'Stop'
   Pop-Location
