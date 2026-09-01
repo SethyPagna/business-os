@@ -120,7 +120,7 @@ export function buildFeeExportRows(rows: FeeRecord[], feeTypeLabel: (type: strin
   }))
 }
 
-export default function FeesPage() {
+export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
   const { getPermissionTier, t, notify, fmtUSD, fmtKHR, khrToUsd, usdToKhr, displayCurrency } = useApp()
   // Display-currency-aware money formatter (see utils/reportMoney.ts) —
   // honors the display_currency setting without touching stored data.
@@ -452,7 +452,7 @@ export default function FeesPage() {
   ]), [tr, t, typeFilter, branchFilter, branches])
 
   return (
-    <div className="page-scroll flex flex-col p-3 sm:p-6">
+    <div className={`${embedded ? '' : 'page-scroll '}flex flex-col p-3 sm:p-6`}>
       {/* Page title removed (Aug 19 2026 UI request): no other page in the
           app repeats its own name in an h1 here -- the sidebar nav item
           already names the page -- so Fees having one was the odd one out,

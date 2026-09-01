@@ -295,7 +295,7 @@ function ReturnPlusIcon({ className = '' }: { className?: string }) {
   )
 }
 
-export default function Returns() {
+export default function Returns({ embedded = false }: { embedded?: boolean }) {
   const { can, t, fmtUSD, fmtKHR, notify, user } = useApp()
   // Editing a return reverses and re-applies batch restocking against live
   // stock, so routes/returns.ts blocks it outright for the Review Required
@@ -1020,7 +1020,7 @@ export default function Returns() {
   }
 
   return (
-    <div className="page-scroll flex flex-col p-3 sm:p-6">
+    <div className={`${embedded ? '' : 'page-scroll '}flex flex-col p-3 sm:p-6`}>
       {selectedReturns.length > 0 ? (
         <div className="bulk-toolbar mb-3 flex flex-wrap items-center gap-2 rounded-xl border px-3 py-2 text-sm">
           <span className="rounded-full bg-blue-100 px-2.5 py-1 text-xs font-semibold text-blue-700 dark:bg-blue-900/40 dark:text-blue-200">{selectedReturns.length} {tr('selected', 'Selected')}</span>

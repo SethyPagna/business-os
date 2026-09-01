@@ -229,7 +229,7 @@ function buildSaleExportRows(rows: SaleRecord[] = []): Array<Record<string, unkn
   return buildSalesImportRows(rows.map((sale) => ({ ...sale, branch_name: getSaleBranchLabel(sale) })))
 }
 
-export default function Sales() {
+export default function Sales({ embedded = false }: { embedded?: boolean }) {
   const { t, settings, fmtUSD, fmtKHR, notify, user, getPermissionTier } = useApp()
   // Part 557 slice 2: 'sales' is a view-tier section. A View-only grant reads
   // the list/stats/reports/export but every write (cancel, change status, edit
@@ -1220,7 +1220,7 @@ export default function Sales() {
   }
 
   return (
-    <div className="page-scroll flex flex-col px-3 pb-3 pt-0 sm:px-6 sm:pb-6 sm:pt-0">
+    <div className={`${embedded ? '' : 'page-scroll '}flex flex-col px-3 pb-3 pt-0 sm:px-6 sm:pb-6 sm:pt-0`}>
       {/* Import/Manage/History action row. The Sales daily/reports view moved
           out to its own top-level Reports hub section (ReportsHub.tsx), so
           Sales now shows only the receipts list. Import/Export each take an

@@ -33,7 +33,7 @@ const useApp = useAppHook as unknown as () => ReportsHubAppContext
 interface BranchOption { id: string; name: string }
 type ReportType = 'sales' | 'returns' | 'fees'
 
-export default function ReportsHub() {
+export default function ReportsHub({ embedded = false }: { embedded?: boolean }) {
   const { t, fmtUSD, fmtKHR, khrToUsd, usdToKhr, displayCurrency, getPermissionTier } = useApp()
   const trh = (key: string, fallback: string): string => { const v = t(key); return v && v !== key ? v : fallback }
   // Display-only money formatter honoring the display_currency setting (see
@@ -109,7 +109,7 @@ export default function ReportsHub() {
   const SelectedIcon = selectedChip.icon
 
   return (
-    <div className="page-scroll flex flex-col space-y-3 p-3 sm:p-6">
+    <div className={`${embedded ? '' : 'page-scroll '}flex flex-col space-y-3 p-3 sm:p-6`}>
       {/* ONE shared control row: range + the "view by" dropdown + branch, all
           on a single row (user, Aug 31: "the options view by can be into one
           button to expand then choose"). The type picker used to spill four

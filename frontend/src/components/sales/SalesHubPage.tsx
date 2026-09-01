@@ -61,12 +61,10 @@ export default function SalesHubPage() {
   const visibleTabs = tabs.filter((tab) => tab.allowed)
 
   return (
-    // The hub root MUST be a height-filling flex column: PageSlot is an
-    // overflow-hidden flex column, and the hosted sections' own `page-scroll`
-    // roots only scroll when they get a bounded height from a flex parent.
-    // A plain block root here left every section clipped and unscrollable
-    // (Phase Y4 regression).
-    <div className="flex min-h-0 flex-1 flex-col">
+    // One scroll root for the hub. The hosted sections render into this page
+    // instead of owning fixed-height nested scrollers, so their lists grow to
+    // fit their content and the whole Sales page scrolls naturally.
+    <div className="page-scroll flex flex-col">
       {visibleTabs.length > 1 ? (
         // Full-width equal tabs so all of Sales/Returns/Fees/Reports FIT on
         // one row on a phone (user, Aug 31: "the sales page's various
@@ -94,12 +92,12 @@ export default function SalesHubPage() {
         </div>
       ) : null}
       <Suspense fallback={<p className="p-4 text-sm text-gray-500">{trh('loading', 'Loading')}...</p>}>
-        {section === 'returns' && canReturns ? <ReturnsSection />
-          : section === 'fees' && canFees ? <FeesSection />
-          : section === 'reports' && canReports ? <ReportsSection />
-          : canSales ? <SalesSection />
-          : canReturns ? <ReturnsSection />
-          : <FeesSection />}
+        {section === 'returns' && canReturns ? <ReturnsSection embedded />
+          : section === 'fees' && canFees ? <FeesSection embedded />
+          : section === 'reports' && canReports ? <ReportsSection embedded />
+          : canSales ? <SalesSection embedded />
+          : canReturns ? <ReturnsSection embedded />
+          : <FeesSection embedded />}
       </Suspense>
     </div>
   )
