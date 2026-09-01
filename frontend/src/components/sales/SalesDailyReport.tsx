@@ -412,17 +412,17 @@ export default function SalesDailyReport({ t, fmtMoney, active = true, range: ex
   const reportFilterSections = useMemo(() => [
     {
       id: 'status', label: t('status') || 'Status', options: statusOptions.map((option) => ({
-        id: option.value, label: option.label, active: statusFilter === option.value, onClick: () => setStatusFilter(option.value),
+        id: option.value, label: option.label, active: statusFilter === String(option.value), onClick: () => setStatusFilter(String(option.value)),
       })),
     },
     {
       id: 'payment', label: t('payment_method') || 'Payment method', options: paymentOptions.map((option) => ({
-        id: option.value, label: option.label, active: paymentFilter === option.value, onClick: () => setPaymentFilter(option.value),
+        id: option.value, label: option.label, active: paymentFilter === String(option.value), onClick: () => setPaymentFilter(String(option.value)),
       })),
     },
     !embedded && branches.length ? {
       id: 'branch', label: t('branch') || 'Branch', options: branchOptions.map((option) => ({
-        id: option.value, label: option.label, active: branchFilter === option.value, onClick: () => setBranchFilter(option.value),
+        id: option.value, label: option.label, active: branchFilter === String(option.value), onClick: () => setBranchFilter(String(option.value)),
       })),
     } : null,
   ], [branchFilter, branchOptions, branches.length, embedded, paymentFilter, paymentOptions, statusFilter, statusOptions, t])
