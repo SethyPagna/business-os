@@ -329,6 +329,19 @@ export default function ProductDetailModal({
                   </div>
                 ) : null}
 
+                {/* Desktop keeps all four related actions in this left-side
+                    column, directly below Branch Stock. */}
+                {batchesButton || Number(p.id) > 0 ? (
+                  <div className="hidden border-t border-gray-100 pt-2 dark:border-gray-700 sm:block">
+                    {batchesButton}
+                    {Number(p.id) > 0 ? (
+                      <Suspense fallback={<p className="py-2 text-center text-xs text-gray-400">...</p>}>
+                        <ProductDetailReport productId={Number(p.id)} barcode={p.barcode} t={t || (() => undefined)} fmtUSD={fmtUSD} />
+                      </Suspense>
+                    ) : null}
+                  </div>
+                ) : null}
+
                 {/* The "Batch: <latest received date>" row is REMOVED (Aug 30
                     ask): after the migration every product carries an
                     import-day opening lot, so "latest received" showed the
@@ -434,23 +447,12 @@ export default function ProductDetailModal({
               </div>
             ) : null}
 
-            {/* D3 (Part 422; pills Part 563): the report sections per the
-                user's detail-page spec -- now click-to-open FLOAT pills (Stock
-                Changes / Sales / Suppliers), spanning the FULL pane width
-                beneath both mini-sections. Needs a real product id (a
-                just-created optimistic row without one simply doesn't render
-                the reports yet). */}
+            {/* Phones retain the report actions below the metadata. */}
             {Number(p.id) > 0 ? (
-              <div className="mt-2.5 border-t border-gray-100 pt-2 dark:border-gray-700">
-                {/* On large screens Batches and its three related drills are
-                    one four-column action row. Phones keep Batches above and
-                    the report actions stacked, preserving comfortable taps. */}
-                <div className="sm:grid sm:grid-cols-4 sm:items-stretch sm:gap-1.5">
-                  {batchesButton ? <div className="hidden sm:block">{batchesButton}</div> : null}
-                  <Suspense fallback={<p className="py-2 text-center text-xs text-gray-400 sm:col-span-3">...</p>}>
-                    <ProductDetailReport productId={Number(p.id)} barcode={p.barcode} t={t || (() => undefined)} fmtUSD={fmtUSD} compactDesktop />
-                  </Suspense>
-                </div>
+              <div className="mt-2.5 border-t border-gray-100 pt-2 dark:border-gray-700 sm:hidden">
+                <Suspense fallback={<p className="py-2 text-center text-xs text-gray-400">...</p>}>
+                  <ProductDetailReport productId={Number(p.id)} barcode={p.barcode} t={t || (() => undefined)} fmtUSD={fmtUSD} />
+                </Suspense>
               </div>
             ) : null}
           </div>
