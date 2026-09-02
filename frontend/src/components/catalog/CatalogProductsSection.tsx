@@ -1,5 +1,6 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import type { Dispatch, SetStateAction } from 'react'
+import { protectedImageProps } from '../../utils/protectedMedia'
 import ArrowRight from 'lucide-react/dist/esm/icons/arrow-right.js'
 import BadgeCheck from 'lucide-react/dist/esm/icons/badge-check.js'
 import BadgePercent from 'lucide-react/dist/esm/icons/badge-percent.js'
@@ -682,7 +683,7 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
                       className="relative min-h-[220px] overflow-hidden bg-slate-100 dark:bg-neutral-800"
                       onClick={() => openPortalImage?.(item.title || promotionsTitle || copy('products', 'Products'), [item.mediaUrl || ''])}
                     >
-                      <img src={item.mediaUrl} alt={item.title || item.subtitle || promotionsTitle || copy('products', 'Products')} className="h-full w-full object-cover" />
+                      <img src={item.mediaUrl} alt={item.title || item.subtitle || promotionsTitle || copy('products', 'Products')} className="h-full w-full object-cover" {...protectedImageProps()} />
                     </button>
                   ) : null}
                 </div>
