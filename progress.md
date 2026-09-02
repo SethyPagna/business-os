@@ -94,12 +94,12 @@ Two rules learned the hard way, both from real incidents in this file's own hist
 
 ## Current status
 
-** FLEET-COORDINATION SKILL EXTENDED + ROOT CLAUDE.md (Sep 2, session business-os-v1-80  DONE, committed `a465e850` + `36f572c6`, docs-only, nothing to deploy; Part 579).**
-Skill now covers verification layer 5 (live-browser screenshot�verify�fix�continue with an expected-vs-actual ledger),
+**✅ FLEET-COORDINATION SKILL EXTENDED + ROOT CLAUDE.md (Sep 2, session business-os-v1-80 — DONE, committed `a465e850` + `36f572c6`, docs-only, nothing to deploy; Part 579).**
+Skill now covers verification layer 5 (live-browser screenshot→verify→fix→continue with an expected-vs-actual ledger),
 sibling-surface/logic consistency audits, reconciling parallel lanes (incl. `rc/*` worktrees + unmerged `codex/*`
-branches), and docs/context upkeep (progress.md / session-log / CLAUDE.md / d300K). Corrections landed in the existing
-references: Vite proxies `/api` � 8787 (8787 serves the LAST BUILD, not live edits); `deploy:full` ends at
-`wrangler deploy` (poll `/health` yourself); `/health` `version` is hard-coded  the deploy id is what wrangler prints.
+branches), and docs/context upkeep (progress.md / session-log / CLAUDE.md / ≤300K). Corrections landed in the existing
+references: Vite proxies `/api` → 8787 (8787 serves the LAST BUILD, not live edits); `deploy:full` ends at
+`wrangler deploy` (poll `/health` yourself); `/health` `version` is hard-coded — the deploy id is what wrangler prints.
 New root `CLAUDE.md` is a pointer document only. Flagged, not fixed: `verify:ui`/`verify:performance` in
 frontend/package.json point at files that do not exist. Reference to re-verify, not truth.
 
