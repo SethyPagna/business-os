@@ -12,9 +12,9 @@ function runTest(name: string, fn: () => void): void {
     fn()
     // Sep 3 2026: RenameCascadeModal portals to document.body from inside a level-3
 // Modal; a literal z-[60] put it UNDER --z-modal (1050) and rename hung forever.
-const renameCascade = fs.readFileSync(new URL('../src/components/shared/RenameCascadeModal.tsx', import.meta.url), 'utf8')
-assert.match(renameCascade, /z-[var(--z-modal-2)]/, 'RenameCascadeModal must stack on the modal-over-modal layer')
-assert.doesNotMatch(renameCascade, /z-[60]/, 'RenameCascadeModal must not use a literal z-index below the modal layer')
+const renameCascade = readFileSync(new URL('../src/components/shared/RenameCascadeModal.tsx', import.meta.url), 'utf8')
+assert.match(renameCascade, /z-\[var\(--z-modal-2\)\]/, 'RenameCascadeModal must stack on the modal-over-modal layer')
+assert.doesNotMatch(renameCascade, /z-\[60\]/, 'RenameCascadeModal must not use a literal z-index below the modal layer')
 
 console.log(`PASS ${name}`)
   } catch (error) {
