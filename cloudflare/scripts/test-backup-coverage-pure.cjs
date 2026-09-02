@@ -40,6 +40,13 @@ const backup = loadModule('lib/backup.ts', (id) => {
   if (id === './backupRestoreStream') return { streamBackupEvents: async function* () {} }
   if (id === './r2') return {}
   if (id === './db') return {}
+  // planTier (Section 8b): backup.ts now imports getPlanLimits from it at
+  // the top of the file -- `require` here is a plain Node require captured
+  // from THIS script's own directory (scripts/), so a bare `require(id)`
+  // fallthrough can never resolve a relative './planTier'. Real module, not
+  // a stub: only BACKUP_TABLES/migrationNumber are exercised below, but the
+  // import still has to resolve for backup.ts's module body to load at all.
+  if (id === './planTier') return loadModule('lib/planTier.ts', require)
   return require(id)
 })
 const { BACKUP_TABLES, migrationNumber } = backup
