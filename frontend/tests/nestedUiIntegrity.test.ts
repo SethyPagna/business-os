@@ -36,7 +36,12 @@ const branchesHub = read('components/branches/BranchesHubPage.tsx')
 assert.doesNotMatch(branchesHub, /id: 'movements'/, 'Branches hub must not restore a separate generic Movement mini-section')
 assert.doesNotMatch(branchesHub, /hostSection="movements"/, 'the redundant Inventory movement ledger must stay removed from Branches')
 assert.match(branchesHub, /active === 'transfers'[\s\S]*view="transfers"/, 'Transfer must own transfer history without a second movement ledger')
-assert.match(branchesHub, /active === 'inventory'[\s\S]*view="branches"/, 'Inventory must render the branch-product stock workspace moved into Branches')
+// Restored Sept 2 2026: this assertion's own stated intent ("the
+// branch-product stock workspace") never matched its old regex, which
+// pinned view="branches" -- the SAME branch-cards content Overview renders.
+// That mismatch was the regression: Inventory was indistinguishable from
+// Overview. Fixed to require the actual products (branch-stock) surface.
+assert.match(branchesHub, /active === 'inventory'[\s\S]*hostSection="products"/, 'Inventory must render the branch-product stock workspace, not a copy of Overview')
 
 for (const file of ['components/branches/BranchesHubPage.tsx', 'components/review/ReviewLogsPage.tsx', 'components/utils-settings/SettingsHubPage.tsx', 'components/promotions/PromotionsPage.tsx']) {
   const source = read(file)

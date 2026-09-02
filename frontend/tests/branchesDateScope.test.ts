@@ -28,7 +28,11 @@ test('Branches restores branch-product Inventory and keeps Transfer history sepa
   assert.match(hubSource, /id: 'overview'.*'Overview'/)
   assert.match(hubSource, /id: 'inventory'.*'Inventory'/)
   assert.match(hubSource, /id: 'transfers'.*trh\('transfer', 'Transfer'\)/)
-  assert.match(hubSource, /active === 'inventory'[\s\S]*view="branches"/)
+  // Restored Sept 2 2026: the Inventory tab used to literally re-render
+  // BranchesSection view="branches" (the same content as Overview's branch
+  // cards) -- indistinguishable from Overview by design of that regression.
+  // It now drives the branch-stock product workspace instead.
+  assert.match(hubSource, /active === 'inventory'[\s\S]*hostSection="products"/)
   assert.doesNotMatch(hubSource, /hostSection="movements"/)
   assert.match(hubSource, /focus === 'movements'\) navigateTo\('products'\)/)
   assert.ok((hubSource.match(/showSectionNavigation=\{false\}/g) || []).length >= 2)
