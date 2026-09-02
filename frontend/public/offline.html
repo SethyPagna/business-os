@@ -3,40 +3,111 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-<title>Offline — Business OS</title>
+<meta name="theme-color" content="#f7f4ee" />
+<title>Offline &mdash; Business OS</title>
 <style>
-  :root { color-scheme: light dark; }
+  /* Self-hosted faces (see src/styles/fonts.css for the same files). This
+     page is the LAST-RESORT offline branch, so it can never pull a webfont
+     from a CDN; the service worker precaches /fonts/** alongside the app
+     shell so these resolve from Cache Storage with no network. Real
+     fallback stacks keep the text readable if a face is missing anyway. */
+  @font-face {
+    font-family: 'Inter';
+    font-style: normal;
+    font-weight: 400;
+    font-display: swap;
+    src: url('/fonts/inter/inter-latin-400-normal.woff2') format('woff2');
+  }
+  @font-face {
+    font-family: 'Source Serif 4';
+    font-style: normal;
+    font-weight: 600;
+    font-display: swap;
+    src: url('/fonts/source-serif-4/source-serif-4-latin-600-normal.woff2') format('woff2');
+  }
+  @font-face {
+    font-family: 'Noto Sans Khmer';
+    font-style: normal;
+    font-weight: 400;
+    font-display: swap;
+    src: url('/fonts/noto-sans-khmer/noto-sans-khmer-khmer-400-normal.woff2') format('woff2');
+    unicode-range: U+1780-17FF, U+19E0-19FF, U+200C-200D, U+25CC;
+  }
+  /* Decision 5: light by default, dark only when the user already chose it.
+     There is deliberately NO prefers-color-scheme rule here -- this page
+     must not be the one surface in the product that auto-honours OS dark.
+     The inline script at the bottom reads the same stored preference the
+     app's own theme bootstrap reads and stamps data-theme="dark". */
+  :root {
+    color-scheme: light;
+    --page: #f7f4ee;
+    --card: #fffdf9;
+    --ink: #1f1d1a;
+    --ink-2: #5b564e;
+    --line: rgba(31, 29, 26, .12);
+    --accent: #9c7a3c;
+    --accent-ink: #6e5527;
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --page: #161513;
+    --card: #1f1d1a;
+    --ink: #f2ede4;
+    --ink-2: #b9b1a4;
+    --line: rgba(242, 237, 228, .14);
+    --accent: #9c7a3c;
+    --accent-ink: #d8b878;
+  }
   body {
     margin: 0;
     min-height: 100vh;
+    min-height: 100dvh;
     display: flex;
     align-items: center;
     justify-content: center;
     padding: 24px;
+    padding-top: calc(24px + env(safe-area-inset-top));
     padding-bottom: calc(24px + env(safe-area-inset-bottom));
-    background: #f9fafb;
-    color: #1f2937;
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    padding-left: calc(24px + env(safe-area-inset-left));
+    padding-right: calc(24px + env(safe-area-inset-right));
+    background: var(--page);
+    color: var(--ink);
+    font-family: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, 'Noto Sans Khmer', sans-serif;
+    font-size: 13px;
+    line-height: 1.5;
     text-align: center;
   }
-  @media (prefers-color-scheme: dark) {
-    body { background: #0f172a; color: #e5e7eb; }
-    button { background: #2563eb !important; }
+  .card {
+    max-width: 420px;
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 24px 20px;
+    box-shadow: 0 4px 14px rgba(31, 29, 26, .10);
   }
-  .card { max-width: 420px; }
-  h1 { font-size: 1.15rem; margin: 0 0 8px; }
-  p { font-size: 0.9rem; line-height: 1.5; opacity: 0.85; margin: 0 0 4px; }
-  .km { margin-top: 4px; }
+  h1 {
+    font-family: 'Source Serif 4', Georgia, 'Times New Roman', 'Noto Serif Khmer', serif;
+    font-weight: 600;
+    font-size: 17px;
+    line-height: 1.25;
+    margin: 0 0 8px;
+  }
+  p { font-size: 13px; margin: 0 0 4px; color: var(--ink-2); }
+  .km { margin-top: 6px; font-family: 'Noto Sans Khmer', 'Khmer OS Siemreap', sans-serif; }
   button {
     margin-top: 20px;
-    border: none;
+    border: 1px solid var(--accent-ink);
     border-radius: 8px;
-    background: #1e3a8a;
-    color: #fff;
-    padding: 10px 20px;
-    font-size: 0.9rem;
+    background: var(--accent);
+    color: #fffdf9;
+    padding: 9px 20px;
+    min-height: 40px;
+    font: inherit;
+    font-size: 16px;
+    font-weight: 600;
     cursor: pointer;
   }
+  button:hover { filter: brightness(0.94); }
 </style>
 </head>
 <body>
@@ -46,5 +117,30 @@
     <p class="km" lang="km">អ្នកកំពុងគ្មានអ៊ីនធឺណិត។ ទំព័រនេះមិនទាន់ត្រូវបានរក្សាទុកទេ ហើយ Business OS មិនអាចភ្ជាប់ទៅម៉ាស៊ីនមេបានទេ។ ការងារ និងការលក់ដែលបានរក្សាទុករួចនៅលើឧបករណ៍នេះមានសុវត្ថិភាព ហើយនឹងធ្វើសមកាលកម្មនៅពេលមានអ៊ីនធឺណិតឡើងវិញ។</p>
     <button type="button" onclick="location.reload()">Try again / ព្យាយាមម្តងទៀត</button>
   </div>
+  <script>
+    // Same three keys, same precedence, as public-runtime/theme-bootstrap.ts
+    // and index.html's pre-paint script. No prefers-color-scheme fallback:
+    // a user who never chose dark stays light here too (decision 5).
+    (function applyStoredTheme() {
+      function read(key, field) {
+        try {
+          var raw = localStorage.getItem(key)
+          if (!raw) return ''
+          if (!field) return raw
+          var parsed = JSON.parse(raw)
+          return parsed && typeof parsed === 'object' ? parsed[field] : ''
+        } catch (error) { return '' }
+      }
+      var candidates = [read('businessos_device_settings', 'theme'), read('businessos_theme', ''), read('businessos_settings', 'theme')]
+      for (var index = 0; index < candidates.length; index += 1) {
+        if (String(candidates[index] || '').trim().toLowerCase() === 'dark') {
+          document.documentElement.setAttribute('data-theme', 'dark')
+          var meta = document.querySelector('meta[name="theme-color"]')
+          if (meta) meta.setAttribute('content', '#161513')
+          return
+        }
+      }
+    }())
+  </script>
 </body>
 </html>
