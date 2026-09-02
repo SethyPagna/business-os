@@ -5,14 +5,20 @@ Worker static assets.
 
 The Worker serves both the API and the built React frontend:
 
-- `https://admin.leangcosmetics.dpdns.org`
-- `https://leangcosmetics.dpdns.org`
+- `https://admin.leangbeauty.com`
+- `https://leangbeauty.com`
+
+(`leangcosmetics.dpdns.org` and `leangcosmetics.com` are earlier/deprecated
+hosts for this shop; `index.html`'s redirect map and `portalPublicUrl` still
+handle them, but the current apex is `leangbeauty.com` — verified against
+`docs/history/session-log.md` Part 461/471.)
 
 API, upload, and health routes run Worker code first. All other paths fall
 back to the single-page frontend app from `../frontend/dist`.
 
 `cloudflare/` is the only backend — the previous Docker/Postgres app has
-been removed. See `../PORTING_STATUS.md` for the historical migration log.
+been removed. (The historical migration log this section used to point at,
+`../PORTING_STATUS.md`, no longer exists in the repo.)
 
 ## Quick Start
 
@@ -32,18 +38,10 @@ curl http://localhost:8787/health
 
 ## Cloudflare Resources
 
-Before the first remote deploy, create or verify:
-
-```sh
-wrangler d1 create business-os
-wrangler kv namespace create CACHE
-wrangler r2 bucket create business-os-assets
-wrangler queues create business-os-import
-wrangler queues create business-os-media
-```
-
-Copy the returned D1 `database_id` and KV namespace `id` into
-`wrangler.toml`.
+The full, current list (two D1 databases, KV, R2, and four queues) plus the
+"copy the IDs into `wrangler.toml`" step lives in [`../DEPLOY.md`](../DEPLOY.md)
+— this section used to repeat a shorter, now-stale list; follow DEPLOY.md
+instead so the two don't drift apart again.
 
 ## Deploy
 
