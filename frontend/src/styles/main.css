@@ -1,3 +1,6 @@
+@import './tokens.css';
+@import './fonts.css';
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -202,13 +205,16 @@ body.lang-km .text-\[11px\] { font-size: calc(0.78rem * var(--ui-text-scale, 1))
     --ui-radius: 8px;
     --ui-font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Noto Sans Khmer', sans-serif;
     --ui-khmer-font-family: "Noto Sans Khmer", "Khmer OS Siemreap", "Battambang", "Khmer OS", sans-serif;
-    --ui-sidebar-bg: ;
-    --ui-page-bg: ;
+    /* --ui-sidebar-bg / --ui-page-bg removed (P2-1, Gate 2A audit): declared
+       here but never set -- the Settings -> Appearance sidebar/page-color
+       pickers (AppContext.tsx:1531-1587) inject their own <style> tag with
+       literal hex values instead of writing these custom properties, and no
+       component ever set that page-background data attribute either, so the
+       dead `body:has(...)` selector that used to read it (and this pair of
+       vars) was removed as one unit. Confirmed via a source grep for both
+       the CSS variable names and the attribute name across frontend/src. */
   }
 }
-
-body:has([data-page-bg])      { background-color: var(--ui-page-bg) !important; }
-/* Applied directly via JS below when variable is set */
 
 /* DARK MODE -- redone (Aug 19 2026 request) to match the public catalog
    site's palette instead of the app's old bespoke "Claude-inspired"
@@ -511,22 +517,55 @@ body:has([data-page-bg])      { background-color: var(--ui-page-bg) !important; 
 
 /* COMPONENT LIBRARY */
 @layer components {
+  /* Buttons -- retargeted onto design-kit tokens (P2-1, Gate 2A audit: was
+     hard-coded `bg-blue-600` here, silently patched back to gold by a
+     SECOND `.btn-primary { background-color: ... !important }` rule further
+     down the file -- a real double-declaration, not just a styling choice).
+     Colors now come from the tokens directly, in one place, no !important
+     needed; the accent stays live (`var(--ui-accent)`) so a user's custom
+     accent color from Settings -> Appearance still applies everywhere. */
   .btn-primary {
-    @apply bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white px-4 py-2 rounded-lg font-semibold transition-colors disabled:opacity-50 disabled:cursor-not-allowed border border-blue-700 shadow-sm;
+    @apply text-white px-4 py-2 rounded-lg font-semibold transition-colors disabled:opacity-50 disabled:cursor-not-allowed shadow-sm;
     min-height: 2.5rem;
+    background-color: var(--ui-accent, #9c7a3c);
+    border: 1px solid color-mix(in srgb, var(--ui-accent, #9c7a3c) 78%, #0f172a 22%);
   }
+  .btn-primary:hover:not(:disabled) { filter: brightness(0.94); }
+  .btn-primary:active:not(:disabled) { filter: brightness(0.88); }
+
   .btn-secondary {
-    @apply bg-white hover:bg-blue-50 active:bg-blue-100 dark:bg-zinc-700 dark:hover:bg-zinc-600 text-gray-700 dark:text-gray-200 px-4 py-2 rounded-lg font-semibold transition-colors border border-slate-300 dark:border-slate-600 shadow-sm;
+    @apply dark:bg-zinc-700 dark:hover:bg-zinc-600 text-gray-700 dark:text-gray-200 px-4 py-2 rounded-lg font-semibold transition-colors border shadow-sm;
     min-height: 2.5rem;
+    background-color: var(--ui-surface, #fff);
+    border-color: var(--ui-line-2, #cbd5e1);
   }
-  .btn-danger  { @apply bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg font-semibold transition-colors border border-red-700 shadow-sm; min-height:2.5rem; }
-  .btn-success { @apply bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg font-semibold transition-colors border border-green-700 shadow-sm; min-height:2.5rem; }
+  .btn-secondary:hover:not(:disabled) { background-color: var(--ui-surface-2, #f1f5f9); }
+  .btn-secondary:active:not(:disabled) { filter: brightness(0.97); }
+
+  .btn-danger {
+    @apply text-white px-4 py-2 rounded-lg font-semibold transition-colors disabled:opacity-50 disabled:cursor-not-allowed shadow-sm;
+    min-height: 2.5rem;
+    background-color: var(--ui-danger, #9b3b2f);
+    border: 1px solid color-mix(in srgb, var(--ui-danger, #9b3b2f) 78%, black 22%);
+  }
+  .btn-danger:hover:not(:disabled) { filter: brightness(0.92); }
+
+  .btn-success {
+    @apply text-white px-4 py-2 rounded-lg font-semibold transition-colors disabled:opacity-50 disabled:cursor-not-allowed shadow-sm;
+    min-height: 2.5rem;
+    background-color: var(--ui-success, #3f6b4a);
+    border: 1px solid color-mix(in srgb, var(--ui-success, #3f6b4a) 78%, black 22%);
+  }
+  .btn-success:hover:not(:disabled) { filter: brightness(0.92); }
 
   .input {
     @apply w-full border border-gray-300 dark:border-zinc-600 rounded-lg px-3 py-2
            bg-white dark:bg-zinc-700 text-gray-900 dark:text-zinc-100
            focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent;
-    font-size: max(16px, var(--ui-font-size, 14px));
+    /* --ui-input-size (tokens.css): 16px below 768px (iOS Safari auto-zoom
+       floor), 13px from 768px up (decision 8's compact desktop density).
+       Was `max(16px, var(--ui-font-size))`, always >=16px everywhere. */
+    font-size: var(--ui-input-size, 16px);
     transition: border-color 0.15s, box-shadow 0.15s;
     min-height: 2.5rem;
   }
@@ -924,8 +963,12 @@ body.lang-km .compact-analytics-legend {
 .col-highlight-blue  { background:rgba(59,130,246,.05); }
 
 /* Accent color overrides */
-.btn-primary { background-color: var(--ui-accent,#9c7a3c) !important; border-color: color-mix(in srgb, var(--ui-accent,#9c7a3c) 78%, #0f172a 22%) !important; }
-.btn-primary:hover { filter: brightness(0.94); }
+/* .btn-primary's color/hover used to be redeclared here with !important,
+   patching over the hard-coded bg-blue-600 still sitting in the base
+   .btn-primary rule above -- that was the double-declaration the Gate 2A
+   audit flagged. The base rule now sets the token color directly (P2-1),
+   so this duplicate is removed rather than kept as a second source of
+   truth for the same property. */
 .btn-secondary:hover { border-color: color-mix(in srgb, var(--ui-accent,#9c7a3c) 42%, #94a3b8 58%) !important; }
 .sidebar-item.active { color: var(--ui-accent,#9c7a3c) !important; }
 
@@ -976,6 +1019,21 @@ th, td, label, p, span, div, button, select, input, textarea { font-size:inherit
 /* Scale text classes without resizing the whole layout/root rem size. */
 .text-xs { font-size: calc(0.75rem * var(--ui-text-scale, 1)) !important; }
 .text-sm { font-size: calc(0.875rem * var(--ui-text-scale, 1)) !important; }
+
+/* `.input.text-xs`/`.input.text-sm` (~80 fields, e.g. Branches.tsx,
+   TransferModal.tsx, ContactPicker.tsx) previously lost their font-size to
+   the two rules directly above: same specificity (0,1,0) as `.input`'s own
+   (non-!important) rule, both `.text-xs`/`.text-sm` win any !important vs.
+   non-!important tie regardless of source order -- silently dropping the
+   16px iOS-Safari zoom-prevention floor on every field that also carried a
+   size utility (Gate 2A audit finding, main.css:529 at audit time). Fixed
+   here with higher specificity (element + two classes = 0,2,1) rather than
+   touching `.text-xs`/`.text-sm` themselves, so no other consumer of those
+   two classes anywhere in the app is affected. */
+input.input.text-xs, textarea.input.text-xs, select.input.text-xs,
+input.input.text-sm, textarea.input.text-sm, select.input.text-sm {
+  font-size: var(--ui-input-size, 16px) !important;
+}
 .text-base { font-size: calc(1rem * var(--ui-text-scale, 1)) !important; }
 .text-lg { font-size: calc(1.125rem * var(--ui-text-scale, 1)) !important; }
 .text-xl { font-size: calc(1.25rem * var(--ui-text-scale, 1)) !important; }
