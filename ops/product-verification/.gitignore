@@ -1,0 +1,4 @@
+# Disk cache for provider calls (verify-products.mjs --cache-dir, default
+# .cache/) -- machine-local, rebuildable, and may contain real search API
+# responses when run with --provider http. Never commit it.
+.cache/
