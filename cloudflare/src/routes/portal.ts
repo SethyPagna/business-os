@@ -20,6 +20,7 @@ import { signupPortalAccount, signinPortalAccount } from '../lib/portalAccounts'
 import { createPortalSession, setPortalCookie, clearPortalCookie, revokePortalSession, getPortalAccount } from '../lib/portalSession'
 import { getPortalLockoutState, recordPortalFailure, clearPortalLockout } from '../lib/portalAuthLockout'
 import { canonicalizePhone } from '../lib/phone'
+import { buildAliasExactClause } from '../lib/barcodeAliases'
 import type { Env } from '../index'
 
 const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser } }>()
@@ -1518,6 +1519,9 @@ export function buildPortalProductFilters(query: Record<string, string>, allowSt
     columns: ['name', 'sku', 'barcode'],
     paramKeyBase: 'portal',
     exactMatchQuery: query.query || query.q || '',
+    // Codex/legacy alias barcodes (migration 0105) are OR'd in through the
+    // plan's extraExactClauses seam; placeholders yield '' and are dropped.
+    extraExactClauses: [buildAliasExactClause(query.query || query.q || '', params, { productAlias: 'p', paramKey: 'portalAliasExact' })].filter(Boolean),
   })
   Object.assign(params, searchPlan.params)
   if (searchPlan.whereClause) {

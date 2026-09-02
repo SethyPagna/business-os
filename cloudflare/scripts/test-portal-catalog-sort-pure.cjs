@@ -70,6 +70,7 @@ function loadReal(relPath, requireOverrides = {}) {
 }
 
 const searchMatch = loadReal('lib/searchMatch.ts')
+const barcodeAliases = loadReal('lib/barcodeAliases.ts')
 
 const portalRoute = loadReal('routes/portal.ts', {
   '../lib/db': { getDb: () => db },
@@ -109,6 +110,7 @@ const portalRoute = loadReal('routes/portal.ts', {
   '../durable-objects/broadcastHub': { broadcast: async () => {} },
   '../lib/portalAi': { generatePortalAiResponse: async () => ({}), getPortalAiUsageStatus: () => ({}) },
   '../lib/searchMatch': searchMatch,
+  '../lib/barcodeAliases': barcodeAliases, // real module: the route ORs alias barcodes into its search plan (P2-3 × P2-2)
   '../lib/importImageMatch': { MAX_IMAGES_PER_PRODUCT: 3, ADMIN_MAX_IMAGES_PER_PRODUCT: 5 },
 })
 

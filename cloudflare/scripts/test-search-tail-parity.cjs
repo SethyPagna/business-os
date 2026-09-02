@@ -66,7 +66,7 @@ function freshDb() {
     is_active INTEGER NOT NULL DEFAULT 1,
     name_normalized TEXT, unit_normalized TEXT, brand_compact TEXT
   )`)
-  for (const file of ['0018_products_fts.sql', '0019_products_fts_code.sql', '0021_products_fts_name_trigram.sql']) {
+  for (const file of ['0018_products_fts.sql', '0019_products_fts_code.sql', '0021_products_fts_name_trigram.sql', '0105_barcode_aliases.sql']) {
     db.exec(fs.readFileSync(path.join(__dirname, '..', 'migrations', file), 'utf8'))
   }
   return db
@@ -219,3 +219,23 @@ check('computeExactBarcodeHitId: whitespace around the scanned value is trimmed 
 })
 
 console.log(`\nAll ${passed} search-tail-parity tests passed`)
+
+// Coordinator (P2-2 × P2-3 seam): an alias barcode recorded in barcode_aliases
+// (migration 0105, applied in freshDb) finds its product through the plan's
+// extraExactClauses, built by lib/barcodeAliases.ts with the routes' `p`
+// table alias -- exactly how products/portal/branches/inventory wire it.
+check('alias barcode (barcode_aliases) finds the product via extraExactClauses', () => {
+  const { buildAliasExactClause } = loadTs('src/lib/barcodeAliases.ts')
+  db.prepare("INSERT INTO barcode_aliases (product_id, barcode, barcode_normalized, source) VALUES (2, '00020714215552', '00020714215552', 'test')").run()
+  const raw = '00020714215552'
+  const groups = tokenizeSearchTermGroups(raw, 6, 8)
+  const params = {}
+  const clause = buildAliasExactClause(raw, params, { productAlias: 'p', paramKey: 'aliasExact' })
+  assert.ok(clause.includes('ba.product_id = p.id AND ba.barcode_normalized = @aliasExact)'), clause)
+  const plan = buildProductSearchPlan({ groups, mode: 'AND', columns: PRODUCT_SEARCH_COLUMNS, exactMatchQuery: raw, extraExactClauses: [clause].filter(Boolean) })
+  Object.assign(params, plan.params)
+  const rows = db.prepare(`SELECT p.id FROM products p WHERE p.is_active = 1 AND ${plan.whereClause}`).all(params)
+  assert.ok(rows.some((r) => r.id === 2), `expected the alias to resolve to id 2, got ${JSON.stringify(rows)}`)
+  const { rows: without } = runPlan(db, raw)
+  assert.ok(!without.some((r) => r.id === 2), 'without the alias clause the alias barcode must not match id 2 (the clause did the work)')
+})

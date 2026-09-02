@@ -27,6 +27,7 @@ import { broadcast } from '../durable-objects/broadcastHub'
 import { createBulkDeleteJob, getBulkDeleteJob, reapStalledBulkDeleteJobs } from '../lib/bulkDeleteEngine'
 import { ADMIN_MAX_IMAGES_PER_PRODUCT, MAX_IMAGES_PER_PRODUCT } from '../lib/importImageMatch'
 import { loadActivePromotionRules, productPromotedSql, productDiscountActiveSql, anyRuleAppliesSql, singleRuleAppliesSql } from '../lib/promotionRulesSql'
+import { buildAliasExactClause } from '../lib/barcodeAliases'
 import {
   computeRenameImpact,
   applyRenameCarry,
@@ -845,6 +846,9 @@ function buildSearchFilters(query: Record<string, string>, options: ProductSearc
       columns: PRODUCT_SEARCH_COLUMNS,
       titleOnly,
       exactMatchQuery: query.query || query.q || '',
+      // Codex/legacy alias barcodes (migration 0105) are OR'd in through the
+      // plan's extraExactClauses seam; placeholders yield '' and are dropped.
+      extraExactClauses: [buildAliasExactClause(query.query || query.q || '', params, { productAlias: 'p', paramKey: 'aliasExact' })].filter(Boolean),
     })
     Object.assign(params, plan.params)
     if (plan.whereClause) {

@@ -78,12 +78,23 @@ export function isRealBarcode(value: unknown): boolean {
  * would match every non-null barcode against an empty string is exactly the
  * kind of accidental "everything matches" bug placeholders exist to avoid.
  */
-export function buildAliasExactClause(alias: string, bindings: Record<string, unknown>): string {
+export function buildAliasExactClause(
+  alias: string,
+  bindings: Record<string, unknown>,
+  // Every product search route aliases the table (`FROM products p`), so
+  // the shared search plan passes productAlias 'p'; the default keeps the
+  // bare-table form for scripts/tests that query `products` directly.
+  // paramKey lets a caller that builds several plans per request
+  // (searchMatch.ts's paramKeyBase) avoid colliding on the default
+  // positional key.
+  opts: { productAlias?: string; paramKey?: string } = {},
+): string {
   const normalized = normalizeBarcode(alias)
   if (!isRealBarcode(normalized)) return ''
-  const key = `barcode_alias_${Object.keys(bindings).length}`
+  const key = opts.paramKey || `barcode_alias_${Object.keys(bindings).length}`
+  const productAlias = opts.productAlias || 'products'
   bindings[key] = normalized
-  return `EXISTS (SELECT 1 FROM barcode_aliases ba WHERE ba.product_id = products.id AND ba.barcode_normalized = @${key})`
+  return `EXISTS (SELECT 1 FROM barcode_aliases ba WHERE ba.product_id = ${productAlias}.id AND ba.barcode_normalized = @${key})`
 }
 
 export type BarcodeAlias = {

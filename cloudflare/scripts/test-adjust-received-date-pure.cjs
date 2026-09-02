@@ -112,6 +112,7 @@ const inventoryRoute = loadReal('routes/inventory.ts', {
   '../durable-objects/broadcastHub': { broadcast: async () => {} },
   '../lib/cache': { bumpVersion: async () => {} },
   '../lib/productIdentity': { findIdentityMatch: async () => null },
+  '../lib/barcodeAliases': { buildAliasExactClause: () => '' }, // route ORs alias barcodes into its search plan; not exercised here
   '../lib/searchMatch': {
     buildFtsMatchExpression: () => "''",
     buildHybridMatchClause: () => '1=1',

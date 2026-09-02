@@ -78,6 +78,7 @@ const portalRoute = loadReal('routes/portal.ts', {
   '../lib/uploadSecurity': { detectBufferKind: () => null },
   '../durable-objects/broadcastHub': { broadcast: async () => {} },
   '../lib/portalAi': { generatePortalAiResponse: async () => ({}), getPortalAiUsageStatus: () => ({}) },
+  '../lib/barcodeAliases': { buildAliasExactClause: () => '' }, // route ORs alias barcodes into its search plan; not exercised here
   '../lib/searchMatch': {},
   '../lib/sqlBinding': {},
   '../lib/familyPagination': {},

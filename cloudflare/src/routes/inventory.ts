@@ -21,6 +21,7 @@ import { applyDatedStockCountPlan } from '../lib/datedStockCountApply'
 import { parseRawDatedCountRows, resolveDatedStockCountRows } from '../lib/datedStockCountResolve'
 import { applyDatedStockCountDecisions, type DatedCountDecision } from '../lib/datedStockCountDecisions'
 import { sendTelegramEvent } from '../lib/telegram'
+import { buildAliasExactClause } from '../lib/barcodeAliases'
 import type { Env } from '../index'
 
 // Inventory routes, ported from backend/src/routes/inventory.ts.
@@ -189,6 +190,9 @@ function appendInventoryProductFilters(query: InventoryFilterQuery) {
       columns: PRODUCT_SEARCH_COLUMNS,
       titleOnly,
       exactMatchQuery: query.query || query.q || '',
+      // Codex/legacy alias barcodes (migration 0105) are OR'd in through the
+      // plan's extraExactClauses seam; placeholders yield '' and are dropped.
+      extraExactClauses: [buildAliasExactClause(query.query || query.q || '', params, { productAlias: 'p', paramKey: 'aliasExact' })].filter(Boolean),
     })
     Object.assign(params, plan.params)
     if (plan.whereClause) {

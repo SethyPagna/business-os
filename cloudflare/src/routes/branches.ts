@@ -14,6 +14,7 @@ import { assertUpdatedAtMatch, getExpectedUpdatedAt, writeConflictResponse, Writ
 import { findIdentityMatch, findIdentityMatches, type ProductIdentityRow } from '../lib/productIdentity'
 import { decrementBatchStockStatement, decrementBatchStockStrictStatement, incrementBatchStockStatement, resolveDestinationBatch, readFifoLotAvailability, allocateAcrossLots } from '../lib/productBatches'
 import { branchUpdateStatements } from '../lib/branchWrites'
+import { buildAliasExactClause } from '../lib/barcodeAliases'
 import {
   buildProductSearchPlan,
   computeExactBarcodeHitId,
@@ -830,6 +831,9 @@ function buildBranchStockWhere(c: any, branchId: number, { includeStockState = t
     columns: PRODUCT_SEARCH_COLUMNS,
     paramKeyBase: 'branch',
     exactMatchQuery: rawQuery,
+    // Codex/legacy alias barcodes (migration 0105) are OR'd in through the
+    // plan's extraExactClauses seam; placeholders yield '' and are dropped.
+    extraExactClauses: [buildAliasExactClause(rawQuery, params, { productAlias: 'p', paramKey: 'branchAliasExact' })].filter(Boolean),
   })
   Object.assign(params, searchPlan.params)
   let matchRankSql: string | undefined

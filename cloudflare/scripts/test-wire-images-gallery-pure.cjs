@@ -87,6 +87,7 @@ const media = loadReal('lib/media.ts')
 const sqlBinding = loadReal('lib/sqlBinding.ts')
 const batchCode = loadReal('lib/batchCode.ts')
 const searchMatch = loadReal('lib/searchMatch.ts')
+const barcodeAliases = loadReal('lib/barcodeAliases.ts')
 const productDetailRule = loadReal('lib/productDetailRule.ts')
 const productWrites = loadReal('lib/productWrites.ts', {
   './db': { getDb: () => dbShim },
@@ -153,6 +154,7 @@ const productsRoute = loadReal('routes/products.ts', {
   '../lib/productIdentity': { findDuplicateProductGroups: async () => [] },
   '../lib/productBatches': { attachBatchCounts: async () => {} },
   '../lib/searchMatch': searchMatch,
+  '../lib/barcodeAliases': barcodeAliases, // real module: the route ORs alias barcodes into its search plan (P2-3 × P2-2)
   '../lib/familyPagination': loadReal('lib/familyPagination.ts'),
   '../lib/fileAssets': { getMediaType: () => 'image', buildUniqueStoredName: (n) => n, sanitizeOriginalFileName: (n) => n },
   '../lib/catalogText': { normalizeCatalogText: (v) => v, hasSuspiciousCatalogText: () => false },

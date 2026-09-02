@@ -82,6 +82,7 @@ const portalRoute = loadReal('routes/portal.ts', {
   '../lib/uploadSecurity': { detectBufferKind: () => null },
   '../durable-objects/broadcastHub': { broadcast: async () => {} },
   '../lib/portalAi': { generatePortalAiResponse: async () => ({}), getPortalAiUsageStatus: () => ({}) },
+  '../lib/barcodeAliases': { buildAliasExactClause: () => '' }, // route ORs alias barcodes into its search plan; not exercised here
   '../lib/searchMatch': {},
   '../lib/familyPagination': { paginateProductFamilies: async () => ({ items: [], total: 0 }) },
   '../lib/importImageMatch': { MAX_IMAGES_PER_PRODUCT: 3, ADMIN_MAX_IMAGES_PER_PRODUCT: 5 },

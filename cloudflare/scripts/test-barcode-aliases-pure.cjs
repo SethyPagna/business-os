@@ -95,3 +95,10 @@ check('buildAliasExactClause: successive calls against the same bindings object 
 })
 
 console.log(`\n${passed} passed`)
+
+check('buildAliasExactClause: productAlias/paramKey opts target the routes `p` alias and a caller-chosen key', () => {
+  const bindings = { keep: 1 }
+  const clause = buildAliasExactClause('6923644012345', bindings, { productAlias: 'p', paramKey: 'portalAliasExact' })
+  assert.ok(clause.includes('ba.product_id = p.id AND ba.barcode_normalized = @portalAliasExact)'), clause)
+  assert.strictEqual(bindings.portalAliasExact, '6923644012345')
+})
