@@ -3,10 +3,12 @@
 // caps -- see that module's header for the full "why").
 //
 // Three things would be catastrophic to get wrong here, silently:
-//   1. An unset env.PLAN_TIER defaulting to 'free' -- production's
-//      wrangler.toml does not currently set this var at all, so that would
-//      shrink every one of today's Paid-sized ceilings on the next cold
-//      start, with no config change and no deploy.
+//   1. An unset env.PLAN_TIER defaulting to 'free' -- that would shrink
+//      every one of today's Paid-sized ceilings on the next cold start,
+//      with no config change and no deploy. (Both configs now pin the var
+//      explicitly -- wrangler.toml "paid", wrangler.free.toml "free" -- so
+//      the default only covers a config that forgot to, `wrangler dev`
+//      against a hand-rolled env, and these harnesses.)
 //   2. The Free/Paid numbers drifting from what wrangler.toml's own
 //      historical comments and each constant's definition-site comment
 //      document -- this file exists specifically so a future edit to
@@ -81,9 +83,41 @@ check('getPlanLimits follows getPlanTier and matches PLAN_LIMITS_BY_TIER exactly
 // constant's own definition-site history in importEngine.ts/backup.ts/
 // system.ts). A future edit that changes a number here without updating
 // this test, or vice versa, is exactly the drift this file exists to catch.
+//
+// SCOPE (P2-8): these two checks pin the TEN fields whose values come from
+// recorded project history, and they are deliberately a SUBSET assertion
+// now that the table also carries fields sourced from Cloudflare's
+// published platform limits. The complete field-by-field pin of both
+// tiers, the "paid >= free for every numeric limit" invariant, and the
+// notice list live in scripts/test-plan-tier-matrix-pure.cjs. The
+// key-parity check below is what stops a field from being added to one
+// tier and not the other, which a subset assertion would otherwise miss.
+const HISTORICAL_FIELDS = [
+  'tier',
+  'rowsPerImportChunk',
+  'preflightMaxRows',
+  'stockActionMaxUnits',
+  'stockActionMaxRows',
+  'maxAssetsPerBackup',
+  'maxImageDeletesPerReset',
+  'importQueueMaxBatchSize',
+  'longAiImagePassesEnabled',
+  'd1DailyRowsReadCeiling',
+  'd1DailyRowsWrittenCeiling',
+]
+
+function pickHistorical(limits) {
+  const picked = {}
+  for (const field of HISTORICAL_FIELDS) {
+    assert.ok(field in limits, `PlanLimits lost the historically-documented field ${field}`)
+    picked[field] = limits[field]
+  }
+  return picked
+}
+
 check('Paid limits match the current exported constants at their definition sites', async () => {
   const { PLAN_LIMITS_BY_TIER } = await loadPlanTier()
-  assert.deepEqual(PLAN_LIMITS_BY_TIER.paid, {
+  assert.deepEqual(pickHistorical(PLAN_LIMITS_BY_TIER.paid), {
     tier: 'paid',
     rowsPerImportChunk: 600,
     preflightMaxRows: 500,
@@ -100,7 +134,7 @@ check('Paid limits match the current exported constants at their definition site
 
 check('Free limits match the documented Free-era / platform-fact values', async () => {
   const { PLAN_LIMITS_BY_TIER } = await loadPlanTier()
-  assert.deepEqual(PLAN_LIMITS_BY_TIER.free, {
+  assert.deepEqual(pickHistorical(PLAN_LIMITS_BY_TIER.free), {
     tier: 'free',
     rowsPerImportChunk: 150,
     preflightMaxRows: 125,
@@ -113,6 +147,14 @@ check('Free limits match the documented Free-era / platform-fact values', async 
     d1DailyRowsReadCeiling: 5_000_000,
     d1DailyRowsWrittenCeiling: 100_000,
   })
+})
+
+check('both tiers carry exactly the same field set -- no field on one tier only', async () => {
+  const { PLAN_LIMITS_BY_TIER } = await loadPlanTier()
+  assert.deepEqual(
+    Object.keys(PLAN_LIMITS_BY_TIER.free).sort(),
+    Object.keys(PLAN_LIMITS_BY_TIER.paid).sort(),
+  )
 })
 
 // Cross-check against wrangler.free.toml's actual [vars] and queue consumer
