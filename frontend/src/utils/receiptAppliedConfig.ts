@@ -1,4 +1,5 @@
 import type { AppliedReceiptConfig, NormalizedReceiptTemplate, ReceiptPrintSettings } from '../types/receiptContracts'
+import { DEFAULT_RECEIPT_TEXT_CONTRAST, normalizeReceiptTextContrast } from './receiptTextContrast.ts'
 
 export const RECEIPT_PRINT_SETTINGS_STORAGE_KEY = 'bos_print_settings'
 
@@ -60,6 +61,7 @@ export const DEFAULT_RECEIPT_TEMPLATE: NormalizedReceiptTemplate = {
   delivery_fee_position: 'totals',
   discount_position: 'before_tax',
   show_emojis: false,
+  text_contrast: DEFAULT_RECEIPT_TEXT_CONTRAST,
   field_order: [
     'header', 'order_info', 'customer', 'delivery', 'items', 'subtotal',
     'discount', 'tax', 'delivery_fee', 'total', 'payment', 'change', 'footer',
@@ -143,6 +145,10 @@ export function normalizeReceiptTemplate(value: unknown): NormalizedReceiptTempl
   }
   merged.template_revision = RECEIPT_TEMPLATE_REVISION
 
+  // Any value other than the literal 'maximum' collapses to 'normal' -- a
+  // corrupted/pre-feature record must never render as anything but the
+  // default receipt colours.
+  merged.text_contrast = normalizeReceiptTextContrast(merged.text_contrast)
   return merged
 }
 

@@ -53,6 +53,11 @@ export interface NormalizedReceiptTemplate {
   delivery_fee_position: string
   discount_position: string
   show_emojis: boolean
+  // 'normal' | 'maximum'. Maximum forces every receipt text node to pure
+  // #000000 (no greys/coloured text/opacity) without touching font size or
+  // weight -- see receiptTextContrast.ts for the single stylesheet switch
+  // that implements it.
+  text_contrast: string
   field_order: string[]
   show_qr_codes: boolean
   qr_show_portal: boolean
