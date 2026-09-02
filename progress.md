@@ -105,7 +105,8 @@ New root `CLAUDE.md` is a pointer document only. → Part 580 (same session): th
 "talk to peers and ChatGPT before touching any file" in `33688d5b`. FLAGGED, not fixed: `npm run verify:i18n` is RED on HEAD —
 30 unresolved keys referenced by `57d8f1a2` (Products.tsx `view_image`, OtpModal `your_current_password`, ManageBatchesModal,
 FastStockInModal, ReceiveBatchModal, Inventory.tsx, StockInSessionsSection, BarcodeScannerModal …) missing from en.json + km.json.
-Open lane (Khmer must be internet-verified). Reference to re-verify, not truth.
+Owner: business-os-v1-d9 on `rc/fix-i18n-missing-keys` (Khmer internet-verified). USER DECISION (Sep 2): the fix lands on main ONLY via
+the RC merge — no cherry-pick, do NOT re-fix on main; the red on main is deliberate until then. Reference to re-verify, not truth.
 
 **⏳ COORDINATOR (session 62) — TIMEZONE + REVENUE reconciliation, two locked decisions (user, Sep 1).**
 User reaffirmed BOTH: (1) "the timezone and data are all Phnom Penh time" → fixed **UTC+7 business-day**
