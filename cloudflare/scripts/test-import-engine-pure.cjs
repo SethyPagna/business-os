@@ -140,6 +140,22 @@ const sqlBindingModuleObj = { exports: {} }
 const sqlBindingWrapper = new Function('exports', 'require', 'module', '__filename', '__dirname', sqlBindingOutputText)
 sqlBindingWrapper(sqlBindingModuleObj.exports, require, sqlBindingModuleObj, sqlBindingSourcePath, path.dirname(sqlBindingSourcePath))
 
+// barcodeAliases.ts (P2-3, Codex/legacy-data contract) is pure (no D1/Env
+// dependency) and importEngine.ts's applyBarcodeImportPrecedence/
+// parseBarcodeAliasColumn genuinely call isRealBarcode/normalizeBarcode at
+// runtime -- real transpiled module, same treatment as productDetailRule.ts
+// etc. above, so the barcode-precedence tests below exercise the actual
+// placeholder rule, not a stand-in.
+const barcodeAliasesSourcePath = path.join(__dirname, '..', 'src', 'lib', 'barcodeAliases.ts')
+const barcodeAliasesSource = fs.readFileSync(barcodeAliasesSourcePath, 'utf8')
+const { outputText: barcodeAliasesOutputText } = ts.transpileModule(barcodeAliasesSource, {
+  compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 },
+  fileName: 'barcodeAliases.ts',
+})
+const barcodeAliasesModuleObj = { exports: {} }
+const barcodeAliasesWrapper = new Function('exports', 'require', 'module', '__filename', '__dirname', barcodeAliasesOutputText)
+barcodeAliasesWrapper(barcodeAliasesModuleObj.exports, require, barcodeAliasesModuleObj, barcodeAliasesSourcePath, path.dirname(barcodeAliasesSourcePath))
+
 function requireForProductBatches(request) {
   if (request === './productDetailRule') return productDetailRuleModuleObj.exports
   if (request === './productDescriptionSections') return productDescriptionSectionsModuleObj.exports
@@ -225,6 +241,9 @@ Module._load = function patchedLoad(request, parent, isMain) {
   }
   if (request === './sqlBinding') {
     return sqlBindingModuleObj.exports // real module -- keeps IN(...) lookups inside D1's bound-parameter limit
+  }
+  if (request === './barcodeAliases') {
+    return barcodeAliasesModuleObj.exports // real module -- applyBarcodeImportPrecedence/parseBarcodeAliasColumn actually call into it
   }
   if (request === './salesImportCommit') {
     return { MAX_HISTORICAL_SALE_LINES: 100, applyHistoricalSaleImport: async () => ({ alreadyApplied: false }) }
