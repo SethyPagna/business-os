@@ -19,7 +19,7 @@ import type { D1Compat } from './db'
 // only) -- duplicated intentionally rather than widening this section's
 // edit surface into a file another lane may also be touching. Both values
 // must be kept at 4 in lockstep; a test in
-// cloudflare/scripts/test-codex-contract-pure.cjs pins this literal against
+// cloudflare/scripts/test-barcode-aliases-pure.cjs pins this literal against
 // a fresh read of productIdentity.ts's own source text so the two can never
 // silently drift apart.
 export const MIN_REAL_BARCODE_LENGTH = 4
@@ -34,6 +34,16 @@ export const MIN_REAL_BARCODE_LENGTH = 4
  * template_barcode=08011003845132, Migration from old
  * system/businessos-migration-aug28/reference/product_mapping.csv row 1),
  * so normalization must not itself erase that distinction.
+ *
+ * Khmer-safe by construction (user directive, decision 20: Khmer product
+ * names are primary data): a barcode is always a digit string, never a
+ * product name, and this function does only `.trim().toLowerCase()` on it
+ * -- no NFKD normalization, no diacritic-stripping, no token-splitting (the
+ * kind of transform `normalizeProductFuzzyName` in productDetailRule.ts
+ * does for NAMES, deliberately not reused here). `.toLowerCase()` is a
+ * no-op on Khmer script (no case) and this function is never called with a
+ * product name in the first place, so there is no Khmer text for it to
+ * mishandle.
  */
 export function normalizeBarcode(value: unknown): string {
   return String(value ?? '').trim().toLowerCase()
@@ -112,6 +122,18 @@ export async function listAliases(db: D1Compat, productId: number): Promise<Barc
  * are dropped, never stored (an alias must be a real barcode, same rule as
  * the primary column). Returns the number of rows actually inserted (not
  * the number of values passed in -- duplicates/placeholders don't count).
+ *
+ * `added_at` (decision 20: Cambodia is the app's one fixed business
+ * timezone, Asia/Phnom_Penh, UTC+7, no DST -- see
+ * cloudflare/src/lib/businessDateWindow.ts) is stored as SQLite's
+ * `datetime('now')`, which is UTC, same convention every other UTC
+ * timestamp column in this schema already follows (see
+ * businessDateWindow.ts's own header). It is never stored pre-shifted to
+ * local time; a display surface converts with businessDateWindow.ts's
+ * `BUSINESS_TZ_FORWARD` ('+7 hours') the same way every other UTC column
+ * already does. importEngine.ts's own write-back path for pending aliases
+ * (runImportApply) uses `new Date().toISOString()` for the same column --
+ * also UTC, so both writers agree.
  */
 export async function addAliases(db: D1Compat, productId: number, values: readonly unknown[], source: string): Promise<number> {
   let inserted = 0

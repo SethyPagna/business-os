@@ -83,6 +83,22 @@ convention is shared byte-for-byte between this script's writer (`:155-178`) and
   widening this section's edit surface into a file outside its ownership — flagged for a later
   one-line `export const` if a shared constant is preferred.
 
+## Timezone (decision 20) and Khmer-safety
+
+Cambodia is the app's one fixed business timezone — Asia/Phnom_Penh, UTC+7, no DST (never
+"Bangkok"; see `cloudflare/src/lib/businessDateWindow.ts`). `barcode_aliases.added_at` is written
+UTC by both writers — `addAliases` (`barcodeAliases.ts`, SQLite `datetime('now')`) and
+`runImportApply`'s write-back block (`new Date().toISOString()`) — never pre-shifted to local
+time; a display surface converts with `businessDateWindow.ts`'s `BUSINESS_TZ_FORWARD` ('+7 hours'),
+same as every other UTC timestamp column in this schema. The review CSV's `reviewed_at_utc`
+column (`official-name-recertification.mjs`) is likewise UTC (its own validation regex requires a
+trailing `Z`) — a human-entered Cambodia wall-clock value gets converted to UTC before it lands in
+that cell, same direction as every other human-entered timestamp in this app.
+`normalizeBarcode`/`isRealBarcode`/`parseBarcodeAliasColumn` operate only on barcode digit-strings,
+never product names, and apply no NFKD-fold/diacritic-stripping/case-transform (unlike
+`normalizeProductFuzzyName` in `productDetailRule.ts`, which is for names) — Khmer-safe by
+construction, since there is no Khmer text for them to see.
+
 ## For P2-2 (search) / P2-4 (import review UI)
 
 - `buildAliasExactClause(alias, bindings)` (`barcodeAliases.ts`) returns a plain `EXISTS (SELECT 1
