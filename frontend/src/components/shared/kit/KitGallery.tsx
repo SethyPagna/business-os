@@ -59,8 +59,13 @@ export default function KitGallery() {
     Promise.all([import('../../../lang/en.json'), import('../../../lang/km.json')])
       .then(([en, km]) => {
         if (cancelled) return
-        GALLERY_STRINGS.en = en.default as LangPack
-        GALLERY_STRINGS.km = km.default as LangPack
+        // en.json/km.json also carry nested `common`/`pages` namespaces (objects, not
+        // strings) alongside the flat top-level keys this gallery actually reads
+        // (kit_gallery_* plus a handful of reused existing keys) -- LangPack only models
+        // the flat shape we use, so the real JSON type and LangPack don't structurally
+        // overlap. Intentional narrowing cast, routed through `unknown` per TS2352.
+        GALLERY_STRINGS.en = en.default as unknown as LangPack
+        GALLERY_STRINGS.km = km.default as unknown as LangPack
         setPacksReady(true)
       })
       .catch(() => setPacksReady(false))
