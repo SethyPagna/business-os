@@ -25,6 +25,12 @@ type ReceiptPrintOptions = {
   previewFallback?: boolean
   autoPrintOnPreviewFallback?: boolean
   previewFallbackNote?: string
+  // Text colour for the last-resort text-only canvas fallback in
+  // createReceiptImageBlob (used only when the primary html2canvas render of
+  // the already-styled DOM clone fails). Callers pass '#000000' when the
+  // receipt's Text contrast setting is 'maximum' so even that rare fallback
+  // stays pure black instead of the softer default.
+  textColor?: string
 }
 type ByteChunk = Uint8Array<ArrayBufferLike>
 type ImagePdfInput = {
@@ -631,10 +637,11 @@ function createTextOnlyReceiptCanvas(content: ReceiptContent, options: ReceiptPr
   const context = canvas.getContext('2d')
   if (!context) throw new Error('Canvas rendering unavailable')
 
+  const textColor = options.textColor || '#111827'
   context.scale(scale, scale)
   context.fillStyle = '#ffffff'
   context.fillRect(0, 0, widthPx, heightPx)
-  context.fillStyle = '#111827'
+  context.fillStyle = textColor
   const fontStack = `"Noto Sans Khmer", "Khmer OS", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace`
   context.font = `${fontSize}px ${fontStack}`
   context.textBaseline = 'top'
@@ -656,7 +663,7 @@ function createTextOnlyReceiptCanvas(content: ReceiptContent, options: ReceiptPr
       }
 
       if (isSeparator) {
-        context.strokeStyle = '#cbd5e1'
+        context.strokeStyle = options.textColor ? options.textColor : '#cbd5e1'
         context.lineWidth = 1
         context.beginPath()
         context.moveTo(paddingX, y + 7)
