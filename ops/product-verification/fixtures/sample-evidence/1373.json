@@ -1,0 +1,32 @@
+{
+  "name": [
+    {
+      "url": "https://www.clinique.com/product/20011/6424/skincare/makeup-removers/take-the-day-off-cleansing-balm",
+      "title": "Take The Day Off Makeup Remover Cleansing Balm | Clinique",
+      "proposedName": "Clinique Take The Day Off Cleansing Balm 125ml",
+      "matchesBrand": true,
+      "matchesProduct": true,
+      "matchesVariant": true
+    },
+    {
+      "url": "https://www.upcitemdb.com/upc/20714215552",
+      "title": "UPC 020714215552 - Clinique Take The Day Off Cleansing Balm Makeup Remover - 3.8oz - Ulta Beauty",
+      "proposedName": "Clinique Take The Day Off Cleansing Balm 125ml",
+      "matchesBrand": true,
+      "matchesProduct": true,
+      "matchesVariant": true
+    }
+  ],
+  "barcodes": {
+    "020714215552": [
+      {
+        "url": "https://www.iciparisxl.be/fr/clinique/take-the-day-off-cleansing-balm/baume-demaquillant-tous-types-de-peaux/p/BP_742123",
+        "title": "Clinique Take The Day Off Cleansing Balm 125 ml",
+        "proposedName": "Clinique Take The Day Off Cleansing Balm 125ml",
+        "matchesBrand": true,
+        "matchesProduct": true,
+        "matchesVariant": true
+      }
+    ]
+  }
+}

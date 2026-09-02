@@ -1,0 +1,32 @@
+{
+  "name": [
+    {
+      "url": "https://www.lauramercier.com/products/translucent-loose-setting-powder",
+      "title": "Laura Mercier Translucent Loose Setting Powder | Finishing Powder",
+      "proposedName": "Laura Mercier Translucent Loose Setting Powder",
+      "matchesBrand": true,
+      "matchesProduct": true,
+      "matchesVariant": true
+    },
+    {
+      "url": "https://www.sephora.com/product/translucent-loose-setting-powder-P109908",
+      "title": "Translucent Loose Setting Powder - Laura Mercier | Sephora",
+      "proposedName": "Laura Mercier Translucent Loose Setting Powder",
+      "matchesBrand": true,
+      "matchesProduct": true,
+      "matchesVariant": true
+    }
+  ],
+  "barcodes": {
+    "194250053555": [
+      {
+        "url": "https://socute.vn/products/phan-bong-laura-mercier",
+        "title": "Laura Mercier The Guiding Star Loose Powder + Puff Set",
+        "proposedName": "Laura Mercier The Guiding Star Loose Powder + Puff Limited Set",
+        "matchesBrand": true,
+        "matchesProduct": true,
+        "matchesVariant": false
+      }
+    ]
+  }
+}

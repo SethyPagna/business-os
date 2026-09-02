@@ -1,0 +1,32 @@
+{
+  "name": [
+    {
+      "url": "https://www.charlottetilbury.com/us/product/airbrush-flawless-setting-spray",
+      "title": "Airbrush Flawless Setting Spray: Hydrating Waterproof Setting Spray | Charlotte Tilbury",
+      "proposedName": "Charlotte Tilbury Airbrush Flawless Setting Spray 100ml",
+      "matchesBrand": true,
+      "matchesProduct": true,
+      "matchesVariant": true
+    },
+    {
+      "url": "https://www.ulta.com/p/airbrush-flawless-setting-spray-pimprod2043342?sku=2619571",
+      "title": "Charlotte Tilbury - Airbrush Flawless Hydrating & Waterproof Setting Spray",
+      "proposedName": "Charlotte Tilbury Airbrush Flawless Setting Spray 100ml",
+      "matchesBrand": true,
+      "matchesProduct": true,
+      "matchesVariant": true
+    }
+  ],
+  "barcodes": {
+    "5056446657228": [
+      {
+        "url": "https://www.bol.com/be/nl/p/charlotte-tilbury-airbrush-flawless-setting-spray-xl-mini-duo-gezichtsset/9300000353449588/",
+        "title": "Charlotte Tilbury Airbrush Flawless Setting Spray XL + Mini Duo",
+        "proposedName": "Charlotte Tilbury Airbrush Flawless Setting Spray 100ml + 34ml Duo",
+        "matchesBrand": true,
+        "matchesProduct": true,
+        "matchesVariant": false
+      }
+    ]
+  }
+}

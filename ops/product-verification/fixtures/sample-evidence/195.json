@@ -1,0 +1,32 @@
+{
+  "name": [
+    {
+      "url": "https://www.upcitemdb.com/upc/381371163816",
+      "title": "UPC 381371163816 - Aveeno Absolutely Ageless 3in1 Under Eye AntiWrinkle Cream - 0.5oz",
+      "proposedName": "Aveeno Absolutely Ageless 3-in-1 Under Eye Anti-Wrinkle Cream 0.5 oz",
+      "matchesBrand": true,
+      "matchesProduct": true,
+      "matchesVariant": true
+    },
+    {
+      "url": "https://www.amazon.com/Aveeno-Anti-Wrinkle-Antioxidant-Rich-Hypoallergenic-Non-Comedogenic/dp/B016OIV4VA",
+      "title": "Aveeno Absolutely Ageless 3-in-1 Anti-Wrinkle Eye Cream, 0.5 oz",
+      "proposedName": "Aveeno Absolutely Ageless 3-in-1 Under Eye Anti-Wrinkle Cream 0.5 oz",
+      "matchesBrand": true,
+      "matchesProduct": true,
+      "matchesVariant": true
+    }
+  ],
+  "barcodes": {
+    "381371163816": [
+      {
+        "url": "https://www.walmart.com/ip/380383842",
+        "title": "Aveeno Absolutely Ageless Eye Cream 0.5 oz / 14 g",
+        "proposedName": "Aveeno Absolutely Ageless 3-in-1 Under Eye Anti-Wrinkle Cream 0.5 oz",
+        "matchesBrand": true,
+        "matchesProduct": true,
+        "matchesVariant": true
+      }
+    ]
+  }
+}

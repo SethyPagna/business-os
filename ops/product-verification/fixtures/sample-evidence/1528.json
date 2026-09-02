@@ -1,0 +1,23 @@
+{
+  "name": [
+    {
+      "url": "https://www.ebay.com/itm/204817242769",
+      "title": "ColourPop Shadow Stix - High Noon - 0.048oz",
+      "proposedName": "ColourPop Shadow Stix High Noon",
+      "matchesBrand": true,
+      "matchesProduct": true,
+      "matchesVariant": true
+    },
+    {
+      "url": "https://www.amazon.com/ColourPop-Shadow-Stix-Long-Lasting-Built/dp/B0D326PG7C",
+      "title": "ColourPop Shadow Stix - Cream Eyeshadow Stick",
+      "proposedName": "ColourPop Shadow Stix (line, shade not confirmed)",
+      "matchesBrand": true,
+      "matchesProduct": true,
+      "matchesVariant": false
+    }
+  ],
+  "barcodes": {
+    "192250042784": []
+  }
+}

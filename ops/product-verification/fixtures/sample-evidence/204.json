@@ -1,0 +1,32 @@
+{
+  "name": [
+    {
+      "url": "https://www.upcitemdb.com/upc/381371163779",
+      "title": "UPC 381371163779 - Aveeno Absolutely Ageless Restorative Night Cream for Face 1.7 oz",
+      "proposedName": "Aveeno Absolutely Ageless Restorative Night Cream 1.7 oz",
+      "matchesBrand": true,
+      "matchesProduct": true,
+      "matchesVariant": true
+    },
+    {
+      "url": "https://www.walmart.com/ip/Aveeno-Absolutely-Ageless-Restorative-Night-Face-Cream-1-7-fl-oz/47431331",
+      "title": "Aveeno Absolutely Ageless Restorative Night Cream for Face, 1.7 oz",
+      "proposedName": "Aveeno Absolutely Ageless Restorative Night Cream 1.7 oz",
+      "matchesBrand": true,
+      "matchesProduct": true,
+      "matchesVariant": true
+    }
+  ],
+  "barcodes": {
+    "381371163779": [
+      {
+        "url": "https://www.karewell.com/product/Aveeno-Absolutely-Ageless-Restorative-Facial-Anti-Aging-Night-Cream-1-7-Oz",
+        "title": "Aveeno Absolutely Ageless Restorative Night Cream 1.7 oz",
+        "proposedName": "Aveeno Absolutely Ageless Restorative Night Cream 1.7 oz",
+        "matchesBrand": true,
+        "matchesProduct": true,
+        "matchesVariant": true
+      }
+    ]
+  }
+}

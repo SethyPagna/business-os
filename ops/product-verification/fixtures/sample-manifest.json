@@ -1,0 +1,258 @@
+[
+  {
+    "id": 195,
+    "name": "Aveeno Eye Cream 14mL",
+    "designedTier": "high",
+    "groupTags": [
+      "A",
+      "multi_barcode(constructed)"
+    ]
+  },
+  {
+    "id": 204,
+    "name": "Aveeno Restorative Night Cream",
+    "designedTier": "high",
+    "groupTags": [
+      "A"
+    ]
+  },
+  {
+    "id": 498,
+    "name": "Caudalie VinoPure លាបមុន 15ml",
+    "designedTier": "high",
+    "groupTags": [
+      "A",
+      "multi_barcode(constructed)"
+    ]
+  },
+  {
+    "id": 1237,
+    "name": "Clarins Soothing Toning Lotion 400ml",
+    "designedTier": "high",
+    "groupTags": [
+      "A"
+    ]
+  },
+  {
+    "id": 1373,
+    "name": "CLINIQUE Cleansing Balm 125ml",
+    "designedTier": "high",
+    "groupTags": [
+      "A"
+    ]
+  },
+  {
+    "id": 2361,
+    "name": "Elixir The Serum+Essence",
+    "designedTier": "medium",
+    "groupTags": [
+      "A(brand mismatch demo)"
+    ]
+  },
+  {
+    "id": 2827,
+    "name": "Haku Serum Melanofocus IV 45g",
+    "designedTier": "high",
+    "groupTags": [
+      "A"
+    ]
+  },
+  {
+    "id": 660,
+    "name": "Chanel Glow Foundation BD01 SPF25",
+    "designedTier": "low",
+    "groupTags": [
+      "B"
+    ]
+  },
+  {
+    "id": 1058,
+    "name": "Charlotte Tilbury Setting Spray No Box 100ml",
+    "designedTier": "medium",
+    "groupTags": [
+      "B(name_barcode_conflict)"
+    ]
+  },
+  {
+    "id": 1461,
+    "name": "Colourpop Hello Kitty Aloha Honey",
+    "designedTier": "medium",
+    "groupTags": [
+      "B",
+      "multi_barcode(real)"
+    ]
+  },
+  {
+    "id": 1462,
+    "name": "Colourpop Hello Kitty Island Shine",
+    "designedTier": "medium",
+    "groupTags": [
+      "B",
+      "multi_barcode(real)"
+    ]
+  },
+  {
+    "id": 1464,
+    "name": "Colourpop LIL' Ray Of Sunshine",
+    "designedTier": "medium",
+    "groupTags": [
+      "B"
+    ]
+  },
+  {
+    "id": 1522,
+    "name": "Colourpop Pressed Blush Palatial",
+    "designedTier": "medium",
+    "groupTags": [
+      "B"
+    ]
+  },
+  {
+    "id": 1528,
+    "name": "Colourpop Shadow Stick High Noon",
+    "designedTier": "medium",
+    "groupTags": [
+      "B"
+    ]
+  },
+  {
+    "id": 3549,
+    "name": "Laura Mercier Loose Setting Powder",
+    "designedTier": "medium",
+    "groupTags": [
+      "B(name_barcode_conflict)"
+    ]
+  },
+  {
+    "id": 6033,
+    "name": "Clinique Moisture Surge 100H Auto Replenishing Hydrator 30ml",
+    "designedTier": "high",
+    "groupTags": [
+      "F",
+      "multi_barcode(constructed)"
+    ]
+  },
+  {
+    "id": 6041,
+    "name": "YSL Rouge Pur Couture N157",
+    "designedTier": "high",
+    "groupTags": [
+      "F"
+    ]
+  },
+  {
+    "id": 6044,
+    "name": "YSL All Hours Foundation LN3",
+    "designedTier": "high",
+    "groupTags": [
+      "F"
+    ]
+  },
+  {
+    "id": 6032,
+    "name": "Clinique All About Eyes Rich 15ml",
+    "designedTier": "low",
+    "groupTags": [
+      "F",
+      "single-source (barcode corroborates but never rescues confidence alone)"
+    ]
+  },
+  {
+    "id": 6034,
+    "name": "Dior Hydra Life 2 In 1 Sorbet Water 175ml",
+    "designedTier": "low",
+    "groupTags": [
+      "F",
+      "single-source; barcode_changed(constructed)"
+    ]
+  },
+  {
+    "id": 6035,
+    "name": "Dior Huile Abricot Daily Nutritive Serum 7.5ml",
+    "designedTier": "low",
+    "groupTags": [
+      "F",
+      "single-source"
+    ]
+  },
+  {
+    "id": 6038,
+    "name": "Clinique Moisture Surge Pop Triple Lip Balm 04",
+    "designedTier": "low",
+    "groupTags": [
+      "F",
+      "single-source"
+    ]
+  },
+  {
+    "id": 6039,
+    "name": "Clinique Moisture Surge Pop Triple Lip Balm 05",
+    "designedTier": "low",
+    "groupTags": [
+      "F",
+      "single-source"
+    ]
+  },
+  {
+    "id": 6040,
+    "name": "Clinique Moisture Surge Pop Triple Lip Balm 06",
+    "designedTier": "low",
+    "groupTags": [
+      "F",
+      "single-source; real prior pass held this at low too (Grape vs Grapefruit conflict)"
+    ]
+  },
+  {
+    "id": 6043,
+    "name": "TheBalm Mad Lash Mascara Travel Size 4.5ml",
+    "designedTier": "low",
+    "groupTags": [
+      "F",
+      "single-source"
+    ]
+  },
+  {
+    "id": 6042,
+    "name": "YSL Tatouage Couture Matte Stain 35",
+    "designedTier": "low",
+    "groupTags": [
+      "F",
+      "no fresh evidence located (real outcome from the prior pass)"
+    ]
+  },
+  {
+    "id": 6066,
+    "name": "Dior Addict Duo Lip Glow Set 004",
+    "designedTier": "low",
+    "groupTags": [
+      "F",
+      "no barcode on record (real)"
+    ]
+  },
+  {
+    "id": 6075,
+    "name": "Clarins Cleansing Milk 400ml",
+    "designedTier": "low",
+    "groupTags": [
+      "F",
+      "no fresh evidence located; barcode_changed(constructed)"
+    ]
+  },
+  {
+    "id": 6093,
+    "name": "Calvin Klein CK One EDP 10ml",
+    "designedTier": "low",
+    "groupTags": [
+      "F",
+      "no evidence and no barcode on record (real)"
+    ]
+  },
+  {
+    "id": 342,
+    "name": "Bobbi Brown Skin Fluid N-012",
+    "designedTier": "low",
+    "groupTags": [
+      "barcode_changed(real)"
+    ]
+  }
+]

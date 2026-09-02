@@ -1,0 +1,32 @@
+{
+  "name": [
+    {
+      "url": "https://www.clarinsusa.com/en/soothing-toning-face-lotion---sensitive-skin/CS00928223.html",
+      "title": "Soothing Toning Face Lotion - Sensitive Skin | CLARINS",
+      "proposedName": "Clarins Soothing Toning Lotion 400ml",
+      "matchesBrand": true,
+      "matchesProduct": true,
+      "matchesVariant": true
+    },
+    {
+      "url": "https://www.ebay.com/itm/284780219217",
+      "title": "Clarins Soothing Toning Lotion 400ml With Chamomile & Saffron Flower Extracts",
+      "proposedName": "Clarins Soothing Toning Lotion 400ml",
+      "matchesBrand": true,
+      "matchesProduct": true,
+      "matchesVariant": true
+    }
+  ],
+  "barcodes": {
+    "3380810378863": [
+      {
+        "url": "https://www.argos.co.uk/product/7898772",
+        "title": "Clarins Soothing Toning Lotion 400 ml",
+        "proposedName": "Clarins Soothing Toning Lotion 400ml",
+        "matchesBrand": true,
+        "matchesProduct": true,
+        "matchesVariant": true
+      }
+    ]
+  }
+}
