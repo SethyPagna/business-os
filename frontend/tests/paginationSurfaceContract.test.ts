@@ -50,6 +50,7 @@ const expectedConsumers = [
   'src/components/files/FilesPage.tsx',
   'src/components/imports/ServerImportReviewScreen.tsx',
   'src/components/inventory/InventoryMovementsSurface.tsx',
+  'src/components/inventory/InventoryProductsSurface.tsx',
   'src/components/pos/POS.tsx',
   'src/components/products/Products.tsx',
   'src/components/products/ProductsImageOnlyView.tsx',
