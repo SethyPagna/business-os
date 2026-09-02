@@ -1,0 +1,32 @@
+{
+  "name": [
+    {
+      "url": "https://japanesetaste.com/products/shiseido-haku-melanofocus-iv-brightening-beauty-serum-45g",
+      "title": "Shiseido Haku Melanofocus IV Brightening Beauty Serum 45g",
+      "proposedName": "Shiseido HAKU Melanofocus IV Whitening Serum 45g",
+      "matchesBrand": true,
+      "matchesProduct": true,
+      "matchesVariant": true
+    },
+    {
+      "url": "https://wafuu.com/en-us/products/shiseido-haku-melanofocus-ev-whitening-serum-45g",
+      "title": "Shiseido HAKU Melanofocus IV Whitening Serum 45g",
+      "proposedName": "Shiseido HAKU Melanofocus IV Whitening Serum 45g",
+      "matchesBrand": true,
+      "matchesProduct": true,
+      "matchesVariant": true
+    }
+  ],
+  "barcodes": {
+    "4909978224479": [
+      {
+        "url": "https://ainz-tulpe.jp/products/4909978224479",
+        "title": "HAKU Melanofocus IV 45g",
+        "proposedName": "Shiseido HAKU Melanofocus IV Whitening Serum 45g",
+        "matchesBrand": true,
+        "matchesProduct": true,
+        "matchesVariant": true
+      }
+    ]
+  }
+}

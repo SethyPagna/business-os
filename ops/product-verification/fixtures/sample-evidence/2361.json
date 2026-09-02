@@ -1,0 +1,32 @@
+{
+  "name": [
+    {
+      "url": "https://sundrug-online.com/en/products/4909978282509",
+      "title": "Shiseido ELIXIR The Serum aa Limited Trial Set",
+      "proposedName": "Shiseido Elixir The Serum aa Limited Trial Set (50ml serum + 18ml lotion)",
+      "matchesBrand": false,
+      "matchesProduct": true,
+      "matchesVariant": true
+    },
+    {
+      "url": "https://www.sk-ii.com/our-products/beauty-essences-and-serums",
+      "title": "Anti-Aging Treatment Serums and Essences | SK-II US",
+      "proposedName": "SK-II Facial Treatment Essence line",
+      "matchesBrand": true,
+      "matchesProduct": false,
+      "matchesVariant": false
+    }
+  ],
+  "barcodes": {
+    "4909978282509": [
+      {
+        "url": "https://sundrug-online.com/en/products/4909978282509",
+        "title": "Shiseido ELIXIR The Serum aa Limited Trial Set",
+        "proposedName": "Shiseido Elixir The Serum aa Limited Trial Set (50ml serum + 18ml lotion)",
+        "matchesBrand": false,
+        "matchesProduct": true,
+        "matchesVariant": true
+      }
+    ]
+  }
+}

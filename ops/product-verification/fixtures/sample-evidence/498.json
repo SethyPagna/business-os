@@ -1,0 +1,32 @@
+{
+  "name": [
+    {
+      "url": "https://www.cultbeauty.com/p/caudalie-vinopure-salicylic-spot-solution-15ml/14843624/",
+      "title": "Caudalie Vinopure Salicylic Spot Solution 15ml",
+      "proposedName": "Caudalie Vinopure Salicylic Acid Spot Solution 15ml",
+      "matchesBrand": true,
+      "matchesProduct": true,
+      "matchesVariant": true
+    },
+    {
+      "url": "https://www.caretobeauty.com/us/caudalie-vinopure-stop-boutons-salicylique-15ml/",
+      "title": "Caudalie Vinopure Salicylic Spot Solution 15ml (0.5floz) USA",
+      "proposedName": "Caudalie Vinopure Salicylic Acid Spot Solution 15ml",
+      "matchesBrand": true,
+      "matchesProduct": true,
+      "matchesVariant": true
+    }
+  ],
+  "barcodes": {
+    "3522931005024": [
+      {
+        "url": "https://www.jeancoutu.com/magasiner/categories/beaute/soins-du-visage/soins-cibles/boutons-ou-acne/vinopure-solution-ciblee-salicylique/p/3522931005024",
+        "title": "Vinopure Solution Ciblée Salicylique",
+        "proposedName": "Caudalie Vinopure Salicylic Acid Spot Solution 15ml",
+        "matchesBrand": true,
+        "matchesProduct": true,
+        "matchesVariant": true
+      }
+    ]
+  }
+}

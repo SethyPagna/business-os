@@ -1,0 +1,156 @@
+{
+  "verifiedAt": "2026-09-02",
+  "policy": "A current barcode 0 is filled only when the source name is the primary match, the code is a numeric 8/12/13/14 digit GTIN with a valid check digit, and a web source corroborates the same product and size/set. A web search failure or different bundle is not evidence.",
+  "results": [
+    {
+      "currentProductId": 195,
+      "name": "Aveeno Eye Cream 14ml",
+      "barcode": "381371163816",
+      "gtinCheck": "valid",
+      "webStatus": "verified_same_product_and_size",
+      "decision": "approved_fill",
+      "evidenceUrl": "https://www.walmart.com/ip/380383842",
+      "evidence": "Aveeno Absolutely Ageless Eye Cream 0.5 oz / 14 g; UPC 381371163816"
+    },
+    {
+      "currentProductId": 204,
+      "name": "Aveeno Restorative Night Cream",
+      "barcode": "381371163779",
+      "gtinCheck": "valid",
+      "webStatus": "verified_same_product",
+      "decision": "approved_fill",
+      "evidenceUrl": "https://www.karewell.com/product/Aveeno-Absolutely-Ageless-Restorative-Facial-Anti-Aging-Night-Cream-1-7-Oz",
+      "evidence": "Aveeno Absolutely Ageless Restorative Night Cream 1.7 oz; UPC 381371163779"
+    },
+    {
+      "currentProductId": 498,
+      "name": "Caudalie VinoPure លាបមុន 15ml",
+      "barcode": "3522931005024",
+      "gtinCheck": "valid",
+      "webStatus": "verified_same_product_and_size",
+      "decision": "approved_fill",
+      "evidenceUrl": "https://www.jeancoutu.com/magasiner/categories/beaute/soins-du-visage/soins-cibles/boutons-ou-acne/vinopure-solution-ciblee-salicylique/p/3522931005024",
+      "evidence": "Caudalie Vinopure salicylic spot solution 15 ml; product number 3522931005024"
+    },
+    {
+      "currentProductId": 660,
+      "name": "Chanel Glow Foundation BD01 SPF25",
+      "barcode": "31458918",
+      "gtinCheck": "invalid_expected_check_digit_7_actual_8",
+      "webStatus": "not_used",
+      "decision": "rejected_no_fill",
+      "evidenceUrl": "",
+      "evidence": "Fails the EAN-8 check digit gate."
+    },
+    {
+      "currentProductId": 1058,
+      "name": "Charlotte Tilbury Setting Spray No Box 100ml",
+      "barcode": "5056446657228",
+      "gtinCheck": "valid",
+      "webStatus": "different_bundle",
+      "decision": "rejected_no_fill",
+      "evidenceUrl": "https://www.bol.com/be/nl/p/charlotte-tilbury-airbrush-flawless-setting-spray-xl-mini-duo-gezichtsset/9300000353449588/",
+      "evidence": "EAN 5056446657228 identifies the 100 ml + 34 ml duo, not the named single 100 ml no-box item."
+    },
+    {
+      "currentProductId": 1237,
+      "name": "Clarins Soothing Toning Lotion 400ml",
+      "barcode": "3380810378863",
+      "gtinCheck": "valid",
+      "webStatus": "verified_same_product_and_size",
+      "decision": "approved_fill",
+      "evidenceUrl": "https://www.argos.co.uk/product/7898772",
+      "evidence": "Clarins Soothing Toning Lotion 400 ml; EAN 3380810378863"
+    },
+    {
+      "currentProductId": 1373,
+      "name": "CLINIQUE Cleansing Balm 125ml",
+      "barcode": "020714215552",
+      "gtinCheck": "valid",
+      "webStatus": "verified_same_product_and_size",
+      "decision": "approved_fill",
+      "evidenceUrl": "https://www.iciparisxl.be/fr/clinique/take-the-day-off-cleansing-balm/baume-demaquillant-tous-types-de-peaux/p/BP_742123",
+      "evidence": "Clinique Take The Day Off Cleansing Balm 125 ml; EAN 020714215552"
+    },
+    {
+      "currentProductId": 1461,
+      "name": "Colourpop Hello Kitty Aloha Honey",
+      "barcode": "112158 815142",
+      "gtinCheck": "invalid_expected_check_digit_3_actual_2",
+      "webStatus": "not_used",
+      "decision": "rejected_no_fill",
+      "evidenceUrl": "",
+      "evidence": "Fails the UPC-A check digit gate."
+    },
+    {
+      "currentProductId": 1462,
+      "name": "Colourpop Hello Kitty Island Shine",
+      "barcode": "851212 151192",
+      "gtinCheck": "valid",
+      "webStatus": "no_reliable_matching_result",
+      "decision": "rejected_no_fill",
+      "evidenceUrl": "",
+      "evidence": "No reliable source connected this code to the named shade."
+    },
+    {
+      "currentProductId": 1464,
+      "name": "Colourpop LIL' Ray Of Sunshine",
+      "barcode": "297161516625",
+      "gtinCheck": "invalid_expected_check_digit_8_actual_5",
+      "webStatus": "not_used",
+      "decision": "rejected_no_fill",
+      "evidenceUrl": "",
+      "evidence": "Fails the UPC-A check digit gate."
+    },
+    {
+      "currentProductId": 1522,
+      "name": "Colourpop Pressed Blush Palatial",
+      "barcode": "165125209512",
+      "gtinCheck": "invalid_expected_check_digit_3_actual_2",
+      "webStatus": "not_used",
+      "decision": "rejected_no_fill",
+      "evidenceUrl": "",
+      "evidence": "Fails the UPC-A check digit gate."
+    },
+    {
+      "currentProductId": 1528,
+      "name": "Colourpop Shadow Stick High Noon",
+      "barcode": "192250042784",
+      "gtinCheck": "valid",
+      "webStatus": "no_reliable_matching_result",
+      "decision": "rejected_no_fill",
+      "evidenceUrl": "",
+      "evidence": "No reliable source connected this code to the named shade."
+    },
+    {
+      "currentProductId": 2361,
+      "name": "Elixir The Serum+Essence",
+      "barcode": "4909978282509",
+      "gtinCheck": "valid",
+      "webStatus": "verified_elixir_the_serum_limited_set",
+      "decision": "approved_fill",
+      "evidenceUrl": "https://sundrug-online.com/en/products/4909978282509",
+      "evidence": "Shiseido ELIXIR The Serum aa limited trial set, 50 ml serum + 18 ml lotion; JAN 4909978282509. This also has repeated old-system stock-in, mapping, and transfer evidence."
+    },
+    {
+      "currentProductId": 2827,
+      "name": "Haku Serum Melanofocus IV 45g",
+      "barcode": "4909978224479",
+      "gtinCheck": "valid",
+      "webStatus": "verified_same_product_and_size",
+      "decision": "approved_fill",
+      "evidenceUrl": "https://ainz-tulpe.jp/products/4909978224479",
+      "evidence": "HAKU Melanofocus IV 45 g; JAN 4909978224479"
+    },
+    {
+      "currentProductId": 3549,
+      "name": "Laura Mercier Loose Setting Powder",
+      "barcode": "194250053555",
+      "gtinCheck": "valid",
+      "webStatus": "different_bundle",
+      "decision": "rejected_no_fill",
+      "evidenceUrl": "https://socute.vn/products/phan-bong-laura-mercier",
+      "evidence": "Code identifies The Guiding Star loose powder + puff limited set; the current name does not establish that bundle."
+    }
+  ]
+}
