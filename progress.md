@@ -68,6 +68,25 @@ Two rules learned the hard way, both from real incidents in this file's own hist
 
 ## Status snapshot — Aug 31 2026
 
+- **⚠️ PRODUCTION IS AHEAD OF COMMITTED HEAD (Sep 2 2026, 17:49 UTC) — reference to re-verify; written Sep 3 by session
+  business-os-v1-80 after 6d's alert, confirmed from two angles (wrangler `deployments list` + remote `d1_migrations`,
+  read-only; and the sealed record under `outputs/01a061f6-6bb2-7b33-8856-4710816f39bf/pre-change-snapshot-20260902/`
+  — `manifest.json`, `production-apply-record.json`, `RECOVERY.md`).** Live Worker version
+  `fd496449-db99-4929-9a4f-a846f28ee9f3` was built from `57d8f1a2` **plus the still-UNCOMMITTED fees/delivery-contact
+  lane** (`cloudflare/src/routes/fees.ts`, `cloudflare/src/lib/salesAnalytics.ts`, `frontend/src/api/feesTransport.ts`,
+  `frontend/src/components/contacts/DeliveryContactReportModal.tsx`, untracked `cloudflare/migrations/
+  0105_fee_delivery_contacts.sql`). Remote D1: `d1_migrations` id 105 = `0105_fee_delivery_contacts.sql` applied
+  2026-09-02 17:23:00. The "zero-error reconciliation" data migration ran with it (products 6,104 → 10,271; sales
+  14,983 → 15,005; pre-change Time Travel bookmark `0000118e-00000000-000050da-cc9020285126934365b0d5b839948385`),
+  sealed 17:55Z. Done outside the Claude fleet (the ChatGPT/Codex surface, per 6d; the record itself names no actor;
+  deploy author = the user's account). Consequences: (1) **committed HEAD ≠ production — no Stage-2 deploy from HEAD
+  until that lane is committed to main**, or the deploy ships code without those edits onto a DB that already has
+  the 0105 column and the reconciled data; (2) nobody `git checkout --` those four files; (3) the fees migration
+  KEEPS the name `0105` (already applied under it), so the RC's `0105_barcode_aliases.sql` must renumber (d9: 0106);
+  (4) the Aug-31 line below (`a5e5023b`) is stale — Sep 2 also saw version `258d5b0a` (09:21Z) and secret changes
+  (07:34Z). 6d's backup of the deployed diff: `cloudflare/outputs/audit-6d-20260903/`. Open data defect reported by
+  6d to d9: ~3,900 twin products from identity keyed on per-branch cost. Owner of the lane: none live (session 97 gone).
+
 - **DEPLOYED Aug 31 2026 (~01:32 UTC), version `a5e5023b`, from commit `242c2b75`
   (Part 538).** Everything from Parts 371–537 is LIVE — migrations 0083–0087 applied
   to remote D1 (0059–0082 were already applied; **none pending now**), the b9
