@@ -72,9 +72,12 @@ runTest("the full-width rows use REAL cells in the table's own columns, never a 
   // percentages leave unclaimed. Real cells cannot drift: there is nothing
   // left to keep in sync.
   // The empty-state row is the one legitimate colSpan=8: it has no rail to
-  // respect because there are no rows to line up with.
+  // respect because there are no rows to line up with. P2-4 step 7: this
+  // cell now renders the shared kit EmptyState instead of its own
+  // className="py-10 text-center..." markup, so the legitimate-row match
+  // looks for the EmptyState tag instead of that literal className.
   const fullSpans = (surface.match(/<td colSpan=\{8\}/g) || []).length
-  const emptyState = (surface.match(/<td colSpan=\{8\} className="py-10 text-center/g) || []).length
+  const emptyState = (surface.match(/<td colSpan=\{8\}>\s*<EmptyState/g) || []).length
   assert.strictEqual(
     fullSpans - emptyState,
     0,

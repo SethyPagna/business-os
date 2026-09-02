@@ -2,6 +2,8 @@ import { Fragment } from 'react'
 import type { ReactNode } from 'react'
 import ChevronDown from 'lucide-react/dist/esm/icons/chevron-down.js'
 import ChevronRight from 'lucide-react/dist/esm/icons/chevron-right.js'
+import Package from 'lucide-react/dist/esm/icons/package.js'
+import { EmptyState, Skeleton } from '../../shared/kit'
 
 // ---------------------------------------------------------------------------
 // Desktop table geometry: ONE left rail
@@ -162,7 +164,6 @@ export default function ProductsListSurface({
   tr,
   visibleProducts,
 }: ProductsListSurfaceProps) {
-  const skeletonRows = Array.from({ length: 8 }, (_, index) => index)
   const showDesktopLoadingOverlay = !initialDesktopRevealReady
 
   // A fixed responsive grid prevents long product metadata from widening
@@ -247,48 +248,15 @@ export default function ProductsListSurface({
     </thead>
   )
 
+  // P2-4 step 7: replaced the hand-rolled row-shaped pulse shell with the
+  // shared kit Skeleton (variant="table"). This trades the old shell's
+  // exact thumbnail/badge/5-column mimicry for consistency with every
+  // other kit-adopting page's loading state -- a deliberate fidelity
+  // step-down the brief's "EmptyState/Skeleton replacing ad-hoc [loaders]"
+  // step calls for, not an oversight; see p2-4-report.md.
   const renderDesktopLoadingShell = () => (
-    <div className="min-h-[26rem] animate-pulse bg-white/95 px-4 py-4 dark:bg-slate-950/80">
-      <div className="rounded-xl border border-slate-200/90 bg-slate-50/85 p-3 dark:border-slate-700/80 dark:bg-slate-900/70">
-        <div className="flex items-center justify-between gap-4">
-          <div className="flex items-center gap-2">
-            <div className="h-4 w-4 rounded bg-slate-200 dark:bg-slate-700" />
-            <div className="h-4 w-32 rounded bg-slate-200 dark:bg-slate-700" />
-          </div>
-          <div className="h-7 w-24 rounded-lg bg-slate-200 dark:bg-slate-700" />
-        </div>
-      </div>
-      <div className="mt-4 space-y-4">
-        {Array.from({ length: 3 }, (_, index) => (
-          <div
-            key={`products-shell-${index}`}
-            className="rounded-2xl border border-slate-200/80 bg-white/90 p-4 shadow-sm dark:border-slate-700/70 dark:bg-slate-900/70"
-          >
-            <div className="flex items-start gap-4">
-              <div className="h-12 w-12 rounded-xl bg-slate-200 dark:bg-slate-700" />
-              <div className="min-w-0 flex-1 space-y-3">
-                <div className="flex items-start justify-between gap-4">
-                  <div className="min-w-0 flex-1 space-y-2">
-                    <div className="h-4 w-48 max-w-[60%] rounded bg-slate-200 dark:bg-slate-700" />
-                    <div className="h-3 w-72 max-w-[80%] rounded bg-slate-100 dark:bg-slate-800" />
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <div className="h-5 w-16 rounded-full bg-slate-100 dark:bg-slate-800" />
-                    <div className="h-5 w-16 rounded-full bg-slate-100 dark:bg-slate-800" />
-                  </div>
-                </div>
-                <div className="grid grid-cols-5 gap-3">
-                  <div className="h-10 rounded-lg bg-slate-100 dark:bg-slate-800" />
-                  <div className="h-10 rounded-lg bg-slate-100 dark:bg-slate-800" />
-                  <div className="h-10 rounded-lg bg-slate-100 dark:bg-slate-800" />
-                  <div className="h-10 rounded-lg bg-slate-100 dark:bg-slate-800" />
-                  <div className="h-10 rounded-lg bg-slate-100 dark:bg-slate-800" />
-                </div>
-              </div>
-            </div>
-          </div>
-        ))}
-      </div>
+    <div className="px-4 py-4">
+      <Skeleton variant="table" rows={8} />
     </div>
   )
 
@@ -314,8 +282,11 @@ export default function ProductsListSurface({
                   ? null
                   : (
                     <tr>
-                      <td colSpan={8} className="py-10 text-center text-gray-400">
-                        {refreshingProducts ? tr('products_refreshing', 'Refreshing products...', 'កំពុងធ្វើបច្ចុប្បន្នភាពផលិតផល...') : t('no_data')}
+                      <td colSpan={8}>
+                        <EmptyState
+                          icon={<Package />}
+                          title={refreshingProducts ? tr('products_refreshing', 'Refreshing products...', 'កំពុងធ្វើបច្ចុប្បន្នភាពផលិតផល...') : t('no_data')}
+                        />
                       </td>
                     </tr>
                     ))
@@ -469,24 +440,13 @@ export default function ProductsListSurface({
           region) so this flows with `.page-scroll` instead. */}
       <div className="space-y-2 sm:hidden">
         {loading ? (
-          <div className="space-y-2">
-            {skeletonRows.slice(0, 6).map((row) => (
-              <div key={`product-mobile-skeleton-${row}`} className="card animate-pulse p-3">
-                <div className="flex items-start gap-3">
-                  <div className="h-4 w-4 rounded bg-slate-200 dark:bg-slate-700" />
-                  <div className="min-w-0 flex-1 space-y-2">
-                    <div className="h-4 w-3/4 rounded bg-slate-200 dark:bg-slate-700" />
-                    <div className="h-3 w-1/2 rounded bg-slate-200 dark:bg-slate-700" />
-                    <div className="h-8 w-full rounded bg-slate-100 dark:bg-slate-800" />
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
+          // P2-4 step 7: same Skeleton adoption as the desktop shell above.
+          <Skeleton variant="table" rows={6} />
         ) : visibleProducts.length === 0 ? (
-          <div className="py-10 text-center text-gray-400">
-            {refreshingProducts ? tr('products_refreshing', 'Refreshing products...', 'កំពុងធ្វើបច្ចុប្បន្នភាពផលិតផល...') : t('no_data')}
-          </div>
+          <EmptyState
+            icon={<Package />}
+            title={refreshingProducts ? tr('products_refreshing', 'Refreshing products...', 'កំពុងធ្វើបច្ចុប្បន្នភាពផលិតផល...') : t('no_data')}
+          />
         ) : productSections.map((section) => {
           const isCollapsed = collapsedProductSections.has(section.id)
           return (
