@@ -11,6 +11,7 @@ import {
   shouldSuppressRuntimeError,
   shouldSuppressSecurityPolicyViolation,
 } from './runtime/runtimeErrorClassifier.ts'
+import { installBeforeInstallPromptCapture, installStandaloneExternalLinkGuard } from './platform/runtime/standaloneNavigation.ts'
 
 type GuardedInsertRule = CSSStyleSheet['insertRule'] & { __businessOsGuarded?: boolean }
 type GuardedGetter = (() => CSSRuleList) & { __businessOsGuarded?: boolean }
@@ -239,3 +240,10 @@ ReactDOM.createRoot(rootElement).render(
 
 registerOfflineAppShell()
 scheduleFormFieldAccessibility()
+// No-op outside an installed, standalone-display-mode PWA -- see
+// standaloneNavigation.ts for why a regular browser tab needs none of this.
+installStandaloneExternalLinkGuard()
+// Must attach before the browser's own beforeinstallprompt fires (it can
+// fire within the first seconds of a qualifying page load), so this runs
+// unconditionally rather than behind an idle/lazy scheduler.
+installBeforeInstallPromptCapture()

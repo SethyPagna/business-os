@@ -10,6 +10,7 @@ import { NotesProvider } from './components/notes/NotesContext.tsx'
 import { APP_NAVIGATION_EVENT, APP_PAGE_INTENT_EVENT, getAdminPageFromPath, getMountedPageLimit, getNotificationColor, getNotificationPrefix, isPublicCatalogPath, MAX_MOUNTED_PAGES, resolveAdminLandingPage, updateMountedPages } from './app/appShellUtils.ts'
 import { isPublicDomMutationError, shouldAttemptPublicDomRecovery } from './app/publicErrorRecovery.ts'
 import { getScrollTarget, getScrollToPosition } from './components/shared/globalScroll.ts'
+import IosInstallHint from './components/shared/IosInstallHint.tsx'
 import { NAV_ITEMS } from './components/shared/navigationConfig.ts'
 import PullToRefreshIndicator from './components/shared/PullToRefreshIndicator.tsx'
 import { usePullToRefresh } from './components/shared/usePullToRefresh.ts'
@@ -1881,6 +1882,7 @@ export default function App() {
       </NotesProvider>
 
       <Notification notification={notification} onDismiss={dismissNotification} />
+      <IosInstallHint />
       <GlobalScrollControls />
       {writeConflict ? (
         <Suspense fallback={null}>

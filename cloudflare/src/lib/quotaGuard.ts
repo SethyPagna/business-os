@@ -31,6 +31,30 @@
 // a D1 write per D1 write, which is self-defeating; D1's own ceiling is
 // generous enough relative to this app's volume that the scarce resources are
 // the ones worth policing.
+//
+// UPDATE (Section 8b, plan-tier work): D1's Free ceiling (5,000,000 rows
+// read/day, 100,000 rows written/day) became HARD-ENFORCED on Sept 1 2026 --
+// queries now ERROR once exceeded, until 00:00 UTC, instead of just costing
+// money. That makes it worth a second look, but the "self-defeating" problem
+// above still holds for a live D1-write-based counter, and the two
+// alternatives considered and rejected were:
+//   - Counting in KV instead of D1: KV's OWN ceiling (1,000 writes/day) is
+//     the tightest resource this module protects; spending it on a counter
+//     for a DIFFERENT resource's usage would make KV run out faster, not
+//     free up D1.
+//   - Aggregating rows_read/rows_written from D1 result `.meta` at a few
+//     high-volume call sites into Analytics Engine (recordAnalytics, which
+//     is genuinely free to write): writing is fine, but READING it back
+//     requires Cloudflare's separate Analytics Engine SQL API (an API
+//     token, not the binding this Worker holds) -- there is no way for the
+//     Worker itself to read back what it wrote, so this would produce
+//     numbers nobody inside the app could ever display.
+// So D1 gets the same treatment as every other resource this module
+// DELIBERATELY does not meter: planTier.ts documents the Free/Paid ceiling
+// as static facts (d1DailyRowsReadCeiling/d1DailyRowsWrittenCeiling), and
+// routes/compat.ts's GET /system/bootstrap surfaces that ceiling plus a
+// plain-language caution to the admin Server page -- an honest "here is the
+// wall and here is what to watch for" instead of a fabricated live count.
 
 import type { Env } from '../index'
 import { getDb } from './db'

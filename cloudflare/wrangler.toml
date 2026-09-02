@@ -250,6 +250,13 @@ tag = "v2-broadcast-hub"
 new_sqlite_classes = ["BroadcastHub"]
 
 [vars]
+# Which deployable configuration this is -- see src/lib/planTier.ts for the
+# full "why". This file (wrangler.toml) is the Paid configuration and pins
+# it explicitly rather than relying on getPlanTier's unset-defaults-to-paid
+# fallback, so `wrangler deploy --dry-run` output and `wrangler tail` both
+# show the real intended tier instead of an absence. wrangler.free.toml is
+# the Free counterpart and sets this to "free".
+PLAN_TIER = "paid"
 BUSINESS_OS_PUBLIC_URL = "https://leangbeauty.com"
 BUSINESS_OS_ADMIN_URL = "https://admin.leangbeauty.com"
 # The one organization this deployment serves. The login screen pins to it

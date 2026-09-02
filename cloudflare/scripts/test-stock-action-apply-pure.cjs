@@ -36,6 +36,13 @@ const REAL = new Set([
   'stockActionCatalog', 'stockActionCommit', 'sqlBinding', 'productDetailRule',
   'productDescriptionSections', 'productBatches', 'salesStatus', 'contactOptions',
   'importImageMatch', 'searchMatch',
+  // planTier (Section 8b): applyStockActionsJob/SinglePass/Continuation each
+  // read getPlanLimits(env).stockActionMaxUnits/stockActionMaxRows now
+  // instead of the bare module-level constants -- stubbing this to {} would
+  // make every call throw "getPlanLimits is not a function". Its only
+  // import (`import type { Env } from '../index'`) is type-only and erased
+  // by transpileModule, so loading it for real needs no extra stubs.
+  'planTier',
 ])
 
 // Functional stubs for the D1/Env/queue/cache/broadcast modules that can't

@@ -14,6 +14,7 @@ import { broadcast } from '../durable-objects/broadcastHub'
 import { bumpVersion } from '../lib/cache'
 import { reportError } from '../lib/errorReporting'
 import { checkRateLimit, getClientIp } from '../lib/rateLimit'
+import { getPlanLimits } from '../lib/planTier'
 
 // Each R2 delete is its own subrequest, and a Worker invocation has a
 // hard ceiling on how many it may make. A catalog of ~6,700 products with
@@ -35,7 +36,11 @@ import { checkRateLimit, getClientIp } from '../lib/rateLimit'
 // catalog": a 20k-object sweep belongs to a continuation design, not one
 // interactive request, and the leftover-reporting path already handles
 // the remainder honestly.
-const MAX_IMAGE_DELETES_PER_RESET = 500
+//
+// Tier-aware: read as `getPlanLimits(c.env).maxImageDeletesPerReset` at the
+// route handler below (not a module-level constant here, since this file
+// has no Env until a request arrives) -- Paid keeps this 500; Free reverts
+// to the documented pre-A4 200. See planTier.ts's comment on that field.
 
 const app = new Hono<{ Bindings: Env; Variables: { user: any } }>()
 
@@ -170,6 +175,8 @@ app.post('/reset-data', async (c) => {
   const includeImages = mode === 'products' && body.includeImages === true
   const db = getDb(c.env)
   const user = c.get('user')
+  // Tier-aware -- see the constant's history above this handler.
+  const MAX_IMAGE_DELETES_PER_RESET = getPlanLimits(c.env).maxImageDeletesPerReset
 
   if (mode === 'products') {
     // ONE list, used for both the backup and the delete. Deriving them

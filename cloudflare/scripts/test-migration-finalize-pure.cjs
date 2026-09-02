@@ -64,6 +64,12 @@ const media = loadReal('lib/media.ts')
 
 const systemRoute = loadReal('routes/system.ts', {
   '../lib/db': { getDb: () => db },
+  // planTier (Section 8b): the reset-data handler now reads
+  // getPlanLimits(c.env).maxImageDeletesPerReset instead of a bare module-
+  // level constant. Real module, not a stub -- its only import (`import
+  // type { Env } from '../index'`) is type-only and erased by
+  // transpileModule, so it needs no overrides of its own.
+  '../lib/planTier': loadReal('lib/planTier.ts', {}),
   '../lib/auth': { requireAuth: async (c, next) => { c.set('user', FAKE_USER); return next() } },
   '../lib/audit': { audit: async () => {} },
   '../lib/permissions': permissions,

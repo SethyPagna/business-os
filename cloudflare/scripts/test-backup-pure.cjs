@@ -46,12 +46,27 @@ new Function('exports', 'require', 'module', '__filename', '__dirname', restoreS
   restoreStreamModuleObj.exports, require, restoreStreamModuleObj, restoreStream.sourcePath, path.dirname(restoreStream.sourcePath),
 )
 
+// planTier (Section 8b): writeBackupDocument and
+// continueCloudflareBackupAssetCopy now read
+// getPlanLimits(env).maxAssetsPerBackup instead of the bare module-level
+// MAX_ASSET_BYTES_PER_BACKUP constant -- falling through to Node's own
+// module resolution here would try to resolve './planTier' relative to
+// this script's directory (scripts/), not src/lib/, and fail. Its only
+// import (`import type { Env } from '../index'`) is type-only and erased
+// by transpileModule, so plain `require` is enough once loaded.
+const planTier = transpile('lib/planTier.ts')
+const planTierModuleObj = { exports: {} }
+new Function('exports', 'require', 'module', '__filename', '__dirname', planTier.outputText)(
+  planTierModuleObj.exports, require, planTierModuleObj, planTier.sourcePath, path.dirname(planTier.sourcePath),
+)
+
 const backup = transpile('lib/backup.ts')
 const Module = require('module')
 const originalLoad = Module._load
 Module._load = function patchedLoad(request, parent, isMain) {
   if (request === './r2') return r2ModuleObj.exports // real module, actually exercised
   if (request === './backupRestoreStream') return restoreStreamModuleObj.exports // real scanner
+  if (request === './planTier') return planTierModuleObj.exports // real module, actually exercised
   return originalLoad.call(this, request, parent, isMain)
 }
 const backupModuleObj = { exports: {} }

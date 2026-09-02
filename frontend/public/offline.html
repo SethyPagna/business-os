@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Offline — Business OS</title>
+<style>
+  :root { color-scheme: light dark; }
+  body {
+    margin: 0;
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+    padding-bottom: calc(24px + env(safe-area-inset-bottom));
+    background: #f9fafb;
+    color: #1f2937;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    text-align: center;
+  }
+  @media (prefers-color-scheme: dark) {
+    body { background: #0f172a; color: #e5e7eb; }
+    button { background: #2563eb !important; }
+  }
+  .card { max-width: 420px; }
+  h1 { font-size: 1.15rem; margin: 0 0 8px; }
+  p { font-size: 0.9rem; line-height: 1.5; opacity: 0.85; margin: 0 0 4px; }
+  .km { margin-top: 4px; }
+  button {
+    margin-top: 20px;
+    border: none;
+    border-radius: 8px;
+    background: #1e3a8a;
+    color: #fff;
+    padding: 10px 20px;
+    font-size: 0.9rem;
+    cursor: pointer;
+  }
+</style>
+</head>
+<body>
+  <div class="card">
+    <h1>You're offline</h1>
+    <p>This page was not cached, and Business OS could not reach the server. Sales and other work already saved on this device are safe and will sync once you're back online.</p>
+    <p class="km" lang="km">អ្នកកំពុងគ្មានអ៊ីនធឺណិត។ ទំព័រនេះមិនទាន់ត្រូវបានរក្សាទុកទេ ហើយ Business OS មិនអាចភ្ជាប់ទៅម៉ាស៊ីនមេបានទេ។ ការងារ និងការលក់ដែលបានរក្សាទុករួចនៅលើឧបករណ៍នេះមានសុវត្ថិភាព ហើយនឹងធ្វើសមកាលកម្មនៅពេលមានអ៊ីនធឺណិតឡើងវិញ។</p>
+    <button type="button" onclick="location.reload()">Try again / ព្យាយាមម្តងទៀត</button>
+  </div>
+</body>
+</html>
