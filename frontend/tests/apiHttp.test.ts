@@ -40,6 +40,7 @@ import { createImportJob, startImportJob, uploadImportJobCsv } from '../src/api/
 import { apiFormPost, buildMultipartHeaders, withImportDeviceInfo } from '../src/api/importTransport.ts'
 import { mirrorReadResult } from '../src/api/localMirrors.ts'
 import { fetchJsonWithTimeout, getPortalBaseUrl } from '../src/api/portalHttp.ts'
+import { STORAGE_KEYS } from '../src/constants.ts'
 import { appendQuery, buildQueryString, normalizePositiveUniqueIds } from '../src/api/query.ts'
 import { buildQueryCacheStorageKey } from '../src/api/queryCache.ts'
 import { createClientRequestId, ensureClientRequestId } from '../src/api/requestIds.ts'
@@ -656,10 +657,11 @@ await runTest('actor query helper appends current user context and extra paramet
   }
 })
 
-await runTest('portal HTTP helper prefers browser origin and keeps fetch abort signals wired', async () => {
+await runTest('portal HTTP helper falls back to browser origin with no override, and keeps fetch abort signals wired', async () => {
   resetApiState()
-  setSyncServerUrl('https://sync.example.test/')
-  assert.equal(getPortalBaseUrl(), 'https://sync.example.test')
+  // No override anywhere (no window at all, so no localStorage; no hydrated
+  // syncServerUrl) -- nothing to prefer yet.
+  assert.equal(getPortalBaseUrl(), '')
 
   const originalWindow = globalThis.window
   const originalFetch = globalThis.fetch
@@ -686,6 +688,59 @@ await runTest('portal HTTP helper prefers browser origin and keeps fetch abort s
   } finally {
     globalThis.window = originalWindow
     globalThis.fetch = originalFetch
+    resetApiState()
+  }
+})
+
+await runTest('portal HTTP helper prefers an explicit sync-server override over same-origin (matches admin transport precedence)', () => {
+  resetApiState()
+  const originalWindow = globalThis.window
+
+  try {
+    // Hydrated module-level override (how the admin app's bootstrap wires
+    // it, via setSyncServerUrl) beats same-origin, same as
+    // getReadServerBaseUrl() in api/http.ts.
+    setSyncServerUrl('https://sync.example.test/')
+    globalThis.window = {
+      location: { origin: 'https://browser.example.test/' },
+    } as unknown as Window & typeof globalThis
+    assert.equal(getPortalBaseUrl(), 'https://sync.example.test')
+    resetApiState()
+
+    // Direct localStorage override beats same-origin too. This is the
+    // storefront-specific path: PublicCatalogRoot never mounts the admin
+    // bootstrap, so getSyncServerUrl() is never hydrated for it -- without
+    // reading localStorage directly here, the documented
+    // `localStorage.setItem('businessos_sync_server', ...)` escape valve
+    // silently had no effect on the public catalog even though it already
+    // worked for the admin app.
+    const values = new Map<string, string>([[STORAGE_KEYS.SYNC_SERVER, 'https://override.example.test/']])
+    globalThis.window = {
+      location: { origin: 'https://browser.example.test/' },
+      localStorage: {
+        getItem: (key: string) => values.get(key) ?? null,
+        setItem: (key: string, value: string) => { values.set(key, value) },
+        removeItem: (key: string) => { values.delete(key) },
+      },
+    } as unknown as Window & typeof globalThis
+    assert.equal(getPortalBaseUrl(), 'https://override.example.test')
+
+    // With no override in either source, same-origin still wins.
+    values.delete(STORAGE_KEYS.SYNC_SERVER)
+    assert.equal(getPortalBaseUrl(), 'https://browser.example.test')
+
+    // A localStorage read that throws (private mode / disabled storage)
+    // must not crash the resolver -- it just falls through to the next
+    // source instead of propagating.
+    globalThis.window = {
+      location: { origin: 'https://browser.example.test/' },
+      localStorage: {
+        getItem: () => { throw new Error('storage disabled') },
+      },
+    } as unknown as Window & typeof globalThis
+    assert.equal(getPortalBaseUrl(), 'https://browser.example.test')
+  } finally {
+    globalThis.window = originalWindow
     resetApiState()
   }
 })

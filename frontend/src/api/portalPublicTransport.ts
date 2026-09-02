@@ -1,3 +1,5 @@
+import { fetchJsonWithTimeout, getPortalBaseUrl } from './portalHttp.ts'
+
 type PortalPayload = Record<string, unknown>
 type QueryPrimitive = string | number | boolean | null | undefined
 type QueryValue = QueryPrimitive | QueryPrimitive[]
@@ -11,10 +13,6 @@ const PORTAL_JSON_HEADERS = {
 
 function readJsonObject(response: Response): Promise<PortalPayload> {
   return response.json().catch(() => ({})) as Promise<PortalPayload>
-}
-
-function getPortalBaseUrl(): string {
-  return (typeof window !== 'undefined' ? (window.location?.origin || '') : '').replace(/\/$/, '')
 }
 
 function buildQueryString(params: QueryParams | null | undefined = {}): string {
@@ -36,28 +34,6 @@ function appendQuery(path: string, query: string): string {
 function appendQueryValue(query: URLSearchParams, key: string, value: QueryPrimitive): void {
   if (value == null || value === '') return
   query.append(key, String(value))
-}
-
-async function fetchJsonWithTimeout(
-  url: string,
-  options: RequestInit = {},
-  timeoutMs = 10_000,
-): Promise<Response> {
-  const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), timeoutMs)
-  try {
-    return await fetch(url, {
-      ...options,
-      signal: controller.signal,
-    })
-  } catch (error) {
-    if ((error as { name?: string })?.name === 'AbortError') {
-      throw new Error(`Request timed out after ${Math.round(timeoutMs / 1000)}s`)
-    }
-    throw error
-  } finally {
-    clearTimeout(timer)
-  }
 }
 
 async function fetchPortalJson(path: string, errorLabel: string): Promise<unknown> {
