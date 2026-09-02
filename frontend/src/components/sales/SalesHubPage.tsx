@@ -4,6 +4,7 @@ import RotateCcw from 'lucide-react/dist/esm/icons/rotate-ccw.js'
 import HandCoins from 'lucide-react/dist/esm/icons/hand-coins.js'
 import BarChart3 from 'lucide-react/dist/esm/icons/bar-chart-3.js'
 import { useApp as useAppHook } from '../../AppContext.tsx'
+import HubSectionNav, { type HubSectionDef, readStoredHubSection } from '../shared/HubSectionNav.tsx'
 
 // E2 (Part 407): Sales absorbs Returns and Fees as sections of one Sales
 // page -- the same hub pattern E3/E4 established (ReviewLogsPage /
@@ -28,16 +29,24 @@ const useApp = useAppHook as unknown as () => SalesHubAppContext
 
 type SalesHubSection = 'sales' | 'returns' | 'fees' | 'reports'
 
-function initialSection(canSales: boolean, canReturns: boolean, canFees: boolean): SalesHubSection {
-  // Deep link: the old standalone URLs keep meaning what they said.
+const SALES_HUB_STORAGE_KEY = 'bos:hub:sales:active'
+
+function initialSection(canSales: boolean, canReturns: boolean, canFees: boolean): { section: SalesHubSection; deepLinked: boolean } {
+  // Deep link: the old standalone URLs keep meaning what they said. A deep
+  // link always wins, and (unlike a plain visit) starts straight on layer 3
+  // in the mobile three-layer nav -- see HubSectionNav's initialEntered.
   if (typeof window !== 'undefined') {
     const segment = String(window.location.pathname || '').toLowerCase()
-    if (segment.includes('return') && canReturns) return 'returns'
-    if (segment.includes('fee') && canFees) return 'fees'
+    if (segment.includes('return') && canReturns) return { section: 'returns', deepLinked: true }
+    if (segment.includes('fee') && canFees) return { section: 'fees', deepLinked: true }
   }
-  if (canSales) return 'sales'
-  if (canReturns) return 'returns'
-  return 'fees'
+  const validIds = (['sales', 'returns', 'fees'] as SalesHubSection[]).filter((id) =>
+    (id === 'sales' && canSales) || (id === 'returns' && canReturns) || (id === 'fees' && canFees))
+  const stored = readStoredHubSection(SALES_HUB_STORAGE_KEY, validIds) as SalesHubSection | null
+  if (stored) return { section: stored, deepLinked: false }
+  if (canSales) return { section: 'sales', deepLinked: false }
+  if (canReturns) return { section: 'returns', deepLinked: false }
+  return { section: 'fees', deepLinked: false }
 }
 
 export default function SalesHubPage() {
@@ -50,51 +59,44 @@ export default function SalesHubPage() {
   // Reports draws on all three areas, so anyone who can see any one of them
   // gets the tab (the hub then only offers the report types they can view).
   const canReports = canSales || canReturns || canFees
-  const [section, setSection] = useState<SalesHubSection>(() => initialSection(canSales, canReturns, canFees))
+  const [initial] = useState(() => initialSection(canSales, canReturns, canFees))
+  const [section, setSection] = useState<SalesHubSection>(initial.section)
 
-  const tabs: Array<{ id: SalesHubSection; label: string; icon: typeof BadgeDollarSign; allowed: boolean; tone: string }> = [
-    { id: 'sales', label: trh('sales', 'Sales'), icon: BadgeDollarSign, allowed: canSales, tone: 'text-blue-600' },
-    { id: 'returns', label: trh('returns', 'Returns'), icon: RotateCcw, allowed: canReturns, tone: 'text-amber-600' },
-    { id: 'fees', label: trh('fees', 'Expenses'), icon: HandCoins, allowed: canFees, tone: 'text-emerald-600' },
-    { id: 'reports', label: trh('reports', 'Reports'), icon: BarChart3, allowed: canReports, tone: 'text-indigo-600' },
+  const tabs: HubSectionDef[] = [
+    { id: 'sales', label: trh('sales', 'Sales'), icon: BadgeDollarSign, hidden: !canSales, tone: 'text-blue-600', description: trh('hub_desc_sales_sales', 'Ring up and record sales') },
+    { id: 'returns', label: trh('returns', 'Returns'), icon: RotateCcw, hidden: !canReturns, tone: 'text-amber-600', description: trh('hub_desc_sales_returns', 'Process customer returns') },
+    { id: 'fees', label: trh('fees', 'Expenses'), icon: HandCoins, hidden: !canFees, tone: 'text-emerald-600', description: trh('hub_desc_sales_fees', 'Track business expenses') },
+    { id: 'reports', label: trh('reports', 'Reports'), icon: BarChart3, hidden: !canReports, tone: 'text-indigo-600', description: trh('hub_desc_sales_reports', 'Sales, returns and expense reports') },
   ]
-  const visibleTabs = tabs.filter((tab) => tab.allowed)
 
   return (
-    // One scroll root for the hub. The hosted sections render into this page
-    // instead of owning fixed-height nested scrollers, so their lists grow to
-    // fit their content and the whole Sales page scrolls naturally.
-    <div className="page-scroll flex min-h-0 min-w-0 flex-col">
-      {visibleTabs.length > 1 ? (
-        // iPhone standalone mode receives the same complete section row as
-        // Android. Labels may use a second line inside their equal cell; none
-        // are ellipsized or pushed beyond the viewport.
-        <div className="shrink-0 px-2 pt-3 sm:px-3 sm:pt-5">
-          <div className="grid w-full rounded-xl bg-gray-100 p-0.5 dark:bg-gray-800" style={{ gridTemplateColumns: `repeat(${visibleTabs.length}, minmax(0, 1fr))` }}>
-            {visibleTabs.map((tab) => {
-              const Icon = tab.icon
-              return (
-                <button
-                  key={tab.id}
-                  type="button"
-                  onClick={() => setSection(tab.id)}
-                  className={`inline-flex min-h-11 min-w-0 flex-col items-center justify-center gap-0.5 rounded-lg px-1 py-1 text-[10px] font-medium sm:min-h-0 sm:flex-row sm:gap-1 sm:px-1.5 sm:py-1.5 sm:text-sm ${section === tab.id ? `bg-white dark:bg-gray-900 shadow ${tab.tone}` : 'text-gray-500'}`}
-                >
-                  <Icon className="h-3.5 w-3.5 shrink-0 sm:h-4 sm:w-4" /> <span className="min-w-0 break-words text-center leading-tight">{tab.label}</span>
-                </button>
-              )
-            })}
-          </div>
-        </div>
-      ) : null}
-      <Suspense fallback={<p className="p-4 text-sm text-gray-500">{trh('loading', 'Loading')}...</p>}>
-        {section === 'returns' && canReturns ? <ReturnsSection embedded />
-          : section === 'fees' && canFees ? <FeesSection embedded />
-          : section === 'reports' && canReports ? <ReportsSection embedded />
-          : canSales ? <SalesSection embedded />
-          : canReturns ? <ReturnsSection embedded />
-          : <FeesSection embedded />}
-      </Suspense>
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+      <HubSectionNav
+        sections={tabs}
+        active={section}
+        onChange={(id) => setSection(id as SalesHubSection)}
+        storageKey={SALES_HUB_STORAGE_KEY}
+        pageId="sales"
+        title={trh('sales', 'Sales')}
+        initialEntered={initial.deepLinked}
+      >
+      {/* One scroll root for the hosted section. It renders straight into
+          this page instead of owning a fixed-height nested scroller, so its
+          list grows to fit its content and the whole thing scrolls naturally
+          -- same contract as before, just page-scroll now lives here instead
+          of on the hub's own outer element (HubSectionNav's layer-3 header,
+          when present, needs to sit OUTSIDE the scrolling box). */}
+      <div className="page-scroll flex min-h-0 min-w-0 flex-1 flex-col">
+        <Suspense fallback={<p className="p-4 text-sm text-gray-500">{trh('loading', 'Loading')}...</p>}>
+          {section === 'returns' && canReturns ? <ReturnsSection embedded />
+            : section === 'fees' && canFees ? <FeesSection embedded />
+            : section === 'reports' && canReports ? <ReportsSection embedded />
+            : canSales ? <SalesSection embedded />
+            : canReturns ? <ReturnsSection embedded />
+            : <FeesSection embedded />}
+        </Suspense>
+      </div>
+      </HubSectionNav>
     </div>
   )
 }
