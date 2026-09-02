@@ -314,6 +314,37 @@ const SETTINGS_BUCKET_LABELS: Record<string, string> = {
   customer_portal: 'Manage portal config',
 }
 
+// Section 4 (2026-09-02 RC): the receipt's "Text contrast" setting
+// (Normal | Maximum black) lives inside the opaque receipt_template JSON
+// blob, same as font family/size/alignment/etc. Every other template field
+// is untouched here -- the frontend already merges it against its own
+// defaults (receiptAppliedConfig.ts's normalizeReceiptTemplate) and this
+// route otherwise just stores whatever JSON string the client sent, like
+// every other settings key. text_contrast gets its own server-side guard
+// because an invalid value here would change how EVERY future receipt
+// renders (all-black vs normal), not just redraw one widget, so it is
+// enum-validated on write rather than trusted like the rest of the blob.
+// Anything other than the literal 'maximum' resolves to the 'normal'
+// default. Mirrors frontend/src/utils/receiptTextContrast.ts's
+// normalizeReceiptTextContrast -- duplicated rather than imported because
+// the Worker and the frontend are separate packages (cloudflare/tsconfig.json
+// only includes "src"; there is no cross-package import path).
+function sanitizeReceiptTemplateValue(raw: unknown): string {
+  const asString = typeof raw === 'string' ? raw : JSON.stringify(raw)
+  let parsed: Record<string, unknown>
+  try {
+    const candidate = JSON.parse(asString)
+    if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) return asString
+    parsed = candidate as Record<string, unknown>
+  } catch {
+    // Malformed JSON is preserved as-is (same "never guess at unparsable
+    // legacy data" stance the rest of this file takes), not discarded.
+    return asString
+  }
+  parsed.text_contrast = parsed.text_contrast === 'maximum' ? 'maximum' : 'normal'
+  return JSON.stringify(parsed)
+}
+
 app.post('/', async (c) => {
   const user = c.get('user')
   const body = await c.req.json<Record<string, unknown>>()
@@ -369,7 +400,7 @@ app.post('/', async (c) => {
   const db = getDb(c.env)
   const statements = attemptedKeys.map((key) => {
     const raw = body[key]
-    const value = typeof raw === 'string' ? raw : JSON.stringify(raw)
+    const value = key === 'receipt_template' ? sanitizeReceiptTemplateValue(raw) : (typeof raw === 'string' ? raw : JSON.stringify(raw))
     return {
       sql: `INSERT INTO settings (key, value, updated_at) VALUES (@key, @value, CURRENT_TIMESTAMP)
             ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP`,
