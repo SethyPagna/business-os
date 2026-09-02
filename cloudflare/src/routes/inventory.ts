@@ -19,7 +19,7 @@ import { parseDatedStockCountEntries, buildDatedStockCountPlan } from '../lib/da
 import { applyDatedStockCountPlan } from '../lib/datedStockCountApply'
 import { parseRawDatedCountRows, resolveDatedStockCountRows } from '../lib/datedStockCountResolve'
 import { applyDatedStockCountDecisions, type DatedCountDecision } from '../lib/datedStockCountDecisions'
-import { sendTelegramEvent } from '../lib/telegram'
+import { formatStockChangeTelegramLines, sendTelegramEvent } from '../lib/telegram'
 import type { Env } from '../index'
 
 // Inventory routes, ported from backend/src/routes/inventory.ts.
@@ -1597,16 +1597,28 @@ app.post('/adjust', async (c) => {
   c.executionCtx.waitUntil(broadcast(c.env, 'inventory', { action: 'adjust', id: targetProductId }))
   c.executionCtx.waitUntil(bumpVersion(c.env, 'products'))
   if (delta !== 0) {
-    c.executionCtx.waitUntil(sendTelegramEvent(c.env, {
-      type: type === 'add' ? 'stock_in' : 'stock_out',
-      lines: [
-        `Product: ${targetProductName}`,
-        `Quantity: ${Math.abs(delta)}`,
-        `Branch: ${branch?.name || 'Unassigned'}`,
-        `Reason: ${reason}`,
-        type === 'add' && lotCode ? `Lot: ${lotCode}` : '',
-      ],
-    }).catch((error) => console.error('[telegram] stock adjustment notification failed', error)))
+    // The alert carries the RESULTING on-hand figures (this branch and all
+    // branches), read back after the write -- not just the delta.
+    c.executionCtx.waitUntil((async () => {
+      const [branchRow, productRow] = await Promise.all([
+        getDb(c.env).prepare('SELECT quantity FROM branch_stock WHERE product_id = @productId AND branch_id = @branchId').get<{ quantity: number }>({ productId: targetProductId, branchId }),
+        getDb(c.env).prepare('SELECT stock_quantity FROM products WHERE id = @productId').get<{ stock_quantity: number }>({ productId: targetProductId }),
+      ])
+      await sendTelegramEvent(c.env, {
+        type: type === 'add' ? 'stock_in' : 'stock_out',
+        lines: formatStockChangeTelegramLines({
+          product: targetProductName || `#${targetProductId}`,
+          type: type === 'add' ? 'add' : 'remove',
+          quantity: delta,
+          branch: branch?.name || null,
+          reason,
+          lot: type === 'add' ? lotCode : null,
+          branchOnHand: branchRow ? num(branchRow.quantity) : null,
+          totalOnHand: productRow ? num(productRow.stock_quantity) : null,
+          by: user?.name || user?.username || null,
+        }),
+      })
+    })().catch((error) => console.error('[telegram] stock adjustment notification failed', error)))
   }
   // NOTE: every other route file in this app replies `{ success: true, ... }`
   // on success (see products.ts, branches.ts, etc). This endpoint used to

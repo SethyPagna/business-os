@@ -33,7 +33,7 @@ import { computeSaleTotals, resolveChangeExchangeRate, round2 } from '../lib/sal
 import { uniqueBusinessDateTimeNumber } from '../lib/receiptNumber'
 import { sanitizeClientCreatedAt } from '../lib/clientTimestamp'
 import { localDateAtOrAfter, localDateAtOrBefore, localDateRangeClause, localTimeRangeClause } from '../lib/businessDateWindow'
-import { sendTelegramEvent, telegramMoney } from '../lib/telegram'
+import { formatSaleTelegramLines, sendTelegramEvent, telegramMoney } from '../lib/telegram'
 import type { Env } from '../index'
 
 const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser } }>()
@@ -896,22 +896,34 @@ app.post('/', async (c) => {
   ]))
   c.executionCtx.waitUntil(sendTelegramEvent(c.env, {
     type: 'sales',
-    lines: [
-      `Receipt: ${receiptNumber}`,
-      `Status: ${saleStatus.replace(/_/g, ' ')}`,
-      `Total: ${telegramMoney(totalUsd, totalKhr)}`,
-      `Items: ${priced.length}`,
-      paymentMethod ? `Payment: ${paymentMethod}` : 'Payment: unpaid',
-      discountUsd || membershipDiscountUsd ? `Discount: ${telegramMoney(discountUsd + membershipDiscountUsd, discountKhr + membershipDiscountKhr)}` : '',
-      taxUsd ? `Tax: ${telegramMoney(taxUsd, Math.round(taxUsd * exchangeRate))}` : '',
-      isDelivery ? `Delivery: ${deliveryFeePaidBy === 'customer' ? 'customer paid' : 'shop paid'}` : '',
-      body.customer_name || customer?.name ? `Customer: ${body.customer_name || customer?.name}` : '',
-      branchRow?.name ? `Branch: ${branchRow.name}` : '',
-      `Cashier: ${body.cashier_name || c.get('user')?.name || c.get('user')?.username || 'Unknown'}`,
-      'Sold items:',
-      ...priced.slice(0, 12).map((item) => `• ${item.quantity} × ${item.product_name} — ${telegramMoney(item.unitPriceUsd, Math.round(item.unitPriceUsd * exchangeRate))} each (${telegramMoney(item.lineTotalUsd, Math.round(item.lineTotalUsd * exchangeRate))})`),
-      priced.length > 12 ? `+ ${priced.length - 12} more item(s)` : '',
-    ],
+    // Receipt-summary shape (lib/telegram.ts formatSaleTelegramLines): status,
+    // date, INV, cashier, customer + tel, item lines with per-line discount,
+    // delivery service, total / discount / net / paid, driver.
+    lines: formatSaleTelegramLines({
+      status: saleStatus,
+      createdAt: clientCreatedAt,
+      receiptNumber,
+      cashier: body.cashier_name || c.get('user')?.name || c.get('user')?.username || null,
+      customer: body.customer_name || customer?.name || null,
+      phone: body.customer_phone || null,
+      branch: branchRow?.name || null,
+      items: priced.map((item) => ({ name: item.product_name, quantity: item.quantity, unitPriceUsd: item.unitPriceUsd, basePriceUsd: Number(item.base_price_usd) || null, lineTotalUsd: item.lineTotalUsd })),
+      exchangeRate,
+      isDelivery,
+      deliveryFeeUsd,
+      deliveryPaidBy: deliveryFeePaidBy,
+      driver: deliveryContact,
+      subtotalUsd: round2(subtotalUsd),
+      discountUsd: round2(discountUsd + membershipDiscountUsd),
+      taxUsd,
+      totalUsd,
+      totalKhr,
+      paidUsd: amountPaidUsd,
+      paidKhr: amountPaidKhr,
+      changeUsd,
+      changeKhr,
+      paymentMethod,
+    }),
   }).catch((error) => console.error('[telegram] sale notification failed', error)))
 
   return c.json({

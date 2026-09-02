@@ -1,5 +1,5 @@
 import { getDb } from './db'
-import { businessToday, localTodayRangeClause } from './businessDateWindow'
+import { BUSINESS_UTC_OFFSET_MINUTES, businessToday, localTodayRangeClause } from './businessDateWindow'
 import type { Env } from '../index'
 
 export type TelegramEventType = 'sales' | 'status' | 'fees' | 'stock_in' | 'stock_out'
@@ -193,3 +193,89 @@ export async function configureTelegramWebhook(env: Env): Promise<void> {
   if (!result.ok) throw new Error(result.description || 'Telegram could not connect the command webhook.')
 }
 export function telegramMoney(usd: unknown, khr: unknown): string { return money(usd, khr) }
+
+// ---- Event message builders -------------------------------------------------
+// The sale alert is a RECEIPT SUMMARY, not a log line -- the user's spec:
+//   Status / Date / INV / Cashier / Customer / Tel / one line per item as
+//   "name qty × price (−discount) = total" / Delivery service / Total /
+//   Discount / Net Total / Paid / Delivery driver.
+// Pure and exported so scripts/test-telegram-messages-pure.cjs pins the exact
+// shape; routes/sales.ts only assembles the input from values it already holds.
+export type TelegramSaleItem = { name: string; quantity: number; unitPriceUsd: number; basePriceUsd?: number | null; lineTotalUsd: number }
+export type TelegramSaleSummary = {
+  status: string; createdAt?: string | null; receiptNumber: string; cashier?: string | null
+  customer?: string | null; phone?: string | null; branch?: string | null
+  items: TelegramSaleItem[]; exchangeRate: number
+  isDelivery?: boolean; deliveryFeeUsd?: number; deliveryPaidBy?: string | null
+  driver?: { name?: string | null; phone?: string | null } | null
+  subtotalUsd: number; discountUsd: number; taxUsd?: number; totalUsd: number; totalKhr?: number
+  paidUsd?: number; paidKhr?: number; changeUsd?: number; changeKhr?: number; paymentMethod?: string | null
+}
+export type TelegramStockChange = {
+  product: string; type: 'add' | 'remove'; quantity: number; branch?: string | null; reason?: string | null
+  lot?: string | null; branchOnHand?: number | null; totalOnHand?: number | null; by?: string | null
+}
+const TELEGRAM_MAX_ITEM_LINES = 20
+const round2 = (value: number) => Math.round(value * 100) / 100
+const usd = (value: unknown) => `$${(Number(value) || 0).toFixed(2)}`
+
+// mm/dd/yyyy HH:mm in the business day's zone (UTC+7) -- the app-wide display
+// convention. D1's CURRENT_TIMESTAMP is 'YYYY-MM-DD HH:MM:SS' UTC without a
+// zone marker; client-sent created_at is ISO with one. Missing/invalid -> now.
+export function formatBusinessDateTime(value?: string | null, nowMs = Date.now()): string {
+  const raw = String(value || '').trim()
+  const parsed = raw ? Date.parse(/(?:[zZ]|[+-]\d{2}:?\d{2})$/.test(raw) ? raw : `${raw.replace(' ', 'T')}Z`) : Number.NaN
+  const local = new Date((Number.isFinite(parsed) ? parsed : nowMs) + BUSINESS_UTC_OFFSET_MINUTES * 60_000)
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${pad(local.getUTCMonth() + 1)}/${pad(local.getUTCDate())}/${local.getUTCFullYear()} ${pad(local.getUTCHours())}:${pad(local.getUTCMinutes())}`
+}
+
+export function formatSaleTelegramLines(sale: TelegramSaleSummary): string[] {
+  const items = sale.items.slice(0, TELEGRAM_MAX_ITEM_LINES).map((item) => {
+    const quantity = Number(item.quantity) || 0
+    const base = Number(item.basePriceUsd)
+    const lineDiscount = Number.isFinite(base) && base > item.unitPriceUsd ? round2((base - item.unitPriceUsd) * quantity) : 0
+    return `• ${cleanLine(item.name, 100)} ${quantity} × ${usd(item.unitPriceUsd)}${lineDiscount ? ` (−${usd(lineDiscount)})` : ''} = ${usd(item.lineTotalUsd)}`
+  })
+  const deliveryFee = Number(sale.deliveryFeeUsd) || 0
+  const customerDelivery = sale.isDelivery && sale.deliveryPaidBy !== 'shop' ? deliveryFee : 0
+  const paid = (Number(sale.paidUsd) || 0) + (Number(sale.paidKhr) || 0)
+  const change = (Number(sale.changeUsd) || 0) + (Number(sale.changeKhr) || 0)
+  return [
+    `Status: ${String(sale.status || '').replace(/_/g, ' ')}`,
+    `Date: ${formatBusinessDateTime(sale.createdAt)}`,
+    `INV: ${sale.receiptNumber}`,
+    `Cashier: ${sale.cashier || 'Unknown'}`,
+    sale.customer ? `Customer: ${sale.customer}` : '',
+    sale.phone ? `Tel: ${sale.phone}` : '',
+    sale.branch ? `Branch: ${sale.branch}` : '',
+    ...items,
+    sale.items.length > TELEGRAM_MAX_ITEM_LINES ? `+ ${sale.items.length - TELEGRAM_MAX_ITEM_LINES} more item(s)` : '',
+    sale.isDelivery ? `Delivery service: ${usd(deliveryFee)}${sale.deliveryPaidBy === 'shop' ? ' (shop paid)' : ''}` : '',
+    `Total: ${usd(round2((Number(sale.subtotalUsd) || 0) + customerDelivery))}`,
+    sale.discountUsd ? `Discount: −${usd(sale.discountUsd)}` : '',
+    sale.taxUsd ? `Tax: ${usd(sale.taxUsd)}` : '',
+    `Net Total: ${money(sale.totalUsd, sale.totalKhr)}`,
+    paid > 0 ? `Paid: ${money(sale.paidUsd, sale.paidKhr)}${sale.paymentMethod ? ` (${sale.paymentMethod})` : ''}` : 'Paid: unpaid',
+    change > 0 ? `Change: ${money(sale.changeUsd, sale.changeKhr)}` : '',
+    sale.driver?.name ? `Delivery driver: ${sale.driver.name}${sale.driver.phone ? ` · ${sale.driver.phone}` : ''}` : '',
+  ]
+}
+
+// Stock alerts carry the RESULTING on-hand figures (this branch, all
+// branches), not only the delta -- "for stock change, should also show total".
+export function formatStockChangeTelegramLines(change: TelegramStockChange): string[] {
+  const quantity = Math.abs(Number(change.quantity) || 0)
+  const onHand: string[] = []
+  if (change.branchOnHand != null) onHand.push(`${change.branch || 'Branch'} ${Number(change.branchOnHand) || 0}`)
+  if (change.totalOnHand != null) onHand.push(`all branches ${Number(change.totalOnHand) || 0}`)
+  return [
+    `Product: ${change.product}`,
+    `Change: ${change.type === 'add' ? '+' : '−'}${quantity}`,
+    `Branch: ${change.branch || 'Unassigned'}`,
+    change.reason ? `Reason: ${change.reason}` : '',
+    change.lot ? `Lot: ${change.lot}` : '',
+    onHand.length ? `On hand: ${onHand.join(' · ')}` : '',
+    change.by ? `By: ${change.by}` : '',
+  ]
+}
