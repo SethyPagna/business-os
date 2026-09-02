@@ -28,7 +28,7 @@ import {
 //
 // Both are hidden once the app is already running standalone.
 export default function IosInstallHint() {
-  const { t } = useAppHook()
+  const { t } = useAppHook() as { t: (key: string) => string }
   const [showIosHint, setShowIosHint] = useState(false)
   const [showAndroidPrompt, setShowAndroidPrompt] = useState(false)
 
