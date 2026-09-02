@@ -7,6 +7,7 @@ import Ruler from 'lucide-react/dist/esm/icons/ruler.js'
 import Scaling from 'lucide-react/dist/esm/icons/scaling.js'
 import TestTube2 from 'lucide-react/dist/esm/icons/test-tube-2.js'
 import { downloadReceiptPdf, getPrintSettings, openReceiptPdf, savePrintSettings, PRINT_DEFAULTS } from '../../utils/printReceipt'
+import { normalizeReceiptTemplate } from '../../utils/receiptAppliedConfig'
 import type { ReceiptPrintSettings } from '../../types/receiptContracts'
 
 type Translate = (key: string, fallback?: string) => string | undefined
@@ -46,14 +47,29 @@ function Section({ icon: Icon, title, children }: SectionProps) {
   )
 }
 
-function buildFallbackPreviewHtml(printSettings: ReceiptPrintSettings, T: (key: string, fallback: string) => string): string {
-  const highContrastStyle = printSettings.highContrastBold ? 'color:#000;font-weight:700;' : 'color:#111827;'
-  const mutedColor = printSettings.highContrastBold ? '#000' : '#555'
-  const footerColor = printSettings.highContrastBold ? '#000' : '#777'
+// The normal path for both Test Print buttons is `getPreviewSource()` below
+// finding the REAL, already-rendered receipt preview DOM (the live sidebar/
+// modal <ReceiptPreview>) via `[data-receipt-export-root="true"]` -- that
+// element already carries Receipt.tsx's `data-receipt-contrast` attribute and
+// main.css's override, so it honours Text Contrast automatically, the same
+// way print/PDF/image export does. This synthetic HTML string is only a
+// last-resort fallback for when that real preview DOM isn't mounted/found
+// (e.g. the ref hasn't attached yet) -- it must still honour the same setting
+// rather than silently reverting to grey, so the fallback also takes the
+// current contrast mode.
+function buildFallbackPreviewHtml(printSettings: ReceiptPrintSettings, T: (key: string, fallback: string) => string, contrastMode: string): string {
+  // Either switch alone is enough to darken this fallback: Text contrast =
+  // maximum, or the older highContrastBold. Only the latter also bolds.
+  const isMaxContrast = contrastMode === 'maximum' || printSettings.highContrastBold
+  const highContrastStyle = printSettings.highContrastBold
+    ? 'color:#000;font-weight:700;'
+    : (isMaxContrast ? 'color:#000;' : 'color:#111827;')
+  const metaColor = isMaxContrast ? '#000000' : '#555'
+  const footerColor = isMaxContrast ? '#000000' : '#777'
   return `
     <div data-receipt-high-contrast="${printSettings.highContrastBold ? 'true' : 'false'}" style="padding:8px;text-align:center;${highContrastStyle}">
       <div style="font-size:16px;font-weight:bold;margin-bottom:4px;">Business OS</div>
-      <div style="font-size:11px;color:${mutedColor};margin-bottom:8px;">${T('receipt_test_pdf', 'Receipt Test')}</div>
+      <div style="font-size:11px;color:${metaColor};margin-bottom:8px;">${T('receipt_test_pdf', 'Receipt Test')}</div>
       <div style="border-top:1px dashed #000;margin:6px 0;"></div>
       <div style="font-size:12px;text-align:left;">
         <div style="display:flex;justify-content:space-between;gap:16px;"><span>Item 1 x2</span><span>$10.00</span></div>
@@ -67,15 +83,15 @@ function buildFallbackPreviewHtml(printSettings: ReceiptPrintSettings, T: (key: 
   `
 }
 
-function buildSafePreviewSource(previewNode: unknown, printSettings: ReceiptPrintSettings, T: (key: string, fallback: string) => string): string | HTMLElement {
+function buildSafePreviewSource(previewNode: unknown, printSettings: ReceiptPrintSettings, T: (key: string, fallback: string) => string, contrastMode: string): string | HTMLElement {
   if (!(previewNode instanceof HTMLElement)) {
-    return buildFallbackPreviewHtml(printSettings, T)
+    return buildFallbackPreviewHtml(printSettings, T, contrastMode)
   }
   try {
     const exportRoot = previewNode.querySelector('[data-receipt-export-root="true"]')
     return exportRoot instanceof HTMLElement ? exportRoot : previewNode
   } catch (_) {
-    return buildFallbackPreviewHtml(printSettings, T)
+    return buildFallbackPreviewHtml(printSettings, T, contrastMode)
   }
 }
 
@@ -151,9 +167,13 @@ export default function PrintSettings({ t: tProp, previewTargetRef = null, setti
     ['marginLeft', T('print_left', 'Left')],
   ]
 
+  // Only the fallback synthetic HTML (buildFallbackPreviewHtml) reads this --
+  // the real preview DOM branch already carries its own contrast attribute.
+  const contrastMode = normalizeReceiptTemplate(settings.receipt_template).text_contrast
+
   const getPreviewSource = () => {
     const previewNode = previewTargetRef?.current
-    return buildSafePreviewSource(previewNode, ps, T)
+    return buildSafePreviewSource(previewNode, ps, T, contrastMode)
   }
 
   return (

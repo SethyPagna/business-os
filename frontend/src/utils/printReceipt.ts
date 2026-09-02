@@ -25,6 +25,12 @@ type ReceiptPrintOptions = {
   previewFallback?: boolean
   autoPrintOnPreviewFallback?: boolean
   previewFallbackNote?: string
+  // Text colour for the last-resort text-only canvas fallback in
+  // createReceiptImageBlob (used only when the primary html2canvas render of
+  // the already-styled DOM clone fails). Callers pass '#000000' when the
+  // receipt's Text contrast setting is 'maximum' so even that rare fallback
+  // stays pure black instead of the softer default.
+  textColor?: string
 }
 type ByteChunk = Uint8Array<ArrayBufferLike>
 type ImagePdfInput = {
@@ -647,10 +653,15 @@ function createTextOnlyReceiptCanvas(content: ReceiptContent, options: ReceiptPr
   const context = canvas.getContext('2d')
   if (!context) throw new Error('Canvas rendering unavailable')
 
+  // Two contrast controls stack here, newest first: the receipt template's
+  // Text contrast = maximum arrives as options.textColor and forces pure
+  // black, and failing that the older per-print highContrastBold switch still
+  // darkens the default. Neither touches font size.
+  const textColor = options.textColor || (printSettings.highContrastBold ? '#000000' : '#111827')
   context.scale(scale, scale)
   context.fillStyle = '#ffffff'
   context.fillRect(0, 0, widthPx, heightPx)
-  context.fillStyle = printSettings.highContrastBold ? '#000000' : '#111827'
+  context.fillStyle = textColor
   const fontStack = `"Noto Sans Khmer", "Khmer OS", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace`
   context.font = `${defaultFontWeight}${fontSize}px ${fontStack}`
   context.textBaseline = 'top'
@@ -674,7 +685,10 @@ function createTextOnlyReceiptCanvas(content: ReceiptContent, options: ReceiptPr
       }
 
       if (isSeparator) {
-        context.strokeStyle = printSettings.highContrastBold ? '#000000' : '#cbd5e1'
+        // Dividers take the same stacked rule as the text, and keep the
+        // thicker 1.5px rule bold mode ships -- a weak-ink thermal printer
+        // drops a 1px hairline entirely.
+        context.strokeStyle = options.textColor || (printSettings.highContrastBold ? '#000000' : '#cbd5e1')
         context.lineWidth = printSettings.highContrastBold ? 1.5 : 1
         context.beginPath()
         context.moveTo(paddingX, y + 7)
