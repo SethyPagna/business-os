@@ -219,8 +219,21 @@ function wordsFuzzyMatch(queryWord: string, haystackWord: string): boolean {
   if (queryWord === haystackWord) return true
   if (haystackWord.includes(queryWord) || queryWord.includes(haystackWord)) return true
   const budget = Math.min(typoBudgetForLength(queryWord.length), typoBudgetForLength(haystackWord.length))
-  if (budget <= 0) return false
-  return boundedLevenshtein(queryWord, haystackWord, budget) <= budget
+  if (budget > 0 && boundedLevenshtein(queryWord, haystackWord, budget) <= budget) return true
+  // Partial typing WITH a typo in the typed portion -- kept in sync with
+  // the backend copy (cloudflare/src/lib/searchMatch.ts's own comment on
+  // this exact block has the full "Elixe" reasoning). queryWord shorter
+  // than haystackWord only; compared against haystackWord's own
+  // same-length prefix instead of the full word, budget scaled to
+  // queryWord's own length.
+  if (queryWord.length < haystackWord.length) {
+    const prefixBudget = typoBudgetForLength(queryWord.length)
+    if (prefixBudget > 0) {
+      const prefix = haystackWord.slice(0, queryWord.length)
+      if (boundedLevenshtein(queryWord, prefix, prefixBudget) <= prefixBudget) return true
+    }
+  }
+  return false
 }
 
 interface HaystackIndex {
