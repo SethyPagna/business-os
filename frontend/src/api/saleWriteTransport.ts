@@ -28,6 +28,27 @@ const OFFLINE_SALE_RETRY_DELAY_MS = 30_000
 const OFFLINE_SALE_SYNC_LEASE_MS = 60_000
 let pendingSalesSyncPromise: Promise<Record<string, unknown>> | null = null
 
+// Section 8b (PWA): while the server is reachable, createSale() below awaits
+// a bare network POST with NO local durability write beforehand -- unlike
+// the offline path (queueOfflineSale), which writes to sync_queue/sales
+// FIRST and syncs after. That is deliberate (the common case should not pay
+// an IndexedDB round trip before every online sale), but it means a reload
+// while that fetch is in flight aborts the request with no local record: a
+// real sale a cashier believes was completed, gone with no trace. The
+// service worker's own install/activate never reload a page on their own
+// (see public-runtime/service-worker.ts -- skipWaiting only ever runs off an
+// explicit BUSINESS_OS_SKIP_WAITING message), so the only path that can
+// reload mid-sale is the manual "Update" action in Sidebar.tsx's
+// runAppUpdate(). This counter lets that action refuse to reload while any
+// online sale submission is outstanding, the same way it already refuses on
+// hasDirtyWork() -- see its own comment for why POS's cart/draft state
+// itself does not need this (sessionStorage-durable, survives a reload).
+let inFlightOnlineSaleSubmissions = 0
+
+export function hasInFlightOnlineSaleSubmission(): boolean {
+  return inFlightOnlineSaleSubmissions > 0
+}
+
 function asText(value: unknown): string {
   return String(value ?? '')
 }
@@ -337,6 +358,7 @@ export function syncPendingSalesQueue(options: QueueSyncOptions = {}): Promise<R
 
 export async function createSale(payload: SalePayload = {}): Promise<unknown> {
   const salePayload = ensureSaleClientRequestId({ ...getClientDeviceInfo(), ...payload }, 'sale')
+  inFlightOnlineSaleSubmissions += 1
   try {
     return await createSaleRequest(salePayload)
   } catch (error) {
@@ -345,5 +367,7 @@ export async function createSale(payload: SalePayload = {}): Promise<unknown> {
       return queueOfflineSale(salePayload, err?.reason || 'server_offline')
     }
     throw error
+  } finally {
+    inFlightOnlineSaleSubmissions -= 1
   }
 }

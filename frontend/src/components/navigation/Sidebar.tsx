@@ -1,6 +1,7 @@
 import { Suspense, type ComponentType, type CSSProperties, type ReactNode, useMemo, useState, useSyncExternalStore } from 'react'
 import { getRegisteredWork, hasDirtyWork, subscribeDirtyWork } from '../../utils/dirtyWork.ts'
 import { flushPendingWorkDrafts } from '../../utils/workDrafts.ts'
+import { hasInFlightOnlineSaleSubmission } from '../../api/saleWriteTransport.ts'
 import type { LucideIcon } from 'lucide-react'
 import BadgeDollarSign from 'lucide-react/dist/esm/icons/badge-dollar-sign.js'
 import BookUser from 'lucide-react/dist/esm/icons/book-user.js'
@@ -208,6 +209,17 @@ export default function Sidebar({ notificationSlot = null, desktopNotificationSl
   // avatar.
   const [accountOpen, setAccountOpen] = useState(false)
   const runAppUpdate = async () => {
+    // Section 8b (PWA): a reload while an ONLINE sale submission is still in
+    // flight would abort that request with no local record of it -- see
+    // saleWriteTransport.ts's own comment on hasInFlightOnlineSaleSubmission
+    // for why this is a real gap the POS cart's own reload-safety (it's
+    // sessionStorage-durable) does not cover. Checked before hasDirtyWork()
+    // below since a mid-checkout POS page deliberately never registers as
+    // dirty work (multi-order carts persist across navigation by design).
+    if (hasInFlightOnlineSaleSubmission()) {
+      window.alert(t('wait_for_sale_before_update') || 'Wait for the current sale to finish before updating the app.')
+      return
+    }
     // iOS does not reliably show beforeunload prompts. Refuse an explicit
     // update while an editor has unsaved work, and activate the WAITING worker
     // (posting to controller targets the old active worker and does nothing).
