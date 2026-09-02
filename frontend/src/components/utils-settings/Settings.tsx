@@ -34,6 +34,7 @@ import { ACCOUNT_NAV_IDS, DEFAULT_MOBILE_PINNED, NAV_ITEMS, orderNavItems, parse
 import SectionSwitcher from '../shared/SectionSwitcher'
 import LoadingWatchdog from '../shared/LoadingWatchdog'
 import AppSelect from '../shared/AppSelect.tsx'
+import KitGallery from '../shared/kit/KitGallery'
 import { beginTrackedRequest, invalidateTrackedRequest, isTrackedRequestCurrent, withLoaderTimeout } from '../../utils/loaders.ts'
 import { beginKeyedAction, beginSingleAction, finishKeyedAction, finishSingleAction } from '../../utils/actionGuards.ts'
 import { buildSettingsConflictState, diffSettingsConflictFields } from './settingsConflict.ts'
@@ -1616,6 +1617,12 @@ export default function Settings() {
             })}
           </div>
 
+        </SettingsSection>
+        ) : null}
+
+        {isAdmin && showSettingsSection('appearance') ? (
+        <SettingsSection title={t('kit_gallery_title')} description={t('kit_gallery_subtitle')}>
+          <KitGallery />
         </SettingsSection>
         ) : null}
 
