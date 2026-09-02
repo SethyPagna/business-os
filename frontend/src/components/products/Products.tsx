@@ -20,6 +20,9 @@ import AppSelect from '../shared/AppSelect'
 import PageSizeSelect from '../shared/PageSizeSelect'
 import SearchInput from '../shared/SearchInput'
 import ScanSearchButton from '../shared/ScanSearchButton'
+import { useBarcodeScan } from '../../hooks/useBarcodeScan.ts'
+import { resolveExactBarcodeHit } from '../../utils/productLookup.ts'
+import type { ProductLookupCandidate } from '../../utils/productLookup.ts'
 import PaginationControls, { PAGE_SIZE_OPTIONS, DEFAULT_PAGE_SIZE } from '../shared/PaginationControls'
 import { ProductImg, ProductImagePlaceholder } from './shared/primitives'
 import ProductsListSurface, { ROW_TEXT_GUTTER } from './surfaces/ProductsListSurface'
@@ -326,6 +329,13 @@ type ProductSearchResponse = {
   items?: ProductRecord[]
   total?: number
   pageSize?: number
+  // P2-2/P2-4 (decision 9, Gate 2B A.6.1): id of the single row on the
+  // CURRENT page whose barcode exactly equals the typed/scanned query, or
+  // null when zero/more-than-one rows match -- see computeExactBarcodeHitId
+  // in cloudflare/src/routes/products.ts. Purely a highlight flag; consumed
+  // via utils/productLookup.ts's resolveExactBarcodeHit below, never used to
+  // filter/select/open anything on its own.
+  exact_barcode_hit_id?: number | string | null
 }
 
 type ProductReadModule = typeof import('../../api/productReadTransport.ts')
@@ -858,6 +868,17 @@ function ProductsFullEditor() {
   // matching "stays until I search again" rather than "stays forever" or
   // "disappears on the very next silent refresh."
   const pinnedEditedProductsRef = useRef<Map<number, ProductRecord>>(new Map())
+  // P2-4 step 3 (decision 9 / alias gap, brief §4 "Part 1 rule"): tracks
+  // whether the search value that produced the CURRENT results came from a
+  // scan (camera via ScanSearchButton, or a keyboard-wedge burst) rather than
+  // manual typing. Read inside load() once the fresh page lands, to decide
+  // whether a lone surviving row should be highlighted even when the server/
+  // client exact-barcode-hit computation came back null (e.g. the value
+  // matched a barcode_aliases row, which findExactBarcodeHit/
+  // computeExactBarcodeHitId never compare against -- see
+  // utils/productLookup.ts's own header comment on this gap). Reset to false
+  // the moment the person edits the search box by hand.
+  const lastSearchWasScanRef = useRef(false)
   const productDeleteInFlightRef = useRef(false)
   const bulkActionInFlightRef = useRef(false)
   const initializedCollapsedGroupKeysRef = useRef<Set<string>>(new Set())
@@ -880,6 +901,13 @@ function ProductsFullEditor() {
   }, [])
   const actionHistory = useActionHistory({ limit: 10, notify, scope: 'products', enabled: historyReady, user })
   const debouncedSearch = useDebouncedValue(search, 180)
+  // P2-4 step 3: id of the row to highlight as the exact scan/search hit
+  // (data-exact-hit="true" below) -- resolved in load() from the server's
+  // exact_barcode_hit_id (preferred) or the client-side fallbacks in
+  // utils/productLookup.ts / the Part-1 alias-gap rule described above.
+  // Never used to auto-open/auto-select the row -- see the Confirm
+  // affordance in renderDesktopProductRow/renderMobileProductCard.
+  const [exactBarcodeHit, setExactBarcodeHit] = useState<number | null>(null)
   // "Searchable filter for special stock states" (progress.md backlog item
   // #2): a term like `stock:0` or `out of stock` inside the search box is
   // parsed out here and treated as if "Out of stock" had been picked from
@@ -1021,6 +1049,36 @@ function ProductsFullEditor() {
             setProducts(prods)
           }
         }
+        // P2-4 step 3 (decision 9): resolve the exact-barcode-hit row for
+        // THIS page of results. Prefers the server's own
+        // exact_barcode_hit_id (computed against the full matched set, not
+        // just this page); resolveExactBarcodeHit falls back to a
+        // client-side single-candidate check only when the server didn't
+        // supply one at all.
+        const serverExactHitRaw = (productPayloadObject as Record<string, unknown> | null)?.exact_barcode_hit_id
+        let resolvedExactHit = resolveExactBarcodeHit(
+          serverExactHitRaw,
+          (Array.isArray(prods) ? prods : []) as ProductLookupCandidate[],
+          cleanedSearchQuery,
+        )
+        // P2-3 alias gap (utils/productLookup.ts header comment): both the
+        // server's computeExactBarcodeHitId and the client's
+        // findExactBarcodeHit compare products.barcode ONLY, so a value that
+        // matched through a barcode_aliases row (the search tail's alias
+        // clause) narrows the list but never resolves to an exact hit here.
+        // Part 1 rule (P2-4 brief §4): when the search that produced this
+        // page was a scan (camera or keyboard wedge, never manual typing --
+        // see lastSearchWasScanRef) and exactly one row survived, highlight
+        // it anyway. Still select-then-confirm: the row is only marked
+        // data-exact-hit and shown a Confirm affordance, never auto-opened.
+        // The real fix (comparing aliases too) belongs in
+        // productLookup.ts/backend -- out of this page's scope, see the
+        // P2-4 report's alias-gap handoff.
+        if (resolvedExactHit === null && lastSearchWasScanRef.current && Array.isArray(prods) && prods.length === 1) {
+          const onlyId = Number(prods[0]?.id)
+          resolvedExactHit = Number.isFinite(onlyId) ? onlyId : null
+        }
+        setExactBarcodeHit(resolvedExactHit)
         setProductTotal(Number(productPayloadObject?.total ?? prods.length) || 0)
         // The server clamps pageSize server-side (see routes/products.ts's
         // clampInt(query.pageSize, 20, 1, 100)) and echoes back whatever it
@@ -1101,6 +1159,19 @@ function ProductsFullEditor() {
   useEffect(() => {
     latestLoadRef.current = load
   }, [load])
+
+  // P2-4 step 3 (decision 9): once a fresh page of results lands with an
+  // exact-hit row resolved (see load()'s exactBarcodeHit block above), bring
+  // that row into view automatically -- but ONLY scroll to it, never open/
+  // select it. Reuses the same data-product-jump-id markers and
+  // scrollNodeWithOffset helper jumpToLetter already relies on, so this
+  // matches the page's one existing "scroll a row into view" convention
+  // instead of inventing a second one.
+  useEffect(() => {
+    if (exactBarcodeHit === null) return
+    const node = document.querySelector(`[data-product-jump-id="${exactBarcodeHit}"]`)
+    scrollNodeWithOffset(node instanceof HTMLElement ? node : null)
+  }, [exactBarcodeHit, products])
 
   const fetchProductsByIds = useCallback(async (ids: EntityId[] = []): Promise<ProductRecord[]> => {
     const uniqueIds = Array.from(new Set(
@@ -2398,8 +2469,33 @@ function ProductsFullEditor() {
     // is intentionally re-querying, a just-edited product that no longer
     // matches should behave like any other non-matching row again.
     pinnedEditedProductsRef.current.clear()
+    // Manual typing is never a "scan" -- see lastSearchWasScanRef's comment.
+    lastSearchWasScanRef.current = false
     setSearch(value)
   }, [])
+
+  // P2-4 step 3: shared target for both scan paths -- ScanSearchButton's
+  // camera detection (already auto-closes itself, see ScanSearchButton.tsx)
+  // and useBarcodeScan's keyboard-wedge burst detector below. Decision 9:
+  // this only ever fills the search box, exactly like handleSearchInputChange
+  // -- it never selects/opens/adds a product itself. The list narrows on its
+  // own via the existing debounced search -> load() pipeline; the single
+  // exact hit (if any) is then highlighted, scrolled into view, and shown a
+  // Confirm affordance the user still has to click.
+  const handleScanDetected = useCallback((value: string) => {
+    pinnedEditedProductsRef.current.clear()
+    lastSearchWasScanRef.current = true
+    setSearch(value)
+  }, [])
+
+  // Keyboard-wedge physical scanner support (decision 9's third input path,
+  // alongside camera-scan and manual typing) -- wired onto the search input
+  // below via wedge.onKeyDown. The camera path stays on ScanSearchButton
+  // as-is (P2-2's PromotionsPage.tsx reference adoption already found it
+  // decision-9-compliant on its own); only `open`/`openScanner`/
+  // `closeScanner`/`handleDetected` go unused here since this page does not
+  // need a second camera-modal instance.
+  const productSearchBarcodeScan = useBarcodeScan({ onValue: handleScanDetected })
 
   const handleLookupReviewSelection = useCallback((selection: { type?: unknown; value?: unknown }) => {
     const type = String(selection?.type || '').toLowerCase()
@@ -3094,6 +3190,11 @@ function ProductsFullEditor() {
     // single id for ordinary, unmerged rows.
     const rowScopeIds = p.__mergedProductIds?.length ? p.__mergedProductIds : [productId]
     const rowSelected = isSelectionScopeFullySelected(rowScopeIds)
+    // P2-4 step 3 (decision 9): is this the row load() resolved as the
+    // exact scan/search hit? Highlight + Confirm affordance only -- never
+    // auto-opened/auto-picked, see the button below and handleScanDetected's
+    // own comment.
+    const isExactHit = exactBarcodeHit !== null && rowScopeIds.includes(exactBarcodeHit)
     // Exact duplicate (same real barcode + same name, per the server sweep)?
     // If so, the row's normal click-to-detail "Manage/Product" flow is
     // suppressed (user spec item #3) -- the inline resolver below is the only
@@ -3126,7 +3227,8 @@ function ProductsFullEditor() {
       <tr
         key={productId}
         data-product-jump-id={productId}
-        className={`table-row cursor-pointer select-none ${rowSelected ? 'bg-primary-50 dark:bg-primary-900/20' : ''}`}
+        data-exact-hit={isExactHit ? 'true' : undefined}
+        className={`table-row cursor-pointer select-none ${rowSelected ? 'bg-primary-50 dark:bg-primary-900/20' : isExactHit ? 'bg-blue-50 ring-1 ring-inset ring-blue-300 dark:bg-blue-950/30 dark:ring-blue-700' : ''}`}
         onClick={selectionModeActive ? handleRowClick : undefined}
         {...(selectionModeActive ? {} : longPress)}
       >
@@ -3213,6 +3315,24 @@ function ProductsFullEditor() {
                   ask. Child rows under a group keep font-medium, same as
                   before. */}
               <div {...getKhmerTextProps(productName, `min-w-0 break-words text-gray-900 dark:text-white ${indented ? 'font-medium' : 'font-semibold'}`)}>{productName}</div>
+              {/* P2-4 step 3 (decision 9): a compact, explicit Confirm
+                  affordance on the exact-hit row -- the row itself already
+                  opens the fold on click (see the longPress onClick above),
+                  but scanning/typing must never make that choice FOR the
+                  user, so this button exists purely to make "this is the
+                  match, click to open it" visually obvious rather than
+                  relying on the person noticing the row is merely tinted.
+                  stopPropagation isn't needed: setDetailProduct(p) is
+                  exactly what the row's own click already does. */}
+              {isExactHit && !dupInfo ? (
+                <button
+                  type="button"
+                  className="shrink-0 rounded-full bg-blue-600 px-2 py-0.5 text-[10px] font-semibold text-white hover:bg-blue-700 dark:bg-blue-500 dark:hover:bg-blue-400"
+                  onClick={(event) => { event.stopPropagation(); setDetailProduct(p) }}
+                >
+                  {tr('confirm', 'Confirm')}
+                </button>
+              ) : null}
             </div>
             {dupInfo ? (
               <DuplicateResolverControl
@@ -3286,7 +3406,7 @@ function ProductsFullEditor() {
         </td>
       </tr>
     )
-  }, [branchFilter, branchNameById, catMap, exchangeRate, fmtKHR, fmtUSD, getBranchQty, getBranchSummaryLabel, getBrandColor, getLongPressState, isSelectionScopeFullySelected, isSelectionScopePartiallySelected, openLightbox, promotionRules, renderMetaPill, renderUnitChip, selectionModeActive, t, toggleSelectionScope, tr, exactDuplicateIndex, dupResolverBusyKey, canMergeDuplicates, handleDuplicateKeepThis, handleDuplicateKeepBoth])
+  }, [branchFilter, branchNameById, catMap, exchangeRate, exactBarcodeHit, fmtKHR, fmtUSD, getBranchQty, getBranchSummaryLabel, getBrandColor, getLongPressState, isSelectionScopeFullySelected, isSelectionScopePartiallySelected, openLightbox, promotionRules, renderMetaPill, renderUnitChip, selectionModeActive, t, toggleSelectionScope, tr, exactDuplicateIndex, dupResolverBusyKey, canMergeDuplicates, handleDuplicateKeepThis, handleDuplicateKeepBoth])
 
   const renderMobileProductCard = useCallback((p: ProductRecord, { indented = false }: { indented?: boolean } = {}) => {
     const productId = p.id ?? 0
@@ -3311,6 +3431,8 @@ function ProductsFullEditor() {
     const thumbnailState = buildProductThumbnailState(p)
     const rowScopeIds = p.__mergedProductIds?.length ? p.__mergedProductIds : [productId]
     const rowSelected = isSelectionScopeFullySelected(rowScopeIds)
+    // P2-4 step 3 -- see renderDesktopProductRow's identical comment.
+    const isExactHit = exactBarcodeHit !== null && rowScopeIds.includes(exactBarcodeHit)
     // Exact duplicate? -> suppress click-to-detail, show the inline resolver
     // (same rule as renderDesktopProductRow; user spec item #3).
     const dupInfo = findRowDuplicateInfo(exactDuplicateIndex, productId, rowScopeIds)
@@ -3322,8 +3444,8 @@ function ProductsFullEditor() {
     // (InventoryProductsSurface.tsx) for parity between the two pages.
     // Ungrouped single products are untouched, still their own card.
     const rowClassName = indented
-      ? `cursor-pointer select-none border-t border-gray-100 px-3 py-2.5 dark:border-gray-800 ${rowSelected ? 'ring-1 ring-primary-400 bg-primary-50/70 dark:bg-primary-900/20' : ''}`
-      : `card cursor-pointer select-none px-3 py-2.5 ${rowSelected ? 'ring-1 ring-primary-400 bg-primary-50/70 dark:bg-primary-900/20' : ''}`
+      ? `cursor-pointer select-none border-t border-gray-100 px-3 py-2.5 dark:border-gray-800 ${rowSelected ? 'ring-1 ring-primary-400 bg-primary-50/70 dark:bg-primary-900/20' : isExactHit ? 'ring-1 ring-blue-400 bg-blue-50/70 dark:bg-blue-950/30' : ''}`
+      : `card cursor-pointer select-none px-3 py-2.5 ${rowSelected ? 'ring-1 ring-primary-400 bg-primary-50/70 dark:bg-primary-900/20' : isExactHit ? 'ring-1 ring-blue-400 bg-blue-50/70 dark:bg-blue-950/30' : ''}`
 
     // Same long-press/select-mode rules as renderDesktopProductRow -- see
     // its comment for the full reasoning. Not a hook; shares the same
@@ -3347,6 +3469,7 @@ function ProductsFullEditor() {
       <div
         key={productId}
         data-product-jump-id={productId}
+        data-exact-hit={isExactHit ? 'true' : undefined}
         className={rowClassName}
         onClick={selectionModeActive ? handleRowClick : undefined}
         {...(selectionModeActive ? {} : longPress)}
@@ -3413,6 +3536,20 @@ function ProductsFullEditor() {
                 <div {...getKhmerTextProps(productName, 'break-words text-sm font-semibold text-gray-900 dark:text-white')}>
                   {productName}
                 </div>
+                {/* P2-4 step 3 (decision 9) -- see renderDesktopProductRow's
+                    identical Confirm-affordance comment. The card itself
+                    already opens the fold on tap; this button just makes the
+                    exact-hit row's "tap here" obvious instead of relying on
+                    the tint alone. */}
+                {isExactHit && !dupInfo ? (
+                  <button
+                    type="button"
+                    className="mt-1 rounded-full bg-blue-600 px-2 py-0.5 text-[10px] font-semibold text-white hover:bg-blue-700 dark:bg-blue-500 dark:hover:bg-blue-400"
+                    onClick={(event) => { event.stopPropagation(); setDetailProduct(p) }}
+                  >
+                    {tr('confirm', 'Confirm')}
+                  </button>
+                ) : null}
               </div>
               {/* Batch count rides the name row as a small YELLOW badge
                   (user, Aug 30: "add number of batches yellow next to the
@@ -3531,7 +3668,7 @@ function ProductsFullEditor() {
         </div>
       </div>
     )
-  }, [branchFilter, catMap, exchangeRate, fmtUSD, getBranchQty, getBrandColor, getLongPressState, isSelectionScopeFullySelected, isSelectionScopePartiallySelected, openLightbox, promotionRules, renderUnitChip, selectionModeActive, t, toggleSelectionScope, tr, exactDuplicateIndex, dupResolverBusyKey, canMergeDuplicates, handleDuplicateKeepThis, handleDuplicateKeepBoth])
+  }, [branchFilter, catMap, exactBarcodeHit, exchangeRate, fmtUSD, getBranchQty, getBrandColor, getLongPressState, isSelectionScopeFullySelected, isSelectionScopePartiallySelected, openLightbox, promotionRules, renderUnitChip, selectionModeActive, t, toggleSelectionScope, tr, exactDuplicateIndex, dupResolverBusyKey, canMergeDuplicates, handleDuplicateKeepThis, handleDuplicateKeepBoth])
 
   // One unified thumbnail for a whole name-group (see the `indented`
   // branches just above, which omit each row's own image once a group
@@ -3835,8 +3972,9 @@ function ProductsFullEditor() {
               placeholder={t('search_products_placeholder') || `${t('search') || 'Search'} products`}
               title={t('search_comma_tip') || 'Comma separates OR-groups \u00b7 space = AND within a group'}
               inputClassName="text-sm"
+              onKeyDown={productSearchBarcodeScan.wedge.onKeyDown}
             />
-            <ScanSearchButton onDetected={setSearch} t={t} />
+            <ScanSearchButton onDetected={handleScanDetected} t={t} />
             {/* AND/OR toggle removed (Aug 19 2026 UI request): matching
                 ALL terms is now the only mode -- search always behaves as
                 if this were locked to 'AND'. searchMode state/plumbing

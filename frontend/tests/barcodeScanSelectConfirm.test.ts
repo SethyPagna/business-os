@@ -227,4 +227,38 @@ check('PromotionsPage.tsx keeps ScanSearchButton wired to fill the search box on
   assert.match(promotionsSource, /<ScanSearchButton onDetected=\{setPickerQuery\} t=\{t\} \/>/)
 })
 
+// --- Products.tsx: scan/wedge value fills search, list narrows, exact hit
+// highlighted + scrolled into view, user still clicks Confirm (or the row
+// itself) to open the fold -- P2-4 step 3 adoption. ---
+
+const productsSource = fs.readFileSync(fileURLToPath(new URL('../src/components/products/Products.tsx', import.meta.url)), 'utf8')
+
+check('Products.tsx wires useBarcodeScan for the keyboard-wedge path, camera path stays on ScanSearchButton (P2-4 step 3 adoption)', () => {
+  assert.match(productsSource, /import \{ useBarcodeScan \} from '\.\.\/\.\.\/hooks\/useBarcodeScan\.ts'/)
+  assert.match(productsSource, /const productSearchBarcodeScan = useBarcodeScan\(\{ onValue: handleScanDetected \}\)/)
+  assert.match(productsSource, /onKeyDown=\{productSearchBarcodeScan\.wedge\.onKeyDown\}/)
+})
+
+check('Products.tsx routes both the camera scan and the wedge scan through the same handleScanDetected -- neither selects/opens/adds a product itself', () => {
+  assert.match(productsSource, /<ScanSearchButton onDetected=\{handleScanDetected\} t=\{t\} \/>/)
+  const block = productsSource.slice(productsSource.indexOf('const handleScanDetected'), productsSource.indexOf('const handleScanDetected') + 500)
+  assert.match(block, /setSearch\(value\)/)
+  assert.doesNotMatch(block, /\b(selectProduct|addProduct|confirmProduct|pickProduct|setDetailProduct|navigate\()/i)
+})
+
+check('Products.tsx resolves exact_barcode_hit_id via the shared resolveExactBarcodeHit helper, never re-implementing the match logic inline', () => {
+  assert.match(productsSource, /import \{ resolveExactBarcodeHit \} from '\.\.\/\.\.\/utils\/productLookup\.ts'/)
+  assert.match(productsSource, /resolveExactBarcodeHit\(\s*serverExactHitRaw,/)
+})
+
+check('Products.tsx marks the exact-hit row with data-exact-hit on both the desktop table row and the mobile card', () => {
+  const matches = productsSource.match(/data-exact-hit=\{isExactHit \? 'true' : undefined\}/g) || []
+  assert.equal(matches.length, 2, 'both renderDesktopProductRow and renderMobileProductCard must mark their exact-hit row')
+})
+
+check('Products.tsx never auto-opens the exact-hit row -- the Confirm affordance and the row itself both require an explicit onClick calling setDetailProduct', () => {
+  const matches = productsSource.match(/onClick=\{\(event\) => \{ event\.stopPropagation\(\); setDetailProduct\(p\) \}\}/g) || []
+  assert.equal(matches.length, 2, 'the desktop Confirm button and the mobile Confirm button must both require an explicit click')
+})
+
 console.log(`\nAll ${passed} barcodeScanSelectConfirm tests passed`)
