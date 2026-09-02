@@ -240,6 +240,17 @@ await runTest('compact receipt output uses ABA details and configurable secondar
   assert.match(receiptSource, /tpl\.show_delivery_khr !== false/)
 })
 
+await runTest('text_contrast survives a parseReceiptTemplate/serializeReceiptTemplate round trip alongside other fields', () => {
+  const serialized = serializeReceiptTemplate({ text_contrast: 'maximum', font_size: 13 })
+  const reparsed = parseReceiptTemplate(serialized)
+  assert.equal(reparsed.text_contrast, 'maximum')
+  assert.equal(reparsed.font_size, 13)
+
+  const withoutField = parseReceiptTemplate(JSON.stringify({ font_size: 11 }))
+  assert.equal(withoutField.text_contrast, DEFAULT_TEMPLATE.text_contrast,
+    'a stored template predating this setting must default to normal, not undefined')
+})
+
 await runTest('receipt asset inlining uses bounded workers', () => {
   const utilSource = fs.readFileSync(new URL('../src/utils/printReceipt.ts', import.meta.url), 'utf8')
   assert.match(utilSource, /const RECEIPT_ASSET_INLINE_CONCURRENCY = 3/)
