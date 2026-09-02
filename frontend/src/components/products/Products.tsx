@@ -35,6 +35,7 @@ import WireImagesReviewModal from './WireImagesReviewModal'
 import type { WireImageChange, WireImagesPreview } from './WireImagesReviewModal'
 import DeleteConfirmModal from './DeleteConfirmModal'
 import ConfirmDialog from '../shared/ConfirmDialog.tsx'
+import { ControlRow } from '../shared/kit'
 import { summarizeDeleteImpact } from '../../utils/deleteImpactSummary'
 import ProductsHeaderActions from './surfaces/HeaderActions'
 import LazyPortalMenu from '../shared/LazyPortalMenu'
@@ -3956,14 +3957,26 @@ function ProductsFullEditor() {
           bg-gray-50/dark:bg-gray-900 matches #app-root's background (the
           page-scroll itself is transparent) so list rows scrolling
           underneath don't show through while this is stuck. */}
-      <div className="sticky top-0 z-30 -mx-1 bg-gray-50/95 pb-2 pt-2 backdrop-blur dark:bg-gray-900/95 sm:mx-0">
-        {/* Y13: a plain page-level search row (the folding "Search &
-            Filters" SectionCard wrapper was removed). SearchInput's own
-            `min-w-0 flex-1` default handles narrow-screen shrink; every
-            other child here is shrink-0/icon-only. History moved to the
-            header row (ProductsHeaderActions' historySlot); the AND/OR
-            toggle was removed (Aug 19 2026), so searchMode stays 'AND'. */}
-        <div className="flex items-center gap-1.5 px-0.5">
+      {/* P2-4 step 4 (Level 0, decision 6/12): the ONE control row, via the
+          shared kit ControlRow instead of a hand-rolled sticky+flex-wrap
+          toolbar. Products has no separate Start/End date row of its own
+          (unlike Sales/Inventory) -- the "Created" range lives inside
+          FilterMenu as a filter, not a pinned top-level control -- so
+          `range` is passed null; ControlRow's tiered layout (1024/768px)
+          still applies to search+filters exactly as it would with a range
+          slot filled. No `overflow` slot: at the "medium" tier ControlRow's
+          own default (render filters/sort/actions inline in the tail) is
+          exactly what this row already did with just one FilterMenu, so a
+          bespoke OverflowMenu here would add a menu wrapping a menu for no
+          behavior change. className restores the search row's own
+          bg/blur/inset treatment (ControlRow's own sticky styling only sets
+          --ui-ground + --z-sticky, per its own doc comment -- kept as an
+          additive className rather than editing the frozen kit file). */}
+      <ControlRow
+        sticky
+        className="-mx-1 px-1 backdrop-blur sm:mx-0 sm:px-0"
+        search={(
+          <div className="flex items-center gap-1.5">
             <SearchInput
               id="products-search"
               name="products_search"
@@ -3974,7 +3987,6 @@ function ProductsFullEditor() {
               inputClassName="text-sm"
               onKeyDown={productSearchBarcodeScan.wedge.onKeyDown}
             />
-            <ScanSearchButton onDetected={handleScanDetected} t={t} />
             {/* AND/OR toggle removed (Aug 19 2026 UI request): matching
                 ALL terms is now the only mode -- search always behaves as
                 if this were locked to 'AND'. searchMode state/plumbing
@@ -3988,16 +4000,21 @@ function ProductsFullEditor() {
                 to render here as its own icon-only button, disconnected
                 from the other page-level actions and one more control
                 competing for room in this already-busy search row. */}
-            <FilterMenu
-              label={t('filters') || 'Filters'}
-              activeCount={activeFilters}
-              sections={productFilterSections}
-              onClear={clearAllFilters}
-              onOpenChange={setIsProductFilterMenuOpen}
-              mobileIconOnly
-            />
+            <ScanSearchButton onDetected={handleScanDetected} t={t} />
           </div>
-      </div>
+        )}
+        range={null}
+        filters={(
+          <FilterMenu
+            label={t('filters') || 'Filters'}
+            activeCount={activeFilters}
+            sections={productFilterSections}
+            onClear={clearAllFilters}
+            onOpenChange={setIsProductFilterMenuOpen}
+            mobileIconOnly
+          />
+        )}
+      />
 
       {/* Pagination sits BELOW the search row (user, Aug 31: "page back and
           forth, items per page and pages ... below the search bar row", never
