@@ -11,6 +11,7 @@ import {
   writeStoredRuntimeDescriptor,
 } from './platform/runtime/clientRuntime.ts'
 import { isWSConnected, resumeWS } from './api/websocket.ts'
+import { requestPersistentAppStorage } from './api/syncRuntime.ts'
 import { APP_NAVIGATION_EVENT, getAdminPageFromPath, getAdminPathForPage, resolveAdminLandingPage } from './app/pathRouting.ts'
 import { getClientDeviceInfo } from './utils/deviceInfo.ts'
 import { getDirtyWork, hasDirtyWork, type DirtyWorkEntry } from './utils/dirtyWork.ts'
@@ -1665,6 +1666,18 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
       if (!result) return { success: false, error: 'Login API is not available' }
       if (result.success && result.user) {
         await persistAuthenticatedUser(result.user, sessionDuration, result.sessionExpiresAt || '')
+        // Best-effort, once per authenticated session: ask the browser not to
+        // evict this origin's storage under pressure. Matters most on iOS,
+        // where a non-persistent origin can lose its offline sales queue and
+        // cached app shell with no warning -- see syncRuntime.ts's own
+        // comment on why this is safe to call even where it is unsupported
+        // (older Safari) or silently denied. Logged (not surfaced to the
+        // user) so a "why did this device lose its offline queue" support
+        // question can be answered from devtools/Sentry breadcrumbs instead
+        // of guessed at.
+        void requestPersistentAppStorage().then((persistent) => {
+          console.info(`[storage] persistent storage ${persistent ? 'granted' : 'not granted'} for this origin`)
+        })
       }
       return result
     } catch (e: unknown) {
