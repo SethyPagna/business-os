@@ -13,7 +13,7 @@ const BUILD_HASH = '__BUSINESS_OS_BUILD_HASH__';
 const APP_SHELL_VERSION = `business-os-app-shell-${BUILD_HASH}`;
 const APP_SHELL_CACHE = APP_SHELL_VERSION;
 const STATIC_CACHE = `business-os-static-${BUILD_HASH}`;
-const APP_SHELL_URLS = ['/', '/index.html', '/manifest.json', '/portal-manifest.json', '/business-os-precache.json', '/icon.png', '/icon-192.png', '/icon-512.png', '/icon-192-maskable.png', '/icon-512-maskable.png', '/apple-touch-icon.png', '/leang-cosmetics-icon-192.png', '/leang-cosmetics-icon-512.png', '/leang-cosmetics-icon-192-maskable.png', '/leang-cosmetics-icon-512-maskable.png', '/leang-cosmetics-apple-touch-icon-v1.png'];
+const APP_SHELL_URLS = ['/', '/index.html', '/offline.html', '/manifest.json', '/portal-manifest.json', '/business-os-precache.json', '/icon.png', '/icon-192.png', '/icon-512.png', '/icon-192-maskable.png', '/icon-512-maskable.png', '/apple-touch-icon.png', '/leang-cosmetics-icon-192.png', '/leang-cosmetics-icon-512.png', '/leang-cosmetics-icon-192-maskable.png', '/leang-cosmetics-icon-512-maskable.png', '/leang-cosmetics-apple-touch-icon-v1.png'];
 const OUTBOX_SYNC_TAG = 'business-os-sync-outbox';
 const DB_NAME = 'BusinessOS';
 const OFFLINE_SALE_QUEUE_CHANNEL = 'sales:create';
@@ -501,6 +501,22 @@ self.addEventListener('activate', (event) => {
         await Promise.all(keys
             .filter((key) => key.startsWith('business-os-') && !retained.has(key))
             .map((key) => caches.delete(key)));
+        // iOS can evict Cache Storage under memory/storage pressure at any time,
+        // including between this worker's own install (where precacheAppShell
+        // ran) and this activate. Claiming clients while APP_SHELL_CACHE is
+        // actually empty would silently promise offline coverage that is not
+        // there -- the next true-offline navigation would hit appShellFallback's
+        // last-resort branch with nothing cached at all. Cheap to check, and
+        // self-healing when it happens: re-run the precache before claiming.
+        try {
+            const shellCache = await caches.open(APP_SHELL_CACHE);
+            const shellStillPresent = await shellCache.match('/index.html') || await shellCache.match('/');
+            if (!shellStillPresent)
+                await precacheAppShell();
+        }
+        catch (_) {
+            // Best-effort self-heal only -- never block activation on it.
+        }
         await self.clients.claim();
         await broadcastSyncEvent('BUSINESS_OS_APP_UPDATE_AVAILABLE', {
             version: APP_SHELL_VERSION,
@@ -574,6 +590,17 @@ async function appShellFallback(request) {
         const cached = await cache.match('/index.html') || await cache.match('/');
         if (cached)
             return cached;
+        // Neither the network nor the app shell itself is available -- a fresh
+        // install whose precache never finished, or a shell evicted under iOS
+        // storage pressure (see the activate-time self-heal below, which exists
+        // to make this branch rare but not impossible: it only runs on the NEXT
+        // activate, not retroactively for clients already caught here). A
+        // browser-level "no internet" page gives the user nothing actionable and
+        // no indication their offline sales are still safe, so fall back to the
+        // static, JS-free offline page instead when it too was cached.
+        const offlineFallback = await cache.match('/offline.html');
+        if (offlineFallback)
+            return offlineFallback;
         throw error;
     }
 }
