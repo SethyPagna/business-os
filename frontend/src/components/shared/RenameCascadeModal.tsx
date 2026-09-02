@@ -67,8 +67,14 @@ export default function RenameCascadeModal({
 }) {
   if (!request) return null
   const lines = impactSummary(request.impact, t)
+  // z-[1060]: this prompt opens from INSIDE the shared Modal portal (ProductForm,
+  // the lookup managers), which sits at z-[1050] -- see Modal.tsx. At the old
+  // z-[60] it rendered BEHIND that modal: the save awaited askRenameChoice(),
+  // the user never saw the question, and every rename/brand/category save on
+  // the Products page looked like "cannot save". One step above the modal
+  // layer, still below App.tsx's toasts (z-[1100]) and InfoHint (z-[1200]).
   return createPortal(
-    <div className="fixed inset-0 z-[60] bg-black/50 flex items-end sm:items-center justify-center p-0 sm:p-4" onClick={() => !busy && onChoose('cancel')}>
+    <div className="fixed inset-0 z-[1060] bg-black/50 flex items-end sm:items-center justify-center p-0 sm:p-4" onClick={() => !busy && onChoose('cancel')}>
       <div className="max-h-[min(88vh,34rem)] w-full overflow-y-auto rounded-t-2xl bg-white shadow-2xl dark:bg-gray-800 sm:max-w-md sm:rounded-2xl fade-in" onClick={(event) => event.stopPropagation()}>
         <div className="border-b border-gray-200 p-3 dark:border-gray-700">
           <h3 className="font-bold text-gray-900 dark:text-white">{t('rename_cascade_title') || 'Rename — what happens to the rest?'}</h3>

@@ -72,6 +72,13 @@ for (const file of ['components/shared/InfoHint.tsx', 'components/shared/Truncat
   assert.match(source, /fixed z-\[1200\]/, `${file}: explanatory content must render above z-[1050] modals and z-[1100] notifications`)
 }
 
+// The rename-cascade prompt is awaited by saves that run INSIDE a z-[1050]
+// shared Modal; below that layer it is invisible and the save never resolves.
+// Accept the literal layer or the token alias the RC branch introduces.
+const renameCascade = read('components/shared/RenameCascadeModal.tsx')
+assert.match(renameCascade, /createPortal\(/, 'RenameCascadeModal must portal to the viewport layer')
+assert.match(renameCascade, /fixed inset-0 z-\[(?:1060|var\(--z-modal-2\))\]/, 'RenameCascadeModal must layer above the z-[1050] shared Modal it is opened from')
+
 for (const file of ['components/products/forms/BulkAddStockModal.tsx', 'components/promotions/PromotionsPage.tsx']) {
   const source = read(file)
   assert.match(source, /modal-viewport-safe/, `${file}: nested dialog viewport must respect safe areas`)
