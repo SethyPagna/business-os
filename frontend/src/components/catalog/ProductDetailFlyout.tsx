@@ -330,15 +330,9 @@ export default function ProductDetailFlyout({ view, copy, onClose, shopName, con
           </div>
         </div>
 
+        {/* One close affordance per sheet: the header X. The footer only carries the Add action. */}
+        {onAddToBucket ? (
         <div className="flex items-center gap-3 border-t border-slate-200 p-4 dark:border-neutral-800">
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded-full border border-slate-200 px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50 dark:border-neutral-700 dark:text-neutral-300 dark:hover:bg-neutral-800"
-          >
-            {copy('close', 'Close')}
-          </button>
-          {onAddToBucket ? (
             <button
               type="button"
               onClick={() => onAddToBucket(product, view.pricePresentation?.primaryText)}
@@ -352,8 +346,8 @@ export default function ProductDetailFlyout({ view, copy, onClose, shopName, con
                 </span>
               ) : null}
             </button>
-          ) : null}
         </div>
+        ) : null}
       </div>
 
       {/* Images on their own, away from the rest of the page. Rendered
