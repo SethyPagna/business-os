@@ -92,7 +92,14 @@ assert.match(
 assert.match(detail, /btn-secondary flex min-w-0 flex-1/, 'detail footer actions must be allowed to shrink on narrow screens')
 assert.match(detail, /btn-primary flex min-w-0 flex-1/, 'the primary detail action must be allowed to shrink on narrow screens')
 assert.match(detail, /import \{ createPortal \} from 'react-dom'/, 'the product detail sheet must render outside the Products page stacking context')
-assert.match(detail, /modal-viewport-safe[\s\S]*z-\[1050\][\s\S]*overflow-y-auto/, 'the product detail overlay must sit above fixed app bars and remain scrollable')
+// P2-4 Level 2/3: the hardcoded z-[1050]/bg-black-50 became the shared
+// zLayers/backdrop tokens (var(--z-modal) resolves to 1050 -- see
+// zLayers.ts's own comment confirming that exact match -- and
+// var(--ui-backdrop) is the same token Fold's own backdrop uses), so this
+// modal is now provably unified onto the kit's Level-3 layer instead of
+// carrying its own one-off literal.
+assert.match(detail, /modal-viewport-safe[\s\S]*z-\[var\(--z-modal\)\][\s\S]*overflow-y-auto/, 'the product detail overlay must sit above fixed app bars and remain scrollable')
+assert.match(detail, /bg-\[var\(--ui-backdrop\)\]/, 'the product detail overlay must use the shared backdrop token, not a one-off bg-black/NN')
 assert.match(detail, /modal-panel-safe flex w-full flex-col/, 'the product detail panel must remain within the usable viewport and safe areas')
 assert.match(detail, /return createPortal\(modal, document\.body\)/, 'the product detail sheet must portal to the document body')
 assert.match(detail, /break-words font-bold text-gray-900 dark:text-white">\{productName\}/, 'product detail titles must wrap in full')

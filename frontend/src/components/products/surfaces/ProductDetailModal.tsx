@@ -222,7 +222,7 @@ export default function ProductDetailModal({
     // footer. Rendering at the body-level overlay layer ensures the sheet is
     // above both bars, while the safe viewport classes keep every control
     // inside the usable screen area on notched/short devices.
-    <div className="modal-viewport-safe pointer-events-auto fixed inset-0 z-[1050] flex items-end justify-center overflow-y-auto bg-black/50 sm:items-center sm:p-4" onClick={onClose}>
+    <div className="modal-viewport-safe pointer-events-auto fixed inset-0 z-[var(--z-modal)] flex items-end justify-center overflow-y-auto bg-[var(--ui-backdrop)] sm:items-center sm:p-4" onClick={onClose}>
       <div className="modal-panel-safe flex w-full flex-col rounded-t-2xl bg-white shadow-2xl sm:max-w-5xl sm:rounded-2xl dark:bg-gray-800" onClick={(event) => event.stopPropagation()}>
         <div className="flex items-center justify-between border-b border-gray-200 p-4 dark:border-gray-700">
           <div className="min-w-0 flex items-center gap-3">

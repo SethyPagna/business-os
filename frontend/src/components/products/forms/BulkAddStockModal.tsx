@@ -331,7 +331,7 @@ export default function BulkAddStockModal({ productIds, products, branches, user
   }
 
   const modal = (
-    <div className="modal-viewport-safe pointer-events-auto fixed inset-0 z-[1050] flex items-start justify-center overflow-y-auto bg-black/50 sm:items-center">
+    <div className="modal-viewport-safe pointer-events-auto fixed inset-0 z-[var(--z-modal)] flex items-start justify-center overflow-y-auto bg-[var(--ui-backdrop)] sm:items-center">
       <div className="modal-panel-safe fade-in my-auto w-full max-w-md overflow-y-auto rounded-2xl bg-white p-4 shadow-2xl dark:bg-gray-800 sm:p-5">
         <h2 className="mb-1 text-lg font-bold text-gray-900 dark:text-white">
           {t('adjust_stock_for_products') || `${actionLabels[action]} Stock -- ${productIds.length} Products`}
