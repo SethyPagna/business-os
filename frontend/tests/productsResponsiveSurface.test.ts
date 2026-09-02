@@ -16,6 +16,33 @@ const receiveBatch = readFileSync(new URL('../src/components/inventory/ReceiveBa
 const fastStockIn = readFileSync(new URL('../src/components/inventory/FastStockInModal.tsx', import.meta.url), 'utf8')
 const transfer = readFileSync(new URL('../src/components/branches/TransferModal.tsx', import.meta.url), 'utf8')
 const newReturn = readFileSync(new URL('../src/components/returns/NewReturnModal.tsx', import.meta.url), 'utf8')
+const surface = readFileSync(new URL('../src/components/products/surfaces/ProductsListSurface.tsx', import.meta.url), 'utf8')
+
+// cert-phase1 finding (P2-4 brief coordinator note): at 375px the mobile
+// category-header row clipped ~9px off-screen and cut off its Collapse
+// button with no way to reveal it, in both themes. Root cause: the row's
+// label was an unconstrained flex child (no min-w-0), so a long category
+// name could grow the label past the row's own width instead of shrinking,
+// pushing the trailing Collapse button off the visible edge -- min-w-0 on
+// the row's flex container AND the label is what actually lets flexbox
+// shrink it (a bare `flex-1` alone does not, without min-w-0 the browser's
+// default min-width:auto wins and the label keeps its full content width).
+// shrink-0 pins the button so it is never the one that gives way.
+assert.match(
+  surface,
+  /flex min-w-0 items-center justify-between gap-3[\s\S]{0,40}<label className="flex min-w-0 flex-1 items-center gap-2/,
+  'the mobile category-header row and its label must both carry min-w-0 so the label can shrink instead of pushing the Collapse button off-screen at 375px',
+)
+assert.match(
+  surface,
+  /<span className="min-w-0 truncate" title=\{section\.label\}>\{section\.label\}<\/span>/,
+  'the category label must truncate with an ellipsis (and expose the full name via title) once it is allowed to shrink',
+)
+assert.match(
+  surface,
+  /<button\s+type="button"\s+className="inline-flex shrink-0 items-center gap-1[^"]*"\s+onClick=\{\(\) => toggleProductSection\(section\.id\)\}/,
+  'the Collapse/Expand button must be shrink-0 so it is always the last thing to give up space, never the first to clip off-screen',
+)
 
 assert.match(
   products,
@@ -24,10 +51,18 @@ assert.match(
 )
 assert.match(products, /onWheel=\{scrollProductSectionsWithWheel\}/, 'the Products section switcher must accept wheel/trackpad scrolling without grabbing its scrollbar')
 assert.match(products, /role="group"[\s\S]*aria-label=\{tr\('product_sections'/, 'the section switcher must have an accessible group label')
+// P2-4 step 5: the switcher buttons became kit <Chip> elements (Chip is
+// exactly its documented "hub-section tabs" use case), which compute their
+// own aria-pressed internally from the `selected` prop (see
+// kit/Chip.tsx's `aria-pressed={interactive ? selected : undefined}`) --
+// so the pin now checks the `selected` prop Products.tsx passes in,
+// the same "selected state is exposed, sourced from activeProductSection"
+// guarantee as before, just one level of indirection through the kit.
+assert.match(products, /import \{ Chip, ControlRow \} from '\.\.\/shared\/kit'/, 'the section switcher must use the shared kit Chip primitive, not a hand-rolled pill button')
 for (const section of ['products', 'stock_changes', 'stock_in_sessions', 'duplicates']) {
   assert.match(
     products,
-    new RegExp(`aria-pressed=\\{activeProductSection === '${section}'\\}`),
+    new RegExp(`<Chip onClick=\\{\\(\\) => setActiveProductSection\\('${section}'\\)\\} selected=\\{activeProductSection === '${section}'\\}>`),
     `the ${section} section button must expose its selected state`,
   )
 }

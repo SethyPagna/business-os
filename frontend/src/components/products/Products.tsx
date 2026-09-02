@@ -35,7 +35,7 @@ import WireImagesReviewModal from './WireImagesReviewModal'
 import type { WireImageChange, WireImagesPreview } from './WireImagesReviewModal'
 import DeleteConfirmModal from './DeleteConfirmModal'
 import ConfirmDialog from '../shared/ConfirmDialog.tsx'
-import { ControlRow } from '../shared/kit'
+import { Chip, ControlRow } from '../shared/kit'
 import { summarizeDeleteImpact } from '../../utils/deleteImpactSummary'
 import ProductsHeaderActions from './surfaces/HeaderActions'
 import LazyPortalMenu from '../shared/LazyPortalMenu'
@@ -3229,7 +3229,7 @@ function ProductsFullEditor() {
         key={productId}
         data-product-jump-id={productId}
         data-exact-hit={isExactHit ? 'true' : undefined}
-        className={`table-row cursor-pointer select-none ${rowSelected ? 'bg-primary-50 dark:bg-primary-900/20' : isExactHit ? 'bg-blue-50 ring-1 ring-inset ring-blue-300 dark:bg-blue-950/30 dark:ring-blue-700' : ''}`}
+        className={`table-row h-[var(--ui-row-h)] cursor-pointer select-none ${rowSelected ? 'bg-primary-50 dark:bg-primary-900/20' : isExactHit ? 'bg-blue-50 ring-1 ring-inset ring-blue-300 dark:bg-blue-950/30 dark:ring-blue-700' : ''}`}
         onClick={selectionModeActive ? handleRowClick : undefined}
         {...(selectionModeActive ? {} : longPress)}
       >
@@ -3794,45 +3794,32 @@ function ProductsFullEditor() {
           aria-label={tr('product_sections', 'Product sections')}
           onWheel={scrollProductSectionsWithWheel}
         >
-          <div className="inline-flex w-max rounded-xl bg-gray-100 p-0.5 dark:bg-gray-800">
-          <button
-            type="button"
-            onClick={() => setActiveProductSection('products')}
-            aria-pressed={activeProductSection === 'products'}
-            className={`rounded-lg px-3 py-1.5 text-sm font-medium transition-colors ${activeProductSection === 'products' ? 'bg-white text-primary-600 shadow dark:bg-gray-900' : 'text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'}`}
-          >
+          {/* P2-4 step 5: the top-level SECTION switcher is exactly kit
+              Chip's first documented use case ("hub-section tabs ...
+              top-level SECTION chips, one shown at a time") -- unlike the
+              product-row meta pills below (brand/category/batch-count
+              badges), which Chip's own doc comment does NOT cover, so those
+              stay on their existing renderMetaPill/renderUnitChip markup
+              (see the report's Level-1 section for that distinction). */}
+          <div className="inline-flex w-max items-center gap-1.5">
+          <Chip onClick={() => setActiveProductSection('products')} selected={activeProductSection === 'products'}>
             {t('products') || 'Products'}
-          </button>
-          <button
-            type="button"
-            onClick={() => setActiveProductSection('stock_changes')}
-            aria-pressed={activeProductSection === 'stock_changes'}
-            className={`rounded-lg px-3 py-1.5 text-sm font-medium transition-colors ${activeProductSection === 'stock_changes' ? 'bg-white text-primary-600 shadow dark:bg-gray-900' : 'text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'}`}
-          >
+          </Chip>
+          <Chip onClick={() => setActiveProductSection('stock_changes')} selected={activeProductSection === 'stock_changes'}>
             {tr('stock_change_ledger', 'Stock Changes', 'ការផ្លាស់ប្តូរស្តុក')}
-          </button>
+          </Chip>
           {canAdjustInventoryStock ? (
-            <button
-              type="button"
-              onClick={() => setActiveProductSection('stock_in_sessions')}
-              aria-pressed={activeProductSection === 'stock_in_sessions'}
-              className={`rounded-lg px-3 py-1.5 text-sm font-medium transition-colors ${activeProductSection === 'stock_in_sessions' ? 'bg-white text-primary-600 shadow dark:bg-gray-900' : 'text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'}`}
-            >
+            <Chip onClick={() => setActiveProductSection('stock_in_sessions')} selected={activeProductSection === 'stock_in_sessions'}>
               {tr('stock_in_sessions', 'Stock-in Sessions', 'វគ្គបញ្ចូលស្តុក')}
-            </button>
+            </Chip>
           ) : null}
           {/* Duplicates review (possibly-same residue) -- same section-chip
               pattern, gated by the same permission as the merge tool since
               its actions are the same kind of merge. */}
           {canMergeDuplicates ? (
-            <button
-              type="button"
-              onClick={() => setActiveProductSection('duplicates')}
-              aria-pressed={activeProductSection === 'duplicates'}
-              className={`rounded-lg px-3 py-1.5 text-sm font-medium transition-colors ${activeProductSection === 'duplicates' ? 'bg-white text-primary-600 shadow dark:bg-gray-900' : 'text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'}`}
-            >
+            <Chip onClick={() => setActiveProductSection('duplicates')} selected={activeProductSection === 'duplicates'}>
               {tr('product_duplicates_section', 'Duplicates', 'ស្ទួន')}
-            </button>
+            </Chip>
           ) : null}
           </div>
         </div>
