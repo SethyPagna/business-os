@@ -25,6 +25,7 @@
 // that turned out to already be built): products import DOES have a real
 import { normalizeProductGroupName, productDetailSignature, productIdentitySignature, resolveMergedPricing } from './productDetailRule'
 import { sanitizeImportedDescription } from './productDescriptionSections'
+import { isRealBarcode, normalizeBarcode } from './barcodeAliases'
 // per-row mode system now, just via a different channel than
 // decisionsByRowNumber/policy_json -- BulkImportModal.tsx's review step
 // bakes the reviewer's per-row choice (IMPORT_DECISION_OPTIONS) directly
@@ -109,7 +110,7 @@ export type RowAction = 'create' | 'update' | 'skip' | 'error'
 // callsite that doesn't bother threading a specific kind through; the
 // report still counts and lists it, just under a generic bucket instead of
 // silently dropping it from the summary.
-export type ImportWarningKind = 'negative_stock' | 'unreadable_batch_date' | 'barcode_collision' | 'sku_collision' | 'name_match' | 'membership_mismatch' | 'membership_phone_conflict' | 'duplicate_row_match' | 'stock_action_conflict' | 'other'
+export type ImportWarningKind = 'negative_stock' | 'unreadable_batch_date' | 'barcode_collision' | 'barcode_alias_recorded' | 'sku_collision' | 'name_match' | 'membership_mismatch' | 'membership_phone_conflict' | 'duplicate_row_match' | 'stock_action_conflict' | 'other'
 
 export type ImportRowWarning = { kind: ImportWarningKind; message: string }
 
@@ -148,6 +149,7 @@ export const IMPORT_WARNING_LABELS: Record<ImportWarningKind, string> = {
   negative_stock: 'Negative stock (clamped to 0)',
   unreadable_batch_date: 'Batch date unreadable (received as today)',
   barcode_collision: 'Same barcode, different name',
+  barcode_alias_recorded: 'Different barcode kept as an alternative (existing barcode preserved)',
   sku_collision: 'Same SKU, different name',
   name_match: 'Matched an existing contact by name',
   membership_mismatch: 'Membership number belongs to a different name on file',
@@ -1369,6 +1371,18 @@ export async function classifyProducts(
       low_stock_threshold: parseImportNumericValue(row.low_stock_threshold, 10),
       is_active: toBool01(row.is_active, 1),
     }
+    // Optional Codex/legacy-data contract column (docs/plans/
+    // codex-data-contract.md): a `|`-separated list of alternative
+    // barcodes for this row's product, recorded additively into
+    // barcode_aliases (never products.barcode) once the row's product id
+    // is known -- see runImportApply's write-back a few hundred lines
+    // down. Independent of the match/precedence logic below: recorded
+    // whether this row creates a new product or updates an existing one,
+    // and independent of whatever the plain `barcode` cell says.
+    const barcodeAliasColumnValues = parseBarcodeAliasColumn(row.barcode_aliases)
+    if (barcodeAliasColumnValues.length) {
+      (data as Record<string, unknown> & { __importAliasColumnValues?: string[] }).__importAliasColumnValues = barcodeAliasColumnValues
+    }
     // Track F parity (special pricing, discount/promotion fields,
     // out_of_stock_threshold, expiry_date/expiry_alert_days): these columns
     // were added to materializeImportChunk's INSERT/UPDATE statements and
@@ -1701,6 +1715,18 @@ export async function classifyProducts(
     // are inherently about reconciling with something that already
     // exists) and always takes the ordinary create path below.
     const requestedRowMode = lower(str(row._action))
+
+    // Barcode precedence (see applyBarcodeImportPrecedence's own comment
+    // for the full rule set) -- runs regardless of productImportMode
+    // (merge/fill_blank/replace_columns/replace_all all reach this call)
+    // because barcode identity safety is not something a job-level
+    // column-replace policy should be able to silently defeat. The one
+    // respected escape hatch is the same explicit per-row
+    // `_action=override_replace` signal preserveExistingMoneyOnBlankCells
+    // below also honors.
+    if (requestedRowMode !== 'override_replace') {
+      applyBarcodeImportPrecedence(data, match as unknown as Record<string, unknown> | null, rowWarnings)
+    }
 
     // Blank money cells on a matched merge row keep the existing values --
     // see preserveExistingMoneyOnBlankCells' own comment for the measured
@@ -2959,6 +2985,127 @@ function applyFillBlankOnlyMode(data: Record<string, unknown>, match: Record<str
     const companion = MULTI_VALUE_COMPANION[key]
     if (companion) data[companion] = match[companion] ?? match[key] ?? null
   }
+}
+
+// A pending alias write, attached to a classified row's `data` object so
+// runImportApply can turn it into an actual barcode_aliases INSERT once
+// the row's product id is known (a create row's id isn't allocated until
+// materializeImportChunk's per-chunk loop; classifyProducts itself is also
+// called for read-only preview/analyze, so it must never write). Not a
+// products column -- ignored by every named-@placeholder UPDATE/INSERT
+// this file builds, same trick branch_id_explicit/branch_name_pending
+// already rely on (see their own comment a few hundred lines up).
+export type PendingBarcodeAlias = { barcode: string; barcodeNormalized: string; source: string }
+
+// Barcode precedence for a matched import row (P2-3, Phase 2 RC "Codex/
+// legacy-data contract", decisions 7/10/12). Unlike every other product
+// column, `data.barcode` never had a preservation rule at all -- contrast
+// preserveExistingMoneyOnBlankCells below, which exists for exactly this
+// reason but only for money fields. Confirmed by reading: before this
+// function, `data.barcode = barcode || null` (this function's own
+// caller) took whatever the CSV cell held, unconditionally -- a matched
+// row with a blank barcode cell silently cleared an existing REAL
+// barcode, and a matched row with a genuinely different real barcode
+// silently overwrote it (the existing `barcode_collision` warning only
+// fires when the barcode-matched candidate's NAME differs -- it does not
+// fire here, where the row matched by SKU and only the barcode differs).
+//
+// That is exactly the failure mode Codex's re-verification work depends
+// on this import path NOT having: an old-system barcode is correct where
+// ours is missing/"0"/short (productIdentity.ts's MIN_REAL_BARCODE_LENGTH
+// placeholder rule, mirrored here via isRealBarcode), but two DIFFERENT
+// real barcodes for the same product must never silently pick a winner --
+// the disagreement itself is the useful signal, so it is kept as a
+// searchable alias instead (barcode_aliases table, migrations/
+// 0105_barcode_aliases.sql) and surfaced as a warning, never applied
+// silently.
+//
+// Rules, in order:
+//   (a) an incoming REAL barcode fills a missing/placeholder existing one
+//       -- already `data`'s default from the caller; nothing to do here.
+//   (b) an incoming REAL barcode that differs (after normalizeBarcode) from
+//       an existing REAL barcode never overwrites it: `data.barcode` is
+//       reset to the existing value, the incoming value is queued as a
+//       pending alias (`source: 'import'`, written by runImportApply once
+//       the product id is known), and a `barcode_alias_recorded` warning is
+//       raised so the operator sees it happened -- reuses the same
+//       ImportRowWarning/warnings mechanism barcode_collision/sku_collision
+//       already use, not a new report surface.
+//   (c) an incoming placeholder/blank barcode never clears an existing REAL
+//       barcode: `data.barcode` is reset to the existing value.
+//   (d) neither side is real: keep the incoming placeholder if the row
+//       actually carried one, otherwise keep the existing placeholder --
+//       an empty cell must not needlessly null out an existing "0"/short
+//       value.
+//
+// Runs for every matched row regardless of job-level product import mode
+// (merge, fill_blank, replace_columns, replace_all all reach this call --
+// see its call site) -- barcode identity safety is not something a
+// job-level column-replace policy should be able to silently defeat. The
+// one respected escape hatch is the SAME explicit per-row signal
+// preserveExistingMoneyOnBlankCells already honors: `_action=
+// override_replace` is the reviewer saying "yes, overwrite this row's
+// fields with the file's values" for this SPECIFIC row, so the caller
+// skips this function entirely in that case rather than silently
+// defeating an explicit, row-level operator decision.
+export function applyBarcodeImportPrecedence(
+  data: Record<string, unknown>,
+  match: Record<string, unknown> | null,
+  rowWarnings: ImportRowWarning[],
+): void {
+  if (!match) return
+  const existing = String(match.barcode ?? '').trim()
+  const incoming = String(data.barcode ?? '').trim()
+  const existingReal = isRealBarcode(existing)
+  const incomingReal = isRealBarcode(incoming)
+  if (existingReal && incomingReal) {
+    if (normalizeBarcode(incoming) === normalizeBarcode(existing)) return
+    data.barcode = existing
+    ;(data as Record<string, unknown> & { __pendingBarcodeAlias?: PendingBarcodeAlias }).__pendingBarcodeAlias = {
+      barcode: incoming,
+      barcodeNormalized: normalizeBarcode(incoming),
+      source: 'import',
+    }
+    rowWarnings.push({
+      kind: 'barcode_alias_recorded',
+      message: `Barcode "${incoming}" differs from this product's existing barcode "${existing}"; kept "${existing}" and recorded "${incoming}" as an alternative barcode instead of overwriting.`,
+    })
+    return
+  }
+  if (existingReal && !incomingReal) {
+    data.barcode = existing
+    return
+  }
+  if (!incomingReal && !incoming && existing) {
+    // Neither value is real, but the row's cell was genuinely blank (not
+    // just a short/placeholder value) and the existing row had SOME
+    // placeholder on file -- keep it rather than null it out for no
+    // reason. When the incoming row carries its own placeholder (e.g.
+    // "0"), that value is left as `data` already has it -- same
+    // "incoming wins when it actually said something" rule as every
+    // other column.
+    data.barcode = existing
+  }
+}
+
+// Splits the optional `barcode_aliases` CSV column (Codex/legacy contract,
+// docs/plans/codex-data-contract.md) into individual candidate aliases:
+// '|'-separated, each trimmed, placeholders dropped, duplicates within the
+// same cell collapsed. Returns real values only -- normalizeBarcode/
+// isRealBarcode application happens again in addAliases at apply time
+// (belt and suspenders: this function's job is just "split the cell",
+// not "be the only place placeholder-filtering happens").
+export function parseBarcodeAliasColumn(raw: unknown): string[] {
+  const seen = new Set<string>()
+  const out: string[] = []
+  for (const candidate of String(raw ?? '').split('|').map((v) => v.trim()).filter(Boolean)) {
+    if (!isRealBarcode(candidate)) continue
+    const key = normalizeBarcode(candidate)
+    if (seen.has(key)) continue
+    seen.add(key)
+    out.push(candidate)
+  }
+  return out
 }
 
 // Money columns come out of normalizeImportMoney as 0 whether the CSV cell
@@ -5664,6 +5811,44 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
           sql: 'UPDATE products SET auto_merged_count = COALESCE(auto_merged_count, 0) + @count WHERE id = @id',
           params: { count, id: productId },
         })
+      }
+    }
+
+    // Codex/legacy-data contract (P2-3, docs/plans/codex-data-contract.md):
+    // write back any pending alias records this chunk's classify pass
+    // queued -- a barcode-precedence conflict
+    // (applyBarcodeImportPrecedence's __pendingBarcodeAlias) and/or the
+    // optional `barcode_aliases` CSV column
+    // (parseBarcodeAliasColumn's __importAliasColumnValues). Rides the
+    // SAME atomic batch as the product writes above (same reasoning as
+    // autoMergeRecords just above: each alias INSERT lands after its own
+    // product's INSERT/UPDATE, statements execute in order) and reuses
+    // the migration's UNIQUE(product_id, barcode_normalized) index for
+    // idempotency (ON CONFLICT ... DO NOTHING) -- a retried/redelivered
+    // chunk (see this function's own redelivery-guard comments elsewhere)
+    // never double-inserts an alias.
+    if (job.type === 'products') {
+      for (const r of actionable) {
+        const d = r.data as Record<string, unknown> & {
+          __importAssignedId?: number
+          __pendingBarcodeAlias?: PendingBarcodeAlias
+          __importAliasColumnValues?: string[]
+        }
+        const productId = r.action === 'update' ? r.existingId : d.__importAssignedId
+        if (!productId) continue
+        const aliasWrites: PendingBarcodeAlias[] = []
+        if (d.__pendingBarcodeAlias) aliasWrites.push(d.__pendingBarcodeAlias)
+        for (const value of d.__importAliasColumnValues || []) {
+          aliasWrites.push({ barcode: value, barcodeNormalized: normalizeBarcode(value), source: `import:${jobId}` })
+        }
+        for (const alias of aliasWrites) {
+          statements.push({
+            sql: `INSERT INTO barcode_aliases (product_id, barcode, barcode_normalized, source, added_at)
+                  VALUES (@product_id, @barcode, @barcode_normalized, @source, @added_at)
+                  ON CONFLICT(product_id, barcode_normalized) DO NOTHING`,
+            params: { product_id: productId, barcode: alias.barcode, barcode_normalized: alias.barcodeNormalized, source: alias.source, added_at: nowIso },
+          })
+        }
       }
     }
 
