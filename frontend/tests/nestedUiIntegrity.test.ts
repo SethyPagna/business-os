@@ -29,7 +29,13 @@ const sectionMatrix: Record<string, { file: string; tokens: string[] }> = {
 
 for (const [page, contract] of Object.entries(sectionMatrix)) {
   const source = read(contract.file)
-  for (const token of contract.tokens) assert.ok(source.includes(token), `${page}: missing nested surface/action token ${token}`)
+  for (const token of contract.tokens) {
+    // Section 6 (2026-09-02): hubs that render the shared <HubSectionNav> get their
+    // horizontally scrollable, viewport-bounded section row from that component
+    // (asserted below), so the raw overflow-x-auto token may live there instead.
+    if (token === 'overflow-x-auto' && source.includes('<HubSectionNav')) continue
+    assert.ok(source.includes(token), `${page}: missing nested surface/action token ${token}`)
+  }
 }
 
 const branchesHub = read('components/branches/BranchesHubPage.tsx')
@@ -45,9 +51,13 @@ assert.match(branchesHub, /active === 'inventory'[\s\S]*hostSection="products"/,
 
 for (const file of ['components/branches/BranchesHubPage.tsx', 'components/review/ReviewLogsPage.tsx', 'components/utils-settings/SettingsHubPage.tsx', 'components/promotions/PromotionsPage.tsx']) {
   const source = read(file)
+  if (source.includes('<HubSectionNav')) continue // row provided by HubSectionNav (asserted below)
   assert.match(source, /max-w-full[^"']*overflow-x-auto|overflow-x-auto[^"']*max-w-full/, `${file}: section row must be viewport bounded and horizontally scrollable`)
   assert.doesNotMatch(source, /inline-flex flex-wrap rounded-xl/, `${file}: section row must not push into extra rows`)
 }
+
+const hubSectionNav = read('components/shared/HubSectionNav.tsx')
+assert.match(hubSectionNav, /max-w-full overflow-x-auto/, 'shared HubSectionNav section row must be viewport bounded and horizontally scrollable')
 
 const pageHeader = read('components/shared/PageHeader.tsx')
 assert.match(pageHeader, /overflow-x-auto/, 'shared page actions must stay on one compact scrollable row')
