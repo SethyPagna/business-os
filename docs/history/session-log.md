@@ -17223,3 +17223,52 @@ UTC+7 date-window 26/26; Sales day-report kernel 26/26; frontend stats-strip sou
 performance/loading source locks green; source syntax 434/434. The fleet skill's final gate is still
 the full verifier against the exact final committed HEAD in the isolated audit worktree; that is the
 next action. Stage 2 remains user-gated, so deploy/migrate/secrets remain untouched.
+
+## Part 579 (Sep 2 2026, session business-os-v1-80, worker) — fleet-coordination skill extended: live-browser verify loop, consistency audits, reconciliation, docs/context upkeep; root CLAUDE.md added
+
+**Ask** — "make skill for sessions coordination, verifications across layers of tasks, session, live
+browser, coordinator … verifications, validation, screenshot and verify, and continue … consistencies
+for logic of the code, buttons, pages … reconcile, and update and compact context, update progress.md
+and claude.md etc." The existing `.claude/skills/fleet-coordination` already covered roles, the shared
+index, layers 1–4, staged deploy and the 300K rule, so it was extended rather than duplicated.
+
+**What changed** (commits a465e850, 36f572c6) —
+- `SKILL.md` rewritten as the hub: the verification ladder gains **layer 5 (live browser)** and a
+  depth-by-moment table (slice / lane / thorough / Stage 1 / post-deploy); new sections for the
+  screenshot→verify→fix→continue loop, consistency (logic/buttons/pages/siblings), reconciling parallel
+  lanes, and docs/context (progress.md, session-log, CLAUDE.md, compaction). Description widened so
+  "verify / screenshot / test in browser / check consistency / continue / update progress.md" trigger it.
+- New `references/browser-verification.md` — launch.json targets and when to use each, the traps
+  (silent writes on the bare Vite port, stale service worker, broken-scale screenshots, paint-gated
+  ResizeObserver, light-theme default, no dev login → never type credentials), the per-surface loop,
+  viewports/modes, the expected-vs-actual ledger format, the 14-page matrix.
+- New `references/consistency-audit.md` — enumerate/matrix/two-angles/fix-in-same-commit method; the
+  existing mechanical locks (verify:i18n, permissionActions, mutationSuccessContract, floatingFilterMenus,
+  pageScrollRoots, sectionNavigation, denseTableSurfaces, rule-parity tests); the standing UI/data
+  conventions with grep leads. Notes that `verify:ui` / `verify:performance` in frontend/package.json point
+  at files that do not exist (zombie refs — flagged as a separate task, not fixed here).
+- New `references/docs-and-context.md` — the four homes (progress.md / session-log / CLAUDE.md / memory)
+  and what never goes in each; board-claim and Part-entry templates; CLAUDE.md as a ≤60-line pointer doc;
+  the before/after compaction checklist (persist → reference-not-truth → ListAgents, re-grep Parts, re-verify).
+- `references/coordination.md` — appended "Reconciling parallel lanes" (timing, later+more-specific wins
+  only after verification, no-loss audit, root cause, two angles, output).
+- New root `CLAUDE.md` — none existed. Pointer document only: start-here steps, the non-negotiables by
+  name, the verification commands, conventions by name, layout. No lane state.
+
+**What was found** — `frontend/package.json` `verify:ui` and `verify:performance` reference
+`ops/scripts/frontend/verify-ui.ts` / `verify-performance.ts`, which exist nowhere in the repo (confirmed
+by `find` over the tree, excluding node_modules). Left for a dedicated task.
+
+**Verified** — frontmatter parses (`name: fleet-coordination`, description 165 words); SKILL.md 246
+lines, references 64–130 lines each; every `references/*.md` named in SKILL.md exists and every reference
+file is named; 43 cited repo paths (tests, scripts, components, launch.json configs) resolved on disk,
+including `cloudflare/src/lib/businessDateWindow.ts`, `frontend/src/utils/permissionActions.ts`,
+`cloudflare/scripts/test-sales-revenue-convergence-pure.cjs`; `coordination.md` diff append-only (0
+deletions). Independent read-only reviewer agent cold-read all files: it returned ~20 findings in 5 categories; every factual one was re-confirmed against source (frontend/vite.config.ts proxy, cloudflare/wrangler.toml [assets], cloudflare/src/index.ts /health, git worktree list, cloudflare/package.json deploy:full) and fixed before commit — wrong proxy direction (Vite → 8787, and 8787 serves the last-built dist), deploy:full does not poll /health, /health version is a hard-coded string (deploy id comes from wrangler output), rc/* lane worktrees + unmerged codex/* branches added to the sweep and reconciliation, hardcoded page list replaced by navigationConfig.ts, Stage-1 depth unified to layers 1–5, Part grep made numeric (awk before sort -n), reserved-range and renumber-in-follow-up rules made explicit, npm ci vs junction rationale stated, per-file test loops added; CLAUDE.md trimmed to a pointer; SKILL.md deduplicated 246→229 lines. The updated
+description was picked up live by the skill registry in this session. No code, tests or build were
+touched, so tsc/build were not re-run for this docs-only change.
+
+**Not done** — no eval-loop runs of the skill against test prompts (operational skill; running it means
+driving live servers and peers' lanes). progress.md header blurb not edited: its dirty hunk belongs to a
+peer's merge-verification note, so only this Part entry was written. `verify:ui`/`verify:performance`
+zombie refs left for the spawned task. Push status: push to origin/main attempted right after this commit — confirm with `git log origin/main -1`.
