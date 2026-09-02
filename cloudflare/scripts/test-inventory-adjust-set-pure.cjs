@@ -1,9 +1,14 @@
 const assert = require('node:assert/strict')
 const fs = require('node:fs')
+const path = require('node:path')
 
-const route = fs.readFileSync('src/routes/inventory.ts', 'utf8')
-const modal = fs.readFileSync('../frontend/src/components/inventory/InventoryStockModals.tsx', 'utf8')
-const branchAdjuster = fs.readFileSync('../frontend/src/components/products/forms/BranchStockAdjuster.tsx', 'utf8')
+// Resolve against the repo layout, not the caller's cwd: the suite is run from
+// cloudflare/scripts by the baseline sweep and from cloudflare/ by hand.
+const cloudflareRoot = path.resolve(__dirname, '..')
+
+const route = fs.readFileSync(path.join(cloudflareRoot, 'src/routes/inventory.ts'), 'utf8')
+const modal = fs.readFileSync(path.join(cloudflareRoot, '../frontend/src/components/inventory/InventoryStockModals.tsx'), 'utf8')
+const branchAdjuster = fs.readFileSync(path.join(cloudflareRoot, '../frontend/src/components/products/forms/BranchStockAdjuster.tsx'), 'utf8')
 
 assert.match(route, /const originalType = type[\s\S]*if \(type === 'set'\)/, 'set preserves its audit identity')
 assert.match(route, /const current = await branchStockQty\(c\.env, productId, branchId\)/, 'set reads the selected branch total')
