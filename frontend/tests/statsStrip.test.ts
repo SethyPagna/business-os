@@ -261,10 +261,15 @@ test('Part 552: report section controls ride the title row; hub tabs fit; branch
   // The hub tab row fits one row on phones: equal grid cells with complete,
   // wrapping labels, including Khmer, instead of hiding Reports with an
   // ellipsis or pushing it beyond the iPhone viewport.
+  // Since Section 6 the strip is rendered by the shared HubSectionNav (every
+  // hub gets the same phone treatment); the invariant is pinned there.
   const shell = read('src/components/sales/SalesHubPage.tsx')
-  assert.ok(shell.includes('grid w-full rounded-xl'), 'the tab strip is full-width')
-  assert.ok(shell.includes('gridTemplateColumns'), 'each visible tab receives an equal bounded cell')
-  assert.ok(shell.includes('break-words text-center leading-tight'), 'tab labels stay complete and may use a second line')
+  assert.ok(shell.includes('<HubSectionNav'), 'the Sales hub renders its tab strip through HubSectionNav')
+  const nav = read('src/components/shared/HubSectionNav.tsx')
+  assert.ok(nav.includes("'grid w-full sm:inline-flex sm:w-auto'"), 'the phone tab strip is a full-width grid')
+  assert.ok(nav.includes('gridTemplateColumns'), 'each visible tab receives an equal bounded cell')
+  assert.ok(nav.includes('break-words text-center leading-tight'), 'tab labels stay complete and may use a second line')
+  assert.ok(nav.includes('MAX_GRID_SECTIONS = 4'), 'hubs with up to four sections never scroll horizontally on phones')
 })
 
 test('Part 553/554: report sections render display-currency money + a CSV export', () => {

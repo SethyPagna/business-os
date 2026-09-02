@@ -27,6 +27,9 @@ import { readMobileSectionNavMode } from '../../utils/sectionNavPreference.ts'
 // layer 2, `children` is simply not included in the returned tree, so the
 // lazy section chunk behind it never starts loading until the user actually
 // enters that section.
+/** Up to this many sections the phone chip row is an equal-cell grid (no horizontal scroll). */
+const MAX_GRID_SECTIONS = 4
+
 export type HubSectionDef = {
   id: string
   label: string
@@ -229,6 +232,7 @@ export default function HubSectionNav({
   if (visible.length <= 1) return <>{children}</>
 
   const sectionsLabel = trh('sections', 'Sections')
+  const fitsGrid = visible.length <= MAX_GRID_SECTIONS
 
   if (!layered) {
     // Desktop/tablet always, and compact + "sections" preference: the chip
@@ -239,19 +243,31 @@ export default function HubSectionNav({
           <div className="mb-1.5 hidden items-center gap-1.5 px-0.5 text-[11px] font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500 md:flex">
             {sectionsLabel}
           </div>
-          <div className="inline-flex max-w-full overflow-x-auto overscroll-x-contain rounded-xl bg-gray-100 p-0.5 [touch-action:pan-x] dark:bg-gray-800 md:border md:border-gray-200 md:dark:border-gray-700">
+          {/* Phones (< sm): when the hub has at most MAX_GRID_SECTIONS sections the
+              strip is an equal-cell grid whose labels wrap (icon above label), so
+              every tab -- Khmer included -- stays complete and inside a 375 px
+              viewport (Part 552 on the Sales hub, now shared by every hub). Wider
+              screens, and hubs with more sections, use the scrollable chip row. */}
+          <div
+            className={`${fitsGrid ? 'grid w-full sm:inline-flex sm:w-auto' : 'inline-flex'} max-w-full overflow-x-auto overscroll-x-contain rounded-xl bg-gray-100 p-0.5 [touch-action:pan-x] dark:bg-gray-800 md:border md:border-gray-200 md:dark:border-gray-700`}
+            style={fitsGrid ? { gridTemplateColumns: `repeat(${visible.length}, minmax(0, 1fr))` } : undefined}
+          >
             {visible.map((section) => {
               const Icon = section.icon
               const isActive = active === section.id
+              const shape = fitsGrid
+                ? 'flex min-h-11 min-w-0 flex-col items-center justify-center gap-0.5 px-1 py-1 text-[10px] sm:h-8 sm:min-h-0 sm:shrink-0 sm:flex-row sm:gap-1.5 sm:whitespace-nowrap sm:px-2.5 sm:text-sm'
+                : 'inline-flex h-8 shrink-0 items-center gap-1.5 whitespace-nowrap px-2.5 text-xs sm:text-sm'
               return (
                 <button
                   key={section.id}
                   type="button"
                   onClick={() => onChange(section.id)}
                   aria-pressed={isActive}
-                  className={`inline-flex h-8 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg px-2.5 text-xs font-semibold sm:text-sm ${isActive ? `bg-white shadow dark:bg-gray-900 ${section.tone || 'text-primary-600 dark:text-primary-400'} md:ring-1 md:ring-inset md:ring-black/5 md:dark:ring-white/10` : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'}`}
+                  className={`${shape} rounded-lg font-semibold ${isActive ? `bg-white shadow dark:bg-gray-900 ${section.tone || 'text-primary-600 dark:text-primary-400'} md:ring-1 md:ring-inset md:ring-black/5 md:dark:ring-white/10` : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'}`}
                 >
-                  {Icon ? <Icon className="h-3.5 w-3.5 sm:h-4 sm:w-4" /> : null} {section.label}
+                  {Icon ? <Icon className="h-3.5 w-3.5 shrink-0 sm:h-4 sm:w-4" /> : null}
+                  <span className={fitsGrid ? 'min-w-0 break-words text-center leading-tight sm:whitespace-nowrap' : undefined}>{section.label}</span>
                   {section.badge}
                 </button>
               )
