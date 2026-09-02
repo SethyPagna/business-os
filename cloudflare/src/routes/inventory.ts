@@ -11,7 +11,7 @@ import { maybeQueueForReview } from '../lib/reviewGate'
 import { broadcast } from '../durable-objects/broadcastHub'
 import { bumpVersion } from '../lib/cache'
 import { findIdentityMatch, type ProductIdentityRow } from '../lib/productIdentity'
-import { buildFtsMatchExpression, buildHybridMatchClause, buildIssueStateClauses, buildLikeAliasClause, buildPartialWordMatchClause, buildShortWordFallbackClause, buildTrigramMatchExpression, isDigitsOnlyQuery, PRODUCT_SEARCH_COLUMNS, PRODUCTS_FTS_BM25_SQL, runFuzzyFallbackMatch, tokenizeSearchTermGroups, tokenizeSearchWords } from '../lib/searchMatch'
+import { buildIssueStateClauses, buildLikeAliasClause, buildProductSearchPlan, computeExactBarcodeHitId, isDigitsOnlyQuery, PRODUCT_SEARCH_COLUMNS, runFuzzyFallbackMatch, tokenizeSearchTermGroups, tokenizeSearchWords } from '../lib/searchMatch'
 import { inlineIntegerIds } from '../lib/sqlBinding'
 import { receiveBatchStock, removeStockFromBatch, removeStockAcrossBatches, InsufficientBatchStockError, readFifoLotAvailability, allocateAcrossLots, decrementBatchStockStrictStatement, incrementBatchStockStatement } from '../lib/productBatches'
 import { applyMovementRevert, type RevertMovementRow } from '../lib/stockRevert'
@@ -167,77 +167,43 @@ function appendInventoryProductFilters(query: InventoryFilterQuery) {
   // so titleOnly now only fires for a caller that actually asks for it.
   const titleOnly = ['name', 'title'].includes(String(query.searchFields || query.search_fields || '').toLowerCase())
   if (termGroups.length) {
-    // FTS5 MATCH against products_fts (migrations/0018_products_fts.sql)
-    // plus products_fts_code (migrations/0019_products_fts_code.sql,
-    // barcode/sku substring fallback) -- same approach as products.ts's
-    // buildSearchFilters, see that file's comment for the full reasoning
-    // (including why both MATCH conditions are IN-subqueries rather than
-    // a JOIN + direct MATCH: combining a JOINed FTS5 table's MATCH with
-    // an OR throws at the SQLite level, confirmed against real FTS5).
-    // Scoped to PRODUCT_SEARCH_COLUMNS, same reasoning as products.ts's identical
-    // change (see lib/searchMatch.ts's own comment on that constant).
-    const ftsMatch = buildFtsMatchExpression(termGroups, mode, titleOnly ? 'name' : PRODUCT_SEARCH_COLUMNS)
-    // Computed once, unconditionally (not gated on titleOnly), and reused
-    // for both products_fts_code (barcode/sku) below and
-    // products_fts_name_trigram (name) -- see products.ts's identical
-    // wiring/comment for the fused-token gap (e.g. "100ml", "110C") this
-    // second table closes, confirmed against this project's own real
-    // catalog data.
-    const trigramMatch = buildTrigramMatchExpression(termGroups, mode)
-    const matchClauses: string[] = []
-    if (ftsMatch) {
-      params.ftsQuery = ftsMatch
-      matchClauses.push('p.id IN (SELECT rowid FROM products_fts WHERE products_fts MATCH @ftsQuery)')
-    }
-    if (trigramMatch && !titleOnly) {
-      params.codeQuery = trigramMatch
-      matchClauses.push('p.id IN (SELECT rowid FROM products_fts_code WHERE products_fts_code MATCH @codeQuery)')
-    }
-    if (trigramMatch) {
-      params.nameCodeQuery = trigramMatch
-      matchClauses.push('p.id IN (SELECT rowid FROM products_fts_name_trigram WHERE products_fts_name_trigram MATCH @nameCodeQuery)')
-    }
-    // Mixed-group fallback (e.g. one group containing both "mac" and
-    // "012") -- see buildHybridMatchClause's own comment in
-    // lib/searchMatch.ts and products.ts's identical wiring. No-op for
-    // the common single-word-per-group case.
-    const hybridMatch = titleOnly ? undefined : buildHybridMatchClause(termGroups, mode, 'hyb', PRODUCT_SEARCH_COLUMNS)
-    if (hybridMatch) {
-      Object.assign(params, hybridMatch.params)
-      matchClauses.push(hybridMatch.sql)
-    }
-    // Short-word (<3 char) LIKE fallback -- see buildShortWordFallbackClause's
-    // own comment in lib/searchMatch.ts and products.ts's identical wiring
-    // for why the trigram tables above can't cover "ml"/"g"/a single
-    // shade-code letter on their own.
-    // Same depth-100 fix as products.ts's identical call site: pass the
-    // precomputed name_normalized/unit_normalized columns with
-    // alreadyNormalizedCols=true instead of raw p.name/p.unit, so this
-    // doesn't run the ~78-level nested REPLACE() chain per column for
-    // every sub-3-character word (see migration 0037_product_search_
-    // compact_columns.sql and products.ts's own comment on this exact fix).
-    // Scoped to name_normalized only -- unit dropped along with unit
-    // leaving PRODUCT_SEARCH_COLUMNS (see that constant's own comment in
-    // lib/searchMatch.ts): unit has its own exact-match filter now instead
-    // of being a free-text search dimension.
-    const shortWordMatch = buildShortWordFallbackClause(termGroups, mode, ['p.name_normalized'], params, 'shortw', true)
-    if (shortWordMatch) matchClauses.push(shortWordMatch)
-    // Compact-brand substring fallback intentionally NOT called here
-    // anymore -- brand is no longer a free-text search dimension (see
-    // PRODUCT_SEARCH_COLUMNS's own comment in lib/searchMatch.ts): names
-    // already carry the brand in this catalog, and the brand filter
-    // dropdown already covers exact-brand lookup.
-    // Partial multi-word fallback -- same long-name gap and identical
-    // wiring as products.ts (see buildPartialWordMatchClause's own
-    // comment in lib/searchMatch.ts). Scoped to name only, same reasoning.
-    // Same depth-100 fix as products.ts -- name_normalized, alreadyNormalizedCols=true.
-    const partialMatch = buildPartialWordMatchClause(termGroups, mode, ['p.name_normalized'], params, 'partialw', 4, true)
-    if (partialMatch) matchClauses.push(partialMatch)
-    if (matchClauses.length) {
-      searchWhereClause = matchClauses.length > 1 ? `(${matchClauses.join(' OR ')})` : matchClauses[0]
-      if (!titleOnly && ftsMatch) {
-        matchRankSql = `COALESCE((SELECT ${PRODUCTS_FTS_BM25_SQL} FROM products_fts WHERE products_fts.rowid = p.id AND products_fts MATCH @ftsQuery), 0)`
-      }
+    // P2-2 (Gate 2B audit): this used to hand-roll its own FTS5-prefix ->
+    // trigram-substring -> hybrid -> short-word-LIKE -> partial-word-LIKE
+    // sequence (see git history / products.ts's own buildProductSearchPlan
+    // comment for why it moved) -- now built through the same
+    // buildProductSearchPlan shared with products.ts/portal.ts/branches.ts.
+    // Same PRODUCT_SEARCH_COLUMNS scope (name/sku/barcode -- brand/
+    // category/unit/supplier/description stay out, already reachable via
+    // their own filter dropdowns) and the same titleOnly narrowing this
+    // endpoint already had (the plan itself scopes to 'name' when
+    // titleOnly is set, same as the old buildFtsMatchExpression(termGroups,
+    // mode, titleOnly ? 'name' : PRODUCT_SEARCH_COLUMNS) call did). Two
+    // behavioral additions over the prior inline version: short-word/
+    // partial-word fallback now also covers barcode/sku (closes the
+    // confirmed 1-2 digit barcode-fragment gap, Gate 2B A.5), and
+    // exactRankSql ranks an exact barcode/sku match ahead of a
+    // same-bm25-weight name match.
+    const plan = buildProductSearchPlan({
+      groups: termGroups,
+      mode,
+      columns: PRODUCT_SEARCH_COLUMNS,
+      titleOnly,
+      exactMatchQuery: query.query || query.q || '',
+    })
+    Object.assign(params, plan.params)
+    if (plan.whereClause) {
+      searchWhereClause = plan.whereClause
+      // Folded into ONE rank expression (rather than threading a second
+      // rank field through familyPagination.ts, which P2-2 doesn't own)
+      // by weighting exactRankSql (0/1/2) far above bm25's actual range
+      // (a handful of points either side of 0) -- ORDER BY this ASC is
+      // equivalent to ORDER BY exact_rank ASC, bm25_rank ASC. Only
+      // combined when plan.matchRankSql exists (titleOnly searches never
+      // compute one, same as before this refactor -- a name-only search
+      // has no barcode/sku relevance to rank by in the first place).
+      matchRankSql = plan.matchRankSql
+        ? `((${plan.exactRankSql}) * 1000000) + (${plan.matchRankSql})`
+        : undefined
     }
   }
 
@@ -592,6 +558,16 @@ async function searchProductsPayload(env: Env, query: Record<string, string>) {
 
   if (items.length) await attachBatchCounts(getDb(env), items)
 
+  // P2-2 (Gate 2B spec §5): exactly one row whose barcode equals the
+  // normalised query, query length >= MIN_REAL_BARCODE_LENGTH, and the
+  // value isn't the "0" placeholder shared by 238 live products -- see
+  // computeExactBarcodeHitId's own doc comment in lib/searchMatch.ts and
+  // products.ts's identical wiring. null in metadataOnly mode (barcode
+  // isn't in selectColumns there -- see selectColumns above).
+  const exactBarcodeHitId = metadataOnly
+    ? null
+    : computeExactBarcodeHitId(items as Array<{ id: number; barcode?: string | null }>, query.query || query.q || '')
+
   return {
     items,
     total: pagedResult.total,
@@ -600,6 +576,7 @@ async function searchProductsPayload(env: Env, query: Record<string, string>) {
     totalPages: pagedResult.totalPages,
     filters: metadata.filters,
     initials: metadata.initials,
+    exact_barcode_hit_id: exactBarcodeHitId,
   }
 }
 
