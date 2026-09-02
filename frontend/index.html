@@ -92,6 +92,36 @@
             && !/\.[a-z0-9]+$/i.test(pathname)
             && !adminRoutes[segment]
         document.documentElement.setAttribute('data-business-os-initial-route', publicRoute ? 'public' : 'admin')
+        // Decision 5 (2026-09-02): the admin app defaults to LIGHT and never
+        // auto-honours the operating system's prefers-color-scheme. Dark is
+        // opt-in only, through the in-app toggle, and a returning visitor
+        // keeps the choice they stored. Resolved here, synchronously and
+        // before the shell below paints, from the same three localStorage
+        // keys public-runtime/theme-bootstrap.ts reads later -- otherwise a
+        // dark-preference user gets a light flash until that script runs,
+        // and an OS-dark user used to get a dark app they never asked for.
+        function readStoredThemeValue(key, field) {
+          try {
+            var raw = localStorage.getItem(key)
+            if (!raw) return ''
+            if (!field) return raw
+            var parsed = JSON.parse(raw)
+            return parsed && typeof parsed === 'object' ? parsed[field] : ''
+          } catch (storageError) { return '' }
+        }
+        var storedTheme = 'light'
+        var themeCandidates = [
+          readStoredThemeValue('businessos_device_settings', 'theme'),
+          readStoredThemeValue('businessos_theme', ''),
+          readStoredThemeValue('businessos_settings', 'theme')
+        ]
+        for (var themeIndex = 0; themeIndex < themeCandidates.length; themeIndex += 1) {
+          if (String(themeCandidates[themeIndex] || '').trim().toLowerCase() === 'dark') {
+            storedTheme = 'dark'
+            break
+          }
+        }
+        document.documentElement.setAttribute('data-business-os-initial-theme', storedTheme)
         if (publicRoute) {
           document.title = 'Leang Beauty'
           var description = document.querySelector('meta[name="description"]')
@@ -129,6 +159,11 @@
             adminIcons[adminIconIndex].setAttribute('href', adminIconSize === '192x192' ? '/icon-192.png' : (adminIconSize === '512x512' ? '/icon-512.png' : '/favicon.ico?v=business-os'))
             adminIcons[adminIconIndex].setAttribute('type', adminIconSize ? 'image/png' : 'image/x-icon')
           }
+          // The static theme-color stays on the storefront's own value (see
+          // the public-first comment above); only the admin shell moves to
+          // the decision-5 palette -- ivory ground, charcoal-ink dark ground.
+          var adminThemeColor = document.querySelector('meta[name="theme-color"]')
+          if (adminThemeColor) adminThemeColor.setAttribute('content', storedTheme === 'dark' ? '#161513' : '#f7f4ee')
           var adminAppleIcon = document.querySelector('link[rel="apple-touch-icon"]')
           if (adminAppleIcon) adminAppleIcon.setAttribute('href', '/apple-touch-icon.png')
         }
@@ -136,7 +171,11 @@
     </script>
     <style data-business-os-initial-shell>
       :root {
-        color-scheme: light dark;
+        /* Decision 5: never `light dark`. Declaring both makes the UA paint
+           form controls, scrollbars and the canvas from the OS preference,
+           which is exactly the auto-dark this app must not do. The stored
+           preference (resolved above) flips this to dark explicitly. */
+        color-scheme: light;
         font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
         background: #f5f7fb;
         color: #0f172a;
@@ -145,6 +184,7 @@
         margin: 0;
         min-width: 320px;
         min-height: 100vh;
+        min-height: 100dvh;
         background: #f5f7fb;
       }
       .business-os-initial-shell {
@@ -200,15 +240,39 @@
         font-size: 11px;
         line-height: 1.3;
       }
-      @media (prefers-color-scheme: dark) {
-        :root,
-        body {
-          background: #101827;
-          color: #e5edf7;
-        }
-        .business-os-initial-copy {
-          color: #a7b4c6;
-        }
+      /* Admin shell palette (decision 5, values read from
+         src/styles/tokens.css: --ui-ground/--ui-ink light, --ui-accent gold).
+         Scoped to the admin route so the customer storefront keeps its own
+         pre-paint design (#f5f7fb) untouched. */
+      [data-business-os-initial-route="admin"],
+      [data-business-os-initial-route="admin"] body {
+        background: #f7f4ee;
+        color: #1f1d1a;
+      }
+      [data-business-os-initial-route="admin"] .business-os-initial-spinner {
+        border-color: rgba(156, 122, 60, 0.18);
+        border-top-color: #9c7a3c;
+      }
+      [data-business-os-initial-route="admin"] .business-os-initial-copy {
+        color: #5b564e;
+      }
+      /* Dark is reached ONLY through data-business-os-initial-theme, which the
+         head script sets from the user's stored choice -- there is deliberately
+         no prefers-color-scheme block anywhere in this shell. */
+      [data-business-os-initial-theme="dark"] {
+        color-scheme: dark;
+      }
+      [data-business-os-initial-route="admin"][data-business-os-initial-theme="dark"],
+      [data-business-os-initial-route="admin"][data-business-os-initial-theme="dark"] body {
+        background: #161513;
+        color: #f2ede4;
+      }
+      [data-business-os-initial-route="admin"][data-business-os-initial-theme="dark"] .business-os-initial-spinner {
+        border-color: rgba(216, 184, 120, 0.18);
+        border-top-color: #d8b878;
+      }
+      [data-business-os-initial-route="admin"][data-business-os-initial-theme="dark"] .business-os-initial-copy {
+        color: #b9b1a4;
       }
     </style>
   </head>
