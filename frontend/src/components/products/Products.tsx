@@ -94,6 +94,7 @@ import {
 import {
   buildProductSearchTerms,
   filterProductsForPage,
+  resolveClientSearchTerms,
   getProductBranchQuantity,
 } from './helpers/productFilterHelpers.ts'
 import { parseProductSearchStockToken } from '../../utils/searchTerms.ts'
@@ -869,17 +870,6 @@ function ProductsFullEditor() {
   // matching "stays until I search again" rather than "stays forever" or
   // "disappears on the very next silent refresh."
   const pinnedEditedProductsRef = useRef<Map<number, ProductRecord>>(new Map())
-  // P2-4 step 3 (decision 9 / alias gap, brief §4 "Part 1 rule"): tracks
-  // whether the search value that produced the CURRENT results came from a
-  // scan (camera via ScanSearchButton, or a keyboard-wedge burst) rather than
-  // manual typing. Read inside load() once the fresh page lands, to decide
-  // whether a lone surviving row should be highlighted even when the server/
-  // client exact-barcode-hit computation came back null (e.g. the value
-  // matched a barcode_aliases row, which findExactBarcodeHit/
-  // computeExactBarcodeHitId never compare against -- see
-  // utils/productLookup.ts's own header comment on this gap). Reset to false
-  // the moment the person edits the search box by hand.
-  const lastSearchWasScanRef = useRef(false)
   const productDeleteInFlightRef = useRef(false)
   const bulkActionInFlightRef = useRef(false)
   const initializedCollapsedGroupKeysRef = useRef<Set<string>>(new Set())
@@ -909,6 +899,14 @@ function ProductsFullEditor() {
   // Never used to auto-open/auto-select the row -- see the Confirm
   // affordance in renderDesktopProductRow/renderMobileProductCard.
   const [exactBarcodeHit, setExactBarcodeHit] = useState<number | null>(null)
+  // P2-4 Part 1b (alias-search root cause): the search query the currently
+  // held page of products was fetched for, or null before the first response.
+  // Never used to fetch anything -- only to tell the free-text client
+  // re-filter below whether it is looking at a stale page (re-filter: useful
+  // instant feedback) or at the server's own answer for this exact query
+  // (stand down: the server already matched, including through
+  // barcode_aliases, and a narrower second pass can only drop rows).
+  const [serverSearchedQuery, setServerSearchedQuery] = useState<string | null>(null)
   // "Searchable filter for special stock states" (progress.md backlog item
   // #2): a term like `stock:0` or `out of stock` inside the search box is
   // parsed out here and treated as if "Out of stock" had been picked from
@@ -1057,29 +1055,27 @@ function ProductsFullEditor() {
         // client-side single-candidate check only when the server didn't
         // supply one at all.
         const serverExactHitRaw = (productPayloadObject as Record<string, unknown> | null)?.exact_barcode_hit_id
-        let resolvedExactHit = resolveExactBarcodeHit(
+        const resolvedExactHit = resolveExactBarcodeHit(
           serverExactHitRaw,
           (Array.isArray(prods) ? prods : []) as ProductLookupCandidate[],
           cleanedSearchQuery,
         )
-        // P2-3 alias gap (utils/productLookup.ts header comment): both the
-        // server's computeExactBarcodeHitId and the client's
-        // findExactBarcodeHit compare products.barcode ONLY, so a value that
-        // matched through a barcode_aliases row (the search tail's alias
-        // clause) narrows the list but never resolves to an exact hit here.
-        // Part 1 rule (P2-4 brief §4): when the search that produced this
-        // page was a scan (camera or keyboard wedge, never manual typing --
-        // see lastSearchWasScanRef) and exactly one row survived, highlight
-        // it anyway. Still select-then-confirm: the row is only marked
-        // data-exact-hit and shown a Confirm affordance, never auto-opened.
-        // The real fix (comparing aliases too) belongs in
-        // productLookup.ts/backend -- out of this page's scope, see the
-        // P2-4 report's alias-gap handoff.
-        if (resolvedExactHit === null && lastSearchWasScanRef.current && Array.isArray(prods) && prods.length === 1) {
-          const onlyId = Number(prods[0]?.id)
-          resolvedExactHit = Number.isFinite(onlyId) ? onlyId : null
-        }
+        // P2-4 Part 1b: the "if exactly one row survived a scan, highlight
+        // it" fallback that used to sit here is GONE. It was a symptom patch
+        // for the alias gap -- the server now resolves an alias-barcode scan
+        // to a real exact_barcode_hit_id itself (routes/products.ts's
+        // resolveAliasExactBarcodeHitId), so a lone surviving row no longer
+        // has to be guessed at; and the guess was never safe anyway, since a
+        // one-result page is not evidence that the one result IS the code
+        // that was scanned.
         setExactBarcodeHit(resolvedExactHit)
+        // The query this page of results was actually searched for on the
+        // server. Read by the filtered memo below (resolveClientSearchTerms)
+        // to know when the free-text client re-filter must stand down and let
+        // the server's answer through unchanged -- including rows the server
+        // matched through barcode_aliases, which no client-side haystack can
+        // see. See productFilterHelpers.ts's resolveClientSearchTerms comment.
+        setServerSearchedQuery(cleanedSearchQuery)
         setProductTotal(Number(productPayloadObject?.total ?? prods.length) || 0)
         // The server clamps pageSize server-side (see routes/products.ts's
         // clampInt(query.pageSize, 20, 1, 100)) and echoes back whatever it
@@ -2182,6 +2178,14 @@ function ProductsFullEditor() {
   // hasn't responded yet) or from the server payload itself, never both
   // as separate visible steps for the same keystroke.
   const searchTerms = useMemo(() => buildProductSearchTerms(cleanedSearchQuery), [cleanedSearchQuery])
+  // See resolveClientSearchTerms in helpers/productFilterHelpers.ts: [] once
+  // the server page for THIS query has landed (the server is the search
+  // authority and already matched aliases the client cannot see), the terms
+  // themselves while that page is still in flight.
+  const clientSearchTerms = useMemo(
+    () => resolveClientSearchTerms(searchTerms, serverSearchedQuery, cleanedSearchQuery),
+    [searchTerms, serverSearchedQuery, cleanedSearchQuery],
+  )
   const filtered = useMemo(() => filterProductsForPage(products, {
     brandFilter,
     branchFilter,
@@ -2190,10 +2194,10 @@ function ProductsFullEditor() {
     issueFilter,
     parentProductIds,
     searchMode,
-    searchTerms,
+    searchTerms: clientSearchTerms,
     stockFilter: effectiveStockState,
     supplierFilter,
-  }), [brandFilter, branchFilter, catFilter, effectiveStockState, groupFilter, issueFilter, parentProductIds, products, searchMode, searchTerms, supplierFilter])
+  }), [brandFilter, branchFilter, catFilter, clientSearchTerms, effectiveStockState, groupFilter, issueFilter, parentProductIds, products, searchMode, supplierFilter])
 
   // Name kept as "...Csv" for now (it's an internal identifier, not shown
   // to users -- see productMenuHelpers.ts's menu item labels, none of which
@@ -2470,8 +2474,6 @@ function ProductsFullEditor() {
     // is intentionally re-querying, a just-edited product that no longer
     // matches should behave like any other non-matching row again.
     pinnedEditedProductsRef.current.clear()
-    // Manual typing is never a "scan" -- see lastSearchWasScanRef's comment.
-    lastSearchWasScanRef.current = false
     setSearch(value)
   }, [])
 
@@ -2485,7 +2487,6 @@ function ProductsFullEditor() {
   // Confirm affordance the user still has to click.
   const handleScanDetected = useCallback((value: string) => {
     pinnedEditedProductsRef.current.clear()
-    lastSearchWasScanRef.current = true
     setSearch(value)
   }, [])
 

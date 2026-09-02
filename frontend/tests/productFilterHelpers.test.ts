@@ -4,6 +4,7 @@ import {
   buildProductSearchTerms,
   filterProductsForPage,
   getProductBranchQuantity,
+  resolveClientSearchTerms,
 } from '../src/components/products/helpers/productFilterHelpers.ts'
 import { parseProductSearchStockToken } from '../src/utils/searchTerms.ts'
 
@@ -184,3 +185,86 @@ assert.equal(allScopeRow.Stock_Quantity, 13, "branchId='all' (the page's own fil
 }
 
 console.log('productFilterHelpers tests passed')
+
+// --- P2-4 Part 1b: the alias-search root cause -----------------------------
+// Reported as "alias-barcode search returns zero results". Verified at route
+// level: GET /api/products/search?query=<alias> returns 200 with the aliased
+// row. That row was then thrown away by this page's OWN re-filter, whose
+// free-text haystack is name/sku/barcode/tag_label and can never see
+// barcode_aliases. resolveClientSearchTerms is the fix: the free-text pass
+// stands down once the server page for THIS exact query has landed.
+{
+  // The real QA seed row (product 5045, primary barcode 6901000009999, alias
+  // 8011003845132) -- copied field-for-field from the seeded record so this
+  // reproduction cannot drift into a shape that accidentally matches.
+  const aliasRow = {
+    id: 5045,
+    name: 'QA Seed Alias Barcode Product',
+    sku: 'QASEED-ALIAS',
+    barcode: '6901000009999',
+    category: 'Fragrance',
+    brand: 'Aveeno',
+    supplier: 'Supplier A',
+    stock_quantity: 3,
+    low_stock_threshold: 5,
+    out_of_stock_threshold: 0,
+    branch_stock: [{ branch_id: 2, branch_name: 'Main', quantity: 3 }],
+  }
+  const ALIAS = '8011003845132'
+  const terms = buildProductSearchTerms(ALIAS)
+
+  // The bug, reproduced against the real helper: re-applying the alias as a
+  // free-text term to a server-searched page empties it.
+  assert.deepEqual(
+    filterProductsForPage([aliasRow], { searchTerms: terms }).map((p) => p.id),
+    [],
+    'precondition: the free-text haystack (name/sku/barcode/tag_label) genuinely cannot see an alias -- that is the gap, not a mistake in this helper',
+  )
+
+  // The fix: once the server has answered for this exact query, the free-text
+  // terms are dropped and the server-matched row survives.
+  assert.deepEqual(
+    resolveClientSearchTerms(terms, ALIAS, ALIAS),
+    [],
+    'server page for THIS query has landed -> no client free-text re-filter',
+  )
+  assert.deepEqual(
+    filterProductsForPage([aliasRow], { searchTerms: resolveClientSearchTerms(terms, ALIAS, ALIAS) }).map((p) => p.id),
+    [5045],
+    'the alias-matched row the server deliberately returned is no longer dropped',
+  )
+
+  // ...and the instant-feedback behaviour it exists for is intact: while the
+  // page in hand was fetched for an OLDER query, the terms still apply.
+  assert.deepEqual(
+    resolveClientSearchTerms(terms, 'rose', ALIAS),
+    [ALIAS],
+    'stale page (fetched for a different query) -> re-filter exactly as before',
+  )
+  assert.deepEqual(
+    resolveClientSearchTerms(terms, null, ALIAS),
+    [ALIAS],
+    'no server response has ever landed -> re-filter exactly as before',
+  )
+  assert.deepEqual(
+    resolveClientSearchTerms(buildProductSearchTerms('rose'), '', 'rose'),
+    ['rose'],
+    'an empty served query is a real value, not "never fetched" -- the pass only stands down when served EQUALS current',
+  )
+  assert.deepEqual(
+    resolveClientSearchTerms(buildProductSearchTerms(''), '', ''),
+    [],
+    'the cleared-search case: served and current agree (both empty), nothing to re-filter',
+  )
+
+  // Facet filters keep re-filtering unconditionally -- only the free-text pass
+  // stands down. Same server page, a category the row is not in: still dropped.
+  assert.deepEqual(
+    filterProductsForPage([aliasRow], {
+      searchTerms: resolveClientSearchTerms(terms, ALIAS, ALIAS),
+      catFilter: 'Makeup',
+    }).map((p) => p.id),
+    [],
+    'facet filters are unaffected by resolveClientSearchTerms -- they stay instant',
+  )
+}

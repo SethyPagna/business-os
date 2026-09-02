@@ -27,7 +27,7 @@ import { broadcast } from '../durable-objects/broadcastHub'
 import { createBulkDeleteJob, getBulkDeleteJob, reapStalledBulkDeleteJobs } from '../lib/bulkDeleteEngine'
 import { ADMIN_MAX_IMAGES_PER_PRODUCT, MAX_IMAGES_PER_PRODUCT } from '../lib/importImageMatch'
 import { loadActivePromotionRules, productPromotedSql, productDiscountActiveSql, anyRuleAppliesSql, singleRuleAppliesSql } from '../lib/promotionRulesSql'
-import { buildAliasExactClause } from '../lib/barcodeAliases'
+import { buildAliasExactClause, isRealBarcode, normalizeBarcode } from '../lib/barcodeAliases'
 import {
   computeRenameImpact,
   applyRenameCarry,
@@ -470,6 +470,51 @@ async function attachImageGallery(env: Env, products: Array<Record<string, unkno
 
 type ProductSearchOptions = { useSearchIndex?: boolean }
 
+// P2-4 Part 1b (alias exact-hit root cause). The alias half of
+// `exact_barcode_hit_id`: given the rows ALREADY on this page of results and
+// the raw scanned/typed value, return the single row that carries that value
+// in `barcode_aliases` -- or null.
+//
+// Why this lives here and not in computeExactBarcodeHitId
+// (lib/searchMatch.ts): that helper is deliberately pure and synchronous (it
+// is kept in byte-for-byte behavioural parity with the client's
+// findExactBarcodeHit -- frontend/tests/searchMatchParity.test.ts pins the
+// pair), and the alias table can only be consulted with a DB round trip. So
+// the pure primary-barcode comparison stays exactly as it is and this async
+// fallback runs only when it came back null.
+//
+// The three gates are the SAME three decision-9 gates the primary comparison
+// applies (digits-only, length >= MIN_REAL_BARCODE_LENGTH, never the shared
+// "0" placeholder) so an alias hit can never be more permissive than a
+// primary-barcode hit; and, exactly like the primary comparison, more than
+// one matching row on the page means "ambiguous", which resolves to null
+// rather than to a confident pick. Scoped to this page's ids on purpose --
+// highlighting a row that is not on screen would be meaningless.
+export async function resolveAliasExactBarcodeHitId(
+  db: { prepare: (sql: string) => { all: <T>(params?: Record<string, unknown>) => Promise<T[]> } },
+  rows: ReadonlyArray<{ id?: unknown }>,
+  rawQuery: unknown,
+): Promise<number | null> {
+  const normalized = normalizeBarcode(rawQuery)
+  if (!/^[0-9]+$/.test(normalized)) return null
+  if (!isRealBarcode(normalized)) return null
+  if (normalized === '0') return null
+  const pageIds = Array.from(new Set(
+    (rows || []).map((row) => Number(row?.id)).filter((id) => Number.isSafeInteger(id) && id > 0),
+  ))
+  if (!pageIds.length) return null
+  const inList = inlineIntegerIds(pageIds)
+  const matched = await db.prepare(`
+    SELECT DISTINCT product_id
+    FROM barcode_aliases
+    WHERE barcode_normalized = @alias AND product_id IN (${inList})
+    LIMIT 2
+  `).all<{ product_id: number }>({ alias: normalized })
+  if (matched.length !== 1) return null
+  const hitId = Number(matched[0]?.product_id)
+  return Number.isSafeInteger(hitId) && hitId > 0 ? hitId : null
+}
+
 // The other half of the "group search hides sibling child rows" fix (see
 // familyMemberBaseWhereSql in familyPagination.ts for the parent_id-linked
 // half). Most groups in this catalog are NOT parent_id-linked -- they're
@@ -750,10 +795,27 @@ async function searchProductsPayload(env: Env, query: Record<string, string>, op
   // used server-side to filter/select anything -- purely a highlight flag
   // the frontend uses to visually emphasize the row; the user still has to
   // click/confirm it (see frontend/src/hooks/useBarcodeScan.ts).
-  const exactBarcodeHitId = computeExactBarcodeHitId(
+  const exactHitQuery = query.query || query.q || ''
+  const primaryExactHitId = computeExactBarcodeHitId(
     itemsWithGallery as Array<{ id: number; barcode?: string | null }>,
-    query.query || query.q || '',
+    exactHitQuery,
   )
+  // P2-4 Part 1b root cause: computeExactBarcodeHitId compares
+  // `products.barcode` ONLY, so scanning a value recorded in
+  // `barcode_aliases` (the search tail already matches it -- see
+  // buildAliasExactClause) narrowed the list but never resolved an exact
+  // hit, and the page had to fall back to a "if exactly one row survived a
+  // scan, highlight it" symptom patch. Resolved here instead: only when the
+  // primary comparison found nothing, ask the alias table which of THIS
+  // page's rows carry the scanned value as an alias. Same select-then-
+  // confirm contract -- this is still nothing but a highlight flag.
+  const exactBarcodeHitId = primaryExactHitId !== null
+    ? primaryExactHitId
+    : await resolveAliasExactBarcodeHitId(
+      getDb(env),
+      itemsWithGallery as Array<{ id: number }>,
+      exactHitQuery,
+    )
 
   return {
     items: itemsWithGallery,

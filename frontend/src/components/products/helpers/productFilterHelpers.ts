@@ -84,6 +84,49 @@ export function getProductBranchQuantity(product: ProductRecord, branchId: unkno
     .find((stock) => String(stock.branch_id) === String(branchId))?.quantity ?? 0
 }
 
+/**
+ * P2-4 Part 1b root cause (alias-barcode search "returns zero").
+ *
+ * `filterProductsForPage`'s free-text haystack is name/sku/barcode/tag_label
+ * (see the long comment inside it) -- deliberately mirroring the server's own
+ * MATCH scope. But the server ALSO matches `barcode_aliases` (see
+ * cloudflare/src/lib/barcodeAliases.ts's buildAliasExactClause, OR'd into the
+ * search tail), and an alias is not one of those four columns. So a row the
+ * server had deliberately matched through an alias was being thrown away by
+ * this page's own re-filter a moment later, and the list read as empty.
+ *
+ * The honest fix is not to widen the haystack with a column the payload does
+ * not carry -- it is to stop re-applying free-text terms to a page the server
+ * has ALREADY searched for exactly this query. That re-filter only ever
+ * existed as instant feedback for the gap between a settled keystroke and the
+ * matching server response (see Products.tsx's `searchTerms` comment): while
+ * `products` still holds the page fetched for an OLDER query it is genuinely
+ * useful, and once the page for the CURRENT query has landed the server is
+ * the search authority and a second, narrower client pass can only subtract
+ * from a correct answer. Exactly the same "don't second-guess the server's
+ * answer with a stricter client check" rule this file already applies to
+ * groupFilter, the created-date range and stockFilter.
+ *
+ * Facet filters (category/brand/branch/supplier/issue/stock) keep
+ * re-filtering unconditionally: those are cheap local predicates over columns
+ * the payload really does carry, and they are what makes the facet chips feel
+ * instant.
+ *
+ * @param searchTerms the terms built from the CURRENT query
+ * @param serverSearchedQuery the query string the page in hand was fetched
+ *        for (`null` before the first response has ever landed)
+ * @param currentQuery the query string the page is showing right now
+ */
+export function resolveClientSearchTerms(
+  searchTerms: readonly string[] = [],
+  serverSearchedQuery: string | null | undefined,
+  currentQuery: unknown,
+): string[] {
+  const current = String(currentQuery ?? '')
+  if (serverSearchedQuery != null && serverSearchedQuery === current) return []
+  return searchTerms.map((term) => String(term || '')).filter(Boolean)
+}
+
 export function filterProductsForPage(products: ProductRecord[] = [], filters: ProductFilterState = {}): ProductRecord[] {
   const {
     brandFilter = 'all',

@@ -36,7 +36,7 @@ highlights, per decision 9.
 |---|---|---|---|---|---|
 | Promotions (per-product discount search + rule-editor product picker) | `useProductLookup` (300ms) — **done**, `rc/p2-2-search` commit `bc997ad2` | `GET /api/products/search` | Yes — `data-exact-hit="true"` on both dropdowns | Yes — via `ScanSearchButton` (unchanged, already correct) | Yes — unchanged existing click-to-open/click-to-add |
 | POS (product search / cart add) | TODO P2-4/P2-5 | `GET /api/products/search` (same endpoint/contract as Promotions — `exact_barcode_hit_id` already in the response) | TODO | TODO — confirm whether POS already auto-closes on a scan-to-add flow, or whether add-to-cart-on-scan needs to change to fill-then-confirm to satisfy decision 9 | TODO — **audit specifically**: POS is the surface most likely to currently auto-add on scan (fast checkout flow); decision 9 still applies — a scan must highlight, not add, unless the existing flow already requires a tap/Enter on the highlighted line |
-| Products (main list search + scanner) | **done**, `rc/p2-4-pages` commit `cd9d3143`. NOT switched onto `useProductLookup` — `load()` already debounces via `useDebouncedValue(search, 180)` (matches the 180ms convention) and Products' 17-param query (filters/initials/promotion_rules metadata) is wider than the hook's surface; forking the hook or dropping functionality was judged worse than reading `exact_barcode_hit_id` off the existing response directly. `useBarcodeScan` is wired for the keyboard-wedge path only (`wedge.onKeyDown` on the search input) | `GET /api/products/search` | Yes — `data-exact-hit="true"` on both the desktop `<tr>` and the mobile card, resolved via the shared `resolveExactBarcodeHit` helper (never a re-implementation), plus a documented client-side fallback: if the server's `exact_barcode_hit_id` is null but a scan narrowed the list to exactly one row, that row is still highlighted (covers the alias-barcode gap below for the *single-result* case only) | Yes — `ScanSearchButton` (camera) is unchanged/already correct; both paths funnel through one `handleScanDetected` that only calls `setSearch`, never selects | Yes — both the highlighted row's own `onClick` and its Confirm pill require an explicit click calling `setDetailProduct`; nothing auto-opens on scan or on an exact-match query |
+| Products (main list search + scanner) | **done**, `rc/p2-4-pages` commit `cd9d3143`. NOT switched onto `useProductLookup` — `load()` already debounces via `useDebouncedValue(search, 180)` (matches the 180ms convention) and Products' 17-param query (filters/initials/promotion_rules metadata) is wider than the hook's surface; forking the hook or dropping functionality was judged worse than reading `exact_barcode_hit_id` off the existing response directly. `useBarcodeScan` is wired for the keyboard-wedge path only (`wedge.onKeyDown` on the search input) | `GET /api/products/search` | Yes — `data-exact-hit="true"` on both the desktop `<tr>` and the mobile card, resolved via the shared `resolveExactBarcodeHit` helper (never a re-implementation), and the server now resolves an ALIAS-barcode scan to a real `exact_barcode_hit_id` too (`resolveAliasExactBarcodeHitId`, `cloudflare/src/routes/products.ts`), so no client-side guessing is needed — P2-4 Part 1b deleted the old "a scan that left exactly one row highlights that row" fallback | Yes — `ScanSearchButton` (camera) is unchanged/already correct; both paths funnel through one `handleScanDetected` that only calls `setSearch`, never selects | Yes — both the highlighted row's own `onClick` and its Confirm pill require an explicit click calling `setDetailProduct`; nothing auto-opens on scan or on an exact-match query |
 | Inventory (search + scanner) | TODO P2-4/P2-5 | `GET /api/inventory/products` (`searchProductsPayload` in `inventory.ts` — patch prepared, not yet applied, see `bos-rc-workers/p2-2-inventory-tail.patch`) | TODO — patch adds `exact_barcode_hit_id`, null when `metadataOnly` | Already uses `ScanSearchButton` per `tests/barcodeScannerState.test.ts` (branch stock surface) | TODO |
 | Branches (per-branch stock search + `TransferModal` product picker) | TODO P2-4/P2-5 | `GET /api/branches/:id/stock` (search tail wired onto `buildProductSearchPlan` in `rc/p2-2-search` commit `1619a18b`; `exact_barcode_hit_id` already in the response) | TODO | Already uses `ScanSearchButton` (`Branches.tsx`, `TransferModal.tsx` — 2 uses, per `tests/barcodeScannerState.test.ts`) | TODO |
 | TransferModal (single + multi product search) | TODO P2-4/P2-5 | Same as Branches above | TODO | Already uses `ScanSearchButton` (2 uses) | TODO |
@@ -76,7 +76,26 @@ highlights, per decision 9.
 
 ## P2-4 findings (Products, `rc/p2-4-pages`)
 
-- **Alias-barcode highlight gap (P2-3 boundary, not fixed here)**: `computeExactBarcodeHitId`
+- **Alias-barcode highlight gap — FIXED in P2-4 Part 1b** (`rc/p2-4b-products`). The rule is now:
+  `exact_barcode_hit_id` = the primary-barcode hit if there is one, otherwise the single row on
+  THIS page that carries the scanned value in `barcode_aliases`, otherwise null.
+  `computeExactBarcodeHitId` (`cloudflare/src/lib/searchMatch.ts`) is unchanged — it stays pure,
+  synchronous and in byte-for-byte parity with the client mirror — and the alias half runs as an
+  async fallback in `resolveAliasExactBarcodeHitId` (`cloudflare/src/routes/products.ts`), gated by
+  the SAME three decision-9 gates (digits-only, length >= 4, never the shared "0" placeholder) and
+  by the same "more than one match on the page is ambiguous, not a pick" rule. Scoped to the ids
+  already on the page: highlighting a row that is not on screen would be meaningless. Pinned by
+  `cloudflare/scripts/test-alias-exact-hit-pure.cjs` (real SQLite, all migrations, the real sliced
+  function — not a re-implementation).
+  A SECOND, separate half of the same report ("alias search returns ZERO rows") turned out not to
+  be a search bug at all: the server returned the row, and the Products page threw it away in its
+  own client-side re-filter, whose free-text haystack (name/sku/barcode/tag_label) can never see an
+  alias. Fixed by `resolveClientSearchTerms`
+  (`frontend/src/components/products/helpers/productFilterHelpers.ts`): the free-text client pass
+  stands down once the server page for THAT exact query has landed — the server is the search
+  authority — while facet filters keep re-filtering instantly. Pinned by
+  `frontend/tests/productFilterHelpers.test.ts`.
+- *(historical, for the record)* **Alias-barcode highlight gap (P2-3 boundary, not fixed in Part 1)**: `computeExactBarcodeHitId`
   (`cloudflare/src/lib/searchMatch.ts:1410`) and its client mirror
   (`frontend/src/utils/productLookup.ts`'s `findExactBarcodeHit`) only compare `products.barcode`
   — never a `barcode_aliases` row — even though `buildAliasExactClause`
