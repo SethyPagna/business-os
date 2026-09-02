@@ -4,6 +4,7 @@ import ArrowRightLeft from 'lucide-react/dist/esm/icons/arrow-right-left.js'
 import Radio from 'lucide-react/dist/esm/icons/radio.js'
 import { useApp as useAppHook } from '../../AppContext.tsx'
 import { useIsPageActive } from '../shared/pageActivity'
+import HubSectionNav, { type HubSectionDef } from '../shared/HubSectionNav.tsx'
 import type { DateTimeRange } from '../shared/DateTimeRangePicker.tsx'
 
 // Branches is one hub with one navigation layer. Overview keeps summary stats
@@ -54,6 +55,16 @@ export default function BranchesHubPage() {
   const canBranchList = getPermissionTier('branches') !== 'none'
   const canInventory = getPermissionTier('inventory') !== 'none'
   const [section, setSection] = useState<BranchesHubSection>(() => initialSection(canBranchList, canInventory))
+  // A deep link (Dashboard's inventory-focus hand-off) resolved at
+  // construction time above lands straight on layer 3 for that section on
+  // mobile; a plain visit (no hand-off, section defaults to 'overview')
+  // lands on layer 2. See HubSectionNav's `initialEntered` doc comment.
+  const [initialEntered] = useState(() => section !== 'overview')
+  // Bumped alongside setSection('rfid') below when the SAME hand-off
+  // arrives while this hub is already mounted in the background (isActive
+  // flips true) -- HubSectionNav can't see that setSection call itself, so
+  // this tells it to force layer 3 open for whatever `active` becomes.
+  const [enterSignal, setEnterSignal] = useState(0)
   // The hub owns one range. Inventory stats use it in Overview; Transfer
   // History receives the exact same controlled value after a section switch.
   const [sharedDateRange, setSharedDateRange] = useState<DateTimeRange>(() => ({
@@ -85,42 +96,31 @@ export default function BranchesHubPage() {
       return
     }
     if (focus === 'movements') navigateTo('products')
-    else if (focus === 'rfid' && canInventory) setSection('rfid')
+    else if (focus === 'rfid' && canInventory) { setSection('rfid'); setEnterSignal((value) => value + 1) }
     else setSection('overview')
   }, [canBranchList, canInventory, isActive, navigateTo])
 
-  const tabs: Array<{ id: BranchesHubSection; label: string; icon: typeof Building2; allowed: boolean; tone: string }> = [
-    { id: 'overview', label: trh('overview', 'Overview'), icon: Building2, allowed: canInventory || canBranchList, tone: 'text-sky-600' },
-    { id: 'inventory', label: trh('inventory', 'Inventory'), icon: Building2, allowed: canInventory, tone: 'text-emerald-600' },
-    { id: 'transfers', label: trh('transfer', 'Transfer'), icon: ArrowRightLeft, allowed: canBranchList, tone: 'text-violet-600' },
-    { id: 'rfid', label: 'RFID', icon: Radio, allowed: canInventory, tone: 'text-emerald-600' },
+  const tabs: HubSectionDef[] = [
+    { id: 'overview', label: trh('overview', 'Overview'), icon: Building2, hidden: !(canInventory || canBranchList), tone: 'text-sky-600', description: trh('hub_desc_branches_overview', 'Stock summary and every branch') },
+    { id: 'inventory', label: trh('inventory', 'Inventory'), icon: Building2, hidden: !canInventory, tone: 'text-emerald-600', description: trh('hub_desc_branches_inventory', 'Per-branch product stock') },
+    { id: 'transfers', label: trh('transfer', 'Transfer'), icon: ArrowRightLeft, hidden: !canBranchList, tone: 'text-violet-600', description: trh('hub_desc_branches_transfers', 'Move stock between branches') },
+    { id: 'rfid', label: 'RFID', icon: Radio, hidden: !canInventory, tone: 'text-emerald-600', description: trh('hub_desc_branches_rfid', 'RFID tag scans') },
   ]
-  const visibleTabs = tabs.filter((tab) => tab.allowed)
+  const visibleTabs = tabs.filter((tab) => !tab.hidden)
   const active = visibleTabs.some((tab) => tab.id === section) ? section : (visibleTabs[0]?.id || 'overview')
 
   return (
     <div className="flex min-h-0 flex-1 flex-col space-y-2">
-      {visibleTabs.length > 1 ? (
-        <div className="min-w-0 shrink-0 px-3 pt-3 sm:px-4 sm:pt-4">
-          <div className="inline-flex max-w-full overflow-x-auto overscroll-x-contain rounded-xl bg-gray-100 p-0.5 [touch-action:pan-x] dark:bg-gray-800">
-            {visibleTabs.map((tab) => {
-              const Icon = tab.icon
-              return (
-                <button
-                  key={tab.id}
-                  type="button"
-                  onClick={() => setSection(tab.id)}
-                  aria-pressed={active === tab.id}
-                  className={`inline-flex h-8 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg px-2.5 text-xs font-semibold sm:text-sm ${active === tab.id ? `bg-white shadow dark:bg-gray-900 ${tab.tone}` : 'text-gray-500'}`}
-                >
-                  <Icon className="h-3.5 w-3.5 sm:h-4 sm:w-4" /> {tab.label}
-                </button>
-              )
-            })}
-          </div>
-        </div>
-      ) : null}
-
+      <HubSectionNav
+        sections={tabs}
+        active={active}
+        onChange={(id) => setSection(id as BranchesHubSection)}
+        storageKey="bos:hub:branches:active"
+        pageId="branches"
+        title={trh('branches', 'Branches')}
+        initialEntered={initialEntered}
+        enterSignal={enterSignal}
+      >
       <Suspense fallback={<p className="p-4 text-sm text-gray-500">{trh('loading', 'Loading')}...</p>}>
         {active === 'overview' ? (
           <div className="page-scroll flex min-h-0 flex-1 flex-col">
@@ -176,6 +176,7 @@ export default function BranchesHubPage() {
           </div>
         ) : null}
       </Suspense>
+      </HubSectionNav>
     </div>
   )
 }
