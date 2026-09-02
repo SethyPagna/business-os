@@ -15,6 +15,7 @@ import { useApp as useAppHook } from '../../AppContext.tsx'
 import AppSelect from '../shared/AppSelect.tsx'
 import InfoHint from '../shared/InfoHint.tsx'
 import ScanSearchButton from '../shared/ScanSearchButton.tsx'
+import HubSectionNav, { type HubSectionDef } from '../shared/HubSectionNav.tsx'
 import { fmtDate } from '../../utils/formatters.ts'
 import {
   getPromotionRules,
@@ -445,19 +446,14 @@ export default function PromotionsPage() {
     </div>
   )
 
-  type SectionChip = { key: PromotionsSection; label: string; icon: ComponentType<SVGProps<SVGSVGElement>>; activeColor: string }
-  const sectionChips: SectionChip[] = [
-    ...(canPromotions ? [
-      { key: 'rules' as const, label: t('promo_tab_rules') || 'Rules', icon: BadgePercent, activeColor: 'text-rose-600 dark:text-rose-400' },
-    ] : []),
-    // Discounts self-gates on 'products' (its real backend gate), not the
-    // promotions grant -- see canManageDiscounts above.
-    ...(canManageDiscounts ? [
-      { key: 'discounts' as const, label: t('promo_tab_discounts') || 'Discounts', icon: Percent, activeColor: 'text-indigo-600 dark:text-indigo-400' },
-    ] : []),
-    ...(canLoyalty ? [
-      { key: 'loyalty' as const, label: t('loyalty_points') || 'Loyalty Points', icon: Gift, activeColor: 'text-amber-600 dark:text-amber-400' },
-    ] : []),
+  // Discounts self-gates on 'products' (its real backend gate), not the
+  // promotions grant -- see canManageDiscounts above. Each section is always
+  // present in the list (HubSectionNav filters `hidden` ones out) so the
+  // gating stays legible in one place instead of three conditional spreads.
+  const sections: HubSectionDef[] = [
+    { id: 'rules', label: t('promo_tab_rules') || 'Rules', icon: BadgePercent, hidden: !canPromotions, tone: 'text-rose-600 dark:text-rose-400', description: t('hub_desc_promotions_rules') || undefined },
+    { id: 'discounts', label: t('promo_tab_discounts') || 'Discounts', icon: Percent, hidden: !canManageDiscounts, tone: 'text-indigo-600 dark:text-indigo-400', description: t('hub_desc_promotions_discounts') || undefined },
+    { id: 'loyalty', label: t('loyalty_points') || 'Loyalty Points', icon: Gift, hidden: !canLoyalty, tone: 'text-amber-600 dark:text-amber-400', description: t('hub_desc_promotions_loyalty') || undefined },
   ]
 
   return (
@@ -467,8 +463,12 @@ export default function PromotionsPage() {
     // unreachable (reported: Promotions/Loyalty could not scroll).
     <div className="page-scroll p-4">
       <div className="mx-auto max-w-5xl space-y-4">
-        {/* Header: identity only. The distinct areas live in the section-chip
-            row below, one shown at a time -- never stacked in one scroll. */}
+        {/* Header: identity only. HubSectionNav's chip row / layer-3 header
+            sits below this -- Promotions is the one hub that keeps its own
+            always-visible title above the switcher (the other four hubs show
+            no page title on mobile, see Gate 1 audit); it also feeds
+            HubSectionNav's `title` so layer 2's card list carries the same
+            name. */}
         <div className="flex items-center gap-2.5">
           <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-rose-100 text-rose-600 dark:bg-rose-900/40 dark:text-rose-300">
             <BadgePercent className="h-5 w-5" />
@@ -476,26 +476,14 @@ export default function PromotionsPage() {
           <h1 className="text-xl font-semibold">{t('promotions') || 'Promotions'}</h1>
         </div>
 
-        {sectionChips.length > 1 ? (
-          <div className="inline-flex max-w-full overflow-x-auto overscroll-x-contain rounded-xl bg-gray-100 p-0.5 [touch-action:pan-x] dark:bg-gray-800">
-            {sectionChips.map((chip) => {
-              const Icon = chip.icon
-              const isActive = activeSection === chip.key
-              return (
-                <button
-                  key={chip.key}
-                  type="button"
-                  onClick={() => setActiveSection(chip.key)}
-                  aria-pressed={isActive}
-                  className={`inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg px-3 py-1.5 text-sm font-medium transition-colors ${isActive ? `bg-white shadow dark:bg-gray-900 ${chip.activeColor}` : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'}`}
-                >
-                  <Icon className="h-4 w-4" /> {chip.label}
-                </button>
-              )
-            })}
-          </div>
-        ) : null}
-
+        <HubSectionNav
+          sections={sections}
+          active={activeSection}
+          onChange={(id) => setActiveSection(id as PromotionsSection)}
+          storageKey="bos:hub:promotions:active"
+          pageId="promotions"
+          title={t('promotions') || 'Promotions'}
+        >
         {activeSection === 'loyalty' ? (
           // G2: the whole former Loyalty Points page, embedded (its own
           // header/sections/logic untouched -- one implementation, new home).
@@ -750,6 +738,7 @@ export default function PromotionsPage() {
             )}
           </div>
         ) : null}
+        </HubSectionNav>
 
         {draft ? (
           <div className="modal-viewport-safe pointer-events-auto fixed inset-0 z-[1050] flex items-start justify-center overflow-y-auto bg-black/40" onClick={() => !savingRule && setDraft(null)}>
