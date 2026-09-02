@@ -1,7 +1,17 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import fs from 'node:fs'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { reconcileProduct } from './reconcile.mjs'
 import { classifyBarcode, gtinCheckDigitValid, canonicalBarcodeKey, dedupeBarcodes, sameBarcodeSet } from './lib/barcode.mjs'
+
+const here = path.dirname(fileURLToPath(import.meta.url))
+// Loaded from the checked-in fixture, not retyped -- this test's GTIN
+// ground truth genuinely depends on fixtures/barcode-web-evidence.json
+// (a real, dated prior web-verification pass) rather than a copy of its
+// numbers that could silently drift from it.
+const barcodeWebEvidence = JSON.parse(fs.readFileSync(path.join(here, 'fixtures', 'barcode-web-evidence.json'), 'utf8'))
 
 function nameHit({ domain, matchesBrand = true, matchesProduct = true, matchesVariant = true, proposedName = 'Elixir The Serum', source }) {
   return {
@@ -154,17 +164,22 @@ test('classifyBarcode: non-numeric placeholder SKUs are junk', () => {
 })
 
 test('classifyBarcode: valid vs invalid GTIN check digits, verified against the prior migration\'s 15 real web-checked barcodes', () => {
-  const knownValid = ['381371163816', '381371163779', '3522931005024', '5056446657228', '3380810378863', '020714215552', '851212151192', '192250042784', '4909978282509', '4909978224479', '194250053555']
-  const knownInvalid = ['31458918', '112158815142', '297161516625', '165125209512']
-  for (const code of knownValid) {
-    const result = classifyBarcode(code)
-    assert.equal(result.isJunk, false, `${code} should classify as a valid GTIN`)
-    assert.equal(result.reason, 'valid_gtin')
-  }
-  for (const code of knownInvalid) {
-    const result = classifyBarcode(code)
-    assert.equal(result.isJunk, true, `${code} should classify as an invalid-check-digit GTIN`)
-    assert.equal(result.reason, 'invalid_check_digit')
+  // Derived from the loaded fixture (barcodeWebEvidence, read at the top of
+  // this file), not retyped: each result's own barcode field (a real code,
+  // some recorded with a source-data space that this test collapses the
+  // same way the original web-check did) bucketed by whether that prior
+  // pass's own gtinCheck said 'valid'.
+  assert.equal(barcodeWebEvidence.results.length, 15, 'fixture should still hold all 15 recorded results')
+  for (const result of barcodeWebEvidence.results) {
+    const code = String(result.barcode).replace(/\s+/g, '')
+    const outcome = classifyBarcode(code)
+    if (result.gtinCheck === 'valid') {
+      assert.equal(outcome.isJunk, false, `${code} (id ${result.currentProductId}) should classify as a valid GTIN`)
+      assert.equal(outcome.reason, 'valid_gtin')
+    } else {
+      assert.equal(outcome.isJunk, true, `${code} (id ${result.currentProductId}) should classify as an invalid-check-digit GTIN`)
+      assert.equal(outcome.reason, 'invalid_check_digit')
+    }
   }
 })
 
