@@ -25,6 +25,7 @@ import devicesRoute from './routes/devices'
 import notesRoute from './routes/notes'
 import batchesRoute from './routes/batches'
 import feesRoute from './routes/fees'
+import reportsRoute from './routes/reports'
 import telegramRoute from './routes/telegram'
 import reviewQueueRoute from './routes/reviewQueue'
 import { createSyncRoute } from './routes/sync'
@@ -312,6 +313,7 @@ app.route('/api/runtime', runtimeRoute)
 app.route('/api/notes', notesRoute)
 app.route('/api/batches', batchesRoute)
 app.route('/api/fees', feesRoute)
+app.route('/api/reports', reportsRoute)
 app.route('/api/telegram', telegramRoute)
 app.route('/api/review', reviewQueueRoute)
 app.route('/api', usersRoute)
