@@ -19,6 +19,7 @@ export default function ExportRangeDialog({
   onExport,
   t,
   title,
+  requireRange,
 }: {
   initial: ExportRange
   onClose: () => void
@@ -26,6 +27,8 @@ export default function ExportRangeDialog({
   onExport: (range: ExportRange) => Promise<void> | void
   t: Translate
   title?: string
+  /** When true the export needs both dates (the API rejects an open range): the hint says so and Export stays disabled until both are set. */
+  requireRange?: boolean
 }) {
   const tr = (key: string, fallback: string): string => {
     const value = t(key)
@@ -33,13 +36,19 @@ export default function ExportRangeDialog({
   }
   const [range, setRange] = useState<ExportRange>(() => ({ startDate: initial.startDate || '', endDate: initial.endDate || '' }))
   const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const rangeMissing = Boolean(requireRange) && (!range.startDate || !range.endDate)
 
   const run = async () => {
-    if (busy) return
+    if (busy || rangeMissing) return
     setBusy(true)
+    setError(null)
     try {
       await onExport(range)
       onClose()
+    } catch (err) {
+      // A thrown export must never be a silent no-op: show the message in the dialog.
+      setError(err instanceof Error && err.message ? err.message : tr('export_failed', 'Export failed.'))
     } finally {
       setBusy(false)
     }
@@ -60,11 +69,14 @@ export default function ExportRangeDialog({
             triggerClassName="flex w-full items-center justify-center gap-2 rounded-lg px-3 py-2"
           />
           <p className="mt-1 text-xs text-gray-400">
-            {tr('export_range_hint', 'Starts from the range shown on the page — change it to export a different window. Empty = everything.')}
+            {requireRange
+              ? tr('export_range_required_hint', 'Starts from the range shown on the page — change it to export a different window. A start and end date are required.')
+              : tr('export_range_hint', 'Starts from the range shown on the page — change it to export a different window. Empty = everything.')}
           </p>
+          {error ? <p className="mt-1 text-xs text-red-600 dark:text-red-400" role="alert">{error}</p> : null}
         </div>
         <div className="flex gap-2">
-          <button type="button" className="btn-primary flex-1" disabled={busy} onClick={() => void run()}>
+          <button type="button" className="btn-primary flex-1" disabled={busy || rangeMissing} onClick={() => void run()}>
             {busy ? (tr('exporting', 'Exporting…')) : tr('export', 'Export')}
           </button>
           <button type="button" className="btn-secondary" disabled={busy} onClick={onClose}>

@@ -212,6 +212,7 @@ export default function ReportsHub({ embedded = false }: { embedded?: boolean })
 
       {exportRangeOpen ? (
         <ExportRangeDialog
+          requireRange
           initial={{ startDate: range.startDate || '', endDate: range.endDate || '' }}
           title={trh('business_summary_workbook', 'Business summary workbook')}
           t={t}
