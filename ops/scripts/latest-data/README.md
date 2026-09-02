@@ -23,7 +23,14 @@ REINDEX keywords, or a `;` followed by more content). See
    - **FTS-family** (name contains `_fts`, e.g. `products_fts`, `products_fts_idx`,
      `products_fts_code_data`): **not dumped**. Only `{ name, row_count }` is
      recorded in the manifest, per the brief.
-   - **Everything else**: dumped in full.
+   - **Everything else**: dumped in full — *except* any table the D1 HTTP API
+     itself refuses direct reads on (observed for `_cf_KV`, a Cloudflare/D1
+     internal table that is enumerated in `sqlite_master` but rejects even
+     `SELECT COUNT(*)` with `not authorized: SQLITE_AUTH [code: 7500]`). Such
+     tables are recorded in `manifest.json`'s `inaccessible_tables` array
+     (`{ name, error }`) and skipped, not treated as a script bug. Every
+     other non-FTS table, including the D1-managed `d1_migrations` (104
+     rows, confirmed readable), dumps normally.
 4. For each dumped table: `COUNT(*)` before, page through `SELECT * FROM
    "<table>" ORDER BY rowid LIMIT 1000 OFFSET n` (falls back to no `ORDER BY`
    only if `rowid` ordering itself fails, e.g. a `WITHOUT ROWID` table),
@@ -31,9 +38,13 @@ REINDEX keywords, or a `;` followed by more content). See
    `manifest.json`'s `drift` array (it is still fully paged; the note flags a
    possible torn read against a live table).
 5. Writes `<table>.jsonl` (one JSON object per line) and a `manifest.json`
-   with `captured_at_utc`, `wrangler_version`, `database_name`, per-table
-   `{ name, columns, count_before, count_after, rows_dumped, file, sha256 }`,
-   `fts_family_tables`, `totals`, and `drift`.
+   with `captured_at_utc`, `captured_at_ict` (the same instant in the app's
+   fixed business timezone, Asia/Phnom_Penh, ICT, UTC+07:00, no DST — decision
+   20: "everything is Cambodian" — see `cloudflare/src/lib/businessDateWindow.ts`;
+   never call this zone "Bangkok"), `business_timezone`, `wrangler_version`,
+   `database_name`, per-table `{ name, columns, count_before, count_after,
+   rows_dumped, file, sha256 }`, `fts_family_tables`, `inaccessible_tables`,
+   `totals`, and `drift`.
 6. Rebuilds `snapshot.sqlite` in the output directory: recreates each dumped
    table from its captured `CREATE TABLE` DDL (from `sqlite_master.sql`) and
    inserts every row from the `.jsonl` file, verifying `COUNT(*)` matches

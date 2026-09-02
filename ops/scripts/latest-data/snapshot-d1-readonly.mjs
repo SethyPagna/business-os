@@ -27,6 +27,16 @@ const DATABASE_NAME = 'business-os'
 const PAGE_SIZE = 1000
 const MIN_DELAY_MS = 260 // keeps us well under the "<=4 requests/second" gentleness rule
 
+// The app's single fixed business timezone (decision 20 / cloudflare/src/lib/businessDateWindow.ts):
+// Asia/Phnom_Penh, UTC+07:00, no DST. Named "Phnom Penh", never "Bangkok".
+const BUSINESS_UTC_OFFSET_MINUTES = 420
+
+/** UTC ISO instant -> 'YYYY-MM-DD HH:MM:SS ICT' wall-clock string in Asia/Phnom_Penh. */
+function toIctString(utcIso) {
+  const ms = new Date(utcIso).getTime() + BUSINESS_UTC_OFFSET_MINUTES * 60 * 1000
+  return `${new Date(ms).toISOString().slice(0, 19).replace('T', ' ')} ICT`
+}
+
 function sleep(ms) {
   // Synchronous sleep (Node allows Atomics.wait on the main thread; browsers do not).
   const sab = new SharedArrayBuffer(4)
@@ -50,7 +60,8 @@ function assertSelect(sql) {
 }
 
 let requestCount = 0
-function d1(sql) {
+const MAX_D1_ATTEMPTS = 4
+function d1(sql, attempt = 1) {
   assertSelect(sql)
   requestCount += 1
   const result = spawnSync(
@@ -60,7 +71,21 @@ function d1(sql) {
   )
   sleep(MIN_DELAY_MS)
   if (result.status !== 0) {
-    throw new Error(`D1 query failed (${result.status}): ${(result.stderr || result.stdout || '').slice(0, 2000)}`)
+    // Observed intermittently: status 3221226505 (0xC0000409, a Windows
+    // child-process crash signature) with empty stderr/stdout -- a flaky
+    // subprocess spawn, not a SQL or auth problem (the identical query
+    // succeeds on retry). Retry with backoff before giving up; a genuinely
+    // persistent failure (e.g. _cf_KV's SQLITE_AUTH) still fails every
+    // attempt and is surfaced to the caller after MAX_D1_ATTEMPTS.
+    if (attempt < MAX_D1_ATTEMPTS) {
+      const backoffMs = 500 * attempt
+      console.warn(
+        `[snapshot] transient D1 call failure (status ${result.status}) on attempt ${attempt}/${MAX_D1_ATTEMPTS}, retrying in ${backoffMs}ms: ${sql.slice(0, 100)}`,
+      )
+      sleep(backoffMs)
+      return d1(sql, attempt + 1)
+    }
+    throw new Error(`D1 query failed after ${MAX_D1_ATTEMPTS} attempts (${result.status}): ${(result.stderr || result.stdout || '').slice(0, 2000)}`)
   }
   let parsed
   try {
@@ -129,6 +154,21 @@ function sha256File(filePath) {
   return hash.digest('hex')
 }
 
+function writeShaSums(outDir) {
+  // SHA256SUMS covers every file already written into the output dir
+  // (jsonl dumps, manifest.json, snapshot.sqlite) so the snapshot can be
+  // verified untouched after the fact. Excludes SQLite WAL/SHM sidecars
+  // (transient journal files, not part of the committed snapshot) and any
+  // pre-existing SHA256SUMS from a prior attempt in the same dir.
+  const entries = fs
+    .readdirSync(outDir)
+    .filter((name) => name !== 'SHA256SUMS' && !name.endsWith('-wal') && !name.endsWith('-shm'))
+    .filter((name) => fs.statSync(path.join(outDir, name)).isFile())
+    .sort()
+  const lines = entries.map((name) => `${sha256File(path.join(outDir, name))}  ${name}`)
+  fs.writeFileSync(path.join(outDir, 'SHA256SUMS'), `${lines.join('\n')}\n`)
+}
+
 function main() {
   const outDirArg = process.argv[2]
   if (!outDirArg) {
@@ -160,13 +200,17 @@ function main() {
 
   const manifest = {
     captured_at_utc: new Date().toISOString(),
+    captured_at_ict: null, // filled in below once captured_at_utc is fixed, in Asia/Phnom_Penh (UTC+7, no DST)
     wrangler_version: wranglerVersion,
     database_name: DATABASE_NAME,
     tables: [],
     fts_family_tables: [],
+    inaccessible_tables: [],
     totals: { rows_dumped: 0, tables_dumped: 0, tables_drifted: 0 },
     drift: [],
   }
+  manifest.captured_at_ict = toIctString(manifest.captured_at_utc)
+  manifest.business_timezone = 'Asia/Phnom_Penh (ICT, UTC+07:00, no DST)'
 
   // Record FTS-family tables: name + row count only, never dumped.
   for (const t of ftsFamily) {
@@ -181,8 +225,21 @@ function main() {
     console.log(`[snapshot] fts-family (not dumped): ${t.name} rows=${count ?? 'ERROR: ' + error}`)
   }
 
+  const accessibleDumpTables = []
   for (const t of dumpTables) {
-    const countBefore = countTable(t.name)
+    let countBefore
+    try {
+      countBefore = countTable(t.name)
+    } catch (err) {
+      // Some tables enumerated in sqlite_master are Cloudflare/D1-internal
+      // and reject even read access at the API layer (observed for
+      // `_cf_KV`: "not authorized: SQLITE_AUTH [code: 7500]"). Record and
+      // skip rather than aborting the whole snapshot.
+      console.warn(`[snapshot] SKIP ${t.name}: inaccessible (${err.message.split('\n')[0]})`)
+      manifest.inaccessible_tables.push({ name: t.name, error: err.message })
+      continue
+    }
+    accessibleDumpTables.push(t)
     let orderBy = 'rowid'
     let rows
     try {
@@ -243,7 +300,12 @@ function main() {
   fs.writeFileSync(path.join(outDir, 'manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`)
 
   console.log('[snapshot] building snapshot.sqlite from captured DDL + jsonl rows')
-  buildSqlite(outDir, dumpTables, manifest)
+  buildSqlite(outDir, accessibleDumpTables, manifest)
+
+  // buildSqlite() adds manifest.fk_violations after the first manifest.json
+  // write above; persist the final version (SHA256SUMS below hashes this
+  // final copy, not the checkpoint written before the sqlite rebuild).
+  fs.writeFileSync(path.join(outDir, 'manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`)
 
   console.log('[snapshot] writing SHA256SUMS')
   writeShaSums(outDir)
@@ -254,9 +316,11 @@ function main() {
       {
         outDir,
         capturedAt: manifest.captured_at_utc,
+        capturedAtIct: manifest.captured_at_ict,
         tablesDumped: manifest.totals.tables_dumped,
         rowsDumped: manifest.totals.rows_dumped,
         ftsFamilyCount: manifest.fts_family_tables.length,
+        inaccessibleCount: manifest.inaccessible_tables.length,
         driftCount: manifest.drift.length,
         requestCount,
       },
@@ -276,6 +340,14 @@ function buildSqlite(outDir, dumpTables, manifest) {
   if (fs.existsSync(sqlitePath)) fs.rmSync(sqlitePath)
   const db = new Database(sqlitePath)
   db.pragma('journal_mode = WAL')
+  // This is a raw reconstruction of a production snapshot, not a fresh
+  // relational write path: legacy/migrated rows can reference a parent that
+  // no longer exists, and insertion here follows sqlite_master's alphabetical
+  // table order rather than FK-dependency order. Enforcing FKs during rebuild
+  // would abort the whole snapshot on exactly the kind of orphan this
+  // verification effort exists to find. Disable enforcement for the rebuild,
+  // then check (informationally) after all rows are in.
+  db.pragma('foreign_keys = OFF')
 
   for (const t of dumpTables) {
     if (!t.sql) continue
@@ -307,6 +379,21 @@ function buildSqlite(outDir, dumpTables, manifest) {
       throw new Error(`snapshot.sqlite row count mismatch for ${t.name}: db=${dbCount} manifest=${m.rows_dumped}`)
     }
   }
+
+  // Informational only (FK enforcement stays OFF for this raw snapshot):
+  // record any orphaned foreign keys so the coordinator/verification plan
+  // can see them, without letting them abort the rebuild.
+  const fkViolations = db.pragma('foreign_key_check')
+  manifest.fk_violations = fkViolations.map((v) => ({
+    table: v.table,
+    rowid: v.rowid,
+    parent: v.parent,
+    fkid: v.fkid,
+  }))
+  if (fkViolations.length > 0) {
+    console.warn(`[snapshot] foreign_key_check found ${fkViolations.length} orphaned reference(s) in production data (recorded in manifest.fk_violations, not fatal)`)
+  }
+
   db.close()
 
   if (process.platform === 'win32') {
