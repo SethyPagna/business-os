@@ -159,12 +159,17 @@ export default function ManageBatchesModal({
     const quantityChange = Number.isFinite(nextQuantity) && nextQuantity >= 0 && nextQuantity !== Number(batch.quantity)
     const batchLabel = batchDisplayLabel({ id: batch.id, lot_code: batch.lot_code ?? null, received_at: batch.received_at ?? null, batch_number: batch.batch_number ?? null }, t('batch') || 'Batch')
     const quantityNote = quantityChange
-      ? ` ${tr('batch_quantity_change_note', `Quantity will change from ${batch.quantity} to ${nextQuantity} at this branch.`)}`
+      ? ` ${tr('batch_quantity_change_note', 'Quantity will change from {from} to {to} at this branch.')
+          .replace('{from}', String(batch.quantity))
+          .replace('{to}', String(nextQuantity))}`
       : ''
     if (!window.confirm(tr(
       'confirm_update_batch_details',
-      `Update ${batchLabel} for ${product.name || 'this product'}?${quantityNote}`,
-    ))) return
+      'Update {batch} for {product}?{note}',
+    )
+      .replace('{batch}', batchLabel)
+      .replace('{product}', product.name || 'this product')
+      .replace('{note}', quantityNote))) return
     if (!beginSingleAction(saveBatchInFlightRef, { blocked: savingId != null })) return
     setSavingId(batch.id)
     try {
@@ -209,8 +214,10 @@ export default function ManageBatchesModal({
     const batchLabel = batchDisplayLabel({ id: batch.id, lot_code: batch.lot_code ?? null, received_at: batch.received_at ?? null, batch_number: batch.batch_number ?? null }, t('batch') || 'Batch')
     if (!window.confirm(tr(
       'confirm_deactivate_batch_details',
-      `Deactivate ${batchLabel} for ${product?.name || 'this product'}? It will no longer be available for new stock operations.`,
-    ))) return
+      'Deactivate {batch} for {product}? It will no longer be available for new stock operations.',
+    )
+      .replace('{batch}', batchLabel)
+      .replace('{product}', product?.name || 'this product'))) return
     setSavingId(batch.id)
     try {
       const res = await deactivateBatch(batch.id)

@@ -317,8 +317,11 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
     const branchName = branchOptions.find((option) => String(option.value) === String(branchId))?.label || tr('branch', 'selected branch')
     if (!window.confirm(tr(
       'confirm_complete_stock_session',
-      `Receive ${pending.length} product line(s), ${totalQuantity} total unit(s), into ${branchName}? This posts stock movements and creates or updates the related lots.`,
-    ))) return
+      'Receive {lines} product line(s), {units} total unit(s), into {branch}? This posts stock movements and creates or updates the related lots.',
+    )
+      .replace('{lines}', String(pending.length))
+      .replace('{units}', String(totalQuantity))
+      .replace('{branch}', branchName))) return
     setSaving(true)
     let failed = 0
     for (const line of pending) {
@@ -360,7 +363,7 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
     setSaving(false)
     onDone()
     const saved = pending.length - failed
-    if (saved > 0) notify(tr('stock_session_completed', `Received ${saved} stock-in line(s) successfully.`))
+    if (saved > 0) notify(tr('stock_session_completed', 'Received {count} stock-in line(s) successfully.').replace('{count}', String(saved)))
     if (failed) { notify(tr('stock_session_partial', `${failed} line(s) could not be saved. Fix them and complete again.`), 'error'); return }
     clearWorkDraft(fastStockInDraftKey)
     onClose()

@@ -198,8 +198,13 @@ export default function ReceiveBatchModal({
       : tr('new_batch', 'a new lot')
     if (!window.confirm(tr(
       'confirm_receive_batch_details',
-      `Receive ${parsedQuantity} ${product.unit || 'unit(s)'} of ${product.name || 'this product'} into ${branchName}, using ${lotLabel}? This posts stock movement(s).`,
-    ))) return
+      'Receive {quantity} {unit} of {product} into {branch}, using {lot}? This posts stock movement(s).',
+    )
+      .replace('{quantity}', String(parsedQuantity))
+      .replace('{unit}', product.unit || 'unit(s)')
+      .replace('{product}', product.name || 'this product')
+      .replace('{branch}', String(branchName))
+      .replace('{lot}', lotLabel))) return
 
     setSaving(true)
     try {
