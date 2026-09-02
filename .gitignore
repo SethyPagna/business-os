@@ -56,3 +56,12 @@ scanbot-web-sdk-*/
 .playwright-cli/
 /ops/.playwright-cli/
 /run/cv-render-check-word/
+
+# Sandbox checkpoint / working-scratch leftovers (see
+# docs/history/checkpoints/README.md — never commit these)
+CHECKPOINT*.patch
+CHECKPOINT_GIT_STATUS.txt
+run-log.txt
+/tmp/
+/outputs/
+/Migration from old system/
