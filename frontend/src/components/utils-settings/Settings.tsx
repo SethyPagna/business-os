@@ -34,6 +34,8 @@ import { ACCOUNT_NAV_IDS, DEFAULT_MOBILE_PINNED, NAV_ITEMS, orderNavItems, parse
 import SectionSwitcher from '../shared/SectionSwitcher'
 import LoadingWatchdog from '../shared/LoadingWatchdog'
 import AppSelect from '../shared/AppSelect.tsx'
+import InfoHint from '../shared/InfoHint.tsx'
+import { readMobileSectionNavMode, writeMobileSectionNavMode, MOBILE_SECTION_NAV_SETTINGS_KEY, type MobileSectionNavMode } from '../../utils/sectionNavPreference.ts'
 import { beginTrackedRequest, invalidateTrackedRequest, isTrackedRequestCurrent, withLoaderTimeout } from '../../utils/loaders.ts'
 import { beginKeyedAction, beginSingleAction, finishKeyedAction, finishSingleAction } from '../../utils/actionGuards.ts'
 import { buildSettingsConflictState, diffSettingsConflictFields } from './settingsConflict.ts'
@@ -252,6 +254,15 @@ function isSettingsSectionId(value: string): value is SettingsSectionId {
 }
 
 const THEME_OPTION_KEYS = [['light', 'themeLight', 'Light'], ['dark', 'themeDark', 'Dark']]
+// Mobile hub navigation (Settings -> Appearance): 'pages' (default) is the
+// three-layer nav HubSectionNav renders on phones -- hub -> a list of
+// section cards -> the chosen section full-screen with a back header, one
+// OS/back-gesture step collapsing a layer at a time. 'sections' keeps the
+// same chip row phones already used before this changed.
+const MOBILE_SECTION_NAV_MODE_KEYS: Array<[MobileSectionNavMode, string, string]> = [
+  ['pages', 'mobile_section_nav_mode_pages', 'Pages'],
+  ['sections', 'sections', 'Sections'],
+]
 const LANGUAGE_OPTION_KEYS = [['en', 'englishLabel', 'English'], ['km', 'khmerLabel', 'Khmer']]
 const CARD_STYLE_OPTION_KEYS = [['sharp', 'sharp'], ['rounded', 'rounded'], ['pill', 'pill']]
 const DENSITY_OPTION_KEYS = [['comfortable', 'comfortable'], ['compact', 'compact'], ['spacious', 'spacious']]
@@ -1546,6 +1557,33 @@ export default function Settings() {
                   {copy('noPinnedItems', 'No pinned items yet.')}
                 </div>
               )}
+            </div>
+          </div>
+
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-gray-200 bg-gray-50 p-3 dark:border-gray-700 dark:bg-gray-800/70">
+            <div className="flex items-center gap-1.5">
+              <div className="text-xs font-semibold text-gray-700 dark:text-gray-200">{copy('mobile_section_nav_title', 'Mobile navigation')}</div>
+              <InfoHint label={copy('mobile_section_nav_title', 'Mobile navigation')} text={copy('mobile_section_nav_hint', 'How hub pages show their sections on a phone: full-screen pages, or the tab row.')} />
+            </div>
+            <div className="flex gap-2">
+              {MOBILE_SECTION_NAV_MODE_KEYS.map(([modeValue, copyKey, defaultLabel]) => {
+                const currentMode = readMobileSectionNavMode(form.ui_mobile_section_nav)
+                const isActive = currentMode === modeValue
+                return (
+                  <button
+                    key={modeValue}
+                    type="button"
+                    onClick={() => {
+                      writeMobileSectionNavMode(modeValue)
+                      setValue(MOBILE_SECTION_NAV_SETTINGS_KEY, modeValue)
+                    }}
+                    aria-pressed={isActive}
+                    className={`rounded-full border px-3 py-1.5 text-sm font-medium transition-colors ${isActive ? 'border-primary-600 bg-primary-50 dark:bg-primary-900/30 text-primary-700 dark:text-primary-400' : 'border-gray-200 dark:border-gray-600 text-gray-600 dark:text-gray-400'}`}
+                  >
+                    {copy(copyKey, defaultLabel)}
+                  </button>
+                )
+              })}
             </div>
           </div>
 
