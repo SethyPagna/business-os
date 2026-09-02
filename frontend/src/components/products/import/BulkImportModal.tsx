@@ -14,6 +14,7 @@ import PackagePlus from 'lucide-react/dist/esm/icons/package-plus.js'
 import RefreshCw from 'lucide-react/dist/esm/icons/refresh-cw.js'
 import Sparkles from 'lucide-react/dist/esm/icons/sparkles.js'
 import Modal from '../../shared/Modal'
+import ConfirmDialog from '../../shared/ConfirmDialog.tsx'
 import AppSelect from '../../shared/AppSelect'
 import FilePickerModalBase from '../../files/FilePickerModal'
 import {
@@ -1109,6 +1110,11 @@ export default function BulkImportModal({ onClose, onDone, t, topMode = 'general
   const canReplaceAll = hasPermission('destructive_delete')
   const mode: ImportMode = topMode === 'images' ? 'images' : 'products'
   const [step, setStep] = useState(1)
+  // Select-then-confirm staging for the import modal's four destructive/
+  // stop-what's-running actions (replaces four bare window.confirm() calls).
+  const [pendingCancelJob, setPendingCancelJob] = useState(false)
+  const [pendingDeleteJob, setPendingDeleteJob] = useState(false)
+  const [pendingImportGate, setPendingImportGate] = useState<'replace_all' | 'replace_columns' | null>(null)
   const [showColumnsInfo, setShowColumnsInfo] = useState(false)
   const [csvData, setCsvData] = useState<CsvData | null>(null)
   // Visual-only (border highlight while a drag is over the drop target).
@@ -1535,10 +1541,15 @@ export default function BulkImportModal({ onClose, onDone, t, topMode = 'general
 
   const handleCancelCurrentJob = async () => {
     if (!currentJob?.id) return
-    if (loading && typeof window !== 'undefined' && typeof window.confirm === 'function') {
-      const confirmed = window.confirm(T('confirm_cancel_import', 'Cancel this import? The upload/start sequence will stop immediately.'))
-      if (!confirmed) return
+    if (loading) {
+      setPendingCancelJob(true)
+      return
     }
+    await commitCancelCurrentJob()
+  }
+  const commitCancelCurrentJob = async () => {
+    setPendingCancelJob(false)
+    if (!currentJob?.id) return
     cancelRequestedRef.current = true
     try {
       const payload = await getProductImportApi().cancelImportJob(currentJob.id, { source: 'products_modal' })
@@ -1603,17 +1614,14 @@ export default function BulkImportModal({ onClose, onDone, t, topMode = 'general
     }
   }
 
-  const handleDeleteCurrentJob = async () => {
+  const handleDeleteCurrentJob = () => {
+    setPendingDeleteJob(true)
+  }
+  const commitDeleteCurrentJob = async () => {
+    setPendingDeleteJob(false)
     if (!beginImportAction('delete')) return
     const targetJob = currentJob || result?.job
     if (!targetJob?.id) {
-      finishImportAction('delete')
-      return
-    }
-    const confirmed = typeof window === 'undefined' || typeof window.confirm !== 'function'
-      ? true
-      : window.confirm(T('confirm_delete_import', 'Delete this import job? This keeps product data unchanged.'))
-    if (!confirmed) {
       finishImportAction('delete')
       return
     }
@@ -1826,27 +1834,29 @@ export default function BulkImportModal({ onClose, onDone, t, topMode = 'general
     if (file) void handleDropCSV(file)
   }
 
+  // Last-chance gate for the destructive modes, right at the point of no
+  // return (job creation kicks off the actual apply chunk-by-chunk). The
+  // picker's inline warning covers the "why", this covers "are you sure,
+  // right now, with this specific file" -- select-then-confirm via the
+  // ConfirmDialog rendered below (replaces the previous bare
+  // window.confirm() calls) instead of proceeding straight into
+  // commitImport().
   const handleImport = async () => {
     if (!csvData?.content) return
-    // Last-chance gate for the destructive mode, right at the point of no
-    // return (job creation kicks off the actual apply chunk-by-chunk).
-    // The picker's inline warning covers the "why", this covers "are you
-    // sure, right now, with this specific file" -- same pattern as the
-    // existing cancel/delete-job confirms above, just red instead of the
-    // neutral copy those use since this one can deactivate products.
     if (mode === 'products' && importMode === 'replace_all') {
-      const confirmed = typeof window === 'undefined' || typeof window.confirm !== 'function'
-        ? true
-        : window.confirm(T('confirm_replace_all_import', 'Replace mode: every active product not in this file will be deactivated once this import finishes. Continue?'))
-      if (!confirmed) return
+      setPendingImportGate('replace_all')
+      return
     }
     if (mode === 'products' && importMode === 'replace_columns') {
       if (!selectedReplaceColumns.length) return
-      const confirmed = typeof window === 'undefined' || typeof window.confirm !== 'function'
-        ? true
-        : window.confirm(T('confirm_replace_columns_import', 'Replace mode: for every product this file matches, the selected columns will be overwritten with this file\'s values -- including blanks. Continue?'))
-      if (!confirmed) return
+      setPendingImportGate('replace_columns')
+      return
     }
+    await commitImport()
+  }
+
+  const commitImport = async () => {
+    setPendingImportGate(null)
     if (!beginImportAction('import')) return
     cancelRequestedRef.current = false
     setAnalysisProgress({ progress: 0, label: 'Creating import job' })
@@ -3010,6 +3020,42 @@ export default function BulkImportModal({ onClose, onDone, t, topMode = 'general
         multiple
         onSelectMany={addLibraryImages}
       />
+      {pendingCancelJob ? (
+        <ConfirmDialog
+          t={(key: string) => T(key, key)}
+          title={T('confirm_cancel_import', 'Cancel this import? The upload/start sequence will stop immediately.')}
+          danger
+          onConfirm={() => { void commitCancelCurrentJob() }}
+          onClose={() => setPendingCancelJob(false)}
+        />
+      ) : null}
+      {pendingDeleteJob ? (
+        <ConfirmDialog
+          t={(key: string) => T(key, key)}
+          title={T('confirm_delete_import', 'Delete this import job? This keeps product data unchanged.')}
+          danger
+          onConfirm={() => { void commitDeleteCurrentJob() }}
+          onClose={() => setPendingDeleteJob(false)}
+        />
+      ) : null}
+      {pendingImportGate === 'replace_all' ? (
+        <ConfirmDialog
+          t={(key: string) => T(key, key)}
+          title={T('confirm_replace_all_import', 'Replace mode: every active product not in this file will be deactivated once this import finishes. Continue?')}
+          danger
+          onConfirm={() => { void commitImport() }}
+          onClose={() => setPendingImportGate(null)}
+        />
+      ) : null}
+      {pendingImportGate === 'replace_columns' ? (
+        <ConfirmDialog
+          t={(key: string) => T(key, key)}
+          title={T('confirm_replace_columns_import', 'Replace mode: for every product this file matches, the selected columns will be overwritten with this file\'s values -- including blanks. Continue?')}
+          danger
+          onConfirm={() => { void commitImport() }}
+          onClose={() => setPendingImportGate(null)}
+        />
+      ) : null}
     </Modal>
   )
 }

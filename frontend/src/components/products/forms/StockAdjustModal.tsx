@@ -195,6 +195,7 @@ export default function StockAdjustModal({ initialType = 'add', initialProduct =
   const [reasonManager, setReasonManager] = useState<ReasonManagerState>({ open: false, type: 'adjust' })
   const [reasonDraft, setReasonDraft] = useState('')
   const [savingReasons, setSavingReasons] = useState(false)
+  const [pendingReasonDelete, setPendingReasonDelete] = useState<InventoryReason | null>(null)
   useEffect(() => {
     let cancelled = false
     getInventoryReasons()
@@ -239,11 +240,17 @@ export default function StockAdjustModal({ initialType = 'add', initialProduct =
     const next = inventoryReasons.map((item) => (item.id === entry.id ? { ...item, label: nextLabel.trim() } : item))
     await saveReasonCatalog(next)
   }, [inventoryReasons, saveReasonCatalog, tr])
-  const deleteSavedReason = useCallback(async (entry: InventoryReason) => {
-    if (!window.confirm(tr('delete_saved_reason_confirm', 'Delete this saved reason?'))) return
-    const next = inventoryReasons.filter((item) => item.id !== entry.id)
+  // Select-then-confirm: staging the entry opens the ConfirmDialog below
+  // instead of a bare window.confirm(); the removal runs from its onConfirm.
+  const deleteSavedReason = useCallback((entry: InventoryReason) => {
+    setPendingReasonDelete(entry)
+  }, [])
+  const commitDeleteSavedReason = useCallback(async () => {
+    if (!pendingReasonDelete) return
+    const next = inventoryReasons.filter((item) => item.id !== pendingReasonDelete.id)
+    setPendingReasonDelete(null)
     await saveReasonCatalog(next)
-  }, [inventoryReasons, saveReasonCatalog, tr])
+  }, [inventoryReasons, pendingReasonDelete, saveReasonCatalog])
 
   // --- adjust form (step 2) ---
   const [adjustForm, setAdjustForm] = useState<AdjustForm>(() => ({
@@ -567,6 +574,17 @@ export default function StockAdjustModal({ initialType = 'add', initialProduct =
           workingLabel={tr('saving', 'Saving...')}
           onConfirm={commitAdjust}
           onClose={() => { if (!adjustSaving) setPendingAdjust(null) }}
+        />
+      ) : null}
+      {pendingReasonDelete ? (
+        <ConfirmDialog
+          t={t}
+          title={tr('delete_saved_reason_confirm', 'Delete this saved reason?')}
+          message={pendingReasonDelete.label}
+          danger
+          working={savingReasons}
+          onConfirm={() => { void commitDeleteSavedReason() }}
+          onClose={() => setPendingReasonDelete(null)}
         />
       ) : null}
     </>

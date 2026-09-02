@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import Trash2 from 'lucide-react/dist/esm/icons/trash-2.js'
 import AlertTriangle from 'lucide-react/dist/esm/icons/alert-triangle.js'
 import Modal from '../shared/Modal'
+import ConfirmDialog from '../shared/ConfirmDialog.tsx'
 import { getInventoryReasons, saveInventoryReasons } from '../../api/methods.ts'
 // Same saved-reason catalog + "Manage reasons" component Inventory's own
 // Adjust-stock modal and BranchStockAdjuster.tsx already use -- per the
@@ -69,6 +70,7 @@ export default function DeleteConfirmModal({
   const [reasonManager, setReasonManager] = useState<ReasonManagerState>({ open: false, type: 'delete' })
   const [reasonDraft, setReasonDraft] = useState('')
   const [savingReasons, setSavingReasons] = useState(false)
+  const [pendingReasonDelete, setPendingReasonDelete] = useState<InventoryReason | null>(null)
   const trimmedReason = reason.trim()
 
   useEffect(() => {
@@ -116,11 +118,18 @@ export default function DeleteConfirmModal({
     const next = inventoryReasons.map((item) => (item.id === entry.id ? { ...item, label: nextLabel.trim() } : item))
     await saveReasonCatalog(next)
   }, [inventoryReasons, saveReasonCatalog])
-  const deleteSavedReason = useCallback(async (entry: InventoryReason) => {
-    if (!window.confirm(T('delete_saved_reason_confirm', 'Delete this saved reason?'))) return
-    const next = inventoryReasons.filter((item) => item.id !== entry.id)
+  // Select-then-confirm: the reason-picker's Delete button just stages the
+  // entry; the actual removal runs from the ConfirmDialog's onConfirm below
+  // (replaces the previous bare window.confirm()).
+  const deleteSavedReason = useCallback((entry: InventoryReason) => {
+    setPendingReasonDelete(entry)
+  }, [])
+  const commitDeleteSavedReason = useCallback(async () => {
+    if (!pendingReasonDelete) return
+    const next = inventoryReasons.filter((item) => item.id !== pendingReasonDelete.id)
+    setPendingReasonDelete(null)
     await saveReasonCatalog(next)
-  }, [inventoryReasons, saveReasonCatalog])
+  }, [inventoryReasons, pendingReasonDelete, saveReasonCatalog])
 
   const isBulk = summary.productCount > 1
   const title = isBulk
@@ -245,6 +254,17 @@ export default function DeleteConfirmModal({
           t={t || (() => undefined)}
           tr={(key, fallbackEn) => T(key, fallbackEn ?? key)}
         />
+        {pendingReasonDelete ? (
+          <ConfirmDialog
+            t={t}
+            title={T('delete_saved_reason_confirm', 'Delete this saved reason?')}
+            message={pendingReasonDelete.label}
+            danger
+            working={savingReasons}
+            onConfirm={() => { void commitDeleteSavedReason() }}
+            onClose={() => setPendingReasonDelete(null)}
+          />
+        ) : null}
       </div>
     </Modal>
   )

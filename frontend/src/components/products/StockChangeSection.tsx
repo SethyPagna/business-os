@@ -19,6 +19,7 @@ import { movementColorClass, translateMovementType } from '../inventory/movement
 import DateTimeRangePicker from '../shared/DateTimeRangePicker'
 import FilterMenu, { type FilterSection } from '../shared/FilterMenu'
 import Modal from '../shared/Modal'
+import ConfirmDialog from '../shared/ConfirmDialog.tsx'
 import PaginationControls from '../shared/PaginationControls'
 import SearchInput from '../shared/SearchInput'
 import ScanSearchButton from '../shared/ScanSearchButton'
@@ -188,6 +189,7 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
   // two-step revert confirm. rowBusy blocks both while a write is in flight.
   const [rowBusy, setRowBusy] = useState(false)
   const [editingReason, setEditingReason] = useState<string | null>(null)
+  const [pendingReasonSave, setPendingReasonSave] = useState<string | null>(null)
   const [confirmRevert, setConfirmRevert] = useState(false)
   // Adjust menu (Add / Remove / Adjust quantity) -> opens the reused modal.
   // The trigger button/menu now lives on the page header row (Products.tsx);
@@ -340,11 +342,19 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
     }
   }, [detail, app, t, closeDetail, load])
 
-  const saveReason = useCallback(async () => {
+  // Select-then-confirm: staging the trimmed value opens the ConfirmDialog
+  // rendered near the detail modal (replaces the previous bare
+  // window.confirm()); commitSaveReason runs the actual write.
+  const saveReason = useCallback(() => {
     if (!detail || editingReason == null) return
     const next = editingReason.trim()
     if (!next) { app.notify(tr(t, 'reason_required', 'A reason is required'), 'error'); return }
-    if (!window.confirm(tr(t, 'confirm_update_stock_reason', 'Update the reason recorded for this stock movement?'))) return
+    setPendingReasonSave(next)
+  }, [detail, editingReason, app, t])
+
+  const commitSaveReason = useCallback(async () => {
+    if (!detail || pendingReasonSave == null) return
+    const next = pendingReasonSave
     setRowBusy(true)
     try {
       const res = await editStockMovementReason(detail.id, next) as { success?: boolean; error?: string } | undefined
@@ -357,8 +367,9 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
       app.notify(error instanceof Error ? error.message : tr(t, 'unknown_error', 'Something went wrong'), 'error')
     } finally {
       setRowBusy(false)
+      setPendingReasonSave(null)
     }
-  }, [detail, editingReason, app, t, load])
+  }, [detail, pendingReasonSave, app, t, load])
 
   // Header-row action bridge (user, Aug 31): the Adjust menu + ledger export
   // moved onto the page header row, rendered by Products.tsx. Its trigger
@@ -851,6 +862,17 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
             </div>
           </div>
         </Modal>
+      ) : null}
+
+      {pendingReasonSave !== null ? (
+        <ConfirmDialog
+          t={(key: string, fallback?: string) => tr(t, key, fallback || key)}
+          title={tr(t, 'confirm_update_stock_reason', 'Update the reason recorded for this stock movement?')}
+          message={pendingReasonSave}
+          working={rowBusy}
+          onConfirm={() => { void commitSaveReason() }}
+          onClose={() => { if (!rowBusy) setPendingReasonSave(null) }}
+        />
       ) : null}
 
       {adjustType ? (

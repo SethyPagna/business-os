@@ -169,6 +169,7 @@ export default function BulkAddStockModal({ productIds, products, branches, user
   const [reasonManager, setReasonManager] = useState<ReasonManagerState>({ open: false, type: 'adjust' })
   const [reasonDraft, setReasonDraft] = useState('')
   const [savingReasons, setSavingReasons] = useState(false)
+  const [pendingReasonDelete, setPendingReasonDelete] = useState<InventoryReason | null>(null)
   const saveInFlightRef = useRef(false)
   const selectedProductIds = new Set(productIds.map((id) => String(id)))
   const selectedProducts = products.filter((product) => selectedProductIds.has(String(product.id)))
@@ -220,11 +221,17 @@ export default function BulkAddStockModal({ productIds, products, branches, user
     const next = inventoryReasons.map((item) => (item.id === entry.id ? { ...item, label: nextLabel.trim() } : item))
     await saveReasonCatalog(next)
   }, [inventoryReasons, saveReasonCatalog])
-  const deleteSavedReason = useCallback(async (entry: InventoryReason) => {
-    if (!window.confirm(t('delete_saved_reason_confirm') || 'Delete this saved reason?')) return
-    const next = inventoryReasons.filter((item) => item.id !== entry.id)
+  // Select-then-confirm: staging the entry opens the ConfirmDialog below
+  // instead of a bare window.confirm(); the removal runs from its onConfirm.
+  const deleteSavedReason = useCallback((entry: InventoryReason) => {
+    setPendingReasonDelete(entry)
+  }, [])
+  const commitDeleteSavedReason = useCallback(async () => {
+    if (!pendingReasonDelete) return
+    const next = inventoryReasons.filter((item) => item.id !== pendingReasonDelete.id)
+    setPendingReasonDelete(null)
     await saveReasonCatalog(next)
-  }, [inventoryReasons, saveReasonCatalog])
+  }, [inventoryReasons, pendingReasonDelete, saveReasonCatalog])
   const runBulkStockMutation = useCallback((loader: () => Promise<ApiResult | undefined>, label: string) => (
     withLoaderTimeout(loader, label, BULK_ADD_STOCK_MUTATION_TIMEOUT_MS)
   ), [])
@@ -324,7 +331,7 @@ export default function BulkAddStockModal({ productIds, products, branches, user
   }
 
   const modal = (
-    <div className="modal-viewport-safe pointer-events-auto fixed inset-0 z-[1050] flex items-start justify-center overflow-y-auto bg-black/50 sm:items-center">
+    <div className="modal-viewport-safe pointer-events-auto fixed inset-0 z-[var(--z-modal)] flex items-start justify-center overflow-y-auto bg-[var(--ui-backdrop)] sm:items-center">
       <div className="modal-panel-safe fade-in my-auto w-full max-w-md overflow-y-auto rounded-2xl bg-white p-4 shadow-2xl dark:bg-gray-800 sm:p-5">
         <h2 className="mb-1 text-lg font-bold text-gray-900 dark:text-white">
           {t('adjust_stock_for_products') || `${actionLabels[action]} Stock -- ${productIds.length} Products`}
@@ -489,6 +496,17 @@ export default function BulkAddStockModal({ productIds, products, branches, user
           workingLabel={t('saving') || 'Saving...'}
           onConfirm={commitBulk}
           onClose={() => { if (!saving) setConfirmOpen(false) }}
+        />
+      ) : null}
+      {pendingReasonDelete ? (
+        <ConfirmDialog
+          t={(key: string) => t(key)}
+          title={t('delete_saved_reason_confirm') || 'Delete this saved reason?'}
+          message={pendingReasonDelete.label}
+          danger
+          working={savingReasons}
+          onConfirm={() => { void commitDeleteSavedReason() }}
+          onClose={() => setPendingReasonDelete(null)}
         />
       ) : null}
     </div>

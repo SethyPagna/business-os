@@ -85,10 +85,16 @@ await runTest('bulk product import actions use a synchronous in-flight guard', (
   assert.match(source, /const beginImportAction = \(action: ImportActionName, options: \{ setLoading\?: boolean \} = \{\}\): boolean => \{[\s\S]*if \(!beginNamedAction\(actionInFlightRef, action, \{ blocked: loading \}\)\) return false/)
   assert.match(source, /const finishImportAction = \(action: ImportActionName\): void => \{[\s\S]*finishNamedAction\(actionInFlightRef, action\)[\s\S]*setLoading\(false\)/)
   assert.match(source, /const handleRetryCurrentJob = async \(\) => \{[\s\S]*if \(!beginImportAction\('retry'\)\) return/)
-  assert.match(source, /const handleDeleteCurrentJob = async \(\) => \{[\s\S]*if \(!beginImportAction\('delete'\)\) return/)
+  // P2-4: handleDeleteCurrentJob/handleImport now select-then-confirm via a
+  // staged ConfirmDialog (replacing bare window.confirm()) instead of
+  // gating on beginImportAction directly -- the guard moved to the
+  // commit*/onConfirm half that actually runs after the user confirms.
+  assert.match(source, /const handleDeleteCurrentJob = \(\) => \{\s*setPendingDeleteJob\(true\)/)
+  assert.match(source, /const commitDeleteCurrentJob = async \(\) => \{[\s\S]*if \(!beginImportAction\('delete'\)\) return/)
   assert.match(source, /const handleImageOnlyImport = async \(\) => \{[\s\S]*if \(!beginImportAction\('image-only'\)\) return/)
   assert.match(source, /const handlePickCSV = async \(\) => \{[\s\S]*if \(!beginImportAction\('pick-csv', \{ setLoading: false \}\)\) return/)
-  assert.match(source, /const handleImport = async \(\) => \{[\s\S]*if \(!beginImportAction\('import'\)\) return/)
+  assert.match(source, /const handleImport = async \(\) => \{[\s\S]*if \(mode === 'products' && importMode === 'replace_all'\)[\s\S]*setPendingImportGate\('replace_all'\)/)
+  assert.match(source, /const commitImport = async \(\) => \{[\s\S]*if \(!beginImportAction\('import'\)\) return/)
   assert.match(source, /const api = getProductImportApi\(\)[\s\S]*withLoaderTimeout\(\s*\(\) => api\.createImportJob\(/, 'product import job creation should be bounded')
   assert.match(source, /withLoaderTimeout\(\s*\(\) => api\.uploadImportJobCsv\(/, 'product import CSV upload should be bounded')
   assert.match(source, /withLoaderTimeout\(\s*\(\) => api\.uploadImportJobZip\(/, 'product import ZIP upload should be bounded')

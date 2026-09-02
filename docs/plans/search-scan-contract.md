@@ -36,7 +36,7 @@ highlights, per decision 9.
 |---|---|---|---|---|---|
 | Promotions (per-product discount search + rule-editor product picker) | `useProductLookup` (300ms) — **done**, `rc/p2-2-search` commit `bc997ad2` | `GET /api/products/search` | Yes — `data-exact-hit="true"` on both dropdowns | Yes — via `ScanSearchButton` (unchanged, already correct) | Yes — unchanged existing click-to-open/click-to-add |
 | POS (product search / cart add) | TODO P2-4/P2-5 | `GET /api/products/search` (same endpoint/contract as Promotions — `exact_barcode_hit_id` already in the response) | TODO | TODO — confirm whether POS already auto-closes on a scan-to-add flow, or whether add-to-cart-on-scan needs to change to fill-then-confirm to satisfy decision 9 | TODO — **audit specifically**: POS is the surface most likely to currently auto-add on scan (fast checkout flow); decision 9 still applies — a scan must highlight, not add, unless the existing flow already requires a tap/Enter on the highlighted line |
-| Products (main list search + scanner) | TODO P2-4/P2-5 | `GET /api/products/search` | TODO | Already uses `ScanSearchButton` per `tests/barcodeScannerState.test.ts` | TODO — confirm click-through still required, not auto-navigate to detail |
+| Products (main list search + scanner) | **done**, `rc/p2-4-pages` commit `cd9d3143`. NOT switched onto `useProductLookup` — `load()` already debounces via `useDebouncedValue(search, 180)` (matches the 180ms convention) and Products' 17-param query (filters/initials/promotion_rules metadata) is wider than the hook's surface; forking the hook or dropping functionality was judged worse than reading `exact_barcode_hit_id` off the existing response directly. `useBarcodeScan` is wired for the keyboard-wedge path only (`wedge.onKeyDown` on the search input) | `GET /api/products/search` | Yes — `data-exact-hit="true"` on both the desktop `<tr>` and the mobile card, resolved via the shared `resolveExactBarcodeHit` helper (never a re-implementation), plus a documented client-side fallback: if the server's `exact_barcode_hit_id` is null but a scan narrowed the list to exactly one row, that row is still highlighted (covers the alias-barcode gap below for the *single-result* case only) | Yes — `ScanSearchButton` (camera) is unchanged/already correct; both paths funnel through one `handleScanDetected` that only calls `setSearch`, never selects | Yes — both the highlighted row's own `onClick` and its Confirm pill require an explicit click calling `setDetailProduct`; nothing auto-opens on scan or on an exact-match query |
 | Inventory (search + scanner) | TODO P2-4/P2-5 | `GET /api/inventory/products` (`searchProductsPayload` in `inventory.ts` — patch prepared, not yet applied, see `bos-rc-workers/p2-2-inventory-tail.patch`) | TODO — patch adds `exact_barcode_hit_id`, null when `metadataOnly` | Already uses `ScanSearchButton` per `tests/barcodeScannerState.test.ts` (branch stock surface) | TODO |
 | Branches (per-branch stock search + `TransferModal` product picker) | TODO P2-4/P2-5 | `GET /api/branches/:id/stock` (search tail wired onto `buildProductSearchPlan` in `rc/p2-2-search` commit `1619a18b`; `exact_barcode_hit_id` already in the response) | TODO | Already uses `ScanSearchButton` (`Branches.tsx`, `TransferModal.tsx` — 2 uses, per `tests/barcodeScannerState.test.ts`) | TODO |
 | TransferModal (single + multi product search) | TODO P2-4/P2-5 | Same as Branches above | TODO | Already uses `ScanSearchButton` (2 uses) | TODO |
@@ -73,3 +73,33 @@ highlights, per decision 9.
   `useBarcodeScan` only for a new surface without `ScanSearchButton` already wired, or if a
   surface specifically needs the keyboard-wedge burst detector on its search input (no existing
   surface has this yet — the wedge detector is new in this effort).
+
+## P2-4 findings (Products, `rc/p2-4-pages`)
+
+- **Alias-barcode highlight gap (P2-3 boundary, not fixed here)**: `computeExactBarcodeHitId`
+  (`cloudflare/src/lib/searchMatch.ts:1410`) and its client mirror
+  (`frontend/src/utils/productLookup.ts`'s `findExactBarcodeHit`) only compare `products.barcode`
+  — never a `barcode_aliases` row — even though `buildAliasExactClause`
+  (`cloudflare/src/lib/barcodeAliases.ts`) already widens the *search* `WHERE` so scanning an
+  alias barcode DOES return the product in the list. Net effect: scanning an alias barcode
+  narrows Products to the right row (search works), but that row is only highlighted+offered a
+  Confirm pill when it is the *sole* result on the page (Products' own client-side single-result
+  fallback, see the table row above) — a multi-result list with an alias hit among several rows
+  gets no highlight at all. The real fix (teaching `computeExactBarcodeHitId` to also match
+  `barcode_aliases`) touches `searchMatch.ts`, which the file's own comments mark as P2-3-owned;
+  left as a handoff rather than edited out-of-lane.
+- **`barcode_aliases` has no read API yet**: `listAliases(db, productId)`
+  (`cloudflare/src/lib/barcodeAliases.ts:110`) is exported but never called from any route —
+  grepped `cloudflare/src/routes/*.ts` and found zero call sites. No product read/search response
+  (list, detail, or otherwise) currently returns a product's aliases, so "aliases shown read-only
+  in the fold" (P2-4 brief step 7) could not be implemented against live data — there is nothing
+  to display. Adding a `barcode_aliases` (or similar) field to a products route response would be
+  the backend half of this and belongs to whichever lane owns `barcodeAliases.ts`/`products.ts`
+  next.
+- **Client-side import review does not silently drop a `barcode_aliases` CSV column**:
+  `productImportPlanner.ts`'s `normalizeProductImportRow` copies every `Object.entries(row)` key
+  through via `normalizeCsvKey`, not a fixed whitelist — an uploaded `barcode_aliases` column
+  survives client-side review/preview untouched. Whether the *server* (`importEngine.ts`, the
+  file the actual uploaded CSV/zip is parsed by — also P2-3-owned per its own comments) persists
+  that column into the `barcode_aliases` table on apply was not verified here, since that is a
+  server-side parsing concern outside this worker's file-ownership scope, not a client-side gap.

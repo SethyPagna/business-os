@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ComponentProps } from 'react'
 import Modal from '../../shared/Modal'
+import ConfirmDialog from '../../shared/ConfirmDialog.tsx'
 import ActionHistoryBar from '../../shared/ActionHistoryBar'
 import { useApp as useAppHook } from '../../../AppContext.tsx'
 import { useActionHistory } from '../../../utils/actionHistory.ts'
@@ -216,6 +217,12 @@ export default function ManageBrandsModal({
   const [renameColor, setRenameColor] = useState(DEFAULT_BRAND_COLOR)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  // Select-then-confirm staging for rename/merge and delete (replaces three
+  // bare window.confirm() calls). The in-flight guard + busy flag stay held
+  // while the ConfirmDialog is open, same as they were held through the
+  // previous synchronous window.confirm().
+  const [pendingRenameBrand, setPendingRenameBrand] = useState<{ from: string; to: string; fromLookup: string; toLookup: string; targetAlreadyExists: boolean; attached: number } | null>(null)
+  const [pendingRemoveBrands, setPendingRemoveBrands] = useState<{ brandNames: string[]; lookups: Set<string>; affectedCount: number } | null>(null)
   const [selectedBrands, setSelectedBrands] = useState<Set<string>>(() => new Set())
   const [usageSummary, setUsageSummary] = useState<BrandUsageEntry[]>([])
   const loadRequestRef = useRef(0)
@@ -408,12 +415,28 @@ export default function ManageBrandsModal({
       const targetAlreadyExists = allKnownBrandNames.some((entry) => normalizeLookup(entry) === toLookup && normalizeLookup(entry) !== fromLookup)
       const impact = await getRenameImpact('brand', from, to)
       const attached = Number(impact.products_primary || 0) + Number(impact.products_secondary || 0)
-      const confirmed = window.confirm(
-        targetAlreadyExists
-          ? `"${to}" already exists. Merge "${from}" into it and update ${attached} exact linked product${attached === 1 ? '' : 's'}? Point-in-time audit history stays unchanged.`
-          : `Rename "${from}" to "${to}" and carry ${attached} exact linked product${attached === 1 ? '' : 's'}? Point-in-time audit history stays unchanged.`,
-      )
-      if (!confirmed) return
+      // Guard + busy stay held; commitRenameBrand or cancelRenameBrand below
+      // release them once the ConfirmDialog resolves.
+      setPendingRenameBrand({ from, to, fromLookup, toLookup, targetAlreadyExists, attached })
+      return
+    } catch (e) {
+      setError(getErrorMessage(e, 'Failed to rename brand'))
+      finishNamedAction(actionInFlightRef, 'rename-brand')
+      setBusy(false)
+    }
+  }
+
+  const cancelRenameBrand = () => {
+    setPendingRenameBrand(null)
+    finishNamedAction(actionInFlightRef, 'rename-brand')
+    setBusy(false)
+  }
+
+  const commitRenameBrand = async () => {
+    if (!pendingRenameBrand) return
+    const { from, to, fromLookup, toLookup, targetAlreadyExists } = pendingRenameBrand
+    setPendingRenameBrand(null)
+    try {
       const previousLibrary = [...libraryBrands]
       const previousColorMap = { ...brandColorMap }
       const productSnapshots = await fetchLookupProductSnapshots({
@@ -492,14 +515,21 @@ export default function ManageBrandsModal({
       .map((name) => brandsByLookup.get(normalizeLookup(name)))
       .filter(Boolean)
     const affectedCount = affectedEntries.reduce((sum, entry) => sum + Number(entry.usage || 0), 0)
-    const clearAppliedBrands = affectedCount > 0
-      ? window.confirm(`${brandNames.length} brand${brandNames.length === 1 ? '' : 's'} are used by ${affectedCount} product(s). Clear those product brand fields too?`)
-      : window.confirm(`Delete ${brandNames.length} selected brand${brandNames.length === 1 ? '' : 's'}?`)
+    // Guard stays held; commitRemoveBrands or cancelRemoveBrands below
+    // release it once the ConfirmDialog resolves (replaces the previous
+    // two-message bare window.confirm()).
+    setPendingRemoveBrands({ brandNames, lookups, affectedCount })
+  }
 
-    if (!clearAppliedBrands) {
-      finishNamedAction(actionInFlightRef, 'delete-brand')
-      return
-    }
+  const cancelRemoveBrands = () => {
+    setPendingRemoveBrands(null)
+    finishNamedAction(actionInFlightRef, 'delete-brand')
+  }
+
+  const commitRemoveBrands = async () => {
+    if (!pendingRemoveBrands) return
+    const { brandNames, lookups } = pendingRemoveBrands
+    setPendingRemoveBrands(null)
 
     setBusy(true)
     setError('')
@@ -841,6 +871,29 @@ export default function ManageBrandsModal({
           )}
         </div>
       </div>
+      {pendingRenameBrand ? (
+        <ConfirmDialog
+          t={(key: string, fallback?: string) => t(key) || fallback}
+          title={pendingRenameBrand.targetAlreadyExists
+            ? `"${pendingRenameBrand.to}" already exists. Merge "${pendingRenameBrand.from}" into it and update ${pendingRenameBrand.attached} exact linked product${pendingRenameBrand.attached === 1 ? '' : 's'}? Point-in-time audit history stays unchanged.`
+            : `Rename "${pendingRenameBrand.from}" to "${pendingRenameBrand.to}" and carry ${pendingRenameBrand.attached} exact linked product${pendingRenameBrand.attached === 1 ? '' : 's'}? Point-in-time audit history stays unchanged.`}
+          working={busy}
+          onConfirm={() => { void commitRenameBrand() }}
+          onClose={cancelRenameBrand}
+        />
+      ) : null}
+      {pendingRemoveBrands ? (
+        <ConfirmDialog
+          t={(key: string, fallback?: string) => t(key) || fallback}
+          title={pendingRemoveBrands.affectedCount > 0
+            ? `${pendingRemoveBrands.brandNames.length} brand${pendingRemoveBrands.brandNames.length === 1 ? '' : 's'} are used by ${pendingRemoveBrands.affectedCount} product(s). Clear those product brand fields too?`
+            : `Delete ${pendingRemoveBrands.brandNames.length} selected brand${pendingRemoveBrands.brandNames.length === 1 ? '' : 's'}?`}
+          danger
+          working={busy}
+          onConfirm={() => { void commitRemoveBrands() }}
+          onClose={cancelRemoveBrands}
+        />
+      ) : null}
     </Modal>
   )
 }

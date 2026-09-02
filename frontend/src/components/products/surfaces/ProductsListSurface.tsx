@@ -2,6 +2,8 @@ import { Fragment } from 'react'
 import type { ReactNode } from 'react'
 import ChevronDown from 'lucide-react/dist/esm/icons/chevron-down.js'
 import ChevronRight from 'lucide-react/dist/esm/icons/chevron-right.js'
+import Package from 'lucide-react/dist/esm/icons/package.js'
+import { EmptyState, Skeleton } from '../../shared/kit'
 
 // ---------------------------------------------------------------------------
 // Desktop table geometry: ONE left rail
@@ -162,7 +164,6 @@ export default function ProductsListSurface({
   tr,
   visibleProducts,
 }: ProductsListSurfaceProps) {
-  const skeletonRows = Array.from({ length: 8 }, (_, index) => index)
   const showDesktopLoadingOverlay = !initialDesktopRevealReady
 
   // A fixed responsive grid prevents long product metadata from widening
@@ -200,13 +201,25 @@ export default function ProductsListSurface({
     </colgroup>
   )
 
+  // P2-4 step 5 (Level 1, decision 6/8): kit tokens on the header row --
+  // sticky z now reads the shared --z-sticky token (was a bare z-10), and
+  // each <th> gets the kit's ivory/charcoal surface+line tokens with an
+  // important modifier: .table-bordered thead th (src/styles/main.css,
+  // P2-9's file, not touched here) already sets its own background/border
+  // with a MORE specific selector (two classes) than a plain utility class
+  // (one class) could ever beat, so a non-important override would
+  // silently lose the cascade fight and render as if nothing changed.
+  // Column-specific text colours (cost=red/selling=green/margin=blue) stay
+  // as-is -- those encode meaning (col-highlight-*), not the ivory/charcoal
+  // palette, and this checkpoint does not touch that convention.
+  const KIT_TH_HEADER = '!bg-[var(--ui-surface)] !border-[var(--ui-line)]'
   const renderDesktopTableHead = () => (
-    <thead className="sticky top-0 z-10">
+    <thead className="sticky top-0 z-[var(--z-sticky)]">
       <tr>
         {/* 11.2 alignment: in select mode the column-header checkbox IS
             select-all, matching the other five list pages. The cell
             collapses to nothing out of select mode. */}
-        <th className={`${selectCellPad} py-3`}>
+        <th className={`${selectCellPad} py-3 ${KIT_TH_HEADER}`}>
           {selectionModeActive ? (
             <input
               type="checkbox"
@@ -218,65 +231,32 @@ export default function ProductsListSurface({
             />
           ) : null}
         </th>
-        <th className="whitespace-nowrap px-2 py-3 text-left font-semibold text-gray-600 dark:text-gray-400">{t('receipt_image_short') || t('image') || 'Image'}</th>
-        <th className={`min-w-[140px] ${ROW_TEXT_GUTTER} py-3 text-left font-semibold text-gray-600 dark:text-gray-400`}>{t('product_name')}</th>
-        <th className="hidden whitespace-nowrap px-3 py-3 text-left font-semibold text-gray-600 dark:text-gray-400 md:table-cell">{t('details') || 'Details'}</th>
+        <th className={`whitespace-nowrap px-2 py-3 text-left font-semibold text-gray-600 dark:text-gray-400 ${KIT_TH_HEADER}`}>{t('receipt_image_short') || t('image') || 'Image'}</th>
+        <th className={`min-w-[140px] ${ROW_TEXT_GUTTER} py-3 text-left font-semibold text-gray-600 dark:text-gray-400 ${KIT_TH_HEADER}`}>{t('product_name')}</th>
+        <th className={`hidden whitespace-nowrap px-3 py-3 text-left font-semibold text-gray-600 dark:text-gray-400 md:table-cell ${KIT_TH_HEADER}`}>{t('details') || 'Details'}</th>
         {/* Was t('cost_in_purchase') ("Cost In (Purchase)") -- too long for
             this column at normal widths, overflowing/truncating to
             "Costin...". Just "Cost" (same short key ProductForm's other
             cost surfaces already use) fits and is unambiguous given the
             red cost-column styling and the Selling/Margin columns beside
             it. */}
-        <th className="col-highlight-red whitespace-nowrap px-3 py-3 text-right font-semibold text-red-600 dark:text-red-400">{t('cost')}</th>
-        <th className="col-highlight-green whitespace-nowrap px-3 py-3 text-right font-semibold text-green-600 dark:text-green-400">{t('selling_price_label')}</th>
-        <th className="hidden whitespace-nowrap px-3 py-3 text-right font-semibold text-blue-600 dark:text-blue-400 lg:table-cell">{t('margin')}</th>
-        <th className="whitespace-nowrap px-3 py-3 text-right font-semibold text-gray-600 dark:text-gray-400">{t('stock')}</th>
+        <th className={`col-highlight-red whitespace-nowrap px-3 py-3 text-right font-semibold text-red-600 dark:text-red-400 ${KIT_TH_HEADER}`}>{t('cost')}</th>
+        <th className={`col-highlight-green whitespace-nowrap px-3 py-3 text-right font-semibold text-green-600 dark:text-green-400 ${KIT_TH_HEADER}`}>{t('selling_price_label')}</th>
+        <th className={`hidden whitespace-nowrap px-3 py-3 text-right font-semibold text-blue-600 dark:text-blue-400 lg:table-cell ${KIT_TH_HEADER}`}>{t('margin')}</th>
+        <th className={`whitespace-nowrap px-3 py-3 text-right font-semibold text-gray-600 dark:text-gray-400 ${KIT_TH_HEADER}`}>{t('stock')}</th>
       </tr>
     </thead>
   )
 
+  // P2-4 step 7: replaced the hand-rolled row-shaped pulse shell with the
+  // shared kit Skeleton (variant="table"). This trades the old shell's
+  // exact thumbnail/badge/5-column mimicry for consistency with every
+  // other kit-adopting page's loading state -- a deliberate fidelity
+  // step-down the brief's "EmptyState/Skeleton replacing ad-hoc [loaders]"
+  // step calls for, not an oversight; see p2-4-report.md.
   const renderDesktopLoadingShell = () => (
-    <div className="min-h-[26rem] animate-pulse bg-white/95 px-4 py-4 dark:bg-slate-950/80">
-      <div className="rounded-xl border border-slate-200/90 bg-slate-50/85 p-3 dark:border-slate-700/80 dark:bg-slate-900/70">
-        <div className="flex items-center justify-between gap-4">
-          <div className="flex items-center gap-2">
-            <div className="h-4 w-4 rounded bg-slate-200 dark:bg-slate-700" />
-            <div className="h-4 w-32 rounded bg-slate-200 dark:bg-slate-700" />
-          </div>
-          <div className="h-7 w-24 rounded-lg bg-slate-200 dark:bg-slate-700" />
-        </div>
-      </div>
-      <div className="mt-4 space-y-4">
-        {Array.from({ length: 3 }, (_, index) => (
-          <div
-            key={`products-shell-${index}`}
-            className="rounded-2xl border border-slate-200/80 bg-white/90 p-4 shadow-sm dark:border-slate-700/70 dark:bg-slate-900/70"
-          >
-            <div className="flex items-start gap-4">
-              <div className="h-12 w-12 rounded-xl bg-slate-200 dark:bg-slate-700" />
-              <div className="min-w-0 flex-1 space-y-3">
-                <div className="flex items-start justify-between gap-4">
-                  <div className="min-w-0 flex-1 space-y-2">
-                    <div className="h-4 w-48 max-w-[60%] rounded bg-slate-200 dark:bg-slate-700" />
-                    <div className="h-3 w-72 max-w-[80%] rounded bg-slate-100 dark:bg-slate-800" />
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <div className="h-5 w-16 rounded-full bg-slate-100 dark:bg-slate-800" />
-                    <div className="h-5 w-16 rounded-full bg-slate-100 dark:bg-slate-800" />
-                  </div>
-                </div>
-                <div className="grid grid-cols-5 gap-3">
-                  <div className="h-10 rounded-lg bg-slate-100 dark:bg-slate-800" />
-                  <div className="h-10 rounded-lg bg-slate-100 dark:bg-slate-800" />
-                  <div className="h-10 rounded-lg bg-slate-100 dark:bg-slate-800" />
-                  <div className="h-10 rounded-lg bg-slate-100 dark:bg-slate-800" />
-                  <div className="h-10 rounded-lg bg-slate-100 dark:bg-slate-800" />
-                </div>
-              </div>
-            </div>
-          </div>
-        ))}
-      </div>
+    <div className="px-4 py-4">
+      <Skeleton variant="table" rows={8} />
     </div>
   )
 
@@ -293,7 +273,7 @@ export default function ProductsListSurface({
           stays visible while scrolling" behavior, just anchored one level up. */}
       <div className="card hidden overflow-hidden sm:flex sm:flex-col">
         <div className="relative overflow-hidden">
-          <table className="w-full table-fixed text-sm table-bordered">
+          <table className="w-full table-fixed text-[length:var(--ui-size-body)] table-bordered">
             {desktopColGroup}
             {renderDesktopTableHead()}
             <tbody className={showDesktopLoadingOverlay ? 'invisible' : ''}>
@@ -302,8 +282,11 @@ export default function ProductsListSurface({
                   ? null
                   : (
                     <tr>
-                      <td colSpan={8} className="py-10 text-center text-gray-400">
-                        {refreshingProducts ? tr('products_refreshing', 'Refreshing products...', 'កំពុងធ្វើបច្ចុប្បន្នភាពផលិតផល...') : t('no_data')}
+                      <td colSpan={8}>
+                        <EmptyState
+                          icon={<Package />}
+                          title={refreshingProducts ? tr('products_refreshing', 'Refreshing products...', 'កំពុងធ្វើបច្ចុប្បន្នភាពផលិតផល...') : t('no_data')}
+                        />
                       </td>
                     </tr>
                     ))
@@ -321,7 +304,7 @@ export default function ProductsListSurface({
                           one column further right, on the name rail. The
                           band still reads full width -- the background is
                           on the <tr>. */}
-                      <tr className="bg-slate-100/90 dark:bg-slate-800/80">
+                      <tr className="h-[var(--ui-row-h)] bg-slate-100/90 dark:bg-slate-800/80">
                         <td className={`${selectCellPad} py-2`}>
                           {selectionModeActive ? (
                             <input
@@ -370,7 +353,7 @@ export default function ProductsListSurface({
                                 rows' names, and as the category label above, at
                                 every viewport width. */}
                             {showGroupRow ? (
-                              <tr className="bg-white/80 dark:bg-slate-900/45" data-product-jump-id={group.anchorId} {...(bindGroupHold ? bindGroupHold(group) : {})}>
+                              <tr className="h-[var(--ui-row-h)] bg-white/80 dark:bg-slate-900/45" data-product-jump-id={group.anchorId} {...(bindGroupHold ? bindGroupHold(group) : {})}>
                                 <td className={`${selectCellPad} py-2.5`}>
                                   {selectionModeActive ? (
                                     <input
@@ -457,35 +440,33 @@ export default function ProductsListSurface({
           region) so this flows with `.page-scroll` instead. */}
       <div className="space-y-2 sm:hidden">
         {loading ? (
-          <div className="space-y-2">
-            {skeletonRows.slice(0, 6).map((row) => (
-              <div key={`product-mobile-skeleton-${row}`} className="card animate-pulse p-3">
-                <div className="flex items-start gap-3">
-                  <div className="h-4 w-4 rounded bg-slate-200 dark:bg-slate-700" />
-                  <div className="min-w-0 flex-1 space-y-2">
-                    <div className="h-4 w-3/4 rounded bg-slate-200 dark:bg-slate-700" />
-                    <div className="h-3 w-1/2 rounded bg-slate-200 dark:bg-slate-700" />
-                    <div className="h-8 w-full rounded bg-slate-100 dark:bg-slate-800" />
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
+          // P2-4 step 7: same Skeleton adoption as the desktop shell above.
+          <Skeleton variant="table" rows={6} />
         ) : visibleProducts.length === 0 ? (
-          <div className="py-10 text-center text-gray-400">
-            {refreshingProducts ? tr('products_refreshing', 'Refreshing products...', 'កំពុងធ្វើបច្ចុប្បន្នភាពផលិតផល...') : t('no_data')}
-          </div>
+          <EmptyState
+            icon={<Package />}
+            title={refreshingProducts ? tr('products_refreshing', 'Refreshing products...', 'កំពុងធ្វើបច្ចុប្បន្នភាពផលិតផល...') : t('no_data')}
+          />
         ) : productSections.map((section) => {
           const isCollapsed = collapsedProductSections.has(section.id)
           return (
             <div key={section.id} className="space-y-2">
               <div className="rounded-xl bg-slate-100 px-3 py-2 dark:bg-slate-800/70">
-                <div className="flex items-center justify-between gap-3">
-                  <label className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
+                {/* P2-4 fix (cert-phase1): at 375px this row used to clip the
+                    Collapse button off-screen because the label was an
+                    unconstrained flex child that could grow past the row's
+                    width. min-w-0 on the row + label lets the flex box
+                    actually shrink the label, and shrink-0 pins the button
+                    so it always stays reachable; the category name truncates
+                    with an ellipsis and a native title attr for the rare
+                    overflow case (not user free text, so no TruncatedText
+                    needed here). */}
+                <div className="flex min-w-0 items-center justify-between gap-3">
+                  <label className="flex min-w-0 flex-1 items-center gap-2 text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
                     {selectionModeActive ? (
                       <input
                         type="checkbox"
-                        className="h-4 w-4 rounded"
+                        className="h-4 w-4 shrink-0 rounded"
                         checked={isSelectionScopeFullySelected(section.ids)}
                         ref={(node) => {
                           if (node) node.indeterminate = isSelectionScopePartiallySelected(section.ids)
@@ -494,12 +475,12 @@ export default function ProductsListSurface({
                         aria-label={`Select ${section.label}`}
                       />
                     ) : null}
-                    <span>{section.label}</span>
-                    <span className="normal-case tracking-normal text-slate-400">{section.items.length}</span>
+                    <span className="min-w-0 truncate" title={section.label}>{section.label}</span>
+                    <span className="shrink-0 normal-case tracking-normal text-slate-400">{section.items.length}</span>
                   </label>
                   <button
                     type="button"
-                    className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-medium text-slate-500 hover:bg-white/70 hover:text-slate-700 dark:text-slate-300 dark:hover:bg-slate-700/60 dark:hover:text-white"
+                    className="inline-flex shrink-0 items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-medium text-slate-500 hover:bg-white/70 hover:text-slate-700 dark:text-slate-300 dark:hover:bg-slate-700/60 dark:hover:text-white"
                     onClick={() => toggleProductSection(section.id)}
                   >
                     {isCollapsed ? <ChevronRight className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}

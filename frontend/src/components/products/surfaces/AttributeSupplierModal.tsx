@@ -92,7 +92,7 @@ export default function AttributeSupplierModal({
   }
 
   const modal = (
-    <div className="modal-viewport-safe pointer-events-auto fixed inset-0 z-[1060] flex items-end justify-center overflow-y-auto bg-black/50 sm:items-center" onClick={onClose}>
+    <div className="modal-viewport-safe pointer-events-auto fixed inset-0 z-[var(--z-modal-2)] flex items-end justify-center overflow-y-auto bg-[var(--ui-backdrop)] sm:items-center" onClick={onClose}>
       <div
         className="modal-panel-safe flex w-full flex-col overflow-hidden rounded-t-2xl bg-white shadow-2xl sm:max-w-md sm:rounded-2xl dark:bg-gray-800"
         onClick={(event) => event.stopPropagation()}
