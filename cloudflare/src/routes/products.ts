@@ -36,15 +36,11 @@ import {
   type RenameKind,
 } from '../lib/renameCascade'
 import {
-  buildFtsMatchExpression,
-  buildHybridMatchClause,
   buildIssueStateClauses,
-  buildPartialWordMatchClause,
-  buildShortWordFallbackClause,
-  buildTrigramMatchExpression,
+  buildProductSearchPlan,
+  computeExactBarcodeHitId,
   isDigitsOnlyQuery,
   PRODUCT_SEARCH_COLUMNS,
-  PRODUCTS_FTS_BM25_SQL,
   runFuzzyFallbackMatch,
   tokenizeSearchTermGroups,
 } from '../lib/searchMatch'
@@ -748,12 +744,23 @@ async function searchProductsPayload(env: Env, query: Record<string, string>, op
   // product's full batch array. See lib/productBatches.ts's attachBatchCounts.
   await attachBatchCounts(getDb(env), itemsWithGallery)
 
+  // P2-2 (decision 9, Gate 2B A.6.1): id of the single row on THIS page
+  // whose barcode exactly equals the typed/scanned value, or null. Never
+  // used server-side to filter/select anything -- purely a highlight flag
+  // the frontend uses to visually emphasize the row; the user still has to
+  // click/confirm it (see frontend/src/hooks/useBarcodeScan.ts).
+  const exactBarcodeHitId = computeExactBarcodeHitId(
+    itemsWithGallery as Array<{ id: number; barcode?: string | null }>,
+    query.query || query.q || '',
+  )
+
   return {
     items: itemsWithGallery,
     total,
     page,
     pageSize,
     totalPages,
+    exact_barcode_hit_id: exactBarcodeHitId,
     // The active rule set rides every product payload so POS/Products can
     // evaluate the SAME kernel client-side (badges, cart pricing) without
     // a second fetch -- and inherit it offline with the cached response.
@@ -818,158 +825,41 @@ function buildSearchFilters(query: Record<string, string>, options: ProductSearc
     })
     if (wordClauses.length) where.push(`(${wordClauses.join(searchMode === 'OR' ? ' OR ' : ' AND ')})`)
   } else if (searchTermGroups.length) {
-    // See lib/searchMatch.ts's buildFtsMatchExpression for how comma
-    // groups/AND-OR/alias-candidates map onto FTS5 MATCH syntax, and
-    // migrations/0018_products_fts.sql for why this replaced a
-    // REPLACE()-chain-wrapped LIKE scan across 8 columns per row.
-    // Scoped to PRODUCT_SEARCH_COLUMNS (name/sku/barcode only) -- see that
-    // constant's own comment in lib/searchMatch.ts for the full reasoning
-    // (brand/category/unit/supplier/description are all noise for a typed
-    // product search box and are already reachable via their own filter
-    // dropdowns or, for unit, its own exact-match review filter).
-    const ftsMatch = buildFtsMatchExpression(searchTermGroups, searchMode, titleOnly ? 'name' : PRODUCT_SEARCH_COLUMNS)
-    // buildTrigramMatchExpression/products_fts_code (migrations/
-    // 0019_products_fts_code.sql) covers the real gap ftsMatch alone
-    // has: unicode61 prefix matching can't find "012" inside a barcode
-    // like "6923644012345" (one unbroken token, "012" isn't its prefix).
-    // Computed once and reused below for BOTH the barcode/sku table and
-    // products_fts_name_trigram (migrations/0021_products_fts_name_
-    // trigram.sql) -- the expression itself only depends on the typed
-    // words/mode, not which table it's matched against, so one call
-    // covers both. No longer gated on titleOnly: it used to be, back
-    // when this only fed products_fts_code (barcode/sku substring
-    // matching has no meaning for a name-only search) -- but it's also
-    // the source for the name-trigram clause below, which titleOnly
-    // *does* need.
-    const trigramMatch = buildTrigramMatchExpression(searchTermGroups, searchMode)
-    // Both MATCH conditions are expressed as `p.id IN (SELECT rowid FROM
-    // <fts table> WHERE <fts table> MATCH ...)` rather than a JOIN +
-    // direct `<fts table> MATCH ...` WHERE clause -- confirmed against
-    // real FTS5 (better-sqlite3) that combining a JOINed-table's direct
-    // MATCH with an OR throws "unable to use function MATCH in the
-    // requested context" the moment a second condition needs an OR
-    // instead of an AND, even when that second condition doesn't touch
-    // the same table at all. The IN-subquery form doesn't have that
-    // restriction and combines cleanly via OR either way, so it's used
-    // for both parts even when only one of the two is actually present
-    // (keeps the two search paths structurally identical instead of
-    // branching between a JOIN form and a subquery form).
-    const matchClauses: string[] = []
-    if (ftsMatch) {
-      params.ftsQuery = ftsMatch
-      matchClauses.push('p.id IN (SELECT rowid FROM products_fts WHERE products_fts MATCH @ftsQuery)')
-    }
-    if (trigramMatch && !titleOnly) {
-      params.codeQuery = trigramMatch
-      matchClauses.push('p.id IN (SELECT rowid FROM products_fts_code WHERE products_fts_code MATCH @codeQuery)')
-    }
-    // Real, reported gap this closes: unicode61 prefix matching (ftsMatch
-    // above) can only find a NAME word from its start -- a product like
-    // "Abercrombie Fierce Cologne 100ml" or "Anastasia Foundation 110C"
-    // stores "100ml"/"110C" as one unbroken token (no space between the
-    // number and the unit/shade-code letters), so typing just the unit
-    // ("ml") or shade code fragment never matched, the exact same class of
-    // bug 0019_products_fts_code.sql already fixed for barcode/sku.
-    // Confirmed at real catalog scale (this project's own real product
-    // catalog, ~107,000 realistic test queries via a real better-sqlite3
-    // harness) before writing this: fused number+unit/shade-code tokens
-    // (10ml, 100ml, 454g, 110C, ...) were by far the single largest cause
-    // of "search hides a product that's clearly there".
-    // products_fts_name_trigram (migrations/0021_products_fts_name_
-    // trigram.sql) mirrors products_fts_code's own trigram-substring
-    // approach, scoped to just `name`. Applies in titleOnly mode too
-    // (unlike the barcode/sku trigram clause above) -- titleOnly means
-    // "search name only", and this table only ever covers name, so it's
-    // exactly the fallback that mode needs.
-    if (trigramMatch) {
-      params.nameCodeQuery = trigramMatch
-      matchClauses.push('p.id IN (SELECT rowid FROM products_fts_name_trigram WHERE products_fts_name_trigram MATCH @nameCodeQuery)')
-    }
-    // Closes the mixed-group gap ftsMatch/trigramMatch can't express on
-    // their own -- see buildHybridMatchClause's own comment in
-    // lib/searchMatch.ts for why (e.g. one comma-group containing both
-    // "mac" and "012", where each word only resolves via a different one
-    // of the two tables). No-op (returns undefined) for the common
-    // single-word-per-group case, which stays on the cheaper paths above.
-    const hybridMatch = titleOnly ? undefined : buildHybridMatchClause(searchTermGroups, searchMode, 'hyb', PRODUCT_SEARCH_COLUMNS)
-    if (hybridMatch) {
-      Object.assign(params, hybridMatch.params)
-      matchClauses.push(hybridMatch.sql)
-    }
-    // Real gap the two trigram tables above can't fix on their own: FTS5's
-    // trigram tokenizer generates no trigrams for a query under 3
-    // characters, so a search for just "ml"/"g"/a single shade-code letter
-    // (extremely common once separated from this catalog's fused
-    // number+unit naming, e.g. "Anastasia Foundation 110C") is
-    // unconditionally zero rows via products_fts_code/products_fts_name_
-    // trigram no matter how the name is stored. Confirmed by far the
-    // largest remaining real-catalog search-accuracy gap (see
-    // buildShortWordFallbackClause's own comment in lib/searchMatch.ts) --
-    // fixed with a plain LIKE fallback, scoped to name+unit only (not
-    // sku/barcode/brand/category/supplier -- a bare 1-2 character LIKE
-    // against those would match far too broadly to be a useful "hides a
-    // real product" fix and would just add noise), gated so it only ever
-    // runs when the query actually contains a sub-3-character word.
-    //
-    // Real, confirmed gap left behind by migration 0037_product_search_
-    // compact_columns.sql: that migration fixed buildCompactBrandMatchClause's
-    // own raw-p.brand REPLACE-chain (the "ana" incident its own comment
-    // documents), but this call site was still passing the RAW `p.name`/
-    // `p.unit` columns with alreadyNormalizedCols left at its default
-    // (false) -- so any query containing a sub-3-character word (the exact
-    // case this fallback exists for: "an", "a", "ml", a single shade-code
-    // letter) still ran normalizedHaystackSql's full ~78-level nested
-    // REPLACE() chain per column, per word, and still could exceed D1's
-    // depth-100 limit. Reproduced against this migration's own name_
-    // normalized/unit_normalized columns (added specifically so callers
-    // like this one could skip the REPLACE chain entirely) -- switching to
-    // those precomputed columns with alreadyNormalizedCols=true removes the
-    // nesting here exactly the way it already does for brand.
-    // Scoped to name_normalized only now (unit dropped along with unit
-    // leaving PRODUCT_SEARCH_COLUMNS -- see that constant's own comment):
-    // unit is no longer a free-text search dimension, it has its own
-    // exact-match review filter instead.
-    const shortWordMatch = buildShortWordFallbackClause(searchTermGroups, searchMode, ['p.name_normalized'], params, 'shortw', true)
-    if (shortWordMatch) matchClauses.push(shortWordMatch)
-    // Compact-brand substring fallback intentionally NOT called here
-    // anymore -- brand is no longer a free-text search dimension (see
-    // PRODUCT_SEARCH_COLUMNS's own comment in lib/searchMatch.ts): product
-    // names already carry the brand in this catalog, and brandFilter
-    // already covers the exact-brand-lookup case. buildCompactBrandMatchClause
-    // itself is untouched (still exported, still covers the portal's own
-    // needs -- actually also removed there, see portal.ts) in case a future
-    // dedicated brand-search surface needs it again.
-    // Partial multi-word fallback -- only ever engages for a genuinely
-    // long typed query (4+ words in one comma-group), see
-    // buildPartialWordMatchClause's own comment for why that keeps the
-    // common short search cheap. Scoped to name only, same reasoning as
-    // shortWordMatch above (a loose multi-word LIKE against brand/sku/
-    // category would add noise, not signal, for this specific "long
-    // product name" case).
-    // Same depth-100 fix as shortWordMatch above -- name_normalized instead
-    // of raw p.name, alreadyNormalizedCols=true so this skips the REPLACE
-    // chain too (this fallback only engages for 4+-word groups, but a long
-    // typed query is exactly the case most likely to already be near the
-    // depth ceiling once combined with everything else in the WHERE).
-    const partialMatch = buildPartialWordMatchClause(searchTermGroups, searchMode, ['p.name_normalized'], params, 'partialw', 4, true)
-    if (partialMatch) matchClauses.push(partialMatch)
-    if (matchClauses.length) {
-      searchWhereClause = matchClauses.length > 1 ? `(${matchClauses.join(' OR ')})` : matchClauses[0]
-      // bm25() must be evaluated inside a query that itself carries the
-      // matching table's own MATCH constraint directly -- confirmed it
-      // can't be called against a table that's only conditionally
-      // matched via an outer OR. A correlated scalar subquery (its own
-      // FROM + MATCH, just correlated on rowid = p.id) satisfies that
-      // requirement while still being usable as a plain SELECT-list
-      // expression. Only ftsMatch contributes a relevance score --
-      // products_fts_code has no bm25 weighting of its own (trigram
-      // relevance isn't meaningful the same way word-match relevance
-      // is); a product that matched only via the barcode/sku fallback
-      // still ranks (COALESCEs to 0, ties with "no search" rank) rather
-      // than being excluded from ordering entirely.
-      if (!titleOnly && ftsMatch) {
-        matchRankSql = `COALESCE((SELECT ${PRODUCTS_FTS_BM25_SQL} FROM products_fts WHERE products_fts.rowid = p.id AND products_fts MATCH @ftsQuery), 0)`
-      }
+    // P2-2 (Gate 2B audit): this used to hand-roll the FTS5-prefix ->
+    // trigram-substring -> hybrid-mixed-group -> short-word-LIKE ->
+    // partial-word-LIKE sequence directly (see git history for the prior
+    // ~150-line inline version, and lib/searchMatch.ts's own
+    // buildProductSearchPlan comment for why it moved). Same sequence,
+    // same PRODUCT_SEARCH_COLUMNS scope (name/sku/barcode -- brand/
+    // category/unit/supplier/description stay out, already reachable via
+    // their own filter dropdowns), now shared with routes/portal.ts and
+    // routes/branches.ts (and routes/inventory.ts via a prepared patch)
+    // instead of copy-pasted four times. Two behavioral additions over the
+    // prior inline version: short-word/partial-word fallback now also
+    // covers barcode/sku (closes the confirmed 1-2 digit barcode-fragment
+    // gap, Gate 2B A.5), and exactRankSql ranks an exact barcode/sku match
+    // ahead of a same-bm25-weight name match.
+    const plan = buildProductSearchPlan({
+      groups: searchTermGroups,
+      mode: searchMode,
+      columns: PRODUCT_SEARCH_COLUMNS,
+      titleOnly,
+      exactMatchQuery: query.query || query.q || '',
+    })
+    Object.assign(params, plan.params)
+    if (plan.whereClause) {
+      searchWhereClause = plan.whereClause
+      // Folded into ONE rank expression (rather than threading a second
+      // rank field through familyPagination.ts, which P2-2 doesn't own)
+      // by weighting exactRankSql (0/1/2) far above bm25's actual range
+      // (a handful of points either side of 0) -- ORDER BY this ASC is
+      // equivalent to ORDER BY exact_rank ASC, bm25_rank ASC. Only
+      // combined when plan.matchRankSql exists (titleOnly searches never
+      // compute one, same as before this refactor -- a name-only search
+      // has no barcode/sku relevance to rank by in the first place).
+      matchRankSql = plan.matchRankSql
+        ? `((${plan.exactRankSql}) * 1000000) + (${plan.matchRankSql})`
+        : undefined
     }
   }
 

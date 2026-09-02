@@ -1,4 +1,4 @@
-import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Suspense, lazy, useCallback, useEffect, useMemo, useState } from 'react'
 import type { ComponentType, SVGProps } from 'react'
 import Gift from 'lucide-react/dist/esm/icons/gift.js'
 import Plus from 'lucide-react/dist/esm/icons/plus.js'
@@ -26,6 +26,7 @@ import {
   type PromotionRuleWrite,
 } from '../../api/promotionsTransport.ts'
 import { searchProducts, getProductFilters, updateProduct } from '../../api/methods.ts'
+import { useProductLookup } from '../../hooks/useProductLookup.ts'
 import { promotionAutoLabel, normalizePromotionRule } from '../../utils/promotionRules.ts'
 import { calculateProductDiscount, isProductDiscountActive } from '../../utils/pricing.ts'
 
@@ -203,7 +204,6 @@ export default function PromotionsPage() {
   // Product picker inside the rule editor.
   const [pickerQuery, setPickerQuery] = useState('')
   const [pickerResults, setPickerResults] = useState<ProductLite[]>([])
-  const searchSeq = useRef(0)
 
   const loadRules = useCallback(async () => {
     setRulesLoading(true)
@@ -241,22 +241,44 @@ export default function PromotionsPage() {
   }, [loadRules, loadDiscounted])
 
   // Debounced product search, shared by the rule scope picker and the
-  // per-product discount search box (whichever is open).
+  // per-product discount search box (whichever is open) -- P2-2: this used
+  // to be a hand-rolled 300ms setTimeout + a searchSeq ref to guard against
+  // out-of-order responses. Now backed by useProductLookup (frontend/src/
+  // hooks/useProductLookup.ts), which gives the same debounce/stale-response
+  // guarding plus real request cancellation (via the SAME 'products:search'
+  // group api/productReadTransport.ts's searchProducts() already shares
+  // across every page, see its own comment on that group name) and the
+  // exact-barcode-hit id (see productQueryLookup.exactBarcodeHit below,
+  // consumed by the two dropdowns to highlight a scanned/typed exact match --
+  // decision 9: highlight only, the user still has to click it).
+  //
+  // The two-input architecture (productQuery/pickerQuery, each bound to its
+  // own search box and its own ScanSearchButton) is left untouched -- only
+  // one of the two dropdowns is ever visible at a time (whichever `draft`
+  // selects), so the hook's single internal query is kept in sync with
+  // whichever input is currently live, and its results are mirrored back
+  // into the same productResults/pickerResults state the two dropdowns
+  // already render from.
+  const activeQuery = draft ? pickerQuery : productQuery
+  const productQueryLookup = useProductLookup<ProductLite>({
+    endpoint: '/api/products/search',
+    cancelGroup: 'products:search',
+    debounceMs: 300,
+    pageSize: 12,
+  })
+
   useEffect(() => {
-    const query = draft ? pickerQuery : productQuery
-    if (!query.trim()) { setPickerResults([]); setProductResults([]); return }
-    const seq = ++searchSeq.current
-    const timer = window.setTimeout(async () => {
-      try {
-        const payload = await searchProducts({ query: query.trim(), pageSize: 12 }) as { items?: ProductLite[] }
-        if (seq !== searchSeq.current) return
-        const items = Array.isArray(payload?.items) ? payload.items : []
-        if (draft) setPickerResults(items)
-        else setProductResults(items)
-      } catch { /* stale/failed search -- keep previous list */ }
-    }, 300)
-    return () => window.clearTimeout(timer)
-  }, [pickerQuery, productQuery, draft])
+    productQueryLookup.setQuery(activeQuery)
+    // productQueryLookup.setQuery is stable across renders (useCallback with
+    // no deps) -- only activeQuery should re-trigger this.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeQuery])
+
+  useEffect(() => {
+    if (!activeQuery.trim()) { setPickerResults([]); setProductResults([]); return }
+    if (draft) setPickerResults(productQueryLookup.results)
+    else setProductResults(productQueryLookup.results)
+  }, [productQueryLookup.results, draft, activeQuery])
 
   const openNewRule = () => {
     if (!canManagePromotions) return
@@ -630,18 +652,21 @@ export default function PromotionsPage() {
                 />
                 {productResults.length > 0 ? (
                   <ul className="absolute z-20 mt-1 max-h-64 w-full overflow-auto rounded-lg border border-gray-200 bg-white shadow-lg dark:border-gray-700 dark:bg-gray-900">
-                    {productResults.map((product) => (
-                      <li key={String(product.id)}>
-                        <button
-                          type="button"
-                          className="w-full px-3 py-2 text-left text-sm hover:bg-gray-50 dark:hover:bg-gray-800"
-                          onClick={() => { openDiscountEditor(product); setProductResults([]) }}
-                        >
-                          {String(product.name || `#${product.id}`)}
-                          <span className="ml-2 text-xs text-gray-400">{fmtUSD(Number(product.selling_price_usd) || 0)}</span>
-                        </button>
-                      </li>
-                    ))}
+                    {productResults.map((product) => {
+                      const isExactHit = productQueryLookup.exactBarcodeHit !== null && Number(product.id) === productQueryLookup.exactBarcodeHit
+                      return (
+                        <li key={String(product.id)} data-exact-hit={isExactHit ? 'true' : undefined}>
+                          <button
+                            type="button"
+                            className={`w-full px-3 py-2 text-left text-sm hover:bg-gray-50 dark:hover:bg-gray-800 ${isExactHit ? 'bg-blue-50 dark:bg-blue-950/30' : ''}`}
+                            onClick={() => { openDiscountEditor(product); setProductResults([]) }}
+                          >
+                            {String(product.name || `#${product.id}`)}
+                            <span className="ml-2 text-xs text-gray-400">{fmtUSD(Number(product.selling_price_usd) || 0)}</span>
+                          </button>
+                        </li>
+                      )
+                    })}
                   </ul>
                 ) : null}
               </div>
@@ -908,20 +933,23 @@ export default function PromotionsPage() {
                         onChange={(event) => setPickerQuery(event.target.value)} />
                       {pickerResults.length > 0 && (
                         <ul className="absolute z-20 mt-1 max-h-48 w-full overflow-auto rounded-lg border border-gray-200 bg-white shadow-lg dark:border-gray-700 dark:bg-gray-900">
-                          {pickerResults.map((product) => (
-                            <li key={String(product.id)}>
-                              <button type="button" className="w-full px-3 py-1.5 text-left text-sm hover:bg-gray-50 dark:hover:bg-gray-800"
-                                onClick={() => {
-                                  if (!draft.products.some((p) => Number(p.id) === Number(product.id))) {
-                                    setDraft({ ...draft, products: [...draft.products, product] })
-                                  }
-                                  setPickerQuery('')
-                                  setPickerResults([])
-                                }}>
-                                {String(product.name || `#${product.id}`)}
-                              </button>
-                            </li>
-                          ))}
+                          {pickerResults.map((product) => {
+                            const isExactHit = productQueryLookup.exactBarcodeHit !== null && Number(product.id) === productQueryLookup.exactBarcodeHit
+                            return (
+                              <li key={String(product.id)} data-exact-hit={isExactHit ? 'true' : undefined}>
+                                <button type="button" className={`w-full px-3 py-1.5 text-left text-sm hover:bg-gray-50 dark:hover:bg-gray-800 ${isExactHit ? 'bg-blue-50 dark:bg-blue-950/30' : ''}`}
+                                  onClick={() => {
+                                    if (!draft.products.some((p) => Number(p.id) === Number(product.id))) {
+                                      setDraft({ ...draft, products: [...draft.products, product] })
+                                    }
+                                    setPickerQuery('')
+                                    setPickerResults([])
+                                  }}>
+                                  {String(product.name || `#${product.id}`)}
+                                </button>
+                              </li>
+                            )
+                          })}
                         </ul>
                       )}
                     </div>

@@ -1,21 +1,30 @@
-// searchMatch.ts (Worker/backend copy)
+// searchMatch.ts (frontend copy)
 //
-// Server-side counterpart of frontend/src/utils/searchMatch.ts -- same
+// P2-2 (Gate 2B audit): this file's header used to open with "(Worker/
+// backend copy)" and a paragraph describing SQL-facing helpers
+// (foldDiacriticsSql, foldJoinersSql, normalizedHaystackSql, plus the
+// DIACRITIC_SQL_PAIRS/JOINER_SQL_CHARS tables and sqlLiteral they leaned
+// on) -- the actual header of cloudflare/src/lib/searchMatch.ts, seemingly
+// pasted over this file's own header by mistake at some point. Confirmed
+// those SQL-string-building exports had zero call sites anywhere in
+// frontend/src -- they build raw SQL fragments, a concept with no meaning
+// in a browser bundle that only ever talks to the Worker over its REST
+// API, never to D1/SQLite directly -- so removed here along with the
+// mislabeled header, rather than left as unreachable exports pretending
+// to be load-bearing.
+//
+// Client-side counterpart of cloudflare/src/lib/searchMatch.ts -- same
 // normalization/fuzzy-matching behavior (typos, joiner variants, conjoined
 // vs. split words, word-order independence, diacritics, brand-shorthand
-// aliases), duplicated here rather than imported because the frontend and
+// aliases) for the functions genuinely shared between the two runtimes
+// (normalizeSearchText, compactSearchText, tokenizeSearchWords,
+// matchesSearchTermGroups, fuzzyTextMatches, runFuzzyFallbackMatch, and
+// friends), duplicated here rather than imported because the frontend and
 // the Cloudflare Worker are two separate TypeScript projects/bundlers with
 // no shared package between them today. If a real shared package is ever
-// set up, these two files should be collapsed into one.
-//
-// This copy adds SQL-facing helpers (foldDiacriticsSql, foldJoinersSql,
-// normalizedHaystackSql, tokenizeSearchWords, expandAliasCandidates) so
-// routes/products.ts and friends can build a WHERE clause that's tolerant
-// of joiners/diacritics directly in SQL (see those functions' own comments
-// for why), and keeps fuzzyTextMatches/matchesSearchTermGroups as the JS
-// fallback pass for genuine typos, which SQL LIKE can never express.
-//
-// Original frontend header, still accurate for the shared logic below:
+// set up, these two files should be collapsed into one. See
+// frontend/tests/searchMatchParity.test.ts for the test that pins the two
+// copies' shared functions behaving identically.
 //
 // Shared free-text matching used everywhere a person types into a product
 // search box (Products, Inventory, POS, the public portal, and the portal
@@ -306,100 +315,33 @@ export function fuzzyTextMatches(haystack: unknown, rawQuery: unknown): boolean 
   return termMatchesHaystack(query, buildHaystackIndex(haystack))
 }
 
-// --- SQL-facing helpers -----------------------------------------------
-//
-// D1/SQLite's LIKE is a literal, byte-for-byte comparison -- it has no
-// concept of "these two characters mean the same letter" the way our JS
-// normalizeSearchText does. To make the *server's own* search (the one
-// that actually determines paginated results, not just the client's
-// re-filter of the current page) diacritic- and joiner-tolerant without a
-// database migration or a new normalized column, these helpers wrap a SQL
-// text expression in a chain of REPLACE() calls that performs the exact
-// same folding in SQL that normalizeSearchText performs in JS. Both sides
-// of the eventual `<folded column> LIKE <folded/normalized param>`
-// comparison end up in the same normalized alphabet, so a stored value of
-// "Crème" matches a typed "creme", and a stored "Cover + Concealer"
-// matches a typed "cover concealer" or "cover+concealer" either way.
-//
-// Deliberately NOT attempted in SQL: genuine typo/edit-distance tolerance.
-// SQLite has no built-in fuzzy-match operator, and emulating Levenshtein in
-// pure SQL per-row would be both slow and unreadable. That case is instead
-// handled by a JS fallback pass (see routes/products.ts's
-// runFuzzyFallbackSearch) that only runs when the strict, SQL-folded search
-// above finds zero results for a non-empty query -- the common case (a
-// correctly- or near-correctly-typed search) never pays that cost.
-
-const DIACRITIC_SQL_PAIRS: Array<[string, string]> = [
-  ['á', 'a'], ['Á', 'a'], ['à', 'a'], ['À', 'a'], ['â', 'a'], ['Â', 'a'], ['ä', 'a'], ['Ä', 'a'], ['ã', 'a'], ['Ã', 'a'], ['å', 'a'], ['Å', 'a'],
-  ['é', 'e'], ['É', 'e'], ['è', 'e'], ['È', 'e'], ['ê', 'e'], ['Ê', 'e'], ['ë', 'e'], ['Ë', 'e'],
-  ['í', 'i'], ['Í', 'i'], ['ì', 'i'], ['Ì', 'i'], ['î', 'i'], ['Î', 'i'], ['ï', 'i'], ['Ï', 'i'],
-  ['ó', 'o'], ['Ó', 'o'], ['ò', 'o'], ['Ò', 'o'], ['ô', 'o'], ['Ô', 'o'], ['ö', 'o'], ['Ö', 'o'], ['õ', 'o'], ['Õ', 'o'], ['ø', 'o'], ['Ø', 'o'],
-  ['ú', 'u'], ['Ú', 'u'], ['ù', 'u'], ['Ù', 'u'], ['û', 'u'], ['Û', 'u'], ['ü', 'u'], ['Ü', 'u'],
-  ['ý', 'y'], ['Ý', 'y'], ['ÿ', 'y'], ['Ÿ', 'y'],
-  ['ñ', 'n'], ['Ñ', 'n'], ['ç', 'c'], ['Ç', 'c'], ['ş', 's'], ['Ş', 's'], ['ţ', 't'], ['Ţ', 't'],
-  ['æ', 'ae'], ['Æ', 'ae'], ['œ', 'oe'], ['Œ', 'oe'], ['ß', 'ss'], ['ł', 'l'], ['Ł', 'l'], ['đ', 'd'], ['Đ', 'd'], ['þ', 'th'], ['Þ', 'th'],
-]
-
-const JOINER_SQL_CHARS = ['+', '&', '/', '_', '.', '-']
-
-function sqlLiteral(char: string): string {
-  return char.replace(/'/g, "''")
-}
-
-// Wraps `expr` (a column reference or any SQL text expression) in nested
-// REPLACE() calls that fold every accented character in DIACRITIC_SQL_PAIRS
-// to its plain-ASCII base letter, mirroring foldDiacritics above.
-export function foldDiacriticsSql(expr: string): string {
-  let out = expr
-  for (const [accented, base] of DIACRITIC_SQL_PAIRS) {
-    out = `REPLACE(${out}, '${sqlLiteral(accented)}', '${base}')`
-  }
-  return out
-}
-
-// Wraps `expr` in nested REPLACE() calls turning every joiner character
-// into a space, mirroring normalizeSearchText's joiner handling.
-export function foldJoinersSql(expr: string): string {
-  let out = expr
-  for (const joiner of JOINER_SQL_CHARS) {
-    out = `REPLACE(${out}, '${sqlLiteral(joiner)}', ' ')`
-  }
-  return out
-}
-
-// Full pipeline: fold diacritics (case-sensitive pairs, so this must run
-// before lower()), fold joiners, then lower() for plain ASCII casing.
-// Apply this to both the column expression AND the bound search parameter
-// (tokenizeSearchWords already normalizes the parameter side in JS) so the
-// comparison happens in the same normalized alphabet on both sides.
-export function normalizedHaystackSql(expr: string): string {
-  return `lower(${foldJoinersSql(foldDiacriticsSql(expr))})`
-}
-
 // --- JS fallback pass for genuine typos ---------------------------------
 //
-// SQL LIKE, even folded through normalizedHaystackSql above, is still a
-// literal substring comparison -- it can express "diacritics/joiners don't
-// matter" but not "this is a misspelling of that word" (that's
-// wordsFuzzyMatch's bounded-Levenshtein pass earlier in this file, which
-// SQL has no equivalent of and this file's own header comment always said
-// would run as a fallback -- see routes/products.ts's now-corrected
-// splitSearchTerms comment). A typed "consealer" against a stored
-// "concealer" is zero SQL LIKE hits no matter how it's folded, even though
-// a human recognizes the match instantly.
+// Even on the server's own SQL-folded search (which handles "diacritics/
+// joiners don't matter" -- see cloudflare/src/lib/searchMatch.ts's
+// normalizedHaystackSql for how, a backend-only concern with no equivalent
+// here), a plain SQL LIKE can't express "this is a misspelling of that
+// word" (that's wordsFuzzyMatch's bounded-Levenshtein pass earlier in this
+// file). A typed "consealer" against a stored "concealer" is zero SQL LIKE
+// hits no matter how it's folded, even though a human recognizes the match
+// instantly.
 //
 // This was planned since the fuzzy-search rollout (part 66) but never
 // actually wired into any route -- routes/products.ts imported
 // fuzzyTextMatches and never called it, a real "looks-wired-but-isn't" gap
-// (Track A's exact bug class), found and fixed this session. Every
-// server-paginated search route (products.ts, inventory.ts, portal.ts)
-// now calls this the same way: only when the strict SQL-folded search
-// finds literally zero rows for a non-empty query, against a bounded
-// candidate list the caller has already narrowed by every *other* filter
-// (branch/stock/category/etc, still via SQL) -- so the common case (a
-// correctly- or near-correctly-typed search) never pays this cost, and a
-// worst-case miss only ever fuzzy-matches a bounded slice of the catalog,
-// never the whole table.
+// (Track A's exact bug class), found and fixed in an earlier session. Every
+// server-paginated search route (products.ts, inventory.ts, portal.ts,
+// branches.ts) now calls the backend copy of this same function the same
+// way: only when the strict SQL-folded search finds literally zero rows
+// for a non-empty query, against a bounded candidate list the caller has
+// already narrowed by every *other* filter (branch/stock/category/etc,
+// still via SQL) -- so the common case (a correctly- or near-correctly-
+// typed search) never pays this cost, and a worst-case miss only ever
+// fuzzy-matches a bounded slice of the catalog, never the whole table.
+// This frontend copy of runFuzzyFallbackMatch has no current call site of
+// its own (every page below calls matchesSearchTermGroups directly, to
+// re-filter the page it already fetched) -- kept for parity with the
+// backend copy and because it's the same one-line wrapper either way.
 export interface FuzzyFallbackCandidate<TId extends number | string = number> {
   id: TId
   haystack: string

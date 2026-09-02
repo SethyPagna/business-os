@@ -13,7 +13,7 @@ import { detectBufferKind } from '../lib/uploadSecurity'
 import { broadcast } from '../durable-objects/broadcastHub'
 import { generatePortalAiResponse } from '../lib/portalAi'
 import { ADMIN_MAX_IMAGES_PER_PRODUCT } from '../lib/importImageMatch'
-import { buildFtsMatchExpression, buildPartialWordMatchClause, buildShortWordFallbackClause, buildTrigramMatchExpression, PRODUCTS_FTS_BM25_SQL, runFuzzyFallbackMatch, tokenizeSearchWords } from '../lib/searchMatch'
+import { buildProductSearchPlan, computeExactBarcodeHitId, isDigitsOnlyQuery, MIN_REAL_BARCODE_LENGTH, runFuzzyFallbackMatch, tokenizeSearchWords } from '../lib/searchMatch'
 import { loadActivePromotionRules, productPromotedSql } from '../lib/promotionRulesSql'
 import { paginateProductFamilies } from '../lib/familyPagination'
 import { signupPortalAccount, signinPortalAccount } from '../lib/portalAccounts'
@@ -1497,101 +1497,34 @@ export function buildPortalProductFilters(query: Record<string, string>, allowSt
   const searchTerms = tokenizeSearchWords(query.query || query.q || '', 8)
   let searchWhereClause: string | undefined
   let matchRankSql: string | undefined
-  if (searchTerms.length) {
-    // Now on products_fts (migrations/0018_products_fts.sql) via an FTS5
-    // column-SET filter (`{name brand category}:term`, see
-    // buildFtsMatchExpression's own comment in lib/searchMatch.ts for how
-    // this was verified against real FTS5) instead of the old per-row
-    // REPLACE()-chain LIKE full-table scan -- that old approach couldn't
-    // use SQLite's inverted index at all (every normalizedHaystackSql()
-    // wrapper defeats any index on the underlying column), so every
-    // storefront search was a full scan of the products table, the exact
-    // cost profile migration 0018's own comment warns about. This is the
-    // one search path that reaches real customers on every keystroke (see
-    // the debounce fix on PublicCatalogPage.tsx), so it's the one place
-    // that cost mattered most. The public portal doesn't expose an
-    // AND/OR toggle -- always one AND-group of every typed word, same
-    // shape this endpoint already had, just expressed as a single FTS5
-    // group instead of an ANDed chain of LIKEs. `IN (SELECT rowid FROM
-    // products_fts WHERE ... MATCH ...)` rather than a JOIN, matching
-    // products.ts/inventory.ts's own wiring (a JOINed FTS5 table combined
-    // via OR throws at the SQLite level -- confirmed against real FTS5,
-    // see inventory.ts's comment). expandAliasCandidates (RT/NYX/BH/OFRA
-    // shorthand) is folded into buildFtsMatchExpression itself now,
-    // rather than expanded into separate LIKE clauses here.
-    // Column set narrowed to name/sku/barcode only, matching
-    // PRODUCT_SEARCH_COLUMNS on the staff-facing surfaces (products.ts/
-    // inventory.ts) -- brand/category dropped per the same reasoning that
-    // constant's own comment documents: product names already carry the
-    // brand in this catalog, and the storefront's own brand/category filter
-    // chips (below, the `for (const field of ['brand', 'category'])` loop)
-    // already cover exact brand/category lookup. sku/barcode stay in scope
-    // -- a shopper scanning or typing a product's barcode/SKU is exactly the
-    // "second-most-used search dimension after name" case. 'unit' was never
-    // in scope here (no portal equivalent of the admin unit-review
-    // workflow), unaffected by this change.
-    const ftsMatch = buildFtsMatchExpression([searchTerms], 'AND', ['name', 'sku', 'barcode'])
-    const matchClauses: string[] = []
-    if (ftsMatch) {
-      params.portalFtsQuery = ftsMatch
-      matchClauses.push('p.id IN (SELECT rowid FROM products_fts WHERE products_fts MATCH @portalFtsQuery)')
-      // Relevance ranking (bm25, same weighting products.ts uses) so a
-      // search actually surfaces the best match first instead of just
-      // alphabetically -- the old LIKE-chain version had no ranking
-      // concept at all, every result tied and fell through to the
-      // alphabetical ORDER BY regardless of match quality.
-      matchRankSql = `COALESCE((SELECT ${PRODUCTS_FTS_BM25_SQL} FROM products_fts WHERE products_fts.rowid = p.id AND products_fts MATCH @portalFtsQuery), 0)`
-    }
-    // products_fts_code (migrations/0019_products_fts_code.sql, trigram
-    // tokenizer) covers the same real gap it covers for products.ts/
-    // inventory.ts: word-prefix FTS5 matching alone can never find a
-    // barcode/SKU typed as a MID-string fragment (e.g. the last 4 digits
-    // of a barcode) because that fragment isn't a token boundary-aligned
-    // prefix -- see that migration's own comment. Not wired to
-    // matchRankSql -- trigram relevance isn't meaningful the same way
-    // word-match relevance is, same call products.ts already made.
-    const trigramMatch = buildTrigramMatchExpression([searchTerms], 'AND')
-    if (trigramMatch) {
-      params.portalCodeQuery = trigramMatch
-      matchClauses.push('p.id IN (SELECT rowid FROM products_fts_code WHERE products_fts_code MATCH @portalCodeQuery)')
-    }
-    // products_fts_name_trigram (migrations/0021_products_fts_name_
-    // trigram.sql) -- same fused number+unit/shade-code gap
-    // (e.g. "100ml", "110C") as products.ts/inventory.ts, and the
-    // storefront needs it just as much: a shopper typing "ml" or a
-    // shade-code fragment into the public search box is exactly the
-    // reported "search hides a product that's clearly there" case, and
-    // this is the highest-traffic search surface in the app (every
-    // customer keystroke, not just staff). Reuses the same trigramMatch
-    // expression computed above -- it's table-agnostic MATCH text.
-    if (trigramMatch) {
-      params.portalNameCodeQuery = trigramMatch
-      matchClauses.push('p.id IN (SELECT rowid FROM products_fts_name_trigram WHERE products_fts_name_trigram MATCH @portalNameCodeQuery)')
-    }
-    // Short-word (<3 char) LIKE fallback -- see buildShortWordFallbackClause's
-    // own comment in lib/searchMatch.ts. Scoped to 'name' only on the
-    // storefront (no 'unit' column exposed here the way the admin
-    // products/inventory search intentionally keeps for the unit-review
-    // workflow -- see PRODUCT_SEARCH_COLUMNS's own comment).
-    // Same depth-100 fix as products.ts/inventory.ts's identical call
-    // sites: name_normalized instead of raw p.name, alreadyNormalizedCols=
-    // true, so a shopper's 1-2 character search doesn't run the ~78-level
-    // nested REPLACE() chain (see migration 0037_product_search_compact_
-    // columns.sql and products.ts's own comment on this exact fix).
-    const shortWordMatch = buildShortWordFallbackClause([searchTerms], 'AND', ['p.name_normalized'], params, 'portalShortw', true)
-    if (shortWordMatch) matchClauses.push(shortWordMatch)
-    // Compact-brand substring fallback intentionally NOT called here
-    // anymore -- brand dropped from ftsMatch's own column list above, same
-    // reasoning (see PRODUCT_SEARCH_COLUMNS's comment in lib/searchMatch.ts).
-    // Partial multi-word fallback -- same long-name gap products.ts/
-    // inventory.ts close (see buildPartialWordMatchClause's own comment).
-    // Scoped to name only, same reasoning as those two.
-    // Same depth-100 fix as products.ts/inventory.ts -- name_normalized, alreadyNormalizedCols=true.
-    const partialMatch = buildPartialWordMatchClause([searchTerms], 'AND', ['p.name_normalized'], params, 'portalPartialw', 4, true)
-    if (partialMatch) matchClauses.push(partialMatch)
-    if (matchClauses.length) {
-      searchWhereClause = matchClauses.length > 1 ? `(${matchClauses.join(' OR ')})` : matchClauses[0]
-    }
+  // P2-2 (Gate 2B audit): this used to hand-roll its own FTS5-prefix ->
+  // trigram-substring -> short-word-LIKE -> partial-word-LIKE sequence
+  // (see git history) -- now built through the same
+  // buildProductSearchPlan shared with products.ts/branches.ts (and
+  // inventory.ts via a prepared patch), see that function's own comment
+  // in lib/searchMatch.ts. Same column scope this endpoint already used
+  // (name/sku/barcode -- brand/category dropped, matching
+  // PRODUCT_SEARCH_COLUMNS's own reasoning: product names already carry
+  // the brand in this catalog, and the storefront's own brand/category
+  // filter chips below already cover exact lookup), single AND-group
+  // (the public portal has no AND/OR toggle -- always every typed word
+  // required, same as before). Picks up the widened short-word/
+  // partial-word barcode/sku coverage (closes the confirmed 1-2 digit
+  // barcode-fragment gap, Gate 2B A.5) and an exact-barcode/sku-first
+  // rank term, folded into matchRankSql the same way products.ts does.
+  const searchPlan = buildProductSearchPlan({
+    groups: searchTerms.length ? [searchTerms] : [],
+    mode: 'AND',
+    columns: ['name', 'sku', 'barcode'],
+    paramKeyBase: 'portal',
+    exactMatchQuery: query.query || query.q || '',
+  })
+  Object.assign(params, searchPlan.params)
+  if (searchPlan.whereClause) {
+    searchWhereClause = searchPlan.whereClause
+    matchRankSql = searchPlan.matchRankSql
+      ? `((${searchPlan.exactRankSql}) * 1000000) + (${searchPlan.matchRankSql})`
+      : undefined
   }
 
   for (const field of ['brand', 'category']) {
@@ -1644,7 +1577,14 @@ export function buildPortalProductFilters(query: Record<string, string>, allowSt
   const baseWhere = [...where]
   if (searchWhereClause) where.push(searchWhereClause)
 
-  return { where, joins, params, stockExpr, baseWhere, searchTerms, matchRankSql }
+  // P2-2 (Gate 2B A.3): portal.ts's fuzzy fallback below previously had no
+  // isDigitsOnlyQuery guard at all (the one confirmed inconsistency vs.
+  // products.ts/inventory.ts, which both exclude digits-only queries from
+  // JS edit-distance tolerance -- an opaque numeric identifier has no
+  // meaningful "typo"). Exposed here so runPortalProductSearch can apply
+  // the same gate.
+  const digitsOnly = isDigitsOnlyQuery(searchTerms.length ? [searchTerms] : [])
+  return { where, joins, params, stockExpr, baseWhere, searchTerms, matchRankSql, digitsOnly }
 }
 
 // The storefront's highest-traffic endpoint, and the one that scales with
@@ -1765,7 +1705,7 @@ async function runPortalProductSearch(c: { env: Env; req: { query(): Record<stri
   // Scoped to name/sku/barcode, matching this endpoint's own ftsMatch
   // column list above (brand/category dropped for the same reasoning --
   // see PRODUCT_SEARCH_COLUMNS's comment in lib/searchMatch.ts).
-  if (total === 0 && filters.searchTerms.length) {
+  if (total === 0 && filters.searchTerms.length && !filters.digitsOnly) {
     const fallbackBaseWhere = initialClause ? [...filters.baseWhere, initialClause] : filters.baseWhere
     const candidateRows = await db.prepare(`
       SELECT p.id AS id, p.name AS name, p.sku AS sku, p.barcode AS barcode
@@ -1833,12 +1773,37 @@ async function runPortalProductSearch(c: { env: Env; req: { query(): Record<stri
     ORDER BY value ASC
   `).all<{ value: string; count: number }>(initialsParams)
 
+  // P2-2 (Gate 2B spec §5): exact_barcode_hit_id -- a small, separately
+  // scoped candidate fetch (id + barcode only, filtered to this search's
+  // OWN non-search filters -- branch/brand/category/stock/initial -- plus
+  // an exact barcode equality check) rather than adding p.barcode to
+  // selectColumnsSql above: attachPortalStockStatus spreads every selected
+  // column straight into the public JSON via ...publicFields (see that
+  // function), so selecting barcode there would leak a raw barcode column
+  // onto every storefront item -- a public-surface no-go. Only worth the
+  // extra tiny query when the raw query even looks like a real barcode
+  // (digits-only, long enough, not the "0" placeholder 238 live products
+  // share) -- every other search skips this entirely.
+  const rawBarcodeQuery = (query.query || query.q || '').trim()
+  let exactBarcodeHitId: number | null = null
+  if (/^[0-9]+$/.test(rawBarcodeQuery) && rawBarcodeQuery.length >= MIN_REAL_BARCODE_LENGTH && rawBarcodeQuery !== '0') {
+    const exactBarcodeWhere = initialClause ? [...filters.baseWhere, initialClause] : filters.baseWhere
+    const exactBarcodeRows = await db.prepare(`
+      SELECT p.id AS id, p.barcode AS barcode
+      FROM products p
+      ${joinSql}
+      WHERE ${[...exactBarcodeWhere, 'p.barcode = @exactBarcodeQuery'].join(' AND ')}
+    `).all<{ id: number; barcode: string }>({ ...params, exactBarcodeQuery: rawBarcodeQuery })
+    exactBarcodeHitId = computeExactBarcodeHitId(exactBarcodeRows || [], rawBarcodeQuery)
+  }
+
   return {
     items: itemsWithStockStatus,
     total,
     page,
     pageSize,
     totalPages: Math.max(1, Math.ceil(total / pageSize)),
+    exact_barcode_hit_id: exactBarcodeHitId,
     initials: initials || [],
     // G1: the storefront prices/badges with the SAME kernel POS charges
     // with (frontend/src/utils/promotionRules.ts, hand-synced mirror of

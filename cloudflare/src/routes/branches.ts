@@ -1,6 +1,6 @@
 import { Hono } from 'hono'
 import { getDb, toDbBool } from '../lib/db'
-import { buildInClause, chunkForBinding, selectInChunks } from '../lib/sqlBinding'
+import { buildInClause, chunkForBinding, inlineIntegerIds, selectInChunks } from '../lib/sqlBinding'
 import type { D1Compat } from '../lib/db'
 import { paginateProductFamilies } from '../lib/familyPagination'
 import { getFamilyStockStats } from '../lib/familyStockStats'
@@ -15,12 +15,13 @@ import { findIdentityMatch, findIdentityMatches, type ProductIdentityRow } from 
 import { decrementBatchStockStatement, decrementBatchStockStrictStatement, incrementBatchStockStatement, resolveDestinationBatch, readFifoLotAvailability, allocateAcrossLots } from '../lib/productBatches'
 import { branchUpdateStatements } from '../lib/branchWrites'
 import {
-  buildFtsMatchExpression,
-  buildHybridMatchClause,
-  buildPartialWordMatchClause,
-  buildShortWordFallbackClause,
-  buildTrigramMatchExpression,
+  buildProductSearchPlan,
+  computeExactBarcodeHitId,
+  isDigitsOnlyQuery,
   PRODUCT_SEARCH_COLUMNS,
+  PRODUCT_SEARCH_FUZZY_FALLBACK_CANDIDATE_LIMIT,
+  PRODUCT_SEARCH_FUZZY_FALLBACK_MATCH_CAP,
+  runFuzzyFallbackMatch,
   tokenizeSearchTermGroups,
 } from '../lib/searchMatch'
 import type { Env } from '../index'
@@ -812,41 +813,31 @@ function buildBranchStockWhere(c: any, branchId: number, { includeStockState = t
   const params: Record<string, unknown> = { branchId }
   const rawQuery = String(c.req.query('query') || c.req.query('q') || '')
   const searchTermGroups = tokenizeSearchTermGroups(rawQuery, 6, 8)
-  if (searchTermGroups.length) {
-    const searchMode = 'AND'
-    const matchClauses: string[] = []
-    const ftsMatch = buildFtsMatchExpression(searchTermGroups, searchMode, PRODUCT_SEARCH_COLUMNS)
-    if (ftsMatch) {
-      params.ftsQuery = ftsMatch
-      matchClauses.push('p.id IN (SELECT rowid FROM products_fts WHERE products_fts MATCH @ftsQuery)')
-    }
-    // Same expression reused against both trigram tables (barcode/sku
-    // substring, and name substring) -- see products.ts's own call site
-    // comment for why one buildTrigramMatchExpression() call covers both.
-    const trigramMatch = buildTrigramMatchExpression(searchTermGroups, searchMode)
-    if (trigramMatch) {
-      params.codeQuery = trigramMatch
-      matchClauses.push('p.id IN (SELECT rowid FROM products_fts_code WHERE products_fts_code MATCH @codeQuery)')
-      params.nameCodeQuery = trigramMatch
-      matchClauses.push('p.id IN (SELECT rowid FROM products_fts_name_trigram WHERE products_fts_name_trigram MATCH @nameCodeQuery)')
-    }
-    // Mixed-group fallback (a group with both a free-text word and a
-    // barcode-fragment word) -- see buildHybridMatchClause's own comment.
-    const hybridMatch = buildHybridMatchClause(searchTermGroups, searchMode, 'hyb', PRODUCT_SEARCH_COLUMNS)
-    if (hybridMatch) {
-      Object.assign(params, hybridMatch.params)
-      matchClauses.push(hybridMatch.sql)
-    }
-    // Sub-3-character word fallback (FTS5's trigram tokenizer emits no
-    // trigrams below 3 chars) and long-query (4+ word) partial fallback --
-    // both scoped to name_normalized only, same reasoning as products.ts.
-    const shortWordMatch = buildShortWordFallbackClause(searchTermGroups, searchMode, ['p.name_normalized'], params, 'shortw', true)
-    if (shortWordMatch) matchClauses.push(shortWordMatch)
-    const partialMatch = buildPartialWordMatchClause(searchTermGroups, searchMode, ['p.name_normalized'], params, 'partialw', 4, true)
-    if (partialMatch) matchClauses.push(partialMatch)
-    if (matchClauses.length) {
-      where.push(matchClauses.length > 1 ? `(${matchClauses.join(' OR ')})` : matchClauses[0])
-    }
+  // P2-2 (Gate 2B audit): this used to hand-roll its own FTS5-prefix ->
+  // trigram-substring -> hybrid -> short-word-LIKE -> partial-word-LIKE
+  // sequence (see git history) -- now built through the same
+  // buildProductSearchPlan shared with products.ts/portal.ts (and
+  // inventory.ts via a prepared patch), see that function's own comment in
+  // lib/searchMatch.ts. Same PRODUCT_SEARCH_COLUMNS scope (name/sku/
+  // barcode) this endpoint already used. Picks up the widened short-word/
+  // partial-word barcode/sku coverage (closes the confirmed 1-2 digit
+  // barcode-fragment gap, Gate 2B A.5) and an exact-barcode/sku-first rank
+  // term, folded into matchRankSql the same way products.ts/portal.ts do.
+  const searchMode = 'AND'
+  const searchPlan = buildProductSearchPlan({
+    groups: searchTermGroups,
+    mode: searchMode,
+    columns: PRODUCT_SEARCH_COLUMNS,
+    paramKeyBase: 'branch',
+    exactMatchQuery: rawQuery,
+  })
+  Object.assign(params, searchPlan.params)
+  let matchRankSql: string | undefined
+  if (searchPlan.whereClause) {
+    where.push(searchPlan.whereClause)
+    matchRankSql = searchPlan.matchRankSql
+      ? `((${searchPlan.exactRankSql}) * 1000000) + (${searchPlan.matchRankSql})`
+      : undefined
   }
   const stockState = String(c.req.query('stockState') || c.req.query('stock_state') || 'positive').toLowerCase()
   if (includeStockState) {
@@ -859,7 +850,25 @@ function buildBranchStockWhere(c: any, branchId: number, { includeStockState = t
     if (stockState === 'low') where.push('COALESCE(bs.quantity, 0) > COALESCE(p.out_of_stock_threshold, 0) AND COALESCE(bs.quantity, 0) <= COALESCE(p.low_stock_threshold, 10)')
     if (stockState === 'out' || stockState === 'out_of_stock') where.push('COALESCE(bs.quantity, 0) <= COALESCE(p.out_of_stock_threshold, 0)')
   }
-  return { where, params, stockState }
+  // Every OTHER filter (active flag/stock-state) except the search match
+  // clause itself -- the JS fuzzy fallback's candidate query (in the
+  // /:id/stock paged handler below) needs this so a fuzzy hit still
+  // respects every other active filter (branch is applied via the JOIN,
+  // not `where`, so it's respected automatically), same role as
+  // products.ts's fuzzyFallbackBaseWhere/portal.ts's baseWhere.
+  const baseWhere = where.filter((clause) => clause !== searchPlan.whereClause)
+  // P2-2 (Gate 2B A.3): branches.ts had NO isDigitsOnlyQuery guard because
+  // it had no JS fuzzy fallback at all to guard -- both are added together
+  // below, in the /:id/stock paged handler, mirroring products.ts/
+  // portal.ts's identical digits-only exclusion (an opaque numeric
+  // identifier has no meaningful "typo").
+  const digitsOnly = isDigitsOnlyQuery(searchTermGroups)
+  // One string PER GROUP (words joined by a space), matching products.ts's
+  // own searchTerms shape exactly -- runFuzzyFallbackMatch/
+  // matchesSearchTermGroups treats each array entry as one AND/OR-combined
+  // term to test against a candidate's haystack, not one word each.
+  const searchTerms = searchTermGroups.map((words) => words.join(' '))
+  return { where, params, stockState, baseWhere, searchTerms, searchMode, matchRankSql, digitsOnly, hasSearchTerm: searchTermGroups.length > 0 }
 }
 
 app.get('/:id/stock', async (c) => {
@@ -883,7 +892,7 @@ app.get('/:id/stock', async (c) => {
   const branchId = Number.parseInt(id, 10)
   const page = normalizePositiveInt(c.req.query('page'), 1, { min: 1, max: 100000 })
   const pageSize = normalizePositiveInt(c.req.query('pageSize') || c.req.query('page_size'), 20, { min: 1, max: 100 })
-  const { where, params, stockState } = buildBranchStockWhere(c, branchId)
+  const { where, params, stockState, baseWhere, searchTerms, searchMode, matchRankSql, digitsOnly, hasSearchTerm } = buildBranchStockWhere(c, branchId)
   const whereSql = `WHERE ${where.join(' AND ')}`
   const summaryWhere = buildBranchStockWhere(c, branchId, { includeStockState: false })
   const summaryWhereSql = `WHERE ${summaryWhere.where.join(' AND ')}`
@@ -933,22 +942,89 @@ app.get('/:id/stock', async (c) => {
     total_value_usd: familyStats.stock_value_usd,
   }
 
-  // Grouped products (parent_id families) are treated as a single unit for
-  // paging here too, same rule and same helper as products.ts/inventory.ts.
-  const { items, total, totalPages } = await paginateProductFamilies<Record<string, unknown>>({
-    db,
-    selectColumns: `p.id, p.name, p.sku, p.barcode, p.brand, p.category, p.unit, p.selling_price_usd, p.selling_price_khr,
+  const selectColumns = `p.id, p.name, p.sku, p.barcode, p.brand, p.category, p.unit, p.selling_price_usd, p.selling_price_khr,
            p.purchase_price_usd, p.purchase_price_khr, p.cost_price_usd, p.cost_price_khr,
            p.low_stock_threshold, p.out_of_stock_threshold,
-           COALESCE(bs.quantity, 0) AS branch_quantity`,
+           COALESCE(bs.quantity, 0) AS branch_quantity`
+  // P2-2 (Gate 2B): a search term now takes over the primary sort order
+  // (relevance -- exact barcode/sku first, then bm25) the same way
+  // products.ts's effectiveFamilyOrderSql does; with no search term this
+  // stays exactly the pre-existing name-alphabetical order.
+  const familyOrderSql = matchRankSql ? `match_rank ASC, family_name ASC` : 'family_name ASC'
+
+  // Grouped products (parent_id families) are treated as a single unit for
+  // paging here too, same rule and same helper as products.ts/inventory.ts.
+  let { items, total, totalPages } = await paginateProductFamilies<Record<string, unknown>>({
+    db,
+    selectColumns,
     joinSql: branchStockJoinSql,
     whereSql,
     params,
     page,
     pageSize,
-    familyOrderSql: 'family_name ASC',
+    familyOrderSql,
     intraFamilyOrderSql: 'lower(name) ASC, id ASC',
+    matchRankSql,
   })
+
+  // P2-2 (Gate 2B A.3): branches.ts had no JS fuzzy (typo-tolerant)
+  // fallback at all -- added here mirroring products.ts's/portal.ts's
+  // identical block (same candidate limit/match cap, same digits-only
+  // exclusion). Only runs when the strict SQL-folded search found
+  // literally nothing for a real, non-digits-only query.
+  if (total === 0 && hasSearchTerm && !digitsOnly) {
+    const fuzzyFallbackBaseWhere = baseWhere
+    const candidateRows = await db.prepare(`
+      SELECT p.id AS id, p.name AS name, p.sku AS sku, p.barcode AS barcode
+      FROM products p
+      ${branchStockJoinSql}
+      WHERE ${fuzzyFallbackBaseWhere.join(' AND ')}
+      ORDER BY p.id ASC
+      LIMIT ${PRODUCT_SEARCH_FUZZY_FALLBACK_CANDIDATE_LIMIT}
+    `).all<{ id: number; name: string; sku: string; barcode: string }>(params)
+    const candidates = (candidateRows || []).map((row) => ({
+      id: row.id,
+      haystack: [row.name, row.sku, row.barcode].filter(Boolean).join(' '),
+    }))
+    const fuzzyIds = runFuzzyFallbackMatch(candidates, searchTerms, searchMode).slice(0, PRODUCT_SEARCH_FUZZY_FALLBACK_MATCH_CAP)
+    if (fuzzyIds.length) {
+      // Inlined as literals, not bound -- same reasoning as products.ts's
+      // identical block: capped at 500 against D1's 100-bound-param limit,
+      // and neither query below survives being chunked. Ids are row ids
+      // this handler just read back from D1; inlineIntegerIds throws on
+      // anything that isn't a safe integer, so no user input reaches SQL.
+      const fuzzyWhereSql = `WHERE ${[...fuzzyFallbackBaseWhere, `p.id IN (${inlineIntegerIds(fuzzyIds)})`].join(' AND ')}`
+      const fuzzyResult = await paginateProductFamilies<Record<string, unknown>>({
+        db,
+        selectColumns,
+        joinSql: branchStockJoinSql,
+        whereSql: fuzzyWhereSql,
+        params,
+        page,
+        pageSize,
+        familyOrderSql: 'family_name ASC',
+        intraFamilyOrderSql: 'lower(name) ASC, id ASC',
+      })
+      items = fuzzyResult.items
+      total = fuzzyResult.total
+      totalPages = fuzzyResult.totalPages
+    }
+  }
+
+  // P2-2 (Gate 2B spec §5): exactly one row whose barcode equals the
+  // normalised query, query length >= MIN_REAL_BARCODE_LENGTH, and the
+  // value isn't the "0" placeholder shared by 238 live products -- see
+  // computeExactBarcodeHitId's own doc comment in lib/searchMatch.ts and
+  // products.ts's identical wiring (searchProductsPayload). barcode is
+  // already selected above (selectColumns), so no separate query is
+  // needed here the way portal.ts's public response required (this is an
+  // admin-only endpoint -- Branches page / TransferModal -- not the public
+  // storefront, so the barcode column already reaching the client is not
+  // a public-surface concern).
+  const exactBarcodeHitId = computeExactBarcodeHitId(
+    items as Array<{ id: number; barcode?: string | null }>,
+    String(c.req.query('query') || c.req.query('q') || ''),
+  )
 
   return c.json({
     items,
@@ -957,6 +1033,7 @@ app.get('/:id/stock', async (c) => {
     pageSize,
     stockState,
     totalPages,
+    exact_barcode_hit_id: exactBarcodeHitId,
     summary: summary || {},
   })
 })
