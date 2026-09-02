@@ -86,6 +86,14 @@ Two rules learned the hard way, both from real incidents in this file's own hist
   (4) the Aug-31 line below (`a5e5023b`) is stale — Sep 2 also saw version `258d5b0a` (09:21Z) and secret changes
   (07:34Z). 6d's backup of the deployed diff: `cloudflare/outputs/audit-6d-20260903/`. Open data defect reported by
   6d to d9: ~3,900 twin products from identity keyed on per-branch cost. Owner of the lane: none live (session 97 gone).
+  **Data findings, Sep 3 (read-only prod D1):** re-verified by 80 — twin groups by LOWER(TRIM(name)) = 3,962 holding
+  8,129 products (matches 6d); `sales.receipt_number` is in the `NNNNNN@YYYY-MM-DD` form on **15,004 of 15,005** rows
+  (1 bare) — the reconciliation rewrote every receipt incl. the 2,918 that were bare, which reverses the user's rule
+  (bare `YYYYMMDD-HHMMSS`, no `@date`; Part 540) → forward-fix candidate, restore from the pre-change snapshot, do not
+  re-mint. 6d's counts, NOT independently re-verified by 80: 14,982 sales rewritten (created_at ICT→UTC, cashier Za
+  14,995 / Rath 5), 27,278 lot rows zeroed → 9,921 synthetic RECON lots (23,052 units: wh 10,621 / shop 12,431),
+  delivery_contacts 2→10, customers +254, fees 4,256→4,266. 6d is preparing a rehearsed forward-fix for the USER's
+  decision — no prod writes without it. RC alias migration renumbered to 0106 (d9, RC 90180e9b).
 
 - **DEPLOYED Aug 31 2026 (~01:32 UTC), version `a5e5023b`, from commit `242c2b75`
   (Part 538).** Everything from Parts 371–537 is LIVE — migrations 0083–0087 applied
