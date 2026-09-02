@@ -1,0 +1,111 @@
+/* Design kit tokens (P2-1, decisions 5/6/8/13 in
+   docs/plans/coordinated-plan-2026-09-02.md §4.5). Ivory + charcoal + muted
+   gold, light by default, dark only via the manual `.dark` class toggle
+   (never `prefers-color-scheme` -- see the standing rule in the P2-1 brief).
+
+   This is an ADDITIVE layer. The live user-customizable theme knobs already
+   in main.css's own `:root` block (`--ui-accent`, `--ui-radius`,
+   `--ui-font-family`, `--ui-*-size`, all written at runtime by
+   AppContext.tsx:1478-1588 from the user's Settings -> Appearance choices)
+   and the legacy `--dm-*` dark-mode palette that every existing page/
+   `.card`/`.btn-secondary`/etc. rule already reads are left untouched here --
+   removing or renaming them would change how every current page renders,
+   which is out of scope for the kit (pages adopt the kit in P2-4/P2-5).
+   `--ui-accent`/`--ui-radius` are read directly by the tokens below via
+   `var()` so a user's custom accent color/radius still flows into every kit
+   primitive that uses `--ui-accent-ink` / `--ui-accent-soft`. */
+
+:root {
+  /* Palette -- light (default) */
+  --ui-ground: #f7f4ee;
+  --ui-surface: #fffdf9;
+  --ui-surface-2: #f1ede5;
+  --ui-ink: #1f1d1a;
+  --ui-ink-2: #5b564e;
+  --ui-ink-3: #8a8378;
+  --ui-line: rgba(31, 29, 26, .10);
+  --ui-line-2: rgba(31, 29, 26, .18);
+  /* Derived from the live --ui-accent (default #9c7a3c) via color-mix so a
+     user-picked custom accent color still produces a sensible ink/soft
+     pair; the literal values below match the design spec exactly for the
+     default gold (156,122,60 * 0.70 = 109,85,42 ~= #6e5527). */
+  --ui-accent-ink: color-mix(in srgb, var(--ui-accent, #9c7a3c) 70%, black 30%);
+  --ui-accent-soft: color-mix(in srgb, var(--ui-accent, #9c7a3c) 12%, transparent);
+  --ui-danger: #9b3b2f;
+  --ui-success: #3f6b4a;
+  --ui-warn: #a6731f;
+  --ui-info: #3d5a73;
+  --ui-focus: 0 0 0 2px color-mix(in srgb, var(--ui-accent, #9c7a3c) 35%, transparent);
+  --ui-backdrop: rgba(31, 29, 26, .42);
+
+  /* Shadows / radius / spacing */
+  --ui-shadow-1: 0 1px 2px rgba(31, 29, 26, .06);
+  --ui-shadow-2: 0 4px 14px rgba(31, 29, 26, .10);
+  --ui-shadow-3: 0 12px 32px rgba(31, 29, 26, .16);
+  --ui-radius-sm: 6px;
+  --ui-radius-lg: 12px;
+  --ui-space-1: 4px;
+  --ui-space-2: 8px;
+  --ui-space-3: 12px;
+  --ui-space-4: 16px;
+  --ui-space-5: 20px;
+  --ui-space-6: 24px;
+
+  /* Typography -- self-hosted (see fonts.css); real fallback stacks so text
+     never blocks on the network and never disappears if a face fails. */
+  --ui-font-body: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, 'Noto Sans Khmer', sans-serif;
+  --ui-font-display: 'Source Serif 4', Georgia, 'Times New Roman', 'Noto Serif Khmer', serif;
+  --ui-font-khmer-body: 'Noto Sans Khmer', 'Khmer OS Siemreap', 'Battambang', 'Khmer OS', sans-serif;
+  --ui-font-khmer-display: 'Noto Serif Khmer', 'Noto Sans Khmer', 'Khmer OS Siemreap', serif;
+  --ui-size-meta: 12px;
+  --ui-size-body: 13px;
+  --ui-size-h3: 15px;
+  --ui-size-h2: 17px;
+  --ui-size-h1: 20px;
+  --ui-lh-body: 1.4;
+  --ui-lh-heading: 1.25;
+
+  /* Density (decision 8): 32px rows/controls on desktop, 40px on mobile.
+     Input font-size gets its own token so it can win the 16px iOS
+     zoom-prevention floor without an !important war -- see main.css's
+     `.input` rule and the `.input.text-xs`/`.input.text-sm` override next
+     to it for the mechanism. */
+  --ui-row-h: 32px;
+  --ui-control-h: 32px;
+  --ui-icon-lg: 16px;
+  --ui-icon-sm: 14px;
+  --ui-input-size: 16px;
+
+  /* Z-layers -- mirrored as typed constants in components/shared/kit/zLayers.ts
+     for inline styles/portals that can't reach a CSS var (e.g. computing a
+     stacking order in JS). Keep the two in sync by hand; kitTokens.test.ts
+     pins both sides. */
+  --z-sticky: 20;
+  --z-dropdown: 30;
+  --z-fold: 40;
+  --z-modal: 50;
+  --z-modal-2: 60;
+  --z-toast: 70;
+}
+
+@media (min-width: 768px) {
+  :root {
+    --ui-row-h: 32px;
+    --ui-control-h: 32px;
+    --ui-input-size: 13px;
+  }
+}
+
+:root.dark,
+.dark {
+  --ui-ground: #161513;
+  --ui-surface: #1f1d1a;
+  --ui-surface-2: #26231f;
+  --ui-ink: #f2ede4;
+  --ui-ink-2: #b9b1a4;
+  --ui-ink-3: #857d70;
+  --ui-line: rgba(242, 237, 228, .10);
+  --ui-line-2: rgba(242, 237, 228, .18);
+  --ui-accent-ink: #d8b878;
+  --ui-backdrop: rgba(0, 0, 0, .6);
+}
