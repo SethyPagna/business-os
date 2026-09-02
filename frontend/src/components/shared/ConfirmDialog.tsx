@@ -71,9 +71,17 @@ export default function ConfirmDialog({
     return value && value !== key ? value : fallback
   }
 
-  const primaryActionClass = `flex items-center justify-center gap-1.5 rounded-lg px-4 py-2 text-sm font-medium text-white disabled:opacity-40 ${
-    danger ? 'bg-red-600 hover:bg-red-700' : 'bg-blue-600 hover:bg-blue-700'
-  }`
+  // Restyled onto the shared .btn-primary/.btn-danger/.btn-secondary classes
+  // (P2-1) instead of a hand-rolled bg-blue-600 -- this was the one
+  // off-brand blue button the Gate 2A audit found outside main.css's own
+  // .btn-primary override chain. Logic (disabled/working/onConfirm/onClose)
+  // is unchanged; only the class names driving color/shape moved. Sizing
+  // utilities (min-h/px/py/text-*) are added per call site and win over the
+  // shared classes' own padding/min-height via Tailwind's utilities layer
+  // (declared after @layer components, so it outranks it at equal
+  // specificity for ordinary, non-!important declarations).
+  const primaryActionClass = `flex items-center justify-center gap-1.5 ${danger ? 'btn-danger' : 'btn-primary'}`
+  const secondaryActionClass = 'btn-secondary'
 
   return (
     <Modal
@@ -85,7 +93,7 @@ export default function ConfirmDialog({
           type="button"
           onClick={onConfirm}
           disabled={working || confirmDisabled}
-          className={`${primaryActionClass} min-h-9 max-w-24 truncate px-3 py-1.5 text-xs sm:hidden`}
+          className={`${primaryActionClass} !min-h-9 max-w-24 truncate !px-3 !py-1.5 text-xs sm:hidden`}
         >
           {working ? (workingLabel || T('saving', 'Saving...')) : (confirmLabel || T('confirm', 'Confirm'))}
         </button>
@@ -131,7 +139,7 @@ export default function ConfirmDialog({
             type="button"
             onClick={onClose}
             disabled={working}
-            className="rounded-lg border border-gray-300 px-4 py-2 text-sm text-gray-600 disabled:opacity-40 dark:border-gray-600 dark:text-gray-300"
+            className={secondaryActionClass}
           >
             {cancelLabel || T('cancel', 'Cancel')}
           </button>
