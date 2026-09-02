@@ -27,13 +27,30 @@ Steps:
    cmd /c mklink /J <wt>\cloudflare\node_modules <main>\cloudflare\node_modules
    ```
    Junctions work for `tsc`, the vite build, and wrangler.
-3. Run **both** typechecks, the vite build, and both test suites **in the worktree**.
+3. Run **both** typechecks, the vite build, and both test suites **in the worktree**, each test
+   file individually so one red cannot hide the rest (Bash tool):
+
+   ```bash
+   cd <wt>/frontend && npx tsc --noEmit && npm run build && npm run verify:i18n && \
+     for f in tests/*.test.ts; do node "$f" >/dev/null 2>&1 || echo "RED $f"; done
+   ```
+
+   ```bash
+   cd <wt>/cloudflare && npx tsc --noEmit && cd scripts && \
+     for f in test-*.cjs; do node "$f" >/dev/null 2>&1 || echo "RED $f"; done
+   ```
+
+   Re-run any `RED` file alone to read its output. Five source-lock tests were once
+   line-ending-sensitive in fresh CRLF worktrees (fixed in Part 578) — if a lock fails only in the
+   worktree, check CRLF before calling it a regression.
 4. Fix a broken-HEAD dependency by committing **just the required piece** (e.g. the one shared
    prop), not the whole orphaned lane — the rest stays un-deployed. Then advance the worktree:
    `git -C <wt> checkout --detach <newHEAD>` and re-checkpoint green.
 5. Tear down: `cmd /c rmdir` the junctions **first**, then `git worktree remove --force <wt>`.
 
-This same isolated-worktree-at-HEAD is also the production-deploy method (see `deploy.md`).
+This same isolated-worktree-at-HEAD is also the production-deploy method (see `deploy.md`) — with a
+real `npm ci` there instead of junctions, because the shipped bundle must build from clean,
+lockfile-exact dependencies.
 
 ## B. Live end-to-end recipe
 
@@ -47,7 +64,9 @@ state. Proven recipe for this repo:
 2. **Mint real sessions directly.** Insert into `user_sessions` a row with `token_hash =
    sha256(token)` (hex) and an ISO `expires_at`; call the API with `Cookie: bos_session=<token>`.
    No login/device-approval needed. Seed purpose-built roles (permissions JSON including
-   `section:action: false` overrides); user rows can carry a garbage password hash.
+   `section:action: false` overrides); user rows can carry a garbage password hash. Read the
+   `CREATE TABLE` statements first — `user_sessions` is in `cloudflare/migrations/0001_init.sql`,
+   roles/users likewise under `cloudflare/migrations/` — rather than guessing columns.
 3. **Assert DB state after every call** with `better-sqlite3` readonly on the same sqlite:
    negative probes must show row counts **unchanged**; positive probes must show the row
    created/updated/deleted. Note: `pending_actions.status` is `'open'` (not `'pending'`);
@@ -61,8 +80,9 @@ state. Proven recipe for this repo:
 
 ## When a scenario fails
 
-Suspect the **harness first** — in the Part-546 66/66 pass, all 11 first-run failures were harness
-assumptions and the app was right each time. And attribute a pre-existing red by re-running it in a
+Suspect the **harness first** — in the 66/66 live-E2E matrix (recorded in progress.md as the
+"Part-546 recipe"), all 11 first-run failures were harness assumptions and the app was right each
+time. And attribute a pre-existing red by re-running it in a
 clean worktree **at an older commit** before claiming or "fixing" anything — it may be a peer's
 mid-edit state or a stale test, not a regression. Distinguish stale-test from real-regression per
 finding *before* touching security-adjacent tests.
