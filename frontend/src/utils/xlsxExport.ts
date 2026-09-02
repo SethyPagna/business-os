@@ -124,6 +124,48 @@ export function buildWorksheet(rows: ExportRow[]): XLSX.WorkSheet {
   return sheet
 }
 
+// Multi-sheet workbook export (Section 5, Sep 2 2026 RC -- the "Business
+// summary" workbook). `buildWorksheet` above already does all the per-sheet
+// work (headers, id-like-column Text forcing, column widths); this just
+// loops it once per named sheet and appends them into one workbook. Excel
+// sheet names are capped at 31 chars and can't contain : \ / ? * [ ] --
+// `safeSheetName` enforces that so a caller never has to know Excel's rules.
+// A sheet with zero rows is still written (with just a header row) rather
+// than skipped, so e.g. an admin exporting a range with no returns still
+// sees an empty "Returns" tab instead of a missing one -- consistent shape
+// beats a shorter file.
+export type WorkbookSheet = { name: string; rows: ExportRow[] }
+
+function safeSheetName(name: string, usedNames: Set<string>): string {
+  let cleaned = String(name || 'Sheet').replace(/[:\\/?*[\]]/g, ' ').trim().slice(0, 31) || 'Sheet'
+  let candidate = cleaned
+  let suffix = 2
+  while (usedNames.has(candidate.toLowerCase())) {
+    const suffixStr = ` (${suffix})`
+    candidate = cleaned.slice(0, 31 - suffixStr.length) + suffixStr
+    suffix += 1
+  }
+  usedNames.add(candidate.toLowerCase())
+  return candidate
+}
+
+export function downloadWorkbook(filename: string, sheets: WorkbookSheet[]): void {
+  const usable = (Array.isArray(sheets) ? sheets : []).filter((s) => s && s.name)
+  if (!usable.length) return
+  const workbook = XLSX.utils.book_new()
+  const usedNames = new Set<string>()
+  for (const sheet of usable) {
+    const rows = Array.isArray(sheet.rows) ? sheet.rows : []
+    // buildWorksheet reads headers from rows[0] -- an empty sheet still gets
+    // a real (headerless but valid) worksheet rather than being skipped, via
+    // a synthetic single blank row that produces an empty ref range.
+    const worksheet = rows.length ? buildWorksheet(rows) : buildWorksheet([])
+    XLSX.utils.book_append_sheet(workbook, worksheet, safeSheetName(sheet.name, usedNames))
+  }
+  const bytes = XLSX.write(workbook, { bookType: 'xlsx', type: 'array', compression: true }) as ArrayBuffer
+  downloadBlob(filename, new Blob([bytes], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }))
+}
+
 export function downloadXLSX(filename: string, rows: unknown[]): void {
   const dataRows = (Array.isArray(rows) ? rows : []) as ExportRow[]
   if (!dataRows.length) return
