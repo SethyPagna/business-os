@@ -1400,8 +1400,12 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
     if (!beginSingleAction(transferStockInFlightRef, { blocked: transferSaving })) return
     const confirmation = tr(
       'confirm_transfer_stock_details',
-      `Transfer ${quantity} of ${transferModal.name} from ${fromBranch.name} to ${toBranch.name}? This posts a traceable stock movement.`,
+      'Transfer {quantity} of {product} from {from} to {to}? This posts a traceable stock movement.',
     )
+      .replace('{quantity}', String(quantity))
+      .replace('{product}', transferModal.name || '')
+      .replace('{from}', fromBranch.name || '')
+      .replace('{to}', toBranch.name || '')
     if (!window.confirm(confirmation)) {
       finishSingleAction(transferStockInFlightRef)
       return
@@ -1448,7 +1452,11 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
           await load(true)
         },
       })
-      notify(tr('stock_transferred_details', `Transferred ${quantity} of ${transferModal.name} from ${fromBranch.name} to ${toBranch.name}.`))
+      notify(tr('stock_transferred_details', 'Transferred {quantity} of {product} from {from} to {to}.')
+        .replace('{quantity}', String(quantity))
+        .replace('{product}', transferModal.name || '')
+        .replace('{from}', fromBranch.name || '')
+        .replace('{to}', toBranch.name || ''))
       setTransferModal(null)
       await load(true)
     } catch (error: unknown) {

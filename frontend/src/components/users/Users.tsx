@@ -1582,7 +1582,7 @@ export default function Users() {
               setUsers((current) => current.map((entry) => Number(entry.id) === Number(otpRecoveryTarget.id)
                 ? { ...entry, otp_enabled: false }
                 : entry))
-              notify(tr('otp_recovery_success', `2FA reset for ${otpRecoveryTarget.name || otpRecoveryTarget.username || 'the account'}. They can now sign in with their password and set up 2FA again.`))
+              notify(tr('otp_recovery_success', '2FA reset for {name}. They can now sign in with their password and set up 2FA again.').replace('{name}', otpRecoveryTarget.name || otpRecoveryTarget.username || 'the account'))
               setOtpRecoveryTarget(null)
             }}
           />
