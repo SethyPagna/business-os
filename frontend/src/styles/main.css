@@ -1034,6 +1034,54 @@ input.input.text-xs, textarea.input.text-xs, select.input.text-xs,
 input.input.text-sm, textarea.input.text-sm, select.input.text-sm {
   font-size: var(--ui-input-size, 16px) !important;
 }
+
+/* Decision 8, second half: iOS Safari auto-zooms the whole page when a focused
+   form control's COMPUTED font-size is below 16px, and nothing but a user
+   gesture undoes that zoom -- the single most visible "this is a website, not
+   an app" tell on an installed PWA. The two rules above only cover controls
+   that carry `.input`. 68 admin controls are styled by hand and never do
+   (PromotionsPage.tsx x18, components/catalog x17, shared/DateTimeRangePicker
+   + PaginationControls + FilterMenu + NotesWidget + NotificationCenter +
+   PageSizeSelect x13, products/** x9, contacts x3, notes x2, users x2,
+   auth/fees/imports/pos x1 each). With no rule of their own they inherit
+   body's 14px, and 35 of them additionally carry `.text-xs` (12px) or
+   `.text-sm` (14px). All of them zoomed.
+
+   One mobile-only floor closes every one of them at once. The shape:
+   - `@media (max-width: 767px)` only -- decision 8 keeps 13px on desktop, and
+     desktop browsers never zoom on focus. `--ui-input-size` is already 16px
+     below 768px and 13px from 768px up (tokens.css), so `max()` here is a
+     belt-and-braces floor, not a second source of truth.
+   - Scoped to the admin shell through BOTH route markers -- index.html's
+     pre-paint `data-business-os-initial-route` and CatalogPage.tsx's runtime
+     `data-public-portal` -- so the customer storefront, which keeps its own
+     design, is excluded even on paths index.html classifies as admin. A
+     missing attribute (test DOM doubles) falls through to "admin".
+   - Specificity is (0,2,3) at minimum: deliberately above
+     `body.lang-km .text-xs`'s (0,2,1) and `.text-xs`'s (0,1,0), both of which
+     are `!important`, so no size utility can steal the floor back.
+   - checkbox/radio are excluded: they render no text, and some engines size
+     the control box from font-size.
+   - The floor is deliberately FLAT (every control lands on exactly 16px on a
+     phone) rather than carrying `:not(.text-lg)`-style carve-outs for the
+     three controls that ask for a bigger size (Login.tsx's and OtpModal.tsx's
+     code fields at `.text-lg` 18px, NotesPage.tsx's title at `.text-base`
+     16px). Naming `.text-lg` in this selector does not work: main.css
+     redefines `.text-lg` as a top-level rule, so Tailwind's `@apply text-lg`
+     inside `.three-dot-btn` clones EVERY rule whose selector mentions it and
+     re-emits the clone with `.text-lg` swapped for `.three-dot-btn` -- a
+     duplicate of this rule that no longer excludes `.text-lg` at all, which
+     defeats the carve-out while doubling the CSS. Verified in
+     dist/assets/index-*.css. Net effect of the flat floor: two phone-only
+     code fields render 16px instead of 18px, both still comfortably above
+     the zoom threshold. */
+@media (max-width: 767px) {
+  html:not([data-business-os-initial-route="public"]) body:not([data-public-portal="true"]) input:not([type="checkbox"]):not([type="radio"]),
+  html:not([data-business-os-initial-route="public"]) body:not([data-public-portal="true"]) select,
+  html:not([data-business-os-initial-route="public"]) body:not([data-public-portal="true"]) textarea {
+    font-size: max(16px, var(--ui-input-size, 16px)) !important;
+  }
+}
 .text-base { font-size: calc(1rem * var(--ui-text-scale, 1)) !important; }
 .text-lg { font-size: calc(1.125rem * var(--ui-text-scale, 1)) !important; }
 .text-xl { font-size: calc(1.25rem * var(--ui-text-scale, 1)) !important; }
