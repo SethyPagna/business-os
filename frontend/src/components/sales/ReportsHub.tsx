@@ -5,11 +5,15 @@ import RotateCcw from 'lucide-react/dist/esm/icons/rotate-ccw.js'
 import HandCoins from 'lucide-react/dist/esm/icons/hand-coins.js'
 import ChevronDown from 'lucide-react/dist/esm/icons/chevron-down.js'
 import Check from 'lucide-react/dist/esm/icons/check.js'
+import Download from 'lucide-react/dist/esm/icons/download.js'
 import { useApp as useAppHook } from '../../AppContext.tsx'
 import DateTimeRangePicker, { todayDateTimeRange, type DateTimeRange } from '../shared/DateTimeRangePicker.tsx'
 import AppSelect, { type AppSelectOption } from '../shared/AppSelect.tsx'
 import LazyPortalMenu from '../shared/LazyPortalMenu'
+import ExportChoiceDialog from '../shared/ExportChoiceDialog'
+import ExportRangeDialog, { type ExportRange } from '../shared/ExportRangeDialog'
 import { makeReportMoneyFormatter } from '../../utils/reportMoney.ts'
+import { exportBusinessWorkbook } from './businessWorkbookExport.ts'
 import SalesDailyReport from './SalesDailyReport'
 import ReturnsReportSection from './ReturnsReportSection'
 import FeesReportSection from './FeesReportSection'
@@ -19,6 +23,7 @@ import FeesReportSection from './FeesReportSection'
 // Sales / Returns / Fees reports, shown side by side (the user picks which
 // types to include). Each type only renders for a user who can see it.
 
+type ReportsHubAppUser = { username?: unknown; role_code?: unknown; permissions?: unknown } | null
 type ReportsHubAppContext = {
   t: (key: string) => string | undefined
   fmtUSD: (value: number | string) => string
@@ -27,6 +32,7 @@ type ReportsHubAppContext = {
   usdToKhr: (value: unknown) => number
   displayCurrency: string
   getPermissionTier: (key: string) => string
+  user: ReportsHubAppUser
 }
 const useApp = useAppHook as unknown as () => ReportsHubAppContext
 
@@ -34,8 +40,28 @@ interface BranchOption { id: string; name: string }
 type ReportType = 'sales' | 'returns' | 'fees'
 
 export default function ReportsHub({ embedded = false }: { embedded?: boolean }) {
-  const { t, fmtUSD, fmtKHR, khrToUsd, usdToKhr, displayCurrency, getPermissionTier } = useApp()
+  const { t, fmtUSD, fmtKHR, khrToUsd, usdToKhr, displayCurrency, getPermissionTier, user } = useApp()
   const trh = (key: string, fallback: string): string => { const v = t(key); return v && v !== key ? v : fallback }
+  // Decorative only -- which hint text the export choice shows. The real
+  // admin gate is server-side (routes/reports.ts's is_admin flag on the
+  // /business-summary response, checked in businessWorkbookExport.ts); a
+  // stale read here can at most show the wrong HINT, never leak/withhold
+  // actual cost data, since the workbook itself never trusts this value.
+  const isAdminHint = useMemo(() => {
+    const roleCode = String(user?.role_code || '').toLowerCase()
+    const username = String(user?.username || '').toLowerCase()
+    let permissions: Record<string, unknown> = {}
+    try {
+      permissions = typeof user?.permissions === 'string'
+        ? JSON.parse(user.permissions || '{}') as Record<string, unknown>
+        : (user?.permissions && typeof user.permissions === 'object' ? user.permissions as Record<string, unknown> : {})
+    } catch {
+      permissions = {}
+    }
+    return username === 'admin' || roleCode === 'admin' || !!permissions.all
+  }, [user])
+  const [exportChoiceOpen, setExportChoiceOpen] = useState(false)
+  const [exportRangeOpen, setExportRangeOpen] = useState(false)
   // Display-only money formatter honoring the display_currency setting (see
   // utils/reportMoney.ts): the raw usd+khr amounts stay the single source of
   // truth, this only changes how they're shown. useMemo so the setting/rate
@@ -151,10 +177,54 @@ export default function ReportsHub({ embedded = false }: { embedded?: boolean })
             options={branchOptions}
             onChange={setBranchFilter}
             ariaLabel={trh('branch', 'Branch')}
-            buttonClassName="w-full min-w-0 py-1 text-xs sm:ml-auto sm:w-auto sm:max-w-[9rem]"
+            buttonClassName="w-full min-w-0 py-1 text-xs sm:max-w-[9rem]"
           />
         ) : null}
+        {canSales ? (
+          <button
+            type="button"
+            onClick={() => setExportChoiceOpen(true)}
+            className="inline-flex items-center gap-1.5 rounded-md border border-slate-200 bg-white px-2 py-1 text-xs font-medium text-slate-700 transition hover:border-slate-300 hover:bg-slate-50 sm:ml-auto dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
+          >
+            <Download className="h-3.5 w-3.5 shrink-0" />
+            {trh('export', 'Export')}
+          </button>
+        ) : null}
       </div>
+
+      {exportChoiceOpen ? (
+        <ExportChoiceDialog
+          title={trh('export', 'Export')}
+          onClose={() => setExportChoiceOpen(false)}
+          groups={[{
+            id: 'business-summary',
+            choices: [{
+              id: 'business-summary-workbook',
+              label: trh('business_summary_workbook', 'Business summary workbook'),
+              hint: isAdminHint
+                ? trh('business_summary_workbook_hint_admin', 'Summary, Sales, Returns, Expenses, Reconciliation, COGS & Gross profit (.xlsx)')
+                : trh('business_summary_workbook_hint', 'Summary, Sales, Returns, Expenses, Reconciliation (.xlsx)'),
+              onClick: () => { setExportChoiceOpen(false); setExportRangeOpen(true) },
+            }],
+          }]}
+        />
+      ) : null}
+
+      {exportRangeOpen ? (
+        <ExportRangeDialog
+          initial={{ startDate: range.startDate || '', endDate: range.endDate || '' }}
+          title={trh('business_summary_workbook', 'Business summary workbook')}
+          t={t}
+          onClose={() => setExportRangeOpen(false)}
+          onExport={async (exportRange: ExportRange) => {
+            await exportBusinessWorkbook({
+              startDate: exportRange.startDate,
+              endDate: exportRange.endDate,
+              branchId: branchId,
+            })
+          }}
+        />
+      ) : null}
 
       {visible.map(({ id, label, icon: Icon }) => {
         // The section's own controls (Sales' status/method selects, Returns/
