@@ -155,8 +155,8 @@ for (const [name, source] of [
 
 assert.match(
   inventory,
-  /<LoadingWatchdog\s+loading=\{loading && !isMovementsFirstLoad\}[\s\S]*timeoutMs=\{8000\}/,
-  'Inventory should not show a delayed watchdog card on top of the first movement loading shell',
+  /<LoadingWatchdog\s+loading=\{loading && !isMovementsFirstLoad && !isProductsFirstLoad\}[\s\S]*timeoutMs=\{8000\}/,
+  'Inventory should not show a delayed watchdog card on top of the first products/movement loading shell',
 )
 assert.doesNotMatch(
   inventory,
@@ -918,7 +918,13 @@ assert.doesNotMatch(inventory, /INVENTORY_HISTORY_READY_DELAY_MS|window\.setTime
 assert.match(inventory, /const \[historyReady, setHistoryReady\] = useState\(false\)/, 'Inventory should have an explicit post-ready action-history gate')
 assert.match(inventory, /useActionHistory\(\{ limit: 10, notify, scope: 'inventory', enabled: historyReady, user \}\)/, 'Inventory should not fetch server action history during first route load and should pass user without importing AppContext inside the hook')
 assert.match(inventory, /if \(!loadedOnceRef\.current \|\| loading\) return undefined[\s\S]*setHistoryReady\(true\)[\s\S]*return undefined/, 'Inventory should enable history immediately after the first inventory data load settles')
-assert.doesNotMatch(inventory, /loading_inventory_products/, 'Inventory products surface should not show a route-subchunk loading placeholder after data is available')
+// Restored Sept 2 2026: the branch-stock products workspace came back as its
+// own lazy chunk (InventoryProductsSurface), so it now carries the SAME
+// Suspense loading placeholder pattern Movements (loading_inventory_movements)
+// and RFID (loading_inventory_rfid) already use for their lazy chunks -- the
+// old doesNotMatch here predates the restoration and guarded against a
+// different, now-removed products implementation.
+assert.match(inventory, /loading_inventory_products/, 'Inventory products surface should use the same lazy-chunk Suspense loading placeholder pattern as Movements and RFID')
 assert.doesNotMatch(inventory, /setTimeout\(\(\) => setInitialInventoryMobileFullListReady\(true\), 140\)/, 'Inventory mobile product data should not be held behind a fixed visual reveal delay')
 assert.doesNotMatch(viteConfig, /inventory:\s*\[[\s\S]*'InventoryProductsSurface'/, 'Inventory products surface should not be a separate eager preload request')
 assert.match(viteConfig, /inventory:\s*\[\s*'Inventory',\s*'inventory-api',\s*'product-shared',\s*'shared-ui',\s*\]/, 'Inventory route preloads should stay focused on first-paint route/read/display chunks')

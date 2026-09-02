@@ -146,18 +146,12 @@ export default function BranchesHubPage() {
           </div>
         ) : active === 'inventory' && canInventory ? (
           <div className="page-scroll flex min-h-0 flex-1 flex-col">
-            {canBranchList ? (
-              <BranchesSection
-                embedded
-                view="branches"
-                showSectionNavigation={false}
-                dateRange={sharedDateRange}
-                onDateRangeChange={setSharedDateRange}
-                showDateRange={false}
-              />
-            ) : (
-              <InventorySection hostSection="stats" embedded />
-            )}
+            <InventorySection
+              hostSection="products"
+              embedded
+              dateRange={sharedDateRange}
+              onDateRangeChange={setSharedDateRange}
+            />
           </div>
         ) : active === 'transfers' && canBranchList ? (
           <div className="page-scroll flex min-h-0 flex-1 flex-col">
