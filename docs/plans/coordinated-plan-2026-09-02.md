@@ -295,3 +295,91 @@ pane at iPhone viewport with results recorded.
   data) but get `.gitignore` entries if missing.
 - Output: RC branch tip hash, certification report, and the list of user decisions still needed.
   **No deploy, no push to main, no migration apply.**
+
+## 4. Phase 2 — ceiling pass (added 2026-09-02 21:10 after the user's scope expansion)
+
+The user's Phase 2 ask, restated as testable requirements. Every Phase 2 section inherits §0
+(isolation), the Golden Rules, and the Phase 1 acceptance style (Ask · What changed · Found ·
+Verified expected-vs-actual · Not done). Phase 2 starts only after every Phase 1 section is merged
+and the RC tip is certified green (layers 1–4).
+
+### 4.0 Requirements (from the user, restated)
+- R1 **Ceiling quality** — "absolute ceiling" on UI/UX, architecture, capabilities; verified from
+  many angles (static, tests, browser at 375/768/1280, dark+light, both plans, offline+online).
+- R2 **Core logic is sacred** — product standalone vs group-with-child-rows, compact designs,
+  POS sell options, permission gating, filters, sticky search+date rows, FilterMenu-only selected
+  state, one close affordance per modal, InfoHint tooltips, Start→End ranges, batch identity —
+  nothing changes semantically. A redesign that changes a number, a row count, or a permission
+  outcome is a regression.
+- R3 **Layering everywhere** — each page and each button follows the user's layering model:
+  level 0 = summary/stats + a single compact control row; level 1 = the list/table; level 2 =
+  fold/expand ("view details") revealing the record's details and its multilayer actions inside
+  the fold; level 3 = the deep action (modal/drawer). Folds float over content, never push it.
+- R4 **Compact, professional, classic/luxury** — no useless space, no control forced to the next
+  row when it could share one, not text-heavy; controls (search, date range, filters, buttons)
+  must never take "half of the page". Feel: classic, expensive, clean, neat.
+- R5 **Both plans maximised** — one codebase, `PLAN=free|paid`; Free stays fully functional
+  inside the enforced daily limits with graceful degradation; Paid uses the headroom (batches,
+  CPU, subrequests, bundle). R2 and D1 identical in behaviour on both.
+- R6 **Search + barcode consistency** — every product-related search (POS, promotions, transfer,
+  inventory, products page, sales, returns, storefront) uses one matcher contract and one scan
+  path: exact barcode first, digits-only exact, typo-tolerant fallback, fast, paginated, Khmer.
+- R7 **Codex re-verification is protected** — Codex's barcode/official-name data re-verification
+  (old-system barcodes are correct where ours are missing) must keep working: the CSV headers,
+  columns, and scripts it depends on stay stable; our search reads any alias barcodes it produces.
+- R8 **Scrollability** — every section scrolls correctly horizontally and vertically in both the
+  desktop sections view and the mobile layered navigation; no nested double scroll, no clipped
+  wide tables, no page-level horizontal scroll.
+- R9 **De-bloat** — remove dead/old/duplicated code and split bloated files without changing
+  behaviour, guards, quotas, offline logic, or efficiencies; every removal proven by zero
+  importers + tests + build.
+- R10 **PWA / mobile / iOS fully working** — install (Add-to-Home-Screen guidance; optional
+  `.mobileconfig` WebClip if the Gate-2C audit finds it appropriate), update flow without
+  mid-sale reloads, storage persistence, offline shell, safe areas, keyboard/viewport hazards.
+- R11 **Verification loops** — every worker runs the loop (typecheck → tests → build → browser
+  at three viewports → expected-vs-actual table) after EACH commit, not once at the end; the
+  coordinator re-runs it on the merged tree and does layer 4 (live worker + D1 copy) at the end.
+
+### 4.1 Gate 2 audits (read-only, running)
+- Gate 2A design/layering/scroll audit → `bos-rc-workers/gate2a-design-audit.md`
+- Gate 2B search/barcode consistency + Codex reconciliation → `gate2b-search-barcode-codex-audit.md`
+- Gate 2C code-bloat map + PWA/iOS install options → `gate2c-bloat-pwa-audit.md`
+Their findings become the file:line specifics of the section briefs below (the coordinator
+rewrites each brief with those references before dispatch; workers never plan from memory).
+
+### 4.2 Sections, dependency order, ownership
+| # | Section | Depends on | Owns (files) | Must not touch |
+|---|---|---|---|---|
+| P2-1 | Design kit: tokens + at most 12 shared primitives (Button, IconButton, SectionHeader, ControlRow, StatStrip, Fold/Expander, DetailFlyout, Chip, EmptyState, Skeleton, DenseTable wrapper, Toolbar) + a gallery page under Settings → Appearance (admin-only) | Gate 2A | `frontend/src/styles/tokens.css`, `frontend/src/components/shared/kit/*`, `frontend/src/lang/*` (append) | any page file |
+| P2-2 | Search/scan core: one client hook `useProductLookup` + one scan handler + backend contract parity | Gate 2B, Sec 2 merged | `frontend/src/utils/productLookup*.ts`, `frontend/src/hooks/*`, `cloudflare/src/lib/searchMatch.ts`, `routes/products.ts` (search only) | page files (migration is P2-4/5) |
+| P2-3 | Codex reconciliation: alias-barcode ingestion (additive), CSV contract test, import path keeps old-system barcode precedence | Gate 2B | `cloudflare/migrations/*` (new, additive only), `cloudflare/src/lib/importEngine.ts` (barcode section), `ops/scripts/migration/*` (compat tests) | anything Codex's scripts read (headers/columns) |
+| P2-4 | Page adoption A: Products, POS, Sales hub (sales/returns/expenses/reports) onto the kit + layering + P2-2 lookup | P2-1, P2-2 | those page folders | logic helpers listed as do-not-touch in Gate 2A |
+| P2-5 | Page adoption B: Branches hub (overview/inventory/movements/rfid), Contacts, Promotions+Loyalty, Dashboard, Settings hub, Notes, Files, Review/Import, Catalog editor, Backup | P2-1, P2-2, Sec 3 + Sec 6 merged | those page folders | same |
+| P2-6 | Scrollability + responsive certification: every page × {375, 768, 1280} × {sections view, layered view} × {light, dark}; fixes only in scroll/sticky wrappers | P2-4, P2-5 | scroll/sticky wrappers, `pageScrollRoots.test.ts` | logic |
+| P2-7 | De-bloat: safe-to-remove list from Gate 2C, then file splits (hooks/helpers extraction only), shape-test updates | Gate 2C, after P2-4/5 land | listed files | guards, quotas, offline queue, permissions |
+| P2-8 | Plans maximised: extend Sec 8b — Paid uses headroom (bigger batches, longer CPU windows, Analytics Engine sampling), Free degrades gracefully with user-visible notices; matrix test for every limit | Sec 8b merged | the plan-limits module Sec 8b introduces and its consumers | wrangler bindings |
+| P2-9 | PWA/iOS: install guidance + optional WebClip `.mobileconfig` route (per Gate 2C verdict), viewport/keyboard/safe-area hazard fixes, offline fallback, update toast; responsive-pwa-audit skill run on the built app | Sec 8b merged, Gate 2C | `frontend/index.html`, `public-runtime/*`, `Sidebar.tsx` (update region), `cloudflare/src/routes/system.ts` (webclip route) | page layouts |
+| P2-10 | Final: outside-diff sweep 2, committed-HEAD certification in a fresh worktree, layer-4 live QA, RC report + user decisions | all | docs only | — |
+
+Workers per section: one Sonnet worker per section (P2-4 and P2-5 may be split by page group into
+two workers each once the kit is stable), always on its own `rc/p2-<n>` branch worktree branched
+from the RC tip at dispatch time; merge order = table order.
+
+### 4.3 Brief template every Phase 2 worker receives (coordinator fills the specifics)
+1. Ask (verbatim) · 2. Files you own / must not touch (from §4.2 + audit) · 3. Invariants (R2 list
++ the audit's do-not-touch helpers) · 4. Exact design spec (tokens, spacing scale, control-row
+composition at each breakpoint, fold behaviour, copy limits) · 5. Step list in dependency order,
+one commit each, exact-path staging · 6. Verification loop after every commit (commands + what
+to screenshot + expected vs actual) · 7. Report format + path.
+
+### 4.4 Acceptance for Phase 2 as a whole
+- Every page renders with the kit; a grep finds zero hand-rolled chip rows / buttons / stat strips
+  outside `shared/kit`; shape tests updated deliberately, not deleted.
+- Control rows: at most 1 row at 1280, 2 rows at 768, 2 rows at 375 (search + date), everything
+  else inside FilterMenu / an overflow menu; measured in the browser, not asserted from code.
+- Search/scan matrix from Gate 2B: every cell passes on the RC tip.
+- Codex contract test green; alias barcodes searchable; old-system barcode precedence on import.
+- Scroll matrix (P2-6) all passing, no page-level horizontal scroll at any viewport.
+- De-bloat: net negative lines with tests/build green and no behaviour diff on the QA script.
+- Free and Paid: `PLAN` matrix test green; a Free run of the QA script completes within daily budgets.
+- PWA: install/update/offline checklist + responsive-pwa-audit report attached; iOS hazard list closed.
