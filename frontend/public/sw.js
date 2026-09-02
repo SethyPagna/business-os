@@ -13,12 +13,15 @@ const BUILD_HASH = '__BUSINESS_OS_BUILD_HASH__';
 const APP_SHELL_VERSION = `business-os-app-shell-${BUILD_HASH}`;
 const APP_SHELL_CACHE = APP_SHELL_VERSION;
 const STATIC_CACHE = `business-os-static-${BUILD_HASH}`;
-const APP_SHELL_URLS = ['/', '/index.html', '/manifest.json', '/portal-manifest.json', '/icon.png', '/icon-192.png', '/icon-512.png', '/icon-192-maskable.png', '/icon-512-maskable.png', '/apple-touch-icon.png', '/leang-cosmetics-icon-192.png', '/leang-cosmetics-icon-512.png', '/leang-cosmetics-icon-192-maskable.png', '/leang-cosmetics-icon-512-maskable.png', '/leang-cosmetics-apple-touch-icon-v1.png'];
+const APP_SHELL_URLS = ['/', '/index.html', '/manifest.json', '/portal-manifest.json', '/business-os-precache.json', '/icon.png', '/icon-192.png', '/icon-512.png', '/icon-192-maskable.png', '/icon-512-maskable.png', '/apple-touch-icon.png', '/leang-cosmetics-icon-192.png', '/leang-cosmetics-icon-512.png', '/leang-cosmetics-icon-192-maskable.png', '/leang-cosmetics-icon-512-maskable.png', '/leang-cosmetics-apple-touch-icon-v1.png'];
 const OUTBOX_SYNC_TAG = 'business-os-sync-outbox';
 const DB_NAME = 'BusinessOS';
 const OFFLINE_SALE_QUEUE_CHANNEL = 'sales:create';
 const RETRY_DELAY_MS = 30_000;
+const SYNC_LEASE_MS = 60_000;
 const OFFLINE_FILE_CHUNK_SIZE = 1024 * 1024;
+const PRECACHE_CONCURRENCY = 4;
+const CACHE_METADATA_URL = '/__business_os_cache_metadata__';
 const FILE_CHUNK_ENDPOINTS = {
     init: '/api/sync/files/chunks/init',
     chunk: '/api/sync/files/chunks/:uploadId/chunk',
@@ -71,7 +74,7 @@ async function readQueuedBusinessOutbox(db) {
     const tx = db.transaction('sync_outbox', 'readonly');
     const rows = await requestResult(tx.objectStore('sync_outbox').getAll());
     return (Array.isArray(rows) ? rows : [])
-        .filter((row) => ['pending', 'failed', 'syncing'].includes(String(row.status || 'pending')))
+        .filter((row) => isReplayEligible(row))
         .sort((a, b) => String(a.created_at || '').localeCompare(String(b.created_at || '')));
 }
 async function putBusinessOutboxRow(db, row, updates = {}) {
@@ -107,8 +110,20 @@ async function readQueuedSales(db) {
         : await requestResult(store.getAll());
     return (Array.isArray(rows) ? rows : [])
         .filter((row) => row?.channel === OFFLINE_SALE_QUEUE_CHANNEL && row.payload)
-        .filter((row) => ['pending', 'failed', 'syncing'].includes(String(row.status || 'pending')))
+        .filter((row) => isReplayEligible(row))
         .sort((a, b) => String(a.created_at || '').localeCompare(String(b.created_at || '')));
+}
+function isReplayEligible(row) {
+    const status = String(row?.status || 'pending');
+    if (!['pending', 'failed', 'retry', 'syncing'].includes(status))
+        return false;
+    if (status === 'syncing') {
+        const claimedAt = Date.parse(String(row?.updated_at || row?.created_at || ''));
+        if (Number.isFinite(claimedAt) && Date.now() - claimedAt < SYNC_LEASE_MS)
+            return false;
+    }
+    const retryAt = row?.retry_at ? Date.parse(String(row.retry_at)) : 0;
+    return !Number.isFinite(retryAt) || retryAt <= Date.now();
 }
 async function putQueueRow(db, row, updates = {}) {
     if (!db.objectStoreNames.contains('sync_queue'))
@@ -129,7 +144,7 @@ async function deleteQueueRow(db, row) {
     await txDone(tx);
 }
 function broadcastSyncEvent(type, detail = {}) {
-    self.clients.matchAll({ includeUncontrolled: true, type: 'window' })
+    return self.clients.matchAll({ includeUncontrolled: true, type: 'window' })
         .then((clients) => {
         clients.forEach((client) => client.postMessage({
             type,
@@ -137,6 +152,110 @@ function broadcastSyncEvent(type, detail = {}) {
         }));
     })
         .catch(() => { });
+}
+function isValidStaticResponse(request, response) {
+    if (!response || !response.ok || response.type !== 'basic' || response.redirected)
+        return false;
+    const pathname = new URL(request.url || request, self.location.origin).pathname.toLowerCase();
+    const contentType = String(response.headers.get('content-type') || '').toLowerCase();
+    if (pathname.endsWith('.js'))
+        return contentType.includes('javascript') || contentType.includes('ecmascript');
+    if (pathname.endsWith('.css'))
+        return contentType.includes('text/css');
+    return true;
+}
+async function mapWithConcurrency(items, concurrency, worker) {
+    let nextIndex = 0;
+    const results = new Array(items.length);
+    const workers = Array.from({ length: Math.min(concurrency, items.length) }, async () => {
+        while (nextIndex < items.length) {
+            const index = nextIndex;
+            nextIndex += 1;
+            try {
+                results[index] = { status: 'fulfilled', value: await worker(items[index]) };
+            }
+            catch (reason) {
+                results[index] = { status: 'rejected', reason };
+            }
+        }
+    });
+    await Promise.all(workers);
+    return results;
+}
+async function cacheVerifiedStaticAsset(cache, url) {
+    const existingCacheNames = (await caches.keys()).filter((name) => (name.startsWith('business-os-static-') && name !== STATIC_CACHE));
+    for (const cacheName of existingCacheNames) {
+        const prior = await caches.open(cacheName).then((candidate) => candidate.match(url)).catch(() => null);
+        if (prior && isValidStaticResponse(new Request(url), prior)) {
+            await cache.put(url, prior.clone());
+            return;
+        }
+    }
+    const request = new Request(url, { cache: 'reload' });
+    const response = await fetch(request);
+    if (!isValidStaticResponse(request, response)) {
+        throw new Error(`Invalid static asset response: ${url}`);
+    }
+    await cache.put(request, response.clone());
+}
+async function precacheAppShell() {
+    const cache = await caches.open(APP_SHELL_CACHE);
+    // One missing optional icon or manifest must not strand a new worker in
+    // "waiting" forever. Cache every URL independently, then require only an
+    // actual navigation shell before activating. This is especially important
+    // on iOS, where the install worker may get very little execution time.
+    await Promise.allSettled(APP_SHELL_URLS.map((url) => (cache.add(new Request(url, { cache: 'reload' })))));
+    const shell = await cache.match('/index.html') || await cache.match('/');
+    if (!shell)
+        throw new Error('Application shell could not be cached');
+    // The worker is registered after the first page load, so those entry files
+    // were fetched before this worker controlled the page. Discover the hashed
+    // JS/CSS references from the cached HTML and explicitly precache them; a
+    // fresh iOS install can then be terminated and reopened offline without
+    // rendering an inert HTML shell.
+    const html = await shell.clone().text().catch(() => '');
+    const htmlEntryAssets = [...html.matchAll(/(?:src|href)=["'](\/assets\/[^"'#?]+(?:\?[^"']*)?)["']/g)]
+        .map((match) => match[1]);
+    const precacheResponse = await cache.match('/business-os-precache.json');
+    const precachePayload = precacheResponse
+        ? await precacheResponse.clone().json().catch(() => null)
+        : null;
+    const generatedAssets = Array.isArray(precachePayload?.assets)
+        ? precachePayload.assets.filter((url) => typeof url === 'string' && url.startsWith('/assets/'))
+        : [];
+    const staticCache = await caches.open(STATIC_CACHE);
+    const requiredEntryAssets = [...new Set(htmlEntryAssets)];
+    const entryResults = await mapWithConcurrency(requiredEntryAssets, PRECACHE_CONCURRENCY, (url) => cacheVerifiedStaticAsset(staticCache, url));
+    if (entryResults.some((result) => result.status === 'rejected')) {
+        throw new Error('Application entry assets could not be cached');
+    }
+    // Lazy route chunks make offline navigation richer, but they must not be a
+    // hard install gate. A single optional/missing chunk should never prevent a
+    // new worker from installing on a memory- or network-constrained iPhone.
+    const optionalAssets = [...new Set(generatedAssets.filter((url) => !requiredEntryAssets.includes(url)))];
+    await mapWithConcurrency(optionalAssets, PRECACHE_CONCURRENCY, (url) => cacheVerifiedStaticAsset(staticCache, url));
+    await cache.put(CACHE_METADATA_URL, new Response(JSON.stringify({
+        version: APP_SHELL_VERSION,
+        installedAt: Date.now(),
+    }), { headers: { 'Content-Type': 'application/json' } }));
+}
+async function cacheNamesToRetain(keys) {
+    const retained = new Set([APP_SHELL_CACHE, STATIC_CACHE]);
+    const priorShells = keys.filter((key) => key.startsWith('business-os-app-shell-') && key !== APP_SHELL_CACHE);
+    const records = await Promise.all(priorShells.map(async (name) => {
+        const metadata = await caches.open(name)
+            .then((cache) => cache.match(CACHE_METADATA_URL))
+            .then((response) => response?.json?.())
+            .catch(() => null);
+        return { name, installedAt: Number(metadata?.installedAt || 0) };
+    }));
+    records.sort((a, b) => b.installedAt - a.installedAt);
+    const previous = records[0]?.name;
+    if (previous) {
+        retained.add(previous);
+        retained.add(previous.replace('business-os-app-shell-', 'business-os-static-'));
+    }
+    return retained;
 }
 function nextRetryAt(row) {
     const retryCount = Math.max(0, Number(row?.retry_count || 0) + 1);
@@ -276,16 +395,41 @@ async function syncOutbox() {
                         }],
                 }),
             });
-            if (response.ok) {
+            const responseText = await response.text().catch(() => '');
+            const responsePayload = (() => { try {
+                return JSON.parse(responseText);
+            }
+            catch (_) {
+                return null;
+            } })();
+            const result = Array.isArray(responsePayload?.results) ? responsePayload.results[0] : null;
+            const status = Number(response.status || 0);
+            const applied = status < 400 && (result
+                ? result.status === 'applied'
+                : response.ok && responsePayload?.success !== false);
+            if (applied) {
                 await deleteBusinessOutboxRow(db, row);
                 broadcastSyncEvent('BUSINESS_OS_OUTBOX_SYNCED', { channel: row.operation_id, entity_name: row.entity_label || null });
             }
-            else if (response.status === 409) {
+            else if (status === 409 || result?.status === 'conflict' || result?.code === 'write_conflict') {
                 await putBusinessOutboxRow(db, row, { status: 'conflict', conflict: true, retry_at: null, reason: 'write_conflict' });
                 broadcastSyncEvent('BUSINESS_OS_OUTBOX_CONFLICT', { channel: row.operation_id, entity_name: row.entity_label || null });
             }
+            else if (status === 401 || status === 403 || result?.code === 'auth_required') {
+                await putBusinessOutboxRow(db, row, {
+                    status: 'failed',
+                    error: result?.error || responsePayload?.error || responseText || 'Sign in again before background sync can continue.',
+                    retry_at: null,
+                    reason: 'auth_required',
+                });
+                broadcastSyncEvent('BUSINESS_OS_OUTBOX_AUTH_REQUIRED', { channel: row.operation_id });
+            }
             else {
-                await putBusinessOutboxRow(db, row, { status: 'failed', error: `Sync failed with HTTP ${response.status}`, ...nextRetryAt(row) });
+                await putBusinessOutboxRow(db, row, {
+                    status: 'failed',
+                    error: result?.error || result?.code || responsePayload?.error || responseText || `Sync failed with HTTP ${status || 'error'}`,
+                    ...nextRetryAt(row),
+                });
             }
         }
         const fileChunks = await readPendingFileChunks(db);
@@ -323,20 +467,42 @@ async function syncOutbox() {
         catch (_) { }
     }
 }
+let syncOutboxPromise = null;
+function syncOutboxOnce() {
+    if (!syncOutboxPromise) {
+        syncOutboxPromise = syncOutbox().finally(() => {
+            syncOutboxPromise = null;
+        });
+    }
+    return syncOutboxPromise;
+}
 self.addEventListener('install', (event) => {
-    event.waitUntil(caches.open(APP_SHELL_CACHE)
-        .then((cache) => cache.addAll(APP_SHELL_URLS))
-        .then(() => self.skipWaiting())
-        .catch(() => { }));
+    event.waitUntil((async () => {
+        await precacheAppShell();
+        // Do not take over a live checkout or editor mid-session. Updated workers
+        // wait until the user closes the old client or explicitly chooses Update;
+        // the first install still activates normally because there is no incumbent.
+        if (self.registration.active) {
+            await broadcastSyncEvent('BUSINESS_OS_APP_UPDATE_AVAILABLE', {
+                version: APP_SHELL_VERSION,
+                message: 'New version ready',
+                waiting: true,
+            });
+        }
+    })());
 });
 self.addEventListener('activate', (event) => {
     event.waitUntil((async () => {
         const keys = await caches.keys();
+        // Keep the immediately previous generation so an older, still-open tab
+        // can finish a checkout or lazy import after another tab accepts Update.
+        // Older generations are removed to keep iOS storage bounded.
+        const retained = await cacheNamesToRetain(keys);
         await Promise.all(keys
-            .filter((key) => key.startsWith('business-os-') && ![APP_SHELL_CACHE, STATIC_CACHE].includes(key))
+            .filter((key) => key.startsWith('business-os-') && !retained.has(key))
             .map((key) => caches.delete(key)));
         await self.clients.claim();
-        broadcastSyncEvent('BUSINESS_OS_APP_UPDATE_AVAILABLE', {
+        await broadcastSyncEvent('BUSINESS_OS_APP_UPDATE_AVAILABLE', {
             version: APP_SHELL_VERSION,
             message: 'New version ready',
         });
@@ -344,15 +510,15 @@ self.addEventListener('activate', (event) => {
 });
 self.addEventListener('sync', (event) => {
     if (event.tag === OUTBOX_SYNC_TAG) {
-        event.waitUntil(syncOutbox());
+        event.waitUntil(syncOutboxOnce());
     }
 });
 self.addEventListener('message', (event) => {
     if (event?.data?.type === 'BUSINESS_OS_SYNC_NOW') {
-        event.waitUntil?.(syncOutbox());
+        event.waitUntil?.(syncOutboxOnce());
     }
     if (event?.data?.type === 'BUSINESS_OS_SKIP_WAITING') {
-        self.skipWaiting();
+        event.waitUntil?.(self.skipWaiting());
     }
 });
 function isSameOrigin(requestUrl) {
@@ -397,7 +563,7 @@ async function appShellFallback(request) {
         const response = await fetch(request, { cache: 'no-store' });
         const cached = await cache.match('/index.html') || await cache.match('/');
         if (response && response.ok && response.type === 'basic' && !response.redirected) {
-            cache.put('/index.html', response.clone()).catch(() => { });
+            await cache.put('/index.html', response.clone()).catch(() => { });
             return response;
         }
         // Do not hide Cloudflare Access/login redirects or app-owned HTTP errors
@@ -417,7 +583,7 @@ async function networkFirstStatic(request) {
     try {
         const response = await fetch(request, { cache: 'no-store' });
         if (response && response.ok && response.type === 'basic' && !response.redirected) {
-            cache.put(request, response.clone()).catch(() => { });
+            await cache.put(request, response.clone()).catch(() => { });
             return response;
         }
         // Returning the live error/redirect prevents stale hashed chunks from
@@ -430,22 +596,23 @@ async function networkFirstStatic(request) {
         throw error;
     }
 }
-async function cacheFirstStatic(request) {
+async function cacheFirstStatic(request, event) {
     const cache = await caches.open(STATIC_CACHE);
     const cached = await cache.match(request);
     if (cached) {
-        fetch(request)
-            .then((response) => {
-            if (response && response.ok && response.type === 'basic' && !response.redirected) {
-                cache.put(request, response.clone()).catch(() => { });
+        const refresh = fetch(request)
+            .then(async (response) => {
+            if (isValidStaticResponse(request, response)) {
+                await cache.put(request, response.clone()).catch(() => { });
             }
         })
             .catch(() => { });
+        event.waitUntil(refresh);
         return cached;
     }
     const response = await fetch(request);
-    if (response && response.ok && response.type === 'basic' && !response.redirected) {
-        cache.put(request, response.clone()).catch(() => { });
+    if (isValidStaticResponse(request, response)) {
+        await cache.put(request, response.clone()).catch(() => { });
     }
     return response;
 }
@@ -465,6 +632,6 @@ self.addEventListener('fetch', (event) => {
     if (!isCacheableStaticPath(url.pathname))
         return;
     event.respondWith(isHashedBuildAsset(url.pathname)
-        ? cacheFirstStatic(request)
+        ? cacheFirstStatic(request, event)
         : networkFirstStatic(request));
 });

@@ -208,10 +208,13 @@ max_batch_timeout = 30
 
 [[queues.consumers]]
 queue = "business-os-backup-assets"
-# handleBackupQueue processes one continuation step per message
-# (continueCloudflareBackupAssetCopy copies up to 20 assets -- 40 R2
-# get/put subrequests, leaving headroom under Workers Free's 50 -- and
-# re-enqueues itself) -- same reasoning as business-os-import's
+# handleBackupQueue processes one backup-asset continuation, Drive mirror, or
+# non-destructive Drive restore-stage job per message. Asset continuation
+# copies a bounded slice and re-enqueues itself; Drive mirror uploads one
+# finalized manifest; restore-stage streams an app-tagged Drive manifest into
+# an isolated R2 candidate and validates it. The shared max_batch_size=1 keeps
+# all three kinds isolated and gives each its own retry budget -- same reasoning as
+# business-os-import's
 # max_batch_size = 1 above: keep each invocation's R2 get()+put() work
 # inside the Workers Free plan's per-invocation CPU budget rather than
 # packing several continuation steps' worth of copying into one call.

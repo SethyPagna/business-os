@@ -16,7 +16,8 @@ function compile(file, stubs = {}) {
 }
 
 const batchCode = compile('batchCode.ts')
-const subject = compile('stockActionCommit.ts', { './db': {}, './batchCode': batchCode })
+const searchMatch = compile('searchMatch.ts')
+const subject = compile('stockActionCommit.ts', { './db': {}, './batchCode': batchCode, './searchMatch': searchMatch })
 
 function setup() {
   const sqlite = new Database(':memory:')

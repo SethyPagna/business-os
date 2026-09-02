@@ -1,5 +1,5 @@
 // The identity rule, enforced on EVERY backend import path (Part 383 R1):
-//   same name + same barcode  = the SAME product (attach/merge)
+//   same name + same barcode + same cost = the SAME product (attach/merge)
 //   same name + diff barcode  = a separate child product (never attach)
 //   diff name + same barcode  = a DIFFERENT product (shared/promo barcodes
 //                               are real -- never attach across names)
@@ -199,10 +199,10 @@ function seedCatalog(sqlite) {
     assert.strictEqual(byRow.get(2).productId, 2, 'name-compatible barcode match attaches')
     assert.strictEqual(byRow.get(3).productId, null, 'same barcode + different name never attaches')
     assert.strictEqual(byRow.get(3).conflicts.length, 0, 'it is a CREATE of its own product, not a blocked conflict')
-    assert.strictEqual(byRow.get(3).identityKey, 'new:chanel no5|b1', 'the new product keeps its own name+barcode identity')
+    assert.strictEqual(byRow.get(3).identityKey, 'new:chanel no5|b1|cost:0', 'the new product keeps its exact name+barcode+cost identity')
     assert.strictEqual(byRow.get(4).productId, null, 'same name + a NEW barcode is a child row (create), not an attach to the other-barcode sibling')
     assert.strictEqual(byRow.get(4).conflicts.length, 0)
-    assert.strictEqual(byRow.get(5).productId, 3, 'a row with NO barcode may attach by unambiguous name')
+    assert.strictEqual(byRow.get(5).productId, null, 'blank barcode differs from a real barcode and creates a child row')
     assert.strictEqual(byRow.get(6).productId, null, 'barcode shared across names with no row name cannot resolve')
     assert.strictEqual(byRow.get(6).conflicts.length, 1)
     assert.match(byRow.get(6).conflicts[0], /name/i)

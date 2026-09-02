@@ -40,11 +40,14 @@
 // either -- `products` is one global table and `branch_stock` is the only
 // per-branch thing, so one product carries stock at many branches.
 //
-// Batches are a separate concern and do NOT participate here: a batch
-// records WHEN stock arrived so older stock sells first (FIFO) and new and
-// old stock don't get mixed. Batches are not a cost-tracking mechanism, and
-// a cost difference is therefore a product-row difference, not a lot
-// difference.
+// Batches are a separate concern and do NOT participate in ordinary catalog
+// identity: a batch records WHEN stock arrived so older stock sells first
+// (FIFO) and new and old stock don't get mixed. The receiving paths have one
+// narrow exception: another receipt with the same non-blank barcode and the
+// exact same evidenced batch may share the existing option, while its own
+// historical unit/total cost stays on that receipt movement and accumulated
+// batch cost. It never replaces the option's catalog cost. Without that exact
+// batch evidence, a cost difference remains a product-row difference.
 
 /** Normalized grouping key for a product name: trim, collapse internal whitespace, lowercase. */
 export function normalizeProductGroupName(value: unknown): string {

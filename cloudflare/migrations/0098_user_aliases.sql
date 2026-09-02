@@ -27,14 +27,18 @@ CREATE INDEX IF NOT EXISTS idx_user_aliases_user
 -- Seed the known legacy POS cashier nicknames. Resolved by CURRENT username so
 -- the seed is environment-safe (only inserts where the account exists) and never
 -- hard-codes an id. Only nicknames that do NOT already equal a username need an
--- alias — "za"/"rath"/"sethyka" match their usernames directly and are omitted.
+-- alias. Reviewed aliases intentionally override a direct username match when
+-- the old label belongs to a different canonical account (Sethyka -> James).
 -- Idempotent: unique alias index + INSERT OR IGNORE.
 INSERT OR IGNORE INTO user_aliases (user_id, alias)
 SELECT u.id, seed.alias
 FROM (
   SELECT 'Za'    AS uname, 'aza'        AS alias UNION ALL
+  SELECT 'Rath'  AS uname, 'rout'       AS alias UNION ALL
   SELECT 'Rath'  AS uname, 'routh'      AS alias UNION ALL
+  SELECT 'james' AS uname, 'sethyka'    AS alias UNION ALL
   SELECT 'james' AS uname, 'pagna'      AS alias UNION ALL
+  SELECT 'admin' AS uname, 'super admin' AS alias UNION ALL
   SELECT 'admin' AS uname, 'dev-usmart' AS alias
 ) AS seed
 JOIN users u ON lower(trim(u.username)) = lower(trim(seed.uname));

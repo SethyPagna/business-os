@@ -6,14 +6,14 @@ import {
   outcomeAt,
   actionAllowed,
 } from '../src/utils/permissionActions.ts'
-import { REVIEW_TIER_KEYS } from '../src/utils/permissions.ts'
+import { REVIEW_TIER_KEYS, VIEW_TIER_KEYS } from '../src/utils/permissions.ts'
 
 // --- 1. structural invariants ------------------------------------------
 
 for (const [permissionKey, actions] of Object.entries(PERMISSION_ACTIONS)) {
   assert.ok(
-    REVIEW_TIER_KEYS.has(permissionKey),
-    `PERMISSION_ACTIONS has a per-action table for '${permissionKey}', which is not a review-tier key -- the tier column would be meaningless there`,
+    REVIEW_TIER_KEYS.has(permissionKey) || VIEW_TIER_KEYS.has(permissionKey),
+    `PERMISSION_ACTIONS has a per-action table for '${permissionKey}', which is not a tiered key -- the tier column would be meaningless there`,
   )
   assert.ok(actions.length > 0, `'${permissionKey}' has an empty action list`)
   const seen = new Set<string>()
@@ -23,9 +23,12 @@ for (const [permissionKey, actions] of Object.entries(PERMISSION_ACTIONS)) {
     assert.ok(action.label.trim(), `'${permissionKey}.${action.key}' has an empty label`)
     assert.ok(action.tKey.trim(), `'${permissionKey}.${action.key}' has an empty translation key`)
   }
-  // Every section a person can reach must expose a view action, otherwise
-  // the matrix implies the page itself is unreachable at that tier.
-  assert.ok(seen.has('view'), `'${permissionKey}' is missing a 'view' action row`)
+  // Review-tier sections model their page read explicitly. View-tier page
+  // access is already controlled by the tier selector itself, so their
+  // tables contain only separately switchable actions.
+  if (REVIEW_TIER_KEYS.has(permissionKey)) {
+    assert.ok(seen.has('view'), `'${permissionKey}' is missing a 'view' action row`)
+  }
 }
 
 // Every review-tier key should have an action table -- a tier key without
@@ -37,6 +40,10 @@ for (const key of REVIEW_TIER_KEYS) {
     PERMISSION_ACTIONS[key],
     `review-tier key '${key}' has no per-action table in permissionActions.ts`,
   )
+}
+
+for (const key of ['sales', 'promotions']) {
+  assert.ok(PERMISSION_ACTIONS[key], `audited view-tier key '${key}' has no per-action table`)
 }
 
 console.log('PASS per-action tables are structurally sound and cover every review-tier key')
@@ -74,6 +81,9 @@ assert.equal(actionAllowed('inventory', 'adjust', 'review'), false)
 assert.equal(actionAllowed('branches', 'transfer', 'review'), false)
 assert.equal(actionAllowed('returns', 'edit', 'review'), false)
 assert.equal(actionAllowed('contacts', 'delete', 'review'), false)
+assert.equal(actionAllowed('sales', 'export', 'view'), true)
+assert.equal(actionAllowed('sales', 'status', 'view'), false)
+assert.equal(actionAllowed('promotions', 'manage', 'view'), false)
 
 // Fees is the permissive one: only delete needs approval.
 assert.equal(actionAllowed('fees', 'add', 'review'), true)
@@ -163,6 +173,21 @@ assert.match(
   /maybeQueueForReview\(c\.env, user, 'inventory'/,
   'inventory reasons-list edit is documented as queueing -- no maybeQueueForReview call found',
 )
+
+const salesRoute = routeSource('sales.ts')
+assert.match(salesRoute, /getActionTier\(user, 'sales', 'status'\) !== 'full'/, 'sales status writes must enforce the action capability server-side')
+assert.match(salesRoute, /getActionTier\(user, 'sales', 'customer'\) !== 'full'/, 'sales customer writes must enforce the action capability server-side')
+assert.match(salesRoute, /getActionTier\(c\.get\('user'\), 'sales', 'export'\) === 'none'/, 'sales export must enforce its action override server-side')
+
+const promotionsRoute = routeSource('promotions.ts')
+assert.equal((promotionsRoute.match(/requireAction\('promotions', 'manage'\)/g) || []).length, 3, 'all three promotion-rule write routes must share promotions.manage')
+
+assert.match(contactsRoute, /denyUnlessFullContactAction\(c, 'resolve_conflicts'\)/, 'contact conflict writes must enforce the explicit resolution capability')
+
+const branchesRoute = routeSource('branches.ts')
+assert.equal((branchesRoute.match(/getActionTier\(user, 'branches', 'transfer'\)/g) || []).length, 2, 'single and bulk branch transfers must share branches.transfer')
+const branchesUi = readFileSync(new URL('../src/components/branches/Branches.tsx', import.meta.url), 'utf8')
+assert.equal((branchesUi.match(/can\('branches', 'transfer'\)/g) || []).length, 1, 'all Branches transfer entry points must derive from one shared capability')
 
 console.log('PASS per-action table still matches the real route guards')
 console.log('permissionActions tests passed')

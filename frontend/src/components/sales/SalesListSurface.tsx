@@ -1,8 +1,19 @@
 import { Fragment, type RefObject } from 'react'
 import ChevronDown from 'lucide-react/dist/esm/icons/chevron-down.js'
 import ChevronRight from 'lucide-react/dist/esm/icons/chevron-right.js'
+import Eye from 'lucide-react/dist/esm/icons/eye.js'
+import Printer from 'lucide-react/dist/esm/icons/printer.js'
 import StatusBadge from './StatusBadge.tsx'
 import { consumeLongPressClick, createLongPressHandlers, type LongPressState } from '../../utils/longPress.ts'
+import ColumnChooser from '../shared/ColumnChooser.tsx'
+import { useColumnPreferences } from '../shared/useColumnPreferences.ts'
+import type { TableColumnDef } from '../shared/columnPreferences.ts'
+
+const SALES_OPTIONAL_COLUMNS: TableColumnDef[] = [
+  { key: 'cashier', label: 'Cashier' },
+  { key: 'branch', label: 'Branch' },
+  { key: 'items', label: 'Items' },
+]
 
 type TranslateFn = (key: string) => string
 type MoneyFormatter = (value: number | string) => string
@@ -120,13 +131,16 @@ export default function SalesListSurface({
   // every first-column cell drops padding/content and auto layout collapses
   // the column.
   const selectCellPad = selectionModeActive ? 'px-3' : 'px-0'
+  const cols = useColumnPreferences('sales', SALES_OPTIONAL_COLUMNS)
+  const columnCount = 9 + cols.visibleCount
+  const chooserColumns = SALES_OPTIONAL_COLUMNS.map((column) => ({ ...column, label: t(column.key) || column.label }))
 
   return (
     <>
-      <div className="card hidden overflow-hidden sm:block">
+      <div className="card hidden overflow-hidden md:block">
         <div className="overflow-x-auto">
-          <table className="w-full text-sm" style={{ minWidth: 760 }}>
-            <thead className="bg-gray-50 dark:bg-gray-700/50">
+          <table className="w-full border-collapse text-xs" style={{ minWidth: 760 }}>
+            <thead className="bg-slate-50 text-[11px] uppercase tracking-wide text-slate-500 dark:bg-slate-800/80 dark:text-slate-400">
               <tr>
                 <th className={`${selectionModeActive ? 'w-10' : 'w-0'} ${selectCellPad} py-3`}>
                   {selectionModeActive ? (
@@ -140,16 +154,19 @@ export default function SalesListSurface({
                     />
                   ) : null}
                 </th>
-                <th className="px-4 py-3 text-left font-semibold text-gray-600 dark:text-gray-400">{t('receipt_number')}</th>
-                <th className="px-4 py-3 text-left font-semibold text-gray-600 dark:text-gray-400">{t('date')}</th>
-                <th className="px-4 py-3 text-left font-semibold text-gray-600 dark:text-gray-400">{t('customer')}</th>
-                <th className="px-4 py-3 text-left font-semibold text-gray-600 dark:text-gray-400">{t('status')}</th>
-                <th className="hidden px-4 py-3 text-left font-semibold text-gray-600 dark:text-gray-400 lg:table-cell">{t('cashier')}</th>
-                <th className="px-4 py-3 text-left font-semibold text-gray-600 dark:text-gray-400">{t('payment_method')}</th>
-                <th className="hidden px-4 py-3 text-left font-semibold text-gray-600 dark:text-gray-400 md:table-cell">{t('branch')}</th>
-                <th className="px-4 py-3 text-right font-semibold text-gray-600 dark:text-gray-400">{t('total')}</th>
-                <th className="hidden px-4 py-3 text-center font-semibold text-gray-600 dark:text-gray-400 md:table-cell">{t('items')}</th>
-                <th className="px-4 py-3 text-center font-semibold text-gray-600 dark:text-gray-400">{t('print')}</th>
+                <th className="px-3 py-2 text-left font-semibold">{t('receipt_number')}</th>
+                <th className="px-3 py-2 text-left font-semibold">{t('date')}</th>
+                <th className="px-3 py-2 text-left font-semibold">{t('customer')}</th>
+                <th className="px-3 py-2 text-left font-semibold">{t('status')}</th>
+                {cols.isVisible('cashier') ? <th className="hidden px-3 py-2 text-left font-semibold lg:table-cell">{t('cashier')}</th> : null}
+                <th className="px-3 py-2 text-left font-semibold">{t('payment_method')}</th>
+                {cols.isVisible('branch') ? <th className="hidden px-3 py-2 text-left font-semibold md:table-cell">{t('branch')}</th> : null}
+                <th className="px-3 py-2 text-right font-semibold">{t('total')}</th>
+                {cols.isVisible('items') ? <th className="hidden px-3 py-2 text-center font-semibold md:table-cell">{t('items')}</th> : null}
+                <th className="px-3 py-2 text-right font-semibold">{t('actions') || 'Actions'}</th>
+                <th className="hidden w-10 px-1 py-2 text-right lg:table-cell">
+                  <ColumnChooser columns={chooserColumns} isVisible={cols.isVisible} toggle={cols.toggle} reset={cols.reset} label={t('columns') || 'Columns'} resetLabel={t('reset') || 'Reset'} />
+                </th>
               </tr>
             </thead>
             <tbody>
@@ -161,16 +178,17 @@ export default function SalesListSurface({
                     <td className="px-4 py-3"><div className="h-3 w-24 rounded bg-slate-200 dark:bg-slate-700" /></td>
                     <td className="px-4 py-3"><div className="h-4 w-28 rounded bg-slate-200 dark:bg-slate-700" /></td>
                     <td className="px-4 py-3"><div className="h-5 w-20 rounded-full bg-slate-200 dark:bg-slate-700" /></td>
-                    <td className="hidden px-4 py-3 lg:table-cell"><div className="h-3 w-24 rounded bg-slate-200 dark:bg-slate-700" /></td>
+                    {cols.isVisible('cashier') ? <td className="hidden px-4 py-3 lg:table-cell"><div className="h-3 w-24 rounded bg-slate-200 dark:bg-slate-700" /></td> : null}
                     <td className="px-4 py-3"><div className="h-5 w-16 rounded-full bg-slate-200 dark:bg-slate-700" /></td>
-                    <td className="hidden px-4 py-3 md:table-cell"><div className="h-3 w-20 rounded bg-slate-200 dark:bg-slate-700" /></td>
+                    {cols.isVisible('branch') ? <td className="hidden px-4 py-3 md:table-cell"><div className="h-3 w-20 rounded bg-slate-200 dark:bg-slate-700" /></td> : null}
                     <td className="px-4 py-3"><div className="ml-auto h-4 w-16 rounded bg-slate-200 dark:bg-slate-700" /></td>
-                    <td className="hidden px-4 py-3 md:table-cell"><div className="mx-auto h-4 w-8 rounded bg-slate-200 dark:bg-slate-700" /></td>
+                    {cols.isVisible('items') ? <td className="hidden px-4 py-3 md:table-cell"><div className="mx-auto h-4 w-8 rounded bg-slate-200 dark:bg-slate-700" /></td> : null}
                     <td className="px-4 py-3"><div className="mx-auto h-6 w-16 rounded bg-slate-200 dark:bg-slate-700" /></td>
+                    <td className="hidden lg:table-cell" />
                   </tr>
                 ))
               ) : filtered.length === 0 ? (
-                <tr><td colSpan={11} className="py-10 text-center text-gray-400">{t('no_data')}</td></tr>
+                <tr><td colSpan={columnCount} className="py-10 text-center text-gray-400">{t('no_data')}</td></tr>
               ) : salesSections.map((section) => {
                 const isCollapsed = collapsedSalesSections.has(section.id)
                 // Money-counting count for the day header (cancelled + awaiting
@@ -179,7 +197,7 @@ export default function SalesListSurface({
                 return (
                   <Fragment key={section.id}>
                     <tr className="bg-slate-100/90 dark:bg-slate-800/80">
-                      <td colSpan={11} className="px-4 py-2">
+                      <td colSpan={columnCount} className="px-4 py-2">
                         <div className="flex items-center justify-between gap-3 text-xs">
                           <label className="inline-flex min-w-0 items-center gap-2 font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
                             {selectionModeActive ? (
@@ -212,7 +230,7 @@ export default function SalesListSurface({
                       <Fragment key={group.id}>
                         {showSalesActionGroups ? (
                           <tr className="bg-slate-50/80 dark:bg-slate-900/30">
-                            <td colSpan={11} className="px-6 py-2">
+                            <td colSpan={columnCount} className="px-6 py-2">
                               <div className="flex flex-wrap items-center gap-3 text-xs">
                                 {selectionModeActive ? (
                                 <input
@@ -260,7 +278,7 @@ export default function SalesListSurface({
                               onClick={selectionModeActive ? handleRowClick : undefined}
                               {...(selectionModeActive ? {} : longPress)}
                             >
-                              <td className={`${selectCellPad} py-2.5`} onClick={(event) => event.stopPropagation()}>
+                              <td className={`${selectCellPad} py-1.5`} onClick={(event) => event.stopPropagation()}>
                                 {selectionModeActive ? (
                                 <input
                                   type="checkbox"
@@ -271,9 +289,11 @@ export default function SalesListSurface({
                                 />
                                 ) : null}
                               </td>
-                              <td className="px-4 py-2.5 font-mono font-medium text-blue-600 dark:text-blue-400">{sale.receipt_number}</td>
-                              <td className="px-4 py-2.5 whitespace-nowrap text-xs text-gray-500">{fmtTime(sale.created_at)}</td>
-                              <td className="px-4 py-2.5">
+                              <td className="max-w-[11rem] px-3 py-1.5">
+                                <button type="button" className="block max-w-full truncate font-mono font-semibold text-blue-600 hover:underline dark:text-blue-400" title={sale.receipt_number} onClick={(event) => { event.stopPropagation(); setDetailSale(sale) }}>{sale.receipt_number}</button>
+                              </td>
+                              <td className="whitespace-nowrap px-3 py-1.5 text-[11px] text-gray-500">{fmtTime(sale.created_at)}</td>
+                              <td className="px-3 py-1.5">
                                 {/* Y17: name + phone folded into one column; the
                                     row click opens the full detail (membership,
                                     address, line items). */}
@@ -282,23 +302,22 @@ export default function SalesListSurface({
                                   {sale.customer_phone?.trim() ? <div className="truncate text-xs text-gray-400">{sale.customer_phone}</div> : null}
                                 </div>
                               </td>
-                              <td className="px-4 py-2.5"><StatusBadge status={status} t={t} /></td>
-                              <td className="hidden px-4 py-2.5 text-gray-700 dark:text-gray-300 lg:table-cell">{sale.cashier_name || 'N/A'}</td>
-                              <td className="px-4 py-2.5"><span className="badge-blue text-xs">{sale.payment_method || 'N/A'}</span></td>
-                              <td className="hidden px-4 py-2.5 text-xs text-gray-500 md:table-cell">{branchLabel || 'N/A'}</td>
-                              <td className="px-4 py-2.5 text-right">
+                              <td className="px-3 py-1.5"><StatusBadge status={status} t={t} /></td>
+                              {cols.isVisible('cashier') ? <td className="hidden px-3 py-1.5 text-gray-700 dark:text-gray-300 lg:table-cell">{sale.cashier_name || 'N/A'}</td> : null}
+                              <td className="px-3 py-1.5"><span className="rounded bg-slate-100 px-1.5 py-0.5 text-[11px] font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-300">{sale.payment_method || 'N/A'}</span></td>
+                              {cols.isVisible('branch') ? <td className="hidden px-3 py-1.5 text-[11px] text-gray-500 md:table-cell">{branchLabel || 'N/A'}</td> : null}
+                              <td className="px-3 py-1.5 text-right">
                                 <div className={`font-semibold ${status === 'cancelled' ? 'line-through text-gray-400' : 'text-gray-900 dark:text-white'}`}>{fmtUSD(totalUsd)}</div>
                                 {totalKhr > 0 ? <div className="text-xs text-gray-400">{fmtKHR(totalKhr)}</div> : null}
                               </td>
-                              <td className="hidden px-4 py-2.5 text-center text-gray-500 md:table-cell">{items.length}</td>
-                              <td className="px-4 py-2.5 text-center" onClick={(event) => event.stopPropagation()}>
-                                <button
-                                  onClick={() => setSelectedSale(sale)}
-                                  className="rounded-lg px-3 py-1.5 text-xs font-medium text-blue-500 hover:bg-blue-50 hover:text-blue-700 dark:hover:bg-blue-900/20"
-                                >
-                                  {t('reprint')}
-                                </button>
+                              {cols.isVisible('items') ? <td className="hidden px-3 py-1.5 text-center text-gray-500 md:table-cell">{items.length}</td> : null}
+                              <td className="px-2 py-1.5 text-right" onClick={(event) => event.stopPropagation()}>
+                                <div className="flex flex-nowrap items-center justify-end gap-0.5">
+                                  <button type="button" onClick={() => setDetailSale(sale)} className="inline-flex h-7 w-7 items-center justify-center rounded-md text-slate-500 hover:bg-slate-100 hover:text-blue-600 dark:hover:bg-slate-800" aria-label={t('view') || 'View'} title={t('view') || 'View'}><Eye className="h-3.5 w-3.5" /></button>
+                                  <button type="button" onClick={() => setSelectedSale(sale)} className="inline-flex h-7 w-7 items-center justify-center rounded-md text-slate-500 hover:bg-slate-100 hover:text-blue-600 dark:hover:bg-slate-800" aria-label={t('print') || 'Print'} title={t('print') || 'Print'}><Printer className="h-3.5 w-3.5" /></button>
+                                </div>
                               </td>
+                              <td className="hidden lg:table-cell" />
                             </tr>
                           )
                         })}
@@ -315,7 +334,7 @@ export default function SalesListSurface({
         </div>
       </div>
 
-      <div className="space-y-2 sm:hidden">
+      <div className="space-y-2 md:hidden">
         {loading ? (
           <div className="space-y-2" aria-hidden="true">
             <div className="rounded-xl bg-slate-100 px-3 py-2 dark:bg-slate-800/70">
@@ -451,7 +470,6 @@ export default function SalesListSurface({
                               {sale.customer_phone?.trim() ? <span className="text-gray-400">{sale.customer_phone}</span> : null}
                               {sale.cashier_name ? <span>| {sale.cashier_name}</span> : null}
                               {branchLabel ? <span>| {branchLabel}</span> : null}
-                              <span>| {items.length} {t('items')}</span>
                             </div>
                             {/* Third row on small screens (user, Aug 30):
                                 status + payment get their OWN line, and the
@@ -460,13 +478,14 @@ export default function SalesListSurface({
                             <div className="mt-1 flex min-w-0 items-center gap-1.5">
                               <StatusBadge status={status} t={t} />
                               <span className="badge-blue min-w-0 max-w-[9rem] truncate text-xs">{sale.payment_method || 'N/A'}</span>
+                              <span className="shrink-0 rounded bg-slate-100 px-1.5 py-0.5 text-xs font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-300">{items.length} {t('items')}</span>
                             </div>
                           </div>
                           <div className="flex-shrink-0 text-right">
                             <div className={`font-semibold ${status === 'cancelled' ? 'line-through text-gray-400' : 'text-gray-900 dark:text-white'}`}>{fmtUSD(totalUsd)}</div>
                             {totalKhr > 0 ? <div className="text-xs text-gray-400">{fmtKHR(totalKhr)}</div> : null}
                             <button className="mt-1 text-xs text-blue-500 underline" onClick={(event) => { event.stopPropagation(); setSelectedSale(sale) }}>
-                              {t('reprint')}
+                              {t('print') || 'Print'}
                             </button>
                           </div>
                         </div>

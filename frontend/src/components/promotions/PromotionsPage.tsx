@@ -10,9 +10,11 @@ import Percent from 'lucide-react/dist/esm/icons/percent.js'
 import Tag from 'lucide-react/dist/esm/icons/tag.js'
 import Layers from 'lucide-react/dist/esm/icons/layers.js'
 import CalendarClock from 'lucide-react/dist/esm/icons/calendar-clock.js'
+import Eye from 'lucide-react/dist/esm/icons/eye.js'
 import { useApp as useAppHook } from '../../AppContext.tsx'
 import AppSelect from '../shared/AppSelect.tsx'
 import InfoHint from '../shared/InfoHint.tsx'
+import ScanSearchButton from '../shared/ScanSearchButton.tsx'
 import { fmtDate } from '../../utils/formatters.ts'
 import {
   getPromotionRules,
@@ -34,6 +36,7 @@ type PromotionsAppContext = {
   fmtUSD: (value: number) => string
   fmtKHR: (value: number) => string
   getPermissionTier: (key: string) => string
+  can: (permissionKey: string, actionKey: string) => boolean
 }
 const useApp = useAppHook as unknown as () => PromotionsAppContext
 
@@ -164,14 +167,14 @@ function ruleTypeIcon(ruleType: string): ComponentType<SVGProps<SVGSVGElement>> 
 type PromotionsSection = 'rules' | 'discounts' | 'loyalty'
 
 export default function PromotionsPage() {
-  const { t, notify, fmtUSD, getPermissionTier } = useApp()
+  const { t, notify, fmtUSD, getPermissionTier, can } = useApp()
   // G2 section gates: the page door admits either grant (see
   // AppContext.canAccessPage); each section still needs its own.
   const canPromotions = getPermissionTier('promotions') !== 'none'
   // Part 557 slice 4: 'promotions' is a view-tier section. A View-only grant
   // reads the rule list but every write (new/edit/delete rule) is hidden here
   // and refused by the backend (writes keep requireKey('promotions')). Full only.
-  const canManagePromotions = getPermissionTier('promotions') === 'full'
+  const canManagePromotions = can('promotions', 'manage')
   // The Discounts sub-section edits PER-PRODUCT discounts via updateProduct(),
   // which the backend gates on 'products' (not 'promotions'). It was coupled to
   // canPromotions, so a promotions user without products access saw a discount
@@ -474,7 +477,7 @@ export default function PromotionsPage() {
         </div>
 
         {sectionChips.length > 1 ? (
-          <div className="inline-flex flex-wrap rounded-xl bg-gray-100 p-0.5 dark:bg-gray-800">
+          <div className="inline-flex max-w-full overflow-x-auto overscroll-x-contain rounded-xl bg-gray-100 p-0.5 [touch-action:pan-x] dark:bg-gray-800">
             {sectionChips.map((chip) => {
               const Icon = chip.icon
               const isActive = activeSection === chip.key
@@ -484,7 +487,7 @@ export default function PromotionsPage() {
                   type="button"
                   onClick={() => setActiveSection(chip.key)}
                   aria-pressed={isActive}
-                  className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-lg px-3 py-1.5 text-sm font-medium transition-colors ${isActive ? `bg-white shadow dark:bg-gray-900 ${chip.activeColor}` : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'}`}
+                  className={`inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg px-3 py-1.5 text-sm font-medium transition-colors ${isActive ? `bg-white shadow dark:bg-gray-900 ${chip.activeColor}` : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'}`}
                 >
                   <Icon className="h-4 w-4" /> {chip.label}
                 </button>
@@ -541,7 +544,40 @@ export default function PromotionsPage() {
                 ) : null}
               </div>
             ) : (
-              <div className="space-y-2">
+              <>
+                <div className="hidden overflow-x-auto rounded-xl border border-slate-200 dark:border-slate-700 md:block">
+                  <table className="w-full min-w-[760px] border-collapse text-xs">
+                    <thead className="bg-slate-50 text-left text-[11px] uppercase tracking-wide text-slate-500 dark:bg-slate-800/80 dark:text-slate-400">
+                      <tr>
+                        <th className="px-3 py-2 font-semibold">Ref</th>
+                        <th className="px-3 py-2 font-semibold">{t('promotions') || 'Promotion'}</th>
+                        <th className="px-3 py-2 font-semibold">{t('type') || 'Type'}</th>
+                        <th className="px-3 py-2 font-semibold">{t('scope') || 'Scope'}</th>
+                        <th className="px-3 py-2 font-semibold">{t('date') || 'Schedule'}</th>
+                        <th className="px-3 py-2 font-semibold">{t('status') || 'Status'}</th>
+                        <th className="px-2 py-2 text-right font-semibold">{t('actions') || 'Actions'}</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                      {ruleViews.map(({ row, status }) => {
+                        const rule = row.normalized
+                        const schedule = [rule?.starts_at ? fmtDate(rule.starts_at) : '', rule?.ends_at ? fmtDate(rule.ends_at) : ''].filter(Boolean).join(' – ')
+                        return (
+                          <tr key={`desktop-${row.id}`} className={`${canManagePromotions ? 'cursor-pointer' : ''} hover:bg-slate-50 dark:hover:bg-slate-800/50`} onClick={() => { if (canManagePromotions) openEditRule(row) }}>
+                            <td className="max-w-[7rem] truncate px-3 py-1.5 font-mono font-semibold text-blue-600 dark:text-blue-400" title={`PR-${row.id}`}>PR-{row.id}</td>
+                            <td className="max-w-[15rem] px-3 py-1.5"><div className="truncate font-semibold text-slate-800 dark:text-slate-100" title={rule?.title || `#${row.id}`}>{rule?.title || `#${row.id}`}</div><div className="truncate text-[11px] text-slate-400">{ruleSummary(row)}</div></td>
+                            <td className="whitespace-nowrap px-3 py-1.5 text-slate-600 dark:text-slate-300">{String(rule?.rule_type || '').replaceAll('_', ' ')}</td>
+                            <td className="max-w-[12rem] truncate px-3 py-1.5 text-slate-600 dark:text-slate-300" title={ruleScopeSummary(row, t)}>{ruleScopeSummary(row, t)}</td>
+                            <td className="whitespace-nowrap px-3 py-1.5 text-[11px] text-slate-500">{schedule || '—'}</td>
+                            <td className="px-3 py-1.5"><StatusPill status={status} /></td>
+                            <td className="px-2 py-1.5" onClick={(event) => event.stopPropagation()}><div className="flex flex-nowrap justify-end gap-0.5">{canManagePromotions ? <><button type="button" className="inline-flex h-7 w-7 items-center justify-center rounded-md text-slate-500 hover:bg-slate-100 hover:text-blue-600 dark:hover:bg-slate-800" onClick={() => openEditRule(row)} aria-label={t('edit') || 'Edit'} title={t('edit') || 'Edit'}><Eye className="h-3.5 w-3.5" /></button><button type="button" className="inline-flex h-7 w-7 items-center justify-center rounded-md text-slate-400 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950" onClick={() => removeRule(row)} aria-label={t('delete') || 'Delete'} title={t('delete') || 'Delete'}><Trash2 className="h-3.5 w-3.5" /></button></> : <span className="text-slate-300">—</span>}</div></td>
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+                <div className="space-y-2 md:hidden">
                 {ruleViews.map(({ row, status }) => {
                   const rule = row.normalized
                   const color = rule?.badge_color || '#e11d48'
@@ -585,7 +621,8 @@ export default function PromotionsPage() {
                     </div>
                   )
                 })}
-              </div>
+                </div>
+              </>
             )}
           </div>
         ) : null}
@@ -620,6 +657,7 @@ export default function PromotionsPage() {
                   </ul>
                 ) : null}
               </div>
+              <ScanSearchButton onDetected={setProductQuery} t={t} />
               <InfoHint
                 label={t('promo_product_discounts_section') || 'Per-product discounts'}
                 text={t('promo_product_discounts_sub') || 'Single-product price cuts (the fields that used to live in the product form). Labels stay visible on Products, POS and the storefront.'}
@@ -640,7 +678,28 @@ export default function PromotionsPage() {
                 <p className="mt-1 text-xs text-gray-400">{t('promo_search_product_placeholder') || 'Search a product to set its discount...'}</p>
               </div>
             ) : (
-              <div className="space-y-2">
+              <>
+                <div className="hidden overflow-x-auto rounded-xl border border-slate-200 dark:border-slate-700 md:block">
+                  <table className="w-full min-w-[680px] border-collapse text-xs">
+                    <thead className="bg-slate-50 text-left text-[11px] uppercase tracking-wide text-slate-500 dark:bg-slate-800/80 dark:text-slate-400">
+                      <tr><th className="px-3 py-2 font-semibold">Ref</th><th className="px-3 py-2 font-semibold">{t('product') || 'Product'}</th><th className="px-3 py-2 font-semibold">{t('price') || 'Price'}</th><th className="px-3 py-2 font-semibold">{t('promo_until') || 'Until'}</th><th className="px-3 py-2 font-semibold">{t('status') || 'Status'}</th><th className="px-2 py-2 text-right font-semibold">{t('actions') || 'Actions'}</th></tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                      {discountViews.map(({ product, promo, live }) => {
+                        const status: PromoStatusKey = computePromoStatus(Boolean(product.discount_enabled), live, product.discount_starts_at, product.discount_ends_at)
+                        return <tr key={`desktop-${String(product.id)}`} className="cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800/50" onClick={() => openDiscountEditor(product)}>
+                          <td className="max-w-[7rem] truncate px-3 py-1.5 font-mono font-semibold text-blue-600 dark:text-blue-400" title={`PD-${product.id}`}>PD-{String(product.id)}</td>
+                          <td className="max-w-[16rem] truncate px-3 py-1.5 font-semibold text-slate-800 dark:text-slate-100" title={String(product.name || `#${product.id}`)}>{String(product.name || `#${product.id}`)}</td>
+                          <td className="whitespace-nowrap px-3 py-1.5"><span className="text-slate-400 line-through">{fmtUSD(Number(product.selling_price_usd) || 0)}</span>{promo.active ? <span className="ml-1.5 font-semibold text-emerald-600 dark:text-emerald-400">{fmtUSD(promo.applied_price_usd)}</span> : null}</td>
+                          <td className="whitespace-nowrap px-3 py-1.5 text-[11px] text-slate-500">{product.discount_ends_at ? fmtDate(String(product.discount_ends_at)) : '—'}</td>
+                          <td className="px-3 py-1.5"><StatusPill status={status} /></td>
+                          <td className="px-2 py-1.5 text-right" onClick={(event) => event.stopPropagation()}><button type="button" className="inline-flex h-7 w-7 items-center justify-center rounded-md text-slate-500 hover:bg-slate-100 hover:text-blue-600 dark:hover:bg-slate-800" onClick={() => openDiscountEditor(product)} aria-label={t('edit') || 'Edit'} title={t('edit') || 'Edit'}><Pencil className="h-3.5 w-3.5" /></button></td>
+                        </tr>
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+                <div className="space-y-2 md:hidden">
                 {discountViews.map(({ product, promo, live }) => {
                   const status: PromoStatusKey = computePromoStatus(Boolean(product.discount_enabled), live, product.discount_starts_at, product.discount_ends_at)
                   const color = String(product.discount_badge_color || '#e11d48')
@@ -686,14 +745,15 @@ export default function PromotionsPage() {
                     </div>
                   )
                 })}
-              </div>
+                </div>
+              </>
             )}
           </div>
         ) : null}
 
         {draft ? (
-          <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/40 p-4" onClick={() => !savingRule && setDraft(null)}>
-            <div className="mt-8 w-full max-w-lg space-y-3 rounded-2xl bg-white p-4 shadow-xl dark:bg-gray-900" onClick={(event) => event.stopPropagation()}>
+          <div className="modal-viewport-safe pointer-events-auto fixed inset-0 z-[1050] flex items-start justify-center overflow-y-auto bg-black/40" onClick={() => !savingRule && setDraft(null)}>
+            <div className="modal-panel-safe my-auto w-full max-w-lg space-y-3 overflow-y-auto rounded-2xl bg-white p-4 shadow-xl dark:bg-gray-900" onClick={(event) => event.stopPropagation()}>
               <h2 className="text-base font-semibold">
                 {draft.id ? (t('promo_edit_rule') || 'Edit promotion') : (t('promo_new_rule') || 'New rule')}
               </h2>
@@ -852,28 +912,31 @@ export default function PromotionsPage() {
                       ))}
                     </div>
                   )}
-                  <div className="relative">
-                    <input className={inputCls} value={pickerQuery}
-                      placeholder={t('promo_pick_products_placeholder') || 'Search products to add...'}
-                      onChange={(event) => setPickerQuery(event.target.value)} />
-                    {pickerResults.length > 0 && (
-                      <ul className="absolute z-20 mt-1 max-h-48 w-full overflow-auto rounded-lg border border-gray-200 bg-white shadow-lg dark:border-gray-700 dark:bg-gray-900">
-                        {pickerResults.map((product) => (
-                          <li key={String(product.id)}>
-                            <button type="button" className="w-full px-3 py-1.5 text-left text-sm hover:bg-gray-50 dark:hover:bg-gray-800"
-                              onClick={() => {
-                                if (!draft.products.some((p) => Number(p.id) === Number(product.id))) {
-                                  setDraft({ ...draft, products: [...draft.products, product] })
-                                }
-                                setPickerQuery('')
-                                setPickerResults([])
-                              }}>
-                              {String(product.name || `#${product.id}`)}
-                            </button>
-                          </li>
-                        ))}
-                      </ul>
-                    )}
+                  <div className="flex min-w-0 items-start gap-1.5">
+                    <div className="relative min-w-0 flex-1">
+                      <input className={inputCls} value={pickerQuery}
+                        placeholder={t('promo_pick_products_placeholder') || 'Search products to add...'}
+                        onChange={(event) => setPickerQuery(event.target.value)} />
+                      {pickerResults.length > 0 && (
+                        <ul className="absolute z-20 mt-1 max-h-48 w-full overflow-auto rounded-lg border border-gray-200 bg-white shadow-lg dark:border-gray-700 dark:bg-gray-900">
+                          {pickerResults.map((product) => (
+                            <li key={String(product.id)}>
+                              <button type="button" className="w-full px-3 py-1.5 text-left text-sm hover:bg-gray-50 dark:hover:bg-gray-800"
+                                onClick={() => {
+                                  if (!draft.products.some((p) => Number(p.id) === Number(product.id))) {
+                                    setDraft({ ...draft, products: [...draft.products, product] })
+                                  }
+                                  setPickerQuery('')
+                                  setPickerResults([])
+                                }}>
+                                {String(product.name || `#${product.id}`)}
+                              </button>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </div>
+                    <ScanSearchButton onDetected={setPickerQuery} t={t} />
                   </div>
                 </div>
               )}
@@ -924,8 +987,8 @@ export default function PromotionsPage() {
         ) : null}
 
         {discountDraft ? (
-          <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/40 p-4" onClick={() => !savingDiscount && setDiscountDraft(null)}>
-            <div className="mt-8 w-full max-w-lg space-y-3 rounded-2xl bg-white p-4 shadow-xl dark:bg-gray-900" onClick={(event) => event.stopPropagation()}>
+          <div className="modal-viewport-safe pointer-events-auto fixed inset-0 z-[1050] flex items-start justify-center overflow-y-auto bg-black/40" onClick={() => !savingDiscount && setDiscountDraft(null)}>
+            <div className="modal-panel-safe my-auto w-full max-w-lg space-y-3 overflow-y-auto rounded-2xl bg-white p-4 shadow-xl dark:bg-gray-900" onClick={(event) => event.stopPropagation()}>
               <h2 className="truncate text-base font-semibold">
                 {(t('promo_discount_for') || 'Discount for')} {String(discountDraft.product.name || `#${discountDraft.product.id}`)}
               </h2>

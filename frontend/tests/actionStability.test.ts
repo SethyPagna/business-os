@@ -187,7 +187,7 @@ await runTest('return create, edit, and supplier flows keep synchronous submit g
   assert.match(returnsTransport, /ensureClientRequestId\(\{ \.\.\.getDevicePayload\(\), \.\.\.\(payload \|\| \{\}\) \}, 'return'\)/)
   assert.match(returnsTransport, /ensureClientRequestId\(\{ \.\.\.getDevicePayload\(\), \.\.\.\(payload \|\| \{\}\) \}, 'supplier_return'\)/)
   assert.match(returnsRoute, /function normalizeClientRequestId\(value: unknown\)/)
-  const returnDedupePattern = /if \(clientRequestId\) \{\s*const existing = await db\.prepare\('SELECT id, return_number FROM returns WHERE client_request_id = \? LIMIT 1'\)[\s\S]*?if \(existing\) return c\.json\(\{ id: existing\.id, returnNumber: existing\.return_number, duplicate: true \}\)\s*\}/g
+  const returnDedupePattern = /if \(clientRequestId\) \{\s*const existing = await db\.prepare\(["']SELECT id, return_number FROM returns WHERE client_request_id = \? AND client_request_id <> '' LIMIT 1["']\)[\s\S]*?if \(existing\) return c\.json\(\{ id: existing\.id, returnNumber: existing\.return_number, duplicate: true \}\)\s*\}/g
   const returnDedupeMatches = returnsRoute.match(returnDedupePattern) || []
   assert.equal(returnDedupeMatches.length, 2, 'expected the same dedupe check in both the customer-return and supplier-return POST handlers')
 })
@@ -777,9 +777,21 @@ await runTest('files AI provider actions use shared guards and bounded mutations
 
 await runTest('users and roles security mutations use shared guards and bounded mutations', () => {
   const source = readFrontend('src/components/users/Users.tsx')
-  const mutationLines = source
-    .split('\n')
-    .filter((line) => /getUsersApi\(\)\.(createUser|updateUser|changeUserPassword|createRole|updateRole|deleteRole)\(/.test(line))
+  const sourceLines = source.split('\n')
+  // Some call sites (e.g. handleResetPassword's admin-override ternary between
+  // resetPassword/changeUserPassword) wrap the actual API call several lines
+  // below the `runUserMutation(...)` opening call, so a same-line check alone
+  // would false-negative on a legitimately-guarded multi-line call. Look back
+  // a few lines for the guard instead of requiring it on the exact line.
+  const CONTEXT_LOOKBACK = 8
+  const mutationLines = sourceLines
+    .map((line: string, index: number) => ({ line, index }))
+    .filter(({ line }: { line: string; index: number }) => /getUsersApi\(\)\.(createUser|updateUser|changeUserPassword|createRole|updateRole|deleteRole)\(/.test(line))
+  const isGuarded = ({ line, index }: { line: string; index: number }): boolean => {
+    const windowText = sourceLines.slice(Math.max(0, index - CONTEXT_LOOKBACK), index + 1).join('\n')
+    return line.includes('runUserMutation') || line.includes('runRoleMutation')
+      || windowText.includes('runUserMutation') || windowText.includes('runRoleMutation')
+  }
 
   assert.match(source, /import \{ beginSingleAction, finishSingleAction \} from '\.\.\/\.\.\/utils\/actionGuards\.ts'/)
   assert.match(source, /const USER_MUTATION_TIMEOUT_MS = 12000/)
@@ -802,8 +814,8 @@ await runTest('users and roles security mutations use shared guards and bounded 
   assert.match(source, /disabled=\{deletingRoleId === role\.id\}/)
   assert.ok(mutationLines.length >= 12, 'users page should still cover user/role normal and undo/redo mutation paths')
   assert.ok(
-    mutationLines.every((line) => line.includes('runUserMutation') || line.includes('runRoleMutation')),
-    `unbounded users/roles mutation lines:\n${mutationLines.filter((line) => !line.includes('runUserMutation') && !line.includes('runRoleMutation')).join('\n')}`,
+    mutationLines.every(isGuarded),
+    `unbounded users/roles mutation lines:\n${mutationLines.filter((entry) => !isGuarded(entry)).map(({ line }) => line).join('\n')}`,
   )
 })
 

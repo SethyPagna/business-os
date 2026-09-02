@@ -4,10 +4,13 @@ import CheckCircle2 from 'lucide-react/dist/esm/icons/check-circle-2.js'
 import Loader2 from 'lucide-react/dist/esm/icons/loader-2.js'
 import Search from 'lucide-react/dist/esm/icons/search.js'
 import Modal from '../../shared/Modal'
+import ScanSearchButton from '../../shared/ScanSearchButton.tsx'
 import { getImportJobReview, updateImportJobDecisions } from '../../../api/importJobsTransport'
+import PaginationControls from '../../shared/PaginationControls'
 
 const PAGE_SIZE = 50
 const WARNING_KINDS = 'negative_stock,barcode_collision,sku_collision'
+const scannerText = (key: string): string => key === 'scan_barcode' ? 'Scan barcode' : key
 
 type ReviewRow = {
   rowNumber: number
@@ -76,7 +79,6 @@ export default function ProductImportConflictsModal({ jobId, notify, onClose, on
     }
   }
 
-  const pages = Math.max(1, Math.ceil(total / PAGE_SIZE))
   return (
     <Modal title="Resolve product import conflicts" onClose={onClose} size="xl">
       <div className="space-y-4">
@@ -84,10 +86,13 @@ export default function ProductImportConflictsModal({ jobId, notify, onClose, on
           <div className="flex items-start gap-2"><AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" /><p>Choose what happens for every barcode, SKU, or negative-stock warning. <strong>Use safe result</strong> keeps the server preview (a colliding identifier stays a separate product; negative stock becomes 0). <strong>Skip row</strong> makes no change for that row.</p></div>
           <p className="mt-2 font-semibold">{unresolved} unresolved of {total} flagged rows</p>
         </div>
-        <label className="relative block">
-          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-          <input type="search" value={query} onChange={(event) => { setQuery(event.target.value); setPage(1) }} className="w-full rounded-lg border border-slate-200 bg-white py-2 pl-9 pr-3 text-sm dark:border-slate-700 dark:bg-slate-900" placeholder="Search product, barcode, or SKU" />
-        </label>
+        <div className="flex min-w-0 items-center gap-1.5">
+          <label className="relative min-w-0 flex-1">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+            <input type="search" value={query} onChange={(event) => { setQuery(event.target.value); setPage(1) }} className="w-full rounded-lg border border-slate-200 bg-white py-2 pl-9 pr-3 text-sm dark:border-slate-700 dark:bg-slate-900" placeholder="Search product, barcode, or SKU" />
+          </label>
+          <ScanSearchButton onDetected={(value) => { setQuery(value); setPage(1) }} t={scannerText} />
+        </div>
         <div className="max-h-[30rem] space-y-2 overflow-auto">
           {loading ? <div className="flex justify-center p-8"><Loader2 className="h-5 w-5 animate-spin" /></div> : rows.length ? rows.map((row) => {
             const choice = String(row.decision?.action || '')
@@ -103,7 +108,7 @@ export default function ProductImportConflictsModal({ jobId, notify, onClose, on
             </div>
           }) : <p className="p-8 text-center text-sm text-slate-500">No matching unresolved or reviewed product conflicts.</p>}
         </div>
-        {total > PAGE_SIZE ? <div className="flex items-center justify-between text-xs text-slate-500"><span>Page {page} of {pages}</span><div className="flex gap-2"><button type="button" className="btn-secondary px-2.5 py-1 text-xs" disabled={page <= 1} onClick={() => setPage((value) => Math.max(1, value - 1))}>Previous</button><button type="button" className="btn-secondary px-2.5 py-1 text-xs" disabled={page >= pages} onClick={() => setPage((value) => value + 1)}>Next</button></div></div> : null}
+        <div className="flex justify-center"><PaginationControls compact rangeAsPageSize page={page} pageSize={PAGE_SIZE} totalItems={total} label="records" onPageChange={setPage} /></div>
         <div className="flex justify-end border-t border-slate-100 pt-3 dark:border-slate-800"><button type="button" className="btn-secondary" onClick={onClose}>Done reviewing</button></div>
       </div>
     </Modal>

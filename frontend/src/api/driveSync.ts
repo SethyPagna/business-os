@@ -91,6 +91,15 @@ export function queueGoogleDriveSyncNow(): Promise<unknown> {
   )
 }
 
+export function queueGoogleDriveRestoreStage(): Promise<unknown> {
+  return route(
+    'system:driveRestoreStage:queue',
+    () => apiFetch('POST', '/api/system/drive-sync/restore-stage/jobs', {}, SYNC.REQUEST_TIMEOUT_MS),
+    null,
+    true,
+  )
+}
+
 export function syncGoogleDriveNow(): Promise<unknown> {
   return route('system:driveSyncNow', () => queueGoogleDriveSyncNow(), null, true)
 }

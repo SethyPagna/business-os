@@ -14,6 +14,8 @@ const path = require('node:path')
 const cloudflareRoot = path.join(__dirname, '..')
 const { openDb } = require('./harness/d1compat.cjs')
 const { loadAll } = require('./harness/load_migrations.cjs')
+const tscVersion = execSync('npx tsc --version', { cwd: cloudflareRoot, encoding: 'utf8' }).trim()
+const ignoreConfigFlag = /^Version\s+(?:[6-9]|\d{2,})\./.test(tscVersion) ? ' --ignoreConfig' : ''
 
 let checks = 0
 function ok(cond, label) {
@@ -33,7 +35,7 @@ try {
   execSync(
     `npx tsc "${path.join(cloudflareRoot, 'src', 'lib', 'stockRevert.ts')}" ` +
       `--outDir "${tmpDir}" --rootDir "${path.join(cloudflareRoot, 'src', 'lib')}" ` +
-      `--module commonjs --target es2022 --moduleResolution node --esModuleInterop --skipLibCheck --noEmitOnError false`,
+      `--module commonjs --target es2022 --moduleResolution node --esModuleInterop --skipLibCheck --noEmitOnError false${ignoreConfigFlag}`,
     { cwd: cloudflareRoot, stdio: 'pipe' },
   )
 } catch (err) {

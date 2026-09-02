@@ -18,7 +18,7 @@
 
 import type { D1Compat } from './db'
 
-export type RenameKind = 'category' | 'brand' | 'supplier' | 'product_name'
+export type RenameKind = 'category' | 'brand' | 'unit' | 'supplier' | 'product_name'
 
 export interface RenameImpact {
   kind: RenameKind
@@ -35,6 +35,23 @@ export interface RenameImpact {
   // an existing row/group already using the TARGET value -- a carry would
   // merge into it, worth a louder word in the UI
   target_exists: boolean
+  // Event/audit rows are immutable point-in-time evidence. This list makes
+  // that boundary explicit to every preview instead of implying that a
+  // "full" live-data cascade rewrites history.
+  historical_snapshots_preserved: string[]
+}
+
+export type RenameBatchStatement = { sql: string; params?: Record<string, unknown> }
+
+export interface LiveLookupMutationPlan {
+  statements: RenameBatchStatement[]
+  products: number
+}
+
+export interface BrandLibraryMutationPlan {
+  statements: RenameBatchStatement[]
+  brands: string[]
+  colorMap: Record<string, string>
 }
 
 const lower = (value: unknown) => String(value ?? '').trim().toLowerCase()
@@ -61,19 +78,163 @@ function splitMulti(value: unknown): string[] {
     .filter(Boolean)
 }
 
-function replaceMultiMember(value: unknown, from: string, to: string): string {
-  const members = splitMulti(value)
-  const target = lower(from)
+function replaceMultiMembers(value: unknown, fromKeys: Set<string>, to: string | null): string {
   const seen = new Set<string>()
   const next: string[] = []
-  for (const member of members) {
-    const replaced = lower(member) === target ? to : member
+  for (const member of splitMulti(value)) {
+    const replaced = fromKeys.has(lower(member)) ? to : member
+    if (!replaced) continue
     const key = lower(replaced)
-    if (seen.has(key)) continue
+    if (!key || seen.has(key)) continue
     seen.add(key)
     next.push(replaced)
   }
   return next.join('||')
+}
+
+function normalizedKeys(values: string[]): string[] {
+  return [...new Set(values.map(lower).filter(Boolean))]
+}
+
+function buildCaseRewriteStatements(
+  column: 'categories' | 'brands',
+  rows: Array<{ id: number; value: string }>,
+  nowIso: string,
+): RenameBatchStatement[] {
+  return chunk(rows, 40).map((group) => {
+    const params: Record<string, unknown> = { now: nowIso }
+    const cases: string[] = []
+    const ids: string[] = []
+    group.forEach((row, index) => {
+      params[`id${index}`] = row.id
+      params[`value${index}`] = row.value
+      cases.push(`WHEN @id${index} THEN @value${index}`)
+      ids.push(`@id${index}`)
+    })
+    return {
+      sql: `UPDATE products SET ${column} = CASE id ${cases.join(' ')} ELSE ${column} END, updated_at = @now WHERE id IN (${ids.join(', ')})`,
+      params,
+    }
+  })
+}
+
+// Build every live product rewrite before the caller starts its single D1
+// batch. The lookup/settings row mutation can then be placed in the SAME
+// batch, so a constraint failure cannot leave products pointing at a name
+// the library did not save (or vice versa). Each CASE statement stays under
+// D1's 100-bound-parameter ceiling: 40 ids + 40 values + one timestamp.
+export async function buildLiveLookupMutationPlan(
+  db: D1Compat,
+  kind: 'category' | 'brand' | 'unit',
+  fromValues: string[],
+  to: string | null,
+  nowIso: string,
+): Promise<LiveLookupMutationPlan> {
+  const keys = normalizedKeys(fromValues)
+  if (!keys.length) return { statements: [], products: 0 }
+  const primary = kind
+  const keysJson = JSON.stringify(keys)
+  const primaryRows = await db.prepare(
+    `SELECT id FROM products WHERE lower(trim(COALESCE(${primary}, ''))) IN (SELECT value FROM json_each(@keysJson))`,
+  ).all<{ id: number }>({ keysJson })
+  const touched = new Set((primaryRows || []).map((row) => Number(row.id)))
+  const statements: RenameBatchStatement[] = [{
+    sql: `UPDATE products SET ${primary} = ${to ? '@to' : 'NULL'}, updated_at = @now
+          WHERE lower(trim(COALESCE(${primary}, ''))) IN (SELECT value FROM json_each(@keysJson))`,
+    params: { to, now: nowIso, keysJson },
+  }]
+
+  if (kind === 'category' || kind === 'brand') {
+    const multi = kind === 'category' ? 'categories' : 'brands'
+    // Read only non-empty membership rows, then perform exact normalized
+    // member comparison in JS. No wildcard/fuzzy decision is made here.
+    const memberRows = await db.prepare(
+      `SELECT id, ${multi} AS value FROM products WHERE trim(COALESCE(${multi}, '')) != ''`,
+    ).all<{ id: number; value: string }>()
+    const keySet = new Set(keys)
+    const rewrites = (memberRows || [])
+      .filter((row) => splitMulti(row.value).some((member) => keySet.has(lower(member))))
+      .map((row) => ({ id: Number(row.id), value: replaceMultiMembers(row.value, keySet, to) }))
+    for (const row of rewrites) touched.add(row.id)
+    statements.push(...buildCaseRewriteStatements(multi, rewrites, nowIso))
+  }
+  return { statements, products: touched.size }
+}
+
+function parseStringList(raw: unknown): string[] {
+  try {
+    const parsed = JSON.parse(String(raw ?? '[]'))
+    return Array.isArray(parsed) ? parsed.map((value) => String(value ?? '').trim()).filter(Boolean) : []
+  } catch {
+    return []
+  }
+}
+
+function parseColorMap(raw: unknown): Record<string, string> {
+  try {
+    const parsed = JSON.parse(String(raw ?? '{}'))
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {}
+    return Object.fromEntries(Object.entries(parsed).map(([key, value]) => [lower(key), String(value ?? '').trim()]).filter(([key, value]) => key && value))
+  } catch {
+    return {}
+  }
+}
+
+// Brand names use settings rather than a lookup table. This plan rewrites the
+// saved list and color map without inventing fuzzy matches; callers append it
+// to the product carry/clear statements in one atomic D1 batch.
+export async function buildBrandLibraryMutationPlan(
+  db: D1Compat,
+  fromValues: string[],
+  to: string | null,
+): Promise<BrandLibraryMutationPlan> {
+  const rows = await db.prepare(
+    `SELECT key, value FROM settings WHERE key IN ('product_brand_options', 'product_brand_color_map')`,
+  ).all<{ key: string; value: string | null }>()
+  const byKey = new Map((rows || []).map((row) => [row.key, row.value]))
+  const fromKeys = new Set(normalizedKeys(fromValues))
+  const target = String(to ?? '').trim() || null
+  const targetKey = lower(target)
+  const brands: string[] = []
+  const seen = new Set<string>()
+  for (const brand of parseStringList(byKey.get('product_brand_options'))) {
+    const replaced = fromKeys.has(lower(brand)) ? target : brand
+    if (!replaced) continue
+    const key = lower(replaced)
+    if (!key || seen.has(key)) continue
+    seen.add(key)
+    brands.push(replaced)
+  }
+  if (target && !seen.has(targetKey)) brands.push(target)
+
+  const currentColors = parseColorMap(byKey.get('product_brand_color_map'))
+  const colorMap: Record<string, string> = {}
+  let carriedColor = targetKey ? currentColors[targetKey] || '' : ''
+  for (const [key, color] of Object.entries(currentColors)) {
+    if (fromKeys.has(key)) {
+      if (!carriedColor) carriedColor = color
+      continue
+    }
+    colorMap[key] = color
+  }
+  if (targetKey && carriedColor) colorMap[targetKey] = carriedColor
+
+  return {
+    brands,
+    colorMap,
+    statements: [
+      {
+        sql: `INSERT INTO settings (key, value, updated_at) VALUES ('product_brand_options', @value, CURRENT_TIMESTAMP)
+              ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP`,
+        params: { value: JSON.stringify(brands) },
+      },
+      {
+        sql: `INSERT INTO settings (key, value, updated_at) VALUES ('product_brand_color_map', @value, CURRENT_TIMESTAMP)
+              ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP`,
+        params: { value: JSON.stringify(colorMap) },
+      },
+    ],
+  }
 }
 
 async function countMultiMembers(db: D1Compat, column: 'categories' | 'brands', primary: 'category' | 'brand', from: string): Promise<number> {
@@ -92,6 +253,7 @@ export async function computeRenameImpact(db: D1Compat, kind: RenameKind, from: 
     kind, from, to,
     products_primary: 0, products_secondary: 0, batches: 0, group_rows: 0,
     target_exists: false,
+    historical_snapshots_preserved: ['audit_logs', 'action payloads'],
   }
   const params = { from: lower(from), to: lower(to) }
   if (kind === 'category' || kind === 'brand') {
@@ -103,6 +265,13 @@ export async function computeRenameImpact(db: D1Compat, kind: RenameKind, from: 
     impact.products_secondary = await countMultiMembers(db, multi as 'categories' | 'brands', primary, from)
     impact.target_exists = Boolean(await db.prepare(
       `SELECT 1 AS x FROM products p WHERE lower(trim(COALESCE(p.${primary}, ''))) = @to LIMIT 1`,
+    ).get(params))
+  } else if (kind === 'unit') {
+    impact.products_primary = Number((await db.prepare(
+      `SELECT COUNT(*) AS n FROM products p WHERE lower(trim(COALESCE(p.unit, ''))) = @from`,
+    ).get<{ n: number }>(params))?.n || 0)
+    impact.target_exists = Boolean(await db.prepare(
+      `SELECT 1 AS x FROM units WHERE lower(trim(name)) = @to LIMIT 1`,
     ).get(params))
   } else if (kind === 'supplier') {
     impact.products_primary = Number((await db.prepare(
@@ -137,37 +306,10 @@ export async function applyRenameCarry(
   const params = { from: lower(from), to, now: nowIso }
   let products = 0
   let batches = 0
-  if (kind === 'category' || kind === 'brand') {
-    const primary = kind
-    const multi = kind === 'category' ? 'categories' : 'brands'
-    // Distinct products touched (a row can carry the value in BOTH the
-    // primary column and the multi-value membership -- it counts once).
-    const touched = new Set<number>()
-    const primaryRows = await db.prepare(
-      `SELECT id FROM products WHERE lower(trim(COALESCE(${primary}, ''))) = @from`,
-    ).all<{ id: number }>(params)
-    for (const row of primaryRows || []) touched.add(Number(row.id))
-    const primaryResult = await db.prepare(
-      `UPDATE products SET ${primary} = @to, updated_at = @now WHERE lower(trim(COALESCE(${primary}, ''))) = @from`,
-    ).run(params)
-    void changesOf(primaryResult)
-
-    // Multi-value membership: rewrite in JS (see header).
-    const memberRows = await db.prepare(`
-      SELECT p.id AS id, p.${multi} AS value FROM products p
-      WHERE ('||' || lower(COALESCE(p.${multi}, '')) || '||') LIKE '%||' || @fromEsc || '||%' ESCAPE '\\'
-    `).all<{ id: number; value: string }>({ fromEsc: lower(from).replace(/[%_]/g, (m) => `\\${m}`) })
-    const rewrites = (memberRows || [])
-      .map((row) => ({ id: row.id, next: replaceMultiMember(row.value, from, to) }))
-      .filter((row) => row.next !== undefined)
-    for (const group of chunk(rewrites, 40)) {
-      await db.batch(group.map((row) => ({
-        sql: `UPDATE products SET ${multi} = @value, updated_at = @now WHERE id = @id`,
-        params: { value: row.next, id: row.id, now: nowIso },
-      })))
-    }
-    for (const row of rewrites) touched.add(Number(row.id))
-    products += touched.size
+  if (kind === 'category' || kind === 'brand' || kind === 'unit') {
+    const plan = await buildLiveLookupMutationPlan(db, kind, [from], to, nowIso)
+    if (plan.statements.length) await db.batch(plan.statements)
+    products += plan.products
   } else if (kind === 'supplier') {
     const productResult = await db.prepare(
       `UPDATE products SET supplier = @to, updated_at = @now WHERE lower(trim(COALESCE(supplier, ''))) = @from`,
@@ -177,6 +319,17 @@ export async function applyRenameCarry(
       `UPDATE product_batches SET supplier_name = @to WHERE lower(trim(COALESCE(supplier_name, ''))) = @from`,
     ).run(params)
     batches += changesOf(batchResult)
+    // Imported AP rows can be name-only (supplier_id NULL). Exact normalized
+    // equality is deliberate: no LIKE/fuzzy rewrite is safe for finance.
+    try {
+      await db.prepare(
+        `UPDATE supplier_invoices SET supplier_name = @to
+         WHERE supplier_id IS NULL AND lower(trim(COALESCE(supplier_name, ''))) = @from`,
+      ).run(params)
+    } catch {
+      // supplier_invoices was introduced by a later migration; old local test
+      // databases may not have it. Production databases do.
+    }
   } else {
     // product_name carry: every ACTIVE row of the name group takes the new
     // name -- the regroup rule 9.1 asked for ("rename does not regroup"
@@ -188,4 +341,29 @@ export async function applyRenameCarry(
     products += changesOf(groupResult)
   }
   return { products, batches }
+}
+
+// Remove one exact category/brand member from the live catalog. Used by lookup
+// deletion and multi-select cleanup so secondary `||` memberships cannot keep
+// a deleted/outdated value. Historical sale/movement text remains untouched.
+export async function removeLiveLookupValue(
+  db: D1Compat,
+  kind: 'category' | 'brand' | 'unit' | 'supplier',
+  value: string,
+  nowIso: string,
+): Promise<{ products: number }> {
+  if (kind === 'supplier') {
+    const from = lower(value)
+    if (!from) return { products: 0 }
+    const rows = await db.prepare(
+      `SELECT id FROM products WHERE lower(trim(COALESCE(supplier, ''))) = @from`,
+    ).all<{ id: number }>({ from })
+    await db.prepare(
+      `UPDATE products SET supplier = NULL, updated_at = @now WHERE lower(trim(COALESCE(supplier, ''))) = @from`,
+    ).run({ from, now: nowIso })
+    return { products: (rows || []).length }
+  }
+  const plan = await buildLiveLookupMutationPlan(db, kind, [value], null, nowIso)
+  if (plan.statements.length) await db.batch(plan.statements)
+  return { products: plan.products }
 }

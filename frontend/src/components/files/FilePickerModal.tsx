@@ -14,6 +14,7 @@ import {
   getFiles as fetchPickerFiles,
   uploadFileAsset as uploadPickerFileAsset,
 } from '../../api/fileTransport.ts'
+import PaginationControls, { clampPage, DEFAULT_PAGE_SIZE } from '../shared/PaginationControls'
 
 const FILE_PICKER_LOAD_TIMEOUT_MS = 8000
 const FILE_PICKER_UPLOAD_TIMEOUT_MS = 30000
@@ -116,8 +117,7 @@ export default function FilePickerModal({
   // "no page to press next or back"). Real pagination now.
   const [page, setPage] = useState(1)
   const [totalFiles, setTotalFiles] = useState(0)
-  const PICKER_PAGE_SIZE = 48
-  const totalPages = Math.max(1, Math.ceil(Math.max(0, totalFiles) / PICKER_PAGE_SIZE))
+  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE)
   const [search, setSearch] = useState('')
   const [uploading, setUploading] = useState(false)
   const [deletingAssetId, setDeletingAssetId] = useState<string | number | null>(null)
@@ -142,22 +142,28 @@ export default function FilePickerModal({
     setLoading(true)
     try {
       const result = await withLoaderTimeout(
-        () => fetchPickerFiles({ search, mediaType, page, pageSize: PICKER_PAGE_SIZE, includeMeta: true }),
+        () => fetchPickerFiles({ search, mediaType, page, pageSize, includeMeta: true }),
         'Files library picker',
         FILE_PICKER_LOAD_TIMEOUT_MS,
       )
       if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
       const meta = result as { items?: unknown; total?: unknown } | null
       const rawItems = meta && Array.isArray(meta.items) ? meta.items : result
+      const nextTotal = Number(meta?.total) || (Array.isArray(rawItems) ? rawItems.length : 0)
+      const nextPage = clampPage(page, nextTotal, pageSize)
+      if (nextPage !== page) {
+        setPage(nextPage)
+        return
+      }
       setFiles(normalizeFileAssets(rawItems))
-      setTotalFiles(Number(meta?.total) || (Array.isArray(rawItems) ? rawItems.length : 0))
+      setTotalFiles(nextTotal)
     } catch (error) {
       if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
       notifyRef.current(getErrorMessage(error, 'Failed to load files'), 'error')
     } finally {
       if (isTrackedRequestCurrent(loadRequestRef, requestId)) setLoading(false)
     }
-  }, [mediaType, page, search])
+  }, [mediaType, page, pageSize, search])
 
   useEffect(() => {
     setPage(1)
@@ -337,19 +343,7 @@ export default function FilePickerModal({
           </div>
         ) : null}
 
-        {!loading && totalPages > 1 ? (
-          <div className="mt-3 flex items-center justify-between gap-2">
-            <button type="button" className="btn-secondary text-sm" disabled={page <= 1} onClick={() => setPage((current) => Math.max(1, current - 1))}>
-              {tr('previous', 'Previous')}
-            </button>
-            <span className="text-sm text-slate-500">
-              {tr('page', 'Page')} {page} / {totalPages} · {totalFiles} {tr('files', 'files')}
-            </span>
-            <button type="button" className="btn-secondary text-sm" disabled={page >= totalPages} onClick={() => setPage((current) => Math.min(totalPages, current + 1))}>
-              {tr('next', 'Next')}
-            </button>
-          </div>
-        ) : null}
+        {!loading ? <div className="mt-3 flex justify-center"><PaginationControls compact rangeAsPageSize page={page} pageSize={pageSize} totalItems={totalFiles} label={tr('files', 'files')} t={(key) => tr(key, key)} onPageChange={setPage} onPageSizeChange={(size) => { setPageSize(size); setPage(1) }} /></div> : null}
 
         {multiple ? (
           <div className="flex flex-col gap-3 border-t border-slate-200 pt-4 sm:flex-row sm:items-center sm:justify-between">

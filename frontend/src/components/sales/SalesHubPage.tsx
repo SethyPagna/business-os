@@ -64,17 +64,13 @@ export default function SalesHubPage() {
     // One scroll root for the hub. The hosted sections render into this page
     // instead of owning fixed-height nested scrollers, so their lists grow to
     // fit their content and the whole Sales page scrolls naturally.
-    <div className="page-scroll flex flex-col">
+    <div className="page-scroll flex min-h-0 min-w-0 flex-col">
       {visibleTabs.length > 1 ? (
-        // Full-width equal tabs so all of Sales/Returns/Fees/Reports FIT on
-        // one row on a phone (user, Aug 31: "the sales page's various
-        // sections are not fit in one row in smaller screens ... touching
-        // edge"). Previously an inline-flex pill sized to content, so 4
-        // icon+label tabs overflowed the viewport and pushed the whole page
-        // wide (Reports fell off the right edge). Now each tab is flex-1 and
-        // its label truncates rather than widening the row.
-        <div className="shrink-0 px-3 pt-4 sm:pt-5">
-          <div className="flex w-full rounded-xl bg-gray-100 dark:bg-gray-800 p-0.5">
+        // iPhone standalone mode receives the same complete section row as
+        // Android. Labels may use a second line inside their equal cell; none
+        // are ellipsized or pushed beyond the viewport.
+        <div className="shrink-0 px-2 pt-3 sm:px-3 sm:pt-5">
+          <div className="grid w-full rounded-xl bg-gray-100 p-0.5 dark:bg-gray-800" style={{ gridTemplateColumns: `repeat(${visibleTabs.length}, minmax(0, 1fr))` }}>
             {visibleTabs.map((tab) => {
               const Icon = tab.icon
               return (
@@ -82,9 +78,9 @@ export default function SalesHubPage() {
                   key={tab.id}
                   type="button"
                   onClick={() => setSection(tab.id)}
-                  className={`flex-1 min-w-0 justify-center px-1.5 py-1.5 rounded-lg text-xs sm:text-sm font-medium inline-flex items-center gap-1 ${section === tab.id ? `bg-white dark:bg-gray-900 shadow ${tab.tone}` : 'text-gray-500'}`}
+                  className={`inline-flex min-h-11 min-w-0 flex-col items-center justify-center gap-0.5 rounded-lg px-1 py-1 text-[10px] font-medium sm:min-h-0 sm:flex-row sm:gap-1 sm:px-1.5 sm:py-1.5 sm:text-sm ${section === tab.id ? `bg-white dark:bg-gray-900 shadow ${tab.tone}` : 'text-gray-500'}`}
                 >
-                  <Icon className="w-4 h-4 shrink-0" /> <span className="truncate">{tab.label}</span>
+                  <Icon className="h-3.5 w-3.5 shrink-0 sm:h-4 sm:w-4" /> <span className="min-w-0 break-words text-center leading-tight">{tab.label}</span>
                 </button>
               )
             })}

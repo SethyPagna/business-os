@@ -16,6 +16,7 @@ import {
   normalizeLookup,
   restoreLookupProductSnapshots,
 } from './productLookupSnapshots.ts'
+import { getRenameImpact } from '../../../api/renameCascadeTransport.ts'
 
 const DEFAULT_BRAND_COLOR = '#f97316'
 const PRODUCT_BRAND_LOOKUP_TIMEOUT_MS = 10000
@@ -405,6 +406,14 @@ export default function ManageBrandsModal({
     setError('')
     try {
       const targetAlreadyExists = allKnownBrandNames.some((entry) => normalizeLookup(entry) === toLookup && normalizeLookup(entry) !== fromLookup)
+      const impact = await getRenameImpact('brand', from, to)
+      const attached = Number(impact.products_primary || 0) + Number(impact.products_secondary || 0)
+      const confirmed = window.confirm(
+        targetAlreadyExists
+          ? `"${to}" already exists. Merge "${from}" into it and update ${attached} exact linked product${attached === 1 ? '' : 's'}? Point-in-time audit history stays unchanged.`
+          : `Rename "${from}" to "${to}" and carry ${attached} exact linked product${attached === 1 ? '' : 's'}? Point-in-time audit history stays unchanged.`,
+      )
+      if (!confirmed) return
       const previousLibrary = [...libraryBrands]
       const previousColorMap = { ...brandColorMap }
       const productSnapshots = await fetchLookupProductSnapshots({

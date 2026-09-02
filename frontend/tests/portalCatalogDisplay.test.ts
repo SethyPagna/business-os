@@ -20,6 +20,10 @@ const catalogSecondaryTabsSource = fs.readFileSync(new URL('../src/components/ca
 const publicCatalogPageSource = fs.readFileSync(new URL('../src/components/catalog/PublicCatalogPage.tsx', import.meta.url), 'utf8')
 const catalogPreviewSurfaceSource = fs.readFileSync(new URL('../src/components/catalog/CatalogPreviewSurface.tsx', import.meta.url), 'utf8')
 const catalogProductsSectionSource = fs.readFileSync(new URL('../src/components/catalog/CatalogProductsSection.tsx', import.meta.url), 'utf8')
+const portalFilterSource = fs.readFileSync(new URL('../src/components/catalog/PortalFilterCombobox.tsx', import.meta.url), 'utf8')
+const productDetailFlyoutSource = fs.readFileSync(new URL('../src/components/catalog/ProductDetailFlyout.tsx', import.meta.url), 'utf8')
+const catalogImagesSource = fs.readFileSync(new URL('../src/components/catalog/catalogImages.tsx', import.meta.url), 'utf8')
+const publicPortalCssSource = fs.readFileSync(new URL('../src/styles/public-portal.css', import.meta.url), 'utf8')
 
 let failed = 0
 
@@ -158,6 +162,40 @@ runTest('public portal About tab keeps the story on the right, the map full-widt
   assert.match(catalogPreviewSurfaceSource, /Social links take this\s*\n?\s*side; language \+ light\/dark sit on the far side/, "6.2's split must stay documented at the header cells")
 })
 
+runTest('portal cover paths are rendered as image sources instead of fragile CSS urls', () => {
+  assert.match(catalogSecondaryTabsSource, /src=\{versionedBusinessCover\}/, 'public cover paths with spaces or parentheses must remain valid image URLs')
+  assert.doesNotMatch(catalogSecondaryTabsSource, /`url\(\$\{versionedBusinessCover\}\)`/, 'public cover paths must not be interpolated into an unquoted CSS url')
+  assert.match(catalogEditorSource, /src=\{editorDraft\.customer_portal_cover_image\}/, 'editor cover previews should use the same robust image-source rendering')
+  assert.doesNotMatch(catalogEditorSource, /url\(\$\{editorDraft\.customer_portal_cover_image\}\)/, 'editor cover paths must not be interpolated into an unquoted CSS url')
+})
+
+runTest('portal contact fields are included in the settings save payload', () => {
+  const payloadStart = catalogPageSource.indexOf('const fullSavePayload: Record<string, unknown> = {')
+  const payloadEnd = catalogPageSource.indexOf('const savePayload = Object.fromEntries(', payloadStart)
+  assert.notEqual(payloadStart, -1)
+  assert.notEqual(payloadEnd, -1)
+  const savePayloadSource = catalogPageSource.slice(payloadStart, payloadEnd)
+  for (const key of [
+    'customer_portal_contact_messenger',
+    'customer_portal_contact_telegram',
+    'customer_portal_contact_whatsapp',
+    'customer_portal_contact_phone',
+    'customer_portal_contact_instagram',
+    'customer_portal_contact_messenger_label',
+    'customer_portal_contact_telegram_label',
+    'customer_portal_contact_whatsapp_label',
+    'customer_portal_contact_phone_label',
+    'customer_portal_contact_instagram_label',
+    'customer_portal_show_contact_messenger',
+    'customer_portal_show_contact_telegram',
+    'customer_portal_show_contact_whatsapp',
+    'customer_portal_show_contact_phone',
+    'customer_portal_show_contact_instagram',
+  ]) {
+    assert.match(savePayloadSource, new RegExp(`\\b${key}\\s*:`), `${key} must survive Save portal settings`)
+  }
+})
+
 runTest('shouldShowStockStatus defaults to shown and only hides on explicit false', () => {
   assert.equal(shouldShowStockStatus({}), true, 'no config at all should default to shown')
   assert.equal(shouldShowStockStatus(), true, 'missing config arg should default to shown')
@@ -230,6 +268,105 @@ runTest('productMatchesPortalBranches understands redacted branch_availability r
   assert.equal(productMatchesPortalBranches(served, ['2']), false, 'out at that branch = not available there')
   const legacy = { branch_stock: [{ branch_id: 4, quantity: 2 }] }
   assert.equal(productMatchesPortalBranches(legacy, ['4']), true)
+})
+
+runTest('portal editor compacts compatible controls into responsive rows with mobile clearance', () => {
+  assert.match(catalogEditorSource, /id="portal-editor-top"[^>]*overflow-x-hidden[^>]*pb-\[calc\(4\.5rem\+env\(safe-area-inset-bottom\)\)\][^>]*md:pb-0/)
+  assert.match(catalogEditorSource, /data-testid="portal-visibility-grid"[^>]*sm:grid-cols-2[^>]*xl:grid-cols-3/)
+  assert.match(catalogEditorSource, /data-testid="portal-layout-grid"[^>]*sm:grid-cols-2[^>]*xl:grid-cols-4/)
+  assert.match(catalogEditorSource, /data-testid="portal-highlight-grid"[^>]*sm:grid-cols-2[^>]*xl:grid-cols-3/)
+  assert.match(catalogEditorSource, /data-testid="portal-business-identity-grid"[^>]*sm:grid-cols-2/)
+  assert.match(catalogEditorSource, /data-testid="portal-social-links-grid"[^>]*sm:grid-cols-2[^>]*2xl:grid-cols-4/)
+  assert.match(catalogEditorSource, /data-testid="portal-contact-channel-grid"[^>]*sm:grid-cols-2[^>]*2xl:grid-cols-3/)
+  assert.match(catalogEditorSource, /data-testid="portal-logo-controls-grid"[^>]*sm:grid-cols-2[^>]*xl:grid-cols-3/)
+  assert.match(catalogEditorSource, /min-h-11[^>]*rounded-xl/, 'compact switch rows must retain a 44px mobile touch target')
+})
+
+runTest('portal editor compaction keeps guidance, validation, preview, and linked account actions', () => {
+  assert.match(catalogEditorSource, /<HintLabel[\s\S]*portalAssistantHint/)
+  assert.match(catalogEditorSource, /<InfoHint[\s\S]*contactChannelsHint/)
+  assert.match(catalogEditorSource, /<HintLabel[\s\S]*translationOverridesHint/)
+  assert.match(catalogEditorSource, /<HintLabel[\s\S]*stockThresholdHint/)
+  assert.doesNotMatch(catalogEditorSource, /<p[^>]*>\{copy\('contactChannelsHint'/)
+  assert.doesNotMatch(catalogEditorSource, /<p[^>]*>\{copy\('stockThresholdHint'/)
+  assert.match(catalogEditorSource, /disabled=\{editorSaving \|\| !editorDirty\} onClick=\{savePortalDraft\}/)
+  assert.match(catalogEditorSource, /previewSectionRef\.current\?\.scrollIntoView/)
+  assert.match(catalogEditorSource, /href=\{publicPortalUrl\}[^>]*target="_blank"/)
+  assert.match(catalogEditorSource, /navigateTo\('loyalty_points'\)/)
+})
+
+runTest('portal editor compaction preserves cover, FAQ, contact, and social draft wiring', () => {
+  assert.match(catalogEditorSource, /value=\{editorDraft\.customer_portal_cover_image\}/)
+  assert.match(catalogEditorSource, /uploadDraftImage\('customer_portal_cover_image'\)/)
+  assert.match(catalogEditorSource, /faqItems\.map[\s\S]*updateFaqItem\(item\.id, 'question'/)
+  assert.match(catalogEditorSource, /faqItems\.map[\s\S]*updateFaqItem\(item\.id, 'answer'/)
+  for (const key of [
+    'customer_portal_website',
+    'customer_portal_facebook',
+    'customer_portal_instagram',
+    'customer_portal_telegram',
+    'customer_portal_contact_messenger',
+    'customer_portal_contact_telegram',
+    'customer_portal_contact_instagram',
+    'customer_portal_contact_whatsapp',
+    'customer_portal_contact_phone',
+  ]) {
+    assert.match(catalogEditorSource, new RegExp(`name="${key}"[\\s\\S]{0,320}setDraft\\('${key}'`), `${key} must keep its draft update handler`)
+  }
+})
+
+runTest('portal editor work leaves product filter popovers viewport-portalled', () => {
+  assert.match(portalFilterSource, /import LazyPortalMenu from '\.\.\/shared\/LazyPortalMenu'/)
+  assert.match(portalFilterSource, /<LazyPortalMenu[\s\S]*max-w-\[calc\(100vw-1rem\)\]/)
+  assert.match(portalFilterSource, /role="dialog"[\s\S]*role="listbox"/)
+})
+
+runTest('public product discovery uses a sticky unified search, responsive brand index, and explicit paging controls', () => {
+  const paginationSource = fs.readFileSync(new URL('../src/components/catalog/catalogPagination.tsx', import.meta.url), 'utf8')
+  assert.match(catalogProductsSectionSource, /sticky top-16[\s\S]*focus-within:border-blue-400/,
+    'search should stay sticky and use the same blue discovery accent as filters')
+  assert.match(catalogProductsSectionSource, /copy\('jumpToBrand', 'Jump to brand'\)/,
+    'large screens need a labelled brand index rail')
+  assert.match(catalogProductsSectionSource, /max-h-\[min\(18rem,calc\(100vh-32rem\)\)\][\s\S]*overflow-y-auto/,
+    'the desktop alphabet rail must scroll within the sticky sidebar')
+  assert.match(catalogProductsSectionSource, /overflow-x-auto[\s\S]*lg:hidden/,
+    'small screens need a horizontally scrollable alphabet row')
+  assert.match(paginationSource, /import PaginationControls from '\.\.\/shared\/PaginationControls'/,
+    'storefront paging should use the same current Back/Next/page-size control as the rest of the app')
+  assert.match(paginationSource, /pageSizeOptions=\{CATALOG_PAGE_SIZE_OPTIONS\}/)
+  assert.match(paginationSource, /editablePageSizeInput=\{false\}/,
+    'items-per-page should stay bounded to the storefront API presets')
+})
+
+runTest('public product details keep every prepared section visible when its data is empty', () => {
+  for (const section of ['features_benefits', 'who_for', 'ingredients', 'caution']) {
+    assert.match(productDetailFlyoutSource, new RegExp(`sectionKey="${section}"`), `${section} should stay visibly wired`)
+  }
+  assert.match(productDetailFlyoutSource, /data-product-detail-section="need_more_details"/)
+  for (const label of ['productOfficialName', 'productIntroduction', 'productCategory', 'productBrand']) {
+    assert.match(productDetailFlyoutSource, new RegExp(`copy\\('${label}'`), `${label} should remain in the flyout even without content`)
+  }
+  assert.match(productDetailFlyoutSource, /productDetailNotProvided[\s\S]*Not provided yet\./)
+  assert.match(productDetailFlyoutSource, /productNeedMoreDetailsFallback[\s\S]*Contact us for more product details\./)
+})
+
+runTest('public media blocks ordinary save, drag, and long-press interactions', () => {
+  assert.match(publicCatalogPageSource, /data-public-media-protection="true"/)
+  assert.match(publicCatalogPageSource, /onContextMenuCapture=/)
+  assert.match(publicCatalogPageSource, /onDragStartCapture=/)
+  assert.match(publicCatalogPageSource, /onAuxClickCapture=/)
+  assert.match(catalogImagesSource, /data-protected-media="true"/)
+  assert.match(catalogImagesSource, /draggable=\{false\}/)
+  assert.match(publicPortalCssSource, /-webkit-touch-callout:\s*none/)
+  assert.match(publicPortalCssSource, /-webkit-user-drag:\s*none/)
+  assert.match(publicPortalCssSource, /user-select:\s*none/)
+})
+
+runTest('public mobile controls and overlays keep accessible touch/dialog contracts', () => {
+  assert.match(publicPortalCssSource, /@media \(pointer: coarse\)[\s\S]*min-height:\s*44px/)
+  assert.match(publicPortalCssSource, /button\[aria-label\][\s\S]*min-width:\s*44px/)
+  assert.match(publicCatalogPageSource, /role="dialog"[\s\S]*aria-modal="true"/)
+  assert.match(productDetailFlyoutSource, /role="dialog"[\s\S]*aria-modal="true"/)
 })
 
 if (failed > 0) {

@@ -2,11 +2,12 @@ import { Hono, type Context } from 'hono'
 import { getDb } from '../lib/db'
 import { requireAuth, type SessionUser } from '../lib/auth'
 import { audit } from '../lib/audit'
-import { applyRenameCarry } from '../lib/renameCascade'
+import { buildLiveLookupMutationPlan } from '../lib/renameCascade'
 import { assertUpdatedAtMatch, getExpectedUpdatedAt, writeConflictResponse, WriteConflictError } from '../lib/conflictControl'
 import { hasPermission } from '../lib/permissions'
 import { assertCatalogTextIntegrity, normalizeCatalogText } from '../lib/catalogText'
 import { broadcast } from '../durable-objects/broadcastHub'
+import { bumpVersion } from '../lib/cache'
 import type { Env } from '../index'
 
 // Categories and units ("lookups"), ported from backend/src/routes/categories.ts
@@ -90,7 +91,11 @@ function conflict(error: unknown) {
   return null
 }
 
-function registerLookupRoutes(kind: LookupKind, table: 'categories' | 'units', productColumn: 'category' | 'unit') {
+function isNormalizedNameCollision(error: unknown): boolean {
+  return /unique constraint failed.*(?:categories|units)|normalized_name_unique/i.test(error instanceof Error ? error.message : String(error))
+}
+
+function registerLookupRoutes(kind: LookupKind, table: 'categories' | 'units') {
   app.get(`/${table}`, async (c) => {
     const rows = await getDb(c.env).prepare(`SELECT * FROM ${table} ORDER BY lower(name) ASC`).all()
     return c.json(rows || [])
@@ -110,11 +115,21 @@ function registerLookupRoutes(kind: LookupKind, table: 'categories' | 'units', p
     }
 
     const db = getDb(c.env)
-    const duplicate = await db.prepare(`SELECT id FROM ${table} WHERE lower(trim(name)) = lower(trim(@name)) LIMIT 1`).get({ name })
-    if (duplicate) return c.json({ error: `${kind === 'category' ? 'Category' : 'Unit'} already exists` }, 400)
-
     const color = normalizeColor(body.color)
-    const result = await db.prepare(`INSERT INTO ${table} (name, color, updated_at) VALUES (@name, @color, CURRENT_TIMESTAMP)`).run({ name, color })
+    // One atomic statement closes the check-then-insert race: two devices
+    // creating the same normalized wording cannot both pass an earlier SELECT.
+    let result: { changes: number; lastInsertRowid: number }
+    try {
+      result = await db.prepare(`
+        INSERT INTO ${table} (name, color, updated_at)
+        SELECT @name, @color, CURRENT_TIMESTAMP
+        WHERE NOT EXISTS (SELECT 1 FROM ${table} WHERE lower(trim(name)) = lower(trim(@name)))
+      `).run({ name, color })
+    } catch (error) {
+      if (isNormalizedNameCollision(error)) return c.json({ error: `${kind === 'category' ? 'Category' : 'Unit'} already exists`, code: 'normalized_name_collision' }, 409)
+      throw error
+    }
+    if (!Number(result.changes || 0)) return c.json({ error: `${kind === 'category' ? 'Category' : 'Unit'} already exists`, code: 'normalized_name_collision' }, 409)
     const id = result.lastInsertRowid
     await audit(c.env, user?.id ?? null, user?.name ?? null, 'create', kind, id, { name })
     const item = await db.prepare(`SELECT * FROM ${table} WHERE id = @id`).get({ id })
@@ -149,52 +164,68 @@ function registerLookupRoutes(kind: LookupKind, table: 'categories' | 'units', p
     }
 
     const color = normalizeColor(body.color)
+    const renamed = normalizeLower(current.name) !== normalizeLower(name)
     // D6: the rename dialog's third choice -- "keep a copy, new is new" --
     // creates the NEW name as a fresh row and leaves the old one (and
     // every product on it) untouched.
     if (body.cascade === 'copy') {
-      const copyDuplicate = await db.prepare(`SELECT id FROM ${table} WHERE lower(trim(name)) = lower(trim(@name)) LIMIT 1`).get({ name })
-      if (copyDuplicate) return c.json({ error: `${kind === 'category' ? 'Category' : 'Unit'} already exists` }, 400)
-      const inserted = await db.prepare(`INSERT INTO ${table} (name, color, updated_at) VALUES (@name, @color, CURRENT_TIMESTAMP)`).run({ name, color })
+      let inserted: { changes: number; lastInsertRowid: number }
+      try {
+        inserted = await db.prepare(`INSERT INTO ${table} (name, color, updated_at) VALUES (@name, @color, CURRENT_TIMESTAMP)`).run({ name, color })
+      } catch (error) {
+        if (isNormalizedNameCollision(error)) return c.json({ error: `${kind === 'category' ? 'Category' : 'Unit'} already exists`, code: 'normalized_name_collision' }, 409)
+        throw error
+      }
       const copyId = inserted.lastInsertRowid
       await audit(c.env, user?.id ?? null, user?.name ?? null, 'create', kind, copyId, { name, copied_from_id: id })
       const copyRow = await db.prepare(`SELECT * FROM ${table} WHERE id = @id`).get({ id: copyId })
       c.executionCtx.waitUntil(broadcast(c.env, table, { action: 'create', id: copyId }))
       return c.json({ ...copyRow, copied: true, copied_from_id: id })
     }
+    if (renamed && body.cascade !== 'carry') {
+      return c.json({
+        error: `Choose whether to carry linked products to the new ${kind} or keep the current ${kind} and create a copy.`,
+        code: 'rename_choice_required',
+      }, 409)
+    }
     const duplicate = await db.prepare(`SELECT * FROM ${table} WHERE id != @id AND lower(trim(name)) = lower(trim(@name)) LIMIT 1`).get<Record<string, unknown>>({ id, name })
-    const normalizedCurrent = normalizeLower(current.name)
-
     let responseRow: Record<string, unknown> | undefined
     let mergedIntoId: number | null = null
 
+    const aliases = [String(current.name || '')]
+    if (duplicate) aliases.push(String(duplicate.name || ''))
+    const carry = await buildLiveLookupMutationPlan(db, kind, aliases, name, new Date().toISOString())
+    const lookupStatements = duplicate
+      ? [
+          { sql: `UPDATE ${table} SET name = @name, color = @color, updated_at = CURRENT_TIMESTAMP WHERE id = @id`, params: { name, color, id: duplicate.id } },
+          { sql: `DELETE FROM ${table} WHERE id = @id`, params: { id } },
+        ]
+      : [
+          { sql: `UPDATE ${table} SET name = @name, color = @color, updated_at = CURRENT_TIMESTAMP WHERE id = @id`, params: { name, color, id } },
+        ]
+    try {
+      // Lookup row + primary products + secondary memberships commit or roll
+      // back together. A concurrent normalized target insert hits 0102's
+      // unique index and cannot leave a half-carried catalog.
+      await db.batch([...lookupStatements, ...carry.statements])
+    } catch (error) {
+      if (isNormalizedNameCollision(error)) return c.json({ error: `${kind === 'category' ? 'Category' : 'Unit'} already exists`, code: 'normalized_name_collision' }, 409)
+      throw error
+    }
     if (duplicate) {
-      await db.batch([
-        { sql: `UPDATE ${table} SET name = @name, color = @color, updated_at = CURRENT_TIMESTAMP WHERE id = @id`, params: { name, color, id: duplicate.id } },
-        { sql: `UPDATE products SET ${productColumn} = @name, updated_at = CURRENT_TIMESTAMP WHERE lower(trim(${productColumn})) IN (@a, @b)`, params: { name, a: normalizedCurrent, b: normalizeLower(name) } },
-        { sql: `DELETE FROM ${table} WHERE id = @id`, params: { id } },
-      ])
       responseRow = await db.prepare(`SELECT * FROM ${table} WHERE id = @id`).get({ id: duplicate.id })
       mergedIntoId = Number(duplicate.id)
     } else {
-      await db.batch([
-        { sql: `UPDATE ${table} SET name = @name, color = @color, updated_at = CURRENT_TIMESTAMP WHERE id = @id`, params: { name, color, id } },
-        { sql: `UPDATE products SET ${productColumn} = @name, updated_at = CURRENT_TIMESTAMP WHERE lower(trim(${productColumn})) = @current`, params: { name, current: normalizedCurrent } },
-      ])
       responseRow = await db.prepare(`SELECT * FROM ${table} WHERE id = @id`).get({ id })
     }
-
-    // D6 gap fix: the primary-column cascade above never touched the
-    // multi-value 'categories' membership (migration 0033), so a product
-    // holding the renamed category as a SECONDARY value kept the stale
-    // text. applyRenameCarry rewrites those memberships (and re-runs the
-    // primary update, harmlessly idempotent here).
-    if (kind === 'category') {
-      await applyRenameCarry(db, 'category', String(current.name || ''), name, new Date().toISOString())
-      if (duplicate) await applyRenameCarry(db, 'category', String(duplicate.name || ''), name, new Date().toISOString())
-    }
     await audit(c.env, user?.id ?? null, user?.name ?? null, duplicate ? 'merge' : 'update', kind, mergedIntoId || id, { name, merged_from_id: duplicate ? id : null })
+    // Carry/merge rewrites products.category/categories or products.unit.
+    // /api/products/search and every derived filter payload are keyed on the
+    // products version, not the lookup-table broadcast, so advance it before
+    // clients refetch or the Worker Cache API can return the old label.
+    await bumpVersion(c.env, 'products')
     c.executionCtx.waitUntil(broadcast(c.env, table, { action: duplicate ? 'merge' : 'update', id: mergedIntoId || id }))
+    c.executionCtx.waitUntil(broadcast(c.env, 'products', { action: `${kind}_ripple`, id: mergedIntoId || id }))
     return c.json({ ...responseRow, merged: !!duplicate, merged_from_id: duplicate ? id : null })
   }
 
@@ -225,18 +256,20 @@ function registerLookupRoutes(kind: LookupKind, table: 'categories' | 'units', p
       throw error
     }
 
-    const normalizedCurrent = normalizeLower(current.name)
+    const cleared = await buildLiveLookupMutationPlan(db, kind, [String(current.name || '')], null, new Date().toISOString())
     await db.batch([
-      { sql: `UPDATE products SET ${productColumn} = NULL, updated_at = CURRENT_TIMESTAMP WHERE lower(trim(${productColumn})) = @current`, params: { current: normalizedCurrent } },
+      ...cleared.statements,
       { sql: `DELETE FROM ${table} WHERE id = @id`, params: { id } },
     ])
-    await audit(c.env, user?.id ?? null, user?.name ?? null, 'delete', kind, id, { name: current.name, cleared_products: true })
+    await audit(c.env, user?.id ?? null, user?.name ?? null, 'delete', kind, id, { name: current.name, cleared_products: cleared.products })
+    await bumpVersion(c.env, 'products')
     c.executionCtx.waitUntil(broadcast(c.env, table, { action: 'delete', id }))
+    c.executionCtx.waitUntil(broadcast(c.env, 'products', { action: `${kind}_ripple`, id }))
     return c.json({})
   })
 }
 
-registerLookupRoutes('category', 'categories', 'category')
-registerLookupRoutes('unit', 'units', 'unit')
+registerLookupRoutes('category', 'categories')
+registerLookupRoutes('unit', 'units')
 
 export default app

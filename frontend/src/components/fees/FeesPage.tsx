@@ -11,11 +11,12 @@ import Pencil from 'lucide-react/dist/esm/icons/pencil.js'
 import Plus from 'lucide-react/dist/esm/icons/plus.js'
 import Receipt from 'lucide-react/dist/esm/icons/receipt.js'
 import Trash2 from 'lucide-react/dist/esm/icons/trash-2.js'
+import Tags from 'lucide-react/dist/esm/icons/tags.js'
 import { useApp as useAppHook, useSync as useSyncHook } from '../../AppContext.tsx'
 import Modal from '../shared/Modal'
 import SearchInput from '../shared/SearchInput'
 import FilterMenu, { type FilterOption } from '../shared/FilterMenu'
-import PaginationControls, { PAGE_SIZE_OPTIONS, DEFAULT_PAGE_SIZE } from '../shared/PaginationControls'
+import PaginationControls, { DEFAULT_PAGE_SIZE, clampPage } from '../shared/PaginationControls'
 import { useIsPageActive } from '../shared/pageActivity'
 import {
   beginTrackedRequest,
@@ -47,6 +48,7 @@ import { columnsFromRows } from '../../utils/exportOptions.ts'
 import { lazyRetry } from '../../utils/lazyImport.ts'
 
 const ExportOptionsDialog = lazyRetry(() => import('../shared/ExportOptionsDialog'), 'fees-export-options')
+const ExpenseLabelManagerModal = lazyRetry(() => import('./ExpenseLabelManagerModal'), 'expense-label-manager-modal')
 
 type TranslateFn = (key: string) => string | undefined
 type NotifyFn = (message: unknown, type?: string, duration?: number) => void
@@ -98,6 +100,16 @@ function formatFeeDate(value: string | null | undefined): string {
   const date = new Date(`${value}T00:00:00`)
   if (Number.isNaN(date.getTime())) return String(value)
   return date.toLocaleDateString('en-US', { year: 'numeric', month: '2-digit', day: '2-digit' })
+}
+
+export function feeTypeToneClass(type: string): string {
+  switch (type) {
+    case 'delivery': return 'bg-blue-50 text-blue-700 dark:bg-blue-950/50 dark:text-blue-300'
+    case 'tax': return 'bg-amber-50 text-amber-700 dark:bg-amber-950/50 dark:text-amber-300'
+    case 'change': return 'bg-violet-50 text-violet-700 dark:bg-violet-950/50 dark:text-violet-300'
+    case 'expense': return 'bg-rose-50 text-rose-700 dark:bg-rose-950/50 dark:text-rose-300'
+    default: return 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300'
+  }
 }
 
 const EMPTY_RESULT: FeeListResult = { fees: [], total: 0, limit: DEFAULT_PAGE_SIZE, offset: 0, summary: [] }
@@ -166,6 +178,7 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
   const [selected, setSelected] = useState<FeeRecord | null>(null)
   const [deletingId, setDeletingId] = useState<number | null>(null)
   const [exportDialog, setExportDialog] = useState<{ rows: Array<Record<string, unknown>>; baseName: string } | null>(null)
+  const [showLabelManager, setShowLabelManager] = useState(false)
 
   const loadRequestRef = useRef(0)
   const deleteActionRef = useRef<Set<string>>(new Set())
@@ -190,7 +203,16 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
         FEES_LOAD_TIMEOUT_MS,
       )
       if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
-      setResult(response || EMPTY_RESULT)
+      const nextResult = response || EMPTY_RESULT
+      const nextPage = clampPage(page, nextResult.total, pageSize)
+      if (nextPage !== page) {
+        // A filtered or deleted final page can disappear between requests.
+        // Correct the controlled page before accepting its now-empty rows;
+        // the page change triggers one request at the valid offset.
+        setPage(nextPage)
+        return
+      }
+      setResult(nextResult)
     } catch (error) {
       if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
       setLoadError(error instanceof Error ? error.message : String(error || ''))
@@ -242,6 +264,7 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
     totals?: { count?: number; amount_usd?: number; amount_khr?: number }
     days?: Array<{ date?: string; count?: number; amount_usd?: number; amount_khr?: number }>
     by_type?: Array<{ fee_type?: string; count?: number; amount_usd?: number; amount_khr?: number }>
+    by_category?: Array<{ label?: string; fee_type?: string; count?: number; amount_usd?: number; amount_khr?: number }>
   }
   const [stripData, setStripData] = useState<FeesStripPayload | null>(null)
   const [stripLoading, setStripLoading] = useState(false)
@@ -254,6 +277,7 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
       const result = await getFeesReport({
         ...(stripRange.startDate ? { startDate: stripRange.startDate } : {}),
         ...(stripRange.endDate ? { endDate: stripRange.endDate } : {}),
+        ...(branchFilter ? { branchId: branchFilter } : {}),
       })
       if (stripRequestRef.current !== requestId) return
       setStripData((result || {}) as FeesStripPayload)
@@ -263,7 +287,7 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
     } finally {
       if (stripRequestRef.current === requestId) setStripLoading(false)
     }
-  }, [isActive, stripRange.endDate, stripRange.startDate])
+  }, [branchFilter, isActive, stripRange.endDate, stripRange.startDate])
   useEffect(() => { void loadStatsStrip() }, [loadStatsStrip])
   useEffect(() => {
     if (!isActive || !syncChannel?.channel) return
@@ -273,6 +297,7 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
   const stripCards = useMemo<StatCardDef[]>(() => {
     const totals = stripData?.totals || {}
     const byType = stripData?.by_type || []
+    const byCategory = stripData?.by_category || []
     const days = stripData?.days || []
     const count = Number(totals.count) || 0
     const amountUsd = Number(totals.amount_usd) || 0
@@ -291,6 +316,16 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
             value: `${Number(row.count) || 0} · ${fmtMoney(Number(row.amount_usd) || 0, Number(row.amount_khr) || 0)}`,
           }
         }),
+      },
+      {
+        key: 'categories',
+        label: tr('expense_categories', 'Categories'),
+        value: String(byCategory.length),
+        hint: tr('expense_categories_hint', 'Saved expense labels in this range, grouped without changing their source wording.'),
+        details: byCategory.slice(0, 12).map((row) => ({
+          label: row.label || tr('unlabeled', 'Unlabeled'),
+          value: `${Number(row.count) || 0} · ${fmtMoney(Number(row.amount_usd) || 0, Number(row.amount_khr) || 0)}`,
+        })),
       },
       {
         key: 'total',
@@ -469,7 +504,13 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
         loading={stripLoading}
         t={t}
         rangeActions={(
-          <ExportMenu label={tr('export', 'Export')} items={exportItems} triggerClassName="h-8 px-2.5 text-xs" />
+          <>
+            <ExportMenu label={tr('export', 'Export')} items={exportItems} triggerClassName="h-8 px-2.5 text-xs" />
+            <button type="button" className="btn-secondary inline-flex h-8 items-center gap-1 px-2.5 py-0 text-xs" onClick={() => setShowLabelManager(true)} title={tr('manage_expense_labels', 'Manage expense labels')}>
+              <Tags className="h-3.5 w-3.5" />
+              <span>{tr('labels', 'Labels')}</span>
+            </button>
+          </>
         )}
         actions={(
           // Fit-to-content, not the wide toolbar-width button ("the add
@@ -566,62 +607,63 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
               imported row has no branch, no sale and only one currency, so
               that layout was mostly "--" cells (user: "no need such weird
               not consistent breakdown"). */}
-          <div className="hidden overflow-x-auto rounded-xl border border-slate-200 dark:border-slate-700 sm:block">
-            <table className="min-w-[680px] w-full text-sm">
-              <thead className="bg-slate-50 text-left text-xs font-medium uppercase tracking-wide text-slate-400 dark:bg-slate-800/60 dark:text-slate-500">
+          <div className="dense-data-shell hidden overflow-x-auto md:block">
+            <table className="dense-data-table min-w-[720px]">
+              <colgroup><col className="w-[7rem]" /><col className="w-[7rem]" /><col /><col className="w-[9rem]" /><col className="w-[12rem]" /><col className="w-[4.5rem]" /></colgroup>
+              <thead>
                 <tr>
-                  <th className="px-3 py-2">{tr('date', 'Date')}</th>
-                  <th className="px-3 py-2">{tr('type', 'Type')}</th>
-                  <th className="px-3 py-2">{tr('fee_label', 'Label')}</th>
-                  <th className="px-3 py-2 text-right">{tr('amount', 'Amount')}</th>
-                  <th className="px-3 py-2">{tr('details', 'Details')}</th>
-                  <th className="px-3 py-2 text-right">{tr('actions', 'Actions')}</th>
+                  <th>{tr('date', 'Date')}</th>
+                  <th data-tone="violet">{tr('type', 'Type')}</th>
+                  <th data-tone="blue">{tr('expense_category', 'Category')}</th>
+                  <th data-tone="emerald" className="text-right">{tr('amount', 'Amount')}</th>
+                  <th>{tr('details', 'Details')}</th>
+                  <th className="text-right">{tr('actions', 'Actions')}</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+              <tbody>
                 {fees.map((fee) => (
-                  <tr key={fee.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/40">
-                    <td className="px-3 py-2 whitespace-nowrap text-slate-500 dark:text-slate-400">{formatFeeDate(fee.fee_date)}</td>
-                    <td className="px-3 py-2 whitespace-nowrap">
-                      <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-300">
+                  <tr key={fee.id} data-clickable="true" tabIndex={0} onClick={() => openEdit(fee)} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); openEdit(fee) } }}>
+                    <td className="whitespace-nowrap text-slate-500 dark:text-slate-400">{formatFeeDate(fee.fee_date)}</td>
+                    <td className="whitespace-nowrap">
+                      <span className={`inline-flex rounded-full px-1.5 py-0.5 text-[11px] font-semibold ${feeTypeToneClass(fee.fee_type)}`}>
                         {feeTypeLabel(fee.fee_type)}
                       </span>
                     </td>
-                    <td className="px-3 py-2 text-slate-700 dark:text-slate-200">{fee.label || ''}</td>
-                    <td className="px-3 py-2 whitespace-nowrap text-right font-medium text-slate-700 dark:text-slate-200">
+                    <td><span className="dense-cell-truncate font-medium text-blue-700 dark:text-blue-300" title={fee.label || ''}>{fee.label || ''}</span></td>
+                    <td className="whitespace-nowrap text-right font-semibold text-emerald-700 dark:text-emerald-300">
                       {fmtMoney(Number(fee.amount_usd) || 0, Number(fee.amount_khr) || 0)}
                     </td>
-                    <td className="px-3 py-2">
-                      <div className="flex flex-col items-start gap-0.5">
+                    <td>
+                      <div className="flex min-w-0 items-center gap-1.5 overflow-hidden">
                         {fee.sale_receipt_number || fee.sale_id ? (
-                          <span className="inline-flex items-center gap-1 rounded-md border border-slate-200 bg-slate-50 px-1.5 py-0.5 font-mono text-[11px] text-slate-500 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300">
+                          <span className="inline-flex min-w-0 items-center gap-1 rounded-md bg-slate-100 px-1.5 py-0.5 font-mono text-[11px] text-slate-600 dark:bg-slate-800 dark:text-slate-300">
                             <Receipt className="h-3 w-3 shrink-0" />
-                            {fee.sale_receipt_number || `#${fee.sale_id}`}
+                            <span className="truncate">{fee.sale_receipt_number || `#${fee.sale_id}`}</span>
                           </span>
                         ) : null}
                         {fee.branch_name ? (
-                          <span className="text-xs text-slate-400">{fee.branch_name}</span>
+                          <span className="truncate text-[11px] text-slate-400">{fee.branch_name}</span>
                         ) : null}
                       </div>
                     </td>
-                    <td className="px-3 py-2">
-                      <div className="flex items-center justify-end gap-1">
+                    <td>
+                      <div className="flex flex-nowrap items-center justify-end gap-0.5">
                         <button
                           type="button"
-                          onClick={() => openEdit(fee)}
+                          onClick={(event) => { event.stopPropagation(); openEdit(fee) }}
                           aria-label={tr('edit', 'Edit')}
                           title={tr('edit', 'Edit')}
-                          className="rounded-full p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-600 dark:hover:bg-slate-700"
+                          className="flex h-7 w-7 items-center justify-center rounded-md text-slate-500 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-slate-700"
                         >
                           <Pencil className="h-3.5 w-3.5" />
                         </button>
                         <button
                           type="button"
-                          onClick={() => handleDelete(fee)}
+                          onClick={(event) => { event.stopPropagation(); void handleDelete(fee) }}
                           disabled={deletingId === fee.id}
                           aria-label={feesNeedsApproval ? tr('delete_needs_approval', 'Delete (needs approval)') : tr('delete', 'Delete')}
                           title={feesNeedsApproval ? tr('delete_needs_approval', 'Delete (needs approval)') : tr('delete', 'Delete')}
-                          className="rounded-full p-1.5 text-slate-400 hover:bg-red-50 hover:text-red-500 disabled:opacity-50 dark:hover:bg-red-950"
+                          className="flex h-7 w-7 items-center justify-center rounded-md text-slate-400 hover:bg-red-50 hover:text-red-500 disabled:opacity-50 dark:hover:bg-red-950"
                         >
                           <Trash2 className="h-3.5 w-3.5" />
                         </button>
@@ -636,13 +678,13 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
           {/* Card layout for narrow screens -- the 7-column table doesn't
               fit comfortably below sm, same pattern as the other list pages
               in this app (Branches, Returns). */}
-          <div className="space-y-2 sm:hidden">
+          <div className="space-y-2 md:hidden">
             {fees.map((fee) => (
               <div key={fee.id} className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm dark:border-slate-700 dark:bg-slate-900">
                 <div className="flex items-start justify-between gap-2">
                   <div className="min-w-0">
                     <div className="flex items-center gap-1.5">
-                      <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-300">
+                      <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${feeTypeToneClass(fee.fee_type)}`}>
                         {feeTypeLabel(fee.fee_type)}
                       </span>
                       <span className="text-xs text-slate-400">{formatFeeDate(fee.fee_date)}</span>
@@ -700,6 +742,17 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
             onClose={closeModal}
           />
         </Modal>
+      ) : null}
+
+      {showLabelManager ? (
+        <Suspense fallback={null}>
+          <ExpenseLabelManagerModal
+            onClose={() => setShowLabelManager(false)}
+            onChanged={() => load(true)}
+            notify={notify}
+            t={t}
+          />
+        </Suspense>
       ) : null}
     </div>
   )

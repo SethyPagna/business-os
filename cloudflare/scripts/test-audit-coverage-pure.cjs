@@ -98,6 +98,11 @@ ok(/forced:\s*usageCount > 0/.test(filesRoute), 'files.ts delete audit records t
 
 const notes = fs.readFileSync(path.join(routesDir, 'notes.ts'), 'utf8')
 ok(/audit\([^)]*'create',\s*'note',[^)]*,\s*null\)/.test(notes), 'notes.ts audits create with NO content in details')
+
+const telegram = fs.readFileSync(path.join(routesDir, 'telegram.ts'), 'utf8')
+ok(/audit\([^)]*'test',\s*'telegram'/.test(telegram), 'telegram.ts audits the test message')
+ok(/audit\([^)]*'send',\s*'telegram_summary'/.test(telegram), 'telegram.ts audits manual daily summaries')
+ok(/audit\([^)]*'connect',\s*'telegram_webhook'/.test(telegram), 'telegram.ts audits command webhook setup')
 ok(/audit\([^)]*'delete',\s*'note',[^)]*,\s*null\)/.test(notes), 'notes.ts audits delete with NO content in details')
 const notesPutBody = notes.slice(notes.indexOf("app.put('/:id'"), notes.indexOf("app.patch('/reorder'"))
 ok(notesPutBody.length > 0 && !notesPutBody.includes('audit('),

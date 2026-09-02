@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import Modal from '../shared/Modal'
-import DateTimeRangePicker, { EMPTY_DATE_TIME_RANGE, type DateTimeRange } from '../shared/DateTimeRangePicker.tsx'
+import DateTimeRangePicker, { todayDateTimeRange, type DateTimeRange } from '../shared/DateTimeRangePicker.tsx'
 import { getCustomerSalesReport } from '../../api/salesTransport.ts'
 
 // X4 (Part 395): the customer leg of the per-contact drills -- purchase
@@ -37,7 +37,10 @@ function money(value: unknown): string {
 }
 
 export default function CustomerPurchasesReportModal({ customerId, customerName, t, onClose }: CustomerPurchasesReportModalProps) {
-  const [range, setRange] = useState<DateTimeRange>(() => ({ ...EMPTY_DATE_TIME_RANGE }))
+  // An empty range returned before making a request but left the modal in its
+  // loading state. This is a purchase-history drill, so open on the complete
+  // known sales window rather than a misleading empty "today" result.
+  const [range, setRange] = useState<DateTimeRange>(() => ({ ...todayDateTimeRange(), startDate: '2024-01-01' }))
   const [totals, setTotals] = useState<CustomerSalesTotals | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')

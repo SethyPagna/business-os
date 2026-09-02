@@ -9,6 +9,7 @@ import type { TableColumnDef } from '../shared/columnPreferences.ts'
 // day must be read in the business timezone.
 import { fmtDate } from '../../utils/formatters'
 import { getCustomerReceivables } from '../../api/contactReadTransport.ts'
+import PaginationControls, { clampPage, DEFAULT_PAGE_SIZE } from '../shared/PaginationControls'
 
 type TranslateFn = (key: string) => string | undefined
 
@@ -57,8 +58,6 @@ type ArInvoicesSectionProps = {
   t: TranslateFn
 }
 
-const PAGE_SIZE = 25
-
 const AR_OPTIONAL_COLUMNS: TableColumnDef[] = [
   { key: 'invoice_no', label: 'Invoice #' },
   { key: 'taxable', label: 'Taxable', defaultVisible: false },
@@ -72,6 +71,7 @@ export default function ArInvoicesSection({ t }: ArInvoicesSectionProps) {
   const [fromDate, setFromDate] = useState('')
   const [toDate, setToDate] = useState('')
   const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE)
   const [refreshToken, setRefreshToken] = useState(0)
   const [data, setData] = useState<ArPayload | null>(null)
   const [loading, setLoading] = useState(true)
@@ -97,11 +97,17 @@ export default function ArInvoicesSection({ t }: ArInvoicesSectionProps) {
       from: fromDate,
       to: toDate,
       page,
-      page_size: PAGE_SIZE,
+      page_size: pageSize,
     })
       .then((result) => {
         if (!aliveRef.current || requestRef.current !== requestId) return
-        setData((result || {}) as ArPayload)
+        const nextData = (result || {}) as ArPayload
+        const nextPage = clampPage(page, Number(nextData.total_invoices) || 0, pageSize)
+        if (nextPage !== page) {
+          setPage(nextPage)
+          return
+        }
+        setData(nextData)
       })
       .catch((err: unknown) => {
         if (!aliveRef.current || requestRef.current !== requestId) return
@@ -111,13 +117,12 @@ export default function ArInvoicesSection({ t }: ArInvoicesSectionProps) {
         if (aliveRef.current && requestRef.current === requestId) setLoading(false)
       })
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [customer, status, fromDate, toDate, page, refreshToken])
+  }, [customer, status, fromDate, toDate, page, pageSize, refreshToken])
 
   const totals = data?.totals || {}
   const invoices = Array.isArray(data?.invoices) ? data!.invoices! : []
   const customerOptions = Array.isArray(data?.meta?.customers) ? data!.meta!.customers! : []
   const totalInvoices = Number(data?.total_invoices) || 0
-  const totalPages = Math.max(1, Math.ceil(totalInvoices / PAGE_SIZE))
   const ledgerReady = data?.ledger_ready !== false
 
   const money = (value: unknown): string => `$${(Number(value) || 0).toFixed(2)}`
@@ -261,20 +266,9 @@ export default function ArInvoicesSection({ t }: ArInvoicesSectionProps) {
             </div>
           )}
 
-          {totalPages > 1 ? (
-            <div className="flex items-center justify-between gap-2 text-xs text-gray-500">
-              <span>{totalInvoices} {tr('stock_in_invoices_count', 'Invoices').toLowerCase()}</span>
-              <div className="flex items-center gap-2">
-                <span>{tr('page', 'Page')} {page} / {totalPages}</span>
-                <button type="button" className="btn-secondary py-1 text-xs disabled:cursor-not-allowed disabled:opacity-50" disabled={page <= 1 || loading} onClick={() => setPage((current) => Math.max(1, current - 1))}>
-                  {tr('previous', 'Previous')}
-                </button>
-                <button type="button" className="btn-secondary py-1 text-xs disabled:cursor-not-allowed disabled:opacity-50" disabled={page >= totalPages || loading} onClick={() => setPage((current) => current + 1)}>
-                  {tr('next', 'Next')}
-                </button>
-              </div>
-            </div>
-          ) : null}
+          <div className="flex justify-center">
+            <PaginationControls compact rangeAsPageSize page={page} pageSize={pageSize} totalItems={totalInvoices} label={tr('stock_in_invoices_count', 'Invoices').toLowerCase()} t={t} onPageChange={setPage} onPageSizeChange={(size) => { setPageSize(size); setPage(1) }} />
+          </div>
         </>
       )}
     </div>

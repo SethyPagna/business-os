@@ -71,8 +71,26 @@ export default function ConfirmDialog({
     return value && value !== key ? value : fallback
   }
 
+  const primaryActionClass = `flex items-center justify-center gap-1.5 rounded-lg px-4 py-2 text-sm font-medium text-white disabled:opacity-40 ${
+    danger ? 'bg-red-600 hover:bg-red-700' : 'bg-blue-600 hover:bg-blue-700'
+  }`
+
   return (
-    <Modal title={title} onClose={onClose} size="sm">
+    <Modal
+      title={title}
+      onClose={onClose}
+      size="sm"
+      headerExtra={(
+        <button
+          type="button"
+          onClick={onConfirm}
+          disabled={working || confirmDisabled}
+          className={`${primaryActionClass} min-h-9 max-w-24 truncate px-3 py-1.5 text-xs sm:hidden`}
+        >
+          {working ? (workingLabel || T('saving', 'Saving...')) : (confirmLabel || T('confirm', 'Confirm'))}
+        </button>
+      )}
+    >
       <div className="space-y-4 text-sm text-gray-700 dark:text-gray-300">
         {danger ? (
           <div className="flex items-start gap-3 rounded-lg border border-red-200 bg-red-50 p-3 dark:border-red-900/40 dark:bg-red-950/30">
@@ -100,14 +118,12 @@ export default function ConfirmDialog({
 
         {note ? <p className="text-xs text-gray-500 dark:text-gray-400">{note}</p> : null}
 
-        <div className="sticky bottom-0 -mx-5 -mb-5 flex gap-3 border-t border-gray-200 bg-white px-5 pb-5 pt-4 dark:border-gray-700 dark:bg-gray-800">
+        <div className="sticky bottom-0 -mx-5 -mb-5 hidden gap-3 border-t border-gray-200 bg-white px-5 pb-5 pt-4 dark:border-gray-700 dark:bg-gray-800 sm:flex">
           <button
             type="button"
             onClick={onConfirm}
             disabled={working || confirmDisabled}
-            className={`flex flex-1 items-center justify-center gap-1.5 rounded-lg px-4 py-2 text-sm font-medium text-white disabled:opacity-40 ${
-              danger ? 'bg-red-600 hover:bg-red-700' : 'bg-blue-600 hover:bg-blue-700'
-            }`}
+            className={`${primaryActionClass} flex-1`}
           >
             {working ? (workingLabel || T('saving', 'Saving...')) : (confirmLabel || T('confirm', 'Confirm'))}
           </button>

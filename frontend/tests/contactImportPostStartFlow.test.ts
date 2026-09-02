@@ -93,7 +93,7 @@ await runTest('contact conflict screen wires server search, sort, filters, pagin
   assert.match(source, /unresolvedContactConflicts/)
   assert.match(source, /Confirm & import/)
   assert.match(source, /updateImportJobDecisions\(jobId/)
-  assert.match(source, /contactReviewPageCount\(total\)/)
+  assert.match(source, /<PaginationControls[\s\S]*page=\{page\}[\s\S]*pageSize=\{CONTACT_REVIEW_PAGE_SIZE\}[\s\S]*totalItems=\{total\}/)
   assert.doesNotMatch(source, /pageSize:\s*200/)
 })
 

@@ -144,8 +144,9 @@ export function usePortalAccount(bucket: BucketLike, wishlist: WishlistLike) {
     try {
       const result = await fn(payload)
       const profile = readProfile(result)
+      if (!profile) throw new Error('The account response was incomplete. Please try again.')
       setAccount(profile)
-      if (profile) await hydrate()
+      await hydrate()
       return true
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Something went wrong. Please try again.')

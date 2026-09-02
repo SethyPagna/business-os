@@ -150,7 +150,7 @@ export function receiveBatchStock(payload: ReceiveBatchPayload): Promise<{ succe
 // more separately-editable lot code -- correcting receivedAt recomputes
 // the batch's code automatically server-side (see cloudflare/src/lib/
 // batchCode.ts's dateToBatchCode).
-export function updateBatch(id: number | string, patch: { expiryDate?: string | null; notes?: string | null; isActive?: boolean; receivedAt?: string | null; supplierId?: number | null; supplierName?: string | null; expectedUpdatedAt?: string | null }): Promise<{ success: boolean }> {
+export function updateBatch(id: number | string, patch: { expiryDate?: string | null; notes?: string | null; isActive?: boolean; receivedAt?: string | null; supplierId?: number | null; supplierName?: string | null; paymentStatus?: 'paid' | 'credit' | null; creditDueDate?: string | null; expectedUpdatedAt?: string | null }): Promise<{ success: boolean }> {
   const body: Record<string, unknown> = {}
   if (patch.expiryDate !== undefined) body.expiry_date = patch.expiryDate || null
   if (patch.notes !== undefined) body.notes = patch.notes || null
@@ -160,6 +160,8 @@ export function updateBatch(id: number | string, patch: { expiryDate?: string | 
     body.supplier_name = patch.supplierName || null
     body.supplier_id = patch.supplierId ?? null
   }
+  if (patch.paymentStatus !== undefined) body.payment_status = patch.paymentStatus || null
+  if (patch.creditDueDate !== undefined) body.credit_due_date = patch.creditDueDate || null
   // Sent through so the server can reject a stale edit (conflictControl).
   if (patch.expectedUpdatedAt) body.expectedUpdatedAt = patch.expectedUpdatedAt
   return route(

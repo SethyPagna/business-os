@@ -25,6 +25,7 @@ import devicesRoute from './routes/devices'
 import notesRoute from './routes/notes'
 import batchesRoute from './routes/batches'
 import feesRoute from './routes/fees'
+import telegramRoute from './routes/telegram'
 import reviewQueueRoute from './routes/reviewQueue'
 import { createSyncRoute } from './routes/sync'
 import { getSessionUser } from './lib/auth'
@@ -34,7 +35,8 @@ import { reportError } from './lib/errorReporting'
 import { serveObject } from './lib/r2'
 import { handleImportQueue, handleImportDeadLetterQueue, handleMediaQueue, handleBackupQueue } from './queue'
 import { maybeRunScheduledBackup } from './lib/backup'
-import { maybeRunScheduledDriveSync } from './lib/googleDrive'
+import { driveSyncScheduleDue } from './lib/googleDrive'
+import { enqueueDriveSyncJob } from './lib/driveSyncQueue'
 import { maybeRunScheduledAuditLogRetention } from './lib/audit'
 import { maybeRunScheduledImportRetention, cleanOrphanImportStaging } from './lib/importRetention'
 import { maybeRunScheduledImageAudit } from './lib/imageAudit'
@@ -111,6 +113,10 @@ export type Env = {
   // lib/verification.ts's sendCodeEmail() for the exact fallback behavior.
   RESEND_API_KEY?: string
   RESEND_FROM_EMAIL?: string
+  // Telegram's bot API token. It is intentionally a Worker secret, never a
+  // setting: chat IDs may be configured by an admin, but a bot token grants
+  // control of the bot and must never be returned to the browser.
+  TELEGRAM_BOT_TOKEN?: string
   // Google identity login (Sign in with Google) -- see lib/googleOauth.ts.
   // CLIENT_ID/REDIRECT_URI are plain vars (not secret); CLIENT_SECRET should
   // be set with `wrangler secret put GOOGLE_LOGIN_CLIENT_SECRET` in
@@ -306,6 +312,7 @@ app.route('/api/runtime', runtimeRoute)
 app.route('/api/notes', notesRoute)
 app.route('/api/batches', batchesRoute)
 app.route('/api/fees', feesRoute)
+app.route('/api/telegram', telegramRoute)
 app.route('/api/review', reviewQueueRoute)
 app.route('/api', usersRoute)
 app.route('/api', compatRoute)
@@ -328,7 +335,11 @@ export default {
     } else if (batch.queue === 'business-os-media') {
       await handleMediaQueue(batch as MessageBatch<{ assetKey: string; kind: 'optimize-video' | 'optimize-image' }>, env)
     } else if (batch.queue === 'business-os-backup-assets') {
-      await handleBackupQueue(batch as MessageBatch<{ kind: 'backup-continue'; backupName: string; nextIndex: number }>, env)
+      await handleBackupQueue(batch as MessageBatch<
+        | { kind: 'backup-continue'; backupName: string; nextIndex: number }
+        | { kind: 'drive-sync'; jobId: string }
+        | { kind: 'drive-restore-stage'; jobId: string }
+      >, env)
     }
   },
   async scheduled(_controller: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
@@ -361,7 +372,11 @@ export default {
         }
       }
       await runStep('backup', () => maybeRunScheduledBackup(env))
-      await runStep('drive-sync', () => maybeRunScheduledDriveSync(env))
+      await runStep('drive-sync', async () => {
+        const schedule = await driveSyncScheduleDue(env)
+        if (!schedule.due) return schedule
+        return enqueueDriveSyncJob(env, 'scheduled')
+      })
       await runStep('audit-log-retention', () => maybeRunScheduledAuditLogRetention(env))
       // Reap stalled import jobs into a terminal status BEFORE retention runs,
       // so a job stuck in analyzing/applying (e.g. a killed queue invocation)

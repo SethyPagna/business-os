@@ -63,7 +63,12 @@ const TRANSIENT_D1_ERROR_PATTERN = /network|timeout|timed out|internal error|too
 // bare `too many` alternative in the pattern above classified it as
 // transient. `too many requests` -- rate limiting -- really is transient
 // and is kept.
-const DETERMINISTIC_SQL_ERROR_PATTERN = /too many SQL variables|no such (table|column|function)|constraint failed|syntax error|datatype mismatch|ambiguous column|incomplete input/i
+// A CPU-limit reset is not a transient transport failure. Replaying the same
+// statement immediately consumes the same budget again and can fan one bad
+// request out into failures in unrelated reads (health/import tracker/etc.).
+// Callers that can safely adapt work (for example the chunked import writer)
+// already handle this class explicitly; ordinary requests must fail once.
+const DETERMINISTIC_SQL_ERROR_PATTERN = /CPU time limit|exceeded its CPU time limit|too many SQL variables|no such (table|column|function)|constraint failed|syntax error|datatype mismatch|ambiguous column|incomplete input/i
 
 async function withD1Retry<T>(run: () => Promise<T>): Promise<T> {
   try {

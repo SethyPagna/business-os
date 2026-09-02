@@ -1069,9 +1069,10 @@ function getContactMergePolicy(policyJson: string | null | undefined): { conflic
 
 // 'merge' (default): add/update rows into the existing catalog, same
 // create-vs-update matching classifyProducts already does (same name +
-// same cost/price/barcode, branch excluded from the comparison -> merge
+// same cost/barcode, branch excluded from the comparison -> merge (selling
+// price is mergeable and the highest wins)
 // into the existing row and add branch_stock; same name + a real
-// cost/price/barcode difference -> a new row, which the frontend's
+// cost/barcode difference -> a new row, which the frontend's
 // existing name-based grouping already presents as a variant under that
 // name). 'replace_all': the imported file IS the complete, current
 // catalog going forward -- same create/update matching runs unchanged
@@ -1233,6 +1234,30 @@ export async function classifyProducts(
     }
   }
 
+  // Explicit receipt batches are the one intentional exception to a cost
+  // change creating a sibling: another receipt for the SAME product,
+  // barcode and batch may top that lot up while its own movement/received
+  // cost remains historical. Read only lot codes named by this window.
+  const requestedLotCodes = [...new Set(rows.map((row) => {
+    const raw = str(row['batch(mm/dd/yyyy)'] || row.batch || row.date || row.received_date)
+    const iso = normalizeToIsoDate(raw) || (!raw ? todayIso() : '')
+    return iso ? lower(dateToBatchCode(iso)) : ''
+  }).filter(Boolean))]
+  const productsByActiveLot = new Map<string, Set<number>>()
+  for (const slice of chunkForBinding(requestedLotCodes, 0)) {
+    const { sql, params } = buildInClause('lot', slice)
+    const lots = await db.prepare(`
+      SELECT variant_product_id, lot_code FROM product_batches
+      WHERE is_active = 1 AND LOWER(TRIM(COALESCE(lot_code, ''))) IN (${sql})
+    `).all<{ variant_product_id: number; lot_code: string }>(params)
+    for (const lot of lots) {
+      const lotKey = lower(lot.lot_code)
+      const ids = productsByActiveLot.get(lotKey) || new Set<number>()
+      ids.add(Number(lot.variant_product_id))
+      productsByActiveLot.set(lotKey, ids)
+    }
+  }
+
   // A product with no branch_stock row is invisible to any branch-filtered
   // POS/Inventory view -- resolve a branch for every row up front (matching
   // classifyInventory's lookup below) so runImportApply always has one to
@@ -1251,6 +1276,10 @@ export async function classifyProducts(
     const name = str(row.name || row.product_name || row.product)
     const sku = str(row.sku || row.code || row.product_code)
     const barcode = str(row.barcode || row.upc || row.ean)
+    const costWasBlank = [
+      row.cost_price_usd, row.purchase_price_usd, row.cost_usd,
+      row.cost_price_khr, row.purchase_price_khr, row.cost_khr,
+    ].every((value) => str(value) === '')
     if (!name) {
       results.push({ rowNumber: row._rowNumber, action: 'error', identifier: sku || barcode || null, existingId: null, message: 'Missing required field: name', changes: {}, data: row })
       continue
@@ -1281,6 +1310,8 @@ export async function classifyProducts(
       }
       return out.join('||')
     }
+    const rawCostUsd = row.cost_price_usd ?? row.purchase_price_usd ?? row.cost_usd
+    const rawCostKhr = row.cost_price_khr ?? row.purchase_price_khr ?? row.cost_khr
     const data: Record<string, unknown> = {
       name,
       sku: sku || null,
@@ -1309,8 +1340,13 @@ export async function classifyProducts(
       // purchase_price_usd/khr and cost_usd/khr headers from files
       // exported before the product-cost fields were consolidated (see
       // migration 0016) -- an old export must still re-import cleanly.
-      cost_price_usd: normalizeImportMoney(row.cost_price_usd ?? row.purchase_price_usd ?? row.cost_usd),
-      cost_price_khr: normalizeImportMoney(row.cost_price_khr ?? row.purchase_price_khr ?? row.cost_khr),
+      cost_price_usd: normalizeImportMoney(rawCostUsd),
+      cost_price_khr: normalizeImportMoney(rawCostKhr),
+      // Internal receipt-evidence flags: normalized product columns use 0
+      // for a blank money cell, but batch/movement history must distinguish
+      // "no recorded receipt cost" from an actual zero-cost receipt.
+      __costPriceUsdProvided: str(rawCostUsd) !== '' ? 1 : 0,
+      __costPriceKhrProvided: str(rawCostKhr) !== '' ? 1 : 0,
       stock_quantity: parseImportNumericValue(row.stock_quantity ?? row.quantity, 0, { allowNegative: false, field: 'stock_quantity' }),
       low_stock_threshold: parseImportNumericValue(row.low_stock_threshold, 10),
       is_active: toBool01(row.is_active, 1),
@@ -1489,10 +1525,48 @@ export async function classifyProducts(
     // several distinct products (see the guard below), this is what lets a
     // re-import correctly find "this specific one" back instead of only
     // ever seeing whichever candidate happened to be last in the list.
-    const barcodeMatch = barcodeCandidates
-      ? barcodeCandidates.find((c) => normalizeProductGroupName(c.name) === normalizeProductGroupName(name)) || barcodeCandidates[0]
-      : null
-    let match = skuMatch || barcodeMatch
+    const sameNameBarcodeCandidates = barcodeCandidates
+      ? barcodeCandidates.filter((c) => normalizeProductGroupName(c.name) === normalizeProductGroupName(name))
+      : []
+    const barcodeMatch = sameNameBarcodeCandidates[0] || barcodeCandidates?.[0] || null
+    const incomingDetails = productDetailSignature(data as Record<string, unknown>)
+    const isExactIdentity = (candidate: typeof existing[number] | null | undefined) => Boolean(candidate)
+      && normalizeProductGroupName(candidate?.name) === normalizeProductGroupName(name)
+      && productDetailSignature(candidate as unknown as Record<string, unknown>) === incomingDetails
+    let match = isExactIdentity(skuMatch) ? skuMatch : null
+    if (!match) match = sameNameBarcodeCandidates.find(isExactIdentity) || null
+
+    // A blank cost is unknown, not evidence that the cost is zero. It may
+    // inherit only when name+barcode identifies exactly one catalog row;
+    // multiple cost children stay ambiguous and are never guessed.
+    const sameNameSameBarcode = (byName.get(normalizeProductGroupName(name)) || [])
+      .filter((candidate) => lower(candidate.barcode) === lower(barcode))
+    if (!match && costWasBlank && sameNameSameBarcode.length === 1) {
+      match = sameNameSameBarcode[0]
+    }
+
+    const activeLotProductIds = productsByActiveLot.get(lower(data.lot_code)) || new Set<number>()
+    const sameBatchCandidates = !match && barcode && activeLotProductIds.size
+      ? sameNameBarcodeCandidates.filter((candidate) => activeLotProductIds.has(Number(candidate.id)))
+      : []
+    // Never let iteration order choose an option when damaged/legacy data
+    // has attached the same active lot code to multiple same-name+barcode
+    // product rows. That is insufficient evidence for receipt ownership;
+    // the operator must reconcile the duplicates before any stock write.
+    if (sameBatchCandidates.length > 1) {
+      results.push({
+        rowNumber: row._rowNumber,
+        action: 'error',
+        identifier: sku || barcode || name,
+        existingId: null,
+        message: `Batch "${String(data.lot_code)}" belongs to ${sameBatchCandidates.length} products with this name and barcode; merge the exact duplicate batch ownership before importing.`,
+        changes: {},
+        data,
+      })
+      continue
+    }
+    const sameBatchCandidate = sameBatchCandidates[0] || null
+    if (sameBatchCandidate) match = sameBatchCandidate
 
     // An SKU match is no longer trusted unconditionally. Previously, a
     // matched SKU with a differing name was treated as a deliberate
@@ -1530,17 +1604,17 @@ export async function classifyProducts(
     // UNIQUE constraint) and leave a visible message so the operator
     // notices the shared barcode and can merge it manually if that was
     // actually intended.
-    if (barcodeMatch && match && normalizeProductGroupName(barcodeMatch.name) !== normalizeProductGroupName(name)) {
+    if (barcodeMatch && normalizeProductGroupName(barcodeMatch.name) !== normalizeProductGroupName(name)) {
       rowWarnings.push({ kind: 'barcode_collision', message: `Barcode "${barcode}" is already used by a different product ("${barcodeMatch.name || 'unnamed'}"). Imported as a separate product -- merge manually if this was meant to update it.` })
       match = null
     }
 
     // Fallback when the CSV has no SKU/barcode match (often no SKU/barcode
     // at all, or a per-branch code that legitimately differs): look for an
-    // existing product with the SAME NAME whose cost, selling price, and
-    // barcode are ALSO all identical -- only then is this genuinely "the
+    // existing product with the SAME NAME whose cost and barcode are ALSO
+    // identical -- only then is this genuinely "the
     // same product" and safe to merge into one row. If a same-name product
-    // exists but any of those differ (a real cost/price/barcode difference),
+    // exists but either differs (a real cost/barcode difference),
     // it's treated as a distinct row instead of silently overwriting the
     // existing one -- the existing name-based display grouping
     // (utils/productGrouping.ts on the frontend) already presents
@@ -1568,7 +1642,6 @@ export async function classifyProducts(
     // via the existing update-path write below.
     if (!match) {
       const candidates = byName.get(normalizeProductGroupName(name)) || []
-      const incomingDetails = productDetailSignature(data as Record<string, unknown>)
       for (const candidate of candidates) {
         if (productDetailSignature(candidate as unknown as Record<string, unknown>) === incomingDetails) { match = candidate; break }
       }
@@ -1647,7 +1720,9 @@ export async function classifyProducts(
 
     const plannedMode = match && (requestedRowMode === 'merge_stock' || requestedRowMode === 'override_add' || requestedRowMode === 'override_replace')
       ? (requestedRowMode as 'merge_stock' | 'override_add' | 'override_replace')
-      : undefined
+      : sameBatchCandidate && match?.id === sameBatchCandidate.id
+        ? 'merge_stock' as const
+        : undefined
 
     results.push({
       rowNumber: row._rowNumber,
@@ -2384,8 +2459,8 @@ export async function classifySales(db: D1Compat, rows: ParsedCsvRow[]): Promise
   // Cashier matching resolves a row's `cashier_name` to a user account (a real
   // FK column a manual checkout resolves and stores). Match on BOTH `username`
   // and `name`, across ALL users: a cashier who has since been deactivated is
-  // still the correct historical attribution (e.g. an inactive "sethyka"
-  // account), so is_active is intentionally NOT filtered here. A key that two
+  // still the correct historical attribution when no reviewed alias supersedes
+  // it, so is_active is intentionally NOT filtered here. A key that two
   // different accounts share stays ambiguous (-> null, never a guess), but the
   // same account contributing one string as both its username and name is not a
   // collision. Legacy display names that equal neither username nor name (e.g.
@@ -2507,14 +2582,17 @@ export async function classifySales(db: D1Compat, rows: ParsedCsvRow[]): Promise
       || (rowCustomerNameKey && customerByName.get(rowCustomerNameKey))
       || null
 
-    // Resolve cashier_name -> user id: a direct username/name match first (an
-    // ambiguous shared name stays null, never a guess), then the alias table for
-    // legacy display names that match neither. See the cashierByName build above.
+    // Resolve cashier_name -> user id. Reviewed aliases take precedence over a
+    // direct username/name match: an old label can intentionally map away from
+    // a stale account (notably Sethyka/Pagna -> James). Without that precedence,
+    // the inactive username `sethyka` would defeat the explicit canonical map.
+    // When no alias exists, direct matching still includes inactive accounts and
+    // an ambiguous shared name stays null rather than becoming a guess.
     const cashierKey = lower(first.cashier_name)
     const matchedCashierId = cashierKey
-      ? (cashierByName.has(cashierKey)
-        ? (cashierByName.get(cashierKey) ?? null)
-        : (cashierAliasByName.get(cashierKey) ?? null))
+      ? (cashierAliasByName.has(cashierKey)
+        ? (cashierAliasByName.get(cashierKey) ?? null)
+        : (cashierByName.get(cashierKey) ?? null))
       : null
 
     // Only resolved/relevant when the row actually says this was a
@@ -3113,11 +3191,13 @@ async function applyCrossChunkProductDedupe(
 }
 
 function previewProductSignature(d: Record<string, unknown>): string {
-  // Mirrors productImportRowSignature's Part-388 identity-rule form so the
-  // analyze preview counts the same merges apply will actually perform.
-  const barcode = String((d as { barcode?: unknown }).barcode ?? '').trim().toLowerCase()
-  if (barcode) return `${normalizeProductGroupName((d as { name?: unknown }).name)}|bc:${barcode}`
-  return productIdentitySignature(d)
+  // Mirrors productImportRowSignature exactly so analyze and apply agree:
+  // name + barcode + cost is identity; selling/VIP price is mergeable data.
+  // A non-blank barcode + explicit lot code is the receipt-only exception:
+  // later rows for that exact lot top up the first option without replacing
+  // its catalog cost, while their own receipt costs remain on the batch and
+  // inventory movement.
+  return productImportRowSignature(d as unknown as ProductImportSignatureInput)
 }
 
 async function getChunkState(db: D1Compat, jobId: string): Promise<{ cursor: number; state: ImportChunkState }> {
@@ -3778,7 +3858,7 @@ async function resolveAndCreateBranches(db: D1Compat, actionable: ImportRowResul
 // Same-batch duplicate merge: two brand-new rows in ONE file with no
 // sku/barcode to match on (classifyProducts's bySku/byBarcode lookups only
 // cover EXISTING db rows) still count as "the same product" if they agree
-// on name + cost + price + barcode + branch -- the exact fallback rule
+// on name + barcode + cost -- the exact fallback rule
 // classifyProducts already applies against existing rows (see its own
 // comment above), just extended to this batch's own rows. Analyze can't
 // resolve this (no row has a real id yet to merge into -- see the "no
@@ -3793,28 +3873,28 @@ export type ProductImportSignatureInput = {
   selling_price_usd: unknown
   selling_price_khr: unknown
   branch_id: number | null
+  lot_code?: unknown
 }
 
 // Branch is intentionally NOT part of this signature -- see classifyProducts'
-// byName/cost/price/barcode fallback comment for why. Two rows in the same
+// byName/cost/barcode fallback comment for why. Two rows in the same
 // chunk with identical identity but different branches are the SAME product
 // (each row's own branch just gets its own branch_stock entry via the
 // normal update-path write once the second row resolves to the first's
 // pre-allocated id below), not two products.
 //
-// Part 388 fix, caught by the full-migration simulation: this used to be
-// the FULL detail signature (name + barcode + cost + prices), so a
-// product's shop row and warehouse row -- adjacent in a per-branch export,
-// and routinely carrying DIFFERENT per-branch costs -- forked two products
-// with the SAME name and SAME barcode: 706 duplicate-identity groups from
-// one real 8,803-row file, warehouse quantities doubling on re-import, and
-// a third of sales receipts erroring on the ambiguity. The user's identity
-// rule is explicit: same name + same barcode = the SAME product. So when a
-// row HAS a barcode, name+barcode alone decide; the detail signature
-// remains the (conservative) tiebreak only for barcode-less rows.
+// The shared identity rule is exact and deliberately excludes selling/VIP
+// price: same normalized name + barcode + cost merges; a barcode OR cost
+// difference creates a sibling row. Branch never participates. A non-blank
+// barcode + explicit lot code is a narrowly scoped receipt exception: rows
+// for that exact batch share the first product option, without allowing the
+// later receipt to replace its catalog cost.
 export function productImportRowSignature(d: ProductImportSignatureInput): string {
   const barcode = String(d.barcode ?? '').trim().toLowerCase()
-  if (barcode) return `${normalizeProductGroupName(d.name)}|bc:${barcode}`
+  const lotCode = String(d.lot_code ?? '').trim().toLowerCase().replace(/\s+/g, ' ')
+  if (barcode && lotCode) {
+    return `${normalizeProductGroupName(d.name)}|bc:${barcode}|batch:${lotCode}`
+  }
   return productIdentitySignature(d)
 }
 
@@ -5062,6 +5142,13 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
         if (earlier != null) {
           r.action = 'update'
           r.existingId = earlier.id
+          // Same barcode+batch may share one product option even when the
+          // receipt cost differs. The first row seeds the option/lot; later
+          // rows are additive receipts, not catalog-field replacements.
+          if (productIdentitySignature(earlier.data as ProductImportSignatureInput) !== productIdentitySignature(d as ProductImportSignatureInput)
+            && str(earlier.data.lot_code) && lower(earlier.data.lot_code) === lower(d.lot_code)) {
+            r.plannedMode = 'merge_stock'
+          }
           // 9.2: snapshot the losing row's ORIGINAL values before the
           // pricing merge mutates it -- this record is the only place
           // they survive.
@@ -5082,6 +5169,7 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
       }
       for (const r of actionable) {
         const d = r.data as Record<string, unknown> & { branch_id: number | null; branch_id_explicit: number }
+        const receiptUnitCostUsd = Number(d.__costPriceUsdProvided) === 1 ? d.cost_price_usd : null
         // Populates the same name_normalized/unit_normalized/brand_compact
         // columns lib/productWrites.ts's insertRow/updateRow compute for
         // the manual Add/Edit-product path (see migrations/0037_product_
@@ -5226,8 +5314,16 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
                 // across every import that names the same batch, instead
                 // of forking into a new unrelated row each time.
                 group.push({
-                  sql: `UPDATE product_batches SET received_at = @receivedAt, is_active = 1, updated_at = @updatedAt WHERE id = @id`,
-                  params: { id: matchedBatch.id, receivedAt: d.received_date, updatedAt: nowIso },
+                  sql: `UPDATE product_batches SET received_at = @receivedAt, is_active = 1,
+                          unit_cost_usd = COALESCE(unit_cost_usd, @unitCostUsd),
+                          received_quantity = COALESCE(received_quantity, 0) + @qty,
+                          received_cost_usd = COALESCE(received_cost_usd, 0) + (@qty * COALESCE(@unitCostUsd, 0)),
+                          received_branch_id = COALESCE(received_branch_id, @branchId),
+                          updated_at = @updatedAt WHERE id = @id`,
+                  params: {
+                    id: matchedBatch.id, receivedAt: d.received_date, updatedAt: nowIso,
+                    unitCostUsd: receiptUnitCostUsd, qty: d.stock_quantity, branchId: d.branch_id,
+                  },
                 })
                 group.push({
                   sql: `INSERT INTO branch_batch_stock (batch_id, branch_id, quantity) VALUES (@batchId, @branchId, @qty)
@@ -5246,14 +5342,17 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
                 // as a lot-code-less manual receive always creating a new
                 // one.
                 group.push({
-                  sql: `INSERT INTO product_batches (id, variant_product_id, batch_key, lot_code, expiry_date, received_at, is_active, notes, batch_number, created_at, updated_at)
-                        VALUES (@batchId, @productId, @batchKey, @lotCode, NULL, @receivedAt, 1, @notes, (SELECT COALESCE(MAX(batch_number), 0) + 1 FROM product_batches WHERE variant_product_id = @productId), @createdAt, @createdAt)`,
+                  sql: `INSERT INTO product_batches (id, variant_product_id, batch_key, lot_code, expiry_date, received_at, is_active, notes, batch_number, unit_cost_usd, received_quantity, received_cost_usd, received_branch_id, created_at, updated_at)
+                        VALUES (@batchId, @productId, @batchKey, @lotCode, NULL, @receivedAt, 1, @notes, (SELECT COALESCE(MAX(batch_number), 0) + 1 FROM product_batches WHERE variant_product_id = @productId), @unitCostUsd, @qty, (@qty * COALESCE(@unitCostUsd, 0)), @branchId, @createdAt, @createdAt)`,
                   params: {
                     batchId,
                     productId: r.existingId,
                     batchKey: importLotCode || `import:${r.existingId}:${nowIso}:${r.rowNumber}`,
                     lotCode: d.lot_code,
                     receivedAt: d.received_date,
+                    unitCostUsd: receiptUnitCostUsd,
+                    qty: d.stock_quantity,
+                    branchId: d.branch_id,
                     notes: mode === 'merge_stock' ? 'Stock merged via product import' : 'Stock added via product import (override)',
                     createdAt: nowIso,
                   },
@@ -5275,6 +5374,25 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
                   batchByProductAndLot.set(`${r.existingId}\u0001${lower(importLotCode)}`, { id: batchId, received_at: d.received_date as string })
                 }
               }
+              // One movement per receipt row keeps its own cost even when
+              // several receipts share the same product+batch option.
+              group.push({
+                sql: `INSERT INTO inventory_movements
+                        (product_id, product_name, branch_id, branch_name, movement_type, quantity,
+                         unit_cost_usd, total_cost_usd, reason, created_at, batch_id)
+                      VALUES (@productId, @productName, @branchId,
+                        (SELECT name FROM branches WHERE id = @branchId), 'add', @qty,
+                        @unitCostUsd,
+                        CASE WHEN @unitCostUsd IS NULL THEN NULL ELSE ROUND(@qty * @unitCostUsd, 4) END,
+                        @reason, @receivedAt, @batchId)`,
+                params: {
+                  productId: r.existingId, productName: d.name, branchId: d.branch_id,
+                  qty: d.stock_quantity, unitCostUsd: receiptUnitCostUsd,
+                  reason: `Product import ${jobId}, row ${r.rowNumber}`,
+                  receivedAt: d.received_date,
+                  batchId: matchedBatch?.id ?? nextBatchId,
+                },
+              })
               guardedGroups.push(group)
             }
           } else {
@@ -5375,15 +5493,18 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
             nextBatchId += 1
             const batchId = nextBatchId
             statements.push({
-                sql: `INSERT INTO product_batches (id, variant_product_id, batch_key, lot_code, expiry_date, received_at, is_active, notes, batch_number, created_at, updated_at)
-                      VALUES (@batchId, @productId, @batchKey, @lotCode, NULL, @receivedAt, 1, @notes, 1, @createdAt, @createdAt)`,
+                sql: `INSERT INTO product_batches (id, variant_product_id, batch_key, lot_code, expiry_date, received_at, is_active, notes, batch_number, unit_cost_usd, received_quantity, received_cost_usd, received_branch_id, created_at, updated_at)
+                      VALUES (@batchId, @productId, @batchKey, @lotCode, NULL, @receivedAt, 1, @notes, 1, @unitCostUsd, @qty, (@qty * COALESCE(@unitCostUsd, 0)), @branchId, @createdAt, @createdAt)`,
                 params: {
                   batchId,
                   productId: newId,
-                  batchKey: `import:${newId}:${nowIso}`,
+                  batchKey: str(d.lot_code) || `import:${newId}:${nowIso}`,
                   lotCode: d.lot_code,
                   receivedAt: d.received_date,
                   notes: 'Received via product import',
+                  unitCostUsd: receiptUnitCostUsd,
+                  qty: d.stock_quantity,
+                  branchId: d.branch_id,
                   createdAt: nowIso,
                 },
             })
@@ -5391,6 +5512,9 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
                 sql: `INSERT INTO branch_batch_stock (batch_id, branch_id, quantity) VALUES (@batchId, @branchId, @qty)`,
                 params: { batchId, branchId: d.branch_id, qty: d.stock_quantity },
             })
+            if (str(d.lot_code)) {
+              batchByProductAndLot.set(`${newId}\u0001${lower(d.lot_code)}`, { id: batchId, received_at: d.received_date as string })
+            }
             // Seed every OTHER active branch at 0 (tracked, not absent) --
             // see allActiveBranchIds' own comment above for why. Runs
             // AFTER the chosen branch's real-quantity insert above, and

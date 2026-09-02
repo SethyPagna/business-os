@@ -542,10 +542,17 @@ function StockAdjustBranchRow({ row, productId, unit, onChange, T }: StockAdjust
           className="input w-full py-1 text-xs"
           type="number"
           min="0"
-          placeholder={T('qty_short', 'Qty', 'ចំនួន')}
+          placeholder={row.type === 'set'
+            ? `${T('total', 'Total', 'សរុប')} ${T('stock', 'stock', 'ស្តុក')}`
+            : T('qty_short', 'Qty', 'ចំនួន')}
           value={row.delta}
           onChange={(event) => onChange({ delta: event.target.value })}
         />
+        {row.type === 'set' && row.delta !== '' && Number.isFinite(parseStockDelta(row.delta)) ? (
+          <div className="mt-1 text-[10px] tabular-nums text-gray-500 dark:text-gray-400">
+            {T('current_stock', 'Current stock', 'ស្តុកបច្ចុប្បន្ន')}: {row.current} → {T('total', 'Total', 'សរុប')}: {parseStockDelta(row.delta)} (Δ {parseStockDelta(row.delta) - row.current >= 0 ? '+' : ''}{parseStockDelta(row.delta) - row.current})
+          </div>
+        ) : null}
         <div className="mt-1 flex flex-wrap gap-1">
           {quantityChoices.map((n) => (
             <button

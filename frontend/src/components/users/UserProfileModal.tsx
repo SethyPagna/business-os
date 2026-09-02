@@ -3,18 +3,18 @@ import type { ChangeEvent, ComponentType, ReactNode } from 'react'
 import { lazyRetry } from '../../utils/lazyImport.ts'
 import Chrome from 'lucide-react/dist/esm/icons/chrome.js'
 import Link2 from 'lucide-react/dist/esm/icons/link-2.js'
-import LogOut from 'lucide-react/dist/esm/icons/log-out.js'
-import RefreshCw from 'lucide-react/dist/esm/icons/refresh-cw.js'
 import Mail from 'lucide-react/dist/esm/icons/mail.js'
 import ShieldCheck from 'lucide-react/dist/esm/icons/shield-check.js'
 import AppSelect from '../shared/AppSelect.tsx'
 import Modal from '../shared/Modal'
 import type { OtpModalProps } from '../utils-settings/OtpModal'
 import ActionHistoryBar from '../shared/ActionHistoryBar'
+import InfoHint from '../shared/InfoHint.tsx'
 import { STORAGE_KEYS } from '../../constants'
 import { isBrokenLocalizedString as isBrokenLocalizedStringHook, useApp as useAppHook } from '../../AppContext.tsx'
 import { beginTrackedRequest, getFirstLoaderError, invalidateTrackedRequest, isTrackedRequestCurrent, settleLoaderMap, withLoaderTimeout } from '../../utils/loaders.ts'
 import { useActionHistory } from '../../utils/actionHistory.ts'
+import { copyPasswordToClipboard, passwordPersistenceNotice, persistChangedPassword } from '../../utils/passwordManager.ts'
 
 const PROFILE_LOAD_TIMEOUT_MS = 10000
 const PROFILE_OTP_STATUS_TIMEOUT_MS = 8000
@@ -70,7 +70,6 @@ interface AppContextValue {
   saveSettings?: (settings: Record<string, unknown>) => unknown | Promise<unknown>
   settings?: ProfileSettings | null
   t: TranslateFn
-  logout: () => void
 }
 
 interface ProfileResult extends ProfileUser {
@@ -153,6 +152,18 @@ interface AvatarEditorModalProps {
   tr: (key: string, fallbackEn: string, fallbackKm?: string) => string
 }
 
+interface AvatarViewerModalProps {
+  open: boolean
+  name?: string | null
+  avatarPath?: string | null
+  uploading: boolean
+  onClose: () => void
+  onUpload: () => void
+  onEdit: () => void
+  onOpenFiles: () => void
+  tr: (key: string, fallbackEn: string, fallbackKm?: string) => string
+}
+
 interface StoredOrganization {
   name?: string | null
 }
@@ -198,13 +209,13 @@ function AvatarPreview({ name, avatarPath }: AvatarPreviewProps) {
       <img
         src={avatarPath}
         alt={name || 'Avatar'}
-        className="h-16 w-16 rounded-2xl object-cover ring-2 ring-blue-100 dark:ring-blue-900/40"
+        className="h-12 w-12 rounded-xl object-cover ring-2 ring-blue-100 dark:ring-blue-900/40"
       />
     )
   }
 
   return (
-    <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-blue-100 text-xl font-bold text-blue-600 dark:bg-blue-900/40 dark:text-blue-300">
+    <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-blue-100 text-lg font-bold text-blue-600 dark:bg-blue-900/40 dark:text-blue-300">
       {name?.[0]?.toUpperCase() || 'U'}
     </div>
   )
@@ -216,7 +227,7 @@ function ProfileSectionButton({ active, children, onClick }: ProfileSectionButto
       type="button"
       onClick={onClick}
       className={[
-        'flex-shrink-0 whitespace-nowrap rounded-full border px-3 py-1.5 text-xs font-medium transition-colors',
+        'flex h-8 flex-shrink-0 items-center whitespace-nowrap rounded-lg border px-2.5 text-xs font-medium transition-colors',
         active
           ? 'border-blue-300 bg-blue-50 text-blue-700 dark:border-blue-500/50 dark:bg-blue-900/30 dark:text-blue-300'
           : 'border-gray-200 bg-white text-gray-600 hover:border-blue-300 hover:text-blue-700 dark:border-zinc-700 dark:bg-zinc-900 dark:text-gray-300 dark:hover:border-blue-500/50 dark:hover:text-blue-300',
@@ -382,7 +393,10 @@ function AvatarEditorModal({
   return (
     <Modal title={tr('avatar_editor', 'Edit avatar image')} onClose={onClose}>
       <div className="space-y-4">
-        <p className="text-sm text-gray-500 dark:text-gray-400">{tr('avatar_editor_hint', 'Use the sliders to zoom and position the image before saving.')}</p>
+        <div className="flex items-center justify-center gap-1 text-sm font-medium text-gray-700 dark:text-gray-300">
+          <span>{tr('adjust_image', 'Adjust image')}</span>
+          <InfoHint label={tr('adjust_image', 'Adjust image')} text={tr('avatar_editor_hint', 'Use the sliders to zoom and position the image before saving.')} />
+        </div>
         <div className="flex justify-center rounded-2xl bg-gray-100 p-4 dark:bg-zinc-900/70">
           <div className="relative h-56 w-56 overflow-hidden rounded-[28px] bg-white shadow-inner dark:bg-zinc-800">
             <img
@@ -424,8 +438,53 @@ function AvatarEditorModal({
   )
 }
 
+function AvatarViewerModal({
+  open,
+  name,
+  avatarPath,
+  uploading,
+  onClose,
+  onUpload,
+  onEdit,
+  onOpenFiles,
+  tr,
+}: AvatarViewerModalProps) {
+  if (!open) return null
+
+  return (
+    <Modal title={tr('avatar_image', 'Profile photo')} onClose={onClose} size="sm">
+      <div className="flex max-h-[72dvh] min-h-0 flex-col">
+        <div className="flex min-h-0 flex-1 items-center justify-center overflow-auto rounded-2xl bg-gray-100 p-2 dark:bg-zinc-900/70">
+          {avatarPath ? (
+            <img
+              src={avatarPath}
+              alt={name || tr('avatar_image', 'Profile photo')}
+              className="max-h-[56dvh] w-full rounded-xl object-contain"
+            />
+          ) : (
+            <div className="flex aspect-square w-full max-w-72 items-center justify-center rounded-2xl bg-blue-100 text-6xl font-bold text-blue-600 dark:bg-blue-900/40 dark:text-blue-300">
+              {name?.[0]?.toUpperCase() || 'U'}
+            </div>
+          )}
+        </div>
+        <div className="-mx-5 -mb-5 mt-3 grid flex-shrink-0 grid-cols-3 gap-2 border-t border-gray-200 bg-white px-4 pt-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] dark:border-zinc-700 dark:bg-gray-800 sm:pb-3">
+          <button type="button" className="btn-secondary min-w-0 px-2 py-2 text-xs" onClick={onUpload} disabled={uploading}>
+            {uploading ? tr('uploading', 'Uploading...') : tr('upload_image', 'Upload')}
+          </button>
+          <button type="button" className="btn-secondary min-w-0 px-2 py-2 text-xs" onClick={onEdit} disabled={uploading || !avatarPath}>
+            {tr('edit', 'Edit')}
+          </button>
+          <button type="button" className="btn-secondary min-w-0 px-2 py-2 text-xs" onClick={onOpenFiles} disabled={uploading}>
+            {tr('open_files', 'Files')}
+          </button>
+        </div>
+      </div>
+    </Modal>
+  )
+}
+
 export default function UserProfileModal({ onClose }: UserProfileModalProps) {
-  const { user, notify, hasPermission, saveSettings, settings, t, logout } = useApp()
+  const { user, notify, hasPermission, saveSettings, settings, t } = useApp()
   const actionHistory = useActionHistory({ limit: 3, notify, scope: 'profile', user })
   const isKhmer = /[\u1780-\u17FF]/.test(t('cancel') || '')
   const tr = (key: string, fallbackEn: string, fallbackKm = fallbackEn): string => {
@@ -446,6 +505,7 @@ export default function UserProfileModal({ onClose }: UserProfileModalProps) {
   const [uploadingAvatar, setUploadingAvatar] = useState(false)
   const [profile, setProfile] = useState<ProfileUser | null>(null)
   const [filePickerOpen, setFilePickerOpen] = useState(false)
+  const [avatarViewerOpen, setAvatarViewerOpen] = useState(false)
   const [avatarEditorOpen, setAvatarEditorOpen] = useState(false)
   const [avatarEditorSrc, setAvatarEditorSrc] = useState('')
   const [otpEnabled, setOtpEnabled] = useState(false)
@@ -608,6 +668,7 @@ export default function UserProfileModal({ onClose }: UserProfileModalProps) {
     try {
       const previousEmail = String(profile.email || '').trim().toLowerCase()
       const userId = requireCurrentUserId()
+      const usernameChanged = String(user?.username || '').trim() !== String(profile.username || '').trim()
       const result = await withLoaderTimeout(() => getProfileApi().updateUserProfile(userId, {
         name: profile.name,
         username: profile.username,
@@ -619,6 +680,11 @@ export default function UserProfileModal({ onClose }: UserProfileModalProps) {
         adminOverride: canAdminOverride,
         userId,
         userName: user?.name,
+        ...(usernameChanged ? {
+          __rename_cascade: window.confirm('Update linked sales, returns, stock movements, transfers, and other live user-name displays too? Point-in-time audit history will stay unchanged.')
+            ? 'carry'
+            : 'record_only',
+        } : {}),
       }), 'Save profile', PROFILE_SAVE_TIMEOUT_MS)
       if (result?.success === false) {
         notify(result.error || 'Failed to save profile', 'error')
@@ -660,16 +726,15 @@ export default function UserProfileModal({ onClose }: UserProfileModalProps) {
     if (savingPassword || savePasswordInFlightRef.current) return
     if (newPassword.length < 6) return notify(tr('password_min_6', 'Use at least 6 characters for the new password.'), 'error')
     if (newPassword !== confirmPassword) return notify(tr('new_password_confirm_mismatch', 'New password confirmation does not match'), 'error')
-    if (!canAdminOverride && !currentPassword.trim()) return notify(tr('current_password_required_change', 'Current password is required to change password'), 'error')
+    if (!currentPassword.trim()) return notify(tr('current_password_required_change', 'Current password is required to change password'), 'error')
 
     savePasswordInFlightRef.current = true
     setSavingPassword(true)
     try {
       const userId = requireCurrentUserId()
       const result = await withLoaderTimeout(() => getProfileApi().changeUserPassword(userId, {
-        currentPassword: canAdminOverride ? undefined : currentPassword,
+        currentPassword,
         newPassword,
-        adminOverride: canAdminOverride,
         userId,
         userName: user?.name,
       }), 'Change password', PROFILE_PASSWORD_TIMEOUT_MS)
@@ -677,10 +742,20 @@ export default function UserProfileModal({ onClose }: UserProfileModalProps) {
         notify(result.error || 'Failed to change password', 'error')
         return
       }
+      const persistence = await persistChangedPassword({
+        username: String(profile?.username || user?.username || '').trim(),
+        displayName: String(profile?.name || user?.name || profile?.username || user?.username || '').trim(),
+        password: newPassword,
+        allowCredentialStore: true,
+        copyFallback: true,
+      })
+      const passwordSecured = persistence.credentialStoreSucceeded || persistence.copiedToClipboard
       setCurrentPassword('')
-      setNewPassword('')
-      setConfirmPassword('')
-      notify(tr('password_updated', 'Password updated'), 'success')
+      if (passwordSecured) {
+        setNewPassword('')
+        setConfirmPassword('')
+      }
+      notify(passwordPersistenceNotice(persistence), passwordSecured && !persistence.copiedToClipboard ? 'success' : 'warning')
       actionHistory.pushAction({
         scope: 'profile',
         entity: 'user',
@@ -858,6 +933,7 @@ export default function UserProfileModal({ onClose }: UserProfileModalProps) {
       }
       const objectUrl = URL.createObjectURL(file)
       avatarObjectUrlRef.current = objectUrl
+      setAvatarViewerOpen(false)
       openAvatarEditor(objectUrl)
     } catch (error) {
       notify(getErrorMessage(error, tr('choose_image_file', 'Please choose an image file')), 'error')
@@ -901,54 +977,47 @@ export default function UserProfileModal({ onClose }: UserProfileModalProps) {
         {loading || !profile ? (
           <div className="py-10 text-center text-sm text-gray-400">{tr('loading_account', 'Loading account...')}</div>
         ) : (
-          <div className="space-y-4">
-            <div className="flex flex-col gap-3 rounded-2xl bg-gray-50 p-3 dark:bg-zinc-800/70 sm:flex-row sm:items-center">
-              <AvatarPreview name={profile.name} avatarPath={profile.avatar_path} />
+          <div className="space-y-3">
+            <div className="flex min-w-0 items-center gap-2 rounded-xl bg-gray-50 p-2 dark:bg-zinc-800/70">
+              <button
+                type="button"
+                className="group relative shrink-0 rounded-xl text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+                onClick={() => setAvatarViewerOpen(true)}
+                title={tr('avatar_preview', 'View profile photo')}
+                aria-label={tr('avatar_preview', 'View profile photo')}
+              >
+                <AvatarPreview name={profile.name} avatarPath={profile.avatar_path} />
+                <span className="absolute inset-x-1 bottom-1 rounded-md bg-black/60 px-1 py-0.5 text-center text-[9px] font-medium text-white opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100">
+                  {tr('view', 'View')}
+                </span>
+              </button>
               <div className="min-w-0 flex-1">
-                <div className="flex items-center gap-3">
-                  <div className="min-w-0 flex-1">
-                    <div className="truncate text-base font-semibold leading-tight text-gray-900 dark:text-white">{profile.name}</div>
-                    <div className="truncate text-xs text-gray-500 dark:text-gray-400">
-                      @{profile.username} {' · '} {profile.role_name || tr('no_role', 'No role')} {' · '} {otpEnabled ? tr('otp_enabled', 'OTP enabled') : tr('otp_not_enabled', 'OTP not enabled')}
-                    </div>
-                  </div>
-                  <button
-                    type="button"
-                    title={tr('refresh_app', 'Refresh / check for update')}
-                    aria-label={tr('refresh_app', 'Refresh / check for update')}
-                    className="inline-flex flex-shrink-0 items-center justify-center gap-1.5 rounded-xl border border-gray-200 bg-white px-2.5 py-2 text-xs font-medium text-gray-600 shadow-sm transition-colors hover:bg-gray-50 dark:border-gray-700 dark:bg-zinc-900/70 dark:text-gray-300 dark:hover:bg-zinc-800/60 sm:px-3 sm:text-sm"
-                    onClick={() => {
-                      // Same manual "tell any waiting service worker to
-                      // activate, then reload" action as the desktop
-                      // sidebar's own update button -- that one only
-                      // renders in the desktop-only <aside> (Sidebar.tsx's
-                      // `hidden ... md:flex`), so there was previously no
-                      // way at all to check for an update from a phone/PWA
-                      // install, which is exactly where a stale cached
-                      // build is most likely to linger unnoticed.
-                      navigator.serviceWorker?.controller?.postMessage?.({ type: 'BUSINESS_OS_SKIP_WAITING' })
-                      window.setTimeout(() => window.location.reload(), 250)
-                    }}
-                  >
-                    <RefreshCw className="h-4 w-4" />
-                    <span className="hidden sm:inline">{tr('refresh_app', 'Refresh / check for update')}</span>
-                  </button>
-                  <button
-                    type="button"
-                    title={tr('logout', 'Logout')}
-                    aria-label={tr('logout', 'Logout')}
-                    className="inline-flex flex-shrink-0 items-center justify-center gap-1.5 rounded-xl border border-red-200 bg-white px-2.5 py-2 text-xs font-medium text-red-700 shadow-sm transition-colors hover:bg-red-50 dark:border-red-800/60 dark:bg-zinc-900/70 dark:text-red-300 dark:hover:bg-red-950/20 sm:px-3 sm:text-sm"
-                    onClick={logout}
-                  >
-                    <LogOut className="h-4 w-4" />
-                    <span className="hidden sm:inline">{tr('logout', 'Logout')}</span>
-                  </button>
+                <div className="flex min-w-0 items-center gap-1.5 whitespace-nowrap">
+                  <div className="min-w-0 flex-1 truncate text-sm font-semibold text-gray-900 dark:text-white">{profile.name}</div>
+                  <span className="max-w-24 shrink-0 truncate rounded-full bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold text-slate-600 dark:bg-zinc-700 dark:text-slate-300" title={profile.role_name || tr('no_role', 'No role')}>
+                    {profile.role_name || tr('no_role', 'No role')}
+                  </span>
+                  <span className={`shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${otpEnabled ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300' : 'bg-gray-200 text-gray-600 dark:bg-zinc-700 dark:text-gray-300'}`}>
+                    2FA {otpEnabled ? tr('on', 'on') : tr('off', 'off')}
+                  </span>
+                </div>
+                <div className="mt-0.5 truncate text-[11px] text-gray-500 dark:text-gray-400">
+                  @{profile.username}
                 </div>
               </div>
+              <input
+                id="profile-avatar"
+                name="profile_avatar"
+                ref={avatarFileInputRef}
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={handleAvatarSelected}
+              />
             </div>
 
-            <div className="flex items-center gap-2">
-              <div className="-mx-1 flex min-w-0 flex-1 gap-1.5 overflow-x-auto px-1 pb-1 [scrollbar-width:thin]">
+            <div className="flex min-w-0 items-center gap-1.5">
+              <div className="-mx-1 flex min-w-0 flex-1 gap-1 overflow-x-auto px-1 [scrollbar-width:thin]">
                 <ProfileSectionButton active={activeSection === 'personal'} onClick={() => setActiveSection('personal')}>
                   {tr('personal_details', 'Personal details')}
                 </ProfileSectionButton>
@@ -970,12 +1039,12 @@ export default function UserProfileModal({ onClose }: UserProfileModalProps) {
             </div>
 
             {activeSection === 'personal' ? (
-            <section className="space-y-4">
-              <div>
+            <section className="space-y-3">
+              <div className="flex items-center gap-1">
                 <h3 className="text-sm font-semibold text-gray-900 dark:text-white">{tr('personal_details', 'Personal details')}</h3>
-                <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">{verificationHelp}</p>
+                <InfoHint label={tr('personal_details', 'Personal details')} text={verificationHelp} />
               </div>
-              <div className="grid gap-4 sm:grid-cols-2">
+              <div className="grid gap-2 sm:grid-cols-2">
                 <div>
                   <label htmlFor="profile-name" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">{tr('full_name', 'Full name')}</label>
                   <input id="profile-name" name="name" className="input" value={profile.name || ''} onChange={(e) => setProfile((prev) => ({ ...prev, name: e.target.value }))} />
@@ -985,9 +1054,12 @@ export default function UserProfileModal({ onClose }: UserProfileModalProps) {
                   <input id="profile-username" name="username" className="input" value={profile.username || ''} onChange={(e) => setProfile((prev) => ({ ...prev, username: e.target.value }))} />
                 </div>
               </div>
-              <div className="space-y-3">
-                <div className="rounded-xl border border-gray-200 p-3 dark:border-zinc-700">
-                  <label htmlFor="profile-phone" className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">{tr('phone', 'Phone')}</label>
+              <div className="grid gap-2 sm:grid-cols-2">
+                <div className="rounded-xl border border-gray-200 p-2.5 dark:border-zinc-700">
+                  <div className="mb-1 flex items-center gap-1">
+                    <label htmlFor="profile-phone" className="block text-sm font-medium text-gray-700 dark:text-gray-300">{tr('phone', 'Phone')}</label>
+                    <InfoHint label={tr('phone', 'Phone')} text={tr('phone_contact_only_hint', 'Phone number is stored as a contact field only. Verification is paused for now.')} />
+                  </div>
                   <input
                     id="profile-phone"
                     name="phone"
@@ -996,67 +1068,26 @@ export default function UserProfileModal({ onClose }: UserProfileModalProps) {
                     onChange={(e) => setProfile((prev) => ({ ...prev, phone: e.target.value }))}
                     placeholder="+85512345678"
                   />
-                  <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
-                    {tr('phone_contact_only_hint', 'Phone number is stored as a contact field only. Verification is paused for now.')}
-                  </p>
                 </div>
 
-                <div className="rounded-xl border border-gray-200 p-3 dark:border-zinc-700">
-                  <div className="grid gap-3 lg:grid-cols-[1.1fr_1fr]">
-                    <div>
-                      <label htmlFor="profile-email" className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">{tr('email', 'Email')}</label>
-                      <input
-                        id="profile-email"
-                        name="email"
-                        type="email"
-                        className="input"
-                        value={profile.email || ''}
-                        onChange={(e) => setProfile((prev) => ({ ...prev, email: e.target.value }))}
-                      />
-                      <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
-                        {tr('profile_email_note', 'Used for email login, password changes, account notices, and matching existing provider records when helpful. Google can still be linked independently.')}
-                      </p>
+                <div className="rounded-xl border border-gray-200 p-2.5 dark:border-zinc-700">
+                  <div className="mb-1 flex items-center justify-between gap-2">
+                    <div className="flex min-w-0 items-center gap-1">
+                      <label htmlFor="profile-email" className="block text-sm font-medium text-gray-700 dark:text-gray-300">{tr('email', 'Email')}</label>
+                      <InfoHint label={tr('account_email_usage', 'Account email')} text={`${tr('profile_email_note', 'Used for email login, password changes, account notices, and matching existing provider records when helpful. Google can still be linked independently.')}\n\n${tr('email_login_simple_note', 'No separate email verification step is required here. Save your email once, then use OTP, Google, or your password for account access and recovery flows.')}`} />
                     </div>
-                    <div>
-                      <div className="mb-2 flex items-center justify-between gap-2">
-                        <div className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">{tr('account_email_usage', 'Account email')}</div>
-                        <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${profile.email?.trim() ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300' : 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300'}`}>
-                          {profile.email?.trim() ? tr('saved', 'Saved') : tr('optional', 'Optional')}
-                        </span>
-                      </div>
-                      <div className="rounded-xl border border-blue-200 bg-blue-50 px-3 py-3 text-xs text-blue-700 dark:border-blue-900/40 dark:bg-blue-900/20 dark:text-blue-200">
-                        {tr('email_login_simple_note', 'No separate email verification step is required here. Save your email once, then use OTP, Google, or your password for account access and recovery flows.')}
-                      </div>
-                    </div>
+                    <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold ${profile.email?.trim() ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300' : 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300'}`}>
+                      {profile.email?.trim() ? tr('saved', 'Saved') : tr('optional', 'Optional')}
+                    </span>
                   </div>
-                </div>
-              </div>
-              <div>
-                <div className="mb-1 flex items-center justify-between gap-2">
-                  <label htmlFor="profile-avatar" className="block text-sm font-medium text-gray-700 dark:text-gray-300">{tr('avatar_image', 'Avatar image')}</label>
-                  <div className="flex flex-wrap gap-2">
-                    <button type="button" className="btn-secondary px-3 py-1 text-xs" onClick={handleAvatarPick} disabled={uploadingAvatar}>
-                      {uploadingAvatar ? tr('uploading', 'Uploading...') : tr('upload_image', 'Upload image')}
-                    </button>
-                    <button type="button" className="btn-secondary px-3 py-1 text-xs" onClick={() => openAvatarEditor(profile.avatar_path)} disabled={uploadingAvatar || !profile.avatar_path}>
-                      {tr('adjust_image', 'Adjust image')}
-                    </button>
-                    <button type="button" className="btn-secondary px-3 py-1 text-xs" onClick={() => setFilePickerOpen(true)}>
-                      {tr('open_files', 'Files')}
-                    </button>
-                  </div>
-                </div>
-                <input
-                  id="profile-avatar"
-                  name="profile_avatar"
-                  ref={avatarFileInputRef}
-                  type="file"
-                  accept="image/*"
-                  className="hidden"
-                  onChange={handleAvatarSelected}
-                />
-                <div className="mt-2 rounded-lg border border-dashed border-gray-300 bg-gray-50 px-3 py-2 text-xs text-gray-500 dark:border-zinc-700 dark:bg-zinc-800/70 dark:text-gray-400">
-                  {profile.avatar_path || tr('no_avatar_uploaded', 'No avatar uploaded yet.')}
+                  <input
+                    id="profile-email"
+                    name="email"
+                    type="email"
+                    className="input"
+                    value={profile.email || ''}
+                    onChange={(e) => setProfile((prev) => ({ ...prev, email: e.target.value }))}
+                  />
                 </div>
               </div>
               <div className="flex justify-end">
@@ -1068,37 +1099,42 @@ export default function UserProfileModal({ onClose }: UserProfileModalProps) {
             ) : null}
 
             {activeSection === 'login_methods' ? (
-            <section className="space-y-4 rounded-2xl border border-gray-200 p-4 dark:border-zinc-700">
-              <div>
+            <section className="space-y-3 rounded-xl border border-gray-200 p-3 dark:border-zinc-700">
+              <div className="flex items-center gap-1">
                 <h3 className="flex items-center gap-2 text-sm font-semibold text-gray-900 dark:text-white">
                   <Link2 className="h-4 w-4 text-gray-400" />
                   <span>{tr('sign_in_methods', 'Sign-in methods')}</span>
                 </h3>
-                <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                  {tr('sign_in_methods_desc', 'Keep your local admin-created account and add email or Google sign-in methods whenever you want them.' )}
-                </p>
+                <InfoHint label={tr('sign_in_methods', 'Sign-in methods')} text={tr('sign_in_methods_desc', 'Keep your local admin-created account and add email or Google sign-in methods whenever you want them.')} />
               </div>
 
-              <div className="grid gap-3 md:grid-cols-2">
-                <div className="rounded-xl border border-gray-200 p-3 dark:border-zinc-700">
-                  <div className="mb-2 flex items-center gap-2 text-sm font-medium text-gray-800 dark:text-gray-200">
+              <div className="grid gap-2 md:grid-cols-2">
+                <div className="rounded-xl border border-gray-200 p-2.5 dark:border-zinc-700">
+                  <div className="mb-1.5 flex items-center gap-2 text-sm font-medium text-gray-800 dark:text-gray-200">
                     <Mail className="h-4 w-4 text-gray-400" />
                     <span>{tr('email_login', 'Email login')}</span>
+                    <InfoHint
+                      label={tr('email_login', 'Email login')}
+                      text={!profile.email?.trim()
+                        ? tr('add_email_for_login_note', 'Add your account email first to use email sign-in on the login screen.')
+                        : tr('email_login_ready_note_simple', 'Email sign-in is ready once this email is saved on your account.')}
+                    />
                   </div>
                   <div className={`inline-flex rounded-full px-2 py-0.5 text-[11px] font-semibold ${authMethods?.email_login_enabled ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300' : 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300'}`}>
                     {authMethods?.email_login_enabled ? tr('enabled', 'enabled') : tr('setup_needed', 'setup needed')}
                   </div>
-                  <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
-                    {!profile.email?.trim()
-                      ? tr('add_email_for_login_note', 'Add your account email first to use email sign-in on the login screen.')
-                      : tr('email_login_ready_note_simple', 'Email sign-in is ready once this email is saved on your account.')}
-                  </p>
                 </div>
 
-                <div className="rounded-xl border border-gray-200 p-3 dark:border-zinc-700">
-                  <div className="mb-2 flex items-center gap-2 text-sm font-medium text-gray-800 dark:text-gray-200">
+                <div className="rounded-xl border border-gray-200 p-2.5 dark:border-zinc-700">
+                  <div className="mb-1.5 flex items-center gap-2 text-sm font-medium text-gray-800 dark:text-gray-200">
                     <Chrome className="h-4 w-4 text-gray-400" />
                     <span>{tr('google_signin', 'Google')}</span>
+                    <InfoHint
+                      label={tr('google_signin', 'Google')}
+                      text={`${verificationCaps.googleOauth && authMethods?.google_ready
+                        ? tr('google_login_ready_note', 'Connect Google once here, then you can keep signing in with that Google account.')
+                        : tr('google_provider_disabled_note', 'Google sign-in is not enabled in Google login yet.')}\n\n${tr('provider_email_match_note', 'Google stays linked to this local account once connected here. Disabled or deleted local users still cannot access the app.')}\n\n${tr('provider_change_note', 'To switch to another Google account, disconnect the current one first and then connect the new provider.')}`}
+                    />
                   </div>
                   <div className={`inline-flex rounded-full px-2 py-0.5 text-[11px] font-semibold ${authMethods?.google_linked ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300' : authMethods?.google_ready ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300' : 'bg-gray-100 text-gray-600 dark:bg-zinc-700 dark:text-gray-300'}`}>
                     {authMethods?.google_linked
@@ -1107,18 +1143,14 @@ export default function UserProfileModal({ onClose }: UserProfileModalProps) {
                         ? tr('ready_on_login', 'Ready on login')
                         : tr('setup_needed', 'setup needed')}
                   </div>
-                  <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
-                    {verificationCaps.googleOauth
-                      ? (authMethods?.google_ready
-                        ? tr('google_login_ready_note', 'Connect Google once here, then you can keep signing in with that Google account.')
-                        : tr('google_provider_disabled_note', 'Google sign-in is not enabled in Google login yet.'))
-                      : tr('google_provider_disabled_note', 'Google sign-in is not enabled in Google login yet.')}
-                  </p>
                   {authMethods?.google_linked && needsSensitivePassword ? (
-                    <div className="mt-3 space-y-2">
-                      <label htmlFor="disconnect-google-password" className="block text-xs font-medium text-gray-600 dark:text-gray-300">
+                    <div className="mt-2">
+                      <div className="mb-1 flex items-center gap-1">
+                        <label htmlFor="disconnect-google-password" className="block text-xs font-medium text-gray-600 dark:text-gray-300">
                         {tr('current_password', 'Current password')}
-                      </label>
+                        </label>
+                        <InfoHint label={tr('disconnect_google', 'Disconnect Google')} text={tr('disconnect_google_password_hint', 'Use your current password before disconnecting Google from this account.')} />
+                      </div>
                       <input
                         id="disconnect-google-password"
                         name="disconnect_google_password"
@@ -1128,9 +1160,6 @@ export default function UserProfileModal({ onClose }: UserProfileModalProps) {
                         value={currentPassword}
                         onChange={(e) => setCurrentPassword(e.target.value)}
                       />
-                      <p className="text-[11px] text-gray-400 dark:text-gray-500">
-                        {tr('disconnect_google_password_hint', 'Use your current password before disconnecting Google from this account.')}
-                      </p>
                     </div>
                   ) : null}
                   {verificationCaps.googleOauth && authMethods?.google_ready ? (
@@ -1147,73 +1176,96 @@ export default function UserProfileModal({ onClose }: UserProfileModalProps) {
                 </div>
 
               </div>
-
-              <div className="rounded-xl bg-gray-50 p-3 text-xs text-gray-500 dark:bg-zinc-800/70 dark:text-gray-400">
-                <div>{tr('provider_email_match_note', 'Google stays linked to this local account once connected here. Disabled or deleted local users still cannot access the app.')}</div>
-                <div className="mt-2">{tr('provider_change_note', 'To switch to another Google account, disconnect the current one first and then connect the new provider.')}</div>
-              </div>
             </section>
             ) : null}
 
             {activeSection === 'security' ? (
-            <section className="space-y-4 rounded-2xl border border-gray-200 p-4 dark:border-zinc-700">
+            <section className="space-y-3 rounded-xl border border-gray-200 p-3 dark:border-zinc-700">
               <div>
-                <h3 className="flex items-center gap-2 text-sm font-semibold text-gray-900 dark:text-white">
+                <div className="flex items-center gap-1">
+                  <h3 className="flex items-center gap-2 text-sm font-semibold text-gray-900 dark:text-white">
                   <ShieldCheck className="h-4 w-4 text-gray-400" />
                   <span>{tr('security', 'Security')}</span>
-                </h3>
-                <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">{tr('profile_security_desc', 'Manage password, OTP login protection, and your default login duration.')}</p>
-                <div className="mt-2 flex flex-wrap gap-1.5 text-[11px]">
+                  </h3>
+                  <InfoHint label={tr('security', 'Security')} text={tr('profile_security_desc', 'Manage password, OTP login protection, and your default login duration.')} />
+                </div>
+                <div className="mt-1.5 flex max-w-full gap-1 overflow-x-auto text-[10px] [scrollbar-width:thin]">
                   <span className="rounded-full bg-gray-100 px-2 py-0.5 text-gray-600 dark:bg-zinc-700 dark:text-gray-300">{tr('username_login', 'Username login')}</span>
-                  <span className={`rounded-full px-2 py-0.5 ${profile.email?.trim() ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300' : 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300'}`}>
+                  <span className={`shrink-0 whitespace-nowrap rounded-full px-2 py-0.5 ${profile.email?.trim() ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300' : 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300'}`}>
                     {tr('email_login', 'Email login')} {profile.email?.trim() ? tr('enabled', 'enabled') : tr('setup_needed', 'setup needed')}
                   </span>
-                  <span className={`rounded-full px-2 py-0.5 ${otpEnabled ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300' : 'bg-gray-100 text-gray-600 dark:bg-zinc-700 dark:text-gray-300'}`}>
+                  <span className={`shrink-0 whitespace-nowrap rounded-full px-2 py-0.5 ${otpEnabled ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300' : 'bg-gray-100 text-gray-600 dark:bg-zinc-700 dark:text-gray-300'}`}>
                     OTP 2FA {otpEnabled ? tr('on', 'on') : tr('off', 'off')}
                   </span>
                 </div>
               </div>
-              {needsSensitivePassword ? (
+              <form className="space-y-2" onSubmit={(event) => { event.preventDefault(); void handlePasswordSave() }}>
+                <input
+                  type="text"
+                  name="username"
+                  autoComplete="username"
+                  value={profile?.username || user?.username || ''}
+                  readOnly
+                  className="sr-only"
+                  tabIndex={-1}
+                  aria-hidden="true"
+                />
+              <div className="grid gap-2 lg:grid-cols-3">
                 <div>
-                  <label htmlFor="security-current-password" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
-                    {tr('current_password', 'Current password')}
-                  </label>
+                  <div className="mb-1 flex items-center gap-1">
+                    <label htmlFor="security-current-password" className="block text-xs font-medium text-gray-700 dark:text-gray-300">
+                      {tr('current_password', 'Current password')}
+                    </label>
+                    <InfoHint label={tr('current_password', 'Current password')} text={tr('current_password_sensitive_note', 'Needed before changing your password or disconnecting Google from this account.')} />
+                  </div>
                   <input
                     id="security-current-password"
                     name="current_password"
                     type="password"
                     autoComplete="current-password"
-                    className="input"
+                    className="input h-9 text-sm"
                     value={currentPassword}
                     onChange={(e) => setCurrentPassword(e.target.value)}
                   />
-                  <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                    {tr('current_password_sensitive_note', 'Needed before changing your password or disconnecting Google from this account.')}
-                  </p>
-                </div>
-              ) : null}
-              <div className="grid gap-4 sm:grid-cols-2">
-                <div>
-                  <label htmlFor="new-password" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">{tr('new_password', 'New password')}</label>
-                  <input id="new-password" name="new_password" type="password" autoComplete="new-password" className="input" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} />
                 </div>
                 <div>
-                  <label htmlFor="confirm-password" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">{tr('confirm_new_password', 'Confirm new password')}</label>
-                  <input id="confirm-password" name="confirm_password" type="password" autoComplete="new-password" className="input" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} />
+                  <label htmlFor="new-password" className="mb-1 block text-xs font-medium text-gray-700 dark:text-gray-300">{tr('new_password', 'New password')}</label>
+                  <input id="new-password" name="new_password" type="password" autoComplete="new-password" className="input h-9 text-sm" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} />
+                </div>
+                <div>
+                  <label htmlFor="confirm-password" className="mb-1 block text-xs font-medium text-gray-700 dark:text-gray-300">{tr('confirm_new_password', 'Confirm new password')}</label>
+                  <input id="confirm-password" name="confirm_password" type="password" autoComplete="new-password" className="input h-9 text-sm" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} />
                 </div>
               </div>
-              <div className="flex flex-wrap gap-3">
-                <button className="btn-primary" onClick={handlePasswordSave} disabled={savingPassword}>
+              <div className="flex min-w-0 items-center gap-2 overflow-x-auto">
+                <button type="submit" className="btn-primary h-9 shrink-0 px-3 text-xs" disabled={savingPassword}>
                   {savingPassword ? tr('updating', 'Updating...') : tr('change_password', 'Change password')}
                 </button>
-                <button className="btn-secondary" onClick={() => setOtpMode(otpEnabled ? 'disable' : 'setup')}>
-                  {otpEnabled ? tr('disable_otp_login', 'Disable OTP login') : tr('enable_otp_login', 'Enable OTP login')}
+                <button
+                  type="button"
+                  className="btn-secondary h-9 shrink-0 px-3 text-xs"
+                  disabled={!newPassword}
+                  onClick={() => {
+                    void copyPasswordToClipboard(newPassword).then((copied) => {
+                      notify(
+                        copied
+                          ? tr('new_password_copied', 'New password copied to clipboard.')
+                          : tr('new_password_copy_failed', 'Could not copy automatically. Select the new password field and copy it before leaving.'),
+                        copied ? 'success' : 'warning',
+                      )
+                    })
+                  }}
+                >
+                  {tr('copy_new_password', 'Copy new password')}
                 </button>
               </div>
-
-              <div className="grid gap-3 rounded-xl bg-gray-50 p-4 dark:bg-zinc-800/70 sm:grid-cols-[1fr_auto] sm:items-end">
-                <div>
-                  <label htmlFor="session-duration-profile" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">{tr('session_duration', 'Default login duration')}</label>
+              </form>
+              <div className="grid gap-2 rounded-xl bg-gray-50 p-2.5 dark:bg-zinc-800/70 sm:grid-cols-[auto_minmax(0,1fr)_auto] sm:items-end">
+                <button type="button" className="btn-secondary h-9 whitespace-nowrap px-3 text-xs" onClick={() => setOtpMode(otpEnabled ? 'disable' : 'setup')}>
+                  {otpEnabled ? tr('disable_otp_login', 'Disable OTP login') : tr('enable_otp_login', 'Enable OTP login')}
+                </button>
+                <div className="min-w-0">
+                  <label htmlFor="session-duration-profile" className="mb-1 block truncate text-xs font-medium text-gray-700 dark:text-gray-300">{tr('session_duration', 'Default login duration')}</label>
                   <AppSelect
                     id="session-duration-profile"
                     name="session_duration"
@@ -1221,7 +1273,7 @@ export default function UserProfileModal({ onClose }: UserProfileModalProps) {
                     onChange={(nextValue) => setSessionDuration(nextValue)}
                     ariaLabel={tr('session_duration', 'Default login duration')}
                     className="w-full"
-                    buttonClassName="h-10 w-full"
+                    buttonClassName="h-9 w-full text-xs"
                     menuClassName="min-w-[13rem]"
                     options={[
                       { value: 'always', label: tr('always_stay_signed_in', 'Always stay signed in') },
@@ -1234,21 +1286,19 @@ export default function UserProfileModal({ onClose }: UserProfileModalProps) {
                     ]}
                   />
                 </div>
-                <button className="btn-secondary" onClick={handleSessionSave}>{tr('save_login_duration', 'Save login duration')}</button>
+                <button className="btn-secondary h-9 whitespace-nowrap px-3 text-xs" onClick={handleSessionSave}>{tr('save_login_duration', 'Save login duration')}</button>
               </div>
             </section>
             ) : null}
 
             {activeSection === 'organization' ? (
-              <section className="space-y-4 rounded-2xl border border-gray-200 p-4 dark:border-zinc-700">
-                <div>
+              <section className="space-y-3 rounded-xl border border-gray-200 p-3 dark:border-zinc-700">
+                <div className="flex items-center gap-1">
                   <h3 className="text-sm font-semibold text-gray-900 dark:text-white">{tr('organization', 'Organization')}</h3>
-                  <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                    {tr('organization_privacy_hint', 'Organization identifiers stay hidden here. Only the organization name and role context are shown.')}
-                  </p>
+                  <InfoHint label={tr('organization', 'Organization')} text={tr('organization_privacy_hint', 'Organization identifiers stay hidden here. Only the organization name and role context are shown.')} />
                 </div>
-                <div className="grid gap-3 sm:grid-cols-2">
-                  <div className="rounded-xl border border-gray-200 bg-gray-50 p-4 dark:border-zinc-700 dark:bg-zinc-800/70">
+                <div className="grid gap-2 sm:grid-cols-2">
+                  <div className="rounded-xl border border-gray-200 bg-gray-50 p-3 dark:border-zinc-700 dark:bg-zinc-800/70">
                     <div className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
                       {tr('organization_name', 'Organization name')}
                     </div>
@@ -1256,7 +1306,7 @@ export default function UserProfileModal({ onClose }: UserProfileModalProps) {
                       {organizationDetails.name}
                     </div>
                   </div>
-                  <div className="rounded-xl border border-gray-200 bg-gray-50 p-4 dark:border-zinc-700 dark:bg-zinc-800/70">
+                  <div className="rounded-xl border border-gray-200 bg-gray-50 p-3 dark:border-zinc-700 dark:bg-zinc-800/70">
                     <div className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
                       {tr('role', 'Role')}
                     </div>
@@ -1265,7 +1315,7 @@ export default function UserProfileModal({ onClose }: UserProfileModalProps) {
                     </div>
                   </div>
                   {organizationDetails.businessName ? (
-                    <div className="rounded-xl border border-gray-200 bg-gray-50 p-4 dark:border-zinc-700 dark:bg-zinc-800/70">
+                    <div className="rounded-xl border border-gray-200 bg-gray-50 p-3 dark:border-zinc-700 dark:bg-zinc-800/70">
                       <div className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
                         {tr('workspace', 'Workspace')}
                       </div>
@@ -1275,7 +1325,7 @@ export default function UserProfileModal({ onClose }: UserProfileModalProps) {
                     </div>
                   ) : null}
                   {organizationDetails.branchName ? (
-                    <div className="rounded-xl border border-gray-200 bg-gray-50 p-4 dark:border-zinc-700 dark:bg-zinc-800/70">
+                    <div className="rounded-xl border border-gray-200 bg-gray-50 p-3 dark:border-zinc-700 dark:bg-zinc-800/70">
                       <div className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
                         {tr('branch', 'Branch')}
                       </div>
@@ -1314,6 +1364,26 @@ export default function UserProfileModal({ onClose }: UserProfileModalProps) {
         onClose={closeAvatarEditor}
         onSave={saveAvatarFromEditor}
         saving={uploadingAvatar}
+        tr={tr}
+      />
+      <AvatarViewerModal
+        open={avatarViewerOpen}
+        name={profile?.name}
+        avatarPath={profile?.avatar_path}
+        uploading={uploadingAvatar}
+        onClose={() => setAvatarViewerOpen(false)}
+        onUpload={() => {
+          setAvatarViewerOpen(false)
+          handleAvatarPick()
+        }}
+        onEdit={() => {
+          setAvatarViewerOpen(false)
+          openAvatarEditor(profile?.avatar_path)
+        }}
+        onOpenFiles={() => {
+          setAvatarViewerOpen(false)
+          setFilePickerOpen(true)
+        }}
         tr={tr}
       />
       {filePickerOpen ? (

@@ -1,11 +1,13 @@
 import X from 'lucide-react/dist/esm/icons/x.js'
 import { createPortal } from 'react-dom'
-import { useRef, useState, type ChangeEvent, type MouseEvent } from 'react'
+import { useEffect, useRef, useState, type ChangeEvent, type MouseEvent } from 'react'
 import { useApp as useAppHook } from '../../AppContext.tsx'
 import AppSelect from '../shared/AppSelect.tsx'
 import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.ts'
 import { getLoaderErrorMessage, withLoaderTimeout } from '../../utils/loaders.ts'
 import { STOCK_ACTION_OPTIONS, normalizeStockAction, type ReturnStockAction } from './helpers/returnOptions.ts'
+import { normalizeReturnReasonList } from './helpers/returnReasonPresets.ts'
+import { useReturnReasonPresets } from './helpers/useReturnReasonPresets.ts'
 
 const RETURN_UPDATE_TIMEOUT_MS = 15000
 
@@ -128,17 +130,9 @@ export default function EditReturnModal({ ret, onClose, onSuccess, fmtUSD, notif
     return value && value !== key ? value : fallback
   }
 
-  const RETURN_REASONS: string[] = [
-    T('reason_defective',    'Defective / damaged product'),
-    T('reason_wrong_item',   'Wrong item delivered'),
-    T('reason_changed_mind', 'Customer changed mind'),
-    T('reason_not_described','Product not as described'),
-    T('reason_duplicate',    'Duplicate order'),
-    T('reason_expired',      'Expired product'),
-    T('reason_quality',      'Quality issue'),
-    T('reason_other',        'Other'),
-  ]
   const OTHER_LABEL = T('reason_other', 'Other')
+  const returnReasonPresets = useReturnReasonPresets(t)
+  const RETURN_REASONS = normalizeReturnReasonList([...returnReasonPresets.customer, OTHER_LABEL])
 
   const existingItems = Array.isArray(ret.items) ? ret.items : []
   const [reason,       setReason]       = useState<string>(ret.reason || RETURN_REASONS[0])
@@ -150,8 +144,14 @@ export default function EditReturnModal({ ret, onClose, onSuccess, fmtUSD, notif
   )
   const [submitting,   setSubmitting]   = useState(false)
   const submitInFlightRef = useRef(false)
+  const isKnownReason = RETURN_REASONS.includes(reason)
 
-  const reasonValue = RETURN_REASONS.includes(reason) ? reason : OTHER_LABEL
+  useEffect(() => {
+    if (!reason || reason === OTHER_LABEL || isKnownReason) return
+    setCustomReason((current) => current || reason)
+  }, [OTHER_LABEL, isKnownReason, reason])
+
+  const reasonValue = isKnownReason ? reason : OTHER_LABEL
   const finalReason = reasonValue === OTHER_LABEL ? customReason : reason
 
   const updateQty     = (idx: number, qty: unknown) => setItems(prev => prev.map((it, i) =>
@@ -225,16 +225,19 @@ export default function EditReturnModal({ ret, onClose, onSuccess, fmtUSD, notif
   }
 
   return createPortal(
-    <div className="fixed inset-0 bg-black/50 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4" onClick={closeIfIdle}>
-      <div className="bg-white dark:bg-gray-800 rounded-t-2xl sm:rounded-2xl shadow-2xl w-full sm:max-w-lg max-h-modal-92 flex flex-col" onClick={(event: MouseEvent<HTMLDivElement>) => event.stopPropagation()}>
+    <div className="modal-viewport-safe pointer-events-auto fixed inset-0 z-[1050] flex items-end justify-center overflow-y-auto bg-black/50 sm:items-center sm:p-4" onClick={closeIfIdle}>
+      <div className="modal-panel-safe flex w-full flex-col rounded-t-2xl bg-white shadow-2xl dark:bg-gray-800 sm:max-w-lg sm:rounded-2xl" onClick={(event: MouseEvent<HTMLDivElement>) => event.stopPropagation()}>
 
         {/* Header */}
-        <div className="flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-700 flex-shrink-0">
-          <div>
+        <div className="flex items-center justify-between gap-2 p-4 border-b border-gray-200 dark:border-gray-700 flex-shrink-0">
+          <div className="min-w-0">
             <h2 className="text-lg font-bold text-gray-900 dark:text-white">✏️ {T('edit','')} {T('returns','Return')}</h2>
             <div className="text-xs text-gray-400 font-mono mt-0.5">{ret.return_number}</div>
           </div>
-          <button type="button" onClick={closeIfIdle} disabled={submitting} aria-label={T('close', 'Close')} className="text-gray-400 hover:text-gray-600 w-8 h-8 flex items-center justify-center disabled:opacity-50"><X className="h-4 w-4" /></button>
+          <div className="flex shrink-0 items-center gap-1">
+            <button type="button" onClick={handleSubmit} disabled={submitting || !finalReason.trim()} className="btn-primary min-h-9 max-w-24 truncate px-3 py-1.5 text-xs sm:hidden">{submitting ? `⏳ ${T('saving_label','Saving…')}` : `✓ ${T('save','Save')}`}</button>
+            <button type="button" onClick={closeIfIdle} disabled={submitting} aria-label={T('close', 'Close')} className="text-gray-400 hover:text-gray-600 w-8 h-8 flex items-center justify-center disabled:opacity-50"><X className="h-4 w-4" /></button>
+          </div>
         </div>
 
         <div className="modal-scroll p-4 space-y-4">
@@ -363,7 +366,7 @@ export default function EditReturnModal({ ret, onClose, onSuccess, fmtUSD, notif
           )}
 
           {/* Buttons */}
-          <div className="flex gap-2 pt-1">
+          <div className="hidden gap-2 pt-1 sm:flex">
             <button onClick={closeIfIdle} disabled={submitting} className="btn-secondary text-sm flex-1 disabled:opacity-50">
               {T('cancel','Cancel')}
             </button>

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
 import X from 'lucide-react/dist/esm/icons/x.js'
 import ChevronRight from 'lucide-react/dist/esm/icons/chevron-right.js'
 import ChevronDown from 'lucide-react/dist/esm/icons/chevron-down.js'
@@ -272,15 +273,15 @@ export default function ProductDetailReport({ productId, barcode, t, fmtUSD }: {
       <button
         type="button"
         onClick={() => setOpenSection(section)}
-        className={`flex w-full items-center justify-between gap-2 rounded-lg px-2.5 py-1.5 text-left text-xs transition-colors ${meta.pill}`}
+        className={`flex w-full min-w-0 items-center justify-between gap-2 rounded-lg px-2.5 py-1.5 text-left text-xs transition-colors ${meta.pill}`}
       >
-        <span className="flex items-center gap-1.5">
-          <Icon className="h-3.5 w-3.5" />
-          {label}
+        <span className="flex min-w-0 items-center gap-1.5">
+          <Icon className="h-3.5 w-3.5 shrink-0" />
+          <span className="detail-scroll-text min-w-0 flex-1">{label}</span>
           {loading ? (
-            <span className={meta.accent}>...</span>
+            <span className={`${meta.accent} shrink-0`}>...</span>
           ) : count > 0 ? (
-            <span className={meta.accent}>({count})</span>
+            <span className={`${meta.accent} shrink-0`}>({count})</span>
           ) : null}
         </span>
         <ChevronRight className="h-3.5 w-3.5 flex-shrink-0" />
@@ -315,7 +316,7 @@ export default function ProductDetailReport({ productId, barcode, t, fmtUSD }: {
                     {signed(row)} {typeLabel}
                   </span>
                   <span className="shrink-0 tabular-nums text-gray-500">{row.before_qty}→{row.after_qty}</span>
-                  <span className="min-w-0 flex-1 truncate text-gray-400" title={row.reason || ''}>{row.reason || ''}</span>
+                  <span className="detail-scroll-text min-w-0 flex-1 text-gray-400" title={row.reason || ''}>{row.reason || ''}</span>
                   <ChevronDown className={`h-3 w-3 shrink-0 text-gray-300 transition-transform ${expanded ? 'rotate-180' : ''}`} />
                 </button>
                 {expanded ? (
@@ -387,7 +388,7 @@ export default function ProductDetailReport({ productId, barcode, t, fmtUSD }: {
                     <p className="py-1 text-center text-gray-400">{tr('no_data_found', 'No data found')}</p>
                   ) : drill.map((sale) => (
                     <div key={sale.id} className="flex items-center justify-between gap-2">
-                      <span className="min-w-0 flex-1 truncate font-mono text-gray-500" title={sale.customer_name || ''}>{sale.receipt_number || `#${sale.id}`}</span>
+                      <span className="detail-scroll-text min-w-0 flex-1 font-mono text-gray-500" title={sale.customer_name || ''}>{sale.receipt_number || `#${sale.id}`}</span>
                       <span className="shrink-0 whitespace-nowrap text-gray-400">{fmtDateTime24(sale.created_at)}</span>
                       <span className="shrink-0 tabular-nums font-semibold text-gray-700 dark:text-gray-200">×{sale.qty}</span>
                       <span className="shrink-0 tabular-nums text-gray-500">{fmtUSD(sale.revenue_usd)}</span>
@@ -436,7 +437,7 @@ export default function ProductDetailReport({ productId, barcode, t, fmtUSD }: {
             {/* Click a supplier to open the lots it delivered for THIS product. */}
             <button type="button" onClick={() => toggleSupplierRow(supplier.supplier_key)} className="w-full rounded-lg bg-gray-50 px-2.5 py-1.5 text-left text-xs transition-colors hover:bg-gray-100 dark:bg-gray-800/60 dark:hover:bg-gray-800">
               <div className="flex items-center justify-between gap-2">
-                <span className="min-w-0 truncate font-semibold text-gray-700 dark:text-gray-200">{supplier.supplier_name || tr('unknown', 'Unknown')}</span>
+                <span className="detail-scroll-text min-w-0 flex-1 font-semibold text-gray-700 dark:text-gray-200">{supplier.supplier_name || tr('unknown', 'Unknown')}</span>
                 <span className="flex shrink-0 items-center gap-2">
                   <span className="tabular-nums text-gray-500">{supplier.lot_count} {tr('batches', 'Batches').toLowerCase()} · {supplier.current_qty}</span>
                   <ChevronDown className={`h-3 w-3 shrink-0 text-gray-300 transition-transform ${open ? 'rotate-180' : ''}`} />
@@ -457,7 +458,7 @@ export default function ProductDetailReport({ productId, barcode, t, fmtUSD }: {
                   <p className="py-1 text-center text-gray-400">{tr('no_data_found', 'No data found')}</p>
                 ) : drill.map((lot) => (
                   <div key={lot.id} className="flex items-center justify-between gap-2">
-                    <span className="min-w-0 flex-1 truncate text-gray-500">{batchDisplayLabel({ id: lot.id, lot_code: lot.lot_code, received_at: lot.received_at })}</span>
+                    <span className="detail-scroll-text min-w-0 flex-1 text-gray-500">{batchDisplayLabel({ id: lot.id, lot_code: lot.lot_code, received_at: lot.received_at })}</span>
                     <span className="shrink-0 whitespace-nowrap text-gray-400">{lot.received_at ? fmtDate(lot.received_at) : '--'}</span>
                     <span className="shrink-0 tabular-nums font-semibold text-gray-700 dark:text-gray-200">×{lot.total_qty}</span>
                     <span className="shrink-0 tabular-nums text-gray-500">{lot.unit_cost_usd != null ? fmtUSD(lot.unit_cost_usd) : '--'}</span>
@@ -488,13 +489,13 @@ export default function ProductDetailReport({ productId, barcode, t, fmtUSD }: {
       <Pill section="sales" label={tr('sales', 'Sales')} count={salesTxCount} loading={reportLoading} />
       <Pill section="suppliers" label={tr('suppliers', 'Suppliers')} count={suppliersCount} loading={reportLoading} />
 
-      {active ? (
+      {active && typeof document !== 'undefined' ? createPortal((
         <div
-          className="fixed inset-0 z-[60] flex items-end justify-center bg-black/50 p-0 sm:items-center sm:p-4"
+          className="modal-viewport-safe fixed inset-0 z-[1070] flex items-end justify-center bg-black/50 p-0 sm:items-center sm:p-4"
           onClick={() => setOpenSection(null)}
         >
           <div
-            className="flex max-h-[85vh] w-full flex-col overflow-hidden rounded-t-2xl bg-white shadow-2xl sm:max-h-[80vh] sm:max-w-lg sm:rounded-2xl dark:bg-gray-800 pb-[env(safe-area-inset-bottom)] sm:pb-0"
+            className="modal-panel-safe flex w-full flex-col overflow-hidden rounded-t-2xl bg-white shadow-2xl sm:max-w-lg sm:rounded-2xl dark:bg-gray-800 pb-[env(safe-area-inset-bottom)] sm:pb-0"
             onClick={(event) => event.stopPropagation()}
           >
             {/* Compact title bar (user ask): smaller title on its own line with
@@ -502,11 +503,11 @@ export default function ProductDetailReport({ productId, barcode, t, fmtUSD }: {
                 the old p-4 so the header stops eating the pane. */}
             <div className="flex items-center justify-between gap-2 border-b border-gray-200 px-3 py-1.5 dark:border-gray-700">
               <div className="min-w-0">
-                <p className="truncate text-xs font-semibold text-gray-900 dark:text-white">
+                <p className="detail-scroll-text text-xs font-semibold text-gray-900 dark:text-white">
                   {active.title}
                   {active.count > 0 ? <span className="ml-1 font-normal text-gray-400">({active.count})</span> : null}
                 </p>
-                {barcode ? <p className="truncate font-mono text-[10px] leading-tight text-gray-400">{barcode}</p> : null}
+                {barcode ? <p className="detail-scroll-text font-mono text-[10px] leading-tight text-gray-400">{barcode}</p> : null}
               </div>
               <button
                 type="button"
@@ -522,7 +523,7 @@ export default function ProductDetailReport({ productId, barcode, t, fmtUSD }: {
             <div className="min-h-0 flex-1 overflow-auto p-3">{active.body}</div>
           </div>
         </div>
-      ) : null}
+      ), document.body) : null}
 
       {attributeOpen ? (
         <AttributeSupplierModal

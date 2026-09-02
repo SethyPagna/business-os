@@ -16,12 +16,13 @@ function compile(file, stubs = {}) {
 }
 
 const batchCode = compile('batchCode.ts')
-const subject = compile('stockActionCommit.ts', { './db': {}, './batchCode': batchCode })
+const searchMatch = compile('searchMatch.ts')
+const subject = compile('stockActionCommit.ts', { './db': {}, './batchCode': batchCode, './searchMatch': searchMatch })
 
 function setup() {
   const sqlite = new Database(':memory:')
   sqlite.exec(`
-    CREATE TABLE products (id INTEGER PRIMARY KEY, name TEXT, barcode TEXT, unit TEXT, stock_quantity REAL DEFAULT 0,
+    CREATE TABLE products (id INTEGER PRIMARY KEY, name TEXT, name_normalized TEXT, barcode TEXT, unit TEXT, stock_quantity REAL DEFAULT 0,
       selling_price_usd REAL DEFAULT 0, special_price_usd REAL DEFAULT 0, cost_price_usd REAL DEFAULT 0,
       is_active INTEGER DEFAULT 1, client_request_id TEXT UNIQUE, created_at TEXT, updated_at TEXT);
     CREATE TABLE branches (id INTEGER PRIMARY KEY, name TEXT, is_active INTEGER DEFAULT 1);
@@ -34,7 +35,8 @@ function setup() {
       updated_at TEXT, UNIQUE(batch_id, branch_id));
     CREATE TABLE inventory_movements (id INTEGER PRIMARY KEY AUTOINCREMENT, product_id INTEGER,
       product_name TEXT, branch_id INTEGER, branch_name TEXT, movement_type TEXT, quantity REAL,
-      reason TEXT, created_at TEXT, batch_id INTEGER);
+      unit_cost_usd REAL DEFAULT 0, total_cost_usd REAL DEFAULT 0,
+      reason TEXT, reference_id INTEGER, created_at TEXT, batch_id INTEGER);
   `)
   sqlite.exec(fs.readFileSync(path.join(__dirname, '..', 'migrations', '0056_import_stock_action_commits.sql'), 'utf8'))
   sqlite.prepare(`INSERT INTO products(id, name) VALUES (10, 'Serum')`).run()
@@ -68,12 +70,15 @@ const input = {
   assert.strictEqual(first.alreadyApplied, false)
   assert.strictEqual(retry.alreadyApplied, true)
   assert.deepStrictEqual(sqlite.prepare(`SELECT stock_quantity, selling_price_usd, special_price_usd, cost_price_usd FROM products WHERE id = 10`).get(), {
-    stock_quantity: 2, selling_price_usd: 12.35, special_price_usd: 10, cost_price_usd: 5,
-  })
+    stock_quantity: 2, selling_price_usd: 12.35, special_price_usd: 10, cost_price_usd: 0,
+  }, 'receipt cost is historical; it never overwrites the catalog cost')
   assert.strictEqual(sqlite.prepare(`SELECT quantity FROM branch_stock`).get().quantity, 2)
   assert.strictEqual(sqlite.prepare(`SELECT quantity FROM branch_batch_stock`).get().quantity, 2)
   assert.strictEqual(sqlite.prepare(`SELECT COUNT(*) AS n FROM product_batches`).get().n, 1)
   assert.strictEqual(sqlite.prepare(`SELECT COUNT(*) AS n FROM inventory_movements`).get().n, 1)
+  assert.deepStrictEqual(sqlite.prepare(`SELECT unit_cost_usd, total_cost_usd FROM inventory_movements`).get(), {
+    unit_cost_usd: 5, total_cost_usd: 10,
+  }, 'movement retains this receipt\'s own cost')
   assert.strictEqual(sqlite.prepare(`SELECT COUNT(*) AS n FROM import_stock_action_commits WHERE status = 'applied'`).get().n, 1)
 
   await assert.rejects(() => subject.applyUnifiedStockAdd(db, { ...input, rowNumber: 3, quantity: -1 }), /greater than 0/)
@@ -101,6 +106,11 @@ const input = {
     supplied.sqlite.prepare(`SELECT received_quantity FROM product_batches`).get().received_quantity,
     4,
     'two 2-unit adds into one lot record received_quantity = 4',
+  )
+  assert.strictEqual(
+    supplied.sqlite.prepare(`SELECT received_cost_usd FROM product_batches`).get().received_cost_usd,
+    20,
+    'same batch accumulates per-receipt spend without changing product cost',
   )
   assert.strictEqual(
     sqlite.prepare(`SELECT received_quantity FROM product_batches`).get().received_quantity,

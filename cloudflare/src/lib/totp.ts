@@ -6,11 +6,9 @@
 // app (Google Authenticator, Authy, etc.) enrolled against either backend
 // produces identical codes.
 //
-// QR code rendering is intentionally not ported here (speakeasy's caller,
-// the `qrcode` package, needs a raster/canvas encoder with no lightweight
-// Workers-native equivalent). Setup falls back to the manual base32 entry
-// key, which frontend/src/components/utils-settings/OtpModal.tsx already
-// renders whenever `qrDataUrl` is null -- see the `scan` step there.
+// QR code rendering remains out of the Worker: the API returns the standard
+// otpauth URI and frontend/src/components/utils-settings/OtpModal.tsx renders
+// it locally. This avoids persisting or serving a raster image of a secret.
 
 const BASE32_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567'
 const STEP_SECONDS = 30
@@ -92,8 +90,14 @@ async function totpAt(secretBase32: string, counter: number): Promise<string> {
   return String(code).padStart(CODE_DIGITS, '0')
 }
 
-/** Verifies a 6-digit TOTP token against a base32 secret, checking +/-`window` steps to absorb clock drift (same tolerance as speakeasy's { window: 1 }). */
-export async function verifyTotp(secretBase32: string, token: string, window = 1): Promise<boolean> {
+/**
+ * Verifies a 6-digit TOTP token against a base32 secret. Two steps on either
+ * side (60 seconds) tolerate a mobile authenticator whose automatic clock
+ * correction has drifted slightly, without making the code reusable beyond
+ * the existing, rate-limited login challenge. Callers may pass a narrower
+ * window for a deliberately stricter flow.
+ */
+export async function verifyTotp(secretBase32: string, token: string, window = 2): Promise<boolean> {
   const cleanToken = String(token || '').replace(/\s/g, '')
   if (!/^\d{6}$/.test(cleanToken)) return false
   if (!secretBase32) return false

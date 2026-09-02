@@ -11,7 +11,9 @@ import {
 } from '../../utils/loaders.ts'
 import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.ts'
 import AppSelect, { type AppSelectOption } from '../shared/AppSelect.tsx'
+import ScanSearchButton from '../shared/ScanSearchButton.tsx'
 import ContactPicker from '../contacts/ContactPicker.tsx'
+import { useReturnReasonPresets } from './helpers/useReturnReasonPresets.ts'
 
 const SUPPLIER_RETURN_SETUP_TIMEOUT_MS = 12000
 const SUPPLIER_RETURN_SETUP_WATCHDOG_MS = SUPPLIER_RETURN_SETUP_TIMEOUT_MS + 1500
@@ -160,6 +162,7 @@ export default function NewSupplierReturnModal({ onClose, onSuccess, notify, fmt
     const value = t?.(key)
     return value && value !== key ? value : fallback
   }
+  const returnReasonPresets = useReturnReasonPresets(t)
 
   const [loading, setLoading] = useState(true)
   const [loadingProducts, setLoadingProducts] = useState(false)
@@ -396,14 +399,17 @@ export default function NewSupplierReturnModal({ onClose, onSuccess, notify, fmt
   }
 
   return createPortal(
-    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-0 sm:items-center sm:p-4" onClick={closeIfIdle}>
-      <div className="flex max-h-modal-92 w-full flex-col rounded-t-2xl bg-white shadow-2xl sm:max-w-4xl sm:rounded-2xl dark:bg-gray-800" onClick={(event) => event.stopPropagation()}>
-        <div className="flex items-center justify-between border-b border-gray-200 p-4 dark:border-gray-700">
-          <div>
+    <div className="modal-viewport-safe pointer-events-auto fixed inset-0 z-[1050] flex items-end justify-center overflow-y-auto bg-black/50 sm:items-center sm:p-4" onClick={closeIfIdle}>
+      <div className="modal-panel-safe flex w-full flex-col rounded-t-2xl bg-white shadow-2xl dark:bg-gray-800 sm:max-w-4xl sm:rounded-2xl" onClick={(event) => event.stopPropagation()}>
+        <div className="flex items-center justify-between gap-2 border-b border-gray-200 p-4 dark:border-gray-700">
+          <div className="min-w-0">
             <h2 className="text-lg font-bold text-gray-900 dark:text-white">{tr('return_to_supplier', 'Return to Supplier')}</h2>
-            <p className="text-xs text-gray-500 dark:text-gray-400">{tr('supplier_return_hint', 'Send stock back to supplier and record compensation/loss.')}</p>
+            <p className="truncate text-xs text-gray-500 dark:text-gray-400">{tr('supplier_return_hint', 'Send stock back to supplier and record compensation/loss.')}</p>
           </div>
-          <button type="button" onClick={closeIfIdle} disabled={submitting} aria-label={tr('close', 'Close')} className="flex h-8 w-8 items-center justify-center text-gray-400 hover:text-gray-600 disabled:opacity-50"><X className="h-4 w-4" /></button>
+          <div className="flex shrink-0 items-center gap-1">
+            <button type="button" className="btn-primary min-h-9 max-w-24 truncate px-3 py-1.5 text-xs sm:hidden" onClick={submit} disabled={loading || loadingProducts || submitting}>{submitting ? `${tr('saving_label', 'Saving')}...` : tr('save', 'Save')}</button>
+            <button type="button" onClick={closeIfIdle} disabled={submitting} aria-label={tr('close', 'Close')} className="flex h-8 w-8 items-center justify-center text-gray-400 hover:text-gray-600 disabled:opacity-50"><X className="h-4 w-4" /></button>
+          </div>
         </div>
 
         {loading ? (
@@ -453,7 +459,10 @@ export default function NewSupplierReturnModal({ onClose, onSuccess, notify, fmt
               </div>
               <div>
                 <label htmlFor="supplier-return-reason" className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-300">{tr('reason', 'Reason')}</label>
-                <input id="supplier-return-reason" className="input text-sm" value={reason} onChange={(event) => setReason(event.target.value)} placeholder={tr('return_reason_placeholder', 'Defective batch / expired stock / wrong shipment')} />
+                <input id="supplier-return-reason" list="supplier-return-reason-presets" className="input text-sm" value={reason} onChange={(event) => setReason(event.target.value)} placeholder={tr('return_reason_placeholder', 'Choose a saved reason or type your own')} />
+                <datalist id="supplier-return-reason-presets">
+                  {returnReasonPresets.supplier.map((savedReason) => <option key={savedReason.toLocaleLowerCase()} value={savedReason} />)}
+                </datalist>
               </div>
             </div>
 
@@ -466,12 +475,15 @@ export default function NewSupplierReturnModal({ onClose, onSuccess, notify, fmt
               <div className="mb-2 flex flex-wrap items-center gap-2">
                 <h3 className="text-sm font-semibold text-gray-800 dark:text-gray-200">{tr('products', 'Products')}</h3>
                 <span className="text-xs text-gray-400">{branch?.name || tr('branch_not_selected', 'Choose a branch')}</span>
-                <input
-                  className="input ml-auto w-full text-sm sm:w-72"
-                  placeholder={tr('search_products_placeholder', 'Search products by name, SKU, category')}
-                  value={search}
-                  onChange={(event) => setSearch(event.target.value)}
-                />
+                <div className="ml-auto flex min-w-0 w-full items-center gap-1.5 sm:w-auto sm:max-w-sm sm:flex-1">
+                  <input
+                    className="input min-w-0 flex-1 text-sm"
+                    placeholder={tr('search_products_placeholder', 'Search products by name, SKU, category')}
+                    value={search}
+                    onChange={(event) => setSearch(event.target.value)}
+                  />
+                  <ScanSearchButton onDetected={setSearch} t={(key) => tr(key, key)} />
+                </div>
               </div>
               <p className="mb-2 text-xs text-gray-500 dark:text-gray-400">{tr('supplier_return_stock_hint', 'Only products with stock in the selected branch are shown. Returned quantity cannot exceed available stock.')}</p>
               <div className="max-h-[320px] overflow-auto rounded-lg border border-gray-100 dark:border-gray-700">
@@ -584,7 +596,7 @@ export default function NewSupplierReturnModal({ onClose, onSuccess, notify, fmt
           </div>
         )}
 
-        <div className="flex items-center gap-2 border-t border-gray-200 p-4 dark:border-gray-700">
+        <div className="hidden items-center gap-2 border-t border-gray-200 p-4 dark:border-gray-700 sm:flex">
           <button className="btn-secondary flex-1" onClick={closeIfIdle} disabled={submitting}>{tr('cancel', 'Cancel')}</button>
           <button className="btn-primary flex-1" onClick={submit} disabled={loading || loadingProducts || submitting}>
             {submitting ? `${tr('saving_label', 'Saving')}...` : tr('save', 'Save')}

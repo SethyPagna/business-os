@@ -33,8 +33,10 @@ type UserDetailSheetProps = {
   user: UserDetail
   roles?: UserRole[]
   canManage?: boolean
+  canRecoverOtp?: boolean
   onEdit?: () => void
   onResetPw?: () => void
+  onRecoverOtp?: () => void
   onClose?: () => void
   t?: TranslateFunction
 }
@@ -69,7 +71,7 @@ function parsePermissions(role: UserRole | undefined): Record<string, unknown> {
   }
 }
 
-export default function UserDetailSheet({ user, roles, canManage, onEdit, onResetPw, onClose, t }: UserDetailSheetProps) {
+export default function UserDetailSheet({ user, roles, canManage, canRecoverOtp, onEdit, onResetPw, onRecoverOtp, onClose, t }: UserDetailSheetProps) {
   const role = roles?.find((item) => Number(item.id) === Number(user.role_id))
   const permissions = parsePermissions(role)
 
@@ -129,7 +131,7 @@ export default function UserDetailSheet({ user, roles, canManage, onEdit, onRese
         </div>
 
         {canManage ? (
-          <div className="flex gap-3 border-t border-gray-200 p-4 dark:border-gray-700">
+          <div className="flex flex-wrap gap-3 border-t border-gray-200 p-4 dark:border-gray-700">
             <button type="button" className="btn-primary flex-1" onClick={onEdit}>{translateLabel(t, 'edit', 'Edit')}</button>
             <button
               type="button"
@@ -138,6 +140,15 @@ export default function UserDetailSheet({ user, roles, canManage, onEdit, onRese
             >
               {translateLabel(t, 'reset_password', 'Reset password')}
             </button>
+            {canRecoverOtp && onRecoverOtp ? (
+              <button
+                type="button"
+                className="rounded-lg bg-red-100 px-4 py-2 text-sm font-medium text-red-700 dark:bg-red-900/30 dark:text-red-300"
+                onClick={onRecoverOtp}
+              >
+                {translateLabel(t, 'reset_2fa', 'Reset 2FA')}
+              </button>
+            ) : null}
           </div>
         ) : null}
       </div>

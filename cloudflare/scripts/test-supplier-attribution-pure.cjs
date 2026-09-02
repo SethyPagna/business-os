@@ -97,6 +97,7 @@ const inventoryRoute = loadReal('routes/inventory.ts', {
   '../lib/familyStockStats': { getFamilyStockStats: async () => ({}) },
   '../lib/auth': { requireAuth: async (c, next) => { c.set('user', FAKE_USER); return next() } },
   '../lib/audit': { audit: async () => {} },
+  '../lib/telegram': { sendTelegramEvent: async () => false },
   '../lib/permissions': permissions,
   '../lib/reviewGate': { maybeQueueForReview: async () => null },
   '../durable-objects/broadcastHub': { broadcast: async () => {} },

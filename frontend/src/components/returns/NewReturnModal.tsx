@@ -1,7 +1,7 @@
 // ── NewReturnModal ───────────────────────────────────────────────────────────
 import X from 'lucide-react/dist/esm/icons/x.js'
 import { createPortal } from 'react-dom'
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useApp as useAppHook } from '../../AppContext.tsx'
 import AppSelect from '../shared/AppSelect.tsx'
 import { fmtTime } from '../../utils/formatters'
@@ -16,6 +16,8 @@ import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.
 import { getProductBatches, type ProductBatch } from '../../api/batchesTransport.ts'
 import { searchProducts } from '../../api/methods.ts'
 import { STOCK_ACTION_OPTIONS, computeSettlementPreview, describeBatchOption, stockActionOption, type ReturnStockAction } from './helpers/returnOptions.ts'
+import { normalizeReturnReasonList } from './helpers/returnReasonPresets.ts'
+import { useReturnReasonPresets } from './helpers/useReturnReasonPresets.ts'
 
 const RETURN_SALE_SEARCH_TIMEOUT_MS = 12000
 const RETURN_HISTORY_LOOKUP_TIMEOUT_MS = 10000
@@ -206,17 +208,9 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify }: N
     return value && value !== key ? value : fallback
   }
 
-  const RETURN_REASONS = [
-    T('reason_defective',   'Defective / damaged product'),
-    T('reason_wrong_item',  'Wrong item delivered'),
-    T('reason_changed_mind','Customer changed mind'),
-    T('reason_not_described','Product not as described'),
-    T('reason_duplicate',   'Duplicate order'),
-    T('reason_expired',     'Expired product'),
-    T('reason_quality',     'Quality issue'),
-    T('reason_other',       'Other'),
-  ]
   const OTHER_LABEL = T('reason_other', 'Other')
+  const returnReasonPresets = useReturnReasonPresets(t)
+  const RETURN_REASONS = normalizeReturnReasonList([...returnReasonPresets.customer, OTHER_LABEL])
 
   const [step,          setStep]          = useState<ModalStep>('search')
   const [searchQuery,   setSearchQuery]   = useState('')
@@ -233,6 +227,12 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify }: N
   const submitInFlightRef = useRef(false)
   const [replacements, setReplacements] = useState<ReplacementLine[]>([])
   const [settleDifference, setSettleDifference] = useState(false)
+  const isKnownReason = RETURN_REASONS.includes(reason)
+  useEffect(() => {
+    if (!reason || reason === OTHER_LABEL || isKnownReason) return
+    setCustomReason((current) => current || reason)
+    setReason(OTHER_LABEL)
+  }, [OTHER_LABEL, isKnownReason, reason])
   // Locked note: "Non-default price adjustment requires full access and an
   // explicit preview" -- the checkbox below IS the explicit preview, and
   // it only unlocks for Full Access to Returns.
@@ -485,15 +485,23 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify }: N
     if (!submitting) onClose()
   }
 
+  const reviewReturn = () => {
+    if (!activeItems.length) { notify(T('select_items_to_return', 'Select at least one item to return.'), 'error'); return }
+    if (!finalReason) { notify(T('return_reason', 'Please provide a return reason.'), 'error'); return }
+    setStep('confirm')
+  }
+
   return createPortal(
-    <div className="fixed inset-0 bg-black/50 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4" onClick={closeIfIdle}>
-      <div className="bg-white dark:bg-gray-800 rounded-t-2xl sm:rounded-2xl shadow-2xl w-full sm:max-w-2xl max-h-modal-92 flex flex-col" onClick={e => e.stopPropagation()}>
+    <div className="modal-viewport-safe pointer-events-auto fixed inset-0 z-[1050] flex items-end justify-center overflow-y-auto bg-black/50 sm:items-center sm:p-4" onClick={closeIfIdle}>
+      <div className="modal-panel-safe flex w-full flex-col rounded-t-2xl bg-white shadow-2xl dark:bg-gray-800 sm:max-w-2xl sm:rounded-2xl" onClick={e => e.stopPropagation()}>
 
         {/* Header */}
-        <div className="flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-700 flex-shrink-0">
-          <h2 className="text-lg font-bold text-gray-900 dark:text-white">↩️ {T('new_return','New Return')}</h2>
-          <div className="flex items-center gap-2">
-            {STEPS.map((s, i) => (
+        <div className="flex items-center justify-between gap-2 p-4 border-b border-gray-200 dark:border-gray-700 flex-shrink-0">
+          <h2 className="min-w-0 truncate text-lg font-bold text-gray-900 dark:text-white">↩️ {T('new_return','New Return')}</h2>
+          <div className="flex shrink-0 items-center gap-2">
+            {step === 'items' ? <button type="button" onClick={reviewReturn} className="btn-primary min-h-9 max-w-28 truncate px-3 py-1.5 text-xs sm:hidden">{T('confirm','Review')}</button> : null}
+            {step === 'confirm' ? <button type="button" onClick={handleSubmit} disabled={submitting} className="btn-primary min-h-9 max-w-28 truncate px-3 py-1.5 text-xs sm:hidden">{submitting ? T('submitting','Processing…') : T('confirm','Confirm')}</button> : null}
+            <div className="hidden items-center gap-2 sm:flex">{STEPS.map((s, i) => (
               <div key={s} className="flex items-center gap-1">
                 <div className={`w-6 h-6 rounded-full text-xs flex items-center justify-center font-bold transition-colors
                   ${i === stepIdx ? 'bg-blue-600 text-white' : i < stepIdx ? 'bg-green-500 text-white' : 'bg-gray-200 dark:bg-gray-700 text-gray-500'}`}>
@@ -501,7 +509,7 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify }: N
                 </div>
                 {i < STEPS.length - 1 && <span className="text-gray-300 dark:text-gray-600 text-xs">→</span>}
               </div>
-            ))}
+            ))}</div>
             <button type="button" onClick={closeIfIdle} disabled={submitting} aria-label={T('close', 'Close')} className="text-gray-400 hover:text-gray-600 w-8 h-8 flex items-center justify-center ml-2 disabled:opacity-50"><X className="h-4 w-4" /></button>
           </div>
         </div>
@@ -802,11 +810,7 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify }: N
 
               <div className="flex gap-2 pt-1">
                 <button onClick={() => setStep('search')} className="btn-secondary text-sm flex-1">← {T('back','Back')}</button>
-                <button onClick={() => {
-                  if (!activeItems.length) { notify(T('select_items_to_return','Select at least one item to return.'), 'error'); return }
-                  if (!finalReason) { notify(T('return_reason','Please provide a return reason.'), 'error'); return }
-                  setStep('confirm')
-                }} className="btn-primary text-sm flex-1">
+                <button onClick={reviewReturn} className="btn-primary text-sm flex-1">
                   {T('confirm','Review')} → {activeItems.length} {T('items','item(s)')}
                   {activeItems.length < selectedItems.filter((it) => (it.remaining ?? toNumber(it.quantity)) > 0).length
                     ? ` (${T('status_partial_return','partial')})` : ''}

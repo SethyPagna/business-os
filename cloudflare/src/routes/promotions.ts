@@ -3,7 +3,7 @@ import type { MiddlewareHandler } from 'hono'
 import { getDb } from '../lib/db'
 import { requireAuth, type SessionUser } from '../lib/auth'
 import { audit } from '../lib/audit'
-import { hasPermission, getPermissionTier } from '../lib/permissions'
+import { hasPermission, getPermissionTier, getActionTier } from '../lib/permissions'
 import { bumpVersion } from '../lib/cache'
 import { normalizePromotionRule, isRuleActive } from '../lib/promotionRules'
 import { normalizeToIsoDate } from '../lib/batchCode'
@@ -26,10 +26,13 @@ const requireKey = (key: string): MiddlewareHandler<{ Bindings: Env; Variables: 
 }
 // 'promotions' is a VIEW_TIER section (Part 557 slice 4): a 'view' grant can
 // READ the full rule list but manage nothing. This admits view OR full (tier
-// != none) for the read route; every WRITE keeps requireKey('promotions')
-// (strict hasPermission === true), which a 'view' value fails.
+// != none) for the read route; rule writes use promotions.manage at Full.
 const requireReadKey = (key: string): MiddlewareHandler<{ Bindings: Env; Variables: { user: SessionUser } }> => async (c, next) => {
   if (getPermissionTier(c.get('user'), key) === 'none') return c.json({ error: 'You do not have permission to perform this action' }, 403)
+  return next()
+}
+const requireAction = (key: string, action: string): MiddlewareHandler<{ Bindings: Env; Variables: { user: SessionUser } }> => async (c, next) => {
+  if (getActionTier(c.get('user'), key, action) !== 'full') return c.json({ error: 'You do not have permission to perform this action' }, 403)
   return next()
 }
 
@@ -131,7 +134,7 @@ app.get('/rules', requireReadKey('promotions'), async (c) => {
   })))
 })
 
-app.post('/rules', requireKey('promotions'), async (c) => {
+app.post('/rules', requireAction('promotions', 'manage'), async (c) => {
   const user = c.get('user')
   const body = await c.req.json<RuleInput>()
   const input = normalizeRuleWrite(body)
@@ -156,7 +159,7 @@ app.post('/rules', requireKey('promotions'), async (c) => {
   return c.json(created)
 })
 
-app.put('/rules/:id', requireKey('promotions'), async (c) => {
+app.put('/rules/:id', requireAction('promotions', 'manage'), async (c) => {
   const user = c.get('user')
   const id = Number(c.req.param('id'))
   const db = getDb(c.env)
@@ -183,7 +186,7 @@ app.put('/rules/:id', requireKey('promotions'), async (c) => {
   return c.json(updated)
 })
 
-app.delete('/rules/:id', requireKey('promotions'), async (c) => {
+app.delete('/rules/:id', requireAction('promotions', 'manage'), async (c) => {
   const user = c.get('user')
   const id = Number(c.req.param('id'))
   const db = getDb(c.env)

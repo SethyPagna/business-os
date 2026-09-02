@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { ComponentType } from 'react'
 import {
   beginTrackedRequest,
@@ -7,6 +7,7 @@ import {
   withLoaderTimeout,
 } from '../../utils/loaders.ts'
 import { buildAppliedReceiptConfig } from '../../utils/receiptAppliedConfig.ts'
+import { businessDateTimeId } from '../../utils/timestampId.ts'
 import type { NormalizedReceiptTemplate } from '../../types/receiptContracts.ts'
 
 const RECEIPT_PREVIEW_IMPORT_TIMEOUT_MS = 12000
@@ -70,11 +71,16 @@ export default function ReceiptPreview({ tpl, settings }: ReceiptPreviewProps) {
   }, [])
 
   const exchangeRate = parseFloat(String(settings.exchange_rate || '4100'))
+  // Freeze one instant for the whole sample. The previous preview paired a
+  // hard-coded 20260831 receipt number with `new Date()` for the Date row,
+  // making the example look like the receipt clock was broken. Both values
+  // now describe the same Phnom Penh business-time moment.
+  const previewNow = useMemo(() => new Date(), [])
   const fakeSale = {
-    receipt_number: '20260831-143000',
+    receipt_number: businessDateTimeId(previewNow),
     cashier_name: 'Demo Cashier',
     payment_method: 'Cash',
-    created_at: new Date().toISOString(),
+    created_at: previewNow.toISOString(),
     customer_name: 'Sample Customer',
     customer_phone: '+855 12 345 678',
     customer_address: 'Phnom Penh, Cambodia',

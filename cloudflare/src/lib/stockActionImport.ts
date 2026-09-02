@@ -2,7 +2,7 @@
 // DB access stays outside this file: the queue engine passes only the
 // targeted catalog/branch/stock rows needed for one bounded window.
 
-import { normalizeToIsoDate } from './batchCode'
+import { dateToBatchCode, normalizeToIsoDate } from './batchCode'
 import { parseImportNumericValue, normalizeImportMoney } from './importNumbers'
 import {
   resolveStockActions,
@@ -28,6 +28,8 @@ export interface UnifiedStockCatalogProduct {
   selling_price_usd?: number | null
   special_price_usd?: number | null
   cost_price_usd?: number | null
+  /** Active normalized lot/batch keys for the same-batch receipt exception. */
+  batch_keys?: string[]
 }
 
 export interface UnifiedStockBranch {
@@ -70,6 +72,10 @@ function key(value: unknown): string {
   return text(value).toLowerCase().replace(/\s+/g, ' ')
 }
 
+function moneyCents(value: unknown): number {
+  return Math.round((Number(value) || 0) * 100)
+}
+
 function optionalNumber(value: unknown, field: string): { value: number | null; error: string | null } {
   if (!text(value)) return { value: null, error: null }
   try {
@@ -98,37 +104,38 @@ export function getUnifiedStockMode(policyJson: string | null | undefined): Stoc
 function matchProduct(
   name: string,
   barcode: string,
+  costPriceUsd: number | null,
+  batchLabel: string,
   products: UnifiedStockCatalogProduct[],
 ): { product: UnifiedStockCatalogProduct | null; conflict: string | null } {
-  const barcodeMatches = barcode ? products.filter((product) => key(product.barcode) === key(barcode)) : []
-  if (barcodeMatches.length) {
-    // Identity rule: same name + same barcode = the SAME product; same
-    // barcode + a DIFFERENT name = a separate product (shared/promo
-    // barcodes are real). So a named row only ever attaches to a
-    // name-compatible barcode match -- when none is compatible this is NOT
-    // a match at all and the row proceeds as a create of its own product
-    // (identityKey `new:name|barcode`), exactly what classifyProducts does
-    // for the same collision. The old fallback here attached the row to a
-    // lone different-name product, putting its stock on the wrong item.
-    if (name) {
-      const sameName = barcodeMatches.filter((product) => key(product.name) === key(name))
-      if (sameName.length === 1) return { product: sameName[0], conflict: null }
-      if (sameName.length > 1) return { product: null, conflict: `Barcode ${barcode} + name "${name}" match ${sameName.length} products (duplicate rows in the catalog); merge them before importing.` }
-      return { product: null, conflict: null }
-    }
-    if (barcodeMatches.length === 1) return { product: barcodeMatches[0], conflict: null }
-    return { product: null, conflict: `Barcode ${barcode} matches ${barcodeMatches.length} products; add the product name so the right one is chosen.` }
+  const nameKey = key(name)
+  const barcodeKey = key(barcode)
+  const candidates = products.filter((product) => (
+    (!nameKey || key(product.name) === nameKey) && key(product.barcode) === barcodeKey
+  ))
+  const exactCost = candidates.filter((product) => (
+    costPriceUsd == null || moneyCents(product.cost_price_usd) === moneyCents(costPriceUsd)
+  ))
+  if (exactCost.length === 1) return { product: exactCost[0], conflict: null }
+  if (exactCost.length > 1) {
+    return { product: null, conflict: `Name/barcode/cost match ${exactCost.length} product rows; merge the exact duplicates before importing.` }
   }
-  // A row that CARRIES a barcode nothing in the catalog has is a new
-  // name+barcode identity pair: same name + different barcode = child row
-  // (a separate product) under the identity rule, so it must NOT attach to
-  // a same-name product that has some other (or no) barcode -- it creates
-  // its own product instead, same as classifyProducts' detail-signature
-  // fallback decides for the identical situation.
-  if (barcode) return { product: null, conflict: null }
-  const nameMatches = name ? products.filter((product) => key(product.name) === key(name)) : []
-  if (nameMatches.length === 1) return { product: nameMatches[0], conflict: null }
-  if (nameMatches.length > 1) return { product: null, conflict: `Name "${name}" matches ${nameMatches.length} products; add a barcode or choose the exact product.` }
+
+  // Cost normally creates a sibling. The sole exception is an explicitly
+  // named batch already owned by exactly one compatible product: another
+  // receipt may share that option while its event cost remains on the
+  // movement/received-cost ledger, never on products.cost_price_usd.
+  const batchKey = key(batchLabel)
+  const sameBatch = batchKey
+    ? candidates.filter((product) => (product.batch_keys || []).some((value) => key(value) === batchKey))
+    : []
+  if (sameBatch.length === 1) return { product: sameBatch[0], conflict: null }
+  if (sameBatch.length > 1) return { product: null, conflict: `Batch "${batchLabel}" belongs to ${sameBatch.length} matching product rows; choose the exact row.` }
+
+  if (!nameKey && barcodeKey) {
+    const barcodeMatches = products.filter((product) => key(product.barcode) === barcodeKey)
+    if (barcodeMatches.length > 1) return { product: null, conflict: `Barcode ${barcode} matches ${barcodeMatches.length} products; add the product name and cost so the right row is chosen.` }
+  }
   return { product: null, conflict: null }
 }
 
@@ -143,6 +150,7 @@ export function resolveUnifiedStockImportRows(
   const branchForSlot = (slot: 'shop' | 'warehouse') => branchByName.get(slot) || null
   const stockRows: StockActionRow[] = []
   const provisional: UnifiedStockResolvedRow[] = []
+  const newBatchIdentityByKey = new Map<string, string>()
   const current = currentStock.map((entry) => ({
     branchId: entry.branchId,
     productKey: `product:${entry.productId}`,
@@ -165,9 +173,19 @@ export function resolveUnifiedStockImportRows(
     if (!date) errors.push('Date must be mm/dd/yyyy or yyyy-mm-dd.')
     if (shop.value == null && warehouse.value == null) errors.push('Enter a shop or warehouse quantity.')
 
-    const matched = matchProduct(name, barcode, products)
+    const batchLabel = text(raw.batch)
+    const effectiveBatchLabel = batchLabel || (date ? String(dateToBatchCode(date)) : '')
+    const matched = matchProduct(name, barcode, cost.value, effectiveBatchLabel, products)
     const productName = matched.product?.name || name
-    const identityKey = matched.product ? `product:${matched.product.id}` : `new:${key(productName)}|${key(barcode)}`
+    let identityKey = matched.product
+      ? `product:${matched.product.id}`
+      : `new:${key(productName)}|${key(barcode)}|cost:${moneyCents(cost.value)}`
+    if (!matched.product && key(productName) && key(barcode) && key(effectiveBatchLabel)) {
+      const batchOwnerKey = `${key(productName)}|${key(barcode)}|batch:${key(effectiveBatchLabel)}`
+      const earlierIdentity = newBatchIdentityByKey.get(batchOwnerKey)
+      if (earlierIdentity) identityKey = earlierIdentity
+      else newBatchIdentityByKey.set(batchOwnerKey, identityKey)
+    }
     const conflicts = matched.conflict ? [matched.conflict] : []
     const branchRefs: UnifiedStockResolvedRow['branchRefs'] = []
     ;(['shop', 'warehouse'] as const).forEach((slot, slotIndex) => {
@@ -195,7 +213,7 @@ export function resolveUnifiedStockImportRows(
       sellingPriceUsd: selling.value ?? matched.product?.selling_price_usd ?? null,
       vipPriceUsd: vip.value ?? matched.product?.special_price_usd ?? null,
       costPriceUsd: cost.value ?? matched.product?.cost_price_usd ?? null,
-      batchLabel: text(raw.batch) || null,
+      batchLabel: batchLabel || null,
       supplier: text(raw.supplier).replace(/\s{2,}/g, ' ').slice(0, 120),
       branchRefs,
       plan: null,

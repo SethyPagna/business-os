@@ -5,6 +5,7 @@ import { getFeesReport } from '../../api/feesTransport.ts'
 import { downloadCSV } from '../../utils/csv.ts'
 import Modal from '../shared/Modal'
 import LazyPortalMenu from '../shared/LazyPortalMenu'
+import { FEE_TYPE_OPTIONS } from '../fees/FeeForm.tsx'
 
 // Fees report section for the Reports hub. Range + branch are owned by the
 // hub and passed in. Backed by GET /api/fees/report, keyed on fee_date (the
@@ -16,6 +17,7 @@ interface FeesReport {
   totals: { count: number; amount_usd: number; amount_khr: number }
   days: Array<{ date: string; count: number; amount_usd: number; amount_khr: number }>
   by_type: Array<{ fee_type: string; count: number; amount_usd: number; amount_khr: number }>
+  by_category: Array<{ label: string; fee_type: string; count: number; amount_usd: number; amount_khr: number }>
 }
 
 interface FeesReportSectionProps {
@@ -50,6 +52,7 @@ function normalize(raw: unknown): FeesReport {
     totals: { count: num(totals.count), amount_usd: num(totals.amount_usd), amount_khr: num(totals.amount_khr) },
     days: Array.isArray(r.days) ? r.days.map((d) => ({ date: String(d.date || ''), count: num(d.count), amount_usd: num(d.amount_usd), amount_khr: num(d.amount_khr) })) : [],
     by_type: Array.isArray(r.by_type) ? r.by_type.map((d) => ({ fee_type: String(d.fee_type || ''), count: num(d.count), amount_usd: num(d.amount_usd), amount_khr: num(d.amount_khr) })) : [],
+    by_category: Array.isArray(r.by_category) ? r.by_category.map((d) => ({ label: String(d.label || ''), fee_type: String(d.fee_type || ''), count: num(d.count), amount_usd: num(d.amount_usd), amount_khr: num(d.amount_khr) })) : [],
   }
 }
 
@@ -89,7 +92,12 @@ export default function FeesReportSection({ t, fmtMoney, range, branchId, active
 
   // Text summary + click-to-open floats — same contract as the Returns
   // report section (no stat tiles, "|" dividers, scrollable Modal).
-  const [openTable, setOpenTable] = useState<'days' | 'types' | null>(null)
+  const [openTable, setOpenTable] = useState<'days' | 'types' | 'categories' | null>(null)
+
+  const typeLabel = useCallback((feeType: string) => {
+    const option = FEE_TYPE_OPTIONS.find((candidate) => candidate.value === feeType)
+    return option ? (t(option.labelKey) || option.fallback) : feeType
+  }, [t])
 
   // Export the range's per-day fee series as CSV (user, Aug 31: "no actions
   // to choose export etc"). Both currency columns are included.
@@ -98,7 +106,7 @@ export default function FeesReportSection({ t, fmtMoney, range, branchId, active
       date: d.date, count: d.count, amount_usd: d.amount_usd, amount_khr: d.amount_khr,
     }))
     if (!rows.length) return
-    downloadCSV(`fees-report-${range.startDate || 'all'}_${range.endDate || 'all'}.csv`, rows)
+    downloadCSV(`expenses-report-${range.startDate || 'all'}_${range.endDate || 'all'}.csv`, rows)
   }, [report, range.startDate, range.endDate])
 
   const floatTable = (rows: Array<{ key: string; label: string; count: number; usd: number; khr: number }>) => (
@@ -149,6 +157,7 @@ export default function FeesReportSection({ t, fmtMoney, range, branchId, active
             items={[
               { label: `${t('by_day') || 'By day'} (${report?.days.length ?? 0})`, onClick: () => setOpenTable('days') },
               { label: `${t('by_type') || 'By type'} (${report?.by_type.length ?? 0})`, onClick: () => setOpenTable('types') },
+              { label: `${t('by_category') || 'By category'} (${report?.by_category.length ?? 0})`, onClick: () => setOpenTable('categories') },
             ]}
           />
         </span>
@@ -165,13 +174,15 @@ export default function FeesReportSection({ t, fmtMoney, range, branchId, active
 
       {openTable ? (
         <Modal
-          title={openTable === 'days' ? (t('by_day') || 'By day') : (t('by_type') || 'By type')}
+          title={openTable === 'days' ? (t('by_day') || 'By day') : openTable === 'types' ? (t('by_type') || 'By type') : (t('by_category') || 'By category')}
           onClose={() => setOpenTable(null)}
           draggable
         >
           {openTable === 'days'
             ? floatTable((report?.days ?? []).map((day) => ({ key: day.date, label: displayDay(day.date), count: day.count, usd: day.amount_usd, khr: day.amount_khr })))
-            : floatTable((report?.by_type ?? []).map((row) => ({ key: row.fee_type, label: row.fee_type, count: row.count, usd: row.amount_usd, khr: row.amount_khr })))}
+            : openTable === 'types'
+              ? floatTable((report?.by_type ?? []).map((row) => ({ key: row.fee_type, label: typeLabel(row.fee_type), count: row.count, usd: row.amount_usd, khr: row.amount_khr })))
+              : floatTable((report?.by_category ?? []).map((row) => ({ key: `${row.fee_type}:${row.label}`, label: `${row.label || (t('unlabeled') || 'Unlabeled')} · ${typeLabel(row.fee_type)}`, count: row.count, usd: row.amount_usd, khr: row.amount_khr })))}
         </Modal>
       ) : null}
     </div>

@@ -124,13 +124,13 @@ export default function Modal({ title, onClose, children, wide, size, draggable,
         style={draggable && (offset.x || offset.y) ? { transform: `translate(${offset.x}px, ${offset.y}px)` } : undefined}
       >
         <div
-          className={`flex items-center justify-between p-5 border-b border-gray-200 dark:border-gray-700 flex-shrink-0 ${draggable ? 'cursor-move select-none touch-none' : ''}`}
+          className={`flex min-w-0 items-center justify-between gap-2 border-b border-gray-200 p-3 dark:border-gray-700 sm:p-4 flex-shrink-0 ${draggable ? 'cursor-move select-none touch-none' : ''}`}
           onPointerDown={handlePointerDown}
           onPointerMove={handlePointerMove}
           onPointerUp={handlePointerUp}
         >
-          <h2 className="text-lg font-bold text-gray-900 dark:text-white">{title}</h2>
-          <div className="flex items-center gap-1">
+          <h2 className="detail-scroll-text min-w-0 flex-1 text-base font-bold text-gray-900 dark:text-white sm:text-lg" title={typeof title === 'string' ? title : undefined}>{title}</h2>
+          <div className="flex shrink-0 items-center gap-1">
           {headerExtra}
           <button
             type="button"
@@ -143,7 +143,7 @@ export default function Modal({ title, onClose, children, wide, size, draggable,
           ><X className="h-4 w-4" /></button>
           </div>
         </div>
-        <div className="modal-scroll p-5">{children}</div>
+        <div className="modal-scroll p-3 sm:p-4">{children}</div>
       </div>
     </div>
   )

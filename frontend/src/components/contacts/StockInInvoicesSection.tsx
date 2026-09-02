@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import ChevronDown from 'lucide-react/dist/esm/icons/chevron-down.js'
 import AppSelect from '../shared/AppSelect.tsx'
 import DateTimeRangePicker from '../shared/DateTimeRangePicker'
+import PaginationControls, { clampPage, DEFAULT_PAGE_SIZE } from '../shared/PaginationControls'
 import { fmtDateOnly } from '../../utils/formatters'
 import { getStockInInvoiceLines, getStockInInvoiceReport } from '../../api/contactReadTransport.ts'
 
@@ -84,7 +85,6 @@ type StockInInvoicesSectionProps = {
   t: TranslateFn
 }
 
-const GROUP_PAGE_SIZE = 15
 const LINE_PAGE_SIZE = 100
 
 function groupKeyOf(group: InvoiceGroup): string {
@@ -98,6 +98,7 @@ export default function StockInInvoicesSection({ t }: StockInInvoicesSectionProp
   const [fromDate, setFromDate] = useState('')
   const [toDate, setToDate] = useState('')
   const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE)
   const [refreshToken, setRefreshToken] = useState(0)
   const [data, setData] = useState<ReportPayload | null>(null)
   const [loading, setLoading] = useState(true)
@@ -121,11 +122,17 @@ export default function StockInInvoicesSection({ t }: StockInInvoicesSectionProp
       from: fromDate,
       to: toDate,
       page,
-      page_size: GROUP_PAGE_SIZE,
+      page_size: pageSize,
     })
       .then((result) => {
         if (!aliveRef.current || requestRef.current !== requestId) return
-        setData((result || {}) as ReportPayload)
+        const nextData = (result || {}) as ReportPayload
+        const nextPage = clampPage(page, Number(nextData.total_invoices) || 0, pageSize)
+        if (nextPage !== page) {
+          setPage(nextPage)
+          return
+        }
+        setData(nextData)
         // A filter change makes the open groups' line sets stale (the
         // branch filter also scopes lines), so they collapse.
         setExpanded({})
@@ -138,7 +145,7 @@ export default function StockInInvoicesSection({ t }: StockInInvoicesSectionProp
         if (aliveRef.current && requestRef.current === requestId) setLoading(false)
       })
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [branchId, supplierKey, fromDate, toDate, page, refreshToken])
+  }, [branchId, supplierKey, fromDate, toDate, page, pageSize, refreshToken])
 
   const loadLines = useCallback((group: InvoiceGroup, linePage: number) => {
     const key = groupKeyOf(group)
@@ -163,13 +170,19 @@ export default function StockInInvoicesSection({ t }: StockInInvoicesSectionProp
       .then((result) => {
         if (!aliveRef.current) return
         const payload = (result || {}) as { lines?: InvoiceLine[]; total_lines?: number }
+        const total = Number(payload.total_lines) || 0
+        const nextPage = clampPage(linePage, total, LINE_PAGE_SIZE)
+        if (nextPage !== linePage) {
+          window.setTimeout(() => loadLines(group, nextPage), 0)
+          return
+        }
         setExpanded((current) => (current[key] ? {
           ...current,
           [key]: {
             lines: Array.isArray(payload.lines) ? payload.lines : [],
             page: linePage,
             pageSize: LINE_PAGE_SIZE,
-            total: Number(payload.total_lines) || 0,
+            total,
             loading: false,
             error: '',
           },
@@ -207,7 +220,6 @@ export default function StockInInvoicesSection({ t }: StockInInvoicesSectionProp
   const branches = Array.isArray(data?.meta?.branches) ? data!.meta!.branches! : []
   const supplierOptions = Array.isArray(data?.meta?.suppliers) ? data!.meta!.suppliers! : []
   const totalInvoices = Number(data?.total_invoices) || 0
-  const totalPages = Math.max(1, Math.ceil(totalInvoices / GROUP_PAGE_SIZE))
   const branchNameById = new Map(branches.map((branch) => [String(branch.id), String(branch.name || '')]))
 
   const money = (value: unknown): string => `$${(Number(value) || 0).toFixed(2)}`
@@ -406,14 +418,8 @@ export default function StockInInvoicesSection({ t }: StockInInvoicesSectionProp
                               </table>
                             </div>
                             {linePages > 1 ? (
-                              <div className="flex items-center justify-end gap-2 border-t border-gray-100 px-3 py-2 text-xs text-gray-500 dark:border-gray-800">
-                                <span>{tr('page', 'Page')} {linesState.page} / {linePages}</span>
-                                <button type="button" className="btn-secondary py-1 text-xs disabled:cursor-not-allowed disabled:opacity-50" disabled={linesState.page <= 1 || linesState.loading} onClick={() => loadLines(group, linesState.page - 1)}>
-                                  {tr('previous', 'Previous')}
-                                </button>
-                                <button type="button" className="btn-secondary py-1 text-xs disabled:cursor-not-allowed disabled:opacity-50" disabled={linesState.page >= linePages || linesState.loading} onClick={() => loadLines(group, linesState.page + 1)}>
-                                  {tr('next', 'Next')}
-                                </button>
+                              <div className="flex justify-center border-t border-gray-100 px-3 py-2 dark:border-gray-800">
+                                <PaginationControls compact rangeAsPageSize page={linesState.page} pageSize={linesState.pageSize} pageSizeOptions={[LINE_PAGE_SIZE]} editablePageSizeInput={false} totalItems={linesState.total} label={tr('invoice_lines', 'Lines').toLowerCase()} t={t} onPageChange={(nextPage) => loadLines(group, nextPage)} />
                               </div>
                             ) : null}
                           </>
@@ -426,20 +432,9 @@ export default function StockInInvoicesSection({ t }: StockInInvoicesSectionProp
             </div>
           )}
 
-          {totalPages > 1 ? (
-            <div className="flex items-center justify-between gap-2 text-xs text-gray-500">
-              <span>{totalInvoices} {tr('stock_in_invoices_count', 'Invoices').toLowerCase()}</span>
-              <div className="flex items-center gap-2">
-                <span>{tr('page', 'Page')} {page} / {totalPages}</span>
-                <button type="button" className="btn-secondary py-1 text-xs disabled:cursor-not-allowed disabled:opacity-50" disabled={page <= 1 || loading} onClick={() => setPage((current) => Math.max(1, current - 1))}>
-                  {tr('previous', 'Previous')}
-                </button>
-                <button type="button" className="btn-secondary py-1 text-xs disabled:cursor-not-allowed disabled:opacity-50" disabled={page >= totalPages || loading} onClick={() => setPage((current) => current + 1)}>
-                  {tr('next', 'Next')}
-                </button>
-              </div>
-            </div>
-          ) : null}
+          <div className="flex justify-center">
+            <PaginationControls compact rangeAsPageSize page={page} pageSize={pageSize} totalItems={totalInvoices} label={tr('stock_in_invoices_count', 'Invoices').toLowerCase()} t={t} onPageChange={setPage} onPageSizeChange={(size) => { setPageSize(size); setPage(1) }} />
+          </div>
         </>
       )}
     </div>

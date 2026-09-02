@@ -317,6 +317,7 @@ type DeliveryFormState = {
 
 type PosOrder = Record<string, unknown> & {
   cart: CartLineRecord[]
+  checkoutRequestId: string
   customPayment?: boolean
   customer: CustomerRecord & {
     _baseCustomer?: CustomerRecord
@@ -592,6 +593,20 @@ export default function POS() {
   const { syncChannel } = useSync() as SyncContextValue
   const isActive = useIsPageActive('pos')
   const posCopy = useCallback((en: string, km = en) => ((settings.language || 'en') === 'km' ? km : en), [settings.language])
+  // localStorage survives an iOS Home Screen process eviction; sessionStorage
+  // alone does not provide that durability. Scope cart drafts to the signed-in
+  // user so another cashier on the same device never inherits them.
+  const posStorageScope = String(user?.id || 'anonymous')
+  const posOrdersStorageKey = `businessos_pos_orders_${posStorageScope}`
+  const posActiveStorageKey = `businessos_pos_active_${posStorageScope}`
+  const posCounterStorageKey = `businessos_pos_counter_${posStorageScope}`
+  const readPosDraft = (key: string, legacyKey: string): string | null => {
+    try { return localStorage.getItem(key) || sessionStorage.getItem(key) || sessionStorage.getItem(legacyKey) } catch { return null }
+  }
+  const writePosDraft = (key: string, value: string): void => {
+    try { localStorage.setItem(key, value) } catch {}
+    try { sessionStorage.setItem(key, value) } catch {}
+  }
 
 // Remote data shared across all orders
   const [products,         setProducts]         = useState<ProductRecord[]>([])
@@ -689,7 +704,7 @@ export default function POS() {
   // all open orders, carts, customer info, and delivery details.
   const [orders, setOrders] = useState<PosOrder[]>(() => {
     try {
-      const saved = sessionStorage.getItem('bos_pos_orders')
+      const saved = readPosDraft(posOrdersStorageKey, 'bos_pos_orders')
       if (saved) {
         const parsed = JSON.parse(saved) as unknown
         if (Array.isArray(parsed) && parsed.length) return parsed.map((order, index) => normalizeOrder(order as Partial<PosOrder>, index + 1))
@@ -699,13 +714,13 @@ export default function POS() {
   })
   const [activeId, setActiveId] = useState<string | null>(() => {
     try {
-      const saved = sessionStorage.getItem('bos_pos_active')
+      const saved = readPosDraft(posActiveStorageKey, 'bos_pos_active')
       if (saved) return saved
     } catch {}
     return null
   })
   const [orderCounter, setOrderCounter] = useState(() => {
-    try { return parseInt(sessionStorage.getItem('bos_pos_counter') || '2', 10) } catch { return 2 }
+    try { return parseInt(readPosDraft(posCounterStorageKey, 'bos_pos_counter') || '2', 10) } catch { return 2 }
   })
 
   // The currently visible order. Derived, not stored separately.
@@ -737,14 +752,14 @@ export default function POS() {
 
   // Persist whenever orders or activeId change
   useEffect(() => {
-    try { sessionStorage.setItem('bos_pos_orders', JSON.stringify(orders)) } catch {}
-  }, [orders])
+    writePosDraft(posOrdersStorageKey, JSON.stringify(orders))
+  }, [orders, posOrdersStorageKey])
   useEffect(() => {
-    try { if (resolvedActiveId) sessionStorage.setItem('bos_pos_active', resolvedActiveId) } catch {}
-  }, [resolvedActiveId])
+    if (resolvedActiveId) writePosDraft(posActiveStorageKey, resolvedActiveId)
+  }, [resolvedActiveId, posActiveStorageKey])
   useEffect(() => {
-    try { sessionStorage.setItem('bos_pos_counter', String(orderCounter)) } catch {}
-  }, [orderCounter])
+    writePosDraft(posCounterStorageKey, String(orderCounter))
+  }, [orderCounter, posCounterStorageKey])
 
   /** Apply a partial update to the active order. Mirrors React's setState signature. */
   const patchActive = useCallback((patch: Partial<PosOrder>) => {
@@ -1015,6 +1030,8 @@ export default function POS() {
   const filterMetaRequestRef = useRef(0)
   const customerRequestRef = useRef(0)
   const deliveryRequestRef = useRef(0)
+  const customerOptionsLoadedRef = useRef(false)
+  const deliveryOptionsLoadedRef = useRef(false)
   const membershipRequestRef = useRef(0)
   const membershipInfoRef = useRef<MembershipInfo | null>(null)
   const savingCustomerRef = useRef(false)
@@ -1281,6 +1298,7 @@ export default function POS() {
       if (!isTrackedRequestCurrent(customerRequestRef, requestId)) return null
       const nextCustomers = Array.isArray(data) ? data : []
       setCustomers(nextCustomers)
+      customerOptionsLoadedRef.current = true
       return nextCustomers
     } catch (error) {
       if (!isTrackedRequestCurrent(customerRequestRef, requestId)) return null
@@ -1296,6 +1314,7 @@ export default function POS() {
       if (!isTrackedRequestCurrent(deliveryRequestRef, requestId)) return null
       const nextContacts = Array.isArray(data) ? data : []
       setDeliveryContacts(nextContacts)
+      deliveryOptionsLoadedRef.current = true
       return nextContacts
     } catch (error) {
       if (!isTrackedRequestCurrent(deliveryRequestRef, requestId)) return null
@@ -1446,18 +1465,27 @@ export default function POS() {
       setContactOptionsReady(false)
       return undefined
     }
-    if (!catalogLoadedOnceRef.current || catalogRefreshing) return undefined
-    setContactOptionsReady(true)
+    // Customer and courier tables can grow far beyond the first product
+    // window. They are optional checkout helpers, so do not put two broad
+    // contact reads on the catalog's critical path. Wake the relevant list
+    // only when its compact section (or create dialog) is actually opened.
+    const needsCustomerOptions = showCustomer || showAddCustomer
+    const needsDeliveryOptions = (showDelivery && Boolean(active?.isDelivery)) || showAddDelivery
+    if (needsCustomerOptions || needsDeliveryOptions) setContactOptionsReady(true)
     return undefined
-  }, [catalogRefreshing, isActive])
+  }, [active?.isDelivery, isActive, showAddCustomer, showAddDelivery, showCustomer, showDelivery])
 
   useEffect(() => {
     if (!isActive || !contactOptionsReady) return
-    void Promise.allSettled([
-      loadCustomers('POS initial customers'),
-      loadDeliveryContacts('POS initial delivery contacts'),
-    ])
-  }, [contactOptionsReady, isActive, loadCustomers, loadDeliveryContacts])
+    const tasks: Promise<unknown>[] = []
+    if ((showCustomer || showAddCustomer) && !customerOptionsLoadedRef.current) {
+      tasks.push(loadCustomers('POS customer options on demand'))
+    }
+    if (((showDelivery && Boolean(active?.isDelivery)) || showAddDelivery) && !deliveryOptionsLoadedRef.current) {
+      tasks.push(loadDeliveryContacts('POS delivery options on demand'))
+    }
+    if (tasks.length) void Promise.allSettled(tasks)
+  }, [active?.isDelivery, contactOptionsReady, isActive, loadCustomers, loadDeliveryContacts, showAddCustomer, showAddDelivery, showCustomer, showDelivery])
 
   useEffect(() => {
     if (!isActive) {
@@ -1509,10 +1537,10 @@ export default function POS() {
       // branches) is unaffected, so no forceMetadata here.
       void loadCatalogData('POS sync stock')
     }
-    if (channel === 'customers') {
+    if (channel === 'customers' && customerOptionsLoadedRef.current) {
       void loadCustomers('POS sync customers')
     }
-    if (channel === 'deliveryContacts') {
+    if (channel === 'deliveryContacts' && deliveryOptionsLoadedRef.current) {
       void loadDeliveryContacts('POS sync delivery contacts')
     }
   }, [filterOpen, isActive, loadCatalogData, loadCustomers, loadDeliveryContacts, syncChannel])
@@ -2643,12 +2671,20 @@ export default function POS() {
     // behavior, generated inside the transport) made every retry a
     // potential duplicate sale.
     const orderKey = String(resolvedActiveId || 'pos-order')
-    let clientRequestId = checkoutRequestIdsRef.current.get(orderKey)
+    let clientRequestId = String(active.checkoutRequestId || '').trim() || checkoutRequestIdsRef.current.get(orderKey)
     if (!clientRequestId) {
       clientRequestId = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
         ? `sale_${crypto.randomUUID()}`
         : `sale_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`
       checkoutRequestIdsRef.current.set(orderKey, clientRequestId)
+      // Persist before the network request starts. If iOS kills the process
+      // after the server commits but before the response arrives, relaunching
+      // and retrying the restored order reuses this exact idempotency key.
+      const durableOrders = orders.map((order) => (
+        order.id === resolvedActiveId ? { ...order, checkoutRequestId: clientRequestId as string } : order
+      ))
+      writePosDraft(posOrdersStorageKey, JSON.stringify(durableOrders))
+      setOrders(durableOrders)
     }
 
     // Y10: with no payment typed on an awaiting-payment sale, record NO
@@ -2979,20 +3015,15 @@ export default function POS() {
                         <span className="ml-1 inline-flex items-center rounded-full bg-sky-100 px-1.5 py-0.5 align-middle text-[9px] font-semibold text-sky-700 dark:bg-sky-900/30 dark:text-sky-300">{String(p.tag_label).trim()}</span>
                       ) : null}
                     </p>
-                    {/* Selling price + a plain VIP tag on ONE row (user: "show
-                        selling and VIP same row bottom … VIP just say VIP"). A
-                        grouped card shows the HIGHEST option price (user: "only
-                        keep the highest price for selling price") — the old
-                        $min–$max range is gone. The VIP AMOUNT stays off the
-                        grid on purpose (user, Aug 28): the tag only says a VIP
-                        price exists; the number reveals in the detail sheet. */}
+                    {/* Product cards show only the normal selling price. VIP
+                        stays inside the product's price options, matching the
+                        wholesale tier instead of advertising a tier label on
+                        the outside grid. Grouped cards still show the highest
+                        option selling price. */}
                     <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
                       <span className="text-sm font-bold text-blue-600">
                         {fmtUSD(groupProduct ? (groupMeta?.maxSellingPriceUsd || asNumber(p.selling_price_usd)) : asNumber(p.selling_price_usd))}
                       </span>
-                      {asNumber(p.special_price_usd) > 0 || asNumber(p.special_price_khr) > 0 ? (
-                        <span {...getKhmerTextProps(t('special_price') || 'VIP', 'text-[11px] font-medium text-emerald-600 dark:text-emerald-400')}>{t('special_price') || 'VIP'}</span>
-                      ) : null}
                     </div>
                     {asNumber(p.selling_price_khr) > 0 && !groupProduct ? <p className="text-xs text-gray-400">{fmtKHR(asNumber(p.selling_price_khr))}</p> : null}
                     {promoBadge.active ? (

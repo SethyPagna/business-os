@@ -27,6 +27,15 @@ export function getReturn(id: number | string): Promise<unknown> {
   )
 }
 
+export function getReturnReasonPresets(): Promise<unknown> {
+  return route(
+    'returns:reason-presets',
+    () => apiFetch('GET', '/api/returns/reason-presets'),
+    () => ({ configured: false, presets: { customer: [], supplier: [] } }),
+    { raceLocalFallback: false },
+  )
+}
+
 // Reports hub: customer-return (refund) totals over a range. Mirrors the
 // sales daily-report transport shape (startDate/endDate/branchId).
 export function getReturnsReport(params: QueryParams = {}): Promise<unknown> {

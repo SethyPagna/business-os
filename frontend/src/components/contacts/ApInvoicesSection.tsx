@@ -7,6 +7,7 @@ import DateTimeRangePicker from '../shared/DateTimeRangePicker'
 // for anything before 07:00 Bangkok).
 import { fmtDate } from '../../utils/formatters'
 import { getSupplierApInvoices } from '../../api/contactReadTransport.ts'
+import PaginationControls, { clampPage, DEFAULT_PAGE_SIZE } from '../shared/PaginationControls'
 
 type TranslateFn = (key: string) => string | undefined
 
@@ -55,8 +56,6 @@ type ApInvoicesSectionProps = {
   t: TranslateFn
 }
 
-const PAGE_SIZE = 25
-
 export default function ApInvoicesSection({ t }: ApInvoicesSectionProps) {
   const tr = (key: string, fallback: string): string => t(key) || fallback
   const [branch, setBranch] = useState('all')
@@ -65,6 +64,7 @@ export default function ApInvoicesSection({ t }: ApInvoicesSectionProps) {
   const [fromDate, setFromDate] = useState('')
   const [toDate, setToDate] = useState('')
   const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE)
   const [refreshToken, setRefreshToken] = useState(0)
   const [data, setData] = useState<ApPayload | null>(null)
   const [loading, setLoading] = useState(true)
@@ -88,11 +88,17 @@ export default function ApInvoicesSection({ t }: ApInvoicesSectionProps) {
       from: fromDate,
       to: toDate,
       page,
-      page_size: PAGE_SIZE,
+      page_size: pageSize,
     })
       .then((result) => {
         if (!aliveRef.current || requestRef.current !== requestId) return
-        setData((result || {}) as ApPayload)
+        const nextData = (result || {}) as ApPayload
+        const nextPage = clampPage(page, Number(nextData.total_invoices) || 0, pageSize)
+        if (nextPage !== page) {
+          setPage(nextPage)
+          return
+        }
+        setData(nextData)
       })
       .catch((err: unknown) => {
         if (!aliveRef.current || requestRef.current !== requestId) return
@@ -102,13 +108,12 @@ export default function ApInvoicesSection({ t }: ApInvoicesSectionProps) {
         if (aliveRef.current && requestRef.current === requestId) setLoading(false)
       })
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [branch, supplier, status, fromDate, toDate, page, refreshToken])
+  }, [branch, supplier, status, fromDate, toDate, page, pageSize, refreshToken])
 
   const totals = data?.totals || {}
   const invoices = Array.isArray(data?.invoices) ? data!.invoices! : []
   const supplierOptions = Array.isArray(data?.meta?.suppliers) ? data!.meta!.suppliers! : []
   const totalInvoices = Number(data?.total_invoices) || 0
-  const totalPages = Math.max(1, Math.ceil(totalInvoices / PAGE_SIZE))
 
   const money = (value: unknown): string => `$${(Number(value) || 0).toFixed(2)}`
   const anyFilter = branch !== 'all' || supplier !== 'all' || status !== 'all' || fromDate !== '' || toDate !== ''
@@ -262,20 +267,9 @@ export default function ApInvoicesSection({ t }: ApInvoicesSectionProps) {
             </div>
           )}
 
-          {totalPages > 1 ? (
-            <div className="flex items-center justify-between gap-2 text-xs text-gray-500">
-              <span>{totalInvoices} {tr('stock_in_invoices_count', 'Invoices').toLowerCase()}</span>
-              <div className="flex items-center gap-2">
-                <span>{tr('page', 'Page')} {page} / {totalPages}</span>
-                <button type="button" className="btn-secondary py-1 text-xs disabled:cursor-not-allowed disabled:opacity-50" disabled={page <= 1 || loading} onClick={() => setPage((current) => Math.max(1, current - 1))}>
-                  {tr('previous', 'Previous')}
-                </button>
-                <button type="button" className="btn-secondary py-1 text-xs disabled:cursor-not-allowed disabled:opacity-50" disabled={page >= totalPages || loading} onClick={() => setPage((current) => current + 1)}>
-                  {tr('next', 'Next')}
-                </button>
-              </div>
-            </div>
-          ) : null}
+          <div className="flex justify-center">
+            <PaginationControls compact rangeAsPageSize page={page} pageSize={pageSize} totalItems={totalInvoices} label={tr('stock_in_invoices_count', 'Invoices').toLowerCase()} t={t} onPageChange={setPage} onPageSizeChange={(size) => { setPageSize(size); setPage(1) }} />
+          </div>
         </>
       )}
     </div>

@@ -80,6 +80,10 @@ export function otpDisable(payload: AuthPayload = {}): Promise<unknown> {
   return apiFetch('POST', '/api/auth/otp/disable', payload || {})
 }
 
+export function otpRecoveryReset(payload: AuthPayload = {}): Promise<unknown> {
+  return apiFetch('POST', '/api/auth/otp/recover', payload || {})
+}
+
 export function otpVerify(payload: AuthPayload = {}): Promise<unknown> {
   // deviceId rides along like it does on /login: the server re-runs the
   // device-approval gate at the OTP step now, and the persistent id is what

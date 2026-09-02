@@ -35,7 +35,10 @@ await runTest('createSale queues retryable offline writes with an idempotency ke
 })
 
 await runTest('retryPendingSyncNow syncs pending sales instead of discarding them', () => {
-  assert.match(saleWriteTransportSource, /export async function syncPendingSalesQueue/)
+  assert.match(saleWriteTransportSource, /export function syncPendingSalesQueue/)
+  assert.match(saleWriteTransportSource, /pendingSalesSyncPromise/)
+  assert.match(saleWriteTransportSource, /db\.transaction\('rw', salesTable, queueTable/)
+  assert.match(saleWriteTransportSource, /requestPersistentAppStorage\(\)/)
   assert.match(saleWriteTransportSource, /createSaleWithoutWriteDedupe\(payload\)/)
   assert.match(salesTransportSource, /apiFetch\(\s*'POST',\s*'\/api\/sales'/)
   assert.match(salesTransportSource, /skipWriteDedupe:\s*true/)

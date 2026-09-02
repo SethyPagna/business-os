@@ -55,9 +55,9 @@ export default function PageHeader({
   void iconClassName
   const titleText = typeof title === 'string' ? title : ''
   const subtitleText = typeof subtitle === 'string' ? subtitle.trim() : ''
-  const layoutClass = stackOnMobile ? 'flex items-center justify-end gap-3' : 'flex items-center justify-end gap-3'
+  const layoutClass = stackOnMobile ? 'flex min-w-0 items-center justify-end gap-2 sm:gap-3' : 'flex min-w-0 items-center justify-end gap-2 sm:gap-3'
   const wrapperClass = [layoutClass, className].filter(Boolean).join(' ')
-  const resolvedActionsClass = ['flex min-w-0 flex-shrink-0 items-center gap-2', actionsClassName].filter(Boolean).join(' ')
+  const resolvedActionsClass = ['flex min-w-0 max-w-full flex-1 items-center justify-end gap-2 overflow-x-auto overscroll-x-contain [touch-action:pan-x] [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden', actionsClassName].filter(Boolean).join(' ')
 
   if (!actions && !subtitleText && !historySlot) return null
 

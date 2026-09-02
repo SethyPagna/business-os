@@ -64,7 +64,7 @@ await runTest('the compact id form stays OUT of displayed dates (receipt shows m
   // dates keep the app-wide mm/dd/yyyy + 24-hour convention.
   assert.equal(fmtDateTime24('2026-08-30T07:35:12Z'), '08/30/2026 14:35')
   const receipt = readFrontend('src/components/receipt/Receipt.tsx')
-  assert.match(receipt, /fmtDateTime24\(parsedDate\)/)
+  assert.match(receipt, /fmtDateTime24\(createdAt \|\| new Date\(\)\)/)
   // The old locale-default form printed 12-hour AM/PM (and day-first on
   // non-US devices) -- it must not come back.
   assert.doesNotMatch(receipt, /toLocaleString\(undefined/)

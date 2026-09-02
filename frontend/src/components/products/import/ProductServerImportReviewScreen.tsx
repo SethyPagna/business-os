@@ -3,6 +3,7 @@ import AlertTriangle from 'lucide-react/dist/esm/icons/alert-triangle.js'
 import Loader2 from 'lucide-react/dist/esm/icons/loader-2.js'
 import Search from 'lucide-react/dist/esm/icons/search.js'
 import AppSelect from '../../shared/AppSelect'
+import PaginationControls from '../../shared/PaginationControls'
 import { approveImportJob, getImportJob, getImportJobReview, updateImportJobDecisions } from '../../../api/importJobsTransport'
 import { beginSingleAction, finishSingleAction } from '../../../utils/actionGuards'
 import { importPollDelayMs } from '../../../utils/importPoll'
@@ -243,7 +244,6 @@ export default function ProductServerImportReviewScreen({ jobId, jobRevision, t,
     </div>
   }
 
-  const pages = Math.max(1, Math.ceil(total / PAGE_SIZE))
   return <div className="space-y-4">
     <div><h3 className="text-sm font-semibold">{tr('import_review_title', 'Review before importing')} — Products</h3><p className="mt-1 text-xs text-slate-500 dark:text-slate-400">{summary || tr('import_review_no_actions', 'No actionable rows were found.')}</p></div>
     {unresolved > 0 ? <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-100"><strong>{unresolved} flagged row(s) still need a decision.</strong> Barcode/SKU collisions stay separate by default; negative stock becomes 0. Confirm that safe result or skip the row.</div> : null}
@@ -266,7 +266,7 @@ export default function ProductServerImportReviewScreen({ jobId, jobRevision, t,
         return <tr key={row.rowNumber} className="border-t border-slate-100 align-top dark:border-slate-800"><td className="px-3 py-2">{row.rowNumber}</td><td className="px-3 py-2 font-medium">{row.identifier || String(row.data?.name || '—')}<div className="mt-0.5 font-normal text-slate-400">{String(row.data?.barcode || row.data?.sku || '')}</div></td><td className="px-3 py-2">{row.action}</td><td className="max-w-sm px-3 py-2 text-slate-500 dark:text-slate-400">{row.message || (row.warnings || []).map((warning) => warning.message).filter(Boolean).join(' · ') || '—'}</td><td className="w-52 px-3 py-2"><AppSelect value={choiceFor(row)} onChange={(value) => void saveDecision(row, value)} ariaLabel={`Decision for row ${row.rowNumber}`} buttonClassName="w-full px-2 py-1.5 text-xs" options={options} disabled={savingRow !== null} /></td></tr>
       })}</tbody></table> : <div className="p-8 text-center text-sm text-slate-500">No matching rows.</div>}
     </div>
-    {total > PAGE_SIZE ? <div className="flex items-center justify-between text-xs text-slate-500"><span>Page {page} of {pages}</span><div className="flex gap-2"><button type="button" className="btn-secondary px-2.5 py-1 text-xs" disabled={page <= 1} onClick={() => setPage((value) => Math.max(1, value - 1))}>Previous</button><button type="button" className="btn-secondary px-2.5 py-1 text-xs" disabled={page >= pages} onClick={() => setPage((value) => value + 1)}>Next</button></div></div> : null}
+    <div className="flex justify-center"><PaginationControls compact rangeAsPageSize page={page} pageSize={PAGE_SIZE} totalItems={total} label="records" onPageChange={setPage} /></div>
     {jobError ? <p className="text-xs text-red-600 dark:text-red-400">{jobError}</p> : null}
     <div className="sticky bottom-0 -mx-5 -mb-5 flex justify-end gap-2 border-t border-slate-100 bg-white px-5 pb-5 pt-3 dark:border-slate-800 dark:bg-slate-900"><button type="button" className="btn-secondary" disabled={approving} onClick={() => void onReviewLater()}>Review later</button><button type="button" className="btn-primary" disabled={approving || loadingRows || unresolved > 0} onClick={() => void confirm()}>{approving ? 'Approving…' : 'Confirm & import'}</button></div>
   </div>

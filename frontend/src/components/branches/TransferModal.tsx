@@ -17,9 +17,11 @@ import {
 import { getProductBatches, getTrackedBatchProductIds } from '../../api/batchesTransport.ts'
 import type { ProductBatch } from '../../api/batchesTransport.ts'
 import { useDebouncedValue } from '../products/helpers/productPageHelpers.ts'
+import { fuzzyTextMatches } from '../../utils/searchMatch.ts'
 import AppSelect, { type AppSelectOption } from '../shared/AppSelect.tsx'
 import { buildProductGroups } from '../../utils/productGrouping.ts'
 import { batchDisplayLabel } from '../../utils/batchLabel.ts'
+import ScanSearchButton from '../shared/ScanSearchButton.tsx'
 
 const TRANSFER_STOCK_LOAD_TIMEOUT_MS = 12000
 const TRANSFER_STOCK_MUTATION_TIMEOUT_MS = 12000
@@ -174,21 +176,17 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
   const aliveRef = useRef(true)
 
   /**
-   * 2.1b Batch/lot picker (single mode only) -- when the selected product
-   * is batch-tracked at the source branch, the operator has to pick which
-   * lot is moving (same "picker required" shape as POS's ProductDetailSheet)
-   * instead of transferring an anonymous quantity off the product's total.
-   * See branches.ts's POST /transfer batch-aware comment for what happens
-   * server-side once a batchId is included.
+   * 2.1b Optional batch/lot picker (single mode only). Operators can select
+   * a precise lot when that matters; otherwise the server allocates the
+   * requested quantity FIFO across available source lots in one transaction.
+   * This keeps quantity entry direct without weakening lot traceability.
    */
   const [productBatches, setProductBatches] = useState<ProductBatch[]>([])
   const [selectedBatchId, setSelectedBatchId] = useState<number | null>(null)
   const [loadingBatches, setLoadingBatches] = useState(false)
   const batchRequestRef = useRef(0)
-  // Which product ids carry active batch/lot tracking at the source branch
-  // (same source of truth POS's ProductDetailSheet uses --
-  // getTrackedBatchProductIds -- so a product only forces the picker below
-  // when it actually has batch stock to pick from at this branch).
+  // Which product ids carry active batch/lot tracking at the source branch.
+  // They show the optional lot selector below; they do not gate quantity entry.
   const [trackedBatchProductIds, setTrackedBatchProductIds] = useState<Set<number>>(new Set())
 
   /**
@@ -201,7 +199,11 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
    * product's branch_quantity for this branch in one response) so the
    * multi-select picker never needs a "next page" click.
    */
-  const [mode, setMode] = useState<TransferMode>('single')
+  // One picker handles both one-product and many-product transfers. Selecting
+  // one row submits one item; selecting several submits them atomically through
+  // the same bulk endpoint. Keeping one mode removes the two diverging search
+  // and loading paths that repeatedly fell out of sync.
+  const [mode] = useState<TransferMode>('multiple')
   const [multiProducts, setMultiProducts] = useState<TransferProduct[]>([])
   const [loadingMultiProducts, setLoadingMultiProducts] = useState(false)
   const [selectedQuantities, setSelectedQuantities] = useState<Record<string, string>>({})
@@ -494,22 +496,32 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
 
   /**
    * 4.2 Multi-mode search filter -- same rules as 4.1 (hide zero-stock rows
-   * when search is empty, match name/sku when it isn't), sourced from the
-   * unpaged multiProducts list instead of the paged single-mode one.
+   * when search is empty, match name/sku/barcode when it isn't), sourced from the
+   * unpaged multiProducts list instead of the paged single-mode one. Was a
+   * literal `name.includes(query) || sku.includes(query)` -- same class of
+   * "2Medium" miss the per-branch/single-mode search had (see backend's
+   * buildBranchStockWhere comment): a stored "Medium (2)" never matched a
+   * typed "2Medium"/"2 Medium" since this list is fetched unpaged and
+   * filtered entirely client-side, with no server round-trip to catch it.
+   * fuzzyTextMatches (utils/searchMatch.ts) is the same typo/conjoined-word/
+   * reordering-tolerant matcher Inventory.tsx and POS.tsx already use for
+   * their own in-memory re-filtering -- swapping to it here makes every
+   * search surface in the app behave the same way. Also folded in `barcode`
+   * (previously omitted from the haystack here even though the field is on
+   * TransferProduct) -- the single-mode/server-side path searches
+   * name+sku+barcode (see buildBranchStockWhere's PRODUCT_SEARCH_COLUMNS),
+   * so leaving barcode out of this client-side path was the last place
+   * this modal's two search paths disagreed on what "fully scoped" means.
    */
   const filteredMulti = useMemo(() => {
-    const query = debouncedSearch.trim().toLowerCase()
+    const query = debouncedSearch.trim()
     let inStock = multiProducts.filter((product) => Number(product.branch_quantity || 0) > 0)
     if (showSelectedOnly) inStock = inStock.filter((product) => String(product.id) in selectedQuantities)
     if (!query) return inStock
-    return inStock.filter((product) => {
-      const name = String(product.name || '').toLowerCase()
-      const sku = String(product.sku || '').toLowerCase()
-      return name.includes(query) || sku.includes(query)
-    })
+    return inStock.filter((product) => fuzzyTextMatches([product.name, product.sku, product.barcode].join(' '), query))
   }, [multiProducts, debouncedSearch, showSelectedOnly, selectedQuantities])
 
-  // Same name/cost/price/barcode grouping every other list surface in the
+  // Same name/cost/barcode grouping every other list surface in the
   // app applies (Products/Inventory/POS/Branches' own stock grid, via
   // utils/productGrouping.ts) -- previously this modal's multi-select list
   // was the one place that rendered every row flat regardless of whether
@@ -564,14 +576,12 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
     })
   }
 
-  // Batch tracked and something is genuinely picked/pickable -- required
-  // before a transfer of this product can submit, same "can't move an
-  // anonymous quantity off a lot-tracked product" rule as POS's
-  // ProductDetailSheet.
+  // A selected lot caps the request to that lot. With no selected lot, the
+  // whole branch quantity is available and the server performs FIFO allocation.
   const selectedBatch = productBatches.find((batch) => batch.id === selectedBatchId) || null
-  const batchSelectionRequired = !!selectedProduct && trackedBatchProductIds.has(Number(selectedProduct.id))
-  const transferAvailable = batchSelectionRequired
-    ? Number(selectedBatch?.quantity || 0)
+  const hasBatchLots = !!selectedProduct && trackedBatchProductIds.has(Number(selectedProduct.id))
+  const transferAvailable = selectedBatch
+    ? Number(selectedBatch.quantity || 0)
     : Number(selectedProduct?.branch_quantity || 0)
 
   /**
@@ -581,11 +591,6 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
    */
   const handleTransfer = async () => {
     if (!fromBranch || !toBranch || !selectedProduct || !quantity) return
-
-    if (batchSelectionRequired && !selectedBatchId) {
-      notify(t('transfer_pick_batch_first') || 'Pick a lot / batch first', 'error')
-      return
-    }
 
     if (Number.parseInt(fromBranch, 10) === Number.parseInt(toBranch, 10)) {
       notify(t('transfer_same_branch_error') || 'Source and destination cannot be the same', 'error')
@@ -604,6 +609,18 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
       return
     }
 
+    const fromName = branches.find((branch) => String(branch.id) === String(fromBranch))?.name || t('source_branch') || 'source branch'
+    const toName = branches.find((branch) => String(branch.id) === String(toBranch))?.name || t('destination_branch') || 'destination branch'
+    const lot = selectedBatch
+      ? ` ${t('transfer_selected_lot') || 'Selected lot'}: ${batchDisplayLabel({ id: selectedBatch.id, lot_code: (selectedBatch.lot_code as string) ?? null, received_at: (selectedBatch.received_at as string) ?? null, batch_number: (selectedBatch.batch_number as number) ?? null }, t('batch') || 'Batch')}.`
+      : ` ${t('transfer_fifo_lot_notice') || 'Available lots will be allocated FIFO.'}`
+    if (!window.confirm((t('confirm_transfer_details') || 'Transfer {n} {unit} of "{name}" from {from} to {to}?')
+      .replace('{n}', String(qty))
+      .replace('{unit}', selectedProduct.unit || '')
+      .replace('{name}', selectedProduct.name || '')
+      .replace('{from}', fromName)
+      .replace('{to}', toName) + lot)) return
+
     if (!beginSingleAction(transferInFlightRef, { blocked: saving })) return
     setSaving(true)
     try {
@@ -616,7 +633,7 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
         note,
         userId: user?.id,
         userName: user?.name,
-        batchId: batchSelectionRequired ? selectedBatchId : null,
+        batchId: selectedBatchId,
       }), 'Transfer branch stock', TRANSFER_STOCK_MUTATION_TIMEOUT_MS)
 
       // The single-transfer endpoint returns the moved lot ({ destBatchId } or a
@@ -685,6 +702,15 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
       items.push({ productId, quantity: qty })
     }
 
+    const fromName = branches.find((branch) => String(branch.id) === String(fromBranch))?.name || t('source_branch') || 'source branch'
+    const toName = branches.find((branch) => String(branch.id) === String(toBranch))?.name || t('destination_branch') || 'destination branch'
+    const totalQuantity = items.reduce((sum, item) => sum + item.quantity, 0)
+    if (!window.confirm((t('confirm_bulk_transfer_details') || 'Transfer {products} products ({quantity} total units) from {from} to {to}? Available lots will be allocated FIFO.')
+      .replace('{products}', String(items.length))
+      .replace('{quantity}', String(totalQuantity))
+      .replace('{from}', fromName)
+      .replace('{to}', toName))) return
+
     if (!beginSingleAction(transferBulkInFlightRef, { blocked: savingBulk })) return
     setSavingBulk(true)
     try {
@@ -721,18 +747,28 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
   }
 
   return createPortal(
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-      <div className="fade-in flex max-h-modal-92 w-full max-w-2xl flex-col rounded-2xl bg-white shadow-2xl dark:bg-gray-800">
-        <div className="flex items-center justify-between border-b border-gray-200 p-5 dark:border-gray-700">
-          <h2 className="text-lg font-bold text-gray-900 dark:text-white">{t('stock_transfer') || 'Stock Transfer'}</h2>
-          <button
-            type="button"
-            onClick={onClose}
-            className="flex h-8 w-8 items-center justify-center rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-gray-700"
-            aria-label={t('close') || 'Close'}
-          >
-            <X className="h-4 w-4" />
-          </button>
+    <div className="modal-viewport-safe pointer-events-auto fixed inset-0 z-[1050] flex items-end justify-center overflow-y-auto bg-black/50 sm:items-center">
+      <div className="modal-panel-safe fade-in flex w-full flex-col rounded-t-2xl bg-white shadow-2xl dark:bg-gray-800 sm:max-w-2xl sm:rounded-2xl">
+        <div className="flex items-center justify-between border-b border-gray-200 p-4 dark:border-gray-700 sm:p-5">
+          <h2 className="min-w-0 truncate text-lg font-bold text-gray-900 dark:text-white">{t('stock_transfer') || 'Stock Transfer'}</h2>
+          <div className="flex shrink-0 items-center gap-1">
+            <button
+              className="btn-primary min-h-9 max-w-28 truncate px-3 py-1.5 text-xs sm:hidden"
+              type="button"
+              onClick={handleBulkTransfer}
+              disabled={savingBulk || loadingMultiProducts || !fromBranch || !toBranch || selectedCount === 0}
+            >
+              {saving || savingBulk ? (t('saving') || 'Saving...') : (t('transfer') || 'Transfer')}
+            </button>
+            <button
+              type="button"
+              onClick={onClose}
+              className="flex h-8 w-8 items-center justify-center rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-gray-700"
+              aria-label={t('close') || 'Close'}
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
         </div>
 
         <div className="flex-1 space-y-4 overflow-auto p-5">
@@ -770,50 +806,22 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
             </div>
           </div>
 
-          {fromBranch ? (
-            <div className="flex gap-2 rounded-lg bg-gray-100 p-1 dark:bg-gray-700/50" role="tablist" aria-label="Transfer mode">
-              <button
-                type="button"
-                role="tab"
-                aria-selected={mode === 'single'}
-                onClick={() => setMode('single')}
-                className={`flex-1 rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
-                  mode === 'single'
-                    ? 'bg-white text-gray-900 shadow-sm dark:bg-gray-600 dark:text-white'
-                    : 'text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'
-                }`}
-              >
-                {t('transfer_mode_single') || 'Single product'}
-              </button>
-              <button
-                type="button"
-                role="tab"
-                aria-selected={mode === 'multiple'}
-                onClick={() => setMode('multiple')}
-                className={`flex-1 rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
-                  mode === 'multiple'
-                    ? 'bg-white text-gray-900 shadow-sm dark:bg-gray-600 dark:text-white'
-                    : 'text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'
-                }`}
-              >
-                {t('transfer_mode_multiple') || 'Multiple products'}
-              </button>
-            </div>
-          ) : null}
-
           {fromBranch && mode === 'single' && !selectedProduct ? (
             <div>
               <label htmlFor="transfer-product-search" className="mb-1 block text-sm font-semibold text-gray-700 dark:text-gray-300">
                 {t('select_product') || 'Select Product'}
               </label>
-              <input
-                id="transfer-product-search"
-                name="transfer_product_search"
-                className="input mb-2"
-                placeholder={t('search_products_placeholder') || 'Search products'}
-                value={search}
-                onChange={(event) => setSearch(event.target.value)}
-              />
+              <div className="mb-2 flex min-w-0 items-center gap-2">
+                <input
+                  id="transfer-product-search"
+                  name="transfer_product_search"
+                  className="input min-w-0 flex-1"
+                  placeholder={t('search_products_placeholder') || 'Search products'}
+                  value={search}
+                  onChange={(event) => setSearch(event.target.value)}
+                />
+                <ScanSearchButton onDetected={setSearch} t={t} />
+              </div>
               <div className="max-h-48 overflow-auto divide-y divide-gray-100 rounded-xl border border-gray-200 dark:divide-gray-700 dark:border-gray-600">
                 {loadingProducts ? (
                   <p className="py-6 text-center text-sm text-gray-400">{t('loading') || 'Loading'}...</p>
@@ -878,17 +886,30 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
                 </span>
               </div>
 
-              {batchSelectionRequired ? (
+              {hasBatchLots ? (
                 <div>
                   <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
-                    {t('transfer_pick_batch') || 'Pick a lot / batch'}
+                    {t('transfer_pick_batch_optional') || 'Lot / batch (optional)'}
                   </label>
                   {loadingBatches ? (
                     <p className="py-3 text-center text-sm text-gray-400">{t('loading') || 'Loading'}...</p>
                   ) : productBatches.length === 0 ? (
                     <p className="py-3 text-center text-sm text-gray-400">{t('transfer_no_batches') || 'No lots with stock at this branch'}</p>
                   ) : (
-                    <div className="max-h-32 overflow-auto divide-y divide-gray-100 rounded-xl border border-gray-200 dark:divide-gray-700 dark:border-gray-600">
+                    <>
+                      <div className="max-h-32 overflow-auto divide-y divide-gray-100 rounded-xl border border-gray-200 dark:divide-gray-700 dark:border-gray-600">
+                      <button
+                        type="button"
+                        onClick={() => setSelectedBatchId(null)}
+                        className={`flex w-full items-center justify-between px-4 py-2 text-left text-sm transition-colors ${
+                          selectedBatchId == null
+                            ? 'bg-blue-100 dark:bg-blue-900/40'
+                            : 'hover:bg-gray-50 dark:hover:bg-gray-700/50'
+                        }`}
+                      >
+                        <span className="font-medium">{t('transfer_auto_fifo') || 'Automatic (FIFO)'}</span>
+                        <span className="text-xs text-gray-500 dark:text-gray-400">{t('transfer_auto_fifo_hint') || 'Use all available lots'}</span>
+                      </button>
                       {productBatches.map((batch) => {
                         const batchOut = Number(batch.quantity || 0) <= 0
                         return (
@@ -898,7 +919,6 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
                             disabled={batchOut}
                             onClick={() => {
                               setSelectedBatchId(batch.id)
-                              setQuantity('')
                             }}
                             className={`flex w-full items-center justify-between px-4 py-2 text-left text-sm transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
                               batch.id === selectedBatchId
@@ -914,7 +934,11 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
                           </button>
                         )
                       })}
-                    </div>
+                      </div>
+                      <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                        {t('transfer_optional_lot_hint') || 'Choose a specific lot only when needed. Otherwise, stock is allocated FIFO from available lots.'}
+                      </p>
+                    </>
                   )}
                 </div>
               ) : null}
@@ -940,14 +964,12 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
                       onChange={(event) => setQuantity(event.target.value)}
                       placeholder="0"
                       autoFocus
-                      disabled={batchSelectionRequired && !selectedBatchId}
                       aria-invalid={quantity !== '' && (!Number.isFinite(Number(quantity)) || Number(quantity) <= 0) ? 'true' : 'false'}
                     />
                     <span className="text-sm text-gray-500 dark:text-gray-400">{selectedProduct.unit}</span>
                     <button
                       className="btn-secondary px-2 py-1.5 text-xs"
                       type="button"
-                      disabled={batchSelectionRequired && !selectedBatchId}
                       onClick={() => setQuantity(String(transferAvailable))}
                     >
                       {t('all') || 'All'}
@@ -977,14 +999,17 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
               <label htmlFor="transfer-product-search-multi" className="mb-1 block text-sm font-semibold text-gray-700 dark:text-gray-300">
                 {t('select_product') || 'Select Product'}
               </label>
-              <input
-                id="transfer-product-search-multi"
-                name="transfer_product_search_multi"
-                className="input mb-2"
-                placeholder={t('search_products_placeholder') || 'Search products'}
-                value={search}
-                onChange={(event) => setSearch(event.target.value)}
-              />
+              <div className="mb-2 flex min-w-0 items-center gap-2">
+                <input
+                  id="transfer-product-search-multi"
+                  name="transfer_product_search_multi"
+                  className="input min-w-0 flex-1"
+                  placeholder={t('search_products_placeholder') || 'Search products'}
+                  value={search}
+                  onChange={(event) => setSearch(event.target.value)}
+                />
+                <ScanSearchButton onDetected={setSearch} t={t} />
+              </div>
 
               <div className="mb-2 flex flex-wrap items-center gap-2">
                 <label className="flex items-center gap-2 text-sm font-medium text-gray-700 dark:text-gray-300">
@@ -1040,8 +1065,8 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
                           aria-label={product.name}
                         />
                         <div className="min-w-0 flex-1">
-                          <div className="truncate text-sm font-medium text-gray-900 dark:text-white">{product.name}</div>
-                          {product.sku ? <div className="truncate font-mono text-xs text-gray-400">{product.sku}</div> : null}
+                          <div className="whitespace-normal break-words text-sm font-medium text-gray-900 dark:text-white">{product.name}</div>
+                          {product.sku ? <div className="break-all font-mono text-xs text-gray-400">{product.sku}</div> : null}
                         </div>
                         <span className="shrink-0 text-xs text-gray-500 dark:text-gray-400">
                           {t('available') || 'Available'}: {product.branch_quantity} {product.unit}
@@ -1073,7 +1098,7 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
                   return [
                     <div
                       key={`group-${group.key}`}
-                      className="bg-gray-50 px-4 py-1 text-[11px] font-semibold uppercase tracking-wide text-gray-400 dark:bg-gray-800/60"
+                      className="whitespace-normal break-words bg-gray-50 px-4 py-1 text-[11px] font-semibold uppercase tracking-wide text-gray-400 dark:bg-gray-800/60"
                     >
                       {group.name} · {(t('transfer_group_variant_count') || '{n} variants').replace('{n}', String(group.rows.length))}
                     </div>,
@@ -1099,28 +1124,17 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
           ) : null}
         </div>
 
-        <div className="flex gap-3 border-t border-gray-200 p-5 dark:border-gray-700">
-          {mode === 'single' ? (
-            <button
-              className="btn-primary flex-1"
-              type="button"
-              onClick={handleTransfer}
-              disabled={saving || loadingProducts || !fromBranch || !toBranch || !selectedProduct || !quantity || (batchSelectionRequired && !selectedBatchId)}
-            >
-              {saving ? (t('saving') || 'Saving...') : (t('stock_transfer') || 'Transfer')}
-            </button>
-          ) : (
-            <button
-              className="btn-primary flex-1"
-              type="button"
-              onClick={handleBulkTransfer}
-              disabled={savingBulk || loadingMultiProducts || !fromBranch || !toBranch || selectedCount === 0}
-            >
-              {savingBulk
-                ? (t('saving') || 'Saving...')
-                : `${t('transfer_bulk_button') || 'Transfer selected'}${selectedCount > 0 ? ` (${selectedCount})` : ''}`}
-            </button>
-          )}
+        <div className="hidden gap-3 border-t border-gray-200 p-4 dark:border-gray-700 sm:flex sm:p-5">
+          <button
+            className="btn-primary flex-1"
+            type="button"
+            onClick={handleBulkTransfer}
+            disabled={savingBulk || loadingMultiProducts || !fromBranch || !toBranch || selectedCount === 0}
+          >
+            {savingBulk
+              ? (t('saving') || 'Saving...')
+              : `${t('transfer_bulk_button') || 'Transfer selected'}${selectedCount > 0 ? ` (${selectedCount})` : ''}`}
+          </button>
           <button className="btn-secondary" type="button" onClick={onClose} disabled={saving || savingBulk}>
             {t('cancel') || 'Cancel'}
           </button>

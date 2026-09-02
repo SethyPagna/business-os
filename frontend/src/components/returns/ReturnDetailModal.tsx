@@ -95,8 +95,8 @@ export default function ReturnDetailModal({ ret, onClose, onEdit, fmtUSD, fmtKHR
     : (ret.return_type || tr('manual_return', 'manual'))
 
   return createPortal(
-    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-0 sm:items-center sm:p-4" onClick={onClose}>
-      <div className="flex max-h-modal-90 w-full flex-col rounded-t-2xl bg-white shadow-2xl sm:max-w-2xl sm:rounded-2xl dark:bg-gray-800" onClick={(event) => event.stopPropagation()}>
+    <div className="modal-viewport-safe pointer-events-auto fixed inset-0 z-[1050] flex items-end justify-center overflow-y-auto bg-black/50 sm:items-center" onClick={onClose}>
+      <div className="modal-panel-safe flex w-full flex-col rounded-t-2xl bg-white shadow-2xl sm:max-w-2xl sm:rounded-2xl dark:bg-gray-800" onClick={(event) => event.stopPropagation()}>
         <div className="flex items-center justify-between border-b border-gray-200 p-4 dark:border-gray-700">
           <div>
             <div className="font-mono text-base font-bold text-gray-900 dark:text-white">{ret.return_number}</div>
@@ -158,7 +158,7 @@ export default function ReturnDetailModal({ ret, onClose, onEdit, fmtUSD, fmtKHR
               {items.map((item, index) => (
                 <div key={`${item.id || item.product_id || 'item'}-${index}`} className="flex items-start justify-between gap-2 border-b border-gray-100 py-2 last:border-0 dark:border-gray-700">
                   <div className="min-w-0 flex-1">
-                    <div className="truncate text-sm font-medium text-gray-800 dark:text-gray-200">{item.product_name || '-'}</div>
+                    <div className="detail-scroll-text text-sm font-medium text-gray-800 dark:text-gray-200">{item.product_name || '-'}</div>
                     <div className="text-xs text-gray-400">
                       {tr('quantity', 'Qty')}: {item.quantity || 0}
                       {!isSupplier ? (() => {
@@ -184,7 +184,7 @@ export default function ReturnDetailModal({ ret, onClose, onEdit, fmtUSD, fmtKHR
               <div className="space-y-1 rounded-xl border border-emerald-200 bg-emerald-50 p-3 dark:border-emerald-800 dark:bg-emerald-900/20">
                 {replacementItems.map((line, index) => (
                   <div key={`${line.id || 'replacement'}-${index}`} className="flex justify-between py-1 text-sm">
-                    <span className="mr-2 truncate text-gray-700 dark:text-gray-300">{line.product_name || '-'} × {line.quantity || 0}</span>
+                    <span className="detail-scroll-text mr-2 min-w-0 flex-1 text-gray-700 dark:text-gray-300">{line.product_name || '-'} × {line.quantity || 0}</span>
                     <span className="flex-shrink-0 font-medium text-gray-900 dark:text-white">{fmtUSD(coerceMoney(line.total_usd))}</span>
                   </div>
                 ))}

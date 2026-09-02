@@ -3,9 +3,6 @@ import UserIcon from 'lucide-react/dist/esm/icons/user.js'
 import LogOut from 'lucide-react/dist/esm/icons/log-out.js'
 import ShoppingBag from 'lucide-react/dist/esm/icons/shopping-bag.js'
 import Heart from 'lucide-react/dist/esm/icons/heart.js'
-import ShieldCheck from 'lucide-react/dist/esm/icons/shield-check.js'
-import Ticket from 'lucide-react/dist/esm/icons/ticket.js'
-import Lock from 'lucide-react/dist/esm/icons/lock.js'
 import PortalNoPaymentNotice from './PortalNoPaymentNotice.tsx'
 import type { PortalAccountProfile } from './portalAccount.ts'
 
@@ -90,44 +87,6 @@ export default function CatalogAccountSection({
         {copy('accountSubtitle', 'Optional — browse and build your list as a guest, or sign in to keep it across devices.', 'ជាជម្រើស — រុករក និងបង្កើតបញ្ជីជាភ្ញៀវ ឬចូលគណនីដើម្បីរក្សាទុកឆ្លងកាត់ឧបករណ៍។')}
       </p>
       <div className="space-y-4">
-        {/* Membership lookup — kept but DISABLED (user correction to §2). It is
-            still shown so a guest can see the feature exists, greyed out, with
-            the exact reason it is unavailable in guest mode. Signed-in members
-            see their membership on the profile card below instead. */}
-        {!account ? (
-          <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 dark:border-neutral-700 dark:bg-white/5">
-            <div className="flex items-center gap-2">
-              <Ticket className="h-4 w-4 shrink-0 text-amber-500 dark:text-amber-300" />
-              <div className="text-sm font-semibold text-slate-900 dark:text-white">{copy('membership', 'Membership', 'សមាជិកភាព')}</div>
-              <span className="ml-auto inline-flex items-center gap-1 rounded-full bg-slate-200 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-500 dark:bg-white/10 dark:text-neutral-300">
-                <Lock className="h-3 w-3" />
-                {copy('guestModeBadge', 'Guest', 'ភ្ញៀវ')}
-              </span>
-            </div>
-            <div className="mt-2 flex items-start gap-2 text-[13px] leading-relaxed text-slate-600 dark:text-neutral-300">
-              <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-emerald-500 dark:text-emerald-300" />
-              <span>{copy('membershipGuestMode', 'You are currently in GUEST mode. This feature is not enabled in Guest mode for privacy and security purposes.', 'អ្នកកំពុងស្ថិតក្នុងទម្រង់ភ្ញៀវ (GUEST)។ មុខងារនេះមិនត្រូវបានបើកនៅក្នុងទម្រង់ភ្ញៀវទេ ដើម្បីគោលបំណងឯកជនភាព និងសុវត្ថិភាព។')}</span>
-            </div>
-            {/* The lookup control itself, present but inert — makes "kept but
-                disabled" literal rather than just a notice in its place. */}
-            <div className="mt-3 flex gap-2" aria-hidden="true">
-              <input
-                type="text"
-                disabled
-                placeholder={copy('membershipNumber', 'Membership number', 'លេខសមាជិកភាព')}
-                className="w-full cursor-not-allowed rounded-2xl border border-slate-200 bg-slate-100 px-4 py-2.5 text-sm text-slate-400 opacity-70 dark:border-white/10 dark:bg-white/5 dark:text-neutral-500"
-              />
-              <button
-                type="button"
-                disabled
-                className="shrink-0 cursor-not-allowed rounded-2xl bg-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-400 opacity-70 dark:bg-white/10 dark:text-neutral-500"
-              >
-                {copy('lookup', 'Look up', 'ស្វែងរក')}
-              </button>
-            </div>
-          </div>
-        ) : null}
-
         {!ready ? (
           <div className="rounded-2xl border border-slate-200 bg-white px-4 py-6 text-center text-sm text-slate-400 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-500">
             {copy('accountLoading', 'Checking your account…')}

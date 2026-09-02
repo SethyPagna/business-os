@@ -15,7 +15,9 @@ import PullToRefreshIndicator from './components/shared/PullToRefreshIndicator.t
 import { usePullToRefresh } from './components/shared/usePullToRefresh.ts'
 import { STORAGE_KEYS } from './constants.ts'
 import { refreshAppData } from './utils/appRefresh.ts'
+import { hasDirtyWork } from './utils/dirtyWork.ts'
 import { withLoaderTimeout } from './utils/loaders.ts'
+import { flushPendingWorkDrafts } from './utils/workDrafts.ts'
 
 declare const __FRONTEND_BUILD_HASH__: string | undefined
 
@@ -348,6 +350,8 @@ function isChunkLoadError(message: string): boolean {
     || /ChunkLoadError/i.test(message)
     || /Failed to fetch dynamically imported module/i.test(message)
     || /Importing a module script failed/i.test(message)
+    || /(?:not a valid|expected a).*JavaScript.*MIME type/i.test(message)
+    || /MIME type[^\n]*text\/html/i.test(message)
 }
 
 function createChunkTimeoutError(key: string, timeoutMs: number): Error {
@@ -432,12 +436,19 @@ function triggerChunkRecoveryReload(marker: string): boolean {
   // full recovery stays available for when connectivity returns), and
   // return false so the caller surfaces the failure instead.
   if (typeof navigator !== 'undefined' && navigator.onLine === false) return false
+  // A deployment mismatch must never turn into silent form/cart loss. Mobile
+  // Safari does not consistently present beforeunload confirmation dialogs.
+  if (hasDirtyWork()) {
+    flushPendingWorkDrafts()
+    return false
+  }
 
   try {
     sessionStorage.setItem(marker, '1')
   } catch (_) {}
 
   if (typeof window === 'undefined') return false
+  flushPendingWorkDrafts()
   const target = buildChunkRecoveryUrl(`chunk:${marker}`)
   const reload = () => {
     if (target) window.location.replace(target)
@@ -1835,7 +1846,7 @@ export default function App() {
 
           <main
             ref={mainRef}
-            className={`relative flex-1 flex flex-col min-h-0 overflow-hidden pb-[calc(3.55rem+env(safe-area-inset-bottom))] transition-[padding-top] duration-300 ease-in-out md:pb-0 md:pt-0 ${mobileHeaderVisible ? 'pt-[calc(4rem+env(safe-area-inset-top))]' : 'pt-[env(safe-area-inset-top)]'}`}
+            className={`relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden pb-[calc(3.55rem+env(safe-area-inset-bottom))] pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)] transition-[padding-top] duration-300 ease-in-out md:pb-0 md:pl-0 md:pr-0 md:pt-0 ${mobileHeaderVisible ? 'pt-[calc(4rem+env(safe-area-inset-top))]' : 'pt-[env(safe-area-inset-top)]'}`}
           >
             <PullToRefreshIndicator pullDistance={pullDistance} refreshing={pullRefreshing} />
             <div className="flex min-w-0 items-center gap-3">

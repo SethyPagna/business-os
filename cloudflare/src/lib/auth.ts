@@ -73,6 +73,38 @@ export type SessionUser = {
   role_name?: string | null
 }
 
+type SessionLookupRow = SessionUser & {
+  session_created_at: string | null
+  session_expires_at: string | null
+  session_last_seen_at: string | null
+}
+
+type SessionExpiryMetadata = {
+  created_at: string | null
+  expires_at: string | null
+}
+
+// Persisting last_seen_at on every authenticated request turns a read-heavy
+// hot path into a D1 write hot path. Five minutes is fresh enough for the
+// session/admin surfaces while bounding routine touch writes to 12/hour per
+// actively used session. The UPDATE below repeats this cutoff so concurrent
+// requests cannot all write after making the same stale-read decision.
+const SESSION_TOUCH_INTERVAL_MS = 5 * 60 * 1000
+
+function asUtc(value: string): number {
+  const text = String(value).trim()
+  const normalized = /[zZ]|[+-]\d{2}:?\d{2}$/.test(text)
+    ? text.replace(' ', 'T')
+    : `${text.replace(' ', 'T')}Z`
+  return Date.parse(normalized)
+}
+
+function isSessionTouchDue(lastSeenAt: string | null, nowMs: number): boolean {
+  if (!lastSeenAt) return true
+  const lastSeenMs = asUtc(lastSeenAt)
+  return !Number.isFinite(lastSeenMs) || lastSeenMs < nowMs - SESSION_TOUCH_INTERVAL_MS
+}
+
 export async function createSession(
   env: Env,
   userId: number,
@@ -164,7 +196,9 @@ export async function getSessionUser<E extends { Bindings: Env } = { Bindings: E
   const db = getDb(c.env)
   const row = await db.prepare(`
     SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active,
-           r.code AS role_code, r.permissions AS role_permissions, r.name AS role_name
+           r.code AS role_code, r.permissions AS role_permissions, r.name AS role_name,
+           s.created_at AS session_created_at, s.expires_at AS session_expires_at,
+           s.last_seen_at AS session_last_seen_at
     FROM user_sessions s
     JOIN users u ON u.id = s.user_id
     LEFT JOIN roles r ON r.id = u.role_id
@@ -174,28 +208,39 @@ export async function getSessionUser<E extends { Bindings: Env } = { Bindings: E
       AND u.is_active = 1
       AND u.deleted_at IS NULL
     LIMIT 1
-  `).get<SessionUser>({ token_hash: tokenHash, now: nowIso })
+  `).get<SessionLookupRow>({ token_hash: tokenHash, now: nowIso })
 
   if (!row) return null
 
-  // "Touch" the session's last-seen timestamp. The original backend
-  // deduplicates this with an in-memory Map (module-scope, keyed by
-  // session id, only writes at most once/minute per session) to avoid a
-  // write on every single request. That cache lived for the lifetime of
-  // one long-running Node process. A Worker isolate is reused across some
-  // requests but not guaranteed to be -- a per-isolate Map here is a
-  // best-effort version of the same optimization (still avoids most
-  // redundant writes in practice, since Cloudflare does reuse warm
-  // isolates for bursts of traffic), not a correctness requirement either
-  // way: skipping the touch just means last_seen_at is slightly stale,
-  // never that auth is wrong.
-  c.executionCtx.waitUntil(
-    db.prepare('UPDATE user_sessions SET last_seen_at = CURRENT_TIMESTAMP WHERE token_hash = ?').run([tokenHash]),
-  )
+  const {
+    session_created_at: createdAt,
+    session_expires_at: expiresAt,
+    session_last_seen_at: lastSeenAt,
+    ...user
+  } = row
 
-  c.executionCtx.waitUntil(slideSessionExpiry(c, tokenHash))
+  if (isSessionTouchDue(lastSeenAt, Date.parse(nowIso))) {
+    c.executionCtx.waitUntil(
+      db.prepare(`
+        UPDATE user_sessions
+        SET last_seen_at = CURRENT_TIMESTAMP
+        WHERE token_hash = @token_hash
+          AND revoked_at IS NULL
+          AND expires_at > @observed_at
+          AND (
+            last_seen_at IS NULL
+            OR datetime(last_seen_at) < datetime(@observed_at, '-5 minutes')
+          )
+      `).run({ token_hash: tokenHash, observed_at: nowIso }),
+    )
+  }
 
-  return row
+  c.executionCtx.waitUntil(slideSessionExpiry(c, tokenHash, {
+    created_at: createdAt,
+    expires_at: expiresAt,
+  }))
+
+  return user
 }
 
 // How much of a session's life has to be gone before it is renewed. Half is
@@ -228,26 +273,16 @@ const SESSION_SLIDE_AFTER_FRACTION = 0.5
 async function slideSessionExpiry<E extends { Bindings: Env } = { Bindings: Env }>(
   c: Context<E>,
   tokenHash: string,
+  session: SessionExpiryMetadata,
 ): Promise<void> {
   try {
     const db = getDb(c.env)
-    const session = await db.prepare(
-      'SELECT created_at, expires_at FROM user_sessions WHERE token_hash = ? LIMIT 1',
-    ).get<{ created_at: string; expires_at: string }>([tokenHash])
     if (!session?.created_at || !session?.expires_at) return
 
     // SQLite's CURRENT_TIMESTAMP writes "YYYY-MM-DD HH:MM:SS" (UTC, no
     // zone marker). Date.parse treats that as LOCAL time in some runtimes,
     // which would skew every comparison here, so the marker is added when
     // it is missing rather than trusting the default parse.
-    const asUtc = (value: string): number => {
-      const text = String(value).trim()
-      const normalized = /[zZ]|[+-]\d{2}:?\d{2}$/.test(text)
-        ? text.replace(' ', 'T')
-        : `${text.replace(' ', 'T')}Z`
-      return Date.parse(normalized)
-    }
-
     const createdAt = asUtc(session.created_at)
     const expiresAt = asUtc(session.expires_at)
     if (!Number.isFinite(createdAt) || !Number.isFinite(expiresAt)) return

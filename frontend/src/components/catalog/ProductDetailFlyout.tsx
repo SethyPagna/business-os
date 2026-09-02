@@ -109,6 +109,40 @@ function DetailField({ label, children }: { label: string; children: ReactNode }
   )
 }
 
+function DetailSectionBlock({
+  sectionKey,
+  items,
+  copy,
+  emptyText,
+}: {
+  sectionKey: ProductDetailSectionKey
+  items: string[]
+  copy: CopyFn
+  emptyText: string
+}) {
+  const meta = SECTION_META[sectionKey]
+  const SectionIcon = meta.icon
+  return (
+    <div data-product-detail-section={sectionKey}>
+      <div className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-neutral-400">
+        <SectionIcon className="h-3.5 w-3.5" />
+        {copy(meta.labelKey, meta.fallback)}
+      </div>
+      {items.length > 1 ? (
+        <ul className="list-disc space-y-1 pl-5 text-sm leading-6 text-slate-600 dark:text-neutral-300">
+          {items.map((item, index) => (
+            <li key={`${item}-${index}`} {...getKhmerTextProps(item, '')}>{item}</li>
+          ))}
+        </ul>
+      ) : (
+        <p {...getKhmerTextProps(items[0] || emptyText, `whitespace-pre-line text-sm leading-6 ${items.length ? 'text-slate-600 dark:text-neutral-300' : 'text-slate-400 dark:text-neutral-500'}`)}>
+          {items[0] || emptyText}
+        </p>
+      )}
+    </div>
+  )
+}
+
 export default function ProductDetailFlyout({ view, copy, onClose, shopName, contactNote, cautionDefault, needMoreDetailsDefault, onAddToBucket, bucketQty = 0 }: ProductDetailFlyoutProps) {
   const [activeIndex, setActiveIndex] = useState(0)
   const [lightboxOpen, setLightboxOpen] = useState(false)
@@ -121,19 +155,35 @@ export default function ProductDetailFlyout({ view, copy, onClose, shopName, con
   const categoryValues = multiValues(product.categories, product.category)
   const brandValues = multiValues(product.brands, product.brand)
   const promotion = view.pricePresentation?.promotion
+  const emptyDetailText = copy('productDetailNotProvided', 'Not provided yet.')
+  const sectionItems = (...keys: ProductDetailSectionKey[]) => parsed.sections
+    .filter((section) => keys.includes(section.key))
+    .flatMap((section) => section.items)
+  const featureItems = sectionItems('features_benefits', 'features', 'benefits')
+  const whoForItems = sectionItems('who_for')
+  const ingredientItems = sectionItems('ingredients')
+  const productCautionItems = sectionItems('caution')
+  const cautionItems = productCautionItems.length
+    ? productCautionItems
+    : (String(cautionDefault || '').trim() ? [String(cautionDefault).trim()] : [])
+  const needMoreDetailsText = String(needMoreDetailsDefault || '').trim()
+    || copy('productNeedMoreDetailsFallback', 'Contact us for more product details.')
 
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-0 sm:items-center sm:p-4" onClick={onClose}>
       <div
         className="flex max-h-[92vh] w-full flex-col overflow-hidden rounded-t-2xl bg-white shadow-2xl sm:max-h-[88vh] sm:max-w-3xl sm:rounded-2xl dark:bg-neutral-900"
         onClick={(event) => event.stopPropagation()}
+        role="dialog"
+        aria-modal="true"
+        aria-label={product.name || copy('productDetails', 'Product details')}
       >
         <div className="flex items-center justify-between border-b border-slate-200 p-4 dark:border-neutral-800">
           <div className="min-w-0 pr-4">
             <div className="text-[10px] font-semibold uppercase tracking-wide text-slate-400 dark:text-neutral-500">
               {copy('productShopName', "Shop's Product Name")}
             </div>
-            <div {...getKhmerTextProps(product.name || '', 'truncate text-base font-semibold text-slate-900 dark:text-white')}>
+            <div {...getKhmerTextProps(product.name || '', 'break-words text-base font-semibold text-slate-900 dark:text-white')}>
               {product.name}
             </div>
           </div>
@@ -228,109 +278,45 @@ export default function ProductDetailFlyout({ view, copy, onClose, shopName, con
               </div>
             ) : null}
 
-            {parsed.officialName ? (
-              <DetailField label={copy('productOfficialName', 'Official Product Name')}>
-                <p {...getKhmerTextProps(parsed.officialName, 'whitespace-pre-line text-sm leading-6 text-slate-600 dark:text-neutral-300')}>
-                  {parsed.officialName}
-                </p>
-              </DetailField>
-            ) : null}
+            <DetailField label={copy('productOfficialName', 'Official Product Name')}>
+              <p {...getKhmerTextProps(parsed.officialName || emptyDetailText, `whitespace-pre-line text-sm leading-6 ${parsed.officialName ? 'text-slate-600 dark:text-neutral-300' : 'text-slate-400 dark:text-neutral-500'}`)}>
+                {parsed.officialName || emptyDetailText}
+              </p>
+            </DetailField>
 
-            {parsed.intro ? (
-              <DetailField label={copy('productIntroduction', 'Introduction')}>
-                <p {...getKhmerTextProps(parsed.intro, 'whitespace-pre-line text-sm leading-6 text-slate-600 dark:text-neutral-300')}>
-                  {parsed.intro}
-                </p>
-              </DetailField>
-            ) : null}
+            <DetailField label={copy('productIntroduction', 'Introduction')}>
+              <p {...getKhmerTextProps(parsed.intro || emptyDetailText, `whitespace-pre-line text-sm leading-6 ${parsed.intro ? 'text-slate-600 dark:text-neutral-300' : 'text-slate-400 dark:text-neutral-500'}`)}>
+                {parsed.intro || emptyDetailText}
+              </p>
+            </DetailField>
 
-            {parsed.sections.filter((section) => section.key === 'features_benefits' || section.key === 'features' || section.key === 'benefits').map((section) => {
-              const meta = SECTION_META[section.key]
-              const SectionIcon = meta.icon
-              return (
-                <div key={section.key}>
-                  <div className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-neutral-400">
-                    <SectionIcon className="h-3.5 w-3.5" />
-                    {copy(meta.labelKey, meta.fallback)}
-                  </div>
-                  {section.items.length > 1 ? (
-                    <ul className="list-disc space-y-1 pl-5 text-sm leading-6 text-slate-600 dark:text-neutral-300">
-                      {section.items.map((item, index) => (
-                        <li key={index} {...getKhmerTextProps(item, '')}>{item}</li>
-                      ))}
-                    </ul>
-                  ) : (
-                    <p {...getKhmerTextProps(section.items[0] || '', 'whitespace-pre-line text-sm leading-6 text-slate-600 dark:text-neutral-300')}>
-                      {section.items[0]}
-                    </p>
-                  )}
-                </div>
-              )
-            })}
+            <DetailSectionBlock sectionKey="features_benefits" items={featureItems} copy={copy} emptyText={emptyDetailText} />
 
-            {categoryValues.length ? (
-              <DetailField label={copy('productCategory', 'Category')}>
-                <p className="text-sm leading-6 text-slate-600 dark:text-neutral-300">{categoryValues.join(', ')}</p>
-              </DetailField>
-            ) : null}
+            <DetailField label={copy('productCategory', 'Category')}>
+              <p className={`text-sm leading-6 ${categoryValues.length ? 'text-slate-600 dark:text-neutral-300' : 'text-slate-400 dark:text-neutral-500'}`}>
+                {categoryValues.join(', ') || emptyDetailText}
+              </p>
+            </DetailField>
 
-            {brandValues.length ? (
-              <DetailField label={copy('productBrand', 'Brand')}>
-                <p className="text-sm leading-6 text-slate-600 dark:text-neutral-300">{brandValues.join(', ')}</p>
-              </DetailField>
-            ) : null}
+            <DetailField label={copy('productBrand', 'Brand')}>
+              <p className={`text-sm leading-6 ${brandValues.length ? 'text-slate-600 dark:text-neutral-300' : 'text-slate-400 dark:text-neutral-500'}`}>
+                {brandValues.join(', ') || emptyDetailText}
+              </p>
+            </DetailField>
 
-            {parsed.sections.filter((section) => section.key === 'who_for' || section.key === 'ingredients' || section.key === 'caution').map((section) => {
-              const meta = SECTION_META[section.key]
-              const SectionIcon = meta.icon
-              return (
-                <div key={section.key}>
-                  <div className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-neutral-400">
-                    <SectionIcon className="h-3.5 w-3.5" />
-                    {copy(meta.labelKey, meta.fallback)}
-                  </div>
-                  {section.items.length > 1 ? (
-                    <ul className="list-disc space-y-1 pl-5 text-sm leading-6 text-slate-600 dark:text-neutral-300">
-                      {section.items.map((item, index) => (
-                        <li key={index} {...getKhmerTextProps(item, '')}>{item}</li>
-                      ))}
-                    </ul>
-                  ) : (
-                    <p {...getKhmerTextProps(section.items[0] || '', 'whitespace-pre-line text-sm leading-6 text-slate-600 dark:text-neutral-300')}>
-                      {section.items[0]}
-                    </p>
-                  )}
-                </div>
-              )
-            })}
+            <DetailSectionBlock sectionKey="who_for" items={whoForItems} copy={copy} emptyText={emptyDetailText} />
+            <DetailSectionBlock sectionKey="ingredients" items={ingredientItems} copy={copy} emptyText={emptyDetailText} />
+            <DetailSectionBlock sectionKey="caution" items={cautionItems} copy={copy} emptyText={copy('productCautionNotProvided', 'No product-specific caution has been added yet.')} />
 
-            {cautionDefault && !parsed.sections.some((section) => section.key === 'caution') ? (
-              <div>
-                <div className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-neutral-400">
-                  <TriangleAlert className="h-3.5 w-3.5" />
-                  {copy('productCaution', 'Caution')}
-                </div>
-                <p {...getKhmerTextProps(cautionDefault, 'whitespace-pre-line text-sm leading-6 text-slate-600 dark:text-neutral-300')}>
-                  {cautionDefault}
-                </p>
+            <div data-product-detail-section="need_more_details">
+              <div className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-neutral-400">
+                <Store className="h-3.5 w-3.5" />
+                {copy('productNeedMoreDetails', 'Need More Details')}
               </div>
-            ) : null}
-
-            {needMoreDetailsDefault ? (
-              <div>
-                <div className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-neutral-400">
-                  <Store className="h-3.5 w-3.5" />
-                  {copy('productNeedMoreDetails', 'Need More Details')}
-                </div>
-                <p {...getKhmerTextProps(needMoreDetailsDefault, 'whitespace-pre-line text-sm leading-6 text-slate-600 dark:text-neutral-300')}>
-                  {needMoreDetailsDefault}
-                </p>
-              </div>
-            ) : null}
-
-            {!parsed.intro && !parsed.sections.length ? (
-              <p className="text-sm text-slate-400 dark:text-neutral-500">{copy('noDescription', 'No description available.')}</p>
-            ) : null}
+              <p {...getKhmerTextProps(needMoreDetailsText, 'whitespace-pre-line text-sm leading-6 text-slate-600 dark:text-neutral-300')}>
+                {needMoreDetailsText}
+              </p>
+            </div>
 
             {shopName ? (
               <div className="flex items-start gap-2 rounded-xl bg-slate-50 p-3 text-xs text-slate-500 dark:bg-neutral-800/60 dark:text-neutral-400">

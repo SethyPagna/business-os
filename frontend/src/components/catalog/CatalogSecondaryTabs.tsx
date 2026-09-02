@@ -344,9 +344,7 @@ function CatalogAboutSection(props: CatalogAboutSectionProps) {
   // the top strip (the content below sits on a translucent surface for
   // legibility). Without a cover, the brand gradient banner stays.
   const hasCover = Boolean(previewConfig.showCover && versionedBusinessCover)
-  const bannerBackground = hasCover
-    ? `url(${versionedBusinessCover})`
-    : `linear-gradient(135deg, ${heroGradientStart} 0%, ${heroGradientMid} 55%, ${heroGradientEnd} 100%)`
+  const bannerBackground = `linear-gradient(135deg, ${heroGradientStart} 0%, ${heroGradientMid} 55%, ${heroGradientEnd} 100%)`
   const logoSizePx = Math.max(72, Number(previewConfig.logoSize || 80))
   const hasContactInfo = Boolean(businessFacts?.length || socialLinks?.length)
 
@@ -361,10 +359,15 @@ function CatalogAboutSection(props: CatalogAboutSectionProps) {
         backgroundImage: `radial-gradient(circle at 15% 0%, ${heroGradientStart}14 0%, transparent 45%), radial-gradient(circle at 100% 20%, ${heroGradientEnd}12 0%, transparent 50%)`,
       }}
     >
-      <div
-        className="overflow-hidden rounded-[32px] border border-slate-200/80 bg-white shadow-[0_18px_42px_rgba(148,163,184,0.14)] dark:border-neutral-700/80 dark:bg-neutral-900/88"
-        style={hasCover ? { backgroundImage: bannerBackground, backgroundSize: 'cover', backgroundPosition: 'center' } : undefined}
-      >
+      <div className="relative isolate overflow-hidden rounded-[32px] border border-slate-200/80 bg-white shadow-[0_18px_42px_rgba(148,163,184,0.14)] dark:border-neutral-700/80 dark:bg-neutral-900/88">
+        {hasCover ? (
+          <img
+            src={versionedBusinessCover}
+            alt=""
+            aria-hidden="true"
+            className="pointer-events-none absolute inset-0 -z-10 h-full w-full object-cover"
+          />
+        ) : null}
         <div
           data-portal-about-hero="true"
           className="relative h-20 sm:h-28"

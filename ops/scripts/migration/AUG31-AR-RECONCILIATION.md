@@ -63,8 +63,9 @@ Notes on the source files:
   `client_request_id = legacy-sale:<no>@2026-08-31`. All 20 product lines resolve
   to live products (each with its opening batch). One signed
   `legacy_inventory_effects` row per unit deducts stock and writes the movement
-  through the 0088 trigger. Cashier is `Old system` (the day's user report only
-  covers Rath and has no per-invoice attribution — the report is archived).
+  through the 0088 trigger. The per-user report's $146 total reconciles exactly
+  to receipts 4377–4381, so those five link to Rath; 4382–4390 remain
+  `Old system` because no supplied source identifies their cashier.
 - **2 Aug-31 expenses** into `fees` with the exact natural-key guard.
 - **13,243 AR rows** into `customer_receivables` (12,620 linked to a live
   customer by unique name; the rest keep the name with `customer_id NULL`).
@@ -74,6 +75,7 @@ Notes on the source files:
 
 - **Source gates** (script aborts on any mismatch): 14 sales · invoices 4377–4390
   · 24 units · $530 goods · $17.5 delivery · $147 credit · 2 expenses / 17,200 KHR
+  · 5 Rath receipts / $146 gross
   · 13,243 AR rows · total $1,730,636.803 · paid $1,821,982.2188 · outstanding
   −$91,345.4158 · 13,243 distinct AR IDs.
 - **AR ledger dry-run** in a local SQLite (migration 0094 + the 5 receivable
@@ -97,12 +99,14 @@ cd cloudflare && node scripts/with-wrangler-auth.cjs wrangler d1 migrations appl
 cd .. && node ops/scripts/migration/import-aug31-legacy-reports.mjs --apply
 ```
 
-The generator re-checks every gate and re-verifies that no Aug-31 sales exist
-before it writes; `--apply` refuses to run until migration 0094 is applied.
+The generator re-checks every gate. It accepts either zero existing target
+receipts or all 14; a partial cohort fails. Existing rows must match the exact
+request id, timestamp and source total and must still be in one of the two
+known legacy cashier states before guarded correction SQL is emitted.
 
 ## Not done / follow-ups
 
-- **Not applied to remote D1** (deliberate — user-gated).
+- **Cashier correction not applied to remote D1** (deliberate — user-gated).
 - The old system's Aug-31 sales are booked *fully paid* like the rest of the
   legacy cohort; the true receivable lives in `customer_receivables`. Retro-
   fitting historical `sale.amount_paid` from AR was **not** done (out of scope,

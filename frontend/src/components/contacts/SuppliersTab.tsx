@@ -120,6 +120,7 @@ interface SupplierPayload {
   userId?: string | number | null
   userName?: string | null
   confirmDuplicate?: boolean
+  __rename_cascade?: 'carry' | 'record_only'
 }
 
 interface SupplierMutationResult {
@@ -636,6 +637,7 @@ function SuppliersTab({ t, notify, active = true, initialSearch }: SuppliersTabP
     gender: supplier.gender || '',
     userId: user?.id,
     userName: user?.name,
+    __rename_cascade: 'carry',
   }), [user?.id, user?.name])
 
   const runSupplierMutation = useCallback(async (loader: () => unknown | Promise<unknown>, label: string): Promise<SupplierMutationResult> => (
@@ -762,11 +764,19 @@ function SuppliersTab({ t, notify, active = true, initialSearch }: SuppliersTabP
       if (selected && oldSupplierName && oldSupplierName.toLowerCase() !== newSupplierName.toLowerCase()) {
         try {
           const impact = await getRenameImpact('supplier', oldSupplierName, newSupplierName)
-          const choice = await askRenameChoice({ kind: 'supplier', from: oldSupplierName, to: newSupplierName, impact, choices: ['carry', 'copy'] })
+          if (impact.target_exists) {
+            notify(`"${newSupplierName}" already exists. Use Possible Duplicates to choose which supplier to keep.`, 'warning')
+            return
+          }
+          const choice = await askRenameChoice({ kind: 'supplier', from: oldSupplierName, to: newSupplierName, impact, choices: ['carry', 'only', 'copy'] })
           if (choice === 'cancel') { finishSingleAction(saveInFlightRef); return }
           if (choice === 'carry') payload.__rename_cascade = 'carry'
+          if (choice === 'only') payload.__rename_cascade = 'record_only'
           if (choice === 'copy') renameCopy = true
-        } catch { /* preview unavailable -- plain rename, no cascade (old behavior) */ }
+        } catch (previewError) {
+          notify(getErrorMessage(previewError, 'Could not verify linked supplier records. Nothing was changed.'), 'error')
+          return
+        }
       }
       const useUpdate = Boolean(selected) && !renameCopy
       const result = useUpdate
@@ -1202,13 +1212,13 @@ function SuppliersTab({ t, notify, active = true, initialSearch }: SuppliersTabP
               </>
               ) : null}
             </td>
-            <td className="cursor-pointer px-4 py-2 font-medium text-gray-900 dark:text-white" onClick={() => handleContactCellClick(supplier)}>{supplier.name}</td>
-            <td className="cursor-pointer px-4 py-2 text-gray-500" onClick={() => handleContactCellClick(supplier)}>{primaryOption.phone || supplier.phone || '--'}</td>
-            <td className="cursor-pointer px-4 py-2 text-xs text-gray-500" onClick={() => handleContactCellClick(supplier)}>{primaryOption.email || supplier.email || '--'}</td>
-            <td className="cursor-pointer px-4 py-2 text-gray-500" onClick={() => handleContactCellClick(supplier)}>{primaryOption.name || supplier.contact_person || '--'}</td>
-            <td className="cursor-pointer px-4 py-2 text-gray-500" onClick={() => handleContactCellClick(supplier)}>{supplier.gender ? tr(supplier.gender, supplier.gender) : tr('unspecified', 'Unspecified')}</td>
-            <td className="cursor-pointer px-4 py-2 text-xs text-gray-500" onClick={() => handleContactCellClick(supplier)}>{fmtDateTime24(supplier.created_at)}</td>
-            <td className="px-2 py-2 text-right" onClick={(event) => event.stopPropagation()}>
+            <td className="max-w-[13rem] cursor-pointer truncate px-3 py-1.5 font-medium text-gray-900 dark:text-white" onClick={() => handleContactCellClick(supplier)}>{supplier.name}</td>
+            <td className="cursor-pointer whitespace-nowrap px-3 py-1.5 text-gray-500" onClick={() => handleContactCellClick(supplier)}>{primaryOption.phone || supplier.phone || '--'}</td>
+            <td className="max-w-[12rem] cursor-pointer truncate px-3 py-1.5 text-[11px] text-gray-500" onClick={() => handleContactCellClick(supplier)}>{primaryOption.email || supplier.email || '--'}</td>
+            <td className="cursor-pointer px-3 py-1.5 text-gray-500" onClick={() => handleContactCellClick(supplier)}>{primaryOption.name || supplier.contact_person || '--'}</td>
+            <td className="cursor-pointer px-3 py-1.5 text-gray-500" onClick={() => handleContactCellClick(supplier)}>{supplier.gender ? tr(supplier.gender, supplier.gender) : tr('unspecified', 'Unspecified')}</td>
+            <td className="cursor-pointer whitespace-nowrap px-3 py-1.5 text-[11px] text-gray-500" onClick={() => handleContactCellClick(supplier)}>{fmtDateTime24(supplier.created_at)}</td>
+            <td className="px-2 py-1.5 text-right" onClick={(event) => event.stopPropagation()}>
               <ThreeDotMenu onDetails={() => { setSelected(supplier); setModal('detail') }} onEdit={() => { setSelected(supplier); setModal('form') }} onDelete={canDeleteContact ? () => handleDelete(supplier) : undefined} />
             </td>
           </tr>

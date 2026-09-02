@@ -99,7 +99,7 @@ export async function applyHistoricalSaleImport(
               manual_discount_type, manual_discount_value, manual_discount_usd, manual_discount_khr,
               branch_id, batch_id, batch_label, batch_expiry_date, returned_quantity
             )
-            SELECT (SELECT id FROM sales WHERE client_request_id = @client_request_id),
+            SELECT (SELECT id FROM sales WHERE client_request_id = @client_request_id AND client_request_id <> ''),
               @product_id, @product_name, @sku, @quantity,
               @applied_price_usd, @applied_price_khr, @total_usd, @total_khr,
               @cost_price_usd, @cost_price_khr, @base_price_usd, @base_price_khr,

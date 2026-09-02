@@ -160,6 +160,112 @@ const SALES_POLICY_KEYS = new Set([
   'pos_payment_methods',
 ])
 
+function normalizeReferenceName(value: unknown): string {
+  return String(value ?? '').trim().toLocaleLowerCase()
+}
+
+async function loadPaymentMethods(env: Env): Promise<string[]> {
+  const row = await getDb(env).prepare("SELECT value FROM settings WHERE key = 'pos_payment_methods'").get<{ value: string }>()
+  try {
+    const parsed = JSON.parse(row?.value || '[]')
+    return Array.isArray(parsed) ? parsed.map((value) => String(value || '').trim()).filter(Boolean) : []
+  } catch {
+    return []
+  }
+}
+
+// Preview and exact replacement for configured payment methods. Report/audit
+// evidence is explicit: linked mode updates the live sales reporting dimension
+// and itemized tender JSON, while audit logs remain immutable.
+app.get('/payment-methods/impact', async (c) => {
+  const from = String(c.req.query('from') || '').trim()
+  const to = String(c.req.query('to') || '').trim()
+  if (!from || !to) return c.json({ error: 'Source and target payment methods are required' }, 400)
+  const db = getDb(c.env)
+  const sales = Number((await db.prepare("SELECT COUNT(*) AS n FROM sales WHERE lower(trim(COALESCE(payment_method,''))) = @from").get<{ n: number }>({ from: normalizeReferenceName(from) }))?.n || 0)
+  const rows = await db.prepare("SELECT payment_details FROM sales WHERE payment_details IS NOT NULL AND trim(payment_details) != ''").all<{ payment_details: string }>()
+  let detailLines = 0
+  for (const row of rows) {
+    try {
+      const details = JSON.parse(row.payment_details)
+      if (Array.isArray(details)) detailLines += details.filter((detail) => normalizeReferenceName(detail?.method) === normalizeReferenceName(from)).length
+    } catch { /* malformed legacy JSON is preserved, never guessed */ }
+  }
+  const methods = await loadPaymentMethods(c.env)
+  return c.json({
+    from, to, configured: methods.some((method) => normalizeReferenceName(method) === normalizeReferenceName(from)),
+    target_exists: methods.some((method) => normalizeReferenceName(method) === normalizeReferenceName(to)),
+    live_snapshots: { sales, payment_detail_lines: detailLines },
+    linked_records: sales + detailLines,
+    historical_snapshots_preserved: ['audit_logs', 'action history payloads'],
+  })
+})
+
+app.post('/payment-methods/replace', async (c) => {
+  const user = c.get('user')
+  if (!hasPermission(user, 'sales_policy') && !hasPermission(user, 'settings')) return c.json({ error: 'No permission' }, 403)
+  const body = await c.req.json<Record<string, unknown>>().catch(() => ({} as Record<string, unknown>))
+  const from = String(body.from || '').trim()
+  const to = String(body.to || '').trim()
+  const scope = body.scope === 'linked' ? 'linked' : 'settings_only'
+  if (!from || !to) return c.json({ error: 'Source and target payment methods are required' }, 400)
+  const fromKey = normalizeReferenceName(from)
+  const toKey = normalizeReferenceName(to)
+  const methods = await loadPaymentMethods(c.env)
+  const next: string[] = []
+  const seen = new Set<string>()
+  for (const method of methods) {
+    const replaced = normalizeReferenceName(method) === fromKey ? to : method
+    const key = normalizeReferenceName(replaced)
+    if (!key || seen.has(key)) continue
+    seen.add(key)
+    next.push(replaced)
+  }
+  if (!seen.has(toKey)) next.push(to)
+  const db = getDb(c.env)
+  const statements: Array<{ sql: string; params: Record<string, unknown> }> = [{
+    sql: `INSERT INTO settings (key, value, updated_at) VALUES ('pos_payment_methods', @value, CURRENT_TIMESTAMP)
+          ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP`,
+    params: { value: JSON.stringify(next) },
+  }]
+  let linkedSales = 0
+  let linkedDetails = 0
+  if (scope === 'linked') {
+    const saleRows = await db.prepare("SELECT id, payment_method, payment_details FROM sales WHERE lower(trim(COALESCE(payment_method,''))) = @from OR (payment_details IS NOT NULL AND trim(payment_details) != '')").all<{ id: number; payment_method: string; payment_details: string | null }>({ from: fromKey })
+    for (const sale of saleRows) {
+      const summaryMatches = normalizeReferenceName(sale.payment_method) === fromKey
+      let detailsChanged = false
+      let paymentDetails = sale.payment_details
+      if (paymentDetails) {
+        try {
+          const details = JSON.parse(paymentDetails)
+          if (Array.isArray(details)) {
+            for (const detail of details) {
+              if (normalizeReferenceName(detail?.method) === fromKey) {
+                detail.method = to
+                detailsChanged = true
+                linkedDetails += 1
+              }
+            }
+            if (detailsChanged) paymentDetails = JSON.stringify(details)
+          }
+        } catch { /* preserve malformed legacy JSON */ }
+      }
+      if (!summaryMatches && !detailsChanged) continue
+      if (summaryMatches) linkedSales += 1
+      statements.push({
+        sql: `UPDATE sales SET payment_method = @method, payment_details = @details, updated_at = CURRENT_TIMESTAMP WHERE id = @id`,
+        params: { method: summaryMatches ? to : sale.payment_method, details: paymentDetails, id: sale.id },
+      })
+    }
+  }
+  await db.batch(statements)
+  await audit(c.env, user?.id ?? null, user?.name ?? null, 'replace', 'payment_method', null, { from, to, scope, linkedSales, linkedDetails })
+  await Promise.all([bumpVersion(c.env, 'settings'), bumpVersion(c.env, 'sales')])
+  c.executionCtx.waitUntil(broadcast(c.env, 'settings', { action: 'payment_method_replace', from, to, scope }))
+  return c.json({ success: true, methods: next, scope, linkedSales, linkedDetails })
+})
+
 // Customer-portal content buckets (Part 557 slice 8): the storefront editor is
 // broken into per-area grants so a role (e.g. an employee) can be given exactly
 // the areas it should manage. Posts/FAQ/About each get their own key; every

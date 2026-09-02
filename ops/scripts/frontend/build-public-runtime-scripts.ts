@@ -12,6 +12,7 @@ const root = path.resolve(__dirname, '..', '..', '..')
 const frontendDir = path.join(root, 'frontend')
 const srcDir = path.join(frontendDir, 'src', 'public-runtime')
 const outDir = path.join(frontendDir, 'public')
+const checkOnly = process.argv.includes('--check')
 
 const BANNER = '/*\n' +
   ' * Generated from frontend/src/public-runtime/*.ts.\n' +
@@ -50,7 +51,7 @@ function main() {
   if (!fs.existsSync(srcDir)) {
     throw new Error(`Missing public-runtime source directory: ${srcDir}`)
   }
-  fs.mkdirSync(outDir, { recursive: true })
+  if (!checkOnly) fs.mkdirSync(outDir, { recursive: true })
 
   for (const [sourceName, outputName] of FILES) {
     const sourcePath = path.join(srcDir, sourceName)
@@ -76,7 +77,16 @@ function main() {
     }
 
     const outputPath = path.join(outDir, outputName)
-    fs.writeFileSync(outputPath, BANNER + outputText, 'utf8')
+    const expected = BANNER + outputText
+    if (checkOnly) {
+      const current = fs.existsSync(outputPath) ? fs.readFileSync(outputPath, 'utf8') : ''
+      if (current !== expected) {
+        throw new Error(`Generated runtime is stale: ${path.relative(root, outputPath)}. Run npm.cmd --prefix frontend run build:public-runtime.`)
+      }
+      console.log(`Verified ${path.relative(root, outputPath)}`)
+      continue
+    }
+    fs.writeFileSync(outputPath, expected, 'utf8')
     console.log(`Built ${path.relative(root, sourcePath)} -> ${path.relative(root, outputPath)}`)
   }
 }

@@ -22,6 +22,7 @@ import { getNotificationSummary as getNotificationSummaryRequest } from '../../a
 import { listImportJobs as listImportJobsRequest } from '../../api/importJobsTransport.ts'
 import { lazyRetry } from '../../utils/lazyImport.ts'
 import AppSelect from './AppSelect'
+import PaginationControls from './PaginationControls'
 
 type Tone = 'danger' | 'warning' | 'success' | 'info'
 type ToneFilter = Tone | 'all'
@@ -998,27 +999,7 @@ export default function NotificationCenter({ compact = false, openRequestId = 0,
                             </button>
                           ))}
                         </div>
-                        {section.totalPages > 1 ? (
-                          <div className="mt-2 flex items-center justify-between gap-2 rounded-xl border border-slate-200 px-2 py-1.5 text-xs text-slate-500 dark:border-slate-700 dark:text-slate-300">
-                            <button
-                              type="button"
-                              className="rounded-lg px-2 py-1 font-semibold hover:bg-slate-100 disabled:opacity-40 dark:hover:bg-slate-800"
-                              disabled={section.page <= 1}
-                              onClick={() => setSectionPages((current) => ({ ...current, [section.id]: Math.max(1, section.page - 1) }))}
-                            >
-                              {tr('previous', 'Previous', 'មុន')}
-                            </button>
-                            <span>{section.page} / {section.totalPages}</span>
-                            <button
-                              type="button"
-                              className="rounded-lg px-2 py-1 font-semibold hover:bg-slate-100 disabled:opacity-40 dark:hover:bg-slate-800"
-                              disabled={section.page >= section.totalPages}
-                              onClick={() => setSectionPages((current) => ({ ...current, [section.id]: Math.min(section.totalPages, section.page + 1) }))}
-                            >
-                              {tr('next', 'Next', 'បន្ទាប់')}
-                            </button>
-                          </div>
-                        ) : null}
+                        <div className="mt-2 flex justify-center"><PaginationControls compact rangeAsPageSize page={section.page} pageSize={itemLimit} totalItems={section.filteredItemCount} label={tr('notifications', 'notifications', 'ការជូនដំណឹង')} t={(key) => tr(key, key, key)} onPageChange={(nextPage) => setSectionPages((current) => ({ ...current, [section.id]: nextPage }))} /></div>
                       </div>
                     ) : null}
                   </section>

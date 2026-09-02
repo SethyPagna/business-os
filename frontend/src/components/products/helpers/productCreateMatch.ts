@@ -6,8 +6,8 @@
 //   - there is no stored parent product, parent_id, or is_group requirement
 //
 // Identity guidance while creating:
-//   same name + same barcode      -> exact twin; create blocked
-//   same name + different barcode -> another ordinary row in that name group
+//   same name + same barcode + same cost -> exact twin; create blocked
+//   barcode OR cost differs              -> another row in that name group
 //   different name + same barcode -> legal separate product; flag for review
 
 export interface CreateMatchCandidate {
@@ -15,6 +15,8 @@ export interface CreateMatchCandidate {
   name?: string
   barcode?: string | null
   selling_price_usd?: unknown
+  cost_price_usd?: unknown
+  cost_price_khr?: unknown
 }
 
 export type CreateMatchKind =
@@ -40,12 +42,14 @@ const norm = (value: unknown) => String(value ?? '').trim().toLowerCase().replac
 const normBarcode = (value: unknown) => String(value ?? '').trim()
 
 export function classifyCreateMatches(
-  typed: { name?: unknown; barcode?: unknown; selling_price_usd?: unknown },
+  typed: { name?: unknown; barcode?: unknown; selling_price_usd?: unknown; cost_price_usd?: unknown; cost_price_khr?: unknown },
   candidates: readonly CreateMatchCandidate[],
 ): CreateMatchVerdict {
   const typedName = norm(typed.name)
   const typedBarcode = normBarcode(typed.barcode)
   const typedPrice = Number(typed.selling_price_usd) || 0
+  const typedCostUsd = Math.round((Number(typed.cost_price_usd) || 0) * 100)
+  const typedCostKhr = Math.round((Number(typed.cost_price_khr) || 0) * 100)
 
   const none: CreateMatchVerdict = {
     kind: null,
@@ -60,7 +64,11 @@ export function classifyCreateMatches(
 
   const nameRows = typedName ? candidates.filter((row) => norm(row.name) === typedName) : []
   const barcodeRows = typedBarcode ? candidates.filter((row) => normBarcode(row.barcode) === typedBarcode) : []
-  const twin = nameRows.find((row) => typedBarcode && normBarcode(row.barcode) === typedBarcode) || null
+  const twin = nameRows.find((row) => (
+    normBarcode(row.barcode) === typedBarcode
+    && Math.round((Number(row.cost_price_usd) || 0) * 100) === typedCostUsd
+    && Math.round((Number(row.cost_price_khr) || 0) * 100) === typedCostKhr
+  )) || null
 
   if (twin) {
     const canonical = String(nameRows[0]?.name || twin.name || '').trim()
@@ -71,7 +79,7 @@ export function classifyCreateMatches(
       canonicalName: canonical,
       priceMatches: false,
       beforeAfter: {
-        group: `${canonical} (${nameRows.length}) → no new row; this exact name + barcode already exists`,
+        group: `${canonical} (${nameRows.length}) → no new row; this exact name + barcode + cost already exists`,
         asNew: '',
       },
       allowProceedAsNew: false,

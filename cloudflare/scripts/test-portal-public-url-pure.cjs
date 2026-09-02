@@ -150,4 +150,23 @@ check('unset override -> empty publicUrlOverride', overrideFor(undefined), '')
 // while the live/resolved url is already correct.
 check('resolved publicUrl stays env even while override input shows the stale value', cfg.publicUrl, 'https://leangbeauty.com')
 
+// Public FAQ settings must survive the editor -> settings -> bootstrap path.
+// Malformed or incomplete rows fail closed instead of breaking the portal.
+const faqConfig = buildPortalConfig({
+  customer_portal_show_membership: '1',
+  customer_portal_faq_title: 'Delivery & products',
+  customer_portal_faq_items: JSON.stringify([
+    { id: 'delivery', question: 'Do you deliver?', answer: 'Yes.' },
+    { id: 'incomplete', question: 'Missing answer', answer: '' },
+  ]),
+}, ENV)
+check('guest membership navigation remains disabled', faqConfig.showMembership, false)
+check('FAQ title round-trips through public config', faqConfig.faqTitle, 'Delivery & products')
+assert.deepStrictEqual(faqConfig.faqItems, [{ id: 'delivery', question: 'Do you deliver?', answer: 'Yes.' }])
+checks++
+console.log('PASS FAQ rows round-trip and incomplete rows are removed')
+assert.deepStrictEqual(buildPortalConfig({ customer_portal_faq_items: '{broken' }, ENV).faqItems, [])
+checks++
+console.log('PASS malformed FAQ JSON fails closed')
+
 console.log(`\nALL ${checks} CHECKS PASSED`)

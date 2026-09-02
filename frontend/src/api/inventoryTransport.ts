@@ -118,3 +118,8 @@ export function getInventoryMovements({
 export function getInventoryReasons(): Promise<unknown> {
   return route('inventory:reasons:get', () => apiFetch('GET', '/api/inventory/reasons'), () => ({ items: [] }))
 }
+
+export function getInventoryReasonImpact(type: string, from: string, to: string): Promise<unknown> {
+  const query = buildQueryString({ type, from, to })
+  return apiFetch('GET', appendQuery('/api/inventory/reasons/impact', query))
+}

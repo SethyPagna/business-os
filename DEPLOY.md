@@ -185,3 +185,34 @@ wrangler secret put SOME_SECRET_NAME
 or via the Cloudflare dashboard (Workers & Pages → business-os → Settings →
 Variables). If a secret was ever pasted into chat, a screenshot, or a commit,
 rotate it immediately.
+
+### Telegram automation
+
+Telegram automation stores only the destination chat ID and category switches
+in Business OS Settings. The bot token remains a Worker secret and is never
+sent to the browser:
+
+```sh
+cd cloudflare
+wrangler secret put TELEGRAM_BOT_TOKEN
+```
+
+Create the bot with BotFather, start a direct chat with it (or add it to the
+target group), then get the chat ID from Telegram's `getUpdates` response.
+After deployment, go to **Settings → Telegram automation**, enter and save the
+chat ID and use **Send test message**. Automation, sales/new receipts,
+receipt status changes, fees, stock in, and stock out are enabled by default;
+each category can still be turned off in Settings.
+
+#### Owner / manager report commands
+
+The bot also answers `/today`, `/sales`, `/fees`, `/inventory`, `/stock`, and
+`/help` in the same configured Telegram chat. No second secret, chat ID list,
+or command setup is needed: **Send test message** connects the verified
+Telegram webhook automatically using a secret derived inside the Worker from
+the bot token.
+
+The configured Telegram chat is the command permission boundary. Use a direct
+owner chat or a manager-only Telegram group. Do not use a general staff alerts
+group as the configured chat, because every member of that group could read a
+manager's command response.

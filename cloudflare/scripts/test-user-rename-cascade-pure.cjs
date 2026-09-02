@@ -19,7 +19,7 @@ const moduleObj = { exports: {} }
 new Function('exports', 'require', 'module', '__filename', '__dirname', outputText)(
   moduleObj.exports, require, moduleObj, sourcePath, path.dirname(sourcePath),
 )
-const { cascadeUserRename, USER_NAME_SNAPSHOTS } = moduleObj.exports
+const { cascadeUserRename, buildUserRenameStatements, USER_NAME_SNAPSHOTS } = moduleObj.exports
 
 // Fake db: records each prepared UPDATE + its bound params; can be told to throw
 // for a given table (to simulate a table absent in some environment).
@@ -27,15 +27,13 @@ function makeRecordingDb({ throwFor = new Set() } = {}) {
   const calls = []
   return {
     calls,
-    prepare(sql) {
-      return {
-        run: async (params) => {
-          calls.push({ sql, params })
-          const table = (sql.match(/UPDATE\s+(\w+)/) || [])[1]
-          if (throwFor.has(table)) throw new Error(`no such table: ${table}`)
-          return { changes: 1, lastInsertRowid: 0 }
-        },
+    async batch(statements) {
+      for (const { sql, params } of statements) {
+        calls.push({ sql, params })
+        const table = (sql.match(/UPDATE\s+(\w+)/) || [])[1]
+        if (throwFor.has(table)) throw new Error(`no such table: ${table}`)
       }
+      return statements.map(() => ({ meta: { changes: 1 } }))
     },
   }
 }
@@ -72,11 +70,16 @@ async function run() {
     assert.deepStrictEqual(tablesHit, USER_NAME_SNAPSHOTS.map((s) => s.table).sort(), 'every snapshot table is hit exactly once')
   })
 
-  await check('a table absent in this environment is skipped, the rest still cascade', async () => {
+  await check('schema drift fails loud instead of committing an ambiguous partial cascade', async () => {
     const db = makeRecordingDb({ throwFor: new Set(['file_assets']) })
-    const updated = await cascadeUserRename(db, 4, 'Rath')
-    assert.strictEqual(db.calls.length, USER_NAME_SNAPSHOTS.length, 'still attempts every table')
-    assert.strictEqual(updated, USER_NAME_SNAPSHOTS.length - 1, 'the throwing table contributes no change but does not abort the cascade')
+    await assert.rejects(() => cascadeUserRename(db, 4, 'Rath'), /no such table: file_assets/)
+    assert.ok(db.calls.some((call) => tableOf(call.sql) === 'file_assets'), 'the schema error is observable to the caller')
+  })
+
+  await check('statement builder is reusable inside the routes atomic user+snapshot batch', () => {
+    const statements = buildUserRenameStatements(2, 'James')
+    assert.strictEqual(statements.length, USER_NAME_SNAPSHOTS.length)
+    assert.ok(statements.every((statement) => statement.params.id === 2 && statement.params.name === 'James'))
   })
 
   await check('no-op guards: blank username or non-finite id cascade nothing', async () => {

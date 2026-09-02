@@ -4,6 +4,7 @@ import ChevronDown from 'lucide-react/dist/esm/icons/chevron-down.js'
 import Search from 'lucide-react/dist/esm/icons/search.js'
 import X from 'lucide-react/dist/esm/icons/x.js'
 import { buildCategoryGroups, categoryGroupValues, type CategoryGroup } from '../../utils/categoryGrouping'
+import LazyPortalMenu from '../shared/LazyPortalMenu'
 
 export type PortalComboboxOption = { value: string; label: string }
 
@@ -47,51 +48,10 @@ export default function PortalFilterCombobox({
 }: PortalFilterComboboxProps) {
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState('')
-  // Which side the panel is anchored to. Previously this was hardcoded to
-  // `left-0` on the trigger's own container -- fine for the first filter in
-  // a row (its container sits near the screen's left edge), but the
-  // CATEGORY/BRAND/STOCK-STATUS row wraps left-to-right, so a filter in the
-  // 2nd/3rd position can sit far enough right that a fixed 16rem-wide panel
-  // anchored to its left edge runs off the right side of the viewport (or
-  // gets tucked under the floating support/list buttons) -- exactly what
-  // the reported screenshots show. Measuring the trigger's position right
-  // before opening and flipping to right-anchored when there isn't 16rem of
-  // room keeps the panel on-screen regardless of which filter it belongs to.
-  const [alignRight, setAlignRight] = useState(false)
-  const containerRef = useRef<HTMLDivElement | null>(null)
   const inputRef = useRef<HTMLInputElement | null>(null)
-  // 240px (w-60), not 256px (w-64): the desktop portal sidebar's own card is
-  // only ~17rem (272px) wide, minus its own padding/border -- a 256px panel
-  // anchored to the (even narrower) trigger row inside that card reliably
-  // ran past the card's own right edge into the product grid, regardless of
-  // the viewport-edge check below (that check only ever kept it from also
-  // running off the browser window, not off its own sidebar). 240px is the
-  // largest width that comfortably clears the sidebar card's inner content
-  // box, so the panel now stays inside the card that contains it.
-  const PANEL_WIDTH_PX = 240 // matches w-60 below
-
-  useEffect(() => {
-    if (!open) return undefined
-    const handleOutside = (event: MouseEvent | TouchEvent) => {
-      const target = event.target
-      if (target instanceof Node && containerRef.current && !containerRef.current.contains(target)) {
-        setOpen(false)
-      }
-    }
-    document.addEventListener('mousedown', handleOutside)
-    document.addEventListener('touchstart', handleOutside)
-    return () => {
-      document.removeEventListener('mousedown', handleOutside)
-      document.removeEventListener('touchstart', handleOutside)
-    }
-  }, [open])
 
   useEffect(() => {
     if (open) {
-      const rect = containerRef.current?.getBoundingClientRect()
-      const viewportWidth = typeof window !== 'undefined' ? window.innerWidth : 0
-      const margin = 16 // small breathing room from the viewport edge
-      setAlignRight(!!rect && rect.left + PANEL_WIDTH_PX + margin > viewportWidth)
       const raf = requestAnimationFrame(() => inputRef.current?.focus())
       return () => cancelAnimationFrame(raf)
     }
@@ -156,30 +116,30 @@ export default function PortalFilterCombobox({
   )
 
   return (
-    <div ref={containerRef} className="relative min-w-0">
-      <button
-        type="button"
-        onClick={() => setOpen((current) => !current)}
-        className={`flex min-h-8 w-full min-w-[7rem] items-center justify-between gap-2 rounded-xl border px-3 py-1.5 text-xs font-semibold transition sm:w-auto ${
-          selected.length
-            ? 'border-blue-300 bg-blue-50 text-blue-700 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-300'
-            : 'border-slate-200 bg-white text-slate-600 hover:border-blue-300 hover:text-blue-700 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-200 dark:hover:border-amber-500/40 dark:hover:text-amber-300'
-        }`}
-        aria-expanded={open}
-        aria-haspopup="listbox"
-      >
-        <span className="truncate">
-          {label}: {selected.length ? `${selected.length} ${selected.length === 1 ? 'selected' : 'selected'}` : allLabel}
-        </span>
-        <ChevronDown className={`h-3.5 w-3.5 shrink-0 transition-transform ${open ? 'rotate-180' : ''}`} />
-      </button>
-
-      {open ? (
-        <div
-          className={`absolute top-[calc(100%+0.35rem)] z-[55] w-60 max-w-[calc(100vw-2rem)] overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-xl dark:border-neutral-700 dark:bg-neutral-900 ${
-            alignRight ? 'right-0' : 'left-0'
-          }`}
-        >
+    <div className="min-w-0">
+      <LazyPortalMenu
+        align="auto"
+        triggerWrapperClassName="w-full min-w-0"
+        menuClassName="w-60 max-w-[calc(100vw-1rem)] overflow-hidden rounded-2xl border border-slate-200 bg-white p-0 shadow-xl dark:border-neutral-700 dark:bg-neutral-900"
+        onOpenChange={setOpen}
+        trigger={(
+          <button
+            type="button"
+            className={`flex min-h-8 w-full min-w-[7rem] items-center justify-between gap-2 rounded-xl border px-3 py-1.5 text-xs font-semibold transition sm:w-auto ${
+              selected.length
+                ? 'border-blue-300 bg-blue-50 text-blue-700 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-300'
+                : 'border-slate-200 bg-white text-slate-600 hover:border-blue-300 hover:text-blue-700 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-200 dark:hover:border-amber-500/40 dark:hover:text-amber-300'
+            }`}
+            aria-label={`${label}: ${selected.length ? `${selected.length} selected` : allLabel}`}
+          >
+            <span className="truncate">
+              {label}: {selected.length ? `${selected.length} selected` : allLabel}
+            </span>
+            <ChevronDown className={`h-3.5 w-3.5 shrink-0 transition-transform ${open ? 'rotate-180' : ''}`} />
+          </button>
+        )}
+        content={({ closeMenu }) => (
+          <div role="dialog" aria-label={label} className="overflow-hidden">
           <label className="relative block border-b border-slate-100 p-2 dark:border-neutral-800">
             <Search className="pointer-events-none absolute left-4.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" aria-hidden="true" />
             <input
@@ -194,7 +154,7 @@ export default function PortalFilterCombobox({
           <div className="max-h-56 overflow-y-auto p-1.5" role="listbox">
             <button
               type="button"
-              onClick={() => { onClear(); setOpen(false) }}
+              onClick={() => { onClear(); closeMenu() }}
               className={`flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 text-left text-xs font-semibold ${
                 !selected.length
                   ? 'bg-slate-950 text-white dark:bg-white dark:text-neutral-950'
@@ -242,8 +202,9 @@ export default function PortalFilterCombobox({
               )
             )}
           </div>
-        </div>
-      ) : null}
+          </div>
+        )}
+      />
 
       {selected.length ? (
         <div className="mt-1.5 flex min-w-0 flex-wrap gap-1">

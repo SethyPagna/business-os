@@ -151,6 +151,13 @@ const reviewGate = loadReal('lib/reviewGate.ts', {
 // left to fall through to node's own require() (which can't resolve a
 // bare .ts file).
 const batchCode = loadReal('lib/batchCode.ts')
+// businessDateWindow.ts is pure (no D1/Env dependency) -- routes/fees.ts now
+// derives its default fee_date through it (businessToday), so it needs to be
+// the real transpiled module, same treatment as batchCode.ts/searchMatch.ts
+// below, not left to fall through to node's own require() (which resolves
+// relative imports against this script's own directory, not the real
+// src/routes/ location, and can't resolve a bare .ts file either way).
+const businessDateWindow = loadReal('lib/businessDateWindow.ts')
 // searchMatch.ts is pure (no D1/Env dependency) -- productWrites.ts's
 // insertRow/updateRow now derive name_normalized/unit_normalized/
 // brand_compact through it (migrations/0037_product_search_compact_
@@ -190,6 +197,8 @@ const feesRoute = loadReal('routes/fees.ts', {
   '../lib/auth': { requireAuth: async (c, next) => { c.set('user', CURRENT_USER); return next() } },
   '../lib/permissions': permissions,
   '../lib/reviewGate': reviewGate,
+  '../lib/businessDateWindow': businessDateWindow,
+  '../lib/telegram': { sendTelegramEvent: async () => false },
   '../lib/conflictControl': {
     assertUpdatedAtMatch: () => {},
     getExpectedUpdatedAt: () => undefined,

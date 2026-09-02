@@ -24,9 +24,11 @@ import {
   setSyncServerUrl,
   setSyncToken,
 } from '../src/api/http.ts'
-import { getFee } from '../src/api/feesTransport.ts'
+import { getFee, getFees } from '../src/api/feesTransport.ts'
 import { getReturn } from '../src/api/returnsReadTransport.ts'
 import { getCustomTableData } from '../src/api/customTablesTransport.ts'
+import { getPendingActions } from '../src/api/reviewQueueTransport.ts'
+import { getSalesExport } from '../src/api/salesTransport.ts'
 
 type FetchCall = Parameters<typeof fetch>
 
@@ -98,6 +100,67 @@ await runTest('getFee keys the read cache per id -- opening fee B never renders 
     assert.ok(cacheGet('fees:get-one:1'), 'per-id cache key for fee 1 must be populated')
     assert.ok(cacheGet('fees:get-one:2'), 'per-id cache key for fee 2 must be populated')
     assert.equal(cacheGet('fees:get-one'), null, 'the old shared constant key must never be used')
+  } finally {
+    restore()
+    resetApiState()
+  }
+})
+
+await runTest('getFees keys list reads by paging and filter query', async () => {
+  resetApiState()
+  setSyncServerUrl('https://sync.example.test')
+  const { urls, restore } = stubFetchByUrl((url) => {
+    const offset = Number(new URL(url).searchParams.get('offset') || 0)
+    return { fees: [{ id: offset + 1 }], total: 40, limit: 20, offset, summary: [] }
+  })
+  try {
+    const first = await getFees({ search: 'delivery', limit: 20, offset: 0 })
+    const second = await getFees({ search: 'delivery', limit: 20, offset: 20 })
+
+    assert.equal(first.fees[0].id, 1)
+    assert.equal(second.fees[0].id, 21, 'page 2 must not reuse page 1 from the route cache')
+    assert.equal(urls.length, 2, 'each distinct list query must issue its own request')
+    assert.equal(cacheGet('fees:get'), null, 'the old shared constant list key must never be used')
+  } finally {
+    restore()
+    resetApiState()
+  }
+})
+
+await runTest('review queue list cache is isolated by status and section filters', async () => {
+  resetApiState()
+  setSyncServerUrl('https://sync.example.test')
+  const { urls, restore } = stubFetchByUrl((url) => {
+    const status = new URL(url).searchParams.get('status') || 'all'
+    return { data: [{ id: status === 'open' ? 1 : 2, status }] }
+  })
+  try {
+    const open = await getPendingActions({ status: 'open', section: 'sales' })
+    const approved = await getPendingActions({ status: 'approved', section: 'sales' })
+    assert.equal(open.data[0].id, 1)
+    assert.equal(approved.data[0].id, 2, 'approved review results must not reuse the open queue cache')
+    assert.equal(urls.length, 2)
+    assert.equal(cacheGet('review:list'), null, 'the old constant review-list key must never be used')
+  } finally {
+    restore()
+    resetApiState()
+  }
+})
+
+await runTest('sales export cache is isolated by its date and branch query', async () => {
+  resetApiState()
+  setSyncServerUrl('https://sync.example.test')
+  const { urls, restore } = stubFetchByUrl((url) => {
+    const branchId = new URL(url).searchParams.get('branchId') || 'all'
+    return { branchId }
+  })
+  try {
+    const branchOne = await getSalesExport({ startDate: '2026-09-01', branchId: 1 }) as { branchId: string }
+    const branchTwo = await getSalesExport({ startDate: '2026-09-01', branchId: 2 }) as { branchId: string }
+    assert.equal(branchOne.branchId, '1')
+    assert.equal(branchTwo.branchId, '2', 'branch 2 export must not reuse branch 1 export data')
+    assert.equal(urls.length, 2)
+    assert.equal(cacheGet('sales:export'), null, 'the old constant sales-export key must never be used')
   } finally {
     restore()
     resetApiState()

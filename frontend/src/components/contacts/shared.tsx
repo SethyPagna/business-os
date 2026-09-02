@@ -234,7 +234,7 @@ export function ThreeDotMenu({ onDetails, onEdit, onDelete }: ThreeDotMenuProps)
           type="button"
           aria-label={t('actions') || 'Actions'}
           name="contact_row_actions"
-          className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-gray-200 text-gray-500 transition-colors hover:bg-gray-50 hover:text-gray-700 dark:border-zinc-700 dark:text-gray-400 dark:hover:bg-zinc-800 dark:hover:text-gray-200"
+          className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-gray-200 text-gray-500 transition-colors hover:bg-gray-50 hover:text-gray-700 dark:border-zinc-700 dark:text-gray-400 dark:hover:bg-zinc-800 dark:hover:text-gray-200"
         >
           <MoreHorizontal className="h-4 w-4" />
         </button>
@@ -266,13 +266,13 @@ export function DetailModal({ item, fields = [], onEdit, onDelete, onClose, t, e
             </div>
           ))}
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-nowrap gap-1.5 overflow-x-auto pb-0.5">
           {extraButtons.map((button) => (
-            <button key={button.label} type="button" className="btn-secondary flex-1" onClick={button.onClick}>{button.label}</button>
+            <button key={button.label} type="button" className="btn-secondary h-8 flex-1 whitespace-nowrap px-2 py-0 text-xs" onClick={button.onClick}>{button.label}</button>
           ))}
-          <button type="button" className="btn-secondary flex-1" onClick={onEdit}>{t?.('edit') || 'Edit'}</button>
-          <button type="button" className="btn-secondary flex-1 border-red-300 text-red-600 dark:border-red-500/40 dark:text-red-400" onClick={onDelete}>{t?.('delete') || 'Delete'}</button>
-          <button type="button" className="btn-primary flex-1" onClick={onClose}>{t?.('close') || 'Close'}</button>
+          <button type="button" className="btn-secondary h-8 flex-1 whitespace-nowrap px-2 py-0 text-xs" onClick={onEdit}>{t?.('edit') || 'Edit'}</button>
+          <button type="button" className="btn-secondary h-8 flex-1 whitespace-nowrap border-red-300 px-2 py-0 text-xs text-red-600 dark:border-red-500/40 dark:text-red-400" onClick={onDelete}>{t?.('delete') || 'Delete'}</button>
+          <button type="button" className="btn-primary h-8 flex-1 whitespace-nowrap px-2 py-0 text-xs" onClick={onClose}>{t?.('close') || 'Close'}</button>
         </div>
       </div>
     </Modal>
@@ -404,35 +404,14 @@ export function ContactTable<T extends ContactRow>({
 
   return (
     <>
-      <div className="mb-2 flex justify-center">
-        <PaginationControls
-          compact
-          rangeAsPageSize
-          page={activePage}
-          pageSize={activePageSize}
-          totalItems={totalItems}
-          label={typeof t === 'function' ? (t('records') || 'records') : 'records'}
-          t={t}
-          onPageChange={usingControlledPagination ? onControlledPageChange : setPage}
-          onPageSizeChange={(size) => {
-            if (usingControlledPagination) {
-              onControlledPageSizeChange?.(size)
-              onControlledPageChange?.(1)
-              return
-            }
-            setPageSize(size)
-            setPage(1)
-          }}
-        />
-      </div>
       {loading ? (
         <div className="mb-2 rounded-xl border border-blue-100 bg-blue-50/80 px-3 py-2 text-xs text-blue-600 dark:border-blue-900/40 dark:bg-blue-900/20 dark:text-blue-300">
           Refreshing...
         </div>
       ) : null}
       <div className="hidden overflow-x-auto rounded-xl border border-gray-200 dark:border-zinc-700 md:block">
-        <table className="w-full text-sm">
-          <thead className="bg-gray-50 text-left text-xs uppercase tracking-wide text-gray-500 dark:bg-zinc-800 dark:text-gray-400">
+        <table className="w-full border-collapse text-xs">
+          <thead className="bg-slate-50 text-left text-[11px] uppercase tracking-wide text-slate-500 dark:bg-zinc-800 dark:text-slate-400">
             <tr>
               <th className={selectionModeActive ? 'w-10 px-3 py-2' : 'w-0 px-0 py-2'}>
                 {selectionModeActive ? (
@@ -452,9 +431,9 @@ export function ContactTable<T extends ContactRow>({
                 ) : null}
               </th>
               {columns.map((column) => (
-                <th key={String(column)} className="px-4 py-2">{column}</th>
+                <th key={String(column)} className="whitespace-nowrap px-3 py-1.5 font-semibold">{column}</th>
               ))}
-              <th className="w-12 px-2 py-2" />
+              <th className="w-10 px-2 py-1.5" />
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100 dark:divide-zinc-800">

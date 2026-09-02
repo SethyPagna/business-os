@@ -9,7 +9,13 @@ const workerProducts = fs.readFileSync(new URL('../../cloudflare/src/routes/prod
 
 assert.doesNotMatch(form, /id="product-sku"|name="product_sku"/, 'manual Product form must not expose SKU')
 assert.equal((form.match(/id="product-barcode"/g) || []).length, 1, 'Barcode must exist once, in Basic Info only')
-assert.match(form, /className="max-w-\[13rem\]"[\s\S]*?product-tag-label/, 'Tag field stays compact')
+assert.match(form, /className="max-w-\[13rem\][^"]*"[\s\S]*?product-tag-label/, 'Tag field stays compact')
+assert.match(form, /data-testid="product-basic-fields"[^>]*grid-cols-1[^>]*sm:grid-cols-2[^>]*lg:grid-cols-4/, 'Basic fields must stack safely on narrow screens and share compact desktop rows')
+assert.match(form, /data-testid="product-pricing-grid"[^>]*grid-cols-1[^>]*xl:grid-cols-2/, 'Pricing panels must share a two-column large-screen row without forcing narrow overflow')
+assert.match(form, /data-testid="product-stock-fields"[^>]*grid-cols-1[^>]*sm:grid-cols-2/, 'Stock and expiry fields must use a responsive compact grid')
+assert.match(form, /h-11 w-11 flex-shrink-0[\s\S]*onClick=\{\(\) => openScanner\('barcode'\)\}/, 'Barcode scanner must remain icon-only with a 44px touch target')
+assert.match(form, /buttonClassName="input min-h-11 w-full min-w-0"/, 'Initial branch stays in the compact stock row with a 44px control')
+assert.match(form, /btn-primary min-h-11 flex-1/, 'Primary save action must preserve a 44px touch target')
 
 for (const id of ['product-category', 'product-brand', 'product-unit']) {
   const pos = form.indexOf(`id="${id}"`)
@@ -37,6 +43,8 @@ assert.match(adjust, /getProductsByIds\(\[id\]\)/, 'floating adjust flow must re
 assert.doesNotMatch(variant, /id="variant-form-sku"|name="variant_sku"/, 'Add-row/variant flow must not expose SKU either')
 assert.doesNotMatch(variant, /parent_id:/, 'new same-name rows must not create stored parent-child links')
 assert.match(variant, /virtual group title/, 'new same-name rows are grouped only by their normalized name')
+assert.match(variant, /data-testid="variant-fields"[^>]*grid-cols-1[^>]*sm:grid-cols-2/, 'Add-row inputs must stack on narrow screens and share rows when space permits')
+assert.match(variant, /btn-primary min-h-11 flex-1/, 'Add-row save action must preserve a 44px touch target')
 
 assert.match(workerProducts, /MAX_PRODUCT_IMAGE_UPLOAD_BYTES = 12 \* 1024 \* 1024/, 'server must allow a bounded raw-image fallback when browser compression cannot decode the source')
 assert.doesNotMatch(workerProducts, /Please try again, or pick a smaller\/simpler source photo/, 'image upload failure must not blame the operator for client compression failure')

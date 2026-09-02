@@ -2,12 +2,13 @@ import { Hono, type Context } from 'hono'
 import { enqueueImageNormalization } from '../lib/imageAudit'
 import bcrypt from 'bcryptjs'
 import { getDb } from '../lib/db'
-import { cascadeUserRename } from '../lib/userIdentity'
+import { buildUserRenameStatements } from '../lib/userIdentity'
 import { requireAuth, revokeUserSessions, type SessionUser } from '../lib/auth'
 import { audit } from '../lib/audit'
 import { isAdminControlUser } from '../lib/permissions'
 import { assertUpdatedAtMatch, getExpectedUpdatedAt, writeConflictResponse, WriteConflictError } from '../lib/conflictControl'
 import { broadcast } from '../durable-objects/broadcastHub'
+import { bumpVersion } from '../lib/cache'
 import { getMediaType, buildUniqueStoredName, sanitizeOriginalFileName } from '../lib/fileAssets'
 import { validateUploadedBuffer } from '../lib/uploadSecurity'
 import { checkRateLimit, getClientIp } from '../lib/rateLimit'
@@ -17,7 +18,7 @@ import type { Env } from '../index'
 // Ported from backend/src/routes/users.ts. Replaces the previous generic
 // CRUD stub in compat.ts (plain insertTableRow/updateTableRow with no
 // permission checks at all beyond "logged in", no admin-vs-admin
-// protection, no primary-admin guardrails, no duplicate-identity checks,
+// management guardrails, no primary-admin guardrails, no duplicate-identity checks,
 // and no forced re-login after a password change).
 //
 // What's intentionally NOT ported, and why:
@@ -152,7 +153,14 @@ function canManageTarget(actor: SessionUser, target: SecurityContextRow | undefi
   if (!actor || !target) return false
   if (Number(actor.id) === Number(target.id)) return true
   if (!isAdminControlUser(actor)) return false
-  if (isAdminControlUser(target)) return false
+  // Admins are allowed to manage other admin accounts (role/status/profile
+  // fields/password reset). The seeded primary-admin account remains the one
+  // protected peer-admin target so a secondary admin cannot lock out the
+  // recovery/root account. Self-service for that account still works above.
+  // Per explicit user decision (Sep 1 2026): admins may manage other admin
+  // accounts including the seeded primary-admin account -- no account is
+  // protected from peer-admin management. isPrimaryAdmin() is still used
+  // for informational display (is_primary_admin) only, never as a gate.
   return true
 }
 
@@ -433,14 +441,6 @@ app.put('/users/:id', async (c) => {
   if (existing.deleted_at) return c.json({ success: false, error: 'User is deleted' }, 400)
   if (!canManageTarget(actor, existingSecurity)) return c.json({ success: false, error: 'Cannot modify another admin account' }, 403)
 
-  const adminRole = await db.prepare(`SELECT id FROM roles WHERE lower(trim(code)) = 'admin' LIMIT 1`).get<{ id: number }>()
-  if (isPrimaryAdmin(existingSecurity) && normalizeLookup(username) !== 'admin') {
-    return c.json({ success: false, error: 'Primary admin username cannot be changed' }, 400)
-  }
-  if (isPrimaryAdmin(existingSecurity) && adminRole && Number(body.role_id || adminRole.id) !== Number(adminRole.id)) {
-    return c.json({ success: false, error: 'Primary admin role cannot be changed' }, 400)
-  }
-
   const name = String(body.name || username).trim()
   const phone = String(body.phone || '').trim() || null
   const phoneLookup = phone ? normalizePhoneLookup(phone) : null
@@ -449,31 +449,46 @@ app.put('/users/:id', async (c) => {
 
   const markDeleted = !!body.delete_user
   const nextIsActive = markDeleted ? 0 : (body.is_active ?? Number(existing.is_active || 0))
-  if (isPrimaryAdmin(existingSecurity) && (markDeleted || Number(nextIsActive) === 0)) {
-    return c.json({ success: false, error: 'Primary admin account cannot be deactivated or deleted' }, 400)
-  }
   const nextPermissions = body.permissions === undefined ? parseJsonSafe(existing.permissions) : body.permissions
 
   try {
-    await db.prepare(`
+    const updateUserStatement = {
+      sql: `
       UPDATE users SET username = @username, name = @name, phone = @phone, phone_lookup = @phone_lookup,
         phone_verified = 0, email = @email, email_verified = CASE WHEN @email IS NULL THEN 0 ELSE email_verified END,
         avatar_path = @avatar, permissions = @permissions, role_id = @role_id, is_active = @is_active,
         deleted_at = @deleted_at, updated_at = CURRENT_TIMESTAMP
       WHERE id = @id
-    `).run({
+    `,
+      params: {
       username, name, phone, phone_lookup: phoneLookup, email,
       avatar: String(body.avatar_path || '').trim() || null,
       permissions: JSON.stringify(nextPermissions), role_id: body.role_id || null,
       is_active: nextIsActive, deleted_at: markDeleted ? new Date().toISOString() : null, id,
-    })
+      },
+    }
     // The account id is the source of truth: when the username changes, propagate
     // it to every denormalized snapshot (cashier_name, movement user_name, etc.)
     // so the whole system reflects the new name rather than keeping stale copies.
-    if (String(existing.username ?? '').trim() !== username) {
-      await cascadeUserRename(db, Number(id), username)
+    const usernameChanged = String(existing.username ?? '').trim() !== username
+    const renameScope = String(body.__rename_cascade || '').trim().toLowerCase()
+    if (usernameChanged && renameScope !== 'carry' && renameScope !== 'record_only') {
+      return c.json({ success: false, error: 'Choose whether to update linked live records or rename only this user.', code: 'rename_choice_required' }, 409)
+    }
+    await db.batch([
+      updateUserStatement,
+      ...(usernameChanged && renameScope === 'carry' ? buildUserRenameStatements(Number(id), username) : []),
+    ])
+    // Deactivation must kill the currently-issued sessions as well. Otherwise
+    // an old cookie becomes valid again if the account is re-enabled before
+    // that session expires, which defeats the meaning of an admin disable.
+    if (Number(nextIsActive) === 0) {
+      await revokeUserSessions(c.env, Number(id))
     }
     await audit(c.env, actor?.id ?? null, actor?.name ?? null, 'update', 'user', id)
+    if (usernameChanged && renameScope === 'carry') {
+      await Promise.all([bumpVersion(c.env, 'sales'), bumpVersion(c.env, 'returns')])
+    }
     c.executionCtx.waitUntil(broadcast(c.env, 'users', { action: 'update', id }))
     return c.json({ success: true, ...sanitizeUserRow(await getUserWithRole(c, id)) })
   } catch (error) {
@@ -512,9 +527,6 @@ app.put('/users/:id/profile', async (c) => {
     if (result) return c.json(result.body, result.status)
     throw error
   }
-  if (isPrimaryAdmin(targetSecurity) && normalizeLookup(username) !== 'admin') {
-    return c.json({ success: false, error: 'Primary admin username cannot be changed' }, 400)
-  }
   if (!adminOverride) {
     const currentPassword = String(body.currentPassword || '')
     if (!currentPassword) return c.json({ success: false, error: 'Current password required' }, 400)
@@ -530,18 +542,31 @@ app.put('/users/:id/profile', async (c) => {
   if (conflict) return c.json({ success: false, error: conflict.message }, 409)
 
   try {
-    await db.prepare(`
+    const updateProfileStatement = {
+      sql: `
       UPDATE users SET username = @username, name = @name, phone = @phone, phone_lookup = @phone_lookup,
         phone_verified = 0, email = @email, email_verified = CASE WHEN @email IS NULL THEN 0 ELSE email_verified END,
         avatar_path = @avatar, updated_at = CURRENT_TIMESTAMP
       WHERE id = @id
-    `).run({ username, name, phone, phone_lookup: phoneLookup, email, avatar: String(body.avatar_path || '').trim() || null, id: targetId })
+    `,
+      params: { username, name, phone, phone_lookup: phoneLookup, email, avatar: String(body.avatar_path || '').trim() || null, id: targetId },
+    }
     // Propagate a username change to every denormalized snapshot (see the admin
     // PUT above) -- same id-is-source-of-truth rule on the self-service path.
-    if (String(user.username ?? '').trim() !== username) {
-      await cascadeUserRename(db, Number(targetId), username)
+    const usernameChanged = String(user.username ?? '').trim() !== username
+    const renameScope = String(body.__rename_cascade || '').trim().toLowerCase()
+    if (usernameChanged && renameScope !== 'carry' && renameScope !== 'record_only') {
+      return c.json({ success: false, error: 'Choose whether to update linked live records or rename only this user.', code: 'rename_choice_required' }, 409)
     }
+    await db.batch([
+      updateProfileStatement,
+      ...(usernameChanged && renameScope === 'carry' ? buildUserRenameStatements(Number(targetId), username) : []),
+    ])
     await audit(c.env, actor?.id ?? null, actor?.name ?? null, 'update', 'user', targetId, { mode: 'profile' })
+    if (usernameChanged && renameScope === 'carry') {
+      await Promise.all([bumpVersion(c.env, 'sales'), bumpVersion(c.env, 'returns')])
+    }
+    c.executionCtx.waitUntil(broadcast(c.env, 'users', { action: 'update', id: targetId }))
     return c.json({ success: true, ...sanitizeUserRow(await getUserWithRole(c, targetId)) })
   } catch (error) {
     const message = String((error as Error)?.message || '')
@@ -549,7 +574,7 @@ app.put('/users/:id/profile', async (c) => {
   }
 })
 
-async function handlePasswordChange(c: Ctx, options: { requireCurrent: boolean; requireAdminControl: boolean }) {
+async function handlePasswordChange(c: Ctx, options: { requireCurrent: boolean; requireAdminControl: boolean; requireSelf: boolean; allowInactive: boolean }) {
   const actor = c.get('user')
   const targetId = c.req.param('id') || ''
   const body = (await c.req.json<Record<string, unknown>>().catch(() => ({}))) as Record<string, unknown>
@@ -557,8 +582,11 @@ async function handlePasswordChange(c: Ctx, options: { requireCurrent: boolean; 
   if (!newPassword) return c.json({ success: false, error: 'New password required' }, 400)
   if (passwordTooShort(newPassword)) return c.json({ success: false, error: passwordMinLengthError() }, 400)
 
-  if (options.requireAdminControl) {
-    if (!isAdminControlUser(actor)) return c.json({ success: false, error: 'No permission' }, 403)
+  if (options.requireAdminControl && !isAdminControlUser(actor)) {
+    return c.json({ success: false, error: 'No permission' }, 403)
+  }
+  if (options.requireSelf && Number(actor?.id || 0) !== Number(targetId || 0)) {
+    return c.json({ success: false, error: 'Use the administrator password-reset action for another account' }, 403)
   }
   const targetSecurity = await getUserSecurityContext(c, targetId)
   if (!targetSecurity) return c.json({ success: false, error: 'User not found' }, 404)
@@ -569,10 +597,11 @@ async function handlePasswordChange(c: Ctx, options: { requireCurrent: boolean; 
     id: number; password: string; is_active: number; deleted_at: string | null
   }>({ id: targetId })
   if (!user) return c.json({ success: false, error: 'User not found' }, 404)
-  if (user.deleted_at || !user.is_active) return c.json({ success: false, error: 'User account is inactive' }, 400)
+  if (user.deleted_at) return c.json({ success: false, error: 'User account is deleted' }, 400)
+  if (!options.allowInactive && !user.is_active) return c.json({ success: false, error: 'User account is inactive' }, 400)
 
-  const allowAdminOverride = options.requireAdminControl || (!!body.adminOverride && isAdminControlUser(actor))
-  if (options.requireCurrent && !allowAdminOverride) {
+  const adminReset = options.requireAdminControl
+  if (options.requireCurrent) {
     const currentPassword = String(body.currentPassword || '')
     if (!currentPassword) return c.json({ success: false, error: 'Current password required' }, 400)
     if (!bcrypt.compareSync(currentPassword, user.password)) return c.json({ success: false, error: 'Current password is incorrect' }, 401)
@@ -582,13 +611,13 @@ async function handlePasswordChange(c: Ctx, options: { requireCurrent: boolean; 
   await db.prepare('UPDATE users SET password = @password, updated_at = CURRENT_TIMESTAMP WHERE id = @id').run({ password: hash, id: targetId })
   await revokeUserSessions(c.env, targetId)
   await audit(c.env, actor?.id ?? null, actor?.name ?? null, 'reset_password', 'user', targetId, {
-    mode: allowAdminOverride ? 'admin' : 'self_service',
+    mode: adminReset ? 'admin' : 'self_service',
   })
   return c.json({ success: true })
 }
 
-app.post('/users/:id/change-password', (c) => handlePasswordChange(c, { requireCurrent: true, requireAdminControl: false }))
-app.post('/users/:id/reset-password', (c) => handlePasswordChange(c, { requireCurrent: false, requireAdminControl: true }))
+app.post('/users/:id/change-password', (c) => handlePasswordChange(c, { requireCurrent: true, requireAdminControl: false, requireSelf: true, allowInactive: false }))
+app.post('/users/:id/reset-password', (c) => handlePasswordChange(c, { requireCurrent: false, requireAdminControl: true, requireSelf: false, allowInactive: true }))
 
 // -- Role CRUD (admin control) ---------------------------------------------
 

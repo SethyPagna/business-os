@@ -17,18 +17,18 @@ const check = (label, fn) => { fn(); passed++; console.log(`PASS ${label}`) }
 
 const db = new Database(':memory:')
 db.exec(`
-  CREATE TABLE fees (id INTEGER PRIMARY KEY, fee_type TEXT, amount_usd REAL, amount_khr REAL, fee_date TEXT, branch_id INTEGER);
+  CREATE TABLE fees (id INTEGER PRIMARY KEY, fee_type TEXT, label TEXT, amount_usd REAL, amount_khr REAL, fee_date TEXT, branch_id INTEGER);
   CREATE TABLE returns (id INTEGER PRIMARY KEY, total_refund_usd REAL, total_refund_khr REAL,
     supplier_compensation_usd REAL, supplier_compensation_khr REAL, supplier_loss_usd REAL, supplier_loss_khr REAL,
     return_scope TEXT, status TEXT, branch_id INTEGER, created_at TEXT);
 `)
 // 3 KHR-only fees + 1 USD-only fee, all inside Aug 2026.
-const insFee = db.prepare('INSERT INTO fees (fee_type, amount_usd, amount_khr, fee_date, branch_id) VALUES (?,?,?,?,1)')
-insFee.run('delivery', 0, 40000, '2026-08-05')
-insFee.run('delivery', 0, 18000, '2026-08-06')
-insFee.run('expense', 0, 73500, '2026-08-06')
-insFee.run('expense', 12.5, 0, '2026-08-07')
-insFee.run('expense', 5, 0, '2026-07-31') // OUT of range -- must be excluded
+const insFee = db.prepare('INSERT INTO fees (fee_type, label, amount_usd, amount_khr, fee_date, branch_id) VALUES (?,?,?,?,?,1)')
+insFee.run('delivery', 'Grab', 0, 40000, '2026-08-05')
+insFee.run('delivery', 'grab ', 0, 18000, '2026-08-06')
+insFee.run('expense', 'Supplies', 0, 73500, '2026-08-06')
+insFee.run('expense', 'Supplies', 12.5, 0, '2026-08-07')
+insFee.run('expense', 'Supplies', 5, 0, '2026-07-31') // OUT of range -- must be excluded
 // 1 KHR-only customer return in range.
 db.prepare(`INSERT INTO returns (total_refund_usd, total_refund_khr, supplier_compensation_usd, supplier_compensation_khr, supplier_loss_usd, supplier_loss_khr, return_scope, status, branch_id, created_at)
   VALUES (0, 51250, 0, 0, 0, 0, 'customer', 'completed', 1, '2026-08-10 03:00:00')`).run()
@@ -45,6 +45,21 @@ check('fees by_type carries KHR too', () => {
   const rows = db.prepare(`SELECT fee_type, COUNT(*) AS count, ${feeMoney} FROM fees f WHERE f.fee_date BETWEEN '2026-08-01' AND '2026-08-31' GROUP BY fee_type ORDER BY amount_khr DESC`).all()
   const delivery = rows.find((r) => r.fee_type === 'delivery')
   assert.ok(delivery && delivery.amount_khr === 58000, `delivery KHR summed, got ${delivery && delivery.amount_khr}`)
+})
+check('fees by_category groups label variants without changing source rows', () => {
+  const rows = db.prepare(`
+    SELECT f.fee_type AS fee_type, COALESCE(NULLIF(MIN(TRIM(f.label)), ''), '') AS label,
+      COUNT(*) AS count, ${feeMoney}
+    FROM fees f
+    WHERE f.fee_date BETWEEN '2026-08-01' AND '2026-08-31'
+    GROUP BY f.fee_type, lower(trim(COALESCE(f.label, '')))
+    ORDER BY amount_usd DESC, amount_khr DESC, label
+  `).all()
+  const grab = rows.find((row) => row.fee_type === 'delivery' && row.label.toLowerCase() === 'grab')
+  assert.ok(grab, 'Grab label variants should form one delivery category')
+  assert.equal(grab.count, 2)
+  assert.equal(grab.amount_khr, 58000)
+  assert.deepEqual(db.prepare(`SELECT label FROM fees WHERE lower(trim(label)) = 'grab' ORDER BY id`).all(), [{ label: 'Grab' }, { label: 'grab ' }], 'source labels remain byte-for-byte unchanged')
 })
 
 // --- returns /report money expression (verbatim from routes/returns.ts) --
@@ -63,6 +78,10 @@ check('the route files still sum both currencies (no silent regression)', () => 
   const feesSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'routes', 'fees.ts'), 'utf8')
   const returnsSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'routes', 'returns.ts'), 'utf8')
   assert.match(feesSrc, /SUM\(amount_khr\)/, 'fees /report must sum amount_khr')
+  assert.match(feesSrc, /by_category:/, 'fees /report must return its label/category breakdown')
+  assert.match(feesSrc, /app\.post\('\/labels\/classify'/, 'saved labels must expose one editable category path')
+  assert.match(feesSrc, /lower\(trim\(COALESCE\(label,''\)\)\) = @label/, 'category updates must use exact normalized labels')
+  assert.doesNotMatch(feesSrc, /const\s+(?:DELIVERY_)?CARRIERS?\s*=/i, 'the route must not introduce a parallel hardcoded carrier list')
   assert.match(returnsSrc, /SUM\(total_refund_khr\)/, 'returns /report must sum total_refund_khr')
 })
 

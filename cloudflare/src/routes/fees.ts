@@ -7,6 +7,7 @@ import { broadcast } from '../durable-objects/broadcastHub'
 import { assertUpdatedAtMatch, getExpectedUpdatedAt, writeConflictResponse, WriteConflictError } from '../lib/conflictControl'
 import { maybeQueueForReview } from '../lib/reviewGate'
 import { businessToday } from '../lib/businessDateWindow'
+import { sendTelegramEvent, telegramMoney } from '../lib/telegram'
 import type { Env } from '../index'
 
 // Standalone Fees page (migrations/0018_fees.sql) -- manual-entry fee
@@ -209,10 +210,19 @@ app.get('/report', async (c) => {
   // per-fee stored rate and the global one can be blank -- so both raw
   // totals are returned and the UI shows "$X · Y៛".
   const money = 'ROUND(COALESCE(SUM(amount_usd), 0), 2) AS amount_usd, ROUND(COALESCE(SUM(amount_khr), 0), 0) AS amount_khr'
-  const [totals, days, byType] = await Promise.all([
+  const [totals, days, byType, byCategory] = await Promise.all([
     db.prepare(`SELECT COUNT(*) AS count, ${money} FROM fees f WHERE ${where}`).get<Record<string, number>>(params),
     db.prepare(`SELECT f.fee_date AS date, COUNT(*) AS count, ${money} FROM fees f WHERE ${where} GROUP BY f.fee_date ORDER BY f.fee_date DESC`).all<Record<string, unknown>>(params),
     db.prepare(`SELECT f.fee_type AS fee_type, COUNT(*) AS count, ${money} FROM fees f WHERE ${where} GROUP BY f.fee_type ORDER BY amount_usd DESC, amount_khr DESC`).all<Record<string, unknown>>(params),
+    db.prepare(`
+      SELECT f.fee_type AS fee_type,
+        COALESCE(NULLIF(MIN(TRIM(f.label)), ''), '') AS label,
+        COUNT(*) AS count, ${money}
+      FROM fees f
+      WHERE ${where}
+      GROUP BY f.fee_type, lower(trim(COALESCE(f.label, '')))
+      ORDER BY amount_usd DESC, amount_khr DESC, label
+    `).all<Record<string, unknown>>(params),
   ])
   return c.json({
     startDate,
@@ -220,6 +230,7 @@ app.get('/report', async (c) => {
     totals: { count: Number(totals?.count || 0), amount_usd: Number(totals?.amount_usd || 0), amount_khr: Number(totals?.amount_khr || 0) },
     days: (days || []).map((d) => ({ date: String(d.date || ''), count: Number(d.count || 0), amount_usd: Number(d.amount_usd || 0), amount_khr: Number(d.amount_khr || 0) })),
     by_type: (byType || []).map((r) => ({ fee_type: String(r.fee_type || ''), count: Number(r.count || 0), amount_usd: Number(r.amount_usd || 0), amount_khr: Number(r.amount_khr || 0) })),
+    by_category: (byCategory || []).map((r) => ({ label: String(r.label || ''), fee_type: String(r.fee_type || ''), count: Number(r.count || 0), amount_usd: Number(r.amount_usd || 0), amount_khr: Number(r.amount_khr || 0) })),
   })
 })
 
@@ -233,21 +244,98 @@ app.get('/report', async (c) => {
 app.get('/labels', async (c) => {
   const db = getDb(c.env)
   const rows = await db.prepare(`
-    SELECT f.label AS label, COUNT(*) AS uses,
-      (SELECT f2.fee_type FROM fees f2 WHERE f2.label = f.label
-        GROUP BY f2.fee_type ORDER BY COUNT(*) DESC, f2.fee_type LIMIT 1) AS fee_type
+    SELECT MIN(TRIM(f.label)) AS label, f.fee_type AS fee_type, COUNT(*) AS uses
     FROM fees f
     WHERE f.label IS NOT NULL AND TRIM(f.label) <> ''
-    GROUP BY f.label
-    ORDER BY uses DESC, f.label
+    GROUP BY lower(trim(f.label)), f.fee_type
+    ORDER BY lower(trim(f.label)), uses DESC, f.fee_type
   `).all<{ label: string; uses: number; fee_type: string }>()
+  const catalog = new Map<string, { label: string; uses: number; type_counts: Array<{ fee_type: FeeType; uses: number }> }>()
+  for (const row of rows || []) {
+    const label = String(row.label || '').trim()
+    if (!label) continue
+    const key = label.toLowerCase()
+    const entry = catalog.get(key) || { label, uses: 0, type_counts: [] }
+    const uses = Number(row.uses) || 0
+    entry.uses += uses
+    entry.type_counts.push({ fee_type: normalizeFeeType(row.fee_type), uses })
+    catalog.set(key, entry)
+  }
   return c.json({
-    labels: (rows || []).map((r) => ({
-      label: String(r.label || ''),
-      uses: Number(r.uses) || 0,
-      fee_type: normalizeFeeType(r.fee_type),
-    })),
+    labels: [...catalog.values()]
+      .map((entry) => ({
+        ...entry,
+        fee_type: [...entry.type_counts].sort((a, b) => b.uses - a.uses || a.fee_type.localeCompare(b.fee_type))[0]?.fee_type || 'other',
+      }))
+      .sort((a, b) => b.uses - a.uses || a.label.localeCompare(b.label)),
   })
+})
+
+app.get('/labels/impact', async (c) => {
+  const from = normalizeFeeLabel(c.req.query('from'))
+  const to = normalizeFeeLabel(c.req.query('to'))
+  if (!from || !to) return c.json({ error: 'Source and target labels are required' }, 400)
+  const db = getDb(c.env)
+  const rows = Number((await db.prepare("SELECT COUNT(*) AS n FROM fees WHERE lower(trim(COALESCE(label,''))) = @from").get<{ n: number }>({ from: from.toLowerCase() }))?.n || 0)
+  const target = Number((await db.prepare("SELECT COUNT(*) AS n FROM fees WHERE lower(trim(COALESCE(label,''))) = @to").get<{ n: number }>({ to: to.toLowerCase() }))?.n || 0)
+  const typeCounts = await db.prepare(`
+    SELECT fee_type, COUNT(*) AS uses FROM fees
+    WHERE lower(trim(COALESCE(label,''))) = @from
+    GROUP BY fee_type ORDER BY uses DESC, fee_type
+  `).all<{ fee_type: string; uses: number }>({ from: from.toLowerCase() })
+  return c.json({ from, to, linked_records: rows, target_exists: target > 0, type_counts: (typeCounts || []).map((row) => ({ fee_type: normalizeFeeType(row.fee_type), uses: Number(row.uses) || 0 })), live_snapshots: { fees: rows }, historical_snapshots_preserved: ['audit_logs', 'action history payloads'] })
+})
+
+app.post('/labels/replace', async (c) => {
+  const user = c.get('user')
+  if (getActionTier(user, 'fees', 'edit') === 'none') return c.json({ error: 'No permission' }, 403)
+  const body = await c.req.json<Record<string, unknown>>().catch(() => ({} as Record<string, unknown>))
+  const from = normalizeFeeLabel(body.from)
+  const to = normalizeFeeLabel(body.to)
+  if (!from || !to) return c.json({ error: 'Source and target labels are required' }, 400)
+  const result = await getDb(c.env).prepare(`
+    UPDATE fees SET label = @to, updated_at = CURRENT_TIMESTAMP
+    WHERE lower(trim(COALESCE(label,''))) = @from
+  `).run({ from: from.toLowerCase(), to })
+  await audit(c.env, user?.id ?? null, user?.name ?? null, 'replace', 'fee_label', null, { from, to, changed: result.changes })
+  c.executionCtx.waitUntil(broadcast(c.env, 'fees', { action: 'label_replace', from, to }))
+  return c.json({ success: true, changed: result.changes })
+})
+
+// Reclassify one exact saved label through the same catalog that feeds the
+// Expense form and label manager. This deliberately does not contain a
+// hardcoded carrier list: Grab, J&T, Capital Express, Virak Buntam and every
+// evidenced spelling remain source labels. Operators can preview and assign
+// any one of them to Delivery (or another existing expense type) here, and
+// every live exact match follows while audit/action history stays immutable.
+app.get('/labels/type-impact', async (c) => {
+  const label = normalizeFeeLabel(c.req.query('label'))
+  if (!label) return c.json({ error: 'Label is required' }, 400)
+  const rows = await getDb(c.env).prepare(`
+    SELECT fee_type, COUNT(*) AS uses FROM fees
+    WHERE lower(trim(COALESCE(label,''))) = @label
+    GROUP BY fee_type ORDER BY uses DESC, fee_type
+  `).all<{ fee_type: string; uses: number }>({ label: label.toLowerCase() })
+  const typeCounts = (rows || []).map((row) => ({ fee_type: normalizeFeeType(row.fee_type), uses: Number(row.uses) || 0 }))
+  return c.json({ label, linked_records: typeCounts.reduce((sum, row) => sum + row.uses, 0), type_counts: typeCounts, historical_snapshots_preserved: ['audit_logs', 'action history payloads'] })
+})
+
+app.post('/labels/classify', async (c) => {
+  const user = c.get('user')
+  if (getActionTier(user, 'fees', 'edit') === 'none') return c.json({ error: 'No permission' }, 403)
+  const body = await c.req.json<Record<string, unknown>>().catch(() => ({} as Record<string, unknown>))
+  const label = normalizeFeeLabel(body.label)
+  const requestedType = String(body.fee_type ?? body.feeType ?? '').trim().toLowerCase()
+  if (!label) return c.json({ error: 'Label is required' }, 400)
+  if (!FEE_TYPES.includes(requestedType)) return c.json({ error: 'Invalid expense type' }, 400)
+  const feeType = requestedType as FeeType
+  const result = await getDb(c.env).prepare(`
+    UPDATE fees SET fee_type = @feeType, updated_at = CURRENT_TIMESTAMP
+    WHERE lower(trim(COALESCE(label,''))) = @label AND fee_type <> @feeType
+  `).run({ label: label.toLowerCase(), feeType })
+  await audit(c.env, user?.id ?? null, user?.name ?? null, 'classify', 'fee_label', null, { label, fee_type: feeType, changed: result.changes })
+  c.executionCtx.waitUntil(broadcast(c.env, 'fees', { action: 'label_classify', label, fee_type: feeType }))
+  return c.json({ success: true, changed: result.changes, label, fee_type: feeType })
 })
 
 // GET /api/fees/:id
@@ -299,6 +387,16 @@ app.post('/', async (c) => {
   const fee = await db.prepare(`SELECT * FROM fees WHERE id = @id`).get<FeeRow>({ id: result.lastInsertRowid })
   await audit(c.env, user.id, user.username || null, 'create', 'fee', result.lastInsertRowid, { fee_type: feeType, amount_usd: amountUsd, amount_khr: amountKhr })
   await broadcast(c.env, 'fees', { type: 'created', id: result.lastInsertRowid })
+  c.executionCtx.waitUntil(sendTelegramEvent(c.env, {
+    type: 'fees',
+    lines: [
+      `Type: ${feeType}`,
+      `Amount: ${telegramMoney(amountUsd, amountKhr)}`,
+      `Date: ${feeDate}`,
+      label ? `Label: ${label}` : '',
+      notes ? `Note: ${notes}` : '',
+    ],
+  }).catch((error) => console.error('[telegram] fee notification failed', error)))
   return c.json({ fee }, 201)
 })
 

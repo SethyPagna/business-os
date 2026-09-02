@@ -36,7 +36,7 @@ execSync(`node ${tscBin} --module commonjs --target es2020 --outDir ${tmpDir} ${
   stdio: 'inherit',
 })
 const lib = require(path.join(tmpDir, 'permissions.js'))
-const { hasPermission, hasAnyPermission, isAdminControlUser } = lib
+const { hasPermission, hasAnyPermission, isAdminControlUser, getActionTier, getPermissionTier } = lib
 
 // ---- scenario: POS-only cashier (role grants { pos: true } only) ----
 {
@@ -85,6 +85,37 @@ const { hasPermission, hasAnyPermission, isAdminControlUser } = lib
   console.log('PASS user-level permission override still wins over the role default for sales/returns gating')
 }
 
+// ---- scenario: hidden per-action controls cannot be invoked directly ----
+{
+  const narrowed = {
+    role_permissions: JSON.stringify({ sales: true, promotions: true, contacts: true }),
+    permissions: JSON.stringify({ 'sales:status': false, 'promotions:manage': false, 'contacts:resolve_conflicts': false }),
+    username: 'narrowed1',
+    role_code: 'manager',
+  }
+  assert.equal(getActionTier(narrowed, 'sales', 'status'), 'none', 'sales.status off must deny the direct PATCH gate')
+  assert.equal(getActionTier(narrowed, 'sales', 'customer'), 'full', 'one Sales action-off switch must not disable unrelated actions')
+  assert.equal(getActionTier(narrowed, 'promotions', 'manage'), 'none', 'promotions.manage off must deny direct rule writes')
+  assert.equal(getActionTier(narrowed, 'contacts', 'resolve_conflicts'), 'none', 'contacts conflict-resolution off must deny direct mutation routes')
+
+  const viewOnly = { role_permissions: JSON.stringify({ sales: 'view', promotions: 'view' }), permissions: null, username: 'viewer1', role_code: 'viewer' }
+  assert.equal(getActionTier(viewOnly, 'sales', 'export'), 'view', 'Sales View keeps the explicitly read-safe export action')
+  assert.notEqual(getActionTier(viewOnly, 'sales', 'status'), 'full', 'Sales View can never satisfy a Full-only write route')
+  assert.notEqual(getActionTier(viewOnly, 'promotions', 'manage'), 'full', 'Promotions View can never satisfy a Full-only write route')
+  console.log('PASS action overrides deny hidden direct writes without widening view tiers or disabling unrelated actions')
+}
+
+// ---- scenario: transfer history uses either parent read tier ------------
+{
+  const branchReviewer = { role_permissions: JSON.stringify({ branches: 'review' }), permissions: null, username: 'br1', role_code: 'reviewer' }
+  const inventoryReviewer = { role_permissions: JSON.stringify({ inventory: 'review' }), permissions: null, username: 'ir1', role_code: 'reviewer' }
+  const mayReadTransferHistory = (user) => getPermissionTier(user, 'inventory') !== 'none' || getPermissionTier(user, 'branches') !== 'none'
+  assert.equal(mayReadTransferHistory(branchReviewer), true)
+  assert.equal(mayReadTransferHistory(inventoryReviewer), true)
+  assert.equal(mayReadTransferHistory({ role_permissions: '{}', permissions: null, username: 'none', role_code: 'staff' }), false)
+  console.log('PASS transfer history admits either Branches or Inventory read tier and denies users with neither')
+}
+
 // ---- scenario: admin-control user always passes ----
 {
   const adminUser = { role_permissions: null, permissions: null, username: 'admin', role_code: 'admin' }
@@ -102,14 +133,14 @@ const { hasPermission, hasAnyPermission, isAdminControlUser } = lib
   // Part 557 view-tier: sales READS moved from the strict hasPermission('sales')
   // boolean to the tier-aware canReadSales() (getPermissionTier(...,'sales') !==
   // 'none') so a read-only 'view' grant can list/report without a write grant;
-  // WRITES (status, customer) stay strict. Assert both gates exist and are wired,
-  // which is a stronger check than the old raw hasPermission count.
-  const salesWriteChecks = salesSrc.match(/hasPermission\(c\.get\('user'\), 'sales'\)|hasPermission\(user, 'sales'\)/g) || []
-  assert.ok(salesWriteChecks.length >= 2, `expected >= 2 strict hasPermission(..., 'sales') WRITE gates in sales.ts (PATCH /:id/status, PATCH /:id/customer), found ${salesWriteChecks.length}`)
+  // WRITES (status, customer) stay Full-only and now honor their individual
+  // action-off switches. Assert both exact capabilities are wired.
+  assert.match(salesSrc, /getActionTier\(user, 'sales', 'status'\) !== 'full'/, 'PATCH /:id/status must require sales.status at Full')
+  assert.match(salesSrc, /getActionTier\(user, 'sales', 'customer'\) !== 'full'/, 'PATCH /:id/customer must require sales.customer at Full')
   assert.match(salesSrc, /function canReadSales\(user: SessionUser\): boolean \{\s*return getPermissionTier\(user, 'sales'\) !== 'none'/, 'sales.ts must define the tier-aware read gate canReadSales(getPermissionTier !== none)')
   const salesReadChecks = salesSrc.match(/canReadSales\(/g) || []
   assert.ok(salesReadChecks.length >= 6, `expected sales.ts reads gated by canReadSales() at multiple sites, found ${salesReadChecks.length}`)
-  console.log('PASS routes/sales.ts gates create (pos-or-sales), writes (strict sales), and reads (tier-aware canReadSales)')
+  console.log('PASS routes/sales.ts gates create (pos-or-sales), writes (action-specific Full), and reads (tier-aware canReadSales)')
 }
 {
   const returnsSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'routes', 'returns.ts'), 'utf8')
@@ -195,7 +226,7 @@ const { hasPermission, hasAnyPermission, isAdminControlUser } = lib
   assert.match(branchesSrc, /maybeQueueForReview\(c\.env, user, 'branches', \{\s*\n\s*actionType: 'delete'/, 'branches.ts DELETE /:id must queue for review too, not apply directly for a Review Required user')
   assert.match(branchesSrc, /transferTier === 'review'\)\s*\{\s*\n\s*return c\.json\(\{ error: 'Transferring stock requires Full Access/, 'branches.ts POST /transfer must explicitly block Review Required rather than leave it reachable')
   assert.match(branchesSrc, /bulkTransferTier === 'review'\)\s*\{\s*\n\s*return c\.json\(\{ error: 'Transferring stock requires Full Access/, 'branches.ts POST /transfer-bulk must explicitly block Review Required too')
-  assert.match(branchesSrc, /tier === 'review'\)\s*\{\s*\n\s*return c\.json\(\{ success: false, error: 'Repairing misplaced stock requires Full Access/, 'branches.ts POST /stock-integrity/repair must explicitly block Review Required too')
+  assert.match(branchesSrc, /tier === 'review'\)\s*\{\s*\n\s*return c\.json\(\{ success: false, error: 'Repairing stock integrity requires Full Access/, 'branches.ts POST /stock-integrity/repair must explicitly block Review Required too')
   console.log("PASS routes/branches.ts's permission checks are now tier-aware under its own 'branches' key, with create/update/delete queued for review and the three live-stock-movement routes explicitly blocked for Review Required")
 }
 {
@@ -259,7 +290,7 @@ const { hasPermission, hasAnyPermission, isAdminControlUser } = lib
   // the form Hono actually matches, which also covers the bare `/prefix`.
   assert.match(compatSrc, /for \(const prefix of \[[\s\S]*?'\/dashboard'[\s\S]*?\]\) \{\s*\n\s*app\.use\(`\$\{prefix\}\/\*`, requireAuth\)/, "compat.ts must require a session on the /dashboard subtree using the `${prefix}/*` form Hono actually matches")
   assert.doesNotMatch(compatSrc, /^app\.use\('\/[a-z-]+\*',/m, "compat.ts must not use the bare-trailing-`*` middleware form -- it matches nothing in Hono and silently leaves routes unguarded")
-  assert.match(compatSrc, /app\.get\('\/transfers', async \(c\) => \{\s*\n\s*const denied = denyUnless\(c, 'inventory', 'branches'\)/, 'compat.ts GET /transfers must check a permission -- it was reachable completely unauthenticated')
+  assert.match(compatSrc, /app\.get\('\/transfers', async \(c\) => \{[\s\S]*?getPermissionTier\(user, 'inventory'\) === 'none' && getPermissionTier\(user, 'branches'\) === 'none'/, 'compat.ts GET /transfers must admit either tier-aware read permission while denying users with neither')
   console.log("PASS routes/compat.ts's dashboard/analytics/dashboard-startup endpoints all check the 'dashboard' permission")
 }
 

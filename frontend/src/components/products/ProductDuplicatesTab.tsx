@@ -4,6 +4,7 @@ import Search from 'lucide-react/dist/esm/icons/search.js'
 import EyeOff from 'lucide-react/dist/esm/icons/eye-off.js'
 import Merge from 'lucide-react/dist/esm/icons/merge.js'
 import InfoHint from '../shared/InfoHint.tsx'
+import ScanSearchButton from '../shared/ScanSearchButton.tsx'
 import { ProductImg } from './shared/primitives.tsx'
 import { getPossiblySameProducts, dismissProductDuplicateCluster, mergePossiblySameProducts, updateProduct } from '../../api/productWriteTransport.ts'
 import { normalizeProductGroupName } from '../../utils/productGrouping.ts'
@@ -504,6 +505,11 @@ export default function ProductDuplicatesTab({ t, notify }: {
             className="w-full rounded-lg border border-gray-200 bg-white py-1.5 pl-8 pr-3 text-xs text-gray-700 outline-none transition placeholder:text-gray-400 focus:border-blue-300 focus:ring-2 focus:ring-blue-100 dark:border-zinc-700 dark:bg-zinc-900 dark:text-gray-100"
           />
         </div>
+        <ScanSearchButton
+          onDetected={setSearch}
+          t={(key) => t(key) || key}
+          className="h-8 w-8 rounded-lg"
+        />
         <button
           onClick={() => void load()}
           disabled={loading}

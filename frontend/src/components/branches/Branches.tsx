@@ -7,7 +7,7 @@ import ChevronDown from 'lucide-react/dist/esm/icons/chevron-down.js'
 import ChevronRight from 'lucide-react/dist/esm/icons/chevron-right.js'
 import Pencil from 'lucide-react/dist/esm/icons/pencil.js'
 import Plus from 'lucide-react/dist/esm/icons/plus.js'
-import Upload from 'lucide-react/dist/esm/icons/upload.js'
+import Download from 'lucide-react/dist/esm/icons/download.js'
 import Trash2 from 'lucide-react/dist/esm/icons/trash-2.js'
 import Warehouse from 'lucide-react/dist/esm/icons/warehouse.js'
 import { useApp as useAppHook, useSync as useSyncHook } from '../../AppContext.tsx'
@@ -16,8 +16,10 @@ import Modal from '../shared/Modal'
 import InfoHint from '../shared/InfoHint.tsx'
 import ActionHistoryBar from '../shared/ActionHistoryBar'
 import FilterMenu from '../shared/FilterMenu'
-import DateTimeRangePicker from '../shared/DateTimeRangePicker'
+import type { DateTimeRange } from '../shared/DateTimeRangePicker'
 import PaginationControls, { clampPage, DEFAULT_PAGE_SIZE } from '../shared/PaginationControls'
+import ScanSearchButton from '../shared/ScanSearchButton.tsx'
+import StatsRangeRow from '../shared/StatsRangeRow.tsx'
 import { useIsPageActive } from '../shared/pageActivity'
 import BranchForm from './BranchForm'
 import { useActionHistory } from '../../utils/actionHistory.ts'
@@ -288,7 +290,29 @@ function formatTransferDate(rawValue: string | null | undefined): string {
   })
 }
 
-export default function Branches({ embedded = false }: { embedded?: boolean } = {}) {
+/**
+ * Transfer rows do not carry a receipt number. Present the immutable row id as
+ * a compact transfer reference so the UI stays traceable without inventing a
+ * receipt identifier that cannot be reconciled with the API.
+ */
+function formatTransferReference(id: string | number | null | undefined): string {
+  const value = String(id ?? '').trim()
+  return value ? `TRF-${value}` : 'TRF—'
+}
+
+export default function Branches({ embedded = false, view, showSectionNavigation = true, dateRange, onDateRangeChange, showDateRange = true }: {
+  embedded?: boolean
+  /** Hub-controlled focused surface. Standalone use keeps internal state. */
+  view?: BranchTab
+  /** The hub owns section navigation; do not render a second nested tab row. */
+  showSectionNavigation?: boolean
+  /** Controlled by BranchesHubPage in the merged view. */
+  dateRange?: DateTimeRange
+  onDateRangeChange?: (range: DateTimeRange) => void
+  /** The merged hub already renders Inventory's shared top picker. A
+   * branch-only viewer keeps this local presentation enabled. */
+  showDateRange?: boolean
+} = {}) {
   const { can, t, user, notify, fmtUSD } = useApp()
   // Transferring stock moves real quantities against live state, so
   // routes/branches.ts blocks it outright for the Review Required tier
@@ -314,10 +338,18 @@ export default function Branches({ embedded = false }: { embedded?: boolean } = 
    * 2.2 UI selection/expansion state.
    */
   const [branches, setBranches] = useState<BranchRecord[]>([])
-  const [tab, setTab] = useState<BranchTab>('branches')
+  const [internalTab, setInternalTab] = useState<BranchTab>('branches')
+  const tab = view ?? internalTab
+  const setTab = useCallback((nextTab: BranchTab) => {
+    if (view == null) setInternalTab(nextTab)
+  }, [view])
   const [modal, setModal] = useState<BranchModal>(null)
   const [selected, setSelected] = useState<BranchRecord | null>(null)
   const [transfers, setTransfers] = useState<StockTransfer[]>([])
+  // Transfer ledger rows are immutable inventory evidence. Opening one shows
+  // the complete recorded movement and offers a correcting transfer, rather
+  // than pretending a posted stock movement can be edited in place.
+  const [transferDetail, setTransferDetail] = useState<StockTransfer | null>(null)
   const [transferTotal, setTransferTotal] = useState(0)
   const [transferPage, setTransferPage] = useState(1)
   const [transferPageSize, setTransferPageSize] = useState(DEFAULT_PAGE_SIZE)
@@ -355,9 +387,17 @@ export default function Branches({ embedded = false }: { embedded?: boolean } = 
   const [branchStatusFilter, setBranchStatusFilter] = useState<'all' | 'active' | 'inactive'>('all')
   const [transferFromFilter, setTransferFromFilter] = useState<string>('all')
   const [transferToFilter, setTransferToFilter] = useState<string>('all')
-  // Transfer history is all-time unless a date range is explicitly selected.
-  const [transferStartDate, setTransferStartDate] = useState('')
-  const [transferEndDate, setTransferEndDate] = useState('')
+  // One page-level date scope. Current-stock branch cards are intentionally
+  // snapshots, while every dated branch surface (transfer history and its
+  // export) reads this same range.
+  const [localBranchDateRange, setLocalBranchDateRange] = useState<DateTimeRange>(() => ({
+    startDate: '',
+    endDate: '',
+    startTime: '',
+    endTime: '',
+  }))
+  const branchDateRange = dateRange ?? localBranchDateRange
+  const handleBranchDateRangeChange = onDateRangeChange ?? setLocalBranchDateRange
   const [statDetail, setStatDetail] = useState<StatDetail | null>(null)
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
@@ -408,8 +448,8 @@ export default function Branches({ embedded = false }: { embedded?: boolean } = 
         if (tab === 'transfers') {
           tasks.transfers = () => withLoaderTimeout(
             () => branchApi.getTransfers({
-              startDate: transferStartDate || undefined,
-              endDate: transferEndDate || undefined,
+              startDate: branchDateRange.startDate || undefined,
+              endDate: branchDateRange.endDate || undefined,
               fromBranchId: transferFromFilter !== 'all' ? transferFromFilter : undefined,
               toBranchId: transferToFilter !== 'all' ? transferToFilter : undefined,
               page: transferPage,
@@ -467,7 +507,7 @@ export default function Branches({ embedded = false }: { embedded?: boolean } = 
     loadPromiseRef.current = wrappedPromise
     loadPromiseModeRef.current = requestedMode
     return wrappedPromise
-  }, [branchApi, notify, transferEndDate, transferFromFilter, transferPage, transferPageSize, transferStartDate, transferToFilter, tr, tab])
+  }, [branchApi, branchDateRange.endDate, branchDateRange.startDate, notify, transferFromFilter, transferPage, transferPageSize, transferToFilter, tr, tab])
 
   useEffect(() => {
     if (!isActive) {
@@ -501,7 +541,7 @@ export default function Branches({ embedded = false }: { embedded?: boolean } = 
   useEffect(() => {
     if (!isActive || !syncChannel?.channel) return
     const channel = syncChannel.channel
-    if (channel === 'branches' || channel === 'products' || channel === 'inventory') void load(true)
+    if (channel === 'branches' || channel === 'products' || channel === 'inventory' || channel === 'users') void load(true)
   }, [isActive, load, syncChannel?.channel, syncChannel?.ts])
 
   useEffect(() => () => {
@@ -539,9 +579,9 @@ export default function Branches({ embedded = false }: { embedded?: boolean } = 
     setTransferPage((current) => clampPage(current, transferTotalCount, transferPageSize))
   }, [transferPageSize, transferTotalCount])
 
-  const branchFilterActiveCount = (branchStatusFilter !== 'all' ? 1 : 0)
-    + (transferFromFilter !== 'all' ? 1 : 0) + (transferToFilter !== 'all' ? 1 : 0)
-    + (transferStartDate ? 1 : 0) + (transferEndDate ? 1 : 0)
+  const branchFilterActiveCount = tab === 'branches'
+    ? (branchStatusFilter !== 'all' ? 1 : 0)
+    : (transferFromFilter !== 'all' ? 1 : 0) + (transferToFilter !== 'all' ? 1 : 0)
   const branchFilterSections = useMemo(() => (
     tab === 'branches'
       ? [{
@@ -588,8 +628,6 @@ export default function Branches({ embedded = false }: { embedded?: boolean } = 
     setBranchStatusFilter('all')
     setTransferFromFilter('all')
     setTransferToFilter('all')
-    setTransferStartDate('')
-    setTransferEndDate('')
     setTransferPage(1)
   }, [])
   const selectedCount = selectedIds.size
@@ -977,13 +1015,63 @@ export default function Branches({ embedded = false }: { embedded?: boolean } = 
   // shared options dialog.
   const [exportDialog, setExportDialog] = useState<{ rows: Array<Record<string, unknown>>; baseName: string } | null>(null)
   const [branchExportLoading, setBranchExportLoading] = useState(false)
-  const openBranchStockExport = useCallback(async () => {
+  const openBranchExport = useCallback(async () => {
     if (branchExportLoading) return
     setBranchExportLoading(true)
     try {
+      if (tab === 'transfers') {
+        const exportRows: Array<Record<string, unknown>> = []
+        const exportPageSize = 200
+        let exportPage = 1
+        let totalPages = 1
+
+        do {
+          const response = await branchApi.getTransfers({
+            startDate: branchDateRange.startDate || undefined,
+            endDate: branchDateRange.endDate || undefined,
+            fromBranchId: transferFromFilter !== 'all' ? transferFromFilter : undefined,
+            toBranchId: transferToFilter !== 'all' ? transferToFilter : undefined,
+            page: exportPage,
+            pageSize: exportPageSize,
+          })
+          const pageResult = response as BranchTransferPage
+          const pageRows = Array.isArray(response)
+            ? response.filter(isTransferRecord)
+            : Array.isArray(pageResult?.items) ? pageResult.items.filter(isTransferRecord) : []
+
+          exportRows.push(...pageRows.map((transfer) => ({
+            Date: formatTransferDate(transfer.created_at),
+            Product: transfer.product_name || '',
+            From: transfer.from_name || '',
+            To: transfer.to_name || '',
+            Quantity: Number(transfer.quantity || 0),
+            Note: transfer.note || '',
+            User: transfer.user_name || '',
+          })))
+          totalPages = Array.isArray(response)
+            ? 1
+            : Math.max(1, Number(pageResult.totalPages) || Math.ceil(Math.max(0, Number(pageResult.total) || 0) / exportPageSize))
+          exportPage += 1
+        } while (exportPage <= totalPages)
+
+        if (!exportRows.length) {
+          notify(tr('no_data_to_export', 'No data to export'), 'error')
+          return
+        }
+        setExportDialog({ rows: exportRows, baseName: 'branch-transfers' })
+        return
+      }
+
       const rows: Array<Record<string, unknown>> = []
-      for (const branch of branches) {
-        const stock = await getBranchStockRequest(branch.id, {}) as Array<Record<string, unknown>> | null
+      // A small bounded pool is faster than serial reads without creating an
+      // unbounded burst when an account has many branches.
+      const stockLoad = await runConcurrentTasks<BranchRecord, Array<Record<string, unknown>> | null>(
+        branches,
+        async (branch: BranchRecord) => getBranchStockRequest(branch.id, {}) as Promise<Array<Record<string, unknown>> | null>,
+        { concurrency: 4 },
+      )
+      if (stockLoad.failures.length) throw stockLoad.failures[0]?.error
+      for (const { item: branch, value: stock } of stockLoad.successes) {
         for (const product of Array.isArray(stock) ? stock : []) {
           const quantity = Number(product.branch_quantity || 0)
           const costUsd = Number(product.purchase_price_usd || 0)
@@ -1009,7 +1097,7 @@ export default function Branches({ embedded = false }: { embedded?: boolean } = 
     } finally {
       setBranchExportLoading(false)
     }
-  }, [branchExportLoading, branches, notify, tr])
+  }, [branchApi, branchDateRange.endDate, branchDateRange.startDate, branchExportLoading, branches, notify, tab, transferFromFilter, transferToFilter, tr])
 
   // 11.1/11.2 (B6): same selection model as the table pages -- checkboxes
   // only exist while something is selected, entered by long-pressing a
@@ -1037,6 +1125,20 @@ export default function Branches({ embedded = false }: { embedded?: boolean } = 
     }
     setSelectedIds(new Set<string | number>(visibleBranches.map((branch) => branch.id)))
   }
+
+  const branchExportButton = (
+    <button
+      type="button"
+      className="inline-flex h-8 shrink-0 items-center justify-center gap-1 rounded-lg border border-slate-300 bg-white px-2 text-xs font-semibold text-slate-700 shadow-sm transition-colors hover:border-emerald-400 hover:bg-emerald-50/60 hover:text-emerald-700 disabled:cursor-wait disabled:opacity-60 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 dark:hover:border-emerald-500 dark:hover:bg-slate-700/80 dark:hover:text-emerald-300"
+      onClick={() => { void openBranchExport() }}
+      disabled={branchExportLoading}
+      title={tab === 'transfers' ? tr('export_transfer_history', 'Export transfer history') : tr('export_branch_stock', 'Export per-branch stock')}
+      aria-label={tab === 'transfers' ? tr('export_transfer_history', 'Export transfer history') : tr('export_branch_stock', 'Export per-branch stock')}
+    >
+      <Download className="h-4 w-4 shrink-0" />
+      <span className="truncate">{branchExportLoading ? tr('exporting', 'Exporting…') : tr('export', 'Export')}</span>
+    </button>
+  )
 
   return (
     <div className={`flex min-h-0 flex-col ${embedded ? 'flex-1 px-3 pb-3 pt-1 sm:px-6 sm:pb-6 sm:pt-2' : 'page-scroll p-3 sm:p-6'}`}>
@@ -1078,7 +1180,7 @@ export default function Branches({ embedded = false }: { embedded?: boolean } = 
           `visibleBranches.length`), the 'transfers' tab has no equivalent,
           and pulling a tab-conditional row up into this always-rendered
           wrapper would change its behavior, not just its position. */}
-      <div className="sticky top-2 z-30 -mx-1 mb-4 space-y-3 bg-gray-50/95 pb-2 backdrop-blur dark:bg-gray-900/95 sm:mx-0">
+      <div className="sticky top-2 z-30 -mx-1 mb-3 space-y-2 bg-gray-50/95 pb-1.5 backdrop-blur dark:bg-gray-900/95 sm:mx-0">
         {/* Merged toolbar row. On phones (user-reported "buttons on each
             other"): four equal flex-1 buttons gave History only ~1/4 of a
             narrow row, and its nowrap "History" label overflowed its box into
@@ -1089,50 +1191,30 @@ export default function Branches({ embedded = false }: { embedded?: boolean } = 
             with labels. Bulk-delete stays a fixed-width contextual button
             (only shown once something's selected), a rare high-stakes action
             rather than a fixed toolbar control. */}
-        <div className="flex min-w-0 items-stretch gap-1.5 overflow-x-auto pt-1">
-          <ActionHistoryBar history={actionHistory as unknown as ActionHistoryProp} t={t} className="min-w-0 flex-1" showLabel />
+        {!showDateRange ? <div className="flex min-w-0 items-stretch gap-1 overflow-x-auto pt-1">
+          <ActionHistoryBar history={actionHistory as unknown as ActionHistoryProp} t={t} className="w-auto shrink-0" showLabel dense />
           {selectedCount > 0 ? (
             <button className="btn-danger flex-shrink-0 text-sm" onClick={handleBulkDelete} disabled={bulkDeleteBusy}>
               <Trash2 className="h-4 w-4" />
               <span>{tr('delete', 'Delete')} ({selectedCount})</span>
             </button>
           ) : null}
-          {canTransferStock ? (
-            <button
-              className="inline-flex h-9 min-w-9 flex-none items-center justify-center gap-1.5 rounded-xl border border-slate-300 bg-white px-2 text-xs font-semibold text-slate-700 shadow-sm transition-colors hover:border-blue-400 hover:bg-blue-50/60 hover:text-blue-700 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 dark:hover:border-blue-500 dark:hover:bg-slate-700/80 dark:hover:text-blue-300 sm:flex-1 sm:text-sm"
-              onClick={() => setModal('transfer')}
-              title={tr('transfer', 'Transfer')}
-              aria-label={tr('transfer', 'Transfer')}
-            >
-              <ArrowRightLeft className="h-4 w-4 shrink-0" />
-              <span className="hidden truncate sm:inline">{tr('transfer', 'Transfer')}</span>
-            </button>
-          ) : null}
-          {/* H1+X5 (Part 403): Branches had NO export at all -- this one
-              covers H1's "per-branch stock" spec through the shared options
-              dialog (Excel/CSV/PDF + column chooser). */}
-          <button
-            className="inline-flex h-9 min-w-9 flex-none items-center justify-center gap-1.5 rounded-xl border border-slate-300 bg-white px-2 text-xs font-semibold text-slate-700 shadow-sm transition-colors hover:border-emerald-400 hover:bg-emerald-50/60 hover:text-emerald-700 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 dark:hover:border-emerald-500 dark:hover:bg-slate-700/80 dark:hover:text-emerald-300 sm:flex-1 sm:text-sm"
-            onClick={() => { void openBranchStockExport() }}
-            disabled={branchExportLoading}
-            title={tr('export_branch_stock', 'Export per-branch stock')}
-            aria-label={tr('export_branch_stock', 'Export per-branch stock')}
-          >
-            <Upload className="h-4 w-4 shrink-0" />
-            <span className="hidden truncate sm:inline">{branchExportLoading ? tr('exporting', 'Exporting…') : tr('export', 'Export')}</span>
-          </button>
-          <button
-            className="inline-flex h-9 flex-1 items-center justify-center gap-1.5 rounded-xl border border-blue-700 bg-blue-600 px-2 text-xs font-semibold text-white shadow-sm transition-colors hover:bg-blue-700 hover:border-blue-800 sm:text-sm"
-            onClick={() => { setSelected(null); setModal('form') }}
-            title={tr('add_branch', 'Add Branch')}
-            aria-label={tr('add_branch', 'Add Branch')}
-          >
-            <Plus className="h-4 w-4 shrink-0" />
-            <span className="truncate">{tr('add_branch', 'Add Branch')}</span>
-          </button>
-        </div>
-        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-gray-200 pt-1 dark:border-gray-700">
-          <div className="flex gap-1 overflow-x-auto">
+          {branchExportButton}
+        </div> : null}
+        {showDateRange ? (
+          <StatsRangeRow
+            range={branchDateRange}
+            onRangeChange={(range) => {
+              handleBranchDateRangeChange(range)
+              setTransferPage(1)
+            }}
+            t={t}
+            className="min-w-0"
+            actions={<><ActionHistoryBar history={actionHistory as unknown as ActionHistoryProp} t={t} className="w-auto shrink-0" showLabel dense />{branchExportButton}</>}
+          />
+        ) : null}
+        <div className="flex min-w-0 items-center gap-1 overflow-x-auto border-b border-gray-200 pt-0.5 dark:border-gray-700">
+          {showSectionNavigation ? <div className="flex gap-1 overflow-x-auto">
             {[
               { id: 'branches' as BranchTab, label: tr('branches', 'Branches') },
               { id: 'transfers' as BranchTab, label: tr('transfer_history', 'Transfer History') },
@@ -1149,30 +1231,35 @@ export default function Branches({ embedded = false }: { embedded?: boolean } = 
                 {label}
               </button>
             ))}
-          </div>
-          <div className="mb-1">
-            <div className="flex flex-wrap items-center justify-end gap-1.5">
-              {tab === 'transfers' ? (
-                <DateTimeRangePicker
-                  t={t}
-                  showTime={false}
-                  value={{ startDate: transferStartDate, endDate: transferEndDate, startTime: '', endTime: '' }}
-                  onChange={(range) => {
-                    setTransferStartDate(range.startDate || '')
-                    setTransferEndDate(range.endDate || '')
-                    setTransferPage(1)
-                  }}
-                  triggerClassName="flex items-center justify-center gap-2 rounded-lg px-2.5 py-1.5"
-                />
-              ) : null}
-              <FilterMenu
-                label={tr('filters', 'Filters')}
-                activeCount={branchFilterActiveCount}
-                sections={branchFilterSections}
-                onClear={branchFilterActiveCount > 0 ? clearBranchFilters : null}
-                compact
-              />
-            </div>
+          </div> : null}
+          {canTransferStock ? (
+            <button
+              className="inline-flex h-8 shrink-0 items-center justify-center gap-1 rounded-lg border border-slate-300 bg-white px-2 text-xs font-semibold text-slate-700 shadow-sm transition-colors hover:border-blue-400 hover:bg-blue-50/60 hover:text-blue-700 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 dark:hover:border-blue-500 dark:hover:bg-slate-700/80 dark:hover:text-blue-300"
+              onClick={() => setModal('transfer')}
+              title={tr('transfer', 'Transfer')}
+              aria-label={tr('transfer', 'Transfer')}
+            >
+              <ArrowRightLeft className="h-4 w-4 shrink-0" />
+              <span>{tr('transfer', 'Transfer')}</span>
+            </button>
+          ) : null}
+          {tab === 'branches' ? <button
+            className="inline-flex h-8 shrink-0 items-center justify-center gap-1 rounded-lg border border-blue-700 bg-blue-600 px-2 text-xs font-semibold text-white shadow-sm transition-colors hover:border-blue-800 hover:bg-blue-700"
+            onClick={() => { setSelected(null); setModal('form') }}
+            title={tr('add_branch', 'Add Branch')}
+            aria-label={tr('add_branch', 'Add Branch')}
+          >
+            <Plus className="h-4 w-4 shrink-0" />
+            <span>{tr('branches', 'Branch')}</span>
+          </button> : null}
+          <div className="mb-1 ml-auto shrink-0">
+            <FilterMenu
+              label={tr('filters', 'Filters')}
+              activeCount={branchFilterActiveCount}
+              sections={branchFilterSections}
+              onClear={branchFilterActiveCount > 0 ? clearBranchFilters : null}
+              compact
+            />
           </div>
         </div>
       </div>
@@ -1396,16 +1483,21 @@ export default function Branches({ embedded = false }: { embedded?: boolean } = 
                               function ... above the each branch['s products] and
                               below the mini sections") -- server-backed, so it
                               finds products beyond the 20 rows already loaded. */}
-                          <div className="mb-2">
+                          <div className="mb-2 flex min-w-0 items-center gap-1.5 sm:max-w-sm">
                             <input
                               id={`branch-stock-search-${branch.id}`}
                               name={`branch_stock_search_${branch.id}`}
                               type="search"
-                              className="input h-9 w-full text-sm sm:max-w-xs"
+                              className="input h-9 min-w-0 flex-1 text-sm"
                               placeholder={tr('branch_stock_search_placeholder', 'Search products in this branch')}
                               aria-label={`${tr('branch_stock_search_placeholder', 'Search products in this branch')} — ${branch.name || ''}`}
                               value={branchStockSearch[String(branch.id)] ?? ''}
                               onChange={(event) => handleBranchStockSearchChange(branch.id, event.target.value)}
+                            />
+                            <ScanSearchButton
+                              onDetected={(value) => handleBranchStockSearchChange(branch.id, value)}
+                              t={(key) => t(key) || key}
+                              className="h-9 w-9 rounded-lg"
                             />
                           </div>
 
@@ -1450,8 +1542,8 @@ export default function Branches({ embedded = false }: { embedded?: boolean } = 
                                           name block no longer stretches (no flex-1), only the
                                           receive button floats to the card edge (ml-auto). */}
                                       <div className="min-w-0">
-                                        <div className="truncate font-medium text-gray-800 dark:text-gray-200">{product.name}</div>
-                                        {product.sku ? <div className="truncate font-mono text-[10px] leading-tight text-gray-400">{product.sku}</div> : null}
+                                        <div className="whitespace-normal break-words font-medium text-gray-800 dark:text-gray-200">{product.name}</div>
+                                        {product.sku ? <div className="break-all font-mono text-[10px] leading-tight text-gray-400">{product.sku}</div> : null}
                                       </div>
                                       <span
                                         className={`shrink-0 whitespace-nowrap text-sm font-bold tabular-nums ${
@@ -1500,7 +1592,7 @@ export default function Branches({ embedded = false }: { embedded?: boolean } = 
                                       className="col-span-full flex min-w-0 items-center gap-1.5 rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 text-left text-xs transition-colors hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800/60 dark:hover:bg-slate-800"
                                     >
                                       {groupCollapsed ? <ChevronRight className="h-3.5 w-3.5 flex-shrink-0 text-slate-400" /> : <ChevronDown className="h-3.5 w-3.5 flex-shrink-0 text-slate-400" />}
-                                      <span className="truncate font-semibold text-slate-700 dark:text-slate-200">{group.name}</span>
+                                      <span className="min-w-0 whitespace-normal break-words font-semibold text-slate-700 dark:text-slate-200">{group.name}</span>
                                       <span className="flex-shrink-0 rounded-full bg-slate-200 px-1.5 text-[10px] font-semibold text-slate-600 dark:bg-slate-700 dark:text-slate-300">
                                         {group.rows.length}
                                       </span>
@@ -1534,19 +1626,6 @@ export default function Branches({ embedded = false }: { embedded?: boolean } = 
 
       {tab === 'transfers' ? (
         <>
-          <div className="mb-3 flex justify-center">
-            <PaginationControls
-              compact
-              rangeAsPageSize
-              page={transferPage}
-              pageSize={transferPageSize}
-              totalItems={transferTotalCount}
-              label={tr('transfers', 'transfers')}
-              t={t}
-              onPageChange={setTransferPage}
-              onPageSizeChange={(size) => { setTransferPageSize(size); setTransferPage(1) }}
-            />
-          </div>
           <div className="space-y-2 sm:hidden">
             {loading && !transfers.length ? (
               <div className="card py-10 text-center text-gray-400">{tr('loading', 'Loading...')}</div>
@@ -1555,41 +1634,50 @@ export default function Branches({ embedded = false }: { embedded?: boolean } = 
             ) : visibleTransfers.length === 0 ? (
               <div className="card py-10 text-center text-gray-400">{tr('no_filter_matches', 'No transfers match the current filter')}</div>
             ) : visibleTransfers.map((transfer) => (
-              <div key={transfer.id} className="card p-3">
+              <button type="button" key={transfer.id} onClick={() => setTransferDetail(transfer)} className="card w-full p-2.5 text-left transition hover:border-violet-300 hover:bg-violet-50/30 dark:hover:border-violet-800 dark:hover:bg-violet-950/10">
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0 flex-1">
-                    <div className="text-sm font-semibold text-gray-900 dark:text-white">{transfer.product_name}</div>
-                    <div className="mt-1 text-xs text-gray-400">{formatTransferDate(transfer.created_at)}</div>
+                    <div className="mb-0.5 flex min-w-0 items-center gap-1.5">
+                      <span className="truncate font-mono text-[10px] font-semibold text-violet-600 dark:text-violet-300" title={`Transfer #${transfer.id}`}>
+                        {formatTransferReference(transfer.id)}
+                      </span>
+                      <span className="shrink-0 rounded bg-violet-50 px-1 py-0.5 text-[9px] font-bold uppercase tracking-wide text-violet-600 dark:bg-violet-950/40 dark:text-violet-300">
+                        {tr('transfer', 'Transfer')}
+                      </span>
+                    </div>
+                    <div className="whitespace-normal break-words text-sm font-semibold text-gray-900 dark:text-white">{transfer.product_name}</div>
+                    <div className="mt-0.5 text-[11px] text-gray-400">{formatTransferDate(transfer.created_at)}</div>
                   </div>
                   <div className="text-right">
-                    <div className="text-lg font-bold text-gray-900 dark:text-white">{transfer.quantity}</div>
+                    <div className="text-base font-bold text-blue-700 dark:text-blue-300">{transfer.quantity}</div>
                     <div className="text-[10px] text-gray-400">{tr('quantity', 'Qty')}</div>
                   </div>
                 </div>
-                <div className="mt-3 flex flex-wrap gap-2 text-xs">
-                  <span className="badge-red text-xs">{transfer.from_name || 'N/A'}</span>
-                  <span className="badge-green text-xs">{transfer.to_name || 'N/A'}</span>
+                <div className="mt-2 flex min-w-0 items-center gap-1 text-[11px]">
+                  <span className="min-w-0 truncate rounded bg-rose-50 px-1.5 py-0.5 font-medium text-rose-700 dark:bg-rose-950/30 dark:text-rose-300">{transfer.from_name || 'N/A'}</span>
+                  <ArrowRightLeft className="h-3 w-3 shrink-0 text-gray-400" aria-hidden="true" />
+                  <span className="min-w-0 truncate rounded bg-emerald-50 px-1.5 py-0.5 font-medium text-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-300">{transfer.to_name || 'N/A'}</span>
                 </div>
-                <div className="mt-3 space-y-1 text-xs text-gray-500 dark:text-gray-400">
-                  <div>{transfer.note || '-'}</div>
-                  <div>{transfer.user_name || 'N/A'}</div>
+                <div className="mt-2 flex min-w-0 items-center justify-between gap-2 text-[11px] text-gray-500 dark:text-gray-400">
+                  <div className="min-w-0 truncate" title={transfer.note || undefined}>{transfer.note || '-'}</div>
+                  <div className="shrink-0 truncate">{transfer.user_name || 'N/A'}</div>
                 </div>
-              </div>
+              </button>
             ))}
           </div>
 
         <div className="card hidden flex-col sm:flex">
           <div className="overflow-x-auto">
-            <table className="table-bordered w-full text-sm" style={{ minWidth: 640 }}>
+            <table className="table-bordered w-full text-xs" style={{ minWidth: 680 }}>
               <thead className="sticky top-0 z-10">
                 <tr>
-                  <th className="whitespace-nowrap px-4 py-3 text-left font-semibold text-gray-600 dark:text-gray-400">{tr('date', 'Date')}</th>
-                  <th className="px-4 py-3 text-left font-semibold text-gray-600 dark:text-gray-400">{tr('product_name', 'Product')}</th>
-                  <th className="whitespace-nowrap px-4 py-3 text-left font-semibold text-gray-600 dark:text-gray-400">{tr('from_branch', 'From')}</th>
-                  <th className="whitespace-nowrap px-4 py-3 text-left font-semibold text-gray-600 dark:text-gray-400">{tr('to_branch', 'To')}</th>
-                  <th className="px-4 py-3 text-right font-semibold text-gray-600 dark:text-gray-400">{tr('quantity', 'Qty')}</th>
-                  <th className="px-4 py-3 text-left font-semibold text-gray-600 dark:text-gray-400">{tr('transfer_note', 'Note')}</th>
-                  <th className="px-4 py-3 text-left font-semibold text-gray-600 dark:text-gray-400">{tr('user', 'User')}</th>
+                  <th className="whitespace-nowrap bg-violet-50/70 px-2.5 py-2 text-left font-semibold text-violet-700 dark:bg-violet-950/25 dark:text-violet-300">{tr('reference', 'Reference')}</th>
+                  <th className="whitespace-nowrap px-2.5 py-2 text-left font-semibold text-gray-600 dark:text-gray-400">{tr('date', 'Date')}</th>
+                  <th className="px-2.5 py-2 text-left font-semibold text-gray-600 dark:text-gray-400">{tr('product_name', 'Product')}</th>
+                  <th className="whitespace-nowrap px-2.5 py-2 text-left font-semibold text-gray-600 dark:text-gray-400">{tr('route', 'Route')}</th>
+                  <th className="bg-blue-50/60 px-2.5 py-2 text-right font-semibold text-blue-700 dark:bg-blue-950/20 dark:text-blue-300">{tr('quantity', 'Qty')}</th>
+                  <th className="px-2.5 py-2 text-left font-semibold text-gray-600 dark:text-gray-400">{tr('transfer_note', 'Note')}</th>
+                  <th className="px-2.5 py-2 text-left font-semibold text-gray-600 dark:text-gray-400">{tr('user', 'User')}</th>
                 </tr>
               </thead>
               <tbody>
@@ -1600,14 +1688,23 @@ export default function Branches({ embedded = false }: { embedded?: boolean } = 
                 ) : visibleTransfers.length === 0 ? (
                   <tr><td colSpan={7} className="py-10 text-center text-gray-400">{tr('no_filter_matches', 'No transfers match the current filter')}</td></tr>
                 ) : visibleTransfers.map((transfer) => (
-                  <tr key={transfer.id} className="table-row">
-                    <td className="whitespace-nowrap px-4 py-2.5 text-xs text-gray-400">{formatTransferDate(transfer.created_at)}</td>
-                    <td className="px-4 py-2.5 font-medium text-gray-800 dark:text-gray-200">{transfer.product_name}</td>
-                    <td className="px-4 py-2.5"><span className="badge-red text-xs">{transfer.from_name || 'N/A'}</span></td>
-                    <td className="px-4 py-2.5"><span className="badge-green text-xs">{transfer.to_name || 'N/A'}</span></td>
-                    <td className="px-4 py-2.5 text-right font-bold text-gray-900 dark:text-white">{transfer.quantity}</td>
-                    <td className="px-4 py-2.5 text-xs text-gray-500">{transfer.note || '-'}</td>
-                    <td className="px-4 py-2.5 text-xs text-gray-500">{transfer.user_name || '-'}</td>
+                  <tr key={transfer.id} className="table-row cursor-pointer hover:bg-violet-50/50 dark:hover:bg-violet-950/10" onClick={() => setTransferDetail(transfer)}>
+                    <td className="whitespace-nowrap px-2.5 py-1.5">
+                      <div className="font-mono text-[11px] font-semibold text-violet-700 dark:text-violet-300" title={`Transfer #${transfer.id}`}>{formatTransferReference(transfer.id)}</div>
+                      <div className="text-[9px] font-bold uppercase tracking-wide text-violet-500 dark:text-violet-400">{tr('transfer', 'Transfer')}</div>
+                    </td>
+                    <td className="whitespace-nowrap px-2.5 py-1.5 text-[11px] text-gray-400">{formatTransferDate(transfer.created_at)}</td>
+                    <td className="max-w-[16rem] whitespace-normal break-words px-2.5 py-1.5 font-medium text-gray-800 dark:text-gray-200">{transfer.product_name}</td>
+                    <td className="px-2.5 py-1.5">
+                      <div className="flex min-w-0 items-center gap-1">
+                        <span className="max-w-[8rem] truncate rounded bg-rose-50 px-1.5 py-0.5 text-[10px] font-medium text-rose-700 dark:bg-rose-950/30 dark:text-rose-300" title={transfer.from_name || undefined}>{transfer.from_name || 'N/A'}</span>
+                        <ArrowRightLeft className="h-3 w-3 shrink-0 text-gray-400" aria-hidden="true" />
+                        <span className="max-w-[8rem] truncate rounded bg-emerald-50 px-1.5 py-0.5 text-[10px] font-medium text-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-300" title={transfer.to_name || undefined}>{transfer.to_name || 'N/A'}</span>
+                      </div>
+                    </td>
+                    <td className="bg-blue-50/30 px-2.5 py-1.5 text-right font-bold text-blue-700 dark:bg-blue-950/10 dark:text-blue-300">{transfer.quantity}</td>
+                    <td className="max-w-[14rem] px-2.5 py-1.5 text-gray-500"><div className="truncate" title={transfer.note || undefined}>{transfer.note || '-'}</div></td>
+                    <td className="max-w-[10rem] px-2.5 py-1.5 text-gray-500"><div className="truncate" title={transfer.user_name || undefined}>{transfer.user_name || '-'}</div></td>
                   </tr>
                 ))}
               </tbody>
@@ -1669,6 +1766,32 @@ export default function Branches({ embedded = false }: { embedded?: boolean } = 
             notify={notify}
           />
         </Suspense>
+      ) : null}
+      {transferDetail ? (
+        <Modal title={`${tr('transfer_history', 'Transfer History')} · ${formatTransferReference(transferDetail.id)}`} onClose={() => setTransferDetail(null)}>
+          <div className="space-y-3 text-sm">
+            <dl className="divide-y divide-slate-100 rounded-lg border border-slate-200 dark:divide-slate-700 dark:border-slate-700">
+              {[
+                [tr('product_name', 'Product'), transferDetail.product_name || '—'],
+                [tr('route', 'Route'), `${transferDetail.from_name || '—'} → ${transferDetail.to_name || '—'}`],
+                [tr('quantity', 'Quantity'), String(transferDetail.quantity ?? '—')],
+                [tr('date', 'Date'), formatTransferDate(transferDetail.created_at)],
+                [tr('user', 'User'), transferDetail.user_name || '—'],
+                [tr('transfer_note', 'Note'), transferDetail.note || '—'],
+              ].map(([label, value]) => (
+                <div key={label} className="flex items-start justify-between gap-3 px-3 py-2">
+                  <dt className="text-xs text-slate-500 dark:text-slate-400">{label}</dt>
+                  <dd className="text-right font-medium text-slate-900 dark:text-white">{value}</dd>
+                </div>
+              ))}
+            </dl>
+            <p className="text-xs text-slate-500 dark:text-slate-400">{tr('transfer_immutable_hint', 'Posted transfers stay unchanged for stock and audit accuracy. Use a new transfer to correct the movement.')}</p>
+            <div className="flex justify-end gap-2">
+              <button type="button" className="btn-secondary px-3 py-1.5 text-sm" onClick={() => setTransferDetail(null)}>{tr('close', 'Close')}</button>
+              {canTransferStock ? <button type="button" className="btn-primary px-3 py-1.5 text-sm" onClick={() => { setTransferDetail(null); setModal('transfer') }}><ArrowRightLeft className="mr-1 inline h-4 w-4" />{tr('new_transfer', 'New transfer')}</button> : null}
+            </div>
+          </div>
+        </Modal>
       ) : null}
       {receiveTarget ? (
         <Suspense fallback={null}>

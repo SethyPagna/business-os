@@ -10,11 +10,15 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="Leang Beauty" />
     <meta name="format-detection" content="telephone=no" />
-    <link rel="manifest" href="/manifest.json" />
-    <link rel="icon" type="image/x-icon" href="/favicon.ico?v=business-os" />
-    <link rel="icon" type="image/png" sizes="192x192" href="/icon-192.png" />
-    <link rel="icon" type="image/png" sizes="512x512" href="/icon-512.png" />
-    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <!-- Public-first metadata is intentional. iOS may snapshot the raw HTML
+         before JavaScript runs, so the customer domain must never initially
+         advertise the internal Business OS app. The synchronous bootstrap
+         below swaps these to the admin assets on admin.* / localhost. -->
+    <link rel="manifest" href="/portal-manifest.json" />
+    <link rel="icon" type="image/png" href="/leang-cosmetics-icon-512.png" />
+    <link rel="icon" type="image/png" sizes="192x192" href="/leang-cosmetics-icon-192.png" />
+    <link rel="icon" type="image/png" sizes="512x512" href="/leang-cosmetics-icon-512.png" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/leang-cosmetics-apple-touch-icon-v1.png" />
     <title>Leang Beauty</title>
     <script>
       (function setInitialBusinessOsRoute() {
@@ -117,6 +121,16 @@
           if (adminAppTitle) adminAppTitle.setAttribute('content', 'Business OS')
           var adminDescription = document.querySelector('meta[name="description"]')
           if (adminDescription) adminDescription.setAttribute('content', 'Business OS - Offline-first POS, inventory and analytics')
+          var adminManifest = document.querySelector('link[rel="manifest"]')
+          if (adminManifest) adminManifest.setAttribute('href', '/manifest.json')
+          var adminIcons = document.querySelectorAll('link[rel="icon"]')
+          for (var adminIconIndex = 0; adminIconIndex < adminIcons.length; adminIconIndex += 1) {
+            var adminIconSize = adminIcons[adminIconIndex].getAttribute('sizes')
+            adminIcons[adminIconIndex].setAttribute('href', adminIconSize === '192x192' ? '/icon-192.png' : (adminIconSize === '512x512' ? '/icon-512.png' : '/favicon.ico?v=business-os'))
+            adminIcons[adminIconIndex].setAttribute('type', adminIconSize ? 'image/png' : 'image/x-icon')
+          }
+          var adminAppleIcon = document.querySelector('link[rel="apple-touch-icon"]')
+          if (adminAppleIcon) adminAppleIcon.setAttribute('href', '/apple-touch-icon.png')
         }
       }())
     </script>

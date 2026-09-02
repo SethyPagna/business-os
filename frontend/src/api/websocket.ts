@@ -19,8 +19,11 @@ let wsSuppressReconnectUntil = 0
 let wsIntentionalClose = false
 let wsLifecycleListenersRegistered = false
 let wsDeferredConnectTimer: ReturnType<typeof setTimeout> | null = null
+let wsLastPongAt = 0
 
 const WS_BOOT_CONNECT_DELAY_MS = 1200
+const WS_PING_INTERVAL_MS = 25_000
+const WS_PONG_TIMEOUT_MS = 55_000
 
 function clearReconnectTimer(): void {
   if (!wsReconnectTimer) return
@@ -106,6 +109,7 @@ export function connectWS(): void {
     reconnectAttempts = 0
     wsFailureStreak = 0
     wsSuppressReconnectUntil = 0
+    wsLastPongAt = Date.now()
     window.dispatchEvent(new CustomEvent('sync:status', { detail: { connected: true } }))
     if (reconnected) {
       window.dispatchEvent(new CustomEvent('sync:reconnected', { detail: { ts: Date.now() } }))
@@ -116,14 +120,22 @@ export function connectWS(): void {
     clearPingTimer()
     wsPingTimer = setInterval(() => {
       if (ws && ws.readyState === WebSocket.OPEN) {
+        if (Date.now() - wsLastPongAt > WS_PONG_TIMEOUT_MS) {
+          // Mobile Safari can resume with a socket that still reports OPEN
+          // even though the underlying network path died while suspended.
+          // Closing it here drives the normal reconnect/reconciliation path.
+          try { ws.close(4000, 'pong-timeout') } catch (_) {}
+          return
+        }
         ws.send(JSON.stringify({ type: 'ping' }))
       }
-    }, 25_000)
+    }, WS_PING_INTERVAL_MS)
   }
 
   ws.onmessage = (event: MessageEvent<string>) => {
     try {
       const data = JSON.parse(event.data) as { type?: string; channel?: string; payload?: { action?: string; id?: string | number } | null }
+      if (data.type === 'pong' || data.type === 'connected') wsLastPongAt = Date.now()
       if (data.type === 'sync:update' && data.channel) {
         // `payload` (action/id -- see broadcastHub.ts's own broadcast() calls,
         // e.g. `broadcast(c.env, 'users', { action: 'update', id })`) was
@@ -148,6 +160,7 @@ export function connectWS(): void {
     logWs('debug', 'onclose event', ev)
     window.dispatchEvent(new CustomEvent('sync:status', { detail: { connected: false } }))
     ws = null
+    wsLastPongAt = 0
     if (wsIntentionalClose) {
       wsIntentionalClose = false
       return
@@ -190,6 +203,7 @@ export function disconnectWS(): void {
   clearDeferredConnectTimer()
   clearReconnectTimer()
   clearPingTimer()
+  wsLastPongAt = 0
   if (ws) {
     if (ws.readyState === WebSocket.OPEN) {
       wsIntentionalClose = true
@@ -215,6 +229,11 @@ export function reconnectWS(): void {
 export function resumeWS(): void {
   wsSuppressReconnectUntil = 0
   reconnectAttempts = 0
+  if (ws && ws.readyState === WebSocket.OPEN && wsLastPongAt > 0 && Date.now() - wsLastPongAt > WS_PONG_TIMEOUT_MS) {
+    try { ws.close(4000, 'resume-stale-socket') } catch (_) {}
+    ws = null
+    wsLastPongAt = 0
+  }
   reconnectWS()
 }
 

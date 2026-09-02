@@ -141,9 +141,12 @@ export async function attachSaleCustomer(
 export function getSalesExport(params: QueryParams = {}): Promise<unknown> {
   const query = buildQueryString(params, { skipEmpty: false })
   return route(
-    'sales:export',
+    `sales:export:${query || 'all'}`,
     () => apiFetch('GET', appendQuery('/api/sales/export', query)),
-    () => ({}),
+    // An export must come from the server. Racing a fabricated empty object
+    // could win before the live response and produce a blank download.
+    null,
+    { raceLocalFallback: false },
   )
 }
 

@@ -12,6 +12,7 @@
 // the size dropdown, fails here instead of in the app.
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
+import './paginationSurfaceContract.test.ts'
 
 let failed = 0
 

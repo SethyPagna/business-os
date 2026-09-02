@@ -1,7 +1,7 @@
 # Legacy cashier identity reconciliation — id is the source of truth
 
 **Status: PREPARED + VERIFIED, NOT YET APPLIED to remote D1.** Every D1 call
-made while preparing this was read-only (`rows_written: 0`). Applying the two
+made while preparing this was read-only (`rows_written: 0`). Applying the
 migrations to production is a deliberate, gated step (see *How to apply*).
 
 ## The problem
@@ -15,8 +15,10 @@ Cashier attribution across the migrated data was broken end to end:
 - The Aug-30 import matched the nickname with `username === 'aza'`, but the real
   username is **`Za`**, so all 40 Aug-30 sales landed with `cashier_id = NULL`
   and the raw string `cashier_name = 'Aza'`.
-- The Aug-31 import placeheld its 14 sales as `'Old system'` even though
-  `report-user-31st` proves **Rath** was the day's sole cashier.
+- The first Aug-31 implementation assigned all 14 receipts to Rath. A
+  multi-report reconciliation shows `report-user-31st` is a per-user summary:
+  its $146 gross sale equals receipts 4377–4381 exactly. Receipts 4382–4390
+  have no cashier evidence and remain unlinked as `Old system`.
 
 The fix the user asked for is broader than cashiers: **an account's id is the
 source of truth, and renaming a username must propagate through the whole
@@ -28,19 +30,19 @@ users."
 | legacy cashier | → user id | resolves via |
 |---|---|---|
 | Aza | 3 (`Za`) | **alias** `aza → 3` (nickname ≠ username) |
-| Rath / routh | 4 (`Rath`) | username (+ alias `routh → 4`) |
-| Sethyka | 5 (`sethyka`, **inactive**) | username (needs inactive included) |
-| pagna | 2 (`james`) | **alias** `pagna → 2` (never appears as a cashier; seeded for completeness) |
-| Dev-Usmart | 1 (`admin`) | **alias** `dev-usmart → 1` |
+| Sethyka / Pagna | 2 (`james`) | **reviewed aliases**; alias precedence intentionally overrides the inactive `sethyka` username |
+| Rout / Routh / Rath | 4 (`Rath`) | reviewed aliases plus direct username |
+| Super Admin / Dev-Usmart | 1 (`admin`) | reviewed aliases |
 
 The **display name is the username**; the `cashier_id` FK is the durable link.
 
-## Verified live state (read-only, before any write)
+## Verified live state (read-only, 2026-09-02; before this correction)
 
 | cohort | finding |
 |---|---|
 | `sales WHERE cashier_name='Aza'` | **40** rows, **all** `cashier_id IS NULL` (the Aug-30 cohort) |
-| `sales` Aug-31 (`43__@2026-08-31`) | **0** rows — Aug-31 not imported yet, no double-count risk |
+| `sales` Aug-31 (4377–4390) | **14** exact legacy-request rows exist; all are currently attributed to Rath. Only 4377–4381 are evidenced, so 4382–4390 require guarded reset to `NULL` / `Old system`. |
+| Aug-31 sale movements | All 20 movement rows are still `NULL` / `Old system`; the five evidenced receipts require Rath attribution and the remaining nine are already correct. |
 | `legacy_deleted_sale_items` | **2,234** rows: Aza 2,220 / Sethyka 7 / Dev-Usmart 5 / Rath 2 |
 | `legacy_deleted_sale_items.cashier_id` | column **did not exist** (name only) |
 
@@ -66,13 +68,17 @@ Data backfill + import scripts — commit `69673fbc`:
   `legacy_deleted_sale_items.cashier_id`, backfills all 2,234 audit rows and the
   40 Aug-30 sales, and normalizes `cashier_name` to the username. Idempotent;
   scoped to the identified cohorts only.
+- `cloudflare/migrations/0103_cashier_alias_overrides.sql` — brings already-
+  migrated databases to the reviewed map, including `Sethyka → James`, and
+  corrects the seven existing deleted-item audit rows from user 5 to user 2.
 - `import-aug30-legacy-reports.mjs` — canonical username→name→alias resolver;
   fails loud if "Aza" doesn't resolve; writes the username as the display name.
-- `import-aug31-legacy-reports.mjs` — attributes its 14 sales to Rath (id4),
-  resolved live from `users`.
+- `import-aug31-legacy-reports.mjs` — attributes only the five evidenced sales
+  (4377–4381) to Rath (resolved live from `users`), gates them to $146, and
+  keeps the other nine receipts unlinked as `Old system`.
 
-Tests: `test-import-engine-pure.cjs` (cashier matching: username / name / alias /
-inactive / ambiguous→null / Dev-Usmart→1) and `test-user-rename-cascade-pure.cjs`
+Tests: `test-import-engine-pure.cjs` (alias precedence, username / name / alias /
+inactive / ambiguous→null) plus `test-cashier-alias-overrides-pure.cjs` and `test-user-rename-cascade-pure.cjs`
 both pass. Migration 0099 validated in local SQLite (11 checks, idempotent
 re-run stable).
 
@@ -88,19 +94,20 @@ already covered by `cascadeUserRename` (e.g. `action_history.created_by_name`).
 **Prerequisite:** deploy the code commits first (or in the same release), so the
 import matching, the POS username, and the rename cascade are live.
 
-1. Apply the two migrations to production (0098 **before** 0099 — 0099 depends
-   on the alias table):
+1. Apply pending migrations through 0103. Migration 0103 is what corrects an
+   already-migrated database whose 0098/0099 ran before the reviewed override:
 
    ```bash
    cd cloudflare && npx wrangler d1 migrations apply business-os --remote
    ```
 
-2. (Optional, only if importing Aug-31) dry-run then apply the Aug-31 script —
-   it now needs `user_aliases`/`users`, which step 1 provides:
+2. Dry-run then apply the Aug-31 script. It now accepts the exact existing
+   14-row cohort as correction input and fails on a partial or identity-drifted
+   cohort; it still needs `user_aliases`/`users`, which step 1 provides:
 
    ```bash
    node ops/scripts/migration/import-aug31-legacy-reports.mjs          # dry-run: read-only + local SQL
-   node ops/scripts/migration/import-aug31-legacy-reports.mjs --apply   # writes 14 sales as Rath
+   node ops/scripts/migration/import-aug31-legacy-reports.mjs --apply   # 5 Rath; 9 reset to unknown
    ```
 
    The Aug-30 script is **already applied**; migration 0099 backfills its 40
@@ -118,7 +125,7 @@ WHERE cashier_name IN ('Aza','Za') GROUP BY cashier_id, cashier_name;
 -- deleted-items fully linked, no legacy nickname string left
 SELECT cashier_name, cashier_id, COUNT(*) FROM legacy_deleted_sale_items
 GROUP BY cashier_name, cashier_id;
---> Za/3 = 2220, sethyka/5 = 7, admin/1 = 5, Rath/4 = 2
+--> Za/3 = 2220, james/2 = 7, admin/1 = 5, Rath/4 = 2
 
 -- the ~14.9k bulk-import sales still carry no cashier (faithful to source)
 SELECT COUNT(*) FROM sales WHERE cashier_id IS NULL AND cashier_name IS NULL;

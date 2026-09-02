@@ -10,6 +10,7 @@ import {
   dismissSaleLinkConflict, undismissSaleLinkConflict, getSaleLinkConflicts, relinkConflictSales, resolveMissingContact,
 } from './contactDuplicates'
 import type { SaleLinkConflicts, SaleLinkMismatch, SaleLinkMissing } from './contactDuplicates'
+import { useApp } from '../../AppContext.tsx'
 
 type TranslateFn = (key: string) => string | undefined
 type NotifyFn = (message: string, tone?: string) => void
@@ -35,6 +36,8 @@ const mismatchKey = (row: SaleLinkMismatch): string => `${row.customer_id}|${row
 const missingKey = (row: SaleLinkMissing): string => `${row.name.toLowerCase()}|${row.phone_key}`
 
 export default function SaleLinkConflictsSection({ t, notify }: { t: TranslateFn; notify: NotifyFn }) {
+  const { can } = useApp() as { can: (permissionKey: string, actionKey: string) => boolean }
+  const canResolveConflicts = can('contacts', 'resolve_conflicts')
   const tr = (key: string, fallback: string): string => t(key) || fallback
   const [data, setData] = useState<SaleLinkConflicts | null>(null)
   const [loading, setLoading] = useState(true)
@@ -249,7 +252,7 @@ export default function SaleLinkConflictsSection({ t, notify }: { t: TranslateFn
                     <span className="text-xs font-semibold text-amber-800 dark:text-amber-300">{tr('link_mismatch_title', 'Phone differs from linked contact')}</span>
                     {row.dismissed ? <span className="rounded bg-gray-200 px-1.5 py-0.5 text-[10px] font-medium text-gray-600 dark:bg-white/10 dark:text-gray-300">{tr('kept', 'Kept')}</span> : null}
                   </div>
-                  {row.dismissed ? (
+                  {canResolveConflicts && row.dismissed ? (
                     <button
                       type="button"
                       onClick={() => void handleReopen('mismatch', key)}
@@ -260,7 +263,7 @@ export default function SaleLinkConflictsSection({ t, notify }: { t: TranslateFn
                       <RotateCcw className="h-3.5 w-3.5" />
                       {tr('reopen', 'Reopen')}
                     </button>
-                  ) : (
+                  ) : canResolveConflicts ? (
                     <button
                       type="button"
                       onClick={() => void handleDismiss('mismatch', key)}
@@ -270,7 +273,7 @@ export default function SaleLinkConflictsSection({ t, notify }: { t: TranslateFn
                     >
                       <EyeOff className="h-3.5 w-3.5" />
                     </button>
-                  )}
+                  ) : null}
                 </div>
                 <div className="space-y-0.5 text-sm">
                   <div className="font-medium text-gray-900 dark:text-white">{row.sale_name || row.sale_phone}
@@ -287,7 +290,7 @@ export default function SaleLinkConflictsSection({ t, notify }: { t: TranslateFn
                     </div>
                   ) : null}
                 </div>
-                {suggestion ? (
+                {canResolveConflicts && suggestion ? (
                   <div className="mt-1.5">
                     <button
                       type="button"
@@ -321,7 +324,7 @@ export default function SaleLinkConflictsSection({ t, notify }: { t: TranslateFn
                     <span className="text-xs font-semibold text-blue-700 dark:text-blue-300">{tr('link_missing_title', 'No matching contact')}</span>
                     {row.dismissed ? <span className="rounded bg-gray-200 px-1.5 py-0.5 text-[10px] font-medium text-gray-600 dark:bg-white/10 dark:text-gray-300">{tr('kept', 'Kept')}</span> : null}
                   </div>
-                  {row.dismissed ? (
+                  {canResolveConflicts && row.dismissed ? (
                     <button
                       type="button"
                       onClick={() => void handleReopen('missing', key)}
@@ -332,7 +335,7 @@ export default function SaleLinkConflictsSection({ t, notify }: { t: TranslateFn
                       <RotateCcw className="h-3.5 w-3.5" />
                       {tr('reopen', 'Reopen')}
                     </button>
-                  ) : (
+                  ) : canResolveConflicts ? (
                     <button
                       type="button"
                       onClick={() => void handleDismiss('missing', key)}
@@ -342,7 +345,7 @@ export default function SaleLinkConflictsSection({ t, notify }: { t: TranslateFn
                     >
                       <EyeOff className="h-3.5 w-3.5" />
                     </button>
-                  )}
+                  ) : null}
                 </div>
                 <div className="space-y-0.5 text-sm">
                   <div className="font-medium text-gray-900 dark:text-white">{row.name || row.phone}
@@ -355,7 +358,7 @@ export default function SaleLinkConflictsSection({ t, notify }: { t: TranslateFn
                     </div>
                   ) : null}
                 </div>
-                <div className="mt-1.5">
+                {canResolveConflicts ? <div className="mt-1.5">
                   <button
                     type="button"
                     onClick={() => void handleResolveMissing(row)}
@@ -371,7 +374,7 @@ export default function SaleLinkConflictsSection({ t, notify }: { t: TranslateFn
                         ? replaceVars(tr('link_to_existing_action', 'Link to {name}'), { name: row.suggested_name || '' })
                         : replaceVars(tr('create_and_link_action', 'Create contact & link {count} sale(s)'), { count: row.sale_count })}
                   </button>
-                </div>
+                </div> : null}
               </div>
             )
           })}

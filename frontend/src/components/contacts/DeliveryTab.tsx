@@ -1141,12 +1141,12 @@ function DeliveryTab({ t, notify, active = true, initialSearch }: DeliveryTabPro
               </>
               ) : null}
             </td>
-            <td className="px-4 py-2 font-medium text-gray-900 dark:text-white cursor-pointer" onClick={() => handleContactCellClick(contact)}>{contact.name}</td>
-            <td className="px-4 py-2 text-gray-500 cursor-pointer" onClick={() => handleContactCellClick(contact)}>{primaryOption.phone || contact.phone || '-'}</td>
-            <td className="px-4 py-2 text-gray-500 cursor-pointer" onClick={() => handleContactCellClick(contact)}>{primaryOption.area || contact.area || '-'}</td>
-            <td className="px-4 py-2 text-gray-500 cursor-pointer" onClick={() => handleContactCellClick(contact)}>{contact.gender ? tr(contact.gender, contact.gender) : tr('unspecified', 'Unspecified')}</td>
-            <td className="px-4 py-2 text-xs text-gray-500 cursor-pointer" onClick={() => handleContactCellClick(contact)}>{fmtDateTime24(contact.created_at)}</td>
-            <td className="px-2 py-2 text-right" onClick={e => e.stopPropagation()}>
+            <td className="max-w-[13rem] cursor-pointer truncate px-3 py-1.5 font-medium text-gray-900 dark:text-white" onClick={() => handleContactCellClick(contact)}>{contact.name}</td>
+            <td className="cursor-pointer whitespace-nowrap px-3 py-1.5 text-gray-500" onClick={() => handleContactCellClick(contact)}>{primaryOption.phone || contact.phone || '-'}</td>
+            <td className="max-w-[12rem] cursor-pointer truncate px-3 py-1.5 text-gray-500" onClick={() => handleContactCellClick(contact)}>{primaryOption.area || contact.area || '-'}</td>
+            <td className="cursor-pointer px-3 py-1.5 text-gray-500" onClick={() => handleContactCellClick(contact)}>{contact.gender ? tr(contact.gender, contact.gender) : tr('unspecified', 'Unspecified')}</td>
+            <td className="cursor-pointer whitespace-nowrap px-3 py-1.5 text-[11px] text-gray-500" onClick={() => handleContactCellClick(contact)}>{fmtDateTime24(contact.created_at)}</td>
+            <td className="px-2 py-1.5 text-right" onClick={e => e.stopPropagation()}>
               <ThreeDotMenu onDetails={() => { setSelected(contact); setModal('detail') }} onEdit={() => { setSelected(contact); setModal('form') }} onDelete={canDeleteContact ? () => handleDelete(contact) : undefined} />
             </td>
           </tr>

@@ -22,6 +22,7 @@ import Modal from '../shared/Modal'
 import ActionHistoryBar from '../shared/ActionHistoryBar'
 import AppSelect from '../shared/AppSelect'
 import FilterMenu from '../shared/FilterMenu'
+import PaginationControls from '../shared/PaginationControls'
 import { useIsPageActive } from '../shared/pageActivity'
 import { useActionHistory } from '../../utils/actionHistory.ts'
 import { cloneHistorySnapshot, extractHistoryResultId } from '../../utils/historyHelpers.ts'
@@ -1012,7 +1013,7 @@ export default function FilesPage() {
   useEffect(() => {
     if (!isActive || !syncChannel) return undefined
     const channel = String(syncChannel.channel || '')
-    if (channel === 'files') {
+    if (channel === 'files' || channel === 'users') {
       void loadFiles()
       if (activeTab === 'responses') void loadResponses('AI responses refresh')
     }
@@ -1706,24 +1707,7 @@ export default function FilesPage() {
               })}
             </div>
           ) : null}
-          {!loadingFiles && totalPages > 1 ? (
-            <div className="card flex flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
-              <div className="text-sm text-slate-500">
-                {pageStart && pageEnd ? `${pageStart}-${pageEnd}` : '0'} / {totalFiles} {tr('files', 'files')}
-              </div>
-              <div className="flex items-center gap-2">
-                <button type="button" className="btn-secondary text-sm" disabled={page <= 1} onClick={() => setPage((current) => Math.max(1, current - 1))}>
-                  {tr('previous', 'Previous')}
-                </button>
-                <div className="min-w-[6rem] text-center text-sm font-medium text-slate-600 dark:text-slate-300">
-                  {tr('page', 'Page')} {page} / {totalPages}
-                </div>
-                <button type="button" className="btn-secondary text-sm" disabled={page >= totalPages} onClick={() => setPage((current) => Math.min(totalPages, current + 1))}>
-                  {tr('next', 'Next')}
-                </button>
-              </div>
-            </div>
-          ) : null}
+          {!loadingFiles ? <div className="card flex justify-center px-4 py-3"><PaginationControls compact rangeAsPageSize page={page} pageSize={pageSize} totalItems={totalFiles} label={tr('files', 'files')} t={(key) => tr(key, key)} onPageChange={setPage} onPageSizeChange={(size) => { setPageSize(size); setPage(1) }} /></div> : null}
         </>
       ) : null}
 

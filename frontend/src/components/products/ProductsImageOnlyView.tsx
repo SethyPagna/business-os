@@ -385,20 +385,15 @@ export default function ProductsImageOnlyView() {
           onChange={setSearch}
           placeholder={t('search') || 'Search'}
         />
-        {/* Labelled, not icon-only. In a row of small square controls a bare
-            camera icon is easy to miss, and a scanner nobody finds is the
-            same as not having one -- this is the button people reach for
-            mid-scan. */}
-        <ScanSearchButton onDetected={setSearch} t={t} showLabel />
+        <ScanSearchButton onDetected={setSearch} t={t} />
         {/* Only offered for the dimensions this role may actually see. A
             category filter for someone not granted category visibility would
             hand them the whole taxonomy through the filter list -- the exact
             data the permission withholds on the row itself.
 
-            `compact`, and deliberately NOT mobileIconOnly: the label stays on
-            phones too, because an unlabelled icon is the thing people miss.
-            Compactness is bought with padding and type size instead, so the
-            search box keeps the room it needs. */}
+            `compact` keeps the controls compact while the scanner stays a
+            recognizable icon-only action, consistent with every product and
+            stock search surface. */}
         {filterSections.length ? (
           <FilterMenu
             label={t('filter') || 'Filter'}
@@ -487,7 +482,7 @@ export default function ProductsImageOnlyView() {
                   onClick={() => setDetailsProduct(product)}
                   title={t('view_details') || 'Click to view details'}
                 >
-                  <p className="truncate text-sm font-medium text-gray-800 dark:text-gray-100">{product.name}</p>
+                  <p className="break-words text-sm font-medium text-gray-800 dark:text-gray-100">{product.name}</p>
                   {showPrice ? (
                     // Named, not a bare figure. A number on its own next to a
                     // product could as easily be cost or a promotional price;
@@ -506,7 +501,7 @@ export default function ProductsImageOnlyView() {
                     </p>
                   ) : null}
                   {showBarcode && product.barcode ? (
-                    <p className="truncate font-mono text-[11px] text-gray-600 dark:text-gray-300" title={String(product.barcode)}>
+                    <p className="break-all font-mono text-[11px] text-gray-600 dark:text-gray-300" title={String(product.barcode)}>
                       {product.barcode}
                     </p>
                   ) : null}

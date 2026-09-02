@@ -453,6 +453,8 @@ body:has([data-page-bg])      { background-color: var(--ui-page-bg) !important; 
   color: var(--dm-text);
 }
 .auth-frame {
+  min-width: 0;
+  max-width: 100%;
   border-color: rgba(148, 163, 184, 0.22);
   background: rgba(255, 255, 255, 0.86);
   box-shadow: 0 24px 60px rgba(15, 23, 42, 0.14);
@@ -482,12 +484,23 @@ body:has([data-page-bg])      { background-color: var(--ui-page-bg) !important; 
   padding: 2.75rem;
 }
 .auth-card {
+  min-width: 0;
+  max-width: 100%;
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(248, 250, 252, 0.92));
+}
+.auth-frame > *,
+.auth-card > *,
+.auth-card form {
+  min-width: 0;
+  max-width: 100%;
 }
 .dark .auth-card {
   background: linear-gradient(180deg, rgba(23, 23, 23, 0.82), var(--dm-card) 92%);
 }
 .auth-card .input {
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
   background-color: rgba(255, 255, 255, 0.92);
 }
 .dark .auth-card .input {
@@ -583,6 +596,25 @@ body:has([data-page-bg])      { background-color: var(--ui-page-bg) !important; 
     min-height: 0;
   }
 
+  /* Detail values must remain fully readable. Keep long identifiers and
+     metadata on one line with direct horizontal touch scrolling instead of
+     replacing their tail with an ellipsis. This is deliberately opt-in so
+     compact navigation/action labels can still use ordinary truncation. */
+  .detail-scroll-text {
+    display: block;
+    min-width: 0;
+    max-width: 100%;
+    overflow-x: auto;
+    overflow-y: hidden;
+    white-space: nowrap;
+    text-overflow: clip;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior-inline: contain;
+    scrollbar-width: thin;
+    touch-action: pan-x;
+  }
+  .detail-scroll-text::-webkit-scrollbar { height: 3px; }
+
   /* Portalled dialogs must fit the actually visible iOS viewport and stay
      clear of notches/home indicators. This also keeps footer buttons from
      sitting underneath the app's fixed bottom navigation. */
@@ -672,6 +704,23 @@ body:has([data-page-bg])      { background-color: var(--ui-page-bg) !important; 
 .h-screen { height: 100vh; height: 100dvh; }
 .min-h-screen { min-height: 100vh; min-height: 100dvh; }
 
+/* iOS standalone mode can change the visual viewport when browser chrome or
+   the keyboard moves. Keep the app shell pinned to that visible viewport and
+   prevent flex descendants from manufacturing a wider page. */
+#app-root {
+  width: 100%;
+  max-width: 100%;
+  min-height: 0;
+  min-height: 100svh;
+  height: 100vh;
+  height: 100dvh;
+}
+#app-root main,
+#app-root .page-scroll {
+  min-width: 0;
+  max-width: 100%;
+}
+
 /* Same "100vh" gap as above, but for the modal panels themselves: every
    modal across the app caps its own height with an arbitrary Tailwind
    value like `max-h-[92vh]` (can't be caught by the two overrides above,
@@ -746,6 +795,110 @@ body:has([data-page-bg])      { background-color: var(--ui-page-bg) !important; 
 .dark .table-bordered th, .dark .table-bordered td { border-color:#3f3f46; }
 .table-bordered thead th { background:#f9fafb; border-bottom:2px solid #d1d5db; }
 .dark .table-bordered thead th { background:#1f1f23; border-bottom-color:#52525b; }
+
+/* Dense business-data tables -------------------------------------------------
+   Larger screens are used like a workbook: one scan line per record, stable
+   columns and restrained colour cues. Phones keep their purpose-built cards;
+   these classes only become table chrome from the md breakpoint upward. */
+.compact-action-row {
+  display:flex;
+  min-width:0;
+  max-width:100%;
+  align-items:center;
+  gap:.375rem;
+  overflow-x:auto;
+  overscroll-behavior-x:contain;
+  scrollbar-width:none;
+  touch-action:pan-x;
+}
+.compact-action-row::-webkit-scrollbar { display:none; }
+.compact-action-row > * { flex-shrink:0; }
+
+.compact-analytics-legend {
+  max-width: 100%;
+  overscroll-behavior-inline: contain;
+  scrollbar-width: none;
+  touch-action: pan-x;
+}
+.compact-analytics-legend::-webkit-scrollbar { display: none; }
+body.lang-km .compact-analytics-legend {
+  font-size: .625rem;
+  line-height: 1.25;
+}
+
+.dense-data-shell {
+  overflow:hidden;
+  border:1px solid #e2e8f0;
+  border-radius:.75rem;
+  background:#fff;
+  box-shadow:0 1px 2px rgb(15 23 42 / .04);
+}
+.dark .dense-data-shell { border-color:#3f3f46; background:#18181b; }
+.dense-data-table {
+  width:100%;
+  table-layout:fixed;
+  border-collapse:collapse;
+}
+.dense-data-table th {
+  height:1.9rem;
+  padding:.25rem .5rem;
+  border-bottom:1px solid #cbd5e1;
+  background:#f8fafc;
+  color:#475569;
+  font-size:.68rem;
+  font-weight:700;
+  line-height:1rem;
+  letter-spacing:.035em;
+  text-align:left;
+  text-transform:uppercase;
+  white-space:nowrap;
+}
+.dark .dense-data-table th { border-color:#52525b; background:#202024; color:#a1a1aa; }
+.dense-data-table th[data-tone='blue'] { color:#1d4ed8; background:#eff6ff; }
+.dense-data-table th[data-tone='emerald'] { color:#047857; background:#ecfdf5; }
+.dense-data-table th[data-tone='amber'] { color:#b45309; background:#fffbeb; }
+.dense-data-table th[data-tone='violet'] { color:#6d28d9; background:#f5f3ff; }
+.dark .dense-data-table th[data-tone='blue'] { color:#93c5fd; background:rgb(30 58 138 / .18); }
+.dark .dense-data-table th[data-tone='emerald'] { color:#6ee7b7; background:rgb(6 78 59 / .2); }
+.dark .dense-data-table th[data-tone='amber'] { color:#fcd34d; background:rgb(120 53 15 / .2); }
+.dark .dense-data-table th[data-tone='violet'] { color:#c4b5fd; background:rgb(76 29 149 / .2); }
+.dense-data-table td {
+  height:2.15rem;
+  min-width:0;
+  padding:.3rem .5rem;
+  border-bottom:1px solid #f1f5f9;
+  color:#334155;
+  font-size:.75rem;
+  line-height:1rem;
+  vertical-align:middle;
+}
+.dark .dense-data-table td { border-color:#27272a; color:#d4d4d8; }
+.dense-data-table tbody tr[data-clickable='true'] { cursor:pointer; }
+.dense-data-table tbody tr[data-clickable='true']:hover { background:#eff6ff; }
+.dark .dense-data-table tbody tr[data-clickable='true']:hover { background:rgb(30 58 138 / .15); }
+.dense-data-table tbody tr:last-child td { border-bottom:0; }
+.dense-data-table .dense-day-row td {
+  height:1.65rem;
+  padding:.2rem .5rem;
+  background:#f8fafc;
+  color:#64748b;
+  font-size:.67rem;
+  font-weight:700;
+  letter-spacing:.045em;
+  text-transform:uppercase;
+}
+.dark .dense-data-table .dense-day-row td { background:#202024; color:#a1a1aa; }
+.dense-cell-truncate { display:block; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.dense-id { font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace; font-size:.68rem; letter-spacing:-.025em; }
+
+@media (min-width:768px) {
+  .desktop-dense-only { display:block; }
+  .mobile-cards-only { display:none !important; }
+}
+@media (max-width:767px) {
+  .desktop-dense-only { display:none !important; }
+  .mobile-cards-only { display:block; }
+}
 
 /* Column highlights */
 .col-highlight-green { background:rgba(16,185,129,.05); }
@@ -856,4 +1009,11 @@ body[data-density='spacious'] th, body[data-density='spacious'] td { padding-top
 /* Branch stock collapse button */
 .branch-stock-expand {
   @apply text-xs px-2 py-0.5 rounded-full bg-gray-100 dark:bg-zinc-700 text-gray-600 dark:text-zinc-300 hover:bg-blue-100 dark:hover:bg-blue-900/30 hover:text-blue-600 dark:hover:text-blue-400 transition-colors cursor-pointer font-medium whitespace-nowrap;
+}
+/* Product results requested at 90% of their previous visual size. `zoom`
+   participates in layout (unlike transform: scale), and the reciprocal
+   width keeps the right edge aligned with the surrounding Products tools. */
+.products-list-density-90 {
+  width: 111.111111%;
+  zoom: 0.9;
 }

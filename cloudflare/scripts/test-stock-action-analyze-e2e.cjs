@@ -177,12 +177,12 @@ async function drainAnalyze(env, jobId) {
   assert.strictEqual(job.processed_rows, 0)
   assert.strictEqual(job.failed_rows, 0)
   assert.strictEqual(job.lease_token, null, 'every continuation releases its single-writer lease')
-  assert.strictEqual(summary.requires_stock_action_confirmation, true)
-  assert.strictEqual(summary.stock_action_confirmation_rows, 2)
+  assert.strictEqual(summary.requires_stock_action_confirmation, false)
+  assert.strictEqual(summary.stock_action_confirmation_rows, 0)
   assert.strictEqual(summary.total, TOTAL_CSV_ROWS)
-  assert.strictEqual(summary.updated, 2)
-  assert.strictEqual(summary.created, FILLER_ROWS)
-  assert.strictEqual(job.warning_count, 2)
+  assert.strictEqual(summary.updated, 1)
+  assert.strictEqual(summary.created, FILLER_ROWS + 1)
+  assert.strictEqual(job.warning_count, 0)
 
   const sourceCount = await db.prepare(`SELECT COUNT(*) AS n FROM import_job_source_rows WHERE job_id = @id`).get({ id: 'analyze-e2e' })
   const reviewCount = await db.prepare(`SELECT COUNT(*) AS n FROM import_job_rows WHERE job_id = @id AND phase = 'analyze'`).get({ id: 'analyze-e2e' })
@@ -195,13 +195,17 @@ async function drainAnalyze(env, jobId) {
     ORDER BY row_number`).all({ id: 'analyze-e2e' })
   // Header is row 1, first Anchor row 2, the fillers, then the second
   // Anchor lands one row past the full window.
-  assert.deepStrictEqual(anchorRows.map((row) => row.row_number), [2, FILLER_ROWS + 3])
+  assert.deepStrictEqual(anchorRows.map((row) => row.row_number), [2])
   for (const row of anchorRows) {
     const result = JSON.parse(row.result_json)
     assert.strictEqual(row.action, 'update')
-    assert.ok(result.warnings.some((warning) => warning.kind === 'stock_action_conflict'))
-    assert.ok(result.data.conflicts.length > 0)
+    assert.strictEqual(result.data.conflicts.length, 0)
   }
+  const costChild = await db.prepare(`SELECT row_number, action, result_json FROM import_job_rows
+    WHERE job_id = @id AND phase = 'analyze'
+      AND json_extract(result_json, '$.data.identityKey') = 'new:anchor serum|anchor|cost:700'`).get({ id: 'analyze-e2e' })
+  assert.strictEqual(costChild.row_number, FILLER_ROWS + 3)
+  assert.strictEqual(costChild.action, 'create', 'different cost is a distinct child row, not an ambiguous merge')
 
   // Analyze is preview-only: a full window of create verdicts cannot mutate live data.
   assert.strictEqual((await db.prepare(`SELECT COUNT(*) AS n FROM products`).get({})).n, 1)

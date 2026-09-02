@@ -48,12 +48,19 @@ type LedgerRow = {
   product_name: string
   barcode: string | null
   unit: string | null
+  brand?: string | null
+  category?: string | null
+  tag_label?: string | null
   branch_name: string | null
   movement_type: string
   quantity: number
   signed_quantity: number
   reason: string | null
   reference_id?: number | string | null
+  unit_cost_usd?: number | null
+  unit_cost_khr?: number | null
+  total_cost_usd?: number | null
+  total_cost_khr?: number | null
   user_name: string | null
   created_at: string
   ledger_bucket: 'in' | 'out'
@@ -66,6 +73,12 @@ type LedgerRow = {
   batch_received_at: string | null
   batch_supplier_id: number | null
   batch_supplier_name: string | null
+  batch_payment_status?: string | null
+  batch_credit_due_date?: string | null
+  batch_expiry_date?: string | null
+  batch_unit_cost_usd?: number | null
+  batch_received_cost_usd?: number | null
+  batch_receipt_session_count?: number | null
 }
 
 type LedgerSummary = {
@@ -113,6 +126,12 @@ function isDateOnlyStamp(raw: unknown): boolean {
 
 function fmtQty(value: number): string {
   return Number.isFinite(value) ? value.toLocaleString('en-US') : '0'
+}
+
+function fmtOptionalUsd(value: unknown): string {
+  const amount = Number(value)
+  if (!Number.isFinite(amount)) return '—'
+  return `$${amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 }
 
 type BranchOption = { id: number; name: string }
@@ -286,7 +305,19 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
       batch: row.batch_id ? batchDisplayLabel({ id: row.batch_id, lot_code: row.batch_lot_code, received_at: row.batch_received_at }) : '',
       supplier: row.batch_supplier_name || '',
       reason: row.reason || '',
+      reference: row.reference_id ?? '',
+      unit: row.unit || '',
+      category: row.category || '',
+      brand: row.brand || '',
+      tag: row.tag_label || '',
       user: row.user_name || '',
+      unit_cost_usd: row.unit_cost_usd ?? row.batch_unit_cost_usd ?? '',
+      unit_cost_khr: row.unit_cost_khr ?? '',
+      total_cost_usd: row.total_cost_usd ?? row.batch_received_cost_usd ?? '',
+      total_cost_khr: row.total_cost_khr ?? '',
+      batch_expiry: row.batch_expiry_date || '',
+      payment_status: row.batch_payment_status || '',
+      credit_due_date: row.batch_credit_due_date || '',
     })))
   }, [app, branchId, debouncedSearch, supplierId, t, view])
 
@@ -313,6 +344,7 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
     if (!detail || editingReason == null) return
     const next = editingReason.trim()
     if (!next) { app.notify(tr(t, 'reason_required', 'A reason is required'), 'error'); return }
+    if (!window.confirm(tr(t, 'confirm_update_stock_reason', 'Update the reason recorded for this stock movement?'))) return
     setRowBusy(true)
     try {
       const res = await editStockMovementReason(detail.id, next) as { success?: boolean; error?: string } | undefined
@@ -434,7 +466,7 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
             >
               {timeUnknown ? '––:––' : clock}
             </span>
-            <span className="truncate text-sm font-semibold text-gray-800 dark:text-gray-100" title={row.product_name}>{row.product_name}</span>
+            <span className="break-words text-[13px] font-semibold leading-4 text-gray-800 dark:text-gray-100" title={row.product_name}>{row.product_name}</span>
           </div>
           <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[11px] text-gray-400">
             {row.batch_id ? (
@@ -442,10 +474,11 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
                 {batchDisplayLabel({ id: row.batch_id, lot_code: row.batch_lot_code, received_at: row.batch_received_at })}
               </span>
             ) : null}
-            {row.batch_supplier_name ? <span className="truncate font-medium text-gray-500 dark:text-gray-300">{row.batch_supplier_name}</span> : null}
-            {row.branch_name ? <span className="truncate">{row.branch_name}</span> : null}
-            {row.user_name ? <span className="truncate">· {row.user_name}</span> : null}
-            {row.reason ? <span className="truncate text-gray-400" title={row.reason}>· {row.reason}</span> : null}
+            {row.barcode ? <span className="break-all font-mono">{row.barcode}</span> : null}
+            {row.batch_supplier_name ? <span className="break-words font-medium text-gray-500 dark:text-gray-300">{row.batch_supplier_name}</span> : null}
+            {row.branch_name ? <span className="break-words">{row.branch_name}</span> : null}
+            {row.user_name ? <span className="break-words">· {row.user_name}</span> : null}
+            {row.reason ? <span className="break-words text-gray-400">· {row.reason}</span> : null}
           </div>
         </div>
         <div className="shrink-0 text-right">
@@ -460,6 +493,69 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
       </button>
     )
   }
+
+  const renderDesktopRows = () => (
+    <div className="desktop-dense-only dense-data-shell">
+      <div className="scroll-x">
+        <table className="dense-data-table min-w-[980px]" aria-label={tr(t, 'stock_change_ledger', 'Stock Changes')}>
+          <colgroup>
+            <col className="w-[5.5rem]" />
+            <col className="w-[18%]" />
+            <col className="w-[8rem]" />
+            <col className="w-[5.5rem]" />
+            <col className="w-[7.5rem]" />
+            <col className="w-[12%]" />
+            <col className="w-[12%]" />
+            <col className="w-[10%]" />
+            <col />
+          </colgroup>
+          <thead>
+            <tr>
+              <th>{tr(t, 'time', 'Time')}</th>
+              <th data-tone="blue">{tr(t, 'product', 'Product')}</th>
+              <th data-tone="violet">{tr(t, 'type', 'Type')}</th>
+              <th data-tone="emerald" className="text-right">{tr(t, 'quantity', 'Quantity')}</th>
+              <th className="text-right">{beforeLabel} → {afterLabel}</th>
+              <th>{tr(t, 'branch', 'Branch')}</th>
+              <th>{tr(t, 'supplier', 'Supplier')}</th>
+              <th>{tr(t, 'cashier_user', 'User')}</th>
+              <th>{tr(t, 'reason', 'Reason')}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {dayGroups.flatMap((group) => [
+              <tr key={`day-${group.key}`} className="dense-day-row"><td colSpan={9}>{group.key} · {group.rows.length}</td></tr>,
+              ...group.rows.map((row) => {
+                const dateOnly = isDateOnlyStamp(row.created_at)
+                const clock = dateOnly ? '' : fmtClock24(row.created_at)
+                const timeUnknown = dateOnly || clock === '—' || clock === ''
+                return (
+                  <tr
+                    key={row.id}
+                    data-clickable="true"
+                    tabIndex={0}
+                    onClick={() => void openDetail(row)}
+                    onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); void openDetail(row) } }}
+                    aria-label={`${row.product_name}, ${signedLabel(row)}`}
+                  >
+                    <td className="tabular-nums text-gray-400" title={timeUnknown ? noTimeLabel : undefined}>{timeUnknown ? '––:––' : clock}</td>
+                    <td><span className="whitespace-normal break-words font-semibold text-gray-800 dark:text-gray-100">{row.product_name}</span><span className="break-all dense-id text-gray-400">{row.barcode || (row.batch_id ? batchDisplayLabel({ id: row.batch_id, lot_code: row.batch_lot_code, received_at: row.batch_received_at }) : '—')}</span></td>
+                    <td><span className={`inline-flex max-w-full items-center rounded px-1.5 py-0.5 font-semibold ${movementColorClass(row.movement_type, row.signed_quantity)}`}><span className="dense-cell-truncate">{translateMovementType(row.movement_type, t)}</span></span></td>
+                    <td className={`text-right font-bold tabular-nums ${row.signed_quantity >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>{signedLabel(row)}</td>
+                    <td className="text-right tabular-nums text-gray-500">{row.before_qty} → <b className="text-gray-800 dark:text-gray-100">{row.after_qty}</b></td>
+                    <td><span className="dense-cell-truncate" title={row.branch_name || ''}>{row.branch_name || '—'}</span></td>
+                    <td><span className="dense-cell-truncate" title={row.batch_supplier_name || ''}>{row.batch_supplier_name || '—'}</span></td>
+                    <td><span className="dense-cell-truncate" title={row.user_name || ''}>{row.user_name || '—'}</span></td>
+                    <td><span className="dense-cell-truncate text-gray-500" title={row.reason || ''}>{row.reason || '—'}</span></td>
+                  </tr>
+                )
+              }),
+            ])}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  )
 
   // Always-visible In vs Out stats (user, Aug 31: "stats should be visible
   // directly without expand/collapse"). Colour-coded so the reported
@@ -575,11 +671,8 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
         </div>
       ) : null}
 
-      {/* Day-grouped card list (user, Aug 30 2026): a divider header per day
-          carries the date, then one tappable card per change showing just its
-          time -- replacing the horizontally-scrolling before/after table
-          (card design like the Products / Fees sections). Tap a card for the
-          per-product mini-ledger. */}
+      {/* Desktop uses a compact workbook-style ledger. Mobile retains the
+          day-grouped cards so values do not squeeze into unreadable columns. */}
       {loading && !rows.length ? (
         <div className="space-y-2">
           {[...Array(6)].map((_, i) => <div key={i} className="h-[4.25rem] animate-pulse rounded-xl border border-gray-100 bg-gray-50 dark:border-gray-800 dark:bg-gray-800/40" />)}
@@ -587,21 +680,24 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
       ) : !rows.length ? (
         <div className="rounded-xl border border-dashed border-gray-200 px-3 py-10 text-center text-sm text-gray-400 dark:border-gray-700">{tr(t, 'no_data_found', 'No data found')}</div>
       ) : (
-        <div className="space-y-4">
-          {dayGroups.map((group) => (
-            <div key={group.key} className="space-y-2">
-              <div className="flex items-center gap-2 px-0.5">
-                <span className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">{group.key}</span>
-                <span className="text-[11px] text-gray-400">{group.rows.length}</span>
-                <div className="h-px flex-1 bg-gray-100 dark:bg-gray-800" />
+        <>
+          {renderDesktopRows()}
+          <div className="mobile-cards-only space-y-4">
+            {dayGroups.map((group) => (
+              <div key={group.key} className="space-y-2">
+                <div className="flex items-center gap-2 px-0.5">
+                  <span className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">{group.key}</span>
+                  <span className="text-[11px] text-gray-400">{group.rows.length}</span>
+                  <div className="h-px flex-1 bg-gray-100 dark:bg-gray-800" />
+                </div>
+                <div className="space-y-2">
+                  {group.rows.map(renderCard)}
+                </div>
               </div>
-              <div className="space-y-2">
-                {group.rows.map(renderCard)}
-              </div>
-            </div>
-          ))}
+            ))}
+          </div>
           {loading ? <p className="text-center text-xs text-gray-400">{tr(t, 'loading', 'Loading')}...</p> : null}
-        </div>
+        </>
       )}
 
       <div className="flex justify-center">
@@ -659,6 +755,26 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
                 {detail.reason}
               </p>
             ) : null}
+            <dl className="grid gap-2 rounded-xl bg-gray-50 px-3 py-2 text-xs dark:bg-gray-800/60 sm:grid-cols-2">
+              {([
+                [tr(t, 'reference', 'Reference'), detail.reference_id],
+                [tr(t, 'unit', 'Unit'), detail.unit],
+                [tr(t, 'category', 'Category'), detail.category],
+                [tr(t, 'brand', 'Brand'), detail.brand],
+                [tr(t, 'tag', 'Tag'), detail.tag_label],
+                [tr(t, 'unit_cost', 'Unit cost'), detail.unit_cost_usd != null || detail.batch_unit_cost_usd != null ? fmtOptionalUsd(detail.unit_cost_usd ?? detail.batch_unit_cost_usd) : null],
+                [tr(t, 'total_cost', 'Total cost'), detail.total_cost_usd != null || detail.batch_received_cost_usd != null ? fmtOptionalUsd(detail.total_cost_usd ?? detail.batch_received_cost_usd) : null],
+                [tr(t, 'expiry_date', 'Expiry'), detail.batch_expiry_date],
+                [tr(t, 'payment_status', 'Payment status'), detail.batch_payment_status],
+                [tr(t, 'credit_due_date', 'Credit due'), detail.batch_credit_due_date],
+                [tr(t, 'receipt_sessions', 'Receipt sessions'), detail.batch_receipt_session_count],
+              ] as Array<[string, string | number | null | undefined]>).filter(([, value]) => value !== null && value !== undefined && value !== '').map(([label, value]) => (
+                <div key={label} className="min-w-0">
+                  <dt className="uppercase tracking-wide text-gray-400">{label}</dt>
+                  <dd className="mt-0.5 whitespace-normal break-words font-medium text-gray-700 dark:text-gray-200">{String(value)}</dd>
+                </div>
+              ))}
+            </dl>
             <div className="flex items-center justify-between text-xs text-gray-400">
               <span>{detail.branch_name || '--'}</span>
               <span>{detail.user_name || '--'}</span>

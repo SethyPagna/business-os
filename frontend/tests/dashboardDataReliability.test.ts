@@ -11,6 +11,8 @@ assert.doesNotMatch(methods, /getAnalytics[\s\S]{0,200}\(\)\s*=>\s*\(\{\}\)/, 'a
 
 assert.match(dashboard, /function isDashboardSummaryPayload/, 'dashboard should validate summary payloads before rendering them')
 assert.match(dashboard, /function isDashboardAnalyticsPayload/, 'dashboard should validate analytics payloads before rendering them')
+assert.match(dashboard, /Number\.isFinite\(Number\(totals\?\.revenue_usd\)\)/, 'analytics validation must reject an empty totals object that would render as fake zero revenue')
+assert.match(dashboard, /if \(!isDashboardAnalyticsPayload\(data\)\)[\s\S]{0,220}normalizeDashboardAnalyticsPayload\(data\)/, 'dashboard must validate the raw response before filling defaults')
 assert.doesNotMatch(dashboard, /setSummary\(\{\}\)/, 'dashboard should preserve the previous summary when refresh fails')
 assert.match(dashboard, /const \[summaryError, setSummaryError\]/, 'dashboard should track summary load errors separately')
 assert.match(dashboard, /const \[analyticsError, setAnalyticsError\]/, 'dashboard should track analytics load errors separately')
@@ -27,9 +29,16 @@ assert.match(dashboard, /onOpenHour\(hour, index \+ 1\)/, 'dashboard best-hour r
 assert.match(dashboard, /const openInventoryOverview = useCallback\(/, 'dashboard should expose a direct inventory follow-through action')
 assert.match(dashboard, /DASHBOARD_INVENTORY_FOCUS_KEY/, 'dashboard should persist a focused inventory handoff when drilling into stock alerts')
 assert.match(dashboard, /review_in_inventory', 'Review in inventory'/, 'dashboard preview-truncated stock cards should offer an explicit inventory review action')
-assert.match(dashboard, /triggerClassName="flex w-full items-center justify-center gap-2 rounded-lg px-3\.5 py-2"/, 'dashboard date picker should stay compact on mobile')
+assert.match(dashboard, /triggerClassName="flex w-full min-w-0 items-center justify-center gap-1\.5 rounded-lg px-2 py-1 !min-h-9 sm:px-3"/, 'dashboard date picker should stay compact on mobile')
 assert.match(dashboard, /min-h-7[^"]*px-2\.5 py-1 text-\[11px\] font-semibold/, 'dashboard export control should stay compact on mobile')
 assert.doesNotMatch(dashboard, /RANGE_PRESETS/, 'dashboard should not restore the removed preset-chip controls')
+assert.match(dashboard, /getDashboardSaleItemCount/, 'dashboard sale details should expose a total item count')
+assert.match(dashboard, /t\('cashier'\)[\s\S]{0,220}getDashboardSaleItemCount\(recentSaleDetail\)/, 'dashboard sale details should include Cashier and Items')
+assert.match(dashboard, /modal-scroll grid grid-cols-2 gap-2 p-4/, 'dashboard sale details should use compact two-per-row facts')
+assert.ok((dashboard.match(/compact-analytics-legend/g) || []).length >= 2, 'three-item analytics legends should stay compact on one row')
+assert.doesNotMatch(dashboard, /getBusinessTimezoneOffsetHours/, 'business-hour analytics must not apply the UTC+7 offset twice')
+assert.match(dashboard, /summary\?\.expiring_count/, 'expiry preview badge should show the complete backend count, not the ten-row preview length')
+assert.match(dashboard, /createPortal\([\s\S]*recentSaleDetail[\s\S]*document\.body/, 'dashboard sale details should portal above the page layer')
 // Aug 31 2026: the Branches hub's Products slice was removed as redundant
 // with the Products page, so the handoff chain is now: Dashboard writes the
 // inventory-focus key -> BranchesHubPage consumes it and FORWARDS a

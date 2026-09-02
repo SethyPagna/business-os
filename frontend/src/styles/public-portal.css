@@ -241,3 +241,43 @@ body[data-public-portal='true'] .portal-contact-value-address {
   background: #171717;
   color: #fafafa;
 }
+
+/* Storefront media is display-only. This blocks the ordinary desktop drag /
+   context-menu save path and iOS long-press callout for product photos, logo,
+   cover, promotion, avatar-like account media, and gallery images. It is a
+   deterrent rather than DRM: anything delivered to a browser can still be
+   captured with screenshots or developer tools. Event capture on the public
+   root provides the matching interaction guard for dynamically inserted
+   images and lightboxes. */
+body[data-public-portal='true'] img,
+body[data-public-portal='true'] video,
+[data-public-media-protection='true'] img,
+[data-public-media-protection='true'] video {
+  -webkit-touch-callout: none;
+  -webkit-user-drag: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+/* Keep every public storefront control comfortably tappable on phones and
+   installed PWAs. Desktop density is unchanged. */
+@media (pointer: coarse) {
+  body[data-public-portal='true'] button,
+  body[data-public-portal='true'] input,
+  body[data-public-portal='true'] select,
+  body[data-public-portal='true'] textarea,
+  [data-public-media-protection='true'] button,
+  [data-public-media-protection='true'] input,
+  [data-public-media-protection='true'] select,
+  [data-public-media-protection='true'] textarea {
+    min-height: 44px;
+  }
+
+  body[data-public-portal='true'] a[aria-label],
+  body[data-public-portal='true'] button[aria-label],
+  [data-public-media-protection='true'] a[aria-label],
+  [data-public-media-protection='true'] button[aria-label] {
+    min-width: 44px;
+    min-height: 44px;
+  }
+}

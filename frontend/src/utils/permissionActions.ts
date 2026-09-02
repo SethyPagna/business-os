@@ -194,6 +194,11 @@ export const PERMISSION_ACTIONS: Record<string, PermissionAction[]> = {
     { key: 'bulk_delete', tKey: 'perm_act_contacts_bulk_delete', label: 'Bulk delete', review: 'block' },
     // POST /merge -> 403 for review (contacts.ts ~492)
     { key: 'merge', tKey: 'perm_act_contacts_merge', label: 'Merge duplicates', review: 'block' },
+    // The Conflicts tab can also persist keep/reopen decisions and rewrite
+    // historical sale-to-customer links. Keep those controls behind one
+    // explicit Full-only capability instead of exposing buttons that a
+    // review-tier user can click only to receive a 403.
+    { key: 'resolve_conflicts', tKey: 'perm_act_contacts_resolve_conflicts', label: 'Resolve contact and sale-link conflicts', review: 'block' },
     // routes/importJobs.ts: the customers/suppliers/delivery_contacts
     // import types -- strict full-grant checks there.
     { key: 'import', tKey: 'perm_act_contacts_import', label: 'Import contacts', review: 'block' },
@@ -207,13 +212,25 @@ export const PERMISSION_ACTIONS: Record<string, PermissionAction[]> = {
     // contact-tab control absent from the permission editor.
     { key: 'export', tKey: 'perm_act_contacts_export', label: 'Export', review: 'block' },
   ],
+
+  // View-tier sections also need action rows: the middle tier is still
+  // meaningful here (reads allowed, writes blocked), and Full roles may be
+  // narrowed with an explicit per-action switch.
+  sales: [
+    { key: 'export', tKey: 'perm_act_sales_export', label: 'Export sales', review: 'allow' },
+    { key: 'import', tKey: 'perm_act_sales_import', label: 'Import sales', review: 'block' },
+    { key: 'status', tKey: 'perm_act_sales_status', label: 'Change or cancel sale status', review: 'block' },
+    { key: 'customer', tKey: 'perm_act_sales_customer', label: 'Change linked customer', review: 'block' },
+  ],
+
+  promotions: [
+    { key: 'manage', tKey: 'perm_act_promotions_manage', label: 'Create, edit, and delete promotion rules', review: 'block' },
+  ],
 }
 
 // 'view' (Part 557) is the read-only middle tier for VIEW_TIER_KEYS sections.
-// Those sections carry NO per-action table (their rule is simply: reads work,
-// every write needs Full), so 'view' never actually reaches a defined action
-// row -- it is handled here for exhaustiveness and to fail SAFE (read-shaped
-// actions allowed, everything else blocked).
+// It allows rows marked read-safe and blocks writes; action overrides may
+// further narrow a Full or View role without widening the selected tier.
 export type PermissionTierValue = 'full' | 'review' | 'view' | 'none'
 
 /** The action rows for a permission key, or [] when it has none defined. */

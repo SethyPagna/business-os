@@ -37,8 +37,9 @@ export type ProductIdentityRow = {
 }
 
 // Finds another ACTIVE product row that is genuinely the same item as
-// `source` (excluding source itself): same name_key, cost, selling price,
-// and barcode. Returns null when nothing else in the catalog matches --
+// `source` (excluding source itself): same name_key, cost, and barcode.
+// Selling/special prices are mergeable fields and never identity. Returns
+// null when nothing else in the catalog matches --
 // the ordinary, unambiguous case, where a transfer is simply the same
 // product_id gaining a branch_stock row at the destination branch, no
 // different from before this existed. Deterministic when more than one

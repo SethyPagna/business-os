@@ -12,8 +12,10 @@ import Mail from 'lucide-react/dist/esm/icons/mail.js'
 import ShieldCheck from 'lucide-react/dist/esm/icons/shield-check.js'
 import { useApp as useAppHook } from '../../AppContext.tsx'
 import QuickPreferenceToggles from '../shared/QuickPreferenceToggles'
+import InfoHint from '../shared/InfoHint.tsx'
 import { STORAGE_KEYS } from '../../constants'
 import { getClientDeviceInfo } from '../../utils/deviceInfo.ts'
+import { copyPasswordToClipboard, passwordPersistenceNotice, persistChangedPassword } from '../../utils/passwordManager.ts'
 import { getPortalConfig } from '../../api/portalPublicTransport.ts'
 import {
   beginTrackedRequest,
@@ -132,6 +134,8 @@ interface PasswordResetResult {
   success?: boolean
   error?: string
   message?: string
+  username?: string
+  name?: string
 }
 
 interface StartOauthResult extends PasswordResetResult {
@@ -773,12 +777,23 @@ export default function Login() {
         setError(result.error || tr('otp_reset_failed', 'Failed to reset password with OTP.'))
         return
       }
-      setResetInfo(tr('otp_password_reset_done', 'Password reset complete. You can now sign in with the new password.'))
+      const persistence = await persistChangedPassword({
+        username: String(result?.username || resetIdentifier).trim(),
+        displayName: String(result?.name || result?.username || resetIdentifier).trim(),
+        password: resetNewPassword,
+        allowCredentialStore: true,
+        copyFallback: true,
+      })
+      const passwordSecured = persistence.credentialStoreSucceeded || persistence.copiedToClipboard
+      setResetInfo(passwordPersistenceNotice(persistence))
+      setUsername(String(result?.username || resetIdentifier).trim())
       setPassword('')
       setOtp('')
       setResetOtp('')
-      setResetNewPassword('')
-      setResetConfirmPassword('')
+      if (passwordSecured) {
+        setResetNewPassword('')
+        setResetConfirmPassword('')
+      }
     } catch (resetError) {
       setError(getErrorMessage(resetError, tr('otp_reset_failed', 'Failed to reset password with OTP.')))
     } finally {
@@ -837,10 +852,21 @@ export default function Login() {
         setError(result.error || tr('email_reset_complete_failed', 'Failed to update password from recovery email.'))
         return
       }
-      setRecoveryAccessToken('')
-      setResetNewPassword('')
-      setResetConfirmPassword('')
-      setResetInfo(tr('email_reset_complete_done', 'Password reset complete. You can now log in with your email and new password.'))
+      const persistence = await persistChangedPassword({
+        username: String(result?.username || resetIdentifier || username).trim(),
+        displayName: String(result?.name || result?.username || resetIdentifier || username).trim(),
+        password: resetNewPassword,
+        allowCredentialStore: true,
+        copyFallback: true,
+      })
+      const passwordSecured = persistence.credentialStoreSucceeded || persistence.copiedToClipboard
+      setUsername(String(result?.username || resetIdentifier || username).trim())
+      if (passwordSecured) {
+        setRecoveryAccessToken('')
+        setResetNewPassword('')
+        setResetConfirmPassword('')
+      }
+      setResetInfo(passwordPersistenceNotice(persistence))
     } catch (resetError) {
       setError(getErrorMessage(resetError, tr('email_reset_complete_failed', 'Failed to update password from recovery email.')))
     } finally {
@@ -910,13 +936,13 @@ export default function Login() {
 
   return (
     <div className="auth-shell relative min-h-screen overflow-hidden px-4 py-6 sm:px-6 lg:px-8">
-      <div className="mx-auto flex min-h-[calc(100vh-3rem)] max-w-6xl items-center justify-center">
+      <div className="mx-auto flex min-h-[calc(100vh-3rem)] w-full min-w-0 max-w-6xl items-center justify-center">
         <div className="absolute right-4 top-4 z-20 sm:right-6 sm:top-6 lg:right-8 lg:top-8">
           <div className="rounded-2xl border border-white/70 bg-white/85 p-1.5 shadow-sm backdrop-blur dark:border-slate-700/80 dark:bg-slate-950/75">
             <QuickPreferenceToggles />
           </div>
         </div>
-        <div className="auth-frame grid w-full max-w-5xl overflow-hidden rounded-[2rem] border xl:grid-cols-[1.05fr_0.95fr]">
+        <div className="auth-frame grid w-full min-w-0 max-w-5xl overflow-hidden rounded-[2rem] border xl:grid-cols-[1.05fr_0.95fr]">
           <aside className="auth-aside hidden xl:flex">
             <div className="flex h-full flex-col justify-between">
               <div className="space-y-4">
@@ -949,7 +975,7 @@ export default function Login() {
               </div>
             </div>
           </aside>
-          <div className="auth-card p-5 sm:p-7 lg:p-8">
+          <div className="auth-card min-w-0 max-w-full p-5 sm:p-7 lg:p-8">
         {/* Logo and wordmark sit on ONE row rather than stacked, which
             reclaims the vertical space the stacked version spent on a
             14x14 block above a heading. "Sign in to continue" is gone with
@@ -961,7 +987,7 @@ export default function Login() {
             -- that flow renders its own heading below, and showing the same
             sentence twice on one short screen was the reported redundancy. */}
         <div className="mb-7">
-          <div className="flex items-center justify-center gap-3">
+          <div className="flex min-w-0 items-center justify-center gap-3">
             <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl text-white shadow-lg overflow-hidden" style={{ backgroundColor: 'var(--ui-accent, #9c7a3c)', boxShadow: '0 10px 24px rgba(156,122,60,0.28)' }}>
               {otpRequired ? (
                 <ShieldCheck className="h-6 w-6" />
@@ -969,7 +995,7 @@ export default function Login() {
                 <img src={brandLogo} alt="" className="h-full w-full object-cover" loading="eager" decoding="async" />
               )}
             </div>
-            <h1 className="text-2xl font-bold leading-tight text-gray-900 dark:text-white">{brandName}</h1>
+            <h1 className="min-w-0 break-words text-center text-2xl font-bold leading-tight text-gray-900 dark:text-white">{brandName}</h1>
           </div>
           {otpRequired ? (
             <p className="mt-2 text-center text-sm text-gray-500 dark:text-gray-400">
@@ -979,7 +1005,7 @@ export default function Login() {
         </div>
 
         {!otpRequired && !deviceApprovalPending && !showOtpReset && !showEmailReset && !recoveryAccessToken ? (
-          <form onSubmit={handleLogin} className="space-y-4">
+          <form onSubmit={handleLogin} className="min-w-0 max-w-full space-y-4">
             {/* Organization picker -- hidden once we've confirmed (via the
                 bootstrap fetch above) that this deployment is locked to a
                 single organization, i.e. every real single-tenant
@@ -1099,7 +1125,7 @@ export default function Login() {
             <div>
               <label htmlFor="login-username" className="mb-1 flex items-center gap-2 text-sm font-medium text-gray-700 dark:text-gray-300">
                 <Mail className="h-4 w-4 text-gray-400" />
-                <span>{tr('username_name_email_phone', 'Username or email')}</span>
+                <span className="min-w-0 break-words">{tr('username_name_email_phone', 'Username or email')}</span>
               </label>
               <input
                 id="login-username"
@@ -1214,21 +1240,22 @@ export default function Login() {
         ) : null}
 
         {!otpRequired && !deviceApprovalPending && showEmailReset && !recoveryAccessToken ? (
-          <div className="space-y-4">
-            <div className="rounded-2xl border border-primary-200 bg-primary-50/90 p-3 text-sm text-primary-800 dark:border-primary-800/40 dark:bg-primary-900/20 dark:text-primary-300">
-              {tr('email_reset_notice', "We'll email a reset link if this account has one saved.")}
+          <div className="space-y-3">
+            <div className="flex items-center justify-center gap-1 text-sm font-semibold text-primary-800 dark:text-primary-300">
+              <span>{tr('email_recovery', 'Email recovery')}</span>
+              <InfoHint label={tr('email_recovery', 'Email recovery')} text={tr('email_reset_notice', "We'll email a reset link if this account has one saved.")} />
             </div>
             <div>
-              <label htmlFor="email-reset-identifier" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
+              <label htmlFor="email-reset-identifier" className="mb-1 block text-xs font-medium text-gray-700 dark:text-gray-300">
                 {tr('username_name_email_phone', 'Username, name, email, or phone')}
               </label>
-              <input id="email-reset-identifier" name="email_reset_identifier" autoComplete="username" className="input" value={resetIdentifier} onChange={(event) => setResetIdentifier(event.target.value)} placeholder="username / name / phone / email" />
+              <input id="email-reset-identifier" name="email_reset_identifier" autoComplete="username" className="input h-10" value={resetIdentifier} onChange={(event) => setResetIdentifier(event.target.value)} placeholder="username / name / phone / email" />
             </div>
 
             {resetInfo ? <div className="rounded-lg border border-green-100 bg-green-50/90 p-3 text-sm text-green-700 dark:border-green-900/40 dark:bg-green-900/20 dark:text-green-300">{resetInfo}</div> : null}
             {error ? <div className="rounded-xl bg-red-50 p-3 text-sm text-red-600 dark:bg-red-900/20 dark:text-red-400">{error}</div> : null}
 
-            <button className="btn-primary w-full py-3 text-base" type="button" disabled={loading} onClick={handleResetWithEmail}>
+            <button className="btn-primary h-10 w-full text-sm" type="button" disabled={loading} onClick={handleResetWithEmail}>
               {loading ? tr('sending_reset_email', 'Sending reset email...') : tr('send_reset_email', 'Send reset email')}
             </button>
 
@@ -1241,13 +1268,11 @@ export default function Login() {
                 admin is the honest fallback when neither applies (this is
                 also where the old "needs an account created by your admin"
                 line belonged). */}
-            <div className="space-y-2 border-t border-gray-200 pt-4 dark:border-slate-700">
-              <p className="text-center text-xs text-gray-500 dark:text-gray-400">
-                {tr('reset_other_ways', 'Other ways to get back in')}
-              </p>
+            <div className="flex min-w-0 items-center justify-center gap-2 border-t border-gray-200 pt-3 dark:border-slate-700">
+              <span className="truncate text-xs text-gray-500 dark:text-gray-400">{tr('reset_other_ways', 'Other recovery')}</span>
               <button
                 type="button"
-                className="w-full text-sm text-primary-700 hover:text-primary-800 dark:text-primary-300"
+                className="shrink-0 text-sm font-medium text-primary-700 hover:text-primary-800 dark:text-primary-300"
                 onClick={() => {
                   setShowOtpReset(true)
                   setShowEmailReset(false)
@@ -1258,9 +1283,7 @@ export default function Login() {
               >
                 {tr('reset_password_with_otp', 'Reset with OTP')}
               </button>
-              <p className="text-center text-xs text-gray-400 dark:text-gray-500">
-                {tr('reset_ask_admin_hint', 'No email or authenticator? Ask your admin to reset it for you.')}
-              </p>
+              <InfoHint label={tr('reset_other_ways', 'Other recovery')} text={tr('reset_ask_admin_hint', 'No email or authenticator? Ask your admin to reset it for you.')} />
             </div>
 
             <ModeBackButton label={tr('back_to_login', 'Back to login')} onClick={closeAuxMode} />
@@ -1268,81 +1291,126 @@ export default function Login() {
         ) : null}
 
         {!otpRequired && !deviceApprovalPending && showOtpReset ? (
-          <div className="space-y-4">
-            <div className="rounded-2xl border border-primary-200 bg-primary-50/90 p-3 text-sm text-primary-800 dark:border-primary-800/40 dark:bg-primary-900/20 dark:text-primary-300">
-              {tr('otp_reset_notice', 'Enter the code from your authenticator app to set a new password.')}
+          <form className="space-y-3" onSubmit={(event) => { event.preventDefault(); void handleResetWithOtp() }}>
+            <div className="flex items-center justify-center gap-1 text-sm font-semibold text-primary-800 dark:text-primary-300">
+              <span>{tr('otp_recovery', 'OTP recovery')}</span>
+              <InfoHint label={tr('otp_recovery', 'OTP recovery')} text={tr('otp_reset_notice', 'Enter the code from your authenticator app to set a new password.')} />
             </div>
-            <div>
-              <label htmlFor="reset-identifier" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
-                {tr('username_name_email_phone', 'Username, name, email, or phone')}
-              </label>
-              <input id="reset-identifier" name="reset_identifier" autoComplete="username" className="input" value={resetIdentifier} onChange={(event) => setResetIdentifier(event.target.value)} placeholder="username / name / phone / email" />
+            <div className="grid gap-2 sm:grid-cols-2">
+              <div>
+                <label htmlFor="reset-identifier" className="mb-1 block text-xs font-medium text-gray-700 dark:text-gray-300">
+                  {tr('username_name_email_phone', 'Username, name, email, or phone')}
+                </label>
+                <input id="reset-identifier" name="username" autoComplete="username" className="input h-10" value={resetIdentifier} onChange={(event) => setResetIdentifier(event.target.value)} placeholder="username / name / phone / email" />
+              </div>
+              <div>
+                <label htmlFor="reset-otp" className="mb-1 block text-xs font-medium text-gray-700 dark:text-gray-300">
+                  {tr('otp_code', 'OTP code')}
+                </label>
+                <input
+                  id="reset-otp"
+                  name="reset_otp"
+                  autoComplete="one-time-code"
+                  inputMode="numeric"
+                  className="input h-10"
+                  value={resetOtp}
+                  onChange={(event) => setResetOtp(event.target.value.replace(/\D/g, '').slice(0, 6))}
+                  placeholder="6-digit code"
+                />
+              </div>
             </div>
-            <div>
-              <label htmlFor="reset-otp" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
-                {tr('otp_code', 'OTP code')}
-              </label>
-              <input
-                id="reset-otp"
-                name="reset_otp"
-                autoComplete="one-time-code"
-                inputMode="numeric"
-                className="input"
-                value={resetOtp}
-                onChange={(event) => setResetOtp(event.target.value.replace(/\D/g, '').slice(0, 6))}
-                placeholder="6-digit code"
-              />
-            </div>
-            <div>
-              <label htmlFor="reset-password-new" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
-                {tr('new_password', 'New password')}
-              </label>
-              <input id="reset-password-new" name="reset_password_new" type="password" className="input" value={resetNewPassword} onChange={(event) => setResetNewPassword(event.target.value)} autoComplete="new-password" />
-            </div>
-            <div>
-              <label htmlFor="reset-password-confirm" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
-                {tr('confirm_new_password', 'Confirm new password')}
-              </label>
-              <input id="reset-password-confirm" name="reset_password_confirm" type="password" className="input" value={resetConfirmPassword} onChange={(event) => setResetConfirmPassword(event.target.value)} autoComplete="new-password" />
+            <div className="grid gap-2 sm:grid-cols-2">
+              <div>
+                <label htmlFor="reset-password-new" className="mb-1 block text-xs font-medium text-gray-700 dark:text-gray-300">
+                  {tr('new_password', 'New password')}
+                </label>
+                <input id="reset-password-new" name="reset_password_new" type="password" className="input h-10" value={resetNewPassword} onChange={(event) => setResetNewPassword(event.target.value)} autoComplete="new-password" />
+              </div>
+              <div>
+                <label htmlFor="reset-password-confirm" className="mb-1 block text-xs font-medium text-gray-700 dark:text-gray-300">
+                  {tr('confirm_new_password', 'Confirm new password')}
+                </label>
+                <input id="reset-password-confirm" name="reset_password_confirm" type="password" className="input h-10" value={resetConfirmPassword} onChange={(event) => setResetConfirmPassword(event.target.value)} autoComplete="new-password" />
+              </div>
             </div>
 
             {resetInfo ? <div className="rounded-lg border border-green-100 bg-green-50/90 p-3 text-sm text-green-700 dark:border-green-900/40 dark:bg-green-900/20 dark:text-green-300">{resetInfo}</div> : null}
             {error ? <div className="rounded-xl bg-red-50 p-3 text-sm text-red-600 dark:bg-red-900/20 dark:text-red-400">{error}</div> : null}
 
-            <button className="btn-primary w-full py-3 text-base" type="button" disabled={loading} onClick={handleResetWithOtp}>
-              {loading ? tr('updating_password', 'Updating password...') : tr('reset_password', 'Reset password')}
-            </button>
+            <div className="grid gap-2 sm:grid-cols-2">
+              <button className="btn-primary h-10 w-full text-sm" type="submit" disabled={loading}>
+                {loading ? tr('updating_password', 'Updating password...') : tr('reset_password', 'Reset password')}
+              </button>
+              <button
+                className="btn-secondary h-10 w-full text-sm"
+                type="button"
+                disabled={!resetNewPassword}
+                onClick={() => {
+                  void copyPasswordToClipboard(resetNewPassword).then((copied) => {
+                    setResetInfo(
+                      copied
+                        ? tr('new_password_copied', 'New password copied to clipboard.')
+                        : tr('new_password_copy_failed', 'Could not copy automatically. Select the new password field and copy it before leaving.'),
+                    )
+                  })
+                }}
+              >
+                {tr('copy_new_password', 'Copy new password')}
+              </button>
+            </div>
 
             <ModeBackButton label={tr('back_to_login', 'Back to login')} onClick={closeAuxMode} />
-          </div>
+          </form>
         ) : null}
 
         {!otpRequired && !deviceApprovalPending && recoveryAccessToken ? (
-          <div className="space-y-4">
-            <div className="rounded-2xl border border-primary-200 bg-primary-50/90 p-3 text-sm text-primary-800 dark:border-primary-800/40 dark:bg-primary-900/20 dark:text-primary-300">
-              {resetInfo || tr('set_new_password_from_email', 'Set your new password below to finish email recovery.')}
+          <form className="space-y-3" onSubmit={(event) => { event.preventDefault(); void handleCompleteEmailReset() }}>
+            <input type="text" name="username" autoComplete="username" value={resetIdentifier || username} readOnly className="sr-only" tabIndex={-1} aria-hidden="true" />
+            <div className="flex items-center justify-center gap-1 text-sm font-semibold text-primary-800 dark:text-primary-300">
+              <span>{tr('set_new_password_from_email', 'Set new password')}</span>
+              <InfoHint label={tr('set_new_password_from_email', 'Set new password')} text={resetInfo || tr('set_new_password_from_email', 'Set your new password below to finish email recovery.')} />
             </div>
-            <div>
-              <label htmlFor="recovery-password-new" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
-                {tr('new_password', 'New password')}
-              </label>
-              <input id="recovery-password-new" name="recovery_password_new" type="password" className="input" value={resetNewPassword} onChange={(event) => setResetNewPassword(event.target.value)} autoComplete="new-password" />
-            </div>
-            <div>
-              <label htmlFor="recovery-password-confirm" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
-                {tr('confirm_new_password', 'Confirm new password')}
-              </label>
-              <input id="recovery-password-confirm" name="recovery_password_confirm" type="password" className="input" value={resetConfirmPassword} onChange={(event) => setResetConfirmPassword(event.target.value)} autoComplete="new-password" />
+            <div className="grid gap-2 sm:grid-cols-2">
+              <div>
+                <label htmlFor="recovery-password-new" className="mb-1 block text-xs font-medium text-gray-700 dark:text-gray-300">
+                  {tr('new_password', 'New password')}
+                </label>
+                <input id="recovery-password-new" name="recovery_password_new" type="password" className="input h-10" value={resetNewPassword} onChange={(event) => setResetNewPassword(event.target.value)} autoComplete="new-password" />
+              </div>
+              <div>
+                <label htmlFor="recovery-password-confirm" className="mb-1 block text-xs font-medium text-gray-700 dark:text-gray-300">
+                  {tr('confirm_new_password', 'Confirm new password')}
+                </label>
+                <input id="recovery-password-confirm" name="recovery_password_confirm" type="password" className="input h-10" value={resetConfirmPassword} onChange={(event) => setResetConfirmPassword(event.target.value)} autoComplete="new-password" />
+              </div>
             </div>
 
             {error ? <div className="rounded-xl bg-red-50 p-3 text-sm text-red-600 dark:bg-red-900/20 dark:text-red-400">{error}</div> : null}
 
-            <button className="btn-primary w-full py-3 text-base" type="button" disabled={loading} onClick={handleCompleteEmailReset}>
-              {loading ? tr('updating_password', 'Updating password...') : tr('save_new_password', 'Save new password')}
-            </button>
+            <div className="grid gap-2 sm:grid-cols-2">
+              <button className="btn-primary h-10 w-full text-sm" type="submit" disabled={loading}>
+                {loading ? tr('updating_password', 'Updating password...') : tr('save_new_password', 'Save new password')}
+              </button>
+              <button
+                className="btn-secondary h-10 w-full text-sm"
+                type="button"
+                disabled={!resetNewPassword}
+                onClick={() => {
+                  void copyPasswordToClipboard(resetNewPassword).then((copied) => {
+                    setResetInfo(
+                      copied
+                        ? tr('new_password_copied', 'New password copied to clipboard.')
+                        : tr('new_password_copy_failed', 'Could not copy automatically. Select the new password field and copy it before leaving.'),
+                    )
+                  })
+                }}
+              >
+                {tr('copy_new_password', 'Copy new password')}
+              </button>
+            </div>
 
             <ModeBackButton label={tr('back_to_login', 'Back to login')} onClick={closeAuxMode} />
-          </div>
+          </form>
         ) : null}
 
         {otpRequired && !deviceApprovalPending ? (
@@ -1467,4 +1535,3 @@ export default function Login() {
     </div>
   )
 }
-

@@ -301,12 +301,12 @@ async function buildSalesSection(env: Env): Promise<NotificationSection | null> 
   const [awaitingPayment, awaitingDelivery] = await Promise.all([
     db.prepare(`
       SELECT id, receipt_number, total_usd FROM sales
-      WHERE COALESCE(sale_status, 'completed') = 'awaiting_payment'
+      WHERE sale_status = 'awaiting_payment'
       ORDER BY created_at DESC LIMIT 50
     `).all<{ id: number; receipt_number: string; total_usd: number }>(),
     db.prepare(`
       SELECT id, receipt_number, total_usd FROM sales
-      WHERE COALESCE(sale_status, 'completed') = 'awaiting_delivery'
+      WHERE sale_status = 'awaiting_delivery'
       ORDER BY created_at DESC LIMIT 50
     `).all<{ id: number; receipt_number: string; total_usd: number }>(),
   ])

@@ -142,7 +142,7 @@ export default function ReviewQueue() {
 
   useEffect(() => {
     if (!isActive || !syncChannel?.channel) return
-    if (syncChannel.channel === 'pendingActions') void load(true)
+    if (syncChannel.channel === 'pendingActions' || syncChannel.channel === 'users') void load(true)
   }, [isActive, load, syncChannel?.channel, syncChannel?.ts])
 
   useEffect(() => () => {

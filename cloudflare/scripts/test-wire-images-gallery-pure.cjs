@@ -87,6 +87,7 @@ const media = loadReal('lib/media.ts')
 const sqlBinding = loadReal('lib/sqlBinding.ts')
 const batchCode = loadReal('lib/batchCode.ts')
 const searchMatch = loadReal('lib/searchMatch.ts')
+const productDetailRule = loadReal('lib/productDetailRule.ts')
 const productWrites = loadReal('lib/productWrites.ts', {
   './db': { getDb: () => dbShim },
   './media': media,
@@ -102,6 +103,7 @@ const productsRoute = loadReal('routes/products.ts', {
   // routes/products.ts buckets the sales drill-down in UTC+7 through the pure
   // businessDateWindow helpers; provide the real module so its date SQL resolves.
   '../lib/businessDateWindow': loadReal('lib/businessDateWindow.ts'),
+  '../lib/productDetailRule': productDetailRule,
   '../lib/auth': { requireAuth: async (c, next) => { c.set('user', FAKE_USER); return next() } },
   '../lib/permissions': {
     hasPermission: () => true,
@@ -118,6 +120,9 @@ const productsRoute = loadReal('routes/products.ts', {
   // stubs are honest. (Added by 6e while landing the Part-registry fix --
   // the D1 train missed this loader.)
   '../lib/stockLedgerQuery': { attachBeforeQty: (rows) => rows, buildStockLedgerQuery: () => ({ sql: 'SELECT 1', params: {} }) },
+  // Stock-in Sessions has its own real-SQL suite; this gallery-only route
+  // harness needs the newly imported query kernel to stay inert.
+  '../lib/stockInSessionsQuery': { buildStockInSessionListQuery: () => ({ groupedSql: 'SELECT 1', params: {} }), stockInSessionLinesSql: 'SELECT 1' },
   // D3 (Part 422, a7): detail-report's sales breakdown -- inert here; the
   // kernel has its own real-SQL coverage via test-sales-day-report-pure.
   '../lib/salesAnalytics': { getProductSalesBreakdown: async () => ({ by_day: [], by_month: [] }) },

@@ -17,6 +17,8 @@ const clientSource = fs.readFileSync(path.join(here, '..', 'src', 'components', 
 const serverSource = fs.readFileSync(path.join(here, '..', '..', 'cloudflare', 'src', 'routes', 'fees.ts'), 'utf8')
 const feesPageSource = fs.readFileSync(path.join(here, '..', 'src', 'components', 'fees', 'FeesPage.tsx'), 'utf8').replace(/\r\n/g, '\n')
 const feesTransportSource = fs.readFileSync(path.join(here, '..', 'src', 'api', 'feesTransport.ts'), 'utf8').replace(/\r\n/g, '\n')
+const expenseLabelManagerSource = fs.readFileSync(path.join(here, '..', 'src', 'components', 'fees', 'ExpenseLabelManagerModal.tsx'), 'utf8').replace(/\r\n/g, '\n')
+const expenseReportSource = fs.readFileSync(path.join(here, '..', 'src', 'components', 'sales', 'FeesReportSection.tsx'), 'utf8').replace(/\r\n/g, '\n')
 
 function extractFunction(source: string, name: string): string {
   const re = new RegExp(`function ${name}\\([\\s\\S]*?\\n\\}`)
@@ -112,6 +114,26 @@ check('Expenses export covers visible, filtered-all, and all-record scopes with 
   assert.match(feesPageSource, /openFeeExport\('filtered'\)/)
   assert.match(feesPageSource, /openFeeExport\('all'\)/)
   assert.match(feesPageSource, /<ExportOptionsDialog/)
+})
+
+check('Expenses keeps reliable filtered paging and responsive dense rows', () => {
+  assert.match(feesPageSource, /const nextPage = clampPage\(page, nextResult\.total, pageSize\)/, 'deleted or filtered final pages must clamp from the server total')
+  assert.match(feesPageSource, /if \(nextPage !== page\)[\s\S]*setPage\(nextPage\)[\s\S]*return[\s\S]*setResult\(nextResult\)/, 'valid-page loading must happen before accepting stale empty rows')
+  assert.match(feesPageSource, /rangeAsPageSize[\s\S]*page=\{page\}[\s\S]*totalItems=\{result\.total\}/, 'Back, Next, page and page-size must use filtered totals')
+  assert.match(feesPageSource, /\.\.\.\(branchFilter \? \{ branchId: branchFilter \} : \{\}\)/, 'report totals must follow the branch filter')
+  assert.match(feesPageSource, /className="dense-data-table min-w-\[720px\]"/, 'desktop must use the shared dense table')
+  assert.match(feesPageSource, /dense-data-shell hidden overflow-x-auto md:block/, 'the table must start at the safe desktop breakpoint')
+  assert.match(feesPageSource, /space-y-2 md:hidden/, 'mobile must retain dedicated cards')
+  assert.match(feesPageSource, /data-tone="violet"[\s\S]*data-tone="blue"[\s\S]*data-tone="emerald"/, 'type, category and amount headers must use semantic tones')
+})
+
+check('saved expense labels are the one editable category source', () => {
+  assert.match(expenseLabelManagerSource, /getFeeLabelTypeImpact\(entry\.label\)/, 'category changes must preview linked records')
+  assert.match(expenseLabelManagerSource, /classifyFeeLabel\(entry\.label, feeType\)/, 'the saved-label manager must own category changes')
+  assert.match(expenseLabelManagerSource, /source label and audit history remain unchanged/i, 'the confirmation must explain preserved history')
+  assert.match(feesTransportSource, /\/api\/fees\/labels\/classify/, 'classification must use the wired label endpoint')
+  assert.match(expenseReportSource, /by_category/, 'the Reports surface must expose category totals')
+  assert.match(expenseReportSource, /expenses-report-/, 'user-facing filenames must use Expenses vocabulary')
 })
 
 console.log(`\nfeeLabelClamp: ${passed} check(s) passed.`)

@@ -39,6 +39,8 @@ const OTP_LIMIT_MAX = 10
 const OTP_LIMIT_WINDOW_MS = 10 * 60 * 1000
 const OTP_IP_LIMIT_MAX = 25
 const OTP_IP_LIMIT_WINDOW_MS = OTP_LIMIT_WINDOW_MS
+const OTP_RECOVERY_LIMIT_MAX = 5
+const OTP_RECOVERY_LIMIT_WINDOW_MS = 15 * 60 * 1000
 
 // Brute-force / credential-stuffing protection on POST /login. Previously
 // this endpoint had no rate limiting at all -- unlike /otp/verify and
@@ -435,7 +437,7 @@ app.post('/password-reset/complete', async (c) => {
   }
 
   const db = getDb(c.env)
-  const user = await db.prepare('SELECT id, name FROM users WHERE id = ? AND deleted_at IS NULL AND is_active = 1').get<{ id: number; name: string }>([result.userId])
+  const user = await db.prepare('SELECT id, username, name FROM users WHERE id = ? AND deleted_at IS NULL AND is_active = 1').get<{ id: number; username: string; name: string }>([result.userId])
   if (!user) return c.json({ success: false, error: 'Account no longer available' }, 400)
 
   const passwordHash = bcrypt.hashSync(newPassword, 10)
@@ -445,7 +447,7 @@ app.post('/password-reset/complete', async (c) => {
   await db.prepare('UPDATE user_sessions SET revoked_at = CURRENT_TIMESTAMP WHERE user_id = ? AND revoked_at IS NULL').run([user.id])
   await audit(c.env, user.id, user.name, 'password_reset', 'user', user.id, { via: 'email_link' })
 
-  return c.json({ success: true })
+  return c.json({ success: true, username: user.username, name: user.name })
 })
 
 // Field names here matter: Login.tsx and UserProfileModal.tsx read
@@ -541,7 +543,7 @@ app.post('/otp/verify', async (c) => {
         retryAfterSeconds: failure.retryAfterSeconds,
       }, 429)
     }
-    return c.json({ error: 'Invalid OTP code', failedAttempts: failure.failedCount }, 401)
+    return c.json({ error: 'Invalid OTP code. Enter the current code and make sure your authenticator device uses automatic date and time.', failedAttempts: failure.failedCount }, 401)
   }
 
   // Device-approval gate, re-run HERE with the deviceId this request
@@ -621,9 +623,9 @@ app.post('/session-duration', requireAuth, async (c) => {
 })
 
 // POST /api/auth/otp/setup -- generates a new pending secret (not active
-// until /otp/confirm). QR image rendering isn't ported (see lib/totp.ts
-// header comment) -- returns qrDataUrl: null, and the frontend's OtpModal
-// already falls back to showing the manual base32 entry key in that case.
+// until /otp/confirm). The browser generates its QR image locally from the
+// standard otpauth URI, so this route never has to persist or serve a raster
+// image containing the enrollment secret.
 app.post('/otp/setup', requireAuth, async (c) => {
   const actor = c.get('user')
   const body = await c.req.json<{ userId?: number }>().catch(() => ({} as { userId?: number }))
@@ -631,7 +633,10 @@ app.post('/otp/setup', requireAuth, async (c) => {
   if (!target) return c.json({ error: 'User not found' }, 404)
   if (!canManageOtpTarget(actor, target)) return c.json({ error: 'No permission' }, 403)
 
-  const { base32, otpauthUrl } = generateTotpSecret(target.username)
+  // The issuer is only an authenticator-app label; it does not affect the
+  // generated codes. Use the public product name for newly enrolled devices
+  // so people do not select an old, similarly named BusinessOS entry.
+  const { base32, otpauthUrl } = generateTotpSecret(target.username, 'Leang Beauty')
   const encrypted = await encryptSecret(base32, c.env.APP_ENCRYPTION_KEY)
   const db = getDb(c.env)
   await db.prepare(`
@@ -688,6 +693,48 @@ app.post('/otp/disable', requireAuth, async (c) => {
   return c.json({ success: true })
 })
 
+// POST /api/auth/otp/recover -- a deliberate administrator break-glass path
+// for a *different* administrator who has lost their authenticator and has
+// no email recovery configured. It is intentionally separate from /disable:
+// the acting administrator must re-enter their own password and type the
+// confirmation phrase, the target loses every existing session, and the
+// event is auditable. It never grants an unauthenticated recovery path.
+app.post('/otp/recover', requireAuth, async (c) => {
+  const actor = c.get('user')
+  const body = await c.req.json<{ userId?: number; password?: string; confirmation?: string }>().catch(() => ({} as { userId?: number; password?: string; confirmation?: string }))
+  const targetId = Number(body.userId || 0)
+  if (!targetId) return c.json({ error: 'userId required' }, 400)
+  if (Number(actor?.id || 0) === targetId) return c.json({ error: 'Use the normal 2FA disable flow for your own account.' }, 400)
+  if (!isAdminControlUser(actor)) return c.json({ error: 'Administrator access required.' }, 403)
+  if (String(body.confirmation || '').trim().toUpperCase() !== 'RESET 2FA') {
+    return c.json({ error: 'Type RESET 2FA to confirm this recovery action.' }, 400)
+  }
+
+  const recoveryLimit = await checkRateLimit(c.env, 'auth:otp_recovery', `actor:${actor.id}`, OTP_RECOVERY_LIMIT_MAX, OTP_RECOVERY_LIMIT_WINDOW_MS)
+  if (!recoveryLimit.allowed) return c.json({ error: 'Too many 2FA recovery attempts. Please try again later.' }, 429)
+
+  const actorRecord = await getOtpTargetUser(c.env, actor.id)
+  if (!actorRecord || !bcrypt.compareSync(String(body.password || ''), actorRecord.password)) {
+    return c.json({ error: 'Your current password is incorrect.' }, 401)
+  }
+  const target = await getOtpTargetUser(c.env, targetId)
+  if (!target) return c.json({ error: 'User not found' }, 404)
+
+  const db = getDb(c.env)
+  await db.prepare(`
+    UPDATE users
+    SET otp_enabled = 0, otp_secret = NULL, otp_pending_secret = NULL, otp_pending_created_at = NULL, updated_at = CURRENT_TIMESTAMP
+    WHERE id = ?
+  `).run([target.id])
+  await revokeUserSessions(c.env, target.id)
+  await audit(c.env, actor.id, actor.username, 'otp_recovery_reset', 'user', target.id, {
+    target_user: target.username,
+    target_was_otp_enabled: !!target.otp_enabled,
+    recovery: 'peer_admin_password_confirmed',
+  })
+  return c.json({ success: true, otpEnabled: false })
+})
+
 // POST /api/auth/password-reset/otp -- account-recovery path for users who
 // have TOTP enabled but lost email access: prove control via a valid TOTP
 // code instead of a magic link, then set a new password directly.
@@ -721,7 +768,7 @@ app.post('/password-reset/otp', async (c) => {
   await revokeUserSessions(c.env, user.id)
   await audit(c.env, user.id, user.username, 'password_reset_complete', 'user', user.id, { method: 'otp' })
 
-  return c.json({ message: 'Password reset successfully.' })
+  return c.json({ success: true, message: 'Password reset successfully.', username: user.username })
 })
 
 function normalizeOauthMode(mode: unknown): 'login' | 'link' {
@@ -820,6 +867,8 @@ app.post('/oauth/start', async (c) => {
 })
 
 function buildOauthCallbackHtml(opts: { payload: Record<string, unknown>; targetUrl: string; title: string; message: string }): string {
+  const targetOrigin = new URL(opts.targetUrl).origin
+  const safeJson = (value: unknown) => JSON.stringify(value).replace(/</g, '\\u003c')
   return `<!doctype html>
 <html>
   <head>
@@ -836,16 +885,18 @@ function buildOauthCallbackHtml(opts: { payload: Record<string, unknown>; target
   <body>
     <div class="card">
       <h1>${opts.title}</h1>
-      <p>${opts.message}</p>
+      <p id="message"></p>
     </div>
     <script>
       (function () {
-        const payload = ${JSON.stringify(opts.payload)};
-        const targetUrl = ${JSON.stringify(opts.targetUrl)};
+        const payload = ${safeJson(opts.payload)};
+        const targetUrl = ${safeJson(opts.targetUrl)};
+        const targetOrigin = ${safeJson(targetOrigin)};
+        document.getElementById('message').textContent = ${safeJson(opts.message)};
         try { localStorage.setItem('businessos_oauth_callback_result', JSON.stringify(payload)); } catch (_) {}
         try {
           if (window.opener && !window.opener.closed) {
-            window.opener.postMessage({ type: 'business-os-oauth', payload }, '*');
+            window.opener.postMessage({ type: 'business-os-oauth', payload }, targetOrigin);
             window.close();
             return;
           }

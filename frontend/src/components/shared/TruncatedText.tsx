@@ -136,7 +136,10 @@ export default function TruncatedText({ text, className }: TruncatedTextProps) {
             maxHeight: position.maxHeight,
             transform: position.placement === 'above' ? 'translateY(-100%)' : undefined,
           }}
-          className="fixed z-[1000] overflow-y-auto whitespace-pre-line break-words rounded-lg border border-slate-200 bg-white p-2.5 text-left text-xs font-normal leading-relaxed text-slate-600 shadow-xl dark:border-slate-600 dark:bg-slate-800 dark:text-slate-300"
+          // Match InfoHint's topmost explanatory layer. Truncated values are
+          // frequently opened from inside z-[1050] modals; z-[1000] put the
+          // full text behind the surface that contained the ellipsis.
+          className="fixed z-[1200] overflow-y-auto whitespace-pre-line break-words rounded-lg border border-slate-200 bg-white p-2.5 text-left text-xs font-normal leading-relaxed text-slate-600 shadow-xl dark:border-slate-600 dark:bg-slate-800 dark:text-slate-300"
         >
           {text}
         </span>,

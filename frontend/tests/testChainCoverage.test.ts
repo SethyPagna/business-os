@@ -28,7 +28,27 @@ assert.ok(chain, 'package.json should define a test:utils script')
 const testFiles = fs.readdirSync(here).filter((f) => f.endsWith('.test.ts')).sort()
 assert.ok(testFiles.length > 50, `expected to find the test suite, found ${testFiles.length} files`)
 
-const missing = testFiles.filter((f) => !chain.includes(`tests/${f}`))
+// A focused test may be statically imported by another chained test. Treat
+// that as reachable too (Node executes the imported module before its parent),
+// then walk imports transitively without weakening the requirement that every
+// file has a real path from test:utils.
+const reachable = new Set(testFiles.filter((f) => chain.includes(`tests/${f}`)))
+let discovered = true
+while (discovered) {
+  discovered = false
+  for (const importer of [...reachable]) {
+    const source = fs.readFileSync(path.join(here, importer), 'utf8')
+    for (const match of source.matchAll(/(?:import(?:[\s\S]*?from\s*)?|import\()\s*['"]\.\/([^'"]+\.test\.ts)['"]/g)) {
+      const imported = match[1]
+      if (testFiles.includes(imported) && !reachable.has(imported)) {
+        reachable.add(imported)
+        discovered = true
+      }
+    }
+  }
+}
+
+const missing = testFiles.filter((f) => !reachable.has(f))
 assert.deepEqual(
   missing, [],
   `these test files exist but are never run by test:utils -- append them to the chain in package.json:\n  ${missing.join('\n  ')}`,

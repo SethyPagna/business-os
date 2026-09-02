@@ -27,31 +27,34 @@ export const USER_NAME_SNAPSHOTS: ReadonlyArray<{ table: string; idColumn: strin
   { table: 'undo_snapshots', idColumn: 'created_by_id', nameColumn: 'created_by_name' },
 ]
 
+export type UserRenameStatement = { sql: string; params: { name: string; id: number } }
+
+export function buildUserRenameStatements(userId: number, newUsername: string): UserRenameStatement[] {
+  if (!Number.isFinite(userId)) return []
+  const name = String(newUsername ?? '').trim()
+  if (!name) return []
+  return USER_NAME_SNAPSHOTS.map((snapshot) => ({
+    sql: `UPDATE ${snapshot.table} SET ${snapshot.nameColumn} = @name
+          WHERE ${snapshot.idColumn} = @id
+            AND (${snapshot.nameColumn} IS NULL OR ${snapshot.nameColumn} != @name)`,
+    params: { name, id: userId },
+  }))
+}
+
 // Propagate a username change to every denormalized snapshot listed above.
 // Returns the number of snapshot rows updated. Each table is updated
-// independently so a table that does not exist in a given environment (e.g. a
-// pared-down test DB) is skipped rather than aborting the whole cascade; in
-// production every table is present. The `!= @name` guard skips rows already
-// correct so a rename never churns rows needlessly.
+// as one D1 batch. D1 batches are transactional: a missing table or schema drift
+// fails the whole rename instead of silently committing a partly-updated user
+// identity. The `!= @name` guard skips rows already correct.
 //
 // The table/column names come only from the hardcoded USER_NAME_SNAPSHOTS list
 // (never user input), so interpolating them into the SQL is safe.
 export async function cascadeUserRename(db: D1Compat, userId: number, newUsername: string): Promise<number> {
-  if (!Number.isFinite(userId)) return 0
-  const name = String(newUsername ?? '').trim()
-  if (!name) return 0
-  let updated = 0
-  for (const snapshot of USER_NAME_SNAPSHOTS) {
-    try {
-      const result = await db.prepare(
-        `UPDATE ${snapshot.table} SET ${snapshot.nameColumn} = @name
-         WHERE ${snapshot.idColumn} = @id
-           AND (${snapshot.nameColumn} IS NULL OR ${snapshot.nameColumn} != @name)`,
-      ).run({ name, id: userId })
-      updated += result.changes
-    } catch {
-      // Table absent in this environment -- skip it, keep cascading the rest.
-    }
-  }
-  return updated
+  const statements = buildUserRenameStatements(userId, newUsername)
+  if (!statements.length) return 0
+  const results = await db.batch(statements)
+  return results.reduce((sum, result) => {
+    const shaped = result as unknown as { changes?: number; meta?: { changes?: number } }
+    return sum + Number(shaped.meta?.changes ?? shaped.changes ?? 0)
+  }, 0)
 }

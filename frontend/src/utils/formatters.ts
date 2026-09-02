@@ -7,6 +7,10 @@ type TimestampInput = string | number | Date | null | undefined
 
 function normalizeTimestampInput(raw: TimestampInput): string {
   if (!raw) return ''
+  if (typeof raw === 'number') {
+    const date = new Date(raw)
+    return Number.isNaN(date.getTime()) ? '' : date.toISOString()
+  }
   if (raw instanceof Date) {
     return Number.isNaN(raw.getTime()) ? '' : raw.toISOString()
   }

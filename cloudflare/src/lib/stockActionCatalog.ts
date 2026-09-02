@@ -5,6 +5,7 @@
 
 import type { D1Compat } from './db'
 import { buildInClause, chunkForBinding } from './sqlBinding'
+import { normalizeSearchText } from './searchMatch'
 import {
   getUnifiedStockMode,
   resolveUnifiedStockImportRows,
@@ -32,7 +33,7 @@ async function readCatalogProducts(
   rows: Array<Record<string, unknown>>,
 ): Promise<UnifiedStockCatalogProduct[]> {
   const barcodes = [...new Set(rows.map((row) => normalized(row.barcode)).filter(Boolean))]
-  const names = [...new Set(rows.map((row) => normalized(row.name)).filter(Boolean))]
+  const names = [...new Set(rows.map((row) => normalizeSearchText(row.name)).filter(Boolean))]
   const found = new Map<number, UnifiedStockCatalogProduct>()
 
   const readMatches = async (columnSql: string, values: string[]) => {
@@ -51,7 +52,28 @@ async function readCatalogProducts(
   }
 
   await readMatches(`LOWER(TRIM(COALESCE(barcode, '')))`, barcodes)
-  await readMatches(`LOWER(TRIM(name))`, names)
+  // name_normalized is indexed/search-maintained and acts only as a bounded
+  // candidate prefilter; matchProduct still applies exact collapsed-name,
+  // barcode and cost equality in JS (never fuzzy identity).
+  await readMatches(`name_normalized`, names)
+  const productIds = [...found.keys()]
+  for (const slice of chunkForBinding(productIds, 0)) {
+    const { sql, params } = buildInClause('p', slice)
+    const batches = await db.prepare(`
+      SELECT variant_product_id AS productId, batch_key, lot_code
+      FROM product_batches
+      WHERE is_active = 1 AND variant_product_id IN (${sql})
+    `).all<{ productId: number; batch_key: string | null; lot_code: string | null }>(params)
+    for (const batch of batches) {
+      const product = found.get(Number(batch.productId))
+      if (!product) continue
+      const values = product.batch_keys || (product.batch_keys = [])
+      for (const value of [batch.batch_key, batch.lot_code]) {
+        const normalizedValue = normalized(value)
+        if (normalizedValue && !values.includes(normalizedValue)) values.push(normalizedValue)
+      }
+    }
+  }
   return [...found.values()]
 }
 

@@ -42,19 +42,20 @@ export default function StatsRangeRow({
   className?: string
 }) {
   return (
-    <div className={`flex min-w-0 flex-wrap items-center gap-1 ${className}`}>
-      {/* On small screens the Start→End picker takes the whole row; from `sm`
-          up it shrinks back to the compact pill. */}
+    <div className={`flex min-w-0 items-center gap-1 ${className}`}>
+      {/* Keep the range and its trailing action on one compact toolbar line.
+          The picker may scroll within its own label rather than forcing Export
+          or Add onto a second line on narrow phones. */}
       <DateTimeRangePicker
         value={range}
         onChange={onRangeChange}
         t={t}
         showTime={showTime}
-        className="w-full sm:w-auto"
-        triggerClassName="flex w-full items-center justify-center gap-2 rounded-md px-3 py-1.5 sm:inline-flex sm:w-auto sm:justify-start sm:gap-2.5 sm:px-4 sm:py-2.5 sm:min-w-[21rem]"
+        className="min-w-0 flex-1 sm:flex-none"
+        triggerClassName="flex min-w-0 w-full items-center justify-center gap-1.5 rounded-md px-2 py-1 !min-h-9 sm:inline-flex sm:w-auto sm:justify-start sm:gap-2 sm:px-3 sm:min-w-[17rem]"
       />
       {actions ? (
-        <div className="ml-auto flex min-w-0 flex-wrap items-center justify-end gap-1">{actions}</div>
+        <div className="ml-auto flex shrink-0 items-center justify-end gap-1">{actions}</div>
       ) : null}
     </div>
   )

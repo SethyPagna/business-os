@@ -330,6 +330,20 @@ await runTest('Z2 wiring: the cart input, updatePrice, and receipt are decoupled
   assert.match(receipt, /baseUnitUsd > 0\s*\n\s*\? baseUnitUsd \+ productDiscUnitUsd/)
 })
 
+await runTest('POS product cards keep VIP pricing inside the price options', () => {
+  const pos = fs.readFileSync(new URL('../src/components/pos/POS.tsx', import.meta.url), 'utf8')
+  const cardStart = pos.indexOf('Product cards show only the normal selling price')
+  const cardEnd = pos.indexOf('Colored qty+unit', cardStart)
+  assert.ok(cardStart >= 0 && cardEnd > cardStart, 'the product-card price block should remain identifiable')
+  const cardPriceBlock = pos.slice(cardStart, cardEnd)
+  assert.doesNotMatch(cardPriceBlock, /special_price|t\('special_price'\)/, 'VIP labels and values must not appear outside on the POS product card')
+
+  const sheet = fs.readFileSync(new URL('../src/components/pos/ProductDetailSheet.tsx', import.meta.url), 'utf8')
+  assert.doesNotMatch(sheet, /<DetailField label=\{posCopy\('VIP'/, 'VIP pricing must not appear in the general read-only product details')
+  assert.match(sheet, /closeAfterAdd\(effectiveVariant, 'special'\)/, 'variant VIP pricing must remain available as a selectable option')
+  assert.match(sheet, /closeAfterAdd\(product, 'special'\)/, 'standalone-product VIP pricing must remain available as a selectable option')
+})
+
 if (failed > 0) {
   process.exitCode = 1
 }

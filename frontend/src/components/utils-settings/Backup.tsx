@@ -34,7 +34,7 @@ import { clearBackupMaintenance, getBackupMaintenance, type RestoreMaintenanceSt
 type TranslateFn = (key: string) => string
 type NotifyFn = (message: string, type?: string) => void
 type BackupSectionId = 'all' | 'doctor' | 'export' | 'restore' | 'drive' | 'maintenance'
-type BackupAction = '' | 'folder-export' | 'folder-import' | 'cancel' | 'save' | 'connect' | 'sync' | 'disconnect' | 'forget' | 'quick' | 'deep'
+type BackupAction = '' | 'folder-export' | 'folder-import' | 'cancel' | 'save' | 'connect' | 'sync' | 'stage-restore' | 'disconnect' | 'forget' | 'quick' | 'deep'
 type BackupTone = 'slate' | 'blue' | 'amber'
 type StopFn = () => void
 
@@ -104,6 +104,9 @@ interface BackupJobResult {
   manifest?: unknown
   message?: string
   summary?: Record<string, number | string | undefined>
+  backupKey?: string
+  validation?: unknown
+  manifestOnly?: boolean
 }
 
 interface BackupJob {
@@ -185,6 +188,7 @@ interface BackupApi {
   saveGoogleDriveSyncPreferences?(payload: Record<string, unknown>): Promise<{ item?: DriveSyncStatus }>
   startGoogleDriveSyncOauth?(payload: Record<string, unknown>): Promise<{ url?: string }>
   queueGoogleDriveSyncNow?(): Promise<QueuedJobResponse>
+  queueGoogleDriveRestoreStage?(): Promise<QueuedJobResponse>
   disconnectGoogleDriveSync?(): Promise<unknown>
   forgetGoogleDriveSyncCredentials?(payload: { confirm: boolean }): Promise<unknown>
   queueBackupFolderExport?(destinationDir: string): Promise<QueuedJobResponse>
@@ -220,6 +224,8 @@ interface GoogleDriveSyncSectionProps {
   notify: NotifyFn
   active?: boolean
   actionHistory?: ActionHistoryValue | null
+  canRestore?: boolean
+  onRestoreStaged?: (backupKey: string) => void
 }
 
 interface BackupOverviewProps {
@@ -875,7 +881,7 @@ function minutesToSyncSeconds(minutes: unknown): number {
   return safeMinutes * 60
 }
 
-function GoogleDriveSyncSection({ t, notify, active = true, actionHistory = null }: GoogleDriveSyncSectionProps) {
+function GoogleDriveSyncSection({ t, notify, active = true, actionHistory = null, canRestore = false, onRestoreStaged }: GoogleDriveSyncSectionProps) {
   const copy = useCopy(t)
   const [busy, setBusy] = useState<BackupAction>('')
   const [status, setStatus] = useState<DriveSyncStatus | null>(null)
@@ -896,6 +902,9 @@ function GoogleDriveSyncSection({ t, notify, active = true, actionHistory = null
   const unavailableUntilRef = useRef(0)
   const loadRef = useRef<((options?: { force?: boolean }) => Promise<void>) | null>(null)
   const isMountedRef = useRef(true)
+  // Kept so the callback can prove its message came from the consent popup
+  // that this tab opened, rather than any same-origin tab/window.
+  const driveOauthPopupRef = useRef<Window | null>(null)
   const jobStopRef = useRef<StopFn | null>(null)
   const activeJobSignatureRef = useRef('')
   const dirtyFieldsRef = useRef<Set<keyof DriveSyncForm>>(new Set())
@@ -1009,6 +1018,9 @@ function GoogleDriveSyncSection({ t, notify, active = true, actionHistory = null
     if (!active) return undefined
     const handler = (event: MessageEvent<{ type?: string; status?: string; message?: string }>) => {
       if (event?.data?.type !== 'business-os-drive-sync') return
+      if (event.origin !== window.location.origin) return
+      if (!driveOauthPopupRef.current || event.source !== driveOauthPopupRef.current) return
+      driveOauthPopupRef.current = null
       if (event.data.status === 'connected') {
         notify(copy('drive_sync_connected', 'Google Drive connected'), 'success')
         load({ force: true })
@@ -1171,6 +1183,21 @@ function GoogleDriveSyncSection({ t, notify, active = true, actionHistory = null
     }
   }
 
+  const openGoogleDriveSetup = (): void => {
+    if (!pendingAuthUrl) return
+    // This explicit popup keeps an opener for the completion handshake. If a
+    // browser blocks it, use the same-tab path instead; the Worker then uses
+    // its safe redirect fallback and no postMessage is trusted by this tab.
+    const popup = window.open(pendingAuthUrl, 'business-os-drive-oauth', 'popup,width=560,height=720')
+    if (popup) {
+      driveOauthPopupRef.current = popup
+      popup.focus()
+      setPendingAuthUrl('')
+      return
+    }
+    window.location.assign(pendingAuthUrl)
+  }
+
   const syncNow = async () => {
     if (!beginAction('sync')) return
     try {
@@ -1180,6 +1207,19 @@ function GoogleDriveSyncSection({ t, notify, active = true, actionHistory = null
         'Queue Google Drive sync',
         DRIVE_SYNC_QUEUE_TIMEOUT_MS,
       )
+      if (queued?.item?.status === 'completed') {
+        const completedJob = queued.item
+        activeJobSignatureRef.current = getJobSignature(completedJob)
+        setActiveJob(completedJob)
+        actionHistory?.pushAction?.({
+          scope: 'backup',
+          entity: 'google_drive_sync',
+          label: copy('drive_sync_complete', 'Drive sync complete'),
+        })
+        notify(completedJob.message || copy('drive_sync_complete', 'Drive sync complete'), 'success')
+        load({ force: true })
+        return
+      }
       notify(copy('drive_sync_queued', 'Google Drive sync queued'), 'info')
       window.setTimeout(() => {
         trackQueuedJob(queued, 'Google Drive sync', {
@@ -1205,6 +1245,46 @@ function GoogleDriveSyncSection({ t, notify, active = true, actionHistory = null
       notify(`${copy('drive_sync_failed', 'Drive sync failed')}: ${getErrorMessage(error, copy('unknown_error', 'Unknown error'))}`, 'error')
     } finally {
       finishAction('sync')
+    }
+  }
+
+  const stageLatestForRestore = async () => {
+    if (!canRestore) return notify(copy('no_permission', 'No permission'), 'error')
+    if (!beginAction('stage-restore')) return
+    try {
+      await yieldToBrowser()
+      const queued = await withLoaderTimeout(
+        () => getBackupApi().queueGoogleDriveRestoreStage?.(),
+        'Queue Google Drive restore staging',
+        DRIVE_SYNC_QUEUE_TIMEOUT_MS,
+      )
+      notify(copy('drive_restore_stage_queued', 'Drive restore staging queued'), 'info')
+      window.setTimeout(() => {
+        trackQueuedJob(queued, 'Google Drive restore staging', {
+          onComplete: (job) => {
+            const backupKey = String(job?.result?.backupKey || '').trim()
+            if (!backupKey) {
+              notify(copy('drive_restore_stage_missing_key', 'Drive backup was staged but no restore key was returned.'), 'error')
+              return
+            }
+            actionHistory?.pushAction?.({
+              scope: 'backup',
+              entity: 'google_drive_restore_stage',
+              label: copy('drive_restore_stage_complete', 'Drive backup staged and validated'),
+              undo_payload: { backupKey },
+            })
+            notify(copy('drive_restore_stage_complete', 'Drive backup staged and validated'), 'success')
+            onRestoreStaged?.(backupKey)
+          },
+          onError: (error) => {
+            notify(`${copy('drive_restore_stage_failed', 'Drive restore staging failed')}: ${getErrorMessage(error, copy('unknown_error', 'Unknown error'))}`, 'error')
+          },
+        })
+      }, 0)
+    } catch (error) {
+      notify(`${copy('drive_restore_stage_failed', 'Drive restore staging failed')}: ${getErrorMessage(error, copy('unknown_error', 'Unknown error'))}`, 'error')
+    } finally {
+      finishAction('stage-restore')
     }
   }
 
@@ -1404,16 +1484,14 @@ function GoogleDriveSyncSection({ t, notify, active = true, actionHistory = null
         <div className="mt-3 rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-800 dark:border-blue-900/40 dark:bg-blue-900/20 dark:text-blue-100">
           <div className="font-medium">{copy('drive_sync_setup_ready', 'Google Drive setup is ready.')}</div>
           <div className="mt-2 flex flex-wrap gap-2">
-            <a
-              href={pendingAuthUrl}
-              target="_blank"
-              rel="noreferrer"
+            <button
+              type="button"
               className="btn-primary inline-flex items-center gap-1.5 px-3 py-2 text-xs"
-              onClick={() => setPendingAuthUrl('')}
+              onClick={openGoogleDriveSetup}
             >
               <Link2 className="h-4 w-4" />
               {copy('drive_sync_open_setup', 'Open Google Drive setup')}
-            </a>
+            </button>
             <button type="button" className="btn-secondary px-3 py-2 text-xs" onClick={() => setPendingAuthUrl('')}>
               {copy('dismiss', 'Dismiss')}
             </button>
@@ -1448,6 +1526,12 @@ function GoogleDriveSyncSection({ t, notify, active = true, actionHistory = null
           <RefreshCw className="h-4 w-4" />
           {busy === 'sync' ? copy('syncing', 'Syncing...') : copy('drive_sync_sync_now', 'Sync now')}
         </PathActionButton>
+        {canRestore ? (
+          <PathActionButton data-testid="backup-drive-stage-restore" onClick={stageLatestForRestore} disabled={!!busy || activeDriveJobRunning || !status?.connected}>
+            <ArchiveRestore className="h-4 w-4" />
+            {busy === 'stage-restore' ? copy('working', 'Working...') : copy('drive_restore_stage', 'Stage latest for restore')}
+          </PathActionButton>
+        ) : null}
         {status?.connected ? (
           <PathActionButton data-testid="backup-drive-disconnect" onClick={disconnect} disabled={!!busy}>
             <Link2Off className="h-4 w-4" />
@@ -1561,6 +1645,10 @@ export default function Backup() {
   }))
   const handleBackupSectionChange = useCallback((value: string) => {
     if (isBackupSectionId(value)) setBackupSection(value)
+  }, [])
+  const handleDriveRestoreStaged = useCallback((backupKey: string) => {
+    setFolderImportPath(backupKey)
+    setBackupSection('restore')
   }, [])
 
   useEffect(() => {
@@ -1901,7 +1989,16 @@ export default function Backup() {
         </div>
         ) : null}
 
-        {isActive && showBackupSection('drive') ? <MemoGoogleDriveSyncSection t={t} notify={notify} active={isActive} actionHistory={actionHistory} /> : null}
+        {isActive && showBackupSection('drive') ? (
+          <MemoGoogleDriveSyncSection
+            t={t}
+            notify={notify}
+            active={isActive}
+            actionHistory={actionHistory}
+            canRestore={hasPermission('backup_restore')}
+            onRestoreStaged={handleDriveRestoreStaged}
+          />
+        ) : null}
         {showBackupSection('maintenance') ? (
         <details
           className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm dark:border-zinc-700 dark:bg-zinc-900"

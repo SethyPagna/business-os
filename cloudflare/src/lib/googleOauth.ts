@@ -16,6 +16,8 @@ const GOOGLE_AUTH_URL = 'https://accounts.google.com/o/oauth2/v2/auth'
 const GOOGLE_TOKEN_URL = 'https://oauth2.googleapis.com/token'
 const GOOGLE_USERINFO_URL = 'https://openidconnect.googleapis.com/v1/userinfo'
 export const CALLBACK_PATH = '/api/auth/oauth/callback'
+export const OAUTH_STATE_TTL_SECONDS = 10 * 60
+const OAUTH_STATE_MAX_FUTURE_SKEW_MS = 60 * 1000
 const DEFAULT_LOGIN_RETURN_PATH = '/login?auth_mode=login&auth_provider=google'
 const DEFAULT_LINK_RETURN_PATH = '/?auth_mode=link&auth_provider=google'
 
@@ -105,7 +107,7 @@ function timingSafeEqual(a: string, b: string): boolean {
 }
 
 function getStateSecret(env: Env): string {
-  return trim(env.AUTH_SESSION_SECRET || env.GOOGLE_LOGIN_CLIENT_SECRET || 'business-os-google-login-state')
+  return trim(env.AUTH_SESSION_SECRET || env.GOOGLE_LOGIN_CLIENT_SECRET)
 }
 
 async function signState(env: Env, payload: OauthStatePayload): Promise<string> {
@@ -114,13 +116,35 @@ async function signState(env: Env, payload: OauthStatePayload): Promise<string> 
   return `${encoded}.${signature}`
 }
 
+function oauthStateKey(nonce: string): string {
+  return `oauth-state:google-login:${nonce}`
+}
+
 export async function verifyState(env: Env, state: string | undefined): Promise<{ success: boolean; payload?: OauthStatePayload; error?: string }> {
   const [encoded, signature] = trim(state).split('.')
   if (!encoded || !signature) return { success: false, error: 'Invalid OAuth state.' }
-  const expected = await hmacSignBase64Url(getStateSecret(env), encoded)
+  const secret = getStateSecret(env)
+  if (!secret) return { success: false, error: 'Google OAuth state signing is not configured.' }
+  const expected = await hmacSignBase64Url(secret, encoded)
   if (!timingSafeEqual(signature, expected)) return { success: false, error: 'OAuth state failed verification.' }
   try {
     const payload = JSON.parse(new TextDecoder().decode(base64UrlDecodeToBytes(encoded))) as OauthStatePayload
+    const ageMs = Date.now() - Number(payload.createdAt || 0)
+    if (payload.provider !== 'google' || !trim(payload.nonce) || !Number.isFinite(ageMs)) {
+      return { success: false, error: 'Invalid OAuth state.' }
+    }
+    if (ageMs < -OAUTH_STATE_MAX_FUTURE_SKEW_MS || ageMs > OAUTH_STATE_TTL_SECONDS * 1000) {
+      return { success: false, error: 'OAuth state expired. Please start Google sign-in again.' }
+    }
+    const key = oauthStateKey(payload.nonce)
+    const remembered = await env.CACHE.get(key)
+    if (!remembered || !timingSafeEqual(remembered, signature)) {
+      return { success: false, error: 'OAuth state was already used or is no longer valid.' }
+    }
+    // Consume before exchanging the authorization code. Google's code is
+    // one-time too, while this delete also stops callback retries from
+    // reaching account-link/session mutation code.
+    await env.CACHE.delete(key)
     return { success: true, payload }
   } catch (_) {
     return { success: false, error: 'OAuth state could not be decoded.' }
@@ -180,6 +204,7 @@ export async function buildGoogleOauthStartUrl(
 ): Promise<{ success: boolean; error?: string; url?: string; mode?: string }> {
   const clientId = trim(env.GOOGLE_LOGIN_CLIENT_ID)
   if (!clientId) return { success: false, error: 'Google login client ID is not configured.' }
+  if (!getStateSecret(env)) return { success: false, error: 'Google OAuth state signing is not configured.' }
   const mode = trim(options.mode).toLowerCase() === 'link' ? 'link' : 'login'
   const codeVerifier = randomBase64Url(32)
   const redirectUri = getPrimaryRedirectUri(env)
@@ -198,6 +223,8 @@ export async function buildGoogleOauthStartUrl(
     deviceId: trim(options.deviceId) || null,
     deviceName: trim(options.deviceName) || null,
   })
+  const statePayload = JSON.parse(new TextDecoder().decode(base64UrlDecodeToBytes(state.split('.')[0]))) as OauthStatePayload
+  await env.CACHE.put(oauthStateKey(statePayload.nonce), state.split('.')[1], { expirationTtl: OAUTH_STATE_TTL_SECONDS })
   const url = new URL(GOOGLE_AUTH_URL)
   url.searchParams.set('client_id', clientId)
   url.searchParams.set('redirect_uri', redirectUri)

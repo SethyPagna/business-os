@@ -6,7 +6,7 @@
 // m.me/<this> would not open a real conversation.
 const RESERVED_FACEBOOK_PATHS = new Set([
   'pages', 'profile.php', 'groups', 'events', 'watch', 'marketplace',
-  'photo', 'photo.php', 'video.php', 'permalink.php', 'sharer', 'share.php',
+  'photo', 'photo.php', 'video.php', 'permalink.php', 'sharer', 'share', 'share.php',
   'login', 'help', 'business', 'ads',
 ])
 
@@ -113,6 +113,13 @@ export function deriveTelegramLink(telegramValue: string): string {
       if (!/(^|\.)t\.me$|(^|\.)telegram\.me$/i.test(url.hostname)) return ''
       const segments = url.pathname.split('/').filter(Boolean)
       const first = segments[0] || ''
+      // Telegram accepts the query-only `?direct` hint used by the store's
+      // configured contact URL. Keep that one intentional flag when
+      // normalizing a profile link; dropping the whole query changed
+      // `https://t.me/Leangcosmetic?direct` into a different destination.
+      // Other query parameters are discarded so a pasted tracking URL does
+      // not leak campaign/user data into every public contact click.
+      const directSuffix = url.searchParams.has('direct') ? '?direct' : ''
       // Real bug, found+fixed part 234: a group/channel invite link is
       // t.me/joinchat/<code> (older format) -- treating "joinchat" as if
       // it were the handle (the naive `segments[0]`) drops the actual
@@ -122,7 +129,7 @@ export function deriveTelegramLink(telegramValue: string): string {
       // preserved) -- confirmed both forms against Telegram's own
       // documented link shapes, not assumed.
       if (first.toLowerCase() === 'joinchat' && segments[1]) return `https://t.me/joinchat/${segments[1]}`
-      return first ? `https://t.me/${first}` : ''
+      return first ? `https://t.me/${first}${directSuffix}` : ''
     } catch {
       return ''
     }

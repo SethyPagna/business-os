@@ -3,12 +3,11 @@ import { getDb } from '../lib/db'
 import { chunkForBinding, selectInChunks } from '../lib/sqlBinding'
 import { requireAuth, type SessionUser } from '../lib/auth'
 import { audit } from '../lib/audit'
-import { hasPermission, hasAnyPermission, getPermissionTier } from '../lib/permissions'
+import { hasPermission, hasAnyPermission, getPermissionTier, getActionTier } from '../lib/permissions'
 
 // Sales is a VIEW_TIER section (Part 557 slice 2): a 'view' grant can READ
 // every sales list/stat/report but perform no writes. Reads use this
-// (tier != none = view OR full); writes keep the strict hasPermission('sales')
-// (=== true), which a 'view' value already fails, so no write route changes.
+// (tier != none = view OR full); writes use action-specific Full gates.
 function canReadSales(user: SessionUser): boolean {
   return getPermissionTier(user, 'sales') !== 'none'
 }
@@ -34,6 +33,7 @@ import { computeSaleTotals, resolveChangeExchangeRate, round2 } from '../lib/sal
 import { uniqueBusinessDateTimeNumber } from '../lib/receiptNumber'
 import { sanitizeClientCreatedAt } from '../lib/clientTimestamp'
 import { localDateAtOrAfter, localDateAtOrBefore, localDateRangeClause, localTimeRangeClause } from '../lib/businessDateWindow'
+import { sendTelegramEvent, telegramMoney } from '../lib/telegram'
 import type { Env } from '../index'
 
 const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser } }>()
@@ -201,7 +201,11 @@ app.post('/', async (c) => {
   const clientRequestId = normalizeClientRequestId(body.client_request_id)
   if (clientRequestId) {
     const existingSale = await db
-      .prepare('SELECT id, receipt_number FROM sales WHERE client_request_id = ? LIMIT 1')
+      // Repeat the partial-index predicate explicitly. SQLite does not infer
+      // `client_request_id <> ''` from the equality binding, so omitting it
+      // turns this idempotency lookup into a full sales-table scan even though
+      // idx_sales_client_request_unique_pg already exists.
+      .prepare("SELECT id, receipt_number FROM sales WHERE client_request_id = ? AND client_request_id <> '' LIMIT 1")
       .get<{ id: number; receipt_number: string }>([clientRequestId])
     if (existingSale) return c.json({ id: existingSale.id, receiptNumber: existingSale.receipt_number, duplicate: true })
   }
@@ -890,6 +894,25 @@ app.post('/', async (c) => {
     bumpVersion(c.env, 'products'),
     bumpVersion(c.env, 'sales'),
   ]))
+  c.executionCtx.waitUntil(sendTelegramEvent(c.env, {
+    type: 'sales',
+    lines: [
+      `Receipt: ${receiptNumber}`,
+      `Status: ${saleStatus.replace(/_/g, ' ')}`,
+      `Total: ${telegramMoney(totalUsd, totalKhr)}`,
+      `Items: ${priced.length}`,
+      paymentMethod ? `Payment: ${paymentMethod}` : 'Payment: unpaid',
+      discountUsd || membershipDiscountUsd ? `Discount: ${telegramMoney(discountUsd + membershipDiscountUsd, discountKhr + membershipDiscountKhr)}` : '',
+      taxUsd ? `Tax: ${telegramMoney(taxUsd, Math.round(taxUsd * exchangeRate))}` : '',
+      isDelivery ? `Delivery: ${deliveryFeePaidBy === 'customer' ? 'customer paid' : 'shop paid'}` : '',
+      body.customer_name || customer?.name ? `Customer: ${body.customer_name || customer?.name}` : '',
+      branchRow?.name ? `Branch: ${branchRow.name}` : '',
+      `Cashier: ${body.cashier_name || c.get('user')?.name || c.get('user')?.username || 'Unknown'}`,
+      'Sold items:',
+      ...priced.slice(0, 12).map((item) => `• ${item.quantity} × ${item.product_name} — ${telegramMoney(item.unitPriceUsd, Math.round(item.unitPriceUsd * exchangeRate))} each (${telegramMoney(item.lineTotalUsd, Math.round(item.lineTotalUsd * exchangeRate))})`),
+      priced.length > 12 ? `+ ${priced.length - 12} more item(s)` : '',
+    ],
+  }).catch((error) => console.error('[telegram] sale notification failed', error)))
 
   return c.json({
     id: saleId,
@@ -946,7 +969,7 @@ app.patch('/:id/status', async (c) => {
   // itself gated on the 'sales' permission -- the API endpoint needs the
   // same gate, since a plain POS-only cashier should not be able to void or
   // refund a sale via direct API calls.
-  if (!hasPermission(user, 'sales')) {
+  if (getActionTier(user, 'sales', 'status') !== 'full') {
     return c.json({ error: 'You do not have permission to perform this action' }, 403)
   }
   const id = c.req.param('id')
@@ -1317,6 +1340,16 @@ app.patch('/:id/status', async (c) => {
 
   const updated = await db.prepare('SELECT id, sale_status, updated_at FROM sales WHERE id = ?').get<{ id: number; sale_status: string; updated_at: string }>([id])
   const payload = updated || { id: Number(id), sale_status: saleStatus }
+  c.executionCtx.waitUntil(sendTelegramEvent(c.env, {
+    type: 'status',
+    lines: [
+      `Receipt: ${sale.receipt_number || id}`,
+      `Status: ${oldStatus.replace(/_/g, ' ')} → ${saleStatus.replace(/_/g, ' ')}`,
+      sale.customer_name ? `Customer: ${sale.customer_name}` : '',
+      cancelReason ? `Reason: ${cancelReasonLabel(cancelReason)}` : '',
+      cancelFeeUsd || cancelFeeKhr ? `Lost fee: ${telegramMoney(cancelFeeUsd, cancelFeeKhr)}` : '',
+    ],
+  }).catch((error) => console.error('[telegram] sale status notification failed', error)))
   return c.json(feeWarning ? { ...payload, warning: feeWarning } : payload)
 })
 
@@ -1329,7 +1362,7 @@ app.patch('/:id/customer', async (c) => {
   const user = c.get('user')
   // Same reasoning as PATCH /:id/status above -- only reachable from the
   // 'sales'-gated Sales page (Sales.tsx's attachSaleCustomer caller).
-  if (!hasPermission(user, 'sales')) {
+  if (getActionTier(user, 'sales', 'customer') !== 'full') {
     return c.json({ error: 'You do not have permission to perform this action' }, 403)
   }
   const saleId = c.req.param('id')
@@ -2008,7 +2041,7 @@ app.get('/customer-report', async (c) => {
 // or disappear between pages. Summary aggregates are computed over the whole
 // frozen snapshot and only need to be requested on page 1.
 app.get('/export', async (c) => {
-  if (!canReadSales(c.get('user'))) {
+  if (getActionTier(c.get('user'), 'sales', 'export') === 'none') {
     return c.json({ error: 'You do not have permission to perform this action' }, 403)
   }
   const db = getDb(c.env)

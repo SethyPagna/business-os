@@ -220,7 +220,25 @@ export default function PortalMenu({
       })
     }
     const closeIfEscape = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setOpen(false)
+      if (event.key !== 'Escape') return
+      // Nested filter comboboxes are separate body portals. Let the most
+      // recently mounted (visually topmost) layer consume Escape first so
+      // closing a Category search does not also dismiss its parent Filters
+      // dialog in the same key event.
+      const openPortalMenus = document.querySelectorAll<HTMLElement>('[data-portal-menu-content]')
+      if (openPortalMenus[openPortalMenus.length - 1] !== menuRef.current) return
+      event.preventDefault()
+      event.stopPropagation()
+      setOpen(false)
+      // Return keyboard users to the control that opened the floating
+      // layer. The wrapper itself is deliberately not focusable, so find
+      // the real trigger inside it (button/link/custom tabindex control).
+      window.requestAnimationFrame(() => {
+        const trigger = triggerRef.current?.querySelector<HTMLElement>(
+          'button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+        )
+        trigger?.focus()
+      })
     }
     let resizeObserver: ResizeObserver | null = null
 

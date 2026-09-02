@@ -14,6 +14,7 @@ import { isWSConnected, resumeWS } from './api/websocket.ts'
 import { APP_NAVIGATION_EVENT, getAdminPageFromPath, getAdminPathForPage, resolveAdminLandingPage } from './app/pathRouting.ts'
 import { getClientDeviceInfo } from './utils/deviceInfo.ts'
 import { getDirtyWork, hasDirtyWork, type DirtyWorkEntry } from './utils/dirtyWork.ts'
+import { flushPendingWorkDrafts } from './utils/workDrafts.ts'
 import { parsePermissionMap, getPermissionTierFromMap, type PermissionTier } from './utils/permissions.ts'
 import { actionAllowed, isActionOverriddenOff } from './utils/permissionActions.ts'
 import { normalizePriceValue } from './utils/pricing.ts'
@@ -112,6 +113,7 @@ type BootstrapPayload = AppRecord & {
   organization?: OrganizationPayload
   settings?: AppSettings
   system?: BootstrapSystemPayload
+  sessionExpiresAt?: string
   unauthorized?: boolean
   user?: AppUser | null
 }
@@ -775,6 +777,8 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
     preserveRuntimeMeta?: boolean
     preserveSessionDuration?: boolean
     preserveSyncServer?: boolean
+    preserveOfflineWork?: boolean
+    preserveUiDrafts?: boolean
   } = {}) => {
     await resetClientRuntimeState({
   // Authentication helpers.
@@ -783,6 +787,9 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
       preserveSessionDuration: options.preserveSessionDuration !== false,
       preserveRuntimeMeta: options.preserveRuntimeMeta === true,
       preserveOrganization: options.preserveOrganization === true,
+      preserveOfflineWork: options.preserveOfflineWork === true,
+      preserveServiceWorker: options.preserveOfflineWork === true,
+      preserveUiDrafts: options.preserveUiDrafts === true,
   // Authentication helpers.
     }).catch(() => {})
     cacheClearAll()
@@ -794,6 +801,8 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
       preserveSyncServer: true,
       preserveSessionDuration: true,
       preserveRuntimeMeta: true,
+      preserveOfflineWork: true,
+      preserveUiDrafts: true,
     })
     setUser(null)
     setPage('dashboard')
@@ -852,7 +861,24 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
     if (mergedSettings.theme) setTheme(mergedSettings.theme)
 
     if (nextUser) {
+      // A cold iOS relaunch can retain the HttpOnly session cookie while the
+      // previous browsing context's sessionStorage is gone. Recreate the
+      // client-side session marker before starting WS/maintenance; both are
+      // intentionally gated on that marker on the protected admin host.
+      const sessionDuration = String(
+        mergedSettings.login_session_duration
+        || safeStorageGet(localStorage, STORAGE_KEYS.SESSION_DURATION)
+        || 'session',
+      )
+      const storedExpiry = Number(getStoredUserExpiry())
+      const expiryTime = Number.isFinite(storedExpiry) && storedExpiry > Date.now()
+        ? storedExpiry
+        : computeSessionExpiryMs(sessionDuration, safePayload.sessionExpiresAt || '')
+      persistAuthState({ user: nextUser, expiryTime, sessionDuration })
       setUser(nextUser)
+      getAppApi().ensureSessionRecoveryListeners?.()
+      resumeWS()
+      startHealthCheck()
     }
 
     const organization = safePayload?.organization
@@ -937,6 +963,8 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
             clearAuth: false,
             preserveSyncServer: true,
             preserveSessionDuration: true,
+            preserveOfflineWork: true,
+            preserveUiDrafts: true,
           })
           const bootstrap = await readAppBootstrap('Runtime bootstrap')
           if (bootstrap?.user) {
@@ -1021,6 +1049,18 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
       const message = detail.message
         || 'Business OS server update is required. Restart the server, then refresh this page.'
       setSyncServerUnreachable(true)
+      // iOS may ignore beforeunload prompts. Keep the current build running
+      // when an editor is dirty and persist any debounced draft immediately;
+      // the next clean recovery event can safely reload the new runtime.
+      if (hasDirtyWork()) {
+        flushPendingWorkDrafts()
+        setNotification({
+          message: 'An app update is ready. Save or discard unfinished work before reloading.',
+          type: 'warning',
+          id: Date.now(),
+        })
+        return
+      }
       try {
         const runtimeHash = String(detail.backend?.frontend?.hash || '').trim()
         const recoveryKey = `${FRONTEND_BUILD_INFO.hash || 'dev'}:${runtimeHash || 'unknown'}`
@@ -1030,6 +1070,7 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
           const url = new URL(window.location.href)
           url.searchParams.set('__bos_reload', String(Date.now()))
           if (runtimeHash) url.searchParams.set('__bos_server_build', runtimeHash)
+          flushPendingWorkDrafts()
           window.location.replace(url.toString())
           return
         }
@@ -1649,6 +1690,7 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
       preserveSyncServer: true,
       preserveSessionDuration: true,
       preserveRuntimeMeta: true,
+      preserveOfflineWork: true,
     })
     setUser(null)
     setAuthReady(true)

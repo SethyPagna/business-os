@@ -106,6 +106,7 @@ const inventoryRoute = loadReal('routes/inventory.ts', {
   '../lib/familyStockStats': { getFamilyStockStats: async () => ({}) },
   '../lib/auth': { requireAuth: async (c, next) => { c.set('user', FAKE_USER); return next() } },
   '../lib/audit': { audit: async () => {} },
+  '../lib/telegram': { sendTelegramEvent: async () => false },
   '../lib/permissions': permissions,
   '../lib/reviewGate': { maybeQueueForReview: async () => null },
   '../durable-objects/broadcastHub': { broadcast: async () => {} },
@@ -329,6 +330,34 @@ async function main() {
     const movement = rawDb.prepare('SELECT reference_id, product_id FROM inventory_movements ORDER BY id DESC LIMIT 1').get()
     assert.strictEqual(movement.reference_id, 98765)
     assert.strictEqual(movement.product_id, json.productId)
+  })
+
+  await check('same barcode + same batch shares the option and preserves each receipt cost', async () => {
+    seed()
+    rawDb.prepare('UPDATE products SET cost_price_usd = 1, purchase_price_usd = 1, selling_price_usd = 4 WHERE id = 1').run()
+    const first = await req('POST', '/adjust', {
+      productId: 1, type: 'add', quantity: 2, reason: 'first receipt', branchId: 1,
+      receivedDate: '2026-08-20', unitCostUsd: 1,
+    })
+    assert.strictEqual(first.status, 200, JSON.stringify(first.json))
+    const second = await req('POST', '/adjust', {
+      productId: 1, type: 'add', quantity: 3, reason: 'second receipt', branchId: 1,
+      unlockPricing: true, receivedDate: '2026-08-20', unitCostUsd: 2.5,
+      pricing: { selling_price_usd: 3, cost_usd: 2.5, cost_khr: 0, barcode: 'B123' },
+    })
+    assert.strictEqual(second.status, 200, JSON.stringify(second.json))
+    assert.strictEqual(second.json.productId, 1)
+    assert.strictEqual(second.json.createdSibling, false)
+    assert.strictEqual(rawDb.prepare('SELECT COUNT(*) AS n FROM products').get().n, 1)
+    assert.strictEqual(rawDb.prepare('SELECT cost_price_usd FROM products WHERE id = 1').get().cost_price_usd, 1, 'catalog cost is never overwritten by a receipt')
+    assert.strictEqual(rawDb.prepare('SELECT selling_price_usd FROM products WHERE id = 1').get().selling_price_usd, 4, 'merge keeps the highest selling price')
+    const lot = rawDb.prepare('SELECT received_quantity, received_cost_usd, unit_cost_usd FROM product_batches WHERE variant_product_id = 1').get()
+    assert.deepStrictEqual({ ...lot }, { received_quantity: 5, received_cost_usd: 9.5, unit_cost_usd: 1 })
+    assert.deepStrictEqual(
+      rawDb.prepare("SELECT unit_cost_usd, total_cost_usd FROM inventory_movements WHERE movement_type = 'add' ORDER BY id").all().map((row) => ({ ...row })),
+      [{ unit_cost_usd: 1, total_cost_usd: 2 }, { unit_cost_usd: 2.5, total_cost_usd: 7.5 }],
+      'each receipt movement retains its own historical cost',
+    )
   })
 
   await check('move-row drains the source lots and receives a fresh lot on the destination (no ledger drift)', async () => {

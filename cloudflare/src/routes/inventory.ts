@@ -14,11 +14,12 @@ import { findIdentityMatch, type ProductIdentityRow } from '../lib/productIdenti
 import { buildFtsMatchExpression, buildHybridMatchClause, buildIssueStateClauses, buildLikeAliasClause, buildPartialWordMatchClause, buildShortWordFallbackClause, buildTrigramMatchExpression, PRODUCT_SEARCH_COLUMNS, PRODUCTS_FTS_BM25_SQL, runFuzzyFallbackMatch, tokenizeSearchTermGroups, tokenizeSearchWords } from '../lib/searchMatch'
 import { receiveBatchStock, removeStockFromBatch, removeStockAcrossBatches, InsufficientBatchStockError, readFifoLotAvailability, allocateAcrossLots, decrementBatchStockStrictStatement, incrementBatchStockStatement } from '../lib/productBatches'
 import { applyMovementRevert, type RevertMovementRow } from '../lib/stockRevert'
-import { normalizeToIsoDate } from '../lib/batchCode'
+import { dateToBatchCode, normalizeToIsoDate } from '../lib/batchCode'
 import { parseDatedStockCountEntries, buildDatedStockCountPlan } from '../lib/datedStockCountRoute'
 import { applyDatedStockCountPlan } from '../lib/datedStockCountApply'
 import { parseRawDatedCountRows, resolveDatedStockCountRows } from '../lib/datedStockCountResolve'
 import { applyDatedStockCountDecisions, type DatedCountDecision } from '../lib/datedStockCountDecisions'
+import { sendTelegramEvent } from '../lib/telegram'
 import type { Env } from '../index'
 
 // Inventory routes, ported from backend/src/routes/inventory.ts.
@@ -977,6 +978,60 @@ app.get('/reasons', async (c) => {
   return c.json({ items })
 })
 
+app.get('/reasons/impact', async (c) => {
+  const type = String(c.req.query('type') || 'adjust').trim().toLowerCase()
+  const from = String(c.req.query('from') || '').trim()
+  const to = String(c.req.query('to') || '').trim()
+  if (!from || !to) return c.json({ error: 'Source and target reasons are required' }, 400)
+  const db = getDb(c.env)
+  const row = await db.prepare("SELECT value FROM settings WHERE key = 'inventory_saved_reasons'").get<{ value: string }>()
+  let saved: InventoryReason[] = []
+  try { saved = normalizeReasons(JSON.parse(row?.value || '[]')) } catch { saved = [] }
+  const movements = Number((await db.prepare("SELECT COUNT(*) AS n FROM inventory_movements WHERE lower(trim(COALESCE(reason,''))) = @from").get<{ n: number }>({ from: from.toLowerCase() }))?.n || 0)
+  return c.json({
+    type, from, to,
+    configured: saved.some((item) => item.type === type && item.label.toLowerCase() === from.toLowerCase()),
+    target_exists: saved.some((item) => item.type === type && item.label.toLowerCase() === to.toLowerCase()),
+    linked_records: movements,
+    live_snapshots: { inventory_movements: movements },
+    historical_snapshots_preserved: ['audit_logs', 'action history payloads'],
+  })
+})
+
+app.post('/reasons/replace', async (c) => {
+  const user = c.get('user')
+  if (getActionTier(user, 'inventory', 'edit_reasons') === 'none') return c.json({ error: 'No permission' }, 403)
+  if (getPermissionTier(user, 'inventory') !== 'full') {
+    return c.json({ error: 'Replacing saved or linked reasons requires Full Access to Inventory.', code: 'full_access_required' }, 403)
+  }
+  const body = await c.req.json<Record<string, unknown>>().catch(() => ({} as Record<string, unknown>))
+  const type = String(body.type || 'adjust').trim().toLowerCase()
+  const from = String(body.from || '').trim()
+  const to = String(body.to || '').trim()
+  const scope = body.scope === 'linked' ? 'linked' : 'saved_only'
+  if (!from || !to) return c.json({ error: 'Source and target reasons are required' }, 400)
+  const db = getDb(c.env)
+  const row = await db.prepare("SELECT value FROM settings WHERE key = 'inventory_saved_reasons'").get<{ value: string }>()
+  let saved: InventoryReason[] = []
+  try { saved = normalizeReasons(JSON.parse(row?.value || '[]')) } catch { saved = [] }
+  const next = normalizeReasons(saved.map((item) => item.type === type && item.label.toLowerCase() === from.toLowerCase() ? { ...item, label: to } : item))
+  const statements: Array<{ sql: string; params: Record<string, unknown> }> = [{
+    sql: `INSERT INTO settings (key, value, updated_at) VALUES ('inventory_saved_reasons', @value, CURRENT_TIMESTAMP)
+          ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP`,
+    params: { value: JSON.stringify(next) },
+  }]
+  if (scope === 'linked') statements.push({
+    sql: `UPDATE inventory_movements SET reason = @to WHERE lower(trim(COALESCE(reason,''))) = @from`,
+    params: { from: from.toLowerCase(), to },
+  })
+  const results = await db.batch(statements)
+  const linkedResult = results[1] as unknown as { changes?: number; meta?: { changes?: number } } | undefined
+  const changed = scope === 'linked' ? Number(linkedResult?.meta?.changes ?? linkedResult?.changes ?? 0) : 0
+  await audit(c.env, user?.id ?? null, user?.name ?? null, 'replace', 'inventory_reason', null, { type, from, to, scope, changed })
+  c.executionCtx.waitUntil(broadcast(c.env, 'inventory', { action: 'reasons_replace', type, from, to, scope }))
+  return c.json({ success: true, items: next, scope, changed })
+})
+
 app.put('/reasons', async (c) => {
   const user = c.get('user')
   // Per-action override (Part 546): 'inventory:edit_reasons' switched off
@@ -1041,9 +1096,9 @@ app.put('/reasons', async (c) => {
 // Fields the "receive stock" grouping decision cares about -- everything
 // that makes a row a genuinely different sellable item, deliberately
 // excluding branch/stock_quantity (see findIdentityMatch's own comment:
-// this is the exact same name_key + cost + selling price + barcode rule
+// this is the exact same name_key + cost + barcode rule
 // transfers, CSV import, and merge-duplicates already use, so a manual
-// Add Stock with edited pricing resolves to a row the same way every
+// Add Stock with edited selling pricing resolves to a row the same way every
 // other path in the app already would). `cost_price_usd/khr` and
 // `purchase_price_usd/khr` are kept mirrored to the same value everywhere
 // they're written (see mirrorCostFields below) -- the schema still has
@@ -1121,6 +1176,7 @@ async function resolveAddStockTarget(
     costUsd: number; costKhr: number
     barcode: string | null
   },
+  receivedDate?: string | null,
 ): Promise<{ productId: number; created: boolean }> {
   const db = getDb(env)
   const candidate: ProductIdentityRow = {
@@ -1138,14 +1194,23 @@ async function resolveAddStockTarget(
   // import-created and Add/Edit-form-created product. Comparing it here meant
   // this short-circuit could never fire for those rows -- the same
   // always-zero-column mistake lib/productIdentity.ts carried.
+  // Same product + barcode + receipt batch may share the option even when
+  // this receipt's cost differs. Per-receipt cost belongs to the batch and
+  // movement ledgers; it must not rewrite products.cost_price_*.
+  const effectiveReceivedDate = receivedDate || new Date().toISOString().slice(0, 10)
+  const receiptBatchKey = String(dateToBatchCode(effectiveReceivedDate)).toLowerCase()
+  const ownsReceiptBatch = lowerTrim(overrides.barcode) === lowerTrim(source.barcode)
+    && Boolean(await db.prepare(`
+      SELECT 1 AS found FROM product_batches
+      WHERE variant_product_id = @productId AND is_active = 1
+        AND LOWER(TRIM(batch_key)) = @batchKey
+      LIMIT 1
+    `).get<{ found: number }>({ productId: source.id, batchKey: receiptBatchKey }))
+  if (ownsReceiptBatch) return { productId: source.id, created: false }
+
   const sameAsSelf = moneyEq(overrides.costUsd, source.cost_price_usd)
     && moneyEq(overrides.costKhr, source.cost_price_khr)
-    && moneyEq(overrides.sellingUsd, source.selling_price_usd)
-    && moneyEq(overrides.sellingKhr, source.selling_price_khr)
-    && moneyEq(overrides.specialUsd, source.special_price_usd)
-    && moneyEq(overrides.specialKhr, source.special_price_khr)
     && lowerTrim(overrides.barcode) === lowerTrim(source.barcode)
-    && Boolean(source.discount_enabled) === overrides.discountEnabled
   if (sameAsSelf) return { productId: source.id, created: false }
 
   const match = await findIdentityMatch(db, candidate)
@@ -1341,9 +1406,20 @@ app.post('/adjust', async (c) => {
       costKhr: pricing.cost_khr != null ? Number(pricing.cost_khr) || 0 : Number(source.cost_price_khr) || 0,
       barcode: pricing.barcode != null ? (String(pricing.barcode).trim() || null) : source.barcode,
     }
-    const resolved = await resolveAddStockTarget(c.env, source, overrides)
+    const resolved = await resolveAddStockTarget(c.env, source, overrides, receivedDate)
     targetProductId = resolved.productId
     createdSibling = resolved.created
+    if (!createdSibling) {
+      // Selling/VIP price is mergeable data: an explicit unlocked receipt
+      // may raise it, but never lower it. Cost remains untouched here.
+      await db.prepare(`UPDATE products SET
+          selling_price_usd = MAX(COALESCE(selling_price_usd, 0), @sellingUsd),
+          selling_price_khr = MAX(COALESCE(selling_price_khr, 0), @sellingKhr),
+          special_price_usd = MAX(COALESCE(special_price_usd, 0), @specialUsd),
+          special_price_khr = MAX(COALESCE(special_price_khr, 0), @specialKhr),
+          updated_at = CURRENT_TIMESTAMP
+        WHERE id = @id`).run({ id: targetProductId, ...overrides })
+    }
     if (createdSibling) {
       const created = await db.prepare('SELECT id, name FROM products WHERE id = @id').get<{ id: number; name: string }>({ id: targetProductId })
       targetProductName = created?.name ?? source.name
@@ -1486,8 +1562,11 @@ app.post('/adjust', async (c) => {
 
   if (delta !== 0) {
     await db.prepare(`
-      INSERT INTO inventory_movements (product_id, product_name, branch_id, branch_name, movement_type, quantity, reason, reference_id, user_id, user_name, created_at, batch_id)
-      VALUES (@productId, @productName, @branchId, @branchName, @movementType, @quantity, @reason, @referenceId, @userId, @userName, CURRENT_TIMESTAMP, @batchId)
+      INSERT INTO inventory_movements (product_id, product_name, branch_id, branch_name, movement_type, quantity,
+        unit_cost_usd, total_cost_usd, reason, reference_id, user_id, user_name, created_at, batch_id)
+      VALUES (@productId, @productName, @branchId, @branchName, @movementType, @quantity,
+        @unitCostUsd, CASE WHEN @unitCostUsd IS NULL THEN NULL ELSE ROUND(@quantity * @unitCostUsd, 4) END,
+        @reason, @referenceId, @userId, @userName, CURRENT_TIMESTAMP, @batchId)
     `).run({
       productId: targetProductId,
       productName: targetProductName,
@@ -1495,8 +1574,9 @@ app.post('/adjust', async (c) => {
       branchName: branch?.name || null,
       movementType,
       quantity: Math.abs(delta),
+      unitCostUsd: type === 'add' ? unitCostUsd : null,
       reason: createdSibling
-        ? `${reason ? `${reason} - ` : ''}Auto-created row (pricing differs from ${product.name})`
+        ? `${reason ? `${reason} - ` : ''}Auto-created row (barcode/cost differs from ${product.name})`
         : setToNote ? `${reason} (${setToNote})` : reason,
       referenceId: sessionId,
       userId: user?.id ?? null,
@@ -1516,6 +1596,18 @@ app.post('/adjust', async (c) => {
   c.executionCtx.waitUntil(broadcast(c.env, 'products', { action: 'update', id: targetProductId }))
   c.executionCtx.waitUntil(broadcast(c.env, 'inventory', { action: 'adjust', id: targetProductId }))
   c.executionCtx.waitUntil(bumpVersion(c.env, 'products'))
+  if (delta !== 0) {
+    c.executionCtx.waitUntil(sendTelegramEvent(c.env, {
+      type: type === 'add' ? 'stock_in' : 'stock_out',
+      lines: [
+        `Product: ${targetProductName}`,
+        `Quantity: ${Math.abs(delta)}`,
+        `Branch: ${branch?.name || 'Unassigned'}`,
+        `Reason: ${reason}`,
+        type === 'add' && lotCode ? `Lot: ${lotCode}` : '',
+      ],
+    }).catch((error) => console.error('[telegram] stock adjustment notification failed', error)))
+  }
   // NOTE: every other route file in this app replies `{ success: true, ... }`
   // on success (see products.ts, branches.ts, etc). This endpoint used to
   // reply with a bare `{}` -- the write went through and the DB was

@@ -81,6 +81,7 @@ interface CategoryPayload {
   name: string
   color: string
   expectedUpdatedAt?: unknown
+  cascade?: 'carry' | 'copy'
 }
 
 interface ReviewSelection {
@@ -325,7 +326,7 @@ export default function ManageCategoriesModal({ onClose, onReviewSelection, t }:
     setSaving(true)
     try {
       const previousSnapshot = categories.find((entry) => Number(entry?.id || 0) === Number(category?.id || 0))
-      const payload: CategoryPayload & { cascade?: 'copy' } = { name: category.name, color: category.color || DEFAULT_CATEGORY_COLOR, expectedUpdatedAt: category.updated_at || undefined }
+      const payload: CategoryPayload & { cascade?: 'carry' | 'copy' } = { name: category.name, color: category.color || DEFAULT_CATEGORY_COLOR, expectedUpdatedAt: category.updated_at || undefined }
       // D6: a real rename previews its blast radius and asks -- carry the
       // attached products, keep a copy (new name starts fresh), or cancel.
       const oldName = String(previousSnapshot?.name || '').trim()
@@ -336,6 +337,7 @@ export default function ManageCategoriesModal({ onClose, onReviewSelection, t }:
           const choice = await askRenameChoice({ kind: 'category', from: oldName, to: newName, impact, choices: ['carry', 'copy'] })
           if (choice === 'cancel') return
           if (choice === 'copy') payload.cascade = 'copy'
+          if (choice === 'carry') payload.cascade = 'carry'
         } catch { /* preview unavailable -- the rename carries, as it always did */ }
       }
       const res = await runCategoryMutation(() => getCategoryApi().updateCategory(category.id, payload), 'Update category')
@@ -356,6 +358,7 @@ export default function ManageCategoriesModal({ onClose, onReviewSelection, t }:
               name: previousSnapshot.name,
               color: previousSnapshot.color || DEFAULT_CATEGORY_COLOR,
               expectedUpdatedAt: latest.updated_at || undefined,
+              cascade: 'carry',
             }), 'Undo category update')
             await load()
           },
@@ -366,6 +369,7 @@ export default function ManageCategoriesModal({ onClose, onReviewSelection, t }:
               name: payload.name,
               color: payload.color || DEFAULT_CATEGORY_COLOR,
               expectedUpdatedAt: latest.updated_at || undefined,
+              cascade: 'carry',
             }), 'Redo category update')
             await load()
           },

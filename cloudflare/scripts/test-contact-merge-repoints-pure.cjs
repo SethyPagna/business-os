@@ -32,24 +32,24 @@ const one = (sql, params) => db.prepare(sql).get(params)
 // Each is run below AND asserted present in the route source, so the two can
 // never drift apart.
 const CUSTOMER_REPOINTS = [
-  `UPDATE sales SET customer_id = @keepId WHERE customer_id = @mergeId`,
-  `UPDATE returns SET customer_id = @keepId WHERE customer_id = @mergeId`,
-  `UPDATE customer_share_submissions SET customer_id = @keepId WHERE customer_id = @mergeId`,
+  `UPDATE sales SET customer_id = @keepId, customer_name = @keeperName, customer_phone = @keeperPhone, customer_address = @keeperAddress WHERE customer_id = @mergeId`,
+  `UPDATE returns SET customer_id = @keepId, customer_name = @keeperName WHERE customer_id = @mergeId`,
+  `UPDATE customer_share_submissions SET customer_id = @keepId, customer_name = @keeperName WHERE customer_id = @mergeId`,
   `UPDATE loyalty_point_adjustments SET customer_id = @keepId WHERE customer_id = @mergeId`,
   `UPDATE portal_accounts SET contact_id = @keepId, updated_at = CURRENT_TIMESTAMP WHERE contact_id = @mergeId`,
   `UPDATE customer_receivables SET customer_id = @keepId, customer_name = @keeperName WHERE customer_id = @mergeId`,
   `UPDATE customer_receivables SET customer_name = @keeperName WHERE customer_id IS NULL AND lower(trim(customer_name)) = @mergedNameLower`,
 ]
 const SUPPLIER_REPOINTS = [
-  `UPDATE returns SET supplier_id = @keepId WHERE supplier_id = @mergeId`,
+  `UPDATE returns SET supplier_id = @keepId, supplier_name = @keeperName WHERE supplier_id = @mergeId`,
   `UPDATE product_batches SET supplier_id = @keepId, supplier_name = @keeperName WHERE supplier_id = @mergeId`,
-  `UPDATE products SET supplier = @keeperName WHERE supplier = @mergedName`,
+  `UPDATE products SET supplier = @keeperName, updated_at = CURRENT_TIMESTAMP WHERE lower(trim(COALESCE(supplier, ''))) = @mergedNameLower`,
   `UPDATE product_batches SET supplier_name = @keeperName WHERE supplier_id IS NULL AND lower(trim(supplier_name)) = @mergedNameLower`,
   `UPDATE supplier_invoices SET supplier_id = @keepId, supplier_name = @keeperName WHERE supplier_id = @mergeId`,
   `UPDATE supplier_invoices SET supplier_name = @keeperName WHERE supplier_id IS NULL AND lower(trim(supplier_name)) = @mergedNameLower`,
 ]
 const DELIVERY_REPOINTS = [
-  `UPDATE sales SET delivery_contact_id = @keepId WHERE delivery_contact_id = @mergeId`,
+  `UPDATE sales SET delivery_contact_id = @keepId, delivery_contact_name = @keeperName WHERE delivery_contact_id = @mergeId`,
 ]
 
 let failed = 0
@@ -61,37 +61,37 @@ function check(name, fn) {
 // Seed: keeper + loser for each contact kind, with loser-linked rows in every
 // table the merge must move.
 // --------------------------------------------------------------------------
-run(`INSERT INTO customers (id, name) VALUES (1, 'Keeper Co'), (2, 'Loser Co')`)
+run(`INSERT INTO customers (id, name, phone, address) VALUES (1, 'Keeper Co', '012 111 111', 'Keeper address'), (2, 'Loser Co', '012 222 222', 'Loser address')`)
 run(`INSERT INTO suppliers (id, name) VALUES (11, 'KeepSup'), (22, 'LoseSup')`)
 run(`INSERT INTO delivery_contacts (id, name) VALUES (31, 'KeepDrv'), (32, 'LoseDrv')`)
 run(`INSERT INTO products (id, name, supplier) VALUES (101, 'P1', 'LoseSup')`)
 
 // Customer-linked
-run(`INSERT INTO sales (customer_id) VALUES (2)`)
-run(`INSERT INTO returns (customer_id, return_scope) VALUES (2, 'customer')`)
-run(`INSERT INTO customer_share_submissions (customer_id) VALUES (2)`)
+run(`INSERT INTO sales (customer_id, customer_name, customer_phone, customer_address) VALUES (2, 'Loser Co', '012 222 222', 'Loser address')`)
+run(`INSERT INTO returns (customer_id, customer_name, return_scope) VALUES (2, 'Loser Co', 'customer')`)
+run(`INSERT INTO customer_share_submissions (customer_id, customer_name) VALUES (2, 'Loser Co')`)
 run(`INSERT INTO loyalty_point_adjustments (customer_id, points) VALUES (2, 10)`)
 run(`INSERT INTO portal_accounts (membership_id, name, phone, password_hash, contact_id) VALUES ('M1', 'Loser', '012000000', 'h', 2)`)
 run(`INSERT INTO customer_receivables (legacy_id, customer_id, customer_name, invoice_date, status, source_file, source_row) VALUES (1, 2, 'Loser Co', '2026-01-01', 'outstanding', 'ar.csv', 1)`)
 run(`INSERT INTO customer_receivables (legacy_id, customer_id, customer_name, invoice_date, status, source_file, source_row) VALUES (2, NULL, 'Loser Co', '2026-01-02', 'outstanding', 'ar.csv', 2)`)
 
 // Supplier-linked
-run(`INSERT INTO returns (supplier_id, return_scope) VALUES (22, 'supplier')`)
+run(`INSERT INTO returns (supplier_id, supplier_name, return_scope) VALUES (22, 'LoseSup old', 'supplier')`)
 run(`INSERT INTO product_batches (variant_product_id, batch_key, supplier_id, supplier_name) VALUES (101, 'b-id', 22, 'LoseSup old')`)
 run(`INSERT INTO product_batches (variant_product_id, batch_key, supplier_id, supplier_name) VALUES (101, 'b-name', NULL, 'LoseSup')`)
 run(`INSERT INTO supplier_invoices (source_branch, legacy_id, supplier_id, supplier_name, invoice_date, status, source_file, source_row) VALUES ('B', 1, 22, 'LoseSup old', '2026-01-01', 'outstanding', 'ap.csv', 1)`)
 run(`INSERT INTO supplier_invoices (source_branch, legacy_id, supplier_id, supplier_name, invoice_date, status, source_file, source_row) VALUES ('B', 2, NULL, 'LoseSup', '2026-01-02', 'outstanding', 'ap.csv', 2)`)
 
 // Delivery-linked
-run(`INSERT INTO sales (delivery_contact_id) VALUES (32)`)
+run(`INSERT INTO sales (delivery_contact_id, delivery_contact_name) VALUES (32, 'LoseDrv')`)
 
 // --------------------------------------------------------------------------
 // Run the repoints exactly as the merge handler does, then delete the losers
 // (as the handler does) to prove nothing dangles afterward.
 // --------------------------------------------------------------------------
-const custParams = { keepId: 1, mergeId: 2, keeperName: 'Keeper Co', mergedName: 'Loser Co', mergedNameLower: 'loser co' }
+const custParams = { keepId: 1, mergeId: 2, keeperName: 'Keeper Co', keeperPhone: '012 111 111', keeperAddress: 'Keeper address', mergedName: 'Loser Co', mergedNameLower: 'loser co' }
 const supParams = { keepId: 11, mergeId: 22, keeperName: 'KeepSup', mergedName: 'LoseSup', mergedNameLower: 'losesup' }
-const delParams = { keepId: 31, mergeId: 32 }
+const delParams = { keepId: 31, mergeId: 32, keeperName: 'KeepDrv' }
 for (const sql of CUSTOMER_REPOINTS) run(sql, custParams)
 for (const sql of SUPPLIER_REPOINTS) run(sql, supParams)
 for (const sql of DELIVERY_REPOINTS) run(sql, delParams)
@@ -111,6 +111,10 @@ check('customer merge moves sales/returns/shares/loyalty to the survivor', () =>
   assert.strictEqual(count(`SELECT COUNT(*) n FROM customer_share_submissions WHERE customer_id = 1`), 1)
   assert.strictEqual(count(`SELECT COUNT(*) n FROM loyalty_point_adjustments WHERE customer_id = 2`), 0)
   assert.strictEqual(count(`SELECT COUNT(*) n FROM loyalty_point_adjustments WHERE customer_id = 1`), 1)
+  const sale = one(`SELECT customer_name, customer_phone, customer_address FROM sales WHERE customer_id = 1`)
+  assert.deepStrictEqual([sale.customer_name, sale.customer_phone, sale.customer_address], ['Keeper Co', '012 111 111', 'Keeper address'], 'sale display snapshot did not follow stable customer id')
+  assert.strictEqual(one(`SELECT customer_name FROM returns WHERE customer_id = 1`).customer_name, 'Keeper Co', 'return customer snapshot stayed stale')
+  assert.strictEqual(one(`SELECT customer_name FROM customer_share_submissions WHERE customer_id = 1`).customer_name, 'Keeper Co', 'share snapshot stayed stale')
 })
 
 check('customer merge moves the storefront account link (portal_accounts.contact_id)', () => {
@@ -131,6 +135,7 @@ check('customer merge moves AR ledger rows (id-linked AND null-id by name) onto 
 check('supplier merge moves returns/products/batches to the survivor', () => {
   assert.strictEqual(count(`SELECT COUNT(*) n FROM returns WHERE supplier_id = 22`), 0)
   assert.strictEqual(count(`SELECT COUNT(*) n FROM returns WHERE supplier_id = 11`), 1)
+  assert.strictEqual(one(`SELECT supplier_name FROM returns WHERE supplier_id = 11`).supplier_name, 'KeepSup', 'supplier return snapshot stayed stale')
   assert.strictEqual(count(`SELECT COUNT(*) n FROM products WHERE supplier = 'LoseSup'`), 0, 'product still on loser supplier name')
   assert.strictEqual(count(`SELECT COUNT(*) n FROM products WHERE supplier = 'KeepSup'`), 1)
   // id-attributed lot
@@ -156,6 +161,7 @@ check('supplier merge moves AP ledger rows (id-linked AND null-id by name) onto 
 check('delivery-contact merge moves the delivery link on sales', () => {
   assert.strictEqual(count(`SELECT COUNT(*) n FROM sales WHERE delivery_contact_id = 32`), 0)
   assert.strictEqual(count(`SELECT COUNT(*) n FROM sales WHERE delivery_contact_id = 31`), 1)
+  assert.strictEqual(one(`SELECT delivery_contact_name FROM sales WHERE delivery_contact_id = 31`).delivery_contact_name, 'KeepDrv', 'delivery snapshot stayed stale')
 })
 
 // --------------------------------------------------------------------------

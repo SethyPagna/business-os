@@ -250,7 +250,21 @@ export default function VariantFormModal({ parent, units, branches, user, onClos
   }
 
   return (
-    <Modal title={`${t('add_variant_to') || 'Add Variant to:'} ${parent.name}`} onClose={onClose} size="lg">
+    <Modal
+      title={`${t('add_variant_to') || 'Add Variant to:'} ${parent.name}`}
+      onClose={onClose}
+      size="lg"
+      headerExtra={(
+        <button
+          type="button"
+          className="btn-primary min-h-9 max-w-24 truncate px-3 py-1.5 text-xs sm:hidden"
+          onClick={handleSave}
+          disabled={saving}
+        >
+          {saving ? (t('saving') || 'Saving...') : (t('save') || 'Save')}
+        </button>
+      )}
+    >
       <div className="space-y-4">
         <div className="rounded-lg bg-blue-50 p-3 text-xs text-blue-700 dark:bg-blue-900/20 dark:text-blue-300">
           {tr('variant_helper_text', 'Variants of the same product group can have different prices, barcodes, and suppliers.', 'វ៉ារីយ៉ង់ក្នុងក្រុមផលិតផលដូចគ្នា អាចមានតម្លៃ បារកូដ និងអ្នកផ្គត់ផ្គង់ខុសគ្នា។')}
@@ -258,15 +272,15 @@ export default function VariantFormModal({ parent, units, branches, user, onClos
 
         {err ? <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600 dark:bg-red-900/20">{err}</div> : null}
 
-        <div className="grid grid-cols-2 gap-4">
-          <div className="col-span-2">
+        <div data-testid="variant-fields" className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2">
+          <div className="min-w-0 sm:col-span-2">
             <label htmlFor="variant-form-name" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
               {tr('variant_name', 'Variant Name', 'ឈ្មោះវ៉ារីយ៉ង់')} *
             </label>
             <input
               id="variant-form-name"
               name="variant_name"
-              className="input"
+              className="input min-h-11 min-w-0"
               value={form.name}
               onChange={(event) => setField('name', event.target.value)}
               placeholder={tr('variant_name_placeholder', 'e.g. Product A - Blue, 500ml, Size L', 'ឧ. ផលិតផល A - ពណ៌ខៀវ 500ml ទំហំ L')}
@@ -282,29 +296,29 @@ export default function VariantFormModal({ parent, units, branches, user, onClos
             ) : null}
           </div>
 
-          <div>
+          <div className="min-w-0">
             <label htmlFor="variant-form-barcode" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
               {t('barcode') || 'Barcode'}
             </label>
-            <input id="variant-form-barcode" name="variant_barcode" className="input" value={form.barcode} onChange={(event) => setField('barcode', event.target.value)} />
+            <input id="variant-form-barcode" name="variant_barcode" className="input min-h-11 min-w-0" value={form.barcode} onChange={(event) => setField('barcode', event.target.value)} />
           </div>
 
-          <div>
+          <div className="min-w-0">
             <label htmlFor="variant-form-supplier" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
               {t('supplier') || 'Supplier'}
             </label>
-            <input id="variant-form-supplier" name="variant_supplier" className="input" value={form.supplier} onChange={(event) => setField('supplier', event.target.value)} />
+            <input id="variant-form-supplier" name="variant_supplier" className="input min-h-11 min-w-0" value={form.supplier} onChange={(event) => setField('supplier', event.target.value)} />
           </div>
 
-          <div>
+          <div className="min-w-0">
             <label htmlFor="variant-form-unit" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
               {t('unit') || 'Unit'}
             </label>
             <AppSelect
               id="variant-form-unit"
               name="variant_unit"
-              className="w-full"
-              buttonClassName="w-full"
+              className="w-full min-w-0"
+              buttonClassName="min-h-11 w-full min-w-0"
               value={form.unit}
               options={unitOptions}
               onChange={(value) => setField('unit', value)}
@@ -312,14 +326,14 @@ export default function VariantFormModal({ parent, units, branches, user, onClos
             />
           </div>
 
-          <div>
+          <div className="min-w-0">
             <label htmlFor="variant-form-cost-price" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
               {t('cost_price_usd') || `Cost Price (${usdSymbol})`}
             </label>
             <input
               id="variant-form-cost-price"
               name="variant_cost_price_usd"
-              className="input"
+              className="input min-h-11 min-w-0"
               type="text"
               inputMode="decimal"
               autoComplete="off"
@@ -328,14 +342,14 @@ export default function VariantFormModal({ parent, units, branches, user, onClos
             />
           </div>
 
-          <div>
+          <div className="min-w-0">
             <label htmlFor="variant-form-selling-price" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
               {t('selling_price_usd') || `Selling Price (${usdSymbol})`}
             </label>
             <input
               id="variant-form-selling-price"
               name="variant_selling_price_usd"
-              className="input"
+              className="input min-h-11 min-w-0"
               type="text"
               inputMode="decimal"
               autoComplete="off"
@@ -344,14 +358,14 @@ export default function VariantFormModal({ parent, units, branches, user, onClos
             />
           </div>
 
-          <div>
+          <div className="min-w-0">
             <label htmlFor="variant-form-special-price" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
               {tr('special_price_usd_full', 'Special Price (USD)', 'តម្លៃពិសេស (USD)')}
             </label>
             <input
               id="variant-form-special-price"
               name="variant_special_price_usd"
-              className="input"
+              className="input min-h-11 min-w-0"
               type="text"
               inputMode="decimal"
               autoComplete="off"
@@ -360,14 +374,14 @@ export default function VariantFormModal({ parent, units, branches, user, onClos
             />
           </div>
 
-          <div>
+          <div className="min-w-0">
             <label htmlFor="variant-form-special-price-khr" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
               {tr('special_price_khr_full', 'Special Price (KHR)', 'តម្លៃពិសេស (KHR)')}
             </label>
             <input
               id="variant-form-special-price-khr"
               name="variant_special_price_khr"
-              className="input"
+              className="input min-h-11 min-w-0"
               type="text"
               inputMode="decimal"
               autoComplete="off"
@@ -376,14 +390,14 @@ export default function VariantFormModal({ parent, units, branches, user, onClos
             />
           </div>
 
-          <div>
+          <div className="min-w-0">
             <label htmlFor="variant-form-stock" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
               {tr('initial_stock', 'Initial Stock', 'ស្តុកដើម')}
             </label>
             <input
               id="variant-form-stock"
               name="variant_stock_quantity"
-              className="input"
+              className="input min-h-11 min-w-0"
               type="text"
               inputMode="decimal"
               autoComplete="off"
@@ -392,15 +406,15 @@ export default function VariantFormModal({ parent, units, branches, user, onClos
             />
           </div>
 
-          <div>
+          <div className="min-w-0">
             <label htmlFor="variant-form-branch" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
               {tr('assign_to_branch', 'Assign to Branch', 'កំណត់ទៅសាខា')}
             </label>
             <AppSelect
               id="variant-form-branch"
               name="variant_branch_id"
-              className="w-full"
-              buttonClassName="w-full"
+              className="w-full min-w-0"
+              buttonClassName="min-h-11 w-full min-w-0"
               value={form.branch_id || ''}
               options={branchOptions}
               onChange={(value) => setField('branch_id', value)}
@@ -411,11 +425,11 @@ export default function VariantFormModal({ parent, units, branches, user, onClos
 
         {/* Sticky footer, same pattern as ProductForm.tsx/FeeForm.tsx/
             CustomerFormModal.tsx's own fix. */}
-        <div className="sticky bottom-0 -mx-5 -mb-5 flex gap-3 border-t border-gray-200 bg-white px-5 pb-5 pt-4 dark:border-gray-700 dark:bg-gray-800">
-          <button type="button" className="btn-primary flex-1" onClick={handleSave} disabled={saving}>
+        <div className="sticky bottom-0 -mx-5 -mb-5 hidden gap-3 border-t border-gray-200 bg-white px-5 pb-5 pt-4 dark:border-gray-700 dark:bg-gray-800 sm:flex">
+          <button type="button" className="btn-primary min-h-11 flex-1" onClick={handleSave} disabled={saving}>
             {saving ? (t('saving') || 'Saving...') : (t('add_variant') || 'Add Variant')}
           </button>
-          <button type="button" className="btn-secondary" onClick={onClose} disabled={saving}>{t('cancel') || 'Cancel'}</button>
+          <button type="button" className="btn-secondary min-h-11" onClick={onClose} disabled={saving}>{t('cancel') || 'Cancel'}</button>
         </div>
       </div>
     </Modal>

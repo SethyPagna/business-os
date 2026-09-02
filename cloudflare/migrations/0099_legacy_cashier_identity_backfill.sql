@@ -6,8 +6,9 @@
 --
 -- Depends on 0098 (user_aliases). "Aza" and "Dev-Usmart" are legacy nicknames
 -- that equal no username ("aza" != username "Za"; "Dev-Usmart" maps to admin),
--- so they resolve ONLY through the alias table. "Sethyka" and "Rath" resolve
--- directly by username. Every UPDATE resolves the target id/username LIVE from
+-- so they resolve ONLY through the alias table. The reviewed Sethyka alias maps
+-- to James and therefore intentionally overrides the stale direct username;
+-- Rath resolves directly. Every UPDATE resolves the target id/username LIVE from
 -- users/user_aliases -- never a hard-coded id -- so it is environment-safe
 -- across dev/prod and survives a later username rename (the alias is keyed by
 -- the stable user_id).
@@ -31,16 +32,13 @@ ALTER TABLE legacy_deleted_sale_items ADD COLUMN cashier_id INTEGER;
 -- (2) Resolve each deleted-item row's cashier_id from username / name / alias,
 --     filling only rows not yet linked. The known cohort is unambiguous.
 UPDATE legacy_deleted_sale_items
-SET cashier_id = (
-  SELECT u.id FROM users u
-  WHERE lower(trim(u.username)) = lower(trim(legacy_deleted_sale_items.cashier_name))
-     OR lower(trim(u.name))     = lower(trim(legacy_deleted_sale_items.cashier_name))
-     OR EXISTS (
-       SELECT 1 FROM user_aliases a
-       WHERE a.user_id = u.id
-         AND lower(trim(a.alias)) = lower(trim(legacy_deleted_sale_items.cashier_name))
-     )
-  LIMIT 1
+SET cashier_id = COALESCE(
+  (SELECT a.user_id FROM user_aliases a
+   WHERE lower(trim(a.alias)) = lower(trim(legacy_deleted_sale_items.cashier_name)) LIMIT 1),
+  (SELECT u.id FROM users u
+   WHERE lower(trim(u.username)) = lower(trim(legacy_deleted_sale_items.cashier_name))
+      OR lower(trim(u.name))     = lower(trim(legacy_deleted_sale_items.cashier_name))
+   ORDER BY u.id LIMIT 1)
 )
 WHERE cashier_id IS NULL
   AND cashier_name IS NOT NULL

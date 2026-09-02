@@ -9,11 +9,11 @@ import ChevronUp from 'lucide-react/dist/esm/icons/chevron-up.js'
 import Search from 'lucide-react/dist/esm/icons/search.js'
 import Modal from '../shared/Modal'
 import AppSelect from '../shared/AppSelect'
+import PaginationControls from '../shared/PaginationControls'
 import { getImportJobReview, updateImportJobDecisions } from '../../api/importJobsTransport'
 import {
   CONTACT_REVIEW_PAGE_SIZE,
   contactConflictWarningKinds,
-  contactReviewPageCount,
   restoreContactRowDecision,
   type ContactConflictFilter as ConflictFilter,
   type ContactReviewSort as ReviewSort,
@@ -634,23 +634,7 @@ export default function ContactImportConflictsModal({ jobId, entityLabel, t, not
               </>
             ) : null}
 
-            {total > CONTACT_REVIEW_PAGE_SIZE ? (
-              <div className="flex items-center justify-between gap-3 rounded-lg border border-gray-200 px-3 py-2 text-xs dark:border-zinc-700">
-                <span className="text-gray-500 dark:text-gray-400">
-                  {tr('contacts_import_conflicts_page', 'Page {page} of {pages}')
-                    .replace('{page}', String(page))
-                    .replace('{pages}', String(contactReviewPageCount(total)))}
-                </span>
-                <div className="flex gap-2">
-                  <button type="button" className="btn-secondary px-2.5 py-1 text-xs" disabled={page <= 1 || loading} onClick={() => setPage((current) => Math.max(1, current - 1))}>
-                    {tr('previous', 'Previous')}
-                  </button>
-                  <button type="button" className="btn-secondary px-2.5 py-1 text-xs" disabled={page >= contactReviewPageCount(total) || loading} onClick={() => setPage((current) => current + 1)}>
-                    {tr('next', 'Next')}
-                  </button>
-                </div>
-              </div>
-            ) : null}
+            <div className="flex justify-center"><PaginationControls compact rangeAsPageSize page={page} pageSize={CONTACT_REVIEW_PAGE_SIZE} totalItems={total} label={tr('records', 'records')} t={t} onPageChange={setPage} /></div>
           </>
         )}
 

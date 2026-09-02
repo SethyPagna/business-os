@@ -111,7 +111,7 @@ export default function MergeDuplicatesReviewModal({ t, onClose, onConfirm, onLo
           <p>
             {T(
               'merge_duplicates_what_counts_body',
-              'Two products are only grouped if they match on ALL of: name, cost price, selling price, and barcode. Products that merely look similar -- same name but a different price, or a different barcode -- are never grouped. This is the same matching rule branch transfers already use to self-heal, not a fuzzy or approximate match.',
+              'Two products are only merged if their normalized name, cost price, and barcode all match. Selling and special prices do not create a child row; when they differ, the highest price is kept. A different cost or barcode stays as a separate child row. Matching is exact, never fuzzy or approximate.',
             )}
           </p>
         </section>

@@ -3,8 +3,8 @@
 // stats ... based on date range. default per day ... do so for all
 // pages"). Tests the pure range-preset helpers, then pins the rollout:
 // every data page renders the SAME shared component (never a bespoke tile
-// grid again). Sales/Returns/Fees/Reports start all-time; operational stock
-// views may still choose Today explicitly.
+// grid again). Sales/Returns/Fees start all-time; Reports begins on an
+// actionable Today range so every chosen report has concrete endpoints.
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
@@ -79,7 +79,7 @@ test('date/time picker owns all-time/today presets and exposes time only where e
 })
 
 // ---- rollout pins (cross-file) --------------------------------------------
-test('data pages render the ONE shared StatsStrip and begin all-time', () => {
+test('data pages render the ONE shared StatsStrip and use their intended initial range', () => {
   const pages: Array<[string, string]> = [
     ['Sales', 'src/components/sales/Sales.tsx'],
     ['Returns', 'src/components/returns/Returns.tsx'],
@@ -92,8 +92,8 @@ test('data pages render the ONE shared StatsStrip and begin all-time', () => {
     assert.ok(src.includes("startDate: '', endDate: ''") || src.includes('EMPTY_DATE_TIME_RANGE'), `${label} starts unfiltered instead of silently limiting records to today`)
   }
   const reports = read('src/components/sales/ReportsHub.tsx')
-  assert.ok(reports.includes('EMPTY_DATE_TIME_RANGE'), 'Reports hub starts all-time and relies on picker presets')
-  assert.ok(!reports.includes('todayDateTimeRange()'), 'Reports hub must not force a standalone Today range')
+  assert.ok(reports.includes('todayDateTimeRange'), 'Reports hub imports the shared business-day range helper')
+  assert.ok(reports.includes('useState<DateTimeRange>(() => todayDateTimeRange())'), 'Reports hub starts on an actionable Today range')
   // Dashboard keeps its own range card, so it passes cards only -- but it
   // must still be the SAME component, not the old MiniStat grid or the
   // KPI portal sheet for period cards.
@@ -215,6 +215,14 @@ test('Part 564: the top date range drives the LIST too on Sales/Returns/Fees (on
   assert.ok(/from: stripRange\.startDate/.test(fees), 'the Fees list is scoped by stripRange')
 })
 
+test('Sales statistics keep COGS, gross profit, and permitted expenses visible', () => {
+  const sales = read('src/components/sales/Sales.tsx')
+  assert.ok(sales.includes("key: 'cogs'"), 'Sales exposes COGS as a stat card')
+  assert.ok(sales.includes("key: 'profit'"), 'Sales exposes gross profit as a stat card')
+  assert.ok(sales.includes("key: 'expenses'"), 'Sales exposes booked expenses when the viewer may read fees')
+  assert.ok(sales.includes('getFeesReport'), 'Sales reads the same dated expense report used by the Fees section')
+})
+
 test('Part 564: headline + day-group counts count only what the money counts', () => {
   // User, Aug 31: "count only what the money counts." Cancelled (and, for
   // sales, awaiting-payment) records still appear in the list but are excluded
@@ -250,13 +258,13 @@ test('Part 552: report section controls ride the title row; hub tabs fit; branch
   // The branch select rides the type-chips row, not its own line.
   assert.ok(/typeChips\.map[\s\S]{0,900}branches\.length \? \(\s*<AppSelect/.test(hub), 'the branch select sits inside the type-chips row')
 
-  // The hub tab row fits one row on phones: full-width equal (flex-1) tabs
-  // with truncating labels, not a content-sized inline-flex pill that
-  // overflowed the viewport ("not fit in one row ... touching edge").
+  // The hub tab row fits one row on phones: equal grid cells with complete,
+  // wrapping labels, including Khmer, instead of hiding Reports with an
+  // ellipsis or pushing it beyond the iPhone viewport.
   const shell = read('src/components/sales/SalesHubPage.tsx')
-  assert.ok(shell.includes('flex w-full rounded-xl'), 'the tab strip is full-width')
-  assert.ok(/flex-1 min-w-0 justify-center/.test(shell), 'each tab is an equal flex-1 cell')
-  assert.ok(shell.includes('<span className="truncate">{tab.label}</span>'), 'tab labels truncate rather than widen the row')
+  assert.ok(shell.includes('grid w-full rounded-xl'), 'the tab strip is full-width')
+  assert.ok(shell.includes('gridTemplateColumns'), 'each visible tab receives an equal bounded cell')
+  assert.ok(shell.includes('break-words text-center leading-tight'), 'tab labels stay complete and may use a second line')
 })
 
 test('Part 553/554: report sections render display-currency money + a CSV export', () => {
@@ -318,7 +326,7 @@ test('Part 560: the Start→End date row is lifted OUT of the stats fold into a 
     const src = read(rel)
     // Rendered above the search bar and wired to the strip's range state
     // (single-line StatsRangeRow form).
-    assert.ok(/<StatsRangeRow[^>]*range=\{stripRange\}[^>]*onRangeChange=\{setStripRange\}/.test(src), `${rel} renders StatsRangeRow wired to stripRange`)
+    assert.ok(/<StatsRangeRow[^>]*range=\{stripRange\}[^>]*onRangeChange=\{(?:setStripRange|handleStripRangeChange)\}/.test(src), `${rel} renders StatsRangeRow wired to stripRange`)
     // The strip on these pages no longer owns the range: the old multi-line
     // `range={stripRange}` / `onRangeChange={setStripRange}` prop pair passed
     // into <StatsStrip> (each on its own line) is gone. The new StatsRangeRow

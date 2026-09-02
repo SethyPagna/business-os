@@ -117,11 +117,11 @@ export default function ProductDetailModal({ product: p, onClose, onAdjust, onTr
   const batchCount = visibleBatches.length
 
   return createPortal(
-    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-0 sm:items-center sm:p-4" onClick={onClose}>
-      <div className="flex max-h-modal-90 w-full flex-col rounded-t-2xl bg-white shadow-2xl dark:bg-gray-800 sm:max-w-lg sm:rounded-2xl" onClick={(event) => event.stopPropagation()}>
+    <div className="modal-viewport-safe pointer-events-auto fixed inset-0 z-[1050] flex items-end justify-center overflow-y-auto bg-black/50 sm:items-center" onClick={onClose}>
+      <div className="modal-panel-safe flex w-full flex-col rounded-t-2xl bg-white shadow-2xl dark:bg-gray-800 sm:max-w-lg sm:rounded-2xl" onClick={(event) => event.stopPropagation()}>
         <div className="flex flex-shrink-0 items-center justify-between border-b border-gray-200 p-4 dark:border-gray-700">
           <div className="min-w-0 flex-1">
-            <div className="font-bold text-gray-900 dark:text-white">{p.name}</div>
+            <div className="break-words font-bold text-gray-900 dark:text-white">{p.name}</div>
             <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5">
               {p.sku ? <span className="rounded bg-gray-100 px-1.5 py-0.5 font-mono text-xs text-gray-400 dark:bg-gray-700">{p.sku}</span> : null}
               {p.category ? <span className="text-xs text-blue-600 dark:text-blue-400">{p.category}</span> : null}
@@ -131,7 +131,7 @@ export default function ProductDetailModal({ product: p, onClose, onAdjust, onTr
                   this row's existing wrap space instead of costing a new
                   row's worth of vertical space every time. */}
               {p.brand ? <span className="text-xs text-gray-400">&middot; {p.brand}</span> : null}
-              {p.barcode ? <span className="font-mono text-xs text-gray-400">&middot; {p.barcode}</span> : null}
+              {p.barcode ? <span className="shrink-0 whitespace-nowrap font-mono text-xs text-gray-400">&middot; {p.barcode}</span> : null}
             </div>
           </div>
           <button type="button" onClick={onClose} className="flex h-8 w-8 items-center justify-center text-gray-400 hover:text-gray-600" aria-label={T('close', 'Close')}><X className="h-4 w-4" /></button>

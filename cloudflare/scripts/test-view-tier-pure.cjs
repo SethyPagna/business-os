@@ -35,6 +35,12 @@ const getPermissionTier = (u, key) => {
   if (raw === 'view' && VIEW_TIER_KEYS.has(key)) return 'view'
   return 'none'
 }
+const getActionTier = (u, key, action) => {
+  const tier = getPermissionTier(u, key)
+  if (tier === 'none') return 'none'
+  if (isAdmin(u)) return tier
+  return merged(u)[`${key}:${action}`] === false ? 'none' : tier
+}
 
 const viewUser = { username: 'v', role_permissions: JSON.stringify({ settings: 'view' }), permissions: '{}' }
 const fullUser = { username: 'f', role_permissions: JSON.stringify({ settings: true }), permissions: '{}' }
@@ -72,6 +78,12 @@ check("Full Sales grant -> tier 'full' AND hasPermission true (writes allowed)",
   assert.equal(getPermissionTier(salesFullUser, 'sales'), 'full')
   assert.equal(hasPermission(salesFullUser, 'sales'), true)
 })
+check('Sales action overrides narrow Full without widening View', () => {
+  const narrowed = { username: 'sx', role_permissions: JSON.stringify({ sales: true, 'sales:status': false }), permissions: '{}' }
+  assert.equal(getActionTier(narrowed, 'sales', 'status'), 'none')
+  assert.equal(getActionTier(narrowed, 'sales', 'customer'), 'full')
+  assert.equal(getActionTier(salesViewUser, 'sales', 'status'), 'view')
+})
 check("canReadSales() shape: tier !== 'none' for view AND full, but 'none' for no grant", () => {
   // Mirrors routes/sales.ts canReadSales(): getPermissionTier(user,'sales') !== 'none'.
   const canRead = (u) => getPermissionTier(u, 'sales') !== 'none'
@@ -90,11 +102,12 @@ check("lib/permissions.ts declares VIEW_TIER_KEYS (settings + sales) + handles '
   assert.match(src, /raw === 'view' && VIEW_TIER_KEYS\.has\(normalized\)\) return 'view'/)
   assert.match(src, /PermissionValue = boolean \| 'review' \| 'view'/)
 })
-check("routes/sales.ts read gates use canReadSales() (view-aware) while writes stay strict", () => {
+check("routes/sales.ts reads stay view-aware while writes use action-specific Full gates", () => {
   const src = fs.readFileSync(path.join(__dirname, '..', 'src', 'routes', 'sales.ts'), 'utf8')
   assert.match(src, /function canReadSales\([\s\S]*getPermissionTier\(user, 'sales'\) !== 'none'/)
-  // The two write gates must remain strict hasPermission('sales').
-  assert.match(src, /if \(!hasPermission\(user, 'sales'\)\)/)
+  assert.match(src, /getActionTier\(user, 'sales', 'status'\) !== 'full'/)
+  assert.match(src, /getActionTier\(user, 'sales', 'customer'\) !== 'full'/)
+  assert.match(src, /getActionTier\(c\.get\('user'\), 'sales', 'export'\) === 'none'/)
 })
 
 // --- Promotions view-tier (Part 557 slice 4): read rule list, no manage -----
@@ -110,13 +123,11 @@ check("Full Promotions grant -> tier 'full' AND hasPermission true (manage allow
   assert.equal(getPermissionTier(promoFullUser, 'promotions'), 'full')
   assert.equal(hasPermission(promoFullUser, 'promotions'), true)
 })
-check("routes/promotions.ts: GET /rules uses requireReadKey (view-aware); writes keep requireKey", () => {
+check("routes/promotions.ts: GET /rules is view-aware; every rule write shares promotions.manage", () => {
   const src = fs.readFileSync(path.join(__dirname, '..', 'src', 'routes', 'promotions.ts'), 'utf8')
   assert.match(src, /const requireReadKey =[\s\S]*getPermissionTier\(c\.get\('user'\), key\) === 'none'/)
   assert.match(src, /app\.get\('\/rules', requireReadKey\('promotions'\)/)
-  assert.match(src, /app\.post\('\/rules', requireKey\('promotions'\)/)
-  assert.match(src, /app\.put\('\/rules\/:id', requireKey\('promotions'\)/)
-  assert.match(src, /app\.delete\('\/rules\/:id', requireKey\('promotions'\)/)
+  assert.equal((src.match(/requireAction\('promotions', 'manage'\)/g) || []).length, 3)
 })
 
 // --- Review view-tier (Part 557 slice 5): watch the queue, no approve/reject -

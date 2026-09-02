@@ -1,7 +1,9 @@
 import { todayStr } from '../../utils/dateHelpers.ts'
 import { useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import X from 'lucide-react/dist/esm/icons/x.js'
 import { registerDirtyWork } from '../../utils/dirtyWork.ts'
+import { clearWorkDraft, scheduleWorkDraftWrite, scopedWorkDraftKey } from '../../utils/workDrafts.ts'
 import AppSelect, { type AppSelectOption } from '../shared/AppSelect'
 import { getProductBatches, receiveBatchStock, type ProductBatch } from '../../api/batchesTransport.ts'
 import { dateToBatchCode } from '../../utils/batchCode.ts'
@@ -121,13 +123,16 @@ export default function ReceiveBatchModal({
   // Part 388 "Canva-level" persistence: typed values survive a crash,
   // reload, or accidental close via a per-product localStorage draft --
   // cleared on a successful receive and on explicit Discard & Leave.
-  const draftKey = product ? `bos_draft_receive_${product.id}` : ''
+  const draftKey = product ? scopedWorkDraftKey(`receive_${product.id}`) : ''
   useEffect(() => {
     if (!product) return
     try {
       const raw = localStorage.getItem(draftKey)
-      if (raw) {
-        const draft = JSON.parse(raw) as Record<string, any>
+      const parsed = raw ? JSON.parse(raw) as Record<string, any> : null
+      // Accept both the shared { at, data } envelope and the old flat shape so
+      // existing device drafts survive this migration.
+      const draft = parsed?.data || parsed?.form || parsed
+      if (draft) {
         if (draft.quantity !== undefined) setQuantity(draft.quantity)
         if (draft.receivedDate) setReceivedDate(draft.receivedDate)
         if (draft.expiryDate !== undefined) setExpiryDate(draft.expiryDate)
@@ -150,19 +155,14 @@ export default function ReceiveBatchModal({
       pageId: 'branches',
       label: `${tr('receive_batch', 'Receive Batch')}${product.name ? ` — ${product.name}` : ''}`,
       isDirty: () => dirtyStateRef.current,
-      discard: () => { try { localStorage.removeItem(draftKey) } catch { /* fine */ } },
+      discard: () => clearWorkDraft(draftKey),
     })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [product?.id])
 
   useEffect(() => {
     if (!product || !dirtyStateRef.current) return
-    const timer = window.setTimeout(() => {
-      try {
-        localStorage.setItem(draftKey, JSON.stringify({ quantity, receivedDate, expiryDate, notes, supplierName, supplierId, unitCost, paymentStatus, creditDueDate }))
-      } catch { /* full/blocked */ }
-    }, 600)
-    return () => window.clearTimeout(timer)
+    return scheduleWorkDraftWrite(draftKey, { quantity, receivedDate, expiryDate, notes, supplierName, supplierId, unitCost, paymentStatus, creditDueDate }, 600)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [quantity, receivedDate, expiryDate, notes, supplierName, supplierId, unitCost, paymentStatus, creditDueDate])
 
@@ -192,6 +192,14 @@ export default function ReceiveBatchModal({
       notify(tr('credit_needs_due_date', 'A credit purchase needs its due date — the admin reminder is built on it.'), 'error')
       return
     }
+    const branchName = branchSelectOptions.find((option) => String(option.value) === String(branchId))?.label || tr('branch', 'selected branch')
+    const lotLabel = typeof batchChoice === 'number'
+      ? batchDisplayLabel({ id: batchChoice, lot_code: selectedLot?.lot_code ?? null, received_at: selectedLot?.received_at ?? null, batch_number: selectedLot?.batch_number ?? null }, t('batch') || 'Batch')
+      : tr('new_batch', 'a new lot')
+    if (!window.confirm(tr(
+      'confirm_receive_batch_details',
+      `Receive ${parsedQuantity} ${product.unit || 'unit(s)'} of ${product.name || 'this product'} into ${branchName}, using ${lotLabel}? This posts stock movement(s).`,
+    ))) return
 
     setSaving(true)
     try {
@@ -219,7 +227,7 @@ export default function ReceiveBatchModal({
         return
       }
       notify(tr('batch_received', 'Batch stock received'))
-      try { localStorage.removeItem(`bos_draft_receive_${productId}`) } catch { /* fine */ }
+      clearWorkDraft(scopedWorkDraftKey(`receive_${productId}`))
       onReceived()
       onClose()
     } catch (e: unknown) {
@@ -229,17 +237,22 @@ export default function ReceiveBatchModal({
     }
   }
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-0 sm:items-center sm:p-4" onClick={closeIfIdle}>
-      <div className="flex max-h-modal-92 w-full flex-col rounded-t-2xl bg-white shadow-2xl dark:bg-gray-800 sm:max-w-lg sm:rounded-2xl" onClick={(event) => event.stopPropagation()}>
+  const modal = (
+    <div className="modal-viewport-safe pointer-events-auto fixed inset-0 z-[1050] flex items-end justify-center overflow-y-auto bg-black/50 sm:items-center" onClick={closeIfIdle}>
+      <div className="modal-panel-safe flex w-full flex-col rounded-t-2xl bg-white shadow-2xl dark:bg-gray-800 sm:max-w-lg sm:rounded-2xl" onClick={(event) => event.stopPropagation()}>
         <div className="flex items-center justify-between gap-3 border-b border-gray-200 p-4 dark:border-gray-700">
           <div className="min-w-0">
             <h2 className="font-bold text-gray-900 dark:text-white">{tr('receive_batch', 'Receive Batch')}</h2>
             <div className="mt-0.5 truncate text-xs text-gray-400">{product.name}</div>
           </div>
-          <button type="button" onClick={closeIfIdle} className="flex h-8 w-8 flex-shrink-0 items-center justify-center text-gray-400 hover:text-gray-600" disabled={saving}>
-            <X className="h-4 w-4" />
-          </button>
+          <div className="flex shrink-0 items-center gap-1">
+            <button type="button" className="btn-primary min-h-9 px-3 py-1.5 text-xs sm:hidden" onClick={submit} disabled={saving}>
+              {saving ? (t('saving') || 'Saving...') : tr('receive_stock', 'Receive stock')}
+            </button>
+            <button type="button" onClick={closeIfIdle} className="flex h-8 w-8 flex-shrink-0 items-center justify-center text-gray-400 hover:text-gray-600" disabled={saving}>
+              <X className="h-4 w-4" />
+            </button>
+          </div>
         </div>
         <div className="modal-scroll space-y-3 p-4">
           <div className="grid gap-3 sm:grid-cols-2">
@@ -405,7 +418,7 @@ export default function ReceiveBatchModal({
             />
           </label>
         </div>
-        <div className="flex items-center justify-end gap-2 border-t border-gray-200 p-4 dark:border-gray-700">
+        <div className="hidden items-center justify-end gap-2 border-t border-gray-200 p-4 dark:border-gray-700 sm:flex">
           <button type="button" className="btn-secondary text-sm" onClick={onClose} disabled={saving}>
             {t('cancel') || 'Cancel'}
           </button>
@@ -416,4 +429,7 @@ export default function ReceiveBatchModal({
       </div>
     </div>
   )
+
+  if (typeof document === 'undefined') return modal
+  return createPortal(modal, document.body)
 }

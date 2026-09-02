@@ -192,20 +192,18 @@ check('captures r2/summary metadata as meta events without holding the tables', 
   const byKey = Object.fromEntries(metas.map((m) => [m.key, m.value]))
   assert.ok(byKey.r2 && byKey.r2.bucket === 'business-os-assets', 'r2 metadata should be captured')
   assert.ok(byKey.summary && typeof byKey.summary.tableCount === 'number', 'summary metadata should be captured')
+  assert.equal(byKey.format, 'business-os-cloudflare-backup', 'streamed validation receives the format marker')
+  assert.equal(byKey.formatVersion, 1, 'streamed validation receives the format version')
   // meta must come AFTER all the table rows (it follows tables in the document)
   const lastRowIdx = events.map((e) => e.type).lastIndexOf('row')
-  const firstMetaIdx = events.findIndex((e) => e.type === 'meta')
-  assert.ok(firstMetaIdx > lastRowIdx, 'meta events should follow the row stream')
+  const firstTailMetaIdx = events.findIndex((e) => e.type === 'meta' && (e.key === 'r2' || e.key === 'summary'))
+  assert.ok(firstTailMetaIdx > lastRowIdx, 'r2/summary meta events should follow the row stream')
 })
 
-check('tolerates a corrupt r2 metadata value -- tables still fully read', () => {
+check('rejects a corrupt r2 metadata tail before it can masquerade as a complete document', () => {
   const doc = buildDoc(TRICKY)
-  // A corrupt asset list must NOT throw: the table rows (already applied on a
-  // real restore) are the critical data; asset restore is best-effort.
   const corruptedTail = doc.replace('"r2":', '"r2":GARBAGE')
-  const events = scanChunks(corruptedTail, 7)
-  assert.equal(rowsOf(events, 'products').length, 3)
-  assert.ok(!events.some((e) => e.type === 'meta' && e.key === 'r2'), 'corrupt r2 meta is skipped, not emitted')
+  assert.throws(() => scanChunks(corruptedTail, 7), /trailing content|Expected/)
 })
 
 check('a truncated document (cut mid-rows) throws on end()', () => {
@@ -229,10 +227,14 @@ check('a corrupted row (invalid JSON in a bracket-balanced region) throws', () =
   assert.ok(threw, 'an unparseable row must throw, never be silently dropped')
 })
 
-check('empty tables object yields no events and ends clean', () => {
+check('empty tables object yields identity metadata and ends clean', () => {
   const doc = '{"format":"x","tables":{}}'
   const events = scanChunks(doc, 2)
-  assert.deepEqual(events, [])
+  assert.deepEqual(events, [{ type: 'meta', key: 'format', value: 'x' }])
+})
+
+check('trailing non-whitespace after the top-level object is rejected', () => {
+  assert.throws(() => scanChunks(buildDoc([]) + '{"second":true}', 7), /trailing content/)
 })
 
 console.log(`\n${passed} passed, ${failed} failed`)

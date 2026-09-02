@@ -97,6 +97,9 @@ export class BackupDocumentScanner {
     if (this.state !== 'done') {
       throw new Error(`Backup stream ended mid-document (state: ${this.state}) — the backup is truncated`)
     }
+    if (this.buf.slice(this.i).trim()) {
+      throw new Error('Backup document has trailing content after the top-level object')
+    }
   }
 
   private run(events: BackupStreamEvent[]): void {
@@ -142,17 +145,16 @@ export class BackupDocumentScanner {
       case 'outer-capture-value': {
         const tok = readValue(this.buf, this.i)
         if (!tok) return false
-        // Capture only the small post-tables metadata (asset copy list, summary
-        // counts); everything else at the top level is skipped. These are
-        // bounded, unlike the tables, so holding one briefly is fine.
+        // Capture the small top-level identity fields as well as the post-table
+        // metadata. Restore ignores the identity events, while the Drive
+        // staging validator uses them to prove this is our exact versioned
+        // backup format without buffering the whole manifest.
         //
-        // Metadata parsing is DELIBERATELY tolerant: r2/summary follow all the
-        // table rows, which the restore has already applied by this point.
-        // Asset restore is best-effort anyway (see restore's missingAssets), so
-        // a corrupt asset list must NOT throw and undo a good table restore.
-        // Row parsing above stays strict -- that is the data that must never be
-        // silently mangled.
-        if (this.outerKey === 'r2' || this.outerKey === 'summary') {
+        // Token parsing remains locally tolerant so restore can report missing
+        // optional asset metadata, but the full streamed validator requires a
+        // valid summary and a clean top-level close. Row parsing above stays
+        // strict -- that is the data that must never be silently mangled.
+        if (['format', 'formatVersion', 'createdAt', 'source', 'runtime', 'r2', 'summary'].includes(this.outerKey)) {
           try {
             events.push({ type: 'meta', key: this.outerKey, value: JSON.parse(tok.raw) })
           } catch (_) {

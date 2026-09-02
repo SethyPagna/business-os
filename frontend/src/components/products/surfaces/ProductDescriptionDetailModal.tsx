@@ -1,7 +1,7 @@
 // Admin-side counterpart to the public-portal Details flyout
 // (catalog/ProductDetailFlyout.tsx). Aug 23 ask: the Products detail
-// sheet's description Row should truncate with "..." instead of
-// dumping the raw free-text blob inline, and clicking it should open a
+// sheet's description Row stays compact through horizontal scrolling, and
+// clicking it opens a
 // separate view with the same formatted Features/Benefits/Ingredients/
 // Caution breakdown the public portal already shows shoppers -- so
 // staff editing a product see it exactly the way a customer will,
@@ -72,9 +72,9 @@ export default function ProductDescriptionDetailModal({
             the public flyout already uses. */}
         <div className="flex items-center justify-between border-b border-gray-200 p-4 dark:border-gray-700">
           <div className="min-w-0 pr-4">
-            <p className="truncate text-base font-semibold text-gray-900 dark:text-white">{productName}</p>
+            <p className="break-words text-base font-semibold text-gray-900 dark:text-white">{productName}</p>
             {(category || brand) ? (
-              <p className="mt-0.5 truncate text-xs uppercase tracking-wide text-gray-400 dark:text-gray-500">
+              <p className="detail-scroll-text mt-0.5 text-xs uppercase tracking-wide text-gray-400 dark:text-gray-500">
                 {[category, brand].filter(Boolean).join(' \u00b7 ')}
               </p>
             ) : null}

@@ -5,9 +5,11 @@ import Search from 'lucide-react/dist/esm/icons/search.js'
 import ArrowRightCircle from 'lucide-react/dist/esm/icons/arrow-right-circle.js'
 import EyeOff from 'lucide-react/dist/esm/icons/eye-off.js'
 import Merge from 'lucide-react/dist/esm/icons/merge.js'
+import ConfirmDialog from '../shared/ConfirmDialog.tsx'
 import { dismissContactDuplicateCluster, undismissContactDuplicateCluster, getContactDuplicateClusters, mergeContacts } from './contactDuplicates'
 import type { ContactDuplicateCluster, ContactDuplicateClusterEntry, ContactDuplicateSeverity, ContactTableKind } from './contactDuplicates'
 import SaleLinkConflictsSection from './SaleLinkConflictsSection'
+import { useApp } from '../../AppContext.tsx'
 
 type TranslateFn = (key: string) => string | undefined
 type NotifyFn = (message: string, tone?: string) => void
@@ -85,7 +87,7 @@ const SEVERITY_TEXT: Record<ContactDuplicateSeverity, string> = {
 }
 
 function ClusterCard({
-  cluster, t, table, dismissing, merging, selected, selectable, onToggleSelect, onResolve, onDismiss, onReopen, onMergeInto,
+  cluster, t, table, dismissing, merging, selected, selectable, canResolveConflicts, onToggleSelect, onResolve, onDismiss, onReopen, onMergeInto,
 }: {
   cluster: ContactDuplicateCluster
   t: TranslateFn
@@ -94,6 +96,7 @@ function ClusterCard({
   merging: boolean
   selected: boolean
   selectable: boolean
+  canResolveConflicts: boolean
   onToggleSelect: () => void
   onResolve: (name: string) => void
   onDismiss: () => void
@@ -101,23 +104,20 @@ function ClusterCard({
   onMergeInto: (keeper: ContactDuplicateClusterEntry) => void
 }) {
   const [key, fallback] = SEVERITY_LABEL_KEY[cluster.severity]
-  // Which contact is about to be kept, once the person has picked one --
-  // a second tap on the SAME contact confirms the merge; tapping a
-  // different one (or Cancel) restarts the choice. Deliberately a local
-  // two-tap confirm rather than a separate modal: a merge here only ever
-  // acts on ids the panel already fetched moments ago, no extra context
-  // to show that a modal would add.
-  const [pendingKeeperId, setPendingKeeperId] = useState<number | null>(null)
+  // Every conflict action uses the shared review dialog. It shows the current
+  // and resulting state before committing instead of relying on a hidden
+  // second click, which was easy to miss and gave no account of what would
+  // happen to every candidate in a multi-record cluster.
+  const [pendingAction, setPendingAction] = useState<
+    | { kind: 'merge'; keeper: ContactDuplicateClusterEntry }
+    | { kind: 'dismiss' }
+    | { kind: 'reopen' }
+    | null
+  >(null)
   const busy = dismissing || merging
-
-  const clickMerge = (contact: ContactDuplicateClusterEntry) => {
-    if (pendingKeeperId === contact.id) {
-      onMergeInto(contact)
-      setPendingKeeperId(null)
-    } else {
-      setPendingKeeperId(contact.id)
-    }
-  }
+  const mergeTargets = pendingAction?.kind === 'merge'
+    ? cluster.contacts.filter((contact) => contact.id !== pendingAction.keeper.id)
+    : []
 
   return (
     <div className={`rounded-xl border px-3 py-2.5 ${SEVERITY_STYLE[cluster.severity]} ${busy ? 'opacity-60' : ''}`}>
@@ -139,13 +139,13 @@ function ClusterCard({
         </div>
         <div className="flex items-center gap-1">
           <span className="text-[11px] text-gray-400">{cluster.type === 'phone' ? cluster.value : `"${cluster.value}"`}</span>
-          {cluster.dismissed ? (
+          {canResolveConflicts && cluster.dismissed ? (
             // A kept cluster is reopenable, never a one-way hide -- Reopen drops
             // the "not a duplicate" marker so it re-enters the open queue and
             // can be merged/resolved after all.
             <button
               type="button"
-              onClick={onReopen}
+              onClick={() => setPendingAction({ kind: 'reopen' })}
               disabled={busy}
               title={t('reopen_duplicate') || 'Reopen -- put this back in the review queue to merge or resolve'}
               className="inline-flex items-center gap-1 rounded-lg px-1.5 py-1 text-[11px] font-medium text-blue-600 transition hover:bg-blue-50 disabled:opacity-50 dark:text-blue-300 dark:hover:bg-blue-900/20"
@@ -153,22 +153,21 @@ function ClusterCard({
               <RotateCcw className="h-3.5 w-3.5" />
               {t('reopen') || 'Reopen'}
             </button>
-          ) : (
+          ) : canResolveConflicts ? (
             <button
               type="button"
-              onClick={onDismiss}
+              onClick={() => setPendingAction({ kind: 'dismiss' })}
               disabled={busy}
               title={t('dismiss_duplicate') || 'Dismiss -- I\'ve reviewed this, not actually a duplicate'}
               className="rounded-lg p-1 text-gray-400 transition hover:bg-black/5 hover:text-gray-600 disabled:opacity-50 dark:hover:bg-white/10 dark:hover:text-gray-200"
             >
               <EyeOff className="h-3.5 w-3.5" />
             </button>
-          )}
+          ) : null}
         </div>
       </div>
       <div className="space-y-1">
         {cluster.contacts.map((contact) => {
-          const isPendingKeeper = pendingKeeperId === contact.id
           return (
             <div key={contact.id} className="flex flex-wrap items-center justify-between gap-x-2 gap-y-0.5 text-sm">
               <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
@@ -192,26 +191,16 @@ function ClusterCard({
                 })() : null}
               </div>
               <div className="flex flex-shrink-0 items-center gap-1">
-                {cluster.contacts.length >= 2 ? (
+                {canResolveConflicts && cluster.contacts.length >= 2 ? (
                   <button
                     type="button"
-                    onClick={() => clickMerge(contact)}
+                    onClick={() => setPendingAction({ kind: 'merge', keeper: contact })}
                     disabled={busy}
-                    title={isPendingKeeper
-                      ? (t('merge_confirm_hint') || 'Tap again to confirm -- the other record(s) will be merged into this one and deleted')
-                      : (t('merge_into_hint') || 'Keep this one, merge the other(s) into it')}
-                    className={`inline-flex items-center gap-1 rounded-lg px-1.5 py-0.5 text-[11px] font-medium transition disabled:opacity-50 ${
-                      isPendingKeeper
-                        ? 'bg-emerald-600 text-white hover:bg-emerald-700'
-                        : 'text-emerald-700 hover:bg-emerald-50 dark:text-emerald-300 dark:hover:bg-emerald-900/20'
-                    }`}
+                    title={t('merge_into_hint') || 'Keep this one, merge the other candidate(s) into it'}
+                    className="inline-flex items-center gap-1 rounded-lg px-1.5 py-0.5 text-[11px] font-medium text-emerald-700 transition hover:bg-emerald-50 disabled:opacity-50 dark:text-emerald-300 dark:hover:bg-emerald-900/20"
                   >
                     <Merge className="h-3 w-3" />
-                    {merging && isPendingKeeper
-                      ? (t('merging') || 'Merging...')
-                      : isPendingKeeper
-                        ? (t('confirm') || 'Confirm')
-                        : (t('keep_this_one') || 'Keep this')}
+                    {t('keep_this_one') || 'Keep this'}
                   </button>
                 ) : null}
                 {contact.name ? (
@@ -230,11 +219,52 @@ function ClusterCard({
           )
         })}
       </div>
+      {pendingAction ? (
+        <ConfirmDialog
+          title={pendingAction.kind === 'merge'
+            ? (t('confirm_merge') || 'Confirm merge')
+            : pendingAction.kind === 'dismiss'
+              ? (t('confirm_keep') || 'Confirm keep separate')
+              : (t('confirm_reopen') || 'Confirm reopen')}
+          message={pendingAction.kind === 'merge'
+            ? (t('merge_review_message') || 'Review every candidate before merging.')
+            : pendingAction.kind === 'dismiss'
+              ? (t('keep_review_message') || 'These records will remain separate and leave the review queue.')
+              : (t('reopen_review_message') || 'This group will return to the review queue.')}
+          items={pendingAction.kind === 'merge'
+            ? [
+                { label: t('before') || 'Before', value: cluster.contacts.map((contact) => contact.name || `#${contact.id}`).join(' · ') },
+                { label: t('after') || 'After', value: `${pendingAction.keeper.name || `#${pendingAction.keeper.id}`} keeps the combined history` },
+                { label: t('merged_records') || 'Merged records', value: mergeTargets.map((contact) => contact.name || `#${contact.id}`).join(' · ') },
+              ]
+            : pendingAction.kind === 'dismiss'
+              ? [
+                  { label: t('before') || 'Before', value: t('needs_review') || 'Needs review' },
+                  { label: t('after') || 'After', value: t('kept_separate') || 'Kept as separate records' },
+                ]
+              : [
+                  { label: t('before') || 'Before', value: t('kept_separate') || 'Kept as separate records' },
+                  { label: t('after') || 'After', value: t('needs_review') || 'Needs review' },
+                ]}
+          confirmLabel={pendingAction.kind === 'merge' ? (t('merge') || 'Merge') : pendingAction.kind === 'dismiss' ? (t('keep') || 'Keep separate') : (t('reopen') || 'Reopen')}
+          working={busy}
+          onConfirm={() => {
+            if (pendingAction.kind === 'merge') onMergeInto(pendingAction.keeper)
+            else if (pendingAction.kind === 'dismiss') onDismiss()
+            else onReopen()
+            setPendingAction(null)
+          }}
+          onClose={() => setPendingAction(null)}
+          t={t}
+        />
+      ) : null}
     </div>
   )
 }
 
 export default function DuplicatesTab({ t, notify, active = true, onResolve, includeSuppliers = true }: DuplicatesTabProps) {
+  const { can } = useApp() as { can: (permissionKey: string, actionKey: string) => boolean }
+  const canResolveConflicts = can('contacts', 'resolve_conflicts')
   // Supplier privacy (Part 383 R2): without the contacts_suppliers grant
   // the supplier duplicates scan isn't offered (its endpoint would 403
   // server-side anyway).
@@ -588,14 +618,14 @@ export default function DuplicatesTab({ t, notify, active = true, onResolve, inc
             {counts.name_only > 0 ? (
               <span>{counts.name_only} {(t(SEVERITY_LABEL_KEY.name_only[0]) || SEVERITY_LABEL_KEY.name_only[1]).toLowerCase()}</span>
             ) : null}
-            <button
+            {canResolveConflicts ? <button
               type="button"
               onClick={() => setSelectedKeys(new Set(visibleClusters.map((cluster) => clusterKey(table, cluster))))}
               disabled={bulkBusy || !visibleClusters.length}
               className="ml-auto text-blue-600 hover:underline disabled:opacity-50 disabled:no-underline dark:text-blue-400"
             >
               {t('select_all') || 'Select all'}
-            </button>
+            </button> : null}
             {selectedKeys.size > 0 ? (
               <button
                 type="button"
@@ -608,7 +638,7 @@ export default function DuplicatesTab({ t, notify, active = true, onResolve, inc
             ) : null}
           </div>
 
-          {selectedKeys.size > 0 ? (
+          {canResolveConflicts && selectedKeys.size > 0 ? (
             <div className="flex flex-wrap items-center gap-2 rounded-xl border border-blue-200 bg-blue-50 px-3 py-2 text-xs dark:border-blue-900/40 dark:bg-blue-950/30">
               <span className="font-medium text-blue-700 dark:text-blue-300">
                 {replaceVars(t('duplicates_bulk_selected_count') || '{count} selected', { count: selectedKeys.size })}
@@ -646,7 +676,8 @@ export default function DuplicatesTab({ t, notify, active = true, onResolve, inc
                   dismissing={dismissingId === id}
                   merging={mergingId === id}
                   selected={selectedKeys.has(id)}
-                  selectable={!bulkBusy}
+                  selectable={canResolveConflicts && !bulkBusy}
+                  canResolveConflicts={canResolveConflicts}
                   onToggleSelect={() => toggleSelected(id)}
                   onResolve={(name) => onResolve?.(TABLE_TO_TAB[table], name)}
                   onDismiss={() => void handleDismiss(cluster)}

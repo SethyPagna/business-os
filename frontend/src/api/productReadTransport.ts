@@ -150,6 +150,19 @@ export function getStockLedger(params: QueryParams = {}): Promise<unknown> {
   return apiFetch('GET', appendQuery('/api/products/stock-ledger', query))
 }
 
+// Server-grouped receiving sessions. Summaries are paged independently from
+// their lines so old-system history never requires downloading the entire
+// stock ledger, and one session cannot be split by movement pagination.
+export function getStockInSessions(params: QueryParams = {}): Promise<unknown> {
+  const query = buildQueryString(params)
+  return apiFetch('GET', appendQuery('/api/products/stock-in-sessions', query))
+}
+
+export function getStockInSessionLines(key: string): Promise<unknown> {
+  const query = buildQueryString({ key })
+  return apiFetch('GET', appendQuery('/api/products/stock-in-session-lines', query))
+}
+
 export function getProductFilters(params: QueryParams = {}): Promise<unknown> {
   const query = buildQueryString(params)
   const cacheKey = `products:filters:${query}`

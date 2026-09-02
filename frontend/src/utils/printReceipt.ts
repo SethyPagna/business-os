@@ -4,6 +4,7 @@ import {
   RECEIPT_PRINT_SETTINGS_STORAGE_KEY,
 } from './receiptAppliedConfig'
 import type { ReceiptPrintSettings } from '../types/receiptContracts'
+import { computeImagePdfLayout } from './receiptPdfLayout.ts'
 
 export const PRINT_DEFAULTS = { ...DEFAULT_RECEIPT_PRINT_SETTINGS }
 const RECEIPT_ASSET_INLINE_CONCURRENCY = 3
@@ -163,9 +164,59 @@ export function normalizeReceiptContentWidth<T>(root: T): T {
     node.style.marginLeft = 'auto'
     node.style.marginRight = 'auto'
     node.style.boxSizing = 'border-box'
-    node.style.overflowX = 'hidden'
+    // The source preview deliberately hides overflow to keep its rounded
+    // paper shell tidy. Carrying that clipping into the printable clone cut
+    // every right-aligned value at the same edge. Printing needs semantic
+    // reflow inside the paper width, never a crop.
+    node.style.overflow = 'visible'
+    node.style.overflowX = 'visible'
     node.style.wordBreak = 'break-word'
     node.style.overflowWrap = 'anywhere'
+
+    // Computed styles are copied from the on-screen preview before the clone
+    // is placed inside the printable content box. Browsers report computed
+    // width/height values in pixels, so carrying those dimensions across
+    // freezes every row at its preview size. Once a long product name wraps
+    // on the narrower print surface, the frozen parent height makes the next
+    // row overlap it. Let normal block/grid layout recalculate dimensions for
+    // every receipt node while preserving explicit sizing for actual assets.
+    node.querySelectorAll<HTMLElement>('*').forEach((descendant) => {
+      if (descendant instanceof HTMLImageElement
+        || descendant instanceof SVGElement
+        || descendant instanceof HTMLCanvasElement
+        || descendant instanceof HTMLVideoElement) return
+      descendant.style.height = 'auto'
+      descendant.style.minHeight = '0'
+      descendant.style.maxHeight = 'none'
+    })
+
+    node.querySelectorAll<HTMLElement>('[data-receipt-line="true"]').forEach((line) => {
+      line.style.width = '100%'
+      line.style.minWidth = '0'
+      line.style.maxWidth = '100%'
+      line.style.height = 'auto'
+      line.style.minHeight = '0'
+      line.style.maxHeight = 'none'
+      line.style.overflow = 'visible'
+      const hasQty = Boolean(line.querySelector('[data-receipt-cell="qty"]'))
+      const hasPrice = Boolean(line.querySelector('[data-receipt-cell="price"]'))
+      if (hasQty && hasPrice) {
+        // Replace pixel tracks captured from the on-screen preview with tracks
+        // that are recalculated against the actual printable content box.
+        line.style.gridTemplateColumns = 'minmax(0,1fr) 2.5rem minmax(4.25rem,auto)'
+      } else if (line.children.length === 2) {
+        line.style.gridTemplateColumns = 'minmax(0,1fr) minmax(4.25rem,auto)'
+      }
+    })
+
+    node.querySelectorAll<HTMLElement>('[data-receipt-cell="name"], [data-receipt-cell="price"]')
+      .forEach((cell) => {
+        cell.style.minWidth = '0'
+        cell.style.maxWidth = '100%'
+        cell.style.height = 'auto'
+        cell.style.maxHeight = 'none'
+        cell.style.overflow = 'visible'
+      })
   })
 
   return root
@@ -325,17 +376,20 @@ function buildPdfStream(dict: string, bodyBytes: ByteChunk): ByteChunk {
   ])
 }
 
-function buildSingleImagePdf({ imageBytes, imageWidthPx, imageHeightPx, pageWidthPt, pageHeightPt: fixedHeightPt, title = 'Receipt' }: ImagePdfInput): ByteChunk {
+export function buildSingleImagePdf({ imageBytes, imageWidthPx, imageHeightPx, pageWidthPt, pageHeightPt: fixedHeightPt, title = 'Receipt' }: ImagePdfInput): ByteChunk {
   const encoder = new TextEncoder()
-  const contentHeightPt = pageWidthPt * (imageHeightPx / imageWidthPx)
-  // Continuous-roll thermal paper (58/72/80mm) has no fixed length, so the
-  // page just wraps the content. Fixed-sheet formats (A4/Letter/custom with
-  // an explicit height) pass a minimum height here so a short receipt still
-  // gets a full-size page instead of a tiny sliver -- while a receipt longer
-  // than the sheet still renders in full rather than being cut off.
-  const pageHeightPt = Math.max(36, fixedHeightPt || 0, contentHeightPt)
+  // Continuous rolls wrap the complete rendered receipt. A fixed sheet keeps
+  // its exact physical MediaBox; oversized content is uniformly scaled down
+  // and centered instead of silently changing 80x50 into a taller page or
+  // clipping an edge at the printer driver.
+  const { pageHeightPt, drawWidthPt, drawHeightPt, drawXPt, drawYPt } = computeImagePdfLayout({
+    imageWidthPx,
+    imageHeightPx,
+    pageWidthPt,
+    fixedHeightPt,
+  })
   const safeTitle = String(title === '' ? '' : (title || 'Receipt')).replace(/[()\\]/g, '')
-  const content = encoder.encode(`q\n${pageWidthPt.toFixed(2)} 0 0 ${pageHeightPt.toFixed(2)} 0 0 cm\n/Im0 Do\nQ`)
+  const content = encoder.encode(`q\n${drawWidthPt.toFixed(2)} 0 0 ${drawHeightPt.toFixed(2)} ${drawXPt.toFixed(2)} ${drawYPt.toFixed(2)} cm\n/Im0 Do\nQ`)
 
   const objects = [
     encoder.encode(`<< /Type /Catalog /Pages 2 0 R /ViewerPreferences << /DisplayDocTitle true >> >>`),
@@ -406,14 +460,19 @@ function buildTextOnlyPdf({ lines, pageWidthPt, pageHeightPt: fixedHeightPt, tit
     .slice(0, 260)
 
   const contentHeightPt = margin * 2 + preparedLines.length * lineHeight + 12
-  const pageHeightPt = Math.max(72, fixedHeightPt || 0, contentHeightPt)
-  const startY = pageHeightPt - margin - fontSize
-  const contentLines = ['BT', `/F1 ${fontSize} Tf`, `${margin} ${startY.toFixed(2)} Td`]
+  const pageHeightPt = fixedHeightPt != null ? Math.max(72, fixedHeightPt) : Math.max(72, contentHeightPt)
+  const fixedContentScale = fixedHeightPt != null
+    ? Math.min(1, Math.max(0.1, (pageHeightPt - margin * 2) / Math.max(1, preparedLines.length * lineHeight + 12)))
+    : 1
+  const fittedFontSize = fontSize * fixedContentScale
+  const fittedLineHeight = lineHeight * fixedContentScale
+  const startY = pageHeightPt - margin - fittedFontSize
+  const contentLines = ['BT', `/F1 ${fittedFontSize.toFixed(2)} Tf`, `${margin} ${startY.toFixed(2)} Td`]
 
   preparedLines.forEach((line, index) => {
     const escaped = escapePdfText(line)
     contentLines.push(`(${escaped}) Tj`)
-    if (index < preparedLines.length - 1) contentLines.push(`0 -${lineHeight} Td`)
+    if (index < preparedLines.length - 1) contentLines.push(`0 -${fittedLineHeight.toFixed(2)} Td`)
   })
   contentLines.push('ET')
 
@@ -705,7 +764,7 @@ async function renderElementToCanvas(element: HTMLElement): Promise<HTMLCanvasEl
     1,
     Math.ceil(rect.width || element.offsetWidth || element.scrollWidth || 320),
   )
-  const height = Math.max(
+  const sourceHeight = Math.max(
     1,
     Math.ceil(element.scrollHeight || rect.height || element.offsetHeight || 200),
   )
@@ -725,41 +784,49 @@ async function renderElementToCanvas(element: HTMLElement): Promise<HTMLCanvasEl
   cloned.style.margin = '0'
   await inlineImageNodeSources(cloned)
   await inlineStyleAssetUrls(cloned)
-  const markup = cloned.outerHTML
-  const svg = `
-    <svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">
-      <foreignObject width="100%" height="100%">
-        <div xmlns="http://www.w3.org/1999/xhtml" style="width:${width}px;height:${height}px;background:#ffffff;overflow:hidden;">
-          ${markup}
-        </div>
-      </foreignObject>
-    </svg>
-  `
-
-  const blob = new Blob([svg], { type: 'image/svg+xml;charset=utf-8' })
-  const url = URL.createObjectURL(blob)
-
+  // Rasterizing an SVG <foreignObject> and then calling canvas.toDataURL()
+  // taints the canvas in Safari and in current Chromium builds. That made the
+  // visible receipt look correct but caused Open PDF / Image to fail and fall
+  // back to the browser print view. html2canvas paints the already-sanitized,
+  // fully inlined clone directly, so the resulting canvas remains exportable
+  // on desktop, Android PWA, and iOS PWA.
+  const stage = document.createElement('div')
+  stage.setAttribute('aria-hidden', 'true')
+  stage.style.position = 'fixed'
+  stage.style.left = '-10000px'
+  stage.style.top = '0'
+  stage.style.width = `${width}px`
+  stage.style.minHeight = `${sourceHeight}px`
+  stage.style.height = 'auto'
+  stage.style.overflow = 'visible'
+  stage.style.background = '#ffffff'
+  stage.style.pointerEvents = 'none'
+  stage.appendChild(cloned)
+  document.body.appendChild(stage)
   try {
-    const image = await new Promise<HTMLImageElement>((resolve, reject) => {
-      const img = new Image()
-      img.decoding = 'sync'
-      img.onload = () => resolve(img)
-      img.onerror = () => reject(new Error('Failed to rasterize receipt layout'))
-      img.src = url
+    await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()))
+    await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()))
+    const renderedRect = cloned.getBoundingClientRect()
+    const renderedHeight = Math.max(
+      1,
+      Math.ceil(cloned.scrollHeight || renderedRect.height || cloned.offsetHeight || sourceHeight),
+    )
+    const { default: html2canvas } = await import('html2canvas')
+    return await html2canvas(cloned, {
+      backgroundColor: '#ffffff',
+      scale,
+      width,
+      height: renderedHeight,
+      windowWidth: width,
+      windowHeight: renderedHeight,
+      scrollX: 0,
+      scrollY: 0,
+      useCORS: true,
+      allowTaint: false,
+      logging: false,
     })
-
-    const canvas = document.createElement('canvas')
-    canvas.width = Math.ceil(width * scale)
-    canvas.height = Math.ceil(height * scale)
-    const context = canvas.getContext('2d')
-    if (!context) throw new Error('Canvas rendering unavailable')
-    context.fillStyle = '#ffffff'
-    context.fillRect(0, 0, canvas.width, canvas.height)
-    context.scale(scale, scale)
-    context.drawImage(image, 0, 0, width, height)
-    return canvas
   } finally {
-    URL.revokeObjectURL(url)
+    stage.remove()
   }
 }
 
@@ -769,6 +836,7 @@ async function withReceiptElement<T>(
   action: (host: HTMLElement) => T | Promise<T>,
   printSettings: ReceiptPrintSettings = getPrintSettings(),
 ): Promise<T> {
+  const isElementContent = typeof HTMLElement !== 'undefined' && content instanceof HTMLElement
   const host = document.createElement('div')
   host.setAttribute('aria-hidden', 'true')
   host.style.position = 'fixed'
@@ -778,7 +846,13 @@ async function withReceiptElement<T>(
   host.style.maxWidth = `${widthMm}mm`
   host.style.background = '#fff'
   host.style.boxSizing = 'border-box'
-  host.style.padding = `${Math.max(0, parsePrintNumber(printSettings.marginTop, 4))}mm ${Math.max(0, parsePrintNumber(printSettings.marginRight, 4))}mm ${Math.max(0, parsePrintNumber(printSettings.marginBottom, 4))}mm ${Math.max(0, parsePrintNumber(printSettings.marginLeft, 4))}mm`
+  const printPadding = `${Math.max(0, parsePrintNumber(printSettings.marginTop, 4))}mm ${Math.max(0, parsePrintNumber(printSettings.marginRight, 4))}mm ${Math.max(0, parsePrintNumber(printSettings.marginBottom, 4))}mm ${Math.max(0, parsePrintNumber(printSettings.marginLeft, 4))}mm`
+  // Receipt components already own the full paper-width shell and its inner
+  // padding. Applying the configured margins to the outer host as well made
+  // an 80 mm receipt behave like a roughly 72 mm receipt, which was the source
+  // of the excessive side margins and narrow/cropped columns. String content
+  // has no shell, so it still receives the host padding.
+  host.style.padding = isElementContent ? '0' : printPadding
   host.style.pointerEvents = 'none'
   const inner = document.createElement('div')
   inner.style.width = '100%'
@@ -788,8 +862,15 @@ async function withReceiptElement<T>(
     inner.style.transform = `scale(${scaleFactor})`
     inner.style.width = `${100 / scaleFactor}%`
   }
-  if (typeof HTMLElement !== 'undefined' && content instanceof HTMLElement) {
+  if (isElementContent) {
     const cloned = normalizeReceiptContentWidth(cloneElementWithInlineStyles(content))
+    // On continuous rolls the receipt shell's padding is the physical print
+    // margin. Replace its screen-preview padding with the operator setting,
+    // instead of stacking two independent margins. Fixed cards keep their
+    // deliberately designed internal card padding.
+    if (cloned && getPaperHeightMm(printSettings) == null) {
+      cloned.style.padding = printPadding
+    }
     inner.innerHTML = cloned?.outerHTML || ''
   } else {
     inner.innerHTML = String(content || '')
@@ -945,13 +1026,17 @@ function buildPrintablePreviewDocument(layout: PrintableReceiptLayout, options: 
         padding-bottom: 8px;
       }
       .receipt-frame {
-        width: calc(${widthMm}mm + 32px);
+        /* The receipt content already contains its designed paper padding.
+           Adding another 16px frame around it made the fallback preview look
+           noticeably narrower and more heavily margined than the receipt the
+           cashier just reviewed. Keep the frame at the exact paper width. */
+        width: ${widthMm}mm;
         max-width: none;
         flex: 0 0 auto;
-        padding: 16px;
-        border-radius: 14px;
-        background: #ffffff;
-        box-shadow: 0 22px 58px rgba(15, 23, 42, 0.16);
+        padding: 0;
+        border-radius: 8px;
+        background: transparent;
+        box-shadow: 0 16px 38px rgba(15, 23, 42, 0.12);
       }
       .receipt-frame > * {
         margin: 0 auto;
@@ -1022,7 +1107,7 @@ function buildPrintablePreviewDocument(layout: PrintableReceiptLayout, options: 
           <p class="receipt-toolbar-subtitle">Printable receipt preview. Use Print to print now or Save as PDF from your browser.</p>
         </div>
         <div class="receipt-toolbar-actions">
-          <button type="button" data-receipt-action="print">Print / Save PDF</button>
+          <button type="button" data-receipt-action="print">Print</button>
           <button type="button" data-receipt-action="close">Close</button>
         </div>
       </div>

@@ -18,6 +18,7 @@ import { connectWS, disconnectWS, reconnectWS, resumeWS, scheduleConnectWS } fro
 import {
   dispatchSyncUpdates,
   emitSyncQueueChanged,
+  FOREGROUND_RESUME_SYNC_UPDATE_CHANNELS,
   hasStoredUserSession,
   registerOutboxBackgroundSync,
 } from './api/syncRuntime.ts'
@@ -87,6 +88,9 @@ const BOOTSTRAP_OFFLINE_DB_WRITE_DELAY_MS = 45_000
 const BOOTSTRAP_OFFLINE_DB_WRITE_IDLE_TIMEOUT_MS = 60_000
 const SERVICE_WORKER_UPDATE_INTERVAL_MS = 15 * 60_000
 const OFFLINE_VAULT_IDLE_LOCK_MS = 15 * 60_000
+const OFFLINE_OUTBOX_SYNC_LEASE_MS = 60_000
+const FOREGROUND_REFRESH_AFTER_MS = 45_000
+const FOREGROUND_RECOVERY_THROTTLE_MS = 1500
 const OFFLINE_FILE_CHUNK_SIZE = 1024 * 1024
 const OFFLINE_FILE_CHUNK_STATUS_WRITE_CONCURRENCY = 3
 const PENDING_SYNC_PREVIEW_LIMIT = 25
@@ -99,6 +103,9 @@ let offlineVaultKey: OfflineVaultKey = null
 let offlineVaultUnlockedAt = 0
 let offlineVaultIdleTimer: number | null = null
 let sessionRecoveryListenersRegistered = false
+let backgroundedAt = 0
+let lastForegroundRecoveryAt = 0
+let deferredForegroundRecoveryTimer = 0
 let methodsModulePromise: Promise<MethodsModule> | null = null
 let appBootstrapModulePromise: Promise<AppBootstrapModule> | null = null
 let authTransportModulePromise: Promise<AuthTransportModule> | null = null
@@ -475,34 +482,36 @@ async function queueOfflineFileChunks(file: File, ownerOperation: OfflineFileOwn
   const offlineDb = await getOfflineDb()
   const upload_id = ownerOperation.upload_id || `offline_file_${Date.now()}_${Math.random().toString(36).slice(2)}`
   const chunkCount = Math.ceil(Number(file.size || 0) / OFFLINE_FILE_CHUNK_SIZE)
-  const wholeBytes = new Uint8Array(await file.arrayBuffer())
-  const fileSha256 = await sha256Hex(wholeBytes)
   const createdAt = new Date().toISOString()
-  const manifest = {
+  const buildingManifest = {
     upload_id,
     file_name: file.name || 'offline-upload.bin',
     mime: file.type || '',
-    size: Number(file.size || wholeBytes.byteLength || 0),
-    sha256: fileSha256,
+    size: Number(file.size || 0),
+    sha256: '',
     chunk_count: chunkCount,
     chunk_size: OFFLINE_FILE_CHUNK_SIZE,
     owner_operation_id: ownerOperation.operation_id || '',
     created_at: createdAt,
+    staging_status: 'building',
   }
-  const encryptedManifest = await encryptOfflineVaultValue(manifest)
+  const encryptedManifest = await encryptOfflineVaultValue(buildingManifest)
   await offlineDb.offline_file_chunks.put({
     upload_id,
     chunk_index: -1,
-    status: 'manifest',
+    status: 'building',
     created_at: createdAt,
     updated_at: createdAt,
-    payload_digest: await sha256Hex(manifest),
+    payload_digest: await sha256Hex(buildingManifest),
     encrypted_payload: encryptedManifest.encrypted_payload,
     iv: encryptedManifest.iv,
   })
   for (let index = 0; index < chunkCount; index += 1) {
     const start = index * OFFLINE_FILE_CHUNK_SIZE
-    const chunk = wholeBytes.slice(start, start + OFFLINE_FILE_CHUNK_SIZE)
+    // Read and persist one slice at a time. This keeps large uploads from being
+    // duplicated in memory and leaves an explicit `building` marker if iOS
+    // suspends or terminates the process between chunk commits.
+    const chunk = new Uint8Array(await file.slice(start, start + OFFLINE_FILE_CHUNK_SIZE).arrayBuffer())
     const encrypted = await encryptOfflineVaultValue({ chunk: bytesToBase64(chunk), chunk_index: index })
     await offlineDb.offline_file_chunks.put({
       upload_id,
@@ -515,6 +524,26 @@ async function queueOfflineFileChunks(file: File, ownerOperation: OfflineFileOwn
       iv: encrypted.iv,
     })
   }
+  // WebCrypto does not expose an incremental SHA-256 API. Compute the whole-
+  // file digest only after every encrypted chunk is durable, then atomically
+  // promote the manifest to `ready`. A kill during this final calculation is
+  // recoverable: sync refuses the incomplete `building` upload and asks the
+  // user to reselect the source file instead of completing corrupt data.
+  const fileSha256 = await sha256Hex(new Uint8Array(await file.arrayBuffer()))
+  const manifest = { ...buildingManifest, sha256: fileSha256, staging_status: 'ready' }
+  const readyManifest = await encryptOfflineVaultValue(manifest)
+  const manifestRow = await offlineDb.offline_file_chunks
+    .where('upload_id').equals(upload_id)
+    .filter((row: OfflineRow) => Number(row.chunk_index) === -1)
+    .first()
+  if (!manifestRow?._seq) throw new Error('Offline upload manifest was lost while staging.')
+  await offlineDb.offline_file_chunks.update(manifestRow._seq, {
+    status: 'ready',
+    updated_at: new Date().toISOString(),
+    payload_digest: await sha256Hex(manifest),
+    encrypted_payload: readyManifest.encrypted_payload,
+    iv: readyManifest.iv,
+  })
   registerOutboxBackgroundSync()
   return { success: true, upload_id, chunkCount, sha256: fileSha256 }
 }
@@ -551,8 +580,18 @@ async function syncUnlockedOfflineOutbox(options: OfflineSyncOptions = {}): Prom
   }
   scheduleOfflineVaultIdleLock()
   const offlineDb = await getOfflineDb()
+  const now = Date.now()
   const rows = ((await offlineDb.sync_outbox.toArray().catch(() => [])) as OfflineRow[])
-    .filter((row) => ['pending', 'failed', 'retry'].includes(String(row?.status || 'pending')))
+    .filter((row) => {
+      const status = String(row?.status || 'pending')
+      if (!['pending', 'failed', 'retry', 'syncing'].includes(status)) return false
+      if (status === 'syncing') {
+        const claimedAt = Date.parse(String(row?.updated_at || row?.created_at || ''))
+        if (Number.isFinite(claimedAt) && now - claimedAt < OFFLINE_OUTBOX_SYNC_LEASE_MS) return false
+      }
+      const retryAt = row?.retry_at ? Date.parse(String(row.retry_at)) : 0
+      return options.force || !Number.isFinite(retryAt) || retryAt <= now
+    })
     .sort((a, b) => String(a?.created_at || '').localeCompare(String(b?.created_at || '')))
     .slice(0, Math.max(1, Number(options.limit || 25)))
   if (!rows.length) return { success: true, synced: 0, conflicts: 0, failed: 0 }
@@ -624,6 +663,7 @@ async function syncUnlockedOfflineOutbox(options: OfflineSyncOptions = {}): Prom
   // this project's Big-O sweep. A Map keyed by client_request_id gives
   // O(1) lookups instead.
   const operationsByClientRequestId = new Map(operations.map((operation) => [operation.client_request_id, operation]))
+  const completedOperationKeys = new Set<string | number>()
   let synced = 0
   let conflicts = 0
   let failed = 0
@@ -631,6 +671,7 @@ async function syncUnlockedOfflineOutbox(options: OfflineSyncOptions = {}): Prom
     const matched = operationsByClientRequestId.get(result.client_request_id)
     const id = matched?.row_key
     if (id == null) continue
+    completedOperationKeys.add(id)
     if (result.status === 'applied') {
       synced += 1
       await offlineDb.sync_outbox.update(id, {
@@ -657,6 +698,19 @@ async function syncUnlockedOfflineOutbox(options: OfflineSyncOptions = {}): Prom
       }).catch(() => {})
     }
   }
+  // A partial/invalid 2xx response must not leave omitted operations stuck in
+  // `syncing` forever after an iOS process kill. Return them to retry state.
+  for (const operation of operations) {
+    if (operation.row_key == null) continue
+    if (completedOperationKeys.has(operation.row_key)) continue
+    failed += 1
+    await offlineDb.sync_outbox.update(operation.row_key, {
+      status: 'failed',
+      error: 'Sync response did not include this operation.',
+      retry_at: new Date(Date.now() + 30_000).toISOString(),
+      updated_at: new Date().toISOString(),
+    }).catch(() => {})
+  }
   dispatchOutboxProgress({ status: conflicts ? 'conflict' : (failed ? 'failed' : 'synced'), total: operations.length, synced, conflicts, failed })
   return { success: failed === 0 && conflicts === 0, synced, conflicts, failed }
 }
@@ -680,13 +734,29 @@ async function syncUnlockedOfflineFileChunks(options: OfflineSyncOptions = {}): 
     const rows = allRows.filter((row) => row.upload_id === uploadId)
     const manifestRow = rows.find((row) => Number(row.chunk_index) === -1)
     if (!manifestRow) continue
+    if (manifestRow.status !== 'ready' && manifestRow.status !== 'manifest') {
+      failed += 1
+      dispatchOutboxFileProgress({
+        upload_id: uploadId,
+        status: 'incomplete',
+        error: 'Offline file staging was interrupted. Reselect the file to queue it again.',
+      })
+      continue
+    }
     try {
       const manifest = await decryptOfflineVaultValue(manifestRow.encrypted_payload ? manifestRow : { encrypted_payload: manifestRow.encrypted_payload, iv: manifestRow.iv })
+      const allChunks = rows
+        .filter((row) => Number(row.chunk_index) >= 0)
+        .sort((a, b) => Number(a.chunk_index) - Number(b.chunk_index))
+      const expectedChunkCount = Math.max(0, Number(manifest.chunk_count || 0))
+      const hasCompleteChunkSet = allChunks.length === expectedChunkCount
+        && allChunks.every((row, index) => Number(row.chunk_index) === index)
+      if (!manifest.sha256 || !hasCompleteChunkSet) {
+        throw new Error('Offline file staging is incomplete. Reselect the file to queue it again.')
+      }
       dispatchOutboxFileProgress({ upload_id: uploadId, status: 'initializing', completed, total: uploadIds.length })
       await apiFetch('POST', '/api/sync/files/chunks/init', { manifest })
-      const chunks = rows
-        .filter((row) => Number(row.chunk_index) >= 0 && row.status !== 'synced')
-        .sort((a, b) => Number(a.chunk_index) - Number(b.chunk_index))
+      const chunks = allChunks.filter((row) => row.status !== 'synced')
       for (const row of chunks) {
         const payload = await decryptOfflineVaultValue(row.encrypted_payload ? row : { encrypted_payload: row.encrypted_payload, iv: row.iv })
         const chunkBytes = base64ToBytes(payload.chunk)
@@ -767,7 +837,7 @@ function refreshServiceWorkerSoon(force = false): void {
 function runOfflineMaintenance(force = false): void {
   if (typeof navigator !== 'undefined' && navigator.onLine === false) return
   if (!hasStoredUserSession()) return
-  loadSaleWriteTransportModule()
+  const salesSync = loadSaleWriteTransportModule()
     .then((module) => module.syncPendingSalesQueue({ force: true }))
     .catch(() => {})
   if (offlineVaultKey) {
@@ -775,7 +845,10 @@ function runOfflineMaintenance(force = false): void {
     syncUnlockedOfflineFileChunks({ force }).catch(() => {})
   }
   refreshOfflineSnapshotSoon(force)
-  registerOutboxBackgroundSync()
+  // Let the foreground sale replay acquire/release its IndexedDB lease before
+  // asking the worker to inspect the same queue. This avoids two contexts
+  // racing the same row while retaining the worker fallback for generic work.
+  salesSync.finally(() => registerOutboxBackgroundSync())
   refreshServiceWorkerSoon(force)
 }
 
@@ -815,22 +888,61 @@ function scheduleInitialOfflineMaintenance(): void {
 function ensureSessionRecoveryListeners(): void {
   if (typeof window === 'undefined' || sessionRecoveryListenersRegistered) return
   sessionRecoveryListenersRegistered = true
-  window.addEventListener('online', () => {
+
+  const recoverForegroundSession = (reason: string, force = false, refreshData = false): boolean => {
+    if (!hasStoredUserSession()) return false
+    const now = Date.now()
+    const elapsedSinceRecovery = now - lastForegroundRecoveryAt
+    if (elapsedSinceRecovery < FOREGROUND_RECOVERY_THROTTLE_MS) {
+      // iOS commonly emits online/focus/visibility/pageshow as one burst. Do
+      // not let an early lightweight event suppress the stronger BFCache or
+      // long-background refresh that follows milliseconds later.
+      if (refreshData) {
+        if (deferredForegroundRecoveryTimer) window.clearTimeout(deferredForegroundRecoveryTimer)
+        deferredForegroundRecoveryTimer = window.setTimeout(() => {
+          deferredForegroundRecoveryTimer = 0
+          recoverForegroundSession(reason, true, true)
+          backgroundedAt = 0
+        }, Math.max(0, FOREGROUND_RECOVERY_THROTTLE_MS - elapsedSinceRecovery + 20))
+      }
+      return false
+    }
+    lastForegroundRecoveryAt = now
     resumeWS()
     startHealthCheck()
-    pingServerHealth(true).catch(() => {})
-    runOfflineMaintenance(true)
+    pingServerHealth(force).catch(() => {})
+    runOfflineMaintenance(force)
+    if (refreshData) {
+      dispatchSyncUpdates(FOREGROUND_RESUME_SYNC_UPDATE_CHANNELS, reason)
+    }
+    return true
+  }
+
+  const recoverAfterBackground = (reason: string, persisted = false) => {
+    const elapsed = backgroundedAt > 0 ? Date.now() - backgroundedAt : 0
+    const needsFullRefresh = persisted || elapsed >= FOREGROUND_REFRESH_AFTER_MS
+    const recovered = recoverForegroundSession(reason, needsFullRefresh, needsFullRefresh)
+    if (recovered || !needsFullRefresh) backgroundedAt = 0
+  }
+
+  window.addEventListener('online', () => {
+    recoverForegroundSession('network-online', true, false)
   })
   window.addEventListener('focus', () => {
-    resumeWS()
-    pingServerHealth().catch(() => {})
-    runOfflineMaintenance()
+    recoverAfterBackground('window-focus')
   })
   document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState !== 'visible') return
-    resumeWS()
-    pingServerHealth().catch(() => {})
-    runOfflineMaintenance()
+    if (document.visibilityState === 'hidden') {
+      backgroundedAt = Date.now()
+      return
+    }
+    recoverAfterBackground('visibility-resume')
+  })
+  window.addEventListener('pagehide', () => {
+    backgroundedAt = Date.now()
+  })
+  window.addEventListener('pageshow', (event) => {
+    recoverAfterBackground('pageshow-resume', Boolean((event as PageTransitionEvent).persisted))
   })
   window.addEventListener('sync:reconnected', () => {
     runOfflineMaintenance(true)
@@ -1009,6 +1121,7 @@ const staticApi = {
   otpSetup: getAuthTransportMethod('otpSetup'),
   otpConfirm: getAuthTransportMethod('otpConfirm'),
   otpDisable: getAuthTransportMethod('otpDisable'),
+  otpRecoveryReset: getAuthTransportMethod('otpRecoveryReset'),
   otpVerify: getAuthTransportMethod('otpVerify'),
   otpStatus: getAuthTransportMethod('otpStatus'),
   startGoogleOauth: getAuthTransportMethod('startGoogleOauth'),

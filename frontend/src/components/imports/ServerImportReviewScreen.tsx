@@ -3,6 +3,7 @@ import Loader2 from 'lucide-react/dist/esm/icons/loader-2.js'
 import Search from 'lucide-react/dist/esm/icons/search.js'
 import AlertTriangle from 'lucide-react/dist/esm/icons/alert-triangle.js'
 import AppSelect from '../shared/AppSelect'
+import PaginationControls from '../shared/PaginationControls'
 import { approveImportJob, getImportJob, getImportJobReview } from '../../api/importJobsTransport'
 import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards'
 import { importPollDelayMs } from '../../utils/importPoll'
@@ -141,7 +142,6 @@ export default function ServerImportReviewScreen({ jobId, label, source, t, noti
     return () => { cancelled = true }
   }, [filter, jobId, page, query, sort, status, autoApprove, autoFellBack])
 
-  const pages = Math.max(1, Math.ceil(total / PAGE_SIZE))
   const summary = useMemo(() => ['create', 'update', 'skip', 'error']
     .filter((key) => Number(counts[key] || 0) > 0)
     .map((key) => `${key}: ${Number(counts[key] || 0)}`)
@@ -245,7 +245,7 @@ export default function ServerImportReviewScreen({ jobId, label, source, t, noti
           </table>
         ) : <div className="p-8 text-center text-sm text-slate-500">{tr('no_matching_rows', 'No matching rows.')}</div>}
       </div>
-      {total > PAGE_SIZE ? <div className="flex items-center justify-between text-xs text-slate-500"><span>{tr('page_of', 'Page {page} of {pages}').replace('{page}', String(page)).replace('{pages}', String(pages))}</span><div className="flex gap-2"><button type="button" className="btn-secondary px-2.5 py-1 text-xs" disabled={page <= 1} onClick={() => setPage((value) => Math.max(1, value - 1))}>{tr('previous', 'Previous')}</button><button type="button" className="btn-secondary px-2.5 py-1 text-xs" disabled={page >= pages} onClick={() => setPage((value) => value + 1)}>{tr('next', 'Next')}</button></div></div> : null}
+      <div className="flex justify-center"><PaginationControls compact rangeAsPageSize page={page} pageSize={PAGE_SIZE} totalItems={total} label={tr('records', 'records')} t={t} onPageChange={setPage} /></div>
       {jobError ? <p className="text-xs text-red-600 dark:text-red-400">{jobError}</p> : null}
       <div className="flex justify-end gap-2 border-t border-slate-100 pt-3 dark:border-slate-800">
         <button type="button" className="btn-secondary" disabled={approving} onClick={() => void onReviewLater()}>{tr('review_later', 'Review later')}</button>

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import InfoHint from './InfoHint.tsx'
 
 // D5a: the one supplier picker every manual add-stock/receive surface
 // shares (ReceiveBatchModal, InventoryStockModals, BranchStockAdjuster,
@@ -33,11 +34,26 @@ type SupplierNameRow = { id: number; name: string }
 
 let supplierNamesCache: { rows: SupplierNameRow[]; at: number } | null = null
 const SUPPLIER_NAMES_TTL_MS = 60_000
+let supplierSyncListenerInstalled = false
+
+export function invalidateSupplierNamesCache(): void {
+  supplierNamesCache = null
+}
+
+function ensureSupplierSyncCacheListener(): void {
+  if (supplierSyncListenerInstalled || typeof window === 'undefined') return
+  supplierSyncListenerInstalled = true
+  window.addEventListener('sync:update', (event: Event) => {
+    const detail = (event as CustomEvent<{ channel?: string }>).detail
+    if (String(detail?.channel || '') === 'suppliers') invalidateSupplierNamesCache()
+  })
+}
 
 // Exported for other supplier-scoped controls (StockChangeSection's D2
 // ledger filter) so they share this one cached name-only read instead of
 // re-fetching or re-implementing it.
 export async function loadSupplierNames(): Promise<SupplierNameRow[]> {
+  ensureSupplierSyncCacheListener()
   if (supplierNamesCache && Date.now() - supplierNamesCache.at < SUPPLIER_NAMES_TTL_MS) {
     return supplierNamesCache.rows
   }
@@ -64,6 +80,8 @@ type SupplierPickerFieldProps = {
   // every lot" note, or "this lot has no supplier yet -- your choice will
   // be recorded on it").
   hint?: string | null
+  /** Keep explanatory copy out of dense forms while retaining touch/keyboard access. */
+  hintDisplay?: 'inline' | 'tooltip'
   disabled?: boolean
   idPrefix: string
 }
@@ -74,6 +92,7 @@ export default function SupplierPickerField({
   tr,
   lockedName,
   hint,
+  hintDisplay = 'inline',
   disabled,
   idPrefix,
 }: SupplierPickerFieldProps) {
@@ -84,6 +103,19 @@ export default function SupplierPickerField({
   useEffect(() => {
     aliveRef.current = true
     return () => { aliveRef.current = false }
+  }, [])
+
+  useEffect(() => {
+    const onSync = (event: Event) => {
+      const detail = (event as CustomEvent<{ channel?: string }>).detail
+      if (String(detail?.channel || '') !== 'suppliers') return
+      invalidateSupplierNamesCache()
+      // Drop suggestions captured before the rename/merge. The next focus
+      // performs the versioned server read; typed free text remains intact.
+      setRows([])
+    }
+    window.addEventListener('sync:update', onSync)
+    return () => window.removeEventListener('sync:update', onSync)
   }, [])
 
   const ensureLoaded = () => {
@@ -121,7 +153,10 @@ export default function SupplierPickerField({
 
   return (
     <div className="relative block">
-      <label htmlFor={`${idPrefix}-supplier`} className="mb-1 block text-[11px] font-medium text-gray-600 dark:text-gray-400">{label}</label>
+      <span className="mb-1 flex items-center gap-1 text-[11px] font-medium text-gray-600 dark:text-gray-400">
+        <label htmlFor={`${idPrefix}-supplier`}>{label}</label>
+        {hint && hintDisplay === 'tooltip' ? <InfoHint text={hint} label={label} /> : null}
+      </span>
       <input
         id={`${idPrefix}-supplier`}
         className="input w-full text-sm"
@@ -160,7 +195,7 @@ export default function SupplierPickerField({
           ))}
         </div>
       ) : null}
-      {hint ? <span className="mt-1 block text-[11px] text-gray-400">{hint}</span> : null}
+      {hint && hintDisplay === 'inline' ? <span className="mt-1 block text-[11px] text-gray-400">{hint}</span> : null}
       {value.supplierName.trim() !== '' ? (
         <span className="mt-1 block text-[11px] text-gray-400">
           {value.supplierId != null

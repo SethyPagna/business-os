@@ -14,9 +14,11 @@ import { fileURLToPath } from 'node:url'
 // The split is by AUDIENCE and is FIXED, not per-merchant customizable: the
 // favicon/PWA-icon customization in Settings + the portal editor was removed
 // (11.14-16), so both brands' icons are static assets now.
-//   - Admin keeps the static /manifest.json + /favicon.ico from index.html.
-//   - The storefront swaps to STATIC same-origin files -- a Leang icon and
-//     /portal-manifest.json. This used to build the manifest at runtime as a
+//   - The raw HTML is storefront-first because iOS may snapshot metadata
+//     before JavaScript executes.
+//   - The admin hostname synchronously swaps to /manifest.json + Business OS
+//     icons; the storefront keeps the static Leang assets. This used to build
+//     the manifest at runtime as a
 //     blob: URL, which Chrome refuses to treat as installable, so the
 //     storefront lost its Install prompt entirely (16.1). Static files ARE
 //     installable AND keep the Leang branding, so both hold at once.
@@ -38,15 +40,18 @@ const manifest = JSON.parse(read('../public/manifest.json')) as {
 const publicCatalog = read('../src/components/catalog/PublicCatalogPage.tsx')
 const login = read('../src/components/auth/Login.tsx')
 
-// --- admin app keeps Business OS branding ---------------------------------
+// --- raw HTML is public-first; admin bootstrap restores Business OS --------
 
-assert.match(indexHtml, /href="\/favicon\.ico/, 'admin index.html should link the static favicon.ico')
-assert.match(indexHtml, /href="\/icon-192\.png"/, 'admin index.html should link the Business OS 192 icon')
-assert.match(indexHtml, /href="\/icon-512\.png"/, 'admin index.html should link the Business OS 512 icon')
+assert.match(indexHtml, /rel="manifest" href="\/portal-manifest\.json"/, 'raw HTML must identify the storefront before iOS snapshots install metadata')
+assert.match(indexHtml, /href="\/leang-cosmetics-icon-192\.png"/, 'raw HTML should use the Leang 192 icon')
+assert.match(indexHtml, /href="\/leang-cosmetics-icon-512\.png"/, 'raw HTML should use the Leang 512 icon')
+assert.match(indexHtml, /href="\/leang-cosmetics-apple-touch-icon-v1\.png"/, 'raw HTML should use the Leang Apple touch icon')
+assert.match(indexHtml, /adminManifest\.setAttribute\('href', '\/manifest\.json'\)/, 'admin bootstrap should restore the Business OS manifest')
+assert.match(indexHtml, /adminAppleIcon\.setAttribute\('href', '\/apple-touch-icon\.png'\)/, 'admin bootstrap should restore the Business OS Apple icon')
 assert.match(indexHtml, /hostname\.indexOf\('admin\.'\) === 0/, 'the bootstrap should distinguish the admin hostname')
 assert.match(indexHtml, /pathname === '\/'\s*\? !adminHostname/, 'the public production root must not be classified as admin')
 
-assert.equal(manifest.name, 'Business OS', 'the STATIC manifest is the admin app -- the storefront builds its own at runtime')
+assert.equal(manifest.name, 'Business OS', 'manifest.json remains the admin app manifest')
 assert.deepEqual(
   manifest.icons.map((icon) => `${icon.src} ${icon.sizes} ${icon.purpose}`).sort(),
   [
@@ -159,14 +164,18 @@ assert.ok(bootstrapMatch, 'the route-aware metadata bootstrap should stay inline
 function runBootstrap(hostname: string, pathname: string) {
   const attributes = new Map<string, string>()
   const elements = new Map<string, { attrs: Map<string, string>; setAttribute(name: string, value: string): void }>()
-  const makeElement = (key: string) => {
-    const element = { attrs: new Map<string, string>(), setAttribute(name: string, value: string) { this.attrs.set(name, value) } }
+  const makeElement = (key: string, initial: Record<string, string> = {}) => {
+    const element = {
+      attrs: new Map<string, string>(Object.entries(initial)),
+      getAttribute(name: string) { return this.attrs.get(name) || null },
+      setAttribute(name: string, value: string) { this.attrs.set(name, value) },
+    }
     elements.set(key, element)
     return element
   }
   const favicon = makeElement('favicon')
-  const png192 = makeElement('png192')
-  const png512 = makeElement('png512')
+  const png192 = makeElement('png192', { sizes: '192x192' })
+  const png512 = makeElement('png512', { sizes: '512x512' })
   const selectors: Record<string, ReturnType<typeof makeElement>> = {
     'meta[name="description"]': makeElement('description'),
     'meta[name="apple-mobile-web-app-title"]': makeElement('apple-title'),
@@ -194,8 +203,9 @@ for (const adminHost of ['admin.leangcosmetics.dpdns.org', 'localhost', '127.0.0
   const adminRoot = runBootstrap(adminHost, '/')
   assert.equal(adminRoot.attributes.get('data-business-os-initial-route'), 'admin', `${adminHost}/ should retain admin branding`)
   assert.equal(adminRoot.document.title, 'Business OS')
-  assert.equal(adminRoot.elements.get('manifest')?.attrs.get('href'), undefined)
-  assert.equal(adminRoot.elements.get('apple-icon')?.attrs.get('href'), undefined)
+  assert.equal(adminRoot.elements.get('manifest')?.attrs.get('href'), '/manifest.json')
+  assert.equal(adminRoot.elements.get('apple-icon')?.attrs.get('href'), '/apple-touch-icon.png')
+  assert.match(adminRoot.favicon.attrs.get('href') || '', /favicon\.ico/)
 }
 
 const appleIconBytes = fs.readFileSync(fileURLToPath(new URL('../public/leang-cosmetics-apple-touch-icon-v1.png', import.meta.url)))

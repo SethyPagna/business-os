@@ -72,7 +72,11 @@ export type FeePayload = {
 export function getFees(params: FeeListParams = {}): Promise<FeeListResult> {
   const query = buildQueryString(params as QueryParams)
   return route(
-    'fees:get',
+    // route() uses this channel as both its 20-second cache key and its
+    // in-flight de-duplication key. Include every effective list parameter;
+    // otherwise page 2, a new page size, or a changed filter can reuse page
+    // 1's cached response and make the pagination controls look broken.
+    `fees:get:${query || 'all'}`,
     () => apiFetch('GET', appendQuery('/api/fees', query)),
     () => ({ fees: [], total: 0, limit: 100, offset: 0, summary: [] }),
     { raceLocalFallback: false },
@@ -82,12 +86,9 @@ export function getFees(params: FeeListParams = {}): Promise<FeeListResult> {
 // Fetch EVERY expense record matching the given filters (for CSV export),
 // paginating past the server's 500-row cap (routes/fees.ts clamps limit to
 // 500). Two deliberate choices keep the result complete and correct:
-//   - It calls apiFetch directly, NOT getFees()/route(). route()'s 20s read
-//     cache and in-flight dedupe are keyed on the CONSTANT 'fees:get' channel
-//     (ignoring limit/offset), so a rapid page-by-page loop through getFees()
-//     would keep returning the first page -- silent truncation. apiFetch has
-//     no such cache, and its GET dedupe key includes the offset in the path,
-//     so every page is a distinct request.
+//   - It calls apiFetch directly rather than filling the interactive list's
+//     short-lived route cache with every export page. apiFetch's GET de-dupe
+//     key includes the offset in the path, so every page is distinct.
 //   - The loop is driven by the server's reported `total`, so it stops exactly
 //     when every matching row has been gathered and never truncates a real
 //     set; a page ceiling derived from that same total guards against a
@@ -125,6 +126,7 @@ export type FeeLabelSuggestion = {
   label: string
   uses: number
   fee_type: FeeType
+  type_counts?: Array<{ fee_type: FeeType; uses: number }>
 }
 
 export function getFeeLabels(): Promise<{ labels: FeeLabelSuggestion[] }> {
@@ -134,6 +136,31 @@ export function getFeeLabels(): Promise<{ labels: FeeLabelSuggestion[] }> {
     () => ({ labels: [] }),
     { raceLocalFallback: false },
   ) as Promise<{ labels: FeeLabelSuggestion[] }>
+}
+
+export function getFeeLabelImpact(from: string, to: string): Promise<unknown> {
+  const query = new URLSearchParams({ from, to })
+  return apiFetch('GET', `/api/fees/labels/impact?${query.toString()}`)
+}
+
+export function replaceFeeLabel(from: string, to: string): Promise<unknown> {
+  return apiFetch('POST', '/api/fees/labels/replace', { from, to })
+}
+
+export type FeeLabelTypeImpact = {
+  label: string
+  linked_records: number
+  type_counts: Array<{ fee_type: FeeType; uses: number }>
+  historical_snapshots_preserved: string[]
+}
+
+export function getFeeLabelTypeImpact(label: string): Promise<FeeLabelTypeImpact> {
+  const query = new URLSearchParams({ label })
+  return apiFetch('GET', `/api/fees/labels/type-impact?${query.toString()}`) as Promise<FeeLabelTypeImpact>
+}
+
+export function classifyFeeLabel(label: string, feeType: FeeType): Promise<{ success: boolean; changed: number; label: string; fee_type: FeeType }> {
+  return apiFetch('POST', '/api/fees/labels/classify', { label, fee_type: feeType }) as Promise<{ success: boolean; changed: number; label: string; fee_type: FeeType }>
 }
 
 export function getFee(id: number): Promise<{ fee: FeeRecord }> {

@@ -32,18 +32,23 @@ import path from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { createRequire } from 'node:module'
 import { fileURLToPath } from 'node:url'
+import { resolveArchivedReport } from './legacy-preflight.mjs'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const repo = path.resolve(here, '../../..')
 const cloudflare = path.join(repo, 'cloudflare')
 const downloads = path.resolve(repo, '..')
-const pack = path.join(downloads, 'businessos-migration-aug28')
+const legacyRoot = path.join(repo, 'Migration from old system')
+const pack = fs.existsSync(path.join(legacyRoot, 'businessos-migration-aug28'))
+  ? path.join(legacyRoot, 'businessos-migration-aug28')
+  : path.join(downloads, 'businessos-migration-aug28')
 const require = createRequire(import.meta.url)
 const XLSX = require(path.join(repo, 'frontend/node_modules/xlsx'))
 
-// The 31st reports arrived loose in Downloads; they are archived under
-// Downloads/27th-30th alongside the earlier pack. Accept either location.
+// Prefer the preserved in-repository archive. Loose Downloads copies are only
+// a compatibility fallback for older worktrees that predate that archive.
 const reportFile = (name) => {
+  if (fs.existsSync(legacyRoot)) return resolveArchivedReport(legacyRoot, name)
   const loose = path.join(downloads, name)
   return fs.existsSync(loose) ? loose : path.join(downloads, '27th-30th', name)
 }
@@ -128,9 +133,10 @@ const productRows = queryRows(`
 `)
 const customers = queryRows('SELECT id,name,phone FROM customers ORDER BY id')
 const deliveryContacts = queryRows('SELECT id,name FROM delivery_contacts ORDER BY id')
-const existing0831 = new Set(queryRows(
-  "SELECT receipt_number FROM sales WHERE receipt_number LIKE '43__@2026-08-31' OR substr(created_at,1,10)='2026-08-31'"
-).map((row) => String(row.receipt_number)))
+const existing0831Rows = queryRows(
+  "SELECT receipt_number,cashier_id,cashier_name,created_at,total_usd,client_request_id FROM sales WHERE client_request_id LIKE 'legacy-sale:43__@2026-08-31'"
+)
+const existing0831 = new Map(existing0831Rows.map((row) => [String(row.receipt_number), row]))
 const arTableExists = Number(queryRows(
   "SELECT COUNT(*) c FROM sqlite_master WHERE type='table' AND name='customer_receivables'"
 )[0]?.c || 0) > 0
@@ -233,11 +239,12 @@ for (const row of invoiceRows) {
 const driver = deliveryContacts.find((row) => norm(row.name) === 'driver 1') || null
 if (!driver) throw new Error('Production delivery contact "driver 1" is missing')
 
-// report-user-31st proves Rath (username "rath", id 4) was the sole cashier that
-// day, so the 14 Aug-31 sales are attributed to that account by id -- resolved
-// LIVE from users (never a hard-coded id) so the script is environment-safe. The
-// display name is the username, matching importEngine / the POS. Falls back to
-// the real name in case the username was later changed.
+// report-user-31st is a per-user summary, not an all-day cashier roster. Its
+// $146 gross sale reconciles exactly to receipts 4377..4381 (13.5 + 28.5 + 22
+// + 47 + 35). It therefore proves Rath only for those five receipts. The nine
+// later receipts have no cashier evidence in the supplied reports and must stay
+// unlinked/"Old system" instead of inheriting Rath from the calendar date.
+const RATH_PROVEN_RECEIPTS = new Set([4377, 4378, 4379, 4380, 4381])
 const users = queryRows('SELECT id,username,name FROM users ORDER BY id')
 const cashierRath = users.find((row) => norm(row.username) === 'rath')
   || users.find((row) => norm(row.name) === 'roune rath')
@@ -274,7 +281,7 @@ function receiptModel(receipt, rows) {
     exchangeRate: num(first['Exchange - KHR']) || 4050,
     subtotal, amountPaid: num(first['Grand Total']) || round(subtotal + deliveryFee),
     deliveryFee, isDelivery: norm(first['Delivery Service']) !== 'walk-in' ? 1 : 0,
-    credit, notes,
+    credit, notes, cashier: RATH_PROVEN_RECEIPTS.has(Number(first['Invoice No'])) ? cashierRath : null,
   }
 }
 const saleModels = [...invoiceGroups.entries()]
@@ -285,15 +292,31 @@ const productUnits = round(saleModels.flatMap((s) => s.items).reduce((sum, i) =>
 const productRevenue = round(saleModels.reduce((sum, s) => sum + s.subtotal, 0))
 const deliveryRevenue = round(saleModels.reduce((sum, s) => sum + s.deliveryFee, 0))
 const creditTotal = round(saleModels.reduce((sum, s) => sum + s.credit, 0))
+const rathSales = saleModels.filter((sale) => sale.cashier)
+const rathGross = round(rathSales.reduce((sum, sale) => sum + sale.amountPaid, 0))
 const invoiceLow = Math.min(...saleModels.map((s) => s.sourceInvoice))
 const invoiceHigh = Math.max(...saleModels.map((s) => s.sourceInvoice))
 if (saleModels.length !== 14 || invoiceLow !== 4377 || invoiceHigh !== 4390 ||
-    productUnits !== 24 || productRevenue !== 530 || deliveryRevenue !== 17.5 || creditTotal !== 147) {
-  throw new Error(`Aug-31 sales gate failed: ${JSON.stringify({ n: saleModels.length, invoiceLow, invoiceHigh, productUnits, productRevenue, deliveryRevenue, creditTotal })}`)
+    productUnits !== 24 || productRevenue !== 530 || deliveryRevenue !== 17.5 || creditTotal !== 147 ||
+    rathSales.length !== 5 || rathGross !== 146) {
+  throw new Error(`Aug-31 sales gate failed: ${JSON.stringify({ n: saleModels.length, invoiceLow, invoiceHigh, productUnits, productRevenue, deliveryRevenue, creditTotal, rathSales: rathSales.length, rathGross })}`)
 }
-const alreadyPresent = saleModels.filter((s) => existing0831.has(s.receipt)).map((s) => s.receipt)
-if (existing0831.size && alreadyPresent.length) {
-  throw new Error(`Aug-31 receipts unexpectedly already present (double-count risk): ${alreadyPresent.join(', ')}`)
+const existingTargetRows = saleModels.map((sale) => existing0831.get(sale.receipt)).filter(Boolean)
+if (existingTargetRows.length !== 0 && existingTargetRows.length !== saleModels.length) {
+  throw new Error(`Aug-31 receipts are only partly present (${existingTargetRows.length}/${saleModels.length}); refusing mixed create/correction SQL`)
+}
+for (const sale of saleModels) {
+  const existing = existing0831.get(sale.receipt)
+  if (!existing) continue
+  const requestId = `legacy-sale:${sale.receipt}`
+  const legacyCashierState = (existing.cashier_id == null && String(existing.cashier_name || '') === 'Old system')
+    || (Number(existing.cashier_id) === Number(cashierRath.id) && norm(existing.cashier_name) === norm(cashierRath.username))
+  if (String(existing.client_request_id || '') !== requestId
+      || String(existing.created_at || '') !== sale.createdAt
+      || Math.abs(num(existing.total_usd) - sale.subtotal) > 0.00001
+      || !legacyCashierState) {
+    throw new Error(`Existing Aug-31 receipt identity drifted; refusing correction: ${sale.receipt}`)
+  }
 }
 
 // ---- Aug-31 expenses --------------------------------------------------------
@@ -361,12 +384,19 @@ for (const sale of saleModels) {
     delivery_contact_name,delivery_contact_phone,delivery_contact_address,delivery_fee_usd,delivery_fee_khr,delivery_fee_paid_by,
     sale_status,notes,items,loyalty_accrual,created_at,updated_at,client_request_id
   ) VALUES (
-    ${sql(sale.receipt)},${cashierRath.id},${sql(cashierRath.username)},2,'Leang Cosmetic Shop',${sale.customer?.id || 'NULL'},${sql(sale.customerName)},${sql(sale.customerPhone)},NULL,
+    ${sql(sale.receipt)},${sale.cashier ? sale.cashier.id : 'NULL'},${sql(sale.cashier?.username || 'Old system')},2,'Leang Cosmetic Shop',${sale.customer?.id || 'NULL'},${sql(sale.customerName)},${sql(sale.customerPhone)},NULL,
     ${sql(sale.paymentMethod)},'USD',${sqlNum(sale.exchangeRate)},${sqlNum(sale.subtotal)},0,0,0,0,0,
     ${sqlNum(sale.subtotal)},${Math.round(sale.subtotal * sale.exchangeRate)},${sqlNum(sale.amountPaid)},0,0,0,${sale.isDelivery},${sale.isDelivery ? driver.id : 'NULL'},
     ${sale.isDelivery ? sql(driver.name) : 'NULL'},NULL,NULL,${sqlNum(sale.deliveryFee)},0,'customer','completed',${sql(sale.notes)},'[]',0,
     ${sql(sale.createdAt)},${sql(sale.createdAt)},${sql(clientRequestId)}
   );`)
+  // Existing Aug-31 rows are accepted only after the exact receipt/request/
+  // timestamp/total preflight above. Limit the correction to the two known
+  // legacy states so a later human attribution can never be overwritten.
+  saleStatements.push(`UPDATE sales SET cashier_id=${sale.cashier ? sale.cashier.id : 'NULL'},cashier_name=${sql(sale.cashier?.username || 'Old system')}
+    WHERE receipt_number=${sql(sale.receipt)} AND client_request_id=${sql(clientRequestId)}
+      AND created_at=${sql(sale.createdAt)} AND total_usd=${sqlNum(sale.subtotal)}
+      AND ((cashier_id IS NULL AND cashier_name='Old system') OR (cashier_id=${cashierRath.id} AND lower(cashier_name)=lower(${sql(cashierRath.username)})));`)
   // sale_items -- ALL of this sale's lines in ONE statement. The sale-level
   // NOT EXISTS guard is evaluated against the pre-insert state (SQLite buffers a
   // SELECT that reads the table it writes), so every line lands on the first run
@@ -417,9 +447,10 @@ for (const sale of saleModels) {
       VALUES (${sql(`legacy-sale:${sale.receipt}:${item.lineOrdinal}`)},${item.product.id},2,${item.product.opening_batch_id || 'NULL'},${-item.quantity},${item.quantity},'sale',${sql(`Old-system sale ${sale.receipt}`)},(SELECT id FROM sales WHERE client_request_id=${sql(clientRequestId)}),${sql(sale.createdAt)});`)
   }
   saleStatements.push(`UPDATE legacy_inventory_effects SET occurred_at=${sql(sale.createdAt)} WHERE source_key LIKE ${sql(`legacy-sale:${sale.receipt}:%`)};`)
-  saleStatements.push(`UPDATE inventory_movements SET created_at=${sql(sale.createdAt)}
+  saleStatements.push(`UPDATE inventory_movements SET created_at=${sql(sale.createdAt)},user_id=${sale.cashier ? sale.cashier.id : 'NULL'},user_name=${sql(sale.cashier?.username || 'Old system')}
     WHERE reference_id=(SELECT id FROM sales WHERE client_request_id=${sql(clientRequestId)})
-      AND movement_type='sale' AND reason=${sql(`Old-system sale ${sale.receipt}`)} AND user_name='Old system';`)
+      AND movement_type='sale' AND reason=${sql(`Old-system sale ${sale.receipt}`)}
+      AND ((user_id IS NULL AND user_name='Old system') OR (user_id=${cashierRath.id} AND lower(user_name)=lower(${sql(cashierRath.username)})));`)
 }
 
 const expenseStatements = []

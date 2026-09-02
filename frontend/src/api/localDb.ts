@@ -233,6 +233,18 @@ export async function resetLocalMirrorDb(): Promise<void> {
   } catch (_) {}
 }
 
+export async function resetLocalMirrorDbPreservingOfflineWork(): Promise<void> {
+  const preservedNames = new Set(['sync_queue', 'sync_outbox', 'offline_vault', 'offline_file_chunks'])
+  const tables = (Array.isArray(dexieDb.tables) ? dexieDb.tables.filter((table) => table && !preservedNames.has(table.name)) : []) as LocalTable[]
+  if (!tables.length) return
+  try {
+    if (!dexieDb.isOpen()) await dexieDb.open()
+    await dexieDb.transaction('rw', tables.map((table) => table.name), async () => {
+      for (const table of tables) await table.clear().catch(() => {})
+    })
+  } catch (_) {}
+}
+
 export async function clearLocalMirrorTables(tableNames: unknown[] = []): Promise<void> {
   const names: string[] = []
   const seenNames = new Set<string>()

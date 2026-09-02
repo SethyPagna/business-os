@@ -100,7 +100,7 @@ assert.ok(Number.isInteger(STOCK_ACTION_MAX_UNITS) && STOCK_ACTION_MAX_UNITS > 0
 function makeDb() {
   const sqlite = new Database(':memory:')
   sqlite.exec(`
-    CREATE TABLE products (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT, barcode TEXT, unit TEXT, category TEXT, brand TEXT,
+    CREATE TABLE products (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT, name_normalized TEXT, barcode TEXT, unit TEXT, category TEXT, brand TEXT,
       selling_price_usd REAL DEFAULT 0, special_price_usd REAL DEFAULT 0, cost_price_usd REAL DEFAULT 0,
       stock_quantity REAL DEFAULT 0, is_active INTEGER DEFAULT 1, client_request_id TEXT,
       created_at TEXT, updated_at TEXT);
@@ -159,8 +159,8 @@ function makeDb() {
 }
 
 function seedProduct(sqlite, { id, name, barcode, cost = 0, sell = 0, shop = 0, warehouse = 0 }) {
-  sqlite.prepare(`INSERT INTO products(id, name, barcode, unit, selling_price_usd, cost_price_usd, stock_quantity, is_active)
-    VALUES (?, ?, ?, 'pcs', ?, ?, ?, 1)`).run(id, name, barcode || null, sell, cost, shop + warehouse)
+  sqlite.prepare(`INSERT INTO products(id, name, name_normalized, barcode, unit, selling_price_usd, cost_price_usd, stock_quantity, is_active)
+    VALUES (?, ?, ?, ?, 'pcs', ?, ?, ?, 1)`).run(id, name, String(name).trim().toLowerCase().replace(/\s+/g, ' '), barcode || null, sell, cost, shop + warehouse)
   sqlite.prepare(`INSERT INTO branch_stock(product_id, branch_id, quantity) VALUES (?, 1, ?)`).run(id, shop)
   sqlite.prepare(`INSERT INTO branch_stock(product_id, branch_id, quantity) VALUES (?, 2, ?)`).run(id, warehouse)
 }

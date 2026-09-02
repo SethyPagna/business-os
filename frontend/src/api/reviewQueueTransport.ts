@@ -37,7 +37,7 @@ export type PendingActionListParams = {
 export function getPendingActions(params: PendingActionListParams = {}): Promise<{ data: PendingActionRow[] }> {
   const query = buildQueryString(params as QueryParams)
   return route(
-    'review:list',
+    `review:list:${query || 'all'}`,
     () => apiFetch('GET', appendQuery('/api/review', query)),
     () => ({ data: [] }),
     { raceLocalFallback: false },
@@ -46,7 +46,7 @@ export function getPendingActions(params: PendingActionListParams = {}): Promise
 
 export function getPendingAction(id: number): Promise<{ data: PendingActionRow }> {
   return route(
-    'review:get-one',
+    `review:get-one:${id}`,
     () => apiFetch('GET', `/api/review/${encodeURIComponent(String(id))}`),
     null,
     { raceLocalFallback: false },

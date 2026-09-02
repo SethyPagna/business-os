@@ -5,6 +5,7 @@ import SlidersHorizontal from 'lucide-react/dist/esm/icons/sliders-horizontal.js
 import Layers from 'lucide-react/dist/esm/icons/layers.js'
 import ChevronRight from 'lucide-react/dist/esm/icons/chevron-right.js'
 import { useState, Suspense, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
 import { ProductImg, ProductImagePlaceholder } from '../shared/primitives'
 import { getContrastingTextColor } from '../../../utils/color.ts'
 import { calculateProductDiscount } from '../../../utils/pricing.ts'
@@ -23,7 +24,6 @@ const ProductDetailReport = lazyRetry(() => import('./ProductDetailReport.tsx'),
 // Features/Benefits/Ingredients/Caution block (which can run to
 // several hundred characters) always gets cut off with "..." rather
 // than dumping the whole blob inline (Aug 23 ask).
-const DESCRIPTION_PREVIEW_LENGTH = 140
 
 type Translate = (key: string) => string | undefined
 type FormatMoney = (value: unknown) => string
@@ -179,14 +179,14 @@ export default function ProductDetailModal({
     void navigator.clipboard.writeText(String(p.barcode)).catch(() => {})
   }
 
-  // Label column tightened from w-28 (7rem) to w-20 (5rem) and the gap from
+  // Label column tightens to 4rem on phones (then 5rem from sm) and the gap
   // gap-3 to gap-2 -- per the Aug 19 2026 ask to tighten these value/label
   // pairs so each row takes less horizontal space, freeing room in the
   // sheet (see the action-button restack just below for the other half of
   // that same request).
   const Row = ({ label, children }: DetailRowProps) => (
     <div className="flex min-w-0 gap-2">
-      <span className="w-20 flex-shrink-0 pt-0.5 text-xs text-gray-400">{label}</span>
+      <span className="w-16 flex-shrink-0 pt-0.5 text-xs text-gray-400 sm:w-20">{label}</span>
       <span className="min-w-0 flex-1 text-sm text-gray-800 dark:text-gray-200">{children}</span>
     </div>
   )
@@ -205,19 +205,25 @@ export default function ProductDetailModal({
       type="button"
       onClick={onManageBatches}
       disabled={!onManageBatches}
-      className="flex w-full items-center justify-between gap-2 rounded-lg bg-amber-50/70 px-2.5 py-1.5 text-left text-xs text-amber-700 transition-colors hover:bg-amber-50 disabled:cursor-default disabled:opacity-100 dark:bg-amber-950/20 dark:text-amber-200 dark:hover:bg-amber-950/30"
+      className="flex w-full min-w-0 items-center justify-between gap-2 rounded-lg bg-amber-50/70 px-2.5 py-1.5 text-left text-xs text-amber-700 transition-colors hover:bg-amber-50 disabled:cursor-default disabled:opacity-100 dark:bg-amber-950/20 dark:text-amber-200 dark:hover:bg-amber-950/30"
     >
-      <span className="flex items-center gap-1.5">
+      <span className="flex min-w-0 items-center gap-1.5">
         <Layers className="h-3.5 w-3.5" />
-        {T('batches', 'Batches')} <span className="text-amber-500/80 dark:text-amber-300/70">({batchCount})</span>
+        <span className="truncate">{T('batches', 'Batches')}</span> <span className="shrink-0 text-amber-500/80 dark:text-amber-300/70">({batchCount})</span>
       </span>
       {onManageBatches ? <ChevronRight className="h-3.5 w-3.5 flex-shrink-0" /> : null}
     </button>
   ) : null
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-0 sm:items-center sm:p-4" onClick={onClose}>
-      <div className="flex max-h-modal-88 w-full flex-col rounded-t-2xl bg-white shadow-2xl sm:max-w-5xl sm:rounded-2xl dark:bg-gray-800 pb-[env(safe-area-inset-bottom)] sm:pb-0" onClick={(event) => event.stopPropagation()}>
+  const modal = (
+    // This sheet used to live inside Products' page tree at z-50. On mobile,
+    // that put it in a lower stacking context than the fixed app header and
+    // bottom navigation, so those bars could cover its rows and action
+    // footer. Rendering at the body-level overlay layer ensures the sheet is
+    // above both bars, while the safe viewport classes keep every control
+    // inside the usable screen area on notched/short devices.
+    <div className="modal-viewport-safe pointer-events-auto fixed inset-0 z-[1050] flex items-end justify-center overflow-y-auto bg-black/50 sm:items-center sm:p-4" onClick={onClose}>
+      <div className="modal-panel-safe flex w-full flex-col rounded-t-2xl bg-white shadow-2xl sm:max-w-5xl sm:rounded-2xl dark:bg-gray-800" onClick={(event) => event.stopPropagation()}>
         <div className="flex items-center justify-between border-b border-gray-200 p-4 dark:border-gray-700">
           <div className="min-w-0 flex items-center gap-3">
             <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center overflow-hidden rounded-lg bg-gray-100 text-xl dark:bg-gray-700">
@@ -236,17 +242,9 @@ export default function ProductDetailModal({
               )}
             </div>
             <div className="min-w-0">
-              <div className="truncate font-bold text-gray-900 dark:text-white">{productName}</div>
-              {/* Category/brand/barcode/SKU all live on this one line right
-                  below the title now (brand moved up from its own row in
-                  the details grid below -- same "avoid showing it twice"
-                  reasoning Inventory's own ProductDetailModal already
-                  applies to its header line). Category and brand each get
-                  a bounded max-w so Tailwind's `truncate` (which needs a
-                  constrained width to do anything inside a flex-wrap row)
-                  actually clips a long value to "..." instead of wrapping
-                  the whole line or overflowing -- title attr keeps the
-                  full value available on hover/long-press. */}
+              <div className="break-words font-bold text-gray-900 dark:text-white">{productName}</div>
+              {/* Category/brand/SKU stay compact but expose their complete
+                  values through horizontal touch scrolling. */}
               <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-gray-500 dark:text-gray-400">
                 {/* Barcode leads this line ("in view details barcode show
                     first"). It is the identifier someone opens a product to
@@ -255,9 +253,9 @@ export default function ProductDetailModal({
                     separator moves onto the FOLLOWING items so the line
                     never opens with a stray dot when a product has no
                     barcode or SKU. */}
-                {p.sku ? <span className="max-w-[100px] truncate font-mono" title={p.sku}>{p.sku}</span> : null}
-                {p.category ? <span className="max-w-[110px] truncate" title={p.category}>{p.sku ? '· ' : ''}{p.category}</span> : null}
-                {p.brand ? <span className="max-w-[110px] truncate" title={p.brand}>&middot; {p.brand}</span> : null}
+                {p.sku ? <span className="detail-scroll-text max-w-[100px] font-mono" title={p.sku}>{p.sku}</span> : null}
+                {p.category ? <span className="detail-scroll-text max-w-[110px]" title={p.category}>{p.sku ? '· ' : ''}{p.category}</span> : null}
+                {p.brand ? <span className="detail-scroll-text max-w-[110px]" title={p.brand}>&middot; {p.brand}</span> : null}
               </div>
             </div>
           </div>
@@ -282,7 +280,7 @@ export default function ProductDetailModal({
               {/* Left mini-section: the compact identity + stock facts. */}
               <div className="min-w-0 space-y-2.5 sm:pr-5">
                 <div className="grid grid-cols-1 gap-y-1.5">
-                  {p.barcode ? <Row label={T('barcode', 'Barcode')}><button type="button" className="max-w-full truncate font-mono underline-offset-2 hover:text-blue-600 hover:underline" onClick={copyBarcode} title={T('copy_barcode', 'Copy barcode')}>{p.barcode}</button></Row> : null}
+                  {p.barcode ? <Row label={T('barcode', 'Barcode')}><button type="button" className="whitespace-nowrap text-left font-mono underline-offset-2 hover:text-blue-600 hover:underline" onClick={copyBarcode} title={T('copy_barcode', 'Copy barcode')}>{p.barcode}</button></Row> : null}
                   {p.sku ? <Row label={T('sku', 'SKU')}><span className="font-mono">{p.sku}</span></Row> : null}
                   {p.supplier ? <Row label={T('label_supplier', 'Supplier')}>{p.supplier}</Row> : null}
                   {/* Stock + Status moved to the right column after Margin
@@ -350,23 +348,18 @@ export default function ProductDetailModal({
 
               {/* Right mini-section: description + the pricing stack. */}
               <div className="min-w-0 space-y-2.5 border-t border-gray-100 pt-2.5 dark:border-gray-700 sm:border-t-0 sm:pl-5 sm:pt-0">
-                {/* Description truncates with "..." and opens
-                    ProductDescriptionDetailModal.tsx, the admin-side
-                    counterpart to the public-portal Details flyout, showing
-                    the same parsed Features/Benefits/Ingredients/Caution
-                    breakdown a shopper sees rather than plain text. */}
+                {/* The compact row keeps the complete description scrollable;
+                    clicking also opens the formatted description reader. */}
                 {p.description ? (
                   <div className="flex min-w-0 gap-2">
                     <span className="w-20 flex-shrink-0 pt-0.5 text-xs text-gray-400">{T('label_description', 'Description')}</span>
                     <button
                       type="button"
                       onClick={() => setDescriptionDetailOpen(true)}
-                      className="min-w-0 flex-1 truncate rounded text-left text-sm text-gray-800 underline-offset-2 hover:text-blue-700 hover:underline dark:text-gray-200 dark:hover:text-blue-300"
+                      className="detail-scroll-text min-w-0 flex-1 rounded text-left text-sm text-gray-800 underline-offset-2 hover:text-blue-700 hover:underline dark:text-gray-200 dark:hover:text-blue-300"
                       title={T('view_full_description', 'View full description')}
                     >
-                      {p.description.length > DESCRIPTION_PREVIEW_LENGTH
-                        ? `${p.description.slice(0, DESCRIPTION_PREVIEW_LENGTH).trimEnd()}...`
-                        : p.description}
+                      {p.description}
                     </button>
                   </div>
                 ) : null}
@@ -466,7 +459,7 @@ export default function ProductDetailModal({
             {onAddVariant ? (
               <button
                 type="button"
-                className="btn-secondary flex flex-1 items-center justify-center gap-1.5 truncate px-3 py-2 text-xs sm:text-sm"
+                className="btn-secondary flex min-w-0 flex-1 items-center justify-center gap-1.5 truncate px-3 py-2 text-xs sm:text-sm"
                 onClick={onAddVariant}
                 aria-label={T('add_variant', 'Add variant')}
                 title={T('add_variant', 'Add variant')}
@@ -478,7 +471,7 @@ export default function ProductDetailModal({
             {onAdjustStock ? (
               <button
                 type="button"
-                className="btn-secondary flex flex-1 items-center justify-center gap-1.5 truncate px-3 py-2 text-xs sm:text-sm"
+                className="btn-secondary flex min-w-0 flex-1 items-center justify-center gap-1.5 truncate px-3 py-2 text-xs sm:text-sm"
                 onClick={onAdjustStock}
                 aria-label={T('adjust_stock', 'Adjust stock')}
                 title={T('adjust_stock', 'Adjust stock')}
@@ -489,7 +482,7 @@ export default function ProductDetailModal({
             ) : null}
             <button
               type="button"
-              className="btn-primary flex flex-1 items-center justify-center gap-1.5 truncate px-3 py-2 text-xs sm:text-sm"
+              className="btn-primary flex min-w-0 flex-1 items-center justify-center gap-1.5 truncate px-3 py-2 text-xs sm:text-sm"
               onClick={onEdit}
               aria-label={T('edit', 'Edit')}
               title={T('edit', 'Edit')}
@@ -514,4 +507,7 @@ export default function ProductDetailModal({
       ) : null}
     </div>
   )
+
+  if (typeof document === 'undefined') return modal
+  return createPortal(modal, document.body)
 }

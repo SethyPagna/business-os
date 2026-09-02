@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useState } from 'react'
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import type { Dispatch, SetStateAction } from 'react'
 import ArrowRight from 'lucide-react/dist/esm/icons/arrow-right.js'
 import BadgeCheck from 'lucide-react/dist/esm/icons/badge-check.js'
@@ -8,15 +8,18 @@ import Medal from 'lucide-react/dist/esm/icons/medal.js'
 import Plus from 'lucide-react/dist/esm/icons/plus.js'
 import Heart from 'lucide-react/dist/esm/icons/heart.js'
 import Search from 'lucide-react/dist/esm/icons/search.js'
+import SlidersHorizontal from 'lucide-react/dist/esm/icons/sliders-horizontal.js'
 import ShoppingBag from 'lucide-react/dist/esm/icons/shopping-bag.js'
 import Sparkles from 'lucide-react/dist/esm/icons/sparkles.js'
 import Trophy from 'lucide-react/dist/esm/icons/trophy.js'
+import X from 'lucide-react/dist/esm/icons/x.js'
 import type { LucideIcon } from 'lucide-react'
 import CatalogProductImage from './catalogImages'
 import CatalogPaginationControls, { CATALOG_DEFAULT_PAGE_SIZE, paginateCatalogItems } from './catalogPagination'
 import { SectionShell, StatusPill } from './catalogUi'
 import PortalFilterCombobox from './PortalFilterCombobox'
 import PortalPromoStrip from './PortalPromoStrip.tsx'
+import LazyPortalMenu from '../shared/LazyPortalMenu'
 import { buildPortalHighlightBadges, buildPortalPricePresentation, resolvePortalStockStatus, shouldShowStockStatus } from './portalCatalogDisplay.ts'
 import { isProductPromoted, type PromotionRule } from '../../utils/promotionRules.ts'
 import { aggregateInitialOptions, getInitialKey } from '../../utils/initials.ts'
@@ -250,6 +253,7 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(CATALOG_DEFAULT_PAGE_SIZE)
   const [localInitialFilter, setLocalInitialFilter] = useState('all')
+  const filterPanelRef = useRef<HTMLDivElement | null>(null)
   const effectivePage = serverPaged ? Number(productPage || 1) : page
   const effectivePageSize = serverPaged ? Number(productPageSize || CATALOG_DEFAULT_PAGE_SIZE) : pageSize
   const effectiveInitialFilter = serverPaged ? (controlledInitialFilter || 'all') : localInitialFilter
@@ -260,6 +264,12 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
   useEffect(() => {
     if (!serverPaged) setPage(1)
   }, [brandFilter, branchFilter, categoryFilter, localInitialFilter, search, serverPaged, stockFilter])
+
+  useEffect(() => {
+    if (!filtersOpen) return undefined
+    const frame = window.requestAnimationFrame(() => filterPanelRef.current?.focus())
+    return () => window.cancelAnimationFrame(frame)
+  }, [filtersOpen])
 
   const localInitialOptions = useMemo(() => {
     const counts = new Map<string, number>()
@@ -333,11 +343,10 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
   }, [pagedProducts, showCategoryHeaders, copy, promotionRules])
 
   // Shared filter-field body (category/brand/branch/stock) -- rendered
-  // twice: once inside the click-to-open mobile/tablet panel (unchanged
-  // behavior below `lg`), and once inside the always-visible left rail at
-  // `lg` and up (see the "desktop left-rail filter layout" ask). Extracted
-  // to a function rather than duplicated JSX so the two call sites can
-  // never drift apart.
+  // twice: once inside the body-portalled mobile/tablet filter layer below
+  // `lg`, and once inside the always-visible left rail at `lg` and up.
+  // Extracted to a function rather than duplicated JSX so the two call
+  // sites can never drift apart.
   const renderFilterFields = () => (
     <>
       {/* G1b: the storefront's ONE promo facet -- a single "only deals"
@@ -456,11 +465,9 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
       title={copy('products', 'Products')}
       subtitle={copy('liveCatalog', 'Browse our products and check availability.')}
     >
-      {/* Desktop (lg+): an always-visible left rail replaces the click-to-
-          open Filters button/panel used below `lg` -- no popover needed
-          when there's room for a permanent sidebar. Below `lg`, this
-          renders nothing (`hidden`) and the existing button/panel further
-          down handles filtering as before. */}
+      {/* Desktop (lg+): an always-visible left rail replaces the floating
+          Filters layer used below `lg`; no popover is needed when there is
+          room for a permanent sidebar. */}
       <div className="lg:grid lg:grid-cols-[17rem_minmax(0,1fr)] lg:items-start lg:gap-6">
         <aside className="hidden min-w-0 lg:sticky lg:top-20 lg:block lg:min-w-0 lg:self-start">
           <div className="min-w-0 space-y-2 rounded-[1.35rem] border border-slate-200 bg-white p-2.5 shadow-sm dark:border-neutral-700 dark:bg-neutral-900">
@@ -474,6 +481,33 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
             </div>
             {renderFilterFields()}
           </div>
+          {initialOptions.length > 1 ? (
+            <div className="mt-3 rounded-[1.35rem] border border-slate-200 bg-white p-2.5 shadow-sm dark:border-neutral-700 dark:bg-neutral-900">
+              <div className="mb-2 px-1 text-xs font-semibold uppercase tracking-[0.12em] text-slate-500 dark:text-neutral-400">
+                {copy('jumpToBrand', 'Jump to brand')}
+              </div>
+              <div className="grid max-h-[min(18rem,calc(100vh-32rem))] grid-cols-4 gap-1 overflow-y-auto overscroll-contain pr-1">
+                <button
+                  type="button"
+                  className={`h-8 rounded-lg text-xs font-semibold transition ${effectiveInitialFilter === 'all' ? 'bg-blue-600 text-white' : 'text-slate-600 hover:bg-blue-50 hover:text-blue-700 dark:text-neutral-300 dark:hover:bg-neutral-800 dark:hover:text-amber-300'}`}
+                  onClick={() => updateInitialFilter?.('all')}
+                >
+                  {copy('all', 'All')}
+                </button>
+                {initialOptions.map((item) => (
+                  <button
+                    key={`rail-${item.key}`}
+                    type="button"
+                    className={`h-8 rounded-lg text-xs font-semibold transition ${effectiveInitialFilter === item.key ? 'bg-blue-600 text-white' : 'text-slate-600 hover:bg-blue-50 hover:text-blue-700 dark:text-neutral-300 dark:hover:bg-neutral-800 dark:hover:text-amber-300'}`}
+                    onClick={() => updateInitialFilter?.(effectiveInitialFilter === item.key ? 'all' : item.key)}
+                    title={`${item.label} (${item.count})`}
+                  >
+                    {item.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : null}
         </aside>
 
         <div className="min-w-0">
@@ -489,10 +523,10 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
         />
       ) : null}
       <div className="mb-5 space-y-3">
-        <div className="sticky top-16 z-20 -mx-1 rounded-[26px] border border-slate-200 bg-white/95 p-2 shadow-sm backdrop-blur dark:border-neutral-700 dark:bg-neutral-900/95 sm:top-20">
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-          <label className="flex min-w-0 flex-1 items-center gap-2 rounded-xl bg-slate-50 px-3 py-2 dark:bg-neutral-800/80">
-            <Search className="h-4 w-4 shrink-0 text-slate-400" />
+        <div className="sticky top-16 z-20 -mx-1 space-y-2 rounded-[22px] border border-slate-200 bg-white/96 p-2 shadow-[0_8px_24px_rgba(15,23,42,0.08)] backdrop-blur dark:border-neutral-700 dark:bg-neutral-900/96 sm:top-20">
+          <div className="flex items-center gap-2">
+          <label className="flex min-w-0 flex-1 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 shadow-sm transition focus-within:border-blue-400 focus-within:ring-2 focus-within:ring-blue-100 dark:border-neutral-700 dark:bg-neutral-950 dark:focus-within:border-amber-400 dark:focus-within:ring-amber-500/15">
+            <Search className="h-4 w-4 shrink-0 text-blue-600 dark:text-amber-300" />
             <input
               id="portal-product-search"
               name="product_search"
@@ -503,19 +537,57 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
               onChange={(event) => setSearch(event.target.value)}
             />
           </label>
-          <div className="flex items-center gap-2 lg:hidden">
-            <button
-              type="button"
-              className={`inline-flex flex-1 items-center justify-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold transition sm:flex-none ${
-                filtersOpen ? 'bg-slate-950 text-white dark:bg-white dark:text-neutral-950' : 'bg-slate-100 text-slate-700 hover:bg-slate-200 dark:bg-neutral-800 dark:text-neutral-200 dark:hover:bg-neutral-700'
-              }`}
-              onClick={() => setFiltersOpen((current) => !current)}
-            >
-              {copy('filters', 'Filters')}
-              {portalActiveFilterCount > 0 ? (
-                <span className="rounded-full bg-white/20 px-2 py-0.5 text-xs">{portalActiveFilterCount}</span>
-              ) : null}
-            </button>
+          <div className="flex shrink-0 items-center gap-1.5 lg:hidden">
+            <LazyPortalMenu
+              align="auto"
+              triggerWrapperClassName="min-w-0"
+              menuClassName="w-[min(24rem,calc(100vw-1rem))] max-w-[calc(100vw-1rem)] overflow-hidden rounded-[1.35rem] border border-slate-200 bg-white p-0 shadow-xl dark:border-neutral-700 dark:bg-neutral-900"
+              onOpenChange={setFiltersOpen}
+              trigger={(
+                <button
+                  type="button"
+                  className={`inline-flex items-center justify-center gap-2 rounded-xl border px-3 py-2 text-sm font-semibold transition ${
+                    filtersOpen || portalActiveFilterCount > 0 ? 'border-blue-600 bg-blue-600 text-white shadow-sm dark:border-amber-400 dark:bg-amber-400 dark:text-neutral-950' : 'border-slate-200 bg-white text-slate-700 shadow-sm hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700 dark:border-neutral-700 dark:bg-neutral-950 dark:text-neutral-200 dark:hover:border-amber-500/50 dark:hover:text-amber-300'
+                  }`}
+                  aria-label={copy('filters', 'Filters')}
+                >
+                  <SlidersHorizontal className="h-4 w-4" />
+                  <span className="hidden sm:inline">{copy('filters', 'Filters')}</span>
+                  {portalActiveFilterCount > 0 ? (
+                    <span className="rounded-full bg-white/20 px-2 py-0.5 text-xs">{portalActiveFilterCount}</span>
+                  ) : null}
+                </button>
+              )}
+              content={({ closeMenu }) => (
+                <div
+                  ref={filterPanelRef}
+                  role="dialog"
+                  aria-label={copy('filters', 'Filters')}
+                  tabIndex={-1}
+                  className="max-h-[min(32rem,calc(100dvh-1rem))] overflow-y-auto overscroll-contain p-2.5 outline-none"
+                >
+                  <div className="mb-2 flex items-center justify-between gap-2 px-1">
+                    <span className="text-sm font-semibold text-slate-900 dark:text-neutral-100">{copy('filters', 'Filters')}</span>
+                    <div className="flex items-center gap-2">
+                      {portalActiveFilterCount > 0 ? (
+                        <button type="button" className="text-xs font-semibold text-slate-500 hover:text-slate-700 dark:text-neutral-300 dark:hover:text-white" onClick={clearPortalFilters}>
+                          {copy('clear', 'Clear')}
+                        </button>
+                      ) : null}
+                      <button
+                        type="button"
+                        className="inline-flex h-7 w-7 items-center justify-center rounded-lg border border-slate-200 text-slate-500 transition hover:bg-slate-50 hover:text-slate-700 dark:border-neutral-700 dark:text-neutral-300 dark:hover:bg-neutral-800 dark:hover:text-white"
+                        onClick={closeMenu}
+                        aria-label={copy('closeFilters', 'Close filters')}
+                      >
+                        <X className="h-4 w-4" />
+                      </button>
+                    </div>
+                  </div>
+                  <div className="space-y-2">{renderFilterFields()}</div>
+                </div>
+              )}
+            />
             {portalActiveFilterCount > 0 ? (
               <button type="button" className="rounded-xl px-3 py-2 text-xs font-semibold text-slate-500 hover:bg-slate-100 dark:text-neutral-300 dark:hover:bg-neutral-800" onClick={clearPortalFilters}>
                 {copy('clear', 'Clear')}
@@ -523,15 +595,31 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
             ) : null}
           </div>
           </div>
-        </div>
 
-        {filtersOpen ? (
-          <div className="space-y-2 rounded-[1.35rem] border border-slate-200 bg-white p-2.5 shadow-sm dark:border-neutral-700 dark:bg-neutral-900 lg:hidden">
-            {renderFilterFields()}
+        {initialOptions.length > 1 ? (
+          <div className="flex gap-1 overflow-x-auto overscroll-x-contain rounded-xl border border-slate-100 bg-slate-50/80 p-1 [scrollbar-width:thin] dark:border-neutral-800 dark:bg-neutral-950/60 lg:hidden">
+            <button
+              type="button"
+              className={`h-8 min-w-9 shrink-0 rounded-lg px-2 text-xs font-semibold transition ${effectiveInitialFilter === 'all' ? 'bg-blue-600 text-white shadow-sm dark:bg-amber-400 dark:text-neutral-950' : 'text-slate-600 hover:bg-white hover:text-blue-700 dark:text-neutral-300 dark:hover:bg-neutral-800 dark:hover:text-amber-300'}`}
+              onClick={() => updateInitialFilter?.('all')}
+            >
+              {copy('all', 'All')}
+            </button>
+            {initialOptions.map((item) => (
+              <button
+                key={`row-${item.key}`}
+                type="button"
+                className={`h-8 min-w-9 shrink-0 rounded-lg px-2 text-xs font-semibold transition ${effectiveInitialFilter === item.key ? 'bg-blue-600 text-white shadow-sm dark:bg-amber-400 dark:text-neutral-950' : 'text-slate-600 hover:bg-white hover:text-blue-700 dark:text-neutral-300 dark:hover:bg-neutral-800 dark:hover:text-amber-300'}`}
+                onClick={() => updateInitialFilter?.(effectiveInitialFilter === item.key ? 'all' : item.key)}
+                title={`${item.label} (${item.count})`}
+              >
+                {item.label}
+              </button>
+            ))}
           </div>
         ) : null}
 
-        <div className="flex items-center justify-between gap-2 px-1 text-xs text-slate-500 dark:text-neutral-400">
+        <div className="flex items-center justify-between gap-2 border-t border-slate-100 px-1 pt-2 text-xs text-slate-500 dark:border-neutral-800 dark:text-neutral-400">
           <span>{portalActiveFilterCount > 0 ? `${portalActiveFilterCount} ${copy('selected', 'selected')}` : copy('filterCompactHint', 'Use quick filters to narrow products faster.')}</span>
           <span className="font-semibold text-slate-600 dark:text-neutral-200">
             {refreshingProducts
@@ -540,6 +628,7 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
                 ? copy('loadingProducts', 'Loading products...')
               : replaceVars(copy('filterSummary', '{count} result(s)'), { count: totalProducts })}
           </span>
+        </div>
         </div>
       </div>
 
@@ -600,29 +689,6 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
               </article>
             ))}
           </div>
-        </div>
-      ) : null}
-
-      {initialOptions.length > 1 ? (
-        <div className="mb-4 flex gap-1 overflow-x-auto rounded-2xl border border-slate-200 bg-white p-1 dark:border-neutral-700 dark:bg-neutral-900/80">
-          <button
-            type="button"
-            className={`h-8 min-w-8 rounded-xl px-2 text-xs font-semibold ${effectiveInitialFilter === 'all' ? 'bg-slate-950 text-white dark:bg-white dark:text-neutral-950' : 'text-slate-500 hover:bg-slate-100 dark:text-neutral-300 dark:hover:bg-neutral-800'}`}
-            onClick={() => updateInitialFilter?.('all')}
-          >
-            {copy('all', 'All')}
-          </button>
-          {initialOptions.map((item) => (
-            <button
-              key={item.key}
-              type="button"
-              className={`h-8 min-w-8 rounded-xl px-2 text-xs font-semibold ${effectiveInitialFilter === item.key ? 'bg-slate-950 text-white dark:bg-white dark:text-neutral-950' : 'text-slate-500 hover:bg-slate-100 dark:text-neutral-300 dark:hover:bg-neutral-800'}`}
-              onClick={() => updateInitialFilter?.(effectiveInitialFilter === item.key ? 'all' : item.key)}
-              title={`${item.label} (${item.count})`}
-            >
-              {item.label}
-            </button>
-          ))}
         </div>
       ) : null}
 

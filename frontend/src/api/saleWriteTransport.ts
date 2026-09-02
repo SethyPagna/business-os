@@ -15,6 +15,7 @@ import {
   dispatchSyncUpdates,
   emitSyncQueueChanged,
   registerOutboxBackgroundSync,
+  requestPersistentAppStorage,
 } from './syncRuntime.ts'
 
 type SalePayload = Record<string, unknown>
@@ -24,6 +25,8 @@ type LocalDb = Awaited<ReturnType<typeof getLocalDb>>
 
 const OFFLINE_SALE_QUEUE_CHANNEL = 'sales:create'
 const OFFLINE_SALE_RETRY_DELAY_MS = 30_000
+const OFFLINE_SALE_SYNC_LEASE_MS = 60_000
+let pendingSalesSyncPromise: Promise<Record<string, unknown>> | null = null
 
 function asText(value: unknown): string {
   return String(value ?? '')
@@ -75,11 +78,8 @@ async function findQueuedSale(clientRequestId: unknown): Promise<LocalRow | null
   return (rows as LocalRow[]).find((row) => asText((row.payload as SalePayload | undefined)?.client_request_id) === clean) || null
 }
 
-async function putOfflineSaleMirror(payload: SalePayload, receiptNumber: string): Promise<number> {
-  const db = await getLocalDb()
-  const now = new Date().toISOString()
-  const offlineId = -Math.abs(Date.now())
-  await localTable(db, 'sales').put({
+function buildOfflineSaleMirror(payload: SalePayload, receiptNumber: string, offlineId: number, now: string): LocalRow {
+  return {
     id: offlineId,
     receipt_number: receiptNumber,
     client_request_id: payload.client_request_id,
@@ -97,8 +97,7 @@ async function putOfflineSaleMirror(payload: SalePayload, receiptNumber: string)
     created_at: payload.created_at || now,
     updated_at: now,
     offline_pending: true,
-  }).catch(() => null)
-  return offlineId
+  }
 }
 
 async function queueOfflineSale(payload: SalePayload, reason = 'server_offline'): Promise<Record<string, unknown>> {
@@ -123,7 +122,7 @@ async function queueOfflineSale(payload: SalePayload, reason = 'server_offline')
   // sanitizeClientCreatedAt puts the sale on the day it happened instead of
   // the day it synced (online checkouts send no created_at).
   salePayload.created_at = asText(salePayload.created_at) || now
-  const localId = await putOfflineSaleMirror(salePayload, receiptNumber)
+  const localId = -Math.abs(Date.now())
   const row = {
     id: salePayload.client_request_id,
     channel: OFFLINE_SALE_QUEUE_CHANNEL,
@@ -143,7 +142,19 @@ async function queueOfflineSale(payload: SalePayload, reason = 'server_offline')
     base_updated_at: salePayload.expectedUpdatedAt || salePayload.expected_updated_at || salePayload.updated_at || now,
   }
   const db = await getLocalDb()
-  await localTable(db, 'sync_queue').put(row)
+  const salesTable = localTable(db, 'sales')
+  const queueTable = localTable(db, 'sync_queue')
+  // The visible local sale and its replay instruction are one durable fact.
+  // A WebKit process kill between two separate writes must never leave a sale
+  // that appears recorded locally but can no longer reach the server.
+  await db.transaction('rw', salesTable, queueTable, async () => {
+    await salesTable.put(buildOfflineSaleMirror(salePayload, receiptNumber, localId, now))
+    await queueTable.put(row)
+  })
+  // Best effort: Chromium can grant persistent storage from this user-driven
+  // checkout. Safari may not expose the API, but the request is always safe and
+  // unsupported/denied cases remain non-fatal.
+  void requestPersistentAppStorage()
   registerOutboxBackgroundSync()
   emitSyncQueueChanged({ channel: OFFLINE_SALE_QUEUE_CHANNEL, queued: 1 })
   if (typeof window !== 'undefined') {
@@ -265,7 +276,7 @@ function createSaleWithoutWriteDedupe(payload: SalePayload): Promise<unknown> {
   )
 }
 
-export async function syncPendingSalesQueue({ force = false }: QueueSyncOptions = {}): Promise<Record<string, unknown>> {
+async function runPendingSalesQueueSync({ force = false }: QueueSyncOptions = {}): Promise<Record<string, unknown>> {
   const now = Date.now()
   const db = await getLocalDb()
   const rows = await localTable(db, 'sync_queue')
@@ -276,6 +287,12 @@ export async function syncPendingSalesQueue({ force = false }: QueueSyncOptions 
   const eligible: LocalRow[] = []
   for (const row of rows) {
     if (!row?.payload) continue
+    const status = asText(row.status || 'pending')
+    if (!['pending', 'failed', 'retry', 'syncing'].includes(status)) continue
+    if (status === 'syncing') {
+      const claimedAt = Date.parse(asText(row.updated_at || row.created_at))
+      if (Number.isFinite(claimedAt) && now - claimedAt < OFFLINE_SALE_SYNC_LEASE_MS) continue
+    }
     if (!force) {
       const retryAt = row.retry_at ? Date.parse(asText(row.retry_at)) : 0
       if (Number.isFinite(retryAt) && retryAt > now) continue
@@ -307,6 +324,15 @@ export async function syncPendingSalesQueue({ force = false }: QueueSyncOptions 
   }
   result.pending = Math.max(0, rows.length - result.synced)
   return result
+}
+
+export function syncPendingSalesQueue(options: QueueSyncOptions = {}): Promise<Record<string, unknown>> {
+  if (!pendingSalesSyncPromise) {
+    pendingSalesSyncPromise = runPendingSalesQueueSync(options).finally(() => {
+      pendingSalesSyncPromise = null
+    })
+  }
+  return pendingSalesSyncPromise
 }
 
 export async function createSale(payload: SalePayload = {}): Promise<unknown> {

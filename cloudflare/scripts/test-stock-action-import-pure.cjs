@@ -76,6 +76,31 @@ const created = subject.resolveUnifiedStockImportRows([
 assert.strictEqual(created.plan.kind, 'create')
 assert.deepStrictEqual(created.branchRefs, [{ slot: 'shop', branchId: -1, branchName: 'Shop', pending: true, value: 3 }])
 
+const variants = [
+  { ...products[0], id: 20, cost_price_usd: 5, batch_keys: ['08272026'] },
+  { ...products[0], id: 21, cost_price_usd: 6, batch_keys: ['OTHER'] },
+]
+const exactCost = subject.resolveUnifiedStockImportRows([
+  { name: 'Serum', barcode: 'ABC', cost_price: '6', shop: '1', date: '08/28/2026', action: 'add', batch: 'NEW' },
+], 'direct', variants, branches, [])[0]
+assert.strictEqual(exactCost.productId, 21, 'same name/barcode resolves the exact cost child')
+const differentCost = subject.resolveUnifiedStockImportRows([
+  { name: 'Serum', barcode: 'ABC', cost_price: '7', shop: '1', date: '08/28/2026', action: 'add', batch: 'NEW' },
+], 'direct', variants, branches, [])[0]
+assert.strictEqual(differentCost.productId, null, 'different cost creates a distinct child row')
+assert.strictEqual(differentCost.identityKey, 'new:serum|abc|cost:700')
+const sameBatch = subject.resolveUnifiedStockImportRows([
+  { name: 'Serum', barcode: 'ABC', cost_price: '7', shop: '1', date: '08/27/2026', action: 'add' },
+], 'direct', variants, branches, [])[0]
+assert.strictEqual(sameBatch.productId, 20, 'same barcode + existing date-derived batch shares the product option despite receipt cost')
+const sameNewBatch = subject.resolveUnifiedStockImportRows([
+  { _rowNumber: 30, name: 'Brand New', barcode: 'BN1', cost_price: '5', shop: '1', date: '08/29/2026', action: 'add', batch: 'SHIP-A' },
+  { _rowNumber: 31, name: 'Brand New', barcode: 'BN1', cost_price: '6', shop: '1', date: '08/29/2026', action: 'add', batch: 'SHIP-A' },
+], 'direct', variants, branches, [])
+assert.strictEqual(sameNewBatch[1].identityKey, sameNewBatch[0].identityKey, 'two new receipts for the same barcode+batch create one option')
+assert.strictEqual(sameNewBatch[0].costPriceUsd, 5)
+assert.strictEqual(sameNewBatch[1].costPriceUsd, 6, 'each shared-option receipt keeps its own cost payload')
+
 const invalid = subject.resolveUnifiedStockImportRows([{ name: '', barcode: '', shop: '-2', date: 'bad' }], 'direct', products, branches, current)[0]
 assert.strictEqual(invalid.plan, null)
 assert.ok(invalid.errors.length >= 3)
@@ -83,15 +108,17 @@ assert.ok(invalid.errors.length >= 3)
 const ambiguous = subject.resolveUnifiedStockImportRows([
   { name: '', barcode: 'DUP', shop: '1', date: '08/27/2026', action: 'add' },
 ], 'direct', [...products, { id: 11, name: 'A', barcode: 'DUP' }, { id: 12, name: 'B', barcode: 'DUP' }], branches, current)[0]
-assert.ok(ambiguous.conflicts.some((message) => /matches 2 products/.test(message)))
+assert.ok(ambiguous.conflicts.some((message) => /match 2 product rows/.test(message)))
 assert.strictEqual(ambiguous.plan, null, 'an ambiguous identity must never fall through to create')
 
 console.log('PASS unified stock import parses, matches, resolves branches/current stock, preserves every row, and flags ambiguity')
 
 const sqlBinding = loadCompiled('sqlBinding.ts', {})
+const searchMatch = loadCompiled('searchMatch.ts', {})
 const catalog = loadCompiled('stockActionCatalog.ts', {
   './db': {},
   './sqlBinding': sqlBinding,
+  './searchMatch': searchMatch,
   './stockActionImport': subject,
 })
 
@@ -102,6 +129,7 @@ const fakeDb = {
     return {
       async all() {
         if (/FROM products/.test(sql)) return products
+        if (/FROM product_batches/.test(sql)) return []
         if (/FROM branches/.test(sql)) return branches
         if (/FROM branch_stock/.test(sql)) return current
         throw new Error(`Unexpected query: ${sql}`)

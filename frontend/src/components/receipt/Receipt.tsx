@@ -268,7 +268,7 @@ function labelFor(mode: LanguageMode, key: ReceiptLabelKey): string {
 function Row({ label, value, subValue, bold = false, tone = '' }: RowProps) {
   return (
     <div data-receipt-line="true" className={`my-1 grid grid-cols-[minmax(0,1fr)_minmax(4.6rem,auto)] items-start gap-x-3 gap-y-1 ${tone}`}>
-      <span className={`min-w-0 overflow-hidden whitespace-normal break-words pr-1 leading-snug ${bold ? 'font-semibold' : ''}`}>{label}</span>
+      <span className={`min-w-0 overflow-visible whitespace-normal break-words pr-1 leading-snug ${bold ? 'font-semibold' : ''}`}>{label}</span>
       <div className="min-w-0 whitespace-normal break-words text-right leading-snug">
         <div className={`${bold ? 'font-semibold' : ''}`}>{value}</div>
         {subValue ? <div className="text-[10px] text-gray-500">{subValue}</div> : null}
@@ -311,12 +311,10 @@ export default function Receipt({ sale, settings = {}, onClose, _previewMode }: 
   const paymentDetails = useMemo(() => parsePaymentDetails(sale.payment_details), [sale.payment_details])
   const rNum = sale.receiptNumber || sale.receipt_number || 'Receipt'
   const createdAt = sale.created_at
-  const createdAtText = createdAt instanceof Date ? createdAt.toISOString() : String(createdAt || '')
-  const parsedDate = createdAt ? new Date(createdAtText.includes('T') ? createdAtText : `${createdAtText}Z`) : new Date()
-  // mm/dd/yyyy HH:mm like the rest of the app -- the locale-default form
-  // rendered 12-hour AM/PM (and day-first on non-US devices), the exact
-  // drift the app-wide mm/dd/yyyy + 24-hour convention forbids.
-  const dateStr = Number.isNaN(parsedDate.getTime()) ? String(createdAt || '') : fmtDateTime24(parsedDate)
+  // Route every supported timestamp shape through the shared formatter:
+  // Date objects, epoch numbers, ISO values, and SQLite's timezone-less UTC
+  // all resolve to the same mm/dd/yyyy HH:mm Phnom Penh wall clock.
+  const dateStr = fmtDateTime24(createdAt || new Date())
   const exchangeRate = toNumber(sale.exchange_rate) || toNumber(appliedSettings.exchange_rate as number | string | undefined) || 4100
   const subtotalUsd = toNumber(sale.subtotal_usd ?? sale.subtotal)
   const discountUsd = toNumber(sale.discount_usd ?? sale.discount)
@@ -361,7 +359,6 @@ export default function Receipt({ sale, settings = {}, onClose, _previewMode }: 
     header: (
       <div key="header">
         {tpl.custom_header ? <div data-receipt-line="true" className={`${headerAlignClass} font-semibold`}>{em(tpl.custom_header)}</div> : null}
-        <div data-receipt-line="true" data-receipt-align="center" className="my-1 text-center text-[11px] text-gray-500">{headerDivider}</div>
         {tpl.show_business_name && settings?.business_name ? <div data-receipt-line="true" className={`${headerAlignClass} break-words text-lg font-bold`}>{settings.business_name}</div> : null}
         {tpl.show_address && settings?.business_address ? <div data-receipt-line="true" className={`${headerAlignClass} break-words text-[11px]`}>{settings.business_address}</div> : null}
         {tpl.show_phone && settings?.business_phone ? <div data-receipt-line="true" className={`${headerAlignClass} break-words text-[11px]`}>{settings.business_phone}</div> : null}
@@ -440,7 +437,7 @@ export default function Receipt({ sale, settings = {}, onClose, _previewMode }: 
           return (
             <div key={`${item.product_id || item.id || index}-${index}`} className="py-1.5">
               <div data-receipt-line="true" className="grid grid-cols-[minmax(0,1fr)_2.8rem_minmax(4.6rem,auto)] items-start gap-x-2">
-                <div data-receipt-cell="name" className="min-w-0 overflow-hidden whitespace-normal break-words font-semibold leading-snug">
+                <div data-receipt-cell="name" className="min-w-0 overflow-visible whitespace-normal break-words font-semibold leading-snug">
                   <div data-receipt-main="true">
                     {item.product_name || item.name}
                     {/* Tier tag kept INLINE with the name (user: compact, don't
@@ -449,21 +446,22 @@ export default function Receipt({ sale, settings = {}, onClose, _previewMode }: 
                     {tierTag ? <span className="ml-1 text-[10px] font-semibold text-emerald-700">{tierTag}</span> : null}
                     {tpl.show_item_sku && item.sku ? <span className="ml-1 text-[10px] text-gray-500">[{item.sku}]</span> : null}
                   </div>
-                  {tpl.show_item_unit_price && qty > 1 ? (
-                    <div data-receipt-subline="true" className="text-[10px] font-normal text-gray-500">
-                      {fmtUSD(unitUsd)} x {qty}
-                    </div>
-                  ) : null}
-                  {hasItemDiscount ? (
-                    <div data-receipt-subline="true" className="text-[10px] font-normal text-red-600">
-                      <span className="line-through text-gray-400">{fmtUSD(originalUnitUsd * qty)}</span>{' '}
-                      -{fmtUSD(itemSavingsUsd)}
-                    </div>
-                  ) : null}
                 </div>
                 <div data-receipt-cell="qty" className="whitespace-nowrap text-center leading-snug">{tpl.show_item_qty ? qty : ''}</div>
                 <div data-receipt-cell="price" className="min-w-0 whitespace-nowrap text-right font-semibold leading-snug">
-                  <div>{fmtUSD(lineUsd)}</div>
+                  {/* Savings describe the charged price, so they belong in
+                      the Price column—not as a second price block beneath the
+                      product name. This keeps a discounted row readable as
+                      "$2.50 (-$0.50)" at a glance. */}
+                  <div>
+                    {fmtUSD(lineUsd)}
+                    {hasItemDiscount ? <span className="ml-1 text-[10px] font-normal text-red-600">(-{fmtUSD(itemSavingsUsd)})</span> : null}
+                  </div>
+                  {tpl.show_item_unit_price && qty > 1 ? (
+                    <div data-receipt-subline="true" className="text-[10px] font-normal text-gray-500">
+                      {qty} × {fmtUSD(unitUsd)}
+                    </div>
+                  ) : null}
                   {tpl.show_item_khr && lineKhr > 0 ? <div className="text-[10px] font-normal text-gray-500">{fmtKHR(lineKhr)}</div> : null}
                 </div>
               </div>
@@ -593,39 +591,47 @@ export default function Receipt({ sale, settings = {}, onClose, _previewMode }: 
   ) : null
 
   const receiptTitle = `Receipt ${rNum}`
-  // Which rendition an action targets. With the 80x50 card enabled the
-  // card stays the DEFAULT (today's behavior for Open PDF / Save Image);
-  // the Print buttons pass their variant explicitly so both sizes are one
-  // tap away (B5).
+  // Which rendition an action targets. Export must mirror the detailed
+  // receipt the cashier is looking at, even when the optional 80x50 summary
+  // card is enabled. The compact card remains an explicit Print-menu choice;
+  // silently exporting it made Open PDF / Image show different data and a
+  // fixed 80x50 page instead of the complete continuous receipt.
   type ReceiptVariant = 'full' | 'compact'
-  const defaultVariant: ReceiptVariant = compactSalesReceipt ? 'compact' : 'full'
-  const exportReceiptPdf = async (mode: ReceiptExportMode, variant: ReceiptVariant = defaultVariant) => {
+  const defaultVariant: ReceiptVariant = 'full'
+  const variantTitle = (variant: ReceiptVariant) => `${receiptTitle} - ${variant === 'compact' ? '80x50mm' : `${fullReceiptWidthMm}mm`}`
+
+  const exportReceiptVariant = async (printTools: ReceiptPrintModule, mode: ReceiptExportMode, variant: ReceiptVariant) => {
     const target = variant === 'compact' ? compactPrintRef.current : printRef.current
     const variantSettings = variant === 'compact' ? compactPrintSettings : fullPrintSettings
     if (!target) return
+    const title = variantTitle(variant)
+    if (mode === 'image') {
+      await printTools.downloadReceiptImage(target, {
+        title,
+        fileName: title,
+        printSettings: variantSettings,
+      })
+    } else if (mode === 'print') {
+      await printTools.printReceipt(target, {
+        title,
+        printSettings: variantSettings,
+      })
+    } else {
+      await printTools.openReceiptPdf(target, {
+        title,
+        fileName: title,
+        printSettings: variantSettings,
+        previewFallback: true,
+        previewFallbackNote: t?.('receipt_pdf_preview_fallback') || 'PDF export was unavailable, so a printable receipt preview was opened instead.',
+      })
+    }
+  }
+
+  const exportReceiptPdf = async (mode: ReceiptExportMode, variant: ReceiptVariant = defaultVariant) => {
     setPdfBusy(mode)
     try {
       const printTools = await loadReceiptPrintModule()
-      if (mode === 'image') {
-        await printTools.downloadReceiptImage(target, {
-          title: receiptTitle,
-          fileName: receiptTitle,
-          printSettings: variantSettings,
-        })
-      } else if (mode === 'print') {
-        await printTools.printReceipt(target, {
-          title: '',
-          printSettings: variantSettings,
-        })
-      } else {
-        await printTools.openReceiptPdf(target, {
-          title: '',
-          fileName: receiptTitle,
-          printSettings: variantSettings,
-          previewFallback: true,
-          previewFallbackNote: t?.('receipt_pdf_preview_fallback') || 'PDF export was unavailable, so a printable receipt preview was opened instead.',
-        })
-      }
+      await exportReceiptVariant(printTools, mode, variant)
     } catch (error) {
       window.alert(getErrorMessage(error, t?.('unable_generate_receipt_pdf') || 'Unable to generate receipt PDF'))
     } finally {
@@ -633,20 +639,17 @@ export default function Receipt({ sale, settings = {}, onClose, _previewMode }: 
     }
   }
 
-  // "Print all": the 80x50 card and the full receipt open as TWO SEPARATE
-  // print files (each its own window), never one combined print — per the
-  // user's request. Both are fired TOGETHER (not one awaited after the
-  // other) so both window.open calls land inside the same click's
-  // user-activation window; awaiting them sequentially would push the second
-  // open past the activation and get it popup-blocked.
-  const printBothSeparately = async () => {
+  // "All" keeps the 80x50 card and the full receipt as separate exports. It
+  // works for Print, PDF, and Image so a cashier can deliberately choose the
+  // compact version, the detailed version, or both without a hidden default.
+  const exportBothSeparately = async (mode: ReceiptExportMode) => {
     if (!compactPrintRef.current || !printRef.current) return
-    setPdfBusy('print')
+    setPdfBusy(mode)
     try {
       const printTools = await loadReceiptPrintModule()
       const results = await Promise.allSettled([
-        printTools.printReceipt(compactPrintRef.current, { title: '', printSettings: compactPrintSettings }),
-        printTools.printReceipt(printRef.current, { title: '', printSettings: fullPrintSettings }),
+        exportReceiptVariant(printTools, mode, 'compact'),
+        exportReceiptVariant(printTools, mode, 'full'),
       ])
       const failure = results.find((r): r is PromiseRejectedResult => r.status === 'rejected')
       if (failure) throw failure.reason
@@ -732,7 +735,7 @@ export default function Receipt({ sale, settings = {}, onClose, _previewMode }: 
               </button>
             )}
             items={[
-              { label: t?.('all') || 'All', disabled: pdfBusy !== '', onClick: () => { void printBothSeparately() } },
+              { label: t?.('all') || 'All', disabled: pdfBusy !== '', onClick: () => { void exportBothSeparately('print') } },
               { label: '80 × 50 mm', disabled: pdfBusy !== '', onClick: () => { void exportReceiptPdf('print', 'compact') } },
               { label: `${t?.('print_default') || 'Default'} · ${fullReceiptWidthMm} mm`, disabled: pdfBusy !== '', onClick: () => { void exportReceiptPdf('print', 'full') } },
             ]}
@@ -750,32 +753,65 @@ export default function Receipt({ sale, settings = {}, onClose, _previewMode }: 
           </span>
         </button>
         )}
-        <button
-          type="button"
-          className="btn-secondary min-w-0 justify-center px-2.5 py-2 text-sm sm:px-3"
-          onClick={() => exportReceiptPdf('open')}
-          disabled={pdfBusy !== ''}
-          title={t?.('open_pdf') || 'Open PDF'}
-          aria-label={t?.('open_pdf') || 'Open PDF'}
-        >
-          <span className="inline-flex min-w-0 items-center justify-center gap-1.5">
-            <FileText className="h-4 w-4 shrink-0" />
-            <span className="hidden truncate sm:inline">{pdfBusy === 'open' ? (t?.('preparing_pdf') || 'Preparing PDF...') : (t?.('open_pdf') || 'Open PDF')}</span>
-          </span>
-        </button>
-        <button
-          type="button"
-          className="btn-secondary min-w-0 justify-center px-2.5 py-2 text-sm sm:px-3"
-          onClick={() => exportReceiptPdf('image')}
-          disabled={pdfBusy !== ''}
-          title={t?.('receipt_image_short') || 'Image'}
-          aria-label={t?.('receipt_image_short') || 'Image'}
-        >
-          <span className="inline-flex min-w-0 items-center justify-center gap-1.5">
-            <ImageDown className="h-4 w-4 shrink-0" />
-            <span className="hidden truncate sm:inline">{pdfBusy === 'image' ? (t?.('saving_image') || 'Saving image...') : (t?.('receipt_image_short') || 'Image')}</span>
-          </span>
-        </button>
+        {compactSalesReceipt ? (
+          <>
+            <LazyPortalMenu
+              align="auto"
+              compact
+              triggerWrapperClassName="min-w-0"
+              menuClassName="min-w-[11rem]"
+              trigger={(
+                <button type="button" className="btn-secondary min-w-0 justify-center px-2.5 py-2 text-sm sm:px-3" disabled={pdfBusy !== ''} aria-haspopup="true" aria-label={t?.('open_pdf') || 'Open PDF'} title={t?.('open_pdf') || 'Open PDF'}>
+                  <span className="inline-flex min-w-0 items-center justify-center gap-1.5"><FileText className="h-4 w-4 shrink-0" /><span className="hidden truncate sm:inline">{pdfBusy === 'open' ? (t?.('preparing_pdf') || 'Preparing PDF...') : (t?.('open_pdf') || 'Open PDF')}</span><ChevronDown className="h-3.5 w-3.5 shrink-0 opacity-80" /></span>
+                </button>
+              )}
+              items={[
+                { label: `${fullReceiptWidthMm} mm`, disabled: pdfBusy !== '', onClick: () => { void exportReceiptPdf('open', 'full') } },
+                { label: '80 × 50 mm', disabled: pdfBusy !== '', onClick: () => { void exportReceiptPdf('open', 'compact') } },
+                { label: t?.('all') || 'All', disabled: pdfBusy !== '', onClick: () => { void exportBothSeparately('open') } },
+              ]}
+            />
+            <LazyPortalMenu
+              align="auto"
+              compact
+              triggerWrapperClassName="min-w-0"
+              menuClassName="min-w-[11rem]"
+              trigger={(
+                <button type="button" className="btn-secondary min-w-0 justify-center px-2.5 py-2 text-sm sm:px-3" disabled={pdfBusy !== ''} aria-haspopup="true" aria-label={t?.('receipt_image_short') || 'Image'} title={t?.('receipt_image_short') || 'Image'}>
+                  <span className="inline-flex min-w-0 items-center justify-center gap-1.5"><ImageDown className="h-4 w-4 shrink-0" /><span className="hidden truncate sm:inline">{pdfBusy === 'image' ? (t?.('saving_image') || 'Saving image...') : (t?.('receipt_image_short') || 'Image')}</span><ChevronDown className="h-3.5 w-3.5 shrink-0 opacity-80" /></span>
+                </button>
+              )}
+              items={[
+                { label: `${fullReceiptWidthMm} mm`, disabled: pdfBusy !== '', onClick: () => { void exportReceiptPdf('image', 'full') } },
+                { label: '80 × 50 mm', disabled: pdfBusy !== '', onClick: () => { void exportReceiptPdf('image', 'compact') } },
+                { label: t?.('all') || 'All', disabled: pdfBusy !== '', onClick: () => { void exportBothSeparately('image') } },
+              ]}
+            />
+          </>
+        ) : (
+          <>
+            <button
+              type="button"
+              className="btn-secondary min-w-0 justify-center px-2.5 py-2 text-sm sm:px-3"
+              onClick={() => exportReceiptPdf('open')}
+              disabled={pdfBusy !== ''}
+              title={t?.('open_pdf') || 'Open PDF'}
+              aria-label={t?.('open_pdf') || 'Open PDF'}
+            >
+              <span className="inline-flex min-w-0 items-center justify-center gap-1.5"><FileText className="h-4 w-4 shrink-0" /><span className="hidden truncate sm:inline">{pdfBusy === 'open' ? (t?.('preparing_pdf') || 'Preparing PDF...') : (t?.('open_pdf') || 'Open PDF')}</span></span>
+            </button>
+            <button
+              type="button"
+              className="btn-secondary min-w-0 justify-center px-2.5 py-2 text-sm sm:px-3"
+              onClick={() => exportReceiptPdf('image')}
+              disabled={pdfBusy !== ''}
+              title={t?.('receipt_image_short') || 'Image'}
+              aria-label={t?.('receipt_image_short') || 'Image'}
+            >
+              <span className="inline-flex min-w-0 items-center justify-center gap-1.5"><ImageDown className="h-4 w-4 shrink-0" /><span className="hidden truncate sm:inline">{pdfBusy === 'image' ? (t?.('saving_image') || 'Saving image...') : (t?.('receipt_image_short') || 'Image')}</span></span>
+            </button>
+          </>
+        )}
         </div>
         <div className="flex shrink-0 items-center gap-1.5 sm:gap-2">
         <div className="flex gap-1 rounded-lg bg-gray-100 p-1 dark:bg-zinc-700">

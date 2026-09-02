@@ -16,7 +16,7 @@ import RenameCascadeModal, { type RenameCascadeChoice, type RenameCascadeRequest
 import ConfirmDialog, { type ConfirmReviewItem } from '../../shared/ConfirmDialog.tsx'
 import { getRenameImpact, renameBrandEverywhere } from '../../../api/renameCascadeTransport.ts'
 import { classifyCreateMatches, type CreateMatchVerdict, type CreateMatchCandidate } from '../helpers/productCreateMatch.ts'
-import { readWorkDraft, scheduleWorkDraftWrite, clearWorkDraft } from '../../../utils/workDrafts.ts'
+import { readWorkDraft, scheduleWorkDraftWrite, clearWorkDraft, scopedWorkDraftKey } from '../../../utils/workDrafts.ts'
 import { searchProducts as searchProductsForMatch } from '../../../api/methods.ts'
 import { buildCacheBustedMediaPath } from '../../../utils/mediaUpload.ts'
 import {
@@ -238,7 +238,7 @@ function SuggestionTextInput({ id, name, value, options, onChange, placeholder, 
       <input
         id={id}
         name={name}
-        className="input w-full"
+        className="input min-h-11 w-full min-w-0"
         value={value}
         onFocus={() => setOpen(true)}
         onBlur={() => window.setTimeout(() => setOpen(false), 120)}
@@ -253,7 +253,7 @@ function SuggestionTextInput({ id, name, value, options, onChange, placeholder, 
             <button
               key={option.toLowerCase()}
               type="button"
-              className="block w-full px-3 py-2 text-left text-sm text-gray-800 hover:bg-blue-50 dark:text-gray-200 dark:hover:bg-blue-900/20"
+              className="block min-h-11 w-full px-3 py-2 text-left text-sm text-gray-800 hover:bg-blue-50 dark:text-gray-200 dark:hover:bg-blue-900/20"
               onMouseDown={(event) => event.preventDefault()}
               onClick={() => { onChange(option); setOpen(false) }}
             >
@@ -475,6 +475,7 @@ export default function ProductForm({
   const [activeTab, setActiveTab] = useState<ProductFormTab>(initialTab || 'basic')
   const lastTabResetKeyRef = useRef<string>(`${currentProductId}:${initialTab || 'basic'}`)
   const [supplierList, setSupplierList] = useState<SupplierOption[]>([])
+  const [supplierReferenceVersion, setSupplierReferenceVersion] = useState(0)
   const [supplierDrop, setSupplierDrop] = useState(false)
   const [filePickerOpen, setFilePickerOpen] = useState(false)
   const [scannerField, setScannerField] = useState<ScannerField | ''>('')
@@ -636,6 +637,17 @@ export default function ProductForm({
   }, [])
 
   useEffect(() => {
+    const onSync = (event: Event) => {
+      const detail = (event as CustomEvent<{ channel?: string }>).detail
+      if (String(detail?.channel || '') === 'suppliers') {
+        setSupplierReferenceVersion((version) => version + 1)
+      }
+    }
+    window.addEventListener('sync:update', onSync)
+    return () => window.removeEventListener('sync:update', onSync)
+  }, [])
+
+  useEffect(() => {
     const requestId = beginTrackedRequest(supplierRequestRef)
     async function loadSuppliers() {
       try {
@@ -657,7 +669,7 @@ export default function ProductForm({
     return () => {
       invalidateTrackedRequest(supplierRequestRef)
     }
-  }, [])
+  }, [supplierReferenceVersion])
 
   useEffect(() => {
     if (!product && !form.branch_id && defaultBranchId) {
@@ -679,7 +691,7 @@ export default function ProductForm({
   // explicit Discard & Leave; a draft older than the product's own
   // updated_at is dropped rather than resurrecting stale edits over newer
   // server data.
-  const draftKey = `bos_draft_product_${product?.id ?? 'new'}`
+  const draftKey = scopedWorkDraftKey(`product_${product?.id ?? 'new'}`)
 
   // D6 rename gate: a promise the save flow awaits while the shared
   // before->after dialog asks what happens to attached rows.
@@ -734,8 +746,14 @@ export default function ProductForm({
   const createMatchSeqRef = useRef(0)
   const createMatchAckRef = useRef('')
   const createVerdict: CreateMatchVerdict = useMemo(
-    () => classifyCreateMatches({ name: form.name, barcode: form.barcode, selling_price_usd: parseNumericInput(form.selling_price_usd) }, createMatches),
-    [form.name, form.barcode, form.selling_price_usd, createMatches],
+    () => classifyCreateMatches({
+      name: form.name,
+      barcode: form.barcode,
+      selling_price_usd: parseNumericInput(form.selling_price_usd),
+      cost_price_usd: parseNumericInput(form.cost_price_usd),
+      cost_price_khr: parseNumericInput(form.cost_price_khr),
+    }, createMatches),
+    [form.name, form.barcode, form.selling_price_usd, form.cost_price_usd, form.cost_price_khr, createMatches],
   )
   useEffect(() => {
     if (!isCreateMode) return
@@ -1092,22 +1110,37 @@ export default function ProductForm({
       title={product ? `${tr('edit_product', 'Edit Product', 'កែប្រែផលិតផល')}: ${product.name}` : tr('add_product', 'Add Product', 'បន្ថែមផលិតផល')}
       onClose={onClose}
       wide
-      headerExtra={onMinimize ? (
-        <button
-          type="button"
-          disabled={saving}
-          onClick={() => {
-            if (saving) return
-            const typedName = String(form.name || '').trim()
-            onMinimize(`${tr('add_product', 'Add Product', 'បន្ថែមផលិតផល')}${typedName ? ` — ${typedName}` : ''}`)
-          }}
-          aria-label={tr('minimize', 'Minimize', 'បង្រួម')}
-          title={tr('minimize_hint', 'Minimize — continue later from the chip', 'បង្រួម — បន្តពេលក្រោយពីស្លាក')}
-          className="flex h-8 w-8 items-center justify-center rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-600 disabled:opacity-50 dark:hover:bg-gray-700"
-        >
-          <span className="text-base leading-none">−</span>
-        </button>
-      ) : undefined}
+      headerExtra={(
+        <>
+          {/* On compact PWA/iOS viewports the persistent footer can fall
+              behind browser chrome or the app navigation. Save is therefore
+              also available in the fixed modal header; Close remains Cancel. */}
+          <button
+            type="button"
+            className="btn-primary min-h-9 max-w-24 truncate px-3 py-1.5 text-xs sm:hidden"
+            onClick={saveForm}
+            disabled={saving || imageUploading}
+          >
+            {saving ? (t('saving') || 'Saving...') : imageUploading ? (tr('uploading', 'Uploading...', 'កំពុងបង្ហោះ...')) : t('save')}
+          </button>
+          {onMinimize ? (
+            <button
+              type="button"
+              disabled={saving}
+              onClick={() => {
+                if (saving) return
+                const typedName = String(form.name || '').trim()
+                onMinimize(`${tr('add_product', 'Add Product', 'បន្ថែមផលិតផល')}${typedName ? ` — ${typedName}` : ''}`)
+              }}
+              aria-label={tr('minimize', 'Minimize', 'បង្រួម')}
+              title={tr('minimize_hint', 'Minimize — continue later from the chip', 'បង្រួម — បន្តពេលក្រោយពីស្លាក')}
+              className="flex h-11 w-11 items-center justify-center rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-600 disabled:opacity-50 dark:hover:bg-gray-700"
+            >
+              <span className="text-base leading-none">−</span>
+            </button>
+          ) : null}
+        </>
+      )}
     >
       <div className="mb-5 -mx-5 border-b border-gray-200 px-5 dark:border-gray-700">
         <div className="flex gap-1 overflow-x-auto">
@@ -1116,7 +1149,7 @@ export default function ProductForm({
               key={tab.id}
               type="button"
               onClick={() => setActiveTab(tab.id)}
-              className={`-mb-px shrink-0 border-b-2 px-4 py-2 text-sm font-medium ${
+              className={`-mb-px min-h-11 shrink-0 border-b-2 px-4 py-2 text-sm font-medium ${
                 activeTab === tab.id
                   ? 'border-blue-600 text-blue-600'
                   : 'border-transparent text-gray-500 hover:text-gray-700'
@@ -1155,13 +1188,13 @@ export default function ProductForm({
               </p>
             ) : (
             <div className="flex flex-wrap gap-2">
-              <button type="button" className="btn-secondary text-sm" onClick={addImages} disabled={saving || imageUploading}>
+              <button type="button" className="btn-secondary min-h-11 text-sm" onClick={addImages} disabled={saving || imageUploading}>
                 {imageUploading ? tr('uploading', 'Uploading...', 'កំពុងបង្ហោះ...') : tr('choose_file', 'Choose File', 'ជ្រើសរើសឯកសារ')}
               </button>
-              <button type="button" className="btn-secondary text-sm" onClick={addPhoto} disabled={saving || imageUploading}>
+              <button type="button" className="btn-secondary min-h-11 text-sm" onClick={addPhoto} disabled={saving || imageUploading}>
                 {tr('take_photo', 'Take Photo', 'ថតរូប')}
               </button>
-              <button type="button" className="btn-secondary text-sm" onClick={() => setFilePickerOpen(true)} disabled={saving || imageUploading}>
+              <button type="button" className="btn-secondary min-h-11 text-sm" onClick={() => setFilePickerOpen(true)} disabled={saving || imageUploading}>
                 {tr('open_files', 'Open Files', 'បើកឯកសារ') || tr('files', 'Files', 'ឯកសារ')}
               </button>
             </div>
@@ -1234,15 +1267,15 @@ export default function ProductForm({
             ) : null}
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
-            <div className="col-span-2">
+          <div data-testid="product-basic-fields" className="grid min-w-0 grid-cols-1 gap-x-3 gap-y-3 sm:grid-cols-2 lg:grid-cols-4">
+            <div className="min-w-0 sm:col-span-2 lg:col-span-4">
               <label htmlFor="product-name" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">{t('name')} *</label>
               <div className="relative">
                 <input
                   id="product-name"
                   name="product_name"
                   ref={nameInputRef}
-                  className={`input ${nameLocked ? 'cursor-pointer bg-gray-50 pr-9 dark:bg-zinc-800/60' : ''}`}
+                  className={`input min-h-11 min-w-0 ${nameLocked ? 'cursor-pointer bg-gray-50 pr-11 dark:bg-zinc-800/60' : ''}`}
                   value={form.name || ''}
                   onChange={(event) => setField('name', event.target.value)}
                   readOnly={nameLocked}
@@ -1252,7 +1285,7 @@ export default function ProductForm({
                 {nameLocked ? (
                   <button
                     type="button"
-                    className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300"
+                    className="absolute right-0 top-1/2 flex h-11 w-11 -translate-y-1/2 items-center justify-center text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300"
                     onClick={() => setNameUnlockConfirmOpen(true)}
                     aria-label={tr('unlock_name', 'Unlock name', 'ដោះសោឈ្មោះ')}
                     title={tr('unlock_name', 'Unlock name', 'ដោះសោឈ្មោះ')}
@@ -1269,7 +1302,7 @@ export default function ProductForm({
                   ? 'border-red-200 bg-red-50 text-red-700 dark:border-red-900/40 dark:bg-red-950/30 dark:text-red-300'
                   : 'border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-900/40 dark:bg-amber-950/30 dark:text-amber-300'}`}>
                   {createVerdict.kind === 'exact_twin'
-                    ? tr('create_match_twin_hint', 'This exact product already exists (same name and barcode) — it cannot be created twice.', 'ផលិតផលនេះមានរួចហើយ (ឈ្មោះ និងបាកូដដូចគ្នា) — មិនអាចបង្កើតម្តងទៀតបានទេ។')
+                    ? tr('create_match_twin_hint', 'This exact product already exists (same name, barcode, and cost) — it cannot be created twice.', 'ផលិតផលនេះមានរួចហើយ (ឈ្មោះ បាកូដ និងថ្លៃដើមដូចគ្នា) — មិនអាចបង្កើតម្តងទៀតបានទេ។')
                     : createVerdict.kind === 'name_match'
                       ? tr('create_match_name_hint', 'This name already exists ({n} rows) — saving adds this as a new row of that group.', 'ឈ្មោះនេះមានរួចហើយ ({n} ជួរ) — ការរក្សាទុកនឹងបន្ថែមជាជួរថ្មីនៃក្រុមនោះ។').replace('{n}', String(createVerdict.groupRows.length))
                       : tr('create_match_barcode_hint', 'This barcode is already on "{name}".', 'បាកូដនេះមាននៅលើ "{name}" រួចហើយ។').replace('{name}', createVerdict.canonicalName)}
@@ -1311,14 +1344,14 @@ export default function ProductForm({
                 </p>
               ) : null)}
             </div>
-            <div className="max-w-[13rem]">
+            <div className="max-w-[13rem] min-w-0">
               {/* Compact optional memory-aid: intentionally smaller than the
                   catalog identity/detail fields below. */}
               <label htmlFor="product-tag-label" className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{t('tag_label') || 'Tag'}</label>
               <input
                 id="product-tag-label"
                 name="product_tag_label"
-                className="input h-8 w-full text-sm"
+                className="input min-h-11 w-full min-w-0 text-sm"
                 value={(form.tag_label as string) || ''}
                 onChange={(event) => setField('tag_label', event.target.value)}
                 placeholder={t('tag_label_placeholder') || 'Short label (optional)'}
@@ -1326,13 +1359,13 @@ export default function ProductForm({
                 autoComplete="off"
               />
             </div>
-            <div>
+            <div className="min-w-0 lg:col-span-3">
               <label htmlFor="product-barcode" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">{t('barcode')}</label>
               <div className="flex gap-2">
                 <input
                   id="product-barcode"
                   name="product_barcode"
-                  className="input flex-1"
+                  className="input min-h-11 min-w-0 flex-1"
                   value={form.barcode || ''}
                   onChange={(event) => setField('barcode', event.target.value)}
                   autoCapitalize="off"
@@ -1341,7 +1374,7 @@ export default function ProductForm({
                 />
                 <button
                   type="button"
-                  className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg border border-gray-300 bg-white text-gray-600 transition-colors hover:border-blue-400 hover:bg-blue-50 hover:text-blue-700 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-300 dark:hover:border-blue-500 dark:hover:bg-blue-900/30 dark:hover:text-blue-300"
+                  className="inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-lg border border-gray-300 bg-white text-gray-600 transition-colors hover:border-blue-400 hover:bg-blue-50 hover:text-blue-700 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-300 dark:hover:border-blue-500 dark:hover:bg-blue-900/30 dark:hover:text-blue-300"
                   onClick={() => openScanner('barcode')}
                   title={scannerLaunchingField === 'barcode' ? scanningLabel : scanBarcodeLabel}
                   aria-label={scanBarcodeLabel}
@@ -1351,7 +1384,7 @@ export default function ProductForm({
                 </button>
               </div>
             </div>
-            <div>
+            <div className="min-w-0">
               <label htmlFor="product-category" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">{tr('category', 'Category', 'ប្រភេទ')}</label>
               <SuggestionTextInput
                 id="product-category"
@@ -1363,7 +1396,7 @@ export default function ProductForm({
                 ariaLabel={tr('category', 'Category', 'ប្រភេទ')}
               />
             </div>
-            <div>
+            <div className="min-w-0">
               <label htmlFor="product-brand" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">{tr('brand', 'Brand', 'ម៉ាក')}</label>
               <SuggestionTextInput
                 id="product-brand"
@@ -1375,7 +1408,7 @@ export default function ProductForm({
                 ariaLabel={tr('brand', 'Brand', 'ម៉ាក')}
               />
             </div>
-            <div>
+            <div className="min-w-0">
               <label htmlFor="product-unit" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">{t('unit')}</label>
               <SuggestionTextInput
                 id="product-unit"
@@ -1387,12 +1420,12 @@ export default function ProductForm({
                 ariaLabel={t('unit') || 'Unit'}
               />
             </div>
-            <div className="relative">
+            <div className="relative min-w-0">
               <label htmlFor="product-supplier" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">{tr('supplier', 'Supplier', 'អ្នកផ្គត់ផ្គង់')}</label>
               <input
                 id="product-supplier"
                 name="product_supplier"
-                className="input"
+                className="input min-h-11 min-w-0"
                 value={form.supplier || ''}
                 onFocus={() => setSupplierDrop(true)}
                 onChange={(event) => {
@@ -1407,7 +1440,7 @@ export default function ProductForm({
                     <button
                       key={supplier.id}
                       type="button"
-                      className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-blue-50 dark:hover:bg-blue-900/20"
+                      className="flex min-h-11 w-full min-w-0 items-center gap-2 px-3 py-2 text-left text-sm hover:bg-blue-50 dark:hover:bg-blue-900/20"
                       onClick={() => {
                         setField('supplier', supplier.name)
                         setSupplierDrop(false)
@@ -1420,7 +1453,7 @@ export default function ProductForm({
                 </div>
               ) : null}
             </div>
-            <div className="col-span-2">
+            <div className="min-w-0 sm:col-span-2 lg:col-span-4">
               <label htmlFor="product-description" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">{t('description')}</label>
               <textarea id="product-description" name="product_description" className="input resize-none" rows={2} value={form.description || ''} onChange={(event) => setField('description', event.target.value)} />
             </div>
@@ -1429,10 +1462,11 @@ export default function ProductForm({
       ) : null}
 
       {activeTab === 'pricing' ? (
-        <div className="space-y-5">
+        <div className="space-y-3">
           {activeTab === 'pricing' ? <>
-          <div className="rounded-xl border border-red-100 bg-red-50 p-4 dark:border-red-800 dark:bg-red-900/10">
-            <div className="mb-3">
+          <div data-testid="product-pricing-grid" className="grid min-w-0 grid-cols-1 gap-3 xl:grid-cols-2">
+          <div className="min-w-0 rounded-xl border border-red-100 bg-red-50 p-3 dark:border-red-800 dark:bg-red-900/10">
+            <div className="mb-2">
               <p className="text-sm font-bold text-red-700 dark:text-red-400">{t('cost')}</p>
               <p className="text-xs text-red-500 dark:text-red-500">{t('what_you_pay_supplier')}</p>
             </div>
@@ -1458,8 +1492,8 @@ export default function ProductForm({
             />
           </div>
 
-          <div className="rounded-xl border border-green-100 bg-green-50 p-4 dark:border-green-800 dark:bg-green-900/10">
-            <div className="mb-3">
+          <div className="min-w-0 rounded-xl border border-green-100 bg-green-50 p-3 dark:border-green-800 dark:bg-green-900/10">
+            <div className="mb-2">
               <p className="text-sm font-bold text-green-700 dark:text-green-400">{tr('selling_price_to_customer', 'Selling Price', 'តម្លៃលក់')}</p>
               <p className="text-xs text-green-600 dark:text-green-500">{tr('what_customers_pay_pos', 'What customers pay at point of sale', 'តម្លៃដែលអតិថិជនបង់នៅកន្លែងលក់')}</p>
             </div>
@@ -1483,8 +1517,8 @@ export default function ProductForm({
             />
           </div>
 
-          <div className="rounded-xl border border-blue-100 bg-blue-50 p-4 dark:border-blue-800 dark:bg-blue-900/10">
-            <div className="mb-3">
+          <div className="min-w-0 rounded-xl border border-blue-100 bg-blue-50 p-3 dark:border-blue-800 dark:bg-blue-900/10">
+            <div className="mb-2">
               <p className="text-sm font-bold text-blue-700 dark:text-blue-400">{tr('special_price', 'Special Price', 'តម្លៃពិសេស')}</p>
               <p className="text-xs text-blue-600 dark:text-blue-500">{tr('special_price_hint', 'Internal alternate selling price for staff-only situations or quick POS selection.', 'តម្លៃលក់ជម្រើសខាងក្នុង សម្រាប់ស្ថានភាពបុគ្គលិក ឬជ្រើសរហ័សនៅ POS។')}</p>
             </div>
@@ -1508,8 +1542,8 @@ export default function ProductForm({
             />
           </div>
 
-          <div className="rounded-xl border border-indigo-100 bg-indigo-50 p-4 dark:border-indigo-800 dark:bg-indigo-900/10">
-            <div className="mb-3">
+          <div className="min-w-0 rounded-xl border border-indigo-100 bg-indigo-50 p-3 dark:border-indigo-800 dark:bg-indigo-900/10">
+            <div className="mb-2">
               <p className="text-sm font-bold text-indigo-700 dark:text-indigo-400">{tr('wholesale_price', 'Wholesale', 'បោះដុំ')}</p>
               <p className="text-xs text-indigo-600 dark:text-indigo-500">{tr('wholesale_price_hint', 'Bulk / wholesale price, selectable at POS like the VIP tier.', 'តម្លៃបោះដុំ អាចជ្រើសនៅ POS ដូចតម្លៃ VIP។')}</p>
             </div>
@@ -1531,6 +1565,7 @@ export default function ProductForm({
               exchangeRate={exchangeRate}
               t={t}
             />
+          </div>
           </div>
           </> : null}
 
@@ -1569,7 +1604,7 @@ export default function ProductForm({
 
       {activeTab === 'stock' || activeTab === 'expiry' ? (
         <div className="space-y-4">
-          <div className={`grid grid-cols-1 gap-4 sm:grid-cols-2 ${activeTab === 'stock' ? 'lg:grid-cols-3' : ''}`}>
+          <div data-testid="product-stock-fields" className={`grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2 ${activeTab === 'stock' ? 'lg:grid-cols-3' : 'lg:grid-cols-4'}`}>
             {activeTab === 'stock' ? <>
             <div>
               <label htmlFor="product-stock-quantity" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">{t('stock')} ({t('quantity')})</label>
@@ -1585,7 +1620,7 @@ export default function ProductForm({
               <input
                 id="product-stock-quantity"
                 name="product_stock_quantity"
-                className={`input${product ? ' cursor-not-allowed bg-gray-100 text-gray-500 dark:bg-gray-900 dark:text-gray-400' : ''}`}
+                className={`input min-h-11 min-w-0${product ? ' cursor-not-allowed bg-gray-100 text-gray-500 dark:bg-gray-900 dark:text-gray-400' : ''}`}
                 type="text"
                 inputMode="decimal"
                 autoComplete="off"
@@ -1604,6 +1639,21 @@ export default function ProductForm({
                 </p>
               ) : null}
             </div>
+            {!product && branches.length > 0 ? (
+              <div className="min-w-0 lg:col-span-2">
+                <label htmlFor="product-initial-branch" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">{tr('assign_initial_branch', 'Assign Initial Stock to Branch *', 'កំណត់ស្តុកដំបូងទៅសាខា *')}</label>
+                <AppSelect
+                  id="product-initial-branch"
+                  name="product_initial_branch"
+                  value={form.branch_id || ''}
+                  options={initialBranchOptions}
+                  onChange={(value) => setField('branch_id', value)}
+                  ariaLabel={tr('assign_initial_branch', 'Assign Initial Stock to Branch', 'កំណត់ស្តុកដំបូងទៅសាខា')}
+                  className="w-full min-w-0"
+                  buttonClassName="input min-h-11 w-full min-w-0"
+                />
+              </div>
+            ) : null}
             </> : null}
             {activeTab === 'expiry' ? <>
             <div>
@@ -1611,7 +1661,7 @@ export default function ProductForm({
               <input
                 id="product-low-stock-threshold"
                 name="product_low_stock_threshold"
-                className="input"
+                className="input min-h-11 min-w-0"
                 type="text"
                 inputMode="decimal"
                 autoComplete="off"
@@ -1624,7 +1674,7 @@ export default function ProductForm({
               <input
                 id="product-out-of-stock-threshold"
                 name="product_out_of_stock_threshold"
-                className="input"
+                className="input min-h-11 min-w-0"
                 type="text"
                 inputMode="decimal"
                 autoComplete="off"
@@ -1639,7 +1689,7 @@ export default function ProductForm({
               <input
                 id="product-expiry-date"
                 name="product_expiry_date"
-                className="input"
+                className="input min-h-11 min-w-0"
                 type="date"
                 value={form.expiry_date || ''}
                 onChange={(event) => setField('expiry_date', event.target.value)}
@@ -1652,7 +1702,7 @@ export default function ProductForm({
               <input
                 id="product-expiry-alert-days"
                 name="product_expiry_alert_days"
-                className="input"
+                className="input min-h-11 min-w-0"
                 type="text"
                 inputMode="numeric"
                 autoComplete="off"
@@ -1662,22 +1712,6 @@ export default function ProductForm({
             </div>
             </> : null}
           </div>
-
-          {activeTab === 'stock' && !product && branches.length > 0 ? (
-            <div>
-              <label htmlFor="product-initial-branch" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">{tr('assign_initial_branch', 'Assign Initial Stock to Branch *', 'កំណត់ស្តុកដំបូងទៅសាខា *')}</label>
-              <AppSelect
-                id="product-initial-branch"
-                name="product_initial_branch"
-                value={form.branch_id || ''}
-                options={initialBranchOptions}
-                onChange={(value) => setField('branch_id', value)}
-                ariaLabel={tr('assign_initial_branch', 'Assign Initial Stock to Branch', 'កំណត់ស្តុកដំបូងទៅសាខា')}
-                className="w-full"
-                buttonClassName="input h-auto w-full"
-              />
-            </div>
-          ) : null}
 
           {activeTab === 'stock' && product && branches.length > 0 ? (
             <div>
@@ -1708,7 +1742,7 @@ export default function ProductForm({
           cancels the modal's own p-5 padding so the bar spans full width
           and sits flush against the bottom edge; px-5 pb-5 pt-4 puts it
           back inside the bar. */}
-      <div className="sticky bottom-0 -mx-5 -mb-5 mt-6 flex gap-3 border-t border-gray-200 bg-white px-5 pb-5 pt-4 dark:border-gray-700 dark:bg-gray-800">
+      <div className="sticky bottom-0 -mx-5 -mb-5 mt-6 hidden gap-3 border-t border-gray-200 bg-white px-5 pb-5 pt-4 dark:border-gray-700 dark:bg-gray-800 sm:flex">
         {/* Disabled while imageUploading, not just `saving`: previously a
             fast Save click during an in-flight image upload would save the
             product with the pre-upload imageList (the just-picked file
@@ -1718,10 +1752,10 @@ export default function ProductForm({
             had to go re-link it via Files" bug reported. Save now can't
             fire until uploadPickedImages's setImageList has actually
             landed. */}
-        <button type="button" className="btn-primary flex-1" onClick={saveForm} disabled={saving || imageUploading}>
+        <button type="button" className="btn-primary min-h-11 flex-1" onClick={saveForm} disabled={saving || imageUploading}>
           {saving ? (t('saving') || 'Saving...') : imageUploading ? (tr('uploading', 'Uploading...', 'កំពុងបង្ហោះ...')) : t('save')}
         </button>
-        <button type="button" className="btn-secondary" onClick={onClose} disabled={saving}>
+        <button type="button" className="btn-secondary min-h-11" onClick={onClose} disabled={saving}>
           {t('cancel')}
         </button>
         {/* Delete lives in this same row now (was only reachable from the
@@ -1736,7 +1770,7 @@ export default function ProductForm({
         {product && onDelete ? (
           <button
             type="button"
-            className="btn-danger shrink-0 px-2.5"
+            className="btn-danger min-h-11 shrink-0 px-2.5"
             onClick={onDelete}
             disabled={saving}
             aria-label={t('delete') || 'Delete'}
@@ -1786,7 +1820,7 @@ export default function ProductForm({
               <div className={`space-y-1 ${createVerdict.kind === 'exact_twin' ? 'text-red-800 dark:text-red-300' : 'text-amber-800 dark:text-amber-300'}`}>
                 <p>
                   {createVerdict.kind === 'exact_twin'
-                    ? tr('create_match_twin_body', 'An identical product already exists — same name and same barcode. Go back and adjust, or open the existing product instead.', 'ផលិតផលដូចគ្នាបេះបិទមានរួចហើយ — ឈ្មោះ និងបាកូដដូចគ្នា។ ត្រឡប់ក្រោយ ហើយកែសម្រួល ឬបើកផលិតផលដែលមានស្រាប់ជំនួសវិញ។')
+                    ? tr('create_match_twin_body', 'An identical product already exists — same name, barcode, and cost. Go back and adjust, or open the existing product instead.', 'ផលិតផលដូចគ្នាបេះបិទមានរួចហើយ — ឈ្មោះ បាកូដ និងថ្លៃដើមដូចគ្នា។ ត្រឡប់ក្រោយ ហើយកែសម្រួល ឬបើកផលិតផលដែលមានស្រាប់ជំនួសវិញ។')
                     : createVerdict.kind === 'name_match'
                       ? tr('create_match_name_body', 'A product with this exact name already exists. Saving adds another ordinary row under the same automatic group title.', 'ផលិតផលដែលមានឈ្មោះដូចគ្នាបេះបិទមានរួចហើយ។ ការរក្សាទុកនឹងបន្ថែមជួរផលិតផលធម្មតាមួយទៀតក្រោមចំណងជើងក្រុមស្វ័យប្រវត្តិដូចគ្នា។')
                       : tr('create_match_barcode_body', 'This barcode already belongs to "{name}". Use that same name to wrap this row under the same automatic group title, or keep your different name as a separate product.', 'បាកូដនេះជារបស់ "{name}" រួចហើយ។ ប្រើឈ្មោះដូចគ្នា ដើម្បីឲ្យជួរនេះត្រូវបានរុំក្រោមចំណងជើងក្រុមស្វ័យប្រវត្តិដូចគ្នា ឬរក្សាឈ្មោះផ្សេងរបស់អ្នកជាផលិតផលដាច់ដោយឡែក។').replace('{name}', createVerdict.canonicalName)}

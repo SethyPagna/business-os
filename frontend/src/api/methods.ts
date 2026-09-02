@@ -638,6 +638,10 @@ export const otpDisable = async (payload) => {
   const { otpDisable: otpDisableRequest } = await loadAuthTransport()
   return otpDisableRequest(payload)
 }
+export const otpRecoveryReset = async (payload) => {
+  const { otpRecoveryReset: otpRecoveryResetRequest } = await loadAuthTransport()
+  return otpRecoveryResetRequest(payload)
+}
 export const otpVerify = async (payload) => {
   const { otpVerify: otpVerifyRequest } = await loadAuthTransport()
   return otpVerifyRequest(payload)
@@ -1119,6 +1123,11 @@ export const forgetGoogleDriveSyncCredentials = async (payload = {}) => {
 export const queueGoogleDriveSyncNow = async () => {
   const { queueGoogleDriveSyncNow: queueGoogleDriveSyncNowRequest } = await loadDriveSyncTransport()
   return queueGoogleDriveSyncNowRequest()
+}
+
+export const queueGoogleDriveRestoreStage = async () => {
+  const { queueGoogleDriveRestoreStage: queueGoogleDriveRestoreStageRequest } = await loadDriveSyncTransport()
+  return queueGoogleDriveRestoreStageRequest()
 }
 
 export const syncGoogleDriveNow = async () => {

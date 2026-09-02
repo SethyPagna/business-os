@@ -72,6 +72,8 @@ type AppTheme = 'light' | 'dark'
     return raw.indexOf('does not provide an export named') !== -1
       || raw.indexOf('Failed to fetch dynamically imported module') !== -1
       || raw.indexOf('Importing a module script failed') !== -1
+      || (raw.indexOf('MIME type') !== -1 && raw.indexOf('text/html') !== -1)
+      || raw.indexOf('not a valid JavaScript MIME type') !== -1
   }
 
   function requestStaleModuleReload(): boolean {

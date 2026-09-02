@@ -2,7 +2,7 @@
 // Main Products page; all sub-modals are imported from sibling files.
 
 import { Suspense, useState, useEffect, useCallback, useMemo, useRef } from 'react'
-import type { ReactNode, MouseEvent as ReactMouseEvent } from 'react'
+import type { ReactNode, MouseEvent as ReactMouseEvent, WheelEvent as ReactWheelEvent } from 'react'
 import { lazyRetry } from '../../utils/lazyImport.ts'
 import ChevronLeft from 'lucide-react/dist/esm/icons/chevron-left.js'
 import ChevronRight from 'lucide-react/dist/esm/icons/chevron-right.js'
@@ -21,8 +21,9 @@ import PageSizeSelect from '../shared/PageSizeSelect'
 import SearchInput from '../shared/SearchInput'
 import ScanSearchButton from '../shared/ScanSearchButton'
 import PaginationControls, { PAGE_SIZE_OPTIONS, DEFAULT_PAGE_SIZE } from '../shared/PaginationControls'
-import { ProductImg, ProductImagePlaceholder, DragScrollText } from './shared/primitives'
+import { ProductImg, ProductImagePlaceholder } from './shared/primitives'
 import ProductsListSurface, { ROW_TEXT_GUTTER } from './surfaces/ProductsListSurface'
+import StockInSessionsSection from './StockInSessionsSection.tsx'
 import MergeDuplicatesReviewModal from './MergeDuplicatesReviewModal'
 import type { MergeDuplicatesPreviewGroup } from './MergeDuplicatesReviewModal'
 import ZeroQuantityCleanupModal from './ZeroQuantityCleanupModal'
@@ -141,7 +142,6 @@ const ManageCategoriesModal = lazyRetry(() => import('./lookups/ManageCategories
 // bundle for a user who will only ever see this lightweight surface.
 const ProductsImageOnlyView = lazyRetry(() => import('./ProductsImageOnlyView.tsx'), 'products-image-only-view')
 const StockChangeSection = lazyRetry(() => import('./StockChangeSection.tsx'), 'products-stock-change-section')
-const StockInSessionsSection = lazyRetry(() => import('./StockInSessionsSection.tsx'), 'products-stock-in-sessions-section')
 const ProductDuplicatesTab = lazyRetry(() => import('./ProductDuplicatesTab.tsx'), 'products-duplicates-tab')
 const ManageBrandsModal = lazyRetry(() => import('./lookups/ManageBrandsModal'), 'products-manage-brands-modal')
 const ManageUnitsModal = lazyRetry(() => import('./lookups/ManageUnitsModal'), 'products-manage-units-modal')
@@ -2018,11 +2018,17 @@ function ProductsFullEditor() {
     if (!item?.label) return null
     const label = String(item.label)
     const color = item.color || DEFAULT_META_PILL_COLOR
+    // A code is the one identifier that must be readable on one line. Keep
+    // the secondary brand/category tags compact so barcode values get the
+    // space first, instead of wrapping or losing their final digits.
+    const widthClass = item.key === 'barcode'
+      ? 'shrink-0 whitespace-nowrap'
+      : 'max-w-[5rem] truncate'
     if (item.color) {
       return (
         <span
           key={item.key}
-          {...getKhmerTextProps(label, 'max-w-[10rem] truncate rounded-full px-1.5 py-0.5 text-[10px] font-semibold')}
+          {...getKhmerTextProps(label, `${widthClass} rounded-full px-1.5 py-0.5 text-[10px] font-semibold`)}
           style={{ background: color, color: getContrastingTextColor(color) }}
           title={label}
         >
@@ -2033,7 +2039,7 @@ function ProductsFullEditor() {
     return (
       <span
         key={item.key}
-        {...getKhmerTextProps(label, `max-w-[10rem] truncate rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${item.className || 'bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-300'}`)}
+        {...getKhmerTextProps(label, `${widthClass} rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${item.className || 'bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-300'}`)}
         title={label}
       >
         {label}
@@ -2058,6 +2064,15 @@ function ProductsFullEditor() {
     const nextLightbox = buildProductLightboxState(gallery, startIndex, title)
     if (nextLightbox) setLightbox(nextLightbox)
   }
+
+  const scrollProductSectionsWithWheel = useCallback((event: ReactWheelEvent<HTMLDivElement>) => {
+    const element = event.currentTarget
+    if (element.scrollWidth <= element.clientWidth) return
+    const delta = Math.abs(event.deltaX) > Math.abs(event.deltaY) ? event.deltaX : event.deltaY
+    if (!delta) return
+    event.preventDefault()
+    element.scrollLeft += delta
+  }, [])
 
   const getBranchQty = useCallback((product: Record<string, unknown>, branchId: unknown) => getProductBranchQuantity(product, branchId), [])
   const parentProductIds = useMemo(() => buildParentProductIdSet(products), [products])
@@ -3094,17 +3109,24 @@ function ProductsFullEditor() {
             child row's name starts at exactly the same x as the group
             title's. */}
         <td className="px-2 py-2">
-          {indented ? null : thumbnailState.hasImage
-            ? <ProductImg src={thumbnailState.thumbnail} alt={productName} className="h-16 w-16 rounded-lg bg-slate-50 object-contain p-0.5 cursor-zoom-in hover:ring-2 hover:ring-primary-400 dark:bg-slate-800" onClick={(e) => { e.stopPropagation(); openLightbox(thumbnailState.gallery, 0, productName) }}
-                // Stopping only the CLICK left the row still opening its
-                // detail flyout behind the lightbox: the row's long-press
-                // handlers bind mousedown/touchstart (utils/longPress.ts),
-                // which fire before click and drive their own onClick on
-                // release. Tapping a thumbnail therefore opened the gallery
-                // AND the detail at once. Stop the gesture at its start.
-                onMouseDown={(e) => e.stopPropagation()}
-                onTouchStart={(e) => e.stopPropagation()} />
-            : <ProductImagePlaceholder className="h-16 w-16 rounded-lg" compact />}
+          {indented ? null : (
+            <button
+                type="button"
+                className={`block rounded-lg ${thumbnailState.hasImage ? 'cursor-zoom-in' : 'cursor-default'}`}
+                aria-label={thumbnailState.hasImage ? `${tr('view_image', 'View image')}: ${productName}` : undefined}
+                aria-disabled={!thumbnailState.hasImage}
+                onMouseDown={(event) => event.stopPropagation()}
+                onTouchStart={(event) => event.stopPropagation()}
+                onClick={(event) => {
+                  event.stopPropagation()
+                  if (thumbnailState.hasImage) openLightbox(thumbnailState.gallery, 0, productName)
+                }}
+              >
+                {thumbnailState.hasImage
+                  ? <ProductImg src={thumbnailState.thumbnail} alt={productName} className="h-16 w-16 rounded-lg bg-slate-50 object-contain p-0.5 cursor-zoom-in hover:ring-2 hover:ring-primary-400 dark:bg-slate-800" />
+                  : <ProductImagePlaceholder className="h-16 w-16 rounded-lg" compact />}
+              </button>
+          )}
         </td>
         {/* Name rail (col 3): child rows align EXACTLY with the group
             title -- no text indent. A child row leaves its image cell empty
@@ -3317,28 +3339,33 @@ function ProductsFullEditor() {
             // empty right side" -- a wide square ate the room barcode/brand/
             // price need). self-stretch grows it to the card's height; w-16
             // keeps it narrow so the text column keeps its width.
-            <div className="relative flex-shrink-0 self-stretch">
+            <button
+              type="button"
+              className="relative flex-shrink-0 self-stretch rounded-xl text-left"
+              aria-label={thumbnailState.hasImage ? `${tr('view_image', 'View image')}: ${productName}` : undefined}
+              aria-disabled={!thumbnailState.hasImage}
+              onMouseDown={(event) => event.stopPropagation()}
+              onTouchStart={(event) => event.stopPropagation()}
+              onClick={(event) => {
+                event.stopPropagation()
+                if (thumbnailState.hasImage) openLightbox(thumbnailState.gallery, 0, productName)
+              }}
+            >
               {thumbnailState.hasImage
-                ? <ProductImg src={thumbnailState.thumbnail} alt={productName} className="h-full min-h-[5rem] w-16 rounded-xl bg-slate-50 object-contain p-0.5 cursor-zoom-in dark:bg-slate-800" onClick={(e) => { e.stopPropagation(); openLightbox(thumbnailState.gallery, 0, productName) }}
-                // Stopping only the CLICK left the row still opening its
-                // detail flyout behind the lightbox: the row's long-press
-                // handlers bind mousedown/touchstart (utils/longPress.ts),
-                // which fire before click and drive their own onClick on
-                // release. Tapping a thumbnail therefore opened the gallery
-                // AND the detail at once. Stop the gesture at its start.
-                onMouseDown={(e) => e.stopPropagation()}
-                onTouchStart={(e) => e.stopPropagation()} />
+                ? <ProductImg src={thumbnailState.thumbnail} alt={productName} className="h-full min-h-[5rem] w-16 rounded-xl bg-slate-50 object-contain p-0.5 cursor-zoom-in dark:bg-slate-800" />
                 : <ProductImagePlaceholder className="h-full min-h-[5rem] w-16 rounded-xl" />}
               <ProductDiscountBadge product={p} promotion={promotion} fmtUSD={fmtUSD} label={tr('discounts', 'Discounts')} overlay />
-            </div>
+            </button>
           )}
           <div className="flex-1 min-w-0">
             <div className="flex items-start justify-between gap-2">
               <div className="min-w-0 flex-1">
-                {/* Long names pan horizontally (touch drag / mouse click-drag)
-                    instead of hard-truncating, with no visible scrollbar --
-                    see DragScrollText (user, Aug 31 2026). */}
-                <DragScrollText {...getKhmerTextProps(productName, 'text-sm font-semibold text-gray-900 dark:text-white')} title={productName}>{productName}</DragScrollText>
+                {/* Product names are content, not a label: let them use a
+                    second (or later) row on small cards instead of clipping
+                    them or requiring a horizontal drag to read them. */}
+                <div {...getKhmerTextProps(productName, 'break-words text-sm font-semibold text-gray-900 dark:text-white')}>
+                  {productName}
+                </div>
               </div>
               {/* Batch count rides the name row as a small YELLOW badge
                   (user, Aug 30: "add number of batches yellow next to the
@@ -3367,7 +3394,7 @@ function ProductsFullEditor() {
                   useful on the card face. Brand stays. */}
               {barcode ? (
                 <span
-                  className="inline-block max-w-[10rem] truncate rounded-full bg-slate-100 px-1.5 py-0.5 font-mono text-[10px] text-slate-600 dark:bg-slate-800 dark:text-slate-300"
+                  className="inline-flex shrink-0 whitespace-nowrap rounded-full bg-slate-100 px-1 py-0.5 font-mono text-[10px] tracking-tight text-slate-600 dark:bg-slate-800 dark:text-slate-300"
                   title={barcode}
                 >
                   {barcode}
@@ -3375,7 +3402,7 @@ function ProductsFullEditor() {
               ) : null}
               {brandName ? (
                 <span
-                  className={`inline-block max-w-[8rem] truncate rounded-full px-1.5 py-0.5 text-[10px] font-medium ${getBrandColor(brandName) ? '' : 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300'}`}
+                  className={`inline-block max-w-[4.5rem] truncate rounded-full px-1 py-0.5 text-[10px] font-medium sm:max-w-[6rem] ${getBrandColor(brandName) ? '' : 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300'}`}
                   style={getBrandColor(brandName) ? {
                     background: getBrandColor(brandName),
                     color: getContrastingTextColor(getBrandColor(brandName)),
@@ -3479,10 +3506,20 @@ function ProductsFullEditor() {
   // per user request that desktop thumbnails were too small).
   const renderGroupThumbnail = useCallback((group: { rows?: ProductRecord[]; leadProduct?: ProductRecord }) => {
     const state = buildGroupThumbnailState(group.rows, group.leadProduct)
+    const title = String(group.leadProduct?.name || group.rows?.[0]?.name || '')
     return state.hasImage
-      ? <ProductImg src={state.thumbnail} alt={String(group.leadProduct?.name || group.rows?.[0]?.name || '')} className="h-20 w-16 rounded-xl bg-slate-50 object-contain p-0.5 cursor-zoom-in sm:h-12 sm:w-12 sm:rounded-lg dark:bg-slate-800" onClick={(event) => { event.stopPropagation(); openLightbox(state.gallery, 0, String(group.leadProduct?.name || group.rows?.[0]?.name || '')) }} />
+      ? <button
+          type="button"
+          className="block rounded-xl text-left sm:rounded-lg"
+          aria-label={`${tr('view_image', 'View image')}: ${title}`}
+          onMouseDown={(event) => event.stopPropagation()}
+          onTouchStart={(event) => event.stopPropagation()}
+          onClick={(event) => { event.stopPropagation(); openLightbox(state.gallery, 0, title) }}
+        >
+          <ProductImg src={state.thumbnail} alt={title} className="h-20 w-16 rounded-xl bg-slate-50 object-contain p-0.5 cursor-zoom-in sm:h-12 sm:w-12 sm:rounded-lg dark:bg-slate-800" />
+        </button>
       : <ProductImagePlaceholder className="h-20 w-16 rounded-xl sm:h-12 sm:w-12 sm:rounded-lg" compact />
-  }, [openLightbox])
+  }, [openLightbox, tr])
 
   // Group-title three-dot menu: "Add child row" (opens the variant modal,
   // same flow as the detail sheet's own Add Variant button) and "Add
@@ -3566,10 +3603,17 @@ function ProductsFullEditor() {
             pattern as the Promotions page. Stock Changes stops being a
             folded card at the bottom of the listing and becomes its own
             section reached from here. */}
-        <div className="inline-flex shrink-0 rounded-xl bg-gray-100 p-0.5 dark:bg-gray-800">
+        <div
+          className="w-full min-w-0 max-w-full overflow-x-auto pb-1 [scrollbar-width:thin] sm:w-auto sm:flex-1 sm:pb-0"
+          role="group"
+          aria-label={tr('product_sections', 'Product sections')}
+          onWheel={scrollProductSectionsWithWheel}
+        >
+          <div className="inline-flex w-max rounded-xl bg-gray-100 p-0.5 dark:bg-gray-800">
           <button
             type="button"
             onClick={() => setActiveProductSection('products')}
+            aria-pressed={activeProductSection === 'products'}
             className={`rounded-lg px-3 py-1.5 text-sm font-medium transition-colors ${activeProductSection === 'products' ? 'bg-white text-primary-600 shadow dark:bg-gray-900' : 'text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'}`}
           >
             {t('products') || 'Products'}
@@ -3577,6 +3621,7 @@ function ProductsFullEditor() {
           <button
             type="button"
             onClick={() => setActiveProductSection('stock_changes')}
+            aria-pressed={activeProductSection === 'stock_changes'}
             className={`rounded-lg px-3 py-1.5 text-sm font-medium transition-colors ${activeProductSection === 'stock_changes' ? 'bg-white text-primary-600 shadow dark:bg-gray-900' : 'text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'}`}
           >
             {tr('stock_change_ledger', 'Stock Changes', 'ការផ្លាស់ប្តូរស្តុក')}
@@ -3585,6 +3630,7 @@ function ProductsFullEditor() {
             <button
               type="button"
               onClick={() => setActiveProductSection('stock_in_sessions')}
+              aria-pressed={activeProductSection === 'stock_in_sessions'}
               className={`rounded-lg px-3 py-1.5 text-sm font-medium transition-colors ${activeProductSection === 'stock_in_sessions' ? 'bg-white text-primary-600 shadow dark:bg-gray-900' : 'text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'}`}
             >
               {tr('stock_in_sessions', 'Stock-in Sessions', 'វគ្គបញ្ចូលស្តុក')}
@@ -3597,11 +3643,13 @@ function ProductsFullEditor() {
             <button
               type="button"
               onClick={() => setActiveProductSection('duplicates')}
+              aria-pressed={activeProductSection === 'duplicates'}
               className={`rounded-lg px-3 py-1.5 text-sm font-medium transition-colors ${activeProductSection === 'duplicates' ? 'bg-white text-primary-600 shadow dark:bg-gray-900' : 'text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'}`}
             >
               {tr('product_duplicates_section', 'Duplicates', 'ស្ទួន')}
             </button>
           ) : null}
+          </div>
         </div>
         <div className="w-full min-w-0 overflow-x-auto pb-1 sm:ml-auto sm:w-auto sm:flex-shrink-0 sm:pb-0">
           {/* Each handler is passed only when this role's tier actually
@@ -4113,33 +4161,38 @@ function ProductsFullEditor() {
           sidebar) jumps to a section instead of hiding everything else.
           initialFilter/initialOptions plumbing removed with it below. */}
 
-      <ProductsListSurface
-        allVisibleProducts={allVisibleProducts}
-        collapsedProductGroups={collapsedProductGroups}
-        collapsedProductSections={collapsedProductSections}
-        getGroupSummaryParts={getGroupSummaryParts}
-        initialDesktopRevealReady={loadedOnceRef.current || !loading}
-        isSelectionScopeFullySelected={isSelectionScopeFullySelected}
-        isSelectionScopePartiallySelected={isSelectionScopePartiallySelected}
-        allVisibleIds={visibleIds}
-        loading={loading}
-        productSections={productSections}
-        productTotal={productTotal}
-        productTotalLabel={productSummaryLabel}
-        refreshingProducts={refreshingProducts}
-        renderDesktopProductRow={renderDesktopProductRow}
-        bindGroupHold={bindGroupHold}
-        renderGroupActions={renderGroupActions}
-        renderGroupThumbnail={renderGroupThumbnail}
-        renderMobileProductCard={renderMobileProductCard}
-        selectionModeActive={selectionModeActive}
-        t={t}
-        toggleProductGroup={toggleProductGroup}
-        toggleProductSection={toggleProductSection}
-        toggleSelectionScope={toggleSelectionScope}
-        tr={tr}
-        visibleProducts={visibleProducts}
-      />
+      {/* The product-result surface is intentionally 90% of its former
+          visual scale. The wrapper restores the layout width so shrinking
+          rows/cards does not leave an empty 10% rail on the right. */}
+      <div className="products-list-density-90">
+        <ProductsListSurface
+          allVisibleProducts={allVisibleProducts}
+          collapsedProductGroups={collapsedProductGroups}
+          collapsedProductSections={collapsedProductSections}
+          getGroupSummaryParts={getGroupSummaryParts}
+          initialDesktopRevealReady={loadedOnceRef.current || !loading}
+          isSelectionScopeFullySelected={isSelectionScopeFullySelected}
+          isSelectionScopePartiallySelected={isSelectionScopePartiallySelected}
+          allVisibleIds={visibleIds}
+          loading={loading}
+          productSections={productSections}
+          productTotal={productTotal}
+          productTotalLabel={productSummaryLabel}
+          refreshingProducts={refreshingProducts}
+          renderDesktopProductRow={renderDesktopProductRow}
+          bindGroupHold={bindGroupHold}
+          renderGroupActions={renderGroupActions}
+          renderGroupThumbnail={renderGroupThumbnail}
+          renderMobileProductCard={renderMobileProductCard}
+          selectionModeActive={selectionModeActive}
+          t={t}
+          toggleProductGroup={toggleProductGroup}
+          toggleProductSection={toggleProductSection}
+          toggleSelectionScope={toggleSelectionScope}
+          tr={tr}
+          visibleProducts={visibleProducts}
+        />
+      </div>
 
       <AlphaIndexRail letters={visibleLetters} onJump={jumpToLetter} label={t('jump_to_letter') || 'Jump to letter'} />
 
@@ -4187,9 +4240,12 @@ function ProductsFullEditor() {
 
       {activeProductSection === 'stock_in_sessions' && canAdjustInventoryStock ? (
         <div className="mt-1">
-          <Suspense fallback={<div className="py-6 text-center text-sm text-gray-400">{t('loading') || 'Loading'}...</div>}>
-            <StockInSessionsSection t={t} notify={notify} branches={branches} onChanged={() => void load(true)} />
-          </Suspense>
+          {/* This section is deliberately bundled with Products. It is small,
+              and fetching it as a second lazy chunk exactly when the user
+              clicked the tab allowed an old app shell/new deployment asset
+              mismatch to reject the import and trip the page-wide boundary
+              even though the API request itself returned 200. */}
+          <StockInSessionsSection t={t} notify={notify} branches={branches} onChanged={() => void load(true)} />
         </div>
       ) : null}
 
@@ -4202,6 +4258,7 @@ function ProductsFullEditor() {
             defaultBranchId={null}
             tr={tr}
             notify={notify}
+            exchangeRate={exchangeRate}
             onClose={() => setAddStockOpen(false)}
             onDone={() => { void load(true) }}
           />

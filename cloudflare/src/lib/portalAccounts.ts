@@ -51,8 +51,12 @@ function existingReject(): SignupResult {
 async function generateMembershipId(env: Env): Promise<string> {
   const db = getDb(env)
   for (let attempt = 0; attempt < 50; attempt += 1) {
-    const entropy = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}${attempt.toString(36)}`.toUpperCase()
-    const candidate = `LCMN-${entropy.slice(-8)}`
+    // Account identifiers must not come from a predictable PRNG. Six random
+    // bytes provide 48 bits of Web-Crypto entropy; the uniqueness checks and
+    // INSERT constraint below remain the final race-safe arbiter.
+    const bytes = crypto.getRandomValues(new Uint8Array(6))
+    const entropy = Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('').toUpperCase()
+    const candidate = `LCMN-${entropy}`
     // Globally unique across BOTH stores — a membership id must never collide
     // with an existing customer's number or another account's.
     const inCustomers = await db.prepare('SELECT id FROM customers WHERE lower(trim(membership_number)) = lower(trim(@candidate)) LIMIT 1').get({ candidate })

@@ -40,6 +40,30 @@ function normalizeBoolean(value: unknown, fallback = false): boolean {
   return ['1', 'true', 'yes', 'on'].includes(String(value).trim().toLowerCase())
 }
 
+function normalizePortalFaqItems(value: unknown): Array<{ id: string; question: string; answer: string }> {
+  let parsed: unknown = value
+  if (typeof value === 'string') {
+    try {
+      parsed = JSON.parse(value)
+    } catch (_) {
+      return []
+    }
+  }
+  if (!Array.isArray(parsed)) return []
+
+  return parsed
+    .slice(0, 50)
+    .map((item, index) => {
+      const row = item && typeof item === 'object' ? item as Record<string, unknown> : {}
+      return {
+        id: String(row.id || `faq-${index + 1}`).trim() || `faq-${index + 1}`,
+        question: String(row.question || '').trim(),
+        answer: String(row.answer || '').trim(),
+      }
+    })
+    .filter((item) => item.question && item.answer)
+}
+
 // Ported from backend/src/routes/portal.ts's normalizeUrl, minus the
 // assertSafeOutboundUrl SSRF check (backend/src/urlSafety.ts -- a
 // DNS-resolution-based check for private/internal IP ranges, not ported
@@ -171,8 +195,12 @@ export function buildPortalConfig(settings: SettingsMap, env: Env) {
     showAddress: normalizeBoolean(settings.customer_portal_show_address, true),
     showAbout: normalizeBoolean(settings.customer_portal_show_about, true),
     showCatalog: normalizeBoolean(settings.customer_portal_show_catalog, true),
-    showMembership: normalizeBoolean(settings.customer_portal_show_membership, true),
+    // Guest membership lookup was removed. Signed-in customers see their own
+    // membership ID in the account drawer instead of exposing an ID oracle.
+    showMembership: false,
     showFaq: normalizeBoolean(settings.customer_portal_show_faq, true),
+    faqTitle: settings.customer_portal_faq_title || 'Frequently asked questions',
+    faqItems: normalizePortalFaqItems(settings.customer_portal_faq_items),
     showPrices: normalizeBoolean(settings.customer_portal_show_prices, true),
     showOutOfStockProducts: normalizeBoolean(settings.customer_portal_show_out_of_stock_products, true),
     // Master switch for the In Stock/Low Stock/Out of Stock badge on each

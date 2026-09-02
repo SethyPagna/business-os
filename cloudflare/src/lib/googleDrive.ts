@@ -23,21 +23,125 @@
 import type { Env } from '../index'
 import { getDb } from './db'
 import { encryptSecret, decryptSecret } from './secretCrypto'
-import { listCloudflareBackups } from './backup'
+import {
+  DRIVE_STAGED_BACKUP_PREFIX,
+  inspectCloudflareBackupStream,
+  listCloudflareBackups,
+  validateCloudflareBackup,
+} from './backup'
 
 const GOOGLE_AUTH_URL = 'https://accounts.google.com/o/oauth2/v2/auth'
 const GOOGLE_TOKEN_URL = 'https://oauth2.googleapis.com/token'
 const DRIVE_UPLOAD_URL = 'https://www.googleapis.com/upload/drive/v3/files'
 const DRIVE_FILES_URL = 'https://www.googleapis.com/drive/v3/files'
 export const DRIVE_CALLBACK_PATH = '/api/system/drive-sync/oauth/callback'
+export const DRIVE_OAUTH_STATE_TTL_SECONDS = 10 * 60
+const DRIVE_OAUTH_MAX_FUTURE_SKEW_MS = 60 * 1000
 const DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.file'
 const DEFAULT_FOLDER_NAME = 'Business OS Sync'
 // 10, not 7, since Part 386 -- the user's standing spec is "2 in R2 and
 // 10 in Google Drive".
 export const DRIVE_BACKUP_KEEP = 10
+export const DRIVE_STAGED_BACKUP_KEEP = 2
+// R2's current single-PUT ceiling is 5 GiB minus 5 MiB. Drive staging uses
+// one streamed binding PUT, so reject metadata outside that bound before
+// opening a remote body.
+export const DRIVE_STAGED_BACKUP_MAX_BYTES = (5 * 1024 * 1024 * 1024) - (5 * 1024 * 1024)
 
 function trim(value: unknown): string {
   return String(value ?? '').trim()
+}
+
+export type DriveOauthStatePayload = {
+  provider: 'google-drive'
+  nonce: string
+  codeVerifier: string
+  createdAt: number
+  userId: number
+  returnOrigin: string
+  returnPath: string
+}
+
+function base64UrlEncodeBytes(bytes: Uint8Array): string {
+  let binary = ''
+  for (const byte of bytes) binary += String.fromCharCode(byte)
+  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
+}
+
+function base64UrlDecodeToBytes(value: string): Uint8Array {
+  const padded = value.replace(/-/g, '+').replace(/_/g, '/').padEnd(value.length + ((4 - (value.length % 4)) % 4), '=')
+  const binary = atob(padded)
+  return Uint8Array.from(binary, (character) => character.charCodeAt(0))
+}
+
+function randomBase64Url(byteLength: number): string {
+  return base64UrlEncodeBytes(crypto.getRandomValues(new Uint8Array(byteLength)))
+}
+
+async function sha256Base64Url(value: string): Promise<string> {
+  return base64UrlEncodeBytes(new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value))))
+}
+
+async function hmacSignBase64Url(secret: string, data: string): Promise<string> {
+  const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign'])
+  return base64UrlEncodeBytes(new Uint8Array(await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(data))))
+}
+
+function timingSafeEqual(left: string, right: string): boolean {
+  if (left.length !== right.length) return false
+  let diff = 0
+  for (let index = 0; index < left.length; index++) diff |= left.charCodeAt(index) ^ right.charCodeAt(index)
+  return diff === 0
+}
+
+function driveOauthStateKey(nonce: string): string {
+  return `oauth-state:google-drive:${nonce}`
+}
+
+function driveOauthStateSecret(env: Env): string {
+  return trim(env.AUTH_SESSION_SECRET || env.GOOGLE_DRIVE_CLIENT_SECRET)
+}
+
+function normalizeDriveReturnTarget(env: Env, returnOrigin: unknown, returnPath: unknown): { origin: string; path: string; url: string } {
+  const admin = new URL(trim(env.BUSINESS_OS_ADMIN_URL))
+  const origin = trim(returnOrigin)
+  const path = trim(returnPath)
+  const safePath = path.startsWith('/') && !path.startsWith('//') ? path : '/?settings=integrations'
+  const selectedOrigin = origin === admin.origin ? origin : admin.origin
+  return { origin: selectedOrigin, path: safePath, url: `${selectedOrigin}${safePath}` }
+}
+
+async function signDriveOauthState(env: Env, payload: DriveOauthStatePayload): Promise<{ state?: string; error?: string }> {
+  const secret = driveOauthStateSecret(env)
+  if (!secret) return { error: 'Google Drive OAuth state signing is not configured.' }
+  const encoded = base64UrlEncodeBytes(new TextEncoder().encode(JSON.stringify(payload)))
+  return { state: `${encoded}.${await hmacSignBase64Url(secret, encoded)}` }
+}
+
+export async function consumeDriveOauthState(env: Env, state: string | undefined): Promise<{ success: boolean; payload?: DriveOauthStatePayload; error?: string }> {
+  const [encoded, signature] = trim(state).split('.')
+  const secret = driveOauthStateSecret(env)
+  if (!encoded || !signature || !secret) return { success: false, error: 'Invalid Google Drive OAuth state.' }
+  const expected = await hmacSignBase64Url(secret, encoded)
+  if (!timingSafeEqual(signature, expected)) return { success: false, error: 'Google Drive OAuth state failed verification.' }
+  try {
+    const payload = JSON.parse(new TextDecoder().decode(base64UrlDecodeToBytes(encoded))) as DriveOauthStatePayload
+    const ageMs = Date.now() - Number(payload.createdAt || 0)
+    if (payload.provider !== 'google-drive' || !trim(payload.nonce) || !trim(payload.codeVerifier) || !Number(payload.userId)) {
+      return { success: false, error: 'Invalid Google Drive OAuth state.' }
+    }
+    if (ageMs < -DRIVE_OAUTH_MAX_FUTURE_SKEW_MS || ageMs > DRIVE_OAUTH_STATE_TTL_SECONDS * 1000) {
+      return { success: false, error: 'Google Drive OAuth state expired. Please connect again.' }
+    }
+    const remembered = await env.CACHE.get(driveOauthStateKey(payload.nonce))
+    if (!remembered || !timingSafeEqual(remembered, signature)) {
+      return { success: false, error: 'Google Drive OAuth state was already used or is no longer valid.' }
+    }
+    await env.CACHE.delete(driveOauthStateKey(payload.nonce))
+    return { success: true, payload }
+  } catch (_) {
+    return { success: false, error: 'Google Drive OAuth state could not be decoded.' }
+  }
 }
 
 async function getSettings(env: Env, keys: string[]): Promise<Record<string, string>> {
@@ -116,9 +220,28 @@ export async function updateDrivePreferences(env: Env, body: Record<string, unkn
   return driveSyncStatus(env)
 }
 
-export function buildDriveOauthStartUrl(env: Env): { success: boolean; error?: string; url?: string } {
+export async function buildDriveOauthStartUrl(
+  env: Env,
+  options: { userId: number; returnOrigin?: unknown; returnPath?: unknown },
+): Promise<{ success: boolean; error?: string; url?: string }> {
   const clientId = trim(env.GOOGLE_DRIVE_CLIENT_ID)
   if (!clientId) return { success: false, error: 'Google Drive client ID is not configured.' }
+  const returnTarget = normalizeDriveReturnTarget(env, options.returnOrigin, options.returnPath)
+  const codeVerifier = randomBase64Url(32)
+  const payload: DriveOauthStatePayload = {
+    provider: 'google-drive',
+    nonce: randomBase64Url(16),
+    codeVerifier,
+    createdAt: Date.now(),
+    userId: Number(options.userId || 0),
+    returnOrigin: returnTarget.origin,
+    returnPath: returnTarget.path,
+  }
+  if (!payload.userId) return { success: false, error: 'Google Drive OAuth requires an authenticated user.' }
+  const signed = await signDriveOauthState(env, payload)
+  if (!signed.state) return { success: false, error: signed.error || 'Failed to secure Google Drive OAuth state.' }
+  const signature = signed.state.split('.')[1]
+  await env.CACHE.put(driveOauthStateKey(payload.nonce), signature, { expirationTtl: DRIVE_OAUTH_STATE_TTL_SECONDS })
   const url = new URL(GOOGLE_AUTH_URL)
   url.searchParams.set('client_id', clientId)
   url.searchParams.set('redirect_uri', getRedirectUri(env))
@@ -127,10 +250,13 @@ export function buildDriveOauthStartUrl(env: Env): { success: boolean; error?: s
   url.searchParams.set('access_type', 'offline')
   url.searchParams.set('prompt', 'consent')
   url.searchParams.set('include_granted_scopes', 'true')
+  url.searchParams.set('state', signed.state)
+  url.searchParams.set('code_challenge', await sha256Base64Url(codeVerifier))
+  url.searchParams.set('code_challenge_method', 'S256')
   return { success: true, url: url.toString() }
 }
 
-export async function completeDriveOauth(env: Env, code: string): Promise<{ success: boolean; error?: string }> {
+export async function completeDriveOauth(env: Env, code: string, codeVerifier: string): Promise<{ success: boolean; error?: string }> {
   const clientId = trim(env.GOOGLE_DRIVE_CLIENT_ID)
   const clientSecret = trim(env.GOOGLE_DRIVE_CLIENT_SECRET)
   if (!clientId || !clientSecret) return { success: false, error: 'Google Drive OAuth is not configured.' }
@@ -140,7 +266,8 @@ export async function completeDriveOauth(env: Env, code: string): Promise<{ succ
   body.set('code', code)
   body.set('grant_type', 'authorization_code')
   body.set('redirect_uri', getRedirectUri(env))
-  const response = await fetch(GOOGLE_TOKEN_URL, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body })
+  body.set('code_verifier', trim(codeVerifier))
+  const response = await fetch(GOOGLE_TOKEN_URL, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body, redirect: 'error' })
   const payload = await response.json().catch(() => ({} as Record<string, unknown>)) as Record<string, unknown>
   if (!response.ok || !payload.refresh_token) {
     return { success: false, error: String(payload.error_description || payload.error || 'Google did not return a refresh token (try disconnecting Drive access at myaccount.google.com/permissions and reconnecting so Google issues a fresh one).') }
@@ -196,7 +323,7 @@ async function getValidAccessToken(env: Env): Promise<{ token: string } | { erro
   body.set('client_secret', clientSecret)
   body.set('refresh_token', refreshToken)
   body.set('grant_type', 'refresh_token')
-  const response = await fetch(GOOGLE_TOKEN_URL, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body })
+  const response = await fetch(GOOGLE_TOKEN_URL, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body, redirect: 'error' })
   const payload = await response.json().catch(() => ({} as Record<string, unknown>)) as Record<string, unknown>
   if (!response.ok || !payload.access_token) {
     const message = String(payload.error_description || payload.error || 'Failed to refresh Google Drive access token.')
@@ -231,9 +358,9 @@ async function ensureFolder(token: string, folderName: string, existingFolderId:
 
 // Pushes the most recent Cloudflare (R2) backup snapshot into the
 // connected Google Drive account as an extra off-platform copy, pruning
-// older Drive copies beyond `maxBackups`. Returns a job-shaped result so
-// callers (compat.ts's /system/drive-sync/jobs) can report it the same
-// way as other async system jobs.
+// older Drive copies beyond `maxBackups`. The HTTP and scheduled paths enqueue
+// this work through lib/driveSyncQueue.ts; this function is the queue worker's
+// idempotent upload operation and remains directly callable in focused tests.
 export async function pushBackupToDrive(env: Env): Promise<{ success: boolean; error?: string; fileId?: string; fileName?: string }> {
   const tokenResult = await getValidAccessToken(env)
   if ('error' in tokenResult) return { success: false, error: tokenResult.error }
@@ -330,25 +457,28 @@ export function isTrustedDriveUploadSession(value: string): boolean {
 // is itself only refreshed on the same 6h cron -- so nothing is lost by
 // checking due-ness at cron granularity instead of continuously.
 //
-// Fixes a real gap: `driveSyncStatus()`/`updateDrivePreferences()` and the
-// Settings > Backup UI (`drive-sync-interval`) let an admin configure and
-// save a sync interval and enable Drive sync, but until this function was
-// wired into `scheduled()`, nothing ever read that interval automatically
-// -- only a manual "Sync now" click (`POST /system/drive-sync/jobs`) ever
-// pushed to Drive. An admin who enabled it and set "every 6 hours" would
-// see it silently never run on its own.
-export async function maybeRunScheduledDriveSync(env: Env): Promise<{ skipped: boolean; reason?: string; result?: Awaited<ReturnType<typeof pushBackupToDrive>> }> {
+// `driveSyncScheduleDue` is intentionally separate from executing the upload:
+// index.ts can evaluate due-ness on cron and enqueue the expensive network/R2
+// work instead of holding the scheduled handler open for the full transfer.
+export async function driveSyncScheduleDue(env: Env): Promise<{ due: boolean; reason?: string }> {
   const settings = await getSettings(env, [
     'drive_sync_enabled', 'drive_sync_refresh_token', 'drive_sync_last_synced_at', 'drive_sync_interval_seconds',
   ])
-  if (settings.drive_sync_enabled === '0') return { skipped: true, reason: 'disabled' }
-  if (!settings.drive_sync_refresh_token) return { skipped: true, reason: 'not-connected' }
+  if (settings.drive_sync_enabled === '0') return { due: false, reason: 'disabled' }
+  if (!settings.drive_sync_refresh_token) return { due: false, reason: 'not-connected' }
 
   const intervalSeconds = Math.min(24 * 60 * 60, Math.max(60 * 60, Number(settings.drive_sync_interval_seconds || 21600)))
   const lastSyncedMs = settings.drive_sync_last_synced_at ? Date.parse(settings.drive_sync_last_synced_at) : 0
   if (lastSyncedMs && (Date.now() - lastSyncedMs) < intervalSeconds * 1000) {
-    return { skipped: true, reason: 'not-due' }
+    return { due: false, reason: 'not-due' }
   }
+
+  return { due: true }
+}
+
+export async function maybeRunScheduledDriveSync(env: Env): Promise<{ skipped: boolean; reason?: string; result?: Awaited<ReturnType<typeof pushBackupToDrive>> }> {
+  const schedule = await driveSyncScheduleDue(env)
+  if (!schedule.due) return { skipped: true, reason: schedule.reason }
 
   const result = await pushBackupToDrive(env)
   return { skipped: false, result }
@@ -358,6 +488,9 @@ type DriveBackupFile = {
   id: string
   name?: string
   createdTime?: string
+  size?: string
+  mimeType?: string
+  md5Checksum?: string
   appProperties?: Record<string, string>
 }
 
@@ -371,17 +504,168 @@ async function listDriveBackups(token: string, folderId: string): Promise<DriveB
   do {
     const url = new URL(DRIVE_FILES_URL)
     url.searchParams.set('q', `'${folderId}' in parents and trashed = false and appProperties has { key='businessOsBackup' and value='true' }`)
-    url.searchParams.set('fields', 'nextPageToken,files(id,name,createdTime,appProperties)')
+    url.searchParams.set('fields', 'nextPageToken,files(id,name,createdTime,size,mimeType,md5Checksum,appProperties)')
     url.searchParams.set('orderBy', 'createdTime desc')
     url.searchParams.set('pageSize', '1000')
     if (pageToken) url.searchParams.set('pageToken', pageToken)
-    const listRes = await fetch(url.toString(), { headers: { Authorization: `Bearer ${token}` } })
+    const listRes = await fetch(url.toString(), { headers: { Authorization: `Bearer ${token}` }, redirect: 'error' })
     if (!listRes.ok) throw new Error('Failed to list Google Drive backups for retention.')
     const listed = await listRes.json().catch(() => ({} as { files?: DriveBackupFile[]; nextPageToken?: string })) as { files?: DriveBackupFile[]; nextPageToken?: string }
     files.push(...(listed.files || []))
     pageToken = String(listed.nextPageToken || '')
   } while (pageToken)
   return files
+}
+
+export type DriveRestoreStageResult = {
+  success: true
+  backupKey: string
+  driveFileId: string
+  driveFileName: string
+  originalBackupKey: string
+  size: number
+  reused: boolean
+  manifestOnly: true
+  validation: Awaited<ReturnType<typeof validateCloudflareBackup>>
+}
+
+function stableDriveStageKey(fileId: string): string {
+  const safeId = fileId.replace(/[^a-zA-Z0-9_-]/g, '')
+  if (!safeId) throw new Error('Google Drive returned an invalid backup file id.')
+  return `${DRIVE_STAGED_BACKUP_PREFIX}${safeId}.json`
+}
+
+async function pruneDriveRestoreStages(env: Env, keep = DRIVE_STAGED_BACKUP_KEEP): Promise<void> {
+  const objects: R2Object[] = []
+  let cursor: string | undefined
+  do {
+    const page = await env.ASSETS.list({ prefix: DRIVE_STAGED_BACKUP_PREFIX, cursor, limit: 1000 })
+    objects.push(...(page.objects || []))
+    cursor = page.truncated ? page.cursor : undefined
+  } while (cursor)
+  objects.sort((left, right) => right.uploaded.getTime() - left.uploaded.getTime())
+  const stale = objects.slice(Math.max(0, keep)).map((object) => object.key)
+  for (let offset = 0; offset < stale.length; offset += 1000) {
+    await env.ASSETS.delete(stale.slice(offset, offset + 1000))
+  }
+}
+
+/**
+ * Downloads only the newest finalized blob tagged by this OAuth app, streams
+ * it into a non-retention R2 staging key, and validates the complete JSON
+ * structure in parallel. It never writes D1 or invokes restore.
+ */
+export async function stageLatestDriveBackupToR2(env: Env): Promise<DriveRestoreStageResult> {
+  const tokenResult = await getValidAccessToken(env)
+  if ('error' in tokenResult) throw new Error(tokenResult.error)
+  const settings = await getSettings(env, ['drive_sync_folder_id'])
+  const folderId = trim(settings.drive_sync_folder_id)
+  if (!folderId) throw new Error('No app-owned Google Drive backup folder is registered. Run Drive sync first.')
+
+  const files = await listDriveBackups(tokenResult.token, folderId)
+  const file = files.find((candidate) => {
+    const properties = candidate.appProperties || {}
+    return properties.businessOsBackup === 'true'
+      && properties.status === 'finalized'
+      && properties.backupKey?.startsWith('backups/cloudflare/')
+      && !properties.backupKey?.startsWith(DRIVE_STAGED_BACKUP_PREFIX)
+      && trim(candidate.name).toLowerCase().endsWith('.json')
+      && candidate.mimeType === 'application/json'
+  })
+  if (!file) throw new Error('No finalized app-owned Google Drive backup is available to stage.')
+
+  const size = Number(file.size || 0)
+  if (!Number.isSafeInteger(size) || size <= 0 || size > DRIVE_STAGED_BACKUP_MAX_BYTES) {
+    throw new Error('The Google Drive backup size is missing or exceeds the safe R2 single-upload limit.')
+  }
+  const md5 = trim(file.md5Checksum).toLowerCase()
+  if (!/^[a-f0-9]{32}$/.test(md5)) throw new Error('The Google Drive backup is missing a valid content checksum.')
+
+  const backupKey = stableDriveStageKey(file.id)
+  const existing = await env.ASSETS.head(backupKey)
+  if (existing
+    && existing.size === size
+    && existing.customMetadata?.source === 'google-drive-stage'
+    && existing.customMetadata?.driveFileId === file.id
+    && existing.customMetadata?.driveMd5 === md5) {
+    try {
+      const validation = await validateCloudflareBackup(env, backupKey)
+      await pruneDriveRestoreStages(env)
+      return {
+        success: true,
+        backupKey,
+        driveFileId: file.id,
+        driveFileName: trim(file.name),
+        originalBackupKey: String(file.appProperties?.backupKey || ''),
+        size,
+        reused: true,
+        manifestOnly: true,
+        validation,
+      }
+    } catch (_) {
+      // Matching metadata is not enough if the object was ever corrupted.
+      // Remove it and rebuild from the checksum-bound Drive source below.
+      await env.ASSETS.delete(backupKey)
+    }
+  }
+
+  const downloadUrl = new URL(`${DRIVE_FILES_URL}/${encodeURIComponent(file.id)}`)
+  downloadUrl.searchParams.set('alt', 'media')
+  downloadUrl.searchParams.set('supportsAllDrives', 'true')
+  const response = await fetch(downloadUrl.toString(), {
+    headers: { Authorization: `Bearer ${tokenResult.token}` },
+    redirect: 'error',
+  })
+  if (!response.ok || !response.body) throw new Error(`Google Drive backup download failed (${response.status}).`)
+  if ((response.headers.get('content-type') || '').split(';', 1)[0].trim().toLowerCase() !== 'application/json') {
+    throw new Error('Google Drive returned an unexpected backup content type.')
+  }
+  const responseLength = response.headers.get('content-length')
+  if (responseLength && Number(responseLength) !== size) throw new Error('Google Drive backup size changed before download.')
+
+  const [r2Body, validationBody] = response.body.tee()
+  const storedMetadata = {
+    format: 'business-os-cloudflare-backup',
+    source: 'google-drive-stage',
+    driveFileId: file.id,
+    driveBackupKey: String(file.appProperties?.backupKey || ''),
+    driveMd5: md5,
+    stagedAt: new Date().toISOString(),
+  }
+  const [putResult, inspectionResult] = await Promise.allSettled([
+    env.ASSETS.put(backupKey, r2Body, {
+      httpMetadata: { contentType: 'application/json; charset=utf-8' },
+      customMetadata: storedMetadata,
+      md5,
+    }),
+    inspectCloudflareBackupStream(validationBody),
+  ])
+  const stored = putResult.status === 'fulfilled' ? putResult.value : null
+  if (putResult.status === 'rejected' || inspectionResult.status === 'rejected' || !stored || stored.size !== size) {
+    await env.ASSETS.delete(backupKey)
+    if (inspectionResult.status === 'rejected') throw inspectionResult.reason
+    if (putResult.status === 'rejected') throw putResult.reason
+    throw new Error('The staged R2 backup failed size verification.')
+  }
+  let validation: Awaited<ReturnType<typeof validateCloudflareBackup>>
+  try {
+    validation = await validateCloudflareBackup(env, backupKey)
+  } catch (error) {
+    await env.ASSETS.delete(backupKey)
+    throw error
+  }
+  await pruneDriveRestoreStages(env)
+  return {
+    success: true,
+    backupKey,
+    driveFileId: file.id,
+    driveFileName: trim(file.name),
+    originalBackupKey: String(file.appProperties?.backupKey || ''),
+    size,
+    reused: false,
+    manifestOnly: true,
+    validation,
+  }
 }
 
 async function pruneDriveBackups(token: string, files: DriveBackupFile[], keep: number): Promise<void> {

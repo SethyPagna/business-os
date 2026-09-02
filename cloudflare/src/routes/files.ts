@@ -55,7 +55,9 @@ export function canWireProductImages(user: SessionUser): boolean {
 const ALLOWED_MEDIA_TYPES = new Set(['all', 'image', 'video', 'document', 'file'])
 const MAX_FILE_SEARCH_LENGTH = 120
 const DEFAULT_FILE_PAGE_SIZE = 24
-const MAX_FILE_PAGE_SIZE = 60
+// Shared pagination offers 20/50/100. Capping a requested 100 at 60 while
+// echoing the filtered total made the client calculate the wrong page count.
+const MAX_FILE_PAGE_SIZE = 100
 
 const LOGICAL_LIBRARY_CTE = `
   WITH product_refs AS (

@@ -155,6 +155,16 @@ export default function ManageBatchesModal({
   const cancelEdit = () => setEditingId(null)
 
   const saveEdit = async (batch: ProductBatch) => {
+    const nextQuantity = Number(draft.quantity)
+    const quantityChange = Number.isFinite(nextQuantity) && nextQuantity >= 0 && nextQuantity !== Number(batch.quantity)
+    const batchLabel = batchDisplayLabel({ id: batch.id, lot_code: batch.lot_code ?? null, received_at: batch.received_at ?? null, batch_number: batch.batch_number ?? null }, t('batch') || 'Batch')
+    const quantityNote = quantityChange
+      ? ` ${tr('batch_quantity_change_note', `Quantity will change from ${batch.quantity} to ${nextQuantity} at this branch.`)}`
+      : ''
+    if (!window.confirm(tr(
+      'confirm_update_batch_details',
+      `Update ${batchLabel} for ${product.name || 'this product'}?${quantityNote}`,
+    ))) return
     if (!beginSingleAction(saveBatchInFlightRef, { blocked: savingId != null })) return
     setSavingId(batch.id)
     try {
@@ -175,7 +185,6 @@ export default function ManageBatchesModal({
       // branch_stock/products.stock_quantity too, so it's only sent when
       // the field actually changed. This is what lets a stock change be
       // applied to one specific batch instead of the product overall.
-      const nextQuantity = Number(draft.quantity)
       if (Number.isFinite(nextQuantity) && nextQuantity >= 0 && nextQuantity !== Number(batch.quantity)) {
         const qtyRes = await updateBatchBranchQuantity(batch.id, branchId, nextQuantity)
         if ((qtyRes as any)?.success === false) {
@@ -197,6 +206,11 @@ export default function ManageBatchesModal({
   }
 
   const deactivate = async (batch: ProductBatch) => {
+    const batchLabel = batchDisplayLabel({ id: batch.id, lot_code: batch.lot_code ?? null, received_at: batch.received_at ?? null, batch_number: batch.batch_number ?? null }, t('batch') || 'Batch')
+    if (!window.confirm(tr(
+      'confirm_deactivate_batch_details',
+      `Deactivate ${batchLabel} for ${product?.name || 'this product'}? It will no longer be available for new stock operations.`,
+    ))) return
     setSavingId(batch.id)
     try {
       const res = await deactivateBatch(batch.id)
@@ -216,8 +230,8 @@ export default function ManageBatchesModal({
   }
 
   return createPortal(
-    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-0 sm:items-center sm:p-4" onClick={closeIfIdle}>
-      <div className="flex max-h-modal-92 w-full flex-col rounded-t-2xl bg-white shadow-2xl dark:bg-gray-800 sm:max-w-lg sm:rounded-2xl" onClick={(event) => event.stopPropagation()}>
+    <div className="modal-viewport-safe pointer-events-auto fixed inset-0 z-[1050] flex items-end justify-center overflow-y-auto bg-black/50 sm:items-center" onClick={closeIfIdle}>
+      <div className="modal-panel-safe flex w-full flex-col rounded-t-2xl bg-white shadow-2xl dark:bg-gray-800 sm:max-w-lg sm:rounded-2xl" onClick={(event) => event.stopPropagation()}>
         <div className="flex items-center justify-between gap-3 border-b border-gray-200 p-4 dark:border-gray-700">
           <div className="min-w-0">
             <h2 className="font-bold text-gray-900 dark:text-white">{tr('manage_batches', 'Manage Batches')}</h2>
@@ -355,7 +369,7 @@ export default function ManageBatchesModal({
                         onChange={(event) => setDraft((prev) => ({ ...prev, notes: event.target.value }))}
                       />
                     </label>
-                    <div className="flex justify-end gap-2">
+                    <div className="sticky bottom-0 -mx-1 flex justify-end gap-2 border-t border-amber-100 bg-amber-50/95 px-1 pt-2 backdrop-blur-sm dark:border-amber-900/50 dark:bg-amber-950/95">
                       <button type="button" className="btn-secondary px-3 py-1.5 text-xs" onClick={cancelEdit} disabled={isSaving}>
                         {t('cancel') || 'Cancel'}
                       </button>

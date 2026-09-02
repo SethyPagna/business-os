@@ -1387,6 +1387,9 @@ export default function PublicCatalogPage() {
       <div
         className="max-h-modal-85 w-full max-w-md overflow-hidden rounded-t-3xl bg-white pb-[env(safe-area-inset-bottom)] shadow-2xl dark:bg-neutral-900 sm:rounded-3xl sm:pb-0"
         onClick={(event) => event.stopPropagation()}
+        role="dialog"
+        aria-modal="true"
+        aria-label={copy('bucketTitle', 'My List')}
       >
         <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4 dark:border-neutral-800">
           <div>
@@ -1550,6 +1553,9 @@ export default function PublicCatalogPage() {
       <div
         className="max-h-modal-85 w-full max-w-md overflow-hidden rounded-t-3xl bg-white pb-[env(safe-area-inset-bottom)] shadow-2xl dark:bg-neutral-900 sm:rounded-3xl sm:pb-0"
         onClick={(event) => event.stopPropagation()}
+        role="dialog"
+        aria-modal="true"
+        aria-label={copy('account', 'Account')}
       >
         <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4 dark:border-neutral-800">
           <div className="flex items-center gap-2">
@@ -1594,6 +1600,9 @@ export default function PublicCatalogPage() {
       <div
         className="max-h-modal-85 w-full max-w-md overflow-hidden rounded-t-3xl bg-white pb-[env(safe-area-inset-bottom)] shadow-2xl dark:bg-neutral-900 sm:rounded-3xl sm:pb-0"
         onClick={(event) => event.stopPropagation()}
+        role="dialog"
+        aria-modal="true"
+        aria-label={copy('wishlistTitle', 'Wishlist', 'បញ្ជីចង់បាន')}
       >
         <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4 dark:border-neutral-800">
           <div className="flex items-center gap-2">
@@ -1767,7 +1776,20 @@ export default function PublicCatalogPage() {
   ) : null
 
   return (
-    <div ref={publicPageRootRef} className="relative">
+    <div
+      ref={publicPageRootRef}
+      className="relative"
+      data-public-media-protection="true"
+      onContextMenuCapture={(event) => {
+        if (event.target instanceof Element && event.target.closest('img, video, [data-protected-media="true"]')) event.preventDefault()
+      }}
+      onDragStartCapture={(event) => {
+        if (event.target instanceof Element && event.target.closest('img, video, [data-protected-media="true"]')) event.preventDefault()
+      }}
+      onAuxClickCapture={(event) => {
+        if (event.button === 1 && event.target instanceof Element && event.target.closest('img, video, [data-protected-media="true"]')) event.preventDefault()
+      }}
+    >
     {bucketFab}
     {contactFab}
     {contactPopover}

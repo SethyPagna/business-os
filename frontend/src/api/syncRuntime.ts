@@ -3,6 +3,30 @@ import { STORAGE_KEYS } from '../constants.ts'
 export const OUTBOX_SYNC_TAG = 'business-os-sync-outbox'
 export const DISCARD_SYNC_UPDATE_CHANNELS = ['products', 'sales', 'customers', 'suppliers', 'deliveryContacts', 'returns', 'inventory', 'dashboard'] as const
 export const OFFLINE_SALE_SYNC_UPDATE_CHANNELS = ['sales', 'products', 'inventory', 'dashboard'] as const
+export const FOREGROUND_RESUME_SYNC_UPDATE_CHANNELS = [
+  'settings',
+  'products',
+  'inventory',
+  'sales',
+  'returns',
+  'customers',
+  'suppliers',
+  'deliveryContacts',
+  'branches',
+  'dashboard',
+  'catalog',
+  'files',
+  'audit_log',
+  'users',
+  'categories',
+  'units',
+  'fees',
+  'notifications',
+  'portalSubmissions',
+  'promotions',
+  'roles',
+  'pendingActions',
+] as const
 
 export type SyncQueueChangedDetail = Record<string, unknown>
 
@@ -10,6 +34,17 @@ type SyncRegistration = ServiceWorkerRegistration & {
   sync?: {
     register: (tag: string) => Promise<void>
   }
+}
+
+let persistentStorageRequest: Promise<boolean> | null = null
+
+export function requestPersistentAppStorage(): Promise<boolean> {
+  if (persistentStorageRequest) return persistentStorageRequest
+  if (typeof navigator === 'undefined' || !navigator.storage?.persist) return Promise.resolve(false)
+  persistentStorageRequest = navigator.storage.persist()
+    .then((persistent) => Boolean(persistent))
+    .catch(() => false)
+  return persistentStorageRequest
 }
 
 export function dispatchSyncUpdates(channels: readonly string[] = [], reason = ''): void {

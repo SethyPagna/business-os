@@ -63,13 +63,13 @@ async function getJob(env: Env, id: string) {
 }
 
 // Per-action override (Part 546): which `section:import` switch governs an
-// import type. Sales imports have no per-action matrix (the 'sales' key is
-// Full/None with no action table), so they map to nothing here.
+// import type. This includes Sales now that its view-tier action table is
+// exposed by the permission editor.
 function importActionSection(type: string): string | null {
   const normalized = String(type || 'products').trim().toLowerCase()
   if (['customers', 'suppliers', 'delivery_contacts'].includes(normalized)) return 'contacts'
   if (normalized === 'inventory' || normalized === 'stock_actions') return 'inventory'
-  if (normalized === 'sales') return null
+  if (normalized === 'sales') return 'sales'
   return 'products'
 }
 

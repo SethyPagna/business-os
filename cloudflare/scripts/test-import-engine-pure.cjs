@@ -293,7 +293,7 @@ const rowE = { ...rowA, branch_id: 9 }
 assert.strictEqual(
   productImportRowSignature(rowA),
   productImportRowSignature(rowE),
-  'same name/price/cost/barcode at a DIFFERENT branch must still be merged into one product',
+  'same name/cost/barcode at a DIFFERENT branch must still be merged into one product regardless of selling price',
 )
 
 // -- Test 5: different SELLING price -> MUST merge. Selling and special
@@ -329,19 +329,29 @@ assert.strictEqual(
   assert.strictEqual(merged.special_price_usd, 2.75, 'each price field resolves independently to its own highest')
 }
 
-// -- Test 5d (Part 388, caught by the full-migration simulation): when a
-// row HAS a barcode, name+barcode ALONE are identity -- per-branch exports
-// routinely carry DIFFERENT costs on a product's shop vs warehouse row,
-// and the old cost-in-signature rule forked 706 same-name+same-barcode
-// duplicate groups out of the real 8,803-row file (warehouse quantities
-// then doubled on re-import). Same name + same barcode = the SAME product.
+// -- Test 5d: cost is identity even when a barcode exists. Different
+// receipt costs become sibling detail rows unless the DB-bound classifier
+// or the import rows carry the same explicit barcode+batch evidence.
 {
   const shopRow = { name: 'Blush Stick', barcode: '0689304186537', cost_price_usd: 18.5, cost_price_khr: 0, selling_price_usd: 30, selling_price_khr: 0, branch_id: 1 }
   const warehouseRow = { ...shopRow, cost_price_usd: 19.5, branch_id: 2 }
-  assert.strictEqual(
+  assert.notStrictEqual(
     productImportRowSignature(shopRow),
     productImportRowSignature(warehouseRow),
-    'barcoded rows differing only in cost/branch are ONE product (the 706-duplicates bug)',
+    'barcoded rows with different costs are distinct child rows',
+  )
+  const sameBatchReceiptA = { ...shopRow, lot_code: '  LOT-SEP-01  ' }
+  const sameBatchReceiptB = { ...warehouseRow, lot_code: 'lot-sep-01' }
+  assert.strictEqual(
+    productImportRowSignature(sameBatchReceiptA),
+    productImportRowSignature(sameBatchReceiptB),
+    'same normalized name + barcode + explicit batch may share one option while retaining receipt-level costs',
+  )
+  const differentBatchReceipt = { ...warehouseRow, lot_code: 'LOT-SEP-02' }
+  assert.notStrictEqual(
+    productImportRowSignature(sameBatchReceiptA),
+    productImportRowSignature(differentBatchReceipt),
+    'a different batch cannot invoke the same-option receipt exception',
   )
   // Same name + DIFFERENT barcode stays a separate child row.
   const childRow = { ...shopRow, barcode: '0689304186999' }
@@ -350,8 +360,7 @@ assert.strictEqual(
     productImportRowSignature(childRow),
     'a different barcode is a different identity (child row)',
   )
-  // Barcode-LESS rows keep the conservative detail tiebreak: a cost
-  // difference still separates them (nothing else distinguishes them).
+  // Barcode-less rows follow the same exact rule.
   const bareA = { ...shopRow, barcode: '' }
   const bareB = { ...bareA, cost_price_usd: 25 }
   assert.notStrictEqual(
@@ -613,7 +622,9 @@ console.log('PASS resolveRowImagePath matches explicit filenames and falls back 
   assert.ok(/WHERE is_active = 1 AND lot_code/.test(source), 'the lot lookup should only match ACTIVE batches, same as receiveBatchStock reactivating on an explicit match rather than matching a deactivated lot silently')
 
   assert.ok(/const matchedBatch = lotKey \? batchByProductAndLot\.get\(lotKey\) : null/.test(block), 'the restock branch should check the lot lookup before deciding whether to top up or create')
-  assert.ok(/UPDATE product_batches SET received_at = @receivedAt, is_active = 1, updated_at = @updatedAt WHERE id = @id/.test(block), 'a matched lot code must refresh received_at on the SAME existing batch row, not just leave the original untouched')
+  assert.ok(/UPDATE product_batches SET received_at = @receivedAt, is_active = 1,[\s\S]*updated_at = @updatedAt WHERE id = @id/.test(block), 'a matched lot code must refresh received_at on the SAME existing batch row, not just leave the original untouched')
+  assert.ok(/received_cost_usd = COALESCE\(received_cost_usd, 0\) \+ \(@qty \* COALESCE\(@unitCostUsd, 0\)\)/.test(block), 'same-batch top-ups must accumulate each receipt cost instead of overwriting catalog cost')
+  assert.ok(/INSERT INTO inventory_movements[\s\S]*unit_cost_usd, total_cost_usd/.test(block), 'each receipt row must retain its own historical cost movement')
   assert.ok(/ON CONFLICT\(batch_id, branch_id\) DO UPDATE SET quantity = quantity \+ excluded\.quantity/.test(block), 'a matched lot code must ADD to its existing branch_batch_stock row, not insert a second row for the same batch+branch')
 
   assert.ok(/batchKey: importLotCode \|\| `import:\$\{r\.existingId\}:\$\{nowIso\}:\$\{r\.rowNumber\}`/.test(block), 'a genuinely NEW batch created from a restock row should key itself by the lot code when one was given (so a later import or manual receive naming the same lot can match it too), falling back to the old unique generated key only when no lot code was supplied')
@@ -936,7 +947,7 @@ assert.strictEqual(isD1CpuLimitError(new Error('Network request failed')), false
   // gets that exact plannedMode, and stays classified as an 'update'.
   for (const mode of ['merge_stock', 'override_add', 'override_replace']) {
     const db = makeFakeProductsDb([existingMatch])
-    const results = await classifyProducts(db, [row({ name: 'Existing Widget', sku: 'SKU-1', selling_price_usd: '10', _action: mode }, 1)], 'job-mode', null, noImages)
+    const results = await classifyProducts(db, [row({ name: 'Existing Widget', sku: 'SKU-1', cost_price_usd: '5', selling_price_usd: '10', _action: mode }, 1)], 'job-mode', null, noImages)
     assert.strictEqual(results[0].action, 'update', `${mode}: matched row should classify as update`)
     assert.strictEqual(results[0].plannedMode, mode, `${mode}: plannedMode should be honored on a matched row`)
   }
@@ -960,7 +971,7 @@ assert.strictEqual(isD1CpuLimitError(new Error('Network request failed')), false
   // legacy default write path, not a crash and not a silent mode switch.
   {
     const db = makeFakeProductsDb([existingMatch])
-    const results = await classifyProducts(db, [row({ name: 'Existing Widget', sku: 'SKU-1', selling_price_usd: '10', _action: 'create_variant' }, 1)], 'job-unrec', null, noImages)
+    const results = await classifyProducts(db, [row({ name: 'Existing Widget', sku: 'SKU-1', cost_price_usd: '5', selling_price_usd: '10', _action: 'create_variant' }, 1)], 'job-unrec', null, noImages)
     assert.strictEqual(results[0].action, 'update')
     assert.strictEqual(results[0].plannedMode, undefined)
   }
@@ -975,7 +986,7 @@ assert.strictEqual(isD1CpuLimitError(new Error('Network request failed')), false
   // is guaranteed to never reach a write statement.
   {
     const db = makeFakeProductsDb([existingMatch])
-    const results = await classifyProducts(db, [row({ name: 'Existing Widget', sku: 'SKU-1', selling_price_usd: '10', _action: 'skip_row' }, 1)], 'job-skip-matched', null, noImages)
+    const results = await classifyProducts(db, [row({ name: 'Existing Widget', sku: 'SKU-1', cost_price_usd: '5', selling_price_usd: '10', _action: 'skip_row' }, 1)], 'job-skip-matched', null, noImages)
     assert.strictEqual(results[0].action, 'skip', 'a row marked skip_row on a matched product must classify as skip, not update')
     assert.strictEqual(results[0].existingId, 42)
   }
@@ -1004,10 +1015,11 @@ assert.strictEqual(isD1CpuLimitError(new Error('Network request failed')), false
   const { classifyProducts } = moduleObj.exports
   const { dateToBatchCode } = batchCodeModuleObj.exports
 
-  const makeFakeProductsDb = (existingProducts = [], branches = [{ id: 1, name: 'Main Branch', is_default: 1 }]) => ({
+  const makeFakeProductsDb = (existingProducts = [], branches = [{ id: 1, name: 'Main Branch', is_default: 1 }], batches = []) => ({
     prepare: (sql) => ({
       all: async () => {
         if (/FROM import_job_files/.test(sql)) return []
+        if (/FROM product_batches/.test(sql)) return batches
         if (/FROM products/.test(sql)) return existingProducts
         if (/FROM branches/.test(sql)) return branches
         return []
@@ -1059,7 +1071,35 @@ assert.strictEqual(isD1CpuLimitError(new Error('Network request failed')), false
     assert.ok(results[0].data.lot_code, 'lot_code should still be derived from the defaulted received_date')
   }
 
-  console.log('PASS classifyProducts reads the consolidated `batch(mm/dd/yyyy)` column as the received date (with `batch`/`date` as fallbacks), and dateToBatchCode renders numeric MMDDYYYY codes like 08242026')
+  // The same-batch receipt exception must be deterministic. One evidenced
+  // owner is safe; two same-name+barcode products claiming that active lot
+  // is an error, never a first-row-wins guess.
+  {
+    const existingProducts = [
+      { id: 11, name: 'Batch Serum', sku: 'SERUM-A', barcode: 'BC-11', cost_price_usd: 1, cost_price_khr: 0, selling_price_usd: 5, selling_price_khr: 0, special_price_usd: 0, special_price_khr: 0, is_active: 1 },
+      { id: 12, name: 'Batch Serum', sku: 'SERUM-B', barcode: 'BC-11', cost_price_usd: 2, cost_price_khr: 0, selling_price_usd: 6, selling_price_khr: 0, special_price_usd: 0, special_price_khr: 0, is_active: 1 },
+    ]
+    const incoming = row({ name: 'Batch Serum', barcode: 'BC-11', cost_price_usd: '3', selling_price_usd: '7', 'batch(mm/dd/yyyy)': '09/01/2026' }, 1)
+    const ambiguous = await classifyProducts(
+      makeFakeProductsDb(existingProducts, undefined, [
+        { variant_product_id: 11, lot_code: '09012026' },
+        { variant_product_id: 12, lot_code: '09012026' },
+      ]),
+      [incoming], 'job-ambiguous-batch', null, noImages,
+    )
+    assert.strictEqual(ambiguous[0].action, 'error', 'multiple candidate owners of one active batch must block the row')
+    assert.match(ambiguous[0].message, /belongs to 2 products/, 'the conflict should explain the exact ambiguity')
+
+    const unique = await classifyProducts(
+      makeFakeProductsDb(existingProducts, undefined, [{ variant_product_id: 11, lot_code: '09012026' }]),
+      [incoming], 'job-unique-batch', null, noImages,
+    )
+    assert.strictEqual(unique[0].action, 'update', 'one evidenced batch owner may receive the row')
+    assert.strictEqual(unique[0].existingId, 11)
+    assert.strictEqual(unique[0].plannedMode, 'merge_stock', 'same-batch receipt must not replace catalog cost/details')
+  }
+
+  console.log('PASS classifyProducts reads batch dates, applies the one-owner same-batch receipt exception, and blocks ambiguous batch ownership')
 }
 
 // -- classifyContacts: customer membership-number auto-assignment
@@ -1576,14 +1616,17 @@ assert.strictEqual(isD1CpuLimitError(new Error('Network request failed')), false
         { id: 2, username: 'james', name: 'ung sethy pagna', is_active: 1 },
         { id: 3, username: 'Za', name: 'Oun Raksa', is_active: 1 },
         { id: 4, username: 'Rath', name: 'Roune Rath', is_active: 1 },
-        { id: 5, username: 'sethyka', name: 'UNG Sethyka', is_active: 0 }, // deactivated, must still match
+        { id: 5, username: 'former-cashier', name: 'Former Cashier', is_active: 0 }, // deactivated, must still match
         { id: 6, username: 'dup', name: 'Zzz', is_active: 1 },
         { id: 7, username: 'Yyy', name: 'dup', is_active: 1 }, // makes 'dup' a shared key
       ]
       const userAliases = [
         { user_id: 3, alias: 'aza' },
         { user_id: 4, alias: 'routh' },
+        { user_id: 4, alias: 'rout' },
+        { user_id: 2, alias: 'sethyka' },
         { user_id: 2, alias: 'pagna' },
+        { user_id: 1, alias: 'super admin' },
         { user_id: 1, alias: 'dev-usmart' },
       ]
       const idb = makeFakeDb({ users: idUsers, userAliases })
@@ -1593,11 +1636,14 @@ assert.strictEqual(isD1CpuLimitError(new Error('Network request failed')), false
       assert.strictEqual(await resolve('Aza', 1), 3, 'legacy "Aza" resolves via user_aliases to account "Za" (id 3), matching neither its username nor name')
       assert.strictEqual(await resolve('Rath', 2), 4, 'a username match wins even when the account name differs ("Roune Rath")')
       assert.strictEqual(await resolve('Oun Raksa', 3), 3, 'a full-name match still resolves')
-      assert.strictEqual(await resolve('sethyka', 4), 5, 'an INACTIVE user is still matched -- historical cashier attribution must not be dropped')
+      assert.strictEqual(await resolve('sethyka', 4), 2, 'an explicit reviewed alias overrides a stale direct username (Sethyka -> James)')
       assert.strictEqual(await resolve('routh', 5), 4, 'a legacy spelling variant resolves via alias')
       assert.strictEqual(await resolve('Dev-Usmart', 6), 1, 'the POS vendor/system account maps to admin via alias')
       assert.strictEqual(await resolve('Nobody', 7), null, 'an unknown cashier name stays null, never guessed')
       assert.strictEqual(await resolve('dup', 8), null, 'a key two different accounts share (one username, one name) stays ambiguous -> null')
+      assert.strictEqual(await resolve('former-cashier', 9), 5, 'an inactive user still matches normally when no reviewed alias overrides it')
+      assert.strictEqual(await resolve('Rout', 10), 4, 'Rout resolves to Rath')
+      assert.strictEqual(await resolve('Super Admin', 11), 1, 'Super Admin resolves to Admin')
     }
 
     // Full money-math sequence: subtotal 1x$10, $2 discount, $1 tax,

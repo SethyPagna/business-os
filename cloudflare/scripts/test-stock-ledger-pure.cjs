@@ -14,6 +14,8 @@ const path = require('node:path')
 const cloudflareRoot = path.join(__dirname, '..')
 const { openDb } = require('./harness/d1compat.cjs')
 const { loadAll } = require('./harness/load_migrations.cjs')
+const tscVersion = execSync('npx tsc --version', { cwd: cloudflareRoot, encoding: 'utf8' }).trim()
+const ignoreConfigFlag = /^Version\s+(?:[6-9]|\d{2,})\./.test(tscVersion) ? ' --ignoreConfig' : ''
 
 let checks = 0
 function ok(cond, label) {
@@ -29,7 +31,7 @@ fs.copyFileSync(path.join(cloudflareRoot, 'src', 'lib', 'stockLedgerQuery.ts'), 
 // pure dependency in so the isolated compile resolves and emits it.
 fs.copyFileSync(path.join(cloudflareRoot, 'src', 'lib', 'businessDateWindow.ts'), path.join(tmpDir, 'businessDateWindow.ts'))
 execSync(
-  `npx tsc "${path.join(tmpDir, 'stockLedgerQuery.ts')}" "${path.join(tmpDir, 'businessDateWindow.ts')}" --outDir "${tmpDir}" --module commonjs --target es2022 --strict --skipLibCheck`,
+  `npx tsc "${path.join(tmpDir, 'stockLedgerQuery.ts')}" "${path.join(tmpDir, 'businessDateWindow.ts')}" --outDir "${tmpDir}" --module commonjs --target es2022 --strict --skipLibCheck${ignoreConfigFlag}`,
   { cwd: cloudflareRoot, stdio: 'pipe' },
 )
 const kernel = require(path.join(tmpDir, 'stockLedgerQuery.js'))

@@ -1,5 +1,6 @@
 import type { D1Compat } from './db'
 import { dateToBatchCode, normalizeToIsoDate } from './batchCode'
+import { normalizeSearchText } from './searchMatch'
 
 export interface UnifiedStockAddInput {
   jobId: string
@@ -124,20 +125,21 @@ export async function ensureUnifiedStockProduct(db: D1Compat, input: UnifiedStoc
   const identityHash = await sha256Hex(`${jobId}\n${identityKey}`)
   const clientRequestId = `stock-import:${jobId}:${identityHash}`
   let product = await db.prepare(`
-    SELECT id FROM products WHERE client_request_id = @clientRequestId
+    SELECT id FROM products WHERE client_request_id = @clientRequestId AND client_request_id <> ''
   `).get<{ id: number }>({ clientRequestId })
   let created = false
   if (!product) {
     const inserted = await db.prepare(`
       INSERT OR IGNORE INTO products (
-        name, barcode, unit, selling_price_usd, special_price_usd, cost_price_usd,
+        name, name_normalized, barcode, unit, selling_price_usd, special_price_usd, cost_price_usd,
         stock_quantity, is_active, client_request_id, created_at, updated_at
       ) VALUES (
-        @productName, @barcode, 'pcs', @sellingPriceUsd, @vipPriceUsd, @costPriceUsd,
+        @productName, @nameNormalized, @barcode, 'pcs', @sellingPriceUsd, @vipPriceUsd, @costPriceUsd,
         0, 1, @clientRequestId, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
       )
     `).run({
       productName,
+      nameNormalized: normalizeSearchText(productName),
       barcode: String(input.barcode || '').trim() || null,
       sellingPriceUsd: optionalMoney(input.sellingPriceUsd) ?? 0,
       vipPriceUsd: optionalMoney(input.vipPriceUsd) ?? 0,
@@ -146,7 +148,7 @@ export async function ensureUnifiedStockProduct(db: D1Compat, input: UnifiedStoc
     })
     created = inserted.changes === 1
     product = await db.prepare(`
-      SELECT id FROM products WHERE client_request_id = @clientRequestId
+      SELECT id FROM products WHERE client_request_id = @clientRequestId AND client_request_id <> ''
     `).get<{ id: number }>({ clientRequestId })
   }
   const productId = Number(product?.id || 0)
@@ -264,9 +266,10 @@ export async function applyUnifiedStockAdd(db: D1Compat, input: UnifiedStockAddI
     {
       sql: `UPDATE products SET
               stock_quantity = COALESCE(stock_quantity, 0) + @quantity,
-              selling_price_usd = COALESCE(@sellingPriceUsd, selling_price_usd),
-              special_price_usd = COALESCE(@vipPriceUsd, special_price_usd),
-              cost_price_usd = COALESCE(@costPriceUsd, cost_price_usd),
+              selling_price_usd = CASE WHEN @sellingPriceUsd IS NULL THEN selling_price_usd
+                ELSE MAX(COALESCE(selling_price_usd, 0), @sellingPriceUsd) END,
+              special_price_usd = CASE WHEN @vipPriceUsd IS NULL THEN special_price_usd
+                ELSE MAX(COALESCE(special_price_usd, 0), @vipPriceUsd) END,
               updated_at = CURRENT_TIMESTAMP
             WHERE id = @productId AND ${guard}`,
       params,
@@ -275,8 +278,12 @@ export async function applyUnifiedStockAdd(db: D1Compat, input: UnifiedStockAddI
       // 0084: the add just created/topped exactly one lot (keyed
       // productId+batchKey above), so the movement records it.
       sql: `INSERT INTO inventory_movements
-              (product_id, product_name, branch_id, branch_name, movement_type, quantity, reason, created_at, batch_id)
-            SELECT @productId, @productName, @branchId, @branchName, 'add', @quantity, @reason, @receivedAt,
+              (product_id, product_name, branch_id, branch_name, movement_type, quantity,
+               unit_cost_usd, total_cost_usd, reason, created_at, batch_id)
+            SELECT @productId, @productName, @branchId, @branchName, 'add', @quantity,
+              @costPriceUsd,
+              CASE WHEN @costPriceUsd IS NULL THEN NULL ELSE ROUND(@quantity * @costPriceUsd, 4) END,
+              @reason, @receivedAt,
               (SELECT id FROM product_batches WHERE variant_product_id = @productId AND batch_key = @batchKey)
             WHERE ${guard}`,
       params,
@@ -520,7 +527,7 @@ export async function applyUnifiedStockSale(db: D1Compat, input: UnifiedStockSal
               cost_price_usd, total_usd, branch_id, price_mode, base_price_usd,
               batch_id, batch_label, batch_expiry_date
             )
-            SELECT (SELECT id FROM sales WHERE client_request_id = @clientRequestId),
+            SELECT (SELECT id FROM sales WHERE client_request_id = @clientRequestId AND client_request_id <> ''),
               @productId, @productName, @quantity, 'pcs', @sellingPriceUsd,
               @costPriceUsd, @totalUsd, @branchId, 'selling', @sellingPriceUsd,
               @batchId, @batchLabel, @batchExpiryDate
@@ -538,7 +545,7 @@ export async function applyUnifiedStockSale(db: D1Compat, input: UnifiedStockSal
                 (sale_item_id, batch_id, branch_id, quantity, lot_code, expiry_date)
               SELECT (
                   SELECT si.id FROM sale_items si
-                  WHERE si.sale_id = (SELECT id FROM sales WHERE client_request_id = @clientRequestId)
+                  WHERE si.sale_id = (SELECT id FROM sales WHERE client_request_id = @clientRequestId AND client_request_id <> '')
                   ORDER BY si.id DESC LIMIT 1
                 ), @batchId, @branchId, @quantity, @lotCode, @expiryDate
               WHERE ${guard}`,
@@ -560,7 +567,7 @@ export async function applyUnifiedStockSale(db: D1Compat, input: UnifiedStockSal
             )
             SELECT @productId, @productName, @branchId, @branchName, 'sale',
               -@quantity, @costPriceUsd, @totalCostUsd, @reason,
-              (SELECT id FROM sales WHERE client_request_id = @clientRequestId), @soldAt, @movementBatchId
+              (SELECT id FROM sales WHERE client_request_id = @clientRequestId AND client_request_id <> ''), @soldAt, @movementBatchId
             WHERE ${guard}`,
       params: {
         ...common, ...line, costPriceUsd,

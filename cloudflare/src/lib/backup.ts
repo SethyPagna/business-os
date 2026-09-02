@@ -4,6 +4,11 @@ import { streamBackupEvents } from './backupRestoreStream'
 
 export const CLOUDFLARE_BACKUP_PREFIX = 'backups/cloudflare/'
 export const CLOUDFLARE_BACKUP_KEEP = 2
+// Drive restores are first staged and structurally validated under this flat
+// prefix. They are intentionally excluded from normal R2 backup listing and
+// retention so a temporary recovery candidate can never evict either of the
+// two locally-created finalized backups.
+export const DRIVE_STAGED_BACKUP_PREFIX = `${CLOUDFLARE_BACKUP_PREFIX}drive-staged-`
 
 // Real R2 object-copy is a get()+put() (see r2.ts's copyObject) -- one
 // subrequest pair per asset. Workers' free-plan subrequest-per-invocation
@@ -379,6 +384,7 @@ export async function listCloudflareBackups(env: Env) {
     })
     for (const object of page.objects || []) {
       if (!object.key.endsWith('.json')) continue
+      if (object.key.startsWith(DRIVE_STAGED_BACKUP_PREFIX)) continue
       // state.json lives under a backup folder and is not a backup manifest.
       if (object.key.endsWith('/state.json')) continue
       const name = object.key.slice(CLOUDFLARE_BACKUP_PREFIX.length)
@@ -969,17 +975,6 @@ function resolveBackupKey(source: string): string {
     : `${CLOUDFLARE_BACKUP_PREFIX}${raw.replace(/^\/+/, '')}`
 }
 
-async function loadBackup(env: Env, source: string): Promise<{ key: string; payload: BackupPayload }> {
-  const key = resolveBackupKey(source)
-  const object = await env.ASSETS.get(key)
-  if (!object) throw new Error(`Backup not found: ${source}`)
-  const payload = await object.json<BackupPayload>()
-  if (payload?.format !== 'business-os-cloudflare-backup' || payload.formatVersion !== 1 || !payload.tables) {
-    throw new Error('Unsupported backup format')
-  }
-  return { key, payload }
-}
-
 /** Opens a fresh read stream over a backup object, or throws if it is gone. */
 async function openBackupStream(env: Env, key: string): Promise<ReadableStream<Uint8Array>> {
   const object = await env.ASSETS.get(key)
@@ -1183,27 +1178,77 @@ export async function restoreCloudflareBackup(env: Env, source: string, onProgre
 }
 
 export async function validateCloudflareBackup(env: Env, source: string) {
-  const { key, payload } = await loadBackup(env, source)
+  const key = resolveBackupKey(source)
+  const streamed = await inspectCloudflareBackupStream(await openBackupStream(env, key))
   const backupName = key.slice(CLOUDFLARE_BACKUP_PREFIX.length).replace(/\.json$/, '')
   const lifecycle = await getCloudflareBackupState(env, backupName)
-  const copiedCount = lifecycle?.copiedKeys.length ?? payload.r2?.copiedKeys?.length ?? payload.summary?.assetsBackedUp ?? 0
-  const assetCount = lifecycle?.assets.length ?? payload.r2?.assets?.length ?? payload.summary?.assetCount ?? 0
+  const copiedCount = lifecycle?.copiedKeys.length ?? streamed.r2?.copiedKeys?.length ?? streamed.summary?.assetsBackedUp ?? 0
+  const assetCount = lifecycle?.assets.length ?? streamed.r2?.assets?.length ?? streamed.summary?.assetCount ?? 0
   return {
     key,
-    createdAt: payload.createdAt,
-    source: payload.source,
-    summary: payload.summary,
-    tables: Object.keys(payload.tables || {}).length,
+    createdAt: streamed.createdAt,
+    source: streamed.source,
+    summary: streamed.summary,
+    tables: streamed.tableCount,
     // Surfaces the asset-completeness gap described on summary.assetsSkipped
     // at validate/dry-run time too, not just after a real restore.
     assetsBackedUp: copiedCount,
     assetCount,
     status: lifecycle?.status || 'finalized',
     failedAssets: lifecycle?.failedKeys.length || 0,
-    restorable: payload.format === 'business-os-cloudflare-backup'
-      && payload.formatVersion === 1
-      && (!lifecycle || lifecycle.status === 'finalized'),
+    restorable: !lifecycle || lifecycle.status === 'finalized',
   }
+}
+
+export type StreamedBackupInspection = {
+  createdAt: string
+  source: string
+  runtime: string
+  summary: BackupPayload['summary']
+  r2: BackupPayload['r2'] | null
+  tableCount: number
+  rowCount: number
+}
+
+/**
+ * Validates a complete backup document without materializing its tables.
+ * Exported for the Google Drive staging path, which tees the remote response:
+ * one branch streams into R2 while this branch proves the format, version,
+ * JSON structure and summary counts. Any corruption rejects the stage.
+ */
+export async function inspectCloudflareBackupStream(
+  body: ReadableStream<Uint8Array>,
+): Promise<StreamedBackupInspection> {
+  let format = ''
+  let formatVersion = 0
+  let createdAt = ''
+  let source = ''
+  let runtime = ''
+  let summary: BackupPayload['summary'] | null = null
+  let r2: BackupPayload['r2'] | null = null
+  let tableCount = 0
+  let rowCount = 0
+  for await (const event of streamBackupEvents(body)) {
+    if (event.type === 'table') tableCount += 1
+    else if (event.type === 'row') rowCount += 1
+    else if (event.key === 'format') format = String(event.value || '')
+    else if (event.key === 'formatVersion') formatVersion = Number(event.value || 0)
+    else if (event.key === 'createdAt') createdAt = String(event.value || '')
+    else if (event.key === 'source') source = String(event.value || '')
+    else if (event.key === 'runtime') runtime = String(event.value || '')
+    else if (event.key === 'summary') summary = event.value as BackupPayload['summary']
+    else if (event.key === 'r2') r2 = event.value as BackupPayload['r2']
+  }
+  if (format !== 'business-os-cloudflare-backup' || formatVersion !== 1 || !summary || !r2) {
+    throw new Error('Unsupported backup format')
+  }
+  if (!createdAt || Number.isNaN(Date.parse(createdAt))) throw new Error('Backup has an invalid creation timestamp')
+  if (source !== 'manual' && source !== 'scheduled') throw new Error('Backup has an invalid source')
+  if (runtime !== 'cloudflare-workers') throw new Error('Backup has an invalid runtime')
+  if (Number(summary.tableCount) !== tableCount || Number(summary.rowCount) !== rowCount) {
+    throw new Error('Backup summary counts do not match its streamed table data')
+  }
+  return { createdAt, source, runtime, summary, r2, tableCount, rowCount }
 }
 
 export async function storeSystemJob(env: Env, job: Record<string, unknown>) {

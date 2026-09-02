@@ -276,18 +276,16 @@ export default function SaleDetailModal({
   }
 
   return createPortal(
-    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-0 sm:items-center sm:p-4" onClick={onClose}>
+    <div className="modal-viewport-safe pointer-events-auto fixed inset-0 z-[1050] flex items-end justify-center overflow-y-auto bg-black/50 sm:items-center sm:p-4" onClick={onClose}>
       <div
-        className="flex max-h-modal-92 w-full flex-col rounded-t-2xl bg-white shadow-2xl sm:max-w-3xl sm:rounded-2xl dark:bg-gray-800"
+        className="modal-panel-safe flex w-full flex-col rounded-t-2xl bg-white shadow-2xl sm:max-w-3xl sm:rounded-2xl dark:bg-gray-800"
         onClick={(event: MouseEvent<HTMLDivElement>) => event.stopPropagation()}
       >
         <div className="flex flex-shrink-0 items-center justify-between gap-2 border-b border-gray-200 p-4 dark:border-gray-700">
-          {/* min-w-0 + truncate: long receipt numbers (RCP-<13 digits>-XXXX)
-              used to wrap onto three lines on phones once the status chip and
-              Print squeezed this column. The full number stays available via
-              title, and the chip/buttons stop wrapping too (shrink-0). */}
+          {/* Long receipt numbers remain fully available through horizontal
+              touch scrolling while the status and actions stay in view. */}
           <div className="min-w-0 flex-1">
-            <div className="truncate font-mono text-sm font-bold text-gray-900 dark:text-white sm:text-base" title={sale.receipt_number || undefined}>{sale.receipt_number}</div>
+            <div className="detail-scroll-text font-mono text-sm font-bold text-gray-900 dark:text-white sm:text-base" title={sale.receipt_number || undefined}>{sale.receipt_number}</div>
             <div className="mt-1 text-xs text-gray-400">{fmtTime(sale.created_at)}</div>
           </div>
           <div className="flex shrink-0 items-center gap-2 whitespace-nowrap">
@@ -354,7 +352,7 @@ export default function SaleDetailModal({
                     <div className="space-y-0.5 text-sm text-gray-800 dark:text-gray-200">
                       {paymentDetails.map((detail, index) => (
                         <div key={`${detail.method}-${index}`} className="flex justify-between gap-3">
-                          <span className="truncate">{detail.method}</span>
+                          <span className="detail-scroll-text min-w-0 flex-1">{detail.method}</span>
                           <span className="shrink-0 tabular-nums">{fmtUSD(detail.amount_usd)}{detail.amount_khr > 0 ? ` · ${fmtKHR(detail.amount_khr)}` : ''}</span>
                         </div>
                       ))}
@@ -507,34 +505,51 @@ export default function SaleDetailModal({
             {items.length === 0 ? (
               <p className="text-sm text-gray-400">{t('no_item_details') || 'No item details available.'}</p>
             ) : (
-              <div className="space-y-2">
-                {items.map((item, index) => {
-                  const qty = toNumber(item.quantity || item.qty || 1) || 1
-                  const unitUsd = toNumber(item.applied_price_usd ?? item.price_usd ?? item.price)
-                  const unitKhr = toNumber(item.applied_price_khr ?? item.price_khr)
-                  const lineUsd = unitUsd * qty
-                  const lineKhr = unitKhr * qty
-                  return (
-                    <div key={`${item.product_id || item.id || index}-${index}`} className="flex items-start justify-between gap-3 border-b border-gray-100 pb-2 last:border-b-0 last:pb-0 dark:border-gray-700">
-                      <div className="min-w-0 flex-1">
-                        <div className="truncate text-sm font-medium text-gray-900 dark:text-white">{item.product_name || item.name}</div>
-                        <div className="text-xs text-gray-500 dark:text-gray-400">
-                          {qty} x {fmtUSD(unitUsd)}
-                        </div>
-                        {item.branch_name ? (
-                          <div className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                            {t('branch') || 'Branch'}: {item.branch_name}
-                          </div>
-                        ) : null}
+              <>
+                <div className="hidden overflow-x-auto sm:block">
+                  <table className="w-full min-w-[34rem] text-sm">
+                    <thead className="border-y border-gray-200 bg-gray-50 text-left text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:border-gray-700 dark:bg-gray-900/35 dark:text-gray-400">
+                      <tr>
+                        <th className="px-2 py-1.5">{t('product') || 'Product'}</th>
+                        <th className="px-2 py-1.5 text-right">{t('quantity') || 'Qty'}</th>
+                        <th className="px-2 py-1.5 text-right">{t('price') || 'Unit price'}</th>
+                        <th className="px-2 py-1.5 text-right">{t('total') || 'Total'}</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
+                      {items.map((item, index) => {
+                        const qty = toNumber(item.quantity || item.qty || 1) || 1
+                        const unitUsd = toNumber(item.applied_price_usd ?? item.price_usd ?? item.price)
+                        const unitKhr = toNumber(item.applied_price_khr ?? item.price_khr)
+                        const lineUsd = unitUsd * qty
+                        const lineKhr = unitKhr * qty
+                        return (
+                          <tr key={`${item.product_id || item.id || index}-${index}`}>
+                            <td className="max-w-0 px-2 py-1.5"><div className="detail-scroll-text font-medium text-gray-900 dark:text-white">{item.product_name || item.name}</div>{item.branch_name ? <div className="detail-scroll-text text-[11px] text-gray-400">{item.branch_name}</div> : null}</td>
+                            <td className="whitespace-nowrap px-2 py-1.5 text-right tabular-nums text-gray-700 dark:text-gray-200">{qty}</td>
+                            <td className="whitespace-nowrap px-2 py-1.5 text-right tabular-nums text-gray-700 dark:text-gray-200">{fmtUSD(unitUsd)}{unitKhr > 0 ? <div className="text-[11px] text-gray-400">{fmtKHR(unitKhr)}</div> : null}</td>
+                            <td className="whitespace-nowrap px-2 py-1.5 text-right font-semibold tabular-nums text-gray-900 dark:text-white">{fmtUSD(lineUsd)}{lineKhr > 0 ? <div className="text-[11px] font-normal text-gray-400">{fmtKHR(lineKhr)}</div> : null}</td>
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+                <div className="space-y-2 sm:hidden">
+                  {items.map((item, index) => {
+                    const qty = toNumber(item.quantity || item.qty || 1) || 1
+                    const unitUsd = toNumber(item.applied_price_usd ?? item.price_usd ?? item.price)
+                    const lineUsd = unitUsd * qty
+                    const lineKhr = toNumber(item.applied_price_khr ?? item.price_khr) * qty
+                    return (
+                      <div key={`${item.product_id || item.id || index}-${index}`} className="flex items-start justify-between gap-3 rounded-lg bg-gray-50 px-2.5 py-2 dark:bg-gray-900/35">
+                        <div className="min-w-0 flex-1"><div className="detail-scroll-text text-sm font-medium text-gray-900 dark:text-white">{item.product_name || item.name}</div><div className="text-xs text-gray-500 dark:text-gray-400">{qty} × {fmtUSD(unitUsd)}</div>{item.branch_name ? <div className="detail-scroll-text mt-0.5 text-[11px] text-gray-400">{item.branch_name}</div> : null}</div>
+                        <div className="shrink-0 text-right text-sm font-semibold tabular-nums text-gray-900 dark:text-white">{fmtUSD(lineUsd)}{lineKhr > 0 ? <div className="text-[11px] font-normal text-gray-400">{fmtKHR(lineKhr)}</div> : null}</div>
                       </div>
-                      <div className="text-right">
-                        <div className="text-sm font-semibold text-gray-900 dark:text-white">{fmtUSD(lineUsd)}</div>
-                        {lineKhr > 0 ? <div className="text-xs text-gray-400">{fmtKHR(lineKhr)}</div> : null}
-                      </div>
-                    </div>
-                  )
-                })}
-              </div>
+                    )
+                  })}
+                </div>
+              </>
             )}
           </section>
 
@@ -562,7 +577,7 @@ export default function SaleDetailModal({
                 ) : null}
                 {toNumber(sale.cancel_fee_id) > 0 ? (
                   <div className="text-xs text-amber-700 dark:text-amber-300">
-                    {t('cancel_lost_fee_recorded') || 'A lost fee was recorded on the Fees page for this cancellation.'}
+                    {t('cancel_lost_fee_recorded') || 'A lost fee was recorded on the Expenses page for this cancellation.'}
                   </div>
                 ) : null}
               </div>

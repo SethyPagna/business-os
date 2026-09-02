@@ -55,6 +55,35 @@ function attachAttemptedReturnUpdate(error: unknown, payload: ReturnPayload): ne
 
 export { getReturn, getReturns }
 
+export function saveReturnReasonPresets(presets: { customer: string[]; supplier: string[] }): Promise<unknown> {
+  return route(
+    'returns:reason-presets:save',
+    () => apiFetch('POST', '/api/returns/reason-presets', { presets }),
+    null,
+    true,
+  )
+}
+
+export function getReturnReasonImpact(payload: { return_scope: 'customer' | 'supplier'; from: string; to: string }): Promise<unknown> {
+  const query = new URLSearchParams(payload)
+  return apiFetch('GET', `/api/returns/reasons/impact?${query.toString()}`)
+}
+
+export function replaceReturnReason(payload: {
+  return_scope: 'customer' | 'supplier'
+  from: string
+  to: string
+  scope: 'presets_only' | 'linked'
+  presets: { customer: string[]; supplier: string[] }
+}): Promise<unknown> {
+  return route(
+    'returns:reason-presets:replace',
+    () => apiFetch('POST', '/api/returns/reasons/replace', payload),
+    null,
+    true,
+  )
+}
+
 export function createReturn(payload: ReturnPayload = {}): Promise<unknown> {
   const body = ensureClientRequestId({ ...getDevicePayload(), ...(payload || {}) }, 'return')
   return route(

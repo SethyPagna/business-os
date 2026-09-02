@@ -130,13 +130,14 @@ const pass = (msg) => { checks++; console.log('PASS ' + msg) }
   const promoSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'routes', 'promotions.ts'), 'utf8')
   assert.match(promoSrc, /app\.get\('\/rules\/active', async/, "/rules/active must stay open to any authenticated user (POS cashiers price with it) -- no requireKey")
   // Part 557 view-tier: GET /rules moved to the tier-aware requireReadKey (a
-  // read-only 'view' grant can list rules); writes stay strict requireKey.
+  // read-only 'view' grant can list rules); writes stay on the stricter,
+  // independently configurable promotions.manage action.
   for (const pin of [
     /app\.get\('\/rules', requireReadKey\('promotions'\)/,
-    /app\.post\('\/rules', requireKey\('promotions'\)/,
-    /app\.put\('\/rules\/:id', requireKey\('promotions'\)/,
-    /app\.delete\('\/rules\/:id', requireKey\('promotions'\)/,
-  ]) assert.match(promoSrc, pin, `rules manage endpoint must gate on 'promotions': ${pin}`)
+    /app\.post\('\/rules', requireAction\('promotions', 'manage'\)/,
+    /app\.put\('\/rules\/:id', requireAction\('promotions', 'manage'\)/,
+    /app\.delete\('\/rules\/:id', requireAction\('promotions', 'manage'\)/,
+  ]) assert.match(promoSrc, pin, `rules endpoint must use the intended promotions read/manage gate: ${pin}`)
   for (const pin of [
     /app\.get\('\/', requireKey\('products'\)/,
     /app\.post\('\/', requireKey\('products'\)/,

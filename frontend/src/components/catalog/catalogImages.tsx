@@ -109,6 +109,10 @@ export default function CatalogProductImage({ src, alt = '', className, onClick 
       src={url}
       alt={alt}
       className={className}
+      data-protected-media="true"
+      draggable={false}
+      onContextMenu={(event) => event.preventDefault()}
+      onDragStart={(event) => event.preventDefault()}
       onClick={onClick}
       onError={() => {
         markBrokenCatalogImage(safeSrc)

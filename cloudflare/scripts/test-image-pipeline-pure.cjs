@@ -291,7 +291,8 @@ check('grouped CHILD rows show no thumbnail on the desktop table either', async 
   // did not, which is why duplicate thumbnails and the ragged left edge
   // appeared only on large screens.
   const products = fs.readFileSync(path.join(cloudflareRoot, '..', 'frontend', 'src', 'components', 'products', 'Products.tsx'), 'utf8')
-  assert.match(products, /\{indented \? null : thumbnailState\.hasImage/, 'desktop row must skip the image for a child row')
+  assert.match(products, /\{indented \? null : \([\s\S]*?aria-label=\{thumbnailState\.hasImage[\s\S]*?openLightbox\(thumbnailState\.gallery, 0, productName\)/,
+    'desktop child rows must skip their duplicate thumbnail while standalone image clicks open the lightbox directly')
   const guards = products.match(/indented \? null/g) || []
   assert.ok(guards.length >= 2, 'both the mobile card and the desktop row need the guard')
 })

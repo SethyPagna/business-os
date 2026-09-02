@@ -18,18 +18,24 @@ function runTest(name: string, fn: TestCallback): void {
 }
 
 const rows: CreateMatchCandidate[] = [
-  { id: 1, name: 'Aloe Vera Gel', barcode: '880123', selling_price_usd: 5.5 },
-  { id: 2, name: 'Aloe Vera Gel', barcode: '880999', selling_price_usd: 6 },
+  { id: 1, name: 'Aloe Vera Gel', barcode: '880123', selling_price_usd: 5.5, cost_price_usd: 2 },
+  { id: 2, name: 'Aloe Vera Gel', barcode: '880999', selling_price_usd: 6, cost_price_usd: 2.5 },
   { id: 3, name: 'Rose Water Toner', barcode: '770001', selling_price_usd: 4 },
 ]
 
-runTest('F1: same name + same barcode is an exact twin and cannot proceed as new', () => {
-  const verdict = classifyCreateMatches({ name: 'aloe vera gel', barcode: '880123' }, rows)
+runTest('F1: same name + same barcode + same cost is an exact twin and cannot proceed as new', () => {
+  const verdict = classifyCreateMatches({ name: 'aloe vera gel', barcode: '880123', cost_price_usd: 2 }, rows)
   assert.equal(verdict.kind, 'exact_twin')
   assert.equal(verdict.allowProceedAsNew, false)
   assert.equal(verdict.primary?.id, 1)
   // the group's exact casing is reported, not the operator's typed casing
   assert.equal(verdict.canonicalName, 'Aloe Vera Gel')
+})
+
+runTest('PRD-04: same name/barcode with a different cost is a distinct child row', () => {
+  const verdict = classifyCreateMatches({ name: 'Aloe Vera Gel', barcode: '880123', cost_price_usd: 3 }, rows)
+  assert.equal(verdict.kind, 'name_match')
+  assert.equal(verdict.primary?.id, 1)
 })
 
 runTest('F1: same name + different barcode joins the virtual same-name group', () => {
@@ -76,7 +82,7 @@ const productsRouteSource = readFileSync(new URL('../../cloudflare/src/routes/pr
 runTest('F1: ProductForm live-searches in create mode and gates submit on the verdict', () => {
   // the live search runs only for a NEW product and is debounced
   assert.match(productFormSource, /const isCreateMode = !product\?\.id/)
-  assert.match(productFormSource, /classifyCreateMatches\(\{ name: form\.name, barcode: form\.barcode/)
+  assert.match(productFormSource, /classifyCreateMatches\(\{[\s\S]*name: form\.name,[\s\S]*cost_price_usd: parseNumericInput\(form\.cost_price_usd\)/)
   // the submit gate asks BEFORE saving, and 'back' aborts the save
   assert.match(productFormSource, /if \(isCreateMode && createVerdict\.kind\)/)
   assert.match(productFormSource, /const choice = await askCreateVerdict\(\)/)

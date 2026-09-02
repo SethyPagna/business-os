@@ -1,5 +1,6 @@
 import { Suspense, type ComponentType, type CSSProperties, type ReactNode, useMemo, useState, useSyncExternalStore } from 'react'
-import { getRegisteredWork, subscribeDirtyWork } from '../../utils/dirtyWork.ts'
+import { getRegisteredWork, hasDirtyWork, subscribeDirtyWork } from '../../utils/dirtyWork.ts'
+import { flushPendingWorkDrafts } from '../../utils/workDrafts.ts'
 import type { LucideIcon } from 'lucide-react'
 import BadgeDollarSign from 'lucide-react/dist/esm/icons/badge-dollar-sign.js'
 import BookUser from 'lucide-react/dist/esm/icons/book-user.js'
@@ -206,10 +207,46 @@ export default function Sidebar({ notificationSlot = null, desktopNotificationSl
   // (user request). The same panel opens as a dropdown from the mobile header
   // avatar.
   const [accountOpen, setAccountOpen] = useState(false)
-  const runAppUpdate = () => {
-    // Same "check for update and refresh" work the old footer Refresh icon did.
-    navigator.serviceWorker?.controller?.postMessage?.({ type: 'BUSINESS_OS_SKIP_WAITING' })
-    window.setTimeout(() => window.location.reload(), 250)
+  const runAppUpdate = async () => {
+    // iOS does not reliably show beforeunload prompts. Refuse an explicit
+    // update while an editor has unsaved work, and activate the WAITING worker
+    // (posting to controller targets the old active worker and does nothing).
+    if (hasDirtyWork()) {
+      flushPendingWorkDrafts()
+      window.alert(t('save_or_discard_before_update') || 'Save or discard your unfinished work before updating the app.')
+      return
+    }
+    flushPendingWorkDrafts()
+    try {
+      const registration = await navigator.serviceWorker?.getRegistration?.('/')
+      await registration?.update?.().catch(() => {})
+      let waiting = registration?.waiting || null
+      if (!waiting && registration?.installing) {
+        const installing = registration.installing
+        await new Promise<void>((resolve) => {
+          if (installing.state === 'installed') return resolve()
+          const timer = window.setTimeout(resolve, 5000)
+          installing.addEventListener('statechange', () => {
+            if (installing.state !== 'installed') return
+            window.clearTimeout(timer)
+            resolve()
+          }, { once: true })
+        })
+        waiting = registration.waiting
+      }
+      if (waiting) {
+        const changed = new Promise<void>((resolve) => {
+          const timer = window.setTimeout(resolve, 1500)
+          navigator.serviceWorker.addEventListener('controllerchange', () => {
+            window.clearTimeout(timer)
+            resolve()
+          }, { once: true })
+        })
+        waiting.postMessage({ type: 'BUSINESS_OS_SKIP_WAITING' })
+        await changed
+      }
+    } catch (_) {}
+    window.location.reload()
   }
 
   // N2: which pages currently hold registered unsaved work -- drives the

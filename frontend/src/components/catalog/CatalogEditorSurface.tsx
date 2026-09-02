@@ -316,7 +316,7 @@ function CatalogEditorSurfaceContent() {
   const [showAnnouncementStripModal, setShowAnnouncementStripModal] = useState(false)
 
   return (
-    <aside id="portal-editor-top" className="min-h-0 max-w-full space-y-5 overflow-x-hidden">
+    <aside id="portal-editor-top" className="min-h-0 max-w-full space-y-4 overflow-x-hidden pb-[calc(4.5rem+env(safe-area-inset-bottom))] md:pb-0">
       <div className="sticky top-0 z-30 -mx-4 rounded-none border-y border-slate-200 bg-white/95 px-3 py-2 shadow-md backdrop-blur dark:border-slate-700 dark:bg-slate-950/95 sm:top-2 sm:mx-0 sm:rounded-2xl sm:border">
         <div className="flex min-w-0 flex-col gap-2 xl:flex-row xl:items-center xl:justify-between">
           <div className="flex min-w-0 flex-1 flex-nowrap gap-1 overflow-x-auto pb-1 xl:pb-0">
@@ -361,15 +361,15 @@ function CatalogEditorSurfaceContent() {
             {canEditConfig ? (
               <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">{copy('displayVisibilityGroup', 'Catalog & page visibility')}</div>
             ) : null}
-            <div className="grid gap-3">
+            <div data-testid="portal-visibility-grid" className="grid min-w-0 gap-2 sm:grid-cols-2 xl:grid-cols-3">
               {/* Catalog/display config toggles (customer_portal). display:contents keeps them
                   as direct grid items when shown; hidden removes them for a posts-only role. */}
               <div className={canEditConfig ? 'contents' : 'hidden'}>
-              <label className="flex items-center justify-between rounded-2xl border border-slate-200 bg-white px-4 py-3">
+              <label className="flex min-h-11 min-w-0 items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white px-3 py-2.5">
                 <span className="text-sm font-medium text-slate-700">{copy('showCatalog', 'Show product catalog')}</span>
                 <input id="portal-show-catalog" name="customer_portal_show_catalog" type="checkbox" checked={!!editorDraft.customer_portal_show_catalog} onChange={(event) => setDraft('customer_portal_show_catalog', event.target.checked)} />
               </label>
-              <div className="flex items-center justify-between rounded-2xl border border-slate-200 bg-white px-4 py-3">
+              <div className="flex min-h-11 min-w-0 items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white px-3 py-2.5">
                 <div>
                   <HintLabel title={copy('announcementStrip', 'Announcement strip')} hint={copy('announcementStripHint', 'Small horizontally-scrolling cards at the very top of the page — separate from the Promotions and posts cards below')} />
                 </div>
@@ -381,43 +381,43 @@ function CatalogEditorSurfaceContent() {
                   {copy('manage', 'Manage')}
                 </button>
               </div>
-              <label className="flex items-center justify-between rounded-2xl border border-slate-200 bg-white px-4 py-3">
+              <label className="flex min-h-11 min-w-0 items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white px-3 py-2.5">
                 <span className="text-sm font-medium text-slate-700">{copy('showAbout', 'Show about section')}</span>
                 <input id="portal-show-about" name="customer_portal_show_about" type="checkbox" checked={!!editorDraft.customer_portal_show_about} onChange={(event) => setDraft('customer_portal_show_about', event.target.checked)} />
               </label>
-              <label className="flex items-center justify-between rounded-2xl border border-slate-200 bg-white px-4 py-3">
+              <label className="flex min-h-11 min-w-0 items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white px-3 py-2.5">
                 <span className="text-sm font-medium text-slate-700">{copy('showPrices', 'Show selling prices')}</span>
                 <input id="portal-show-prices" name="customer_portal_show_prices" type="checkbox" checked={!!editorDraft.customer_portal_show_prices} onChange={(event) => setDraft('customer_portal_show_prices', event.target.checked)} />
               </label>
-              <label className="flex items-center justify-between rounded-2xl border border-slate-200 bg-white px-4 py-3">
+              <label className="flex min-h-11 min-w-0 items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white px-3 py-2.5">
                 <span className="text-sm font-medium text-slate-700">{copy('showOutOfStockProducts', 'Show out-of-stock products')}</span>
                 <input id="portal-show-out-of-stock-products" name="customer_portal_show_out_of_stock_products" type="checkbox" checked={editorDraft.customer_portal_show_out_of_stock_products !== false} onChange={(event) => setDraft('customer_portal_show_out_of_stock_products', event.target.checked)} />
               </label>
-              <label className="flex items-center justify-between rounded-2xl border border-slate-200 bg-white px-4 py-3">
+              <label className="flex min-h-11 min-w-0 items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white px-3 py-2.5">
                 <div>
                   <HintLabel title={copy('showStockStatus', 'Show stock status')} hint={copy('showStockStatusHint', 'The In Stock / Low Stock / Out of Stock badge on each product, and the matching filter above the catalog. Turning this off hides both.')} />
                 </div>
                 <input id="portal-show-stock-status" name="customer_portal_show_stock_status" type="checkbox" checked={editorDraft.customer_portal_show_stock_status !== false} onChange={(event) => setDraft('customer_portal_show_stock_status', event.target.checked)} />
               </label>
-              <label className="flex items-center justify-between rounded-2xl border border-slate-200 bg-white px-4 py-3">
+              <label className="flex min-h-11 min-w-0 items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white px-3 py-2.5">
                 <span className="text-sm font-medium text-slate-700">{copy('showProductBrand', 'Show brand tags')}</span>
                 <input id="portal-show-product-brand" name="customer_portal_show_product_brand" type="checkbox" checked={editorDraft.customer_portal_show_product_brand !== false} onChange={(event) => setDraft('customer_portal_show_product_brand', event.target.checked)} />
               </label>
-              <label className="flex items-center justify-between rounded-2xl border border-slate-200 bg-white px-4 py-3">
+              <label className="flex min-h-11 min-w-0 items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white px-3 py-2.5">
                 <span className="text-sm font-medium text-slate-700">{copy('showProductCategory', 'Show category tags')}</span>
                 <input id="portal-show-product-category" name="customer_portal_show_product_category" type="checkbox" checked={editorDraft.customer_portal_show_product_category !== false} onChange={(event) => setDraft('customer_portal_show_product_category', event.target.checked)} />
               </label>
-              <label className="flex items-center justify-between rounded-2xl border border-slate-200 bg-white px-4 py-3">
+              <label className="flex min-h-11 min-w-0 items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white px-3 py-2.5">
                 <span className="text-sm font-medium text-slate-700">{copy('showProductDescription', 'Show short descriptions')}</span>
                 <input id="portal-show-product-description" name="customer_portal_show_product_description" type="checkbox" checked={editorDraft.customer_portal_show_product_description !== false} onChange={(event) => setDraft('customer_portal_show_product_description', event.target.checked)} />
               </label>
-              <label className="flex items-center justify-between rounded-2xl border border-slate-200 bg-white px-4 py-3">
+              <label className="flex min-h-11 min-w-0 items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white px-3 py-2.5">
                 <span className="text-sm font-medium text-slate-700">{copy('showProductDiscount', 'Show discount details')}</span>
                 <input id="portal-show-product-discount" name="customer_portal_show_product_discount" type="checkbox" checked={editorDraft.customer_portal_show_product_discount !== false} onChange={(event) => setDraft('customer_portal_show_product_discount', event.target.checked)} />
               </label>
             </div>
             <div className="mt-4 mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">{copy('displayLayoutGroup', 'Layout & pricing')}</div>
-            <div className="grid gap-4 sm:grid-cols-2">
+            <div data-testid="portal-layout-grid" className="grid min-w-0 gap-3 sm:grid-cols-2 xl:grid-cols-4">
               <div>
                 <label htmlFor="portal-price-display" className="block text-sm font-medium text-slate-700">{copy('priceDisplay', 'Price display')}</label>
                 <AppSelect
@@ -473,7 +473,7 @@ function CatalogEditorSurfaceContent() {
               <div className="flex flex-col gap-1">
                 <HintLabel className="text-sm font-semibold text-slate-900" title={copy('portalHighlights', 'Product highlights')} hint={copy('portalHighlightsHint', 'Use compact badges to call attention to trending, featured, or promotional items without overcrowding the product cards.')} />
               </div>
-              <div className="mt-4 grid gap-3 md:grid-cols-2">
+              <div data-testid="portal-highlight-grid" className="mt-3 grid min-w-0 gap-2 sm:grid-cols-2 xl:grid-cols-3">
                 <label className="flex items-center justify-between rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
                   <span className="text-sm font-medium text-slate-700">{copy('showTopSellerBadge', 'Show top seller badges')}</span>
                   <input type="checkbox" checked={!!editorDraft.customer_portal_show_top_seller_badge} onChange={(event) => setDraft('customer_portal_show_top_seller_badge', event.target.checked)} />
@@ -490,11 +490,11 @@ function CatalogEditorSurfaceContent() {
                   <span className="text-sm font-medium text-slate-700">{copy('showPromotionBadge', 'Show promotion badges')}</span>
                   <input type="checkbox" checked={!!editorDraft.customer_portal_show_promotion_badge} onChange={(event) => setDraft('customer_portal_show_promotion_badge', event.target.checked)} />
                 </label>
-                <label className="flex items-center justify-between rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 md:col-span-2">
+                <label className="flex min-h-11 items-center justify-between gap-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5">
                   <span className="text-sm font-medium text-slate-700">{copy('showNewArrivalBadge', 'Show new arrival badges')}</span>
                   <input type="checkbox" checked={!!editorDraft.customer_portal_show_new_arrival_badge} onChange={(event) => setDraft('customer_portal_show_new_arrival_badge', event.target.checked)} />
                 </label>
-                <div className="md:col-span-2">
+                <div className="min-w-0">
                   <label htmlFor="portal-highlight-rank-limit" className="block text-sm font-medium text-slate-700">{copy('highlightRankLimit', 'Ranking badge limit')}</label>
                   <input
                     id="portal-highlight-rank-limit"
@@ -848,7 +848,8 @@ function CatalogEditorSurfaceContent() {
             </div>
             <div className="mt-5 rounded-2xl border border-slate-200 bg-white p-4">
               <HintLabel className="text-sm font-semibold text-slate-900" title={copy('productDefaultsTitle', 'Product detail defaults')} hint={copy('productDefaultsHint', 'Shown on every product\'s detail view. A product\'s own Caution text (typed into its description) takes priority over this default; Need More Details always shows when set here.')} />
-              <div className="mt-3">
+              <div className="mt-3 grid min-w-0 gap-3 lg:grid-cols-2">
+                <div>
                 <label htmlFor="portal-product-caution-default" className="block text-sm font-medium text-slate-700">{copy('productCaution', 'Caution')}</label>
                 <textarea
                   id="portal-product-caution-default"
@@ -859,8 +860,8 @@ function CatalogEditorSurfaceContent() {
                   value={editorDraft.customer_portal_product_caution_default || ''}
                   onChange={(event) => setDraft('customer_portal_product_caution_default', event.target.value)}
                 />
-              </div>
-              <div className="mt-4">
+                </div>
+                <div>
                 <label htmlFor="portal-product-need-more-details-default" className="block text-sm font-medium text-slate-700">{copy('productNeedMoreDetails', 'Need More Details')}</label>
                 <textarea
                   id="portal-product-need-more-details-default"
@@ -871,6 +872,7 @@ function CatalogEditorSurfaceContent() {
                   value={editorDraft.customer_portal_product_need_more_details_default || ''}
                   onChange={(event) => setDraft('customer_portal_product_need_more_details_default', event.target.value)}
                 />
+                </div>
               </div>
             </div>
             <div className="mt-5 rounded-2xl border border-slate-200 bg-white p-4">
@@ -1036,23 +1038,23 @@ function CatalogEditorSurfaceContent() {
                   </button>
                 </div>
               </div>
-              <div className="mt-4 grid gap-4">
-                <label className="flex items-center justify-between rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+              <div className="mt-3 grid min-w-0 gap-3 sm:grid-cols-[minmax(12rem,0.7fr)_minmax(0,1.3fr)]">
+                <label className="flex min-h-11 items-center justify-between gap-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 sm:self-end">
                   <span className="text-sm font-medium text-slate-700">{copy('faqEnabled', 'Show FAQ section')}</span>
                   <input type="checkbox" checked={!!editorDraft.customer_portal_show_faq} onChange={(event) => setDraft('customer_portal_show_faq', event.target.checked)} />
                 </label>
-                <div>
+                <div className="min-w-0">
                   <label htmlFor="portal-faq-title" className="block text-sm font-medium text-slate-700">{copy('faqTitle', 'FAQ title')}</label>
                   <input id="portal-faq-title" className="input mt-1" value={editorDraft.customer_portal_faq_title || ''} onChange={(event) => setDraft('customer_portal_faq_title', event.target.value)} />
                 </div>
-                <div className="space-y-3">
+                <div className="space-y-3 sm:col-span-2">
                   {faqItems.length ? faqItems.map((item, index) => (
                     <article key={item.id} className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
                       <div className="flex items-center justify-between gap-3">
                         <div className="text-sm font-semibold text-slate-900">#{index + 1}</div>
                         <button type="button" className="btn-secondary px-3 py-1 text-xs" onClick={() => removeFaqItem(item.id)}>{copy('remove', 'Remove')}</button>
                       </div>
-                      <div className="mt-3 grid gap-3">
+                      <div className="mt-3 grid min-w-0 gap-3 lg:grid-cols-[minmax(0,0.85fr)_minmax(0,1.15fr)]">
                         <div>
                           <label htmlFor={`portal-faq-question-${item.id}`} className="block text-sm font-medium text-slate-700">{copy('faqQuestion', 'Question')}</label>
                           <input id={`portal-faq-question-${item.id}`} className="input mt-1" value={item.question || ''} onChange={(event) => updateFaqItem(item.id, 'question', event.target.value)} />
@@ -1075,10 +1077,11 @@ function CatalogEditorSurfaceContent() {
 
           <div id="portal-section-assistant" className={`rounded-2xl border border-slate-200 bg-slate-50 p-4 ${activeEditorSection === 'assistant' ? '' : 'hidden'}`}>
             <div className="space-y-5">
-              <div>
-                  <div className="text-sm font-semibold text-slate-900">{copy('portalAssistantSettings', 'AI assistant settings', 'ការកំណត់ជំនួយការ AI')}</div>
-                  <p className="mt-2 text-sm text-slate-600">{copy('portalAssistantHint', 'This customer-facing AI page suggests products from your live catalog and can include online references when the selected provider supports them.', 'ជំនួយការ AI សម្រាប់អតិថិជននេះនឹងណែនាំផលិតផលពីកាតាឡុកបច្ចុប្បន្ន ហើយអាចបន្ថែមប្រភពអនឡាញបាន បើ provider ដែលបានជ្រើសគាំទ្រ។')}</p>
-              </div>
+              <HintLabel
+                className="text-sm font-semibold text-slate-900"
+                title={copy('portalAssistantSettings', 'AI assistant settings', 'ការកំណត់ជំនួយការ AI')}
+                hint={copy('portalAssistantHint', 'This customer-facing AI page suggests products from your live catalog and can include online references when the selected provider supports them.', 'ជំនួយការ AI សម្រាប់អតិថិជននេះនឹងណែនាំផលិតផលពីកាតាឡុកបច្ចុប្បន្ន ហើយអាចបន្ថែមប្រភពអនឡាញបាន បើ provider ដែលបានជ្រើសគាំទ្រ។')}
+              />
 
               <label className="flex items-center justify-between rounded-2xl border border-slate-200 bg-white px-4 py-3">
                 <span className="text-sm font-medium text-slate-700">{copy('assistantEnabled', 'Enable AI assistant')}</span>
@@ -1137,7 +1140,8 @@ function CatalogEditorSurfaceContent() {
               <InfoHint label={copy('customerUrl', 'Customer URL')} text={copy('customerUrlHint', 'Set a custom public path here, then publish that path through a separate customer-facing Funnel so the customer link is harder to guess from the admin side.')} />
             </div>
             <div className="break-all rounded-xl bg-white px-3 py-2 text-sm text-slate-700">{generatedPublicUrl}</div>
-            <div className="mt-3">
+            <div data-testid="portal-publish-address-grid" className="mt-3 grid min-w-0 gap-3 lg:grid-cols-2">
+              <div>
               <label htmlFor="portal-public-path" className="block text-sm font-medium text-slate-700">{copy('publicPathInput', 'Custom public path')}</label>
               <input
                 id="portal-public-path"
@@ -1147,36 +1151,37 @@ function CatalogEditorSurfaceContent() {
                 placeholder={copy('publicPathPlaceholder', '/your-customer-link')}
                 onChange={(event) => setDraft('customer_portal_path', event.target.value)}
               />
-            </div>
-            <div className="mt-3">
-              <div className="flex items-center gap-1.5">
-                <label htmlFor="portal-public-url" className="text-sm font-medium text-slate-700">{copy('publicUrlLabel', 'Public customer URL')}</label>
-                <InfoHint label={copy('publicUrlLabel', 'Public customer URL')} text={copy('publicUrlHint', 'Use a different public domain or Funnel URL here when you publish the customer portal outside the admin link.')} />
               </div>
-              <input
-                id="portal-public-url"
-                name="customer_portal_public_url"
-                className="input mt-1"
-                value={editorDraft.customer_portal_public_url || ''}
-                placeholder={copy('publicUrlPlaceholder', 'https://customers.example.com')}
-                onChange={(event) => setDraft('customer_portal_public_url', event.target.value)}
-              />
+              <div>
+                <div className="flex items-center gap-1.5">
+                  <label htmlFor="portal-public-url" className="text-sm font-medium text-slate-700">{copy('publicUrlLabel', 'Public customer URL')}</label>
+                  <InfoHint label={copy('publicUrlLabel', 'Public customer URL')} text={copy('publicUrlHint', 'Use a different public domain or Funnel URL here when you publish the customer portal outside the admin link.')} />
+                </div>
+                <input
+                  id="portal-public-url"
+                  name="customer_portal_public_url"
+                  className="input mt-1"
+                  value={editorDraft.customer_portal_public_url || ''}
+                  placeholder={copy('publicUrlPlaceholder', 'https://customers.example.com')}
+                  onChange={(event) => setDraft('customer_portal_public_url', event.target.value)}
+                />
+              </div>
             </div>
-            <label className="mt-3 flex items-center justify-between gap-4 rounded-2xl border border-slate-200 bg-white px-4 py-3">
+            <label className="mt-3 flex min-h-11 items-center justify-between gap-4 rounded-xl border border-slate-200 bg-white px-3 py-2.5">
               <div>
                 <HintLabel title={copy('translateWidget', 'Enable public translate widget')} hint={copy('translateWidgetHint', 'Public customers switch English/Khmer instantly. External languages use Google only as a fallback.')} />
               </div>
               <input id="portal-translate-widget-enabled" name="customer_portal_translate_widget_enabled" type="checkbox" checked={!!editorDraft.customer_portal_translate_widget_enabled} onChange={(event) => setDraft('customer_portal_translate_widget_enabled', event.target.checked)} />
             </label>
             <div className="mt-3 rounded-2xl border border-slate-200 bg-white p-4">
-              <label htmlFor="portal-translations-json" className="block text-sm font-medium text-slate-700">{copy('translationOverrides', 'Dynamic content translations')}</label>
-              <p className="mt-1 text-xs text-slate-500">
-                {copy('translationOverridesHint', 'Optional JSON for About, FAQ, assistant, submission, social labels, and product description translations. Business name, short tagline, and portal intro stay original.')}
-              </p>
+              <HintLabel
+                title={copy('translationOverrides', 'Dynamic content translations')}
+                hint={copy('translationOverridesHint', 'Optional JSON for About, FAQ, assistant, submission, social labels, and product description translations. Business name, short tagline, and portal intro stay original.')}
+              />
               <textarea
                 id="portal-translations-json"
                 name="customer_portal_translations"
-                className="input mt-3 min-h-[160px] resize-y font-mono text-xs"
+                className="input mt-2 min-h-[140px] resize-y font-mono text-xs"
                 spellCheck={false}
                 value={editorDraft.customer_portal_translations || '{}'}
                 onChange={(event) => setDraft('customer_portal_translations', event.target.value)}
@@ -1209,16 +1214,18 @@ function CatalogEditorSurfaceContent() {
             </a>
           </div>
 
-          <div id="portal-section-branding" className={activeEditorSection === 'branding' ? 'grid gap-4' : 'hidden'}>
-            <div>
-              <label htmlFor="portal-business-name" className="block text-sm font-medium text-slate-700">{copy('businessName', 'Business name')}</label>
-              <input id="portal-business-name" name="business_name" autoComplete="organization" className="input" value={editorDraft.business_name || ''} onChange={(event) => setDraft('business_name', event.target.value)} />
+          <div id="portal-section-branding" className={activeEditorSection === 'branding' ? 'grid min-w-0 gap-3' : 'hidden'}>
+            <div data-testid="portal-business-identity-grid" className="grid min-w-0 gap-3 sm:grid-cols-2">
+              <div>
+                <label htmlFor="portal-business-name" className="block text-sm font-medium text-slate-700">{copy('businessName', 'Business name')}</label>
+                <input id="portal-business-name" name="business_name" autoComplete="organization" className="input" value={editorDraft.business_name || ''} onChange={(event) => setDraft('business_name', event.target.value)} />
+              </div>
+              <div>
+                <label htmlFor="portal-business-tagline" className="block text-sm font-medium text-slate-700">{copy('businessTagline', 'Short tagline')}</label>
+                <input id="portal-business-tagline" name="customer_portal_business_tagline" autoComplete="off" className="input" value={editorDraft.customer_portal_business_tagline || ''} onChange={(event) => setDraft('customer_portal_business_tagline', event.target.value)} />
+              </div>
             </div>
-            <div>
-              <label htmlFor="portal-business-tagline" className="block text-sm font-medium text-slate-700">{copy('businessTagline', 'Short tagline')}</label>
-              <input id="portal-business-tagline" name="customer_portal_business_tagline" autoComplete="off" className="input" value={editorDraft.customer_portal_business_tagline || ''} onChange={(event) => setDraft('customer_portal_business_tagline', event.target.value)} />
-            </div>
-            <div className="grid gap-4 sm:grid-cols-2">
+            <div className="grid min-w-0 gap-3 sm:grid-cols-2">
               <div>
                 <label htmlFor="portal-business-phone" className="block text-sm font-medium text-slate-700">{copy('phone', 'Phone')}</label>
                 <input id="portal-business-phone" name="business_phone" autoComplete="tel" className="input" value={editorDraft.business_phone || ''} onChange={(event) => setDraft('business_phone', event.target.value)} />
@@ -1228,24 +1235,26 @@ function CatalogEditorSurfaceContent() {
                 <input id="portal-business-email" name="business_email" autoComplete="email" className="input" value={editorDraft.business_email || ''} onChange={(event) => setDraft('business_email', event.target.value)} />
               </div>
             </div>
-            <div>
-              <label htmlFor="portal-business-address" className="block text-sm font-medium text-slate-700">{copy('address', 'Address')}</label>
-              <textarea id="portal-business-address" name="business_address" autoComplete="street-address" className="input resize-none" rows={2} value={editorDraft.business_address || ''} onChange={(event) => setDraft('business_address', event.target.value)} />
-            </div>
-            <div>
-              <div className="flex items-center gap-1.5">
-                <label htmlFor="portal-address-link" className="text-sm font-medium text-slate-700">{copy('addressLink', 'Address link')}</label>
-                <InfoHint label={copy('addressLink', 'Address link')} text={copy('addressLinkHint', 'Optional external map or directions link opened when customers tap the address.')} />
+            <div className="grid min-w-0 gap-3 lg:grid-cols-2">
+              <div>
+                <label htmlFor="portal-business-address" className="block text-sm font-medium text-slate-700">{copy('address', 'Address')}</label>
+                <textarea id="portal-business-address" name="business_address" autoComplete="street-address" className="input resize-none" rows={2} value={editorDraft.business_address || ''} onChange={(event) => setDraft('business_address', event.target.value)} />
               </div>
-              <input
-                id="portal-address-link"
-                name="customer_portal_address_link"
-                autoComplete="url"
-                className="input"
-                placeholder="https://maps.google.com/..."
-                value={editorDraft.customer_portal_address_link || ''}
-                onChange={(event) => setDraft('customer_portal_address_link', event.target.value)}
-              />
+              <div>
+                <div className="flex items-center gap-1.5">
+                  <label htmlFor="portal-address-link" className="text-sm font-medium text-slate-700">{copy('addressLink', 'Address link')}</label>
+                  <InfoHint label={copy('addressLink', 'Address link')} text={copy('addressLinkHint', 'Optional external map or directions link opened when customers tap the address.')} />
+                </div>
+                <input
+                  id="portal-address-link"
+                  name="customer_portal_address_link"
+                  autoComplete="url"
+                  className="input"
+                  placeholder="https://maps.google.com/..."
+                  value={editorDraft.customer_portal_address_link || ''}
+                  onChange={(event) => setDraft('customer_portal_address_link', event.target.value)}
+                />
+              </div>
             </div>
 
             <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
@@ -1291,7 +1300,7 @@ function CatalogEditorSurfaceContent() {
                   />
                 </div>
 
-                <div className="grid gap-4 sm:grid-cols-2">
+                <div data-testid="portal-social-links-grid" className="grid min-w-0 gap-3 sm:grid-cols-2 2xl:grid-cols-4">
                   <div className="space-y-2">
                     <label htmlFor="portal-website" className="flex items-center gap-1.5 text-sm font-medium text-slate-700"><Globe className="h-3.5 w-3.5 text-slate-500" />{copy('website', 'Website')}</label>
                     <input id="portal-website" name="customer_portal_website" autoComplete="url" className="input" value={editorDraft.customer_portal_website || ''} onChange={(event) => setDraft('customer_portal_website', event.target.value)} />
@@ -1316,7 +1325,7 @@ function CatalogEditorSurfaceContent() {
 
                 <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
                   <div className="mb-3 text-sm font-semibold text-slate-900">{copy('socialVisibility', 'Social visibility')}</div>
-                  <div className="grid gap-3 sm:grid-cols-2">
+                  <div className="grid min-w-0 gap-2 sm:grid-cols-2 2xl:grid-cols-4">
                     <label className="flex items-center justify-between rounded-xl border border-slate-200 bg-white px-3 py-2" htmlFor="portal-show-website">
                       <span className="text-sm text-slate-700">{copy('showWebsite', 'Show website')}</span>
                       <input id="portal-show-website" name="customer_portal_show_website" type="checkbox" checked={!!editorDraft.customer_portal_show_website} onChange={(event) => setDraft('customer_portal_show_website', event.target.checked)} />
@@ -1342,8 +1351,12 @@ function CatalogEditorSurfaceContent() {
                     populate customer_portal_contact_* / turn the show-contact-* toggles on,
                     which is why the FAB never appeared even though the code path is correct. */}
                 <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                  <div className="mb-1 flex items-center gap-2">
+                  <div className="mb-3 flex min-w-0 items-center gap-2">
                     <div className="text-sm font-semibold text-slate-900">{copy('contactChannels', 'Contact us button')}</div>
+                    <InfoHint
+                      label={copy('contactChannels', 'Contact us button')}
+                      text={copy('contactChannelsHint', 'A direct-message floating button shown on the storefront, separate from the social links above. Messenger/Telegram fall back to your Facebook/Telegram links above if left blank.')}
+                    />
                     <ButtonGuidePopover
                       title={copy('contactChannelsGuideTitle', 'Contact us channels')}
                       triggerLabel={copy('contactChannelsGuideTitle', 'Contact us channels')}
@@ -1355,8 +1368,7 @@ function CatalogEditorSurfaceContent() {
                       ]}
                     />
                   </div>
-                  <p className="mb-3 text-xs text-slate-500">{copy('contactChannelsHint', 'A direct-message floating button shown on the storefront, separate from the social links above. Messenger/Telegram fall back to your Facebook/Telegram links above if left blank.')}</p>
-                  <div className="grid gap-4 sm:grid-cols-2">
+                  <div data-testid="portal-contact-channel-grid" className="grid min-w-0 gap-3 sm:grid-cols-2 2xl:grid-cols-3">
                     <div className="space-y-2">
                       <label htmlFor="portal-contact-messenger" className="flex items-center gap-1.5 text-sm font-medium text-slate-700"><MessengerIcon className="h-3.5 w-3.5 text-amber-600" />{copy('messenger', 'Messenger')}</label>
                       <input id="portal-contact-messenger" name="customer_portal_contact_messenger" autoComplete="off" className="input" placeholder="username or m.me/username" value={editorDraft.customer_portal_contact_messenger || ''} onChange={(event) => setDraft('customer_portal_contact_messenger', event.target.value)} />
@@ -1383,7 +1395,7 @@ function CatalogEditorSurfaceContent() {
                       <input id="portal-contact-phone-label" name="customer_portal_contact_phone_label" autoComplete="off" className="input" placeholder={copy('socialLabelPlaceholder', 'Optional label shown to customers')} value={editorDraft.customer_portal_contact_phone_label || ''} onChange={(event) => setDraft('customer_portal_contact_phone_label', event.target.value)} />
                     </div>
                   </div>
-                  <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                  <div className="mt-3 grid min-w-0 gap-2 sm:grid-cols-2 2xl:grid-cols-5">
                     <label className="flex items-center justify-between rounded-xl border border-slate-200 bg-white px-3 py-2" htmlFor="portal-show-contact-messenger">
                       <span className="text-sm text-slate-700">{copy('showContactMessenger', 'Show Messenger button')}</span>
                       <input id="portal-show-contact-messenger" name="customer_portal_show_contact_messenger" type="checkbox" checked={editorDraft.customer_portal_show_contact_messenger !== false} onChange={(event) => setDraft('customer_portal_show_contact_messenger', event.target.checked)} />
@@ -1465,7 +1477,7 @@ function CatalogEditorSurfaceContent() {
                 <span className="text-sm font-medium text-slate-700">{copy('showLogo', 'Show logo')}</span>
                 <input id="portal-show-logo" name="customer_portal_show_logo" type="checkbox" checked={!!editorDraft.customer_portal_show_logo} onChange={(event) => setDraft('customer_portal_show_logo', event.target.checked)} />
               </label>
-              <div className="grid gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-4 sm:grid-cols-2">
+              <div data-testid="portal-logo-controls-grid" className="grid min-w-0 gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-4 sm:grid-cols-2 xl:grid-cols-3">
               <label className="block">
                 <span className="text-sm font-medium text-slate-700">{copy('logoSize', 'Logo size')}</span>
                 <input
@@ -1615,13 +1627,21 @@ function CatalogEditorSurfaceContent() {
                     of only the raw uploaded file the ImageField's own preview/gallery
                     modal shows -- same gap the logo section already closed with its own
                     dedicated preview card above. */}
-                <div
-                  className="mt-3 flex h-32 items-end overflow-hidden rounded-[28px] bg-cover bg-center p-4 text-white"
-                  style={{
-                    backgroundImage: `linear-gradient(135deg, ${normalizeHexColor(editorDraft.customer_portal_hero_gradient_start, '#0f172a')}cc 0%, ${normalizeHexColor(editorDraft.customer_portal_hero_gradient_mid, '#14532d')}b3 55%, ${normalizeHexColor(editorDraft.customer_portal_hero_gradient_end, '#ea580c')}cc 100%), url(${editorDraft.customer_portal_cover_image})`,
-                  }}
-                >
-                  <div className="min-w-0">
+                <div className="relative isolate mt-3 flex h-32 items-end overflow-hidden rounded-[28px] p-4 text-white">
+                  <img
+                    src={editorDraft.customer_portal_cover_image}
+                    alt=""
+                    aria-hidden="true"
+                    className="pointer-events-none absolute inset-0 -z-20 h-full w-full object-cover"
+                  />
+                  <div
+                    aria-hidden="true"
+                    className="pointer-events-none absolute inset-0 -z-10"
+                    style={{
+                      backgroundImage: `linear-gradient(135deg, ${normalizeHexColor(editorDraft.customer_portal_hero_gradient_start, '#0f172a')}cc 0%, ${normalizeHexColor(editorDraft.customer_portal_hero_gradient_mid, '#14532d')}b3 55%, ${normalizeHexColor(editorDraft.customer_portal_hero_gradient_end, '#ea580c')}cc 100%)`,
+                    }}
+                  />
+                  <div className="relative min-w-0">
                     <div className="truncate text-sm font-semibold">{editorDraft.business_name || previewConfig.businessName || 'Business OS'}</div>
                     <div className="mt-1 truncate text-xs text-white/80">{editorDraft.customer_portal_business_tagline || previewConfig.businessTagline || 'Preview the hero banner on the live header.'}</div>
                   </div>
@@ -1636,8 +1656,12 @@ function CatalogEditorSurfaceContent() {
 
           <div id="portal-section-submissions" className={activeEditorSection === 'submissions' ? 'grid gap-4' : 'hidden'}>
             <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-              <div className="text-sm font-semibold text-slate-900">{copy('portalCatalogSettings', 'Catalog settings')}</div>
-              <div className="mt-4 grid gap-4 sm:grid-cols-2">
+              <HintLabel
+                className="text-sm font-semibold text-slate-900"
+                title={copy('portalCatalogSettings', 'Catalog settings')}
+                hint={copy('stockThresholdHint', 'Global thresholds override the product-level stock badges on the customer portal only.')}
+              />
+              <div className="mt-3 grid min-w-0 gap-3 sm:grid-cols-2 xl:grid-cols-3">
                 <div>
                   <label htmlFor="portal-stock-threshold-mode" className="block text-sm font-medium text-slate-700">{copy('stockThresholdMode', 'Stock badge mode')}</label>
                   <AppSelect
@@ -1664,15 +1688,15 @@ function CatalogEditorSurfaceContent() {
                   <input id="portal-out-stock-threshold" name="customer_portal_out_of_stock_threshold" className="input" type="number" min="0" step="0.01" value={editorDraft.customer_portal_out_of_stock_threshold || '0'} onChange={(event) => setDraft('customer_portal_out_of_stock_threshold', event.target.value)} />
                 </div>
               </div>
-              <p className="mt-3 text-xs text-slate-500">{copy('stockThresholdHint', 'Global thresholds override the product-level stock badges on the customer portal only.')}</p>
             </div>
 
             <div className="rounded-2xl border border-sky-200 bg-sky-50 p-4">
-              <div className="text-sm font-semibold text-sky-900">{copy('portalMembershipSettings', 'Membership settings')}</div>
-              <p className="mt-2 text-sm text-sky-800">
-                {copy('pointsPageHint', 'Point earning rules, redemption values, customer point notes, and reward-point defaults are managed in Loyalty Points so this portal page can stay focused on customer-facing content.')}
-              </p>
-                <button type="button" className="btn-secondary mt-3 text-sm" onClick={() => navigateTo('loyalty_points')}>
+              <HintLabel
+                className="text-sm font-semibold text-sky-900"
+                title={copy('portalMembershipSettings', 'Membership settings')}
+                hint={copy('pointsPageHint', 'Point earning rules, redemption values, customer point notes, and reward-point defaults are managed in Loyalty Points so this portal page can stay focused on customer-facing content.')}
+              />
+                <button type="button" className="btn-secondary mt-2 text-sm" onClick={() => navigateTo('loyalty_points')}>
                   {copy('openPointsPage', 'Open Loyalty Points', 'បើកទំព័រពិន្ទុស្មោះត្រង់')}
                 </button>
             </div>
@@ -1695,11 +1719,12 @@ function CatalogEditorSurfaceContent() {
             </div>
 
             <div className="rounded-2xl border border-sky-200 bg-sky-50 p-4">
-              <div className="text-sm font-semibold text-sky-900">{copy('reviewQueue', 'Review queue')}</div>
-              <p className="mt-2 text-sm text-sky-800">
-                {copy('reviewQueueMovedHint', 'Approving, rejecting, and awarding points for customer share submissions now happens in Loyalty Points, alongside the rest of the points rules.')}
-              </p>
-              <button type="button" className="btn-secondary mt-3 text-sm" onClick={() => navigateTo('loyalty_points')}>
+              <HintLabel
+                className="text-sm font-semibold text-sky-900"
+                title={copy('reviewQueue', 'Review queue')}
+                hint={copy('reviewQueueMovedHint', 'Approving, rejecting, and awarding points for customer share submissions now happens in Loyalty Points, alongside the rest of the points rules.')}
+              />
+              <button type="button" className="btn-secondary mt-2 text-sm" onClick={() => navigateTo('loyalty_points')}>
                 {copy('openPointsPage', 'Open Loyalty Points', 'បើកទំព័រពិន្ទុស្មោះត្រង់')}
               </button>
             </div>

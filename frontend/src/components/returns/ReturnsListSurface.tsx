@@ -97,7 +97,7 @@ interface ReturnsListSurfaceProps {
 
 function detectMobileViewport() {
   if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return false
-  return window.matchMedia('(max-width: 639px)').matches
+  return window.matchMedia('(max-width: 767px)').matches
 }
 
 function ReturnsDesktopSkeletonRows() {
@@ -112,6 +112,7 @@ function ReturnsDesktopSkeletonRows() {
       <td className="px-4 py-3"><div className="h-3 w-32 rounded bg-slate-200 dark:bg-slate-700" /></td>
       <td className="px-4 py-3"><div className="h-5 w-20 rounded-full bg-slate-200 dark:bg-slate-700" /></td>
       <td className="px-4 py-3"><div className="ml-auto h-4 w-16 rounded bg-slate-200 dark:bg-slate-700" /></td>
+      <td className="px-2 py-3"><div className="ml-auto h-6 w-6 rounded bg-slate-200 dark:bg-slate-700" /></td>
     </tr>
   ))
 }
@@ -168,12 +169,14 @@ export default function ReturnsListSurface({
   // 11.1: the checkbox column only takes space in select mode.
   const selectCellPad = selectionModeActive ? 'px-3' : 'px-0'
   const cols = useColumnPreferences('returns', RETURN_OPTIONAL_COLUMNS)
-  const columnCount = 8 + cols.visibleCount
+  // The column chooser belongs in the actual table header, not in a detached
+  // strip above it. Keep an aligned trailing cell for every body state.
+  const columnCount = 9 + cols.visibleCount
   const chooserColumns = RETURN_OPTIONAL_COLUMNS.map((column) => ({ ...column, label: tr(column.key, column.label) }))
 
   useEffect(() => {
     if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return undefined
-    const media = window.matchMedia('(max-width: 639px)')
+    const media = window.matchMedia('(max-width: 767px)')
     const apply = () => setIsMobileViewport(media.matches)
     apply()
     if (typeof media.addEventListener === 'function') {
@@ -187,12 +190,9 @@ export default function ReturnsListSurface({
   return (
     <>
       {!isMobileViewport ? (
-      <div className="card overflow-hidden">
-        <div className="hidden items-center justify-end gap-2 border-b border-gray-100 px-3 py-1.5 lg:flex dark:border-gray-700">
-          <ColumnChooser columns={chooserColumns} isVisible={cols.isVisible} toggle={cols.toggle} reset={cols.reset} label={tr('columns', 'Columns')} resetLabel={tr('reset', 'Reset')} />
-        </div>
+      <div className="desktop-dense-only dense-data-shell">
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[760px] text-sm">
+          <table className="dense-data-table min-w-[720px]">
             <thead className="sticky top-0 z-10 bg-gray-50 dark:bg-gray-700/50">
               <tr>
                 <th className={`${selectionModeActive ? 'w-10' : 'w-0'} ${selectCellPad} py-3`}>
@@ -216,6 +216,7 @@ export default function ReturnsListSurface({
                 {cols.isVisible('status') ? <th className="px-4 py-3 text-left font-semibold text-gray-600 dark:text-gray-400">{tr('status', 'Status')}</th> : null}
                 {cols.isVisible('cashier') ? <th className="px-4 py-3 text-left font-semibold text-gray-600 dark:text-gray-400">{tr('cashier', 'Cashier')}</th> : null}
                 <th className="px-4 py-3 text-right font-semibold text-gray-600 dark:text-gray-400">{tr('amount', 'Amount')}</th>
+                <th className="w-10 px-2 py-2 text-right"><ColumnChooser columns={chooserColumns} isVisible={cols.isVisible} toggle={cols.toggle} reset={cols.reset} label={tr('columns', 'Columns')} resetLabel={tr('reset', 'Reset')} /></th>
               </tr>
             </thead>
             <tbody>
@@ -308,8 +309,16 @@ export default function ReturnsListSurface({
                             <tr
                               key={ret.id}
                               className={`table-row cursor-pointer select-none hover:bg-orange-50 dark:hover:bg-orange-900/10 ${rowSelected ? 'bg-orange-50 dark:bg-orange-900/20' : ''}`}
+                              data-clickable="true"
+                              tabIndex={0}
                               style={desktopRowIndex >= 12 ? deferredDesktopRowStyle : undefined}
                               onClick={selectionModeActive ? handleRowClick : undefined}
+                              onKeyDown={(event) => {
+                                if (event.key !== 'Enter' && event.key !== ' ') return
+                                event.preventDefault()
+                                if (selectionModeActive) handleRowClick()
+                                else setDetailRet(ret)
+                              }}
                               {...(selectionModeActive ? {} : longPress)}
                             >
                               <td className={`${selectCellPad} py-2.5`} onClick={(event) => event.stopPropagation()}>
@@ -323,27 +332,28 @@ export default function ReturnsListSurface({
                                 />
                                 ) : null}
                               </td>
-                              <td className="whitespace-nowrap px-4 py-2.5 font-mono font-medium text-orange-600 dark:text-orange-400">{ret.return_number}</td>
-                              <td className="whitespace-nowrap px-4 py-2.5 text-xs text-gray-500">{fmtTime(ret.created_at)}</td>
-                              <td className="px-4 py-2.5">
+                              <td className="dense-id whitespace-nowrap font-medium text-orange-600 dark:text-orange-400">{ret.return_number}</td>
+                              <td className="whitespace-nowrap text-gray-500">{fmtTime(ret.created_at)}</td>
+                              <td>
                                 {ret.receipt_number
-                                  ? <span className="font-mono text-xs text-blue-600 dark:text-blue-400">{ret.receipt_number}</span>
+                                  ? <span className="dense-cell-truncate dense-id text-blue-600 dark:text-blue-400" title={ret.receipt_number}>{ret.receipt_number}</span>
                                   : <span className="text-xs text-gray-400">{tr('manual_return', 'Manual')}</span>}
                               </td>
-                              <td className="px-4 py-2.5 text-gray-700 dark:text-gray-300">{retScope === SUPPLIER_SCOPE ? (ret.supplier_name || '-') : (ret.customer_name || '-')}</td>
-                              <td className="px-4 py-2.5 text-gray-700 dark:text-gray-300">{ret.reason || '-'}</td>
-                              <td className="px-4 py-2.5">
+                              <td className="text-gray-700 dark:text-gray-300"><span className="dense-cell-truncate" title={retScope === SUPPLIER_SCOPE ? (ret.supplier_name || '-') : (ret.customer_name || '-')}>{retScope === SUPPLIER_SCOPE ? (ret.supplier_name || '-') : (ret.customer_name || '-')}</span></td>
+                              <td className="text-gray-700 dark:text-gray-300"><span className="dense-cell-truncate" title={ret.reason || '-'}>{ret.reason || '-'}</span></td>
+                              <td>
                                 <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-700 dark:bg-zinc-700 dark:text-gray-200">{typeLabel}</span>
                               </td>
                               {cols.isVisible('status') ? (
-                                <td className="px-4 py-2.5">
+                                <td>
                                   <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${(ret.status || 'completed') === 'cancelled' ? 'bg-gray-100 text-gray-500 dark:bg-zinc-700 dark:text-gray-400' : 'bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300'}`}>{tr(`status_${ret.status || 'completed'}`, ret.status || 'completed')}</span>
                                 </td>
                               ) : null}
                               {cols.isVisible('cashier') ? (
-                                <td className="px-4 py-2.5 text-xs text-gray-500 dark:text-gray-400">{ret.cashier_name || '-'}</td>
+                                <td className="text-gray-500 dark:text-gray-400"><span className="dense-cell-truncate" title={ret.cashier_name || '-'}>{ret.cashier_name || '-'}</span></td>
                               ) : null}
-                              <td className="px-4 py-2.5 text-right">{renderAmount(ret)}</td>
+                              <td className="text-right">{renderAmount(ret)}</td>
+                              <td className="w-10 px-2 py-2" aria-hidden="true" />
                             </tr>
                           )
                         })}
@@ -359,7 +369,7 @@ export default function ReturnsListSurface({
       ) : null}
 
       {isMobileViewport ? (
-      <div className="space-y-2">
+      <div className="mobile-cards-only space-y-2">
         {loading ? (
           <ReturnsMobileSkeletonCards />
         ) : filtered.length === 0 ? (

@@ -3,7 +3,6 @@ import { getDb } from '../lib/db'
 import { chunkForBinding } from '../lib/sqlBinding'
 import { requireAuth, type SessionUser } from '../lib/auth'
 import { audit } from '../lib/audit'
-import { applyRenameCarry } from '../lib/renameCascade'
 import { getPermissionTier, getActionTier, hasPermission, isAdminControlUser } from '../lib/permissions'
 import { broadcast, type BroadcastChannel } from '../durable-objects/broadcastHub'
 import { assertUpdatedAtMatch, getExpectedUpdatedAt, writeConflictResponse, WriteConflictError } from '../lib/conflictControl'
@@ -162,6 +161,13 @@ const requireContactsAccess = async (c: Context<{ Bindings: Env; Variables: { us
   const user = c.get('user')
   if (getPermissionTier(user, 'contacts') === 'none') return c.json({ error: 'You do not have permission to perform this action' }, 403)
   return next()
+}
+
+function denyUnlessFullContactAction(c: Context<{ Bindings: Env; Variables: { user: SessionUser } }>, action: string) {
+  if (getActionTier(c.get('user'), 'contacts', action) !== 'full') {
+    return c.json({ error: 'You do not have permission to perform this action' }, 403)
+  }
+  return null
 }
 for (const prefix of CONTACT_PATH_PREFIXES) {
   app.use(prefix, requireContactsAccess)
@@ -598,6 +604,49 @@ function registerContactRoutes(config: ContactConfig) {
     return c.json(payload)
   })
 
+  // Exact, read-only rename preview. Stable ids define the live links; audit
+  // and event rows are listed as preserved point-in-time evidence.
+  app.get(`${config.path}/:id/rename-impact`, async (c) => {
+    const id = Number(c.req.param('id'))
+    const to = String(c.req.query('to') || '').trim()
+    if (!Number.isFinite(id) || !to) return c.json({ error: 'Valid contact id and target name are required' }, 400)
+    const db = getDb(c.env)
+    const current = await db.prepare(`SELECT id, name FROM ${config.table} WHERE id = @id`).get<{ id: number; name: string }>({ id })
+    if (!current) return c.json({ error: `${config.entity} not found` }, 404)
+    const target = await db.prepare(`SELECT id, name FROM ${config.table} WHERE id != @id AND lower(trim(name)) = lower(trim(@to)) LIMIT 1`).get<{ id: number; name: string }>({ id, to })
+    const live: Record<string, number> = {}
+    if (config.table === 'customers') {
+      live.sales = Number((await db.prepare('SELECT COUNT(*) AS n FROM sales WHERE customer_id = @id').get<{ n: number }>({ id }))?.n || 0)
+      live.returns = Number((await db.prepare('SELECT COUNT(*) AS n FROM returns WHERE customer_id = @id').get<{ n: number }>({ id }))?.n || 0)
+      live.portal_submissions = Number((await db.prepare('SELECT COUNT(*) AS n FROM customer_share_submissions WHERE customer_id = @id').get<{ n: number }>({ id }))?.n || 0)
+      live.receivables = await hasTable(db, 'customer_receivables')
+        ? Number((await db.prepare('SELECT COUNT(*) AS n FROM customer_receivables WHERE customer_id = @id').get<{ n: number }>({ id }))?.n || 0)
+        : 0
+    } else if (config.table === 'suppliers') {
+      live.returns = Number((await db.prepare('SELECT COUNT(*) AS n FROM returns WHERE supplier_id = @id').get<{ n: number }>({ id }))?.n || 0)
+      live.batches = Number((await db.prepare('SELECT COUNT(*) AS n FROM product_batches WHERE supplier_id = @id').get<{ n: number }>({ id }))?.n || 0)
+      live.invoices = await hasTable(db, 'supplier_invoices')
+        ? Number((await db.prepare('SELECT COUNT(*) AS n FROM supplier_invoices WHERE supplier_id = @id').get<{ n: number }>({ id }))?.n || 0)
+        : 0
+    } else {
+      live.sales = Number((await db.prepare('SELECT COUNT(*) AS n FROM sales WHERE delivery_contact_id = @id').get<{ n: number }>({ id }))?.n || 0)
+    }
+    return c.json({
+      kind: config.table === 'customers' ? 'customer' : config.table === 'suppliers' ? 'supplier' : 'customer',
+      from: current.name,
+      to,
+      products_primary: 0,
+      products_secondary: 0,
+      batches: Number(live.batches || 0),
+      group_rows: 0,
+      linked_records: Object.values(live).reduce((sum, count) => sum + count, 0),
+      live_snapshots: live,
+      target_exists: Boolean(target),
+      target_id: target?.id || null,
+      historical_snapshots_preserved: ['audit_logs', 'action history payloads'],
+    })
+  })
+
   // Live pre-submit check, called (debounced) while the form's name/phone
   // fields are being typed -- lets the frontend show a non-blocking flag
   // banner ("possible duplicate of X") before the person even hits Save.
@@ -652,6 +701,8 @@ function registerContactRoutes(config: ContactConfig) {
   // scoped to the cluster, not a specific pair of ids.
   app.post(`${config.path}/duplicates/dismiss`, async (c) => {
     const user = c.get('user')
+    const denied = denyUnlessFullContactAction(c, 'resolve_conflicts')
+    if (denied) return denied
     const body = (await c.req.json<Record<string, unknown>>().catch(() => ({}))) as Record<string, unknown>
     const type = body.type === 'phone' ? 'phone' : body.type === 'name' ? 'name' : null
     const value = String(body.value || '').trim()
@@ -667,6 +718,8 @@ function registerContactRoutes(config: ContactConfig) {
   // a kept conflict is never a one-way hide, it can always be reopened and
   // resolved. Same cluster identity ({type, value}) the panel dismissed with.
   app.post(`${config.path}/duplicates/undismiss`, async (c) => {
+    const denied = denyUnlessFullContactAction(c, 'resolve_conflicts')
+    if (denied) return denied
     const body = (await c.req.json<Record<string, unknown>>().catch(() => ({}))) as Record<string, unknown>
     const type = body.type === 'phone' ? 'phone' : body.type === 'name' ? 'name' : null
     const value = String(body.value || '').trim()
@@ -706,6 +759,18 @@ function registerContactRoutes(config: ContactConfig) {
     ])
     if (!keeper) return c.json({ error: `Contact to keep (id ${keepId}) not found` }, 404)
     if (!merged) return c.json({ error: `Contact to merge (id ${mergeId}) not found` }, 404)
+    if (config.table === 'customers') {
+      const portalAccounts = await db.prepare(
+        `SELECT id, contact_id FROM portal_accounts WHERE contact_id IN (@keepId, @mergeId) ORDER BY id`,
+      ).all<{ id: number; contact_id: number }>({ keepId, mergeId })
+      if (portalAccounts.some((row) => Number(row.contact_id) === keepId) && portalAccounts.some((row) => Number(row.contact_id) === mergeId)) {
+        return c.json({
+          error: 'Both customers have storefront accounts. Cancel this merge and resolve which storefront account must survive first.',
+          code: 'portal_account_collision',
+          accounts: portalAccounts,
+        }, 409)
+      }
+    }
 
     // Backfill: only columns this table actually allows editing (same
     // allowlist POST/PUT use), and only where the keeper is genuinely
@@ -733,9 +798,12 @@ function registerContactRoutes(config: ContactConfig) {
     if (config.table === 'customers') {
       const mergedNameLower = String(merged.name || '').trim().toLowerCase()
       await db.batch([
-        { sql: `UPDATE sales SET customer_id = @keepId WHERE customer_id = @mergeId`, params: { keepId, mergeId } },
-        { sql: `UPDATE returns SET customer_id = @keepId WHERE customer_id = @mergeId`, params: { keepId, mergeId } },
-        { sql: `UPDATE customer_share_submissions SET customer_id = @keepId WHERE customer_id = @mergeId`, params: { keepId, mergeId } },
+        // The id is authoritative, but these operational rows also expose a
+        // mutable display snapshot in lists, details, reports and exports.
+        // Repointing only the FK left the survivor linked to the loser name.
+        { sql: `UPDATE sales SET customer_id = @keepId, customer_name = @keeperName, customer_phone = @keeperPhone, customer_address = @keeperAddress WHERE customer_id = @mergeId`, params: { keepId, mergeId, keeperName: keeper.name, keeperPhone: keeper.phone ?? null, keeperAddress: keeper.address ?? null } },
+        { sql: `UPDATE returns SET customer_id = @keepId, customer_name = @keeperName WHERE customer_id = @mergeId`, params: { keepId, mergeId, keeperName: keeper.name } },
+        { sql: `UPDATE customer_share_submissions SET customer_id = @keepId, customer_name = @keeperName WHERE customer_id = @mergeId`, params: { keepId, mergeId, keeperName: keeper.name } },
         // Was missing until an earlier session -- loyalty_point_adjustments
         // has no FK/CASCADE (confirmed against migrations/0028), so without
         // this repoint, merging a customer who had ever been manually
@@ -777,7 +845,7 @@ function registerContactRoutes(config: ContactConfig) {
       const mergedName = String(merged.name || '')
       const mergedNameLower = mergedName.trim().toLowerCase()
       const statements: Array<{ sql: string; params: Record<string, unknown> }> = [
-        { sql: `UPDATE returns SET supplier_id = @keepId WHERE supplier_id = @mergeId`, params: { keepId, mergeId } },
+        { sql: `UPDATE returns SET supplier_id = @keepId, supplier_name = @keeperName WHERE supplier_id = @mergeId`, params: { keepId, mergeId, keeperName: keeper.name } },
         // Purchase lots (product_batches, migration 0062): id-attributed lots
         // follow the keeper. The supplier batch/cost drilldown reads by
         // supplier_id (contacts.ts supplier-lots query: `pb.supplier_id = @id
@@ -788,7 +856,7 @@ function registerContactRoutes(config: ContactConfig) {
         { sql: `UPDATE product_batches SET supplier_id = @keepId, supplier_name = @keeperName WHERE supplier_id = @mergeId`, params: { keepId, mergeId, keeperName: keeper.name } },
       ]
       if (mergedName) {
-        statements.push({ sql: `UPDATE products SET supplier = @keeperName WHERE supplier = @mergedName`, params: { keeperName: keeper.name, mergedName } })
+        statements.push({ sql: `UPDATE products SET supplier = @keeperName, updated_at = CURRENT_TIMESTAMP WHERE lower(trim(COALESCE(supplier, ''))) = @mergedNameLower`, params: { keeperName: keeper.name, mergedNameLower } })
         // Name-only lots (supplier typed free-text, supplier_id NULL) move by
         // name exactly the way products.supplier does above and the way
         // renameCascade.ts already carries a supplier rename -- otherwise a
@@ -812,14 +880,26 @@ function registerContactRoutes(config: ContactConfig) {
       }
     } else if (config.table === 'delivery_contacts') {
       await db.batch([
-        { sql: `UPDATE sales SET delivery_contact_id = @keepId WHERE delivery_contact_id = @mergeId`, params: { keepId, mergeId } },
+        { sql: `UPDATE sales SET delivery_contact_id = @keepId, delivery_contact_name = @keeperName WHERE delivery_contact_id = @mergeId`, params: { keepId, mergeId, keeperName: keeper.name } },
       ])
     }
 
     await db.prepare(`DELETE FROM ${config.table} WHERE id = @id`).run({ id: mergeId })
     await audit(c.env, user?.id ?? null, user?.name ?? null, 'merge', config.entity, keepId, { mergedId: mergeId, mergedName: merged.name, backfilled: Object.keys(backfill) })
+    const mergeVersions: string[] = [config.table]
+    // A merge changes more than the contact picker: linked operational rows
+    // feed other versioned read caches. Advance those dependency namespaces
+    // at the mutation boundary so a live-refresh cannot fetch an old Cache
+    // API response under the previous version.
+    if (config.table === 'customers') {
+      mergeVersions.push('sales', 'returns')
+    } else if (config.table === 'suppliers') {
+      mergeVersions.push('products', 'returns')
+    } else if (config.table === 'delivery_contacts') {
+      mergeVersions.push('sales')
+    }
+    await Promise.all([...new Set(mergeVersions)].map((namespace) => bumpVersion(c.env, namespace)))
     c.executionCtx.waitUntil(broadcast(c.env, config.channel, { action: 'merge', id: keepId, mergedId: mergeId }))
-    c.executionCtx.waitUntil(bumpVersion(c.env, config.table))
     const refreshed = await db.prepare(`SELECT * FROM ${config.table} WHERE id = @id`).get<Record<string, unknown>>({ id: keepId })
     return c.json({ contact: refreshed })
   })
@@ -870,8 +950,8 @@ function registerContactRoutes(config: ContactConfig) {
     `).run(payload)
     const id = result.lastInsertRowid
     await audit(c.env, user?.id ?? null, user?.name ?? null, 'create', config.entity, id, { name })
+    await bumpVersion(c.env, config.table)
     c.executionCtx.waitUntil(broadcast(c.env, config.channel, { action: 'create', id }))
-    c.executionCtx.waitUntil(bumpVersion(c.env, config.table))
     const item = await db.prepare(`SELECT * FROM ${config.table} WHERE id = @id`).get({ id })
     return c.json(item)
   })
@@ -927,6 +1007,21 @@ function registerContactRoutes(config: ContactConfig) {
 
     const name = body.name != null ? String(body.name).trim() : String(current.name || '')
     if (!name) return c.json({ error: 'Name is required' }, 400)
+    const nameChanged = String(current.name || '').trim().toLowerCase() !== name.toLowerCase()
+    const renameScope = String(body.__rename_cascade || '').trim().toLowerCase()
+    if (nameChanged && (config.table === 'customers' || config.table === 'suppliers')) {
+      if (renameScope !== 'carry' && renameScope !== 'record_only') {
+        return c.json({ error: 'Choose whether to update linked live records or rename only this contact.', code: 'rename_choice_required' }, 409)
+      }
+      const collision = await db.prepare(`SELECT id, name FROM ${config.table} WHERE id != @id AND lower(trim(name)) = lower(trim(@name)) LIMIT 1`).get<{ id: number; name: string }>({ id, name })
+      if (collision) {
+        return c.json({
+          error: `"${name}" already exists. Open Possible Duplicates and explicitly choose which record to keep, or cancel this rename.`,
+          code: 'merge_required',
+          duplicate: collision,
+        }, 409)
+      }
+    }
 
     // Review Required tier (progress.md's "Permissions UI redesign" item):
     // Contacts' spec is narrower than Products' -- "edit limited to name
@@ -952,18 +1047,6 @@ function registerContactRoutes(config: ContactConfig) {
       payload.phone_normalized = canonicalizePhone(payload.phone)
     }
 
-    // D6: renaming a SUPPLIER used to leave every product/batch that
-    // carries the old free-text name pointing at nothing. When the rename
-    // dialog chose "carry", every attached row follows the new name;
-    // without the flag the old (no-cascade) behavior stands, and "keep a
-    // copy, new is new" is the frontend creating a fresh supplier instead.
-    if (config.table === 'suppliers' && body.__rename_cascade === 'carry') {
-      const fromName = String(current.name || '').trim()
-      if (fromName && fromName.toLowerCase() !== name.toLowerCase()) {
-        const carried = await applyRenameCarry(db, 'supplier', fromName, name, new Date().toISOString())
-        await audit(c.env, user?.id ?? null, user?.name ?? null, 'rename', 'supplier_cascade', id, { from: fromName, to: name, products: carried.products, batches: carried.batches })
-      }
-    }
     delete (body as Record<string, unknown>).__rename_cascade
 
     // Flagged as a UX gap in Part 155, fixed here (Part 157): a Review
@@ -999,53 +1082,86 @@ function registerContactRoutes(config: ContactConfig) {
       }
     }
 
-    const columns = Object.keys(payload)
-    if (columns.length) {
-      await db.prepare(`
-        UPDATE ${config.table}
-        SET ${columns.map((col) => `${col} = @${col}`).join(', ')}, updated_at = CURRENT_TIMESTAMP
-        WHERE id = @id
-      `).run({ ...payload, id })
-    }
-
-    // Stable ids are the authority for display snapshots. Keep every row
-    // already linked to this exact contact synchronized, while deliberately
-    // leaving NULL-id/name-only rows untouched: those are the genuine
-    // conflicts that must stay visible for review instead of being guessed.
-    const nameChanged = String(current.name || '') !== name
+    // Stable ids are the authority for display snapshots. Build the contact
+    // update and every live snapshot/free-text carry into ONE D1 batch. This
+    // matters most for suppliers: the old implementation renamed product
+    // text before duplicate/membership validation and committed each linked
+    // table separately, so a later failure could leave the contact and its
+    // products disagreeing. D1 batch is transactional and fails loudly.
+    // Immutable audit/event rows are deliberately not rewritten here.
+    const snapshotCarry = !nameChanged || renameScope === 'carry' || (config.table !== 'customers' && config.table !== 'suppliers')
     const phoneChanged = config.table === 'customers'
       && Object.prototype.hasOwnProperty.call(payload, 'phone')
       && String(current.phone || '') !== String(payload.phone || '')
     const addressChanged = config.table === 'customers'
       && Object.prototype.hasOwnProperty.call(payload, 'address')
       && String(current.address || '') !== String(payload.address || '')
-    if (nameChanged || phoneChanged || addressChanged) {
+    const statements: Array<{ sql: string; params: Record<string, unknown> }> = []
+    const columns = Object.keys(payload)
+    if (columns.length) {
+      statements.push({
+        sql: `UPDATE ${config.table}
+          SET ${columns.map((col) => `${col} = @${col}`).join(', ')}, updated_at = CURRENT_TIMESTAMP
+          WHERE id = @id`,
+        params: { ...payload, id },
+      })
+    }
+
+    if ((nameChanged && snapshotCarry) || phoneChanged || addressChanged) {
       if (config.table === 'customers') {
         const customerPhone = Object.prototype.hasOwnProperty.call(payload, 'phone') ? payload.phone : current.phone
         const customerAddress = Object.prototype.hasOwnProperty.call(payload, 'address') ? payload.address : current.address
-        await db.batch([
-          { sql: `UPDATE sales SET customer_name = @name, customer_phone = @phone, customer_address = @address WHERE customer_id = @id`, params: { id, name, phone: customerPhone ?? null, address: customerAddress ?? null } },
-          { sql: `UPDATE returns SET customer_name = @name WHERE customer_id = @id`, params: { id, name } },
-          { sql: `UPDATE customer_share_submissions SET customer_name = @name WHERE customer_id = @id`, params: { id, name } },
-        ])
-        if (await hasTable(db, 'customer_receivables')) {
-          await db.prepare(`UPDATE customer_receivables SET customer_name = @name WHERE customer_id = @id`).run({ id, name })
+        const snapshotName = nameChanged && !snapshotCarry ? current.name : name
+        statements.push(
+          { sql: `UPDATE sales SET customer_name = @name, customer_phone = @phone, customer_address = @address WHERE customer_id = @id`, params: { id, name: snapshotName, phone: customerPhone ?? null, address: customerAddress ?? null } },
+          { sql: `UPDATE returns SET customer_name = @name WHERE customer_id = @id`, params: { id, name: snapshotName } },
+          { sql: `UPDATE customer_share_submissions SET customer_name = @name WHERE customer_id = @id`, params: { id, name: snapshotName } },
+        )
+        if (snapshotCarry && await hasTable(db, 'customer_receivables')) {
+          statements.push({ sql: `UPDATE customer_receivables SET customer_name = @name WHERE customer_id = @id`, params: { id, name: snapshotName } })
         }
-      } else if (config.table === 'suppliers' && nameChanged) {
-        await db.batch([
+      } else if (config.table === 'suppliers' && nameChanged && snapshotCarry) {
+        const fromName = String(current.name || '').trim()
+        // Name-only legacy rows have no stable supplier id. Carry only an
+        // exact normalized old value; never use LIKE/fuzzy matching.
+        statements.push(
+          { sql: `UPDATE products SET supplier = @name, updated_at = CURRENT_TIMESTAMP WHERE lower(trim(COALESCE(supplier, ''))) = @from`, params: { name, from: fromName.toLowerCase() } },
+          { sql: `UPDATE product_batches SET supplier_name = @name, updated_at = CURRENT_TIMESTAMP WHERE lower(trim(COALESCE(supplier_name, ''))) = @from`, params: { name, from: fromName.toLowerCase() } },
           { sql: `UPDATE returns SET supplier_name = @name WHERE supplier_id = @id`, params: { id, name } },
           { sql: `UPDATE product_batches SET supplier_name = @name WHERE supplier_id = @id`, params: { id, name } },
-        ])
+        )
         if (await hasTable(db, 'supplier_invoices')) {
-          await db.prepare(`UPDATE supplier_invoices SET supplier_name = @name WHERE supplier_id = @id`).run({ id, name })
+          statements.push(
+            { sql: `UPDATE supplier_invoices SET supplier_name = @name WHERE supplier_id = @id`, params: { id, name } },
+            { sql: `UPDATE supplier_invoices SET supplier_name = @name WHERE supplier_id IS NULL AND lower(trim(COALESCE(supplier_name, ''))) = @from`, params: { name, from: fromName.toLowerCase() } },
+          )
         }
       } else if (config.table === 'delivery_contacts' && nameChanged) {
-        await db.prepare(`UPDATE sales SET delivery_contact_name = @name WHERE delivery_contact_id = @id`).run({ id, name })
+        statements.push({ sql: `UPDATE sales SET delivery_contact_name = @name WHERE delivery_contact_id = @id`, params: { id, name } })
       }
     }
+    if (statements.length) await db.batch(statements)
+    if (config.table === 'suppliers' && nameChanged && snapshotCarry) {
+      await audit(c.env, user?.id ?? null, user?.name ?? null, 'rename', 'supplier_cascade', id, {
+        from: String(current.name || '').trim(),
+        to: name,
+        scope: 'linked_live_records',
+        historical_snapshots_preserved: true,
+      })
+    }
     await audit(c.env, user?.id ?? null, user?.name ?? null, 'update', config.entity, id, { name })
+    const updateVersions: string[] = [config.table]
+    if (nameChanged && snapshotCarry) {
+      if (config.table === 'customers') {
+        updateVersions.push('sales', 'returns')
+      } else if (config.table === 'suppliers') {
+        updateVersions.push('products', 'returns')
+      } else if (config.table === 'delivery_contacts') {
+        updateVersions.push('sales')
+      }
+    }
+    await Promise.all([...new Set(updateVersions)].map((namespace) => bumpVersion(c.env, namespace)))
     c.executionCtx.waitUntil(broadcast(c.env, config.channel, { action: 'update', id }))
-    c.executionCtx.waitUntil(bumpVersion(c.env, config.table))
     const item = await db.prepare(`SELECT * FROM ${config.table} WHERE id = @id`).get({ id })
     // `partial`/`partialFields` are additive -- every existing caller reads
     // specific known fields off this response (id, name, etc.) or just
@@ -1099,8 +1215,8 @@ function registerContactRoutes(config: ContactConfig) {
 
     await db.prepare(`DELETE FROM ${config.table} WHERE id = @id`).run({ id })
     await audit(c.env, user?.id ?? null, user?.name ?? null, 'delete', config.entity, id, { name: current.name })
+    await bumpVersion(c.env, config.table)
     c.executionCtx.waitUntil(broadcast(c.env, config.channel, { action: 'delete', id }))
-    c.executionCtx.waitUntil(bumpVersion(c.env, config.table))
     return c.json({})
   })
 
@@ -1361,7 +1477,10 @@ app.get('/suppliers/reports/stock-in-invoices', async (c) => {
   const db = getDb(c.env)
   const query = c.req.query()
   const page = clampInt(query.page, 1, 1, 100000)
-  const pageSize = clampInt(query.page_size, 15, 1, 25)
+  // Match the shared 20/50/100 pager. The former 25-row ceiling meant the
+  // client could request 50, calculate two pages, but receive only 25 rows
+  // while the API still reported the same filtered total.
+  const pageSize = clampInt(query.page_size, 20, 1, 100)
   const { where, params } = stockInReportFilters(query)
 
   type GroupRow = {
@@ -1865,9 +1984,8 @@ app.get('/customers/link-conflicts', async (c) => {
 // rewrites sale history links, the same class of write as a merge.
 app.post('/customers/link-conflicts/relink', async (c) => {
   const user = c.get('user')
-  if (getPermissionTier(user, 'contacts') !== 'full') {
-    return c.json({ error: 'Relinking sales requires Full Access to Contacts.' }, 403)
-  }
+  const denied = denyUnlessFullContactAction(c, 'resolve_conflicts')
+  if (denied) return denied
   const body = (await c.req.json<Record<string, unknown>>().catch(() => ({}))) as Record<string, unknown>
   const currentId = Number(body.customer_id)
   const phoneKey = String(body.phone_key || '').trim()
@@ -1895,9 +2013,8 @@ app.post('/customers/link-conflicts/relink', async (c) => {
 // or create a new contact from the sale's own name/phone and link to that.
 app.post('/customers/link-conflicts/resolve-missing', async (c) => {
   const user = c.get('user')
-  if (getPermissionTier(user, 'contacts') !== 'full') {
-    return c.json({ error: 'Creating or linking contacts requires Full Access to Contacts.' }, 403)
-  }
+  const denied = denyUnlessFullContactAction(c, 'resolve_conflicts')
+  if (denied) return denied
   const body = (await c.req.json<Record<string, unknown>>().catch(() => ({}))) as Record<string, unknown>
   const name = String(body.name || '').trim()
   const phone = String(body.phone || '').trim()
@@ -1941,6 +2058,8 @@ app.post('/customers/link-conflicts/resolve-missing', async (c) => {
 // dismissal ledger under this feature's own cluster types.
 app.post('/customers/link-conflicts/dismiss', async (c) => {
   const user = c.get('user')
+  const denied = denyUnlessFullContactAction(c, 'resolve_conflicts')
+  if (denied) return denied
   const body = (await c.req.json<Record<string, unknown>>().catch(() => ({}))) as Record<string, unknown>
   const kind = body.kind === 'mismatch' ? 'link_mismatch' : body.kind === 'missing' ? 'link_missing' : null
   const value = String(body.value || '').trim()
@@ -1962,6 +2081,8 @@ app.post('/customers/link-conflicts/dismiss', async (c) => {
 // customer_id|phone_key, missing: lower(name)|phone_key), so an exact-match
 // delete is right here.
 app.post('/customers/link-conflicts/undismiss', async (c) => {
+  const denied = denyUnlessFullContactAction(c, 'resolve_conflicts')
+  if (denied) return denied
   const body = (await c.req.json<Record<string, unknown>>().catch(() => ({}))) as Record<string, unknown>
   const kind = body.kind === 'mismatch' ? 'link_mismatch' : body.kind === 'missing' ? 'link_missing' : null
   const value = String(body.value || '').trim()

@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react'
+import { createPortal } from 'react-dom'
 import X from 'lucide-react/dist/esm/icons/x.js'
 import SupplierPickerField, { type SupplierChoice } from '../../shared/SupplierPickerField.tsx'
 import { backfillProductSupplier } from '../../../api/productWriteTransport.ts'
@@ -90,22 +91,27 @@ export default function AttributeSupplierModal({
     }
   }
 
-  return (
-    <div className="fixed inset-0 z-[70] flex items-end justify-center bg-black/50 p-0 sm:items-center sm:p-4" onClick={onClose}>
+  const modal = (
+    <div className="modal-viewport-safe pointer-events-auto fixed inset-0 z-[1060] flex items-end justify-center overflow-y-auto bg-black/50 sm:items-center" onClick={onClose}>
       <div
-        className="flex max-h-[85vh] w-full flex-col overflow-hidden rounded-t-2xl bg-white shadow-2xl sm:max-h-[80vh] sm:max-w-md sm:rounded-2xl dark:bg-gray-800 pb-[env(safe-area-inset-bottom)] sm:pb-0"
+        className="modal-panel-safe flex w-full flex-col overflow-hidden rounded-t-2xl bg-white shadow-2xl sm:max-w-md sm:rounded-2xl dark:bg-gray-800"
         onClick={(event) => event.stopPropagation()}
       >
         <div className="flex items-center justify-between gap-2 border-b border-gray-200 px-3 py-1.5 dark:border-gray-700">
-          <p className="truncate text-xs font-semibold text-gray-900 dark:text-white">{tr('attribute_supplier', 'Attribute supplier')}</p>
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label={tr('close', 'Close')}
-            className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full text-gray-400 hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-gray-700 dark:hover:text-gray-200"
-          >
-            <X className="h-4 w-4" />
-          </button>
+          <p className="min-w-0 truncate text-xs font-semibold text-gray-900 dark:text-white">{tr('attribute_supplier', 'Attribute supplier')}</p>
+          <div className="flex shrink-0 items-center gap-1">
+            <button type="button" onClick={apply} disabled={!canApply} className="rounded-lg bg-purple-600 px-2.5 py-1.5 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-40 sm:hidden">
+              {busy ? tr('saving', 'Saving...') : tr('attribute', 'Attribute')}
+            </button>
+            <button
+              type="button"
+              onClick={onClose}
+              aria-label={tr('close', 'Close')}
+              className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full text-gray-400 hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-gray-700 dark:hover:text-gray-200"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
         </div>
 
         <div className="min-h-0 flex-1 space-y-2 overflow-auto p-3">
@@ -155,4 +161,7 @@ export default function AttributeSupplierModal({
       </div>
     </div>
   )
+
+  if (typeof document === 'undefined') return modal
+  return createPortal(modal, document.body)
 }

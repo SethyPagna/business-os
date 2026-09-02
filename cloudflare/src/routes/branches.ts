@@ -14,6 +14,15 @@ import { assertUpdatedAtMatch, getExpectedUpdatedAt, writeConflictResponse, Writ
 import { findIdentityMatch, findIdentityMatches, type ProductIdentityRow } from '../lib/productIdentity'
 import { decrementBatchStockStatement, decrementBatchStockStrictStatement, incrementBatchStockStatement, resolveDestinationBatch, readFifoLotAvailability, allocateAcrossLots } from '../lib/productBatches'
 import { branchUpdateStatements } from '../lib/branchWrites'
+import {
+  buildFtsMatchExpression,
+  buildHybridMatchClause,
+  buildPartialWordMatchClause,
+  buildShortWordFallbackClause,
+  buildTrigramMatchExpression,
+  PRODUCT_SEARCH_COLUMNS,
+  tokenizeSearchTermGroups,
+} from '../lib/searchMatch'
 import type { Env } from '../index'
 
 async function sha256Hex(input: string): Promise<string> {
@@ -279,7 +288,7 @@ app.post('/stock-integrity/repair', async (c) => {
 // Destination-side merge resolution: before writing the destination
 // branch_stock row, check whether some OTHER product in the catalog is
 // already the exact same real-world item (findIdentityMatch -- same
-// name_key, cost, selling price, and barcode; see productIdentity.ts).
+// name_key, cost, and barcode; selling price is mergeable; see productIdentity.ts).
 // This is the same identity rule CSV import now uses to decide "same
 // product, just needs a branch_stock row for this branch" vs. "genuinely a
 // different product" (see importEngine.ts's classifyProducts fallback) --
@@ -503,7 +512,7 @@ app.post('/transfer', async (c) => {
 // route above (findIdentityMatches -- batched counterpart of
 // findIdentityMatch, one query for every selected product instead of N):
 // any item whose product is an exact identity match (name_key, cost,
-// price, barcode) for some other product elsewhere in the catalog has its
+// barcode) for some other product elsewhere in the catalog has its
 // destination-side branch_stock, transfer_in movement, and stock_transfers
 // note redirected to that other product, same as the single-item case.
 // The source side is never redirected, for the same reason as /transfer.
@@ -779,19 +788,65 @@ function normalizePositiveInt(value: unknown, fallback: number, { min = 1, max =
   return Math.max(min, Math.min(max, parsed))
 }
 
+// Per-branch stock search (Branches.tsx's per-branch search box, and
+// TransferModal's product picker, both of which hit this endpoint with
+// ?query=) used to be a single `lower(name/sku/barcode/brand/category)
+// LIKE '%query%'` -- a literal, whole-string substring match with no
+// tokenization. Reported bug ("2Medium" search miss, plus "can't search
+// everything"/per-branch search not working): a product stored as e.g.
+// "Medium (2)" or "Size 2 - Medium" never matched typing "2Medium" or
+// "2 Medium" -- and more generally this path never got any of the
+// conjoined/split-word, typo, word-reordering, or diacritic handling
+// routes/products.ts's catalog search already has (see lib/searchMatch.ts's
+// own top-of-file comment for the exact class of input that breaks a bare
+// LIKE). Root cause: this endpoint predates products_fts and was never
+// ported onto it when products.ts/inventory.ts were -- fixed here by
+// reusing the exact same FTS5 + trigram + short-word/partial-word fallback
+// stack products.ts's buildSearchFilters uses, scoped to
+// PRODUCT_SEARCH_COLUMNS (name/sku/barcode) for the same reason products.ts
+// dropped brand/category as free-text dims (see that constant's own
+// comment -- both are already reachable via this page's own filter
+// dropdowns, and stay out of the same-shaped noise problem here too).
 function buildBranchStockWhere(c: any, branchId: number, { includeStockState = true } = {}) {
   const where = ['p.is_active = 1']
   const params: Record<string, unknown> = { branchId }
-  const query = String(c.req.query('query') || c.req.query('q') || '').trim().toLowerCase()
-  if (query) {
-    params.query = `%${query}%`
-    where.push(`(
-      lower(COALESCE(p.name, '')) LIKE @query
-      OR lower(COALESCE(p.sku, '')) LIKE @query
-      OR lower(COALESCE(p.barcode, '')) LIKE @query
-      OR lower(COALESCE(p.brand, '')) LIKE @query
-      OR lower(COALESCE(p.category, '')) LIKE @query
-    )`)
+  const rawQuery = String(c.req.query('query') || c.req.query('q') || '')
+  const searchTermGroups = tokenizeSearchTermGroups(rawQuery, 6, 8)
+  if (searchTermGroups.length) {
+    const searchMode = 'AND'
+    const matchClauses: string[] = []
+    const ftsMatch = buildFtsMatchExpression(searchTermGroups, searchMode, PRODUCT_SEARCH_COLUMNS)
+    if (ftsMatch) {
+      params.ftsQuery = ftsMatch
+      matchClauses.push('p.id IN (SELECT rowid FROM products_fts WHERE products_fts MATCH @ftsQuery)')
+    }
+    // Same expression reused against both trigram tables (barcode/sku
+    // substring, and name substring) -- see products.ts's own call site
+    // comment for why one buildTrigramMatchExpression() call covers both.
+    const trigramMatch = buildTrigramMatchExpression(searchTermGroups, searchMode)
+    if (trigramMatch) {
+      params.codeQuery = trigramMatch
+      matchClauses.push('p.id IN (SELECT rowid FROM products_fts_code WHERE products_fts_code MATCH @codeQuery)')
+      params.nameCodeQuery = trigramMatch
+      matchClauses.push('p.id IN (SELECT rowid FROM products_fts_name_trigram WHERE products_fts_name_trigram MATCH @nameCodeQuery)')
+    }
+    // Mixed-group fallback (a group with both a free-text word and a
+    // barcode-fragment word) -- see buildHybridMatchClause's own comment.
+    const hybridMatch = buildHybridMatchClause(searchTermGroups, searchMode, 'hyb', PRODUCT_SEARCH_COLUMNS)
+    if (hybridMatch) {
+      Object.assign(params, hybridMatch.params)
+      matchClauses.push(hybridMatch.sql)
+    }
+    // Sub-3-character word fallback (FTS5's trigram tokenizer emits no
+    // trigrams below 3 chars) and long-query (4+ word) partial fallback --
+    // both scoped to name_normalized only, same reasoning as products.ts.
+    const shortWordMatch = buildShortWordFallbackClause(searchTermGroups, searchMode, ['p.name_normalized'], params, 'shortw', true)
+    if (shortWordMatch) matchClauses.push(shortWordMatch)
+    const partialMatch = buildPartialWordMatchClause(searchTermGroups, searchMode, ['p.name_normalized'], params, 'partialw', 4, true)
+    if (partialMatch) matchClauses.push(partialMatch)
+    if (matchClauses.length) {
+      where.push(matchClauses.length > 1 ? `(${matchClauses.join(' OR ')})` : matchClauses[0])
+    }
   }
   const stockState = String(c.req.query('stockState') || c.req.query('stock_state') || 'positive').toLowerCase()
   if (includeStockState) {

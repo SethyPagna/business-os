@@ -1,4 +1,5 @@
 import { useEffect, useState, type Dispatch, type SetStateAction } from 'react'
+import { createPortal } from 'react-dom'
 import X from 'lucide-react/dist/esm/icons/x.js'
 import Info from 'lucide-react/dist/esm/icons/info.js'
 import AppSelect, { type AppSelectOption } from '../shared/AppSelect'
@@ -162,6 +163,8 @@ export default function InventoryStockModals({
   usdSymbol,
 }: InventoryStockModalsProps) {
   const addQuantityChoices = [...new Set([1, defaultAddQuantity, 5, 10, 20].filter((n) => n > 0))]
+  const requestedSetTotal = Number(adjustForm.quantity)
+  const setDifference = Number.isFinite(requestedSetTotal) ? requestedSetTotal - adjustCurrentQuantity : null
 
   // Mandatory batch selection, for EVERY target -- group containers
   // included (D4b). The old "flat rows only" exclusion predated the
@@ -254,19 +257,22 @@ export default function InventoryStockModals({
 
   if (!adjustModal && !transferModal) return null
 
-  return (
+  const modals = (
     <>
       {adjustModal ? (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4" onClick={onCloseAdjust}>
-          <div className="bg-white dark:bg-gray-800 rounded-t-2xl sm:rounded-2xl shadow-2xl w-full sm:max-w-md flex flex-col max-h-modal-92" onClick={e => e.stopPropagation()}>
+        <div className="modal-viewport-safe pointer-events-auto fixed inset-0 z-[1050] flex items-end justify-center overflow-y-auto bg-black/50 sm:items-center sm:p-4" onClick={onCloseAdjust}>
+          <div className="modal-panel-safe flex w-full flex-col rounded-t-2xl bg-white shadow-2xl dark:bg-gray-800 sm:max-w-md sm:rounded-2xl" onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-700 flex-shrink-0">
-              <div>
+              <div className="min-w-0">
                 <h2 className="font-bold text-gray-900 dark:text-white">{t('adjust_stock')}</h2>
-                <div className="text-xs text-gray-400 mt-0.5">{adjustModal.name} - Current: {adjustCurrentQuantity} {adjustModal.unit}</div>
+                <div className="truncate text-xs text-gray-400 mt-0.5">{adjustModal.name} - Current: {adjustCurrentQuantity} {adjustModal.unit}</div>
               </div>
-              <button onClick={onCloseAdjust} className="flex h-8 w-8 items-center justify-center text-gray-400 hover:text-gray-600">
-                <X className="h-4 w-4" />
-              </button>
+              <div className="flex shrink-0 items-center gap-1">
+                <button type="button" onClick={onAdjust} className="btn-primary min-h-9 max-w-24 truncate px-3 py-1.5 text-xs sm:hidden" disabled={adjustSaving}>{adjustSaving ? (t('saving') || 'Saving...') : t('save')}</button>
+                <button type="button" onClick={onCloseAdjust} className="flex h-8 w-8 items-center justify-center text-gray-400 hover:text-gray-600" aria-label={t('close') || 'Close'}>
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
             </div>
             <div className="modal-scroll p-4 space-y-3">
               {adjustTargetOptions.length > 1 ? (
@@ -293,7 +299,11 @@ export default function InventoryStockModals({
                 ))}
               </div>
               <div>
-                <label className="text-xs font-medium text-gray-600 dark:text-gray-400 block mb-1">{t('quantity')} *</label>
+                <label className="text-xs font-medium text-gray-600 dark:text-gray-400 block mb-1">
+                  {adjustForm.type === 'set'
+                    ? `${t('adjust_set') || 'Set'} ${t('stock') || 'Stock'} (${t('total') || 'Total'}) *`
+                    : `${t('quantity') || 'Quantity'} *`}
+                </label>
                 <input
                   id="inventory-adjust-quantity"
                   name="inventory_adjust_quantity"
@@ -303,6 +313,11 @@ export default function InventoryStockModals({
                   min="0"
                   value={adjustForm.quantity}
                   onChange={e => setAdjustForm(f=>({...f, quantity:e.target.value}))} />
+                {adjustForm.type === 'set' && setDifference != null ? (
+                  <div className="mt-1 text-[11px] tabular-nums text-gray-500 dark:text-gray-400">
+                    {t('current_stock') || 'Current stock'}: {adjustCurrentQuantity} → {t('total') || 'Total'}: {requestedSetTotal} (Δ {setDifference >= 0 ? '+' : ''}{setDifference})
+                  </div>
+                ) : null}
                 <div className="mt-1.5 flex flex-wrap gap-1">
                   {addQuantityChoices.map((n) => (
                     <button
@@ -522,7 +537,7 @@ export default function InventoryStockModals({
                   placeholder={t('reason_placeholder')}
                   value={adjustForm.reason} onChange={e => setAdjustForm(f=>({...f, reason:e.target.value}))} />
               </div>
-              <div className="flex gap-2 pt-1">
+              <div className="hidden gap-2 pt-1 sm:flex">
                 <button onClick={onAdjust} className="btn-primary flex-1 text-sm" disabled={adjustSaving}>{adjustSaving ? (t('saving') || 'Saving...') : t('save')}</button>
                 <button onClick={onCloseAdjust} className="btn-secondary text-sm" disabled={adjustSaving}>{t('cancel')}</button>
               </div>
@@ -532,16 +547,19 @@ export default function InventoryStockModals({
       ) : null}
 
       {transferModal ? (
-        <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-0 sm:items-center sm:p-4" onClick={onCloseTransfer}>
-          <div className="flex max-h-modal-92 w-full flex-col rounded-t-2xl bg-white shadow-2xl dark:bg-gray-800 sm:max-w-md sm:rounded-2xl" onClick={(event) => event.stopPropagation()}>
+        <div className="modal-viewport-safe pointer-events-auto fixed inset-0 z-[1050] flex items-end justify-center overflow-y-auto bg-black/50 sm:items-center sm:p-4" onClick={onCloseTransfer}>
+          <div className="modal-panel-safe flex w-full flex-col rounded-t-2xl bg-white shadow-2xl dark:bg-gray-800 sm:max-w-md sm:rounded-2xl" onClick={(event) => event.stopPropagation()}>
             <div className="flex items-center justify-between border-b border-gray-200 p-4 dark:border-gray-700">
-              <div>
+              <div className="min-w-0">
                 <h2 className="font-bold text-gray-900 dark:text-white">{tr('transfer', 'Transfer')}</h2>
-                <div className="mt-0.5 text-xs text-gray-400">{transferModal.name} - {getStockQty(transferModal)} {transferModal.unit}</div>
+                <div className="mt-0.5 truncate text-xs text-gray-400">{transferModal.name} - {getStockQty(transferModal)} {transferModal.unit}</div>
               </div>
-              <button type="button" onClick={onCloseTransfer} className="flex h-8 w-8 items-center justify-center text-gray-400 hover:text-gray-600" aria-label={t('close') || 'Close'}>
-                <X className="h-4 w-4" />
-              </button>
+              <div className="flex shrink-0 items-center gap-1">
+                <button type="button" onClick={onTransfer} className="btn-primary min-h-9 max-w-24 truncate px-3 py-1.5 text-xs sm:hidden" disabled={transferSaving}>{transferSaving ? (t('saving') || 'Saving...') : tr('transfer', 'Transfer')}</button>
+                <button type="button" onClick={onCloseTransfer} className="flex h-8 w-8 items-center justify-center text-gray-400 hover:text-gray-600" aria-label={t('close') || 'Close'}>
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
             </div>
             <div className="modal-scroll space-y-3 p-4">
               <label className="block">
@@ -597,7 +615,7 @@ export default function InventoryStockModals({
                 ) : null}
                 <textarea className="input min-h-[84px] text-sm" value={transferForm.reason} onChange={(event) => setTransferForm((current) => ({ ...current, reason: event.target.value }))} placeholder={tr('transfer_reason_placeholder')} />
               </label>
-              <div className="flex gap-2 pt-1">
+              <div className="hidden gap-2 pt-1 sm:flex">
                 <button type="button" onClick={onTransfer} className="btn-primary flex-1 text-sm" disabled={transferSaving}>
                   {transferSaving ? (t('saving') || 'Saving...') : tr('transfer', 'Transfer')}
                 </button>
@@ -612,4 +630,7 @@ export default function InventoryStockModals({
 
     </>
   )
+
+  if (typeof document === 'undefined') return modals
+  return createPortal(modals, document.body)
 }

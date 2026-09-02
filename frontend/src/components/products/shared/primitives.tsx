@@ -222,13 +222,13 @@ function DualPriceInput({ labelUsd, labelKhr, valueUsd, valueKhr, onUsdChange, o
   const handleKhrChange = (val: string) => onKhrChange(sanitizeNumericInput(val))
 
   return (
-    <div className="grid grid-cols-2 gap-2">
-      <div>
+    <div className="grid min-w-0 grid-cols-1 gap-2 min-[420px]:grid-cols-2">
+      <div className="min-w-0">
         <label className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{labelUsd} ({usdSymbol})</label>
         <div className="relative">
           <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-gray-400">{usdSymbol}</span>
           <input
-            className="input pl-7"
+            className="input min-h-11 min-w-0 pl-7"
             type="text"
             inputMode="decimal"
             autoComplete="off"
@@ -238,11 +238,11 @@ function DualPriceInput({ labelUsd, labelKhr, valueUsd, valueKhr, onUsdChange, o
           />
         </div>
       </div>
-      <div>
+      <div className="min-w-0">
         <label className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{labelKhr} ({khrSymbol})</label>
         <div className="relative">
           <input
-            className="input pr-7"
+            className="input min-h-11 min-w-0 pr-7"
             type="text"
             inputMode="decimal"
             autoComplete="off"

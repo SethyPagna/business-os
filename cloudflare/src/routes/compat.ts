@@ -3,15 +3,16 @@ import { getDb } from '../lib/db'
 import { requireAuth } from '../lib/auth'
 import type { Env } from '../index'
 import { getSystemJob, listCloudflareBackups, listSystemJobs, storeSystemJob } from '../lib/backup'
-import { buildDriveOauthStartUrl, completeDriveOauth, disconnectDrive, driveSyncStatus, pushBackupToDrive, updateDrivePreferences } from '../lib/googleDrive'
+import { buildDriveOauthStartUrl, completeDriveOauth, consumeDriveOauthState, disconnectDrive, driveSyncStatus, updateDrivePreferences } from '../lib/googleDrive'
+import { enqueueDriveRestoreStageJob, enqueueDriveSyncJob } from '../lib/driveSyncQueue'
 import { hasPermission, hasAnyPermission, isAdminControlUser, getPermissionTier } from '../lib/permissions'
 import { audit } from '../lib/audit'
 import { buildAuditLogFilters } from '../lib/auditLogQuery'
 import { putObject, getObject, deleteObject } from '../lib/r2'
 import { getGoogleLoginPublicConfig } from '../lib/googleOauth'
-import { getSalesTotals, getSalesPeriodSeries, previousPeriodFilters } from '../lib/salesAnalytics'
+import { CUSTOMER_REFUND_JOIN, getSalesTotals, getSalesPeriodSeries, netSaleExpr, previousPeriodFilters, recognizedExpr } from '../lib/salesAnalytics'
 import { getFamilyStockStats } from '../lib/familyStockStats'
-import { businessToday, localDateAtOrAfter, localDateAtOrBefore, localDateRangeClause, localTodayRangeClause, localHourExpr } from '../lib/businessDateWindow'
+import { businessToday, localDateAtOrAfter, localDateAtOrBefore, localDateRangeClause, localTodayRangeClause, localHourExpr, localTimeRangeClause } from '../lib/businessDateWindow'
 
 const app = new Hono<{ Bindings: Env; Variables: { user: any } }>()
 
@@ -141,6 +142,20 @@ function num(value: unknown): number {
   return Number.isFinite(n) ? n : 0
 }
 
+function saleItemCount(value: unknown): number {
+  let rows: unknown = value
+  if (typeof rows === 'string') {
+    try { rows = JSON.parse(rows) } catch { return 0 }
+  }
+  if (!Array.isArray(rows)) return 0
+  return rows.reduce((total, item) => {
+    if (!item || typeof item !== 'object') return total
+    const row = item as Record<string, unknown>
+    const quantity = num(row.quantity ?? row.qty ?? 1)
+    return total + Math.max(0, quantity)
+  }, 0)
+}
+
 function clampInt(value: unknown, fallback: number, min: number, max: number): number {
   const n = Number.parseInt(String(value ?? ''), 10)
   if (!Number.isFinite(n)) return fallback
@@ -209,7 +224,7 @@ async function dashboardSummary(env: Env) {
   // -- previously a flat COUNT(*)/SUM() here counted every variant row (and
   // group-header placeholder rows) individually, overcounting vs. those
   // listing pages whenever grouped products existed.
-  const [todaySales, allSales, todayReturns, inventory, lowStock, outOfStock, expiring, recentSales] = await Promise.all([
+  const [todaySales, allSales, todayReturns, inventory, lowStock, outOfStock, expiring, expiringCount, recentSales] = await Promise.all([
     db.prepare(`
       SELECT COUNT(*) AS count, COALESCE(SUM(total_usd), 0) AS total_usd, COALESCE(SUM(total_khr), 0) AS total_khr
       FROM sales
@@ -254,7 +269,12 @@ async function dashboardSummary(env: Env) {
       LIMIT 10
     `).all({}),
     db.prepare(`
-      SELECT id, receipt_number, created_at, sale_status, branch_name, customer_name, total_usd, total_khr, items
+      SELECT COUNT(*) AS count
+      FROM products
+      WHERE is_active = 1 AND expiry_date IS NOT NULL AND date(expiry_date) <= date('now', '+' || COALESCE(expiry_alert_days, 30) || ' day')
+    `).get({}),
+    db.prepare(`
+      SELECT id, receipt_number, created_at, sale_status, branch_name, customer_name, cashier_name, total_usd, total_khr, items
       FROM sales
       ORDER BY created_at DESC, id DESC
       LIMIT 10
@@ -279,8 +299,11 @@ async function dashboardSummary(env: Env) {
     low_stock: lowStock || [],
     out_of_stock: outOfStock || [],
     expiring_products: expiring || [],
-    expiring_count: (expiring || []).length,
-    recent_sales: recentSales || [],
+    expiring_count: num((expiringCount as Record<string, unknown>)?.count),
+    recent_sales: (recentSales || []).map((sale) => ({
+      ...sale,
+      item_count: saleItemCount((sale as Record<string, unknown>).items),
+    })),
   }
 }
 
@@ -289,6 +312,14 @@ async function dashboardAnalytics(env: Env, query: Record<string, string>) {
   const { startDate, endDate, granularity } = dateRange(query)
   const params = { startDate, endDate }
   const filters = { startDate, endDate, branchId: query.branchId || null }
+  const analyticsParams = filters.branchId ? { ...params, branchId: filters.branchId } : params
+  const branchClause = (alias: string) => filters.branchId ? ` AND ${alias}.branch_id = @branchId` : ''
+  const activeSalesClause = (alias: string) => `${localDateRangeClause(`${alias}.created_at`)} AND ${recognizedExpr(`${alias}.`)}${branchClause(alias)}`
+  const attributedLineRevenue = `CASE
+    WHEN COALESCE(s.subtotal_usd, 0) > 0
+      THEN COALESCE(si.total_usd, 0) / s.subtotal_usd * (${netSaleExpr('s.')} - COALESCE(rf.refund_usd, 0))
+    ELSE 0
+  END`
   const [
     totals,
     prevTotals,
@@ -306,78 +337,92 @@ async function dashboardAnalytics(env: Env, query: Record<string, string>) {
     getSalesTotals(env, previousPeriodFilters(filters)),
     getSalesPeriodSeries(env, filters, granularity as 'day' | 'week' | 'month'),
     db.prepare(`
-      SELECT COUNT(*) AS count, COALESCE(SUM(total_refund_usd), 0) AS refund_usd
-      FROM returns
-      WHERE ${localDateRangeClause('created_at')}
-        AND COALESCE(status, 'completed') <> 'cancelled'
-    `).get(params),
+      WITH matching_returns AS (
+        SELECT r.id, r.total_refund_usd
+        FROM returns r
+        WHERE ${localDateRangeClause('r.created_at')}
+          AND COALESCE(r.return_scope, 'customer') = 'customer'
+          AND COALESCE(r.status, 'completed') <> 'cancelled'${branchClause('r')}
+      )
+      SELECT COUNT(*) AS return_count,
+             COALESCE(SUM(total_refund_usd), 0) AS refund_usd,
+             COALESCE((SELECT SUM(ri.quantity) FROM return_items ri JOIN matching_returns mr2 ON mr2.id = ri.return_id), 0) AS items_returned
+      FROM matching_returns
+    `).get(analyticsParams),
     db.prepare(`
-      SELECT COUNT(*) AS count, COALESCE(SUM(supplier_compensation_usd), 0) AS supplier_compensation_usd,
-             COALESCE(SUM(supplier_loss_usd), 0) AS supplier_loss_usd
-      FROM returns
-      WHERE ${localDateRangeClause('created_at')}
-        AND COALESCE(return_scope, 'customer') = 'supplier'
-        AND COALESCE(status, 'completed') <> 'cancelled'
-    `).get(params),
+      SELECT COUNT(*) AS return_count,
+             COALESCE(SUM(r.supplier_compensation_usd), 0) AS supplier_compensation_usd,
+             COALESCE(SUM(r.supplier_loss_usd), 0) AS loss_usd
+      FROM returns r
+      WHERE ${localDateRangeClause('r.created_at')}
+        AND COALESCE(r.return_scope, 'customer') = 'supplier'
+        AND COALESCE(r.status, 'completed') <> 'cancelled'${branchClause('r')}
+    `).get(analyticsParams),
     db.prepare(`
-      SELECT COALESCE(payment_method, 'Unknown') AS method, COALESCE(payment_method, 'Unknown') AS payment_method,
-             COUNT(*) AS count, COALESCE(SUM(total_usd), 0) AS revenue_usd
-      FROM sales
-      WHERE ${localDateRangeClause('created_at')}
-        AND COALESCE(sale_status, 'completed') <> 'cancelled'
-      GROUP BY COALESCE(payment_method, 'Unknown')
+      SELECT COALESCE(NULLIF(TRIM(s.payment_method), ''), 'Unknown') AS method,
+             COALESCE(NULLIF(TRIM(s.payment_method), ''), 'Unknown') AS payment_method,
+             COUNT(*) AS count,
+             COALESCE(SUM(${netSaleExpr('s.')} - COALESCE(rf.refund_usd, 0)), 0) AS revenue_usd
+      FROM sales s
+      ${CUSTOMER_REFUND_JOIN}s.id
+      WHERE ${activeSalesClause('s')}
+      GROUP BY COALESCE(NULLIF(TRIM(s.payment_method), ''), 'Unknown')
       ORDER BY revenue_usd DESC
-    `).all(params),
+    `).all(analyticsParams),
     db.prepare(`
-      SELECT branch_id, COALESCE(branch_name, 'Unassigned') AS branch_name,
-             COUNT(*) AS tx_count, COUNT(*) AS count, COALESCE(SUM(total_usd), 0) AS revenue_usd
-      FROM sales
-      WHERE ${localDateRangeClause('created_at')}
-        AND COALESCE(sale_status, 'completed') <> 'cancelled'
-      GROUP BY branch_id, COALESCE(branch_name, 'Unassigned')
+      SELECT s.branch_id, COALESCE(s.branch_name, 'Unassigned') AS branch_name,
+             COUNT(*) AS tx_count, COUNT(*) AS count,
+             COALESCE(SUM(${netSaleExpr('s.')} - COALESCE(rf.refund_usd, 0)), 0) AS revenue_usd
+      FROM sales s
+      ${CUSTOMER_REFUND_JOIN}s.id
+      WHERE ${activeSalesClause('s')}
+      GROUP BY s.branch_id, COALESCE(s.branch_name, 'Unassigned')
       ORDER BY revenue_usd DESC
-    `).all(params),
+    `).all(analyticsParams),
     db.prepare(`
-      SELECT si.product_id, si.product_name, SUM(si.quantity) AS qty_sold, SUM(si.total_usd) AS revenue_usd
+      SELECT si.product_id, si.product_name, SUM(si.quantity) AS qty_sold,
+             COALESCE(SUM(${attributedLineRevenue}), 0) AS revenue_usd
       FROM sale_items si
       JOIN sales s ON s.id = si.sale_id
-      WHERE ${localDateRangeClause('s.created_at')}
-        AND COALESCE(s.sale_status, 'completed') <> 'cancelled'
+      ${CUSTOMER_REFUND_JOIN}s.id
+      WHERE ${activeSalesClause('s')}
       GROUP BY si.product_id, si.product_name
       ORDER BY revenue_usd DESC
       LIMIT 20
-    `).all(params),
+    `).all(analyticsParams),
     db.prepare(`
-      SELECT si.product_id, si.product_name, SUM(si.quantity) AS qty_sold, SUM(si.total_usd) AS revenue_usd
+      SELECT si.product_id, si.product_name, SUM(si.quantity) AS qty_sold,
+             COALESCE(SUM(${attributedLineRevenue}), 0) AS revenue_usd
       FROM sale_items si
       JOIN sales s ON s.id = si.sale_id
-      WHERE ${localDateRangeClause('s.created_at')}
-        AND COALESCE(s.sale_status, 'completed') <> 'cancelled'
+      ${CUSTOMER_REFUND_JOIN}s.id
+      WHERE ${activeSalesClause('s')}
       GROUP BY si.product_id, si.product_name
       ORDER BY qty_sold DESC
       LIMIT 20
-    `).all(params),
+    `).all(analyticsParams),
     db.prepare(`
-      SELECT COALESCE(customer_name, 'Walk-in') AS customer_name, COUNT(*) AS sale_count,
-             COALESCE(SUM(subtotal_usd), 0) AS gross_revenue_usd,
-             COALESCE(SUM(discount_usd), 0) AS store_discount_usd,
-             COALESCE(SUM(membership_discount_usd), 0) AS membership_discount_usd,
-             COALESCE(SUM(subtotal_usd) - SUM(discount_usd) - SUM(membership_discount_usd), 0) AS net_revenue_usd
-      FROM sales
-      WHERE ${localDateRangeClause('created_at')}
-        AND COALESCE(sale_status, 'completed') <> 'cancelled'
-      GROUP BY COALESCE(customer_name, 'Walk-in')
+      SELECT COALESCE(NULLIF(TRIM(s.customer_name), ''), 'Walk-in') AS customer_name, COUNT(*) AS sale_count,
+             COALESCE(SUM(s.subtotal_usd), 0) AS gross_revenue_usd,
+             COALESCE(SUM(s.discount_usd), 0) AS store_discount_usd,
+             COALESCE(SUM(s.membership_discount_usd), 0) AS membership_discount_usd,
+             COALESCE(SUM(${netSaleExpr('s.')} - COALESCE(rf.refund_usd, 0)), 0) AS net_revenue_usd
+      FROM sales s
+      ${CUSTOMER_REFUND_JOIN}s.id
+      WHERE ${activeSalesClause('s')}
+      GROUP BY COALESCE(NULLIF(TRIM(s.customer_name), ''), 'Walk-in')
       ORDER BY net_revenue_usd DESC
       LIMIT 20
-    `).all(params),
+    `).all(analyticsParams),
     db.prepare(`
-      SELECT CAST(${localHourExpr('created_at')} AS INTEGER) AS hour, COUNT(*) AS count, COALESCE(SUM(total_usd), 0) AS revenue_usd
-      FROM sales
-      WHERE ${localDateRangeClause('created_at')}
-        AND COALESCE(sale_status, 'completed') <> 'cancelled'
-      GROUP BY CAST(${localHourExpr('created_at')} AS INTEGER)
+      SELECT CAST(${localHourExpr('s.created_at')} AS INTEGER) AS hour, COUNT(*) AS count,
+             COALESCE(SUM(${netSaleExpr('s.')} - COALESCE(rf.refund_usd, 0)), 0) AS revenue_usd
+      FROM sales s
+      ${CUSTOMER_REFUND_JOIN}s.id
+      WHERE ${activeSalesClause('s')}
+      GROUP BY CAST(${localHourExpr('s.created_at')} AS INTEGER)
       ORDER BY hour ASC
-    `).all(params),
+    `).all(analyticsParams),
   ])
   return {
     totals: totals || {},
@@ -836,28 +881,54 @@ app.post('/system/drive-sync/preferences', requireAuth, async (c) => {
   const body = (await c.req.json<Record<string, unknown>>().catch(() => ({}))) as Record<string, unknown>
   return c.json(await updateDrivePreferences(c.env, body))
 })
-app.post('/system/drive-sync/oauth/start', requireAuth, (c) => {
+app.post('/system/drive-sync/oauth/start', requireAuth, async (c) => {
   const denied = denyUnless(c, 'settings')
   if (denied) return denied
-  const result = buildDriveOauthStartUrl(c.env)
+  const body = await c.req.json<Record<string, unknown>>().catch(() => ({} as Record<string, unknown>))
+  const result = await buildDriveOauthStartUrl(c.env, {
+    userId: Number(c.get('user')?.id || 0),
+    returnOrigin: body.returnOrigin,
+    returnPath: body.returnPath,
+  })
   if (!result.success) return c.json({ error: result.error }, 400)
   return c.json({ url: result.url })
 })
+
+function driveOauthCallbackHtml({ targetUrl, message, status }: { targetUrl: string; message: string; status: 'connected' | 'error' }): string {
+  const parsedTarget = new URL(targetUrl)
+  parsedTarget.searchParams.set('drive_sync', status)
+  const safeJson = (value: unknown) => JSON.stringify(value).replace(/</g, '\\u003c')
+  const payload = safeJson({ type: 'business-os-drive-sync', status, message })
+  const targetOrigin = safeJson(parsedTarget.origin)
+  const fallbackUrl = safeJson(parsedTarget.toString())
+  // The popup is opened by Backup.tsx without `noopener` so it can report
+  // completion to that exact opener. targetOrigin is never `*`; the opener
+  // validates both origin and source before accepting this message. A
+  // same-tab (popup-blocked) OAuth flow has no opener and safely redirects.
+  return `<!doctype html><html><body><p id="message"></p><script>(function(){const payload=${payload};const targetOrigin=${targetOrigin};document.getElementById('message').textContent=payload.message;try{if(window.opener&&!window.opener.closed){window.opener.postMessage(payload,targetOrigin);window.close();return}}catch(_){ }setTimeout(function(){location.replace(${fallbackUrl})},400)})()</script></body></html>`
+}
+
 app.get('/system/drive-sync/oauth/callback', async (c) => {
   const code = c.req.query('code')
   const error = c.req.query('error')
+  const stateResult = await consumeDriveOauthState(c.env, c.req.query('state'))
   const adminUrl = c.env.BUSINESS_OS_ADMIN_URL.replace(/\/$/, '')
-  const redirectTarget = `${adminUrl}/?settings=integrations&drive_sync=`
+  const stateTargetUrl = stateResult.success && stateResult.payload
+    ? `${stateResult.payload.returnOrigin}${stateResult.payload.returnPath}`
+    : `${adminUrl}/?settings=integrations`
+  if (!stateResult.success) {
+    return c.html(driveOauthCallbackHtml({ targetUrl: stateTargetUrl, message: stateResult.error || 'Google Drive connection expired. Please try again.', status: 'error' }), 400)
+  }
   if (error) {
-    return c.html(`<!doctype html><html><body>Google Drive connection was cancelled or denied.<script>setTimeout(function(){location.replace(${JSON.stringify(redirectTarget)}+'error')},400)</script></body></html>`, 400)
+    return c.html(driveOauthCallbackHtml({ targetUrl: stateTargetUrl, message: 'Google Drive connection was cancelled or denied.', status: 'error' }), 400)
   }
   if (!code) {
-    return c.html('<!doctype html><html><body>Missing authorization code from Google.</body></html>', 400)
+    return c.html(driveOauthCallbackHtml({ targetUrl: stateTargetUrl, message: 'Missing authorization code from Google.', status: 'error' }), 400)
   }
-  const result = await completeDriveOauth(c.env, code)
+  const result = await completeDriveOauth(c.env, code, stateResult.payload?.codeVerifier || '')
   const status = result.success ? 'connected' : 'error'
   const message = result.success ? 'Google Drive connected. You can close this window.' : (result.error || 'Failed to connect Google Drive.')
-  return c.html(`<!doctype html><html><body>${message}<script>try{window.opener&&window.opener.postMessage({type:'business-os-drive-oauth',success:${result.success}},'*')}catch(e){}setTimeout(function(){ if(window.opener){window.close()} else {location.replace(${JSON.stringify(redirectTarget)}+${JSON.stringify(status)})} },400)</script></body></html>`, result.success ? 200 : 400)
+  return c.html(driveOauthCallbackHtml({ targetUrl: stateTargetUrl, message, status }), result.success ? 200 : 400)
 })
 app.post('/system/drive-sync/disconnect', requireAuth, async (c) => {
   const denied = denyUnless(c, 'settings')
@@ -874,15 +945,33 @@ app.post('/system/drive-sync/forget-credentials', requireAuth, async (c) => {
 app.post('/system/drive-sync/jobs', requireAuth, async (c) => {
   const denied = denyUnless(c, 'backup', 'settings')
   if (denied) return denied
-  const result = await pushBackupToDrive(c.env)
-  const job = await storeSystemJob(c.env, {
-    id: crypto.randomUUID(),
-    status: result.success ? 'completed' : 'failed',
-    progress: 100,
-    message: result.success ? `Uploaded ${result.fileName} to Google Drive.` : (result.error || 'Google Drive sync failed.'),
-    error: result.success ? null : (result.error || 'Google Drive sync failed.'),
-  })
-  return c.json({ job_id: job.id, item: job }, result.success ? 200 : 400)
+  try {
+    const job = await enqueueDriveSyncJob(c.env, 'manual')
+    return c.json({ job_id: job.id, item: job }, 202)
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Could not queue Google Drive sync.'
+    return c.json({ error: message }, 503)
+  }
+})
+// Recovery is deliberately two-step. This endpoint only stages and validates
+// a Drive manifest in R2; it never calls the destructive D1 restore. The
+// returned backupKey can then be reviewed through the existing backup flow.
+app.post('/system/drive-sync/restore-stage/jobs', requireAuth, async (c) => {
+  const user = c.get('user')
+  if (!hasPermission(user, 'backup_restore')) {
+    return c.json({ error: 'You do not have permission to perform this action' }, 403)
+  }
+  try {
+    const job = await enqueueDriveRestoreStageJob(c.env)
+    await audit(c.env, Number(user?.id || 0), user?.username || null, 'create', 'backup', 'google-drive-restore-stage', {
+      job_id: job.id,
+      destructive_restore: false,
+    })
+    return c.json({ job_id: job.id, item: job }, 202)
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Could not queue Google Drive restore staging.'
+    return c.json({ error: message }, 503)
+  }
 })
 app.get('/system/jobs', requireAuth, async (c) => {
   const denied = denyUnless(c, 'backup', 'settings')
@@ -941,8 +1030,13 @@ app.get('/import-jobs/:id/review', async (c) => {
 // authenticated account (e.g. a cashier-only role) should not read it
 // either. Matches this file's own denyUnless() pattern used by /dashboard.
 app.get('/transfers', async (c) => {
-  const denied = denyUnless(c, 'inventory', 'branches')
-  if (denied) return denied
+  const user = c.get('user')
+  // Transfer history is a read surface shared by Inventory and Branches.
+  // Review-tier users may read both parent pages, so requiring a strict Full
+  // grant here made the history panel fail with 403 after the page opened.
+  if (getPermissionTier(user, 'inventory') === 'none' && getPermissionTier(user, 'branches') === 'none') {
+    return c.json({ error: 'You do not have permission to perform this action' }, 403)
+  }
 
   const query = c.req.query()
   const startDate = String(query.startDate || '').trim()
@@ -962,6 +1056,18 @@ app.get('/transfers', async (c) => {
   if (/^\d{4}-\d{2}-\d{2}$/.test(endDate)) {
     clauses.push(localDateAtOrBefore('st.created_at'))
     bindings.endDate = endDate
+  }
+  // Optional local (UTC+7) wall-clock bound, ADDITIONAL to the calendar-day
+  // bound above -- same "date and time range" picker/route pattern
+  // sales.ts's appendLocalTimeRange already uses. Both start/end must be
+  // present and valid to take effect.
+  const LOCAL_TIME_RE = /^(?:[01]\d|2[0-3]):[0-5]\d$/
+  const startTime = String(query.startTime || '').trim()
+  const endTime = String(query.endTime || '').trim()
+  if (LOCAL_TIME_RE.test(startTime) && LOCAL_TIME_RE.test(endTime)) {
+    clauses.push(localTimeRangeClause('st.created_at'))
+    bindings.startTime = startTime
+    bindings.endTime = endTime
   }
   if (fromBranchId && /^\d+$/.test(fromBranchId)) {
     clauses.push('st.from_branch_id = @fromBranchId')

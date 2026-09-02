@@ -6,7 +6,7 @@ import HandCoins from 'lucide-react/dist/esm/icons/hand-coins.js'
 import ChevronDown from 'lucide-react/dist/esm/icons/chevron-down.js'
 import Check from 'lucide-react/dist/esm/icons/check.js'
 import { useApp as useAppHook } from '../../AppContext.tsx'
-import DateTimeRangePicker, { EMPTY_DATE_TIME_RANGE, type DateTimeRange } from '../shared/DateTimeRangePicker.tsx'
+import DateTimeRangePicker, { todayDateTimeRange, type DateTimeRange } from '../shared/DateTimeRangePicker.tsx'
 import AppSelect, { type AppSelectOption } from '../shared/AppSelect.tsx'
 import LazyPortalMenu from '../shared/LazyPortalMenu'
 import { makeReportMoneyFormatter } from '../../utils/reportMoney.ts'
@@ -55,7 +55,9 @@ export default function ReportsHub({ embedded = false }: { embedded?: boolean })
     canFees ? { id: 'fees' as const, label: trh('fees', 'Expenses'), icon: HandCoins } : null,
   ].filter(Boolean) as Array<{ id: ReportType; label: string; icon: ComponentType<{ className?: string }> }>), [canSales, canReturns, canFees, t]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  const [range, setRange] = useState<DateTimeRange>(() => ({ ...EMPTY_DATE_TIME_RANGE }))
+  // An empty range left the Expenses report without an actionable initial
+  // request. Today gives every report a concrete, business-time scope.
+  const [range, setRange] = useState<DateTimeRange>(() => todayDateTimeRange())
   const [branchFilter, setBranchFilter] = useState('')
   const [branches, setBranches] = useState<BranchOption[]>([])
   // SINGLE-select with an explicit "All" chip (user, Aug 30: "instead of
@@ -109,7 +111,7 @@ export default function ReportsHub({ embedded = false }: { embedded?: boolean })
   const SelectedIcon = selectedChip.icon
 
   return (
-    <div className={`${embedded ? '' : 'page-scroll '}flex flex-col space-y-3 p-3 sm:p-6`}>
+    <div className={`${embedded ? '' : 'page-scroll '}flex w-full min-w-0 flex-col space-y-3 p-3 sm:p-6`}>
       {/* ONE shared control row: range + the "view by" dropdown + branch, all
           on a single row (user, Aug 31: "the options view by can be into one
           button to expand then choose"). The type picker used to spill four
@@ -118,7 +120,7 @@ export default function ReportsHub({ embedded = false }: { embedded?: boolean })
           a view never reflows the rows below it ("a float above layer so it
           doesn't push down other details"). The branch select rides the same
           row and ellipsizes long names. */}
-      <div className="sticky top-0 z-20 -mx-1 flex flex-wrap items-center gap-1.5 bg-gray-50/95 px-1 py-1 backdrop-blur dark:bg-gray-900/95">
+      <div className="sticky top-0 z-20 -mx-1 flex min-w-0 flex-wrap items-center gap-1.5 bg-gray-50/95 px-1 py-1 backdrop-blur dark:bg-gray-900/95">
         <DateTimeRangePicker value={range} onChange={setRange} t={t} showTime={selectedType === 'sales'} />
         <LazyPortalMenu
           align="auto"
@@ -149,7 +151,7 @@ export default function ReportsHub({ embedded = false }: { embedded?: boolean })
             options={branchOptions}
             onChange={setBranchFilter}
             ariaLabel={trh('branch', 'Branch')}
-            buttonClassName="ml-auto max-w-[9rem] truncate py-1 text-xs"
+            buttonClassName="w-full min-w-0 py-1 text-xs sm:ml-auto sm:w-auto sm:max-w-[9rem]"
           />
         ) : null}
       </div>
@@ -165,7 +167,7 @@ export default function ReportsHub({ embedded = false }: { embedded?: boolean })
         // De-carded (user, Aug 30: inner wraps keep top/bottom hairlines,
         // drop the side border + padding so content gets the full width).
         return (
-          <section key={id} className="space-y-2 border-y border-slate-200 py-2.5 dark:border-slate-800">
+          <section key={id} className="min-w-0 space-y-2 border-y border-slate-200 py-2.5 dark:border-slate-800">
             {id === 'sales' ? (
               <SalesDailyReport t={t} fmtMoney={fmtMoney} range={range} onRangeChange={setRange} branchId={branchId} embedded active titleNode={titleNode} />
             ) : id === 'returns' ? (

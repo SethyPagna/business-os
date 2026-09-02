@@ -439,7 +439,7 @@ export default function StockAdjustModal({ initialType = 'add', initialProduct =
                 autoFocus
               />
             </div>
-            <ScanSearchButton onDetected={setSearch} t={t} showLabel />
+            <ScanSearchButton onDetected={setSearch} t={t} />
           </div>
           {searching && !results.length ? (
             <div className="py-6 text-center text-sm text-gray-400">{t('loading')}</div>

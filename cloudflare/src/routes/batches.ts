@@ -168,14 +168,30 @@ app.post('/', async (c) => {
   // other stock addition, so this doesn't become a receipt that's visible
   // in the batch ledger and the audit log but invisible in Stock History.
   await db.prepare(`
-    INSERT INTO inventory_movements (product_id, product_name, branch_id, branch_name, movement_type, quantity, reason, reference_id, user_id, user_name, created_at, batch_id)
-    VALUES (@productId, @productName, @branchId, @branchName, 'add', @quantity, @reason, @referenceId, @userId, @userName, CURRENT_TIMESTAMP, @batchId)
+    INSERT INTO inventory_movements (
+      product_id, product_name, branch_id, branch_name, movement_type, quantity,
+      unit_cost_usd, total_cost_usd, reason, reference_id, user_id, user_name,
+      created_at, batch_id
+    )
+    VALUES (
+      @productId, @productName, @branchId, @branchName, 'add', @quantity,
+      @unitCostUsd, @totalCostUsd, @reason, @referenceId, @userId, @userName,
+      CURRENT_TIMESTAMP, @batchId
+    )
   `).run({
     productId,
     productName: product.name,
     branchId,
     branchName: branch?.name || null,
     quantity,
+    // A receipt's money belongs to this movement, not only to the cumulative
+    // lot row. Same-day top-ups can share one product_batches row while
+    // carrying different costs; movement snapshots let Stock-in Sessions
+    // report each receipt accurately without mutating the product's cost.
+    unitCostUsd: Number.isFinite(Number(body.unit_cost_usd)) && Number(body.unit_cost_usd) >= 0 ? Number(body.unit_cost_usd) : null,
+    totalCostUsd: Number.isFinite(Number(body.unit_cost_usd)) && Number(body.unit_cost_usd) >= 0
+      ? Math.round(Number(body.unit_cost_usd) * quantity * 10000) / 10000
+      : null,
     reason: `Batch receipt (${lotCode})`,
     referenceId: Number.isSafeInteger(Number(body.session_id)) && Number(body.session_id) > 0 ? Number(body.session_id) : null,
     userId: user?.id ?? null,

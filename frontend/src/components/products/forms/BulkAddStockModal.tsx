@@ -1,5 +1,6 @@
 import { todayStr } from '../../../utils/dateHelpers.ts'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { beginSingleAction, finishSingleAction } from '../../../utils/actionGuards.ts'
 import { withLoaderTimeout } from '../../../utils/loaders.ts'
 import AppSelect, { type AppSelectOption } from '../../shared/AppSelect.tsx'
@@ -322,9 +323,9 @@ export default function BulkAddStockModal({ productIds, products, branches, user
     }
   }
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-      <div className="fade-in w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl dark:bg-gray-800">
+  const modal = (
+    <div className="modal-viewport-safe pointer-events-auto fixed inset-0 z-[1050] flex items-start justify-center overflow-y-auto bg-black/50 sm:items-center">
+      <div className="modal-panel-safe fade-in my-auto w-full max-w-md overflow-y-auto rounded-2xl bg-white p-4 shadow-2xl dark:bg-gray-800 sm:p-5">
         <h2 className="mb-1 text-lg font-bold text-gray-900 dark:text-white">
           {t('adjust_stock_for_products') || `${actionLabels[action]} Stock -- ${productIds.length} Products`}
         </h2>
@@ -492,4 +493,7 @@ export default function BulkAddStockModal({ productIds, products, branches, user
       ) : null}
     </div>
   )
+
+  if (typeof document === 'undefined') return modal
+  return createPortal(modal, document.body)
 }

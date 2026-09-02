@@ -137,7 +137,11 @@ export default function InfoHint({ text, label, className }: InfoHintProps) {
           // Pointer events stay ON (unlike the old in-flow panel) so a long
           // hint capped by maxHeight can be scrolled on touch; it closes on
           // Escape or any tap outside the trigger and the panel itself.
-          className="fixed z-[1000] overflow-y-auto whitespace-pre-line rounded-lg border border-slate-200 bg-white p-2.5 text-left text-xs font-normal leading-relaxed text-slate-600 shadow-xl dark:border-slate-600 dark:bg-slate-800 dark:text-slate-300"
+          // Shared Modal is z-[1050] and notifications are z-[1100]. Hints
+          // are the layer the user explicitly asked to reveal, so they must
+          // sit above both instead of being portalled to body at z-[1000]
+          // and disappearing behind the modal that owns their trigger.
+          className="fixed z-[1200] overflow-y-auto whitespace-pre-line rounded-lg border border-slate-200 bg-white p-2.5 text-left text-xs font-normal leading-relaxed text-slate-600 shadow-xl dark:border-slate-600 dark:bg-slate-800 dark:text-slate-300"
         >
           {text}
         </span>,

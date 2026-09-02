@@ -7,14 +7,25 @@ import { readFileSync } from 'node:fs'
 // the wiring pins that keep all three flows on the SAME store.
 
 const memory = new Map<string, string>()
+const eventListeners = new Map<string, Array<() => void>>()
 ;(globalThis as Record<string, unknown>).localStorage = {
   getItem: (key: string) => (memory.has(key) ? memory.get(key)! : null),
   setItem: (key: string, value: string) => { memory.set(key, value) },
   removeItem: (key: string) => { memory.delete(key) },
 }
 ;(globalThis as Record<string, unknown>).window = globalThis
+;(globalThis as Record<string, unknown>).sessionStorage = (globalThis as Record<string, unknown>).localStorage
+;(globalThis as Record<string, unknown>).addEventListener = (type: string, listener: () => void) => {
+  eventListeners.set(type, [...(eventListeners.get(type) || []), listener])
+}
+;(globalThis as Record<string, unknown>).document = {
+  visibilityState: 'visible',
+  addEventListener: (type: string, listener: () => void) => {
+    eventListeners.set(type, [...(eventListeners.get(type) || []), listener])
+  },
+}
 
-const { readWorkDraft, writeWorkDraft, clearWorkDraft, scheduleWorkDraftWrite } = await import('../src/utils/workDrafts.ts')
+const { flushPendingWorkDrafts, readWorkDraft, writeWorkDraft, clearWorkDraft, scheduleWorkDraftWrite, scopedWorkDraftKey } = await import('../src/utils/workDrafts.ts')
 
 let failed = 0
 
@@ -67,6 +78,19 @@ await runTest('the debounced write fires once and its cancel prevents it', async
   assert.equal(readWorkDraft<{ v: number }>('k7')?.data.v, 2)
 })
 
+await runTest('pending drafts flush synchronously when iOS backgrounds the page', () => {
+  scheduleWorkDraftWrite('k8', { v: 'latest' }, 60_000)
+  assert.equal(readWorkDraft('k8'), null)
+  flushPendingWorkDrafts()
+  assert.equal(readWorkDraft<{ v: string }>('k8')?.data.v, 'latest')
+})
+
+await runTest('draft keys are scoped to organization and user', () => {
+  memory.set('businessos_user', JSON.stringify({ id: 42, organization_public_id: 'shop-a' }))
+  assert.equal(scopedWorkDraftKey('product_new'), 'businessos_draft_shop-a_42_product_new')
+  memory.delete('businessos_user')
+})
+
 const productFormSource = readFileSync(new URL('../src/components/products/forms/ProductForm.tsx', import.meta.url), 'utf8')
 const fastStockInSource = readFileSync(new URL('../src/components/inventory/FastStockInModal.tsx', import.meta.url), 'utf8')
 const receiveBatchSource = readFileSync(new URL('../src/components/inventory/ReceiveBatchModal.tsx', import.meta.url), 'utf8')
@@ -79,12 +103,14 @@ await runTest('all flows ride the ONE store -- no leftover hand-rolled localStor
   assert.doesNotMatch(productFormSource, /localStorage\.(get|set|remove)Item\(draftKey/)
   // FastStockIn: header + in-progress line persist; Done (and only Done)
   // completes the batch and clears; X/backdrop keep the shipment
-  assert.match(fastStockInSource, /readWorkDraft<FastStockInDraft>\(FAST_STOCKIN_DRAFT_KEY\)/)
-  assert.match(fastStockInSource, /scheduleWorkDraftWrite<FastStockInDraft>\(FAST_STOCKIN_DRAFT_KEY/)
-  assert.match(fastStockInSource, /const finishAndClose = \(\) => \{\s+if \(saving\) return\s+clearWorkDraft\(FAST_STOCKIN_DRAFT_KEY\)/)
-  assert.match(fastStockInSource, /onClick=\{finishAndClose\}/)
+  assert.match(fastStockInSource, /scopedWorkDraftKey\('fast_stockin'\)/)
+  assert.match(fastStockInSource, /readWorkDraft<FastStockInDraft>\(fastStockInDraftKey\)/)
+  assert.match(fastStockInSource, /scheduleWorkDraftWrite<FastStockInDraft>\(fastStockInDraftKey/)
+  assert.match(fastStockInSource, /clearWorkDraft\(fastStockInDraftKey\)\s+onClose\(\)/)
   // deliberately NO dirty-work guard for the draft-backed shipment
   assert.doesNotMatch(fastStockInSource, /registerDirtyWork/)
+  assert.match(receiveBatchSource, /scheduleWorkDraftWrite\(draftKey/)
+  assert.match(receiveBatchSource, /scopedWorkDraftKey\(`receive_\$\{product\.id\}`\)/)
 })
 
 await runTest('rider: ReceiveBatchModal\'s nav-guard dot points at the live Branches hub, not the retired inventory page', () => {

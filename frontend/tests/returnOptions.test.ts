@@ -4,6 +4,12 @@ import {
   STOCK_ACTION_OPTIONS, normalizeStockAction, stockActionOption,
   computeSettlementPreview, formatBatchDate, describeBatchOption,
 } from '../src/components/returns/helpers/returnOptions.ts'
+import {
+  normalizeReturnReasonList,
+  replaceReturnReasonPreset,
+  resolveReturnReasonPresets,
+  type ReturnReasonPresets,
+} from '../src/components/returns/helpers/returnReasonPresets.ts'
 
 let failed = 0
 
@@ -55,10 +61,41 @@ runTest('K2: batch option lines read mm/dd/yyyy and never carry cost', () => {
   assert.doesNotMatch(label, /cost/i)
 })
 
+runTest('return reason presets dedupe fallback and collision merges without parallel values', () => {
+  const fallback: ReturnReasonPresets = { customer: ['Damaged', 'Wrong item'], supplier: ['Wrong shipment'] }
+  assert.deepEqual(normalizeReturnReasonList([' Damaged ', 'damaged', { label: 'Wrong   item' }, '']), ['Damaged', 'Wrong item'])
+  assert.deepEqual(resolveReturnReasonPresets({ configured: false, presets: { customer: ['stale'] } }, fallback), fallback)
+  assert.deepEqual(resolveReturnReasonPresets({ configured: true, presets: { customer: [], supplier: [] } }, fallback), { customer: [], supplier: [] })
+  assert.deepEqual(
+    replaceReturnReasonPreset({ customer: ['Damaged', 'Wrong item'], supplier: [] }, 'customer', 'Damaged', 'Wrong item').customer,
+    ['Wrong item'],
+  )
+})
+
 const newReturnSource = readFileSync(new URL('../src/components/returns/NewReturnModal.tsx', import.meta.url), 'utf8')
 const editReturnSource = readFileSync(new URL('../src/components/returns/EditReturnModal.tsx', import.meta.url), 'utf8')
 const detailSource = readFileSync(new URL('../src/components/returns/ReturnDetailModal.tsx', import.meta.url), 'utf8')
 const backendKernelSource = readFileSync(new URL('../../cloudflare/src/lib/returnsStock.ts', import.meta.url), 'utf8')
+const returnReasonManagerSource = readFileSync(new URL('../src/components/returns/ReturnReasonManagerModal.tsx', import.meta.url), 'utf8')
+const supplierReturnSource = readFileSync(new URL('../src/components/returns/NewSupplierReturnModal.tsx', import.meta.url), 'utf8')
+const expenseLabelManagerSource = readFileSync(new URL('../src/components/fees/ExpenseLabelManagerModal.tsx', import.meta.url), 'utf8')
+const settingsSource = readFileSync(new URL('../src/components/utils-settings/Settings.tsx', import.meta.url), 'utf8')
+const inventorySource = readFileSync(new URL('../src/components/inventory/Inventory.tsx', import.meta.url), 'utf8')
+
+runTest('reference managers preview exact impact and keep custom return entry available', () => {
+  assert.match(returnReasonManagerSource, /getReturnReasonImpact/)
+  assert.match(returnReasonManagerSource, /scope: replaceLinked \? 'linked' : 'presets_only'/)
+  assert.match(newReturnSource, /useReturnReasonPresets\(t\)/)
+  assert.match(editReturnSource, /useReturnReasonPresets\(t\)/)
+  assert.match(supplierReturnSource, /list="supplier-return-reason-presets"/)
+  assert.match(supplierReturnSource, /Choose a saved reason or type your own/)
+  assert.match(expenseLabelManagerSource, /getFeeLabelImpact/)
+  assert.match(expenseLabelManagerSource, /replaceFeeLabel/)
+  assert.match(settingsSource, /getPaymentMethodImpact/)
+  assert.match(settingsSource, /replacePaymentMethod/)
+  assert.match(inventorySource, /getInventoryReasonImpact/)
+  assert.match(inventorySource, /replaceInventoryReason/)
+})
 
 runTest('K2: NewReturnModal wires the chooser, Replace, and the settlement gate', () => {
   // the ONE chooser renders per item and writes stock_action (boolean kept in step)

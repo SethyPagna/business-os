@@ -22,6 +22,9 @@ export type RenameCascadeRequest = {
 function impactSummary(impact: RenameImpact, t: (key: string, fallback?: string) => string): string[] {
   const lines: string[] = []
   const attachedProducts = impact.products_primary + impact.products_secondary
+  if (Number(impact.linked_records || 0) > 0) {
+    lines.push(`${impact.linked_records} ${t('rename_linked_records') || 'linked live records'}`)
+  }
   if (impact.kind === 'product_name') {
     lines.push(`${impact.group_rows} ${t('rename_group_rows') || 'product rows share this name (one grouped product)'}`)
   } else if (attachedProducts > 0) {
@@ -29,6 +32,9 @@ function impactSummary(impact: RenameImpact, t: (key: string, fallback?: string)
   }
   if (impact.batches > 0) lines.push(`${impact.batches} ${t('rename_attached_batches') || 'stock batches carry this supplier'}`)
   if (impact.target_exists) lines.push(t('rename_target_exists') || 'The new name already exists — carrying will merge into it.')
+  if (impact.historical_snapshots_preserved?.length) {
+    lines.push(`${t('rename_history_preserved') || 'Point-in-time history stays unchanged'}: ${impact.historical_snapshots_preserved.join(', ')}`)
+  }
   if (!lines.length) lines.push(t('rename_nothing_attached') || 'Nothing else is attached — the rename only affects this record.')
   return lines
 }
@@ -63,8 +69,8 @@ export default function RenameCascadeModal({
   const lines = impactSummary(request.impact, t)
   return createPortal(
     <div className="fixed inset-0 z-[60] bg-black/50 flex items-end sm:items-center justify-center p-0 sm:p-4" onClick={() => !busy && onChoose('cancel')}>
-      <div className="bg-white dark:bg-gray-800 rounded-t-2xl sm:rounded-2xl shadow-2xl w-full sm:max-w-md fade-in" onClick={(event) => event.stopPropagation()}>
-        <div className="p-4 border-b border-gray-200 dark:border-gray-700">
+      <div className="max-h-[min(88vh,34rem)] w-full overflow-y-auto rounded-t-2xl bg-white shadow-2xl dark:bg-gray-800 sm:max-w-md sm:rounded-2xl fade-in" onClick={(event) => event.stopPropagation()}>
+        <div className="border-b border-gray-200 p-3 dark:border-gray-700">
           <h3 className="font-bold text-gray-900 dark:text-white">{t('rename_cascade_title') || 'Rename — what happens to the rest?'}</h3>
           <p className="mt-2 text-sm">
             <span className="line-through text-gray-400">{request.from}</span>
@@ -72,7 +78,7 @@ export default function RenameCascadeModal({
             <span className="font-semibold text-gray-900 dark:text-gray-100">{request.to}</span>
           </p>
         </div>
-        <div className="p-4 space-y-3">
+        <div className="space-y-2 p-3">
           <ul className="text-xs text-gray-500 dark:text-gray-400 space-y-1">
             {lines.map((line) => <li key={line}>• {line}</li>)}
           </ul>
@@ -85,7 +91,7 @@ export default function RenameCascadeModal({
                   type="button"
                   disabled={busy}
                   onClick={() => onChoose(choice)}
-                  className="w-full p-3 rounded-xl border-2 border-gray-200 dark:border-gray-600 hover:border-blue-400 dark:hover:border-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/20 text-left transition-colors disabled:opacity-50"
+                  className="w-full rounded-xl border border-gray-200 px-3 py-2 text-left transition-colors hover:border-blue-400 hover:bg-blue-50 disabled:opacity-50 dark:border-gray-600 dark:hover:border-blue-500 dark:hover:bg-blue-900/20"
                 >
                   <div className="font-semibold text-sm text-gray-800 dark:text-gray-200">{t(text.key) || text.fallback}</div>
                   <div className="text-xs text-gray-400 mt-0.5">{t(text.descKey) || text.descFallback}</div>

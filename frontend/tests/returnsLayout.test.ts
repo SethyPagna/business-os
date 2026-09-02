@@ -18,7 +18,7 @@ assert.match(returnsSource, /<SearchInput\b/, 'Returns search should use the sha
 // into the field's usable width for no real benefit) -- assert its
 // absence now, the inverse of what this test checked for before.
 assert.doesNotMatch(searchInputSource, /<Search className=/, 'Shared SearchInput should no longer render a leading search icon')
-assert.match(returnsSurfaceSource, /matchMedia\('\(max-width: 639px\)'\)/, 'Returns list surface should track the mobile breakpoint explicitly')
+assert.match(returnsSurfaceSource, /matchMedia\('\(max-width: 767px\)'\)/, 'Returns list surface should keep phone-sized and narrow PWA viewports on the mobile card layout')
 assert.match(returnsSurfaceSource, /\{!isMobileViewport \? \(/, 'Returns desktop list should only render for desktop viewports')
 assert.match(returnsSurfaceSource, /\{isMobileViewport \? \(/, 'Returns mobile cards should only render for mobile viewports')
 assert.doesNotMatch(en, /"search_returns_placeholder":\s*"[^"]*ðŸ”/)
@@ -45,4 +45,3 @@ assert.match(returnsSource, /const searchFiltered = useMemo\(/, 'Returns should 
 assert.match(returnsSource, /for \(const ret of searchFiltered\)/, 'Returns scope stat tiles should sum from the search-only filtered view, not the type-filtered list view')
 
 console.log('PASS returns type filter stays client-side so scope stat tiles and type options always reflect the full dataset')
-

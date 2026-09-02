@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import { DEFAULT_TEMPLATE } from '../src/components/receipt-settings/constants.ts'
 import { parseReceiptTemplate, serializeReceiptTemplate } from '../src/components/receipt-settings/template.ts'
+import { computeImagePdfLayout } from '../src/utils/receiptPdfLayout.ts'
 
 let failed = 0
 
@@ -66,6 +67,8 @@ await runTest('receipt preview remains strict-CSP compatible and binds buttons o
   assert.doesNotMatch(source, /onclick\s*=/i)
   assert.doesNotMatch(source, /<script[\s>]/i)
   assert.match(source, /data-receipt-action="print"/)
+  assert.match(source, /data-receipt-action="print">Print<\/button>/)
+  assert.doesNotMatch(source, /Print \/ Save PDF/)
   assert.match(source, /data-receipt-action="close"/)
   assert.match(source, /function attachPrintablePreviewActions/)
 })
@@ -89,6 +92,44 @@ await runTest('thermal print keeps configured margins inside paper and uses one 
   assert.doesNotMatch(source, /node\.style\.width = `\$\{widthMm\}mm`[\s\S]{0,120}node\.style\.maxWidth = `\$\{widthMm\}mm`/)
   assert.match(source, /\.receipt-frame > \*[\s\S]*page-break-inside: avoid/)
   assert.match(source, /root\.style\.margin = '0'/)
+  assert.match(source, /\.receipt-frame \{[\s\S]*width: \$\{widthMm\}mm;[\s\S]*padding: 0;/)
+  assert.doesNotMatch(source, /width: calc\(\$\{widthMm\}mm \+ 32px\)/)
+  assert.match(source, /host\.style\.padding = isElementContent \? '0' : printPadding/,
+    'a receipt component must not receive a second outer print margin')
+  assert.match(source, /cloned\.style\.padding = printPadding/,
+    'continuous receipt margins should replace the screen-shell padding')
+  assert.match(source, /descendant\.style\.height = 'auto'/,
+    'wrapped receipt rows must be allowed to grow in the printable clone')
+})
+
+await runTest('fixed 80x50 PDF layout keeps exact dimensions and fits tall content proportionally', () => {
+  const widthPt = (80 / 25.4) * 72
+  const heightPt = (50 / 25.4) * 72
+  const layout = computeImagePdfLayout({
+    imageWidthPx: 800,
+    imageHeightPx: 1600,
+    pageWidthPt: widthPt,
+    fixedHeightPt: heightPt,
+  })
+  assert.equal(layout.pageHeightPt.toFixed(2), '141.73', '80x50 must not silently grow to the image height')
+  assert.equal(layout.drawWidthPt.toFixed(2), '70.87')
+  assert.equal(layout.drawHeightPt.toFixed(2), '141.73')
+  assert.equal(layout.drawXPt.toFixed(2), '77.95', 'tall content should be centered horizontally')
+  assert.equal(layout.drawYPt.toFixed(2), '0.00')
+})
+
+await runTest('continuous 80mm PDF layout remains one content-height page', () => {
+  const widthPt = (80 / 25.4) * 72
+  const layout = computeImagePdfLayout({
+    imageWidthPx: 800,
+    imageHeightPx: 1600,
+    pageWidthPt: widthPt,
+  })
+  assert.equal(layout.pageHeightPt.toFixed(2), '453.54')
+  assert.equal(layout.drawWidthPt.toFixed(2), '226.77')
+  assert.equal(layout.drawHeightPt.toFixed(2), '453.54')
+  assert.equal(layout.drawXPt.toFixed(2), '0.00')
+  assert.equal(layout.drawYPt.toFixed(2), '0.00')
 })
 
 await runTest('receipt export supports PNG image download from the same rendered receipt', () => {
@@ -101,6 +142,15 @@ await runTest('receipt export supports PNG image download from the same rendered
   assert.match(receiptSource, /loadReceiptPrintModule/)
   assert.match(receiptSource, /printTools\.downloadReceiptImage/)
   assert.match(receiptSource, /receipt_image_short|saving_image/)
+})
+
+await runTest('receipt rasterization stays exportable on Chromium and iOS instead of using a tainted foreignObject canvas', () => {
+  const utilSource = fs.readFileSync(new URL('../src/utils/printReceipt.ts', import.meta.url), 'utf8')
+  assert.match(utilSource, /await import\('html2canvas'\)/)
+  assert.match(utilSource, /allowTaint: false/)
+  assert.match(utilSource, /useCORS: true/)
+  assert.doesNotMatch(utilSource, /const svg\s*=/)
+  assert.doesNotMatch(utilSource, /new Blob\(\[svg\]/)
 })
 
 await runTest('receipt layout keeps Khmer labels, item columns, and row-aware image fallback', () => {
@@ -117,8 +167,15 @@ await runTest('receipt layout keeps Khmer labels, item columns, and row-aware im
   // or the 80x50 card's -- and with the card enabled, Print offers BOTH
   // sizes as explicit variants.
   assert.match(receiptSource, /const target = variant === 'compact' \? compactPrintRef\.current : printRef\.current/)
-  assert.match(receiptSource, /printTools\.printReceipt\(target,\s*\{[\s\S]*title:\s*''/)
-  assert.match(receiptSource, /printTools\.openReceiptPdf\(target,\s*\{[\s\S]*title:\s*''/)
+  assert.match(receiptSource, /const exportReceiptVariant = async/)
+  assert.match(receiptSource, /printTools\.printReceipt\(target,\s*\{[\s\S]*title,/)
+  assert.match(receiptSource, /printTools\.openReceiptPdf\(target,\s*\{[\s\S]*title,/)
+  assert.match(receiptSource, /const defaultVariant: ReceiptVariant = 'full'/,
+    'Open PDF and Image must export the detailed receipt, not silently use the 80x50 summary card')
+  assert.match(receiptSource, /void exportReceiptPdf\('open', 'compact'\)/)
+  assert.match(receiptSource, /void exportReceiptPdf\('image', 'compact'\)/)
+  assert.match(receiptSource, /void exportBothSeparately\('open'\)/)
+  assert.match(receiptSource, /void exportBothSeparately\('image'\)/)
   assert.match(receiptSource, /exportReceiptPdf\('print', 'compact'\)/)
   assert.match(receiptSource, /exportReceiptPdf\('print', 'full'\)/)
   assert.match(receiptSource, /data-receipt-line="true"/)
@@ -129,6 +186,24 @@ await runTest('receipt layout keeps Khmer labels, item columns, and row-aware im
   assert.match(utilSource, /const nameMaxWidth = Math\.max\(92, qtyX - paddingX - 18\)/)
   assert.match(utilSource, /querySelectorAll\?\.\('\[data-receipt-line="true"\]'\)/)
   assert.match(utilSource, /if \(markedLines\.length\) return markedLines/)
+})
+
+await runTest('receipt discounts stay beside the charged price and printable grids reflow instead of clipping', () => {
+  const receiptSource = fs.readFileSync(new URL('../src/components/receipt/Receipt.tsx', import.meta.url), 'utf8')
+  const previewSource = fs.readFileSync(new URL('../src/components/receipt-settings/ReceiptPreview.tsx', import.meta.url), 'utf8')
+  const printSource = fs.readFileSync(new URL('../src/utils/printReceipt.ts', import.meta.url), 'utf8')
+
+  assert.match(receiptSource, /\{fmtUSD\(lineUsd\)\}[\s\S]*\(-\{fmtUSD\(itemSavingsUsd\)\}\)/,
+    'line savings should be rendered next to the charged total in the Price cell')
+  assert.match(receiptSource, /\{qty\} × \{fmtUSD\(unitUsd\)\}/,
+    'optional unit math should stay in the Price cell rather than duplicate quantity under the name')
+  assert.doesNotMatch(receiptSource, /line-through text-gray-400/,
+    'the receipt should not add a separate crossed-out price block beneath the product name')
+  assert.match(previewSource, /businessDateTimeId\(previewNow\)/)
+  assert.match(previewSource, /created_at: previewNow\.toISOString\(\)/)
+  assert.doesNotMatch(previewSource, /receipt_number: '20260831-143000'/)
+  assert.match(printSource, /line\.style\.gridTemplateColumns = 'minmax\(0,1fr\) 2\.5rem minmax\(4\.25rem,auto\)'/)
+  assert.match(printSource, /node\.style\.overflowX = 'visible'/)
 })
 
 await runTest('compact receipt output uses ABA details and configurable secondary KHR rows', () => {

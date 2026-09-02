@@ -1,3 +1,5 @@
+import { STORAGE_KEYS } from '../constants.ts'
+
 // F3 (Part 424, slice 1): the ONE draft store behind every in-progress
 // flow -- extracted from ProductForm's Part-388 "Canva-level" persistence
 // so add-product, fast stock-in (batch-in), and any future detail tab all
@@ -15,6 +17,55 @@
 //     flow still works, it just doesn't survive a reload.
 
 export type WorkDraft<T> = { at: number; data: T }
+
+type PendingWorkDraft = {
+  data: unknown
+  timer: number
+}
+
+const pendingWorkDrafts = new Map<string, PendingWorkDraft>()
+let lifecycleFlushInstalled = false
+
+function persistWorkDraft<T>(key: string, data: T): void {
+  try { localStorage.setItem(key, JSON.stringify({ at: Date.now(), data })) } catch { /* full/blocked -- non-fatal */ }
+}
+
+function installLifecycleFlush(): void {
+  if (lifecycleFlushInstalled || typeof window === 'undefined' || typeof window.addEventListener !== 'function') return
+  lifecycleFlushInstalled = true
+
+  // iOS can freeze or terminate a Home Screen web app immediately after it
+  // moves to the background. A debounced localStorage write is therefore not
+  // allowed to depend on its timer getting another turn. pagehide also covers
+  // Safari's back-forward cache path; visibilitychange covers app switching.
+  window.addEventListener('pagehide', flushPendingWorkDrafts)
+  if (typeof document !== 'undefined' && typeof document.addEventListener === 'function') {
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'hidden') flushPendingWorkDrafts()
+    })
+  }
+}
+
+export function scopedWorkDraftKey(baseKey: string): string {
+  let userId = 'anonymous'
+  let organizationId = 'default'
+  try {
+    const rawUser = sessionStorage.getItem(STORAGE_KEYS.USER) || localStorage.getItem(STORAGE_KEYS.USER) || ''
+    const user = rawUser ? JSON.parse(rawUser) as Record<string, unknown> : {}
+    userId = String(user.id || user.username || 'anonymous').replace(/[^a-z0-9_-]+/gi, '_')
+    organizationId = String(user.organization_public_id || user.organizationId || user.organization_id || 'default').replace(/[^a-z0-9_-]+/gi, '_')
+  } catch {}
+  const cleanBase = String(baseKey || 'draft').replace(/[^a-z0-9_-]+/gi, '_')
+  return `businessos_draft_${organizationId}_${userId}_${cleanBase}`
+}
+
+export function flushPendingWorkDrafts(): void {
+  for (const [key, pending] of pendingWorkDrafts) {
+    window.clearTimeout(pending.timer)
+    pendingWorkDrafts.delete(key)
+    persistWorkDraft(key, pending.data)
+  }
+}
 
 export function readWorkDraft<T>(key: string, options?: { notOlderThanMs?: number }): WorkDraft<T> | null {
   try {
@@ -41,10 +92,16 @@ export function readWorkDraft<T>(key: string, options?: { notOlderThanMs?: numbe
 }
 
 export function writeWorkDraft<T>(key: string, data: T): void {
-  try { localStorage.setItem(key, JSON.stringify({ at: Date.now(), data })) } catch { /* full/blocked -- non-fatal */ }
+  const pending = pendingWorkDrafts.get(key)
+  if (pending) window.clearTimeout(pending.timer)
+  pendingWorkDrafts.delete(key)
+  persistWorkDraft(key, data)
 }
 
 export function clearWorkDraft(key: string): void {
+  const pending = pendingWorkDrafts.get(key)
+  if (pending) window.clearTimeout(pending.timer)
+  pendingWorkDrafts.delete(key)
   try { localStorage.removeItem(key) } catch { /* fine */ }
 }
 
@@ -54,6 +111,23 @@ export function clearWorkDraft(key: string): void {
  * most a keystroke or two, slow enough not to hammer storage per key.
  */
 export function scheduleWorkDraftWrite<T>(key: string, data: T, delayMs = 800): () => void {
-  const timer = window.setTimeout(() => writeWorkDraft(key, data), delayMs)
-  return () => window.clearTimeout(timer)
+  installLifecycleFlush()
+  const previous = pendingWorkDrafts.get(key)
+  if (previous) window.clearTimeout(previous.timer)
+
+  const pending: PendingWorkDraft = {
+    data,
+    timer: window.setTimeout(() => {
+      if (pendingWorkDrafts.get(key) !== pending) return
+      pendingWorkDrafts.delete(key)
+      persistWorkDraft(key, data)
+    }, delayMs),
+  }
+  pendingWorkDrafts.set(key, pending)
+
+  return () => {
+    if (pendingWorkDrafts.get(key) !== pending) return
+    window.clearTimeout(pending.timer)
+    pendingWorkDrafts.delete(key)
+  }
 }

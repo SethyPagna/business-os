@@ -30,7 +30,7 @@ type CancelSaleModalProps = {
 // the backend refuses it without a reason, adds the stock back with a
 // movement note naming the cancellation, and records the optional lost
 // fee (e.g. a delivery fee already paid out that the buyer refused to
-// cover) as a linked expense row on the Fees page.
+// cover) as a linked expense row on the Expenses page.
 export default function CancelSaleModal({ label, bulk = false, saving = false, onClose, onConfirm, t }: CancelSaleModalProps) {
   const [reason, setReason] = useState<'' | 'mistake' | 'buyer_refused' | 'other'>('')
   const [note, setNote] = useState('')
@@ -72,16 +72,19 @@ export default function CancelSaleModal({ label, bulk = false, saving = false, o
   }
 
   return createPortal(
-    <div className="fixed inset-0 z-[60] flex items-end justify-center bg-black/50 p-0 sm:items-center sm:p-4" onClick={saving ? undefined : onClose}>
-      <div className="flex max-h-modal-92 w-full flex-col rounded-t-2xl bg-white shadow-2xl dark:bg-gray-800 sm:max-w-md sm:rounded-2xl" onClick={(event) => event.stopPropagation()}>
+    <div className="modal-viewport-safe pointer-events-auto fixed inset-0 z-[1050] flex items-end justify-center overflow-y-auto bg-black/50 sm:items-center sm:p-4" onClick={saving ? undefined : onClose}>
+      <div className="modal-panel-safe flex w-full flex-col rounded-t-2xl bg-white shadow-2xl dark:bg-gray-800 sm:max-w-md sm:rounded-2xl" onClick={(event) => event.stopPropagation()}>
         <div className="flex items-center justify-between gap-3 border-b border-gray-200 p-4 dark:border-gray-700">
           <div className="min-w-0">
             <h2 className="font-bold text-gray-900 dark:text-white">{tr('cancel_sale_title', 'Cancel sale')}</h2>
             <div className="mt-0.5 truncate text-xs text-gray-400">{label}</div>
           </div>
-          <button type="button" onClick={onClose} className="flex h-8 w-8 flex-shrink-0 items-center justify-center text-gray-400 hover:text-gray-600" disabled={saving}>
-            <X className="h-4 w-4" />
-          </button>
+          <div className="flex shrink-0 items-center gap-1">
+            <button type="button" className="min-h-9 max-w-28 truncate rounded-lg bg-red-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50 sm:hidden" onClick={confirm} disabled={!canConfirm}>{saving ? tr('saving', 'Saving...') : tr('confirm', 'Confirm')}</button>
+            <button type="button" onClick={onClose} className="flex h-8 w-8 flex-shrink-0 items-center justify-center text-gray-400 hover:text-gray-600" disabled={saving}>
+              <X className="h-4 w-4" />
+            </button>
+          </div>
         </div>
         <div className="modal-scroll space-y-3 p-4">
           <div>
@@ -114,7 +117,7 @@ export default function CancelSaleModal({ label, bulk = false, saving = false, o
             <div className="rounded-xl border border-amber-200 bg-amber-50/60 p-3 dark:border-amber-700/50 dark:bg-amber-900/20">
               <div className="text-[11px] font-medium text-amber-800 dark:text-amber-200">{tr('cancel_lost_fee', 'Money lost on this sale (optional)')}</div>
               <div className="mt-0.5 text-[11px] text-amber-700/80 dark:text-amber-300/70">
-                {tr('cancel_lost_fee_hint', 'e.g. a delivery fee already paid that the buyer refused to cover. Recorded as an expense on the Fees page.')}
+                {tr('cancel_lost_fee_hint', 'e.g. a delivery fee already paid that the buyer refused to cover. Recorded as an expense on the Expenses page.')}
               </div>
               <div className="mt-2 grid grid-cols-2 gap-2">
                 <label className="block">
@@ -142,7 +145,7 @@ export default function CancelSaleModal({ label, bulk = false, saving = false, o
             {tr('cancel_stock_hint', 'Anything not already returned goes back into stock, with a movement note naming this cancellation.')}
           </div>
         </div>
-        <div className="flex items-center justify-end gap-2 border-t border-gray-200 p-4 dark:border-gray-700">
+        <div className="hidden items-center justify-end gap-2 border-t border-gray-200 p-4 dark:border-gray-700 sm:flex">
           <button type="button" className="btn-secondary text-sm" onClick={onClose} disabled={saving}>
             {tr('keep_sale', 'Keep sale')}
           </button>

@@ -19,6 +19,7 @@ import { getDb } from './lib/db'
 import { runImportAnalyze, runImportApply, markJobFailed } from './lib/importEngine'
 import { runBulkDeleteJob } from './lib/bulkDeleteEngine'
 import { continueCloudflareBackupAssetCopy, type BackupQueueMessage } from './lib/backup'
+import { runQueuedDriveRestoreStage, runQueuedDriveSync, type DriveSyncQueueMessage } from './lib/driveSyncQueue'
 import { normalizeStoredImage } from './lib/imageAudit'
 
 type ImportJobMessage = { jobId: string; kind: 'analyze' | 'apply' | 'bulk-delete' }
@@ -182,11 +183,17 @@ export async function handleMediaQueue(batch: MessageBatch<MediaJobMessage>, env
 // scripts/test-backup-pure.cjs; it never reparses the large DB manifest.
 // this consumer is just the queue-delivery plumbing around it, same shape
 // as handleImportQueue/handleMediaQueue above.
-export async function handleBackupQueue(batch: MessageBatch<BackupQueueMessage>, env: Env): Promise<void> {
+export async function handleBackupQueue(batch: MessageBatch<BackupQueueMessage | DriveSyncQueueMessage>, env: Env): Promise<void> {
   for (const message of batch.messages) {
     try {
-      const { backupName, nextIndex } = message.body
-      await continueCloudflareBackupAssetCopy(env, backupName, nextIndex)
+      if (message.body.kind === 'drive-sync') {
+        await runQueuedDriveSync(env, message.body.jobId)
+      } else if (message.body.kind === 'drive-restore-stage') {
+        await runQueuedDriveRestoreStage(env, message.body.jobId)
+      } else {
+        const { backupName, nextIndex } = message.body
+        await continueCloudflareBackupAssetCopy(env, backupName, nextIndex)
+      }
       message.ack()
     } catch (error) {
       console.error('[backup-queue] continuation failed', message.body, error)

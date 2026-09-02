@@ -22,6 +22,8 @@
 // Run: node scripts/test-session-slide-pure.cjs
 
 const assert = require('assert')
+const fs = require('fs')
+const path = require('path')
 
 let passed = 0
 function check(name, fn) {
@@ -32,6 +34,7 @@ function check(name, fn) {
 
 const SESSION_SLIDE_AFTER_FRACTION = 0.5
 const MAX_COOKIE_AGE_MS = 399 * 24 * 60 * 60 * 1000
+const SESSION_TOUCH_INTERVAL_MS = 5 * 60 * 1000
 
 // Mirrors lib/auth.ts's asUtc exactly.
 function asUtc(value) {
@@ -40,6 +43,13 @@ function asUtc(value) {
     ? text.replace(' ', 'T')
     : `${text.replace(' ', 'T')}Z`
   return Date.parse(normalized)
+}
+
+// Mirrors lib/auth.ts's last-seen write throttle exactly.
+function isSessionTouchDue(lastSeenAt, nowMs) {
+  if (!lastSeenAt) return true
+  const lastSeenMs = asUtc(lastSeenAt)
+  return !Number.isFinite(lastSeenMs) || lastSeenMs < nowMs - SESSION_TOUCH_INTERVAL_MS
 }
 
 // Mirrors slideSessionExpiry's decision. Returns the new expiry, or null for
@@ -63,6 +73,38 @@ const iso = (ms) => new Date(ms).toISOString()
 const sqlite = (ms) => new Date(ms).toISOString().replace('T', ' ').slice(0, 19)
 
 const T0 = Date.parse('2026-08-01T00:00:00Z')
+
+// --- bounded last-seen writes -----------------------------------------
+
+check('a fresh last-seen timestamp does not schedule a touch write', () => {
+  assert.equal(isSessionTouchDue(sqlite(T0 - 60 * 1000), T0), false)
+  assert.equal(isSessionTouchDue(iso(T0 - 4 * 60 * 1000), T0), false)
+  assert.equal(isSessionTouchDue(sqlite(T0 - SESSION_TOUCH_INTERVAL_MS), T0), false,
+    'exactly five minutes old is not older than the threshold')
+})
+
+check('a stale, missing, or corrupt last-seen timestamp may schedule a touch', () => {
+  assert.equal(isSessionTouchDue(sqlite(T0 - SESSION_TOUCH_INTERVAL_MS - 1000), T0), true)
+  assert.equal(isSessionTouchDue(null, T0), true)
+  assert.equal(isSessionTouchDue('not-a-date', T0), true)
+})
+
+check('auth reads session metadata once and race-protects a stale touch', () => {
+  const source = fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'auth.ts'), 'utf8')
+
+  assert.match(source, /s\.created_at AS session_created_at[\s\S]*s\.expires_at AS session_expires_at[\s\S]*s\.last_seen_at AS session_last_seen_at/)
+  assert.doesNotMatch(source, /SELECT created_at, expires_at FROM user_sessions/,
+    'sliding expiry must not issue a second session metadata SELECT')
+  assert.match(source, /slideSessionExpiry\(c, tokenHash, \{[\s\S]*created_at: createdAt,[\s\S]*expires_at: expiresAt/,
+    'the initial auth row must feed sliding expiry directly')
+
+  const touchSql = source.match(/UPDATE user_sessions\s+SET last_seen_at = CURRENT_TIMESTAMP[\s\S]*?\)\s*\n\s*`\)\.run/)
+  assert.ok(touchSql, 'conditional last-seen UPDATE must exist')
+  assert.match(touchSql[0], /revoked_at IS NULL/)
+  assert.match(touchSql[0], /expires_at > @observed_at/)
+  assert.match(touchSql[0], /datetime\(last_seen_at\) < datetime\(@observed_at, '-5 minutes'\)/,
+    'SQL must repeat the strict stale cutoff to protect concurrent requests')
+})
 
 // --- the timestamp format that would skew everything -------------------
 

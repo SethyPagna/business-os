@@ -27,6 +27,7 @@ function loadModule(relPath) {
 }
 
 const { issueOtpChallenge, isLiveOtpChallenge, consumeOtpChallenge } = loadModule('lib/otpChallenge.ts')
+const { verifyTotp } = loadModule('lib/totp.ts')
 
 // Minimal KV: put/get/delete over a Map (TTL not simulated -- expiry is
 // KV's own contract; what this suite pins is the binding logic around it).
@@ -75,6 +76,23 @@ await check('consuming a challenge kills it; a wrong code before that does NOT (
   assert.strictEqual(await isLiveOtpChallenge(env, token, 7), false)
 })
 
+await check('TOTP accepts RFC 6238 codes and the bounded two-step mobile-clock tolerance', async () => {
+  // RFC 6238 SHA-1 test secret. At Unix second 59, its six-digit code is
+  // 287082. A device one minute behind is still accepted by the default
+  // two-step window, while a caller can explicitly retain the stricter
+  // one-step policy where required.
+  const realNow = Date.now
+  try {
+    Date.now = () => 59_000
+    assert.strictEqual(await verifyTotp('GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ', '287082', 0), true)
+    Date.now = () => 119_000
+    assert.strictEqual(await verifyTotp('GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ', '287082'), true)
+    assert.strictEqual(await verifyTotp('GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ', '287082', 1), false)
+  } finally {
+    Date.now = realNow
+  }
+})
+
 await check('source lock: both first factors mint the challenge with their otpRequired answer', () => {
   const src = fs.readFileSync(path.join(__dirname, '..', 'src', 'routes', 'auth.ts'), 'utf8')
   const mintSites = src.match(/otpRequired: true[^}]*otpChallenge: await issueOtpChallenge\(c\.env, /g) || []
@@ -112,6 +130,30 @@ await check('source lock: the frontend sends the challenge and the persistent de
   const transport = fs.readFileSync(path.join(__dirname, '..', '..', 'frontend', 'src', 'api', 'authTransport.ts'), 'utf8')
   const verifyAt = transport.indexOf('export function otpVerify')
   assert.ok(verifyAt > -1 && /getOrCreatePersistentDeviceId\(\)/.test(transport.slice(verifyAt, verifyAt + 400)), 'otpVerify must carry the persistent deviceId for the re-run device gate')
+})
+
+await check('source lock: new OTP enrollment uses the Leang Beauty authenticator label', () => {
+  const src = fs.readFileSync(path.join(__dirname, '..', 'src', 'routes', 'auth.ts'), 'utf8')
+  assert.ok(/generateTotpSecret\(target\.username, 'Leang Beauty'\)/.test(src))
+})
+
+await check('source lock: peer-admin 2FA recovery requires a password-confirmed, audited break-glass action', () => {
+  const auth = fs.readFileSync(path.join(__dirname, '..', 'src', 'routes', 'auth.ts'), 'utf8')
+  const frontendRoot = path.join(__dirname, '..', '..', 'frontend', 'src')
+  const modal = fs.readFileSync(path.join(frontendRoot, 'components', 'utils-settings', 'OtpModal.tsx'), 'utf8')
+  const users = fs.readFileSync(path.join(frontendRoot, 'components', 'users', 'Users.tsx'), 'utf8')
+  const detail = fs.readFileSync(path.join(frontendRoot, 'components', 'users', 'UserDetailSheet.tsx'), 'utf8')
+  const routeAt = auth.indexOf("app.post('/otp/recover'")
+  assert.ok(routeAt > -1, 'expected an authenticated OTP recovery route')
+  const body = auth.slice(routeAt, auth.indexOf("app.post('", routeAt + 20))
+  assert.ok(body.includes('requireAuth'), 'recovery must require an existing administrator session')
+  assert.ok(body.includes("String(body.confirmation || '').trim().toUpperCase() !== 'RESET 2FA'"), 'recovery needs an explicit confirmation phrase')
+  assert.ok(body.includes('bcrypt.compareSync(String(body.password || \'\'), actorRecord.password)'), 'recovery must verify the acting administrator password')
+  assert.ok(body.includes('revokeUserSessions(c.env, target.id)'), 'recovery must revoke the affected account sessions')
+  assert.ok(body.includes("'otp_recovery_reset'"), 'recovery must be audited')
+  assert.ok(/otpRecoveryReset/.test(modal), 'the shared OTP dialog must call the recovery transport')
+  assert.ok(/mode="recover"/.test(users), 'Users must open the recovery dialog for another account')
+  assert.ok(/Reset 2FA/.test(detail), 'the account detail must expose the recovery action')
 })
 
 }

@@ -20,6 +20,9 @@ type RuntimeResetOptions = {
   preserveOrganization?: boolean
   preserveAuth?: boolean
   clearAuth?: boolean
+  preserveOfflineWork?: boolean
+  preserveServiceWorker?: boolean
+  preserveUiDrafts?: boolean
   // When omitted/undefined, every local IndexedDB mirror table is wiped
   // (the original, unscoped behavior -- still correct for factory-reset and
   // the data-path switch/restore flows, which really do invalidate
@@ -203,6 +206,19 @@ function snapshotStorage(storage: Storage | null, preserveKeys: Set<string>): St
   return kept
 }
 
+function snapshotStoragePrefixes(storage: Storage | null, prefixes: readonly string[]): StorageEntry[] {
+  if (!storage) return []
+  const kept: StorageEntry[] = []
+  try {
+    for (let index = 0; index < storage.length; index += 1) {
+      const key = storage.key(index)
+      if (!key || !prefixes.some((prefix) => key.startsWith(prefix))) continue
+      kept.push([key, storage.getItem(key)])
+    }
+  } catch (_) {}
+  return kept
+}
+
 function clearStorage(storage: Storage | null, preserveKeys: Set<string>): void {
   if (!storage) return
   const toDelete: string[] = []
@@ -256,13 +272,16 @@ export async function resetClientRuntimeState(options: RuntimeResetOptions = {})
     sessionPreserveKeys.add(STORAGE_KEYS.USER_EXPIRY)
   }
 
-  const keptLocal = canUseBrowserStorage() ? snapshotStorage(window.localStorage, localPreserveKeys) : []
+  const keptLocal = canUseBrowserStorage() ? [
+    ...snapshotStorage(window.localStorage, localPreserveKeys),
+    ...(options.preserveUiDrafts === true ? snapshotStoragePrefixes(window.localStorage, ['businessos_draft_']) : []),
+  ] : []
   const keptSession = canUseBrowserStorage() ? snapshotStorage(window.sessionStorage, sessionPreserveKeys) : []
 
   clearStorage(canUseBrowserStorage() ? window.localStorage : null, localPreserveKeys)
   clearStorage(canUseBrowserStorage() ? window.sessionStorage : null, sessionPreserveKeys)
 
-  await clearServiceWorkersAndCaches()
+  if (options.preserveServiceWorker !== true) await clearServiceWorkersAndCaches()
   if (Array.isArray(options.mirrorTables)) {
     // Scoped clear -- only the tables the caller identified as actually
     // affected server-side. An empty array is a valid, deliberate "clear
@@ -270,6 +289,9 @@ export async function resetClientRuntimeState(options: RuntimeResetOptions = {})
     // what sync:update's channel listeners already handle).
     const { clearLocalMirrorTables } = await import('../../api/localDb.ts')
     await clearLocalMirrorTables(options.mirrorTables)
+  } else if (options.preserveOfflineWork === true) {
+    const { resetLocalMirrorDbPreservingOfflineWork } = await import('../../api/localDb.ts')
+    await resetLocalMirrorDbPreservingOfflineWork()
   } else {
     const { resetLocalMirrorDb } = await import('../../api/localDb.ts')
     await resetLocalMirrorDb()

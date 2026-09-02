@@ -100,6 +100,7 @@ const catalogEditorSurface = fs.readFileSync(new URL('../src/components/catalog/
 const catalogImages = fs.readFileSync(new URL('../src/components/catalog/catalogImages.tsx', import.meta.url), 'utf8')
 const catalogAssetUrls = fs.readFileSync(new URL('../src/components/catalog/catalogAssetUrls.ts', import.meta.url), 'utf8')
 const catalogPagination = fs.readFileSync(new URL('../src/components/catalog/catalogPagination.tsx', import.meta.url), 'utf8')
+const paginationControls = fs.readFileSync(new URL('../src/components/shared/PaginationControls.tsx', import.meta.url), 'utf8')
 const products = fs.readFileSync(new URL('../src/components/products/Products.tsx', import.meta.url), 'utf8')
 const productExport = fs.readFileSync(new URL('../src/components/products/helpers/productExport.ts', import.meta.url), 'utf8')
 const productFilterHelpers = fs.readFileSync(new URL('../src/components/products/helpers/productFilterHelpers.ts', import.meta.url), 'utf8')
@@ -242,8 +243,8 @@ assert.match(app, /const NOTIFICATION_CENTER_IDLE_TIMEOUT_MS = 45000/, 'deferred
 assert.match(app, /const IMPORT_TRACKER_INITIAL_MOUNT_DELAY_MS = 180000/, 'global import tracker chunk should stay out of short-session first-load windows unless import activity wakes it')
 assert.match(app, /const IMPORT_TRACKER_IDLE_TIMEOUT_MS = 60000/, 'deferred import tracker should still wake during a long-lived session')
 assert.match(serviceWorker, /function isHashedBuildAsset\(pathname\)[\s\S]*pathname\.startsWith\('\/assets\/'\)/, 'hashed build chunks should be recognized as safe cache-first static assets')
-assert.match(serviceWorker, /async function cacheFirstStatic\(request\)[\s\S]*const cached = await cache\.match\(request\)[\s\S]*if \(cached\)[\s\S]*return cached/, 'hashed build chunks should use cache-first service-worker reads so repeat visits do not pay tunnel latency')
-assert.match(serviceWorker, /event\.respondWith\(isHashedBuildAsset\(url\.pathname\)[\s\S]*\? cacheFirstStatic\(request\)[\s\S]*: networkFirstStatic\(request\)\)/, 'only hashed build chunks should switch to cache-first while mutable runtime assets stay network-first')
+assert.match(serviceWorker, /async function cacheFirstStatic\(request, event\)[\s\S]*const cached = await cache\.match\(request\)[\s\S]*if \(cached\)[\s\S]*return cached/, 'hashed build chunks should use cache-first service-worker reads so repeat visits do not pay tunnel latency')
+assert.match(serviceWorker, /event\.respondWith\(isHashedBuildAsset\(url\.pathname\)[\s\S]*\? cacheFirstStatic\(request, event\)[\s\S]*: networkFirstStatic\(request\)\)/, 'only hashed build chunks should switch to cache-first while mutable runtime assets stay network-first')
 assert.match(app, /function scheduleInitialPendingSyncRefresh\(refresh: \(\) => void\): CancelWarmup/, 'pending-sync startup refresh should use a cancellable idle scheduler')
 assert.match(app, /window\.requestIdleCallback\(run, \{ timeout: PENDING_SYNC_IDLE_TIMEOUT_MS \}\)/, 'pending-sync startup refresh should prefer idle time')
 assert.match(app, /if \(!user \|\| typeof window === 'undefined'\) \{[\s\S]*return undefined[\s\S]*const cancelInitialPendingSyncRefresh = scheduleInitialPendingSyncRefresh\(refreshPendingSync\)/, 'sync banner should not import API methods or register listeners during logged-out first shell render')
@@ -542,8 +543,9 @@ assert.doesNotMatch(catalogPage, /from '\.\/portalLanguagePacks\.ts'/, 'public c
 assert.doesNotMatch(catalogPage, /from '\.\/portalContentI18n\.ts'/, 'public catalog should not statically import full content localization tables during route startup')
 assert.match(catalogPage, /import\('\.\/portalLanguagePacks\.ts'\)/, 'public catalog should lazy-load first-party language packs only for non-English language intent')
 assert.match(catalogPage, /import\('\.\/portalContentI18n\.ts'\)/, 'public catalog should lazy-load content localization only for non-English language intent')
-assert.match(catalogPagination, /grid-cols-\[minmax\(0,1fr\)_4rem_minmax\(6\.5rem,8rem\)\]/, 'public catalog pagination should keep controls inside narrow mobile cards')
-assert.match(catalogPagination, /<span className="sm:hidden">\{start\.toLocaleString\(\)\}-\{end\.toLocaleString\(\)\} \/ \{total\.toLocaleString\(\)\}<\/span>/, 'public catalog pagination should use a compact mobile summary instead of clipping the full desktop label')
+assert.match(catalogPagination, /<PaginationControls/, 'public catalog pagination should use the shared responsive control')
+assert.match(catalogPagination, /editablePageSizeInput=\{false\}/, 'public catalog pagination should keep the mobile selector compact')
+assert.match(paginationControls, /flex flex-col gap-2[^"]*sm:flex-row/, 'shared pagination should stack on narrow mobile cards and return to one row on larger screens')
 assert.match(viteConfig, /ResetData\.tsx'\)\) return 'backup-reset-tools'/, 'destructive Backup reset panels should have an action-only chunk')
 assert.match(viteConfig, /OtpModal\.tsx'\)\) return 'settings-otp-modal'/, 'Settings OTP setup/disable modal should have an action-only chunk')
 assert.match(viteConfig, /formatters\.ts'\)\) \{[\s\S]*return 'shared-formatters'/, 'shared date/number formatters should not be owned by a lazy user detail chunk')
@@ -680,7 +682,7 @@ assert.match(contactReadTransport, /await import\('\.\/localMirrors\.ts'\)/, 'PO
 assert.doesNotMatch(contactWriteTransport, /import .*['"]\.\/requestIds\.ts['"]/, 'POS contact quick-create writes should not import the shared app-api-methods request-id owner')
 assert.match(contactWriteTransport, /function ensureContactClientRequestId/, 'POS contact quick-create writes should keep a tiny local request-id helper')
 assert.match(saleWriteTransport, /export async function createSale[\s\S]*queueOfflineSale/, 'sale write transport should own checkout create and offline queue fallback outside the broad API registry')
-assert.match(saleWriteTransport, /export async function syncPendingSalesQueue/, 'sale write transport should preserve pending offline sale sync for background retry')
+assert.match(saleWriteTransport, /export function syncPendingSalesQueue/, 'sale write transport should preserve pending offline sale sync through its same-context single-flight wrapper')
 assert.doesNotMatch(saleWriteTransport, /from '\.\/methods\.ts'|from "\.\/methods\.ts"|from '\.\/salesTransport\.ts'|from "\.\/salesTransport\.ts"|from '\.\/requestIds\.ts'|from "\.\/requestIds\.ts"/, 'sale write transport should not import the broad API registry, sales read/mirror transport, or shared request-id owner')
 assert.match(saleWriteTransport, /function ensureSaleClientRequestId/, 'sale write transport should keep a tiny local request-id helper so checkout does not wake app-api-methods')
 assert.doesNotMatch(productWriteTransport, /from '\.\/methods\.ts'|from "\.\/methods\.ts"/, 'product write transport should not import the broad API registry')
@@ -852,7 +854,7 @@ assert.match(webApi, /if \(!skipOfflineBootstrapDb\) \{[\s\S]*const db = await g
 assert.match(webApi, /function runOfflineMaintenance\(force = false\): void \{[\s\S]*if \(!hasStoredUserSession\(\)\) return[\s\S]*loadSaleWriteTransportModule\(\)[\s\S]*syncPendingSalesQueue\(\{ force: true \}\)/, 'logged-in idle maintenance should retry pending sale sync through the focused sale write transport')
 assert.match(webApi, /function refreshOfflineSnapshotSoon\(force = false\): void \{[\s\S]*loadOfflineSnapshotTransportModule\(\)[\s\S]*refreshOfflineDeviceSnapshot\(\{ force \}\)/, 'offline snapshot refresh should use the focused offline snapshot transport')
 assert.doesNotMatch(webApi, /getLazyApiMethod\('(?:retryPendingSyncNow|refreshOfflineDeviceSnapshot)'\)/, 'idle offline maintenance should call focused transports instead of the broad API registry')
-assert.match(webApi, /function ensureSessionRecoveryListeners\(\): void \{[\s\S]*sessionRecoveryListenersRegistered[\s\S]*window\.addEventListener\('online'[\s\S]*resumeWS\(\)[\s\S]*pingServerHealth\(true\)\.catch[\s\S]*window\.addEventListener\('focus'[\s\S]*resumeWS\(\)[\s\S]*pingServerHealth\(\)\.catch[\s\S]*document\.addEventListener\('visibilitychange'[\s\S]*resumeWS\(\)[\s\S]*pingServerHealth\(\)\.catch[\s\S]*window\.addEventListener\('sync:reconnected'/, 'online/focus/visibility recovery listeners should be centralized in web-api after session recovery')
+assert.match(webApi, /function ensureSessionRecoveryListeners\(\): void \{[\s\S]*sessionRecoveryListenersRegistered[\s\S]*const recoverForegroundSession = \(reason: string, force = false, refreshData = false\): boolean => \{[\s\S]*resumeWS\(\)[\s\S]*pingServerHealth\(force\)\.catch[\s\S]*runOfflineMaintenance\(force\)[\s\S]*window\.addEventListener\('online'[\s\S]*recoverForegroundSession\('network-online', true, false\)[\s\S]*window\.addEventListener\('focus'[\s\S]*recoverAfterBackground\('window-focus'\)[\s\S]*document\.addEventListener\('visibilitychange'[\s\S]*recoverAfterBackground\('visibility-resume'\)[\s\S]*window\.addEventListener\('sync:reconnected'/, 'online/focus/visibility recovery listeners should delegate to the centralized throttled foreground-recovery path')
 assert.doesNotMatch(webApi, /if \(typeof window !== 'undefined'\) \{[\s\S]{0,500}window\.addEventListener\('online'/, 'signed-out startup should not register session recovery listeners at module load')
 assert.match(webApi, /const previousSyncServerUrl = getSyncServerUrl\(\)[\s\S]*const syncServerChanged = previousSyncServerUrl !== clean[\s\S]*scheduleBootstrapOfflineDbWrite\(\(db\) => db\.settings\.put\(\{ key: 'sync_server_url', value: clean \}\)\)[\s\S]*cacheClearAll\(\)[\s\S]*if \(hasStoredUserSession\(\)\) \{[\s\S]*ensureSessionRecoveryListeners\(\)[\s\S]*scheduleConnectWS\(\)[\s\S]*startHealthCheck\(\)[\s\S]*if \(syncServerChanged && hasStoredUserSession\(\)\) \{[\s\S]*scheduleInitialOfflineMaintenance\(\)/, 'setSyncServerUrl should avoid duplicate cache clears and start recovery loops only for stored sessions while deferring the first websocket connect')
 assert.doesNotMatch(webApi, /setSyncServerUrl\(url: unknown\)[\s\S]{0,900}getOfflineDb\(\)\.then/, 'setSyncServerUrl should not load IndexedDB during startup')
@@ -1478,7 +1480,7 @@ assert.doesNotMatch(
 )
 assert.match(
   transferModal,
-  /getTransferApi\(\)\.getBranchStock\(Number\.parseInt\(fromBranch, 10\), \{ page: 1, pageSize: 50, stockState: 'positive' \}\)/,
+  /getTransferApi\(\)\.getBranchStock\(Number\.parseInt\(fromBranch, 10\), \{[\s\S]{0,160}page: 1,[\s\S]{0,120}pageSize: TRANSFER_STOCK_PAGE_SIZE,[\s\S]{0,120}stockState: 'positive'/,
   'transfer stock modal should request a bounded positive-stock page',
 )
 assert.match(
@@ -1592,8 +1594,13 @@ assert.match(
 )
 assert.match(
   salesExportModal,
-  /withLoaderTimeout\(\s*\(\) => getSalesExportApi\(\)\.getSalesExport\(\{ startDate: dates\.start, endDate: dates\.end, format: 'csv' \}\),\s*'Sales export CSV',\s*SALES_EXPORT_CSV_TIMEOUT_MS,\s*\)/,
-  'sales CSV export should timeout slow CSV reads',
+  /withLoaderTimeout\(\s*\(\) => api\.getSalesExport\(\{ startDate: dates\.start, endDate: dates\.end, detailsOnly: 'true', pageSize: '500' \}\),\s*'Sales export CSV',\s*SALES_EXPORT_CSV_TIMEOUT_MS,\s*\)/,
+  'sales CSV export should timeout slow CSV reads (first page)',
+)
+assert.match(
+  salesExportModal,
+  /while \(page\.has_more\) \{[\s\S]*?withLoaderTimeout\(\s*\(\) => api\.getSalesExport\(\{[\s\S]*?\}\),\s*'Sales export CSV page',\s*SALES_EXPORT_CSV_TIMEOUT_MS,\s*\)/,
+  'sales CSV export should timeout slow CSV reads (subsequent cursor-paged pages)',
 )
 assert.match(
   inventory,
@@ -2218,7 +2225,7 @@ assert.match(
 )
 assert.match(
   receipt,
-  /const printTools = await loadReceiptPrintModule\(\)[\s\S]*printTools\.downloadReceiptImage[\s\S]*printTools\.printReceipt[\s\S]*printTools\.openReceiptPdf/,
+  /const exportReceiptVariant = async \(printTools: ReceiptPrintModule[\s\S]*printTools\.downloadReceiptImage[\s\S]*printTools\.printReceipt[\s\S]*printTools\.openReceiptPdf[\s\S]*const printTools = await loadReceiptPrintModule\(\)[\s\S]*exportReceiptVariant\(printTools/,
   'receipt export actions should use the lazy-loaded print tools for image, print, and PDF flows',
 )
 assert.match(
@@ -2956,8 +2963,8 @@ assert.match(
 )
 assert.match(
   filePickerModal,
-  /const notifyRef = useRef\(notify\)[\s\S]*notifyRef\.current = notify[\s\S]*notifyRef\.current\(getErrorMessage\(error, 'Failed to load files'\), 'error'\)[\s\S]*\}, \[mediaType, page, search\]\)/,
-  'file picker load effect should avoid unstable notify dependencies that can restart the modal loader every render (page is a real dependency: each page is a separate fetch)',
+  /const notifyRef = useRef\(notify\)[\s\S]*notifyRef\.current = notify[\s\S]*notifyRef\.current\(getErrorMessage\(error, 'Failed to load files'\), 'error'\)[\s\S]*\}, \[mediaType, page, pageSize, search\]\)/,
+  'file picker load effect should avoid unstable notify dependencies while retaining every request-scope dependency (page and pageSize each select a separate fetch)',
 )
 assert.match(
   filePickerModal,
@@ -2971,7 +2978,7 @@ assert.match(
 )
 assert.match(
   filePickerModal,
-  /withLoaderTimeout\(\s*\(\) => fetchPickerFiles\(\{ search, mediaType, page, pageSize: PICKER_PAGE_SIZE, includeMeta: true \}\),\s*'Files library picker',\s*FILE_PICKER_LOAD_TIMEOUT_MS,?\s*\)/,
+  /withLoaderTimeout\(\s*\(\) => fetchPickerFiles\(\{ search, mediaType, page, pageSize, includeMeta: true \}\),\s*'Files library picker',\s*FILE_PICKER_LOAD_TIMEOUT_MS,?\s*\)/,
   'file picker library should timeout slow file reads',
 )
 assert.doesNotMatch(
@@ -3336,13 +3343,13 @@ assert.match(
 )
 assert.match(
   pos,
-  /if \(!catalogLoadedOnceRef\.current \|\| catalogRefreshing\) return undefined[\s\S]*setContactOptionsReady\(true\)/,
-  'POS should enable contact option reads immediately after the first catalog load settles',
+  /const needsCustomerOptions = showCustomer \|\| showAddCustomer[\s\S]*const needsDeliveryOptions = \(showDelivery && Boolean\(active\?\.isDelivery\)\) \|\| showAddDelivery[\s\S]*setContactOptionsReady\(true\)/,
+  'POS should wake contact option reads only when the matching checkout section opens',
 )
 assert.match(
   pos,
-  /if \(!isActive \|\| !contactOptionsReady\) return[\s\S]*loadCustomers\('POS initial customers'\)[\s\S]*loadDeliveryContacts\('POS initial delivery contacts'\)/,
-  'POS should keep customer and delivery option reads out of the first route load',
+  /if \(!isActive \|\| !contactOptionsReady\) return[\s\S]*!customerOptionsLoadedRef\.current[\s\S]*loadCustomers\('POS customer options on demand'\)[\s\S]*!deliveryOptionsLoadedRef\.current[\s\S]*loadDeliveryContacts\('POS delivery options on demand'\)/,
+  'POS should keep customer and delivery reads off the catalog path and avoid refetching loaded option lists',
 )
 assert.match(
   pos,

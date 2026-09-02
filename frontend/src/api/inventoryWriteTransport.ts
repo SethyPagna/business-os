@@ -70,6 +70,10 @@ export function saveInventoryReasons(items: unknown[] = []): Promise<unknown> {
   )
 }
 
+export function replaceInventoryReason(payload: { type: string; from: string; to: string; scope: 'saved_only' | 'linked' }): Promise<unknown> {
+  return route('inventory:reasons:replace', () => apiFetch('POST', '/api/inventory/reasons/replace', payload), null, true)
+}
+
 // Dated stock-reconciliation import -- the 4-call review flow (Part
 // 288-292's backend, first wired to a real UI this session): /resolve
 // analyzes raw uploaded rows (never writes a product), the review screen

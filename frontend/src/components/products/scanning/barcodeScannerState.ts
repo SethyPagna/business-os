@@ -7,7 +7,9 @@ interface ScannerPresentationLabels {
   requestingCamera?: string
   scanUnsupported?: string
   cameraPermissionNeeded?: string
+  cameraPermissionReady?: string
   cameraPermissionBlocked?: string
+  startCamera?: string
   requestCameraAccess?: string
   tryCameraAgain?: string
   error?: string
@@ -34,9 +36,11 @@ export function deriveScannerPresentation({
   labels = {},
   promptDismissedMessage = '',
 }: ScannerPresentationInput = {}): ScannerPresentation {
-  const requestCameraLabel = permissionState === 'denied' || status === 'dismissed'
-    ? labels.tryCameraAgain
-    : labels.requestCameraAccess
+  const requestCameraLabel = permissionState === 'granted'
+    ? labels.startCamera
+    : permissionState === 'denied' || status === 'dismissed'
+      ? labels.tryCameraAgain
+      : labels.requestCameraAccess
 
   const statusMessage = status === 'scanning'
     ? labels.scanReady
@@ -58,7 +62,9 @@ export function deriveScannerPresentation({
       ? labels.cameraPermissionBlocked
       : status === 'dismissed'
         ? promptDismissedMessage
-        : labels.cameraPermissionNeeded
+        : permissionState === 'granted'
+          ? labels.cameraPermissionReady
+          : labels.cameraPermissionNeeded
   )
 
   const stateKind = status === 'scanning'

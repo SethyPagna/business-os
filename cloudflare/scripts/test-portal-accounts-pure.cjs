@@ -16,6 +16,7 @@ const { openDb } = require('./harness/d1compat.cjs')
 const { loadAll } = require('./harness/load_migrations.cjs')
 
 const rawDb = openDb(loadAll())
+const portalAccountSource = fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'portalAccounts.ts'), 'utf8')
 
 // The harness D1Compat's .run() returns the RAW D1 shape ({ meta: { last_row_id
 // }}); the real lib/db.ts D1Compat flattens that to { changes, lastInsertRowid
@@ -120,7 +121,8 @@ async function run() {
   await check('signup (new customer, no membership id) creates account + folded contact + auto id', async () => {
     const res = await signupPortalAccount(env, { name: 'Dara', phone: '099 888 777', password: 'secret123' })
     assert.strictEqual(res.ok, true)
-    assert.ok(/^LCMN-/.test(res.membershipId), 'auto membership id has the LCMN prefix')
+    assert.ok(/^LCMN-[A-F0-9]{12}$/.test(res.membershipId), 'auto membership id uses 48 bits of Web-Crypto entropy')
+    assert.ok(!portalAccountSource.includes('Math.random('), 'account identifiers must never use Math.random')
     const account = rawDb.prepare('SELECT phone, contact_id, membership_id FROM portal_accounts WHERE id = ?').get([res.accountId])
     assert.strictEqual(account.phone, '099888777', 'stored phone is canonical')
     assert.ok(account.contact_id, 'a contact was folded and linked')

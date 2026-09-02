@@ -2,6 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ComponentProps } from 'react'
 import Modal from '../../shared/Modal'
 import ActionHistoryBar from '../../shared/ActionHistoryBar'
+import RenameCascadeModal, { type RenameCascadeChoice, type RenameCascadeRequest } from '../../shared/RenameCascadeModal.tsx'
+import { getRenameImpact } from '../../../api/renameCascadeTransport.ts'
 import { useApp as useAppHook, useSync as useSyncHook } from '../../../AppContext.tsx'
 import { useActionHistory } from '../../../utils/actionHistory.ts'
 import { beginSingleAction, finishSingleAction } from '../../../utils/actionGuards.ts'
@@ -79,6 +81,7 @@ interface UnitPayload {
   name: string
   color: string
   expectedUpdatedAt?: unknown
+  cascade?: 'carry' | 'copy'
 }
 
 interface ReviewSelection {
@@ -170,6 +173,18 @@ export default function ManageUnitsModal({ onClose, onReviewSelection, t }: Mana
   const [err, setErr] = useState('')
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
+  const [renameRequest, setRenameRequest] = useState<RenameCascadeRequest | null>(null)
+  const renameResolveRef = useRef<((choice: RenameCascadeChoice) => void) | null>(null)
+  const askRenameChoice = (request: RenameCascadeRequest) => new Promise<RenameCascadeChoice>((resolve) => {
+    renameResolveRef.current = resolve
+    setRenameRequest(request)
+  })
+  const handleRenameChoice = (choice: RenameCascadeChoice) => {
+    setRenameRequest(null)
+    const resolve = renameResolveRef.current
+    renameResolveRef.current = null
+    resolve?.(choice)
+  }
   const [deletingId, setDeletingId] = useState<EntityId | 'selected' | null>(null)
   const [selectedIds, setSelectedIds] = useState<Set<number>>(() => new Set())
   const { notify, user } = useApp()
@@ -308,7 +323,15 @@ export default function ManageUnitsModal({ onClose, onReviewSelection, t }: Mana
     setSaving(true)
     try {
       const previousSnapshot = units.find((entry) => Number(entry?.id || 0) === Number(unit?.id || 0))
-      const payload = { name: unit.name, color: unit.color || DEFAULT_UNIT_COLOR, expectedUpdatedAt: unit.updated_at || undefined }
+      const payload: UnitPayload = { name: unit.name, color: unit.color || DEFAULT_UNIT_COLOR, expectedUpdatedAt: unit.updated_at || undefined }
+      const oldName = String(previousSnapshot?.name || '').trim()
+      const newName = String(unit.name || '').trim()
+      if (oldName && newName && oldName.toLowerCase() !== newName.toLowerCase()) {
+        const impact = await getRenameImpact('unit', oldName, newName)
+        const choice = await askRenameChoice({ kind: 'unit', from: oldName, to: newName, impact, choices: ['carry', 'copy'] })
+        if (choice === 'cancel') return
+        payload.cascade = choice === 'copy' ? 'copy' : 'carry'
+      }
       const res = await runUnitMutation(() => getUnitApi().updateUnit(unit.id, payload), 'Update unit')
       if (res?.success === false) {
         setErr(res.error || 'Failed')
@@ -327,6 +350,7 @@ export default function ManageUnitsModal({ onClose, onReviewSelection, t }: Mana
               name: previousSnapshot.name,
               color: previousSnapshot.color || DEFAULT_UNIT_COLOR,
               expectedUpdatedAt: latest.updated_at || undefined,
+              cascade: 'carry',
             }), 'Undo unit update')
             await load()
           },
@@ -337,6 +361,7 @@ export default function ManageUnitsModal({ onClose, onReviewSelection, t }: Mana
               name: payload.name,
               color: payload.color || DEFAULT_UNIT_COLOR,
               expectedUpdatedAt: latest.updated_at || undefined,
+              cascade: 'carry',
             }), 'Redo unit update')
             await load()
           },
@@ -604,6 +629,7 @@ export default function ManageUnitsModal({ onClose, onReviewSelection, t }: Mana
           ))}
         </div>
       </div>
+      <RenameCascadeModal request={renameRequest} busy={saving} t={(key, fallback) => t(key) || fallback || key} onChoose={handleRenameChoice} />
     </Modal>
   )
 }

@@ -72,7 +72,14 @@ try {
   Module._load = originalLoad
 }
 
-const { DRIVE_BACKUP_KEEP, isTrustedDriveUploadSession, pushBackupToDrive } = moduleObj.exports
+const {
+  DRIVE_BACKUP_KEEP,
+  DRIVE_OAUTH_STATE_TTL_SECONDS,
+  buildDriveOauthStartUrl,
+  consumeDriveOauthState,
+  isTrustedDriveUploadSession,
+  pushBackupToDrive,
+} = moduleObj.exports
 assert.strictEqual(DRIVE_BACKUP_KEEP, 10, 'the user keeps 2 in R2 and 10 in Drive (Part 386)')
 assert.strictEqual(isTrustedDriveUploadSession('https://www.googleapis.com/upload/drive/v3/files?upload_id=ok'), true)
 assert.strictEqual(isTrustedDriveUploadSession('https://upload.googleapis.com/session/ok'), true)
@@ -93,6 +100,18 @@ const env = {
   APP_ENCRYPTION_KEY: 'test',
   GOOGLE_DRIVE_CLIENT_ID: 'client',
   GOOGLE_DRIVE_CLIENT_SECRET: 'secret',
+  AUTH_SESSION_SECRET: 'oauth-state-secret',
+  BUSINESS_OS_ADMIN_URL: 'https://admin.example.com',
+  GOOGLE_DRIVE_REDIRECT_URI: 'https://admin.example.com/api/system/drive-sync/oauth/callback',
+  CACHE: {
+    values: new Map(),
+    async put(key, value, options) {
+      assert.strictEqual(options.expirationTtl, DRIVE_OAUTH_STATE_TTL_SECONDS)
+      this.values.set(key, value)
+    },
+    async get(key) { return this.values.get(key) || null },
+    async delete(key) { this.values.delete(key) },
+  },
 }
 
 const calls = []
@@ -141,6 +160,24 @@ global.fetch = async (url, init = {}) => {
 
 async function main() {
   try {
+    const oauth = await buildDriveOauthStartUrl(env, {
+      userId: 42,
+      returnOrigin: 'https://evil.example',
+      returnPath: '//evil.example/escape',
+    })
+    assert.strictEqual(oauth.success, true, oauth.error)
+    const oauthUrl = new URL(oauth.url)
+    assert.ok(oauthUrl.searchParams.get('state'))
+    assert.ok(oauthUrl.searchParams.get('code_challenge'))
+    assert.strictEqual(oauthUrl.searchParams.get('code_challenge_method'), 'S256')
+    const consumed = await consumeDriveOauthState(env, oauthUrl.searchParams.get('state'))
+    assert.strictEqual(consumed.success, true, consumed.error)
+    assert.strictEqual(consumed.payload.userId, 42)
+    assert.strictEqual(consumed.payload.returnOrigin, 'https://admin.example.com')
+    assert.strictEqual(consumed.payload.returnPath, '/?settings=integrations')
+    const replay = await consumeDriveOauthState(env, oauthUrl.searchParams.get('state'))
+    assert.strictEqual(replay.success, false, 'Drive OAuth state must be one-time')
+
     const result = await pushBackupToDrive(env)
     assert.strictEqual(result.success, true, result.error)
     assert.strictEqual(result.fileId, 'drive-file')
@@ -155,7 +192,7 @@ async function main() {
     assert.strictEqual(r2Reads, 1, 'a duplicate Drive mirror must not even reopen the R2 body')
     assert.doesNotMatch(source, /object\.arrayBuffer\(\)/)
     assert.doesNotMatch(source, /await createCloudflareBackup\(/)
-    console.log('PASS Drive mirrors the newest finalized R2 manifest via trusted resumable streaming and prunes only tagged app backups to ten')
+    console.log('PASS Drive uses signed expiring one-time PKCE state, mirrors the newest finalized R2 manifest, and prunes only tagged app backups to ten')
   } finally {
     global.fetch = originalFetch
   }

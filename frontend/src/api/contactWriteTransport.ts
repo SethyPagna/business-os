@@ -1,5 +1,6 @@
 import { getClientDeviceInfo } from '../utils/deviceInfo.ts'
 import { apiFetch, route } from './http.ts'
+import type { RenameImpact } from './renameCascadeTransport.ts'
 
 type ContactWritePayload = Record<string, unknown>
 type ContactTableName = 'customers' | 'suppliers' | 'delivery_contacts'
@@ -89,6 +90,11 @@ export function updateCustomer(id: number | string, payload: ContactWritePayload
   return updateContact('customers', '/api/customers', 'customers', id, payload)
 }
 
+export function getCustomerRenameImpact(id: number | string, to: string): Promise<RenameImpact> {
+  const query = new URLSearchParams({ to })
+  return apiFetch('GET', `/api/customers/${encodeURIComponent(String(id))}/rename-impact?${query.toString()}`)
+}
+
 export function deleteCustomer(id: number | string): Promise<unknown> {
   return deleteContact('customers', '/api/customers', 'customers', id)
 }
@@ -108,6 +114,11 @@ export function createSupplier(payload: ContactWritePayload = {}): Promise<unkno
 
 export function updateSupplier(id: number | string, payload: ContactWritePayload = {}): Promise<unknown> {
   return updateContact('suppliers', '/api/suppliers', 'suppliers', id, payload)
+}
+
+export function getSupplierRenameImpact(id: number | string, to: string): Promise<RenameImpact> {
+  const query = new URLSearchParams({ to })
+  return apiFetch('GET', `/api/suppliers/${encodeURIComponent(String(id))}/rename-impact?${query.toString()}`)
 }
 
 export function deleteSupplier(id: number | string): Promise<unknown> {

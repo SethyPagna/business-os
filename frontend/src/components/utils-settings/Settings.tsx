@@ -44,6 +44,8 @@ import {
   sanitizePersistedMediaPath,
 } from '../../utils/mediaUploadState.ts'
 import type { UploadAction } from '../../utils/mediaUploadState.ts'
+import { getPaymentMethodImpact, replacePaymentMethod } from '../../api/settingsTransport.ts'
+import { getTelegramStatus, sendTelegramTest, sendTelegramTodaySummary, type TelegramStatus } from '../../api/telegramTransport.ts'
 
 type TranslateFn = (key: string) => string
 type NotifyFn = (message: string, type?: string) => void
@@ -489,6 +491,8 @@ export default function Settings() {
   const [showConflictReview, setShowConflictReview] = useState(false)
   const [savingSettings, setSavingSettings] = useState(false)
   const [uploadStates, setUploadStates] = useState<UploadStateMap>(() => ({}))
+  const [telegramStatus, setTelegramStatus] = useState<TelegramStatus | null>(null)
+  const [telegramAction, setTelegramAction] = useState<'test' | 'summary' | null>(null)
   const settingsSaveInFlightRef = useRef(false)
   const uploadInFlightKeysRef = useRef<Set<string>>(new Set())
   const uploadControllersRef = useRef<Map<string, AbortController>>(new Map())
@@ -604,6 +608,11 @@ export default function Settings() {
       return false
     }
   }, [user])
+
+  useEffect(() => {
+    if (!isAdmin) return
+    void getTelegramStatus().then(setTelegramStatus).catch(() => setTelegramStatus(null))
+  }, [isAdmin])
 
   const navItems = useMemo<NavItem[]>(
     // Account-expander pages (Settings / Receipt Settings) aren't reorderable
@@ -748,17 +757,43 @@ export default function Settings() {
     </div>
   )
 
-  const savePaymentMethods = (updated: string[]) => {
-    setPmList(updated)
-    void saveSettings(
-      { pos_payment_methods: JSON.stringify(updated) },
-      {
-        silentToast: true,
-        refreshChannels: ['settings', 'sales', 'pos', 'dashboard'],
-        reason: 'pos-payment-methods-saved',
-        source: 'settings:payment-methods',
-      },
-    )
+  const savePaymentMethods = async (updated: string[]): Promise<boolean> => {
+    const normalized = normalizePaymentMethods(updated)
+    try {
+      await saveSettings(
+        { pos_payment_methods: JSON.stringify(normalized) },
+        {
+          silentToast: true,
+          refreshChannels: ['settings', 'sales', 'pos', 'dashboard'],
+          reason: 'pos-payment-methods-saved',
+          source: 'settings:payment-methods',
+        },
+      )
+      setPmList(normalized)
+      notify('Payment methods saved.', 'success')
+      return true
+    } catch (error) {
+      notify(error instanceof Error ? error.message : 'Failed to save payment methods', 'error')
+      return false
+    }
+  }
+
+  const renamePaymentMethod = async (from: string) => {
+    const to = window.prompt(t('rename_payment_method') || 'Rename payment method', from)?.trim()
+    if (!to || to.toLocaleLowerCase() === from.toLocaleLowerCase()) return
+    try {
+      const impact = await getPaymentMethodImpact(from, to) as { linked_records?: number; target_exists?: boolean }
+      const linked = Number(impact.linked_records || 0)
+      const scope = linked > 0 && window.confirm(
+        `${linked} linked sale/payment record${linked === 1 ? '' : 's'} use "${from}".${impact.target_exists ? ` "${to}" already exists, so the configured choices will merge.` : ''}\n\nOK: update those exact matches too.\nCancel: rename only the configured choice.\nAudit logs stay unchanged.`,
+      ) ? 'linked' : 'settings_only'
+      const result = await replacePaymentMethod({ from, to, scope }) as { methods?: string[] }
+      setPmList(normalizePaymentMethods(result.methods || pmList.map((method) => method.toLocaleLowerCase() === from.toLocaleLowerCase() ? to : method)))
+      await loadSettings({ force: true })
+      notify(scope === 'linked' ? 'Payment method and linked records updated.' : 'Payment method option updated; existing sales were preserved.', 'success')
+    } catch (error) {
+      notify(error instanceof Error ? error.message : 'Failed to rename payment method', 'error')
+    }
   }
 
   const cancelImageUpload = useCallback((key: string) => {
@@ -876,6 +911,21 @@ export default function Settings() {
     } finally {
       finishSingleAction(settingsSaveInFlightRef)
       setSavingSettings(false)
+    }
+  }
+
+  const runTelegramAction = async (action: 'test' | 'summary') => {
+    if (!canEditSettings || telegramAction) return
+    setTelegramAction(action)
+    try {
+      if (action === 'test') await sendTelegramTest()
+      else await sendTelegramTodaySummary()
+      setTelegramStatus(await getTelegramStatus().catch(() => telegramStatus))
+      notify(action === 'test' ? 'Telegram test message sent and commands connected.' : "Today's Telegram summary was sent.", 'success')
+    } catch (error) {
+      notify(error instanceof Error ? error.message : 'Telegram action failed', 'error')
+    } finally {
+      setTelegramAction(null)
     }
   }
 
@@ -1578,7 +1628,18 @@ export default function Settings() {
                 <span className="flex-1 text-sm text-gray-700 dark:text-gray-300">{paymentMethod}</span>
                 <button
                   type="button"
-                  onClick={() => savePaymentMethods(pmList.filter((_, methodIndex) => methodIndex !== index))}
+                  onClick={() => void renamePaymentMethod(paymentMethod)}
+                  className="rounded px-2 py-1 text-xs text-blue-600 hover:bg-blue-50 dark:text-blue-300 dark:hover:bg-blue-900/20"
+                  title="Preview and rename"
+                >
+                  {t('rename') || 'Rename'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (!window.confirm(`Remove "${paymentMethod}" from checkout choices? Existing sales keep their recorded payment method.`)) return
+                    void savePaymentMethods(pmList.filter((_, methodIndex) => methodIndex !== index))
+                  }}
                   className="text-red-400 hover:text-red-600 text-xs px-2 py-1 rounded hover:bg-red-50 dark:hover:bg-red-900/20"
                 >
                   {t('remove')}
@@ -1599,8 +1660,7 @@ export default function Settings() {
               onChange={(event) => setNewPm(event.target.value)}
               onKeyDown={(event) => {
                 if (event.key === 'Enter' && newPm.trim()) {
-                  savePaymentMethods(normalizePaymentMethods([...pmList, newPm.trim()]))
-                  setNewPm('')
+                  void savePaymentMethods([...pmList, newPm.trim()]).then((saved) => { if (saved) setNewPm('') })
                 }
               }}
             />
@@ -1609,8 +1669,7 @@ export default function Settings() {
               className="btn-primary text-sm"
               onClick={() => {
                 if (!newPm.trim()) return
-                savePaymentMethods(normalizePaymentMethods([...pmList, newPm.trim()]))
-                setNewPm('')
+                void savePaymentMethods([...pmList, newPm.trim()]).then((saved) => { if (saved) setNewPm('') })
               }}
             >
               + {t('add')}
@@ -1741,6 +1800,78 @@ export default function Settings() {
                 <p className="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
                   {t('notification_realert_interval_desc') || 'Opening notifications clears the badge. Unresolved alerts can appear again after this interval.'}
                 </p>
+              </div>
+            </div>
+          </SettingsSection>
+        ) : null}
+
+        {isAdmin && showSettingsSection('security') ? (
+          <SettingsSection
+            title="Telegram automation"
+            description="Send business activity to one owner/manager Telegram chat. Every category is on by default; turn off any category you do not want."
+          >
+            <div className="grid gap-3 sm:grid-cols-2">
+              <label className="flex items-center justify-between rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 sm:col-span-2 dark:border-gray-700 dark:bg-gray-800/70">
+                <div className="pr-3">
+                  <div className="text-sm font-medium text-gray-800 dark:text-gray-100">Enable Telegram automation</div>
+                  <div className="text-xs text-gray-500 dark:text-gray-400">Turns every selected Telegram message on or off.</div>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={String(form.telegram_automation_enabled ?? 'true') === 'true'}
+                  onChange={(event) => setValue('telegram_automation_enabled', event.target.checked ? 'true' : 'false')}
+                />
+              </label>
+              <div>
+                <label htmlFor="settings-telegram-chat-id" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">Telegram chat ID</label>
+                <input
+                  id="settings-telegram-chat-id"
+                  name="telegram_chat_id"
+                  className="input w-full"
+                  autoComplete="off"
+                  placeholder="Example: -1001234567890"
+                  value={form.telegram_chat_id || ''}
+                  onChange={(event) => setValue('telegram_chat_id', event.target.value)}
+                />
+              </div>
+              <div className="rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 dark:border-gray-700 dark:bg-gray-800/70">
+                <div className="text-sm font-medium text-gray-800 dark:text-gray-100">Bot token</div>
+                <div className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                  {telegramStatus?.configured ? 'Configured securely on the server.' : 'Not configured on the server yet.'}
+                </div>
+              </div>
+              {[
+                ['telegram_sales_enabled', 'Sales & new receipts', 'Receipt number, status, totals, items, customer, and branch'],
+                ['telegram_status_enabled', 'Receipt status changes', 'Payment, delivery, completion, and cancellation changes'],
+                ['telegram_fees_enabled', 'Fees', 'New fee type, amount, date, label, and note'],
+                ['telegram_stock_in_enabled', 'Stock in', 'Product, quantity, branch, reason, and lot'],
+                ['telegram_stock_out_enabled', 'Stock out', 'Product, quantity, branch, and reason'],
+              ].map(([key, label, description]) => (
+                <label key={key} className="flex items-center justify-between rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 dark:border-gray-700 dark:bg-gray-800/70">
+                  <div className="pr-3">
+                    <div className="text-sm font-medium text-gray-800 dark:text-gray-100">{label}</div>
+                    <div className="text-xs text-gray-500 dark:text-gray-400">{description}</div>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={String(form[key] ?? 'true') === 'true'}
+                    onChange={(event) => setValue(key, event.target.checked ? 'true' : 'false')}
+                  />
+                </label>
+              ))}
+              <div className="sm:col-span-2 flex flex-wrap gap-2 pt-1">
+                <button type="button" className="btn-secondary text-sm" onClick={() => void runTelegramAction('test')} disabled={!canEditSettings || telegramAction !== null}>
+                  {telegramAction === 'test' ? 'Sending test...' : 'Send test message'}
+                </button>
+                <button type="button" className="btn-secondary text-sm" onClick={() => void runTelegramAction('summary')} disabled={!canEditSettings || telegramAction !== null}>
+                  {telegramAction === 'summary' ? 'Sending summary...' : "Send today's summary"}
+                </button>
+              </div>
+              <p className="sm:col-span-2 text-xs text-gray-500 dark:text-gray-400">
+                Save the chat ID and switches first. The bot token is a server secret, so it is never displayed in the app. Start a chat with the bot or add it to the target group before sending a test.
+              </p>
+              <div className="sm:col-span-2 rounded-xl bg-gray-50 px-3 py-2 text-xs text-gray-600 dark:bg-gray-800/70 dark:text-gray-300">
+                <span className="font-medium">Owner / manager commands:</span> this same Telegram chat can use <code>/today</code>, <code>/sales</code>, <code>/fees</code>, <code>/inventory</code>, <code>/stock</code>, and <code>/help</code>. Keep this chat private to owners/managers; sending a test message automatically connects commands.
               </div>
             </div>
           </SettingsSection>

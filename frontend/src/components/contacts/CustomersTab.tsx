@@ -20,6 +20,7 @@ import FilterMenu from '../shared/FilterMenu'
 import SearchInput from '../shared/SearchInput'
 import { loadSortSpec, saveSortSpec, type SortField, type SortSpec } from '../../utils/listSort'
 import ActionHistoryBar from '../shared/ActionHistoryBar'
+import RenameCascadeModal, { type RenameCascadeChoice, type RenameCascadeRequest } from '../shared/RenameCascadeModal.tsx'
 import { ThreeDotMenu, DetailModal, ContactTable, buildSelectedSnapshots, countActiveFlags, useContactSelection } from './shared'
 import { withLoaderTimeout } from '../../utils/loaders.ts'
 import { beginTrackedRequest, invalidateTrackedRequest, isTrackedRequestCurrent } from '../../utils/loaders.ts'
@@ -46,7 +47,7 @@ type NotifyFn = (message: string, tone?: string) => void
 type ContactModal = 'form' | 'import' | 'detail' | 'purchases' | null
 type SortDirection = 'asc' | 'desc'
 type CustomerGroupMode = 'time' | 'alphabet'
-type CustomerPayload = Omit<CustomerRow, 'id' | 'points_balance' | 'points_earned' | 'points_redeemed' | 'points_rewarded' | 'points_deducted' | 'created_at'> & {
+type CustomerPayload = Partial<CustomerRow> & {
   userId?: string | number | null
   userName?: string | null
   // Only buildCustomerPayload (undo/redo replay + delete-restore) ever
@@ -57,6 +58,7 @@ type CustomerPayload = Omit<CustomerRow, 'id' | 'points_balance' | 'points_earne
   // never has this key, since the form has no created_at input -- see
   // contacts.ts's CUSTOMERS.columns comment for the full reasoning.
   created_at?: string | null
+  __rename_cascade?: 'carry' | 'record_only'
 }
 
 interface CustomerMutationResult {
@@ -149,6 +151,7 @@ interface CustomerApi {
   getCustomers: (query: QueryParams) => Promise<unknown>
   createCustomer: (payload: CustomerPayload) => Promise<unknown>
   updateCustomer: (id: number | string, payload: CustomerPayload | CustomerRow) => Promise<unknown>
+  getCustomerRenameImpact: (id: number | string, to: string) => Promise<import('../../api/renameCascadeTransport.ts').RenameImpact>
   deleteCustomer: (id: number | string) => Promise<unknown>
 }
 
@@ -187,6 +190,7 @@ function getCustomerApi(): CustomerApi {
     getCustomers: async (query) => (await loadContactReadTransportModule()).getCustomers(query),
     createCustomer: async (payload) => (await loadContactWriteTransportModule()).createCustomer(payload),
     updateCustomer: async (id, payload) => (await loadContactWriteTransportModule()).updateCustomer(id, payload),
+    getCustomerRenameImpact: async (id, to) => (await loadContactWriteTransportModule()).getCustomerRenameImpact(id, to),
     deleteCustomer: async (id) => (await loadContactWriteTransportModule()).deleteCustomer(id),
   }
 }
@@ -266,6 +270,18 @@ function CustomersTab({ t, notify, active = true, initialSearch }: CustomersTabP
   }, [initialSearch])
   const [modal, setModal] = useState<ContactModal>(null)
   const [selected, setSelected] = useState<CustomerRow | null>(null)
+  const [renameRequest, setRenameRequest] = useState<RenameCascadeRequest | null>(null)
+  const renameResolveRef = useRef<((choice: RenameCascadeChoice) => void) | null>(null)
+  const askRenameChoice = (request: RenameCascadeRequest) => new Promise<RenameCascadeChoice>((resolve) => {
+    renameResolveRef.current = resolve
+    setRenameRequest(request)
+  })
+  const handleRenameChoice = (choice: RenameCascadeChoice) => {
+    setRenameRequest(null)
+    const resolve = renameResolveRef.current
+    renameResolveRef.current = null
+    resolve?.(choice)
+  }
   const [loading, setLoading] = useState(true)
   // Y1: true while ANY load is in flight, including the silent search
   // refetches -- so an empty re-filtered list can say "Searching..."
@@ -505,6 +521,7 @@ function CustomersTab({ t, notify, active = true, initialSearch }: CustomersTabP
     created_at: customer.created_at || undefined,
     userId: user?.id,
     userName: user?.name,
+    __rename_cascade: 'carry',
   }), [user?.id, user?.name])
 
   const runCustomerMutation = useCallback(async (loader: () => unknown | Promise<unknown>, label: string): Promise<CustomerMutationResult> => (
@@ -628,7 +645,19 @@ function CustomersTab({ t, notify, active = true, initialSearch }: CustomersTabP
 
     try {
       const existingSnapshot = selected ? cloneHistorySnapshot(selected) : null
-      const payload = { ...form, userId: user?.id, userName: user?.name }
+      const payload: CustomerPayload = { ...form, userId: user?.id, userName: user?.name } as CustomerPayload
+      const oldName = selected ? String(selected.name || '').trim() : ''
+      const newName = String(form.name || '').trim()
+      if (selected && oldName && oldName.toLowerCase() !== newName.toLowerCase()) {
+        const impact = await getCustomerApi().getCustomerRenameImpact(selected.id, newName)
+        if (impact.target_exists) {
+          notify(`"${newName}" already exists. Use Possible Duplicates to choose which customer to keep.`, 'warning')
+          return
+        }
+        const choice = await askRenameChoice({ kind: 'customer', from: oldName, to: newName, impact, choices: ['carry', 'only'] })
+        if (choice === 'cancel') return
+        payload.__rename_cascade = choice === 'carry' ? 'carry' : 'record_only'
+      }
       const result = selected
         ? await runCustomerMutation(() => getCustomerApi().updateCustomer(selected.id, payload), 'Update customer')
         : await runCustomerMutation(() => getCustomerApi().createCustomer(payload), 'Create customer')
@@ -1025,7 +1054,7 @@ function CustomersTab({ t, notify, active = true, initialSearch }: CustomersTabP
                 </>
                 ) : null}
               </td>
-              <td className="px-4 py-2 font-medium text-gray-900 cursor-pointer dark:text-white" onClick={() => handleContactCellClick(customerRow)}>
+              <td className="max-w-[13rem] cursor-pointer px-3 py-1.5 font-medium text-gray-900 dark:text-white" onClick={() => handleContactCellClick(customerRow)}>
                 <span className="inline-flex items-center gap-1.5">
                   {customerRow.name}
                   {customerRow.portal_account ? (
@@ -1035,15 +1064,15 @@ function CustomersTab({ t, notify, active = true, initialSearch }: CustomersTabP
                   ) : null}
                 </span>
               </td>
-              <td className="px-4 py-2 font-mono text-xs text-gray-500 cursor-pointer" onClick={() => handleContactCellClick(customerRow)}>{customerRow.membership_number || '--'}</td>
-              <td className="px-4 py-2 font-semibold text-blue-600 cursor-pointer dark:text-blue-300" onClick={() => handleContactCellClick(customerRow)}>
+              <td className="max-w-[10rem] cursor-pointer truncate px-3 py-1.5 font-mono text-[11px] text-blue-600 dark:text-blue-400" title={customerRow.membership_number || undefined} onClick={() => handleContactCellClick(customerRow)}>{customerRow.membership_number || '--'}</td>
+              <td className="cursor-pointer px-3 py-1.5 font-semibold text-blue-600 dark:text-blue-300" onClick={() => handleContactCellClick(customerRow)}>
                 {formatPoints(customerRow.points_balance)}
               </td>
-              <td className="px-4 py-2 text-gray-500 cursor-pointer" onClick={() => handleContactCellClick(customerRow)}>{primaryOption.phone || customerRow.phone || '-'}</td>
-              <td className="px-4 py-2 text-xs text-gray-500 cursor-pointer" onClick={() => handleContactCellClick(customerRow)}>{primaryOption.email || customerRow.email || '-'}</td>
-              <td className="px-4 py-2 text-gray-500 cursor-pointer" onClick={() => handleContactCellClick(customerRow)}>{customerRow.gender ? tr(t, customerRow.gender, customerRow.gender) : tr(t, 'unspecified', 'Unspecified')}</td>
-              <td className="px-4 py-2 text-xs text-gray-500 cursor-pointer" onClick={() => handleContactCellClick(customerRow)}>{fmtDateTime24(customerRow.created_at)}</td>
-              <td className="px-4 py-2 cursor-pointer" onClick={() => handleContactCellClick(customerRow)}>
+              <td className="cursor-pointer whitespace-nowrap px-3 py-1.5 text-gray-500" onClick={() => handleContactCellClick(customerRow)}>{primaryOption.phone || customerRow.phone || '-'}</td>
+              <td className="max-w-[12rem] cursor-pointer truncate px-3 py-1.5 text-[11px] text-gray-500" onClick={() => handleContactCellClick(customerRow)}>{primaryOption.email || customerRow.email || '-'}</td>
+              <td className="cursor-pointer px-3 py-1.5 text-gray-500" onClick={() => handleContactCellClick(customerRow)}>{customerRow.gender ? tr(t, customerRow.gender, customerRow.gender) : tr(t, 'unspecified', 'Unspecified')}</td>
+              <td className="cursor-pointer whitespace-nowrap px-3 py-1.5 text-[11px] text-gray-500" onClick={() => handleContactCellClick(customerRow)}>{fmtDateTime24(customerRow.created_at)}</td>
+              <td className="cursor-pointer px-3 py-1.5" onClick={() => handleContactCellClick(customerRow)}>
                 {options.length === 0 ? (
                   <span className="text-xs text-gray-400">-</span>
                 ) : (
@@ -1055,7 +1084,7 @@ function CustomersTab({ t, notify, active = true, initialSearch }: CustomersTabP
                   </div>
                 )}
               </td>
-              <td className="px-2 py-2 text-right" onClick={(event) => event.stopPropagation()}>
+              <td className="px-2 py-1.5 text-right" onClick={(event) => event.stopPropagation()}>
                 <ThreeDotMenu onDetails={() => { setSelected(customerRow); setModal('detail') }} onEdit={() => { setSelected(customerRow); setModal('form') }} onDelete={canDeleteContact ? () => handleDelete(customerRow) : undefined} />
               </td>
             </tr>
@@ -1223,9 +1252,9 @@ function CustomersTab({ t, notify, active = true, initialSearch }: CustomersTabP
           />
         </Suspense>
       ) : null}
+      <RenameCascadeModal request={renameRequest} busy={false} t={(key, fallback) => tr(t, key, fallback || key)} onChoose={handleRenameChoice} />
     </div>
   )
 }
 
 export { CustomersTab }
-

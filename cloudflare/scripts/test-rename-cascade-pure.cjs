@@ -112,6 +112,41 @@ async function run() {
     assert.equal(batch.supplier_name, 'New Trading')
   })
 
+  await check('unit carry uses exact normalized equality', async () => {
+    await db.prepare(`UPDATE products SET unit = 'Bottle' WHERE barcode IN ('a1','b1')`).run()
+    const impact = await engine.computeRenameImpact(db, 'unit', ' bottle ', 'Piece')
+    assert.equal(impact.products_primary, 2)
+    const changed = await engine.applyRenameCarry(db, 'unit', 'BOTTLE', 'Piece', '2026-08-28T10:00:00Z')
+    assert.equal(changed.products, 2)
+    assert.equal(Number((await db.prepare(`SELECT COUNT(*) AS n FROM products WHERE unit = 'Piece'`).get()).n), 2)
+  })
+
+  await check('atomic normalized lookup create admits only one case/space-equivalent value', async () => {
+    const insert = (name) => db.prepare(`
+      INSERT INTO categories (name, color, updated_at)
+      SELECT @name, '#64748B', CURRENT_TIMESTAMP
+      WHERE NOT EXISTS (SELECT 1 FROM categories WHERE lower(trim(name)) = lower(trim(@name)))
+    `).run({ name })
+    await Promise.all([insert('Concurrency Set'), insert('  concurrency set  ')])
+    const row = await db.prepare(`SELECT COUNT(*) AS n FROM categories WHERE lower(trim(name)) = 'concurrency set'`).get()
+    assert.equal(Number(row.n), 1, 'the collision check lives inside the write statement')
+  })
+
+  await check('category removal clears primary and secondary memberships without touching near-matches', async () => {
+    await db.prepare(`UPDATE products SET category='Lips', categories='Lips||Gift Set' WHERE barcode='a1'`).run()
+    await db.prepare(`UPDATE products SET category='Skincare', categories='Skincare||Lips' WHERE barcode='b1'`).run()
+    await db.prepare(`UPDATE products SET category='Lipstick', categories='Lipstick' WHERE barcode='c1'`).run()
+    const changed = await engine.removeLiveLookupValue(db, 'category', ' lips ', '2026-08-28T11:00:00Z')
+    assert.equal(changed.products, 2)
+    const a = await db.prepare(`SELECT category, categories FROM products WHERE barcode='a1'`).get()
+    const b = await db.prepare(`SELECT category, categories FROM products WHERE barcode='b1'`).get()
+    const c = await db.prepare(`SELECT category, categories FROM products WHERE barcode='c1'`).get()
+    assert.equal(a.category, null)
+    assert.equal(a.categories, 'Gift Set')
+    assert.equal(b.categories, 'Skincare')
+    assert.equal(c.category, 'Lipstick', 'no broad prefix/LIKE rewrite')
+  })
+
   await check('product-name carry renames the whole active group and the trigger keeps name_key in step (9.1)', async () => {
     const impact = await engine.computeRenameImpact(db, 'product_name', 'twin cream', 'Twin Cream Pro')
     assert.equal(impact.group_rows, 2)
@@ -131,9 +166,12 @@ async function run() {
     assert.match(products, /__rename_scope === 'group'/, 'PUT /:id honours the carry-the-group choice')
     const lookups = fs.readFileSync(path.join(cloudflareRoot, 'src', 'routes', 'lookups.ts'), 'utf8')
     assert.match(lookups, /body\.cascade === 'copy'/, "lookup rename supports 'keep a copy, new is new'")
-    assert.match(lookups, /applyRenameCarry\(db, 'category'/, 'lookup rename carries the multi-value membership too')
+    assert.match(lookups, /rename_choice_required/, 'direct lookup API requires an explicit rename choice')
+    assert.match(lookups, /INSERT INTO \$\{table\}[\s\S]*WHERE NOT EXISTS/, 'lookup create collision check is atomic in the INSERT statement')
+    assert.match(lookups, /buildLiveLookupMutationPlan\(db, kind, aliases, name,/, 'lookup rename carries primary and multi-value memberships in the same atomic plan')
+    assert.match(lookups, /await db\.batch\(\[\.\.\.lookupStatements, \.\.\.carry\.statements\]\)/, 'lookup row and product carry share one D1 batch')
     const contacts = fs.readFileSync(path.join(cloudflareRoot, 'src', 'routes', 'contacts.ts'), 'utf8')
-    assert.match(contacts, /__rename_cascade === 'carry'/, 'supplier rename carries on request')
+    assert.match(contacts, /renameScope === 'carry'/, 'supplier rename carries on request')
   })
 
   console.log(`\n${passed} checks passed.`)

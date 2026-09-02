@@ -160,10 +160,10 @@ function round2(n: number): number {
 // COALESCE(NULLIF(...,''),'completed') -- so a blank status counts as completed
 // on BOTH surfaces and the two revenue numbers converge to the byte.
 function saleStatusExpr(p: string): string { return `COALESCE(NULLIF(${p}sale_status, ''), 'completed')` }
-function recognizedExpr(p: string): string { return `${saleStatusExpr(p)} NOT IN ('cancelled', 'awaiting_payment')` }
+export function recognizedExpr(p: string): string { return `${saleStatusExpr(p)} NOT IN ('cancelled', 'awaiting_payment')` }
 function awaitingExpr(p: string): string { return `${saleStatusExpr(p)} = 'awaiting_payment'` }
 // Net sale value (subtotal minus both discounts) -- tax and delivery excluded.
-function netSaleExpr(p: string): string {
+export function netSaleExpr(p: string): string {
   return `(COALESCE(${p}subtotal_usd, 0) - COALESCE(${p}discount_usd, 0) - COALESCE(${p}membership_discount_usd, 0))`
 }
 // The delivery fee the CUSTOMER paid (a store-absorbed fee was never collected).
@@ -178,7 +178,7 @@ function storeDeliveryExpr(p: string): string {
 // a sale carrying two returns still subtracts once. Refunds attribute to the
 // SALE's date bucket via sale_id -- identical to GET /api/sales/stats. Join it
 // as `rf` and read COALESCE(rf.refund_usd, 0).
-const CUSTOMER_REFUND_JOIN = `LEFT JOIN (
+export const CUSTOMER_REFUND_JOIN = `LEFT JOIN (
       SELECT sale_id, SUM(total_refund_usd) AS refund_usd
       FROM returns
       WHERE COALESCE(status, 'completed') <> 'cancelled' AND COALESCE(return_scope, 'customer') = 'customer'

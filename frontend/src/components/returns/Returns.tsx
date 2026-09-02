@@ -11,6 +11,7 @@ import SearchInput from '../shared/SearchInput'
 import ScanSearchButton from '../shared/ScanSearchButton'
 import Undo2 from 'lucide-react/dist/esm/icons/undo-2.js'
 import Plus from 'lucide-react/dist/esm/icons/plus.js'
+import Settings2 from 'lucide-react/dist/esm/icons/settings-2.js'
 import { isBrokenLocalizedString as isBrokenLocalizedStringHook, useApp as useAppHook, useSync as useSyncHook } from '../../AppContext.tsx'
 import { fmtTime } from '../../utils/formatters'
 import ExportMenu from '../shared/ExportMenu'
@@ -47,6 +48,7 @@ const ReturnDetailModal = lazyRetry(() => import('./ReturnDetailModal'), 'return
 const EditReturnModal = lazyRetry(() => import('./EditReturnModal'), 'returns-edit-modal')
 const NewReturnModal = lazyRetry(() => import('./NewReturnModal'), 'returns-new-modal')
 const NewSupplierReturnModal = lazyRetry(() => import('./NewSupplierReturnModal'), 'returns-new-supplier-modal')
+const ReturnReasonManagerModal = lazyRetry(() => import('./ReturnReasonManagerModal'), 'returns-reason-manager-modal')
 const ExportOptionsDialog = lazyRetry(() => import('../shared/ExportOptionsDialog'), 'returns-export-options')
 
 type ActionHistoryBarHistory = ComponentProps<typeof ActionHistoryBar>['history']
@@ -345,6 +347,7 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
   const [detailRet, setDetailRet] = useState<ReturnRow | null>(null)
   const [showCustomerForm, setShowCustomerForm] = useState(false)
   const [showSupplierForm, setShowSupplierForm] = useState(false)
+  const [showReasonManager, setShowReasonManager] = useState(false)
   const [editRet, setEditRet] = useState<ReturnRow | null>(null)
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
@@ -480,10 +483,22 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
 
   useEffect(() => {
     if (!isActive || !syncChannel?.channel) return
-    if (['returns', 'sales', 'inventory', 'products'].includes(syncChannel.channel)) {
+    if (['returns', 'sales', 'inventory', 'products', 'customers', 'suppliers', 'users'].includes(syncChannel.channel)) {
       loadReturns(true)
     }
   }, [isActive, loadReturns, syncChannel?.channel, syncChannel?.ts])
+
+  // A reference rename can land while a return detail/editor is open. Rebind
+  // those nested surfaces to the newly fetched row by stable return id so
+  // customer/supplier/cashier labels do not remain frozen at click time.
+  useEffect(() => {
+    const refreshOpen = (current: ReturnRow | null): ReturnRow | null => {
+      if (!current) return current
+      return rows.find((row) => Number(row.id) === Number(current.id)) || current
+    }
+    setDetailRet(refreshOpen)
+    setEditRet(refreshOpen)
+  }, [rows])
 
   // The foldable stats strip (shared StatsStrip, app-wide stats pattern):
   // range-scoped (all-time by default), scope-aware -- customer returns show
@@ -1053,6 +1068,12 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
         rangeActions={(
           <>
             <ExportMenu label={tr('export', 'Export')} items={exportItems} triggerClassName="h-8 px-2.5 text-xs" />
+            {canEditReturn ? (
+              <button type="button" className="btn-secondary inline-flex h-8 items-center gap-1 px-2.5 py-0 text-xs" onClick={() => setShowReasonManager(true)} title={tr('manage_return_reasons', 'Manage return reasons')}>
+                <Settings2 className="h-3.5 w-3.5" />
+                <span>{tr('reasons', 'Reasons')}</span>
+              </button>
+            ) : null}
             {/* dense: pin History to a true 32px so it matches the h-8 Export
                 button beside it on the Stats row (btn-secondary's 40px
                 min-height would otherwise make it taller). */}
@@ -1244,6 +1265,17 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
             notify={notify}
             fmtUSD={fmtUSD}
             fmtKHR={fmtKHR}
+          />
+        </Suspense>
+      ) : null}
+
+      {showReasonManager ? (
+        <Suspense fallback={null}>
+          <ReturnReasonManagerModal
+            onClose={() => setShowReasonManager(false)}
+            onChanged={() => { void loadReturns(true) }}
+            notify={notify}
+            t={t}
           />
         </Suspense>
       ) : null}

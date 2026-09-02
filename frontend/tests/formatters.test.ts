@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
-import { fmtCount, fmtDate, fmtShort, fmtTime, fmtTimezoneLabel, parseServerTimestampMs } from '../src/utils/formatters.ts'
+import { fmtClock24, fmtCount, fmtDate, fmtDateTime24, fmtShort, fmtTime, fmtTimezoneLabel, parseServerTimestampMs } from '../src/utils/formatters.ts'
 
 let failed = 0
 
@@ -25,6 +25,26 @@ await runTest('formatters keep empty timestamps stable', () => {
 await runTest('formatters accept database timestamp shapes', () => {
   assert.notEqual(fmtTime('2026-05-19 10:30:00'), 'â€”')
   assert.notEqual(fmtDate('2026-05-19T10:30:00+0700'), 'â€”')
+  assert.match(fmtClock24('2026-05-19 10:30:00'), /^\d{2}:\d{2}$/)
+})
+
+await runTest('receipt date formatting accepts every supported timestamp representation', () => {
+  const instant = Date.parse('2026-09-02T01:59:00.000Z')
+  const expected = '09/02/2026 08:59'
+  assert.equal(fmtDateTime24(instant), expected)
+  assert.equal(fmtDateTime24(new Date(instant)), expected)
+  assert.equal(fmtDateTime24('2026-09-02T01:59:00.000Z'), expected)
+  assert.equal(fmtDateTime24('2026-09-02 01:59:00'), expected)
+  assert.equal(fmtDateTime24('2026-09-02 08:59:00+07:00'), expected)
+  const receiptSource = fs.readFileSync(new URL('../src/components/receipt/Receipt.tsx', import.meta.url), 'utf8')
+  assert.match(receiptSource, /const dateStr = fmtDateTime24\(createdAt \|\| new Date\(\)\)/)
+})
+
+await runTest('day-grouped sales use time only while the clicked detail keeps the full timestamp', () => {
+  const listPage = fs.readFileSync(new URL('../src/components/sales/Sales.tsx', import.meta.url), 'utf8')
+  const detailPage = fs.readFileSync(new URL('../src/components/sales/SaleDetailModal.tsx', import.meta.url), 'utf8')
+  assert.match(listPage, /fmtTime=\{fmtClock24\}/)
+  assert.match(detailPage, /fmtTime\(sale\.created_at\)/)
 })
 
 await runTest('short numeric formatters abbreviate values', () => {

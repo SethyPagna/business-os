@@ -2,6 +2,7 @@
   "name": "Leang Beauty",
   "short_name": "Leang Beauty",
   "description": "Leang Beauty online store",
+  "id": "/",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",

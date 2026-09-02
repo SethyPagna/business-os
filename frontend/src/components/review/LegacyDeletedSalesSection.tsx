@@ -5,6 +5,7 @@ import SearchInput from '../shared/SearchInput'
 import { fmtDateTime24 } from '../../utils/formatters'
 import { getLegacyDeletedSales } from '../../api/auditLogTransport.ts'
 import { useApp as useAppHook } from '../../AppContext.tsx'
+import PaginationControls, { clampPage, DEFAULT_PAGE_SIZE } from '../shared/PaginationControls'
 
 // M-audit follow-through: the legacy deleted-sale audit ledger -- every
 // line the old system's cashiers deleted from a cart or bill (618 events /
@@ -54,8 +55,6 @@ type LegacyDeletedSalesAppContext = {
 }
 const useApp = useAppHook as unknown as () => LegacyDeletedSalesAppContext
 
-const PAGE_SIZE = 50
-
 export default function LegacyDeletedSalesSection() {
   const { t } = useApp()
   const tr = (key: string, fallback: string): string => t(key) || fallback
@@ -64,6 +63,7 @@ export default function LegacyDeletedSalesSection() {
   const [fromDate, setFromDate] = useState('')
   const [toDate, setToDate] = useState('')
   const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE)
   const [refreshToken, setRefreshToken] = useState(0)
   const [data, setData] = useState<DeletedPayload | null>(null)
   const [loading, setLoading] = useState(true)
@@ -86,11 +86,17 @@ export default function LegacyDeletedSalesSection() {
       from: fromDate,
       to: toDate,
       page,
-      page_size: PAGE_SIZE,
+      page_size: pageSize,
     })
       .then((result) => {
         if (!aliveRef.current || requestRef.current !== requestId) return
-        setData((result || {}) as DeletedPayload)
+        const nextData = (result || {}) as DeletedPayload
+        const nextPage = clampPage(page, Number(nextData.total_lines) || 0, pageSize)
+        if (nextPage !== page) {
+          setPage(nextPage)
+          return
+        }
+        setData(nextData)
       })
       .catch((err: unknown) => {
         if (!aliveRef.current || requestRef.current !== requestId) return
@@ -100,13 +106,12 @@ export default function LegacyDeletedSalesSection() {
         if (aliveRef.current && requestRef.current === requestId) setLoading(false)
       })
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [search, cashier, fromDate, toDate, page, refreshToken])
+  }, [search, cashier, fromDate, toDate, page, pageSize, refreshToken])
 
   const totals = data?.totals || {}
   const rows = Array.isArray(data?.items) ? data!.items! : []
   const cashierOptions = Array.isArray(data?.meta?.cashiers) ? data!.meta!.cashiers! : []
   const totalLines = Number(data?.total_lines) || 0
-  const totalPages = Math.max(1, Math.ceil(totalLines / PAGE_SIZE))
 
   const money = (value: unknown): string => `$${(Number(value) || 0).toFixed(2)}`
   const anyFilter = search !== '' || cashier !== 'all' || fromDate !== '' || toDate !== ''
@@ -240,20 +245,9 @@ export default function LegacyDeletedSalesSection() {
             </div>
           )}
 
-          {totalPages > 1 ? (
-            <div className="flex items-center justify-between gap-2 text-xs text-gray-500">
-              <span>{totalLines} {tr('invoice_lines', 'Lines').toLowerCase()}</span>
-              <div className="flex items-center gap-2">
-                <span>{tr('page', 'Page')} {page} / {totalPages}</span>
-                <button type="button" className="btn-secondary py-1 text-xs disabled:cursor-not-allowed disabled:opacity-50" disabled={page <= 1 || loading} onClick={() => setPage((current) => Math.max(1, current - 1))}>
-                  {tr('previous', 'Previous')}
-                </button>
-                <button type="button" className="btn-secondary py-1 text-xs disabled:cursor-not-allowed disabled:opacity-50" disabled={page >= totalPages || loading} onClick={() => setPage((current) => current + 1)}>
-                  {tr('next', 'Next')}
-                </button>
-              </div>
-            </div>
-          ) : null}
+          <div className="flex justify-center">
+            <PaginationControls compact rangeAsPageSize page={page} pageSize={pageSize} totalItems={totalLines} label={tr('invoice_lines', 'Lines').toLowerCase()} t={t} onPageChange={setPage} onPageSizeChange={(size) => { setPageSize(size); setPage(1) }} />
+          </div>
         </>
       )}
     </div>

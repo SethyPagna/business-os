@@ -11,12 +11,14 @@ import { getMediaType, buildUniqueStoredName, sanitizeOriginalFileName } from '.
 import { sanitizeMediaList } from '../lib/media'
 import { buildInClause, chunkForBinding, selectInChunks } from '../lib/sqlBinding'
 import { attachBeforeQty, buildStockLedgerQuery, type StockLedgerView } from '../lib/stockLedgerQuery'
+import { buildStockInSessionListQuery, parseStockInSessionKey, stockInSessionLineParams, stockInSessionLinesSql } from '../lib/stockInSessionsQuery'
 import { getProductSalesBreakdown } from '../lib/salesAnalytics'
 import { localDateExpr, localMonthExpr } from '../lib/businessDateWindow'
 import { validateUploadedBuffer } from '../lib/uploadSecurity'
 import { checkRateLimit, getClientIp } from '../lib/rateLimit'
 import { audit } from '../lib/audit'
 import { findDuplicateProductGroups, findPossiblySameProductClusters, normalizeProductClusterKey } from '../lib/productIdentity'
+import { normalizeProductGroupName } from '../lib/productDetailRule'
 import { registerMergeFold, recordMergeUndoSnapshot, recordBulkMergeUndoSnapshot, recordSupplierBackfillSnapshot, type MergeReversal } from '../lib/undoAppliers'
 import { attachBatchCounts } from '../lib/productBatches'
 import { maybeQueueForReview } from '../lib/reviewGate'
@@ -25,7 +27,14 @@ import { broadcast } from '../durable-objects/broadcastHub'
 import { createBulkDeleteJob, getBulkDeleteJob, reapStalledBulkDeleteJobs } from '../lib/bulkDeleteEngine'
 import { ADMIN_MAX_IMAGES_PER_PRODUCT, MAX_IMAGES_PER_PRODUCT } from '../lib/importImageMatch'
 import { loadActivePromotionRules, productPromotedSql, productDiscountActiveSql, anyRuleAppliesSql, singleRuleAppliesSql } from '../lib/promotionRulesSql'
-import { computeRenameImpact, applyRenameCarry, type RenameKind } from '../lib/renameCascade'
+import {
+  computeRenameImpact,
+  applyRenameCarry,
+  removeLiveLookupValue,
+  buildLiveLookupMutationPlan,
+  buildBrandLibraryMutationPlan,
+  type RenameKind,
+} from '../lib/renameCascade'
 import {
   buildFtsMatchExpression,
   buildHybridMatchClause,
@@ -190,6 +199,17 @@ export function parseProductReadSurface(raw: unknown): ProductReadSurface {
   if (value === 'pos') return 'pos'
   if (value === 'inventory') return 'inventory'
   return 'products'
+}
+
+// POS deliberately asks the first catalog bootstrap for products + branches
+// only, then loads the heavier faceted filter vocabulary after the route is
+// interactive.  Keep the default metadata-on contract for older callers,
+// while making `metadata=0` an actual server-side query gate (previously the
+// parameter was sent by POS but ignored here, so the bootstrap still ran six
+// facet GROUP BY queries plus a second promotion-rule read, then POS fetched
+// the same facets again from /filters).
+export function shouldLoadProductBootstrapMetadata(raw: unknown): boolean {
+  return String(raw ?? '').trim() !== '0'
 }
 
 /** Null when allowed; an error message when this user may not read that surface. */
@@ -1021,6 +1041,7 @@ app.get('/bootstrap', async (c) => {
   const denial = productSurfaceDenialReason(user, surface)
   if (denial) return c.json({ error: denial }, 403)
   const db = getDb(c.env)
+  const includeFilterMetadata = shouldLoadProductBootstrapMetadata(query.metadata)
   // POS.tsx's loadCatalogData() reads this endpoint's response as
   // { items, ..., branches, filters, initials } and only treats branch
   // metadata as loaded once `branches` comes back as a real array (see
@@ -1034,11 +1055,18 @@ app.get('/bootstrap', async (c) => {
   // query routes/branches.ts's list endpoint uses.
   const [products, filters, branchRows] = await Promise.all([
     searchProductsWithIndexFallback(c.env, query),
-    loadProductFilters(c.env, query),
-    db.prepare('SELECT * FROM branches WHERE is_active = 1 ORDER BY is_default DESC, id ASC').all(),
+    includeFilterMetadata ? loadProductFilters(c.env, query) : Promise.resolve(null),
+    // POS only consumes these four fields. Keeping this bootstrap projection
+    // narrow avoids shipping location/phone/manager/notes/timestamps on every
+    // first catalog window.
+    db.prepare('SELECT id, name, is_default, is_active FROM branches WHERE is_active = 1 ORDER BY is_default DESC, id ASC').all(),
   ])
   const restrictedProducts = isImageOnlyRead(user, surface) ? restrictListPayloadForImageOnly(products as { items?: unknown }, user) : products
-  return c.json({ ...restrictedProducts, filters, initials: filters.initials, branches: branchRows })
+  return c.json({
+    ...restrictedProducts,
+    ...(filters ? { filters, initials: filters.initials } : {}),
+    branches: branchRows,
+  })
 })
 
 app.get('/filters', async (c) => {
@@ -1279,6 +1307,100 @@ app.post('/:id/suppliers/backfill', async (c) => {
 // movement data is inventory-domain, the surface is the Products page.
 // Query/classification semantics live in lib/stockLedgerQuery.ts (the
 // kernel the pure test drives directly).
+// Stock-in Sessions is the editable view of purchasing/receiving history.
+// Grouping happens in D1, not by downloading an arbitrary first 1,000 rows:
+// the 21k legacy receipts remain reachable and a multi-line session can never
+// be split at a movement-page boundary. Lines load only when a group opens.
+app.get('/stock-in-sessions', async (c) => {
+  const user = c.get('user')
+  const allowed = getPermissionTier(user, 'products') !== 'none' || getPermissionTier(user, 'inventory') !== 'none'
+  if (!allowed) return c.json({ error: 'You do not have permission to perform this action' }, 403)
+  const page = clampInt(c.req.query('page'), 1, 1, 100000)
+  const pageSize = clampInt(c.req.query('pageSize'), 30, 1, 100)
+  const { groupedSql, params } = buildStockInSessionListQuery(c.req.query('search'))
+  const db = getDb(c.env)
+  // The old page did the full legacy grouping twice at the same time: once
+  // for COUNT(*) and once for the visible rows. That doubles the D1 work for
+  // every normal visit and lets two expensive scans contend with unrelated
+  // reads. A window count keeps the page and its total in one bounded query.
+  // The rare stale/out-of-range page is the only case that needs a fallback
+  // count because OFFSET can legitimately return no row from which to read it.
+  const sessions = await db.prepare(`
+    SELECT grouped.*, COUNT(*) OVER () AS total
+    FROM (${groupedSql}) grouped
+    ORDER BY created_at DESC, session_key DESC
+    LIMIT @limit OFFSET @offset
+  `).all<Record<string, unknown>>({ ...params, limit: pageSize, offset: (page - 1) * pageSize })
+  const countRow = sessions.length || page <= 1
+    ? null
+    : await db.prepare(`SELECT COUNT(*) AS total FROM (${groupedSql}) grouped`).get<{ total: number }>(params)
+  const total = sessions.length ? Number(sessions[0]?.total) || 0 : Number(countRow?.total) || 0
+  return c.json({ sessions, total, page, pageSize, totalPages: Math.max(1, Math.ceil(total / pageSize)) })
+})
+
+app.get('/stock-in-session-lines', async (c) => {
+  const user = c.get('user')
+  const allowed = getPermissionTier(user, 'products') !== 'none' || getPermissionTier(user, 'inventory') !== 'none'
+  if (!allowed) return c.json({ error: 'You do not have permission to perform this action' }, 403)
+  const sessionKey = String(c.req.query('key') || '').trim()
+  if (!sessionKey || sessionKey.length > 300) return c.json({ error: 'A valid stock-in session key is required' }, 400)
+  const locator = parseStockInSessionKey(sessionKey)
+  if (!locator) return c.json({ error: 'This stock-in session key is not supported. Refresh the sessions list and try again.' }, 400)
+  const db = getDb(c.env)
+  // This deliberately does not query on STOCK_IN_SESSION_KEY_SQL. The old
+  // computed predicate scanned the entire ledger and then executed a
+  // correlated receipt-count query for every candidate row, which is why one
+  // legacy receipt click could exceed D1's CPU limit. The parsed key maps to
+  // the indexes introduced in 0104 instead.
+  let rows = await db.prepare(stockInSessionLinesSql(locator)).all<Record<string, unknown>>(stockInSessionLineParams(locator))
+  const exceededLineLimit = rows.length > 2000
+  const movementIds = rows.map((row) => Number(row.id)).filter((id) => Number.isSafeInteger(id) && id > 0)
+  if (movementIds.length) {
+    const reverted = new Set<string>()
+    for (const chunk of chunkForBinding(movementIds)) {
+      const refs = chunk.map((id) => `revert:${id}`)
+      const clause = buildInClause('revert', refs)
+      const found = await db.prepare(`SELECT reference_id FROM inventory_movements WHERE reference_id IN (${clause.sql})`).all<{ reference_id: string | number }>({ ...clause.params })
+      for (const row of found) reverted.add(String(row.reference_id))
+    }
+    rows = rows.filter((row) => !reverted.has(`revert:${Number(row.id)}`))
+  }
+
+  // A shared lot makes a header edit unsafe: it could rewrite another receipt.
+  // Count sessions by indexed batch ids in bounded chunks, separately from the
+  // line lookup so it cannot turn the normal detail read into an N+1 scan.
+  const batchIds = [...new Set(rows.map((row) => Number(row.batch_id)).filter((id) => Number.isSafeInteger(id) && id > 0))]
+  const receiptCounts = new Map<number, number>()
+  try {
+    for (const chunk of chunkForBinding(batchIds)) {
+      const clause = buildInClause('batch', chunk)
+      const counts = await db.prepare(`
+        SELECT m.batch_id,
+               COUNT(DISTINCT CASE
+                 WHEN m.reference_id IS NOT NULL AND CAST(m.reference_id AS TEXT) NOT LIKE 'revert:%'
+                   THEN 'session:' || CAST(m.reference_id AS TEXT)
+                 ELSE 'legacy:' || COALESCE(m.created_at, '') || ':' || COALESCE(CAST(m.user_id AS TEXT), '') || ':' ||
+                      COALESCE(CAST(m.branch_id AS TEXT), '') || ':' ||
+                      COALESCE(CAST(b.supplier_id AS TEXT), lower(trim(COALESCE(b.supplier_name, ''))))
+               END) AS receipt_session_count
+        FROM inventory_movements m
+        JOIN product_batches b ON b.id = m.batch_id
+        WHERE m.movement_type = 'add' AND m.batch_id IN (${clause.sql})
+        GROUP BY m.batch_id
+      `).all<{ batch_id: number; receipt_session_count: number }>({ ...clause.params })
+      for (const row of counts) receiptCounts.set(Number(row.batch_id), Number(row.receipt_session_count) || 0)
+    }
+  } catch {
+    // Keep the receipt readable if a historical lot is pathological. A value
+    // greater than one is intentionally conservative: it disables the header
+    // edit rather than risking an edit that spills into another receipt.
+    for (const batchId of batchIds) receiptCounts.set(batchId, 2)
+  }
+  rows = rows.map((row) => ({ ...row, batch_receipt_session_count: receiptCounts.get(Number(row.batch_id)) ?? 0 }))
+  const truncated = exceededLineLimit || rows.length > 2000
+  return c.json({ rows: truncated ? rows.slice(0, 2000) : rows, truncated })
+})
+
 app.get('/stock-ledger', async (c) => {
   const user = c.get('user')
   // A REAL products or inventory tier is required. products_image_only on
@@ -1302,6 +1424,8 @@ app.get('/stock-ledger', async (c) => {
     branchId: Number(query.branchId) || 0,
     startDate: String(query.startDate || ''),
     endDate: String(query.endDate || ''),
+    startTime: String(query.startTime || ''),
+    endTime: String(query.endTime || ''),
     search: String(query.search || ''),
     supplierId: Number(query.supplierId) || 0,
   })
@@ -1398,7 +1522,7 @@ app.post('/bulk-price-adjust', async (c) => {
 })
 
 // The ONE product identity rule's manual-path check: an ACTIVE product with
-// the same normalized name AND the same non-empty barcode is the SAME
+// the same normalized name, barcode AND cost is the SAME
 // product (the import merges such rows — resolveMergedPricing and friends),
 // so manual create/edit must refuse to mint a twin of it. A same-name row
 // with a DIFFERENT or empty barcode is a legitimate child row and is never
@@ -1413,22 +1537,31 @@ const scientificBarcodeError = (barcode: string) => ({
   code: 'barcode_scientific_notation',
 })
 
-async function findSameNameBarcodeProduct(
+async function findSameProductIdentityProduct(
   env: Env,
   name: string,
   barcode: unknown,
+  costPriceUsd: unknown,
+  costPriceKhr: unknown,
   excludeId: number | null,
-): Promise<{ id: number; name: string; barcode: string } | null> {
+): Promise<{ id: number; name: string; barcode: string; cost_price_usd: number; cost_price_khr: number } | null> {
   const trimmedBarcode = String(barcode ?? '').trim()
-  if (!name.trim() || !trimmedBarcode) return null
+  const nameKey = normalizeProductGroupName(name)
+  if (!nameKey) return null
+  const costUsdCents = Math.round((Number(costPriceUsd) || 0) * 100)
+  const costKhrCents = Math.round((Number(costPriceKhr) || 0) * 100)
   const row = await getDb(env).prepare(`
-    SELECT id, name, barcode FROM products
+    SELECT id, name, barcode, cost_price_usd, cost_price_khr FROM products
     WHERE is_active = 1
-      AND TRIM(COALESCE(barcode, '')) = @barcode
-      AND LOWER(TRIM(name)) = LOWER(TRIM(@name))
+      AND LOWER(TRIM(COALESCE(barcode, ''))) = LOWER(@barcode)
+      AND LOWER(TRIM(REPLACE(REPLACE(REPLACE(name, '  ', ' '), '  ', ' '), '  ', ' '))) = @nameKey
+      AND ROUND(COALESCE(cost_price_usd, 0) * 100) = @costUsdCents
+      AND ROUND(COALESCE(cost_price_khr, 0) * 100) = @costKhrCents
       AND (@excludeId IS NULL OR id != @excludeId)
     LIMIT 1
-  `).get<{ id: number; name: string; barcode: string }>({ name, barcode: trimmedBarcode, excludeId })
+  `).get<{ id: number; name: string; barcode: string; cost_price_usd: number; cost_price_khr: number }>({
+    nameKey, barcode: trimmedBarcode, costUsdCents, costKhrCents, excludeId,
+  })
   return row || null
 }
 
@@ -1452,10 +1585,12 @@ app.post('/', async (c) => {
   // Same name with a DIFFERENT (or no) barcode stays a legitimate child row
   // and passes through untouched. Checked before the review queue so a
   // reviewer is never asked to approve a duplicate either.
-  const duplicate = await findSameNameBarcodeProduct(c.env, name, body.barcode, null)
+  const duplicate = await findSameProductIdentityProduct(
+    c.env, name, body.barcode, body.cost_price_usd, body.cost_price_khr, null,
+  )
   if (duplicate) {
     return c.json({
-      error: `"${duplicate.name}" already exists with this exact barcode — same name + same barcode is the same product. Edit it or add stock to it instead of creating a duplicate.`,
+      error: `"${duplicate.name}" already exists with this barcode and cost — same name + barcode + cost is the same product. Edit it or add stock to it instead of creating a duplicate.`,
       code: 'duplicate_product',
       duplicate,
     }, 409)
@@ -1599,11 +1734,14 @@ app.post('/rename-brand', async (c) => {
   const to = String(body.to || '').trim()
   if (!from || !to) return c.json({ error: 'from and to are required' }, 400)
   if (from.toLowerCase() === to.toLowerCase()) return c.json({ error: 'New brand name is the same' }, 400)
-  const changed = await applyRenameCarry(getDb(c.env), 'brand', from, to, new Date().toISOString())
+  const db = getDb(c.env)
+  const changed = await buildLiveLookupMutationPlan(db, 'brand', [from, to], to, new Date().toISOString())
+  const library = await buildBrandLibraryMutationPlan(db, [from, to], to)
+  await db.batch([...changed.statements, ...library.statements])
   await audit(c.env, user?.id ?? null, user?.name ?? null, 'rename', 'brand', null, { from, to, products: changed.products })
-  c.executionCtx.waitUntil(bumpVersion(c.env, 'products'))
+  await Promise.all([bumpVersion(c.env, 'products'), bumpVersion(c.env, 'settings')])
   c.executionCtx.waitUntil(broadcast(c.env, 'products', { action: 'rename-brand', from, to }))
-  return c.json({ renamed: true, ...changed })
+  return c.json({ renamed: true, products: changed.products, batches: 0, brands: library.brands })
 })
 
 app.put('/:id', async (c) => {
@@ -1671,14 +1809,17 @@ app.put('/:id', async (c) => {
   }
   let renamedProductIds: number[] = []
   let renamedProductName: string | null = null
-  if (body.name !== undefined || body.barcode !== undefined) {
-    const current = await getDb(c.env).prepare('SELECT name, barcode FROM products WHERE id = @id').get<{ name: string; barcode: string | null }>({ id })
+  if (body.name !== undefined || body.barcode !== undefined || body.cost_price_usd !== undefined || body.cost_price_khr !== undefined) {
+    const current = await getDb(c.env).prepare('SELECT name, barcode, cost_price_usd, cost_price_khr FROM products WHERE id = @id')
+      .get<{ name: string; barcode: string | null; cost_price_usd: number | null; cost_price_khr: number | null }>({ id })
     const nextName = body.name !== undefined ? String(body.name || '').trim() : String(current?.name || '')
     const nextBarcode = body.barcode !== undefined ? body.barcode : current?.barcode
-    const duplicate = await findSameNameBarcodeProduct(c.env, nextName, nextBarcode, Number(id))
+    const nextCostUsd = body.cost_price_usd !== undefined ? body.cost_price_usd : current?.cost_price_usd
+    const nextCostKhr = body.cost_price_khr !== undefined ? body.cost_price_khr : current?.cost_price_khr
+    const duplicate = await findSameProductIdentityProduct(c.env, nextName, nextBarcode, nextCostUsd, nextCostKhr, Number(id))
     if (duplicate) {
       return c.json({
-        error: `"${duplicate.name}" already exists with this exact barcode — same name + same barcode is the same product. Merge into it instead of creating a twin.`,
+        error: `"${duplicate.name}" already exists with this barcode and cost — same name + barcode + cost is the same product. Merge into it instead of creating a twin.`,
         code: 'duplicate_product',
         duplicate,
       }, 409)
@@ -1773,7 +1914,7 @@ app.put('/:id', async (c) => {
     const gallery = await syncProductImageGallery(c.env, id, body.image_gallery, ADMIN_MAX_IMAGES_PER_PRODUCT)
     ;(item as Record<string, unknown>).image_gallery = gallery
   }
-  c.executionCtx.waitUntil(bumpVersion(c.env, 'products'))
+  await bumpVersion(c.env, 'products')
   c.executionCtx.waitUntil(broadcast(c.env, 'products', { action: 'update', id }))
   return c.json({ item: isImageOnlyEdit ? restrictToImageOnlyFields(item as Record<string, unknown>, getMergedPermissions(user)) : item, success: true })
 })
@@ -1976,7 +2117,7 @@ app.post('/variant', async (c) => {
 // runs (e.g. one file per branch) that never saw each other's rows. This
 // walks the whole active catalog once, groups by the same identity rule
 // transfers already self-heal with (findIdentityMatch/-es -- name_key +
-// cost + selling price + barcode), and for every group folds every
+// cost + barcode; selling price is mergeable), and for every group folds every
 // duplicate's branch_stock into the lowest-id ("canonical") row, then
 // deactivates the duplicate (soft delete, same as DELETE /:id, so old
 // sales/movement rows that still reference its id stay valid).
@@ -3032,19 +3173,34 @@ app.post('/lookups/replace', async (c) => {
   }
 
   const db = getDb(c.env)
-  // `@target` is bound in the same statement, so it costs one of the 100
-  // slots the `IN` list is competing for -- hence reservedParams = 1.
   let updatedCount = 0
-  for (const chunk of chunkForBinding(fromLookups, normalizedTarget ? 1 : 0)) {
-    const { sql, params } = buildInClause('from', chunk)
-    if (normalizedTarget) params.target = normalizedTarget
-    const result = await db.prepare(`
-      UPDATE products
-      SET ${field} = ${normalizedTarget ? '@target' : 'NULL'}, updated_at = CURRENT_TIMESTAMP
-      WHERE lower(trim(COALESCE(${field}, ''))) IN (${sql})
-        AND is_active = 1
-    `).run(params)
-    updatedCount += Number(result.changes || 0)
+  // Use the shared exact-value engine so category/brand secondary `||`
+  // memberships move or clear together with the primary field. The old bulk
+  // UPDATE touched only products.brand/category and left stale secondary
+  // values behind. Values are still exact normalized equality, never LIKE.
+  if (type === 'brand' || type === 'category' || type === 'unit') {
+    const changed = await buildLiveLookupMutationPlan(db, type, sourceEntries, normalizedTarget || null, new Date().toISOString())
+    const statements = [...changed.statements]
+    if (type === 'brand') {
+      const library = await buildBrandLibraryMutationPlan(db, sourceEntries, normalizedTarget || null)
+      statements.push(...library.statements)
+    }
+    if (statements.length) await db.batch(statements)
+    updatedCount = changed.products
+  } else {
+    // Suppliers are stable-ID contact records and can legitimately share a
+    // display name, so they intentionally do not use the normalized lookup
+    // constraint/library plan.
+    for (const source of sourceEntries) {
+      if (normalizedTarget && normalizeLookupKey(source) === normalizeLookupKey(normalizedTarget)) continue
+      if (normalizedTarget) {
+        const changed = await applyRenameCarry(db, 'supplier', source, normalizedTarget, new Date().toISOString())
+        updatedCount += changed.products
+      } else {
+        const changed = await removeLiveLookupValue(db, 'supplier', source, new Date().toISOString())
+        updatedCount += changed.products
+      }
+    }
   }
 
   await audit(c.env, user?.id ?? null, user?.name ?? null, 'lookup_replace', 'product', null, {
@@ -3054,6 +3210,7 @@ app.post('/lookups/replace', async (c) => {
     updated_count: updatedCount,
   })
   c.executionCtx.waitUntil(bumpVersion(c.env, 'products'))
+  if (type === 'brand') c.executionCtx.waitUntil(bumpVersion(c.env, 'settings'))
   return c.json({ success: true, updatedCount })
 })
 

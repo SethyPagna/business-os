@@ -54,14 +54,20 @@ export interface PaginationControlsProps {
 }
 
 export function clampPage(page: NumericInput, totalItems: NumericInput, pageSize: NumericInput): number {
-  const safePageSize = Math.max(1, Number(pageSize || DEFAULT_PAGE_SIZE))
-  const totalPages = Math.max(1, Math.ceil(Math.max(0, Number(totalItems || 0)) / safePageSize))
-  return Math.max(1, Math.min(totalPages, Number(page || 1)))
+  const parsedPageSize = Number(pageSize || DEFAULT_PAGE_SIZE)
+  const safePageSize = Number.isFinite(parsedPageSize) && parsedPageSize > 0 ? parsedPageSize : DEFAULT_PAGE_SIZE
+  const parsedTotal = Number(totalItems || 0)
+  const total = Number.isFinite(parsedTotal) ? Math.max(0, parsedTotal) : 0
+  const totalPages = Math.max(1, Math.ceil(total / safePageSize))
+  const parsedPage = Number(page || 1)
+  const requestedPage = Number.isFinite(parsedPage) ? parsedPage : 1
+  return Math.max(1, Math.min(totalPages, requestedPage))
 }
 
 export function paginateItems<T>(items: readonly T[] = [], page: NumericInput = 1, pageSize: NumericInput = DEFAULT_PAGE_SIZE): T[] {
   const list = Array.isArray(items) ? items : []
-  const safePageSize = Math.max(1, Number(pageSize || DEFAULT_PAGE_SIZE))
+  const parsedPageSize = Number(pageSize || DEFAULT_PAGE_SIZE)
+  const safePageSize = Number.isFinite(parsedPageSize) && parsedPageSize > 0 ? parsedPageSize : DEFAULT_PAGE_SIZE
   const safePage = clampPage(page, list.length, safePageSize)
   const start = (safePage - 1) * safePageSize
   return list.slice(start, start + safePageSize)
@@ -83,8 +89,10 @@ export default function PaginationControls({
   editablePageSizeInput = true,
   rangeAsPageSize = false,
 }: PaginationControlsProps) {
-  const safePageSize = Math.max(1, Number(pageSize || DEFAULT_PAGE_SIZE))
-  const total = Math.max(0, Number(totalItems || 0))
+  const parsedPageSize = Number(pageSize || DEFAULT_PAGE_SIZE)
+  const safePageSize = Number.isFinite(parsedPageSize) && parsedPageSize > 0 ? parsedPageSize : DEFAULT_PAGE_SIZE
+  const parsedTotal = Number(totalItems || 0)
+  const total = Number.isFinite(parsedTotal) ? Math.max(0, parsedTotal) : 0
   const totalPages = Math.max(1, Math.ceil(total / safePageSize))
   const safePage = clampPage(page, total, safePageSize)
   const start = total ? ((safePage - 1) * safePageSize) + 1 : 0
@@ -100,6 +108,18 @@ export default function PaginationControls({
   useEffect(() => {
     setPageDraft(String(safePage))
   }, [safePage])
+
+  // A filtered or deleted last page can leave the parent holding a page that
+  // no longer exists.  Rendering the clamped number alone makes the controls
+  // look correct but sends the next request with the stale offset, so Back /
+  // Next appears unresponsive. Keep the controlled page in sync for every
+  // list that uses this shared control.
+  useEffect(() => {
+    const requestedPage = Math.max(1, Number(page || 1))
+    if (Number.isFinite(requestedPage) && requestedPage !== safePage) {
+      onPageChange?.(safePage)
+    }
+  }, [page, safePage, onPageChange])
 
   const commitPageDraft = (value: string = pageDraft) => {
     const parsed = Number.parseInt(String(value || '').trim(), 10)
@@ -147,12 +167,12 @@ export default function PaginationControls({
           aria-label={backLabel}
         >
           <ChevronLeft className="h-4 w-4" strokeWidth={2.5} />
-          <span>{backLabel}</span>
+          <span className="hidden sm:inline">{backLabel}</span>
         </button>
         <div className="inline-flex min-w-0 items-center gap-1.5 px-1.5">
           {/* Order per request: the item-range chip (per-page trigger) FIRST,
               then the editable page number, then the total page count. */}
-          <PageSizeSelect
+          {onPageSizeChange ? <PageSizeSelect
             value={safePageSize}
             options={pageSizeOptions}
             onChange={(nextValue) => onPageSizeChange?.(nextValue)}
@@ -164,7 +184,7 @@ export default function PaginationControls({
             buttonClassName="h-6 rounded-full border border-slate-200 bg-slate-100 px-2.5 py-0 text-xs font-semibold text-slate-800 shadow-none hover:bg-slate-200 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700"
             menuClassName="min-w-[9rem]"
             optionClassName="text-xs"
-          />
+          /> : <span className="h-6 rounded-full border border-slate-200 bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-800 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100">{start.toLocaleString()}-{end.toLocaleString()}</span>}
           {editablePageInput ? (
             <>
               <span className="sr-only">{pageLabel}</span>
@@ -191,7 +211,7 @@ export default function PaginationControls({
           onClick={() => onPageChange?.(safePage + 1)}
           aria-label={nextLabel}
         >
-          <span>{nextLabel}</span>
+          <span className="hidden sm:inline">{nextLabel}</span>
           <ChevronRight className="h-4 w-4" strokeWidth={2.5} />
         </button>
       </div>

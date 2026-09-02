@@ -62,8 +62,8 @@ export default function ReviewLogsPage() {
     // roots get a bounded height and actually scroll (Y4 regression).
     <div className="flex min-h-0 flex-1 flex-col space-y-3">
       {chips.length > 1 ? (
-        <div className="shrink-0 px-4 pt-4">
-          <div className="inline-flex flex-wrap rounded-xl bg-gray-100 dark:bg-gray-800 p-0.5">
+        <div className="min-w-0 shrink-0 px-4 pt-4">
+          <div className="inline-flex max-w-full overflow-x-auto overscroll-x-contain rounded-xl bg-gray-100 p-0.5 [touch-action:pan-x] dark:bg-gray-800">
             {chips.map((chip) => {
               const Icon = chip.icon
               return (
@@ -71,7 +71,7 @@ export default function ReviewLogsPage() {
                   key={chip.key}
                   type="button"
                   onClick={() => setSection(chip.key)}
-                  className={`px-3 py-1.5 rounded-lg text-sm font-medium inline-flex items-center gap-1.5 ${section === chip.key ? `bg-white dark:bg-gray-900 shadow ${chip.activeColor}` : 'text-gray-500'}`}
+                  className={`inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg px-3 py-1.5 text-sm font-medium ${section === chip.key ? `bg-white dark:bg-gray-900 shadow ${chip.activeColor}` : 'text-gray-500'}`}
                 >
                   <Icon className="w-4 h-4" /> {chip.label}
                 </button>

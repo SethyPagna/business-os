@@ -193,3 +193,12 @@ export function saveSettings(updates: SettingsPayload = {}, options: SettingsOpt
   settingsSaveQueue = queuedSave.catch(() => {})
   return queuedSave
 }
+
+export function getPaymentMethodImpact(from: string, to: string): Promise<unknown> {
+  const query = new URLSearchParams({ from, to })
+  return apiFetch('GET', `/api/settings/payment-methods/impact?${query.toString()}`)
+}
+
+export function replacePaymentMethod(payload: { from: string; to: string; scope: 'settings_only' | 'linked' }): Promise<unknown> {
+  return apiFetch('POST', '/api/settings/payment-methods/replace', payload)
+}

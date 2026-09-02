@@ -7,7 +7,7 @@ import Download from 'lucide-react/dist/esm/icons/download.js'
 import Upload from 'lucide-react/dist/esm/icons/upload.js'
 import Settings2 from 'lucide-react/dist/esm/icons/settings-2.js'
 import { isBrokenLocalizedString as isBrokenLocalizedStringHook, useApp as useAppHook, useSync as useSyncHook } from '../../AppContext.tsx'
-import { fmtTime } from '../../utils/formatters'
+import { fmtClock24 } from '../../utils/formatters'
 import LazyPortalMenu from '../shared/LazyPortalMenu'
 import type { PortalMenuItem } from '../shared/PortalMenu'
 import FilterMenu from '../shared/FilterMenu'
@@ -27,6 +27,7 @@ import { createLongPressState, type LongPressState } from '../../utils/longPress
 import { buildTimeActionSections, getTimeGroupingMode, toggleIdSet } from '../../utils/groupedRecords.ts'
 import { beginKeyedAction, beginSingleAction, finishKeyedAction, finishSingleAction } from '../../utils/actionGuards.ts'
 import { getSales as fetchSales, getSalesStats as fetchSalesStats, getSalesStatsStrip } from '../../api/salesTransport.ts'
+import { getFeesReport } from '../../api/feesTransport.ts'
 import StatsStrip, { type StatCardDef } from '../shared/StatsStrip.tsx'
 import StatsRangeRow from '../shared/StatsRangeRow.tsx'
 import { EMPTY_DATE_TIME_RANGE, type DateTimeRange } from '../shared/DateTimeRangePicker.tsx'
@@ -123,6 +124,7 @@ interface AppContextValue {
   notify: NotifyFn
   user?: AppUser | null
   getPermissionTier: (key: string) => string
+  can: (permissionKey: string, actionKey: string) => boolean
 }
 
 interface SyncContextValue {
@@ -228,11 +230,15 @@ function buildSaleExportRows(rows: SaleRecord[] = []): Array<Record<string, unkn
 }
 
 export default function Sales({ embedded = false }: { embedded?: boolean }) {
-  const { t, settings, fmtUSD, fmtKHR, notify, user, getPermissionTier } = useApp()
+  const { t, settings, fmtUSD, fmtKHR, notify, user, can } = useApp()
   // Part 557 slice 2: 'sales' is a view-tier section. A View-only grant reads
   // the list/stats/reports/export but every write (cancel, change status, edit
   // customer, import) is hidden here and refused by the backend. Full only.
-  const canEditSales = getPermissionTier('sales') === 'full'
+  const canChangeSaleStatus = can('sales', 'status')
+  const canChangeSaleCustomer = can('sales', 'customer')
+  const canImportSales = can('sales', 'import')
+  const canExportSales = can('sales', 'export')
+  const canViewFees = can('fees', 'view')
   const { syncChannel } = useSync()
   const isActive = useIsPageActive('sales')
   const [sales, setSales] = useState<SaleRecord[]>([])
@@ -511,34 +517,47 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
     by_status?: Array<{ sale_status?: string; count?: number; total_usd?: number }>
     returns?: { count?: number; refund_usd?: number }
   }
+  type FeesStripPayload = {
+    totals?: { count?: number; amount_usd?: number; amount_khr?: number }
+    by_type?: Array<{ fee_type?: string; count?: number; amount_usd?: number; amount_khr?: number }>
+  }
   const [stripData, setStripData] = useState<SalesStripPayload | null>(null)
+  const [feeStripData, setFeeStripData] = useState<FeesStripPayload | null>(null)
   const [stripLoading, setStripLoading] = useState(false)
   const stripRequestRef = useRef(0)
   const loadStatsStrip = useCallback(async (): Promise<void> => {
     if (!isActive) return
     if (!stripRange.startDate || !stripRange.endDate) {
       setStripData(null)
+      setFeeStripData(null)
       setStripLoading(false)
       return
     }
     const requestId = beginTrackedRequest(stripRequestRef)
     setStripLoading(true)
     try {
-      const result = await getSalesStatsStrip({
-        startDate: stripRange.startDate,
-        endDate: stripRange.endDate,
-        startTime: stripRange.startTime,
-        endTime: stripRange.endTime,
-      })
+      const [result, fees] = await Promise.all([
+        getSalesStatsStrip({
+          startDate: stripRange.startDate,
+          endDate: stripRange.endDate,
+          startTime: stripRange.startTime,
+          endTime: stripRange.endTime,
+        }),
+        canViewFees
+          ? getFeesReport({ startDate: stripRange.startDate, endDate: stripRange.endDate })
+          : Promise.resolve(null),
+      ])
       if (!aliveRef.current || !isTrackedRequestCurrent(stripRequestRef, requestId)) return
       setStripData((result || {}) as SalesStripPayload)
+      setFeeStripData((fees || null) as FeesStripPayload | null)
     } catch {
       if (!aliveRef.current || !isTrackedRequestCurrent(stripRequestRef, requestId)) return
       setStripData(null)
+      setFeeStripData(null)
     } finally {
       if (aliveRef.current && isTrackedRequestCurrent(stripRequestRef, requestId)) setStripLoading(false)
     }
-  }, [isActive, stripRange.endDate, stripRange.endTime, stripRange.startDate, stripRange.startTime])
+  }, [canViewFees, isActive, stripRange.endDate, stripRange.endTime, stripRange.startDate, stripRange.startTime])
   useEffect(() => { void loadStatsStrip() }, [loadStatsStrip])
 
   useEffect(() => {
@@ -568,7 +587,12 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
 
   useEffect(() => {
     if (!isActive || !syncChannel?.channel) return
-    if (syncChannel.channel === 'sales' || syncChannel.channel === 'returns') {
+    // Sales rows/reports expose current linked customer, courier, cashier and
+    // product metadata in addition to immutable receipt snapshots. Those
+    // reference routes broadcast their own channels, so refresh on the full
+    // dependency set instead of waiting for the next sale mutation.
+    if (['sales', 'returns', 'fees', 'customers', 'deliveryContacts', 'users', 'products', 'settings'].includes(syncChannel.channel)) {
+      if (syncChannel.channel === 'users') setUserOptionsLoaded(false)
       loadSales(true)
       void loadSalesStats() // Z3a: keep the summary aggregate in lockstep with the rows
       void loadStatsStrip() // the range strip counts the same events
@@ -620,10 +644,9 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
   // completes an awaiting-payment sale (payment_method/amount_paid_*).
   const handleStatusChange = async (saleId: number | string, newStatus: string, notes = '', recordHistory = true, extra: SaleCancelPayload | Record<string, unknown> | null = null): Promise<boolean> => {
     // View-only (Part 557): status changes are Full-Access only. The backend
-    // already refuses these (PATCH /:id/status checks hasPermission strictly),
-    // so this is the matching client guard -- keeps a view user from firing a
-    // request that can only 403.
-    if (!canEditSales) {
+    // already refuses these through sales.status, so this matching client
+    // guard also honors a Full role whose one action was switched off.
+    if (!canChangeSaleStatus) {
       notify?.(translateOr('perm_view_only_action', 'View only: you do not have permission to change sales.'), 'error')
       return false
     }
@@ -688,9 +711,9 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
 
   const handleAttachMembership = async (saleId: number | string, membershipNumber: string): Promise<boolean> => {
     // View-only (Part 557): linking a membership edits the sale's customer,
-    // which the backend gates behind Full sales access (PATCH /:id/customer);
-    // refuse client-side too.
-    if (!canEditSales) {
+    // which the backend gates behind Full sales.customer access; refuse
+    // client-side too, including an explicit action-off override.
+    if (!canChangeSaleCustomer) {
       notify?.(translateOr('perm_view_only_action', 'View only: you do not have permission to change sales.'), 'error')
       return false
     }
@@ -862,6 +885,20 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
     [salesSections],
   )
 
+  // Keep an already-open detail/print surface attached to the refreshed row
+  // by stable sale id. Reference broadcasts can update cashier/customer/
+  // courier/payment display fields while the modal is open; retaining the
+  // object captured on the original click would leave that nested surface
+  // stale even though the list behind it had refreshed correctly.
+  useEffect(() => {
+    const refreshOpen = (current: SaleRecord | null): SaleRecord | null => {
+      if (!current) return current
+      return visibleSales.find((sale) => Number(sale.id) === Number(current.id)) || current
+    }
+    setDetailSale(refreshOpen)
+    setSelectedSale(refreshOpen)
+  }, [visibleSales])
+
   const filteredIds = useMemo(
     () => normalizeFiniteIdsFrom(visibleSales, (sale) => sale.id),
     [visibleSales],
@@ -896,8 +933,18 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
     const revenueUsd = Number(totals.revenue_usd) || 0
     const returnCount = Number(stripReturns.count) || 0
     const refundUsd = Number(stripReturns.refund_usd) || 0
+    const cogsUsd = Number(totals.cost_usd) || 0
+    const profitUsd = Number(totals.profit_usd) || 0
+    const storeDeliveryUsd = Number(totals.store_delivery_usd) || 0
+    const feeTotals = feeStripData?.totals || {}
+    const expensesUsd = Number(feeTotals.amount_usd) || 0
+    const expensesKhr = Number(feeTotals.amount_khr) || 0
+    const expenseValue = [
+      expensesUsd > 0 ? fmtUSD(expensesUsd) : '',
+      expensesKhr > 0 ? fmtKHR(expensesKhr) : '',
+    ].filter(Boolean).join(' · ') || fmtUSD(0)
     const topPayment = byPayment[0]
-    return [
+    const cards: StatCardDef[] = [
       {
         key: 'sales',
         label: t('sales') || 'Sales',
@@ -925,6 +972,32 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
         ],
       },
       {
+        key: 'cogs',
+        label: t('cogs') || 'COGS',
+        value: fmtUSD(cogsUsd),
+        tone: cogsUsd > 0 ? ('warn' as const) : undefined,
+        hint: translateOr('stats_cogs_hint', 'Cost of the products sold in this range, using the recorded cost on each sale line.'),
+        details: [
+          { label: t('cogs') || 'COGS', value: fmtUSD(cogsUsd) },
+          { label: t('revenue') || 'Revenue', value: fmtUSD(revenueUsd) },
+          { label: t('gross_profit') || 'Gross profit', value: fmtUSD(profitUsd), tone: profitUsd < 0 ? ('crit' as const) : ('ok' as const) },
+        ],
+      },
+      {
+        key: 'profit',
+        label: t('gross_profit') || 'Gross Profit',
+        value: fmtUSD(profitUsd),
+        tone: profitUsd < 0 ? ('crit' as const) : ('ok' as const),
+        sub: revenueUsd > 0 ? `${((profitUsd / revenueUsd) * 100).toFixed(1)}% ${translateOr('profit_margin_short', 'margin')}` : undefined,
+        hint: translateOr('stats_profit_hint', 'Gross profit = net revenue − COGS − store-paid delivery.'),
+        details: [
+          { label: t('revenue') || 'Revenue', value: fmtUSD(revenueUsd) },
+          { label: t('cogs') || 'COGS', value: fmtUSD(cogsUsd), tone: 'warn' as const },
+          { label: translateOr('store_paid_delivery', 'Store-paid delivery'), value: fmtUSD(storeDeliveryUsd), tone: storeDeliveryUsd > 0 ? ('warn' as const) : undefined },
+          { label: t('gross_profit') || 'Gross profit', value: fmtUSD(profitUsd), tone: profitUsd < 0 ? ('crit' as const) : ('ok' as const) },
+        ],
+      },
+      {
         key: 'payments',
         label: translateOr('stats_payments', 'Payments'),
         value: topPayment ? String(topPayment.payment_method || 'Unknown') : '—',
@@ -948,7 +1021,25 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
         ],
       },
     ]
-  }, [fmtUSD, stripData, t, translateOr])
+    if (canViewFees) {
+      cards.push({
+        key: 'expenses',
+        label: t('fees') || 'Expenses',
+        value: expenseValue,
+        tone: expensesUsd > 0 || expensesKhr > 0 ? ('warn' as const) : undefined,
+        hint: translateOr('stats_expenses_hint', 'Expenses booked by date in this range. They are kept separate from gross profit so the accounting basis stays explicit.'),
+        details: (feeStripData?.by_type || []).map((row) => ({
+          label: String(row.fee_type || 'Other'),
+          value: [
+            Number(row.amount_usd) > 0 ? fmtUSD(Number(row.amount_usd)) : '',
+            Number(row.amount_khr) > 0 ? fmtKHR(Number(row.amount_khr)) : '',
+          ].filter(Boolean).join(' · ') || fmtUSD(0),
+          tone: 'warn' as const,
+        })),
+      })
+    }
+    return cards
+  }, [canViewFees, feeStripData, fmtKHR, fmtUSD, stripData, t, translateOr])
 
   // A sale "counts" toward the headline figures only when it contributes to
   // the money shown: cancelled and awaiting-payment sales are excluded from
@@ -1019,12 +1110,16 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
   // the file will carry (incl. C4's staff-only actual delivery cost).
   const [exportDialog, setExportDialog] = useState<{ rows: Array<Record<string, unknown>>; baseName: string } | null>(null)
   const openExportOptions = useCallback((scopeRows: SaleRecord[], baseName: string) => {
+    if (!canExportSales) {
+      notify(translateOr('perm_view_only_action', 'You do not have permission to export sales.'), 'error')
+      return
+    }
     if (!scopeRows.length) {
       notify(t('no_data_to_export') || 'No data to export', 'error')
       return
     }
     setExportDialog({ rows: buildSaleExportRows(scopeRows), baseName })
-  }, [notify, t])
+  }, [canExportSales, notify, t, translateOr])
 
   const handleExportSelected = useCallback(() => {
     openExportOptions(selectedSales, 'sales-selected')
@@ -1063,9 +1158,9 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
   }, [loadSales, runSaleStatusMutation])
 
   const handleBulkStatusUpdate = async (nextStatus: string, extra: SaleCancelPayload | null = null) => {
-    // View-only (Part 557): bulk status writes are Full-Access only, mirroring
-    // handleStatusChange and the backend's strict PATCH gate.
-    if (!canEditSales) {
+    // View-only (Part 557): bulk status writes share sales.status with single
+    // status changes, including the per-action override.
+    if (!canChangeSaleStatus) {
       notify?.(translateOr('perm_view_only_action', 'View only: you do not have permission to change sales.'), 'error')
       return
     }
@@ -1110,14 +1205,14 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
     openExportOptions(rows, filePrefix)
   }, [filtered, openExportOptions])
 
-  const salesExportItems = useMemo<Array<PortalMenuItem | null | false>>(() => ([
+  const salesExportItems = useMemo<Array<PortalMenuItem | null | false>>(() => canExportSales ? ([
     { label: translateOr('export_visible_sales', 'Export visible sales', 'នាំចេញការលក់ដែលកំពុងបង្ហាញ'), onClick: () => exportVisibleSales(filtered, 'sales-visible') },
     selectedSales.length ? { label: translateOr('export_selected_sales', 'Export selected sales', 'នាំចេញការលក់ដែលបានជ្រើស'), onClick: handleExportSelected, color: 'blue' } : null,
     statusFilter !== 'all' ? { label: translateOr('export_filtered_status', `Export ${getStatusLabel(statusFilter, t)}`, `នាំចេញតាមស្ថានភាព ${getStatusLabel(statusFilter, t)}`), onClick: () => exportVisibleSales(filtered, `sales-${statusFilter}`) } : null,
     (stripRange.startDate || stripRange.endDate) ? { label: translateOr('export_filtered_time_range', 'Export filtered time range', 'នាំចេញតាមចន្លោះពេលដែលបានតម្រង'), onClick: () => exportVisibleSales(filtered, 'sales-filtered') } : null,
     'divider',
     { label: translateOr('export_detailed_sales_report', 'Detailed sales report', 'របាយការណ៍លម្អិតការលក់'), onClick: () => setShowExport(true), color: 'green' },
-  ].filter(Boolean) as Array<PortalMenuItem | null | false>), [exportVisibleSales, filtered, handleExportSelected, stripRange.startDate, stripRange.endDate, selectedSales.length, statusFilter, t, translateOr])
+  ].filter(Boolean) as Array<PortalMenuItem | null | false>) : [], [canExportSales, exportVisibleSales, filtered, handleExportSelected, stripRange.startDate, stripRange.endDate, selectedSales.length, statusFilter, t, translateOr])
 
   const salesFilterSections = useMemo(() => ([
     {
@@ -1210,7 +1305,9 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
           standalone action row and the centered pagination row are gone;
           the pager now rides the sticky search row below. */}
       <StatsStrip
-        className="mb-2"
+        // Keep a clear visual breath after the Sales hub's section tabs;
+        // without this, the first stats row reads as part of the title row.
+        className="mt-3 mb-4"
         cards={stripCards}
         loading={stripLoading}
         t={t}
@@ -1227,7 +1324,7 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
                 button beside it on the Stats row (btn-secondary's 40px
                 min-height would otherwise make it taller). */}
             <ActionHistoryBar history={actionHistory as unknown as ActionHistoryBarHistory} t={t} className="min-w-0" dense />
-            <LazyPortalMenu
+            {canImportSales || canExportSales ? <LazyPortalMenu
               align="auto"
               menuClassName="max-h-[70vh] overflow-auto"
               trigger={(
@@ -1245,7 +1342,7 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
               items={([
                 // Import writes sales, so it is Full-Access only (Part 557);
                 // Export stays a read and is always offered.
-                ...(canEditSales
+                ...(canImportSales
                   ? [
                       { label: translateOr('import', 'Import'), onClick: () => setShowImport(true), color: 'blue', icon: <Download className="h-4 w-4 shrink-0" /> },
                       'divider' as const,
@@ -1255,7 +1352,7 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
                   .filter((item): item is PortalMenuItem => Boolean(item))
                   .map((item) => (item === 'divider' ? item : { ...item, icon: item.icon ?? <Upload className="h-4 w-4 shrink-0" /> })),
               ] as PortalMenuItem[])}
-            />
+            /> : null}
           </>
         )}
       />
@@ -1269,7 +1366,7 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
           search row, which pinned the bar but let the search box scroll
           away. Pagination now lives above this group instead of below it,
           matching Products/Inventory's order. */}
-      <div className="sticky top-0 z-30 -mx-1 space-y-2 bg-gray-50/95 pb-2 pt-2 backdrop-blur dark:bg-gray-900/95 sm:mx-0">
+      <div className="sticky top-0 z-30 -mx-1 space-y-1.5 bg-gray-50/95 pb-2 pt-2 backdrop-blur dark:bg-gray-900/95 sm:mx-0">
         {/* The Start→End range that scopes the stats strip above now leads
             this pinned toolbar as its own row, directly above the search bar
             (user, Aug 31: "fish out the start date and end date from the stats
@@ -1311,10 +1408,10 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
       {selectedSales.length > 0 ? (
           <div className="bulk-toolbar mb-2 flex flex-wrap items-center gap-1.5 rounded-xl border px-2.5 py-2 text-sm shadow-sm">
             <span className="rounded-full bg-blue-100 px-2.5 py-1 text-xs font-semibold text-blue-700 dark:bg-blue-900/40 dark:text-blue-200">{selectedSales.length}</span>
-            <button type="button" className="btn-secondary px-2.5 py-1 text-xs" onClick={handleExportSelected}>{translateOr('export', 'Export')}</button>
+            {canExportSales ? <button type="button" className="btn-secondary px-2.5 py-1 text-xs" onClick={handleExportSelected}>{translateOr('export', 'Export')}</button> : null}
             {/* Bulk status writes are Full-Access only (Part 557): View-only
                 keeps selection for Export, but the status buttons are hidden. */}
-            {canEditSales ? (
+            {canChangeSaleStatus ? (
               <>
                 <button type="button" className="btn-secondary px-2.5 py-1 text-xs" onClick={() => handleBulkStatusUpdate('completed')} disabled={!!bulkStatusSaving}>{bulkStatusSaving === 'completed' ? translateOr('saving', 'Saving...') : translateOr('done', 'Done')}</button>
                 <button type="button" className="btn-secondary px-2.5 py-1 text-xs" onClick={() => handleBulkStatusUpdate('awaiting_delivery')} disabled={!!bulkStatusSaving}>{bulkStatusSaving === 'awaiting_delivery' ? translateOr('saving', 'Saving...') : translateOr('pos_delivery', 'Delivery')}</button>
@@ -1354,7 +1451,10 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
         filtered={filtered}
         filteredIds={filteredIds}
         fmtKHR={fmtKHR}
-        fmtTime={fmtTime}
+        // Each section already carries the calendar date. Keep row timestamps
+        // to the business-time clock; the clicked detail modal still shows
+        // the complete date and time via fmtTime.
+        fmtTime={fmtClock24}
         fmtUSD={fmtUSD}
         getSaleBranchLabel={getSaleBranchLabel as SalesListSurfaceProps['getSaleBranchLabel']}
         isSelectionScopeFullySelected={isSelectionScopeFullySelected}
@@ -1377,10 +1477,6 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
         toggleSelectAll={toggleSelectAll}
         toggleSelectionScope={toggleSelectionScope}
       />
-
-      <div className="mt-3 flex justify-center">
-        <PaginationControls compact rangeAsPageSize page={salesPage} pageSize={salesPageSize} totalItems={totalSalesCount} label={t('sales') || 'sales'} t={t} onPageChange={setSalesPage} onPageSizeChange={(size) => { setSalesPageSize(size); setSalesPage(1) }} />
-      </div>
 
       {exportDialog ? (
         <Suspense fallback={null}>
@@ -1405,8 +1501,8 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
             onClose={() => setDetailSale(null)}
             // View-only (Part 557): omit the write callbacks so the modal hides
             // its status buttons and membership form entirely.
-            onStatusChange={canEditSales ? handleStatusChange : undefined}
-            onAttachMembership={canEditSales ? handleAttachMembership : undefined}
+            onStatusChange={canChangeSaleStatus ? handleStatusChange : undefined}
+            onAttachMembership={canChangeSaleCustomer ? handleAttachMembership : undefined}
             onPrint={(sale) => setSelectedSale(sale as SaleRecord)}
             t={t}
             fmtUSD={fmtUSD}
@@ -1443,13 +1539,13 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
         </Suspense>
       ) : null}
 
-      {showExport ? (
+      {showExport && canExportSales ? (
         <Suspense fallback={null}>
           <ExportModal onClose={() => setShowExport(false)} t={t} fmtUSD={fmtUSD} />
         </Suspense>
       ) : null}
 
-      {showImport ? (
+      {showImport && canImportSales ? (
         <Suspense fallback={null}>
           <SalesImportModal
             onClose={() => setShowImport(false)}

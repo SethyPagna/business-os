@@ -518,8 +518,8 @@ export default function DateTimeRangePicker({
                 <ChevronRight className="h-4 w-4" strokeWidth={2.5} />
               </button>
             </div>
-            <div className="grid grid-cols-7 text-center text-[11px] font-semibold text-slate-600 dark:text-slate-300">
-              {DOW_LABELS.map((label) => <div key={label} className="py-1">{label}</div>)}
+            <div className="grid grid-cols-7 text-center text-[10px] font-semibold text-slate-600 dark:text-slate-300">
+              {DOW_LABELS.map((label) => <div key={label} className="py-0.5">{label}</div>)}
             </div>
             <div className="grid grid-cols-7 text-center text-xs">
               {calendarCells.map((cell, index) => cell ? (
@@ -532,7 +532,7 @@ export default function DateTimeRangePicker({
                   // "pick a day, pick another, nothing changes" bug).
                   onMouseDown={(event) => event.preventDefault()}
                   onClick={() => pickDay(cell.iso)}
-                  className={`mx-auto my-0.5 flex h-8 w-8 items-center justify-center rounded-md transition ${isEdge(cell.iso)
+                  className={`mx-auto my-px flex h-7 w-7 items-center justify-center rounded-md transition ${isEdge(cell.iso)
                     ? 'bg-slate-800 font-semibold text-white dark:bg-slate-200 dark:text-slate-900'
                     : inRange(cell.iso)
                       ? 'bg-slate-200 text-slate-800 dark:bg-slate-700 dark:text-slate-100'
@@ -552,13 +552,13 @@ export default function DateTimeRangePicker({
               endpoint selection remains the primary interaction. */}
           <div className="mt-2 border-t border-slate-100 pt-2 dark:border-slate-700/60">
             <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">{quickRangeLabel('quick_range', 'Quick range')}</div>
-            <div className="flex flex-wrap gap-1">
+            <div className="flex flex-nowrap gap-1 overflow-x-auto pb-0.5 [scrollbar-width:thin]">
               {quickRanges.map((preset) => (
                 <button
                   key={preset.id}
                   type="button"
                   onClick={() => applyQuickRange(preset.id)}
-                  className={`rounded-md border px-2 py-1 text-[11px] font-medium transition ${activePreset === preset.id
+                  className={`shrink-0 rounded-md border px-2 py-1 text-[11px] font-medium transition ${activePreset === preset.id
                     ? 'border-blue-500 bg-blue-600 text-white dark:border-blue-400 dark:bg-blue-500 dark:text-white'
                     : 'border-slate-200 bg-white text-slate-600 hover:border-blue-300 hover:text-blue-700 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-300 dark:hover:border-blue-500 dark:hover:text-blue-200'}`}
                 >

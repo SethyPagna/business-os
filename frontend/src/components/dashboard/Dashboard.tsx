@@ -8,7 +8,7 @@ import { useRef } from 'react'
 import LayoutDashboard from 'lucide-react/dist/esm/icons/layout-dashboard.js'
 import RefreshCw from 'lucide-react/dist/esm/icons/refresh-cw.js'
 import StatsStrip, { type StatCardDef } from '../shared/StatsStrip.tsx'
-import { fmtTime, getBusinessTimezoneOffsetHours } from '../../utils/formatters'
+import { fmtTime } from '../../utils/formatters'
 import { todayStr } from '../../utils/dateHelpers'
 import Download from 'lucide-react/dist/esm/icons/download.js'
 import DateTimeRangePicker, { type DateTimeRange } from '../shared/DateTimeRangePicker'
@@ -121,9 +121,11 @@ interface DashboardSale {
   sale_status?: string
   branch_name?: string
   customer_name?: string
+  cashier_name?: string
   total?: number
   total_usd?: number
   total_khr?: number
+  item_count?: number
   items?: DashboardSaleItem[]
   [key: string]: unknown
 }
@@ -373,6 +375,15 @@ function compactDashboardMetaParts(parts: unknown[] = []): string[] {
     .filter((part) => part && part !== '-' && part !== '--')
 }
 
+function getDashboardSaleItemCount(sale: DashboardSale): number {
+  const explicit = Number(sale.item_count)
+  if (Number.isFinite(explicit) && explicit >= 0) return explicit
+  return (Array.isArray(sale.items) ? sale.items : []).reduce((total, item) => {
+    const quantity = Number(item.quantity ?? item.qty ?? 1)
+    return total + (Number.isFinite(quantity) ? Math.max(0, quantity) : 0)
+  }, 0)
+}
+
 function ChartFallback({ className = 'h-52' }: { className?: string }) {
   return (
     <div className={`${className} rounded-2xl border border-slate-200 bg-slate-50/70 dark:border-slate-700 dark:bg-slate-800/50`} />
@@ -474,7 +485,7 @@ function RecentSalesCard({ summary, t, translateOr, fmtUSD, fmtKHR, formatStatus
         {!sales.length ? <p className="p-4 text-center text-sm text-gray-400">{translateOr('no_data', 'No data found', 'រកមិនឃើញទិន្នន័យ')}</p> : sales.map((sale) => (
           <button key={sale.id} type="button" className="flex w-full items-center justify-between gap-2 px-3 py-2.5 text-left transition hover:bg-slate-50 dark:hover:bg-slate-800/50 sm:px-4" onClick={() => onOpenSale(sale)}>
             <div className="min-w-0"><p className="truncate text-sm font-medium text-gray-700 dark:text-gray-300">{sale.receipt_number}</p><p className="truncate text-xs text-gray-400">{compactDashboardMetaParts([fmtTime(sale.created_at), sale.branch_name, sale.customer_name]).join(' | ')}</p></div>
-            <div className="shrink-0 text-right"><span className="font-semibold text-green-600">{fmtUSD(sale.total_usd || sale.total || 0)}</span>{(sale.total_khr || 0) > 0 ? <div className="text-xs text-gray-400">{fmtKHR(sale.total_khr || 0)}</div> : null}<div className={`mt-1 inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold ${getSaleStatusTone(sale.sale_status)}`}>{formatStatus(sale.sale_status)}</div></div>
+            <div className="shrink-0 text-right"><div className="flex items-baseline justify-end gap-1 whitespace-nowrap"><span className="font-semibold text-green-600">{fmtUSD(sale.total_usd || sale.total || 0)}</span>{(sale.total_khr || 0) > 0 ? <span className="text-[10px] text-gray-400">{fmtKHR(sale.total_khr || 0)}</span> : null}</div><div className={`mt-1 inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold ${getSaleStatusTone(sale.sale_status)}`}>{formatStatus(sale.sale_status)}</div></div>
           </button>
         ))}
       </div>
@@ -516,8 +527,8 @@ function ExpiryAlertsCard({ summary, translateOr, onOpen }: {
 }) {
   const items = summary?.expiring_products || []
   return <div className="card flex flex-col">
-    <div className="flex items-center justify-between border-b border-gray-100 px-3 py-2.5 sm:px-4 dark:border-gray-700"><h2 className="font-semibold text-gray-900 dark:text-white">{translateOr('product_expiry_alerts', 'Expiry alerts', 'ការជូនដំណឹងផុតកំណត់')}</h2>{items.length ? <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-medium text-amber-700 dark:bg-amber-900/30 dark:text-amber-300">{items.length}</span> : null}</div>
-    <div className={`divide-y divide-gray-100 dark:divide-gray-700 ${CARD_LIST_BODY}`}>{!items.length ? <p className="p-4 text-center text-sm text-gray-400">{translateOr('no_data', 'No data found', 'រកមិនឃើញទិន្នន័យ')}</p> : items.map((item) => <button key={item.id} type="button" onClick={() => onOpen(item)} className="flex w-full items-center justify-between gap-2 px-3 py-2.5 text-left transition hover:bg-slate-50 dark:hover:bg-slate-800/50 sm:px-4"><div className="min-w-0"><p className="truncate text-sm text-gray-700 dark:text-gray-300">{item.name}</p>{item.category ? <p className="truncate text-xs text-gray-400">{item.category}</p> : null}</div><span className={`shrink-0 ${Number(item.days_until_expiry || 0) < 0 ? 'badge-red' : 'badge-yellow'}`}>{item.expiry_date}</span></button>)}</div>
+    <div className="flex items-center justify-between border-b border-gray-100 px-3 py-2.5 sm:px-4 dark:border-gray-700"><h2 className="font-semibold text-gray-900 dark:text-white">{translateOr('product_expiry_alerts', 'Expiry alerts', 'ការជូនដំណឹងផុតកំណត់')}</h2>{Number(summary?.expiring_count || 0) > 0 ? <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-medium text-amber-700 dark:bg-amber-900/30 dark:text-amber-300">{summary?.expiring_count}</span> : null}</div>
+    <div className={`divide-y divide-gray-100 dark:divide-gray-700 ${CARD_LIST_BODY}`}>{!items.length ? <p className="p-4 text-center text-sm text-gray-400">{translateOr('no_data', 'No data found', 'រកមិនឃើញទិន្នន័យ')}</p> : items.map((item) => <button key={item.id} type="button" onClick={() => onOpen(item)} className="flex w-full items-center justify-between gap-2 px-3 py-2.5 text-left transition hover:bg-slate-50 dark:hover:bg-slate-800/50 sm:px-4"><p className="min-w-0 break-words text-[13px] leading-4 text-gray-700 dark:text-gray-300 sm:text-sm">{item.name}</p><span className={`shrink-0 ${Number(item.days_until_expiry || 0) < 0 ? 'badge-red' : 'badge-yellow'}`}>{item.expiry_date}</span></button>)}</div>
   </div>
 }
 
@@ -532,13 +543,11 @@ function BestHourCard({ analytics, analyticsPending, analyticsUnavailable, analy
   onOpenHour: (hour: DashboardHourRow, rank?: number | null) => void
 }) {
   const hourly = analytics?.hourlyDist || []
-  // Business-timezone offset, not the device's own -- backend hour buckets
-  // are UTC, and this chart must read the same "9am" for every user
-  // regardless of what timezone their device is set to.
-  const timezoneOffset = getBusinessTimezoneOffsetHours()
+  // The backend already emits UTC+7 business-hour buckets. Applying the
+  // offset again here moved every value seven hours forward on the chart.
   const merged: Record<number, DashboardHourRow> = {}
   hourly.forEach((hour) => {
-    const localHour = ((Math.round(Number.parseInt(String(hour.hour), 10) + timezoneOffset)) % 24 + 24) % 24
+    const localHour = ((Number.parseInt(String(hour.hour), 10) % 24) + 24) % 24
     if (!merged[localHour]) merged[localHour] = { hour: localHour, count: 0, revenue_usd: 0 }
     merged[localHour].count = (merged[localHour].count || 0) + (Number(hour.count) || 0)
     merged[localHour].revenue_usd = (merged[localHour].revenue_usd || 0) + (Number.parseFloat(String(hour.revenue_usd || 0)) || 0)
@@ -560,23 +569,31 @@ function isDashboardSummaryPayload(value: unknown): value is DashboardSummary {
   const payload = value as Partial<DashboardSummary>
   return (
     Number.isFinite(Number(payload.product_count))
-    || Number.isFinite(Number(payload.stock_value_usd))
-    || Array.isArray(payload.recent_sales)
-    || Array.isArray(payload.low_stock)
-    || Array.isArray(payload.out_of_stock)
+    && Number.isFinite(Number(payload.today_count))
+    && Number.isFinite(Number(payload.stock_value_usd))
+    && Number.isFinite(Number(payload.expiring_count))
+    && Array.isArray(payload.recent_sales)
+    && Array.isArray(payload.low_stock)
+    && Array.isArray(payload.out_of_stock)
+    && Array.isArray(payload.expiring_products)
   )
 }
 
 function isDashboardAnalyticsPayload(value: unknown): value is DashboardAnalytics {
   if (!value || typeof value !== 'object') return false
   const payload = value as Partial<DashboardAnalytics>
+  const totals = payload.totals as DashboardMetricMap | undefined
   return (
-    Array.isArray(payload.periodData)
-    || Array.isArray(payload.byPayment)
-    || Array.isArray(payload.byBranch)
-    || Array.isArray(payload.topProducts)
-    || Array.isArray(payload.topCustomers)
-    || Boolean(payload.totals && typeof payload.totals === 'object')
+    Boolean(totals && typeof totals === 'object')
+    && Number.isFinite(Number(totals?.revenue_usd))
+    && Number.isFinite(Number(totals?.transaction_count))
+    && Array.isArray(payload.periodData)
+    && Array.isArray(payload.byPayment)
+    && Array.isArray(payload.byBranch)
+    && Array.isArray(payload.topProducts)
+    && Array.isArray(payload.topProductsQty)
+    && Array.isArray(payload.topCustomers)
+    && Array.isArray(payload.hourlyDist)
   )
 }
 
@@ -738,14 +755,15 @@ export default function Dashboard() {
       )
       if (!isTrackedRequestCurrent(startupRequestRef, requestId)) return null
       const payload = data && typeof data === 'object' ? data as { summary?: unknown; analytics?: unknown } : {}
-      const normalizedSummary = normalizeDashboardSummaryPayload(payload.summary)
-      const normalizedAnalytics = normalizeDashboardAnalyticsPayload(payload.analytics)
-      if (!normalizedSummary || !isDashboardSummaryPayload(normalizedSummary)) {
+      if (!isDashboardSummaryPayload(payload.summary)) {
         throw new Error('Dashboard startup returned incomplete summary data.')
       }
-      if (!normalizedAnalytics || !isDashboardAnalyticsPayload(normalizedAnalytics)) {
+      if (!isDashboardAnalyticsPayload(payload.analytics)) {
         throw new Error('Dashboard startup returned incomplete analytics data.')
       }
+      const normalizedSummary = normalizeDashboardSummaryPayload(payload.summary)
+      const normalizedAnalytics = normalizeDashboardAnalyticsPayload(payload.analytics)
+      if (!normalizedSummary || !normalizedAnalytics) throw new Error('Dashboard startup returned invalid data.')
       setSummary(normalizedSummary)
       setAnalytics(normalizedAnalytics)
       setSummaryError('')
@@ -780,10 +798,11 @@ export default function Dashboard() {
     try {
       const data = await withLoaderTimeout(() => getDashboardApi().getDashboard(), label, DASHBOARD_SUMMARY_TIMEOUT_MS)
       if (!isTrackedRequestCurrent(summaryRequestRef, requestId)) return null
-      const normalized = normalizeDashboardSummaryPayload(data)
-      if (!normalized || !isDashboardSummaryPayload(normalized)) {
+      if (!isDashboardSummaryPayload(data)) {
         throw new Error('Dashboard summary returned incomplete data.')
       }
+      const normalized = normalizeDashboardSummaryPayload(data)
+      if (!normalized) throw new Error('Dashboard summary returned invalid data.')
       setSummary(normalized)
       setSummaryError('')
       return data
@@ -815,10 +834,11 @@ export default function Dashboard() {
         DASHBOARD_ANALYTICS_TIMEOUT_MS,
       )
       if (!isTrackedRequestCurrent(analyticsRequestRef, requestId)) return null
-      const normalized = normalizeDashboardAnalyticsPayload(data)
-      if (!normalized || !isDashboardAnalyticsPayload(normalized)) {
+      if (!isDashboardAnalyticsPayload(data)) {
         throw new Error('Dashboard analytics returned incomplete data.')
       }
+      const normalized = normalizeDashboardAnalyticsPayload(data)
+      if (!normalized) throw new Error('Dashboard analytics returned invalid data.')
       setAnalytics(normalized)
       setAnalyticsError('')
       return data
@@ -1575,13 +1595,13 @@ ${translateOr('delivery_margin', 'Delivery margin')} ${fmtUSD(aDeliveryMargin)} 
 
       {/* Range selector -- one picker, no preset chips. */}
       <div className="px-0.5">
-        <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:gap-2">
+        <div className="flex min-w-0 items-center gap-2">
           {/* Label + range value + export all share one row -- the range
               value pill previously grew (flex-1) to fill the row on its own
               with nothing but blank pill background to its right; export
               now sits in that same slack space instead of getting its own
               near-empty row below the date picker. */}
-          <div className="flex min-w-0 items-center gap-2 lg:max-w-[22rem]">
+          <div className="flex min-w-0 flex-1 items-center gap-2 lg:max-w-[22rem]">
             {/* Y19: the Start → End box both SHOWS the effective range and IS
                 the custom editor -- editing it switches to
                 the 'custom' rangeId. No "Range:" label: the rectangular,
@@ -1596,11 +1616,11 @@ ${translateOr('delivery_margin', 'Delivery margin')} ${fmtUSD(aDeliveryMargin)} 
                 }}
                 t={t}
                 showTime={false}
-                triggerClassName="flex w-full items-center justify-center gap-2 rounded-lg px-3.5 py-2"
+                triggerClassName="flex w-full min-w-0 items-center justify-center gap-1.5 rounded-lg px-2 py-1 !min-h-9 sm:px-3"
               />
             </div>
           </div>
-          <div className="flex min-w-0 flex-1 items-start justify-end gap-1">
+          <div className="flex shrink-0 items-center justify-end gap-1">
             {/* Opens the float export-choices dialog -- no direct downloads
                 off a toolbar menu. */}
             {hasPermission('dashboard_export') && (
@@ -1716,10 +1736,10 @@ ${translateOr('delivery_margin', 'Delivery margin')} ${fmtUSD(aDeliveryMargin)} 
                   { key:'revenue_usd', color:'#2563eb', label: netRevenueLabel },
                 ]} />
               </Suspense>
-              <div className="mt-1.5 flex flex-wrap items-center gap-2">
-                <div className="inline-flex items-center gap-2 rounded-full bg-slate-50 px-2.5 py-1 dark:bg-slate-800/70"><div className="h-2 w-4 rounded-full bg-cyan-600"/><span className="text-sm font-semibold text-slate-600 dark:text-slate-200">{grossSalesLabel}</span></div>
-                <div className="inline-flex items-center gap-2 rounded-full bg-slate-50 px-2.5 py-1 dark:bg-slate-800/70"><div className="h-2 w-4 rounded-full bg-orange-500"/><span className="text-sm font-semibold text-slate-600 dark:text-slate-200">{refundsLabel}</span></div>
-                <div className="inline-flex items-center gap-2 rounded-full bg-slate-50 px-2.5 py-1 dark:bg-slate-800/70"><div className="h-2 w-4 rounded-full bg-blue-600"/><span className="text-sm font-semibold text-slate-600 dark:text-slate-200">{netRevenueLabel}</span></div>
+              <div className="compact-analytics-legend mt-1.5 flex flex-nowrap items-center gap-1 overflow-x-auto">
+                <div className="inline-flex shrink-0 items-center gap-1 rounded-full bg-slate-50 px-1.5 py-0.5 dark:bg-slate-800/70"><div className="h-1.5 w-2.5 shrink-0 rounded-full bg-cyan-600"/><span className="whitespace-nowrap text-[10px] font-semibold leading-tight text-slate-600 dark:text-slate-200">{grossSalesLabel}</span></div>
+                <div className="inline-flex shrink-0 items-center gap-1 rounded-full bg-slate-50 px-1.5 py-0.5 dark:bg-slate-800/70"><div className="h-1.5 w-2.5 shrink-0 rounded-full bg-orange-500"/><span className="whitespace-nowrap text-[10px] font-semibold leading-tight text-slate-600 dark:text-slate-200">{refundsLabel}</span></div>
+                <div className="inline-flex shrink-0 items-center gap-1 rounded-full bg-slate-50 px-1.5 py-0.5 dark:bg-slate-800/70"><div className="h-1.5 w-2.5 shrink-0 rounded-full bg-blue-600"/><span className="whitespace-nowrap text-[10px] font-semibold leading-tight text-slate-600 dark:text-slate-200">{netRevenueLabel}</span></div>
               </div>
             </>
           ) : activeChart === 'profit' ? (
@@ -1727,10 +1747,10 @@ ${translateOr('delivery_margin', 'Delivery margin')} ${fmtUSD(aDeliveryMargin)} 
               <Suspense fallback={<ChartFallback />}>
                 <LineChart data={chartRenderData} lines={[{ key:'revenue_usd', color:'#2563eb', label: profitRevenueLabel },{ key:'cost_usd', color:'#dc2626', label: cogsLabel },{ key:'profit_usd', color:'#16a34a', label: estProfitLabel }]} />
               </Suspense>
-              <div className="mt-1.5 flex flex-wrap items-center gap-3">
-                <div className="inline-flex items-center gap-2 rounded-full bg-slate-50 px-2.5 py-1 dark:bg-slate-800/70"><div className="h-2 w-4 rounded-full bg-blue-600"/><span className="text-sm font-semibold text-slate-600 dark:text-slate-200">{profitRevenueLabel}</span></div>
-                <div className="inline-flex items-center gap-2 rounded-full bg-slate-50 px-2.5 py-1 dark:bg-slate-800/70"><div className="h-2 w-4 rounded-full bg-red-600"/><span className="text-sm font-semibold text-slate-600 dark:text-slate-200">{cogsLabel}</span></div>
-                <div className="inline-flex items-center gap-2 rounded-full bg-slate-50 px-2.5 py-1 dark:bg-slate-800/70"><div className="h-2 w-4 rounded-full bg-green-600"/><span className="text-sm font-semibold text-slate-600 dark:text-slate-200">{estProfitLabel}</span></div>
+              <div className="compact-analytics-legend mt-1.5 flex flex-nowrap items-center gap-1 overflow-x-auto">
+                <div className="inline-flex shrink-0 items-center gap-1 rounded-full bg-slate-50 px-1.5 py-0.5 dark:bg-slate-800/70"><div className="h-1.5 w-2.5 shrink-0 rounded-full bg-blue-600"/><span className="whitespace-nowrap text-[10px] font-semibold leading-tight text-slate-600 dark:text-slate-200">{profitRevenueLabel}</span></div>
+                <div className="inline-flex shrink-0 items-center gap-1 rounded-full bg-slate-50 px-1.5 py-0.5 dark:bg-slate-800/70"><div className="h-1.5 w-2.5 shrink-0 rounded-full bg-red-600"/><span className="whitespace-nowrap text-[10px] font-semibold leading-tight text-slate-600 dark:text-slate-200">{cogsLabel}</span></div>
+                <div className="inline-flex shrink-0 items-center gap-1 rounded-full bg-slate-50 px-1.5 py-0.5 dark:bg-slate-800/70"><div className="h-1.5 w-2.5 shrink-0 rounded-full bg-green-600"/><span className="whitespace-nowrap text-[10px] font-semibold leading-tight text-slate-600 dark:text-slate-200">{estProfitLabel}</span></div>
               </div>
             </>
           ) : (
@@ -2066,9 +2086,9 @@ ${translateOr('delivery_margin', 'Delivery margin')} ${fmtUSD(aDeliveryMargin)} 
       </div>
       </section>
 
-      {recentSalesOpen ? (
-        <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-0 sm:items-center sm:p-4" onClick={() => setRecentSalesOpen(false)}>
-          <div className="flex max-h-modal-88 w-full flex-col rounded-t-2xl bg-white shadow-2xl dark:bg-gray-800 sm:max-w-lg sm:rounded-2xl pb-[env(safe-area-inset-bottom)] sm:pb-0" onClick={(event) => event.stopPropagation()}>
+      {recentSalesOpen && typeof document !== 'undefined' ? createPortal((
+        <div className="modal-viewport-safe fixed inset-0 z-[1040] flex items-end justify-center bg-black/50 p-0 sm:items-center sm:p-4" onClick={() => setRecentSalesOpen(false)}>
+          <div className="modal-panel-safe flex w-full flex-col rounded-t-2xl bg-white shadow-2xl dark:bg-gray-800 sm:max-w-lg sm:rounded-2xl pb-[env(safe-area-inset-bottom)] sm:pb-0" onClick={(event) => event.stopPropagation()}>
             <div className="flex items-center justify-between border-b border-gray-200 p-4 dark:border-gray-700">
               <div>
                 <h2 className="font-bold text-gray-900 dark:text-white">{t('sales') || 'Sales'}</h2>
@@ -2085,52 +2105,53 @@ ${translateOr('delivery_margin', 'Delivery margin')} ${fmtUSD(aDeliveryMargin)} 
                   onClick={() => setRecentSaleDetail(sale)}
                 >
                   <div className="min-w-0">
-                    <div className="truncate text-sm font-semibold text-gray-800 dark:text-gray-100">{sale.receipt_number || `#${sale.id}`}</div>
-                    <div className="truncate text-xs text-gray-400">
+                    <div className="detail-scroll-text text-sm font-semibold text-gray-800 dark:text-gray-100">{sale.receipt_number || `#${sale.id}`}</div>
+                    <div className="detail-scroll-text text-xs text-gray-400">
                       {compactDashboardMetaParts([fmtTime(sale.created_at), sale.branch_name, sale.customer_name]).join(' | ')}
                     </div>
                   </div>
                   <div className="shrink-0 text-right">
-                    <div className="font-semibold text-green-600">{fmtUSD(sale.total_usd || sale.total || 0)}</div>
+                    <div className="flex items-baseline justify-end gap-1 whitespace-nowrap"><span className="font-semibold text-green-600">{fmtUSD(sale.total_usd || sale.total || 0)}</span>{(sale.total_khr || 0) > 0 ? <span className="text-[10px] text-gray-400">{fmtKHR(sale.total_khr || 0)}</span> : null}</div>
                     <div className={`mt-1 inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold ${getSaleStatusTone(sale.sale_status)}`}>
                       {formatSaleStatus(sale.sale_status)}
                     </div>
-                    {(sale.total_khr || 0) > 0 ? <div className="text-xs text-gray-400">{fmtKHR(sale.total_khr || 0)}</div> : null}
                   </div>
                 </button>
               ))}
             </div>
           </div>
         </div>
-      ) : null}
+      ), document.body) : null}
 
-      {recentSaleDetail ? (
-        <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-0 sm:items-center sm:p-4" onClick={() => setRecentSaleDetail(null)}>
-          <div className="flex max-h-modal-85 w-full flex-col rounded-t-2xl bg-white shadow-2xl dark:bg-gray-800 sm:max-w-sm sm:rounded-2xl pb-[env(safe-area-inset-bottom)] sm:pb-0" onClick={(event) => event.stopPropagation()}>
+      {recentSaleDetail && typeof document !== 'undefined' ? createPortal((
+        <div className="modal-viewport-safe fixed inset-0 z-[1050] flex items-end justify-center bg-black/50 p-0 sm:items-center sm:p-4" onClick={() => setRecentSaleDetail(null)}>
+          <div className="modal-panel-safe flex w-full flex-col rounded-t-2xl bg-white shadow-2xl dark:bg-gray-800 sm:max-w-sm sm:rounded-2xl pb-[env(safe-area-inset-bottom)] sm:pb-0" onClick={(event) => event.stopPropagation()}>
             <div className="flex items-center justify-between border-b border-gray-200 p-4 dark:border-gray-700">
               <div>
                 <h2 className="font-bold text-gray-900 dark:text-white">{t('sale') || 'Sale'}</h2>
-                <div className="mt-0.5 max-w-56 truncate text-xs text-gray-400">{recentSaleDetail.receipt_number || `#${recentSaleDetail.id}`}</div>
+                <div className="detail-scroll-text mt-0.5 max-w-56 text-xs text-gray-400">{recentSaleDetail.receipt_number || `#${recentSaleDetail.id}`}</div>
               </div>
               <button onClick={() => setRecentSaleDetail(null)} className="text-gray-400 hover:text-gray-600 text-sm w-8 h-8 flex items-center justify-center">{closeLabel}</button>
             </div>
-            <div className="p-4 space-y-2 overflow-y-auto">
+            <div className="modal-scroll grid grid-cols-2 gap-2 p-4">
               {([
                 { label: t('date') || 'Date', value: fmtTime(recentSaleDetail.created_at) },
                 { label: t('status') || 'Status', value: formatSaleStatus(recentSaleDetail.sale_status) },
+                { label: t('total') || 'Total', value: fmtUSD(recentSaleDetail.total_usd || recentSaleDetail.total || 0) },
+                { label: 'KHR', value: fmtKHR(recentSaleDetail.total_khr || 0) },
                 { label: t('branch') || 'Branch', value: recentSaleDetail.branch_name || '--' },
                 { label: t('customer') || 'Customer', value: recentSaleDetail.customer_name || '--' },
-                { label: t('total') || 'Total', value: fmtUSD(recentSaleDetail.total_usd || recentSaleDetail.total || 0) },
-                (recentSaleDetail.total_khr || 0) > 0 ? { label: 'KHR', value: fmtKHR(recentSaleDetail.total_khr || 0) } : null,
+                { label: t('cashier') || 'Cashier', value: recentSaleDetail.cashier_name || '--' },
+                { label: t('items') || 'Items', value: String(getDashboardSaleItemCount(recentSaleDetail)) },
               ] as Array<{ label: ReactNode; value: ReactNode } | null>).filter((item): item is { label: ReactNode; value: ReactNode } => Boolean(item)).map((item, index) => (
                 <div key={String(item.label || index)} className="rounded-xl border border-gray-100 bg-gray-50 px-3 py-2 dark:border-gray-700 dark:bg-gray-900/40">
                   <div className="text-[11px] uppercase tracking-wide text-gray-400">{item.label}</div>
-                  <div className="mt-1 text-sm font-semibold text-gray-900 dark:text-white">{item.value}</div>
+                  <div className="detail-scroll-text mt-1 text-sm font-semibold text-gray-900 dark:text-white">{item.value}</div>
                 </div>
               ))}
               <button
                 type="button"
-                className="btn-secondary w-full"
+                className="btn-secondary col-span-2 w-full"
                 onClick={() => {
                   setRecentSaleDetail(null)
                   setRecentSalesOpen(false)
@@ -2142,7 +2163,7 @@ ${translateOr('delivery_margin', 'Delivery margin')} ${fmtUSD(aDeliveryMargin)} 
             </div>
           </div>
         </div>
-      ) : null}
+      ), document.body) : null}
 
       {/* Product detail modal. This and the two overlays below render
           through a portal to document.body (5.3): position:fixed anchors to
@@ -2151,16 +2172,16 @@ ${translateOr('delivery_margin', 'Delivery margin')} ${fmtUSD(aDeliveryMargin)} 
           covering the screen the moment any wrapper gains a transform. The
           shared Modal and InfoHint already portal for exactly this reason. */}
       {productDetail && createPortal(
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4" onClick={() => setProductDetail(null)}>
-          <div className="bg-white dark:bg-gray-800 rounded-t-2xl sm:rounded-2xl shadow-2xl w-full sm:max-w-sm flex flex-col max-h-modal-85 pb-[env(safe-area-inset-bottom)] sm:pb-0" onClick={e=>e.stopPropagation()}>
+        <div className="modal-viewport-safe fixed inset-0 z-[1050] flex items-end justify-center bg-black/50 p-0 sm:items-center sm:p-4" onClick={() => setProductDetail(null)}>
+          <div className="modal-panel-safe flex w-full flex-col rounded-t-2xl bg-white shadow-2xl dark:bg-gray-800 sm:max-w-sm sm:rounded-2xl pb-[env(safe-area-inset-bottom)] sm:pb-0" onClick={e=>e.stopPropagation()}>
             <div className="flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-700">
-              <div>
+              <div className="min-w-0 flex-1">
                 <h2 className="font-bold text-gray-900 dark:text-white">
                   {productDetail.insightType === 'low_stock' || productDetail.insightType === 'out_of_stock'
                     ? translateOr('inventory_item_details', 'Inventory item details')
                     : t('product_details')}
                 </h2>
-                <div className="text-xs text-gray-400 mt-0.5 truncate max-w-56">{productDetail.product_name || productDetail.name}</div>
+                <div className="break-words text-xs text-gray-400 mt-0.5">{productDetail.product_name || productDetail.name}</div>
               </div>
               <button onClick={() => setProductDetail(null)} className="text-gray-400 hover:text-gray-600 text-sm w-8 h-8 flex items-center justify-center">{closeLabel}</button>
             </div>
@@ -2189,7 +2210,7 @@ ${translateOr('delivery_margin', 'Delivery margin')} ${fmtUSD(aDeliveryMargin)} 
                 <>
                   <div className="rounded-xl border border-gray-100 bg-gray-50 px-3 py-2 dark:border-gray-700 dark:bg-gray-900/40">
                     <div className="text-[11px] uppercase tracking-wide text-gray-400">{t('category') || 'Category'}</div>
-                    <div className="mt-1 text-sm font-semibold text-gray-900 dark:text-white">{productDetail.category || '--'}</div>
+                    <div className="detail-scroll-text mt-1 text-sm font-semibold text-gray-900 dark:text-white">{productDetail.category || '--'}</div>
                   </div>
                   <button
                     type="button"
@@ -2219,12 +2240,12 @@ ${translateOr('delivery_margin', 'Delivery margin')} ${fmtUSD(aDeliveryMargin)} 
 
       {/* Customer detail modal -- portaled, see the product detail note. */}
       {customerDetail && createPortal(
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4" onClick={() => setCustomerDetail(null)}>
-          <div className="bg-white dark:bg-gray-800 rounded-t-2xl sm:rounded-2xl shadow-2xl w-full sm:max-w-sm flex flex-col max-h-modal-85 pb-[env(safe-area-inset-bottom)] sm:pb-0" onClick={e=>e.stopPropagation()}>
+        <div className="modal-viewport-safe fixed inset-0 z-[1050] flex items-end justify-center bg-black/50 p-0 sm:items-center sm:p-4" onClick={() => setCustomerDetail(null)}>
+          <div className="modal-panel-safe flex w-full flex-col rounded-t-2xl bg-white shadow-2xl dark:bg-gray-800 sm:max-w-sm sm:rounded-2xl pb-[env(safe-area-inset-bottom)] sm:pb-0" onClick={e=>e.stopPropagation()}>
             <div className="flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-700">
-              <div>
+              <div className="min-w-0 flex-1">
                 <h2 className="font-bold text-gray-900 dark:text-white">{t('customer_details')}</h2>
-                <div className="text-xs text-gray-400 mt-0.5">{customerDetail.customer_name}</div>
+                <div className="detail-scroll-text text-xs text-gray-400 mt-0.5">{customerDetail.customer_name}</div>
               </div>
               <button onClick={() => setCustomerDetail(null)} className="text-gray-400 hover:text-gray-600 text-sm w-8 h-8 flex items-center justify-center">{closeLabel}</button>
             </div>

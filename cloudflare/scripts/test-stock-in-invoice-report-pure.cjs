@@ -37,8 +37,9 @@ function compile(file, stubs = {}) {
 
 const batchCode = compile('batchCode.ts')
 const sqlBinding = compile('sqlBinding.ts')
+const searchMatch = compile('searchMatch.ts')
 const productBatches = compile('productBatches.ts', { './db': {}, './batchCode': batchCode, './sqlBinding': sqlBinding })
-const stockActionCommit = compile('stockActionCommit.ts', { './db': {}, './batchCode': batchCode })
+const stockActionCommit = compile('stockActionCommit.ts', { './db': {}, './batchCode': batchCode, './searchMatch': searchMatch })
 
 const migrationsDir = path.join(__dirname, '..', 'migrations')
 const migrationFiles = fs.readdirSync(migrationsDir).filter((f) => f.endsWith('.sql')).sort()

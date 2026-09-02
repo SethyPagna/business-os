@@ -110,7 +110,11 @@ function fixCrossorigin(): Plugin {
 function emitBuildManifest(): Plugin {
   return {
     name: 'business-os-build-manifest',
-    generateBundle() {
+    generateBundle(_options, bundle) {
+      const offlineAssetUrls = Object.values(bundle)
+        .map((output) => `/${output.fileName.replace(/\\/g, '/')}`)
+        .filter((fileName) => /\.(?:js|css)$/i.test(fileName))
+        .sort()
       this.emitFile({
         type: 'asset',
         fileName: 'business-os-build.json',
@@ -119,6 +123,11 @@ function emitBuildManifest(): Plugin {
           hash: buildHash,
           builtAt: new Date().toISOString(),
         }, null, 2),
+      })
+      this.emitFile({
+        type: 'asset',
+        fileName: 'business-os-precache.json',
+        source: JSON.stringify({ hash: buildHash, assets: offlineAssetUrls }, null, 2),
       })
     },
     writeBundle(options): void {
@@ -282,6 +291,12 @@ function buildRoutePreloadScript(preloads: Record<string, string[]>): string {
     return pathname === '/login' || pathname.indexOf('/login/') === 0;
   }
   function isPublicCatalogPath(pathname) {
+    // index.html's parser-time route bootstrap already knows that the root is the
+    // storefront on the public hostname and the admin shell on admin.*.
+    // Reuse that authoritative result so the public root never starts an
+    // unnecessary /api/auth/bootstrap request (which returns an expected 401
+    // for shoppers and used to leave a noisy console error).
+    if (document.documentElement.getAttribute('data-business-os-initial-route') === 'public') return true;
     if (!pathname || pathname === '/' || pathname === '/health') return false;
     if (pathname.indexOf('/api/') === 0 || pathname.indexOf('/uploads/') === 0) return false;
     if (/\\.[a-z0-9]+$/i.test(pathname)) return false;

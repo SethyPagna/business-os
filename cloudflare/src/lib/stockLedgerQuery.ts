@@ -18,7 +18,7 @@
 // the reported "70+ in vs very few out" skew was this bug, not just data.
 // `row_move_out` and `write_off` are kept for any legacy rows even though
 // current code writes `move_out` / `return_reversal` instead.
-import { localDateAtOrAfter, localDateAtOrBefore } from './businessDateWindow'
+import { localDateAtOrAfter, localDateAtOrBefore, localTimeRangeClause } from './businessDateWindow'
 
 export const LEDGER_OUT_TYPES = [
   'remove', 'sale', 'supplier_return', 'return_reversal', 'transfer_out',
@@ -42,6 +42,14 @@ export type StockLedgerFilters = {
   branchId?: number
   startDate?: string
   endDate?: string
+  // Optional local (UTC+7) wall-clock bound, 'HH:MM', ADDITIONAL to the
+  // calendar-day bound above (e.g. "every day, but only 9am-6pm shifts").
+  // Both must be present and valid to take effect -- see the route's own
+  // regex gate, same pattern sales.ts's appendLocalTimeRange already uses.
+  // Independent of startDate/endDate: a time-only range with no date bound
+  // scopes every day in the ledger to that daily window.
+  startTime?: string
+  endTime?: string
   search?: string
   // D2a (0084): filter by the supplier attributed to the movement's lot.
   // Only movements stamped with a batch_id can match -- unattributed rows
@@ -94,6 +102,14 @@ export function buildStockLedgerQuery(filters: StockLedgerFilters = {}): StockLe
   const endDate = /^\d{4}-\d{2}-\d{2}$/.test(String(filters.endDate || '')) ? String(filters.endDate) : ''
   if (startDate) { base.push(localDateAtOrAfter('m.created_at')); params.startDate = startDate }
   if (endDate) { base.push(localDateAtOrBefore('m.created_at')); params.endDate = endDate }
+  const LOCAL_TIME_RE = /^(?:[01]\d|2[0-3]):[0-5]\d$/
+  const startTime = String(filters.startTime || '').trim()
+  const endTime = String(filters.endTime || '').trim()
+  if (LOCAL_TIME_RE.test(startTime) && LOCAL_TIME_RE.test(endTime)) {
+    base.push(localTimeRangeClause('m.created_at'))
+    params.startTime = startTime
+    params.endTime = endTime
+  }
   const search = String(filters.search || '').trim().slice(0, 120)
   if (search) {
     // LIKE with ESCAPE, auditLogQuery.ts convention: user text matches
@@ -144,12 +160,19 @@ export function buildStockLedgerQuery(filters: StockLedgerFilters = {}): StockLe
   // idx_inventory_movements_product_created_pg.
   const rowsSql = `
     SELECT
-      m.id, m.product_id, m.product_name, p.barcode, p.unit,
+      m.id, m.product_id, m.product_name, p.barcode, p.unit, p.brand, p.category, p.tag_label,
       m.branch_id, m.branch_name, m.movement_type, ABS(COALESCE(m.quantity, 0)) AS quantity,
       CASE WHEN m.movement_type IN (${OUT_LIST}) THEN -ABS(COALESCE(m.quantity, 0)) ELSE ABS(COALESCE(m.quantity, 0)) END AS signed_quantity,
+      m.unit_cost_usd, m.unit_cost_khr, m.total_cost_usd, m.total_cost_khr,
       m.reason, m.reference_id, m.user_name, m.created_at,
       m.batch_id, b.lot_code AS batch_lot_code, b.received_at AS batch_received_at,
       b.supplier_id AS batch_supplier_id, b.supplier_name AS batch_supplier_name,
+      b.payment_status AS batch_payment_status, b.credit_due_date AS batch_credit_due_date,
+      b.unit_cost_usd AS batch_unit_cost_usd, b.received_cost_usd AS batch_received_cost_usd,
+      b.expiry_date AS batch_expiry_date, b.updated_at AS batch_updated_at,
+      (SELECT COUNT(DISTINCT COALESCE(mx.reference_id, -mx.id))
+       FROM inventory_movements mx
+       WHERE mx.batch_id = m.batch_id AND mx.movement_type = 'add') AS batch_receipt_session_count,
       CASE WHEN m.movement_type IN (${OUT_LIST}) THEN 'out' ELSE 'in' END AS ledger_bucket,
       COALESCE(p.stock_quantity, 0) - COALESCE((
         SELECT SUM(CASE WHEN mn.movement_type IN (${OUT_LIST}) THEN -ABS(COALESCE(mn.quantity, 0)) ELSE ABS(COALESCE(mn.quantity, 0)) END)

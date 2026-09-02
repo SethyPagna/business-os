@@ -525,7 +525,7 @@ export default function ProductDetailSheet({
               {primaryImage ? <ProductImage src={primaryImage} alt={displayName} className="w-full h-full object-cover" /> : <ImageOff className="h-4 w-4 text-gray-400" />}
             </button>
             <div className="min-w-0">
-              <div className="font-bold text-gray-900 dark:text-white truncate">{displayName}</div>
+              <div className="break-words font-bold text-gray-900 dark:text-white">{displayName}</div>
               {product.sku ? <div className="text-xs text-gray-400 font-mono">{product.sku}</div> : null}
             </div>
           </div>
@@ -544,9 +544,9 @@ export default function ProductDetailSheet({
             <div key={label} className="flex gap-3"><span className="text-xs text-gray-400 w-24 flex-shrink-0 pt-0.5">{label}</span><span className="text-sm text-gray-800 dark:text-gray-200">{String(val)}</span></div>
           ) : null)}
           <div className="flex gap-3"><span className="text-xs text-gray-400 w-24 flex-shrink-0 pt-0.5">{posCopy('Selling', 'តម្លៃលក់')}</span><div><span className="font-bold text-blue-600">{fmtUSD(asNumber(product.selling_price_usd))}</span>{asNumber(product.selling_price_khr) > 0 ? <span className="text-xs text-gray-400 ml-2">{fmtKHR(asNumber(product.selling_price_khr))}</span> : null}</div></div>
-          {asNumber(product.special_price_usd) > 0 || asNumber(product.special_price_khr) > 0 ? (
-            <div className="flex gap-3"><span className="text-xs text-gray-400 w-24 flex-shrink-0 pt-0.5">{posCopy('VIP', 'VIP')}</span><div><span className="font-bold text-emerald-600">{fmtUSD(asNumber(product.special_price_usd || product.selling_price_usd || 0))}</span>{asNumber(product.special_price_khr || product.selling_price_khr || 0) > 0 ? <span className="text-xs text-gray-400 ml-2">{fmtKHR(asNumber(product.special_price_khr || product.selling_price_khr || 0))}</span> : null}</div></div>
-          ) : null}
+          {/* VIP pricing is intentionally absent from the read-only detail
+              rows. It is revealed only by pressing the VIP price option
+              below, then applied on the second press. */}
           {asNumber(product.wholesale_price_usd) > 0 || asNumber(product.wholesale_price_khr) > 0 ? (
             <div className="flex gap-3"><span className="text-xs text-gray-400 w-24 flex-shrink-0 pt-0.5">{posCopy('Wholesale', 'បោះដុំ')}</span><div><span className="font-bold text-indigo-600">{fmtUSD(asNumber(product.wholesale_price_usd || 0))}</span>{asNumber(product.wholesale_price_khr || 0) > 0 ? <span className="text-xs text-gray-400 ml-2">{fmtKHR(asNumber(product.wholesale_price_khr || 0))}</span> : null}</div></div>
           ) : null}
@@ -659,7 +659,7 @@ export default function ProductDetailSheet({
               {effectiveVariant ? (
                 <div className="rounded-lg border border-gray-200 bg-white p-3 dark:border-gray-700 dark:bg-gray-800">
                   <div className="mb-2 flex items-center justify-between gap-2">
-                    <div {...getKhmerTextProps(effectiveVariant.name, 'min-w-0 flex-1 truncate text-sm font-semibold text-gray-900 dark:text-white')}>{effectiveVariant.name}</div>
+                    <div {...getKhmerTextProps(effectiveVariant.name, 'min-w-0 flex-1 break-words text-sm font-semibold text-gray-900 dark:text-white')}>{effectiveVariant.name}</div>
                     <span className={`flex-shrink-0 text-xs font-bold ${effectiveVariantStock <= 0 ? 'text-red-600' : effectiveVariantStock <= (asNumber(effectiveVariant.low_stock_threshold) || 10) ? 'text-yellow-600' : 'text-green-600'}`}>
                       {effectiveVariantStock} {effectiveVariant.unit}
                     </span>

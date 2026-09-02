@@ -112,6 +112,7 @@ export const EMPTY_CUSTOMER = Object.freeze({ name: '', phone: '', address: '' }
 export type PosOrder = {
   id: string
   label: string
+  checkoutRequestId: string
   cart: unknown[]
   customer: typeof EMPTY_CUSTOMER
   customerSearch: string
@@ -150,6 +151,7 @@ export function createEmptyOrder(number: number): PosOrder {
   return {
     id: `ord-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
     label: `Order ${number}`,
+    checkoutRequestId: '',
     cart: [],
     customer: { ...EMPTY_CUSTOMER },
     customerSearch: '',

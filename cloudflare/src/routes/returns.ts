@@ -47,6 +47,55 @@ app.use('*', async (c, next) => {
 
 const CUSTOMER_SCOPE = 'customer'
 const SUPPLIER_SCOPE = 'supplier'
+const RETURN_REASON_PRESETS_KEY = 'return_reason_presets'
+
+type ReturnReasonPresets = {
+  customer: string[]
+  supplier: string[]
+}
+
+function normalizeReferenceName(value: unknown): string {
+  return String(value ?? '').trim().toLocaleLowerCase().replace(/\s+/g, ' ')
+}
+
+function normalizeReasonList(value: unknown): string[] {
+  if (!Array.isArray(value)) return []
+  const output: string[] = []
+  const seen = new Set<string>()
+  for (const entry of value) {
+    const label = String(typeof entry === 'object' && entry !== null && 'label' in entry
+      ? (entry as { label?: unknown }).label
+      : entry ?? '').trim().replace(/\s+/g, ' ').slice(0, 160)
+    const key = normalizeReferenceName(label)
+    if (!key || seen.has(key)) continue
+    seen.add(key)
+    output.push(label)
+  }
+  return output
+}
+
+function normalizeReturnReasonPresets(value: unknown): ReturnReasonPresets {
+  let parsed = value
+  if (typeof value === 'string') {
+    try { parsed = JSON.parse(value) } catch { parsed = null }
+  }
+  if (Array.isArray(parsed)) {
+    // Compatibility with the brief early shape where one customer list was
+    // stored directly. The first explicit save rewrites it to the shared,
+    // two-scope object without duplicating entries.
+    return { customer: normalizeReasonList(parsed), supplier: [] }
+  }
+  const record = parsed && typeof parsed === 'object' ? parsed as Record<string, unknown> : {}
+  return {
+    customer: normalizeReasonList(record.customer),
+    supplier: normalizeReasonList(record.supplier),
+  }
+}
+
+async function loadReturnReasonPresets(env: Env): Promise<{ configured: boolean; presets: ReturnReasonPresets }> {
+  const row = await getDb(env).prepare('SELECT value FROM settings WHERE key = @key').get<{ value: string }>({ key: RETURN_REASON_PRESETS_KEY })
+  return { configured: !!row, presets: normalizeReturnReasonPresets(row?.value) }
+}
 
 // ---------------------------------------------------------------------------
 // What's simplified vs. the original backend/src/routes/returns.ts (1152
@@ -533,6 +582,110 @@ app.get('/report', async (c) => {
   })
 })
 
+// One persisted source for both customer- and supplier-return presets. The
+// frontend supplies translated fallbacks only while this row is absent; the
+// first edit writes the complete two-scope object, so legacy hard-coded lists
+// migrate without creating a second store or duplicate values.
+app.get('/reason-presets', async (c) => {
+  return c.json(await loadReturnReasonPresets(c.env))
+})
+
+app.post('/reason-presets', async (c) => {
+  const user = c.get('user')
+  if (getActionTier(user, 'returns', 'edit') !== 'full') {
+    return c.json({ error: 'Full Access to Returns is required to edit saved reasons.' }, 403)
+  }
+  const body = await c.req.json<Record<string, unknown>>().catch(() => ({} as Record<string, unknown>))
+  const presets = normalizeReturnReasonPresets(body.presets ?? body)
+  await getDb(c.env).prepare(`
+    INSERT INTO settings (key, value, updated_at) VALUES (@key, @value, CURRENT_TIMESTAMP)
+    ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP
+  `).run({ key: RETURN_REASON_PRESETS_KEY, value: JSON.stringify(presets) })
+  await audit(c.env, user?.id ?? null, user?.name ?? null, 'update', 'return_reason_presets', null, {
+    customerCount: presets.customer.length,
+    supplierCount: presets.supplier.length,
+  })
+  c.executionCtx.waitUntil(bumpVersion(c.env, 'settings'))
+  c.executionCtx.waitUntil(broadcast(c.env, 'settings', { action: 'return_reason_presets_update' }))
+  c.executionCtx.waitUntil(broadcast(c.env, 'returns', { action: 'reason_presets_update' }))
+  return c.json({ success: true, configured: true, presets })
+})
+
+app.get('/reasons/impact', async (c) => {
+  const returnScope: keyof ReturnReasonPresets = normalizeScope(c.req.query('return_scope')) === SUPPLIER_SCOPE ? 'supplier' : 'customer'
+  const from = String(c.req.query('from') || '').trim()
+  const to = String(c.req.query('to') || '').trim()
+  if (!from || !to) return c.json({ error: 'Source and target reasons are required' }, 400)
+  const fromKey = normalizeReferenceName(from)
+  const toKey = normalizeReferenceName(to)
+  const db = getDb(c.env)
+  const scopeExpr = "COALESCE(NULLIF(lower(trim(return_scope)), ''), 'customer')"
+  const linkedRecords = Number((await db.prepare(`
+    SELECT COUNT(*) AS n FROM returns
+    WHERE ${scopeExpr} = @returnScope AND lower(trim(COALESCE(reason, ''))) = @from
+  `).get<{ n: number }>({ returnScope, from: fromKey }))?.n || 0)
+  const targetRecords = Number((await db.prepare(`
+    SELECT COUNT(*) AS n FROM returns
+    WHERE ${scopeExpr} = @returnScope AND lower(trim(COALESCE(reason, ''))) = @to
+  `).get<{ n: number }>({ returnScope, to: toKey }))?.n || 0)
+  const { presets } = await loadReturnReasonPresets(c.env)
+  return c.json({
+    from,
+    to,
+    return_scope: returnScope,
+    configured: presets[returnScope].some((reason) => normalizeReferenceName(reason) === fromKey),
+    target_exists: presets[returnScope].some((reason) => normalizeReferenceName(reason) === toKey) || targetRecords > 0,
+    linked_records: linkedRecords,
+    live_snapshots: { returns: linkedRecords },
+    historical_snapshots_preserved: ['audit_logs', 'action history payloads', 'inventory movements'],
+  })
+})
+
+app.post('/reasons/replace', async (c) => {
+  const user = c.get('user')
+  if (getActionTier(user, 'returns', 'edit') !== 'full') {
+    return c.json({ error: 'Full Access to Returns is required to replace saved reasons.' }, 403)
+  }
+  const body = await c.req.json<Record<string, unknown>>().catch(() => ({} as Record<string, unknown>))
+  const returnScope: keyof ReturnReasonPresets = normalizeScope(body.return_scope) === SUPPLIER_SCOPE ? 'supplier' : 'customer'
+  const from = String(body.from || '').trim().replace(/\s+/g, ' ').slice(0, 160)
+  const to = String(body.to || '').trim().replace(/\s+/g, ' ').slice(0, 160)
+  const replaceScope = body.scope === 'linked' ? 'linked' : 'presets_only'
+  if (!from || !to) return c.json({ error: 'Source and target reasons are required' }, 400)
+  const fromKey = normalizeReferenceName(from)
+  const suppliedPresets = body.presets === undefined
+    ? (await loadReturnReasonPresets(c.env)).presets
+    : normalizeReturnReasonPresets(body.presets)
+  const nextList = normalizeReasonList(suppliedPresets[returnScope].map((reason) => (
+    normalizeReferenceName(reason) === fromKey ? to : reason
+  )))
+  if (!nextList.some((reason) => normalizeReferenceName(reason) === normalizeReferenceName(to))) nextList.push(to)
+  const nextPresets: ReturnReasonPresets = { ...suppliedPresets, [returnScope]: nextList }
+  const db = getDb(c.env)
+  const statements: Array<{ sql: string; params: Record<string, unknown> }> = [{
+    sql: `INSERT INTO settings (key, value, updated_at) VALUES (@key, @value, CURRENT_TIMESTAMP)
+          ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP`,
+    params: { key: RETURN_REASON_PRESETS_KEY, value: JSON.stringify(nextPresets) },
+  }]
+  if (replaceScope === 'linked') {
+    statements.push({
+      sql: `UPDATE returns SET reason = @to, updated_at = CURRENT_TIMESTAMP
+            WHERE COALESCE(NULLIF(lower(trim(return_scope)), ''), 'customer') = @returnScope
+              AND lower(trim(COALESCE(reason, ''))) = @from`,
+      params: { to, returnScope, from: fromKey },
+    })
+  }
+  const results = await db.batch(statements)
+  const linkedChanged = replaceScope === 'linked' ? Number(results[1]?.meta?.changes || 0) : 0
+  await audit(c.env, user?.id ?? null, user?.name ?? null, 'replace', 'return_reason', null, {
+    from, to, returnScope, scope: replaceScope, linkedChanged,
+  })
+  await Promise.all([bumpVersion(c.env, 'settings'), bumpVersion(c.env, 'returns')])
+  c.executionCtx.waitUntil(broadcast(c.env, 'settings', { action: 'return_reason_replace', returnScope, from, to }))
+  c.executionCtx.waitUntil(broadcast(c.env, 'returns', { action: 'reason_replace', returnScope, from, to }))
+  return c.json({ success: true, configured: true, presets: nextPresets, scope: replaceScope, linkedChanged })
+})
+
 // GET /api/returns/:id
 app.get('/:id', async (c) => {
   const db = getDb(c.env)
@@ -601,7 +754,7 @@ app.post('/', async (c) => {
   }
 
   if (clientRequestId) {
-    const existing = await db.prepare('SELECT id, return_number FROM returns WHERE client_request_id = ? LIMIT 1').get<{ id: number; return_number: string }>([clientRequestId])
+    const existing = await db.prepare("SELECT id, return_number FROM returns WHERE client_request_id = ? AND client_request_id <> '' LIMIT 1").get<{ id: number; return_number: string }>([clientRequestId])
     if (existing) return c.json({ id: existing.id, returnNumber: existing.return_number, duplicate: true })
   }
 
@@ -1093,7 +1246,7 @@ app.post('/supplier', async (c) => {
   if (!body.reason) return c.json({ error: 'Reason is required' }, 400)
 
   if (clientRequestId) {
-    const existing = await db.prepare('SELECT id, return_number FROM returns WHERE client_request_id = ? LIMIT 1').get<{ id: number; return_number: string }>([clientRequestId])
+    const existing = await db.prepare("SELECT id, return_number FROM returns WHERE client_request_id = ? AND client_request_id <> '' LIMIT 1").get<{ id: number; return_number: string }>([clientRequestId])
     if (existing) return c.json({ id: existing.id, returnNumber: existing.return_number, duplicate: true })
   }
 

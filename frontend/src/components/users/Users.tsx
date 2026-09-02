@@ -22,6 +22,7 @@ import { APP_NAVIGATION_EVENT } from '../../app/pathRouting.ts'
 import { useActionHistory } from '../../utils/actionHistory.ts'
 import { cloneHistorySnapshot, extractHistoryResultId } from '../../utils/historyHelpers.ts'
 import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.ts'
+import { copyPasswordToClipboard, passwordPersistenceNotice, persistChangedPassword } from '../../utils/passwordManager.ts'
 import {
   beginTrackedRequest,
   invalidateTrackedRequest,
@@ -36,6 +37,7 @@ import {
   deleteRole as deleteRoleRequest,
   getRoles as getRolesRequest,
   getUsers as getUsersRequest,
+  resetPassword as resetPasswordRequest,
   updateRole as updateRoleRequest,
   updateUser as updateUserRequest,
 } from '../../api/userAdminTransport.ts'
@@ -50,6 +52,8 @@ type PermissionState = Record<string, PermissionValue>
 interface CurrentUser {
   id?: EntityId | null
   name?: string | null
+  username?: string | null
+  role_code?: string | null
 }
 
 interface AppContextValue {
@@ -80,6 +84,7 @@ interface UserRecord extends Record<string, unknown> {
   created_at?: string | number | Date | null
   updated_at?: string | null
   has_admin_access?: boolean | number | null
+  is_primary_admin?: boolean | number | null
 }
 
 // SortChip vocabulary (utils/listSort.ts) -- this list is loaded whole, so
@@ -136,6 +141,7 @@ type UserWritePayload = Record<string, unknown> & {
   avatar_path: string
   role_id: EntityId | null
   is_active: boolean | number
+  __rename_cascade?: 'carry' | 'record_only'
 }
 
 interface UsersApi {
@@ -144,6 +150,7 @@ interface UsersApi {
   createUser: (payload: UserWritePayload & { password: string }) => Promise<MutationResult>
   updateUser: (id: EntityId, payload: UserWritePayload) => Promise<MutationResult>
   changeUserPassword: (id: EntityId, payload: Record<string, unknown>) => Promise<MutationResult>
+  resetPassword: (id: EntityId, payload: Record<string, unknown>) => Promise<MutationResult>
   createRole: (payload: Record<string, unknown>) => Promise<MutationResult>
   updateRole: (id: EntityId, payload: Record<string, unknown>) => Promise<MutationResult>
   deleteRole: (id: EntityId, payload?: Record<string, unknown>) => Promise<MutationResult>
@@ -166,6 +173,7 @@ function getUsersApi(): UsersApi {
     createUser: (payload) => createUserRequest(payload) as Promise<MutationResult>,
     updateUser: (id, payload) => updateUserRequest(id, payload) as Promise<MutationResult>,
     changeUserPassword: (id, payload) => changeUserPasswordRequest(id, payload) as Promise<MutationResult>,
+    resetPassword: (id, payload) => resetPasswordRequest(id, payload) as Promise<MutationResult>,
     createRole: (payload) => createRoleRequest(payload) as Promise<MutationResult>,
     updateRole: (id, payload) => updateRoleRequest(id, payload) as Promise<MutationResult>,
     deleteRole: (id, payload) => deleteRoleRequest(id, payload) as Promise<MutationResult>,
@@ -284,6 +292,7 @@ const INITIAL_ROLE_FORM: RoleFormState = {
 const LazyPermissionEditor = lazyRetry(async () => ({ default: (await import('./PermissionEditor')).default }), 'users-permission-editor')
 const LazyUserDetailSheet = lazyRetry(async () => ({ default: (await import('./UserDetailSheet')).default }), 'users-user-detail-sheet')
 const LazyUserProfileModal = lazyRetry(async () => ({ default: (await import('./UserProfileModal')).default }), 'users-user-profile-modal')
+const LazyOtpModal = lazyRetry(async () => ({ default: (await import('../utils-settings/OtpModal')).default }), 'users-otp-recovery-modal')
 const USERS_LIST_TIMEOUT_MS = 8000
 const ROLES_LIST_TIMEOUT_MS = 8000
 const USER_MUTATION_TIMEOUT_MS = 12000
@@ -407,6 +416,7 @@ export default function Users() {
   const saveRoleInFlightRef = useRef(false)
   const deleteRoleInFlightRef = useRef(false)
   const [profileOpen, setProfileOpen] = useState(false)
+  const [otpRecoveryTarget, setOtpRecoveryTarget] = useState<UserRecord | null>(null)
   const [loading, setLoading] = useState(false)
   const [rolesLoading, setRolesLoading] = useState(false)
   const [loadError, setLoadError] = useState<string | null>(null)
@@ -422,13 +432,15 @@ export default function Users() {
   /**
    * 2. Authorization Guards
    * 2.1 `canManage` gates admin-only data/actions.
-   * 2.2 `canManageTargetUser` blocks peer-admin edits while preserving self actions.
+   * 2.2 `canManageTargetUser` permits peer-admin management, including of the
+   *     primary admin account (explicit user decision, Sep 1 2026). Server-side
+   *     canManageTarget() enforces the same rule.
    */
   const canManage = hasPermission('all')
+    || String(currentUser?.role_code || '').trim().toLowerCase() === 'admin'
+    || String(currentUser?.username || '').trim().toLowerCase() === 'admin'
   const canManageTargetUser = (targetUser: UserRecord | null | undefined): boolean => {
-    if (!canManage || !targetUser) return false
-    if (Number(targetUser.id) === Number(currentUser?.id)) return true
-    return !targetUser.has_admin_access
+    return canManage && !!targetUser
   }
 
   // Device-approval notifications navigate here with anchor 'devices' (see
@@ -678,7 +690,7 @@ export default function Users() {
 
   const openEditUser = async (user: UserRecord): Promise<void> => {
     if (!canManage) return notify(t('no_permission') || 'No permission', 'error')
-    if (!canManageTargetUser(user)) return notify(tr('cannot_manage_admin_account', 'You cannot modify another admin account.'), 'error')
+    if (!canManageTargetUser(user)) return notify(tr('cannot_manage_admin_account', 'You cannot manage this account.'), 'error')
     if (!rolesLoadedOnceRef.current && !roles.length) {
       await loadRoles({ silent: false })
     }
@@ -748,6 +760,7 @@ export default function Users() {
     is_active: overrides.is_active ?? account.is_active ?? 1,
     userId: currentUser?.id,
     userName: currentUser?.name,
+    __rename_cascade: 'carry',
     ...(overrides.delete_user ? { delete_user: 1 } : {}),
   }), [currentUser?.id, currentUser?.name])
 
@@ -774,7 +787,7 @@ export default function Users() {
       return
     }
     if (selectedUser && !canManageTargetUser(selectedUser)) {
-      notify(tr('cannot_manage_admin_account', 'You cannot modify another admin account.'), 'error')
+      notify(tr('cannot_manage_admin_account', 'You cannot manage this account.'), 'error')
       return
     }
     if (!selectedUser && !userForm.role_id) {
@@ -791,7 +804,8 @@ export default function Users() {
     setUserConfirmOpen(false)
     setSaving(true)
     try {
-      const payload = {
+      const usernameChanged = Boolean(selectedUser) && String(selectedUser?.username || '').trim() !== userForm.username.trim()
+      const payload: UserWritePayload = {
         name: userForm.name.trim(),
         username: userForm.username.trim(),
         phone: userForm.phone.trim(),
@@ -802,6 +816,11 @@ export default function Users() {
         expectedUpdatedAt: selectedUser?.updated_at || undefined,
         userId: currentUser?.id,
         userName: currentUser?.name,
+        ...(usernameChanged ? {
+          __rename_cascade: window.confirm('Update linked sales, returns, stock movements, transfers, and other live user-name displays too? Point-in-time audit history will stay unchanged.')
+            ? 'carry'
+            : 'record_only',
+        } : {}),
       }
 
       const result = selectedUser
@@ -861,7 +880,7 @@ export default function Users() {
   const handleResetPassword = async () => {
     if (!selectedUser?.id) return
     if (!canManageTargetUser(selectedUser)) {
-      notify(tr('cannot_manage_admin_account', 'You cannot modify another admin account.'), 'error')
+      notify(tr('cannot_manage_admin_account', 'You cannot manage this account.'), 'error')
       return
     }
     const currentPassword = String(passwordForm.currentPassword || '')
@@ -889,24 +908,47 @@ export default function Users() {
 
     setPasswordSaving(true)
     try {
-      const result = await runUserMutation(() => getUsersApi().changeUserPassword(selectedUser.id, {
-        currentPassword: allowAdminOverride ? undefined : currentPassword,
-        newPassword,
-        adminOverride: allowAdminOverride,
-        userId: currentUser?.id,
-        userName: currentUser?.name,
-      }), 'Change user password')
+      const result = await runUserMutation(() => (allowAdminOverride
+        ? getUsersApi().resetPassword(selectedUser.id, {
+            newPassword,
+            userId: currentUser?.id,
+            userName: currentUser?.name,
+          })
+        : getUsersApi().changeUserPassword(selectedUser.id, {
+            currentPassword,
+            newPassword,
+            userId: currentUser?.id,
+            userName: currentUser?.name,
+          })
+      ), allowAdminOverride ? 'Reset user password' : 'Change user password')
       if (result?.success === false) {
         notify(result.error || 'Failed to change password', 'error')
         return
       }
-      notify(tr('password_updated', 'Password updated'), 'success')
-      setPasswordForm({
-        currentPassword: '',
-        newPassword: '',
-        confirmPassword: '',
+      const adminReset = Number(selectedUser.id) !== Number(currentUser?.id)
+      const persistence = await persistChangedPassword({
+        username: String(selectedUser.username || '').trim(),
+        displayName: String(selectedUser.name || selectedUser.username || '').trim(),
+        password: newPassword,
+        // Never store another user's credential as this administrator's own
+        // browser login. For admin resets the clipboard safeguard is used.
+        allowCredentialStore: !adminReset,
+        copyFallback: true,
       })
-      setModal(null)
+      const passwordSecured = persistence.credentialStoreSucceeded || persistence.copiedToClipboard
+      notify(passwordPersistenceNotice(persistence, { adminReset }), passwordSecured && !persistence.copiedToClipboard ? 'success' : 'warning')
+      if (passwordSecured) {
+        setPasswordForm({
+          currentPassword: '',
+          newPassword: '',
+          confirmPassword: '',
+        })
+        setModal(null)
+      } else {
+        // The server write already succeeded. Keep the new value in the form
+        // instead of clearing it and stranding the operator without a copy.
+        setPasswordForm((prev) => ({ ...prev, currentPassword: '' }))
+      }
     } catch (error) {
       notify(getErrorMessage(error, 'Failed to change password'), 'error')
     } finally {
@@ -1289,6 +1331,13 @@ export default function Users() {
               setPasswordForm({ currentPassword: '', newPassword: '', confirmPassword: '' })
               setModal('resetPw')
             }}
+            canRecoverOtp={canManageTargetUser(selectedUser)
+              && Number(selectedUser.id) !== Number(currentUser?.id)
+              && Boolean(selectedUser.otp_enabled)}
+            onRecoverOtp={() => {
+              setOtpRecoveryTarget(selectedUser)
+              setModal(null)
+            }}
             onClose={() => { setModal(null); setSelectedUser(null) }}
           />
         </Suspense>
@@ -1385,7 +1434,17 @@ export default function Users() {
 
       {modal === 'resetPw' && selectedUser ? (
         <Modal title={`${tr('change_password', 'Change password')}: ${selectedUser.name}`} onClose={() => setModal(null)}>
-          <div className="space-y-4">
+          <form className="space-y-4" onSubmit={(event) => { event.preventDefault(); void handleResetPassword() }}>
+            <input
+              type="text"
+              name="username"
+              autoComplete={Number(selectedUser.id) === Number(currentUser?.id) ? 'username' : 'off'}
+              value={selectedUser.username || ''}
+              readOnly
+              className="sr-only"
+              tabIndex={-1}
+              aria-hidden="true"
+            />
             {Number(selectedUser.id) === Number(currentUser?.id) ? (
               <div className="rounded-xl border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-700 dark:border-blue-900/40 dark:bg-blue-950/30 dark:text-blue-300">
                 {tr('current_password_required_change', 'Current password is required to change password')}
@@ -1393,7 +1452,7 @@ export default function Users() {
             ) : null}
             {Number(selectedUser.id) !== Number(currentUser?.id) && canManageTargetUser(selectedUser) ? (
               <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700 dark:border-amber-900/40 dark:bg-amber-950/30 dark:text-amber-300">
-                {tr('admin_password_override_note', 'Current password can be left blank when an administrator updates another non-admin account.')}
+                {tr('admin_password_override_note', 'Current password is not required when an administrator resets another account, including another admin account.')}
               </div>
             ) : null}
             <div>
@@ -1402,7 +1461,7 @@ export default function Users() {
                 id="reset-password-current"
                 name="current_password"
                 type="password"
-                autoComplete="current-password"
+                autoComplete={Number(selectedUser.id) === Number(currentUser?.id) ? 'current-password' : 'off'}
                 className="input"
                 value={passwordForm.currentPassword}
                 onChange={(e) => setPasswordForm((prev) => ({ ...prev, currentPassword: e.target.value }))}
@@ -1415,7 +1474,7 @@ export default function Users() {
                 id="reset-password-new"
                 name="new_password"
                 type="password"
-                autoComplete="new-password"
+                autoComplete={Number(selectedUser.id) === Number(currentUser?.id) ? 'new-password' : 'off'}
                 className="input"
                 value={passwordForm.newPassword}
                 onChange={(e) => setPasswordForm((prev) => ({ ...prev, newPassword: e.target.value }))}
@@ -1427,17 +1486,34 @@ export default function Users() {
                 id="reset-password-confirm"
                 name="confirm_password"
                 type="password"
-                autoComplete="new-password"
+                autoComplete={Number(selectedUser.id) === Number(currentUser?.id) ? 'new-password' : 'off'}
                 className="input"
                 value={passwordForm.confirmPassword}
                 onChange={(e) => setPasswordForm((prev) => ({ ...prev, confirmPassword: e.target.value }))}
               />
             </div>
-            <div className="flex justify-end gap-3">
+            <div className="flex flex-wrap justify-end gap-3">
+              <button
+                type="button"
+                className="btn-secondary"
+                disabled={!passwordForm.newPassword}
+                onClick={() => {
+                  void copyPasswordToClipboard(passwordForm.newPassword).then((copied) => {
+                    notify(
+                      copied
+                        ? tr('new_password_copied', 'New password copied to clipboard.')
+                        : tr('new_password_copy_failed', 'Could not copy automatically. Select the new password field and copy it before leaving.'),
+                      copied ? 'success' : 'warning',
+                    )
+                  })
+                }}
+              >
+                {tr('copy_new_password', 'Copy new password')}
+              </button>
               <button type="button" className="btn-secondary" onClick={() => setModal(null)}>{t('cancel') || 'Cancel'}</button>
-              <button type="button" className="btn-primary" onClick={handleResetPassword} disabled={passwordSaving}>{passwordSaving ? (t('loading') || 'Saving...') : tr('change_password', 'Change password')}</button>
+              <button type="submit" className="btn-primary" disabled={passwordSaving}>{passwordSaving ? (t('loading') || 'Saving...') : tr('change_password', 'Change password')}</button>
             </div>
-          </div>
+          </form>
         </Modal>
       ) : null}
 
@@ -1491,6 +1567,25 @@ export default function Users() {
       {profileOpen ? (
         <Suspense fallback={null}>
           <LazyUserProfileModal onClose={() => setProfileOpen(false)} />
+        </Suspense>
+      ) : null}
+      {otpRecoveryTarget ? (
+        <Suspense fallback={null}>
+          <LazyOtpModal
+            mode="recover"
+            userId={otpRecoveryTarget.id}
+            targetName={otpRecoveryTarget.name || null}
+            targetUsername={otpRecoveryTarget.username || null}
+            t={t}
+            onClose={() => setOtpRecoveryTarget(null)}
+            onDone={() => {
+              setUsers((current) => current.map((entry) => Number(entry.id) === Number(otpRecoveryTarget.id)
+                ? { ...entry, otp_enabled: false }
+                : entry))
+              notify(tr('otp_recovery_success', `2FA reset for ${otpRecoveryTarget.name || otpRecoveryTarget.username || 'the account'}. They can now sign in with their password and set up 2FA again.`))
+              setOtpRecoveryTarget(null)
+            }}
+          />
         </Suspense>
       ) : null}
     </div>

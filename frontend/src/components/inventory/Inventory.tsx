@@ -185,6 +185,7 @@ type InventoryAppContext = {
   fmtUSD: MoneyFormatter
   fmtKHR: MoneyFormatter
   usdSymbol: string
+  exchangeRate?: number
 }
 
 type InventorySyncContext = {
@@ -268,12 +269,14 @@ function getInventoryApi(): InventoryApi {
     getInventoryBootstrap: async (params: QueryParams = {}) => (await loadInventoryTransport()).getInventoryBootstrap(params),
     getInventoryMovements: async (params: QueryParams = {}) => (await loadInventoryTransport()).getInventoryMovements(params),
     getInventoryReasons: async () => (await loadInventoryTransport()).getInventoryReasons(),
+    getInventoryReasonImpact: async (type: string, from: string, to: string) => (await loadInventoryTransport()).getInventoryReasonImpact(type, from, to),
     getInventoryStats: async (params: QueryParams = {}) => (await loadInventoryTransport()).getInventoryStats(params),
     getProductsByIds: async (ids: unknown[] = [], params: QueryParams = {}) => (await loadProductReadTransport()).getProductsByIds(ids, params),
     getReturns: async (params: QueryParams = {}) => (await loadReturnsReadTransport()).getReturns(params),
     getRfidStatus: async (params: QueryParams = {}) => (await loadRfidTransport()).getRfidStatus(params),
     getUsers: async () => (await loadUserReadTransport()).getUsers(),
     saveInventoryReasons: async (items: unknown[] = []) => (await loadInventoryWriteTransport()).saveInventoryReasons(items),
+    replaceInventoryReason: async (payload: Record<string, unknown>) => (await loadInventoryWriteTransport()).replaceInventoryReason(payload as { type: string; from: string; to: string; scope: 'saved_only' | 'linked' }),
     searchInventoryProducts: async (params: QueryParams = {}) => (await loadInventoryTransport()).searchInventoryProducts(params),
     adjustStock: async (payload: Record<string, unknown> = {}) => (await loadInventoryWriteTransport()).adjustStock(payload),
     moveStockRow: async (payload: Record<string, unknown> = {}) => (await loadInventoryWriteTransport()).moveStockRow(payload),
@@ -336,9 +339,9 @@ const RFID_SECTION_OPTIONS = [
 // the hub's chips stay truthful. Standalone rendering (no props) keeps
 // working exactly as before -- the internal SectionSwitcher only hides
 // when a host is driving.
-export type InventoryHostSection = 'stats' | 'products' | 'movements' | 'rfid'
+export type InventoryHostSection = 'all' | 'stats' | 'products' | 'movements' | 'rfid'
 
-export default function Inventory({ hostSection, onHostSectionChange, embedded = false }: {
+export default function Inventory({ hostSection, onHostSectionChange, embedded = false, dateRange, onDateRangeChange }: {
   hostSection?: InventoryHostSection
   onHostSectionChange?: (section: InventoryHostSection) => void
   // `embedded`: render inline (no own `page-scroll` root) so a host can flow
@@ -346,8 +349,12 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
   // the Branches hub's merged "Stats & Branches" view so the stats cards sit
   // right on top of the branch list with no capped-pane gap between them.
   embedded?: boolean
+  /** Controlled by BranchesHubPage in the merged Stats & Branches view so
+   * this strip and the branch transfer history share one page date scope. */
+  dateRange?: DateTimeRange
+  onDateRangeChange?: (range: DateTimeRange) => void
 } = {}) {
-  const { can, t, user, notify, fmtUSD, fmtKHR, usdSymbol } = useApp() as InventoryAppContext
+  const { can, t, user, notify, fmtUSD, fmtKHR, usdSymbol, exchangeRate } = useApp() as InventoryAppContext
   // Every stock-moving action here mutates live batch/stock state that could
   // go stale between a Review Required user's request and an admin's
   // approval, so routes/inventory.ts blocks them outright for that tier
@@ -389,7 +396,9 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
   // Dashboard and Reports for the same dates.
   type InventoryStripKernel = { totals?: Record<string, number> }
   type InventoryStripReturns = { totals?: { count?: number; refund_usd?: number; compensation_usd?: number; loss_usd?: number }; by_type?: Array<{ return_type?: string; count?: number }> }
-  const [stripRange, setStripRange] = useState<DateTimeRange>(() => ({ startDate: '', endDate: '', startTime: '', endTime: '' }))
+  const [localStripRange, setLocalStripRange] = useState<DateTimeRange>(() => ({ startDate: '', endDate: '', startTime: '', endTime: '' }))
+  const stripRange = dateRange ?? localStripRange
+  const handleStripRangeChange = onDateRangeChange ?? setLocalStripRange
   const [stripKernel, setStripKernel] = useState<InventoryStripKernel | null>(null)
   const [stripCustomerReturns, setStripCustomerReturns] = useState<InventoryStripReturns | null>(null)
   const [stripSupplierReturns, setStripSupplierReturns] = useState<InventoryStripReturns | null>(null)
@@ -451,7 +460,7 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
   const debouncedSearch = useDebouncedValue(search, 180)
   const deferredSearch = String(debouncedSearch || '').trim()
   const [rfidStatus, setRfidStatus] = useState<LegacyInventoryRecord | null>(null)
-  const [tab,           setTab]           = useState<string>(hostSection && hostSection !== 'stats' ? hostSection : 'products')
+  const [tab,           setTab]           = useState<string>(hostSection && !['stats', 'all'].includes(hostSection) ? hostSection : 'products')
   const [inventorySection, setInventorySection] = useState<string>(hostSection || 'products')
   // E1: the hub's chip is authoritative -- when it changes, re-slice. Runs
   // only on hostSection changes, so internal jumps (view-history, focus
@@ -460,7 +469,8 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
   useEffect(() => {
     if (!hostSection) return
     setInventorySection(hostSection)
-    if (hostSection !== 'stats') setTab(hostSection)
+    if (hostSection === 'all') setTab('products')
+    else if (hostSection !== 'stats') setTab(hostSection)
   }, [hostSection])
   const [rfidSection, setRfidSection] = useState('all')
   const [movFilter,     setMovFilter]     = useState('all')
@@ -871,7 +881,7 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
   useEffect(() => {
     if (!isActive || !syncChannel?.channel) return
     const ch = syncChannel.channel
-    if (ch === 'inventory' || ch === 'products' || ch === 'sales' || ch === 'returns') load(true)
+    if (['inventory', 'products', 'sales', 'returns', 'suppliers', 'users'].includes(ch)) load(true)
   }, [isActive, load, syncChannel?.channel, syncChannel?.ts])
 
   const saveReasonCatalog = useCallback(async (nextItems: InventoryReason[]) => {
@@ -911,10 +921,18 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
 
   const renameSavedReason = useCallback(async (entry: InventoryReason) => {
     const nextLabel = window.prompt(tr('rename_reason_prompt', 'Rename saved reason'), entry?.label || '')
-    if (!nextLabel) return
-    const next = inventoryReasons.map((item) => item.id === entry.id ? { ...item, label: nextLabel.trim() } : item)
-    await saveReasonCatalog(next)
-  }, [inventoryReasons, saveReasonCatalog, tr])
+    if (!nextLabel?.trim() || nextLabel.trim().toLowerCase() === entry.label.trim().toLowerCase()) return
+    const to = nextLabel.trim()
+    const impact = await getInventoryApi().getInventoryReasonImpact(entry.type, entry.label, to) as { linked_records?: number }
+    const linked = Number(impact.linked_records || 0)
+    const scope = linked > 0 && window.confirm(
+      `${linked} exact stock-movement record${linked === 1 ? '' : 's'} use this reason. Update those linked records too? Audit logs stay unchanged.`,
+    ) ? 'linked' : 'saved_only'
+    const result = await getInventoryApi().replaceInventoryReason({ type: entry.type, from: entry.label, to, scope })
+    const items = Array.isArray(result?.items) ? result.items as InventoryReason[] : inventoryReasons.map((item) => item.id === entry.id ? { ...item, label: to } : item)
+    setInventoryReasons(items)
+    notify(scope === 'linked' ? 'Reason and exact linked movements updated.' : 'Saved reason updated; existing movements were preserved.')
+  }, [inventoryReasons, notify, tr])
 
   const deleteSavedReason = useCallback(async (entry: InventoryReason) => {
     if (!window.confirm(tr('delete_saved_reason_confirm'))) return
@@ -1306,7 +1324,11 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
       return
     }
     if (!beginSingleAction(transferStockInFlightRef, { blocked: transferSaving })) return
-    if (!window.confirm(tr('confirm_transfer_stock'))) {
+    const confirmation = tr(
+      'confirm_transfer_stock_details',
+      `Transfer ${quantity} of ${transferModal.name} from ${fromBranch.name} to ${toBranch.name}? This posts a traceable stock movement.`,
+    )
+    if (!window.confirm(confirmation)) {
       finishSingleAction(transferStockInFlightRef)
       return
     }
@@ -1352,7 +1374,7 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
           await load(true)
         },
       })
-      notify(tr('stock_transferred', 'Stock transferred'))
+      notify(tr('stock_transferred_details', `Transferred ${quantity} of ${transferModal.name} from ${fromBranch.name} to ${toBranch.name}.`))
       setTransferModal(null)
       await load(true)
     } catch (error: unknown) {
@@ -2103,7 +2125,7 @@ ${inventoryFeesFormulaText}`,
         // above — it leads the section instead, driving the same stripRange.
         <div className="mb-2 space-y-1.5">
           <StatsRangeRow
-            range={stripRange} onRangeChange={setStripRange}
+            range={stripRange} onRangeChange={handleStripRangeChange}
             t={t}
             actions={(
               // Ranged stats export -- the dialog opens seeded with the
@@ -2413,6 +2435,7 @@ ${inventoryFeesFormulaText}`,
             defaultBranchId={branchFilter !== 'all' ? branchFilter : null}
             tr={tr}
             notify={notify}
+            exchangeRate={exchangeRate}
             onClose={() => setShowFastStockIn(false)}
             onDone={() => load(false)}
             onMinimize={(label: string) => minimizeWork({ key: 'fast-stockin', kind: 'fast_stockin', pageId: 'branches', label })}
