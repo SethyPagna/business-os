@@ -68,7 +68,8 @@ export default function RenameCascadeModal({
   if (!request) return null
   const lines = impactSummary(request.impact, t)
   return createPortal(
-    <div className="fixed inset-0 z-[60] bg-black/50 flex items-end sm:items-center justify-center p-0 sm:p-4" onClick={() => !busy && onChoose('cancel')}>
+    {/* Portals to document.body from INSIDE a level-3 Modal (ProductForm, Customers, Suppliers), so it must sit on the modal-over-modal layer; the old literal z-[60] rendered it UNDER Modal.tsx (--z-modal 1050) and the rename hung with no visible dialog. */}
+    <div className="fixed inset-0 z-[var(--z-modal-2)] flex items-end sm:items-center justify-center p-0 sm:p-4" style={{ backgroundColor: 'var(--ui-backdrop)' }} onClick={() => !busy && onChoose('cancel')}>
       <div className="max-h-[min(88vh,34rem)] w-full overflow-y-auto rounded-t-2xl bg-white shadow-2xl dark:bg-gray-800 sm:max-w-md sm:rounded-2xl fade-in" onClick={(event) => event.stopPropagation()}>
         <div className="border-b border-gray-200 p-3 dark:border-gray-700">
           <h3 className="font-bold text-gray-900 dark:text-white">{t('rename_cascade_title') || 'Rename — what happens to the rest?'}</h3>
