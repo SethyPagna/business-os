@@ -11,7 +11,8 @@ import { maybeQueueForReview } from '../lib/reviewGate'
 import { broadcast } from '../durable-objects/broadcastHub'
 import { bumpVersion } from '../lib/cache'
 import { findIdentityMatch, type ProductIdentityRow } from '../lib/productIdentity'
-import { buildFtsMatchExpression, buildHybridMatchClause, buildIssueStateClauses, buildLikeAliasClause, buildPartialWordMatchClause, buildShortWordFallbackClause, buildTrigramMatchExpression, PRODUCT_SEARCH_COLUMNS, PRODUCTS_FTS_BM25_SQL, runFuzzyFallbackMatch, tokenizeSearchTermGroups, tokenizeSearchWords } from '../lib/searchMatch'
+import { buildFtsMatchExpression, buildHybridMatchClause, buildIssueStateClauses, buildLikeAliasClause, buildPartialWordMatchClause, buildShortWordFallbackClause, buildTrigramMatchExpression, isDigitsOnlyQuery, PRODUCT_SEARCH_COLUMNS, PRODUCTS_FTS_BM25_SQL, runFuzzyFallbackMatch, tokenizeSearchTermGroups, tokenizeSearchWords } from '../lib/searchMatch'
+import { inlineIntegerIds } from '../lib/sqlBinding'
 import { receiveBatchStock, removeStockFromBatch, removeStockAcrossBatches, InsufficientBatchStockError, readFifoLotAvailability, allocateAcrossLots, decrementBatchStockStrictStatement, incrementBatchStockStatement } from '../lib/productBatches'
 import { applyMovementRevert, type RevertMovementRow } from '../lib/stockRevert'
 import { dateToBatchCode, normalizeToIsoDate } from '../lib/batchCode'
@@ -47,6 +48,14 @@ import type { Env } from '../index'
 // own comments for the price-unlock interaction and grouped-product
 // exclusion. RFID hardware endpoints are functional stubs (no reader
 // hardware exists to talk to from a Worker).
+
+// Same candidate/result caps as products.ts's own PRODUCTS_FUZZY_FALLBACK_*
+// constants and routes/portal.ts's PORTAL_FUZZY_FALLBACK_* (the reference
+// implementation) -- keeps the JS fuzzy fallback below bounded to a fixed
+// slice of the catalog rather than a full-table scan, and the post-fuzzy
+// id list under D1's 100-bound-param limit (see inlineIntegerIds).
+const INVENTORY_FUZZY_FALLBACK_CANDIDATE_LIMIT = 3000
+const INVENTORY_FUZZY_FALLBACK_MATCH_CAP = 500
 
 const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser } }>()
 app.use('*', requireAuth)
@@ -326,9 +335,38 @@ function appendInventoryProductFilters(query: InventoryFilterQuery) {
     else where.push("substr(trim(COALESCE(p.name, '')), 1, 1) = @initial")
   }
 
+  // Captured before the search match clause is folded into `where` below --
+  // mirrors products.ts's buildSearchFilters own baseWhere (see that
+  // file's searchProductsPayload for how it's used): every OTHER active
+  // filter (branch/brand/category/stock/issue/group/initial above), so the
+  // JS fuzzy fallback in searchProductsPayload can re-scope its own
+  // candidate query the same way the strict search was already scoped,
+  // without also carrying the strict search's own MATCH clause (which the
+  // fallback only runs after that clause found zero rows).
+  const baseWhere = [...where]
+
   if (searchWhereClause) where.push(searchWhereClause)
 
-  return { where, joins, params, stockExpr, matchRankSql, titleOnly }
+  return {
+    where,
+    joins,
+    params,
+    stockExpr,
+    matchRankSql,
+    titleOnly,
+    baseWhere,
+    searchMode: mode,
+    // Same shape lib/searchMatch.ts's runFuzzyFallbackMatch/
+    // isDigitsOnlyQuery expect (each entry is itself re-tokenized on the
+    // fuzzy path) -- see products.ts's buildSearchFilters own
+    // searchTerms field for the identical wiring.
+    searchTerms: termGroups.map((words) => words.join(' ')),
+    // Barcode/SKU queries stay exact-only -- see isDigitsOnlyQuery's own
+    // comment in lib/searchMatch.ts for why edit-distance tolerance is
+    // wrong for an opaque numeric identifier.
+    digitsOnly: isDigitsOnlyQuery(termGroups),
+    hasSearchTerm: termGroups.length > 0,
+  }
 }
 
 async function getInventoryProductMetadata(env: Env, query: InventoryFilterQuery) {
@@ -424,7 +462,7 @@ async function searchProductsPayload(env: Env, query: Record<string, string>) {
   const metadataOnly = ['1', 'true', 'yes'].includes(String(query.metadataOnly ?? query.metadata_only ?? '').trim().toLowerCase())
   const db = getDb(env)
   const filters = appendInventoryProductFilters(query)
-  const { where, joins, params, matchRankSql } = filters
+  const { where, joins, params, matchRankSql, baseWhere, searchMode, searchTerms, digitsOnly, hasSearchTerm, titleOnly } = filters
   const joinSql = joins.join('\n')
   const whereSql = `WHERE ${where.join(' AND ')}`
 
@@ -447,6 +485,15 @@ async function searchProductsPayload(env: Env, query: Record<string, string>) {
              WHERE bs2.product_id = p.id
            ), '[]') AS branch_stock_json`
 
+  // metadataOnly shrinks selectColumns down to just `p.id`, so `name`
+  // isn't a column in the `matched` CTE at that point -- ordering by it
+  // would 500 with "no such column: name". The row order is discarded
+  // either way in that mode (see `items: metadataOnly ? [] : ...`
+  // below), so fall back to the one column guaranteed to exist. Hoisted
+  // out of the paginateProductFamilies call below so the JS fuzzy
+  // fallback's own re-query (if it runs) can reuse the exact same value.
+  const intraFamilyOrderSql = metadataOnly ? 'id ASC' : 'lower(name) ASC, id ASC'
+
   // Grouped products (parent_id families) are treated as a single unit for
   // paging -- see paginateProductFamilies for why plain LIMIT/OFFSET over
   // raw rows is wrong here. When metadataOnly, still select minimally so
@@ -468,18 +515,69 @@ async function searchProductsPayload(env: Env, query: Record<string, string>) {
       page,
       pageSize,
       familyOrderSql: effectiveFamilyOrderSql,
-      // metadataOnly shrinks selectColumns down to just `p.id`, so `name`
-      // isn't a column in the `matched` CTE at that point -- ordering by it
-      // would 500 with "no such column: name". The row order is discarded
-      // either way in that mode (see `items: metadataOnly ? [] : ...`
-      // below), so fall back to the one column guaranteed to exist.
-      intraFamilyOrderSql: metadataOnly ? 'id ASC' : 'lower(name) ASC, id ASC',
+      intraFamilyOrderSql,
       matchRankSql: metadataOnly ? undefined : matchRankSql,
     }),
     includeMetadata ? getInventoryProductMetadata(env, query) : Promise.resolve({ filters: { brands: [], categories: [] }, initials: [] }),
   ])
 
-  const pagedResult = paged
+  let pagedResult = paged
+
+  // JS fuzzy (typo-tolerant) fallback -- see lib/searchMatch.ts's
+  // runFuzzyFallbackMatch header comment, routes/portal.ts's reference
+  // implementation, and the identical block in products.ts's own
+  // searchProductsPayload (this route mirrors that one exactly, just
+  // against Inventory's own filter set/columns/no-promo ordering). Only
+  // runs when the strict SQL-folded search (FTS5 prefix, trigram
+  // substring, short-word/partial-word LIKE fallbacks -- all already
+  // applied inside appendInventoryProductFilters above) found literally
+  // nothing for a real, non-digits-only query -- the common case (a
+  // correctly- or near-correctly-typed search) never pays this extra
+  // pair of queries. Barcode/SKU (digits-only) queries are excluded --
+  // see isDigitsOnlyQuery's own comment in lib/searchMatch.ts.
+  if (pagedResult.total === 0 && hasSearchTerm && !digitsOnly) {
+    const candidateRows = await db.prepare(`
+      SELECT p.id AS id, p.name AS name, p.sku AS sku, p.barcode AS barcode
+      FROM products p
+      ${joinSql}
+      WHERE ${baseWhere.join(' AND ')}
+      ORDER BY p.id ASC
+      LIMIT ${INVENTORY_FUZZY_FALLBACK_CANDIDATE_LIMIT}
+    `).all<{ id: number; name: string; sku: string; barcode: string }>(params)
+    const candidates = (candidateRows || []).map((row) => ({
+      id: row.id,
+      // titleOnly ("search name only") scopes the haystack the same way
+      // it scopes the SQL MATCH above (PRODUCT_SEARCH_COLUMNS vs 'name')
+      // -- a name-only search must not fuzzy-match via sku/barcode either.
+      haystack: titleOnly ? String(row.name || '') : [row.name, row.sku, row.barcode].filter(Boolean).join(' '),
+    }))
+    const fuzzyIds = runFuzzyFallbackMatch(candidates, searchTerms, searchMode).slice(0, INVENTORY_FUZZY_FALLBACK_MATCH_CAP)
+    if (fuzzyIds.length) {
+      // Inlined as literals, not bound: capped at 500
+      // (INVENTORY_FUZZY_FALLBACK_MATCH_CAP) against D1's 100-bound-param
+      // limit, and the ids are row ids this handler just read back from
+      // D1 -- inlineIntegerIds throws on anything that isn't a safe
+      // integer, so no user input reaches the SQL text.
+      const fuzzyWhereSql = `WHERE ${[...baseWhere, `p.id IN (${inlineIntegerIds(fuzzyIds)})`].join(' AND ')}`
+      // Re-run through the SAME family-pagination helper (not a
+      // hand-rolled flat query) so grouped products, page-2 stability,
+      // and the total count all behave exactly like the strict-search
+      // path -- just without matchRankSql (a fuzzy hit has no bm25
+      // relevance to rank by; alphabetical is the fallback's own order,
+      // same as this route's own no-search-term order).
+      pagedResult = await paginateProductFamilies<Record<string, unknown>>({
+        db,
+        selectColumns,
+        joinSql,
+        whereSql: fuzzyWhereSql,
+        params,
+        page,
+        pageSize,
+        familyOrderSql: 'family_name ASC',
+        intraFamilyOrderSql,
+      })
+    }
+  }
 
   const items = metadataOnly ? [] : (pagedResult.items as Array<Record<string, unknown>>).map((row) => {
     const next = { ...row }
