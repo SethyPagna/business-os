@@ -80,7 +80,12 @@ function main() {
     const expected = BANNER + outputText
     if (checkOnly) {
       const current = fs.existsSync(outputPath) ? fs.readFileSync(outputPath, 'utf8') : ''
-      if (current !== expected) {
+      // Compare content, not line endings: on a Windows checkout with
+      // core.autocrlf=true the committed LF files arrive as CRLF, which made
+      // this check fail on every fresh worktree (and made the files show as
+      // dirty after every build) even though nothing had changed.
+      const normalizeEol = (text) => text.replace(/\r\n/g, '\n')
+      if (normalizeEol(current) !== normalizeEol(expected)) {
         throw new Error(`Generated runtime is stale: ${path.relative(root, outputPath)}. Run npm.cmd --prefix frontend run build:public-runtime.`)
       }
       console.log(`Verified ${path.relative(root, outputPath)}`)
