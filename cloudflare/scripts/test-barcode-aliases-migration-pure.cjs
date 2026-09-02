@@ -1,4 +1,4 @@
-// DB-backed proofs for migrations/0105_barcode_aliases.sql and
+// DB-backed proofs for migrations/0106_barcode_aliases.sql and
 // src/lib/barcodeAliases.ts's listAliases/addAliases, against REAL SQLite
 // (better-sqlite3, the engine D1 runs on) -- same method as
 // test-migration-chain-fresh-pure.cjs: the actual migration files, applied
@@ -28,7 +28,7 @@ const Database = require('better-sqlite3')
 
 const migrationsDir = path.join(__dirname, '..', 'migrations')
 const migrationFiles = fs.readdirSync(migrationsDir).filter((f) => f.endsWith('.sql')).sort()
-assert.ok(migrationFiles.includes('0105_barcode_aliases.sql'), 'migrations/0105_barcode_aliases.sql must exist')
+assert.ok(migrationFiles.includes('0106_barcode_aliases.sql'), 'migrations/0106_barcode_aliases.sql must exist')
 
 function freshDb() {
   const sqlite = new Database(':memory:')
@@ -51,7 +51,7 @@ check('the full migration chain (through 0105) applies to a fresh database', () 
 
 check('0105 alone is idempotent -- applying its SQL a second time does not throw', () => {
   const sqlite = freshDb()
-  const sql = fs.readFileSync(path.join(migrationsDir, '0105_barcode_aliases.sql'), 'utf8')
+  const sql = fs.readFileSync(path.join(migrationsDir, '0106_barcode_aliases.sql'), 'utf8')
   assert.doesNotThrow(() => sqlite.exec(sql), 'a re-apply of 0105 must be a no-op, not an error')
   const row = sqlite.prepare('PRAGMA integrity_check').get()
   assert.strictEqual(row.integrity_check, 'ok')

@@ -7,7 +7,7 @@ import type { D1Compat } from './db'
 // `products.barcode` (barcode is a deliberately shared, non-unique scalar
 // column; see productIdentity.ts and migrations/0001_init.sql:419,776).
 // Instead the alternative code is recorded here as a searchable alias --
-// migrations/0105_barcode_aliases.sql adds the table this file writes to and
+// migrations/0106_barcode_aliases.sql adds the table this file writes to and
 // reads from. Nothing here ever touches `products.barcode` itself.
 //
 // MIN_REAL_BARCODE_LENGTH mirrors cloudflare/src/lib/productIdentity.ts:173

@@ -66,7 +66,7 @@ function freshDb() {
     is_active INTEGER NOT NULL DEFAULT 1,
     name_normalized TEXT, unit_normalized TEXT, brand_compact TEXT
   )`)
-  for (const file of ['0018_products_fts.sql', '0019_products_fts_code.sql', '0021_products_fts_name_trigram.sql', '0105_barcode_aliases.sql']) {
+  for (const file of ['0018_products_fts.sql', '0019_products_fts_code.sql', '0021_products_fts_name_trigram.sql', '0106_barcode_aliases.sql']) {
     db.exec(fs.readFileSync(path.join(__dirname, '..', 'migrations', file), 'utf8'))
   }
   return db

@@ -3017,7 +3017,7 @@ export type PendingBarcodeAlias = { barcode: string; barcodeNormalized: string; 
 // real barcodes for the same product must never silently pick a winner --
 // the disagreement itself is the useful signal, so it is kept as a
 // searchable alias instead (barcode_aliases table, migrations/
-// 0105_barcode_aliases.sql) and surfaced as a warning, never applied
+// 0106_barcode_aliases.sql) and surfaced as a warning, never applied
 // silently.
 //
 // Rules, in order:

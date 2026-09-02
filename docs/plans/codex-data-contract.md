@@ -7,7 +7,7 @@ ops scripts against D1 directly. This section pins the contract both paths depen
 
 ## barcode_aliases table (additive, new)
 
-`cloudflare/migrations/0105_barcode_aliases.sql` — `barcode_aliases(id, product_id, barcode,
+`cloudflare/migrations/0106_barcode_aliases.sql` — `barcode_aliases(id, product_id, barcode,
 barcode_normalized, source, added_at)`, `UNIQUE(product_id, barcode_normalized)`, non-unique
 index on `barcode_normalized` (one alias barcode CAN legitimately belong to several products,
 mirroring `products.barcode` itself), `ON DELETE CASCADE`. `cloudflare/src/lib/barcodeAliases.ts`

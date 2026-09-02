@@ -3,7 +3,7 @@
 // coverage of listAliases/addAliases against the real migrated schema
 // (idempotency, ON DELETE CASCADE, the non-unique barcode_normalized
 // index) lives in test-barcode-aliases-migration-pure.cjs, once
-// migrations/0105_barcode_aliases.sql exists for it to run against.
+// migrations/0106_barcode_aliases.sql exists for it to run against.
 //
 // Same transpile-the-real-source method as the rest of this suite (see
 // test-import-engine-pure.cjs's own note) -- no D1/wrangler test harness
