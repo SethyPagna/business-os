@@ -26,31 +26,39 @@
 // (JS-side normalization of the *typed query*, not the stored column) are
 // still used to build both MATCH expressions.
 //
-// routes/portal.ts (the public storefront) is NOT on products_fts --
-// confirmed by reading the route, not assumed; an earlier version of this
-// comment claimed otherwise and was wrong. It's a deliberate, narrower
-// design (scoped to name/brand/category only -- the storefront was never
-// meant to expose sku/barcode/supplier/description/unit search, so the
-// barcode-substring problem buildTrigramMatchExpression fixes doesn't
-// apply there), still using foldDiacriticsSql/foldJoinersSql/
-// normalizedHaystackSql below for its per-row REPLACE()-chain LIKE
-// comparison. That's a real, separate opportunity (same full-table-scan
-// cost profile 0018's own comment describes) if the public search path
-// ever needs the same performance work -- not done here, flagged in
-// progress.md rather than silently left as-is. Those three helpers are
-// also still used by inventory.ts's movement-log search (a much smaller,
-// less latency-sensitive table with no catalog-scale concerns). The old
-// JS Levenshtein-based typo-tolerant fallback (fuzzyTextMatches/
+// routes/portal.ts (the public storefront) IS on products_fts, same as
+// products.ts/inventory.ts/branches.ts -- CORRECTED 2026-09-02 (Gate 2B
+// audit, P2-2): this comment previously claimed portal.ts was "NOT on
+// products_fts" and "scoped to name/brand/category only", which was
+// already wrong when written and had drifted further from the code since.
+// Confirmed by reading routes/portal.ts directly: its ftsMatch is built
+// via buildFtsMatchExpression(..., ['name', 'sku', 'barcode']) (same
+// PRODUCT_SEARCH_COLUMNS-shaped scope products.ts/inventory.ts/branches.ts
+// use -- brand/category dropped, not name/brand/category kept), and it
+// also calls buildTrigramMatchExpression/buildShortWordFallbackClause/
+// buildPartialWordMatchClause the same way the other three routes do.
+// foldDiacriticsSql/foldJoinersSql/normalizedHaystackSql below are NOT
+// used for portal.ts's product search (that would be the old pre-FTS5
+// REPLACE()-chain LIKE approach this file's own history already moved
+// away from) -- they're still used by inventory.ts's movement-log search
+// (a much smaller, less latency-sensitive table with no catalog-scale
+// concerns) and by sales.ts/returns.ts's LIKE-based search (deliberately
+// not on FTS5, see buildLikeAliasClause's own comment).
+//
+// The JS Levenshtein-based typo-tolerant fallback (fuzzyTextMatches/
 // matchesSearchTermGroups' word-fuzzy-match path, runFuzzyFallbackMatch)
-// is no longer called from products.ts/inventory.ts -- it was an
-// expensive full-candidate-fetch-plus-JS-loop pass that only ever fired
-// on a zero-result strict search, and FTS5 prefix+trigram matching
-// already handles the overwhelming majority of real partial-typing/
-// reordering/barcode-fragment cases far more cheaply. portal.ts still
-// calls runFuzzyFallbackMatch (it isn't on FTS5). matchesSearchTermGroups/
-// fuzzyTextMatches are also kept for genuine in-memory re-filtering of an
-// already-fetched page (no DB cost either way) -- see Inventory.tsx/
-// POS.tsx on the frontend.
+// is NOT "no longer called from products.ts/inventory.ts" either -- also
+// wrong, also corrected here: products.ts, inventory.ts, AND portal.ts all
+// call it today, each as a zero-result-gated fallback after the strict
+// FTS5/trigram/short-word/partial-word search above returns nothing for a
+// real, non-digits-only query (see buildProductSearchPlan's own comment
+// below for the shared plan these three routes -- and now branches.ts too
+// -- build their match clauses from; each route still runs its own
+// zero-result-gated fuzzy-candidate query and re-pagination, which stays
+// route-specific because each route's pagination/family-grouping shape
+// differs). matchesSearchTermGroups/fuzzyTextMatches are also kept for
+// genuine in-memory re-filtering of an already-fetched page (no DB cost
+// either way) -- see Inventory.tsx/POS.tsx on the frontend.
 //
 // Shared free-text matching used everywhere a person types into a product
 // search box (Products, Inventory, POS, the public portal, and the portal
@@ -1202,6 +1210,221 @@ export function buildLikeAliasClause(
     return perWordClauses.length > 1 ? `(${perWordClauses.join(' AND ')})` : perWordClauses[0]
   })
   return candidateClauses.length > 1 ? `(${candidateClauses.join(' OR ')})` : candidateClauses[0]
+}
+
+// --- shared product-catalog search tail (products.ts, portal.ts,
+// branches.ts; inventory.ts via a prepared patch -- see
+// bos-rc-workers/p2-2-inventory-tail.patch) -------------------------------
+//
+// P2-2 (Gate 2B audit, 2026-09-02): before this, each of the four
+// product-catalog search routes hand-rolled the same FTS5-prefix ->
+// trigram-substring -> hybrid-mixed-group -> short-word-LIKE ->
+// partial-word-LIKE clause sequence, almost verbatim, by copy-paste. That
+// meant a fix applied to one route's copy didn't reach the others unless
+// someone remembered to port it by hand three more times -- which is
+// exactly how two real, confirmed gaps happened: portal.ts never got the
+// isDigitsOnlyQuery guard products.ts/inventory.ts have on their JS fuzzy
+// fallback (see routes/portal.ts's own fallback block), and branches.ts
+// never got a JS fuzzy fallback AT ALL (confirmed absent, no
+// runFuzzyFallbackMatch/isDigitsOnlyQuery import). Both are closed by
+// construction now: every route that builds its match clauses through
+// this one function gets the same digitsOnly computation and the same
+// widened short-word/partial-word column scope, and branches.ts (below)
+// now runs the same zero-result-gated fuzzy fallback the other three do.
+//
+// Also fixes the confirmed 1-2 digit barcode-fragment gap (a 2-character
+// query like "12" returned zero rows in products.ts/inventory.ts/
+// branches.ts: buildTrigramMatchExpression drops any word under 3 chars,
+// buildHybridMatchClause needs 2+ words per group, and the short-word LIKE
+// fallback that DOES fire for a sub-3-char word was scoped to
+// p.name_normalized only everywhere -- never barcode/sku -- so a bare
+// barcode fragment had no rescue path). Fix: shortWordColumns/
+// partialWordColumns below default to name_normalized + barcode + sku,
+// not name_normalized alone. barcode/sku have no precomputed *_normalized
+// column (unlike name), but that's fine to pass with alreadyNormalizedCols
+// = true anyway -- normalizedHaystackSql's alreadyNormalized branch is just
+// `lower(COALESCE(expr, ''))`, no REPLACE-chain folding, and barcode/sku
+// values in this catalog are plain ASCII digits/alphanumerics with no
+// diacritics to fold, so skipping the REPLACE chain for them is correct,
+// not a shortcut -- and it avoids re-introducing the exact D1 "Expression
+// tree is too large (maximum depth 100)" incident normalizedHaystackSql's
+// own comment documents (the REPLACE chain is ~78 levels deep per raw
+// column read).
+//
+// extraExactClauses is a deliberately empty extension point for P2-3's
+// barcode_aliases work (Codex/legacy-reverified alias barcodes, e.g. an
+// old-system barcode that differs only by a leading zero from ours) -- it
+// is OR'd alongside this function's own match clauses, untouched by this
+// function itself. P2-3 owns building the actual SQL clause; this file
+// only reserves the seam so a route doesn't need a second, separate
+// "also check aliases" code path bolted on afterward.
+//
+// exactRankSql is new: an ORDER BY term ranking an exact barcode match
+// first (0), an exact sku match second (1), everything else tied (2) --
+// closes the Gate 2B finding that PRODUCTS_FTS_BM25_SQL weights name/sku/
+// barcode equally (10/10/10), so a scanned/typed exact barcode could rank
+// behind an unrelated name match that merely scored higher under bm25.
+// Only engages when exactMatchQuery is passed (the caller's raw, untrimmed
+// query text) -- omitted, it's the literal string '2' (a no-op constant,
+// ties every row, changes nothing about existing order-by behavior).
+export interface ProductSearchPlanOptions {
+  // Pre-tokenized AND-groups (tokenizeSearchTermGroups's own shape) --
+  // portal.ts, which has no comma AND/OR toggle, passes a single group
+  // (`[tokenizeSearchWords(raw, 8)]`), matching how it already builds its
+  // MATCH expressions today.
+  groups: readonly string[][]
+  mode: 'AND' | 'OR' | string
+  // FTS5/hybrid column scope; defaults to PRODUCT_SEARCH_COLUMNS
+  // (name/sku/barcode). titleOnly narrows the FTS match itself to 'name'
+  // and skips the barcode/sku trigram + hybrid clauses (unchanged from
+  // products.ts's/inventory.ts's existing titleOnly behavior).
+  columns?: readonly string[]
+  titleOnly?: boolean
+  shortWordColumns?: readonly string[]
+  partialWordColumns?: readonly string[]
+  // Bound-param key prefix so two plans can be built in the same request
+  // (or the same route file, across handlers) without colliding on
+  // @ftsQuery/@codeQuery/etc. Defaults to '' (single-plan-per-request
+  // callers, matching the param names the routes already used before this
+  // refactor).
+  paramKeyBase?: string
+  extraExactClauses?: string[]
+  // Raw (untokenized) query text for exactRankSql -- pass the same string
+  // the route already extracts from query.query/query.q before tokenizing.
+  exactMatchQuery?: string
+}
+
+export interface ProductSearchPlan {
+  matchClauses: string[]
+  // OR of matchClauses, or undefined when there's no search term at all --
+  // same shape products.ts's prior searchWhereClause local had, so callers
+  // can drop this straight into their own `where` array unchanged.
+  whereClause?: string
+  params: Record<string, unknown>
+  matchRankSql?: string
+  exactRankSql: string
+  hasSearchTerm: boolean
+  // One space-joined string per AND-group, the shape
+  // matchesSearchTermGroups/runFuzzyFallbackMatch expect -- same as
+  // products.ts's prior `searchTerms` local.
+  searchTerms: string[]
+  digitsOnly: boolean
+}
+
+export function buildProductSearchPlan(opts: ProductSearchPlanOptions): ProductSearchPlan {
+  const groups = opts.groups
+  const mode = opts.mode === 'OR' ? 'OR' : 'AND'
+  const titleOnly = !!opts.titleOnly
+  const columns = opts.columns || PRODUCT_SEARCH_COLUMNS
+  const base = opts.paramKeyBase || ''
+  const shortWordColumns = opts.shortWordColumns || ['p.name_normalized', 'p.barcode', 'p.sku']
+  const partialWordColumns = opts.partialWordColumns || shortWordColumns
+  const params: Record<string, unknown> = {}
+  const matchClauses: string[] = []
+  let matchRankSql: string | undefined
+
+  if (groups.length) {
+    const ftsMatch = buildFtsMatchExpression(groups, mode, titleOnly ? 'name' : columns)
+    if (ftsMatch) {
+      params[`${base}FtsQuery`] = ftsMatch
+      matchClauses.push(`p.id IN (SELECT rowid FROM products_fts WHERE products_fts MATCH @${base}FtsQuery)`)
+    }
+    // Same expression reused against both trigram tables (barcode/sku
+    // substring, and name substring) -- see products.ts's prior call site
+    // comment (now here) for why one buildTrigramMatchExpression() call
+    // covers both.
+    const trigramMatch = buildTrigramMatchExpression(groups, mode)
+    if (trigramMatch && !titleOnly) {
+      params[`${base}CodeQuery`] = trigramMatch
+      matchClauses.push(`p.id IN (SELECT rowid FROM products_fts_code WHERE products_fts_code MATCH @${base}CodeQuery)`)
+    }
+    if (trigramMatch) {
+      params[`${base}NameCodeQuery`] = trigramMatch
+      matchClauses.push(`p.id IN (SELECT rowid FROM products_fts_name_trigram WHERE products_fts_name_trigram MATCH @${base}NameCodeQuery)`)
+    }
+    const hybridMatch = titleOnly ? undefined : buildHybridMatchClause(groups, mode, `${base}hyb`, columns)
+    if (hybridMatch) {
+      Object.assign(params, hybridMatch.params)
+      matchClauses.push(hybridMatch.sql)
+    }
+    const shortWordMatch = buildShortWordFallbackClause(groups, mode, shortWordColumns, params, `${base}shortw`, true)
+    if (shortWordMatch) matchClauses.push(shortWordMatch)
+    const partialMatch = buildPartialWordMatchClause(groups, mode, partialWordColumns, params, `${base}partialw`, 4, true)
+    if (partialMatch) matchClauses.push(partialMatch)
+    if (opts.extraExactClauses && opts.extraExactClauses.length) {
+      matchClauses.push(...opts.extraExactClauses)
+    }
+    if (!titleOnly && ftsMatch) {
+      matchRankSql = `COALESCE((SELECT ${PRODUCTS_FTS_BM25_SQL} FROM products_fts WHERE products_fts.rowid = p.id AND products_fts MATCH @${base}FtsQuery), 0)`
+    }
+  }
+
+  let exactRankSql = '2'
+  const exactQuery = String(opts.exactMatchQuery || '').trim()
+  if (exactQuery) {
+    params[`${base}ExactQuery`] = exactQuery.toLowerCase()
+    exactRankSql = `CASE WHEN lower(COALESCE(p.barcode, '')) = @${base}ExactQuery THEN 0 WHEN lower(COALESCE(p.sku, '')) = @${base}ExactQuery THEN 1 ELSE 2 END`
+  }
+
+  return {
+    matchClauses,
+    whereClause: matchClauses.length ? (matchClauses.length > 1 ? `(${matchClauses.join(' OR ')})` : matchClauses[0]) : undefined,
+    params,
+    matchRankSql,
+    exactRankSql,
+    hasSearchTerm: groups.length > 0,
+    searchTerms: groups.map((words) => words.join(' ')),
+    digitsOnly: isDigitsOnlyQuery(groups),
+  }
+}
+
+// Shared bounds for the JS fuzzy (typo-tolerant) zero-result fallback --
+// same 3000-candidate/500-match caps products.ts/inventory.ts/portal.ts
+// each already hard-coded as their own local constant (kept as-is there,
+// not migrated to import these, to avoid an unrelated rename diff on
+// files P2-2 doesn't otherwise need to touch); branches.ts's new fallback
+// (routes/branches.ts) imports these directly since it has no fallback
+// today to keep a local constant from.
+export const PRODUCT_SEARCH_FUZZY_FALLBACK_CANDIDATE_LIMIT = 3000
+export const PRODUCT_SEARCH_FUZZY_FALLBACK_MATCH_CAP = 500
+
+// Mirrors lib/productIdentity.ts's own local MIN_REAL_BARCODE_LENGTH
+// (same value, 4) -- duplicated rather than imported because
+// productIdentity.ts is outside P2-2's owned files (Gate 2B P2-2 brief
+// section 2) and the two uses are conceptually independent (duplicate-
+// product-cluster detection there vs. exact-scan-hit highlighting here),
+// same reasoning this file's own top-of-file comment gives for
+// duplicating against frontend/src/utils/searchMatch.ts.
+export const MIN_REAL_BARCODE_LENGTH = 4
+
+// Response-shape helper: computes exact_barcode_hit_id the same way
+// frontend/src/utils/productLookup.ts's findExactBarcodeHit does
+// client-side (kept in exact parity -- see
+// frontend/tests/searchMatchParity.test.ts) -- decision 9's "exact single
+// hit is highlighted, never auto-added/picked/opened": a scan/typed value
+// only ever counts as "the" exact barcode hit when it looks like a real
+// barcode (digits-only, length >= MIN_REAL_BARCODE_LENGTH, not the "0"
+// placeholder 238 production rows share) AND exactly one row in the
+// CURRENT result page has that literal barcode -- never auto-selected,
+// only surfaced as a highlight flag for the caller's UI.
+export function computeExactBarcodeHitId(
+  rows: readonly { id: number; barcode?: string | null }[],
+  rawQuery: string,
+): number | null {
+  const normalized = String(rawQuery || '').trim()
+  if (!/^[0-9]+$/.test(normalized)) return null
+  if (normalized.length < MIN_REAL_BARCODE_LENGTH) return null
+  if (normalized === '0') return null
+  let hitId: number | null = null
+  let hitCount = 0
+  for (const row of rows) {
+    if (String(row.barcode || '').trim() === normalized) {
+      hitCount += 1
+      hitId = row.id
+      if (hitCount > 1) return null
+    }
+  }
+  return hitCount === 1 ? hitId : null
 }
 
 // --- "Issues" quick filter (products.ts, inventory.ts) --------------------
