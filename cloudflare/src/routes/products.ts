@@ -1069,7 +1069,22 @@ app.get('/bootstrap', async (c) => {
   })
 })
 
+// GET /filters is the catalog's facet vocabulary (categories, brands, suppliers,
+// units, initials). It was the one product read with no permission check at
+// all, so any signed-in account -- a user with no products/pos/inventory grant
+// -- could enumerate the catalog's supplier and brand lists. Callers do not all
+// send `surface` (POS and the promotion rule editor omit it), so the gate is
+// "may read the catalog on ANY surface", not the caller's declared one.
+function catalogVocabularyDenialReason(user: SessionUser): string | null {
+  const surfaces: ProductReadSurface[] = ['products', 'pos', 'inventory']
+  if (surfaces.some((surface) => productSurfaceDenialReason(user, surface) === null)) return null
+  if (getPermissionTier(user, 'promotions') !== 'none') return null
+  return 'You do not have permission to view the product catalog'
+}
+
 app.get('/filters', async (c) => {
+  const denial = catalogVocabularyDenialReason(c.get('user'))
+  if (denial) return c.json({ error: denial }, 403)
   return c.json(await loadProductFilters(c.env, c.req.query()))
 })
 
