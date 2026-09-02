@@ -690,11 +690,16 @@ function ProductsFullEditor() {
     const raw = window.sessionStorage.getItem('bos:dashboard:products-focus')
     if (!raw) return
     try {
-      const payload = JSON.parse(raw) as { stockFilter?: unknown }
+      const payload = JSON.parse(raw) as { stockFilter?: unknown; search?: unknown }
       const stockState = String(payload?.stockFilter || '')
       if (stockState === 'low' || stockState === 'out' || stockState === 'in_stock') {
         setStockFilter(stockState)
       }
+      // Branches hub -> Inventory's "Open in Products catalogue" link (Sept 2
+      // 2026 restore) carries the product's name so this jump lands on it
+      // directly instead of the full unfiltered catalog.
+      const prefillSearch = String(payload?.search || '').trim()
+      if (prefillSearch) setSearch(prefillSearch)
       setActiveProductSection('products')
     } catch {
       // Malformed handoff -- keep the current view state.
