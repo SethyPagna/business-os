@@ -383,3 +383,28 @@ to screenshot + expected vs actual) · 7. Report format + path.
 - De-bloat: net negative lines with tests/build green and no behaviour diff on the QA script.
 - Free and Paid: `PLAN` matrix test green; a Free run of the QA script completes within daily budgets.
 - PWA: install/update/offline checklist + responsive-pwa-audit report attached; iOS hazard list closed.
+
+### 4.5 User decisions for Phase 2 (2026-09-02, plan approved ~21:40) — binding for every P2 brief
+
+1. Branches → Inventory = branch-stock workspace distinct from Products.
+2. iOS install = guidance only (Add-to-Home-Screen hint, update toast, persistence, offline). No `.mobileconfig` WebClip. Gate 2C reached the same verdict independently.
+3. De-bloat = proven-dead removals + hook/helper splits; test-only exports stay.
+4. Phase 2 lands on the same RC branch.
+5. Look = ivory + charcoal + muted gold, serif display headings over a clean sans body, hairline borders, soft shadows. Dark variant (charcoal ground, ivory text, same gold) only via the manual `.dark` toggle; light stays the default; the app must not auto-honour OS dark (fix the `index.html` pre-paint shell).
+6. Fold container = floating panel on desktop, bottom sheet on mobile; deep actions are level-3 modals.
+7. Scope = admin app only; the storefront keeps its design (Section 8a fixes only).
+8. Density = compact: 13 px body text, 32 px rows; 36–40 px touch targets on mobile only. iOS exception: form inputs ≥16 px below 768 px so Safari does not auto-zoom; desktop inputs stay 13 px.
+9. Barcode scan = select, then confirm, on every surface including POS. Camera auto-closes on read; value fills the search box; list narrows; an exact single hit is highlighted/scrolled into view but never auto-added, auto-picked, or auto-opened (products fold into groups, batches, and options the user must choose). Keyboard-wedge scans land in the focused search box the same way.
+10. Codex/legacy re-verified data reaches the app by both paths (CSV through the import hub AND ops scripts against D1); the RC hardens the import path and pins the script/CSV contract with tests.
+11. Deeper verification of the latest data folder (`tmp/latest-data-input-20260902/latest data/`, pipeline `tmp/latest-data-reconcile/`, workbook `outputs/…/latest-data-zero-error-reconciliation-20260902.xlsx`) against the system = section P2-3b, read-only against production.
+12. App logic consistency is global: every page follows every rule fully (search, scan, date range, filters, grouping, permissions, stats); P2-6 certifies a consistency matrix.
+13. Fonts = self-hosted woff2 (offline-safe via the SW), legibility first: Source Serif 4 medium/semibold for headings ≥16 px only, Inter body at 13 px, Noto Sans Khmer / Noto Serif Khmer, real fallback stacks. No thin display serifs.
+14. Plan packaging = two toml files: `cloudflare/wrangler.toml` (Paid, unchanged default) and `cloudflare/wrangler.free.toml` (Free) selected via `--config`; runtime reads one `PLAN` var.
+15. P2-3b = full re-verify + prepared guarded SQL, nothing applied; waits until Codex has finished so its output is a second independent source. Step 0 runs now: keep a read-only copy of production D1 (SELECT-only) under `bos-rc-workers/d1-snapshot-<timestamp>/` with a row-count manifest. The user says when Codex is done and where its output lives.
+16. Timing = start disjoint Phase-2 work now (P2-1, P2-2, P2-3, P2-3b step 0) in parallel with the Phase-1 close-out; page adoption waits for the certified Phase-1 tip; the `inventory.ts` search tail is sequenced after Section 3 merges.
+17. Mobile navigation default = pages (layered): hub → section list → full-screen section with back header; OS back collapses one layer; switchable in Settings → Appearance.
+18. Visual checkpoint on Products: after kit + gallery + restyled Products, the coordinator sends screenshots (375/768/1280, light/dark) and waits for the user's approval before P2-4/P2-5 restyle the remaining pages.
+
+Standing policies (no further questions): shape-pinning tests are updated to the new markup with the invariant kept, never deleted; all 56 `window.confirm` sites move to `ConfirmDialog`; `dateHelpers.toLocalDateString` is exported and its 8 copies import it; the five uncertain zero-importer symbols from Gate 2C (`readAllQuotas`, `emptySalesTotals`, `samePhone`, `getSupplierRenameImpact`, `parseCSV`) are not removed; outside diffs are swept before every merge and never absorbed.
+
+Section additions: **P2-3b Latest-data deep verification** (owns `bos-rc-workers/d1-snapshot-*`, `docs/reports/latest-data-verification-*.md`, a scripts folder under `ops/scripts/latest-data/`; must not write to production, `products`, or any tracked data file) and the Products-first checkpoint inside P2-4.
