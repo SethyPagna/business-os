@@ -1,0 +1,197 @@
+# Workers FREE plan configuration -- see src/lib/planTier.ts for the full
+# "why" this file exists at all. This is wrangler.toml (the Paid config)
+# with three kinds of changes, and nothing else:
+#   1. [limits] removed entirely -- custom cpu_ms/subrequests is a Paid-only
+#      feature and makes `wrangler deploy` fail outright on Free (error
+#      100328, see wrangler.toml's own [limits] comment for the historical
+#      incident). Free's fixed defaults apply instead: 10ms CPU/invocation,
+#      50 external + 1,000 internal subrequests.
+#   2. Queue consumer max_batch_size lowered back to the Free-safe values
+#      wrangler.toml's own comments already document as this repo's
+#      historical Free-era numbers (see each consumer below for its own
+#      reasoning) -- because every consumer here (queue.ts) processes its
+#      batch SEQUENTIALLY in one invocation, so a batch sized for a 5-minute
+#      Paid CPU budget silently repacks several chunks' worth of compute
+#      into Free's single fixed 10ms window otherwise.
+#   3. [vars] PLAN_TIER = "free" instead of "paid" -- read once per isolate
+#      by lib/planTier.ts, and everything downstream of it (import chunk
+#      sizes, stock-action ceilings, backup/reset batch caps) follows from
+#      that one value. See that module for the full table of Free vs Paid
+#      numbers.
+#
+# Deliberately UNCHANGED from wrangler.toml (do not "fix" these on a future
+# edit without re-reading the reasoning first):
+#   - Both Durable Object bindings (SYNC_UPLOADS -> SyncUploadSession,
+#     BROADCAST_HUB -> BroadcastHub) and their new_sqlite_classes migrations.
+#     SQLite-backed Durable Objects are available on Workers Free (verified
+#     against Cloudflare's current docs, Sept 2 2026) -- there is no
+#     Free-tier reason to stub or remove them.
+#   - All three queue bindings (IMPORT_QUEUE, MEDIA_QUEUE, BACKUP_QUEUE) and
+#     all four consumers. Queues are available on Free: 10,000
+#     operations/day, 24h message retention. That retention window matters
+#     for business-os-import-dlq and business-os-backup-assets specifically
+#     (see their own comments below) -- a message that sits un-consumed for
+#     over 24h on Free is simply gone, unlike Paid's longer retention.
+#   - R2, D1 (both databases), Images, Analytics Engine, KV bindings -- all
+#     available on Free with their own documented ceilings (see
+#     lib/planTier.ts and lib/quotaGuard.ts), and NO code path branches on
+#     PLAN_TIER to pick a different storage location -- grepped and
+#     confirmed identical R2/D1 access on both tiers.
+#   - routes, assets, triggers (one cron trigger; Free allows up to 5).
+#
+# Deploy with `npm run deploy:free` (cloudflare/package.json), which passes
+# `--config wrangler.free.toml` explicitly -- `wrangler deploy` with no
+# --config flag always uses wrangler.toml (Paid) by default, so this file is
+# never picked up by accident.
+
+name = "business-os"
+main = "src/index.ts"
+compatibility_date = "2026-07-01"
+compatibility_flags = ["nodejs_compat"]
+account_id = "743e5b727d139e85ed11679097f6f99e"
+# See wrangler.toml's own comment on this key for the full history. Kept
+# identical here -- whether workers_dev is on is a DNS-routing concern, not
+# a plan-tier one.
+workers_dev = false
+
+routes = [
+  { pattern = "leangbeauty.com", custom_domain = true },
+  { pattern = "admin.leangbeauty.com", custom_domain = true },
+  { pattern = "leangcosmetics.dpdns.org/*", zone_name = "leangcosmetics.dpdns.org" },
+  { pattern = "admin.leangcosmetics.dpdns.org/*", zone_name = "leangcosmetics.dpdns.org" },
+]
+
+[assets]
+directory = "../frontend/dist"
+not_found_handling = "single-page-application"
+run_worker_first = ["/api/*", "/uploads/*", "/health", "/ws"]
+
+[triggers]
+crons = ["0 */6 * * *"]
+
+# NO [limits] BLOCK on Free -- see the file-top comment. Free's fixed
+# defaults (10ms CPU/invocation, 50 external + 1,000 internal subrequests)
+# apply automatically; setting cpu_ms/subrequests here makes `wrangler
+# deploy` fail with error 100328 (Paid-only feature).
+
+[[d1_databases]]
+binding = "DB"
+database_name = "business-os"
+database_id = "49795be9-eabe-43f1-8e16-b86faed60cb1"
+migrations_dir = "migrations"
+
+[[d1_databases]]
+binding = "IMPORT_DB"
+database_name = "business-os-import"
+database_id = "5c667470-920b-4cb1-bbc9-67d0d919c965"
+migrations_dir = "migrations-import"
+
+[[r2_buckets]]
+binding = "ASSETS"
+bucket_name = "business-os-assets"
+
+[images]
+binding = "IMAGES"
+
+[[analytics_engine_datasets]]
+binding = "Business_OS_Analytics"
+dataset = "Business_OS_Analytics"
+
+[[kv_namespaces]]
+binding = "CACHE"
+id = "de5f3b41c7264e4582077176fd0c1fe8"
+
+[[queues.producers]]
+binding = "IMPORT_QUEUE"
+queue = "business-os-import"
+
+[[queues.producers]]
+binding = "MEDIA_QUEUE"
+queue = "business-os-media"
+
+[[queues.producers]]
+binding = "BACKUP_QUEUE"
+queue = "business-os-backup-assets"
+
+[[queues.consumers]]
+queue = "business-os-import"
+# Free-era value (see wrangler.toml's matching consumer for the full
+# reasoning): handleImportQueue processes a batch SEQUENTIALLY in one
+# invocation, and Free's 10ms CPU budget is per INVOCATION, not per
+# message -- max_batch_size=5 would silently repack up to 5 chunks' worth
+# of classify/apply CPU into a single 10ms window and get killed mid-batch.
+max_batch_size = 1
+max_batch_timeout = 5
+dead_letter_queue = "business-os-import-dlq"
+
+[[queues.consumers]]
+queue = "business-os-import-dlq"
+# Left at the same size as wrangler.toml (Paid): this consumer's entire job
+# (handleImportDeadLetterQueue) is one D1 UPDATE per message -- genuinely
+# cheap synchronous work, not the CPU-bound classify/apply loop the import
+# queue's own batch size protects against. 10,000 ops/day (Free's queue
+# ceiling) is also far above what a dead-letter volume ever reaches in
+# practice.
+max_batch_size = 10
+max_batch_timeout = 30
+max_retries = 2
+
+[[queues.consumers]]
+queue = "business-os-media"
+# Lowered from wrangler.toml's 5, same reasoning as business-os-import
+# above: each message runs a real synchronous format/quality transform-
+# attempt ladder (imagePipeline.ts), not just a D1 write, so batching
+# several into one Free invocation risks the same 10ms-budget overrun.
+# This is a conservative, undemonstrated choice (no measured per-message
+# CPU figure exists for this path) rather than a documented historical
+# Free value the way business-os-import's is -- flagged here so a future
+# reader with real numbers can raise it with evidence.
+max_batch_size = 1
+max_batch_timeout = 30
+
+[[queues.consumers]]
+queue = "business-os-backup-assets"
+# Already max_batch_size=1 on Paid (see wrangler.toml's matching consumer
+# comment -- it was sized for the Free per-invocation CPU budget from the
+# start), so no change needed here. Free's 24h message retention (vs
+# Paid's longer window) is the one thing that matters more on this tier:
+# a stuck continuation message that exhausts retries sits dead-lettered
+# nowhere (no dead_letter_queue configured, by design -- see wrangler.toml)
+# and simply expires after 24h if never re-driven, same as Paid.
+max_batch_size = 1
+max_batch_timeout = 5
+max_retries = 3
+
+[[durable_objects.bindings]]
+name = "SYNC_UPLOADS"
+class_name = "SyncUploadSession"
+
+[[durable_objects.bindings]]
+name = "BROADCAST_HUB"
+class_name = "BroadcastHub"
+
+[[migrations]]
+tag = "v1-sync-upload-session"
+new_sqlite_classes = ["SyncUploadSession"]
+
+[[migrations]]
+tag = "v2-broadcast-hub"
+new_sqlite_classes = ["BroadcastHub"]
+
+[vars]
+# The one line this file exists to set. See src/lib/planTier.ts.
+PLAN_TIER = "free"
+BUSINESS_OS_PUBLIC_URL = "https://leangbeauty.com"
+BUSINESS_OS_ADMIN_URL = "https://admin.leangbeauty.com"
+BUSINESS_OS_ORGANIZATION_SLUG = "leangbeauty"
+BUSINESS_OS_ORGANIZATION_NAME = "LeangBeauty"
+
+SENTRY_DSN = "https://3a7ba49248bf45b90262cdc5709df9c1@o4511967341903872.ingest.us.sentry.io/4511973058543616"
+
+RESEND_FROM_EMAIL = "no-reply@leangbeauty.com"
+
+GOOGLE_LOGIN_CLIENT_ID = "784691087631-2ugaidgt6umv80i9qvfo08ddu12n4a9b.apps.googleusercontent.com"
+GOOGLE_LOGIN_REDIRECT_URI = "https://admin.leangbeauty.com/api/auth/oauth/callback"
+
+GOOGLE_DRIVE_CLIENT_ID = "784691087631-8ptg5j6vb15oi3ljg66dli7ssne88jig.apps.googleusercontent.com"
+GOOGLE_DRIVE_REDIRECT_URI = "https://admin.leangbeauty.com/api/system/drive-sync/oauth/callback"

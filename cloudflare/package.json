@@ -21,7 +21,11 @@
     "secrets:sync": "node scripts/sync-secrets.cjs",
     "deploy:full": "npm run typecheck && npm run build:frontend && npm run migrate:remote && npm run migrate:import:remote && npm run secrets:sync && npm run deploy",
     "d1:shell:local": "node scripts/with-wrangler-auth.cjs wrangler d1 execute business-os --local --command",
-    "d1:shell:remote": "node scripts/with-wrangler-auth.cjs wrangler d1 execute business-os --remote --command"
+    "d1:shell:remote": "node scripts/with-wrangler-auth.cjs wrangler d1 execute business-os --remote --command",
+    "dry-run:paid": "node scripts/with-wrangler-auth.cjs wrangler deploy --dry-run --outdir dist-dry-run-paid",
+    "dry-run:free": "node scripts/with-wrangler-auth.cjs wrangler deploy --config wrangler.free.toml --dry-run --outdir dist-dry-run-free",
+    "deploy:free": "node scripts/with-wrangler-auth.cjs wrangler deploy --config wrangler.free.toml",
+    "test:plan-tier": "node scripts/test-plan-tier-pure.cjs"
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",
