@@ -196,10 +196,35 @@ check('useBarcodeScan.ts never calls a select/add/confirm/navigate-shaped functi
   assert.doesNotMatch(hookSource, /\b(selectProduct|addProduct|confirmProduct|pickProduct|navigate\()/i)
 })
 
-// PromotionsPage.tsx-specific decision-9 assertions (scan fills search only,
-// user still clicks to confirm, exact-hit highlight) are added to this file
-// as part of P2-2 step 9 (PromotionsPage adoption), once that page actually
-// wires useProductLookup/the exact-hit highlight -- see the later commit
-// that touches both PromotionsPage.tsx and this file together.
+// --- PromotionsPage.tsx: scan value fills search, list narrows, user confirms via click ---
+// (P2-2 step 9 -- added once PromotionsPage.tsx actually adopted the hooks above.)
+
+const promotionsSource = fs.readFileSync(fileURLToPath(new URL('../src/components/promotions/PromotionsPage.tsx', import.meta.url)), 'utf8')
+
+check('PromotionsPage.tsx wires useProductLookup for the debounced search (P2-2 step 9 adoption)', () => {
+  assert.match(promotionsSource, /import \{ useProductLookup \} from '\.\.\/\.\.\/hooks\/useProductLookup\.ts'/)
+  assert.match(promotionsSource, /useProductLookup<ProductLite>\(\{/)
+})
+
+check('PromotionsPage.tsx still requires an explicit click on the per-product-discount result before opening the editor -- scan/type never auto-opens it', () => {
+  const block = promotionsSource.slice(promotionsSource.indexOf('{productResults.map'), promotionsSource.indexOf('{productResults.map') + 1200)
+  assert.match(block, /onClick=\{\(\) => \{ openDiscountEditor\(product\); setProductResults\(\[\]\) \}\}/)
+})
+
+check('PromotionsPage.tsx still requires an explicit click on the rule-picker result before adding it to the draft -- scan/type never auto-adds it', () => {
+  const block = promotionsSource.slice(promotionsSource.indexOf('{pickerResults.map'), promotionsSource.indexOf('{pickerResults.map') + 1200)
+  assert.match(block, /onClick=\{\(\) => \{/)
+  assert.match(block, /setDraft\(\{ \.\.\.draft, products: \[\.\.\.draft\.products, product\] \}\)/)
+})
+
+check('PromotionsPage.tsx marks the exact-barcode-hit row with data-exact-hit, never a selected/active class alone', () => {
+  const matches = promotionsSource.match(/data-exact-hit=\{isExactHit \? 'true' : undefined\}/g) || []
+  assert.equal(matches.length, 2, 'both the per-product picker and the rule picker must mark their exact-hit row')
+})
+
+check('PromotionsPage.tsx keeps ScanSearchButton wired to fill the search box only (setProductQuery/setPickerQuery), not to select/add anything', () => {
+  assert.match(promotionsSource, /<ScanSearchButton onDetected=\{setProductQuery\} t=\{t\} \/>/)
+  assert.match(promotionsSource, /<ScanSearchButton onDetected=\{setPickerQuery\} t=\{t\} \/>/)
+})
 
 console.log(`\nAll ${passed} barcodeScanSelectConfirm tests passed`)
