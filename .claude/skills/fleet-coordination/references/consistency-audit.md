@@ -39,10 +39,11 @@ convention you find yourself checking by hand twice.
 | Frontend ↔ backend rule parity (product identity; revenue kernel vs `/stats`) | `tests/productDetailRuleParity.test.ts`, `cloudflare/scripts/test-sales-revenue-convergence-pure.cjs` |
 | Source parses; public runtime scripts are current | `npm run check:source`, `npm run verify:public-runtime` |
 
-Note: `frontend/package.json` still references `verify:ui` and `verify:performance` scripts whose
-files do not exist under `ops/scripts/frontend/`. Do not cite them as evidence — that is a zombie
-reference to fix or remove (Golden Rule 6), and an example of why a claimed check must be observed,
-not assumed.
+Note: a script name in `package.json` is not evidence that a check exists. `verify:ui` and
+`verify:performance` pointed at files deleted with the old `backend/` architecture (commit
+`9ba4e843`) and stayed as dead entries through 20+ Part entries that "could not run them" until
+Part 580 removed them. Before citing any lock, confirm its file is present (`ls ops/scripts/frontend`
+/ `frontend/tests`) and run it — a claimed check must be observed, not assumed (Golden Rule 6).
 
 ## The convention checklist (audit by grep, confirm by eye)
 

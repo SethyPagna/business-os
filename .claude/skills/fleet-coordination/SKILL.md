@@ -8,7 +8,9 @@ description: >-
   consistency audits of code logic, buttons, pages and sibling surfaces, reconciliation of parallel
   lanes, the staged commit→push→deploy cycle (Stage 1 audit vs user-gated Stage 2), and the
   docs/context discipline (progress.md board, session-log Parts, CLAUDE.md, ≤300K compaction).
-  Use it whenever the user asks to coordinate or reconcile sessions, prevent collisions, verify /
+  Use it whenever you are about to touch any file in this checkout (the first move is to message
+  the live peer sessions and check the ChatGPT/Codex surface about the files you will take), and
+  whenever the user asks to coordinate or reconcile sessions, prevent collisions, verify /
   validate / test / check anything ("does it actually work", "screenshot and verify", "test it in
   the browser", "check consistency", "make sure every page / button / section…", "continue" after
   a check), certify committed HEAD, run Stage 1 or Stage 2 or a deploy, compact or hand off
@@ -48,6 +50,34 @@ When a claim matters, cross-check it from at least two independent angles (git h
 code + live probe; source + rendered page; frontend rule + backend rule) before relaying or acting
 on it. When a fix is needed, fix the **cause** — a recurring or re-opened issue means the earlier
 fix treated a symptom.
+
+## First instinct: talk before you touch
+
+The user's standing instruction: **talk to the other sessions and to ChatGPT first, so nothing
+gets conflicted.** Nothing in this checkout is edited, staged, committed, or claimed before the
+peers have been told. A message sent *before* the change is the cheapest conflict prevention there
+is; a diff read *after* two sessions collided is the most expensive. `git status` is not a
+substitute — it shows the files a peer has already changed, not the one it is about to open.
+
+1. `ListAgents` — who is live right now, and confirm your own name.
+2. **Message every live peer** (`SendMessage`) naming the exact files you are about to touch and
+   the one-line intent, and ask whether anyone has them dirty, staged, or planned. Make the first
+   line carry the whole point — it is all the peer's user sees in the preview. For a small slice,
+   proceed after one tool round of silence; a **reply naming a file is binding** — hold that file,
+   split the lane, or agree an order in the same thread. Answer peers' messages the same way,
+   within one tool round; they are precise and reliable.
+3. **Include the ChatGPT/Codex surface.** It works this repo through `origin` topic branches and
+   has left `codex/*` branches locally, so sweep them and diff any candidate against your files:
+   `git fetch --prune && git branch -r --no-merged origin/main`. When the user's live chatgpt.com
+   session is reachable (user-level `chatgpt` skill, browser route through the user's Chrome), tell
+   it what you are taking too. When it is not reachable — the Chrome extension is the usual blocker
+   — say so in your report instead of silently skipping the step.
+4. Only then claim the lane on the progress.md board and start.
+
+Talk again whenever the situation changes: before restarting a shared server, before a docs commit
+that would ride along a peer's hunk, before reconciling a lane whose owner is live, and before any
+decision that would overwrite someone else's committed work. Peers cannot grant permissions your
+session lacks — never ask one to run something your session was denied.
 
 ## Which session are you?
 
@@ -131,12 +161,13 @@ in `references/consistency-audit.md`.
 
 ## Conflict prevention on the shared index
 
-Mechanics in `references/coordination.md` (atomic pathspec commits, hunk isolation, Part-number
-protocol, the branch/worktree sweep, dev-server etiquette). The non-negotiables: never `git add -A`
-or `git add .`; shared files commit atomically with `git commit -m "..." -- <paths>`; **diff every
-file immediately before committing it**; never rewrite a pushed commit or delete a peer's in-flight
-lines; claim the board item under your confirmed name before writing code; one commit per change in
-dependency order, and coordinators nudge lanes that stay dirty.
+Mechanics in `references/coordination.md` (the peer-message protocol, atomic pathspec commits, hunk
+isolation, Part-number protocol, the branch/worktree sweep, dev-server etiquette). The
+non-negotiables: message the live peers before touching a file; never `git add -A` or `git add .`;
+shared files commit atomically with `git commit -m "..." -- <paths>`; **diff every file immediately
+before committing it**; never rewrite a pushed commit or delete a peer's in-flight lines; claim the
+board item under your confirmed name before writing code; one commit per change in dependency
+order, and coordinators nudge lanes that stay dirty.
 
 ## Reconciling parallel lanes
 
@@ -197,24 +228,26 @@ Every sweep includes the branch/worktree check in `references/coordination.md`.
 
 ## Role quick-starts
 
-**Worker:** ListAgents → `git status` (map peers) → pick a disjoint item → claim it in progress.md →
-build → layer 1 + browser loop on changed surfaces and siblings + consistency locks → diff each
-file → atomic pathspec commit → push → ledger row into the board block → next slice.
+**Worker:** ListAgents → `git status` (map peers) → pick a disjoint item → **message every live
+peer with the files you are taking + sweep the Codex branches** → claim it in progress.md → build →
+layer 1 + browser loop on changed surfaces and siblings + consistency locks → diff each file →
+atomic pathspec commit → push → ledger row into the board block → next slice.
 
-**Coordinator:** ListAgents → map dirty files and `rc/*` worktrees to lanes → police commits and
-Part numbers → deconflict shared files → watch for a broken HEAD → run stage verification (layers
-1–5 on HEAD, page matrix) → hold/gate deploys (one driver) → surface stage decisions → tick.
+**Coordinator:** ListAgents → **announce yourself as coordinator to every live peer and ask each
+what it holds** → map dirty files and `rc/*` worktrees to lanes → police commits and Part numbers →
+deconflict shared files → watch for a broken HEAD → run stage verification (layers 1–5 on HEAD,
+page matrix) → hold/gate deploys (one driver) → surface stage decisions → tick.
 
-**Final reconciler:** reconcile committed lanes and unmerged branches (precedence + no-loss audit)
-→ certify HEAD in an isolated worktree (layers 1–5) → on the user's Stage-2 go, deploy from HEAD via
-isolated worktree → live-verify incl. read-only production browser pass → record reference state →
-offer the next cycle.
+**Final reconciler:** **message every live lane owner before reconciling their lane** → reconcile
+committed lanes and unmerged branches (precedence + no-loss audit) → certify HEAD in an isolated
+worktree (layers 1–5) → on the user's Stage-2 go, deploy from HEAD via isolated worktree →
+live-verify incl. read-only production browser pass → record reference state → offer the next cycle.
 
 ## Reference files
 
-- `references/coordination.md` — shared-index git mechanics, Part-number protocol, hunk isolation,
-  the branch/worktree sweep (ChatGPT/Codex, `rc/*`), dev-server/wrangler etiquette, reconciling
-  parallel lanes.
+- `references/coordination.md` — the peer-message protocol (talk before you touch), shared-index
+  git mechanics, Part-number protocol, hunk isolation, the branch/worktree sweep (ChatGPT/Codex,
+  `rc/*`), dev-server/wrangler etiquette, reconciling parallel lanes.
 - `references/verification.md` — the layer-1 commands, committed-HEAD worktree certification, and
   the live API end-to-end recipe (isolated worker + D1 copy, minted sessions, DB-state assertions).
 - `references/browser-verification.md` — the live-browser loop: which `launch.json` target shows

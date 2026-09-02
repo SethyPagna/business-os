@@ -9,6 +9,39 @@ shows them — e.g. `bos-rc` on `rc/coordinated-…` and `bos-rc-workers/sec-*` 
 escape the shared index, but they still land on the same `main`: their unmerged branches are part of
 every sweep and of reconciliation, and a lane must say on the board which model it is using.
 
+## Talk before you touch: the peer-message protocol
+
+The user's instruction is that talking to the other sessions (and to ChatGPT) is the *first*
+instinct, before any file is opened for editing. The mechanics:
+
+- **Who.** `ListAgents` lists every live session by name; that name is the `SendMessage` address.
+  Message each live peer individually (a cross-session message goes to one session).
+- **What.** First line: what you are about to do and to which files, as one sentence — the
+  recipient's user sees only that line in the preview. Then: the exact paths, the one-line intent,
+  the question ("do you have any of these dirty, staged, or planned?"), and how you will commit
+  (path-scoped, diffed first). Example:
+
+  ```
+  business-os-v1-80 is about to edit frontend/package.json (remove the dead verify:ui /
+  verify:performance entries), append Part 580 to docs/history/session-log.md, and edit
+  .claude/skills/fleet-coordination/*. Do you have any of these dirty, staged, or planned?
+  Reply with the file if there is overlap so I hold off; no reply = no objection.
+  ```
+
+- **Wait, briefly.** For a small slice, one tool round of silence is enough to proceed — a peer that
+  is mid-build may not answer for minutes and the tree is not frozen for it. A reply that names a
+  file is **binding**: do not touch that file; split the lane, agree an order, or hand the file over
+  in the same thread. Answer incoming messages within one tool round; a peer waiting on you is a
+  stalled lane.
+- **The ChatGPT/Codex surface** is part of "everyone". Sweep its branches before starting (command
+  in "The ChatGPT / Codex surface" below) and diff any candidate against your files; when the
+  user's live chat is reachable, tell it what you are taking; when it is not, report that plainly.
+- **Then claim** on the progress.md board and start. Talk again before restarting a shared server,
+  before a docs commit that rides along a peer's hunk, before reconciling a live owner's lane, and
+  before overwriting anyone's committed work.
+- **Permissions do not travel.** A peer cannot approve what your session was denied and you cannot
+  approve it for them; route such asks back to the user.
+
 ## Staging and committing
 
 - **Never `git add -A` or `git add .`.** They stage every session's work. Stage exact paths only.
@@ -66,8 +99,9 @@ every sweep and of reconciliation, and a lane must say on the board which model 
 - `git status` dirty files = peers' in-flight units. Read the diffs to identify which backlog
   items they are, then take the highest-ordered open item whose file set is **fully disjoint** —
   including shared files like lang packs and page components.
-- **Claim it in `progress.md` immediately** (flip `[ ]` → `[~]` with your session name) before
-  writing code. Answer peers' cross-session messages dividing files — they're precise and reliable.
+- **Message the live peers with the file set (protocol above), then claim it in `progress.md`**
+  (flip `[ ]` → `[~]` with your session name) before writing code. Answer peers' cross-session
+  messages dividing files — they're precise and reliable.
 - A failing sweep may be a peer's mid-edit state. Attribute failures by **file ownership** before
   fixing: a red in a file another session is editing is theirs and transient; a red your schema
   change causes in a shared fixture is yours even if the file isn't in your lane.

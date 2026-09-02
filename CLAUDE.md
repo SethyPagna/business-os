@@ -10,7 +10,11 @@ Loaded into every session on this shared checkout, so this file is a short point
    queue, and the **Golden Rules** section (the project's non-negotiables — authoritative there).
 2. Run `ListAgents` to confirm your session name. Other sessions share this working tree and its
    one git index at the same time; some lanes work in their own `rc/*` worktrees (`git worktree list`).
-3. Invoke `/fleet-coordination` ([.claude/skills/fleet-coordination/](.claude/skills/fleet-coordination/SKILL.md))
+3. **Talk before you touch.** Before editing any file, `SendMessage` every live peer with the exact
+   files you are about to take and sweep the ChatGPT/Codex branches
+   (`git fetch --prune && git branch -r --no-merged origin/main`). A reply naming a file is binding.
+   Protocol: the skill's "First instinct" section.
+4. Invoke `/fleet-coordination` ([.claude/skills/fleet-coordination/](.claude/skills/fleet-coordination/SKILL.md))
    whenever more than one session is active and for any coordinate / verify / reconcile / deploy /
    compaction / docs task. It is the operating playbook; this file only points at it.
 

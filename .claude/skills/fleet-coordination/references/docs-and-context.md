@@ -19,10 +19,11 @@ proves it — so the next reader can check instead of trust.
 
 Read it top-to-bottom at session start; it is kept short enough for that on purpose.
 
-- **Claim before you code.** In *Current status*, add a lane block headed by status glyph + lane
-  name + your `ListAgents`-confirmed session name, listing the files you own and whether you work
-  in the main checkout or your own `rc/*` worktree. Flip the queue item `[ ]` → `[~]`. Peers pick
-  disjoint work by reading these blocks — a missing claim is a collision.
+- **Talk, then claim, before you code.** First message the live peers with the file set (the
+  protocol in `coordination.md`); then, in *Current status*, add a lane block headed by status
+  glyph + lane name + your `ListAgents`-confirmed session name, listing the files you own and
+  whether you work in the main checkout or your own `rc/*` worktree. Flip the queue item
+  `[ ]` → `[~]`. Peers pick disjoint work by reading these blocks — a missing claim is a collision.
 - **Keep the block current** as the lane moves: ✅ with commit hashes when done, "NOT deployed /
   Stage-1" until a deploy ships it, the follow-ups you are leaving.
 - **Ending a session, do all three:** append the session-log Part; move finished items to the DONE
