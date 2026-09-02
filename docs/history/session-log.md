@@ -17342,3 +17342,90 @@ instinct... so nothing gets conflicted."
 old scripts, NOT implemented (would be new policy): built JS/CSS size ceiling, `<link rel=preconnect>`
 count, Khmer Latin-only / `????` value audit. Historical "still missing" mentions in Parts ~87–140 are
 left as written. Nothing to deploy (docs + package.json scripts only).
+
+## Part 581 (Sep 3 2026, session business-os-v1-6d, worker, main tree) — Products "cannot save" root cause (dialogs mounted only on the Pricing tab), rename prompt layered above the modal, `/products/filters` permission gate, Telegram receipt-summary alerts; Sep-2 production reconciliation audited and a twin-product forward fix rehearsed (NOT applied)
+
+**Ask** — the user's single opening message (two screenshots): audit the Sep-2 latest-data
+reconciliation that ChatGPT/Codex ran ("without getting the results wrong … losing data, over
+reading data": cashier map Aza→Za and Rout/Routh/Rath→Rath, date AND time, stock = the Item
+Exports of both branches, every branch/supplier/cashier/customer/delivery/label/fee link
+connected); a rename link-over feature ("full linkover or show past record … saved in
+conflict"); fully scoped permissions down to buttons/columns such as cost price; a reports plan
+(multiple views, excel style, receipt style on mobile, calculation options); unified stock
+reasons; the Fees→Expenses rename leftovers; Telegram as a receipt summary with stock totals on
+stock changes; a 100% audit of actions — "confirmation reminder is not at back but on top layer
+properly", "products page various actions can save as currently … not working"; coordinate with
+the other sessions.
+
+**What changed** — four path-scoped commits, all pushed; d9 sweeps them into the RC.
+- `69ed7a1f` `frontend/src/components/products/forms/ProductForm.tsx` — THE "cannot save" cause.
+  `RenameCascadeModal` and the save `ConfirmDialog` were rendered inside
+  `{activeTab === 'pricing' ? … : null}`. The save flow awaits `askRenameChoice()` /
+  `askSaveConfirm()`; on Basic Info / Stock / Expiry no dialog existed to resolve the promise, so
+  Save did nothing and `saveInFlightRef` swallowed every later click. The two dialogs now mount at
+  the form root beside the create-verdict modal (pure relocation). Lock:
+  `tests/productFormContract.test.ts` requires the three root dialogs after the last
+  `activeTab ===` block.
+- `352ed476` `frontend/src/components/shared/RenameCascadeModal.tsx` — `z-[60]` → `z-[1060]`.
+  The prompt portals to `body` but sat BELOW the z-[1050] shared Modal it opens from, so even on
+  the Pricing tab the rename question rendered behind the form. Lock in
+  `tests/nestedUiIntegrity.test.ts` accepts the RC's `var(--z-modal-2)` alias (RC `1ed26f80` has
+  the same fix as a token; one-line merge conflict, resolve toward the token).
+- `f1436b08` `cloudflare/src/routes/products.ts` — `GET /products/filters` (the
+  category/brand/supplier/unit vocabulary) had no permission check at all; any signed-in account
+  could enumerate suppliers and brands. Now denied unless the user may read the catalog on any of
+  products/pos/inventory or holds a promotions tier (POS and the promotion rule editor call it
+  without `surface`). Source lock `scripts/test-products-filters-gate-source.cjs`.
+- `aa59016f` `cloudflare/src/lib/telegram.ts` + `routes/sales.ts` (POST `/`) +
+  `routes/inventory.ts` (POST `/adjust`) — the sale alert is the user's receipt summary: Status /
+  Date (mm/dd/yyyy HH:mm, UTC+7) / INV / Cashier / Customer / Tel / Branch / one line per item as
+  `• name qty × $price (−$discount) = $total` (20-line cap) / Delivery service / Total / Discount /
+  Net Total / Paid (method) / Change / Delivery driver. Stock-adjust alerts read back the branch and
+  all-branch on-hand after the write ("for stock change, should also show total stock"). Pure
+  exported builders, pinned by `scripts/test-telegram-messages-pure.cjs`. Status-change and fee
+  alerts unchanged; transfers, returns and stock-in sessions still send no Telegram event (open).
+
+**What was found**
+- The Sep-2 Codex "zero-error" reconciliation IS in production (read-only D1 probes, confirmed by
+  80 and d9): Worker `fd496449` = `57d8f1a2` + the still-uncommitted fees lane, migration
+  `0105_fee_delivery_contacts.sql` applied 17:23Z, manifest sealed 17:55Z, pre-change Time-Travel
+  bookmark `0000118e-00000000-000050da-cc9020285126934365b0d5b839948385`. Right: the cashier map
+  (Za on 14,995 receipts, Rath on 5), receipt timestamps (legacy checkout time, ICT→UTC), the
+  delivery-fee split, the per-branch totals (warehouse 10,621 / shop 12,431, re-summed from both
+  Item Exports). Wrong: (1) identity keyed on name + barcode + COST while the two exports disagree
+  on cost for 4,004 of 6,047 legacy items → 3,881 twin products, 356 holding stock in both
+  branches; (2) 27,278 pre-existing lot quantities zeroed and all stock re-issued as 9,921
+  synthetic `RECON-*` lots (batch-identity rule broken); (3) every receipt number rewritten to
+  `invoice@YYYY-MM-DD`, including 2,918 bare `YYYYMMDD-HHMMSS` new-system receipts (Part 540 rule
+  broken); (4) the expense label "Delivery" became a courier contact. Twin merge rehearsed green
+  on a prod-equivalent copy (3,881 pairs; branch totals unchanged; active 10,271 → 6,390; 0
+  stock/lot mismatches, 0 dangling refs, 0 FK errors): `outputs/audit-6d-20260903/FORWARD-FIX.md`,
+  `twin-merge.sql`, `twin-pairs.csv`, `twin-fix-report.json` (untracked; the 109 MB rehearsal
+  sqlite must never be committed). NOTHING applied — the user decides go/no-go; fixes 2–4 not built.
+- Browser ledger (`outputs/audit-6d-20260903/BROWSER-LEDGER.md`, 5173 live edits): Basic Info
+  rename → Save Changes dialog on top → `PUT /api/products/5001` 200 → row renamed; grouped-name
+  rename → unlock prompt → RenameCascadeModal at z 1060 above the z 1050 form → "Only this one" →
+  Save Changes → `PUT /api/products/5019` 200; 375×812: form panel 351 px wide, confirm dialog
+  stacked above it, no page overflow. Finding for the RC P2-4 products lane: at 375 px the
+  Products list `.page-scroll` container overflows sideways (scrollWidth 408 vs clientWidth 370;
+  the group header's Collapse control and the card badge are clipped).
+- Pre-existing red on the DIRTY tree only: `scripts/test-sales-revenue-convergence-pure.cjs`
+  fails because the uncommitted fees-lane `salesAnalytics.ts` (`getDeliveryContactTotals`) reads
+  a `fees` table the fixture never creates; green on committed HEAD.
+
+**Verified** — `frontend`: `npx tsc --noEmit` exit 0; `node tests/nestedUiIntegrity.test.ts`
+PASS; `node tests/productFormContract.test.ts` PASS. `cloudflare`: `npx tsc --noEmit` exit 0;
+`scripts/test-products-filters-gate-source.cjs` and `scripts/test-telegram-messages-pure.cjs`
+green; the 36 pure tests that load products/inventory/sales/telegram green except the dirty-tree
+red above. Browser: the ledger rows, observed in the pane at desktop and 375 px. Committed-HEAD
+certification and the RC merge are d9's gate; nothing deployed.
+
+**Not done** — forward fixes 2–4 (receipt restore from the pre-change snapshot, lot-identity
+option A/B, the "Delivery" contact) and the apply of fix 1 (user-gated); the rename link-over
+spec ("full link-over vs keep past → Conflicts") for delivery contacts / branches / fee labels /
+users; permission gaps beyond `/filters` flagged during the sweep but not yet re-verified
+(`compat.ts` `/import-jobs` bypass, cost exposure to POS-only roles, ungated export/import
+buttons, column scoping for non-admins); the reports plan/UI (per-sale profit list, excel/receipt
+views, calculation options); stock-reason unification in Settings; the fees→expenses leftovers
+(`km.json` ~895, `Settings.tsx` ~1846, `en.json` ~4116) and the income type; Telegram events from
+transfers/returns/stock-in sessions; the 375 px Products overflow (RC P2-4 lane).

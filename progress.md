@@ -121,6 +121,22 @@ Two rules learned the hard way, both from real incidents in this file's own hist
 
 ## Current status
 
+**✅ PRODUCTS "CANNOT SAVE" ROOT CAUSE + RENAME PROMPT LAYER + `/products/filters` GATE + TELEGRAM RECEIPT ALERTS (Sep 3, session business-os-v1-6d, main tree, worker — DONE, committed + pushed `352ed476` `f1436b08` `aa59016f` `69ed7a1f`; d9 sweeps into the RC; Part 581).**
+"Products page actions cannot save": ProductForm rendered its save-confirm + rename-cascade dialogs only inside the
+Pricing tab block, so the awaited save promise never resolved on Basic Info / Stock / Expiry (`69ed7a1f`, lock in
+productFormContract). RenameCascadeModal `z-[60]` → `z-[1060]` above the z-[1050] shared Modal (`352ed476`; the RC has
+the same fix as `--z-modal-2` — resolve toward the token). `GET /products/filters` had no permission check (`f1436b08`).
+Telegram sale alert = receipt summary, stock alerts carry resulting on-hand (`aa59016f`). Browser-verified at 5173,
+desktop + 375 px: `outputs/audit-6d-20260903/BROWSER-LEDGER.md`.
+**⚠️ DATA — the Sep-2 production apply has 4 defects; forward fix PREPARED, NOT APPLIED, user go/no-go:** 3,881 twin
+products (identity keyed on cost, the two exports disagree); 27,278 lot quantities zeroed into 9,921 `RECON-*` lots;
+15,004 receipt numbers rewritten to `invoice@date` incl. 2,918 bare ids; the "Delivery" label became a courier contact.
+Twin merge rehearsed green on a prod-equivalent copy (branch totals 10,621 / 12,431 unchanged, 0 mismatches):
+`outputs/audit-6d-20260903/FORWARD-FIX.md` + `twin-merge.sql`. Pre-change bookmark
+`0000118e-00000000-000050da-cc9020285126934365b0d5b839948385` — never restore or apply without the user. OPEN from the
+ask: rename link-over spec, permission gaps beyond `/filters`, reports UI plan, stock-reason unification, fees→expenses
+leftovers, Telegram from transfers/returns/stock-in, 375 px Products list overflow (RC P2-4). Reference to re-verify.
+
 **✅ FLEET-COORDINATION SKILL EXTENDED + ROOT CLAUDE.md (Sep 2, session business-os-v1-80 — DONE, committed `a465e850` + `36f572c6`, docs-only, nothing to deploy; Part 579).**
 Skill now covers verification layer 5 (live-browser screenshot→verify→fix→continue with an expected-vs-actual ledger),
 sibling-surface/logic consistency audits, reconciling parallel lanes (incl. `rc/*` worktrees + unmerged `codex/*`
