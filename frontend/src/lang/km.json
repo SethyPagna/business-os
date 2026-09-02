@@ -5278,5 +5278,11 @@
   "replacement_sale_new": "ការលក់ថ្មីសម្រាប់ទំនិញទាំងនេះ",
   "replacement_sale_total": "សរុបការលក់ថ្មី",
   "replacement_sale_hint": "វាមានវិក្កយបត្រផ្ទាល់ខ្លួន និងចូលក្នុងការលក់ដូចការលក់ធម្មតា។ ប្រាក់សងខាងលើ សងដាច់ដោយឡែក។",
-  "historical_settlement": "កត់ត្រាជាការប្តូរទំនិញ"
+  "historical_settlement": "កត់ត្រាជាការប្តូរទំនិញ",
+  "replacement_items_label": "ទំនិញជំនួស (ស្តុកឈ្មោះដូចគ្នា)",
+  "replacement_items_short": "ទំនិញជំនួសបានប្រគល់ចេញ",
+  "receipt_text_contrast": "កម្រិតពណ៌អក្សរ",
+  "receipt_text_contrast_desc": "កម្រិតអតិបរមាបង្ហាញអក្សរទាំងអស់លើបង្កាន់ដៃជាពណ៌ខ្មៅសុទ្ធ ដោយមិនប្ដូរទំហំ ឬកម្រាស់អក្សរ។",
+  "receipt_text_contrast_maximum": "ខ្មៅអតិបរមា",
+  "receipt_text_contrast_normal": "ធម្មតា"
 }
