@@ -33,6 +33,9 @@ import {
   type AppContextCoreValue,
 } from './app/AppContextCore.tsx'
 
+/** Muted-gold accent; must equal the fallback in styles/tokens.css and main.css :root --ui-accent. */
+export const DEFAULT_UI_ACCENT = '#9c7a3c'
+
 export { isBrokenLocalizedString, useApp, useSync, useT }
 
 /**
@@ -1494,7 +1497,10 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
     }
     const fs  = settings.ui_font_size    || '14'
     const fw  = settings.ui_font_weight  || 'normal'
-    const ac  = settings.ui_accent_color || '#2563eb'
+    // Default accent = the design-language muted gold (tokens.css --ui-accent);
+    // the old '#2563eb' default made the whole kit render blue whenever no
+    // accent had been saved (P2-4 checkpoint finding, Sep 3 2026).
+    const ac  = settings.ui_accent_color || DEFAULT_UI_ACCENT
     const br  = settings.ui_border_radius || 'rounded'
     const ff  = settings.ui_font_family  || 'system'
     const sbc = settings.ui_sidebar_color || ''

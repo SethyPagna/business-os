@@ -16,6 +16,12 @@ const renameCascade = readFileSync(new URL('../src/components/shared/RenameCasca
 assert.match(renameCascade, /z-\[var\(--z-modal-2\)\]/, 'RenameCascadeModal must stack on the modal-over-modal layer')
 assert.doesNotMatch(renameCascade, /z-\[60\]/, 'RenameCascadeModal must not use a literal z-index below the modal layer')
 
+// Sep 3 2026: AppContext injects --ui-accent inline on <html>; its unset default
+// must be the token gold, or every kit primitive renders the legacy blue.
+const appContext = readFileSync(new URL('../src/AppContext.tsx', import.meta.url), 'utf8')
+assert.match(appContext, /export const DEFAULT_UI_ACCENT = '#9c7a3c'/, 'AppContext default accent must be the design-language gold')
+assert.doesNotMatch(appContext, /ui_accent_color \|\| '#2563eb'/, 'AppContext must not fall back to the legacy blue accent')
+
 console.log(`PASS ${name}`)
   } catch (error) {
     failed += 1
