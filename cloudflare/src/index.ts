@@ -44,6 +44,14 @@ import { maybeRunScheduledEphemeralRetention } from './lib/ephemeralRetention'
 import { reapStalledImportJobs } from './routes/importJobs'
 
 export type Env = {
+  // Which deployable configuration this Worker is running as -- 'free' when
+  // deployed with wrangler.free.toml, 'paid' (the default when unset, so
+  // existing production behaviour is unchanged) otherwise. Read exactly
+  // once per isolate by lib/planTier.ts's getPlanTier/getPlanLimits; see
+  // that module's header for the full "why". Every plan-sensitive constant
+  // (import chunk sizes, stock-action ceilings, backup/reset batch caps)
+  // is sized off this, not read directly.
+  PLAN_TIER?: 'free' | 'paid'
   DB: D1Database
   // Optional second D1 holding ONLY the bulk import STAGING tables
   // (import_job_rows, import_job_source_rows) -- see lib/db.ts's D1Compat

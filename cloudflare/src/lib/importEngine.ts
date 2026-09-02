@@ -80,6 +80,7 @@ import { applyUnifiedStockAdd, applyUnifiedStockSale, ensureUnifiedStockProduct,
 import { parseStockAction, saleGroupKeyFor } from './stockActionResolver'
 import { applyHistoricalSaleImport, MAX_HISTORICAL_SALE_LINES } from './salesImportCommit'
 import { getUnifiedStockMode, type UnifiedStockResolvedRow } from './stockActionImport'
+import { getPlanLimits } from './planTier'
 import {
   normalizeImageMatchKey,
   MAX_IMAGES_PER_PRODUCT,
@@ -256,6 +257,15 @@ const MAX_SYNC_ROWS = 25_000 // hard ceiling on total rows any one job will proc
 // analyze/apply for a particular job. Exported (like backup.ts's copy
 // cap) so window-crossing test fixtures seed relative to the real value
 // instead of pinning a copy that silently drifts.
+//
+// This is the PAID value -- planTier.ts's PLAN_LIMITS_BY_TIER.paid.
+// rowsPerImportChunk mirrors it exactly. runImportAnalyze/runImportApply
+// shadow this identifier with a per-request, tier-aware local (see
+// `getPlanLimits(env).rowsPerImportChunk` near the top of each) so a Free
+// deployment (wrangler.free.toml, env.PLAN_TIER='free') actually uses the
+// smaller pre-A4 figure instead of this one -- kept as a plain exported
+// number, not a function, so this module-level identifier stays usable
+// exactly as before everywhere else it is read (tests included).
 export const ROWS_PER_IMPORT_CHUNK = 600
 
 // POST /:id/preflight (importJobs.ts) is a synchronous HTTP request, not a
@@ -264,6 +274,14 @@ export const ROWS_PER_IMPORT_CHUNK = 600
 // response), so it only ever classifies a bounded sample for a quick
 // sanity check. The real, authoritative, complete pass is the (chunked)
 // analyze phase that runs after POST /:id/start.
+//
+// This is the PAID value. routes/importJobs.ts's POST /:id/preflight reads
+// the tier-aware figure via `getPlanLimits(c.env).preflightMaxRows`
+// instead of this identifier directly -- see planTier.ts's comment on that
+// field for the Free-side estimate and why it is an estimate, not a
+// recorded historical value like the constants above. Kept here, exported,
+// as the canonical Paid number and for anything that still wants "the
+// default preflight sample size" without an Env in hand.
 export const PREFLIGHT_MAX_ROWS = 500
 
 // Phase timing, stored on the job row (summary_json.timings) so a slow
@@ -3531,6 +3549,11 @@ async function persistChunkResults(db: D1Compat, jobId: string, phase: 'analyze'
 export async function runImportAnalyze(env: Env, jobId: string, queueLatencyMs?: number): Promise<void> {
   const db = getDb(env)
   const sw = makeStopwatch()
+  // Tier-aware shadow of the module-level export above -- see that
+  // constant's comment. Free deployments classify/write a smaller window
+  // per invocation to stay inside the 10ms CPU budget.
+  const ROWS_PER_IMPORT_CHUNK = getPlanLimits(env).rowsPerImportChunk
+  const STOCK_ACTION_MAX_ROWS = getPlanLimits(env).stockActionMaxRows
   const jobRow = await db.prepare(`SELECT status, cancel_requested FROM import_jobs WHERE id = @id`).get<{ status: string; cancel_requested: number }>({ id: jobId })
   if (!jobRow) throw new Error('Import job not found')
   // See isFreshImportRun's comment for the full "why", including the
@@ -4172,6 +4195,14 @@ async function finalizeImportApply(
 // per-invocation dispatch window (see the dispatch loop), so raising it
 // widens how much one continuation invocation dispatches -- budgeted in
 // the subrequest math above.
+// These two are the PAID values -- planTier.ts's PLAN_LIMITS_BY_TIER.paid
+// mirrors them exactly (see that module's comment for the documented Free
+// history: 60 units / 480 rows). runImportAnalyze, applyStockActionsJob,
+// applyStockActionsSinglePass and applyStockActionsContinuation each shadow
+// these identifiers with a per-request `getPlanLimits(env).stockAction...`
+// local so a Free deployment actually enforces the smaller ceiling instead
+// of this one -- kept as plain exported numbers, not functions, so every
+// other reader of these identifiers (tests included) is unaffected.
 export const STOCK_ACTION_MAX_ROWS = 1920 // 240 maximum groups x the writer's 8-line receipt ceiling
 export const STOCK_ACTION_MAX_UNITS = 480
 // DIRECT-mode continuation (M4): a direct sheet is not capped at the unit
@@ -4340,6 +4371,8 @@ export async function applyStockActionsJob(
   queueLatencyMs: number | undefined,
 ): Promise<{ applied: number; failed: number }> {
   const startedAtMs = Date.now()
+  // Tier-aware shadow -- see STOCK_ACTION_MAX_ROWS's module-level comment.
+  const STOCK_ACTION_MAX_ROWS = getPlanLimits(env).stockActionMaxRows
   // Same materialize-first contract as the generic apply path: this
   // self-enqueues and returns 'still working' until every raw row is in
   // import_job_source_rows, so this invocation just acks with 0/0.
@@ -4384,6 +4417,8 @@ async function applyStockActionsSinglePass(
   queueLatencyMs: number | undefined,
   startedAtMs: number,
 ): Promise<{ applied: number; failed: number }> {
+  // Tier-aware shadow -- see STOCK_ACTION_MAX_UNITS's module-level comment.
+  const STOCK_ACTION_MAX_UNITS = getPlanLimits(env).stockActionMaxUnits
   const decisions = getDecisionMap(policyJson)
   const rows = await readAllMaterializedRows(db, jobId, decisions)
   const totalUnits = rows.length
@@ -4508,6 +4543,8 @@ async function applyStockActionsContinuation(
   startedAtMs: number,
   totalRows: number,
 ): Promise<{ applied: number; failed: number }> {
+  // Tier-aware shadow -- see STOCK_ACTION_MAX_UNITS's module-level comment.
+  const STOCK_ACTION_MAX_UNITS = getPlanLimits(env).stockActionMaxUnits
   const decisions = getDecisionMap(policyJson)
   const { cursor, state } = await getChunkState(db, jobId)
   if (!state.startedAtMs) state.startedAtMs = startedAtMs
@@ -4852,6 +4889,8 @@ export async function runD1BatchGroupsInChunks(
 // covered duplicates within one batch).
 export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: number): Promise<{ applied: number; failed: number }> {
   const db = getDb(env)
+  // Tier-aware shadow -- see ROWS_PER_IMPORT_CHUNK's module-level comment.
+  const ROWS_PER_IMPORT_CHUNK = getPlanLimits(env).rowsPerImportChunk
   const sw = makeStopwatch()
   const jobRow = await db.prepare(`SELECT status, cancel_requested, started_at FROM import_jobs WHERE id = @id`).get<{ status: string; cancel_requested: number; started_at: string | null }>({ id: jobId })
   if (!jobRow) throw new Error('Import job not found')

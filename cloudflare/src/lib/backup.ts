@@ -1,6 +1,7 @@
 import type { Env } from '../index'
 import { copyObject, listObjects } from './r2'
 import { streamBackupEvents } from './backupRestoreStream'
+import { getPlanLimits } from './planTier'
 
 export const CLOUDFLARE_BACKUP_PREFIX = 'backups/cloudflare/'
 export const CLOUDFLARE_BACKUP_KEEP = 2
@@ -33,6 +34,14 @@ export const DRIVE_STAGED_BACKUP_PREFIX = `${CLOUDFLARE_BACKUP_PREFIX}drive-stag
 // fail before the continuation was recorded). Exported so the regression
 // tests seed their fixtures relative to the real cap instead of pinning
 // a copy of the number that silently drifts.
+//
+// This is the PAID value -- planTier.ts's maxAssetsPerBackup mirrors it,
+// with Free restored to that documented "20 under the Free plan's older
+// model" figure above. writeBackupDocument and
+// continueCloudflareBackupAssetCopy each shadow this identifier with a
+// per-request `getPlanLimits(env).maxAssetsPerBackup` local so a Free
+// deployment actually copies the smaller slice -- kept as a plain exported
+// number here so every other reader (tests included) is unaffected.
 export const MAX_ASSET_BYTES_PER_BACKUP = 100
 const MAX_ASSET_COPY_ATTEMPTS = 3
 const BACKUP_LIFECYCLE_FORMAT = 'business-os-cloudflare-backup-state'
@@ -515,6 +524,8 @@ async function writeBackupDocument(
   const createdAt = new Date().toISOString()
   let rowCount = 0
   let tableCount = 0
+  // Tier-aware shadow -- see MAX_ASSET_BYTES_PER_BACKUP's module-level comment.
+  const MAX_ASSET_BYTES_PER_BACKUP = getPlanLimits(env).maxAssetsPerBackup
 
   const assets = includeAssets ? await listAssets(env) : []
   const backupName = `business-os-cloudflare-${stamp(new Date(createdAt))}`
@@ -566,7 +577,10 @@ async function writeBackupDocument(
     // still make real progress across the whole catalog instead of
     // repeatedly copying the same first 40.
     const priorCursor = await getAssetCopyCursor(env)
-    const toCopy = selectAssetsToCopy(assets, priorCursor)
+    // Explicit cap (not the default param) -- selectAssetsToCopy's own
+    // default resolves against the module-level (Paid) MAX_ASSET_BYTES_
+    // PER_BACKUP, not this function's tier-aware shadow above.
+    const toCopy = selectAssetsToCopy(assets, priorCursor, MAX_ASSET_BYTES_PER_BACKUP)
     for (const asset of toCopy) {
       try {
         const destKey = `${assetsPrefix}${asset.key.replace(/^uploads\//, '')}`
@@ -727,6 +741,8 @@ export async function createSectionBackup(env: Env, tables: readonly string[], s
 // sidecar, and re-enqueues itself until finished. The large DB manifest stays
 // immutable.
 export async function continueCloudflareBackupAssetCopy(env: Env, backupName: string, _nextIndex?: number) {
+  // Tier-aware shadow -- see MAX_ASSET_BYTES_PER_BACKUP's module-level comment.
+  const MAX_ASSET_BYTES_PER_BACKUP = getPlanLimits(env).maxAssetsPerBackup
   const key = `${CLOUDFLARE_BACKUP_PREFIX}${backupName}.json`
   const manifest = await env.ASSETS.head(key)
   if (!manifest) {

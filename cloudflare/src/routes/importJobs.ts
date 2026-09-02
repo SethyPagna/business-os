@@ -6,7 +6,8 @@ import { hasPermission, hasAnyPermission, isActionBlocked } from '../lib/permiss
 import { audit } from '../lib/audit'
 import { sanitizeOriginalFileName, buildUniqueStoredName, getMediaType } from '../lib/fileAssets'
 import { validateUploadedBuffer } from '../lib/uploadSecurity'
-import { runImportAnalyze, runImportApply, buildErrorsCsv, loadAndClassify, resetMaterializeState, PREFLIGHT_MAX_ROWS, summarizeImportWarnings, countRowsWithWarningKinds, SERIOUS_IMPORT_WARNING_KINDS, IMPORT_WARNING_LABELS, type ImportRowResult, type RowAction } from '../lib/importEngine'
+import { runImportAnalyze, runImportApply, buildErrorsCsv, loadAndClassify, resetMaterializeState, summarizeImportWarnings, countRowsWithWarningKinds, SERIOUS_IMPORT_WARNING_KINDS, IMPORT_WARNING_LABELS, type ImportRowResult, type RowAction } from '../lib/importEngine'
+import { getPlanLimits } from '../lib/planTier'
 import { readCentralDirectory, extractZipEntry, isRealFileEntry, ZipFormatError } from '../lib/zipReader'
 import { MAX_IMAGES_PER_PRODUCT, buildImageDisplayName } from '../lib/importImageMatch'
 import { bumpVersion } from '../lib/cache'
@@ -590,7 +591,10 @@ app.post('/:id/preflight', async (c) => {
   const denied = await requireImportPermission(c as any, job)
   if (denied) return denied
   try {
-    const loaded = await loadAndClassify(c.env, id, PREFLIGHT_MAX_ROWS)
+    // Tier-aware: Free's smaller sample keeps this synchronous request
+    // inside the 10ms CPU budget -- see planTier.ts's preflightMaxRows.
+    const preflightMaxRows = getPlanLimits(c.env).preflightMaxRows
+    const loaded = await loadAndClassify(c.env, id, preflightMaxRows)
     if (!loaded) return c.json({ success: false, error: 'Upload a CSV before previewing this import' }, 400)
     const counts = { create: 0, update: 0, skip: 0, error: 0 }
     for (const r of loaded.results) counts[r.action] += 1
@@ -669,7 +673,7 @@ app.post('/:id/preflight', async (c) => {
       // quick check never looked at (the real, complete check is the
       // queued analyze phase after POST /:id/start). Under the cap =>
       // this preflight covered the entire file.
-      partial: loaded.results.length >= PREFLIGHT_MAX_ROWS,
+      partial: loaded.results.length >= preflightMaxRows,
     })
   } catch (error) {
     return c.json({ success: false, error: (error as Error).message || 'Failed to preflight import job' }, 400)

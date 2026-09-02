@@ -13,6 +13,8 @@ import { getGoogleLoginPublicConfig } from '../lib/googleOauth'
 import { CUSTOMER_REFUND_JOIN, getSalesTotals, getSalesPeriodSeries, netSaleExpr, previousPeriodFilters, recognizedExpr } from '../lib/salesAnalytics'
 import { getFamilyStockStats } from '../lib/familyStockStats'
 import { businessToday, localDateAtOrAfter, localDateAtOrBefore, localDateRangeClause, localTodayRangeClause, localHourExpr, localTimeRangeClause } from '../lib/businessDateWindow'
+import { getPlanTier, getPlanLimits } from '../lib/planTier'
+import { readAllQuotas } from '../lib/quotaGuard'
 
 const app = new Hono<{ Bindings: Env; Variables: { user: any } }>()
 
@@ -478,14 +480,39 @@ app.get('/system/config', (c) => c.json({
   runtime: 'cloudflare-workers',
 }))
 
-app.get('/system/bootstrap', (c) => c.json({
-  config: {
-    publicUrl: c.env.BUSINESS_OS_PUBLIC_URL,
-    adminUrl: c.env.BUSINESS_OS_ADMIN_URL,
-    runtime: 'cloudflare-workers',
-  },
-  debugLog: { entries: [] },
-}))
+app.get('/system/bootstrap', async (c) => {
+  const tier = getPlanTier(c.env)
+  const limits = getPlanLimits(c.env)
+  // Best-effort: readAllQuotas already fails open to 'ok'/allowed on any
+  // read error (see quotaGuard.ts), so this can never turn an otherwise
+  // healthy bootstrap response into a failure. Only KV/R2/Images are
+  // tracked live -- D1's own daily ceiling is NOT (see quotaGuard.ts's
+  // header for why counting it would cost a D1 write per D1 write, which
+  // defeats the purpose); `d1` below is the static Free/Paid ceiling plus a
+  // caution, not a live count.
+  const quotas = await readAllQuotas(c.env)
+  return c.json({
+    config: {
+      publicUrl: c.env.BUSINESS_OS_PUBLIC_URL,
+      adminUrl: c.env.BUSINESS_OS_ADMIN_URL,
+      runtime: 'cloudflare-workers',
+    },
+    debugLog: { entries: [] },
+    plan: {
+      tier,
+      quotas,
+      d1: {
+        dailyRowsReadCeiling: limits.d1DailyRowsReadCeiling,
+        dailyRowsWrittenCeiling: limits.d1DailyRowsWrittenCeiling,
+        tracked: false,
+        note: tier === 'free'
+          ? 'D1 reads/writes are hard-capped since Sept 1 2026 and are not metered live here (would cost a D1 write per D1 write to count). Watch the Cloudflare dashboard\'s D1 usage graph if queries start erroring.'
+          : 'Paid D1 ceilings are monthly, not daily, and are well above this app\'s usage -- not metered live here.',
+      },
+      longAiImagePassesEnabled: limits.longAiImagePassesEnabled,
+    },
+  })
+})
 
 app.get('/system/debug/log', (c) => c.json({ entries: [] }))
 app.get('/system/audit-logs', requireAuth, async (c) => {
