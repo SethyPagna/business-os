@@ -3,6 +3,7 @@ import SettingsIcon from 'lucide-react/dist/esm/icons/settings.js'
 import UsersIcon from 'lucide-react/dist/esm/icons/users.js'
 import DatabaseBackup from 'lucide-react/dist/esm/icons/database-backup.js'
 import { useApp as useAppHook } from '../../AppContext.tsx'
+import HubSectionNav, { type HubSectionDef, readStoredHubSection } from '../shared/HubSectionNav.tsx'
 
 // E4 (Part 403): Settings absorbs Users and Backup as sections of one
 // page. Pure rewiring per the Phase-E contract: the three section
@@ -23,15 +24,21 @@ const useApp = useAppHook as unknown as () => SettingsHubAppContext
 
 type SettingsHubSection = 'settings' | 'users' | 'backup'
 
-function initialSection(canSettings: boolean, canUsers: boolean, canBackup: boolean): SettingsHubSection {
+const SETTINGS_HUB_STORAGE_KEY = 'bos:hub:settings:active'
+
+function initialSection(canSettings: boolean, canUsers: boolean, canBackup: boolean): { section: SettingsHubSection; deepLinked: boolean } {
   if (typeof window !== 'undefined') {
     const segment = String(window.location.pathname || '').toLowerCase()
-    if (segment.includes('user') && canUsers) return 'users'
-    if (segment.includes('backup') && canBackup) return 'backup'
+    if (segment.includes('user') && canUsers) return { section: 'users', deepLinked: true }
+    if (segment.includes('backup') && canBackup) return { section: 'backup', deepLinked: true }
   }
-  if (canSettings) return 'settings'
-  if (canUsers) return 'users'
-  return 'backup'
+  const validIds = (['settings', 'users', 'backup'] as SettingsHubSection[]).filter((id) =>
+    (id === 'settings' && canSettings) || (id === 'users' && canUsers) || (id === 'backup' && canBackup))
+  const stored = readStoredHubSection(SETTINGS_HUB_STORAGE_KEY, validIds) as SettingsHubSection | null
+  if (stored) return { section: stored, deepLinked: false }
+  if (canSettings) return { section: 'settings', deepLinked: false }
+  if (canUsers) return { section: 'users', deepLinked: false }
+  return { section: 'backup', deepLinked: false }
 }
 
 export default function SettingsHubPage() {
@@ -51,39 +58,29 @@ export default function SettingsHubPage() {
   // holder an empty, no-op section. hasPermission('all') === isAdminControlUser.
   const canUsers = hasPermission('all')
   const canBackup = getPermissionTier('backup') !== 'none'
-  const [section, setSection] = useState<SettingsHubSection>(() => initialSection(canSettings, canUsers, canBackup))
+  const [initial] = useState(() => initialSection(canSettings, canUsers, canBackup))
+  const [section, setSection] = useState<SettingsHubSection>(initial.section)
 
-  const tabs: Array<{ id: SettingsHubSection; label: string; icon: typeof SettingsIcon; allowed: boolean; tone: string }> = [
-    { id: 'settings', label: t('settings') || 'Settings', icon: SettingsIcon, allowed: canSettings, tone: 'text-blue-600' },
-    { id: 'users', label: t('users') || 'Users', icon: UsersIcon, allowed: canUsers, tone: 'text-violet-600' },
-    { id: 'backup', label: t('backup') || 'Backup', icon: DatabaseBackup, allowed: canBackup, tone: 'text-emerald-600' },
+  const tabs: HubSectionDef[] = [
+    { id: 'settings', label: t('settings') || 'Settings', icon: SettingsIcon, hidden: !canSettings, tone: 'text-blue-600', description: t('hub_desc_settings_settings') || 'Business and app preferences' },
+    { id: 'users', label: t('users') || 'Users', icon: UsersIcon, hidden: !canUsers, tone: 'text-violet-600', description: t('hub_desc_settings_users') || 'Manage staff accounts' },
+    { id: 'backup', label: t('backup') || 'Backup', icon: DatabaseBackup, hidden: !canBackup, tone: 'text-emerald-600', description: t('hub_desc_settings_backup') || 'Backup and restore data' },
   ]
-  const visibleTabs = tabs.filter((tab) => tab.allowed)
 
   return (
     // Height-filling flex column so the hosted sections' `page-scroll`
     // roots get a bounded height and actually scroll (Y4 regression --
     // a plain block root clipped Settings/Users/Backup at the fold).
     <div className="flex min-h-0 flex-1 flex-col space-y-3">
-      {visibleTabs.length > 1 ? (
-        <div className="min-w-0 shrink-0 px-4 pt-4">
-          <div className="inline-flex max-w-full overflow-x-auto overscroll-x-contain rounded-xl bg-gray-100 p-0.5 [touch-action:pan-x] dark:bg-gray-800">
-            {visibleTabs.map((tab) => {
-              const Icon = tab.icon
-              return (
-                <button
-                  key={tab.id}
-                  type="button"
-                  onClick={() => setSection(tab.id)}
-                  className={`inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg px-3 py-1.5 text-sm font-medium ${section === tab.id ? `bg-white dark:bg-gray-900 shadow ${tab.tone}` : 'text-gray-500'}`}
-                >
-                  <Icon className="w-4 h-4" /> {tab.label}
-                </button>
-              )
-            })}
-          </div>
-        </div>
-      ) : null}
+      <HubSectionNav
+        sections={tabs}
+        active={section}
+        onChange={(id) => setSection(id as SettingsHubSection)}
+        storageKey={SETTINGS_HUB_STORAGE_KEY}
+        pageId="settings"
+        title={t('settings') || 'Settings'}
+        initialEntered={initial.deepLinked}
+      >
       <Suspense fallback={<p className="p-4 text-sm text-gray-500">{t('loading') || 'Loading'}...</p>}>
         {section === 'users' && canUsers ? <UsersSection />
           : section === 'backup' && canBackup ? <BackupSection />
@@ -91,6 +88,7 @@ export default function SettingsHubPage() {
           : canUsers ? <UsersSection />
           : <BackupSection />}
       </Suspense>
+      </HubSectionNav>
     </div>
   )
 }
