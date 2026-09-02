@@ -223,6 +223,28 @@ export function tokenizeSearchTermGroups(raw: unknown, maxGroups = 6, maxWordsPe
   return groups.slice(0, maxGroups)
 }
 
+// True when every word across every comma-group of an already-tokenized
+// search query is purely digits -- the shape of a typed/scanned barcode or
+// SKU ("6923644012345", or two barcodes typed as "6923644012345,
+// 8901030652584"). Used to gate the JS Levenshtein fuzzy fallback
+// (routes/products.ts's searchProductsPayload) OFF for that case: a
+// barcode/SKU is an opaque identifier, not a spelled word, so "close in
+// edit distance" is meaningless and actively wrong there (a 1-digit-off
+// barcode is a DIFFERENT product's barcode, never a typo of this one --
+// unlike a misspelled name, where a 1-character edit distance usually
+// means the same word). The exact-match/trigram-substring paths
+// (buildTrigramMatchExpression, buildShortWordFallbackClause) already
+// handle a correctly- or partially-typed digit string; this only turns off
+// the separate typo-tolerant Levenshtein pass for that case, not search
+// itself. Returns false (not exempt) for an empty query -- an empty query
+// never reaches the fuzzy fallback anyway (hasSearchTerm gates that), this
+// is just about not silently mis-scoping a query with no words at all.
+export function isDigitsOnlyQuery(groups: readonly (readonly string[])[]): boolean {
+  const words = groups.flat()
+  if (!words.length) return false
+  return words.every((word) => /^[0-9]+$/.test(word))
+}
+
 // Every alias form (including the word itself) for a single normalized
 // search word -- exported so callers can generate one LIKE per alias.
 export function expandAliasCandidates(compactWord: string): string[] {
@@ -347,8 +369,35 @@ function wordsFuzzyMatch(queryWord: string, haystackWord: string): boolean {
   if (queryWord === haystackWord) return true
   if (haystackWord.includes(queryWord) || queryWord.includes(haystackWord)) return true
   const budget = Math.min(typoBudgetForLength(queryWord.length), typoBudgetForLength(haystackWord.length))
-  if (budget <= 0) return false
-  return boundedLevenshtein(queryWord, haystackWord, budget) <= budget
+  if (budget > 0 && boundedLevenshtein(queryWord, haystackWord, budget) <= budget) return true
+  // Partial typing WITH a typo in the typed portion: queryWord is SHORTER
+  // than haystackWord (an exact, error-free prefix/substring already
+  // returned true above, so this only runs for a genuinely incomplete AND
+  // imperfect partial type), compared against haystackWord's own
+  // same-length prefix instead of the full word. Real, confirmed gap this
+  // closes: "Elixe" (typed for "Elixir") is edit-distance 2 from the full
+  // word "elixir" (substitute the 5th letter AND insert the missing 6th),
+  // which exceeds a 5-letter word's typo budget of 1 -- so the full-word
+  // comparison above always missed it, even though a person reading both
+  // recognizes "Elixe" instantly as one typo away from "Elixi", the first
+  // five letters of "Elixir". Scoped to queryWord strictly shorter than
+  // haystackWord (a same-length pair already got its one chance via the
+  // full-word comparison above; widening it there would double-count nothing
+  // but also add no new coverage, since prefix === whole word at equal
+  // length). Budget uses queryWord's own length only, since both sides of
+  // THIS comparison are exactly that length by construction -- haystackWord's
+  // own length isn't a meaningful second bound the way it is for the
+  // full-word case above (a long haystack word plus a short, heavily-typo'd
+  // query would otherwise get an unfairly wide budget from the full-word
+  // rule's own min()).
+  if (queryWord.length < haystackWord.length) {
+    const prefixBudget = typoBudgetForLength(queryWord.length)
+    if (prefixBudget > 0) {
+      const prefix = haystackWord.slice(0, queryWord.length)
+      if (boundedLevenshtein(queryWord, prefix, prefixBudget) <= prefixBudget) return true
+    }
+  }
+  return false
 }
 
 interface HaystackIndex {

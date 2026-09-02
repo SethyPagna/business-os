@@ -9,7 +9,7 @@ import { hasPermission, getPermissionTier, getActionTier, getMergedPermissions, 
 import { normalizeCatalogText, hasSuspiciousCatalogText } from '../lib/catalogText'
 import { getMediaType, buildUniqueStoredName, sanitizeOriginalFileName } from '../lib/fileAssets'
 import { sanitizeMediaList } from '../lib/media'
-import { buildInClause, chunkForBinding, selectInChunks } from '../lib/sqlBinding'
+import { buildInClause, chunkForBinding, inlineIntegerIds, selectInChunks } from '../lib/sqlBinding'
 import { attachBeforeQty, buildStockLedgerQuery, type StockLedgerView } from '../lib/stockLedgerQuery'
 import { buildStockInSessionListQuery, parseStockInSessionKey, stockInSessionLineParams, stockInSessionLinesSql } from '../lib/stockInSessionsQuery'
 import { getProductSalesBreakdown } from '../lib/salesAnalytics'
@@ -42,13 +42,25 @@ import {
   buildPartialWordMatchClause,
   buildShortWordFallbackClause,
   buildTrigramMatchExpression,
+  isDigitsOnlyQuery,
   PRODUCT_SEARCH_COLUMNS,
   PRODUCTS_FTS_BM25_SQL,
+  runFuzzyFallbackMatch,
   tokenizeSearchTermGroups,
 } from '../lib/searchMatch'
 import type { Env } from '../index'
 
 const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser } }>()
+
+// Same two bounds as routes/portal.ts's PORTAL_FUZZY_FALLBACK_CANDIDATE_LIMIT/
+// PORTAL_FUZZY_FALLBACK_MATCH_CAP, reused here for the admin Products/POS/
+// Inventory-bootstrap search's own JS fuzzy fallback (searchProductsPayload
+// below) -- same reasoning: a candidate query bounded by LIMIT so a
+// worst-case zero-exact-result search never scans/holds the whole catalog
+// in memory, and a match cap kept under D1's 100-bound-param ceiling since
+// the matched ids are inlined as literals into the requery, not bound.
+const PRODUCTS_FUZZY_FALLBACK_CANDIDATE_LIMIT = 3000
+const PRODUCTS_FUZZY_FALLBACK_MATCH_CAP = 500
 
 async function syncLinkedProductNameSnapshots(env: Env, productIds: number[], productName: string): Promise<void> {
   if (!productIds.length) return
@@ -551,7 +563,7 @@ async function searchProductsPayload(env: Env, query: Record<string, string>, op
 
   const db = getDb(env)
   const filters = buildSearchFilters(query, options)
-  const { where, joins, params, matchRankSql, hasSearchTerm } = filters
+  const { where, joins, params, matchRankSql, hasSearchTerm, baseWhere, searchMode, searchTerms, digitsOnly, titleOnly } = filters
 
   // G1: promoted/discounted products occupy the block ABOVE the
   // alphabetical run (Products page and POS both read this endpoint, so
@@ -562,22 +574,29 @@ async function searchProductsPayload(env: Env, query: Record<string, string>, op
   const promotionRules = await loadActivePromotionRules(db)
   const promotedRankSql = `CASE WHEN ${productPromotedSql(promotionRules, params)} THEN 1 ELSE 0 END`
   const promoFilter = String(query.promo || '').trim().toLowerCase()
+  // Built once as a variable (rather than inlined straight into `where`)
+  // so the exact same clause text can also be folded into
+  // fuzzyFallbackBaseWhere below -- the JS fuzzy fallback's candidate
+  // query must see every OTHER active filter (promo/merged/initial
+  // included, same as branch/brand/category/stock), or a fuzzy hit could
+  // surface a product the person's own filters would otherwise exclude.
+  let promoClause: string | undefined
   if (promoFilter === 'promoted') {
-    where.push(productPromotedSql(promotionRules, params))
+    promoClause = productPromotedSql(promotionRules, params)
   } else if (promoFilter === 'discounted') {
-    where.push(productDiscountActiveSql(params))
+    promoClause = productDiscountActiveSql(params)
   } else if (promoFilter === 'rules') {
-    where.push(anyRuleAppliesSql(promotionRules, params))
+    promoClause = anyRuleAppliesSql(promotionRules, params)
   } else if (/^rule:\d+$/.test(promoFilter) || /^\d+$/.test(promoFilter)) {
-    where.push(singleRuleAppliesSql(promotionRules, Number(promoFilter.replace('rule:', '')), params))
+    promoClause = singleRuleAppliesSql(promotionRules, Number(promoFilter.replace('rule:', '')), params)
   }
+  if (promoClause) where.push(promoClause)
   // 9.2 (Part 421): the auto-merged facet -- products that absorbed
   // in-file import merges (auto_merged_count, migration 0076), so "what
   // merged automatically" is one click, not archaeology.
   const mergedFilter = String(query.merged || '').trim().toLowerCase()
-  if (mergedFilter === 'auto') {
-    where.push('COALESCE(p.auto_merged_count, 0) > 0')
-  }
+  const mergedClause = mergedFilter === 'auto' ? 'COALESCE(p.auto_merged_count, 0) > 0' : undefined
+  if (mergedClause) where.push(mergedClause)
   const initial = String(query.initial || '').trim()
   const initialClause = initial && initial.toLowerCase() !== 'all'
     ? "upper(substr(trim(COALESCE(p.name, '')), 1, 1)) = @initial"
@@ -586,6 +605,18 @@ async function searchProductsPayload(env: Env, query: Record<string, string>, op
     params.initial = initial.toUpperCase()
     where.push(initialClause)
   }
+  // Same role as routes/portal.ts's own fallbackBaseWhere: every filter
+  // that applies regardless of search (branch/brand/category/stock/issue/
+  // group/batch-date from buildSearchFilters' own baseWhere, PLUS the
+  // promo/merged/initial clauses just built above, which are added here in
+  // this function rather than inside buildSearchFilters) -- everything
+  // except the search match clause itself. Used below only if the strict
+  // SQL search comes back with zero results for a real, non-digits-only
+  // query.
+  const fuzzyFallbackBaseWhere = [...baseWhere]
+  if (promoClause) fuzzyFallbackBaseWhere.push(promoClause)
+  if (mergedClause) fuzzyFallbackBaseWhere.push(mergedClause)
+  if (initialClause) fuzzyFallbackBaseWhere.push(initialClause)
   const joinSql = joins.join('\n')
   const whereSql = `WHERE ${where.join(' AND ')}`
 
@@ -617,7 +648,7 @@ async function searchProductsPayload(env: Env, query: Record<string, string>, op
            p.discount_badge_color, p.discount_starts_at, p.discount_ends_at,
            p.expiry_date, p.expiry_alert_days, p.created_at, p.updated_at`
 
-  const { items, total, totalPages } = await paginateProductFamilies<Record<string, unknown>>({
+  let { items, total, totalPages } = await paginateProductFamilies<Record<string, unknown>>({
     db,
     selectColumns,
     joinSql,
@@ -637,6 +668,71 @@ async function searchProductsPayload(env: Env, query: Record<string, string>, op
     // keeps the prior per-row-filtered behavior; nothing reported there.
     familyMemberBaseWhereSql: hasSearchTerm ? 'p.is_active = 1' : undefined,
   })
+
+  // JS fuzzy (typo-tolerant) fallback -- see lib/searchMatch.ts's
+  // runFuzzyFallbackMatch header comment and routes/portal.ts's identical
+  // block (this route's own reference implementation; the public
+  // storefront is the one other search path that reaches real users, so
+  // it's the one this mirrors). Only runs when the strict SQL-folded
+  // search (FTS5 prefix, trigram substring, short-word/partial-word LIKE
+  // fallbacks -- all already applied above) found literally nothing for a
+  // real, non-digits-only query -- the common case (a correctly- or
+  // near-correctly-typed search) never pays this extra pair of queries,
+  // and exact/barcode-first ranking is untouched since fuzzy results only
+  // ever appear when there were zero exact/prefix/trigram hits to rank
+  // against in the first place. Barcode/SKU (digits-only) queries are
+  // excluded -- see isDigitsOnlyQuery's own comment for why edit-distance
+  // tolerance is wrong for an opaque numeric identifier.
+  if (total === 0 && hasSearchTerm && !digitsOnly) {
+    const candidateRows = await db.prepare(`
+      SELECT p.id AS id, p.name AS name, p.sku AS sku, p.barcode AS barcode
+      FROM products p
+      ${joinSql}
+      WHERE ${fuzzyFallbackBaseWhere.join(' AND ')}
+      ORDER BY p.id ASC
+      LIMIT ${PRODUCTS_FUZZY_FALLBACK_CANDIDATE_LIMIT}
+    `).all<{ id: number; name: string; sku: string; barcode: string }>(params)
+    const candidates = (candidateRows || []).map((row) => ({
+      id: row.id,
+      // titleOnly ("search name only") scopes the haystack the same way
+      // it scopes the SQL MATCH above (PRODUCT_SEARCH_COLUMNS vs 'name')
+      // -- a name-only search must not fuzzy-match via sku/barcode either.
+      haystack: titleOnly ? String(row.name || '') : [row.name, row.sku, row.barcode].filter(Boolean).join(' '),
+    }))
+    const fuzzyIds = runFuzzyFallbackMatch(candidates, searchTerms, searchMode).slice(0, PRODUCTS_FUZZY_FALLBACK_MATCH_CAP)
+    if (fuzzyIds.length) {
+      // Inlined as literals, not bound: capped at 500
+      // (PRODUCTS_FUZZY_FALLBACK_MATCH_CAP) against D1's 100-bound-param
+      // limit, and neither query below survives being chunked (one's a
+      // family COUNT, the other a family-paginated page). The ids are row
+      // ids this handler just read back from D1, and inlineIntegerIds
+      // throws on anything that isn't a safe integer, so no user input
+      // reaches the SQL text.
+      const fuzzyWhereSql = `WHERE ${[...fuzzyFallbackBaseWhere, `p.id IN (${inlineIntegerIds(fuzzyIds)})`].join(' AND ')}`
+      // Re-run through the SAME family-pagination helper (not a hand-rolled
+      // flat query) so grouped products, page-2 stability, and the total
+      // count all behave exactly like the strict-search path -- just
+      // without matchRankSql (a fuzzy hit has no bm25 relevance to rank
+      // by; alphabetical + promoted-first is the fallback's own order,
+      // same as this route's own no-search-term order).
+      const fuzzyResult = await paginateProductFamilies<Record<string, unknown>>({
+        db,
+        selectColumns,
+        joinSql,
+        whereSql: fuzzyWhereSql,
+        params,
+        page,
+        pageSize,
+        familyOrderSql: `family_promoted DESC, ${familyOrderSql}`,
+        intraFamilyOrderSql,
+        promotedRankSql,
+        familyMemberBaseWhereSql: 'p.is_active = 1',
+      })
+      items = fuzzyResult.items
+      total = fuzzyResult.total
+      totalPages = fuzzyResult.totalPages
+    }
+  }
 
   // Name-duplicate half of the same fix (see expandSearchResultsToNameSiblings's
   // own comment) -- only when a search term is active, same gating as the
@@ -988,9 +1084,41 @@ function buildSearchFilters(query: Record<string, string>, options: ProductSearc
     where.push(`EXISTS (SELECT 1 FROM product_batches pb WHERE ${batchConditions.join(' AND ')})`)
   }
 
+  // Snapshot before the search clause is added -- every OTHER filter
+  // (branch/brand/category/unit/supplier/tag/stock/issue/group/batch-date)
+  // already applies. Same "candidate list for the JS fuzzy fallback" role
+  // as routes/portal.ts's own baseWhere -- see searchProductsPayload's own
+  // comment (and lib/searchMatch.ts's runFuzzyFallbackMatch) for why this
+  // exists. The caller (searchProductsPayload) still needs to fold in its
+  // own promo/merged/initial clauses (added after this function returns,
+  // exactly like portal.ts's runPortalProductSearch does for its own
+  // `initial` clause) before using this for the fuzzy candidate query.
+  const baseWhere = [...where]
   if (searchWhereClause) where.push(searchWhereClause)
 
-  return { where, joins, params, stockExpr, matchRankSql, titleOnly, hasSearchTerm: searchTermGroups.length > 0 }
+  return {
+    where,
+    joins,
+    params,
+    stockExpr,
+    matchRankSql,
+    titleOnly,
+    hasSearchTerm: searchTermGroups.length > 0,
+    baseWhere,
+    searchMode,
+    // One string per comma-group (words re-joined with a space), matching
+    // the shape lib/searchMatch.ts's matchesSearchTermGroups/
+    // runFuzzyFallbackMatch expect: each entry is itself re-tokenized and
+    // every word in it must be found (AND within the group), with `mode`
+    // deciding how the groups themselves combine -- same semantics
+    // tokenizeSearchTermGroups already gives the SQL paths above, just
+    // flattened back to strings for this JS-side matcher's own contract.
+    searchTerms: searchTermGroups.map((words) => words.join(' ')),
+    // Barcode/SKU queries stay exact-only -- see isDigitsOnlyQuery's own
+    // comment in lib/searchMatch.ts for why edit-distance tolerance is
+    // actively wrong for an opaque numeric identifier.
+    digitsOnly: isDigitsOnlyQuery(searchTermGroups),
+  }
 }
 
 function isProductSearchIndexUnavailable(error: unknown): boolean {
