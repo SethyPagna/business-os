@@ -31,6 +31,7 @@ import type { ZeroQuantityCandidate } from './ZeroQuantityCleanupModal'
 import WireImagesReviewModal from './WireImagesReviewModal'
 import type { WireImageChange, WireImagesPreview } from './WireImagesReviewModal'
 import DeleteConfirmModal from './DeleteConfirmModal'
+import ConfirmDialog from '../shared/ConfirmDialog.tsx'
 import { summarizeDeleteImpact } from '../../utils/deleteImpactSummary'
 import ProductsHeaderActions from './surfaces/HeaderActions'
 import LazyPortalMenu from '../shared/LazyPortalMenu'
@@ -793,6 +794,19 @@ function ProductsFullEditor() {
   const [refreshingProducts, setRefreshingProducts] = useState(false)
   const [loadError,    setLoadError]    = useState<string | null>(null)
   const [bulkActionBusy, setBulkActionBusy] = useState(false)
+  // Select-then-confirm staging for the three bulk/whole-catalog price and
+  // field mutations below (replaces three bare window.confirm() calls).
+  const [pendingBulkProductUpdates, setPendingBulkProductUpdates] = useState<Record<string, unknown> | null>(null)
+  const [pendingBulkPriceAdjustAll, setPendingBulkPriceAdjustAll] = useState<{
+    payload: { direction: 'increase' | 'decrease'; amount: number; fields: string[]; skip_zero: boolean }
+    count: number
+    verb: string
+  } | null>(null)
+  const [pendingBulkPriceAdjustSelected, setPendingBulkPriceAdjustSelected] = useState<{
+    adjustments: Array<{ id: number; updates: Record<string, unknown> }>
+    verb: string
+    buildProductBulkUpdatePayload: (updates: Record<string, unknown>, currentProduct?: ProductRecord, user?: { id?: unknown; name?: unknown }, fallbackUpdatedAt?: unknown) => Record<string, unknown>
+  } | null>(null)
   const [mergeDuplicatesBusy, setMergeDuplicatesBusy] = useState(false)
   const [mergeDuplicatesReviewOpen, setMergeDuplicatesReviewOpen] = useState(false)
   // Exact-duplicate (same real barcode + same name) flagging for the list
@@ -2701,18 +2715,23 @@ function ProductsFullEditor() {
     return summary
   }, [fetchProductsByIds, load, runProductStockMutation, user?.id, user?.name])
 
+  // Select-then-confirm: validates + stages the resolved update payload;
+  // the ConfirmDialog rendered near the bulk-edit form (below) shows the
+  // review and runs commitBulkProductUpdates on its onConfirm (replaces the
+  // previous bare window.confirm()).
   const runBulkProductUpdates = useCallback(async (updates: Record<string, unknown>) => {
     if (!selectedVisibleIds.length || bulkActionBusy) return
-    const {
-      buildDefinedProductUpdates,
-      buildProductBulkUpdatePayload,
-    } = await loadProductWriteHelpers()
+    const { buildDefinedProductUpdates } = await loadProductWriteHelpers()
     const nextUpdates = buildDefinedProductUpdates(updates)
     if (!Object.keys(nextUpdates).length) {
       notify('No changes specified', 'warning')
       return
     }
-    if (!window.confirm(`Do you want to update ${selectedVisibleCount} product${selectedVisibleCount === 1 ? '' : 's'}?`)) return
+    setPendingBulkProductUpdates(nextUpdates)
+  }, [bulkActionBusy, notify, selectedVisibleIds])
+
+  const commitBulkProductUpdates = useCallback(async (nextUpdates: Record<string, unknown>) => {
+    const { buildProductBulkUpdatePayload } = await loadProductWriteHelpers()
     const snapshots = snapshotProductsByIds(selectedVisibleIds)
     setBulkActionBusy(true)
     let done = 0
@@ -2780,6 +2799,7 @@ function ProductsFullEditor() {
       )
     } finally {
       setBulkActionBusy(false)
+      setPendingBulkProductUpdates(null)
     }
   }, [actionHistory, bulkActionBusy, load, notify, productsById, restoreProductSnapshots, runProductWriteMutation, selectedVisibleCount, selectedVisibleIds, snapshotProductsByIds, user?.id, user?.name])
 
@@ -2797,6 +2817,10 @@ function ProductsFullEditor() {
   // selection flow above it, but the WORK runs server-side (set-based
   // UPDATEs) with a preview count fetched first so the confirm can say the
   // real number -- and it says plainly that this scope has no undo.
+  // Select-then-confirm: fetches the real preview count (server-side, whole
+  // catalog) then stages it; the ConfirmDialog below runs
+  // commitBulkPriceAdjustAllProducts on its onConfirm (replaces the previous
+  // bare window.confirm()).
   const runBulkPriceAdjustAllProducts = useCallback(async () => {
     if (bulkActionBusy) return
     const amount = Number(bulkEditForm.adjust_amount)
@@ -2825,8 +2849,20 @@ function ProductsFullEditor() {
         return
       }
       const verb = direction === 'decrease' ? tr('bulk_price_decrease', 'Decrease') : tr('bulk_price_increase', 'Increase')
-      const warning = tr('bulk_price_all_confirm', 'This runs on the WHOLE catalog and cannot be undone.')
-      if (!window.confirm(`${verb} prices on ${count} products — ${warning}`)) return
+      setPendingBulkPriceAdjustAll({ payload, count, verb })
+    } catch (error) {
+      notify(getErrorMessage(error, 'Bulk adjustment failed'), 'error')
+    } finally {
+      setBulkActionBusy(false)
+    }
+  }, [bulkActionBusy, bulkEditForm, notify, tr])
+
+  const commitBulkPriceAdjustAllProducts = useCallback(async () => {
+    if (!pendingBulkPriceAdjustAll) return
+    const { payload, count } = pendingBulkPriceAdjustAll
+    setBulkActionBusy(true)
+    try {
+      const { bulkPriceAdjustAllProducts } = await import('../../api/productWriteTransport.ts')
       const result = await bulkPriceAdjustAllProducts(payload)
       if (result?.success === false || result?.error) throw new Error(String(result?.error || 'Bulk adjustment failed'))
       notify(`${tr('bulk_price_all_done', 'Adjusted prices across the catalog')}: ${Number(result?.changed) || count}`)
@@ -2835,8 +2871,9 @@ function ProductsFullEditor() {
       notify(getErrorMessage(error, 'Bulk adjustment failed'), 'error')
     } finally {
       setBulkActionBusy(false)
+      setPendingBulkPriceAdjustAll(null)
     }
-  }, [bulkActionBusy, bulkEditForm, notify, tr, load])
+  }, [load, notify, pendingBulkPriceAdjustAll, tr])
 
   const runBulkProductPriceAdjustment = useCallback(async () => {
     if (!selectedVisibleIds.length || bulkActionBusy) return
@@ -2874,8 +2911,12 @@ function ProductsFullEditor() {
     const verb = bulkEditForm.adjust_direction === 'decrease'
       ? tr('bulk_price_decrease', 'Decrease')
       : tr('bulk_price_increase', 'Increase')
-    if (!window.confirm(`${verb} prices on ${adjustments.length} product${adjustments.length === 1 ? '' : 's'}?`)) return
+    setPendingBulkPriceAdjustSelected({ adjustments, verb, buildProductBulkUpdatePayload })
+  }, [bulkActionBusy, bulkEditForm, loadProductWriteHelpers, notify, productsById, selectedVisibleIds, tr])
 
+  const commitBulkProductPriceAdjustment = useCallback(async () => {
+    if (!pendingBulkPriceAdjustSelected) return
+    const { adjustments, verb, buildProductBulkUpdatePayload } = pendingBulkPriceAdjustSelected
     const adjustedIds = adjustments.map((entry) => entry.id)
     const snapshots = snapshotProductsByIds(adjustedIds)
     setBulkActionBusy(true)
@@ -2946,8 +2987,9 @@ function ProductsFullEditor() {
       )
     } finally {
       setBulkActionBusy(false)
+      setPendingBulkPriceAdjustSelected(null)
     }
-  }, [actionHistory, bulkActionBusy, bulkEditForm, load, notify, productsById, restoreProductSnapshots, runProductWriteMutation, selectedVisibleIds, snapshotProductsByIds, tr, user?.id, user?.name])
+  }, [actionHistory, load, notify, pendingBulkPriceAdjustSelected, productsById, restoreProductSnapshots, runProductWriteMutation, snapshotProductsByIds, user?.id, user?.name])
 
   const productFilterSections = useMemo(() => buildProductFilterSections({
     availabilitySection: buildAvailabilityFilterSection({
@@ -4545,6 +4587,42 @@ function ProductsFullEditor() {
           working={deleteConfirmBusy}
         />
       )}
+      {pendingBulkProductUpdates ? (
+        <ConfirmDialog
+          t={t}
+          title={tr('bulk_update_confirm_title', 'Update {count} product{s}?')
+            .replace('{count}', String(selectedVisibleCount))
+            .replace('{s}', selectedVisibleCount === 1 ? '' : 's')}
+          danger={false}
+          working={bulkActionBusy}
+          workingLabel={tr('saving', 'Saving...')}
+          onConfirm={() => { void commitBulkProductUpdates(pendingBulkProductUpdates) }}
+          onClose={() => { if (!bulkActionBusy) setPendingBulkProductUpdates(null) }}
+        />
+      ) : null}
+      {pendingBulkPriceAdjustSelected ? (
+        <ConfirmDialog
+          t={t}
+          title={`${pendingBulkPriceAdjustSelected.verb} prices on ${pendingBulkPriceAdjustSelected.adjustments.length} product${pendingBulkPriceAdjustSelected.adjustments.length === 1 ? '' : 's'}?`}
+          working={bulkActionBusy}
+          workingLabel={tr('saving', 'Saving...')}
+          onConfirm={() => { void commitBulkProductPriceAdjustment() }}
+          onClose={() => { if (!bulkActionBusy) setPendingBulkPriceAdjustSelected(null) }}
+        />
+      ) : null}
+      {pendingBulkPriceAdjustAll ? (
+        <ConfirmDialog
+          t={t}
+          title={`${pendingBulkPriceAdjustAll.verb} ${tr('bulk_price_apply_all', 'prices on ALL products in the system')}`}
+          message={`${pendingBulkPriceAdjustAll.count} ${tr('products', 'products')}`}
+          danger
+          note={tr('bulk_price_all_confirm', 'This runs on the WHOLE catalog and cannot be undone.')}
+          working={bulkActionBusy}
+          workingLabel={tr('saving', 'Saving...')}
+          onConfirm={() => { void commitBulkPriceAdjustAllProducts() }}
+          onClose={() => { if (!bulkActionBusy) setPendingBulkPriceAdjustAll(null) }}
+        />
+      ) : null}
     </div>
   )
 }

@@ -162,6 +162,7 @@ export default function BranchStockAdjuster({ product, branches, user, onDone, t
   const [reasonManager, setReasonManager] = useState<ReasonManagerState>({ open: false, type: 'adjust' })
   const [reasonDraft, setReasonDraft] = useState('')
   const [savingReasons, setSavingReasons] = useState(false)
+  const [pendingReasonDelete, setPendingReasonDelete] = useState<InventoryReason | null>(null)
   const saveInFlightRef = useRef(false)
   const isKhmer = /[\u1780-\u17FF]/.test((typeof t === 'function' ? t('cancel') : '') || '')
 
@@ -219,11 +220,17 @@ export default function BranchStockAdjuster({ product, branches, user, onDone, t
     const next = inventoryReasons.map((item) => (item.id === entry.id ? { ...item, label: nextLabel.trim() } : item))
     await saveReasonCatalog(next)
   }, [inventoryReasons, saveReasonCatalog])
-  const deleteSavedReason = useCallback(async (entry: InventoryReason) => {
-    if (!window.confirm(T('delete_saved_reason_confirm', 'Delete this saved reason?', 'លុបមូលហេតុដែលបានរក្សាទុកនេះ?'))) return
-    const next = inventoryReasons.filter((item) => item.id !== entry.id)
+  // Select-then-confirm: staging the entry opens the ConfirmDialog below
+  // instead of a bare window.confirm(); the removal runs from its onConfirm.
+  const deleteSavedReason = useCallback((entry: InventoryReason) => {
+    setPendingReasonDelete(entry)
+  }, [])
+  const commitDeleteSavedReason = useCallback(async () => {
+    if (!pendingReasonDelete) return
+    const next = inventoryReasons.filter((item) => item.id !== pendingReasonDelete.id)
+    setPendingReasonDelete(null)
     await saveReasonCatalog(next)
-  }, [inventoryReasons, saveReasonCatalog])
+  }, [inventoryReasons, pendingReasonDelete, saveReasonCatalog])
   const runBranchStockMutation = useCallback((loader: () => Promise<ApiResult | undefined>, label: string) => (
     withLoaderTimeout(loader, label, BRANCH_STOCK_ADJUSTMENT_TIMEOUT_MS)
   ), [])
@@ -424,6 +431,17 @@ export default function BranchStockAdjuster({ product, branches, user, onDone, t
           workingLabel={T('loading', 'Loading...', 'កំពុងរក្សាទុក...')}
           onConfirm={commitBranch}
           onClose={() => { if (!saving) setConfirmOpen(false) }}
+        />
+      ) : null}
+      {pendingReasonDelete ? (
+        <ConfirmDialog
+          t={t || (() => undefined)}
+          title={T('delete_saved_reason_confirm', 'Delete this saved reason?', 'លុបមូលហេតុដែលបានរក្សាទុកនេះ?')}
+          message={pendingReasonDelete.label}
+          danger
+          working={savingReasons}
+          onConfirm={() => { void commitDeleteSavedReason() }}
+          onClose={() => setPendingReasonDelete(null)}
         />
       ) : null}
     </div>

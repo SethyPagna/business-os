@@ -8,6 +8,7 @@ import { updateBatch } from '../../api/batchesTransport.ts'
 import { fmtDate, fmtDateTime24 } from '../../utils/formatters.ts'
 import { lazyRetry } from '../../utils/lazyImport.ts'
 import Modal from '../shared/Modal.tsx'
+import ConfirmDialog from '../shared/ConfirmDialog.tsx'
 import SearchInput from '../shared/SearchInput.tsx'
 import ScanSearchButton from '../shared/ScanSearchButton.tsx'
 import SupplierPickerField, { type SupplierChoice } from '../shared/SupplierPickerField.tsx'
@@ -89,6 +90,9 @@ export default function StockInSessionsSection({ t, notify, branches, onChanged 
   const [editing, setEditing] = useState(false)
   const [busy, setBusy] = useState(false)
   const [editDate, setEditDate] = useState('')
+  const [pendingSaveHeader, setPendingSaveHeader] = useState(false)
+  const [pendingRemoveRow, setPendingRemoveRow] = useState<Row | null>(null)
+  const [pendingRemoveSession, setPendingRemoveSession] = useState(false)
   const [editSupplier, setEditSupplier] = useState<SupplierChoice>({ supplierId: null, supplierName: '' })
   const [editPayment, setEditPayment] = useState<'paid' | 'credit'>('paid')
   const [editCreditDueDate, setEditCreditDueDate] = useState('')
@@ -166,10 +170,13 @@ export default function StockInSessionsSection({ t, notify, branches, onChanged 
       notify(tr('fast_stockin_credit_due', 'On-credit stock needs a due date'), 'error')
       return
     }
-    if (!window.confirm(tr(
-      'confirm_update_stock_session',
-      'Update the receipt details for this {count}-line stock-in session? The selected lot records will be updated.',
-    ).replace('{count}', String(selected.rows.length)))) return
+    // Select-then-confirm: stage the request, the ConfirmDialog rendered
+    // below runs commitSaveHeader (replaces the previous bare window.confirm()).
+    setPendingSaveHeader(true)
+  }
+  const commitSaveHeader = async () => {
+    if (!selected) return
+    setPendingSaveHeader(false)
     setBusy(true)
     try {
       const batches = new Map<number, Row>()
@@ -187,15 +194,26 @@ export default function StockInSessionsSection({ t, notify, branches, onChanged 
     } catch (error) { notify(error instanceof Error ? error.message : tr('update_failed', 'Update failed'), 'error') }
     finally { setBusy(false) }
   }
-  const removeRow = async (row: Row) => {
-    if (busy || !window.confirm(tr('confirm_remove_stock_line', `Remove ${row.product_name} from this session? This posts a reversing stock movement.`))) return
+  const removeRow = (row: Row) => {
+    if (busy) return
+    setPendingRemoveRow(row)
+  }
+  const commitRemoveRow = async () => {
+    if (!pendingRemoveRow) return
+    const row = pendingRemoveRow
+    setPendingRemoveRow(null)
     setBusy(true)
     try { await revertStockMovement(row.id); notify(tr('movement_reverted', 'Stock line removed')); setSelected(null); await load(); onChanged() }
     catch (error) { notify(error instanceof Error ? error.message : tr('update_failed', 'Update failed'), 'error') }
     finally { setBusy(false) }
   }
-  const removeSession = async () => {
-    if (!selected || busy || !window.confirm(tr('confirm_remove_stock_session', `Remove this ${selected.rows.length}-line stock-in session? Each line will be reversed; history is preserved.`))) return
+  const removeSession = () => {
+    if (!selected || busy) return
+    setPendingRemoveSession(true)
+  }
+  const commitRemoveSession = async () => {
+    if (!selected) return
+    setPendingRemoveSession(false)
     setBusy(true)
     try {
       for (const row of selected.rows) await revertStockMovement(row.id)
@@ -289,5 +307,39 @@ export default function StockInSessionsSection({ t, notify, branches, onChanged 
       </div>
     </Modal> : null}
     {addMore ? <Suspense fallback={null}><FastStockInModal branchOptions={branches.map((branch) => ({ value: String(branch.id || ''), label: String(branch.name || branch.id || '') }))} defaultBranchId={addMore.branchId || null} initialHeader={{ branchId: addMore.branchId, receivedDate: addMore.receivedDate, supplier: addMore.supplier, paymentStatus: addMore.paymentStatus === 'credit' ? 'credit' : 'paid', creditDueDate: addMore.creditDueDate }} tr={(key, fallback = key) => tr(key, fallback)} notify={notify} onClose={() => setAddMore(null)} onDone={() => { void load(); onChanged() }} /></Suspense> : null}
+    {pendingSaveHeader && selected ? (
+      <ConfirmDialog
+        t={t}
+        title={tr(
+          'confirm_update_stock_session',
+          'Update the receipt details for this {count}-line stock-in session? The selected lot records will be updated.',
+        ).replace('{count}', String(selected.rows.length))}
+        working={busy}
+        onConfirm={() => { void commitSaveHeader() }}
+        onClose={() => { if (!busy) setPendingSaveHeader(false) }}
+      />
+    ) : null}
+    {pendingRemoveRow ? (
+      <ConfirmDialog
+        t={t}
+        title={tr('confirm_remove_stock_line', 'Remove this line from the session? This posts a reversing stock movement.')}
+        message={pendingRemoveRow.product_name || ''}
+        danger
+        working={busy}
+        onConfirm={() => { void commitRemoveRow() }}
+        onClose={() => { if (!busy) setPendingRemoveRow(null) }}
+      />
+    ) : null}
+    {pendingRemoveSession && selected ? (
+      <ConfirmDialog
+        t={t}
+        title={tr('confirm_remove_stock_session', 'Remove this stock-in session? Every line will be reversed and history will be preserved.')}
+        message={`${selected.rows.length} ${tr('lines', 'lines')}`}
+        danger
+        working={busy}
+        onConfirm={() => { void commitRemoveSession() }}
+        onClose={() => { if (!busy) setPendingRemoveSession(false) }}
+      />
+    ) : null}
   </div>
 }
