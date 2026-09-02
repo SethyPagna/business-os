@@ -79,13 +79,36 @@
   /* Z-layers -- mirrored as typed constants in components/shared/kit/zLayers.ts
      for inline styles/portals that can't reach a CSS var (e.g. computing a
      stacking order in JS). Keep the two in sync by hand; kitTokens.test.ts
-     pins both sides. */
+     pins both sides.
+
+     DEVIATION FROM THE P2-1 BRIEF'S SPEC VALUES (sticky:20/dropdown:30/
+     fold:40/modal:50/modal-2:60/toast:70), recorded per the P2 common
+     brief's "brief conflicts with code" rule: this app already has an
+     established, fought-for z-index scale for elements portalled straight
+     to document.body -- BackgroundImportTracker's chip (z-[1000]),
+     NotesWidget (z-[1001]), NotificationCenter's dropdown (z-[1010]),
+     Modal.tsx (z-[1050], raised from z-50 specifically to beat the two
+     above -- see Modal.tsx's own comment), OtpModal's modal-over-modal
+     (z-[1060]), App.tsx's toast layer (z-[1100]). Using the brief's small
+     0-70 numbers for --z-modal/--z-modal-2/--z-toast/--z-fold would sink
+     every one of them back below BackgroundImportTracker/NotificationCenter
+     -- reintroducing the exact "frozen import report" bug Modal.tsx's
+     z-[1050] was raised to fix. --z-sticky/--z-dropdown keep the spec's
+     small values: they are for page-LOCAL stacking (sticky table headers,
+     in-flow dropdowns inside a page's own stacking context, matching the
+     small numbers already used that way across the app, e.g. Sidebar.tsx's
+     z-40, POS.tsx's z-20/z-50) and never compete with the body-portal
+     scale. --z-fold/--z-modal/--z-modal-2/--z-toast are body-portal values,
+     kept numerically equal to (or logically slotted next to) the app's
+     existing ones so the relative order the brief specified (sticky <
+     dropdown < fold < modal < modal-2 < toast) still holds exactly, with
+     zero regression to any already-shipped overlay. */
   --z-sticky: 20;
   --z-dropdown: 30;
-  --z-fold: 40;
-  --z-modal: 50;
-  --z-modal-2: 60;
-  --z-toast: 70;
+  --z-fold: 1020;
+  --z-modal: 1050;
+  --z-modal-2: 1060;
+  --z-toast: 1100;
 }
 
 @media (min-width: 768px) {

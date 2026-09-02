@@ -104,20 +104,29 @@ export default function Modal({ title, onClose, children, wide, size, draggable,
     // positioning wrapper). Kept even now that the whole node is portalled
     // to document.body (see below) -- cheap, and guards against a future
     // ancestor doing the same thing again.
-    // z-[1050] (was z-50): now that this whole node is portalled directly
-    // to document.body (see below), its z-index competes in the SAME
-    // global stacking context as the app's other body-level fixed overlays
-    // instead of being scoped inside whatever ancestor happened to mount
-    // it. z-50 was never wrong for a nested Modal (any local ancestor's
-    // own stacking context made it "win" against ordinary page content
-    // regardless), but at the top level it would have lost to
-    // BackgroundImportTracker.tsx's chip/panel (z-[1000]) and
-    // NotificationCenter.tsx's dropdown (z-[1010]) -- i.e. exactly the
-    // widgets a Modal like the Import Report is opened from. Placed above
-    // both, but deliberately still below App.tsx's toast layer (z-[1100])
-    // -- a toast confirming an action taken while a modal is open should
-    // stay visible on top of it, not get hidden behind the backdrop.
-    <div className="modal-viewport-safe pointer-events-auto fixed inset-0 bg-black/50 flex items-start sm:items-center justify-center z-[1050] overflow-y-auto sm:p-4">
+    // z-[var(--z-modal)] (tokens.css: 1050; was a literal z-[1050], before
+    // that z-50): now that this whole node is portalled directly to
+    // document.body (see below), its z-index competes in the SAME global
+    // stacking context as the app's other body-level fixed overlays instead
+    // of being scoped inside whatever ancestor happened to mount it. z-50
+    // was never wrong for a nested Modal (any local ancestor's own stacking
+    // context made it "win" against ordinary page content regardless), but
+    // at the top level it would have lost to BackgroundImportTracker.tsx's
+    // chip/panel (z-[1000]) and NotificationCenter.tsx's dropdown
+    // (z-[1010]) -- i.e. exactly the widgets a Modal like the Import Report
+    // is opened from. Placed above both, but deliberately still below
+    // App.tsx's toast layer (z-[1100]) -- a toast confirming an action
+    // taken while a modal is open should stay visible on top of it, not get
+    // hidden behind the backdrop. P2-1 kept this exact numeric value (not
+    // the design spec's smaller --z-modal:50) when introducing zLayers.ts --
+    // see components/shared/kit/zLayers.ts for why: this app already has an
+    // established 1000+ global scale for body-portalled overlays, and using
+    // a small number here would have silently sunk every Modal below
+    // BackgroundImportTracker/NotificationCenter again, resurrecting the
+    // exact "frozen import report" bug this z-index was raised to fix.
+    // Backdrop color also now reads --ui-backdrop instead of a literal
+    // bg-black/50, so light/dark match the kit's own overlay tone.
+    <div className="modal-viewport-safe pointer-events-auto fixed inset-0 flex items-start sm:items-center justify-center z-[var(--z-modal)] overflow-y-auto sm:p-4" style={{ backgroundColor: 'var(--ui-backdrop)' }}>
       <div
         ref={panelRef}
         className={`modal-panel-safe bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full ${widthClass} flex flex-col fade-in my-auto`}

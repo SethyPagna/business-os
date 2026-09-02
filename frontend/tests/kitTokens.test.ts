@@ -124,6 +124,31 @@ runTest('every referenced woff2 file actually exists under public/fonts', () => 
   assert.ok(count >= 10, `expected at least 10 font-face src urls, found ${count}`)
 })
 
+runTest('zLayers.ts mirrors tokens.css --z-* values exactly (no drift between the two sources)', () => {
+  const zLayersSrc = readFileSync(new URL('../src/components/shared/kit/zLayers.ts', import.meta.url), 'utf8')
+  const cssZ: Record<string, number> = {}
+  for (const match of tokens.matchAll(/--z-([a-z0-9-]+):\s*(\d+);/g)) {
+    cssZ[match[1]] = Number(match[2])
+  }
+  const nameMap: Record<string, string> = {
+    sticky: 'sticky', dropdown: 'dropdown', fold: 'fold',
+    modal: 'modal', modal2: 'modal-2', toast: 'toast',
+  }
+  for (const [jsName, cssName] of Object.entries(nameMap)) {
+    const jsMatch = zLayersSrc.match(new RegExp(`${jsName}:\\s*(\\d+),`))
+    assert.ok(jsMatch, `zLayers.ts missing ${jsName}`)
+    assert.ok(cssName in cssZ, `tokens.css missing --z-${cssName}`)
+    assert.equal(Number(jsMatch![1]), cssZ[cssName], `zLayers.${jsName} (${jsMatch![1]}) must equal tokens.css --z-${cssName} (${cssZ[cssName]})`)
+  }
+})
+
+runTest('Modal.tsx reads --z-modal and --ui-backdrop instead of a literal z-index/black overlay', () => {
+  const modal = readFileSync(new URL('../src/components/shared/Modal.tsx', import.meta.url), 'utf8')
+  assert.match(modal, /className="[^"]*z-\[var\(--z-modal\)\][^"]*"/)
+  assert.match(modal, /var\(--ui-backdrop\)/)
+  assert.doesNotMatch(modal, /className="[^"]*bg-black\/50[^"]*"/)
+})
+
 runTest('tailwind.config.ts exposes the ui-* tokens as theme extensions', () => {
   const tw = readFileSync(new URL('../tailwind.config.ts', import.meta.url), 'utf8')
   assert.match(tw, /'ui-ground':\s*'var\(--ui-ground\)'/)
