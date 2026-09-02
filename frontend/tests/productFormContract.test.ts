@@ -50,3 +50,16 @@ assert.match(workerProducts, /MAX_PRODUCT_IMAGE_UPLOAD_BYTES = 12 \* 1024 \* 102
 assert.doesNotMatch(workerProducts, /Please try again, or pick a smaller\/simpler source photo/, 'image upload failure must not blame the operator for client compression failure')
 
 console.log('PASS Product form/create/stock/grouping/image-upload contract')
+
+// The save flow AWAITS the rename-cascade prompt and the save-confirm dialog
+// (askRenameChoice / askSaveConfirm). Both used to be rendered inside the
+// Pricing tab's conditional block, so on every other tab the promise never got
+// a dialog to resolve it: Save did nothing and every later click was swallowed
+// by saveInFlightRef ("Products page actions cannot save"). They must mount at
+// the form root, after every activeTab-conditional block.
+const lastTabConditional = form.lastIndexOf('activeTab ===')
+for (const marker of ['<RenameCascadeModal request={renameRequest}', '{saveConfirmOpen ? (', '{createVerdictOpen ? (']) {
+  const at = form.indexOf(marker)
+  assert.ok(at > 0, `ProductForm must render ${marker}`)
+  assert.ok(at > lastTabConditional, `ProductForm: ${marker} must be rendered at the form root, after the last activeTab-conditional block, or the awaited save promise never resolves on the other tabs`)
+}

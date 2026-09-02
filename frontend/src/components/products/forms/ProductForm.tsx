@@ -1569,20 +1569,6 @@ export default function ProductForm({
           </div>
           </> : null}
 
-          <RenameCascadeModal request={renameRequest} busy={saving} t={(key, fallback) => t(key) || fallback || key} onChoose={handleRenameChoice} />
-          {saveConfirmOpen ? (
-            <ConfirmDialog
-              t={t}
-              title={isCreateMode ? tr('add_product', 'Add Product') : tr('save_changes', 'Save Changes')}
-              message={String(form.name || '').trim() || (isCreateMode ? tr('add_product', 'Add Product') : tr('save_changes', 'Save Changes'))}
-              items={saveReviewItems()}
-              confirmLabel={isCreateMode ? tr('add_product', 'Add Product') : tr('save', 'Save')}
-              working={saving}
-              workingLabel={tr('saving', 'Saving...')}
-              onConfirm={() => resolveSaveConfirm(true)}
-              onClose={() => resolveSaveConfirm(false)}
-            />
-          ) : null}
       {/* G1 (Part 391): the per-product discount editor MOVED to the
               Promotions page (user: "per-product discounts manage in
               Promotions, labels stay visible in Products"). The product
@@ -1801,6 +1787,28 @@ export default function ProductForm({
             />
           ) : null}
         </Suspense>
+      ) : null}
+      {/* The save flow AWAITS these two dialogs (askRenameChoice /
+          askSaveConfirm). They used to sit inside the Pricing tab's
+          conditional block, so on Basic Info / Stock / Expiry the promise
+          never got a dialog to resolve it: Save appeared to do nothing and
+          every later click was swallowed by saveInFlightRef. They mount at
+          the form root, independent of activeTab, next to the other
+          root-level dialog (create verdict). Locked by
+          tests/productFormContract.test.ts. */}
+      <RenameCascadeModal request={renameRequest} busy={saving} t={(key, fallback) => t(key) || fallback || key} onChoose={handleRenameChoice} />
+      {saveConfirmOpen ? (
+        <ConfirmDialog
+          t={t}
+          title={isCreateMode ? tr('add_product', 'Add Product') : tr('save_changes', 'Save Changes')}
+          message={String(form.name || '').trim() || (isCreateMode ? tr('add_product', 'Add Product') : tr('save_changes', 'Save Changes'))}
+          items={saveReviewItems()}
+          confirmLabel={isCreateMode ? tr('add_product', 'Add Product') : tr('save', 'Save')}
+          working={saving}
+          workingLabel={tr('saving', 'Saving...')}
+          onConfirm={() => resolveSaveConfirm(true)}
+          onClose={() => resolveSaveConfirm(false)}
+        />
       ) : null}
       {createVerdictOpen ? (
         <Modal
