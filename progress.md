@@ -100,8 +100,12 @@ sibling-surface/logic consistency audits, reconciling parallel lanes (incl. `rc/
 branches), and docs/context upkeep (progress.md / session-log / CLAUDE.md / ≤300K). Corrections landed in the existing
 references: Vite proxies `/api` → 8787 (8787 serves the LAST BUILD, not live edits); `deploy:full` ends at
 `wrangler deploy` (poll `/health` yourself); `/health` `version` is hard-coded — the deploy id is what wrangler prints.
-New root `CLAUDE.md` is a pointer document only. Flagged, not fixed: `verify:ui`/`verify:performance` in
-frontend/package.json point at files that do not exist. Reference to re-verify, not truth.
+New root `CLAUDE.md` is a pointer document only. → Part 580 (same session): the dead `verify:ui`/`verify:performance` entries REMOVED from frontend/package.json in `2f245f9f`
+(their scripts died in 9ba4e843 with `backend/`; RC lanes based on 57d8f1a2 take this version at merge); skill + CLAUDE.md gained
+"talk to peers and ChatGPT before touching any file" in `33688d5b`. FLAGGED, not fixed: `npm run verify:i18n` is RED on HEAD —
+30 unresolved keys referenced by `57d8f1a2` (Products.tsx `view_image`, OtpModal `your_current_password`, ManageBatchesModal,
+FastStockInModal, ReceiveBatchModal, Inventory.tsx, StockInSessionsSection, BarcodeScannerModal …) missing from en.json + km.json.
+Open lane (Khmer must be internet-verified). Reference to re-verify, not truth.
 
 **⏳ COORDINATOR (session 62) — TIMEZONE + REVENUE reconciliation, two locked decisions (user, Sep 1).**
 User reaffirmed BOTH: (1) "the timezone and data are all Phnom Penh time" → fixed **UTC+7 business-day**

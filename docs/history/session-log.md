@@ -17272,3 +17272,73 @@ touched, so tsc/build were not re-run for this docs-only change.
 driving live servers and peers' lanes). progress.md header blurb not edited: its dirty hunk belongs to a
 peer's merge-verification note, so only this Part entry was written. `verify:ui`/`verify:performance`
 zombie refs left for the spawned task. Push status: push to origin/main attempted right after this commit — confirm with `git log origin/main -1`.
+
+## Part 580 (Sep 2 2026, session business-os-v1-80, worker) — dead `verify:ui`/`verify:performance` entries removed from frontend/package.json; fleet-coordination skill: talk to peers and ChatGPT first
+
+**Ask** — (1) The task chip from Part 579: `frontend/package.json` defines `verify:ui` and
+`verify:performance` pointing at `ops/scripts/frontend/verify-ui.ts` / `verify-performance.ts`, which
+exist nowhere; decide from git history and this log whether they were planned locks never created
+(like verify-i18n.ts before Part 545) or stale entries, then either implement them mirroring
+verify-i18n.ts or remove them and any docs telling sessions to run them. (2) Mid-task, the user:
+"make sure you talk to other sessions and chatgpt, can include that into the file as first
+instinct... so nothing gets conflicted."
+
+**What changed**
+- `frontend/package.json` — the two entries removed (`2f245f9f`). Decision: REMOVE, not restore.
+  History: `verify-ui.js` was added in 520f2bd4 ("Harden portal UI coverage"),
+  `verify-performance.js` in aa0c1951 ("Harden large import pipeline"); f18a6ffa (May 28 2026)
+  renamed all three verify scripts to `.ts` and repointed package.json; 9ba4e843 (Aug 25 2026,
+  "sync local working state" — the commit that replaced `backend/` with `cloudflare/`) deleted all
+  three `.ts` files but left the package.json lines. verify-i18n.ts was recreated with a new purpose
+  in Part 545; the other two never were. Their content asserted the pre-Cloudflare architecture:
+  `backend/src/importCsv.js`, BullMQ `importWorker.js`/`mediaWorker.js`,
+  `ops/scripts/powershell/docker-release.ps1`, `frontend/src/api/methods.js`, `.jsx` components
+  (`CatalogPage.jsx`, `BulkImportModal.jsx`, `Sidebar.jsx`, `BackgroundImportTracker.jsx`),
+  `dist/business-os-build.json`, and a ban on tracked `.cjs` files (the repo now tracks 175 — the
+  cloudflare test suite). Every checked path is gone; restoring verbatim would be red for
+  policy reasons, rewriting would be inventing new policy. Callers: none — not `test:utils`, not
+  `run/verify-local.bat`, not the deploy scripts. `verify:i18n` and `verify:public-runtime` untouched.
+- `.claude/skills/fleet-coordination/` + `CLAUDE.md` (`33688d5b`) — new SKILL.md section "First
+  instinct: talk before you touch" (ListAgents → SendMessage every live peer with the exact files →
+  sweep the Codex branches / tell the live chat when reachable → then claim); the description now
+  triggers on "about to touch any file"; every role quick-start starts with the message;
+  coordination.md gains the peer-message protocol (first line = the point, one tool round of silence
+  for a small slice, a reply naming a file is binding, permissions do not travel); docs-and-context.md
+  says talk-then-claim; CLAUDE.md Start-here gets step 3. consistency-audit.md's note updated: the
+  zombies are gone; confirm a lock's file exists and run it before citing it.
+- `progress.md` — the Part-579 board block updated with the two hashes (peer d9 asked for them so
+  its `rc/*` merge picks this package.json) and the open i18n finding below (this commit).
+
+**What was found**
+- `verify:i18n` is RED on committed HEAD: 30 unresolved keys, all referenced by `57d8f1a2`
+  ("fix(release): capture consolidated runtime and scanner lifecycle", Sep 2) and absent from
+  en.json and km.json in HEAD. The working-tree lang packs and the referencing components are clean,
+  so this is HEAD, not a peer's mid-edit. Examples: `view_image` (Products.tsx),
+  `your_current_password` (OtpModal.tsx), `barcode_not_recorded` (StockInSessionsSection.tsx),
+  `batch_quantity_change_note` / `confirm_deactivate_batch_details` / `confirm_update_batch_details`
+  (ManageBatchesModal.tsx), `camera_permission_ready` (BarcodeScannerModal.tsx),
+  `confirm_complete_stock_session` (FastStockInModal.tsx), `confirm_receive_batch_details`
+  (ReceiveBatchModal.tsx), `confirm_transfer_stock_details` (Inventory.tsx). Not fixed here (out of
+  lane; 30 Khmer strings need internet-verified translations). Relayed to the live peers; the idle
+  peer was offered the lane.
+- The 7 local `codex/recovery/claude-audit-20260901/*` branches differ from main in package.json
+  only in the `test:utils` chain (Aug 30 autostash snapshots), not in the verify entries — stale,
+  not in flight. No unmerged remote branches after `git fetch --prune`.
+
+**Verified**
+- Peers messaged BEFORE editing: business-os-v1-6f (idle, no overlap) and business-os-v1-d9 (works
+  only in `rc/*` worktrees, no overlap). ChatGPT live chat: Claude-in-Chrome extension not
+  connected, so the Codex branch sweep stood in for it (stated, not skipped silently).
+- `node -e "require('./frontend/package.json')"` parses; verify scripts now: `verify:i18n`,
+  `verify:public-runtime`. `npm run verify:i18n` still executes (and reports the 30 HEAD reds above).
+- `git diff` on every file immediately before each commit: only my hunks (package.json −2;
+  skill + CLAUDE.md +104/−31). Index empty after each commit. SKILL.md is 261 lines (< 500).
+- Docs commit: progress.md staged via `git hash-object -w --no-filters` of HEAD content plus my
+  hunk only; the peer's uncommitted hunks (3+/1−) stay in the working tree untouched. Session-log
+  appended, otherwise clean. Verified after commit: HEAD carries exactly one Part-580 reference in
+  the board block; working tree vs HEAD = the peer's hunks only.
+
+**Not done** — the 30 i18n keys (open lane, see above). Possible future locks salvageable from the
+old scripts, NOT implemented (would be new policy): built JS/CSS size ceiling, `<link rel=preconnect>`
+count, Khmer Latin-only / `????` value audit. Historical "still missing" mentions in Parts ~87–140 are
+left as written. Nothing to deploy (docs + package.json scripts only).
