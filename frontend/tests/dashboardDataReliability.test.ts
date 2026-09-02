@@ -50,4 +50,10 @@ assert.match(branchesHub, /navigateTo\('products'\)/, 'the Branches hub should n
 assert.match(products, /bos:dashboard:products-focus/, 'the Products page should consume the forwarded dashboard stock drill')
 assert.match(products, /setStockFilter\(stockState\)/, 'the Products page should apply the forwarded stock filter')
 
+// Sep 3 2026 (CERT-P1 HIGH): the analytics API returns totals.tx_count (salesAnalytics.ts),
+// never transaction_count; validating the wrong field rejected every real payload
+// and the dashboard failed on every load for every user.
+assert.match(dashboard, /Number\.isFinite\(Number\(totals\?\.tx_count\)\)/, 'analytics validation must check the tx_count field the API actually returns')
+assert.doesNotMatch(dashboard, /totals\?\.transaction_count/, 'analytics validation must not check a transaction_count field the API never returns')
+
 console.log('PASS dashboard data reliability guards')
