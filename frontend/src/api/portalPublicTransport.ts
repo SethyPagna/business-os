@@ -1,5 +1,3 @@
-import { fetchJsonWithTimeout, getPortalBaseUrl } from './portalHttp.ts'
-
 type PortalPayload = Record<string, unknown>
 type QueryPrimitive = string | number | boolean | null | undefined
 type QueryValue = QueryPrimitive | QueryPrimitive[]
@@ -9,6 +7,62 @@ const PORTAL_HEADERS = { 'bypass-tunnel-reminder': 'true' }
 const PORTAL_JSON_HEADERS = {
   'Content-Type': 'application/json',
   ...PORTAL_HEADERS,
+}
+
+// Deliberately NOT imported from ./portalHttp.ts (which the admin catalog
+// editor's portalTransport.ts also uses): performanceLoadingUx.test.ts locks
+// this file into vite.config.ts's self-contained public 'app-portal' chunk
+// and portalHttp.ts into the separate admin-only 'portal-admin-api' chunk
+// (portalHttp.ts itself imports getSyncServerUrl from api/http.ts, the
+// shared admin HTTP core that must never reach the public storefront's
+// startup bundle). Importing the shared helpers here previously (commit
+// 9bfd2d90) fixed a real bug -- the storefront ignored a
+// localStorage['businessos_sync_server'] override -- but silently reversed
+// that chunk boundary, so this file now carries its own copy instead. The
+// STORAGE_KEYS.SYNC_SERVER string is inlined rather than imported from
+// ../constants.ts for the same reason: a dependency-free file only, per the
+// "stay self-contained" contract those tests enforce.
+const PORTAL_SYNC_SERVER_STORAGE_KEY = 'businessos_sync_server'
+
+// Same override-wins-over-same-origin precedence as the admin transport
+// (api/http.ts's getReadServerBaseUrl()) and as portalHttp.ts's copy used by
+// the admin catalog editor's own live preview -- an explicit dev/test
+// override must always win. Unlike portalHttp.ts's copy, this one does not
+// also fall back to the admin app's in-memory getSyncServerUrl() state:
+// PublicCatalogRoot never mounts the admin bootstrap that hydrates it, so
+// that fallback would always resolve empty here anyway, and checking it
+// would require importing the forbidden shared admin HTTP core.
+function getPortalBaseUrl(): string {
+  let stored = ''
+  try {
+    stored = typeof window !== 'undefined' ? (window.localStorage?.getItem(PORTAL_SYNC_SERVER_STORAGE_KEY) || '') : ''
+  } catch (_) {
+    // Storage can throw (private mode, disabled cookies) -- fall through.
+  }
+  const browserOrigin = typeof window !== 'undefined' ? (window.location?.origin || '') : ''
+  return (stored || browserOrigin || '').replace(/\/$/, '')
+}
+
+async function fetchJsonWithTimeout(
+  url: string,
+  options: RequestInit = {},
+  timeoutMs = 10_000,
+): Promise<Response> {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), timeoutMs)
+  try {
+    return await fetch(url, {
+      ...options,
+      signal: controller.signal,
+    })
+  } catch (error) {
+    if ((error as { name?: string })?.name === 'AbortError') {
+      throw new Error(`Request timed out after ${Math.round(timeoutMs / 1000)}s`)
+    }
+    throw error
+  } finally {
+    clearTimeout(timer)
+  }
 }
 
 function readJsonObject(response: Response): Promise<PortalPayload> {
