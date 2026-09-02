@@ -10,6 +10,7 @@ import { parseReceiptTemplate } from '../receipt-settings/template'
 import { buildAppliedReceiptConfig } from '../../utils/receiptAppliedConfig.ts'
 import ReceiptQrCodes, { normalizeQrSocialLinksForReceipt, type ReceiptQrEntry } from './ReceiptQrCodes.tsx'
 import LazyPortalMenu from '../shared/LazyPortalMenu'
+import { RECEIPT_CONTRAST_ATTR, normalizeReceiptTextContrast } from '../../utils/receiptTextContrast.ts'
 
 type LanguageMode = 'en' | 'km' | 'both'
 type ReceiptExportMode = 'print' | 'open' | 'image'
@@ -285,6 +286,16 @@ export default function Receipt({ sale, settings = {}, onClose, _previewMode }: 
   const tpl = parseReceiptTemplate(appliedConfig.serializedTemplate)
   const appliedSettings = appliedConfig.settings
   const appliedPrintSettings = appliedConfig.printSettings
+  // Text contrast: ONE root-level switch (styles/main.css's
+  // `[data-receipt-contrast="maximum"] *` override does the rest -- forcing
+  // every descendant's color/opacity/border-color, never font size/weight).
+  // Applied to every shell wrapper below so it covers the on-screen preview,
+  // the interactive receipt view, and -- because printReceipt.ts bakes
+  // computed styles into the print/PDF/image export clones from this live,
+  // already-styled DOM -- the printed and exported receipt too.
+  const contrastMode = normalizeReceiptTextContrast(tpl.text_contrast)
+  const contrastAttrs = { [RECEIPT_CONTRAST_ATTR]: contrastMode }
+  const contrastTextColor = contrastMode === 'maximum' ? '#000000' : undefined
   const compactSalesReceipt = tpl.sales_receipt_enabled === true || String(appliedPrintSettings.paperSize || '').toLowerCase() === '80x50mm'
   // B5: enabling the 80x50 card must not make the FULL receipt unreachable
   // -- with it on, BOTH renditions preview and Print offers BOTH sizes.
@@ -610,6 +621,11 @@ export default function Receipt({ sale, settings = {}, onClose, _previewMode }: 
         title,
         fileName: title,
         printSettings: variantSettings,
+        // Only reached by the rare text-only canvas fallback (the primary
+        // html2canvas render already carries the CSS-forced #000 through its
+        // computed styles); keeps that fallback pure black too when Maximum
+        // is set.
+        textColor: contrastTextColor,
       })
     } else if (mode === 'print') {
       await printTools.printReceipt(target, {
@@ -689,13 +705,13 @@ export default function Receipt({ sale, settings = {}, onClose, _previewMode }: 
       return (
         <div>
           <p className="mb-1 text-center text-[11px] font-semibold uppercase tracking-wide text-gray-400">80 × 50 mm</p>
-          <div data-receipt-export-root="true" style={shellStyle}>{compactReceiptBlock}</div>
+          <div data-receipt-export-root="true" {...contrastAttrs} style={shellStyle}>{compactReceiptBlock}</div>
           <p className="mb-1 mt-4 text-center text-[11px] font-semibold uppercase tracking-wide text-gray-400">{fullReceiptWidthMm} mm</p>
-          <div style={shellStyleFor(fullReceiptWidthMm)}>{renderedSections}{qrBlock}</div>
+          <div {...contrastAttrs} style={shellStyleFor(fullReceiptWidthMm)}>{renderedSections}{qrBlock}</div>
         </div>
       )
     }
-    return <div data-receipt-export-root="true" style={shellStyle}>{renderedSections}{qrBlock}</div>
+    return <div data-receipt-export-root="true" {...contrastAttrs} style={shellStyle}>{renderedSections}{qrBlock}</div>
   }
 
   return (
@@ -854,20 +870,20 @@ export default function Receipt({ sale, settings = {}, onClose, _previewMode }: 
             <>
               <p className="mb-1 text-center text-[11px] font-semibold uppercase tracking-wide text-gray-400">80 × 50 mm</p>
               <div className="mx-auto rounded-[18px] border border-gray-200 bg-white p-2 shadow-[0_22px_48px_rgba(15,23,42,0.14)] dark:border-zinc-700 dark:bg-white" style={{ maxWidth: `calc(${receiptWidthMm}mm + 16px)` }}>
-                <div ref={compactPrintRef} data-receipt-export-root="true" style={shellStyle}>
+                <div ref={compactPrintRef} data-receipt-export-root="true" {...contrastAttrs} style={shellStyle}>
                   {compactReceiptBlock}
                 </div>
               </div>
               <p className="mb-1 mt-4 text-center text-[11px] font-semibold uppercase tracking-wide text-gray-400">{fullReceiptWidthMm} mm</p>
               <div className="mx-auto rounded-[18px] border border-gray-200 bg-white p-2 shadow-[0_22px_48px_rgba(15,23,42,0.14)] dark:border-zinc-700 dark:bg-white" style={{ maxWidth: `calc(${fullReceiptWidthMm}mm + 16px)` }}>
-                <div ref={printRef} data-receipt-export-root="true" style={shellStyleFor(fullReceiptWidthMm)}>
+                <div ref={printRef} data-receipt-export-root="true" {...contrastAttrs} style={shellStyleFor(fullReceiptWidthMm)}>
                   {renderedSections}{qrBlock}
                 </div>
               </div>
             </>
           ) : (
             <div className="rounded-[18px] border border-gray-200 bg-white p-2 shadow-[0_22px_48px_rgba(15,23,42,0.14)] dark:border-zinc-700 dark:bg-white">
-            <div ref={printRef} data-receipt-export-root="true" style={shellStyle}>
+            <div ref={printRef} data-receipt-export-root="true" {...contrastAttrs} style={shellStyle}>
               {renderedSections}{qrBlock}
             </div>
             </div>

@@ -25,9 +25,11 @@ import AllFieldsPanel    from './AllFieldsPanel'
 import ReceiptPreview    from './ReceiptPreview'
 import PrintSettings     from './PrintSettings'
 import AppSelect from '../shared/AppSelect.tsx'
+import InfoHint from '../shared/InfoHint.tsx'
 import { withLoaderTimeout } from '../../utils/loaders.ts'
 import { buildAppliedReceiptConfig } from '../../utils/receiptAppliedConfig.ts'
 import { normalizeSocialQrUrl } from '../../utils/socialQrLink.ts'
+import { normalizeReceiptTextContrast } from '../../utils/receiptTextContrast.ts'
 
 const RECEIPT_SETTINGS_SAVE_TIMEOUT_MS = 12000
 const RECEIPT_SETTINGS_REFRESH_TIMEOUT_MS = 10000
@@ -686,6 +688,21 @@ export default function ReceiptSettings() {
                 </div>
                 <label htmlFor="receipt-font-size" className="text-sm text-gray-700 dark:text-gray-300 block mb-2">{t('font_size_label') || 'Font Size'}: {tpl.font_size}px</label>
                 <input id="receipt-font-size" name="receipt_font_size" autoComplete="off" type="range" min="9" max="16" value={tpl.font_size} onChange={e => setT('font_size', parseInt(e.target.value))} className="w-full" />
+                <div className="mt-4 flex items-center gap-1.5">
+                  <span className="text-sm text-gray-700 dark:text-gray-300">{t('receipt_text_contrast') || 'Text Contrast'}</span>
+                  <InfoHint
+                    label={t('receipt_text_contrast') || 'Text Contrast'}
+                    text={t('receipt_text_contrast_desc') || 'Maximum renders every receipt text node in pure black, without changing font size or weight.'}
+                  />
+                </div>
+                <div className="mt-2 grid grid-cols-2 gap-2">
+                  {[['normal', t('receipt_text_contrast_normal') || 'Normal'], ['maximum', t('receipt_text_contrast_maximum') || 'Maximum black']].map(([val, label]) => (
+                    <button key={val} onClick={() => setT('text_contrast', val)}
+                      className={`py-2 rounded-lg text-xs font-medium border-2 ${normalizeReceiptTextContrast(tpl.text_contrast) === val ? 'border-blue-600 bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400' : 'border-gray-200 dark:border-gray-600 text-gray-600 dark:text-gray-400'}`}>
+                      {label}
+                    </button>
+                  ))}
+                </div>
               </Section>
               <Section title={t('header_alignment') || 'Header Alignment'}>
                 <div className="grid grid-cols-3 gap-2">

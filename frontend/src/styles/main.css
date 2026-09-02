@@ -757,6 +757,24 @@ body:has([data-page-bg])      { background-color: var(--ui-page-bg) !important; 
   #receipt-print { position: absolute; left:0; top:0; width:80mm; }
 }
 
+/* Receipt text contrast: Normal | Maximum black (Section 4, 2026-09-02 RC).
+   Receipt.tsx sets data-receipt-contrast="maximum" on the receipt shell
+   root(s) -- the on-screen preview, the interactive receipt view, and (via
+   printReceipt.ts baking computed styles into its export clones) print/PDF/
+   image. ONE switch, ONE override rule: every descendant's foreground goes
+   pure black at full opacity and every border/divider colour flattens to
+   black too. Font size and weight are untouched -- this rule never sets
+   them. The admin app's dark mode must never leak into the receipt, so this
+   is not gated by a `dark:` variant; the receipt shell itself is always
+   rendered on a white background regardless of theme. */
+[data-receipt-contrast="maximum"],
+[data-receipt-contrast="maximum"] * {
+  color: #000000 !important;
+  opacity: 1 !important;
+  border-color: #000000 !important;
+  text-decoration-color: #000000 !important;
+}
+
 /* Animations */
 .fade-in { animation: fadeIn 0.15s ease; }
 @keyframes fadeIn { from { opacity:0; transform:translateY(4px); } to { opacity:1; transform:translateY(0); } }

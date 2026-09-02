@@ -25,6 +25,14 @@ assert.match(printSettingsSource, /receipt_print_settings/)
 assert.match(printSettingsSource, /saveAppSettings/)
 assert.match(printSettingsSource, /reason:\s*'receipt-print-settings-saved'/)
 assert.match(printSettingsSource, /printSettings:\s*ps/)
+// Test Print/PDF normally exports the REAL live preview DOM (already carrying
+// Receipt.tsx's data-receipt-contrast attribute), but the synthetic fallback
+// HTML used when that DOM isn't mounted must still honour Text Contrast
+// instead of silently reverting to grey.
+assert.match(printSettingsSource, /import \{ normalizeReceiptTemplate \} from '\.\.\/\.\.\/utils\/receiptAppliedConfig'/)
+assert.match(printSettingsSource, /const contrastMode = normalizeReceiptTemplate\(settings\.receipt_template\)\.text_contrast/)
+assert.match(printSettingsSource, /buildSafePreviewSource\(previewNode, ps, T, contrastMode\)/)
+assert.match(printSettingsSource, /const isMaxContrast = contrastMode === 'maximum'/)
 
 assert.match(receiptPreviewSource, /buildAppliedReceiptConfig\(\{ settings, template: tpl \}\)\.settings/)
 assert.match(receiptSource, /const appliedConfig = useMemo\(\(\) => buildAppliedReceiptConfig\(\{ settings \}\), \[settings\]\)/)
