@@ -19,7 +19,7 @@ const sectionMatrix: Record<string, { file: string; tokens: string[] }> = {
   branches: { file: 'components/branches/BranchesHubPage.tsx', tokens: ["'overview'", "'transfers'", "'rfid'", 'showSectionNavigation={false}', 'overflow-x-auto'] },
   contacts: { file: 'components/contacts/Contacts.tsx', tokens: ["'customers'", "'suppliers'", "'delivery'", "'duplicates'", 'overflow-x-auto'] },
   catalog: { file: 'components/catalog/CatalogPage.tsx', tokens: ["activeTab === 'products'", "activeTab === 'about'", "activeTab === 'faq'", "activeTab === 'ai'"] },
-  promotions: { file: 'components/promotions/PromotionsPage.tsx', tokens: ["key: 'rules'", "key: 'discounts'", "key: 'loyalty'", 'overflow-x-auto'] },
+  promotions: { file: 'components/promotions/PromotionsPage.tsx', tokens: ["id: 'rules'", "id: 'discounts'", "id: 'loyalty'", 'overflow-x-auto'] },
   review: { file: 'components/review/ReviewLogsPage.tsx', tokens: ["key: 'review'", "key: 'audit'", "key: 'deleted'", 'overflow-x-auto'] },
   receipt_settings: { file: 'components/receipt-settings/ReceiptSettings.tsx', tokens: ["id: 'fields'", "id: 'order'", "id: 'delivery'", "id: 'style'", "id: 'language'", "id: 'footer'", "id: 'qr'", "id: 'print'", 'overflow-x-auto'] },
   settings: { file: 'components/utils-settings/SettingsHubPage.tsx', tokens: ["id: 'settings'", "id: 'users'", "id: 'backup'", 'overflow-x-auto'] },
