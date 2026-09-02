@@ -24,6 +24,14 @@ const portalFilterSource = fs.readFileSync(new URL('../src/components/catalog/Po
 const productDetailFlyoutSource = fs.readFileSync(new URL('../src/components/catalog/ProductDetailFlyout.tsx', import.meta.url), 'utf8')
 const catalogImagesSource = fs.readFileSync(new URL('../src/components/catalog/catalogImages.tsx', import.meta.url), 'utf8')
 const publicPortalCssSource = fs.readFileSync(new URL('../src/styles/public-portal.css', import.meta.url), 'utf8')
+// Section 8a: the four deterrence attributes (draggable={false}, onContextMenu,
+// onDragStart, data-protected-media="true") used to be hand-rolled directly in
+// catalogImages.tsx's JSX; they were centralized into utils/protectedMedia.ts's
+// protectedImageProps() so every caller (catalogImages.tsx, the shared
+// ImageGalleryLightbox default renderer, plus the admin app's own avatar/cover
+// views) shares one implementation instead of four re-implementations. See the
+// full source-scan coverage in tests/protectedImages.test.ts.
+const protectedMediaSource = fs.readFileSync(new URL('../src/utils/protectedMedia.ts', import.meta.url), 'utf8')
 
 let failed = 0
 
@@ -355,8 +363,11 @@ runTest('public media blocks ordinary save, drag, and long-press interactions', 
   assert.match(publicCatalogPageSource, /onContextMenuCapture=/)
   assert.match(publicCatalogPageSource, /onDragStartCapture=/)
   assert.match(publicCatalogPageSource, /onAuxClickCapture=/)
-  assert.match(catalogImagesSource, /data-protected-media="true"/)
-  assert.match(catalogImagesSource, /draggable=\{false\}/)
+  assert.match(catalogImagesSource, /import \{ protectedImageProps \} from '\.\.\/\.\.\/utils\/protectedMedia'/,
+    'catalogImages.tsx should wire the shared protectedImageProps() helper, not hand-roll its own drag/context-menu guards')
+  assert.match(catalogImagesSource, /\{\.\.\.protectedImageProps\(\)\}/)
+  assert.match(protectedMediaSource, /'data-protected-media':\s*'true',/)
+  assert.match(protectedMediaSource, /draggable:\s*false,/)
   assert.match(publicPortalCssSource, /-webkit-touch-callout:\s*none/)
   assert.match(publicPortalCssSource, /-webkit-user-drag:\s*none/)
   assert.match(publicPortalCssSource, /user-select:\s*none/)

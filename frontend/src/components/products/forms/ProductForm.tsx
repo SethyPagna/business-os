@@ -2,6 +2,7 @@ import { Suspense, useEffect, useMemo, useRef, useState } from 'react'
 import type { ComponentType, DragEvent } from 'react'
 import { lazyRetry } from '../../../utils/lazyImport.ts'
 import { registerDirtyWork } from '../../../utils/dirtyWork.ts'
+import { preventContextMenu } from '../../../utils/protectedMedia'
 import ScanLine from 'lucide-react/dist/esm/icons/scan-line.js'
 import ChevronLeft from 'lucide-react/dist/esm/icons/chevron-left.js'
 import ChevronRight from 'lucide-react/dist/esm/icons/chevron-right.js'
@@ -1224,7 +1225,14 @@ export default function ProductForm({
                       }}
                       onDragEnd={() => setDragImageIndex(null)}
                     >
-                      <img src={image} alt={`product-${index + 1}`} className="h-20 w-full object-cover sm:h-24" />
+                      {/* Right-click-save only, deliberately NOT the full
+                          protectedImageProps() (draggable={false} +
+                          onDragStart preventDefault) -- this thumbnail
+                          itself is the drag source for the reorder gesture
+                          the wrapping div above implements; disabling drag
+                          here would break reordering, not just image
+                          drag-out. */}
+                      <img src={image} alt={`product-${index + 1}`} className="h-20 w-full object-cover sm:h-24" onContextMenu={preventContextMenu} />
                       {index === 0 ? (
                         <span className="absolute left-1 top-1 rounded bg-blue-600/90 px-1 py-0.5 text-[9px] font-medium text-white">
                           {tr('primary', 'Primary', 'រូបសំខាន់')}

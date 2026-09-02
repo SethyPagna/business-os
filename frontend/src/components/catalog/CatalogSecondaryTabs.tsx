@@ -1,5 +1,6 @@
 import type { ClipboardEventHandler, ComponentType, Dispatch, SetStateAction } from 'react'
 import { buildLogoImageStyle } from './logoImageStyle'
+import { protectedImageProps } from '../../utils/protectedMedia'
 import Bot from 'lucide-react/dist/esm/icons/bot.js'
 import ChevronDown from 'lucide-react/dist/esm/icons/chevron-down.js'
 import ChevronUp from 'lucide-react/dist/esm/icons/chevron-up.js'
@@ -366,6 +367,7 @@ function CatalogAboutSection(props: CatalogAboutSectionProps) {
             alt=""
             aria-hidden="true"
             className="pointer-events-none absolute inset-0 -z-10 h-full w-full object-cover"
+            {...protectedImageProps()}
           />
         ) : null}
         <div
@@ -395,6 +397,7 @@ function CatalogAboutSection(props: CatalogAboutSectionProps) {
                     src={versionedBusinessLogo}
                     alt={previewConfig.businessName || copy('logoImage', 'Logo image')}
                     className="h-full w-full rounded-full"
+                    {...protectedImageProps()}
                     style={{
                       // With the top-bar logo gone (6.2) this hero IS the
                       // live logo surface -- preview == applied runs
@@ -557,7 +560,7 @@ function CatalogAboutSection(props: CatalogAboutSectionProps) {
                     {block.type === 'video' ? (
                       <video src={block.mediaUrl} controls preload="metadata" className="max-h-[280px] w-full rounded-2xl bg-white object-contain dark:bg-neutral-950 sm:h-full sm:max-h-none" />
                     ) : (
-                      <img src={block.mediaUrl} alt={block.title || previewConfig.aboutTitle || copy('about', 'About')} className="max-h-[280px] w-full rounded-2xl object-contain sm:h-full sm:max-h-none" />
+                      <img src={block.mediaUrl} alt={block.title || previewConfig.aboutTitle || copy('about', 'About')} className="max-h-[280px] w-full rounded-2xl object-contain sm:h-full sm:max-h-none" {...protectedImageProps()} />
                     )}
                   </button>
                 ) : null}
@@ -794,7 +797,7 @@ function CatalogAiSection(props: CatalogAiSectionProps) {
                 <article key={item.product_id} className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-neutral-700 dark:bg-neutral-900/90">
                   <button type="button" className="flex w-full items-start gap-3 px-4 py-4 text-left" onClick={() => setAssistantExpandedProductId((current) => current === item.product_id ? null : item.product_id)}>
                     {item.image_path ? (
-                      <img src={item.image_path} alt={item.name} className="h-16 w-16 rounded-2xl object-cover" />
+                      <img src={item.image_path} alt={item.name} className="h-16 w-16 rounded-2xl object-cover" {...protectedImageProps()} />
                     ) : (
                       <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-slate-100 text-slate-400">
                         <ShoppingBag className="h-5 w-5" />

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { getPortalPromotions } from '../../api/portalPublicTransport.ts'
 import { resolvePublicAssetUrl } from '../../utils/publicAssetUrls.ts'
+import { protectedImageProps } from '../../utils/protectedMedia'
 
 type CopyFunction = (key: string, fallback?: string, fallbackKm?: string) => string
 
@@ -194,6 +195,7 @@ export default function PortalPromotionsBanner({ copy, onOpenImage }: PortalProm
                         alt={promo.title}
                         loading="lazy"
                         className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
+                        {...protectedImageProps()}
                       />
                       <div className="absolute inset-x-0 bottom-0 h-10 bg-gradient-to-t from-black/25 to-transparent" />
                     </div>

@@ -9,33 +9,38 @@ const PORTAL_JSON_HEADERS = {
   ...PORTAL_HEADERS,
 }
 
-function readJsonObject(response: Response): Promise<PortalPayload> {
-  return response.json().catch(() => ({})) as Promise<PortalPayload>
-}
+// Deliberately NOT imported from ./portalHttp.ts (which the admin catalog
+// editor's portalTransport.ts also uses): performanceLoadingUx.test.ts locks
+// this file into vite.config.ts's self-contained public 'app-portal' chunk
+// and portalHttp.ts into the separate admin-only 'portal-admin-api' chunk
+// (portalHttp.ts itself imports getSyncServerUrl from api/http.ts, the
+// shared admin HTTP core that must never reach the public storefront's
+// startup bundle). Importing the shared helpers here previously (commit
+// 9bfd2d90) fixed a real bug -- the storefront ignored a
+// localStorage['businessos_sync_server'] override -- but silently reversed
+// that chunk boundary, so this file now carries its own copy instead. The
+// STORAGE_KEYS.SYNC_SERVER string is inlined rather than imported from
+// ../constants.ts for the same reason: a dependency-free file only, per the
+// "stay self-contained" contract those tests enforce.
+const PORTAL_SYNC_SERVER_STORAGE_KEY = 'businessos_sync_server'
 
+// Same override-wins-over-same-origin precedence as the admin transport
+// (api/http.ts's getReadServerBaseUrl()) and as portalHttp.ts's copy used by
+// the admin catalog editor's own live preview -- an explicit dev/test
+// override must always win. Unlike portalHttp.ts's copy, this one does not
+// also fall back to the admin app's in-memory getSyncServerUrl() state:
+// PublicCatalogRoot never mounts the admin bootstrap that hydrates it, so
+// that fallback would always resolve empty here anyway, and checking it
+// would require importing the forbidden shared admin HTTP core.
 function getPortalBaseUrl(): string {
-  return (typeof window !== 'undefined' ? (window.location?.origin || '') : '').replace(/\/$/, '')
-}
-
-function buildQueryString(params: QueryParams | null | undefined = {}): string {
-  const query = new URLSearchParams()
-  for (const [key, value] of Object.entries(params || {})) {
-    if (Array.isArray(value)) {
-      for (const item of value) appendQueryValue(query, key, item)
-      continue
-    }
-    appendQueryValue(query, key, value)
+  let stored = ''
+  try {
+    stored = typeof window !== 'undefined' ? (window.localStorage?.getItem(PORTAL_SYNC_SERVER_STORAGE_KEY) || '') : ''
+  } catch (_) {
+    // Storage can throw (private mode, disabled cookies) -- fall through.
   }
-  return query.toString()
-}
-
-function appendQuery(path: string, query: string): string {
-  return query ? `${path}?${query}` : path
-}
-
-function appendQueryValue(query: URLSearchParams, key: string, value: QueryPrimitive): void {
-  if (value == null || value === '') return
-  query.append(key, String(value))
+  const browserOrigin = typeof window !== 'undefined' ? (window.location?.origin || '') : ''
+  return (stored || browserOrigin || '').replace(/\/$/, '')
 }
 
 async function fetchJsonWithTimeout(
@@ -58,6 +63,31 @@ async function fetchJsonWithTimeout(
   } finally {
     clearTimeout(timer)
   }
+}
+
+function readJsonObject(response: Response): Promise<PortalPayload> {
+  return response.json().catch(() => ({})) as Promise<PortalPayload>
+}
+
+function buildQueryString(params: QueryParams | null | undefined = {}): string {
+  const query = new URLSearchParams()
+  for (const [key, value] of Object.entries(params || {})) {
+    if (Array.isArray(value)) {
+      for (const item of value) appendQueryValue(query, key, item)
+      continue
+    }
+    appendQueryValue(query, key, value)
+  }
+  return query.toString()
+}
+
+function appendQuery(path: string, query: string): string {
+  return query ? `${path}?${query}` : path
+}
+
+function appendQueryValue(query: URLSearchParams, key: string, value: QueryPrimitive): void {
+  if (value == null || value === '') return
+  query.append(key, String(value))
 }
 
 async function fetchPortalJson(path: string, errorLabel: string): Promise<unknown> {

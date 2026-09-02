@@ -169,4 +169,21 @@ assert.deepStrictEqual(buildPortalConfig({ customer_portal_faq_items: '{broken' 
 checks++
 console.log('PASS malformed FAQ JSON fails closed')
 
+// Section 8a regression: buildPortalConfig previously never read back
+// customer_portal_product_caution_default / _need_more_details_default even
+// though CatalogPage.tsx (the admin portal editor) already saved them and
+// ProductDetailFlyout.tsx already consumed them as the portal-wide
+// Caution/Need-More-Details fallback for every product -- so the merchant's
+// saved copy silently never reached the real public storefront (only the
+// editor's own live preview, which builds its display config straight from
+// draft state rather than round-tripping through this endpoint, showed it).
+const productDefaultsConfig = buildPortalConfig({
+  customer_portal_product_caution_default: 'Patch test 24h before first use.',
+  customer_portal_product_need_more_details_default: 'Message us on Telegram for a full ingredient list.',
+}, ENV)
+check('saved caution default reaches the public config', productDefaultsConfig.productCautionDefault, 'Patch test 24h before first use.')
+check('saved need-more-details default reaches the public config', productDefaultsConfig.productNeedMoreDetailsDefault, 'Message us on Telegram for a full ingredient list.')
+check('caution default is empty (not undefined) when never configured', buildPortalConfig({}, ENV).productCautionDefault, '')
+check('need-more-details default is empty (not undefined) when never configured', buildPortalConfig({}, ENV).productNeedMoreDetailsDefault, '')
+
 console.log(`\nALL ${checks} CHECKS PASSED`)

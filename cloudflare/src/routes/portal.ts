@@ -324,6 +324,21 @@ export function buildPortalConfig(settings: SettingsMap, env: Env) {
     submissionRewardPoints: Math.max(0, Math.floor(toNumber(settings.customer_portal_submission_reward_points, 5))),
     submissionInstructions: settings.customer_portal_submission_instructions
       || 'Share the business on social media, then upload screenshots here for staff review.',
+    // Same "editor saves it, buildPortalConfig never sends it" gap already
+    // fixed above for translateWidgetEnabled, the per-field show* toggles,
+    // and the whole contact-links block: CatalogPage.tsx (Aug 24 request,
+    // Part 326 backlog item 3) saves these under
+    // customer_portal_product_caution_default/_need_more_details_default,
+    // and ProductDetailFlyout.tsx already renders them as the portal-wide
+    // Caution/Need-More-Details fallback on every product -- but this
+    // function never read them back out, so the real public storefront
+    // always fell back to the frontend's hardcoded generic copy
+    // ("Contact us for more product details." / no caution shown) instead
+    // of the merchant's own saved text, even though the editor's own live
+    // preview (which builds displayConfig straight from its own draft
+    // state, not a round trip through this endpoint) showed it correctly.
+    productCautionDefault: settings.customer_portal_product_caution_default || '',
+    productNeedMoreDetailsDefault: settings.customer_portal_product_need_more_details_default || '',
   }
 }
 

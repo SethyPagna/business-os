@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { MouseEventHandler } from 'react'
 import { resolveCatalogAssetUrl } from './catalogAssetUrls'
+import { protectedImageProps } from '../../utils/protectedMedia'
 
 const BROKEN_CATALOG_IMAGE_RETRY_MS = 5 * 60 * 1000
 const brokenCatalogImageUrls = new Map<string, number>()
@@ -109,10 +110,7 @@ export default function CatalogProductImage({ src, alt = '', className, onClick 
       src={url}
       alt={alt}
       className={className}
-      data-protected-media="true"
-      draggable={false}
-      onContextMenu={(event) => event.preventDefault()}
-      onDragStart={(event) => event.preventDefault()}
+      {...protectedImageProps()}
       onClick={onClick}
       onError={() => {
         markBrokenCatalogImage(safeSrc)

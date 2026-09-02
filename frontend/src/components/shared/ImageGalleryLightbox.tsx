@@ -6,6 +6,7 @@ import ChevronRight from 'lucide-react/dist/esm/icons/chevron-right.js'
 import X from 'lucide-react/dist/esm/icons/x.js'
 import ZoomIn from 'lucide-react/dist/esm/icons/zoom-in.js'
 import ZoomOut from 'lucide-react/dist/esm/icons/zoom-out.js'
+import { protectedImageProps } from '../../utils/protectedMedia'
 
 /**
  * Reusable gallery lightbox with arrows, dot navigation, and thumbnail rail.
@@ -101,7 +102,12 @@ export default function ImageGalleryLightbox({
 
   function renderGalleryImage(src: string, alt: string, className: string) {
     if (typeof renderImage === 'function') return renderImage(src, alt, className)
-    return <img src={src} alt={alt} className={className} />
+    // Every caller except CatalogPreviewSurface.tsx (which supplies its own
+    // renderImage using the already-protected CatalogProductImage) lands
+    // here -- including ProductDetailFlyout.tsx's storefront lightbox and
+    // any admin product-photo gallery use, so this default is where the
+    // shared deterrence has to live for those to be covered at all.
+    return <img src={src} alt={alt} className={className} {...protectedImageProps()} />
   }
 
   // Keeps a zoomed/panned image inside the stage rather than letting it

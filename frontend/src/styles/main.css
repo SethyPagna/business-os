@@ -1035,3 +1035,19 @@ body[data-density='spacious'] th, body[data-density='spacious'] td { padding-top
   width: 111.111111%;
   zoom: 0.9;
 }
+
+/* Section 8a: app-wide (not portal-scoped) counterpart to public-portal.css's
+   `body[data-public-portal='true'] img` deterrence rule. That rule only
+   loads with CatalogPreviewSurface.tsx (the storefront editor/preview), so
+   it never reached plain admin views. Any element carrying
+   `data-protected-media="true"` -- the same marker catalogImages.tsx's
+   CatalogProductImage and the shared ImageGalleryLightbox already set --
+   gets the same honest browser deterrence here, everywhere in the app.
+   Deterrent only, not DRM: anything rendered to a browser can still be
+   captured with screenshots or devtools. */
+[data-protected-media='true'] {
+  -webkit-touch-callout: none;
+  -webkit-user-drag: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
