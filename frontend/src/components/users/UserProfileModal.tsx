@@ -15,6 +15,7 @@ import { isBrokenLocalizedString as isBrokenLocalizedStringHook, useApp as useAp
 import { beginTrackedRequest, getFirstLoaderError, invalidateTrackedRequest, isTrackedRequestCurrent, settleLoaderMap, withLoaderTimeout } from '../../utils/loaders.ts'
 import { useActionHistory } from '../../utils/actionHistory.ts'
 import { copyPasswordToClipboard, passwordPersistenceNotice, persistChangedPassword } from '../../utils/passwordManager.ts'
+import { protectedImageProps } from '../../utils/protectedMedia'
 
 const PROFILE_LOAD_TIMEOUT_MS = 10000
 const PROFILE_OTP_STATUS_TIMEOUT_MS = 8000
@@ -210,6 +211,7 @@ function AvatarPreview({ name, avatarPath }: AvatarPreviewProps) {
         src={avatarPath}
         alt={name || 'Avatar'}
         className="h-12 w-12 rounded-xl object-cover ring-2 ring-blue-100 dark:ring-blue-900/40"
+        {...protectedImageProps()}
       />
     )
   }
@@ -408,6 +410,7 @@ function AvatarEditorModal({
                 transform: `scale(${clamp(Number(zoom || 100) / 100, 1, 2.4)})`,
                 transformOrigin: 'center',
               }}
+              {...protectedImageProps()}
             />
           </div>
         </div>
@@ -460,6 +463,7 @@ function AvatarViewerModal({
               src={avatarPath}
               alt={name || tr('avatar_image', 'Profile photo')}
               className="max-h-[56dvh] w-full rounded-xl object-contain"
+              {...protectedImageProps()}
             />
           ) : (
             <div className="flex aspect-square w-full max-w-72 items-center justify-center rounded-2xl bg-blue-100 text-6xl font-bold text-blue-600 dark:bg-blue-900/40 dark:text-blue-300">
