@@ -109,6 +109,11 @@
   --z-modal: 1050;
   --z-modal-2: 1060;
   --z-toast: 1100;
+
+  /* Set by a hub/page when it stacks its own sticky chip row above a kit
+     ControlRow's sticky search/range rows (`kit/ControlRow.tsx`'s `sticky`
+     prop reads this as its `top`); 0 when nothing sits above it. */
+  --ui-sticky-offset: 0px;
 }
 
 @media (min-width: 768px) {
