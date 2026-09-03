@@ -63,9 +63,16 @@ export default function ProductDescriptionDetailModal({
   const parsed = parseProductDescription(description)
 
   return (
-    <div className="fixed inset-0 z-[60] flex items-end justify-center bg-black/50 p-0 sm:items-center sm:p-4" onClick={onClose}>
+    // P2-4 Part 1b: was a literal `z-[60]` and a hand-rolled `bg-black/50`.
+    // This renders inside ProductDetailModal's own portal tree, so it is a
+    // modal opened from within a modal -- --z-modal-2 says exactly that,
+    // where 60 said nothing and only happened to work because the enclosing
+    // --z-modal element creates its own stacking context. The overlay tint
+    // now comes from the one shared --ui-backdrop token like every other
+    // modal layer, so light/dark stay consistent with the rest of the app.
+    <div className="fixed inset-0 z-[var(--z-modal-2)] flex items-end justify-center bg-[var(--ui-backdrop)] p-0 sm:items-center sm:p-4" onClick={onClose}>
       <div
-        className="flex max-h-[88vh] w-full flex-col overflow-hidden rounded-t-2xl bg-white shadow-2xl sm:max-h-[85vh] sm:max-w-2xl sm:rounded-2xl dark:bg-gray-800"
+        className="flex max-h-[88dvh] w-full flex-col overflow-hidden rounded-t-2xl bg-white shadow-2xl sm:max-h-[85dvh] sm:max-w-2xl sm:rounded-2xl dark:bg-gray-800"
         onClick={(event) => event.stopPropagation()}
       >
         {/* Top close button, per the site-wide "top+bottom close" pattern

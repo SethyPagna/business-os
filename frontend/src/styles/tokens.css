@@ -108,6 +108,18 @@
   --z-fold: 1020;
   --z-modal: 1050;
   --z-modal-2: 1060;
+  /* Third body-portal modal tier, added by P2-4 Part 1b because the Products
+     page proves a real three-deep chain exists and 1050/1060 alone cannot
+     express it: ProductDetailModal (--z-modal, body portal) renders
+     ProductDetailReport, whose drill-down float ALSO portals to document.body
+     -- so it must outrank 1050 -- and that float in turn contains the button
+     that opens AttributeSupplierModal, a third body-portalled overlay that
+     must outrank the float. Giving the float and the modal it opens the same
+     1060 would make which one wins depend on portal insertion order, not on
+     intent. The drill float is the modal-over-modal (--z-modal-2) and
+     AttributeSupplierModal is the modal over THAT (--z-modal-3). Still below
+     --z-toast (1100): a toast must outrank every modal tier. */
+  --z-modal-3: 1070;
   --z-toast: 1100;
 
   /* Set by a hub/page when it stacks its own sticky chip row above a kit

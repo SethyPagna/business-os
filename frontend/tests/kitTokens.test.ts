@@ -49,7 +49,7 @@ const REQUIRED_TOKENS = [
   '--ui-font-body', '--ui-font-display', '--ui-font-khmer-body', '--ui-font-khmer-display',
   '--ui-size-meta', '--ui-size-body', '--ui-size-h3', '--ui-size-h2', '--ui-size-h1',
   '--ui-row-h', '--ui-control-h', '--ui-icon-lg', '--ui-icon-sm', '--ui-input-size',
-  '--z-sticky', '--z-dropdown', '--z-fold', '--z-modal', '--z-modal-2', '--z-toast',
+  '--z-sticky', '--z-dropdown', '--z-fold', '--z-modal', '--z-modal-2', '--z-modal-3', '--z-toast',
 ]
 
 runTest('tokens.css declares every design-kit token', () => {
@@ -144,7 +144,7 @@ runTest('zLayers.ts mirrors tokens.css --z-* values exactly (no drift between th
   }
   const nameMap: Record<string, string> = {
     sticky: 'sticky', dropdown: 'dropdown', fold: 'fold',
-    modal: 'modal', modal2: 'modal-2', toast: 'toast',
+    modal: 'modal', modal2: 'modal-2', modal3: 'modal-3', toast: 'toast',
   }
   for (const [jsName, cssName] of Object.entries(nameMap)) {
     const jsMatch = zLayersSrc.match(new RegExp(`${jsName}:\\s*(\\d+),`))

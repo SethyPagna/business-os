@@ -32,6 +32,15 @@ export const zLayers = {
   /** A modal opened from within another modal (e.g. OtpModal's inner
    *  step). Matches OtpModal's existing z-[1060]. */
   modal2: 1060,
+  /** A modal opened from within a modal-over-modal -- the third and, so far,
+   *  deepest real chain in the app: Products' ProductDetailModal (modal) ->
+   *  ProductDetailReport's drill-down float, which portals to document.body
+   *  itself (modal2) -> AttributeSupplierModal, opened from inside that float
+   *  (modal3). Added by P2-4 Part 1b, which replaced ProductDetailReport's
+   *  literal `z-[1070]`; before that the chain's top two tiers would have had
+   *  to share 1060 and their order would have depended on portal insertion
+   *  order rather than on intent. */
+  modal3: 1070,
   /** Toast/snackbar notifications -- must outrank every modal. Matches
    *  App.tsx's existing toast z-[1100]. */
   toast: 1100,
@@ -43,6 +52,9 @@ export type ZLayerName = keyof typeof zLayers
  *  (so a future tokens.css edit doesn't require a JS change too) while
  *  still getting autocomplete/typo-safety on the layer name. */
 export function zLayerVar(name: ZLayerName): string {
-  const cssName = name === 'modal2' ? 'modal-2' : name
+  // The two multi-word layer names are camelCase in JS and hyphenated in CSS
+  // (`modal2` -> `--z-modal-2`, `modal3` -> `--z-modal-3`); every other name
+  // is identical on both sides.
+  const cssName = name === 'modal2' ? 'modal-2' : name === 'modal3' ? 'modal-3' : name
   return `var(--z-${cssName})`
 }

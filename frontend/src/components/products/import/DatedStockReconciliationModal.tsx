@@ -449,7 +449,7 @@ export default function DatedStockReconciliationModal({ onClose, onDone, t, prod
       ) : null}
 
       {step === 'review' ? (
-        <div className="max-h-[60vh] space-y-4 overflow-y-auto pr-1">
+        <div className="max-h-[60dvh] space-y-4 overflow-y-auto pr-1">
           <div className="grid grid-cols-3 gap-2 text-center text-xs">
             <div className="rounded-lg bg-green-50 p-2 text-green-700 dark:bg-green-950/30 dark:text-green-300">
               <div className="text-lg font-semibold">{resolved.length}</div>
@@ -549,7 +549,7 @@ export default function DatedStockReconciliationModal({ onClose, onDone, t, prod
       ) : null}
 
       {step === 'plan' && plan ? (
-        <div className="max-h-[60vh] space-y-3 overflow-y-auto pr-1">
+        <div className="max-h-[60dvh] space-y-3 overflow-y-auto pr-1">
           {applyErrors.length > 0 ? (
             <div className="rounded-lg border border-amber-300 bg-amber-50 p-2.5 text-xs text-amber-800 dark:border-amber-900/60 dark:bg-amber-950/20 dark:text-amber-300">
               {T('dated_count_rows_skipped_as_errors', '{n} row(s) could not be applied and were skipped as errors.').replace('{n}', String(applyErrors.length))}

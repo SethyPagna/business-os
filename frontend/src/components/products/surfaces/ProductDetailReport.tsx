@@ -490,14 +490,15 @@ export default function ProductDetailReport({ productId, barcode, t, fmtUSD }: {
       <Pill section="suppliers" label={tr('suppliers', 'Suppliers')} count={suppliersCount} loading={reportLoading} />
 
       {active && typeof document !== 'undefined' ? createPortal((
-        // P2-4 (Level 2/3 tokenization): z-[1070] has no zLayers constant --
-        // the kit only defines modal:1050/modal2:1060/toast:1100, one short
-        // of this drill-down-above-a-modal tier. Documented as a kit gap
-        // (see p2-4-report.md) rather than inventing a new shared token
-        // here; the backdrop color still moves onto the shared token so at
-        // least the overlay tint is unified with every other Level-3 layer.
+        // P2-4 Part 1b: this WAS a literal z-[1070] with a note saying the
+        // kit had no constant for it. It does now. This float portals to
+        // document.body from inside ProductDetailModal (--z-modal, itself a
+        // body portal), so it must outrank 1050 -- it is the modal-over-modal
+        // tier, --z-modal-2. The AttributeSupplierModal opened from inside
+        // this float sits one higher again on the new --z-modal-3; see
+        // tokens.css's comment on that token for the full three-deep chain.
         <div
-          className="modal-viewport-safe fixed inset-0 z-[1070] flex items-end justify-center bg-[var(--ui-backdrop)] p-0 sm:items-center sm:p-4"
+          className="modal-viewport-safe fixed inset-0 z-[var(--z-modal-2)] flex items-end justify-center bg-[var(--ui-backdrop)] p-0 sm:items-center sm:p-4"
           onClick={() => setOpenSection(null)}
         >
           <div
