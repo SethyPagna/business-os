@@ -100,6 +100,9 @@ const returnsRoute = loadReal('routes/returns.ts', {
   '../lib/productBatches': productBatches,
   '../lib/returnsStock': loadReal('lib/returnsStock.ts', { './db': { getDb: () => db }, './productBatches': productBatches, './sqlBinding': sqlBinding }),
   '../lib/receiptNumber': { uniqueBusinessDateTimeNumber: async (prefix) => `${prefix ? `${prefix}-` : ''}20260830-120000` },
+  // Real money kernel -- the replacement sale derives its totals through the
+  // same function routes/sales.ts uses, so it must be the real one here too.
+  '../lib/saleTotals': loadReal('lib/saleTotals.ts'),
 })
 
 const app = returnsRoute.default

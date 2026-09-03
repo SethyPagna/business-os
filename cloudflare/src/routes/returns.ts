@@ -4,7 +4,7 @@ import { selectInChunks } from '../lib/sqlBinding'
 import { localDateAtOrAfter, localDateAtOrBefore, localDateExpr, localDateRangeClause } from '../lib/businessDateWindow'
 import { requireAuth, type SessionUser } from '../lib/auth'
 import { audit } from '../lib/audit'
-import { sendReturnTelegramEvent } from '../lib/telegram'
+import { sendReturnTelegramEvent, sendTelegramEvent, formatSaleTelegramLines } from '../lib/telegram'
 import { getPermissionTier, getActionTier } from '../lib/permissions'
 import { assertUpdatedAtMatch, getExpectedUpdatedAt, writeConflictResponse, WriteConflictError } from '../lib/conflictControl'
 import { broadcast } from '../durable-objects/broadcastHub'
@@ -18,6 +18,7 @@ import {
   REPLACEMENT_OUT_MOVEMENT,
 } from '../lib/returnsStock'
 import { uniqueBusinessDateTimeNumber } from '../lib/receiptNumber'
+import { computeSaleTotals } from '../lib/saleTotals'
 import type { Env } from '../index'
 
 const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser } }>()
@@ -45,6 +46,12 @@ app.use('*', async (c, next) => {
   if (getPermissionTier(user, 'returns') === 'none') return c.json({ error: 'You do not have permission to perform this action' }, 403)
   return next()
 })
+
+// The payment method a replacement sale carries. It is a settlement, not a
+// tender: lib/salesAnalytics.ts reads what was actually collected off
+// sales.source_return_id (migration 0106) rather than off this label, so the
+// string here is only what a human reads on the receipt and in the Sales list.
+const REPLACEMENT_PAYMENT_METHOD = 'Return Exchange'
 
 const CUSTOMER_SCOPE = 'customer'
 const SUPPLIER_SCOPE = 'supplier'
@@ -388,6 +395,16 @@ async function assertReturnableItems(
   }
 }
 
+// The Returns list shows one row per return, never its lines, so a damaged
+// item was invisible there unless someone opened the return. This counts the
+// return's damaged lines in the list read itself -- the list carries a flag,
+// not a second round trip and not the whole item set. It matches
+// lib/returnsStock.ts's normalizeStockAction: an explicit 'damaged' only.
+const DAMAGED_ITEM_COUNT_SQL = `(
+      SELECT COUNT(*) FROM return_items dri
+      WHERE dri.return_id = r.id AND lower(COALESCE(dri.stock_action, '')) = 'damaged'
+    ) AS damaged_item_count`
+
 // GET /api/returns
 app.get('/', async (c) => {
   const db = getDb(c.env)
@@ -486,7 +503,8 @@ app.get('/', async (c) => {
   }
 
   const returns = await db.prepare(`
-    SELECT r.*, replacement_sale.receipt_number AS replacement_receipt_number
+    SELECT r.*, replacement_sale.receipt_number AS replacement_receipt_number,
+      ${DAMAGED_ITEM_COUNT_SQL}
     FROM returns r
     LEFT JOIN sales replacement_sale ON replacement_sale.id = r.replacement_sale_id
     WHERE ${where.join(' AND ')}
@@ -793,7 +811,8 @@ app.get('/:id', async (c) => {
   const db = getDb(c.env)
   const id = c.req.param('id')
   const row = await db.prepare(`
-    SELECT r.*, replacement_sale.receipt_number AS replacement_receipt_number
+    SELECT r.*, replacement_sale.receipt_number AS replacement_receipt_number,
+      ${DAMAGED_ITEM_COUNT_SQL}
     FROM returns r
     LEFT JOIN sales replacement_sale ON replacement_sale.id = r.replacement_sale_id
     WHERE r.id = ?
@@ -951,6 +970,57 @@ app.post('/', async (c) => {
     settlementDiffKhr = settlement.mode === 'price_difference' ? settlement.diffKhr : 0
   }
 
+  type ReplacementLotTake = { batchId: number; lotCode: string | null; expiryDate: string | null; quantity: number }
+  const replacementFifoTakes = new Map<number, ReplacementLotTake[]>()
+  // Hand-picked lots, kept in their OWN map: these drain through
+  // applyReplacementStock and are reversed by its own compensation entry, so
+  // they must never be double-reversed by the FIFO branch_batch_stock
+  // put-back below -- but they still owe the sale an allocation row.
+  const replacementExplicitTakes = new Map<number, ReplacementLotTake[]>()
+
+  // FIFO lot planning for the replacement lines, run BEFORE the first write.
+  // Two reasons it lives here rather than inside the write block below:
+  //
+  //   1. A lot shortfall is an answer, not a rollback. `branch_stock` (the
+  //      aggregate) and `branch_batch_stock` (the lots) can disagree on a
+  //      batch-tracked product -- historical rows, an import, a manual
+  //      aggregate adjustment. If the lots cover LESS than the aggregate says,
+  //      draining the aggregate in full while drawing the lots only partly
+  //      silently widens exactly that drift. `allocateAcrossLots` already
+  //      reports the gap as `uncovered`; the caller was discarding it. We
+  //      refuse instead, and say which product and how short, so the operator
+  //      picks an explicit lot or fixes the count. (routes/sales.ts:365 takes
+  //      the same shortcut on the POS path -- reported, not touched from here.)
+  //   2. Refusing before the returns row exists means no compensation path has
+  //      to run for it at all.
+  const replacementFifoLots = await readFifoLotAvailabilityForCart(
+    db,
+    replacementLines
+      .filter((line) => line.batchId == null)
+      .map((line) => ({ productId: line.productId, branchId: line.branchId || Number(branchId) || 0 }))
+      .filter((pair) => pair.branchId > 0),
+  )
+  for (const [lineIndex, line] of replacementLines.entries()) {
+    if (line.batchId != null) continue
+    const lineBranchId = line.branchId || Number(branchId) || 0
+    const lots = replacementFifoLots.get(`${line.productId}:${lineBranchId}`) || []
+    const { takes, uncovered } = allocateAcrossLots(lots, line.quantity)
+    if (uncovered > 0 && takes.length > 0) {
+      // Partially covered: the product IS lot-tracked at this branch but its
+      // lots cannot cover the hand-out. Committing would decrement the
+      // aggregate by the full quantity and the lots by less.
+      return c.json({
+        error: `Not enough lot stock to hand out ${line.quantity} of "${line.productName}": the tracked lots at this branch cover only ${line.quantity - uncovered}. Pick a specific lot, or reconcile this product's lot quantities first.`,
+        code: 'replacement_lot_shortfall',
+      }, 409)
+    }
+    replacementFifoTakes.set(lineIndex, takes)
+    for (const take of takes) {
+      const lot = lots.find((entry) => entry.batchId === take.batchId)
+      if (lot) lot.available -= take.quantity
+    }
+  }
+
   // Insert the return header first (mirrors sales.ts's POST / -- a single
   // statement can't share a D1 batch() with the item/stock writes below
   // since we need its lastInsertRowid first; see lib/db.ts).
@@ -1007,29 +1077,10 @@ app.post('/', async (c) => {
   // read them.
   const appliedLotRestocks: Array<{ productId: number; batchId: number; branchId: number; quantity: number }> = []
   const appliedReplacements: Array<{ productId: number; productName: string; branchId: number; batchId: number | null; quantity: number }> = []
-  const replacementFifoTakes = new Map<number, Array<{ batchId: number; lotCode: string | null; expiryDate: string | null; quantity: number }>>()
   let replacementBatchWritesCommitted = false
+  let replacementSaleNotice: Parameters<typeof formatSaleTelegramLines>[0] | null = null
 
   try {
-    const replacementFifoLots = await readFifoLotAvailabilityForCart(
-      db,
-      replacementLines
-        .filter((line) => line.batchId == null)
-        .map((line) => ({ productId: line.productId, branchId: line.branchId || Number(branchId) || 0 }))
-        .filter((pair) => pair.branchId > 0),
-    )
-    for (const [lineIndex, line] of replacementLines.entries()) {
-      if (line.batchId != null) continue
-      const lineBranchId = line.branchId || Number(branchId) || 0
-      const lots = replacementFifoLots.get(`${line.productId}:${lineBranchId}`) || []
-      const { takes } = allocateAcrossLots(lots, line.quantity)
-      replacementFifoTakes.set(lineIndex, takes)
-      for (const take of takes) {
-        const lot = lots.find((entry) => entry.batchId === take.batchId)
-        if (lot) lot.available -= take.quantity
-      }
-    }
-
     // A hand-out is a real sale, not only an inventory movement. This makes
     // it visible in Sales, gives it a printable receipt, and lets the item be
     // returned later through the same ordinary sale-item path. Stock is still
@@ -1041,8 +1092,37 @@ app.post('/', async (c) => {
         async (candidate) => !!(await db.prepare('SELECT 1 AS hit FROM sales WHERE receipt_number = ? LIMIT 1').get([candidate])),
       )
       const replacementSubtotalUsd = Number(replacementLines.reduce((sum, line) => sum + line.totalUsd, 0).toFixed(2))
-      const replacementSubtotalKhr = Math.round(replacementLines.reduce((sum, line) => sum + line.totalKhr, 0))
       const exchangeRate = body.exchange_rate || saleMeta.exchange_rate || 4100
+      const originalReceipt = body.receipt_number || saleMeta.receipt_number || null
+      const replacementSaleNote = `Replacement for return ${returnNumber}${originalReceipt ? ` / receipt ${originalReceipt}` : ''}`
+      // The money model, through the SAME kernel routes/sales.ts POST / uses,
+      // so this row's totals are derived exactly as a POS sale's are (KHR from
+      // the USD total at the sale's rate -- not a separate sum of per-line KHR
+      // that can round away from it).
+      //
+      // What the customer actually TENDERS is the settlement, not the goods'
+      // value: nothing at all for an even exchange, and only the difference
+      // when the replacement is worth more. Recording the full value as
+      // amount_paid (with a matching 'Return Exchange' payment line) claimed
+      // money the till never saw. Revenue still nets correctly either way --
+      // it reads subtotal_usd, and the return's refund cancels it -- but
+      // "collected" reads the tender, so the tender has to be true.
+      const customerTenderUsd = settlementMode === 'price_difference' && settlementDiffUsd > 0
+        ? Number(settlementDiffUsd.toFixed(2))
+        : 0
+      const replacementTotals = computeSaleTotals({
+        subtotalUsd: replacementSubtotalUsd,
+        discountUsd: 0,
+        membershipDiscountUsd: 0,
+        taxUsd: 0,
+        deliveryFeeUsd: 0,
+        deliveryFeePaidBy: 'customer',
+        isDelivery: false,
+        exchangeRate,
+        rawAmountPaidUsd: customerTenderUsd,
+        rawAmountPaidKhr: 0,
+      })
+      const replacementSubtotalKhr = replacementTotals.totalKhr
       const replacementClientRequestId = clientRequestId
         ? `${clientRequestId.slice(0, 96)}:replacement`
         : `return_${returnId}_replacement`
@@ -1077,16 +1157,24 @@ app.post('/', async (c) => {
         customer_name: body.customer_name || saleMeta.customer_name || null,
         customer_phone: saleMeta.customer_phone || null,
         customer_address: saleMeta.customer_address || null,
-        payment_method: 'Return Exchange',
-        payment_details: JSON.stringify([{ method: 'Return Exchange', amount_usd: replacementSubtotalUsd, amount_khr: 0 }]),
+        payment_method: REPLACEMENT_PAYMENT_METHOD,
+        // Only a REAL tender gets a payment line. An even exchange has none:
+        // an empty array says "settled, nothing tendered", where a line
+        // claiming the goods' value said the till took money it never took.
+        payment_details: JSON.stringify(customerTenderUsd > 0
+          ? [{ method: REPLACEMENT_PAYMENT_METHOD, amount_usd: customerTenderUsd, amount_khr: 0 }]
+          : []),
         exchange_rate: exchangeRate,
         subtotal_usd: replacementSubtotalUsd,
         subtotal_khr: replacementSubtotalKhr,
-        total_usd: replacementSubtotalUsd,
-        total_khr: replacementSubtotalKhr,
-        amount_paid_usd: replacementSubtotalUsd,
-        amount_paid_khr: 0,
-        notes: `Replacement sale for return ${returnNumber}${body.receipt_number || saleMeta.receipt_number ? `; original receipt ${body.receipt_number || saleMeta.receipt_number}` : ''}`,
+        total_usd: replacementTotals.totalUsd,
+        total_khr: replacementTotals.totalKhr,
+        amount_paid_usd: replacementTotals.amountPaidUsd,
+        amount_paid_khr: replacementTotals.amountPaidKhr,
+        // The one auto note that makes this sale legible anywhere it turns up
+        // -- Sales list, receipt, an audit trail months later. Deterministic
+        // wording so it is greppable and testable, not free prose.
+        notes: replacementSaleNote,
         items: JSON.stringify(replacementLines.map((line) => ({
           product_id: line.productId,
           product_name: line.productName,
@@ -1111,6 +1199,58 @@ app.post('/', async (c) => {
       })
       replacementSaleId = replacementSaleInsert.lastInsertRowid
       await db.prepare('UPDATE returns SET replacement_sale_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run([replacementSaleId, returnId])
+      // A normal sale announces itself on the sales Telegram channel through
+      // this exact shared formatter (routes/sales.ts POST /). A replacement is
+      // a normal sale, so it announces itself the same way -- not silently,
+      // and not through a bespoke second message format.
+      replacementSaleNotice = {
+        status: 'completed',
+        createdAt: null,
+        receiptNumber: replacementReceiptNumber,
+        cashier: user?.name || user?.username || null,
+        customer: body.customer_name || saleMeta.customer_name || null,
+        phone: saleMeta.customer_phone || null,
+        branch: branchName,
+        items: replacementLines.map((line) => ({
+          name: line.productName,
+          quantity: line.quantity,
+          unitPriceUsd: line.priceUsd,
+          basePriceUsd: null,
+          lineTotalUsd: line.totalUsd,
+        })),
+        exchangeRate,
+        isDelivery: false,
+        deliveryFeeUsd: 0,
+        deliveryPaidBy: null,
+        driver: null,
+        subtotalUsd: replacementSubtotalUsd,
+        discountUsd: 0,
+        taxUsd: 0,
+        totalUsd: replacementTotals.totalUsd,
+        totalKhr: replacementTotals.totalKhr,
+        paidUsd: replacementTotals.amountPaidUsd,
+        paidKhr: replacementTotals.amountPaidKhr,
+        changeUsd: 0,
+        changeKhr: 0,
+        paymentMethod: REPLACEMENT_PAYMENT_METHOD,
+      }
+      // The lot the operator picked by hand drains through
+      // applyReplacementStock (not the FIFO allocator), so it has no entry in
+      // replacementFifoTakes -- without this it would be the ONE replacement
+      // shape whose sale line carried no sale_item_batch_allocations row, and
+      // batch identity would end at the return instead of following the units
+      // onto the sale the customer can later return.
+      for (const [lineIndex, line] of replacementLines.entries()) {
+        if (line.batchId == null) continue
+        const lot = await db.prepare('SELECT lot_code, expiry_date FROM product_batches WHERE id = ?')
+          .get<{ lot_code: string | null; expiry_date: string | null }>([line.batchId])
+        replacementExplicitTakes.set(lineIndex, [{
+          batchId: line.batchId,
+          lotCode: lot?.lot_code ?? null,
+          expiryDate: lot?.expiry_date ?? null,
+          quantity: line.quantity,
+        }])
+      }
     }
 
     const statements: Array<{ sql: string; params: Record<string, unknown> }> = []
@@ -1389,7 +1529,7 @@ app.post('/', async (c) => {
         params: { sale_item_id: saleItems[index].id, id: row.id },
       }))
       for (const [lineIndex, saleItem] of saleItems.entries()) {
-        for (const take of replacementFifoTakes.get(lineIndex) || []) {
+        for (const take of [...(replacementFifoTakes.get(lineIndex) || []), ...(replacementExplicitTakes.get(lineIndex) || [])]) {
           linkStatements.push({
             sql: `INSERT INTO sale_item_batch_allocations (sale_item_id, batch_id, branch_id, quantity, lot_code, expiry_date, released_quantity, released_at)
                   VALUES (@sale_item_id, @batch_id, @branch_id, @quantity, @lot_code, @expiry_date, 0, NULL)`,
@@ -1526,6 +1666,16 @@ app.post('/', async (c) => {
     returnType: body.return_type || 'restock', refundUsd: body.total_refund_usd || 0, refundKhr: body.total_refund_khr || 0,
     by: user?.name || user?.username || null,
   }).catch((error) => console.error('[telegram] return notification failed', error)))
+  // ...and the replacement sale announces itself as the ordinary sale it is,
+  // on the SAME 'sales' channel and through the SAME shared formatter
+  // routes/sales.ts uses. Without this the one sale the shop never typed into
+  // POS was also the one sale that never reached the channel.
+  if (replacementSaleNotice) {
+    c.executionCtx.waitUntil(sendTelegramEvent(c.env, {
+      type: 'sales',
+      lines: formatSaleTelegramLines(replacementSaleNotice),
+    }).catch((error) => console.error('[telegram] replacement sale notification failed', error)))
+  }
   c.executionCtx.waitUntil(broadcast(c.env, 'sales', { action: 'update', id: body.sale_id || null }))
   return c.json({ id: returnId, returnNumber, replacementSaleId, replacementReceiptNumber })
 })
