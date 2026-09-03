@@ -523,6 +523,102 @@ app.get('/damaged-lots', async (c) => {
   return c.json(lots)
 })
 
+// --- Receipt typeahead ------------------------------------------------------
+// The new-return flow used to pull 500 sales to the browser and Array.find()
+// the receipt out of them, so a receipt older than that window was simply
+// "not found" and nothing ever listed the candidates. This is the server-side
+// lookup behind the typeahead: matching receipts only, newest first, capped.
+//
+// Three number shapes have to match here:
+//   - the current bare `YYYYMMDD-HHMMSS`, including a partial-digit type-ahead
+//     ("2026090" or "0903-1430"),
+//   - the legacy `NNNNNN@YYYY-MM-DD` numbers still in production history,
+//   - and whatever the receipt lane's migration 0107 moves into
+//     sales.legacy_receipt_number.
+// The last of those may or may not exist when this Worker runs, so the column
+// is probed once instead of being assumed: a build of this route that runs
+// against a pre-0107 database must still answer, not 500 on "no such column".
+const LEGACY_RECEIPT_COLUMN = 'legacy_receipt_number'
+const LEGACY_COLUMN_RECHECK_MS = 60_000
+let legacyReceiptColumnState: { present: boolean; checkedAt: number } | null = null
+
+// Strip the separators the two formats use so a digits-only query
+// ("202609031430") still matches "20260903-143000" and "123456@2026-09-03".
+function receiptDigitsExpr(column: string): string {
+  return `REPLACE(REPLACE(REPLACE(COALESCE(${column}, ''), '-', ''), '@', ''), ':', '')`
+}
+
+export async function salesHasLegacyReceiptColumn(db: ReturnType<typeof getDb>): Promise<boolean> {
+  const now = Date.now()
+  // A `true` never becomes false again (columns are not dropped here), so it
+  // is cached for the isolate's life; a `false` is re-probed, because 0107 can
+  // land while this isolate is still warm.
+  if (legacyReceiptColumnState?.present) return true
+  if (legacyReceiptColumnState && now - legacyReceiptColumnState.checkedAt < LEGACY_COLUMN_RECHECK_MS) return false
+  try {
+    const rows = await db.prepare('PRAGMA table_info("sales")').all<{ name?: string }>()
+    const present = (Array.isArray(rows) ? rows : []).some((row) => String(row?.name || '') === LEGACY_RECEIPT_COLUMN)
+    legacyReceiptColumnState = { present, checkedAt: now }
+    return present
+  } catch {
+    // A probe failure must not take the lookup down with it -- answer without
+    // the legacy column rather than 500.
+    legacyReceiptColumnState = { present: false, checkedAt: now }
+    return false
+  }
+}
+
+// Exported for the pure test: builds exactly the SQL + bindings the route
+// runs, so both column shapes can be exercised against a real database.
+export function buildReceiptLookupQuery(input: { query: string; limit: number; hasLegacyColumn: boolean }): { sql: string; params: Record<string, unknown> } | null {
+  const raw = String(input.query ?? '').trim()
+  if (raw.length < 2) return null
+  const digits = raw.replace(/\D+/g, '')
+  const params: Record<string, unknown> = { like: `%${raw.toLowerCase()}%`, limit: input.limit }
+  const clauses = [`lower(COALESCE(s.receipt_number, '')) LIKE @like`]
+  if (digits.length >= 4) {
+    params.digitsLike = `%${digits}%`
+    clauses.push(`${receiptDigitsExpr('s.receipt_number')} LIKE @digitsLike`)
+  }
+  if (/^\d{1,15}$/.test(raw)) {
+    params.saleId = Number(raw)
+    clauses.push('s.id = @saleId')
+  }
+  if (input.hasLegacyColumn) {
+    clauses.push(`lower(COALESCE(s.${LEGACY_RECEIPT_COLUMN}, '')) LIKE @like`)
+    if (digits.length >= 4) clauses.push(`${receiptDigitsExpr(`s.${LEGACY_RECEIPT_COLUMN}`)} LIKE @digitsLike`)
+  }
+  const legacySelect = input.hasLegacyColumn ? `s.${LEGACY_RECEIPT_COLUMN}` : `NULL AS ${LEGACY_RECEIPT_COLUMN}`
+  const sql = `
+    SELECT s.id, s.receipt_number, ${legacySelect}, s.created_at, s.customer_name,
+           s.branch_id, s.branch_name, s.total_usd, s.total_khr, s.sale_status
+    FROM sales s
+    WHERE COALESCE(s.sale_status, 'completed') <> 'cancelled'
+      AND (${clauses.join(' OR ')})
+    ORDER BY s.created_at DESC, s.id DESC
+    LIMIT @limit
+  `
+  return { sql, params }
+}
+
+export const RECEIPT_LOOKUP_MAX_ROWS = 20
+
+// GET /api/returns/receipt-lookup?query=&limit= -- registered before /:id so
+// the param route does not swallow it. Gated by the returns-permission
+// middleware at the top of this file like every other route here: this is a
+// staff lookup, never a customer-facing one.
+app.get('/receipt-lookup', async (c) => {
+  const db = getDb(c.env)
+  const raw = String(c.req.query('query') || c.req.query('q') || '')
+  const requested = Number.parseInt(String(c.req.query('limit') || RECEIPT_LOOKUP_MAX_ROWS), 10)
+  const limit = Math.min(RECEIPT_LOOKUP_MAX_ROWS, Math.max(1, Number.isFinite(requested) ? requested : RECEIPT_LOOKUP_MAX_ROWS))
+  const hasLegacyColumn = await salesHasLegacyReceiptColumn(db)
+  const built = buildReceiptLookupQuery({ query: raw, limit, hasLegacyColumn })
+  if (!built) return c.json([])
+  const rows = await db.prepare(built.sql).all<Record<string, unknown>>(built.params)
+  return c.json(Array.isArray(rows) ? rows : [])
+})
+
 // GET /api/returns/report?startDate&endDate&branchId -- customer-return
 // (refund) totals over a range for the Reports hub: range totals, a per-day
 // series, and reason/type breakdowns. Scoped to customer returns
