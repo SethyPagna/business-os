@@ -200,7 +200,7 @@ for (const fileUrl of productsFiles) {
   // used identically on the sibling Sales/Inventory tables -- retiring it in
   // the products folder alone would break sibling-surface parity, so it is
   // reported to the coordinator rather than changed here.
-  if (/blue-[0-9]|indigo-[0-9]|#2563eb|(?:color|tone): '(?:blue|indigo)'/i.test(src)) tokenOffenders.colour.push(rel)
+  if (/blue-[0-9]|indigo-[0-9]|#2563eb|\b(?:color|tone): '(?:blue|indigo)'/i.test(src)) tokenOffenders.colour.push(rel)
   if (/z-\[[0-9]+\]/.test(src)) tokenOffenders.zIndex.push(rel)
   if (/-\[[0-9]+(?:\.[0-9]+)?vh\]/.test(src)) tokenOffenders.viewport.push(rel)
 }

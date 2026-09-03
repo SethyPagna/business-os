@@ -20,9 +20,16 @@ function test(name: string, fn: () => void): void {
 }
 
 test('every cluster card carries a selection checkbox and a selected ring', () => {
+  // P2-4 Part 1b: the ring is still required, but it is no longer blue --
+  // the products folder was swept onto --ui-accent (the one, user-pickable
+  // accent) and productsResponsiveSurface.test.ts now fails the whole folder
+  // if a Tailwind blue/indigo class comes back. Pinning the literal blue here
+  // would have made those two guards contradict each other; what this test
+  // actually cares about -- a selected card is visibly distinct via a ring --
+  // is unchanged, so the pin follows the token.
   assert.match(src, /type="checkbox"/)
   assert.match(src, /onChange=\{onToggleSelect\}/)
-  assert.match(src, /selected \? 'ring-2 ring-blue-400/, 'a selected card must be visibly distinct')
+  assert.ok(src.includes("selected ? 'ring-2 ring-[var(--ui-accent)]'"), 'a selected card must be visibly distinct')
 })
 
 test('Select all selects the FILTERED view, not hidden clusters', () => {
