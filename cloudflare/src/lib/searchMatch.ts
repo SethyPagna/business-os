@@ -1213,3 +1213,90 @@ export function buildIssueStateClauses(rawValue: string, stockExpr: string): str
   if (!clauses.length) return undefined
   return clauses.length > 1 ? `(${clauses.join(' OR ')})` : clauses[0]
 }
+
+// --- barcode identity: GTIN-14 / EAN-13 leading-zero folding ------------
+//
+// Real, confirmed production bug this exists for: this catalog carries ~3000
+// products whose `barcode` is stored as a 14-character GTIN-14 with a
+// leading zero ("03348901770569") alongside a twin row holding the bare
+// EAN-13 the scanner actually emits ("3348901770569"). Scanning the EAN-13
+// found only the bare twin through products_fts (unicode61 prefix matching
+// starts at the START of a token, and "3348901770569*" is not a prefix of
+// "03348901770569"); the zero-padded twin only came back incidentally, via
+// the products_fts_code trigram substring table. That made "does the scan
+// find both twins" depend on an index that a route may or may not consult
+// (branches.ts's picker, for one, has no JS fallback at all) instead of on
+// an explicit, stated rule.
+//
+// The rule, stated once here and mirrored verbatim in the frontend copy
+// (frontend/src/utils/searchMatch.ts) so client re-filters and server
+// queries can never disagree about which two codes are "the same barcode":
+//   * compare on the leading-zero-stripped form of BOTH sides, so
+//     "03348901770569" and "3348901770569" are one barcode;
+//   * ignore spaces and hyphens (printed/typed separators);
+//   * a code shorter than MIN_REAL_BARCODE_LENGTH characters, or one that
+//     is nothing but zeros, is NOT a real barcode -- 238 production rows
+//     share the literal placeholder "0", and treating that as an identity
+//     would collapse them all onto each other. Same threshold and same
+//     reasoning as lib/productIdentity.ts's MIN_REAL_BARCODE_LENGTH, which
+//     already excludes the placeholder from duplicate clustering.
+export const MIN_REAL_BARCODE_LENGTH = 4
+
+// Canonical comparison key for a barcode, or '' when the value is not a
+// real barcode (too short, blank, or an all-zero placeholder).
+export function normalizeBarcodeKey(value: unknown): string {
+  const raw = String(value ?? '').trim().toLowerCase().replace(/[\s-]+/g, '')
+  if (raw.length < MIN_REAL_BARCODE_LENGTH) return ''
+  const stripped = raw.replace(/^0+/, '')
+  return stripped
+}
+
+// True when two barcodes are the same real barcode under the rule above.
+export function barcodeKeysMatch(left: unknown, right: unknown): boolean {
+  const key = normalizeBarcodeKey(left)
+  return key !== '' && key === normalizeBarcodeKey(right)
+}
+
+// The barcode key a typed/scanned SEARCH BOX value stands for, or '' when
+// the text isn't a lone code. Deliberately single-token: "dior 3348901770569"
+// is a normal two-word search (name AND code), not a barcode lookup, and
+// must keep going through the ordinary word path.
+export function searchTermBarcodeKey(raw: unknown): string {
+  const text = String(raw ?? '').trim()
+  if (!text || /[\s,]/.test(text)) return ''
+  return normalizeBarcodeKey(text)
+}
+
+// SQL form of normalizeBarcodeKey for a stored column: lowercase, drop
+// spaces/hyphens, strip leading zeros. Kept in lockstep with the JS above.
+export function normalizedBarcodeSql(column: string): string {
+  return `ltrim(lower(replace(replace(trim(COALESCE(${column}, '')), ' ', ''), '-', '')), '0')`
+}
+
+// Extra WHERE disjunct that makes "the scanned code finds BOTH twins" an
+// explicit guarantee rather than a side effect of the trigram index.
+// Returns undefined when the query text isn't a lone real barcode.
+export function buildExactBarcodeMatchClause(
+  rawQuery: unknown,
+  params: Record<string, unknown>,
+  paramName = 'barcodeKey',
+  column = 'p.barcode',
+): string | undefined {
+  const key = searchTermBarcodeKey(rawQuery)
+  if (!key) return undefined
+  params[paramName] = key
+  return `${normalizedBarcodeSql(column)} = @${paramName}`
+}
+
+// Rank contribution that floats an exact barcode hit to the top of an
+// ASC-ordered relevance sort. The offset dwarfs any bm25() score (bm25 is
+// negative and small in magnitude here), so exact-barcode rows sort ahead
+// of rows that only matched a name/sku/substring, and bm25 still orders
+// within each of the two blocks. Only valid when the caller also called
+// buildExactBarcodeMatchClause with the same paramName (that is what binds
+// the parameter).
+export const EXACT_BARCODE_RANK_OFFSET = 1000000
+
+export function buildExactBarcodeRankSql(paramName = 'barcodeKey', column = 'p.barcode'): string {
+  return `(CASE WHEN ${normalizedBarcodeSql(column)} = @${paramName} THEN 0 ELSE ${EXACT_BARCODE_RANK_OFFSET} END)`
+}

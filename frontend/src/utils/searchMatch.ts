@@ -403,3 +403,52 @@ export function runFuzzyFallbackMatch<TId extends number | string = number>(
   }
   return matched
 }
+
+// --- barcode identity: GTIN-14 / EAN-13 leading-zero folding ------------
+//
+// Mirror of the block at the end of cloudflare/src/lib/searchMatch.ts --
+// read that copy for the full reasoning (a production catalog that stores
+// ~3000 barcodes twice: once as a 14-character GTIN-14 with a leading zero,
+// once as the bare EAN-13 a scanner emits). Kept byte-for-byte equivalent
+// so a client-side re-filter can never drop a row the server matched, or
+// keep one the server would not.
+//
+// The rule: compare the leading-zero-stripped form of both sides; ignore
+// spaces and hyphens; a code shorter than MIN_REAL_BARCODE_LENGTH or made
+// only of zeros is NOT a real barcode (238 production rows share the
+// literal placeholder "0").
+export const MIN_REAL_BARCODE_LENGTH = 4
+
+export function normalizeBarcodeKey(value: unknown): string {
+  const raw = String(value ?? '').trim().toLowerCase().replace(/[\s-]+/g, '')
+  if (raw.length < MIN_REAL_BARCODE_LENGTH) return ''
+  const stripped = raw.replace(/^0+/, '')
+  return stripped
+}
+
+export function barcodeKeysMatch(left: unknown, right: unknown): boolean {
+  const key = normalizeBarcodeKey(left)
+  return key !== '' && key === normalizeBarcodeKey(right)
+}
+
+// The barcode key a typed/scanned search-box value stands for, or '' when
+// the text isn't a lone code (a multi-word query stays a normal search).
+export function searchTermBarcodeKey(raw: unknown): string {
+  const text = String(raw ?? '').trim()
+  if (!text || /[\s,]/.test(text)) return ''
+  return normalizeBarcodeKey(text)
+}
+
+// Client-side counterpart of the server's exact-barcode-first ordering: a
+// row whose barcode IS the scanned code sorts ahead of rows that merely
+// contain the digits somewhere. Never used to auto-select -- every picker
+// in this app requires the operator to click the row (scan fills the search
+// box, the list narrows, the person chooses).
+export function sortExactBarcodeFirst<T extends { barcode?: unknown }>(rows: readonly T[], rawQuery: unknown): T[] {
+  const key = searchTermBarcodeKey(rawQuery)
+  if (!key) return rows.slice()
+  return rows
+    .map((row, index) => ({ row, index, exact: normalizeBarcodeKey(row?.barcode) === key ? 0 : 1 }))
+    .sort((a, b) => (a.exact - b.exact) || (a.index - b.index))
+    .map((entry) => entry.row)
+}
