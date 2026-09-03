@@ -163,11 +163,12 @@ export const PERMISSION_ACTIONS: Record<string, PermissionAction[]> = {
     // PATCH /:id -> 403 for review (returns.ts ~781): editing reverses and
     // re-applies batch restocking against live state.
     { key: 'edit', tKey: 'perm_act_returns_edit', label: 'Edit return', review: 'block' },
-    // Inside POST /: an uneven replacement exchange settled as a price
-    // difference -- getActionTier(user, 'returns', 'settle_difference')
-    // must be 'full' (returns.ts ~662), the "Non-default price adjustment
-    // requires full access" locked note.
-    { key: 'settle_difference', tKey: 'perm_act_returns_settle_difference', label: 'Settle a replacement price difference', review: 'block' },
+    // There is no third returns action. The retired one gated settling a
+    // price difference on an uneven replacement exchange; a return no longer
+    // nets against its replacement, so there is no difference to settle and
+    // nothing to gate. Removed rather than left unreachable -- a permission
+    // nobody can exercise is a permission that lies to whoever reads the role
+    // screen. (tests/returnOptions.test.ts pins that its key stays gone.)
   ],
 
   // cloudflare/src/routes/fees.ts

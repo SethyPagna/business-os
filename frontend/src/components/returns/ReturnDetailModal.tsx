@@ -233,12 +233,35 @@ export default function ReturnDetailModal({ ret, onClose, onEdit, fmtUSD, fmtKHR
                     <span className="flex-shrink-0 font-medium text-gray-900 dark:text-white">{fmtUSD(coerceMoney(line.total_usd))}</span>
                   </div>
                 ))}
-                <div className="flex justify-between border-t border-emerald-200 pt-1 text-xs font-semibold text-emerald-700 dark:border-emerald-800 dark:text-emerald-300">
-                  <span>{ret.settlement_mode === 'price_difference' ? tr('price_difference', 'Price difference') : tr('even_exchange', 'Even exchange')}</span>
-                  <span>{ret.settlement_mode === 'price_difference'
-                    ? (Number(ret.settlement_diff_usd || 0) > 0 ? '+' : '−') + fmtUSD(Math.abs(Number(ret.settlement_diff_usd || 0)))
-                    : '±0'}</span>
-                </div>
+                {/* Two eras read side by side.
+                    CURRENT: the replacement is its own sale, so the line names
+                    that sale's receipt and its own total -- nothing is netted.
+                    HISTORICAL: a return recorded under the old exchange model
+                    carries settlement_mode/settlement_diff_usd (migration
+                    0074). Nothing writes those any more, but they are the only
+                    record of what actually happened on that day, so they are
+                    still read and shown -- labelled as the settlement they
+                    were, never re-presented as today's model. */}
+                {ret.settlement_mode ? (
+                  <div data-historical-settlement className="flex justify-between border-t border-emerald-200 pt-1 text-xs font-semibold text-emerald-700 dark:border-emerald-800 dark:text-emerald-300">
+                    <span>
+                      {tr('historical_settlement', 'Recorded as an exchange')} · {ret.settlement_mode === 'price_difference'
+                        ? tr('price_difference', 'Price difference')
+                        : tr('even_exchange', 'Even exchange')}
+                    </span>
+                    <span>{ret.settlement_mode === 'price_difference'
+                      ? (Number(ret.settlement_diff_usd || 0) > 0 ? '+' : '−') + fmtUSD(Math.abs(Number(ret.settlement_diff_usd || 0)))
+                      : '±0'}</span>
+                  </div>
+                ) : (
+                  <div data-replacement-sale className="flex justify-between border-t border-emerald-200 pt-1 text-xs font-semibold text-emerald-700 dark:border-emerald-800 dark:text-emerald-300">
+                    <span>
+                      {tr('replacement_sale_total', 'New sale total')}
+                      {ret.replacement_receipt_number ? ` · ${ret.replacement_receipt_number}` : ''}
+                    </span>
+                    <span>{fmtUSD(replacementItems.reduce((sum, line) => sum + Number(line.total_usd || 0), 0))}</span>
+                  </div>
+                )}
               </div>
             </div>
           ) : null}

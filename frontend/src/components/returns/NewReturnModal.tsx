@@ -16,7 +16,8 @@ import {
 import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.ts'
 import { getProductBatches, type ProductBatch } from '../../api/batchesTransport.ts'
 import { searchProducts } from '../../api/methods.ts'
-import { STOCK_ACTION_OPTIONS, computeSettlementPreview, describeBatchOption, stockActionOption, type ReturnStockAction } from './helpers/returnOptions.ts'
+import { PAYMENT_METHODS } from '../../constants.ts'
+import { STOCK_ACTION_OPTIONS, returnLineNeedsLotPick, describeBatchOption, stockActionOption, type ReturnStockAction } from './helpers/returnOptions.ts'
 import { normalizeReturnReasonList } from './helpers/returnReasonPresets.ts'
 import { useReturnReasonPresets } from './helpers/useReturnReasonPresets.ts'
 
@@ -57,6 +58,13 @@ interface SaleItemRow {
   cost_price_khr?: number | string | null
   purchase_price_khr?: number | string | null
   branch_id?: number | string | null
+  // Which lot this line was sold from: one lot on batch_id, or several
+  // recorded as allocations (batch_id NULL, lot_allocation_count > 0). Zero
+  // of both means the sale genuinely cannot say -- the only case where the
+  // operator has to name the lot the units go back into.
+  batch_id?: number | string | null
+  batch_label?: string | null
+  lot_allocation_count?: number | string | null
 }
 
 interface SaleReturnItem extends SaleItemRow {
@@ -68,6 +76,11 @@ interface SaleReturnItem extends SaleItemRow {
   // 11.13: the ONE per-item chooser -- what happens to this item's stock.
   // return_to_stock stays derived from it (restock <=> true) for the wire.
   stock_action: ReturnStockAction
+  // Only used when the sale cannot say which lot: the lots this product has
+  // at the branch, and the one the operator named. Every unit goes back into
+  // a named lot -- unspecified stock is not a destination.
+  lotOptions: ProductBatch[]
+  pickedBatchId: number | null
 }
 
 // A replacement is a normal sale line linked to this return. It may be any
@@ -153,6 +166,7 @@ interface ReturnCreatePayload extends Record<string, unknown> {
     return_to_stock: boolean
     stock_action: ReturnStockAction
     branch_id: number | string | null
+    batch_id?: number | null
   }>
 }
 
@@ -248,7 +262,7 @@ function getSaleItemKey(item: SaleItemRow): string {
 }
 
 export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, initialReceiptQuery }: NewReturnModalProps) {
-  const { user, t, getPermissionTier } = useApp()
+  const { user, t } = useApp()
   const T = (key: string, fallback: string): string => {
     const value = typeof t === 'function' ? t(key) : undefined
     return value && value !== key ? value : fallback
@@ -272,7 +286,8 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
   const searchInFlightRef = useRef(false)
   const submitInFlightRef = useRef(false)
   const [replacements, setReplacements] = useState<ReplacementLine[]>([])
-  const [settleDifference, setSettleDifference] = useState(false)
+  // The replacement is an ordinary sale, so it takes an ordinary tender.
+  const [replacementPaymentMethod, setReplacementPaymentMethod] = useState<string>(PAYMENT_METHODS[0])
   // Receipt typeahead. suggestOpen is separate from suggestions.length so that
   // dismissing the list (Escape, or a pick) does not also throw away rows the
   // operator may want back on the next keystroke.
@@ -294,10 +309,6 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
     setCustomReason((current) => current || reason)
     setReason(OTHER_LABEL)
   }, [OTHER_LABEL, isKnownReason, reason])
-  // Locked note: "Non-default price adjustment requires full access and an
-  // explicit preview" -- the checkbox below IS the explicit preview, and
-  // it only unlocks for Full Access to Returns.
-  const canSettleDifference = getPermissionTier?.('returns') === 'full'
 
   // Ask the server as the operator types. Every request carries an id and only
   // the newest one is allowed to write state, so a slow early keystroke can
@@ -359,7 +370,11 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
       setReplacements((prev) => prev.map((line) => line.key === lineKey
         ? { ...line, batches: (Array.isArray(batches) ? batches : []).filter((batch) => (Number(batch.quantity) || 0) > 0) }
         : line))
-    } catch { /* the lot picker is a nicety -- "any stock" still works */ }
+    } catch {
+      // The lot list is an aid for the operator, not the authority: a
+      // replacement with no hand-picked lot still drains FIFO on the server,
+      // and a genuine shortfall comes back as the 409 the server raises.
+    }
   }
 
   // One place a replacement line is born, whatever chose it: the catalog
@@ -493,9 +508,33 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
           const key = getSaleItemKey(item)
           const alreadyQty = alreadyReturned[key] || 0
           const remaining = Math.max(0, toNumber(item.quantity) - alreadyQty)
-          return { ...item, alreadyQty, remaining, returnQty: 0, included: remaining > 0, return_to_stock: true, stock_action: 'restock' as ReturnStockAction }
+          return {
+            ...item,
+            alreadyQty,
+            remaining,
+            returnQty: 0,
+            included: remaining > 0,
+            return_to_stock: true,
+            stock_action: 'restock' as ReturnStockAction,
+            lotOptions: [],
+            pickedBatchId: null,
+          }
         }))
         setStep('items')
+        // Lines the sale cannot place in a lot need one named before they can
+        // be restocked, so fetch what this product HAS at the branch. Every
+        // active lot is offered, not only the ones with stock left: an empty
+        // lot is exactly where returned units of that lot belong.
+        void Promise.all(items.map(async (item, index) => {
+          const lotKnown = toNumber(item.batch_id) > 0 || toNumber(item.lot_allocation_count) > 0
+          const branchId = item.branch_id || found.branch_id || null
+          if (lotKnown || !item.product_id || !branchId) return
+          try {
+            const { batches } = await getProductBatches(item.product_id, branchId, false)
+            if (!isTrackedRequestCurrent(searchRequestRef, requestId)) return
+            setSelectedItems((prev) => prev.map((row, i) => i === index ? { ...row, lotOptions: Array.isArray(batches) ? batches : [] } : row))
+          } catch { /* leave the line without options; the server refuses it rather than guessing */ }
+        }))
       } else {
         if (!isTrackedRequestCurrent(searchRequestRef, requestId)) return
         notify(T('sale_not_found', 'Sale not found. Try the receipt number or sale ID.'), 'error')
@@ -610,6 +649,10 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
     setSelectedItems((prev) => prev.map((it, i) => i === idx ? { ...it, stock_action: action, return_to_stock: action === 'restock' } : it))
   }
 
+  const updateItemLot = (idx: number, batchId: number | null) => {
+    setSelectedItems((prev) => prev.map((it, i) => i === idx ? { ...it, pickedBatchId: batchId } : it))
+  }
+
   const selectAll = () => setSelectedItems((prev) => prev.map((it) =>
     it.remaining > 0 ? { ...it, included: true, returnQty: it.remaining, return_to_stock: returnType === 'restock', stock_action: (returnType === 'restock' ? 'restock' : 'none') as ReturnStockAction } : it
   ))
@@ -619,17 +662,25 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
   const totalRefund    = activeItems.reduce((s, it) => s + toNumber(it.applied_price_usd) * it.returnQty, 0)
   const totalRefundKhr = activeItems.reduce((s, it) => s + toNumber(it.applied_price_khr) * it.returnQty, 0)
   const replacementTotalUsd = replacements.reduce((s, line) => s + line.price_usd * line.quantity, 0)
-  const replacementTotalKhr = replacements.reduce((s, line) => s + line.price_khr * line.quantity, 0)
-  // Mirrors the backend kernel's math exactly -- the preview and the
-  // server's verdict can never disagree.
-  const settlementPreview = computeSettlementPreview({ returnedTotalUsd: totalRefund, returnedTotalKhr: totalRefundKhr, replacementTotalUsd, replacementTotalKhr })
   const finalReason    = reason === OTHER_LABEL ? customReason.trim() : reason
+
+  // Every line that still owes an answer about WHICH lot. Restock is the only
+  // action that puts units back on a shelf, so it is the only one that needs
+  // one; the server refuses the same lines (return_lot_required), this is
+  // just the operator finding out before they press Confirm.
+  const lineNeedsLot = (item: SaleReturnItem): boolean => item.stock_action === 'restock' && returnLineNeedsLotPick({
+    originalBatchId: toNumber(item.batch_id) > 0 ? item.batch_id : (toNumber(item.lot_allocation_count) > 0 ? 1 : null),
+    pickedBatchId: item.pickedBatchId,
+    lotOptionCount: item.lotOptions.length,
+  })
+  const itemsMissingLot = activeItems.filter(lineNeedsLot)
+  const replacementsMissingLot = replacements.filter((line) => line.batches.length > 0 && line.batch_id == null)
 
   const handleSubmit = async () => {
     if (!activeItems.length) { notify(T('select_items_to_return','Select at least one item to return.'), 'error'); return }
     if (!finalReason) { notify(T('return_reason','Please provide a return reason.'), 'error'); return }
-    if (replacements.length && !settlementPreview.isEven && !settleDifference) {
-      notify(T('uneven_exchange_blocked', 'This is not an even exchange -- tick "Settle this price difference" (Full Access) or match the totals.'), 'error')
+    if (itemsMissingLot.length || replacementsMissingLot.length) {
+      notify(T('lot_required', 'Pick the lot for every line first — stock never goes back to, or comes out of, unspecified stock.'), 'error')
       return
     }
     if (!beginSingleAction(submitInFlightRef)) return
@@ -661,6 +712,10 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
             return_to_stock:   it.return_to_stock !== false,
             stock_action:      it.stock_action,
             branch_id:         it.branch_id || foundSale?.branch_id || null,
+            // Sent ONLY for a line the sale itself cannot place. When the
+            // sale knows the lot(s), the server restocks exactly those --
+            // including a multi-lot split an operator pick would collapse.
+            ...(it.pickedBatchId != null ? { batch_id: it.pickedBatchId } : {}),
           })),
           ...(replacements.length ? {
             replacement_items: replacements.map((line) => ({
@@ -672,7 +727,7 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
               applied_price_usd: line.price_usd,
               applied_price_khr: line.price_khr,
             })),
-            settlement_mode: settlementPreview.isEven ? 'even_exchange' : 'price_difference',
+            replacement_payment_method: replacementPaymentMethod,
           } : {}),
         }),
         'Create return',
@@ -710,6 +765,10 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
   const reviewReturn = () => {
     if (!activeItems.length) { notify(T('select_items_to_return', 'Select at least one item to return.'), 'error'); return }
     if (!finalReason) { notify(T('return_reason', 'Please provide a return reason.'), 'error'); return }
+    if (itemsMissingLot.length || replacementsMissingLot.length) {
+      notify(T('lot_required', 'Pick the lot for every line first — stock never goes back to, or comes out of, unspecified stock.'), 'error')
+      return
+    }
     setStep('confirm')
   }
 
@@ -968,6 +1027,40 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
                                   {T('stock_action_damaged_hint', 'Tracked as a damaged lot tied to this return — kept out of sellable stock.')}
                                 </div>
                               )}
+                              {/* WHICH lot these units go back into. When the
+                                  sale knows, it is stated and not editable --
+                                  units belong in the lot they came out of,
+                                  including a multi-lot split. When the sale
+                                  cannot say, the operator names one; there is
+                                  nothing unspecified to fall back on. */}
+                              {item.stock_action === 'restock' && (
+                                toNumber(item.batch_id) > 0 || toNumber(item.lot_allocation_count) > 0 ? (
+                                  <div data-lot="known" className="text-[10px] text-gray-400">
+                                    ↩ {T('return_lot_from_sale', 'Back into the lot this line was sold from')}
+                                    {item.batch_label ? `: ${item.batch_label}` : ''}
+                                  </div>
+                                ) : item.lotOptions.length > 0 ? (
+                                  <div data-lot="pick" className="flex items-center gap-2">
+                                    <span className="flex-shrink-0 text-[10px] text-gray-400">{T('return_lot_pick', 'Back into lot')}</span>
+                                    <AppSelect
+                                      value={item.pickedBatchId != null ? String(item.pickedBatchId) : ''}
+                                      onChange={(next) => updateItemLot(idx, next ? Number(next) : null)}
+                                      ariaLabel={T('return_lot_pick', 'Back into lot')}
+                                      className="min-w-0 flex-1"
+                                      buttonClassName={`h-8 w-full text-xs ${item.pickedBatchId == null ? 'border-amber-400 dark:border-amber-600' : ''}`}
+                                      optionClassName="text-xs"
+                                      options={[
+                                        { value: '', label: T('select_lot', 'Choose a lot…') },
+                                        ...item.lotOptions.map((batch) => ({ value: String(batch.id), label: describeBatchOption(batch) })),
+                                      ]}
+                                    />
+                                  </div>
+                                ) : (
+                                  <div data-lot="untracked" className="text-[10px] text-gray-400">
+                                    {T('lot_untracked', 'This product has no lots — stock goes back to the branch count.')}
+                                  </div>
+                                )
+                              )}
                             </div>
                           )}
                         </div>
@@ -1079,10 +1172,12 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
                             onChange={(next) => updateReplacement(line.key, { batch_id: next ? Number(next) : null })}
                             ariaLabel={T('batch','Batch')}
                             className="flex-1 min-w-0"
-                            buttonClassName="h-9 w-full text-xs"
                             optionClassName="text-xs"
-                            options={[{ value: '', label: T('any_stock','Any stock (no specific lot)') },
-                              ...line.batches.map((batch) => ({ value: String(batch.id), label: describeBatchOption(batch) }))]}
+                            buttonClassName={`h-9 w-full text-xs ${line.batches.length > 0 && line.batch_id == null ? 'border-amber-400 dark:border-amber-600' : ''}`}
+                            options={line.batches.length > 0
+                              ? [{ value: '', label: T('select_lot', 'Choose a lot…') },
+                                ...line.batches.map((batch) => ({ value: String(batch.id), label: describeBatchOption(batch) }))]
+                              : [{ value: '', label: T('lot_untracked_out', 'No lots — drawn from the branch count') }]}
                           />
                           <input type="number" min="1" step="1" className="input w-16 flex-shrink-0 py-1 text-center text-sm"
                             aria-label={T('quantity','Quantity')}
@@ -1093,26 +1188,30 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
                       </div>
                     ))}
                   </div>
-                  <div className={`mt-2 rounded-lg border px-3 py-2 text-sm ${settlementPreview.isEven
-                    ? 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-800 dark:bg-emerald-900/20 dark:text-emerald-300'
-                    : 'border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-800 dark:bg-amber-900/20 dark:text-amber-300'}`}>
-                    {settlementPreview.isEven ? (
-                      <span>✓ {T('even_exchange','Even exchange')} — {T('even_exchange_desc','replacement value equals the returned value; no money moves.')}</span>
-                    ) : (
-                      <div className="space-y-1">
-                        <div>
-                          {settlementPreview.diffUsd > 0
-                            ? `${T('customer_owes','Customer pays the difference')}: ${fmtUSD(settlementPreview.diffUsd)}`
-                            : `${T('shop_refunds','Shop refunds the difference')}: ${fmtUSD(Math.abs(settlementPreview.diffUsd))}`}
-                        </div>
-                        <label className={`flex items-center gap-2 text-xs ${canSettleDifference ? 'cursor-pointer' : 'opacity-60'}`}>
-                          <input type="checkbox" className="rounded accent-amber-600" checked={settleDifference}
-                            disabled={!canSettleDifference}
-                            onChange={(e) => setSettleDifference(e.target.checked)} />
-                          <span>{T('settle_difference','Settle this price difference')}{canSettleDifference ? '' : ` (${T('requires_full_access','requires Full Access to Returns')})`}</span>
-                        </label>
-                      </div>
-                    )}
+                  {/* Two separate movements of money, stated as two. The
+                      refund is what the return pays back; this is a new sale
+                      the customer pays for as usual. Nothing is netted, so
+                      there is no difference to owe or settle. */}
+                  <div data-section="replacement-sale-summary" className="mt-2 space-y-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800 dark:border-emerald-800 dark:bg-emerald-900/20 dark:text-emerald-200">
+                    <div className="flex items-center justify-between gap-2">
+                      <span>🧾 {T('replacement_sale_new', 'New sale for these items')}</span>
+                      <span className="font-semibold">{fmtUSD(replacementTotalUsd)}</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="flex-shrink-0 text-xs">{T('payment_method', 'Payment method')}</span>
+                      <AppSelect
+                        value={replacementPaymentMethod}
+                        onChange={(next) => setReplacementPaymentMethod(next)}
+                        ariaLabel={T('payment_method', 'Payment method')}
+                        className="min-w-0 flex-1"
+                        buttonClassName="h-8 w-full text-xs"
+                        optionClassName="text-xs"
+                        options={PAYMENT_METHODS.map((method) => ({ value: method, label: method }))}
+                      />
+                    </div>
+                    <div className="text-[11px] opacity-80">
+                      {T('replacement_sale_hint', 'It gets its own receipt and is recorded in Sales like any other sale. The refund above is paid back separately.')}
+                    </div>
                   </div>
                 </>
                 )}
@@ -1180,7 +1279,7 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
                     <div>🟠 {activeItems.filter(it => it.stock_action === 'damaged').length} {T('tracked_as_damaged','tracked as damaged stock')}</div>
                   )}
                   {replacements.length > 0 && (
-                    <div>🔁 {replacements.length} {T('replacement_sale_items_short','item(s) on the replacement sale receipt')} — {settlementPreview.isEven ? T('even_exchange','even exchange') : T('price_difference','price difference')}</div>
+                    <div>🔁 {replacements.length} {T('replacement_sale_items_short','item(s) on the replacement sale receipt')} — {fmtUSD(replacementTotalUsd)} · {replacementPaymentMethod}</div>
                   )}
                 </div>
               </div>
@@ -1227,8 +1326,8 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
                     </div>
                   ))}
                   <div className="flex justify-between border-t border-emerald-200 pt-1 text-xs font-semibold text-emerald-700 dark:border-emerald-800 dark:text-emerald-300">
-                    <span>{settlementPreview.isEven ? T('even_exchange','Even exchange') : T('price_difference','Price difference')}</span>
-                    <span>{settlementPreview.isEven ? '±0' : (settlementPreview.diffUsd > 0 ? '+' : '−') + fmtUSD(Math.abs(settlementPreview.diffUsd))}</span>
+                    <span>{T('replacement_sale_total', 'New sale total')} · {replacementPaymentMethod}</span>
+                    <span>{fmtUSD(replacementTotalUsd)}</span>
                   </div>
                 </div>
               )}
