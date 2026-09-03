@@ -2355,7 +2355,7 @@ ${inventoryFeesFormulaText}`,
         <LazyPortalMenu
           align="auto"
           triggerWrapperClassName={`min-w-0 ${TOOLBAR_BUTTON_WIDTH}`}
-          menuClassName="max-h-[70vh] overflow-auto"
+          menuClassName="max-h-[calc(var(--app-vh-100)_*_.7)] overflow-auto"
           trigger={(
             <button
               type="button"

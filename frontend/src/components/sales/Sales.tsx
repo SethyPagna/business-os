@@ -1326,7 +1326,7 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
             <ActionHistoryBar history={actionHistory as unknown as ActionHistoryBarHistory} t={t} className="min-w-0" dense />
             {canImportSales || canExportSales ? <LazyPortalMenu
               align="auto"
-              menuClassName="max-h-[70vh] overflow-auto"
+              menuClassName="max-h-[calc(var(--app-vh-100)_*_.7)] overflow-auto"
               trigger={(
                 <button
                   type="button"

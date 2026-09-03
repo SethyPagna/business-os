@@ -487,7 +487,7 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
               <div className="mb-2 px-1 text-xs font-semibold uppercase tracking-[0.12em] text-slate-500 dark:text-neutral-400">
                 {copy('jumpToBrand', 'Jump to brand')}
               </div>
-              <div className="grid max-h-[min(18rem,calc(100vh-32rem))] grid-cols-4 gap-1 overflow-y-auto overscroll-contain pr-1">
+              <div className="grid max-h-[min(18rem,calc(var(--app-vh-100)_-_32rem))] grid-cols-4 gap-1 overflow-y-auto overscroll-contain pr-1">
                 <button
                   type="button"
                   className={`h-8 rounded-lg text-xs font-semibold transition ${effectiveInitialFilter === 'all' ? 'bg-blue-600 text-white' : 'text-slate-600 hover:bg-blue-50 hover:text-blue-700 dark:text-neutral-300 dark:hover:bg-neutral-800 dark:hover:text-amber-300'}`}

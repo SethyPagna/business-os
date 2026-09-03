@@ -414,8 +414,8 @@ function AssetPreviewModal({ asset, onClose, canManage, notify, filesApi, onRewi
   return (
     <Modal title={sanitizeFallback(logicalAssetDisplayName(asset)) || 'Details'} onClose={onClose} size="xl">
       <div className="space-y-4">
-        <div className="flex max-h-[55vh] w-full items-center justify-center overflow-hidden rounded-xl bg-slate-100 dark:bg-slate-800">
-          <img src={previewUrl || ''} alt={logicalAssetDisplayName(asset)} className="max-h-[55vh] w-full object-contain" />
+        <div className="flex max-h-[calc(var(--app-vh-100)_*_.55)] w-full items-center justify-center overflow-hidden rounded-xl bg-slate-100 dark:bg-slate-800">
+          <img src={previewUrl || ''} alt={logicalAssetDisplayName(asset)} className="max-h-[calc(var(--app-vh-100)_*_.55)] w-full object-contain" />
         </div>
 
         <div className="rounded-xl border border-slate-200 p-3 text-sm dark:border-slate-700">

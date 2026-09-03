@@ -117,7 +117,7 @@ export default function NotesPage() {
 
   return (
     <div className="page-scroll flex flex-col p-3 sm:p-6">
-      <div className="flex min-h-[70vh] flex-1 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900 sm:min-h-[75vh]">
+      <div className="flex min-h-[calc(var(--app-vh-100)_*_.7)] flex-1 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900 sm:min-h-[calc(var(--app-vh-100)_*_.75)]">
         {/* List pane */}
         <div
           className={`flex w-full flex-col border-slate-100 dark:border-slate-800 sm:flex sm:w-72 sm:flex-shrink-0 sm:border-r ${

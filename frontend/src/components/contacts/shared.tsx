@@ -255,7 +255,7 @@ export function DetailModal({ item, fields = [], onEdit, onDelete, onClose, t, e
             view needs to be made more compact") -- narrower label column and
             tighter vertical padding than the old 140px / py-2 layout, so more
             fields fit without scrolling. */}
-        <div className="max-h-[60vh] overflow-y-auto rounded-xl border border-gray-200 dark:border-zinc-700">
+        <div className="max-h-[calc(var(--app-vh-100)_*_.6)] overflow-y-auto rounded-xl border border-gray-200 dark:border-zinc-700">
           {fields.map(([label, value], index) => (
             <div
               key={`${String(label)}-${index}`}

@@ -124,7 +124,7 @@ export default function SupplierPurchasesModal({ supplierId, supplierName, fetch
             {batches.length === 0 ? (
               <div className="py-6 text-center text-sm text-gray-400">{tr('no_purchases_yet', 'No batches are attributed to this supplier yet.')}</div>
             ) : (
-              <div className="max-h-[55vh] overflow-auto rounded-xl border border-gray-200 dark:border-gray-700">
+              <div className="max-h-[calc(var(--app-vh-100)_*_.55)] overflow-auto rounded-xl border border-gray-200 dark:border-gray-700">
                 <table className="w-full min-w-[640px] text-left text-xs">
                   <thead className="sticky top-0 bg-gray-50 text-[11px] uppercase tracking-wide text-gray-500 dark:bg-gray-800 dark:text-gray-400">
                     <tr>
