@@ -104,7 +104,7 @@ export function ProductBatchPreview({
         const batchId = String(batch.id || batch.batch_id || 'batch')
         // Z1a: a date-derived lot code reads as its mm/dd/yyyy date; a real
         // custom code stays a code.
-        const lotCode = batchDisplayLabel({ id: String(batch.id ?? batch.batch_id ?? 'batch'), lot_code: (batch.lot_code as string) ?? null, received_at: (batch.received_at as string) ?? null, batch_number: (batch.batch_number as number) ?? null }, tr('batch', 'Batch', 'Batch'))
+        const lotCode = batchDisplayLabel({ id: String(batch.id ?? batch.batch_id ?? 'batch'), lot_code: (batch.lot_code as string) ?? null, received_at: (batch.received_at as string) ?? null, batch_number: (batch.batch_number as number) ?? null }, tr('batch', 'Batch', 'បាច់'))
         const expiryDate = String(batch.expiry_date || tr('no_expiry', 'No expiry', 'No expiry'))
         const quantity = Number(batch.quantity || 0)
         return (
