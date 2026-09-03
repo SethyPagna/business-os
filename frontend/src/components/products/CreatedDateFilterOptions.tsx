@@ -48,7 +48,12 @@ export function buildCreatedDateFilterSection({
 
   return {
     id: 'created',
-    label: T('created', 'Created'),
+    // The section id stays 'created' (state keys, tests and callers use it),
+    // but the LABEL now says what it actually filters on: this range is sent
+    // as batchDateFrom/batchDateTo and scopes by product_batches.received_at,
+    // never by product.created_at. Calling it "Created" was the last place the
+    // batch -> received date rename had not reached.
+    label: T('received_date', 'Received date'),
     summary,
     active,
     render: () => (
