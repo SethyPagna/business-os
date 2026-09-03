@@ -68,6 +68,10 @@ Two rules learned the hard way, both from real incidents in this file's own hist
 
 ## Status snapshot — Aug 31 2026
 
+- **✅ SUPERSEDED Sep 3 by session business-os-v1-5d (Part 583): committed HEAD `90568d35` now CONTAINS the fees
+  lane and `0105`, is a strict superset of production, and is certified green. Migrations in HEAD stop at `0105`, which
+  prod already applied, so a Stage-2 deploy from HEAD applies ZERO migrations. Read the next bullet as history only.**
+
 - **⚠️ PRODUCTION IS AHEAD OF COMMITTED HEAD (Sep 2 2026, 17:49 UTC) — reference to re-verify; written Sep 3 by session
   business-os-v1-80 after 6d's alert, confirmed from two angles (wrangler `deployments list` + remote `d1_migrations`,
   read-only; and the sealed record under `outputs/01a061f6-6bb2-7b33-8856-4710816f39bf/pre-change-snapshot-20260902/`
@@ -120,6 +124,88 @@ Two rules learned the hard way, both from real incidents in this file's own hist
 ---
 
 ## Current status
+
+**🔎 FULL-STATE AUDIT + HEAD CERTIFICATION (Sep 3, session business-os-v1-5d, main tree, COORDINATOR — Part 583; reference to re-verify).**
+Ask: "check bos-rc and bos-rc-worker… know what is in progress, committed, done, halfway, not started… update progress.md… then deploy what can be deployed."
+
+**A. The RC worktrees were moved and are now restored.** The user had moved `bos-rc/` and `bos-rc-workers/` INTO
+`business-os-v1/`, which broke all 41 registered worktrees (`git worktree list` read `prunable` for every one) and left
+41 full copies of the codebase untracked inside the repo. Both were moved back to `C:\Users\mrkl6\Downloads\`.
+`git worktree list` now reports **0 prunable**. No branch or commit was lost — the worktree dirs are checkouts, the work
+lives in the refs. **One remnant:** `hf-adjust-fail` is split across `business-os-v1/bos-rc-workers/hf-adjust-fail/`
+(≈1,145 files) and `Downloads/bos-rc-workers/hf-adjust-fail/` (133 files); a Windows file lock (`…/frontend`) blocked the
+last move and the delete/re-move was refused by the permission classifier. Its branch `hf/adjust-fail` @ `7f58077a` is
+intact and its work-tree diff vs the branch tip is **pure deletions** (i.e. nothing uncommitted was lost). Safe to delete
+both halves once whatever holds the lock is closed.
+
+**B. Committed HEAD `90568d35` is CERTIFIED GREEN and is a strict superset of production — deployable with ZERO migrations.**
+Certified in an isolated worktree with a real `npm ci` (not the dirty tree). Results: frontend `tsc` exit 0 · cloudflare
+`tsc` exit 0 · every frontend test file swept, **no RED** · **161/161** worker tests green · real `vite build` ✓ 20.72s.
+`main` == `origin/main` (0/0, fully pushed). Prod base `57d8f1a2` **is an ancestor of HEAD** (verified), and the
+fees/delivery-contact lane that blocked Stage 2 — `routes/fees.ts`, `lib/salesAnalytics.ts`, `feesTransport.ts`,
+`DeliveryContactReportModal.tsx` **and `0105_fee_delivery_contacts.sql`** — is now committed (`3bf58d6c` + `835a99f8`).
+**Migrations in HEAD stop at `0105`, which production already applied (remote `d1_migrations` id 105) → a deploy from
+HEAD applies NO migration and touches NO data.** The f23db0f0 board line ("no Stage-2 from HEAD") is therefore
+**SUPERSEDED**. HEAD ships beyond prod: `69ed7a1f` Products "cannot save" fix · `f1436b08` `/products/filters`
+permission gate (security) · `352ed476` RenameCascadeModal z-index · `aa59016f` + `98f8ee79` Telegram receipt/transfer/
+return alerts · `012eef90` Workers Logs · `aae18fba` chunk-load recovery.
+
+**C. One real red on HEAD: `verify:i18n` exits 1 — 30 keys unresolved in BOTH `en.json` and `km.json`** (`reset_2fa`,
+`otp_recovery_*`, `drive_restore_stage_*`, `start_camera`, `view_image`, `new_transfer`, `transfer_immutable_hint`,
+`stock_session_*`, `receipt_cost`, `your_current_password`, `confirm_*_details`, `batch_quantity_change_note`,
+`barcode_not_recorded`, `camera_permission_ready`). Pre-existing (flagged Part 580), so it is already live in production.
+Session 6d's prepared `outputs/audit-6d-20260903/i18n-30-keys.patch` **applies cleanly to `90568d35`**
+(`git apply --check` exit 0) and touches 8 files (both lang packs + FastStockInModal, Inventory, ManageBatchesModal,
+ReceiveBatchModal, StockInSessionsSection, Users, OtpModal). Never folded in by d9 — it is the cheapest real win open.
+
+**D. The working tree holds ~6 lanes of ORPHANED, UNDOCUMENTED work — 63 tracked files, +1,465/−489, owned by NOBODY.**
+Every session named in the board (6d, 97, d9) is gone; the two live peers (`claude-swap-dc` ×2) are in a different
+checkout and claimed nothing here. The content, identified from the diff: (1) **return-with-replacement-sale**
+(`routes/returns.ts` +235, `NewReturnModal` +70, untracked `0106_return_replacement_sales.sql`, ~10 `replacement_*`
+i18n keys) — the largest lane, and **it appears in NO session-log Part**; (2) product identity / duplicates / "Conflicts"
+(`productIdentity.ts` +86, `productGrouping.ts` +45); (3) receipt extra-dark bold print (`PrintSettings` +43,
+`printReceipt` +27); (4) app-update prompt (`App.tsx` +104, untracked `utils/appUpdate.ts`); (5) transfer scan
+(`TransferModal` +69); (6) barcode-scanner / ColumnChooser / products-surface UI. Working-tree `SaleDetailModal.tsx`
+(`bac77954`) **matches no branch** — this is a third state, not a checkout of any lane. **Snapshotted non-destructively**
+to the scratchpad (`ORPHANED-worktree-tracked.patch`, 274,860 bytes, + the untracked migration and `appUpdate.ts`);
+the working tree was NOT modified. **Nothing here is verified — it must not be committed or deployed on trust.**
+
+**E. `rc/coordinated-2026-09-02` is the big unmerged body of work: 149 ahead / 29 behind main, 257 files, +31,752/−10,716.**
+It carries reports (`routes/reports.ts` +552), plan tiers (`lib/planTier.ts` +460), barcode-import precedence, fuzzy
+product search, InventoryProductsSurface, HubSectionNav, businessWorkbookExport and the product-verification tooling.
+**Merge dry-run into main: only 4 conflicts** — `cloudflare/src/routes/inventory.ts`, `frontend/package.json`,
+`frontend/src/components/shared/RenameCascadeModal.tsx` (RC uses the `--z-modal-2` token, main uses `z-[1060]` — resolve
+toward the token) and `progress.md`. Tractable.
+
+**F. ⚠️ MIGRATION NUMBER COLLISION — `0106` is claimed twice.** `rc/coordinated-2026-09-02` (and `rc/p2-9-pwa`) carry
+`0106_barcode_aliases.sql`; the `hotfix/prod-2026-09-03` / `hf/*` family AND the uncommitted working tree carry
+`0106_return_replacement_sales.sql`. Worse, **the RC does not contain `0105_fee_delivery_contacts.sql` at all**, which is
+already APPLIED in production. Any RC merge must renumber its alias migration and re-base onto main's 0105. Per
+`79b6998f` the standing rule is **new migrations take 0108 or later** (0106 batch, 0107 hotfix).
+
+**G. Test-harness defect (not a regression): `cloudflare/scripts/test-inventory-adjust-set-pure.cjs` reads
+`'src/routes/inventory.ts'` and `'../frontend/…'` relative to CWD**, so it only passes when run from `cloudflare/`. Under
+the sweep command documented in CLAUDE.md (`cd cloudflare/scripts && for f in test-*.cjs; do node "$f"; done`) it dies
+ENOENT and reads as a RED. Run from `cloudflare/` it PASSES and the suite is 161/161. Fix the test's paths or fix the
+documented command — until then this red is a false alarm that will keep costing sessions time.
+
+**H. Correction to the trailing Sep-1 note at the bottom of this file:** its claim that `--ignoreConfig` fixed the
+`tsc` test failures is FALSE and was already retracted in `CHECKPOINT.md` — no TypeScript version has that flag; the
+real fix was removing it and restoring the executable bit on `cloudflare/node_modules/.bin/tsc`. Left in place rather
+than deleted (it is an uncommitted in-flight line), but do not act on it.
+
+**NEW USER ASKS logged this session (not started):** (1) **Sales — add products to an existing sale** (customers add items
+after the sale is rung; the sale and its totals must update); (2) **redesign the sale "click for more details" view**
+(`SaleDetailModal.tsx`); (3) **receipt: drop the KHR line from per-item, discount, membership discount and delivery**,
+keeping KHR only on the Grand Total, and (4) **relabel "Driver" → "Delivery"**. On (3): the template flags already exist
+(`show_item_khr`, `show_discount_khr`, `show_membership_discount_khr`, `show_delivery_khr`, all defaulting `true` in BOTH
+`receipt-settings/constants.ts` AND `utils/receiptAppliedConfig.ts` — a duplicated default that must be changed in both).
+**Flipping the defaults will NOT change the user's live receipt**, because `normalizeReceiptTemplate` merges
+`{...DEFAULT, ...saved}` and ReceiptSettings auto-saves the whole template — the business already has `true` persisted.
+Either the user toggles the four switches in Receipt Settings (no deploy needed) or a one-time normalization must flip
+the saved template. "Driver:" lives at `Receipt.tsx:205` (en) / `:233` (km) and `SaleDetailModal.tsx:417`.
+
+
 
 **✅ TELEGRAM TRANSFER/RETURN ALERTS + FEES-LANE REVIEW/COMMIT 2 + i18n-30-KEYS PATCH (Sep 3, session business-os-v1-6d, main tree, worker — Part 582; reference to re-verify).**
 Committed + pushed `98f8ee79` (Telegram events for `/transfer`, `/transfer-bulk`, inventory `/transfer`, customer +
@@ -9544,3 +9630,5 @@ POS.tsx along the way — no behavior change needed there).
 **CORRECTION (session-59, after coordinator 7b's read-only prod D1 verification): my earlier data-corruption claims in this note were REFUTED against CURRENT production and are WITHDRAWN — DO NOT act on them. Prod has EXACTLY two branches (Warehouse id1 + Shop id2), all 14,939 sales on Shop, ZERO NULL branch_id, subtotal_usd populated (SUM=$1,873,656.34, gross-sales computes fine). There is NO "Leang Cosmetic Shop" stray branch to merge and NO missing-subtotal problem — merging/deleting a branch here would DAMAGE clean prod. My false premises came from the LOCAL miniflare set (Main Store/Branch 2 + NULL branch_id = harmless dev data) plus the user's screenshot, which appears to predate a consolidation (or is a stale view). Canonical two-branch model (shop rings sales, warehouse doesn't) is CONFIRMED. Still-UNVERIFIED user-reported items (missing timestamps, supplier/stock inconsistencies, naming drift) need the SAME direct-prod verification before anyone acts.**
 
 **→ USER-REASSERTED DATA CONCERNS (logged via session-59, Sep 1 — NOTED for the data lane, NOT closed). After seeing the live dashboard the user reaffirms: (a) "time is not being written in many places", (b) supplier attribution wrong/blank, (c) stock off, (d) "calculations are not correct at all" — and reiterated they routed this data-corruption/error/loss concern to the fleet to coordinate. CRITICAL distinction so nobody marks this closed prematurely: coordinator 7b's read-only prod checks refuted the specific PRESENCE/integrity versions (sales created_at 0/14,939 missing; inventory_movements 0/21,375 missing; subtotal_usd populated, SUM=$1,873,656.34; 0 negative branch_stock/branch_batch_stock; 0 unnamed of 6,104; branches canonical = Warehouse id1 + Shop id2). BUT: "calculations are not correct" is a CORRECTNESS/RECONCILIATION claim that presence/null checks do NOT cover (e.g. does dashboard revenue = gross − discount − refund reconcile to the underlying sales? is COGS/profit right?), and "time not written" may mean a DIFFERENT timestamp field/surface than created_at (received date, stock-adjustment/transfer time, expiry). These stay OPEN — need a concrete offending record from the user OR a read-only reconciliation audit against prod before ANY data mutation. No prod writes without an explicit, specific user-confirmed target.**
+
+**\xe2\x86\x92 MERGE-VERIFICATION PASS (Sep 1, continued session): fixed all 4 pre-existing backend test failures at root cause (harness require-override gap for lib/businessDateWindow.ts in test-review-gate-pure.cjs; stale "misplaced stock" wording in test-route-permissions-pure.cjs vs source's already-correct "stock integrity"; TS 6.0.3 turning TS5112 into a hard error for test-stock-ledger-pure.cjs/test-stock-revert-pure.cjs, fixed with --ignoreConfig). File-by-file verified update_code.zip + business-os-update-20260901.zip against main: confirmed main-newer for compat.ts/inventory.ts route/Inventory.tsx/Products.tsx/StockAdjustModal.tsx/SalesDailyReport.tsx/test-image-normalize-pure.cjs + 4 frontend test files by reading real source (not assumed) -- kept main. Merged in the account-security/password-manager feature (users.ts, auth.ts, Users.tsx, UserProfileModal.tsx, Login.tsx, passwordManager.ts + tests) from the update package; per explicit user decision, REMOVED all primary-admin protection -- admins can now manage any admin account including the seeded primary admin, no account is special-cased. Wired passwordManagement.test.ts into test:utils. Fixed one genuinely stale pre-existing test (performanceLoadingUx.test.ts still asserted the old single-request CSV export shape) and one over-strict regex (actionStability.test.ts false-negatived on a legitimately-guarded multi-line ternary). Fixed zip-transfer node_modules corruption (0-byte files) via a clean frontend npm install. Full verification green: 147/147 backend tests + tsc clean, frontend tsc clean + full test:utils (858 checks) + a REAL vite build (not skipped) all pass. Two live bugs (branch Transfer button/function, "2Medium" search miss) still not investigated -- next up.**
