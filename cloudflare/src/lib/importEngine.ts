@@ -23,7 +23,7 @@
 // UPDATE (this session, correcting the paragraph above -- it had gone
 // stale and was actively misleading, having sent a full trace down a path
 // that turned out to already be built): products import DOES have a real
-import { normalizeProductGroupName, productDetailSignature, productIdentitySignature, resolveMergedPricing } from './productDetailRule'
+import { normalizeProductGroupName, productDetailSignature, productIdentitySignature, resolveMergedCost, resolveMergedPricing } from './productDetailRule'
 import { sanitizeImportedDescription } from './productDescriptionSections'
 // per-row mode system now, just via a different channel than
 // decisionsByRowNumber/policy_json -- BulkImportModal.tsx's review step
@@ -1533,8 +1533,39 @@ export async function classifyProducts(
     const isExactIdentity = (candidate: typeof existing[number] | null | undefined) => Boolean(candidate)
       && normalizeProductGroupName(candidate?.name) === normalizeProductGroupName(name)
       && productDetailSignature(candidate as unknown as Record<string, unknown>) === incomingDetails
+    const activeLotProductIds = productsByActiveLot.get(lower(data.lot_code)) || new Set<number>()
+    // True only when the active lot is what picked this product out of a set
+    // of same-identity candidates -- the receipt evidence the old same-batch
+    // exception carried, and the reason such a row adds stock instead of
+    // restating the catalog.
+    let matchedByLotEvidence = false
     let match = isExactIdentity(skuMatch) ? skuMatch : null
-    if (!match) match = sameNameBarcodeCandidates.find(isExactIdentity) || null
+    if (!match) {
+      // Since Sep 4 2026 identity is name + barcode, so EVERY candidate here
+      // has the same identity as this row and as each other: a catalog that
+      // offers more than one is carrying exact duplicates, left over from
+      // when a differing cost forked a child row.
+      //
+      // This used to be refused outright ("merge the exact duplicate batch
+      // ownership before importing") on the grounds that iteration order
+      // must never pick which product receives stock. The first half of that
+      // still holds and is honoured below; the refusal itself no longer
+      // does. Under the new rule the candidates ARE one product, awaiting a
+      // merge, and the products this fires on are exactly the ones the rule
+      // change exists to heal -- refusing would block restocks on precisely
+      // those. So the row is received, by evidence and never by chance:
+      // the active lot's owner when the batch names exactly one of them,
+      // otherwise the oldest row, which is the same survivor the
+      // merge-duplicates tool keeps.
+      const identical = sameNameBarcodeCandidates.filter(isExactIdentity)
+      const lotOwners = activeLotProductIds.size
+        ? identical.filter((candidate) => activeLotProductIds.has(Number(candidate.id)))
+        : []
+      matchedByLotEvidence = lotOwners.length === 1 && identical.length > 1
+      match = (lotOwners.length === 1 ? lotOwners[0] : null)
+        || identical.slice().sort((a, b) => Number(a.id) - Number(b.id))[0]
+        || null
+    }
 
     // A blank cost is unknown, not evidence that the cost is zero. It may
     // inherit only when name+barcode identifies exactly one catalog row;
@@ -1545,28 +1576,10 @@ export async function classifyProducts(
       match = sameNameSameBarcode[0]
     }
 
-    const activeLotProductIds = productsByActiveLot.get(lower(data.lot_code)) || new Set<number>()
-    const sameBatchCandidates = !match && barcode && activeLotProductIds.size
-      ? sameNameBarcodeCandidates.filter((candidate) => activeLotProductIds.has(Number(candidate.id)))
-      : []
-    // Never let iteration order choose an option when damaged/legacy data
-    // has attached the same active lot code to multiple same-name+barcode
-    // product rows. That is insufficient evidence for receipt ownership;
-    // the operator must reconcile the duplicates before any stock write.
-    if (sameBatchCandidates.length > 1) {
-      results.push({
-        rowNumber: row._rowNumber,
-        action: 'error',
-        identifier: sku || barcode || name,
-        existingId: null,
-        message: `Batch "${String(data.lot_code)}" belongs to ${sameBatchCandidates.length} products with this name and barcode; merge the exact duplicate batch ownership before importing.`,
-        changes: {},
-        data,
-      })
-      continue
-    }
-    const sameBatchCandidate = sameBatchCandidates[0] || null
-    if (sameBatchCandidate) match = sameBatchCandidate
+    // (The same-batch receipt exception that used to sit here is folded into
+    // the match resolution above. It could only ever fire when no candidate
+    // shared this row's name and barcode -- which, now that those two fields
+    // ARE the identity, is the same condition as having no candidate at all.)
 
     // An SKU match is no longer trusted unconditionally. Previously, a
     // matched SKU with a differing name was treated as a deliberate
@@ -1661,6 +1674,27 @@ export async function classifyProducts(
       ]))
     }
 
+    // Cost stopped being identity on Sep 4 2026, so a row whose cost differs
+    // from the matched product now merges into it instead of forking a child
+    // row -- and the stored cost becomes the mean of the distinct costs.
+    //
+    // Only when the row actually states a cost of its own, though. Two older
+    // rules own the other two cases and neither is being reopened here: a
+    // BLANK cost cell keeps the product's existing cost (see
+    // preserveExistingMoneyOnBlankCells and the 61-product cost wipe it was
+    // written for), and an explicit 0 in the file still lands as 0. Averaging
+    // is for costs that were recorded -- resolveMergedCost reads a 0 as "not
+    // recorded", which is right when folding two catalog rows and wrong as an
+    // answer to an operator who typed the zero.
+    const rowStatesACost = !costWasBlank
+      && ((Number(data.cost_price_usd) || 0) > 0 || (Number(data.cost_price_khr) || 0) > 0)
+    if (match && rowStatesACost) {
+      Object.assign(data, resolveMergedCost([
+        match as unknown as Record<string, unknown>,
+        data,
+      ]))
+    }
+
     // Reconcile the "Details" field-rule preset (see applyProductDetailFieldRules'
     // doc comment) before `data` is used for the changes diff below or for
     // the actual write in runImportApply -- both read off this same `data`
@@ -1718,9 +1752,20 @@ export async function classifyProducts(
       continue
     }
 
+    // A row that states a cost of its own and disagrees with the product it
+    // matched is a fresh receipt, not a restatement of the catalog: before
+    // Sep 4 2026 it would not have matched at all, it would have become its
+    // own child row keeping its own quantity. Now that it lands on the
+    // existing row, it has to ADD -- the default path below replaces the
+    // branch's quantity outright, which would throw the earlier receipt's
+    // units away. A row with a BLANK cost states nothing, so it keeps the
+    // long-standing replace semantics a stock-count file relies on.
+    const statesADifferentCost = Boolean(match) && !costWasBlank
+      && ((Number(data.cost_price_usd) || 0) !== (Number(match?.cost_price_usd) || 0)
+        || (Number(data.cost_price_khr) || 0) !== (Number(match?.cost_price_khr) || 0))
     const plannedMode = match && (requestedRowMode === 'merge_stock' || requestedRowMode === 'override_add' || requestedRowMode === 'override_replace')
       ? (requestedRowMode as 'merge_stock' | 'override_add' | 'override_replace')
-      : sameBatchCandidate && match?.id === sameBatchCandidate.id
+      : matchedByLotEvidence || statesADifferentCost
         ? 'merge_stock' as const
         : undefined
 
@@ -3884,17 +3929,21 @@ export type ProductImportSignatureInput = {
 // pre-allocated id below), not two products.
 //
 // The shared identity rule is exact and deliberately excludes selling/VIP
-// price: same normalized name + barcode + cost merges; a barcode OR cost
-// difference creates a sibling row. Branch never participates. A non-blank
-// barcode + explicit lot code is a narrowly scoped receipt exception: rows
-// for that exact batch share the first product option, without allowing the
-// later receipt to replace its catalog cost.
+// price AND cost: same normalized name + barcode merges, and only a barcode
+// difference creates a sibling row. Branch never participates.
+//
+// This used to carry its own exception -- a non-blank barcode plus an
+// explicit lot code returned a name|barcode|batch key -- so that two
+// receipts of one batch at two costs could share a product option back when
+// a cost difference otherwise forked a row. Cost stopped being identity on
+// Sep 4 2026, so that branch could no longer merge anything: all it could
+// still do was SPLIT one barcode into a row per lot code, which is exactly
+// what the user's rule forbids ("only diffeerent barcode creates new child
+// row... rest merge"). Lot codes belong to product_batches, which hang off
+// one product row by variant_product_id -- a batch was never a child row.
+// So the signature is now the identity rule, unmodified, and the apply path
+// creates or tops up one batch per lot beneath the single row.
 export function productImportRowSignature(d: ProductImportSignatureInput): string {
-  const barcode = String(d.barcode ?? '').trim().toLowerCase()
-  const lotCode = String(d.lot_code ?? '').trim().toLowerCase().replace(/\s+/g, ' ')
-  if (barcode && lotCode) {
-    return `${normalizeProductGroupName(d.name)}|bc:${barcode}|batch:${lotCode}`
-  }
   return productIdentitySignature(d)
 }
 
@@ -5134,7 +5183,12 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
           batchByProductAndLot.set(`${batch.variant_product_id}\u0001${lower(batch.lot_code)}`, { id: batch.id, received_at: batch.received_at })
         }
       }
-      const inBatchSignatureToId = new Map<string, { id: number; data: Record<string, unknown> }>()
+      // seedCost* is the FIRST row's cost as the file wrote it, kept apart
+      // from `data` because resolveMergedCost below rewrites data's cost to
+      // the running mean -- a third receipt has to be compared against the
+      // original figure, not against the average it is about to change.
+      const inBatchSignatureToId = new Map<string, { id: number; data: Record<string, unknown>; seedCostUsd: number; seedCostKhr: number }>()
+      const rowCost = (row: Record<string, unknown>, field: string): number => Number(row?.[field]) || 0
       for (const r of createRows) {
         const d = r.data as Record<string, unknown> & { branch_id: number | null }
         const signature = productImportRowSignature(d as unknown as ProductImportSignatureInput)
@@ -5145,8 +5199,23 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
           // Same barcode+batch may share one product option even when the
           // receipt cost differs. The first row seeds the option/lot; later
           // rows are additive receipts, not catalog-field replacements.
-          if (productIdentitySignature(earlier.data as ProductImportSignatureInput) !== productIdentitySignature(d as ProductImportSignatureInput)
-            && str(earlier.data.lot_code) && lower(earlier.data.lot_code) === lower(d.lot_code)) {
+          //
+          // The cost clause is what keeps S4-17 from losing stock. Before
+          // Sep 4 2026 two receipts of one article at two costs were two
+          // product rows, each keeping its own quantity. Now they fold into
+          // one row, and a fold with no plannedMode falls through to the
+          // legacy path further down, which REPLACES the branch's quantity
+          // instead of adding to it -- receipts of 5 and 3 would store 3.
+          // Two rows that disagree on cost are two receipts, so the fold is
+          // additive. Rows that agree on cost are unchanged from before:
+          // they folded then too, and still replace.
+          const costsDiffer = rowCost(d, 'cost_price_usd') !== earlier.seedCostUsd
+            || rowCost(d, 'cost_price_khr') !== earlier.seedCostKhr
+          // A different lot code is likewise a second receipt, not a
+          // restatement of the first -- and since the signature stopped
+          // splitting on lot code, those rows now land here too.
+          const lotsDiffer = lower(earlier.data.lot_code) !== lower(d.lot_code)
+          if (costsDiffer || lotsDiffer) {
             r.plannedMode = 'merge_stock'
           }
           // 9.2: snapshot the losing row's ORIGINAL values before the
@@ -5158,13 +5227,18 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
           // to BOTH rows' data, because the first row's INSERT and this
           // row's later UPDATE each write their own params and the update
           // runs last (statement order preserves row order).
-          const merged = resolveMergedPricing([earlier.data, d])
+          const merged = { ...resolveMergedPricing([earlier.data, d]), ...resolveMergedCost([earlier.data, d]) }
           Object.assign(earlier.data, merged)
           Object.assign(d, merged)
           continue
         }
         nextProductId += 1
-        inBatchSignatureToId.set(signature, { id: nextProductId, data: d })
+        inBatchSignatureToId.set(signature, {
+          id: nextProductId,
+          data: d,
+          seedCostUsd: rowCost(d, 'cost_price_usd'),
+          seedCostKhr: rowCost(d, 'cost_price_khr'),
+        })
         d.__importAssignedId = nextProductId
       }
       for (const r of actionable) {

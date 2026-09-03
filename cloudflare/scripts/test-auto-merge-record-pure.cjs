@@ -43,9 +43,12 @@ async function run() {
   })
 
   await check('the engine records the fold BEFORE pricing mutates the losing row, and writes ride the same batch', async () => {
-    // the snapshot happens inside the dedupe branch, before resolveMergedPricing
+    // the snapshot happens inside the dedupe branch, before resolveMergedPricing.
+    // Matched on the call, not on the whole assignment: the assignment gained a
+    // second spread (resolveMergedCost) on Sep 4 2026 and the ordering this
+    // guards did not change.
     const foldIndex = engineSource.indexOf('autoMergeRecords.push({ productId: earlier.id')
-    const pricingIndex = engineSource.indexOf('const merged = resolveMergedPricing([earlier.data, d])')
+    const pricingIndex = engineSource.indexOf('resolveMergedPricing([earlier.data, d])')
     assert.ok(foldIndex !== -1 && pricingIndex !== -1 && foldIndex < pricingIndex,
       'the losing-row snapshot must be taken before resolveMergedPricing mutates it')
     // internal keys never pollute the record

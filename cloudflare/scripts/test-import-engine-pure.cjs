@@ -329,29 +329,30 @@ assert.strictEqual(
   assert.strictEqual(merged.special_price_usd, 2.75, 'each price field resolves independently to its own highest')
 }
 
-// -- Test 5d: cost is identity even when a barcode exists. Different
-// receipt costs become sibling detail rows unless the DB-bound classifier
-// or the import rows carry the same explicit barcode+batch evidence.
+// -- Test 5d: cost is NOT identity, with or without a barcode, and neither
+// is the lot code. Since Sep 4 2026 only a different barcode forks a child
+// row; two receipts of one article at two costs, or from two batches, are
+// one row (the batches hang off it in product_batches).
 {
   const shopRow = { name: 'Blush Stick', barcode: '0689304186537', cost_price_usd: 18.5, cost_price_khr: 0, selling_price_usd: 30, selling_price_khr: 0, branch_id: 1 }
   const warehouseRow = { ...shopRow, cost_price_usd: 19.5, branch_id: 2 }
-  assert.notStrictEqual(
+  assert.strictEqual(
     productImportRowSignature(shopRow),
     productImportRowSignature(warehouseRow),
-    'barcoded rows with different costs are distinct child rows',
+    'barcoded rows with different costs are ONE row -- the costs average instead',
   )
   const sameBatchReceiptA = { ...shopRow, lot_code: '  LOT-SEP-01  ' }
   const sameBatchReceiptB = { ...warehouseRow, lot_code: 'lot-sep-01' }
   assert.strictEqual(
     productImportRowSignature(sameBatchReceiptA),
     productImportRowSignature(sameBatchReceiptB),
-    'same normalized name + barcode + explicit batch may share one option while retaining receipt-level costs',
+    'same normalized name + barcode + explicit batch is one product option',
   )
   const differentBatchReceipt = { ...warehouseRow, lot_code: 'LOT-SEP-02' }
-  assert.notStrictEqual(
+  assert.strictEqual(
     productImportRowSignature(sameBatchReceiptA),
     productImportRowSignature(differentBatchReceipt),
-    'a different batch cannot invoke the same-option receipt exception',
+    'a different lot code is a different BATCH under one row, never a child row',
   )
   // Same name + DIFFERENT barcode stays a separate child row.
   const childRow = { ...shopRow, barcode: '0689304186999' }
@@ -363,10 +364,10 @@ assert.strictEqual(
   // Barcode-less rows follow the same exact rule.
   const bareA = { ...shopRow, barcode: '' }
   const bareB = { ...bareA, cost_price_usd: 25 }
-  assert.notStrictEqual(
+  assert.strictEqual(
     productImportRowSignature(bareA),
     productImportRowSignature(bareB),
-    'barcode-less rows with different costs keep the conservative separate-row rule',
+    'barcode-less rows with different costs are one row too -- nothing else is a detail',
   )
 }
 
@@ -378,15 +379,31 @@ assert.notStrictEqual(
   'rows with different barcodes must NOT be merged',
 )
 
-// -- Test 7: different COST -> must NOT merge. Cost is a detail: it is what
-// was actually spent to buy the item, real money out, and must never be
-// silently replaced by another row's figure.
+// -- Test 7: different COST -> must MERGE, as of the Sep-4-2026 rule. Cost
+// is still real money out, so it is not discarded: the merged row carries
+// the mean of the distinct costs (resolveMergedCost), rounded up to 4dp.
+// This inverts the assertion that stood here before, which forked a child
+// row per purchase price and made the shelf show one article many times.
 const rowH = { ...rowA, cost_price_usd: 99.5 }
-assert.notStrictEqual(
+assert.strictEqual(
   productImportRowSignature(rowA),
   productImportRowSignature(rowH),
-  'rows with different cost prices must NOT be merged -- cost is a detail',
+  'rows differing only in cost must merge -- only the barcode is a detail',
 )
+
+// -- Test 7b: the fold that Test 7 now produces must ADD the second
+// receipt's units, not replace them. A folded row with no plannedMode falls
+// through to the legacy replace path, so runImportApply marks a
+// cost-differing or lot-differing fold as merge_stock at the point it folds.
+{
+  const engineSource = fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'importEngine.ts'), 'utf8')
+  const foldIndex = engineSource.indexOf('const earlier = inBatchSignatureToId.get(signature)')
+  const additiveIndex = engineSource.indexOf('if (costsDiffer || lotsDiffer) {')
+  assert.ok(foldIndex !== -1 && additiveIndex > foldIndex,
+    'the in-batch fold must decide merge_stock from a cost or lot difference')
+  assert.ok(engineSource.includes("r.plannedMode = 'merge_stock'"),
+    'and the additive mode must actually be the one it sets')
+}
 
 console.log('PASS productImportRowSignature merges true in-batch duplicates and keeps genuinely different rows apart')
 
@@ -1071,9 +1088,12 @@ assert.strictEqual(isD1CpuLimitError(new Error('Network request failed')), false
     assert.ok(results[0].data.lot_code, 'lot_code should still be derived from the defaulted received_date')
   }
 
-  // The same-batch receipt exception must be deterministic. One evidenced
-  // owner is safe; two same-name+barcode products claiming that active lot
-  // is an error, never a first-row-wins guess.
+  // Which product receives a receipt must be decided by evidence or by age,
+  // never by iteration order. Since Sep 4 2026 two same-name+barcode rows
+  // are exact duplicates awaiting a merge rather than two child rows, so a
+  // row naming them is received by the oldest instead of being refused --
+  // refusing would block restocks on precisely the products the new rule
+  // exists to heal. One evidenced lot owner still wins outright.
   {
     const existingProducts = [
       { id: 11, name: 'Batch Serum', sku: 'SERUM-A', barcode: 'BC-11', cost_price_usd: 1, cost_price_khr: 0, selling_price_usd: 5, selling_price_khr: 0, special_price_usd: 0, special_price_khr: 0, is_active: 1 },
@@ -1087,8 +1107,20 @@ assert.strictEqual(isD1CpuLimitError(new Error('Network request failed')), false
       ]),
       [incoming], 'job-ambiguous-batch', null, noImages,
     )
-    assert.strictEqual(ambiguous[0].action, 'error', 'multiple candidate owners of one active batch must block the row')
-    assert.match(ambiguous[0].message, /belongs to 2 products/, 'the conflict should explain the exact ambiguity')
+    assert.strictEqual(ambiguous[0].action, 'update', 'two owners of one active batch no longer block the row')
+    assert.strictEqual(ambiguous[0].existingId, 11, 'with the lot evidence tied, the OLDEST duplicate receives it')
+    assert.strictEqual(ambiguous[0].plannedMode, 'merge_stock', 'and it is a receipt: it adds stock, it does not restate the catalog')
+
+    // Deterministic, not order-dependent: the same product wins when the
+    // candidates arrive the other way round.
+    const reversed = await classifyProducts(
+      makeFakeProductsDb(existingProducts.slice().reverse(), undefined, [
+        { variant_product_id: 12, lot_code: '09012026' },
+        { variant_product_id: 11, lot_code: '09012026' },
+      ]),
+      [incoming], 'job-ambiguous-batch-reversed', null, noImages,
+    )
+    assert.strictEqual(reversed[0].existingId, 11, 'candidate order must not change who receives the row')
 
     const unique = await classifyProducts(
       makeFakeProductsDb(existingProducts, undefined, [{ variant_product_id: 11, lot_code: '09012026' }]),
