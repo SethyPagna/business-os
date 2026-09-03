@@ -1,5 +1,6 @@
 import { todayStr } from '../../utils/dateHelpers.ts'
 import type { FilterSection } from '../shared/FilterMenu'
+import DateEntryInput from '../shared/DateEntryInput.tsx'
 
 // "Created" filter section for the Products page -- a real date range sent
 // to the server as batchDateFrom/batchDateTo (see routes/products.ts's
@@ -56,27 +57,29 @@ export function buildCreatedDateFilterSection({
           <label htmlFor="products-created-from-date" className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-300">
             {T('start_date', 'Start Date')}
           </label>
-          <input
+          {/* Typed, not a native picker (Sep 3) -- the same Start -> End
+              entry rule as every other date range in the app. */}
+          <DateEntryInput
             id="products-created-from-date"
-            type="date"
-            className="input"
+            t={t}
+            ariaLabel={T('start_date', 'Start Date')}
             value={createdDateFrom}
             max={createdDateTo || undefined}
-            onChange={(event) => setCreatedDateFrom(event.target.value)}
+            onChange={(iso) => setCreatedDateFrom(iso)}
           />
         </div>
         <div>
           <label htmlFor="products-created-to-date" className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-300">
             {T('end_date', 'End Date')}
           </label>
-          <input
+          <DateEntryInput
             id="products-created-to-date"
-            type="date"
-            className="input"
+            t={t}
+            ariaLabel={T('end_date', 'End Date')}
             value={createdDateTo}
             min={createdDateFrom || undefined}
             max={todayStr()}
-            onChange={(event) => setCreatedDateTo(event.target.value)}
+            onChange={(iso) => setCreatedDateTo(iso)}
           />
         </div>
       </div>

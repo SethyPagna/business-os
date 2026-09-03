@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useApp as useAppHook } from '../../AppContext.tsx'
 import AppSelect from '../shared/AppSelect.tsx'
 import SearchInput from '../shared/SearchInput.tsx'
+import DateEntryInput from '../shared/DateEntryInput.tsx'
 import { normalizePriceValue } from '../../utils/pricing.ts'
 import { getFeeLabels, type FeeLabelSuggestion, type FeeRecord, type FeeType } from '../../api/feesTransport.ts'
 import { todayStr } from '../../utils/dateHelpers.ts'
@@ -400,14 +401,16 @@ export default function FeeForm({ fee, labelSuggestions = [], onSave, onClose }:
           <label htmlFor="fee-date" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
             {t('fee_date') || 'Date'} *
           </label>
-          <input
+          {/* Typed, not a native picker (Sep 3) -- an expense date is keyed
+              as digits like every other date in the app. The form's own
+              touched/dateInvalid gate still runs on the committed value. */}
+          <DateEntryInput
             id="fee-date"
-            className="input"
-            type="date"
+            t={t}
+            ariaLabel={t('fee_date') || 'Date'}
             value={form.fee_date}
-            onChange={(event) => set('fee_date', event.target.value)}
-            onBlur={() => setTouched(true)}
-            aria-invalid={touched && dateInvalid ? 'true' : 'false'}
+            onChange={(iso) => { set('fee_date', iso); setTouched(true) }}
+            onInvalidChange={(invalid) => { if (invalid) setTouched(true) }}
           />
         </div>
         <div>

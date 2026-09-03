@@ -4,6 +4,7 @@ import { createPortal } from 'react-dom'
 import { beginSingleAction, finishSingleAction } from '../../../utils/actionGuards.ts'
 import { withLoaderTimeout } from '../../../utils/loaders.ts'
 import AppSelect, { type AppSelectOption } from '../../shared/AppSelect.tsx'
+import DateEntryInput from '../../shared/DateEntryInput.tsx'
 import { getInventoryReasons, saveInventoryReasons } from '../../../api/methods.ts'
 // Same saved-reason catalog + "Manage reasons" flow BranchStockAdjuster.tsx
 // (product edit page's per-branch adjuster) and Inventory's own "Adjust
@@ -463,12 +464,15 @@ export default function BulkAddStockModal({ productIds, products, branches, user
               <label htmlFor="bulk-add-stock-received-date" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
                 {t('received_date') || 'Received date'}
               </label>
-              <input
+              {/* Typed, not a native picker (Sep 3) -- the bulk add's own
+                  received date, which derives every lot code it creates. */}
+              <DateEntryInput
                 id="bulk-add-stock-received-date"
-                className="input text-sm"
-                type="date"
+                className="text-sm"
+                t={t}
+                ariaLabel={t('received_date') || 'Received date'}
                 value={receivedDate}
-                onChange={(event) => setReceivedDate(event.target.value)}
+                onChange={(iso) => setReceivedDate(iso)}
               />
               <div className="mt-1 text-[11px] text-gray-400">
                 {t('batch_code_preview') || 'Batch code'}: {dateToBatchCode(receivedDate) || '--'}

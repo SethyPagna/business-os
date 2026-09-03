@@ -7,6 +7,7 @@ import { getProductBatches, type ProductBatch } from '../../api/batchesTransport
 import { batchDisplayLabel } from '../../utils/batchLabel.ts'
 import { dateToBatchCode } from '../../utils/batchCode.ts'
 import SupplierPickerField from '../shared/SupplierPickerField.tsx'
+import DateEntryInput from '../shared/DateEntryInput.tsx'
 
 type MoneyFormatter = (value: number) => string
 
@@ -473,13 +474,17 @@ export default function InventoryStockModals({
               {adjustForm.type === 'add' && (unlockPricing || (showBatchPicker && adjustForm.batch_id === 'new')) ? (
                 <div>
                   <label className="text-xs font-medium text-gray-600 dark:text-gray-400 block mb-1">{tr('received_date', 'Received date')}</label>
-                  <input
+                  {/* Typed, not a native picker (Sep 3): staff key the date
+                      on a numeric pad, so 9032026 has to land as 09/03/2026
+                      -- and this IS the add/remove/set stock dialog's date. */}
+                  <DateEntryInput
                     id="inventory-adjust-received-date"
                     name="inventory_adjust_received_date"
-                    className="input text-sm"
-                    type="date"
+                    className="text-sm"
+                    t={t}
+                    ariaLabel={tr('received_date', 'Received date')}
                     value={adjustForm.received_date}
-                    onChange={e => setAdjustForm(f => ({ ...f, received_date: e.target.value }))}
+                    onChange={iso => setAdjustForm(f => ({ ...f, received_date: iso }))}
                   />
                   <div className="mt-1 text-[11px] text-gray-400">
                     {tr('batch_code_preview', 'Batch code', 'កូដបាច់')}: {dateToBatchCode(adjustForm.received_date) || '--'}
