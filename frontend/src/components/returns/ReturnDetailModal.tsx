@@ -301,7 +301,6 @@ export default function ReturnDetailModal({ ret, onClose, onEdit, fmtUSD, fmtKHR
               <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-emerald-600 dark:text-emerald-400">
                 🔁 {tr('replacement_sale_items_label', 'Replacement sale items')} ({replacementItems.length})
               </div>
-<<<<<<< HEAD
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead className="border-y border-emerald-200 text-[11px] font-semibold uppercase tracking-wide text-emerald-700/80 dark:border-emerald-800 dark:text-emerald-300/80">
