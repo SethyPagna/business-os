@@ -299,7 +299,10 @@ export default function ProductDetailReport({ productId, barcode, t, fmtUSD }: {
             const expanded = openMovementId === row.id
             const typeLabel = translateMovementType(row.movement_type, t as (key: string) => string)
             const batchLabel = row.batch_id
-              ? batchDisplayLabel({ id: row.batch_id, lot_code: row.batch_lot_code, received_at: row.batch_received_at })
+              // batchWord is the fallback prefix for a pre-redesign row that has
+              // neither a received_at nor a date-shaped lot code; omitting it
+              // renders the English default 'Batch' to a Khmer user.
+              ? batchDisplayLabel({ id: row.batch_id, lot_code: row.batch_lot_code, received_at: row.batch_received_at }, tr('batch', 'Batch'))
               : null
             return (
               <div key={row.id}>
@@ -458,7 +461,7 @@ export default function ProductDetailReport({ productId, barcode, t, fmtUSD }: {
                   <p className="py-1 text-center text-gray-400">{tr('no_data_found', 'No data found')}</p>
                 ) : drill.map((lot) => (
                   <div key={lot.id} className="flex items-center justify-between gap-2">
-                    <span className="detail-scroll-text min-w-0 flex-1 text-gray-500">{batchDisplayLabel({ id: lot.id, lot_code: lot.lot_code, received_at: lot.received_at })}</span>
+                    <span className="detail-scroll-text min-w-0 flex-1 text-gray-500">{batchDisplayLabel({ id: lot.id, lot_code: lot.lot_code, received_at: lot.received_at }, tr('batch', 'Batch'))}</span>
                     <span className="shrink-0 whitespace-nowrap text-gray-400">{lot.received_at ? fmtDate(lot.received_at) : '--'}</span>
                     <span className="shrink-0 tabular-nums font-semibold text-gray-700 dark:text-gray-200">×{lot.total_qty}</span>
                     <span className="shrink-0 tabular-nums text-gray-500">{lot.unit_cost_usd != null ? fmtUSD(lot.unit_cost_usd) : '--'}</span>
