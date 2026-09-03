@@ -11,6 +11,28 @@ const APP_SHELL_VERSION = `business-os-app-shell-${BUILD_HASH}`
 const APP_SHELL_CACHE = APP_SHELL_VERSION
 const STATIC_CACHE = `business-os-static-${BUILD_HASH}`
 const APP_SHELL_URLS = ['/', '/index.html', '/offline.html', '/manifest.json', '/portal-manifest.json', '/business-os-precache.json', '/icon.png', '/icon-192.png', '/icon-512.png', '/icon-192-maskable.png', '/icon-512-maskable.png', '/apple-touch-icon.png', '/leang-cosmetics-icon-192.png', '/leang-cosmetics-icon-512.png', '/leang-cosmetics-icon-192-maskable.png', '/leang-cosmetics-icon-512-maskable.png', '/leang-cosmetics-apple-touch-icon-v1.png']
+// Self-hosted web fonts (P2-1 moved them off the Google CDN into public/fonts).
+// They are NOT content-hashed and they are NOT part of the rollup bundle, so
+// neither the /assets/ precache nor business-os-precache.json covers them: a
+// cold offline load re-requested every face over the network, failed, and fell
+// back to the OS default -- Latin text reflowed and Khmer rendered in whatever
+// the device happened to have. offline.html has the same problem and no JS to
+// recover with. Precached here, and additionally matched by prefix in
+// isCacheableStaticPath so a face added later is still runtime-cached rather
+// than silently uncovered. standaloneNavigation.test.ts fails if a .woff2 under
+// public/fonts is missing from this list.
+const FONT_URLS = [
+  '/fonts/inter/inter-latin-400-normal.woff2',
+  '/fonts/inter/inter-latin-500-normal.woff2',
+  '/fonts/inter/inter-latin-600-normal.woff2',
+  '/fonts/source-serif-4/source-serif-4-latin-500-normal.woff2',
+  '/fonts/source-serif-4/source-serif-4-latin-600-normal.woff2',
+  '/fonts/noto-sans-khmer/noto-sans-khmer-khmer-400-normal.woff2',
+  '/fonts/noto-sans-khmer/noto-sans-khmer-khmer-500-normal.woff2',
+  '/fonts/noto-sans-khmer/noto-sans-khmer-khmer-600-normal.woff2',
+  '/fonts/noto-serif-khmer/noto-serif-khmer-khmer-500-normal.woff2',
+  '/fonts/noto-serif-khmer/noto-serif-khmer-khmer-600-normal.woff2',
+]
 const OUTBOX_SYNC_TAG = 'business-os-sync-outbox'
 const DB_NAME = 'BusinessOS'
 const OFFLINE_SALE_QUEUE_CHANNEL = 'sales:create'
@@ -160,6 +182,10 @@ function isValidStaticResponse(request, response) {
   const contentType = String(response.headers.get('content-type') || '').toLowerCase()
   if (pathname.endsWith('.js')) return contentType.includes('javascript') || contentType.includes('ecmascript')
   if (pathname.endsWith('.css')) return contentType.includes('text/css')
+  // A missing font under an SPA fallback answers 200 text/html. Caching that
+  // as a font would poison the cache for the life of the build and render
+  // every glyph in the OS fallback face, offline and online alike.
+  if (pathname.endsWith('.woff2')) return contentType.includes('font') || contentType.includes('application/octet-stream')
   return true
 }
 
@@ -242,6 +268,11 @@ async function precacheAppShell() {
   // new worker from installing on a memory- or network-constrained iPhone.
   const optionalAssets = [...new Set(generatedAssets.filter((url) => !requiredEntryAssets.includes(url)))]
   await mapWithConcurrency(optionalAssets, PRECACHE_CONCURRENCY, (url) => cacheVerifiedStaticAsset(staticCache, url))
+  // Fonts go into STATIC_CACHE, not APP_SHELL_CACHE, because STATIC_CACHE is
+  // what the fetch handler reads for non-navigation requests. Optional for the
+  // same reason the lazy chunks above are: one 404 font must never leave a new
+  // worker stuck in "waiting" on a constrained iPhone.
+  await mapWithConcurrency(FONT_URLS, PRECACHE_CONCURRENCY, (url) => cacheVerifiedStaticAsset(staticCache, url))
   await cache.put(CACHE_METADATA_URL, new Response(JSON.stringify({
     version: APP_SHELL_VERSION,
     installedAt: Date.now(),
@@ -566,6 +597,7 @@ function isNeverCachedPath(pathname) {
 
 function isCacheableStaticPath(pathname) {
   return pathname.startsWith('/assets/')
+    || pathname.startsWith('/fonts/')
     || pathname === '/icon.png'
     || pathname === '/icon-192.png'
     || pathname === '/icon-512.png'
@@ -583,8 +615,13 @@ function isCacheableStaticPath(pathname) {
     || pathname === '/theme-bootstrap.js'
 }
 
+// Cache-first (stale-while-revalidate) rather than network-first. True of the
+// hashed bundle by construction, and true of /fonts/** in practice: the files
+// are immutable within a build, and a font served network-first blocks text
+// on a round trip that offline never completes.
 function isHashedBuildAsset(pathname) {
   return pathname.startsWith('/assets/')
+    || pathname.startsWith('/fonts/')
 }
 
 async function appShellFallback(request) {
