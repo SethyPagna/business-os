@@ -1,4 +1,4 @@
-import { useEffect, useState, type Dispatch, type SetStateAction } from 'react'
+import { useEffect, useState, type Dispatch, type ReactNode, type SetStateAction } from 'react'
 import { createPortal } from 'react-dom'
 import X from 'lucide-react/dist/esm/icons/x.js'
 import Info from 'lucide-react/dist/esm/icons/info.js'
@@ -104,6 +104,13 @@ type InventoryStockModalsProps = {
   adjustCurrentQuantity: number
   adjustForm: AdjustForm
   adjustModal: InventoryProduct | null
+  // Optional resilience slots used by the Products-page adjust flow
+  // (StockAdjustModal.tsx): an inline notice pinned under the form when the
+  // last submit FAILED, and a submit label that reads "Retry (n)" while a
+  // failed row is still unsaved. Both default to the previous behaviour, so
+  // Inventory.tsx and every other caller stay unchanged.
+  adjustNotice?: ReactNode
+  adjustSubmitLabel?: ReactNode
   adjustSaving: boolean
   adjustTargetOptions: InventoryProduct[]
   adjustTargetSelectOptions: AppSelectOption[]
@@ -137,6 +144,8 @@ export default function InventoryStockModals({
   adjustCurrentQuantity,
   adjustForm,
   adjustModal,
+  adjustNotice = null,
+  adjustSubmitLabel,
   adjustSaving,
   adjustTargetOptions,
   adjustTargetSelectOptions,
@@ -268,7 +277,7 @@ export default function InventoryStockModals({
                 <div className="truncate text-xs text-gray-400 mt-0.5">{adjustModal.name} - Current: {adjustCurrentQuantity} {adjustModal.unit}</div>
               </div>
               <div className="flex shrink-0 items-center gap-1">
-                <button type="button" onClick={onAdjust} className="btn-primary min-h-9 max-w-24 truncate px-3 py-1.5 text-xs sm:hidden" disabled={adjustSaving}>{adjustSaving ? (t('saving') || 'Saving...') : t('save')}</button>
+                <button type="button" onClick={onAdjust} className="btn-primary min-h-9 max-w-24 truncate px-3 py-1.5 text-xs sm:hidden" disabled={adjustSaving}>{adjustSaving ? (t('saving') || 'Saving...') : (adjustSubmitLabel || t('save'))}</button>
                 <button type="button" onClick={onCloseAdjust} className="flex h-8 w-8 items-center justify-center text-gray-400 hover:text-gray-600" aria-label={t('close') || 'Close'}>
                   <X className="h-4 w-4" />
                 </button>
@@ -537,8 +546,11 @@ export default function InventoryStockModals({
                   placeholder={t('reason_placeholder')}
                   value={adjustForm.reason} onChange={e => setAdjustForm(f=>({...f, reason:e.target.value}))} />
               </div>
+              {/* The failed-submit reason sits with the values that produced
+                  it, above the actions, so it survives the toast. */}
+              {adjustNotice}
               <div className="hidden gap-2 pt-1 sm:flex">
-                <button onClick={onAdjust} className="btn-primary flex-1 text-sm" disabled={adjustSaving}>{adjustSaving ? (t('saving') || 'Saving...') : t('save')}</button>
+                <button onClick={onAdjust} className="btn-primary flex-1 text-sm" disabled={adjustSaving}>{adjustSaving ? (t('saving') || 'Saving...') : (adjustSubmitLabel || t('save'))}</button>
                 <button onClick={onCloseAdjust} className="btn-secondary text-sm" disabled={adjustSaving}>{t('cancel')}</button>
               </div>
             </div>

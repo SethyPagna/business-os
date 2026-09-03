@@ -14,6 +14,18 @@ import { getBranches } from '../../../api/branchTransport.ts'
 import { getInventoryReasons, saveInventoryReasons } from '../../../api/methods.ts'
 import { useDebouncedValue } from '../../../utils/useDebouncedValue.ts'
 import { beginSingleAction, finishSingleAction } from '../../../utils/actionGuards.ts'
+import {
+  applyRowOutcome,
+  browserStockStorage,
+  classifyStockAdjustFailure,
+  createRow,
+  dropFailedStockAttempt,
+  emitFailedAttemptsChanged,
+  hasUnsavedFailures,
+  recordFailedStockAttempt,
+  submitButtonState,
+  type StockAdjustRow,
+} from '../../../utils/stockAdjustOutcome.ts'
 
 // Full-featured "Adjust stock" flow for the Products page "Stock Changes"
 // ledger. It REUSES Inventory's own presentational adjust modal
@@ -108,6 +120,19 @@ type Branch = {
 type StockAdjustModalProps = {
   initialType?: 'add' | 'remove' | 'set'
   initialProduct?: Record<string, any> | null
+  // Reopening an UNSAVED failed attempt from the Stock Change section: the
+  // row carries exactly the values that failed, so the operator lands back on
+  // the same form instead of retyping it. `resumeAttemptId` is the persisted
+  // record this modal clears once the retry commits.
+  resumeRow?: {
+    type?: string
+    quantity?: number
+    reason?: string
+    branchId?: number | null
+    batchId?: number | string | null
+    receivedDate?: string
+  } | null
+  resumeAttemptId?: string | null
   onClose: () => void
   onDone: () => void
   t: (key: string) => string
@@ -136,7 +161,7 @@ function stockQtyOf(product?: Record<string, any> | null): number {
   return Number(product.stock_quantity || 0)
 }
 
-export default function StockAdjustModal({ initialType = 'add', initialProduct = null, onClose, onDone, t }: StockAdjustModalProps) {
+export default function StockAdjustModal({ initialType = 'add', initialProduct = null, resumeRow = null, resumeAttemptId = null, onClose, onDone, t }: StockAdjustModalProps) {
   const { fmtUSD, fmtKHR, usdSymbol, user, notify } = useApp() as AppContextSlice
 
   const isKhmer = /[ក-៿]/.test(t('cancel') || '')
@@ -285,6 +310,21 @@ export default function StockAdjustModal({ initialType = 'add', initialProduct =
   // here (opening the review dialog); commitAdjust does the actual write once
   // the dialog is confirmed. null = no confirm pending.
   const [pendingAdjust, setPendingAdjust] = useState<Parameters<typeof adjustStock>[0] | null>(null)
+  // Failure resilience (user, Sep 3: a failed adjustment "should not close the
+  // action ... so user can edit the failed to correct"). `rows` is the
+  // row-outcome list from utils/stockAdjustOutcome.ts -- one row here, since
+  // POST /api/inventory/adjust commits exactly one product per call, but the
+  // same reducer the bulk surface uses so the rule is one rule. A row that
+  // reached 'done' is never resubmitted; a failed row keeps its request
+  // verbatim and carries the server's reason for inline display.
+  const [rows, setRows] = useState<StockAdjustRow<Parameters<typeof adjustStock>[0]>[]>([])
+  const [confirmDiscard, setConfirmDiscard] = useState(false)
+  const attemptIdRef = useRef<string>(resumeAttemptId || `attempt-${Date.now().toString(36)}`)
+  const resumeRef = useRef(resumeRow)
+  const storage = useMemo(() => browserStockStorage(), [])
+  const userKey = user?.id ?? user?.username ?? null
+  const failedRow = rows.find((row) => row.status === 'failed') || null
+  const submitState = submitButtonState(rows)
 
   // Initialize adjustForm exactly like Inventory.openAdjust once a product
   // is picked (pricingLocked true, prices from the product, branch = default).
@@ -313,6 +353,22 @@ export default function StockAdjustModal({ initialType = 'add', initialProduct =
       supplier_id: '',
       supplier_name: '',
     })
+    // Resuming an unsaved failed attempt: put back exactly what the operator
+    // had typed (type, quantity, reason, branch, lot, date) on top of the
+    // freshly seeded form, once.
+    const resume = resumeRef.current
+    if (resume) {
+      resumeRef.current = null
+      setAdjustForm((prev) => ({
+        ...prev,
+        type: resume.type || prev.type,
+        quantity: resume.quantity != null ? resume.quantity : prev.quantity,
+        reason: resume.reason || prev.reason,
+        branch_id: resume.branchId != null ? String(resume.branchId) : prev.branch_id,
+        batch_id: resume.batchId != null ? resume.batchId : prev.batch_id,
+        received_date: resume.receivedDate || prev.received_date,
+      }))
+    }
   }, [defaultBranch, initialType])
 
   // When opened from a product detail card, skip the product-picker step and
@@ -406,33 +462,107 @@ export default function StockAdjustModal({ initialType = 'add', initialProduct =
     // Part 563: don't write yet -- park the validated request and open the
     // review dialog. commitAdjust runs the actual write once confirmed.
     setPendingAdjust(adjustmentRequest)
+    // Keep the row's identity across a retry: an edited-and-resubmitted failed
+    // row stays the SAME rowId, so the outcome list never grows a phantom
+    // duplicate and a committed row can never be re-entered.
+    setRows((prev) => {
+      const retryTarget = prev.find((row) => row.status === 'failed') || prev.find((row) => row.status === 'pending')
+      if (retryTarget) {
+        return prev.map((row) => (row.rowId === retryTarget.rowId
+          ? { ...row, status: 'pending' as const, request: adjustmentRequest, failure: null }
+          : row))
+      }
+      return [...prev.filter((row) => row.status === 'done'), createRow(adjustmentRequest)]
+    })
   }, [selectedProduct, adjustSaving, adjustForm, user, notify, tr])
+
+  // Persist the failed attempt so the Stock Change section can list it (and
+  // reopen it prefilled) even if the operator navigates away. There is no
+  // server-side 'failed' status to write to -- inventory_movements only ever
+  // records movements that committed -- so this is client-side, per user, and
+  // marked UNSAVED in the ledger until it is fixed or discarded.
+  const persistFailedAttempt = useCallback((
+    request: Parameters<typeof adjustStock>[0],
+    rowId: string,
+    failure: ReturnType<typeof classifyStockAdjustFailure>,
+  ) => {
+    const req = (request || {}) as Record<string, any>
+    const branchId = req.branchId != null ? Number(req.branchId) : null
+    recordFailedStockAttempt(storage, userKey, {
+      id: attemptIdRef.current,
+      createdAt: new Date().toISOString(),
+      source: 'adjust',
+      rows: [{
+        rowId,
+        productId: req.productId ?? null,
+        productName: String(req.productName || selectedProduct?.name || ''),
+        type: String(req.type || ''),
+        quantity: Number(req.quantity || 0),
+        branchId,
+        branchName: branchId ? String(branches.find((b) => Number(b.id) === branchId)?.name || branchId) : '',
+        batchId: req.batchId ?? null,
+        receivedDate: String(req.receivedDate || ''),
+        reason: String(req.reason || ''),
+        note: '',
+        failure,
+      }],
+    })
+    emitFailedAttemptsChanged()
+  }, [storage, userKey, selectedProduct, branches])
 
   const commitAdjust = useCallback(async () => {
     const adjustmentRequest = pendingAdjust
     if (!adjustmentRequest) return
+    // The row this confirm is committing -- never a row already 'done'.
+    const target = rows.find((row) => row.status === 'pending') || rows.find((row) => row.status === 'failed')
+    if (!target) return
     // Single-flight guard: a double-submit must never issue two writes.
     if (!beginSingleAction(submitRef, { blocked: adjustSaving })) return
     setAdjustSaving(true)
+    setRows((prev) => applyRowOutcome(prev, target.rowId, { status: 'saving' }))
     try {
       const res = await adjustStock(adjustmentRequest) as { success?: boolean; error?: string } | undefined
       if (res?.success !== false) {
+        setRows((prev) => applyRowOutcome(prev, target.rowId, { status: 'done' }))
+        dropFailedStockAttempt(storage, userKey, attemptIdRef.current)
+        emitFailedAttemptsChanged()
         notify(tr('stock_updated', 'Stock updated'))
         setPendingAdjust(null)
         onDone()
         onClose()
-      } else {
-        // Keep the review dialog open on a rejected write so the operator can
-        // fix the reason/quantity and retry rather than losing the request.
-        notify(res?.error || 'Adjustment failed', 'error')
+        return
       }
+      // A `{success:false}` body is a rejected write, same as a thrown one.
+      throw Object.assign(new Error(res?.error || 'Adjustment failed'), { status: 400 })
     } catch (error: unknown) {
-      notify(error instanceof Error ? error.message : 'Error', 'error')
+      // THE RULE: a failure never closes this modal and never resets a field.
+      // The row keeps the exact request the operator built, the server's own
+      // reason is pinned to it for inline display, and the attempt is
+      // persisted so the Stock Change section lists it as unsaved.
+      const failure = classifyStockAdjustFailure(error)
+      setRows((prev) => applyRowOutcome(prev, target.rowId, { status: 'failed', failure }))
+      persistFailedAttempt(adjustmentRequest, target.rowId, failure)
+      notify(failure.message, 'error')
     } finally {
       finishSingleAction(submitRef)
       setAdjustSaving(false)
     }
-  }, [pendingAdjust, adjustSaving, notify, tr, onDone, onClose])
+  }, [pendingAdjust, rows, adjustSaving, notify, tr, onDone, onClose, storage, userKey, persistFailedAttempt])
+
+  // Closing with an unresolved failure asks first (shared ConfirmDialog, never
+  // window.confirm): discard the failed attempt, or keep editing it.
+  const requestClose = useCallback(() => {
+    if (adjustSaving) return
+    if (hasUnsavedFailures(rows)) { setConfirmDiscard(true); return }
+    onClose()
+  }, [adjustSaving, rows, onClose])
+
+  const discardFailedAndClose = useCallback(() => {
+    dropFailedStockAttempt(storage, userKey, attemptIdRef.current)
+    emitFailedAttemptsChanged()
+    setConfirmDiscard(false)
+    onClose()
+  }, [storage, userKey, onClose])
 
   // Step 1: product picker.
   if (!selectedProduct) {
@@ -519,6 +649,29 @@ export default function StockAdjustModal({ initialType = 'add', initialProduct =
     return items
   }
 
+  // The failed row's reason, shown INLINE next to the values that produced it
+  // (not only as a toast, which disappears). 409/400 insufficient stock adds
+  // the available quantity; an offline failure says the write never left the
+  // device and the row is being kept.
+  const failureNotice = failedRow?.failure ? (
+    <div
+      data-stock-adjust-failure="true"
+      className="rounded-xl border border-rose-300 bg-rose-50 px-3 py-2 text-xs text-rose-700 dark:border-rose-800 dark:bg-rose-950/40 dark:text-rose-300"
+    >
+      <div className="font-semibold">
+        {failedRow.failure.offline
+          ? tr('stock_adjust_failed_offline', 'Not saved — offline. Your entry is kept.', 'មិនបានរក្សាទុក — គ្មានអ៊ីនធឺណិត។ ធាតុរបស់អ្នកត្រូវបានរក្សាទុក។')
+          : tr('stock_adjust_failed_row', 'Not saved — fix and retry', 'មិនបានរក្សាទុក — សូមកែ ហើយព្យាយាមម្ដងទៀត')}
+      </div>
+      <div className="mt-0.5 break-words">{failedRow.failure.message}</div>
+      {failedRow.failure.available != null ? (
+        <div className="mt-0.5 tabular-nums">
+          {tr('available', 'Available')}: <b>{failedRow.failure.available}</b>
+        </div>
+      ) : null}
+    </div>
+  ) : null
+
   return (
     <>
       <InventoryStockModals
@@ -528,7 +681,11 @@ export default function StockAdjustModal({ initialType = 'add', initialProduct =
         setAdjustForm={setAdjustForm}
         adjustSaving={adjustSaving}
         onAdjust={onAdjust}
-        onCloseAdjust={onClose}
+        onCloseAdjust={requestClose}
+        adjustNotice={failureNotice}
+        adjustSubmitLabel={submitState.mode === 'retry'
+          ? `${tr('retry', 'Retry')} (${submitState.failedCount})`
+          : undefined}
         adjustTargetOptions={[product]}
         adjustTargetSelectOptions={[]}
         adjustBranchSelectOptions={branchSelectOptions}
@@ -576,11 +733,35 @@ export default function StockAdjustModal({ initialType = 'add', initialProduct =
           title={tr('adjust_stock', 'Adjust stock')}
           message={String(pendingAdjust.productName || product.name || '')}
           items={buildAdjustReviewItems()}
-          confirmLabel={tr('confirm', 'Confirm')}
+          // Once anything has failed the primary action is a RETRY of exactly
+          // that row, never a fresh submit -- committed rows are excluded by
+          // rowsToSubmit(), so a retry can never double-apply.
+          confirmLabel={submitState.mode === 'retry'
+            ? `${tr('retry_failed', 'Retry failed')} (${submitState.failedCount})`
+            : tr('confirm', 'Confirm')}
           working={adjustSaving}
           workingLabel={tr('saving', 'Saving...')}
           onConfirm={commitAdjust}
           onClose={() => { if (!adjustSaving) setPendingAdjust(null) }}
+        >
+          {failureNotice}
+        </ConfirmDialog>
+      ) : null}
+      {confirmDiscard ? (
+        <ConfirmDialog
+          t={t}
+          danger
+          title={tr('discard_failed_adjustment', 'Discard the unsaved adjustment?', 'បោះបង់ការកែស្តុកដែលមិនបានរក្សាទុក?')}
+          message={tr(
+            'discard_failed_adjustment_desc',
+            'This entry was never saved. Discard it, or keep editing to fix and retry.',
+            'ធាតុនេះមិនត្រូវបានរក្សាទុកទេ។ បោះបង់វា ឬបន្តកែដើម្បីព្យាយាមម្ដងទៀត។',
+          )}
+          items={buildAdjustReviewItems()}
+          confirmLabel={tr('discard', 'Discard', 'បោះបង់')}
+          cancelLabel={tr('keep_editing', 'Keep editing', 'បន្តកែ')}
+          onConfirm={discardFailedAndClose}
+          onClose={() => setConfirmDiscard(false)}
         />
       ) : null}
     </>
