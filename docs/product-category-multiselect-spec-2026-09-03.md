@@ -206,7 +206,10 @@ Which reads as three rules:
    shows no counter.
 2. **On click/tap** — the `+N` reveals the **full** category list in the detail view. It must be
    genuinely revealable rather than a dead end (shared truncated-text reveal), and the reveal
-   **floats over** content rather than pushing the page down.
+   **floats over** content rather than pushing the page down. The reveal always lists **every**
+   category the product carries, including the one already occupying the visible slot — the counter
+   counts what is hidden, the panel shows the whole set. It does not change contents between the
+   default and filtered states; only the visible label and the number do.
 3. **Under a filter or search** — the product surfaces under **every** category it carries, not
    only the primary, **and the label swaps from the primary to whichever category matched the
    filter**, so the shopper can see why the product is in these results. The `+N` counter stays,
