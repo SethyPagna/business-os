@@ -32,7 +32,7 @@ import path from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { createRequire } from 'node:module'
 import { fileURLToPath } from 'node:url'
-import { resolveArchivedReport } from './legacy-preflight.mjs'
+import { assertLegacyReceiptEraStillCurrent, resolveArchivedReport } from './legacy-preflight.mjs'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const repo = path.resolve(here, '../../..')
@@ -515,6 +515,7 @@ console.log(JSON.stringify(summary, null, 2))
 
 if (process.argv.includes('--apply')) {
   if (!arTableExists) throw new Error('Refusing to apply: migration 0094 (customer_receivables) is not applied yet')
+  assertLegacyReceiptEraStillCurrent(queryRows)
   for (const filename of phaseFiles) d1File(filename)
   const verification = queryRows(`
     SELECT 'sales_0831' metric, COUNT(*) value, ROUND(COALESCE(SUM(total_usd),0),2) value2 FROM sales WHERE receipt_number LIKE '43__@2026-08-31';

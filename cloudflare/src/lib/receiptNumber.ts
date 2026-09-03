@@ -30,16 +30,67 @@ export function businessDateTimeId(now: Date = new Date()): string {
 // principle race between probe and INSERT (receipt_number carries no
 // UNIQUE constraint) -- accepted: client_request_id dedupe already guards
 // the harmful double-insert case, this only disambiguates the label.
+//
+// `moment` defaults to now (a live checkout or return). A historical sales
+// import passes the sale's OWN moment instead, so an imported receipt gets
+// the id the POS would have minted the day it happened rather than the id of
+// the day someone happened to run the import.
 export async function uniqueBusinessDateTimeNumber(
   prefix: string,
   exists: (candidate: string) => Promise<boolean>,
+  moment: Date = new Date(),
 ): Promise<string> {
   // Empty prefix = the bare timestamp id (sales receipts); no leading dash.
-  const base = prefix ? `${prefix}-${businessDateTimeId()}` : businessDateTimeId()
+  const stamp = businessDateTimeId(moment)
+  const base = prefix ? `${prefix}-${stamp}` : stamp
   let candidate = base
   for (let n = 2; await exists(candidate); n++) {
     if (n > 10) return `${base}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`
     candidate = `${base}-${n}`
   }
   return candidate
+}
+
+// ---------------------------------------------------------------------------
+// Shape guard for a receipt number that arrives from OUTSIDE this generator.
+//
+// On 2026-09-02 an out-of-band reconciliation pack (the untracked
+// tmp/latest-data-reconcile/zero-error-migration.sql in the main checkout)
+// rewrote 15,004 of the 15,005 sales.receipt_number values to the OLD
+// SYSTEM's `NNNNNN@YYYY-MM-DD` form -- taking 87 of that week's 88 POS
+// receipts with it. The user's rule (Sep 2 2026): "receipt numbers must be
+// changed according to our system format, not nnnnn@yyyymmdd; it must be
+// yyyymmdd-24hour format". Migration 0107 repairs the stored rows;
+// this predicate is the gate that stops the shape coming back through a
+// live writer.
+//
+// Accepted, and ONLY these:
+//   20260902-164228        bare sales receipt (the generator's normal output)
+//   20260902-164228-2      same-second disambiguation, -2 .. -10
+//   20260902-164228-A3F9   pathological-burst random suffix
+//   RET-/SRET-/RCP- + any of the above (returns, and historical sales ids
+//   minted before the Aug-31 "Receipt no need RCP" change)
+//
+// Rejected: anything with '@', anything without the date-time core -- an
+// invoice counter, a UUID, free text.
+export const BUSINESS_RECEIPT_NUMBER_RE = /^(?:RCP-|RET-|SRET-)?\d{8}-\d{6}(?:-[0-9A-Z]{1,4})?$/
+
+export function isBusinessReceiptNumber(value: unknown): boolean {
+  return typeof value === 'string' && BUSINESS_RECEIPT_NUMBER_RE.test(value.trim())
+}
+
+// What POST /api/sales does with a client-supplied receipt_number.
+//
+// NORMALISE, never 400. An offline POS sale mints its own receipt id at
+// QUEUE time (frontend/src/api/saleWriteTransport.ts) and the customer may
+// already hold that printed number, so the value is honored when it is a
+// real business id. But a 400 on replay is unrecoverable: failQueuedSale
+// only sets retry_at for a *retryable* error, so a non-retryable rejection
+// parks the queued sale as `failed` with no retry -- a sale that really
+// happened would never reach the server. Dropping a malformed label and
+// minting a correct one server-side loses nothing; rejecting loses money.
+export function normalizeClientReceiptNumber(raw: unknown): string | null {
+  if (typeof raw !== 'string') return null
+  const value = raw.trim()
+  return value && isBusinessReceiptNumber(value) ? value : null
 }
