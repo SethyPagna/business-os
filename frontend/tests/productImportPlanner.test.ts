@@ -77,18 +77,19 @@ await runTest('same product name with different sku/price/supplier still merges 
   assert.equal(analysis.rows[0]._planned_action, 'merge_stock')
 })
 
-await runTest('same product name and a different COST plans a separate child row', () => {
-  // Cost is what was actually spent. It is a detail precisely so it can
-  // never be silently replaced by another row's figure.
+await runTest('same product name and a different COST merges into the existing row', () => {
+  // Cost stopped being a detail on Sep 4 2026: only a different barcode
+  // forks a child row, so a re-buy at a new price adds stock to the row
+  // that is already there instead of duplicating the article.
   const analysis = analyzeProductImportRows([
     { name: 'Serum', cost_price_usd: '9', stock_quantity: '2' },
   ], [
     { id: 10, name: 'Serum', cost_price_usd: 6, created_at: '2026-01-01' },
   ])
 
-  assert.equal(analysis.rows[0]._planned_action, 'create_variant')
-  assert.equal(analysis.rows[0]._parent_id, 10)
-  assert.equal(analysis.summary.variantCount, 1)
+  assert.equal(analysis.rows[0]._planned_action, 'merge_stock')
+  assert.equal(analysis.rows[0]._target_product_id, 10)
+  assert.equal(analysis.summary.variantCount, 0)
 })
 
 await runTest('same name + same barcode + same cost merges even when the SELLING price differs', () => {
@@ -137,20 +138,24 @@ await runTest('different product name with same SKU or barcode becomes editable 
   assert.deepEqual(analysis.conflicts[0].conflictFields, ['sku', 'barcode'])
 })
 
-await runTest('same product name with same barcode still exposes identifier handling', () => {
-  // Different cost keeps these apart (cost is a detail), so the shared
-  // barcode still has to be surfaced as an identifier conflict rather than
-  // silently duplicated onto two rows.
+await runTest('same product name with same barcode merges, differing cost and supplier notwithstanding', () => {
+  // Same name AND same barcode is the same row under the Sep-4-2026 rule.
+  // Cost no longer splits it and supplier never did, so there is nothing to
+  // fork and no identifier conflict to resolve -- the barcode is not being
+  // claimed by a second row, it is the thing that matched.
   const analysis = analyzeProductImportRows([
     { name: 'Serum', barcode: 'BC-1', cost_price_usd: '9', supplier: 'Supplier B', stock_quantity: '2' },
   ], [
     { id: 20, name: 'Serum', barcode: 'BC-1', cost_price_usd: 6, supplier: 'Supplier A', created_at: '2026-01-01' },
   ])
 
-  assert.equal(analysis.rows[0]._planned_action, 'create_variant')
-  assert.equal(analysis.rows[0]._identifier_conflict_mode, 'clear_imported')
-  assert.equal(analysis.conflicts[0].conflictType, 'same_name_identifier')
-  assert.deepEqual(analysis.conflicts[0].conflictFields, ['barcode'])
+  assert.equal(analysis.rows[0]._planned_action, 'merge_stock')
+  assert.equal(analysis.rows[0]._target_product_id, 20)
+  assert.equal(analysis.rows[0]._identifier_conflict_mode, '', 'nothing to clear: the barcode is what matched, not a second row claiming it')
+  // Every merge is still surfaced for review -- it changes a product that
+  // already exists -- but it is surfaced as a merge, not as a fork.
+  assert.equal(analysis.conflicts[0].plannedAction, 'merge_stock')
+  assert.equal(analysis.summary.variantCount, 0)
 })
 
 await runTest('same-file duplicate barcode rows become review conflicts', () => {
@@ -210,7 +215,7 @@ await runTest('duplicate imported same-name rows avoid unsafe temporary row ids'
   assert.equal(analysis.rows.some((row) => String(row._target_product_id || '').startsWith('row:')), false)
 })
 
-await runTest('a differing DETAIL (barcode or cost) still plans a separate child row', () => {
+await runTest('a differing barcode forks a child row; a differing cost does not', () => {
   const analysis = analyzeProductImportRows([
     { name: 'Cream', barcode: 'BC-1', selling_price_usd: '3', stock_quantity: '1' },
     { name: 'Cream', barcode: 'BC-2', selling_price_usd: '3', stock_quantity: '1' },
@@ -218,8 +223,8 @@ await runTest('a differing DETAIL (barcode or cost) still plans a separate child
   ], [])
   const actions = analysis.rows.map((row) => row._planned_action)
   assert.equal(actions[0], 'new')
-  assert.notEqual(actions[1], 'merge_stock', 'a different barcode must not merge -- barcode is a detail')
-  assert.notEqual(actions[2], 'merge_stock', 'a different cost must not merge -- cost is a detail')
+  assert.notEqual(actions[1], 'merge_stock', 'a different barcode must not merge -- the barcode is the only detail')
+  assert.equal(actions[2], 'merge_stock', 'same barcode, new cost: one row, cost averaged (Sep 4 2026 rule)')
 })
 
 await runTest('same imported name groups rows into detail subgroups for review', () => {

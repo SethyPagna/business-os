@@ -1,5 +1,5 @@
 import { compareInitialKeys, getInitialKey } from './initials.ts'
-import { productIdentitySignature, resolveMergedPricing } from './productDetailRule.ts'
+import { productIdentitySignature, resolveMergedCost, resolveMergedPricing } from './productDetailRule.ts'
 
 type ProductId = number
 
@@ -177,6 +177,11 @@ export function mergeSameDetailRows(items: ProductRecord[] = []): ProductGroupRo
       // shows a lower price than one of the merged rows expected to charge.
       // Same rule the server applies on import merges.
       ...resolveMergedPricing(cluster as Record<string, unknown>[]),
+      // Cost is not identity either (Sep 4 2026): rows bought at different
+      // costs merge, and the merged row shows the mean of the DISTINCT costs
+      // rounded up to 4dp, so one article is one row no matter how many
+      // prices it was bought at.
+      ...resolveMergedCost(cluster as Record<string, unknown>[]),
       stock_quantity: stockTotal,
       branch_stock: branchStock,
       __mergedProductIds: mergedProductIds,

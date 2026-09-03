@@ -60,14 +60,19 @@ check('the rule module stays dependency-free, so copying it remains valid', () =
   assert.ok(!/^\s*import\s/m.test(text), 'productDetailRule.ts must not import anything -- it is duplicated verbatim across packages')
 })
 
-check('the rule still says details are barcode + cost, and prices take the highest', () => {
+check('the rule still says the barcode is the only detail, and says how cost and price merge', () => {
   const text = read(backendPath)
-  // Guards the two decisions most likely to be silently reverted.
-  assert.ok(/cost_price_usd/.test(text) && /cost_price_khr/.test(text), 'cost must be part of the detail signature')
-  assert.ok(/barcode/.test(text), 'barcode must be part of the detail signature')
+  // Guards the decisions most likely to be silently reverted. Read the
+  // signature's own body, not the whole file: cost, selling price and
+  // special price all still appear in the module -- they are merged there
+  // rather than split on, which is exactly the distinction being pinned.
   const sigBody = text.slice(text.indexOf('export function productDetailSignature'), text.indexOf('export function productIdentitySignature'))
+  assert.ok(/barcode/.test(sigBody), 'barcode must be part of the detail signature')
+  assert.ok(!/cost_price/.test(sigBody), 'cost must NOT be part of the detail signature -- since Sep 4 2026 differing costs merge')
   assert.ok(!/selling_price/.test(sigBody), 'selling price must NOT be part of the detail signature')
   assert.ok(!/special_price/.test(sigBody), 'special price must NOT be part of the detail signature')
+  assert.ok(/export function resolveMergedCost/.test(text), 'cost must still be reconciled on merge -- by averaging, in resolveMergedCost')
+  assert.ok(/Math\.ceil/.test(text), 'the averaged cost must round UP, never down: rounding down overstates profit')
   assert.ok(/value > best/.test(text), 'merged pricing must resolve to the HIGHEST value')
 })
 

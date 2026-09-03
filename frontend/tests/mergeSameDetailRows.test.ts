@@ -72,15 +72,18 @@ await runTest('mergeSameDetailRows keeps rows separate when a DETAIL differs (ba
   assert.deepEqual(rows.map((row) => row.__mergedRowCount), [1, 1])
 })
 
-await runTest('mergeSameDetailRows keeps rows separate when a DETAIL differs (cost)', () => {
-  // Cost is real money actually spent and must never be silently replaced
-  // by another row's figure -- so it splits, exactly like barcode.
+await runTest('mergeSameDetailRows MERGES a cost difference and averages the distinct costs', () => {
+  // Cost stopped being a detail on Sep 4 2026 (user ruling). One article
+  // bought twice at two prices is one row, not two, and the merged row
+  // carries the mean of the distinct costs.
   const rows = mergeSameDetailRows([
     { id: 1, name: 'Gloss Nude', cost_price_usd: 4, stock_quantity: 1 },
     { id: 2, name: 'Gloss Nude', cost_price_usd: 5, stock_quantity: 1 },
   ])
-  assert.equal(rows.length, 2)
-  assert.deepEqual(rows.map((row) => row.id), [1, 2])
+  assert.equal(rows.length, 1)
+  assert.equal(rows[0].__mergedRowCount, 2)
+  assert.equal(rows[0].cost_price_usd, 4.5, 'the merged cost is the mean of the distinct costs')
+  assert.equal(rows[0].stock_quantity, 2, 'and their stock adds up, because they are one row now')
 })
 
 await runTest('mergeSameDetailRows MERGES a selling/special price difference and keeps the highest', () => {

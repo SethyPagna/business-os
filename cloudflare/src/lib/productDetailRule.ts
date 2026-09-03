@@ -23,12 +23,23 @@
 // differ. Details are exactly two things:
 //
 //   * barcode  -- a different barcode is a different physical article.
-//   * cost     -- what was actually spent to buy the item. This is real
-//                 money out and must never be silently averaged, replaced
-//                 or guessed, so two rows bought at different costs stay
-//                 separate rows.
 //
-// Selling price and special price are deliberately NOT details. They are
+// Cost is NOT a detail. Until Sep 4 2026 it was, on the reasoning that real
+// money out must never be silently averaged -- and that produced the fault
+// the user reported: one article bought twice at two prices rendered as two
+// child rows forever, so the shelf showed a product twice and the POS had to
+// invent "#7321 / #7322" labels to tell the twins apart. The user's ruling
+// (Sep 4 2026, verbatim): "all products if cost is different add different
+// costs together and divide by the number different costs... keep 4 decimal
+// digits always round up to 4 decimal digits... so now only diffeerent
+// barcode creates new child row... rest merge".
+//
+// So differing costs now MERGE, and the merged cost is the mean of the
+// DISTINCT costs (see resolveMergedCost), kept to 4 decimals and rounded up.
+// Rounded up, never down, so an averaged cost can never understate what was
+// actually paid and quietly overstate profit.
+//
+// Selling price and special price are likewise NOT details. They are
 // what we plan to charge, they are adjusted for sales/POS, and two rows
 // differing only in what we hope to sell for are the same product. When
 // rows merge and disagree on them, the HIGHEST wins -- never a lower price
@@ -84,11 +95,6 @@ export function normalizeProductFuzzyName(value: unknown): string {
   return [...new Set(tokens)].sort().join(' ')
 }
 
-/** Integer cents, so float noise from CSV round-tripping can't fake a difference. */
-function cents(value: unknown): number {
-  return Math.round((Number(value) || 0) * 100)
-}
-
 function normalizedBarcode(value: unknown): string {
   return String(value ?? '').trim().toLowerCase()
 }
@@ -100,19 +106,16 @@ export type ProductDetailInput = {
 }
 
 /**
- * The DETAIL signature: barcode + cost. Two rows sharing a name and this
- * signature are the same product and must merge into one row; two rows
- * sharing a name but not this signature are sibling child rows inside that
- * name's group.
+ * The DETAIL signature: the barcode, and nothing else. Two rows sharing a
+ * name and this signature are the same product and must merge into one row;
+ * two rows sharing a name but not this signature are sibling child rows
+ * inside that name's group.
  *
- * Deliberately excludes selling/special price -- see the rule above.
+ * Deliberately excludes cost (merged by averaging instead -- see
+ * resolveMergedCost) and selling/special price -- see the rule above.
  */
 export function productDetailSignature(row: ProductDetailInput): string {
-  return [
-    normalizedBarcode(row.barcode),
-    cents(row.cost_price_usd),
-    cents(row.cost_price_khr),
-  ].join('')
+  return normalizedBarcode(row.barcode)
 }
 
 /**
@@ -129,6 +132,75 @@ export function isSameProductIdentity(
   b: ProductDetailInput & { name?: unknown },
 ): boolean {
   return productIdentitySignature(a) === productIdentitySignature(b)
+}
+
+/** The cost fields that merge by averaging rather than by splitting a row. */
+export type MergeableCost = {
+  cost_price_usd?: unknown
+  cost_price_khr?: unknown
+}
+
+/**
+ * Rounds UP to 4 decimal places. Up rather than nearest so an averaged cost
+ * never lands below what was actually paid: understating cost overstates
+ * profit, and this number feeds margin reporting.
+ *
+ * The 1e-9 nudge absorbs binary float error, so a value that is already
+ * exactly 4dp (9.8765, or the 4dp mean of two 4dp costs) is not pushed up a
+ * tick by its own representation -- without it, Math.ceil(9.8765 * 10000)
+ * can be 98766 on a value whose double sits a hair above 98765.
+ *
+ * That same nudge is why the result is normalised at the end: Math.ceil of a
+ * small negative is -0, so a cost of 0 would come back as -0 and be stored
+ * and serialised as "-0". `|| 0` maps it back to 0 and touches nothing else,
+ * every other falsy case having already returned above.
+ */
+export function roundCostUp4(value: unknown): number {
+  const n = Number(value)
+  if (!Number.isFinite(n)) return 0
+  return Math.ceil(n * 10000 - 1e-9) / 10000 || 0
+}
+
+/**
+ * Resolves the cost for a merge: the mean of the DISTINCT costs across the
+ * rows, per currency field, rounded up to 4 decimals.
+ *
+ * Distinct, not per-row, because the user's rule is "add different costs
+ * together and divide by the number different costs" -- ten rows at $4 and
+ * one at $5 average to $4.50, not $4.09. Each currency field is resolved
+ * independently.
+ *
+ * A cost of 0 is treated as NOT RECORDED and is excluded from the mean.
+ * Both cost columns are `DEFAULT 0` and every importer writes 0 when the
+ * source has no cost, so 0 is this schema's "unset", not a free item. Were
+ * it averaged in, merging a $50.70 row with a legacy 0-cost row would halve
+ * the cost and double the reported profit. If no row carries a cost, the
+ * result is 0 -- unchanged from what every row already said.
+ *
+ * Returns only the fields at least one row actually carried, so the result
+ * can be spread over an existing row without clobbering it with zeros.
+ */
+export function resolveMergedCost(rows: MergeableCost[]): Partial<Record<keyof MergeableCost, number>> {
+  const fields: (keyof MergeableCost)[] = ['cost_price_usd', 'cost_price_khr']
+  const merged: Partial<Record<keyof MergeableCost, number>> = {}
+  for (const field of fields) {
+    const distinct = new Set<number>()
+    let sawField = false
+    for (const row of rows) {
+      const raw = row?.[field]
+      if (raw === undefined || raw === null || raw === '') continue
+      const value = Number(raw)
+      if (!Number.isFinite(value)) continue
+      sawField = true
+      if (value > 0) distinct.add(roundCostUp4(value))
+    }
+    if (!sawField) continue
+    if (!distinct.size) { merged[field] = 0; continue }
+    let sum = 0
+    for (const value of distinct) sum += value
+    merged[field] = roundCostUp4(sum / distinct.size)
+  }
+  return merged
 }
 
 export type MergeablePricing = {

@@ -62,8 +62,12 @@ const IMAGE_FIELDS = new Set([
   'image_conflict_mode',
 ])
 
-// The DETAIL fields, matching utils/productDetailRule.ts exactly: barcode +
-// cost, and nothing else.
+// The DETAIL fields, matching utils/productDetailRule.ts exactly: the
+// barcode, and nothing else.
+//
+// Cost left this list on Sep 4 2026 (user ruling): only a different barcode
+// forks a child row now, and rows differing only in cost merge, with the
+// stored cost becoming the mean of the distinct costs.
 //
 // This list used to also contain sku, category, brand, unit, description,
 // supplier, selling price and special price -- so changing a supplier or a
@@ -76,8 +80,6 @@ const IMAGE_FIELDS = new Set([
 // nothing.
 const DETAIL_FIELDS = [
   'barcode',
-  'cost_price_usd',
-  'cost_price_khr',
 ]
 
 const TEXT_CORRUPTION_FIELDS = [
