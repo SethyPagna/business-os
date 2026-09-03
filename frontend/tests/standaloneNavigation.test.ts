@@ -180,6 +180,101 @@ await runTest('beforeinstallprompt capture defers the native prompt and notifies
   unsubscribe()
 })
 
+// --- P2-9 findings 6 and 8 (additive) -------------------------------------
+// Section 8b made the shell work offline; these keep it LOOKING right offline
+// and keep the install nudge from turning into a paragraph.
+const fsp = await import('node:fs')
+const pathp = await import('node:path')
+const urlp = await import('node:url')
+const testDir = pathp.dirname(urlp.fileURLToPath(import.meta.url))
+const frontendRoot = pathp.join(testDir, '..')
+const swSource = fsp.readFileSync(pathp.join(frontendRoot, 'src', 'public-runtime', 'service-worker.ts'), 'utf8')
+
+function listWoff2(dir: string, out: string[] = []): string[] {
+  for (const entry of fsp.readdirSync(dir, { withFileTypes: true })) {
+    const full = pathp.join(dir, entry.name)
+    if (entry.isDirectory()) listWoff2(full, out)
+    else if (entry.name.endsWith('.woff2')) out.push('/' + pathp.relative(pathp.join(frontendRoot, 'public'), full).replace(/\\/g, '/'))
+  }
+  return out
+}
+
+await runTest('every self-hosted font file is precached, declared, and used -- all three agree', () => {
+  // P2-9 finding 6: the app self-hosts its faces (no Google Fonts request to
+  // fail offline), but the service worker precached only the app shell and
+  // the icons. A cold offline start therefore rendered the whole UI --
+  // including Khmer -- in the OS fallback face. Three lists have to stay in
+  // step, and a mismatch in any direction is a silent visual regression:
+  //   files on disk  <->  FONT_URLS in the worker  <->  @font-face in CSS.
+  const onDisk = listWoff2(pathp.join(frontendRoot, 'public', 'fonts')).sort()
+  const declared = (swSource.match(/'\/fonts\/[^']+\.woff2'/g) || [])
+    .map((quoted) => quoted.slice(1, -1))
+    .sort()
+  const fontsCss = fsp.readFileSync(pathp.join(frontendRoot, 'src', 'styles', 'fonts.css'), 'utf8')
+  const referenced = [...new Set((fontsCss.match(/\/fonts\/[^')]+\.woff2/g) || []))].sort()
+
+  assert.ok(onDisk.length >= 10, 'expected the self-hosted Latin and Khmer faces on disk, found ' + onDisk.length)
+  assert.deepEqual(declared, onDisk, 'the service worker precache list and public/fonts have drifted apart')
+  assert.deepEqual(referenced, onDisk, 'a @font-face points at a file that does not exist, or a shipped file is never used')
+})
+
+await runTest('fonts are runtime-cached as immutable assets, not just precached', () => {
+  // Precaching alone would leave a face added between releases uncovered, and
+  // a precache miss (quota, a flaky install) permanently uncovered. The
+  // /fonts/ prefix rule is the safety net underneath the explicit list.
+  assert.match(swSource, /function isCacheableStaticPath[\s\S]{0,400}?pathname\.startsWith\('\/fonts\/'\)/, 'font requests must be handled by the static route at all')
+  assert.match(swSource, /function isHashedBuildAsset[\s\S]{0,200}?pathname\.startsWith\('\/fonts\/'\)/, 'font files are content-named, so they must be cache-first rather than network-first')
+})
+
+await runTest('an SPA-fallback HTML response is never cached as a font', () => {
+  // A missing font under the SPA fallback answers 200 text/html. Caching that
+  // as a .woff2 poisons the cache for the life of the build and renders every
+  // glyph in the OS fallback face -- online as well as offline.
+  assert.match(
+    swSource, /pathname\.endsWith\('\.woff2'\)\s*\)?\s*return contentType\.includes\('font'\)/,
+    'isValidStaticResponse must content-type-check woff2 before caching it',
+  )
+})
+
+await runTest('the offline fallback document is part of the precached shell', () => {
+  assert.ok(fsp.existsSync(pathp.join(frontendRoot, 'public', 'offline.html')), 'public/offline.html must ship')
+  assert.match(swSource, /APP_SHELL_URLS = \[[^\]]*'\/offline\.html'/, 'offline.html must be precached, or the offline page is itself offline')
+  assert.match(swSource, /cache\.match\('\/offline\.html'\)/, 'a navigation with nothing cached must fall back to it')
+})
+
+await runTest('the iOS install hint keeps its visible copy short and folds the rest away', () => {
+  // P2-9 finding 8 / the project's density rule: the band sits across the
+  // bottom of a phone screen, so the visible line names the two steps and
+  // nothing else; the why-bother lives behind an InfoHint.
+  const hint = fsp.readFileSync(pathp.join(frontendRoot, 'src', 'components', 'shared', 'IosInstallHint.tsx'), 'utf8')
+  assert.match(hint, /import InfoHint from/, 'the detail must move behind the shared InfoHint, not into the band')
+  assert.match(hint, /t\('ios_install_hint_detail'\)/, 'the InfoHint must carry the longer explanation')
+
+  const en = JSON.parse(fsp.readFileSync(pathp.join(frontendRoot, 'src', 'lang', 'en.json'), 'utf8')) as Record<string, string>
+  const km = JSON.parse(fsp.readFileSync(pathp.join(frontendRoot, 'src', 'lang', 'km.json'), 'utf8')) as Record<string, string>
+  for (const key of ['ios_install_hint', 'ios_install_hint_detail', 'install_app']) {
+    assert.ok(en[key] && en[key].trim(), 'en.json is missing ' + key)
+    assert.ok(km[key] && km[key].trim(), 'km.json is missing ' + key)
+    assert.match(km[key], /[ក-៿]/, 'km.json still holds the English string for ' + key)
+  }
+  // Roughly 34 characters fit per line at 14px on a 375px-wide band once the
+  // icon, the info dot and the close button are subtracted; three lines is
+  // the agreed ceiling, so the visible string stays under ~102 characters.
+  assert.ok(
+    en.ios_install_hint.length <= 102,
+    'the visible hint is ' + en.ios_install_hint.length + ' characters, which wraps past three lines on a 375px screen -- move the detail into ios_install_hint_detail',
+  )
+})
+
+await runTest('the install hint and the update toast cannot cover each other', () => {
+  // Both are bottom-anchored and both can be on screen at once. The toast
+  // stack sits above the bottom nav; the install band is the full-width
+  // strip below it. If they ever shared an offset one would hide the other.
+  const app = fsp.readFileSync(pathp.join(frontendRoot, 'src', 'App.tsx'), 'utf8')
+  assert.match(app, /<IosInstallHint \/>/, 'App.tsx owns the install band')
+  assert.match(app, /bottom-\[calc\(4rem\+env\(safe-area-inset-bottom\)\)\]/, 'the toast stack must clear the mobile bottom nav (h-14) and the home indicator')
+})
+
 if (failed > 0) {
   process.exitCode = 1
 }
