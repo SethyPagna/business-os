@@ -56,3 +56,8 @@ scanbot-web-sdk-*/
 .playwright-cli/
 /ops/.playwright-cli/
 /run/cv-render-check-word/
+
+# Lane-worktree preview artifacts (see frontend/vite.lane.config.ts):
+# a private vite optimize cache, and the one-line Worker port for the proxy.
+frontend/.vite-lane-cache/
+frontend/.lane-api-port
