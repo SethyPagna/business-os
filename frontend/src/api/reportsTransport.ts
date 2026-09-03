@@ -27,3 +27,20 @@ export function getBusinessSummaryExpensesPage(params: QueryParams = {}): Promis
   const query = buildQueryString(params, { skipEmpty: true })
   return apiFetch('GET', appendQuery('/api/reports/business-summary/expenses', query))
 }
+
+// Reports redesign (Sep 3 2026, rc/sec-10): the per-view read endpoints.
+// Same read-only shape as the pages above -- no offline mirror, no fallback.
+export function getReportOverview(params: QueryParams = {}): Promise<unknown> {
+  const query = buildQueryString(params, { skipEmpty: true })
+  return apiFetch('GET', appendQuery('/api/reports/overview', query))
+}
+
+export function getReportPeriods(params: QueryParams = {}): Promise<unknown> {
+  const query = buildQueryString(params, { skipEmpty: true })
+  return apiFetch('GET', appendQuery('/api/reports/periods', query))
+}
+
+export function getReportGrouped(params: QueryParams = {}): Promise<unknown> {
+  const query = buildQueryString(params, { skipEmpty: true })
+  return apiFetch('GET', appendQuery('/api/reports/grouped', query))
+}

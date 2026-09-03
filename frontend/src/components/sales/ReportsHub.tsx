@@ -1,27 +1,60 @@
-import { useEffect, useMemo, useState } from 'react'
-import type { ComponentType } from 'react'
-import BadgeDollarSign from 'lucide-react/dist/esm/icons/badge-dollar-sign.js'
-import RotateCcw from 'lucide-react/dist/esm/icons/rotate-ccw.js'
-import HandCoins from 'lucide-react/dist/esm/icons/hand-coins.js'
-import ChevronDown from 'lucide-react/dist/esm/icons/chevron-down.js'
-import Check from 'lucide-react/dist/esm/icons/check.js'
+// Reports hub -- the Sales hub's "Reports" section, redesigned (Part 581 ask:
+// per-sale profit list, multiple views, excel style + receipt style for
+// mobile, multiple calculation options).
+//
+// One control row drives every view: search · Start→End date/time range ·
+// branch / status / payment filters (inline on wide screens, in a Filters
+// fold on phones) · the View picker · the Excel/Receipt style toggle · the
+// calculation Options fold · the workbook export. Below it exactly ONE view
+// renders (Overview, By period, Sales list, Products, Customers, Cashiers,
+// Payment methods, Hours, Days of week, Branches, Couriers, Returns,
+// Expenses); each view is a ReportFrame with its own title-row actions,
+// summary line, table/receipt body and drill-down folds. Every figure is a
+// kernel figure (cloudflare/src/lib/salesAnalytics.ts): the views only
+// arrange and present. Cost / profit never reach a non-admin (server-gated).
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import BarChart3 from 'lucide-react/dist/esm/icons/bar-chart-3.js'
 import Download from 'lucide-react/dist/esm/icons/download.js'
+import Filter from 'lucide-react/dist/esm/icons/filter.js'
+import Receipt from 'lucide-react/dist/esm/icons/receipt.js'
+import SlidersHorizontal from 'lucide-react/dist/esm/icons/sliders-horizontal.js'
+import Table2 from 'lucide-react/dist/esm/icons/table-2.js'
 import { useApp as useAppHook } from '../../AppContext.tsx'
-import DateTimeRangePicker, { todayDateTimeRange, type DateTimeRange } from '../shared/DateTimeRangePicker.tsx'
+import { makeReportMoneyFormatter } from '../../utils/reportMoney.ts'
+import { useIsCompactViewport } from '../../utils/useViewport.ts'
 import AppSelect, { type AppSelectOption } from '../shared/AppSelect.tsx'
-import LazyPortalMenu from '../shared/LazyPortalMenu'
+import DateTimeRangePicker, { todayDateTimeRange, type DateTimeRange } from '../shared/DateTimeRangePicker.tsx'
 import ExportChoiceDialog from '../shared/ExportChoiceDialog'
 import ExportRangeDialog, { type ExportRange } from '../shared/ExportRangeDialog'
-import { makeReportMoneyFormatter } from '../../utils/reportMoney.ts'
+import { Button, ControlRow, EmptyState, Fold, IconButton, OverflowMenu } from '../shared/kit'
 import { exportBusinessWorkbook } from './businessWorkbookExport.ts'
-import SalesDailyReport from './SalesDailyReport'
-import ReturnsReportSection from './ReturnsReportSection'
-import FeesReportSection from './FeesReportSection'
-
-// Reports hub -- a top-level Sales-hub section (a chip beside Sales/Returns/
-// Fees). One shared date range + branch scope drives any combination of the
-// Sales / Returns / Fees reports, shown side by side (the user picks which
-// types to include). Each type only renders for a user who can see it.
+import { ALL_STATUSES, getStatusLabel } from './StatusBadge.tsx'
+import ExpensesReport from './reports/ExpensesReport.tsx'
+import GroupedReport from './reports/GroupedReport.tsx'
+import OverviewReport from './reports/OverviewReport.tsx'
+import PeriodReport from './reports/PeriodReport.tsx'
+import ReportOptionsFold from './reports/ReportOptionsFold.tsx'
+import ReturnsReport from './reports/ReturnsReport.tsx'
+import SalesListReport from './reports/SalesListReport.tsx'
+import {
+  DEFAULT_REPORT_OPTIONS,
+  REPORT_STORAGE_KEYS,
+  defaultReportStyle,
+  getReportView,
+  isReportViewId,
+  normalizeReportOptions,
+  normalizeReportStyle,
+  readStoredJson,
+  resolveReportView,
+  visibleReportViews,
+  writeStoredJson,
+  type ReportFilters,
+  type ReportOptions,
+  type ReportPermissions,
+  type ReportStyle,
+  type ReportViewId,
+} from './reports/reportModel.ts'
+import type { DrillPatch, ReportViewProps } from './reports/reportTypes.ts'
 
 type ReportsHubAppUser = { username?: unknown; role_code?: unknown; permissions?: unknown } | null
 type ReportsHubAppContext = {
@@ -33,20 +66,43 @@ type ReportsHubAppContext = {
   displayCurrency: string
   getPermissionTier: (key: string) => string
   user: ReportsHubAppUser
+  settings?: { pos_payment_methods?: unknown }
 }
 const useApp = useAppHook as unknown as () => ReportsHubAppContext
 
 interface BranchOption { id: string; name: string }
-type ReportType = 'sales' | 'returns' | 'fees'
+// Retired methods still exist on old sales; they stay OUT of the filter list
+// (same rule the old daily report applied).
+const RETIRED_PAYMENT_METHODS = new Set(['pi pay', 'transfer'])
+const PAYMENT_METHOD_FALLBACK = ['Cash', 'Card', 'ABA Bank', 'Wing', 'KHQR']
+const SEARCH_DEBOUNCE_MS = 250
+
+/** The POS payment-method list from settings (JSON), retired methods dropped; the fallback when unset/malformed. */
+export function parsePaymentMethods(raw: unknown): string[] {
+  try {
+    const parsed = typeof raw === 'string' ? (JSON.parse(raw || '[]') as unknown) : raw
+    if (!Array.isArray(parsed)) return PAYMENT_METHOD_FALLBACK
+    const seen = new Set<string>()
+    const methods = parsed
+      .map((m) => (typeof m === 'string' ? m : m && typeof m === 'object' ? String((m as { name?: unknown; label?: unknown; value?: unknown }).name ?? (m as { label?: unknown }).label ?? (m as { value?: unknown }).value ?? '') : ''))
+      .map((m) => m.trim())
+      .filter((m) => m && !RETIRED_PAYMENT_METHODS.has(m.toLowerCase()) && !seen.has(m.toLowerCase()) && !!seen.add(m.toLowerCase()))
+    return methods.length ? methods : PAYMENT_METHOD_FALLBACK
+  } catch {
+    return PAYMENT_METHOD_FALLBACK
+  }
+}
 
 export default function ReportsHub({ embedded = false }: { embedded?: boolean }) {
-  const { t, fmtUSD, fmtKHR, khrToUsd, usdToKhr, displayCurrency, getPermissionTier, user } = useApp()
-  const trh = (key: string, fallback: string): string => { const v = t(key); return v && v !== key ? v : fallback }
-  // Decorative only -- which hint text the export choice shows. The real
-  // admin gate is server-side (routes/reports.ts's is_admin flag on the
-  // /business-summary response, checked in businessWorkbookExport.ts); a
-  // stale read here can at most show the wrong HINT, never leak/withhold
-  // actual cost data, since the workbook itself never trusts this value.
+  const { t, fmtUSD, fmtKHR, khrToUsd, usdToKhr, displayCurrency, getPermissionTier, user, settings } = useApp()
+  const trh = useCallback((key: string, fallback: string): string => { const v = t(key); return v && v !== key ? v : fallback }, [t])
+  const tStr = useCallback((key: string): string => { const v = t(key); return v == null ? key : v }, [t])
+  const compact = useIsCompactViewport()
+
+  // Decorative only -- which hint text the export choice shows and whether
+  // the Options fold offers the profit group. The real admin gate is
+  // server-side (routes/reports.ts strips cost/profit for non-admins); a
+  // stale read here can at most show the wrong HINT, never leak cost data.
   const isAdminHint = useMemo(() => {
     const roleCode = String(user?.role_code || '').toLowerCase()
     const username = String(user?.username || '').toLowerCase()
@@ -60,47 +116,53 @@ export default function ReportsHub({ embedded = false }: { embedded?: boolean })
     }
     return username === 'admin' || roleCode === 'admin' || !!permissions.all
   }, [user])
-  const [exportChoiceOpen, setExportChoiceOpen] = useState(false)
-  const [exportRangeOpen, setExportRangeOpen] = useState(false)
-  // Display-only money formatter honoring the display_currency setting (see
-  // utils/reportMoney.ts): the raw usd+khr amounts stay the single source of
-  // truth, this only changes how they're shown. useMemo so the setting/rate
-  // flowing in re-renders every section's figures.
-  const fmtMoney = useMemo(
-    () => makeReportMoneyFormatter({ displayCurrency, fmtUSD, fmtKHR, khrToUsd, usdToKhr }),
-    [displayCurrency, fmtUSD, fmtKHR, khrToUsd, usdToKhr],
-  )
 
   const canSales = getPermissionTier('sales') !== 'none'
   const canReturns = getPermissionTier('returns') !== 'none'
   const canFees = getPermissionTier('fees') !== 'none'
+  const perms = useMemo<ReportPermissions>(() => ({ sales: canSales, returns: canReturns, fees: canFees }), [canSales, canReturns, canFees])
+  const views = useMemo(() => visibleReportViews(perms), [perms])
 
-  const available = useMemo<Array<{ id: ReportType; label: string; icon: ComponentType<{ className?: string }> }>>(() => ([
-    canSales ? { id: 'sales' as const, label: trh('sales', 'Sales'), icon: BadgeDollarSign } : null,
-    canReturns ? { id: 'returns' as const, label: trh('returns', 'Returns'), icon: RotateCcw } : null,
-    canFees ? { id: 'fees' as const, label: trh('fees', 'Expenses'), icon: HandCoins } : null,
-  ].filter(Boolean) as Array<{ id: ReportType; label: string; icon: ComponentType<{ className?: string }> }>), [canSales, canReturns, canFees, t]) // eslint-disable-line react-hooks/exhaustive-deps
+  // ---- persisted choices (view, style, calculation options) ----
+  const storage = typeof window !== 'undefined' ? window.localStorage : null
+  const [viewId, setViewId] = useState<ReportViewId | null>(() => resolveReportView(readStoredJson(storage, REPORT_STORAGE_KEYS.view, (raw) => raw), perms))
+  const [styleChoice, setStyleChoice] = useState<ReportStyle | null>(() => readStoredJson(storage, REPORT_STORAGE_KEYS.style, normalizeReportStyle))
+  const [options, setOptions] = useState<ReportOptions>(() => readStoredJson(storage, REPORT_STORAGE_KEYS.options, normalizeReportOptions))
+  const style: ReportStyle = styleChoice ?? defaultReportStyle(compact)
+  useEffect(() => { setViewId((cur) => resolveReportView(cur, perms)) }, [perms])
+  useEffect(() => { if (viewId) writeStoredJson(storage, REPORT_STORAGE_KEYS.view, viewId) }, [viewId, storage])
+  useEffect(() => { if (styleChoice) writeStoredJson(storage, REPORT_STORAGE_KEYS.style, styleChoice) }, [styleChoice, storage])
+  useEffect(() => { writeStoredJson(storage, REPORT_STORAGE_KEYS.options, options) }, [options, storage])
+  const view = viewId ? getReportView(viewId) : null
+  const supportsTime = !!view?.supportsTime
+  const supportsSaleFilters = !!view?.supportsSaleFilters
+  const supportsSearch = !!view?.supportsSearch
+  const onOptionsChange = useCallback((patch: Partial<ReportOptions>) => setOptions((cur) => ({ ...cur, ...patch })), [])
 
+  // ---- filters ----
   // An empty range left the Expenses report without an actionable initial
   // request. Today gives every report a concrete, business-time scope.
   const [range, setRange] = useState<DateTimeRange>(() => todayDateTimeRange())
   const [branchFilter, setBranchFilter] = useState('')
+  const [statusFilter, setStatusFilter] = useState('')
+  const [paymentFilter, setPaymentFilter] = useState('')
+  const [searchText, setSearchText] = useState('')
+  const [search, setSearch] = useState('')
   const [branches, setBranches] = useState<BranchOption[]>([])
-  // SINGLE-select with an explicit "All" chip (user, Aug 30: "instead of
-  // selecting all just make an additional 'All' so it is not multi select
-  // but single for the report's options").
-  const [selectedType, setSelectedType] = useState<'all' | ReportType>('all')
-
-  // Returns and Expenses are date-only ledgers. If a user narrows Sales to a
-  // time window and then leaves that report, restore full-day bounds so no
-  // hidden time filter survives while the 24-hour control is intentionally
-  // absent (including the mixed "All" view).
   useEffect(() => {
-    if (selectedType === 'sales') return
+    const handle = window.setTimeout(() => setSearch(searchText.trim()), SEARCH_DEBOUNCE_MS)
+    return () => window.clearTimeout(handle)
+  }, [searchText])
+
+  // Views without a clock are date-only ledgers. If a user narrows a sales
+  // view to a time window and then switches, restore full-day bounds so no
+  // hidden time filter survives while the 24-hour control is absent.
+  useEffect(() => {
+    if (supportsTime) return
     setRange((current) => current.startTime === '00:00' && current.endTime === '23:59'
       ? current
       : { ...current, startTime: '00:00', endTime: '23:59' })
-  }, [selectedType])
+  }, [supportsTime])
 
   useEffect(() => {
     let cancelled = false
@@ -124,73 +186,167 @@ export default function ReportsHub({ embedded = false }: { embedded?: boolean })
   const branchOptions = useMemo<AppSelectOption[]>(() => [
     { value: '', label: trh('all_branches', 'All Branches') },
     ...branches.map((branch) => ({ value: branch.id, label: branch.name })),
-  ], [branches]) // eslint-disable-line react-hooks/exhaustive-deps
+  ], [branches, trh])
+  const statusOptions = useMemo<AppSelectOption[]>(() => [
+    { value: '', label: trh('all_statuses', 'All statuses') },
+    ...ALL_STATUSES.map((status) => ({ value: status, label: getStatusLabel(status, tStr) })),
+  ], [tStr, trh])
+  const paymentOptions = useMemo<AppSelectOption[]>(() => {
+    const methods = parsePaymentMethods(settings?.pos_payment_methods)
+    // A filter picked through a drill-down (e.g. a legacy method) must stay selectable.
+    if (paymentFilter && !methods.some((m) => m.toLowerCase() === paymentFilter.toLowerCase())) methods.push(paymentFilter)
+    return [{ value: '', label: trh('all_payment_methods', 'All methods') }, ...methods.map((m) => ({ value: m, label: m }))]
+  }, [settings?.pos_payment_methods, paymentFilter, trh])
 
+  const filters = useMemo<ReportFilters>(() => ({
+    startDate: range.startDate || '',
+    endDate: range.endDate || '',
+    startTime: range.startTime || '',
+    endTime: range.endTime || '',
+    branchId: branchFilter,
+    status: statusFilter,
+    paymentMethod: paymentFilter,
+  }), [range, branchFilter, statusFilter, paymentFilter])
+  const activeFilterCount = (branchFilter ? 1 : 0) + (supportsSaleFilters ? (statusFilter ? 1 : 0) + (paymentFilter ? 1 : 0) : 0)
+  const clearFilters = () => { setBranchFilter(''); setStatusFilter(''); setPaymentFilter('') }
+
+  // Display-only money formatter: the raw usd+khr amounts stay the single
+  // source of truth; the Currency option only changes how they're shown.
+  const fmtMoney = useMemo(
+    () => makeReportMoneyFormatter({ displayCurrency: options.currency === 'setting' ? displayCurrency : options.currency, fmtUSD, fmtKHR, khrToUsd, usdToKhr }),
+    [options.currency, displayCurrency, fmtUSD, fmtKHR, khrToUsd, usdToKhr],
+  )
+  const khrToUsdNum = useCallback((khr: number) => Number(khrToUsd(khr)) || 0, [khrToUsd])
+
+  // ---- drill-downs from a view into the per-receipt list ----
+  const onDrill = useCallback((patch: DrillPatch) => {
+    if (patch.startDate || patch.endDate) setRange((cur) => ({ ...cur, startDate: patch.startDate ?? cur.startDate, endDate: patch.endDate ?? cur.endDate }))
+    if (patch.search != null) { setSearchText(patch.search); setSearch(patch.search.trim()) }
+    if (patch.paymentMethod != null) setPaymentFilter(patch.paymentMethod)
+    if (patch.branchId != null) setBranchFilter(patch.branchId)
+    if (patch.view) setViewId((cur) => resolveReportView(patch.view, perms) ?? cur)
+  }, [perms])
+
+  // ---- folds & dialogs ----
+  const [filtersOpen, setFiltersOpen] = useState(false)
+  const [optionsOpen, setOptionsOpen] = useState(false)
+  const [exportChoiceOpen, setExportChoiceOpen] = useState(false)
+  const [exportRangeOpen, setExportRangeOpen] = useState(false)
+  const filtersAnchor = useRef<HTMLElement | null>(null)
+  const optionsAnchor = useRef<HTMLElement | null>(null)
   const branchId = branchFilter || undefined
-  const visible = selectedType === 'all' ? available : available.filter((entry) => entry.id === selectedType)
-  const typeChips: Array<{ id: 'all' | ReportType; label: string; icon?: ComponentType<{ className?: string }> }> = [
-    { id: 'all', label: trh('all', 'All') },
-    ...available,
-  ]
-  // The current selection labels the single "view by" dropdown trigger below.
-  const selectedChip = typeChips.find((chip) => chip.id === selectedType) || typeChips[0]
-  const SelectedIcon = selectedChip.icon
+
+  const viewPicker = (
+    <AppSelect
+      value={viewId || ''}
+      options={views.map((v) => ({ value: v.id, label: trh(v.labelKey, v.fallback) }))}
+      onChange={(value) => { if (isReportViewId(value)) setViewId(value) }}
+      ariaLabel={trh('view', 'View')}
+      buttonClassName="h-7 min-w-[10rem] py-0 px-2 text-[11px]"
+      showChevron
+    />
+  )
+  const styleToggle = (
+    <IconButton
+      label={style === 'excel' ? trh('rpt_style_receipt', 'Receipt style') : trh('rpt_style_excel', 'Excel style')}
+      icon={style === 'excel' ? <Receipt className="h-3.5 w-3.5" /> : <Table2 className="h-3.5 w-3.5" />}
+      onClick={() => setStyleChoice(style === 'excel' ? 'receipt' : 'excel')}
+    />
+  )
+  const optionsButton = (
+    <span ref={(el) => { optionsAnchor.current = el }}>
+      <Button size="sm" variant={JSON.stringify({ ...options, granularity: 'day' }) === JSON.stringify({ ...DEFAULT_REPORT_OPTIONS, granularity: 'day' }) ? 'secondary' : 'primary'} icon={<SlidersHorizontal className="h-3.5 w-3.5" />} onClick={() => setOptionsOpen((o) => !o)}>
+        {trh('options', 'Options')}
+      </Button>
+    </span>
+  )
+  const exportMenu = canSales ? (
+    <OverflowMenu
+      label={trh('export', 'Export')}
+      items={[{ label: trh('business_summary_workbook', 'Business summary workbook'), icon: <Download className="h-3.5 w-3.5" />, onSelect: () => setExportChoiceOpen(true) }]}
+    />
+  ) : null
+  const filterSelects = (
+    <>
+      {branches.length ? <AppSelect value={branchFilter} options={branchOptions} onChange={setBranchFilter} ariaLabel={trh('branch', 'Branch')} buttonClassName="h-7 py-0 px-2 text-[11px]" showChevron /> : null}
+      {supportsSaleFilters ? <AppSelect value={statusFilter} options={statusOptions} onChange={setStatusFilter} ariaLabel={trh('status', 'Status')} buttonClassName="h-7 py-0 px-2 text-[11px]" showChevron /> : null}
+      {supportsSaleFilters ? <AppSelect value={paymentFilter} options={paymentOptions} onChange={setPaymentFilter} ariaLabel={trh('payment_method', 'Payment method')} buttonClassName="h-7 py-0 px-2 text-[11px]" showChevron /> : null}
+    </>
+  )
+  const hasFilterControls = branches.length > 0 || supportsSaleFilters
+  const filtersButton = hasFilterControls ? (
+    <span ref={(el) => { filtersAnchor.current = el }}>
+      <Button size="sm" variant={activeFilterCount ? 'primary' : 'secondary'} icon={<Filter className="h-3.5 w-3.5" />} onClick={() => setFiltersOpen((o) => !o)}>
+        {trh('filters', 'Filters')}{activeFilterCount ? ` · ${activeFilterCount}` : ''}
+      </Button>
+    </span>
+  ) : null
+
+  const viewProps: ReportViewProps | null = view ? {
+    view,
+    filters,
+    search: supportsSearch ? search : '',
+    options,
+    style,
+    fmtMoney,
+    khrToUsd: khrToUsdNum,
+    tr: trh,
+    t: tStr,
+    perms,
+    compact,
+    onDrill,
+    onOptionsChange,
+  } : null
+
+  const body = !viewProps || !view ? (
+    <EmptyState icon={<BarChart3 className="h-5 w-5" />} title={trh('reports', 'Reports')} text={trh('rpt_no_access', 'No report is available for your permissions.')} />
+  ) : view.id === 'overview' ? <OverviewReport {...viewProps} />
+    : view.id === 'periods' ? <PeriodReport {...viewProps} />
+      : view.id === 'sales' ? <SalesListReport {...viewProps} />
+        : view.id === 'returns' ? <ReturnsReport {...viewProps} />
+          : view.id === 'expenses' ? <ExpensesReport {...viewProps} />
+            : <GroupedReport key={view.id} {...viewProps} />
 
   return (
-    <div className={`${embedded ? '' : 'page-scroll '}flex w-full min-w-0 flex-col space-y-3 p-3 sm:p-6`}>
-      {/* ONE shared control row: range + the "view by" dropdown + branch, all
-          on a single row (user, Aug 31: "the options view by can be into one
-          button to expand then choose"). The type picker used to spill four
-          inline chips across the row; it now collapses into one button whose
-          menu FLOATS above the page (LazyPortalMenu → body portal) so choosing
-          a view never reflows the rows below it ("a float above layer so it
-          doesn't push down other details"). The branch select rides the same
-          row and ellipsizes long names. */}
-      <div className="sticky top-0 z-20 -mx-1 flex min-w-0 flex-wrap items-center gap-1.5 bg-gray-50/95 px-1 py-1 backdrop-blur dark:bg-gray-900/95">
-        <DateTimeRangePicker value={range} onChange={setRange} t={t} showTime={selectedType === 'sales'} />
-        <LazyPortalMenu
-          align="auto"
-          trigger={(
-            <button
-              type="button"
-              className="inline-flex items-center gap-1.5 rounded-md border border-slate-200 bg-white px-2 py-1 text-xs font-medium text-slate-700 transition hover:border-slate-300 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
-              aria-label={trh('view', 'View')}
-            >
-              {SelectedIcon ? <SelectedIcon className="h-3.5 w-3.5 shrink-0" /> : null}
-              <span className="text-slate-400 dark:text-slate-500">{trh('view', 'View')}</span>
-              <span className="truncate">{selectedChip.label}</span>
-              <ChevronDown className="h-3.5 w-3.5 shrink-0 text-slate-400" />
-            </button>
-          )}
-          items={typeChips.map(({ id, label, icon: Icon }) => ({
-            label,
-            onClick: () => setSelectedType(id),
-            color: selectedType === id ? 'blue' : 'gray',
-            icon: selectedType === id
-              ? <Check className="h-4 w-4" />
-              : (Icon ? <Icon className="h-4 w-4" /> : <span className="inline-block h-4 w-4" />),
-          }))}
-        />
-        {branches.length ? (
-          <AppSelect
-            value={branchFilter}
-            options={branchOptions}
-            onChange={setBranchFilter}
-            ariaLabel={trh('branch', 'Branch')}
-            buttonClassName="w-full min-w-0 py-1 text-xs sm:max-w-[9rem]"
+    <div className={embedded ? 'space-y-2' : 'space-y-2 p-2 sm:p-3'} data-reports-hub>
+      <ControlRow
+        sticky
+        search={supportsSearch ? (
+          <input
+            type="search"
+            value={searchText}
+            onChange={(e) => setSearchText(e.target.value)}
+            placeholder={trh('search', 'Search')}
+            aria-label={trh('search', 'Search')}
+            className="h-7 w-full rounded-[var(--ui-radius-sm)] border border-[var(--ui-line)] bg-[var(--ui-surface)] px-2 text-[length:var(--ui-size-body)] text-[var(--ui-ink)] placeholder:text-[var(--ui-ink-3)] focus:outline-none focus:ring-2 focus:ring-[var(--ui-focus)]"
           />
         ) : null}
-        {canSales ? (
-          <button
-            type="button"
-            onClick={() => setExportChoiceOpen(true)}
-            className="inline-flex items-center gap-1.5 rounded-md border border-slate-200 bg-white px-2 py-1 text-xs font-medium text-slate-700 transition hover:border-slate-300 hover:bg-slate-50 sm:ml-auto dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
-          >
-            <Download className="h-3.5 w-3.5 shrink-0" />
-            {trh('export', 'Export')}
-          </button>
-        ) : null}
-      </div>
+        range={<DateTimeRangePicker value={range} onChange={setRange} t={t} showTime={supportsTime} />}
+        filters={compact ? null : filterSelects}
+        actions={compact ? null : <>{viewPicker}{styleToggle}{optionsButton}</>}
+        overflow={compact ? <>{viewPicker}{filtersButton}<OverflowMenu label={trh('options', 'Options')} items={[
+          { label: style === 'excel' ? trh('rpt_style_receipt', 'Receipt style') : trh('rpt_style_excel', 'Excel style'), icon: style === 'excel' ? <Receipt className="h-3.5 w-3.5" /> : <Table2 className="h-3.5 w-3.5" />, onSelect: () => setStyleChoice(style === 'excel' ? 'receipt' : 'excel') },
+          { label: trh('rpt_options_title', 'Calculation options'), icon: <SlidersHorizontal className="h-3.5 w-3.5" />, onSelect: () => setOptionsOpen(true) },
+          ...(canSales ? [{ label: trh('business_summary_workbook', 'Business summary workbook'), icon: <Download className="h-3.5 w-3.5" />, onSelect: () => setExportChoiceOpen(true) }] : []),
+        ]} /></> : exportMenu}
+      />
+
+      {body}
+
+      <Fold open={filtersOpen} onClose={() => setFiltersOpen(false)} anchorRef={filtersAnchor} title={trh('filters', 'Filters')} actions={<Button size="sm" variant="ghost" onClick={clearFilters} disabled={!activeFilterCount}>{trh('reset', 'Reset')}</Button>}>
+        <div className="flex flex-col gap-2 p-3">{filterSelects}</div>
+      </Fold>
+      <ReportOptionsFold
+        open={optionsOpen}
+        onClose={() => setOptionsOpen(false)}
+        anchorRef={optionsAnchor}
+        options={options}
+        onChange={onOptionsChange}
+        onReset={() => setOptions({ ...DEFAULT_REPORT_OPTIONS, granularity: options.granularity })}
+        tr={trh}
+        showProfit={isAdminHint}
+        showExpenses={canFees}
+      />
 
       {exportChoiceOpen ? (
         <ExportChoiceDialog
@@ -226,29 +382,6 @@ export default function ReportsHub({ embedded = false }: { embedded?: boolean })
           }}
         />
       ) : null}
-
-      {visible.map(({ id, label, icon: Icon }) => {
-        // The section's own controls (Sales' status/method selects, Returns/
-        // Fees' breakdown chips) ride THIS title row (user, Aug 31: "the
-        // sales, returns and fees, sections the card title ... can be moved
-        // to title row") — each section component places its controls
-        // ml-auto beside the title node and drops the totals to a line
-        // below. ReportsHub no longer renders a standalone title row.
-        const titleNode = <><Icon className="h-4 w-4 shrink-0" /> {label}</>
-        // De-carded (user, Aug 30: inner wraps keep top/bottom hairlines,
-        // drop the side border + padding so content gets the full width).
-        return (
-          <section key={id} className="min-w-0 space-y-2 border-y border-slate-200 py-2.5 dark:border-slate-800">
-            {id === 'sales' ? (
-              <SalesDailyReport t={t} fmtMoney={fmtMoney} range={range} onRangeChange={setRange} branchId={branchId} embedded active titleNode={titleNode} />
-            ) : id === 'returns' ? (
-              <ReturnsReportSection t={t} fmtMoney={fmtMoney} range={range} branchId={branchId} active titleNode={titleNode} />
-            ) : (
-              <FeesReportSection t={t} fmtMoney={fmtMoney} range={range} branchId={branchId} active titleNode={titleNode} />
-            )}
-          </section>
-        )
-      })}
     </div>
   )
 }
