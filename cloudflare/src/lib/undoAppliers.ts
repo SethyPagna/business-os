@@ -137,7 +137,51 @@ export interface MergeReversal {
   reparentedSaleItemIds: number[]
   reparentedMovementIds: number[]
   adjustmentMovementIds: number[]
+  // What the fold did with the discarded row's stock. Absent on snapshots
+  // written before the choice existed -- those were all 'merge'.
+  stockDisposition?: MergeStockDisposition
+  // WRITE-OFF only: the discarded row's lots, deactivated in place with their
+  // per-branch stock cleared. Undo reactivates each and re-inserts the stock.
+  writtenOffBatches?: Array<{
+    batchId: number
+    stockBefore: Array<{ branch_id: number; quantity: number }>
+  }>
+  // Every OTHER foreign key the fold moved onto the keeper, table by table, so
+  // undo can put each row back on the discarded id. sale_items and
+  // inventory_movements keep their own dedicated fields above for
+  // backward-compatibility with snapshots written before this existed.
+  reparentedByTable?: Array<{ table: string; column: string; ids: number[] }>
 }
+
+// What a merge does with the stock still sitting on the row being discarded.
+// 'merge'     -- every lot moves onto the keeper with its batch/branch identity.
+// 'write_off' -- the lots are zeroed and a balancing ledger movement is written.
+// There is deliberately no third, silent path: a caller that supplies neither
+// for a stocked row is rejected (see routes/products.ts's merge endpoint).
+export type MergeStockDisposition = 'merge' | 'write_off'
+
+// The ONE list of foreign keys a product merge must move onto the survivor.
+// Kept here (a lib) rather than in the route so the forward fold and the undo
+// applier read the SAME list and can never drift -- and so undo can validate a
+// snapshot's table/column names against it before they ever reach SQL.
+//
+// Deliberately excluded, with reasons: stock_row_moves, import_auto_merges and
+// the legacy_* tables record what a PAST operation did to a specific product id
+// -- repointing them would rewrite provenance rather than move a live link.
+export const MERGE_REPARENT_TABLES: ReadonlyArray<{ table: string; column: string }> = [
+  { table: 'sale_items', column: 'product_id' },
+  { table: 'return_items', column: 'product_id' },
+  { table: 'return_replacement_items', column: 'product_id' },
+  { table: 'inventory_movements', column: 'product_id' },
+  { table: 'damaged_stock_lots', column: 'product_id' },
+  { table: 'stock_transfers', column: 'product_id' },
+  { table: 'rfid_tags', column: 'product_id' },
+  { table: 'rfid_events', column: 'product_id' },
+  { table: 'rfid_session_items', column: 'product_id' },
+  { table: 'promotions', column: 'link_product_id' },
+]
+
+const MERGE_REPARENT_ALLOWED = new Set(MERGE_REPARENT_TABLES.map((t) => `${t.table}.${t.column}`))
 
 // The forward fold lives in routes/products.ts; rather than have this lib
 // import a route module (a lib->route dependency, and a require cycle since the
@@ -151,6 +195,7 @@ export type MergeFoldFn = (
   dup: { id: number; name: string | null; image_path?: string | null },
   branchNameById: Map<number, string>,
   mergeContext: string,
+  stockDisposition?: MergeStockDisposition,
 ) => Promise<{ reversal: MergeReversal }>
 
 let mergeFoldFn: MergeFoldFn | null = null
@@ -362,6 +407,20 @@ async function applyMergeReversal(env: Env, r: MergeReversal): Promise<void> {
     stmts.push({ sql: `UPDATE sale_items SET product_id = @dupId WHERE id IN (${grp.join(',')})`, params: { dupId } })
   }
 
+  // 4b. Every OTHER foreign key the fold moved (return_items, damaged lots,
+  //     RFID tags, promotions...). Re-applying a table already covered above is
+  //     idempotent, so the two overlapping records cannot conflict. Table and
+  //     column names come out of a stored snapshot, so they are checked against
+  //     MERGE_REPARENT_TABLES before being interpolated -- never trusted.
+  for (const entry of (r.reparentedByTable || [])) {
+    const table = String(entry?.table || '')
+    const column = String(entry?.column || '')
+    if (!MERGE_REPARENT_ALLOWED.has(`${table}.${column}`)) continue
+    for (const grp of chunk(intIds(entry?.ids), 400)) {
+      stmts.push({ sql: `UPDATE ${table} SET ${column} = @dupId WHERE id IN (${grp.join(',')})`, params: { dupId } })
+    }
+  }
+
   // 5. product_images: pull the moved paths off the keeper, restore the dup's
   //    gallery (the fold had deleted every dup image row).
   const movedPaths = (r.imagesMovedToKeeper || []).map(String).filter(Boolean)
@@ -398,6 +457,21 @@ async function applyMergeReversal(env: Env, r: MergeReversal): Promise<void> {
       }
       stmts.push({ sql: 'DELETE FROM branch_batch_stock WHERE batch_id = @db AND branch_id = @b', params: { db: dupBatchId, b } })
       stmts.push({ sql: 'INSERT INTO branch_batch_stock (batch_id, branch_id, quantity, updated_at) VALUES (@db, @b, @q, CURRENT_TIMESTAMP)', params: { db: dupBatchId, b, q: Number(d.quantity) || 0 } })
+    }
+  }
+
+  // 6b. WRITE-OFF undo: the discarded row's lots were deactivated in place and
+  //     their per-branch stock cleared (nothing was moved onto the keeper), so
+  //     reversing is exactly reactivate + re-insert the captured quantities.
+  //     The balancing negative inventory_movements rows the write-off wrote are
+  //     deleted by step 3 (they were captured into adjustmentMovementIds).
+  for (const wb of (r.writtenOffBatches || [])) {
+    const batchId = Number(wb?.batchId)
+    if (!Number.isInteger(batchId) || batchId <= 0) continue
+    stmts.push({ sql: 'UPDATE product_batches SET is_active = 1, updated_at = CURRENT_TIMESTAMP WHERE id = @id', params: { id: batchId } })
+    for (const s of (wb.stockBefore || [])) {
+      stmts.push({ sql: 'DELETE FROM branch_batch_stock WHERE batch_id = @b AND branch_id = @br', params: { b: batchId, br: Number(s.branch_id) } })
+      stmts.push({ sql: 'INSERT INTO branch_batch_stock (batch_id, branch_id, quantity, updated_at) VALUES (@b, @br, @q, CURRENT_TIMESTAMP)', params: { b: batchId, br: Number(s.branch_id), q: Number(s.quantity) || 0 } })
     }
   }
 
@@ -451,6 +525,9 @@ async function redoBulkMergeFolds(
       { id: dupId, name: dupRow.name, image_path: dupRow.image_path },
       branchNameById,
       r.mergeContext || 'redo merge',
+      // A redo must repeat the operator's ORIGINAL stock decision, never
+      // silently fall back to merging stock the reviewer chose to write off.
+      r.stockDisposition === 'write_off' ? 'write_off' : 'merge',
     )
     fresh.push(one)
     keeperIds.add(keeperId)
@@ -848,6 +925,9 @@ const APPLIERS: Record<string, UndoApplierDef> = {
           { id: dupId, name: dupRow.name, image_path: dupRow.image_path },
           new Map<number, string>(branchRows.map((b) => [b.id, b.name])),
           reversal.mergeContext || 'redo merge',
+          // Repeat the operator's ORIGINAL stock decision on redo; a merge the
+          // reviewer settled as a write-off must not come back as a stock fold.
+          reversal.stockDisposition === 'write_off' ? 'write_off' : 'merge',
         )
         await db.prepare('UPDATE products SET stock_quantity = (SELECT COALESCE(SUM(quantity), 0) FROM branch_stock WHERE product_id = @id), updated_at = CURRENT_TIMESTAMP WHERE id = @id').run({ id: keeperId })
         await db.prepare("UPDATE undo_snapshots SET status = 'applied', payload_json = @payload, updated_at = CURRENT_TIMESTAMP WHERE id = @id").run({ payload: JSON.stringify(fresh), id: snapshotId })
