@@ -92,6 +92,22 @@ db.exec(`
     branch_id INTEGER
   );
   CREATE TABLE customers (id INTEGER PRIMARY KEY, membership_number TEXT);
+  -- getDeliveryContactTotals also folds courier expense rows (fees linked to a
+  -- delivery contact via 0105) into the day report; the columns it reads.
+  CREATE TABLE delivery_contacts (id INTEGER PRIMARY KEY, name TEXT);
+  CREATE TABLE fees (
+    id INTEGER PRIMARY KEY,
+    fee_type TEXT,
+    label TEXT,
+    amount_usd REAL,
+    amount_khr REAL,
+    fee_date TEXT,
+    sale_id INTEGER,
+    branch_id INTEGER,
+    delivery_contact_id INTEGER,
+    notes TEXT,
+    created_at TEXT
+  );
 `)
 
 // All created_at are UTC that map into local (UTC+7) August 2026 (midday, so

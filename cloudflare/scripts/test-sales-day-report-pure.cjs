@@ -45,12 +45,15 @@ const tscBin = path.join(cloudflareRoot, 'node_modules', 'typescript', 'bin', 't
 execSync(`node ${tscBin} --module commonjs --target es2022 --strict --skipLibCheck --outDir ${tmpDir} ${path.join(tmpDir, 'salesAnalytics.ts')} ${path.join(tmpDir, 'businessDateWindow.ts')}`, { cwd: tmpDir, stdio: 'inherit' })
 
 // ---- real schema ----------------------------------------------------------
-const initSql = fs.readFileSync(path.join(cloudflareRoot, 'migrations', '0001_init.sql'), 'utf8')
-function lift(tableName) {
-  const start = initSql.indexOf(`CREATE TABLE ${tableName} (`)
-  assert.ok(start > 0, `${tableName} CREATE TABLE found in 0001_init.sql`)
-  return initSql.slice(start, initSql.indexOf(';', start) + 1)
+const migrationSql = (file) => fs.readFileSync(path.join(cloudflareRoot, 'migrations', file), 'utf8')
+const initSql = migrationSql('0001_init.sql')
+function liftFrom(file, tableName) {
+  const sql = file === '0001_init.sql' ? initSql : migrationSql(file)
+  const start = sql.indexOf(`CREATE TABLE ${tableName} (`)
+  assert.ok(start > 0, `${tableName} CREATE TABLE found in ${file}`)
+  return sql.slice(start, sql.indexOf(';', start) + 1)
 }
+const lift = (tableName) => liftFrom('0001_init.sql', tableName)
 const db = new Database(':memory:')
 db.exec(lift('sales'))
 db.exec(lift('sale_items'))
@@ -59,6 +62,13 @@ db.exec(lift('sale_items'))
 // the real returns schema so that SQL resolves; this suite seeds no returns, so
 // refund_usd is 0 and the payment/delivery assertions below are unaffected.
 db.exec(lift('returns'))
+// getDeliveryContactTotals (fees lane) folds courier expense rows into the
+// delivery report: real fees schema (0018) + the 0105 link column, plus the
+// delivery_contacts table it joins for names. No fees are seeded here, so
+// the delivery assertions below are unaffected.
+db.exec(lift('delivery_contacts'))
+db.exec(liftFrom('0018_fees.sql', 'fees'))
+db.exec('ALTER TABLE fees ADD COLUMN delivery_contact_id INTEGER')
 db.exec('ALTER TABLE sales ADD COLUMN delivery_actual_cost_usd REAL')
 db.exec('ALTER TABLE sales ADD COLUMN delivery_actual_cost_khr REAL')
 
@@ -114,8 +124,12 @@ const env = { DB: {} }
   ok(byMethod.get('Cash').tx_count === 2 && !methods.some((m) => m.tx_count === 0),
     'cancelled and out-of-range sales are excluded')
   const aba = byMethod.get('ABA')
-  ok(aba.collected_usd === 27 && aba.total_usd === 25,
-    'collected = total + customer-paid delivery fee (25 + 2); store-absorbed never collects')
+  // sales.total_usd already carries the customer-paid delivery fee (POS:
+  // totalUsd = afterDisc + tax + customerFee; 4,398/4,398 delivery sales on
+  // prod agree), so Collected is total_usd itself -- adding the fee again
+  // double-counted every delivery sale until the fees lane fixed it.
+  ok(aba.collected_usd === 25 && aba.total_usd === 25,
+    'collected = total_usd; the customer-paid delivery fee is already inside total_usd, never added twice')
   const abaLower = byMethod.get('aba')
   ok(abaLower.collected_usd === 18, "store-paid delivery adds nothing to the customer's collected figure")
 
@@ -187,8 +201,8 @@ const env = { DB: {} }
   // ---- X4: per-customer purchase totals -----------------------------------
   db.exec("UPDATE sales SET customer_id = 5 WHERE receipt_number IN ('R1', 'R2', 'R5', 'R7')")
   const customerDay = await kernel.getCustomerSalesTotals(env, { startDate: D, endDate: D, customerId: 5 })
-  ok(customerDay.tx_count === 2 && customerDay.collected_usd === 37,
-    'customer totals: cancelled excluded; collected = totals + customer-paid delivery (10 + 25+2)')
+  ok(customerDay.tx_count === 2 && customerDay.collected_usd === 35,
+    'customer totals: cancelled excluded; collected = total_usd (10 + 25), delivery fee already inside total_usd')
   ok(customerDay.discount_usd === 5 && customerDay.membership_discount_usd === 0,
     'customer discount split rides along')
   const customerAll = await kernel.getCustomerSalesTotals(env, { startDate: '2026-08-27', endDate: D, customerId: 5 })
