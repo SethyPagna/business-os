@@ -24,9 +24,7 @@ const migrationsDir = path.join(cloudflareRoot, 'migrations')
 const MIGRATION_0107 = '0107_receipt_numbers_business_format.sql'
 // Normalise line endings: an autocrlf checkout hands this file back with CRLF,
 // and the shape checks below look for LF-separated SQL.
-const migration0107 = fs.readFileSync(path.join(migrationsDir, MIGRATION_0107), 'utf8').replace(/
-/g, '
-')
+const migration0107 = fs.readFileSync(path.join(migrationsDir, MIGRATION_0107), 'utf8').replace(/\r\n/g, '\n')
 
 let failed = 0
 function check(name, fn) {
