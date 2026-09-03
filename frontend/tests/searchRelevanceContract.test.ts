@@ -30,6 +30,7 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import {
+  fuzzyTextMatches,
   MATCH_TIER_EXACT_BARCODE,
   MATCH_TIER_EXACT_NAME,
   MATCH_TIER_NAME_PREFIX,
@@ -120,6 +121,33 @@ check('sortExactBarcodeFirst keeps its narrower contract on the shared implement
     /export function sortExactBarcodeFirst[\s\S]{0,400}?return sortBySearchRelevance\(/,
     'sortExactBarcodeFirst must delegate rather than become a second copy of the ordering',
   )
+})
+
+// --- 1b. a scan must NARROW the list, never widen it ---------------------
+
+check('a scanned barcode narrows an in-memory picker instead of matching everything', () => {
+  // Measured live in the Transfer bulk picker against the production
+  // snapshot before this fix: typing the 13-digit barcode returned all 101
+  // loaded rows. Cause: the fuzzy matcher let a typed word CONTAIN a stored
+  // one with no length floor, and a 13-digit code contains "1", so every
+  // product whose name held a lone digit matched. A scan that widens the
+  // list is the same defect the operator reported, in its worst form.
+  const SCAN = '3348901486385'
+  for (const name of [
+    'Anessa Sunscreen Compact SPF 50+(1)',
+    'Benefit Gimme Brow Gel 4',
+    'Bobbi Brown Stick Gel Tahiti 3',
+  ]) {
+    assert.equal(fuzzyTextMatches(name, SCAN), false, `a scan must not match "${name}"`)
+  }
+  assert.equal(fuzzyTextMatches(`SAUVAGE dior Parfum 100ml ${SCAN}`, SCAN), true)
+  assert.equal(fuzzyTextMatches(`Dior Sauvage Parfum 100ml 0${SCAN}`, SCAN), true,
+    'the GTIN-14 leading-zero twin must still be reachable from the bare EAN-13 scan')
+  // The reverse-containment branch still does the job it was written for.
+  assert.equal(fuzzyTextMatches('Matte Lipstick', 'lipsticks'), true, 'typed-more-than-stored must still match')
+  assert.equal(fuzzyTextMatches('Dior 9ml Bottle', '9ml'), true, 'a real size token must still match')
+  assert.equal(fuzzyTextMatches('Dior Sauvage', 'sauvage dior'), true, 'word order must stay free')
+  assert.equal(fuzzyTextMatches('Anessa Sunscreen', 'anesa'), true, 'typo tolerance must survive')
 })
 
 // --- 2. the fully client-side pickers call it ----------------------------
@@ -221,6 +249,30 @@ check('the search-only barcode fold never leaks into the auto-merge identity rul
   assert.ok(
     !/\^0\+|padStart|checkDigit|check_digit/i.test(body),
     `the identity normalizer must not learn the search fold. got:\n${body}`,
+  )
+})
+
+check('the unpaged branch-stock payload still carries the barcode the bulk picker ranks on', () => {
+  // TransferModal's bulk picker is the only consumer of the UNPAGED branch
+  // of GET /api/branches/:id/stock, and it filters + ranks that list
+  // entirely client-side over [name, sku, barcode]. The column was missing
+  // from that SELECT, so product.barcode was undefined on every row and a
+  // scanned code could not reach the product it belongs to at all --
+  // measured live on the production snapshot: typing 3348901486385 returned
+  // two unrelated fuzzy rows and never the scanned product. Guard the
+  // column, and guard that the picker still reads it, so the two halves
+  // cannot drift apart again.
+  const route = read('../../cloudflare/src/routes/branches.ts')
+  const start = route.indexOf('if (!wantsPaged) {')
+  assert.ok(start >= 0, 'the unpaged branch-stock branch must still exist')
+  const unpaged = route.slice(start, start + 2500)
+  const select = unpaged.slice(unpaged.indexOf('SELECT p.id'), unpaged.indexOf('FROM products p'))
+  assert.ok(select.includes('p.barcode'),
+    'the unpaged branch-stock SELECT must include p.barcode -- the bulk transfer picker ranks on it')
+  assert.match(
+    read('../src/components/branches/TransferModal.tsx'),
+    /fuzzyTextMatches\(\[product\.name, product\.sku, product\.barcode\]/,
+    'the bulk transfer picker must keep barcode in its client-side haystack',
   )
 })
 

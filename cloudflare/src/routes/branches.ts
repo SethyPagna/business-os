@@ -887,8 +887,19 @@ app.get('/:id/stock', async (c) => {
   const wantsPaged = PAGED_STOCK_QUERY_KEYS.some((key) => c.req.query(key) !== undefined)
 
   if (!wantsPaged) {
+    // p.barcode is in this SELECT because the ONE consumer of this unpaged
+    // branch -- TransferModal's bulk product picker -- filters and ranks the
+    // whole list client-side over `[name, sku, barcode]` and carries its own
+    // ScanSearchButton. The column was missing, so `product.barcode` was
+    // `undefined` on every row and a scanned code could not match the product
+    // it belongs to at all: measured live on the production snapshot, typing
+    // 3348901486385 (SAUVAGE dior Parfum 100ml, present and in stock in this
+    // branch) returned two unrelated Chanel rows and not the scanned product.
+    // The picker's TransferProduct type has always declared `barcode?: string`
+    // and the paged branch below already selects it; this is the payload
+    // catching up with both. Ordering stays A-Z here -- the client ranks.
     const rows = await db.prepare(`
-      SELECT p.id, p.name, p.sku, p.unit, p.selling_price_usd, p.selling_price_khr,
+      SELECT p.id, p.name, p.sku, p.barcode, p.unit, p.selling_price_usd, p.selling_price_khr,
              p.purchase_price_usd, p.purchase_price_khr, p.low_stock_threshold, p.out_of_stock_threshold,
              COALESCE(bs.quantity, 0) AS branch_quantity
       FROM products p

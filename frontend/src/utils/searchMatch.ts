@@ -214,10 +214,26 @@ function typoBudgetForLength(length: number): number {
 // an exact match, a prefix/substring either direction (covers partial
 // typing and simple pluralization), or a small bounded edit distance
 // (covers genuine typos/transpositions).
+// The reverse-containment branch below (a typed word CONTAINING a stored
+// one) exists for the "typed more than is stored" case -- "lipsticks"
+// finding "lipstick", "9piece" finding "piece". It must not fire on a
+// stored word so short that it appears inside almost anything: a scanned
+// 13-digit barcode contains "1", so every product whose name holds a lone
+// digit or letter -- "Anessa Sunscreen Compact SPF 50+(1)", "Benefit Brow
+// Gel 4" -- came back as a match. Measured live in the Transfer bulk
+// picker on the production snapshot: scanning 3348901486385 returned the
+// ENTIRE loaded catalogue (101 rows) instead of the one product, so the
+// scan widened the list rather than narrowing it. Three characters is the
+// shortest stored token that still carries meaning here (a "9ml"/"75g"
+// size, a "sku" fragment); anything shorter is noise on this side of the
+// comparison and is left to the compact-substring and Levenshtein checks.
+const MIN_REVERSE_CONTAINMENT_LENGTH = 3
+
 function wordsFuzzyMatch(queryWord: string, haystackWord: string): boolean {
   if (!queryWord || !haystackWord) return false
   if (queryWord === haystackWord) return true
-  if (haystackWord.includes(queryWord) || queryWord.includes(haystackWord)) return true
+  if (haystackWord.includes(queryWord)) return true
+  if (haystackWord.length >= MIN_REVERSE_CONTAINMENT_LENGTH && queryWord.includes(haystackWord)) return true
   const budget = Math.min(typoBudgetForLength(queryWord.length), typoBudgetForLength(haystackWord.length))
   if (budget <= 0) return false
   return boundedLevenshtein(queryWord, haystackWord, budget) <= budget
