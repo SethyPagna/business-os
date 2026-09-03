@@ -16,6 +16,8 @@ import { findIdentityMatch, findIdentityMatches, type ProductIdentityRow } from 
 import { decrementBatchStockStatement, decrementBatchStockStrictStatement, incrementBatchStockStatement, resolveDestinationBatch, readFifoLotAvailability, allocateAcrossLots } from '../lib/productBatches'
 import { branchUpdateStatements } from '../lib/branchWrites'
 import {
+  buildExactBarcodeMatchClause,
+  buildExactBarcodeRankSql,
   buildFtsMatchExpression,
   buildHybridMatchClause,
   buildPartialWordMatchClause,
@@ -854,7 +856,14 @@ function normalizePositiveInt(value: unknown, fallback: number, { min = 1, max =
 function buildBranchStockWhere(c: any, branchId: number, { includeStockState = true } = {}) {
   const where = ['p.is_active = 1']
   const params: Record<string, unknown> = { branchId }
-  const rawQuery = String(c.req.query('query') || c.req.query('q') || '')
+  // Relevance rank for this endpoint, used only to float an exact barcode
+  // hit above rows that merely contain the digits (the listing is otherwise
+  // ordered by family name).
+  let matchRankSql: string | undefined
+  // `search` accepted as a third alias alongside query/q, same as
+  // products.ts/inventory.ts -- an unrecognized key used to mean "return the
+  // whole branch's stock" rather than an error.
+  const rawQuery = String(c.req.query('query') || c.req.query('q') || c.req.query('search') || '')
   const searchTermGroups = tokenizeSearchTermGroups(rawQuery, 6, 8)
   if (searchTermGroups.length) {
     const searchMode = 'AND'
@@ -888,6 +897,16 @@ function buildBranchStockWhere(c: any, branchId: number, { includeStockState = t
     if (shortWordMatch) matchClauses.push(shortWordMatch)
     const partialMatch = buildPartialWordMatchClause(searchTermGroups, searchMode, ['p.name_normalized'], params, 'partialw', 4, true)
     if (partialMatch) matchClauses.push(partialMatch)
+    // Exact-barcode disjunct with leading zeros folded on both sides, same
+    // shared helper products.ts/inventory.ts use (lib/searchMatch.ts's
+    // buildExactBarcodeMatchClause). This picker needs it most: it is the
+    // one product search in the app with NO JS fuzzy fallback behind it, so
+    // whatever this WHERE misses is simply gone.
+    const exactBarcodeMatch = buildExactBarcodeMatchClause(rawQuery, params)
+    if (exactBarcodeMatch) {
+      matchClauses.push(exactBarcodeMatch)
+      matchRankSql = buildExactBarcodeRankSql()
+    }
     if (matchClauses.length) {
       where.push(matchClauses.length > 1 ? `(${matchClauses.join(' OR ')})` : matchClauses[0])
     }
@@ -903,7 +922,7 @@ function buildBranchStockWhere(c: any, branchId: number, { includeStockState = t
     if (stockState === 'low') where.push('COALESCE(bs.quantity, 0) > COALESCE(p.out_of_stock_threshold, 0) AND COALESCE(bs.quantity, 0) <= COALESCE(p.low_stock_threshold, 10)')
     if (stockState === 'out' || stockState === 'out_of_stock') where.push('COALESCE(bs.quantity, 0) <= COALESCE(p.out_of_stock_threshold, 0)')
   }
-  return { where, params, stockState }
+  return { where, params, stockState, matchRankSql }
 }
 
 app.get('/:id/stock', async (c) => {
@@ -927,7 +946,7 @@ app.get('/:id/stock', async (c) => {
   const branchId = Number.parseInt(id, 10)
   const page = normalizePositiveInt(c.req.query('page'), 1, { min: 1, max: 100000 })
   const pageSize = normalizePositiveInt(c.req.query('pageSize') || c.req.query('page_size'), 20, { min: 1, max: 100 })
-  const { where, params, stockState } = buildBranchStockWhere(c, branchId)
+  const { where, params, stockState, matchRankSql } = buildBranchStockWhere(c, branchId)
   const whereSql = `WHERE ${where.join(' AND ')}`
   const summaryWhere = buildBranchStockWhere(c, branchId, { includeStockState: false })
   const summaryWhereSql = `WHERE ${summaryWhere.where.join(' AND ')}`
@@ -990,8 +1009,11 @@ app.get('/:id/stock', async (c) => {
     params,
     page,
     pageSize,
-    familyOrderSql: 'family_name ASC',
+    // With a scanned barcode in play the family holding that exact code
+    // leads; everything else keeps the plain A-Z listing order.
+    familyOrderSql: matchRankSql ? 'match_rank ASC, family_name ASC' : 'family_name ASC',
     intraFamilyOrderSql: 'lower(name) ASC, id ASC',
+    matchRankSql,
   })
 
   return c.json({
