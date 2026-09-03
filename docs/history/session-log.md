@@ -18094,3 +18094,81 @@ this project pinned and re-swept in Part 388/W2. The user's newer instruction wi
 surface, which is where they gave it; whether the rest of the app follows is on the board as
 **S4-26b** and should not be decided unilaterally.
 
+## Part 590 (Sep 4 2026, session business-os-v1-c3, lane S4-27, worktree `bos-rc-workers/s4-rd`) — "batch" becomes "received date" everywhere, and the Khmer word turned out to have been dictated a day earlier
+
+Branch `s4/received-date` off the deployed tip `e3678a39`, six commits, pushed. Reference to
+re-verify, not ground truth.
+
+The user's instruction was one line ("make sure the renamed batch to received date is updated
+throughout the system"), and the honest answer was that the earlier rename had only ever reached
+one field label. Two questions had to go back to them before anything could be renamed, and both
+were answered:
+
+- **Does the collection noun move too?** — *Everything moves.* Not just the date field: the
+  "Manage batches" button, the Batches column headers, the Worker's own error bodies.
+- **Is "lot" a second vocabulary or drift?** — *Drift, revert to one word.* Some screens had
+  quietly started saying "lot" where others said "batch"; there was never a decision behind it.
+
+So there is now exactly one term: **"received date"** in English, **`ថ្ងៃចូល`** in Khmer.
+
+### The part that is worth reading before anyone renames anything again
+
+**The Khmer word was not mine to choose, and I chose wrong first.** I picked `ថ្ងៃទទួលស្តុក`,
+built the whole pack on it, and `frontend/tests/khmerRetailVocabulary.test.ts` went red at 1,038
+PASS. The test was right. On 2026-09-03 the shop owner had dictated, in their own words, *"Batch
+name change Date in `ថ្ងៃចូល`"* — which means **that dictation already was this rename, in Khmer**,
+a day before the English one was asked for. 106 occurrences were replaced and the glossary rule
+rewritten so `ថ្ងៃចូល` is canonical and `បាច់` / `ឡូត` / `ឡុត` are all forbidden spellings.
+`ចាំបាច់` ("necessary") contains `បាច់` and needed a lookbehind to survive the rule.
+
+Two lessons the next session gets for free: **that test file is the Khmer glossary** — read it
+before writing Khmer, not after; and **a raw line read out of `km.json` is not the rendered value**,
+because `AppContext` flattens the nested `common`/`pages` groups into one namespace last-write-wins
+(517 top-level keys are shadowed that way). A survey that quoted `received_date = ថ្ងៃទទួលស្តុក`
+from the file was quoting a key the UI never renders.
+
+**A blind regex over a language pack produced twelve broken strings.** Three renamed `{batch}` and
+`{lot}` *interpolation slots* — those are named placeholders the calling code fills, so renaming one
+prints literal braces to the shopkeeper. One renamed the CSV header `batch(mm/dd/yyyy)` inside its
+own documentation, where the whole point of the sentence is that the header keeps its old name so
+existing files still import. The rest were nonsense the substitution manufactured: "Received date
+date", "Receive Received date", "a damaged received date", "received date(es)". All rewritten by
+hand and then asserted — placeholders intact, header intact, no doubling.
+
+### What was deliberately not renamed
+
+The `product_batches` D1 columns and every identifier (a rename there is a migration, not a label
+change); the CSV header `batch(mm/dd/yyyy)`, which is read by a four-way fallback at
+`cloudflare/src/lib/importEngine.ts:1433` and counted as one of seven routing signals at
+`importTemplateRouter.ts:122`; and three keys where the same word means something else entirely —
+`inventory_batch_session` (a multi-line review flow) and `reason_defective_batch` (a return reason
+the shop writes). Also `importEngine.ts:1562` and `stockActionResolver.ts`'s
+`COST_BATCH_CONFLICT_MESSAGE`, because lane `s4/identity-cost` deletes them — renaming them here
+would have manufactured a merge conflict over dead code.
+
+**Stored text is not rewritten.** Inventory-movement reasons are saved into D1, so rows written
+before this still read "Batch receipt (…)" in stock history. Rewriting them is a production data
+write and is out of this lane.
+
+### The commits
+
+| commit | what |
+| --- | --- |
+| `dd475a3f` | three places a Khmer user was shown the English word |
+| `bdf2998d` | stop printing `08242026` where a received date belongs — `ProductsImageOnlyView`, `movementGroups.ts:319`, `FastStockInModal.tsx:433` now all route through `batchDisplayLabel` / `lotCodeAsDate` |
+| `ffec1309` | `batchDisplayLabel`'s English default was reaching Khmer users from `ProductDetailReport` |
+| `374bbe33` | the Products date filter said "Created" and filters on received date |
+| `894ad310` | the packs: 85 EN values, 90 KM, plus the glossary rule |
+| `d144e133` | the Worker's own 31 user-visible strings across five routes and seven libs |
+
+Gate at `d144e133`: `verify:i18n` OK, `test:utils` exit 0 with 1,078 PASS, `vite build` clean,
+Worker `tsc --noEmit` clean, full `cloudflare/scripts/test-*.cjs` sweep clean.
+
+### Left for their owners, messaged rather than edited around
+
+`ProductDetailSheet.tsx` and `POS.tsx` bypass the packs entirely through `posCopy(...)`, so nothing
+in `894ad310` reaches them — `business-os-v1-7c` owns those and was told, with the canonical Khmer
+word. `StockChangeSection.tsx:748` and `StockInSessionsSection.tsx:260,265` belong to
+`business-os-v1-ba`, told the same. Both messages went out twice: once to claim the boundary, once
+after the Khmer term changed under them.
+
