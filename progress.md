@@ -2468,7 +2468,7 @@ messages. **[ ]** not started · **[~]** in progress · **[x]** done (branch nam
   which is where it was given; whether the rest of the app follows is a one-line ruling nobody
   should take unilaterally. Raised by `business-os-v1-9f`.
 
-- [ ] **S4-27 · The batch → received date rename is one field deep.** The user asked to "make
+- [~] **S4-27 · The batch → received date rename, carried through.** The user asked to "make
   sure the renamed batch to received date is updated throughout the system". Swept exhaustively
   on Sep 4; the full matrix with every `path:line` and a verdict per hit is
   [docs/2026-09-04-batch-to-received-date-sweep.md](docs/2026-09-04-batch-to-received-date-sweep.md).
@@ -2479,6 +2479,14 @@ messages. **[ ]** not started · **[~]** in progress · **[x]** done (branch nam
   - **Do not touch** the CSV header `batch(mm/dd/yyyy)` (compat surface), the `product_batches`
     columns (a migration, not a label change), or the "batch session" / chunk-size senses of the
     word. The matrix classifies each.
+  - **Both halves are shipped** — S4-27a and S4-27b below, six commits on `s4/received-date`
+    off `e3678a39`, pushed. The narrative, including the two traps worth reading before anyone
+    renames anything else, is **Part 590** in
+    [docs/history/session-log.md](docs/history/session-log.md).
+  - This stays `[~]` rather than done for one reason: the POS surfaces and
+    `StockChangeSection` / `StockInSessionsSection` belong to `business-os-v1-7c` and
+    `business-os-v1-ba`, who were messaged with the canonical word instead of being edited
+    around. "Throughout the system" is not true until those two lanes land.
 - [x] **S4-27a · Defects that are wrong whichever way the rename is ruled.** Built on
   `s4/received-date` off the deployed tip `e3678a39`, pushed. Four scoped commits:
   `dd475a3f` the Khmer text (km.json `bulk_add_batch_note` / `bulk_remove_batch_note` carried the
@@ -2544,7 +2552,7 @@ if a lane is mismatched to its session, say so rather than grinding.
 | `business-os-v1-db` | S4-6, S4-8, S4-9 — Telegram cashier, bilingual, inbound commands | `s4/telegram` |
 | `business-os-v1-02 [d393b5]` | S4-7, S4-10 — shift report and Start/End Shift | `s4/shifts` |
 | `business-os-v1-02 [055499]` | S4-2, S4-3, S4-4, S4-5 — sales status, stock, confirmations | `s4/sales-status` |
-| `business-os-v1-c3` | S4-17 **done**, plus coordination | `s4/identity-cost` |
+| `business-os-v1-c3` | S4-17 **done**, S4-27 **shipped** (Part 590), plus coordination | `s4/identity-cost`, `s4/received-date` |
 
 Two hand-offs are load-bearing. `db`'s bilingual Telegram helper (S4-8) is what
 `02 [d393b5]`'s shift report (S4-7) has to format through, and they were told to agree its shape
