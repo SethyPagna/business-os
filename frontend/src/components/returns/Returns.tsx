@@ -368,6 +368,7 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
   const loadedOnceRef = useRef(false)
   const returnsRequestRef = useRef(0)
   const editRequestRef = useRef(0)
+  const detailRequestRef = useRef(0)
   const historyRestoreInFlightRef = useRef(false)
   const loadPromiseRef = useRef<Promise<void> | null>(null)
   const loadWatchdogRef = useRef<number | null>(null)
@@ -494,7 +495,18 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
   useEffect(() => {
     const refreshOpen = (current: ReturnRow | null): ReturnRow | null => {
       if (!current) return current
-      return rows.find((row) => Number(row.id) === Number(current.id)) || current
+      const fresh = rows.find((row) => Number(row.id) === Number(current.id))
+      if (!fresh) return current
+      // MERGE, don't replace: list rows carry no items (GET /api/returns only
+      // hydrates them for a caller that asks), so replacing an open, hydrated
+      // detail with its list row would empty the items table again the next
+      // time anything refreshes the list underneath it.
+      return {
+        ...current,
+        ...fresh,
+        items: fresh.items ?? current.items,
+        replacement_items: fresh.replacement_items ?? current.replacement_items,
+      }
     }
     setDetailRet(refreshOpen)
     setEditRet(refreshOpen)
@@ -603,6 +615,32 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
       },
     ]
   }, [fmtUSD, scope, stripData, tr])
+
+  // Opening a return showed "No item details available" for EVERY record,
+  // whatever it actually held: the list these rows come from is fetched
+  // without includeItems, so ret.items / ret.replacement_items are simply
+  // absent, and the detail modal was handed that row directly. The edit flow
+  // already re-fetches by id for the same reason (handleOpenEdit below); the
+  // view flow now does too -- open instantly on the list row so the modal is
+  // never a blank wait, then fill the line items in.
+  const openReturnDetail = useCallback(async (ret: ReturnRow): Promise<void> => {
+    setDetailRet(ret)
+    const requestId = beginTrackedRequest(detailRequestRef)
+    try {
+      const fresh = await withLoaderTimeout(
+        () => fetchReturnDetail(ret.id),
+        'Return details',
+        RETURNS_DETAIL_TIMEOUT_MS,
+      )
+      if (!fresh || !isTrackedRequestCurrent(detailRequestRef, requestId)) return
+      setDetailRet((current) => (current && Number(current.id) === Number(ret.id)
+        ? { ...current, ...(fresh as ReturnRow) }
+        : current))
+    } catch {
+      // Leave the list row on screen: every field except the line items is
+      // already on it, so a failed hydrate must not blank the modal.
+    }
+  }, [])
 
   const handleOpenEdit = async (ret: ReturnRow): Promise<void> => {
     const requestId = beginTrackedRequest(editRequestRef)
@@ -1193,7 +1231,7 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
         selectedIds={selectedIds}
         selectionModeActive={selectionModeActive}
         getReturnLongPressState={getReturnLongPressState}
-        setDetailRet={(ret) => setDetailRet(ret as ReturnRow)}
+        setDetailRet={(ret) => { void openReturnDetail(ret as ReturnRow) }}
         showReturnActionGroups={showReturnActionGroups}
         SUPPLIER_SCOPE={SUPPLIER_SCOPE}
         t={t}
