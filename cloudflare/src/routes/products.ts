@@ -726,8 +726,15 @@ function buildSearchFilters(query: Record<string, string>, options: ProductSearc
     const requestedIds = [...new Set(
       String(rawIdFilter)
         .split(',')
-        .map((raw) => Number.parseInt(String(raw).trim(), 10))
-        .filter((id) => Number.isFinite(id) && id > 0),
+        .map((raw) => String(raw).trim())
+        // Whole-token digits only. Number.parseInt is lenient and stops at
+        // the first non-digit, so a malformed '1.5.2' would parse to 1 --
+        // resolving a bad id to a DIFFERENT VALID PRODUCT, which is the
+        // wrong-record failure this filter exists to prevent. A token that
+        // is not an id must fall through to the 1 = 0 branch below.
+        .filter((raw) => /^\d+$/.test(raw))
+        .map((raw) => Number.parseInt(raw, 10))
+        .filter((id) => Number.isSafeInteger(id) && id > 0),
     )].slice(0, 100)
     if (!requestedIds.length) where.push('1 = 0')
     else {

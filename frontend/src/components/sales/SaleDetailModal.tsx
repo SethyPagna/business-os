@@ -460,7 +460,7 @@ export default function SaleDetailModal({
                   {translateOr('delivery', 'Delivery', 'ការដឹកជញ្ជូន')}
                 </div>
                 <div className="grid gap-3">
-                  <InfoBlock label={translateOr('driver', 'Driver', 'អ្នកបើកបរ')} value={sale.delivery_contact_name} />
+                  <InfoBlock label={translateOr('driver', 'Delivery', 'ដឹកជញ្ជូន')} value={sale.delivery_contact_name} />
                   <InfoBlock label={t('phone') || 'Phone'} value={sale.delivery_contact_phone} />
                   <InfoBlock label={t('address') || 'Address'} value={sale.delivery_contact_address} />
                 </div>
