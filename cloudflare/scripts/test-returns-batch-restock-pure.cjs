@@ -417,6 +417,25 @@ async function main() {
     assert.strictEqual(rawDb.prepare('SELECT name FROM products WHERE id = 1').get().name, 'Widget', 'the product name is untouched')
     assert.strictEqual(item.product_name, 'Widget', 'and the snapshot carries no "(damaged)" suffix either')
 
+    // --- the customer copy cannot leak the internal choice ---------------
+    // The receipt is built from the replacement SALE row and its sale_items.
+    // Neither table has anywhere to put a stock_action, and the auto note is
+    // the only free text on the row -- so there is no field to strip and no
+    // CSS rule to trust: the restock/damaged choice physically cannot reach
+    // what the customer is handed.
+    const saleColumns = rawDb.prepare('PRAGMA table_info("sales")').all().map((c) => c.name)
+    const saleItemColumns = rawDb.prepare('PRAGMA table_info("sale_items")').all().map((c) => c.name)
+    for (const column of [...saleColumns, ...saleItemColumns]) {
+      assert.ok(!/stock_action/i.test(column), `receipt-bearing tables must carry no "${column}" -- the choice has nowhere to land`)
+    }
+    // sale_items.damaged_lot_id (0075) is a DIFFERENT feature -- POS selling
+    // marked-down damaged stock -- and a return's hand-out is never that, so
+    // the replacement line must leave it null rather than borrowing it to
+    // carry this return's damaged flag onto the sale.
+    const replacementItem = rawDb.prepare('SELECT damaged_lot_id FROM sale_items WHERE sale_id = ?').get([json.replacementSaleId])
+    assert.strictEqual(replacementItem.damaged_lot_id, null)
+    assert.doesNotMatch(sale.notes, /damaged|restock/i, 'the auto note must not spell the internal choice onto the receipt')
+
     // --- and the list read carries the flag without a second round trip --
     const list = await req('GET', '/')
     const listed = list.json.find((row) => row.id === json.id)
