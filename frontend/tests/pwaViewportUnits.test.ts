@@ -61,8 +61,15 @@ const ALLOWED: Array<{ prefix: string; why: string }> = [
   { prefix: 'src/components/products/', why: 'P2-4b lane owns components/products' },
   { prefix: 'src/components/shared/kit/', why: 'kit lane owns shared/kit' },
   { prefix: 'src/components/utils-settings/', why: 'P2-8 lane owns utils-settings' },
-  // The customer storefront keeps its own design.
+  // The customer storefront keeps its own design. PublicCatalogPage renders
+  // all four of these, so they are storefront surfaces even though the admin
+  // Customer Portal editor previews the same components. floatingFilterMenus
+  // .test.ts pins the compact filter sheet's own 100dvh, which is the proof
+  // that this boundary is real and not a matter of taste.
   { prefix: 'src/components/catalog/PublicCatalogPage.tsx', why: 'storefront keeps its own design' },
+  { prefix: 'src/components/catalog/CatalogProductsSection.tsx', why: 'storefront: rendered by PublicCatalogPage' },
+  { prefix: 'src/components/catalog/CatalogPreviewSurface.tsx', why: 'storefront: rendered by PublicCatalogPage' },
+  { prefix: 'src/components/catalog/ProductDetailFlyout.tsx', why: 'storefront: rendered by PublicCatalogPage' },
   // A generated print document, rendered by the print pipeline into a fresh
   // window -- there is no iOS URL bar in a print box.
   { prefix: 'src/utils/printReceipt.ts', why: 'generated print document, not a viewport' },

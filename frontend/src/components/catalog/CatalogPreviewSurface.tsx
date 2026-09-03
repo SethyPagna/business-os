@@ -439,7 +439,7 @@ export default function CatalogPreviewSurface({
                                   />
                                 </div>
                               ) : null}
-                              <div className="max-h-[min(calc(var(--app-vh-100)_*_.6),20rem)] overflow-y-auto py-1">
+                              <div className="max-h-[min(60vh,20rem)] overflow-y-auto py-1">
                                 {firstPartyTranslateOptions.length ? firstPartyTranslateOptions.map(renderOption) : null}
                                 {externalTranslateOptions.length ? (
                                   <>

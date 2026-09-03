@@ -172,7 +172,7 @@ export default function ProductDetailFlyout({ view, copy, onClose, shopName, con
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-0 sm:items-center sm:p-4" onClick={onClose}>
       <div
-        className="flex max-h-[calc(var(--app-vh-100)_*_.92)] w-full flex-col overflow-hidden rounded-t-2xl bg-white shadow-2xl sm:max-h-[calc(var(--app-vh-100)_*_.88)] sm:max-w-3xl sm:rounded-2xl dark:bg-neutral-900"
+        className="flex max-h-[92vh] w-full flex-col overflow-hidden rounded-t-2xl bg-white shadow-2xl sm:max-h-[88vh] sm:max-w-3xl sm:rounded-2xl dark:bg-neutral-900"
         onClick={(event) => event.stopPropagation()}
         role="dialog"
         aria-modal="true"

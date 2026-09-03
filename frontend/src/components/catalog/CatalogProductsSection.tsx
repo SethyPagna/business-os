@@ -487,7 +487,7 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
               <div className="mb-2 px-1 text-xs font-semibold uppercase tracking-[0.12em] text-slate-500 dark:text-neutral-400">
                 {copy('jumpToBrand', 'Jump to brand')}
               </div>
-              <div className="grid max-h-[min(18rem,calc(var(--app-vh-100)_-_32rem))] grid-cols-4 gap-1 overflow-y-auto overscroll-contain pr-1">
+              <div className="grid max-h-[min(18rem,calc(100vh-32rem))] grid-cols-4 gap-1 overflow-y-auto overscroll-contain pr-1">
                 <button
                   type="button"
                   className={`h-8 rounded-lg text-xs font-semibold transition ${effectiveInitialFilter === 'all' ? 'bg-blue-600 text-white' : 'text-slate-600 hover:bg-blue-50 hover:text-blue-700 dark:text-neutral-300 dark:hover:bg-neutral-800 dark:hover:text-amber-300'}`}
@@ -565,7 +565,7 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
                   role="dialog"
                   aria-label={copy('filters', 'Filters')}
                   tabIndex={-1}
-                  className="max-h-[min(32rem,calc(var(--app-vh-100)_-_1rem))] overflow-y-auto overscroll-contain p-2.5 outline-none"
+                  className="max-h-[min(32rem,calc(100dvh-1rem))] overflow-y-auto overscroll-contain p-2.5 outline-none"
                 >
                   <div className="mb-2 flex items-center justify-between gap-2 px-1">
                     <span className="text-sm font-semibold text-slate-900 dark:text-neutral-100">{copy('filters', 'Filters')}</span>
