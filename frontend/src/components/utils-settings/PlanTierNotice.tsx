@@ -65,10 +65,12 @@ export default function PlanTierNotice({ copy }: { copy: CopyFn }) {
   ].join('\n')
 
   return (
-    <div className="flex flex-wrap items-center gap-2 rounded-xl border border-sky-300 bg-sky-50 px-3 py-2 text-sm text-sky-900 dark:border-sky-900/60 dark:bg-sky-950/30 dark:text-sky-200">
-      <Gauge className="h-4 w-4 shrink-0" />
+    // Design-language tokens only (no blue utility classes), single row:
+    // the summary span truncates instead of wrapping the row (P2-8 merge fix).
+    <div className="flex min-w-0 items-center gap-2 rounded-[var(--ui-radius-lg)] border border-[var(--ui-line-2)] bg-[var(--ui-surface-2)] px-3 py-2 text-sm text-[var(--ui-ink)]">
+      <Gauge className="h-4 w-4 shrink-0 text-[var(--ui-info)]" />
       <span className="font-semibold">{copy('plan_tier_free_title', 'Free plan', 'គម្រោងឥតគិតថ្លៃ')}</span>
-      <span className="min-w-0 flex-1 text-xs opacity-90">
+      <span className="min-w-0 flex-1 truncate text-xs text-[var(--ui-ink-2)]">
         {copy('plan_tier_free_summary', '{count} limits smaller than on paid', '{count} ដែនកំណត់តូចជាងគម្រោងបង់ប្រាក់')
           .replace('{count}', String(status.notices.length))}
       </span>
