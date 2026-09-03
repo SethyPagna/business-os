@@ -41,7 +41,14 @@ assert.match(dashboard, /getDashboard\(\{ startDate: start, endDate: end, granul
 assert.match(transport, /appendQuery\('\/api\/dashboard', query\)/, 'dashboard summary transport must forward range parameters')
 assert.match(compat, /defaultStart\.setUTCDate\(defaultStart\.getUTCDate\(\) - 6\)/, 'dashboard API fallback must also cover seven days including today')
 assert.match(compat, /async function dashboardSummary\(env: Env, query: Record<string, string>\)/, 'dashboard summary must accept the selected range')
-assert.match(compat, /const productInRangeClause = `EXISTS \([\s\S]*localDateRangeClause\('dashboard_s\.created_at'\)/, 'product and inventory cards must share the selected sales range')
+// The selected range scopes the sales/returns tiles and the recent-sales
+// feed. It must NOT scope the inventory alert cards: a product that is out of
+// stock cannot sell, so restricting them to "products sold in the range"
+// emptied the out-of-stock alert exactly when it mattered. See
+// cloudflare/scripts/test-compat-dashboard-daterange-pure.cjs for the
+// behavioral proof against real sqlite.
+assert.doesNotMatch(compat, /productInRangeClause/, 'inventory alert cards must not be scoped to products sold in the selected range')
+assert.match(compat, /whereSql: 'WHERE p\.is_active = 1',/, 'dashboard stock stats must stay catalog-wide so the card badges match their lists')
 assert.match(dashboard, /getDashboardSaleItemCount/, 'dashboard sale details should expose a total item count')
 assert.match(dashboard, /t\('cashier'\)[\s\S]{0,220}getDashboardSaleItemCount\(recentSaleDetail\)/, 'dashboard sale details should include Cashier and Items')
 assert.match(dashboard, /modal-scroll grid grid-cols-2 gap-2 p-4/, 'dashboard sale details should use compact two-per-row facts')

@@ -1211,7 +1211,7 @@ export default function Dashboard() {
   const periodKpis = useMemo(() => ([
       {
         id: 'products',
-        info: translateOr('dash_info_products', "How many products you carry. A group of same-name items counts as ONE product, matching how the Products list pages them."),
+        info: translateOr('dash_info_products', "How many products you carry. A group of same-name items counts as ONE product, matching how the Products list pages them. Always the current total, not the selected date range."),
         label: translateOr('products', 'Products'),
         value: summary?.product_count || 0,
         sub: `${lowStockCount} ${lowShortLabel} | ${outOfStockCount} ${outShortLabel}`,
@@ -1225,7 +1225,7 @@ export default function Dashboard() {
     },
     {
       id: 'stock-value',
-      info: translateOr('dash_info_stock_value', "What the stock you are holding right now cost you to buy. Not what it will sell for."),
+      info: translateOr('dash_info_stock_value', "What the stock you are holding right now cost you to buy. Not what it will sell for. Always the current total, not the selected date range."),
       label: translateOr('stock_value', 'Stock value'),
       value: fmtUSD(aStockValue),
       color: 'text-cyan-600',
