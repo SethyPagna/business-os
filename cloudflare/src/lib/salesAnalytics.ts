@@ -160,9 +160,9 @@ function round2(n: number): number {
 // The status is normalised exactly as GET /api/sales/stats does --
 // COALESCE(NULLIF(...,''),'completed') -- so a blank status counts as completed
 // on BOTH surfaces and the two revenue numbers converge to the byte.
-function saleStatusExpr(p: string): string { return `COALESCE(NULLIF(${p}sale_status, ''), 'completed')` }
+export function saleStatusExpr(p: string): string { return `COALESCE(NULLIF(${p}sale_status, ''), 'completed')` }
 export function recognizedExpr(p: string): string { return `${saleStatusExpr(p)} NOT IN ('cancelled', 'awaiting_payment')` }
-function awaitingExpr(p: string): string { return `${saleStatusExpr(p)} = 'awaiting_payment'` }
+export function awaitingExpr(p: string): string { return `${saleStatusExpr(p)} = 'awaiting_payment'` }
 // Net sale value (subtotal minus both discounts) -- tax and delivery excluded.
 export function netSaleExpr(p: string): string {
   return `(COALESCE(${p}subtotal_usd, 0) - COALESCE(${p}discount_usd, 0) - COALESCE(${p}membership_discount_usd, 0))`
@@ -190,7 +190,7 @@ export function collectedExpr(p: string): string {
   return `CASE WHEN COALESCE(${p}source_return_id, 0) <> 0 THEN COALESCE(${p}amount_paid_usd, 0) ELSE COALESCE(${p}total_usd, 0) END`
 }
 // The delivery fee the CUSTOMER paid (a store-absorbed fee was never collected).
-function customerDeliveryFeeExpr(p: string): string {
+export function customerDeliveryFeeExpr(p: string): string {
   return `CASE WHEN COALESCE(${p}delivery_fee_paid_by, 'customer') = 'store' THEN 0 ELSE COALESCE(${p}delivery_fee_usd, 0) END`
 }
 // The delivery fee the SHOP absorbed (customer not charged) -- a cost, not revenue.
@@ -1022,3 +1022,81 @@ export async function getProductSalesRanking(env: Env, f: SalesFilters, limit = 
     }
   })
 }
+
+// Ported with the reports lane (S4-26): /periods builds its day rows from
+// this one call, so a period roll-up can never disagree with the Sales header
+// for the same range. Authored by the business-workbook lane; unchanged here.
+
+// Section 5 (Business summary workbook, Sep 2): one row per BUSINESS DAY
+// (UTC+7) carrying the FULL canonical SalesTotals shape, not the narrowed
+// SalesPeriodRow getSalesPeriodSeries returns for the Dashboard chart. This
+// is the Summary sheet's data source -- gross sales, both discount lines,
+// tax, delivery, refunds, net revenue, pending (awaiting_payment) credit,
+// collected total, cost and profit all come out of ONE call to deriveTotals
+// per day, so the workbook can never disagree with the Sales-page header or
+// the Dashboard for the same range (single-source rule). Only days that
+// actually have at least one sale are returned -- same convention
+// getSalesPeriodSeries already uses -- callers that need every calendar day
+// in a range (e.g. to merge in expense-only days for Reconciliation) union
+// this with their own day set.
+// cost_missing_snapshot_lines: how many RECOGNIZED sold lines that day have
+// no cost_price_usd snapshot (legacy/imported rows -- the live create-sale
+// path always writes a numeric snapshot, see routes/sales.ts's `costPriceUsd:
+// Number(product?.cost_price_usd || 0)`). Those lines contribute $0 to
+// cost_usd via plain SQL SUM/COALESCE -- the EXACT same basis salesCost()
+// (this file, used by getSalesTotals/getSalesPeriodSeries) already uses, so
+// the workbook's COGS figure never drifts from the Dashboard/Sales-page
+// figure for the same range. This count is purely a transparency signal for
+// the Definitions/COGS sheet ("N sold lines have no cost snapshot and are
+// counted as $0 COGS here, same as everywhere else in the app") -- it never
+// changes cost_usd itself.
+export type BusinessSummaryDayRow = { date: string; cost_missing_snapshot_lines: number } & SalesTotals
+
+export async function getBusinessSummaryDayRows(env: Env, f: SalesFilters): Promise<BusinessSummaryDayRow[]> {
+  const db = getDb(env)
+  const periodExprS = localDateExpr('sales.created_at')
+  const periodExprJoined = localDateExpr('s.created_at')
+  const { sql: whereLevel, params: paramsLevel } = whereActiveSales('sales', f)
+  const { sql: whereCost, params: paramsCost } = whereActiveSales('s', f)
+
+  const [levelRows, costRows] = await Promise.all([
+    db.prepare(`
+      SELECT ${periodExprS} AS period, COUNT(*) AS tx_count,
+             COALESCE(SUM(subtotal_usd), 0) AS gross_sales_usd,
+             COALESCE(SUM(discount_usd), 0) AS store_discount_usd,
+             COALESCE(SUM(membership_discount_usd), 0) AS membership_discount_usd,
+             COALESCE(SUM(tax_usd), 0) AS tax_usd,
+             COALESCE(SUM(CASE WHEN COALESCE(delivery_fee_paid_by, 'customer') = 'store' THEN 0 ELSE delivery_fee_usd END), 0) AS delivery_usd,
+             COALESCE(SUM(CASE WHEN delivery_fee_paid_by = 'store' THEN delivery_fee_usd ELSE 0 END), 0) AS store_delivery_usd,
+             COALESCE(SUM(CASE WHEN ${recognizedExpr('')} THEN ${netSaleExpr('')} ELSE 0 END), 0) AS recognized_net_usd,
+             COALESCE(SUM(CASE WHEN ${awaitingExpr('')} THEN ${netSaleExpr('')} ELSE 0 END), 0) AS pending_revenue_usd,
+             COALESCE(SUM(CASE WHEN ${recognizedExpr('')} THEN tax_usd ELSE 0 END), 0) AS recognized_tax_usd,
+             COALESCE(SUM(CASE WHEN ${recognizedExpr('')} THEN ${customerDeliveryFeeExpr('')} ELSE 0 END), 0) AS recognized_delivery_usd,
+             COALESCE(SUM(CASE WHEN ${recognizedExpr('')} THEN ${storeDeliveryExpr('')} ELSE 0 END), 0) AS recognized_store_delivery_usd,
+             COALESCE(SUM(CASE WHEN ${recognizedExpr('')} THEN COALESCE(rf.refund_usd, 0) ELSE 0 END), 0) AS refund_usd
+      FROM sales
+      ${CUSTOMER_REFUND_JOIN}sales.id
+      WHERE ${whereLevel}
+      GROUP BY ${periodExprS}
+    `).all<Record<string, number> & { period: string }>(paramsLevel),
+    db.prepare(`
+      SELECT ${periodExprJoined} AS period,
+             COALESCE(SUM(si.cost_price_usd * si.quantity), 0) AS cost_usd,
+             COALESCE(SUM(CASE WHEN si.cost_price_usd IS NULL THEN 1 ELSE 0 END), 0) AS missing_snapshot_lines
+      FROM sale_items si
+      JOIN sales s ON s.id = si.sale_id
+      WHERE ${whereCost} AND ${recognizedExpr('s.')}
+      GROUP BY ${periodExprJoined}
+    `).all<{ period: string; cost_usd: number; missing_snapshot_lines: number }>(paramsCost),
+  ])
+
+  const costByPeriod = new Map((costRows || []).map((r) => [r.period, num(r.cost_usd)]))
+  const missingByPeriod = new Map((costRows || []).map((r) => [r.period, num(r.missing_snapshot_lines)]))
+  const rows = (levelRows || []).map((r) => ({
+    date: r.period,
+    cost_missing_snapshot_lines: missingByPeriod.get(r.period) || 0,
+    ...deriveTotals(r, costByPeriod.get(r.period) || 0),
+  }))
+  return rows.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0))
+}
+
