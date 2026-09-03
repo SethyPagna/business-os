@@ -96,9 +96,51 @@ assert.match(fastStockIn, /modal-viewport-safe[\s\S]*modal-panel-safe[\s\S]*sm:h
 assert.match(transfer, /modal-viewport-safe[\s\S]*z-\[1050\][\s\S]*sm:hidden[\s\S]*handleBulkTransfer/, 'branch transfers must use one safe one-or-many flow with a mobile header action')
 assert.doesNotMatch(transfer, /role="tablist" aria-label="Transfer mode"/, 'branch transfers must not restore separate single and multiple modes')
 assert.match(transfer, /fuzzyTextMatches\(\[product\.name, product\.sku, product\.barcode\]\.join\(' '\), query\)/, 'the unified transfer picker must search product name, SKU, and barcode')
-assert.match(transfer, /const catalogRequested = Boolean\(debouncedSearch\.trim\(\)\) \|\| showAllProducts[\s\S]*if \(!catalogRequested\) return undefined/, 'the transfer picker must not load the entire catalog before search or Select all')
-assert.match(transfer, /Search products, or use Select all to show the full catalog/, 'the initially empty transfer picker must explain how to reveal products')
-assert.match(transfer, /selectAllAfterLoadRef\.current = true/, 'Select all must reveal and select the full in-stock catalog when it has not loaded yet')
+assert.match(transfer, /const catalogRequested = Boolean\(debouncedSearch\.trim\(\)\) \|\| showAllProducts[\s\S]*if \(!catalogRequested\) return undefined/, 'the transfer picker must not load the entire catalog before search or Show all products')
+assert.match(transfer, /Search products, or use Show all products to list the whole branch/, 'the initially empty transfer picker must explain how to reveal products')
+assert.match(transfer, /entireBranchAfterLoadRef\.current = true/, 'Transfer entire branch must still work when the catalog has not loaded yet')
+
+// Lane B: "Select all" used to mean three things at once -- reveal the
+// catalog, tick the visible rows, and (as the user read it) move the whole
+// branch. It only ever did the first two, silently against whatever happened
+// to be on screen. These assertions pin the three controls apart.
+assert.match(transfer, /const toggleSelectAllShown = \(\) =>/, 'checking the visible rows must be its own control')
+assert.doesNotMatch(transfer, /toggleSelectAllFiltered/, 'the conflated Select all handler must stay gone')
+assert.match(transfer, /onClick=\{\(\) => setShowAllProducts\(\(current\) => !current\)\}[\s\S]*aria-pressed=\{showAllProducts\}/, 'revealing the catalog must be a plain view toggle')
+assert.match(transfer, /onClick=\{handleTransferEntireBranch\}/, 'moving the whole branch must be its own action')
+// What "entire branch" means must not be readable off the filtered list --
+// that is exactly how the old control under-transferred without saying so.
+assert.match(transfer, /function entireBranchItems\(rows: TransferProduct\[\]\)/, 'the whole-branch item list must be pure and module-scope')
+assert.match(transfer, /const everything = entireBranchItems\(multiProducts\)/, 'entire branch must be built from the full listing, never filteredMulti')
+assert.doesNotMatch(transfer, /entireBranchItems\(filteredMulti\)/, 'a search box must not be able to shrink what "entire branch" means')
+
+// A whole branch is thousands of rows and the Worker caps one request at 200,
+// so the move is chunked. Chunking makes it non-atomic across chunks, which
+// the operator has to be told BEFORE committing and again if it stops early.
+assert.match(transfer, /const TRANSFER_BULK_CHUNK_SIZE = 200/, 'the client cap must mirror the Worker MAX_BULK_TRANSFER_ITEMS')
+assert.match(transfer, /transfer_entire_branch_note/, 'the confirm must say a multi-request run is not one undoable step')
+assert.match(transfer, /transfer_bulk_partial/, 'a run that stops partway must report how much already landed')
+assert.match(transfer, /if \(transferred > 0\) onDone\(\)/, 'a partial run must refresh -- the on-screen quantities are now wrong')
+
+// The write path: one confirmed entry point, on-brand, translated.
+// The live bulk path must not use a native confirm. One window.confirm does
+// remain in the file, inside the unreachable mode === 'single' handler that is
+// deliberately left physically intact rather than adding deletion churn to a
+// live deploy; if that block is ever removed, drop the expected count to 0.
+const liveTransferPath = transfer.slice(transfer.indexOf('const handleBulkTransfer'))
+assert.doesNotMatch(liveTransferPath, /window\.confirm/, 'no native confirm on the live transfer path -- off-brand and untranslatable')
+assert.equal((transfer.match(/window\.confirm/g) || []).length, 1, 'the only window.confirm left must be the dormant single-mode handler')
+assert.match(transfer, /<ConfirmDialog/, 'the shared review dialog asks instead')
+assert.match(transfer, /danger=\{pendingTransfer\.scope === 'entire_branch'\}/, 'emptying a branch must get the destructive treatment')
+assert.match(transfer, /confirm_bulk_transfer_details/, 'the existing pack key survives the move off window.confirm')
+
+// Small screens: the panel must render its real content from first paint
+// instead of showing branch selects and then jumping to full height.
+assert.doesNotMatch(transfer, /\{fromBranch && mode === 'multiple' \?/, 'the picker must not be gated behind picking a branch')
+assert.match(transfer, /className="modal-scroll space-y-4 p-4 sm:p-5"/, 'one iOS-safe scroll region, not flex-1 overflow-auto')
+assert.match(transfer, /grid grid-cols-1 gap-2 sm:grid-cols-2 sm:gap-3/, 'branch selects must stack before they clip their own names')
+assert.match(transfer, /sm:max-h-64 sm:overflow-auto/, 'the row list must not nest a second scroller inside the sheet on phones')
+assert.match(transfer, /flex flex-wrap items-center gap-x-3 gap-y-1\.5 px-3 py-2\.5 sm:flex-nowrap/, 'a row must restack rather than squeeze its quantity box away at 375px')
 assert.match(posDetail, /aria-expanded=\{batchChoicesOpen\}/, 'POS batches must be collapsed behind one option button')
 assert.match(posDetail, /batchChoicesOpen \? <><div/, 'POS batch options must render only after the option button is expanded')
 assert.match(posDetail, /setSelectedBatchId\(batch\.id\); setSelectedDamagedLotId\(null\); setBatchChoicesOpen\(false\)/, 'choosing a POS batch must close its options')
