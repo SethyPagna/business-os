@@ -2504,6 +2504,29 @@ for the obvious path finds nothing and will make you think the lane is empty.
 one-line ruling on what "check in users for invoices details" means), S4-17b (production write),
 S4-26b (`dd-mm-yyyy` versus the pinned `mm/dd/yyyy` convention).
 
+### Subagent roster (committed `739f3750`, .claude/agents/)
+
+Nine role definitions so a lane can delegate instead of doing everything in one window. They load
+**at session start**, so a session that was already running when they landed cannot see them —
+restart, then `Agent` with the `subagent_type` below.
+
+| Agent | Model / effort | For |
+|---|---|---|
+| `bos-sweep` | sonnet, high | read-only exhaustive "where is X, everywhere" matrices; cannot edit |
+| `bos-i18n` | sonnet, high | both language packs together, and the call sites that read them |
+| `bos-rename` | sonnet, high | a label change carried to every surface, with the hits it must *not* rename classified |
+| `bos-tests` | sonnet, high | both harnesses, the `test:utils` chain registration, red-test triage |
+| `bos-feature` | opus, medium | one frontend board item end to end |
+| `bos-worker-api` | opus, medium | Worker routes, lib modules, D1 queries, migrations |
+| `bos-telegram` | opus, medium | outbound messages and inbound bot commands, bilingual, never sends live |
+| `bos-stock` | opus, high | anything that could make an on-hand number wrong |
+| `bos-verify` | opus, high | adversarial certification of a claim; read-only, returns a verdict |
+
+Every definition repeats the constraints that actually bite here — never `git add -A` on the shared
+index, never `npm install` in a worktree whose `node_modules` is a junction, remote D1 is
+SELECT-only, both packs every time, a red test is a suspect not a verdict. None of them deploys and
+none of them writes to production.
+
 ### Now / gate
 
 - ~~**Deploy**~~ — **DONE Aug 31 (Part 538): production is `242c2b75` / Worker version
