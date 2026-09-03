@@ -2574,6 +2574,29 @@ for the obvious path finds nothing and will make you think the lane is empty.
 one-line ruling on what "check in users for invoices details" means), S4-17b (production write),
 S4-26b (`dd-mm-yyyy` versus the pinned `mm/dd/yyyy` convention).
 
+### Fleet sweep, Sep 4 ~02:20 (business-os-v1-c3)
+
+**52 branches of real lane work existed only on this machine. They are now on GitHub.**
+Every `fx/*`, `hf/*`, `rc/*`, `lane-*/*`, `claude/*` and `docs/*` branch had commits and no
+`origin` counterpart — including `s4/09` and `rc/sec-10-reports`, the two branches holding the
+reports work whose owner session ended. All 52 pushed; `codex/recovery/*` was deliberately
+excluded, being ~60 refs of `git stash` autostash noise, not work. Nothing was rewritten and no
+branch was deleted. After Part 583 this is not paranoia: work that lives only in a worktree is
+one `git worktree remove` from gone.
+
+**Six of the seven Sep-4 lanes had not started an hour in** — no branch on `origin`, no worktree,
+and (checked, not assumed) **no tracked file in the shared checkout modified in 90 minutes**, so
+nobody is editing the main tree. `s4/sessions`, `s4/modal-chrome`, `s4/khmer-pos`, `s4/telegram`,
+`s4/shifts`, `s4/sales-status` all messaged for a status line. `s4/modal-chrome` is the one that
+matters soonest: S4-21 is meant to be the single dirty-state contract every other lane opts into,
+so if it stays unbuilt the other lanes will hand-roll their own.
+
+`business-os-v1-40`, `-63` and `-7e` (all ~7h old, none on the Sep-4 table) were offered the five
+unowned items — S4-12, S4-23, S4-24, S4-25, S4-26 — and told to name one rather than three of
+them starting the same thing. **S4-19 was deliberately held back** from that offer: renaming RECON
+to `ADJMM/DD/YYYY` rewrites existing D1 rows, so it is a data migration and should be boarded with
+that written down, not picked up casually.
+
 ### Subagent roster (committed `739f3750`, .claude/agents/)
 
 Nine role definitions so a lane can delegate instead of doing everything in one window. They load
