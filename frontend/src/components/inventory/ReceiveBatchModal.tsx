@@ -9,6 +9,7 @@ import { getProductBatches, receiveBatchStock, type ProductBatch } from '../../a
 import { dateToBatchCode } from '../../utils/batchCode.ts'
 import { batchDisplayLabel } from '../../utils/batchLabel.ts'
 import SupplierPickerField from '../shared/SupplierPickerField.tsx'
+import DateEntryInput from '../shared/DateEntryInput.tsx'
 
 function todayIsoDate(): string {
   return todayStr()
@@ -316,11 +317,14 @@ export default function ReceiveBatchModal({
             {batchChoice === 'new' ? (
               <label className="block">
                 <span className="mb-1 block text-[11px] font-medium text-gray-600 dark:text-gray-400">{tr('received_date', 'Received date')}</span>
-                <input
-                  className="input w-full text-sm"
-                  type="date"
+                {/* Typed, not a native picker (Sep 3) -- staff key this on a
+                    numeric pad and it derives the lot code. */}
+                <DateEntryInput
+                  className="w-full text-sm"
+                  t={t}
+                  ariaLabel={tr('received_date', 'Received date')}
                   value={receivedDate}
-                  onChange={(event) => setReceivedDate(event.target.value)}
+                  onChange={(iso) => setReceivedDate(iso)}
                 />
                 {/* Preview only -- the backend always recomputes and stores
                     the authoritative code itself from whichever date is
@@ -344,11 +348,12 @@ export default function ReceiveBatchModal({
             )}
             <label className="block">
               <span className="mb-1 block text-[11px] font-medium text-gray-600 dark:text-gray-400">{tr('expiry_date', 'Expiry date')}</span>
-              <input
-                className="input w-full text-sm"
-                type="date"
+              <DateEntryInput
+                className="w-full text-sm"
+                t={t}
+                ariaLabel={tr('expiry_date', 'Expiry date')}
                 value={expiryDate}
-                onChange={(event) => setExpiryDate(event.target.value)}
+                onChange={(iso) => setExpiryDate(iso)}
               />
             </label>
           </div>
@@ -398,11 +403,12 @@ export default function ReceiveBatchModal({
               {paymentStatus === 'credit' ? (
                 <label className="flex min-w-0 flex-1 items-center gap-1.5">
                   <span className="flex-shrink-0 text-[11px] text-gray-500">{tr('due', 'Due')}</span>
-                  <input
-                    className="input min-w-0 flex-1 text-sm"
-                    type="date"
+                  <DateEntryInput
+                    className="min-w-0 flex-1 text-sm"
+                    t={t}
+                    ariaLabel={tr('due', 'Due')}
                     value={creditDueDate}
-                    onChange={(event) => setCreditDueDate(event.target.value)}
+                    onChange={(iso) => setCreditDueDate(iso)}
                   />
                 </label>
               ) : null}

@@ -1,4 +1,5 @@
 import type { D1Compat } from './db'
+import { normalizeClientReceiptNumber, uniqueBusinessDateTimeNumber } from './receiptNumber'
 import { RETURN_STATUSES } from './salesStatus'
 
 // 100, not 50, since Part 388: the real Aug-28 sales history holds three
@@ -50,6 +51,27 @@ export async function applyHistoricalSaleImport(
   `).get<{ status: string }>({ job_id: jobId, group_key: groupKey })
   if (existing?.status === 'applied') return { alreadyApplied: true, clientRequestId }
 
+  // A sales CSV's receipt_number column carries whatever the source system
+  // called the order -- very often the old system's `NNNNNN@YYYY-MM-DD`
+  // invoice label, which is exactly the shape the 2026-09-02 reconciliation
+  // pack put on 15,004 live rows (migration 0107 repaired those). An import
+  // must not be able to put it back. A foreign label is preserved in
+  // legacy_receipt_number -- it is the operator's own key back to the source
+  // file, and sales search folds the column into its haystack -- while the
+  // sale itself gets a business receipt id minted from the sale's OWN moment,
+  // so an imported 2024 receipt reads like the POS would have minted it that
+  // day, not like the day the import ran.
+  const createdAt = d.created_at || input.nowIso
+  const suppliedReceipt = typeof d.receipt_number === 'string' ? d.receipt_number.trim() : ''
+  const ownReceipt = normalizeClientReceiptNumber(suppliedReceipt)
+  const mintMoment = new Date(createdAt)
+  const receiptNumber = ownReceipt || await uniqueBusinessDateTimeNumber(
+    '',
+    async (candidate) => !!(await db.prepare('SELECT 1 AS hit FROM sales WHERE receipt_number = ? LIMIT 1').get([candidate])),
+    Number.isNaN(mintMoment.getTime()) ? new Date(input.nowIso) : mintMoment,
+  )
+  const legacyReceiptNumber = ownReceipt ? null : suppliedReceipt || null
+
   const common = { job_id: jobId, group_key: groupKey, row_number: rowNumber, client_request_id: clientRequestId }
   const statements: Array<{ sql: string; params: Record<string, unknown> }> = [{
     sql: `INSERT OR IGNORE INTO import_sales_commits (job_id, group_key, row_number, status)
@@ -66,7 +88,8 @@ export async function applyHistoricalSaleImport(
             is_delivery, delivery_contact_id, delivery_contact_name, delivery_contact_phone,
             delivery_contact_address, delivery_fee_usd, delivery_fee_khr, delivery_fee_paid_by,
             delivery_actual_cost_usd, delivery_actual_cost_khr,
-            loyalty_accrual, sale_status, items, created_at, client_request_id
+            loyalty_accrual, sale_status, items, created_at, client_request_id,
+            legacy_receipt_number
           )
           SELECT
             @receipt_number, @cashier_id, @cashier_name, @branch_id, @branch_name,
@@ -78,14 +101,23 @@ export async function applyHistoricalSaleImport(
             @is_delivery, @delivery_contact_id, @delivery_contact_name, @delivery_contact_phone,
             @delivery_contact_address, @delivery_fee_usd, @delivery_fee_khr, @delivery_fee_paid_by,
             @delivery_actual_cost_usd, @delivery_actual_cost_khr,
-            @loyalty_accrual, @sale_status, @items_json, @created_at, @client_request_id
+            @loyalty_accrual, @sale_status, @items_json, @created_at, @client_request_id,
+            @legacy_receipt_number
           WHERE ${pendingGuard}`,
     // Imported sales default to NOT earning loyalty points -- the balance is
     // computed by summing sales, so migrated old-system receipts would
     // otherwise inflate every matched customer's balance (migration 0061).
     // The operator can opt a specific import INTO accrual on the review
     // screen (input.accrueLoyalty), keeping the choice in their hands.
-    params: { ...common, ...d, loyalty_accrual: input.accrueLoyalty ? 1 : 0, items_json: JSON.stringify(d.items), created_at: d.created_at || input.nowIso },
+    params: {
+      ...common,
+      ...d,
+      receipt_number: receiptNumber,
+      legacy_receipt_number: legacyReceiptNumber,
+      loyalty_accrual: input.accrueLoyalty ? 1 : 0,
+      items_json: JSON.stringify(d.items),
+      created_at: createdAt,
+    },
   }]
 
   const isReturnGroup = RETURN_STATUSES.has(d.sale_status)
@@ -117,7 +149,7 @@ export async function applyHistoricalSaleImport(
       ...item,
       returned_quantity: returnedQuantity,
       updated_at: input.nowIso,
-      reason: `Imported as ${d.sale_status}${d.receipt_number ? ` (receipt ${d.receipt_number})` : ''}`,
+      reason: `Imported as ${d.sale_status} (receipt ${receiptNumber}${legacyReceiptNumber ? `, source ${legacyReceiptNumber}` : ''})`,
     }
     statements.push({
       sql: `UPDATE products SET stock_quantity = stock_quantity + @returned_quantity, updated_at = @updated_at

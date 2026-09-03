@@ -30,7 +30,7 @@ import {
 } from '../lib/saleTransitions'
 import { buildLikeAliasClause, tokenizeSearchTermGroups, normalizeSearchText } from '../lib/searchMatch'
 import { computeSaleTotals, resolveChangeExchangeRate, round2 } from '../lib/saleTotals'
-import { uniqueBusinessDateTimeNumber } from '../lib/receiptNumber'
+import { normalizeClientReceiptNumber, uniqueBusinessDateTimeNumber } from '../lib/receiptNumber'
 import { sanitizeClientCreatedAt } from '../lib/clientTimestamp'
 import { localDateAtOrAfter, localDateAtOrBefore, localDateRangeClause, localTimeRangeClause } from '../lib/businessDateWindow'
 import { formatSaleTelegramLines, sendTelegramEvent, telegramMoney } from '../lib/telegram'
@@ -535,9 +535,15 @@ app.post('/', async (c) => {
   // YYYYMMDD-HHMMSS in Phnom Penh wall-clock time -- the receipt id encodes
   // the sale's own date+time (user, Aug 30 2026), with NO prefix (user,
   // Aug 31 2026: "Receipt no need RCP"; returns keep RET-/SRET-).
-  // Client-provided numbers (offline replays, imports) are preserved
-  // untouched -- historical RCP- ids stay as minted.
-  const receiptNumber = body.receipt_number?.trim() || await uniqueBusinessDateTimeNumber(
+  // A client-provided number (an offline replay whose id was already printed
+  // for the customer at queue time) is honored ONLY when it is a real
+  // business receipt id -- historical RCP- ids still pass. Anything else,
+  // including the old system's `NNNNNN@YYYY-MM-DD` form that the 2026-09-02
+  // reconciliation pack wrote onto 15,004 rows (repaired by migration 0107),
+  // is dropped and replaced by the server-minted id. Normalise rather than
+  // 400: see normalizeClientReceiptNumber for why rejecting an offline
+  // replay would strand a sale that really happened in the outbox forever.
+  const receiptNumber = normalizeClientReceiptNumber(body.receipt_number) || await uniqueBusinessDateTimeNumber(
     '',
     async (candidate) => !!(await db.prepare('SELECT 1 AS hit FROM sales WHERE receipt_number = ? LIMIT 1').get([candidate])),
   )
@@ -1498,7 +1504,10 @@ type SaleRow = {
 // but was never actually searched) and, via a join from sale_items back
 // to products on product_id, barcode and brand (neither sale_items nor
 // return_items stores those directly -- they're snapshotted onto the
-// products table, not copied onto the line-item row at sale time).
+// products table, not copied onto the line-item row at sale time), PLUS
+// s.legacy_receipt_number (migration 0107) so a sale whose old-system
+// `NNNNNN@YYYY-MM-DD` label was rewritten to the business format is still
+// findable by the number printed on the customer's old paper receipt.
 // Deliberately still a LIKE scan, not FTS5 -- see buildLikeAliasClause's
 // own comment in lib/searchMatch.ts for why that's a considered choice
 // for this table, not an oversight.
@@ -1525,7 +1534,8 @@ function buildSalesSearchWhere(query: Record<string, string>, params: Record<str
   // migration's own comment for why there is no data backfill.
   const flatHaystack = `(
     COALESCE(s.search_normalized, '') || ' ' ||
-    COALESCE(s.receipt_number, '') || ' ' || COALESCE(s.cashier_name, '') || ' ' ||
+    COALESCE(s.receipt_number, '') || ' ' || COALESCE(s.legacy_receipt_number, '') || ' ' ||
+    COALESCE(s.cashier_name, '') || ' ' ||
     COALESCE(s.customer_name, '') || ' ' || COALESCE(s.customer_phone, '') || ' ' ||
     COALESCE(s.branch_name, '') || ' ' || COALESCE(s.payment_method, '') || ' ' ||
     COALESCE(s.notes, '') || ' ' || COALESCE(c.membership_number, '')

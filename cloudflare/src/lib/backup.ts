@@ -436,43 +436,84 @@ export async function listCloudflareBackups(env: Env) {
 // every existing backup file keep working -- only how it is produced
 // changed. Two bounds:
 //   - rows are read a page at a time (TABLE_PAGE_SIZE), never a whole table
-//   - JSON is written into an R2 multipart upload and flushed once a part
-//     is big enough, so at most one part is ever in memory
+//   - JSON is written into an R2 multipart upload in fixed-size parts, so
+//     at most ~two parts (the one filling, the one uploading) are ever in
+//     memory
 const TABLE_PAGE_SIZE = 500
 
-// R2 requires every part except the last to be at least 5MB. 6MB gives
-// headroom over that floor while keeping peak memory small.
-const MIN_R2_PART_BYTES = 6 * 1024 * 1024
+// R2 multipart rules (Cloudflare R2 docs, "Multipart upload" limits and
+// error 10048 "All non-trailing parts must have the same length"):
+//   - every part except the LAST must be exactly the same size -- not
+//     merely >= the S3-style 5 MiB floor. Uploading "at least N bytes, plus
+//     whatever string happened to push it over" therefore works only while
+//     there is a single non-trailing part (<= 2 parts total) and fails at
+//     complete() as soon as the document needs a third part. That is what
+//     broke every scheduled backup once the export crossed ~12 MiB.
+//   - part size min 5 MiB, max 5 GiB; at most 10,000 parts per upload
+//     (8 MiB x 10,000 = 80 GiB of headroom, far beyond a D1 database).
+// So the writer cuts the byte stream into parts of exactly R2_PART_BYTES
+// and only the trailing part may be shorter. Exported for the pure test.
+export const R2_PART_BYTES = 8 * 1024 * 1024
 
-class R2StreamWriter {
+export class R2StreamWriter {
   private parts: R2UploadedPart[] = []
-  private buffer: string[] = []
-  private bufferBytes = 0
+  // The part being filled. Sized to exactly one R2 part so a full buffer
+  // IS the next part, byte for byte -- no join/slice of strings, which is
+  // where the old writer lost the equal-size guarantee.
+  private buffer = new Uint8Array(R2_PART_BYTES)
+  private filled = 0
   private readonly encoder = new TextEncoder()
 
   constructor(private readonly upload: R2MultipartUpload) {}
 
   async write(text: string): Promise<void> {
     if (!text) return
-    this.buffer.push(text)
-    // Measured in BYTES, not characters -- R2's part floor is bytes, and
+    // Measured in BYTES, not characters -- R2's part size is bytes, and
     // this payload is full of non-ASCII (Khmer product names, currency
-    // symbols) where the two differ by up to 3x.
-    this.bufferBytes += this.encoder.encode(text).byteLength
-    if (this.bufferBytes >= MIN_R2_PART_BYTES) await this.flush()
+    // symbols) where the two differ by up to 3x. Copying into a byte
+    // buffer (rather than counting bytes and joining strings) is what lets
+    // a part boundary fall in the middle of a string, or even of a
+    // multi-byte character, without changing any part's length.
+    const bytes = this.encoder.encode(text)
+    let offset = 0
+    while (offset < bytes.byteLength) {
+      const take = Math.min(R2_PART_BYTES - this.filled, bytes.byteLength - offset)
+      this.buffer.set(bytes.subarray(offset, offset + take), this.filled)
+      this.filled += take
+      offset += take
+      if (this.filled === R2_PART_BYTES) await this.flushFullPart()
+    }
   }
 
-  private async flush(): Promise<void> {
-    if (!this.buffer.length) return
-    const body = this.buffer.join('')
-    this.buffer = []
-    this.bufferBytes = 0
+  // Uploads the buffer as one exactly-R2_PART_BYTES part and starts a fresh
+  // one. A new buffer is allocated rather than reused so the bytes handed to
+  // uploadPart are never overwritten while the runtime may still hold them;
+  // peak memory is therefore at most two parts.
+  private async flushFullPart(): Promise<void> {
+    const body = this.buffer
+    this.buffer = new Uint8Array(R2_PART_BYTES)
+    this.filled = 0
+    await this.uploadPart(body)
+  }
+
+  private async uploadPart(body: Uint8Array): Promise<void> {
     const part = await this.upload.uploadPart(this.parts.length + 1, body)
     this.parts.push(part)
   }
 
   async finish(): Promise<void> {
-    await this.flush()
+    // The trailing part may be any size below R2_PART_BYTES, but a
+    // zero-length trailing part is never uploaded: when the document ends
+    // exactly on a part boundary the last full part already IS the trailing
+    // part. (An entirely empty document -- nothing ever written -- completes
+    // with no parts, exactly as the previous writer did; every caller writes
+    // a header first, so that path is unreachable in practice.)
+    if (this.filled > 0) {
+      const body = this.buffer.subarray(0, this.filled)
+      this.buffer = new Uint8Array(0)
+      this.filled = 0
+      await this.uploadPart(body)
+    }
     await this.upload.complete(this.parts)
   }
 

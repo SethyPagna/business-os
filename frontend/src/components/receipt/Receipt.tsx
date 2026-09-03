@@ -4,12 +4,14 @@ import FileText from 'lucide-react/dist/esm/icons/file-text.js'
 import ImageDown from 'lucide-react/dist/esm/icons/image-down.js'
 import Printer from 'lucide-react/dist/esm/icons/printer.js'
 import ChevronDown from 'lucide-react/dist/esm/icons/chevron-down.js'
+import Undo2 from 'lucide-react/dist/esm/icons/undo-2.js'
 import { useApp as useAppHook } from '../../AppContext.tsx'
 import { fmtDateTime24 } from '../../utils/formatters.ts'
 import { parseReceiptTemplate } from '../receipt-settings/template'
 import { buildAppliedReceiptConfig } from '../../utils/receiptAppliedConfig.ts'
 import ReceiptQrCodes, { normalizeQrSocialLinksForReceipt, type ReceiptQrEntry } from './ReceiptQrCodes.tsx'
 import LazyPortalMenu from '../shared/LazyPortalMenu'
+import InfoHint from '../shared/InfoHint.tsx'
 
 type LanguageMode = 'en' | 'km' | 'both'
 type ReceiptExportMode = 'print' | 'open' | 'image'
@@ -102,6 +104,16 @@ interface ReceiptProps {
   sale: ReceiptSale
   settings?: ReceiptSettings
   onClose: () => void
+  // "also has the returns button right in the sales receipt directly" (user,
+  // Sep 3 2026). Supplied by Sales.tsx only when the signed-in user holds
+  // `returns:add`; omitted everywhere else (POS's post-sale receipt, the
+  // Receipt Settings preview), so the action simply does not render there.
+  onReturn?: () => void
+  returnLabel?: string
+  // Non-empty when the sale cannot be returned (cancelled / already fully
+  // returned) -- the button stays visible but inert, with the reason behind
+  // an InfoHint rather than as inline prose in this one-row toolbar.
+  returnDisabledReason?: string
   _previewMode?: boolean
 }
 
@@ -111,6 +123,7 @@ interface RowProps {
   subValue?: ReactNode
   bold?: boolean
   tone?: string
+  breakAll?: boolean
 }
 
 const useApp = useAppHook as () => {
@@ -265,11 +278,15 @@ function labelFor(mode: LanguageMode, key: ReceiptLabelKey): string {
   return `${stripTrailingColon(enLabel)} / ${stripTrailingColon(kmLabel)}${endsWithColon ? ':' : ''}`
 }
 
-function Row({ label, value, subValue, bold = false, tone = '' }: RowProps) {
+function Row({ label, value, subValue, bold = false, tone = '', breakAll = false }: RowProps) {
   return (
     <div data-receipt-line="true" className={`my-1 grid grid-cols-[minmax(0,1fr)_minmax(4.6rem,auto)] items-start gap-x-3 gap-y-1 ${tone}`}>
       <span className={`min-w-0 overflow-visible whitespace-normal break-words pr-1 leading-snug ${bold ? 'font-semibold' : ''}`}>{label}</span>
-      <div className="min-w-0 whitespace-normal break-words text-right leading-snug">
+      {/* `breakAll` is for identifiers: a receipt number has no spaces to
+          wrap at, so on a narrow paper width (or a phone) `break-words`
+          alone can leave it overflowing the column. It must wrap onto a
+          second line -- never clip, never scroll. */}
+      <div className={`min-w-0 whitespace-normal text-right leading-snug ${breakAll ? 'break-all' : 'break-words'}`}>
         <div className={`${bold ? 'font-semibold' : ''}`}>{value}</div>
         {subValue ? <div className="text-[10px] text-gray-500">{subValue}</div> : null}
       </div>
@@ -277,7 +294,7 @@ function Row({ label, value, subValue, bold = false, tone = '' }: RowProps) {
   )
 }
 
-export default function Receipt({ sale, settings = {}, onClose, _previewMode }: ReceiptProps) {
+export default function Receipt({ sale, settings = {}, onClose, onReturn, returnLabel, returnDisabledReason = '', _previewMode }: ReceiptProps) {
   const { fmtUSD, fmtKHR, khrSymbol, t } = useApp()
   const printRef = useRef<HTMLDivElement | null>(null)
   const compactPrintRef = useRef<HTMLDivElement | null>(null)
@@ -370,7 +387,7 @@ export default function Receipt({ sale, settings = {}, onClose, _previewMode }: 
     ),
     order_info: (
       <div key="order_info">
-        {tpl.show_receipt_number ? <Row label={labelFor(lang, 'receiptNum')} value={rNum} bold /> : null}
+        {tpl.show_receipt_number ? <Row label={labelFor(lang, 'receiptNum')} value={rNum} bold breakAll /> : null}
         {tpl.show_date ? <Row label={labelFor(lang, 'date')} value={dateStr} /> : null}
         {tpl.show_cashier ? <Row label={labelFor(lang, 'cashier')} value={sale.cashier_name || '-'} /> : null}
         {tpl.show_payment_method ? <Row label={labelFor(lang, 'payment')} value={sale.payment_method || 'Cash'} subValue={paymentDetails.length > 1 ? paymentDetails.map((detail) => `${detail.method}: ${detail.amount_usd > 0 ? fmtUSD(detail.amount_usd) : ''}${detail.amount_usd > 0 && detail.amount_khr > 0 ? ' + ' : ''}${detail.amount_khr > 0 ? fmtKHR(detail.amount_khr) : ''}`).join(' · ') : ''} /> : null}
@@ -816,6 +833,26 @@ export default function Receipt({ sale, settings = {}, onClose, _previewMode }: 
         )}
         </div>
         <div className="flex shrink-0 items-center gap-1.5 sm:gap-2">
+        {onReturn ? (
+          <span className="inline-flex shrink-0 items-center gap-1">
+            <button
+              type="button"
+              className="btn-secondary min-w-0 justify-center px-2.5 py-2 text-sm text-orange-700 disabled:cursor-not-allowed disabled:opacity-50 dark:text-orange-300 sm:px-3"
+              onClick={onReturn}
+              disabled={returnDisabledReason !== ''}
+              title={returnLabel || t?.('return') || 'Return'}
+              aria-label={returnLabel || t?.('return') || 'Return'}
+            >
+              <span className="inline-flex min-w-0 items-center justify-center gap-1.5">
+                <Undo2 className="h-4 w-4 shrink-0" />
+                <span className="hidden truncate sm:inline">{returnLabel || t?.('return') || 'Return'}</span>
+              </span>
+            </button>
+            {returnDisabledReason ? (
+              <InfoHint text={returnDisabledReason} label={returnLabel || t?.('return') || 'Return'} />
+            ) : null}
+          </span>
+        ) : null}
         <div className="flex gap-1 rounded-lg bg-gray-100 p-1 dark:bg-zinc-700">
           {([
             ['en', 'EN'],

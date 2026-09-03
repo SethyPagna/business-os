@@ -8,6 +8,7 @@ import Upload from 'lucide-react/dist/esm/icons/upload.js'
 import Settings2 from 'lucide-react/dist/esm/icons/settings-2.js'
 import { isBrokenLocalizedString as isBrokenLocalizedStringHook, useApp as useAppHook, useSync as useSyncHook } from '../../AppContext.tsx'
 import { fmtClock24 } from '../../utils/formatters'
+import { getSaleReturnBlockReason } from '../../utils/saleReturnGuard.ts'
 import LazyPortalMenu from '../shared/LazyPortalMenu'
 import type { PortalMenuItem } from '../shared/PortalMenu'
 import FilterMenu from '../shared/FilterMenu'
@@ -45,6 +46,10 @@ const CancelSaleModal = lazyRetry(() => import('./CancelSaleModal'), 'sales-canc
 const ExportModal = lazyRetry(() => import('./ExportModal'), 'sales-export-modal')
 const SalesImportModal = lazyRetry(() => import('./SalesImportModal'), 'sales-import')
 const ExportOptionsDialog = lazyRetry(() => import('../shared/ExportOptionsDialog'), 'sales-export-options')
+// The SAME component the Returns section opens for "Add Return" -- opened
+// here from a sale the user is already looking at, with the receipt number
+// prefilled. No forked return logic lives in Sales.
+const NewReturnModal = lazyRetry(() => import('../returns/NewReturnModal'), 'sales-new-return-modal')
 import SalesListSurface from './SalesListSurface'
 import { buildSalesImportRows, SALES_IMPORT_COLUMNS } from '../../utils/salesImportContract.ts'
 import { exportColumnLabel } from '../../utils/exportOptions.ts'
@@ -239,6 +244,11 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
   const canImportSales = can('sales', 'import')
   const canExportSales = can('sales', 'export')
   const canViewFees = can('fees', 'view')
+  // Returning straight from the receipt is still a RETURNS write, so it is
+  // gated on the returns section's own create action -- the same
+  // `returns:add` grant behind the Returns page's Add Return button and the
+  // same one routes/returns.ts enforces on POST /api/returns.
+  const canAddReturn = can('returns', 'add')
   const { syncChannel } = useSync()
   const isActive = useIsPageActive('sales')
   const [sales, setSales] = useState<SaleRecord[]>([])
@@ -274,6 +284,10 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
     return created
   }, [])
   const [selectedSale, setSelectedSale] = useState<SaleRecord | null>(null)
+  // The sale a Return was started for, from the detail modal or the receipt
+  // view. Holds the sale itself so the prefill can fall back to its id when
+  // a legacy row carries no receipt number.
+  const [returnForSale, setReturnForSale] = useState<SaleRecord | null>(null)
   const [detailSale, setDetailSale] = useState<SaleRecord | null>(null)
   const [showExport, setShowExport] = useState(false)
   const [showImport, setShowImport] = useState(false)
@@ -790,6 +804,24 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
     }
   }
 
+  // "also has the returns button right in the sales receipt directly in
+  // addition to being in returns section" (user, Sep 3 2026). Both receipt
+  // surfaces -- the detail modal and the printable receipt view -- hand the
+  // sale to the SAME returns/NewReturnModal the Returns section opens, with
+  // the receipt number prefilled. Falls back to the sale id, which that
+  // flow's own lookup accepts too.
+  const startReturnForSale = useCallback((sale: SaleRecord | null): void => {
+    if (!sale) return
+    setDetailSale(null)
+    setReturnForSale(sale)
+  }, [])
+  const returnBlockedReasonFor = useCallback((sale: SaleRecord | null): string => {
+    const reason = getSaleReturnBlockReason(sale as { sale_status?: string | null; items?: unknown } | null)
+    if (reason === 'cancelled') return translateOr('return_blocked_cancelled_sale', 'This sale was cancelled, so there is nothing to return.', 'ការលក់នេះត្រូវបានបោះបង់ ដូច្នេះគ្មានអ្វីត្រូវប្រគល់មកវិញទេ។')
+    if (reason === 'fully_returned') return translateOr('return_blocked_fully_returned', 'Every item on this sale has already been returned.', 'ទំនិញទាំងអស់ក្នុងការលក់នេះ ត្រូវបានប្រគល់មកវិញរួចហើយ។')
+    return ''
+  }, [translateOr])
+
   // Search, status, date, cashier, sorting, and pagination are authoritative
   // on the server. Re-filtering a server page here used a different search
   // vocabulary (it cannot see current product brand/barcode joins) and could
@@ -1275,7 +1307,17 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
   if (selectedSale) {
     return (
       <Suspense fallback={null}>
-        <Receipt sale={selectedSale} settings={settings || undefined} onClose={() => setSelectedSale(null)} />
+        <Receipt
+          sale={selectedSale}
+          settings={settings || undefined}
+          onClose={() => setSelectedSale(null)}
+          // The receipt view is a full-screen replacement for this page, so
+          // starting a return has to leave it first -- the return modal
+          // renders in the list tree below.
+          onReturn={canAddReturn ? () => { setSelectedSale(null); startReturnForSale(selectedSale) } : undefined}
+          returnLabel={t('return') || 'Return'}
+          returnDisabledReason={returnBlockedReasonFor(selectedSale)}
+        />
       </Suspense>
     )
   }
@@ -1504,9 +1546,34 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
             onStatusChange={canChangeSaleStatus ? handleStatusChange : undefined}
             onAttachMembership={canChangeSaleCustomer ? handleAttachMembership : undefined}
             onPrint={(sale) => setSelectedSale(sale as SaleRecord)}
+            // Gated exactly like the write callbacks above: without
+            // `returns:add` the prop is omitted and the action never renders.
+            onReturn={canAddReturn ? (sale) => startReturnForSale(sale as SaleRecord) : undefined}
             t={t}
             fmtUSD={fmtUSD}
             fmtKHR={fmtKHR}
+          />
+        </Suspense>
+      ) : null}
+
+      {returnForSale ? (
+        <Suspense fallback={null}>
+          <NewReturnModal
+            initialReceiptQuery={returnForSale.receipt_number || String(returnForSale.id || '')}
+            onClose={() => setReturnForSale(null)}
+            onSuccess={async () => {
+              // NewReturnModal already raises its own success notice (it is
+              // the one that knows whether a replacement sale was created),
+              // so this only has to refresh what the return changed.
+              setReturnForSale(null)
+              await loadSales(true)
+              void loadSalesStats()
+              window.dispatchEvent(new CustomEvent('sync:update', { detail: { channel: 'returns' } }))
+              window.dispatchEvent(new CustomEvent('sync:update', { detail: { channel: 'sales' } }))
+              window.dispatchEvent(new CustomEvent('sync:update', { detail: { channel: 'inventory' } }))
+            }}
+            fmtUSD={fmtUSD}
+            notify={notify as (message: string, kind?: string) => void}
           />
         </Suspense>
       ) : null}

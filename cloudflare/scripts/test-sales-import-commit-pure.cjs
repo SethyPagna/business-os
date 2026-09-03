@@ -5,22 +5,32 @@ const assert = require('node:assert/strict')
 const Database = require('better-sqlite3')
 const { loadAll } = require('./harness/load_migrations.cjs')
 
-function compileSubject() {
-  const sourcePath = path.join(__dirname, '..', 'src', 'lib', 'salesImportCommit.ts')
+function compileLib(name, localRequire) {
+  const sourcePath = path.join(__dirname, '..', 'src', 'lib', `${name}.ts`)
   const output = ts.transpileModule(fs.readFileSync(sourcePath, 'utf8'), {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 },
   }).outputText
   const moduleObj = { exports: {} }
-  const localRequire = (request) => {
-    if (request === './db') return {}
-    if (request === './salesStatus') return { RETURN_STATUSES: new Set(['returned', 'partial_return']) }
-    return require(request)
-  }
   new Function('exports', 'require', 'module', output)(moduleObj.exports, localRequire, moduleObj)
   return moduleObj.exports
 }
 
+function compileSubject() {
+  const localRequire = (request) => {
+    if (request === './db') return {}
+    if (request === './salesStatus') return { RETURN_STATUSES: new Set(['returned', 'partial_return']) }
+    // The REAL receipt-number module, not a stub: an imported sale's receipt
+    // id and its legacy-label routing are exactly what this test checks.
+    if (request === './receiptNumber') return compileLib('receiptNumber', localRequire)
+    return require(request)
+  }
+  return compileLib('salesImportCommit', localRequire)
+}
+
 function filterParams(sql, params = {}) {
+  // The uniqueness probe in receiptNumber.ts binds positionally (`?`), the
+  // commit statements bind by @name. Pass an array straight through.
+  if (Array.isArray(params)) return params
   const filtered = {}
   for (const match of sql.matchAll(/@(\w+)/g)) filtered[match[1]] = params[match[1]] ?? null
   return filtered
@@ -84,9 +94,17 @@ function saleData(overrides = {}) {
   const retry = await subject.applyHistoricalSaleImport(normal.db, input)
   assert.equal(first.alreadyApplied, false)
   assert.equal(retry.alreadyApplied, true)
-  assert.equal(normal.sqlite.prepare(`SELECT COUNT(*) n FROM sales WHERE receipt_number = 'R-100'`).get().n, 1)
+  // The CSV's own label 'R-100' is not a business receipt id, so it is kept
+  // as the source key in legacy_receipt_number while the sale gets a real
+  // receipt minted from ITS OWN moment: 2026-08-28T07:30:00Z = 14:30:00 in
+  // Phnom Penh. This is what stops a sales import re-introducing the old
+  // system's `NNNNNN@YYYY-MM-DD` shape (migration 0107).
+  assert.deepEqual(
+    normal.sqlite.prepare(`SELECT receipt_number, legacy_receipt_number FROM sales WHERE client_request_id = 'sales-import:job-1:2'`).all(),
+    [{ receipt_number: '20260828-143000', legacy_receipt_number: 'R-100' }],
+  )
   assert.equal(normal.sqlite.prepare(`SELECT COUNT(*) n FROM sale_items`).get().n, 1)
-  assert.equal(normal.sqlite.prepare(`SELECT s.receipt_number FROM sale_items si JOIN sales s ON s.id = si.sale_id`).get().receipt_number, 'R-100')
+  assert.equal(normal.sqlite.prepare(`SELECT s.receipt_number FROM sale_items si JOIN sales s ON s.id = si.sale_id`).get().receipt_number, '20260828-143000')
   assert.equal(normal.sqlite.prepare(`SELECT stock_quantity FROM products WHERE id = 10`).get().stock_quantity, 5, 'ordinary history import never deducts current stock')
   assert.equal(normal.sqlite.prepare(`SELECT status FROM import_sales_commits`).get().status, 'applied')
 

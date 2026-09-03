@@ -100,8 +100,13 @@ export function resolveReviewedSep1ItemOverride({ invoice, barcode, sourceName, 
   if (!override) return { status: 'no_reviewed_override', product: null }
   const product = candidates.find((candidate) => Number(candidate.id) === override.productId && String(candidate.name) === override.productName)
   if (!product) return { status: 'override_live_product_mismatch', product: null, override }
+  // Match on the OLD-SYSTEM label, which after migration 0107 lives in
+  // sales.legacy_receipt_number -- receipt_number now holds the business
+  // YYYYMMDD-HHMMSS id. Both are accepted so this keeps working against a
+  // pre-0107 snapshot as well as against repaired production.
+  const legacyLabel = `${override.invoice}@2026-09-01`
   const existing = existingSaleItems.filter((item) =>
-    String(item.receipt_number) === `${override.invoice}@2026-09-01`
+    (String(item.legacy_receipt_number ?? '') === legacyLabel || String(item.receipt_number) === legacyLabel)
     && Number(item.product_id) === override.productId
     && String(item.product_name) === override.productName
     && Math.abs(Number(item.cost_price_usd) - override.sourceCostUsd) < 0.00001,
@@ -204,5 +209,37 @@ export function buildSep1CorrectionManifest({ receipts = [], transfers = [], sou
         'negative-stock trigger and pre/post stock totals must pass before any apply',
       ],
     },
+  }
+}
+
+/**
+ * Refuse to re-apply an old-system importer after migration 0107.
+ *
+ * These importers key every sale they wrote by the OLD SYSTEM's invoice label
+ * `NNNNNN@YYYY-MM-DD`, both to mint sales.receipt_number and -- crucially --
+ * to recognise the rows they already imported so a rerun is a no-op.
+ * Migration 0107 moved that label to sales.legacy_receipt_number and put
+ * receipt_number back into the project's own YYYYMMDD-HHMMSS format (the user
+ * rule of Sep 2 2026, after a reconciliation pack overwrote 15,004 receipts).
+ *
+ * Post-0107 a rerun would therefore do two harmful things at once: match none
+ * of its own rows and duplicate every sale, and write the `@` label back onto
+ * live receipts. Neither is recoverable from inside the script, so it stops
+ * here instead. A genuine re-import goes through the sales importer, which
+ * routes a foreign source label to legacy_receipt_number and mints a real
+ * business receipt id from the sale's own moment
+ * (cloudflare/src/lib/salesImportCommit.ts).
+ *
+ * @param queryRows a function running one SQL command and returning its rows
+ */
+export function assertLegacyReceiptEraStillCurrent(queryRows) {
+  const rows = queryRows("SELECT COUNT(*) AS n FROM pragma_table_info('sales') WHERE name = 'legacy_receipt_number'")
+  if (Number(rows?.[0]?.n || 0) > 0) {
+    throw new Error(
+      'Refusing to apply: migration 0107 has already moved the old-system `NNNNNN@YYYY-MM-DD` labels to '
+      + 'sales.legacy_receipt_number and rewritten sales.receipt_number to the business YYYYMMDD-HHMMSS format. '
+      + 'This importer keys its sales by the old label, so a rerun would duplicate every row it already '
+      + 'imported and put the `@` shape back on live receipts. Re-import through the sales importer instead.',
+    )
   }
 }
