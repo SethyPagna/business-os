@@ -4223,6 +4223,8 @@
   "scan_from_photo_busy": "Reading photo...",
   "scan_permission_denied": "Camera access was denied. Allow it or enter the code manually.",
   "scan_photo_failed": "We could not read a barcode from that photo. Try another photo or type the code manually.",
+  "scan_product_for_adjustment": "Scan product for this stock adjustment",
+  "scan_product_for_stock_in": "Scan product for this stock-in",
   "scan_product_for_transfer": "Scan product for this transfer",
   "scan_prompt_dismissed": "The camera prompt was dismissed. Tap below to try again, or enter the code manually.",
   "scan_ready": "Point the camera at a barcode or SKU label.",
