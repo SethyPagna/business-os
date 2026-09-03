@@ -139,6 +139,26 @@ assert.match(
   "the 90%-density product-list wrapper must pin width:auto -- main.css pairs its zoom:.9 with a reciprocal width:111.111111% that zoom does not need, and that extra 11% is what pushed .page-scroll to scrollWidth 408 against clientWidth 370 at 375px",
 )
 
+// P2-4 Part 1b: the Products search placeholder must stay a LABEL, not
+// documentation. `search_products_placeholder` -- still the shared value used
+// by TransferModal and NewSupplierReturnModal -- reads "Search divide by
+// comma, any order: name, barcode, SKU" and measures 398px in the input's own
+// font against 276px of usable width at 375px, so the user never saw the last
+// third of the very instruction it was giving them (the Khmer pack overflowed
+// too, 313px). The comma/AND guidance is still one hover away in this input's
+// own `title`. `search_products` exists in both packs already: EN 126px, KM
+// 132px, both inside 276px.
+assert.match(
+  products,
+  /placeholder=\{t\('search_products'\) \|\| 'Search products'\}/,
+  "the Products search input must use the short `search_products` label -- `search_products_placeholder` is a 398px instruction in a 276px box at 375px",
+)
+assert.match(
+  products,
+  /title=\{t\('search_comma_tip'\)/,
+  'the comma/AND search guidance must stay reachable on the search input itself once the placeholder stops carrying it',
+)
+
 console.log('PASS Products responsive section, detail, and batch surfaces')
 
 // P2-4 Part 1b: the whole products folder is swept onto the design tokens, so

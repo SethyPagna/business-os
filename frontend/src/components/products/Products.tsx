@@ -3970,7 +3970,18 @@ function ProductsFullEditor() {
               name="products_search"
               value={search}
               onChange={handleSearchInputChange}
-              placeholder={t('search_products_placeholder') || `${t('search') || 'Search'} products`}
+              /* P2-4 Part 1b: was `search_products_placeholder`, whose value is a
+                 whole instruction -- "Search divide by comma, any order: name,
+                 barcode, SKU". Measured in the input's own font at 375px: 398px
+                 of text in 276px of usable width, so it lost its last ~122px and
+                 the user never saw what it was telling them to do; the Khmer pack
+                 overflowed too (313px). A placeholder is a label, not
+                 documentation -- the comma/AND guidance already lives one hover
+                 away in this same input's `title` (`search_comma_tip`) and is not
+                 lost. `search_products` already exists in BOTH packs, so nothing
+                 is added or translated here: EN "Search products…" measures 126px
+                 and KM "ស្វែងរកផលិតផល…" 132px, both comfortably inside 276px. */
+              placeholder={t('search_products') || 'Search products'}
               title={t('search_comma_tip') || 'Comma separates OR-groups \u00b7 space = AND within a group'}
               inputClassName="text-sm"
               onKeyDown={productSearchBarcodeScan.wedge.onKeyDown}
