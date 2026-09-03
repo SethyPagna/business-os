@@ -69,7 +69,12 @@ db.exec(`
     customer_id INTEGER,
     payment_method TEXT,
     customer_name TEXT,
-    receipt_number TEXT
+    receipt_number TEXT,
+    -- What the till actually took, and 0106's link back to the return a
+    -- replacement sale settles: collectedExpr reads both to keep an even
+    -- exchange out of "collected" while still counting the sale.
+    amount_paid_usd REAL,
+    source_return_id INTEGER
   );
   CREATE INDEX idx_sales_created_pg ON sales (created_at DESC, id DESC);
   CREATE TABLE sale_items (

@@ -166,6 +166,24 @@ function awaitingExpr(p: string): string { return `${saleStatusExpr(p)} = 'await
 export function netSaleExpr(p: string): string {
   return `(COALESCE(${p}subtotal_usd, 0) - COALESCE(${p}discount_usd, 0) - COALESCE(${p}membership_discount_usd, 0))`
 }
+// Money the till actually took for one sale row.
+//
+// For an ordinary sale that is total_usd. A REPLACEMENT sale (returns.ts writes
+// it with sales.source_return_id set, migration 0106) is a settlement, not a
+// tender: the customer hands back goods and walks out with goods, so an even
+// exchange collects $0 even though total_usd carries the full value of what
+// left the shelf. Only the price difference the customer actually paid on top
+// is real money, and returns.ts records exactly that in amount_paid_usd. So
+// read amount_paid_usd for exchange rows and total_usd for everything else --
+// an even exchange contributes 0, a customer who topped up $3 contributes $3,
+// and the sale is still COUNTED (goods really moved) rather than dropped from
+// the breakdown entirely.
+//
+// Revenue is untouched by this: an exchange nets out against the refund leg of
+// its own return (sale +X, refund -X) through CUSTOMER_REFUND_JOIN.
+export function collectedExpr(p: string): string {
+  return `CASE WHEN COALESCE(${p}source_return_id, 0) <> 0 THEN COALESCE(${p}amount_paid_usd, 0) ELSE COALESCE(${p}total_usd, 0) END`
+}
 // The delivery fee the CUSTOMER paid (a store-absorbed fee was never collected).
 function customerDeliveryFeeExpr(p: string): string {
   return `CASE WHEN COALESCE(${p}delivery_fee_paid_by, 'customer') = 'store' THEN 0 ELSE COALESCE(${p}delivery_fee_usd, 0) END`
@@ -488,7 +506,7 @@ export async function getPaymentMethodBreakdown(env: Env, f: SalesFilters): Prom
     SELECT COALESCE(NULLIF(TRIM(payment_method), ''), 'Unknown') AS payment_method,
            COUNT(*) AS tx_count,
            COALESCE(SUM(total_usd), 0) AS total_usd,
-           COALESCE(SUM(total_usd), 0) AS collected_usd
+           COALESCE(SUM(${collectedExpr('')}), 0) AS collected_usd
     FROM sales
     WHERE ${whereSql}
     GROUP BY COALESCE(NULLIF(TRIM(payment_method), ''), 'Unknown')
@@ -677,7 +695,7 @@ export async function getCustomerSalesTotals(
   params.customerId = f.customerId
   const row = await db.prepare(`
     SELECT COUNT(*) AS tx_count,
-           COALESCE(SUM(total_usd), 0) AS collected_usd,
+           COALESCE(SUM(${collectedExpr('')}), 0) AS collected_usd,
            COALESCE(SUM(discount_usd), 0) AS discount_usd,
            COALESCE(SUM(membership_discount_usd), 0) AS membership_discount_usd,
            COALESCE(SUM(membership_points_redeemed), 0) AS points_redeemed,
@@ -730,7 +748,7 @@ export async function getSalesDayReport(
              -- SUM(revenue_usd) over the day == totals.revenue_usd.
              ROUND(CASE WHEN ${recognizedExpr('')} THEN ${netSaleExpr('')} - COALESCE(rf.refund_usd, 0) ELSE 0 END, 2) AS revenue_usd,
              ROUND(COALESCE(discount_usd, 0) + COALESCE(membership_discount_usd, 0), 2) AS discount_usd,
-             ROUND(COALESCE(total_usd, 0), 2) AS collected_usd
+             ROUND(${collectedExpr('')}, 2) AS collected_usd
       FROM sales
       ${CUSTOMER_REFUND_JOIN}sales.id
       WHERE ${whereSql}

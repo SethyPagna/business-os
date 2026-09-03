@@ -81,7 +81,15 @@ assert.match(sales, /lazyRetry\(\(\) => import\('\.\.\/returns\/NewReturnModal'\
 assert.match(sales, /<NewReturnModal[\s\S]*?initialReceiptQuery=\{returnForSale\.receipt_number \|\| String\(returnForSale\.id \|\| ''\)\}/, 'the return modal must open pre-filled with the sale')
 assert.match(newReturn, /initialReceiptQuery\?: string \| null/, 'NewReturnModal must accept the additive prefill prop')
 assert.match(newReturn, /useState\(\(\) => String\(initialReceiptQuery \|\| ''\)\.trim\(\)\)/, 'the prefill seeds step 1 of the existing flow')
-assert.match(newReturn, /autoSearchedRef[\s\S]{0,400}void handleSearch\(\)/, 'the prefill runs the existing handleSearch once, so every guard and lookup is unchanged')
+// The seed is not a shortcut around the operator: it drives the SAME debounced
+// receipt typeahead a typed query drives (pre-filled box, matching receipts
+// listed, first one highlighted) and never opens a sale by itself -- a seed,
+// like a scan, narrows the list; the person picks. (Reworked Sep 3 2026 when
+// the receipt search became a typeahead; the old autoSearchedRef one-shot went
+// with it.)
+assert.match(newReturn, /useEffect\(\(\) => \{\s*const query = searchQuery\.trim\(\)[\s\S]*?lookupReceiptSuggestions\(query, RECEIPT_SUGGEST_LIMIT\)[\s\S]*?\}, \[searchQuery, step\]\)/, 'the seeded query must flow through the debounced receipt typeahead effect')
+assert.doesNotMatch(newReturn, /autoSearchedRef|autoResolvedRef/, 'no one-shot auto-search may open a sale on the seed alone')
+assert.equal((newReturn.match(/\[initialReceiptQuery\]/g) || []).length, 0, 'nothing but the initial state may key off the seed prop')
 
 console.log('PASS the Return action opens the same NewReturnModal prefilled, behind returns:add, inert with a reason when blocked')
 
