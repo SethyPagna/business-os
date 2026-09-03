@@ -91,15 +91,21 @@ interface MoneyRowProps {
   strong?: boolean
   /** How many leading item columns the label spans. */
   labelSpan?: number
+  /** A bare `data-*` attribute name stamped on the row, for surfaces that
+   *  need to distinguish two totals rows that look alike but mean different
+   *  things -- the replacement-sale total vs. a historical exchange
+   *  settlement on a return. Keeps those rows on this shared rhythm instead
+   *  of hand-rolling a second row shape just to carry the marker. */
+  marker?: string
   /** Extra note rendered under the label (e.g. a credit due date). */
   note?: ReactNode
 }
 
-export function MoneyRow({ label, amount, sub, tone = 'default', strong = false, labelSpan = 3, note }: MoneyRowProps) {
+export function MoneyRow({ label, amount, sub, tone = 'default', strong = false, labelSpan = 3, note, marker }: MoneyRowProps) {
   const toneClass = MONEY_TONE_CLASS[tone]
   const border = strong ? 'border-t border-gray-200 dark:border-gray-700' : ''
   return (
-    <tr className={`${toneClass} ${border}`}>
+    <tr className={`${toneClass} ${border}`} {...(marker ? { [marker]: '' } : {})}>
       <td colSpan={labelSpan} className={`px-2 py-1 text-right ${strong ? 'text-sm font-bold sm:text-base' : 'text-xs'}`}>
         {label}
         {note ? <span className="ml-1 text-[11px] font-normal opacity-80">{note}</span> : null}

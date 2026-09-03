@@ -1,9 +1,11 @@
+import { useEffect, useState } from 'react'
 import X from 'lucide-react/dist/esm/icons/x.js'
 import { createPortal } from 'react-dom'
 import { useApp as useAppHook } from '../../AppContext.tsx'
 import { fmtTime } from '../../utils/formatters.ts'
 import CopyableId from '../shared/CopyableId.tsx'
 import { DetailRow, DetailRowGroup, MoneyRow } from '../shared/DetailRows.tsx'
+import { getReturn as fetchReturnDetail } from '../../api/returnsReadTransport.ts'
 import { normalizeStockAction, stockActionOption } from './helpers/returnOptions.ts'
 
 const CUSTOMER_SCOPE = 'customer'
@@ -31,6 +33,7 @@ interface ReplacementLineItem {
 }
 
 interface ReturnDetail {
+  id?: number | string | null
   return_number?: string | null
   created_at?: string | Date | null
   items?: ReturnLineItem[] | null
@@ -89,9 +92,41 @@ export default function ReturnDetailModal({ ret, onClose, onEdit, fmtUSD, fmtKHR
     return value && value !== key ? value : fallback
   }
 
+  // The Returns list read deliberately does not carry items -- one row per
+  // return, no per-line fan-out (see routes/returns.ts GET /'s includeItems
+  // gate). So the row this modal is handed has none, and every return opened
+  // from the list read "Items (0)" with no lines and no replacement block.
+  // Fetch them here, once per return, the same way the edit path already
+  // does: the prop stays authoritative whenever it does carry them.
+  const [fetched, setFetched] = useState<{ items: ReturnLineItem[]; replacement_items: ReplacementLineItem[] } | null>(null)
+  const returnId = ret?.id ?? null
+  const propItems = Array.isArray(ret?.items) && ret.items.length ? ret.items : null
+  const needsFetch = returnId != null && !propItems
+  useEffect(() => {
+    if (!needsFetch || returnId == null) { setFetched(null); return }
+    let alive = true
+    setFetched(null)
+    void (async () => {
+      try {
+        const detail = await fetchReturnDetail(returnId) as { items?: ReturnLineItem[] | null; replacement_items?: ReplacementLineItem[] | null } | null
+        if (!alive || !detail) return
+        setFetched({
+          items: Array.isArray(detail.items) ? detail.items : [],
+          replacement_items: Array.isArray(detail.replacement_items) ? detail.replacement_items : [],
+        })
+      } catch {
+        // A failed line fetch must not blank a return the operator can already
+        // read: the header keeps rendering what the list row carried.
+      }
+    })()
+    return () => { alive = false }
+  }, [needsFetch, returnId])
+
   if (!ret) return null
-  const items = Array.isArray(ret.items) ? ret.items : []
-  const replacementItems = Array.isArray(ret.replacement_items) ? ret.replacement_items : []
+  const items = propItems && propItems.length ? propItems : (fetched?.items || [])
+  const replacementItems = Array.isArray(ret.replacement_items) && ret.replacement_items.length
+    ? ret.replacement_items
+    : (fetched?.replacement_items || [])
   const scope = normalizeScope(ret.return_scope)
   const isSupplier = scope === SUPPLIER_SCOPE
 
@@ -266,6 +301,7 @@ export default function ReturnDetailModal({ ret, onClose, onEdit, fmtUSD, fmtKHR
               <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-emerald-600 dark:text-emerald-400">
                 🔁 {tr('replacement_sale_items_label', 'Replacement sale items')} ({replacementItems.length})
               </div>
+<<<<<<< HEAD
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead className="border-y border-emerald-200 text-[11px] font-semibold uppercase tracking-wide text-emerald-700/80 dark:border-emerald-800 dark:text-emerald-300/80">
@@ -287,18 +323,42 @@ export default function ReturnDetailModal({ ret, onClose, onEdit, fmtUSD, fmtKHR
                       </tr>
                     ))}
                   </tbody>
+                  {/* Two eras read side by side, on the shared row rhythm.
+                      CURRENT: the replacement is its own sale, so the totals
+                      row names that sale's receipt and its own total --
+                      nothing is netted.
+                      HISTORICAL: a return recorded under the old exchange
+                      model carries settlement_mode/settlement_diff_usd
+                      (migration 0074). Nothing writes those any more, but they
+                      are the only record of what actually happened on that
+                      day, so they are still read and shown -- labelled as the
+                      settlement they were, never re-presented as today's
+                      model. */}
                   <tfoot className="border-t border-emerald-200 dark:border-emerald-800">
-                    <MoneyRow
-                      labelSpan={2}
-                      tone="credit"
-                      label={ret.settlement_mode === 'price_difference' ? tr('price_difference', 'Price difference') : tr('even_exchange', 'Even exchange')}
-                      amount={ret.settlement_mode === 'price_difference'
-                        ? (Number(ret.settlement_diff_usd || 0) > 0 ? '+' : '−') + fmtUSD(Math.abs(Number(ret.settlement_diff_usd || 0)))
-                        : '±0'}
-                      sub={ret.settlement_mode === 'price_difference' && isPositiveMoney(Math.abs(Number(ret.settlement_diff_khr || 0)))
-                        ? (Number(ret.settlement_diff_usd || 0) > 0 ? '+' : '−') + fmtKHR(Math.abs(Number(ret.settlement_diff_khr || 0)))
-                        : null}
-                    />
+                    {ret.settlement_mode ? (
+                      <MoneyRow
+                        marker="data-historical-settlement"
+                        labelSpan={2}
+                        tone="credit"
+                        label={`${tr('historical_settlement', 'Recorded as an exchange')} · ${ret.settlement_mode === 'price_difference'
+                          ? tr('price_difference', 'Price difference')
+                          : tr('even_exchange', 'Even exchange')}`}
+                        amount={ret.settlement_mode === 'price_difference'
+                          ? (Number(ret.settlement_diff_usd || 0) > 0 ? '+' : '−') + fmtUSD(Math.abs(Number(ret.settlement_diff_usd || 0)))
+                          : '±0'}
+                        sub={ret.settlement_mode === 'price_difference' && isPositiveMoney(Math.abs(Number(ret.settlement_diff_khr || 0)))
+                          ? (Number(ret.settlement_diff_usd || 0) > 0 ? '+' : '−') + fmtKHR(Math.abs(Number(ret.settlement_diff_khr || 0)))
+                          : null}
+                      />
+                    ) : (
+                      <MoneyRow
+                        marker="data-replacement-sale"
+                        labelSpan={2}
+                        tone="credit"
+                        label={`${tr('replacement_sale_total', 'New sale total')}${ret.replacement_receipt_number ? ` · ${ret.replacement_receipt_number}` : ''}`}
+                        amount={fmtUSD(replacementItems.reduce((sum, line) => sum + Number(line.total_usd || 0), 0))}
+                      />
+                    )}
                   </tfoot>
                 </table>
               </div>

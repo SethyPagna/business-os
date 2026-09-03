@@ -12,8 +12,14 @@
 //     return edit that created it.
 //   - Replace may hand out any catalog product. routes/returns.ts records the
 //     hand-out as a linked sale/receipt as well as this stock movement.
-//   - The value gap settles as 'even_exchange' (no money moves; only legal
-//     when the gap is zero) or 'price_difference' (full access only).
+//   - A return is ONLY a return: the customer gets back exactly what the
+//     original sale line charged. A replacement is ONLY a sale: priced,
+//     tendered and recorded like any other. Neither nets against the other,
+//     so there is no exchange arithmetic, no price-difference settlement
+//     and no permission gate on a value gap. (Returns rows written before
+//     this carry settlement_mode/settlement_diff_* from migration 0074;
+//     those columns are read-only history now -- ReturnDetailModal still
+//     renders them for old rows, nothing writes them again.)
 //
 // The pre-existing sellable-restock path (receiveBatchStock/plain bump)
 // stays in routes/returns.ts unchanged; this file owns only what 0074
@@ -23,7 +29,6 @@ import type { D1Compat } from './db'
 import { removeStockFromBatch } from './productBatches'
 
 export type ReturnStockAction = 'none' | 'restock' | 'damaged'
-export type SettlementMode = 'even_exchange' | 'price_difference'
 
 // Movement-ledger types for the product's information trail (11.13's "adds
 // a damage entry in the product's information" is exactly these rows).
@@ -40,24 +45,79 @@ export function normalizeStockAction(input: { stock_action?: unknown; return_to_
   return input.return_to_stock !== false ? 'restock' : 'none'
 }
 
-export function computeSettlement(input: {
-  mode?: unknown
-  returnedTotalUsd: number
-  returnedTotalKhr: number
-  replacementTotalUsd: number
-  replacementTotalKhr: number
-}): { mode: SettlementMode; diffUsd: number; diffKhr: number; needsFullAccess: boolean; evenExchangeBlocked: boolean } {
-  const mode: SettlementMode = String(input.mode ?? '').trim().toLowerCase() === 'price_difference' ? 'price_difference' : 'even_exchange'
-  // Positive = the replacement is worth MORE than what came back -- the
-  // customer owes the difference; negative = the shop refunds it.
-  const diffUsd = Number((input.replacementTotalUsd - input.returnedTotalUsd).toFixed(2))
-  const diffKhr = Math.round(input.replacementTotalKhr - input.returnedTotalKhr)
+// What one returned line refunds. The ONLY authority is the price the
+// ORIGINAL sale line charged -- not the product's current selling price, and
+// not whatever the client posted. A manual return (no sale line on file) has
+// no such authority and falls back to the posted price, which is the only
+// number that exists for it.
+export function resolveRefundUnitPrice(input: {
+  saleLine?: { applied_price_usd?: number | null; applied_price_khr?: number | null } | null
+  postedUsd: number
+  postedKhr: number
+}): { unitUsd: number; unitKhr: number; fromSaleLine: boolean } {
+  const line = input.saleLine
+  if (line && (line.applied_price_usd != null || line.applied_price_khr != null)) {
+    return {
+      unitUsd: Number(line.applied_price_usd) || 0,
+      unitKhr: Number(line.applied_price_khr) || 0,
+      fromSaleLine: true,
+    }
+  }
+  return { unitUsd: Number(input.postedUsd) || 0, unitKhr: Number(input.postedKhr) || 0, fromSaleLine: false }
+}
+
+export type ReturnLotSplit = { batchId: number; quantity: number }
+
+export class ReturnLotRequiredError extends Error {
+  code = 'return_lot_required'
+  constructor(productName: string, quantity: number) {
+    super(`Pick the lot ${quantity} unit(s) of "${productName}" go back into. This product's stock is tracked by lot, and the original sale line does not say which one -- a return never lands on unspecified stock.`)
+    this.name = 'ReturnLotRequiredError'
+  }
+}
+
+// Which lot(s) a returned line restocks into, decided BEFORE any write.
+//
+// An explicit operator pick is authoritative for the WHOLE line -- the person
+// looked at the shelf and said "these units belong in that lot", and letting
+// it merge with a derived split would put units somewhere nobody chose. With
+// no pick, the sale itself answers: the lots the line actually drew from
+// (last drawn first, mirroring the cancel path), or the single lot recorded
+// on the line.
+//
+// A lot-tracked product with neither a pick nor a sale-side answer is
+// REFUSED, never silently bumped onto the unspecified branch_stock
+// aggregate. A product that has never used lot tracking (`lotTracked` false)
+// keeps the plain aggregate bump, which for it is the only truthful
+// destination.
+export function planReturnLot(input: {
+  allocations: Array<{ batch_id: number; outstanding: number }>
+  saleLineBatchId: number | null
+  operatorBatchId: number | null
+  quantity: number
+  lotTracked: boolean
+}): { splits: ReturnLotSplit[]; plainQuantity: number; requiresLotPick: boolean } {
+  const quantity = Math.max(0, Number(input.quantity) || 0)
+  if (input.operatorBatchId != null) {
+    return { splits: [{ batchId: Number(input.operatorBatchId), quantity }], plainQuantity: 0, requiresLotPick: false }
+  }
+  const splits: ReturnLotSplit[] = []
+  let remaining = quantity
+  for (let index = input.allocations.length - 1; index >= 0 && remaining > 0; index -= 1) {
+    const alloc = input.allocations[index]
+    const give = Math.min(Math.max(0, Number(alloc.outstanding) || 0), remaining)
+    if (give <= 0) continue
+    splits.push({ batchId: Number(alloc.batch_id), quantity: give })
+    remaining -= give
+  }
+  if (remaining > 0 && input.saleLineBatchId != null) {
+    splits.push({ batchId: Number(input.saleLineBatchId), quantity: remaining })
+    remaining = 0
+  }
   return {
-    mode,
-    diffUsd,
-    diffKhr,
-    needsFullAccess: mode === 'price_difference',
-    evenExchangeBlocked: mode === 'even_exchange' && (Math.abs(diffUsd) >= 0.005 || Math.abs(diffKhr) >= 1),
+    splits,
+    plainQuantity: input.lotTracked ? 0 : remaining,
+    requiresLotPick: remaining > 0 && input.lotTracked,
   }
 }
 
@@ -192,8 +252,10 @@ export async function applyReplacementStock(db: D1Compat, input: {
     reference_id: input.returnId,
     user_id: input.userId,
     user_name: input.userName,
-    // 0084: an explicit lot pick drained exactly that lot; the plain path
-    // touched no specific lot.
+    // 0084: an explicit lot pick drained exactly that lot. The plain path is
+    // reached only by a product that has never used lot tracking (the modal
+    // requires a lot wherever lots exist), so a NULL here means "this
+    // product has no lots", never "we did not bother to look".
     batch_id: input.batchId ?? null,
   })
   return { usedBatch }

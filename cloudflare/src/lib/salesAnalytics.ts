@@ -168,19 +168,23 @@ export function netSaleExpr(p: string): string {
 }
 // Money the till actually took for one sale row.
 //
-// For an ordinary sale that is total_usd. A REPLACEMENT sale (returns.ts writes
-// it with sales.source_return_id set, migration 0106) is a settlement, not a
-// tender: the customer hands back goods and walks out with goods, so an even
-// exchange collects $0 even though total_usd carries the full value of what
-// left the shelf. Only the price difference the customer actually paid on top
-// is real money, and returns.ts records exactly that in amount_paid_usd. So
-// read amount_paid_usd for exchange rows and total_usd for everything else --
-// an even exchange contributes 0, a customer who topped up $3 contributes $3,
-// and the sale is still COUNTED (goods really moved) rather than dropped from
-// the breakdown entirely.
+// For an ordinary sale that is total_usd, and a replacement sale written
+// under the CURRENT model is an ordinary sale: the customer pays for it in
+// full, so returns.ts records amount_paid_usd == total_usd and this CASE is a
+// no-op for those rows.
 //
-// Revenue is untouched by this: an exchange nets out against the refund leg of
-// its own return (sale +X, refund -X) through CUSTOMER_REFUND_JOIN.
+// It still has to exist for HISTORY. Replacement rows written under the old
+// exchange model (returns.ts wrote them with sales.source_return_id set,
+// migration 0106, and an amount_paid of only the price difference the
+// customer topped up) really did collect less than total_usd -- an even
+// exchange collected $0 even though total_usd carried the full value of what
+// left the shelf. Reading amount_paid_usd for source_return_id rows keeps
+// those old days reporting the money the till actually took, while the sale
+// is still COUNTED (goods really moved) rather than dropped from the
+// breakdown.
+//
+// Revenue is untouched by this: the sale's value and the return's refund are
+// each recognized on their own through CUSTOMER_REFUND_JOIN.
 export function collectedExpr(p: string): string {
   return `CASE WHEN COALESCE(${p}source_return_id, 0) <> 0 THEN COALESCE(${p}amount_paid_usd, 0) ELSE COALESCE(${p}total_usd, 0) END`
 }

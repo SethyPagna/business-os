@@ -1,8 +1,13 @@
 // K2 (Part 410, 11.12/11.13): pure helpers for the return-options chooser
 // and Replace. The BACKEND kernel (cloudflare/src/lib/returnsStock.ts) is
-// authoritative for all of this -- these mirror its normalization and
-// settlement math so the modal's preview shows exactly what the server
-// will decide, never a different answer.
+// authoritative for all of this -- these mirror its normalization and lot
+// rules so the modal shows exactly what the server will decide, never a
+// different answer.
+//
+// There is deliberately NO settlement math here any more. A return refunds
+// its own lines at the original sale's prices; a replacement is an ordinary
+// sale the customer pays for. Neither nets against the other, so there is no
+// difference to preview, owe, or settle.
 
 export type ReturnStockAction = 'none' | 'restock' | 'damaged'
 
@@ -35,18 +40,22 @@ export function stockActionOption(action: ReturnStockAction): StockActionOption 
   return STOCK_ACTION_OPTIONS.find((option) => option.value === action) || STOCK_ACTION_OPTIONS[2]
 }
 
-// Mirror of the backend kernel's computeSettlement thresholds: an even
-// exchange is only even within half a cent / half a riel of zero.
-// Positive diff = the customer owes the difference.
-export function computeSettlementPreview(input: {
-  returnedTotalUsd: number
-  returnedTotalKhr: number
-  replacementTotalUsd: number
-  replacementTotalKhr: number
-}): { diffUsd: number; diffKhr: number; isEven: boolean } {
-  const diffUsd = Number((input.replacementTotalUsd - input.returnedTotalUsd).toFixed(2))
-  const diffKhr = Math.round(input.replacementTotalKhr - input.returnedTotalKhr)
-  return { diffUsd, diffKhr, isEven: Math.abs(diffUsd) < 0.005 && Math.abs(diffKhr) < 1 }
+// Mirror of the backend kernel's planReturnLot verdict, for the ONE thing
+// the modal has to decide before it can submit: does this line still need
+// the operator to name a lot? The server refuses a lot-tracked line that
+// answers "yes" (ReturnLotRequiredError), so the modal must not offer an
+// "any stock" escape and must not let Confirm through until every such line
+// is answered.
+export function returnLineNeedsLotPick(input: {
+  originalBatchId?: number | string | null
+  pickedBatchId?: number | string | null
+  lotOptionCount: number
+}): boolean {
+  if (input.lotOptionCount <= 0) return false
+  const known = Number(input.originalBatchId)
+  if (Number.isFinite(known) && known > 0) return false
+  const picked = Number(input.pickedBatchId)
+  return !(Number.isFinite(picked) && picked > 0)
 }
 
 // mm/dd/yyyy per the app-wide date convention; ISO or Date-parseable in.

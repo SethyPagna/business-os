@@ -88,6 +88,9 @@ const productBatches = loadReal('lib/productBatches.ts', { './db': { getDb: () =
 const permissions = loadReal('lib/permissions.ts')
 
 const FAKE_USER = { id: 1, username: 'tester', name: 'Test User', permissions: JSON.stringify({ returns: true }) }
+// Swapped for one request at a time by reqAs() so a permission-shaped probe
+// runs through the REAL lib/permissions tier resolution, not a stub of it.
+let activeUser = FAKE_USER
 
 const returnsRoute = loadReal('routes/returns.ts', {
   '../lib/db': { getDb: () => db },
@@ -97,7 +100,7 @@ const returnsRoute = loadReal('routes/returns.ts', {
   // Real, pure -- its chunking is what keeps these reads inside D1's
   // 100-bound-parameter limit, so a stub would test the stub.
   '../lib/sqlBinding': loadReal('lib/sqlBinding.ts'),
-  '../lib/auth': { requireAuth: async (c, next) => { c.set('user', FAKE_USER); return next() } },
+  '../lib/auth': { requireAuth: async (c, next) => { c.set('user', activeUser); return next() } },
   '../lib/audit': { audit: async () => {} },
   '../lib/telegram': { sendReturnTelegramEvent: async () => false, sendTelegramEvent: async () => false, formatSaleTelegramLines: () => [] },
   '../lib/permissions': permissions,
@@ -159,6 +162,15 @@ async function req(method, url, body) {
   }, fakeEnv, fakeExecutionCtx)
   const json = await res.json().catch(() => null)
   return { status: res.status, json }
+}
+
+async function reqAs(user, method, url, body) {
+  activeUser = user
+  try {
+    return await req(method, url, body)
+  } finally {
+    activeUser = FAKE_USER
+  }
 }
 
 async function main() {
@@ -345,14 +357,17 @@ async function main() {
     assert.strictEqual(rep.quantity, 2)
     assert.strictEqual(rep.total_usd, 20)
     assert.strictEqual(rawDb.prepare('SELECT quantity FROM branch_stock WHERE product_id = 2 AND branch_id = 1').get().quantity, 8)
-    const header = rawDb.prepare('SELECT settlement_mode, settlement_diff_usd, replacement_sale_id FROM returns WHERE id = @id').get({ id: json.id })
-    assert.strictEqual(header.settlement_mode, 'even_exchange')
+    const header = rawDb.prepare('SELECT settlement_mode, settlement_diff_usd, replacement_sale_id, total_refund_usd FROM returns WHERE id = @id').get({ id: json.id })
+    assert.strictEqual(header.settlement_mode, null, 'a same-value swap is still just a return plus a sale')
     assert.strictEqual(header.settlement_diff_usd, 0)
+    assert.strictEqual(header.total_refund_usd, 20, 'the return refunds its own lines, whatever the replacement costs')
     assert.strictEqual(header.replacement_sale_id, json.replacementSaleId)
     assert.strictEqual(json.replacementReceiptNumber, '20260830-120000')
-    const replacementSale = rawDb.prepare('SELECT receipt_number, source_return_id, payment_method FROM sales WHERE id = ?').get([json.replacementSaleId])
+    const replacementSale = rawDb.prepare('SELECT receipt_number, source_return_id, payment_method, total_usd, amount_paid_usd FROM sales WHERE id = ?').get([json.replacementSaleId])
     assert.strictEqual(replacementSale.source_return_id, json.id)
-    assert.strictEqual(replacementSale.payment_method, 'Return Exchange')
+    assert.strictEqual(replacementSale.payment_method, 'Cash')
+    assert.strictEqual(replacementSale.total_usd, 20)
+    assert.strictEqual(replacementSale.amount_paid_usd, 20)
     const replacementSaleItem = rawDb.prepare('SELECT product_id, quantity FROM sale_items WHERE sale_id = ?').get([json.replacementSaleId])
     assert.strictEqual(replacementSaleItem.product_id, 2)
     assert.strictEqual(replacementSaleItem.quantity, 2)
@@ -364,7 +379,7 @@ async function main() {
     assert.strictEqual(move.quantity, -2)
   })
 
-  await check('an EVEN exchange records a normal sale that collected nothing, carries the auto note, and keeps its hand-picked lot', async () => {
+  await check('a same-value replacement records a normal sale, carries the auto note, and keeps its hand-picked lot', async () => {
     seed()
     // Product 2 is the replacement and its stock is lot-tracked, and the
     // operator picks the lot BY HAND (batch_id on the line) rather than
@@ -386,12 +401,18 @@ async function main() {
     })
     assert.strictEqual(status, 200, JSON.stringify(json))
 
-    // --- the money. Goods for goods: the till took NOTHING. ---------------
+    // --- the money. Two records, neither netted against the other. -------
+    // Same value on both sides, but they are still a $20 refund and a $20
+    // sale, not a "goods for goods, the till took nothing" special case:
+    // that framing is exactly what made a same-value swap read differently
+    // from an unequal one.
     const sale = rawDb.prepare('SELECT subtotal_usd, total_usd, total_khr, amount_paid_usd, amount_paid_khr, payment_details, notes, exchange_rate, source_return_id FROM sales WHERE id = ?').get([json.replacementSaleId])
-    assert.strictEqual(sale.total_usd, 20, 'the goods that left the shelf are still worth $20')
-    assert.strictEqual(sale.amount_paid_usd, 0, 'but nothing was tendered for them')
-    assert.strictEqual(sale.amount_paid_khr, 0)
-    assert.deepStrictEqual(JSON.parse(sale.payment_details), [], 'no payment line at all -- not a $20 "Return Exchange" tender the till never saw')
+    assert.strictEqual(sale.total_usd, 20, 'the goods that left the shelf are worth $20')
+    assert.strictEqual(sale.amount_paid_usd, 20, 'and the sale is settled in full, like any other sale')
+    assert.strictEqual(rawDb.prepare('SELECT total_refund_usd FROM returns WHERE id = @id').get({ id: json.id }).total_refund_usd, 20, 'the refund is the returned line, untouched by the sale')
+    const paymentLines = JSON.parse(sale.payment_details)
+    assert.strictEqual(paymentLines.length, 1)
+    assert.strictEqual(paymentLines[0].amount_usd, 20)
     // KHR comes off the USD total at the sale rate, through the SAME kernel
     // routes/sales.ts uses -- not a separate sum of per-line KHR.
     assert.strictEqual(sale.total_khr, Math.round(20 * sale.exchange_rate))
@@ -442,51 +463,185 @@ async function main() {
     assert.strictEqual(listed.damaged_item_count, 1)
   })
 
-  await check('a PRICE-DIFFERENCE exchange collects exactly the gap the customer topped up -- no more', async () => {
+  await check('a replacement is an ORDINARY sale: full tender, real payment method, its own receipt', async () => {
     seed()
     rawDb.prepare('INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (2, 1, 10)').run()
     rawDb.prepare('UPDATE products SET stock_quantity = 10 WHERE id = 2').run()
     const { status, json } = await req('POST', '/', {
-      // $10 back, $25 out: the customer hands over $15 and nothing else.
+      // $10 comes back as a refund and $25 goes out as a sale. Two separate
+      // movements of money -- the old model collected only the $15 gap and
+      // made the operator declare who owed it.
       items: [{ product_id: 1, quantity: 1, stock_action: 'none', branch_id: 1, applied_price_usd: 10 }],
       replacement_items: [{ product_id: 2, quantity: 1, branch_id: 1, applied_price_usd: 25 }],
-      settlement_mode: 'price_difference',
+      replacement_payment_method: 'ABA Bank',
       reason: 'Upgraded to the bigger size',
     })
     assert.strictEqual(status, 200, JSON.stringify(json))
-    const sale = rawDb.prepare('SELECT total_usd, amount_paid_usd, payment_details FROM sales WHERE id = ?').get([json.replacementSaleId])
-    assert.strictEqual(sale.total_usd, 25, 'the goods are worth $25')
-    assert.strictEqual(sale.amount_paid_usd, 15, 'but only the $15 gap was actually tendered')
+    const sale = rawDb.prepare('SELECT receipt_number, total_usd, amount_paid_usd, payment_method, payment_details, loyalty_accrual, source_return_id FROM sales WHERE id = ?').get([json.replacementSaleId])
+    assert.strictEqual(sale.total_usd, 25)
+    assert.strictEqual(sale.amount_paid_usd, 25, 'the customer pays for the sale in full, like any other sale')
+    assert.strictEqual(sale.payment_method, 'ABA Bank', 'a real tender, not a "Return Exchange" placeholder')
+    assert.strictEqual(sale.loyalty_accrual, 1, 'and it earns loyalty exactly as any other sale does')
     const details = JSON.parse(sale.payment_details)
     assert.strictEqual(details.length, 1)
-    assert.strictEqual(details[0].amount_usd, 15)
-    assert.strictEqual(details[0].method, 'Return Exchange')
+    assert.strictEqual(details[0].amount_usd, 25)
+    assert.strictEqual(details[0].method, 'ABA Bank')
+    // its OWN receipt number, minted through the shared generator
+    assert.ok(sale.receipt_number && sale.receipt_number !== json.returnNumber)
+    assert.strictEqual(json.replacementReceiptNumber, sale.receipt_number)
+    // the two records are linked both ways and neither nets against the other
+    assert.strictEqual(sale.source_return_id, json.id)
+    const header = rawDb.prepare('SELECT replacement_sale_id, total_refund_usd, settlement_mode, settlement_diff_usd FROM returns WHERE id = @id').get({ id: json.id })
+    assert.strictEqual(header.replacement_sale_id, json.replacementSaleId)
+    assert.strictEqual(header.total_refund_usd, 10, 'the refund is the returned line alone -- nothing is netted off it')
+    assert.strictEqual(header.settlement_mode, null, 'nothing writes a settlement mode any more')
+    assert.strictEqual(header.settlement_diff_usd, 0)
+    // a default is offered when the client names no method
+    const plain = await req('POST', '/', {
+      items: [{ product_id: 1, quantity: 1, stock_action: 'none', branch_id: 1, applied_price_usd: 10 }],
+      replacement_items: [{ product_id: 2, quantity: 1, branch_id: 1, applied_price_usd: 25 }],
+      reason: 'No method named',
+    })
+    assert.strictEqual(plain.status, 200, JSON.stringify(plain.json))
+    assert.strictEqual(rawDb.prepare('SELECT payment_method FROM sales WHERE id = ?').get([plain.json.replacementSaleId]).payment_method, 'Cash')
   })
 
-  await check('K2: an uneven "even exchange" is refused; price_difference stores the signed gap', async () => {
+  await check('an "uneven" swap is just a return plus a sale now -- accepted, with both totals intact', async () => {
     seed()
     rawDb.prepare('INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (1, 1, 10)').run()
-    const uneven = await req('POST', '/', {
+    // $10 back, $20 out. The old model refused this outright (400
+    // uneven_exchange) unless a Full-Access user ticked "settle the price
+    // difference". It is now the ordinary case.
+    const { status, json } = await req('POST', '/', {
       items: [{ product_id: 1, quantity: 1, stock_action: 'none', branch_id: 1, applied_price_usd: 10 }],
       replacement_items: [{ product_id: 1, quantity: 2, branch_id: 1, applied_price_usd: 10 }],
-      reason: 'Uneven swap attempt',
+      reason: 'Two small ones instead of the big one',
     })
-    assert.strictEqual(uneven.status, 400)
-    assert.strictEqual(uneven.json.code, 'uneven_exchange')
-    // nothing was written by the refusal
-    assert.strictEqual(rawDb.prepare('SELECT COUNT(*) AS n FROM returns').get().n, 0)
-    assert.strictEqual(rawDb.prepare('SELECT quantity FROM branch_stock WHERE product_id = 1 AND branch_id = 1').get().quantity, 10)
+    assert.strictEqual(status, 200, JSON.stringify(json))
+    assert.strictEqual(rawDb.prepare('SELECT total_refund_usd FROM returns WHERE id = @id').get({ id: json.id }).total_refund_usd, 10)
+    assert.strictEqual(rawDb.prepare('SELECT total_usd, amount_paid_usd FROM sales WHERE id = ?').get([json.replacementSaleId]).total_usd, 20)
+    // and the 2 handed out really left the shelf
+    assert.strictEqual(rawDb.prepare('SELECT quantity FROM branch_stock WHERE product_id = 1 AND branch_id = 1').get().quantity, 8)
+  })
 
-    const settled = await req('POST', '/', {
-      items: [{ product_id: 1, quantity: 1, stock_action: 'none', branch_id: 1, applied_price_usd: 10 }],
-      replacement_items: [{ product_id: 1, quantity: 2, branch_id: 1, applied_price_usd: 10 }],
-      settlement_mode: 'price_difference',
-      reason: 'Customer pays the gap',
+  await check('the refund is the ORIGINAL sale line price, whatever the client posts', async () => {
+    seed()
+    // The sale charged $7.50. The payload claims $99.
+    rawDb.prepare('INSERT INTO sale_items (id, sale_id, product_id, quantity, applied_price_usd, applied_price_khr) VALUES (1, 1, 1, 2, 7.5, 30000)').run()
+    const { status, json } = await req('POST', '/', {
+      sale_id: 1,
+      items: [{ sale_item_id: 1, product_id: 1, quantity: 2, stock_action: 'none', branch_id: 1, applied_price_usd: 99, applied_price_khr: 400000 }],
+      total_refund_usd: 198,
+      total_refund_khr: 800000,
+      reason: 'Price-authority probe',
     })
-    assert.strictEqual(settled.status, 200, JSON.stringify(settled.json))
-    const header = rawDb.prepare('SELECT settlement_mode, settlement_diff_usd FROM returns WHERE id = @id').get({ id: settled.json.id })
-    assert.strictEqual(header.settlement_mode, 'price_difference')
-    assert.strictEqual(header.settlement_diff_usd, 10) // positive = customer owes
+    assert.strictEqual(status, 200, JSON.stringify(json))
+    const header = rawDb.prepare('SELECT total_refund_usd, total_refund_khr FROM returns WHERE id = @id').get({ id: json.id })
+    assert.strictEqual(header.total_refund_usd, 15, '2 x $7.50 from the sale line, not 2 x $99 from the payload')
+    assert.strictEqual(header.total_refund_khr, 60000)
+    const line = rawDb.prepare('SELECT applied_price_usd, total_usd FROM return_items WHERE return_id = @id').get({ id: json.id })
+    assert.strictEqual(line.applied_price_usd, 7.5)
+    assert.strictEqual(line.total_usd, 15)
+  })
+
+  await check('a lot-tracked line the sale cannot place is REFUSED until the operator names a lot', async () => {
+    seed()
+    // The product HAS lots, but this sale line predates lot tracking: no
+    // batch_id and no allocations. The old code silently bumped the branch
+    // aggregate, leaving the lot ledger and the aggregate drifting apart.
+    const batch = await productBatches.receiveBatchStock(db, { productId: 1, branchId: 1, quantity: 4, lotCode: 'LOT-DEST' })
+    rawDb.prepare('INSERT INTO sale_items (id, sale_id, product_id, quantity, applied_price_usd, batch_id) VALUES (1, 1, 1, 3, 10, NULL)').run()
+
+    const refused = await req('POST', '/', {
+      sale_id: 1,
+      items: [{ sale_item_id: 1, product_id: 1, quantity: 3, return_to_stock: true, branch_id: 1, applied_price_usd: 10 }],
+      reason: 'Legacy line, lot unknown',
+    })
+    assert.strictEqual(refused.status, 400, JSON.stringify(refused.json))
+    assert.strictEqual(refused.json.code, 'return_lot_required')
+    assert.match(refused.json.error, /Widget/)
+    // refused BEFORE any write -- no return, no stock movement
+    assert.strictEqual(rawDb.prepare('SELECT COUNT(*) AS n FROM returns').get().n, 0)
+    assert.strictEqual(rawDb.prepare('SELECT quantity FROM branch_batch_stock WHERE batch_id = @batchId AND branch_id = 1').get({ batchId: batch.batchId }).quantity, 4)
+
+    // Naming the lot lets it through, and the units land in THAT lot.
+    const named = await req('POST', '/', {
+      sale_id: 1,
+      items: [{ sale_item_id: 1, product_id: 1, quantity: 3, return_to_stock: true, branch_id: 1, applied_price_usd: 10, batch_id: batch.batchId }],
+      reason: 'Legacy line, lot named',
+    })
+    assert.strictEqual(named.status, 200, JSON.stringify(named.json))
+    assert.strictEqual(rawDb.prepare('SELECT quantity FROM branch_batch_stock WHERE batch_id = @batchId AND branch_id = 1').get({ batchId: batch.batchId }).quantity, 7)
+    assert.strictEqual(rawDb.prepare('SELECT batch_id FROM return_items WHERE return_id = @id').get({ id: named.json.id }).batch_id, batch.batchId)
+  })
+
+  await check('the plain-return path needs no permission beyond returns:add', async () => {
+    seed()
+    rawDb.prepare("INSERT INTO sale_items (id, sale_id, product_id, quantity, applied_price_usd) VALUES (1, 1, 1, 1, 12)").run()
+    // The only per-action gate on this path is 'returns:add'. Switched off,
+    // the plain return is refused; on (the suite's default user), it goes
+    // through -- with no second tier to clear, as the retired
+    // 'returns:settle_difference' used to be for anything with a value gap.
+    const withoutAdd = { ...FAKE_USER, permissions: JSON.stringify({ returns: { tier: 'full', actions: { add: 'none' } } }) }
+    const denied = await reqAs(withoutAdd, 'POST', '/', {
+      sale_id: 1,
+      items: [{ sale_item_id: 1, product_id: 1, quantity: 1, stock_action: 'none', branch_id: 1, applied_price_usd: 12 }],
+      reason: 'Permission probe',
+    })
+    assert.strictEqual(denied.status, 403, JSON.stringify(denied.json))
+    assert.strictEqual(rawDb.prepare('SELECT COUNT(*) AS n FROM returns').get().n, 0)
+
+    const allowed = await req('POST', '/', {
+      sale_id: 1,
+      items: [{ sale_item_id: 1, product_id: 1, quantity: 1, stock_action: 'none', branch_id: 1, applied_price_usd: 12 }],
+      reason: 'Permission probe',
+    })
+    assert.strictEqual(allowed.status, 200, JSON.stringify(allowed.json))
+    assert.strictEqual(rawDb.prepare('SELECT total_refund_usd FROM returns WHERE id = @id').get({ id: allowed.json.id }).total_refund_usd, 12)
+  })
+
+  await check('a return recorded under the OLD exchange model still reads back correctly', async () => {
+    seed()
+    // A fixture written the way production rows from before this change look:
+    // settlement_mode/settlement_diff_* populated, a linked replacement sale
+    // whose amount_paid is only the gap the customer topped up.
+    rawDb.prepare("INSERT INTO sale_items (id, sale_id, product_id, product_name, quantity, applied_price_usd, applied_price_khr) VALUES (1, 1, 1, 'Widget', 1, 10, 41000)").run()
+    rawDb.prepare(`INSERT INTO sales (id, receipt_number, branch_id, source_return_id, total_usd, amount_paid_usd, payment_method, loyalty_accrual)
+                   VALUES (900, 'OLD-REP-1', 1, 800, 25, 15, 'Return Exchange', 0)`).run()
+    rawDb.prepare(`INSERT INTO returns (id, return_number, sale_id, branch_id, return_scope, reason, status,
+                     total_refund_usd, total_refund_khr, replacement_sale_id, settlement_mode, settlement_diff_usd, settlement_diff_khr)
+                   VALUES (800, 'RET-OLD-1', 1, 1, 'customer', 'Upgraded', 'completed', 10, 41000, 900, 'price_difference', 15, 61500)`).run()
+    rawDb.prepare("INSERT INTO return_items (return_id, sale_item_id, product_id, product_name, quantity, applied_price_usd, total_usd, return_to_stock, stock_action, branch_id) VALUES (800, 1, 1, 'Widget', 1, 10, 10, 0, 'none', 1)").run()
+    rawDb.prepare("INSERT INTO return_replacement_items (return_id, product_id, product_name, branch_id, quantity, applied_price_usd, total_usd) VALUES (800, 2, 'Different Serum', 1, 1, 25, 25)").run()
+
+    const detail = await req('GET', '/800')
+    assert.strictEqual(detail.status, 200, JSON.stringify(detail.json))
+    // Every field ReturnDetailModal renders for a historical row survives the
+    // model change -- the columns are read-only history, not deleted.
+    assert.strictEqual(detail.json.settlement_mode, 'price_difference')
+    assert.strictEqual(detail.json.settlement_diff_usd, 15)
+    assert.strictEqual(detail.json.total_refund_usd, 10)
+    assert.strictEqual(detail.json.replacement_sale_id, 900)
+    assert.strictEqual(detail.json.replacement_receipt_number, 'OLD-REP-1')
+    assert.strictEqual(detail.json.replacement_items.length, 1)
+    assert.strictEqual(detail.json.replacement_items[0].total_usd, 25)
+    // and the list read agrees with the detail read
+    const listed = (await req('GET', '/')).json.find((row) => row.id === 800)
+    assert.strictEqual(listed.settlement_mode, 'price_difference')
+    assert.strictEqual(listed.replacement_receipt_number, 'OLD-REP-1')
+
+    // Editing that old return leaves its recorded settlement exactly as found
+    // -- nothing rewrites history, and nothing refuses the edit over a gap
+    // that no longer means anything.
+    const edited = await req('PATCH', '/800', {
+      items: [{ sale_item_id: 1, product_id: 1, quantity: 1, stock_action: 'none', branch_id: 1, applied_price_usd: 10 }],
+      reason: 'Reason corrected',
+    })
+    assert.strictEqual(edited.status, 200, JSON.stringify(edited.json))
+    const after = rawDb.prepare('SELECT settlement_mode, settlement_diff_usd, settlement_diff_khr FROM returns WHERE id = 800').get()
+    assert.strictEqual(after.settlement_mode, 'price_difference')
+    assert.strictEqual(after.settlement_diff_usd, 15)
+    assert.strictEqual(after.settlement_diff_khr, 61500)
   })
 
   await check('K2: editing a return whose damaged lot was already drawn from is blocked', async () => {
@@ -521,15 +676,14 @@ async function main() {
     const { status, json } = await req('POST', '/', {
       sale_id: 1,
       items: [{ sale_item_id: 1, product_id: 1, quantity: 3, return_to_stock: true, branch_id: 1, applied_price_usd: 10 }],
-      // Passes every pre-check (price_difference waives the even-exchange
-      // rule) and then fails INSIDE applyReplacementStock on the plain
-      // branch_stock aggregate: product 2 has no stock at all, 99 requested.
+      // Passes every pre-check and then fails INSIDE applyReplacementStock
+      // on the plain branch_stock aggregate: product 2 has no stock at all,
+      // 99 requested.
       // It has to be product 2 and not product 1: product 1 IS lot-tracked
       // here, and a lot-tracked over-draw is now refused up front by the
       // lot-shortfall 409 (its own check below) -- which would never reach
       // the compensation path this check exists to prove.
       replacement_items: [{ product_id: 2, quantity: 99, branch_id: 1, applied_price_usd: 10 }],
-      settlement_mode: 'price_difference',
       reason: 'Compensation probe',
     })
     assert.strictEqual(status, 500, JSON.stringify(json))
@@ -566,7 +720,6 @@ async function main() {
       items: [{ sale_item_id: 1, product_id: 1, quantity: 1, return_to_stock: false, branch_id: 1, applied_price_usd: 10 }],
       // 99 units, no explicit lot: FIFO can cover only what the lots hold.
       replacement_items: [{ product_id: 1, quantity: 99, branch_id: 1, applied_price_usd: 10 }],
-      settlement_mode: 'price_difference',
       reason: 'Lot shortfall probe',
     })
     assert.strictEqual(status, 409, JSON.stringify(json))
@@ -585,9 +738,9 @@ async function main() {
     assert.strictEqual(rawDb.prepare('SELECT quantity FROM branch_batch_stock WHERE batch_id = @batchId AND branch_id = 1').get({ batchId: batch.batchId }).quantity, 5)
   })
 
-  await check('Part-77: an even-exchange-blocked EDIT refuses before touching any stock (the gate is hoisted)', async () => {
+  await check('Part-77: a lot-blocked EDIT refuses before touching any stock (the gate is still hoisted)', async () => {
     seed()
-    // A lot-backed sale + an even-exchange return with a replacement line.
+    // A lot-backed sale and a return that restocked into that lot.
     const batch = await productBatches.receiveBatchStock(db, { productId: 1, branchId: 1, quantity: 10, lotCode: 'LOT-E' })
     await productBatches.removeStockFromBatch(db, { batchId: batch.batchId, productId: 1, branchId: 1, quantity: 5 })
     rawDb.prepare('INSERT INTO sale_items (id, sale_id, product_id, quantity, batch_id) VALUES (1, 1, 1, 5, @batchId)').run({ batchId: batch.batchId })
@@ -595,7 +748,7 @@ async function main() {
       sale_id: 1,
       items: [{ sale_item_id: 1, product_id: 1, quantity: 2, return_to_stock: true, branch_id: 1, applied_price_usd: 10 }],
       replacement_items: [{ product_id: 1, quantity: 2, branch_id: 1, applied_price_usd: 10 }],
-      reason: 'Even exchange',
+      reason: 'Swapped for two more',
     })
     assert.strictEqual(created.status, 200, JSON.stringify(created.json))
 
@@ -603,20 +756,30 @@ async function main() {
     const stockBefore = rawDb.prepare('SELECT quantity FROM branch_stock WHERE product_id = 1 AND branch_id = 1').get().quantity
     const itemsBefore = rawDb.prepare('SELECT COUNT(*) AS n FROM return_items WHERE return_id = @id').get({ id: created.json.id }).n
 
-    // Editing the returned side to 1 unit breaks the even exchange (the
-    // replacement stays at 2 x $10). The OLD code ran the reversal and
-    // re-apply loops FIRST and only then 400'd -- corrupting stock on a
-    // mere validation refusal. The hoisted gate must refuse untouched.
+    // The settlement gate that used to occupy this slot is gone, and the
+    // lot-required gate now stands in it: an edited line that drops its
+    // sale_item_id has no lot the sale can name and none the operator gave.
+    // The OLD code ran the reversal and re-apply loops FIRST and only then
+    // 400'd -- corrupting stock on a mere validation refusal. Refusing
+    // untouched is the invariant, whatever the reason for the refusal.
     const edited = await req('PATCH', `/${created.json.id}`, {
-      items: [{ sale_item_id: 1, product_id: 1, quantity: 1, return_to_stock: true, branch_id: 1, applied_price_usd: 10 }],
+      items: [{ product_id: 1, quantity: 1, return_to_stock: true, branch_id: 1, applied_price_usd: 10 }],
       reason: 'Shrinking the returned side',
     })
     assert.strictEqual(edited.status, 400, JSON.stringify(edited.json))
-    assert.match(edited.json.error, /even exchange/)
+    assert.strictEqual(edited.json.code, 'return_lot_required')
 
     assert.strictEqual(rawDb.prepare('SELECT quantity FROM branch_batch_stock WHERE batch_id = @batchId AND branch_id = 1').get({ batchId: batch.batchId }).quantity, lotBefore, 'the lot must be untouched by a refused edit')
     assert.strictEqual(rawDb.prepare('SELECT quantity FROM branch_stock WHERE product_id = 1 AND branch_id = 1').get().quantity, stockBefore, 'the aggregate must be untouched by a refused edit')
     assert.strictEqual(rawDb.prepare('SELECT COUNT(*) AS n FROM return_items WHERE return_id = @id').get({ id: created.json.id }).n, itemsBefore, 'the return_items rows must survive a refused edit')
+
+    // Naming the lot lets the same edit through, and it lands in THAT lot.
+    const accepted = await req('PATCH', `/${created.json.id}`, {
+      items: [{ product_id: 1, quantity: 1, return_to_stock: true, branch_id: 1, applied_price_usd: 10, batch_id: batch.batchId }],
+      reason: 'Shrinking the returned side',
+    })
+    assert.strictEqual(accepted.status, 200, JSON.stringify(accepted.json))
+    assert.strictEqual(rawDb.prepare('SELECT quantity FROM branch_batch_stock WHERE batch_id = @batchId AND branch_id = 1').get({ batchId: batch.batchId }).quantity, lotBefore - 1, 'the edit reversed 2 and re-applied 1 into the same lot')
   })
 
   console.log(`\n${passed} check(s) passed.`)

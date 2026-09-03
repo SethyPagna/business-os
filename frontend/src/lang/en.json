@@ -5247,5 +5247,15 @@
   "lines": "Lines",
   "total_units": "Total units",
   "add_next_hint": "Add & next queues this line; nothing is written until Complete.",
-  "confirm_complete_stock_session_note": "This posts stock movements and creates or updates the related lots."
+  "confirm_complete_stock_session_note": "This posts stock movements and creates or updates the related lots.",
+  "lot_required": "Pick the lot for every line first — stock never goes back to, or comes out of, unspecified stock.",
+  "select_lot": "Choose a lot…",
+  "lot_untracked": "This product has no lots — stock goes back to the branch count.",
+  "lot_untracked_out": "No lots — drawn from the branch count",
+  "return_lot_from_sale": "Back into the lot this line was sold from",
+  "return_lot_pick": "Back into lot",
+  "replacement_sale_new": "New sale for these items",
+  "replacement_sale_total": "New sale total",
+  "replacement_sale_hint": "It gets its own receipt and is recorded in Sales like any other sale. The refund above is paid back separately.",
+  "historical_settlement": "Recorded as an exchange"
 }

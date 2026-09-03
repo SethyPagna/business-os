@@ -1705,7 +1705,15 @@ app.get('/', async (c) => {
           WHERE ri.sale_item_id = si.id
             AND COALESCE(item_return.status, 'completed') != 'cancelled'
             AND COALESCE(item_return.return_scope, 'customer') = 'customer'
-        ), 0) AS returned_quantity
+        ), 0) AS returned_quantity,
+        -- Does this line still know which lot(s) it drew from? A multi-lot
+        -- line carries batch_id NULL and keeps the answer here instead, so a
+        -- return of it must NOT be treated as "lot unknown" and asked to pick
+        -- one -- that would collapse a real split onto a single lot. Reads
+        -- the (sale_item_id, released_at) index; a legacy line predating lot
+        -- tracking correctly answers 0.
+        (SELECT COUNT(*) FROM sale_item_batch_allocations sia
+          WHERE sia.sale_item_id = si.id AND sia.quantity > COALESCE(sia.released_quantity, 0)) AS lot_allocation_count
       FROM sale_items si
       LEFT JOIN branches b ON b.id = si.branch_id
       LEFT JOIN products p ON p.id = si.product_id
