@@ -3033,7 +3033,7 @@ function ProductsFullEditor() {
     setSupplierFilter,
     suppliers,
     t,
-  }), [branches, brandFilter, branchFilter, brandOptions, catFilter, categoryFilterOptions, createdDateFrom, createdDateTo, groupFilter, hideZeroStockRows, hierarchicalCategoryOptions, isProductFilterMenuOpen, issueFilter, productSortDirection, searchMode, setSearchMode, stockFilter, supplierFilter, suppliers, t])
+  }), [branches, brandFilter, branchFilter, brandOptions, catFilter, categoryFilterOptions, createdDateFrom, createdDateTo, groupFilter, hideZeroStockRows, hierarchicalCategoryOptions, isProductFilterMenuOpen, issueFilter, mergedFilter, productSortDirection, promoFilter, searchMode, setSearchMode, stockFilter, supplierFilter, suppliers, t])
 
   const renderDesktopProductRow = useCallback((p: ProductRecord, { indented = false }: { indented?: boolean } = {}) => {
     const productId = p.id ?? 0
