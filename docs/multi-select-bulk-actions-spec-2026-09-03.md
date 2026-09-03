@@ -211,7 +211,7 @@ No selection exists today; this surface gets the full Phase-0 primitives.
 | **Delete selected** | **NEW `fees:bulk_delete`** | all-or-nothing | Follows the `products:bulk_delete` / `contacts:bulk_delete` precedent — destructive-at-scale gets its own key, so a role can hold `fees:delete` without holding bulk. **Review tier is refused, not queued**: `reviewApply.ts` has a single-fee applier only, and queuing N rows individually would flood the approval queue. The refusal message says exactly that. |
 | **Relabel selected** | `fees:edit` | all-or-nothing | Drives `POST /fees/labels/replace` (`fees.ts:312`). Existing label rules stand: reusable saved tags, 6 words / 60 chars max. |
 | **Reclassify type** | `fees:edit` | all-or-nothing | Drives `POST /fees/labels/classify` (`fees.ts:346`); target restricted to `FEE_TYPES` (`fees.ts:43` — `tax`, `delivery`, `change`, `expense`, `other`). Note `expense` must stay in that list — 4,240 historical rows carry it. |
-| **Set direction** (expense / income) | `fees:edit` | all-or-nothing | **BLOCKED** on 6d's `fees.direction` column (migration 0107+, specified in `docs/rename-linkover-permissions-reasons-expenses-spec-2026-09-03.md` §4). Ships in the same phase as that migration, not before. Incomes never touch the revenue kernel. |
+| **Set direction** (expense / income) | `fees:edit` | all-or-nothing | **BLOCKED** on 6d's `fees.direction` column (migration **0108+** — see §9 numbering note; specified in `docs/rename-linkover-permissions-reasons-expenses-spec-2026-09-03.md` §4). Ships in the same phase as that migration, not before. Incomes never touch the revenue kernel. |
 | **Export selected** | `fees` | n/a | All. |
 
 ### 5.4 Reports
@@ -352,8 +352,10 @@ preview lists skipped rows, force a partial failure, dialog stays open with reas
 | **0** | `useRowSelection`, `BulkActionBar`, `BulkResultDialog`; migrate Sales and Returns onto them with **no behaviour change** | nothing |
 | **1** | Sales: copy receipt IDs, eligibility preview, `updated_at` guard, `POST /sales/bulk-status` | Phase 0; d9's `sales.ts` receipt-renumber hotfix must land first |
 | **2** | Returns: bulk metadata edit + reason cascade, `POST /returns/bulk-update` | Phase 0; d9's `returns.ts` hotfix (replacement-sale accounting + receipt typeahead) must land first |
-| **3** | Expenses: select mode + bulk delete / relabel / reclassify | Phase 0. *Set direction* additionally blocked on 6d's `fees.direction` migration 0107+ |
+| **3** | Expenses: select mode + bulk delete / relabel / reclassify | Phase 0. *Set direction* additionally blocked on 6d's `fees.direction` migration, **0108+** |
 | **4** | Reports: read-only select (copy / export) | `rc/sec-10-reports` merging; targets the new report components |
+
+**Migration numbering** (corrected by the coordinator, re-verified here from the trees on Sep 3): `0106_return_replacement_sales.sql` is ChatGPT's and is present both in the main tree and at the hotfix tip `89f5b6a1`. `0107_receipt_numbers_business_format.sql` is the hotfix's receipt renumber and exists on `hf/receipt` — **claimed but not yet merged into `89f5b6a1`**, which still stops at 0106. So 0107 is reserved, and `fees.direction` plus everything after it must take **0108+**. Because wrangler tracks migrations by **filename**, a number that was merely reserved on an unmerged branch still collides once that branch lands — every migration in this spec's phases is renumbered at merge time, by the reconciler, not at authoring time. This is the same trap that forced the RC's barcode-alias migration from 0105 to 0106 after the fees migration had already been applied to production under 0105.
 
 **i18n**: ~24 new keys. Per the standing rule they are **not** edited on main — they ship as an additive
 patch against d9's hotfix tip, both packs, Khmer verified from authoritative sources, folded at RC time:
