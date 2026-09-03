@@ -3,7 +3,7 @@ import { getDb } from '../lib/db'
 import { chunkForBinding, selectInChunks } from '../lib/sqlBinding'
 import { requireAuth, type SessionUser } from '../lib/auth'
 import { audit } from '../lib/audit'
-import { hasPermission, hasAnyPermission, getPermissionTier, getActionTier } from '../lib/permissions'
+import { hasPermission, hasAnyPermission, getPermissionTier, getActionTier, isAdminControlUser } from '../lib/permissions'
 
 // Sales is a VIEW_TIER section (Part 557 slice 2): a 'view' grant can READ
 // every sales list/stat/report but perform no writes. Reads use this
@@ -13,7 +13,7 @@ function canReadSales(user: SessionUser): boolean {
 }
 import { assertUpdatedAtMatch, getExpectedUpdatedAt, writeConflictResponse, WriteConflictError } from '../lib/conflictControl'
 import { bumpVersion, cachedJsonResponse, getVersionWithFallback } from '../lib/cache'
-import { getCustomerSalesTotals, getDeliveryContactTotals, getPaymentMethodBreakdown, getSalesDayReport, getSalesPeriodSeries, getSalesTotals } from '../lib/salesAnalytics'
+import { getCustomerSalesTotals, getDeliveryContactTotals, getPaymentMethodBreakdown, getSalesDayReport, getSalesPeriodSeries, getSalesTotals, getSalesGroupedTotals, getProductSalesRanking, isSalesGroupKey, SALES_GROUP_KEYS } from '../lib/salesAnalytics'
 import { allocateAcrossLots, decrementBatchStockStatement, decrementBatchStockStrictStatement, readFifoLotAvailabilityForCart, type FifoLotTake } from '../lib/productBatches'
 import { VALID_SALE_STATUSES, STOCK_DEDUCTED_STATUSES } from '../lib/salesStatus'
 import { consumeDamagedLot, restoreDamagedLot, DamagedLotShortfallError, DAMAGE_OUT_MOVEMENT, DAMAGE_IN_MOVEMENT } from '../lib/returnsStock'
@@ -2006,6 +2006,90 @@ app.get('/day-report', async (c) => {
     tzOffsetMinutes: Number(query.tzOffsetMinutes) || 0,
   })
   return c.json(report)
+})
+
+// ---- Reports redesign (Sep 3 2026, lane fx/reports-redesign) --------------
+// GET /api/sales/grouped-totals?groupBy=&startDate&endDate&...  -- one
+// canonical SalesTotals per customer / cashier / payment method / hour /
+// weekday / branch, and GET /api/sales/product-ranking -- products ranked by
+// item-level line sales. Both take the SAME query fields /stats-strip and
+// /daily-report take and hand them to the same salesAnalytics kernel, so the
+// Reports views, the Sales list's stats strip and the Dashboard cannot
+// disagree for one date range. Nothing here computes money; it slices and
+// GATES what the kernel returned.
+//
+// Cost/profit are staff-only figures. For a non-admin the keys are not
+// blanked, they are ABSENT from the row object, so a client cannot render a
+// zero and imply the margin was zero. Pinned by
+// scripts/test-reports-views-pure.cjs.
+
+/** Strip the cost/profit keys entirely for non-admin callers. */
+export function gateGroupedRow<T extends Record<string, unknown>>(row: T, isAdmin: boolean): Partial<T> {
+  if (isAdmin) return row
+  const { cost_usd, profit_usd, margin_pct, cost_missing_snapshot_lines, ...rest } = row as Record<string, unknown>
+  void cost_usd; void profit_usd; void margin_pct; void cost_missing_snapshot_lines
+  return rest as Partial<T>
+}
+
+function parseReportViewFilters(query: Record<string, string>) {
+  return {
+    startDate: String(query.startDate || '').slice(0, 10) || null,
+    endDate: String(query.endDate || '').slice(0, 10) || null,
+    branchId: query.branchId || null,
+    status: query.status || null,
+    paymentMethod: query.paymentMethod || null,
+    startTime: query.startTime || null,
+    endTime: query.endTime || null,
+    tzOffsetMinutes: Number(query.tzOffsetMinutes) || 0,
+  }
+}
+
+app.get('/grouped-totals', async (c) => {
+  if (!canReadSales(c.get('user'))) {
+    return c.json({ error: 'You do not have permission to perform this action' }, 403)
+  }
+  const query = c.req.query()
+  const groupBy = String(query.groupBy || '').trim()
+  if (!isSalesGroupKey(groupBy)) {
+    return c.json({ error: `groupBy must be one of: ${SALES_GROUP_KEYS.join(', ')}` }, 400)
+  }
+  const validDate = (v: string) => !v || /^\d{4}-\d{2}-\d{2}$/.test(v)
+  if (!validDate(String(query.startDate || '').slice(0, 10)) || !validDate(String(query.endDate || '').slice(0, 10))) {
+    return c.json({ error: 'startDate/endDate must use YYYY-MM-DD' }, 400)
+  }
+  const filters = parseReportViewFilters(query)
+  const isAdmin = isAdminControlUser(c.get('user'))
+  const limit = Math.max(1, Math.min(2000, Number(query.limit) || 500))
+  const rows = await getSalesGroupedTotals(c.env, filters, groupBy, limit)
+  return c.json({
+    group_by: groupBy,
+    startDate: filters.startDate,
+    endDate: filters.endDate,
+    // The same kernel call /stats-strip makes: the client shows it beside the
+    // rows so a mismatch is visible rather than silent.
+    totals: gateGroupedRow(await getSalesTotals(c.env, filters) as unknown as Record<string, unknown>, isAdmin),
+    rows: rows.map((r) => gateGroupedRow(r as unknown as Record<string, unknown>, isAdmin)),
+  })
+})
+
+app.get('/product-ranking', async (c) => {
+  if (!canReadSales(c.get('user'))) {
+    return c.json({ error: 'You do not have permission to perform this action' }, 403)
+  }
+  const query = c.req.query()
+  const validDate = (v: string) => !v || /^\d{4}-\d{2}-\d{2}$/.test(v)
+  if (!validDate(String(query.startDate || '').slice(0, 10)) || !validDate(String(query.endDate || '').slice(0, 10))) {
+    return c.json({ error: 'startDate/endDate must use YYYY-MM-DD' }, 400)
+  }
+  const filters = parseReportViewFilters(query)
+  const isAdmin = isAdminControlUser(c.get('user'))
+  const limit = Math.max(1, Math.min(1000, Number(query.limit) || 200))
+  const rows = await getProductSalesRanking(c.env, filters, limit)
+  return c.json({
+    startDate: filters.startDate,
+    endDate: filters.endDate,
+    rows: rows.map((r) => gateGroupedRow(r as unknown as Record<string, unknown>, isAdmin)),
+  })
 })
 
 // GET /api/sales/delivery-contact-report?startDate&endDate&branchId&contactId
