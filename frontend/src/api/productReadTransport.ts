@@ -71,8 +71,45 @@ export function getProducts(): Promise<unknown> {
   )
 }
 
+// The catalog search endpoint reads its free-text term from `query` (with
+// `q` accepted as a legacy alias) -- see buildSearchFilters in
+// cloudflare/src/routes/products.ts. Any OTHER key holding the typed text
+// is silently dropped by the server, which does not error: it returns the
+// whole unfiltered catalog, so the caller's list looks like it "ignores the
+// search box" instead of failing.
+//
+// That is exactly the confirmed production bug this exists to make
+// impossible: the Change-stock product picker
+// (components/products/forms/StockAdjustModal.tsx) called this with
+// `{ search: <typed text> }`, so scanning a barcode into it returned all
+// 10212 products in catalog order (verified live against a production
+// snapshot: `?search=3348901770569` -> total 10212, `?query=...` -> total
+// 3). Every other picker happened to spell it `query`.
+//
+// Canonicalizing here rather than patching that one call site is the point:
+// this function is the single chokepoint every product picker in the app
+// goes through (POS, Products, StockAdjustModal, FastStockInModal,
+// Promotions, NewReturnModal, ProductsImageOnlyView, the lookup
+// snapshotter), so no future caller can reintroduce the same silent drop by
+// picking a reasonable-sounding synonym. The canonical key wins if a caller
+// somehow sends more than one.
+const SEARCH_TERM_ALIASES = ['query', 'q', 'search', 'searchTerm', 'search_term'] as const
+
+function canonicalizeSearchTerm(params: QueryParams): QueryParams {
+  const next: QueryParams = { ...params }
+  let term = ''
+  for (const key of SEARCH_TERM_ALIASES) {
+    const value = next[key]
+    if (!term && value != null && String(value).trim()) term = String(value)
+    if (key !== 'query') delete next[key]
+  }
+  if (term) next.query = term
+  else delete next.query
+  return next
+}
+
 export function searchProducts(params: QueryParams = {}): Promise<unknown> {
-  const query = buildQueryString(params)
+  const query = buildQueryString(canonicalizeSearchTerm(params))
   const cacheKey = `products:search:${query}`
   // Fixed group name (not the per-query cacheKey above) -- every call to
   // searchProducts, regardless of which page called it or what the query
@@ -87,7 +124,10 @@ export function searchProducts(params: QueryParams = {}): Promise<unknown> {
 }
 
 export function getProductBootstrap(params: QueryParams = {}): Promise<unknown> {
-  const query = buildQueryString(params)
+  // Same canonicalization as searchProducts: /bootstrap runs the identical
+  // buildSearchFilters term parsing, so a synonym key would silently return
+  // the unfiltered catalog here too.
+  const query = buildQueryString(canonicalizeSearchTerm(params))
   const cacheKey = `products:bootstrap:${query}`
   return routeCachedProductQuery(cacheKey, appendQuery('/api/products/bootstrap', query), 'products:bootstrap')
 }

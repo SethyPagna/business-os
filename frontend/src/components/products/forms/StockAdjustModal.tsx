@@ -171,7 +171,14 @@ export default function StockAdjustModal({ initialType = 'add', initialProduct =
     // include branch_stock so per-branch quantity + remove-availability
     // checks below are accurate; the search endpoint supports `include`
     // (same param getProductsByIds passes).
-    searchProducts({ search: debouncedSearch, pageSize: 20, include: 'branch_stock' })
+    // `query` is the catalog search endpoint's free-text parameter. This
+    // used to say `search:`, which the server does not read: it answered
+    // 200 with the entire unfiltered catalog, so typing or scanning a
+    // barcode here listed unrelated products (reported live: scanning
+    // 3348901770569 still showed "Abercrombie Authantic 10ml"). The
+    // transport now canonicalizes the key for every caller
+    // (api/productReadTransport.ts) -- this spells it correctly regardless.
+    searchProducts({ query: debouncedSearch, pageSize: 20, include: 'branch_stock' })
       .then((raw) => {
         if (cancelled) return
         const rows = Array.isArray(raw)
