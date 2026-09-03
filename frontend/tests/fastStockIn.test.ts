@@ -53,7 +53,7 @@ runTest('F2: the shipment header is entered once and rides every line', () => {
 
 runTest('F2: Add queues editable lines; completion writes through the one D4 kernel', () => {
   // the shared transport is the only write path -- no parallel writes
-  assert.match(modalSource, /import \{ receiveBatchStock \} from '\.\.\/\.\.\/api\/batchesTransport\.ts'/)
+  assert.match(modalSource, /import \{ receiveBatchStock[^}]*\} from '\.\.\/\.\.\/api\/batchesTransport\.ts'/)
   assert.doesNotMatch(modalSource, /apiFetch|fetch\(/)
   assert.equal((modalSource.match(/receiveBatchStock\(/g) || []).length, 1) // exactly one call site
   assert.match(modalSource, /status: 'queued'/)
@@ -151,3 +151,54 @@ runTest('stock-in header edits are collision- and concurrency-safe', () => {
 if (failed > 0) {
   process.exitCode = 1
 }
+
+runTest('the lot picker matches the sibling add-stock surfaces', () => {
+  // Same affordance ReceiveBatchModal / InventoryStockModals already have:
+  // a chip row scoped to the picked product and the shipment branch.
+  assert.match(modalSource, /getProductBatches/, 'the fast modal reads lots like every other add-stock surface')
+  assert.match(modalSource, /getProductBatches\(productId, parsedBranchId, false\)/, 'add shows every active lot, empty ones included')
+  assert.match(modalSource, /\}, \[picked\?\.id, branchId\]\)/, 'lots refetch per picked product AND branch')
+  assert.match(modalSource, /setBatchChoice\('new'\)/, "a stale lot id can never ride to submit")
+  assert.match(modalSource, /batchDisplayLabel\(batch, tr\('batch', 'Batch'\)\)/, 'lot labels come from the shared helper')
+  // A batch is identified by its DATE -- the code is previewed, never typed.
+  assert.match(modalSource, /dateToBatchCode\(receivedDate\)/, 'the derived lot code is visible before commit')
+  assert.match(modalSource, /existing_lot_keeps_date/, 'picking a lot replaces the date rather than pretending it applies')
+  // The choice reaches the server, and unlocked pricing never carries one.
+  assert.match(modalSource, /batchId: typeof line\.batchChoice === 'number' \? line\.batchChoice : null/)
+  assert.match(modalSource, /receivedDate: line\.batchChoice === 'new' \? \(receivedDate\.trim\(\) \|\| null\) : null/)
+  assert.match(modalSource, /batch_auto_new_unlocked/, 'a price variant always creates a fresh lot, and says so')
+  // The lot is frozen onto the queued line and stays visible.
+  assert.match(modalSource, /batchChoice: effectiveBatchChoice/)
+  assert.match(modalSource, /\{line\.batchLabel\}/, 'what was chosen is visible before and after Complete')
+  // Reopening a queued line must not silently drop its lot: the options
+  // effect re-keys on the product and would otherwise reset it to new.
+  assert.match(modalSource, /pendingBatchRestoreRef/, 'the restore survives the refetch editLine triggers')
+  assert.match(modalSource, /lots\.some\(\(lot\) => Number\(lot\.id\) === restore\)/, 'a lot that no longer exists here is not restored')
+})
+
+runTest('queueing a line and committing the session are visibly different actions', () => {
+  // The queue action is its own row with an explicit verb -- it no longer
+  // says "Save" while writing nothing.
+  assert.match(modalSource, /fast_stockin_add/, "the queue button uses the 'Add & next' key")
+  assert.match(modalSource, /update_line/, 'editing a queued line says Update line, not Save')
+  assert.doesNotMatch(modalSource, /tr\('save', 'Save'\)/, 'nothing that writes nothing may be labelled Save')
+  // Exactly one commit control per breakpoint: header on phones, footer above.
+  assert.match(modalSource, /sm:hidden[\s\S]*commitSession/, 'phones commit from the header')
+  assert.match(modalSource, /hidden flex-shrink-0[\s\S]*sm:flex/, 'the desktop commit sits in a footer, not in the scroll body')
+  assert.match(modalSource, /lines_queued/, 'the footer states what is queued and what it costs')
+  assert.match(modalSource, /add_next_hint/, 'the difference is a tooltip, not prose on the card')
+})
+
+runTest('committing asks through ConfirmDialog, and placeholders are filled', () => {
+  assert.doesNotMatch(modalSource, /window\.confirm/, 'no native confirm -- off-brand and untranslatable')
+  assert.match(modalSource, /<ConfirmDialog/, 'the shared compact review dialog asks instead')
+  assert.match(modalSource, /confirm_complete_stock_session/, 'the existing pack key survives the move')
+  // tr() does not interpolate, so every {placeholder} must be substituted or
+  // the operator reads the braces literally.
+  assert.match(modalSource, /\.replace\('\{lines\}'/)
+  assert.match(modalSource, /\.replace\('\{units\}'/)
+  assert.match(modalSource, /\.replace\('\{branch\}'/)
+  assert.match(modalSource, /\.replace\('\{count\}', String\(saved\)\)/, 'the completion toast fills its count too')
+  // A failure keeps the modal and the draft, and the reason stays readable.
+  assert.match(modalSource, /break-words text-\[10px\]/, 'a long server reason wraps rather than being squeezed out')
+})

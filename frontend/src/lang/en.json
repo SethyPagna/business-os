@@ -5239,5 +5239,11 @@
   "transfer_search_or_show_all": "Search products, or use Show all products to list the whole branch",
   "transfer_entire_branch_note": "Runs as {n} transfers, one after another. If one fails the earlier ones stay transferred -- run it again to move the rest.",
   "transfer_bulk_partial": "Transferred {done} of {total} products, then stopped: {reason}",
-  "transfer_chunk_progress": "Transfer {done} of {total}"
+  "transfer_chunk_progress": "Transfer {done} of {total}",
+  "update_line": "Update line",
+  "lines_queued": "queued",
+  "lines": "Lines",
+  "total_units": "Total units",
+  "add_next_hint": "Add & next queues this line; nothing is written until Complete.",
+  "confirm_complete_stock_session_note": "This posts stock movements and creates or updates the related lots."
 }
