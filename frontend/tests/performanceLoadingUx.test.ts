@@ -596,7 +596,12 @@ assert.doesNotMatch(filterMenu, /ActiveFilterChips/, 'FilterMenu must not surfac
 assert.match(filterMenu, /if \(label\.toLowerCase\(\) === 'back'\) return fallback/, 'FilterMenu should replace accidental Back labels with section-specific labels')
 assert.match(appSelect, /data-app-select-button="true"/, 'AppSelect should expose a stable rounded trigger hook for live visual checks')
 assert.match(appSelect, /data-app-select-selected="true"/, 'AppSelect should expose the selected value for live visual checks')
-assert.match(appSelect, /max-h-\[min\(18rem,calc\(100vh-1rem\)\)\]/, 'AppSelect menus should be viewport-bounded instead of tall square native popups')
+// P2-9 finding 5: the bound is still 18rem-or-the-viewport, but it now reads
+// --app-vh-100 (100dvh where supported, 100vh otherwise) instead of a raw
+// 100vh. This menu is position:fixed, so on iOS Safari the raw unit measured
+// a viewport taller than the visible one and the menu's last options sat
+// behind the toolbar -- exactly the popup this assertion exists to prevent.
+assert.match(appSelect, /max-h-\[min\(18rem,calc\(var\(--app-vh-100\)_-_1rem\)\)\]/, 'AppSelect menus should be viewport-bounded instead of tall square native popups')
 assert.doesNotMatch(productsHeaderActions, /import PortalMenu from '\.\.\/\.\.\/shared\/PortalMenu'/, 'Products header actions should not load PortalMenu before a manage/export click')
 assert.match(productsHeaderActions, /import LazyPortalMenu from '\.\.\/\.\.\/shared\/LazyPortalMenu'/, 'Products header actions should load PortalMenu through LazyPortalMenu')
 assert.doesNotMatch(productRowParts, /import \{ ThreeDotPortal \} from '\.\.\/\.\.\/shared\/PortalMenu'/, 'Product row actions should not statically load PortalMenu for every first route paint')

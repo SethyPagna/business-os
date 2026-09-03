@@ -26,6 +26,7 @@ const packageSource = fs.readFileSync(new URL('../package.json', import.meta.url
 const swRuntimeSource = fs.readFileSync(new URL('../src/public-runtime/service-worker.ts', import.meta.url), 'utf8')
 const websocketSource = fs.readFileSync(new URL('../src/api/websocket.ts', import.meta.url), 'utf8')
 const appContextSource = fs.readFileSync(new URL('../src/AppContext.tsx', import.meta.url), 'utf8')
+const appUpdateToastSource = fs.readFileSync(new URL('../src/components/shared/AppUpdateToast.tsx', import.meta.url), 'utf8')
 
 await runTest('frontend uses cookie credentials and does not persist auth tokens for offline sync', () => {
   assert.match(httpSource, /credentials:\s*'include'/)
@@ -104,8 +105,14 @@ await runTest('worker upgrades retain one prior cache generation and never overw
 await runTest('UX exposes vault, conflicts, storage, security, and update states', () => {
   assert.match(appSource, /Vault locked/)
   assert.match(appSource, /Conflicts need review/)
-  assert.match(appSource, /New version ready/)
-  assert.match(appSource, /sync:app-update-available/)
+  // P2-9 finding 3: App.tsx used to hold an `appUpdate` state and this
+  // listener, but the consumer never destructured the value, so the update
+  // state was tracked and never shown. AppUpdateToast.tsx owns the broadcast
+  // end to end now and actually renders it -- these two assertions follow the
+  // behaviour to its new owner rather than pinning the dead state.
+  assert.match(appUpdateToastSource, /New version ready/)
+  assert.match(appUpdateToastSource, /sync:app-update-available/)
+  assert.match(appSource, /<AppUpdateToast \/>/)
   assert.match(serverPageSource, /Sync Center/)
   assert.match(serverPageSource, /Storage/)
   assert.match(serverPageSource, /Security/)
