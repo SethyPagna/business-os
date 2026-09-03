@@ -15,6 +15,7 @@ import { isBrokenLocalizedString, useApp, useSync } from '../../AppContext'
 import Modal from '../shared/Modal'
 import AlphaIndexRail from '../shared/AlphaIndexRail'
 import FilterMenu from '../shared/FilterMenu'
+import InfoHint from '../shared/InfoHint'
 import PortalMenu from '../shared/PortalMenu'
 import AppSelect from '../shared/AppSelect'
 import PageSizeSelect from '../shared/PageSizeSelect'
@@ -664,6 +665,14 @@ function ProductsFullEditor() {
   const [promoFilter, setPromoFilter] = useState('all')
   // 9.2: 'all' | 'auto' -- server-side facet over auto_merged_count.
   const [mergedFilter, setMergedFilter] = useState('all')
+  // OFF by default, and deliberately so. Collapsing a same-name group down to
+  // its rows that still have stock made a genuinely out-of-stock row
+  // impossible to find, open, edit or restock from this page whenever it
+  // shared a name group -- a data-visibility removal with no way to see what
+  // went. It is now an explicit choice inside the FilterMenu ("Rows" ->
+  // "Hide out-of-stock rows"), and every group it shortens says how many rows
+  // it hid.
+  const [hideZeroStockRows, setHideZeroStockRows] = useState(false)
   const [promotionRules, setPromotionRules] = useState<PromotionRule[]>([])
   // The Products section has no date filter. Keep these empty compatibility
   // values for the shared query/export helpers, so product results are never
@@ -2150,12 +2159,18 @@ function ProductsFullEditor() {
   // on Inventory.tsx. POS.tsx's own AlphaIndexRail is untouched -- that one
   // was never part of this ask, it stays name-initial.
   const productSections = useMemo<ProductSectionLike[]>(
-    () => hideZeroStockGroupedChildRows(buildProductCategorySections(filtered, {
-      productsById,
-      sortDirection: productSortDirection,
-      uncategorizedLabel: t('uncategorized') || 'Uncategorized',
-    })) as unknown as ProductSectionLike[],
-    [filtered, productSortDirection, productsById, t],
+    () => {
+      const sections = buildProductCategorySections(filtered, {
+        productsById,
+        sortDirection: productSortDirection,
+        uncategorizedLabel: t('uncategorized') || 'Uncategorized',
+      })
+      // Only when the operator asked for it in the FilterMenu -- see
+      // hideZeroStockRows' declaration. By default every row that survived
+      // the filters above is reachable here.
+      return (hideZeroStockRows ? hideZeroStockGroupedChildRows(sections) : sections) as unknown as ProductSectionLike[]
+    },
+    [filtered, hideZeroStockRows, productSortDirection, productsById, t],
   )
 
   const allVisibleProducts = useMemo<ProductRecord[]>(
@@ -2165,7 +2180,7 @@ function ProductsFullEditor() {
 
   useEffect(() => {
     setProductPage(1)
-  }, [brandFilter, branchFilter, catFilter, createdDateFrom, createdDateTo, groupFilter, initialFilter, issueFilter, productSortDirection, search, searchMode, stockFilter, supplierFilter])
+  }, [brandFilter, branchFilter, catFilter, createdDateFrom, createdDateTo, groupFilter, hideZeroStockRows, initialFilter, issueFilter, productSortDirection, search, searchMode, stockFilter, supplierFilter])
 
   const visibleProducts = useMemo<ProductRecord[]>(
     () => allVisibleProducts,
@@ -2351,7 +2366,11 @@ function ProductsFullEditor() {
     productSortDirection,
     stockFilter,
     supplierFilter,
-  }) + (searchMode === 'OR' ? 1 : 0)
+    // Counted here rather than inside countActiveProductFilters because that
+    // helper also drives the export menu's "filtered results" labelling, and
+    // this option changes only which GROUPED ROWS render -- `filtered` (what
+    // the export walks) is untouched by it.
+  }) + (searchMode === 'OR' ? 1 : 0) + (hideZeroStockRows ? 1 : 0)
 
   const clearAllFilters = useCallback(() => {
     setCatFilter(new Set())
@@ -2374,6 +2393,7 @@ function ProductsFullEditor() {
     // than restoring the real default.
     setProductSortDirection('name_asc')
     setSearchMode('AND')
+    setHideZeroStockRows(false)
   }, [])
 
   const handleSearchInputChange = useCallback((value: string) => {
@@ -2994,12 +3014,14 @@ function ProductsFullEditor() {
       createdDateFrom,
       createdDateTo,
       groupFilter,
+      hideZeroStockRows,
       issueFilter,
       productSortDirection,
       stockFilter,
       supplierFilter,
     },
     isOpen: isProductFilterMenuOpen,
+    setHideZeroStockRows,
     setBrandFilter,
     setBranchFilter,
     setCatFilter,
@@ -3011,7 +3033,7 @@ function ProductsFullEditor() {
     setSupplierFilter,
     suppliers,
     t,
-  }), [branches, brandFilter, branchFilter, brandOptions, catFilter, categoryFilterOptions, createdDateFrom, createdDateTo, groupFilter, hierarchicalCategoryOptions, isProductFilterMenuOpen, issueFilter, productSortDirection, searchMode, setSearchMode, stockFilter, supplierFilter, suppliers, t])
+  }), [branches, brandFilter, branchFilter, brandOptions, catFilter, categoryFilterOptions, createdDateFrom, createdDateTo, groupFilter, hideZeroStockRows, hierarchicalCategoryOptions, isProductFilterMenuOpen, issueFilter, productSortDirection, searchMode, setSearchMode, stockFilter, supplierFilter, suppliers, t])
 
   const renderDesktopProductRow = useCallback((p: ProductRecord, { indented = false }: { indented?: boolean } = {}) => {
     const productId = p.id ?? 0
@@ -3556,10 +3578,26 @@ function ProductsFullEditor() {
     return { ...handlers, ...guard }
   }, [getLongPressState, selectionModeActive, toggleSelectionScope])
 
-  const renderGroupActions = useCallback((group: { key: string; leadProduct?: ProductRecord }) => {
+  const renderGroupActions = useCallback((group: { key: string; leadProduct?: ProductRecord; hiddenZeroStockRowCount?: number }) => {
     const lead = group.leadProduct
     if (!lead) return null
+    // "N hidden" -- only when the FilterMenu's "Hide out-of-stock rows"
+    // option actually removed rows from THIS group. A shortened group must
+    // never look like the whole group; the hint says what went and how to
+    // get it back, and lives in a hint rather than inline prose.
+    const hiddenRows = Number(group.hiddenZeroStockRowCount || 0)
+    const hiddenBadge = hiddenRows > 0 ? (
+      <span className="flex shrink-0 items-center gap-0.5 rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-medium text-amber-700 dark:bg-amber-900/30 dark:text-amber-300">
+        {`${hiddenRows} ${tr('hidden', 'hidden')}`}
+        <InfoHint
+          label={tr('hide_out_of_stock_rows', 'Hide out-of-stock rows')}
+          text={`${tr('hidden_out_of_stock_rows_hint', 'Rows in this group that are out of stock at every branch are hidden. Turn off "Hide out-of-stock rows" in Filters to see them.')}`}
+        />
+      </span>
+    ) : null
     return (
+      <>
+      {hiddenBadge}
       <PortalMenu
         align="right"
         compact
@@ -3570,6 +3608,7 @@ function ProductsFullEditor() {
           { label: tr('add_image', 'Add image'), icon: <ImagePlus className="h-3.5 w-3.5" />, onClick: () => openProductFormTab(lead, 'basic') },
         ]}
       />
+      </>
     )
   }, [openProductFormTab, tr])
 
