@@ -3040,14 +3040,25 @@ export default function POS() {
                         amber/yellow when low, emerald when healthy. Group products have
                         no single qty to color against (variants can each differ), so
                         they keep the neutral gray style. */}
-                    {/* Grouped card's bottom row (user): "Options: N | Total
-                        Qty: n" — the single home for the option count (the
-                        removed purple chip's duplicate) and the summed stock.
-                        A flat product keeps its coloured "qty unit". */}
+                    {/* Grouped card's bottom row (user): "Options: N | Total: n"
+                        — the single home for the option count (the removed
+                        purple chip's duplicate) and the summed stock. The
+                        labels stay grey but the NUMBERS carry colour (user,
+                        Sep 3 2026): the option count in the accent, the summed
+                        stock in the same red/amber/emerald convention a flat
+                        product's "qty unit" uses, judged against the group's
+                        total. A flat product keeps its coloured "qty unit". */}
                     <p {...getKhmerTextProps(groupProduct ? choiceLabel : p.unit, `text-xs mt-0.5 font-medium ${groupProduct ? 'text-gray-400 font-normal' : !inStock ? 'text-red-500' : stock <= (asNumber(p.low_stock_threshold) || 10) ? 'text-yellow-500' : 'text-emerald-500'}`)}>
-                      {groupProduct
-                        ? `${choiceLabel}: ${variants.length}${groupMeta?.stockTotal != null ? ` | ${posCopy('Total Qty', 'ចំនួនសរុប')}: ${groupMeta.stockTotal}` : ''}`
-                        : `${stock} ${p.unit}`}
+                      {groupProduct ? (
+                        <>
+                          {choiceLabel}: <span className="font-semibold text-primary-600 dark:text-primary-400">{variants.length}</span>
+                          {groupMeta?.stockTotal != null ? (
+                            <>
+                              {' | '}{posCopy('Total', 'សរុប')}: <span className={`font-semibold ${groupMeta.stockTotal <= 0 ? 'text-red-500' : groupMeta.stockTotal <= (asNumber(p.low_stock_threshold) || 10) ? 'text-yellow-500' : 'text-emerald-500'}`}>{groupMeta.stockTotal}</span>
+                            </>
+                          ) : null}
+                        </>
+                      ) : `${stock} ${p.unit}`}
                     </p>
                     {expiryInfo && expiryInfo.status !== 'ok' ? (
                       <p className={`text-[11px] font-semibold ${expiryInfo.status === 'expired' ? 'text-red-600' : 'text-yellow-600'}`}>
