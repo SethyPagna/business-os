@@ -23,6 +23,7 @@ import { revokePortalSessionsForAccount } from '../lib/portalSession'
 import bcrypt from 'bcryptjs'
 import { buildContactMatchClause } from '../lib/contactSearch'
 import { buildContactIdClause, parseContactIdFilter, CONTACT_ID_FILTER_MAX } from '../lib/contactIds'
+import { buildContactPickerSql, CONTACT_PICKER_DEFAULT_LIMIT, CONTACT_PICKER_MAX_LIMIT } from '../lib/contactPicker'
 import { createBulkDeleteJob, getBulkDeleteJob, reapStalledBulkDeleteJobs, type BulkDeleteEntityType } from '../lib/bulkDeleteEngine'
 import { bumpVersion, cachedJsonResponse, getVersionWithFallback } from '../lib/cache'
 import { localDateAtOrAfter, localDateAtOrBefore, localDateExpr } from '../lib/businessDateWindow'
@@ -484,6 +485,30 @@ function registerContactRoutes(config: ContactConfig) {
         db.prepare(`SELECT id, name FROM ${config.table} ORDER BY lower(name) ASC`).all<Record<string, unknown>>(),
       )
       return c.json(rows)
+    }
+    // fields=picker: the bounded offline-mirror / picker shape. Only the
+    // columns a picker or a receipt needs (never notes/company/audit
+    // columns), never the loyalty aggregation, and never more than `limit`
+    // rows -- for customers the most recently active first (last sale, via
+    // idx_sales_customer_created), so a device that keeps an offline copy
+    // keeps the people who actually walk in, not the first N by name. The
+    // reply says how many rows exist, so the client can tell a full copy
+    // from a truncated one. Cache version: the table alone -- no computed
+    // balance here, so a sale must NOT turn this over the way it turns
+    // over the unpaged list (that churn is what made the unbounded read
+    // effectively uncacheable during business hours).
+    if (String(query.fields || '') === 'picker') {
+      const limit = clampInt(query.limit, CONTACT_PICKER_DEFAULT_LIMIT, 1, CONTACT_PICKER_MAX_LIMIT)
+      const version = `${config.table}:${await getVersionWithFallback(c.env, config.table)}`
+      const payload = await cachedJsonResponse(c.req.raw, c.executionCtx, version, CONTACT_READ_CACHE_TTL_SECONDS, async () => {
+        const [totalRow, items] = await Promise.all([
+          db.prepare(`SELECT COUNT(*) AS count FROM ${config.table}`).get<{ count: number }>({}),
+          db.prepare(buildContactPickerSql(config.table)).all<Record<string, unknown>>({ limit }),
+        ])
+        const total = Number(totalRow?.count || 0)
+        return { items: items || [], total, limit, truncated: total > (items || []).length }
+      })
+      return c.json(payload)
     }
     const hasPaging = Object.prototype.hasOwnProperty.call(query, 'page') || Object.prototype.hasOwnProperty.call(query, 'pageSize')
     const search = String(query.search || query.q || '').trim().toLowerCase()
