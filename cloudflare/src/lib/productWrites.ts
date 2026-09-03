@@ -279,7 +279,7 @@ export async function seedInitialBatchForNewProduct(
     INSERT INTO product_batches (variant_product_id, batch_key, lot_code, received_at, is_active, notes, batch_number)
     VALUES (@productId, @batchKey, @lotCode, datetime('now'), 1, @notes, 1)
     ON CONFLICT(variant_product_id, batch_key) DO NOTHING
-  `).run({ productId: id, batchKey, lotCode: dateToBatchCode(addedOn), notes: 'Default batch created with product' })
+  `).run({ productId: id, batchKey, lotCode: dateToBatchCode(addedOn), notes: 'Default received date created with product' })
   if (chosenBranchId == null) return
   const batch = await db.prepare('SELECT id FROM product_batches WHERE variant_product_id = @productId AND batch_key = @batchKey').get<{ id: number }>({ productId: id, batchKey })
   if (!batch) return

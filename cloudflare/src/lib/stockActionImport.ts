@@ -130,7 +130,7 @@ function matchProduct(
     ? candidates.filter((product) => (product.batch_keys || []).some((value) => key(value) === batchKey))
     : []
   if (sameBatch.length === 1) return { product: sameBatch[0], conflict: null }
-  if (sameBatch.length > 1) return { product: null, conflict: `Batch "${batchLabel}" belongs to ${sameBatch.length} matching product rows; choose the exact row.` }
+  if (sameBatch.length > 1) return { product: null, conflict: `Received date "${batchLabel}" belongs to ${sameBatch.length} matching product rows; choose the exact row.` }
 
   if (!nameKey && barcodeKey) {
     const barcodeMatches = products.filter((product) => key(product.barcode) === barcodeKey)

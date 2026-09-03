@@ -1460,7 +1460,7 @@ app.post('/adjust', async (c) => {
       resolvedBatchId = received.batchId
       lotCode = received.lotCode
     } catch (err) {
-      return c.json({ error: err instanceof Error ? err.message : 'Failed to receive batch stock' }, 400)
+      return c.json({ error: err instanceof Error ? err.message : 'Failed to receive stock' }, 400)
     }
   } else if (useBatchLedger && type === 'remove') {
     if (batchIdRequested != null) {
@@ -1468,14 +1468,14 @@ app.post('/adjust', async (c) => {
         await removeStockFromBatch(db, { batchId: batchIdRequested, productId: targetProductId, branchId, quantity })
       } catch (err) {
         if (err instanceof InsufficientBatchStockError) return c.json({ error: err.message }, 400)
-        return c.json({ error: err instanceof Error ? err.message : 'Failed to remove batch stock' }, 400)
+        return c.json({ error: err instanceof Error ? err.message : 'Failed to remove stock' }, 400)
       }
     } else if (rawBatchId != null && rawBatchId !== '') {
       // An interactive picker explicitly requires a choice -- 'new' isn't
       // valid for remove (see BranchStockAdjuster.tsx/
       // InventoryStockModals.tsx's own client-side guard); this only
       // fires if that guard was somehow bypassed.
-      return c.json({ error: 'A batch must be selected to remove stock' }, 400)
+      return c.json({ error: 'A received date must be selected to remove stock' }, 400)
     } else {
       // Auto-routed remove (no interactive batchId at all) -- FIFO-drain
       // across whatever active batches this branch has rather than
@@ -1491,7 +1491,7 @@ app.post('/adjust', async (c) => {
         resolvedBatchId = drained.batchIds.length === 1 && drained.remainder === 0 ? drained.batchIds[0] : null
         if (drained.remainder > 0) await applyStockDelta(c.env, targetProductId, branchId, -drained.remainder)
       } catch (err) {
-        return c.json({ error: err instanceof Error ? err.message : 'Failed to remove batch stock' }, 400)
+        return c.json({ error: err instanceof Error ? err.message : 'Failed to remove stock' }, 400)
       }
     }
   } else if (delta !== 0) {

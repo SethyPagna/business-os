@@ -157,7 +157,7 @@ app.post('/', async (c) => {
     // The explicit-lot pick can fail validation ("Selected batch does not
     // belong to this product") -- a caller mistake, not a server fault, so
     // it answers 400 exactly as /inventory/adjust's batch path does.
-    return c.json({ error: err instanceof Error ? err.message : 'Failed to receive batch stock' }, 400)
+    return c.json({ error: err instanceof Error ? err.message : 'Failed to receive stock' }, 400)
   }
   const { batchId, batchNumber, lotCode } = received
 
@@ -192,7 +192,7 @@ app.post('/', async (c) => {
     totalCostUsd: Number.isFinite(Number(body.unit_cost_usd)) && Number(body.unit_cost_usd) >= 0
       ? Math.round(Number(body.unit_cost_usd) * quantity * 10000) / 10000
       : null,
-    reason: `Batch receipt (${lotCode})`,
+    reason: `Stock received (${lotCode})`,
     referenceId: Number.isSafeInteger(Number(body.session_id)) && Number(body.session_id) > 0 ? Number(body.session_id) : null,
     userId: user?.id ?? null,
     userName: user?.name ?? null,
@@ -228,7 +228,7 @@ app.patch('/:id', async (c) => {
     .catch(() => ({} as { expiry_date?: string | null; notes?: string | null; is_active?: boolean; received_at?: string | null }))
 
   const existing = await db.prepare('SELECT id, updated_at FROM product_batches WHERE id = ?').get<{ id: number; updated_at: string | null }>([id])
-  if (!existing) return c.json({ error: 'Batch not found' }, 404)
+  if (!existing) return c.json({ error: 'Received date not found' }, 404)
 
   // Optimistic-concurrency guard, the same one products/contacts/sales use.
   // No-op when the editor sends no token; a stale token means someone else
@@ -315,7 +315,7 @@ app.patch('/:id/branches/:branchId', async (c) => {
   if (!Number.isFinite(quantity) || quantity < 0) return c.json({ error: 'quantity must be a non-negative number' }, 400)
 
   const batch = await db.prepare('SELECT id, variant_product_id AS productId FROM product_batches WHERE id = ?').get<{ id: number; productId: number }>([batchId])
-  if (!batch) return c.json({ error: 'Batch not found' }, 404)
+  if (!batch) return c.json({ error: 'Received date not found' }, 404)
   const product = await db.prepare('SELECT id, name FROM products WHERE id = ?').get<{ id: number; name: string }>([batch.productId])
 
   // A direct SET (a stock-take correction, not a delta) -- read the
@@ -371,7 +371,7 @@ app.patch('/:id/branches/:branchId', async (c) => {
       productName: product?.name || null,
       branchId,
       quantity: Math.abs(delta),
-      reason: `Batch quantity correction (Batch #${batchId})`,
+      reason: `Quantity correction (received date #${batchId})`,
       userId: user?.id ?? null,
       userName: user?.name ?? null,
       batchId,
@@ -396,7 +396,7 @@ app.delete('/:id', async (c) => {
   const user = c.get('user')
   const id = Number(c.req.param('id'))
   const existing = await db.prepare('SELECT id FROM product_batches WHERE id = ?').get<{ id: number }>([id])
-  if (!existing) return c.json({ error: 'Batch not found' }, 404)
+  if (!existing) return c.json({ error: 'Received date not found' }, 404)
 
   // A deactivated batch drops out of every FIFO picker (listBatchesForProduct
   // filters `is_active = 1`) -- POS's lot picker, Inventory's mandatory
@@ -413,7 +413,7 @@ app.delete('/:id', async (c) => {
   ).get<{ total: number }>([id])
   const remainingQty = Number(remaining?.total) || 0
   if (remainingQty > 0) {
-    return c.json({ error: `This batch still has ${remainingQty} unit(s) of stock. Correct the quantity to 0 before deactivating.` }, 400)
+    return c.json({ error: `This received date still has ${remainingQty} unit(s) of stock. Correct the quantity to 0 before deactivating.` }, 400)
   }
 
   await db.prepare(`UPDATE product_batches SET is_active = 0, updated_at = datetime('now') WHERE id = ?`).run([id])
