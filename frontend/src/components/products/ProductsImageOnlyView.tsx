@@ -26,6 +26,8 @@ import ScanSearchButton from '../shared/ScanSearchButton'
 import FilterMenu from '../shared/FilterMenu'
 import PaginationControls, { PAGE_SIZE_OPTIONS } from '../shared/PaginationControls'
 import Modal from '../shared/Modal'
+import InfoHint from '../shared/InfoHint'
+import { SectionHeader } from '../shared/kit'
 import { ProductImg, ProductImagePlaceholder } from './shared/primitives'
 import { lazyRetry } from '../../utils/lazyImport.ts'
 import { fmtDateOnly } from '../../utils/formatters'
@@ -371,12 +373,24 @@ export default function ProductsImageOnlyView() {
 
   return (
     <div className="page-scroll p-3 sm:p-6">
-      <div className="mb-4">
-        <h1 className="text-lg font-semibold text-gray-800 dark:text-gray-100">{t('products') || 'Products'}</h1>
-        <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-          {t('products_image_only_hint') || 'You can update product photos here. Other fields are managed elsewhere.'}
-        </p>
-      </div>
+      {/* P2-4 Part 1b (Level 0): the one section-title row, through the kit's
+          SectionHeader instead of a hand-rolled h1 + explanatory paragraph.
+          Three things change and each is a rule, not a preference:
+          - the title renders in --ui-font-display at --ui-size-h2. Nothing in
+            the app used the token font families before this, so none of the
+            ten self-hosted woff2 faces was ever requested by a rendered
+            element -- document.fonts reported 19 faces declared and 0 loaded.
+            This is the first surface that actually asks for the display face.
+          - the row now carries the record count, which this view never showed.
+          - the standing hint moves out of a permanent paragraph and into an
+            InfoHint, per the density rule that explanations live in tooltips
+            rather than as prose competing with the controls. */}
+      <SectionHeader
+        className="mb-4"
+        title={t('products') || 'Products'}
+        count={total ? total.toLocaleString() : null}
+        infoHint={<InfoHint label={t('about') || 'About'} text={t('products_image_only_hint') || 'You can update product photos here. Other fields are managed elsewhere.'} />}
+      />
 
       <div className="mb-3 flex items-center gap-1.5 sm:gap-2">
         <SearchInput
