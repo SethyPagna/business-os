@@ -188,16 +188,29 @@ export default function ProductsListSurface({
           width after the compact, bounded Details and numeric columns. */}
       <col />
       {/* Details holds one chip per branch ("Main Store: 10", "Branch 2: 0")
-          plus SKU / unit / supplier / discount chips. Measured at 1280 with
-          the two production branches: the pair is 151px wide and the old
-          10.5rem column left 144px of content box, so they wrapped onto two
-          lines by SEVEN pixels and every row in the report grew to 103px --
-          while Name, the auto column, sat at 396px for a 134px product name.
-          12.5rem gives the chips 176px, they fit on one line as
-          ProductRowParts' `flex-wrap` intends, and the row falls to 85px
-          (-17%) with Name still at 364px. Bounded, not auto: the point of
-          this column is to stay compact so the numeric columns stay put. */}
-      <col style={{ width: '12.5rem' }} />
+          plus SKU / unit / supplier / discount chips. At 10.5rem the branch
+          pair wrapped onto a second line and every row in the report stood at
+          103px, while Name -- the auto column -- sat at 396px to hold a 134px
+          product name.
+
+          Size this in KHMER, not English. `body.lang-km` swaps the whole app
+          onto Noto Sans Khmer, which renders even these Latin chips wider, so
+          an English-only measurement under-sizes the column and the report
+          silently regrows a line for Khmer operators. Measured at 1280, chips
+          plus their 4px gap, against this column's content box:
+
+            Main Store: 10   / Branch 2: 0     181px
+            Main Store: 100  / Branch 2: 0     188px
+            Main Store: 100  / Branch 2: 100   202px
+            Main Store: 1000 / Branch 2: 250   208px
+
+          15rem leaves a 216px content box, so all four fit on one line and
+          every row settles at 85px (-17%) in both languages, with Name still
+          at 324px. Bounded, not auto: this column stays compact so the
+          numeric columns stay put. A third branch, or quantities past those,
+          will wrap again -- that is inherent to a fixed width and is the
+          trade the bounded column is making. */}
+      <col style={{ width: '15rem' }} />
       <col style={{ width: '5.5rem' }} />
       <col style={{ width: '6.5rem' }} />
       <col style={{ width: '5rem' }} />

@@ -94,12 +94,15 @@ runTest('Name is the only auto column and Details stays bounded', () => {
   const auto = cols.filter((col) => !/width/.test(col))
   assert.equal(auto.length, 1, 'exactly one column (Name) may be auto-sized; every other column must be bounded')
   assert.equal(cols.indexOf(auto[0]), 2, 'the auto column must be Name (third), not Details or a numeric column')
-  // Details must have room for one chip per branch side by side. Two
-  // branches' chips measure 151px; anything under 12rem wraps them and
-  // inflates every row in the report (measured at 1280, Sep 3).
+  // Details must have room for one chip per branch side by side, measured in
+  // KHMER -- lang-km puts the whole app on Noto Sans Khmer, which renders even
+  // these Latin chips wider, so an English-only width under-sizes the column
+  // and the report regrows a line for Khmer operators. "Main Store: 1000" plus
+  // "Branch 2: 250" plus the 4px gap needs 208px; 15rem leaves 216px. Anything
+  // below wraps them and inflates every row (measured at 1280, Sep 3).
   const detailsWidth = /<col style=\{\{ width: '([\d.]+)rem' \}\} \/>/.exec(cols[3])
   assert.ok(detailsWidth, 'the Details column must declare a rem width')
-  assert.ok(Number(detailsWidth[1]) >= 12, `Details is ${detailsWidth[1]}rem -- under 12rem the per-branch chips wrap and every row grows`)
+  assert.ok(Number(detailsWidth[1]) >= 15, `Details is ${detailsWidth[1]}rem -- under 15rem the per-branch chips wrap in Khmer and every row grows`)
 })
 
 // ---------------------------------------------------------------------------

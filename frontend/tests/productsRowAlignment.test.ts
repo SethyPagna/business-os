@@ -104,11 +104,12 @@ runTest('desktop columns fit the available width and overflow remains reachable'
   // compact. This keeps Stock/Qty in the default viewport at xl widths.
   const colgroup = surface.slice(surface.indexOf('<colgroup>'), surface.indexOf('</colgroup>'))
   // Name auto, Details bounded and immediately adjacent -- unchanged. The
-  // bound itself moved 10.5rem -> 12.5rem: 10.5rem was seven pixels under the
-  // two branch chips, so they wrapped and every row in the report grew (see
-  // the colgroup comment). The five bounded widths still sum to 42rem, well
-  // inside the 58rem table minimum asserted three lines below.
-  assert.match(colgroup, /<col \/>\s*(?:\{\/\*[\s\S]*?\*\/\}\s*)?<col style=\{\{ width: '12\.5rem' \}\} \/>/)
+  // bound itself moved 10.5rem -> 15rem: both 10.5rem and 12.5rem sat under
+  // the two branch chips once Noto Sans Khmer widened them, so they wrapped
+  // and every row in the report grew (see the colgroup comment). The five
+  // bounded widths now sum to 44.5rem, still inside the 58rem table minimum
+  // asserted three lines below.
+  assert.match(colgroup, /<col \/>\s*(?:\{\/\*[\s\S]*?\*\/\}\s*)?<col style=\{\{ width: '15rem' \}\} \/>/)
   assert.strictEqual((colgroup.match(/<col style=\{\{ width: '[\d.]+rem' \}\} \/>/g) || []).length, 5)
   assert.match(surface, /<div className="relative overflow-x-auto">/)
   assert.match(surface, /<table className="w-full min-w-\[58rem\] table-fixed/)
