@@ -19,7 +19,7 @@ import { parseDatedStockCountEntries, buildDatedStockCountPlan } from '../lib/da
 import { applyDatedStockCountPlan } from '../lib/datedStockCountApply'
 import { parseRawDatedCountRows, resolveDatedStockCountRows } from '../lib/datedStockCountResolve'
 import { applyDatedStockCountDecisions, type DatedCountDecision } from '../lib/datedStockCountDecisions'
-import { formatStockChangeTelegramLines, sendTelegramEvent } from '../lib/telegram'
+import { formatStockChangeTelegramLines, formatTransferTelegramLines, sendTelegramEvent } from '../lib/telegram'
 import type { Env } from '../index'
 
 // Inventory routes, ported from backend/src/routes/inventory.ts.
@@ -1854,6 +1854,26 @@ app.post('/transfer', async (c) => {
   c.executionCtx.waitUntil(broadcast(c.env, 'products', { action: 'update', id: productId }))
   c.executionCtx.waitUntil(broadcast(c.env, 'inventory', { action: 'transfer', id: productId }))
   c.executionCtx.waitUntil(bumpVersion(c.env, 'products'))
+  // Telegram: resulting on-hand at both branches, read back after the write
+  // (same alert shape as branches.ts /transfer).
+  c.executionCtx.waitUntil((async () => {
+    const [fromRow, toRow, totalRow] = await Promise.all([
+      db.prepare('SELECT quantity FROM branch_stock WHERE product_id = @productId AND branch_id = @branchId').get<{ quantity: number }>({ productId, branchId: fromBranchId }),
+      db.prepare('SELECT quantity FROM branch_stock WHERE product_id = @productId AND branch_id = @branchId').get<{ quantity: number }>({ productId, branchId: toBranchId }),
+      db.prepare('SELECT stock_quantity FROM products WHERE id = @productId').get<{ stock_quantity: number }>({ productId }),
+    ])
+    await sendTelegramEvent(c.env, {
+      type: 'stock_out', heading: '🔁 Stock transferred',
+      lines: formatTransferTelegramLines({
+        fromBranch: fromBranch?.name || null, toBranch: toBranch?.name || null, note: reason, by: user?.name || user?.username || null,
+        items: [{
+          product: product.name, quantity, lot: takes.length === 1 ? takes[0].lotCode || null : null,
+          fromOnHand: fromRow ? Number(fromRow.quantity) || 0 : null, toOnHand: toRow ? Number(toRow.quantity) || 0 : null,
+          totalOnHand: totalRow ? Number(totalRow.stock_quantity) || 0 : null,
+        }],
+      }),
+    })
+  })().catch((error) => console.error('[telegram] transfer notification failed', error)))
   // See the matching note in /adjust above -- same missing-`success`-field bug.
   return c.json({ success: true, fromBranchId, toBranchId, quantity })
 })

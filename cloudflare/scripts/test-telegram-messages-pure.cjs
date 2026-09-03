@@ -4,6 +4,10 @@
 //            Delivery service / Total / Discount / Net Total / Paid /
 //            Delivery driver
 //   stock -> the change PLUS the resulting on-hand (branch · all branches)
+//   transfer -> From / To / one line per product with the resulting on-hand at
+//            both branches / Total moved (Part 582)
+//   return -> RET|SRET / INV / Customer|Supplier / lines with refund, stock
+//            action, lot and resulting on-hand / Refund or Supplier pays / Loss
 // Loads the REAL lib/telegram.ts (transpiled) with only the D1 handle stubbed;
 // the date helper is the real businessDateWindow so the UTC+7 rule is the
 // same one every report uses.
@@ -100,5 +104,86 @@ assert.deepEqual(telegram.formatStockChangeTelegramLines({
 assert.deepEqual(telegram.formatStockChangeTelegramLines({
   product: 'Rice 5kg', type: 'add', quantity: 5, branch: 'Warehouse', lot: '09032026', branchOnHand: 0, totalOnHand: null,
 }).filter(Boolean), ['Product: Rice 5kg', 'Change: +5', 'Branch: Warehouse', 'Lot: 09032026', 'On hand: Warehouse 0'])
+
+// --- transfers: one builder for the single, bulk and inventory-page routes ---
+assert.deepEqual(telegram.formatTransferTelegramLines({
+  createdAt: '2026-09-03 03:04:05', fromBranch: 'Warehouse', toBranch: 'Shop', note: 'Restock front shelf', by: 'Za',
+  items: [
+    { product: 'Rice 5kg', quantity: 10, lot: '09032026', fromOnHand: 90, toOnHand: 25, totalOnHand: 115 },
+    { product: 'Coca Cola 330ml', quantity: 24, mergedInto: 'Coca-Cola 330ml', fromOnHand: 0, toOnHand: 48, totalOnHand: null },
+  ],
+}).filter(Boolean), [
+  'Date: 09/03/2026 10:04',
+  'From: Warehouse',
+  'To: Shop',
+  '• Rice 5kg 10 (lot 09032026) — Warehouse 90 · Shop 25 · all branches 115',
+  '• Coca Cola 330ml 24 → Coca-Cola 330ml — Warehouse 0 · Shop 48',
+  'Total moved: 34 unit(s) · 2 product(s)',
+  'Note: Restock front shelf',
+  'By: Za',
+])
+// unknown on-hand (read-back failed) and missing branch names never produce a
+// dangling "On hand:" fragment; the cap states the remainder
+const bulk = telegram.formatTransferTelegramLines({
+  items: Array.from({ length: 23 }, (_, i) => ({ product: `Item ${i + 1}`, quantity: 2 })),
+}).filter(Boolean)
+assert.equal(bulk[1], 'From: Source')
+assert.equal(bulk[3], '• Item 1 2')
+assert.equal(bulk.filter((line) => line.startsWith('• ')).length, 20)
+assert.ok(bulk.includes('+ 3 more item(s)'))
+assert.ok(bulk.includes('Total moved: 46 unit(s) · 23 product(s)'))
+
+// --- customer return: receipt-style, refund per line, resulting on-hand ---
+assert.deepEqual(telegram.formatReturnTelegramLines({
+  kind: 'customer', createdAt: '2026-09-03T03:04:05.000Z', returnNumber: 'RET-20260903-100405', receiptNumber: '20260901-153000',
+  party: 'Sok Dara', branch: 'Shop', reason: 'Wrong size', returnType: 'restock',
+  items: [
+    { product: 'Rice 5kg', quantity: 1, refundUsd: 7.25, stockAction: 'restock', lot: '09012026', branchOnHand: 13, totalOnHand: 41 },
+    { product: 'Broken jar', quantity: 2, refundUsd: 3, stockAction: 'damaged', branchOnHand: 5, totalOnHand: 5 },
+  ],
+  refundUsd: 10.25, refundKhr: 0, replacements: [{ product: 'Rice 5kg', quantity: 1 }], by: 'Za',
+}).filter(Boolean), [
+  'Date: 09/03/2026 10:04',
+  'RET: RET-20260903-100405',
+  'INV: 20260901-153000',
+  'Customer: Sok Dara',
+  'Branch: Shop',
+  'Reason: Wrong size',
+  'Type: restock',
+  '• Rice 5kg 1 = $7.25 (restock) (lot 09012026) — Shop 13 · all branches 41',
+  '• Broken jar 2 = $3.00 (damaged) — Shop 5 · all branches 5',
+  '↔ Rice 5kg 1',
+  'Refund: $10.25',
+  'By: Za',
+])
+// a replacement-only return has no money: say so instead of "$0.00"
+const swap = telegram.formatReturnTelegramLines({ kind: 'customer', returnNumber: 'RET-1', items: [{ product: 'A', quantity: 1 }], refundUsd: 0, refundKhr: 0 }).filter(Boolean)
+assert.ok(swap.includes('Refund: none'), swap.join('\n'))
+assert.ok(!swap.some((line) => /^(INV|Customer|Branch|Reason|Type|Settlement|Loss|By):/.test(line)))
+
+// --- supplier return: stock out + settlement money, loss only when there is one ---
+assert.deepEqual(telegram.formatReturnTelegramLines({
+  kind: 'supplier', createdAt: '2026-09-03T03:04:05.000Z', returnNumber: 'SRET-20260903-100405', party: 'ABC Trading', branch: 'Warehouse',
+  reason: 'Expired on arrival', settlement: 'credit', items: [{ product: 'Milk 1L', quantity: 12, branchOnHand: 88, totalOnHand: 100 }],
+  compensationUsd: 9.6, compensationKhr: 0, lossUsd: 2.4, lossKhr: 0, by: 'Rath',
+}).filter(Boolean), [
+  'Date: 09/03/2026 10:04',
+  'SRET: SRET-20260903-100405',
+  'Supplier: ABC Trading',
+  'Branch: Warehouse',
+  'Reason: Expired on arrival',
+  'Settlement: credit',
+  '• Milk 1L 12 — Warehouse 88 · all branches 100',
+  'Supplier pays: $9.60',
+  'Loss: $2.40',
+  'By: Rath',
+])
+const writeoff = telegram.formatReturnTelegramLines({ kind: 'supplier', returnNumber: 'SRET-2', settlement: 'writeoff', items: [{ product: 'A', quantity: 1 }], compensationUsd: 0, compensationKhr: 0, lossUsd: 0, lossKhr: 0 }).filter(Boolean)
+assert.ok(writeoff.includes('Supplier pays: $0.00'))
+assert.ok(!writeoff.some((line) => line.startsWith('Loss:') || line.startsWith('Refund:')))
+
+// --- the event heading is the route's, the enable switch stays the category ---
+assert.ok(/heading: string/.test(fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'telegram.ts'), 'utf8')) === false, 'heading is optional on TelegramEvent')
+assert.ok(/event\.heading \|\| heading\[event\.type\]/.test(fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'telegram.ts'), 'utf8')))
 
 console.log('test-telegram-messages-pure: ok')

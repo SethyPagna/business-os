@@ -99,6 +99,7 @@ const returnsRoute = loadReal('routes/returns.ts', {
   '../lib/sqlBinding': loadReal('lib/sqlBinding.ts'),
   '../lib/auth': { requireAuth: async (c, next) => { c.set('user', FAKE_USER); return next() } },
   '../lib/audit': { audit: async () => {} },
+  '../lib/telegram': { sendReturnTelegramEvent: async () => false },
   '../lib/permissions': permissions,
   '../lib/conflictControl': {
     assertUpdatedAtMatch: () => {},

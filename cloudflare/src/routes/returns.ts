@@ -4,6 +4,7 @@ import { selectInChunks } from '../lib/sqlBinding'
 import { localDateAtOrAfter, localDateAtOrBefore, localDateExpr, localDateRangeClause } from '../lib/businessDateWindow'
 import { requireAuth, type SessionUser } from '../lib/auth'
 import { audit } from '../lib/audit'
+import { sendReturnTelegramEvent } from '../lib/telegram'
 import { getPermissionTier, getActionTier } from '../lib/permissions'
 import { assertUpdatedAtMatch, getExpectedUpdatedAt, writeConflictResponse, WriteConflictError } from '../lib/conflictControl'
 import { broadcast } from '../durable-objects/broadcastHub'
@@ -1210,6 +1211,15 @@ app.post('/', async (c) => {
     bumpVersion(c.env, 'sales'),
   ]))
   c.executionCtx.waitUntil(broadcast(c.env, 'returns', { action: 'create', id: returnId }))
+  // Telegram: the return as a receipt summary (RET / INV / customer / lines
+  // with refund and resulting on-hand / refund total) -- lib/telegram.ts
+  // reads the recorded lines back, so this passes only the header.
+  c.executionCtx.waitUntil(sendReturnTelegramEvent(c.env, returnId, {
+    kind: 'customer', returnNumber, receiptNumber: body.receipt_number || saleMeta.receipt_number || null,
+    party: body.customer_name || saleMeta.customer_name || null, branch: branchName, reason: body.reason || null,
+    returnType: body.return_type || 'restock', refundUsd: body.total_refund_usd || 0, refundKhr: body.total_refund_khr || 0,
+    by: user?.name || user?.username || null,
+  }).catch((error) => console.error('[telegram] return notification failed', error)))
   c.executionCtx.waitUntil(broadcast(c.env, 'sales', { action: 'update', id: body.sale_id || null }))
   return c.json({ id: returnId, returnNumber })
 })
@@ -1472,6 +1482,13 @@ app.post('/supplier', async (c) => {
     bumpVersion(c.env, 'returns'),
     bumpVersion(c.env, 'sales'),
   ]))
+  // Telegram: supplier return = stock out with the settlement money.
+  c.executionCtx.waitUntil(sendReturnTelegramEvent(c.env, returnId, {
+    kind: 'supplier', returnNumber, party: body.supplier_name || null,
+    branch: body.branch_id ? (await db.prepare('SELECT name FROM branches WHERE id = ?').get<{ name: string }>([body.branch_id]))?.name || null : null,
+    reason: body.reason || null, settlement, compensationUsd: supplierCompensationUsd, compensationKhr: supplierCompensationKhr,
+    lossUsd: supplierLossUsd, lossKhr: supplierLossKhr, by: user?.name || user?.username || null,
+  }).catch((error) => console.error('[telegram] supplier return notification failed', error)))
   c.executionCtx.waitUntil(broadcast(c.env, 'returns', { action: 'create', id: returnId }))
   return c.json({ id: returnId, returnNumber })
 })

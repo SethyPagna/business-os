@@ -10,6 +10,7 @@ import { maybeQueueForReview } from '../lib/reviewGate'
 import { broadcast } from '../durable-objects/broadcastHub'
 import { bumpVersion } from '../lib/cache'
 import { audit } from '../lib/audit'
+import { formatTransferTelegramLines, sendTelegramEvent } from '../lib/telegram'
 import { assertUpdatedAtMatch, getExpectedUpdatedAt, writeConflictResponse, WriteConflictError } from '../lib/conflictControl'
 import { findIdentityMatch, findIdentityMatches, type ProductIdentityRow } from '../lib/productIdentity'
 import { decrementBatchStockStatement, decrementBatchStockStrictStatement, incrementBatchStockStatement, resolveDestinationBatch, readFifoLotAvailability, allocateAcrossLots } from '../lib/productBatches'
@@ -489,6 +490,26 @@ app.post('/transfer', async (c) => {
   if (mergeTarget) c.executionCtx.waitUntil(broadcast(c.env, 'products', { action: 'update', id: destProductId }))
   c.executionCtx.waitUntil(bumpVersion(c.env, 'products'))
   c.executionCtx.waitUntil(broadcast(c.env, 'inventory', { action: 'update' }))
+  // Telegram: a transfer is a stock change, so the alert carries the
+  // resulting on-hand at both branches, read back after the write.
+  c.executionCtx.waitUntil((async () => {
+    const [fromRow, toRow, totalRow] = await Promise.all([
+      db.prepare('SELECT quantity FROM branch_stock WHERE product_id = @productId AND branch_id = @branchId').get<{ quantity: number }>({ productId, branchId: fromBranchId }),
+      db.prepare('SELECT quantity FROM branch_stock WHERE product_id = @productId AND branch_id = @branchId').get<{ quantity: number }>({ productId: destProductId, branchId: toBranchId }),
+      db.prepare('SELECT stock_quantity FROM products WHERE id = @productId').get<{ stock_quantity: number }>({ productId: destProductId }),
+    ])
+    await sendTelegramEvent(c.env, {
+      type: 'stock_out', heading: '🔁 Stock transferred',
+      lines: formatTransferTelegramLines({
+        fromBranch: fromBranch?.name || null, toBranch: toBranch?.name || null, note, by: user?.name || user?.username || null,
+        items: [{
+          product: product.name, quantity, lot: sourceBatch?.lot_code || null, mergedInto: mergeTarget ? destProductName : null,
+          fromOnHand: fromRow ? Number(fromRow.quantity) || 0 : null, toOnHand: toRow ? Number(toRow.quantity) || 0 : null,
+          totalOnHand: totalRow ? Number(totalRow.stock_quantity) || 0 : null,
+        }],
+      }),
+    })
+  })().catch((error) => console.error('[telegram] transfer notification failed', error)))
   return c.json(mergeTarget ? { mergedIntoProductId: destProductId, mergedIntoProductName: destProductName, destBatchId } : { destBatchId })
 })
 
@@ -765,6 +786,29 @@ app.post('/transfer-bulk', async (c) => {
   c.executionCtx.waitUntil(broadcast(c.env, 'products', { action: 'update' }))
   c.executionCtx.waitUntil(bumpVersion(c.env, 'products'))
   c.executionCtx.waitUntil(broadcast(c.env, 'inventory', { action: 'update' }))
+  // Telegram: same resulting-on-hand alert as /transfer, one line per item
+  // (the builder caps the list and states the remainder).
+  c.executionCtx.waitUntil((async () => {
+    const mergedInto = new Map(merges.map((merge) => [merge.productId, merge]))
+    const lines = await Promise.all(items.map(async (item) => {
+      const destProductId = mergedInto.get(item.productId)?.mergedIntoProductId ?? item.productId
+      const [fromRow, toRow, totalRow] = await Promise.all([
+        db.prepare('SELECT quantity FROM branch_stock WHERE product_id = @productId AND branch_id = @branchId').get<{ quantity: number }>({ productId: item.productId, branchId: fromBranchId }),
+        db.prepare('SELECT quantity FROM branch_stock WHERE product_id = @productId AND branch_id = @branchId').get<{ quantity: number }>({ productId: destProductId, branchId: toBranchId }),
+        db.prepare('SELECT stock_quantity FROM products WHERE id = @productId').get<{ stock_quantity: number }>({ productId: destProductId }),
+      ])
+      return {
+        product: productById.get(item.productId)?.name || `#${item.productId}`, quantity: item.quantity,
+        mergedInto: mergedInto.get(item.productId)?.mergedIntoProductName || null,
+        fromOnHand: fromRow ? Number(fromRow.quantity) || 0 : null, toOnHand: toRow ? Number(toRow.quantity) || 0 : null,
+        totalOnHand: totalRow ? Number(totalRow.stock_quantity) || 0 : null,
+      }
+    }))
+    await sendTelegramEvent(c.env, {
+      type: 'stock_out', heading: '🔁 Stock transferred',
+      lines: formatTransferTelegramLines({ fromBranch: fromBranch?.name || null, toBranch: toBranch?.name || null, note, by: user?.name || user?.username || null, items: lines }),
+    })
+  })().catch((error) => console.error('[telegram] bulk transfer notification failed', error)))
   return c.json({ success: true, transferredCount: items.length, merges })
 })
 

@@ -3,7 +3,9 @@ import { BUSINESS_UTC_OFFSET_MINUTES, businessToday, localTodayRangeClause } fro
 import type { Env } from '../index'
 
 export type TelegramEventType = 'sales' | 'status' | 'fees' | 'stock_in' | 'stock_out'
-export type TelegramEvent = { type: TelegramEventType; lines: string[] }
+// `heading` lets a route name the event (a return is not a sale, a transfer
+// is not a plain stock-out) while `type` stays the user's enable switch.
+export type TelegramEvent = { type: TelegramEventType; lines: string[]; heading?: string }
 
 type TelegramConfig = {
   enabled: boolean; chatId: string; token: string
@@ -70,7 +72,7 @@ export async function sendTelegramEvent(env: Env, event: TelegramEvent): Promise
   const config = await getTelegramConfig(env)
   if (!config.enabled || !config.categories[event.type] || configurationProblem(config)) return false
   const heading: Record<TelegramEventType, string> = { sales: '🛍️ Sale recorded', status: '🧾 Receipt status updated', fees: '💸 Fee recorded', stock_in: '📥 Stock in', stock_out: '📤 Stock out' }
-  await postTelegram(config, [heading[event.type], ...event.lines.map((line) => cleanLine(line))].filter(Boolean).join('\n'))
+  await postTelegram(config, [event.heading || heading[event.type], ...event.lines.map((line) => cleanLine(line))].filter(Boolean).join('\n'))
   return true
 }
 
@@ -278,4 +280,125 @@ export function formatStockChangeTelegramLines(change: TelegramStockChange): str
     onHand.length ? `On hand: ${onHand.join(' · ')}` : '',
     change.by ? `By: ${change.by}` : '',
   ]
+}
+
+// Transfers and returns are stock changes too ("for stock change, should
+// also show total stock"), so their alerts carry the resulting on-hand of
+// every touched product, read back after the write by the route. One
+// builder serves the single, bulk and inventory-page transfer routes; one
+// serves customer and supplier returns. Both are pure and pinned by
+// scripts/test-telegram-messages-pure.cjs. The event heading is chosen by
+// the route (TelegramEvent.heading) because a return is not a sale and a
+// transfer is not a plain stock-out, while the enable switch stays the
+// user's existing five categories.
+export type TelegramTransferLine = {
+  product: string; quantity: number; lot?: string | null; mergedInto?: string | null
+  fromOnHand?: number | null; toOnHand?: number | null; totalOnHand?: number | null
+}
+export type TelegramTransferSummary = {
+  createdAt?: string | null; fromBranch?: string | null; toBranch?: string | null
+  items: TelegramTransferLine[]; note?: string | null; by?: string | null
+}
+export type TelegramReturnLine = {
+  product: string; quantity: number; refundUsd?: number | null; lot?: string | null
+  stockAction?: string | null; branchOnHand?: number | null; totalOnHand?: number | null
+}
+export type TelegramReturnSummary = {
+  kind: 'customer' | 'supplier'; createdAt?: string | null; returnNumber: string
+  receiptNumber?: string | null; party?: string | null; branch?: string | null
+  reason?: string | null; returnType?: string | null; settlement?: string | null
+  items: TelegramReturnLine[]; refundUsd?: number | null; refundKhr?: number | null
+  compensationUsd?: number | null; compensationKhr?: number | null; lossUsd?: number | null; lossKhr?: number | null
+  replacements?: Array<{ product: string; quantity: number }>; by?: string | null
+}
+
+function onHandLine(parts: Array<[string, number | null | undefined]>): string {
+  const shown = parts.filter(([, value]) => value != null).map(([label, value]) => `${label} ${Number(value) || 0}`)
+  return shown.length ? `On hand: ${shown.join(' · ')}` : ''
+}
+
+export function formatTransferTelegramLines(transfer: TelegramTransferSummary): string[] {
+  const from = transfer.fromBranch || 'Source'
+  const to = transfer.toBranch || 'Destination'
+  const items = transfer.items.slice(0, TELEGRAM_MAX_ITEM_LINES).map((item) => {
+    const onHand = onHandLine([[from, item.fromOnHand], [to, item.toOnHand], ['all branches', item.totalOnHand]])
+    return `• ${cleanLine(item.product, 100)} ${Math.abs(Number(item.quantity) || 0)}`
+      + (item.lot ? ` (lot ${cleanLine(item.lot, 40)})` : '')
+      + (item.mergedInto ? ` → ${cleanLine(item.mergedInto, 100)}` : '')
+      + (onHand ? ` — ${onHand.slice('On hand: '.length)}` : '')
+  })
+  const total = transfer.items.reduce((sum, item) => sum + Math.abs(Number(item.quantity) || 0), 0)
+  return [
+    `Date: ${formatBusinessDateTime(transfer.createdAt)}`,
+    `From: ${from}`,
+    `To: ${to}`,
+    ...items,
+    transfer.items.length > TELEGRAM_MAX_ITEM_LINES ? `+ ${transfer.items.length - TELEGRAM_MAX_ITEM_LINES} more item(s)` : '',
+    `Total moved: ${total} unit(s) · ${transfer.items.length} product(s)`,
+    transfer.note ? `Note: ${transfer.note}` : '',
+    transfer.by ? `By: ${transfer.by}` : '',
+  ]
+}
+
+export function formatReturnTelegramLines(ret: TelegramReturnSummary): string[] {
+  const items = ret.items.slice(0, TELEGRAM_MAX_ITEM_LINES).map((item) => {
+    const onHand = onHandLine([[ret.branch || 'Branch', item.branchOnHand], ['all branches', item.totalOnHand]])
+    return `• ${cleanLine(item.product, 100)} ${Math.abs(Number(item.quantity) || 0)}`
+      + (item.refundUsd != null ? ` = ${usd(item.refundUsd)}` : '')
+      + (item.stockAction ? ` (${String(item.stockAction).replace(/_/g, ' ')})` : '')
+      + (item.lot ? ` (lot ${cleanLine(item.lot, 40)})` : '')
+      + (onHand ? ` — ${onHand.slice('On hand: '.length)}` : '')
+  })
+  const replacements = (ret.replacements || []).slice(0, TELEGRAM_MAX_ITEM_LINES)
+    .map((rep) => `↔ ${cleanLine(rep.product, 100)} ${Math.abs(Number(rep.quantity) || 0)}`)
+  const hasMoney = (ret.refundUsd || 0) !== 0 || (ret.refundKhr || 0) !== 0
+  return [
+    `Date: ${formatBusinessDateTime(ret.createdAt)}`,
+    `${ret.kind === 'supplier' ? 'SRET' : 'RET'}: ${ret.returnNumber}`,
+    ret.receiptNumber ? `INV: ${ret.receiptNumber}` : '',
+    ret.party ? `${ret.kind === 'supplier' ? 'Supplier' : 'Customer'}: ${ret.party}` : '',
+    ret.branch ? `Branch: ${ret.branch}` : '',
+    ret.reason ? `Reason: ${ret.reason}` : '',
+    ret.returnType ? `Type: ${String(ret.returnType).replace(/_/g, ' ')}` : '',
+    ret.settlement ? `Settlement: ${String(ret.settlement).replace(/_/g, ' ')}` : '',
+    ...items,
+    ret.items.length > TELEGRAM_MAX_ITEM_LINES ? `+ ${ret.items.length - TELEGRAM_MAX_ITEM_LINES} more item(s)` : '',
+    ...replacements,
+    ret.kind === 'supplier'
+      ? (ret.compensationUsd != null || ret.compensationKhr != null ? `Supplier pays: ${money(ret.compensationUsd, ret.compensationKhr)}` : '')
+      : (hasMoney ? `Refund: ${money(ret.refundUsd, ret.refundKhr)}` : 'Refund: none'),
+    ret.kind === 'supplier' && ((ret.lossUsd || 0) > 0 || (ret.lossKhr || 0) > 0) ? `Loss: ${money(ret.lossUsd, ret.lossKhr)}` : '',
+    ret.by ? `By: ${ret.by}` : '',
+  ]
+}
+
+// Return alerts read the recorded lines back (return_items is the truth the
+// route just wrote, incl. the lot each line landed in and its branch) and the
+// resulting on-hand per product, so the route hands over only the header.
+type ReturnItemRow = { product_name: string | null; quantity: number; total_usd: number | null; stock_action: string | null; lot_code: string | null; branch_on_hand: number | null; total_on_hand: number | null }
+export async function sendReturnTelegramEvent(env: Env, returnId: number, base: Omit<TelegramReturnSummary, 'items' | 'replacements'>): Promise<boolean> {
+  const db = getDb(env)
+  const [items, replacements] = await Promise.all([
+    db.prepare(`SELECT ri.product_name, ri.quantity, ri.total_usd, ri.stock_action, pb.lot_code,
+        (SELECT quantity FROM branch_stock WHERE product_id = ri.product_id AND branch_id = ri.branch_id) AS branch_on_hand,
+        (SELECT stock_quantity FROM products WHERE id = ri.product_id) AS total_on_hand
+      FROM return_items ri LEFT JOIN product_batches pb ON pb.id = ri.batch_id
+      WHERE ri.return_id = @returnId ORDER BY ri.id`).all<ReturnItemRow>({ returnId }),
+    db.prepare('SELECT product_name, quantity FROM return_replacement_items WHERE return_id = @returnId ORDER BY id').all<{ product_name: string | null; quantity: number }>({ returnId }).catch(() => []),
+  ])
+  return sendTelegramEvent(env, {
+    type: base.kind === 'supplier' ? 'stock_out' : 'sales',
+    heading: base.kind === 'supplier' ? '📤 Supplier return recorded' : '↩️ Return recorded',
+    lines: formatReturnTelegramLines({
+      ...base,
+      items: items.map((row) => ({
+        product: row.product_name || 'Item', quantity: Number(row.quantity) || 0,
+        refundUsd: base.kind === 'supplier' ? null : Number(row.total_usd) || 0,
+        stockAction: base.kind === 'supplier' ? null : row.stock_action, lot: row.lot_code,
+        branchOnHand: row.branch_on_hand == null ? null : Number(row.branch_on_hand) || 0,
+        totalOnHand: row.total_on_hand == null ? null : Number(row.total_on_hand) || 0,
+      })),
+      replacements: replacements.map((row) => ({ product: row.product_name || 'Item', quantity: Number(row.quantity) || 0 })),
+    }),
+  })
 }
