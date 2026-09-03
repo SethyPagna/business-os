@@ -3,6 +3,7 @@ import fs from 'node:fs'
 import { DEFAULT_TEMPLATE } from '../src/components/receipt-settings/constants.ts'
 import { parseReceiptTemplate, serializeReceiptTemplate } from '../src/components/receipt-settings/template.ts'
 import { computeImagePdfLayout } from '../src/utils/receiptPdfLayout.ts'
+import { normalizeReceiptPrintSettings, normalizeReceiptTemplate, RECEIPT_TEMPLATE_REVISION, DEFAULT_RECEIPT_TEMPLATE } from '../src/utils/receiptAppliedConfig.ts'
 
 let failed = 0
 
@@ -39,6 +40,13 @@ await runTest('serializeReceiptTemplate keeps default fields available for previ
   assert.equal(Array.isArray(reparsed.field_order), true)
 })
 
+await runTest('high-contrast bold receipt printing is enabled by default and can be disabled', () => {
+  assert.equal(normalizeReceiptPrintSettings({}).highContrastBold, true)
+  assert.equal(normalizeReceiptPrintSettings({ highContrastBold: true }).highContrastBold, true)
+  assert.equal(normalizeReceiptPrintSettings({ highContrastBold: false }).highContrastBold, false)
+  assert.equal(normalizeReceiptPrintSettings(JSON.stringify({ highContrastBold: 'false' })).highContrastBold, false)
+})
+
 await runTest('compact ABA receipt and KHR visibility settings survive a template round trip', () => {
   const serialized = serializeReceiptTemplate({
     sales_receipt_enabled: true,
@@ -71,6 +79,20 @@ await runTest('receipt preview remains strict-CSP compatible and binds buttons o
   assert.doesNotMatch(source, /Print \/ Save PDF/)
   assert.match(source, /data-receipt-action="close"/)
   assert.match(source, /function attachPrintablePreviewActions/)
+})
+
+await runTest('high-contrast print mode forces solid black bold text through every export path', () => {
+  const printSource = fs.readFileSync(new URL('../src/utils/printReceipt.ts', import.meta.url), 'utf8')
+  const receiptSource = fs.readFileSync(new URL('../src/components/receipt/Receipt.tsx', import.meta.url), 'utf8')
+  const cssSource = fs.readFileSync(new URL('../src/styles/main.css', import.meta.url), 'utf8')
+
+  assert.match(printSource, /function applyHighContrastBold/)
+  assert.match(printSource, /style\.setProperty\('color', '#000000', 'important'\)/)
+  assert.match(printSource, /style\.setProperty\('font-weight', '700', 'important'\)/)
+  assert.match(printSource, /applyHighContrastBold\(host, printSettings\)/)
+  assert.match(printSource, /Helvetica-Bold/)
+  assert.match(receiptSource, /data-receipt-high-contrast=\{highContrastBold \? 'true' : 'false'\}/)
+  assert.match(cssSource, /\[data-receipt-high-contrast='true'\] \*/)
 })
 
 await runTest('print export normalizes receipt root width inside paper frame', () => {
@@ -227,6 +249,55 @@ await runTest('receipt asset inlining uses bounded workers', () => {
   assert.match(utilSource, /await mapReceiptAssets\(nodes, async \(node\) =>/)
   assert.doesNotMatch(utilSource, /Promise\.all\(images\.map/)
   assert.doesNotMatch(utilSource, /Promise\.all\(nodes\.map/)
+})
+
+// --- KHR sub-lines are Grand-Total-only (template revision 2) --------------
+// These four lock the fix for a real trap: a saved template overrides the
+// defaults, so flipping DEFAULT_RECEIPT_TEMPLATE alone silently does nothing
+// for any business that has ever opened Receipt Settings (it auto-saves the
+// whole template). The revision upgrade is what actually clears them.
+
+await runTest('KHR sub-lines default off; only the grand total keeps KHR', () => {
+  assert.equal(DEFAULT_RECEIPT_TEMPLATE.show_item_khr, false)
+  assert.equal(DEFAULT_RECEIPT_TEMPLATE.show_discount_khr, false)
+  assert.equal(DEFAULT_RECEIPT_TEMPLATE.show_membership_discount_khr, false)
+  assert.equal(DEFAULT_RECEIPT_TEMPLATE.show_delivery_khr, false)
+  assert.equal(DEFAULT_RECEIPT_TEMPLATE.show_total_khr, true)
+})
+
+await runTest('a pre-revision saved template with KHR sub-lines ON is upgraded OFF', () => {
+  const upgraded = normalizeReceiptTemplate({
+    show_item_khr: true,
+    show_discount_khr: true,
+    show_membership_discount_khr: true,
+    show_delivery_khr: true,
+    show_total_khr: true,
+    font_size: 15,
+  })
+  assert.equal(upgraded.show_item_khr, false, 'per-item KHR must be cleared')
+  assert.equal(upgraded.show_discount_khr, false)
+  assert.equal(upgraded.show_membership_discount_khr, false)
+  assert.equal(upgraded.show_delivery_khr, false)
+  assert.equal(upgraded.show_total_khr, true, 'grand-total KHR must survive')
+  assert.equal(upgraded.font_size, 15, 'unrelated saved values must survive')
+  assert.equal(upgraded.template_revision, RECEIPT_TEMPLATE_REVISION)
+})
+
+await runTest('once stamped, a deliberate re-enable is NOT overwritten again', () => {
+  const reEnabled = normalizeReceiptTemplate({
+    template_revision: RECEIPT_TEMPLATE_REVISION,
+    show_item_khr: true,
+    show_delivery_khr: true,
+  })
+  assert.equal(reEnabled.show_item_khr, true, 'upgrade must run once, not every load')
+  assert.equal(reEnabled.show_delivery_khr, true)
+})
+
+await runTest('the receipt says Delivery, never Driver', () => {
+  const receiptSource = fs.readFileSync(new URL('../src/components/receipt/Receipt.tsx', import.meta.url), 'utf8')
+  assert.ok(!/'Driver:'/.test(receiptSource), 'the Driver label must be gone from the receipt')
+  assert.match(receiptSource, /driver: 'Delivery:'/, 'the delivery-contact row is labelled Delivery')
+  assert.match(receiptSource, /delivery: 'Delivery Fee:'/, 'the fee row stays distinct from the contact row')
 })
 
 if (failed > 0) {

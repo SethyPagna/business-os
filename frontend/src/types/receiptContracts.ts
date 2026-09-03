@@ -34,6 +34,9 @@ export interface NormalizedReceiptTemplate {
   show_tax: boolean
   show_delivery: boolean
   show_total_khr: boolean
+  // Bumped when a default changes that must also apply to ALREADY-SAVED templates.
+  // normalizeReceiptTemplate() upgrades anything below the current revision.
+  template_revision: number
   show_amount_paid: boolean
   show_change: boolean
   custom_header: string
@@ -66,6 +69,7 @@ export interface NormalizedReceiptTemplate {
 
 export interface ReceiptPrintSettings {
   paperSize: string
+  highContrastBold: boolean
   marginTop: string
   marginRight: string
   marginBottom: string

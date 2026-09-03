@@ -2,6 +2,12 @@ import type { AppliedReceiptConfig, NormalizedReceiptTemplate, ReceiptPrintSetti
 
 export const RECEIPT_PRINT_SETTINGS_STORAGE_KEY = 'bos_print_settings'
 
+// Revision 2 (Sep 2026): KHR is a Grand-Total-only line. Per-item, discount,
+// membership-discount and delivery KHR sub-lines are off. Because a saved
+// template overrides the defaults, the upgrade in normalizeReceiptTemplate()
+// below is what actually clears these for businesses that already saved one.
+export const RECEIPT_TEMPLATE_REVISION = 2
+
 export const DEFAULT_RECEIPT_TEMPLATE: NormalizedReceiptTemplate = {
   font_family: 'monospace',
   font_size: 12,
@@ -26,11 +32,11 @@ export const DEFAULT_RECEIPT_TEMPLATE: NormalizedReceiptTemplate = {
   show_item_sku: false,
   show_item_qty: true,
   show_item_unit_price: true,
-  show_item_khr: true,
+  show_item_khr: false,
   show_item_discount: true,
-  show_discount_khr: true,
-  show_membership_discount_khr: true,
-  show_delivery_khr: true,
+  show_discount_khr: false,
+  show_membership_discount_khr: false,
+  show_delivery_khr: false,
   show_subtotal: true,
   show_discount: true,
   show_membership_discount: true,
@@ -69,10 +75,12 @@ export const DEFAULT_RECEIPT_TEMPLATE: NormalizedReceiptTemplate = {
   sales_receipt_aba_account_number: '',
   sales_receipt_aba_qr_image: '',
   sales_receipt_note: 'none',
+  template_revision: RECEIPT_TEMPLATE_REVISION,
 }
 
 export const DEFAULT_RECEIPT_PRINT_SETTINGS: ReceiptPrintSettings = {
   paperSize: '80mm',
+  highContrastBold: true,
   marginTop: '4',
   marginRight: '4',
   marginBottom: '4',
@@ -114,11 +122,27 @@ function normalizeQrSocialLinks(value: unknown): NormalizedReceiptTemplate['qr_s
 }
 
 export function normalizeReceiptTemplate(value: unknown): NormalizedReceiptTemplate {
+  const saved = parseObject(value)
   const merged = {
     ...DEFAULT_RECEIPT_TEMPLATE,
-    ...parseObject(value),
+    ...saved,
   }
   merged.qr_social_links = normalizeQrSocialLinks(merged.qr_social_links)
+
+  // One-time upgrade. A template saved before revision 2 carries the old
+  // KHR sub-line defaults as EXPLICIT true values, so merging new defaults
+  // underneath them changes nothing -- the saved value always wins. Force the
+  // four sub-lines off once, then stamp the revision so this never re-runs and
+  // a later deliberate re-enable by the user is preserved.
+  const savedRevision = Number(saved.template_revision) || 0
+  if (savedRevision < RECEIPT_TEMPLATE_REVISION) {
+    merged.show_item_khr = false
+    merged.show_discount_khr = false
+    merged.show_membership_discount_khr = false
+    merged.show_delivery_khr = false
+  }
+  merged.template_revision = RECEIPT_TEMPLATE_REVISION
+
   return merged
 }
 
@@ -128,8 +152,12 @@ export function serializeReceiptTemplateValue(value: unknown): string {
 
 export function normalizeReceiptPrintSettings(value: unknown): ReceiptPrintSettings {
   const parsed = parseObject(value)
+  const storedHighContrast = parsed.highContrastBold
   return {
     paperSize: String(parsed.paperSize || DEFAULT_RECEIPT_PRINT_SETTINGS.paperSize),
+    highContrastBold: storedHighContrast === undefined
+      ? DEFAULT_RECEIPT_PRINT_SETTINGS.highContrastBold
+      : storedHighContrast === true || storedHighContrast === 1 || String(storedHighContrast).toLowerCase() === 'true',
     marginTop: String(parsed.marginTop || DEFAULT_RECEIPT_PRINT_SETTINGS.marginTop),
     marginRight: String(parsed.marginRight || DEFAULT_RECEIPT_PRINT_SETTINGS.marginRight),
     marginBottom: String(parsed.marginBottom || DEFAULT_RECEIPT_PRINT_SETTINGS.marginBottom),
