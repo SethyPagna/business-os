@@ -924,7 +924,7 @@ function buildSearchFilters(query: Record<string, string>, options: ProductSearc
     // via the trigram table, which makes "does the scan find both twins"
     // depend on an index rather than on a stated rule; this states it.
     const exactBarcodeMatch = titleOnly ? undefined : buildExactBarcodeMatchClause(rawSearchText, params)
-    if (exactBarcodeMatch) matchClauses.push(exactBarcodeMatch)
+    if (exactBarcodeMatch) matchClauses.unshift(exactBarcodeMatch)
     if (matchClauses.length) {
       searchWhereClause = matchClauses.length > 1 ? `(${matchClauses.join(' OR ')})` : matchClauses[0]
       // bm25() must be evaluated inside a query that itself carries the

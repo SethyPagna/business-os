@@ -234,7 +234,7 @@ function appendInventoryProductFilters(query: InventoryFilterQuery) {
     // products.ts uses; see buildExactBarcodeMatchClause in
     // lib/searchMatch.ts.
     const exactBarcodeMatch = titleOnly ? undefined : buildExactBarcodeMatchClause(rawSearchText, params)
-    if (exactBarcodeMatch) matchClauses.push(exactBarcodeMatch)
+    if (exactBarcodeMatch) matchClauses.unshift(exactBarcodeMatch)
     if (matchClauses.length) {
       searchWhereClause = matchClauses.length > 1 ? `(${matchClauses.join(' OR ')})` : matchClauses[0]
       if (!titleOnly && ftsMatch) {

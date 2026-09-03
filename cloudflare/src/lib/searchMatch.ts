@@ -1285,7 +1285,32 @@ export function buildExactBarcodeMatchClause(
   const key = searchTermBarcodeKey(rawQuery)
   if (!key) return undefined
   params[paramName] = key
-  return `${normalizedBarcodeSql(column)} = @${paramName}`
+  // Two probes, sargable one first. `products(barcode)` carries a plain index
+  // (idx_products_barcode_pg, migrations/0001_init.sql), which a predicate
+  // wrapped in ltrim()/replace() can never use -- so the literal forms the
+  // catalog actually stores (the bare code, and the same code zero-padded to
+  // GTIN-14 and beyond) are probed by equality against the raw column, and
+  // the normalized comparison stays behind them as the catch-all for stored
+  // values carrying spaces, hyphens or padding past that width. Both
+  // directions of the asymmetry are covered: a scanner emitting MORE leading
+  // zeros than the catalog stores folds down onto the bare candidate, and one
+  // emitting fewer is padded back up.
+  const candidates = barcodeEqualityCandidates(key)
+  const placeholders = candidates.map((candidate, index) => {
+    params[`${paramName}Eq${index}`] = candidate
+    return `@${paramName}Eq${index}`
+  })
+  return `(${column} IN (${placeholders.join(', ')}) OR ${normalizedBarcodeSql(column)} = @${paramName})`
+}
+
+// The stored literal forms one normalized barcode key can take. GTIN-14 is the
+// only padding this catalog is known to carry (~3000 rows), but padding to 18
+// costs five extra bound values on a 13-digit scan and removes the guesswork.
+export function barcodeEqualityCandidates(key: string, maxLength = 18): string[] {
+  if (!key) return []
+  const forms = [key]
+  for (let length = key.length + 1; length <= maxLength; length += 1) forms.push(key.padStart(length, '0'))
+  return forms
 }
 
 // Rank contribution that floats an exact barcode hit to the top of an

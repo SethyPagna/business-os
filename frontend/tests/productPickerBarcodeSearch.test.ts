@@ -198,4 +198,81 @@ assert.ok(
   'the Change-stock picker must never auto-select the first/only result',
 )
 
+// --- 5. a by-id lookup never resolves by position ------------------------
+// Second live bug, reported 2026-09-03 on an iPhone against production code:
+// opening Adjust Stock on "Dior Backstage Highlighter New 002" (id 7231)
+// loaded and would have written against "Abercrombie Authantic 10ml" (id 1).
+// /api/products/search never read the `ids` parameter this transport has
+// always sent, so a by-id lookup answered with page 1 of the whole catalog in
+// name order and every consumer that took items[0] bound itself to the
+// catalog's first row. The endpoint now filters; these locks keep the client
+// half honest, because StockAdjustModal builds its per-branch stock map -- and
+// therefore its remove-availability guard -- out of the FETCHED row.
+
+assert.match(
+  transport,
+  /ids: uniqueIds\.join\(','\)/,
+  'the by-id lookup must send the ids it wants',
+)
+assert.match(
+  transport,
+  /restrictPayloadToIds\(payload, uniqueIds\)/,
+  'and must drop any row it did not ask for, so a stale or older response cannot substitute a product',
+)
+assert.match(
+  transport,
+  /products:byIds:v2:/,
+  'the by-id cache key is versioned past the entries written while the endpoint ignored `ids`',
+)
+
+const BY_ID_CONSUMERS: Array<[string, string, RegExp]> = [
+  [
+    'StockAdjustModal refresh of the picked product',
+    '../src/components/products/forms/StockAdjustModal.tsx',
+    /\.find\(\(row\) => Number\(row\?\.id\) === Number\(id\)\)/,
+  ],
+  [
+    'Products fetchProductsByIds (post-save, undo/redo, created-row confirm)',
+    '../src/components/products/Products.tsx',
+    /wanted\.has\(Number\(\(row as \{ id\?: unknown \}\)\?\.id\)\)/,
+  ],
+  [
+    'Inventory movement product detail',
+    '../src/components/inventory/Inventory.tsx',
+    /\.find\(\(row: \{ id\?: unknown \}\) => Number\(row\?\.id\) === productId\)/,
+  ],
+]
+
+for (const [label, relPath, shape] of BY_ID_CONSUMERS) {
+  const source = readFileSync(new URL(relPath, import.meta.url), 'utf8')
+  assert.match(source, shape, `${label} must resolve the fetched row by id, not by position`)
+}
+
+const stockAdjustSource = readFileSync(
+  new URL('../src/components/products/forms/StockAdjustModal.tsx', import.meta.url),
+  'utf8',
+)
+assert.ok(
+  !/selectProduct\(\(rows\[0\]/.test(stockAdjustSource),
+  'the Change-stock refresh must never call selectProduct with items[0]',
+)
+// The guard this protects: the availability check reads the SELECTED row's
+// per-branch stock, so binding the form to the wrong row silently validated a
+// removal against a different product's quantity.
+assert.match(
+  stockAdjustSource,
+  /branchStockById/,
+  'the availability guard still derives from the selected product\'s branch stock',
+)
+
+const lookupSnapshots = readFileSync(
+  new URL('../src/components/products/lookups/productLookupSnapshots.ts', import.meta.url),
+  'utf8',
+)
+assert.match(
+  lookupSnapshots,
+  /const latest = latestMap\.get\(productId\)/,
+  'the lookup rename-undo must stay keyed on the snapshot id (fail-closed: it restored nothing, never the wrong product)',
+)
+
 console.log('PASS productPickerBarcodeSearch')

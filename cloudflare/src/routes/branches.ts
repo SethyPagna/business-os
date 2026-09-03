@@ -904,7 +904,7 @@ function buildBranchStockWhere(c: any, branchId: number, { includeStockState = t
     // whatever this WHERE misses is simply gone.
     const exactBarcodeMatch = buildExactBarcodeMatchClause(rawQuery, params)
     if (exactBarcodeMatch) {
-      matchClauses.push(exactBarcodeMatch)
+      matchClauses.unshift(exactBarcodeMatch)
       matchRankSql = buildExactBarcodeRankSql()
     }
     if (matchClauses.length) {
