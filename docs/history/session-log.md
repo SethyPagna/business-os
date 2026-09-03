@@ -17429,3 +17429,84 @@ buttons, column scoping for non-admins); the reports plan/UI (per-sale profit li
 views, calculation options); stock-reason unification in Settings; the fees→expenses leftovers
 (`km.json` ~895, `Settings.tsx` ~1846, `en.json` ~4116) and the income type; Telegram events from
 transfers/returns/stock-in sessions; the 375 px Products overflow (RC P2-4 lane).
+
+## Part 582 (Sep 3 2026, session business-os-v1-6d, worker, main tree) — Telegram transfer/return alerts; read-only outage support for the coordinator; fees-lane review + commit 2; the i18n-30-keys patch ported onto the deployed hotfix tip
+
+Reference to re-verify, not ground truth.
+
+**Ask** — "continue" the Part-581 backlog (Telegram completeness, delivery-contact rename parity),
+then the production-outage priority relayed by coordinator business-os-v1-d9 from the user (sales,
+printing, POS, product save and stock transfer reported not working): pause feature hunks in the
+main tree, supply read-only facts, author patches only, nothing pushed or deployed without the user.
+
+**What changed** — one commit pushed to main before the pause: `98f8ee79` —
+`cloudflare/src/lib/telegram.ts` (`TelegramEvent.heading?`, `formatTransferTelegramLines`,
+`formatReturnTelegramLines`, `sendReturnTelegramEvent`), `routes/branches.ts` (`/transfer`,
+`/transfer-bulk` alerts with resulting on-hand per branch and across branches), `routes/inventory.ts`
+(`/transfer`), `routes/returns.ts` (customer + supplier returns),
+`scripts/test-telegram-messages-pure.cjs`, `scripts/test-returns-batch-restock-pure.cjs` (telegram
+stub). Everything after that is patches under `outputs/audit-6d-20260903/` that d9 applied on the
+hotfix branch `hotfix/prod-2026-09-03`:
+- `fees-lane-review.md` — the six dirty fees-lane files + migration 0105 are byte-identical to the
+  deployed Worker `fd496449` patch; the revenue kernel is untouched; `collected_usd = total_usd` is a
+  real fix (prod: 4,398/4,398 customer-paid delivery sales carry the fee inside `total_usd`,
+  POS.tsx:2555); the Dashboard validator `tx_count` fix is correct (`transaction_count` exists
+  nowhere in `cloudflare/src`); migration additive and already applied remotely as id 105. Verdict:
+  commit as-is, never ship alone. d9 landed the lane as `3bf58d6c`.
+- `fees-lane-commit2.patch` — `test-sales-day-report-pure.cjs` (ABA collected 25 not 27, customer
+  day 35 not 37; fixture lifts `delivery_contacts`, `fees` from 0018 and the 0105 column),
+  `test-sales-revenue-convergence-pure.cjs` (fixture gains `delivery_contacts` + `fees`), both
+  packs gain `linked_delivery_expenses` / `expense_rows`. Landed as `835a99f8`.
+- `i18n-30-keys.patch` — 3 commits on the deployed tip `aae18fba`. Commits 1–2 are the
+  `rc/fix-i18n-missing-keys` commits `1b771b25` (30 keys in both packs) and `6b2472f9`
+  (`{placeholder}` interpolation at the 11 runtime-value `tr()` sites — FastStockInModal, Inventory,
+  ManageBatchesModal, ReceiveBatchModal, StockInSessionsSection, Users, OtpModal) ported
+  content-identical (diff bodies equal, only hunk offsets differ). Commit 3 is km.json only: seven
+  strings aligned with the packs' own vocabulary (line item ជួរ not បន្ទាត់; receipt វិក្កយបត្រ not
+  បង្កាន់ដៃ; backup បម្រុងទុក instead of the English word; queued បានដាក់ជួរ not the pack's "pending";
+  receipt_cost ថ្លៃទិញតាមវិក្កយបត្រ; restore key កូនសោ per Wiktionary). Not re-authored: the branch
+  already did the work; its owner is unknown to d9 and it was not written to.
+
+**What was found** (read-only, all supplied to d9)
+- Outage theories closed with evidence: the service worker self-heals (navigations network-first
+  with `cache: 'no-store'`, cached shell only when fetch throws; hashed assets cache-first behind a
+  MIME guard, so SPA-fallback HTML never poisons the cache); the live build was self-consistent
+  (230/230 precached assets 200 with JS/CSS MIME); every chunk name failing in Sentry belonged to
+  the pre-17:49Z build; Sentry quiet (0 errors in 8 h, spans/logs datasets empty); prod D1 had no
+  user-driven audit row after 2026-09-02 14:58:58Z and the last sale at 09:42:28Z.
+- Twin merge on transfer is impossible under the deployed identity rule (`name_key` + barcode +
+  cost cents): 0 matching active pairs among the 4,167 reconciliation product rows (created
+  2026-09-02T15:30:00.000Z; 4,026 with barcode, 876 with cost, 681 holding 4,256 units). Worked
+  example product 1 / twin 6105: a 1-unit Shop→Warehouse transfer moves `branch_stock` 2:8→7,
+  1:0→1 under product 1 (`{ destBatchId: 55411 }`); transferring the twin → 400 insufficient stock.
+- `t(key)` takes no params and every `tr`/`copy`/`translateLabel` wrapper returns the pack string
+  verbatim, so a packs-only fix for the 11 dynamic keys either drops the quantity/product/branch
+  details or renders literal `{quantity}`; the packs' convention is fallback-with-placeholder +
+  `.replace` at the call site (ContactImportConflictsModal, TransferModal), which commit 2 follows.
+- `rc/fix-i18n-missing-keys` exists as worktree `bos-rc-workers/fix-i18n` (Sep 2 22:36/22:57
+  +0700, Co-Authored Claude Sonnet) — a duplicate lane that the board did not show.
+
+**Verified** — `98f8ee79`: `npx tsc --noEmit` exit 0 in both packages; Worker pure sweep green except
+the two fees-lane reds later fixed by commit 2; live local API probe of the three transfer routes
+forward + reverse (product 5001, lots 9101/9102) with stock restored 25/0 and no `[telegram]` errors.
+Commit 2 (scratch worktree at origin/main + lane + 0105): day-report 26/26, convergence 16/16,
+`dashboardDataReliability.test.ts` PASS, tsc both exit 0, verify:i18n unchanged 30 pre-existing reds.
+i18n patch (scratch worktree at `aae18fba` + 3 commits, node_modules junctioned): `npm run
+verify:i18n` exit 0 — "4442 pack keys, 443 source files, every referenced key resolves in both
+packs" (`835a99f8` exits 1 with the 30); `langKeyIntegrity`, `portalLanguagePacks`,
+`portalContentI18n`, `portalTranslateController` PASS; frontend `tsc` exit 0; every frontend test
+file individually 161/161 green; both packs 4,442 keys, 0 duplicates, JSON.parse clean, CRLF kept;
+`git apply --check` + `git am` clean on a fresh `aae18fba` worktree. Local fixture sale 13 restored
+(`delivery_contact_id/name = NULL`). Deploy state relayed by d9 via 80, not verified here:
+`aae18fba` live as Worker `2ab62468…` (build `d2ac9efccdde3477`), origin/main fast-forwarded
+`98f8ee79 → aae18fba`; the D1 restore (Gate B) unapproved.
+
+**Not done** — delivery-contact rename parity: built and typechecked, restored to HEAD on the pause
+(scratchpad `delivery-rename-parity.patch` / `patch-delivery-rename.cjs`; the SuppliersTab parity lock
+must use `getRenameImpact('supplier'` with `source.includes(fetcher)`; browser verification pending).
+The Part-581 open list stands: rename link-over spec (delivery contacts / branches / fee labels /
+users → Conflicts), permission sweep leftovers (`compat.ts` `/import-jobs` bypass, cost exposure to
+POS-only roles, ungated export/import buttons, non-admin column scoping), reports plan (8c owns the
+RC Reports redesign), stock-reason presets in Settings, fees→expenses leftovers + income type, the
+375 px Products overflow, and the user-gated production forward fixes (never restore the
+Time-Travel bookmark `0000118e-…` or apply `twin-merge.sql` without the user).

@@ -121,6 +121,19 @@ Two rules learned the hard way, both from real incidents in this file's own hist
 
 ## Current status
 
+**✅ TELEGRAM TRANSFER/RETURN ALERTS + FEES-LANE REVIEW/COMMIT 2 + i18n-30-KEYS PATCH (Sep 3, session business-os-v1-6d, main tree, worker — Part 582; reference to re-verify).**
+Committed + pushed `98f8ee79` (Telegram events for `/transfer`, `/transfer-bulk`, inventory `/transfer`, customer +
+supplier returns, resulting on-hand per branch). Read-only outage support for coordinator d9: service worker /
+live build / Sentry / prod D1 facts (no twin merge possible under the deployed identity rule; 4,167 reconciliation
+rows), `outputs/audit-6d-20260903/fees-lane-review.md` (verdict: commit as-is, never ship alone — d9 landed it as
+`3bf58d6c` + my `fees-lane-commit2.patch` = `835a99f8`), and `outputs/audit-6d-20260903/i18n-30-keys.patch` (3
+commits on `aae18fba`: the two `rc/fix-i18n-missing-keys` commits ported content-identical + a km-only polish of 7
+strings; verify:i18n exit 0, 4 lang tests PASS, tsc 0, 161/161 frontend test files green — d9 folds it into the
+next deploy). **Parked, no dirty files:** delivery-contact rename parity (scratchpad `delivery-rename-parity.patch`).
+**Still open from Part 581:** rename link-over spec, permission sweep leftovers, reports plan, stock-reason presets,
+375 px Products overflow, user-gated production forward fixes (never restore the Time-Travel bookmark or apply
+`twin-merge.sql` without the user).
+
 **✅ PRODUCTS "CANNOT SAVE" ROOT CAUSE + RENAME PROMPT LAYER + `/products/filters` GATE + TELEGRAM RECEIPT ALERTS (Sep 3, session business-os-v1-6d, main tree, worker — DONE, committed + pushed `352ed476` `f1436b08` `aa59016f` `69ed7a1f`; d9 sweeps into the RC; Part 581).**
 "Products page actions cannot save": ProductForm rendered its save-confirm + rename-cascade dialogs only inside the
 Pricing tab block, so the awaited save promise never resolved on Basic Info / Stock / Expiry (`69ed7a1f`, lock in
