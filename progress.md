@@ -2468,6 +2468,35 @@ messages. **[ ]** not started · **[~]** in progress · **[x]** done (branch nam
   which is where it was given; whether the rest of the app follows is a one-line ruling nobody
   should take unilaterally. Raised by `business-os-v1-9f`.
 
+- [ ] **S4-27 · The batch → received date rename is one field deep.** The user asked to "make
+  sure the renamed batch to received date is updated throughout the system". Swept exhaustively
+  on Sep 4; the full matrix with every `path:line` and a verdict per hit is
+  [docs/2026-09-04-batch-to-received-date-sweep.md](docs/2026-09-04-batch-to-received-date-sweep.md).
+  The rename landed on **the date input only**. `en.json:312` still reads `"batch_date": "Batch
+  date"` — the very field — and `batch_code_preview` = "Batch code" renders one line under an
+  input already labelled "Received date". Six of the matrix's claims were re-verified in source
+  before boarding this; all six held exactly.
+  - **Do not touch** the CSV header `batch(mm/dd/yyyy)` (compat surface), the `product_batches`
+    columns (a migration, not a label change), or the "batch session" / chunk-size senses of the
+    word. The matrix classifies each.
+- [ ] **S4-27a · Defects that are wrong whichever way the rename is ruled** — no ruling needed,
+  do these regardless. `km.json:855` and `:882` carry the Latin word `batch` inside the Khmer
+  sentence. `ProductRowParts.tsx:107` passes `'Batch'` as the *Khmer* argument to `tr()`.
+  `POS.tsx:2914-2915` uses one identical English sentence for both languages.
+  `StockChangeSection.tsx:748` and `ProductDetailReport.tsx:301` call `batchDisplayLabel()` with
+  no `batchWord`, so its English `'Batch'` default renders for Khmer users.
+  `ProductsImageOnlyView.tsx:707` and `movementGroups.ts:319` print the raw lot code (`08242026`,
+  `Lot 08242026`) instead of decoding it — the exact MMDDYYYY-where-a-date-belongs defect
+  `batchLabel.ts` exists to prevent. `CreatedDateFilterOptions.tsx:51` is labelled "Created"
+  while filtering on `received_at`.
+- [?] **S4-27b · Does the noun move too?** Renaming the date *field* is unambiguous. Renaming the
+  collection noun is a product call: "Manage Batches" → "Manage received dates"? the `Batches`
+  button? the `Batch` column header in three tables? Needs one line from the user. Two smaller
+  rulings ride along: whether **"lot"** is an accepted synonym or itself a rename target (English
+  already drifted the `transfer_*` keys and the POS empty states to "lot" while Khmer stayed on
+  `បាច់`, with no decision record either way), and **which Khmer noun** wins for "received date"
+  — three spellings are in use today.
+
 ### Sep-4 lane assignments (business-os-v1-c3, Part 589)
 
 Sent by `SendMessage` on Sep 4 2026. Every lane branches off the **deployed tip `e3678a39`**, not
