@@ -103,7 +103,12 @@ runTest('desktop columns fit the available width and overflow remains reachable'
   // Name and Details flex with the table while the four numeric columns stay
   // compact. This keeps Stock/Qty in the default viewport at xl widths.
   const colgroup = surface.slice(surface.indexOf('<colgroup>'), surface.indexOf('</colgroup>'))
-  assert.match(colgroup, /<col \/>\s*<col style=\{\{ width: '10\.5rem' \}\} \/>/)
+  // Name auto, Details bounded and immediately adjacent -- unchanged. The
+  // bound itself moved 10.5rem -> 12.5rem: 10.5rem was seven pixels under the
+  // two branch chips, so they wrapped and every row in the report grew (see
+  // the colgroup comment). The five bounded widths still sum to 42rem, well
+  // inside the 58rem table minimum asserted three lines below.
+  assert.match(colgroup, /<col \/>\s*(?:\{\/\*[\s\S]*?\*\/\}\s*)?<col style=\{\{ width: '12\.5rem' \}\} \/>/)
   assert.strictEqual((colgroup.match(/<col style=\{\{ width: '[\d.]+rem' \}\} \/>/g) || []).length, 5)
   assert.match(surface, /<div className="relative overflow-x-auto">/)
   assert.match(surface, /<table className="w-full min-w-\[58rem\] table-fixed/)

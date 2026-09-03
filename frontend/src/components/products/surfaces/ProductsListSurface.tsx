@@ -187,7 +187,17 @@ export default function ProductsListSurface({
       {/* Name is the one auto column: it receives exactly the remaining
           width after the compact, bounded Details and numeric columns. */}
       <col />
-      <col style={{ width: '10.5rem' }} />
+      {/* Details holds one chip per branch ("Main Store: 10", "Branch 2: 0")
+          plus SKU / unit / supplier / discount chips. Measured at 1280 with
+          the two production branches: the pair is 151px wide and the old
+          10.5rem column left 144px of content box, so they wrapped onto two
+          lines by SEVEN pixels and every row in the report grew to 103px --
+          while Name, the auto column, sat at 396px for a 134px product name.
+          12.5rem gives the chips 176px, they fit on one line as
+          ProductRowParts' `flex-wrap` intends, and the row falls to 85px
+          (-17%) with Name still at 364px. Bounded, not auto: the point of
+          this column is to stay compact so the numeric columns stay put. */}
+      <col style={{ width: '12.5rem' }} />
       <col style={{ width: '5.5rem' }} />
       <col style={{ width: '6.5rem' }} />
       <col style={{ width: '5rem' }} />
