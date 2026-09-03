@@ -1,8 +1,10 @@
+import { useEffect, useState } from 'react'
 import X from 'lucide-react/dist/esm/icons/x.js'
 import { createPortal } from 'react-dom'
 import { useApp as useAppHook } from '../../AppContext.tsx'
 import { fmtTime } from '../../utils/formatters.ts'
 import CopyableId from '../shared/CopyableId.tsx'
+import { getReturn as fetchReturnDetail } from '../../api/returnsReadTransport.ts'
 import { normalizeStockAction, stockActionOption } from './helpers/returnOptions.ts'
 
 const CUSTOMER_SCOPE = 'customer'
@@ -30,6 +32,7 @@ interface ReplacementLineItem {
 }
 
 interface ReturnDetail {
+  id?: number | string | null
   return_number?: string | null
   created_at?: string | Date | null
   items?: ReturnLineItem[] | null
@@ -87,9 +90,41 @@ export default function ReturnDetailModal({ ret, onClose, onEdit, fmtUSD, fmtKHR
     return value && value !== key ? value : fallback
   }
 
+  // The Returns list read deliberately does not carry items -- one row per
+  // return, no per-line fan-out (see routes/returns.ts GET /'s includeItems
+  // gate). So the row this modal is handed has none, and every return opened
+  // from the list read "Items (0)" with no lines and no replacement block.
+  // Fetch them here, once per return, the same way the edit path already
+  // does: the prop stays authoritative whenever it does carry them.
+  const [fetched, setFetched] = useState<{ items: ReturnLineItem[]; replacement_items: ReplacementLineItem[] } | null>(null)
+  const returnId = ret?.id ?? null
+  const propItems = Array.isArray(ret?.items) && ret.items.length ? ret.items : null
+  const needsFetch = returnId != null && !propItems
+  useEffect(() => {
+    if (!needsFetch || returnId == null) { setFetched(null); return }
+    let alive = true
+    setFetched(null)
+    void (async () => {
+      try {
+        const detail = await fetchReturnDetail(returnId) as { items?: ReturnLineItem[] | null; replacement_items?: ReplacementLineItem[] | null } | null
+        if (!alive || !detail) return
+        setFetched({
+          items: Array.isArray(detail.items) ? detail.items : [],
+          replacement_items: Array.isArray(detail.replacement_items) ? detail.replacement_items : [],
+        })
+      } catch {
+        // A failed line fetch must not blank a return the operator can already
+        // read: the header keeps rendering what the list row carried.
+      }
+    })()
+    return () => { alive = false }
+  }, [needsFetch, returnId])
+
   if (!ret) return null
-  const items = Array.isArray(ret.items) ? ret.items : []
-  const replacementItems = Array.isArray(ret.replacement_items) ? ret.replacement_items : []
+  const items = propItems && propItems.length ? propItems : (fetched?.items || [])
+  const replacementItems = Array.isArray(ret.replacement_items) && ret.replacement_items.length
+    ? ret.replacement_items
+    : (fetched?.replacement_items || [])
   const scope = normalizeScope(ret.return_scope)
   const isSupplier = scope === SUPPLIER_SCOPE
 
