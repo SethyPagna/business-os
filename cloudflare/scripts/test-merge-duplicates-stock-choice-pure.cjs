@@ -185,6 +185,14 @@ const q = (d1, sql) => d1.db.prepare(sql).all().map(plain)
 const one = (d1, sql) => plain(d1.db.prepare(sql).get())
 const branchNames = new Map([[SHOP, 'shop'], [WAREHOUSE, 'warehouse']])
 
+// The route's SQL_NAME_GROUP_KEY, restated. The check below asserts the route
+// still builds this exact chain, so the two cannot drift apart silently.
+const SQL_NAME_GROUP_KEY_SQL = (column) => {
+  const spaced = 'replace(replace(replace(' + column + ", char(9), ' '), char(10), ' '), char(13), ' ')"
+  const collapse = (inner) => 'replace(' + inner + ", '  ', ' ')"
+  return 'lower(trim(' + collapse(collapse(collapse(collapse(spaced)))) + '))'
+}
+
 // A whole-database row-count fingerprint, so "nothing was written" can be
 // asserted as a fact rather than spot-checked.
 function fingerprint(d1) {
@@ -439,6 +447,238 @@ async function main() {
       assert.equal(stats.reversal.stockDisposition, 'merge')
       assert.equal(one(d1, `SELECT is_active FROM products WHERE id = ${DUP}`).is_active, 0, 'the duplicate is still retired')
       assert.equal(Number(one(d1, `SELECT COUNT(*) AS n FROM return_items WHERE product_id = ${KEEPER}`).n), 1)
+    })
+  }
+
+  console.log('-- IDENTITY: barcode/cost are identity fields, and the sweep sees EVERY child row --')
+  {
+    const d1 = seed()
+    const { mod } = loadProductsRoute(d1)
+
+    await check('a barcode-only difference is reported as a real identity difference', () => {
+      const diff = mod.compareMergeIdentity(
+        { name: 'Face Cream', barcode: '689304051040', cost_price_usd: 8 },
+        { name: 'Face Cream', barcode: '0689304051040', cost_price_usd: 8 },
+      )
+      assert.equal(diff.same, false, 'a leading-zero twin is NOT automatically the same product row')
+      assert.deepEqual(diff.differs.map((d) => d.field), ['barcode'])
+      assert.equal(diff.differs[0].keeper, '689304051040')
+      assert.equal(diff.differs[0].discarded, '0689304051040')
+    })
+
+    await check('a cost-only difference is reported too -- real money out is never averaged away silently', () => {
+      const diff = mod.compareMergeIdentity(
+        { name: 'Face Cream', barcode: 'X', cost_price_usd: 8 },
+        { name: 'Face Cream', barcode: 'X', cost_price_usd: 9.5 },
+      )
+      assert.equal(diff.same, false)
+      assert.deepEqual(diff.differs.map((d) => d.field), ['cost_price_usd'])
+      assert.equal(diff.differs[0].keeper, '8')
+      assert.equal(diff.differs[0].discarded, '9.5')
+    })
+
+    await check('identical name + barcode + cost is the same product, with nothing to warn about', () => {
+      const diff = mod.compareMergeIdentity(
+        { name: 'Face  Cream', barcode: ' X ', cost_price_usd: 8.0 },
+        { name: 'face cream', barcode: 'x', cost_price_usd: 8 },
+      )
+      assert.equal(diff.same, true, 'whitespace, case and float noise are not identity')
+      assert.deepEqual(diff.differs, [])
+    })
+
+    await check('selling price is NOT identity -- it is a mergeable field', () => {
+      const diff = mod.compareMergeIdentity(
+        { name: 'Face Cream', barcode: 'X', cost_price_usd: 8, selling_price_usd: 22 },
+        { name: 'Face Cream', barcode: 'X', cost_price_usd: 8, selling_price_usd: 25 },
+      )
+      assert.equal(diff.same, true)
+    })
+
+    await check('the merge audit records whether the two rows were really the same product', async () => {
+      const fixture = seed()
+      const { mod: m2, adapter: a2, auditCalls } = loadProductsRoute(fixture)
+      await m2.foldDuplicateProductInto(
+        {}, a2, { id: 42, name: 'Reviewer' },
+        { id: KEEPER, name: 'Anastasia Dipbrow Pomade Dark Brown' },
+        { id: DUP, name: 'Anastasia Dipbrow Pomade Dark Brown', image_path: null },
+        branchNames, 'possible-duplicates review merge', 'merge',
+      )
+      const entry = auditCalls.find((c) => c.action === 'merge_duplicate')
+      assert.ok(entry, 'the merge must be audited')
+      // The fixture pair differs by the leading zero, which IS an identity
+      // difference -- the audit has to be able to answer for that afterwards.
+      assert.equal(entry.detail.sameIdentity, false)
+      assert.deepEqual(entry.detail.identityDiffers, ['barcode'])
+    })
+
+    await check('the twin sweep returns EVERY identical child row, not the first one SQLite hands back', () => {
+      // Three rows, one name, same barcode and cost: the rows[0] class of bug
+      // is exactly "three became one because a LIMIT 1 picked a winner".
+      const routeSrc = fs.readFileSync(path.join(SRC, 'routes', 'products.ts'), 'utf8')
+      const at = routeSrc.indexOf('async function findSameProductIdentityProducts')
+      assert.ok(at > 0, 'the sweep must exist as its own function')
+      const body = routeSrc.slice(at, at + 1400)
+      assert.ok(!/LIMIT 1/.test(body), 'a LIMIT 1 here is the defect, not the fix')
+      assert.match(body, /ORDER BY id ASC/, 'the survivor must be deterministic (lowest id), never arbitrary')
+      assert.match(body, /detailsMergeCompatible\(details, row\)/,
+        'identity must be decided by the SHARED rule, not re-spelled in SQL')
+      assert.match(body, /normalizeProductGroupName\(row\.name\) === nameKey/)
+      // And the 409 the product form sees carries all of them, not one.
+      const createAt = routeSrc.indexOf('const identityTwins = await findSameProductIdentityProducts')
+      assert.ok(createAt > 0)
+      assert.match(routeSrc.slice(createAt, createAt + 900), /duplicateCount: identityTwins\.length/)
+    })
+
+    await check('a DOUBLED-SPACE sibling is swept -- the stored name_key does not collapse whitespace', () => {
+      // products.name_key is lower(trim(name)) (migration 0010), which leaves
+      // "Face  Cream" as "face  cream", while normalizeProductGroupName makes
+      // it "face cream". Matching only the stored key would make this row
+      // invisible; matching only the collapse expression would miss a row
+      // whose stored key is stale. The query has to accept both.
+      d1.db.prepare(`INSERT INTO products (id, name, name_key, barcode, cost_price_usd, is_active)
+        VALUES (401, 'Face Cream', 'face cream', 'FC-1', 4, 1),
+               (402, 'Face  Cream', 'face  cream', 'FC-1', 4, 1)`).run()
+      const nameKey = 'face cream'
+      const rows = q(d1, `
+        SELECT id FROM products
+        WHERE is_active = 1
+          AND (name_key = '${nameKey}' OR ${SQL_NAME_GROUP_KEY_SQL('name')} = '${nameKey}')
+          AND id IN (401, 402)
+        ORDER BY id ASC`)
+      assert.deepEqual(rows.map((r) => r.id), [401, 402],
+        'the doubled-space sibling must be swept in, not dropped by the uncollapsed key')
+      // ...and the route builds the same expression this check just ran.
+      const routeSrc2 = fs.readFileSync(path.join(SRC, 'routes', 'products.ts'), 'utf8')
+      assert.ok(routeSrc2.includes("char(9), ' '") && routeSrc2.includes("'  ', ' '"),
+        'the route must still collapse tabs/newlines and runs of spaces')
+      assert.match(routeSrc2, /name_key = @nameKey OR \$\{SQL_NAME_GROUP_KEY\('name'\)\} = @nameKey/,
+        'the identity sweep must accept BOTH the stored key and the collapsed name')
+    })
+  }
+
+  console.log('-- COST RULING: 0/NULL is a MISSING cost, not a different one --')
+  {
+    const { mod } = loadProductsRoute(seed())
+
+    await check('one side missing: the rows do NOT disagree, and the survivor takes the real cost', () => {
+      const diff = mod.compareMergeIdentity(
+        { name: 'Face Cream', barcode: 'X', cost_price_usd: 0, cost_price_khr: 0 },
+        { name: 'Face Cream', barcode: 'X', cost_price_usd: 8, cost_price_khr: 0 },
+      )
+      assert.equal(diff.same, true, 'a missing cost is not a difference')
+      assert.deepEqual(diff.differs, [], 'and it is never listed as one')
+      assert.equal(diff.costVerdict, 'missing')
+      assert.deepEqual(diff.costFill, [{ field: 'cost_price_usd', value: 8 }],
+        'the operator is told which cost lands on the kept row')
+    })
+
+    await check('both sides set and different: REVIEW ONLY -- never averaged, never auto-merged', () => {
+      const diff = mod.compareMergeIdentity(
+        { name: 'Face Cream', barcode: 'X', cost_price_usd: 8 },
+        { name: 'Face Cream', barcode: 'X', cost_price_usd: 9.5 },
+      )
+      assert.equal(diff.same, false)
+      assert.equal(diff.costVerdict, 'differs')
+      assert.deepEqual(diff.costFill, [], 'a real difference is the operator\'s to resolve, not the fold\'s to fill')
+    })
+
+    await check('both missing is agreement, not a difference', () => {
+      const diff = mod.compareMergeIdentity(
+        { name: 'Face Cream', barcode: 'X', cost_price_usd: 0 },
+        { name: 'Face Cream', barcode: 'X', cost_price_usd: null },
+      )
+      assert.equal(diff.same, true)
+      assert.equal(diff.costVerdict, 'same')
+      assert.deepEqual(diff.costFill, [])
+    })
+  }
+
+  console.log('-- COST RULING through the REAL fold, and back through the REAL undo --')
+  {
+    await check('a keeper with NO cost takes the discarded row\'s, and undo puts the blank back', async () => {
+      const d1 = seed()
+      const { mod, adapter, auditCalls } = loadProductsRoute(d1)
+      const undo = loadTs(path.join('lib', 'undoAppliers.ts'), {
+        '../index': {}, './auth': {}, './db': { getDb: () => adapter }, './audit': { audit: async () => {} },
+        '../durable-objects/broadcastHub': { broadcast: async () => {} },
+        './branchWrites': { branchUpdateStatements: () => [] },
+        './permissions': { getActionTier: () => 'full', getPermissionTier: () => 'full' },
+      })
+      // The real production shape of this bucket: the row somebody typed
+      // without a cost is the one being kept.
+      d1.db.prepare(`UPDATE products SET cost_price_usd = 0 WHERE id = ${KEEPER}`).run()
+      d1.db.prepare(`UPDATE products SET cost_price_usd = 8 WHERE id = ${DUP}`).run()
+
+      const { reversal } = await mod.foldDuplicateProductInto(
+        {}, adapter, { id: 42, name: 'Reviewer' },
+        { id: KEEPER, name: 'Anastasia Dipbrow Pomade Dark Brown' },
+        { id: DUP, name: 'Anastasia Dipbrow Pomade Dark Brown', image_path: null },
+        branchNames, 'possible-duplicates review merge', 'merge',
+      )
+      assert.equal(one(d1, `SELECT cost_price_usd c FROM products WHERE id = ${KEEPER}`).c, 8,
+        'the survivor keeps the one cost anybody actually entered')
+      const entry = auditCalls.find((c) => c.action === 'merge_duplicate')
+      assert.equal(entry.detail.costVerdict, 'missing', 'the audit says WHY the cost moved')
+      assert.deepEqual(entry.detail.costFilled, [{ field: 'cost_price_usd', value: 8 }])
+      assert.deepEqual(reversal.keeperCostBefore, { cost_price_usd: 0, cost_price_khr: 0 },
+        'the reversal carries the blank so undo can restore it')
+
+      const rec = await undo.recordMergeUndoSnapshot({}, { id: 42, name: 'Reviewer' }, reversal)
+      const applier = undo.resolveUndoApplier({ applier: 'product.merge', snapshot_id: rec.snapshotId })
+      await applier.run({ applier: 'product.merge', snapshot_id: rec.snapshotId },
+        { env: {}, user: { id: 42 }, direction: 'undo' })
+      assert.equal(one(d1, `SELECT cost_price_usd c FROM products WHERE id = ${KEEPER}`).c, 0,
+        'undo restores the keeper\'s blank cost exactly -- the fill is not permanent')
+      assert.equal(one(d1, `SELECT cost_price_usd c FROM products WHERE id = ${DUP}`).c, 8,
+        'and the discarded row keeps its own cost')
+    })
+
+    await check('a keeper that HAS a cost never has it overwritten by the fold', async () => {
+      const d1 = seed()
+      const { mod, adapter } = loadProductsRoute(d1)
+      d1.db.prepare(`UPDATE products SET cost_price_usd = 8 WHERE id = ${KEEPER}`).run()
+      d1.db.prepare(`UPDATE products SET cost_price_usd = 9.5 WHERE id = ${DUP}`).run()
+      await mod.foldDuplicateProductInto(
+        {}, adapter, { id: 42, name: 'Reviewer' },
+        { id: KEEPER, name: 'Anastasia Dipbrow Pomade Dark Brown' },
+        { id: DUP, name: 'Anastasia Dipbrow Pomade Dark Brown', image_path: null },
+        branchNames, 'possible-duplicates review merge', 'merge',
+      )
+      assert.equal(one(d1, `SELECT cost_price_usd c FROM products WHERE id = ${KEEPER}`).c, 8,
+        'two set costs are never averaged or replaced by a fold')
+    })
+  }
+
+  console.log('-- The cost ruling did NOT leak into productDetailSignature --')
+  {
+    const rule = loadTs(path.join('lib', 'productDetailRule.ts'), {})
+    await check('productDetailSignature still treats a missing cost as its own signature', () => {
+      const withCost = { barcode: 'X', cost_price_usd: 8, cost_price_khr: 0 }
+      const without = { barcode: 'X', cost_price_usd: 0, cost_price_khr: 0 }
+      assert.notEqual(rule.productDetailSignature(withCost), rule.productDetailSignature(without),
+        'auto-merge/grouping must decide EXACTLY as it did before the cost ruling')
+      assert.equal(rule.compareCosts(withCost, without), 'missing',
+        'while the merge verdict -- a separate layer -- says the two do not disagree')
+      assert.equal(rule.isSameProductIdentity({ name: 'A', ...withCost }, { name: 'A', ...without }), false,
+        'the exact-identity predicate is unchanged too')
+    })
+    await check('normalizedBarcode is unchanged: trim + lowercase, never leading-zero stripping', () => {
+      // A leading zero is a DIFFERENT barcode to the signature. The
+      // leading-zero-equivalence that lets a GTIN-14/EAN-13 pair be merged is
+      // a REVIEW-surface rule (the duplicates panel), and it must never widen
+      // this one -- widening it would auto-merge rows nobody reviewed.
+      assert.notEqual(
+        rule.productDetailSignature({ barcode: '0689304051040', cost_price_usd: 8 }),
+        rule.productDetailSignature({ barcode: '689304051040', cost_price_usd: 8 }),
+      )
+      assert.equal(
+        rule.productDetailSignature({ barcode: ' X ', cost_price_usd: 8 }),
+        rule.productDetailSignature({ barcode: 'x', cost_price_usd: 8 }),
+        'trim + lowercase is all the normalization there has ever been',
+      )
+      const src = fs.readFileSync(path.join(SRC, 'lib', 'productDetailRule.ts'), 'utf8')
+      const at = src.indexOf('function normalizedBarcode')
+      assert.match(src.slice(at, at + 160), /String\(value \?\? ''\)\.trim\(\)\.toLowerCase\(\)/)
     })
   }
 
