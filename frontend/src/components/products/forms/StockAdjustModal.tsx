@@ -459,7 +459,7 @@ export default function StockAdjustModal({ initialType = 'add', initialProduct =
                   key={String(product.id)}
                   type="button"
                   onClick={() => selectProduct(product)}
-                  className="flex w-full items-center justify-between gap-2 rounded-xl border border-gray-200 px-3 py-2 text-left hover:border-blue-400 hover:bg-blue-50 dark:border-gray-700 dark:hover:border-blue-600 dark:hover:bg-blue-900/20"
+                  className="flex w-full items-center justify-between gap-2 rounded-xl border border-gray-200 px-3 py-2 text-left hover:border-[var(--ui-accent)] hover:bg-[var(--ui-accent-soft)] dark:border-gray-700"
                 >
                   <span className="min-w-0 flex-1">
                     <span className="block truncate text-sm font-medium text-gray-900 dark:text-white">{product.name || String(product.id)}</span>

@@ -461,7 +461,7 @@ export default function ProductsImageOnlyView() {
               <div
                 key={product.id}
                 className={`card flex items-center gap-3 p-3 transition-shadow ${
-                  isSaving ? 'ring-2 ring-blue-400/60 dark:ring-blue-500/50' : 'hover:shadow-md'
+                  isSaving ? 'ring-2 ring-[var(--ui-accent)]' : 'hover:shadow-md'
                 }`}
               >
                 <div className="relative h-14 w-14 shrink-0">
@@ -516,7 +516,7 @@ export default function ProductsImageOnlyView() {
                     ) : null}
                   </div>
                   {isSaving ? (
-                    <p className="text-xs text-blue-500 dark:text-blue-400">{t('uploading') || 'Uploading...'}</p>
+                    <p className="text-xs text-[var(--ui-ink-3)]">{t('uploading') || 'Uploading...'}</p>
                   ) : null}
                 </button>
                 {/* Three upload paths, matching the full ProductForm editor's
@@ -634,7 +634,7 @@ export default function ProductsImageOnlyView() {
               {showWholesale && (Number(detailsProduct.wholesale_price_usd || 0) > 0 || Number(detailsProduct.wholesale_price_khr || 0) > 0) ? (
                 <div className="flex justify-between gap-3 py-2">
                   <dt className="text-gray-500 dark:text-gray-400">{t('wholesale_price') || 'Wholesale'}</dt>
-                  <dd className="text-right text-indigo-700 dark:text-indigo-300">
+                  <dd className="text-right text-[var(--ui-info)]">
                     {fmtUSD(detailsProduct.wholesale_price_usd)}
                     {Number(detailsProduct.wholesale_price_khr || 0) > 0 ? ` · ${fmtKHR(detailsProduct.wholesale_price_khr)}` : ''}
                   </dd>

@@ -606,7 +606,7 @@ export default function ManageUnitsModal({ onClose, onReviewSelection, t }: Mana
                   </div>
                   <button
                     onClick={() => setEditing({ ...unit, color: unit.color || DEFAULT_UNIT_COLOR })}
-                    className="text-xs text-blue-500 hover:underline"
+                    className="text-xs text-[var(--ui-accent-ink)] hover:underline"
                     disabled={saving || deletingId != null || unit.virtual}
                   >
                     {t('edit') || 'Edit'}

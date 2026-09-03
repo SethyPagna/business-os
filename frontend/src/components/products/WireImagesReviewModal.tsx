@@ -166,9 +166,9 @@ export default function WireImagesReviewModal({
   return (
     <Modal title={T('wire_images_title', 'Wire images to products')} onClose={onClose} size="lg">
       <div className="space-y-4 text-sm text-gray-700 dark:text-gray-300">
-        <div className="flex items-start gap-3 rounded-lg border border-blue-200 bg-blue-50 p-3 dark:border-blue-900/50 dark:bg-blue-950/20">
-          <ImagePlus className="mt-0.5 h-4 w-4 shrink-0 text-blue-600 dark:text-blue-400" />
-          <p className="text-blue-800 dark:text-blue-300">
+        <div className="flex items-start gap-3 rounded-lg border border-[var(--ui-line)] bg-[var(--ui-surface-2)] p-3">
+          <ImagePlus className="mt-0.5 h-4 w-4 shrink-0 text-[var(--ui-ink-3)]" />
+          <p className="text-[var(--ui-ink-2)]">
             {T(
               'wire_images_summary',
               'Matches photos already in your Library to products by filename. "Rose Serum.jpg" goes to Rose Serum; add _1, _2 and _3 to give one product up to three photos. Only exact name matches are used -- nothing is attached on a guess, and nothing is attached until you confirm below.',
@@ -383,7 +383,7 @@ export default function WireImagesReviewModal({
           <button
             onClick={handleConfirm}
             disabled={!acknowledged || !canApply || working}
-            className="rounded-lg bg-blue-600 px-4 py-2 text-sm text-white hover:bg-blue-700 disabled:opacity-40"
+            className="rounded-lg bg-[var(--ui-accent)] px-4 py-2 text-sm text-white hover:bg-[var(--ui-accent-ink)] disabled:opacity-40"
           >
             {working
               ? T('wire_images_working', 'Attaching...')

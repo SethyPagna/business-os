@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
+import { readdirSync, readFileSync } from 'node:fs'
 
 const products = readFileSync(new URL('../src/components/products/Products.tsx', import.meta.url), 'utf8')
 const css = readFileSync(new URL('../src/styles/main.css', import.meta.url), 'utf8')
@@ -123,3 +123,41 @@ assert.match(report, /flex w-full min-w-0 items-center justify-between/, 'detail
 assert.match(report, /<span className="detail-scroll-text[^\"]*">\{label\}<\/span>/, 'detail report labels must stay fully readable through bounded horizontal scrolling')
 
 console.log('PASS Products responsive section, detail, and batch surfaces')
+
+// P2-4 Part 1b: the whole products folder is swept onto the design tokens, so
+// these three classes of literal must not creep back in anywhere under
+// src/components/products/**. Each was a real defect, not a style nit:
+//  - blue-* / indigo-* / #2563eb: the page carried a second, un-themeable
+//    accent beside --ui-accent, so a user-picked accent left ~330 class
+//    occurrences stranded on Tailwind blue, and every one of them needed a
+//    hand-written dark: twin that the tokens give for free.
+//  - a literal z-index (z-[1070] and friends) cannot be ordered against the
+//    kit's scale -- which is exactly how ProductDetailReport ended up sitting
+//    above --z-modal-2 by luck. Every layer now names a --z-* token.
+//  - a raw `vh` height mis-sizes under iOS Safari's collapsing toolbar; dvh is
+//    the unit these actually mean (the kit's own Fold already uses it).
+const productsDir = new URL('../src/components/products/', import.meta.url)
+const productsFiles: URL[] = []
+const walkProducts = (dir: URL) => {
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const child = new URL(entry.name + (entry.isDirectory() ? '/' : ''), dir)
+    if (entry.isDirectory()) walkProducts(child)
+    else if (/[.]tsx?$/.test(entry.name)) productsFiles.push(child)
+  }
+}
+walkProducts(productsDir)
+assert.ok(productsFiles.length > 30, `expected the products folder, found ${productsFiles.length} files`)
+
+const tokenOffenders: { colour: string[]; zIndex: string[]; viewport: string[] } = { colour: [], zIndex: [], viewport: [] }
+for (const fileUrl of productsFiles) {
+  const src = readFileSync(fileUrl, 'utf8')
+  const rel = fileUrl.href.slice(fileUrl.href.indexOf('/products/') + 1)
+  if (/blue-[0-9]|indigo-[0-9]|#2563eb/i.test(src)) tokenOffenders.colour.push(rel)
+  if (/z-\[[0-9]+\]/.test(src)) tokenOffenders.zIndex.push(rel)
+  if (/-\[[0-9]+(?:\.[0-9]+)?vh\]/.test(src)) tokenOffenders.viewport.push(rel)
+}
+assert.deepEqual(tokenOffenders.colour, [], `these products files still hard-code Tailwind blue/indigo instead of --ui-accent / --ui-info / a neutral surface token: ${tokenOffenders.colour.join(', ')}`)
+assert.deepEqual(tokenOffenders.zIndex, [], `these products files still hard-code a numeric z-index instead of a --z-* token from the kit: ${tokenOffenders.zIndex.join(', ')}`)
+assert.deepEqual(tokenOffenders.viewport, [], `these products files still size with raw vh instead of dvh: ${tokenOffenders.viewport.join(', ')}`)
+
+console.log(`PASS products folder is token-only across ${productsFiles.length} files (no blue/indigo, no literal z-index, no raw vh)`)

@@ -155,9 +155,9 @@ export default function ZeroQuantityCleanupModal({
   return (
     <Modal title={T('zero_quantity_cleanup_title', 'Remove 0-quantity products')} onClose={onClose} size="lg">
       <div className="space-y-4 text-sm text-gray-700 dark:text-gray-300">
-        <div className="flex items-start gap-3 rounded-lg border border-blue-200 bg-blue-50 p-3 dark:border-blue-900/50 dark:bg-blue-950/20">
-          <Trash2 className="mt-0.5 h-4 w-4 shrink-0 text-blue-600 dark:text-blue-400" />
-          <p className="text-blue-800 dark:text-blue-300">
+        <div className="flex items-start gap-3 rounded-lg border border-[var(--ui-line)] bg-[var(--ui-surface-2)] p-3">
+          <Trash2 className="mt-0.5 h-4 w-4 shrink-0 text-[var(--ui-ink-3)]" />
+          <p className="text-[var(--ui-ink-2)]">
             {T(
               'zero_quantity_cleanup_summary',
               'Finds products with 0 stock at every branch, confirmed from both the stock cache and a live sum, that have stayed at 0 for at least the threshold below. Nothing is ever deleted automatically -- review the list and confirm which ones to remove.',

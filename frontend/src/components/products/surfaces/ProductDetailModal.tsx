@@ -280,7 +280,7 @@ export default function ProductDetailModal({
               {/* Left mini-section: the compact identity + stock facts. */}
               <div className="min-w-0 space-y-2.5 sm:pr-5">
                 <div className="grid grid-cols-1 gap-y-1.5">
-                  {p.barcode ? <Row label={T('barcode', 'Barcode')}><button type="button" className="whitespace-nowrap text-left font-mono underline-offset-2 hover:text-blue-600 hover:underline" onClick={copyBarcode} title={T('copy_barcode', 'Copy barcode')}>{p.barcode}</button></Row> : null}
+                  {p.barcode ? <Row label={T('barcode', 'Barcode')}><button type="button" className="whitespace-nowrap text-left font-mono underline-offset-2 hover:text-[var(--ui-accent-ink)] hover:underline" onClick={copyBarcode} title={T('copy_barcode', 'Copy barcode')}>{p.barcode}</button></Row> : null}
                   {p.sku ? <Row label={T('sku', 'SKU')}><span className="font-mono">{p.sku}</span></Row> : null}
                   {p.supplier ? <Row label={T('label_supplier', 'Supplier')}>{p.supplier}</Row> : null}
                   {/* Stock + Status moved to the right column after Margin
@@ -356,7 +356,7 @@ export default function ProductDetailModal({
                     <button
                       type="button"
                       onClick={() => setDescriptionDetailOpen(true)}
-                      className="detail-scroll-text min-w-0 flex-1 rounded text-left text-sm text-gray-800 underline-offset-2 hover:text-blue-700 hover:underline dark:text-gray-200 dark:hover:text-blue-300"
+                      className="detail-scroll-text min-w-0 flex-1 rounded text-left text-sm text-gray-800 underline-offset-2 hover:text-[var(--ui-accent-ink)] hover:underline dark:text-gray-200"
                       title={T('view_full_description', 'View full description')}
                     >
                       {p.description}
@@ -374,7 +374,7 @@ export default function ProductDetailModal({
                 </Row>
                 {purchaseUsd > 0 && sellingUsd > 0 ? (
                   <Row label={T('label_margin', 'Margin')}>
-                    <span className={`font-medium ${marginUsd >= 0 ? 'text-blue-600' : 'text-yellow-600'}`}>
+                    <span className={`font-medium ${marginUsd >= 0 ? 'text-[var(--ui-info)]' : 'text-yellow-600'}`}>
                       {fmtUSD(marginUsd)}
                     </span>
                     <span className="ml-2 text-xs text-gray-400">{marginPct.toFixed(1)}%</span>
@@ -404,13 +404,13 @@ export default function ProductDetailModal({
                 </Row>
                 {(specialUsd > 0 || specialKhr > 0) ? (
                   <Row label={T('special_price', 'VIP Price')}>
-                    <span className="text-blue-600">{fmtUSD(specialUsd || sellingUsd)}</span>
+                    <span className="text-[var(--ui-accent-ink)]">{fmtUSD(specialUsd || sellingUsd)}</span>
                     {(specialKhr > 0 || sellingKhr > 0) ? <span className="ml-2 text-xs text-gray-400">{fmtKHR(specialKhr || sellingKhr)}</span> : null}
                   </Row>
                 ) : null}
                 {(wholesaleUsd > 0 || wholesaleKhr > 0) ? (
                   <Row label={T('wholesale_price', 'Wholesale')}>
-                    <span className="text-indigo-600 dark:text-indigo-300">{fmtUSD(wholesaleUsd)}</span>
+                    <span className="text-[var(--ui-info)]">{fmtUSD(wholesaleUsd)}</span>
                     {wholesaleKhr > 0 ? <span className="ml-2 text-xs text-gray-400">{fmtKHR(wholesaleKhr)}</span> : null}
                   </Row>
                 ) : null}

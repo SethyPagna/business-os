@@ -63,7 +63,7 @@ export default function ProductDescriptionDetailModal({
   const parsed = parseProductDescription(description)
 
   return (
-    // P2-4 Part 1b: was a literal `z-[60]` and a hand-rolled `bg-black/50`.
+    // P2-4 Part 1b: was a bare numeric z-index and a hand-rolled bg-black/50.
     // This renders inside ProductDetailModal's own portal tree, so it is a
     // modal opened from within a modal -- --z-modal-2 says exactly that,
     // where 60 said nothing and only happened to work because the enclosing

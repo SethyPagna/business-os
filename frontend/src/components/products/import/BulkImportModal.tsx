@@ -1005,8 +1005,8 @@ function ImageMatchReviewPanel({
         </div>
       ) : null}
       {overLimit.map((entry) => (
-        <div key={entry.rowNumber} className="rounded-xl border border-blue-200 bg-blue-50 p-3 text-xs dark:border-blue-900/50 dark:bg-blue-950/30">
-          <div className="mb-2 font-semibold text-blue-800 dark:text-blue-100">
+        <div key={entry.rowNumber} className="rounded-xl border border-[var(--ui-line)] bg-[var(--ui-surface-2)] p-3 text-xs">
+          <div className="mb-2 font-semibold text-[var(--ui-ink)]">
             "{entry.productName}" matched {entry.images.length} images -- only {entry.limit} can be kept. Pick which ones.
           </div>
           <ImageLimitPicker
@@ -1047,7 +1047,7 @@ function ImageLimitPicker({
           return (
             <label
               key={image.id}
-              className={`flex cursor-pointer flex-col items-center gap-1 rounded-lg border p-1.5 ${isSelected ? 'border-blue-500 bg-white dark:bg-slate-900' : 'border-transparent opacity-60'}`}
+              className={`flex cursor-pointer flex-col items-center gap-1 rounded-lg border p-1.5 ${isSelected ? 'border-[var(--ui-accent)] bg-white dark:bg-slate-900' : 'border-transparent opacity-60'}`}
             >
               <input type="checkbox" className="sr-only" checked={isSelected} onChange={() => toggle(image.id)} />
               <img src={image.publicPath} alt={image.originalName} className="h-14 w-14 rounded object-cover" />
@@ -2409,17 +2409,17 @@ export default function BulkImportModal({ onClose, onDone, t, topMode = 'general
 
       <div className="mb-5 flex gap-1.5">
         {[1, 2].map((value) => (
-          <div key={value} className={`h-1 flex-1 rounded-full ${step >= value ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-700'}`} />
+          <div key={value} className={`h-1 flex-1 rounded-full ${step >= value ? 'bg-[var(--ui-accent)]' : 'bg-gray-200 dark:bg-gray-700'}`} />
         ))}
       </div>
       {analysisProgress && step !== 1 ? (
-        <div className="mb-4 rounded-xl border border-blue-100 bg-blue-50 p-3 text-xs text-blue-700 dark:border-blue-900/40 dark:bg-blue-900/20 dark:text-blue-300">
+        <div className="mb-4 rounded-xl border border-[var(--ui-line)] bg-[var(--ui-surface-2)] p-3 text-xs text-[var(--ui-ink-2)]">
           <div className="mb-2 flex items-center justify-between gap-3">
             <span>{analysisProgress.label || T('analysing', 'Analyzing...')}</span>
             <span>{Math.round(analysisProgress.progress || 0)}%</span>
           </div>
-          <div className="h-2 overflow-hidden rounded-full bg-blue-100 dark:bg-blue-950">
-            <div className="h-full rounded-full bg-blue-600 transition-all" style={{ width: `${Math.max(5, Math.min(100, analysisProgress.progress || 0))}%` }} />
+          <div className="h-2 overflow-hidden rounded-full bg-[var(--ui-accent-soft)]">
+            <div className="h-full rounded-full bg-[var(--ui-accent)] transition-all" style={{ width: `${Math.max(5, Math.min(100, analysisProgress.progress || 0))}%` }} />
           </div>
         </div>
       ) : null}
@@ -2497,7 +2497,7 @@ export default function BulkImportModal({ onClose, onDone, t, topMode = 'general
           past the wizard" design DatedStockReconciliationModal's own header
           comment documents. */}
       {datedReconciliationSignal && !dismissedDatedSignal && step === 1 ? (
-        <div className="mb-4 rounded-xl border border-blue-200 bg-blue-50 p-3 text-xs text-blue-800 dark:border-blue-900/60 dark:bg-blue-950/30 dark:text-blue-100">
+        <div className="mb-4 rounded-xl border border-[var(--ui-line)] bg-[var(--ui-surface-2)] p-3 text-xs text-[var(--ui-ink-2)]">
           <div className="flex items-start gap-2">
             <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
             <div className="flex-1">
@@ -2514,14 +2514,14 @@ export default function BulkImportModal({ onClose, onDone, t, topMode = 'general
                 <button
                   type="button"
                   onClick={onClose}
-                  className="rounded-lg bg-blue-600 px-2.5 py-1 text-xs font-semibold text-white hover:bg-blue-700"
+                  className="rounded-lg bg-[var(--ui-accent)] px-2.5 py-1 text-xs font-semibold text-white hover:bg-[var(--ui-accent-ink)]"
                 >
                   {T('dated_reconciliation_suggestion_switch', 'Cancel this import & choose Dated Reconciliation')}
                 </button>
                 <button
                   type="button"
                   onClick={() => setDismissedDatedSignal(true)}
-                  className="rounded-lg px-2.5 py-1 text-xs font-medium text-blue-700 hover:bg-blue-100 dark:text-blue-200 dark:hover:bg-blue-900/40"
+                  className="rounded-lg px-2.5 py-1 text-xs font-medium text-[var(--ui-accent-ink)] hover:bg-[var(--ui-accent-soft)]"
                 >
                   {T('dated_reconciliation_suggestion_dismiss', 'No, this file is correct')}
                 </button>
@@ -2566,19 +2566,19 @@ export default function BulkImportModal({ onClose, onDone, t, topMode = 'general
             onDrop={handleDropCSVEvent}
             className={`order-3 flex flex-row items-center gap-3 rounded-2xl border-2 border-dashed px-4 py-4 text-left transition-colors ${loading ? 'cursor-wait opacity-70' : 'cursor-pointer'} ${
               isDragActive
-                ? 'border-blue-400 bg-blue-50 dark:border-blue-600 dark:bg-blue-900/20'
-                : 'border-gray-300 hover:border-blue-300 hover:bg-blue-50/40 dark:border-gray-700 dark:hover:border-blue-800 dark:hover:bg-blue-900/10'
+                ? 'border-[var(--ui-accent)] bg-[var(--ui-accent-soft)]'
+                : 'border-gray-300 hover:border-[var(--ui-accent)] hover:bg-[var(--ui-accent-soft)] dark:border-gray-700'
             }`}
           >
-            <UploadCloud className={`h-7 w-7 shrink-0 ${isDragActive ? 'text-blue-500' : 'text-gray-400 dark:text-gray-500'}`} aria-hidden="true" />
+            <UploadCloud className={`h-7 w-7 shrink-0 ${isDragActive ? 'text-[var(--ui-accent)]' : 'text-gray-400 dark:text-gray-500'}`} aria-hidden="true" />
             <div className="min-w-0">
-              <p className={`text-sm font-semibold ${isDragActive ? 'text-blue-600 dark:text-blue-300' : 'text-gray-700 dark:text-gray-200'}`}>
+              <p className={`text-sm font-semibold ${isDragActive ? 'text-[var(--ui-accent-ink)]' : 'text-gray-700 dark:text-gray-200'}`}>
                 {isDragActive ? T('csv_drop_file', 'Drop file here to import') : T('csv_template_upload', 'Upload CSV or Excel')}
               </p>
               <p className="text-xs text-gray-400 dark:text-gray-500">
                 {T('csv_drop_hint_inline', 'Click to browse, or drag a CSV/Excel file anywhere in this box')}
               </p>
-              {loading ? <p className="text-xs font-medium text-blue-600 dark:text-blue-300">{T('analysing', 'Analyzing...')}</p> : null}
+              {loading ? <p className="text-xs font-medium text-[var(--ui-accent-ink)]">{T('analysing', 'Analyzing...')}</p> : null}
             </div>
           </div>
           <button
@@ -2630,7 +2630,7 @@ export default function BulkImportModal({ onClose, onDone, t, topMode = 'general
             onDragOver={handleImageDragOver}
             onDragLeave={handleImageDragLeave}
             onDrop={handleImageDropEvent}
-            className={`order-4 rounded-xl border p-3 transition-colors ${isImageDragActive ? 'border-dashed border-blue-400 bg-blue-50 dark:border-blue-600 dark:bg-blue-900/20' : 'border-gray-200 dark:border-gray-700'}`}
+            className={`order-4 rounded-xl border p-3 transition-colors ${isImageDragActive ? 'border-dashed border-[var(--ui-accent)] bg-[var(--ui-accent-soft)]' : 'border-gray-200 dark:border-gray-700'}`}
           >
             <p className="mb-1 text-sm font-medium text-gray-700 dark:text-gray-300">
               {isImageDragActive ? T('zip_drop_file', 'Drop the .zip here') : T('images_optional', 'Product images (optional)')}
@@ -2647,13 +2647,13 @@ export default function BulkImportModal({ onClose, onDone, t, topMode = 'general
           </div>
 
           {analysisProgress ? (
-            <div className="order-6 rounded-xl border border-blue-100 bg-blue-50 p-3 text-xs text-blue-700 dark:border-blue-900/40 dark:bg-blue-900/20 dark:text-blue-300">
+            <div className="order-6 rounded-xl border border-[var(--ui-line)] bg-[var(--ui-surface-2)] p-3 text-xs text-[var(--ui-ink-2)]">
               <div className="mb-2 flex items-center justify-between gap-3">
                 <span>{analysisProgress.label || T('analysing', 'Analyzing...')}</span>
                 <span>{Math.round(analysisProgress.progress || 0)}%</span>
               </div>
-              <div className="h-2 overflow-hidden rounded-full bg-blue-100 dark:bg-blue-950">
-                <div className="h-full rounded-full bg-blue-600 transition-all" style={{ width: `${Math.max(5, Math.min(100, analysisProgress.progress || 0))}%` }} />
+              <div className="h-2 overflow-hidden rounded-full bg-[var(--ui-accent-soft)]">
+                <div className="h-full rounded-full bg-[var(--ui-accent)] transition-all" style={{ width: `${Math.max(5, Math.min(100, analysisProgress.progress || 0))}%` }} />
               </div>
             </div>
           ) : null}
@@ -2809,15 +2809,15 @@ export default function BulkImportModal({ onClose, onDone, t, topMode = 'general
               the toggle reveals the full column list AND the field-by-
               field notes together, instead of two separately-triggered
               reveals stacked on top of each other. */}
-          <div className="order-5 rounded-xl bg-blue-50 p-4 text-sm text-blue-700 dark:bg-blue-900/20 dark:text-blue-300">
+          <div className="order-5 rounded-xl bg-[var(--ui-surface-2)] p-4 text-sm text-[var(--ui-ink-2)]">
             <div className="flex items-center justify-between gap-2">
               <p>
-                {T('csv_columns_summary', 'Only ')}<code className="rounded bg-blue-100 px-1 py-0.5 font-mono text-xs dark:bg-blue-900/40">name</code>{T('csv_columns_summary_rest', ' is required -- pricing, stock, images, and variant columns are all optional.')}
+                {T('csv_columns_summary', 'Only ')}<code className="rounded bg-[var(--ui-accent-soft)] px-1 py-0.5 font-mono text-xs">name</code>{T('csv_columns_summary_rest', ' is required -- pricing, stock, images, and variant columns are all optional.')}
               </p>
               <button
                 type="button"
                 onClick={() => setShowColumnsInfo((current) => !current)}
-                className="inline-flex shrink-0 items-center gap-1 rounded-full border border-blue-300 px-2 py-0.5 text-xs font-semibold text-blue-700 hover:bg-blue-100 dark:border-blue-700 dark:text-blue-300 dark:hover:bg-blue-900/40"
+                className="inline-flex shrink-0 items-center gap-1 rounded-full border border-[var(--ui-line-2)] px-2 py-0.5 text-xs font-semibold text-[var(--ui-accent-ink)] hover:bg-[var(--ui-accent-soft)]"
                 aria-expanded={showColumnsInfo}
               >
                 <Info className="h-3 w-3" aria-hidden="true" />
@@ -2825,7 +2825,7 @@ export default function BulkImportModal({ onClose, onDone, t, topMode = 'general
               </button>
             </div>
             {showColumnsInfo ? (
-              <div className="mt-3 space-y-3 rounded-lg border border-blue-200 bg-white/70 p-3 text-xs leading-relaxed text-slate-700 dark:border-blue-900/40 dark:bg-slate-900/40 dark:text-slate-200">
+              <div className="mt-3 space-y-3 rounded-lg border border-[var(--ui-line)] bg-white/70 p-3 text-xs leading-relaxed text-slate-700 dark:bg-slate-900/40 dark:text-slate-200">
                 <p className="font-mono leading-relaxed">
                   {T('csv_template_columns', 'name*, sku, barcode, category, brand, unit, description, selling_price_usd, selling_price_khr, vip_price_usd, vip_price_khr, cost_price_usd, cost_price_khr, stock_quantity, low_stock_threshold, batch(mm/dd/yyyy), expiry_date, expiry_alert_days, branch, supplier, parent_id, is_group, image_filename_1..5, image_filenames, is_active')}
                 </p>
@@ -2884,7 +2884,7 @@ export default function BulkImportModal({ onClose, onDone, t, topMode = 'general
             onDrop={handleImageDropEvent}
             className={`rounded-xl border p-4 transition-colors ${
               isImageDragActive
-                ? 'border-2 border-dashed border-blue-400 bg-blue-50 dark:border-blue-600 dark:bg-blue-900/20'
+                ? 'border-2 border-dashed border-[var(--ui-accent)] bg-[var(--ui-accent-soft)]'
                 : 'border-gray-200 dark:border-gray-700'
             }`}
           >
@@ -2945,7 +2945,7 @@ export default function BulkImportModal({ onClose, onDone, t, topMode = 'general
 
       {step === 3 && result ? (
         <div className="space-y-4">
-          <div className={`rounded-xl p-4 ${result.queued ? 'bg-blue-50 dark:bg-blue-900/20' : (result.imported || 0) + (result.updated || 0) > 0 ? 'bg-green-50 dark:bg-green-900/20' : 'bg-red-50 dark:bg-red-900/20'}`}>
+          <div className={`rounded-xl p-4 ${result.queued ? 'bg-[var(--ui-surface-2)]' : (result.imported || 0) + (result.updated || 0) > 0 ? 'bg-green-50 dark:bg-green-900/20' : 'bg-red-50 dark:bg-red-900/20'}`}>
             {result.queued ? <p className="text-sm font-medium">{result.message || T('import_job_started_background', '{n} item(s) queued for background analysis. Review and approve it from the top progress bar.').replace('{n}', String(result.queued))}</p> : null}
             {result.jobId ? <p className="mt-1 text-xs opacity-70">Job: {result.jobId}</p> : null}
             {result.imported > 0 ? <p className="text-sm">{T('n_products_created', '{n} new products created').replace('{n}', String(result.imported))}</p> : null}
@@ -2989,9 +2989,9 @@ export default function BulkImportModal({ onClose, onDone, t, topMode = 'general
               carried images -- offering it for a CSV-only import would be
               a control that does nothing. */}
           {(result.jobId || result.job?.id || currentJob?.id) && (Object.keys(imageFiles).length > 0 || zipFile) ? (
-            <div className="rounded-xl border border-blue-200 bg-blue-50 p-3 text-sm dark:border-blue-900/50 dark:bg-blue-950/20">
-              <p className="font-medium text-blue-900 dark:text-blue-200">{T('wire_import_images_title', "Attach this import's images")}</p>
-              <p className="mt-1 text-xs text-blue-800 dark:text-blue-300">
+            <div className="rounded-xl border border-[var(--ui-line)] bg-[var(--ui-surface-2)] p-3 text-sm">
+              <p className="font-medium text-[var(--ui-ink)]">{T('wire_import_images_title', "Attach this import's images")}</p>
+              <p className="mt-1 text-xs text-[var(--ui-ink-2)]">
                 {T('wire_import_images_hint', 'Photos are matched to rows by filename but stay unattached until you ask for it, so you can review the match first. Nothing about the products changes if you skip this.')}
               </p>
               <button

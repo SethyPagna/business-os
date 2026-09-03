@@ -43,13 +43,13 @@ type Cluster = {
 
 const SEVERITY_STYLE: Record<Severity, string> = {
   same_barcode: 'border-amber-200 bg-amber-50 dark:border-amber-900/40 dark:bg-amber-950/30',
-  same_name: 'border-blue-200 bg-blue-50 dark:border-blue-900/40 dark:bg-blue-950/30',
+  same_name: 'border-[var(--ui-line)] bg-[var(--ui-surface-2)]',
   similar_name: 'border-violet-200 bg-violet-50 dark:border-violet-900/40 dark:bg-violet-950/30',
 }
 
 const SEVERITY_TEXT: Record<Severity, string> = {
   same_barcode: 'text-amber-800 dark:text-amber-300',
-  same_name: 'text-blue-700 dark:text-blue-300',
+  same_name: 'text-[var(--ui-ink-2)]',
   similar_name: 'text-violet-700 dark:text-violet-300',
 }
 
@@ -142,7 +142,7 @@ function ClusterCard({
   const canApply = Boolean(keeper) && everyDecided && removals.length > 0 && !busy
 
   return (
-    <div className={`rounded-xl border px-3 py-2.5 transition-shadow ${SEVERITY_STYLE[cluster.severity]} ${busy ? 'opacity-60' : ''} ${selected ? 'ring-2 ring-blue-400 dark:ring-blue-500' : ''}`}>
+    <div className={`rounded-xl border px-3 py-2.5 transition-shadow ${SEVERITY_STYLE[cluster.severity]} ${busy ? 'opacity-60' : ''} ${selected ? 'ring-2 ring-[var(--ui-accent)]' : ''}`}>
       <div className="mb-1.5 flex items-center justify-between gap-2">
         <label className="flex cursor-pointer items-center gap-1.5">
           <input
@@ -222,7 +222,7 @@ function ClusterCard({
                     onClick={() => onEdit(product)}
                     disabled={busy}
                     title={t('resolve_duplicate_inline_hint') || 'Edit this product right here — name, barcode and prices — without leaving the review'}
-                    className="rounded-md px-1.5 py-0.5 text-[11px] font-medium text-blue-600 transition hover:bg-blue-50 disabled:opacity-50 dark:text-blue-300 dark:hover:bg-blue-900/20"
+                    className="rounded-md px-1.5 py-0.5 text-[11px] font-medium text-[var(--ui-accent-ink)] transition hover:bg-[var(--ui-accent-soft)] disabled:opacity-50"
                   >
                     {t('resolve') || 'Resolve'}
                   </button>
@@ -502,7 +502,7 @@ export default function ProductDuplicatesTab({ t, notify }: {
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder={t('search_product_duplicates_placeholder') || 'Filter by name or barcode...'}
-            className="w-full rounded-lg border border-gray-200 bg-white py-1.5 pl-8 pr-3 text-xs text-gray-700 outline-none transition placeholder:text-gray-400 focus:border-blue-300 focus:ring-2 focus:ring-blue-100 dark:border-zinc-700 dark:bg-zinc-900 dark:text-gray-100"
+            className="w-full rounded-lg border border-gray-200 bg-white py-1.5 pl-8 pr-3 text-xs text-gray-700 outline-none transition placeholder:text-gray-400 focus:border-[var(--ui-accent)] focus:ring-2 focus:ring-[var(--ui-accent-soft)] dark:border-zinc-700 dark:bg-zinc-900 dark:text-gray-100"
           />
         </div>
         <ScanSearchButton
@@ -513,7 +513,7 @@ export default function ProductDuplicatesTab({ t, notify }: {
         <button
           onClick={() => void load()}
           disabled={loading}
-          className="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium text-blue-600 hover:bg-blue-50 disabled:opacity-50 dark:hover:bg-blue-900/20"
+          className="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium text-[var(--ui-accent-ink)] hover:bg-[var(--ui-accent-soft)] disabled:opacity-50"
         >
           <RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} />
           {t('refresh') || 'Refresh'}
@@ -538,7 +538,7 @@ export default function ProductDuplicatesTab({ t, notify }: {
               type="button"
               onClick={() => setSelectedKeys(new Set(visibleClusters.map((cluster) => clusterKey(cluster))))}
               disabled={bulkBusy || !visibleClusters.length}
-              className="ml-auto text-blue-600 hover:underline disabled:opacity-50 disabled:no-underline dark:text-blue-400"
+              className="ml-auto text-[var(--ui-accent-ink)] hover:underline disabled:opacity-50 disabled:no-underline"
             >
               {t('select_all') || 'Select all'}
             </button>
@@ -555,8 +555,8 @@ export default function ProductDuplicatesTab({ t, notify }: {
           </div>
 
           {selectedKeys.size > 0 ? (
-            <div className="flex flex-wrap items-center gap-2 rounded-xl border border-blue-200 bg-blue-50 px-3 py-2 text-xs dark:border-blue-900/40 dark:bg-blue-950/30">
-              <span className="font-medium text-blue-700 dark:text-blue-300">
+            <div className="flex flex-wrap items-center gap-2 rounded-xl border border-[var(--ui-line)] bg-[var(--ui-surface-2)] px-3 py-2 text-xs">
+              <span className="font-medium text-[var(--ui-ink-2)]">
                 {bulkProgress || replaceVars(t('duplicates_bulk_selected_count') || '{count} selected', { count: selectedKeys.size })}
               </span>
               <button

@@ -266,7 +266,7 @@ export default function VariantFormModal({ parent, units, branches, user, onClos
       )}
     >
       <div className="space-y-4">
-        <div className="rounded-lg bg-blue-50 p-3 text-xs text-blue-700 dark:bg-blue-900/20 dark:text-blue-300">
+        <div className="rounded-lg bg-[var(--ui-surface-2)] p-3 text-xs text-[var(--ui-ink-2)]">
           {tr('variant_helper_text', 'Variants of the same product group can have different prices, barcodes, and suppliers.', 'វ៉ារីយ៉ង់ក្នុងក្រុមផលិតផលដូចគ្នា អាចមានតម្លៃ បារកូដ និងអ្នកផ្គត់ផ្គង់ខុសគ្នា។')}
         </div>
 

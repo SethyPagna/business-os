@@ -93,7 +93,8 @@ type PurchaseRow = { id: number; lot_code: string | null; batch_number: number |
 type DrillCache<T> = Record<string, T[] | 'loading' | 'error'>
 
 // Which float is open. `null` = none; the parent detail sheet stays interactive
-// behind it (the float is a separate z-[60] overlay above the z-50 sheet).
+// behind it (the float is its own body-portalled overlay on --z-modal-2,
+// above the --z-modal detail sheet it was opened from).
 type OpenSection = 'movements' | 'sales' | 'suppliers' | null
 
 // Per-section pill styling. Colors mirror shared/SectionCard's
@@ -358,8 +359,8 @@ export default function ProductDetailReport({ productId, barcode, t, fmtUSD }: {
   const salesBody: ReactNode = (
     <div>
       <div className="mb-1.5 inline-flex rounded-lg bg-gray-100 p-0.5 text-xs dark:bg-gray-800">
-        <button type="button" onClick={() => setSalesMode('by_day')} className={`rounded-md px-2 py-1 font-medium ${salesMode === 'by_day' ? 'bg-white text-blue-600 shadow dark:bg-gray-900' : 'text-gray-500'}`}>{tr('daily', 'Daily')}</button>
-        <button type="button" onClick={() => setSalesMode('by_month')} className={`rounded-md px-2 py-1 font-medium ${salesMode === 'by_month' ? 'bg-white text-blue-600 shadow dark:bg-gray-900' : 'text-gray-500'}`}>{tr('monthly', 'Monthly')}</button>
+        <button type="button" onClick={() => setSalesMode('by_day')} className={`rounded-md px-2 py-1 font-medium ${salesMode === 'by_day' ? 'bg-white text-[var(--ui-accent-ink)] shadow dark:bg-gray-900' : 'text-gray-500'}`}>{tr('daily', 'Daily')}</button>
+        <button type="button" onClick={() => setSalesMode('by_month')} className={`rounded-md px-2 py-1 font-medium ${salesMode === 'by_month' ? 'bg-white text-[var(--ui-accent-ink)] shadow dark:bg-gray-900' : 'text-gray-500'}`}>{tr('monthly', 'Monthly')}</button>
       </div>
       <div className="space-y-1">
         {salesRows.map((row) => {
@@ -490,7 +491,7 @@ export default function ProductDetailReport({ productId, barcode, t, fmtUSD }: {
       <Pill section="suppliers" label={tr('suppliers', 'Suppliers')} count={suppliersCount} loading={reportLoading} />
 
       {active && typeof document !== 'undefined' ? createPortal((
-        // P2-4 Part 1b: this WAS a literal z-[1070] with a note saying the
+        // P2-4 Part 1b: this WAS a bare numeric z-index with a note saying the
         // kit had no constant for it. It does now. This float portals to
         // document.body from inside ProductDetailModal (--z-modal, itself a
         // body portal), so it must outrank 1050 -- it is the modal-over-modal

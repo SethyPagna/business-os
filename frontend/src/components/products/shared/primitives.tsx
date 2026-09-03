@@ -191,7 +191,7 @@ function MarginCard({ costUsd, sellingUsd, usdSymbol }: MarginCardProps) {
   const isProfit = margin >= 0
 
   return (
-    <div className={`rounded-xl border p-4 ${isProfit ? 'border-blue-100 bg-blue-50 dark:border-blue-800 dark:bg-blue-900/20' : 'border-yellow-200 bg-yellow-50 dark:border-yellow-800 dark:bg-yellow-900/20'}`}>
+    <div className={`rounded-xl border p-4 ${isProfit ? 'border-[var(--ui-line)] bg-[var(--ui-surface-2)]' : 'border-yellow-200 bg-yellow-50 dark:border-yellow-800 dark:bg-yellow-900/20'}`}>
       <p className="mb-2 text-xs font-semibold text-gray-500 dark:text-gray-400">Margin Analysis</p>
       <div className="grid grid-cols-3 gap-3 text-center">
         <div>
@@ -199,7 +199,7 @@ function MarginCard({ costUsd, sellingUsd, usdSymbol }: MarginCardProps) {
           <div className="text-xs text-gray-500">Cost</div>
         </div>
         <div>
-          <div className={`text-lg font-bold ${isProfit ? 'text-blue-600' : 'text-yellow-600'}`}>{usdSymbol}{margin.toFixed(2)}</div>
+          <div className={`text-lg font-bold ${isProfit ? 'text-[var(--ui-info)]' : 'text-yellow-600'}`}>{usdSymbol}{margin.toFixed(2)}</div>
           <div className="text-xs text-gray-500">Margin ({pct.toFixed(1)}%)</div>
         </div>
         <div>

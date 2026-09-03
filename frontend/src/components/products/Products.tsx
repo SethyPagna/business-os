@@ -3230,7 +3230,7 @@ function ProductsFullEditor() {
         key={productId}
         data-product-jump-id={productId}
         data-exact-hit={isExactHit ? 'true' : undefined}
-        className={`table-row h-[var(--ui-row-h)] cursor-pointer select-none ${rowSelected ? 'bg-primary-50 dark:bg-primary-900/20' : isExactHit ? 'bg-blue-50 ring-1 ring-inset ring-blue-300 dark:bg-blue-950/30 dark:ring-blue-700' : ''}`}
+        className={`table-row h-[var(--ui-row-h)] cursor-pointer select-none ${rowSelected ? 'bg-primary-50 dark:bg-primary-900/20' : isExactHit ? 'bg-[var(--ui-accent-soft)] ring-1 ring-inset ring-[var(--ui-accent)]' : ''}`}
         onClick={selectionModeActive ? handleRowClick : undefined}
         {...(selectionModeActive ? {} : longPress)}
       >
@@ -3329,7 +3329,7 @@ function ProductsFullEditor() {
               {isExactHit && !dupInfo ? (
                 <button
                   type="button"
-                  className="shrink-0 rounded-full bg-blue-600 px-2 py-0.5 text-[10px] font-semibold text-white hover:bg-blue-700 dark:bg-blue-500 dark:hover:bg-blue-400"
+                  className="shrink-0 rounded-full bg-[var(--ui-accent)] px-2 py-0.5 text-[10px] font-semibold text-white hover:bg-[var(--ui-accent-ink)]"
                   onClick={(event) => { event.stopPropagation(); setDetailProduct(p) }}
                 >
                   {tr('confirm', 'Confirm')}
@@ -3384,7 +3384,7 @@ function ProductsFullEditor() {
         </td>
         <td className="px-3 py-2 text-right hidden lg:table-cell">
           {costUsd > 0 && sellingUsd > 0
-            ? <div><div className={`font-medium text-xs ${marginUsd >= 0 ? 'text-blue-600 dark:text-blue-400' : 'text-yellow-600'}`}>{fmtUSD(marginUsd)}</div><div className="text-xs text-blue-500/80 dark:text-blue-400/80">{marginPct.toFixed(1)}%</div></div>
+            ? <div><div className={`font-medium text-xs ${marginUsd >= 0 ? 'text-[var(--ui-info)]' : 'text-yellow-600'}`}>{fmtUSD(marginUsd)}</div><div className="text-xs text-[var(--ui-info)]">{marginPct.toFixed(1)}%</div></div>
             : <span className="text-gray-300">N/A</span>}
         </td>
         <td className="px-3 py-2 text-right">
@@ -3446,8 +3446,8 @@ function ProductsFullEditor() {
     // (InventoryProductsSurface.tsx) for parity between the two pages.
     // Ungrouped single products are untouched, still their own card.
     const rowClassName = indented
-      ? `cursor-pointer select-none border-t border-gray-100 px-3 py-2.5 dark:border-gray-800 ${rowSelected ? 'ring-1 ring-primary-400 bg-primary-50/70 dark:bg-primary-900/20' : isExactHit ? 'ring-1 ring-blue-400 bg-blue-50/70 dark:bg-blue-950/30' : ''}`
-      : `card cursor-pointer select-none px-3 py-2.5 ${rowSelected ? 'ring-1 ring-primary-400 bg-primary-50/70 dark:bg-primary-900/20' : isExactHit ? 'ring-1 ring-blue-400 bg-blue-50/70 dark:bg-blue-950/30' : ''}`
+      ? `cursor-pointer select-none border-t border-gray-100 px-3 py-2.5 dark:border-gray-800 ${rowSelected ? 'ring-1 ring-primary-400 bg-primary-50/70 dark:bg-primary-900/20' : isExactHit ? 'ring-1 ring-[var(--ui-accent)] bg-[var(--ui-accent-soft)]' : ''}`
+      : `card cursor-pointer select-none px-3 py-2.5 ${rowSelected ? 'ring-1 ring-primary-400 bg-primary-50/70 dark:bg-primary-900/20' : isExactHit ? 'ring-1 ring-[var(--ui-accent)] bg-[var(--ui-accent-soft)]' : ''}`
 
     // Same long-press/select-mode rules as renderDesktopProductRow -- see
     // its comment for the full reasoning. Not a hook; shares the same
@@ -3546,7 +3546,7 @@ function ProductsFullEditor() {
                 {isExactHit && !dupInfo ? (
                   <button
                     type="button"
-                    className="mt-1 rounded-full bg-blue-600 px-2 py-0.5 text-[10px] font-semibold text-white hover:bg-blue-700 dark:bg-blue-500 dark:hover:bg-blue-400"
+                    className="mt-1 rounded-full bg-[var(--ui-accent)] px-2 py-0.5 text-[10px] font-semibold text-white hover:bg-[var(--ui-accent-ink)]"
                     onClick={(event) => { event.stopPropagation(); setDetailProduct(p) }}
                   >
                     {tr('confirm', 'Confirm')}
@@ -4307,7 +4307,7 @@ function ProductsFullEditor() {
               {/* Same border-2 / primary-50+primary-700 selected-state styling
                   as Inventory's Adjust-stock modal and the product edit
                   page's BranchStockAdjuster -- was previously a solid
-                  blue-600 fill, its own separate look for the same
+                  solid blue accent fill, its own separate look for the same
                   three-way choice. Recolored brass/primary Aug 24 2026. */}
               <div className="flex gap-1">
                 {[['add', t('add') || 'Add'],['remove', t('remove') || 'Remove'],['set', `= ${t('set')||'Set'}`]].map(([v,l])=>(

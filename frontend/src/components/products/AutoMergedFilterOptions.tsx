@@ -48,7 +48,7 @@ export function buildAutoMergedFilterSection({
             type="button"
             onClick={() => setMergedFilter(value)}
             className={`block w-full rounded-lg px-2 py-1.5 text-left text-sm transition-colors ${mergedFilter === value
-              ? 'bg-blue-100/70 font-semibold text-blue-700 dark:bg-blue-900/40 dark:text-blue-300'
+              ? 'bg-[var(--ui-accent-soft)] font-semibold text-[var(--ui-accent-ink)]'
               : 'text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700'}`}
           >
             {label}

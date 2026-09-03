@@ -143,7 +143,7 @@ export function ProductDetailsCell({
     detailPills.push({ key: 'branches', label: branchLabel, className: 'bg-cyan-50 text-cyan-700 dark:bg-cyan-900/30 dark:text-cyan-200' })
   }
   if (product.sku) {
-    detailPills.push({ key: 'sku', label: product.sku, className: 'bg-indigo-50 font-mono text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-200' })
+    detailPills.push({ key: 'sku', label: product.sku, className: 'bg-[var(--ui-surface-2)] font-mono text-[var(--ui-ink-2)]' })
   }
   // Barcode moved out of this cell -- it now sits with brand/category in
   // the name cell's compactMeta line (desktop table row, see

@@ -254,7 +254,7 @@ function SuggestionTextInput({ id, name, value, options, onChange, placeholder, 
             <button
               key={option.toLowerCase()}
               type="button"
-              className="block min-h-11 w-full px-3 py-2 text-left text-sm text-gray-800 hover:bg-blue-50 dark:text-gray-200 dark:hover:bg-blue-900/20"
+              className="block min-h-11 w-full px-3 py-2 text-left text-sm text-gray-800 hover:bg-[var(--ui-accent-soft)] dark:text-gray-200"
               onMouseDown={(event) => event.preventDefault()}
               onClick={() => { onChange(option); setOpen(false) }}
             >
@@ -1152,7 +1152,7 @@ export default function ProductForm({
               onClick={() => setActiveTab(tab.id)}
               className={`-mb-px min-h-11 shrink-0 border-b-2 px-4 py-2 text-sm font-medium ${
                 activeTab === tab.id
-                  ? 'border-blue-600 text-blue-600'
+                  ? 'border-[var(--ui-accent)] text-[var(--ui-accent-ink)]'
                   : 'border-transparent text-gray-500 hover:text-gray-700'
               }`}
             >
@@ -1211,7 +1211,7 @@ export default function ProductForm({
                   {imageList.map((image, index) => (
                     <div
                       key={`${image}-${index}`}
-                      className={`group relative overflow-hidden rounded-xl border bg-slate-50 ${dragImageIndex === index ? 'border-blue-400 ring-2 ring-blue-200' : 'border-slate-200'}`}
+                      className={`group relative overflow-hidden rounded-xl border bg-slate-50 ${dragImageIndex === index ? 'border-[var(--ui-accent)] ring-2 ring-[var(--ui-accent-soft)]' : 'border-slate-200'}`}
                       draggable={imageList.length > 1}
                       onDragStart={(event: DragEvent<HTMLDivElement>) => {
                         setDragImageIndex(index)
@@ -1234,7 +1234,7 @@ export default function ProductForm({
                           drag-out. */}
                       <img src={image} alt={`product-${index + 1}`} className="h-20 w-full object-cover sm:h-24" onContextMenu={preventContextMenu} />
                       {index === 0 ? (
-                        <span className="absolute left-1 top-1 rounded bg-blue-600/90 px-1 py-0.5 text-[9px] font-medium text-white">
+                        <span className="absolute left-1 top-1 rounded bg-[var(--ui-accent)] px-1 py-0.5 text-[9px] font-medium text-white">
                           {tr('primary', 'Primary', 'រូបសំខាន់')}
                         </span>
                       ) : null}
@@ -1382,7 +1382,7 @@ export default function ProductForm({
                 />
                 <button
                   type="button"
-                  className="inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-lg border border-gray-300 bg-white text-gray-600 transition-colors hover:border-blue-400 hover:bg-blue-50 hover:text-blue-700 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-300 dark:hover:border-blue-500 dark:hover:bg-blue-900/30 dark:hover:text-blue-300"
+                  className="inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-lg border border-gray-300 bg-white text-gray-600 transition-colors hover:border-[var(--ui-accent)] hover:bg-[var(--ui-accent-soft)] hover:text-[var(--ui-accent-ink)] disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-300"
                   onClick={() => openScanner('barcode')}
                   title={scannerLaunchingField === 'barcode' ? scanningLabel : scanBarcodeLabel}
                   aria-label={scanBarcodeLabel}
@@ -1448,7 +1448,7 @@ export default function ProductForm({
                     <button
                       key={supplier.id}
                       type="button"
-                      className="flex min-h-11 w-full min-w-0 items-center gap-2 px-3 py-2 text-left text-sm hover:bg-blue-50 dark:hover:bg-blue-900/20"
+                      className="flex min-h-11 w-full min-w-0 items-center gap-2 px-3 py-2 text-left text-sm hover:bg-[var(--ui-accent-soft)]"
                       onClick={() => {
                         setField('supplier', supplier.name)
                         setSupplierDrop(false)
@@ -1525,10 +1525,10 @@ export default function ProductForm({
             />
           </div>
 
-          <div className="min-w-0 rounded-xl border border-blue-100 bg-blue-50 p-3 dark:border-blue-800 dark:bg-blue-900/10">
+          <div className="min-w-0 rounded-xl border border-[var(--ui-line)] bg-[var(--ui-surface-2)] p-3">
             <div className="mb-2">
-              <p className="text-sm font-bold text-blue-700 dark:text-blue-400">{tr('special_price', 'Special Price', 'តម្លៃពិសេស')}</p>
-              <p className="text-xs text-blue-600 dark:text-blue-500">{tr('special_price_hint', 'Internal alternate selling price for staff-only situations or quick POS selection.', 'តម្លៃលក់ជម្រើសខាងក្នុង សម្រាប់ស្ថានភាពបុគ្គលិក ឬជ្រើសរហ័សនៅ POS។')}</p>
+              <p className="text-sm font-bold text-[var(--ui-ink)]">{tr('special_price', 'Special Price', 'តម្លៃពិសេស')}</p>
+              <p className="text-xs text-[var(--ui-ink-2)]">{tr('special_price_hint', 'Internal alternate selling price for staff-only situations or quick POS selection.', 'តម្លៃលក់ជម្រើសខាងក្នុង សម្រាប់ស្ថានភាពបុគ្គលិក ឬជ្រើសរហ័សនៅ POS។')}</p>
             </div>
             <DualPriceInput
               labelUsd={tr('special_price_usd_full', 'Special Price (USD)', 'តម្លៃពិសេស (USD)')}
@@ -1550,10 +1550,10 @@ export default function ProductForm({
             />
           </div>
 
-          <div className="min-w-0 rounded-xl border border-indigo-100 bg-indigo-50 p-3 dark:border-indigo-800 dark:bg-indigo-900/10">
+          <div className="min-w-0 rounded-xl border border-[var(--ui-line)] bg-[var(--ui-surface-2)] p-3">
             <div className="mb-2">
-              <p className="text-sm font-bold text-indigo-700 dark:text-indigo-400">{tr('wholesale_price', 'Wholesale', 'បោះដុំ')}</p>
-              <p className="text-xs text-indigo-600 dark:text-indigo-500">{tr('wholesale_price_hint', 'Bulk / wholesale price, selectable at POS like the VIP tier.', 'តម្លៃបោះដុំ អាចជ្រើសនៅ POS ដូចតម្លៃ VIP។')}</p>
+              <p className="text-sm font-bold text-[var(--ui-ink)]">{tr('wholesale_price', 'Wholesale', 'បោះដុំ')}</p>
+              <p className="text-xs text-[var(--ui-ink-2)]">{tr('wholesale_price_hint', 'Bulk / wholesale price, selectable at POS like the VIP tier.', 'តម្លៃបោះដុំ អាចជ្រើសនៅ POS ដូចតម្លៃ VIP។')}</p>
             </div>
             <DualPriceInput
               labelUsd={tr('wholesale_price_usd_full', 'Wholesale (USD)', 'បោះដុំ (USD)')}

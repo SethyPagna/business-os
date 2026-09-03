@@ -94,9 +94,9 @@ export default function MergeDuplicatesReviewModal({ t, onClose, onConfirm, onLo
   return (
     <Modal title={T('merge_duplicate_products', 'Merge duplicate products')} onClose={onClose} size="lg">
       <div className="space-y-4 text-sm text-gray-700 dark:text-gray-300">
-        <div className="flex items-start gap-3 rounded-lg border border-blue-200 bg-blue-50 p-3 dark:border-blue-900/50 dark:bg-blue-950/20">
-          <GitMerge className="mt-0.5 h-4 w-4 shrink-0 text-blue-600 dark:text-blue-400" />
-          <p className="text-blue-800 dark:text-blue-300">
+        <div className="flex items-start gap-3 rounded-lg border border-[var(--ui-line)] bg-[var(--ui-surface-2)] p-3">
+          <GitMerge className="mt-0.5 h-4 w-4 shrink-0 text-[var(--ui-ink-3)]" />
+          <p className="text-[var(--ui-ink-2)]">
             {T(
               'merge_duplicates_summary',
               'Scans every active product and folds branch-only duplicates -- rows that are identical in every identity field but landed in the catalog separately, usually from two import runs (e.g. one file per branch) that never saw each other -- into a single row.',
@@ -255,7 +255,7 @@ export default function MergeDuplicatesReviewModal({ t, onClose, onConfirm, onLo
                         {group.branchBreakdown.map((b) => (
                           <span
                             key={b.branchId}
-                            className="rounded-full bg-blue-50 px-2 py-0.5 text-[11px] text-blue-700 dark:bg-blue-950/30 dark:text-blue-300"
+                            className="rounded-full bg-[var(--ui-accent-soft)] px-2 py-0.5 text-[11px] text-[var(--ui-accent-ink)]"
                           >
                             {b.branchName || `#${b.branchId}`}: +{b.quantity}
                           </span>
@@ -301,7 +301,7 @@ export default function MergeDuplicatesReviewModal({ t, onClose, onConfirm, onLo
           <button
             onClick={onConfirm}
             disabled={!acknowledged || !canMerge || working}
-            className="rounded-lg bg-blue-600 px-4 py-2 text-sm text-white hover:bg-blue-700 disabled:opacity-40"
+            className="rounded-lg bg-[var(--ui-accent)] px-4 py-2 text-sm text-white hover:bg-[var(--ui-accent-ink)] disabled:opacity-40"
           >
             {working
               ? T('merge_duplicates_working', 'Merging...')

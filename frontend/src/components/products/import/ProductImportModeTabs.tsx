@@ -28,7 +28,7 @@ export default function ProductImportModeTabs({ value, onChange }: {
             ? 'bg-white text-emerald-700 shadow dark:bg-slate-900 dark:text-emerald-400'
             : tone === 'violet'
               ? 'bg-white text-violet-700 shadow dark:bg-slate-900 dark:text-violet-400'
-              : 'bg-white text-blue-700 shadow dark:bg-slate-900 dark:text-blue-400'
+              : 'bg-white text-[var(--ui-accent-ink)] shadow dark:bg-slate-900'
         return (
           <button
             key={id}
@@ -55,9 +55,9 @@ export function ProductImportOptionCard({ active, dangerous = false, icon: Icon,
   onClick: () => void
 }) {
   return (
-    <div className={`flex items-center gap-3 rounded-xl border-2 p-3 transition ${active ? (dangerous ? 'border-red-500 bg-red-50 dark:bg-red-950/20' : 'border-blue-500 bg-blue-50 dark:bg-blue-950/20') : 'border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-900'}`}>
+    <div className={`flex items-center gap-3 rounded-xl border-2 p-3 transition ${active ? (dangerous ? 'border-red-500 bg-red-50 dark:bg-red-950/20' : 'border-[var(--ui-accent)] bg-[var(--ui-accent-soft)]') : 'border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-900'}`}>
       <button type="button" onClick={onClick} className="flex min-w-0 flex-1 items-center gap-3 text-left" aria-pressed={active}>
-        <Icon className={`h-4 w-4 shrink-0 ${dangerous ? 'text-red-600 dark:text-red-400' : 'text-blue-600 dark:text-blue-400'}`} />
+        <Icon className={`h-4 w-4 shrink-0 ${dangerous ? 'text-red-600 dark:text-red-400' : 'text-[var(--ui-accent-ink)]'}`} />
         <span className="truncate text-sm font-semibold text-slate-900 dark:text-slate-100">{title}</span>
       </button>
       <InfoHint text={description} label={`About ${title}`} />

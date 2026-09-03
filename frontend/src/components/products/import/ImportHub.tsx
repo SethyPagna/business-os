@@ -172,7 +172,7 @@ export default function ImportHub({
       <button
         type="button"
         onClick={() => inputRef.current?.click()}
-        className="w-full rounded-2xl border-2 border-dashed border-gray-300 dark:border-gray-600 hover:border-blue-400 p-6 text-center transition-colors"
+        className="w-full rounded-2xl border-2 border-dashed border-gray-300 dark:border-gray-600 hover:border-[var(--ui-accent)] p-6 text-center transition-colors"
         onDragOver={(event) => event.preventDefault()}
         onDrop={(event) => { event.preventDefault(); void addFiles(event.dataTransfer?.files || null) }}
       >
@@ -206,7 +206,7 @@ export default function ImportHub({
                   entry.status === 'queued' ? 'text-emerald-600'
                   : entry.status === 'error' ? 'text-red-600'
                   : entry.status === 'planned' ? 'text-gray-400'
-                  : 'text-blue-600'
+                  : 'text-[var(--ui-accent-ink)]'
                 }`}>
                   {entry.status === 'planned' ? ''
                     : entry.status === 'creating' ? T('import_hub_creating', 'creating job…')
@@ -256,7 +256,7 @@ export default function ImportHub({
               )}
               {previews[index]?.rows.length ? (
                 <details className="mt-2">
-                  <summary className="cursor-pointer select-none text-[11px] font-medium text-blue-600 dark:text-blue-400">
+                  <summary className="cursor-pointer select-none text-[11px] font-medium text-[var(--ui-accent-ink)]">
                     {T('import_hub_preview_rows', 'Preview rows')}
                   </summary>
                   <div className="mt-1.5 max-h-40 overflow-auto rounded-lg border border-gray-200 dark:border-gray-700">

@@ -464,7 +464,7 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
         key={row.id}
         type="button"
         onClick={() => void openDetail(row)}
-        className="flex w-full items-start justify-between gap-3 rounded-xl border border-gray-200 bg-white p-3 text-left shadow-sm transition hover:border-blue-300 hover:bg-blue-50/40 dark:border-gray-700 dark:bg-gray-900 dark:hover:border-blue-700 dark:hover:bg-blue-900/10"
+        className="flex w-full items-start justify-between gap-3 rounded-xl border border-gray-200 bg-white p-3 text-left shadow-sm transition hover:border-[var(--ui-accent)] hover:bg-[var(--ui-accent-soft)] dark:border-gray-700 dark:bg-gray-900"
       >
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
@@ -648,7 +648,7 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
               key={option.id}
               type="button"
               onClick={() => setView(option.id)}
-              className={`rounded-lg px-3 py-1.5 text-sm font-medium ${view === option.id ? 'bg-white text-blue-600 shadow dark:bg-gray-900' : 'text-gray-500'}`}
+              className={`rounded-lg px-3 py-1.5 text-sm font-medium ${view === option.id ? 'bg-white text-[var(--ui-accent-ink)] shadow dark:bg-gray-900' : 'text-gray-500'}`}
             >
               {option.label}
             </button>
@@ -848,7 +848,7 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
               ) : (
                 <div className="max-h-64 space-y-1 overflow-y-auto">
                   {detailRows.map((row) => (
-                    <div key={row.id} className={`flex items-center justify-between rounded-lg px-2.5 py-1.5 text-xs ${row.id === detail.id ? 'ring-1 ring-blue-300 dark:ring-blue-700' : ''} bg-gray-50 dark:bg-gray-800/60`}>
+                    <div key={row.id} className={`flex items-center justify-between rounded-lg px-2.5 py-1.5 text-xs ${row.id === detail.id ? 'ring-1 ring-[var(--ui-accent)]' : ''} bg-gray-50 dark:bg-gray-800/60`}>
                       <span className="text-gray-400" title={isDateOnlyStamp(row.created_at) ? noTimeLabel : undefined}>
                         {isDateOnlyStamp(row.created_at) ? fmtDate(row.created_at) : fmtDateTime24(row.created_at)}
                       </span>

@@ -369,7 +369,7 @@ export default function BranchStockAdjuster({ product, branches, user, onDone, t
             <label className="text-xs font-medium text-gray-600 dark:text-gray-400 block" htmlFor="branch-stock-adjust-reason">
               {T('reason', 'Reason', 'មូលហេតុ')}
             </label>
-            <button type="button" className="text-[11px] font-medium text-blue-600 hover:text-blue-700 dark:text-blue-300" onClick={() => setReasonManager({ open: true, type: 'adjust' })}>
+            <button type="button" className="text-[11px] font-medium text-[var(--ui-accent-ink)] hover:underline" onClick={() => setReasonManager({ open: true, type: 'adjust' })}>
               {T('manage_reasons', 'Manage reasons', 'គ្រប់គ្រងមូលហេតុ')}
             </button>
           </div>
@@ -379,7 +379,7 @@ export default function BranchStockAdjuster({ product, branches, user, onDone, t
                 <button
                   key={entry.id}
                   type="button"
-                  className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${reason === entry.label ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300'}`}
+                  className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${reason === entry.label ? 'bg-[var(--ui-accent)] text-white' : 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300'}`}
                   onClick={() => setReason(entry.label)}
                 >
                   {entry.label}
@@ -549,7 +549,7 @@ function StockAdjustBranchRow({ row, productId, unit, onChange, T }: StockAdjust
             key={value}
             type="button"
             onClick={() => onChange({ type: value, batchId: '' })}
-            className={`rounded-lg border-2 py-1 text-[11px] font-medium ${row.type === value ? 'border-blue-600 bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300' : 'border-gray-200 text-gray-600 dark:border-gray-600 dark:text-gray-400'}`}
+            className={`rounded-lg border-2 py-1 text-[11px] font-medium ${row.type === value ? 'border-[var(--ui-accent)] bg-[var(--ui-accent-soft)] text-[var(--ui-accent-ink)]' : 'border-gray-200 text-gray-600 dark:border-gray-600 dark:text-gray-400'}`}
           >
             {label}
           </button>
@@ -576,7 +576,7 @@ function StockAdjustBranchRow({ row, productId, unit, onChange, T }: StockAdjust
             <button
               key={n}
               type="button"
-              className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${Number(row.delta) === n ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300'}`}
+              className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${Number(row.delta) === n ? 'bg-[var(--ui-accent)] text-white' : 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300'}`}
               onClick={() => onChange({ delta: String(n) })}
             >
               {n}
@@ -596,7 +596,7 @@ function StockAdjustBranchRow({ row, productId, unit, onChange, T }: StockAdjust
               {row.type === 'add' ? (
                 <button
                   type="button"
-                  className={`rounded-full px-2.5 py-1 text-[11px] font-medium border ${row.batchId === 'new' ? 'border-blue-600 bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300' : 'border-gray-200 text-gray-600 dark:border-gray-600 dark:text-gray-400'}`}
+                  className={`rounded-full px-2.5 py-1 text-[11px] font-medium border ${row.batchId === 'new' ? 'border-[var(--ui-accent)] bg-[var(--ui-accent-soft)] text-[var(--ui-accent-ink)]' : 'border-gray-200 text-gray-600 dark:border-gray-600 dark:text-gray-400'}`}
                   onClick={() => onChange({ batchId: 'new' })}
                 >
                   {T('new_batch', '+ New batch')}
@@ -606,7 +606,7 @@ function StockAdjustBranchRow({ row, productId, unit, onChange, T }: StockAdjust
                 <button
                   key={batch.id}
                   type="button"
-                  className={`rounded-full px-2.5 py-1 text-[11px] font-medium border ${String(row.batchId) === String(batch.id) ? 'border-blue-600 bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300' : 'border-gray-200 text-gray-600 dark:border-gray-600 dark:text-gray-400'}`}
+                  className={`rounded-full px-2.5 py-1 text-[11px] font-medium border ${String(row.batchId) === String(batch.id) ? 'border-[var(--ui-accent)] bg-[var(--ui-accent-soft)] text-[var(--ui-accent-ink)]' : 'border-gray-200 text-gray-600 dark:border-gray-600 dark:text-gray-400'}`}
                   onClick={() => onChange({ batchId: batch.id })}
                 >
                   {batchDisplayLabel(batch, T('batch', 'Batch'))} ({batch.quantity})

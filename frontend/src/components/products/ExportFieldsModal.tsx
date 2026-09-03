@@ -111,7 +111,7 @@ export default function ExportFieldsModal({ rowCount, onClose, scopes, selectedS
       <div className="flex justify-end mb-2">
         <button
           type="button"
-          className="text-xs text-blue-600 dark:text-blue-400 hover:underline"
+          className="text-xs text-[var(--ui-accent-ink)] hover:underline"
           onClick={() => setSelected(allSelected ? new Set() : new Set(EXPORT_FIELD_GROUPS.map((g) => g.key)))}
         >
           {allSelected ? tr('deselect_all', 'Deselect all') : tr('select_all', 'Select all')}
@@ -155,7 +155,7 @@ export default function ExportFieldsModal({ rowCount, onClose, scopes, selectedS
               onClick={() => setFormat(value)}
               aria-pressed={format === value}
               className={`rounded-lg border px-2 py-1.5 text-xs font-semibold transition ${format === value
-                ? 'border-blue-500 bg-blue-50 text-blue-800 dark:border-blue-500 dark:bg-blue-950/30 dark:text-blue-200'
+                ? 'border-[var(--ui-accent)] bg-[var(--ui-accent-soft)] text-[var(--ui-accent-ink)]'
                 : 'border-gray-200 bg-white text-gray-600 hover:border-gray-300 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300'}`}
             >
               {label}

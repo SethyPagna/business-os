@@ -242,7 +242,7 @@ export default function ProductsListSurface({
             it. */}
         <th className={`col-highlight-red whitespace-nowrap px-3 py-3 text-right font-semibold text-red-600 dark:text-red-400 ${KIT_TH_HEADER}`}>{t('cost')}</th>
         <th className={`col-highlight-green whitespace-nowrap px-3 py-3 text-right font-semibold text-green-600 dark:text-green-400 ${KIT_TH_HEADER}`}>{t('selling_price_label')}</th>
-        <th className={`hidden whitespace-nowrap px-3 py-3 text-right font-semibold text-blue-600 dark:text-blue-400 lg:table-cell ${KIT_TH_HEADER}`}>{t('margin')}</th>
+        <th className={`hidden whitespace-nowrap px-3 py-3 text-right font-semibold text-[var(--ui-info)] lg:table-cell ${KIT_TH_HEADER}`}>{t('margin')}</th>
         <th className={`whitespace-nowrap px-3 py-3 text-right font-semibold text-gray-600 dark:text-gray-400 ${KIT_TH_HEADER}`}>{t('stock')}</th>
       </tr>
     </thead>

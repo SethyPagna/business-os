@@ -785,7 +785,7 @@ export default function ManageBrandsModal({
                     </div>
                     <button
                       type="button"
-                      className="text-xs text-blue-600 hover:underline"
+                      className="text-xs text-[var(--ui-accent-ink)] hover:underline"
                       onClick={() => {
                         setRenamingBrand(entry.name)
                         setRenameValue(entry.name)
@@ -844,7 +844,7 @@ export default function ManageBrandsModal({
                         <span className="min-w-0 flex-1 truncate font-medium">{name}</span>
                         <button
                           type="button"
-                          className="text-blue-600 hover:underline dark:text-blue-300"
+                          className="text-[var(--ui-accent-ink)] hover:underline"
                           onClick={() => {
                             setRenamingBrand(name)
                             setRenameValue(name)

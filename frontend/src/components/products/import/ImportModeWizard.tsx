@@ -33,9 +33,9 @@ export default function ImportModeWizard({ onClose, onDone, t }: ImportModeWizar
   const [screen, setScreen] = useState<'hub' | 'classic'>('hub')
 
   if (screen === 'hub') {
-    // Shared Modal (portalled, z-[1050]) instead of a hand-rolled z-50
+    // Shared Modal (portalled, --z-modal) instead of a hand-rolled z-50
     // overlay: the old sheet rendered BELOW BackgroundImportTracker's
-    // chip/panel (z-[1000]), so the tracker could bury the very hub that
+    // chip/panel, so the tracker could bury the very hub that
     // just queued the jobs. The hub's title/hint live in the Modal header
     // now (the hub itself renders body content only).
     return (

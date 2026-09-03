@@ -227,7 +227,7 @@ export default function ProductServerImportReviewScreen({ jobId, jobRevision, t,
     const progressDetail = summary
       || (rowCount > 0 ? `${rowCount.toLocaleString()} ${tr('rows', 'rows')}` : '')
     return <div className="space-y-4 py-8 text-center">
-      {!terminal ? <Loader2 className="mx-auto h-6 w-6 animate-spin text-blue-500" /> : <AlertTriangle className="mx-auto h-6 w-6 text-amber-500" />}
+      {!terminal ? <Loader2 className="mx-auto h-6 w-6 animate-spin text-[var(--ui-accent)]" /> : <AlertTriangle className="mx-auto h-6 w-6 text-amber-500" />}
       <p className="text-sm font-semibold">{terminal ? tr('import_analysis_stopped', 'Import analysis stopped') : tr('import_applying_now', 'Importing…')}</p>
       <p className="text-xs text-slate-500 dark:text-slate-400">{jobError || (terminal ? status : (progressDetail || tr('import_applying_hint', 'Applying your reviewed import. This closes when it starts.')))}</p>
       <div className="flex justify-center gap-2"><button type="button" className="btn-secondary text-sm" onClick={() => void onCancel()}>{tr('cancel_import', 'Cancel import')}</button><button type="button" className="btn-secondary text-sm" onClick={() => void onReviewLater()}>{tr('continue_in_background', 'Continue in background')}</button></div>
@@ -237,7 +237,7 @@ export default function ProductServerImportReviewScreen({ jobId, jobRevision, t,
   if (status !== 'awaiting_review') {
     const terminal = ['failed', 'cancelled', 'completed', 'completed_with_errors'].includes(status)
     return <div className="space-y-4 py-8 text-center">
-      {!terminal ? <Loader2 className="mx-auto h-6 w-6 animate-spin text-blue-500" /> : <AlertTriangle className="mx-auto h-6 w-6 text-amber-500" />}
+      {!terminal ? <Loader2 className="mx-auto h-6 w-6 animate-spin text-[var(--ui-accent)]" /> : <AlertTriangle className="mx-auto h-6 w-6 text-amber-500" />}
       <p className="text-sm font-semibold">{terminal ? tr('import_analysis_stopped', 'Import analysis stopped') : tr('import_analyzing', 'Analyzing on the server…')}</p>
       <p className="text-xs text-slate-500 dark:text-slate-400">{jobError || (terminal ? status : tr('import_analyzing_hint', 'The persisted review will open here when analysis finishes.'))}</p>
       <div className="flex justify-center gap-2"><button type="button" className="btn-secondary text-sm" onClick={() => void onCancel()}>{tr('cancel_import', 'Cancel import')}</button><button type="button" className="btn-secondary text-sm" onClick={() => void onReviewLater()}>{tr('continue_in_background', 'Continue in background')}</button></div>

@@ -614,7 +614,7 @@ export default function ManageCategoriesModal({ onClose, onReviewSelection, t }:
                   </div>
                   <button
                     onClick={() => setEditing({ ...category, color: category.color || DEFAULT_CATEGORY_COLOR })}
-                    className="text-xs text-blue-500 hover:underline"
+                    className="text-xs text-[var(--ui-accent-ink)] hover:underline"
                     disabled={saving || deletingId != null || category.virtual}
                   >
                     {t('edit') || 'Edit'}

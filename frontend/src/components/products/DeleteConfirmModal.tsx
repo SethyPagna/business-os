@@ -192,7 +192,7 @@ export default function DeleteConfirmModal({
             <label htmlFor="delete-confirm-reason" className="block text-xs font-medium text-gray-500 dark:text-gray-400">
               {T('delete_confirm_reason_label', 'Reason for deleting')}
             </label>
-            <button type="button" className="text-[11px] font-medium text-blue-600 hover:text-blue-700 dark:text-blue-300" onClick={() => setReasonManager({ open: true, type: 'delete' })}>
+            <button type="button" className="text-[11px] font-medium text-[var(--ui-accent-ink)] hover:underline" onClick={() => setReasonManager({ open: true, type: 'delete' })}>
               {T('manage_reasons', 'Manage reasons')}
             </button>
           </div>
@@ -202,7 +202,7 @@ export default function DeleteConfirmModal({
                 <button
                   key={entry.id}
                   type="button"
-                  className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${reason === entry.label ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300'}`}
+                  className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${reason === entry.label ? 'bg-[var(--ui-accent)] text-white' : 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300'}`}
                   onClick={() => setReason(entry.label)}
                 >
                   {entry.label}

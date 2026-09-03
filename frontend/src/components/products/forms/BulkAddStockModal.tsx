@@ -338,7 +338,7 @@ export default function BulkAddStockModal({ productIds, products, branches, user
         </h2>
         <p className="mb-4 text-sm text-gray-500 dark:text-gray-400">{t('adjust_stock_bulk_desc') || 'This will apply the same change to each selected product.'}</p>
         <div className="space-y-4">
-          {/* Same border-2 / blue-50+blue-700 segmented style as
+          {/* Same border-2 / accent-soft + accent-ink segmented style as
               InventoryStockModals.tsx, BranchStockAdjuster.tsx, and the
               Products.tsx inline bulk panel that opens this modal --
               continues whatever choice was already made there instead of
@@ -351,7 +351,7 @@ export default function BulkAddStockModal({ productIds, products, branches, user
                   key={value}
                   type="button"
                   onClick={() => setAction(value)}
-                  className={`rounded-xl border-2 py-2 text-xs font-medium ${action === value ? 'border-blue-600 bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300' : 'border-gray-200 dark:border-gray-600 text-gray-600 dark:text-gray-400'}`}
+                  className={`rounded-xl border-2 py-2 text-xs font-medium ${action === value ? 'border-[var(--ui-accent)] bg-[var(--ui-accent-soft)] text-[var(--ui-accent-ink)]' : 'border-gray-200 dark:border-gray-600 text-gray-600 dark:text-gray-400'}`}
                 >
                   {actionLabels[value]}
                 </button>
@@ -380,7 +380,7 @@ export default function BulkAddStockModal({ productIds, products, branches, user
                 <button
                   key={n}
                   type="button"
-                  className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${Number(qty) === n ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300'}`}
+                  className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${Number(qty) === n ? 'bg-[var(--ui-accent)] text-white' : 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300'}`}
                   onClick={() => setQty(String(n))}
                 >
                   {n}
@@ -395,7 +395,7 @@ export default function BulkAddStockModal({ productIds, products, branches, user
               /adjust already does server-side when no explicit batchId is
               given. */}
           {action !== 'set' ? (
-            <p className="rounded-lg bg-blue-50 px-3 py-2 text-xs text-blue-700 dark:bg-blue-900/20 dark:text-blue-300">
+            <p className="rounded-lg bg-[var(--ui-surface-2)] px-3 py-2 text-xs text-[var(--ui-ink-2)]">
               {action === 'add'
                 ? (t('bulk_add_batch_note') || 'Each product gets its own new batch with the received date below.')
                 : (t('bulk_remove_batch_note') || 'Stock is drawn from each product\u2019s oldest batch first (FIFO).')}
@@ -440,7 +440,7 @@ export default function BulkAddStockModal({ productIds, products, branches, user
                   <button
                     key={entry.id}
                     type="button"
-                    className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${reason === entry.label ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300'}`}
+                    className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${reason === entry.label ? 'bg-[var(--ui-accent)] text-white' : 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300'}`}
                     onClick={() => setReason(entry.label)}
                   >
                     {entry.label}
@@ -457,7 +457,7 @@ export default function BulkAddStockModal({ productIds, products, branches, user
             />
             <button
               type="button"
-              className="mt-1 text-[11px] font-medium text-blue-600 hover:underline dark:text-blue-400"
+              className="mt-1 text-[11px] font-medium text-[var(--ui-accent-ink)] hover:underline"
               onClick={() => setReasonManager({ open: true, type: 'adjust' })}
             >
               {t('manage_reasons') || 'Manage reasons'}
