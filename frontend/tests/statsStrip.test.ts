@@ -60,6 +60,15 @@ test('activeStatsPreset round-trips every preset and rejects a custom range', ()
   assert.equal(activeStatsPreset({ startDate: '2026-08-01', endDate: '2026-08-15', startTime: '', endTime: '' }, now), null)
 })
 
+const REPORT_VIEW_FILES = [
+  'src/components/sales/reports/OverviewReport.tsx',
+  'src/components/sales/reports/PeriodReport.tsx',
+  'src/components/sales/reports/SalesListReport.tsx',
+  'src/components/sales/reports/GroupedReport.tsx',
+  'src/components/sales/reports/ReturnsReport.tsx',
+  'src/components/sales/reports/ExpensesReport.tsx',
+]
+
 test('date/time picker owns all-time/today presets and exposes time only where endpoints honor it', () => {
   const picker = read('src/components/shared/DateTimeRangePicker.tsx')
   const presets = read('src/components/shared/statsStripPresets.ts')
@@ -74,8 +83,11 @@ test('date/time picker owns all-time/today presets and exposes time only where e
   assert.match(sales, /getSalesStatsStrip\(\{[\s\S]{0,180}startTime: stripRange\.startTime[\s\S]{0,80}endTime: stripRange\.endTime/, 'Sales threads the selected time window into its stats request')
 
   const reports = read('src/components/sales/ReportsHub.tsx')
-  assert.ok(reports.includes("showTime={selectedType === 'sales'}"), 'the Reports hub exposes time only for its timestamp-backed Sales report')
-  assert.match(reports, /selectedType !==?= 'sales'|selectedType === 'sales'/, 'the Reports hub guards the Sales-only time behavior')
+  assert.ok(reports.includes('showTime={supportsTime}'), 'the Reports hub exposes time only for views whose endpoints honor a clock window')
+  assert.ok(reports.includes('const supportsTime = !!view?.supportsTime'), 'the Reports hub derives the clock affordance from the active view definition')
+  const model = read('src/components/sales/reports/reportModel.ts')
+  assert.ok(/id: 'returns'[^}]*supportsTime: false/.test(model) && /id: 'expenses'[^}]*supportsTime: false/.test(model), 'date-only ledgers (Returns, Expenses) never expose a time window')
+  assert.ok(/id: 'sales'[^}]*supportsTime: true/.test(model), 'the per-receipt Sales list keeps the 24-hour window')
 })
 
 // ---- rollout pins (cross-file) --------------------------------------------
@@ -161,15 +173,26 @@ test('secondary controls stay on the Stats-chip row whether the strip is folded 
   assert.ok(!/hidden sm:inline">\{tr\('add_return'/.test(returns), 'the add label never hides on phones')
 })
 
-test('Part 548: the Reports range totals show Profit on every viewport', () => {
-  const report = read('src/components/sales/SalesDailyReport.tsx')
-  const totalsRow = report.slice(report.indexOf('rangeTotals.tx'), report.indexOf('rangeTotals.profit') + 200)
-  assert.ok(totalsRow.includes('rangeTotals.profit'), 'Profit renders beside N sales | Revenue')
-  assert.ok(!/hidden sm:inline[^>]*>\{t\('profit'\)/.test(report), 'Profit is not hidden below the sm breakpoint')
+test('Part 548: the Reports summary lines show Profit on every viewport', () => {
+  // Since the Reports redesign every view renders its figures through the
+  // ReportFrame summary line (N sales | Revenue | Refunds | Gross profit);
+  // nothing in a view may hide a figure below the sm breakpoint.
+  for (const rel of [
+    'src/components/sales/reports/SalesListReport.tsx',
+    'src/components/sales/reports/OverviewReport.tsx',
+    'src/components/sales/reports/PeriodReport.tsx',
+    'src/components/sales/reports/GroupedReport.tsx',
+  ]) {
+    const src = read(rel)
+    assert.ok(src.includes("tr('rpt_gross_profit', 'Gross profit')"), `${rel} renders profit in its summary`)
+    assert.ok(!/hidden sm:inline/.test(src), `${rel} never hides a figure below the sm breakpoint`)
+  }
+  const frame = read('src/components/sales/reports/ReportFrame.tsx')
+  assert.ok(frame.includes('data-report-summary'), 'the ReportFrame owns the one summary line')
 })
 
-test('Part 549/552: the Sales report status/method filters are compact chip-selects', () => {
-  const report = read('src/components/sales/SalesDailyReport.tsx')
+test('Part 549/552: the Reports status/method filters are compact chip-selects', () => {
+  const report = read('src/components/sales/ReportsHub.tsx')
   // Compact h-7 chip-selects (not the old full-height dropdowns), matching
   // the Returns/Fees report density.
   assert.ok(report.includes("buttonClassName=\"h-7 py-0 px-2 text-[11px]\""), 'status/method use the compact chip-select size')
@@ -243,20 +266,19 @@ test('Part 552: report section controls ride the title row; hub tabs fit; branch
   // (user: "the sales, returns and fees, sections the card title can be
   // moved to title row"): the section owns a `titleNode` prop and ReportsHub
   // stops rendering a standalone title.
-  for (const rel of [
-    'src/components/sales/SalesDailyReport.tsx',
-    'src/components/sales/ReturnsReportSection.tsx',
-    'src/components/sales/FeesReportSection.tsx',
-  ]) {
+  // Since the Reports redesign each view is a ReportFrame whose title row
+  // (SectionHeader) carries the view's own controls in `actions`; the hub
+  // renders no standalone title of its own.
+  for (const rel of REPORT_VIEW_FILES) {
     const src = read(rel)
-    assert.ok(/titleNode\??: ReactNode/.test(src), `${rel} accepts a titleNode`)
-    assert.ok(src.includes('{titleNode}'), `${rel} renders the titleNode on its control row`)
+    assert.ok(src.includes('<ReportFrame'), `${rel} renders inside a ReportFrame`)
+    assert.ok(/<ReportFrame[\s\S]{0,600}actions=\{/.test(src), `${rel} places its controls on the title row`)
   }
   const hub = read('src/components/sales/ReportsHub.tsx')
-  assert.ok(hub.includes('titleNode={titleNode}'), 'ReportsHub passes the title into each section')
   assert.ok(!/<Icon className="h-4 w-4" \/> \{label\}/.test(hub), 'ReportsHub no longer renders its own standalone section title row')
-  // The branch select rides the type-chips row, not its own line.
-  assert.ok(/typeChips\.map[\s\S]{0,900}branches\.length \? \(\s*<AppSelect/.test(hub), 'the branch select sits inside the type-chips row')
+  // The branch select rides the shared control row's filters slot, not its own line.
+  assert.ok(/const filterSelects = \([\s\S]{0,120}branches\.length \? <AppSelect/.test(hub), 'the branch select is part of the control-row filters')
+  assert.ok(hub.includes('<ControlRow') && hub.includes('filters={compact ? null : filterSelects}'), 'the hub renders the shared ControlRow (filters inline on wide screens, in a Fold on phones)')
 
   // The hub tab row fits one row on phones: equal grid cells with complete,
   // wrapping labels, including Khmer, instead of hiding Reports with an
@@ -278,20 +300,17 @@ test('Part 553/554: report sections render display-currency money + a CSV export
   // display_currency setting is honored. Each section also offers an Export
   // action (user: "no actions to choose export etc"). Deeper reportMoney
   // behavior is pinned in tests/reportMoney.test.ts.
-  for (const rel of [
-    'src/components/sales/FeesReportSection.tsx',
-    'src/components/sales/ReturnsReportSection.tsx',
-  ]) {
+  for (const rel of REPORT_VIEW_FILES) {
     const src = read(rel)
     assert.ok(src.includes('fmtMoney('), `${rel} renders money via fmtMoney`)
     assert.ok(src.includes('downloadCSV('), `${rel} exports CSV`)
-    assert.ok(/onClick=\{exportCsv\}/.test(src), `${rel} wires an Export button`)
+    assert.ok(src.includes('exportMenuItems('), `${rel} offers Export CSV / Print on its title row`)
   }
-  const sales = read('src/components/sales/SalesDailyReport.tsx')
-  assert.ok(sales.includes('downloadCSV(') && /onClick=\{exportCsv\}/.test(sales), 'Sales report exports CSV')
-  // The hub threads the display-currency fmtMoney into every section.
+  // The hub threads the display-currency fmtMoney into every view (and the
+  // Currency option overrides the app setting for display only).
   const hub = read('src/components/sales/ReportsHub.tsx')
-  assert.ok(hub.includes('fmtMoney={fmtMoney}'), 'ReportsHub passes fmtMoney to the sections')
+  assert.ok(/const viewProps[\s\S]{0,400}fmtMoney,/.test(hub), 'ReportsHub passes fmtMoney to the views')
+  assert.ok(hub.includes("options.currency === 'setting' ? displayCurrency : options.currency"), 'the Currency option is display-only, layered over the app setting')
 })
 
 test('old bespoke stat surfaces are really gone (no zombie tile grids)', () => {

@@ -18,7 +18,7 @@ const serverSource = fs.readFileSync(path.join(here, '..', '..', 'cloudflare', '
 const feesPageSource = fs.readFileSync(path.join(here, '..', 'src', 'components', 'fees', 'FeesPage.tsx'), 'utf8').replace(/\r\n/g, '\n')
 const feesTransportSource = fs.readFileSync(path.join(here, '..', 'src', 'api', 'feesTransport.ts'), 'utf8').replace(/\r\n/g, '\n')
 const expenseLabelManagerSource = fs.readFileSync(path.join(here, '..', 'src', 'components', 'fees', 'ExpenseLabelManagerModal.tsx'), 'utf8').replace(/\r\n/g, '\n')
-const expenseReportSource = fs.readFileSync(path.join(here, '..', 'src', 'components', 'sales', 'FeesReportSection.tsx'), 'utf8').replace(/\r\n/g, '\n')
+const expenseReportSource = fs.readFileSync(path.join(here, '..', 'src', 'components', 'sales', 'reports', 'ExpensesReport.tsx'), 'utf8').replace(/\r\n/g, '\n')
 
 function extractFunction(source: string, name: string): string {
   const re = new RegExp(`function ${name}\\([\\s\\S]*?\\n\\}`)
