@@ -19,7 +19,7 @@ import { searchProducts } from '../../api/methods.ts'
 import { readWorkDraft, scheduleWorkDraftWrite, clearWorkDraft, writeWorkDraft, scopedWorkDraftKey } from '../../utils/workDrafts.ts'
 import { lazyRetry } from '../../utils/lazyImport.ts'
 import ConfirmDialog, { type ConfirmReviewItem } from '../shared/ConfirmDialog.tsx'
-import { batchDisplayLabel } from '../../utils/batchLabel.ts'
+import { batchDisplayLabel, lotCodeAsDate } from '../../utils/batchLabel.ts'
 import { dateToBatchCode } from '../../utils/batchCode.ts'
 import { todayStr } from '../../utils/dateHelpers.ts'
 
@@ -430,7 +430,9 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
             })
         setReceived((prev) => prev.map((item) => item.key === line.key ? {
           ...item, status: 'saved', detail: result?.lotCode
-            ? `${tr('lot', 'lot')} ${result.lotCode}`
+            // Z1a: the server hands back an MMDDYYYY lot code; show it as the
+            // received date it encodes, not as a raw 8-digit run.
+            ? `${tr('lot', 'lot')} ${lotCodeAsDate(result.lotCode) || result.lotCode}`
             : line.createPriceVariant
               ? tr('price_variant_received', 'Price variant received')
               : tr('received', 'Received'),
