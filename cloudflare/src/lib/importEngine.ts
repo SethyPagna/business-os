@@ -81,7 +81,7 @@ import { applyUnifiedStockAdd, applyUnifiedStockSale, ensureUnifiedStockProduct,
 import { parseStockAction, saleGroupKeyFor } from './stockActionResolver'
 import { applyHistoricalSaleImport, MAX_HISTORICAL_SALE_LINES } from './salesImportCommit'
 import { getUnifiedStockMode, type UnifiedStockResolvedRow } from './stockActionImport'
-import { getPlanLimits } from './planTier'
+import { getCachedPlanLimits, getPlanLimits } from './planTier'
 import {
   normalizeImageMatchKey,
   MAX_IMAGES_PER_PRODUCT,
@@ -774,8 +774,9 @@ type MaterializeState = {
 // heavier classify/apply phase. That removes five out of every six queue
 // round-trips for the 12k/21k migration files while keeping each D1 write
 // split by runD1BatchInChunks. Lower it again only if production telemetry
-// shows a materialization-specific CPU failure.
-const MATERIALIZE_ROWS_PER_CHUNK = 600
+// shows a materialization-specific CPU failure. The window size itself now
+// lives in planTier.ts as PLAN_LIMITS.materializeRowsPerChunk (Paid 600,
+// Free 100); ensureSourceRowsMaterialized reads it per request.
 
 async function getMaterializeState(db: D1Compat, jobId: string): Promise<{ state: MaterializeState; done: boolean; type: ImportType | null }> {
   const row = await db.prepare(`SELECT type, materialize_state_json, materialize_done FROM import_jobs WHERE id = @id`)
@@ -813,6 +814,12 @@ export async function resetMaterializeState(db: D1Compat, jobId: string): Promis
 // materialize_done was ALREADY true on entry (the common-case, cheap
 // no-op check) -- the caller then proceeds to read import_job_source_rows.
 async function ensureSourceRowsMaterialized(env: Env, db: D1Compat, jobId: string, kind: 'analyze' | 'apply'): Promise<boolean> {
+  // Tier-aware window size. Shadows the module constant with the same name
+  // (the established pattern in this file -- see ROWS_PER_IMPORT_CHUNK in
+  // runImportAnalyze) so every read below is unchanged and a Free
+  // deployment actually parses the smaller 100-row window its 10ms CPU
+  // budget was measured against.
+  const MATERIALIZE_ROWS_PER_CHUNK = getPlanLimits(env).materializeRowsPerChunk
   const { state, done, type } = await getMaterializeState(db, jobId)
   if (done) return false
 
@@ -4692,6 +4699,14 @@ async function applyStockActionsContinuation(
 ): Promise<{ applied: number; failed: number }> {
   // Tier-aware shadow -- see STOCK_ACTION_MAX_UNITS's module-level comment.
   const STOCK_ACTION_MAX_UNITS = getPlanLimits(env).stockActionMaxUnits
+  // The direct-mode continuation's own window sizes, tier-aware for the
+  // same reason as the unit ceiling above: on Free each window's classify
+  // and dispatch work has a 10ms CPU budget instead of 300,000ms, and each
+  // concurrent add is one more subrequest against a 1,000 (not 10,000)
+  // budget. Paid keeps M4's proven 480 / 400 / 12 exactly.
+  const STOCK_ACTION_CLASSIFY_WINDOW = getPlanLimits(env).stockActionClassifyWindow
+  const STOCK_ACTION_DISPATCH_READ = getPlanLimits(env).stockActionDispatchRead
+  const STOCK_ACTION_ADD_CONCURRENCY = getPlanLimits(env).stockActionAddConcurrency
   const decisions = getDecisionMap(policyJson)
   const { cursor, state } = await getChunkState(db, jobId)
   if (!state.startedAtMs) state.startedAtMs = startedAtMs
@@ -4927,7 +4942,11 @@ async function applyStockActionsContinuation(
 // strictly better than today's behavior, where a CPU-limit reset can also
 // leave partial writes (D1 resets the *connection*, not necessarily
 // everything already flushed) with no way to finish the job at all.
-const D1_IMPORT_BATCH_CHUNK_SIZE = 300 // statements per db.batch() call, not rows -- a products row can be 1-3 statements, so this is roughly 100-300 rows/chunk depending on import type. Lower this further if very large imports still hit the CPU-time error.
+// The chunk size itself now lives in planTier.ts as
+// PLAN_LIMITS.d1BatchChunkStatements (Paid 300, Free 100) -- statements
+// per db.batch() call, not rows: a products row can be 1-3 statements, so
+// 300 is roughly 100-300 rows/chunk depending on import type. Lower the
+// table's value if very large imports still hit the CPU-time error.
 // Historical receipts are independent, records-only transactions. The
 // writer gives every receipt a deterministic client_request_id and an
 // import_sales_commits seal, so bounded concurrency is both retry-safe and
@@ -4950,15 +4969,20 @@ export function isD1CpuLimitError(error: unknown): boolean {
 export async function runD1BatchInChunks(
   db: D1Compat,
   statements: Array<{ sql: string; params: Record<string, unknown> }>,
-  chunkSize: number = D1_IMPORT_BATCH_CHUNK_SIZE,
+  chunkSize?: number,
   onChunkDone?: (doneStatements: number, totalStatements: number) => Promise<void> | void,
 ): Promise<void> {
-  for (let offset = 0; offset < statements.length; offset += chunkSize) {
-    const chunk = statements.slice(offset, offset + chunkSize)
+  // Tier-aware default. This helper takes a D1Compat, not an Env (it is
+  // called from ~20 sites here and in bulkDeleteEngine.ts), so it reads the
+  // tier the isolate already resolved -- see getCachedPlanLimits' header for
+  // why that is safe and why its fallback is Paid.
+  const batchSize = chunkSize ?? getCachedPlanLimits().d1BatchChunkStatements
+  for (let offset = 0; offset < statements.length; offset += batchSize) {
+    const chunk = statements.slice(offset, offset + batchSize)
     try {
       await db.batch(chunk)
     } catch (error) {
-      // D1_IMPORT_BATCH_CHUNK_SIZE is a fixed guess at what fits the CPU
+      // d1BatchChunkStatements is a fixed guess at what fits the CPU
       // budget -- it's usually right, but a chunk with an unusually
       // write-heavy mix of statements (e.g. more branch_stock upserts than
       // typical) can still blow it. Rather than let that fail the whole
@@ -4994,14 +5018,16 @@ export async function runD1BatchInChunks(
 export async function runD1BatchGroupsInChunks(
   db: D1Compat,
   groups: Array<Array<{ sql: string; params: Record<string, unknown> }>>,
-  chunkSize: number = D1_IMPORT_BATCH_CHUNK_SIZE,
+  chunkSize?: number,
 ): Promise<void> {
+  // Tier-aware default -- same reasoning as runD1BatchInChunks above.
+  const batchSize = chunkSize ?? getCachedPlanLimits().d1BatchChunkStatements
   const packs: Array<typeof groups> = []
   let pack: typeof groups = []
   let packSize = 0
   for (const group of groups) {
     if (!group.length) continue
-    if (packSize + group.length > chunkSize && pack.length) {
+    if (packSize + group.length > batchSize && pack.length) {
       packs.push(pack)
       pack = []
       packSize = 0
@@ -5016,8 +5042,8 @@ export async function runD1BatchGroupsInChunks(
     } catch (error) {
       if (!isD1CpuLimitError(error) || packedGroups.length <= 1) throw error
       const mid = Math.ceil(packedGroups.length / 2)
-      await runD1BatchGroupsInChunks(db, packedGroups.slice(0, mid), chunkSize)
-      await runD1BatchGroupsInChunks(db, packedGroups.slice(mid), chunkSize)
+      await runD1BatchGroupsInChunks(db, packedGroups.slice(0, mid), batchSize)
+      await runD1BatchGroupsInChunks(db, packedGroups.slice(mid), batchSize)
     }
   }
 }
@@ -5038,6 +5064,10 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
   const db = getDb(env)
   // Tier-aware shadow -- see ROWS_PER_IMPORT_CHUNK's module-level comment.
   const ROWS_PER_IMPORT_CHUNK = getPlanLimits(env).rowsPerImportChunk
+  // Historical-receipt fan-out: each in-flight receipt write is a subrequest,
+  // so this is bounded by the subrequest budget (Paid 10,000, Free 1,000 to
+  // Cloudflare services). Paid keeps 12.
+  const HISTORICAL_SALES_IMPORT_CONCURRENCY = getPlanLimits(env).historicalSalesImportConcurrency
   const sw = makeStopwatch()
   const jobRow = await db.prepare(`SELECT status, cancel_requested, started_at FROM import_jobs WHERE id = @id`).get<{ status: string; cancel_requested: number; started_at: string | null }>({ id: jobId })
   if (!jobRow) throw new Error('Import job not found')

@@ -1,4 +1,9 @@
-// Free-tier quota guard.
+// Plan-aware quota guard.
+//
+// (Named "free-tier" originally because the ceilings it enforced were the
+// Free plan's, on both plans. The ceilings now come from planTier.ts, so a
+// Paid deployment is measured against the Paid allowance -- see the
+// LIMITS table below and PLAN_LIMITS_BY_TIER's kvWritesPerDay.)
 //
 // Every Cloudflare product this app uses has a free ceiling, and they are not
 // equally generous. The failure mode that matters is not "we got billed" --
@@ -58,6 +63,7 @@
 
 import type { Env } from '../index'
 import { getDb } from './db'
+import { getPlanLimits, type PlanLimits } from './planTier'
 import { recordAnalytics } from './analytics'
 
 export type QuotaResource = 'kv_write' | 'r2_class_a' | 'cf_images_transform' | 'cloudinary_transform'
@@ -74,24 +80,45 @@ export type QuotaZone =
   | 'exhausted'
 
 type QuotaLimit = {
-  /** Ceiling for the window. */
-  limit: number
   /** 'day' resets at UTC midnight; 'month' on the 1st. */
   window: 'day' | 'month'
+  /**
+   * Which PlanLimits field carries this resource's ceiling. The NUMBERS
+   * live in planTier.ts (PLAN_LIMITS_BY_TIER) because they differ by plan;
+   * this module keeps only the reset window, which is a property of the
+   * product rather than the plan.
+   */
+  tierField: NumericQuotaField
 }
 
+type NumericQuotaField = 'kvWritesPerDay' | 'r2ClassAPerMonth' | 'imagesTransformsPerMonth' | 'cloudinaryTransformsPerMonth'
+
+// The ceilings the entries below resolve to, and why each is what it is,
+// are documented at their definition sites in planTier.ts. Free's numbers
+// are exactly the ones this table used to hard-code; Paid raises kv_write
+// (1,000,000 writes/month included, divided by 30 for a daily budget) and
+// leaves the other three equal, because R2 and the two image services bill
+// independently of the Workers plan.
 const LIMITS: Record<QuotaResource, QuotaLimit> = {
-  kv_write: { limit: 1000, window: 'day' },
-  r2_class_a: { limit: 1_000_000, window: 'month' },
+  kv_write: { window: 'day', tierField: 'kvWritesPerDay' },
+  r2_class_a: { window: 'month', tierField: 'r2ClassAPerMonth' },
   // Cloudflare Images free plan: 5,000 UNIQUE transformations/month, counted
   // per source+parameters. Exceeding it returns error 9422 and is never
   // charged, so this budget protects capability rather than money -- once
   // spent, no new size or format can be produced until the month rolls over.
-  cf_images_transform: { limit: 5000, window: 'month' },
+  cf_images_transform: { window: 'month', tierField: 'imagesTransformsPerMonth' },
   // Cloudinary free plan: 25 credits/month, ~1,000 transformations per
   // credit. Tracked as transformations so the two providers are directly
   // comparable in the same units.
-  cloudinary_transform: { limit: 25_000, window: 'month' },
+  cloudinary_transform: { window: 'month', tierField: 'cloudinaryTransformsPerMonth' },
+}
+
+// The running deployment's ceiling for one resource. Every caller below
+// already holds an Env, so this resolves the real tier rather than the
+// cached one.
+function ceilingFor(env: Env, resource: QuotaResource): number {
+  const limits: PlanLimits = getPlanLimits(env)
+  return limits[LIMITS[resource].tierField]
 }
 
 // Deliberately conservative. The point of a safe zone is to change behaviour
@@ -133,9 +160,12 @@ const VIDEO_RESERVE: Partial<Record<QuotaResource, number>> = {
  * Same thresholds, applied against the reduced ceiling -- so an image sweep
  * backs off while the real quota still has room, and a video request later
  * that day still finds budget.
+ *
+ * The reserve is a fixed count, not a ratio, so on Paid (where kv_write has
+ * a larger ceiling) it stays the same absolute cushion for video.
  */
-export function reservedZoneFor(resource: QuotaResource, used: number): QuotaZone {
-  const { limit } = LIMITS[resource]
+export function reservedZoneFor(env: Env, resource: QuotaResource, used: number): QuotaZone {
+  const limit = ceilingFor(env, resource)
   const reserve = VIDEO_RESERVE[resource] || 0
   return zoneFor(used, Math.max(1, limit - reserve))
 }
@@ -161,8 +191,8 @@ export type QuotaStatus = {
   allowed: boolean
 }
 
-function buildStatus(resource: QuotaResource, used: number): QuotaStatus {
-  const { limit } = LIMITS[resource]
+function buildStatus(env: Env, resource: QuotaResource, used: number): QuotaStatus {
+  const limit = ceilingFor(env, resource)
   const zone = zoneFor(used, limit)
   return {
     resource,
@@ -173,7 +203,7 @@ function buildStatus(resource: QuotaResource, used: number): QuotaStatus {
     // What an image caller should read: the same thresholds against a
     // ceiling reduced by the video reserve, so image work stops early and
     // leaves the remainder for video.
-    reservedZone: reservedZoneFor(resource, used),
+    reservedZone: reservedZoneFor(env, resource, used),
     allowed: zone !== 'exhausted',
   }
 }
@@ -201,7 +231,7 @@ export async function consumeQuota(env: Env, resource: QuotaResource, amount = 1
     const row = await db
       .prepare(`SELECT used FROM quota_usage WHERE resource = @resource AND window_key = @windowKey`)
       .get<{ used: number }>({ resource, windowKey })
-    const status = buildStatus(resource, Number(row?.used || 0))
+    const status = buildStatus(env, resource, Number(row?.used || 0))
     // Only the moment a zone CHANGES, not every consumption. The point is to
     // be able to answer "when did we start running out" without writing a
     // data point on every mutation -- and Analytics Engine is the only store
@@ -216,7 +246,7 @@ export async function consumeQuota(env: Env, resource: QuotaResource, amount = 1
     }
     return status
   } catch {
-    return { ...buildStatus(resource, 0), zone: 'ok', allowed: true }
+    return { ...buildStatus(env, resource, 0), zone: 'ok', allowed: true }
   }
 }
 
@@ -228,9 +258,9 @@ export async function readQuota(env: Env, resource: QuotaResource): Promise<Quot
     const row = await db
       .prepare(`SELECT used FROM quota_usage WHERE resource = @resource AND window_key = @windowKey`)
       .get<{ used: number }>({ resource, windowKey: windowKeyFor(window) })
-    return buildStatus(resource, Number(row?.used || 0))
+    return buildStatus(env, resource, Number(row?.used || 0))
   } catch {
-    return buildStatus(resource, 0)
+    return buildStatus(env, resource, 0)
   }
 }
 

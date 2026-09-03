@@ -1,5 +1,11 @@
 // Free-tier quota guard, and the cache-version fallback it exists for.
 //
+// P2-8: the guard reads its ceilings from planTier.ts now, so every env
+// below pins PLAN_TIER = 'free' -- these cases are ABOUT the Free ceilings
+// (1,000 KV writes/day) and would otherwise be measured against the Paid
+// allowance, which is the default when PLAN_TIER is unset. Paid coverage
+// lives in scripts/test-plan-tier-matrix-pure.cjs.
+//
 // The problem being guarded is not billing -- there is none on the free plan.
 // It is that an exhausted quota makes writes fail SILENTLY, and the write
 // that fails most often here is a cache-invalidation bump. When that stops
@@ -36,6 +42,7 @@ function freshEnv() {
   return {
     env: {
       DB: db,
+      PLAN_TIER: 'free',
       CACHE: {
         get: async (key) => (kv.has(key) ? kv.get(key) : null),
         put: async (key, value) => { kvWrites += 1; kv.set(key, value) },
@@ -74,7 +81,7 @@ check('usage accumulates and the zone escalates as the ceiling approaches', asyn
 check('a broken counter never blocks the app -- it fails OPEN', async () => {
   const { consumeQuota } = await loadQuotaGuard()
   // No DB at all: the guard's own bookkeeping is broken.
-  const status = await consumeQuota({ DB: null }, 'kv_write', 1)
+  const status = await consumeQuota({ DB: null, PLAN_TIER: 'free' }, 'kv_write', 1)
   assert.equal(status.allowed, true, 'a guard that takes the app down when ITS bookkeeping breaks is worse than the quota')
   assert.equal(status.zone, 'ok')
 })
@@ -241,6 +248,9 @@ function loadModule(name) {
     // test env has -- stubbed so this never depends on the real dataset.
     if (request === './analytics') return { recordAnalytics: () => {} }
     if (request === './quotaGuard') return loadModule('quotaGuard.ts')
+    // Real module -- quotaGuard.ts's ceilings come from it, so stubbing it
+    // would test a copy of the limits rather than the shipped table.
+    if (request === './planTier') return loadModule('planTier.ts')
     if (request === '../index') return {}
     return require(request)
   }

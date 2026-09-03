@@ -369,6 +369,33 @@ export function getPlanLimits(env: Env): PlanLimits {
   return getPlanTier(env) === 'free' ? FREE_LIMITS : PAID_LIMITS
 }
 
+// The tier ALREADY resolved for this isolate, for the handful of helpers
+// that legitimately have no Env in hand.
+//
+// WHY THIS EXISTS, AND WHY IT IS NOT A BACK DOOR
+//
+// importEngine.ts's runD1BatchInChunks / runD1BatchGroupsInChunks take a
+// D1Compat and a statement list, not an Env -- deliberately, since they are
+// pure batching helpers called from ~20 sites across importEngine.ts AND
+// bulkDeleteEngine.ts. Threading an Env through every one of those callers
+// to size a chunk would be a far larger change than the sizing itself, and
+// bulkDeleteEngine.ts is not this section's file to rewrite.
+//
+// Every path that reaches those helpers enters the Worker through a request
+// or a queue message and resolves the tier FIRST (runImportAnalyze /
+// runImportApply / the routes each call getPlanLimits(env) at the top), so
+// by the time a batch is built the isolate cache is warm and this returns
+// the real tier's numbers.
+//
+// The fallback when nothing has resolved a tier yet is PAID -- identical to
+// the behaviour before any of this existed. So the worst case is a Free
+// deployment briefly using a Paid-sized chunk, never a Paid deployment
+// silently shrinking: the same asymmetry getPlanTier's own default is built
+// on. Request-handling code that HAS an Env must still use getPlanLimits(env).
+export function getCachedPlanLimits(): PlanLimits {
+  return cachedTier === 'free' ? FREE_LIMITS : PAID_LIMITS
+}
+
 // Exported so a pure test (scripts/test-plan-tier-pure.cjs) can pin both
 // tiers' full numbers without re-deriving them, and so a future call site
 // can read a specific tier's limits without a fake Env (e.g. a dry-run

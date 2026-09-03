@@ -162,9 +162,16 @@ check('failure is reported, never disguised as success', async () => {
 })
 
 check('quotas exist for both providers, with the documented free limits', async () => {
+  // P2-8: the numbers moved to planTier.ts (quotaGuard.ts now keeps only
+  // each resource's reset window and the PlanLimits field that carries its
+  // ceiling), so pin them where they actually live -- on BOTH tiers, since
+  // Images and Cloudinary bill independently of the Workers plan.
   const guard = fs.readFileSync(path.join(cloudflareRoot, 'src', 'lib', 'quotaGuard.ts'), 'utf8')
-  assert.match(guard, /cf_images_transform: \{ limit: 5000, window: 'month' \}/, 'Cloudflare Images free plan is 5,000/month')
-  assert.match(guard, /cloudinary_transform: \{ limit: 25_000, window: 'month' \}/)
+  assert.match(guard, /cf_images_transform: \{ window: 'month', tierField: 'imagesTransformsPerMonth' \}/)
+  assert.match(guard, /cloudinary_transform: \{ window: 'month', tierField: 'cloudinaryTransformsPerMonth' \}/)
+  const planTier = fs.readFileSync(path.join(cloudflareRoot, 'src', 'lib', 'planTier.ts'), 'utf8')
+  assert.equal((planTier.match(/imagesTransformsPerMonth: 5_000,/g) || []).length, 2, 'Cloudflare Images free plan is 5,000/month, on both tiers')
+  assert.equal((planTier.match(/cloudinaryTransformsPerMonth: 25_000,/g) || []).length, 2)
 })
 
 check('the Images binding is declared and optional', async () => {
