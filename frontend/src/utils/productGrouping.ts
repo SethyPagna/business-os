@@ -534,6 +534,51 @@ export function buildProductCategorySections(products: ProductRecord[] = [], {
   })
 }
 
+function isAllBranchZeroRow(row: ProductGroupRow): boolean {
+  const branchStock = Array.isArray(row?.branch_stock) ? row.branch_stock as Array<Record<string, unknown>> : []
+  // This rule is intentionally limited to a real multi-branch row. A
+  // standalone zero-stock product (or a product tracked at only one branch)
+  // remains visible; only redundant children whose recorded branch balances
+  // are all zero are removed from a same-name multi-row group.
+  return branchStock.length >= 2 && branchStock.every((entry) => Number(entry?.quantity || 0) <= 0)
+}
+
+export function hideZeroStockGroupedChildRows(sections: ProductGroupSection[] = []): ProductGroupSection[] {
+  return sections.map((section) => {
+    const groups = section.groups.flatMap((group): ProductGroup[] => {
+      if (group.rows.length <= 1) return [group]
+      const rows = group.rows.filter((row) => !isAllBranchZeroRow(row))
+      if (!rows.length) return []
+      const visibleIds = new Set(rows.flatMap((row) => row.__mergedProductIds || []).map(toProductId))
+      const items = group.items.filter((item) => visibleIds.has(toProductId(item?.id)))
+      const branchNames = [...new Set(rows.flatMap((row) => (
+        Array.isArray(row.branch_stock)
+          ? (row.branch_stock as Array<Record<string, unknown>>).map((entry) => normalizeText(entry?.branch_name)).filter(Boolean)
+          : []
+      )))].sort((left, right) => left.localeCompare(right, undefined, { sensitivity: 'base' }))
+      return [{
+        ...group,
+        rows,
+        items,
+        ids: items.map((item) => toProductId(item?.id)).filter((id) => id > 0),
+        matchedIds: group.matchedIds.filter((id) => visibleIds.has(id)),
+        sellableItems: group.sellableItems.filter((item) => visibleIds.has(toProductId(item?.id))),
+        leadProduct: rows[0],
+        anchorId: toProductId(rows[0]?.id),
+        stockTotal: rows.reduce((sum, row) => sum + Number(row?.stock_quantity || 0), 0),
+        branchNames,
+        hasMultipleItems: items.length > 1,
+      }]
+    })
+    return {
+      ...section,
+      groups,
+      ids: groups.flatMap((group) => group.ids),
+      items: groups.flatMap((group) => group.items),
+    }
+  }).filter((section) => section.groups.length > 0)
+}
+
 export function buildProductGroupSections(products: ProductRecord[] = [], {
   productsById = new Map(),
   sortDirection = 'asc',

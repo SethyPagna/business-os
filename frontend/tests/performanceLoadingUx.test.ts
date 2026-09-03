@@ -1354,7 +1354,7 @@ assert.doesNotMatch(
 )
 assert.match(
   dashboard,
-  /withLoaderTimeout\(\(\) => getDashboardApi\(\)\.getDashboard\(\), label, DASHBOARD_SUMMARY_TIMEOUT_MS\)/,
+  /withLoaderTimeout\([\s\S]{0,180}getDashboardApi\(\)\.getDashboard\(\{ startDate: start, endDate: end, granularity \}\)[\s\S]{0,80}DASHBOARD_SUMMARY_TIMEOUT_MS/,
   'dashboard summary should timeout slow summary reads',
 )
 assert.match(

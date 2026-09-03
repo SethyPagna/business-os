@@ -30,10 +30,24 @@ export type ProductIdentityRow = {
   cost_price_khr: number | null
   selling_price_usd: number | null
   selling_price_khr: number | null
+  // Live aggregate from branch_stock. Used only to choose the survivor during
+  // catalog cleanup; stock is never part of product identity.
+  live_stock_quantity?: number
   // Not part of the identity comparison -- carried so merge-duplicates can
   // move a duplicate's primary image onto the canonical row instead of
   // orphaning it on a row it is about to deactivate.
   image_path?: string | null
+}
+
+/**
+ * Cleanup-only barcode normalization for the import typo the production audit
+ * found: the same real barcode entered once normally and once with ONE extra
+ * leading zero. Placeholder/short barcodes stay untouched, and this helper is
+ * deliberately not used by ordinary create/transfer identity matching.
+ */
+export function normalizeLeadingZeroBarcodeForCleanup(value: unknown): string {
+  const barcode = String(value ?? '').trim().toLowerCase()
+  return /^0[0-9]{4,}$/.test(barcode) ? barcode.slice(1) : barcode
 }
 
 // Finds another ACTIVE product row that is genuinely the same item as
@@ -113,7 +127,8 @@ export async function findIdentityMatches(
 // duplicates: instead of resolving one source product against the rest of
 // the catalog (transfer-time), this scans every ACTIVE product up front and
 // buckets them into identity-duplicate groups (same name_key + cost +
-// selling price + barcode), independent of any transfer happening. This is
+// barcode), independent of any transfer happening. Selling/special prices
+// are mergeable and the highest value is carried by the fold. This is
 // the case a plain CSV/branch-column import has always been able to leave
 // behind -- two rows for what's really one product, differing only in
 // which branch ended up with the branch_stock row -- and which nothing
@@ -127,7 +142,7 @@ export type ProductDuplicateGroup = {
 // ---------------------------------------------------------------------------
 // "Possibly the same" sweep for the Products → Duplicates review section.
 // Where findDuplicateProductGroups (below) finds rows PROVABLY identical
-// under THE identity rule (name_key + cost + price + barcode) and is safe
+// under THE identity rule (name_key + cost + barcode) and is safe
 // to auto-merge, this finds the residue only a human can settle -- the
 // classes the Aug 30 production audit surfaced:
 //  - same_barcode: two+ active products sharing one real barcode but
@@ -154,6 +169,7 @@ export type PossiblySameProductEntry = {
   name: string | null
   barcode: string | null
   cost_price_usd: number | null
+  cost_price_khr: number | null
   selling_price_usd: number | null
   stock_quantity: number | null
   image_path: string | null
@@ -201,10 +217,14 @@ export function normalizeProductClusterKey(type: 'barcode' | 'name' | 'similar',
 export async function findPossiblySameProductClusters(db: D1Compat): Promise<PossiblySameProductCluster[]> {
   const [rows, dismissalRows] = await Promise.all([
     db.prepare(`
-      SELECT id, name, barcode, cost_price_usd, selling_price_usd, stock_quantity, image_path, name_key
-      FROM products
-      WHERE is_active = 1 AND COALESCE(is_group, 0) = 0
-      ORDER BY id ASC
+      SELECT p.id, p.name, p.barcode, p.cost_price_usd, p.cost_price_khr,
+             p.selling_price_usd, COALESCE(SUM(bs.quantity), 0) AS stock_quantity,
+             p.image_path, p.name_key
+      FROM products p
+      LEFT JOIN branch_stock bs ON bs.product_id = p.id
+      WHERE p.is_active = 1 AND COALESCE(p.is_group, 0) = 0
+      GROUP BY p.id
+      ORDER BY p.id ASC
     `).all<PossiblySameProductEntry & { name_key: string | null }>({}),
     db.prepare(`SELECT cluster_type, cluster_value FROM product_duplicate_dismissals`)
       .all<{ cluster_type: string; cluster_value: string }>({}),
@@ -233,7 +253,8 @@ export async function findPossiblySameProductClusters(db: D1Compat): Promise<Pos
 
   const toEntry = (row: PossiblySameProductEntry): PossiblySameProductEntry => ({
     id: row.id, name: row.name, barcode: row.barcode,
-    cost_price_usd: row.cost_price_usd, selling_price_usd: row.selling_price_usd,
+    cost_price_usd: row.cost_price_usd, cost_price_khr: row.cost_price_khr,
+    selling_price_usd: row.selling_price_usd,
     stock_quantity: row.stock_quantity, image_path: row.image_path,
   })
 
@@ -279,18 +300,48 @@ export async function findPossiblySameProductClusters(db: D1Compat): Promise<Pos
 export async function findDuplicateProductGroups(db: D1Compat): Promise<ProductDuplicateGroup[]> {
   const rows = await db
     .prepare(`
-      SELECT id, name, barcode, cost_price_usd, cost_price_khr, selling_price_usd, selling_price_khr, image_path, name_key
-      FROM products
-      WHERE is_active = 1 AND COALESCE(is_group, 0) = 0
-      ORDER BY name_key ASC, id ASC
+      SELECT p.id, p.name, p.barcode, p.cost_price_usd, p.cost_price_khr,
+             p.selling_price_usd, p.selling_price_khr, p.image_path, p.name_key,
+             COALESCE(SUM(bs.quantity), 0) AS live_stock_quantity
+      FROM products p
+      LEFT JOIN branch_stock bs ON bs.product_id = p.id
+      WHERE p.is_active = 1 AND COALESCE(p.is_group, 0) = 0
+      GROUP BY p.id
+      ORDER BY p.name_key ASC, p.id ASC
     `)
     .all<ProductIdentityRow & { name_key: string }>({})
 
   const byNameKey = new Map<string, (ProductIdentityRow & { name_key: string })[]>()
+  const byRawBarcode = new Map<string, (ProductIdentityRow & { name_key: string })[]>()
+  const byFuzzyName = new Map<string, (ProductIdentityRow & { name_key: string })[]>()
   for (const row of rows) {
     if (!row.name_key) continue
     if (!byNameKey.has(row.name_key)) byNameKey.set(row.name_key, [])
     byNameKey.get(row.name_key)!.push(row)
+    const barcode = String(row.barcode || '').trim().toLowerCase()
+    if (barcode.length >= MIN_REAL_BARCODE_LENGTH) {
+      if (!byRawBarcode.has(barcode)) byRawBarcode.set(barcode, [])
+      byRawBarcode.get(barcode)!.push(row)
+    }
+    const fuzzyName = normalizeProductFuzzyName(row.name)
+    if (fuzzyName) {
+      if (!byFuzzyName.has(fuzzyName)) byFuzzyName.set(fuzzyName, [])
+      byFuzzyName.get(fuzzyName)!.push(row)
+    }
+  }
+
+  // Manual review wins over automatic cleanup when classifications overlap.
+  // A row sharing its raw barcode with another exact name, or participating
+  // in a fuzzy-name cluster spanning exact names, must stay visible for the
+  // reviewer even if it also has an otherwise-safe exact duplicate.
+  const manualOnlyIds = new Set<number>()
+  for (const group of byRawBarcode.values()) {
+    if (new Set(group.map((row) => row.name_key)).size < 2) continue
+    for (const row of group) manualOnlyIds.add(row.id)
+  }
+  for (const group of byFuzzyName.values()) {
+    if (new Set(group.map((row) => row.name_key)).size < 2) continue
+    for (const row of group) manualOnlyIds.add(row.id)
   }
 
   const groups: ProductDuplicateGroup[] = []
@@ -303,13 +354,35 @@ export async function findDuplicateProductGroups(db: D1Compat): Promise<ProductD
     // assuming every same-name row belongs together.
     const buckets = new Map<string, (ProductIdentityRow & { name_key: string })[]>()
     for (const candidate of candidates) {
-      const bucketKey = productDetailSignature(candidate)
+      if (manualOnlyIds.has(candidate.id)) continue
+      // Exact barcode matches behave as before. A pair differing only by one
+      // leading zero also lands together, but still only inside the same exact
+      // name and same-cost bucket. Same barcode + different name therefore
+      // remains in the manual-review list, exactly as requested.
+      const bucketKey = productDetailSignature({
+        ...candidate,
+        barcode: normalizeLeadingZeroBarcodeForCleanup(candidate.barcode),
+      })
       if (!buckets.has(bucketKey)) buckets.set(bucketKey, [])
       buckets.get(bucketKey)!.push(candidate)
     }
     for (const bucket of buckets.values()) {
       if (bucket.length < 2) continue
-      const [canonical, ...duplicates] = bucket
+      // For an extra-zero pair, the already-clean barcode must survive; the
+      // fold moves all branch stock onto it even when the typo row owns that
+      // stock today. Exact-barcode duplicates prefer the stocked row. Id is
+      // the stable final tie-break.
+      const rawBarcodes = new Set(bucket.map((row) => String(row.barcode ?? '').trim().toLowerCase()))
+      const isLeadingZeroPair = rawBarcodes.size > 1
+      const ordered = [...bucket].sort((a, b) => {
+        const aWasNormalized = normalizeLeadingZeroBarcodeForCleanup(a.barcode) !== String(a.barcode ?? '').trim().toLowerCase()
+        const bWasNormalized = normalizeLeadingZeroBarcodeForCleanup(b.barcode) !== String(b.barcode ?? '').trim().toLowerCase()
+        if (isLeadingZeroPair && aWasNormalized !== bWasNormalized) return aWasNormalized ? 1 : -1
+        const stockDiff = (Number(b.live_stock_quantity) || 0) - (Number(a.live_stock_quantity) || 0)
+        if (stockDiff) return stockDiff
+        return a.id - b.id
+      })
+      const [canonical, ...duplicates] = ordered
       groups.push({ canonical, duplicates })
     }
   }

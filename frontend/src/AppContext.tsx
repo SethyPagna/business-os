@@ -1048,12 +1048,21 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
       const detail = eventDetail<{ backend?: { frontend?: { hash?: string } }; message?: string }>(e)
       const message = detail.message
         || 'Business OS server update is required. Restart the server, then refresh this page.'
+      const runtimeHash = String(detail.backend?.frontend?.hash || '').trim()
       setSyncServerUnreachable(true)
       // iOS may ignore beforeunload prompts. Keep the current build running
       // when an editor is dirty and persist any debounced draft immediately;
       // the next clean recovery event can safely reload the new runtime.
       if (hasDirtyWork()) {
         flushPendingWorkDrafts()
+        window.dispatchEvent(new CustomEvent('sync:app-update-available', {
+          detail: {
+            reason: 'runtime_mismatch',
+            message: 'New version ready',
+            version: runtimeHash,
+            ts: Date.now(),
+          },
+        }))
         setNotification({
           message: 'An app update is ready. Save or discard unfinished work before reloading.',
           type: 'warning',
@@ -1062,7 +1071,6 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
         return
       }
       try {
-        const runtimeHash = String(detail.backend?.frontend?.hash || '').trim()
         const recoveryKey = `${FRONTEND_BUILD_INFO.hash || 'dev'}:${runtimeHash || 'unknown'}`
         const previous = window.sessionStorage.getItem(RUNTIME_RECOVERY_SESSION_KEY)
         if (previous !== recoveryKey) {

@@ -8,6 +8,7 @@ import { updateBatch } from '../../api/batchesTransport.ts'
 import { fmtDate, fmtDateTime24 } from '../../utils/formatters.ts'
 import { lazyRetry } from '../../utils/lazyImport.ts'
 import Modal from '../shared/Modal.tsx'
+import DateEntryInput from '../shared/DateEntryInput.tsx'
 import SearchInput from '../shared/SearchInput.tsx'
 import ScanSearchButton from '../shared/ScanSearchButton.tsx'
 import SupplierPickerField, { type SupplierChoice } from '../shared/SupplierPickerField.tsx'
@@ -239,10 +240,10 @@ export default function StockInSessionsSection({ t, notify, branches, onChanged 
     {selected ? <Modal title={tr('stock_in_session', 'Stock-in session')} onClose={() => setSelected(null)} size="lg">
       <div className="space-y-3">
         {editing ? <div className="grid grid-cols-2 gap-2 rounded-lg bg-gray-50 p-2.5 dark:bg-gray-800/60">
-          <label><span className="mb-1 block text-[11px] text-gray-500">{tr('received_date', 'Received date')}</span><input type="date" className="input h-9 text-sm" value={String(editDate || '').slice(0, 10)} onChange={(event) => setEditDate(event.target.value)} /></label>
+          <label><span className="mb-1 block text-[11px] text-gray-500">{tr('received_date', 'Received date')}</span><DateEntryInput className="h-9 text-sm" t={t} ariaLabel={tr('received_date', 'Received date')} value={String(editDate || '').slice(0, 10)} onChange={(iso) => setEditDate(iso)} /></label>
           <SupplierPickerField value={editSupplier} onChange={setEditSupplier} tr={(key, fallback = key) => tr(key, fallback)} idPrefix="stock-session-edit" />
           <label><span className="mb-1 block text-[11px] text-gray-500">{tr('payment', 'Payment')}</span><AppSelect ariaLabel={tr('payment', 'Payment')} value={editPayment} onChange={(value) => setEditPayment(value as 'paid' | 'credit')} buttonClassName="h-9 w-full text-sm" optionClassName="text-sm" options={[{ value: 'paid', label: tr('paid', 'Paid') }, { value: 'credit', label: tr('on_credit', 'On credit') }]} /></label>
-          {editPayment === 'credit' ? <label><span className="mb-1 block text-[11px] text-gray-500">{tr('due_date', 'Due date')}</span><input type="date" className="input h-9 text-sm" value={String(editCreditDueDate || '').slice(0, 10)} onChange={(event) => setEditCreditDueDate(event.target.value)} /></label> : <div />}
+          {editPayment === 'credit' ? <label><span className="mb-1 block text-[11px] text-gray-500">{tr('due_date', 'Due date')}</span><DateEntryInput className="h-9 text-sm" t={t} ariaLabel={tr('due_date', 'Due date')} value={String(editCreditDueDate || '').slice(0, 10)} onChange={(iso) => setEditCreditDueDate(iso)} /></label> : <div />}
           {selected.hasSharedBatch || selected.hasMixedHeader ? <div className="col-span-2 text-[11px] text-amber-700 dark:text-amber-300">{tr('shared_batch_session_edit_blocked', 'This session contains shared lots or mixed linked headers. Review its receipts before editing; changing them together could rewrite another session.')}</div> : null}
         </div> : <div className="grid grid-cols-2 gap-x-3 gap-y-1 rounded-lg bg-gray-50 p-2.5 text-xs dark:bg-gray-800/60 sm:grid-cols-4">
           <div className="col-span-2 min-w-0 sm:col-span-1"><div className="truncate font-semibold text-gray-900 dark:text-white">{selected.supplier.supplierName || tr('supplier_not_recorded', 'Supplier not recorded')}</div><div className="truncate text-gray-400">{selected.branchName || '—'}</div></div>

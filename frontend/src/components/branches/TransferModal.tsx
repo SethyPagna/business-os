@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import X from 'lucide-react/dist/esm/icons/x.js'
 import { useApp as useAppHook } from '../../AppContext.tsx'
@@ -206,6 +206,7 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
   const [mode] = useState<TransferMode>('multiple')
   const [multiProducts, setMultiProducts] = useState<TransferProduct[]>([])
   const [loadingMultiProducts, setLoadingMultiProducts] = useState(false)
+  const [showAllProducts, setShowAllProducts] = useState(false)
   const [selectedQuantities, setSelectedQuantities] = useState<Record<string, string>>({})
   // Multi mode: view filter that narrows the (whole-catalog) list to just
   // the checked rows, so the picked set can be reviewed/adjusted in one
@@ -214,7 +215,19 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
   const [savingBulk, setSavingBulk] = useState(false)
   const multiStockRequestRef = useRef(0)
   const multiProductsBranchRef = useRef('')
+  const selectAllAfterLoadRef = useRef(false)
   const transferBulkInFlightRef = useRef(false)
+
+  // Keep camera results inside the transfer picker. Reset selected-only/full-
+  // catalog presentation flags so the scanned code immediately becomes the
+  // active branch-stock query without touching any page-level search field.
+  const handleTransferProductScan = useCallback((value: string) => {
+    const barcode = String(value || '').trim()
+    if (!barcode) return
+    setShowSelectedOnly(false)
+    setShowAllProducts(false)
+    setSearch(barcode)
+  }, [])
 
   useEffect(() => {
     // Re-arm on mount, not just init-once: StrictMode's dev double-mount runs
@@ -422,13 +435,9 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
   }, [selectedProduct, fromBranch, trackedBatchProductIds])
 
   /**
-   * 3.2 Multi-mode source branch sync -- same idea as 3.1, but only runs
-   * while multi mode is active, and fetches the unpaged listing instead of
-   * a 50-row page (see the multiProducts state comment above for why).
-   * Deliberately only triggers on the source branch or a switch *into*
-   * multi mode, not on every render -- switching back to single mode
-   * leaves the already-fetched list cached in state so flipping back and
-   * forth doesn't re-fetch.
+   * 3.2 The catalog stays closed until the operator searches or explicitly
+   * asks for Select all. The first such action fetches the unpaged source-
+   * branch stock once; subsequent searches filter that cached catalog.
    */
   useEffect(() => {
     if (mode !== 'multiple') return undefined
@@ -438,8 +447,12 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
       setLoadingMultiProducts(false)
       setMultiProducts([])
       setSelectedQuantities({})
+      setShowAllProducts(false)
+      selectAllAfterLoadRef.current = false
       return undefined
     }
+    const catalogRequested = Boolean(debouncedSearch.trim()) || showAllProducts
+    if (!catalogRequested) return undefined
     if (multiProductsBranchRef.current === String(fromBranch)) return undefined
 
     const requestId = beginTrackedRequest(multiStockRequestRef)
@@ -455,7 +468,16 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
         )
         if (!aliveRef.current || !isTrackedRequestCurrent(multiStockRequestRef, requestId)) return
         multiProductsBranchRef.current = String(fromBranch)
-        setMultiProducts(normalizeTransferStockRows(stock))
+        const normalized = normalizeTransferStockRows(stock)
+        setMultiProducts(normalized)
+        if (selectAllAfterLoadRef.current) {
+          selectAllAfterLoadRef.current = false
+          setSelectedQuantities(Object.fromEntries(
+            normalized
+              .filter((product) => Number(product.branch_quantity || 0) > 0)
+              .map((product) => [String(product.id), String(product.branch_quantity ?? '')]),
+          ))
+        }
       } catch (error) {
         if (!aliveRef.current || !isTrackedRequestCurrent(multiStockRequestRef, requestId)) return
         notify(getErrorMessage(error, t('failed_to_load_data') || 'Failed to load data'), 'error')
@@ -469,7 +491,7 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
     return () => {
       invalidateTrackedRequest(multiStockRequestRef)
     }
-  }, [fromBranch, mode])
+  }, [debouncedSearch, fromBranch, mode, showAllProducts])
 
   // Switching source branch invalidates whatever was picked under the old
   // branch, in both modes -- a selection made against branch A's stock
@@ -477,6 +499,8 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
   useEffect(() => {
     setSelectedQuantities({})
     setShowSelectedOnly(false)
+    setShowAllProducts(false)
+    multiProductsBranchRef.current = ''
   }, [fromBranch])
 
   // An empty selection has nothing for the selected-only view to show --
@@ -517,9 +541,10 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
     const query = debouncedSearch.trim()
     let inStock = multiProducts.filter((product) => Number(product.branch_quantity || 0) > 0)
     if (showSelectedOnly) inStock = inStock.filter((product) => String(product.id) in selectedQuantities)
+    if (!query && !showAllProducts) inStock = inStock.filter((product) => String(product.id) in selectedQuantities)
     if (!query) return inStock
     return inStock.filter((product) => fuzzyTextMatches([product.name, product.sku, product.barcode].join(' '), query))
-  }, [multiProducts, debouncedSearch, showSelectedOnly, selectedQuantities])
+  }, [multiProducts, debouncedSearch, showAllProducts, showSelectedOnly, selectedQuantities])
 
   // Same name/cost/barcode grouping every other list surface in the
   // app applies (Products/Inventory/POS/Branches' own stock grid, via
@@ -562,6 +587,19 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
   }
 
   const toggleSelectAllFiltered = () => {
+    if (!debouncedSearch.trim() && !showAllProducts) {
+      setShowAllProducts(true)
+      if (!multiProducts.length) {
+        selectAllAfterLoadRef.current = true
+        return
+      }
+      setSelectedQuantities(Object.fromEntries(
+        multiProducts
+          .filter((product) => Number(product.branch_quantity || 0) > 0)
+          .map((product) => [String(product.id), String(product.branch_quantity ?? '')]),
+      ))
+      return
+    }
     setSelectedQuantities((current) => {
       if (allFilteredSelected) {
         // Only clear the rows currently visible under the active search --
@@ -819,8 +857,14 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
                   placeholder={t('search_products_placeholder') || 'Search products'}
                   value={search}
                   onChange={(event) => setSearch(event.target.value)}
+                  autoFocus
+                  autoComplete="off"
                 />
-                <ScanSearchButton onDetected={setSearch} t={t} />
+                <ScanSearchButton
+                  onDetected={handleTransferProductScan}
+                  t={t}
+                  title={t('scan_product_for_transfer') || 'Scan product for this transfer'}
+                />
               </div>
               <div className="max-h-48 overflow-auto divide-y divide-gray-100 rounded-xl border border-gray-200 dark:divide-gray-700 dark:border-gray-600">
                 {loadingProducts ? (
@@ -1007,8 +1051,14 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
                   placeholder={t('search_products_placeholder') || 'Search products'}
                   value={search}
                   onChange={(event) => setSearch(event.target.value)}
+                  autoFocus
+                  autoComplete="off"
                 />
-                <ScanSearchButton onDetected={setSearch} t={t} />
+                <ScanSearchButton
+                  onDetected={handleTransferProductScan}
+                  t={t}
+                  title={t('scan_product_for_transfer') || 'Scan product for this transfer'}
+                />
               </div>
 
               <div className="mb-2 flex flex-wrap items-center gap-2">
@@ -1017,7 +1067,7 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
                     type="checkbox"
                     checked={allFilteredSelected}
                     onChange={toggleSelectAllFiltered}
-                    disabled={loadingMultiProducts || filteredMulti.length === 0}
+                    disabled={loadingMultiProducts}
                   />
                   {t('transfer_select_all') || 'Select all'}
                 </label>
@@ -1044,7 +1094,11 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
                 {loadingMultiProducts ? (
                   <p className="py-6 text-center text-sm text-gray-400">{t('loading') || 'Loading'}...</p>
                 ) : filteredMulti.length === 0 ? (
-                  <p className="py-6 text-center text-sm text-gray-400">{t('transfer_no_stock_products') || 'No products with stock in this branch'}</p>
+                  <p className="py-6 text-center text-sm text-gray-400">
+                    {!debouncedSearch.trim() && !showAllProducts
+                      ? (t('transfer_search_or_select_all') || 'Search products, or use Select all to show the full catalog')
+                      : (t('transfer_no_stock_products') || 'No products with stock in this branch')}
+                  </p>
                 ) : null}
 
                 {filteredMulti.length === 0 ? null : groupedMulti.flatMap((group) => {

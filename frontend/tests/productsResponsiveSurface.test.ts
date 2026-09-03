@@ -16,6 +16,10 @@ const receiveBatch = readFileSync(new URL('../src/components/inventory/ReceiveBa
 const fastStockIn = readFileSync(new URL('../src/components/inventory/FastStockInModal.tsx', import.meta.url), 'utf8')
 const transfer = readFileSync(new URL('../src/components/branches/TransferModal.tsx', import.meta.url), 'utf8')
 const newReturn = readFileSync(new URL('../src/components/returns/NewReturnModal.tsx', import.meta.url), 'utf8')
+const posDetail = readFileSync(new URL('../src/components/pos/ProductDetailSheet.tsx', import.meta.url), 'utf8')
+const stockChanges = readFileSync(new URL('../src/components/products/StockChangeSection.tsx', import.meta.url), 'utf8')
+const productList = readFileSync(new URL('../src/components/products/surfaces/ProductsListSurface.tsx', import.meta.url), 'utf8')
+const productRowParts = readFileSync(new URL('../src/components/products/surfaces/ProductRowParts.tsx', import.meta.url), 'utf8')
 
 assert.match(
   products,
@@ -33,7 +37,14 @@ for (const section of ['products', 'stock_changes', 'stock_in_sessions', 'duplic
 }
 
 assert.match(products, /className="products-list-density-90"[\s\S]*<ProductsListSurface/, 'only the product-result surface should use the requested 90% density')
-assert.match(css, /\.products-list-density-90\s*\{[\s\S]*width:\s*111\.111111%;[\s\S]*zoom:\s*0\.9;/, '90% density must retain the surrounding content width')
+assert.match(css, /\.products-list-density-90\s*\{[\s\S]*width:\s*100%;[\s\S]*min-width:\s*0;[\s\S]*max-width:\s*100%;/, 'the product surface must never exceed the clipped page width')
+assert.doesNotMatch(css, /\.products-list-density-90\s*\{[^}]*zoom:/, 'product density must not use zoom because mobile WebKit can clip the widened box')
+assert.match(productList, /<table className="w-full min-w-\[58rem\] table-fixed/, 'the desktop product table must use the compact responsive minimum width')
+assert.match(productList, /Name is the one auto column[\s\S]*<col \/>\s*<col style=\{\{ width: '10\.5rem' \}\} \/>/, 'name must consume the leftover space while Details stays compact')
+assert.match(productList, /card hidden min-w-0 max-w-full overflow-hidden xl:flex xl:flex-col/, 'the full table must only replace cards when enough post-sidebar width is available')
+assert.match(productList, /min-w-0 max-w-full space-y-2 xl:hidden/, 'cards must remain width-bounded through laptop and mobile layouts')
+assert.match(productList, /inline-flex shrink-0 items-center gap-1 whitespace-nowrap[\s\S]*t\('collapse'\)/, 'the section Collapse control must remain fully visible on narrow screens')
+assert.match(productRowParts, /mb-1 flex min-w-0 flex-wrap gap-1/, 'branch details must auto-fit horizontally before creating extra rows')
 assert.match(products, /Product names are content[\s\S]*break-words text-sm font-semibold/, 'mobile product names must wrap instead of requiring horizontal scrolling')
 assert.match(products, /shrink-0 whitespace-nowrap rounded-full bg-slate-100[\s\S]*\{barcode\}/, 'the mobile barcode pill must show every digit on one line rather than truncating or wrapping')
 assert.match(products, /aria-disabled=\{!thumbnailState\.hasImage\}[\s\S]*if \(thumbnailState\.hasImage\) openLightbox\(thumbnailState\.gallery, 0, productName\)/, 'product image slots must isolate row detail clicks and only open the gallery when an image exists')
@@ -76,6 +87,15 @@ assert.match(fastStockIn, /modal-viewport-safe[\s\S]*modal-panel-safe[\s\S]*sm:h
 assert.match(transfer, /modal-viewport-safe[\s\S]*z-\[1050\][\s\S]*sm:hidden[\s\S]*handleBulkTransfer/, 'branch transfers must use one safe one-or-many flow with a mobile header action')
 assert.doesNotMatch(transfer, /role="tablist" aria-label="Transfer mode"/, 'branch transfers must not restore separate single and multiple modes')
 assert.match(transfer, /fuzzyTextMatches\(\[product\.name, product\.sku, product\.barcode\]\.join\(' '\), query\)/, 'the unified transfer picker must search product name, SKU, and barcode')
+assert.match(transfer, /const catalogRequested = Boolean\(debouncedSearch\.trim\(\)\) \|\| showAllProducts[\s\S]*if \(!catalogRequested\) return undefined/, 'the transfer picker must not load the entire catalog before search or Select all')
+assert.match(transfer, /Search products, or use Select all to show the full catalog/, 'the initially empty transfer picker must explain how to reveal products')
+assert.match(transfer, /selectAllAfterLoadRef\.current = true/, 'Select all must reveal and select the full in-stock catalog when it has not loaded yet')
+assert.match(posDetail, /aria-expanded=\{batchChoicesOpen\}/, 'POS batches must be collapsed behind one option button')
+assert.match(posDetail, /batchChoicesOpen \? <><div/, 'POS batch options must render only after the option button is expanded')
+assert.match(posDetail, /setSelectedBatchId\(batch\.id\); setSelectedDamagedLotId\(null\); setBatchChoicesOpen\(false\)/, 'choosing a POS batch must close its options')
+assert.doesNotMatch(stockChanges, /detailRows/, 'a selected stock change must not load unrelated before/after history into its detail dialog')
+assert.match(stockChanges, /<th data-tone="emerald" className="text-center">/, 'stock change Quantity headers must center over centered values')
+assert.match(stockChanges, /<th className="text-center">\{beforeLabel\} → \{afterLabel\}<\/th>/, 'stock change Before/After headers must center over centered values')
 assert.match(newReturn, /const reviewReturn[\s\S]*step === 'items'[\s\S]*onClick=\{reviewReturn\}/, 'returns must expose Review before the final confirmation on mobile')
 assert.match(report, /flex w-full min-w-0 items-center justify-between/, 'detail report links must remain width-bounded')
 assert.match(report, /<span className="detail-scroll-text[^\"]*">\{label\}<\/span>/, 'detail report labels must stay fully readable through bounded horizontal scrolling')

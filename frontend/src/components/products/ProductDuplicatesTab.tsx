@@ -29,6 +29,7 @@ type ClusterProduct = {
   name: string | null
   barcode: string | null
   cost_price_usd: number | null
+  cost_price_khr?: number | null
   selling_price_usd: number | null
   stock_quantity: number | null
   image_path: string | null
@@ -73,6 +74,37 @@ function clusterIsExact(cluster: Cluster): boolean {
   if (cluster.type !== 'barcode') return false
   const names = new Set(cluster.products.map((product) => normalizeProductGroupName(product.name || '')))
   return names.size === 1 && !names.has('')
+}
+
+function cleanupBarcode(value: string | null): string {
+  const barcode = String(value || '').trim().toLowerCase()
+  return /^0[0-9]{4,}$/.test(barcode) ? barcode.slice(1) : barcode
+}
+
+// Only these pairs are safe for an automatic bulk decision: same exact name,
+// same costs, and either the exact barcode or precisely one extra leading 0.
+// Similar names and a shared barcode under different names stay manual.
+function clusterIsSafeAutoMerge(cluster: Cluster): boolean {
+  if (cluster.products.length !== 2) return false
+  const [a, b] = cluster.products
+  if (!normalizeProductGroupName(a.name) || normalizeProductGroupName(a.name) !== normalizeProductGroupName(b.name)) return false
+  if (Math.round((Number(a.cost_price_usd) || 0) * 100) !== Math.round((Number(b.cost_price_usd) || 0) * 100)) return false
+  if (Math.round((Number(a.cost_price_khr) || 0) * 100) !== Math.round((Number(b.cost_price_khr) || 0) * 100)) return false
+  return cleanupBarcode(a.barcode) === cleanupBarcode(b.barcode)
+}
+
+function chooseAutomaticKeeper(products: ClusterProduct[]): [ClusterProduct, ClusterProduct] {
+  const rawBarcodes = new Set(products.map((product) => String(product.barcode || '').trim().toLowerCase()))
+  const isLeadingZeroPair = rawBarcodes.size > 1
+  const ordered = [...products].sort((a, b) => {
+    const aExtraZero = cleanupBarcode(a.barcode) !== String(a.barcode || '').trim().toLowerCase()
+    const bExtraZero = cleanupBarcode(b.barcode) !== String(b.barcode || '').trim().toLowerCase()
+    if (isLeadingZeroPair && aExtraZero !== bExtraZero) return aExtraZero ? 1 : -1
+    const stockDiff = (Number(b.stock_quantity) || 0) - (Number(a.stock_quantity) || 0)
+    if (stockDiff) return stockDiff
+    return a.id - b.id
+  })
+  return [ordered[0], ordered[1]]
 }
 
 function replaceVars(template: string, values: Record<string, unknown>): string {
@@ -416,23 +448,21 @@ export default function ProductDuplicatesTab({ t, notify }: {
     }
   }
 
-  // Bulk Merge -- only automated for exactly-2-product clusters, where
-  // "keep the older record" (lower id, created first) is an unambiguous,
-  // defensible default; its sales/lot history is the longer one. A 3+
-  // cluster genuinely needs a human to pick the survivor (the per-row
-  // "Keep this" flow), so those are skipped here and reported, never
-  // guessed at -- identical rule to the contacts panel's bulk merge.
+  // Bulk Merge is intentionally narrow. Similar-name groups and shared-
+  // barcode/different-name groups require a human decision. Only exact
+  // same-name + same-cost barcode pairs (including one extra leading zero)
+  // are automatic; the row with live stock wins, then the clean barcode.
   const bulkMerge = async () => {
     const targets = clusters.filter((cluster) => selectedKeys.has(clusterKey(cluster)))
     if (!targets.length || bulkBusy) return
-    const mergeable = targets.filter((cluster) => cluster.products.length === 2)
+    const mergeable = targets.filter(clusterIsSafeAutoMerge)
     const skipped = targets.length - mergeable.length
     setBulkBusy(true)
     let failed = 0
     let done = 0
     for (const cluster of mergeable) {
       setBulkProgress(replaceVars(t('bulk_merging_progress') || 'Merging {done}/{total}…', { done: done + 1, total: mergeable.length }))
-      const [keeper, other] = [...cluster.products].sort((a, b) => a.id - b.id)
+      const [keeper, other] = chooseAutomaticKeeper(cluster.products)
       try {
         await mergePossiblySameProducts(keeper.id, other.id)
         removeCluster(clusterKey(cluster))
@@ -447,7 +477,7 @@ export default function ProductDuplicatesTab({ t, notify }: {
     if (failed || skipped) {
       const parts = []
       if (failed) parts.push(replaceVars(t('bulk_merge_partial_failure') || '{count} could not be merged', { count: failed }))
-      if (skipped) parts.push(replaceVars(t('bulk_merge_skipped_multiway') || '{count} group(s) with 3+ records were skipped -- merge those individually', { count: skipped }))
+      if (skipped) parts.push(replaceVars(t('bulk_merge_skipped_multiway') || '{count} group(s) need manual review and were skipped', { count: skipped }))
       notify(parts.join('. '), failed ? 'error' : 'info')
     } else {
       notify(t('bulk_merge_success') || 'Merged the selected duplicates')
@@ -563,7 +593,7 @@ export default function ProductDuplicatesTab({ t, notify }: {
                 type="button"
                 onClick={() => void bulkMerge()}
                 disabled={bulkBusy}
-                title={t('bulk_merge_products_hint') || 'Each selected pair merges into its older record (created first); groups of 3+ are skipped — pick their keeper by hand'}
+                title={t('bulk_merge_products_hint') || 'Only exact same-name and same-cost pairs are automatic. Similar names and same-barcode/different-name groups stay manual.'}
                 className="btn-secondary px-2.5 py-1 text-xs disabled:opacity-50"
               >
                 <Merge className="mr-1 inline h-3.5 w-3.5" />

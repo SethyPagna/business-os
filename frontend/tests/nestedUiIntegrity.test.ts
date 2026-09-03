@@ -16,7 +16,7 @@ const sectionMatrix: Record<string, { file: string; tokens: string[] }> = {
   products: { file: 'components/products/Products.tsx', tokens: ["'products' | 'stock_changes' | 'stock_in_sessions' | 'duplicates'", 'HeaderActions', 'ManageBatchesModal', 'ProductDetailModal'] },
   pos: { file: 'components/pos/POS.tsx', tokens: ['FilterPanel', 'ProductDetailSheet', 'QuickAddModal', 'PaginationControls'] },
   sales: { file: 'components/sales/SalesHubPage.tsx', tokens: ["'sales'", "'returns'", "'fees'", "'reports'"] },
-  branches: { file: 'components/branches/BranchesHubPage.tsx', tokens: ["'overview'", "'transfers'", "'rfid'", 'showSectionNavigation={false}', 'overflow-x-auto'] },
+  branches: { file: 'components/branches/BranchesHubPage.tsx', tokens: ["'overview'", "'products'", "'transfers'", "'rfid'", 'showSectionNavigation={false}', 'overflow-x-auto'] },
   contacts: { file: 'components/contacts/Contacts.tsx', tokens: ["'customers'", "'suppliers'", "'delivery'", "'duplicates'", 'overflow-x-auto'] },
   catalog: { file: 'components/catalog/CatalogPage.tsx', tokens: ["activeTab === 'products'", "activeTab === 'about'", "activeTab === 'faq'", "activeTab === 'ai'"] },
   promotions: { file: 'components/promotions/PromotionsPage.tsx', tokens: ["key: 'rules'", "key: 'discounts'", "key: 'loyalty'", 'overflow-x-auto'] },
@@ -36,7 +36,8 @@ const branchesHub = read('components/branches/BranchesHubPage.tsx')
 assert.doesNotMatch(branchesHub, /id: 'movements'/, 'Branches hub must not restore a separate generic Movement mini-section')
 assert.doesNotMatch(branchesHub, /hostSection="movements"/, 'the redundant Inventory movement ledger must stay removed from Branches')
 assert.match(branchesHub, /active === 'transfers'[\s\S]*view="transfers"/, 'Transfer must own transfer history without a second movement ledger')
-assert.match(branchesHub, /active === 'inventory'[\s\S]*view="branches"/, 'Inventory must render the branch-product stock workspace moved into Branches')
+assert.match(branchesHub, /active === 'products'[\s\S]*hostSection="stats"/, 'Products must render the ranged COGS, revenue, profit, sales and inventory statistics workspace')
+assert.doesNotMatch(branchesHub, /active === 'inventory'/, 'Branches must not restore the redundant branch-inventory duplicate section')
 
 for (const file of ['components/branches/BranchesHubPage.tsx', 'components/review/ReviewLogsPage.tsx', 'components/utils-settings/SettingsHubPage.tsx', 'components/promotions/PromotionsPage.tsx']) {
   const source = read(file)

@@ -2,7 +2,10 @@ import { useMemo, useRef, useState, type MouseEvent } from 'react'
 import { createPortal } from 'react-dom'
 import X from 'lucide-react/dist/esm/icons/x.js'
 import { fmtTime, fmtTimezoneLabel } from '../../utils/formatters.ts'
+import { getSaleReturnBlockReason } from '../../utils/saleReturnGuard.ts'
 import AppSelect from '../shared/AppSelect.tsx'
+import CopyableId from '../shared/CopyableId.tsx'
+import InfoHint from '../shared/InfoHint.tsx'
 import StatusBadge, { ALL_STATUSES, getStatusLabel } from './StatusBadge.tsx'
 
 type TranslateFn = (key: string) => string
@@ -28,11 +31,13 @@ interface SaleLineItem {
   price_khr?: number | string | null
   price?: number | string | null
   branch_name?: string | null
+  returned_quantity?: number | string | null
 }
 
 interface SaleDetail {
   id: string | number
   receipt_number?: string | null
+  source_return_id?: number | string | null
   created_at?: string | Date | null
   sale_status?: string | null
   customer_membership_number?: string | null
@@ -116,6 +121,11 @@ interface SaleDetailModalProps {
   onStatusChange?: (saleId: string | number, status: string, notes: string, recordHistory?: boolean, extra?: Record<string, unknown> | null) => Promise<unknown> | unknown
   onAttachMembership?: (saleId: string | number, membershipNumber: string) => Promise<boolean | unknown> | boolean | unknown
   onPrint?: (sale: SaleDetail) => void
+  // Opens the SAME new-return flow the Returns section uses
+  // (returns/NewReturnModal), pre-filled with this sale. Omitted entirely
+  // when the signed-in user lacks `returns:add` -- the identical
+  // hide-by-omission pattern as onStatusChange / onAttachMembership above.
+  onReturn?: (sale: SaleDetail) => void
   t: TranslateFn
   fmtUSD: MoneyFormatter
   fmtKHR: MoneyFormatter
@@ -159,6 +169,7 @@ export default function SaleDetailModal({
   onStatusChange,
   onAttachMembership,
   onPrint,
+  onReturn,
   t,
   fmtUSD,
   fmtKHR,
@@ -199,6 +210,17 @@ export default function SaleDetailModal({
   if (!sale) return null
 
   const currentStatus = sale.sale_status || 'completed'
+  // The Return action reuses the Returns section's own guards rather than
+  // inventing new ones -- see utils/saleReturnGuard.ts, shared with the
+  // receipt view so the two surfaces never disagree. The reason is stated up
+  // front (disabled button + InfoHint) instead of letting someone walk into a
+  // dead-end form.
+  const returnBlockReason = getSaleReturnBlockReason({ sale_status: currentStatus, items })
+  const returnBlockedReason = returnBlockReason === 'cancelled'
+    ? translateOr('return_blocked_cancelled_sale', 'This sale was cancelled, so there is nothing to return.', 'ការលក់នេះត្រូវបានបោះបង់ ដូច្នេះគ្មានអ្វីត្រូវប្រគល់មកវិញទេ។')
+    : returnBlockReason === 'fully_returned'
+      ? translateOr('return_blocked_fully_returned', 'Every item on this sale has already been returned.', 'ទំនិញទាំងអស់ក្នុងការលក់នេះ ត្រូវបានប្រគល់មកវិញរួចហើយ។')
+      : ''
   const totalUsd = toNumber(sale.total_usd || sale.total)
   const totalKhr = toNumber(sale.total_khr)
   const refundUsd = toNumber(sale.refund_usd)
@@ -281,15 +303,41 @@ export default function SaleDetailModal({
         className="modal-panel-safe flex w-full flex-col rounded-t-2xl bg-white shadow-2xl sm:max-w-3xl sm:rounded-2xl dark:bg-gray-800"
         onClick={(event: MouseEvent<HTMLDivElement>) => event.stopPropagation()}
       >
-        <div className="flex flex-shrink-0 items-center justify-between gap-2 border-b border-gray-200 p-4 dark:border-gray-700">
-          {/* Long receipt numbers remain fully available through horizontal
-              touch scrolling while the status and actions stay in view. */}
+        {/* The receipt id owns a full-width row of its own below sm (user,
+            Sep 3 2026: "for smaller screens the receipt id must be shown
+            clearly fully, no scroll; can push to second row and copy
+            easily"), so it wraps instead of scrolling sideways and the
+            status/actions cluster drops underneath it. From sm the two share
+            one compact row again, with the same copy button. */}
+        <div className="flex flex-shrink-0 flex-col gap-2 border-b border-gray-200 p-4 dark:border-gray-700 sm:flex-row sm:items-start sm:justify-between">
           <div className="min-w-0 flex-1">
-            <div className="detail-scroll-text font-mono text-sm font-bold text-gray-900 dark:text-white sm:text-base" title={sale.receipt_number || undefined}>{sale.receipt_number}</div>
+            <CopyableId
+              value={sale.receipt_number || ''}
+              copyLabel={translateOr('copy_receipt_number', 'Copy receipt number', 'ចម្លងលេខវិក្កយបត្រ')}
+              copiedLabel={t('copied') || 'Copied'}
+              valueClassName="font-mono text-sm font-bold text-gray-900 dark:text-white sm:text-base"
+            />
             <div className="mt-1 text-xs text-gray-400">{fmtTime(sale.created_at)}</div>
           </div>
-          <div className="flex shrink-0 items-center gap-2 whitespace-nowrap">
+          <div className="flex shrink-0 flex-wrap items-center gap-2">
             <StatusBadge status={currentStatus} t={t} />
+            {onReturn ? (
+              <span className="inline-flex items-center gap-1">
+                <button
+                  type="button"
+                  onClick={() => onReturn(sale)}
+                  disabled={returnBlockedReason !== ''}
+                  className="rounded-lg bg-orange-50 px-3 py-1.5 text-xs font-medium text-orange-700 hover:bg-orange-100 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-orange-900/30 dark:text-orange-300 dark:hover:bg-orange-900/50"
+                >
+                  {t('return') || 'Return'}
+                </button>
+                {/* Why the action is unavailable stays behind the hint, not
+                    as inline prose next to the button. */}
+                {returnBlockedReason ? (
+                  <InfoHint text={returnBlockedReason} label={t('return') || 'Return'} />
+                ) : null}
+              </span>
+            ) : null}
             {onPrint ? (
               <button
                 type="button"
@@ -361,6 +409,9 @@ export default function SaleDetailModal({
                 ) : null}
                 <InfoBlock label={t('branch') || 'Branch'} value={sale.branch_name} />
                 <InfoBlock label={t('status') || 'Status'} value={getStatusLabel(currentStatus, t)} />
+                {sale.source_return_id ? (
+                  <InfoBlock label={translateOr('replacement_for_return', 'Replacement for return', 'ការលក់ជំនួសសម្រាប់ការបង្វិលត្រឡប់')} value={`#${sale.source_return_id}`} mono />
+                ) : null}
                 <InfoBlock label={t('timezone') || 'Timezone'} value={fmtTimezoneLabel(sale.device_tz)} mono />
                 <InfoBlock label={t('device') || 'Device'} value={sale.device_name} />
               </div>
@@ -525,7 +576,7 @@ export default function SaleDetailModal({
                         const lineKhr = unitKhr * qty
                         return (
                           <tr key={`${item.product_id || item.id || index}-${index}`}>
-                            <td className="max-w-0 px-2 py-1.5"><div className="detail-scroll-text font-medium text-gray-900 dark:text-white">{item.product_name || item.name}</div>{item.branch_name ? <div className="detail-scroll-text text-[11px] text-gray-400">{item.branch_name}</div> : null}</td>
+                            <td className="max-w-0 px-2 py-1.5"><div className="detail-scroll-text font-medium text-gray-900 dark:text-white">{item.product_name || item.name}</div>{toNumber(item.returned_quantity) > 0 ? <div className="mt-0.5 inline-flex rounded bg-orange-100 px-1.5 py-0.5 text-[10px] font-semibold text-orange-700 dark:bg-orange-900/40 dark:text-orange-300">↩ {toNumber(item.returned_quantity)} {t('returned_quantity_tag') || 'returned'}</div> : null}{item.branch_name ? <div className="detail-scroll-text text-[11px] text-gray-400">{item.branch_name}</div> : null}</td>
                             <td className="whitespace-nowrap px-2 py-1.5 text-right tabular-nums text-gray-700 dark:text-gray-200">{qty}</td>
                             <td className="whitespace-nowrap px-2 py-1.5 text-right tabular-nums text-gray-700 dark:text-gray-200">{fmtUSD(unitUsd)}{unitKhr > 0 ? <div className="text-[11px] text-gray-400">{fmtKHR(unitKhr)}</div> : null}</td>
                             <td className="whitespace-nowrap px-2 py-1.5 text-right font-semibold tabular-nums text-gray-900 dark:text-white">{fmtUSD(lineUsd)}{lineKhr > 0 ? <div className="text-[11px] font-normal text-gray-400">{fmtKHR(lineKhr)}</div> : null}</td>
@@ -543,7 +594,7 @@ export default function SaleDetailModal({
                     const lineKhr = toNumber(item.applied_price_khr ?? item.price_khr) * qty
                     return (
                       <div key={`${item.product_id || item.id || index}-${index}`} className="flex items-start justify-between gap-3 rounded-lg bg-gray-50 px-2.5 py-2 dark:bg-gray-900/35">
-                        <div className="min-w-0 flex-1"><div className="detail-scroll-text text-sm font-medium text-gray-900 dark:text-white">{item.product_name || item.name}</div><div className="text-xs text-gray-500 dark:text-gray-400">{qty} × {fmtUSD(unitUsd)}</div>{item.branch_name ? <div className="detail-scroll-text mt-0.5 text-[11px] text-gray-400">{item.branch_name}</div> : null}</div>
+                        <div className="min-w-0 flex-1"><div className="detail-scroll-text text-sm font-medium text-gray-900 dark:text-white">{item.product_name || item.name}</div><div className="text-xs text-gray-500 dark:text-gray-400">{qty} × {fmtUSD(unitUsd)}</div>{toNumber(item.returned_quantity) > 0 ? <div className="mt-0.5 inline-flex rounded bg-orange-100 px-1.5 py-0.5 text-[10px] font-semibold text-orange-700 dark:bg-orange-900/40 dark:text-orange-300">↩ {toNumber(item.returned_quantity)} {t('returned_quantity_tag') || 'returned'}</div> : null}{item.branch_name ? <div className="detail-scroll-text mt-0.5 text-[11px] text-gray-400">{item.branch_name}</div> : null}</div>
                         <div className="shrink-0 text-right text-sm font-semibold tabular-nums text-gray-900 dark:text-white">{fmtUSD(lineUsd)}{lineKhr > 0 ? <div className="text-[11px] font-normal text-gray-400">{fmtKHR(lineKhr)}</div> : null}</div>
                       </div>
                     )

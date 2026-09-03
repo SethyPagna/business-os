@@ -12,6 +12,7 @@ import Trash2 from 'lucide-react/dist/esm/icons/trash-2.js'
 import AppSelect from '../shared/AppSelect.tsx'
 import ScanSearchButton from '../shared/ScanSearchButton.tsx'
 import SupplierPickerField, { type SupplierChoice } from '../shared/SupplierPickerField.tsx'
+import DateEntryInput from '../shared/DateEntryInput.tsx'
 import { receiveBatchStock } from '../../api/batchesTransport.ts'
 import { adjustStock } from '../../api/inventoryWriteTransport.ts'
 import { searchProducts } from '../../api/methods.ts'
@@ -114,6 +115,9 @@ function normalizeLookupOptions(value: unknown): LookupOption[] {
 }
 
 export default function FastStockInModal({ branchOptions, defaultBranchId, tr, notify, onClose, onDone, onMinimize, initialHeader, exchangeRate = 4100 }: FastStockInModalProps) {
+  // This modal only receives the fallback-aware tr(); DateEntryInput wants a
+  // bare pack lookup, so adapt rather than duplicate its strings.
+  const packLookup = (key: string): string | undefined => tr(key, '') || undefined
   const fastStockInDraftKey = scopedWorkDraftKey('fast_stockin')
   // ---- shipment header (entered once, applies to every line) ----
   const draftRef = useRef<FastStockInDraft | null>(readWorkDraft<FastStockInDraft>(fastStockInDraftKey)?.data ?? null)
@@ -446,7 +450,7 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
                 setPicked(null)
                 setEditingKey('')
                 setScannedBarcode(barcode)
-              }} t={(key) => tr(key, key)} />
+              }} t={(key) => tr(key, key)} title={tr('scan_product_for_stock_in', 'Scan product for this stock-in')} />
             </div>
             {scannedBarcode && scannedBarcode === query.trim() && searchCompleteFor === scannedBarcode && candidates.length === 0 ? (
               <div className="mt-2 flex items-center justify-between gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-200">
@@ -464,7 +468,7 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
                   setUnitCost(next)
                   setCreatePriceVariant(costChanged(picked, next))
                 }} /></label>
-                <label className="block"><span className="mb-1 block text-[11px] font-medium text-gray-600 dark:text-gray-400">{tr('expiry_optional', 'Expiry (optional)')}</span><input className="input text-sm" placeholder="mm/dd/yyyy" value={expiryDate} onChange={(event) => setExpiryDate(event.target.value)} /></label>
+                <label className="block"><span className="mb-1 block text-[11px] font-medium text-gray-600 dark:text-gray-400">{tr('expiry_optional', 'Expiry (optional)')}</span><DateEntryInput className="text-sm" t={packLookup} ariaLabel={tr('expiry_optional', 'Expiry (optional)')} value={expiryDate} onChange={(iso) => setExpiryDate(iso)} /></label>
                 <div className="flex min-w-0 items-end gap-1.5">
                   <span className="mb-2 whitespace-nowrap text-[10px] tabular-nums text-gray-500 sm:text-[11px]">{tr('total_cost', 'Total cost')}: ${(Math.max(0, Number(quantity) || 0) * Math.max(0, Number(unitCost) || 0)).toFixed(2)}</span>
                   <button type="button" className="btn-primary h-10 shrink-0 px-3 text-xs disabled:opacity-50" disabled={saving} onClick={addLine}>＋ {editingKey ? tr('save', 'Save') : tr('add', 'Add')}</button>
@@ -498,7 +502,7 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
               </label>
               <label className="block">
                 <span className="mb-1 block text-[11px] font-medium text-gray-600 dark:text-gray-400">{tr('received_date', 'Received date')}</span>
-                <input className="input h-9 w-full text-sm" placeholder="mm/dd/yyyy" value={receivedDate} onChange={(event) => setReceivedDate(event.target.value)} />
+                <DateEntryInput className="h-9 w-full text-sm" t={packLookup} ariaLabel={tr('received_date', 'Received date')} value={receivedDate} onChange={(iso) => setReceivedDate(iso)} />
               </label>
               <div className="col-span-2"><SupplierPickerField
                 value={supplier}
@@ -521,7 +525,7 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
                     </button>
                   ))}
                   {paymentStatus === 'credit' ? (
-                    <input className="input flex-1 text-sm" placeholder={`${tr('due', 'due')} mm/dd/yyyy`} value={creditDueDate} onChange={(event) => setCreditDueDate(event.target.value)} />
+                    <DateEntryInput className="flex-1 text-sm" t={packLookup} ariaLabel={tr('due', 'due')} value={creditDueDate} onChange={(iso) => setCreditDueDate(iso)} />
                   ) : null}
                 </div>
               </div>

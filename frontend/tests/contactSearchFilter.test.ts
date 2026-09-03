@@ -1,5 +1,8 @@
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 import { fuzzyTextMatches } from '../src/utils/searchMatch.ts'
+
+const duplicateConflicts = readFileSync(new URL('../src/components/contacts/DuplicatesTab.tsx', import.meta.url), 'utf8')
 
 // Part 111 follow-up: CustomersTab.tsx/SuppliersTab.tsx/DeliveryTab.tsx's
 // own client-side `filteredBySearch` re-filter used to be a literal
@@ -57,5 +60,9 @@ assert.equal(
   true,
   'a plain correctly-typed substring should still match, same as before',
 )
+
+assert.match(duplicateConflicts, /paginateItems\(visibleClusters, page, pageSize\)/, 'contact conflicts should paginate their filtered page data')
+assert.match(duplicateConflicts, /<PaginationControls[\s\S]*totalItems=\{visibleClusters\.length\}/, 'contact conflicts should expose per-page controls using the full filtered count')
+assert.match(duplicateConflicts, /setPage\(1\)/, 'contact conflict filters should return pagination to the first page')
 
 console.log('contactSearchFilter tests passed')

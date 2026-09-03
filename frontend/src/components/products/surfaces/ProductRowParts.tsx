@@ -22,6 +22,7 @@ type ProductLike = {
   discount_ends_at?: unknown
   selling_price_usd?: unknown
   selling_price_khr?: unknown
+  branch_stock?: Array<{ branch_id?: unknown; branch_name?: unknown; quantity?: unknown }>
 }
 
 type ProductPromotion = {
@@ -136,12 +137,11 @@ export function ProductDetailsCell({
   fmtUSD,
 }: ProductDetailsCellProps) {
   const detailPills: MetaPill[] = []
-  if (selectedBranchName) {
-    detailPills.push({ key: 'branch', label: selectedBranchName, className: 'bg-cyan-50 text-cyan-700 dark:bg-cyan-900/30 dark:text-cyan-200' })
-  }
-  if (branchLabel) {
-    detailPills.push({ key: 'branches', label: branchLabel, className: 'bg-cyan-50 text-cyan-700 dark:bg-cyan-900/30 dark:text-cyan-200' })
-  }
+  const branchRows = selectedBranchName
+    ? [String(selectedBranchName)]
+    : Array.isArray(product.branch_stock) && product.branch_stock.length
+      ? product.branch_stock.map((entry) => `${String(entry.branch_name || entry.branch_id || 'Branch')}: ${Number(entry.quantity || 0)}`)
+      : branchLabel ? [String(branchLabel)] : []
   if (product.sku) {
     detailPills.push({ key: 'sku', label: product.sku, className: 'bg-indigo-50 font-mono text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-200' })
   }
@@ -155,11 +155,20 @@ export function ProductDetailsCell({
   }
 
   return (
-    <div className="min-h-[4.25rem] max-w-[17rem]">
-      <div className="flex flex-wrap items-center gap-1">
+    <div className="min-h-[4.25rem] min-w-0">
+      {branchRows.length ? (
+        <div className="mb-1 flex min-w-0 flex-wrap gap-1">
+          {branchRows.map((label, index) => (
+            <div key={`${label}-${index}`} className="max-w-full whitespace-normal break-words rounded-lg bg-cyan-50 px-1.5 py-0.5 text-[10px] font-semibold text-cyan-700 dark:bg-cyan-900/30 dark:text-cyan-200">
+              {label}
+            </div>
+          ))}
+        </div>
+      ) : null}
+      <div className="flex min-w-0 flex-wrap items-center gap-1">
         {detailPills.map((item) => renderMetaPill(item))}
         <ProductDiscountBadge product={product} promotion={promotion} fmtUSD={fmtUSD} label={tr('discounts', 'Discounts', 'Discounts')} />
-        {!detailPills.length && !promotion?.active ? <span className="text-xs text-gray-300">N/A</span> : null}
+        {!branchRows.length && !detailPills.length && !promotion?.active ? <span className="text-xs text-gray-300">N/A</span> : null}
       </div>
       <ProductBatchPreview product={product} branchId={selectedBranchId} tr={tr} />
     </div>

@@ -3,7 +3,11 @@ import { readFileSync } from 'node:fs'
 
 const returnsSource = readFileSync(new URL('../src/components/returns/Returns.tsx', import.meta.url), 'utf8')
 const returnsSurfaceSource = readFileSync(new URL('../src/components/returns/ReturnsListSurface.tsx', import.meta.url), 'utf8')
+const newReturnSource = readFileSync(new URL('../src/components/returns/NewReturnModal.tsx', import.meta.url), 'utf8')
+const returnDetailSource = readFileSync(new URL('../src/components/returns/ReturnDetailModal.tsx', import.meta.url), 'utf8')
+const saleDetailSource = readFileSync(new URL('../src/components/sales/SaleDetailModal.tsx', import.meta.url), 'utf8')
 const searchInputSource = readFileSync(new URL('../src/components/shared/SearchInput.tsx', import.meta.url), 'utf8')
+const columnChooserSource = readFileSync(new URL('../src/components/shared/ColumnChooser.tsx', import.meta.url), 'utf8')
 const en = readFileSync(new URL('../src/lang/en.json', import.meta.url), 'utf8')
 const km = readFileSync(new URL('../src/lang/km.json', import.meta.url), 'utf8')
 
@@ -23,6 +27,9 @@ assert.match(returnsSurfaceSource, /\{!isMobileViewport \? \(/, 'Returns desktop
 assert.match(returnsSurfaceSource, /\{isMobileViewport \? \(/, 'Returns mobile cards should only render for mobile viewports')
 assert.doesNotMatch(en, /"search_returns_placeholder":\s*"[^"]*ðŸ”/)
 assert.doesNotMatch(km, /"search_returns_placeholder":\s*"[^"]*ðŸ”/)
+assert.match(columnChooserSource, /createPortal\([\s\S]*document\.body/, 'column option menus must portal outside fixed cards and table clipping layers')
+assert.match(columnChooserSource, /className="fixed z-\[1200\]/, 'column option menus must use a fixed top layer')
+assert.match(columnChooserSource, /menuRef\.current\?\.contains\(target\)/, 'clicks inside the portaled column menu must not be mistaken for outside clicks')
 
 console.log('PASS returns layout shows stats first, uses icon-only search, and gates list surfaces by viewport')
 
@@ -45,3 +52,14 @@ assert.match(returnsSource, /const searchFiltered = useMemo\(/, 'Returns should 
 assert.match(returnsSource, /for \(const ret of searchFiltered\)/, 'Returns scope stat tiles should sum from the search-only filtered view, not the type-filtered list view')
 
 console.log('PASS returns type filter stays client-side so scope stat tiles and type options always reflect the full dataset')
+
+assert.match(newReturnSource, /Search another product by name, SKU or barcode/, 'replacement sale should search the full catalog by name/SKU/barcode')
+assert.match(newReturnSource, /searchProducts\(\{ query, page: 1, pageSize: 30 \}\)/, 'replacement catalog search should use the normal product search transport')
+assert.doesNotMatch(newReturnSource, /if \(exactBarcode\) pickReplacementRow\(/, 'a scan must never auto-pick a replacement row -- it only narrows the candidate list, the operator chooses')
+assert.doesNotMatch(newReturnSource, /normName\(row\.name\).*normName\(name\)/, 'replacement choices must not be filtered back to the returned product name')
+assert.match(newReturnSource, /replacementReceiptNumber/, 'successful exchange should surface the linked replacement receipt number')
+assert.match(returnDetailSource, /replacement_receipt_number/, 'return detail should show the linked replacement sale receipt')
+assert.match(saleDetailSource, /returned_quantity/, 'sale detail should tag returned item quantities')
+assert.match(saleDetailSource, /source_return_id/, 'replacement sale detail should identify the source return')
+
+console.log('PASS returns can replace with any barcode-searched product and expose linked return/sale receipt tags')

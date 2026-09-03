@@ -4,6 +4,7 @@ import Eye from 'lucide-react/dist/esm/icons/eye.js'
 import FileSpreadsheet from 'lucide-react/dist/esm/icons/file-spreadsheet.js'
 import Upload from 'lucide-react/dist/esm/icons/upload.js'
 import Modal from '../shared/Modal'
+import DateEntryInput from '../shared/DateEntryInput.tsx'
 import StatusBadge from './StatusBadge'
 import { withLoaderTimeout } from '../../utils/loaders.ts'
 import { todayStr, businessYear, businessMonth } from '../../utils/dateHelpers'
@@ -264,11 +265,11 @@ export default function ExportModal({ onClose, t, fmtUSD }: ExportModalProps) {
             <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
               <div>
                 <label className="mb-1 block text-xs text-gray-500">{tr('start_date', 'Start Date')}</label>
-                <input type="date" className="input text-sm" value={startDate} onChange={(event) => setStartDate(event.target.value)} />
+                <DateEntryInput className="text-sm" t={t} ariaLabel={tr('start_date', 'Start Date')} value={startDate} onChange={(iso) => setStartDate(iso)} />
               </div>
               <div>
                 <label className="mb-1 block text-xs text-gray-500">{tr('end_date', 'End Date')}</label>
-                <input type="date" className="input text-sm" value={endDate} onChange={(event) => setEndDate(event.target.value)} />
+                <DateEntryInput className="text-sm" t={t} ariaLabel={tr('end_date', 'End Date')} value={endDate} onChange={(iso) => setEndDate(iso)} />
               </div>
             </div>
           ) : (

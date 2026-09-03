@@ -53,7 +53,7 @@ const identity = loadTs('lib/productIdentity.ts', {
   './sqlBinding': { buildInClause: () => ({ sql: '', params: {} }), selectInChunks: async () => [] },
   './productDetailRule': detailRule,
 })
-const { findPossiblySameProductClusters, normalizeProductClusterKey } = identity
+const { findPossiblySameProductClusters, findDuplicateProductGroups, normalizeProductClusterKey, normalizeLeadingZeroBarcodeForCleanup } = identity
 check('productIdentity exports findPossiblySameProductClusters', typeof findPossiblySameProductClusters === 'function')
 
 // --- Seed a real DB with every path the sweep must distinguish -------------
@@ -81,16 +81,45 @@ const products = [
   { id: 8, name: 'Cafe Creme', barcode: 'BAR-E222' },
   // negative: a lone product forms no cluster.
   { id: 9, name: 'Solo Item', barcode: 'BAR-SOLO' },
+  // Safe cleanup pair: same exact name/cost, one extra barcode zero. The
+  // extra-zero row has stock, but the clean-barcode row must still survive;
+  // the fold moves the stock. Selling price is not identity.
+  { id: 10, name: 'Zero Prefix Mascara', barcode: '0123456789' },
+  { id: 11, name: 'Zero Prefix Mascara', barcode: '123456789' },
+  // Same barcode under different names stays manual and never auto-merges.
+  { id: 12, name: 'Manual Shade A', barcode: 'MANUAL-42' },
+  { id: 13, name: 'Manual Shade B', barcode: 'MANUAL-42' },
+  // Overlap guard: 14/15 look auto-safe, but 14's raw barcode is also used by
+  // a different name, so the entire decision must stay manual.
+  { id: 14, name: 'Overlap Product', barcode: '077777' },
+  { id: 15, name: 'Overlap Product', barcode: '77777' },
+  { id: 16, name: 'Different Name Sharing Raw Barcode', barcode: '077777' },
 ]
 for (const p of products) {
   db.prepare(`INSERT INTO products (id, name, barcode, is_active, is_group) VALUES (@id, @name, @barcode, 1, 0)`)
     .run({ id: p.id, name: p.name, barcode: p.barcode })
 }
+db.prepare(`INSERT INTO branches (id, name, is_active) VALUES (1, 'Main', 1)`).run({})
+db.prepare(`INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (10, 1, 7)`).run({})
 
 const idsOf = (cluster) => cluster.products.map((x) => x.id).sort((a, b) => a - b).join(',')
 const findCluster = (clusters, sev, ids) => clusters.find((c) => c.severity === sev && idsOf(c) === ids)
 
 async function run() {
+  check('cleanup normalization removes exactly one numeric leading zero',
+    normalizeLeadingZeroBarcodeForCleanup('0123456789') === '123456789')
+  check('placeholder barcode 0 is not normalized into a blank barcode',
+    normalizeLeadingZeroBarcodeForCleanup('0') === '0')
+
+  const duplicateGroups = await findDuplicateProductGroups(db)
+  const zeroPrefix = duplicateGroups.find((group) => [group.canonical.id, ...group.duplicates.map((x) => x.id)].sort((a, b) => a - b).join(',') === '10,11')
+  check('same-name/same-cost pair differing only by one leading barcode zero is auto-mergeable', !!zeroPrefix)
+  check('clean-barcode row is selected as keeper and will receive stock from the typo row', zeroPrefix?.canonical.id === 11)
+  check('same barcode under different names remains manual',
+    !duplicateGroups.some((group) => [group.canonical.id, ...group.duplicates.map((x) => x.id)].some((id) => id === 12 || id === 13)))
+  check('manual classification wins when a leading-zero pair overlaps a same-barcode/different-name conflict',
+    !duplicateGroups.some((group) => [group.canonical.id, ...group.duplicates.map((x) => x.id)].some((id) => id === 14 || id === 15)))
+
   const clusters = await findPossiblySameProductClusters(db)
 
   // The two genuine renames surface as similar_name.

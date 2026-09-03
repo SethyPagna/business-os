@@ -2,6 +2,7 @@ import X from 'lucide-react/dist/esm/icons/x.js'
 import { createPortal } from 'react-dom'
 import { useApp as useAppHook } from '../../AppContext.tsx'
 import { fmtTime } from '../../utils/formatters.ts'
+import CopyableId from '../shared/CopyableId.tsx'
 import { normalizeStockAction, stockActionOption } from './helpers/returnOptions.ts'
 
 const CUSTOMER_SCOPE = 'customer'
@@ -36,6 +37,8 @@ interface ReturnDetail {
   supplier_settlement?: string | null
   return_type?: string | null
   receipt_number?: string | null
+  replacement_sale_id?: number | string | null
+  replacement_receipt_number?: string | null
   supplier_name?: string | null
   customer_name?: string | null
   branch_name?: string | null
@@ -97,12 +100,20 @@ export default function ReturnDetailModal({ ret, onClose, onEdit, fmtUSD, fmtKHR
   return createPortal(
     <div className="modal-viewport-safe pointer-events-auto fixed inset-0 z-[1050] flex items-end justify-center overflow-y-auto bg-black/50 sm:items-center" onClick={onClose}>
       <div className="modal-panel-safe flex w-full flex-col rounded-t-2xl bg-white shadow-2xl sm:max-w-2xl sm:rounded-2xl dark:bg-gray-800" onClick={(event) => event.stopPropagation()}>
-        <div className="flex items-center justify-between border-b border-gray-200 p-4 dark:border-gray-700">
-          <div>
-            <div className="font-mono text-base font-bold text-gray-900 dark:text-white">{ret.return_number}</div>
-            <div className="text-xs text-gray-400">{fmtTime(ret.created_at)}</div>
+        {/* Same treatment as the sale receipt id: below sm the return id takes
+            a full-width row of its own and wraps rather than being clipped or
+            scrolled, with a one-tap copy control. */}
+        <div className="flex flex-col gap-2 border-b border-gray-200 p-4 dark:border-gray-700 sm:flex-row sm:items-start sm:justify-between">
+          <div className="min-w-0 flex-1">
+            <CopyableId
+              value={ret.return_number || ''}
+              copyLabel={tr('copy_return_id', 'Copy return ID')}
+              copiedLabel={tr('copied', 'Copied')}
+              valueClassName="font-mono text-base font-bold text-gray-900 dark:text-white"
+            />
+            <div className="mt-1 text-xs text-gray-400">{fmtTime(ret.created_at)}</div>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex shrink-0 items-center gap-2">
             {onEdit ? (
               <button type="button" onClick={onEdit} className="btn-secondary px-3 py-1.5 text-xs">{tr('edit', 'Edit')}</button>
             ) : null}
@@ -125,7 +136,23 @@ export default function ReturnDetailModal({ ret, onClose, onEdit, fmtUSD, fmtKHR
             {ret.receipt_number ? (
               <div>
                 <div className="mb-0.5 text-xs text-gray-400">{tr('original_receipt', 'Original Receipt')}</div>
-                <div className="font-mono text-sm text-blue-600 dark:text-blue-400">{ret.receipt_number}</div>
+                <CopyableId
+                  value={ret.receipt_number}
+                  copyLabel={tr('copy_receipt_number', 'Copy receipt number')}
+                  copiedLabel={tr('copied', 'Copied')}
+                  valueClassName="font-mono text-sm text-blue-600 dark:text-blue-400"
+                />
+              </div>
+            ) : null}
+            {ret.replacement_receipt_number ? (
+              <div>
+                <div className="mb-0.5 text-xs text-gray-400">{tr('replacement_sale_receipt', 'Replacement Sale Receipt')}</div>
+                <CopyableId
+                  value={ret.replacement_receipt_number}
+                  copyLabel={tr('copy_receipt_number', 'Copy receipt number')}
+                  copiedLabel={tr('copied', 'Copied')}
+                  valueClassName="font-mono text-sm font-semibold text-emerald-600 dark:text-emerald-400"
+                />
               </div>
             ) : null}
             <div>
@@ -179,7 +206,7 @@ export default function ReturnDetailModal({ ret, onClose, onEdit, fmtUSD, fmtKHR
           {replacementItems.length > 0 ? (
             <div>
               <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-emerald-600 dark:text-emerald-400">
-                🔁 {tr('replacement_items_label', 'Replacements handed out')} ({replacementItems.length})
+                🔁 {tr('replacement_sale_items_label', 'Replacement sale items')} ({replacementItems.length})
               </div>
               <div className="space-y-1 rounded-xl border border-emerald-200 bg-emerald-50 p-3 dark:border-emerald-800 dark:bg-emerald-900/20">
                 {replacementItems.map((line, index) => (

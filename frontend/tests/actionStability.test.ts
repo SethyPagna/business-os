@@ -187,9 +187,10 @@ await runTest('return create, edit, and supplier flows keep synchronous submit g
   assert.match(returnsTransport, /ensureClientRequestId\(\{ \.\.\.getDevicePayload\(\), \.\.\.\(payload \|\| \{\}\) \}, 'return'\)/)
   assert.match(returnsTransport, /ensureClientRequestId\(\{ \.\.\.getDevicePayload\(\), \.\.\.\(payload \|\| \{\}\) \}, 'supplier_return'\)/)
   assert.match(returnsRoute, /function normalizeClientRequestId\(value: unknown\)/)
-  const returnDedupePattern = /if \(clientRequestId\) \{\s*const existing = await db\.prepare\(["']SELECT id, return_number FROM returns WHERE client_request_id = \? AND client_request_id <> '' LIMIT 1["']\)[\s\S]*?if \(existing\) return c\.json\(\{ id: existing\.id, returnNumber: existing\.return_number, duplicate: true \}\)\s*\}/g
-  const returnDedupeMatches = returnsRoute.match(returnDedupePattern) || []
-  assert.equal(returnDedupeMatches.length, 2, 'expected the same dedupe check in both the customer-return and supplier-return POST handlers')
+  const returnDedupeQuery = /SELECT id, return_number FROM returns WHERE client_request_id = \? AND client_request_id <> '' LIMIT 1/g
+  const returnDedupeMatches = returnsRoute.match(returnDedupeQuery) || []
+  assert.equal(returnDedupeMatches.length, 2, 'expected the same indexed dedupe lookup in both the customer-return and supplier-return POST handlers')
+  assert.match(returnsRoute, /if \(existing\) \{[\s\S]*replacementSaleId:[\s\S]*replacementReceiptNumber:[\s\S]*duplicate: true/)
 })
 
 await runTest('file picker and library upload/delete flows keep synchronous action guards', () => {

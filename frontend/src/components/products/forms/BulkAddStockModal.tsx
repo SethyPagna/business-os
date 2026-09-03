@@ -4,6 +4,7 @@ import { createPortal } from 'react-dom'
 import { beginSingleAction, finishSingleAction } from '../../../utils/actionGuards.ts'
 import { withLoaderTimeout } from '../../../utils/loaders.ts'
 import AppSelect, { type AppSelectOption } from '../../shared/AppSelect.tsx'
+import DateEntryInput from '../../shared/DateEntryInput.tsx'
 import { getInventoryReasons, saveInventoryReasons } from '../../../api/methods.ts'
 // Same saved-reason catalog + "Manage reasons" flow BranchStockAdjuster.tsx
 // (product edit page's per-branch adjuster) and Inventory's own "Adjust
@@ -23,6 +24,16 @@ import InventoryReasonManagerModal from '../../inventory/InventoryReasonManagerM
 import SupplierPickerField from '../../shared/SupplierPickerField.tsx'
 import ConfirmDialog, { type ConfirmReviewItem } from '../../shared/ConfirmDialog.tsx'
 import { dateToBatchCode } from '../../../utils/batchCode.ts'
+import {
+  applyRowOutcome,
+  classifyStockAdjustFailure,
+  countRows,
+  createRow,
+  hasUnsavedFailures,
+  rowsToSubmit,
+  submitButtonState,
+  type StockAdjustRow,
+} from '../../../utils/stockAdjustOutcome.ts'
 
 const BULK_ADD_STOCK_MUTATION_TIMEOUT_MS = 12000
 
@@ -152,6 +163,10 @@ export default function BulkAddStockModal({ productIds, products, branches, user
   // server's date->code matching per product exactly as a picker's "New
   // batch" does, so late bulk stock-ins land with their real date.
   const [receivedDate, setReceivedDate] = useState(todayIsoDate())
+  // Per-product outcomes of the last submit -- what succeeded (never retried),
+  // what failed and why. Empty until the first commit.
+  const [rows, setRows] = useState<StockAdjustRow<{ productId: number; productName: string }>[]>([])
+  const [confirmAbandon, setConfirmAbandon] = useState(false)
   // D5a: one supplier for the whole bulk receive event -- every lot this
   // add creates gets it; a lot that already has a supplier keeps its own
   // (COALESCE fill server-side, first attribution sticks). supplierId only
@@ -282,12 +297,24 @@ export default function BulkAddStockModal({ productIds, products, branches, user
     setSaving(true)
     setMsg(null)
     try {
-      let done = 0
-      let failed = 0
-      const updatedIds: number[] = []
-      const failedIds: number[] = []
-      for (const product of selectedProducts) {
-        const productId = normalizeProductId(product.id)
+      // Row outcomes (utils/stockAdjustOutcome.ts): the first pass submits
+      // every selected product, a retry submits ONLY the rows that failed.
+      // rowsToSubmit() excludes anything already 'done', so no product can be
+      // adjusted twice by a retry -- /api/inventory/adjust is a one-row,
+      // non-idempotent write, so that exclusion is the guarantee.
+      const startingRows = rows.length
+        ? rows
+        : selectedProducts.map((product) => createRow({
+          productId: normalizeProductId(product.id),
+          productName: String(product.name || product.id),
+        }))
+      let working = startingRows
+      setRows(working)
+      for (const row of rowsToSubmit(startingRows)) {
+        const product = selectedProducts.find((entry) => normalizeProductId(entry.id) === row.request.productId)
+        if (!product) continue
+        working = applyRowOutcome(working, row.rowId, { status: 'saving' })
+        setRows(working)
         try {
           const result = await runBulkStockMutation(() => getProductApi().adjustStock({
             productId: product.id,
@@ -308,19 +335,57 @@ export default function BulkAddStockModal({ productIds, products, branches, user
             supplierName: action === 'add' && supplierName.trim() ? supplierName.trim() : undefined,
           }), 'Bulk adjust product stock')
           if (result?.success === false) throw new Error(result?.error || 'Failed to adjust stock')
-          done += 1
-          updatedIds.push(productId)
-        } catch {
-          failed += 1
-          failedIds.push(productId)
+          working = applyRowOutcome(working, row.rowId, { status: 'done' })
+        } catch (error) {
+          // Never swallow the reason -- the operator needs to know WHICH
+          // product refused and why (insufficient stock, and how much is
+          // actually available) to fix it.
+          working = applyRowOutcome(working, row.rowId, {
+            status: 'failed',
+            failure: classifyStockAdjustFailure(error),
+          })
         }
+        setRows(working)
       }
-      if (done) onDone({ quantity: amount, branchId, done, failed, updatedIds, failedIds })
+      const counts = countRows(working)
+      const updatedIds = working.filter((row) => row.status === 'done').map((row) => row.request.productId)
+      const failedIds = working.filter((row) => row.status === 'failed').map((row) => row.request.productId)
+      if (counts.failed > 0) {
+        // THE RULE (user, Sep 3): a failure keeps this dialog open with every
+        // typed value intact and the per-product reason on screen. Nothing is
+        // reported as finished until the operator resolves or discards it.
+        setMsg(t('stock_rows_failed') || `${counts.failed} product(s) could not be saved. Fix them and retry.`)
+        return
+      }
+      if (counts.done) onDone({ quantity: amount, branchId, done: counts.done, failed: 0, updatedIds, failedIds })
       else setMsg('Failed to adjust stock')
     } finally {
       finishSingleAction(saveInFlightRef)
       setSaving(false)
     }
+  }
+
+  // Leaving with failures still unsaved asks first (shared ConfirmDialog,
+  // never window.confirm): abandon them, or keep editing. Whatever DID commit
+  // is still reported so the page refreshes and undo history stays truthful.
+  const reportAndClose = () => {
+    const counts = countRows(rows)
+    const amount = parseQuantity(qty, action)
+    const updatedIds = rows.filter((row) => row.status === 'done').map((row) => row.request.productId)
+    const failedIds = rows.filter((row) => row.status === 'failed').map((row) => row.request.productId)
+    setConfirmAbandon(false)
+    if (counts.done && amount !== null) {
+      onDone({ quantity: amount, branchId, done: counts.done, failed: counts.failed, updatedIds, failedIds })
+      return
+    }
+    onClose()
+  }
+
+  const requestClose = () => {
+    if (saving) return
+    if (hasUnsavedFailures(rows)) { setConfirmAbandon(true); return }
+    if (countRows(rows).done) { reportAndClose(); return }
+    onClose()
   }
 
   const modal = (
@@ -399,12 +464,15 @@ export default function BulkAddStockModal({ productIds, products, branches, user
               <label htmlFor="bulk-add-stock-received-date" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
                 {t('received_date') || 'Received date'}
               </label>
-              <input
+              {/* Typed, not a native picker (Sep 3) -- the bulk add's own
+                  received date, which derives every lot code it creates. */}
+              <DateEntryInput
                 id="bulk-add-stock-received-date"
-                className="input text-sm"
-                type="date"
+                className="text-sm"
+                t={t}
+                ariaLabel={t('received_date') || 'Received date'}
                 value={receivedDate}
-                onChange={(event) => setReceivedDate(event.target.value)}
+                onChange={(iso) => setReceivedDate(iso)}
               />
               <div className="mt-1 text-[11px] text-gray-400">
                 {t('batch_code_preview') || 'Batch code'}: {dateToBatchCode(receivedDate) || '--'}
@@ -457,11 +525,47 @@ export default function BulkAddStockModal({ productIds, products, branches, user
             </button>
           </div>
           {msg ? <p className="text-sm text-red-600 dark:text-red-400">{msg}</p> : null}
+          {/* Per-product outcomes: what committed (excluded from any retry)
+              and what refused, with the server's own reason inline. */}
+          {rows.some((row) => row.status !== 'pending') ? (
+            <div data-bulk-stock-outcomes="true" className="max-h-40 space-y-1 overflow-y-auto rounded-xl border border-gray-200 p-2 dark:border-gray-700">
+              {rows.map((row) => (
+                <div key={row.rowId} className="flex items-start gap-2 text-xs">
+                  <span className={`mt-0.5 shrink-0 rounded px-1.5 py-0.5 font-semibold ${
+                    row.status === 'done'
+                      ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300'
+                      : row.status === 'failed'
+                        ? 'bg-rose-100 text-rose-700 dark:bg-rose-900/40 dark:text-rose-300'
+                        : 'bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-300'
+                  }`}>
+                    {row.status === 'done'
+                      ? (t('done') || 'Done')
+                      : row.status === 'failed'
+                        ? (t('failed') || 'Failed')
+                        : (t('pending') || 'Pending')}
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate font-medium text-gray-800 dark:text-gray-100">{row.request.productName}</span>
+                    {row.failure ? (
+                      <span className="block break-words text-rose-600 dark:text-rose-300">
+                        {row.failure.message}
+                        {row.failure.available != null ? ` (${t('available') || 'Available'}: ${row.failure.available})` : ''}
+                      </span>
+                    ) : null}
+                  </span>
+                </div>
+              ))}
+            </div>
+          ) : null}
           <div className="flex gap-3">
             <button className="btn-primary flex-1" onClick={handleSave} disabled={saving}>
-              {saving ? (t('saving') || 'Saving...') : `${actionLabels[action]} ${qty || 0} ${action === 'set' ? '' : 'to each'}`.trim()}
+              {saving
+                ? (t('saving') || 'Saving...')
+                : submitButtonState(rows).mode === 'retry'
+                  ? `${t('retry_failed') || 'Retry failed'} (${submitButtonState(rows).failedCount})`
+                  : `${actionLabels[action]} ${qty || 0} ${action === 'set' ? '' : 'to each'}`.trim()}
             </button>
-            <button className="btn-secondary" onClick={onClose}>{t('cancel') || 'Cancel'}</button>
+            <button className="btn-secondary" onClick={requestClose}>{t('cancel') || 'Cancel'}</button>
           </div>
         </div>
       </div>
@@ -489,6 +593,22 @@ export default function BulkAddStockModal({ productIds, products, branches, user
           workingLabel={t('saving') || 'Saving...'}
           onConfirm={commitBulk}
           onClose={() => { if (!saving) setConfirmOpen(false) }}
+        />
+      ) : null}
+      {confirmAbandon ? (
+        <ConfirmDialog
+          t={(key: string) => t(key)}
+          danger
+          title={t('discard_failed_adjustment') || 'Discard the unsaved adjustment?'}
+          message={t('discard_failed_adjustment_desc') || 'This entry was never saved. Discard it, or keep editing to fix and retry.'}
+          items={[
+            { label: t('failed') || 'Failed', value: String(countRows(rows).failed) },
+            { label: t('done') || 'Done', value: String(countRows(rows).done) },
+          ]}
+          confirmLabel={t('discard') || 'Discard'}
+          cancelLabel={t('keep_editing') || 'Keep editing'}
+          onConfirm={reportAndClose}
+          onClose={() => setConfirmAbandon(false)}
         />
       ) : null}
     </div>

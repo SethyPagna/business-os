@@ -43,7 +43,7 @@ import {
   ProductDiscountBadge,
 } from './surfaces/ProductRowParts'
 import { useIsPageActive } from '../shared/pageActivity'
-import { buildProductCategorySections } from '../../utils/productGrouping.ts'
+import { buildProductCategorySections, hideZeroStockGroupedChildRows } from '../../utils/productGrouping.ts'
 import { useActionHistory } from '../../utils/actionHistory.ts'
 import { cloneHistorySnapshot, extractHistoryResultId, resolveCreatedHistorySnapshot } from '../../utils/historyHelpers.ts'
 import { createProductHistoryRequestId, orderProductRestoreSnapshots } from './history/productHistoryHelpers.ts'
@@ -2021,9 +2021,12 @@ function ProductsFullEditor() {
     // A code is the one identifier that must be readable on one line. Keep
     // the secondary brand/category tags compact so barcode values get the
     // space first, instead of wrapping or losing their final digits.
+    const fullDetailKeys = new Set(['branch', 'branches', 'sku', 'supplier'])
     const widthClass = item.key === 'barcode'
       ? 'shrink-0 whitespace-nowrap'
-      : 'max-w-[5rem] truncate'
+      : fullDetailKeys.has(item.key)
+        ? 'max-w-full whitespace-normal break-words'
+        : 'max-w-[5rem] truncate'
     if (item.color) {
       return (
         <span
@@ -2147,11 +2150,11 @@ function ProductsFullEditor() {
   // on Inventory.tsx. POS.tsx's own AlphaIndexRail is untouched -- that one
   // was never part of this ask, it stays name-initial.
   const productSections = useMemo<ProductSectionLike[]>(
-    () => buildProductCategorySections(filtered, {
+    () => hideZeroStockGroupedChildRows(buildProductCategorySections(filtered, {
       productsById,
       sortDirection: productSortDirection,
       uncategorizedLabel: t('uncategorized') || 'Uncategorized',
-    }) as unknown as ProductSectionLike[],
+    })) as unknown as ProductSectionLike[],
     [filtered, productSortDirection, productsById, t],
   )
 
@@ -3182,7 +3185,7 @@ function ProductsFullEditor() {
         {/* border-l here (freed-up space between the Name and Details
             columns) instead of a whole new column -- per the Aug 19 2026
             ask for a divider before the details column. */}
-        <td className="hidden border-l border-gray-100 px-3 py-2 align-top dark:border-gray-700 md:table-cell">
+        <td className="border-l border-gray-100 px-3 py-2 align-top dark:border-gray-700">
           <ProductDetailsCell
             product={p}
             promotion={promotion}
@@ -3213,7 +3216,7 @@ function ProductsFullEditor() {
             </div>
           ) : null}
         </td>
-        <td className="px-3 py-2 text-right hidden lg:table-cell">
+        <td className="px-3 py-2 text-right">
           {costUsd > 0 && sellingUsd > 0
             ? <div><div className={`font-medium text-xs ${marginUsd >= 0 ? 'text-blue-600 dark:text-blue-400' : 'text-yellow-600'}`}>{fmtUSD(marginUsd)}</div><div className="text-xs text-blue-500/80 dark:text-blue-400/80">{marginPct.toFixed(1)}%</div></div>
             : <span className="text-gray-300">N/A</span>}
@@ -3275,8 +3278,8 @@ function ProductsFullEditor() {
     // (InventoryProductsSurface.tsx) for parity between the two pages.
     // Ungrouped single products are untouched, still their own card.
     const rowClassName = indented
-      ? `cursor-pointer select-none border-t border-gray-100 px-3 py-2.5 dark:border-gray-800 ${rowSelected ? 'ring-1 ring-primary-400 bg-primary-50/70 dark:bg-primary-900/20' : ''}`
-      : `card cursor-pointer select-none px-3 py-2.5 ${rowSelected ? 'ring-1 ring-primary-400 bg-primary-50/70 dark:bg-primary-900/20' : ''}`
+      ? `min-w-0 max-w-full cursor-pointer select-none border-t border-gray-100 px-3 py-2.5 dark:border-gray-800 ${rowSelected ? 'ring-1 ring-primary-400 bg-primary-50/70 dark:bg-primary-900/20' : ''}`
+      : `card min-w-0 max-w-full cursor-pointer select-none px-3 py-2.5 ${rowSelected ? 'ring-1 ring-primary-400 bg-primary-50/70 dark:bg-primary-900/20' : ''}`
 
     // Same long-press/select-mode rules as renderDesktopProductRow -- see
     // its comment for the full reasoning. Not a hook; shares the same
@@ -3311,7 +3314,7 @@ function ProductsFullEditor() {
             `card`). An extra left-padding indent on top of that was
             redundant, and it also meant a child row's text started to the
             right of the group title above it instead of lining up with it. */}
-        <div className="flex items-start gap-3">
+        <div className="flex min-w-0 items-start gap-3">
           {selectionModeActive ? (
             <input
               type="checkbox"
@@ -4161,9 +4164,10 @@ function ProductsFullEditor() {
           sidebar) jumps to a section instead of hiding everything else.
           initialFilter/initialOptions plumbing removed with it below. */}
 
-      {/* The product-result surface is intentionally 90% of its former
-          visual scale. The wrapper restores the layout width so shrinking
-          rows/cards does not leave an empty 10% rail on the right. */}
+      {/* Keep the result surface explicitly width-bounded. Its compact visual
+          density comes from the rows/cards themselves; widening a zoomed
+          wrapper caused mobile WebKit and the clipped page scroll root to
+          cut off the right side of cards and the final Stock/Qty column. */}
       <div className="products-list-density-90">
         <ProductsListSurface
           allVisibleProducts={allVisibleProducts}
