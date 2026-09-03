@@ -6,6 +6,7 @@ import Trash2 from 'lucide-react/dist/esm/icons/trash-2.js'
 import Plus from 'lucide-react/dist/esm/icons/plus.js'
 import Modal from '../shared/Modal'
 import AppSelect from '../shared/AppSelect.tsx'
+import DateEntryInput from '../shared/DateEntryInput.tsx'
 import { useApp } from '../../AppContext.tsx'
 import type { AppContextCoreValue } from '../../app/AppContextCore.tsx'
 import {
@@ -428,21 +429,26 @@ export default function ManagePromotionsModal({ onClose, productOptions = [] }: 
 
               <label className="flex flex-col gap-1 text-sm">
                 <span className="font-medium text-gray-700 dark:text-gray-300">Show from (optional)</span>
-                <input
-                  type="date"
+                {/* Typed, not a native picker (Sep 3) -- app-wide rule. */}
+                <DateEntryInput
+                  bare
+                  t={t}
+                  ariaLabel="Show from"
                   value={form.starts_at}
-                  onChange={(e) => setForm((p) => ({ ...p, starts_at: e.target.value }))}
-                  className="rounded-lg border border-gray-300 px-3 py-2 text-sm dark:border-gray-700 dark:bg-gray-900"
+                  onChange={(iso) => setForm((p) => ({ ...p, starts_at: iso }))}
+                  className="rounded-lg border border-gray-300 px-3 py-2 dark:border-gray-700 dark:bg-gray-900"
                 />
               </label>
 
               <label className="flex flex-col gap-1 text-sm">
                 <span className="font-medium text-gray-700 dark:text-gray-300">Show until (optional)</span>
-                <input
-                  type="date"
+                <DateEntryInput
+                  bare
+                  t={t}
+                  ariaLabel="Show until"
                   value={form.ends_at}
-                  onChange={(e) => setForm((p) => ({ ...p, ends_at: e.target.value }))}
-                  className="rounded-lg border border-gray-300 px-3 py-2 text-sm dark:border-gray-700 dark:bg-gray-900"
+                  onChange={(iso) => setForm((p) => ({ ...p, ends_at: iso }))}
+                  className="rounded-lg border border-gray-300 px-3 py-2 dark:border-gray-700 dark:bg-gray-900"
                 />
               </label>
 

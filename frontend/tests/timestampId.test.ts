@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { businessDateTimeId } from '../src/utils/timestampId.ts'
+import { BUSINESS_RECEIPT_NUMBER_RE, businessDateTimeId, isBusinessReceiptNumber } from '../src/utils/timestampId.ts'
 import { fmtDateTime24 } from '../src/utils/formatters.ts'
 
 const testDir = dirname(fileURLToPath(import.meta.url))
@@ -70,6 +70,30 @@ await runTest('the compact id form stays OUT of displayed dates (receipt shows m
   assert.doesNotMatch(receipt, /toLocaleString\(undefined/)
 })
 
+
+await runTest('the client refuses a foreign receipt shape, so the @ label cannot be queued offline', () => {
+  // 2026-09-02: a reconciliation pack wrote the old system's
+  // `NNNNNN@YYYY-MM-DD` invoice label onto 15,004 sales (repaired by
+  // migration 0107). The offline queue mints and PRINTS a receipt id at
+  // queue time, so the client has to be able to tell a real business id
+  // from a foreign one before that number reaches a customer.
+  for (const bad of ['004434@2026-09-02', '4351@2026-08-28', '004434', '20260902', '20260902-1642', '', null, 42]) {
+    assert.equal(isBusinessReceiptNumber(bad), false, `should reject ${String(bad)}`)
+  }
+  for (const good of ['20260902-164228', '20260902-164228-2', '20260902-164228-A3F9', 'RCP-20260101-090000', 'RET-20260902-164228', 'SRET-20260902-164228-2']) {
+    assert.equal(isBusinessReceiptNumber(good), true, `should accept ${good}`)
+  }
+  assert.equal(isBusinessReceiptNumber(`  ${businessDateTimeId()}  `), true, 'a trimmed freshly minted id is accepted')
+
+  // The queue must USE the guard, not merely export it...
+  const saleWrite = readFrontend('src/api/saleWriteTransport.ts')
+  assert.match(saleWrite, /isBusinessReceiptNumber\(salePayload\.receipt_number\)/)
+  assert.doesNotMatch(saleWrite, /salePayload\.receipt_number = salePayload\.receipt_number \|\|/)
+  // ...and the server-side twin must stay hand-synced with this regex.
+  const serverLib = readRepo('cloudflare/src/lib/receiptNumber.ts')
+  const serverRe = serverLib.match(/export const BUSINESS_RECEIPT_NUMBER_RE = (.+)$/m)?.[1]
+  assert.equal(serverRe, String(BUSINESS_RECEIPT_NUMBER_RE), 'client and server receipt regexes drifted apart')
+})
 if (failed > 0) {
   process.exitCode = 1
 }

@@ -2,7 +2,10 @@ import { useMemo, useRef, useState, type MouseEvent } from 'react'
 import { createPortal } from 'react-dom'
 import X from 'lucide-react/dist/esm/icons/x.js'
 import { fmtTime, fmtTimezoneLabel } from '../../utils/formatters.ts'
+import { getSaleReturnBlockReason } from '../../utils/saleReturnGuard.ts'
 import AppSelect from '../shared/AppSelect.tsx'
+import CopyableId from '../shared/CopyableId.tsx'
+import InfoHint from '../shared/InfoHint.tsx'
 import StatusBadge, { ALL_STATUSES, getStatusLabel } from './StatusBadge.tsx'
 
 type TranslateFn = (key: string) => string
@@ -118,6 +121,11 @@ interface SaleDetailModalProps {
   onStatusChange?: (saleId: string | number, status: string, notes: string, recordHistory?: boolean, extra?: Record<string, unknown> | null) => Promise<unknown> | unknown
   onAttachMembership?: (saleId: string | number, membershipNumber: string) => Promise<boolean | unknown> | boolean | unknown
   onPrint?: (sale: SaleDetail) => void
+  // Opens the SAME new-return flow the Returns section uses
+  // (returns/NewReturnModal), pre-filled with this sale. Omitted entirely
+  // when the signed-in user lacks `returns:add` -- the identical
+  // hide-by-omission pattern as onStatusChange / onAttachMembership above.
+  onReturn?: (sale: SaleDetail) => void
   t: TranslateFn
   fmtUSD: MoneyFormatter
   fmtKHR: MoneyFormatter
@@ -161,6 +169,7 @@ export default function SaleDetailModal({
   onStatusChange,
   onAttachMembership,
   onPrint,
+  onReturn,
   t,
   fmtUSD,
   fmtKHR,
@@ -201,6 +210,17 @@ export default function SaleDetailModal({
   if (!sale) return null
 
   const currentStatus = sale.sale_status || 'completed'
+  // The Return action reuses the Returns section's own guards rather than
+  // inventing new ones -- see utils/saleReturnGuard.ts, shared with the
+  // receipt view so the two surfaces never disagree. The reason is stated up
+  // front (disabled button + InfoHint) instead of letting someone walk into a
+  // dead-end form.
+  const returnBlockReason = getSaleReturnBlockReason({ sale_status: currentStatus, items })
+  const returnBlockedReason = returnBlockReason === 'cancelled'
+    ? translateOr('return_blocked_cancelled_sale', 'This sale was cancelled, so there is nothing to return.', 'ការលក់នេះត្រូវបានបោះបង់ ដូច្នេះគ្មានអ្វីត្រូវប្រគល់មកវិញទេ។')
+    : returnBlockReason === 'fully_returned'
+      ? translateOr('return_blocked_fully_returned', 'Every item on this sale has already been returned.', 'ទំនិញទាំងអស់ក្នុងការលក់នេះ ត្រូវបានប្រគល់មកវិញរួចហើយ។')
+      : ''
   const totalUsd = toNumber(sale.total_usd || sale.total)
   const totalKhr = toNumber(sale.total_khr)
   const refundUsd = toNumber(sale.refund_usd)
@@ -283,15 +303,41 @@ export default function SaleDetailModal({
         className="modal-panel-safe flex w-full flex-col rounded-t-2xl bg-white shadow-2xl sm:max-w-3xl sm:rounded-2xl dark:bg-gray-800"
         onClick={(event: MouseEvent<HTMLDivElement>) => event.stopPropagation()}
       >
-        <div className="flex flex-shrink-0 items-center justify-between gap-2 border-b border-gray-200 p-4 dark:border-gray-700">
-          {/* Long receipt numbers remain fully available through horizontal
-              touch scrolling while the status and actions stay in view. */}
+        {/* The receipt id owns a full-width row of its own below sm (user,
+            Sep 3 2026: "for smaller screens the receipt id must be shown
+            clearly fully, no scroll; can push to second row and copy
+            easily"), so it wraps instead of scrolling sideways and the
+            status/actions cluster drops underneath it. From sm the two share
+            one compact row again, with the same copy button. */}
+        <div className="flex flex-shrink-0 flex-col gap-2 border-b border-gray-200 p-4 dark:border-gray-700 sm:flex-row sm:items-start sm:justify-between">
           <div className="min-w-0 flex-1">
-            <div className="detail-scroll-text font-mono text-sm font-bold text-gray-900 dark:text-white sm:text-base" title={sale.receipt_number || undefined}>{sale.receipt_number}</div>
+            <CopyableId
+              value={sale.receipt_number || ''}
+              copyLabel={translateOr('copy_receipt_number', 'Copy receipt number', 'ចម្លងលេខវិក្កយបត្រ')}
+              copiedLabel={t('copied') || 'Copied'}
+              valueClassName="font-mono text-sm font-bold text-gray-900 dark:text-white sm:text-base"
+            />
             <div className="mt-1 text-xs text-gray-400">{fmtTime(sale.created_at)}</div>
           </div>
-          <div className="flex shrink-0 items-center gap-2 whitespace-nowrap">
+          <div className="flex shrink-0 flex-wrap items-center gap-2">
             <StatusBadge status={currentStatus} t={t} />
+            {onReturn ? (
+              <span className="inline-flex items-center gap-1">
+                <button
+                  type="button"
+                  onClick={() => onReturn(sale)}
+                  disabled={returnBlockedReason !== ''}
+                  className="rounded-lg bg-orange-50 px-3 py-1.5 text-xs font-medium text-orange-700 hover:bg-orange-100 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-orange-900/30 dark:text-orange-300 dark:hover:bg-orange-900/50"
+                >
+                  {t('return') || 'Return'}
+                </button>
+                {/* Why the action is unavailable stays behind the hint, not
+                    as inline prose next to the button. */}
+                {returnBlockedReason ? (
+                  <InfoHint text={returnBlockedReason} label={t('return') || 'Return'} />
+                ) : null}
+              </span>
+            ) : null}
             {onPrint ? (
               <button
                 type="button"

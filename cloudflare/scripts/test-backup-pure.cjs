@@ -243,7 +243,12 @@ function makeFakeR2(seed = {}) {
         key,
         uploadId: `upload-${key}`,
         async uploadPart(partNumber, body) {
-          parts.set(partNumber, String(body ?? ''))
+          // The real writer hands over Uint8Array parts (copied here, as R2
+          // would, so a reused buffer could never alias an uploaded part);
+          // strings stay accepted because R2 accepts them too.
+          if (body instanceof Uint8Array) parts.set(partNumber, Buffer.from(body).toString('utf8'))
+          else if (body instanceof ArrayBuffer) parts.set(partNumber, Buffer.from(new Uint8Array(body)).toString('utf8'))
+          else parts.set(partNumber, String(body ?? ''))
           return { partNumber, etag: `etag-${partNumber}` }
         },
         async complete(uploaded) {

@@ -13,6 +13,7 @@ import { dateToBatchCode } from '../../../utils/batchCode.ts'
 import InventoryReasonManagerModal from '../../inventory/InventoryReasonManagerModal.tsx'
 import ConfirmDialog, { type ConfirmReviewItem } from '../../shared/ConfirmDialog.tsx'
 import SupplierPickerField from '../../shared/SupplierPickerField.tsx'
+import DateEntryInput from '../../shared/DateEntryInput.tsx'
 
 const BRANCH_STOCK_ADJUSTMENT_TIMEOUT_MS = 12000
 
@@ -610,11 +611,16 @@ function StockAdjustBranchRow({ row, productId, unit, onChange, T }: StockAdjust
               <label className="mb-1 block text-[11px] font-medium text-gray-600 dark:text-gray-400">
                 {T('received_date', 'Received date', 'ថ្ងៃទទួលស្តុក')}
               </label>
-              <input
-                className="input w-full py-1 text-xs"
-                type="date"
+              {/* Typed, not a native picker (Sep 3): this is the add-stock
+                  row's own received date, and it derives the lot code. */}
+              <DateEntryInput
+                className="w-full py-1"
+                // This row only receives the fallback-aware T; hand the field
+                // a bare lookup so its own messages still use the pack.
+                t={(key: string) => T(key, key)}
+                ariaLabel={T('received_date', 'Received date', 'ថ្ងៃទទួលស្តុក')}
                 value={row.receivedDate}
-                onChange={(event) => onChange({ receivedDate: event.target.value })}
+                onChange={(iso) => onChange({ receivedDate: iso })}
               />
               <div className="mt-1 text-[10px] text-gray-400">
                 {T('batch_code_preview', 'Batch code', 'កូដបាច់')}: {dateToBatchCode(row.receivedDate) || '--'}
