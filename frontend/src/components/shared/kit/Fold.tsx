@@ -16,6 +16,9 @@ export type FoldProps = {
    *  implement "anchored to the triggering row" -- documented here rather
    *  than left unresolved. */
   anchorRef?: RefObject<HTMLElement | null>
+  /** Desktop panel width: 'md' (20rem, default) for a single receipt/detail,
+   *  'lg' (28rem) when the body is a multi-column table. Ignored on the mobile sheet. */
+  size?: 'md' | 'lg'
   className?: string
 }
 
@@ -53,7 +56,27 @@ function getFocusable(root: HTMLElement | null): HTMLElement[] {
 // outside click, the X button) calls `history.back()` itself IF the fold's
 // own marked entry is still the current one, so it does not leave a dead
 // forward-history entry sitting behind the user.
-export default function Fold({ open, onClose, title, actions, children, anchorRef, className = '' }: FoldProps) {
+// Desktop placement: below the anchor when there is room, otherwise flipped
+// above it. A chip or row near the bottom of the viewport used to get a panel
+// whose top was clamped to innerHeight-80, leaving ~80px visible and the rest
+// cut off (a fixed element cannot be scrolled into view). Whichever side is
+// used, max height is bounded by the space on that side so the body scrolls
+// instead of overflowing the viewport.
+const FOLD_MIN_SPACE = 240
+function placeAnchored(rect: DOMRect, panelWidth: number): CSSProperties {
+  const gap = 8
+  const left = Math.max(8, Math.min(rect.left, window.innerWidth - panelWidth - gap))
+  const spaceBelow = window.innerHeight - rect.bottom - gap * 2
+  const spaceAbove = rect.top - gap * 2
+  const base: CSSProperties = { position: 'fixed', left, zIndex: 'var(--z-fold)' }
+  if (spaceBelow >= FOLD_MIN_SPACE || spaceBelow >= spaceAbove) {
+    return { ...base, top: rect.bottom + gap, maxHeight: Math.max(120, spaceBelow) }
+  }
+  return { ...base, bottom: window.innerHeight - rect.top + gap, maxHeight: Math.max(120, spaceAbove) }
+}
+
+export default function Fold({ open, onClose, title, actions, children, anchorRef, size = 'md', className = '' }: FoldProps) {
+  const panelWidth = size === 'lg' ? 448 : 320
   const panelRef = useRef<HTMLDivElement>(null)
   const previouslyFocusedRef = useRef<HTMLElement | null>(null)
   const pushedHistoryRef = useRef(false)
@@ -148,7 +171,7 @@ export default function Fold({ open, onClose, title, actions, children, anchorRe
   const panelStyle: CSSProperties = isMobile
     ? {}
     : anchorRect
-      ? { position: 'fixed', top: Math.min(anchorRect.bottom + 8, window.innerHeight - 80), left: Math.max(8, Math.min(anchorRect.left, window.innerWidth - 328)), zIndex: 'var(--z-fold)' }
+      ? placeAnchored(anchorRect, panelWidth)
       : { position: 'fixed', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', zIndex: 'var(--z-fold)' }
 
   const node = isMobile ? (
@@ -182,7 +205,7 @@ export default function Fold({ open, onClose, title, actions, children, anchorRe
       aria-label={typeof title === 'string' ? title : undefined}
       tabIndex={-1}
       style={panelStyle}
-      className={['w-80 max-h-[70vh] flex flex-col rounded-[var(--ui-radius-lg)] border border-[var(--ui-line)] bg-[var(--ui-surface)] shadow-[var(--ui-shadow-3)]', className].join(' ').trim()}
+      className={[size === 'lg' ? 'w-[28rem]' : 'w-80', 'max-h-[70vh] flex flex-col rounded-[var(--ui-radius-lg)] border border-[var(--ui-line)] bg-[var(--ui-surface)] shadow-[var(--ui-shadow-3)]', className].join(' ').trim()}
     >
       <div className="flex min-w-0 items-center gap-2 border-b border-[var(--ui-line)] px-3 py-2">
         <h3 className="min-w-0 flex-1 truncate font-[family-name:var(--ui-font-display)] text-[length:var(--ui-size-h3)] font-semibold text-[var(--ui-ink)]">{title}</h3>
