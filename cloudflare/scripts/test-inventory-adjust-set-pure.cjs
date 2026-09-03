@@ -1,9 +1,19 @@
 const assert = require('node:assert/strict')
 const fs = require('node:fs')
+const path = require('node:path')
 
-const route = fs.readFileSync('src/routes/inventory.ts', 'utf8')
-const modal = fs.readFileSync('../frontend/src/components/inventory/InventoryStockModals.tsx', 'utf8')
-const branchAdjuster = fs.readFileSync('../frontend/src/components/products/forms/BranchStockAdjuster.tsx', 'utf8')
+// Anchored to this file, not to the caller's cwd. These paths used to be
+// relative, so the suite passed when swept from `cloudflare/` and threw ENOENT
+// when swept from `cloudflare/scripts/` -- which is the directory CLAUDE.md's
+// own documented sweep command cds into. Three lanes independently reported the
+// resulting false RED. A test's location is a property of the test, not of
+// wherever someone happened to run it from.
+const repo = path.resolve(__dirname, '..', '..')
+const read = (rel) => fs.readFileSync(path.join(repo, rel), 'utf8')
+
+const route = read('cloudflare/src/routes/inventory.ts')
+const modal = read('frontend/src/components/inventory/InventoryStockModals.tsx')
+const branchAdjuster = read('frontend/src/components/products/forms/BranchStockAdjuster.tsx')
 
 assert.match(route, /const originalType = type[\s\S]*if \(type === 'set'\)/, 'set preserves its audit identity')
 assert.match(route, /const current = await branchStockQty\(c\.env, productId, branchId\)/, 'set reads the selected branch total')
