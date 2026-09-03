@@ -1095,7 +1095,16 @@ function ProductsFullEditor() {
       'Products by id',
       PRODUCTS_BY_ID_TIMEOUT_MS,
     )
-    return Array.isArray(payload) ? payload : []
+    // Resolve by id, never by position. Consumers here take latestProducts[0]
+    // for a single-id refetch (post-save snapshot, undo/redo, created-row
+    // confirm); a response that is not exactly the requested row must yield
+    // nothing rather than bind those flows to a stranger. /api/products/search
+    // ignored `ids` outright until this lane fixed it, and answered with the
+    // catalog's first row by name instead.
+    const wanted = new Set(uniqueIds)
+    return Array.isArray(payload)
+      ? payload.filter((row) => wanted.has(Number((row as { id?: unknown })?.id)))
+      : []
   }, [])
 
   const loadAuxOptions = useCallback(async (label = 'Product auxiliary options') => {

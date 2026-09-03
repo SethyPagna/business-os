@@ -71,8 +71,45 @@ export function getProducts(): Promise<unknown> {
   )
 }
 
+// The catalog search endpoint reads its free-text term from `query` (with
+// `q` accepted as a legacy alias) -- see buildSearchFilters in
+// cloudflare/src/routes/products.ts. Any OTHER key holding the typed text
+// is silently dropped by the server, which does not error: it returns the
+// whole unfiltered catalog, so the caller's list looks like it "ignores the
+// search box" instead of failing.
+//
+// That is exactly the confirmed production bug this exists to make
+// impossible: the Change-stock product picker
+// (components/products/forms/StockAdjustModal.tsx) called this with
+// `{ search: <typed text> }`, so scanning a barcode into it returned all
+// 10212 products in catalog order (verified live against a production
+// snapshot: `?search=3348901770569` -> total 10212, `?query=...` -> total
+// 3). Every other picker happened to spell it `query`.
+//
+// Canonicalizing here rather than patching that one call site is the point:
+// this function is the single chokepoint every product picker in the app
+// goes through (POS, Products, StockAdjustModal, FastStockInModal,
+// Promotions, NewReturnModal, ProductsImageOnlyView, the lookup
+// snapshotter), so no future caller can reintroduce the same silent drop by
+// picking a reasonable-sounding synonym. The canonical key wins if a caller
+// somehow sends more than one.
+const SEARCH_TERM_ALIASES = ['query', 'q', 'search', 'searchTerm', 'search_term'] as const
+
+function canonicalizeSearchTerm(params: QueryParams): QueryParams {
+  const next: QueryParams = { ...params }
+  let term = ''
+  for (const key of SEARCH_TERM_ALIASES) {
+    const value = next[key]
+    if (!term && value != null && String(value).trim()) term = String(value)
+    if (key !== 'query') delete next[key]
+  }
+  if (term) next.query = term
+  else delete next.query
+  return next
+}
+
 export function searchProducts(params: QueryParams = {}): Promise<unknown> {
-  const query = buildQueryString(params)
+  const query = buildQueryString(canonicalizeSearchTerm(params))
   const cacheKey = `products:search:${query}`
   // Fixed group name (not the per-query cacheKey above) -- every call to
   // searchProducts, regardless of which page called it or what the query
@@ -87,7 +124,10 @@ export function searchProducts(params: QueryParams = {}): Promise<unknown> {
 }
 
 export function getProductBootstrap(params: QueryParams = {}): Promise<unknown> {
-  const query = buildQueryString(params)
+  // Same canonicalization as searchProducts: /bootstrap runs the identical
+  // buildSearchFilters term parsing, so a synonym key would silently return
+  // the unfiltered catalog here too.
+  const query = buildQueryString(canonicalizeSearchTerm(params))
   const cacheKey = `products:bootstrap:${query}`
   return routeCachedProductQuery(cacheKey, appendQuery('/api/products/bootstrap', query), 'products:bootstrap')
 }
@@ -117,8 +157,38 @@ export function getProductsByIds(ids: unknown[] = [], params: QueryParams = {}):
   // by-id lookup gets its own cache key (already true) and now its own
   // unshared request lifecycle, so it can never be cancelled by, or cancel,
   // the box search.
-  const cacheKey = `products:byIds:${query}`
+  // v2: every payload cached under the v1 key was written while the endpoint
+  // ignored `ids` (the head of the whole catalog, not the requested rows).
+  // Those entries live in the local mirror and would be served as the offline
+  // fallback for this exact query string, so the key is versioned rather than
+  // reused -- a client that already has the fix never reads a pre-fix answer.
+  const cacheKey = `products:byIds:v2:${query}`
   return routeCachedProductQuery(cacheKey, appendQuery('/api/products/search', query))
+    .then((payload) => restrictPayloadToIds(payload, uniqueIds))
+}
+
+// A by-id lookup must answer with the rows that were asked for or with
+// nothing -- never with a substitute. The endpoint used to ignore `ids`
+// entirely and answer 200 with the head of the whole catalog, so callers
+// that take items[0] (StockAdjustModal's refresh, Inventory's adjust
+// refresh, Products' undo/redo snapshot, the brand/category/unit lookup
+// snapshots) silently bound themselves to the catalog's first row by name
+// -- "Abercrombie Authantic 10ml" -- instead of the product the operator
+// picked. The server now filters (cloudflare/src/routes/products.ts), and
+// this pass makes the guarantee hold on the client too, so an older or
+// cached response cannot reintroduce a wrong-record write.
+function restrictPayloadToIds(payload: unknown, requestedIds: number[]): unknown {
+  const wanted = new Set(requestedIds.map((id) => Number(id)))
+  const keep = (row: unknown): boolean => {
+    const id = Number((row as { id?: unknown })?.id)
+    return Number.isFinite(id) && wanted.has(id)
+  }
+  if (Array.isArray(payload)) return payload.filter(keep)
+  const items = (payload as { items?: unknown })?.items
+  if (!Array.isArray(items)) return payload
+  const filtered = items.filter(keep)
+  if (filtered.length === items.length) return payload
+  return { ...(payload as Record<string, unknown>), items: filtered, total: filtered.length }
 }
 
 // D3: the product detail page's one-round-trip report -- per-lot totals,

@@ -212,6 +212,11 @@ export async function restoreLookupProductSnapshots({
       .map((product) => [Number(product?.id || 0), product] as const)
       .filter(([id]) => Number.isFinite(id) && id > 0),
   )
+  // Keyed on the snapshot's own id, so this loop is fail-closed: until
+  // /api/products/search learned to honour `ids` (fixed in this lane), the
+  // fetch above answered with the head of the whole catalog and the undo
+  // silently restored NOTHING for any product outside that first page --
+  // never the wrong product.
   for (const snapshot of snapshots) {
     const productId = Number(snapshot?.id || 0)
     const latest = latestMap.get(productId)

@@ -36,6 +36,8 @@ import {
   type RenameKind,
 } from '../lib/renameCascade'
 import {
+  buildExactBarcodeMatchClause,
+  buildExactBarcodeRankSql,
   buildFtsMatchExpression,
   buildHybridMatchClause,
   buildIssueStateClauses,
@@ -316,7 +318,11 @@ async function loadProductFilters(env: Env, query: Record<string, string> = {}) 
   // structural filters only, same stable behavior Products.tsx's own
   // filter-meta cache already relies on, so it can never again go stale
   // relative to a search box the caller doesn't track in its refresh key.
-  const { query: _searchTerm, q: _searchTermAlt, ...structuralQuery } = query
+  // `search` is listed alongside query/q because buildSearchFilters now
+  // honors it as a third alias (see its own comment there) -- if it were
+  // left in, this facet-metadata call would silently start narrowing by a
+  // free-text term again, the exact staleness this strip exists to prevent.
+  const { query: _searchTerm, q: _searchTermAlt, search: _searchTermAlias, ...structuralQuery } = query
   const variants = buildFilterVariants(structuralQuery)
   const sql = (f: ReturnType<typeof buildSearchFilters>) => `WHERE ${f.where.join(' AND ')}`
   const joinSql = (f: ReturnType<typeof buildSearchFilters>) => f.joins.join('\n')
@@ -694,7 +700,58 @@ function buildSearchFilters(query: Record<string, string>, options: ProductSearc
   }
   const stockExpr = params.branchId ? 'COALESCE(selected_bs.quantity, 0)' : 'COALESCE(p.stock_quantity, 0)'
 
-  const searchTermGroups = splitSearchTermGroups(query.query || query.q || '')
+  // `ids` is the by-id lookup the client transport has always sent
+  // (frontend/src/api/productReadTransport.ts -> getProductsByIds, e.g.
+  // `?ids=7231&pageSize=1&include=...`), and this endpoint never read it.
+  // The silent-drop consequence is not "an unfiltered list" here, it is the
+  // WRONG RECORD: the caller asks for one id, takes items[0], and gets the
+  // catalog's first row by the default name order instead. Reported live
+  // 2026-09-03 -- opening Adjust Stock on "Dior Backstage Highlighter New
+  // 002" (id 7231) loaded and would have written against "Abercrombie
+  // Authantic 10ml" (id 1). Verified against a production snapshot:
+  // `?ids=7231&pageSize=1` answered total 10212, items[0] = id 1.
+  // The same silent drop also fed Products' undo/redo snapshots and the
+  // brand/category/unit lookup snapshots.
+  // A present-but-unusable `ids` resolves to "no rows", never "everything":
+  // returning the whole catalog to a by-id lookup is exactly the failure
+  // being fixed.
+  // Not every unread param is a bug: `include` is also never parsed here, and
+  // that is deliberate and harmless -- attachBranchStock/attachImageGallery/
+  // attachBatchCounts run unconditionally for every product read, and the
+  // Products page, POS and the branch stock column all depend on that data
+  // arriving whether or not they asked for it. Do NOT "tidy" `include` into a
+  // gate; it would silently strip fields those surfaces render.
+  const rawIdFilter = query.ids ?? query.id
+  if (rawIdFilter != null && String(rawIdFilter).trim() !== '') {
+    const requestedIds = [...new Set(
+      String(rawIdFilter)
+        .split(',')
+        .map((raw) => Number.parseInt(String(raw).trim(), 10))
+        .filter((id) => Number.isFinite(id) && id > 0),
+    )].slice(0, 100)
+    if (!requestedIds.length) where.push('1 = 0')
+    else {
+      const placeholders = requestedIds.map((id, index) => {
+        params[`byId${index}`] = id
+        return `@byId${index}`
+      })
+      where.push(`p.id IN (${placeholders.join(', ')})`)
+    }
+  }
+
+  // `search` accepted as a third alias alongside query/q. A caller that
+  // spells the term with a synonym used to get the WHOLE unfiltered catalog
+  // back with a 200 -- a silent drop, not an error -- which is precisely how
+  // the Change-stock picker shipped a search box that ignored what was typed
+  // or scanned into it (StockAdjustModal.tsx sent `search=`; verified live
+  // against a production snapshot: `?search=3348901770569` returned total
+  // 10212, `?query=3348901770569` returned total 3). The client transport
+  // now canonicalizes the key (frontend/src/api/productReadTransport.ts);
+  // this accepts it server-side too so the contract is forgiving on both
+  // ends rather than only where this codebase happens to route through.
+  // NOTE: /filters strips all three aliases -- see its own comment.
+  const rawSearchText = String(query.query || query.q || query.search || '')
+  const searchTermGroups = splitSearchTermGroups(rawSearchText)
   // Relevance rank for ordering (not filtering) results once there's an
   // actual search term -- FTS5's own bm25() relevance function
   // (PRODUCTS_FTS_BM25_SQL, lib/searchMatch.ts) weighted so a
@@ -857,6 +914,17 @@ function buildSearchFilters(query: Record<string, string>, options: ProductSearc
     // depth ceiling once combined with everything else in the WHERE).
     const partialMatch = buildPartialWordMatchClause(searchTermGroups, searchMode, ['p.name_normalized'], params, 'partialw', 4, true)
     if (partialMatch) matchClauses.push(partialMatch)
+    // Exact-barcode disjunct, leading zeros folded on BOTH sides (see
+    // buildExactBarcodeMatchClause / normalizeBarcodeKey in
+    // lib/searchMatch.ts). This catalog stores ~3000 barcodes twice -- once
+    // as a 14-character GTIN-14 with a leading zero, once as the bare
+    // EAN-13 the scanner emits -- and the FTS5 prefix match can only ever
+    // find the bare twin ("3348901770569*" is not a prefix of
+    // "03348901770569"). The zero-padded twin came back only incidentally
+    // via the trigram table, which makes "does the scan find both twins"
+    // depend on an index rather than on a stated rule; this states it.
+    const exactBarcodeMatch = titleOnly ? undefined : buildExactBarcodeMatchClause(rawSearchText, params)
+    if (exactBarcodeMatch) matchClauses.unshift(exactBarcodeMatch)
     if (matchClauses.length) {
       searchWhereClause = matchClauses.length > 1 ? `(${matchClauses.join(' OR ')})` : matchClauses[0]
       // bm25() must be evaluated inside a query that itself carries the
@@ -873,6 +941,17 @@ function buildSearchFilters(query: Record<string, string>, options: ProductSearc
       // than being excluded from ordering entirely.
       if (!titleOnly && ftsMatch) {
         matchRankSql = `COALESCE((SELECT ${PRODUCTS_FTS_BM25_SQL} FROM products_fts WHERE products_fts.rowid = p.id AND products_fts MATCH @ftsQuery), 0)`
+      }
+      // Exact barcode hits lead. match_rank sorts ASC and bm25 is a small
+      // negative number here, so adding EXACT_BARCODE_RANK_OFFSET to every
+      // NON-exact row floats the scanned product's own rows to the top
+      // while bm25 keeps ordering within each of the two blocks. This is
+      // ordering only -- nothing auto-selects or auto-adds on an exact
+      // barcode anywhere in this app: a scan fills the search box, the list
+      // narrows, and the operator still picks the row.
+      if (exactBarcodeMatch) {
+        const barcodeRank = buildExactBarcodeRankSql()
+        matchRankSql = matchRankSql ? `(${barcodeRank} + ${matchRankSql})` : barcodeRank
       }
     }
   }

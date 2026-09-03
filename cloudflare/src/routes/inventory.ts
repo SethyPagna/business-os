@@ -11,7 +11,7 @@ import { maybeQueueForReview } from '../lib/reviewGate'
 import { broadcast } from '../durable-objects/broadcastHub'
 import { bumpVersion } from '../lib/cache'
 import { findIdentityMatch, type ProductIdentityRow } from '../lib/productIdentity'
-import { buildFtsMatchExpression, buildHybridMatchClause, buildIssueStateClauses, buildLikeAliasClause, buildPartialWordMatchClause, buildShortWordFallbackClause, buildTrigramMatchExpression, PRODUCT_SEARCH_COLUMNS, PRODUCTS_FTS_BM25_SQL, runFuzzyFallbackMatch, tokenizeSearchTermGroups, tokenizeSearchWords } from '../lib/searchMatch'
+import { buildExactBarcodeMatchClause, buildExactBarcodeRankSql, buildFtsMatchExpression, buildHybridMatchClause, buildIssueStateClauses, buildLikeAliasClause, buildPartialWordMatchClause, buildShortWordFallbackClause, buildTrigramMatchExpression, PRODUCT_SEARCH_COLUMNS, PRODUCTS_FTS_BM25_SQL, runFuzzyFallbackMatch, tokenizeSearchTermGroups, tokenizeSearchWords } from '../lib/searchMatch'
 import { receiveBatchStock, removeStockFromBatch, removeStockAcrossBatches, InsufficientBatchStockError, readFifoLotAvailability, allocateAcrossLots, decrementBatchStockStrictStatement, incrementBatchStockStatement } from '../lib/productBatches'
 import { applyMovementRevert, type RevertMovementRow } from '../lib/stockRevert'
 import { dateToBatchCode, normalizeToIsoDate } from '../lib/batchCode'
@@ -147,7 +147,12 @@ function appendInventoryProductFilters(query: InventoryFilterQuery) {
     joins.push('LEFT JOIN branch_stock selected_bs ON selected_bs.product_id = p.id AND selected_bs.branch_id = @branchId')
   }
 
-  const termGroups = splitSearchTermGroups(query.query || query.q || '')
+  // `search` accepted as a third alias alongside query/q -- identical
+  // reasoning and identical wiring to products.ts's buildSearchFilters (a
+  // term sent under an unrecognized key used to return the entire
+  // unfiltered catalog with a 200 instead of erroring).
+  const rawSearchText = String(query.query || query.q || query.search || '')
+  const termGroups = splitSearchTermGroups(rawSearchText)
   let matchRankSql: string | undefined
   let searchWhereClause: string | undefined
   const mode = String(query.searchMode || query.search_mode || 'AND').toUpperCase() === 'OR' ? 'OR' : 'AND'
@@ -224,10 +229,21 @@ function appendInventoryProductFilters(query: InventoryFilterQuery) {
     // Same depth-100 fix as products.ts -- name_normalized, alreadyNormalizedCols=true.
     const partialMatch = buildPartialWordMatchClause(termGroups, mode, ['p.name_normalized'], params, 'partialw', 4, true)
     if (partialMatch) matchClauses.push(partialMatch)
+    // Exact-barcode disjunct with leading zeros folded on both sides --
+    // same GTIN-14/EAN-13 twin problem and the same shared helper
+    // products.ts uses; see buildExactBarcodeMatchClause in
+    // lib/searchMatch.ts.
+    const exactBarcodeMatch = titleOnly ? undefined : buildExactBarcodeMatchClause(rawSearchText, params)
+    if (exactBarcodeMatch) matchClauses.unshift(exactBarcodeMatch)
     if (matchClauses.length) {
       searchWhereClause = matchClauses.length > 1 ? `(${matchClauses.join(' OR ')})` : matchClauses[0]
       if (!titleOnly && ftsMatch) {
         matchRankSql = `COALESCE((SELECT ${PRODUCTS_FTS_BM25_SQL} FROM products_fts WHERE products_fts.rowid = p.id AND products_fts MATCH @ftsQuery), 0)`
+      }
+      // Exact barcode hits lead; ordering only, nothing auto-selects.
+      if (exactBarcodeMatch) {
+        const barcodeRank = buildExactBarcodeRankSql()
+        matchRankSql = matchRankSql ? `(${barcodeRank} + ${matchRankSql})` : barcodeRank
       }
     }
   }
