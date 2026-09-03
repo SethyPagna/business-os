@@ -106,7 +106,16 @@ export default function ExportFieldsModal({ rowCount, onClose, scopes, selectedS
         </div>
       ) : null}
       <p className="text-sm text-gray-500 dark:text-gray-400 mb-3">
-        {tr('export_products_desc', `Choose which fields to include for ${activeCount} product${activeCount === 1 ? '' : 's'}. Name is always included.`)}
+        {/* tr() returns the PACK value whenever the key resolves, and it never
+            interpolates. `export_products_desc` exists in both packs carrying a
+            literal {count}, so the template-literal fallback below was dead code
+            and operators read "for {count} product(s)" on screen, in English and
+            in Khmer alike. The count has to be substituted into whatever tr()
+            returns -- fallback included, which is why the fallback now carries
+            the placeholder too instead of interpolating itself. */}
+        {tr('export_products_desc', 'Choose which fields to include for {count} product(s). Name is always included.')
+          .split('{count}')
+          .join(String(activeCount))}
       </p>
       <div className="flex justify-end mb-2">
         <button

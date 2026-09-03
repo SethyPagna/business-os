@@ -21,7 +21,8 @@
 // builder and checks the returned array, so ANY future facet that is added
 // to the props but not to the array fails here.
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
+import { readFileSync, readdirSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
 import { buildProductFilterSections } from '../src/components/products/helpers/productMenuHelpers.ts'
 
 const surface = readFileSync(new URL('../src/components/products/surfaces/ProductsListSurface.tsx', import.meta.url), 'utf8')
@@ -198,6 +199,79 @@ runTest('the list surface renders only reading affordances on a group row', () =
   for (const pattern of OPERATIONS_AFFORDANCES) {
     assert.doesNotMatch(groupActions, pattern, `the group row menu must not offer a stock operation (${pattern})`)
   }
+})
+
+// ---------------------------------------------------------------------------
+// 5. No Products surface prints a raw {placeholder}
+// ---------------------------------------------------------------------------
+
+// tr()/t() return the PACK value whenever the key resolves, and neither
+// interpolates. A key whose pack value carries {count} therefore reaches the
+// screen with the braces intact unless the call site substitutes them itself.
+// The failure hides in plain sight when the fallback is a template literal
+// that already has the number in it -- it reads correctly in review and is
+// dead code at runtime, in English as much as in Khmer. That is exactly how
+// ExportFieldsModal printed "for {count} product(s)" to operators.
+//
+// A report page is mostly counts, so this is pinned for the whole Products
+// tree. Three interpolation idioms are in use and all three count as handled:
+//   .replace('{x}', ...)   .split('{x}').join(...)   replaceVars(..., { x })
+const INTERPOLATION_WINDOW = 700
+const INTERPOLATION_LOOKBEHIND = 200
+
+runTest('no Products surface renders an uninterpolated {placeholder}', () => {
+  const en = JSON.parse(readFileSync(new URL('../src/lang/en.json', import.meta.url), 'utf8')) as Record<string, string>
+  const km = JSON.parse(readFileSync(new URL('../src/lang/km.json', import.meta.url), 'utf8')) as Record<string, string>
+
+  const placeholdersOf = (value: unknown): string[] =>
+    [...new Set(String(value || '').match(/\{\s*[a-zA-Z_]\w*\s*\}/g) || [])]
+
+  const keyPlaceholders = new Map<string, string[]>()
+  for (const key of new Set([...Object.keys(en), ...Object.keys(km)])) {
+    const marks = [...new Set([...placeholdersOf(en[key]), ...placeholdersOf(km[key])])]
+    if (marks.length) keyPlaceholders.set(key, marks)
+  }
+  assert.ok(keyPlaceholders.size > 0, 'the packs must still contain placeholder-bearing keys for this check to mean anything')
+
+  const dir = new URL('../src/components/products/', import.meta.url)
+  const files: string[] = []
+  const walk = (folder: URL): void => {
+    for (const entry of readdirSync(folder, { withFileTypes: true })) {
+      if (entry.isDirectory()) walk(new URL(`${entry.name}/`, folder))
+      else if (/\.tsx?$/.test(entry.name)) files.push(fileURLToPath(new URL(entry.name, folder)))
+    }
+  }
+  walk(dir)
+  assert.ok(files.length > 20, 'the Products tree must have been walked')
+
+  const leaks: string[] = []
+  for (const file of files) {
+    const src = readFileSync(file, 'utf8')
+    for (const [key, marks] of keyPlaceholders) {
+      for (const quote of ["'", '"', '`']) {
+        let at = src.indexOf(quote + key + quote)
+        while (at !== -1) {
+          // Reaches backwards as well: `replaceVars(t('key') || '...', { n })`
+          // wraps the call, so the helper's name sits BEFORE the key literal.
+          const window = src.slice(Math.max(0, at - INTERPOLATION_LOOKBEHIND), at + INTERPOLATION_WINDOW)
+          const unhandled = marks.filter((mark) => {
+            const name = mark.slice(1, -1).trim()
+            return !window.includes(`.replace('${mark}'`)
+              && !window.includes(`.replace("${mark}"`)
+              && !window.includes(`.split('${mark}')`)
+              && !window.includes(`.split("${mark}")`)
+              && !new RegExp(`replaceVars\\([\\s\\S]{0,${INTERPOLATION_WINDOW}}?\\b${name}\\s*:`).test(window)
+          })
+          if (unhandled.length) {
+            const line = src.slice(0, at).split('\n').length
+            leaks.push(`${file.split(/[\\/]/).slice(-2).join('/')}:${line} uses '${key}' but never substitutes ${unhandled.join(', ')}`)
+          }
+          at = src.indexOf(quote + key + quote, at + 1)
+        }
+      }
+    }
+  }
+  assert.deepEqual(leaks, [], `a Products surface would print raw braces to the operator:\n  ${leaks.join('\n  ')}`)
 })
 
 if (failed > 0) {
