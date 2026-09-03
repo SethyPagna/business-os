@@ -456,13 +456,13 @@ function AvatarViewerModal({
 
   return (
     <Modal title={tr('avatar_image', 'Profile photo')} onClose={onClose} size="sm">
-      <div className="flex max-h-[72dvh] min-h-0 flex-col">
+      <div className="flex max-h-[calc(var(--app-vh-100)_*_.72)] min-h-0 flex-col">
         <div className="flex min-h-0 flex-1 items-center justify-center overflow-auto rounded-2xl bg-gray-100 p-2 dark:bg-zinc-900/70">
           {avatarPath ? (
             <img
               src={avatarPath}
               alt={name || tr('avatar_image', 'Profile photo')}
-              className="max-h-[56dvh] w-full rounded-xl object-contain"
+              className="max-h-[calc(var(--app-vh-100)_*_.56)] w-full rounded-xl object-contain"
               {...protectedImageProps()}
             />
           ) : (

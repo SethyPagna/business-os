@@ -565,7 +565,7 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
                   role="dialog"
                   aria-label={copy('filters', 'Filters')}
                   tabIndex={-1}
-                  className="max-h-[min(32rem,calc(100dvh-1rem))] overflow-y-auto overscroll-contain p-2.5 outline-none"
+                  className="max-h-[min(32rem,calc(var(--app-vh-100)_-_1rem))] overflow-y-auto overscroll-contain p-2.5 outline-none"
                 >
                   <div className="mb-2 flex items-center justify-between gap-2 px-1">
                     <span className="text-sm font-semibold text-slate-900 dark:text-neutral-100">{copy('filters', 'Filters')}</span>
