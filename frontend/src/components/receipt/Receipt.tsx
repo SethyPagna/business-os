@@ -270,13 +270,15 @@ function stripTrailingColon(value: string): string {
 function labelFor(mode: LanguageMode, key: ReceiptLabelKey): string {
   if (mode === 'km') return RECEIPT_KHMER_LABELS[key]
   if (mode !== 'both') return LABELS.en[key]
-  // Bilingual labels: join the English/Khmer terms with a single trailing
+  // Bilingual labels: join the Khmer/English terms with a single trailing
   // colon instead of concatenating two colon-terminated strings (which
   // produced "Receipt #: / លេខបង្កាន់ដៃ:" -- two colons for one label).
+  // Khmer comes FIRST (user, Sep 3 2026): the shop's customers read Khmer,
+  // English is the secondary reading, so "លេខបង្កាន់ដៃ / Receipt #:".
   const enLabel = LABELS.en[key]
   const kmLabel = RECEIPT_KHMER_LABELS[key]
   const endsWithColon = enLabel.endsWith(':')
-  return `${stripTrailingColon(enLabel)} / ${stripTrailingColon(kmLabel)}${endsWithColon ? ':' : ''}`
+  return `${stripTrailingColon(kmLabel)} / ${stripTrailingColon(enLabel)}${endsWithColon ? ':' : ''}`
 }
 
 function Row({ label, value, subValue, bold = false, tone = '', breakAll = false }: RowProps) {
@@ -549,7 +551,7 @@ export default function Receipt({ sale, settings = {}, onClose, onReturn, return
         <div data-receipt-line="true" data-receipt-align="center" className="text-center text-[11px] text-gray-500">{footerDivider}</div>
         <div data-receipt-line="true" className="mt-1 text-center text-[11px]">
           {tpl.custom_footer || settings?.receipt_footer || (lang === 'both' ? (
-            <><div>{LABELS.en.thankYou}</div><div className="mt-0.5">{RECEIPT_KHMER_LABELS.thankYou}</div></>
+            <><div>{RECEIPT_KHMER_LABELS.thankYou}</div><div className="mt-0.5">{LABELS.en.thankYou}</div></>
           ) : labelFor(lang, 'thankYou'))}
         </div>
         <div data-receipt-line="true" data-receipt-align="center" className="text-center text-[11px] text-gray-500">{footerDivider}</div>
@@ -878,7 +880,7 @@ export default function Receipt({ sale, settings = {}, onClose, onReturn, return
           {([
             ['en', 'EN'],
             ['km', 'KH'],
-            ['both', 'EN/KH'],
+            ['both', 'KH/EN'],
           ] as Array<[LanguageMode, string]>).map(([code, text]) => (
             <button
               key={code}
