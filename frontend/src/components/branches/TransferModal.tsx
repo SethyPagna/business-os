@@ -22,12 +22,44 @@ import AppSelect, { type AppSelectOption } from '../shared/AppSelect.tsx'
 import { buildProductGroups } from '../../utils/productGrouping.ts'
 import { batchDisplayLabel } from '../../utils/batchLabel.ts'
 import ScanSearchButton from '../shared/ScanSearchButton.tsx'
+import ConfirmDialog, { type ConfirmReviewItem } from '../shared/ConfirmDialog.tsx'
 
 const TRANSFER_STOCK_LOAD_TIMEOUT_MS = 12000
 const TRANSFER_STOCK_MUTATION_TIMEOUT_MS = 12000
 const TRANSFER_STOCK_BULK_MUTATION_TIMEOUT_MS = 20000
+// Mirrors MAX_BULK_TRANSFER_ITEMS in the Worker's POST /transfer-bulk. A
+// whole-branch move can be thousands of rows, so it is split into requests
+// this size rather than raising the server cap -- the cap is what keeps one
+// request's db.batch() inside the Worker's memory and D1's statement limits.
+const TRANSFER_BULK_CHUNK_SIZE = 200
 const TRANSFER_SEARCH_DEBOUNCE_MS = 200
 const TRANSFER_STOCK_PAGE_SIZE = 50
+
+type PendingTransferItem = { productId: string | number; quantity: number }
+type PendingTransfer = {
+  /** 'selected' = the checked rows. 'entire_branch' = every in-stock row. */
+  scope: 'selected' | 'entire_branch'
+  items: PendingTransferItem[]
+  totalUnits: number
+  fromName: string
+  toName: string
+  /** How many requests this will take -- >1 means it is not one atomic step. */
+  chunks: number
+}
+
+/**
+ * Every row that actually has stock to move, at its full branch quantity.
+ *
+ * Module-scope and pure on purpose: 'entire branch' must mean the same thing
+ * regardless of what is typed in the search box or which rows are checked.
+ * Reading it off the filtered list instead is precisely the bug the old
+ * Select all had -- it summed whatever happened to be on screen.
+ */
+function entireBranchItems(rows: TransferProduct[]): PendingTransferItem[] {
+  return rows
+    .map((product) => ({ productId: product.id, quantity: Number(product.branch_quantity || 0) }))
+    .filter((item) => Number.isFinite(item.quantity) && item.quantity > 0)
+}
 
 type TranslateFunction = (key: string) => string
 type NotifyFunction = (message: string, type?: string) => void
@@ -213,9 +245,19 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
   // screen instead of hunting scattered highlighted rows through thousands.
   const [showSelectedOnly, setShowSelectedOnly] = useState(false)
   const [savingBulk, setSavingBulk] = useState(false)
+  // A transfer parked for confirmation. Both the checked-rows transfer and
+  // the whole-branch transfer go through this one shape, so there is exactly
+  // one place that actually writes (runPendingTransfer).
+  const [pendingTransfer, setPendingTransfer] = useState<PendingTransfer | null>(null)
+  // Only set while a multi-request whole-branch move is running, so the
+  // operator can see it is partway through rather than hung.
+  const [chunkProgress, setChunkProgress] = useState<{ done: number; total: number } | null>(null)
   const multiStockRequestRef = useRef(0)
   const multiProductsBranchRef = useRef('')
-  const selectAllAfterLoadRef = useRef(false)
+  // Set when Transfer entire branch was pressed before the branch listing had
+  // been fetched; consumed once it lands, to open the confirm with real
+  // numbers rather than guessing at them.
+  const entireBranchAfterLoadRef = useRef(false)
   const transferBulkInFlightRef = useRef(false)
 
   // Keep camera results inside the transfer picker. Reset selected-only/full-
@@ -448,7 +490,7 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
       setMultiProducts([])
       setSelectedQuantities({})
       setShowAllProducts(false)
-      selectAllAfterLoadRef.current = false
+      entireBranchAfterLoadRef.current = false
       return undefined
     }
     const catalogRequested = Boolean(debouncedSearch.trim()) || showAllProducts
@@ -470,15 +512,19 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
         multiProductsBranchRef.current = String(fromBranch)
         const normalized = normalizeTransferStockRows(stock)
         setMultiProducts(normalized)
-        if (selectAllAfterLoadRef.current) {
-          selectAllAfterLoadRef.current = false
-          setSelectedQuantities(Object.fromEntries(
-            normalized
-              .filter((product) => Number(product.branch_quantity || 0) > 0)
-              .map((product) => [String(product.id), String(product.branch_quantity ?? '')]),
-          ))
+        if (entireBranchAfterLoadRef.current) {
+          entireBranchAfterLoadRef.current = false
+          const everything = entireBranchItems(normalized)
+          if (everything.length) {
+            setPendingTransfer(buildPendingTransfer('entire_branch', everything))
+          } else {
+            notify(t('transfer_no_stock_products') || 'No products with stock in this branch', 'error')
+          }
         }
       } catch (error) {
+        // Disarm before the early return: a whole-branch intent must not
+        // survive the load it was waiting on and fire against a later one.
+        entireBranchAfterLoadRef.current = false
         if (!aliveRef.current || !isTrackedRequestCurrent(multiStockRequestRef, requestId)) return
         notify(getErrorMessage(error, t('failed_to_load_data') || 'Failed to load data'), 'error')
       } finally {
@@ -586,20 +632,15 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
     setSelectedQuantities((current) => ({ ...current, [String(productId)]: value }))
   }
 
-  const toggleSelectAllFiltered = () => {
-    if (!debouncedSearch.trim() && !showAllProducts) {
-      setShowAllProducts(true)
-      if (!multiProducts.length) {
-        selectAllAfterLoadRef.current = true
-        return
-      }
-      setSelectedQuantities(Object.fromEntries(
-        multiProducts
-          .filter((product) => Number(product.branch_quantity || 0) > 0)
-          .map((product) => [String(product.id), String(product.branch_quantity ?? '')]),
-      ))
-      return
-    }
+  /**
+   * Checks or clears the rows currently on screen -- nothing more. It does not
+   * reveal the catalog and it is not how a whole branch is moved; those are
+   * the Show all products toggle and Transfer entire branch respectively.
+   * Splitting them is the fix: as one checkbox this silently meant "all" while
+   * only ever submitting what the visible list happened to hold, capped at the
+   * server's per-request limit.
+   */
+  const toggleSelectAllShown = () => {
     setSelectedQuantities((current) => {
       if (allFilteredSelected) {
         // Only clear the rows currently visible under the active search --
@@ -612,6 +653,60 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
       filteredMulti.forEach((product) => { next[String(product.id)] = String(product.branch_quantity ?? '') })
       return next
     })
+  }
+
+  const branchNameById = (value: string) => branches.find((branch) => String(branch.id) === String(value))?.name || ''
+
+  // The compact review the operator reads before committing. Same four facts
+  // for both scopes, so a whole-branch move is checked the same way a
+  // three-row one is.
+  const confirmReviewItems = (pending: PendingTransfer): ConfirmReviewItem[] => [
+    { label: t('products') || 'Products', value: String(pending.items.length) },
+    { label: t('transfer_total_units') || 'Total units', value: String(pending.totalUnits) },
+    { label: t('from_branch') || 'From Branch', value: pending.fromName },
+    { label: t('to_branch') || 'To Branch', value: pending.toName },
+  ]
+
+  const buildPendingTransfer = (scope: PendingTransfer['scope'], items: PendingTransferItem[]): PendingTransfer => ({
+    scope,
+    items,
+    totalUnits: items.reduce((sum, item) => sum + item.quantity, 0),
+    fromName: branchNameById(fromBranch) || t('source_branch') || 'source branch',
+    toName: branchNameById(toBranch) || t('destination_branch') || 'destination branch',
+    chunks: Math.max(1, Math.ceil(items.length / TRANSFER_BULK_CHUNK_SIZE)),
+  })
+
+  /**
+   * Moves every in-stock row out of the source branch -- the thing the old
+   * Select all checkbox gestured at but never actually did.
+   *
+   * Built from the full branch listing, never from filteredMulti: an active
+   * search or the selected-only view must not quietly shrink what "entire
+   * branch" means. Nothing is written here; this only parks the confirm.
+   */
+  const handleTransferEntireBranch = () => {
+    if (!fromBranch || !toBranch) {
+      notify(t('select_transfer_branches') || 'Choose both source and destination branches.', 'error')
+      return
+    }
+    if (Number.parseInt(fromBranch, 10) === Number.parseInt(toBranch, 10)) {
+      notify(t('transfer_same_branch_error') || 'Source and destination cannot be the same', 'error')
+      return
+    }
+    // The listing is only fetched once something asks for it. Ask, and
+    // re-enter through the ref once it lands, so the confirm can show real
+    // counts instead of guessing at them.
+    if (multiProductsBranchRef.current !== String(fromBranch)) {
+      entireBranchAfterLoadRef.current = true
+      setShowAllProducts(true)
+      return
+    }
+    const everything = entireBranchItems(multiProducts)
+    if (!everything.length) {
+      notify(t('transfer_no_stock_products') || 'No products with stock in this branch', 'error')
+      return
+    }
+    setPendingTransfer(buildPendingTransfer('entire_branch', everything))
   }
 
   // A selected lot caps the request to that lot. With no selected lot, the
@@ -715,7 +810,7 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
    * input is caught before the request goes out, but the backend re-checks
    * everything itself -- this is a UX shortcut, not the source of truth.
    */
-  const handleBulkTransfer = async () => {
+  const handleBulkTransfer = () => {
     if (!fromBranch || !toBranch) return
     if (Number.parseInt(fromBranch, 10) === Number.parseInt(toBranch, 10)) {
       notify(t('transfer_same_branch_error') || 'Source and destination cannot be the same', 'error')
@@ -740,47 +835,95 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
       items.push({ productId, quantity: qty })
     }
 
-    const fromName = branches.find((branch) => String(branch.id) === String(fromBranch))?.name || t('source_branch') || 'source branch'
-    const toName = branches.find((branch) => String(branch.id) === String(toBranch))?.name || t('destination_branch') || 'destination branch'
-    const totalQuantity = items.reduce((sum, item) => sum + item.quantity, 0)
-    if (!window.confirm((t('confirm_bulk_transfer_details') || 'Transfer {products} products ({quantity} total units) from {from} to {to}? Available lots will be allocated FIFO.')
-      .replace('{products}', String(items.length))
-      .replace('{quantity}', String(totalQuantity))
-      .replace('{from}', fromName)
-      .replace('{to}', toName))) return
+    setPendingTransfer(buildPendingTransfer('selected', items))
+  }
 
+  /**
+   * The one write path for both scopes, submitted in chunks of
+   * TRANSFER_BULK_CHUNK_SIZE.
+   *
+   * Each chunk is a single POST /transfer-bulk and is atomic on its own (one
+   * D1 db.batch()). Chunking is what makes a whole-branch move possible at
+   * all, but it means a multi-chunk run is NOT one undoable step -- the
+   * confirm dialog says so before the operator commits, and a stop partway
+   * reports exactly how far it got. Re-running is the documented recovery and
+   * is safe: rows already moved have no stock left in the source branch, so
+   * they are simply absent from the next run's item list.
+   */
+  const runPendingTransfer = async (pending: PendingTransfer) => {
     if (!beginSingleAction(transferBulkInFlightRef, { blocked: savingBulk })) return
     setSavingBulk(true)
+    const chunks: PendingTransferItem[][] = []
+    for (let index = 0; index < pending.items.length; index += TRANSFER_BULK_CHUNK_SIZE) {
+      chunks.push(pending.items.slice(index, index + TRANSFER_BULK_CHUNK_SIZE))
+    }
+    let transferred = 0
+    let mergeCount = 0
+    let stoppedReason = ''
     try {
-      const res = await withLoaderTimeout<TransferBulkResult>(() => getTransferApi().transferStockBulk({
-        fromBranchId: Number.parseInt(fromBranch, 10),
-        toBranchId: Number.parseInt(toBranch, 10),
-        note,
-        items,
-        userId: user?.id,
-        userName: user?.name,
-      }), 'Bulk transfer branch stock', TRANSFER_STOCK_BULK_MUTATION_TIMEOUT_MS)
+      for (let index = 0; index < chunks.length; index += 1) {
+        // Only meaningful for a run that takes more than one request; a
+        // single-chunk transfer keeps the plain saving state it always had.
+        if (chunks.length > 1) setChunkProgress({ done: index, total: chunks.length })
+        let res: TransferBulkResult
+        try {
+          res = await withLoaderTimeout<TransferBulkResult>(() => getTransferApi().transferStockBulk({
+            fromBranchId: Number.parseInt(fromBranch, 10),
+            toBranchId: Number.parseInt(toBranch, 10),
+            note,
+            items: chunks[index],
+            userId: user?.id,
+            userName: user?.name,
+          }), 'Bulk transfer branch stock', TRANSFER_STOCK_BULK_MUTATION_TIMEOUT_MS)
+        } catch (error) {
+          stoppedReason = getErrorMessage(error, t('transfer_bulk_failed') || 'Bulk transfer failed')
+          break
+        }
+        if (res?.success !== false) {
+          transferred += res.transferredCount ?? chunks[index].length
+          // Same identity-match redirect as the single-item handler above,
+          // just per-item -- summarize how many redirected rather than
+          // naming each one (could be thousands across a whole branch).
+          mergeCount += res.merges?.length ?? 0
+          continue
+        }
+        stoppedReason = res?.error || (t('transfer_bulk_failed') || 'Bulk transfer failed')
+        break
+      }
 
-      if (res?.success !== false) {
-        const message = (t('transfer_bulk_success') || 'Transferred {n} products').replace('{n}', String(res.transferredCount ?? items.length))
-        // Same identity-match redirect as the single-item handler above,
-        // just per-item -- summarize how many of this batch redirected
-        // rather than naming each one (could be up to 200 items).
-        const mergeCount = res.merges?.length ?? 0
-        const finalMessage = mergeCount > 0
-          ? `${message} ${(t('transfer_bulk_merged_note') || '({n} merged into existing products)').replace('{n}', String(mergeCount))}`
-          : message
-        notify(finalMessage)
-        onDone()
+      if (stoppedReason) {
+        // Never let a partial run look like a clean failure: earlier chunks
+        // have already landed and the operator has to know that before they
+        // decide what to do next.
+        notify(transferred > 0
+          ? (t('transfer_bulk_partial') || 'Transferred {done} of {total} products, then stopped: {reason}')
+            .replace('{done}', String(transferred))
+            .replace('{total}', String(pending.items.length))
+            .replace('{reason}', stoppedReason)
+          : stoppedReason, 'error')
+        // Whatever did land makes the on-screen quantities wrong, so refresh
+        // rather than leaving stale numbers to act on.
+        if (transferred > 0) onDone()
         return
       }
 
-      notify(res?.error || (t('transfer_bulk_failed') || 'Bulk transfer failed'), 'error')
+      const message = (t('transfer_bulk_success') || 'Transferred {n} products').replace('{n}', String(transferred))
+      const finalMessage = mergeCount > 0
+        ? `${message} ${(t('transfer_bulk_merged_note') || '({n} merged into existing products)').replace('{n}', String(mergeCount))}`
+        : message
+      notify(finalMessage)
+      onDone()
     } catch (error) {
+      // The per-chunk try already turns a failed request into stoppedReason,
+      // so reaching here means something else threw. Report it rather than
+      // letting an unawaited rejection leave the dialog sitting there.
       notify(getErrorMessage(error, t('transfer_bulk_failed') || 'Bulk transfer failed'), 'error')
+      if (transferred > 0) onDone()
     } finally {
       finishSingleAction(transferBulkInFlightRef)
       setSavingBulk(false)
+      setChunkProgress(null)
+      setPendingTransfer(null)
     }
   }
 
@@ -809,8 +952,8 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
           </div>
         </div>
 
-        <div className="flex-1 space-y-4 overflow-auto p-5">
-          <div className="grid grid-cols-2 gap-3">
+        <div className="modal-scroll space-y-4 p-4 sm:p-5">
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 sm:gap-3">
             <div>
               <label htmlFor="transfer-from-branch" className="mb-1 block text-sm font-semibold text-gray-700 dark:text-gray-300">
                 {t('from_branch') || 'From Branch'}
@@ -1038,12 +1181,12 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
             </div>
           ) : null}
 
-          {fromBranch && mode === 'multiple' ? (
+          {mode === 'multiple' ? (
             <div>
               <label htmlFor="transfer-product-search-multi" className="mb-1 block text-sm font-semibold text-gray-700 dark:text-gray-300">
                 {t('select_product') || 'Select Product'}
               </label>
-              <div className="mb-2 flex min-w-0 items-center gap-2">
+              <div className="sticky top-0 z-10 mb-2 flex min-w-0 items-center gap-2 bg-white pb-1 dark:bg-gray-800">
                 <input
                   id="transfer-product-search-multi"
                   name="transfer_product_search_multi"
@@ -1051,6 +1194,7 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
                   placeholder={t('search_products_placeholder') || 'Search products'}
                   value={search}
                   onChange={(event) => setSearch(event.target.value)}
+                  disabled={!fromBranch}
                   autoFocus
                   autoComplete="off"
                 />
@@ -1062,15 +1206,33 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
               </div>
 
               <div className="mb-2 flex flex-wrap items-center gap-2">
-                <label className="flex items-center gap-2 text-sm font-medium text-gray-700 dark:text-gray-300">
-                  <input
-                    type="checkbox"
-                    checked={allFilteredSelected}
-                    onChange={toggleSelectAllFiltered}
-                    disabled={loadingMultiProducts}
-                  />
-                  {t('transfer_select_all') || 'Select all'}
-                </label>
+                {/* Reveals the branch catalog. A view control, and nothing else. */}
+                <button
+                  type="button"
+                  onClick={() => setShowAllProducts((current) => !current)}
+                  aria-pressed={showAllProducts}
+                  disabled={!fromBranch || loadingMultiProducts}
+                  className={`rounded-full px-2.5 py-1 text-xs font-semibold transition-colors disabled:opacity-50 ${
+                    showAllProducts
+                      ? 'bg-gray-700 text-white dark:bg-gray-200 dark:text-gray-900'
+                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600'
+                  }`}
+                >
+                  {t('transfer_show_all_products') || 'Show all products'}
+                </button>
+                {/* Checks the rows on screen. Hidden until there are rows to check,
+                    so it can never be read as "all products in the branch". */}
+                {filteredMulti.length > 0 ? (
+                  <label className="flex items-center gap-2 text-sm font-medium text-gray-700 dark:text-gray-300">
+                    <input
+                      type="checkbox"
+                      checked={allFilteredSelected}
+                      onChange={toggleSelectAllShown}
+                      disabled={loadingMultiProducts}
+                    />
+                    {t('transfer_select_all_shown') || 'Select all shown'}
+                  </label>
+                ) : null}
                 {selectedCount > 0 ? (
                   // The count doubles as a view toggle: tap to see ONLY the
                   // checked rows (review/adjust the whole picked set in one
@@ -1090,14 +1252,28 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
                 ) : null}
               </div>
 
-              <div className="max-h-64 overflow-auto divide-y divide-gray-100 rounded-xl border border-gray-200 dark:divide-gray-700 dark:border-gray-600">
+              {/* Moves everything out of the source branch. Deliberately its
+                  own full-width action, not a checkbox: it is the only control
+                  here that writes, and it writes a lot. */}
+              <button
+                type="button"
+                onClick={handleTransferEntireBranch}
+                disabled={savingBulk || loadingMultiProducts || !fromBranch || !toBranch}
+                className="mb-2 w-full rounded-lg border border-red-200 px-3 py-2 text-xs font-semibold text-red-700 transition-colors hover:bg-red-50 disabled:opacity-50 dark:border-red-900/60 dark:text-red-300 dark:hover:bg-red-900/20"
+              >
+                {t('transfer_entire_branch') || 'Transfer entire branch'}
+              </button>
+
+              <div className="divide-y divide-gray-100 rounded-xl border border-gray-200 sm:max-h-64 sm:overflow-auto dark:divide-gray-700 dark:border-gray-600">
                 {loadingMultiProducts ? (
                   <p className="py-6 text-center text-sm text-gray-400">{t('loading') || 'Loading'}...</p>
                 ) : filteredMulti.length === 0 ? (
                   <p className="py-6 text-center text-sm text-gray-400">
-                    {!debouncedSearch.trim() && !showAllProducts
-                      ? (t('transfer_search_or_select_all') || 'Search products, or use Select all to show the full catalog')
-                      : (t('transfer_no_stock_products') || 'No products with stock in this branch')}
+                    {!fromBranch
+                      ? (t('select_transfer_branches') || 'Choose both source and destination branches.')
+                      : !debouncedSearch.trim() && !showAllProducts
+                        ? (t('transfer_search_or_show_all') || 'Search products, or use Show all products to list the whole branch')
+                        : (t('transfer_no_stock_products') || 'No products with stock in this branch')}
                   </p>
                 ) : null}
 
@@ -1110,7 +1286,7 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
                     return (
                       <div
                         key={product.id}
-                        className={`flex items-center gap-3 px-4 py-2.5 ${group.rows.length > 1 ? 'pl-8' : ''} ${checked ? 'bg-blue-50 dark:bg-blue-900/30' : ''}`}
+                        className={`flex flex-wrap items-center gap-x-3 gap-y-1.5 px-3 py-2.5 sm:flex-nowrap sm:px-4 ${group.rows.length > 1 ? 'pl-6 sm:pl-8' : ''} ${checked ? 'bg-blue-50 dark:bg-blue-900/30' : ''}`}
                       >
                         <input
                           type="checkbox"
@@ -1118,11 +1294,11 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
                           onChange={() => toggleProductSelected(product)}
                           aria-label={product.name}
                         />
-                        <div className="min-w-0 flex-1">
+                        <div className="min-w-0 flex-1 basis-[60%] sm:basis-auto">
                           <div className="whitespace-normal break-words text-sm font-medium text-gray-900 dark:text-white">{product.name}</div>
                           {product.sku ? <div className="break-all font-mono text-xs text-gray-400">{product.sku}</div> : null}
                         </div>
-                        <span className="shrink-0 text-xs text-gray-500 dark:text-gray-400">
+                        <span className="ml-auto shrink-0 text-xs text-gray-500 sm:ml-0 dark:text-gray-400">
                           {t('available') || 'Available'}: {product.branch_quantity} {product.unit}
                         </span>
                         {checked ? (
@@ -1186,14 +1362,46 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
             disabled={savingBulk || loadingMultiProducts || !fromBranch || !toBranch || selectedCount === 0}
           >
             {savingBulk
-              ? (t('saving') || 'Saving...')
+              ? (chunkProgress
+                ? (t('transfer_chunk_progress') || 'Transfer {done} of {total}')
+                  .replace('{done}', String(chunkProgress.done + 1))
+                  .replace('{total}', String(chunkProgress.total))
+                : (t('saving') || 'Saving...'))
               : `${t('transfer_bulk_button') || 'Transfer selected'}${selectedCount > 0 ? ` (${selectedCount})` : ''}`}
-          </button>
-          <button className="btn-secondary" type="button" onClick={onClose} disabled={saving || savingBulk}>
-            {t('cancel') || 'Cancel'}
           </button>
         </div>
       </div>
+
+      {/* A run that takes more than one request is not one undoable step, and
+          the operator has to be told that before committing, not after. */}
+      {pendingTransfer ? (
+        <ConfirmDialog
+          title={pendingTransfer.scope === 'entire_branch'
+            ? (t('transfer_entire_branch') || 'Transfer entire branch')
+            : (t('confirm_transfer') || 'Confirm Transfer')}
+          message={(t('confirm_bulk_transfer_details') || 'Transfer {products} products ({quantity} total units) from {from} to {to}? Available lots will be allocated FIFO.')
+            .replace('{products}', String(pendingTransfer.items.length))
+            .replace('{quantity}', String(pendingTransfer.totalUnits))
+            .replace('{from}', pendingTransfer.fromName)
+            .replace('{to}', pendingTransfer.toName)}
+          items={confirmReviewItems(pendingTransfer)}
+          note={pendingTransfer.chunks > 1
+            ? (t('transfer_entire_branch_note') || 'Runs as {n} transfers, one after another. If one fails the earlier ones stay transferred -- run it again to move the rest.')
+              .replace('{n}', String(pendingTransfer.chunks))
+            : undefined}
+          danger={pendingTransfer.scope === 'entire_branch'}
+          working={savingBulk}
+          workingLabel={chunkProgress
+            ? (t('transfer_chunk_progress') || 'Transfer {done} of {total}')
+              .replace('{done}', String(chunkProgress.done + 1))
+              .replace('{total}', String(chunkProgress.total))
+            : (t('saving') || 'Saving...')}
+          confirmLabel={t('transfer') || 'Transfer'}
+          onConfirm={() => { runPendingTransfer(pendingTransfer) }}
+          onClose={() => { if (!savingBulk) setPendingTransfer(null) }}
+          t={t}
+        />
+      ) : null}
     </div>,
     document.body,
   )
