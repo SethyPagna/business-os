@@ -1,7 +1,6 @@
 import { Suspense, type ComponentType, type CSSProperties, type ReactNode, useMemo, useState, useSyncExternalStore } from 'react'
 import { getRegisteredWork, hasDirtyWork, subscribeDirtyWork } from '../../utils/dirtyWork.ts'
-import { flushPendingWorkDrafts } from '../../utils/workDrafts.ts'
-import { hasInFlightOnlineSaleSubmission } from '../../api/saleWriteTransport.ts'
+import { applyAppUpdate } from '../../utils/appUpdate.ts'
 import type { LucideIcon } from 'lucide-react'
 import BadgeDollarSign from 'lucide-react/dist/esm/icons/badge-dollar-sign.js'
 import BookUser from 'lucide-react/dist/esm/icons/book-user.js'
@@ -71,6 +70,7 @@ interface SidebarAppContext {
   navigateTo: (pageId: string) => void
   user?: SidebarUser | null
   logout: () => void
+  notify: (message: unknown, type?: string, duration?: number) => void
   t: TranslateFn
   settings?: SidebarSettings | null
   hasPermission: (permission: NavigationPermission) => boolean
@@ -192,6 +192,7 @@ export default function Sidebar({ notificationSlot = null, desktopNotificationSl
     navigateTo,
     user,
     logout,
+    notify,
     t,
     settings,
     hasPermission,
@@ -208,57 +209,23 @@ export default function Sidebar({ notificationSlot = null, desktopNotificationSl
   // (user request). The same panel opens as a dropdown from the mobile header
   // avatar.
   const [accountOpen, setAccountOpen] = useState(false)
+  // The explicit "Refresh / check for update" action. Both the reload-safety
+  // guard and the skip-waiting handshake live in utils/appUpdate.ts so this
+  // menu entry and AppUpdateToast.tsx cannot drift apart -- see that module
+  // for why an in-flight online sale and unsaved editor work are the only two
+  // blockers (the POS cart and the offline queue both survive a reload).
+  //
+  // The two window.alert() calls this used to make are gone: a native modal
+  // alert is the blocking popup this app deliberately does not use, and
+  // renderAccountAction closes the panel before running the action anyway, so
+  // an inline message here would never be read. The refusal goes through the
+  // app's own non-blocking notification channel instead.
   const runAppUpdate = async () => {
-    // Section 8b (PWA): a reload while an ONLINE sale submission is still in
-    // flight would abort that request with no local record of it -- see
-    // saleWriteTransport.ts's own comment on hasInFlightOnlineSaleSubmission
-    // for why this is a real gap the POS cart's own reload-safety (it's
-    // sessionStorage-durable) does not cover. Checked before hasDirtyWork()
-    // below since a mid-checkout POS page deliberately never registers as
-    // dirty work (multi-order carts persist across navigation by design).
-    if (hasInFlightOnlineSaleSubmission()) {
-      window.alert(t('wait_for_sale_before_update') || 'Wait for the current sale to finish before updating the app.')
-      return
-    }
-    // iOS does not reliably show beforeunload prompts. Refuse an explicit
-    // update while an editor has unsaved work, and activate the WAITING worker
-    // (posting to controller targets the old active worker and does nothing).
-    if (hasDirtyWork()) {
-      flushPendingWorkDrafts()
-      window.alert(t('save_or_discard_before_update') || 'Save or discard your unfinished work before updating the app.')
-      return
-    }
-    flushPendingWorkDrafts()
-    try {
-      const registration = await navigator.serviceWorker?.getRegistration?.('/')
-      await registration?.update?.().catch(() => {})
-      let waiting = registration?.waiting || null
-      if (!waiting && registration?.installing) {
-        const installing = registration.installing
-        await new Promise<void>((resolve) => {
-          if (installing.state === 'installed') return resolve()
-          const timer = window.setTimeout(resolve, 5000)
-          installing.addEventListener('statechange', () => {
-            if (installing.state !== 'installed') return
-            window.clearTimeout(timer)
-            resolve()
-          }, { once: true })
-        })
-        waiting = registration.waiting
-      }
-      if (waiting) {
-        const changed = new Promise<void>((resolve) => {
-          const timer = window.setTimeout(resolve, 1500)
-          navigator.serviceWorker.addEventListener('controllerchange', () => {
-            window.clearTimeout(timer)
-            resolve()
-          }, { once: true })
-        })
-        waiting.postMessage({ type: 'BUSINESS_OS_SKIP_WAITING' })
-        await changed
-      }
-    } catch (_) {}
-    window.location.reload()
+    const refused = await applyAppUpdate()
+    if (!refused) return
+    notify(refused === 'sale-in-flight'
+      ? (t('wait_for_sale_before_update') || 'Wait for the current sale to finish before updating the app.')
+      : (t('save_or_discard_before_update') || 'Save or discard your unfinished work before updating the app.'), 'warning', 6000)
   }
 
   // N2: which pages currently hold registered unsaved work -- drives the

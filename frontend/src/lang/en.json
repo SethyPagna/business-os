@@ -5231,5 +5231,8 @@
   "kit_gallery_sample_empty_title": "Nothing here yet",
   "kit_gallery_sample_empty_text": "Try a different filter or date range.",
   "kit_gallery_section_skeleton": "Skeleton",
-  "kit_gallery_section_tile_grid": "Tile grid (mobile home)"
+  "kit_gallery_section_tile_grid": "Tile grid (mobile home)",
+  "update_available": "New version available",
+  "update_now": "Update now",
+  "later": "Later"
 }

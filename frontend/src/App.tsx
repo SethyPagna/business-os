@@ -10,6 +10,7 @@ import { NotesProvider } from './components/notes/NotesContext.tsx'
 import { APP_NAVIGATION_EVENT, APP_PAGE_INTENT_EVENT, getAdminPageFromPath, getMountedPageLimit, getNotificationColor, getNotificationPrefix, isPublicCatalogPath, MAX_MOUNTED_PAGES, resolveAdminLandingPage, updateMountedPages } from './app/appShellUtils.ts'
 import { isPublicDomMutationError, shouldAttemptPublicDomRecovery } from './app/publicErrorRecovery.ts'
 import { getScrollTarget, getScrollToPosition } from './components/shared/globalScroll.ts'
+import AppUpdateToast from './components/shared/AppUpdateToast.tsx'
 import IosInstallHint from './components/shared/IosInstallHint.tsx'
 import { NAV_ITEMS } from './components/shared/navigationConfig.ts'
 import PullToRefreshIndicator from './components/shared/PullToRefreshIndicator.tsx'
@@ -721,7 +722,6 @@ function useSyncErrorBanner(user: AppUser | null) {
   const [transientOutage, setTransientOutage] = useState<SyncProblemDetail | null>(null)
   const [pendingSync, setPendingSync] = useState<PendingSyncState | null>(null)
   const [vaultLocked, setVaultLocked] = useState<SyncProblemDetail | null>(null)
-  const [appUpdate, setAppUpdate] = useState<SyncProblemDetail | null>(null)
   const [conflictsNeedReview, setConflictsNeedReview] = useState<WriteConflictDetail | null>(null)
 
   useEffect(() => {
@@ -730,7 +730,6 @@ function useSyncErrorBanner(user: AppUser | null) {
       setTransientOutage(null)
       setPendingSync(null)
       setVaultLocked(null)
-      setAppUpdate(null)
       setConflictsNeedReview(null)
       return undefined
     }
@@ -764,19 +763,14 @@ function useSyncErrorBanner(user: AppUser | null) {
     }
     const onQueueChanged = () => refreshPendingSync()
     const onVaultLocked = (event: Event) => setVaultLocked(event instanceof CustomEvent ? event.detail as SyncProblemDetail : { reason: 'locked', ts: Date.now() })
-    const onAppUpdate = (event: Event) => setAppUpdate(event instanceof CustomEvent ? event.detail as SyncProblemDetail : { message: 'New version ready', ts: Date.now() })
-    // The service worker can broadcast BUSINESS_OS_APP_UPDATE_AVAILABLE at any
-    // time, including while this effect isn't mounted yet (no user signed in
-    // -- e.g. sitting on the login screen right after a deploy). The window
-    // CustomEvent it triggers is fire-and-forget, so a listener that only
-    // exists once a user is present would silently miss it, leaving the app
-    // running the stale pre-update JS with no banner ever shown. Pick up
-    // anything that already fired and was buffered before we could listen.
-    const bufferedAppUpdate = getAppShellApi().getPendingAppUpdate?.()
-    if (bufferedAppUpdate) {
-      setAppUpdate(bufferedAppUpdate)
-      getAppShellApi().clearPendingAppUpdate?.()
-    }
+    // BUSINESS_OS_APP_UPDATE_AVAILABLE is NOT handled here. This hook used to
+    // keep an `appUpdate` state, listen for 'sync:app-update-available', and
+    // drain web-api.ts's buffered detail -- but the value it produced was
+    // never destructured by the consumer below, so it rendered nothing and,
+    // worse, its drain consumed the buffer that a real consumer would need.
+    // AppUpdateToast.tsx (P2-9 finding 3) owns that broadcast end to end now:
+    // it listens, reads the buffer without clearing it, de-duplicates by
+    // version, and is the only surface allowed to trigger a reload.
     const onConflictReview = (event: Event) => {
       setConflictsNeedReview(event instanceof CustomEvent ? event.detail as WriteConflictDetail : { message: 'Conflicts need review', ts: Date.now() })
       refreshPendingSync()
@@ -790,7 +784,6 @@ function useSyncErrorBanner(user: AppUser | null) {
     window.addEventListener('sync:offline-sale-queued', onQueueChanged)
     window.addEventListener('sync:offline-sale-synced', onQueueChanged)
     window.addEventListener('offline:vault-locked', onVaultLocked)
-    window.addEventListener('sync:app-update-available', onAppUpdate)
     window.addEventListener('sync:write-conflict', onConflictReview)
     const cancelInitialPendingSyncRefresh = scheduleInitialPendingSyncRefresh(refreshPendingSync)
     const cancelPendingSyncPolling = scheduleDeferredPendingSyncPolling(refreshPendingSync)
@@ -806,7 +799,6 @@ function useSyncErrorBanner(user: AppUser | null) {
       window.removeEventListener('sync:offline-sale-queued', onQueueChanged)
       window.removeEventListener('sync:offline-sale-synced', onQueueChanged)
       window.removeEventListener('offline:vault-locked', onVaultLocked)
-      window.removeEventListener('sync:app-update-available', onAppUpdate)
       window.removeEventListener('sync:write-conflict', onConflictReview)
     }
   }, [user])
@@ -816,10 +808,8 @@ function useSyncErrorBanner(user: AppUser | null) {
     transientOutage,
     pendingSync,
     vaultLocked,
-    appUpdate,
     conflictsNeedReview,
     clearVaultLocked: () => setVaultLocked(null),
-    clearAppUpdate: () => setAppUpdate(null),
     clearConflictsNeedReview: () => setConflictsNeedReview(null),
     clearSyncError: () => setSyncError(null),
   }
@@ -1882,6 +1872,7 @@ export default function App() {
       </NotesProvider>
 
       <Notification notification={notification} onDismiss={dismissNotification} />
+      <AppUpdateToast />
       <IosInstallHint />
       <GlobalScrollControls />
       {writeConflict ? (
