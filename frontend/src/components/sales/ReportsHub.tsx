@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useState } from 'react'
-import type { ComponentType } from 'react'
+import type { ComponentType, ReactNode } from 'react'
 import BadgeDollarSign from 'lucide-react/dist/esm/icons/badge-dollar-sign.js'
 import RotateCcw from 'lucide-react/dist/esm/icons/rotate-ccw.js'
 import HandCoins from 'lucide-react/dist/esm/icons/hand-coins.js'
+import LayoutDashboard from 'lucide-react/dist/esm/icons/layout-dashboard.js'
+import PieChart from 'lucide-react/dist/esm/icons/pie-chart.js'
 import ChevronDown from 'lucide-react/dist/esm/icons/chevron-down.js'
 import Check from 'lucide-react/dist/esm/icons/check.js'
 import { useApp as useAppHook } from '../../AppContext.tsx'
@@ -10,14 +12,34 @@ import DateTimeRangePicker, { todayDateTimeRange, type DateTimeRange } from '../
 import AppSelect, { type AppSelectOption } from '../shared/AppSelect.tsx'
 import LazyPortalMenu from '../shared/LazyPortalMenu'
 import { makeReportMoneyFormatter } from '../../utils/reportMoney.ts'
+import { LayerHeader, LayerList, normalizeSectionLayout, useLayerStack, useLayeredSections } from '../shared/HubLayers.tsx'
 import SalesDailyReport from './SalesDailyReport'
 import ReturnsReportSection from './ReturnsReportSection'
 import FeesReportSection from './FeesReportSection'
+import ReportsOverviewSection from './ReportsOverviewSection'
+import ReportsBreakdownSection from './ReportsBreakdownSection'
 
 // Reports hub -- a top-level Sales-hub section (a chip beside Sales/Returns/
 // Fees). One shared date range + branch scope drives any combination of the
-// Sales / Returns / Fees reports, shown side by side (the user picks which
-// types to include). Each type only renders for a user who can see it.
+// Overview / Sales / Returns / Expenses / Breakdown reports. Each type only
+// renders for a user who can see it.
+//
+// Sep 3 2026 (lane fx/reports-redesign) added two reports and a second way
+// to present them:
+//
+//   Overview   the canonical headline totals, from the SAME /stats-strip
+//              call the Sales list makes -- so Reports and the Sales list
+//              cannot disagree for one range.
+//   Breakdown  the same range sliced by customer / cashier / payment / hour /
+//              weekday / branch / product, every row built from the one
+//              revenue kernel and shown against its own total.
+//
+// PRESENTATION. Stacking five sections in one scroll is unusable on a phone,
+// so Settings -> Appearance -> "Section layout" can switch small screens to
+// LAYERED: this hub lists its sections, tapping one opens it full screen
+// with a back header, and the device back gesture collapses one layer. The
+// range and branch live HERE, above the layers, so collapsing a layer never
+// loses them. Default stays 'stacked' -- the layout this app has always had.
 
 type ReportsHubAppContext = {
   t: (key: string) => string | undefined
@@ -27,14 +49,15 @@ type ReportsHubAppContext = {
   usdToKhr: (value: unknown) => number
   displayCurrency: string
   getPermissionTier: (key: string) => string
+  settings?: Record<string, unknown>
 }
 const useApp = useAppHook as unknown as () => ReportsHubAppContext
 
 interface BranchOption { id: string; name: string }
-type ReportType = 'sales' | 'returns' | 'fees'
+type ReportType = 'overview' | 'sales' | 'returns' | 'fees' | 'breakdown'
 
 export default function ReportsHub({ embedded = false }: { embedded?: boolean }) {
-  const { t, fmtUSD, fmtKHR, khrToUsd, usdToKhr, displayCurrency, getPermissionTier } = useApp()
+  const { t, fmtUSD, fmtKHR, khrToUsd, usdToKhr, displayCurrency, getPermissionTier, settings } = useApp()
   const trh = (key: string, fallback: string): string => { const v = t(key); return v && v !== key ? v : fallback }
   // Display-only money formatter honoring the display_currency setting (see
   // utils/reportMoney.ts): the raw usd+khr amounts stay the single source of
@@ -50,9 +73,11 @@ export default function ReportsHub({ embedded = false }: { embedded?: boolean })
   const canFees = getPermissionTier('fees') !== 'none'
 
   const available = useMemo<Array<{ id: ReportType; label: string; icon: ComponentType<{ className?: string }> }>>(() => ([
+    canSales ? { id: 'overview' as const, label: trh('overview', 'Overview'), icon: LayoutDashboard } : null,
     canSales ? { id: 'sales' as const, label: trh('sales', 'Sales'), icon: BadgeDollarSign } : null,
     canReturns ? { id: 'returns' as const, label: trh('returns', 'Returns'), icon: RotateCcw } : null,
     canFees ? { id: 'fees' as const, label: trh('fees', 'Expenses'), icon: HandCoins } : null,
+    canSales ? { id: 'breakdown' as const, label: trh('breakdown', 'Breakdown'), icon: PieChart } : null,
   ].filter(Boolean) as Array<{ id: ReportType; label: string; icon: ComponentType<{ className?: string }> }>), [canSales, canReturns, canFees, t]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // An empty range left the Expenses report without an actionable initial
@@ -65,16 +90,24 @@ export default function ReportsHub({ embedded = false }: { embedded?: boolean })
   // but single for the report's options").
   const [selectedType, setSelectedType] = useState<'all' | ReportType>('all')
 
+  // Layered presentation: the preference, whether it applies at this width,
+  // and the layer stack the back gesture pops.
+  const sectionLayout = normalizeSectionLayout(settings?.ui_section_layout)
+  const layered = useLayeredSections(sectionLayout)
+  const { stack, open, back } = useLayerStack(layered, 'reports')
+  const openSection = stack.length > 0 ? stack[stack.length - 1] : null
+
   // Returns and Expenses are date-only ledgers. If a user narrows Sales to a
   // time window and then leaves that report, restore full-day bounds so no
   // hidden time filter survives while the 24-hour control is intentionally
   // absent (including the mixed "All" view).
+  const timeScopedSection = layered ? openSection : selectedType
   useEffect(() => {
-    if (selectedType === 'sales') return
+    if (timeScopedSection === 'sales') return
     setRange((current) => current.startTime === '00:00' && current.endTime === '23:59'
       ? current
       : { ...current, startTime: '00:00', endTime: '23:59' })
-  }, [selectedType])
+  }, [timeScopedSection])
 
   useEffect(() => {
     let cancelled = false
@@ -110,8 +143,67 @@ export default function ReportsHub({ embedded = false }: { embedded?: boolean })
   const selectedChip = typeChips.find((chip) => chip.id === selectedType) || typeChips[0]
   const SelectedIcon = selectedChip.icon
 
+  // One section's body. `titleNode` rides the section's own control row --
+  // the hub never renders a standalone title row (Part 552).
+  const renderSection = (id: ReportType, titleNode: ReactNode) => (
+    id === 'overview' ? <ReportsOverviewSection t={t} fmtMoney={fmtMoney} range={range} branchId={branchId} active titleNode={titleNode} />
+      : id === 'sales' ? <SalesDailyReport t={t} fmtMoney={fmtMoney} range={range} onRangeChange={setRange} branchId={branchId} embedded active titleNode={titleNode} />
+      : id === 'returns' ? <ReturnsReportSection t={t} fmtMoney={fmtMoney} range={range} branchId={branchId} active titleNode={titleNode} />
+      : id === 'fees' ? <FeesReportSection t={t} fmtMoney={fmtMoney} range={range} branchId={branchId} active titleNode={titleNode} />
+      : <ReportsBreakdownSection t={t} fmtMoney={fmtMoney} range={range} branchId={branchId} active titleNode={titleNode} />
+  )
+
+  const shell = `${embedded ? '' : 'page-scroll '}flex w-full min-w-0 flex-col space-y-3 p-3 sm:p-6`
+
+  // ---- Layered: one layer on screen, back collapses exactly one ----------
+  if (layered) {
+    const openEntry = available.find((entry) => entry.id === openSection) || null
+    if (openEntry) {
+      const OpenIcon = openEntry.icon
+      return (
+        <div className={shell}>
+          <LayerHeader
+            title={<><OpenIcon className="h-4 w-4 shrink-0" /> {openEntry.label}</>}
+            onBack={back}
+            backLabel={trh('back', 'Back')}
+          />
+          {/* The range stays available inside the layer, and lives above it,
+              so collapsing the layer cannot lose what the user set. */}
+          <DateTimeRangePicker value={range} onChange={setRange} t={t} showTime={openEntry.id === 'sales'} />
+          <section className="min-w-0 space-y-2">
+            {renderSection(openEntry.id, null)}
+          </section>
+        </div>
+      )
+    }
+    return (
+      <div className={shell}>
+        <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+          <DateTimeRangePicker value={range} onChange={setRange} t={t} showTime={false} />
+          {branches.length ? (
+            <AppSelect
+              value={branchFilter}
+              options={branchOptions}
+              onChange={setBranchFilter}
+              ariaLabel={trh('branch', 'Branch')}
+              buttonClassName="w-full min-w-0 py-1 text-xs sm:w-auto sm:max-w-[9rem]"
+            />
+          ) : null}
+        </div>
+        <LayerList
+          items={available.map((entry) => {
+            const Icon = entry.icon
+            return { id: entry.id, label: entry.label, icon: <Icon className="h-4 w-4" /> }
+          })}
+          onOpen={open}
+        />
+      </div>
+    )
+  }
+
+  // ---- Stacked (default): every chosen section in one scroll -------------
   return (
-    <div className={`${embedded ? '' : 'page-scroll '}flex w-full min-w-0 flex-col space-y-3 p-3 sm:p-6`}>
+    <div className={shell}>
       {/* ONE shared control row: range + the "view by" dropdown + branch, all
           on a single row (user, Aug 31: "the options view by can be into one
           button to expand then choose"). The type picker used to spill four
@@ -168,13 +260,7 @@ export default function ReportsHub({ embedded = false }: { embedded?: boolean })
         // drop the side border + padding so content gets the full width).
         return (
           <section key={id} className="min-w-0 space-y-2 border-y border-slate-200 py-2.5 dark:border-slate-800">
-            {id === 'sales' ? (
-              <SalesDailyReport t={t} fmtMoney={fmtMoney} range={range} onRangeChange={setRange} branchId={branchId} embedded active titleNode={titleNode} />
-            ) : id === 'returns' ? (
-              <ReturnsReportSection t={t} fmtMoney={fmtMoney} range={range} branchId={branchId} active titleNode={titleNode} />
-            ) : (
-              <FeesReportSection t={t} fmtMoney={fmtMoney} range={range} branchId={branchId} active titleNode={titleNode} />
-            )}
+            {renderSection(id, titleNode)}
           </section>
         )
       })}

@@ -190,6 +190,27 @@ export function getSalesDailyReport(params: QueryParams = {}): Promise<unknown> 
   )
 }
 
+// Reports redesign (Sep 3 2026): the grouped + product views. Both hit the
+// salesAnalytics kernel behind /api/sales, so their figures are the same
+// ones /stats-strip gives the Sales list for the same query.
+export function getSalesGroupedTotals(params: QueryParams = {}): Promise<unknown> {
+  const query = buildQueryString(params, { skipEmpty: false })
+  return route(
+    `sales:grouped-totals:${query}`,
+    () => apiFetch('GET', appendQuery('/api/sales/grouped-totals', query)),
+    null,
+  )
+}
+
+export function getProductSalesRanking(params: QueryParams = {}): Promise<unknown> {
+  const query = buildQueryString(params, { skipEmpty: false })
+  return route(
+    `sales:product-ranking:${query}`,
+    () => apiFetch('GET', appendQuery('/api/sales/product-ranking', query)),
+    null,
+  )
+}
+
 export function getSalesDayReport(params: QueryParams = {}): Promise<unknown> {
   const query = buildQueryString(params, { skipEmpty: false })
   return route(
