@@ -102,9 +102,50 @@ check('the merge carries the highest selling and WHOLESALE prices onto the keepe
 })
 
 check('the audit entry reports what was moved, including images', () => {
-  const auditBlock = routeSrc.slice(mergeEnd, mergeEnd + 700)
+  const auditBlock = routeSrc.slice(mergeEnd, mergeEnd + 2000)
   assert.ok(/batchesMoved:/.test(auditBlock))
   assert.ok(/imagesMoved:/.test(auditBlock), 'a merge that moved imagery must say so rather than doing it invisibly')
+  assert.ok(/stockDisposition,/.test(auditBlock), 'the audit must say WHICH answer was given for the discarded row\'s stock')
+  assert.ok(/priceChanges: priceChangesForAudit/.test(auditBlock),
+    'a merge adopts the higher selling/special price, so a price it moved must be recorded, not applied invisibly')
+  assert.ok(/returnsReparented,/.test(auditBlock))
+})
+
+check('the merge carries the discarded row\'s RETURNS, not just its sales', () => {
+  // The gap this check exists for: return_items.product_id kept pointing at a
+  // row the merge had just deactivated, so a refund of a merged-away twin
+  // dropped out of the survivor's history entirely.
+  const appliersSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'undoAppliers.ts'), 'utf8')
+  const listStart = appliersSrc.indexOf('export const MERGE_REPARENT_TABLES')
+  assert.ok(listStart > 0, 'the shared reparent list not found -- update this test')
+  const list = appliersSrc.slice(listStart, appliersSrc.indexOf(']', listStart))
+  for (const table of [
+    'sale_items', 'return_items', 'return_replacement_items', 'inventory_movements',
+    'damaged_stock_lots', 'stock_transfers', 'rfid_tags', 'rfid_events', 'rfid_session_items', 'promotions',
+  ]) {
+    assert.ok(new RegExp(`table: '${table}'`).test(list), `${table} must be relinked onto the survivor, never orphaned`)
+  }
+  assert.ok(/for \(const \{ table, column \} of MERGE_REPARENT_TABLES\)/.test(mergeBlock),
+    'the fold must walk the ONE shared list, so a table added there is moved without a second edit here')
+  assert.ok(/reparentedByTable,/.test(routeSrc), 'undo cannot put back a link the reversal never recorded')
+})
+
+check('a WRITE-OFF zeroes the lots in place and leaves a balancing ledger line', () => {
+  assert.ok(/const writeOffStock = stockDisposition === 'write_off'/.test(mergeBlock))
+  assert.ok(/quantity: -qty,/.test(mergeBlock), 'the write-off must post a NEGATIVE movement, not just delete stock')
+  assert.ok(/reason: writeOffReason\(dup, mergeContext\)/.test(mergeBlock), 'the ledger line must say why the stock left')
+  assert.ok(/DELETE FROM branch_batch_stock WHERE batch_id = @id/.test(mergeBlock), 'the written-off lots must be emptied')
+  assert.ok(/writtenOffBatches\.push\(/.test(mergeBlock), 'undo must be able to bring the written-off lots back')
+  // The RECON lots in production stored TEXT in this INTEGER column; the
+  // write-off path must not add to that, so it writes no batch_number at all.
+  const writeOffBlock = mergeBlock.slice(mergeBlock.indexOf('if (writeOffStock) {', mergeBlock.indexOf('for (const batchRow of dupBatchRows)')))
+  const writeOffBody = writeOffBlock.slice(0, writeOffBlock.indexOf('continue'))
+  assert.ok(!/batch_number\s*=\s*@/.test(writeOffBody),
+    'the write-off path must never write batch_number -- production already carries TEXT values in that INTEGER column')
+  assert.ok(/batchNumber: batchRow\.batch_number == null \? null : Number\(batchRow\.batch_number\)/.test(writeOffBody),
+    'the batch number it merely REPORTS must still be coerced to a number, so a legacy TEXT lot is not echoed back as text')
+  assert.ok(/batchNumber: nextCanonicalBatchNumber/.test(mergeBlock),
+    'the merge path must renumber from its own integer counter, never copy a possibly-TEXT value across')
 })
 
 check('both merge endpoints route through the ONE shared fold helper -- they can never drift', () => {
