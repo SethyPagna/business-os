@@ -133,8 +133,16 @@ check('the catalog search reads query, q AND search as the same term', () => {
     /query\.query \|\| query\.q \|\| query\.search \|\| ''/,
     'a picker that spells the term `search` must not silently get the unfiltered catalog',
   )
+  // The tokenizer moved behind the shared search-tail builder
+  // (lib/productSearchQuery.ts), so the chain to pin is now
+  // rawSearchText -> buildProductSearchQuery -> tokenizeSearchTermGroups.
+  // Same invariant: the RESOLVED term (query || q || search) has to be what
+  // actually reaches the parser, not just what got read into a variable.
   assert.ok(
-    /splitSearchTermGroups\(\s*(rawSearchText|query\.query)/.test(productsRoute),
+    /buildProductSearchQuery\(\s*rawSearchText/.test(productsRoute)
+    && /tokenizeSearchTermGroups\(rawSearchText/.test(
+      fs.readFileSync(path.join(root, 'src', 'lib', 'productSearchQuery.ts'), 'utf8'),
+    ),
     'the resolved term must be what actually feeds the search-term parser',
   )
 })

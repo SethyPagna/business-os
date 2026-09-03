@@ -153,6 +153,10 @@ const productsRoute = loadReal('routes/products.ts', {
   '../lib/productIdentity': { findDuplicateProductGroups: async () => [] },
   '../lib/productBatches': { attachBatchCounts: async () => {} },
   '../lib/searchMatch': searchMatch,
+  // The shared search-tail/ranking module products.ts now builds its search
+  // from -- loaded for real (it is pure SQL-string assembly over searchMatch,
+  // which is itself loaded for real here).
+  '../lib/productSearchQuery': loadReal('lib/productSearchQuery.ts', { './searchMatch': searchMatch }),
   '../lib/familyPagination': loadReal('lib/familyPagination.ts'),
   '../lib/fileAssets': { getMediaType: () => 'image', buildUniqueStoredName: (n) => n, sanitizeOriginalFileName: (n) => n },
   '../lib/catalogText': { normalizeCatalogText: (v) => v, hasSuspiciousCatalogText: () => false },

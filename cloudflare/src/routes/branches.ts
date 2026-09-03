@@ -15,17 +15,7 @@ import { assertUpdatedAtMatch, getExpectedUpdatedAt, writeConflictResponse, Writ
 import { findIdentityMatch, findIdentityMatches, type ProductIdentityRow } from '../lib/productIdentity'
 import { decrementBatchStockStatement, decrementBatchStockStrictStatement, incrementBatchStockStatement, resolveDestinationBatch, readFifoLotAvailability, allocateAcrossLots } from '../lib/productBatches'
 import { branchUpdateStatements } from '../lib/branchWrites'
-import {
-  buildExactBarcodeMatchClause,
-  buildExactBarcodeRankSql,
-  buildFtsMatchExpression,
-  buildHybridMatchClause,
-  buildPartialWordMatchClause,
-  buildShortWordFallbackClause,
-  buildTrigramMatchExpression,
-  PRODUCT_SEARCH_COLUMNS,
-  tokenizeSearchTermGroups,
-} from '../lib/searchMatch'
+import { buildFamilyRelevanceOrderSql, buildProductSearchQuery } from '../lib/productSearchQuery'
 import type { Env } from '../index'
 
 async function sha256Hex(input: string): Promise<string> {
@@ -856,61 +846,27 @@ function normalizePositiveInt(value: unknown, fallback: number, { min = 1, max =
 function buildBranchStockWhere(c: any, branchId: number, { includeStockState = true } = {}) {
   const where = ['p.is_active = 1']
   const params: Record<string, unknown> = { branchId }
-  // Relevance rank for this endpoint, used only to float an exact barcode
-  // hit above rows that merely contain the digits (the listing is otherwise
-  // ordered by family name).
-  let matchRankSql: string | undefined
   // `search` accepted as a third alias alongside query/q, same as
   // products.ts/inventory.ts -- an unrecognized key used to mean "return the
   // whole branch's stock" rather than an error.
   const rawQuery = String(c.req.query('query') || c.req.query('q') || c.req.query('search') || '')
-  const searchTermGroups = tokenizeSearchTermGroups(rawQuery, 6, 8)
-  if (searchTermGroups.length) {
-    const searchMode = 'AND'
-    const matchClauses: string[] = []
-    const ftsMatch = buildFtsMatchExpression(searchTermGroups, searchMode, PRODUCT_SEARCH_COLUMNS)
-    if (ftsMatch) {
-      params.ftsQuery = ftsMatch
-      matchClauses.push('p.id IN (SELECT rowid FROM products_fts WHERE products_fts MATCH @ftsQuery)')
-    }
-    // Same expression reused against both trigram tables (barcode/sku
-    // substring, and name substring) -- see products.ts's own call site
-    // comment for why one buildTrigramMatchExpression() call covers both.
-    const trigramMatch = buildTrigramMatchExpression(searchTermGroups, searchMode)
-    if (trigramMatch) {
-      params.codeQuery = trigramMatch
-      matchClauses.push('p.id IN (SELECT rowid FROM products_fts_code WHERE products_fts_code MATCH @codeQuery)')
-      params.nameCodeQuery = trigramMatch
-      matchClauses.push('p.id IN (SELECT rowid FROM products_fts_name_trigram WHERE products_fts_name_trigram MATCH @nameCodeQuery)')
-    }
-    // Mixed-group fallback (a group with both a free-text word and a
-    // barcode-fragment word) -- see buildHybridMatchClause's own comment.
-    const hybridMatch = buildHybridMatchClause(searchTermGroups, searchMode, 'hyb', PRODUCT_SEARCH_COLUMNS)
-    if (hybridMatch) {
-      Object.assign(params, hybridMatch.params)
-      matchClauses.push(hybridMatch.sql)
-    }
-    // Sub-3-character word fallback (FTS5's trigram tokenizer emits no
-    // trigrams below 3 chars) and long-query (4+ word) partial fallback --
-    // both scoped to name_normalized only, same reasoning as products.ts.
-    const shortWordMatch = buildShortWordFallbackClause(searchTermGroups, searchMode, ['p.name_normalized'], params, 'shortw', true)
-    if (shortWordMatch) matchClauses.push(shortWordMatch)
-    const partialMatch = buildPartialWordMatchClause(searchTermGroups, searchMode, ['p.name_normalized'], params, 'partialw', 4, true)
-    if (partialMatch) matchClauses.push(partialMatch)
-    // Exact-barcode disjunct with leading zeros folded on both sides, same
-    // shared helper products.ts/inventory.ts use (lib/searchMatch.ts's
-    // buildExactBarcodeMatchClause). This picker needs it most: it is the
-    // one product search in the app with NO JS fuzzy fallback behind it, so
-    // whatever this WHERE misses is simply gone.
-    const exactBarcodeMatch = buildExactBarcodeMatchClause(rawQuery, params)
-    if (exactBarcodeMatch) {
-      matchClauses.unshift(exactBarcodeMatch)
-      matchRankSql = buildExactBarcodeRankSql()
-    }
-    if (matchClauses.length) {
-      where.push(matchClauses.length > 1 ? `(${matchClauses.join(' OR ')})` : matchClauses[0])
-    }
-  }
+  // THE FIX THIS LANE EXISTS FOR. This block used to be a fourth
+  // hand-copy of the search tail, and it had drifted: it computed a
+  // relevance rank ONLY when the typed text was a lone barcode, so every
+  // ordinary name search through this endpoint -- the Transfer picker
+  // (TransferModal) and the per-branch search box on the Branches page,
+  // both of which send ?query= here -- came back in plain alphabetical
+  // family order with no relevance term at all. The closest match landed
+  // wherever the alphabet put it, which is the reported "it shows products
+  // not really matched in top to bottom ... the likely result was at
+  // bottom". Now on the same shared implementation as every other picker
+  // (lib/productSearchQuery.ts), so it gains bm25 plus the exact-barcode/
+  // exact-name/name-prefix tier, and a future picker cannot be built
+  // without them.
+  const searchQuery = buildProductSearchQuery(rawQuery, params)
+  if (searchQuery.whereClause) where.push(searchQuery.whereClause)
+  const matchRankSql = searchQuery.matchRankSql
+  const matchTierSql = searchQuery.matchTierSql
   const stockState = String(c.req.query('stockState') || c.req.query('stock_state') || 'positive').toLowerCase()
   if (includeStockState) {
     if (stockState === 'positive' || stockState === 'in_stock') where.push('COALESCE(bs.quantity, 0) > COALESCE(p.out_of_stock_threshold, 0)')
@@ -922,7 +878,7 @@ function buildBranchStockWhere(c: any, branchId: number, { includeStockState = t
     if (stockState === 'low') where.push('COALESCE(bs.quantity, 0) > COALESCE(p.out_of_stock_threshold, 0) AND COALESCE(bs.quantity, 0) <= COALESCE(p.low_stock_threshold, 10)')
     if (stockState === 'out' || stockState === 'out_of_stock') where.push('COALESCE(bs.quantity, 0) <= COALESCE(p.out_of_stock_threshold, 0)')
   }
-  return { where, params, stockState, matchRankSql }
+  return { where, params, stockState, matchRankSql, matchTierSql }
 }
 
 app.get('/:id/stock', async (c) => {
@@ -946,7 +902,7 @@ app.get('/:id/stock', async (c) => {
   const branchId = Number.parseInt(id, 10)
   const page = normalizePositiveInt(c.req.query('page'), 1, { min: 1, max: 100000 })
   const pageSize = normalizePositiveInt(c.req.query('pageSize') || c.req.query('page_size'), 20, { min: 1, max: 100 })
-  const { where, params, stockState, matchRankSql } = buildBranchStockWhere(c, branchId)
+  const { where, params, stockState, matchRankSql, matchTierSql } = buildBranchStockWhere(c, branchId)
   const whereSql = `WHERE ${where.join(' AND ')}`
   const summaryWhere = buildBranchStockWhere(c, branchId, { includeStockState: false })
   const summaryWhereSql = `WHERE ${summaryWhere.where.join(' AND ')}`
@@ -1009,11 +965,15 @@ app.get('/:id/stock', async (c) => {
     params,
     page,
     pageSize,
-    // With a scanned barcode in play the family holding that exact code
-    // leads; everything else keeps the plain A-Z listing order.
-    familyOrderSql: matchRankSql ? 'match_rank ASC, family_name ASC' : 'family_name ASC',
+    // Relevance first (exact barcode, then exact/prefix name, then bm25),
+    // A-Z only as the tail -- same contract every other picker uses.
+    familyOrderSql: buildFamilyRelevanceOrderSql('family_name ASC', {
+      hasTier: Boolean(matchTierSql),
+      hasRank: Boolean(matchRankSql),
+    }),
     intraFamilyOrderSql: 'lower(name) ASC, id ASC',
     matchRankSql,
+    matchTierSql,
   })
 
   return c.json({

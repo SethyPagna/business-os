@@ -151,12 +151,32 @@ const pass = (msg) => { checks++; console.log('PASS ' + msg) }
   pass('routes/promotions.ts gates: rules/active open, rules manage promotions-gated, strip products-gated, rules registered first')
 
   const productsSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'routes', 'products.ts'), 'utf8')
-  assert.match(productsSrc, /family_promoted DESC, \$\{familyOrderSql\}/, 'browse order: promoted families lead')
-  // G1b flip: within MATCHING results, discounted items top; relevance
-  // orders inside each block ("relevance still wins but if relevance also
-  // have discounts, discounts top" -- relevance decides what matches at
-  // all, promoted matches lead).
-  assert.match(productsSrc, /family_promoted DESC, match_rank ASC/, 'search order: promoted matches top, relevance orders within each block')
+  // The family ORDER BY is no longer assembled by string-splicing inside
+  // products.ts -- it comes from the shared buildFamilyRelevanceOrderSql
+  // (lib/productSearchQuery.ts), so these pin the ORDER IT ACTUALLY
+  // PRODUCES rather than the shape of the source line. Same invariants,
+  // executed instead of pattern-matched.
+  const { buildFamilyRelevanceOrderSql } = loadReal('lib/productSearchQuery.ts', { './searchMatch': loadReal('lib/searchMatch.ts') })
+  assert.match(productsSrc, /promotedFirst: true/, 'products.ts must ask for the promoted-first ordering')
+  assert.equal(
+    buildFamilyRelevanceOrderSql('family_name ASC', { hasTier: false, hasRank: false, promotedFirst: true }),
+    'family_promoted DESC, family_name ASC',
+    'browse order: promoted families lead',
+  )
+  // G1b: within MATCHING results, discounted items top; relevance orders
+  // inside each block ("relevance still wins but if relevance also have
+  // discounts, discounts top"). The relevance TIER (exact barcode, then
+  // exact/prefix name) now sits ABOVE the promoted key: G1b decides between
+  // equally relevant matches, it must not float a barely-relevant
+  // discounted product above the product the operator actually typed or
+  // scanned. Within a tier the promoted-first rule is unchanged, and when
+  // no result is an exact/prefix match every family shares one tier and the
+  // order is what it always was.
+  assert.equal(
+    buildFamilyRelevanceOrderSql('family_name ASC', { hasTier: true, hasRank: true, promotedFirst: true }),
+    'match_tier ASC, family_promoted DESC, match_rank ASC, family_name ASC',
+    'search order: relevance tier first, then promoted matches, then bm25 within each block',
+  )
   assert.match(productsSrc, /promo === 'promoted'|promoFilter === 'promoted'/, 'promoted filter must exist')
   assert.match(productsSrc, /promotion_rules: promotionRules/, 'search/bootstrap payload carries the active rules')
   pass("products.ts: promoted-first family ordering + promo filter + rules in the payload")
