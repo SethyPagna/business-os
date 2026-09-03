@@ -125,6 +125,51 @@ Two rules learned the hard way, both from real incidents in this file's own hist
 
 ## Current status
 
+**FLEET STATE — Sep 3, 14 lanes on `a486d82e`, none merged, none deployed (Part 585).** Tips read from
+git, not from lane reports. Green and complete: `fx/fleet-tooling` `be09ee65` · `fx/runtime-provenance`
+`93632d0b` · `fx/catalog-no-update-banner` `5778c01f` · `fx/khmer-naming` `64c69d67` ·
+`fx/sale-detail-rows` `1ee8696a` · `fx/products-report-style` `5fd0ebd2` · `fx/reports-redesign`
+`9b444788` · `fx/returns-semantics` `d8931348` · `lane-a/fast-stock-in` `6b2acc88` · `lane-b/transfer`
+`5f1794c4` · `lane-c/app-update-prompt` `8580c92a`. Still running: `fx/search-rank` (`1b83e1b5` at time
+of writing). **Divergent** (merge-base `7afc8a71`, not `a486d82e`): `hf/merge` `65459d6e` and
+`hf/customers-perf` `68d5ecef` — their `verify:i18n` red is a merge signal, not a defect, because
+`fced3086` is not in their ancestry (`hf/merge` simulated the union merge onto `a486d82e`: exit 0, 4516
+keys). Lane D (tier-count reconciliation, session 64) stays **frozen**: both rehearsals red, nothing
+applyable. No trial integration yet — it waits for `fx/search-rank`, which touches 26 files and overlaps
+five other lanes. The measured conflict map (12 shared files, 9 of them real code overlaps) is in Part 585.
+
+**TWO TOOLING DEFECTS FIXED — both made lanes distrust their own test runs (`fx/fleet-tooling`).**
+Same shape in each: the check was wrong, so its red looked like lane error every time and the real
+defect hid behind it. Do not "fix" either by editing files.
+- `1755bd6b` — **`verify:public-runtime` compared bytes, not content.** Git stores
+  `frontend/public/{sw,runtime-noise-guard,theme-bootstrap}.js` with LF, `core.autocrlf=true` checks them
+  out as CRLF, so a *pristine* tree was reported stale forever. It is **step 2 of the `test:utils` chain
+  and that chain stops at the first red** — a lane could see "chain is red" without one of its 171 test
+  files running, and any certification from that run is empty. The old cleanup rule made it recur:
+  `npm run build` fixes it and the documented `git checkout -- frontend/public/*.js` **restores the CRLF
+  and re-breaks it**. Use `npm run build:public-runtime`, leave those three files dirty, never stage them.
+- `be09ee65` — **the backend sweep was cwd-sensitive.** `test-inventory-adjust-set-pure.cjs` read paths
+  relative to the cwd, so the suite was 167/168 from `cloudflare/scripts/` — the directory CLAUDE.md's own
+  documented command cds into — and 168/168 from `cloudflare/`. Three lanes hit it independently. Reads are
+  now anchored to `__dirname` and `test-script-path-anchoring-pure.cjs` enforces it across all 168 scripts.
+  Sweep is now 168/168 from **either** directory.
+
+**LANGUAGE PACKS SHIPPED A LITERAL `{count}` AND A WRONG INSTRUCTION — `3ad506ce`.** `tr()`/`t()` look a
+key up; neither interpolates, so a pack value with `{count}` renders literal braces unless the call site
+substitutes. The idiomatic call hides it: the template-literal fallback reads perfectly and is *never
+reached*, because `tr()` falls back only when the key MISSES. A full sweep found **exactly 4** sites of 88
+(two already fixed on `lane-a/fast-stock-in` and `fx/products-report-style`). A sweep must know **both**
+idioms — `.replace('{k}', v)` and the five-times-duplicated `replaceVars(t, vars)` — or it over-reports 4x,
+and must scan **backward** too (`SaleLinkConflictsSection.tsx:113` wraps two `tr()` calls in one
+`replaceVars()` above both). The two worst were not brace bugs: `sales_import_started` and
+`inventory_import_started` had been copy-pasted from `contacts_import_started`, so both modals told
+operators in both languages to *"review and approve it from the top progress bar"* — for an import that
+auto-approves in-modal and whose only button says "Continue in background". `salesImportWorker.test.ts`
+and `inventoryImportWorker.test.ts` already assert that sentence is absent, and both passed for the whole
+life of the bug: **a source-text assertion cannot see a string that lives in a language pack.** Fixed in
+the packs, not the call sites, and `trPlaceholderSubstitution.test.ts` now extends both invariants into
+the packs.
+
 **CORRECTION — `verify:i18n` is GREEN, and the "30 unresolved keys" line below is now stale.**
 Measured on `a486d82e` (what production runs) on Sep 3: `npm run verify:i18n` exits **0** —
 *"4498 pack keys, 449 source files, every referenced key resolves in both packs"*. Commit `fced3086`

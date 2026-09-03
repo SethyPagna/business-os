@@ -17693,3 +17693,146 @@ suspected cause the denormalized `products.stock_quantity` not recomputed after 
 rehearsed, and its counts disagreeing with 6d's on the same data (1723/1682, 409/392, 279/267, 10/0) — one
 classifier is wrong and which is unknown · `AppUpdateBanner` renders on the public-catalog route (`App.tsx`
 ~:1844-1848), flagged by session 64, not yet fixed.
+
+## Part 585 (Sep 3 2026, session business-os-v1-c9, COORDINATOR, isolated worktrees) — two fleet-wide tooling defects that made lanes distrust their own test runs; the language packs shipping a literal `{count}` and a wrong instruction; fourteen lanes inventoried and their conflict map measured
+
+**Ask.** Continue the round-2 lane program on top of `a486d82e` (what production runs): finish the
+fleet-blocking `verify:public-runtime` fix routed over from session 64, sweep the `tr()` placeholder
+bug, collect the eight dispatched lanes, and reconcile everything into a state the user can decide to
+deploy from. Nothing pushed, nothing deployed, no migrations, no remote writes.
+
+**What changed.** Branch `fx/fleet-tooling` (base `a486d82e`), three commits, tip `be09ee65`.
+`fx/public-runtime-eol` still points at the first of them and is an ancestor.
+
+- `1755bd6b` — `ops/scripts/frontend/build-public-runtime-scripts.ts` compares CONTENT, not bytes,
+  plus `frontend/tests/publicRuntimeCheck.test.ts` and its chain entry (172 → 173).
+- `3ad506ce` — `en.json`/`km.json` values for `sales_import_started` and `inventory_import_started`,
+  `ExportFieldsModal.tsx` (carried verbatim from `fx/products-report-style`), plus
+  `frontend/tests/trPlaceholderSubstitution.test.ts` and its chain entry (173 → 174).
+- `be09ee65` — `cloudflare/scripts/test-inventory-adjust-set-pure.cjs` anchored to `__dirname`, plus
+  `cloudflare/scripts/test-script-path-anchoring-pure.cjs`.
+
+**What was found.**
+
+*Two tooling defects that punished lanes for following the documented procedure.* Both have the same
+shape, and the shape is the finding: the check was wrong, so its red looked like lane error every
+single time, and the real defect stayed invisible behind it.
+
+1. `verify:public-runtime` compared bytes. Git stores `frontend/public/{sw,runtime-noise-guard,
+   theme-bootstrap}.js` with LF; this checkout is `core.autocrlf=true`, so they land on disk with
+   CRLF while the generator emits LF. A pristine checkout was therefore reported stale, permanently.
+   It is **step 2 of the `test:utils` chain and the chain stops at the first red**, so a lane could
+   run `test:utils`, see it fail, and conclude "the chain is red" without one of its 171 test files
+   ever executing — a certification from that run is empty. Worse, the standing cleanup rule made it
+   recur: `npm run build` fixes it, and the documented `git checkout -- frontend/public/*.js`
+   afterwards **restores the CRLF and re-breaks it** (measured by the Khmer lane, confirmed by the
+   returns lane, which also observed that a later full `npm run build` does not re-break it — only
+   the checkout step does).
+2. `cloudflare/scripts/test-inventory-adjust-set-pure.cjs` read `src/routes/inventory.ts` relative to
+   the cwd, so the suite was 167/168 from `cloudflare/scripts/` — the directory **CLAUDE.md's own
+   documented sweep command cds into** — and 168/168 from `cloudflare/`. Three lanes hit it
+   independently and each spent time proving the red was not theirs.
+
+*The language packs were shipping two different live defects, and a source-text test could not see
+either.* `tr()` and `t()` look a key up; neither interpolates. A full sweep of every `tr()`/`t()`
+call on a placeholder-bearing pack key found **exactly four** sites (169 placeholder keys, 88 call
+sites, 84 already correct). The sweep must recognise **both** substitution idioms — chained
+`.replace('{k}', v)` and the locally-redefined `replaceVars(template, values)`, which exists in five
+separate copies — or it over-reports 4x; and it must scan **backward** as well as forward, because
+`SaleLinkConflictsSection.tsx:113` wraps a ternary of two `tr()` calls in one `replaceVars()` above
+both keys. Credit for both traps to session 64.
+
+Of the four: `FastStockInModal.tsx:367` is fixed on `lane-a/fast-stock-in` (`6b2acc88`);
+`ExportFieldsModal.tsx:109` is fixed identically on `fx/products-report-style` (`459cacc7`) and is
+carried here byte-for-byte so the two branches merge without a choice to make.
+
+The remaining two were worse than a stray brace. `salesImportWorker.test.ts` and
+`inventoryImportWorker.test.ts` each assert their modal's source does **not** contain "Review and
+approve it from the top progress bar" — those two imports review and auto-approve **in-modal**, their
+only "later" affordance is the button labelled `continue_in_background`, and no top-progress-bar
+approval step exists for them. Both assertions passed for the whole life of the bug, because the
+sentence was not in the source: it had been copy-pasted into `en.json` and `km.json` from
+`contacts_import_started`, whose flow genuinely does queue rows for that approval. So production told
+operators, in both languages, to go review and approve an import that had already been applied — with
+a literal `{count}` in the sentence. **A source-text assertion structurally cannot see a string that
+lives in a language pack.** The call sites were right all along; the fix is the pack values, and the
+new test extends both source-level invariants into the packs.
+
+*The exemption pattern.* `FastStockInModal` is listed in `EXPECTED_UNFIXED` as a **self-retiring**
+exemption, not a tolerated baseline: the test requires it to be both still present and still broken,
+so lane-a's merge turns it red and names the entry to delete.
+
+**Verified** (this run, in `bos-rc-workers/fx-provenance`, base `a486d82e`).
+`npx tsc --noEmit` frontend 0 · **172/172** frontend test files green individually (explicit for-loop,
+not the chain) · `testChainCoverage` green, chain 172 → 174, appended, nothing removed ·
+`check:source` 449 files · `verify:i18n` exit 0, 4498 pack keys, 449 source files, every referenced
+key resolves in both packs · `vite build` exit 0 · `verify:public-runtime` exit 0 **on a pristine
+CRLF checkout** · cloudflare `tsc` 0 · backend sweep **168/168 from `cloudflare/` AND 168/168 from
+`cloudflare/scripts/`**, where it was 167/168 before.
+
+Non-vacuity proven one thing at a time, never by assertion-count: reverting only the EOL comparison
+line failed with "a CRLF checkout must not be reported stale"; reverting `ExportFieldsModal` named
+that exact file:line; restoring the base pack values failed the placeholder check; injecting a
+placeholder-free sentence that still said "top progress bar" failed check 5 by name; restoring the
+cwd-relative reads named `test-inventory-adjust-set-pure.cjs` lines 4, 5 and 6; and the exemption was
+proven self-retiring by simulating lane-a's fix, after which `FastStockInModal` was restored
+byte-for-byte and verified by an empty diff.
+
+**Lane inventory — tips read from git, not from any lane's report.** Base `a486d82e` unless noted.
+
+| lane | branch | tip | state |
+| --- | --- | --- | --- |
+| fleet tooling | `fx/fleet-tooling` | `be09ee65` | green, this Part |
+| runtime provenance | `fx/runtime-provenance` | `93632d0b` | green (Part 584) |
+| catalog update banner | `fx/catalog-no-update-banner` | `5778c01f` | green — **supersedes** the "not yet fixed" note at the end of Part 584 |
+| Khmer naming | `fx/khmer-naming` | `64c69d67` | green, 4 commits |
+| sale-detail rows | `fx/sale-detail-rows` | `1ee8696a` | green, 5 commits |
+| products data-report style | `fx/products-report-style` | `5fd0ebd2` | green, 6 commits |
+| reports redesign | `fx/reports-redesign` | `9b444788` | green, 4 commits |
+| returns semantics | `fx/returns-semantics` | `d8931348` | green, 6 commits |
+| search relevance | `fx/search-rank` | `1b83e1b5` | **still running at time of writing** |
+| lane A | `lane-a/fast-stock-in` | `6b2acc88` | green (session 64) |
+| lane B | `lane-b/transfer` | `5f1794c4` | green (session 64) |
+| lane C | `lane-c/app-update-prompt` | `8580c92a` | green (session 64) |
+| merge/duplicates | `hf/merge` | `65459d6e` | green — **DIVERGENT**, merge-base `7afc8a71` |
+| customers perf | `hf/customers-perf` | `68d5ecef` | green — **DIVERGENT**, merge-base `7afc8a71` |
+
+The two divergent lanes are why their `verify:i18n` is red on their own branch: `fced3086` (the
+32-key fix) is not in their ancestry. `hf/merge` simulated the union merge onto `a486d82e` and got
+`OK — 4516 pack keys, 451 source files`, exit 0. Merge signal, not a defect. Lane D (session 64,
+tier-count reconciliation) stays **frozen**: both rehearsals red, nothing applyable.
+
+**Conflict map, measured** with `git diff --name-only <merge-base> <lane>` across all 14 branches.
+12 files are touched by more than one lane. Three are the known union-merge files —
+`frontend/package.json` (8 lanes; the `test:utils` chain is one long line every lane appends to,
+taking either side silently drops a lane's test) and `frontend/src/lang/{km,en}.json` (8 and 7 lanes;
+union by key, then re-`JSON.parse` both packs). The nine real code overlaps, each needing a human
+decision at merge time:
+
+- `frontend/tests/productsResponsiveSurface.test.ts` — khmer-naming, products-report, lane-b (3 lanes)
+- `frontend/src/components/products/Products.tsx` — products-report, search-rank, hf-merge (3 lanes)
+- `frontend/src/components/products/ExportFieldsModal.tsx` — fleet-tooling, products-report
+  (**byte-identical on both**, verified: merges with no conflict and no choice)
+- `frontend/src/components/returns/ReturnDetailModal.tsx` — sale-detail, returns-semantics
+- `cloudflare/src/lib/salesAnalytics.ts` and `cloudflare/src/routes/sales.ts` — reports-redesign,
+  returns-semantics
+- `cloudflare/src/routes/products.ts` — search-rank, hf-merge (one line in
+  `expandSearchResultsToNameSiblings`, flagged by hf/merge)
+- `frontend/src/components/branches/TransferModal.tsx` — search-rank, lane-b (lane-b rewrote +360
+  lines; highest risk in the set)
+- `frontend/src/components/pos/POS.tsx` — search-rank, hf-customers-perf
+
+Session 64 separately proved `fx/public-runtime-eol` and `lane-b/transfer` reconcile in either order
+(`git merge-tree --write-tree` exit 0, no conflict list).
+
+**Not done.** No trial integration yet — it waits for `fx/search-rank`, the most entangled lane (26
+files, overlapping five others). Nothing pushed, nothing deployed, no migration applied anywhere, no
+remote D1 writes; remote access this session was SELECT-only and rare. The nine code overlaps above
+are unresolved by design. Two operational facts worth carrying: a killed background wrangler task can
+leave `workerd.exe` still holding the port, so `netstat` the port before certifying; and
+`frontend/node_modules` being a junction means `node_modules/.vite` is **shared**, so a lane running
+vite with a private config must also set a private `cacheDir` or it swaps the optimize cache out from
+under peers (`504 Outdated Optimize Dep`). Also unresolved: **the preview pane resolves
+`.claude/launch.json` against the primary working directory**, so a screenshot taken from a lane
+worktree silently shows the MAIN checkout instead — session 64 correctly refused to ship small-screen
+evidence on that basis, and no supported way to preview an `rc/*` worktree exists yet.
