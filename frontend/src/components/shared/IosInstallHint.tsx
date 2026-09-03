@@ -3,6 +3,7 @@ import Download from 'lucide-react/dist/esm/icons/download.js'
 import Share from 'lucide-react/dist/esm/icons/share.js'
 import X from 'lucide-react/dist/esm/icons/x.js'
 import { useApp as useAppHook } from '../../AppContext.tsx'
+import InfoHint from './InfoHint.tsx'
 import {
   dismissIosInstallHint,
   hasDeferredInstallPrompt,
@@ -90,6 +91,15 @@ export default function IosInstallHint() {
       <Share className="h-4 w-4 flex-shrink-0" aria-hidden="true" />
       <span className="min-w-0 flex-1">
         {t('ios_install_hint') || 'Install this app: tap Share, then "Add to Home Screen".'}
+        {/* P2-9 finding 8: the visible copy stays one short line naming both
+            steps; the why-bother and the rest of the detail move behind the
+            hint rather than growing this band into a paragraph the user has
+            to read past to get back to work. */}
+        <InfoHint
+          className="ml-1 align-middle"
+          label={t('install_app') || 'Install app'}
+          text={t('ios_install_hint_detail') || 'Tap Share in Safari, then Add to Home Screen. Installed, the app gets its own icon and keeps working offline.'}
+        />
       </span>
       <button
         type="button"

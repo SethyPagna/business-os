@@ -5237,5 +5237,6 @@
   "later": "Later",
   "storage_eviction_title": "Offline data may be cleared",
   "storage_eviction_body": "This browser did not grant permanent storage.",
-  "storage_eviction_detail": "Offline sales waiting to sync and the saved app pages can be removed when the device runs low on space. Add the app to your Home Screen and open it from there — browsers keep data for installed apps."
+  "storage_eviction_detail": "Offline sales waiting to sync and the saved app pages can be removed when the device runs low on space. Add the app to your Home Screen and open it from there — browsers keep data for installed apps.",
+  "ios_install_hint_detail": "Tap Share in Safari, then Add to Home Screen. Installed, the app gets its own icon and keeps working offline."
 }
