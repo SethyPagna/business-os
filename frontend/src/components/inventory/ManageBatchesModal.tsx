@@ -10,6 +10,7 @@ import { getInventoryMovements } from '../../api/inventoryTransport.ts'
 import { batchDisplayLabel } from '../../utils/batchLabel.ts'
 import { dateToBatchCode } from '../../utils/batchCode.ts'
 import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.ts'
+import DateEntryInput from '../shared/DateEntryInput.tsx'
 
 type DayMovement = {
   id?: number | string
@@ -317,11 +318,14 @@ export default function ManageBatchesModal({
                     <div className="grid gap-2 sm:grid-cols-2">
                       <label className="block">
                         <span className="mb-1 block text-[11px] font-medium text-gray-600 dark:text-gray-400">{tr('batch_date', 'Batch date')}</span>
-                        <input
-                          className="input w-full text-sm"
-                          type="date"
+                        {/* Typed, not a native picker (Sep 3) -- this date
+                            IS the lot code, and staff key it as digits. */}
+                        <DateEntryInput
+                          className="w-full text-sm"
+                          t={t}
+                          ariaLabel={tr('batch_date', 'Batch date')}
                           value={draft.receivedAt}
-                          onChange={(event) => setDraft((prev) => ({ ...prev, receivedAt: event.target.value }))}
+                          onChange={(iso) => setDraft((prev) => ({ ...prev, receivedAt: iso }))}
                         />
                         {/* Preview only -- the backend always recomputes
                             and stores the authoritative code itself from
@@ -336,11 +340,12 @@ export default function ManageBatchesModal({
                       </label>
                       <label className="block">
                         <span className="mb-1 block text-[11px] font-medium text-gray-600 dark:text-gray-400">{tr('expiry_date', 'Expiry date')}</span>
-                        <input
-                          className="input w-full text-sm"
-                          type="date"
+                        <DateEntryInput
+                          className="w-full text-sm"
+                          t={t}
+                          ariaLabel={tr('expiry_date', 'Expiry date')}
                           value={draft.expiryDate}
-                          onChange={(event) => setDraft((prev) => ({ ...prev, expiryDate: event.target.value }))}
+                          onChange={(iso) => setDraft((prev) => ({ ...prev, expiryDate: iso }))}
                         />
                       </label>
                     </div>

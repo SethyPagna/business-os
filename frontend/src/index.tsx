@@ -18,6 +18,8 @@ const AdminRoot = React.lazy(() => import('./AdminRoot.tsx')) as ComponentType
 const PublicCatalogRoot = React.lazy(() => import('./PublicCatalogRoot.tsx')) as ComponentType
 const SERVICE_WORKER_REGISTER_IDLE_TIMEOUT_MS = 5000
 const SERVICE_WORKER_REGISTER_FALLBACK_DELAY_MS = 1200
+const SERVICE_WORKER_UPDATE_POLL_MS = 15 * 60 * 1000
+const SERVICE_WORKER_UPDATE_MIN_GAP_MS = 60 * 1000
 const FORM_FIELD_ACCESSIBILITY_IDLE_TIMEOUT_MS = 3000
 const FORM_FIELD_ACCESSIBILITY_FALLBACK_DELAY_MS = 1200
 
@@ -40,6 +42,51 @@ function scheduleAfterLoadIdle(task: () => void, idleTimeoutMs: number, fallback
   window.addEventListener('load', schedule, { once: true })
 }
 
+// A shop tab stays open all day and never navigates, so the browser only ever
+// refetches sw.js at registration time. Without an explicit re-check the new
+// worker never reaches 'install', BUSINESS_OS_APP_UPDATE_AVAILABLE is never
+// broadcast, and the "Restart now" bar can never appear -- the till keeps
+// running a stale bundle across deploys. Re-check on the cheap signals plus a
+// slow interval. This only ASKS the browser to look; the service worker still
+// decides whether anything actually changed, and nothing here ever reloads the
+// page. Restarting stays exclusively the user's choice through
+// restartIntoLatestApp(), which guards unfinished work.
+function watchForNewAppShell(registration: ServiceWorkerRegistration) {
+  if (typeof window === 'undefined') return
+
+  let lastCheckedAt = Date.now()
+  let checking = false
+
+  const check = (minGapMs = 0) => {
+    if (checking) return
+    // An offline till would only burn a failing fetch every tick.
+    if (navigator.onLine === false) return
+    if (minGapMs > 0 && Date.now() - lastCheckedAt < minGapMs) return
+    checking = true
+    lastCheckedAt = Date.now()
+    Promise.resolve(registration.update?.())
+      .catch(() => {})
+      .finally(() => { checking = false })
+  }
+
+  window.setInterval(() => {
+    // A hidden tab can wait until someone looks at it again.
+    if (document.visibilityState === 'hidden') return
+    check()
+  }, SERVICE_WORKER_UPDATE_POLL_MS)
+
+  // Returning to the tab is the moment the bar is worth showing. The minimum
+  // gap keeps rapid tab-switching from hammering the network.
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState !== 'visible') return
+    check(SERVICE_WORKER_UPDATE_MIN_GAP_MS)
+  })
+
+  // Reconnecting is the other moment a deploy missed while offline becomes
+  // reachable.
+  window.addEventListener('online', () => { check(SERVICE_WORKER_UPDATE_MIN_GAP_MS) })
+}
+
 function registerOfflineAppShell() {
   if (typeof window === 'undefined' || !('serviceWorker' in navigator)) return
 
@@ -47,6 +94,7 @@ function registerOfflineAppShell() {
     try {
       const registration = await navigator.serviceWorker.register('/sw.js', { scope: '/' })
       registration.update?.().catch(() => {})
+      watchForNewAppShell(registration)
     } catch (_) {}
   }
 

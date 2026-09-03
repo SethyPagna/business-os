@@ -1504,6 +1504,10 @@
   "data_rows_detected": "data rows detected",
   "date": "Date",
   "date_added": "Date added",
+  "date_entry_ambiguous": "That digit run has more than one reading — check the date.",
+  "date_entry_help": "Type digits only — 9032026 becomes 09/03/2026.",
+  "date_entry_hint_label": "Date format",
+  "date_entry_invalid": "Enter the date as mm/dd/yyyy.",
   "date_from": "From Date",
   "date_only": "date",
   "date_time_range": "Date & time range",
@@ -5179,5 +5183,16 @@
   "copy_receipt_number": "Copy receipt number",
   "copy_return_id": "Copy return ID",
   "return_blocked_cancelled_sale": "This sale was cancelled, so there is nothing to return.",
-  "return_blocked_fully_returned": "Every item on this sale has already been returned."
+  "return_blocked_fully_returned": "Every item on this sale has already been returned.",
+  "retry_failed": "Retry failed",
+  "discard": "Discard",
+  "keep_editing": "Keep editing",
+  "stock_rows_failed": "Some products could not be saved. Fix them and retry.",
+  "discard_failed_adjustment": "Discard the unsaved adjustment?",
+  "discard_failed_adjustment_desc": "This entry was never saved. Discard it, or keep editing to fix and retry.",
+  "unsaved_not_applied": "Unsaved — not applied",
+  "failed_attempt_hint": "This change never reached the server, so no stock moved. Fix it and retry, or discard it.",
+  "fix_and_retry": "Fix and retry",
+  "stock_adjust_failed_row": "Not saved — fix and retry",
+  "stock_adjust_failed_offline": "Not saved — offline. Your entry is kept."
 }
