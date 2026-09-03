@@ -55,7 +55,7 @@ console.log('PASS returns type filter stays client-side so scope stat tiles and 
 
 assert.match(newReturnSource, /Search another product by name, SKU or barcode/, 'replacement sale should search the full catalog by name/SKU/barcode')
 assert.match(newReturnSource, /searchProducts\(\{ query, page: 1, pageSize: 30 \}\)/, 'replacement catalog search should use the normal product search transport')
-assert.match(newReturnSource, /normCode\(row\.barcode\).*normCode\(row\.sku\)/, 'an exact scanned barcode or SKU should select its replacement row')
+assert.doesNotMatch(newReturnSource, /if \(exactBarcode\) pickReplacementRow\(/, 'a scan must never auto-pick a replacement row -- it only narrows the candidate list, the operator chooses')
 assert.doesNotMatch(newReturnSource, /normName\(row\.name\).*normName\(name\)/, 'replacement choices must not be filtered back to the returned product name')
 assert.match(newReturnSource, /replacementReceiptNumber/, 'successful exchange should surface the linked replacement receipt number')
 assert.match(returnDetailSource, /replacement_receipt_number/, 'return detail should show the linked replacement sale receipt')

@@ -242,7 +242,6 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify }: N
   // explicit preview" -- the checkbox below IS the explicit preview, and
   // it only unlocks for Full Access to Returns.
   const canSettleDifference = getPermissionTier?.('returns') === 'full'
-  const normCode = (value: unknown) => String(value ?? '').trim().toLowerCase()
 
   const loadReplacementBatches = async (lineKey: string, productId: number | string, branchId: number | string | null) => {
     if (!branchId) return
@@ -309,9 +308,12 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify }: N
     try {
       const payload = await searchProducts({ query, page: 1, pageSize: 30 }) as { items?: ReplacementCandidate[] }
       const rows = Array.isArray(payload?.items) ? payload.items : []
+      // Project rule (barcode-scan-select-then-confirm): a scan NEVER
+      // auto-picks a product on any surface. The scanned/typed code becomes
+      // the query and narrows this line's candidate list -- the operator
+      // still chooses the row, because a replacement changes what the
+      // customer walks out with and what the linked sale charges.
       updateReplacement(lineKey, { candidates: rows, searching: false, searched: true })
-      const exactBarcode = rows.find((row) => normCode(row.barcode) === normCode(query) || normCode(row.sku) === normCode(query))
-      if (exactBarcode) pickReplacementRow(lineKey, exactBarcode)
     } catch (error) {
       updateReplacement(lineKey, { searching: false, searched: true })
       notify(`${T('search_error', 'Search error')}: ${getLoaderErrorMessage(error, T('error', 'Error'))}`, 'error')
