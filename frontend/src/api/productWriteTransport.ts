@@ -158,10 +158,30 @@ export function dismissProductDuplicateCluster(type: 'barcode' | 'name' | 'simil
   )
 }
 
-export function mergePossiblySameProducts(keepId: number | string, mergeId: number | string): Promise<unknown> {
+// Read-only dry run behind every "keep this one" decision: what the row being
+// discarded still holds (per branch, per lot) and whether the merge would move
+// the keeper's prices. Callers open the confirm dialog with these numbers, so
+// the operator answers with the facts in view. Plain apiFetch -- it writes
+// nothing and is safe to repeat.
+export function getMergePreview(keepId: number | string, mergeId: number | string): Promise<unknown> {
+  const query = `keepId=${encodeURIComponent(String(keepId))}&mergeId=${encodeURIComponent(String(mergeId))}`
+  return apiFetch('GET', `/api/products/possible-duplicates/merge-preview?${query}`)
+}
+
+// `stock` is the operator's answer for the discarded row's remaining stock:
+// 'merge' moves every lot onto the keeper keeping its batch and branch, and
+// 'write_off' zeroes them against a balancing ledger entry. It is deliberately
+// NOT defaulted here: the server refuses a stocked row with no answer (400
+// stock_choice_required) rather than guessing, and a default in the transport
+// would quietly reinstate exactly the silent behaviour that was wrong.
+export function mergePossiblySameProducts(
+  keepId: number | string,
+  mergeId: number | string,
+  stock?: 'merge' | 'write_off',
+): Promise<unknown> {
   return route(
     'products:mergePossiblySame',
-    () => apiFetch('POST', '/api/products/possible-duplicates/merge', { keepId, mergeId }),
+    () => apiFetch('POST', '/api/products/possible-duplicates/merge', stock ? { keepId, mergeId, stock } : { keepId, mergeId }),
     null,
     true,
   )

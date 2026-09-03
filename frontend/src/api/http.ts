@@ -306,6 +306,14 @@ function createApiError(status: number, parsed: LooseRecord | null, text: string
   // can offer to SELECT the existing contact instead of dead-ending on the
   // 409 -- see routes/contacts.ts's duplicateErrorResponse.
   error.duplicate = parsed?.duplicate || null
+  // Carry the per-branch/per-lot breakdown a 400 stock_choice_required returns,
+  // so the caller can open the merge/remove dialog with the real numbers
+  // instead of a bare error toast -- see routes/products.ts's merge guard.
+  error.stockImpact = parsed?.stockImpact || null
+  // ...and whether the two rows are actually the same product (name + barcode
+  // + cost), so the same dialog can warn about a cross-identity merge whether
+  // it was opened from the preview or from this refusal.
+  error.identity = parsed?.identity || null
   error.transientGateway = isTransientGatewayError(status)
   error.conflict = !!parsed?.conflict || parsed?.code === 'write_conflict'
   error.entity = parsed?.entity || null
