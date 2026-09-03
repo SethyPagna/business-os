@@ -14,6 +14,7 @@ import { MarginCard, DualPriceInput, parseNumericInput, sanitizeNumericInput } f
 import { calculateProductDiscount, formatPriceNumber, normalizePriceValue } from '../../../utils/pricing.ts'
 import RenameCascadeModal, { type RenameCascadeChoice, type RenameCascadeRequest } from '../../shared/RenameCascadeModal.tsx'
 import ConfirmDialog, { type ConfirmReviewItem } from '../../shared/ConfirmDialog.tsx'
+import { useMergeStockChoice } from '../useMergeStockChoice.tsx'
 import { getRenameImpact, renameBrandEverywhere } from '../../../api/renameCascadeTransport.ts'
 import { classifyCreateMatches, type CreateMatchVerdict, type CreateMatchCandidate } from '../helpers/productCreateMatch.ts'
 import { readWorkDraft, scheduleWorkDraftWrite, clearWorkDraft, scopedWorkDraftKey } from '../../../utils/workDrafts.ts'
@@ -26,6 +27,18 @@ import {
   withLoaderTimeout,
 } from '../../../utils/loaders.ts'
 import { ADMIN_MAX_PRODUCT_GALLERY_IMAGES, MAX_PRODUCT_GALLERY_IMAGES } from '../helpers/productGalleryHelpers.ts'
+
+// The server's "same name + barcode + cost is the same product -- merge into it
+// instead of creating a twin" 409, unpacked into the row it is pointing at.
+// Returns null for any other failure, so an unrelated error can never be
+// mistaken for an invitation to merge two products together.
+function duplicateCollisionFrom(error: unknown): { id: number; name: string | null } | null {
+  const err = error as { code?: unknown; duplicate?: { id?: unknown; name?: unknown } } | null
+  if (String(err?.code || '') !== 'duplicate_product') return null
+  const id = Number(err?.duplicate?.id)
+  if (!Number.isInteger(id) || id <= 0) return null
+  return { id, name: err?.duplicate?.name == null ? null : String(err.duplicate.name) }
+}
 
 const BarcodeScannerModal = lazyRetry(() => import('../scanning/BarcodeScannerModal'), 'product-form-barcode-scanner-modal')
 const PRODUCT_SUPPLIERS_TIMEOUT_MS = 8000
@@ -711,6 +724,10 @@ export default function ProductForm({
   // Part 563: the final "confirm / double-check" gate the save flow awaits
   // before writing, using the shared ConfirmDialog. Same promise-based pattern
   // as askRenameChoice above -- saveForm opens it and blocks on the choice.
+  // Saving a rename/re-barcode into an existing twin is a merge decision, and
+  // it goes through the SAME flow (and the same stock question) the Conflicts
+  // review uses -- one answer to "the other row also has stock", everywhere.
+  const { mergeWithChoice, mergeStockChoiceDialog } = useMergeStockChoice(t)
   const [saveConfirmOpen, setSaveConfirmOpen] = useState(false)
   const saveConfirmResolveRef = useRef<((ok: boolean) => void) | null>(null)
   const askSaveConfirm = () => new Promise<boolean>((resolve) => {
@@ -1068,6 +1085,30 @@ export default function ProductForm({
       formDirtyRef.current = false
       clearWorkDraft(draftKey)
     } catch (error) {
+      // "Merge into it instead of creating a twin" used to be a dead end: the
+      // server's 409 arrived as a bare alert and the operator was left to find
+      // the Conflicts review by hand. Offer the merge right here instead --
+      // through the SAME shared flow the Conflicts tab uses, so a row that
+      // still holds stock is asked the same merge-or-write-off question rather
+      // than having it answered for it. Only on an EDIT: in create mode there
+      // is no saved row yet to fold into the twin.
+      const collision = duplicateCollisionFrom(error)
+      if (collision && product?.id) {
+        try {
+          const outcome = await mergeWithChoice({ id: collision.id, name: collision.name }, { id: Number(product.id), name: String(form.name || '') })
+          if (outcome === 'merged') {
+            formDirtyRef.current = false
+            clearWorkDraft(draftKey)
+            onClose()
+            return
+          }
+        } catch (mergeError) {
+          alert(getErrorMessage(mergeError, tr('failed', 'Failed', 'បរាជ័យ')))
+          return
+        }
+        // Cancelled the merge -- fall through to the message so the operator
+        // knows the save did not go through and can edit the name instead.
+      }
       alert(getErrorMessage(error, tr('failed', 'Failed', 'បរាជ័យ')))
     } finally {
       saveInFlightRef.current = false
@@ -1797,6 +1838,9 @@ export default function ProductForm({
           root-level dialog (create verdict). Locked by
           tests/productFormContract.test.ts. */}
       <RenameCascadeModal request={renameRequest} busy={saving} t={(key, fallback) => t(key) || fallback || key} onChoose={handleRenameChoice} />
+      {/* Saving into an existing twin offers the merge here; a twin that still
+          holds stock is asked merge-or-write-off before anything is written. */}
+      {mergeStockChoiceDialog}
       {saveConfirmOpen ? (
         <ConfirmDialog
           t={t}

@@ -132,7 +132,8 @@ import { buildIssuesFilterSection } from '../shared/IssuesFilterOptions.tsx'
 import { buildPromotionsFilterSection } from '../shared/PromotionsFilterOptions.ts'
 import type { PromotionRule } from '../../utils/promotionRules.ts'
 import type { BulkDeleteJobStatus } from '../../api/productWriteTransport.ts'
-import { getPossiblySameProducts, mergePossiblySameProducts, dismissProductDuplicateCluster } from '../../api/productWriteTransport.ts'
+import { getPossiblySameProducts, dismissProductDuplicateCluster } from '../../api/productWriteTransport.ts'
+import { useMergeStockChoice } from './useMergeStockChoice.tsx'
 import { buildExactDuplicateIndex, extractDuplicateClusters, findRowDuplicateInfo, type ExactDuplicateInfo } from '../../utils/exactDuplicateProducts.ts'
 import DuplicateResolverControl from './DuplicateResolverControl.tsx'
 
@@ -797,6 +798,9 @@ function ProductsFullEditor() {
   // dismissing so its row's buttons show a spinner without freezing the rest.
   const [duplicateClusters, setDuplicateClusters] = useState<unknown[]>([])
   const [dupResolverBusyKey, setDupResolverBusyKey] = useState<string | null>(null)
+  // The ONE keep-this / merge-that flow, shared with the Conflicts review: a
+  // discarded twin that still holds stock asks what happens to it first.
+  const { mergeWithChoice, mergeStockChoiceDialog } = useMergeStockChoice(t)
   const [zeroQuantityCleanupOpen, setZeroQuantityCleanupOpen] = useState(false)
   const [zeroQuantityCleanupBusy, setZeroQuantityCleanupBusy] = useState(false)
   const [wireImagesOpen, setWireImagesOpen] = useState(false)
@@ -1778,15 +1782,23 @@ function ProductsFullEditor() {
   // "Keep this": fold the OTHER members of this exact-duplicate group into the
   // chosen record (one pair per call, stopping on first failure so nothing
   // half-merges silently), then reload and re-sweep.
+  // A twin that still holds stock asks what happens to it before anything is
+  // written -- the SAME dialog and the same server call the Conflicts review
+  // uses, so this list shortcut cannot be the quiet way round the question.
   const handleDuplicateKeepThis = useCallback(async (keepId: number, info: ExactDuplicateInfo) => {
     if (dupResolverBusyKey) return
     const others = info.members.filter((m) => Number(m.id) !== Number(keepId))
     if (!others.length) return
+    const keeper = info.members.find((m) => Number(m.id) === Number(keepId)) || { id: keepId, name: null }
     setDupResolverBusyKey(info.key)
     try {
+      let merged = 0
       for (const other of others) {
-        await mergePossiblySameProducts(keepId, other.id)
+        const outcome = await mergeWithChoice(keeper, other)
+        if (outcome === 'cancelled') break
+        merged += 1
       }
+      if (!merged) return
       notify(t('product_duplicate_merged') || 'Merged — stock, lots and images were carried onto the kept product')
       await load(true)
       await refreshDuplicateClusters()
@@ -1795,7 +1807,7 @@ function ProductsFullEditor() {
     } finally {
       setDupResolverBusyKey(null)
     }
-  }, [dupResolverBusyKey, load, notify, refreshDuplicateClusters, t])
+  }, [dupResolverBusyKey, load, mergeWithChoice, notify, refreshDuplicateClusters, t])
 
   // "Keep both": dismiss the barcode cluster (these are genuinely different
   // items), so the sweep stops flagging it -- the false-positive escape hatch.
@@ -4544,6 +4556,9 @@ function ProductsFullEditor() {
           working={deleteConfirmBusy}
         />
       )}
+
+      {/* The merge/remove stock decision behind an exact-duplicate "Keep this". */}
+      {mergeStockChoiceDialog}
     </div>
   )
 }

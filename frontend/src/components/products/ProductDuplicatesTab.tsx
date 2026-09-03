@@ -6,8 +6,10 @@ import Merge from 'lucide-react/dist/esm/icons/merge.js'
 import InfoHint from '../shared/InfoHint.tsx'
 import ScanSearchButton from '../shared/ScanSearchButton.tsx'
 import { ProductImg } from './shared/primitives.tsx'
-import { getPossiblySameProducts, dismissProductDuplicateCluster, mergePossiblySameProducts, updateProduct } from '../../api/productWriteTransport.ts'
+import { getPossiblySameProducts, dismissProductDuplicateCluster, updateProduct } from '../../api/productWriteTransport.ts'
 import { normalizeProductGroupName } from '../../utils/productGrouping.ts'
+import { compareCosts } from '../../utils/productDetailRule.ts'
+import { useMergeStockChoice } from './useMergeStockChoice.tsx'
 import Modal from '../shared/Modal'
 
 // Products → Duplicates: the human-review residue the identity rule can't
@@ -33,6 +35,11 @@ type ClusterProduct = {
   selling_price_usd: number | null
   stock_quantity: number | null
   image_path: string | null
+  // WHERE this row's stock sits, not just how much. A pair whose set costs
+  // genuinely differ is review-only (never auto-merged), and the reviewer
+  // deciding it by hand needs both costs -- shown above -- and both rows'
+  // per-branch lines. Absent on an older Worker; an unstocked row sends [].
+  branch_stock?: Array<{ branch_id: number; branch_name: string | null; quantity: number }>
 }
 
 type Cluster = {
@@ -82,14 +89,21 @@ function cleanupBarcode(value: string | null): string {
 }
 
 // Only these pairs are safe for an automatic bulk decision: same exact name,
-// same costs, and either the exact barcode or precisely one extra leading 0.
-// Similar names and a shared barcode under different names stay manual.
+// costs that do not DISAGREE, and either the exact barcode or precisely one
+// extra leading 0. Similar names and a shared barcode under different names
+// stay manual.
+//
+// "Do not disagree" is the shared cost ruling (utils/productDetailRule.ts's
+// compareCosts), not an equality test: a cost of 0/NULL is a cost nobody has
+// recorded yet, so a pair where one side is blank is one product and the
+// survivor keeps the real cost. Only BOTH sides carrying a cost and the two
+// differing is a real difference -- real money out, never averaged away by a
+// bulk run -- and that pair stays review-list only.
 function clusterIsSafeAutoMerge(cluster: Cluster): boolean {
   if (cluster.products.length !== 2) return false
   const [a, b] = cluster.products
   if (!normalizeProductGroupName(a.name) || normalizeProductGroupName(a.name) !== normalizeProductGroupName(b.name)) return false
-  if (Math.round((Number(a.cost_price_usd) || 0) * 100) !== Math.round((Number(b.cost_price_usd) || 0) * 100)) return false
-  if (Math.round((Number(a.cost_price_khr) || 0) * 100) !== Math.round((Number(b.cost_price_khr) || 0) * 100)) return false
+  if (compareCosts(a, b) === 'differs') return false
   return cleanupBarcode(a.barcode) === cleanupBarcode(b.barcode)
 }
 
@@ -225,6 +239,14 @@ function ClusterCard({
                   {cluster.type !== 'barcode' && product.barcode ? <span>{product.barcode}</span> : null}
                   <span>{money(product.cost_price_usd)} → {money(product.selling_price_usd)}</span>
                   <span>{Number(product.stock_quantity) || 0} {t('pcs') || 'pcs'}</span>
+                  {/* Per-branch lines: "which of these two rows holds the
+                      warehouse stock" is the fact that decides most keeper
+                      choices, and a bare total hides it. */}
+                  {(product.branch_stock || []).map((line) => (
+                    <span key={line.branch_id} className="rounded bg-black/5 px-1 dark:bg-white/10">
+                      {line.branch_name || `#${line.branch_id}`} {line.quantity}
+                    </span>
+                  ))}
                 </div>
               </div>
               <div className="flex flex-shrink-0 items-center gap-1">
@@ -360,21 +382,37 @@ export default function ProductDuplicatesTab({ t, notify }: {
     }
   }
 
+  // The one shared "keep this, what happens to the other's stock?" flow, used
+  // by every surface that resolves a twin (see useMergeStockChoice).
+  const { mergeWithChoice, mergeStockChoiceDialog } = useMergeStockChoice(t)
+
   // Apply the group's explicit decisions (ONE keeper + the rows marked
   // Remove); one pair per call, stopping on the first failure so nothing
   // half-merges silently. Undecided rows (in an odd partial state) are
   // never touched -- but the card only arms Apply when every row is
   // decided, so normally removals covers the whole rest of the group.
+  //
+  // Marking a row Remove used to fold its stock onto the keeper anyway: the
+  // word said one thing and the write did the other. Each removal that still
+  // holds stock now asks -- merge the quantities across, or write them off --
+  // before anything is written, one question per row, since two rows in one
+  // group can hold different stock and deserve different answers. Cancelling
+  // stops the whole Apply where it stands rather than continuing down the list.
   const handleApplyDecisions = async (cluster: Cluster, keeper: ClusterProduct, removals: ClusterProduct[]) => {
     if (!removals.length) return
     const id = clusterKey(cluster)
     setMergingId(id)
     try {
+      let merged = 0
       for (const other of removals) {
-        await mergePossiblySameProducts(keeper.id, other.id)
+        const outcome = await mergeWithChoice(keeper, other)
+        if (outcome === 'cancelled') break
+        merged += 1
       }
+      if (!merged) return
       notify(t('product_duplicate_merged') || 'Merged -- stock, lots and images were carried onto the kept product')
-      removeCluster(id)
+      if (merged === removals.length) removeCluster(id)
+      else void load()
     } catch (e: unknown) {
       notify(e instanceof Error ? e.message : (t('merge_duplicate_failed') || 'Could not merge these records'), 'error')
     } finally {
@@ -459,12 +497,17 @@ export default function ProductDuplicatesTab({ t, notify }: {
     const skipped = targets.length - mergeable.length
     setBulkBusy(true)
     let failed = 0
+    let cancelled = 0
     let done = 0
     for (const cluster of mergeable) {
       setBulkProgress(replaceVars(t('bulk_merging_progress') || 'Merging {done}/{total}…', { done: done + 1, total: mergeable.length }))
       const [keeper, other] = chooseAutomaticKeeper(cluster.products)
       try {
-        await mergePossiblySameProducts(keeper.id, other.id)
+        // Same question as the per-card Apply: a bulk run may not decide for
+        // the operator what happens to a stocked row's lots just because it is
+        // faster. The dialog opens mid-run and the progress label waits for it.
+        const outcome = await mergeWithChoice(keeper, other)
+        if (outcome === 'cancelled') { cancelled += 1; done += 1; continue }
         removeCluster(clusterKey(cluster))
       } catch {
         failed += 1
@@ -474,10 +517,11 @@ export default function ProductDuplicatesTab({ t, notify }: {
     setBulkBusy(false)
     setBulkProgress('')
     setSelectedKeys(new Set())
-    if (failed || skipped) {
+    if (failed || skipped || cancelled) {
       const parts = []
       if (failed) parts.push(replaceVars(t('bulk_merge_partial_failure') || '{count} could not be merged', { count: failed }))
       if (skipped) parts.push(replaceVars(t('bulk_merge_skipped_multiway') || '{count} group(s) need manual review and were skipped', { count: skipped }))
+      if (cancelled) parts.push(replaceVars(t('bulk_merge_cancelled_count') || '{count} left untouched — you cancelled the stock decision', { count: cancelled }))
       notify(parts.join('. '), failed ? 'error' : 'info')
     } else {
       notify(t('bulk_merge_success') || 'Merged the selected duplicates')
@@ -504,7 +548,7 @@ export default function ProductDuplicatesTab({ t, notify }: {
       <div className="flex flex-wrap items-center gap-1.5">
         <InfoHint
           label={t('product_duplicates_how') || 'How this review works'}
-          text={t('product_duplicates_hint') || 'Products that share one real barcode (strong same-item evidence — but an EDP/EDT pair or two shades can genuinely share one), one display name with different barcodes (usually genuinely different SKUs), or a similar name — the same name re-typed with different punctuation, accents or word order, each with its own barcode. Keep this = the other rows merge into it: stock, lots and photos carry over, old sales stay valid. Dismiss = reviewed, genuinely different items — it stays dismissed for everyone.'}
+          text={t('product_duplicates_hint') || 'Products that share one real barcode (strong same-item evidence — but an EDP/EDT pair or two shades can genuinely share one), one display name with different barcodes (usually genuinely different SKUs), or a similar name — the same name re-typed with different punctuation, accents or word order, each with its own barcode. Keep this = the other rows fold into it: lots, photos, sales and returns carry over and old sales stay valid. If a row you are removing still holds stock you are asked what happens to it — move the lots onto the kept product, or write them off against the ledger. Dismiss = reviewed, genuinely different items — it stays dismissed for everyone.'}
         />
         <div className="flex items-center gap-1">
           {(['all', 'same_barcode', 'same_name', 'similar_name'] as const).map((severity) => {
@@ -665,6 +709,11 @@ export default function ProductDuplicatesTab({ t, notify }: {
           </div>
         </Modal>
       ) : null}
+
+      {/* The stock merge/remove decision. Rendered here so it floats above the
+          review grid; the Apply and bulk flows AWAIT it (the shared
+          ConfirmDialog, never window.confirm). */}
+      {mergeStockChoiceDialog}
     </div>
   )
 }
