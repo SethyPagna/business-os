@@ -125,6 +125,37 @@ Two rules learned the hard way, both from real incidents in this file's own hist
 
 ## Current status
 
+**TWO PROGRAMS, ONE PRODUCTION — AND THE RC LINE'S 0106 IS ALREADY TAKEN (Part 586).** The fleet is
+building two separate bodies of work that both target the same Worker, and they forked at `57d8f1a2`.
+Measured, not inferred: the **RC line** (`rc/coordinated-2026-09-02`, `539567e2`) is **149 commits /
+244 code files** since the split; the **production line** (`reconcile/2026-09-03`, `a486d82e`, what the
+live Worker is built from) is **89 commits / 148 code files**; **55 files were changed by both**. Read
+from remote D1 (SELECT-only), production has applied through **0107**, and its 0106 is
+`0106_return_replacement_sales.sql`. The RC line carries a *different* `0106_barcode_aliases.sql`,
+put there by `90180e9b chore(migrations): renumber barcode_aliases to 0106` — the exact trap
+`deploy-provenance` documents, renumbering into a slot production had already used. The RC line also
+has **none** of 0105, 0106_return_replacement or 0107: it is 149 commits built against a schema
+production left behind three migrations ago. **No `rc/*` branch is deployable until that is
+reconciled** — a decision for the user, not for a lane. Fleet-wide sweep: `0106_barcode_aliases.sql`
+is the **only** unapplied migration in the entire repo (no round-2 lane, no `hf/*` branch and neither
+in-flight RC lane adds one), so renaming it to **0108** is safe, isolated and one commit. Applied
+filenames 0105/0106/0107 are frozen; this one has never run anywhere.
+
+**Duplicate work across the two programs, at feature level not file level.** Both programs are
+independently redesigning the same surfaces from the same user request. `fx/reports-redesign`
+`9b444788` modifies `ReportsHub.tsx` and ships `HubLayers.tsx`; `rc/sec-10-reports` is rebuilding the
+same hub with its own `kit/Fold.tsx`, and **both create `cloudflare/scripts/test-reports-views-pure.cjs`**
+— an add/add conflict with no automatic resolution. Same shape for search (`fx/search-rank` vs
+`rc/p2-2-search` + `rc/sec-2-products-search`), products (`fx/products-report-style` vs
+`rc/p2-4b-products`) and PWA/update (`lane-c/app-update-prompt` vs `rc/p2-9-pwa` +
+`rc/sec-8b-plan-variants-pwa`). Per-lane file overlap between the two programs, computed from each
+branch's own fork point: **12 files**, headed by both lang packs, `frontend/package.json`,
+`Products.tsx`, `cloudflare/src/routes/products.ts`, `ProductsListSurface.tsx`, `App.tsx`,
+`AppContext.tsx`, `main.css`. RC lanes still ahead of the RC tip: only `rc/p2-4b-products` (8 commits)
+and `rc/p2-9-pwa` (17); every other `rc/sec-*` and `rc/p2-*` branch is already an ancestor of
+`rc/coordinated-2026-09-02`, and `rc/sec-10-reports` / `rc/sec-11-ios-pwa` sit exactly at it with **no
+commits of their own** — their lanes' work is uncommitted in their worktrees.
+
 **FLEET STATE — Sep 3, 14 lanes on `a486d82e`, none merged, none deployed (Part 585).** Tips read from
 git, not from lane reports. Green and complete: `fx/fleet-tooling` `be09ee65` · `fx/runtime-provenance`
 `93632d0b` · `fx/catalog-no-update-banner` `5778c01f` · `fx/khmer-naming` `64c69d67` ·

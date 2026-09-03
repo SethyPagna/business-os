@@ -17836,3 +17836,71 @@ under peers (`504 Outdated Optimize Dep`). Also unresolved: **the preview pane r
 `.claude/launch.json` against the primary working directory**, so a screenshot taken from a lane
 worktree silently shows the MAIN checkout instead — session 64 correctly refused to ship small-screen
 evidence on that basis, and no supported way to preview an `rc/*` worktree exists yet.
+
+## Part 586 (Sep 3 2026, session business-os-v1-c9, COORDINATOR) — the fleet is building two programs against one production Worker, and the RC line's migration number is already taken
+
+**Ask.** Continue coordinating. Four new peer sessions appeared after session 64 went away; brief them
+before they touch a file, and answer session 8c/sec-10's ownership report.
+
+**What changed.** Nothing in code. `progress.md` and this Part; four coordinator briefs and four
+escalations sent by `SendMessage`. No lane branch was touched, nothing merged, nothing deployed.
+
+**What was found.**
+
+*There are two programs, not one backlog.* They forked at `57d8f1a2`. Since the split the **RC line**
+(`rc/coordinated-2026-09-02`, `539567e2`) is **149 commits / 244 code files**; the **production line**
+(`reconcile/2026-09-03`, `a486d82e`, the commit the live Worker is built from) is **89 commits / 148
+code files**; **55 files were changed by both**. Neither is an ancestor of the other. Every prior Part
+that talked about "the lanes" meant one of these two and never said which, which is why the collision
+below survived this long.
+
+*The RC line cannot be deployed, and the reason is a number.* Read from remote D1, SELECT-only:
+
+```
+107  0107_receipt_numbers_business_format.sql
+106  0106_return_replacement_sales.sql
+105  0105_fee_delivery_contacts.sql
+104  0104_stock_in_session_read_indexes.sql
+```
+
+`rc/coordinated-2026-09-02` carries `cloudflare/migrations/0106_barcode_aliases.sql` — a **different
+file in an applied slot** — placed there by `90180e9b chore(migrations): renumber barcode_aliases to
+0106`. That is precisely the fourth false reading in the `deploy-provenance` skill: renumber per the
+standing rule *without reading `d1_migrations` first*. The standing rule governs migrations that have
+never run; 0105/0106/0107 have run, so their filenames are frozen and the free number was 0108, not
+0106. The RC line is also missing all three of those migrations outright — it forked before they
+existed — so it is 149 commits of work built against a schema production left behind.
+
+A fleet-wide sweep makes the fix small: **`0106_barcode_aliases.sql` is the only unapplied migration
+anywhere in the repo.** No round-2 lane adds a migration, no `hf/*` branch adds one, and neither
+in-flight RC lane adds one. Renaming it to `0108_barcode_aliases.sql` is one commit, touches nothing
+else, and cannot disturb production because D1 keys on filename and this file has never run.
+
+*Both programs are redesigning the same pages from the same user request.* Not a file-lock problem —
+duplicated implementation. `fx/reports-redesign` `9b444788` modifies `ReportsHub.tsx` and ships
+`HubLayers.tsx` as its layered container; `rc/sec-10-reports` is rebuilding the same hub with
+`kit/Fold.tsx`. **Both create `cloudflare/scripts/test-reports-views-pure.cjs`** — identical new path,
+different content, an add/add conflict git cannot resolve, in the very file whose job is to prove the
+other file is right. The same pattern covers search (`fx/search-rank` vs `rc/p2-2-search` +
+`rc/sec-2-products-search`), products (`fx/products-report-style` vs `rc/p2-4b-products`) and
+PWA/update (`lane-c/app-update-prompt` vs `rc/p2-9-pwa` + `rc/sec-8b-plan-variants-pwa`).
+
+*The measurement had to be redone once, and the first answer was wrong.* Diffing each `rc/*` branch
+from the original `57d8f1a2` split attributes the whole RC line's history to whichever lane sits on
+top of it, and reported 28 shared files. Diffing each branch from **its own fork point off
+`rc/coordinated-2026-09-02`** gives the real per-lane answer: **12**. It also showed that every
+`rc/sec-*` and `rc/p2-*` branch except two is already an ancestor of the RC tip; only
+`rc/p2-4b-products` (8 commits) and `rc/p2-9-pwa` (17) are ahead. `rc/sec-10-reports` and
+`rc/sec-11-ios-pwa` sit **exactly at** the RC tip with no commits of their own, so those lanes' work
+exists only as uncommitted files in their worktrees.
+
+**Verified.** Migration state read from production D1 with a read-only SELECT, not inferred from the
+repo. Branch topology from `git merge-base --is-ancestor` and `git rev-list --count`, per-lane file
+sets from `git diff --name-only <own fork point> <branch>`. The `0106` collision confirmed from three
+independent angles: the applied list in D1, `git ls-tree` of both lines' migration directories, and
+the commit that introduced the rename.
+
+**Not done.** Nothing renamed — `0108_barcode_aliases.sql` is the RC lane's commit to make, and I told
+them so rather than reaching into their branch. No trial integration; `fx/search-rank` is still
+running. Nothing deployed and no Stage-2 go exists. The RC-versus-production reconciliation, and
+which of each duplicated pair survives, are the user's decisions and are now in front of them.
