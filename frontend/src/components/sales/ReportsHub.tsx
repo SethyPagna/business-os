@@ -236,16 +236,36 @@ export default function ReportsHub({ embedded = false }: { embedded?: boolean })
   const optionsAnchor = useRef<HTMLElement | null>(null)
   const branchId = branchFilter || undefined
 
+  const searchInput = supportsSearch ? (
+    <input
+      type="search"
+      value={searchText}
+      onChange={(e) => setSearchText(e.target.value)}
+      placeholder={trh('search', 'Search')}
+      aria-label={trh('search', 'Search')}
+      className="h-7 w-full rounded-[var(--ui-radius-sm)] border border-[var(--ui-line)] bg-[var(--ui-surface)] px-2 text-[length:var(--ui-size-body)] text-[var(--ui-ink)] placeholder:text-[var(--ui-ink-3)] focus:outline-none focus:ring-2 focus:ring-[var(--ui-focus)]"
+    />
+  ) : null
+
   const viewPicker = (
     <AppSelect
       value={viewId || ''}
       options={views.map((v) => ({ value: v.id, label: trh(v.labelKey, v.fallback) }))}
       onChange={(value) => { if (isReportViewId(value)) setViewId(value) }}
       ariaLabel={trh('view', 'View')}
-      buttonClassName="h-7 min-w-[10rem] py-0 px-2 text-[11px]"
+      buttonClassName={compact ? 'h-7 min-w-0 max-w-[10rem] py-0 px-2 text-[11px]' : 'h-7 min-w-[10rem] py-0 px-2 text-[11px]'}
       showChevron
     />
   )
+  const searchSlot = compact
+    ? (
+      <div className="flex min-w-0 items-center gap-2">
+        {searchInput ? <div className="min-w-0 flex-1">{searchInput}</div> : null}
+        {viewPicker}
+      </div>
+    )
+    : searchInput
+
   const styleToggle = (
     <IconButton
       label={style === 'excel' ? trh('rpt_style_receipt', 'Receipt style') : trh('rpt_style_excel', 'Excel style')}
@@ -274,11 +294,21 @@ export default function ReportsHub({ embedded = false }: { embedded?: boolean })
     </>
   )
   const hasFilterControls = branches.length > 0 || supportsSaleFilters
+  const filtersLabel = `${trh('filters', 'Filters')}${activeFilterCount ? ` · ${activeFilterCount}` : ''}`
   const filtersButton = hasFilterControls ? (
     <span ref={(el) => { filtersAnchor.current = el }}>
-      <Button size="sm" variant={activeFilterCount ? 'primary' : 'secondary'} icon={<Filter className="h-3.5 w-3.5" />} onClick={() => setFiltersOpen((o) => !o)}>
-        {trh('filters', 'Filters')}{activeFilterCount ? ` · ${activeFilterCount}` : ''}
-      </Button>
+      {compact ? (
+        <IconButton
+          label={filtersLabel}
+          icon={<Filter className="h-3.5 w-3.5" />}
+          variant={activeFilterCount ? 'primary' : 'secondary'}
+          onClick={() => setFiltersOpen((o) => !o)}
+        />
+      ) : (
+        <Button size="sm" variant={activeFilterCount ? 'primary' : 'secondary'} icon={<Filter className="h-3.5 w-3.5" />} onClick={() => setFiltersOpen((o) => !o)}>
+          {filtersLabel}
+        </Button>
+      )}
     </span>
   ) : null
 
@@ -298,6 +328,18 @@ export default function ReportsHub({ embedded = false }: { embedded?: boolean })
     onOptionsChange,
   } : null
 
+  const collapsedTail = (
+    <>
+      {compact ? null : viewPicker}
+      {filtersButton}
+      <OverflowMenu label={trh('options', 'Options')} items={[
+        { label: style === 'excel' ? trh('rpt_style_receipt', 'Receipt style') : trh('rpt_style_excel', 'Excel style'), icon: style === 'excel' ? <Receipt className="h-3.5 w-3.5" /> : <Table2 className="h-3.5 w-3.5" />, onSelect: () => setStyleChoice(style === 'excel' ? 'receipt' : 'excel') },
+        { label: trh('rpt_options_title', 'Calculation options'), icon: <SlidersHorizontal className="h-3.5 w-3.5" />, onSelect: () => setOptionsOpen(true) },
+        ...(canSales ? [{ label: trh('business_summary_workbook', 'Business summary workbook'), icon: <Download className="h-3.5 w-3.5" />, onSelect: () => setExportChoiceOpen(true) }] : []),
+      ]} />
+    </>
+  )
+
   const body = !viewProps || !view ? (
     <EmptyState icon={<BarChart3 className="h-5 w-5" />} title={trh('reports', 'Reports')} text={trh('rpt_no_access', 'No report is available for your permissions.')} />
   ) : view.id === 'overview' ? <OverviewReport {...viewProps} />
@@ -311,24 +353,19 @@ export default function ReportsHub({ embedded = false }: { embedded?: boolean })
     <div className={embedded ? 'space-y-2' : 'space-y-2 p-2 sm:p-3'} data-reports-hub>
       <ControlRow
         sticky
-        search={supportsSearch ? (
-          <input
-            type="search"
-            value={searchText}
-            onChange={(e) => setSearchText(e.target.value)}
-            placeholder={trh('search', 'Search')}
-            aria-label={trh('search', 'Search')}
-            className="h-7 w-full rounded-[var(--ui-radius-sm)] border border-[var(--ui-line)] bg-[var(--ui-surface)] px-2 text-[length:var(--ui-size-body)] text-[var(--ui-ink)] placeholder:text-[var(--ui-ink-3)] focus:outline-none focus:ring-2 focus:ring-[var(--ui-focus)]"
+        search={searchSlot}
+        range={(
+          <DateTimeRangePicker
+            value={range}
+            onChange={setRange}
+            t={t}
+            showTime={supportsTime}
+            triggerClassName={compact ? 'flex w-full min-w-0 items-center gap-2 rounded-md px-2.5 py-1.5' : undefined}
           />
-        ) : null}
-        range={<DateTimeRangePicker value={range} onChange={setRange} t={t} showTime={supportsTime} />}
+        )}
         filters={compact ? null : filterSelects}
-        actions={compact ? null : <>{viewPicker}{styleToggle}{optionsButton}</>}
-        overflow={compact ? <>{viewPicker}{filtersButton}<OverflowMenu label={trh('options', 'Options')} items={[
-          { label: style === 'excel' ? trh('rpt_style_receipt', 'Receipt style') : trh('rpt_style_excel', 'Excel style'), icon: style === 'excel' ? <Receipt className="h-3.5 w-3.5" /> : <Table2 className="h-3.5 w-3.5" />, onSelect: () => setStyleChoice(style === 'excel' ? 'receipt' : 'excel') },
-          { label: trh('rpt_options_title', 'Calculation options'), icon: <SlidersHorizontal className="h-3.5 w-3.5" />, onSelect: () => setOptionsOpen(true) },
-          ...(canSales ? [{ label: trh('business_summary_workbook', 'Business summary workbook'), icon: <Download className="h-3.5 w-3.5" />, onSelect: () => setExportChoiceOpen(true) }] : []),
-        ]} /></> : exportMenu}
+        actions={compact ? null : <>{viewPicker}{styleToggle}{optionsButton}{exportMenu}</>}
+        overflow={collapsedTail}
       />
 
       {body}

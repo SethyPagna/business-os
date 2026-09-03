@@ -307,6 +307,29 @@ test('the hub persists view / style / options under the model\'s storage keys an
   }
 })
 
+test('the control row keeps every control at each width: nothing is dropped, nothing is doubled', () => {
+  const hub = read(HUB)
+  // ControlRow renders `overflow` INSTEAD of filters/sort/actions from 1023px
+  // down. Passing a tail that held only the export menu silently deleted the
+  // view picker and the filter selects between 768 and 1023 -- the tail has to
+  // be unconditional and carry them.
+  assert.ok(/overflow=\{collapsedTail\}/.test(hub), 'the collapsed tail is passed at every width, not only when compact')
+  const tail = hub.slice(hub.indexOf('const collapsedTail'), hub.indexOf('const body'))
+  assert.ok(tail.includes('{filtersButton}'), 'the tail carries the filters')
+  assert.ok(tail.includes("trh('rpt_options_title'"), 'the tail carries the calculation options')
+  assert.ok(tail.includes('viewPicker'), 'the tail carries the view picker')
+  // On the narrow tier the picker rides the search row instead, so exactly one
+  // of the two places renders it.
+  assert.ok(tail.includes('{compact ? null : viewPicker}'), 'the tail drops the picker on the narrow tier')
+  assert.ok(/const searchSlot = compact[\s\S]*?\{viewPicker\}/.test(hub), 'the narrow tier puts the picker on the search row')
+  // The date range is the widest control on a phone row; it only fits because
+  // the trigger becomes a full-width field whose labels can truncate.
+  assert.ok(hub.includes("triggerClassName={compact ? 'flex w-full min-w-0"), 'the range trigger goes full-width and shrinkable on phones')
+  const picker = read('src/components/shared/DateTimeRangePicker.tsx')
+  const spans = picker.match(/className=\{`min-w-0 truncate /g) || []
+  assert.equal(spans.length, 2, 'both endpoint labels can actually truncate (min-w-0, not truncate alone)')
+})
+
 test('no view assigns a cost/profit key itself -- profit is shown only when the server sent it', () => {
   for (const rel of VIEW_FILES) {
     const src = read(rel)
