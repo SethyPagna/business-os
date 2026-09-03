@@ -464,19 +464,13 @@ export default function PromotionsPage() {
     // unreachable (reported: Promotions/Loyalty could not scroll).
     <div className="page-scroll p-4">
       <div className="mx-auto max-w-5xl space-y-4">
-        {/* Header: identity only. HubSectionNav's chip row / layer-3 header
-            sits below this -- Promotions is the one hub that keeps its own
-            always-visible title above the switcher (the other four hubs show
-            no page title on mobile, see Gate 1 audit); it also feeds
-            HubSectionNav's `title` so layer 2's card list carries the same
-            name. */}
-        <div className="flex items-center gap-2.5">
-          <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-rose-100 text-rose-600 dark:bg-rose-900/40 dark:text-rose-300">
-            <BadgePercent className="h-5 w-5" />
-          </div>
-          <h1 className="text-xl font-semibold">{t('promotions') || 'Promotions'}</h1>
-        </div>
-
+        {/* No page title (user, Sep 3 2026). Promotions used to be the one
+            hub that kept an always-visible "Promotions" heading above its
+            switcher; the other four show none, and the sidebar already says
+            which page you are on. Removing it brings Promotions into line
+            with its siblings and gives the sections a screenful more room.
+            The name is still passed to HubSectionNav below, where layer 2 on
+            a phone does need it as the mini-page heading. */}
         <HubSectionNav
           sections={sections}
           active={activeSection}

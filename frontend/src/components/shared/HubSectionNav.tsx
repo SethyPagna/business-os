@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState, type ComponentType, type ReactNode, type SVGProps } from 'react'
 import ChevronLeft from 'lucide-react/dist/esm/icons/chevron-left.js'
-import ChevronRight from 'lucide-react/dist/esm/icons/chevron-right.js'
 import { useApp as useAppCore } from '../../app/AppContextCore.tsx'
 import { APP_NAVIGATION_EVENT } from '../../app/appShellUtils.ts'
 import { useIsCompactViewport } from '../../utils/useViewport.ts'
@@ -228,17 +227,19 @@ export default function HubSectionNav({
 
   if (visible.length <= 1) return <>{children}</>
 
-  const sectionsLabel = trh('sections', 'Sections')
 
   if (!layered) {
     // Desktop/tablet always, and compact + "sections" preference: the chip
     // row, with a clearer treatment (caption + stronger divider) at md+.
     return (
       <>
+        {/* No "Sections" caption above the chip row (user, Sep 3 2026): the
+            chips already read as a section switcher, and the word was one
+            more line of chrome above every hub page. The md+ divider below
+            stays -- that is what separates the switcher from the body. The
+            `sections` lang key is still live as the Settings toggle's option
+            label. */}
         <div className="min-w-0 shrink-0 px-3 pt-3 sm:px-4 sm:pt-4">
-          <div className="mb-1.5 hidden items-center gap-1.5 px-0.5 text-[11px] font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500 md:flex">
-            {sectionsLabel}
-          </div>
           <div className="inline-flex max-w-full overflow-x-auto overscroll-x-contain rounded-xl bg-gray-100 p-0.5 [touch-action:pan-x] dark:bg-gray-800 md:border md:border-gray-200 md:dark:border-gray-700">
             {visible.map((section) => {
               const Icon = section.icon
@@ -265,13 +266,19 @@ export default function HubSectionNav({
   }
 
   if (!entered) {
-    // Layer 2: option cards, one per visible section. The active section's
-    // body is intentionally NOT rendered here (see the doc comment above).
+    // Layer 2: SQUARE TILES, two per row (user, Sep 3 2026) -- a bigger icon
+    // with the name under it, rather than the full-width list rows this
+    // started as. Two per row means the whole hub is visible without
+    // scrolling on a 375-wide phone, and a square target is easier to hit on
+    // a shop counter than a thin row. The chevron goes: on a tile the whole
+    // square is obviously the target, so the affordance was noise. No
+    // "Sections" caption here either, for the same reason as the chip row
+    // above. The active section's body is intentionally NOT rendered here
+    // (see the doc comment at the top of this file).
     return (
       <div className="page-scroll flex-1 space-y-3 p-3 sm:p-4">
         {title ? <h1 className="px-0.5 text-lg font-semibold text-gray-900 dark:text-white">{title}</h1> : null}
-        <div className="px-0.5 text-xs font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500">{sectionsLabel}</div>
-        <div className="grid grid-cols-1 gap-2">
+        <div className="grid grid-cols-2 gap-2.5">
           {visible.map((section) => {
             const Icon = section.icon
             return (
@@ -279,19 +286,22 @@ export default function HubSectionNav({
                 key={section.id}
                 type="button"
                 onClick={() => enter(section.id)}
-                className="flex w-full items-center gap-3 rounded-2xl border border-gray-200 bg-white p-3.5 text-left shadow-sm transition-transform active:scale-[0.99] dark:border-gray-700 dark:bg-gray-900"
+                className="relative flex aspect-square w-full flex-col items-center justify-center gap-2 rounded-2xl border border-gray-200 bg-white p-3 text-center shadow-sm transition-transform active:scale-[0.98] dark:border-gray-700 dark:bg-gray-900"
               >
+                {section.badge ? <span className="absolute right-2 top-2">{section.badge}</span> : null}
                 {Icon ? (
-                  <span className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gray-100 dark:bg-gray-800 ${section.tone || 'text-primary-600 dark:text-primary-400'}`}>
-                    <Icon className="h-5 w-5" />
+                  <span className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-gray-100 dark:bg-gray-800 ${section.tone || 'text-primary-600 dark:text-primary-400'}`}>
+                    <Icon className="h-7 w-7" />
                   </span>
                 ) : null}
-                <span className="min-w-0 flex-1">
-                  <span className="block truncate text-sm font-semibold text-gray-900 dark:text-white">{section.label}</span>
-                  {section.description ? <span className="block truncate text-xs text-gray-500 dark:text-gray-400">{section.description}</span> : null}
+                <span className="min-w-0">
+                  {/* The label wraps rather than truncating: a two-word Khmer
+                      section name is wider than its English counterpart and
+                      would lose its second half to an ellipsis on a tile this
+                      narrow. */}
+                  <span className="block text-sm font-semibold leading-tight text-gray-900 dark:text-white">{section.label}</span>
+                  {section.description ? <span className="mt-1 block text-[10px] leading-tight text-gray-500 dark:text-gray-400">{section.description}</span> : null}
                 </span>
-                {section.badge}
-                <ChevronRight className="h-4 w-4 shrink-0 text-gray-300 dark:text-gray-600" aria-hidden="true" />
               </button>
             )
           })}
