@@ -863,7 +863,7 @@ export default function NotificationCenter({ compact = false, openRequestId = 0,
             </button>
           </div>
 
-          <div className="max-h-[70vh] overflow-y-auto px-2 py-2 sm:px-3 sm:py-3">
+          <div className="max-h-[calc(var(--app-vh-100)_*_.7)] overflow-y-auto px-2 py-2 sm:px-3 sm:py-3">
             <div className="mb-3 grid gap-2 rounded-xl border border-slate-200 bg-slate-50 p-2 dark:border-slate-700 dark:bg-slate-800/60 sm:grid-cols-[1fr_auto]">
               <label className="relative sm:col-span-2">
                 <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" aria-hidden="true" />

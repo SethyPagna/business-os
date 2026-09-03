@@ -173,7 +173,7 @@ export default function ActionHistoryBar({
       <LazyPortalMenu
         align={align === 'right' ? 'right' : 'auto'}
         onOpenChange={(isOpen) => { setOpen(isOpen); if (isOpen) setPreviewOpen(false) }}
-        menuClassName="w-[min(18rem,calc(100vw-1rem))] max-w-[calc(100vw-1rem)] max-h-[min(28rem,70vh)] overflow-auto rounded-2xl border border-slate-200 bg-white p-2 text-xs shadow-xl dark:border-slate-700 dark:bg-slate-900"
+        menuClassName="w-[min(18rem,calc(100vw-1rem))] max-w-[calc(100vw-1rem)] max-h-[min(28rem,calc(var(--app-vh-100)_*_.7))] overflow-auto rounded-2xl border border-slate-200 bg-white p-2 text-xs shadow-xl dark:border-slate-700 dark:bg-slate-900"
         trigger={(
           <button
             type="button"

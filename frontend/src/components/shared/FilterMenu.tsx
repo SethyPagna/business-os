@@ -329,7 +329,7 @@ function FilterMenuPanel({
     return (activeSection ?? sections[0])?.id ?? null
   })
   return (
-    <div className="max-h-[min(32rem,70vh)] overflow-auto rounded-[1.35rem] p-2.5">
+    <div className="max-h-[min(32rem,calc(var(--app-vh-100)_*_.7))] overflow-auto rounded-[1.35rem] p-2.5">
       <div className="mb-2.5 flex items-center justify-between gap-3">
         <div className="text-sm font-semibold text-gray-900 dark:text-white">{label}</div>
         <div className="flex items-center gap-2">

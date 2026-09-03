@@ -197,7 +197,7 @@ export default function PageSizeSelect({
           ref={menuRef}
           role="listbox"
           aria-label={ariaLabel}
-          className={`max-h-[min(18rem,calc(100vh-1rem))] overflow-y-auto overscroll-contain rounded-[1.05rem] border border-slate-200 bg-white p-1.5 shadow-2xl shadow-slate-900/12 ring-1 ring-black/5 dark:border-slate-700 dark:bg-slate-900 dark:shadow-black/35 ${menuClassName}`.trim()}
+          className={`max-h-[min(18rem,calc(var(--app-vh-100)_-_1rem))] overflow-y-auto overscroll-contain rounded-[1.05rem] border border-slate-200 bg-white p-1.5 shadow-2xl shadow-slate-900/12 ring-1 ring-black/5 dark:border-slate-700 dark:bg-slate-900 dark:shadow-black/35 ${menuClassName}`.trim()}
           style={usePortalMenu ? { position: 'fixed', top: position.top, left: position.left, width: position.width, zIndex: 10000 } : undefined}
         >
           {options.map((option) => {

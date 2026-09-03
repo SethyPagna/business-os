@@ -31,7 +31,7 @@ export default function ButtonGuidePopover({ title, entries, align = 'auto', tri
       align={align}
       compact
       openOnHover
-      menuClassName="max-h-[60vh] overflow-auto p-2.5 w-72"
+      menuClassName="max-h-[calc(var(--app-vh-100)_*_.6)] overflow-auto p-2.5 w-72"
       trigger={(
         <button
           type="button"

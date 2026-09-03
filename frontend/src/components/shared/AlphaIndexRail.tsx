@@ -174,7 +174,7 @@ export default function AlphaIndexRail({ letters, onJump, label, className = '' 
         onPointerUp={releaseDrag}
         onPointerCancel={releaseDrag}
         onPointerLeave={handlePointerLeave}
-        className={`fixed right-2 top-1/2 z-30 flex max-h-[70vh] -translate-y-1/2 touch-none select-none flex-col items-center justify-center rounded-full border border-gray-200 bg-white/90 shadow-md backdrop-blur-sm transition-[gap,padding] duration-150 dark:border-slate-700 dark:bg-slate-900/90 md:left-[228px] md:right-auto ${
+        className={`fixed right-2 top-1/2 z-30 flex max-h-[calc(var(--app-vh-100)_*_.7)] -translate-y-1/2 touch-none select-none flex-col items-center justify-center rounded-full border border-gray-200 bg-white/90 shadow-md backdrop-blur-sm transition-[gap,padding] duration-150 dark:border-slate-700 dark:bg-slate-900/90 md:left-[228px] md:right-auto ${
           expanded ? 'gap-[1px] px-1 py-2' : 'gap-0 px-0.5 py-1.5'
         } ${className}`}
       >

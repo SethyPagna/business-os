@@ -295,7 +295,7 @@ export default function ImageGalleryLightbox({
           phone this fills the safe viewport edge-to-edge (minus the outer
           p-2) rather than reserving a fixed vw fraction that could still
           overflow/clip on very small or very wide-aspect devices. */}
-      <div className="relative flex h-full max-h-[92vh] w-full max-w-[98vw] flex-col justify-center sm:max-w-[min(92vw,1100px)]" onClick={(event) => event.stopPropagation()}>
+      <div className="relative flex h-full max-h-[calc(var(--app-vh-100)_*_.92)] w-full max-w-[98vw] flex-col justify-center sm:max-w-[min(92vw,1100px)]" onClick={(event) => event.stopPropagation()}>
         <div className="absolute right-1 top-1 z-20 flex items-center gap-1.5 sm:right-2 sm:top-2">
           <button
             type="button"

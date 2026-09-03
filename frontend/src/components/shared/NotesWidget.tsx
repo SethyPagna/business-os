@@ -545,7 +545,7 @@ export default function NotesWidget() {
         width: `${size?.width ?? DEFAULT_WIDTH}px`,
         height: `${size?.height ?? DEFAULT_HEIGHT}px`,
         maxWidth: 'calc(100vw - 1rem)',
-        maxHeight: 'calc(100vh - 1rem)',
+        maxHeight: 'calc(var(--app-vh-100, 100vh) - 1rem)',
       }}
       className={`pointer-events-none fixed z-[1001] flex flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl dark:border-slate-700 dark:bg-slate-900 ${isDragging || isResizing ? 'transition-none' : ''} ${!dragPos ? 'left-6 top-1/2 -translate-y-1/2' : ''}`}
     >

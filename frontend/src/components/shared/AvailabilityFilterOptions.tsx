@@ -94,7 +94,7 @@ export function buildAvailabilityFilterSection({
       // popover's own cap alone) so on a short/tablet screen the combined
       // content can't push the flyout's own close button out of reach --
       // see the original POS FilterPanel comment this was lifted from.
-      <div className="max-h-[45vh] space-y-3 overflow-y-auto pr-0.5">
+      <div className="max-h-[calc(var(--app-vh-100)_*_.45)] space-y-3 overflow-y-auto pr-0.5">
         <div>
           <div className="mb-1 px-0.5 text-[10px] font-bold uppercase tracking-wide text-gray-500 dark:text-gray-400">
             {T('stock_status', 'Stock Status')}
