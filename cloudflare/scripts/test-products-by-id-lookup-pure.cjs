@@ -122,9 +122,20 @@ check('the id list is clamped so a caller cannot blow the SQL variable limit', (
 // --- the free-text alias half ------------------------------------------
 
 check('the catalog search reads query, q AND search as the same term', () => {
-  assert.ok(
-    productsRoute.includes("splitSearchTermGroups(query.query || query.q || query.search || '')"),
+  // Matched on the alias chain rather than on one whole statement: the term
+  // is read into a named variable so the barcode-equality probe can reuse the
+  // raw text, and pinning the old single-line form made this test fail on a
+  // pure refactor while the behaviour was intact. What must not drift is the
+  // chain -- a picker that spells the term with a synonym used to get the
+  // whole unfiltered catalog back with a 200.
+  assert.match(
+    productsRoute,
+    /query\.query \|\| query\.q \|\| query\.search \|\| ''/,
     'a picker that spells the term `search` must not silently get the unfiltered catalog',
+  )
+  assert.ok(
+    /splitSearchTermGroups\(\s*(rawSearchText|query\.query)/.test(productsRoute),
+    'the resolved term must be what actually feeds the search-term parser',
   )
 })
 
