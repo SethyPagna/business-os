@@ -1077,7 +1077,16 @@ input.input.text-sm, textarea.input.text-sm, select.input.text-sm {
      `body.lang-km .text-xs`'s (0,2,1) and `.text-xs`'s (0,1,0), both of which
      are `!important`, so no size utility can steal the floor back.
    - checkbox/radio are excluded: they render no text, and some engines size
-     the control box from font-size.
+     the control box from font-size. The same two :not() filters are
+     repeated on <select> and <textarea>, where they can never match
+     anything, on purpose: they equalise specificity across all three
+     selectors at (0,4,3). Without them those two sat at (0,2,3), which
+     LOSES to `body.lang-km .text-[10px]` / `.text-[11px]` at (0,3,1) --
+     so a Khmer phone could still have taken a 10px select and zoomed
+     on focus. No control carries those two utilities today; the floor
+     is written so it cannot be beaten if one ever does.
+     pwaInputZoom.test.ts computes that arithmetic against every
+     !important font-size rule in this file.
    - The floor is deliberately FLAT (every control lands on exactly 16px on a
      phone) rather than carrying `:not(.text-lg)`-style carve-outs for the
      three controls that ask for a bigger size (Login.tsx's and OtpModal.tsx's
@@ -1093,8 +1102,8 @@ input.input.text-sm, textarea.input.text-sm, select.input.text-sm {
      the zoom threshold. */
 @media (max-width: 767px) {
   html:not([data-business-os-initial-route="public"]) body:not([data-public-portal="true"]) input:not([type="checkbox"]):not([type="radio"]),
-  html:not([data-business-os-initial-route="public"]) body:not([data-public-portal="true"]) select,
-  html:not([data-business-os-initial-route="public"]) body:not([data-public-portal="true"]) textarea {
+  html:not([data-business-os-initial-route="public"]) body:not([data-public-portal="true"]) select:not([type="checkbox"]):not([type="radio"]),
+  html:not([data-business-os-initial-route="public"]) body:not([data-public-portal="true"]) textarea:not([type="checkbox"]):not([type="radio"]) {
     font-size: max(16px, var(--ui-input-size, 16px)) !important;
   }
 }
