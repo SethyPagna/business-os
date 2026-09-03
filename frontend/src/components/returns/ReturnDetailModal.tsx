@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 import { useApp as useAppHook } from '../../AppContext.tsx'
 import { fmtTime } from '../../utils/formatters.ts'
 import CopyableId from '../shared/CopyableId.tsx'
+import { DetailRow, DetailRowGroup, MoneyRow } from '../shared/DetailRows.tsx'
 import { normalizeStockAction, stockActionOption } from './helpers/returnOptions.ts'
 
 const CUSTOMER_SCOPE = 'customer'
@@ -54,6 +55,7 @@ interface ReturnDetail {
   replacement_items?: ReplacementLineItem[] | null
   settlement_mode?: string | null
   settlement_diff_usd?: number | string | null
+  settlement_diff_khr?: number | string | null
 }
 
 interface ReturnDetailModalProps {
@@ -121,153 +123,187 @@ export default function ReturnDetailModal({ ret, onClose, onEdit, fmtUSD, fmtKHR
           </div>
         </div>
 
+        {/* Same rhythm as the sale detail (fx/sale-detail-rows, Sep 3 2026):
+            label/value ROWS through the shared DetailRow, and the money
+            summary as MoneyRows inside the items table so the refund lands in
+            the same right-aligned column as the line amounts. This modal had
+            the identical defects -- stacked label-above-value blocks and a
+            bare unlabelled KHR line under the refund total -- and fixing only
+            the sale would have left the two record details disagreeing. */}
         <div className="modal-scroll space-y-4 p-4">
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <div className="mb-0.5 text-xs text-gray-400">{tr('scope', 'Scope')}</div>
-              <div className="text-sm font-medium text-gray-800 dark:text-gray-200">
-                {isSupplier ? tr('supplier_returns', 'Supplier Return') : tr('customer_returns', 'Customer Return')}
-              </div>
-            </div>
-            <div>
-              <div className="mb-0.5 text-xs text-gray-400">{tr('type', 'Type')}</div>
-              <div className="text-sm font-medium text-gray-800 dark:text-gray-200">{typeLabel}</div>
-            </div>
-            {ret.receipt_number ? (
-              <div>
-                <div className="mb-0.5 text-xs text-gray-400">{tr('original_receipt', 'Original Receipt')}</div>
-                <CopyableId
-                  value={ret.receipt_number}
-                  copyLabel={tr('copy_receipt_number', 'Copy receipt number')}
-                  copiedLabel={tr('copied', 'Copied')}
-                  valueClassName="font-mono text-sm text-blue-600 dark:text-blue-400"
-                />
-              </div>
-            ) : null}
-            {ret.replacement_receipt_number ? (
-              <div>
-                <div className="mb-0.5 text-xs text-gray-400">{tr('replacement_sale_receipt', 'Replacement Sale Receipt')}</div>
-                <CopyableId
-                  value={ret.replacement_receipt_number}
-                  copyLabel={tr('copy_receipt_number', 'Copy receipt number')}
-                  copiedLabel={tr('copied', 'Copied')}
-                  valueClassName="font-mono text-sm font-semibold text-emerald-600 dark:text-emerald-400"
-                />
-              </div>
-            ) : null}
-            <div>
-              <div className="mb-0.5 text-xs text-gray-400">{isSupplier ? tr('supplier', 'Supplier') : tr('customer', 'Customer')}</div>
-              <div className="text-sm font-medium text-gray-800 dark:text-gray-200">
-                {isSupplier ? (ret.supplier_name || '-') : (ret.customer_name || '-')}
-              </div>
-            </div>
-            <div>
-              <div className="mb-0.5 text-xs text-gray-400">{tr('branch', 'Branch')}</div>
-              <div className="text-sm font-medium text-gray-800 dark:text-gray-200">{ret.branch_name || '-'}</div>
-            </div>
-            <div>
-              <div className="mb-0.5 text-xs text-gray-400">{tr('cashier', 'Cashier')}</div>
-              <div className="text-sm font-medium text-gray-800 dark:text-gray-200">{ret.cashier_name || '-'}</div>
-            </div>
+          <div className="rounded-xl border border-gray-200 p-3 dark:border-gray-700">
+            <DetailRowGroup>
+              <DetailRow
+                label={tr('scope', 'Scope')}
+                value={isSupplier ? tr('supplier_returns', 'Supplier Return') : tr('customer_returns', 'Customer Return')}
+              />
+              <DetailRow label={tr('type', 'Type')} value={typeLabel} />
+              {ret.receipt_number ? (
+                <DetailRow label={tr('original_receipt', 'Original Receipt')}>
+                  <CopyableId
+                    value={ret.receipt_number}
+                    copyLabel={tr('copy_receipt_number', 'Copy receipt number')}
+                    copiedLabel={tr('copied', 'Copied')}
+                    valueClassName="font-mono text-sm text-blue-600 dark:text-blue-400"
+                  />
+                </DetailRow>
+              ) : null}
+              {ret.replacement_receipt_number ? (
+                <DetailRow label={tr('replacement_sale_receipt', 'Replacement Sale Receipt')}>
+                  <CopyableId
+                    value={ret.replacement_receipt_number}
+                    copyLabel={tr('copy_receipt_number', 'Copy receipt number')}
+                    copiedLabel={tr('copied', 'Copied')}
+                    valueClassName="font-mono text-sm font-semibold text-emerald-600 dark:text-emerald-400"
+                  />
+                </DetailRow>
+              ) : null}
+              <DetailRow
+                label={isSupplier ? tr('supplier', 'Supplier') : tr('customer', 'Customer')}
+                value={(isSupplier ? ret.supplier_name : ret.customer_name) || '-'}
+              />
+              <DetailRow label={tr('branch', 'Branch')} value={ret.branch_name || '-'} />
+              <DetailRow label={tr('cashier', 'Cashier')} value={ret.cashier_name || '-'} />
+              <DetailRow label={tr('reason', 'Reason')} value={ret.reason || '-'} />
+              <DetailRow label={tr('notes', 'Notes')} value={ret.notes} />
+            </DetailRowGroup>
           </div>
 
-          <div className="rounded-xl bg-orange-50 p-3 dark:bg-orange-900/20">
-            <div className="mb-1 text-xs font-semibold text-orange-700 dark:text-orange-400">{tr('reason', 'Reason')}</div>
-            <div className="text-sm text-orange-800 dark:text-orange-300">{ret.reason || '-'}</div>
-            {ret.notes ? <div className="mt-1 text-xs text-orange-600 dark:text-orange-400">{ret.notes}</div> : null}
-          </div>
-
-          <div>
+          <section className="rounded-xl border border-gray-200 p-3 dark:border-gray-700">
             <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
               {tr('items', 'Items')} ({items.length})
             </div>
-            <div className="space-y-2">
-              {items.map((item, index) => (
-                <div key={`${item.id || item.product_id || 'item'}-${index}`} className="flex items-start justify-between gap-2 border-b border-gray-100 py-2 last:border-0 dark:border-gray-700">
-                  <div className="min-w-0 flex-1">
-                    {/* Damaged is a TAG on the line, next to the name -- the
-                        product itself is never renamed to say so, so the name
-                        here is the catalog name and the chip carries the
-                        state. It sits beside the name rather than only in the
-                        meta line below, where it read as one more attribute
-                        instead of the flag that keeps the units out of
-                        sellable stock. */}
-                    <div className="flex flex-wrap items-center gap-1.5">
-                      <span className="detail-scroll-text text-sm font-medium text-gray-800 dark:text-gray-200">{item.product_name || '-'}</span>
-                      {!isSupplier && normalizeStockAction({ stock_action: item.stock_action, return_to_stock: item.return_to_stock !== 0 && item.return_to_stock !== false }) === 'damaged' ? (
-                        <span
-                          data-tag="damaged"
-                          title={tr('stock_action_damaged_hint', 'Tracked as a damaged lot tied to this return — kept out of sellable stock.')}
-                          className="inline-flex flex-shrink-0 items-center gap-1 rounded-full border border-orange-300 bg-orange-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-orange-700 dark:border-orange-700 dark:bg-orange-900/40 dark:text-orange-300"
-                        >
-                          {stockActionOption('damaged').icon} {tr('stock_action_damaged', 'Damaged')}
-                        </span>
-                      ) : null}
-                    </div>
-                    <div className="text-xs text-gray-400">
-                      {tr('quantity', 'Qty')}: {item.quantity || 0}
-                      {!isSupplier ? (() => {
-                        const option = stockActionOption(normalizeStockAction({ stock_action: item.stock_action, return_to_stock: item.return_to_stock !== 0 && item.return_to_stock !== false }))
-                        return <span className="ml-2">{option.icon} {tr(option.labelKey, option.labelEn)}</span>
-                      })() : null}
-                    </div>
-                  </div>
-                  <div className="text-right">
-                    <div className="text-sm font-semibold text-gray-900 dark:text-white">{fmtUSD(coerceMoney(item.total_usd))}</div>
-                    {isPositiveMoney(item.total_khr) ? <div className="text-xs text-gray-400">{fmtKHR(coerceMoney(item.total_khr))}</div> : null}
-                  </div>
-                </div>
-              ))}
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="border-y border-gray-200 bg-gray-50 text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:border-gray-700 dark:bg-gray-900/35 dark:text-gray-400">
+                  <tr>
+                    <th className="px-1.5 py-1.5 text-left sm:px-2">{tr('product', 'Product')}</th>
+                    <th className="px-1.5 py-1.5 text-right sm:px-2">{tr('qty_short', 'Qty')}</th>
+                    <th className="px-1.5 py-1.5 text-right sm:px-2">{tr('line_total', 'Line total')}</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
+                  {items.length === 0 ? (
+                    <tr>
+                      <td colSpan={3} className="px-2 py-3 text-sm text-gray-400">{tr('no_item_details', 'No item details available.')}</td>
+                    </tr>
+                  ) : items.map((item, index) => (
+                    <tr key={`${item.id || item.product_id || 'item'}-${index}`}>
+                      <td className="px-1.5 py-1.5 align-top sm:px-2">
+                        {/* Damaged is a TAG on the line, next to the name -- the
+                            product itself is never renamed to say so, so the name
+                            here is the catalog name and the chip carries the
+                            state. It sits beside the name rather than only in the
+                            meta line below, where it read as one more attribute
+                            instead of the flag that keeps the units out of
+                            sellable stock. */}
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <span className="break-words font-medium text-gray-800 dark:text-gray-200">{item.product_name || '-'}</span>
+                          {!isSupplier && normalizeStockAction({ stock_action: item.stock_action, return_to_stock: item.return_to_stock !== 0 && item.return_to_stock !== false }) === 'damaged' ? (
+                            <span
+                              data-tag="damaged"
+                              title={tr('stock_action_damaged_hint', 'Tracked as a damaged lot tied to this return — kept out of sellable stock.')}
+                              className="inline-flex flex-shrink-0 items-center gap-1 rounded-full border border-orange-300 bg-orange-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-orange-700 dark:border-orange-700 dark:bg-orange-900/40 dark:text-orange-300"
+                            >
+                              {stockActionOption('damaged').icon} {tr('stock_action_damaged', 'Damaged')}
+                            </span>
+                          ) : null}
+                        </div>
+                        {!isSupplier ? (() => {
+                          const option = stockActionOption(normalizeStockAction({ stock_action: item.stock_action, return_to_stock: item.return_to_stock !== 0 && item.return_to_stock !== false }))
+                          return <div className="text-[11px] text-gray-400">{option.icon} {tr(option.labelKey, option.labelEn)}</div>
+                        })() : null}
+                      </td>
+                      <td className="whitespace-nowrap px-1.5 py-1.5 text-right align-top sm:px-2 tabular-nums text-gray-700 dark:text-gray-200">{item.quantity || 0}</td>
+                      <td className="whitespace-nowrap px-1.5 py-1.5 text-right align-top sm:px-2 font-semibold tabular-nums text-gray-900 dark:text-white">
+                        {fmtUSD(coerceMoney(item.total_usd))}
+                        {isPositiveMoney(item.total_khr) ? <div className="text-[11px] font-normal text-gray-400">{fmtKHR(coerceMoney(item.total_khr))}</div> : null}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+                <tfoot className="border-t border-gray-200 dark:border-gray-700">
+                  {isSupplier ? (
+                    <>
+                      <MoneyRow
+                        labelSpan={2}
+                        tone="credit"
+                        label={tr('supplier_compensation', 'Supplier compensation')}
+                        amount={fmtUSD(coerceMoney(ret.supplier_compensation_usd))}
+                        sub={isPositiveMoney(ret.supplier_compensation_khr) ? fmtKHR(coerceMoney(ret.supplier_compensation_khr)) : null}
+                      />
+                      <MoneyRow
+                        labelSpan={2}
+                        tone="discount"
+                        label={tr('business_loss', 'Business loss')}
+                        amount={fmtUSD(coerceMoney(ret.supplier_loss_usd))}
+                        sub={isPositiveMoney(ret.supplier_loss_khr) ? fmtKHR(coerceMoney(ret.supplier_loss_khr)) : null}
+                      />
+                    </>
+                  ) : (
+                    <MoneyRow
+                      labelSpan={2}
+                      strong
+                      label={tr('total_refunded', 'Total Refunded')}
+                      amount={fmtUSD(coerceMoney(ret.total_refund_usd))}
+                      sub={isPositiveMoney(ret.total_refund_khr) ? fmtKHR(coerceMoney(ret.total_refund_khr)) : null}
+                    />
+                  )}
+                </tfoot>
+              </table>
             </div>
-          </div>
+          </section>
 
+          {/* The replacement sale is a second, separate document, so it keeps
+              its own table rather than being folded into the return's rows --
+              but it now uses the same columns and the same MoneyRow footer as
+              everything else instead of its own flex list. The supplier /
+              customer money summary that used to repeat down here is gone: it
+              is the tfoot of the items table above, where it aligns with the
+              line amounts it is the sum of. */}
           {replacementItems.length > 0 ? (
-            <div>
+            <section className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 dark:border-emerald-800 dark:bg-emerald-900/20">
               <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-emerald-600 dark:text-emerald-400">
                 🔁 {tr('replacement_sale_items_label', 'Replacement sale items')} ({replacementItems.length})
               </div>
-              <div className="space-y-1 rounded-xl border border-emerald-200 bg-emerald-50 p-3 dark:border-emerald-800 dark:bg-emerald-900/20">
-                {replacementItems.map((line, index) => (
-                  <div key={`${line.id || 'replacement'}-${index}`} className="flex justify-between py-1 text-sm">
-                    <span className="detail-scroll-text mr-2 min-w-0 flex-1 text-gray-700 dark:text-gray-300">{line.product_name || '-'} × {line.quantity || 0}</span>
-                    <span className="flex-shrink-0 font-medium text-gray-900 dark:text-white">{fmtUSD(coerceMoney(line.total_usd))}</span>
-                  </div>
-                ))}
-                <div className="flex justify-between border-t border-emerald-200 pt-1 text-xs font-semibold text-emerald-700 dark:border-emerald-800 dark:text-emerald-300">
-                  <span>{ret.settlement_mode === 'price_difference' ? tr('price_difference', 'Price difference') : tr('even_exchange', 'Even exchange')}</span>
-                  <span>{ret.settlement_mode === 'price_difference'
-                    ? (Number(ret.settlement_diff_usd || 0) > 0 ? '+' : '−') + fmtUSD(Math.abs(Number(ret.settlement_diff_usd || 0)))
-                    : '±0'}</span>
-                </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead className="border-y border-emerald-200 text-[11px] font-semibold uppercase tracking-wide text-emerald-700/80 dark:border-emerald-800 dark:text-emerald-300/80">
+                    <tr>
+                      <th className="px-1.5 py-1.5 text-left sm:px-2">{tr('product', 'Product')}</th>
+                      <th className="px-1.5 py-1.5 text-right sm:px-2">{tr('qty_short', 'Qty')}</th>
+                      <th className="px-1.5 py-1.5 text-right sm:px-2">{tr('line_total', 'Line total')}</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-emerald-100 dark:divide-emerald-800/60">
+                    {replacementItems.map((line, index) => (
+                      <tr key={`${line.id || 'replacement'}-${index}`}>
+                        <td className="break-words px-1.5 py-1.5 align-top sm:px-2 text-gray-700 dark:text-gray-300">{line.product_name || '-'}</td>
+                        <td className="whitespace-nowrap px-1.5 py-1.5 text-right align-top sm:px-2 tabular-nums text-gray-700 dark:text-gray-300">{line.quantity || 0}</td>
+                        <td className="whitespace-nowrap px-1.5 py-1.5 text-right align-top sm:px-2 font-medium tabular-nums text-gray-900 dark:text-white">
+                          {fmtUSD(coerceMoney(line.total_usd))}
+                          {isPositiveMoney(line.total_khr) ? <div className="text-[11px] font-normal text-gray-400">{fmtKHR(coerceMoney(line.total_khr))}</div> : null}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  <tfoot className="border-t border-emerald-200 dark:border-emerald-800">
+                    <MoneyRow
+                      labelSpan={2}
+                      tone="credit"
+                      label={ret.settlement_mode === 'price_difference' ? tr('price_difference', 'Price difference') : tr('even_exchange', 'Even exchange')}
+                      amount={ret.settlement_mode === 'price_difference'
+                        ? (Number(ret.settlement_diff_usd || 0) > 0 ? '+' : '−') + fmtUSD(Math.abs(Number(ret.settlement_diff_usd || 0)))
+                        : '±0'}
+                      sub={ret.settlement_mode === 'price_difference' && isPositiveMoney(Math.abs(Number(ret.settlement_diff_khr || 0)))
+                        ? (Number(ret.settlement_diff_usd || 0) > 0 ? '+' : '−') + fmtKHR(Math.abs(Number(ret.settlement_diff_khr || 0)))
+                        : null}
+                    />
+                  </tfoot>
+                </table>
               </div>
-            </div>
+            </section>
           ) : null}
-
-          {isSupplier ? (
-            <div className="rounded-xl bg-gray-50 p-3 dark:bg-gray-700/40">
-              <div className="flex justify-between text-sm">
-                <span className="text-gray-600 dark:text-gray-300">{tr('supplier_compensation', 'Supplier compensation')}</span>
-                <span className="font-semibold text-emerald-700 dark:text-emerald-400">{fmtUSD(coerceMoney(ret.supplier_compensation_usd))}</span>
-              </div>
-              <div className="mt-1 flex justify-between text-sm">
-                <span className="text-gray-600 dark:text-gray-300">{tr('business_loss', 'Business loss')}</span>
-                <span className="font-semibold text-rose-600 dark:text-rose-400">{fmtUSD(coerceMoney(ret.supplier_loss_usd))}</span>
-              </div>
-              <div className="mt-1 text-xs text-gray-400">
-                {fmtKHR(coerceMoney(ret.supplier_compensation_khr))} / {fmtKHR(coerceMoney(ret.supplier_loss_khr))}
-              </div>
-            </div>
-          ) : (
-            <div className="rounded-xl bg-gray-50 p-3 dark:bg-gray-700/40">
-              <div className="flex justify-between text-base font-bold text-gray-900 dark:text-white">
-                <span>{tr('total_refunded', 'Total Refunded')}</span>
-                <span>{fmtUSD(coerceMoney(ret.total_refund_usd))}</span>
-              </div>
-              {isPositiveMoney(ret.total_refund_khr) ? (
-                <div className="text-right text-xs text-gray-400">{fmtKHR(coerceMoney(ret.total_refund_khr))}</div>
-              ) : null}
-            </div>
-          )}
         </div>
       </div>
     </div>,
