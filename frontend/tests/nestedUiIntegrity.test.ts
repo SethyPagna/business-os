@@ -19,7 +19,7 @@ const sectionMatrix: Record<string, { file: string; tokens: string[] }> = {
   branches: { file: 'components/branches/BranchesHubPage.tsx', tokens: ["'overview'", "'products'", "'transfers'", "'rfid'", 'showSectionNavigation={false}', 'overflow-x-auto'] },
   contacts: { file: 'components/contacts/Contacts.tsx', tokens: ["'customers'", "'suppliers'", "'delivery'", "'duplicates'", 'overflow-x-auto'] },
   catalog: { file: 'components/catalog/CatalogPage.tsx', tokens: ["activeTab === 'products'", "activeTab === 'about'", "activeTab === 'faq'", "activeTab === 'ai'"] },
-  promotions: { file: 'components/promotions/PromotionsPage.tsx', tokens: ["key: 'rules'", "key: 'discounts'", "key: 'loyalty'", 'overflow-x-auto'] },
+  promotions: { file: 'components/promotions/PromotionsPage.tsx', tokens: ["id: 'rules'", "id: 'discounts'", "id: 'loyalty'", 'overflow-x-auto'] },
   review: { file: 'components/review/ReviewLogsPage.tsx', tokens: ["key: 'review'", "key: 'audit'", "key: 'deleted'", 'overflow-x-auto'] },
   receipt_settings: { file: 'components/receipt-settings/ReceiptSettings.tsx', tokens: ["id: 'fields'", "id: 'order'", "id: 'delivery'", "id: 'style'", "id: 'language'", "id: 'footer'", "id: 'qr'", "id: 'print'", 'overflow-x-auto'] },
   settings: { file: 'components/utils-settings/SettingsHubPage.tsx', tokens: ["id: 'settings'", "id: 'users'", "id: 'backup'", 'overflow-x-auto'] },
@@ -27,9 +27,20 @@ const sectionMatrix: Record<string, { file: string; tokens: string[] }> = {
   server: { file: 'components/server/ServerPage.tsx', tokens: ['page-scroll', 'PageHeader', 'card flex'] },
 }
 
+// The section chip row moved out of the hub pages and into the shared
+// HubSectionNav (the 3-layer mobile navigation). A hub that renders it
+// satisfies the row's viewport-bounded / scrollable pin through that
+// component, so the row tokens are looked up there instead of in the hub.
+const hubSectionNav = read('components/shared/HubSectionNav.tsx')
+const delegatesRow = (source: string): boolean => /<HubSectionNav\b/.test(source)
+const rowSource = (source: string): string => (delegatesRow(source) ? hubSectionNav : source)
+
 for (const [page, contract] of Object.entries(sectionMatrix)) {
   const source = read(contract.file)
-  for (const token of contract.tokens) assert.ok(source.includes(token), `${page}: missing nested surface/action token ${token}`)
+  for (const token of contract.tokens) {
+    const haystack = token === 'overflow-x-auto' ? rowSource(source) : source
+    assert.ok(haystack.includes(token), `${page}: missing nested surface/action token ${token}`)
+  }
 }
 
 const branchesHub = read('components/branches/BranchesHubPage.tsx')
@@ -40,7 +51,7 @@ assert.match(branchesHub, /active === 'products'[\s\S]*hostSection="stats"/, 'Pr
 assert.doesNotMatch(branchesHub, /active === 'inventory'/, 'Branches must not restore the redundant branch-inventory duplicate section')
 
 for (const file of ['components/branches/BranchesHubPage.tsx', 'components/review/ReviewLogsPage.tsx', 'components/utils-settings/SettingsHubPage.tsx', 'components/promotions/PromotionsPage.tsx']) {
-  const source = read(file)
+  const source = rowSource(read(file))
   assert.match(source, /max-w-full[^"']*overflow-x-auto|overflow-x-auto[^"']*max-w-full/, `${file}: section row must be viewport bounded and horizontally scrollable`)
   assert.doesNotMatch(source, /inline-flex flex-wrap rounded-xl/, `${file}: section row must not push into extra rows`)
 }
