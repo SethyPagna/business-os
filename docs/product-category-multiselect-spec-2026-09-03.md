@@ -12,9 +12,10 @@ Nothing here is implemented.
 originally left open — Brand ships with Category, Unit stays single-value, categories are capped at
 5, and the storefront gets a primary-plus-ellipsis reveal. Those are decisions now, recorded in
 §10 with the verbatim wording, and they have already been pushed back through §3, §3.2, §4 and
-§4.1. **Revision 3** closes the last ambiguity: the storefront's filter clause was put back to the
-user directly rather than inferred, and is now decided in §4.1 rule 3. No question in this spec is
-left to the lane's judgement.
+§4.1. **Revisions 3 and 4** close the last ambiguity: the storefront's filter clause was put back
+to the user directly rather than inferred — they chose the *matched* category, then refined the
+affordance to "matched and +n number of categories", so the card carries one label plus a `+N`
+counter rather than an ellipsis (§4.1). No question in this spec is left to the lane's judgement.
 
 Standing rules this spec is written against: root cause over symptom, sibling-surface parity in the
 same commit, both language packs, per-action permission keys, floats over inline expansion,
@@ -176,11 +177,11 @@ lane's checklist, not a suggestion.
 | Variant form | `products/forms/VariantFormModal.tsx:149` (`category: parent.category`) | inherits the single primary | must inherit the whole list |
 | Bulk import | `products/import/BulkImportModal.tsx:477`, `:2187`, `:2820` | maps a single `category` column | accept a delimited `categories` column, map it, let the review grid edit it |
 | Bulk edit / mass assign | Products page bulk actions | single | multi, same control |
-| Product detail read views | `products/surfaces/ProductDetailModal.tsx:257`, `ProductRowParts.tsx`, `inventory/ProductDetailModal.tsx:127` | render `p.category` only | render every category as chips |
+| Product detail read views | `products/surfaces/ProductDetailModal.tsx:257`, `ProductRowParts.tsx`, `inventory/ProductDetailModal.tsx:127` | render `p.category` only | render every category; in a **row** use the same one-label-plus-`+N` pattern as §4.1 so admin and storefront read alike, expanded to chips in the detail sheet |
 | Export | `products/ExportFieldsModal.tsx:35` | basic group names `category` | export the full list |
 | Filters — Products / Inventory / POS / portal | `shared/CategoryFilterOptions.tsx`, `utils/multiSelect.ts`, `pos/FilterPanel.tsx`, `catalog/PortalFilterCombobox.tsx` | **already multi-select**, and the backend already matches `p.categories` | no build — but **verify** a two-category product appears under *both* |
 | Manage categories | `products/lookups/ManageCategoriesModal.tsx` | usage counts + rename/merge | counts must include multi-membership; rename/merge must rewrite **every element** of the `\|\|` list (`routes/lookups.ts:222` claims it rewrites `products.category/categories` — verify element-wise) |
-| Storefront / public portal | `catalog/*` | — | primary + ellipsis reveal, see §4.1; only public categories, never internal facets |
+| Storefront / public portal | `catalog/*` | — | one label + `+N` counter, matched label under a filter, see §4.1; only public categories, never internal facets |
 
 Two rules that bite here specifically:
 
@@ -197,25 +198,34 @@ shows all in details... when filter search it shows..."*
 
 Which reads as three rules:
 
-1. **Default** — a product shows its **primary** category followed by an ellipsis affordance when
-   it carries more. Not a truncated string; a real control.
-2. **On click/tap** — the ellipsis reveals the **full** category list in the detail view. It must
-   be genuinely revealable rather than a dead-end "…" (shared truncated-text reveal), and the
-   reveal **floats over** content rather than pushing the page down.
+1. **Default** — a product shows **one** category label followed by a **`+N` counter** when it
+   carries more, where N is the number of categories not shown (a product with 3 categories reads
+   `Skincare +2`). The counter is a real control, not a truncated string, and not a bare "…" — the
+   user asked for the count explicitly ("matched and +n number of categories") so the shopper can
+   see *how much* more there is before deciding to open it. A product with exactly one category
+   shows no counter.
+2. **On click/tap** — the `+N` reveals the **full** category list in the detail view. It must be
+   genuinely revealable rather than a dead end (shared truncated-text reveal), and the reveal
+   **floats over** content rather than pushing the page down.
 3. **Under a filter or search** — the product surfaces under **every** category it carries, not
-   only the primary, **and the label on the card swaps from the primary to whichever category
-   matched the filter**, so the shopper can see why the product is in these results. The ellipsis
-   still reveals the rest. The backend already supports the query half
-   (`COALESCE(categories, category)`), so this is display work.
+   only the primary, **and the label swaps from the primary to whichever category matched the
+   filter**, so the shopper can see why the product is in these results. The `+N` counter stays,
+   now counting the product's other categories (`Serums +2`). The backend already supports the
+   query half (`COALESCE(categories, category)`), so this is display work.
 
 Rule 3 was the least explicit clause in the user's message; it was put back to them directly rather
 than guessed, and **they chose "show the matched category"** over always showing the primary and
-over expanding the card to list every match. All three rules are now decided.
+over expanding the card to list every match — then refined the affordance to *"matched and +n
+number of categories"*, which is why rules 1 and 3 both carry a counter rather than an ellipsis.
 
 Edge case the lane must settle without asking again: when a filter matches **more than one** of a
-product's categories, show the first match in the product's own category order (i.e. the
-primary-first order stored in `categories`) and leave the remainder behind the ellipsis. That keeps
-the card to a single label, which is the shape rules 1 and 3 both assume.
+product's categories, show the first match in the product's own category order (the primary-first
+order stored in `categories`) and count the rest into `+N`. That keeps the card to one label plus
+one counter, which is the shape all three rules assume.
+
+`+N` is a composed string, so it needs a real i18n entry with the number interpolated — not an
+English "+" concatenated onto a translated word — and Khmer numerals/format verified rather than
+assumed. Same treatment on every surface that adopts the pattern.
 
 ---
 
@@ -245,7 +255,9 @@ fallbacks in ProductForm.
 
 New keys, in **both** packs, with Khmer verified from authoritative sources rather than guessed:
 search categories, show all categories, create category "X", primary category, make primary, remove
-category, N selected, no matching categories. `npm run verify:i18n` must exit 0.
+category, "N of 5 selected", cap-reached reason, no matching categories, and the **`+N` counter**
+from §4.1 as an interpolated entry (never an English "+" concatenated onto a translated word).
+`npm run verify:i18n` must exit 0.
 
 ---
 
@@ -299,7 +311,7 @@ now, not proposals.
 | 1 | Brand multi-select too? | **Yes** — "brands too". Category and Brand ship multi-select **in one commit**; they share the broken component |
 | 2 | Unit multi-value? | **No** — "Unit stays single-value". A product keeps exactly one unit; Unit still gets the search + show-all fix from the shared component |
 | 3 | A cap per product? | **Yes — 5 categories.** Enforced as one rule in the picker *and* the backend, so import/bulk-edit/undo cannot exceed it (§3.2) |
-| 4 | Storefront display | **A third shape, not either option offered** — primary + ellipsis by default, full list on click, and under a filter the card shows the **matched** category rather than the primary. Verbatim wording and the three rules are in §4.1 |
+| 4 | Storefront display | **A third shape, not either option offered** — one category label plus a **`+N` counter** ("matched and +n number of categories"), the full list on click, and under a filter the label shown is the **matched** category rather than the primary. Verbatim wording and the three rules are in §4.1 |
 
 **Nothing in this spec is left to a guess.** The one clause that was ambiguous — "when filter
 search it shows..." — was put back to the user rather than inferred, and they chose *show the
