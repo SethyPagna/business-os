@@ -125,6 +125,94 @@ Two rules learned the hard way, both from real incidents in this file's own hist
 
 ## Current status
 
+**DEPLOY LEDGER — Sep 3 2026, reconstructed from Cloudflare + D1 because two of these three left no record.**
+Read this before any deploy. The `deploy-provenance` skill exists because of the gap this table closes.
+
+| # | Worker version id | Deployed (UTC) | Built from | Branch | Tree | Migrations applied | secrets:sync |
+|---|---|---|---|---|---|---|---|
+| 1 | `0a531d53-3aa6-4b31-a50e-e04c9bc109ac` | 2026-09-03T07:26:26Z | `57c0b61c` | **`hotfix/prod-2026-09-03`** (NOT main) | clean, isolated worktree `bos-rc-workers/cert-57c0b61c` | **0107**, applied before the Worker deploy | no |
+| 2 | `d701ddc1-22ff-4d87-bbe7-6b25a666b79b` | 2026-09-03T08:41:57Z | `a4f10152` | `main` | clean, isolated worktree | none | no |
+| 3 | `eb358e4d-624b-472f-aca0-f896a352b430` | 2026-09-03T09:40:33Z | `a486d82e` | **`reconcile/2026-09-03`** (NOT main) | clean, worktree `Downloads/bos-rec` | none (chain top == prod top == 107) | no |
+
+**#3 IS WHAT PRODUCTION SERVES RIGHT NOW.** Frontend build stamp `a486d82ef747` / hash `e0915eed8f9ed1e4`, builtAt
+2026-09-03T09:39:48Z, deployed 45 s later. Re-verified live this session: `/health` **200**, `d1_migrations` top =
+**107** (`0107_receipt_numbers_business_format.sql`; 106 = `0106_return_replacement_sales.sql`, 105 =
+`0105_fee_delivery_contacts.sql`). **The next free migration number is 0108.**
+
+**Deploy #1 was this coordinator's, and it is the only data-touching deploy of the three** — it applied migration
+0107. A Time Travel bookmark was captured immediately before it:
+`000011e2-0000013c-000050db-bb6abbd525c8f952faa55f551870b7ce` (restore with
+`wrangler d1 time-travel restore business-os --bookmark <value>`). 0107 relabelled 15,004 legacy `@` receipts to the
+bare `YYYYMMDD-HHMMSS` business format, preserved every legacy label, and left 15,005 distinct receipt numbers for
+15,005 sales with zero collisions. Ordering was load-bearing: `buildSalesSearchWhere` reads `s.legacy_receipt_number`,
+so the migration had to land before the Worker that queries it. The migration's step 2 was also rewritten from a
+correlated scalar subquery to an `UPDATE ... FROM final` — 30,220 ms to 1,953 ms on a production copy (15.5x), which
+is what kept it under D1's CPU limit instead of tripping error 7429.
+**Deploy #2 is the revert incident** written up above and in Part 583. **Deploy #3 restored it and is a superset of
+#1**, so nothing from the hotfix lanes is missing from production today.
+
+**PRODUCTION CANNOT BE ASKED WHAT COMMIT IT IS RUNNING — this is the root cause of the whole incident.**
+`GET /api/runtime/version` on the live site returns `{"revision":"","sourceHash":""}`. Not stale — **hard-coded**, at
+[`cloudflare/src/routes/runtime.ts:44-53`](cloudflare/src/routes/runtime.ts), which returns `revision: ''` and
+`sourceHash: ''` as literals. The module comment directly above it says the intent was to report the deployment's
+`compatibility_date` as the closest build signal a Worker can reach; the code never did. So the only build identity
+production exposes is `packageVersion: "cloudflare-2026-08"` (a hand-maintained string) and `/health`'s `version`
+field (the unrelated hard-coded literal `cloudflare-portal-bootstrap-20260728`). **Neither is a deploy id, and
+neither changed across any of these three deploys.** That is exactly why provenance had to be rebuilt from the
+Cloudflare API and `d1_migrations` while a live regression was in front of the user. Fix: stamp the commit hash into
+the Worker at build time and return it here. Until that ships, `wrangler deployments list` + a direct read of
+`d1_migrations` are the ONLY truth about what is live.
+
+
+**RECONCILIATION SWEEP — Sep 3 2026, all 49 worktrees + the main checkout, every dirty file accounted for.**
+Ask: *"make sure uncommitted, dirty works in downloads, in other sessions, etc… are all accounted for, reconciled,
+continued and finished."* Baseline for "live" throughout is `a486d82e` (deploy #3 above).
+
+**Most of the apparent dirt is not work.** Three classes were identified and can be ignored on sight:
+
+1. **The self-rewriting public trio.** `frontend/public/{sw.js,runtime-noise-guard.js,theme-bootstrap.js}` show as
+   modified in **11 worktrees** (`sec-2`, `sec-3`, `sec-4`, `sec-5`, `sec-6`, `sec-8`, `p2-1`, `p2-3`, `p2-9`,
+   `cert-phase1`, `hf-verify`). They are rewritten by the dev server at boot. Standing rule unchanged: **never stage
+   them.** They are noise, not content, and they are why raw dirty-file counts overstate outstanding work.
+2. **Per-session QA scaffolding**, never deliverable: `frontend/.qa-vite.config.ts` (`p2-1`, `p2-4`, `p2-4b`,
+   `hf-customers-perf`), `frontend/.qa-boot.js` (`p2-4b`), `frontend/vite.qa.config.ts` (`hf-dates`,
+   `hf-review-fixes`), `tmp-portal-flow-test.mjs` (`sec-8`), plus local edits to `frontend/vite.config.ts` and
+   `.claude/launch.json` for private ports.
+3. **Superseded copies.** `head-cert` and `prod-repro` both hold the same six-file fees/delivery-contact working set.
+   Diffed against `a486d82e` it is **behind production, not ahead** (`salesAnalytics.ts` 3/21, `Dashboard.tsx` 11/18,
+   `dashboardDataReliability.test.ts` 0/17 — insertions below deletions, zero unique insertions in the test). That
+   lane was committed as `3bf58d6c` + `835a99f8` and shipped. Nothing unique is at risk; both are safe to discard
+   after one more diff.
+
+**What is genuinely outstanding, and who has it:**
+
+| Lane / worktree | State vs live | Real uncommitted work | Owner now |
+|---|---|---|---|
+| `hf/merge` (`hf-merge`) | **+2 commits, NOT live** | 18 files. Adds the cost verdict on top of `productDetailSignature` without changing it (`compareCosts`, `detailsMergeCompatible`, `costFillFromDiscarded`) + the merge stock-choice dialog | agent finishing + certifying |
+| `hf/customers-perf` (`hf-customers-perf`) | **+1 commit, NOT live** | 9 files. Caller side of the narrowed customer reads: offline snapshot transport, POS, loyalty board | agent finishing + certifying |
+| `hf/search` (`hf-search`) | tip live, **work not** | `searchMatch.ts` +37/−14 and `test-barcode-twin-search-pure.cjs` +65. Rewrites the exact-barcode equality probe into a rowid subquery so `idx_products_barcode_pg` is actually consulted; EXPLAIN QUERY PLAN evidence in the test | routed to `fx/search-rank` |
+| `rc/sec-10-reports` (`sec-10`) | +149, NOT live | 20 files: the reports redesign, incl. 3 deleted section components and a new `sales/reports/` directory | routed to `fx/reports-redesign` |
+| `lane-c/app-update-prompt` (`s58-lanes`) | +1, NOT live | none (clean). Code half already live as `29fc6c53`; `8580c92a` is docs only | peer session 64 |
+| `rc/coordinated-2026-09-02` + `rc/p2-*` + `rc/sec-*` | +26…+155, NOT live | Phase-1/Phase-2 program, ~150 commits | **separate program, not this round** |
+| `rc/fix-i18n-missing-keys` (`fix-i18n`) | +32, NOT live | none (clean) | the 30-unresolved-key fix still open |
+| `docs/bulk-actions-spec-4f` | +4, NOT live | none (clean) | spec only |
+
+**Clean and fully live, nothing owed:** `hotfix/prod-2026-09-03`, `hf/adjust-fail`, `hf/backup`, `hf/receipt`,
+`hf/receipt-ui`, `hf/dates`, `hf/returns`, `hf/review-fixes`, `lane-a/fast-stock-in`, `lane-b/transfer`.
+
+**Main checkout: 64 dirty tracked files, unchanged and untouched.** This is the ChatGPT/Codex batch that is already
+inside the live build. Nobody may check it out, revert it, edit it or absorb it.
+
+**Fleet running this round, all based on `a486d82e`:** `fx/returns-semantics` (returns stop settling price
+differences; a replacement becomes a normal sale; lot must be specific) · `fx/khmer-naming` (the four dictated terms
+plus a naturalness pass with a glossary) · `fx/search-rank` (picker relevance ordering, one shared ranking helper) ·
+`fx/sale-detail-rows` (sale detail becomes consistent labelled rows) · `fx/reports-redesign` (reports redone + the
+3-layer small-screen page mode in Settings) · `fx/products-report-style` (Products stays data-report style, checked
+against the pre-merge reference tree) · plus the two rescues above. Peer session 64 holds `lane-a/fast-stock-in` and
+`lane-b/transfer` (UI only — the search path inside those modals belongs to `fx/search-rank`).
+**Nothing deploys until every one of these is back and certified.**
+
+
 **🔴 READ FIRST — Sep 3: a deploy from clean `main` REVERTED production. `main` is NOT what production runs.**
 Production was Worker `0a531d53…` (07:26:26Z), built by another session from a tree carrying
 **`hotfix/prod-2026-09-03` — 24 commits never merged to `main`**. Session business-os-v1-5d then deployed

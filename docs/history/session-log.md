@@ -17623,3 +17623,73 @@ tooltips, options compact to one row on small screens including iOS, name horizo
 **Correction owed to the user on returns framing:** the original sale is immutable, so this is a
 return plus a **new linked sale** joined by `returns.replacement_sale_id` / `sales.source_return_id`
 — not a multi-role edit of the sale.
+
+---
+
+## Part 584 (Sep 3 2026, session business-os-v1-0a, COORDINATOR, main tree + isolated worktrees) — the missing deploy ledger written, all 49 worktrees reconciled, six user-reported defects dispatched as isolated lanes
+
+**Ask** — one message, seven things: *"check sessions, check progress.md, check the latest deployed"*; the Products
+section judged against an attached pre-merge reference tree, *"though remember i only want the data report style for
+products section"*; *"the returns seems to say customer pay price difference,, and it says any stock no specific
+lot… fixx these, so returns is returns, and this replacement will just be replace/add buy same time add to sales…
+and the price returns gets returned, price returns back and the added product do like normal sales… this way it is
+not confusing"*; *"go deep into the namings, make them more easily understood in khmer"* with four terms dictated
+verbatim; *"the search functions of transfer, stock change, returns etc… seems not fully scoped properly… feels like
+the likely result was at bottom in reverse"*; *"sales the click to view details… a row view is better instead of
+current broken view"*; *"reports i wanted you to redo and designed better.. and view in settings that can change
+sections into 3 layer page design for smaller screens"*; and *"make sure uncommited, dirty works in downloads, in
+other sessions, etc… are all acccounted for, reconciled, continued and finished."*
+
+**What changed** — no product code was written by this session; it coordinated, verified and recorded.
+- `progress.md` gains two blocks at the top of *Current status*: the **deploy ledger** (three Sep-3 deploys with
+  version id, source commit AND branch, tree state, migrations, `secrets:sync`) and the **reconciliation sweep**
+  (every worktree, every dirty file, classified).
+- Eight isolated lanes dispatched from `a486d82e`, each in its own worktree with `node_modules` junctioned to the
+  main checkout (never `npm install`), private Vite/Worker ports and a `<lane>.localhost` host so no two share a
+  cookie jar: `fx/returns-semantics`, `fx/khmer-naming`, `fx/search-rank`, `fx/sale-detail-rows`,
+  `fx/reports-redesign`, `fx/products-report-style`, plus rescues of the two abandoned lanes `hf/merge` and
+  `hf/customers-perf`.
+
+**What was found**
+- **Production cannot be asked what commit it is running, and that is the root cause of the Sep-3 revert.**
+  `GET /api/runtime/version` returns `{"revision":"","sourceHash":""}` — hard-coded literals at
+  `cloudflare/src/routes/runtime.ts:44-53`, directly under a comment saying the intent was to report the
+  deployment's `compatibility_date`. `/health`'s `version` is the unrelated literal
+  `cloudflare-portal-bootstrap-20260728`. Neither is a deploy id; neither changed across three deploys.
+- **The live Worker version is `eb358e4d-624b-472f-aca0-f896a352b430` (09:40:33Z), from `a486d82e` on
+  `reconcile/2026-09-03`** — not `main`, and not recorded anywhere before now. Nor was the 07:26Z deploy's source
+  (`57c0b61c` on `hotfix/prod-2026-09-03`), the one that applied migration 0107.
+- **Most "dirty work" was noise.** The `frontend/public/{sw.js,runtime-noise-guard.js,theme-bootstrap.js}` trio is
+  dirty in 11 worktrees because the dev server rewrites it at boot; per-session QA scaffolding accounts for most of
+  the rest. `head-cert` and `prod-repro` hold a fees/delivery-contact set that is **behind** production, not ahead —
+  already shipped as `3bf58d6c` + `835a99f8`.
+- **Genuinely at-risk uncommitted work, now owned:** `hf/merge` (18 files — the cost verdict where 0/NULL means
+  *missing* rather than *different*, built on top of `productDetailSignature` without changing it);
+  `hf/customers-perf` (9 files — the caller side of the narrowed customer reads); `hf/search` (`searchMatch.ts`
+  +37/−14 rewriting the exact-barcode probe into a rowid subquery so `idx_products_barcode_pg` is actually
+  consulted, with EXPLAIN QUERY PLAN evidence, never committed); `sec-10` (20 files of reports redesign).
+- **A peer's root cause was stale and was corrected before it cost a lane a wasted rewrite.** Session 64's
+  fast-stock-in spec §4.3 states there is no exact-equality barcode probe in the read path. At `a486d82e` there is:
+  `buildExactBarcodeMatchClause` (`searchMatch.ts:1279`) is wired in `products.ts:933-934` (unshifted to the front
+  of the clause list), `branches.ts:905` and `inventory.ts:236`, and `inventory.ts:14` already imports
+  `buildExactBarcodeRankSql`. The revised hypothesis handed to `fx/search-rank`: a ranked search read and an
+  unranked list read sit side by side and some pickers call the unranked one.
+- **`normalizedBarcode` (`productDetailRule.ts:92-94`) must never be widened.** It feeds the auto-merge identity
+  signature; teaching it leading-zero or GTIN-14 equivalence would silently auto-merge the 1,722 leading-zero
+  families the user reserved to handle by hand. Search-only barcode folding goes in a separate helper, pinned by a
+  test that fails if the identity normalizer ever gains that behaviour.
+
+**Verified** — `wrangler deployments list` (three Sep-3 deploys, ids and timestamps above) · `d1_migrations` read
+directly: top **107**, then 106, then 105 · `admin.leangbeauty.com/health` **200** · `/api/runtime/version` returns
+empty `revision`/`sourceHash` · 49 worktrees swept for branch, tip, dirty count and `merge-base --is-ancestor`
+containment in `a486d82e` · `head-cert` working tree diffed against `a486d82e` (insertions below deletions, zero
+unique insertions in the test) · `progress.md` diff before commit: **88 insertions, 0 deletions**.
+
+**Not done** — no deploy (nothing ships until all eight lanes return certified) · the `runtime.ts` provenance stamp
+is diagnosed, not fixed · the 30 unresolved i18n keys are still red · `rc/coordinated-2026-09-02` and the `rc/p2-*`
+program (~150 commits) remain a separate body of work, untouched · session 64's Lane D stays frozen: both rehearsals
+red, the tier2 `CHECK constraint failed: value=1` correctly proving an invariant false across 1,400 families, tier1's
+suspected cause the denormalized `products.stock_quantity` not recomputed after branch rows move, tier3 never
+rehearsed, and its counts disagreeing with 6d's on the same data (1723/1682, 409/392, 279/267, 10/0) — one
+classifier is wrong and which is unknown · `AppUpdateBanner` renders on the public-catalog route (`App.tsx`
+~:1844-1848), flagged by session 64, not yet fixed.
