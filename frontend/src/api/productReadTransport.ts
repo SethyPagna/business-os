@@ -157,8 +157,38 @@ export function getProductsByIds(ids: unknown[] = [], params: QueryParams = {}):
   // by-id lookup gets its own cache key (already true) and now its own
   // unshared request lifecycle, so it can never be cancelled by, or cancel,
   // the box search.
-  const cacheKey = `products:byIds:${query}`
+  // v2: every payload cached under the v1 key was written while the endpoint
+  // ignored `ids` (the head of the whole catalog, not the requested rows).
+  // Those entries live in the local mirror and would be served as the offline
+  // fallback for this exact query string, so the key is versioned rather than
+  // reused -- a client that already has the fix never reads a pre-fix answer.
+  const cacheKey = `products:byIds:v2:${query}`
   return routeCachedProductQuery(cacheKey, appendQuery('/api/products/search', query))
+    .then((payload) => restrictPayloadToIds(payload, uniqueIds))
+}
+
+// A by-id lookup must answer with the rows that were asked for or with
+// nothing -- never with a substitute. The endpoint used to ignore `ids`
+// entirely and answer 200 with the head of the whole catalog, so callers
+// that take items[0] (StockAdjustModal's refresh, Inventory's adjust
+// refresh, Products' undo/redo snapshot, the brand/category/unit lookup
+// snapshots) silently bound themselves to the catalog's first row by name
+// -- "Abercrombie Authantic 10ml" -- instead of the product the operator
+// picked. The server now filters (cloudflare/src/routes/products.ts), and
+// this pass makes the guarantee hold on the client too, so an older or
+// cached response cannot reintroduce a wrong-record write.
+function restrictPayloadToIds(payload: unknown, requestedIds: number[]): unknown {
+  const wanted = new Set(requestedIds.map((id) => Number(id)))
+  const keep = (row: unknown): boolean => {
+    const id = Number((row as { id?: unknown })?.id)
+    return Number.isFinite(id) && wanted.has(id)
+  }
+  if (Array.isArray(payload)) return payload.filter(keep)
+  const items = (payload as { items?: unknown })?.items
+  if (!Array.isArray(items)) return payload
+  const filtered = items.filter(keep)
+  if (filtered.length === items.length) return payload
+  return { ...(payload as Record<string, unknown>), items: filtered, total: filtered.length }
 }
 
 // D3: the product detail page's one-round-trip report -- per-lot totals,

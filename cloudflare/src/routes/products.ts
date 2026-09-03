@@ -700,6 +700,45 @@ function buildSearchFilters(query: Record<string, string>, options: ProductSearc
   }
   const stockExpr = params.branchId ? 'COALESCE(selected_bs.quantity, 0)' : 'COALESCE(p.stock_quantity, 0)'
 
+  // `ids` is the by-id lookup the client transport has always sent
+  // (frontend/src/api/productReadTransport.ts -> getProductsByIds, e.g.
+  // `?ids=7231&pageSize=1&include=...`), and this endpoint never read it.
+  // The silent-drop consequence is not "an unfiltered list" here, it is the
+  // WRONG RECORD: the caller asks for one id, takes items[0], and gets the
+  // catalog's first row by the default name order instead. Reported live
+  // 2026-09-03 -- opening Adjust Stock on "Dior Backstage Highlighter New
+  // 002" (id 7231) loaded and would have written against "Abercrombie
+  // Authantic 10ml" (id 1). Verified against a production snapshot:
+  // `?ids=7231&pageSize=1` answered total 10212, items[0] = id 1.
+  // The same silent drop also fed Products' undo/redo snapshots and the
+  // brand/category/unit lookup snapshots.
+  // A present-but-unusable `ids` resolves to "no rows", never "everything":
+  // returning the whole catalog to a by-id lookup is exactly the failure
+  // being fixed.
+  // Not every unread param is a bug: `include` is also never parsed here, and
+  // that is deliberate and harmless -- attachBranchStock/attachImageGallery/
+  // attachBatchCounts run unconditionally for every product read, and the
+  // Products page, POS and the branch stock column all depend on that data
+  // arriving whether or not they asked for it. Do NOT "tidy" `include` into a
+  // gate; it would silently strip fields those surfaces render.
+  const rawIdFilter = query.ids ?? query.id
+  if (rawIdFilter != null && String(rawIdFilter).trim() !== '') {
+    const requestedIds = [...new Set(
+      String(rawIdFilter)
+        .split(',')
+        .map((raw) => Number.parseInt(String(raw).trim(), 10))
+        .filter((id) => Number.isFinite(id) && id > 0),
+    )].slice(0, 100)
+    if (!requestedIds.length) where.push('1 = 0')
+    else {
+      const placeholders = requestedIds.map((id, index) => {
+        params[`byId${index}`] = id
+        return `@byId${index}`
+      })
+      where.push(`p.id IN (${placeholders.join(', ')})`)
+    }
+  }
+
   // `search` accepted as a third alias alongside query/q. A caller that
   // spells the term with a synonym used to get the WHOLE unfiltered catalog
   // back with a 200 -- a silent drop, not an error -- which is precisely how
