@@ -5231,5 +5231,11 @@
   "failed_attempt_hint": "This change never reached the server, so no stock moved. Fix it and retry, or discard it.",
   "fix_and_retry": "Fix and retry",
   "stock_adjust_failed_row": "Not saved — fix and retry",
-  "stock_adjust_failed_offline": "Not saved — offline. Your entry is kept."
+  "stock_adjust_failed_offline": "Not saved — offline. Your entry is kept.",
+  "update_line": "Update line",
+  "lines_queued": "queued",
+  "lines": "Lines",
+  "total_units": "Total units",
+  "add_next_hint": "Add & next queues this line; nothing is written until Complete.",
+  "confirm_complete_stock_session_note": "This posts stock movements and creates or updates the related lots."
 }
