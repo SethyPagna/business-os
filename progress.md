@@ -125,6 +125,65 @@ Two rules learned the hard way, both from real incidents in this file's own hist
 
 ## Current status
 
+**🔴 READ FIRST — Sep 3: a deploy from clean `main` REVERTED production. `main` is NOT what production runs.**
+Production was Worker `0a531d53…` (07:26:26Z), built by another session from a tree carrying
+**`hotfix/prod-2026-09-03` — 24 commits never merged to `main`**. Session business-os-v1-5d then deployed
+`d701ddc1…` (08:41:57Z) from committed `main` `a4f10152`, fully certified green, and a deploy replaces
+production wholesale — so all 24 commits were deleted from the live site (the Sales→Returns button
+`8e961357`, the BranchesHubPage work, and more; user-reported). **Before ANY deploy, invoke the
+`deploy-provenance` skill** (`.claude/skills/deploy-provenance/SKILL.md`) and name the source of the build
+you are replacing. Full incident: [docs/2026-09-03-deploy-reconciliation.md](docs/2026-09-03-deploy-reconciliation.md);
+narrative in session-log **Part 583**.
+**Three traps this cost us, all now written down:**
+1. `wrangler d1 migrations list --remote` saying `✅ No migrations to apply!` means your chain is not
+   *ahead* of production. It says the SAME THING when production is ahead of you. **Read `d1_migrations`
+   directly.** Production is at **0107**, not 0105 — the earlier board claim was wrong.
+2. **Commit ancestry cannot see a deploy that was not made from a commit.** "Prod's base commit is an
+   ancestor of HEAD" proves nothing when prod was built from a dirty tree or an unmerged branch.
+3. **An applied migration's filename is frozen.** Renaming `0106_return_replacement_sales.sql` → `0108_…`
+   per the "new migrations take 0108+" rule would have made D1 re-run an already-applied `ALTER TABLE`
+   and fail the deploy. That rule is only for migrations that never ran anywhere. **0106 and 0107 are
+   both TAKEN AND APPLIED — the next free number is 0108.**
+**And: the 07:26 deploy left NO record on this board.** That omission is why provenance had to be
+reconstructed from Cloudflare + D1 under a live regression. Every deploy records the wrangler version id,
+the commit AND branch built from, whether the tree was clean, the highest applied migration, and whether
+`secrets:sync` ran.
+
+**✅ RECONCILED — branch `reconcile/2026-09-03`, certified, deployed (Sep 3, session business-os-v1-5d).**
+Built in an isolated worktree (`C:/Users/mrkl6/Downloads/bos-rec`) so the shared dirty tree and its live
+peers were never touched. Merged in order, committing between each: **`hotfix/prod-2026-09-03`** (the
+deployed baseline, 24 ahead of main) · **`hf/search`** (+9, the reviewed by-id stock fix) ·
+**`hf/returns`** (+7, matches the live 0106 schema) · **`hf/review-fixes`** (+6: dashboard default range is
+the business day, out-of-stock grouped rows become an opt-in, catalog-wide inventory alerts, two
+stale-closure filter hooks). Migration chain stops at **0107 = production's highest applied id → the
+deploy applies ZERO migrations and touches NO data.**
+**Still unmerged, deliberately** (never in the hotfix branch, so almost certainly not in the build being
+restored — merging them would be new code shipped under cover of a restore): `hf/merge` (2),
+`hf/customers-perf` (1), `lane/6d-delivery-rename-parity` (1), `rc/coordinated-2026-09-02` (149; also needs
+its `0106_barcode_aliases.sql` renumbered to 0108+ and a rebase onto main's 0105).
+**Merge conflicts here are UNIONS, not choices** — `lang/en.json`/`km.json` (each lane *adds* keys; dedupe,
+then re-`JSON.parse`: the side that had been the object's last entry loses its trailing comma, and this
+checkout is `autocrlf` so match `\r?\n`) and **`frontend/package.json`'s `test:utils` chain**, one very long
+single line every lane appends to — a side-pick silently drops a lane's test from the chain CI runs.
+Unioning recovered `returnsExchangeFlow.test.ts` and `hookDepsFilterState.test.ts`; `testChainCoverage`
+then confirmed all 170 test files wired.
+
+**🐛 FIXED — `/api/products/search` ignored `ids`, so Adjust Stock edited the WRONG PRODUCT (live, shipped in the reconcile deploy).**
+A dropped filter on a list endpoint is not "an unfiltered list" to a by-id caller — it is the **wrong
+record**, because every by-id consumer takes `items[0]`. Production snapshot: `?ids=7231&pageSize=1` →
+`total 10212`, `items[0] = id 1`. Same silent-drop shape broke the Change-stock picker, which sent an
+unread `search=`. Fixed server-side (`ids`/`id` honoured, `search` as a third alias, `/filters` strips all
+three), client-side (`canonicalizeSearchTerm` at the single transport chokepoint, by-id payloads filtered
+to the requested ids, cache key → `v2` so a client cannot serve a pre-fix cached answer) and at each
+consumer (`StockAdjustModal`, `Inventory`, `Products.fetchProductsByIds` resolve by id, never `items[0]`).
+**Hardened beyond `hf/search`:** `Number.parseInt` stops at the first non-digit, so `ids=1.5.2` parsed to
+`1` — a malformed id resolving to a *different valid product*. Whole-token digits only; anything else falls
+to the `1 = 0` branch. Locked by `cloudflare/scripts/test-products-by-id-lookup-pure.cjs` (14 checks), which
+extracts the real `ids` block from the shipped source and **runs** it, and is path-independent.
+**Open harness defect:** `test-inventory-adjust-set-pure.cjs` reads CWD-relative paths, so it is a false RED
+under the sweep command CLAUDE.md documents; it passes from `cloudflare/`.
+
+
 **🚀 STAGE 2 DEPLOYED (Sep 3 2026, 08:41 UTC) — Worker version `d701ddc1-22ff-4d87-bbe7-6b25a666b79b`, from committed HEAD `a4f10152`, by session business-os-v1-5d on the user's explicit go. Reference to re-verify.**
 Deployed from an **isolated worktree** (`scratchpad/cert-head`) at `a4f10152` with a real `npm ci`, never from the dirty
 shared tree. **Zero migrations applied** — both remote D1s answered `✅ No migrations to apply!` before the deploy

@@ -17510,3 +17510,116 @@ POS-only roles, ungated export/import buttons, non-admin column scoping), report
 RC Reports redesign), stock-reason presets in Settings, fees→expenses leftovers + income type, the
 375 px Products overflow, and the user-gated production forward fixes (never restore the
 Time-Travel bookmark `0000118e-…` or apply `twin-merge.sql` without the user).
+
+## Part 583 (Sep 3 2026, session business-os-v1-5d, main tree, COORDINATOR) — a clean-HEAD deploy reverted production; provenance reconstructed from Cloudflare + D1, four lanes reconciled and certified; the ignored-`ids` stock-integrity bug fixed
+
+Reference to re-verify, not ground truth. Full incident write-up:
+[docs/2026-09-03-deploy-reconciliation.md](../2026-09-03-deploy-reconciliation.md). Generalised
+procedure: the **`deploy-provenance`** skill (`.claude/skills/deploy-provenance/SKILL.md`).
+
+**Ask** — "check the bos-rc and bos-rc-worker… know what is in progress, committed, done, halfway,
+not started… update progress.md… then deploy what can be deployed"; then, after the deploy, "it
+seems you deployed using the old version… i saw returns button in sales reverted, the branch
+inventory identical to branch section's overview brought back and many more"; then "find that latest
+deploy and also uncommitted code not your current deploy… reconcile, then fix and deploy plus the
+current changes"; then "deploy, make an md for session what happened… make a skill as well".
+
+**The incident** — production was Worker `0a531d53-3aa6-4b31-a50e-e04c9bc109ac` (07:26:26Z),
+deployed by another session from a tree carrying `hotfix/prod-2026-09-03` — **24 commits never
+merged to `main`**. This session deployed `d701ddc1-22ff-4d87-bbe7-6b25a666b79b` (08:41:57Z) from
+committed `main` `a4f10152`, certified green. A deploy replaces production wholesale, so all 24
+commits were deleted from the live site, including `8e961357 feat(sales): return straight from the
+sale receipt` — the user's missing Returns button — and the BranchesHubPage work. **Every check
+passed; none could catch it.** Four readings looked like confirmation and were not: (1) commit
+ancestry proved HEAD ⊃ `57d8f1a2` but ancestry cannot see a deploy that was not made from a commit;
+(2) `wrangler d1 migrations list --remote` said "No migrations to apply", which means the local
+chain is not *ahead* — it says the same when production is *ahead*, and production was at **0107**,
+not 0105; (3) the dirty tree looked like the only copy of the orphaned lanes, but `7afc8a71` had
+already committed that batch onto the hotfix branch; (4) renaming `0106_return_replacement_sales.sql`
+to `0108_…` per the "new migrations take 0108+" rule would have made D1 re-run an **already-applied**
+migration and fail the deploy — caught by reading `d1_migrations`, reverted before shipping. **An
+applied migration's filename is frozen.**
+
+**Provenance evidence** — `wrangler deployments list` (version ids + UTC timestamps, no source
+commit); `SELECT id, name FROM d1_migrations ORDER BY id DESC` (top **107**; **106** =
+`0106_return_replacement_sales.sql`, which proves the live build came from a branch `main` lacked);
+`git for-each-ref --sort=-committerdate` (the `hf/*` merges at 13:00–14:13 **+07** = 06:00–07:13Z,
+minutes before the 07:26Z deploy); `git merge-base --is-ancestor` for containment. Timestamps are
+the trap — wrangler is UTC, repo commit dates here are +07.
+
+**What changed** — pushed to `main` earlier in the session: `a4f10152` (Part 583 audit block),
+`3e03f9e1` (deploy record), `fced3086` (the 30 unresolved i18n keys — `verify:i18n` exits 0 for the
+first time in days), `c570a37e` (KHR is a Grand-Total-only receipt line via a `template_revision`
+one-time upgrade, since `normalizeReceiptTemplate` merges `{...DEFAULT, ...saved}` and
+ReceiptSettings auto-saves the whole template, so flipping defaults alone would never reach a
+business that already saved one; `Driver` → `Delivery`). Also repaired
+`cloudflare/node_modules/.bin/tsc`, **missing entirely** while `typescript@5.9.3` was installed, so
+`npx tsc` fell through to the registry — `CHECKPOINT.md` blamed a lost executable bit; the real
+cause was the absent shim, and `npm install` in `cloudflare/` recreated it. This repaired the
+command CLAUDE.md documents for every session.
+
+Then branch **`reconcile/2026-09-03`**, built in an isolated worktree at
+`C:/Users/mrkl6/Downloads/bos-rec` so the shared dirty tree and its live peers were never touched.
+Merged in order, committing between each: `hotfix/prod-2026-09-03` (24 ahead of main — the deployed
+baseline), `hf/search` (+9 — the reviewed by-id stock fix), `hf/returns` (+7 — matches the live 0106
+schema), `hf/review-fixes` (+6 — dashboard default range is the business day, out-of-stock grouped
+rows become opt-in, catalog-wide inventory alerts, two stale-closure filter hooks). Migration chain
+stops at **0107 = production's highest applied id**, so the deploy applies **zero** migrations.
+**Deliberately excluded** because they were never in the hotfix branch and so almost certainly not
+in the build being restored: `hf/merge` (2), `hf/customers-perf` (1),
+`lane/6d-delivery-rename-parity` (1), `rc/coordinated-2026-09-02` (149).
+
+**Conflicts were unions, not choices** — three i18n blocks in `en.json`/`km.json` (each side *added*
+distinct keys; unioned with dedupe; the side that had been the object's last entry loses its trailing
+comma when the other side is appended after it, and this checkout is `autocrlf` so regexes must match
+`\r?\n`), and `frontend/package.json` twice: the `test:utils` chain is one very long single line and
+each lane appends its own `node tests/<name>.test.ts`, so a side-pick silently drops a lane's test
+from the chain CI runs. Unioning recovered `returnsExchangeFlow.test.ts` and
+`hookDepsFilterState.test.ts`; `testChainCoverage` then confirmed **all 170 test files wired**.
+
+**The stock-integrity bug** (live the whole time, separate from the reconciliation) —
+`GET /api/products/search` accepted `ids` from every client and **never read it**. A dropped filter
+on a list endpoint is not "an unfiltered list" to a by-id caller: it is the **wrong record**, since
+every by-id consumer takes `items[0]`. Production snapshot: `?ids=7231&pageSize=1` → `total 10212`,
+`items[0] = id 1`, so Adjust Stock on id 7231 loaded and would have written against the catalog's
+first row by name. Same shape broke the Change-stock picker, which sent an unread `search=`. Fixed
+server-side (`ids`/`id` honoured, `search` as a third alias, `/filters` strips all three),
+client-side (`canonicalizeSearchTerm` at the one transport chokepoint, by-id payloads filtered to
+the requested ids, cache key → `v2`), and at each consumer (`StockAdjustModal`, `Inventory`,
+`Products.fetchProductsByIds` resolve by id). **One hardening beyond `hf/search`:**
+`Number.parseInt` stops at the first non-digit, so `ids=1.5.2` parsed to `1` — a malformed id
+resolving to a *different valid product*, the same failure one step further in. Whole-token digits
+only; anything else falls to the `1 = 0` branch. Locked by
+`cloudflare/scripts/test-products-by-id-lookup-pure.cjs`, which extracts the real `ids` block from
+the shipped source and **runs** it (14 checks), and is path-independent — unlike
+`test-inventory-adjust-set-pure.cjs`, whose CWD-relative paths make it a false RED under the sweep
+command CLAUDE.md documents. That harness defect is still open.
+
+**Two reds that were the tests' fault, not the code's** — `test-products-by-id-lookup-pure.cjs` went
+red on a merged branch because `hf/search` splits the term expression across two lines to reuse the
+raw text for its barcode probe; the assertion was pinning source formatting, and now matches the
+alias chain. `test-returns-receipt-lookup-pure.cjs` asserted the base chain had no
+`sales.legacy_receipt_number`, true only while 0107 sat outside that lane; the pre-0107 shape is now
+constructed (drop the index first — SQLite refuses to drop a column an index references) and driven
+through `buildReceiptLookupQuery`, because the route caches a `true` probe for the isolate's life on
+the correct production reasoning that columns are not dropped. **A red on a merged branch is a
+suspect, not a verdict.**
+
+**Also this session** — all 41 registered worktrees read `prunable` because the user had moved
+`bos-rc/` and `bos-rc-workers/` *into* `business-os-v1/`; both were moved back and `git worktree
+list` now reports **0 prunable**, no branch or commit lost. `hf-adjust-fail` remains split across two
+directories (a Windows file lock blocked the last move; its branch `hf/adjust-fail` @ `7f58077a` is
+intact and the work-tree diff vs the tip is pure deletions).
+
+**Not done** — the three excluded lanes above, if wanted, as a separate verified step;
+`rc/coordinated-2026-09-02` (149 ahead, 4 conflicts, needs its `0106_barcode_aliases.sql` renumbered
+since 0106 **and** 0107 are taken and applied, plus a rebase onto main's 0105);
+`test-inventory-adjust-set-pure.cjs`'s CWD-relative paths; the `hf-adjust-fail` split directory. The
+user's open UI asks: **add products to an existing sale**, redesign the sale detail view, the
+image-only upload page redesign (selling + VIP price highlighted outside as bare numbers, barcode
+shown, categories/brand folded into details, name horizontally scrollable without pushing the row),
+and the returns page redesign (before/after stock and sale columns, options text into hover/touch
+tooltips, options compact to one row on small screens including iOS, name horizontally scrollable).
+**Correction owed to the user on returns framing:** the original sale is immutable, so this is a
+return plus a **new linked sale** joined by `returns.replacement_sale_id` / `sales.source_return_id`
+— not a multi-role edit of the sale.
