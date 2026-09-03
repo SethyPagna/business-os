@@ -131,6 +131,77 @@ export function isSameProductIdentity(
   return productIdentitySignature(a) === productIdentitySignature(b)
 }
 
+/**
+ * The cost ruling that sits ON TOP of productDetailSignature without changing
+ * it: a cost of 0 or NULL means MISSING, not "a different cost".
+ *
+ * Per cost field (USD and KHR judged independently):
+ *   'same'     -- both sides agree (both set and equal, or both missing);
+ *   'missing'  -- exactly one side has no cost recorded, so the two rows do
+ *                 NOT disagree: they are the same product and the survivor of
+ *                 a merge keeps the real cost;
+ *   'differs'  -- BOTH sides carry a cost and the costs differ. Only this is a
+ *                 real detail difference, and it is REVIEW ONLY: never
+ *                 auto-merged, always shown with both costs and both stock
+ *                 lines.
+ *
+ * productDetailSignature stays the exact-detail key (it still says a missing
+ * cost is a different signature, so the sibling-row grouping in the product
+ * list is unchanged); this verdict is what merge eligibility and the manual
+ * create/edit guard read.
+ */
+export type CostVerdict = 'same' | 'missing' | 'differs'
+
+/** A cost of 0 or NULL is not a value -- nobody has recorded one yet. */
+export function costIsMissing(value: unknown): boolean {
+  return cents(value) === 0
+}
+
+export function compareCostField(a: unknown, b: unknown): CostVerdict {
+  const aMissing = costIsMissing(a)
+  const bMissing = costIsMissing(b)
+  if (aMissing && bMissing) return 'same'
+  if (aMissing !== bMissing) return 'missing'
+  return cents(a) === cents(b) ? 'same' : 'differs'
+}
+
+/** The pair's overall cost verdict: 'differs' if EITHER field differs with both sides set. */
+export function compareCosts(a: ProductDetailInput, b: ProductDetailInput): CostVerdict {
+  const usd = compareCostField(a.cost_price_usd, b.cost_price_usd)
+  const khr = compareCostField(a.cost_price_khr, b.cost_price_khr)
+  if (usd === 'differs' || khr === 'differs') return 'differs'
+  if (usd === 'missing' || khr === 'missing') return 'missing'
+  return 'same'
+}
+
+/**
+ * Same barcode and costs that do not disagree ('same' or 'missing'): the two
+ * rows are ONE product for merge purposes. This is the detail half of the
+ * merge-eligibility rule; the caller pairs it with normalizeProductGroupName.
+ */
+export function detailsMergeCompatible(a: ProductDetailInput, b: ProductDetailInput): boolean {
+  return normalizedBarcode(a.barcode) === normalizedBarcode(b.barcode) && compareCosts(a, b) !== 'differs'
+}
+
+/**
+ * The cost fields a merge survivor takes from the discarded row: those where
+ * the survivor has no cost recorded and the discarded row has one. Empty when
+ * nothing is missing, and NEVER filled when both sides are set (a real
+ * difference is the operator's to resolve, not the fold's to average away).
+ */
+export function costFillFromDiscarded(
+  survivor: ProductDetailInput,
+  discarded: ProductDetailInput,
+): Array<{ field: 'cost_price_usd' | 'cost_price_khr'; value: number }> {
+  const fill: Array<{ field: 'cost_price_usd' | 'cost_price_khr'; value: number }> = []
+  for (const field of ['cost_price_usd', 'cost_price_khr'] as const) {
+    if (costIsMissing(survivor[field]) && !costIsMissing(discarded[field])) {
+      fill.push({ field, value: cents(discarded[field]) / 100 })
+    }
+  }
+  return fill
+}
+
 export type MergeablePricing = {
   selling_price_usd?: unknown
   selling_price_khr?: unknown
