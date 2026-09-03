@@ -261,10 +261,17 @@ test('Part 552: report section controls ride the title row; hub tabs fit; branch
   // The hub tab row fits one row on phones: equal grid cells with complete,
   // wrapping labels, including Khmer, instead of hiding Reports with an
   // ellipsis or pushing it beyond the iPhone viewport.
+  // Sep 3 2026: the hub no longer owns its tab row. The shared HubSectionNav
+  // renders it -- a viewport-bounded, horizontally scrollable chip row on
+  // wide screens, and on phones the default surface is the two-per-row tile
+  // grid (every section visible, labels wrap, nothing pushed off-screen),
+  // which is how Part 552's "Reports must not fall off an iPhone" holds now.
   const shell = read('src/components/sales/SalesHubPage.tsx')
-  assert.ok(shell.includes('grid w-full rounded-xl'), 'the tab strip is full-width')
-  assert.ok(shell.includes('gridTemplateColumns'), 'each visible tab receives an equal bounded cell')
-  assert.ok(shell.includes('break-words text-center leading-tight'), 'tab labels stay complete and may use a second line')
+  assert.ok(/<HubSectionNav\b/.test(shell), 'the sales hub renders its tabs through HubSectionNav')
+  const nav = read('src/components/shared/HubSectionNav.tsx')
+  assert.ok(nav.includes('max-w-full overflow-x-auto'), 'the chip row is viewport bounded and scrolls')
+  assert.ok(nav.includes('grid grid-cols-2'), 'the phone surface is a two-per-row tile grid')
+  assert.ok(nav.includes('leading-tight'), 'tile labels stay complete and may use a second line')
 })
 
 test('Part 553/554: report sections render display-currency money + a CSV export', () => {
