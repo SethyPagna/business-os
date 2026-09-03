@@ -26,6 +26,14 @@ import InfoHint from '../shared/InfoHint'
 import { useDebouncedValue } from '../../utils/useDebouncedValue.ts'
 import { fmtDate, fmtClock24, fmtDateTime24 } from '../../utils/formatters'
 import { batchDisplayLabel } from '../../utils/batchLabel.ts'
+import {
+  browserStockStorage,
+  dropFailedStockAttempt,
+  emitFailedAttemptsChanged,
+  readFailedStockAttempts,
+  FAILED_ATTEMPTS_EVENT,
+  type FailedStockAttempt,
+} from '../../utils/stockAdjustOutcome.ts'
 
 // D1 (Part 415): the user's Stock Change ledger on the Products page --
 // one row per recorded action over the EXISTING movement history, with the
@@ -158,7 +166,11 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
   // Row write actions (revert / edit reason) reuse the same app context the
   // rest of the Products page reads -- can() gates them exactly as the server
   // does (Inventory adjust access), notify() surfaces the result.
-  const app = useApp() as { can: (section: string, action: string) => boolean; notify: (message: string, type?: string) => void }
+  const app = useApp() as {
+    can: (section: string, action: string) => boolean
+    notify: (message: string, type?: string) => void
+    user?: { id?: string | number; username?: string } | null
+  }
   const canAdjust = app.can('inventory', 'adjust')
   const [view, setView] = useState<LedgerView>('all')
   const [page, setPage] = useState(1)
@@ -192,6 +204,15 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
   const [adjustType, setAdjustType] = useState<'add' | 'remove' | 'set' | null>(null)
   const [fastStockInOpen, setFastStockInOpen] = useState(false)
   const [exportRange, setExportRange] = useState<{ startDate: string; endDate: string } | null>(null)
+  // Unsaved failed adjustments (user, Sep 3: "also show the failed in the
+  // stock change as well"). These never reached the server -- inventory_
+  // movements only records movements that committed, and no stock-action table
+  // carries a 'failed' status -- so they are kept per user in localStorage and
+  // listed here, above the committed ledger, until they are fixed or discarded.
+  const failedStorage = useMemo(() => browserStockStorage(), [])
+  const failedUserKey = app.user?.id ?? app.user?.username ?? null
+  const [failedAttempts, setFailedAttempts] = useState<FailedStockAttempt[]>([])
+  const [resumeAttempt, setResumeAttempt] = useState<FailedStockAttempt | null>(null)
   const requestRef = useRef(0)
   const stockWorkflowOpen = adjustType !== null || fastStockInOpen
 
@@ -240,6 +261,29 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
 
   useEffect(() => { void load() }, [load])
   useEffect(() => { setPage(1) }, [view, debouncedSearch, branchId, startDate, endDate, supplierId])
+
+  // Keep the unsaved-failure list in step with whatever modal recorded it.
+  useEffect(() => {
+    const sync = () => setFailedAttempts(readFailedStockAttempts(failedStorage, failedUserKey))
+    sync()
+    if (typeof window === 'undefined') return
+    window.addEventListener(FAILED_ATTEMPTS_EVENT, sync)
+    return () => window.removeEventListener(FAILED_ATTEMPTS_EVENT, sync)
+  }, [failedStorage, failedUserKey])
+
+  const discardFailedAttempt = useCallback((attemptId: string) => {
+    setFailedAttempts(dropFailedStockAttempt(failedStorage, failedUserKey, attemptId))
+    emitFailedAttemptsChanged()
+  }, [failedStorage, failedUserKey])
+
+  // Reopen a failed attempt prefilled with exactly the values that failed.
+  const resumeFailedAttempt = useCallback((attempt: FailedStockAttempt) => {
+    const row = attempt.rows[0]
+    if (!row) return
+    blurLedgerSearch()
+    setResumeAttempt(attempt)
+    setAdjustType(row.type === 'remove' || row.type === 'set' ? row.type : 'add')
+  }, [blurLedgerSearch])
 
   useEffect(() => {
     let cancelled = false
@@ -678,6 +722,66 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
         </div>
       ) : null}
 
+      {/* Failed, UNSAVED adjustments lead the ledger -- they are not history,
+          they are work still owed. Each shows the server's reason, the time,
+          and its rows; "Fix" reopens the adjust modal prefilled. */}
+      {failedAttempts.length ? (
+        <div data-failed-stock-attempts="true" className="space-y-2">
+          {failedAttempts.map((attempt) => (
+            <div
+              key={attempt.id}
+              className="rounded-xl border border-rose-300 bg-rose-50/70 px-3 py-2 dark:border-rose-800 dark:bg-rose-950/30"
+            >
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="rounded bg-rose-600 px-1.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-white">
+                  {tr(t, 'failed', 'Failed')}
+                </span>
+                <span className="rounded border border-rose-300 px-1.5 py-0.5 text-[11px] font-semibold text-rose-700 dark:border-rose-700 dark:text-rose-300">
+                  {tr(t, 'unsaved_not_applied', 'Unsaved — not applied')}
+                </span>
+                <span className="text-xs tabular-nums text-gray-500">{fmtDateTime24(attempt.createdAt)}</span>
+                <InfoHint
+                  text={tr(t, 'failed_attempt_hint', 'This change never reached the server, so no stock moved. Fix it and retry, or discard it.')}
+                  label={tr(t, 'unsaved_not_applied', 'Unsaved — not applied')}
+                />
+                <div className="ml-auto flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    className="rounded-lg bg-rose-600 px-2.5 py-1 text-xs font-semibold text-white hover:bg-rose-700"
+                    onClick={() => resumeFailedAttempt(attempt)}
+                    disabled={!canAdjust}
+                  >
+                    {tr(t, 'fix_and_retry', 'Fix and retry')}
+                  </button>
+                  <button
+                    type="button"
+                    className="rounded-lg border border-gray-300 px-2.5 py-1 text-xs text-gray-600 hover:bg-white dark:border-gray-600 dark:text-gray-300"
+                    onClick={() => discardFailedAttempt(attempt.id)}
+                  >
+                    {tr(t, 'discard', 'Discard')}
+                  </button>
+                </div>
+              </div>
+              {attempt.rows.map((row) => (
+                <div key={row.rowId} className="mt-1.5 text-xs text-gray-700 dark:text-gray-200">
+                  <span className="font-semibold">{row.productName || `#${row.productId}`}</span>
+                  <span className="text-gray-500">
+                    {' · '}{translateMovementType(row.type, t)}{' '}
+                    <b className="tabular-nums">{row.quantity}</b>
+                    {row.branchName ? ` · ${row.branchName}` : ''}
+                    {row.reason ? ` · ${row.reason}` : ''}
+                  </span>
+                  <div className="mt-0.5 break-words text-rose-700 dark:text-rose-300">
+                    {row.failure?.message}
+                    {row.failure?.available != null ? ` (${tr(t, 'available', 'Available')}: ${row.failure.available})` : ''}
+                  </div>
+                </div>
+              ))}
+            </div>
+          ))}
+        </div>
+      ) : null}
+
       {/* Desktop uses a compact workbook-style ledger. Mobile retains the
           day-grouped cards so values do not squeeze into unreadable columns. */}
       {loading && !rows.length ? (
@@ -845,9 +949,16 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
         <Suspense fallback={null}>
           <StockAdjustModal
             initialType={adjustType}
+            // Resuming an unsaved failure: the product AND every typed value
+            // come back with it, so nothing has to be retyped.
+            initialProduct={resumeAttempt?.rows[0]?.productId != null
+              ? { id: resumeAttempt.rows[0].productId, name: resumeAttempt.rows[0].productName }
+              : null}
+            resumeRow={resumeAttempt?.rows[0] || null}
+            resumeAttemptId={resumeAttempt?.id || null}
             t={t}
-            onClose={() => setAdjustType(null)}
-            onDone={() => { setAdjustType(null); void load() }}
+            onClose={() => { setAdjustType(null); setResumeAttempt(null) }}
+            onDone={() => { setAdjustType(null); setResumeAttempt(null); void load() }}
           />
         </Suspense>
       ) : null}
