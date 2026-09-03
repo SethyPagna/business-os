@@ -1842,12 +1842,14 @@ export default function App() {
 
 
   if (isPublicCatalogRoute) {
-    return (
-      <>
-        <AppUpdateBanner update={appUpdate} />
-        <PublicCatalogView />
-      </>
-    )
+    // The admin app-update prompt is deliberately absent here. A shopper on
+    // the public catalog is not running the till: the prompt offers "Restart
+    // now" and its guard message talks about saving unfinished work, neither
+    // of which means anything to a storefront visitor. A public page updates
+    // the ordinary way, by being loaded again.
+    // (Named in prose rather than in code above, because the test for this
+    // greps the branch for the component's tag.)
+    return <PublicCatalogView />
   }
 
   const storedAuthSessionPending = !user && hasUsableStoredAuthSession()
