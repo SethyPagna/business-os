@@ -51,8 +51,11 @@ set — the user's rule is that a link-over moves **every** linked record, never
 
 There is no generic conflict table today: products use `product_duplicate_dismissals` (0083),
 contacts use `contact_duplicate_dismissals` (0034), clusters are computed in memory. The kept-past
-pair needs a home, so add one small generic table (migration `0107_rename_links.sql`; 0106 is
-taken by the ChatGPT batch):
+pair needs a home, so add one small generic table (migration `01NN_rename_links.sql` with NN =
+the next free number at lane start, **0108 or later**: 0106 is the ChatGPT batch's
+`return_replacement_sales` (applied to production Sep 3), 0107 is the hotfix receipt renumber,
+and the RC's `barcode_aliases` shifts to the next free number at RC merge — wrangler tracks
+migrations by filename, so a duplicate number is the one thing that must never happen):
 
 ```
 rename_links(id, entity_kind TEXT, entity_id INTEGER, old_name TEXT, new_name TEXT,
@@ -150,8 +153,10 @@ appears nowhere in either package.
 
 **Design (revenue definition untouched).**
 
-- Migration `0107` (or next free): `ALTER TABLE fees ADD COLUMN direction TEXT NOT NULL DEFAULT
-  'expense' CHECK(direction IN ('expense','income'))`; existing rows stay `expense`.
+- Migration numbered **0108 or later** (next free at lane start; 0106 and 0107 are taken, see
+  §1.3): `ALTER TABLE fees ADD COLUMN direction TEXT NOT NULL DEFAULT 'expense'
+  CHECK(direction IN ('expense','income'))`; existing rows stay `expense`. Nothing is prepared
+  yet — this is design text, not a script.
 - `fee_type` gains `'income'`; labels stay shared tags, each tag remembering its last direction
   so picking "Rent received" auto-selects income.
 - UI: the Expenses page keeps one list with a direction chip filter inside the shared FilterMenu,
