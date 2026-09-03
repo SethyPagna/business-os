@@ -25,6 +25,8 @@ assert.match(printSettingsSource, /receipt_print_settings/)
 assert.match(printSettingsSource, /saveAppSettings/)
 assert.match(printSettingsSource, /reason:\s*'receipt-print-settings-saved'/)
 assert.match(printSettingsSource, /printSettings:\s*ps/)
+assert.match(printSettingsSource, /setValue\('highContrastBold', event\.target\.checked\)/)
+assert.match(printSettingsSource, /Extra-dark bold receipt text/)
 
 assert.match(receiptPreviewSource, /buildAppliedReceiptConfig\(\{ settings, template: tpl \}\)\.settings/)
 assert.match(receiptSource, /const appliedConfig = useMemo\(\(\) => buildAppliedReceiptConfig\(\{ settings \}\), \[settings\]\)/)
@@ -42,6 +44,7 @@ assert.match(receiptSource, /\? \{ \.\.\.appliedPrintSettings, paperSize: '80mm'
 
 assert.match(printUtilSource, /RECEIPT_PRINT_SETTINGS_STORAGE_KEY/)
 assert.match(printUtilSource, /normalizeReceiptPrintSettings/)
+assert.match(printUtilSource, /applyHighContrastBold\(host, printSettings\)/)
 assert.match(printUtilSource, /sourceSettings && typeof sourceSettings === 'object' && sourceSettings\.receipt_print_settings/)
 
 assert.match(receiptConfigSource, /export const DEFAULT_RECEIPT_TEMPLATE/)

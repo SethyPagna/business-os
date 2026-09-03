@@ -6,8 +6,8 @@
 //     return_to_stock boolean keeps its exact default (absent = restock)
 //   - computeSettlement: even exchange only at a zero gap; price
 //     difference is signed and needs full access
-//   - same-name gate: a replacement from another row of the SAME name
-//     group passes; a different-name product is refused
+//   - replacement selection is not restricted by product name; the route
+//     records a linked sale/receipt for any chosen catalog item
 //   - damaged lots: created traceable (return/branch/batch), never touch
 //     sellable branch_stock; reversal deletes untouched lots and REFUSES
 //     once any quantity was drawn (ConsumedDamagedStockError)
@@ -115,15 +115,6 @@ async function run() {
     assert.equal(diff.diffUsd, 5.5) // positive = customer owes
     const refundSide = kernel.computeSettlement({ mode: 'price_difference', returnedTotalUsd: 30, returnedTotalKhr: 0, replacementTotalUsd: 25, replacementTotalKhr: 0 })
     assert.equal(refundSide.diffUsd, -5)
-  })
-
-  await check('same-name gate: sibling row of the name group passes, different name is refused', async () => {
-    // tc1 returned, tc2 handed out -- same name_key (trigger-maintained)
-    await kernel.assertReplacementsSameName(db, [ids.tc1], [ids.tc2])
-    await assert.rejects(
-      () => kernel.assertReplacementsSameName(db, [ids.tc1], [ids.os1]),
-      (err) => err.name === 'ReplacementNameMismatchError' && /same-name stock/.test(err.message),
-    )
   })
 
   await check('damaged lot: traceable, never sellable stock; open-lot listing sees it', async () => {
@@ -260,12 +251,16 @@ async function run() {
     // damaged lots reverse (and can block) before an edit re-applies
     assert.match(routeSource, /const reversedLots = await reverseDamagedLots\(db, id\)/)
     assert.match(routeSource, /instanceof ConsumedDamagedStockError/)
-    // replacements: same-name gate + settlement gate before any write,
-    // full-access enforcement, and the damaged-lots read endpoint sits
+    // replacements: any catalog item is accepted, the settlement gate still
+    // applies, a linked sale/receipt is written, and the damaged-lots endpoint sits
     // above the /:id param route
-    assert.match(routeSource, /await assertReplacementsSameName\(/)
+    assert.doesNotMatch(routeSource, /assertReplacementsSameName/)
     assert.match(routeSource, /code: 'uneven_exchange'/)
     assert.match(routeSource, /Settling a price difference on a replacement requires Full Access/)
+    assert.match(routeSource, /INSERT INTO sales \(/)
+    assert.match(routeSource, /source_return_id/)
+    assert.match(routeSource, /INSERT INTO sale_items \(/)
+    assert.match(routeSource, /replacementReceiptNumber/)
     assert.ok(routeSource.indexOf(`app.get('/damaged-lots'`) < routeSource.indexOf(`app.get('/:id'`))
     // failed creates clean up ALL of this return's rows
     assert.match(routeSource, /DELETE FROM damaged_stock_lots WHERE return_id = \?/)
@@ -275,6 +270,9 @@ async function run() {
     assert.match(migration, /CREATE TABLE IF NOT EXISTS return_replacement_items/)
     assert.match(migration, /ALTER TABLE return_items ADD COLUMN stock_action TEXT/)
     assert.match(migration, /WHEN COALESCE\(return_to_stock, 0\) = 1 THEN 'restock' ELSE 'none'/)
+    const replacementSaleMigration = fs.readFileSync(path.join(cloudflareRoot, 'migrations', '0106_return_replacement_sales.sql'), 'utf8')
+    assert.match(replacementSaleMigration, /ALTER TABLE returns ADD COLUMN replacement_sale_id INTEGER/)
+    assert.match(replacementSaleMigration, /ALTER TABLE sales ADD COLUMN source_return_id INTEGER/)
   })
 
   console.log(`\n${passed} check(s) passed.`)

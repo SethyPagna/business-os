@@ -28,11 +28,13 @@ interface SaleLineItem {
   price_khr?: number | string | null
   price?: number | string | null
   branch_name?: string | null
+  returned_quantity?: number | string | null
 }
 
 interface SaleDetail {
   id: string | number
   receipt_number?: string | null
+  source_return_id?: number | string | null
   created_at?: string | Date | null
   sale_status?: string | null
   customer_membership_number?: string | null
@@ -361,6 +363,9 @@ export default function SaleDetailModal({
                 ) : null}
                 <InfoBlock label={t('branch') || 'Branch'} value={sale.branch_name} />
                 <InfoBlock label={t('status') || 'Status'} value={getStatusLabel(currentStatus, t)} />
+                {sale.source_return_id ? (
+                  <InfoBlock label={translateOr('replacement_for_return', 'Replacement for return', 'ការលក់ជំនួសសម្រាប់ការបង្វិលត្រឡប់')} value={`#${sale.source_return_id}`} mono />
+                ) : null}
                 <InfoBlock label={t('timezone') || 'Timezone'} value={fmtTimezoneLabel(sale.device_tz)} mono />
                 <InfoBlock label={t('device') || 'Device'} value={sale.device_name} />
               </div>
@@ -525,7 +530,7 @@ export default function SaleDetailModal({
                         const lineKhr = unitKhr * qty
                         return (
                           <tr key={`${item.product_id || item.id || index}-${index}`}>
-                            <td className="max-w-0 px-2 py-1.5"><div className="detail-scroll-text font-medium text-gray-900 dark:text-white">{item.product_name || item.name}</div>{item.branch_name ? <div className="detail-scroll-text text-[11px] text-gray-400">{item.branch_name}</div> : null}</td>
+                            <td className="max-w-0 px-2 py-1.5"><div className="detail-scroll-text font-medium text-gray-900 dark:text-white">{item.product_name || item.name}</div>{toNumber(item.returned_quantity) > 0 ? <div className="mt-0.5 inline-flex rounded bg-orange-100 px-1.5 py-0.5 text-[10px] font-semibold text-orange-700 dark:bg-orange-900/40 dark:text-orange-300">↩ {toNumber(item.returned_quantity)} {t('returned_quantity_tag') || 'returned'}</div> : null}{item.branch_name ? <div className="detail-scroll-text text-[11px] text-gray-400">{item.branch_name}</div> : null}</td>
                             <td className="whitespace-nowrap px-2 py-1.5 text-right tabular-nums text-gray-700 dark:text-gray-200">{qty}</td>
                             <td className="whitespace-nowrap px-2 py-1.5 text-right tabular-nums text-gray-700 dark:text-gray-200">{fmtUSD(unitUsd)}{unitKhr > 0 ? <div className="text-[11px] text-gray-400">{fmtKHR(unitKhr)}</div> : null}</td>
                             <td className="whitespace-nowrap px-2 py-1.5 text-right font-semibold tabular-nums text-gray-900 dark:text-white">{fmtUSD(lineUsd)}{lineKhr > 0 ? <div className="text-[11px] font-normal text-gray-400">{fmtKHR(lineKhr)}</div> : null}</td>
@@ -543,7 +548,7 @@ export default function SaleDetailModal({
                     const lineKhr = toNumber(item.applied_price_khr ?? item.price_khr) * qty
                     return (
                       <div key={`${item.product_id || item.id || index}-${index}`} className="flex items-start justify-between gap-3 rounded-lg bg-gray-50 px-2.5 py-2 dark:bg-gray-900/35">
-                        <div className="min-w-0 flex-1"><div className="detail-scroll-text text-sm font-medium text-gray-900 dark:text-white">{item.product_name || item.name}</div><div className="text-xs text-gray-500 dark:text-gray-400">{qty} × {fmtUSD(unitUsd)}</div>{item.branch_name ? <div className="detail-scroll-text mt-0.5 text-[11px] text-gray-400">{item.branch_name}</div> : null}</div>
+                        <div className="min-w-0 flex-1"><div className="detail-scroll-text text-sm font-medium text-gray-900 dark:text-white">{item.product_name || item.name}</div><div className="text-xs text-gray-500 dark:text-gray-400">{qty} × {fmtUSD(unitUsd)}</div>{toNumber(item.returned_quantity) > 0 ? <div className="mt-0.5 inline-flex rounded bg-orange-100 px-1.5 py-0.5 text-[10px] font-semibold text-orange-700 dark:bg-orange-900/40 dark:text-orange-300">↩ {toNumber(item.returned_quantity)} {t('returned_quantity_tag') || 'returned'}</div> : null}{item.branch_name ? <div className="detail-scroll-text mt-0.5 text-[11px] text-gray-400">{item.branch_name}</div> : null}</div>
                         <div className="shrink-0 text-right text-sm font-semibold tabular-nums text-gray-900 dark:text-white">{fmtUSD(lineUsd)}{lineKhr > 0 ? <div className="text-[11px] font-normal text-gray-400">{fmtKHR(lineKhr)}</div> : null}</div>
                       </div>
                     )

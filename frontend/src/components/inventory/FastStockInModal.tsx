@@ -446,7 +446,7 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
                 setPicked(null)
                 setEditingKey('')
                 setScannedBarcode(barcode)
-              }} t={(key) => tr(key, key)} />
+              }} t={(key) => tr(key, key)} title={tr('scan_product_for_stock_in', 'Scan product for this stock-in')} />
             </div>
             {scannedBarcode && scannedBarcode === query.trim() && searchCompleteFor === scannedBarcode && candidates.length === 0 ? (
               <div className="mt-2 flex items-center justify-between gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-200">

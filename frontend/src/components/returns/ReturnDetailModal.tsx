@@ -36,6 +36,8 @@ interface ReturnDetail {
   supplier_settlement?: string | null
   return_type?: string | null
   receipt_number?: string | null
+  replacement_sale_id?: number | string | null
+  replacement_receipt_number?: string | null
   supplier_name?: string | null
   customer_name?: string | null
   branch_name?: string | null
@@ -128,6 +130,12 @@ export default function ReturnDetailModal({ ret, onClose, onEdit, fmtUSD, fmtKHR
                 <div className="font-mono text-sm text-blue-600 dark:text-blue-400">{ret.receipt_number}</div>
               </div>
             ) : null}
+            {ret.replacement_receipt_number ? (
+              <div>
+                <div className="mb-0.5 text-xs text-gray-400">{tr('replacement_sale_receipt', 'Replacement Sale Receipt')}</div>
+                <div className="font-mono text-sm font-semibold text-emerald-600 dark:text-emerald-400">{ret.replacement_receipt_number}</div>
+              </div>
+            ) : null}
             <div>
               <div className="mb-0.5 text-xs text-gray-400">{isSupplier ? tr('supplier', 'Supplier') : tr('customer', 'Customer')}</div>
               <div className="text-sm font-medium text-gray-800 dark:text-gray-200">
@@ -179,7 +187,7 @@ export default function ReturnDetailModal({ ret, onClose, onEdit, fmtUSD, fmtKHR
           {replacementItems.length > 0 ? (
             <div>
               <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-emerald-600 dark:text-emerald-400">
-                🔁 {tr('replacement_items_label', 'Replacements handed out')} ({replacementItems.length})
+                🔁 {tr('replacement_sale_items_label', 'Replacement sale items')} ({replacementItems.length})
               </div>
               <div className="space-y-1 rounded-xl border border-emerald-200 bg-emerald-50 p-3 dark:border-emerald-800 dark:bg-emerald-900/20">
                 {replacementItems.map((line, index) => (

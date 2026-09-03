@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import ChevronLeft from 'lucide-react/dist/esm/icons/chevron-left.js'
 import ChevronRight from 'lucide-react/dist/esm/icons/chevron-right.js'
+import ChevronDown from 'lucide-react/dist/esm/icons/chevron-down.js'
 import ImageOff from 'lucide-react/dist/esm/icons/image-off.js'
 import X from 'lucide-react/dist/esm/icons/x.js'
 import { promotionBadgeForProduct, evaluatePromotionPricing, type PromotionRule } from '../../utils/promotionRules.ts'
@@ -277,6 +278,7 @@ export default function ProductDetailSheet({
   // lots. The two must not render the same way -- see the fetch below.
   const [batchesError, setBatchesError] = useState('')
   const [selectedBatchId, setSelectedBatchId] = useState<number | null>(null)
+  const [batchChoicesOpen, setBatchChoicesOpen] = useState(false)
   // 11.9: open damaged lots for the resolved row/branch -- the Damage
   // source option shown beside the sellable lots. A failed fetch shows no
   // option (absence is safe; damaged stock is an offer, not a gate).
@@ -289,6 +291,7 @@ export default function ProductDetailSheet({
     setBranchPage(0)
     setBarcodePage(0)
     setSelectedBatchId(null)
+    setBatchChoicesOpen(false)
     setBatchPage(0)
   }, [product?.id])
 
@@ -457,6 +460,7 @@ export default function ProductDetailSheet({
     setSelectedBatchId(null)
     setSelectedDamagedLotId(null)
     setBatchPage(0)
+    setBatchChoicesOpen(false)
   }, [resolvedProduct?.id, resolvedBranchId])
 
   const batchPageCount = Math.max(1, Math.ceil(batches.length / BATCH_CHOICES_PAGE_SIZE))
@@ -687,7 +691,16 @@ export default function ProductDetailSheet({
                         <div className="text-xs text-gray-400">{posCopy('No lots available at this branch', 'គ្មានបាច់នៅសាខានេះទេ')}</div>
                       ) : (
                         <>
-                          <div className="flex flex-wrap gap-1.5">
+                          <button
+                            type="button"
+                            className="flex w-full items-center justify-between gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-left text-xs font-semibold text-gray-700 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200"
+                            onClick={() => setBatchChoicesOpen((open) => !open)}
+                            aria-expanded={batchChoicesOpen}
+                          >
+                            <span className="min-w-0 truncate">{selectedBatch ? formatBatchLabel(selectedBatch, posCopy) : posCopy('Choose batch', 'ជ្រើសរើសបាច់')}</span>
+                            <ChevronDown className={`h-4 w-4 shrink-0 transition-transform ${batchChoicesOpen ? 'rotate-180' : ''}`} />
+                          </button>
+                          {batchChoicesOpen ? <><div className="mt-1.5 flex flex-wrap gap-1.5">
                             {pagedBatches.map((batch) => {
                               const batchOut = Number(batch.quantity || 0) <= 0
                               return (
@@ -695,7 +708,7 @@ export default function ProductDetailSheet({
                                   key={batch.id}
                                   type="button"
                                   className={pillClass(batch.id === selectedBatchId, batchOut)}
-                                  onClick={() => { setSelectedBatchId(batch.id); setSelectedDamagedLotId(null) }}
+                                  onClick={() => { setSelectedBatchId(batch.id); setSelectedDamagedLotId(null); setBatchChoicesOpen(false) }}
                                 >
                                   <span className="font-mono">{formatBatchLabel(batch, posCopy)}</span>
                                   {batch.expiry_date ? <span className="ml-1 text-[10px] font-normal opacity-75">{posCopy('exp', 'ផុត')} {batch.expiry_date}</span> : null}
@@ -705,6 +718,7 @@ export default function ProductDetailSheet({
                             })}
                           </div>
                           <PillPager page={clampedBatchPage} pageCount={batchPageCount} onPageChange={setBatchPage} posCopy={posCopy} />
+                          </> : null}
                         </>
                       )}
                     </div>
@@ -780,7 +794,16 @@ export default function ProductDetailSheet({
                   <div className="text-xs text-gray-400">{posCopy('No lots available at this branch', 'គ្មានបាច់នៅសាខានេះទេ')}</div>
                 ) : (
                   <>
-                    <div className="flex flex-wrap gap-1.5">
+                    <button
+                      type="button"
+                      className="flex w-full items-center justify-between gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-left text-xs font-semibold text-gray-700 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200"
+                      onClick={() => setBatchChoicesOpen((open) => !open)}
+                      aria-expanded={batchChoicesOpen}
+                    >
+                      <span className="min-w-0 truncate">{selectedBatch ? formatBatchLabel(selectedBatch, posCopy) : posCopy('Choose batch', 'ជ្រើសរើសបាច់')}</span>
+                      <ChevronDown className={`h-4 w-4 shrink-0 transition-transform ${batchChoicesOpen ? 'rotate-180' : ''}`} />
+                    </button>
+                    {batchChoicesOpen ? <><div className="mt-1.5 flex flex-wrap gap-1.5">
                       {pagedBatches.map((batch) => {
                         const batchOut = Number(batch.quantity || 0) <= 0
                         return (
@@ -788,7 +811,7 @@ export default function ProductDetailSheet({
                             key={batch.id}
                             type="button"
                             className={pillClass(batch.id === selectedBatchId, batchOut)}
-                            onClick={() => { setSelectedBatchId(batch.id); setSelectedDamagedLotId(null) }}
+                            onClick={() => { setSelectedBatchId(batch.id); setSelectedDamagedLotId(null); setBatchChoicesOpen(false) }}
                           >
                             <span className="font-mono">{formatBatchLabel(batch, posCopy)}</span>
                             {batch.expiry_date ? <span className="ml-1 text-[10px] font-normal opacity-75">{posCopy('exp', 'ផុត')} {batch.expiry_date}</span> : null}
@@ -798,6 +821,7 @@ export default function ProductDetailSheet({
                       })}
                     </div>
                     <PillPager page={clampedBatchPage} pageCount={batchPageCount} onPageChange={setBatchPage} posCopy={posCopy} />
+                    </> : null}
                   </>
                 )}
               </div>

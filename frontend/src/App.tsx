@@ -15,6 +15,7 @@ import PullToRefreshIndicator from './components/shared/PullToRefreshIndicator.t
 import { usePullToRefresh } from './components/shared/usePullToRefresh.ts'
 import { STORAGE_KEYS } from './constants.ts'
 import { refreshAppData } from './utils/appRefresh.ts'
+import { restartIntoLatestApp } from './utils/appUpdate.ts'
 import { claimChunkReload, clearChunkReloadMarker } from './utils/chunkReloadGuard.ts'
 import { hasDirtyWork } from './utils/dirtyWork.ts'
 import { withLoaderTimeout } from './utils/loaders.ts'
@@ -93,6 +94,8 @@ interface SyncProblemDetail {
   status?: number | string
   message?: string
   ts?: number | string
+  version?: string
+  waiting?: boolean
 }
 
 interface PendingSyncState {
@@ -203,6 +206,10 @@ interface SyncErrorBannerProps {
   error: SyncProblemDetail | null
   onDismiss: () => void
   onGoToServer: () => void
+}
+
+interface AppUpdateBannerProps {
+  update: SyncProblemDetail | null
 }
 
 interface OfflineModeBannerProps {
@@ -713,13 +720,40 @@ function useSyncErrorBanner(user: AppUser | null) {
   const [appUpdate, setAppUpdate] = useState<SyncProblemDetail | null>(null)
   const [conflictsNeedReview, setConflictsNeedReview] = useState<WriteConflictDetail | null>(null)
 
+  // App updates are independent of authentication. A waiting worker may
+  // announce itself on the login screen, during session restoration, or in
+  // the signed-in shell, so keep one listener mounted for App's lifetime.
+  useEffect(() => {
+    if (typeof window === 'undefined') return undefined
+
+    const acceptAppUpdate = (detail: SyncProblemDetail) => {
+      const announcedHash = String(detail.version || '').replace(/^business-os-app-shell-/, '')
+      // A device's first service-worker activation announces the same build
+      // the page is already running. That is not an update and must not nag
+      // the user; a genuinely newer waiting/active worker has a different hash.
+      if (announcedHash && FRONTEND_BUILD_HASH !== 'dev' && announcedHash === FRONTEND_BUILD_HASH) return
+      setAppUpdate(detail)
+    }
+    const onAppUpdate = (event: Event) => acceptAppUpdate(
+      event instanceof CustomEvent
+        ? event.detail as SyncProblemDetail
+        : { message: 'New version ready', ts: Date.now() },
+    )
+    const bufferedAppUpdate = getAppShellApi().getPendingAppUpdate?.()
+    if (bufferedAppUpdate) {
+      acceptAppUpdate(bufferedAppUpdate)
+      getAppShellApi().clearPendingAppUpdate?.()
+    }
+    window.addEventListener('sync:app-update-available', onAppUpdate)
+    return () => window.removeEventListener('sync:app-update-available', onAppUpdate)
+  }, [])
+
   useEffect(() => {
     if (!user || typeof window === 'undefined') {
       setSyncError(null)
       setTransientOutage(null)
       setPendingSync(null)
       setVaultLocked(null)
-      setAppUpdate(null)
       setConflictsNeedReview(null)
       return undefined
     }
@@ -753,19 +787,6 @@ function useSyncErrorBanner(user: AppUser | null) {
     }
     const onQueueChanged = () => refreshPendingSync()
     const onVaultLocked = (event: Event) => setVaultLocked(event instanceof CustomEvent ? event.detail as SyncProblemDetail : { reason: 'locked', ts: Date.now() })
-    const onAppUpdate = (event: Event) => setAppUpdate(event instanceof CustomEvent ? event.detail as SyncProblemDetail : { message: 'New version ready', ts: Date.now() })
-    // The service worker can broadcast BUSINESS_OS_APP_UPDATE_AVAILABLE at any
-    // time, including while this effect isn't mounted yet (no user signed in
-    // -- e.g. sitting on the login screen right after a deploy). The window
-    // CustomEvent it triggers is fire-and-forget, so a listener that only
-    // exists once a user is present would silently miss it, leaving the app
-    // running the stale pre-update JS with no banner ever shown. Pick up
-    // anything that already fired and was buffered before we could listen.
-    const bufferedAppUpdate = getAppShellApi().getPendingAppUpdate?.()
-    if (bufferedAppUpdate) {
-      setAppUpdate(bufferedAppUpdate)
-      getAppShellApi().clearPendingAppUpdate?.()
-    }
     const onConflictReview = (event: Event) => {
       setConflictsNeedReview(event instanceof CustomEvent ? event.detail as WriteConflictDetail : { message: 'Conflicts need review', ts: Date.now() })
       refreshPendingSync()
@@ -779,7 +800,6 @@ function useSyncErrorBanner(user: AppUser | null) {
     window.addEventListener('sync:offline-sale-queued', onQueueChanged)
     window.addEventListener('sync:offline-sale-synced', onQueueChanged)
     window.addEventListener('offline:vault-locked', onVaultLocked)
-    window.addEventListener('sync:app-update-available', onAppUpdate)
     window.addEventListener('sync:write-conflict', onConflictReview)
     const cancelInitialPendingSyncRefresh = scheduleInitialPendingSyncRefresh(refreshPendingSync)
     const cancelPendingSyncPolling = scheduleDeferredPendingSyncPolling(refreshPendingSync)
@@ -795,7 +815,6 @@ function useSyncErrorBanner(user: AppUser | null) {
       window.removeEventListener('sync:offline-sale-queued', onQueueChanged)
       window.removeEventListener('sync:offline-sale-synced', onQueueChanged)
       window.removeEventListener('offline:vault-locked', onVaultLocked)
-      window.removeEventListener('sync:app-update-available', onAppUpdate)
       window.removeEventListener('sync:write-conflict', onConflictReview)
     }
   }, [user])
@@ -1106,6 +1125,48 @@ function Notification({ notification, onDismiss }: NotificationProps) {
       </button>
     </div>
   )
+  return typeof document !== 'undefined' ? createPortal(node, document.body) : node
+}
+
+function AppUpdateBanner({ update }: AppUpdateBannerProps) {
+  const { t } = useApp()
+  const [restarting, setRestarting] = useState(false)
+
+  if (!update) return null
+
+  const restart = async () => {
+    if (restarting) return
+    setRestarting(true)
+    const result = await restartIntoLatestApp({
+      unsavedWorkMessage: t('save_or_discard_before_update') || 'Save or discard your unfinished work before updating the app.',
+    })
+    if (result === 'blocked') setRestarting(false)
+  }
+
+  const node = (
+    <div
+      role="alert"
+      aria-live="assertive"
+      className="fixed inset-x-0 top-0 z-[1500] flex min-h-[calc(3rem+env(safe-area-inset-top))] w-full items-center bg-blue-700 px-[calc(0.75rem+env(safe-area-inset-left))] pb-2 pt-[calc(0.5rem+env(safe-area-inset-top))] text-white shadow-lg dark:bg-blue-600"
+    >
+      <div className="mx-auto flex w-full max-w-[1680px] items-center justify-between gap-3">
+        <span className="min-w-0 text-sm font-semibold">
+          {t('app_update_ready') || 'A new version is ready.'}
+        </span>
+        <button
+          type="button"
+          onClick={() => { void restart() }}
+          disabled={restarting}
+          className="shrink-0 rounded-lg bg-white px-3 py-1.5 text-sm font-bold text-blue-700 shadow-sm transition hover:bg-blue-50 disabled:cursor-wait disabled:opacity-70 dark:text-blue-700"
+        >
+          {restarting
+            ? (t('restarting_app') || 'Restarting...')
+            : (t('restart_now') || 'Restart now')}
+        </button>
+      </div>
+    </div>
+  )
+
   return typeof document !== 'undefined' ? createPortal(node, document.body) : node
 }
 
@@ -1569,6 +1630,7 @@ export default function App() {
     transientOutage,
     pendingSync,
     vaultLocked,
+    appUpdate,
     conflictsNeedReview,
     clearSyncError,
   } = useSyncErrorBanner(authReady ? user : null)
@@ -1780,7 +1842,12 @@ export default function App() {
 
 
   if (isPublicCatalogRoute) {
-    return <PublicCatalogView />
+    return (
+      <>
+        <AppUpdateBanner update={appUpdate} />
+        <PublicCatalogView />
+      </>
+    )
   }
 
   const storedAuthSessionPending = !user && hasUsableStoredAuthSession()
@@ -1794,28 +1861,35 @@ export default function App() {
     // used everywhere in the app, instead of several different-looking
     // loading screens appearing back to back during boot/navigation.
     return (
-      <div className="business-os-initial-shell" role="status" aria-live="polite">
-        <div className="business-os-initial-panel">
-          <div className="business-os-initial-spinner" aria-hidden="true" />
-          <div className="business-os-initial-brand">
-            <h1 className="business-os-initial-title">Business OS</h1>
-            <p className="business-os-initial-copy">Preparing secure sign-in...</p>
+      <>
+        <AppUpdateBanner update={appUpdate} />
+        <div className="business-os-initial-shell" role="status" aria-live="polite">
+          <div className="business-os-initial-panel">
+            <div className="business-os-initial-spinner" aria-hidden="true" />
+            <div className="business-os-initial-brand">
+              <h1 className="business-os-initial-title">Business OS</h1>
+              <p className="business-os-initial-copy">Preparing secure sign-in...</p>
+            </div>
           </div>
         </div>
-      </div>
+      </>
     )
   }
 
   if (!user) {
     return (
-      <Suspense fallback={<PageLoader />}>
-        <Login />
-      </Suspense>
+      <>
+        <AppUpdateBanner update={appUpdate} />
+        <Suspense fallback={<PageLoader />}>
+          <Login />
+        </Suspense>
+      </>
     )
   }
 
   return (
-    <div id="app-root" className="flex h-screen flex-col overflow-hidden bg-gray-50 dark:bg-gray-900">
+    <div id="app-root" className={`flex h-screen flex-col overflow-hidden bg-gray-50 dark:bg-gray-900 ${appUpdate ? 'pt-[calc(3rem+env(safe-area-inset-top))]' : ''}`}>
+      <AppUpdateBanner update={appUpdate} />
       {/* Desktop's standalone top bar (logo, business name, notification
           bell, theme/language toggles in their own h-14 row above the
           sidebar+content) is gone -- per request, large screens fold all
@@ -1831,12 +1905,13 @@ export default function App() {
               desktopNotificationSlot={desktopNotificationSlot}
               showQuickPreferences={shouldMountQuickPreferences}
               mobileHeaderVisible={mobileHeaderVisible}
+              appUpdateVisible={!!appUpdate}
             />
           </Suspense>
 
           <main
             ref={mainRef}
-            className={`relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden pb-[calc(3.55rem+env(safe-area-inset-bottom))] pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)] transition-[padding-top] duration-300 ease-in-out md:pb-0 md:pl-0 md:pr-0 md:pt-0 ${mobileHeaderVisible ? 'pt-[calc(4rem+env(safe-area-inset-top))]' : 'pt-[env(safe-area-inset-top)]'}`}
+            className={`relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden pb-[calc(3.55rem+env(safe-area-inset-bottom))] pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)] transition-[padding-top] duration-300 ease-in-out md:pb-0 md:pl-0 md:pr-0 md:pt-0 ${mobileHeaderVisible ? (appUpdate ? 'pt-16' : 'pt-[calc(4rem+env(safe-area-inset-top))]') : (appUpdate ? 'pt-0' : 'pt-[env(safe-area-inset-top)]')}`}
           >
             <PullToRefreshIndicator pullDistance={pullDistance} refreshing={pullRefreshing} />
             <div className="flex min-w-0 items-center gap-3">

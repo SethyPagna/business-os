@@ -2,7 +2,8 @@
 // popover of checkboxes, one per OPTIONAL column, driven by useColumnPreferences.
 // Callers place it on the table's header row; wrap it in `hidden lg:…` if the
 // surface only offers extra columns on large screens (the intended use).
-import { useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import MoreVertical from 'lucide-react/dist/esm/icons/more-vertical.js'
 import Check from 'lucide-react/dist/esm/icons/check.js'
 import type { TableColumnDef } from './columnPreferences.ts'
@@ -21,20 +22,43 @@ interface ColumnChooserProps {
 export default function ColumnChooser({ columns, isVisible, toggle, reset, label = 'Columns', resetLabel = 'Reset', className = '' }: ColumnChooserProps) {
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement | null>(null)
+  const triggerRef = useRef<HTMLButtonElement | null>(null)
+  const menuRef = useRef<HTMLDivElement | null>(null)
+  const [position, setPosition] = useState({ left: 0, top: 0 })
+
+  const updatePosition = useCallback(() => {
+    const trigger = triggerRef.current
+    if (!trigger) return
+    const rect = trigger.getBoundingClientRect()
+    const menuWidth = 208
+    const menuHeight = menuRef.current?.getBoundingClientRect().height || 300
+    const left = Math.max(8, Math.min(window.innerWidth - menuWidth - 8, rect.right - menuWidth))
+    const top = window.innerHeight - rect.bottom >= menuHeight + 8 || rect.top < menuHeight
+      ? rect.bottom + 4
+      : Math.max(8, rect.top - menuHeight - 4)
+    setPosition({ left, top })
+  }, [])
 
   useEffect(() => {
     if (!open) return
     const onDocClick = (event: MouseEvent) => {
-      if (ref.current && !ref.current.contains(event.target as Node)) setOpen(false)
+      const target = event.target as Node
+      if (!ref.current?.contains(target) && !menuRef.current?.contains(target)) setOpen(false)
     }
     const onKey = (event: KeyboardEvent) => { if (event.key === 'Escape') setOpen(false) }
     document.addEventListener('mousedown', onDocClick)
     document.addEventListener('keydown', onKey)
+    window.addEventListener('resize', updatePosition)
+    window.addEventListener('scroll', updatePosition, true)
+    const frame = window.requestAnimationFrame(updatePosition)
     return () => {
       document.removeEventListener('mousedown', onDocClick)
       document.removeEventListener('keydown', onKey)
+      window.removeEventListener('resize', updatePosition)
+      window.removeEventListener('scroll', updatePosition, true)
+      window.cancelAnimationFrame(frame)
     }
-  }, [open])
+  }, [open, updatePosition])
 
   if (!columns.length) return null
   const shownCount = columns.reduce((count, column) => count + (isVisible(column.key) ? 1 : 0), 0)
@@ -42,8 +66,9 @@ export default function ColumnChooser({ columns, isVisible, toggle, reset, label
   return (
     <div ref={ref} className={`relative inline-block ${className}`}>
       <button
+        ref={triggerRef}
         type="button"
-        onClick={() => setOpen((value) => !value)}
+        onClick={() => { setOpen((value) => !value); window.requestAnimationFrame(updatePosition) }}
         aria-haspopup="true"
         aria-expanded={open}
         className="inline-flex h-7 w-7 items-center justify-center rounded-md text-gray-500 hover:bg-gray-100 hover:text-gray-800 dark:text-gray-400 dark:hover:bg-gray-700 dark:hover:text-gray-100"
@@ -52,8 +77,12 @@ export default function ColumnChooser({ columns, isVisible, toggle, reset, label
         <MoreVertical className="h-4 w-4" />
         <span className="sr-only">{label} ({shownCount}/{columns.length})</span>
       </button>
-      {open ? (
-        <div className="absolute right-0 z-20 mt-1 w-52 rounded-xl border border-gray-200 bg-white p-1.5 shadow-lg dark:border-gray-700 dark:bg-gray-800">
+      {open ? createPortal((
+        <div
+          ref={menuRef}
+          className="fixed z-[1200] w-52 rounded-xl border border-gray-200 bg-white p-1.5 shadow-lg dark:border-gray-700 dark:bg-gray-800"
+          style={{ left: position.left, top: position.top }}
+        >
           <div className="max-h-72 overflow-y-auto">
             {columns.map((column) => {
               const on = isVisible(column.key)
@@ -80,7 +109,7 @@ export default function ColumnChooser({ columns, isVisible, toggle, reset, label
             {resetLabel}
           </button>
         </div>
-      ) : null}
+      ), document.body) : null}
     </div>
   )
 }

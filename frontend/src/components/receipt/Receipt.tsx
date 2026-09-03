@@ -285,6 +285,7 @@ export default function Receipt({ sale, settings = {}, onClose, _previewMode }: 
   const tpl = parseReceiptTemplate(appliedConfig.serializedTemplate)
   const appliedSettings = appliedConfig.settings
   const appliedPrintSettings = appliedConfig.printSettings
+  const highContrastBold = appliedPrintSettings.highContrastBold
   const compactSalesReceipt = tpl.sales_receipt_enabled === true || String(appliedPrintSettings.paperSize || '').toLowerCase() === '80x50mm'
   // B5: enabling the 80x50 card must not make the FULL receipt unreachable
   // -- with it on, BOTH renditions preview and Print offers BOTH sizes.
@@ -667,7 +668,8 @@ export default function Receipt({ sale, settings = {}, onClose, _previewMode }: 
     maxWidth: '100%',
     minWidth: 0,
     background: '#ffffff',
-    color: '#111827',
+    color: highContrastBold ? '#000000' : '#111827',
+    fontWeight: highContrastBold ? 700 : 400,
     padding: '18px 16px 20px',
     borderRadius: 12,
     lineHeight: 1.45,
@@ -689,13 +691,13 @@ export default function Receipt({ sale, settings = {}, onClose, _previewMode }: 
       return (
         <div>
           <p className="mb-1 text-center text-[11px] font-semibold uppercase tracking-wide text-gray-400">80 × 50 mm</p>
-          <div data-receipt-export-root="true" style={shellStyle}>{compactReceiptBlock}</div>
+          <div data-receipt-export-root="true" data-receipt-high-contrast={highContrastBold ? 'true' : 'false'} style={shellStyle}>{compactReceiptBlock}</div>
           <p className="mb-1 mt-4 text-center text-[11px] font-semibold uppercase tracking-wide text-gray-400">{fullReceiptWidthMm} mm</p>
-          <div style={shellStyleFor(fullReceiptWidthMm)}>{renderedSections}{qrBlock}</div>
+          <div data-receipt-high-contrast={highContrastBold ? 'true' : 'false'} style={shellStyleFor(fullReceiptWidthMm)}>{renderedSections}{qrBlock}</div>
         </div>
       )
     }
-    return <div data-receipt-export-root="true" style={shellStyle}>{renderedSections}{qrBlock}</div>
+    return <div data-receipt-export-root="true" data-receipt-high-contrast={highContrastBold ? 'true' : 'false'} style={shellStyle}>{renderedSections}{qrBlock}</div>
   }
 
   return (
@@ -854,20 +856,20 @@ export default function Receipt({ sale, settings = {}, onClose, _previewMode }: 
             <>
               <p className="mb-1 text-center text-[11px] font-semibold uppercase tracking-wide text-gray-400">80 × 50 mm</p>
               <div className="mx-auto rounded-[18px] border border-gray-200 bg-white p-2 shadow-[0_22px_48px_rgba(15,23,42,0.14)] dark:border-zinc-700 dark:bg-white" style={{ maxWidth: `calc(${receiptWidthMm}mm + 16px)` }}>
-                <div ref={compactPrintRef} data-receipt-export-root="true" style={shellStyle}>
+                <div ref={compactPrintRef} data-receipt-export-root="true" data-receipt-high-contrast={highContrastBold ? 'true' : 'false'} style={shellStyle}>
                   {compactReceiptBlock}
                 </div>
               </div>
               <p className="mb-1 mt-4 text-center text-[11px] font-semibold uppercase tracking-wide text-gray-400">{fullReceiptWidthMm} mm</p>
               <div className="mx-auto rounded-[18px] border border-gray-200 bg-white p-2 shadow-[0_22px_48px_rgba(15,23,42,0.14)] dark:border-zinc-700 dark:bg-white" style={{ maxWidth: `calc(${fullReceiptWidthMm}mm + 16px)` }}>
-                <div ref={printRef} data-receipt-export-root="true" style={shellStyleFor(fullReceiptWidthMm)}>
+                <div ref={printRef} data-receipt-export-root="true" data-receipt-high-contrast={highContrastBold ? 'true' : 'false'} style={shellStyleFor(fullReceiptWidthMm)}>
                   {renderedSections}{qrBlock}
                 </div>
               </div>
             </>
           ) : (
             <div className="rounded-[18px] border border-gray-200 bg-white p-2 shadow-[0_22px_48px_rgba(15,23,42,0.14)] dark:border-zinc-700 dark:bg-white">
-            <div ref={printRef} data-receipt-export-root="true" style={shellStyle}>
+            <div ref={printRef} data-receipt-export-root="true" data-receipt-high-contrast={highContrastBold ? 'true' : 'false'} style={shellStyle}>
               {renderedSections}{qrBlock}
             </div>
             </div>

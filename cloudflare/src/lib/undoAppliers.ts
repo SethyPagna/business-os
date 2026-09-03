@@ -87,6 +87,14 @@ export interface MergeReversal {
   dupName: string | null
   mergeContext: string
   keeperImagePathBefore: string | null
+  // Optional for backward compatibility with snapshots written before merge
+  // cleanup began carrying the highest selling/special prices to the keeper.
+  keeperPricingBefore?: {
+    selling_price_usd: number
+    selling_price_khr: number
+    special_price_usd: number
+    special_price_khr: number
+  }
   keeperStockBefore: Array<{ branch_id: number; quantity: number }>
   dupStockBefore: Array<{ branch_id: number; quantity: number; rfid_confirmed_qty: number }>
   dupImagesBefore: Array<{ image_path: string; sort_order: number | null }>
@@ -230,6 +238,24 @@ async function applyMergeReversal(env: Env, r: MergeReversal): Promise<void> {
   // 1. Reactivate the merged-away product; restore keeper's image_path.
   stmts.push({ sql: 'UPDATE products SET is_active = 1, updated_at = CURRENT_TIMESTAMP WHERE id = @dupId', params: { dupId } })
   stmts.push({ sql: 'UPDATE products SET image_path = @path, updated_at = CURRENT_TIMESTAMP WHERE id = @keeperId', params: { keeperId, path: r.keeperImagePathBefore ?? null } })
+  if (r.keeperPricingBefore) {
+    stmts.push({
+      sql: `UPDATE products
+            SET selling_price_usd = @sellingUsd,
+                selling_price_khr = @sellingKhr,
+                special_price_usd = @specialUsd,
+                special_price_khr = @specialKhr,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = @keeperId`,
+      params: {
+        keeperId,
+        sellingUsd: Number(r.keeperPricingBefore.selling_price_usd) || 0,
+        sellingKhr: Number(r.keeperPricingBefore.selling_price_khr) || 0,
+        specialUsd: Number(r.keeperPricingBefore.special_price_usd) || 0,
+        specialKhr: Number(r.keeperPricingBefore.special_price_khr) || 0,
+      },
+    })
+  }
 
   // 2. branch_stock, for exactly the branches the fold touched (the dup's):
   //    the keeper keeps its row and we UPDATE only quantity back (preserving

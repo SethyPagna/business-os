@@ -118,7 +118,7 @@ const returnsRoute = loadReal('routes/returns.ts', {
   // Part 519 (session 0b) gave the route a datetime return-number generator;
   // the real one reads the DB for same-second collisions -- a deterministic
   // stub keeps this suite's return numbers stable.
-  '../lib/receiptNumber': { uniqueBusinessDateTimeNumber: async (_db, prefix) => `${prefix}-20260830-120000` },
+  '../lib/receiptNumber': { uniqueBusinessDateTimeNumber: async (prefix) => `${prefix ? `${prefix}-` : ''}20260830-120000` },
 })
 
 const app = returnsRoute.default
@@ -134,6 +134,7 @@ function seed() {
   rawDb.exec('DELETE FROM branch_batch_stock; DELETE FROM product_batches; DELETE FROM branch_stock; DELETE FROM products; DELETE FROM branches; DELETE FROM sale_items; DELETE FROM sale_item_batch_allocations; DELETE FROM sales; DELETE FROM returns; DELETE FROM return_items; DELETE FROM return_item_batch_allocations; DELETE FROM inventory_movements; DELETE FROM damaged_stock_lots; DELETE FROM return_replacement_items;')
   rawDb.prepare('INSERT INTO branches (id, name, is_active, is_default) VALUES (1, \'Main\', 1, 1)').run()
   rawDb.prepare("INSERT INTO products (id, name, is_active, stock_quantity) VALUES (1, 'Widget', 1, 0)").run()
+  rawDb.prepare("INSERT INTO products (id, name, is_active, stock_quantity, selling_price_usd) VALUES (2, 'Different Serum', 1, 0, 10)").run()
   rawDb.prepare("INSERT INTO sales (id, branch_id) VALUES (1, 1)").run()
 }
 
@@ -324,23 +325,38 @@ async function main() {
     assert.strictEqual(damageMove.quantity, 3)
   })
 
-  await check('K2: Replace hands out same-name stock -- even exchange records lines and drains stock', async () => {
+  await check('K2: Replace accepts a different product and creates a linked sale receipt', async () => {
     seed()
-    rawDb.prepare('INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (1, 1, 10)').run()
-    rawDb.prepare('UPDATE products SET stock_quantity = 10, selling_price_usd = 10 WHERE id = 1').run()
+    rawDb.prepare('INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (2, 1, 10)').run()
+    rawDb.prepare('UPDATE products SET stock_quantity = 10 WHERE id = 2').run()
+    rawDb.prepare("INSERT INTO product_batches (variant_product_id, batch_key, lot_code, received_at, is_active, batch_number) VALUES (2, 'replacement-lot', 'REPL-LOT', '2026-08-01', 1, 1)").run()
+    const replacementBatchId = Number(rawDb.prepare('SELECT id FROM product_batches WHERE variant_product_id = 2').get().id)
+    rawDb.prepare('INSERT INTO branch_batch_stock (batch_id, branch_id, quantity) VALUES (?, 1, 5)').run([replacementBatchId])
     const { status, json } = await req('POST', '/', {
       items: [{ product_id: 1, quantity: 2, stock_action: 'none', branch_id: 1, applied_price_usd: 10 }],
-      replacement_items: [{ product_id: 1, quantity: 2, branch_id: 1, applied_price_usd: 10 }],
+      replacement_items: [{ product_id: 2, quantity: 2, branch_id: 1, applied_price_usd: 10 }],
       reason: 'Defective, swapped on the spot',
     })
     assert.strictEqual(status, 200, JSON.stringify(json))
     const rep = rawDb.prepare('SELECT * FROM return_replacement_items WHERE return_id = @id').get({ id: json.id })
     assert.strictEqual(rep.quantity, 2)
     assert.strictEqual(rep.total_usd, 20)
-    assert.strictEqual(rawDb.prepare('SELECT quantity FROM branch_stock WHERE product_id = 1 AND branch_id = 1').get().quantity, 8)
-    const header = rawDb.prepare('SELECT settlement_mode, settlement_diff_usd FROM returns WHERE id = @id').get({ id: json.id })
+    assert.strictEqual(rawDb.prepare('SELECT quantity FROM branch_stock WHERE product_id = 2 AND branch_id = 1').get().quantity, 8)
+    const header = rawDb.prepare('SELECT settlement_mode, settlement_diff_usd, replacement_sale_id FROM returns WHERE id = @id').get({ id: json.id })
     assert.strictEqual(header.settlement_mode, 'even_exchange')
     assert.strictEqual(header.settlement_diff_usd, 0)
+    assert.strictEqual(header.replacement_sale_id, json.replacementSaleId)
+    assert.strictEqual(json.replacementReceiptNumber, '20260830-120000')
+    const replacementSale = rawDb.prepare('SELECT receipt_number, source_return_id, payment_method FROM sales WHERE id = ?').get([json.replacementSaleId])
+    assert.strictEqual(replacementSale.source_return_id, json.id)
+    assert.strictEqual(replacementSale.payment_method, 'Return Exchange')
+    const replacementSaleItem = rawDb.prepare('SELECT product_id, quantity FROM sale_items WHERE sale_id = ?').get([json.replacementSaleId])
+    assert.strictEqual(replacementSaleItem.product_id, 2)
+    assert.strictEqual(replacementSaleItem.quantity, 2)
+    assert.strictEqual(rawDb.prepare('SELECT quantity FROM branch_batch_stock WHERE batch_id = ? AND branch_id = 1').get([replacementBatchId]).quantity, 3)
+    const replacementAllocation = rawDb.prepare('SELECT batch_id, quantity FROM sale_item_batch_allocations WHERE sale_item_id = (SELECT id FROM sale_items WHERE sale_id = ?)').get([json.replacementSaleId])
+    assert.strictEqual(replacementAllocation.batch_id, replacementBatchId)
+    assert.strictEqual(replacementAllocation.quantity, 2)
     const move = rawDb.prepare("SELECT quantity FROM inventory_movements WHERE movement_type = 'replacement_out' AND reference_id = @id").get({ id: json.id })
     assert.strictEqual(move.quantity, -2)
   })

@@ -32,6 +32,8 @@ interface PrintSettingsProps {
   saveSettings?: SaveSettings | null
 }
 
+type ReceiptMarginKey = 'marginTop' | 'marginRight' | 'marginBottom' | 'marginLeft'
+
 function Section({ icon: Icon, title, children }: SectionProps) {
   return (
     <div className="card mb-4 p-4">
@@ -45,10 +47,13 @@ function Section({ icon: Icon, title, children }: SectionProps) {
 }
 
 function buildFallbackPreviewHtml(printSettings: ReceiptPrintSettings, T: (key: string, fallback: string) => string): string {
+  const highContrastStyle = printSettings.highContrastBold ? 'color:#000;font-weight:700;' : 'color:#111827;'
+  const mutedColor = printSettings.highContrastBold ? '#000' : '#555'
+  const footerColor = printSettings.highContrastBold ? '#000' : '#777'
   return `
-    <div style="padding:8px;text-align:center;">
+    <div data-receipt-high-contrast="${printSettings.highContrastBold ? 'true' : 'false'}" style="padding:8px;text-align:center;${highContrastStyle}">
       <div style="font-size:16px;font-weight:bold;margin-bottom:4px;">Business OS</div>
-      <div style="font-size:11px;color:#555;margin-bottom:8px;">${T('receipt_test_pdf', 'Receipt Test')}</div>
+      <div style="font-size:11px;color:${mutedColor};margin-bottom:8px;">${T('receipt_test_pdf', 'Receipt Test')}</div>
       <div style="border-top:1px dashed #000;margin:6px 0;"></div>
       <div style="font-size:12px;text-align:left;">
         <div style="display:flex;justify-content:space-between;gap:16px;"><span>Item 1 x2</span><span>$10.00</span></div>
@@ -56,7 +61,7 @@ function buildFallbackPreviewHtml(printSettings: ReceiptPrintSettings, T: (key: 
       </div>
       <div style="border-top:1px dashed #000;margin:6px 0;"></div>
       <div style="display:flex;justify-content:space-between;font-size:14px;font-weight:bold;gap:16px;"><span>TOTAL</span><span>$15.50</span></div>
-      <div style="margin-top:10px;font-size:10px;color:#777;">Paper: ${printSettings?.paperSize || '80mm'} | Scale: ${printSettings?.scale || 100}%</div>
+      <div style="margin-top:10px;font-size:10px;color:${footerColor};">Paper: ${printSettings?.paperSize || '80mm'} | Scale: ${printSettings?.scale || 100}%</div>
       <div style="margin-top:4px;font-size:10px;">Thank you!</div>
     </div>
   `
@@ -113,7 +118,7 @@ export default function PrintSettings({ t: tProp, previewTargetRef = null, setti
     }, 350)
   }
 
-  const setValue = (key: keyof ReceiptPrintSettings, value: string) => {
+  const setValue = <Key extends keyof ReceiptPrintSettings>(key: Key, value: ReceiptPrintSettings[Key]) => {
     setPs((prev) => {
       const next = { ...prev, [key]: value }
       try { savePrintSettings(next) } catch (_) {}
@@ -139,7 +144,7 @@ export default function PrintSettings({ t: tProp, previewTargetRef = null, setti
     { id: 'custom', label: T('print_set_size', 'Custom'), desc: T('print_set_size', 'Set size') },
   ]
 
-  const marginFields: Array<[keyof ReceiptPrintSettings, string]> = [
+  const marginFields: Array<[ReceiptMarginKey, string]> = [
     ['marginTop', T('print_top', 'Top')],
     ['marginRight', T('print_right', 'Right')],
     ['marginBottom', T('print_bottom', 'Bottom')],
@@ -190,6 +195,39 @@ export default function PrintSettings({ t: tProp, previewTargetRef = null, setti
             </div>
           </div>
         ) : null}
+      </Section>
+
+      <Section icon={Printer} title={T('print_dark_bold_title', 'Receipt Text Darkness')}>
+        <label
+          htmlFor="print-high-contrast-bold"
+          className={`flex cursor-pointer items-start gap-3 rounded-xl border-2 p-3 transition-colors ${
+            ps.highContrastBold
+              ? 'border-gray-950 bg-gray-50 dark:border-white dark:bg-zinc-800'
+              : 'border-gray-200 bg-white dark:border-gray-600 dark:bg-zinc-900'
+          }`}
+        >
+          <input
+            id="print-high-contrast-bold"
+            name="print_high_contrast_bold"
+            type="checkbox"
+            className="mt-0.5 h-4 w-4 shrink-0 accent-black"
+            checked={ps.highContrastBold}
+            onChange={(event) => setValue('highContrastBold', event.target.checked)}
+          />
+          <span className="min-w-0">
+            <span className="block text-sm font-bold text-black dark:text-white">
+              {T('print_dark_bold', 'Extra-dark bold receipt text')}
+            </span>
+            <span className="mt-0.5 block text-xs leading-relaxed text-gray-600 dark:text-gray-300">
+              {T('print_dark_bold_desc', 'Print every receipt label and value in solid black at bold weight for faint thermal printers.')}
+            </span>
+            {ps.highContrastBold ? (
+              <span className="mt-2 inline-flex rounded-full bg-black px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-white dark:bg-white dark:text-black">
+                {T('print_dark_bold_enabled', 'Dark print enabled')}
+              </span>
+            ) : null}
+          </span>
+        </label>
       </Section>
 
       <Section icon={Ruler} title={T('print_margins', 'Margins (mm)')}>

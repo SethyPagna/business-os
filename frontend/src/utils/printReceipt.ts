@@ -40,6 +40,7 @@ type TextPdfInput = {
   pageWidthPt: number
   pageHeightPt?: number
   title?: string
+  bold?: boolean
 }
 type ReceiptFallbackLine = {
   text: string
@@ -147,6 +148,20 @@ function cloneElementWithInlineStyles(node: unknown): HTMLElement | null {
   }
 
   return cloned
+}
+
+function applyHighContrastBold(root: HTMLElement, printSettings: ReceiptPrintSettings): HTMLElement {
+  if (!printSettings.highContrastBold) return root
+  root.setAttribute('data-receipt-high-contrast', 'true')
+  const elements = [root, ...Array.from(root.querySelectorAll('*'))]
+  elements.forEach((element) => {
+    if (!(element instanceof HTMLElement)) return
+    element.style.setProperty('color', '#000000', 'important')
+    element.style.setProperty('font-weight', '700', 'important')
+    element.style.setProperty('opacity', '1', 'important')
+    element.style.setProperty('text-shadow', 'none', 'important')
+  })
+  return root
 }
 
 export function normalizeReceiptContentWidth<T>(root: T): T {
@@ -449,7 +464,7 @@ function wrapTextLine(text: unknown, maxChars = 54): string[] {
   return lines.length ? lines : ['']
 }
 
-function buildTextOnlyPdf({ lines, pageWidthPt, pageHeightPt: fixedHeightPt, title = 'Receipt' }: TextPdfInput): ByteChunk {
+function buildTextOnlyPdf({ lines, pageWidthPt, pageHeightPt: fixedHeightPt, title = 'Receipt', bold = false }: TextPdfInput): ByteChunk {
   const encoder = new TextEncoder()
   const safeTitle = String(title === '' ? '' : (title || 'Receipt')).replace(/[()\\]/g, '')
   const margin = 18
@@ -481,7 +496,7 @@ function buildTextOnlyPdf({ lines, pageWidthPt, pageHeightPt: fixedHeightPt, tit
     encoder.encode(`<< /Type /Catalog /Pages 2 0 R /ViewerPreferences << /DisplayDocTitle true >> >>`),
     encoder.encode(`<< /Type /Pages /Count 1 /Kids [3 0 R] >>`),
     encoder.encode(`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${pageWidthPt.toFixed(2)} ${pageHeightPt.toFixed(2)}] /Resources 4 0 R /Contents 5 0 R >>`),
-    encoder.encode(`<< /Font << /F1 << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> >> >>`),
+    encoder.encode(`<< /Font << /F1 << /Type /Font /Subtype /Type1 /BaseFont /${bold ? 'Helvetica-Bold' : 'Helvetica'} >> >> >>`),
     buildPdfStream(`<< /Length ${content.length} >>`, content),
     encoder.encode(`<< /Title (${safeTitle}) >>`),
   ]
@@ -621,6 +636,7 @@ function createTextOnlyReceiptCanvas(content: ReceiptContent, options: ReceiptPr
   const paddingY = 24
   const lineHeight = 18
   const fontSize = 12
+  const defaultFontWeight = printSettings.highContrastBold ? '700 ' : ''
   const maxChars = Math.max(28, Math.floor((widthPx - paddingX * 2) / 6.5))
   const classifiedLines = lines.map(classifyReceiptFallbackLine)
   const heightPx = Math.max(260, paddingY * 2 + measureWrappedReceiptHeight(classifiedLines, maxChars, lineHeight))
@@ -634,9 +650,9 @@ function createTextOnlyReceiptCanvas(content: ReceiptContent, options: ReceiptPr
   context.scale(scale, scale)
   context.fillStyle = '#ffffff'
   context.fillRect(0, 0, widthPx, heightPx)
-  context.fillStyle = '#111827'
+  context.fillStyle = printSettings.highContrastBold ? '#000000' : '#111827'
   const fontStack = `"Noto Sans Khmer", "Khmer OS", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace`
-  context.font = `${fontSize}px ${fontStack}`
+  context.font = `${defaultFontWeight}${fontSize}px ${fontStack}`
   context.textBaseline = 'top'
 
   let y = paddingY
@@ -647,7 +663,9 @@ function createTextOnlyReceiptCanvas(content: ReceiptContent, options: ReceiptPr
       const isSeparator = /^[=\-_.]{8,}$/.test(textLine)
       const isTitle = index === 0
       const isCenter = entry.kind === 'center'
-      if (isTitle) {
+      if (printSettings.highContrastBold) {
+        context.font = `700 ${isTitle ? fontSize + 3 : fontSize}px ${fontStack}`
+      } else if (isTitle) {
         context.font = `700 ${fontSize + 3}px ${fontStack}`
       } else if (entry.kind === 'item' || /^(total|subtotal|paid|change|discount|delivery)\b/i.test(textLine)) {
         context.font = `600 ${fontSize}px ${fontStack}`
@@ -656,8 +674,8 @@ function createTextOnlyReceiptCanvas(content: ReceiptContent, options: ReceiptPr
       }
 
       if (isSeparator) {
-        context.strokeStyle = '#cbd5e1'
-        context.lineWidth = 1
+        context.strokeStyle = printSettings.highContrastBold ? '#000000' : '#cbd5e1'
+        context.lineWidth = printSettings.highContrastBold ? 1.5 : 1
         context.beginPath()
         context.moveTo(paddingX, y + 7)
         context.lineTo(widthPx - paddingX, y + 7)
@@ -876,6 +894,7 @@ async function withReceiptElement<T>(
     inner.innerHTML = String(content || '')
   }
   host.appendChild(inner)
+  applyHighContrastBold(host, printSettings)
   document.body.appendChild(host)
   try {
     if (scaleFactor !== 1) {
@@ -1225,6 +1244,7 @@ export async function createReceiptPdfBlob(content: ReceiptContent, options: Rec
       pageWidthPt,
       pageHeightPt,
       title,
+      bold: printSettings.highContrastBold,
     })
     return new Blob([bytesToBlobPart(pdfBytes)], { type: 'application/pdf' })
   }

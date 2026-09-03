@@ -73,6 +73,7 @@ export const DEFAULT_RECEIPT_TEMPLATE: NormalizedReceiptTemplate = {
 
 export const DEFAULT_RECEIPT_PRINT_SETTINGS: ReceiptPrintSettings = {
   paperSize: '80mm',
+  highContrastBold: true,
   marginTop: '4',
   marginRight: '4',
   marginBottom: '4',
@@ -128,8 +129,12 @@ export function serializeReceiptTemplateValue(value: unknown): string {
 
 export function normalizeReceiptPrintSettings(value: unknown): ReceiptPrintSettings {
   const parsed = parseObject(value)
+  const storedHighContrast = parsed.highContrastBold
   return {
     paperSize: String(parsed.paperSize || DEFAULT_RECEIPT_PRINT_SETTINGS.paperSize),
+    highContrastBold: storedHighContrast === undefined
+      ? DEFAULT_RECEIPT_PRINT_SETTINGS.highContrastBold
+      : storedHighContrast === true || storedHighContrast === 1 || String(storedHighContrast).toLowerCase() === 'true',
     marginTop: String(parsed.marginTop || DEFAULT_RECEIPT_PRINT_SETTINGS.marginTop),
     marginRight: String(parsed.marginRight || DEFAULT_RECEIPT_PRINT_SETTINGS.marginRight),
     marginBottom: String(parsed.marginBottom || DEFAULT_RECEIPT_PRINT_SETTINGS.marginBottom),

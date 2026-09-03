@@ -2,14 +2,14 @@ import { Suspense, lazy, useEffect, useState } from 'react'
 import Building2 from 'lucide-react/dist/esm/icons/building-2.js'
 import ArrowRightLeft from 'lucide-react/dist/esm/icons/arrow-right-left.js'
 import Radio from 'lucide-react/dist/esm/icons/radio.js'
+import Package from 'lucide-react/dist/esm/icons/package.js'
 import { useApp as useAppHook } from '../../AppContext.tsx'
 import { useIsPageActive } from '../shared/pageActivity'
 import type { DateTimeRange } from '../shared/DateTimeRangePicker.tsx'
 
-// Branches is one hub with one navigation layer. Overview keeps summary stats
-// and branch cards together; Inventory is the branch-product stock workspace
-// that moved here from the old Inventory page; Transfer owns transfer history
-// only (the complete movement ledger now lives in Products -> Stock Changes).
+// Branches is one hub with one navigation layer. Overview owns branch cards;
+// Products owns the ranged product/COGS/revenue/profit summary; Transfer owns
+// transfer history (the complete movement ledger lives in Products -> Stock Changes).
 const BranchesSection = lazy(() => import('./Branches'))
 const InventorySection = lazy(() => import('../inventory/Inventory.tsx'))
 
@@ -20,7 +20,7 @@ type BranchesHubAppContext = {
 }
 const useApp = useAppHook as unknown as () => BranchesHubAppContext
 
-type BranchesHubSection = 'overview' | 'inventory' | 'transfers' | 'rfid'
+type BranchesHubSection = 'overview' | 'products' | 'transfers' | 'rfid'
 type DashboardFocusSection = 'products' | 'movements' | 'rfid' | ''
 
 const DASHBOARD_INVENTORY_FOCUS_KEY = 'bos:dashboard:inventory-focus'
@@ -43,9 +43,9 @@ function initialSection(canBranchList: boolean, canInventory: boolean): Branches
     if (focus === 'rfid' && canInventory) return 'rfid'
     // Historical Dashboard movement drills now land on the one authoritative
     // ledger in Products instead of reopening the retired Inventory ledger.
-    if (focus === 'movements' && canInventory) return 'inventory'
+    if (focus === 'movements' && canInventory) return 'products'
   }
-  return 'overview'
+  return canBranchList ? 'overview' : 'products'
 }
 
 export default function BranchesHubPage() {
@@ -54,8 +54,8 @@ export default function BranchesHubPage() {
   const canBranchList = getPermissionTier('branches') !== 'none'
   const canInventory = getPermissionTier('inventory') !== 'none'
   const [section, setSection] = useState<BranchesHubSection>(() => initialSection(canBranchList, canInventory))
-  // The hub owns one range. Inventory stats use it in Overview; Transfer
-  // History receives the exact same controlled value after a section switch.
+  // The hub owns one range. Product stats and Transfer History receive the
+  // exact same controlled value after a section switch.
   const [sharedDateRange, setSharedDateRange] = useState<DateTimeRange>(() => ({
     startDate: '',
     endDate: '',
@@ -90,8 +90,8 @@ export default function BranchesHubPage() {
   }, [canBranchList, canInventory, isActive, navigateTo])
 
   const tabs: Array<{ id: BranchesHubSection; label: string; icon: typeof Building2; allowed: boolean; tone: string }> = [
-    { id: 'overview', label: trh('overview', 'Overview'), icon: Building2, allowed: canInventory || canBranchList, tone: 'text-sky-600' },
-    { id: 'inventory', label: trh('inventory', 'Inventory'), icon: Building2, allowed: canInventory, tone: 'text-emerald-600' },
+    { id: 'overview', label: trh('overview', 'Overview'), icon: Building2, allowed: canBranchList, tone: 'text-sky-600' },
+    { id: 'products', label: trh('products', 'Products'), icon: Package, allowed: canInventory, tone: 'text-emerald-600' },
     { id: 'transfers', label: trh('transfer', 'Transfer'), icon: ArrowRightLeft, allowed: canBranchList, tone: 'text-violet-600' },
     { id: 'rfid', label: 'RFID', icon: Radio, allowed: canInventory, tone: 'text-emerald-600' },
   ]
@@ -124,15 +124,6 @@ export default function BranchesHubPage() {
       <Suspense fallback={<p className="p-4 text-sm text-gray-500">{trh('loading', 'Loading')}...</p>}>
         {active === 'overview' ? (
           <div className="page-scroll flex min-h-0 flex-1 flex-col">
-            {canInventory ? (
-              <InventorySection
-                hostSection="stats"
-                embedded
-                dateRange={sharedDateRange}
-                onDateRangeChange={setSharedDateRange}
-              />
-            ) : null}
-            {canInventory && canBranchList ? <div className="mx-3 shrink-0 border-t border-gray-200 dark:border-gray-700 sm:mx-6" aria-hidden="true" /> : null}
             {canBranchList ? (
               <BranchesSection
                 embedded
@@ -140,24 +131,18 @@ export default function BranchesHubPage() {
                 showSectionNavigation={false}
                 dateRange={sharedDateRange}
                 onDateRangeChange={setSharedDateRange}
-                showDateRange={!canInventory}
+                showDateRange
               />
             ) : null}
           </div>
-        ) : active === 'inventory' && canInventory ? (
+        ) : active === 'products' && canInventory ? (
           <div className="page-scroll flex min-h-0 flex-1 flex-col">
-            {canBranchList ? (
-              <BranchesSection
-                embedded
-                view="branches"
-                showSectionNavigation={false}
-                dateRange={sharedDateRange}
-                onDateRangeChange={setSharedDateRange}
-                showDateRange={false}
-              />
-            ) : (
-              <InventorySection hostSection="stats" embedded />
-            )}
+            <InventorySection
+              hostSection="stats"
+              embedded
+              dateRange={sharedDateRange}
+              onDateRangeChange={setSharedDateRange}
+            />
           </div>
         ) : active === 'transfers' && canBranchList ? (
           <div className="page-scroll flex min-h-0 flex-1 flex-col">

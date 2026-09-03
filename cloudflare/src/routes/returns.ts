@@ -12,7 +12,7 @@ import { bumpVersion } from '../lib/cache'
 import { buildLikeAliasClause, tokenizeSearchTermGroups, normalizeSearchText } from '../lib/searchMatch'
 import { receiveBatchStock, removeStockFromBatch, InsufficientBatchStockError, readFifoLotAvailabilityForCart, allocateAcrossLots, decrementBatchStockStatement, decrementBatchStockStrictStatement } from '../lib/productBatches'
 import {
-  normalizeStockAction, computeSettlement, assertReplacementsSameName,
+  normalizeStockAction, computeSettlement,
   createDamagedLot, reverseDamagedLots, applyReplacementStock, listOpenDamagedLots,
   ConsumedDamagedStockError, DAMAGE_IN_MOVEMENT, DAMAGE_REVERSAL_MOVEMENT,
   REPLACEMENT_OUT_MOVEMENT,
@@ -173,6 +173,8 @@ type ReturnRow = Record<string, unknown> & {
   branch_name: string | null
   reason: string | null
   updated_at: string | null
+  replacement_sale_id?: number | null
+  replacement_receipt_number?: string | null
 }
 
 type ReturnItemInput = {
@@ -484,7 +486,10 @@ app.get('/', async (c) => {
   }
 
   const returns = await db.prepare(`
-    SELECT r.* FROM returns r WHERE ${where.join(' AND ')}
+    SELECT r.*, replacement_sale.receipt_number AS replacement_receipt_number
+    FROM returns r
+    LEFT JOIN sales replacement_sale ON replacement_sale.id = r.replacement_sale_id
+    WHERE ${where.join(' AND ')}
     ORDER BY r.created_at DESC LIMIT @limit
   `).all<ReturnRow>(params)
 
@@ -691,7 +696,12 @@ app.post('/reasons/replace', async (c) => {
 app.get('/:id', async (c) => {
   const db = getDb(c.env)
   const id = c.req.param('id')
-  const row = await db.prepare('SELECT * FROM returns WHERE id = ?').get<ReturnRow>([id])
+  const row = await db.prepare(`
+    SELECT r.*, replacement_sale.receipt_number AS replacement_receipt_number
+    FROM returns r
+    LEFT JOIN sales replacement_sale ON replacement_sale.id = r.replacement_sale_id
+    WHERE r.id = ?
+  `).get<ReturnRow>([id])
   if (!row) return c.json({ error: 'Return not found' }, 404)
   const items = await db.prepare('SELECT * FROM return_items WHERE return_id = ?').all([id])
   const replacementItems = await db.prepare('SELECT * FROM return_replacement_items WHERE return_id = ?').all([id])
@@ -725,7 +735,8 @@ app.post('/', async (c) => {
     exchange_rate?: number
     return_number?: string
     client_request_id?: string
-    // 11.12 Replace: lines handed to the customer from same-name stock.
+    // Replacement sale lines. They can be any active catalog product; the
+    // server records them both beside the return and on a linked sale receipt.
     replacement_items?: Array<{ product_id: number; product_name?: string; branch_id?: number; batch_id?: number; quantity: number; applied_price_usd?: number; applied_price_khr?: number }>
     settlement_mode?: string
   }>()
@@ -739,24 +750,27 @@ app.post('/', async (c) => {
       return c.json({ error: 'Each replacement line needs a product and a positive quantity' }, 400)
     }
   }
-  if (replacementInputs.length) {
-    // Replace is an even exchange from SAME-NAME stock (locked design
-    // note) -- a different product is a refund plus a new sale, and the
-    // name group is this app's product identity, so the gate is name_key.
-    try {
-      await assertReplacementsSameName(
-        db,
-        body.items.map((i) => Number(i.product_id)).filter((pid) => Number.isFinite(pid) && pid > 0),
-        replacementInputs.map((rep) => Number(rep.product_id)),
-      )
-    } catch (error) {
-      return c.json({ error: (error as Error).message }, 400)
-    }
-  }
-
   if (clientRequestId) {
+    // Keep the idempotency door as the exact partial-index lookup shared by
+    // supplier returns. Only after a duplicate is found do we load the optional
+    // replacement receipt; putting the LEFT JOIN in this hot-path query made
+    // the indexed predicate drift and broke the cross-route contract.
     const existing = await db.prepare("SELECT id, return_number FROM returns WHERE client_request_id = ? AND client_request_id <> '' LIMIT 1").get<{ id: number; return_number: string }>([clientRequestId])
-    if (existing) return c.json({ id: existing.id, returnNumber: existing.return_number, duplicate: true })
+    if (existing) {
+      const replacement = await db.prepare(`
+        SELECT r.replacement_sale_id, replacement_sale.receipt_number AS replacement_receipt_number
+        FROM returns r
+        LEFT JOIN sales replacement_sale ON replacement_sale.id = r.replacement_sale_id
+        WHERE r.id = ? LIMIT 1
+      `).get<{ replacement_sale_id: number | null; replacement_receipt_number: string | null }>([existing.id])
+      return c.json({
+        id: existing.id,
+        returnNumber: existing.return_number,
+        replacementSaleId: replacement?.replacement_sale_id || null,
+        replacementReceiptNumber: replacement?.replacement_receipt_number || null,
+        duplicate: true,
+      })
+    }
   }
 
   try {
@@ -772,9 +786,9 @@ app.post('/', async (c) => {
     async (candidate) => !!(await db.prepare('SELECT 1 AS hit FROM returns WHERE return_number = ? LIMIT 1').get([candidate])),
   )
 
-  let saleMeta: { receipt_number?: string; customer_id?: number; customer_name?: string; branch_id?: number; branch_name?: string; exchange_rate?: number } = {}
+  let saleMeta: { receipt_number?: string; customer_id?: number; customer_name?: string; customer_phone?: string; customer_address?: string; branch_id?: number; branch_name?: string; exchange_rate?: number } = {}
   if (body.sale_id) {
-    const sale = await db.prepare('SELECT receipt_number, customer_id, customer_name, branch_id, branch_name, exchange_rate FROM sales WHERE id = ?').get<typeof saleMeta>([body.sale_id])
+    const sale = await db.prepare('SELECT receipt_number, customer_id, customer_name, customer_phone, customer_address, branch_id, branch_name, exchange_rate FROM sales WHERE id = ?').get<typeof saleMeta>([body.sale_id])
     if (sale) saleMeta = sale
   }
   const branchId = body.branch_id || saleMeta.branch_id || null
@@ -884,6 +898,8 @@ app.post('/', async (c) => {
     settlement_diff_khr: settlementDiffKhr,
   })
   const returnId = returnInsert.lastInsertRowid
+  let replacementSaleId: number | null = null
+  let replacementReceiptNumber: string | null = null
 
   // Compensation log (Part-77, write-path + batch-identity audits): every
   // stock write that lands OUTSIDE the outer db.batch() below --
@@ -895,8 +911,112 @@ app.post('/', async (c) => {
   // read them.
   const appliedLotRestocks: Array<{ productId: number; batchId: number; branchId: number; quantity: number }> = []
   const appliedReplacements: Array<{ productId: number; productName: string; branchId: number; batchId: number | null; quantity: number }> = []
+  const replacementFifoTakes = new Map<number, Array<{ batchId: number; lotCode: string | null; expiryDate: string | null; quantity: number }>>()
+  let replacementBatchWritesCommitted = false
 
   try {
+    const replacementFifoLots = await readFifoLotAvailabilityForCart(
+      db,
+      replacementLines
+        .filter((line) => line.batchId == null)
+        .map((line) => ({ productId: line.productId, branchId: line.branchId || Number(branchId) || 0 }))
+        .filter((pair) => pair.branchId > 0),
+    )
+    for (const [lineIndex, line] of replacementLines.entries()) {
+      if (line.batchId != null) continue
+      const lineBranchId = line.branchId || Number(branchId) || 0
+      const lots = replacementFifoLots.get(`${line.productId}:${lineBranchId}`) || []
+      const { takes } = allocateAcrossLots(lots, line.quantity)
+      replacementFifoTakes.set(lineIndex, takes)
+      for (const take of takes) {
+        const lot = lots.find((entry) => entry.batchId === take.batchId)
+        if (lot) lot.available -= take.quantity
+      }
+    }
+
+    // A hand-out is a real sale, not only an inventory movement. This makes
+    // it visible in Sales, gives it a printable receipt, and lets the item be
+    // returned later through the same ordinary sale-item path. Stock is still
+    // drained below by the replacement kernel so the return + sale remain one
+    // coordinated write flow and can share the compensation path.
+    if (replacementLines.length) {
+      replacementReceiptNumber = await uniqueBusinessDateTimeNumber(
+        '',
+        async (candidate) => !!(await db.prepare('SELECT 1 AS hit FROM sales WHERE receipt_number = ? LIMIT 1').get([candidate])),
+      )
+      const replacementSubtotalUsd = Number(replacementLines.reduce((sum, line) => sum + line.totalUsd, 0).toFixed(2))
+      const replacementSubtotalKhr = Math.round(replacementLines.reduce((sum, line) => sum + line.totalKhr, 0))
+      const exchangeRate = body.exchange_rate || saleMeta.exchange_rate || 4100
+      const replacementClientRequestId = clientRequestId
+        ? `${clientRequestId.slice(0, 96)}:replacement`
+        : `return_${returnId}_replacement`
+      const replacementSaleInsert = await db.prepare(`
+        INSERT INTO sales (
+          receipt_number, client_request_id, cashier_id, cashier_name, branch_id, branch_name,
+          customer_id, customer_name, customer_phone, customer_address,
+          payment_method, payment_details, payment_currency, exchange_rate,
+          subtotal_usd, subtotal_khr, discount_usd, discount_khr, tax_usd, tax_khr,
+          total_usd, total_khr, amount_paid_usd, amount_paid_khr, change_usd, change_khr,
+          membership_discount_usd, membership_discount_khr, membership_points_redeemed,
+          is_delivery, loyalty_accrual, sale_status, notes, items, search_normalized,
+          source_return_id, updated_at
+        ) VALUES (
+          @receipt_number, @client_request_id, @cashier_id, @cashier_name, @branch_id, @branch_name,
+          @customer_id, @customer_name, @customer_phone, @customer_address,
+          @payment_method, @payment_details, 'USD', @exchange_rate,
+          @subtotal_usd, @subtotal_khr, 0, 0, 0, 0,
+          @total_usd, @total_khr, @amount_paid_usd, @amount_paid_khr, 0, 0,
+          0, 0, 0,
+          0, 0, 'completed', @notes, @items, @search_normalized,
+          @source_return_id, CURRENT_TIMESTAMP
+        )
+      `).run({
+        receipt_number: replacementReceiptNumber,
+        client_request_id: replacementClientRequestId,
+        cashier_id: user?.id ?? null,
+        cashier_name: user?.name || user?.username || null,
+        branch_id: branchId,
+        branch_name: branchName,
+        customer_id: body.customer_id || saleMeta.customer_id || null,
+        customer_name: body.customer_name || saleMeta.customer_name || null,
+        customer_phone: saleMeta.customer_phone || null,
+        customer_address: saleMeta.customer_address || null,
+        payment_method: 'Return Exchange',
+        payment_details: JSON.stringify([{ method: 'Return Exchange', amount_usd: replacementSubtotalUsd, amount_khr: 0 }]),
+        exchange_rate: exchangeRate,
+        subtotal_usd: replacementSubtotalUsd,
+        subtotal_khr: replacementSubtotalKhr,
+        total_usd: replacementSubtotalUsd,
+        total_khr: replacementSubtotalKhr,
+        amount_paid_usd: replacementSubtotalUsd,
+        amount_paid_khr: 0,
+        notes: `Replacement sale for return ${returnNumber}${body.receipt_number || saleMeta.receipt_number ? `; original receipt ${body.receipt_number || saleMeta.receipt_number}` : ''}`,
+        items: JSON.stringify(replacementLines.map((line) => ({
+          product_id: line.productId,
+          product_name: line.productName,
+          quantity: line.quantity,
+          applied_price_usd: line.priceUsd,
+          applied_price_khr: line.priceKhr,
+          total_usd: line.totalUsd,
+          total_khr: line.totalKhr,
+          branch_id: line.branchId || branchId,
+          batch_id: line.batchId,
+        }))),
+        search_normalized: normalizeSearchText([
+          replacementReceiptNumber,
+          returnNumber,
+          body.receipt_number || saleMeta.receipt_number,
+          user?.name || user?.username,
+          body.customer_name || saleMeta.customer_name,
+          branchName,
+          ...replacementLines.map((line) => line.productName),
+        ].filter(Boolean).join(' ')),
+        source_return_id: returnId,
+      })
+      replacementSaleId = replacementSaleInsert.lastInsertRowid
+      await db.prepare('UPDATE returns SET replacement_sale_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run([replacementSaleId, returnId])
+    }
+
     const statements: Array<{ sql: string; params: Record<string, unknown> }> = []
     const touchedProductIds = new Set<number>()
 
@@ -1080,7 +1200,7 @@ app.post('/', async (c) => {
     // branch_stock decrement). Same non-atomic-across-steps tradeoff as
     // receiveBatchStock above; a failure lands in the catch below, which
     // deletes this return's rows.
-    for (const line of replacementLines) {
+    for (const [lineIndex, line] of replacementLines.entries()) {
       const lineBranchId = line.branchId || Number(branchId) || 0
       if (!lineBranchId) throw new Error(`Replacement line for ${line.productName} needs a branch`)
       await applyReplacementStock(db, {
@@ -1097,6 +1217,40 @@ app.post('/', async (c) => {
         userName: user?.name ?? null,
       })
       appliedReplacements.push({ productId: line.productId, productName: line.productName, branchId: lineBranchId, batchId: line.batchId, quantity: line.quantity })
+      if (!replacementSaleId) throw new Error('Replacement sale header was not created')
+      const fifoTakes = replacementFifoTakes.get(lineIndex) || []
+      for (const take of fifoTakes) {
+        statements.push(decrementBatchStockStrictStatement(take.batchId, lineBranchId, take.quantity))
+      }
+      const recordedBatchId = line.batchId
+        || (fifoTakes.length === 1 && fifoTakes[0].quantity === line.quantity ? fifoTakes[0].batchId : null)
+      statements.push({
+        sql: `INSERT INTO sale_items (
+                sale_id, product_id, product_name, quantity, applied_price_usd, applied_price_khr,
+                cost_price_usd, cost_price_khr, total_usd, total_khr, branch_id,
+                price_mode, base_price_usd, base_price_khr, batch_id
+              ) VALUES (
+                @sale_id, @product_id, @product_name, @quantity, @applied_price_usd, @applied_price_khr,
+                @cost_price_usd, @cost_price_khr, @total_usd, @total_khr, @branch_id,
+                'selling', @base_price_usd, @base_price_khr, @batch_id
+              )`,
+        params: {
+          sale_id: replacementSaleId,
+          product_id: line.productId,
+          product_name: line.productName,
+          quantity: line.quantity,
+          applied_price_usd: line.priceUsd,
+          applied_price_khr: line.priceKhr,
+          cost_price_usd: line.unitCostUsd,
+          cost_price_khr: line.unitCostKhr,
+          total_usd: line.totalUsd,
+          total_khr: line.totalKhr,
+          branch_id: lineBranchId,
+          base_price_usd: line.priceUsd,
+          base_price_khr: line.priceKhr,
+          batch_id: recordedBatchId,
+        },
+      })
       statements.push({
         sql: `INSERT INTO return_replacement_items (return_id, product_id, product_name, branch_id, batch_id, quantity, applied_price_usd, applied_price_khr, total_usd, total_khr)
               VALUES (@return_id, @product_id, @product_name, @branch_id, @batch_id, @quantity, @applied_price_usd, @applied_price_khr, @total_usd, @total_khr)`,
@@ -1127,6 +1281,35 @@ app.post('/', async (c) => {
     }
 
     await db.batch(statements)
+    replacementBatchWritesCommitted = [...replacementFifoTakes.values()].some((takes) => takes.length > 0)
+
+    if (replacementSaleId) {
+      const [saleItems, replacementRows] = await Promise.all([
+        db.prepare('SELECT id FROM sale_items WHERE sale_id = ? ORDER BY id ASC').all<{ id: number }>([replacementSaleId]),
+        db.prepare('SELECT id FROM return_replacement_items WHERE return_id = ? ORDER BY id ASC').all<{ id: number }>([returnId]),
+      ])
+      const linkStatements: Array<{ sql: string; params: Record<string, unknown> }> = replacementRows.slice(0, saleItems.length).map((row, index) => ({
+        sql: 'UPDATE return_replacement_items SET sale_item_id = @sale_item_id WHERE id = @id',
+        params: { sale_item_id: saleItems[index].id, id: row.id },
+      }))
+      for (const [lineIndex, saleItem] of saleItems.entries()) {
+        for (const take of replacementFifoTakes.get(lineIndex) || []) {
+          linkStatements.push({
+            sql: `INSERT INTO sale_item_batch_allocations (sale_item_id, batch_id, branch_id, quantity, lot_code, expiry_date, released_quantity, released_at)
+                  VALUES (@sale_item_id, @batch_id, @branch_id, @quantity, @lot_code, @expiry_date, 0, NULL)`,
+            params: {
+              sale_item_id: saleItem.id,
+              batch_id: take.batchId,
+              branch_id: replacementLines[lineIndex].branchId || Number(branchId) || 0,
+              quantity: take.quantity,
+              lot_code: take.lotCode,
+              expiry_date: take.expiryDate,
+            },
+          })
+        }
+      }
+      if (linkStatements.length) await db.batch(linkStatements)
+    }
 
     // Now that the return_items rows have ids, persist which exact lot(s)
     // each sellable restock went into -- the trail a later edit reverses by.
@@ -1153,6 +1336,22 @@ app.post('/', async (c) => {
     // fail (e.g. a concurrent sale already consumed the restocked units) and
     // that must reach the operator and the audit log, never be swallowed.
     const unreversed: string[] = []
+    if (replacementBatchWritesCommitted) {
+      for (const [lineIndex, takes] of [...replacementFifoTakes.entries()].reverse()) {
+        const line = replacementLines[lineIndex]
+        const lineBranchId = line.branchId || Number(branchId) || 0
+        for (const take of [...takes].reverse()) {
+          try {
+            await db.prepare(`
+              INSERT INTO branch_batch_stock (batch_id, branch_id, quantity) VALUES (@batch_id, @branch_id, @quantity)
+              ON CONFLICT(batch_id, branch_id) DO UPDATE SET quantity = branch_batch_stock.quantity + @quantity
+            `).run({ batch_id: take.batchId, branch_id: lineBranchId, quantity: take.quantity })
+          } catch (_) {
+            unreversed.push(`replacement lot allocation of ${take.quantity} from lot #${take.batchId} (product #${line.productId})`)
+          }
+        }
+      }
+    }
     for (const restock of [...appliedLotRestocks].reverse()) {
       try {
         await removeStockFromBatch(db, { batchId: restock.batchId, productId: restock.productId, branchId: restock.branchId, quantity: restock.quantity })
@@ -1188,6 +1387,11 @@ app.post('/', async (c) => {
     // the outer batch (allocation recording, sale-status update) left its
     // rows orphaned under a deleted returns row.
     await db.prepare('DELETE FROM return_items WHERE return_id = ?').run([returnId])
+    if (replacementSaleId) {
+      await db.prepare('DELETE FROM sale_item_batch_allocations WHERE sale_item_id IN (SELECT id FROM sale_items WHERE sale_id = ?)').run([replacementSaleId])
+      await db.prepare('DELETE FROM sale_items WHERE sale_id = ?').run([replacementSaleId])
+      await db.prepare('DELETE FROM sales WHERE id = ?').run([replacementSaleId])
+    }
     await db.prepare('DELETE FROM returns WHERE id = ?').run([returnId])
     await db.prepare('DELETE FROM damaged_stock_lots WHERE return_id = ?').run([returnId])
     await db.prepare('DELETE FROM return_replacement_items WHERE return_id = ?').run([returnId])
@@ -1202,7 +1406,13 @@ app.post('/', async (c) => {
     }, 500)
   }
 
-  await audit(c.env, user?.id ?? null, user?.name ?? null, 'create', 'return', returnId, { returnNumber, saleId: body.sale_id || null, reason: body.reason })
+  await audit(c.env, user?.id ?? null, user?.name ?? null, 'create', 'return', returnId, {
+    returnNumber,
+    saleId: body.sale_id || null,
+    replacementSaleId,
+    replacementReceiptNumber,
+    reason: body.reason,
+  })
   c.executionCtx.waitUntil(broadcast(c.env, 'inventory', { action: 'return', id: returnId }))
   c.executionCtx.waitUntil(broadcast(c.env, 'products', { action: 'update' }))
   c.executionCtx.waitUntil(Promise.all([
@@ -1221,7 +1431,7 @@ app.post('/', async (c) => {
     by: user?.name || user?.username || null,
   }).catch((error) => console.error('[telegram] return notification failed', error)))
   c.executionCtx.waitUntil(broadcast(c.env, 'sales', { action: 'update', id: body.sale_id || null }))
-  return c.json({ id: returnId, returnNumber })
+  return c.json({ id: returnId, returnNumber, replacementSaleId, replacementReceiptNumber })
 })
 
 // POST /api/returns/supplier -- "process" a supplier return: pull stock out

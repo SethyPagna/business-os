@@ -3,6 +3,7 @@ import fs from 'node:fs'
 import { DEFAULT_TEMPLATE } from '../src/components/receipt-settings/constants.ts'
 import { parseReceiptTemplate, serializeReceiptTemplate } from '../src/components/receipt-settings/template.ts'
 import { computeImagePdfLayout } from '../src/utils/receiptPdfLayout.ts'
+import { normalizeReceiptPrintSettings } from '../src/utils/receiptAppliedConfig.ts'
 
 let failed = 0
 
@@ -39,6 +40,13 @@ await runTest('serializeReceiptTemplate keeps default fields available for previ
   assert.equal(Array.isArray(reparsed.field_order), true)
 })
 
+await runTest('high-contrast bold receipt printing is enabled by default and can be disabled', () => {
+  assert.equal(normalizeReceiptPrintSettings({}).highContrastBold, true)
+  assert.equal(normalizeReceiptPrintSettings({ highContrastBold: true }).highContrastBold, true)
+  assert.equal(normalizeReceiptPrintSettings({ highContrastBold: false }).highContrastBold, false)
+  assert.equal(normalizeReceiptPrintSettings(JSON.stringify({ highContrastBold: 'false' })).highContrastBold, false)
+})
+
 await runTest('compact ABA receipt and KHR visibility settings survive a template round trip', () => {
   const serialized = serializeReceiptTemplate({
     sales_receipt_enabled: true,
@@ -71,6 +79,20 @@ await runTest('receipt preview remains strict-CSP compatible and binds buttons o
   assert.doesNotMatch(source, /Print \/ Save PDF/)
   assert.match(source, /data-receipt-action="close"/)
   assert.match(source, /function attachPrintablePreviewActions/)
+})
+
+await runTest('high-contrast print mode forces solid black bold text through every export path', () => {
+  const printSource = fs.readFileSync(new URL('../src/utils/printReceipt.ts', import.meta.url), 'utf8')
+  const receiptSource = fs.readFileSync(new URL('../src/components/receipt/Receipt.tsx', import.meta.url), 'utf8')
+  const cssSource = fs.readFileSync(new URL('../src/styles/main.css', import.meta.url), 'utf8')
+
+  assert.match(printSource, /function applyHighContrastBold/)
+  assert.match(printSource, /style\.setProperty\('color', '#000000', 'important'\)/)
+  assert.match(printSource, /style\.setProperty\('font-weight', '700', 'important'\)/)
+  assert.match(printSource, /applyHighContrastBold\(host, printSettings\)/)
+  assert.match(printSource, /Helvetica-Bold/)
+  assert.match(receiptSource, /data-receipt-high-contrast=\{highContrastBold \? 'true' : 'false'\}/)
+  assert.match(cssSource, /\[data-receipt-high-contrast='true'\] \*/)
 })
 
 await runTest('print export normalizes receipt root width inside paper frame', () => {

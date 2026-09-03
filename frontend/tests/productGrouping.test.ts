@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { buildProductGroups, buildProductGroupSections, getNameInitialSection, normalizeProductGroupName } from '../src/utils/productGrouping.ts'
+import { buildProductCategorySections, buildProductGroups, buildProductGroupSections, getNameInitialSection, hideZeroStockGroupedChildRows, normalizeProductGroupName } from '../src/utils/productGrouping.ts'
 
 let failed = 0
 
@@ -189,6 +189,19 @@ await runTest('buildProductGroups returns an empty branchNames array for product
   const products = [{ id: 42, name: 'No Branch Data', stock_quantity: 1, selling_price_usd: 10 }]
   const groups = buildProductGroups(products, new Map(products.map((product) => [product.id, product])))
   assert.deepEqual(groups[0].branchNames, [])
+})
+
+await runTest('Products can hide all-zero multi-branch child rows without hiding standalone zero products', () => {
+  const products = [
+    { id: 1, name: 'Same Name', barcode: '111', cost_price_usd: 1, stock_quantity: 0, branch_stock: [{ branch_id: 1, branch_name: 'Warehouse', quantity: 0 }, { branch_id: 2, branch_name: 'Shop', quantity: 0 }] },
+    { id: 2, name: 'Same Name', barcode: '222', cost_price_usd: 2, stock_quantity: 3, branch_stock: [{ branch_id: 1, branch_name: 'Warehouse', quantity: 2 }, { branch_id: 2, branch_name: 'Shop', quantity: 1 }] },
+    { id: 3, name: 'Standalone Zero', barcode: '333', cost_price_usd: 3, stock_quantity: 0, branch_stock: [{ branch_id: 1, branch_name: 'Warehouse', quantity: 0 }, { branch_id: 2, branch_name: 'Shop', quantity: 0 }] },
+  ]
+  const sections = hideZeroStockGroupedChildRows(buildProductCategorySections(products, { productsById: new Map(products.map((product) => [product.id, product])) }))
+  const visibleIds = sections.flatMap((section) => section.ids)
+  assert.deepEqual(visibleIds.sort((a, b) => a - b), [2, 3])
+  const sameName = sections.flatMap((section) => section.groups).find((group) => group.name === 'Same Name')
+  assert.equal(sameName?.rows.length, 1)
 })
 
 if (failed > 0) {

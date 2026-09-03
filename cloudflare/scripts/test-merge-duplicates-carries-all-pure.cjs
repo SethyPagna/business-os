@@ -87,6 +87,13 @@ check('the merge deactivates the duplicate only after everything is carried over
   assert.ok(imagesAt > 0 && imagesAt < deactivateAt, 'images must be moved before the duplicate is deactivated')
 })
 
+check('the merge carries the highest selling and special prices onto the keeper', () => {
+  assert.ok(/resolveMergedPricing\(\[canonicalBefore \|\| \{\}, dupPricing \|\| \{\}\]\)/.test(mergeBlock), 'price resolution must compare both rows')
+  assert.ok(/selling_price_usd = @sellingUsd/.test(mergeBlock), 'highest USD selling price must be written to the keeper')
+  assert.ok(/special_price_usd = @specialUsd/.test(mergeBlock), 'highest USD special price must be written to the keeper')
+  assert.ok(/keeperPricingBefore:/.test(routeSrc), 'the keeper price before-image must be captured so undo is exact')
+})
+
 check('the audit entry reports what was moved, including images', () => {
   const auditBlock = routeSrc.slice(mergeEnd, mergeEnd + 700)
   assert.ok(/batchesMoved:/.test(auditBlock))

@@ -18,7 +18,7 @@ import { validateUploadedBuffer } from '../lib/uploadSecurity'
 import { checkRateLimit, getClientIp } from '../lib/rateLimit'
 import { audit } from '../lib/audit'
 import { findDuplicateProductGroups, findPossiblySameProductClusters, normalizeProductClusterKey } from '../lib/productIdentity'
-import { normalizeProductGroupName } from '../lib/productDetailRule'
+import { normalizeProductGroupName, resolveMergedPricing } from '../lib/productDetailRule'
 import { registerMergeFold, recordMergeUndoSnapshot, recordBulkMergeUndoSnapshot, recordSupplierBackfillSnapshot, type MergeReversal } from '../lib/undoAppliers'
 import { attachBatchCounts } from '../lib/productBatches'
 import { maybeQueueForReview } from '../lib/reviewGate'
@@ -2479,8 +2479,14 @@ export async function foldDuplicateProductInto(
   // Keeper's image_path BEFORE the fold: the fold adopts the dup's image only
   // when the keeper had none, so undo restores this captured value verbatim.
   const canonicalBefore = await db
-    .prepare('SELECT image_path FROM products WHERE id = @id')
-    .get<{ image_path: string | null }>({ id: canonicalId })
+    .prepare(`SELECT image_path, selling_price_usd, selling_price_khr, special_price_usd, special_price_khr
+              FROM products WHERE id = @id`)
+    .get<{ image_path: string | null; selling_price_usd: number | null; selling_price_khr: number | null; special_price_usd: number | null; special_price_khr: number | null }>({ id: canonicalId })
+  const dupPricing = await db
+    .prepare(`SELECT selling_price_usd, selling_price_khr, special_price_usd, special_price_khr
+              FROM products WHERE id = @id`)
+    .get<{ selling_price_usd: number | null; selling_price_khr: number | null; special_price_usd: number | null; special_price_khr: number | null }>({ id: dup.id })
+  const mergedPricing = resolveMergedPricing([canonicalBefore || {}, dupPricing || {}])
   const dupBatchRows = await db
     .prepare('SELECT id, batch_key, batch_number FROM product_batches WHERE variant_product_id = @id')
     .all<{ id: number; batch_key: string; batch_number: number | null }>({ id: dup.id })
@@ -2556,6 +2562,22 @@ export async function foldDuplicateProductInto(
   })
 
   statements.push({ sql: 'UPDATE products SET is_active = 0, updated_at = CURRENT_TIMESTAMP WHERE id = @id', params: { id: dup.id } })
+  statements.push({
+    sql: `UPDATE products
+          SET selling_price_usd = @sellingUsd,
+              selling_price_khr = @sellingKhr,
+              special_price_usd = @specialUsd,
+              special_price_khr = @specialKhr,
+              updated_at = CURRENT_TIMESTAMP
+          WHERE id = @canonicalId`,
+    params: {
+      canonicalId,
+      sellingUsd: mergedPricing.selling_price_usd ?? canonicalBefore?.selling_price_usd ?? 0,
+      sellingKhr: mergedPricing.selling_price_khr ?? canonicalBefore?.selling_price_khr ?? 0,
+      specialUsd: mergedPricing.special_price_usd ?? canonicalBefore?.special_price_usd ?? 0,
+      specialKhr: mergedPricing.special_price_khr ?? canonicalBefore?.special_price_khr ?? 0,
+    },
+  })
 
   // batch_key has a UNIQUE(variant_product_id, batch_key) index, so a
   // batch can't just be re-pointed at the canonical product if the
@@ -2686,6 +2708,12 @@ export async function foldDuplicateProductInto(
       dupId: dup.id,
       dupName: dup.name ?? null,
       keeperImagePathBefore: canonicalBefore?.image_path ?? null,
+      keeperPricingBefore: {
+        selling_price_usd: Number(canonicalBefore?.selling_price_usd) || 0,
+        selling_price_khr: Number(canonicalBefore?.selling_price_khr) || 0,
+        special_price_usd: Number(canonicalBefore?.special_price_usd) || 0,
+        special_price_khr: Number(canonicalBefore?.special_price_khr) || 0,
+      },
       keeperStockBefore: canonicalStockBefore.map((r) => ({ branch_id: r.branch_id, quantity: Number(r.quantity) || 0 })),
       dupStockBefore: stockRows.map((r) => ({ branch_id: r.branch_id, quantity: Number(r.quantity) || 0, rfid_confirmed_qty: Number(r.rfid_confirmed_qty) || 0 })),
       dupImagesBefore: dupImageRows.map((r) => ({ image_path: String(r.image_path), sort_order: r.sort_order == null ? null : Number(r.sort_order) })),

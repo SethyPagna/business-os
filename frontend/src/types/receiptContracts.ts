@@ -66,6 +66,7 @@ export interface NormalizedReceiptTemplate {
 
 export interface ReceiptPrintSettings {
   paperSize: string
+  highContrastBold: boolean
   marginTop: string
   marginRight: string
   marginBottom: string

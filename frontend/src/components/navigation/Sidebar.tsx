@@ -1,6 +1,6 @@
 import { Suspense, type ComponentType, type CSSProperties, type ReactNode, useMemo, useState, useSyncExternalStore } from 'react'
-import { getRegisteredWork, hasDirtyWork, subscribeDirtyWork } from '../../utils/dirtyWork.ts'
-import { flushPendingWorkDrafts } from '../../utils/workDrafts.ts'
+import { getRegisteredWork, subscribeDirtyWork } from '../../utils/dirtyWork.ts'
+import { restartIntoLatestApp } from '../../utils/appUpdate.ts'
 import type { LucideIcon } from 'lucide-react'
 import BadgeDollarSign from 'lucide-react/dist/esm/icons/badge-dollar-sign.js'
 import BookUser from 'lucide-react/dist/esm/icons/book-user.js'
@@ -99,6 +99,7 @@ type SidebarProps = {
   // so any caller that doesn't pass this (e.g. a future test render) still
   // gets a bar that's actually on screen.
   mobileHeaderVisible?: boolean
+  appUpdateVisible?: boolean
 }
 
 const useApp = useAppHook as () => SidebarAppContext
@@ -185,7 +186,7 @@ function isNavigationItemWithIcon(item: NavigationItemWithIcon | undefined): ite
   return !!item
 }
 
-export default function Sidebar({ notificationSlot = null, desktopNotificationSlot = null, showQuickPreferences = false, mobileHeaderVisible = true }: SidebarProps = {}) {
+export default function Sidebar({ notificationSlot = null, desktopNotificationSlot = null, showQuickPreferences = false, mobileHeaderVisible = true, appUpdateVisible = false }: SidebarProps = {}) {
   const {
     page,
     navigateTo,
@@ -207,46 +208,10 @@ export default function Sidebar({ notificationSlot = null, desktopNotificationSl
   // (user request). The same panel opens as a dropdown from the mobile header
   // avatar.
   const [accountOpen, setAccountOpen] = useState(false)
-  const runAppUpdate = async () => {
-    // iOS does not reliably show beforeunload prompts. Refuse an explicit
-    // update while an editor has unsaved work, and activate the WAITING worker
-    // (posting to controller targets the old active worker and does nothing).
-    if (hasDirtyWork()) {
-      flushPendingWorkDrafts()
-      window.alert(t('save_or_discard_before_update') || 'Save or discard your unfinished work before updating the app.')
-      return
-    }
-    flushPendingWorkDrafts()
-    try {
-      const registration = await navigator.serviceWorker?.getRegistration?.('/')
-      await registration?.update?.().catch(() => {})
-      let waiting = registration?.waiting || null
-      if (!waiting && registration?.installing) {
-        const installing = registration.installing
-        await new Promise<void>((resolve) => {
-          if (installing.state === 'installed') return resolve()
-          const timer = window.setTimeout(resolve, 5000)
-          installing.addEventListener('statechange', () => {
-            if (installing.state !== 'installed') return
-            window.clearTimeout(timer)
-            resolve()
-          }, { once: true })
-        })
-        waiting = registration.waiting
-      }
-      if (waiting) {
-        const changed = new Promise<void>((resolve) => {
-          const timer = window.setTimeout(resolve, 1500)
-          navigator.serviceWorker.addEventListener('controllerchange', () => {
-            window.clearTimeout(timer)
-            resolve()
-          }, { once: true })
-        })
-        waiting.postMessage({ type: 'BUSINESS_OS_SKIP_WAITING' })
-        await changed
-      }
-    } catch (_) {}
-    window.location.reload()
+  const runAppUpdate = () => {
+    void restartIntoLatestApp({
+      unsavedWorkMessage: t('save_or_discard_before_update') || 'Save or discard your unfinished work before updating the app.',
+    })
   }
 
   // N2: which pages currently hold registered unsaved work -- drives the
@@ -495,7 +460,7 @@ export default function Sidebar({ notificationSlot = null, desktopNotificationSl
           background still extends fully behind the notch; App.tsx's <main>
           padding-top is matched to this same total height. */}
       <header
-        className={`fixed left-0 right-0 top-0 z-40 flex h-[calc(4rem+env(safe-area-inset-top))] items-center justify-between border-b border-gray-200 bg-white pl-[calc(1rem+env(safe-area-inset-left))] pr-[calc(1rem+env(safe-area-inset-right))] pt-[env(safe-area-inset-top)] transition-transform duration-300 ease-in-out dark:border-slate-800 dark:bg-slate-900 md:hidden ${mobileHeaderVisible ? 'translate-y-0' : '-translate-y-full'}`}
+        className={`fixed left-0 right-0 z-40 flex items-center justify-between border-b border-gray-200 bg-white pl-[calc(1rem+env(safe-area-inset-left))] pr-[calc(1rem+env(safe-area-inset-right))] transition-[transform,top] duration-300 ease-in-out dark:border-slate-800 dark:bg-slate-900 md:hidden ${appUpdateVisible ? 'top-[calc(3rem+env(safe-area-inset-top))] h-16 pt-0' : 'top-0 h-[calc(4rem+env(safe-area-inset-top))] pt-[env(safe-area-inset-top)]'} ${mobileHeaderVisible ? 'translate-y-0' : '-translate-y-full'}`}
       >
         <div className="flex min-w-0 items-center gap-2.5">
           <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center overflow-hidden rounded-full border border-slate-200/80 bg-slate-100 dark:border-slate-700 dark:bg-slate-800/80">

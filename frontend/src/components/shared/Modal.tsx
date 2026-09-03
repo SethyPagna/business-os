@@ -21,9 +21,13 @@ type ModalProps = {
   // before this component ever implemented it (a real typecheck break,
   // not just an unused prop) -- see CHANGES-VERIFIED.md.
   draggable?: boolean
+  // Nested tools such as the barcode camera are opened from inside another
+  // modal. Give them an explicit higher layer so their controls and scan
+  // result cannot fall behind or interact with the parent workflow.
+  layer?: 'default' | 'nested'
 }
 
-export default function Modal({ title, onClose, children, wide, size, draggable, headerExtra }: ModalProps) {
+export default function Modal({ title, onClose, children, wide, size, draggable, headerExtra, layer = 'default' }: ModalProps) {
   const widthClass =
     size === 'sm' ? 'max-w-lg' :
     size === 'lg' ? 'max-w-3xl' :
@@ -117,7 +121,11 @@ export default function Modal({ title, onClose, children, wide, size, draggable,
     // both, but deliberately still below App.tsx's toast layer (z-[1100])
     // -- a toast confirming an action taken while a modal is open should
     // stay visible on top of it, not get hidden behind the backdrop.
-    <div className="modal-viewport-safe pointer-events-auto fixed inset-0 bg-black/50 flex items-start sm:items-center justify-center z-[1050] overflow-y-auto sm:p-4">
+    <div
+      className={`modal-viewport-safe pointer-events-auto fixed inset-0 bg-black/50 flex items-start sm:items-center justify-center ${layer === 'nested' ? 'z-[1070]' : 'z-[1050]'} overflow-y-auto sm:p-4`}
+      role="dialog"
+      aria-modal="true"
+    >
       <div
         ref={panelRef}
         className={`modal-panel-safe bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full ${widthClass} flex flex-col fade-in my-auto`}

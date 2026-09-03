@@ -10,10 +10,8 @@
 //     branch_stock. POS's damage option (11.9) draws quantity_remaining
 //     down later; a lot that has been drawn from blocks un-doing the
 //     return edit that created it.
-//   - Replace hands the customer product from the SAME-NAME stock of a
-//     returned item (the name group IS product identity in this app --
-//     see routes/products.ts's identity rule). A different product is a
-//     refund plus a new sale, not a replacement.
+//   - Replace may hand out any catalog product. routes/returns.ts records the
+//     hand-out as a linked sale/receipt as well as this stock movement.
 //   - The value gap settles as 'even_exchange' (no money moves; only legal
 //     when the gap is zero) or 'price_difference' (full access only).
 //
@@ -23,7 +21,6 @@
 // real logic against a real sqlite database.
 import type { D1Compat } from './db'
 import { removeStockFromBatch } from './productBatches'
-import { selectInChunks } from './sqlBinding'
 
 export type ReturnStockAction = 'none' | 'restock' | 'damaged'
 export type SettlementMode = 'even_exchange' | 'price_difference'
@@ -61,37 +58,6 @@ export function computeSettlement(input: {
     diffKhr,
     needsFullAccess: mode === 'price_difference',
     evenExchangeBlocked: mode === 'even_exchange' && (Math.abs(diffUsd) >= 0.005 || Math.abs(diffKhr) >= 1),
-  }
-}
-
-export class ReplacementNameMismatchError extends Error {
-  constructor(productName: string) {
-    super(`"${productName}" is not the same-name stock of any returned item -- a replacement must be the same product (any of its rows). For a different product, refund this return and make a new sale instead.`)
-    this.name = 'ReplacementNameMismatchError'
-  }
-}
-
-// Replace's identity gate: every replacement product's name_key must match
-// a returned item's product name_key. name_key is trigger-maintained
-// (migration 0010) so this is the SAME grouping every other surface uses.
-export async function assertReplacementsSameName(
-  db: D1Compat,
-  returnedProductIds: number[],
-  replacementProductIds: number[],
-): Promise<void> {
-  const replacementIds = [...new Set(replacementProductIds.filter((id) => Number.isFinite(id) && id > 0))]
-  if (!replacementIds.length) return
-  const returnedIds = [...new Set(returnedProductIds.filter((id) => Number.isFinite(id) && id > 0))]
-  const fetchKeys = async (ids: number[]) => ids.length
-    ? await selectInChunks(ids, 0, (chunk) => db
-        .prepare(`SELECT id, name, name_key FROM products WHERE id IN (${chunk.map(() => '?').join(',')})`)
-        .all<{ id: number; name: string | null; name_key: string | null }>(chunk))
-    : []
-  const returnedKeys = new Set((await fetchKeys(returnedIds)).map((row) => String(row.name_key || '')))
-  for (const row of await fetchKeys(replacementIds)) {
-    if (!returnedKeys.has(String(row.name_key || ''))) {
-      throw new ReplacementNameMismatchError(String(row.name || `product #${row.id}`))
-    }
   }
 }
 

@@ -30,10 +30,8 @@ import { batchDisplayLabel } from '../../utils/batchLabel.ts'
 // D1 (Part 415): the user's Stock Change ledger on the Products page --
 // one row per recorded action over the EXISTING movement history, with the
 // derived running balance (before -> after) the /stock-ledger kernel
-// computes by walking back from current stock. Read-only. Row click opens
-// the per-product mini-ledger (D3's absorption of Inventory's
-// view-stock-movement drill into the Products surface): the same endpoint
-// scoped to that product, so both levels always agree.
+// computes by walking back from current stock. Row click opens only that
+// selected movement's details; unrelated product history stays in the ledger.
 //
 // Part 553 (this session): reworked to the two-column In / Out model the
 // user asked for -- the "Adjustments" view is gone (its rows fold into In),
@@ -183,7 +181,6 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
   const [loading, setLoading] = useState(false)
   const [loadError, setLoadError] = useState('')
   const [detail, setDetail] = useState<LedgerRow | null>(null)
-  const [detailRows, setDetailRows] = useState<LedgerRow[] | null>(null)
   // Row context actions on the open detail: an inline reason editor and a
   // two-step revert confirm. rowBusy blocks both while a write is in flight.
   const [rowBusy, setRowBusy] = useState(false)
@@ -196,6 +193,23 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
   const [fastStockInOpen, setFastStockInOpen] = useState(false)
   const [exportRange, setExportRange] = useState<{ startDate: string; endDate: string } | null>(null)
   const requestRef = useRef(0)
+  const stockWorkflowOpen = adjustType !== null || fastStockInOpen
+
+  // A hardware scanner behaves like a keyboard. Blur and disable the ledger
+  // search before opening an adjustment workflow so its barcode cannot be
+  // typed into Stock Change History while the modal is taking over.
+  const blurLedgerSearch = useCallback(() => {
+    const activeElement = typeof document === 'undefined' ? null : document.activeElement
+    if (activeElement instanceof HTMLElement) activeElement.blur()
+  }, [])
+  const openStockAdjustment = useCallback((type: 'add' | 'remove' | 'set') => {
+    blurLedgerSearch()
+    setAdjustType(type)
+  }, [blurLedgerSearch])
+  const openFastStockIn = useCallback(() => {
+    blurLedgerSearch()
+    setFastStockInOpen(true)
+  }, [blurLedgerSearch])
 
   const load = useCallback(async () => {
     const requestId = ++requestRef.current
@@ -248,21 +262,14 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
     return () => { cancelled = true }
   }, [])
 
-  const openDetail = useCallback(async (row: LedgerRow) => {
+  const openDetail = useCallback((row: LedgerRow) => {
     setDetail(row)
-    setDetailRows(null)
     setEditingReason(null)
     setConfirmRevert(false)
-    try {
-      const response = await getStockLedger({ productId: row.product_id, page: 1, pageSize: 20 }) as LedgerResponse
-      setDetailRows(Array.isArray(response?.items) ? response.items : [])
-    } catch {
-      setDetailRows([])
-    }
   }, [])
 
   const closeDetail = useCallback(() => {
-    setDetail(null); setDetailRows(null); setEditingReason(null); setConfirmRevert(false)
+    setDetail(null); setEditingReason(null); setConfirmRevert(false)
   }, [])
 
   // Ranged CSV export of the ledger, honoring the section's current search/
@@ -373,12 +380,12 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
     if (!onRegisterActions) return
     onRegisterActions({
       canAdjust,
-      openAdjust: (type) => setAdjustType(type),
-      openFastStockIn: () => setFastStockInOpen(true),
+      openAdjust: openStockAdjustment,
+      openFastStockIn,
       runExport: openExport,
     })
     return () => onRegisterActions(null)
-  }, [onRegisterActions, canAdjust, openExport])
+  }, [onRegisterActions, canAdjust, openExport, openFastStockIn, openStockAdjustment])
 
   // Part 553: two view chips plus All -- the Adjustment chip is gone (its
   // rows fold into In).
@@ -452,7 +459,7 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
       <button
         key={row.id}
         type="button"
-        onClick={() => void openDetail(row)}
+        onClick={() => openDetail(row)}
         className="flex w-full items-start justify-between gap-3 rounded-xl border border-gray-200 bg-white p-3 text-left shadow-sm transition hover:border-blue-300 hover:bg-blue-50/40 dark:border-gray-700 dark:bg-gray-900 dark:hover:border-blue-700 dark:hover:bg-blue-900/10"
       >
         <div className="min-w-0 flex-1">
@@ -514,8 +521,8 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
               <th>{tr(t, 'time', 'Time')}</th>
               <th data-tone="blue">{tr(t, 'product', 'Product')}</th>
               <th data-tone="violet">{tr(t, 'type', 'Type')}</th>
-              <th data-tone="emerald" className="text-right">{tr(t, 'quantity', 'Quantity')}</th>
-              <th className="text-right">{beforeLabel} → {afterLabel}</th>
+              <th data-tone="emerald" className="text-center">{tr(t, 'quantity', 'Quantity')}</th>
+              <th className="text-center">{beforeLabel} → {afterLabel}</th>
               <th>{tr(t, 'branch', 'Branch')}</th>
               <th>{tr(t, 'supplier', 'Supplier')}</th>
               <th>{tr(t, 'cashier_user', 'User')}</th>
@@ -534,15 +541,15 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
                     key={row.id}
                     data-clickable="true"
                     tabIndex={0}
-                    onClick={() => void openDetail(row)}
-                    onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); void openDetail(row) } }}
+                    onClick={() => openDetail(row)}
+                    onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); openDetail(row) } }}
                     aria-label={`${row.product_name}, ${signedLabel(row)}`}
                   >
                     <td className="tabular-nums text-gray-400" title={timeUnknown ? noTimeLabel : undefined}>{timeUnknown ? '––:––' : clock}</td>
                     <td><span className="whitespace-normal break-words font-semibold text-gray-800 dark:text-gray-100">{row.product_name}</span><span className="break-all dense-id text-gray-400">{row.barcode || (row.batch_id ? batchDisplayLabel({ id: row.batch_id, lot_code: row.batch_lot_code, received_at: row.batch_received_at }) : '—')}</span></td>
                     <td><span className={`inline-flex max-w-full items-center rounded px-1.5 py-0.5 font-semibold ${movementColorClass(row.movement_type, row.signed_quantity)}`}><span className="dense-cell-truncate">{translateMovementType(row.movement_type, t)}</span></span></td>
-                    <td className={`text-right font-bold tabular-nums ${row.signed_quantity >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>{signedLabel(row)}</td>
-                    <td className="text-right tabular-nums text-gray-500">{row.before_qty} → <b className="text-gray-800 dark:text-gray-100">{row.after_qty}</b></td>
+                    <td className={`text-center font-bold tabular-nums ${row.signed_quantity >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>{signedLabel(row)}</td>
+                    <td className="text-center tabular-nums text-gray-500">{row.before_qty} → <b className="text-gray-800 dark:text-gray-100">{row.after_qty}</b></td>
                     <td><span className="dense-cell-truncate" title={row.branch_name || ''}>{row.branch_name || '—'}</span></td>
                     <td><span className="dense-cell-truncate" title={row.batch_supplier_name || ''}>{row.batch_supplier_name || '—'}</span></td>
                     <td><span className="dense-cell-truncate" title={row.user_name || ''}>{row.user_name || '—'}</span></td>
@@ -613,12 +620,12 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
           triggerClassName="flex items-center justify-center gap-2 rounded-lg px-2.5 py-1.5"
         />
         <div className="min-w-48 flex-1 sm:max-w-96">
-          <SearchInput id="stock-ledger-search" name="stock_ledger_search" value={search} onChange={setSearch} placeholder={tr(t, 'search', 'Search')} />
+          <SearchInput id="stock-ledger-search" name="stock_ledger_search" value={search} onChange={setSearch} placeholder={tr(t, 'search', 'Search')} disabled={stockWorkflowOpen} />
         </div>
         {/* The barcode scanner rides the ledger search too (user, Aug 31:
             "bring the barcode scanner back") -- scanning a product fills the
             search box, same as the Products / POS / Inventory search rows. */}
-        <ScanSearchButton onDetected={setSearch} t={t} />
+        {!stockWorkflowOpen ? <ScanSearchButton onDetected={setSearch} t={t} /> : null}
         {/* The loose "↓ <total> ⓘ" export affordance that used to sit at the
             end of this row was removed (user, Aug 31: "remove the whole thing")
             -- the ledger CSV export is now folded into the page header's
@@ -830,25 +837,6 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
                 </div>
               )
             ) : null}
-            <div>
-              <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-gray-400">{tr(t, 'stock_change_ledger', 'Stock Changes')}</div>
-              {detailRows === null ? (
-                <p className="py-3 text-center text-xs text-gray-400">{tr(t, 'loading', 'Loading')}...</p>
-              ) : (
-                <div className="max-h-64 space-y-1 overflow-y-auto">
-                  {detailRows.map((row) => (
-                    <div key={row.id} className={`flex items-center justify-between rounded-lg px-2.5 py-1.5 text-xs ${row.id === detail.id ? 'ring-1 ring-blue-300 dark:ring-blue-700' : ''} bg-gray-50 dark:bg-gray-800/60`}>
-                      <span className="text-gray-400" title={isDateOnlyStamp(row.created_at) ? noTimeLabel : undefined}>
-                        {isDateOnlyStamp(row.created_at) ? fmtDate(row.created_at) : fmtDateTime24(row.created_at)}
-                      </span>
-                      <span className={`rounded px-1.5 py-0.5 font-semibold ${movementColorClass(row.movement_type, row.signed_quantity)}`}>{signedLabel(row)}</span>
-                      <span className="tabular-nums text-gray-500">{row.before_qty} → {row.after_qty}</span>
-                    </div>
-                  ))}
-                  {!detailRows.length ? <p className="py-2 text-center text-gray-400">{tr(t, 'no_data_found', 'No data found')}</p> : null}
-                </div>
-              )}
-            </div>
           </div>
         </Modal>
       ) : null}
