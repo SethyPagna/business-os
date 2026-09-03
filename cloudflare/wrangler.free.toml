@@ -17,7 +17,20 @@
 #      by lib/planTier.ts, and everything downstream of it (import chunk
 #      sizes, stock-action ceilings, backup/reset batch caps) follows from
 #      that one value. See that module for the full table of Free vs Paid
-#      numbers.
+#      numbers, and docs/plans/plan-tiers.md for the same table with the
+#      platform limit each number respects.
+#
+# Those three ARE the whole difference, and that is enforced rather than
+# hoped for: scripts/test-plan-tier-matrix-pure.cjs parses both files as
+# TOML and fails on any path that differs outside [limits], the queue
+# consumers' max_batch_size, and vars.PLAN_TIER. So a binding, route,
+# database id or cron added to wrangler.toml and forgotten here is a red
+# test, not a Free deployment that quietly lost a feature.
+#
+# The absence of [limits] is load-bearing, not an omission -- see (1)
+# above. Do not add one "for parity": it makes `wrangler deploy --config
+# wrangler.free.toml` fail with error 100328, and the matrix test allows
+# the path precisely so this file can keep NOT having it.
 #
 # Deliberately UNCHANGED from wrangler.toml (do not "fix" these on a future
 # edit without re-reading the reasoning first):
