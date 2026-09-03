@@ -162,12 +162,14 @@ function clampInt(value: unknown, fallback: number, min: number, max: number): n
   return Math.min(max, Math.max(min, n))
 }
 
+// The dashboard's default window is TODAY -- the business day in
+// Asia/Phnom_Penh, the same default every list page uses (user, 2026-09-03).
+// The caller widens it freely; it governs only the flow figures (sales,
+// returns, the charts, the recent-sales feed), never the stock/alert cards.
 function dateRange(query: Record<string, string>) {
   const today = businessToday()
-  const defaultStart = new Date(`${today}T00:00:00.000Z`)
-  defaultStart.setUTCDate(defaultStart.getUTCDate() - 6)
   return {
-    startDate: String(query.startDate || defaultStart.toISOString().slice(0, 10)).slice(0, 10),
+    startDate: String(query.startDate || today).slice(0, 10),
     endDate: String(query.endDate || today).slice(0, 10),
     granularity: ['week', 'month'].includes(String(query.granularity || 'day')) ? String(query.granularity) : 'day',
   }
@@ -222,17 +224,25 @@ async function dashboardSummary(env: Env, query: Record<string, string>) {
   const branchId = query.branchId || null
   const params = branchId ? { startDate, endDate, branchId } : { startDate, endDate }
   const saleBranchClause = (alias: string) => branchId ? ` AND ${alias}.branch_id = @branchId` : ''
-  // Every summary card follows the same selected range. Inventory cards are
-  // the current on-hand state of products that participated in that range;
-  // this keeps their stock meaning intact while making the product scope
-  // agree with sales, charts and top-product analytics.
-  const productInRangeClause = `EXISTS (
-    SELECT 1 FROM sale_items dashboard_si
-    JOIN sales dashboard_s ON dashboard_s.id = dashboard_si.sale_id
-    WHERE dashboard_si.product_id = p.id
-      AND ${localDateRangeClause('dashboard_s.created_at')}
-      AND ${recognizedExpr('dashboard_s.')}${saleBranchClause('dashboard_s')}
-  )`
+  // The selected Start->End range scopes everything that is a MOVEMENT:
+  // sales, returns and the recent-sales feed. It deliberately does NOT
+  // scope the STOCK surfaces -- the product/in-stock/low/out counts, the
+  // stock value, and the low-stock / out-of-stock / expiring alert lists and
+  // their counts -- which report current on-hand state for the whole active
+  // catalog. The stock/alert cards are the deliberate exception to the
+  // one-range-scopes-list-and-stats convention (user, 2026-09-03): a period
+  // figure may appear inside such a card as a secondary line, never as its
+  // face value.
+  //
+  // An earlier revision restricted those to "products that had a recognized
+  // sale in the range". That inverts the alert: a product which is out of
+  // stock cannot sell, so anything out of stock for the whole window
+  // dropped off the out-of-stock card exactly when it mattered most, and
+  // the same trap applied more weakly to low stock and expiry. The
+  // low-stock/out-of-stock badge counts come from getFamilyStockStats and
+  // are rendered directly above those lists (Dashboard.tsx), so they are
+  // scoped identically -- a range-scoped badge over a catalog-wide list
+  // would disagree with itself.
   // Family-aware counts (see familyStockStats.ts) so this dashboard tile
   // agrees with the family-grouped pagination total on Products/Inventory
   // -- previously a flat COUNT(*)/SUM() here counted every variant row (and
@@ -257,35 +267,35 @@ async function dashboardSummary(env: Env, query: Record<string, string>) {
     getFamilyStockStats({
       db,
       joinSql: '',
-      whereSql: `WHERE p.is_active = 1 AND ${productInRangeClause}`,
+      whereSql: 'WHERE p.is_active = 1',
       params,
       qtyExpr: 'COALESCE(p.stock_quantity, 0)',
     }),
     db.prepare(`
       SELECT id, name, category, unit, stock_quantity, low_stock_threshold, out_of_stock_threshold
       FROM products p
-      WHERE p.is_active = 1 AND ${productInRangeClause} AND COALESCE(stock_quantity, 0) <= COALESCE(low_stock_threshold, 10) AND COALESCE(stock_quantity, 0) > COALESCE(out_of_stock_threshold, 0)
+      WHERE p.is_active = 1 AND COALESCE(stock_quantity, 0) <= COALESCE(low_stock_threshold, 10) AND COALESCE(stock_quantity, 0) > COALESCE(out_of_stock_threshold, 0)
       ORDER BY stock_quantity ASC, lower(name) ASC
       LIMIT 10
     `).all(params),
     db.prepare(`
       SELECT id, name, category, unit, stock_quantity, low_stock_threshold, out_of_stock_threshold
       FROM products p
-      WHERE p.is_active = 1 AND ${productInRangeClause} AND COALESCE(stock_quantity, 0) <= COALESCE(out_of_stock_threshold, 0)
+      WHERE p.is_active = 1 AND COALESCE(stock_quantity, 0) <= COALESCE(out_of_stock_threshold, 0)
       ORDER BY stock_quantity ASC, lower(name) ASC
       LIMIT 10
     `).all(params),
     db.prepare(`
       SELECT id, name, category, unit, expiry_date, CAST(julianday(expiry_date) - julianday('now') AS INTEGER) AS days_until_expiry
       FROM products p
-      WHERE p.is_active = 1 AND ${productInRangeClause} AND expiry_date IS NOT NULL AND date(expiry_date) <= date('now', '+' || COALESCE(expiry_alert_days, 30) || ' day')
+      WHERE p.is_active = 1 AND expiry_date IS NOT NULL AND date(expiry_date) <= date('now', '+' || COALESCE(expiry_alert_days, 30) || ' day')
       ORDER BY date(expiry_date) ASC
       LIMIT 10
     `).all(params),
     db.prepare(`
       SELECT COUNT(*) AS count
       FROM products p
-      WHERE p.is_active = 1 AND ${productInRangeClause} AND expiry_date IS NOT NULL AND date(expiry_date) <= date('now', '+' || COALESCE(expiry_alert_days, 30) || ' day')
+      WHERE p.is_active = 1 AND expiry_date IS NOT NULL AND date(expiry_date) <= date('now', '+' || COALESCE(expiry_alert_days, 30) || ' day')
     `).get(params),
     db.prepare(`
       SELECT id, receipt_number, created_at, sale_status, branch_name, customer_name, cashier_name, total_usd, total_khr, items

@@ -309,7 +309,7 @@ export default function ProductsImageOnlyView() {
     } finally {
       if (requestIdRef.current === requestId) setLoading(false)
     }
-  }, [search, page, pageSize, t])
+  }, [search, page, pageSize, categoryFilter, brandFilter, t])
 
   useEffect(() => { load() }, [load])
 

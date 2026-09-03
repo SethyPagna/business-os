@@ -191,17 +191,40 @@ await runTest('buildProductGroups returns an empty branchNames array for product
   assert.deepEqual(groups[0].branchNames, [])
 })
 
-await runTest('Products can hide all-zero multi-branch child rows without hiding standalone zero products', () => {
-  const products = [
-    { id: 1, name: 'Same Name', barcode: '111', cost_price_usd: 1, stock_quantity: 0, branch_stock: [{ branch_id: 1, branch_name: 'Warehouse', quantity: 0 }, { branch_id: 2, branch_name: 'Shop', quantity: 0 }] },
-    { id: 2, name: 'Same Name', barcode: '222', cost_price_usd: 2, stock_quantity: 3, branch_stock: [{ branch_id: 1, branch_name: 'Warehouse', quantity: 2 }, { branch_id: 2, branch_name: 'Shop', quantity: 1 }] },
-    { id: 3, name: 'Standalone Zero', barcode: '333', cost_price_usd: 3, stock_quantity: 0, branch_stock: [{ branch_id: 1, branch_name: 'Warehouse', quantity: 0 }, { branch_id: 2, branch_name: 'Shop', quantity: 0 }] },
-  ]
-  const sections = hideZeroStockGroupedChildRows(buildProductCategorySections(products, { productsById: new Map(products.map((product) => [product.id, product])) }))
+// The zero-stock child rows are only ever hidden when the operator asks for
+// it in the Products FilterMenu ("Rows" -> "Hide out-of-stock rows"). These
+// two tests pin BOTH halves: the default reaches every row, and the opt-in
+// reports what it removed.
+const zeroStockGroupProducts = [
+  { id: 1, name: 'Same Name', barcode: '111', cost_price_usd: 1, stock_quantity: 0, branch_stock: [{ branch_id: 1, branch_name: 'Warehouse', quantity: 0 }, { branch_id: 2, branch_name: 'Shop', quantity: 0 }] },
+  { id: 2, name: 'Same Name', barcode: '222', cost_price_usd: 2, stock_quantity: 3, branch_stock: [{ branch_id: 1, branch_name: 'Warehouse', quantity: 2 }, { branch_id: 2, branch_name: 'Shop', quantity: 1 }] },
+  { id: 3, name: 'Standalone Zero', barcode: '333', cost_price_usd: 3, stock_quantity: 0, branch_stock: [{ branch_id: 1, branch_name: 'Warehouse', quantity: 0 }, { branch_id: 2, branch_name: 'Shop', quantity: 0 }] },
+]
+const zeroStockSections = () => buildProductCategorySections(zeroStockGroupProducts, {
+  productsById: new Map(zeroStockGroupProducts.map((product) => [product.id, product])),
+})
+
+await runTest('by default NO product row is unreachable -- an out-of-stock row inside a name group still renders', () => {
+  const sections = zeroStockSections()
+  const visibleIds = sections.flatMap((section) => section.ids)
+  // Product 1 is out of stock at every branch AND shares a name group with
+  // product 2. It must still be listed, or it cannot be found, opened,
+  // edited or restocked from the Products page at all.
+  assert.deepEqual(visibleIds.sort((a, b) => a - b), [1, 2, 3])
+  const sameName = sections.flatMap((section) => section.groups).find((group) => group.name === 'Same Name')
+  assert.equal(sameName?.rows.length, 2)
+  assert.equal(sameName?.hiddenZeroStockRowCount, undefined, 'nothing is hidden unless the filter is turned on')
+})
+
+await runTest('the opt-in hides all-zero multi-branch child rows, reports the count, and keeps standalone zero products', () => {
+  const sections = hideZeroStockGroupedChildRows(zeroStockSections())
   const visibleIds = sections.flatMap((section) => section.ids)
   assert.deepEqual(visibleIds.sort((a, b) => a - b), [2, 3])
   const sameName = sections.flatMap((section) => section.groups).find((group) => group.name === 'Same Name')
   assert.equal(sameName?.rows.length, 1)
+  // The group header renders this as "N hidden" so a shortened group never
+  // passes for the whole group.
+  assert.equal(sameName?.hiddenZeroStockRowCount, 1)
 })
 
 if (failed > 0) {

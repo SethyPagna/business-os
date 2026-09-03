@@ -70,6 +70,11 @@ export interface ProductGroup {
   // Used by the "wrap" collapsed-group header (name + rows + qty + branches)
   // on Products/Inventory/Branches -- see buildProductGroupSummaryParts.
   branchNames: string[]
+  // How many child rows hideZeroStockGroupedChildRows() removed from this
+  // group. Only set when that opt-in filter actually ran and actually
+  // dropped something, so the group header can say "N hidden" instead of
+  // silently shortening the list. Absent/0 means nothing was hidden.
+  hiddenZeroStockRowCount?: number
 }
 
 export interface ProductGroupSection {
@@ -543,6 +548,12 @@ function isAllBranchZeroRow(row: ProductGroupRow): boolean {
   return branchStock.length >= 2 && branchStock.every((entry) => Number(entry?.quantity || 0) <= 0)
 }
 
+// OPT-IN only. Products.tsx runs this exclusively when the operator turns on
+// the "Hide out-of-stock rows" option in the shared FilterMenu -- it is off by
+// default, because a row this drops is a row that cannot be found, opened,
+// edited or restocked from the Products page at all. Each surviving group
+// reports how many of its rows went away via hiddenZeroStockRowCount so the
+// header can show a "N hidden" affordance rather than a silently shorter list.
 export function hideZeroStockGroupedChildRows(sections: ProductGroupSection[] = []): ProductGroupSection[] {
   return sections.map((section) => {
     const groups = section.groups.flatMap((group): ProductGroup[] => {
@@ -568,6 +579,7 @@ export function hideZeroStockGroupedChildRows(sections: ProductGroupSection[] = 
         stockTotal: rows.reduce((sum, row) => sum + Number(row?.stock_quantity || 0), 0),
         branchNames,
         hasMultipleItems: items.length > 1,
+        hiddenZeroStockRowCount: group.rows.length - rows.length,
       }]
     })
     return {

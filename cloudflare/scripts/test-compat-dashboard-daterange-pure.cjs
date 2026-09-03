@@ -120,6 +120,79 @@ const NEW_TODAY = `date(created_at, '+7 hours') = date('now', '+7 hours') AND cr
   check('today: hybrid form uses idx_sales_created_pg', usesIndex(NEW_TODAY))
 }
 
+// ---- Alert scope: sales tiles follow the range, inventory alerts do NOT ----
+//
+// A product that is out of stock CANNOT sell, so scoping the out-of-stock /
+// low-stock / expiring lists to "products with a recognized sale in the
+// selected range" empties the alert exactly when it matters most. This block
+// seeds that precise case against real sqlite: a product out of stock with no
+// sale anywhere in the range must still be listed, while the sales tiles for
+// the same range stay range-scoped.
+{
+  const inv = new Database(':memory:')
+  inv.exec(`
+    CREATE TABLE products (
+      id INTEGER PRIMARY KEY, name TEXT, category TEXT, unit TEXT, is_active INTEGER DEFAULT 1,
+      stock_quantity REAL DEFAULT 0, low_stock_threshold REAL, out_of_stock_threshold REAL,
+      expiry_date TEXT, expiry_alert_days INTEGER
+    );
+    CREATE TABLE sales (id INTEGER PRIMARY KEY, created_at TEXT, sale_status TEXT, total_usd REAL);
+    CREATE TABLE sale_items (id INTEGER PRIMARY KEY, sale_id INTEGER, product_id INTEGER);
+  `)
+  // 1: out of stock everywhere, LAST sold long before the range (the regression case)
+  // 2: out of stock and never sold at all
+  // 3: low stock, sold inside the range
+  // 4: low stock, not sold inside the range
+  // 5: expiring soon, never sold
+  // 6: healthy stock, sold inside the range
+  // 7: INACTIVE and out of stock -- must stay excluded (active catalog only)
+  inv.exec(`
+    INSERT INTO products (id, name, is_active, stock_quantity, low_stock_threshold, out_of_stock_threshold, expiry_date, expiry_alert_days) VALUES
+      (1, 'Stale Out Of Stock', 1, 0, 10, 0, NULL, NULL),
+      (2, 'Never Sold Out Of Stock', 1, 0, 10, 0, NULL, NULL),
+      (3, 'Low And Selling', 1, 3, 10, 0, NULL, NULL),
+      (4, 'Low And Quiet', 1, 2, 10, 0, NULL, NULL),
+      (5, 'Expiring Quiet', 1, 40, 10, 0, date('now', '+3 day'), 30),
+      (6, 'Healthy Seller', 1, 90, 10, 0, NULL, NULL),
+      (7, 'Inactive Out Of Stock', 0, 0, 10, 0, NULL, NULL);
+    INSERT INTO sales (id, created_at, sale_status, total_usd) VALUES
+      (1, '2026-08-15 05:00:00', 'completed', 25),
+      (2, '2026-08-16 05:00:00', 'completed', 15),
+      (9, '2026-01-05 05:00:00', 'completed', 99);
+    INSERT INTO sale_items (id, sale_id, product_id) VALUES
+      (1, 1, 3), (2, 2, 6), (9, 9, 1);
+  `)
+  const range = { startDate: '2026-08-01', endDate: '2026-08-31' }
+  const RANGE_ON = (col) => `date(${col}, '+7 hours') >= @startDate AND ${col} >= date(@startDate, '-1 day') AND date(${col}, '+7 hours') <= @endDate AND ${col} < date(@endDate, '+1 day')`
+  // The scope the fix REMOVED, kept here to prove the behavior changed.
+  const IN_RANGE_PRODUCT = `EXISTS (
+    SELECT 1 FROM sale_items dsi JOIN sales ds ON ds.id = dsi.sale_id
+    WHERE dsi.product_id = p.id AND ${RANGE_ON('ds.created_at')} AND COALESCE(ds.sale_status, 'completed') <> 'cancelled'
+  )`
+  const pick = (where) => inv.prepare(`SELECT id FROM products p WHERE ${where} ORDER BY id`).all(range).map((r) => r.id)
+
+  const OUT_OF_STOCK = `p.is_active = 1 AND COALESCE(stock_quantity, 0) <= COALESCE(out_of_stock_threshold, 0)`
+  const LOW_STOCK = `p.is_active = 1 AND COALESCE(stock_quantity, 0) <= COALESCE(low_stock_threshold, 10) AND COALESCE(stock_quantity, 0) > COALESCE(out_of_stock_threshold, 0)`
+  const EXPIRING = `p.is_active = 1 AND expiry_date IS NOT NULL AND date(expiry_date) <= date('now', '+' || COALESCE(expiry_alert_days, 30) || ' day')`
+
+  check('alerts: out-of-stock list is catalog-wide -- a product with no sale in the range is STILL listed',
+    same(pick(OUT_OF_STOCK), [1, 2]))
+  check('alerts: the removed in-range product scope EMPTIED the out-of-stock list (regression pinned)',
+    pick(`${OUT_OF_STOCK} AND ${IN_RANGE_PRODUCT}`).length === 0)
+  check('alerts: inactive products stay out of the out-of-stock list', !pick(OUT_OF_STOCK).includes(7))
+  check('alerts: low-stock list is catalog-wide (quiet product 4 kept)', same(pick(LOW_STOCK), [3, 4]))
+  check('alerts: the removed scope would have dropped the quiet low-stock product',
+    same(pick(`${LOW_STOCK} AND ${IN_RANGE_PRODUCT}`), [3]))
+  check('alerts: expiring list and its count are catalog-wide (never-sold product 5 kept)',
+    same(pick(EXPIRING), [5]) && pick(`${EXPIRING} AND ${IN_RANGE_PRODUCT}`).length === 0)
+
+  // ...and the money tiles for the same call DO follow the range.
+  const salesInRange = inv.prepare(`SELECT COUNT(*) AS c, COALESCE(SUM(total_usd), 0) AS t FROM sales WHERE ${RANGE_ON('created_at')} AND COALESCE(sale_status, 'completed') <> 'cancelled'`).get(range)
+  check('tiles: the sales count/total tiles stay scoped to the selected range (2 sales / $40, the January sale excluded)',
+    salesInRange.c === 2 && salesInRange.t === 40)
+  inv.close()
+}
+
 // ---- Source lock ----
 {
   const src = fs.readFileSync(path.join(__dirname, '..', 'src', 'routes', 'compat.ts'), 'utf8')
@@ -130,12 +203,30 @@ const NEW_TODAY = `date(created_at, '+7 hours') = date('now', '+7 hours') AND cr
   check('compat.ts scopes dashboard summary sales and returns through the selected local-date range',
     (src.match(/localDateRangeClause\('created_at'\)/g) || []).length >= 4)
   check('compat.ts buckets hour-of-day in local time', /localHourExpr\('s\.created_at'\)/.test(src))
+  // Alert scope lock -- see the "Alert scope" block above for the behavior.
+  check('compat.ts no longer scopes any dashboard card to products sold in the range',
+    !/productInRangeClause/.test(src) && !/dashboard_si/.test(src))
+  {
+    const summary = src.slice(src.indexOf('async function dashboardSummary'), src.indexOf('async function dashboardAnalytics'))
+    check('compat.ts dashboardSummary was located for the alert-scope lock', summary.length > 500)
+    const alertQueries = summary.split('db.prepare(').filter((chunk) => /COALESCE\(stock_quantity, 0\) <=|COALESCE\(expiry_alert_days/.test(chunk))
+    check('compat.ts has all four inventory alert queries (low stock, out of stock, expiring list, expiring count)',
+      alertQueries.length === 4)
+    check('compat.ts inventory alert queries filter on the active catalog only -- no sales/date scope',
+      alertQueries.every((chunk) => /p\.is_active = 1/.test(chunk) && !/sale_items|localDateRangeClause|@startDate/.test(chunk.slice(0, chunk.indexOf('`).')))))
+    check('compat.ts family stock stats are catalog-wide too, so the card badges match their lists',
+      /whereSql: 'WHERE p\.is_active = 1',/.test(summary))
+  }
   check('compat.ts returns the field names consumed by the dashboard',
     /AS return_count/.test(src) && /AS items_returned/.test(src) && /AS loss_usd/.test(src))
   check('compat.ts breakdowns share the canonical recognized net-sale formula',
     /recognizedExpr\(`\$\{alias\}\.`\)/.test(src) && /netSaleExpr\('s\.'\)/.test(src) && /CUSTOMER_REFUND_JOIN/.test(src))
-  check('compat.ts default range uses seven business days ending today',
-    /const today = businessToday\(\)/.test(src) && /defaultStart\.setUTCDate\(defaultStart\.getUTCDate\(\) - 6\)/.test(src))
+  // The default window is the business day itself, matching every list page
+  // (user, 2026-09-03) -- not a rolling seven days, not all history.
+  check('compat.ts default range is today, the business day',
+    /const today = businessToday\(\)/.test(src)
+    && /startDate: String\(query\.startDate \|\| today\)/.test(src)
+    && !/defaultStart/.test(src))
   // The intentionally-skipped sites must stay (expiry_date has a per-row bound;
   // the audit_logs retention delete has no created_at index -- ±7h immaterial).
   check('expiry_date and audit_logs date() sites are deliberately untouched',

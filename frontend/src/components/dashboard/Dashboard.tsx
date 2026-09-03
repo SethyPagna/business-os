@@ -9,7 +9,7 @@ import LayoutDashboard from 'lucide-react/dist/esm/icons/layout-dashboard.js'
 import RefreshCw from 'lucide-react/dist/esm/icons/refresh-cw.js'
 import StatsStrip, { type StatCardDef } from '../shared/StatsStrip.tsx'
 import { fmtTime } from '../../utils/formatters'
-import { offsetDate, todayStr } from '../../utils/dateHelpers'
+import { todayStr } from '../../utils/dateHelpers'
 import Download from 'lucide-react/dist/esm/icons/download.js'
 import DateTimeRangePicker, { type DateTimeRange } from '../shared/DateTimeRangePicker'
 import { useIsPageActive } from '../shared/pageActivity'
@@ -678,9 +678,11 @@ export default function Dashboard() {
   const [summaryError, setSummaryError] = useState('')
   const [analyticsError, setAnalyticsError] = useState('')
   // Preset chips are gone. A user-edited custom range remains; everyone else
-  // starts with the requested rolling seven business days (today inclusive).
+  // starts on TODAY, the business day (user, 2026-09-03) -- the same default
+  // every list page uses. The range governs the flow cards only; the stock and
+  // alert cards stay catalog-wide whatever the range (see compat.ts).
   const [rangeId, setRangeId]     = useState<DashboardRangeId>('custom')
-  const [customStart, setCustomStart] = useState(() => initialFilterPrefs?.rangeId === 'custom' && initialFilterPrefs.customStart ? initialFilterPrefs.customStart : offsetDate(-6))
+  const [customStart, setCustomStart] = useState(() => initialFilterPrefs?.rangeId === 'custom' && initialFilterPrefs.customStart ? initialFilterPrefs.customStart : todayStr())
   const [customEnd, setCustomEnd]     = useState(() => initialFilterPrefs?.rangeId === 'custom' && initialFilterPrefs.customEnd ? initialFilterPrefs.customEnd : todayStr())
   const [activeChart, setActiveChart] = useState<DashboardChartMode>('revenue')
   const [topMode, setTopMode]         = useState<DashboardTopMode>('revenue')
@@ -868,7 +870,7 @@ export default function Dashboard() {
     filterStorageKeyRef.current = dashboardFilterStorageKey
     const nextPrefs = readDashboardFilterPrefs([dashboardFilterStorageKey, DASHBOARD_FILTER_STORAGE_FALLBACK_KEY])
     setRangeId('custom')
-    setCustomStart(nextPrefs?.rangeId === 'custom' && nextPrefs.customStart ? nextPrefs.customStart : offsetDate(-6))
+    setCustomStart(nextPrefs?.rangeId === 'custom' && nextPrefs.customStart ? nextPrefs.customStart : todayStr())
     setCustomEnd(nextPrefs?.rangeId === 'custom' && nextPrefs.customEnd ? nextPrefs.customEnd : todayStr())
   }, [dashboardFilterStorageKey])
 
@@ -1211,7 +1213,7 @@ export default function Dashboard() {
   const periodKpis = useMemo(() => ([
       {
         id: 'products',
-        info: translateOr('dash_info_products', "How many products you carry. A group of same-name items counts as ONE product, matching how the Products list pages them."),
+        info: translateOr('dash_info_products', "How many products you carry. A group of same-name items counts as ONE product, matching how the Products list pages them. Always the current total, not the selected date range."),
         label: translateOr('products', 'Products'),
         value: summary?.product_count || 0,
         sub: `${lowStockCount} ${lowShortLabel} | ${outOfStockCount} ${outShortLabel}`,
@@ -1225,7 +1227,7 @@ export default function Dashboard() {
     },
     {
       id: 'stock-value',
-      info: translateOr('dash_info_stock_value', "What the stock you are holding right now cost you to buy. Not what it will sell for."),
+      info: translateOr('dash_info_stock_value', "What the stock you are holding right now cost you to buy. Not what it will sell for. Always the current total, not the selected date range."),
       label: translateOr('stock_value', 'Stock value'),
       value: fmtUSD(aStockValue),
       color: 'text-cyan-600',

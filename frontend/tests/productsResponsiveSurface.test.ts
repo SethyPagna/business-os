@@ -36,6 +36,15 @@ for (const section of ['products', 'stock_changes', 'stock_in_sessions', 'duplic
   )
 }
 
+// No product row may be unreachable by default: hiding a group's out-of-stock
+// child rows is an explicit FilterMenu choice, off unless the operator turns
+// it on, and every group it shortens says how many rows went.
+assert.match(products, /const \[hideZeroStockRows, setHideZeroStockRows\] = useState\(false\)/, 'zero-stock row hiding must default to off')
+assert.match(products, /hideZeroStockRows \? hideZeroStockGroupedChildRows\(sections\) : sections/, 'the Products list must only hide zero-stock rows when the filter is on')
+assert.match(products, /setHideZeroStockRows,/, 'the hiding option must be reachable from the shared FilterMenu')
+assert.match(products, /hiddenZeroStockRowCount \|\| 0[\s\S]{0,400}tr\('hidden', 'hidden'\)/, 'a shortened group header must show how many rows are hidden')
+assert.doesNotMatch(products, /hideZeroStockGroupedChildRows\(buildProductCategorySections/, 'zero-stock rows must not be hidden unconditionally')
+
 assert.match(products, /className="products-list-density-90"[\s\S]*<ProductsListSurface/, 'only the product-result surface should use the requested 90% density')
 assert.match(css, /\.products-list-density-90\s*\{[\s\S]*width:\s*100%;[\s\S]*min-width:\s*0;[\s\S]*max-width:\s*100%;/, 'the product surface must never exceed the clipped page width')
 assert.doesNotMatch(css, /\.products-list-density-90\s*\{[^}]*zoom:/, 'product density must not use zoom because mobile WebKit can clip the widened box')
