@@ -3,6 +3,7 @@ import { getDb } from '../lib/db'
 import { requireAuth, type SessionUser } from '../lib/auth'
 import { hasPermission } from '../lib/permissions'
 import { hasSuspiciousCatalogText } from '../lib/catalogText'
+import { getBuildStamp } from '../lib/buildStamp'
 import type { Env } from '../index'
 
 // Ported from backend/src/routes/runtime.ts. Three endpoints the Settings
@@ -13,10 +14,12 @@ import type { Env } from '../index'
 // a filesystem, a long-lived process, or a Node BullMQ/ioredis client, so
 // none of this is a 1:1 port -- it's the same *shape* of information,
 // sourced the Workers-native way):
-// - No git revision / source-hash / frontend-build-file reading (no `git`,
-//   no local filesystem in a Worker). `revision` instead reports the
-//   deployment's compatibility_date, which is the closest stable "what
-//   build is this" signal a Worker has access to at runtime.
+// - No frontend-build-file reading (no local filesystem in a Worker). The
+//   git revision and source hash ARE reported: they are substituted into the
+//   bundle at build time from `--define` flags (see lib/buildStamp.ts and
+//   scripts/deploy.cjs), the same way frontend/vite.config.ts stamps the SPA.
+//   A build that reports 'dev' here was deployed without going through that
+//   path, which is itself worth seeing.
 // - No BullMQ/ioredis "queue depth" introspection -- Cloudflare Queues
 //   doesn't expose a public API for a consumer Worker to introspect its own
 //   queue depth. `queues.status` instead reports binding presence (is the
@@ -34,21 +37,23 @@ const SUSPICIOUS_PRODUCT_SAMPLE_LIMIT = 25
 const SUSPICIOUS_BRAND_OPTION_LIMIT = 100
 
 // Bumped by hand when a release changes runtime-visible behavior worth
-// surfacing on the System Health screen. There's no build pipeline step in
-// this Worker that stamps a real commit hash the way the Docker backend's
-// git-based runtimeVersion.ts did (see the module comment above), so this
-// is deliberately a human-maintained marker, not a computed hash.
+// surfacing on the System Health screen. This is a human-maintained marker,
+// NOT build provenance -- it did not change across any of the three Sep-3
+// deploys. `revision` and `sourceHash` below are the computed values; read
+// those when you need to know what is running.
 const RUNTIME_APP_VERSION = 'cloudflare-2026-08'
 let workerBootedAt = ''
 
 function getRuntimeVersion(env: Env) {
   if (!workerBootedAt) workerBootedAt = new Date().toISOString()
+  const stamp = getBuildStamp()
   return {
     app: 'business-os',
     runtime: 'cloudflare-workers',
     packageVersion: RUNTIME_APP_VERSION,
-    revision: '',
-    sourceHash: '',
+    revision: stamp.revision,
+    sourceHash: stamp.sourceHash,
+    builtAt: stamp.builtAt,
     bootedAt: workerBootedAt,
   }
 }
