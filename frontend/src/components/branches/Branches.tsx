@@ -1515,7 +1515,13 @@ export default function Branches({ embedded = false, view, showSectionNavigation
                                   (name left, qty right) needs the width; 4-5 skinny columns
                                   truncated every real product name. */}
                               <div className="grid grid-cols-1 gap-1.5 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
-                                {buildProductGroups(inStock).flatMap((group) => {
+                                {/* preserveInputOrder while a term is in the box: this list is
+                                    the server response from runBranchStockSearch, already ranked
+                                    by relevance (exact barcode, then exact/prefix name, then
+                                    bm25 -- cloudflare/src/lib/productSearchQuery.ts). Grouping
+                                    used to re-sort it A-Z and bury the scanned product. With an
+                                    empty box this is a plain browse list and stays A-Z. */}
+                                {buildProductGroups(inStock, undefined, { preserveInputOrder: Boolean(getBranchStockQuery(branch.id)) }).flatMap((group) => {
                                   const cards = group.rows.map((row) => {
                                     const product = row as unknown as BranchStockProduct
                                     // Neutral surface + a thin colored left edge and colored qty,

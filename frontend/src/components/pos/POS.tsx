@@ -2146,8 +2146,10 @@ export default function POS() {
   // still needs buildVisibleProductCards to collapse same-name rows for
   // display, it just no longer re-filters by groupFilter afterward.
   const visibleProductCards = useMemo(() => (
-    buildVisibleProductCards(filteredProducts, productsById) as unknown as ProductRecord[]
-  ), [filteredProducts, productsById])
+    buildVisibleProductCards(filteredProducts, productsById, {
+      preserveInputOrder: Boolean(debouncedProductSearch.trim()),
+    }) as unknown as ProductRecord[]
+  ), [debouncedProductSearch, filteredProducts, productsById])
 
   useEffect(() => {
     setProductPage(1)

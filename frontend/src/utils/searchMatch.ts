@@ -439,16 +439,73 @@ export function searchTermBarcodeKey(raw: unknown): string {
   return normalizeBarcodeKey(text)
 }
 
-// Client-side counterpart of the server's exact-barcode-first ordering: a
-// row whose barcode IS the scanned code sorts ahead of rows that merely
-// contain the digits somewhere. Never used to auto-select -- every picker
-// in this app requires the operator to click the row (scan fills the search
-// box, the list narrows, the person chooses).
-export function sortExactBarcodeFirst<T extends { barcode?: unknown }>(rows: readonly T[], rawQuery: unknown): T[] {
-  const key = searchTermBarcodeKey(rawQuery)
-  if (!key) return rows.slice()
-  return rows
-    .map((row, index) => ({ row, index, exact: normalizeBarcodeKey(row?.barcode) === key ? 0 : 1 }))
-    .sort((a, b) => (a.exact - b.exact) || (a.index - b.index))
+// --- relevance ordering -------------------------------------------------
+//
+// Client mirror of THE ORDERING CONTRACT in
+// cloudflare/src/lib/productSearchQuery.ts. The tier numbers, the
+// normalization on each side of every comparison and the ordering of the
+// branches are deliberately identical, so a picker that re-filters or
+// re-orders in memory lands on the same first row the server would have
+// put first. Divergence here is exactly the reported bug in a different
+// costume: the server ranks the response and the client then shuffles it.
+//
+// A client cannot compute bm25, so within a tier this preserves the order
+// the rows arrived in -- which IS the server's rank for a server-backed
+// picker, and the caller's own stable order for a fully client-side one.
+// That makes the comparator total and the result deterministic, so paging
+// and re-renders never reshuffle equal rows.
+//
+// Never used to auto-select: every picker in this app requires the operator
+// to click the row (a scan fills the search box, the list narrows, the
+// person chooses).
+export const MATCH_TIER_EXACT_BARCODE = 0
+export const MATCH_TIER_EXACT_NAME = 1
+export const MATCH_TIER_NAME_PREFIX = 2
+export const MATCH_TIER_OTHER = 3
+
+export interface RelevanceSortOptions {
+  // false restricts the sort to the barcode tier, leaving name matches in
+  // the order they arrived. Used by sortExactBarcodeFirst below.
+  nameTiers?: boolean
+}
+
+export function searchRelevanceTier(
+  row: { name?: unknown; barcode?: unknown } | null | undefined,
+  rawQuery: unknown,
+  { nameTiers = true }: RelevanceSortOptions = {},
+): number {
+  const barcodeKey = searchTermBarcodeKey(rawQuery)
+  if (barcodeKey && normalizeBarcodeKey(row?.barcode) === barcodeKey) return MATCH_TIER_EXACT_BARCODE
+  if (!nameTiers) return MATCH_TIER_OTHER
+  const nameKey = normalizeSearchText(rawQuery)
+  if (!nameKey) return MATCH_TIER_OTHER
+  const name = normalizeSearchText(row?.name)
+  if (name === nameKey) return MATCH_TIER_EXACT_NAME
+  if (name.startsWith(nameKey)) return MATCH_TIER_NAME_PREFIX
+  return MATCH_TIER_OTHER
+}
+
+export function sortBySearchRelevance<T extends { name?: unknown; barcode?: unknown }>(
+  rows: readonly T[],
+  rawQuery: unknown,
+  options: RelevanceSortOptions = {},
+): T[] {
+  const source = Array.isArray(rows) ? rows : []
+  const barcodeKey = searchTermBarcodeKey(rawQuery)
+  const nameKey = options.nameTiers === false ? '' : normalizeSearchText(rawQuery)
+  // Nothing to rank by: hand back the caller's order untouched rather than
+  // imposing an arbitrary one.
+  if (!barcodeKey && !nameKey) return source.slice()
+  return source
+    .map((row, index) => ({ row, index, tier: searchRelevanceTier(row, rawQuery, options) }))
+    .sort((a, b) => (a.tier - b.tier) || (a.index - b.index))
     .map((entry) => entry.row)
+}
+
+// The barcode-tier-only subset, kept because its narrower contract (a
+// non-barcode query changes nothing) is pinned by
+// tests/productPickerBarcodeSearch.test.ts. One implementation, two
+// contracts -- not a second copy of the ordering.
+export function sortExactBarcodeFirst<T extends { barcode?: unknown }>(rows: readonly T[], rawQuery: unknown): T[] {
+  return sortBySearchRelevance(rows as ReadonlyArray<T & { name?: unknown }>, rawQuery, { nameTiers: false })
 }

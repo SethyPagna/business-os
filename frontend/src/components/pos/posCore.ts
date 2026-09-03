@@ -256,9 +256,21 @@ export function getVariantRootProduct(product: ProductRecord | null | undefined,
   return productsById.get(parentId) || product
 }
 
-export function buildVisibleProductCards(filteredProducts: readonly ProductRecord[] = [], productsById: Map<number, ProductRecord> = new Map()): ProductRecord[] {
+// `preserveInputOrder` keeps the server's relevance ranking for the grid
+// while a term is in the search box. `filteredProducts` is the ranked
+// server page (POS sends `query` to /api/products/search, see
+// loadCatalogData) put through a pure .filter(), so its order IS the
+// ranking; buildProductGroups re-sorted it A-Z and scattered the closest
+// match through the grid. With an empty box the grid is a browse list and
+// keeps A-Z exactly as before. The AlphaIndexRail is unaffected either
+// way -- it drives the server's `initial` filter, not this order.
+export function buildVisibleProductCards(
+  filteredProducts: readonly ProductRecord[] = [],
+  productsById: Map<number, ProductRecord> = new Map(),
+  { preserveInputOrder = false }: { preserveInputOrder?: boolean } = {},
+): ProductRecord[] {
   const cards: ProductRecord[] = []
-  for (const group of buildProductGroups([...filteredProducts], productsById)) {
+  for (const group of buildProductGroups([...filteredProducts], productsById, { preserveInputOrder })) {
     const leadProduct = group.leadProduct || group.items?.[0] || null
     if (!leadProduct) continue
     cards.push({

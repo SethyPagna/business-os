@@ -886,7 +886,10 @@ export default function PublicCatalogPage() {
       .then((result) => {
         if (!aliveRef.current || !isTrackedRequestCurrent(productRequestRef, requestId)) return
         const data = (result || {}) as LooseRecord
-        const nextItems = mergePortalCatalogProducts(data.items)
+        // Search response: keep the server's relevance order (see
+        // portalProductGrouping.ts). The bootstrap/cache merges above stay
+        // A-Z because they are browse payloads, not answers to a query.
+        const nextItems = mergePortalCatalogProducts(data.items, Boolean(String(deferredSearch || '').trim()))
         const nextInitials = normalizePortalInitialOptions(data.initials)
         const nextTotal = Number(data.total || 0)
         const responsePage = Number(data.page || productPage) || 1

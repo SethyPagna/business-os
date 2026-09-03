@@ -363,8 +363,38 @@ function resolveGroupKey(product: ProductRecord, { productsById = new Map() }: {
   }
 }
 
-export function buildProductGroups(products: ProductRecord[] = [], productsById: Map<unknown, ProductRecord> = new Map()): ProductGroup[] {
+// `preserveInputOrder` is the client half of the search-relevance fix (see
+// cloudflare/src/lib/productSearchQuery.ts for the server half and the
+// ordering contract). This function's default A-Z group sort is right for
+// BROWSING and wrong the moment a search term is in play: the server has
+// already ordered the response by relevance -- exact barcode, then exact/
+// prefix name, then bm25 -- and re-sorting it alphabetically here threw
+// that away completely, so the closest match reappeared wherever the
+// alphabet put it. That was the reported "shows products not really
+// matched, top to bottom" on every surface that renders through this
+// helper (POS's grid, the Branches per-branch list, TransferModal's bulk
+// picker, the storefront catalog).
+//
+// When set, groups are ordered by the position of their best-ranked member
+// in the input array, which is exactly the server's own order, and paging
+// stays consistent with it. Grouping itself is untouched either way.
+export interface ProductGroupingOptions {
+  preserveInputOrder?: boolean
+}
+
+export function buildProductGroups(
+  products: ProductRecord[] = [],
+  productsById: Map<unknown, ProductRecord> = new Map(),
+  { preserveInputOrder = false }: ProductGroupingOptions = {},
+): ProductGroup[] {
   const source = Array.isArray(products) ? products : []
+  const inputRankById = new Map<ProductId, number>()
+  if (preserveInputOrder) {
+    source.forEach((product, index) => {
+      const id = toProductId(product?.id)
+      if (!inputRankById.has(id)) inputRankById.set(id, index)
+    })
+  }
   const universe = productsById instanceof Map && productsById.size > 0
     ? [...productsById.values()]
     : source
@@ -471,10 +501,31 @@ export function buildProductGroups(products: ProductRecord[] = [], productsById:
       branchNames,
     }
   }).sort((left, right) => {
+    if (preserveInputOrder) {
+      // Rank a group by its best-placed member, so a family whose single
+      // matching variant was the server's top hit leads even when its
+      // sibling rows arrived further down the page.
+      const leftRank = bestInputRank(left, inputRankById)
+      const rightRank = bestInputRank(right, inputRankById)
+      if (leftRank !== rightRank) return leftRank - rightRank
+      // Same-rank is only reachable for groups with no member in the input
+      // (impossible by construction) -- fall through to the stable A-Z tail
+      // rather than leaving the comparator non-total.
+    }
     const nameDelta = String(left?.name || '').localeCompare(String(right?.name || ''), undefined, { sensitivity: 'base' })
     if (nameDelta !== 0) return nameDelta
     return Number(left?.anchorId || 0) - Number(right?.anchorId || 0)
   })
+}
+
+// The earliest position any of a group's rows held in the server's response.
+function bestInputRank(group: { ids?: readonly ProductId[] }, inputRankById: Map<ProductId, number>): number {
+  let best = Number.MAX_SAFE_INTEGER
+  for (const id of group?.ids || []) {
+    const rank = inputRankById.get(id)
+    if (rank !== undefined && rank < best) best = rank
+  }
+  return best
 }
 
 // Category-first sectioning (per the explicit decision recorded in
@@ -491,8 +542,20 @@ export function buildProductCategorySections(products: ProductRecord[] = [], {
   productsById = new Map(),
   sortDirection = 'asc',
   uncategorizedLabel = 'Uncategorized',
-}: BuildGroupSectionsOptions & { uncategorizedLabel?: string } = {}): ProductGroupSection[] {
-  const groups = buildProductGroups(products, productsById)
+  preserveInputOrder = false,
+}: BuildGroupSectionsOptions & { uncategorizedLabel?: string; preserveInputOrder?: boolean } = {}): ProductGroupSection[] {
+  const groups = buildProductGroups(products, productsById, { preserveInputOrder })
+  // With a search term in play the server has already ranked the response
+  // by relevance, so category A-Z would bury the best match under whatever
+  // category happens to sort first -- the reported "the likely result was
+  // at bottom". Sections, and the groups inside them, are then ordered by
+  // where their best-ranked row landed in that response instead. Category
+  // headers and the grouping itself are unchanged; only the ORDER is.
+  // Browsing (no search term) keeps the decided category-A-Z layering
+  // exactly as before.
+  const sectionRank = new Map<string, number>()
+  const groupRank = new Map<string, number>()
+  if (preserveInputOrder) groups.forEach((group, index) => groupRank.set(group.key, index))
   const mode = String(sortDirection || 'asc').toLowerCase()
   const nameDirection = mode === 'name_desc' ? 'desc' : 'asc'
 
@@ -527,6 +590,11 @@ export function buildProductCategorySections(products: ProductRecord[] = [], {
   }
 
   for (const section of sections.values()) {
+    if (preserveInputOrder) {
+      section.groups.sort((left, right) => (groupRank.get(left.key) ?? Number.MAX_SAFE_INTEGER) - (groupRank.get(right.key) ?? Number.MAX_SAFE_INTEGER))
+      sectionRank.set(section.id, groupRank.get(section.groups[0]?.key ?? '') ?? Number.MAX_SAFE_INTEGER)
+      continue
+    }
     section.groups.sort((left, right) => {
       const nameDelta = String(left?.name || '').localeCompare(String(right?.name || ''), undefined, { sensitivity: 'base' })
       return nameDirection === 'desc' ? -nameDelta : nameDelta
@@ -534,7 +602,14 @@ export function buildProductCategorySections(products: ProductRecord[] = [], {
   }
 
   return [...sections.values()].sort((left, right) => {
-    if (left.sortsLast !== right.sortsLast) return left.sortsLast ? 1 : -1
+    if (preserveInputOrder) {
+      // During a search the uncategorized section keeps no special standing:
+      // a product with no category can perfectly well be the exact scan hit.
+      const delta = (sectionRank.get(left.id) ?? Number.MAX_SAFE_INTEGER) - (sectionRank.get(right.id) ?? Number.MAX_SAFE_INTEGER)
+      if (delta !== 0) return delta
+    } else if (left.sortsLast !== right.sortsLast) {
+      return left.sortsLast ? 1 : -1
+    }
     return String(left.label || '').localeCompare(String(right.label || ''), undefined, { sensitivity: 'base' })
   })
 }

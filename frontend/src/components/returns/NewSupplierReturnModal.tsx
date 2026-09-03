@@ -14,6 +14,7 @@ import AppSelect, { type AppSelectOption } from '../shared/AppSelect.tsx'
 import ScanSearchButton from '../shared/ScanSearchButton.tsx'
 import ContactPicker from '../contacts/ContactPicker.tsx'
 import { useReturnReasonPresets } from './helpers/useReturnReasonPresets.ts'
+import { normalizeBarcodeKey, searchTermBarcodeKey, sortBySearchRelevance } from '../../utils/searchMatch.ts'
 
 const SUPPLIER_RETURN_SETUP_TIMEOUT_MS = 12000
 const SUPPLIER_RETURN_SETUP_WATCHDOG_MS = SUPPLIER_RETURN_SETUP_TIMEOUT_MS + 1500
@@ -49,6 +50,7 @@ interface InventoryProductRow {
   id: number | string
   name?: string
   sku?: string
+  barcode?: string
   category?: string
   brand?: string
   display_quantity?: number | string
@@ -289,13 +291,32 @@ export default function NewSupplierReturnModal({ onClose, onSuccess, notify, fmt
     }
   }, [branchId]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  // This picker reads the whole branch inventory in one unpaged, unsearched
+  // call (loadSupplierReturnInventory -> GET /api/inventory/summary, which
+  // takes no search parameter and answers ORDER BY lower(p.name) ASC), so
+  // nothing upstream ever ranked these rows: the operator got the catalogue
+  // in alphabetical order with the non-matches removed, which is the
+  // reported "not really matched, top to bottom" on the Returns side.
+  //
+  // Two things were also out of SCOPE rather than merely mis-ordered:
+  // barcode was missing from the haystack entirely, so a scan into this box
+  // matched nothing at all, and the plain substring test could not see
+  // through this catalogue's GTIN-14/EAN-13 leading-zero twins. The
+  // barcode-key probe below is the same fold the server applies
+  // (normalizeBarcodeKey), and the sort is the shared client mirror of the
+  // server ordering contract (utils/searchMatch.ts). A scan still only
+  // narrows the list -- the operator picks the row.
   const filteredProducts = useMemo(() => {
-    const term = search.trim().toLowerCase()
+    const raw = search.trim()
+    const term = raw.toLowerCase()
     if (!term) return products
-    return products.filter((product) => {
-      const hay = `${product.name || ''} ${product.sku || ''} ${product.category || ''} ${product.brand || ''}`.toLowerCase()
+    const barcodeKey = searchTermBarcodeKey(raw)
+    const matches = products.filter((product) => {
+      if (barcodeKey && normalizeBarcodeKey(product.barcode) === barcodeKey) return true
+      const hay = `${product.name || ''} ${product.sku || ''} ${product.barcode || ''} ${product.category || ''} ${product.brand || ''}`.toLowerCase()
       return hay.includes(term)
     })
+    return sortBySearchRelevance(matches, raw)
   }, [products, search])
 
   const selectedItems = useMemo<SupplierReturnItem[]>(() => {

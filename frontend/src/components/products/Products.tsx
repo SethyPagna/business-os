@@ -2173,13 +2173,21 @@ function ProductsFullEditor() {
         productsById,
         sortDirection: productSortDirection,
         uncategorizedLabel: t('uncategorized') || 'Uncategorized',
+        // With a term typed or scanned, `filtered` is the server's
+        // relevance-ranked page passed through a pure .filter(), so its
+        // order IS the ranking (exact barcode, then exact/prefix name,
+        // then bm25 -- see cloudflare/src/lib/productSearchQuery.ts).
+        // Re-sectioning it category-A-Z threw that away and put the best
+        // match wherever the alphabet happened to land it. Browsing with
+        // no term keeps the decided category-A-Z layering.
+        preserveInputOrder: searchTerms.length > 0,
       })
       // Only when the operator asked for it in the FilterMenu -- see
       // hideZeroStockRows' declaration. By default every row that survived
       // the filters above is reachable here.
       return (hideZeroStockRows ? hideZeroStockGroupedChildRows(sections) : sections) as unknown as ProductSectionLike[]
     },
-    [filtered, hideZeroStockRows, productSortDirection, productsById, t],
+    [filtered, hideZeroStockRows, productSortDirection, productsById, searchTerms, t],
   )
 
   const allVisibleProducts = useMemo<ProductRecord[]>(
