@@ -12,6 +12,7 @@ import { isPublicDomMutationError, shouldAttemptPublicDomRecovery } from './app/
 import { getScrollTarget, getScrollToPosition } from './components/shared/globalScroll.ts'
 import AppUpdateToast from './components/shared/AppUpdateToast.tsx'
 import IosInstallHint from './components/shared/IosInstallHint.tsx'
+import StoragePersistenceNotice from './components/shared/StoragePersistenceNotice.tsx'
 import { NAV_ITEMS } from './components/shared/navigationConfig.ts'
 import PullToRefreshIndicator from './components/shared/PullToRefreshIndicator.tsx'
 import { usePullToRefresh } from './components/shared/usePullToRefresh.ts'
@@ -1872,7 +1873,15 @@ export default function App() {
       </NotesProvider>
 
       <Notification notification={notification} onDismiss={dismissNotification} />
-      <AppUpdateToast />
+      {/* One bottom stack for the shell's floating advisories, so two of them
+          can never land on top of each other. It sits clear of BOTH the mobile
+          bottom nav (h-14) and the IosInstallHint band pinned at bottom-0, and
+          is inert where it is empty (pointer-events-none; each card turns
+          pointer events back on). */}
+      <div className="pointer-events-none fixed inset-x-2 bottom-[calc(4rem+env(safe-area-inset-bottom))] z-[160] flex flex-col gap-2 md:inset-x-auto md:right-4 md:w-[22rem]">
+        <AppUpdateToast />
+        <StoragePersistenceNotice />
+      </div>
       <IosInstallHint />
       <GlobalScrollControls />
       {writeConflict ? (

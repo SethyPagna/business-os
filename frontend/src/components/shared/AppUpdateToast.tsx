@@ -111,7 +111,7 @@ export default function AppUpdateToast() {
 
   return (
     <div
-      className="fixed inset-x-2 bottom-[calc(4rem+env(safe-area-inset-bottom))] z-[160] rounded-xl border border-gray-200 bg-white p-3 shadow-2xl dark:border-slate-700 dark:bg-slate-900 md:inset-x-auto md:bottom-4 md:right-4 md:w-[22rem]"
+      className="pointer-events-auto rounded-xl border border-gray-200 bg-white p-3 shadow-2xl dark:border-slate-700 dark:bg-slate-900"
       role="status"
       aria-live="polite"
     >

@@ -5234,5 +5234,8 @@
   "kit_gallery_section_tile_grid": "Tile grid (mobile home)",
   "update_available": "New version available",
   "update_now": "Update now",
-  "later": "Later"
+  "later": "Later",
+  "storage_eviction_title": "Offline data may be cleared",
+  "storage_eviction_body": "This browser did not grant permanent storage.",
+  "storage_eviction_detail": "Offline sales waiting to sync and the saved app pages can be removed when the device runs low on space. Add the app to your Home Screen and open it from there — browsers keep data for installed apps."
 }
