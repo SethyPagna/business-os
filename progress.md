@@ -2316,6 +2316,125 @@ One line per open item; the full text lives in the master-plan phases below (sam
 IDs) or the section linked. Statuses: **[~]** = in progress / partly done,
 **[ ]** = not started.
 
+### Sep-4 walkthrough — 26 items (user, Sep 4 2026; claimed by business-os-v1-c3, Part 589)
+
+The user's Sep-4 message, split into work items. IDs are stable; use them in commit
+messages. **[ ]** not started · **[~]** in progress · **[x]** done (branch named) ·
+**[?]** needs a ruling before it can be built. Everything here lands on
+`ship/2026-09-04` off the deployed tip `e3678a39`, not on `main`.
+
+**Production data incident — do first**
+
+- [~] **S4-1 · Revert the 21:48 bulk status change.** Read from remote D1 (SELECT-only):
+  `action_history` **160** "Update 9 sales to បានបញ្ចប់" by Admin at `2026-09-03 14:49:05`
+  UTC (21:49 local) moved **7 sales** — 16786, 16789, 16791, 16795, 16796, 16798, 16801,
+  all migrated `20260901-*` receipts — from `awaiting_payment` to `completed`, and that
+  wrote **9 `inventory_movements` rows** (ids 46189–46197, all `movement_type='sale'`,
+  `quantity=-1`, branch 2, `reason='Sale status changed from awaiting_payment to
+  completed'`). These are old-system sales whose stock was already accounted for at
+  import, so the deduction is a double-count of 9 units across products 165, 5196, 5067,
+  4115, 4259, 238, 3924, 955, 939. The revert must restore both the 7 statuses and the 9
+  units. **No production write has been made.** Remote D1 is SELECT-only by standing rule,
+  so the mechanism is the user's call: the app's own Undo entry (if its applier really
+  reverses this — being verified) or an explicitly-approved guarded script.
+
+**Sales: status, stock and confirmation**
+
+- [ ] **S4-2 · "Complete without touching stock" (admin only, lock-gated).** New option in
+  the sale-status confirmation: mark a sale done with **no** `inventory_movements` write,
+  for sales carried over from the old system. Admin-only, and behind an explicit unlock
+  inside the dialog so it cannot be hit by accident. Non-admins never see it. Server must
+  enforce the permission, not just the UI. Record the choice on the sale so a later reader
+  can tell why stock did not move.
+- [ ] **S4-3 · Confirmation on every sales action.** Sales page and its sections: save /
+  update / status change all confirm first. The confirmation shows **before → after** for
+  the fields that change (a standing rule from earlier parts, still unbuilt). Returns are
+  exempt — they are the newest surface and already correct.
+- [ ] **S4-4 · `awaiting_payment` must deduct stock.** Stock on hold is stock that cannot be
+  sold twice, so an awaiting-payment sale should reserve it. Today's behaviour is being
+  confirmed. Interacts with S4-1: if awaiting-payment already deducted at import, then
+  completing must **not** deduct again, which is exactly the bug S4-1 cleans up.
+- [ ] **S4-5 · Returns add stock back.** Confirm the invariant end-to-end: with every sale
+  completed and every return processed, the ledger equals physical stock. Stated by the
+  user as an assumption to verify, not a change to make.
+
+**Telegram**
+
+- [ ] **S4-6 · Cashier name on status-update messages.** The receipt-status Telegram message
+  must name the user who made the update.
+- [ ] **S4-7 · Shift report message.** Shop name, cashier, from/to, invoice counts (total,
+  deleted, edited), revenue, item discount, invoice discount, gross sale, credit, other
+  expense, registered cash, final amount, then payment-method and delivery-service
+  breakdowns. Format given verbatim in the user's message and in Part 589.
+- [ ] **S4-8 · Every Telegram message bilingual (Khmer / English).** Needs a server-side copy
+  of the two labels per line; the lang packs are frontend-only today.
+- [ ] **S4-9 · Inbound Telegram commands.** A group member types `/report` (and others) and
+  the bot answers with the data. Includes a designed, clear command-reference message.
+
+**Shifts**
+
+- [ ] **S4-10 · Start Shift / End Shift.** First POS use of a day requires Start Shift; the
+  day ends with End Shift. Both capture cash on hand for change in **USD and KHR**. The
+  shift report (S4-7) covers whichever user is signed in.
+- [?] **S4-11 · "Can check in users for invoices details."** Reading: invoice detail should
+  show which user handled it, and a shift should be attributable per user. Needs one line
+  of confirmation from the user before building.
+
+**Products, stock sessions and costs**
+
+- [ ] **S4-12 · Create Products: a header step before the item rows.** Brand, Supplier and
+  Branch are entered **once** at the start, then the current Add-Product form repeats for
+  each item, so a run of products sharing those three is entered without leaving and
+  re-entering the flow. Mirrors the fast-stock-in session, and the session view shows the
+  three header values. Reference screenshot supplied by the user.
+- [ ] **S4-13 · Rename.** "Add Product" → **Create Products** (KM `បង្កើតផលិតផលថ្មី`);
+  "Add stock" → KM `បញ្ចូលស្តុក`. Both packs, every call site.
+- [ ] **S4-14 · Session ID replaces the "receipt" column.** Sessions list header and value
+  become a session id of the form **`S-YYYYMMDD-HHMM`** (24-hour).
+- [ ] **S4-15 · Sessions must actually show supplier, payment and total cost** for stock
+  adjusted from the Products section and from Stock changes — the columns exist but are
+  not populated from those two entry points.
+- [ ] **S4-16 · "Set quantity" captures no cost.** In a stock session, Set-quantity rows show
+  no cost; they must.
+- [ ] **S4-17 · New identity rule: only a different barcode makes a new child row.** Cost no
+  longer splits a row. Differing costs **merge** — the stored cost becomes the mean of the
+  distinct costs, kept to **4 decimal places, always rounded up**. This replaces the
+  barcode-or-cost predicate and touches product grouping, the Worker's identity helper,
+  every merge/duplicate surface and their tests.
+- [ ] **S4-18 · POS: remove the duplicated batch option list.** When a barcode matches
+  several rows the sheet offers a "#7321, #7322" style option list **and** a batch dropdown
+  underneath — the same choice twice. Remove the option list. Batch entries list
+  **earliest → latest** with available first, not split into available/unavailable
+  sections, and every entry shows its quantity.
+- [ ] **S4-19 · Rename RECON → `ADJMM/DD/YYYY`.**
+
+**App-wide UI**
+
+- [ ] **S4-20 · Save button at the end of the page**, not beside the close (X) button — product
+  edit, transfer, adjust stock, and their siblings. Keep the minimize control and improve it.
+- [ ] **S4-21 · Close with unsaved changes prompts "Discard changes" or "Back".** Every modal
+  and float in the app, not a one-off.
+- [ ] **S4-22 · Khmer glyphs are clipped.** Ascenders and descenders are cut across the app —
+  a line-height / overflow fix at the CSS level, not per component.
+- [ ] **S4-23 · Membership number for every customer, `LC-` prefix**, zero-padded to a fixed
+  width so the digits fill the missing places at the back.
+- [ ] **S4-24 · Sale detail = receipt-shaped.** Clicking a sale shows what the receipt shows,
+  without the extra breakdowns: status, customer with membership, status update, and the
+  add-sale-products action. Returns: move the print buttons to the end of the page, off the
+  header beside the X.
+- [ ] **S4-25 · Delivery merges into the items list**, the way the receipt places it next to
+  the total. *(Reading to confirm with the user: the delivery fee becomes a line in the
+  items list rather than its own block.)*
+
+**Reports**
+
+- [ ] **S4-26 · Keep the localhost design the user liked**, with: a more compact excel/tab
+  style (fields and values much closer), the search input visible, the other options moved
+  into a filter menu, sale dates as `dd-mm-yyyy`, and the cashier shown. This supersedes
+  the "which of the two reports redesigns survives" question — the answer is the local one
+  the user was shown. `fx/reports-redesign` `9b444788` is the candidate to base it on and
+  still carries the All-time `$0.00` defect, which must be fixed before it ships.
+
 ### Now / gate
 
 - ~~**Deploy**~~ — **DONE Aug 31 (Part 538): production is `242c2b75` / Worker version
