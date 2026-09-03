@@ -221,8 +221,12 @@ const NEW_TODAY = `date(created_at, '+7 hours') = date('now', '+7 hours') AND cr
     /AS return_count/.test(src) && /AS items_returned/.test(src) && /AS loss_usd/.test(src))
   check('compat.ts breakdowns share the canonical recognized net-sale formula',
     /recognizedExpr\(`\$\{alias\}\.`\)/.test(src) && /netSaleExpr\('s\.'\)/.test(src) && /CUSTOMER_REFUND_JOIN/.test(src))
-  check('compat.ts default range uses seven business days ending today',
-    /const today = businessToday\(\)/.test(src) && /defaultStart\.setUTCDate\(defaultStart\.getUTCDate\(\) - 6\)/.test(src))
+  // The default window is the business day itself, matching every list page
+  // (user, 2026-09-03) -- not a rolling seven days, not all history.
+  check('compat.ts default range is today, the business day',
+    /const today = businessToday\(\)/.test(src)
+    && /startDate: String\(query\.startDate \|\| today\)/.test(src)
+    && !/defaultStart/.test(src))
   // The intentionally-skipped sites must stay (expiry_date has a per-row bound;
   // the audit_logs retention delete has no created_at index -- ±7h immaterial).
   check('expiry_date and audit_logs date() sites are deliberately untouched',

@@ -36,10 +36,12 @@ assert.match(dashboard, /review_in_inventory', 'Review in inventory'/, 'dashboar
 assert.match(dashboard, /triggerClassName="flex w-full min-w-0 items-center justify-center gap-1\.5 rounded-lg px-2 py-1 !min-h-9 sm:px-3"/, 'dashboard date picker should stay compact on mobile')
 assert.match(dashboard, /min-h-7[^"]*px-2\.5 py-1 text-\[11px\] font-semibold/, 'dashboard export control should stay compact on mobile')
 assert.doesNotMatch(dashboard, /RANGE_PRESETS/, 'dashboard should not restore the removed preset-chip controls')
-assert.match(dashboard, /offsetDate\(-6\)/, 'dashboard should default to seven days including today')
+// The dashboard's default window is TODAY -- the business day, exactly like
+// the list pages (user, 2026-09-03) -- and it governs the FLOW cards only.
+assert.doesNotMatch(dashboard, /offsetDate\(-6\)/, 'dashboard must not default to a rolling seven-day window')
 assert.match(dashboard, /getDashboard\(\{ startDate: start, endDate: end, granularity \}\)/, 'summary refresh must receive the same range as analytics')
 assert.match(transport, /appendQuery\('\/api\/dashboard', query\)/, 'dashboard summary transport must forward range parameters')
-assert.match(compat, /defaultStart\.setUTCDate\(defaultStart\.getUTCDate\(\) - 6\)/, 'dashboard API fallback must also cover seven days including today')
+assert.match(compat, /startDate: String\(query\.startDate \|\| today\)/, 'the dashboard API fallback range must be today as well')
 assert.match(compat, /async function dashboardSummary\(env: Env, query: Record<string, string>\)/, 'dashboard summary must accept the selected range')
 // The selected range scopes the sales/returns tiles and the recent-sales
 // feed. It must NOT scope the inventory alert cards: a product that is out of

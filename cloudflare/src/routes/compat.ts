@@ -162,12 +162,14 @@ function clampInt(value: unknown, fallback: number, min: number, max: number): n
   return Math.min(max, Math.max(min, n))
 }
 
+// The dashboard's default window is TODAY -- the business day in
+// Asia/Phnom_Penh, the same default every list page uses (user, 2026-09-03).
+// The caller widens it freely; it governs only the flow figures (sales,
+// returns, the charts, the recent-sales feed), never the stock/alert cards.
 function dateRange(query: Record<string, string>) {
   const today = businessToday()
-  const defaultStart = new Date(`${today}T00:00:00.000Z`)
-  defaultStart.setUTCDate(defaultStart.getUTCDate() - 6)
   return {
-    startDate: String(query.startDate || defaultStart.toISOString().slice(0, 10)).slice(0, 10),
+    startDate: String(query.startDate || today).slice(0, 10),
     endDate: String(query.endDate || today).slice(0, 10),
     granularity: ['week', 'month'].includes(String(query.granularity || 'day')) ? String(query.granularity) : 'day',
   }
