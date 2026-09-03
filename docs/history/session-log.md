@@ -17980,3 +17980,117 @@ comparison is still owed to the user. (3) `rc/sec-10-reports` stays parked on th
 localStorage print settings can still hold an old `highContrastBold:false`; if a receipt still prints light on that
 device, tick "Extra-dark bold receipt text" once in Print settings there. (6) Reply from peers 40/63/7e to the deploy
 brief: none arrived before the deploy; musing-tu-d9f677-c4 was told to use Part 588.
+
+## Part 589 (Sep 4 2026, session business-os-v1-c3, COORDINATOR + lane S4-17) — the user's Sep-4 walkthrough split into 26 items, one production incident root-caused from read-only queries, and the identity rule reversed
+
+The user walked the whole app in one message and left 26 distinct asks in it. They are on the board
+as **S4-1 … S4-26** with stable ids; use those ids in commit messages. Everything below is
+reference to re-verify, not ground truth.
+
+**The production incident (S4-1), root-caused entirely from SELECT-only reads.** `action_history`
+row **160**, "Update 9 sales to បានបញ្ចប់", by Admin at `2026-09-03 14:49:05` UTC (21:49 local),
+moved **seven** sales — 16786, 16789, 16791, 16795, 16796, 16798, 16801, every one a migrated
+`20260901-*` receipt — from `awaiting_payment` to `completed`. That wrote **nine
+`inventory_movements` rows**, ids 46189–46197, all `movement_type='sale'`, `quantity=-1`, branch 2,
+reason "Sale status changed from awaiting_payment to completed", against products 165, 5196, 5067,
+4115, 4259, 238, 3924, 955, 939. These are old-system sales whose stock was already accounted for
+at import, so the nine units are a double-count.
+
+**The app's own Undo for that action does nothing.** Its `undo_payload` is literally `{}` —
+Sales.tsx's `actionHistory.pushAction` supplies none — `resolveUndoApplier({})` returns null, and
+there is no `sale.status` applier in the codebase at all. With `require_applied` the Undo 409s;
+without it, it flips the history row's own status and performs zero writes. So the safe revert is
+to set those seven sales back to **Awaiting payment in the app UI**: `heldQuantity` gives
+`held(completed)=qty` and `held(awaiting_payment)=0`, so the delta is negative and
+`planSaleStockTransition` restores the nine units as `'return'`-type movements. That is a
+production write; remote D1 is SELECT-only by standing rule and no approval exists, so **S4-1 is
+blocked on the user**, not on analysis.
+
+**S4-4 has a trap worth naming before anyone builds it.** `awaiting_payment` does not deduct today:
+`STOCK_DEDUCTED_STATUSES` is `{completed, awaiting_delivery}`, and `heldQuantity` *also*
+early-returns 0 for `awaiting_payment` before it ever consults that set — so both places have to
+change together or the fix is half-applied. And making awaiting-payment deduct while migrated sales
+must never move stock means the "don't touch stock" flag (S4-2) belongs on the **legacy sale**, not
+on one action.
+
+**Two more findings that change what their items are.** `RECON` is production **data**, not code:
+it is a value in `product_batches.lot_code`, and no generator, template, lang key, SQL file or
+migration emits the string — so S4-19 is a D1 data migration plus possibly a display rule, not a
+rename. And the membership prefix is `LCMN-` + 8 characters, generated in **four** independent
+places (`customerMembershipNumber.ts` with `Math.random()` and no uniqueness check, `contacts.ts`,
+`portalAccounts.ts` via `crypto.getRandomValues`, and `importEngine.ts`), against a nullable column
+with only a partial unique index — so S4-23 has to unify four writers before it can promise every
+customer a number.
+
+### S4-17 — cost stopped being identity (branch `s4/identity-cost`, pushed)
+
+The user's ruling, verbatim: *"chaneg the rule, all products if cost is different add different
+costs together and divide by the number different costs...keep 4 decimal digits always round up to
+4 decimal digits... so now only diffeerent barcode creates new child row... rest merge"*.
+
+Three commits, each green on its own scope: `b1463d4b` the rule, `f4474ea1` the import path,
+`c730e5be` merge-duplicates and its undo. Gate at that tip: `npm run test:utils`, `verify:i18n` and
+a real `vite build` green in `frontend`; `npx tsc --noEmit` and every `scripts/test-*.cjs` green in
+`cloudflare`.
+
+`productDetailSignature` is now the normalized barcode and nothing else, in both byte-identical
+copies of the rule. `resolveMergedCost` takes its place for cost: the mean of the **distinct**
+costs per currency field — the user said "divide by the number different costs", so ten rows at $4
+and one at $5 average to $4.50, not $4.09 — rounded **up** to 4dp, because an averaged cost below
+what was actually paid overstates profit. A cost of **0 reads as not recorded** and stays out of the
+mean: both columns are `DEFAULT 0` and every importer writes 0 for a missing cell, so averaging it
+in would halve a real cost and double reported profit.
+
+Four consequences fell out of the change and are fixed in the same branch rather than left to
+surface in production:
+
+1. **A fold that only happens because cost stopped splitting had to be made additive.** Rows that
+   used to fork a child row now land on the row that already exists, and a folded row carrying no
+   `plannedMode` falls through to the legacy update path — which *replaces* a branch's quantity.
+   Two receipts of 5 and 3 would have stored 3. Folds whose rows disagree on cost or on lot code are
+   now marked `merge_stock`, the additive path, and the seed row's original cost is kept beside the
+   running mean so a third receipt is compared against what the file said, not against the average
+   it is about to move.
+2. **The lot-code branch of `productImportRowSignature` is gone.** It existed so two receipts of one
+   batch at two costs could share a product option back when a cost difference otherwise forked a
+   row. With cost out of identity it could no longer merge anything — all it could still do was
+   split one barcode into a row per lot, which is exactly what the ruling forbids. Lot codes live in
+   `product_batches`, which hang off a single product row by `variant_product_id`; a batch was never
+   a child row.
+3. **Several products can now share one name+barcode**, so the import match is resolved by evidence
+   and then by age — the active lot's owner when the batch names exactly one, otherwise the oldest
+   row, which is the survivor merge-duplicates keeps — instead of by iteration order. The old
+   *"merge the exact duplicate batch ownership before importing"* refusal is retired: under the new
+   rule it fires on precisely the products the rule change exists to heal, and refusing would block
+   their restocks.
+4. **A blank cost cell still keeps the product's existing cost, and an explicit 0 still lands as 0.**
+   Those two cases belong to `preserveExistingMoneyOnBlankCells` and the 61-product cost wipe it was
+   written for; averaging applies only to a cost the row actually states.
+
+Also fixed while pinning it: `roundCostUp4(0)` returned `-0`, because `Math.ceil(-1e-9)` is `-0` —
+it would have stored and serialised as "-0". Four tests that pinned the old rule were **inverted
+rather than deleted**, so the reversal stays legible to the next reader, and
+`frontend/tests/mergedCostRule.test.ts` is new (14 checks) and registered in the `test:utils` chain.
+
+**S4-17b is the half this does not do.** None of it folds the cost-forked twins production is
+already carrying — the very `#7321 / #7322` pairs the user complained about. That needs a survey of
+same-name+same-barcode groups and then the merge-duplicates path run per group, and it is a
+production write: user-gated.
+
+### S4-26 — which reports design the user actually saw
+
+Peer `business-os-v1-9f` claimed the localhost design the user liked is theirs (`rc/sec-10-reports`),
+not `fx/reports-redesign`. Checked here rather than taken on their word, and it holds: the user's
+phrase *"the tab excel style"* names a control that exists only in that lane
+(`frontend/src/components/sales/reports/ReportTable.tsx` and `ReportsHub.tsx`), while
+`fx/reports-redesign` `9b444788` has no style toggle at all — its only "excel" hits are import and
+export wording in `Sales.tsx` and `SalesImportModal.tsx`. So `fx/reports-redesign` is **parked**,
+and the All-time `$0.00` defect it carries leaves the critical path with it. Note for whoever picks
+this up: a first grep for `frontend/src/components/reports` finds nothing — the directory is
+`frontend/src/components/sales/reports`.
+
+One item came back needing a ruling: `dd-mm-yyyy` contradicts the `mm/dd/yyyy` / `en-US` convention
+this project pinned and re-swept in Part 388/W2. The user's newer instruction wins for the reports
+surface, which is where they gave it; whether the rest of the app follows is on the board as
+**S4-26b** and should not be decided unilaterally.
+

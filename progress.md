@@ -2396,11 +2396,33 @@ messages. **[ ]** not started · **[~]** in progress · **[x]** done (branch nam
   not populated from those two entry points.
 - [ ] **S4-16 · "Set quantity" captures no cost.** In a stock session, Set-quantity rows show
   no cost; they must.
-- [ ] **S4-17 · New identity rule: only a different barcode makes a new child row.** Cost no
+- [x] **S4-17 · New identity rule: only a different barcode makes a new child row.** Cost no
   longer splits a row. Differing costs **merge** — the stored cost becomes the mean of the
-  distinct costs, kept to **4 decimal places, always rounded up**. This replaces the
-  barcode-or-cost predicate and touches product grouping, the Worker's identity helper,
-  every merge/duplicate surface and their tests.
+  distinct costs, kept to **4 decimal places, always rounded up**. Built on
+  `s4/identity-cost` (pushed): `b1463d4b` the rule itself, `f4474ea1` the import path,
+  `c730e5be` merge-duplicates + its undo. Gate green in both packages at that tip
+  (`test:utils`, `verify:i18n`, `vite build`; `tsc --noEmit` + every `scripts/test-*.cjs`).
+  `resolveMergedCost` averages the **distinct** costs per currency and rounds **up** to 4dp;
+  a cost of **0 reads as not recorded** and stays out of the mean, since both columns are
+  `DEFAULT 0` and every importer writes 0 for a missing cell.
+  Four decisions this forced, each carried in the commits and worth re-reading before deploy:
+  - A fold that only happens because cost stopped splitting had to be made **additive**.
+    The legacy update path REPLACES a branch's quantity, so two receipts of 5 and 3 would
+    have stored 3. Folds that disagree on cost or lot code are now `merge_stock`.
+  - The **lot-code branch of `productImportRowSignature` is gone.** It could only merge back
+    when cost split rows; with cost out, all it could do was fork one barcode into a row per
+    lot, which the ruling forbids. Lot codes belong to `product_batches` under one row.
+  - Several products can now share one name+barcode, so the import match is resolved by
+    **evidence, then age** (active-lot owner, else the oldest row) instead of iteration
+    order. The old *"merge the exact duplicate batch ownership before importing"* refusal is
+    retired: it fired on exactly the products this rule exists to heal.
+  - A **blank** cost cell still keeps the product's existing cost and an **explicit 0** still
+    lands as 0. Averaging applies only to a cost the row actually states.
+- [ ] **S4-17b · Merge the child rows the old rule already created.** Everything above stops
+  new cost-forked twins; it does not fold the ones production is carrying today — the very
+  `#7321 / #7322` pairs the user complained about. Needs a survey of same-name+same-barcode
+  groups on remote D1 (SELECT-only) and then the existing merge-duplicates path, run per
+  group with the reversal snapshot it already writes. **A production write: user-gated.**
 - [ ] **S4-18 · POS: remove the duplicated batch option list.** When a barcode matches
   several rows the sheet offers a "#7321, #7322" style option list **and** a batch dropdown
   underneath — the same choice twice. Remove the option list. Batch entries list
@@ -2428,12 +2450,23 @@ messages. **[ ]** not started · **[~]** in progress · **[x]** done (branch nam
 
 **Reports**
 
-- [ ] **S4-26 · Keep the localhost design the user liked**, with: a more compact excel/tab
-  style (fields and values much closer), the search input visible, the other options moved
-  into a filter menu, sale dates as `dd-mm-yyyy`, and the cashier shown. This supersedes
-  the "which of the two reports redesigns survives" question — the answer is the local one
-  the user was shown. `fx/reports-redesign` `9b444788` is the candidate to base it on and
-  still carries the All-time `$0.00` defect, which must be fixed before it ships.
+- [ ] **S4-26 · Keep the localhost design the user liked** — settled: it is **`rc/sec-10-reports`**
+  (peer `business-os-v1-9f`), not `fx/reports-redesign`. Verified here two ways rather than
+  taken on the peer's word: the user's phrase *"the tab excel style"* names a control that
+  exists only in that lane (`frontend/src/components/sales/reports/ReportTable.tsx` and
+  `ReportsHub.tsx` carry it), and `fx/reports-redesign` `9b444788` has no style toggle at all
+  — its only "excel" hits are import/export wording in `Sales.tsx` and `SalesImportModal.tsx`.
+  So `fx/reports-redesign` stays **parked** and its All-time `$0.00` defect leaves the
+  critical path with it. Owner: `business-os-v1-9f`, porting the six sec-10 commits onto the
+  deployed tip `e3678a39` in `s4/09`, then building the five asks on top. Still wanted: a
+  more compact excel/tab style (fields and values much closer), the search input visible,
+  the other options moved into a filter menu, sale dates as `dd-mm-yyyy`, and the cashier
+  shown.
+- [?] **S4-26b · `dd-mm-yyyy` contradicts a settled convention.** The app is pinned to
+  `mm/dd/yyyy` and `en-US` everywhere (re-swept in Part 388/W2, documented in the range
+  picker's own header comment). The user's newer instruction wins **for the reports surface**,
+  which is where it was given; whether the rest of the app follows is a one-line ruling nobody
+  should take unilaterally. Raised by `business-os-v1-9f`.
 
 ### Now / gate
 
