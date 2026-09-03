@@ -2468,6 +2468,42 @@ messages. **[ ]** not started · **[~]** in progress · **[x]** done (branch nam
   which is where it was given; whether the rest of the app follows is a one-line ruling nobody
   should take unilaterally. Raised by `business-os-v1-9f`.
 
+### Sep-4 lane assignments (business-os-v1-c3, Part 589)
+
+Sent by `SendMessage` on Sep 4 2026. Every lane branches off the **deployed tip `e3678a39`**, not
+`main`, and works in its own worktree. Nobody has replied with a model/effort confirmation yet, so
+if a lane is mismatched to its session, say so rather than grinding.
+
+| Session | Items | Branch |
+|---|---|---|
+| `business-os-v1-ba` | S4-13, S4-14, S4-15, S4-16 — stock sessions and the two renames | `s4/sessions` |
+| `business-os-v1-4a` | S4-20, S4-21 — save at page end, discard-changes on close, app-wide | `s4/modal-chrome` |
+| `business-os-v1-7c` | S4-22, S4-18 — Khmer clipping, POS duplicate batch list | `s4/khmer-pos` |
+| `business-os-v1-db` | S4-6, S4-8, S4-9 — Telegram cashier, bilingual, inbound commands | `s4/telegram` |
+| `business-os-v1-02 [d393b5]` | S4-7, S4-10 — shift report and Start/End Shift | `s4/shifts` |
+| `business-os-v1-02 [055499]` | S4-2, S4-3, S4-4, S4-5 — sales status, stock, confirmations | `s4/sales-status` |
+| `business-os-v1-c3` | S4-17 **done**, plus coordination | `s4/identity-cost` |
+
+Two hand-offs are load-bearing. `db`'s bilingual Telegram helper (S4-8) is what
+`02 [d393b5]`'s shift report (S4-7) has to format through, and they were told to agree its shape
+before either formats a message. `4a`'s dirty-state contract (S4-21) is the mechanism every other
+lane's modals must opt into, so it should land as one shared thing, not twenty copies.
+
+**Unowned and still open:** S4-12 (Create Products header step), S4-19 (RECON → `ADJMM/DD/YYYY`, a
+D1 data migration, not a rename), S4-23 (`LC-` membership, and it must unify **four** independent
+generators first), S4-24 (receipt-shaped sale detail, returns print at the footer), S4-25 (delivery
+merges into items).
+
+**S4-26 lost its owner.** `business-os-v1-9f` ended its session after claiming the reports lane; its
+work is committed on `s4/09` (`7735dc95`) and `rc/sec-10-reports` (`e2497aa0`), so nothing is lost,
+but the item needs reassigning. Whoever takes it: the reports directory is
+`frontend/src/components/sales/reports`, **not** `frontend/src/components/reports` — a first grep
+for the obvious path finds nothing and will make you think the lane is empty.
+
+**Blocked on the user, not on work:** S4-1 (the revert is a production write), S4-11 (needs a
+one-line ruling on what "check in users for invoices details" means), S4-17b (production write),
+S4-26b (`dd-mm-yyyy` versus the pinned `mm/dd/yyyy` convention).
+
 ### Now / gate
 
 - ~~**Deploy**~~ — **DONE Aug 31 (Part 538): production is `242c2b75` / Worker version
