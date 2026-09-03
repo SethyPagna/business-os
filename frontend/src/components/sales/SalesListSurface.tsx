@@ -460,7 +460,11 @@ export default function SalesListSurface({
                                 aria-label={`Select ${sale.receipt_number}`}
                               />
                               ) : null}
-                              <span className="min-w-0 truncate font-mono text-sm font-semibold text-blue-600 dark:text-blue-400">{sale.receipt_number}</span>
+                              {/* The card layout is the phone one (<768px), so
+                                  the receipt id must never be ellipsised here
+                                  -- it wraps onto a second line inside the
+                                  card instead (user, Sep 3 2026). */}
+                              <span className="min-w-0 whitespace-normal break-all font-mono text-sm font-semibold leading-snug text-blue-600 dark:text-blue-400">{sale.receipt_number}</span>
                               <span className="shrink-0 text-xs text-gray-400">{fmtTime(sale.created_at)}</span>
                             </div>
                             {/* Y17: customer (name + phone) leads the meta line;

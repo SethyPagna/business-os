@@ -5165,5 +5165,9 @@
   "manual_setup_key": "សោដំឡើងដោយដៃ",
   "mixed_categories": "ប្រភេទចម្រុះ",
   "show_manual_key": "បង្ហាញសោដំឡើងដោយដៃ",
-  "unlabeled": "គ្មានស្លាក"
+  "unlabeled": "គ្មានស្លាក",
+  "copy_receipt_number": "ចម្លងលេខវិក្កយបត្រ",
+  "copy_return_id": "ចម្លងលេខសម្គាល់ការត្រឡប់",
+  "return_blocked_cancelled_sale": "ការលក់នេះត្រូវបានបោះបង់ ដូច្នេះគ្មានអ្វីត្រូវប្រគល់មកវិញទេ។",
+  "return_blocked_fully_returned": "ទំនិញទាំងអស់ក្នុងការលក់នេះ ត្រូវបានប្រគល់មកវិញរួចហើយ។"
 }
