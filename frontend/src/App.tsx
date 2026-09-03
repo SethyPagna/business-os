@@ -15,6 +15,7 @@ import PullToRefreshIndicator from './components/shared/PullToRefreshIndicator.t
 import { usePullToRefresh } from './components/shared/usePullToRefresh.ts'
 import { STORAGE_KEYS } from './constants.ts'
 import { refreshAppData } from './utils/appRefresh.ts'
+import { claimChunkReload, clearChunkReloadMarker } from './utils/chunkReloadGuard.ts'
 import { hasDirtyWork } from './utils/dirtyWork.ts'
 import { withLoaderTimeout } from './utils/loaders.ts'
 import { flushPendingWorkDrafts } from './utils/workDrafts.ts'
@@ -384,14 +385,7 @@ async function importWithTimeout(importer: ChunkImporter, key: string, timeoutMs
   }
 }
 
-function clearRetryMarker(marker: string): void {
-  // Reset the retry state after either a successful import or a final failure.
-  try {
-    sessionStorage.removeItem(marker)
-  } catch (_) {}
-}
-
-function buildChunkRecoveryUrl(reason = 'chunk-reload'): string {
+function buildChunkRecoveryUrl(reason = 'chunk-reload', serverBuild: string | null = null): string {
   if (typeof window === 'undefined') return ''
   const url = new URL(window.location.href)
   url.searchParams.set('__bos_reload', String(Date.now()))
@@ -399,6 +393,7 @@ function buildChunkRecoveryUrl(reason = 'chunk-reload'): string {
   if (FRONTEND_BUILD_HASH && FRONTEND_BUILD_HASH !== 'dev') {
     url.searchParams.set('__bos_build', FRONTEND_BUILD_HASH)
   }
+  if (serverBuild) url.searchParams.set('__bos_server_build', serverBuild)
   return url.toString()
 }
 
@@ -425,16 +420,16 @@ async function clearStaleShellCaches() {
   } catch (_) {}
 }
 
-function triggerChunkRecoveryReload(marker: string): boolean {
+async function triggerChunkRecoveryReload(marker: string): Promise<boolean> {
   // Offline guard (Part-77, offline audit): a chunk import fails OFFLINE for
   // any page the SW never cached -- and this recovery then deleted the
   // business-os-app-shell-*/static-* caches, i.e. the device's ONLY copy of
   // the app, before a reload that cannot refetch anything. That bricked the
   // whole offline PWA over one missing page. Recovery is pointless without a
   // network (its entire mechanism is "refetch the newest HTML/chunks"), so
-  // offline: keep the caches, leave the one-shot retry marker UNSPENT (the
-  // full recovery stays available for when connectivity returns), and
-  // return false so the caller surfaces the failure instead.
+  // offline: keep the caches, leave the retry marker UNSPENT (the full
+  // recovery stays available for when connectivity returns), and return
+  // false so the caller surfaces the failure instead.
   if (typeof navigator !== 'undefined' && navigator.onLine === false) return false
   // A deployment mismatch must never turn into silent form/cart loss. Mobile
   // Safari does not consistently present beforeunload confirmation dialogs.
@@ -442,14 +437,16 @@ function triggerChunkRecoveryReload(marker: string): boolean {
     flushPendingWorkDrafts()
     return false
   }
-
-  try {
-    sessionStorage.setItem(marker, '1')
-  } catch (_) {}
-
   if (typeof window === 'undefined') return false
+
+  // One reload per (page key, build) -- see utils/chunkReloadGuard.ts. The
+  // old tab-lifetime '1' sentinel meant a single reload that did not land on
+  // a good build left the tab unable to self-heal after every later deploy.
+  const decision = await claimChunkReload(marker)
+  if (!decision.allow) return false
+
   flushPendingWorkDrafts()
-  const target = buildChunkRecoveryUrl(`chunk:${marker}`)
+  const target = buildChunkRecoveryUrl(`chunk:${marker}:${decision.reason}`, decision.marker.live)
   const reload = () => {
     if (target) window.location.replace(target)
     else window.location.reload()
@@ -466,25 +463,18 @@ function createChunkReloadStallError(key: string): Error {
   return error
 }
 
-function shouldRetryChunk(marker: string): boolean {
-  // One reload per page key avoids infinite loops while still healing most
-  // stale-index / evicted-chunk deployment states.
-  try {
-    return sessionStorage.getItem(marker) !== '1'
-  } catch (_) {
-    return false
-  }
-}
-
 function lazyWithRetry(importer: ChunkImporter, key: string) {
-  // Wrap React.lazy so stale chunks can trigger one hard reload and pick up the
+  // Wrap React.lazy so stale chunks can trigger a hard reload and pick up the
   // newest HTML/chunk graph after deployments or proxy cache races.
   return lazy(async () => {
     const marker = `bos-lazy-reload:${key}`
     for (let attempt = 1; attempt <= CHUNK_IMPORT_MAX_ATTEMPTS; attempt += 1) {
       try {
         const loaded = await importWithTimeout(importer, key)
-        clearRetryMarker(marker)
+        // Only a successful import re-arms the guard. Clearing on a final
+        // failure as well (the previous behaviour) re-armed the SAME build and
+        // turned every navigation into one more reload.
+        clearChunkReloadMarker(marker)
         return loaded
       } catch (error) {
         if (!isRetryableImportError(error) || typeof window === 'undefined') {
@@ -497,14 +487,14 @@ function lazyWithRetry(importer: ChunkImporter, key: string) {
           continue
         }
 
-        // Recovery can decline (offline guard above) -- then fall through to
-        // the thrown error so the page-level error UI shows, with the retry
-        // marker still unspent for a real recovery once back online.
-        if (shouldRetryChunk(marker) && triggerChunkRecoveryReload(marker)) {
+        // Recovery can decline (offline / dirty-work guards above, or this
+        // build already reloaded for this key) -- then fall through to the
+        // thrown error so the page-level error UI shows. The declines leave
+        // the marker unspent for a real recovery once the block clears.
+        if (await triggerChunkRecoveryReload(marker)) {
           return await new Promise(() => {})
         }
 
-        clearRetryMarker(marker)
         throw error
       }
     }

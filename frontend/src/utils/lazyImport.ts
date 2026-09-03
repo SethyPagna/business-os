@@ -1,4 +1,6 @@
 import { lazy, type ComponentType } from 'react'
+import { claimChunkReload, clearChunkReloadMarker } from './chunkReloadGuard.ts'
+import { flushPendingWorkDrafts } from './workDrafts.ts'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any -- mirrors React's own lazy() signature (ComponentType<any>), so components with concrete prop types can be passed through unchanged.
 type LazyImporter<T> = () => Promise<{ default: T }>
@@ -20,22 +22,26 @@ function isRetryableChunkError(error: unknown): boolean {
     || /aborted/i.test(message)
 }
 
+const nestedMarkerKey = (key: string): string => `bos-nested-lazy-reload:${key}`
+
 function clearLazyRetryMarker(key: string): void {
-  try { window.sessionStorage.removeItem(`bos-nested-lazy-reload:${key}`) } catch { /* storage unavailable */ }
+  clearChunkReloadMarker(nestedMarkerKey(key))
 }
 
-function triggerLazyChunkRecovery(key: string): boolean {
+// One recovery reload per (chunk key, build) -- see utils/chunkReloadGuard.ts.
+// The old tab-lifetime '1' sentinel left a long-lived tab unable to self-heal
+// after any later deploy once a single reload had not landed on a good build.
+async function triggerLazyChunkRecovery(key: string): Promise<boolean> {
   if (typeof window === 'undefined' || (typeof navigator !== 'undefined' && navigator.onLine === false)) return false
-  const marker = `bos-nested-lazy-reload:${key}`
-  try {
-    if (window.sessionStorage.getItem(marker) === '1') return false
-    window.sessionStorage.setItem(marker, '1')
-  } catch {
-    return false
-  }
+  const decision = await claimChunkReload(nestedMarkerKey(key))
+  if (!decision.allow) return false
+  // This path reloads immediately (a modal chunk, not a page): persist any
+  // debounced draft first so the reload cannot become silent form/cart loss.
+  flushPendingWorkDrafts()
   const url = new URL(window.location.href)
   url.searchParams.set('__bos_reload', String(Date.now()))
-  url.searchParams.set('__bos_reason', `nested-chunk:${key}`)
+  url.searchParams.set('__bos_reason', `nested-chunk:${key}:${decision.reason}`)
+  if (decision.marker.live) url.searchParams.set('__bos_server_build', decision.marker.live)
   window.location.replace(url.toString())
   return true
 }
@@ -76,7 +82,7 @@ export function lazyRetry<T extends ComponentType<any>>(importer: LazyImporter<T
         const isFinalAttempt = attempt >= RETRY_ATTEMPTS
         if (!isRetryableChunkError(error)) throw error
         if (isFinalAttempt) {
-          if (triggerLazyChunkRecovery(key)) return await new Promise<never>(() => {})
+          if (await triggerLazyChunkRecovery(key)) return await new Promise<never>(() => {})
           throw error
         }
         await new Promise((resolve) => setTimeout(resolve, RETRY_DELAY_MS))
