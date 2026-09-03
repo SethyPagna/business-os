@@ -530,6 +530,22 @@ body:has([data-page-bg])      { background-color: var(--ui-page-bg) !important; 
     transition: border-color 0.15s, box-shadow 0.15s;
     min-height: 2.5rem;
   }
+
+  /* The shared typed-date field (components/shared/DateEntryInput.tsx).
+     13px on desktop, where dates sit in dense grids beside 13px labels, and
+     16px under 768px because iOS Safari zooms the whole page when a focused
+     field is smaller than 16px. !important because call sites pass their own
+     text-xs/text-sm utilities and the floor must survive them. */
+  .date-entry-input { font-size: 16px !important; font-variant-numeric: tabular-nums; }
+  @media (min-width: 768px) {
+    .date-entry-input { font-size: 13px !important; }
+  }
+  .date-entry-input--invalid {
+    border-color: #dc2626 !important;
+    color: #b91c1c;
+  }
+  .dark .date-entry-input--invalid { border-color: #ef4444 !important; color: #fca5a5; }
+
   .card { @apply bg-white dark:bg-zinc-800 rounded-xl shadow-sm border border-gray-200 dark:border-zinc-700; }
 
   .table-row {
