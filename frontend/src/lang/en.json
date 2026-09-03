@@ -5175,5 +5175,9 @@
   "manual_setup_key": "Manual setup key",
   "mixed_categories": "Mixed categories",
   "show_manual_key": "Show manual key",
-  "unlabeled": "Unlabeled"
+  "unlabeled": "Unlabeled",
+  "copy_receipt_number": "Copy receipt number",
+  "copy_return_id": "Copy return ID",
+  "return_blocked_cancelled_sale": "This sale was cancelled, so there is nothing to return.",
+  "return_blocked_fully_returned": "Every item on this sale has already been returned."
 }

@@ -162,9 +162,11 @@ interface NewReturnModalProps {
   fmtUSD: MoneyFormatter
   notify: (message: string, kind?: NoticeKind) => void
   // Optional and additive: a caller that ALREADY knows which receipt is being
-  // returned (the Return button on a sale/receipt) seeds the search with it so
-  // the modal opens straight on the item step. Every existing caller omits it
-  // and gets the ordinary "type and pick" flow unchanged.
+  // returned -- the Return button on a sale detail or a receipt view -- seeds
+  // the search with it so the modal opens with the number typed and its match
+  // listed for the operator to confirm. It is the same component the Returns
+  // section opens, with the same flow; seeding the query is the whole
+  // difference. Every existing caller omits it and starts on a blank box.
   initialReceiptQuery?: string | null
 }
 
@@ -257,7 +259,7 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
   const RETURN_REASONS = normalizeReturnReasonList([...returnReasonPresets.customer, OTHER_LABEL])
 
   const [step,          setStep]          = useState<ModalStep>('search')
-  const [searchQuery,   setSearchQuery]   = useState(() => String(initialReceiptQuery || ''))
+  const [searchQuery,   setSearchQuery]   = useState(() => String(initialReceiptQuery || '').trim())
   const [foundSale,     setFoundSale]     = useState<SaleRow | null>(null)
   const [searching,     setSearching]     = useState(false)
   const [selectedItems, setSelectedItems] = useState<SaleReturnItem[]>([])
@@ -342,41 +344,13 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
     }
   }, [searchQuery, step])
 
-  // A caller that already knows the receipt (the Return button on a sale)
-  // should not make the operator press Find again. Resolve it once, through
-  // the SAME server lookup a typed query goes through -- so a legacy or
-  // partial number behaves identically here and there -- and land on the item
-  // step. autoResolvedRef makes it one-shot: re-renders, a failed lookup, or
-  // the operator navigating back to the search step must not re-fire it and
-  // fight whatever they type next.
-  const autoResolvedRef = useRef(false)
-  useEffect(() => {
-    const seed = String(initialReceiptQuery || '').trim()
-    if (!seed || autoResolvedRef.current) return
-    autoResolvedRef.current = true
-    void (async () => {
-      try {
-        const rows = await withLoaderTimeout(
-          () => lookupReceiptSuggestions(seed, RECEIPT_SUGGEST_LIMIT),
-          'Receipt lookup',
-          RECEIPT_SUGGEST_TIMEOUT_MS,
-        )
-        if (rows.length === 1) {
-          await openSaleForReturn(rows[0].id)
-          return
-        }
-        // Ambiguous or unknown: leave the operator on the search step with the
-        // seed already typed and the list open, rather than opening the wrong
-        // sale on their behalf.
-        setSuggestions(rows)
-        setSuggestIndex(rows.length > 0 ? 0 : -1)
-        setSuggestOpen(rows.length > 0)
-      } catch {
-        /* the ordinary Find path still works; nothing to announce here */
-      }
-    })()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [initialReceiptQuery])
+  // A caller that already knows the receipt (the Return button on a sale
+  // detail or a receipt view) seeds searchQuery above, and that seed flows
+  // through the SAME debounced lookup a typed query goes through: the modal
+  // opens with the number already in the box and the matching receipt rows
+  // listed, highlighted on the first one, so Enter or a tap confirms it. There
+  // is deliberately no separate auto-open path -- a scan or a seed never
+  // picks a record on the operator's behalf; they see the match and choose.
 
   const loadReplacementBatches = async (lineKey: string, productId: number | string, branchId: number | string | null) => {
     if (!branchId) return

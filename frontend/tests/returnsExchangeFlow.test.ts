@@ -41,11 +41,13 @@ assert.match(newReturn, /handleSearchKeyDown/, 'the typeahead must be keyboard n
 for (const key of ['ArrowDown', 'ArrowUp', 'Escape', 'Enter']) {
   assert.ok(newReturn.includes(`'${key}'`), `the typeahead must handle ${key}`)
 }
-// A caller that already knows the receipt (the Return button on a sale) must
-// resolve through this same server path -- kept additive so every existing
-// caller of the modal is unaffected.
+// A caller that already knows the receipt (the Return button on a sale) seeds
+// the query and nothing more: the seed goes through this same debounced server
+// lookup, the matches are listed, and the operator confirms -- never an
+// auto-open. Kept additive so every existing caller of the modal is unaffected.
 assert.match(newReturn, /initialReceiptQuery\?: string \| null/, 'the receipt prefill prop must stay optional (backward compatible)')
-assert.match(newReturn, /autoResolvedRef/, 'a prefilled receipt must resolve exactly once, not fight what the operator types next')
+assert.match(newReturn, /useState\(\(\) => String\(initialReceiptQuery \|\| ''\)\.trim\(\)\)/, 'the seed lands in searchQuery, which the typeahead effect watches')
+assert.doesNotMatch(newReturn, /autoResolvedRef|autoSearchedRef/, 'a prefilled receipt is listed for the operator to pick, never opened on their behalf')
 
 console.log('PASS return search shows matching receipts from the server as you type, debounced and keyboard-navigable')
 
