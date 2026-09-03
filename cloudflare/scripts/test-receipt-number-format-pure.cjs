@@ -190,6 +190,74 @@ check('a return follows its sale onto the new label instead of naming a dead rec
   } finally { db.close() }
 })
 
+check('the relabel is linear, not a per-row scan of the materialized CTE', () => {
+  // The first draft of 0107 wrote `SET receipt_number = (SELECT new_number
+  // FROM final WHERE final.id = sales.id) WHERE id IN (SELECT id FROM final)`.
+  // SQLite builds NO automatic index on a MATERIALIZED CTE, so that plan was
+  // `CORRELATED SCALAR SUBQUERY -> SCAN final`: a full scan of the 15,004-row
+  // CTE per updated row. Measured on a copy of production it took 30,220 ms
+  // against 1,953 ms for the UPDATE...FROM form -- and 30s of single-statement
+  // CPU is what trips remote D1's limit (code 7429), which would leave the
+  // migration half-applied with the ALTER and indexes already committed.
+  // This check pins the shape so the trap cannot be reintroduced.
+  const updateAt = migration0107.indexOf('UPDATE sales\n   SET receipt_number = final.new_number')
+  assert.ok(updateAt > 0, 'step 2 is no longer an UPDATE ... FROM final')
+  const step2 = migration0107.slice(
+    migration0107.indexOf('WITH cand AS ('),
+    migration0107.indexOf(';', updateAt) + 1,
+  )
+  assert.match(step2, /SET receipt_number = final\.new_number\s+FROM final\s+WHERE final\.id = sales\.id;\s*$/)
+  // The redundant `WHERE id IN (SELECT id FROM final)` filter is gone with it:
+  // UPDATE...FROM already touches only sales rows that have a `final` row, and
+  // the IN filter cost a second walk of the CTE for no semantic gain.
+  // (the migration's own comment quotes the rejected form, so strip comments
+  // before looking for it in the executable text)
+  const step2Sql = step2.replace(/^\s*--.*$/gm, '')
+  assert.ok(!/WHERE id IN \(SELECT id FROM final\)/.test(step2Sql), 'the redundant IN filter is back')
+
+  const db = freshDb()
+  try {
+    db.exec('ALTER TABLE sales ADD COLUMN legacy_receipt_number TEXT')
+    db.exec('CREATE INDEX IF NOT EXISTS idx_sales_receipt_number ON sales(receipt_number)')
+    seed(db, [
+      { id: 1, receipt_number: '004434@2026-09-02', created_at: '2026-09-02T09:42:28.000Z' },
+      { id: 2, receipt_number: '004433@2026-09-02', created_at: '2026-09-02T09:18:15.000Z' },
+    ])
+    // EXPLAIN QUERY PLAN rows are a tree: {id, parent, detail}.
+    const rows = db.prepare('EXPLAIN QUERY PLAN ' + step2).all()
+    const plan = rows.map((row) => row.detail)
+    const show = plan.join('\n')
+    const byId = new Map(rows.map((row) => [row.id, row]))
+    const ancestry = (row) => {
+      const out = []
+      for (let cur = byId.get(row.parent); cur; cur = byId.get(cur.parent)) out.push(cur.detail)
+      return out
+    }
+
+    // (i) the CTE is walked ONCE, and at the top level of the UPDATE.
+    const finalScans = rows.filter((row) => row.detail === 'SCAN final')
+    assert.equal(finalScans.length, 1, show)
+    // (ii) nothing correlates back into `final`. This is the exact regression:
+    //      a `SCAN final` underneath a CORRELATED SCALAR SUBQUERY is one full
+    //      pass of the CTE per updated row.
+    assert.ok(
+      !finalScans.some((row) => ancestry(row).some((d) => /CORRELATED SCALAR SUBQUERY/.test(d))),
+      `step 2 rescans the CTE once per row:\n${show}`,
+    )
+    // (iii) the target row is reached by rowid: one seek per updated row.
+    assert.ok(plan.includes('SEARCH sales USING INTEGER PRIMARY KEY (rowid=?)'), show)
+    // (iv) MATERIALIZED still holds, so `taken` reads the PRE-update table and
+    //      the result cannot depend on the order SQLite visits rows in.
+    assert.ok(plan.includes('MATERIALIZE final'), show)
+    assert.ok(plan.includes('MATERIALIZE ranked'), show)
+    // (v) the collision probe is an index seek, never a 15k x 15k scan.
+    assert.ok(
+      plan.some((line) => /SEARCH k USING (COVERING )?INDEX idx_sales_receipt_number/.test(line)),
+      `the taken sub-select is not index-backed:\n${show}`,
+    )
+  } finally { db.close() }
+})
+
 check('the migration adds the receipt lookup indexes the mint-time probe needs', () => {
   const db = freshDb()
   try {

@@ -111,9 +111,26 @@ WITH cand AS (
          CASE WHEN taken + seq = 1 THEN base ELSE base || '-' || (taken + seq) END AS new_number
     FROM ranked
 )
+--
+--    UPDATE ... FROM (SQLite >= 3.33, supported by D1), NOT
+--    `SET receipt_number = (SELECT new_number FROM final WHERE final.id =
+--    sales.id) WHERE id IN (SELECT id FROM final)`.  That correlated-scalar
+--    form is a CPU trap and was the first draft of this migration: SQLite
+--    builds NO automatic index on a MATERIALIZED CTE, so EXPLAIN QUERY PLAN
+--    showed `CORRELATED SCALAR SUBQUERY -> SCAN final` -- a full scan of the
+--    15,004-row CTE for each of the 15,004 rows updated, ~225M row visits.
+--    Measured on a local copy of production: 30,220 ms for the correlated
+--    form vs 1,953 ms this way, 15.5x.  Thirty seconds of single-statement
+--    CPU is what trips remote D1's per-statement limit ("exceeded its CPU
+--    time limit and was reset", code 7429), and a migration that dies HERE
+--    dies half-applied -- the ALTER and both indexes are already committed
+--    by then.  The plan below is one pass over `final` plus one rowid seek:
+--      SCAN final
+--      SEARCH sales USING INTEGER PRIMARY KEY (rowid=?)
 UPDATE sales
-   SET receipt_number = (SELECT new_number FROM final WHERE final.id = sales.id)
- WHERE id IN (SELECT id FROM final);
+   SET receipt_number = final.new_number
+  FROM final
+ WHERE final.id = sales.id;
 
 -- 3. Follow the label onto the denormalized copy a return keeps of the sale
 --    it refunds, so a repaired sale and its return never disagree about the
