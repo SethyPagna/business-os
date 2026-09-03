@@ -89,4 +89,21 @@ assert.match(
 assert.match(read('src/web-api.ts'), /sync:app-update-available/, 'the client must re-dispatch the update event to the window')
 assert.match(read('src/web-api.ts'), /pendingAppUpdateDetail/, 'a fired update must stay buffered for a later consumer')
 
+// 9. The PUBLIC CATALOG must not offer the admin app-update prompt. A
+//    storefront visitor is not running the till: "Restart now", and a guard
+//    message about saving unfinished work, mean nothing to them. Pins the
+//    isPublicCatalogRoute early-return specifically, not the whole file --
+//    the banner is still correct on every admin branch below it.
+{
+  const at = app.indexOf('if (isPublicCatalogRoute) {')
+  assert.ok(at > 0, 'the public-catalog early return moved or was renamed')
+  const nextBranch = app.indexOf('storedAuthSessionPending', at)
+  assert.ok(nextBranch > at, 'could not find the end of the public-catalog branch')
+  const branch = app.slice(at, nextBranch)
+  assert.ok(
+    !/<AppUpdateBanner/.test(branch),
+    'the public catalog route renders the admin app-update banner',
+  )
+  assert.ok(branch.includes('<PublicCatalogView />'), 'the public catalog must still render')
+}
 console.log('appUpdatePrompt.test.ts OK')
