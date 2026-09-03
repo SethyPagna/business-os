@@ -57,6 +57,16 @@ for (const [name, src] of [['Overview', overview], ['Breakdown', breakdown]]) {
 }
 assert.match(overview, /totals\.profit_usd != null \? \[\{/, 'the profit tile is dropped, not zeroed, for a non-admin')
 
+// Sibling-surface parity: the Sales list and the daily report both call a
+// customer-less sale 'Walk-in'. The by-customer breakdown counts those same
+// sales, so calling them 'Unknown' would make one shop's walk-in trade look
+// like a data problem on one screen and normal business on another.
+assert.match(
+  breakdown,
+  /view === 'customer'[^]{0,200}walk_in/,
+  'the by-customer breakdown labels a customer-less sale the way the Sales list does',
+)
+
 // The hub still honours the contracts earlier parts pinned.
 assert.match(hub, /titleNode=\{titleNode\}/, 'ReportsHub passes the title into each section')
 assert.match(hub, /fmtMoney=\{fmtMoney\}/, 'ReportsHub passes fmtMoney to the sections')
@@ -78,7 +88,13 @@ assert.ok(!/pushState\([^)]*`\/[a-z]/.test(layers), 'a layer never pushes a new 
 // Back pops exactly one layer, and delegates to history so the on-screen
 // chevron and the device gesture behave identically.
 assert.match(layers, /window\.history\.back\(\)/, 'the back affordance delegates to browser history')
-assert.match(layers, /next < current\.length \? current\.slice\(0, next\) : current/, 'popstate trims to the depth that history entry recorded')
+// The hash IS the record of which layers are open, so back, FORWARD and a
+// reload all agree with what is on screen. This replaces a trim-only
+// popstate handler that passed the back test while leaving the URL saying
+// "#reports/overview" with the section list rendered -- one forward gesture
+// was enough to desynchronise the address bar from the screen.
+assert.match(layers, /function stackFromLocation/, 'the open layers are derived from the URL hash')
+assert.ok(layers.includes('setStack(stackFromLocation(baseHash))'), 'popstate re-reads the hash instead of only trimming')
 
 // Leaving layered mode must not strand the user inside a layer.
 assert.match(layers, /if \(!active\) setStack\(\[\]\)/, 'turning layered mode off resets the stack')

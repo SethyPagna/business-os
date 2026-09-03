@@ -22,9 +22,9 @@ import ChevronRight from 'lucide-react/dist/esm/icons/chevron-right.js'
 // app's own popstate listener (AppContext) resolves the page from the
 // pathname, so an unchanged pathname makes a layer pop a no-op for page
 // routing, and this hook is free to interpret it as "close one layer".
-// Depth is carried in history.state, so the back button, the Android
-// gesture and the on-screen chevron all take exactly one step, and a
-// forward gesture re-enters the layer it just left.
+// The hash is the record of which layers are open, so the back button, the
+// Android gesture and the on-screen chevron all take exactly one step, and
+// a forward gesture re-enters the layer it just left.
 //
 // The hub keeps owning its state. This component never touches the date
 // range or filters -- it only decides which layer is on screen -- so
@@ -66,10 +66,26 @@ export function useLayeredSections(layout: SectionLayout, maxWidth = 768): boole
 }
 
 /**
+ * The layers the URL says are open. The hash is the record -- pushing a
+ * layer writes `#reports/overview` -- so back, FORWARD and a reload all
+ * resolve to the same stack. Reading the depth out of history.state instead
+ * only ever let the stack shrink, which desynchronised the address bar from
+ * the screen after a single forward gesture.
+ */
+function stackFromLocation(baseHash: string): string[] {
+  if (typeof window === 'undefined') return []
+  const raw = window.location.hash.replace(/^#/, '')
+  if (!raw) return []
+  const parts = raw.split('/').filter(Boolean)
+  if (!baseHash) return parts
+  return parts[0] === baseHash ? parts.slice(1) : []
+}
+
+/**
  * A layer stack whose depth the browser's back gesture pops one step at a
  * time. `open(id)` pushes a layer, `back()` pops one, and a real popstate
- * (button or gesture) is reconciled against the depth recorded in
- * history.state so back and forward both land where the user expects.
+ * (button or gesture) is resolved from the URL hash, so back and forward
+ * both land where the user expects.
  */
 export function useLayerStack(active: boolean, baseHash = ''): {
   stack: string[]
@@ -88,15 +104,14 @@ export function useLayerStack(active: boolean, baseHash = ''): {
   useEffect(() => {
     if (!active || typeof window === 'undefined') return undefined
     const onPop = () => {
-      const state = (window.history.state || {}) as Record<string, unknown>
-      const depth = Number(state[HISTORY_KEY])
-      const next = Number.isFinite(depth) && depth >= 0 ? depth : 0
-      // Trim to (or restore toward) the depth this history entry recorded.
-      setStack((current) => (next < current.length ? current.slice(0, next) : current))
+      // Whatever the URL now says is open, is open. Back collapses one
+      // layer, forward re-enters the one it left, and neither can leave the
+      // address bar describing a screen the user is not looking at.
+      setStack(stackFromLocation(baseHash))
     }
     window.addEventListener('popstate', onPop)
     return () => window.removeEventListener('popstate', onPop)
-  }, [active])
+  }, [active, baseHash])
 
   const open = useCallback((id: string) => {
     setStack((current) => {
@@ -115,7 +130,8 @@ export function useLayerStack(active: boolean, baseHash = ''): {
   const back = useCallback(() => {
     if (stackRef.current.length === 0) return
     // Delegate to the browser so the on-screen back button and the device
-    // gesture produce the SAME history movement; popstate then trims.
+    // gesture produce the SAME history movement; popstate then re-reads
+    // the hash and renders whatever it now names.
     if (typeof window !== 'undefined') window.history.back()
     else setStack((c) => c.slice(0, -1))
   }, [])

@@ -169,6 +169,10 @@ export default function ReportsBreakdownSection({ t, fmtMoney, range, branchId, 
       const name = WEEKDAYS[idx] || row.key
       return trh(name.toLowerCase(), name)
     }
+    // A sale with no customer is a walk-in, and that is exactly what the
+    // Sales list and the daily report call it. Labelling the same sales
+    // 'Unknown' here would read as missing data rather than walk-in trade.
+    if (view === 'customer') return row.label || trh('walk_in', 'Walk-in')
     return row.label || trh('unknown', 'Unknown')
   }
 
