@@ -37,7 +37,9 @@ test('bulk merge excludes manual-only conflicts and keeps stock/clean barcode', 
   assert.match(src, /isLeadingZeroPair && aExtraZero !== bExtraZero/, 'an extra-zero pair must preserve the clean barcode')
   assert.match(src, /aExtraZero \? 1 : -1/, 'the clean barcode must beat the extra-zero copy')
   assert.match(src, /const stockDiff =/, 'ordinary exact-barcode duplicates must prefer the stocked row')
-  assert.match(src, /mergePossiblySameProducts\(keeper\.id, other\.id\)/)
+  // Every merge now goes through the shared stock-choice flow, so a bulk run
+  // asks about a stocked row exactly like a single one does.
+  assert.match(src, /await mergeWithChoice\(keeper, other\)/)
   assert.match(src, /bulk_merge_skipped_multiway/, 'manual-only groups are reported as skipped, not silent')
 })
 
