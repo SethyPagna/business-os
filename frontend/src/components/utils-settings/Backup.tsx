@@ -29,6 +29,7 @@ import PageHeader from '../shared/PageHeader'
 import ActionHistoryBar from '../shared/ActionHistoryBar'
 import SectionSwitcher from '../shared/SectionSwitcher'
 import LoadingWatchdog from '../shared/LoadingWatchdog'
+import PlanTierNotice from './PlanTierNotice.tsx'
 import { clearBackupMaintenance, getBackupMaintenance, type RestoreMaintenanceState } from '../../api/systemJobs.ts'
 
 type TranslateFn = (key: string) => string
@@ -1860,6 +1861,12 @@ export default function Backup() {
           historySlot={<ActionHistoryBar history={actionHistory} className="flex-shrink-0" t={t} showLabel />}
         />
         <RestoreMaintenanceBanner copy={copy} notify={notify} />
+        {/* Renders only on the Cloudflare free config, where the backup
+            batch caps below (and ~20 other ceilings) are smaller than on
+            paid. Placed with the maintenance banner because both answer
+            the same question -- "why is this behaving differently than I
+            expect" -- before the operator starts a run. */}
+        <PlanTierNotice copy={copy} />
         {/* Sections get their own full-width row now that History sits next
             to the page-guide icon in PageHeader's row above (per explicit
             user direction: the icon explaining what this page does, then

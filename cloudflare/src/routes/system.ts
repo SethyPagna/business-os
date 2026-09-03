@@ -14,7 +14,7 @@ import { broadcast } from '../durable-objects/broadcastHub'
 import { bumpVersion } from '../lib/cache'
 import { reportError } from '../lib/errorReporting'
 import { checkRateLimit, getClientIp } from '../lib/rateLimit'
-import { getPlanLimits } from '../lib/planTier'
+import { getPlanLimits, getPlanNotices, getPlanTier } from '../lib/planTier'
 
 // Each R2 delete is its own subrequest, and a Worker invocation has a
 // hard ceiling on how many it may make. A catalog of ~6,700 products with
@@ -871,6 +871,38 @@ app.post('/repair-integrity', async (c) => {
   } catch (error) {
     return c.json({ success: false, error: `Integrity repair failed: ${(error as Error).message}` }, 500)
   }
+})
+
+// GET /api/system/plan -- which Cloudflare plan this deployment is
+// configured for, every ceiling that follows from it, and one notice per
+// ceiling that is SMALLER than it would be on Paid.
+//
+// Why this exists as its own route rather than more fields on
+// /system/bootstrap (which already reports `plan.tier` and the live quota
+// counters): bootstrap is fetched once at startup by every client and is
+// deliberately small, whereas this is the full table -- ~25 numbers -- read
+// only when an admin opens the System settings panel. Keeping them apart
+// means the notice list can grow with the table without making every cold
+// start heavier.
+//
+// Behind this router's requireAuth like everything else here, but with no
+// further permission gate: it exposes deployment CONFIGURATION (which plan,
+// which ceilings), never business data, and the same numbers are already in
+// the repo. A permission gate would only mean the panel's notice silently
+// disappears for the roles most likely to hit a Free ceiling.
+//
+// The response is DERIVED, never hand-maintained: `limits` is the tier row
+// straight out of PLAN_LIMITS_BY_TIER and `notices` is computed by diffing
+// the two rows, so a limit added to the table shows up here with no edit to
+// this file. The Worker holds no display copy -- `notices[].id` is the
+// PlanLimits field name and the admin app translates it (both packs).
+app.get('/plan', (c) => {
+  const tier = getPlanTier(c.env)
+  return c.json({
+    tier,
+    limits: getPlanLimits(c.env),
+    notices: getPlanNotices(tier),
+  })
 })
 
 export default app

@@ -62,18 +62,31 @@ crons = ["0 */6 * * *"]
 # Cloudflare services. The 10,000 default is pinned EXPLICITLY here, the
 # way cpu_ms is, so a future platform-default change cannot silently
 # shrink budgets this codebase's ceilings were measured against.
-# App ceilings recorded against that 10,000 budget (each constant carries
-# its own full reasoning at its definition):
-#   backup.ts   MAX_ASSET_BYTES_PER_BACKUP  20  -> 100  (~200 subreqs/run)
-#   system.ts   MAX_IMAGE_DELETES_PER_RESET 200 -> 500  (~500 subreqs/run)
-#   importEngine ROWS_PER_IMPORT_CHUNK      150 -> 600  (CPU-bound; the
-#     constant's own comment said to raise it once cpu_ms was restored)
-#   importEngine STOCK_ACTION_MAX_UNITS     60  -> 240  (~2,880 subreqs
-#     worst case, ~29% of budget), MAX_ROWS 480 -> 1920 (units x 8 lines)
-# NOT raised, with reasons at their sites: D1's 100-bound-params-per-
-# statement (plan-independent), MAX_HISTORICAL_SALE_LINES = 100 (data
-# bound: largest real receipt is 86 lines), STOCK_ACTION_CLASSIFY_WINDOW /
-# DISPATCH_READ (M4's windowed continuation, already Paid-sized).
+#
+# WHERE THE APP CEILINGS MEASURED AGAINST THIS BUDGET NOW LIVE.
+# This block used to list them here, one line per constant. That list went
+# stale the moment the constants moved, and a stale list next to the real
+# knob is worse than no list -- so it is gone, and there is now exactly one
+# place to look: PLAN_LIMITS_BY_TIER in src/lib/planTier.ts. Every
+# plan-sensitive number in the Worker (import chunk sizes, stock-action
+# ceilings, backup/restore batch caps, per-reset image deletes, quota
+# ceilings) is a field of that table, on both tiers, each with a comment
+# naming the platform limit it respects. No consumer keeps a private copy;
+# scripts/test-plan-tier-matrix-pure.cjs fails if one reappears.
+#
+# The two values in [limits] below are themselves mirrored into that table
+# as cpuMsPerInvocation / subrequestsPerInvocation (Paid 300,000 / 10,000;
+# Free 10 / 1,000), and the matrix test asserts the mirror matches this
+# file -- so changing a number here without changing the table is a red
+# test, not a silent drift. wrangler.free.toml has no [limits] block at
+# all, deliberately: custom cpu_ms is Paid-only and fails Free deploys.
+#
+# Still NOT plan-scaled, and deliberately so (reasons at their sites):
+# D1's 100-bound-params-per-statement and its ~100KB SQL length are
+# SQLite/D1 engine properties, identical on both tiers (they are in the
+# table with equal values so the "paid >= free" invariant covers them);
+# MAX_HISTORICAL_SALE_LINES = 100 is a DATA bound, not a platform one
+# (largest real receipt is 86 lines), so it stays in importEngine.ts.
 [limits]
 cpu_ms = 300000
 subrequests = 10_000

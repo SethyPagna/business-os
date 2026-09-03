@@ -24,7 +24,11 @@ const ALLOWED_TYPES = new Set(['products', 'customers', 'suppliers', 'delivery_c
 const IMAGE_EXTENSIONS = new Set(['.jpg', '.jpeg', '.png', '.webp', '.gif', '.bmp'])
 const MAX_CSV_BYTES = 80 * 1024 * 1024
 const MAX_ZIP_BYTES = 2048 * 1024 * 1024
-const MAX_IMAGES_PER_REQUEST = 200
+// The per-request image cap lives in planTier.ts as
+// PLAN_LIMITS.maxImagesPerImportRequest (Paid 200, Free 40) -- every image
+// costs an R2 PUT plus a normalization enqueue, so the ceiling is bounded
+// by the plan's subrequest and CPU budgets. Each handler below reads it
+// into a local of that name.
 
 function extname(name: string): string {
   const match = /\.[^./\\]+$/.exec(name)
@@ -569,6 +573,8 @@ app.patch('/:id/images/resolve-limit', async (c) => {
   const rowNumber = body?.row_number
   const keepFileIds = Array.isArray(body?.keep_file_ids) ? body.keep_file_ids.map(Number).filter(Number.isFinite) : []
   if (rowNumber == null) return c.json({ success: false, error: 'row_number is required' }, 400)
+  // Tier-aware shadow -- see MAX_IMAGES_PER_REQUEST's module-level comment.
+  const MAX_IMAGES_PER_REQUEST = getPlanLimits(c.env).maxImagesPerImportRequest
   if (keepFileIds.length > MAX_IMAGES_PER_REQUEST) return c.json({ success: false, error: 'Too many images selected' }, 400)
 
   const db = getDb(c.env)
@@ -871,6 +877,8 @@ app.post('/:id/zip', async (c) => {
       zipError = error instanceof ZipFormatError ? error.message : 'Failed to read ZIP contents'
     }
 
+    // Tier-aware shadow -- see MAX_IMAGES_PER_REQUEST's module-level comment.
+    const MAX_IMAGES_PER_REQUEST = getPlanLimits(c.env).maxImagesPerImportRequest
     const imageEntries = entries.filter((entry) => isRealFileEntry(entry) && IMAGE_EXTENSIONS.has(extname(entry.fileName))).slice(0, MAX_IMAGES_PER_REQUEST)
     const extractedImages: unknown[] = []
     const failedImages: { file_name: string; error_message: string }[] = []
@@ -921,6 +929,8 @@ app.post('/:id/images', async (c) => {
   const denied = await requireImportPermission(c as any, job)
   if (denied) return denied
   const form = await c.req.formData()
+  // Tier-aware shadow -- see MAX_IMAGES_PER_REQUEST's module-level comment.
+  const MAX_IMAGES_PER_REQUEST = getPlanLimits(c.env).maxImagesPerImportRequest
   const files = form.getAll('files').filter((f): f is File => f instanceof File).slice(0, MAX_IMAGES_PER_REQUEST)
   let relativePaths: string[] = []
   try {

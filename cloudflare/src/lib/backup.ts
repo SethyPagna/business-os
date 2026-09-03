@@ -447,7 +447,9 @@ export async function listCloudflareBackups(env: Env) {
 //   - rows are read a page at a time (TABLE_PAGE_SIZE), never a whole table
 //   - JSON is written into an R2 multipart upload and flushed once a part
 //     is big enough, so at most one part is ever in memory
-const TABLE_PAGE_SIZE = 500
+// The page size itself lives in planTier.ts as
+// PLAN_LIMITS.backupTablePageSize (Paid 500, Free 200);
+// writeBackupDocument reads it per request.
 
 // R2 requires every part except the last to be at least 5MB. 6MB gives
 // headroom over that floor while keeping peak memory small.
@@ -524,8 +526,9 @@ async function writeBackupDocument(
   const createdAt = new Date().toISOString()
   let rowCount = 0
   let tableCount = 0
-  // Tier-aware shadow -- see MAX_ASSET_BYTES_PER_BACKUP's module-level comment.
+  // Tier-aware shadows -- see each name's module-level comment.
   const MAX_ASSET_BYTES_PER_BACKUP = getPlanLimits(env).maxAssetsPerBackup
+  const TABLE_PAGE_SIZE = getPlanLimits(env).backupTablePageSize
 
   const assets = includeAssets ? await listAssets(env) : []
   const backupName = `business-os-cloudflare-${stamp(new Date(createdAt))}`
@@ -1092,7 +1095,9 @@ export async function restoreCloudflareBackup(env: Env, source: string, onProgre
   }
 
   // Pass 2: stream rows and insert in bounded batches, per table.
-  const CHUNK = 80
+  // Rows per db.batch() during a restore -- bounded by D1's per-batch CPU
+  // budget and, on Free, by the Worker's 10ms CPU limit; see planTier.ts.
+  const CHUNK = getPlanLimits(env).backupRestoreRowsPerBatch
   const liveColumnsCache = new Map<string, Set<string>>()
   let insertSql = ''
   let insertColumns: string[] = []
