@@ -1817,8 +1817,23 @@ assert.match(
 )
 assert.match(
   newReturnModal,
-  /function loadSalesTransport\(\): Promise<SalesTransportModule>[\s\S]*import\('\.\.\/\.\.\/api\/salesTransport\.ts'\)[\s\S]*async function searchReturnSales\(options: \{ limit: number \}\): Promise<SaleRow\[]>[\s\S]*getSales\(options\)/,
-  'customer return sale search should use the focused sales transport instead of the broad API registry',
+  /function loadSalesTransport\(\): Promise<SalesTransportModule>[\s\S]*import\('\.\.\/\.\.\/api\/salesTransport\.ts'\)[\s\S]*async function loadSaleById\(saleId: number \| string\): Promise<SaleRow \| null>[\s\S]*getSales\(\{ id: saleId \}\)/,
+  'customer return sale read should use the focused sales transport, by exact id, instead of the broad API registry',
+)
+assert.match(
+  newReturnModal,
+  /async function lookupReceiptSuggestions\(query: string, limit: number\): Promise<ReceiptSuggestion\[]>[\s\S]*lookupReturnReceipts\(\{ query, limit \}\)/,
+  'the receipt typeahead should go through the focused returns-read transport too',
+)
+assert.match(
+  newReturnModal,
+  /const RECEIPT_SUGGEST_TIMEOUT_MS = 8000/,
+  'the receipt typeahead should use an explicit timeout',
+)
+assert.match(
+  newReturnModal,
+  /const RECEIPT_SUGGEST_DEBOUNCE_MS = 250/,
+  'the receipt typeahead should be debounced rather than firing a request per keystroke',
 )
 assert.match(
   newReturnModal,
@@ -1827,8 +1842,13 @@ assert.match(
 )
 assert.match(
   newReturnModal,
-  /withLoaderTimeout\(\s*\(\) => searchReturnSales\(\{ limit: 500 \}\),\s*'Return sale search',\s*RETURN_SALE_SEARCH_TIMEOUT_MS,\s*\)/,
-  'customer return sale search should timeout slow sales reads',
+  /withLoaderTimeout\(\s*\(\) => loadSaleById\(saleId\),\s*'Return sale search',\s*RETURN_SALE_SEARCH_TIMEOUT_MS,\s*\)/,
+  'customer return sale read should timeout slow sales reads',
+)
+assert.match(
+  newReturnModal,
+  /withLoaderTimeout\(\s*\(\) => lookupReceiptSuggestions\(query, RECEIPT_SUGGEST_LIMIT\),\s*'Receipt lookup',\s*RECEIPT_SUGGEST_TIMEOUT_MS,\s*\)/,
+  'the receipt typeahead should timeout slow lookups',
 )
 assert.match(
   newReturnModal,

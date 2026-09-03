@@ -166,7 +166,25 @@ export default function ReturnDetailModal({ ret, onClose, onEdit, fmtUSD, fmtKHR
               {items.map((item, index) => (
                 <div key={`${item.id || item.product_id || 'item'}-${index}`} className="flex items-start justify-between gap-2 border-b border-gray-100 py-2 last:border-0 dark:border-gray-700">
                   <div className="min-w-0 flex-1">
-                    <div className="detail-scroll-text text-sm font-medium text-gray-800 dark:text-gray-200">{item.product_name || '-'}</div>
+                    {/* Damaged is a TAG on the line, next to the name -- the
+                        product itself is never renamed to say so, so the name
+                        here is the catalog name and the chip carries the
+                        state. It sits beside the name rather than only in the
+                        meta line below, where it read as one more attribute
+                        instead of the flag that keeps the units out of
+                        sellable stock. */}
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <span className="detail-scroll-text text-sm font-medium text-gray-800 dark:text-gray-200">{item.product_name || '-'}</span>
+                      {!isSupplier && normalizeStockAction({ stock_action: item.stock_action, return_to_stock: item.return_to_stock !== 0 && item.return_to_stock !== false }) === 'damaged' ? (
+                        <span
+                          data-tag="damaged"
+                          title={tr('stock_action_damaged_hint', 'Tracked as a damaged lot tied to this return — kept out of sellable stock.')}
+                          className="inline-flex flex-shrink-0 items-center gap-1 rounded-full border border-orange-300 bg-orange-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-orange-700 dark:border-orange-700 dark:bg-orange-900/40 dark:text-orange-300"
+                        >
+                          {stockActionOption('damaged').icon} {tr('stock_action_damaged', 'Damaged')}
+                        </span>
+                      ) : null}
+                    </div>
                     <div className="text-xs text-gray-400">
                       {tr('quantity', 'Qty')}: {item.quantity || 0}
                       {!isSupplier ? (() => {

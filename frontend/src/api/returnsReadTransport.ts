@@ -46,3 +46,18 @@ export function getReturnsReport(params: QueryParams = {}): Promise<unknown> {
     () => null,
   )
 }
+
+// Receipt typeahead for the New Return flow. The old flow pulled 500 sales to
+// the browser and Array.find()'d them, so a receipt outside that page simply
+// did not exist and nothing was shown while the operator typed. This asks the
+// server, which matches the bare YYYYMMDD-HHMMSS number, a partial run of
+// digits across its separators, the sale id, and the legacy NNNNNN@YYYY-MM-DD
+// number -- capped server-side at 20 rows.
+//
+// Deliberately NOT routed through the shared 20s response cache: a receipt
+// minted seconds ago has to be findable, and every keystroke is its own query
+// anyway, so there is nothing to reuse.
+export function lookupReturnReceipts(params: QueryParams = {}): Promise<unknown> {
+  const query = buildQueryString(params, { skipEmpty: true })
+  return apiFetch('GET', appendQuery('/api/returns/receipt-lookup', query))
+}

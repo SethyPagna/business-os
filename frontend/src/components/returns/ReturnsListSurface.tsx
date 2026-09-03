@@ -41,6 +41,10 @@ interface ReturnRecord {
   reason?: string
   status?: string
   cashier_name?: string
+  // Counted by the list read itself (routes/returns.ts DAMAGED_ITEM_COUNT_SQL)
+  // so a damaged line is visible on the row -- the list shows one row per
+  // return and never its items, so this used to require opening the return.
+  damaged_item_count?: number
 }
 
 interface ReturnGroup {
@@ -332,7 +336,18 @@ export default function ReturnsListSurface({
                                 />
                                 ) : null}
                               </td>
-                              <td className="dense-id whitespace-nowrap font-medium text-orange-600 dark:text-orange-400">{ret.return_number}</td>
+                              <td className="dense-id whitespace-nowrap font-medium text-orange-600 dark:text-orange-400">
+                                {ret.return_number}
+                                {(ret.damaged_item_count || 0) > 0 ? (
+                                  <span
+                                    data-tag="damaged"
+                                    title={tr('stock_action_damaged_hint', 'Tracked as a damaged lot tied to this return — kept out of sellable stock.')}
+                                    className="ml-1 inline-flex items-center rounded-full border border-orange-300 bg-orange-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-orange-700 dark:border-orange-700 dark:bg-orange-900/40 dark:text-orange-300"
+                                  >
+                                    {ret.damaged_item_count} {tr('damaged_items_tag', 'damaged')}
+                                  </span>
+                                ) : null}
+                              </td>
                               <td className="whitespace-nowrap text-gray-500">{fmtTime(ret.created_at)}</td>
                               <td>
                                 {ret.receipt_number
@@ -463,7 +478,18 @@ export default function ReturnsListSurface({
                         ) : null}
                         <div className="flex items-start justify-between gap-2">
                           <div className="min-w-0 flex-1">
-                            <div className="font-mono text-sm font-semibold text-orange-600 dark:text-orange-400">{ret.return_number}</div>
+                            <div className="flex flex-wrap items-center gap-1.5">
+                              <span className="font-mono text-sm font-semibold text-orange-600 dark:text-orange-400">{ret.return_number}</span>
+                              {(ret.damaged_item_count || 0) > 0 ? (
+                                <span
+                                  data-tag="damaged"
+                                  title={tr('stock_action_damaged_hint', 'Tracked as a damaged lot tied to this return — kept out of sellable stock.')}
+                                  className="inline-flex items-center rounded-full border border-orange-300 bg-orange-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-orange-700 dark:border-orange-700 dark:bg-orange-900/40 dark:text-orange-300"
+                                >
+                                  {ret.damaged_item_count} {tr('damaged_items_tag', 'damaged')}
+                                </span>
+                              ) : null}
+                            </div>
                             <div className="text-xs text-gray-400">{fmtTime(ret.created_at)}</div>
                             <div className="mt-0.5 truncate text-xs text-gray-600 dark:text-gray-400">{ret.reason}</div>
                             <div className="mt-0.5 text-xs text-gray-400">{retScope === SUPPLIER_SCOPE ? (ret.supplier_name || '-') : (ret.customer_name || '-')}</div>
