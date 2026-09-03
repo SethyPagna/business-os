@@ -110,6 +110,10 @@ Semantics settled here, because today's two implementations disagree:
 - **Selection persists across filter / date-range / page changes**, keyed by id. It is *not* cleared when
   the list re-queries, because the real workflow is filter, select, filter again, act.
 - Because it persists, the bar must always disclose scope: `24 selected · 8 on this page`.
+- **"Select all matching" is allowed across pages the user has not seen — but selecting them means
+  showing them** (user decision, Sep 3: "across all pages haven't seen… but show them when selected").
+  `selectAllMatching` therefore always pairs with the **Selected-only view** in §4.2.1. The user may act
+  on rows they never scrolled past, but never on rows they cannot look at.
 
 ### 4.2 `frontend/src/components/shared/BulkActionBar.tsx` (new)
 
@@ -130,6 +134,22 @@ Replaces the two divergent inline toolbars (`Sales.tsx:1409`, `Returns.tsx:1045`
   that pushes cards down. Primary action full-width, overflow behind a single "More" sheet.
 - Contents, left to right: count pill · primary actions · overflow menu · `Clear` (right-aligned).
 - Never more than **4** visible actions; the rest collapse into one overflow menu.
+
+#### 4.2.1 Selected-only view (required companion to "select all matching")
+
+The count pill in the bar is a **toggle**. Clicking `24 selected` switches the list to show exactly those
+24 rows — every page of them — and clicking again returns to the filtered list.
+
+This is what makes acting on unseen rows safe, and it is a requirement rather than a convenience:
+
+- **"Select all N matching" is only offered when the Selected-only view exists to back it.** The moment
+  the user selects rows beyond the current page, the bar surfaces `Review 24 selected` next to the count.
+- The selected-only view is the **same list surface**, with the same columns, sort and row rendering — not
+  a summary modal. The user reviews the real rows and can deselect individually from there before acting.
+- The confirm dialog additionally lists what will change, but the dialog is a summary; the selected-only
+  view is where the user actually *looks at* the records.
+- It also solves the mixed-selection problem for the sales `from` → `to` control (§5.1.1): filtering the
+  selected-only view by the chosen `from` status shows precisely the group about to change.
 
 ### 4.3 `frontend/src/components/shared/BulkResultDialog.tsx` (new)
 
@@ -170,10 +190,39 @@ than aspirational.
 
 | Action | Permission | Atomicity | Eligibility rule |
 |---|---|---|---|
-| **Change status** to completed / awaiting_delivery / awaiting_payment | `sales:status` (existing) | per-row | `guardSaleStatusTransition(old, next, status_before_cancel)` — the same guard `sales.ts:1041` calls. Rows failing it are listed as skipped with the guard's own message. |
-| **Cancel** | `sales:status` | per-row | Same guard. Opens the existing `CancelSaleModal` in bulk mode — `Sales.tsx:288` already models `{mode:'bulk', count}`; reason, note and cancel fee apply to **every** selected sale, and the dialog says so explicitly. |
+| **Change status — `from` → `to`** | `sales:status` (existing) | per-row | See §5.1.1. `guardSaleStatusTransition(old, next, status_before_cancel)` — the same guard `sales.ts:1041` calls — is evaluated per row, but the `from` picker means the user has already narrowed to one starting status, so a guard rejection becomes rare rather than routine. |
+| **Cancel** (a `to = cancelled` transition) | `sales:status` | per-row | Same guard and the same `from` → `to` control. Opens the existing `CancelSaleModal` in bulk mode — `Sales.tsx:288` already models `{mode:'bulk', count}`. One reason, note and cancel fee apply to the whole `from` group, and the dialog says so explicitly. |
 | **Copy receipt IDs** | `sales` (view tier suffices — read-only) | n/a | All. Copies **bare `YYYYMMDD-HHMMSS`** ids, newline-joined, in list order. A second overflow item, *Copy as table*, yields `receipt_number<TAB>date<TAB>total` for pasting into a sheet. |
 | **Export selected** | `sales` + existing export grant | n/a | All. Already built (`Sales.tsx:1125`) — rehomed into the shared bar unchanged. |
+
+#### 5.1.1 The `from` → `to` status control (user decision, Sep 3)
+
+> User: "for sales, choose current status (like choose if it is cancelled, awaiting etc…), to what new status".
+
+Bulk status change is **not** "apply status X to everything selected". It is an explicit transition:
+
+```
+Change status:   from [ Awaiting delivery ▾ ]   to [ Completed ▾ ]
+                 12 of the 24 selected sales are Awaiting delivery
+```
+
+- The **`from` picker** lists only the statuses actually present in the current selection, each with its
+  count (`Awaiting delivery (12)`, `Cancelled (7)`, `Completed (5)`). It defaults to the largest group
+  when the selection is mixed, and is pre-filled and locked when the selection is already uniform.
+- The **`to` picker** lists only the statuses `guardSaleStatusTransition` permits *from* the chosen `from`
+  — so an illegal transition is unreachable rather than attempted-and-skipped. Un-cancel remains
+  constrained to `status_before_cancel`, exactly as the single-row route enforces it.
+- The action applies **only to the `from` group**. The other selected sales are untouched and are shown as
+  such in the confirm dialog (`12 will change · 12 not in the chosen status, unchanged`) — not as errors,
+  and not silently.
+- To move two starting statuses to the same target, the user runs the action twice. This is deliberate:
+  it keeps one reason/note/fee attached to one coherent group, and keeps the undo entry meaningful.
+
+Why this is better than the "apply X to all" shape originally spec'd: it converts eligibility from an
+after-the-fact skip list into a **pre-filtered choice**. The user picks a real group and a legal target,
+so the common case produces no skipped rows at all, and the per-row guard becomes a safety net rather
+than the primary UX. It also removes the ambiguity of what a single cancel reason means across sales in
+different states.
 
 Deliberately **not** offered in bulk, with reasons the reconciler should check rather than assume:
 
@@ -221,11 +270,22 @@ Reports are **read-only presentation**, and are being rewritten right now by `rc
 replaced by `sales/reports/{Overview,Period,SalesList,Grouped,Returns,Expenses}Report.tsx` plus a rewritten
 `ReportsHub.tsx`).
 
-The user's ask named reports, so it is **not dropped** — it is sequenced:
+**Settled by the user (Sep 3):** "not real editing read only copy/export, but can add columns or details
+based on available data."
 
 - Reports get select mode with **read-only** actions only: *Copy selected rows*, *Export selected*.
-- No mutating bulk action in a report view. A report row is an aggregate, not the record; editing belongs
-  on the list surface that owns the record.
+- **No mutating bulk action in a report view.** A report row is an aggregate, not the record; editing
+  belongs on the list surface that owns the record.
+- **Reports gain a column chooser** — the user explicitly wants to surface more of the data that is
+  already there. This uses the existing shared `ColumnChooser` + `useColumnPreferences` /
+  `columnPreferences.ts` (all in `frontend/src/components/shared/`), matching the standing convention that
+  large screens get excel-style tables whose optional columns are revealed rather than hidden behind
+  another page. Per-report column preferences persist like every other surface's.
+- **"Based on available data" is a hard boundary**: the chooser exposes only fields the report query
+  already returns or can derive from what it returns. It is not a licence to widen the query, add joins,
+  or introduce new aggregates — that would change the report's cost and its numbers. Any column needing
+  data the query does not have is a separate, costed change.
+- Copy/Export honour the **chosen columns**, so what the user configured is what they get out.
 - **Targets the new report components, after `rc/sec-10-reports` merges.** Phase 4.
 
 ---
@@ -337,7 +397,11 @@ cd cloudflare && npx tsc --noEmit && cd scripts && for f in test-*.cjs; do node 
 
 **Frontend tests**: `useRowSelection` semantics (persistence across a filter change, tri-state group,
 select-visible vs select-all-matching), plus a `BulkResultDialog` test asserting that a partial failure
-keeps the dialog open with the failed rows still selected.
+keeps the dialog open with the failed rows still selected. For the Sep-3 decisions: the `to` picker offers
+**only** transitions `guardSaleStatusTransition` permits from the chosen `from` (an illegal target must be
+unreachable, not merely rejected on submit); the action touches only the `from` group and reports the rest
+as unchanged rather than failed; and `selectAllMatching` cannot be invoked without the selected-only view
+being reachable.
 
 **Layer 5 — browser ledger**, expected vs actual, per surface × {desktop, 375px} × {light, dark}:
 Sales, Returns and Expenses, each covering enter select mode, select across a filter change, confirm
@@ -363,7 +427,9 @@ patch against d9's hotfix tip, both packs, Khmer verified from authoritative sou
 `bulk_change_status`, `copy_receipt_ids`, `copy_as_table`, `copied_n_ids`, `bulk_edit_returns`,
 `bulk_change_reason`, `copy_return_ids`, `bulk_delete_expenses`, `bulk_relabel`, `bulk_reclassify`,
 `bulk_set_direction`, `bulk_result_changed`, `bulk_result_skipped`, `bulk_result_failed`,
-`bulk_retry_failed`, `bulk_reason_ineligible`, `bulk_reason_write_conflict`, `bulk_items_not_editable`.
+`bulk_retry_failed`, `bulk_reason_ineligible`, `bulk_reason_write_conflict`, `bulk_items_not_editable`,
+and for the Sep-3 decisions: `bulk_status_from`, `bulk_status_to`, `bulk_not_in_chosen_status`,
+`review_selected`, `selected_only`, `back_to_all_rows`, `report_choose_columns` (~31 keys total).
 
 **New permission key**: `fees:bulk_delete` — must be added to `permissionDefinitions.ts` (Fees block,
 `:405`), to `rolePresetDefaults.ts`, and enforced in the route. No other new keys: every other bulk action
@@ -371,14 +437,27 @@ reuses the existing per-action grant, so bulk can never exceed single-row author
 
 ---
 
-## 10. Open questions for the user
+## 10. Decisions — settled by the user, Sep 3
 
-1. **Bulk cancel reason** — one reason and note applied to all selected sales, or per sale? This spec
-   assumes **one for all**, stated plainly in the dialog. Per-sale would need a different UI.
-2. **"Select all matching"** across a filtered set that spans pages — offered here behind an explicit
-   second click. Confirm that acting on rows the user has not seen is wanted at all.
-3. **Reports (Phase 4)** — read-only copy/export only, per §5.4. If mutating bulk actions were wanted
-   *in the report views themselves*, that is a different design and needs saying.
+All three questions this spec opened with are now answered. They are **decisions, not assumptions**; the
+implementation is held to them and a reviewer should not re-litigate them.
+
+1. **Sales bulk status is a `from` → `to` transition, not "apply X to all".** The user picks the current
+   status and the new status: *"choose current status (like choose if it is cancelled, awaiting etc…), to
+   what new status"*. Full design in **§5.1.1**. This supersedes the original "apply one status to
+   everything selected" shape, and it resolves the cancel-reason question as a side effect: one reason,
+   note and fee attach to one coherent `from` group.
+2. **"Select all matching" across unseen pages is wanted — and selecting them requires showing them.**
+   *"across all pages haven't seen… but show them when selected"*. `selectAllMatching` is therefore
+   inseparable from the **Selected-only view** in **§4.2.1**: the count pill toggles the list to exactly
+   the selected rows, on the same surface with the same columns, so the user can review and deselect
+   before acting. Acting on rows the user never scrolled past is allowed; acting on rows the user *cannot
+   look at* is not.
+3. **Reports stay read-only, and gain a column chooser.** *"not real editing read only copy/export, but
+   can add columns or details based on available data"*. Copy and export only, no mutating action, plus
+   the shared `ColumnChooser` bounded strictly to fields the report query already returns — see **§5.4**.
+
+Nothing in this spec is now blocked on a user answer. It is blocked only on the branch sequencing in §9.
 
 ---
 
