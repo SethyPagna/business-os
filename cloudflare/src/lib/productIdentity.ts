@@ -173,6 +173,11 @@ export type PossiblySameProductEntry = {
   selling_price_usd: number | null
   stock_quantity: number | null
   image_path: string | null
+  // Per-branch stock lines, so the review shows WHERE each row's stock sits
+  // (the cost ruling: a pair whose set costs differ is review-only and the
+  // reviewer sees both costs and both per-branch stock lines). Zero-quantity
+  // branches are left out; an unstocked row has an empty list.
+  branch_stock: Array<{ branch_id: number; branch_name: string | null; quantity: number }>
 }
 
 export type PossiblySameProductCluster = {
@@ -215,7 +220,7 @@ export function normalizeProductClusterKey(type: 'barcode' | 'name' | 'similar',
 }
 
 export async function findPossiblySameProductClusters(db: D1Compat): Promise<PossiblySameProductCluster[]> {
-  const [rows, dismissalRows] = await Promise.all([
+  const [rows, dismissalRows, branchStockRows] = await Promise.all([
     db.prepare(`
       SELECT p.id, p.name, p.barcode, p.cost_price_usd, p.cost_price_khr,
              p.selling_price_usd, COALESCE(SUM(bs.quantity), 0) AS stock_quantity,
@@ -225,15 +230,35 @@ export async function findPossiblySameProductClusters(db: D1Compat): Promise<Pos
       WHERE p.is_active = 1 AND COALESCE(p.is_group, 0) = 0
       GROUP BY p.id
       ORDER BY p.id ASC
-    `).all<PossiblySameProductEntry & { name_key: string | null }>({}),
+    `).all<Omit<PossiblySameProductEntry, 'branch_stock'> & { name_key: string | null }>({}),
     db.prepare(`SELECT cluster_type, cluster_value FROM product_duplicate_dismissals`)
       .all<{ cluster_type: string; cluster_value: string }>({}),
+    // Per-branch lines for every stocked active product (PK-joined; the
+    // products scan above already costs more than this). Filtered to the
+    // clustered rows below.
+    db.prepare(`
+      SELECT bs.product_id, bs.branch_id, b.name AS branch_name, bs.quantity
+      FROM branch_stock bs
+      JOIN products p ON p.id = bs.product_id
+      LEFT JOIN branches b ON b.id = bs.branch_id
+      WHERE p.is_active = 1 AND COALESCE(p.is_group, 0) = 0 AND COALESCE(bs.quantity, 0) != 0
+      ORDER BY bs.product_id ASC, bs.branch_id ASC
+    `).all<{ product_id: number; branch_id: number; branch_name: string | null; quantity: number }>({}),
   ])
   const dismissed = new Set(dismissalRows.map((row) => dismissKey(row.cluster_type, row.cluster_value)))
+  const branchStockByProduct = new Map<number, PossiblySameProductEntry['branch_stock']>()
+  for (const line of branchStockRows) {
+    const productId = Number(line.product_id)
+    if (!branchStockByProduct.has(productId)) branchStockByProduct.set(productId, [])
+    branchStockByProduct.get(productId)!.push({
+      branch_id: Number(line.branch_id), branch_name: line.branch_name ?? null, quantity: Number(line.quantity) || 0,
+    })
+  }
 
-  const byBarcode = new Map<string, (PossiblySameProductEntry & { name_key: string | null })[]>()
-  const byNameKey = new Map<string, (PossiblySameProductEntry & { name_key: string | null })[]>()
-  const byFuzzyKey = new Map<string, (PossiblySameProductEntry & { name_key: string | null })[]>()
+  type ScanRow = Omit<PossiblySameProductEntry, 'branch_stock'> & { name_key: string | null }
+  const byBarcode = new Map<string, ScanRow[]>()
+  const byNameKey = new Map<string, ScanRow[]>()
+  const byFuzzyKey = new Map<string, ScanRow[]>()
   for (const row of rows) {
     const barcode = String(row.barcode || '').trim()
     if (barcode.length >= MIN_REAL_BARCODE_LENGTH) {
@@ -251,11 +276,16 @@ export async function findPossiblySameProductClusters(db: D1Compat): Promise<Pos
     }
   }
 
-  const toEntry = (row: PossiblySameProductEntry): PossiblySameProductEntry => ({
+  // Each entry carries WHERE its stock sits, not just how much: a pair whose
+  // set costs genuinely differ is review-only (productDetailRule.ts's cost
+  // ruling), and the reviewer deciding it by hand needs both costs and both
+  // rows' per-branch lines in front of them. An unstocked row gets [].
+  const toEntry = (row: ScanRow): PossiblySameProductEntry => ({
     id: row.id, name: row.name, barcode: row.barcode,
     cost_price_usd: row.cost_price_usd, cost_price_khr: row.cost_price_khr,
     selling_price_usd: row.selling_price_usd,
     stock_quantity: row.stock_quantity, image_path: row.image_path,
+    branch_stock: branchStockByProduct.get(Number(row.id)) || [],
   })
 
   const clusters: PossiblySameProductCluster[] = []

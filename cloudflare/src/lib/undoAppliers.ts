@@ -95,6 +95,14 @@ export interface MergeReversal {
     special_price_usd: number
     special_price_khr: number
   }
+  // The keeper's cost BEFORE the fold. A keeper with no cost recorded takes
+  // the discarded row's (the cost ruling: 0/NULL is missing, not different),
+  // so undo has to put the original value back. Absent on older snapshots,
+  // whose folds never touched cost.
+  keeperCostBefore?: {
+    cost_price_usd: number
+    cost_price_khr: number
+  }
   keeperStockBefore: Array<{ branch_id: number; quantity: number }>
   dupStockBefore: Array<{ branch_id: number; quantity: number; rfid_confirmed_qty: number }>
   dupImagesBefore: Array<{ image_path: string; sort_order: number | null }>
@@ -298,6 +306,20 @@ async function applyMergeReversal(env: Env, r: MergeReversal): Promise<void> {
         sellingKhr: Number(r.keeperPricingBefore.selling_price_khr) || 0,
         specialUsd: Number(r.keeperPricingBefore.special_price_usd) || 0,
         specialKhr: Number(r.keeperPricingBefore.special_price_khr) || 0,
+      },
+    })
+  }
+  if (r.keeperCostBefore) {
+    stmts.push({
+      sql: `UPDATE products
+            SET cost_price_usd = @costUsd,
+                cost_price_khr = @costKhr,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = @keeperId`,
+      params: {
+        keeperId,
+        costUsd: Number(r.keeperCostBefore.cost_price_usd) || 0,
+        costKhr: Number(r.keeperCostBefore.cost_price_khr) || 0,
       },
     })
   }

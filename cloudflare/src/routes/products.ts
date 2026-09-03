@@ -18,7 +18,7 @@ import { validateUploadedBuffer } from '../lib/uploadSecurity'
 import { checkRateLimit, getClientIp } from '../lib/rateLimit'
 import { audit } from '../lib/audit'
 import { findDuplicateProductGroups, findPossiblySameProductClusters, normalizeProductClusterKey } from '../lib/productIdentity'
-import { normalizeProductGroupName, resolveMergedPricing } from '../lib/productDetailRule'
+import { normalizeProductGroupName, compareCostField, compareCosts, costFillFromDiscarded, detailsMergeCompatible, resolveMergedPricing, type CostVerdict } from '../lib/productDetailRule'
 import { registerMergeFold, recordMergeUndoSnapshot, recordBulkMergeUndoSnapshot, recordSupplierBackfillSnapshot, MERGE_REPARENT_TABLES, type MergeReversal, type MergeStockDisposition } from '../lib/undoAppliers'
 import { attachBatchCounts } from '../lib/productBatches'
 import { maybeQueueForReview } from '../lib/reviewGate'
@@ -475,16 +475,44 @@ type ProductSearchOptions = { useSearchIndex?: boolean }
 // So: once a search has picked a page of results, look at which OTHER
 // active products anywhere in the catalog share a search-result row's
 // normalized name (and aren't already in the page), and pull those in too.
+// SQL that reproduces normalizeProductGroupName (productDetailRule.ts) for a
+// name column: whitespace of any kind collapsed to single spaces, trimmed,
+// lowercased.
+//
+// It exists because the three "same name" normalizations in this system do NOT
+// agree today. normalizeProductGroupName collapses internal whitespace; the
+// stored products.name_key column (migration 0010's backfill and triggers) is
+// lower(trim(name)) and does NOT collapse; and the sibling-expansion query
+// below used to compare lower(trim(p.name)) against a collapsed JS key. So a
+// product named "Face  Cream" (two spaces) was invisible to every name-based
+// sweep -- it grouped in the UI but was never fetched as a sibling and never
+// found as an identity twin. The comment that used to sit here claiming parity
+// was simply wrong.
+//
+// Rewriting name_key and its triggers is a migration (registry 0111, scheduled
+// after today's deploy), so until that lands the collapse is done in the query:
+// tabs/newlines/CRs become spaces, then runs of spaces collapse (four halving
+// rounds, so up to 16 consecutive spaces), then trim + lower. Callers that can
+// also match the stored key OR both forms together -- neither is a superset of
+// the other -- and settle identity in JS with the shared rule.
+const SQL_NAME_GROUP_KEY = (column: string): string => {
+  const spaced = `replace(replace(replace(${column}, char(9), ' '), char(10), ' '), char(13), ' ')`
+  const collapsed = `replace(replace(replace(replace(${spaced}, '  ', ' '), '  ', ' '), '  ', ' '), '  ', ' ')`
+  return `lower(trim(${collapsed}))`
+}
+
 // One extra indexed-ish query (name compare is case/whitespace-normalized,
 // so it can't use a plain index, but the IN-list is bounded to this page's
 // distinct names, not the whole catalog) rather than N queries.
 async function expandSearchResultsToNameSiblings(env: Env, items: Array<Record<string, unknown>>): Promise<Array<Record<string, unknown>>> {
   if (!items.length) return items
   const seenIds = new Set(items.map((p) => Number(p.id)).filter((id) => Number.isFinite(id) && id > 0))
-  // Matches normalizeProductGroupName's own normalization exactly (trim +
-  // collapse internal whitespace + lowercase) so this can't miss a sibling
-  // the client would otherwise have grouped it with, or pull in one it
-  // wouldn't have.
+  // The JS key below is normalizeProductGroupName's normalization: trim +
+  // collapse internal whitespace + lowercase. The SQL side must reproduce it,
+  // which is what SQL_NAME_GROUP_KEY does -- a plain lower(trim(name)) does
+  // NOT (it leaves a doubled internal space intact), so a sibling typed with
+  // two spaces was invisible to this expansion and the client never got the
+  // row it would have grouped.
   const namesByKey = new Map<string, string>()
   for (const item of items) {
     const rawName = String(item.name || '').trim().replace(/\s+/g, ' ')
@@ -515,7 +543,7 @@ async function expandSearchResultsToNameSiblings(env: Env, items: Array<Record<s
            COALESCE(p.auto_merged_count, 0) AS auto_merged_count
       FROM products p
       WHERE p.is_active = 1
-        AND lower(trim(p.name)) IN (${sql})
+        AND ${SQL_NAME_GROUP_KEY('p.name')} IN (${sql})
     `).all<Record<string, unknown>>(params)
   })
 
@@ -1559,25 +1587,57 @@ async function findSameProductIdentityProduct(
   costPriceUsd: unknown,
   costPriceKhr: unknown,
   excludeId: number | null,
-): Promise<{ id: number; name: string; barcode: string; cost_price_usd: number; cost_price_khr: number } | null> {
-  const trimmedBarcode = String(barcode ?? '').trim()
+): Promise<IdentityTwin | null> {
+  return (await findSameProductIdentityProducts(env, name, barcode, costPriceUsd, costPriceKhr, excludeId))[0] || null
+}
+
+type IdentityTwin = { id: number; name: string; barcode: string; cost_price_usd: number; cost_price_khr: number }
+
+// Sweeps EVERY child row under the name -- never the first row the database
+// happens to hand back, and never only the one the caller can see.
+//
+// The old shape was `... AND <barcode> AND <cost> ... LIMIT 1`: it re-spelled
+// the identity rule in SQL (a whitespace-collapse that is not
+// normalizeProductGroupName, its own barcode/cost comparisons) and then took
+// an arbitrary row out of however many matched. Two defects in one: a second
+// definition of "same product" that can drift from the shared one, and the
+// rows[0] class of bug where three identical child rows are silently reduced to
+// whichever one SQLite returned first.
+//
+// Now the SQL only NARROWS to the name group -- deliberately by BOTH the stored
+// name_key and SQL_NAME_GROUP_KEY, because the trigger writes lower(trim(name))
+// while normalizeProductGroupName also collapses internal whitespace: neither
+// is a superset of the other (a stale/uncollapsed key on one side, a
+// whitespace-normalized name on the other), so a "Face  Cream" sibling must not
+// slip through either door. ORDER BY id ASC makes the result
+// deterministic, and the SHARED normalizeProductGroupName +
+// detailsMergeCompatible (productDetailRule.ts) decide identity: same barcode,
+// and costs that do not DISAGREE -- a cost of 0/NULL is missing, not
+// different, so "Face Cream / X / $8" and "Face Cream / X / (no cost)" are one
+// product and the guard refuses to mint the second. Two SET costs that differ
+// are a legitimate sibling child row and pass. Callers that only need one twin
+// take [0] (the lowest id, so repeated saves converge instead of bouncing);
+// callers that need to tell the operator how many there are read .length.
+export async function findSameProductIdentityProducts(
+  env: Env,
+  name: string,
+  barcode: unknown,
+  costPriceUsd: unknown,
+  costPriceKhr: unknown,
+  excludeId: number | null,
+): Promise<IdentityTwin[]> {
   const nameKey = normalizeProductGroupName(name)
-  if (!nameKey) return null
-  const costUsdCents = Math.round((Number(costPriceUsd) || 0) * 100)
-  const costKhrCents = Math.round((Number(costPriceKhr) || 0) * 100)
-  const row = await getDb(env).prepare(`
+  if (!nameKey) return []
+  const details = { barcode, cost_price_usd: costPriceUsd, cost_price_khr: costPriceKhr }
+  const candidates = await getDb(env).prepare(`
     SELECT id, name, barcode, cost_price_usd, cost_price_khr FROM products
     WHERE is_active = 1
-      AND LOWER(TRIM(COALESCE(barcode, ''))) = LOWER(@barcode)
-      AND LOWER(TRIM(REPLACE(REPLACE(REPLACE(name, '  ', ' '), '  ', ' '), '  ', ' '))) = @nameKey
-      AND ROUND(COALESCE(cost_price_usd, 0) * 100) = @costUsdCents
-      AND ROUND(COALESCE(cost_price_khr, 0) * 100) = @costKhrCents
+      AND (name_key = @nameKey OR ${SQL_NAME_GROUP_KEY('name')} = @nameKey)
       AND (@excludeId IS NULL OR id != @excludeId)
-    LIMIT 1
-  `).get<{ id: number; name: string; barcode: string; cost_price_usd: number; cost_price_khr: number }>({
-    nameKey, barcode: trimmedBarcode, costUsdCents, costKhrCents, excludeId,
-  })
-  return row || null
+    ORDER BY id ASC
+  `).all<IdentityTwin>({ nameKey, excludeId })
+  return candidates.filter((row) => normalizeProductGroupName(row.name) === nameKey
+    && detailsMergeCompatible(details, row))
 }
 
 app.post('/', async (c) => {
@@ -1600,14 +1660,20 @@ app.post('/', async (c) => {
   // Same name with a DIFFERENT (or no) barcode stays a legitimate child row
   // and passes through untouched. Checked before the review queue so a
   // reviewer is never asked to approve a duplicate either.
-  const duplicate = await findSameProductIdentityProduct(
+  const identityTwins = await findSameProductIdentityProducts(
     c.env, name, body.barcode, body.cost_price_usd, body.cost_price_khr, null,
   )
+  const duplicate = identityTwins[0] || null
   if (duplicate) {
     return c.json({
       error: `"${duplicate.name}" already exists with this barcode and cost — same name + barcode + cost is the same product. Edit it or add stock to it instead of creating a duplicate.`,
       code: 'duplicate_product',
       duplicate,
+      // Every child row under this name that shares the identity, not just the
+      // one being offered: three identical rows is a Conflicts job, and the
+      // operator has to be told rather than shown one arbitrary row.
+      duplicates: identityTwins,
+      duplicateCount: identityTwins.length,
     }, 409)
   }
 
@@ -1831,12 +1897,15 @@ app.put('/:id', async (c) => {
     const nextBarcode = body.barcode !== undefined ? body.barcode : current?.barcode
     const nextCostUsd = body.cost_price_usd !== undefined ? body.cost_price_usd : current?.cost_price_usd
     const nextCostKhr = body.cost_price_khr !== undefined ? body.cost_price_khr : current?.cost_price_khr
-    const duplicate = await findSameProductIdentityProduct(c.env, nextName, nextBarcode, nextCostUsd, nextCostKhr, Number(id))
+    const identityTwins = await findSameProductIdentityProducts(c.env, nextName, nextBarcode, nextCostUsd, nextCostKhr, Number(id))
+    const duplicate = identityTwins[0] || null
     if (duplicate) {
       return c.json({
         error: `"${duplicate.name}" already exists with this barcode and cost — same name + barcode + cost is the same product. Merge into it instead of creating a twin.`,
         code: 'duplicate_product',
         duplicate,
+        duplicates: identityTwins,
+        duplicateCount: identityTwins.length,
       }, 409)
     }
     // D6 / 9.1 ("rename does not regroup"): when the operator chose to
@@ -2513,6 +2582,81 @@ export async function readMergePricingChange(
   return { before, after, changes }
 }
 
+// The THIRD thing the operator has to be told before they confirm: whether the
+// two rows are actually the same product.
+//
+// Name + barcode + cost is the identity rule (productDetailSignature); a row
+// with the same name but a different barcode or cost is a legitimate SIBLING
+// child row, not a duplicate. The Conflicts review deliberately surfaces those
+// sibling groups too (same name / similar name clusters), so "Keep this" there
+// can be pointed at a row that is NOT identity-equal -- a real decision the
+// operator may want to make, but never one they should make without being told.
+// When the identity differs, the dialog says which field differs and states
+// plainly that the stock would land on a different-identity row.
+//
+// The comparison is the shared rule (normalizeProductGroupName +
+// productDetailSignature via normalizedBarcode/cents), never a second
+// hand-rolled one: a divergent copy is how "the importer and the reviewer
+// disagree about what one product is" starts.
+export type MergeIdentityDiff = {
+  same: boolean
+  differs: Array<{ field: 'name' | 'barcode' | 'cost_price_usd' | 'cost_price_khr'; keeper: string; discarded: string }>
+  // The cost ruling (productDetailRule.ts compareCosts): 'differs' only when
+  // BOTH sides carry a cost and they disagree -- review only, never automatic.
+  // 'missing' when exactly one side has no cost: the rows are the same product
+  // and the survivor takes the real cost, listed in costFill so the operator
+  // is told which value lands on the kept row.
+  costVerdict: CostVerdict
+  costFill: Array<{ field: 'cost_price_usd' | 'cost_price_khr'; value: number }>
+}
+
+type IdentityRow = { name?: unknown; barcode?: unknown; cost_price_usd?: unknown; cost_price_khr?: unknown }
+
+const moneyText = (value: unknown): string => (Math.round((Number(value) || 0) * 100) / 100).toString()
+
+export function compareMergeIdentity(keeper: IdentityRow, discarded: IdentityRow): MergeIdentityDiff {
+  const differs: MergeIdentityDiff['differs'] = []
+  if (normalizeProductGroupName(keeper.name) !== normalizeProductGroupName(discarded.name)) {
+    differs.push({ field: 'name', keeper: String(keeper.name ?? ''), discarded: String(discarded.name ?? '') })
+  }
+  // Same normalization productDetailSignature applies to a barcode.
+  if (String(keeper.barcode ?? '').trim().toLowerCase() !== String(discarded.barcode ?? '').trim().toLowerCase()) {
+    differs.push({ field: 'barcode', keeper: String(keeper.barcode ?? ''), discarded: String(discarded.barcode ?? '') })
+  }
+  // A cost only "differs" when both rows carry one. One side at 0/NULL is a
+  // MISSING cost -- not a different one -- so it is never listed as a
+  // difference; it shows up in costFill instead.
+  for (const field of ['cost_price_usd', 'cost_price_khr'] as const) {
+    if (compareCostField(keeper[field], discarded[field]) === 'differs') {
+      differs.push({ field, keeper: moneyText(keeper[field]), discarded: moneyText(discarded[field]) })
+    }
+  }
+  const costVerdict = compareCosts(keeper, discarded)
+  // Cross-check against the shared merge-identity rule so this can never
+  // drift into a second, disagreeing definition of "same product".
+  const same = detailsMergeCompatible(keeper, discarded)
+    && normalizeProductGroupName(keeper.name) === normalizeProductGroupName(discarded.name)
+  return {
+    same,
+    differs: same ? [] : differs,
+    costVerdict,
+    costFill: costFillFromDiscarded(keeper, discarded),
+  }
+}
+
+export async function readMergeIdentityDiff(
+  db: ReturnType<typeof getDb>,
+  keeperId: number,
+  dupId: number,
+): Promise<MergeIdentityDiff> {
+  const columns = 'name, barcode, cost_price_usd, cost_price_khr'
+  const [keeperRow, dupRow] = await Promise.all([
+    db.prepare(`SELECT ${columns} FROM products WHERE id = @id`).get<IdentityRow>({ id: keeperId }),
+    db.prepare(`SELECT ${columns} FROM products WHERE id = @id`).get<IdentityRow>({ id: dupId }),
+  ])
+  return compareMergeIdentity(keeperRow || {}, dupRow || {})
+}
+
 // True when discarding this row would destroy or move something real, i.e. when
 // the operator MUST be asked. Quantity is the deciding fact; a lot row that is
 // live but empty carries nothing and is folded/deactivated either way.
@@ -2604,14 +2748,24 @@ export async function foldDuplicateProductInto(
   // Keeper's image_path BEFORE the fold: the fold adopts the dup's image only
   // when the keeper had none, so undo restores this captured value verbatim.
   const canonicalBefore = await db
-    .prepare(`SELECT image_path, selling_price_usd, selling_price_khr, special_price_usd, special_price_khr
+    .prepare(`SELECT image_path, selling_price_usd, selling_price_khr, special_price_usd, special_price_khr, cost_price_usd, cost_price_khr
               FROM products WHERE id = @id`)
-    .get<{ image_path: string | null; selling_price_usd: number | null; selling_price_khr: number | null; special_price_usd: number | null; special_price_khr: number | null }>({ id: canonicalId })
+    .get<{ image_path: string | null; selling_price_usd: number | null; selling_price_khr: number | null; special_price_usd: number | null; special_price_khr: number | null; cost_price_usd: number | null; cost_price_khr: number | null }>({ id: canonicalId })
   const dupPricing = await db
-    .prepare(`SELECT selling_price_usd, selling_price_khr, special_price_usd, special_price_khr
+    .prepare(`SELECT selling_price_usd, selling_price_khr, special_price_usd, special_price_khr, cost_price_usd, cost_price_khr
               FROM products WHERE id = @id`)
-    .get<{ selling_price_usd: number | null; selling_price_khr: number | null; special_price_usd: number | null; special_price_khr: number | null }>({ id: dup.id })
+    .get<{ selling_price_usd: number | null; selling_price_khr: number | null; special_price_usd: number | null; special_price_khr: number | null; cost_price_usd: number | null; cost_price_khr: number | null }>({ id: dup.id })
   const mergedPricing = resolveMergedPricing([canonicalBefore || {}, dupPricing || {}])
+  // The cost ruling: a keeper with NO cost recorded (0/NULL) takes the
+  // discarded row's real cost, so the survivor keeps the one value anybody
+  // entered. Never touched when the keeper already has a cost -- two set costs
+  // that differ are the operator's to resolve, and this fold does not average
+  // or overwrite them.
+  const costFillForKeeper = costFillFromDiscarded(canonicalBefore || {}, dupPricing || {})
+  const keeperCostAfter = {
+    cost_price_usd: costFillForKeeper.find((f) => f.field === 'cost_price_usd')?.value ?? (Number(canonicalBefore?.cost_price_usd) || 0),
+    cost_price_khr: costFillForKeeper.find((f) => f.field === 'cost_price_khr')?.value ?? (Number(canonicalBefore?.cost_price_khr) || 0),
+  }
   // Which of the keeper's prices this fold actually moves. Computed from the
   // same two rows and the same fallback chain the UPDATE below writes, so the
   // audit trail cannot claim a change the fold did not make (or miss one it
@@ -2625,6 +2779,18 @@ export async function foldDuplicateProductInto(
   ] as Array<[string, number]>)
     .map(([field, to]) => ({ field, from: Number((canonicalBefore as Record<string, number | null> | null)?.[field]) || 0, to: Number(to) || 0 }))
     .filter((change) => Math.round(change.from * 100) !== Math.round(change.to * 100))
+  // Whether the two rows were actually the same product (name + barcode + cost)
+  // at the moment they were folded. Read BEFORE the batch runs, because the
+  // discarded row is deactivated by it. A merge across a barcode/cost
+  // difference is a legitimate operator decision -- the Conflicts review
+  // deliberately surfaces same-name sibling groups -- but it is exactly the
+  // kind of decision the audit trail has to be able to answer for afterwards.
+  const identityForAudit = compareMergeIdentity(
+    (await db.prepare('SELECT name, barcode, cost_price_usd, cost_price_khr FROM products WHERE id = @id')
+      .get<IdentityRow>({ id: canonicalId })) || {},
+    (await db.prepare('SELECT name, barcode, cost_price_usd, cost_price_khr FROM products WHERE id = @id')
+      .get<IdentityRow>({ id: dup.id })) || {},
+  )
   const dupBatchRows = await db
     .prepare('SELECT id, batch_key, batch_number FROM product_batches WHERE variant_product_id = @id')
     .all<{ id: number; batch_key: string; batch_number: number | null }>({ id: dup.id })
@@ -2731,6 +2897,8 @@ export async function foldDuplicateProductInto(
               selling_price_khr = @sellingKhr,
               special_price_usd = @specialUsd,
               special_price_khr = @specialKhr,
+              cost_price_usd = @costUsd,
+              cost_price_khr = @costKhr,
               updated_at = CURRENT_TIMESTAMP
           WHERE id = @canonicalId`,
     params: {
@@ -2739,6 +2907,9 @@ export async function foldDuplicateProductInto(
       sellingKhr: mergedPricing.selling_price_khr ?? canonicalBefore?.selling_price_khr ?? 0,
       specialUsd: mergedPricing.special_price_usd ?? canonicalBefore?.special_price_usd ?? 0,
       specialKhr: mergedPricing.special_price_khr ?? canonicalBefore?.special_price_khr ?? 0,
+      // Unchanged unless the keeper had no cost and the discarded row did.
+      costUsd: keeperCostAfter.cost_price_usd,
+      costKhr: keeperCostAfter.cost_price_khr,
     },
   })
 
@@ -2914,6 +3085,14 @@ export async function foldDuplicateProductInto(
     // nothing moved) rather than left as an invisible side effect -- the
     // reviewer is shown the same before/after in the confirm dialog.
     priceChanges: priceChangesForAudit,
+    // Same name + barcode + cost, or a cross-identity merge the operator was
+    // warned about and chose anyway? Recorded either way.
+    sameIdentity: identityForAudit.same,
+    identityDiffers: identityForAudit.differs.map((d) => d.field),
+    // 'missing' / 'same' / 'differs' under the cost ruling, and the cost the
+    // survivor took from the discarded row when it had none of its own.
+    costVerdict: identityForAudit.costVerdict,
+    costFilled: costFillForKeeper,
     batchesMoved: batchesMovedThisDup,
     batchesFoldedIntoExistingLot: batchesFoldedThisDup,
     batchesWrittenOff: batchesWrittenOffThisDup,
@@ -2955,6 +3134,10 @@ export async function foldDuplicateProductInto(
         selling_price_khr: Number(canonicalBefore?.selling_price_khr) || 0,
         special_price_usd: Number(canonicalBefore?.special_price_usd) || 0,
         special_price_khr: Number(canonicalBefore?.special_price_khr) || 0,
+      },
+      keeperCostBefore: {
+        cost_price_usd: Number(canonicalBefore?.cost_price_usd) || 0,
+        cost_price_khr: Number(canonicalBefore?.cost_price_khr) || 0,
       },
       keeperStockBefore: canonicalStockBefore.map((r) => ({ branch_id: r.branch_id, quantity: Number(r.quantity) || 0 })),
       dupStockBefore: stockRows.map((r) => ({ branch_id: r.branch_id, quantity: Number(r.quantity) || 0, rfid_confirmed_qty: Number(r.rfid_confirmed_qty) || 0 })),
@@ -3196,9 +3379,10 @@ app.get('/possible-duplicates/merge-preview', async (c) => {
   const db = getDb(c.env)
   const branchRows = await db.prepare('SELECT id, name FROM branches').all<{ id: number; name: string }>({})
   const branchNameById = new Map<number, string>(branchRows.map((b) => [b.id, b.name]))
-  const [stockImpact, pricing] = await Promise.all([
+  const [stockImpact, pricing, identity] = await Promise.all([
     readMergeStockImpact(db, mergeId, branchNameById),
     readMergePricingChange(db, keepId, mergeId),
+    readMergeIdentityDiff(db, keepId, mergeId),
   ])
   return c.json({
     success: true,
@@ -3207,6 +3391,7 @@ app.get('/possible-duplicates/merge-preview', async (c) => {
     stockImpact,
     needsStockChoice: mergeStockImpactNeedsChoice(stockImpact),
     pricing,
+    identity,
   })
 })
 
@@ -3251,6 +3436,9 @@ app.post('/possible-duplicates/merge', async (c) => {
       code: 'stock_choice_required',
       error: `"${dup.name}" still holds ${stockImpact.totalQuantity} in stock. Choose whether that stock moves onto the product you are keeping or is written off before this merge can run.`,
       stockImpact,
+      // Carried on the refusal too, so the dialog the client opens from this
+      // response says the same thing about identity that the preview would.
+      identity: await readMergeIdentityDiff(db, keeper.id, dup.id),
     }, 400)
   }
 
