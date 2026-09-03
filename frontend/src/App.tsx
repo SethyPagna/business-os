@@ -1875,10 +1875,13 @@ export default function App() {
       <Notification notification={notification} onDismiss={dismissNotification} />
       {/* One bottom stack for the shell's floating advisories, so two of them
           can never land on top of each other. It sits clear of BOTH the mobile
-          bottom nav (h-14) and the IosInstallHint band pinned at bottom-0, and
+          bottom nav and the IosInstallHint band that parks above it, and
           is inert where it is empty (pointer-events-none; each card turns
           pointer events back on). */}
-      <div className="pointer-events-none fixed inset-x-2 bottom-[calc(4rem+env(safe-area-inset-bottom))] z-[160] flex flex-col gap-2 md:inset-x-auto md:right-4 md:w-[22rem]">
+      {/* P2-9 finding 9: 4rem cleared the bottom nav but assumed nothing else was
+          stacked down there. The install band publishes its measured height, so
+          the toasts clear whichever of the two is actually on screen. */}
+      <div className="pointer-events-none fixed inset-x-2 bottom-[calc(4rem+var(--app-install-band-height,0px)+env(safe-area-inset-bottom))] z-[160] flex flex-col gap-2 md:inset-x-auto md:right-4 md:w-[22rem]">
         <AppUpdateToast />
         <StoragePersistenceNotice />
       </div>

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import Download from 'lucide-react/dist/esm/icons/download.js'
 import Share from 'lucide-react/dist/esm/icons/share.js'
 import X from 'lucide-react/dist/esm/icons/x.js'
@@ -27,7 +27,11 @@ import {
 //   (`appinstalled`) and a declined prompt can legitimately be offered again
 //   later (the browser itself decides whether/when to re-fire it).
 //
-// Both are hidden once the app is already running standalone.
+// Both are hidden once the app is already running standalone, and both park
+// directly above the mobile bottom nav (--app-bottom-nav-height, 0 on md+
+// where that nav is hidden) rather than on top of it. The safe-area padding
+// is therefore only the band's own on md+; below that the nav underneath
+// already carries it, and adding it here would double-count.
 export default function IosInstallHint() {
   const { t } = useAppHook() as { t: (key: string) => string }
   const [showIosHint, setShowIosHint] = useState(false)
@@ -37,6 +41,36 @@ export default function IosInstallHint() {
     setShowIosHint(shouldOfferIosInstallHint())
     setShowAndroidPrompt(hasDeferredInstallPrompt())
     return onInstallPromptAvailable(() => setShowAndroidPrompt(true))
+  }, [])
+
+  // P2-9 finding 9: the toast stack has to clear whatever this band ends up
+  // being -- one line in English, two or three wrapped Khmer lines, or gone
+  // entirely -- so the band measures itself and publishes the number instead
+  // of the other end guessing it. Cleared on unmount so a dismissed band
+  // stops reserving space.
+  const observerRef = useRef<ResizeObserver | null>(null)
+  const measureBand = useCallback((node: HTMLDivElement | null) => {
+    observerRef.current?.disconnect()
+    observerRef.current = null
+    if (typeof document === 'undefined') return
+    const root = document.documentElement
+    // React hands the callback null on detach, and again with the other
+    // node when the Android half replaces the iOS half.
+    if (!node) {
+      root.style.setProperty('--app-install-band-height', '0px')
+      return
+    }
+    const publish = () => root.style.setProperty('--app-install-band-height', node.offsetHeight + 'px')
+    publish()
+    if (typeof ResizeObserver === 'undefined') return
+    observerRef.current = new ResizeObserver(publish)
+    observerRef.current.observe(node)
+  }, [])
+
+  useEffect(() => () => {
+    observerRef.current?.disconnect()
+    observerRef.current = null
+    if (typeof document !== 'undefined') document.documentElement.style.setProperty('--app-install-band-height', '0px')
   }, [])
 
   if (showAndroidPrompt) {
@@ -50,8 +84,8 @@ export default function IosInstallHint() {
 
     return (
       <div
-        className="fixed inset-x-0 bottom-0 z-[150] flex items-center gap-2.5 border-t border-blue-200 bg-blue-50 px-4 py-2.5 text-sm text-blue-900 shadow-[0_-2px_8px_rgba(0,0,0,0.08)] dark:border-blue-800 dark:bg-blue-950/90 dark:text-blue-100"
-        style={{ paddingBottom: 'calc(0.625rem + env(safe-area-inset-bottom))' }}
+        ref={measureBand}
+        className="fixed inset-x-0 bottom-[var(--app-bottom-nav-height,0px)] z-[150] flex items-center gap-2.5 border-t border-blue-200 bg-blue-50 px-4 py-2.5 text-sm text-blue-900 shadow-[0_-2px_8px_rgba(0,0,0,0.08)] dark:border-blue-800 dark:bg-blue-950/90 dark:text-blue-100 md:pb-[calc(0.625rem+env(safe-area-inset-bottom))]"
         role="status"
       >
         <Download className="h-4 w-4 flex-shrink-0" aria-hidden="true" />
@@ -84,8 +118,8 @@ export default function IosInstallHint() {
 
   return (
     <div
-      className="fixed inset-x-0 bottom-0 z-[150] flex items-center gap-2.5 border-t border-blue-200 bg-blue-50 px-4 py-2.5 text-sm text-blue-900 shadow-[0_-2px_8px_rgba(0,0,0,0.08)] dark:border-blue-800 dark:bg-blue-950/90 dark:text-blue-100"
-      style={{ paddingBottom: 'calc(0.625rem + env(safe-area-inset-bottom))' }}
+      ref={measureBand}
+      className="fixed inset-x-0 bottom-[var(--app-bottom-nav-height,0px)] z-[150] flex items-center gap-2.5 border-t border-blue-200 bg-blue-50 px-4 py-2.5 text-sm text-blue-900 shadow-[0_-2px_8px_rgba(0,0,0,0.08)] dark:border-blue-800 dark:bg-blue-950/90 dark:text-blue-100 md:pb-[calc(0.625rem+env(safe-area-inset-bottom))]"
       role="status"
     >
       <Share className="h-4 w-4 flex-shrink-0" aria-hidden="true" />

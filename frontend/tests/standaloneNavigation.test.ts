@@ -266,13 +266,39 @@ await runTest('the iOS install hint keeps its visible copy short and folds the r
   )
 })
 
+await runTest('the install band parks above the mobile bottom nav instead of over it', () => {
+  // Measured live at 375px before the fix: the band (fixed bottom-0 z-[150],
+  // 49px tall) covered 49 of the bottom nav's 57 pixels, and
+  // document.elementFromPoint at the nav's centre returned the band -- every
+  // nav destination was untappable while the band was up. Both halves of the
+  // band park on the same reservation, which main.css zeroes at md where the
+  // nav is hidden.
+  const hint = fsp.readFileSync(pathp.join(frontendRoot, 'src', 'components', 'shared', 'IosInstallHint.tsx'), 'utf8')
+  const css = fsp.readFileSync(pathp.join(frontendRoot, 'src', 'styles', 'main.css'), 'utf8')
+  const bands = hint.match(/className="fixed inset-x-0 [^"]*z-\[150\][^"]*"/g) || []
+  assert.equal(bands.length, 2, 'expected the iOS half and the Android half of the band')
+  for (const band of bands) {
+    assert.match(band, /bottom-\[var\(--app-bottom-nav-height,0px\)\]/, 'the band must clear the bottom nav: ' + band.slice(0, 80))
+    assert.ok(!/\bbottom-0\b/.test(band), 'bottom-0 puts the band back on top of the nav')
+  }
+  assert.ok(!hint.includes("paddingBottom: 'calc(0.625rem + env(safe-area-inset-bottom))'"), 'below md the nav underneath already carries the safe area; adding it here double-counts')
+  assert.match(hint, /md:pb-\[calc\(0\.625rem\+env\(safe-area-inset-bottom\)\)\]/, 'at md the band is back at the screen edge and needs the home-indicator padding itself')
+  assert.match(css, /--app-bottom-nav-height: calc\(3\.55rem \+ env\(safe-area-inset-bottom, 0px\)\)/, 'main.css must name the nav height once')
+  assert.match(css, /@media \(min-width: 768px\) \{\s*:root \{ --app-bottom-nav-height: 0px; \}/, 'the nav is md:hidden, so the reservation must be 0 there')
+  assert.match(css, /\.safe-area-inset-bottom \{[^}]*height: var\(--app-bottom-nav-height\)/, 'the nav itself must read the same variable, or the two drift apart')
+})
+
 await runTest('the install hint and the update toast cannot cover each other', () => {
-  // Both are bottom-anchored and both can be on screen at once. The toast
-  // stack sits above the bottom nav; the install band is the full-width
-  // strip below it. If they ever shared an offset one would hide the other.
+  // Both are bottom-anchored and both can be on screen at once, stacked:
+  // nav, then band, then toasts. The band measures itself (English is one
+  // line, Khmer wraps to two or three) and publishes the height, so the
+  // toast offset is derived rather than guessed.
   const app = fsp.readFileSync(pathp.join(frontendRoot, 'src', 'App.tsx'), 'utf8')
+  const hint = fsp.readFileSync(pathp.join(frontendRoot, 'src', 'components', 'shared', 'IosInstallHint.tsx'), 'utf8')
   assert.match(app, /<IosInstallHint \/>/, 'App.tsx owns the install band')
-  assert.match(app, /bottom-\[calc\(4rem\+env\(safe-area-inset-bottom\)\)\]/, 'the toast stack must clear the mobile bottom nav (h-14) and the home indicator')
+  assert.match(app, /bottom-\[calc\(4rem\+var\(--app-install-band-height,0px\)\+env\(safe-area-inset-bottom\)\)\]/, 'the toast stack must clear the mobile bottom nav AND the install band')
+  assert.match(hint, /setProperty\('--app-install-band-height', node\.offsetHeight \+ 'px'\)/, 'the band must publish its measured height')
+  assert.match(hint, /setProperty\('--app-install-band-height', '0px'\)/, 'a dismissed band must stop reserving space')
 })
 
 if (failed > 0) {

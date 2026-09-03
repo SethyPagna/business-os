@@ -719,7 +719,18 @@ body.lang-km .text-\[11px\] { font-size: calc(0.78rem * var(--ui-text-scale, 1))
   padding-bottom: env(safe-area-inset-bottom, 0px);
   padding-left: env(safe-area-inset-left, 0px);
   padding-right: env(safe-area-inset-right, 0px);
-  height: calc(3.55rem + env(safe-area-inset-bottom, 0px));
+  height: var(--app-bottom-nav-height);
+}
+
+/* P2-9 finding 9: the height above was a literal, so anything that had to sit
+   clear of the bottom nav re-guessed it (the install band guessed 0 and
+   covered 49 of the nav's 57 measured pixels, killing every nav tap target
+   while it was up). The nav is md:hidden, so the reservation is 0 there. */
+:root {
+  --app-bottom-nav-height: calc(3.55rem + env(safe-area-inset-bottom, 0px));
+}
+@media (min-width: 768px) {
+  :root { --app-bottom-nav-height: 0px; }
 }
 
 /* Same reasoning for the fixed mobile top bar (Sidebar.tsx) and any other
