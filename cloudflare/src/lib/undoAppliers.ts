@@ -94,6 +94,11 @@ export interface MergeReversal {
     selling_price_khr: number
     special_price_usd: number
     special_price_khr: number
+    // Optional again, one layer deeper: snapshots written before Sep 4 2026
+    // predate cost being merged at all, so they carry no cost to restore and
+    // must leave the keeper's cost alone rather than zero it.
+    cost_price_usd?: number
+    cost_price_khr?: number
   }
   keeperStockBefore: Array<{ branch_id: number; quantity: number }>
   dupStockBefore: Array<{ branch_id: number; quantity: number; rfid_confirmed_qty: number }>
@@ -239,12 +244,29 @@ async function applyMergeReversal(env: Env, r: MergeReversal): Promise<void> {
   stmts.push({ sql: 'UPDATE products SET is_active = 1, updated_at = CURRENT_TIMESTAMP WHERE id = @dupId', params: { dupId } })
   stmts.push({ sql: 'UPDATE products SET image_path = @path, updated_at = CURRENT_TIMESTAMP WHERE id = @keeperId', params: { keeperId, path: r.keeperImagePathBefore ?? null } })
   if (r.keeperPricingBefore) {
+    // Cost is restored only when the snapshot recorded it. A pre-Sep-4-2026
+    // snapshot has no cost_price_* in its payload, and writing `|| 0` for a
+    // missing field would wipe a real cost off the keeper on undo -- so the
+    // two columns join the SET list only when they are actually present.
+    const hasCost = r.keeperPricingBefore.cost_price_usd !== undefined
+      || r.keeperPricingBefore.cost_price_khr !== undefined
+    const costSet = hasCost
+      ? `,
+                cost_price_usd = @costUsd,
+                cost_price_khr = @costKhr`
+      : ''
+    const costParams = hasCost
+      ? {
+        costUsd: Number(r.keeperPricingBefore.cost_price_usd) || 0,
+        costKhr: Number(r.keeperPricingBefore.cost_price_khr) || 0,
+      }
+      : {}
     stmts.push({
       sql: `UPDATE products
             SET selling_price_usd = @sellingUsd,
                 selling_price_khr = @sellingKhr,
                 special_price_usd = @specialUsd,
-                special_price_khr = @specialKhr,
+                special_price_khr = @specialKhr${costSet},
                 updated_at = CURRENT_TIMESTAMP
             WHERE id = @keeperId`,
       params: {
@@ -253,6 +275,7 @@ async function applyMergeReversal(env: Env, r: MergeReversal): Promise<void> {
         sellingKhr: Number(r.keeperPricingBefore.selling_price_khr) || 0,
         specialUsd: Number(r.keeperPricingBefore.special_price_usd) || 0,
         specialKhr: Number(r.keeperPricingBefore.special_price_khr) || 0,
+        ...costParams,
       },
     })
   }

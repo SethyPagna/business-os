@@ -18,7 +18,7 @@ import { validateUploadedBuffer } from '../lib/uploadSecurity'
 import { checkRateLimit, getClientIp } from '../lib/rateLimit'
 import { audit } from '../lib/audit'
 import { findDuplicateProductGroups, findPossiblySameProductClusters, normalizeProductClusterKey } from '../lib/productIdentity'
-import { normalizeProductGroupName, resolveMergedPricing } from '../lib/productDetailRule'
+import { normalizeProductGroupName, resolveMergedCost, resolveMergedPricing } from '../lib/productDetailRule'
 import { registerMergeFold, recordMergeUndoSnapshot, recordBulkMergeUndoSnapshot, recordSupplierBackfillSnapshot, type MergeReversal } from '../lib/undoAppliers'
 import { attachBatchCounts } from '../lib/productBatches'
 import { maybeQueueForReview } from '../lib/reviewGate'
@@ -2410,14 +2410,18 @@ export async function foldDuplicateProductInto(
   // Keeper's image_path BEFORE the fold: the fold adopts the dup's image only
   // when the keeper had none, so undo restores this captured value verbatim.
   const canonicalBefore = await db
-    .prepare(`SELECT image_path, selling_price_usd, selling_price_khr, special_price_usd, special_price_khr
+    .prepare(`SELECT image_path, selling_price_usd, selling_price_khr, special_price_usd, special_price_khr, cost_price_usd, cost_price_khr
               FROM products WHERE id = @id`)
-    .get<{ image_path: string | null; selling_price_usd: number | null; selling_price_khr: number | null; special_price_usd: number | null; special_price_khr: number | null }>({ id: canonicalId })
+    .get<{ image_path: string | null; selling_price_usd: number | null; selling_price_khr: number | null; special_price_usd: number | null; special_price_khr: number | null; cost_price_usd: number | null; cost_price_khr: number | null }>({ id: canonicalId })
   const dupPricing = await db
-    .prepare(`SELECT selling_price_usd, selling_price_khr, special_price_usd, special_price_khr
+    .prepare(`SELECT selling_price_usd, selling_price_khr, special_price_usd, special_price_khr, cost_price_usd, cost_price_khr
               FROM products WHERE id = @id`)
-    .get<{ selling_price_usd: number | null; selling_price_khr: number | null; special_price_usd: number | null; special_price_khr: number | null }>({ id: dup.id })
+    .get<{ selling_price_usd: number | null; selling_price_khr: number | null; special_price_usd: number | null; special_price_khr: number | null; cost_price_usd: number | null; cost_price_khr: number | null }>({ id: dup.id })
   const mergedPricing = resolveMergedPricing([canonicalBefore || {}, dupPricing || {}])
+  // Cost is no longer identity (Sep 4 2026), so folding a duplicate must also
+  // reconcile the two costs rather than silently keeping the keeper's: the
+  // survivor carries the mean of the distinct costs, rounded up to 4dp.
+  const mergedCost = resolveMergedCost([canonicalBefore || {}, dupPricing || {}])
   const dupBatchRows = await db
     .prepare('SELECT id, batch_key, batch_number FROM product_batches WHERE variant_product_id = @id')
     .all<{ id: number; batch_key: string; batch_number: number | null }>({ id: dup.id })
@@ -2499,6 +2503,8 @@ export async function foldDuplicateProductInto(
               selling_price_khr = @sellingKhr,
               special_price_usd = @specialUsd,
               special_price_khr = @specialKhr,
+              cost_price_usd = @costUsd,
+              cost_price_khr = @costKhr,
               updated_at = CURRENT_TIMESTAMP
           WHERE id = @canonicalId`,
     params: {
@@ -2507,6 +2513,8 @@ export async function foldDuplicateProductInto(
       sellingKhr: mergedPricing.selling_price_khr ?? canonicalBefore?.selling_price_khr ?? 0,
       specialUsd: mergedPricing.special_price_usd ?? canonicalBefore?.special_price_usd ?? 0,
       specialKhr: mergedPricing.special_price_khr ?? canonicalBefore?.special_price_khr ?? 0,
+      costUsd: mergedCost.cost_price_usd ?? canonicalBefore?.cost_price_usd ?? 0,
+      costKhr: mergedCost.cost_price_khr ?? canonicalBefore?.cost_price_khr ?? 0,
     },
   })
 
@@ -2644,6 +2652,8 @@ export async function foldDuplicateProductInto(
         selling_price_khr: Number(canonicalBefore?.selling_price_khr) || 0,
         special_price_usd: Number(canonicalBefore?.special_price_usd) || 0,
         special_price_khr: Number(canonicalBefore?.special_price_khr) || 0,
+        cost_price_usd: Number(canonicalBefore?.cost_price_usd) || 0,
+        cost_price_khr: Number(canonicalBefore?.cost_price_khr) || 0,
       },
       keeperStockBefore: canonicalStockBefore.map((r) => ({ branch_id: r.branch_id, quantity: Number(r.quantity) || 0 })),
       dupStockBefore: stockRows.map((r) => ({ branch_id: r.branch_id, quantity: Number(r.quantity) || 0, rfid_confirmed_qty: Number(r.rfid_confirmed_qty) || 0 })),
