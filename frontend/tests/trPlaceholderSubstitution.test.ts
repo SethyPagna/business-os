@@ -111,7 +111,6 @@ for (const file of walk(path.join(frontend, 'src'))) {
 // lane-a merges, this test goes red and tells whoever merged it to delete this
 // entry. It cannot rot into a permanent allowance.
 const EXPECTED_UNFIXED = new Map<string, string>([
-  ['src/components/inventory/FastStockInModal.tsx', 'stock_session_completed'],
 ])
 
 const found = sites.map((s) => `${s.file}:${s.line} ${s.key} [${s.unmet.join(',')}]`).sort()
