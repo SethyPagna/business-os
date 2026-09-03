@@ -53,6 +53,8 @@ type FeeRow = {
   sale_id: number | null
   branch_id: number | null
   branch_name?: string | null
+  delivery_contact_id: number | null
+  delivery_contact_name?: string | null
   notes: string | null
   created_by: number | null
   created_by_name: string | null
@@ -78,6 +80,21 @@ function normalizeText(value: unknown, maxLength = 500): string | null {
   const str = typeof value === 'string' ? value.trim() : ''
   if (!str) return null
   return str.length > maxLength ? str.slice(0, maxLength) : str
+}
+
+function optionalPositiveId(value: unknown): number | null {
+  if (value === undefined || value === null || value === '') return null
+  const id = Number(value)
+  return Number.isSafeInteger(id) && id > 0 ? id : null
+}
+
+async function requireDeliveryContact(db: ReturnType<typeof getDb>, value: unknown): Promise<number | null> {
+  const id = optionalPositiveId(value)
+  if (value !== undefined && value !== null && value !== '' && id == null) throw new Error('INVALID_DELIVERY_CONTACT')
+  if (id == null) return null
+  const row = await db.prepare('SELECT id FROM delivery_contacts WHERE id = @id').get<{ id: number }>({ id })
+  if (!row) throw new Error('INVALID_DELIVERY_CONTACT')
+  return id
 }
 
 // Labels are reusable tags (the /labels endpoint below feeds them back as
@@ -115,7 +132,7 @@ function normalizeDate(value: unknown): string {
 // per-page search implementation.
 app.get('/', async (c) => {
   const db = getDb(c.env)
-  const { search, fee_type: feeType, from, to, sale_id: saleId, branch_id: branchId, limit: limitParam, offset: offsetParam } = c.req.query()
+  const { search, fee_type: feeType, from, to, sale_id: saleId, branch_id: branchId, delivery_contact_id: deliveryContactId, limit: limitParam, offset: offsetParam } = c.req.query()
 
   const conditions: string[] = []
   const params: Record<string, unknown> = {}
@@ -149,16 +166,22 @@ app.get('/', async (c) => {
     conditions.push('f.branch_id = @branchId')
     params.branchId = Number(branchId)
   }
+  if (deliveryContactId && deliveryContactId.trim()) {
+    conditions.push('f.delivery_contact_id = @deliveryContactId')
+    params.deliveryContactId = Number(deliveryContactId)
+  }
 
   const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : ''
   const limit = Math.min(Math.max(toNumber(limitParam, 100), 1), 500)
   const offset = Math.max(toNumber(offsetParam, 0), 0)
 
   const rows = await db.prepare(`
-    SELECT f.*, s.receipt_number AS sale_receipt_number, b.name AS branch_name
+    SELECT f.*, s.receipt_number AS sale_receipt_number, b.name AS branch_name,
+      dc.name AS delivery_contact_name
     FROM fees f
     LEFT JOIN sales s ON s.id = f.sale_id
     LEFT JOIN branches b ON b.id = f.branch_id
+    LEFT JOIN delivery_contacts dc ON dc.id = f.delivery_contact_id
     ${where}
     ORDER BY f.fee_date DESC, f.id DESC
     LIMIT @limit OFFSET @offset
@@ -344,10 +367,12 @@ app.get('/:id', async (c) => {
   const id = Number(c.req.param('id'))
   if (!Number.isFinite(id)) return c.json({ error: 'Invalid fee id' }, 400)
   const fee = await db.prepare(`
-    SELECT f.*, s.receipt_number AS sale_receipt_number, b.name AS branch_name
+    SELECT f.*, s.receipt_number AS sale_receipt_number, b.name AS branch_name,
+      dc.name AS delivery_contact_name
     FROM fees f
     LEFT JOIN sales s ON s.id = f.sale_id
     LEFT JOIN branches b ON b.id = f.branch_id
+    LEFT JOIN delivery_contacts dc ON dc.id = f.delivery_contact_id
     WHERE f.id = @id
   `).get<FeeRow>({ id })
   if (!fee) return c.json({ error: 'Fee not found' }, 404)
@@ -371,17 +396,23 @@ app.post('/', async (c) => {
   const feeDate = normalizeDate(body.fee_date ?? body.feeDate)
   const saleId = body.sale_id != null && body.sale_id !== '' ? Number(body.sale_id) : null
   const branchId = body.branch_id != null && body.branch_id !== '' ? Number(body.branch_id) : null
+  let deliveryContactId: number | null
+  try {
+    deliveryContactId = await requireDeliveryContact(db, body.delivery_contact_id ?? body.deliveryContactId)
+  } catch {
+    return c.json({ error: 'Invalid delivery contact' }, 400)
+  }
   const notes = normalizeText(body.notes, 2000)
   const now = new Date().toISOString()
 
   const result = await db.prepare(`
-    INSERT INTO fees (fee_type, label, amount_usd, amount_khr, fee_date, sale_id, branch_id, notes, created_by, created_by_name, created_at, updated_at)
-    VALUES (@feeType, @label, @amountUsd, @amountKhr, @feeDate, @saleId, @branchId, @notes, @createdBy, @createdByName, @now, @now)
+    INSERT INTO fees (fee_type, label, amount_usd, amount_khr, fee_date, sale_id, branch_id, delivery_contact_id, notes, created_by, created_by_name, created_at, updated_at)
+    VALUES (@feeType, @label, @amountUsd, @amountKhr, @feeDate, @saleId, @branchId, @deliveryContactId, @notes, @createdBy, @createdByName, @now, @now)
   `).run({
     feeType, label, amountUsd, amountKhr, feeDate,
     saleId: Number.isFinite(saleId as number) ? saleId : null,
     branchId: Number.isFinite(branchId as number) ? branchId : null,
-    notes, createdBy: user.id, createdByName: user.username || null, now,
+    deliveryContactId, notes, createdBy: user.id, createdByName: user.username || null, now,
   })
 
   const fee = await db.prepare(`SELECT * FROM fees WHERE id = @id`).get<FeeRow>({ id: result.lastInsertRowid })
@@ -431,14 +462,23 @@ app.put('/:id', async (c) => {
   const feeDate = body.fee_date !== undefined || body.feeDate !== undefined ? normalizeDate(body.fee_date ?? body.feeDate) : existing.fee_date
   const saleId = body.sale_id !== undefined ? (body.sale_id === null || body.sale_id === '' ? null : Number(body.sale_id)) : existing.sale_id
   const branchId = body.branch_id !== undefined ? (body.branch_id === null || body.branch_id === '' ? null : Number(body.branch_id)) : existing.branch_id
+  let deliveryContactId = existing.delivery_contact_id
+  if (body.delivery_contact_id !== undefined || body.deliveryContactId !== undefined) {
+    try {
+      deliveryContactId = await requireDeliveryContact(db, body.delivery_contact_id ?? body.deliveryContactId)
+    } catch {
+      return c.json({ error: 'Invalid delivery contact' }, 400)
+    }
+  }
   const notes = body.notes !== undefined ? normalizeText(body.notes, 2000) : existing.notes
   const now = new Date().toISOString()
 
   await db.prepare(`
     UPDATE fees SET fee_type = @feeType, label = @label, amount_usd = @amountUsd, amount_khr = @amountKhr,
-      fee_date = @feeDate, sale_id = @saleId, branch_id = @branchId, notes = @notes, updated_at = @now
+      fee_date = @feeDate, sale_id = @saleId, branch_id = @branchId,
+      delivery_contact_id = @deliveryContactId, notes = @notes, updated_at = @now
     WHERE id = @id
-  `).run({ feeType, label, amountUsd, amountKhr, feeDate, saleId, branchId, notes, now, id })
+  `).run({ feeType, label, amountUsd, amountKhr, feeDate, saleId, branchId, deliveryContactId, notes, now, id })
 
   const fee = await db.prepare(`SELECT * FROM fees WHERE id = @id`).get<FeeRow>({ id })
   await audit(c.env, user.id, user.username || null, 'update', 'fee', id, { fee_type: feeType, amount_usd: amountUsd, amount_khr: amountKhr })

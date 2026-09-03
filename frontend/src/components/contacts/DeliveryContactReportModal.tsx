@@ -21,8 +21,12 @@ interface DeliveryContactReportRow {
   absorbed_fee_usd: number
   actual_cost_usd: number
   actual_cost_count: number
+  linked_expense_count: number
+  linked_expense_usd: number
+  linked_expense_khr: number
   margin_usd: number
   last_delivery_at: string | null
+  last_expense_at: string | null
 }
 
 interface DeliveryContactReportModalProps {
@@ -38,6 +42,10 @@ function tr(t: TranslateFn, key: string, fallback: string): string {
 
 function money(value: unknown): string {
   return `$${(Number(value) || 0).toFixed(2)}`
+}
+
+function expenseMoney(usd: unknown, khr: unknown): string {
+  return `${money(usd)} · ${(Number(khr) || 0).toLocaleString()}៛`
 }
 
 export default function DeliveryContactReportModal({ contactId, contactName, t, onClose }: DeliveryContactReportModalProps) {
@@ -123,6 +131,11 @@ export default function DeliveryContactReportModal({ contactId, contactName, t, 
                 tr(t, 'delivery_actual_cost', 'Actual cost paid'),
                 money(row.actual_cost_usd),
                 `${row.actual_cost_count}/${row.deliveries} ${tr(t, 'recorded', 'recorded')}`,
+              )}
+              {stat(
+                tr(t, 'linked_delivery_expenses', 'Linked expenses'),
+                expenseMoney(row.linked_expense_usd, row.linked_expense_khr),
+                `${row.linked_expense_count} ${tr(t, 'expense_rows', 'expense rows')}${row.last_expense_at ? ` · ${tr(t, 'last_delivery', 'Last')}: ${String(row.last_expense_at).slice(0, 10)}` : ''}`,
               )}
             </div>
             <div className={`rounded-xl border px-3 py-2 text-sm font-semibold ${row.margin_usd < 0

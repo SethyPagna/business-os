@@ -12,7 +12,7 @@
 //   sales.membership_discount_usd = points-redemption discount
 //   sales.tax_usd              = tax charged on the sale
 //   sales.total_usd            = subtotal - discount - membership_discount + tax
-//                                 (does NOT include delivery_fee_usd)
+//                                 + customer-paid delivery_fee_usd
 //   sales.delivery_fee_usd     = delivery fee, only meaningful when
 //                                 is_delivery=1; delivery_fee_paid_by is
 //                                 'customer' (customer pays it, on top of
@@ -440,8 +440,12 @@ export interface DeliveryContactTotalsRow {
   // actual_cost_count says how many deliveries carried a recorded cost.
   actual_cost_usd: number
   actual_cost_count: number
+  linked_expense_count: number
+  linked_expense_usd: number
+  linked_expense_khr: number
   margin_usd: number
   last_delivery_at: string | null
+  last_expense_at: string | null
 }
 
 // One receipt inside a day's drill. revenue_usd is computed the SAME way the
@@ -484,7 +488,7 @@ export async function getPaymentMethodBreakdown(env: Env, f: SalesFilters): Prom
     SELECT COALESCE(NULLIF(TRIM(payment_method), ''), 'Unknown') AS payment_method,
            COUNT(*) AS tx_count,
            COALESCE(SUM(total_usd), 0) AS total_usd,
-           COALESCE(SUM(total_usd + CASE WHEN COALESCE(delivery_fee_paid_by, 'customer') = 'store' THEN 0 ELSE COALESCE(delivery_fee_usd, 0) END), 0) AS collected_usd
+           COALESCE(SUM(total_usd), 0) AS collected_usd
     FROM sales
     WHERE ${whereSql}
     GROUP BY COALESCE(NULLIF(TRIM(payment_method), ''), 'Unknown')
@@ -528,6 +532,39 @@ export async function getDeliveryContactTotals(
     GROUP BY delivery_contact_id, LOWER(TRIM(COALESCE(delivery_contact_name, '')))
   `).all<Record<string, unknown>>(params)
 
+  // Standalone courier payments are expense rows, not sale rows.  Keep the
+  // accounting amounts separate from charged/absorbed sale fees so reports
+  // never double-count or silently reinterpret an Expense-classified label.
+  // fee_date owns the calendar-day filter; an optional time-of-day filter is
+  // evaluated against the source-preserved created_at timestamp in UTC+7.
+  const feeClauses: string[] = ['fees.delivery_contact_id IS NOT NULL']
+  const feeParams: Record<string, unknown> = {}
+  if (f.startDate) { feeClauses.push('fees.fee_date >= @feeStartDate'); feeParams.feeStartDate = f.startDate }
+  if (f.endDate) { feeClauses.push('fees.fee_date <= @feeEndDate'); feeParams.feeEndDate = f.endDate }
+  if (f.branchId) { feeClauses.push('fees.branch_id = @feeBranchId'); feeParams.feeBranchId = f.branchId }
+  const validTime = (value: unknown): value is string => typeof value === 'string' && /^(?:[01]\d|2[0-3]):[0-5]\d$/.test(value)
+  if (validTime(f.startTime) && validTime(f.endTime)) {
+    feeClauses.push(localTimeRangeClause('fees.created_at').replaceAll('@startTime', '@feeStartTime').replaceAll('@endTime', '@feeEndTime'))
+    feeParams.feeStartTime = f.startTime
+    feeParams.feeEndTime = f.endTime
+  }
+  if (f.contactId != null && f.contactId !== '') {
+    feeClauses.push('fees.delivery_contact_id = @feeContactId')
+    feeParams.feeContactId = f.contactId
+  }
+  const expenseRows = await db.prepare(`
+    SELECT fees.delivery_contact_id,
+           COALESCE(NULLIF(TRIM(dc.name), ''), '') AS delivery_contact_name,
+           COUNT(*) AS linked_expense_count,
+           COALESCE(SUM(fees.amount_usd), 0) AS linked_expense_usd,
+           COALESCE(SUM(fees.amount_khr), 0) AS linked_expense_khr,
+           MAX(fees.created_at) AS last_expense_at
+    FROM fees
+    JOIN delivery_contacts dc ON dc.id = fees.delivery_contact_id
+    WHERE ${feeClauses.join(' AND ')}
+    GROUP BY fees.delivery_contact_id, LOWER(TRIM(COALESCE(dc.name, '')))
+  `).all<Record<string, unknown>>(feeParams)
+
   // Merge rows that share a real contact id (name-snapshot renames), keep
   // NULL-id rows separate per name.
   const merged = new Map<string, DeliveryContactTotalsRow & { _lastAt: string }>()
@@ -553,8 +590,12 @@ export async function getDeliveryContactTotals(
         absorbed_fee_usd: add.absorbed,
         actual_cost_usd: add.actual,
         actual_cost_count: add.actualCount,
+        linked_expense_count: 0,
+        linked_expense_usd: 0,
+        linked_expense_khr: 0,
         margin_usd: 0,
         last_delivery_at: lastAt || null,
+        last_expense_at: null,
         _lastAt: lastAt,
       })
       continue
@@ -571,15 +612,48 @@ export async function getDeliveryContactTotals(
       if (name) existing.delivery_contact_name = name
     }
   }
+  for (const r of expenseRows || []) {
+    const id = Number(r.delivery_contact_id)
+    const name = String(r.delivery_contact_name || '')
+    const key = `id:${id}`
+    const existing = merged.get(key)
+    const expenseAt = String(r.last_expense_at || '')
+    if (!existing) {
+      merged.set(key, {
+        delivery_contact_id: id,
+        delivery_contact_name: name,
+        deliveries: 0,
+        charged_fee_usd: 0,
+        absorbed_fee_usd: 0,
+        actual_cost_usd: 0,
+        actual_cost_count: 0,
+        linked_expense_count: num(r.linked_expense_count),
+        linked_expense_usd: num(r.linked_expense_usd),
+        linked_expense_khr: num(r.linked_expense_khr),
+        margin_usd: 0,
+        last_delivery_at: null,
+        last_expense_at: expenseAt || null,
+        _lastAt: '',
+      })
+      continue
+    }
+    existing.linked_expense_count += num(r.linked_expense_count)
+    existing.linked_expense_usd += num(r.linked_expense_usd)
+    existing.linked_expense_khr += num(r.linked_expense_khr)
+    existing.last_expense_at = expenseAt || existing.last_expense_at
+    if (name) existing.delivery_contact_name = name
+  }
   return [...merged.values()]
     .map(({ _lastAt, ...row }) => ({
       ...row,
       charged_fee_usd: round2(row.charged_fee_usd),
       absorbed_fee_usd: round2(row.absorbed_fee_usd),
       actual_cost_usd: round2(row.actual_cost_usd),
+      linked_expense_usd: round2(row.linked_expense_usd),
+      linked_expense_khr: round2(row.linked_expense_khr),
       margin_usd: round2(row.charged_fee_usd - row.actual_cost_usd),
     }))
-    .sort((a, b) => b.deliveries - a.deliveries)
+    .sort((a, b) => (b.deliveries + b.linked_expense_count) - (a.deliveries + a.linked_expense_count))
 }
 
 // X4: per-customer purchase totals -- the "same for customer" leg of the
@@ -603,7 +677,7 @@ export async function getCustomerSalesTotals(
   params.customerId = f.customerId
   const row = await db.prepare(`
     SELECT COUNT(*) AS tx_count,
-           COALESCE(SUM(total_usd + CASE WHEN COALESCE(delivery_fee_paid_by, 'customer') = 'store' THEN 0 ELSE COALESCE(delivery_fee_usd, 0) END), 0) AS collected_usd,
+           COALESCE(SUM(total_usd), 0) AS collected_usd,
            COALESCE(SUM(discount_usd), 0) AS discount_usd,
            COALESCE(SUM(membership_discount_usd), 0) AS membership_discount_usd,
            COALESCE(SUM(membership_points_redeemed), 0) AS points_redeemed,
@@ -656,7 +730,7 @@ export async function getSalesDayReport(
              -- SUM(revenue_usd) over the day == totals.revenue_usd.
              ROUND(CASE WHEN ${recognizedExpr('')} THEN ${netSaleExpr('')} - COALESCE(rf.refund_usd, 0) ELSE 0 END, 2) AS revenue_usd,
              ROUND(COALESCE(discount_usd, 0) + COALESCE(membership_discount_usd, 0), 2) AS discount_usd,
-             ROUND(COALESCE(total_usd, 0) + CASE WHEN COALESCE(delivery_fee_paid_by, 'customer') = 'store' THEN 0 ELSE COALESCE(delivery_fee_usd, 0) END, 2) AS collected_usd
+             ROUND(COALESCE(total_usd, 0), 2) AS collected_usd
       FROM sales
       ${CUSTOMER_REFUND_JOIN}sales.id
       WHERE ${whereSql}

@@ -12,6 +12,8 @@ assert.doesNotMatch(methods, /getAnalytics[\s\S]{0,200}\(\)\s*=>\s*\(\{\}\)/, 'a
 assert.match(dashboard, /function isDashboardSummaryPayload/, 'dashboard should validate summary payloads before rendering them')
 assert.match(dashboard, /function isDashboardAnalyticsPayload/, 'dashboard should validate analytics payloads before rendering them')
 assert.match(dashboard, /Number\.isFinite\(Number\(totals\?\.revenue_usd\)\)/, 'analytics validation must reject an empty totals object that would render as fake zero revenue')
+assert.match(dashboard, /Number\.isFinite\(Number\(totals\?\.tx_count\)\)/, 'analytics validation must use the tx_count field returned by the analytics API')
+assert.doesNotMatch(dashboard, /totals\?\.transaction_count/, 'analytics validation must not require the nonexistent transaction_count field')
 assert.match(dashboard, /if \(!isDashboardAnalyticsPayload\(data\)\)[\s\S]{0,220}normalizeDashboardAnalyticsPayload\(data\)/, 'dashboard must validate the raw response before filling defaults')
 assert.doesNotMatch(dashboard, /setSummary\(\{\}\)/, 'dashboard should preserve the previous summary when refresh fails')
 assert.match(dashboard, /const \[summaryError, setSummaryError\]/, 'dashboard should track summary load errors separately')

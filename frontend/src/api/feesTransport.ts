@@ -24,6 +24,8 @@ export type FeeRecord = {
   sale_receipt_number?: string | null
   branch_id: number | null
   branch_name?: string | null
+  delivery_contact_id: number | null
+  delivery_contact_name?: string | null
   notes: string | null
   created_by: number | null
   created_by_name: string | null
@@ -53,6 +55,7 @@ export type FeeListParams = {
   to?: string
   sale_id?: number | string
   branch_id?: number | string
+  delivery_contact_id?: number | string
   limit?: number
   offset?: number
 }
@@ -65,6 +68,7 @@ export type FeePayload = {
   fee_date?: string
   sale_id?: number | null
   branch_id?: number | null
+  delivery_contact_id?: number | null
   notes?: string | null
   expectedUpdatedAt?: string | null
 }

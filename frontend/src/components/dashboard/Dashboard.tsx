@@ -586,7 +586,7 @@ function isDashboardAnalyticsPayload(value: unknown): value is DashboardAnalytic
   return (
     Boolean(totals && typeof totals === 'object')
     && Number.isFinite(Number(totals?.revenue_usd))
-    && Number.isFinite(Number(totals?.transaction_count))
+    && Number.isFinite(Number(totals?.tx_count))
     && Array.isArray(payload.periodData)
     && Array.isArray(payload.byPayment)
     && Array.isArray(payload.byBranch)
