@@ -664,8 +664,7 @@ body.lang-km .text-\[11px\] { font-size: calc(0.78rem * var(--ui-text-scale, 1))
     padding-left: calc(.75rem + env(safe-area-inset-left, 0px));
   }
   .modal-panel-safe {
-    max-height: calc(100vh - 1.5rem - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));
-    max-height: calc(100dvh - 1.5rem - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));
+    max-height: calc(var(--app-vh-100) - 1.5rem - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));
     max-width: calc(100vw - 1.5rem - env(safe-area-inset-left, 0px) - env(safe-area-inset-right, 0px));
   }
   .scroll-x { overflow-x: auto; -webkit-overflow-scrolling: touch; }
@@ -677,14 +676,13 @@ body.lang-km .text-\[11px\] { font-size: calc(0.78rem * var(--ui-text-scale, 1))
      block could measure taller than what's really visible, pushing the
      modal's total height past what Modal.tsx's own `max-h-modal-92` (which
      already correctly falls back to `dvh`) expected -- the two rules were
-     computing against different viewport definitions. This class uses the
-     same vh-then-dvh-override pattern as `.max-h-modal-92` so both agree,
-     and caps against a lower ceiling (46vh vs the old 50vh) with a smaller
-     floor (200px vs 240px) so there's more slack for the header/manual-
-     entry section to still fit above the fold on short screens. */
+     computing against different viewport definitions. This class reads the
+     shared --app-vh-100 helper so both agree, and caps against a lower
+     ceiling (46% vs the old 50vh) with a smaller floor (200px vs 240px) so
+     there's more slack for the header/manual-entry section to still fit
+     above the fold on short screens. */
   .scanner-video-shell {
-    height: min(46vh, 420px);
-    height: min(46dvh, 420px);
+    height: min(calc(var(--app-vh-100) * .46), 420px);
     min-height: 200px;
   }
 
@@ -731,17 +729,37 @@ body.lang-km .text-\[11px\] { font-size: calc(0.78rem * var(--ui-text-scale, 1))
   padding-right: env(safe-area-inset-right, 0px);
 }
 
-/* iOS Safari's address bar/toolbar is part of the "100vh" box but not part
-   of what's actually visible -- with #app-root also using overflow:hidden,
-   that gap used to mean real content (including the bottom nav) could sit
-   clipped behind Safari's chrome, worst when the toolbar is expanded.
-   Overriding Tailwind's h-screen/min-h-screen utilities here (after
+/* THE viewport-height helper for the whole admin app.
+
+   iOS Safari's address bar/toolbar is part of the "100vh" box but not part of
+   what's actually visible, so anything sized or capped with a raw `vh` renders
+   taller than the visible viewport: with #app-root also using overflow:hidden,
+   real content (including the bottom nav) sits clipped behind Safari's chrome,
+   and a modal's sticky footer and rounded bottom corners land underneath it --
+   which is what read as "the nav bar shows through the modal". `dvh` is the
+   correct unit but is invalid in engines older than iOS 15.4 / Chrome 108,
+   where an invalid declaration silently drops the whole cap.
+
+   Both halves live in ONE custom property instead of being re-solved with a
+   vh-then-dvh double declaration at every call site (which no Tailwind
+   arbitrary value or inline style can express anyway -- a single declaration
+   cannot carry a fallback). Every consumer in the app now reads
+   `var(--app-vh-100)`: the utilities below, the modal/scanner classes above,
+   Tailwind arbitrary values such as `max-h-[calc(var(--app-vh-100)_*_.7)]`,
+   and the two inline styles that need it. This block is intentionally the
+   only place in frontend/src that still names a raw `vh` unit for height --
+   pwaViewportUnits.test.ts pins that. */
+:root { --app-vh-100: 100vh; }
+@supports (height: 100dvh) {
+  :root { --app-vh-100: 100dvh; }
+}
+
+/* Overriding Tailwind's h-screen/min-h-screen utilities here (after
    @tailwind utilities, so this wins on source order at equal specificity)
    fixes every current and future use of those utilities app-wide in one
-   place. 100dvh is invalid in older engines, so the 100vh set first is kept
-   as the fallback there; iOS Safari has supported dvh since 15.4. */
-.h-screen { height: 100vh; height: 100dvh; }
-.min-h-screen { min-height: 100vh; min-height: 100dvh; }
+   place. */
+.h-screen { height: var(--app-vh-100); }
+.min-h-screen { min-height: var(--app-vh-100); }
 
 /* iOS standalone mode can change the visual viewport when browser chrome or
    the keyboard moves. Keep the app shell pinned to that visible viewport and
@@ -751,8 +769,7 @@ body.lang-km .text-\[11px\] { font-size: calc(0.78rem * var(--ui-text-scale, 1))
   max-width: 100%;
   min-height: 0;
   min-height: 100svh;
-  height: 100vh;
-  height: 100dvh;
+  height: var(--app-vh-100);
 }
 #app-root main,
 #app-root .page-scroll {
@@ -769,14 +786,13 @@ body.lang-km .text-\[11px\] { font-size: calc(0.78rem * var(--ui-text-scale, 1))
    render taller than what's actually visible -- its own sticky footer
    (Save/Cancel) and rounded bottom corners end up rendered below the
    visible fold, in the same area the fixed bottom nav bar occupies, which
-   is what read as "the nav bar shows through the modal". Same 92vh-then-
-   92dvh fallback pattern as `.h-screen` above, just as reusable classes
-   since an arbitrary-value utility can't carry two declarations itself. */
-.max-h-modal-90 { max-height: 90vh; max-height: 90dvh; }
-.max-h-modal-92 { max-height: 92vh; max-height: 92dvh; }
-.max-h-modal-80 { max-height: 80vh; max-height: 80dvh; }
-.max-h-modal-85 { max-height: 85vh; max-height: 85dvh; }
-.max-h-modal-88 { max-height: 88vh; max-height: 88dvh; }
+   is what read as "the nav bar shows through the modal". These read the
+   shared --app-vh-100 helper defined above. */
+.max-h-modal-90 { max-height: calc(var(--app-vh-100) * .90); }
+.max-h-modal-92 { max-height: calc(var(--app-vh-100) * .92); }
+.max-h-modal-80 { max-height: calc(var(--app-vh-100) * .80); }
+.max-h-modal-85 { max-height: calc(var(--app-vh-100) * .85); }
+.max-h-modal-88 { max-height: calc(var(--app-vh-100) * .88); }
 
 /* POS product grid. Denser on phones (user, Aug 31: "pos products section is
    showing one whole product display for small screens ... should be minimized
