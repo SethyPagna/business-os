@@ -364,7 +364,7 @@ export default function OtpModal({ mode, userId, targetName, targetUsername, onC
           <div className="space-y-3">
             <div className={`flex items-center gap-1 rounded-lg p-2.5 text-sm font-medium ${mode === 'recover' ? 'bg-red-50 text-red-800 dark:bg-red-900/20 dark:text-red-300' : 'bg-yellow-50 text-yellow-800 dark:bg-yellow-900/20 dark:text-yellow-300'}`}>
               <span>{mode === 'recover'
-                ? (tr('otp_recovery_warning') || `This removes 2FA for ${targetName || targetUsername || 'this account'}, signs it out everywhere, and requires it to enroll again after login.`)
+                ? (tr('otp_recovery_warning') || 'This removes 2FA for {name}, signs it out everywhere, and requires it to enroll again after login.').replace('{name}', targetName || targetUsername || 'this account')
                 : (tr('disable_2fa_warning') || 'Disabling 2FA reduces account security.')}</span>
               <InfoHint label={mode === 'recover' ? (tr('otp_recovery_reset', 'Reset another user’s 2FA') || 'Reset another user’s 2FA') : (tr('disable_2fa') || 'Disable 2FA')} text={mode === 'recover'
                 ? 'Break-glass recovery requires a different signed-in administrator, that administrator’s current password, and an explicit confirmation phrase. The affected account is signed out of every session.'

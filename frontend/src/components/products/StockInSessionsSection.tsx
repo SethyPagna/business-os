@@ -168,8 +168,8 @@ export default function StockInSessionsSection({ t, notify, branches, onChanged 
     }
     if (!window.confirm(tr(
       'confirm_update_stock_session',
-      `Update the receipt details for this ${selected.rows.length}-line stock-in session? The selected lot records will be updated.`,
-    ))) return
+      'Update the receipt details for this {count}-line stock-in session? The selected lot records will be updated.',
+    ).replace('{count}', String(selected.rows.length)))) return
     setBusy(true)
     try {
       const batches = new Map<number, Row>()
