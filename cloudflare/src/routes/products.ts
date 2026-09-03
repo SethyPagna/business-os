@@ -19,7 +19,7 @@ import { checkRateLimit, getClientIp } from '../lib/rateLimit'
 import { audit } from '../lib/audit'
 import { findDuplicateProductGroups, findPossiblySameProductClusters, normalizeProductClusterKey } from '../lib/productIdentity'
 import { normalizeProductGroupName, resolveMergedPricing } from '../lib/productDetailRule'
-import { registerMergeFold, recordMergeUndoSnapshot, recordBulkMergeUndoSnapshot, recordSupplierBackfillSnapshot, type MergeReversal } from '../lib/undoAppliers'
+import { registerMergeFold, recordMergeUndoSnapshot, recordBulkMergeUndoSnapshot, recordSupplierBackfillSnapshot, MERGE_REPARENT_TABLES, type MergeReversal, type MergeStockDisposition } from '../lib/undoAppliers'
 import { attachBatchCounts } from '../lib/productBatches'
 import { maybeQueueForReview } from '../lib/reviewGate'
 import { assertUpdatedAtMatch, getExpectedUpdatedAt, writeConflictResponse, WriteConflictError } from '../lib/conflictControl'
@@ -2425,6 +2425,69 @@ app.post('/unwire-images', async (c) => {
   return c.json({ success: true, cleared })
 })
 
+// What the row about to be discarded still holds, per branch and per lot.
+// Read BEFORE any decision so the reviewer sees the actual numbers -- "3 pcs in
+// Shop across 2 lots" -- rather than agreeing to something described in the
+// abstract, and read again server-side so the guard below cannot be talked out
+// of firing by a stale client.
+export type MergeStockImpact = {
+  productId: number
+  totalQuantity: number
+  lotCount: number
+  branches: Array<{ branchId: number; branchName: string | null; quantity: number; lotCount: number }>
+}
+
+async function readMergeStockImpact(
+  db: ReturnType<typeof getDb>,
+  productId: number,
+  branchNameById: Map<number, string>,
+): Promise<MergeStockImpact> {
+  const [stockRows, lotRows] = await Promise.all([
+    db.prepare('SELECT branch_id, quantity FROM branch_stock WHERE product_id = @id')
+      .all<{ branch_id: number; quantity: number }>({ id: productId }),
+    db.prepare(`SELECT bbs.branch_id AS branch_id, COUNT(*) AS lots
+                FROM branch_batch_stock bbs
+                JOIN product_batches pb ON pb.id = bbs.batch_id
+                WHERE pb.variant_product_id = @id AND bbs.quantity != 0
+                GROUP BY bbs.branch_id`)
+      .all<{ branch_id: number; lots: number }>({ id: productId }),
+  ])
+  const lotsByBranch = new Map<number, number>(lotRows.map((r) => [Number(r.branch_id), Number(r.lots) || 0]))
+  const branchIds = new Set<number>([...stockRows.map((r) => Number(r.branch_id)), ...lotsByBranch.keys()])
+  const qtyByBranch = new Map<number, number>(stockRows.map((r) => [Number(r.branch_id), Number(r.quantity) || 0]))
+  const branches = [...branchIds]
+    .map((branchId) => ({
+      branchId,
+      branchName: branchNameById.get(branchId) ?? null,
+      quantity: qtyByBranch.get(branchId) || 0,
+      lotCount: lotsByBranch.get(branchId) || 0,
+    }))
+    // A branch with neither stock nor a live lot is not worth a dialog row.
+    .filter((b) => b.quantity !== 0 || b.lotCount > 0)
+    .sort((a, b) => a.branchId - b.branchId)
+  return {
+    productId,
+    totalQuantity: branches.reduce((sum, b) => sum + b.quantity, 0),
+    lotCount: branches.reduce((sum, b) => sum + b.lotCount, 0),
+    branches,
+  }
+}
+
+// True when discarding this row would destroy or move something real, i.e. when
+// the operator MUST be asked. Quantity is the deciding fact; a lot row that is
+// live but empty carries nothing and is folded/deactivated either way.
+const mergeStockImpactNeedsChoice = (impact: MergeStockImpact): boolean =>
+  impact.branches.some((b) => b.quantity !== 0)
+
+// The ledger line a WRITE-OFF leaves behind, and the fragment that finds it
+// again afterwards. Both live here so the reason text and the id-capture query
+// can never disagree: the "(#id) removed -- stock written off" middle is the
+// stable part and everything around it is free prose.
+const writeOffMarker = (dupId: number): string => `(#${dupId}) removed -- stock written off`
+function writeOffReason(dup: { id: number; name: string | null }, mergeContext: string): string {
+  return `Duplicate product "${dup.name}" ${writeOffMarker(dup.id)} instead of being merged -- ${mergeContext}`
+}
+
 // The complete fold of ONE duplicate product into a keeper -- branch_stock
 // summed per branch (with an inventory_movements record each), gallery +
 // primary image carried over, product_batches re-pointed lot-by-lot (or
@@ -2435,6 +2498,23 @@ app.post('/unwire-images', async (c) => {
 // POST /possible-duplicates/merge, so the two paths can never drift.
 // Callers recompute the keeper's denormalized stock_quantity afterwards
 // (once per group / once per pair) and bump caches.
+//
+// `stockDisposition` is the operator's answer to "the row you are discarding
+// still holds stock -- what happens to it?", and there are exactly two answers:
+//
+//   'merge'     -- the default and the historical behaviour. Every lot moves
+//                  onto the keeper KEEPING its lot code, batch number, branch
+//                  and dates; a lot whose batch_key already exists on the
+//                  keeper for the same branch has its quantities added into
+//                  that one row rather than being duplicated.
+//   'write_off' -- the lots are deactivated in place with their per-branch
+//                  stock cleared, and one balancing NEGATIVE inventory_movement
+//                  per branch is written on the discarded row (naming the
+//                  reason, the user and the time) so the ledger still adds up
+//                  after the row is gone. Nothing lands on the keeper's shelf.
+//
+// There is no third, silent path: the review endpoint refuses to guess when a
+// stocked row arrives without a choice (400 stock_choice_required).
 export async function foldDuplicateProductInto(
   env: Env,
   db: ReturnType<typeof getDb>,
@@ -2443,17 +2523,22 @@ export async function foldDuplicateProductInto(
   dup: { id: number; name: string | null; image_path?: string | null },
   branchNameById: Map<number, string>,
   mergeContext: string,
+  stockDisposition: MergeStockDisposition = 'merge',
 ): Promise<{
   batchesMoved: number
   batchesFolded: number
+  batchesWrittenOff: number
   imagesMoved: number
   quantityMoved: number
+  quantityWrittenOff: number
   salesReparented: number
   movementsReparented: number
+  returnsReparented: number
   reparentedSaleItemIds: number[]
   reparentedMovementIds: number[]
   reversal: MergeReversal
 }> {
+  const writeOffStock = stockDisposition === 'write_off'
   const canonicalId = canonical.id
   const canonicalName = canonical.name
   // Snapshot the keeper's current batch set at call time; a group caller
@@ -2508,9 +2593,34 @@ export async function foldDuplicateProductInto(
 
   const statements: Array<{ sql: string; params?: Record<string, unknown> }> = []
   let quantityMoved = 0
+  let quantityWrittenOff = 0
   for (const row of stockRows) {
     const qty = Number(row.quantity) || 0
     if (!qty) continue
+    if (writeOffStock) {
+      // REMOVE: nothing lands on the keeper. One negative movement per branch,
+      // equal to exactly what the discarded row held there, written against the
+      // DISCARDED product so it sits in that row's own history -- the reparent
+      // pass further down then carries it onto the keeper with the rest of that
+      // history, which is what keeps the keeper's ledger balanced (the stock
+      // came in on the discarded row and went out again on the same row).
+      quantityWrittenOff += qty
+      statements.push({
+        sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id, branch_name, movement_type, quantity, reason, user_id, user_name, created_at)
+              VALUES (@productId, @productName, @branchId, @branchName, 'adjustment', @quantity, @reason, @userId, @userName, CURRENT_TIMESTAMP)`,
+        params: {
+          productId: dup.id,
+          productName: dup.name,
+          branchId: row.branch_id,
+          branchName: branchNameById.get(row.branch_id) || null,
+          quantity: -qty,
+          reason: writeOffReason(dup, mergeContext),
+          userId: user?.id ?? null,
+          userName: user?.name ?? null,
+        },
+      })
+      continue
+    }
     quantityMoved += qty
     statements.push({
       sql: `INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (@canonicalId, @branchId, @qty)
@@ -2608,7 +2718,42 @@ export async function foldDuplicateProductInto(
     dupStockBefore: Array<{ branch_id: number; quantity: number }>
     keeperStockBefore: Array<{ branch_id: number; quantity: number }>
   }> = []
+  // WRITE-OFF only: each lot deactivated in place, its per-branch stock cleared.
+  const writtenOffBatches: Array<{ batchId: number; stockBefore: Array<{ branch_id: number; quantity: number }> }> = []
+  // The per-lot detail behind a write-off, recorded in the audit entry so the
+  // lots that were destroyed are named (code, number, branch, quantity) rather
+  // than collapsing into one anonymous total.
+  const writtenOffLotDetail: Array<{ batchId: number; batchNumber: number | null; branchId: number; quantity: number }> = []
+  let batchesWrittenOffThisDup = 0
   for (const batchRow of dupBatchRows) {
+    if (writeOffStock) {
+      // REMOVE: the lot belonged to the row being discarded, so it does not
+      // travel. Its branch_batch_stock is cleared and the lot row itself is
+      // deactivated in place (never deleted) because
+      // sale_item_batch_allocations / return_item_batch_allocations may still
+      // point at its id. batch_number is left exactly as it was -- this path
+      // writes no batch_number at all, so it cannot introduce a TEXT value into
+      // that INTEGER column the way the RECON import once did.
+      const dupBatchStockRows = await db
+        .prepare('SELECT branch_id, quantity FROM branch_batch_stock WHERE batch_id = @id')
+        .all<{ branch_id: number; quantity: number }>({ id: batchRow.id })
+      statements.push({ sql: 'DELETE FROM branch_batch_stock WHERE batch_id = @id', params: { id: batchRow.id } })
+      statements.push({ sql: 'UPDATE product_batches SET is_active = 0, updated_at = CURRENT_TIMESTAMP WHERE id = @id', params: { id: batchRow.id } })
+      writtenOffBatches.push({
+        batchId: batchRow.id,
+        stockBefore: dupBatchStockRows.map((r) => ({ branch_id: r.branch_id, quantity: Number(r.quantity) || 0 })),
+      })
+      for (const bbs of dupBatchStockRows) {
+        writtenOffLotDetail.push({
+          batchId: batchRow.id,
+          batchNumber: batchRow.batch_number == null ? null : Number(batchRow.batch_number),
+          branchId: Number(bbs.branch_id),
+          quantity: Number(bbs.quantity) || 0,
+        })
+      }
+      batchesWrittenOffThisDup += 1
+      continue
+    }
     const existingCanonicalBatchId = canonicalBatchIdByKey.get(batchRow.batch_key)
     if (existingCanonicalBatchId) {
       const dupBatchStockRows = await db
@@ -2657,14 +2802,31 @@ export async function foldDuplicateProductInto(
   // is left exactly as-sold (historical receipt fidelity); only the
   // product_id owner moves. Captured first (the ids, not just counts) so the
   // merge is reversible: undo re-parents these exact rows back to the dup.
-  const reparentedSaleItemIds = (await db
-    .prepare('SELECT id FROM sale_items WHERE product_id = @id')
-    .all<{ id: number }>({ id: dup.id })).map((r) => Number(r.id))
-  const reparentedMovementIds = (await db
-    .prepare('SELECT id FROM inventory_movements WHERE product_id = @id')
-    .all<{ id: number }>({ id: dup.id })).map((r) => Number(r.id))
-  statements.push({ sql: 'UPDATE sale_items SET product_id = @canonicalId WHERE product_id = @dupId', params: { canonicalId, dupId: dup.id } })
-  statements.push({ sql: 'UPDATE inventory_movements SET product_id = @canonicalId WHERE product_id = @dupId', params: { canonicalId, dupId: dup.id } })
+  //
+  // The table list is MERGE_REPARENT_TABLES (lib/undoAppliers.ts) -- the ONE
+  // place the forward fold and the undo applier both read, so a link added to
+  // the schema is either on that list or provably not a link (see the
+  // exclusions documented there). Returns in particular used to be missed:
+  // return_items.product_id kept pointing at a deactivated row, so a refund of
+  // a merged-away twin vanished from the survivor's history.
+  const reparentedByTable: Array<{ table: string; column: string; ids: number[] }> = []
+  for (const { table, column } of MERGE_REPARENT_TABLES) {
+    // sql-bound-params: `table`/`column` are compile-time constants from
+    // MERGE_REPARENT_TABLES, never request input.
+    const ids = (await db
+      .prepare(`SELECT id FROM ${table} WHERE ${column} = @id`)
+      .all<{ id: number }>({ id: dup.id })).map((r) => Number(r.id))
+    if (!ids.length) continue
+    reparentedByTable.push({ table, column, ids })
+    statements.push({
+      sql: `UPDATE ${table} SET ${column} = @canonicalId WHERE ${column} = @dupId`,
+      params: { canonicalId, dupId: dup.id },
+    })
+  }
+  const byTable = (table: string): number[] => reparentedByTable.find((e) => e.table === table)?.ids ?? []
+  const reparentedSaleItemIds = byTable('sale_items')
+  const reparentedMovementIds = byTable('inventory_movements')
+  const returnsReparented = byTable('return_items').length + byTable('return_replacement_items').length
 
   await db.batch(statements)
 
@@ -2673,30 +2835,52 @@ export async function foldDuplicateProductInto(
   // fold's rows carry the dup-specific reason fragment -- the dup is now
   // inactive and cannot be re-merged, so no other rows can match) so undo
   // deletes those exact rows by id rather than by a fragile reason match.
+  // A WRITE-OFF's balancing rows were written on the DUP and then carried onto
+  // the keeper by the reparent pass, so they answer to the keeper id here just
+  // like the merge path's adjustments. Both fragments are matched so undo
+  // deletes exactly this fold's own rows whichever disposition ran.
   const adjustmentMovementIds = (await db
-    .prepare(`SELECT id FROM inventory_movements WHERE product_id = @keeperId AND movement_type = 'adjustment' AND reason LIKE @frag`)
-    .all<{ id: number }>({ keeperId: canonicalId, frag: `%(#${dup.id}) into this product%` })).map((r) => Number(r.id))
+    .prepare(`SELECT id FROM inventory_movements
+              WHERE product_id = @keeperId AND movement_type = 'adjustment'
+                AND (reason LIKE @frag OR reason LIKE @writeOffFrag)`)
+    .all<{ id: number }>({
+      keeperId: canonicalId,
+      frag: `%(#${dup.id}) into this product%`,
+      writeOffFrag: `%${writeOffMarker(dup.id)}%`,
+    })).map((r) => Number(r.id))
 
   await audit(env, user?.id ?? null, user?.name ?? null, 'merge_duplicate', 'product', dup.id, {
     productName: dup.name,
     mergedIntoProductId: canonicalId,
     mergedIntoProductName: canonicalName,
+    // Which of the two explicit answers the operator gave for the discarded
+    // row's stock. Never absent -- the endpoint refuses to guess.
+    stockDisposition,
     batchesMoved: batchesMovedThisDup,
     batchesFoldedIntoExistingLot: batchesFoldedThisDup,
+    batchesWrittenOff: batchesWrittenOffThisDup,
+    quantityMoved,
+    quantityWrittenOff,
+    lotsWrittenOff: writtenOffLotDetail,
     // Recorded so a merge that moved imagery is visible in the audit log
     // rather than being an invisible side effect.
     imagesMoved: imagesMovedThisDup,
     salesReparented: reparentedSaleItemIds.length,
     movementsReparented: reparentedMovementIds.length,
+    returnsReparented,
+    reparentedTables: reparentedByTable.map((e) => `${e.table}:${e.ids.length}`),
   })
 
   return {
     batchesMoved: batchesMovedThisDup,
     batchesFolded: batchesFoldedThisDup,
+    batchesWrittenOff: batchesWrittenOffThisDup,
     imagesMoved: imagesMovedThisDup,
     quantityMoved,
+    quantityWrittenOff,
     salesReparented: reparentedSaleItemIds.length,
     movementsReparented: reparentedMovementIds.length,
+    returnsReparented,
     reparentedSaleItemIds,
     reparentedMovementIds,
     // Everything undo needs to restore both products to their exact pre-fold
@@ -2720,9 +2904,12 @@ export async function foldDuplicateProductInto(
       imagesMovedToKeeper: imagesMovedPaths,
       repointedBatches,
       foldedBatches,
+      writtenOffBatches,
       reparentedSaleItemIds,
       reparentedMovementIds,
+      reparentedByTable,
       adjustmentMovementIds,
+      stockDisposition,
       mergeContext,
     },
   }
@@ -2931,14 +3118,42 @@ app.post('/possible-duplicates/dismiss', async (c) => {
   return c.json({ success: true })
 })
 
+// GET /api/products/possible-duplicates/stock-impact?ids=12,34 -- read-only:
+// what each of these rows still holds, per branch and per lot. The Conflicts
+// review and the product-form collision path both call this BEFORE asking the
+// operator to choose, so the merge/remove dialog can put the real numbers in
+// front of them instead of a generic warning.
+app.get('/possible-duplicates/stock-impact', async (c) => {
+  const user = c.get('user')
+  if (getActionTier(user, 'products', 'merge_duplicates') !== 'full') {
+    return c.json({ success: false, error: 'You do not have permission to perform this action' }, 403)
+  }
+  const ids = String(c.req.query('ids') || '')
+    .split(',')
+    .map((part) => Number(part.trim()))
+    .filter((n) => Number.isInteger(n) && n > 0)
+    .slice(0, 25)
+  if (!ids.length) return c.json({ success: false, error: 'ids (comma-separated product ids) are required' }, 400)
+  const db = getDb(c.env)
+  const branchRows = await db.prepare('SELECT id, name FROM branches').all<{ id: number; name: string }>({})
+  const branchNameById = new Map<number, string>(branchRows.map((b) => [b.id, b.name]))
+  const impacts: MergeStockImpact[] = []
+  for (const id of ids) impacts.push(await readMergeStockImpact(db, id, branchNameById))
+  return c.json({ success: true, impacts })
+})
+
 app.post('/possible-duplicates/merge', async (c) => {
   const user = c.get('user')
   if (getActionTier(user, 'products', 'merge_duplicates') !== 'full') {
     return c.json({ error: 'You do not have permission to perform this action' }, 403)
   }
-  const body = await c.req.json().catch(() => ({})) as { keepId?: unknown; mergeId?: unknown }
+  const body = await c.req.json().catch(() => ({})) as { keepId?: unknown; mergeId?: unknown; stock?: unknown }
   const keepId = Number(body.keepId)
   const mergeId = Number(body.mergeId)
+  // The operator's answer for the discarded row's stock. Anything other than
+  // the two words is treated as "no answer given", never as a default.
+  const stockChoice: MergeStockDisposition | null =
+    body.stock === 'merge' ? 'merge' : body.stock === 'write_off' ? 'write_off' : null
   if (!Number.isFinite(keepId) || !Number.isFinite(mergeId) || keepId === mergeId) {
     return c.json({ error: 'keepId and mergeId (two different ids) are required' }, 400)
   }
@@ -2954,16 +3169,41 @@ app.post('/possible-duplicates/merge', async (c) => {
   if (keeper.is_group || dup.is_group) return c.json({ error: 'Group rows cannot be merged — merge the variant products instead' }, 400)
 
   const branchRows = await db.prepare('SELECT id, name FROM branches').all<{ id: number; name: string }>({})
+  const branchNameById = new Map<number, string>(branchRows.map((b) => [b.id, b.name]))
+
+  // THE GUARD. The row being discarded still holds stock and the caller did not
+  // say what to do with it -> refuse, describe what is there, and write nothing.
+  // Merging it onto the keeper and writing it off are both defensible and they
+  // give opposite inventory answers, so the server must not pick one; an
+  // unstocked row needs no answer and proceeds as before.
+  const stockImpact = await readMergeStockImpact(db, dup.id, branchNameById)
+  if (!stockChoice && mergeStockImpactNeedsChoice(stockImpact)) {
+    return c.json({
+      success: false,
+      code: 'stock_choice_required',
+      error: `"${dup.name}" still holds ${stockImpact.totalQuantity} in stock. Choose whether that stock moves onto the product you are keeping or is written off before this merge can run.`,
+      stockImpact,
+    }, 400)
+  }
+
   const stats = await foldDuplicateProductInto(
     c.env, db, user,
     { id: keeper.id, name: keeper.name },
     { id: dup.id, name: dup.name, image_path: dup.image_path },
-    new Map<number, string>(branchRows.map((b) => [b.id, b.name])),
+    branchNameById,
     'possible-duplicates review merge',
+    stockChoice ?? 'merge',
   )
   await db
     .prepare('UPDATE products SET stock_quantity = (SELECT COALESCE(SUM(quantity), 0) FROM branch_stock WHERE product_id = @id), updated_at = CURRENT_TIMESTAMP WHERE id = @id')
     .run({ id: keeper.id })
+  // ...and the discarded row's own cache, which both dispositions empty. Left
+  // stale it would keep reporting phantom stock on a deactivated product -- and
+  // a written-off row reporting stock it no longer has is exactly the kind of
+  // silent mismatch this whole change exists to stop.
+  await db
+    .prepare('UPDATE products SET stock_quantity = (SELECT COALESCE(SUM(quantity), 0) FROM branch_stock WHERE product_id = @id), updated_at = CURRENT_TIMESTAMP WHERE id = @id')
+    .run({ id: dup.id })
 
   // Record the merge as a reload-durable undoable/redoable action. The heavy
   // reversal snapshot goes to undo_snapshots; a small action_history row points
@@ -2976,7 +3216,15 @@ app.post('/possible-duplicates/merge', async (c) => {
   c.executionCtx.waitUntil(broadcast(c.env, 'products', { action: 'update' }))
   c.executionCtx.waitUntil(broadcast(c.env, 'inventory', { action: 'update' }))
   const { reversal: _reversal, reparentedSaleItemIds: _si, reparentedMovementIds: _mi, ...publicStats } = stats
-  return c.json({ success: true, keptId: keeper.id, mergedId: dup.id, actionHistoryId: undoRecord.actionHistoryId, ...publicStats })
+  return c.json({
+    success: true,
+    keptId: keeper.id,
+    mergedId: dup.id,
+    actionHistoryId: undoRecord.actionHistoryId,
+    stockDisposition: stockChoice ?? 'merge',
+    stockImpact,
+    ...publicStats,
+  })
 })
 
 // GET /api/products/zero-quantity-candidates -- read-only scan for the

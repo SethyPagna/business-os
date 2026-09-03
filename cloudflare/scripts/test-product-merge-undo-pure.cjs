@@ -312,10 +312,16 @@ async function run() {
   const appliersSrc = fs.readFileSync(path.join(LIB_DIR, 'undoAppliers.ts'), 'utf8')
 
   await check('products.ts fold re-parents sale_items + inventory_movements and captures their ids', async () => {
-    assert.match(productsSrc, /UPDATE sale_items SET product_id = @canonicalId WHERE product_id = @dupId/)
-    assert.match(productsSrc, /UPDATE inventory_movements SET product_id = @canonicalId WHERE product_id = @dupId/)
-    assert.match(productsSrc, /const reparentedSaleItemIds =/)
-    assert.match(productsSrc, /const reparentedMovementIds =/)
+    // The per-table repoint is now driven by MERGE_REPARENT_TABLES (the one
+    // list undoAppliers.ts and the fold share) instead of two hand-written
+    // UPDATEs, so assert the generic statement AND that both original tables
+    // are still on the list -- dropping either would otherwise pass silently.
+    assert.match(productsSrc, /UPDATE \$\{table\} SET \$\{column\} = @canonicalId WHERE \$\{column\} = @dupId/)
+    assert.match(productsSrc, /for \(const \{ table, column \} of MERGE_REPARENT_TABLES\)/)
+    assert.match(appliersSrc, /\{ table: 'sale_items', column: 'product_id' \}/)
+    assert.match(appliersSrc, /\{ table: 'inventory_movements', column: 'product_id' \}/)
+    assert.match(productsSrc, /const reparentedSaleItemIds = byTable\('sale_items'\)/)
+    assert.match(productsSrc, /const reparentedMovementIds = byTable\('inventory_movements'\)/)
     assert.match(productsSrc, /rfid_confirmed_qty FROM branch_stock WHERE product_id = @id/)
     assert.match(productsSrc, /const adjustmentMovementIds =/)
     assert.match(productsSrc, /registerMergeFold\(foldDuplicateProductInto\)/)
