@@ -126,10 +126,24 @@ runTest('DateEntryInput carries the entry contract the direction asked for', () 
 
 runTest('the shared field is 13px on desktop and >=16px under 768px', () => {
   const css = fs.readFileSync(path.join(SRC, 'styles', 'main.css'), 'utf8')
-  const base = /\.date-entry-input\s*\{[^}]*font-size:\s*16px/.exec(css)
-  assert.ok(base, '.date-entry-input must default to 16px (the iOS focus-zoom floor)')
-  const desktop = /@media \(min-width: 768px\)\s*\{\s*\.date-entry-input\s*\{[^}]*font-size:\s*13px/.exec(css)
-  assert.ok(desktop, '.date-entry-input must drop to 13px at >=768px')
+  const base = /input\.date-entry-input\s*\{[^}]*font-size:[^;]*16px/.exec(css)
+  assert.ok(base, 'input.date-entry-input must floor at 16px (the iOS focus-zoom floor)')
+  const desktop = /@media \(min-width: 768px\)\s*\{\s*input\.date-entry-input\s*\{[^}]*font-size:[^;]*13px/.exec(css)
+  assert.ok(desktop, 'input.date-entry-input must drop to 13px at >=768px')
+  // The regression this pins: a BARE '.date-entry-input { font-size }' rule
+  // has the same specificity as this file's own '.text-sm { ... !important }'
+  // text-scale rules and loses to them on source order, so every adopted
+  // field that passes text-sm rendered at 14px on a phone -- under the very
+  // floor the rule exists to guarantee (measured live at 375px, Sep 3). The
+  // element-qualified selector is what makes that floor real.
+  assert.ok(
+    !/(^|[^a-zA-Z.])\.date-entry-input\s*\{[^}]*font-size/m.test(css),
+    'the font-size rule must stay element-qualified (input.date-entry-input), or .text-sm !important wins',
+  )
+  assert.ok(
+    /\.text-sm\s*\{[^}]*font-size:[^;]*!important/.test(css),
+    'the .text-sm !important scale rule this has to outrank must still exist',
+  )
 })
 
 runTest('the range picker still scopes list and stats through the same onChange', () => {
