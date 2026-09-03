@@ -141,6 +141,14 @@ interface NewReturnModalProps {
   onSuccess?: (result?: unknown) => void | Promise<void>
   fmtUSD: MoneyFormatter
   notify: (message: string, kind?: NoticeKind) => void
+  // Additive prefill (Sep 3 2026). The sale detail modal and the sales
+  // receipt view open THIS component -- the same one the Returns section
+  // opens, with the same flow -- for a sale the user is already looking at.
+  // Seeding step 1's query and letting it run itself is the whole
+  // difference; every guard, lookup and step below is untouched. Omitted
+  // (undefined) from the Returns section, which still starts on a blank
+  // search box.
+  initialReceiptQuery?: string | null
 }
 
 type ReturnedQuantityMap = Record<string, number>
@@ -206,7 +214,7 @@ function getSaleItemKey(item: SaleItemRow): string {
   return String(item.id || `p_${item.product_id}`)
 }
 
-export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify }: NewReturnModalProps) {
+export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, initialReceiptQuery }: NewReturnModalProps) {
   const { user, t, getPermissionTier } = useApp()
   const T = (key: string, fallback: string): string => {
     const value = typeof t === 'function' ? t(key) : undefined
@@ -218,7 +226,7 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify }: N
   const RETURN_REASONS = normalizeReturnReasonList([...returnReasonPresets.customer, OTHER_LABEL])
 
   const [step,          setStep]          = useState<ModalStep>('search')
-  const [searchQuery,   setSearchQuery]   = useState('')
+  const [searchQuery,   setSearchQuery]   = useState(() => String(initialReceiptQuery || '').trim())
   const [foundSale,     setFoundSale]     = useState<SaleRow | null>(null)
   const [searching,     setSearching]     = useState(false)
   const [selectedItems, setSelectedItems] = useState<SaleReturnItem[]>([])
@@ -383,6 +391,19 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify }: N
       }
     }
   }
+
+  // Prefill: run step 1 once, with the seeded receipt number, through the
+  // very same handleSearch the Find button calls -- so the already-returned
+  // reconciliation and the "sale not found" path behave identically. The ref
+  // makes it strict-mode / re-render safe.
+  const autoSearchedRef = useRef(false)
+  useEffect(() => {
+    if (autoSearchedRef.current) return
+    if (!String(initialReceiptQuery || '').trim()) return
+    autoSearchedRef.current = true
+    void handleSearch()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialReceiptQuery])
 
   const handleReturnTypeChange = (v: ReturnType) => {
     setReturnType(v)
