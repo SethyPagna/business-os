@@ -1281,26 +1281,41 @@ export function buildExactBarcodeMatchClause(
   params: Record<string, unknown>,
   paramName = 'barcodeKey',
   column = 'p.barcode',
+  idColumn = 'p.id',
+  table = 'products',
 ): string | undefined {
   const key = searchTermBarcodeKey(rawQuery)
   if (!key) return undefined
   params[paramName] = key
-  // Two probes, sargable one first. `products(barcode)` carries a plain index
-  // (idx_products_barcode_pg, migrations/0001_init.sql), which a predicate
-  // wrapped in ltrim()/replace() can never use -- so the literal forms the
-  // catalog actually stores (the bare code, and the same code zero-padded to
-  // GTIN-14 and beyond) are probed by equality against the raw column, and
-  // the normalized comparison stays behind them as the catch-all for stored
-  // values carrying spaces, hyphens or padding past that width. Both
-  // directions of the asymmetry are covered: a scanner emitting MORE leading
-  // zeros than the catalog stores folds down onto the bare candidate, and one
-  // emitting fewer is padded back up.
+  // Two probes, the index-served one first. `products(barcode)` carries a
+  // plain index (idx_products_barcode_pg, migrations/0001_init.sql), which a
+  // predicate wrapped in ltrim()/replace() can never use -- so the literal
+  // forms the catalog actually stores (the bare code, and the same code
+  // zero-padded to GTIN-14 and beyond) are probed by equality against the raw
+  // column, and the normalized comparison stays behind them as the catch-all
+  // for stored values carrying spaces, hyphens or padding past that width.
+  // Both directions of the asymmetry are covered: a scanner emitting MORE
+  // leading zeros than the catalog stores folds down onto the bare candidate,
+  // and one emitting fewer is padded back up.
+  //
+  // The equality probe is a rowid subquery, not a bare `column IN (...)`
+  // disjunct, on purpose. Confirmed with EXPLAIN QUERY PLAN on the real
+  // migrations (scripts/test-barcode-twin-search-pure.cjs pins it): once
+  // this clause is OR-ed with the FTS/trigram subqueries and the ltrim()
+  // catch-all, an inline `p.barcode IN (...)` is just one more per-row test
+  // inside a scan of every active product -- idx_products_barcode_pg is never
+  // consulted. As `p.id IN (SELECT id FROM products WHERE barcode IN (...))`
+  // it becomes its own materialized LIST SUBQUERY, planned as a SEARCH on
+  // the covering barcode index and evaluated before the FTS/trigram
+  // subqueries that follow it in the OR.
   const candidates = barcodeEqualityCandidates(key)
   const placeholders = candidates.map((candidate, index) => {
     params[`${paramName}Eq${index}`] = candidate
     return `@${paramName}Eq${index}`
   })
-  return `(${column} IN (${placeholders.join(', ')}) OR ${normalizedBarcodeSql(column)} = @${paramName})`
+  const rawColumn = column.includes('.') ? column.slice(column.lastIndexOf('.') + 1) : column
+  const probe = `${idColumn} IN (SELECT id FROM ${table} WHERE ${rawColumn} IN (${placeholders.join(', ')}))`
+  return `(${probe} OR ${normalizedBarcodeSql(column)} = @${paramName})`
 }
 
 // The stored literal forms one normalized barcode key can take. GTIN-14 is the

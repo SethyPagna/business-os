@@ -17,7 +17,7 @@ import {
 import { getProductBatches, getTrackedBatchProductIds } from '../../api/batchesTransport.ts'
 import type { ProductBatch } from '../../api/batchesTransport.ts'
 import { useDebouncedValue } from '../products/helpers/productPageHelpers.ts'
-import { fuzzyTextMatches } from '../../utils/searchMatch.ts'
+import { fuzzyTextMatches, sortBySearchRelevance } from '../../utils/searchMatch.ts'
 import AppSelect, { type AppSelectOption } from '../shared/AppSelect.tsx'
 import { buildProductGroups } from '../../utils/productGrouping.ts'
 import { batchDisplayLabel } from '../../utils/batchLabel.ts'
@@ -589,7 +589,17 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
     if (showSelectedOnly) inStock = inStock.filter((product) => String(product.id) in selectedQuantities)
     if (!query && !showAllProducts) inStock = inStock.filter((product) => String(product.id) in selectedQuantities)
     if (!query) return inStock
-    return inStock.filter((product) => fuzzyTextMatches([product.name, product.sku, product.barcode].join(' '), query))
+    // Relevance, not catalogue order. This list is fetched UNPAGED with no
+    // query (getBranchStock(branch, {}) above), so the server never ranked
+    // it -- filtering alone left the closest match wherever the bulk read
+    // happened to put it, which is the reported "likely result was at the
+    // bottom". sortBySearchRelevance is the client mirror of the server
+    // ordering contract (utils/searchMatch.ts), so this picker and the
+    // single-mode server-backed one above now agree on what comes first.
+    return sortBySearchRelevance(
+      inStock.filter((product) => fuzzyTextMatches([product.name, product.sku, product.barcode].join(' '), query)),
+      query,
+    )
   }, [multiProducts, debouncedSearch, showAllProducts, showSelectedOnly, selectedQuantities])
 
   // Same name/cost/barcode grouping every other list surface in the
@@ -603,8 +613,14 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
   // display). group.rows is already branch-merged (see productGrouping.ts)
   // so branch-only duplicates collapse into one checkbox row here too.
   const groupedMulti = useMemo(
-    () => buildProductGroups(filteredMulti as unknown as Parameters<typeof buildProductGroups>[0]),
-    [filteredMulti],
+    () => buildProductGroups(
+      filteredMulti as unknown as Parameters<typeof buildProductGroups>[0],
+      undefined,
+      // filteredMulti is relevance-ordered whenever a term is typed (see 4.2);
+      // grouping must not re-sort that back to A-Z.
+      { preserveInputOrder: Boolean(debouncedSearch.trim()) },
+    ),
+    [filteredMulti, debouncedSearch],
   )
 
   const selectedEntries = useMemo(

@@ -231,18 +231,36 @@ const routeSurfaces = [
   ['branches.ts (TransferModal picker)', 'src/routes/branches.ts'],
 ]
 
+// The invariant here has not changed -- every catalog-search route must
+// reach the shared exact-barcode clause builder and must rank exact hits
+// first. What changed is that it now reaches them through ONE hop:
+// lib/productSearchQuery.ts owns the whole search tail (the fourth
+// hand-copy of it, in branches.ts, is what had drifted into computing no
+// relevance rank at all), and the routes call buildProductSearchQuery.
+// So the assertion follows the indirection rather than being relaxed:
+// the routes must call the shared builder, and the shared builder must
+// still call these two.
 check('every catalog-search route wires the shared barcode helper', () => {
   for (const [label, relPath] of routeSurfaces) {
     const source = fs.readFileSync(path.join(__dirname, '..', relPath), 'utf8')
     assert.ok(
-      source.includes('buildExactBarcodeMatchClause('),
-      `${label} must call the shared exact-barcode clause builder`,
+      source.includes('buildProductSearchQuery('),
+      `${label} must build its search tail from the one shared implementation`,
     )
     assert.ok(
-      source.includes('buildExactBarcodeRankSql('),
-      `${label} must rank exact barcode hits first`,
+      !/buildFtsMatchExpression\(|buildTrigramMatchExpression\(/.test(source),
+      `${label} must not re-copy the match clauses locally -- that is how branches.ts lost its relevance rank`,
     )
   }
+  const shared = fs.readFileSync(path.join(__dirname, '..', 'src/lib/productSearchQuery.ts'), 'utf8')
+  assert.ok(
+    shared.includes('buildExactBarcodeMatchClause('),
+    'the shared search-query builder must call the shared exact-barcode clause builder',
+  )
+  assert.ok(
+    shared.includes('buildExactBarcodeRankSql('),
+    'the shared search-query builder must rank exact barcode hits first',
+  )
 })
 
 check('every catalog-search route accepts the term under query/q/search', () => {
@@ -289,10 +307,10 @@ check('the equality probe is emitted before the normalized comparison, and is sa
   const params = {}
   const clause = buildExactBarcodeMatchClause(SCANNED, params)
   assert.ok(clause, 'a 13-digit scan emits a barcode clause')
-  const inIndex = clause.indexOf('p.barcode IN (')
+  const probeIndex = clause.indexOf('p.id IN (SELECT id FROM products WHERE barcode IN (')
   const ltrimIndex = clause.indexOf('ltrim(')
-  assert.ok(inIndex >= 0, 'a plain-column IN probe must be present -- ltrim() alone cannot use idx_products_barcode_pg')
-  assert.ok(ltrimIndex > inIndex, 'the normalized catch-all comes after the indexable probe')
+  assert.ok(probeIndex >= 0, 'a raw-column equality probe must be present -- ltrim() alone cannot use idx_products_barcode_pg')
+  assert.ok(ltrimIndex > probeIndex, 'the normalized catch-all comes after the indexable probe')
   const candidates = barcodeEqualityCandidates(SCANNED)
   assert.equal(candidates[0], SCANNED, 'the bare code is a candidate')
   assert.ok(candidates.includes(TWIN), 'so is the GTIN-14 zero-padded form')
@@ -302,6 +320,65 @@ check('the equality probe is emitted before the normalized comparison, and is sa
       `${candidate} must be bound as a literal equality value`,
     )
   }
+})
+
+// The route-shaped WHERE: is_active AND (exact-barcode OR fts OR trigram OR
+// name-trigram), the exact clause at the head of the OR exactly as
+// routes/products.ts / inventory.ts / branches.ts assemble it. Returns the
+// plan lines in execution order so the tests below can pin what SQLite
+// really does, rather than what the SQL text looks like.
+function planForRouteShape(exactClause, params) {
+  const groups = tokenizeSearchTermGroups(SCANNED, 6, 8)
+  const clauses = [exactClause]
+  const ftsMatch = buildFtsMatchExpression(groups, 'AND', PRODUCT_SEARCH_COLUMNS)
+  params.ftsQuery = ftsMatch
+  clauses.push('p.id IN (SELECT rowid FROM products_fts WHERE products_fts MATCH @ftsQuery)')
+  const trigramMatch = buildTrigramMatchExpression(groups, 'AND')
+  params.codeQuery = trigramMatch
+  clauses.push('p.id IN (SELECT rowid FROM products_fts_code WHERE products_fts_code MATCH @codeQuery)')
+  params.nameCodeQuery = trigramMatch
+  clauses.push('p.id IN (SELECT rowid FROM products_fts_name_trigram WHERE products_fts_name_trigram MATCH @nameCodeQuery)')
+  const sql = `SELECT p.id FROM products p WHERE p.is_active = 1 AND (${clauses.join(' OR ')}) ORDER BY p.id`
+  const plan = db.prepare(`EXPLAIN QUERY PLAN ${sql}`).all(params).map((r) => r.detail)
+  const rows = db.prepare(sql).all(params).map((r) => r.id)
+  return { plan, rows }
+}
+
+check('EXPLAIN QUERY PLAN: the equality probe is served by idx_products_barcode_pg, ahead of every FTS/trigram probe', () => {
+  const params = {}
+  const { plan, rows } = planForRouteShape(buildExactBarcodeMatchClause(SCANNED, params), params)
+  const barcodeStep = plan.findIndex((line) => /idx_products_barcode_pg/.test(line))
+  assert.ok(barcodeStep >= 0, `the barcode index must appear in the plan:\n  ${plan.join('\n  ')}`)
+  assert.match(plan[barcodeStep], /SEARCH products USING COVERING INDEX idx_products_barcode_pg \(barcode=\?\)/)
+  const firstFtsStep = plan.findIndex((line) => /products_fts/.test(line))
+  assert.ok(firstFtsStep >= 0, 'the FTS probes are still in the plan (the equality probe is added, not substituted)')
+  assert.ok(
+    barcodeStep < firstFtsStep,
+    `the barcode index probe must be materialized before any FTS/trigram subquery:\n  ${plan.join('\n  ')}`,
+  )
+  assert.ok(rows.includes(1722) && rows.includes(7231), 'and both twins come back')
+  assert.ok(!rows.includes(1), 'without the unrelated Abercrombie row')
+})
+
+check('negative case: an inline `p.barcode IN (...)` disjunct does NOT reach the barcode index (why the probe is a subquery)', () => {
+  // The shape this lane first shipped. Textually "sargable", but OR-ed with
+  // the ltrim() catch-all and the FTS subqueries SQLite evaluates it as one
+  // more per-row test inside a scan of every active product. If SQLite ever
+  // starts planning this shape through the barcode index, this check fails
+  // and the subquery indirection can be reconsidered -- until then the
+  // subquery form is what makes idx_products_barcode_pg reachable.
+  const params = { barcodeKey: normalizeBarcodeKey(SCANNED) }
+  const placeholders = barcodeEqualityCandidates(params.barcodeKey).map((candidate, index) => {
+    params[`barcodeKeyEq${index}`] = candidate
+    return `@barcodeKeyEq${index}`
+  })
+  const inline = `(p.barcode IN (${placeholders.join(', ')}) OR ltrim(lower(replace(replace(trim(COALESCE(p.barcode, '')), ' ', ''), '-', '')), '0') = @barcodeKey)`
+  const { plan, rows } = planForRouteShape(inline, params)
+  assert.ok(
+    !plan.some((line) => /idx_products_barcode_pg/.test(line)),
+    `the inline shape was expected to bypass the barcode index; the planner changed:\n  ${plan.join('\n  ')}`,
+  )
+  assert.ok(rows.includes(1722) && rows.includes(7231) && !rows.includes(1), 'it still finds the twins -- the difference is the index, not the answer')
 })
 
 // --- `ids` is the by-id lookup, not a suggestion ------------------------

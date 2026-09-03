@@ -1,7 +1,7 @@
 import { Suspense, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react'
 import type { ClipboardEvent, Dispatch, RefObject, SetStateAction } from 'react'
 import { lazyRetry } from '../../utils/lazyImport.ts'
-import { fuzzyTextMatches, matchesSearchTermGroups } from '../../utils/searchMatch.ts'
+import { fuzzyTextMatches, matchesSearchTermGroups, sortBySearchRelevance } from '../../utils/searchMatch.ts'
 import { fmtTime } from '../../utils/formatters.ts'
 import { deriveTelegramLink } from '../../utils/socialLinks.ts'
 import { canWriteSettingKey } from '../../utils/portalPermissions.ts'
@@ -3127,9 +3127,20 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
   const recommendedProductOptions = useMemo(() => {
     const term = recommendedProductSearchTerm.trim()
     if (term.length < 2) return []
-    return (products || [])
-      .filter((product) => productMatchesRecommendedSearch(product, term))
-      .sort((a, b) => String(a?.name || '').localeCompare(String(b?.name || ''), 'km'))
+    // A-Z stays the WITHIN-tier order, but it can no longer decide which
+    // 30 rows survive: this list was sliced to 30 straight off the
+    // alphabet, so a scanned or exactly-named product sitting past the
+    // 30th match was not merely ranked low, it was cut from the picker
+    // entirely. Ranking first (exact barcode, exact name, name prefix,
+    // then the A-Z tail -- the same contract the server search applies)
+    // and slicing after means the closest match is always in the list and
+    // always at the top.
+    return sortBySearchRelevance(
+      (products || [])
+        .filter((product) => productMatchesRecommendedSearch(product, term))
+        .sort((a, b) => String(a?.name || '').localeCompare(String(b?.name || ''), 'km')),
+      term,
+    )
       .slice(0, 30)
       .map(buildRecommendedProductOption)
       .filter((product) => product.id > 0)

@@ -112,6 +112,14 @@ const inventoryRoute = loadReal('routes/inventory.ts', {
   '../durable-objects/broadcastHub': { broadcast: async () => {} },
   '../lib/cache': { bumpVersion: async () => {} },
   '../lib/productIdentity': { findIdentityMatch: async () => null },
+  // routes/products.ts + inventory.ts now build their search tail from the
+  // one shared implementation (lib/productSearchQuery.ts). These tests
+  // exercise write paths, not search, so an inert builder keeps the WHERE
+  // unfiltered exactly as the searchMatch stubs above already did.
+  '../lib/productSearchQuery': {
+    buildProductSearchQuery: () => ({ hasSearchTerm: false, titleOnly: false }),
+    buildFamilyRelevanceOrderSql: (tail) => tail,
+  },
   '../lib/searchMatch': {
     buildFtsMatchExpression: () => "''",
     buildHybridMatchClause: () => '1=1',

@@ -13,7 +13,8 @@ import { detectBufferKind } from '../lib/uploadSecurity'
 import { broadcast } from '../durable-objects/broadcastHub'
 import { generatePortalAiResponse } from '../lib/portalAi'
 import { ADMIN_MAX_IMAGES_PER_PRODUCT } from '../lib/importImageMatch'
-import { buildFtsMatchExpression, buildPartialWordMatchClause, buildShortWordFallbackClause, buildTrigramMatchExpression, PRODUCTS_FTS_BM25_SQL, runFuzzyFallbackMatch, tokenizeSearchWords } from '../lib/searchMatch'
+import { runFuzzyFallbackMatch, tokenizeSearchWords } from '../lib/searchMatch'
+import { buildFamilyRelevanceOrderSql, buildProductSearchQuery } from '../lib/productSearchQuery'
 import { loadActivePromotionRules, productPromotedSql } from '../lib/promotionRulesSql'
 import { paginateProductFamilies } from '../lib/familyPagination'
 import { signupPortalAccount, signinPortalAccount } from '../lib/portalAccounts'
@@ -1469,115 +1470,63 @@ export function buildPortalProductFilters(query: Record<string, string>, allowSt
     where.push(`EXISTS (SELECT 1 FROM branch_stock mb WHERE mb.product_id = p.id AND mb.branch_id IN (${keys.join(', ')}) AND mb.quantity > 0)`)
   }
 
-  // Was `raw.toLowerCase().split(/\s+/)` -- only ever split on whitespace,
-  // so it never folded accents/diacritics and never treated "+"/"&"/"-"
-  // etc. as word boundaries, meaning a typed "Cover+Concealer" (no spaces)
-  // and a stored "Cover + Concealer" (spaces around the plus) landed as
-  // different single "words" and never matched. Ported from
-  // routes/products.ts's splitSearchTerms (lib/searchMatch.ts's
-  // tokenizeSearchWords) -- this is the one search path that reaches
-  // real customers (GET /api/portal/catalog/products/search), so it's
-  // the one place fuzzy/typo-tolerant matching matters most, and it had
-  // been left on a plain substring LIKE this whole time.
+  // The flat word list, kept for the JS fuzzy (typo-tolerant) fallback in
+  // runPortalProductSearch below -- runFuzzyFallbackMatch takes words, not
+  // the comma-separated GROUPS the SQL tail tokenizes into. It no longer
+  // feeds the WHERE clause: buildProductSearchQuery does its own
+  // tokenization (tokenizeSearchTermGroups over the same raw text, and the
+  // two always agree on whether anything was typed at all -- both start
+  // from normalizeSearchText, which reduces a comma to a space, so neither
+  // can see a term the other cannot).
+  //
+  // History, since it explains the tokenizer choice: this used to be
+  // `raw.toLowerCase()` split on whitespace, which never folded accents/
+  // diacritics and never treated "+"/"&"/"-" as word boundaries, so a typed
+  // "Cover+Concealer" (no spaces) and a stored "Cover + Concealer" (spaces
+  // around the plus) landed as different single "words" and never matched.
+  // This is the one search path that reaches real customers (GET
+  // /api/portal/catalog/products/search), so it is the one place fuzzy/typo
+  // tolerance matters most.
   const searchTerms = tokenizeSearchWords(query.query || query.q || '', 8)
-  let searchWhereClause: string | undefined
-  let matchRankSql: string | undefined
-  if (searchTerms.length) {
-    // Now on products_fts (migrations/0018_products_fts.sql) via an FTS5
-    // column-SET filter (`{name brand category}:term`, see
-    // buildFtsMatchExpression's own comment in lib/searchMatch.ts for how
-    // this was verified against real FTS5) instead of the old per-row
-    // REPLACE()-chain LIKE full-table scan -- that old approach couldn't
-    // use SQLite's inverted index at all (every normalizedHaystackSql()
-    // wrapper defeats any index on the underlying column), so every
-    // storefront search was a full scan of the products table, the exact
-    // cost profile migration 0018's own comment warns about. This is the
-    // one search path that reaches real customers on every keystroke (see
-    // the debounce fix on PublicCatalogPage.tsx), so it's the one place
-    // that cost mattered most. The public portal doesn't expose an
-    // AND/OR toggle -- always one AND-group of every typed word, same
-    // shape this endpoint already had, just expressed as a single FTS5
-    // group instead of an ANDed chain of LIKEs. `IN (SELECT rowid FROM
-    // products_fts WHERE ... MATCH ...)` rather than a JOIN, matching
-    // products.ts/inventory.ts's own wiring (a JOINed FTS5 table combined
-    // via OR throws at the SQLite level -- confirmed against real FTS5,
-    // see inventory.ts's comment). expandAliasCandidates (RT/NYX/BH/OFRA
-    // shorthand) is folded into buildFtsMatchExpression itself now,
-    // rather than expanded into separate LIKE clauses here.
-    // Column set narrowed to name/sku/barcode only, matching
-    // PRODUCT_SEARCH_COLUMNS on the staff-facing surfaces (products.ts/
-    // inventory.ts) -- brand/category dropped per the same reasoning that
-    // constant's own comment documents: product names already carry the
-    // brand in this catalog, and the storefront's own brand/category filter
-    // chips (below, the `for (const field of ['brand', 'category'])` loop)
-    // already cover exact brand/category lookup. sku/barcode stay in scope
-    // -- a shopper scanning or typing a product's barcode/SKU is exactly the
-    // "second-most-used search dimension after name" case. 'unit' was never
-    // in scope here (no portal equivalent of the admin unit-review
-    // workflow), unaffected by this change.
-    const ftsMatch = buildFtsMatchExpression([searchTerms], 'AND', ['name', 'sku', 'barcode'])
-    const matchClauses: string[] = []
-    if (ftsMatch) {
-      params.portalFtsQuery = ftsMatch
-      matchClauses.push('p.id IN (SELECT rowid FROM products_fts WHERE products_fts MATCH @portalFtsQuery)')
-      // Relevance ranking (bm25, same weighting products.ts uses) so a
-      // search actually surfaces the best match first instead of just
-      // alphabetically -- the old LIKE-chain version had no ranking
-      // concept at all, every result tied and fell through to the
-      // alphabetical ORDER BY regardless of match quality.
-      matchRankSql = `COALESCE((SELECT ${PRODUCTS_FTS_BM25_SQL} FROM products_fts WHERE products_fts.rowid = p.id AND products_fts MATCH @portalFtsQuery), 0)`
-    }
-    // products_fts_code (migrations/0019_products_fts_code.sql, trigram
-    // tokenizer) covers the same real gap it covers for products.ts/
-    // inventory.ts: word-prefix FTS5 matching alone can never find a
-    // barcode/SKU typed as a MID-string fragment (e.g. the last 4 digits
-    // of a barcode) because that fragment isn't a token boundary-aligned
-    // prefix -- see that migration's own comment. Not wired to
-    // matchRankSql -- trigram relevance isn't meaningful the same way
-    // word-match relevance is, same call products.ts already made.
-    const trigramMatch = buildTrigramMatchExpression([searchTerms], 'AND')
-    if (trigramMatch) {
-      params.portalCodeQuery = trigramMatch
-      matchClauses.push('p.id IN (SELECT rowid FROM products_fts_code WHERE products_fts_code MATCH @portalCodeQuery)')
-    }
-    // products_fts_name_trigram (migrations/0021_products_fts_name_
-    // trigram.sql) -- same fused number+unit/shade-code gap
-    // (e.g. "100ml", "110C") as products.ts/inventory.ts, and the
-    // storefront needs it just as much: a shopper typing "ml" or a
-    // shade-code fragment into the public search box is exactly the
-    // reported "search hides a product that's clearly there" case, and
-    // this is the highest-traffic search surface in the app (every
-    // customer keystroke, not just staff). Reuses the same trigramMatch
-    // expression computed above -- it's table-agnostic MATCH text.
-    if (trigramMatch) {
-      params.portalNameCodeQuery = trigramMatch
-      matchClauses.push('p.id IN (SELECT rowid FROM products_fts_name_trigram WHERE products_fts_name_trigram MATCH @portalNameCodeQuery)')
-    }
-    // Short-word (<3 char) LIKE fallback -- see buildShortWordFallbackClause's
-    // own comment in lib/searchMatch.ts. Scoped to 'name' only on the
-    // storefront (no 'unit' column exposed here the way the admin
-    // products/inventory search intentionally keeps for the unit-review
-    // workflow -- see PRODUCT_SEARCH_COLUMNS's own comment).
-    // Same depth-100 fix as products.ts/inventory.ts's identical call
-    // sites: name_normalized instead of raw p.name, alreadyNormalizedCols=
-    // true, so a shopper's 1-2 character search doesn't run the ~78-level
-    // nested REPLACE() chain (see migration 0037_product_search_compact_
-    // columns.sql and products.ts's own comment on this exact fix).
-    const shortWordMatch = buildShortWordFallbackClause([searchTerms], 'AND', ['p.name_normalized'], params, 'portalShortw', true)
-    if (shortWordMatch) matchClauses.push(shortWordMatch)
-    // Compact-brand substring fallback intentionally NOT called here
-    // anymore -- brand dropped from ftsMatch's own column list above, same
-    // reasoning (see PRODUCT_SEARCH_COLUMNS's comment in lib/searchMatch.ts).
-    // Partial multi-word fallback -- same long-name gap products.ts/
-    // inventory.ts close (see buildPartialWordMatchClause's own comment).
-    // Scoped to name only, same reasoning as those two.
-    // Same depth-100 fix as products.ts/inventory.ts -- name_normalized, alreadyNormalizedCols=true.
-    const partialMatch = buildPartialWordMatchClause([searchTerms], 'AND', ['p.name_normalized'], params, 'portalPartialw', 4, true)
-    if (partialMatch) matchClauses.push(partialMatch)
-    if (matchClauses.length) {
-      searchWhereClause = matchClauses.length > 1 ? `(${matchClauses.join(' OR ')})` : matchClauses[0]
-    }
-  }
+  // The WHOLE search tail -- FTS5 MATCH over name/sku/barcode, both trigram
+  // tables, the hybrid/short-word/partial-word fallbacks, the exact-barcode
+  // equality probe, the bm25 relevance rank and the discrete relevance TIER
+  // -- comes from lib/productSearchQuery.ts, the ONE implementation every
+  // product picker in the app shares. This file carried the last hand-copy
+  // of it: products.ts, inventory.ts and branches.ts moved onto the shared
+  // module earlier in this lane and the storefront was left behind, which
+  // is exactly how four copies of the same ~90 lines drifted apart in the
+  // first place. See that module's header for the ordering contract and
+  // why the tier is kept separate from the bm25 rank.
+  //
+  // Nothing about WHICH columns are searched changes: PRODUCT_SEARCH_COLUMNS
+  // is name/sku/barcode, the same three this endpoint's own FTS5 column-set
+  // filter already scoped to, and brand/category stay out for the reason
+  // that constant's comment documents (the storefront's own brand/category
+  // chips already cover exact brand/category lookup). The portal exposes no
+  // AND/OR toggle and no "titles only" switch, so both stay at their
+  // defaults (AND, everything in scope).
+  //
+  // What the storefront GAINS by adopting it, beyond ending the drift:
+  //  - the exact-barcode disjunct with leading zeros folded on both sides,
+  //    so a shopper scanning a GTIN-14 finds the EAN-13 twin this catalog
+  //    also stores (and vice versa) instead of relying on the trigram
+  //    table happening to contain the fragment;
+  //  - the mixed word+code group clause, which neither FTS5 table resolves
+  //    alone;
+  //  - the discrete relevance TIER (exact barcode / exact name / name
+  //    prefix / everything else), which is what the ORDER BY in
+  //    runPortalProductSearch now leads with.
+  //
+  // paramPrefix 'portal' keeps every bound name this function produces
+  // inside its own namespace, the same way the hand-copy prefixed its
+  // own (@portalFtsQuery, @portalShortw0, ...) -- runPortalProductSearch
+  // binds promotion-rule and pagination params into the SAME object after
+  // this returns.
+  const searchQuery = buildProductSearchQuery(query.query || query.q || '', params, { paramPrefix: 'portal' })
+  const searchWhereClause = searchQuery.whereClause
+  const matchRankSql = searchQuery.matchRankSql
+  const matchTierSql = searchQuery.matchTierSql
 
   for (const field of ['brand', 'category']) {
     const values = String(query[field] || '')
@@ -1629,7 +1578,7 @@ export function buildPortalProductFilters(query: Record<string, string>, allowSt
   const baseWhere = [...where]
   if (searchWhereClause) where.push(searchWhereClause)
 
-  return { where, joins, params, stockExpr, baseWhere, searchTerms, matchRankSql }
+  return { where, joins, params, stockExpr, baseWhere, searchTerms, matchRankSql, matchTierSql }
 }
 
 // The storefront's highest-traffic endpoint, and the one that scales with
@@ -1708,20 +1657,44 @@ async function runPortalProductSearch(c: { env: Env; req: { query(): Record<stri
            p.discount_enabled, p.discount_type, p.discount_percent,
            p.discount_amount_usd, p.discount_amount_khr, p.discount_label,
            p.discount_badge_color, p.discount_starts_at, p.discount_ends_at`
-  // When there's an active search, relevance (bm25 via matchRankSql) sorts
-  // first and name is just the tiebreaker -- otherwise (no search) the
-  // catalog stays name-alphabetical, same browsing order as before this
-  // session's FTS5 change. Mirrors products.ts's own
-  // effectiveFamilyOrderSql pattern (match_rank ASC, then the caller's
-  // chosen sort).
+  // Ordering, through the ONE shared builder (lib/productSearchQuery.ts's
+  // buildFamilyRelevanceOrderSql) that products.ts, inventory.ts and
+  // branches.ts already order through:
+  //
+  //   match_tier ASC         exact barcode, then exact name, then name
+  //                          prefix, then everything else
+  //   family_promoted DESC   G1b, but only WITHIN a relevance tier
+  //   match_rank ASC         bm25 among equally-tiered matches
+  //   family_sort_value ASC  the storefront's own brand-first browse key
+  //   family_name ASC        (+ family_root_id ASC, appended for every
+  //                          caller by familyPagination.ts)
+  //
+  // This endpoint used to hardcode 'family_promoted DESC, match_rank ASC,
+  // family_sort_value ASC, family_name ASC', and both halves of that were
+  // wrong the same way products.ts's copy was. (1) The promoted key sat
+  // ABOVE relevance, and because bm25 is continuous "promoted" became the
+  // de-facto primary sort of every storefront search -- a discounted
+  // product that merely shared a word with what the shopper typed outranked
+  // the product they actually typed. (2) There was no discrete tier at all,
+  // so an exact barcode or an exact name had nothing but its bm25 score to
+  // carry it, and any product scoring well on the same words could sit
+  // above it. Together that is the reported "it shows products not really
+  // matched, top to bottom".
+  //
+  // The brand-first tail stays the tail, so within one relevance tier the
+  // storefront's own browse order still applies -- that is the whole reason
+  // the tail is passed in rather than baked into the builder. With no
+  // search term typed, hasTier/hasRank are both false and the builder emits
+  // the previous browse order byte for byte: 'family_promoted DESC,
+  // family_sort_value ASC, family_name ASC'.
   // 6.5: paginate by GROUP (shared familyPagination helper), not by row --
   // the browser merges name groups into one card, so row-paged responses
   // thinned out and the pager promised pages that did not exist. total is
   // now a GROUP count (equal to the cards rendered and to what the A-Z
   // rail already counts), and a page carries every row of its window's
-  // groups so the client merge yields exactly pageSize cards. Ordering is
-  // the same promoted-first + brand-first rule, computed per family
-  // (relevance first-by-best-row while searching).
+  // groups so the client merge yields exactly pageSize cards. Every
+  // ordering key above is computed per FAMILY -- a family surfaces at its
+  // best row's tier and rank -- not per row.
   const paged = await paginateProductFamilies<Record<string, unknown>>({
     db,
     selectColumns: selectColumnsSql,
@@ -1730,11 +1703,14 @@ async function runPortalProductSearch(c: { env: Env; req: { query(): Record<stri
     params,
     page,
     pageSize,
-    familyOrderSql: filters.matchRankSql
-      ? 'family_promoted DESC, match_rank ASC, family_sort_value ASC, family_name ASC'
-      : 'family_promoted DESC, family_sort_value ASC, family_name ASC',
+    familyOrderSql: buildFamilyRelevanceOrderSql('family_sort_value ASC, family_name ASC', {
+      hasTier: Boolean(filters.matchTierSql),
+      hasRank: Boolean(filters.matchRankSql),
+      promotedFirst: true,
+    }),
     intraFamilyOrderSql: 'lower(name) ASC, id ASC',
     matchRankSql: filters.matchRankSql,
+    matchTierSql: filters.matchTierSql,
     promotedRankSql: searchPromotedRankSql,
     familySortValueSql: PORTAL_BRAND_SORT_KEY_SQL,
   })

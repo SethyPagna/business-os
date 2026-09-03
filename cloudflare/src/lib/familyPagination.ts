@@ -93,6 +93,23 @@ export interface FamilyPaginationOptions {
   // unaffected either way since `matched`/`families` only add the extra
   // column when this is set.
   matchRankSql?: string
+  // Optional per-row DISCRETE relevance-tier expression (referencing `p.`
+  // columns), built by lib/productSearchQuery.ts's buildProductSearchQuery:
+  // 0 = exact barcode, 1 = exact name, 2 = name prefix, 3 = everything
+  // else. Exposed per row as `__match_tier` and per family as
+  // `MIN(__match_tier)` under the aggregate name `match_tier`, so a family
+  // surfaces at its best row's tier. Reference it FIRST from
+  // `familyOrderSql` ('match_tier ASC, ...').
+  //
+  // Why this is separate from matchRankSql rather than folded into it: the
+  // Products page and POS interleave `family_promoted DESC` between the
+  // two (a discounted family leads *within* a relevance tier -- the G1b
+  // rule). With one combined number there is nowhere to put that key that
+  // doesn't either bury the exact match under an unrelated discounted
+  // product, or make the promoted rule a no-op tiebreak that never fires
+  // (bm25 is continuous, so it essentially never ties). Same additive
+  // pattern as matchRankSql: omitted = identical query shape as before.
+  matchTierSql?: string
   // Optional per-row 0/1 expression (referencing `p.` columns) marking a
   // row as PROMOTED (G1: live per-product discount or an active promotion
   // rule reaching it). When provided, each family additionally exposes the
@@ -142,9 +159,11 @@ export interface FamilyPaginationResult<T> {
   totalPages: number
 }
 
-function buildCtes(opts: Pick<FamilyPaginationOptions, 'selectColumns' | 'joinSql' | 'whereSql' | 'matchRankSql' | 'familyMemberBaseWhereSql' | 'promotedRankSql' | 'familySortValueSql'>) {
+function buildCtes(opts: Pick<FamilyPaginationOptions, 'selectColumns' | 'joinSql' | 'whereSql' | 'matchRankSql' | 'matchTierSql' | 'familyMemberBaseWhereSql' | 'promotedRankSql' | 'familySortValueSql'>) {
   const matchRankSelect = opts.matchRankSql ? `, (${opts.matchRankSql}) AS __match_rank` : ''
   const matchRankAgg = opts.matchRankSql ? ', MIN(__match_rank) AS match_rank' : ''
+  const matchTierSelect = opts.matchTierSql ? `, (${opts.matchTierSql}) AS __match_tier` : ''
+  const matchTierAgg = opts.matchTierSql ? ', MIN(__match_tier) AS match_tier' : ''
   const promotedSelect = opts.promotedRankSql ? `, (${opts.promotedRankSql}) AS __promoted` : ''
   const promotedAgg = opts.promotedRankSql ? ', MAX(__promoted) AS family_promoted' : ''
   const sortValueSelect = opts.familySortValueSql ? `, (${opts.familySortValueSql}) AS __family_sort` : ''
@@ -169,7 +188,7 @@ function buildCtes(opts: Pick<FamilyPaginationOptions, 'selectColumns' | 'joinSq
       SELECT ${opts.selectColumns},
              ${FAMILY_ROOT_KEY_SQL} AS __family_root_id,
              lower(trim(COALESCE(parent.name, p.name))) AS __family_name,
-             p.created_at AS __created_at${matchRankSelect}${promotedSelect}${sortValueSelect}
+             p.created_at AS __created_at${matchRankSelect}${matchTierSelect}${promotedSelect}${sortValueSelect}
       FROM products p
       LEFT JOIN products parent ON parent.id = p.parent_id
       ${opts.joinSql}
@@ -178,7 +197,7 @@ function buildCtes(opts: Pick<FamilyPaginationOptions, 'selectColumns' | 'joinSq
     families AS (
       SELECT __family_root_id AS family_root_id,
              MIN(__family_name) AS family_name,
-             MAX(__created_at) AS latest_created_at${matchRankAgg}${promotedAgg}${sortValueAgg}
+             MAX(__created_at) AS latest_created_at${matchRankAgg}${matchTierAgg}${promotedAgg}${sortValueAgg}
       FROM matched
       GROUP BY __family_root_id
     )${familyMembersCte}
@@ -203,10 +222,23 @@ export async function paginateProductFamilies<T = Record<string, unknown>>(
   `).get<{ count: number }>(params)
   const total = totalRow?.count || 0
 
+  // `family_root_id ASC` is appended to EVERY caller's familyOrderSql as the
+  // terminal key, and it is not decoration: family_root_id is the GROUP BY
+  // key of `families`, so it is unique per row and makes the window
+  // function's ordering a TOTAL order. Without it, two families tying on
+  // every key the caller supplied (two blank-named rows; two families with
+  // the same lowercased name but different name_keys; any search where
+  // several families share a bm25 score) get an arbitrary, run-to-run
+  // ROW_NUMBER assignment -- and because paging is OFFSET-based over that
+  // same ranking, page 2 can then repeat a family page 1 already showed and
+  // drop one it never did. To an operator that reads exactly as "the
+  // results are shuffled / the one I want is at the bottom", which is the
+  // symptom this lane was opened for. Appending rather than replacing keeps
+  // every existing caller's intended order intact.
   const rawRows = await db.prepare(`
     ${ctes},
     ranked AS (
-      SELECT family_root_id, ROW_NUMBER() OVER (ORDER BY ${familyOrderSql}) AS family_rank
+      SELECT family_root_id, ROW_NUMBER() OVER (ORDER BY ${familyOrderSql}, family_root_id ASC) AS family_rank
       FROM families
     )
     SELECT ${resultSource}.*
@@ -221,7 +253,7 @@ export async function paginateProductFamilies<T = Record<string, unknown>>(
   })
 
   const cleaned = (Array.isArray(rawRows) ? rawRows : []).map((row) => {
-    const { __family_root_id, __family_name, __created_at, __match_rank, __promoted, __family_sort, ...rest } = row
+    const { __family_root_id, __family_name, __created_at, __match_rank, __match_tier, __promoted, __family_sort, ...rest } = row
     return rest as unknown as T
   })
 
