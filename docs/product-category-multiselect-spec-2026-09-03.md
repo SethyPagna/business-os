@@ -8,6 +8,13 @@ main tree carries ~63 dirty files that are the ChatGPT/Codex surface's in-flight
 `bos-rc-workers/task-board-2026-09-03.md`, coordinator `business-os-v1-d9`) as item **B12**.
 Nothing here is implemented.
 
+**Revision 2** (same day) folds in the user's answers to all four of the questions this spec
+originally left open — Brand ships with Category, Unit stays single-value, categories are capped at
+5, and the storefront gets a primary-plus-ellipsis reveal. Those are decisions now, recorded in
+§10 with the verbatim wording, and they have already been pushed back through §3, §3.2, §4 and
+§4.1. One sub-clause of the storefront answer still needs the user's confirmation — flagged in
+§4.1.
+
 Standing rules this spec is written against: root cause over symptom, sibling-surface parity in the
 same commit, both language packs, per-action permission keys, floats over inline expansion,
 truncated text revealable, a failed save keeps the form intact, verified for real in both packages
@@ -114,7 +121,9 @@ Requirements, each traceable to a defect or a standing rule:
 2. **Show options (defect B).** An always-present chevron button opens the full, unfiltered list
    with zero typing — including when values are already chosen. Focus still opens it too.
 3. **Multiple (defect C).** Selected categories render as removable chips in the field; list rows
-   are checkboxes (toggle, not replace); a live "N selected" count.
+   are checkboxes (toggle, not replace); a live "N of 5 selected" count. **Capped at 5 categories
+   per product** (user decision, §10). At the cap the unselected rows go disabled with a short
+   reason rather than silently ignoring the click, and removing a chip re-enables them.
 4. **Free text stays possible.** Today an operator may type a category that does not exist yet
    (`ProductForm.tsx:217` says so explicitly). Keep it as an explicit **"Create 'X'"** row so the
    capability is not lost in the rewrite.
@@ -141,6 +150,16 @@ the other chips, and the form always sends `category = categories[0]`. Lock it w
 test, not a comment — a form that sends a `category` not equal to `categories[0]` would silently
 mis-sort the catalog.
 
+### 3.2 The cap is one rule with one implementation
+
+The 5-category cap is a business rule, so it does not live only in the picker. One shared constant,
+enforced in the component **and** in `normalizeMultiValue` / the product write routes (reject or
+truncate deterministically, with a clear error), and therefore also on the paths that never touch
+the picker: **CSV import**, bulk edit, and the undo/redo replay. A cap enforced only in the UI is
+the exact shape of bug this project keeps finding — the importer would happily write eight
+categories that no editor can then represent. Cover it with a pure test in `cloudflare/scripts/`
+alongside the §2.1 empty-list test.
+
 ---
 
 ## 4. Sibling surfaces — same unit of work
@@ -151,8 +170,8 @@ lane's checklist, not a suggestion.
 | Surface | File (HEAD) | Today | Required |
 |---|---|---|---|
 | Product edit/create — Category | `products/forms/ProductForm.tsx:1389` | single, no search, no show-all | the new control, multi |
-| Product edit/create — Brand | `ProductForm.tsx:1401` | same defects; `products.brands` exists | the new control, multi |
-| Product edit/create — Unit | `ProductForm.tsx:1413` | same defects | the new control in **single** mode (a product has one unit) — still gains search + show-all |
+| Product edit/create — Brand | `ProductForm.tsx:1401` | same defects; `products.brands` exists | the new control, multi — **in the same commit as Category** (user decision, §10) |
+| Product edit/create — Unit | `ProductForm.tsx:1413` | same defects | the new control in **single** mode — a product keeps exactly one unit (user decision, §10) — but it still gains search + show-all |
 | Variant form | `products/forms/VariantFormModal.tsx:149` (`category: parent.category`) | inherits the single primary | must inherit the whole list |
 | Bulk import | `products/import/BulkImportModal.tsx:477`, `:2187`, `:2820` | maps a single `category` column | accept a delimited `categories` column, map it, let the review grid edit it |
 | Bulk edit / mass assign | Products page bulk actions | single | multi, same control |
@@ -160,7 +179,7 @@ lane's checklist, not a suggestion.
 | Export | `products/ExportFieldsModal.tsx:35` | basic group names `category` | export the full list |
 | Filters — Products / Inventory / POS / portal | `shared/CategoryFilterOptions.tsx`, `utils/multiSelect.ts`, `pos/FilterPanel.tsx`, `catalog/PortalFilterCombobox.tsx` | **already multi-select**, and the backend already matches `p.categories` | no build — but **verify** a two-category product appears under *both* |
 | Manage categories | `products/lookups/ManageCategoriesModal.tsx` | usage counts + rename/merge | counts must include multi-membership; rename/merge must rewrite **every element** of the `\|\|` list (`routes/lookups.ts:222` claims it rewrites `products.category/categories` — verify element-wise) |
-| Storefront / public portal | `catalog/*` | — | only public categories; never expose internal facets |
+| Storefront / public portal | `catalog/*` | — | primary + ellipsis reveal, see §4.1; only public categories, never internal facets |
 
 Two rules that bite here specifically:
 
@@ -169,6 +188,25 @@ Two rules that bite here specifically:
   is the obvious wrong implementation — "Hair" would corrupt "Haircare".
 - **Undo/redo.** The product-edit undo appliers must restore `category` and `categories` together,
   or an undo silently drops the extra categories.
+
+### 4.1 Storefront display contract (user decision, §10)
+
+The user's words: *"so for the default we show primary with elipses...when user click on it it
+shows all in details... when filter search it shows..."*
+
+Which reads as three rules:
+
+1. **Default** — a product shows its **primary** category followed by an ellipsis affordance when
+   it carries more. Not a truncated string; a real control.
+2. **On click/tap** — the ellipsis reveals the **full** category list in the detail view. It must
+   be genuinely revealable rather than a dead-end "…" (shared truncated-text reveal), and the
+   reveal **floats over** content rather than pushing the page down.
+3. **Under a filter or search** — the product surfaces under **every** category it carries, not
+   only the primary, and the matching categories are the ones shown. The backend already supports
+   this (`COALESCE(categories, category)`), so this is a display question, not a query one.
+
+Rule 3 is the least explicit clause in the user's message and is a *reading*, not a quote.
+**Confirm it with the user before building it**; rules 1 and 2 are unambiguous.
 
 ---
 
@@ -233,13 +271,27 @@ checked out or reverted. Base the lane on d9's hotfix base `c2bb7e6c` in an isol
 `bos-rc-workers`. The item is parked behind the production hotfix as **B12** and is scheduled when
 the user re-opens the RC lanes.
 
+**Expect the base to move.** d9 has opened `hf/review-fixes` on `hotfix/prod-2026-09-03` to fix
+forward a dashboard regression in the same ChatGPT batch (`compat.ts` `productInRangeClause`
+scoping the stock and alert cards to the selected date range). Re-confirm the base commit with d9
+at the moment the lane starts rather than reusing `c2bb7e6c` from this document — this spec is
+reference to re-verify, and that is exactly the field most likely to have gone stale.
+
 ---
 
-## 10. Open questions for the user
+## 10. Decisions (user, Sep 3 — all four answered)
 
-1. **Brand too?** `products.brands` already exists and shares the broken component. Recommend
-   shipping Brand multi-select in the same change — otherwise the identical complaint returns for
-   Brand.
-2. **Unit** stays single-value (a product has one unit) but gains search + show-all. Confirm.
-3. **A cap** on categories per product, or unlimited?
-4. **Storefront** — should a product's full category list show publicly, or only the primary?
+These were open questions in the first version of this spec (`538e9783`); the user answered all
+four the same day, relayed through the coordinate-plan verification session. They are decisions
+now, not proposals.
+
+| # | Question | Decision |
+|---|---|---|
+| 1 | Brand multi-select too? | **Yes** — "brands too". Category and Brand ship multi-select **in one commit**; they share the broken component |
+| 2 | Unit multi-value? | **No** — "Unit stays single-value". A product keeps exactly one unit; Unit still gets the search + show-all fix from the shared component |
+| 3 | A cap per product? | **Yes — 5 categories.** Enforced as one rule in the picker *and* the backend, so import/bulk-edit/undo cannot exceed it (§3.2) |
+| 4 | Storefront display | **A third shape, not either option offered** — primary + ellipsis by default, full list on click, matching categories under filter/search. Verbatim wording and the three rules are in §4.1 |
+
+**One thing still to confirm before building:** the third clause of the storefront answer ("when
+filter search it shows...") is the least explicit part of the user's message. §4.1 rule 3 is a
+reading of it, not a quote — put it back to the user rather than guessing.
