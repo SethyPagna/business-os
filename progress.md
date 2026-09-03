@@ -2499,13 +2499,36 @@ messages. **[ ]** not started · **[~]** in progress · **[x]** done (branch nam
     lane, which is also the right owner for `StockInSessionsSection.tsx:260, 265`.
   - **Named, not fixed:** `movementGroups.ts` is a JSX-free helper with no translator in scope,
     so its `Lot ` prefix stays hard-coded English.
-- [?] **S4-27b · Does the noun move too?** Renaming the date *field* is unambiguous. Renaming the
-  collection noun is a product call: "Manage Batches" → "Manage received dates"? the `Batches`
-  button? the `Batch` column header in three tables? Needs one line from the user. Two smaller
-  rulings ride along: whether **"lot"** is an accepted synonym or itself a rename target (English
-  already drifted the `transfer_*` keys and the POS empty states to "lot" while Khmer stayed on
-  `បាច់`, with no decision record either way), and **which Khmer noun** wins for "received date"
-  — three spellings are in use today.
+- [x] **S4-27b · Ruled Sep 4, and done.** The user ruled **the noun moves too**, and that the
+  English drift to "lot" on some screens was an accident rather than a second vocabulary. Both
+  words therefore collapse into one term: **"received date"** in English, **`ថ្ងៃចូល`** in Khmer.
+  Built on `s4/received-date`, pushed: `894ad310` the packs (85 EN values, 90 KM) plus the
+  vocabulary test, `d144e133` the Worker's own 31 user-visible strings.
+  - **The Khmer term was not a free choice, and this session got it wrong first.** I picked
+    `ថ្ងៃទទួលស្តុក`; `frontend/tests/khmerRetailVocabulary.test.ts` went red and was right — the
+    owner had already dictated this exact word on 2026-09-03 ("Batch name change Date in
+    `ថ្ងៃចូល`"), which means that dictation *was* this rename in Khmer all along. Anyone writing
+    Khmer should read that test file before starting; it is the glossary.
+  - The test's glossary rule now pins `ថ្ងៃចូល` as canonical with `បាច់` / `ឡូត` / `ឡុត` all
+    forbidden, so the vocabulary cannot silently fork back. `ចាំបាច់` ("necessary") needed a
+    lookbehind to survive the new rule.
+  - **Deliberately not renamed, and asserted so afterwards:** the `{batch}` and `{lot}`
+    interpolation slots (renaming a slot prints raw braces to the user — the blind pass did
+    exactly that before it was caught), the CSV header `batch(mm/dd/yyyy)` *including inside its
+    own documentation*, the `product_batches` columns, and three keys where the word means a
+    review session or a return reason rather than a stock record.
+  - **A blind substitution produced 12 broken strings** — "Received date date", "Receive Received
+    date", "a damaged received date", "received date(es)". All rewritten by hand to say the thing
+    plainly. Worth knowing before anyone runs a regex over a language pack again.
+  - **Stored text is not rewritten.** Inventory-movement reasons are saved to D1, so rows written
+    before this still read "Batch receipt (…)" in stock history. Rewriting them is a production
+    data write and is not in this lane.
+  - Gate at `d144e133`: `verify:i18n` OK, `test:utils` exit 0 with 1,078 PASS, `vite build` clean,
+    Worker `tsc` clean, full `scripts/test-*.cjs` sweep clean.
+  - **Left for their owners:** the POS surfaces (`ProductDetailSheet.tsx`, `POS.tsx`) bypass the
+    packs entirely via `posCopy(...)`, so nothing here reaches them — `business-os-v1-7c`, told.
+    `StockChangeSection.tsx:748` and `StockInSessionsSection.tsx:260, 265` — `business-os-v1-ba`,
+    told. Both were messaged with the new canonical word rather than edited around.
 
 ### Sep-4 lane assignments (business-os-v1-c3, Part 589)
 
