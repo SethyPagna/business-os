@@ -2437,7 +2437,7 @@ export type MergeStockImpact = {
   branches: Array<{ branchId: number; branchName: string | null; quantity: number; lotCount: number }>
 }
 
-async function readMergeStockImpact(
+export async function readMergeStockImpact(
   db: ReturnType<typeof getDb>,
   productId: number,
   branchNameById: Map<number, string>,
@@ -2473,10 +2473,50 @@ async function readMergeStockImpact(
   }
 }
 
+// The OTHER thing a merge silently changes: foldDuplicateProductInto carries
+// the HIGHER of the two rows' selling and special prices onto the keeper
+// (resolveMergedPricing), so resolving a twin pair can quietly raise the price
+// the shop rings up. That is a defensible rule -- it is not a defensible
+// surprise, so the reviewer is shown it before they confirm, and the audit
+// entry records it after. Fields that do not move are not reported.
+export type MergePricingChange = {
+  before: Record<string, number>
+  after: Record<string, number>
+  changes: Array<{ field: string; from: number; to: number }>
+}
+
+const MERGE_PRICE_FIELDS = ['selling_price_usd', 'selling_price_khr', 'special_price_usd', 'special_price_khr'] as const
+
+export async function readMergePricingChange(
+  db: ReturnType<typeof getDb>,
+  keeperId: number,
+  dupId: number,
+): Promise<MergePricingChange> {
+  const columns = MERGE_PRICE_FIELDS.join(', ')
+  const [keeperRow, dupRow] = await Promise.all([
+    db.prepare(`SELECT ${columns} FROM products WHERE id = @id`).get<Record<string, number | null>>({ id: keeperId }),
+    db.prepare(`SELECT ${columns} FROM products WHERE id = @id`).get<Record<string, number | null>>({ id: dupId }),
+  ])
+  const merged = resolveMergedPricing([keeperRow || {}, dupRow || {}]) as Record<string, number | null | undefined>
+  const before: Record<string, number> = {}
+  const after: Record<string, number> = {}
+  const changes: Array<{ field: string; from: number; to: number }> = []
+  for (const field of MERGE_PRICE_FIELDS) {
+    const from = Number(keeperRow?.[field]) || 0
+    // Same fallback chain the fold writes, so the preview cannot promise a
+    // price the fold would not actually set.
+    const to = Number(merged[field] ?? keeperRow?.[field] ?? 0) || 0
+    before[field] = from
+    after[field] = to
+    if (Math.round(from * 100) !== Math.round(to * 100)) changes.push({ field, from, to })
+  }
+  return { before, after, changes }
+}
+
 // True when discarding this row would destroy or move something real, i.e. when
 // the operator MUST be asked. Quantity is the deciding fact; a lot row that is
 // live but empty carries nothing and is folded/deactivated either way.
-const mergeStockImpactNeedsChoice = (impact: MergeStockImpact): boolean =>
+export const mergeStockImpactNeedsChoice = (impact: MergeStockImpact): boolean =>
   impact.branches.some((b) => b.quantity !== 0)
 
 // The ledger line a WRITE-OFF leaves behind, and the fragment that finds it
@@ -2572,6 +2612,19 @@ export async function foldDuplicateProductInto(
               FROM products WHERE id = @id`)
     .get<{ selling_price_usd: number | null; selling_price_khr: number | null; special_price_usd: number | null; special_price_khr: number | null }>({ id: dup.id })
   const mergedPricing = resolveMergedPricing([canonicalBefore || {}, dupPricing || {}])
+  // Which of the keeper's prices this fold actually moves. Computed from the
+  // same two rows and the same fallback chain the UPDATE below writes, so the
+  // audit trail cannot claim a change the fold did not make (or miss one it
+  // did). Empty on the common case where the keeper already had the higher
+  // price -- the audit entry then simply says nothing moved.
+  const priceChangesForAudit = ([
+    ['selling_price_usd', mergedPricing.selling_price_usd ?? canonicalBefore?.selling_price_usd ?? 0],
+    ['selling_price_khr', mergedPricing.selling_price_khr ?? canonicalBefore?.selling_price_khr ?? 0],
+    ['special_price_usd', mergedPricing.special_price_usd ?? canonicalBefore?.special_price_usd ?? 0],
+    ['special_price_khr', mergedPricing.special_price_khr ?? canonicalBefore?.special_price_khr ?? 0],
+  ] as Array<[string, number]>)
+    .map(([field, to]) => ({ field, from: Number((canonicalBefore as Record<string, number | null> | null)?.[field]) || 0, to: Number(to) || 0 }))
+    .filter((change) => Math.round(change.from * 100) !== Math.round(change.to * 100))
   const dupBatchRows = await db
     .prepare('SELECT id, batch_key, batch_number FROM product_batches WHERE variant_product_id = @id')
     .all<{ id: number; batch_key: string; batch_number: number | null }>({ id: dup.id })
@@ -2856,6 +2909,11 @@ export async function foldDuplicateProductInto(
     // Which of the two explicit answers the operator gave for the discarded
     // row's stock. Never absent -- the endpoint refuses to guess.
     stockDisposition,
+    // A merge adopts the HIGHER of the two rows' selling/special prices, so it
+    // can raise what the shop rings up. Recorded field by field (empty when
+    // nothing moved) rather than left as an invisible side effect -- the
+    // reviewer is shown the same before/after in the confirm dialog.
+    priceChanges: priceChangesForAudit,
     batchesMoved: batchesMovedThisDup,
     batchesFoldedIntoExistingLot: batchesFoldedThisDup,
     batchesWrittenOff: batchesWrittenOffThisDup,
@@ -3118,28 +3176,38 @@ app.post('/possible-duplicates/dismiss', async (c) => {
   return c.json({ success: true })
 })
 
-// GET /api/products/possible-duplicates/stock-impact?ids=12,34 -- read-only:
-// what each of these rows still holds, per branch and per lot. The Conflicts
-// review and the product-form collision path both call this BEFORE asking the
-// operator to choose, so the merge/remove dialog can put the real numbers in
-// front of them instead of a generic warning.
-app.get('/possible-duplicates/stock-impact', async (c) => {
+// GET /api/products/possible-duplicates/merge-preview?keepId=1&mergeId=2 --
+// read-only: everything the operator needs to answer "keep this one" honestly.
+// What the row being discarded still holds (per branch, per lot), and whether
+// the merge would move the keeper's prices. Both callers -- the Conflicts review
+// and the product-form collision path -- read this BEFORE opening the dialog, so
+// the decision is made with the actual numbers in view rather than in the
+// abstract. Writes nothing.
+app.get('/possible-duplicates/merge-preview', async (c) => {
   const user = c.get('user')
   if (getActionTier(user, 'products', 'merge_duplicates') !== 'full') {
     return c.json({ success: false, error: 'You do not have permission to perform this action' }, 403)
   }
-  const ids = String(c.req.query('ids') || '')
-    .split(',')
-    .map((part) => Number(part.trim()))
-    .filter((n) => Number.isInteger(n) && n > 0)
-    .slice(0, 25)
-  if (!ids.length) return c.json({ success: false, error: 'ids (comma-separated product ids) are required' }, 400)
+  const keepId = Number(c.req.query('keepId'))
+  const mergeId = Number(c.req.query('mergeId'))
+  if (!Number.isInteger(keepId) || keepId <= 0 || !Number.isInteger(mergeId) || mergeId <= 0 || keepId === mergeId) {
+    return c.json({ success: false, error: 'keepId and mergeId (two different product ids) are required' }, 400)
+  }
   const db = getDb(c.env)
   const branchRows = await db.prepare('SELECT id, name FROM branches').all<{ id: number; name: string }>({})
   const branchNameById = new Map<number, string>(branchRows.map((b) => [b.id, b.name]))
-  const impacts: MergeStockImpact[] = []
-  for (const id of ids) impacts.push(await readMergeStockImpact(db, id, branchNameById))
-  return c.json({ success: true, impacts })
+  const [stockImpact, pricing] = await Promise.all([
+    readMergeStockImpact(db, mergeId, branchNameById),
+    readMergePricingChange(db, keepId, mergeId),
+  ])
+  return c.json({
+    success: true,
+    keepId,
+    mergeId,
+    stockImpact,
+    needsStockChoice: mergeStockImpactNeedsChoice(stockImpact),
+    pricing,
+  })
 })
 
 app.post('/possible-duplicates/merge', async (c) => {
