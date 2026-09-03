@@ -125,6 +125,31 @@ Two rules learned the hard way, both from real incidents in this file's own hist
 
 ## Current status
 
+**🚀 STAGE 2 DEPLOYED (Sep 3 2026, 08:41 UTC) — Worker version `d701ddc1-22ff-4d87-bbe7-6b25a666b79b`, from committed HEAD `a4f10152`, by session business-os-v1-5d on the user's explicit go. Reference to re-verify.**
+Deployed from an **isolated worktree** (`scratchpad/cert-head`) at `a4f10152` with a real `npm ci`, never from the dirty
+shared tree. **Zero migrations applied** — both remote D1s answered `✅ No migrations to apply!` before the deploy
+(`business-os` and `business-os-import`), because HEAD's migration chain stops at `0105`, which production applied on
+Sep 2. **No data was touched.**
+**`secrets:sync` was DELIBERATELY SKIPPED** — local `cloudflare/.dev.vars` is dated **Aug 28** while production secrets
+were changed **Sep 2 07:34Z** outside the fleet; running it would have overwritten newer live secrets with stale ones
+(Google login, Drive backup, Resend, Cloudinary). Production secrets are therefore UNCHANGED by this deploy. If the
+secrets ever do need syncing, refresh `.dev.vars` from the live values first.
+**What this shipped beyond the previous live Worker `fd496449`:** `69ed7a1f` ProductForm mounts its save-confirm and
+rename-cascade dialogs at the form root (**the user-reported "Products page actions cannot save"**) · `f1436b08`
+`GET /products/filters` gated behind catalog-read permission (**security**) · `352ed476` RenameCascadeModal layers above
+the shared Modal · `aa59016f` Telegram sale alert as a receipt summary + stock alerts carrying resulting on-hand ·
+`98f8ee79` Telegram transfer/return alerts · `012eef90` Workers Logs observability · `aae18fba` chunk-load recovery
+re-armed per live build · plus the fees/delivery-contact lane now committed rather than deployed-but-uncommitted.
+**Post-deploy live verification (read-only, all PASS):** `admin.leangbeauty.com/health` **200** `{"status":"ok"}` ·
+`leangbeauty.com/health` **200** · storefront `/` **200** HTML · `/api/products` unauth **401** `invalid_session` ·
+`/api/sales` unauth **401** · **`/api/products/filters` unauth 401 — the `f1436b08` gate confirmed LIVE** ·
+`/api/portal/bootstrap` **200** (Leang Cosmetics config). NOTE: `/health`'s `version` field is hard-coded
+(`cloudflare-portal-bootstrap-20260728`) and is NOT the deploy id — the only deploy id is the one wrangler printed,
+recorded above.
+**Still not verified (owed):** a live-browser pass (layer 5) on the deployed build, and a real POS write confirming the
+bare `YYYYMMDD-HHMMSS` receipt id.
+
+
 **🔎 FULL-STATE AUDIT + HEAD CERTIFICATION (Sep 3, session business-os-v1-5d, main tree, COORDINATOR — Part 583; reference to re-verify).**
 Ask: "check bos-rc and bos-rc-worker… know what is in progress, committed, done, halfway, not started… update progress.md… then deploy what can be deployed."
 
