@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import {
   STOCK_ACTION_OPTIONS, normalizeStockAction, stockActionOption,
-  computeSettlementPreview, formatBatchDate, describeBatchOption,
+  returnLineNeedsLotPick, formatBatchDate, describeBatchOption,
 } from '../src/components/returns/helpers/returnOptions.ts'
 import {
   normalizeReturnReasonList,
@@ -42,14 +42,18 @@ runTest('K2: the chooser offers exactly the three stock actions', () => {
   assert.equal(stockActionOption('mystery' as never).value, 'none')
 })
 
-runTest('K2: settlement preview matches the backend thresholds (half cent / half riel)', () => {
-  assert.equal(computeSettlementPreview({ returnedTotalUsd: 20, returnedTotalKhr: 82000, replacementTotalUsd: 20, replacementTotalKhr: 82000 }).isEven, true)
-  const uneven = computeSettlementPreview({ returnedTotalUsd: 20, returnedTotalKhr: 0, replacementTotalUsd: 25.5, replacementTotalKhr: 0 })
-  assert.equal(uneven.isEven, false)
-  assert.equal(uneven.diffUsd, 5.5) // positive = customer owes
-  assert.equal(computeSettlementPreview({ returnedTotalUsd: 30, returnedTotalKhr: 0, replacementTotalUsd: 25, replacementTotalKhr: 0 }).diffUsd, -5)
-  // a KHR-only gap alone breaks evenness too
-  assert.equal(computeSettlementPreview({ returnedTotalUsd: 10, returnedTotalKhr: 41000, replacementTotalUsd: 10, replacementTotalKhr: 45000 }).isEven, false)
+runTest('a returned line needs a lot pick exactly when nothing else can name one', () => {
+  // the sale said which lot -> nothing to ask
+  assert.equal(returnLineNeedsLotPick({ originalBatchId: 7, pickedBatchId: null, lotOptionCount: 3 }), false)
+  // the sale cannot say, but lots exist -> must be answered
+  assert.equal(returnLineNeedsLotPick({ originalBatchId: null, pickedBatchId: null, lotOptionCount: 3 }), true)
+  // ...and answering it settles the line
+  assert.equal(returnLineNeedsLotPick({ originalBatchId: null, pickedBatchId: 12, lotOptionCount: 3 }), false)
+  // a product that has never had a lot has nothing to pick: the branch count
+  // is the only truthful destination, so this must NOT block a return
+  assert.equal(returnLineNeedsLotPick({ originalBatchId: null, pickedBatchId: null, lotOptionCount: 0 }), false)
+  // a zero/blank id is not an answer
+  assert.equal(returnLineNeedsLotPick({ originalBatchId: 0, pickedBatchId: '', lotOptionCount: 2 }), true)
 })
 
 runTest('K2: batch option lines read mm/dd/yyyy and never carry cost', () => {
@@ -97,7 +101,76 @@ runTest('reference managers preview exact impact and keep custom return entry av
   assert.match(inventorySource, /replaceInventoryReason/)
 })
 
-runTest('K2: NewReturnModal wires the chooser, Replace, and the settlement gate', () => {
+// ── A return is a return; a replacement is a sale ────────────────────────
+// The two things the user could see on screen and named as confusing: a
+// return asking who pays a price difference, and a lot chooser offering "any
+// stock". Both are gone, and this pins them gone -- reintroducing either
+// affordance in any of these three files fails here, not in production.
+runTest('the price-difference settlement is gone from the returns surface', () => {
+  for (const [name, source] of [
+    ['NewReturnModal', newReturnSource],
+    ['returnOptions', readFileSync(new URL('../src/components/returns/helpers/returnOptions.ts', import.meta.url), 'utf8')],
+    ['returnsStock (backend kernel)', backendKernelSource],
+  ] as const) {
+    assert.doesNotMatch(source, /computeSettlement/, `${name} still computes a settlement`)
+    assert.doesNotMatch(source, /settle_difference/, `${name} still references the settle_difference gate`)
+    assert.doesNotMatch(source, /customer_owes|shop_refunds/, `${name} still asks who pays the difference`)
+    assert.doesNotMatch(source, /uneven_exchange/, `${name} still blocks an uneven exchange`)
+    assert.doesNotMatch(source, /settlement_mode:/, `${name} still writes a settlement mode`)
+  }
+  // the permission action itself is retired, not merely unreachable
+  const permissionActionsSource = readFileSync(new URL('../src/utils/permissionActions.ts', import.meta.url), 'utf8')
+  assert.doesNotMatch(permissionActionsSource, /settle_difference/)
+  // ...and its language keys are gone from BOTH packs
+  for (const pack of ['en', 'km']) {
+    const lang = JSON.parse(readFileSync(new URL(`../src/lang/${pack}.json`, import.meta.url), 'utf8')) as Record<string, string>
+    for (const key of ['any_stock', 'customer_owes', 'shop_refunds', 'settle_difference', 'uneven_exchange_blocked', 'even_exchange_desc', 'perm_act_returns_settle_difference']) {
+      assert.equal(Object.hasOwn(lang, key), false, `${pack}.json still carries the retired key ${key}`)
+    }
+  }
+})
+
+runTest('no surface offers "any stock" -- a lot is named or the product has none', () => {
+  assert.doesNotMatch(newReturnSource, /any_stock/)
+  assert.doesNotMatch(newReturnSource, /Any stock/i)
+  // the replacement lot picker's empty option is a prompt, never a choice
+  assert.match(newReturnSource, /T\('select_lot', 'Choose a lot…'\)/)
+  // and a line with no lot named cannot be submitted or even reviewed
+  assert.match(newReturnSource, /const itemsMissingLot = activeItems\.filter\(lineNeedsLot\)/)
+  assert.match(newReturnSource, /const replacementsMissingLot = replacements\.filter\(\(line\) => line\.batches\.length > 0 && line\.batch_id == null\)/)
+  assert.equal((newReturnSource.match(/if \(itemsMissingLot\.length \|\| replacementsMissingLot\.length\)/g) || []).length, 2,
+    'both Review and Confirm must refuse an unnamed lot')
+  // the backend refuses the same case rather than trusting the modal
+  assert.match(backendKernelSource, /ReturnLotRequiredError/)
+  assert.match(backendKernelSource, /requiresLotPick/)
+})
+
+runTest('the refund is the ORIGINAL sale line price, resolved on the server', () => {
+  assert.match(backendKernelSource, /export function resolveRefundUnitPrice/)
+  const routeSource = readFileSync(new URL('../../cloudflare/src/routes/returns.ts', import.meta.url), 'utf8')
+  assert.match(routeSource, /const refundPrices = body\.items\.map\(\(item\) => resolveRefundUnitPrice\(/)
+  // the header's refund total is derived, never taken from the payload
+  assert.match(routeSource, /total_refund_usd: totalRefundUsd,/)
+  assert.doesNotMatch(routeSource, /total_refund_usd: body\.total_refund_usd \|\| 0/)
+  // and the stored line price is the resolved one, not the posted one
+  assert.match(routeSource, /applied_price_usd: refundUnitUsd,/)
+})
+
+runTest('a replacement is recorded as an ordinary sale, not a settlement', () => {
+  const routeSource = readFileSync(new URL('../../cloudflare/src/routes/returns.ts', import.meta.url), 'utf8')
+  // the customer tenders the whole sale...
+  assert.match(routeSource, /const customerTenderUsd = replacementSubtotalUsd/)
+  // ...on a real payment method, defaulting to a real one
+  assert.match(routeSource, /const DEFAULT_REPLACEMENT_PAYMENT_METHOD = 'Cash'/)
+  assert.doesNotMatch(routeSource, /'Return Exchange'/)
+  // ...and it earns loyalty exactly as any other sale does
+  assert.match(routeSource, /0, 1, 'completed', @notes, @items, @search_normalized,/)
+  // the modal offers the shop's own methods
+  assert.match(newReturnSource, /PAYMENT_METHODS\.map\(\(method\) => \(\{ value: method, label: method \}\)\)/)
+  assert.match(newReturnSource, /replacement_payment_method: replacementPaymentMethod,/)
+})
+
+runTest('K2: NewReturnModal wires the chooser and Replace', () => {
   // the ONE chooser renders per item and writes stock_action (boolean kept in step)
   assert.match(newReturnSource, /STOCK_ACTION_OPTIONS\.map\(\(option\)/)
   assert.match(newReturnSource, /const updateItemAction = \(idx: number, action: ReturnStockAction\)/)
@@ -111,10 +184,6 @@ runTest('K2: NewReturnModal wires the chooser, Replace, and the settlement gate'
   assert.match(newReturnSource, /<ScanSearchButton/)
   assert.match(newReturnSource, /getProductBatches\(productId, branchId, true\)/)
   assert.match(newReturnSource, /replacement_items: replacements\.map/)
-  assert.match(newReturnSource, /settlement_mode: settlementPreview\.isEven \? 'even_exchange' : 'price_difference'/)
-  // the explicit preview: an uneven swap can't submit without the full-access tick
-  assert.match(newReturnSource, /replacements\.length && !settlementPreview\.isEven && !settleDifference/)
-  assert.match(newReturnSource, /getPermissionTier\?\.\('returns'\) === 'full'/)
   // 5.3: the overlay portals to document.body like the other returns modals
   assert.match(newReturnSource, /return createPortal\(/)
 })
@@ -128,7 +197,13 @@ runTest('K2: EditReturnModal edits with the same chooser and sends stock_action'
 runTest('K2: ReturnDetailModal shows the per-item action and the replacement lines', () => {
   assert.match(detailSource, /stockActionOption\(normalizeStockAction\(/)
   assert.match(detailSource, /replacement_items/)
-  assert.match(detailSource, /settlement_mode === 'price_difference'/)
+  // A return written under the CURRENT model names the sale it created...
+  assert.match(detailSource, /replacement_receipt_number/)
+  // ...and one written under the OLD exchange model still renders its stored
+  // settlement, marked as the history it is. Deleting this read would make
+  // every pre-existing exchange return misreport itself as a plain return.
+  assert.match(detailSource, /ret\.settlement_mode === 'price_difference'/)
+  assert.match(detailSource, /historical_settlement/)
 })
 
 runTest('K2/11.9: the POS damage source option is wired end to end', () => {
@@ -174,12 +249,11 @@ runTest('K2: the frontend mirror cannot drift from the backend kernel silently',
     const frontendHelper = readFileSync(new URL('../src/components/returns/helpers/returnOptions.ts', import.meta.url), 'utf8')
     assert.ok(frontendHelper.includes(pin), `frontend helper lost: ${pin}`)
   }
-  // ...and the same settlement thresholds on both sides
-  for (const source of [backendKernelSource, readFileSync(new URL('../src/components/returns/helpers/returnOptions.ts', import.meta.url), 'utf8')]) {
-    assert.match(source, /toFixed\(2\)/)
-    assert.match(source, /0\.005/)
-    assert.match(source, /Math\.abs\(diffKhr\) >= 1|Math\.abs\(diffKhr\) < 1/)
-  }
+  // ...and the same lot rule: neither side may invent an "unspecified lot"
+  // destination for a product that has lots.
+  const frontendHelper = readFileSync(new URL('../src/components/returns/helpers/returnOptions.ts', import.meta.url), 'utf8')
+  assert.match(frontendHelper, /export function returnLineNeedsLotPick/)
+  assert.match(backendKernelSource, /requiresLotPick: remaining > 0 && input\.lotTracked/)
 })
 
 if (failed > 0) {

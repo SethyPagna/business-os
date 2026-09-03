@@ -102,19 +102,52 @@ async function run() {
     assert.equal(kernel.normalizeStockAction({ stock_action: 'garbage', return_to_stock: false }), 'none')
   })
 
-  await check('computeSettlement: even exchange only at zero gap; price difference is signed + full-access', async () => {
-    const even = kernel.computeSettlement({ returnedTotalUsd: 20, returnedTotalKhr: 82000, replacementTotalUsd: 20, replacementTotalKhr: 82000 })
-    assert.equal(even.mode, 'even_exchange')
-    assert.equal(even.evenExchangeBlocked, false)
-    assert.equal(even.needsFullAccess, false)
-    const uneven = kernel.computeSettlement({ returnedTotalUsd: 20, returnedTotalKhr: 0, replacementTotalUsd: 25.5, replacementTotalKhr: 0 })
-    assert.equal(uneven.evenExchangeBlocked, true)
-    const diff = kernel.computeSettlement({ mode: 'price_difference', returnedTotalUsd: 20, returnedTotalKhr: 0, replacementTotalUsd: 25.5, replacementTotalKhr: 0 })
-    assert.equal(diff.needsFullAccess, true)
-    assert.equal(diff.evenExchangeBlocked, false)
-    assert.equal(diff.diffUsd, 5.5) // positive = customer owes
-    const refundSide = kernel.computeSettlement({ mode: 'price_difference', returnedTotalUsd: 30, returnedTotalKhr: 0, replacementTotalUsd: 25, replacementTotalKhr: 0 })
-    assert.equal(refundSide.diffUsd, -5)
+  await check('resolveRefundUnitPrice: the ORIGINAL sale line wins over anything posted', async () => {
+    // the sale charged $8; the client claims $25 -- the sale wins
+    const fromSale = kernel.resolveRefundUnitPrice({
+      saleLine: { applied_price_usd: 8, applied_price_khr: 32000 },
+      postedUsd: 25, postedKhr: 100000,
+    })
+    assert.equal(fromSale.unitUsd, 8)
+    assert.equal(fromSale.unitKhr, 32000)
+    assert.equal(fromSale.fromSaleLine, true)
+    // a line sold at $0 (a giveaway) refunds $0 -- not the posted price
+    assert.equal(kernel.resolveRefundUnitPrice({ saleLine: { applied_price_usd: 0, applied_price_khr: 0 }, postedUsd: 9, postedKhr: 0 }).unitUsd, 0)
+    // a manual return has no sale line, so the posted price is all there is
+    const manual = kernel.resolveRefundUnitPrice({ saleLine: null, postedUsd: 9.5, postedKhr: 38000 })
+    assert.equal(manual.unitUsd, 9.5)
+    assert.equal(manual.fromSaleLine, false)
+  })
+
+  await check('planReturnLot: the sale names the lot, or the operator does, or it is refused', async () => {
+    // multi-lot line: split back across the SAME lots, last drawn first
+    const multi = kernel.planReturnLot({
+      allocations: [{ batch_id: 11, outstanding: 3 }, { batch_id: 22, outstanding: 2 }],
+      saleLineBatchId: null, operatorBatchId: null, quantity: 5, lotTracked: true,
+    })
+    assert.deepEqual(multi.splits, [{ batchId: 22, quantity: 2 }, { batchId: 11, quantity: 3 }])
+    assert.equal(multi.requiresLotPick, false)
+    assert.equal(multi.plainQuantity, 0)
+    // single-lot line falls back to the lot recorded on the sale line
+    const single = kernel.planReturnLot({ allocations: [], saleLineBatchId: 9, operatorBatchId: null, quantity: 4, lotTracked: true })
+    assert.deepEqual(single.splits, [{ batchId: 9, quantity: 4 }])
+    // an explicit pick is authoritative for the WHOLE line -- it never merges
+    // with a derived split and leaves units somewhere nobody chose
+    const picked = kernel.planReturnLot({
+      allocations: [{ batch_id: 11, outstanding: 3 }],
+      saleLineBatchId: 9, operatorBatchId: 77, quantity: 5, lotTracked: true,
+    })
+    assert.deepEqual(picked.splits, [{ batchId: 77, quantity: 5 }])
+    // lot-tracked with no answer anywhere: REFUSED, never a silent aggregate bump
+    const stuck = kernel.planReturnLot({ allocations: [], saleLineBatchId: null, operatorBatchId: null, quantity: 2, lotTracked: true })
+    assert.equal(stuck.requiresLotPick, true)
+    assert.equal(stuck.plainQuantity, 0)
+    // ...and a product that has never had a lot keeps the plain bump
+    const legacy = kernel.planReturnLot({ allocations: [], saleLineBatchId: null, operatorBatchId: null, quantity: 2, lotTracked: false })
+    assert.equal(legacy.requiresLotPick, false)
+    assert.equal(legacy.plainQuantity, 2)
+    // the settlement kernel is GONE, not merely unused
+    assert.equal(typeof kernel.computeSettlement, 'undefined')
   })
 
   await check('damaged lot: traceable, never sellable stock; open-lot listing sees it', async () => {
@@ -251,12 +284,16 @@ async function run() {
     // damaged lots reverse (and can block) before an edit re-applies
     assert.match(routeSource, /const reversedLots = await reverseDamagedLots\(db, id\)/)
     assert.match(routeSource, /instanceof ConsumedDamagedStockError/)
-    // replacements: any catalog item is accepted, the settlement gate still
-    // applies, a linked sale/receipt is written, and the damaged-lots endpoint sits
-    // above the /:id param route
+    // replacements: any catalog item is accepted, a linked sale/receipt is
+    // written, and the damaged-lots endpoint sits above the /:id param route.
+    // The settlement gate is GONE from the route -- a return no longer nets
+    // against its replacement, so there is nothing to refuse or to escalate.
     assert.doesNotMatch(routeSource, /assertReplacementsSameName/)
-    assert.match(routeSource, /code: 'uneven_exchange'/)
-    assert.match(routeSource, /Settling a price difference on a replacement requires Full Access/)
+    assert.doesNotMatch(routeSource, /uneven_exchange/)
+    assert.doesNotMatch(routeSource, /settle_difference/)
+    assert.doesNotMatch(routeSource, /computeSettlement/)
+    // ...and the lot refusal took its place
+    assert.match(routeSource, /code: error\.code, product_id: productId/)
     assert.match(routeSource, /INSERT INTO sales \(/)
     assert.match(routeSource, /source_return_id/)
     assert.match(routeSource, /INSERT INTO sale_items \(/)
