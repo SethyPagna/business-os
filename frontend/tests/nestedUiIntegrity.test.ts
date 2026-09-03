@@ -16,7 +16,7 @@ const sectionMatrix: Record<string, { file: string; tokens: string[] }> = {
   products: { file: 'components/products/Products.tsx', tokens: ["'products' | 'stock_changes' | 'stock_in_sessions' | 'duplicates'", 'HeaderActions', 'ManageBatchesModal', 'ProductDetailModal'] },
   pos: { file: 'components/pos/POS.tsx', tokens: ['FilterPanel', 'ProductDetailSheet', 'QuickAddModal', 'PaginationControls'] },
   sales: { file: 'components/sales/SalesHubPage.tsx', tokens: ["'sales'", "'returns'", "'fees'", "'reports'"] },
-  branches: { file: 'components/branches/BranchesHubPage.tsx', tokens: ["'overview'", "'transfers'", "'rfid'", 'showSectionNavigation={false}', 'overflow-x-auto'] },
+  branches: { file: 'components/branches/BranchesHubPage.tsx', tokens: ["'overview'", "'products'", "'transfers'", "'rfid'", 'showSectionNavigation={false}', 'overflow-x-auto'] },
   contacts: { file: 'components/contacts/Contacts.tsx', tokens: ["'customers'", "'suppliers'", "'delivery'", "'duplicates'", 'overflow-x-auto'] },
   catalog: { file: 'components/catalog/CatalogPage.tsx', tokens: ["activeTab === 'products'", "activeTab === 'about'", "activeTab === 'faq'", "activeTab === 'ai'"] },
   promotions: { file: 'components/promotions/PromotionsPage.tsx', tokens: ["key: 'rules'", "key: 'discounts'", "key: 'loyalty'", 'overflow-x-auto'] },
@@ -36,7 +36,8 @@ const branchesHub = read('components/branches/BranchesHubPage.tsx')
 assert.doesNotMatch(branchesHub, /id: 'movements'/, 'Branches hub must not restore a separate generic Movement mini-section')
 assert.doesNotMatch(branchesHub, /hostSection="movements"/, 'the redundant Inventory movement ledger must stay removed from Branches')
 assert.match(branchesHub, /active === 'transfers'[\s\S]*view="transfers"/, 'Transfer must own transfer history without a second movement ledger')
-assert.match(branchesHub, /active === 'inventory'[\s\S]*view="branches"/, 'Inventory must render the branch-product stock workspace moved into Branches')
+assert.match(branchesHub, /active === 'products'[\s\S]*hostSection="stats"/, 'Products must render the ranged COGS, revenue, profit, sales and inventory statistics workspace')
+assert.doesNotMatch(branchesHub, /active === 'inventory'/, 'Branches must not restore the redundant branch-inventory duplicate section')
 
 for (const file of ['components/branches/BranchesHubPage.tsx', 'components/review/ReviewLogsPage.tsx', 'components/utils-settings/SettingsHubPage.tsx', 'components/promotions/PromotionsPage.tsx']) {
   const source = read(file)
@@ -78,6 +79,24 @@ for (const file of ['components/shared/InfoHint.tsx', 'components/shared/Truncat
 const renameCascade = read('components/shared/RenameCascadeModal.tsx')
 assert.match(renameCascade, /createPortal\(/, 'RenameCascadeModal must portal to the viewport layer')
 assert.match(renameCascade, /fixed inset-0 z-\[(?:1060|var\(--z-modal-2\))\]/, 'RenameCascadeModal must layer above the z-[1050] shared Modal it is opened from')
+
+// Sibling-surface parity: every contact tab with live name snapshots asks the
+// rename question the same way (Customers, Suppliers, Delivery) -- fetch the
+// impact, await the carry / only-this-one choice, send __rename_cascade, and
+// mount the prompt at the tab root. A tab missing any step saves silently
+// (Delivery did until Part 582).
+for (const [tab, fetcher] of [
+  ['CustomersTab', 'getCustomerRenameImpact('],
+  ['SuppliersTab', "getRenameImpact('supplier'"],
+  ['DeliveryTab', 'getDeliveryContactRenameImpact('],
+] as const) {
+  const source = read(`components/contacts/${tab}.tsx`)
+  assert.match(source, /import RenameCascadeModal/, `${tab} must import RenameCascadeModal`)
+  assert.ok(source.includes(fetcher), `${tab} must fetch the rename impact via ${fetcher}`)
+  assert.match(source, /askRenameChoice\(\{ kind: '/, `${tab} must await the rename choice`)
+  assert.match(source, /__rename_cascade = /, `${tab} must send the chosen scope as __rename_cascade`)
+  assert.match(source, /<RenameCascadeModal request=\{renameRequest\}/, `${tab} must mount the prompt`)
+}
 
 for (const file of ['components/products/forms/BulkAddStockModal.tsx', 'components/promotions/PromotionsPage.tsx']) {
   const source = read(file)
