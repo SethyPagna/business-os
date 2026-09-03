@@ -438,7 +438,14 @@ export function buildProductFilterSections({
     // 'supplier' section removed from the filter menu (see comment above
     // 'created' section) -- suppliers/supplierFilter/setSupplierFilter
     // params stay for countActiveProductFilters and the export-menu
-    // "filtered supplier" item, just no longer rendered here.    promotionsSection ? promotionsSection : null,
+    // "filtered supplier" item, just no longer rendered here.
+    // G1b's Promotions facet. This expression was appended to the END of
+    // the comment line above in 642188a4, so `//` swallowed it and the
+    // section Products.tsx has been building and passing all along never
+    // reached the menu. On its own line it renders again -- the promoted /
+    // discounted / by-rule facet is a way of READING the catalogue, which
+    // is what this page is for.
+    promotionsSection ? promotionsSection : null,
     createdSection ? createdSection : null,
     // AND/OR search-mode section (see searchModeSection's own comment
     // above) -- right after Created, before Availability/Category, same
@@ -473,11 +480,5 @@ export function buildProductFilterSections({
       ],
     },
     searchModeSection ? searchModeSection : null,
-    // Merged Branch/Groups/Stock "Availability" section when the .tsx
-    // caller built one (see components/shared/AvailabilityFilterOptions.tsx)
-    // -- covers all three, so the separate sections below are skipped.
-    // Falls back to those three separate sections when not supplied (e.g.
-    // the plain-node test harness, which can't construct the JSX render).
-
   ].filter(Boolean) as FilterSection[]
 }
