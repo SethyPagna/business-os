@@ -1,22 +1,16 @@
-import { useMemo, useRef, useState, type MouseEvent } from 'react'
+import { useMemo, useRef, useState, type MouseEvent, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import X from 'lucide-react/dist/esm/icons/x.js'
 import { fmtTime, fmtTimezoneLabel } from '../../utils/formatters.ts'
 import { getSaleReturnBlockReason } from '../../utils/saleReturnGuard.ts'
 import AppSelect from '../shared/AppSelect.tsx'
 import CopyableId from '../shared/CopyableId.tsx'
+import { DetailRow, DetailRowGroup, MoneyRow } from '../shared/DetailRows.tsx'
 import InfoHint from '../shared/InfoHint.tsx'
 import StatusBadge, { ALL_STATUSES, getStatusLabel } from './StatusBadge.tsx'
 
 type TranslateFn = (key: string) => string
 type MoneyFormatter = (value: number | string) => string
-
-interface InfoBlockProps {
-  label: string
-  value?: string | number | null
-  mono?: boolean
-  badge?: boolean
-}
 
 interface SaleLineItem {
   id?: string | number | null
@@ -136,19 +130,15 @@ function toNumber(value: number | string | null | undefined): number {
   return Number.isFinite(parsed) ? parsed : 0
 }
 
-function InfoBlock({ label, value, mono = false, badge = false }: InfoBlockProps) {
-  if (value == null || value === '') return null
+// Every card in this modal wears the same shell, so "Sale", "Customer",
+// "Delivery" and the items/money block are visibly one family instead of the
+// four different treatments they used to be.
+function SectionCard({ title, children, className = '' }: { title: string; children: ReactNode; className?: string }) {
   return (
-    <div>
-      <div className="mb-1 text-xs text-gray-400">{label}</div>
-      {badge ? (
-        <span className="badge-blue text-xs">{value}</span>
-      ) : (
-        <div className={`text-sm font-medium text-gray-800 dark:text-gray-200 ${mono ? 'font-mono' : ''}`}>
-          {value}
-        </div>
-      )}
-    </div>
+    <section className={`rounded-xl border border-gray-200 p-3 dark:border-gray-700 ${className}`}>
+      <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">{title}</div>
+      {children}
+    </section>
   )
 }
 
@@ -231,6 +221,12 @@ export default function SaleDetailModal({
   const baseDiscountUsd = toNumber(sale.discount_usd)
   const taxUsd = toNumber(sale.tax_usd)
   const subtotalUsd = toNumber(sale.subtotal_usd)
+  // subtotal_khr was already returned by GET /api/sales and already stored by
+  // the POS, but the old Totals block printed a KHR line for the discounts and
+  // the total while leaving the subtotal USD-only -- so the riel column had a
+  // hole in it right at the top. It is shown now for the same reason the rest
+  // are: the KHR column has to read straight down.
+  const subtotalKhr = toNumber(sale.subtotal_khr)
   const amountPaidUsd = toNumber(sale.amount_paid_usd)
   const amountPaidKhr = toNumber(sale.amount_paid_khr)
   const changeUsd = toNumber(sale.change_usd)
@@ -361,21 +357,28 @@ export default function SaleDetailModal({
           </div>
         </div>
 
+        {/* One rhythm for the whole record (user, Sep 3 2026: "a row view is
+            better instead of current broken view"). Every field is a
+            label/value ROW -- Sale, Customer and Delivery no longer stack the
+            label above the value while Totals used rows, which is what made
+            the same modal read in two shapes at once. The money summary is
+            not a separate box any more either: it lives in the SAME table as
+            the line items, so subtotal / discounts / total land in the same
+            right-aligned column as the line totals and can be scanned
+            straight down. Every KHR figure now sits inside its own row's
+            amount cell instead of floating underneath as an unlabelled
+            right-aligned line. */}
         <div className="modal-scroll space-y-4 p-4">
-          <div className="grid gap-4 md:grid-cols-3">
-            <section className="rounded-xl border border-gray-200 p-3 dark:border-gray-700">
-              <div className="mb-3 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
-                {t('sale') || 'Sale'}
-              </div>
-              <div className="grid gap-3">
-                <InfoBlock label={t('cashier') || 'Cashier'} value={sale.cashier_name} />
+          <div className="grid gap-4 md:grid-cols-2">
+            <SectionCard title={t('sale') || 'Sale'}>
+              <DetailRowGroup>
+                <DetailRow label={t('cashier') || 'Cashier'} value={sale.cashier_name} />
                 {/* Z8: an awaiting-payment (credit) sale carries no method yet
                     -- the field becomes a Record-payment affordance right here
                     "near the payment method", per the user. */}
                 {currentStatus === 'awaiting_payment' ? (
-                  <div>
-                    <div className="text-xs text-gray-400">{t('payment_method') || 'Payment method'}</div>
-                    <div className="mt-1 flex flex-wrap items-center gap-2">
+                  <DetailRow label={t('payment_method') || 'Payment method'}>
+                    <span className="flex flex-wrap items-center gap-2">
                       <span className="rounded-full bg-yellow-100 px-2 py-0.5 text-xs font-medium text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-300">
                         {translateOr('credit_awaiting_payment', 'Credit — awaiting payment', 'ឥណទាន — រង់ចាំការទូទាត់')}
                       </span>
@@ -386,252 +389,256 @@ export default function SaleDetailModal({
                       >
                         {translateOr('record_payment', 'Record payment', 'កត់ត្រាការទូទាត់')}
                       </button>
-                    </div>
-                  </div>
+                    </span>
+                  </DetailRow>
                 ) : (
-                  <InfoBlock label={t('payment_method') || 'Payment method'} value={sale.payment_method} badge />
+                  <DetailRow label={t('payment_method') || 'Payment method'} value={sale.payment_method} badge />
                 )}
                 {paymentCurrency && paymentCurrency.toUpperCase() !== 'USD' ? (
-                  <InfoBlock label={translateOr('payment_currency', 'Payment currency', 'រូបិយប័ណ្ណទូទាត់')} value={paymentCurrency} />
+                  <DetailRow label={translateOr('payment_currency', 'Payment currency', 'រូបិយប័ណ្ណទូទាត់')} value={paymentCurrency} />
                 ) : null}
                 {paymentDetails.length > 1 ? (
-                  <div>
-                    <div className="mb-1 text-xs text-gray-400">{translateOr('payment_breakdown', 'Payment breakdown', 'ការបំបែកការទូទាត់')}</div>
-                    <div className="space-y-0.5 text-sm text-gray-800 dark:text-gray-200">
+                  <DetailRow label={translateOr('payment_breakdown', 'Payment breakdown', 'ការបំបែកការទូទាត់')}>
+                    <div className="space-y-0.5">
                       {paymentDetails.map((detail, index) => (
                         <div key={`${detail.method}-${index}`} className="flex justify-between gap-3">
-                          <span className="detail-scroll-text min-w-0 flex-1">{detail.method}</span>
+                          <span className="min-w-0 flex-1 break-words">{detail.method}</span>
                           <span className="shrink-0 tabular-nums">{fmtUSD(detail.amount_usd)}{detail.amount_khr > 0 ? ` · ${fmtKHR(detail.amount_khr)}` : ''}</span>
                         </div>
                       ))}
                     </div>
-                  </div>
+                  </DetailRow>
                 ) : null}
-                <InfoBlock label={t('branch') || 'Branch'} value={sale.branch_name} />
-                <InfoBlock label={t('status') || 'Status'} value={getStatusLabel(currentStatus, t)} />
+                <DetailRow label={t('branch') || 'Branch'} value={sale.branch_name} />
+                <DetailRow label={t('status') || 'Status'} value={getStatusLabel(currentStatus, t)} />
                 {sale.source_return_id ? (
-                  <InfoBlock label={translateOr('replacement_for_return', 'Replacement for return', 'ការលក់ជំនួសសម្រាប់ការបង្វិលត្រឡប់')} value={`#${sale.source_return_id}`} mono />
+                  <DetailRow label={translateOr('replacement_for_return', 'Replacement for return', 'ការលក់ជំនួសសម្រាប់ការបង្វិលត្រឡប់')} value={`#${sale.source_return_id}`} mono />
                 ) : null}
-                <InfoBlock label={t('timezone') || 'Timezone'} value={fmtTimezoneLabel(sale.device_tz)} mono />
-                <InfoBlock label={t('device') || 'Device'} value={sale.device_name} />
-              </div>
-            </section>
+                <DetailRow label={t('timezone') || 'Timezone'} value={fmtTimezoneLabel(sale.device_tz)} mono />
+                <DetailRow label={t('device') || 'Device'} value={sale.device_name} />
+              </DetailRowGroup>
+            </SectionCard>
 
-            <section className="rounded-xl border border-gray-200 p-3 dark:border-gray-700">
-              <div className="mb-3 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
-                {t('customer') || 'Customer'}
-              </div>
-              <div className="grid gap-3">
-                <InfoBlock label={t('customer_name') || 'Customer'} value={sale.customer_name} />
-                <InfoBlock label={t('phone') || 'Phone'} value={sale.customer_phone} />
-                <InfoBlock label={t('address') || 'Address'} value={sale.customer_address} />
-                <InfoBlock label={t('membership') || 'Membership'} value={sale.customer_membership_number} mono />
-                <div>
-                  <label htmlFor="sale-membership-attach" className="mb-1 block text-xs text-gray-400">
-                    {translateOr('attach_membership', 'Attach membership to this sale', 'ភ្ជាប់សមាជិកទៅការលក់នេះ')}
-                  </label>
-                  <div className="flex gap-2">
-                    <input
-                      id="sale-membership-attach"
-                      className="input text-sm"
-                      value={membershipNumber}
-                      onChange={(event) => setMembershipNumber(event.target.value)}
-                      placeholder={t('membership_number') || 'Membership number'}
-                    />
-                    <button
-                      type="button"
-                      className="btn-primary whitespace-nowrap text-xs"
-                      disabled={membershipSaving || !String(membershipNumber || '').trim()}
-                      onClick={handleMembershipAttach}
-                    >
-                      {membershipSaving ? (t('loading') || 'Saving') : (t('save') || 'Save')}
-                    </button>
-                  </div>
-                  <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
-                    {translateOr('sale_membership_attach_hint', 'Use this when a sale was created anonymously and staff need to link it to a member later.', 'ប្រើពេលការលក់ត្រូវបានបង្កើតដោយមិនមានសមាជិក ហើយបុគ្គលិកត្រូវភ្ជាប់ទៅសមាជិកនៅពេលក្រោយ។')}
-                  </p>
+            <SectionCard title={t('customer') || 'Customer'}>
+              <DetailRowGroup>
+                <DetailRow label={t('customer_name') || 'Customer'} value={sale.customer_name} />
+                <DetailRow label={t('phone') || 'Phone'} value={sale.customer_phone} />
+                <DetailRow label={t('address') || 'Address'} value={sale.customer_address} />
+                <DetailRow label={t('membership') || 'Membership'} value={sale.customer_membership_number} mono />
+              </DetailRowGroup>
+              {/* An ACTION, not a field -- kept in the Customer card but held
+                  below the row list so it cannot break the row rhythm. */}
+              <div className="mt-3 border-t border-gray-100 pt-3 dark:border-gray-700/60">
+                <label htmlFor="sale-membership-attach" className="mb-1 block text-xs text-gray-400">
+                  {translateOr('attach_membership', 'Attach membership to this sale', 'ភ្ជាប់សមាជិកទៅការលក់នេះ')}
+                </label>
+                <div className="flex gap-2">
+                  <input
+                    id="sale-membership-attach"
+                    className="input text-sm"
+                    value={membershipNumber}
+                    onChange={(event) => setMembershipNumber(event.target.value)}
+                    placeholder={t('membership_number') || 'Membership number'}
+                  />
+                  <button
+                    type="button"
+                    className="btn-primary whitespace-nowrap text-xs"
+                    disabled={membershipSaving || !String(membershipNumber || '').trim()}
+                    onClick={handleMembershipAttach}
+                  >
+                    {membershipSaving ? (t('loading') || 'Saving') : (t('save') || 'Save')}
+                  </button>
                 </div>
+                <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
+                  {translateOr('sale_membership_attach_hint', 'Use this when a sale was created anonymously and staff need to link it to a member later.', 'ប្រើពេលការលក់ត្រូវបានបង្កើតដោយមិនមានសមាជិក ហើយបុគ្គលិកត្រូវភ្ជាប់ទៅសមាជិកនៅពេលក្រោយ។')}
+                </p>
               </div>
-            </section>
+            </SectionCard>
 
             {isDelivery ? (
-              <section className="rounded-xl border border-gray-200 p-3 dark:border-gray-700">
-                <div className="mb-3 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
-                  {translateOr('delivery', 'Delivery', 'ការដឹកជញ្ជូន')}
-                </div>
-                <div className="grid gap-3">
-                  <InfoBlock label={translateOr('driver', 'Delivery', 'ដឹកជញ្ជូន')} value={sale.delivery_contact_name} />
-                  <InfoBlock label={t('phone') || 'Phone'} value={sale.delivery_contact_phone} />
-                  <InfoBlock label={t('address') || 'Address'} value={sale.delivery_contact_address} />
-                </div>
-              </section>
+              <SectionCard title={translateOr('delivery', 'Delivery', 'ការដឹកជញ្ជូន')}>
+                <DetailRowGroup>
+                  <DetailRow label={translateOr('driver', 'Delivery', 'ដឹកជញ្ជូន')} value={sale.delivery_contact_name} />
+                  <DetailRow label={t('phone') || 'Phone'} value={sale.delivery_contact_phone} />
+                  <DetailRow label={t('address') || 'Address'} value={sale.delivery_contact_address} />
+                </DetailRowGroup>
+              </SectionCard>
             ) : null}
 
-            <section className="rounded-xl border border-gray-200 p-3 dark:border-gray-700">
-              <div className="mb-3 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
-                {t('totals') || 'Totals'}
-              </div>
-              <div className="space-y-2 text-sm">
-                <div className="flex justify-between"><span>{t('subtotal') || 'Subtotal'}</span><span>{fmtUSD(subtotalUsd)}</span></div>
-                {baseDiscountUsd > 0 ? (
-                  <div className="flex justify-between text-red-600 dark:text-red-400"><span>{t('discount') || 'Store discount'}</span><span>-{fmtUSD(baseDiscountUsd)}</span></div>
-                ) : null}
-                {discountKhr > 0 ? <div className="text-right text-xs text-gray-400">-{fmtKHR(discountKhr)}</div> : null}
-                {membershipDiscountUsd > 0 ? (
-                  <div className="flex justify-between text-emerald-600 dark:text-emerald-400">
-                    <span>{t('membership_discount') || 'Membership discount'}</span>
-                    <span>-{fmtUSD(membershipDiscountUsd)}</span>
-                  </div>
-                ) : null}
-                {membershipDiscountKhr > 0 ? (
-                  <div className="text-right text-xs text-gray-400">{fmtKHR(membershipDiscountKhr)}</div>
-                ) : null}
-                {membershipPointsRedeemed > 0 ? (
-                  <div className="flex justify-between text-xs text-gray-500 dark:text-gray-400">
-                    <span>{t('points_redeemed') || 'Points redeemed'}</span>
-                    <span>{membershipPointsRedeemed}</span>
-                  </div>
-                ) : null}
-                {taxUsd > 0 ? (
-                  <div className="flex justify-between"><span>{t('tax') || 'Tax'}</span><span>{fmtUSD(taxUsd)}</span></div>
-                ) : null}
-                {taxKhr > 0 ? <div className="text-right text-xs text-gray-400">{fmtKHR(taxKhr)}</div> : null}
-                {deliveryFeeUsd > 0 || deliveryFeeKhr > 0 ? (
-                  <div className="flex justify-between"><span>{translateOr('delivery_fee', 'Delivery fee', 'ថ្លៃដឹកជញ្ជូន')}</span><span>{fmtUSD(deliveryFeeUsd)}</span></div>
-                ) : null}
-                {deliveryFeeKhr > 0 ? <div className="text-right text-xs text-gray-400">{fmtKHR(deliveryFeeKhr)}</div> : null}
-                {refundUsd > 0 ? (
-                  <div className="flex justify-between text-orange-600 dark:text-orange-400">
-                    <span>{t('returns_refunded') || 'Refunded by returns'}</span>
-                    <span>-{fmtUSD(refundUsd)}</span>
-                  </div>
-                ) : null}
-                {refundKhr > 0 ? <div className="text-right text-xs text-gray-400">{fmtKHR(refundKhr)}</div> : null}
-                <div className="mt-2 flex justify-between border-t border-gray-200 pt-2 text-base font-bold dark:border-gray-700">
-                  <span>{t('total') || 'Total'}</span>
-                  <span>{fmtUSD(totalUsd)}</span>
-                </div>
-                {totalKhr > 0 ? <div className="text-right text-xs text-gray-400">{fmtKHR(totalKhr)}</div> : null}
-                {amountPaidUsd > 0 ? (
-                  <div className="flex justify-between text-xs text-gray-500 dark:text-gray-400">
-                    <span>{t('amount_paid') || 'Amount paid'}</span>
-                    <span>{fmtUSD(amountPaidUsd)}</span>
-                  </div>
-                ) : null}
-                {amountPaidKhr > 0 ? <div className="text-right text-xs text-gray-400">{fmtKHR(amountPaidKhr)}</div> : null}
-                {outstandingUsd > 0 && currentStatus !== 'cancelled' ? (
-                  <div className="flex justify-between text-xs font-semibold text-amber-600 dark:text-amber-400">
-                    <span>{translateOr('outstanding_balance', 'Outstanding (on credit)', 'នៅជំពាក់')}{sale.credit_due_date ? ` · ${translateOr('due', 'due', 'កំណត់')} ${String(sale.credit_due_date).slice(0, 10)}` : ''}</span>
-                    <span>{fmtUSD(outstandingUsd)}</span>
-                  </div>
-                ) : null}
-                {changeUsd > 0 ? (
-                  <div className="flex justify-between text-xs text-blue-600 dark:text-blue-400">
-                    <span>{t('change') || 'Change'}</span>
-                    <span>{fmtUSD(changeUsd)}</span>
-                  </div>
-                ) : null}
-                {changeKhr > 0 ? <div className="text-right text-xs text-gray-400">{fmtKHR(changeKhr)}</div> : null}
-                {deliveryActualCostUsd > 0 || deliveryActualCostKhr > 0 ? (
-                  <div className="mt-1 flex justify-between border-t border-dashed border-gray-200 pt-1 text-xs text-gray-500 dark:border-gray-700 dark:text-gray-400">
-                    <span>{translateOr('delivery_actual_cost', 'Actual delivery cost', 'ថ្លៃដឹកជញ្ជូនពិត')}</span>
-                    <span>{fmtUSD(deliveryActualCostUsd)}{deliveryActualCostKhr > 0 ? ` · ${fmtKHR(deliveryActualCostKhr)}` : ''}</span>
-                  </div>
-                ) : null}
-              </div>
-            </section>
+            {sale.notes ? (
+              <SectionCard title={t('notes') || 'Notes'}>
+                <p className="break-words text-sm text-gray-700 dark:text-gray-200">{sale.notes}</p>
+              </SectionCard>
+            ) : null}
           </div>
 
-          {sale.notes ? (
-            <div className="rounded-xl bg-gray-50 p-3 text-sm text-gray-600 dark:bg-gray-700/50 dark:text-gray-300">
-              <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-gray-400">{t('notes') || 'Notes'}</div>
-              {sale.notes}
-            </div>
-          ) : null}
-
-          <section className="rounded-xl border border-gray-200 p-3 dark:border-gray-700">
-            <div className="mb-3 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
-              {t('items') || 'Items'} ({items.length})
-            </div>
-            {items.length === 0 ? (
-              <p className="text-sm text-gray-400">{t('no_item_details') || 'No item details available.'}</p>
-            ) : (
-              <>
-                <div className="hidden overflow-x-auto sm:block">
-                  <table className="w-full min-w-[34rem] text-sm">
-                    <thead className="border-y border-gray-200 bg-gray-50 text-left text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:border-gray-700 dark:bg-gray-900/35 dark:text-gray-400">
-                      <tr>
-                        <th className="px-2 py-1.5">{t('product') || 'Product'}</th>
-                        <th className="px-2 py-1.5 text-right">{t('quantity') || 'Qty'}</th>
-                        <th className="px-2 py-1.5 text-right">{t('price') || 'Unit price'}</th>
-                        <th className="px-2 py-1.5 text-right">{t('total') || 'Total'}</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
-                      {items.map((item, index) => {
-                        const qty = toNumber(item.quantity || item.qty || 1) || 1
-                        const unitUsd = toNumber(item.applied_price_usd ?? item.price_usd ?? item.price)
-                        const unitKhr = toNumber(item.applied_price_khr ?? item.price_khr)
-                        const lineUsd = unitUsd * qty
-                        const lineKhr = unitKhr * qty
-                        return (
-                          <tr key={`${item.product_id || item.id || index}-${index}`}>
-                            <td className="max-w-0 px-2 py-1.5"><div className="detail-scroll-text font-medium text-gray-900 dark:text-white">{item.product_name || item.name}</div>{toNumber(item.returned_quantity) > 0 ? <div className="mt-0.5 inline-flex rounded bg-orange-100 px-1.5 py-0.5 text-[10px] font-semibold text-orange-700 dark:bg-orange-900/40 dark:text-orange-300">↩ {toNumber(item.returned_quantity)} {t('returned_quantity_tag') || 'returned'}</div> : null}{item.branch_name ? <div className="detail-scroll-text text-[11px] text-gray-400">{item.branch_name}</div> : null}</td>
-                            <td className="whitespace-nowrap px-2 py-1.5 text-right tabular-nums text-gray-700 dark:text-gray-200">{qty}</td>
-                            <td className="whitespace-nowrap px-2 py-1.5 text-right tabular-nums text-gray-700 dark:text-gray-200">{fmtUSD(unitUsd)}{unitKhr > 0 ? <div className="text-[11px] text-gray-400">{fmtKHR(unitKhr)}</div> : null}</td>
-                            <td className="whitespace-nowrap px-2 py-1.5 text-right font-semibold tabular-nums text-gray-900 dark:text-white">{fmtUSD(lineUsd)}{lineKhr > 0 ? <div className="text-[11px] font-normal text-gray-400">{fmtKHR(lineKhr)}</div> : null}</td>
-                          </tr>
-                        )
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-                <div className="space-y-2 sm:hidden">
-                  {items.map((item, index) => {
+          {/* Items AND the money summary in ONE table: the tfoot amounts sit in
+              the same column as the line totals above them, which is the whole
+              point of a row view -- the numbers can be read straight down. The
+              product name wraps instead of living in a 151px horizontal scroll
+              box (measured on the old shape at 1280), and the table keeps the
+              same shape at every width, so the phone no longer loses the Qty
+              and Unit price columns to a separate card list. */}
+          <SectionCard title={`${t('items') || 'Items'} (${items.length})`}>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="border-y border-gray-200 bg-gray-50 text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:border-gray-700 dark:bg-gray-900/35 dark:text-gray-400">
+                  <tr>
+                    <th className="px-1.5 py-1.5 text-left sm:px-2">{t('product') || 'Product'}</th>
+                    <th className="px-1.5 py-1.5 text-right sm:px-2">{t('qty_short') || 'Qty'}</th>
+                    <th className="px-1.5 py-1.5 text-right sm:px-2">{t('unit_price') || 'Unit price'}</th>
+                    <th className="px-1.5 py-1.5 text-right sm:px-2">{t('line_total') || 'Line total'}</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
+                  {items.length === 0 ? (
+                    <tr>
+                      <td colSpan={4} className="px-2 py-3 text-sm text-gray-400">{t('no_item_details') || 'No item details available.'}</td>
+                    </tr>
+                  ) : items.map((item, index) => {
                     const qty = toNumber(item.quantity || item.qty || 1) || 1
                     const unitUsd = toNumber(item.applied_price_usd ?? item.price_usd ?? item.price)
+                    const unitKhr = toNumber(item.applied_price_khr ?? item.price_khr)
                     const lineUsd = unitUsd * qty
-                    const lineKhr = toNumber(item.applied_price_khr ?? item.price_khr) * qty
+                    const lineKhr = unitKhr * qty
                     return (
-                      <div key={`${item.product_id || item.id || index}-${index}`} className="flex items-start justify-between gap-3 rounded-lg bg-gray-50 px-2.5 py-2 dark:bg-gray-900/35">
-                        <div className="min-w-0 flex-1"><div className="detail-scroll-text text-sm font-medium text-gray-900 dark:text-white">{item.product_name || item.name}</div><div className="text-xs text-gray-500 dark:text-gray-400">{qty} × {fmtUSD(unitUsd)}</div>{toNumber(item.returned_quantity) > 0 ? <div className="mt-0.5 inline-flex rounded bg-orange-100 px-1.5 py-0.5 text-[10px] font-semibold text-orange-700 dark:bg-orange-900/40 dark:text-orange-300">↩ {toNumber(item.returned_quantity)} {t('returned_quantity_tag') || 'returned'}</div> : null}{item.branch_name ? <div className="detail-scroll-text mt-0.5 text-[11px] text-gray-400">{item.branch_name}</div> : null}</div>
-                        <div className="shrink-0 text-right text-sm font-semibold tabular-nums text-gray-900 dark:text-white">{fmtUSD(lineUsd)}{lineKhr > 0 ? <div className="text-[11px] font-normal text-gray-400">{fmtKHR(lineKhr)}</div> : null}</div>
-                      </div>
+                      <tr key={`${item.product_id || item.id || index}-${index}`}>
+                        <td className="px-1.5 py-1.5 align-top sm:px-2">
+                          <div className="break-words font-medium text-gray-900 dark:text-white">{item.product_name || item.name}</div>
+                          {toNumber(item.returned_quantity) > 0 ? (
+                            <div className="mt-0.5 inline-flex rounded bg-orange-100 px-1.5 py-0.5 text-[10px] font-semibold text-orange-700 dark:bg-orange-900/40 dark:text-orange-300">↩ {toNumber(item.returned_quantity)} {t('returned_quantity_tag') || 'returned'}</div>
+                          ) : null}
+                          {item.branch_name ? <div className="break-words text-[11px] text-gray-400">{item.branch_name}</div> : null}
+                        </td>
+                        <td className="whitespace-nowrap px-1.5 py-1.5 text-right align-top sm:px-2 tabular-nums text-gray-700 dark:text-gray-200">{qty}</td>
+                        <td className="whitespace-nowrap px-1.5 py-1.5 text-right align-top sm:px-2 tabular-nums text-gray-700 dark:text-gray-200">
+                          {fmtUSD(unitUsd)}
+                          {unitKhr > 0 ? <div className="text-[11px] text-gray-400">{fmtKHR(unitKhr)}</div> : null}
+                        </td>
+                        <td className="whitespace-nowrap px-1.5 py-1.5 text-right align-top sm:px-2 font-semibold tabular-nums text-gray-900 dark:text-white">
+                          {fmtUSD(lineUsd)}
+                          {lineKhr > 0 ? <div className="text-[11px] font-normal text-gray-400">{fmtKHR(lineKhr)}</div> : null}
+                        </td>
+                      </tr>
                     )
                   })}
-                </div>
-              </>
-            )}
-          </section>
+                </tbody>
+                <tfoot className="border-t border-gray-200 dark:border-gray-700">
+                  <MoneyRow
+                    label={t('subtotal') || 'Subtotal'}
+                    amount={fmtUSD(subtotalUsd)}
+                    sub={subtotalKhr > 0 ? fmtKHR(subtotalKhr) : null}
+                  />
+                  {baseDiscountUsd > 0 ? (
+                    <MoneyRow
+                      label={t('discount') || 'Store discount'}
+                      tone="discount"
+                      amount={`-${fmtUSD(baseDiscountUsd)}`}
+                      sub={discountKhr > 0 ? `-${fmtKHR(discountKhr)}` : null}
+                    />
+                  ) : null}
+                  {membershipDiscountUsd > 0 ? (
+                    <MoneyRow
+                      label={t('membership_discount') || 'Membership discount'}
+                      tone="credit"
+                      amount={`-${fmtUSD(membershipDiscountUsd)}`}
+                      sub={membershipDiscountKhr > 0 ? `-${fmtKHR(membershipDiscountKhr)}` : null}
+                    />
+                  ) : null}
+                  {membershipPointsRedeemed > 0 ? (
+                    <MoneyRow label={t('points_redeemed') || 'Points redeemed'} tone="muted" amount={membershipPointsRedeemed} />
+                  ) : null}
+                  {taxUsd > 0 ? (
+                    <MoneyRow label={t('tax') || 'Tax'} amount={fmtUSD(taxUsd)} sub={taxKhr > 0 ? fmtKHR(taxKhr) : null} />
+                  ) : null}
+                  {deliveryFeeUsd > 0 || deliveryFeeKhr > 0 ? (
+                    <MoneyRow
+                      label={translateOr('delivery_fee', 'Delivery fee', 'ថ្លៃដឹកជញ្ជូន')}
+                      amount={fmtUSD(deliveryFeeUsd)}
+                      sub={deliveryFeeKhr > 0 ? fmtKHR(deliveryFeeKhr) : null}
+                    />
+                  ) : null}
+                  {refundUsd > 0 ? (
+                    <MoneyRow
+                      label={t('returns_refunded') || 'Refunded by returns'}
+                      tone="refund"
+                      amount={`-${fmtUSD(refundUsd)}`}
+                      sub={refundKhr > 0 ? `-${fmtKHR(refundKhr)}` : null}
+                    />
+                  ) : null}
+                  <MoneyRow
+                    label={t('total') || 'Total'}
+                    strong
+                    amount={fmtUSD(totalUsd)}
+                    sub={totalKhr > 0 ? fmtKHR(totalKhr) : null}
+                  />
+                  {amountPaidUsd > 0 ? (
+                    <MoneyRow
+                      label={t('amount_paid') || 'Amount paid'}
+                      tone="muted"
+                      amount={fmtUSD(amountPaidUsd)}
+                      sub={amountPaidKhr > 0 ? fmtKHR(amountPaidKhr) : null}
+                    />
+                  ) : null}
+                  {outstandingUsd > 0 && currentStatus !== 'cancelled' ? (
+                    <MoneyRow
+                      label={translateOr('outstanding_balance', 'Outstanding (on credit)', 'នៅជំពាក់')}
+                      note={sale.credit_due_date ? `· ${translateOr('due', 'due', 'កំណត់')} ${String(sale.credit_due_date).slice(0, 10)}` : null}
+                      tone="due"
+                      amount={fmtUSD(outstandingUsd)}
+                    />
+                  ) : null}
+                  {changeUsd > 0 ? (
+                    <MoneyRow
+                      label={t('change') || 'Change'}
+                      tone="change"
+                      amount={fmtUSD(changeUsd)}
+                      sub={changeKhr > 0 ? fmtKHR(changeKhr) : null}
+                    />
+                  ) : null}
+                  {deliveryActualCostUsd > 0 || deliveryActualCostKhr > 0 ? (
+                    <MoneyRow
+                      label={translateOr('delivery_actual_cost', 'Actual delivery cost', 'ថ្លៃដឹកជញ្ជូនពិត')}
+                      tone="muted"
+                      amount={fmtUSD(deliveryActualCostUsd)}
+                      sub={deliveryActualCostKhr > 0 ? fmtKHR(deliveryActualCostKhr) : null}
+                    />
+                  ) : null}
+                </tfoot>
+              </table>
+            </div>
+          </SectionCard>
 
           {currentStatus === 'cancelled' ? (
             <section className="rounded-xl border border-red-200 bg-red-50/50 p-3 dark:border-red-800/60 dark:bg-red-900/15">
               <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-red-600 dark:text-red-300">
                 {t('cancelled_sale') || 'Cancelled sale'}
               </div>
-              <div className="space-y-1 text-sm text-gray-700 dark:text-gray-200">
-                {sale.cancel_reason ? (
-                  <div>
-                    <span className="text-gray-400">{t('cancel_reason_label') || 'Reason'}: </span>
-                    {sale.cancel_reason === 'mistake'
+              {/* Same label/value rows as every other block -- the reason used
+                  to be inline prose ("Reason: Mistake -- note"), the only
+                  field in the modal whose label sat on the same line as its
+                  value with a colon. */}
+              <DetailRowGroup>
+                <DetailRow
+                  label={t('cancel_reason_label') || 'Reason'}
+                  value={sale.cancel_reason
+                    ? `${sale.cancel_reason === 'mistake'
                       ? (t('cancel_reason_mistake') || 'Mistake')
                       : sale.cancel_reason === 'buyer_refused'
                         ? (t('cancel_reason_buyer_refused') || "Buyer didn't buy")
-                        : (t('cancel_reason_other') || 'Other')}
-                    {sale.cancel_note ? ` -- ${sale.cancel_note}` : ''}
-                  </div>
-                ) : null}
-                {sale.cancelled_by_name || sale.cancelled_at ? (
-                  <div className="text-xs text-gray-400">
-                    {[sale.cancelled_by_name, sale.cancelled_at ? fmtTime(sale.cancelled_at) : ''].filter(Boolean).join(' · ')}
-                  </div>
-                ) : null}
-                {toNumber(sale.cancel_fee_id) > 0 ? (
-                  <div className="text-xs text-amber-700 dark:text-amber-300">
-                    {t('cancel_lost_fee_recorded') || 'A lost fee was recorded on the Expenses page for this cancellation.'}
-                  </div>
-                ) : null}
-              </div>
+                        : (t('cancel_reason_other') || 'Other')}${sale.cancel_note ? ` — ${sale.cancel_note}` : ''}`
+                    : null}
+                />
+                <DetailRow
+                  label={t('cancelled_by') || 'Cancelled by'}
+                  value={[sale.cancelled_by_name, sale.cancelled_at ? fmtTime(sale.cancelled_at) : ''].filter(Boolean).join(' · ') || null}
+                />
+              </DetailRowGroup>
+              {toNumber(sale.cancel_fee_id) > 0 ? (
+                <p className="mt-2 text-xs text-amber-700 dark:text-amber-300">
+                  {t('cancel_lost_fee_recorded') || 'A lost fee was recorded on the Expenses page for this cancellation.'}
+                </p>
+              ) : null}
               {onStatusChange ? (
                 <button
                   type="button"

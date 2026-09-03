@@ -15,8 +15,19 @@ assert.match(salesSurface, /<ColumnChooser[\s\S]*columns=\{chooserColumns\}/)
 assert.match(salesSurface, /cols\.isVisible\('cashier'\)/)
 assert.match(salesSurface, /cols\.isVisible\('branch'\)/)
 assert.match(detail, /modal-viewport-safe[\s\S]*modal-panel-safe/, 'sale detail must respect every iPhone safe-area edge')
-assert.match(detail, /<table className="w-full min-w-\[34rem\] text-sm">/)
-assert.match(detail, /<div className="space-y-2 sm:hidden">/)
+// The sale detail's line items are a real table, and it is the SAME table at
+// every width. This used to be two assertions -- a `min-w-[34rem]` table plus
+// a separate `space-y-2 sm:hidden` phone card list -- and both were part of
+// the shape the user called broken on Sep 3 2026: the 34rem floor starved the
+// product column to 151px inside a per-cell horizontal scroll box at 1280,
+// and the phone fork silently dropped the Qty and Unit price columns (and the
+// unit KHR) that the desktop table showed. The invariant that mattered --
+// "the phone must not be handed a wide desktop table that scrolls the page"
+// -- is now met by the table wrapping its own scroll container and dropping
+// the width floor, so it fits 375 with no scroll at all.
+assert.match(detail, /<div className="overflow-x-auto">\s*<table className="w-full text-sm">/, 'sale detail items must be a table inside its own horizontal-scroll container')
+assert.doesNotMatch(detail, /min-w-\[34rem\]/, 'the items table must not carry a width floor that starves the product column')
+assert.doesNotMatch(detail, /sm:hidden|md:hidden/, 'the sale detail must not fork a phone-only item list that drops columns')
 assert.match(reports, /useState<DateTimeRange>\(\(\) => todayDateTimeRange\(\)\)/)
 assert.match(salesSurface, /border-collapse text-xs/)
 assert.match(salesSurface, /setDetailSale\(sale\)/)
