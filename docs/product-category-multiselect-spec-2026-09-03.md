@@ -12,8 +12,9 @@ Nothing here is implemented.
 originally left open — Brand ships with Category, Unit stays single-value, categories are capped at
 5, and the storefront gets a primary-plus-ellipsis reveal. Those are decisions now, recorded in
 §10 with the verbatim wording, and they have already been pushed back through §3, §3.2, §4 and
-§4.1. One sub-clause of the storefront answer still needs the user's confirmation — flagged in
-§4.1.
+§4.1. **Revision 3** closes the last ambiguity: the storefront's filter clause was put back to the
+user directly rather than inferred, and is now decided in §4.1 rule 3. No question in this spec is
+left to the lane's judgement.
 
 Standing rules this spec is written against: root cause over symptom, sibling-surface parity in the
 same commit, both language packs, per-action permission keys, floats over inline expansion,
@@ -202,11 +203,19 @@ Which reads as three rules:
    be genuinely revealable rather than a dead-end "…" (shared truncated-text reveal), and the
    reveal **floats over** content rather than pushing the page down.
 3. **Under a filter or search** — the product surfaces under **every** category it carries, not
-   only the primary, and the matching categories are the ones shown. The backend already supports
-   this (`COALESCE(categories, category)`), so this is a display question, not a query one.
+   only the primary, **and the label on the card swaps from the primary to whichever category
+   matched the filter**, so the shopper can see why the product is in these results. The ellipsis
+   still reveals the rest. The backend already supports the query half
+   (`COALESCE(categories, category)`), so this is display work.
 
-Rule 3 is the least explicit clause in the user's message and is a *reading*, not a quote.
-**Confirm it with the user before building it**; rules 1 and 2 are unambiguous.
+Rule 3 was the least explicit clause in the user's message; it was put back to them directly rather
+than guessed, and **they chose "show the matched category"** over always showing the primary and
+over expanding the card to list every match. All three rules are now decided.
+
+Edge case the lane must settle without asking again: when a filter matches **more than one** of a
+product's categories, show the first match in the product's own category order (i.e. the
+primary-first order stored in `categories`) and leave the remainder behind the ellipsis. That keeps
+the card to a single label, which is the shape rules 1 and 3 both assume.
 
 ---
 
@@ -290,8 +299,10 @@ now, not proposals.
 | 1 | Brand multi-select too? | **Yes** — "brands too". Category and Brand ship multi-select **in one commit**; they share the broken component |
 | 2 | Unit multi-value? | **No** — "Unit stays single-value". A product keeps exactly one unit; Unit still gets the search + show-all fix from the shared component |
 | 3 | A cap per product? | **Yes — 5 categories.** Enforced as one rule in the picker *and* the backend, so import/bulk-edit/undo cannot exceed it (§3.2) |
-| 4 | Storefront display | **A third shape, not either option offered** — primary + ellipsis by default, full list on click, matching categories under filter/search. Verbatim wording and the three rules are in §4.1 |
+| 4 | Storefront display | **A third shape, not either option offered** — primary + ellipsis by default, full list on click, and under a filter the card shows the **matched** category rather than the primary. Verbatim wording and the three rules are in §4.1 |
 
-**One thing still to confirm before building:** the third clause of the storefront answer ("when
-filter search it shows...") is the least explicit part of the user's message. §4.1 rule 3 is a
-reading of it, not a quote — put it back to the user rather than guessing.
+**Nothing in this spec is left to a guess.** The one clause that was ambiguous — "when filter
+search it shows..." — was put back to the user rather than inferred, and they chose *show the
+matched category* over always showing the primary and over expanding the card to list every match.
+§4.1 also settles the follow-on edge case (a filter matching several of a product's categories)
+so the lane does not have to re-open the question mid-build.
