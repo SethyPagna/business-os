@@ -21,6 +21,7 @@ import { lazyRetry } from '../../utils/lazyImport.ts'
 import ConfirmDialog, { type ConfirmReviewItem } from '../shared/ConfirmDialog.tsx'
 import { batchDisplayLabel } from '../../utils/batchLabel.ts'
 import { dateToBatchCode } from '../../utils/batchCode.ts'
+import { todayStr } from '../../utils/dateHelpers.ts'
 
 // Keep product creation inside this receiving flow rather than sending the
 // operator to a separate page. The standard ProductForm and create transport
@@ -132,7 +133,11 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
   const draftRef = useRef<FastStockInDraft | null>(readWorkDraft<FastStockInDraft>(fastStockInDraftKey)?.data ?? null)
   const draft = draftRef.current
   const [branchId, setBranchId] = useState<string>(draft?.branchId || initialHeader?.branchId || (defaultBranchId != null ? String(defaultBranchId) : (branchOptions[0]?.value || '')))
-  const [receivedDate, setReceivedDate] = useState<string>(draft?.receivedDate || initialHeader?.receivedDate || '')
+  // Received date defaults to TODAY (business day) rather than empty (user,
+  // Sep 3 2026): nearly every fast stock-in is for stock that just arrived,
+  // so the date the batch code derives from should already be filled in and
+  // the cashier only edits it for a late-entered delivery.
+  const [receivedDate, setReceivedDate] = useState<string>(draft?.receivedDate || initialHeader?.receivedDate || todayStr())
   const [supplier, setSupplier] = useState<SupplierChoice>(draft?.supplier || initialHeader?.supplier || { supplierId: null, supplierName: '' })
   const [paymentStatus, setPaymentStatus] = useState<'paid' | 'credit'>(draft?.paymentStatus || initialHeader?.paymentStatus || 'paid')
   const [creditDueDate, setCreditDueDate] = useState(draft?.creditDueDate || initialHeader?.creditDueDate || '')

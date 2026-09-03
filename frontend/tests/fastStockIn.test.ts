@@ -39,7 +39,7 @@ runTest('F2: the shipment header is entered once and rides every line', () => {
   // F3 slice 1: initializers became draft-aware -- the saved shipment
   // header wins over a reopened-session seed; dates intentionally start
   // blank so the app never silently filters/records a preset day.
-  assert.match(modalSource, /draft\?\.receivedDate \|\| initialHeader\?\.receivedDate \|\| ''/)
+  assert.match(modalSource, /draft\?\.receivedDate \|\| initialHeader\?\.receivedDate \|\| todayStr\(\)/)
   assert.match(modalSource, /draft\?\.paymentStatus \|\| initialHeader\?\.paymentStatus \|\| 'paid'/)
   // every Add sends the header fields with the line
   assert.match(modalSource, /receivedDate: receivedDate\.trim\(\) \|\| null/)
