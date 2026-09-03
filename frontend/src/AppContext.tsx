@@ -378,6 +378,12 @@ const DEVICE_LOCAL_SETTING_KEYS = new Set([
   'ui_custom_sidebar_colors',
   'ui_custom_page_bg_colors',
   'ui_custom_sidebar_text_colors',
+  // How a hub presents its sections on a small screen: 'stacked' (the
+  // long scroll this app has always shown) or 'layered' (hub -> section
+  // list -> one full-screen section with a back header). Device-local like
+  // every other appearance preference: a phone and a desktop browser want
+  // different answers, and one admin should not force either on everyone.
+  'ui_section_layout',
 ])
 const SESSION_ONLY_STORAGE_KEYS = [
   STORAGE_KEYS.USER,

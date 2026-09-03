@@ -252,6 +252,12 @@ function isSettingsSectionId(value: string): value is SettingsSectionId {
 }
 
 const THEME_OPTION_KEYS = [['light', 'themeLight', 'Light'], ['dark', 'themeDark', 'Dark']]
+// Section layout: how a hub presents its sections on a small screen.
+// 'stacked' is the long-standing behaviour and stays the default.
+const SECTION_LAYOUT_OPTION_KEYS: Array<[string, string, string]> = [
+  ['stacked', 'sectionLayoutStacked', 'Stacked'],
+  ['layered', 'sectionLayoutLayered', 'Layered'],
+]
 const LANGUAGE_OPTION_KEYS = [['en', 'englishLabel', 'English'], ['km', 'khmerLabel', 'Khmer']]
 const CARD_STYLE_OPTION_KEYS = [['sharp', 'sharp'], ['rounded', 'rounded'], ['pill', 'pill']]
 const DENSITY_OPTION_KEYS = [['comfortable', 'comfortable'], ['compact', 'compact'], ['spacious', 'spacious']]
@@ -1185,6 +1191,33 @@ export default function Settings() {
                     type="button"
                     onClick={() => setValue('language', langCode)}
                     className={`rounded-full border px-3 py-1.5 text-sm font-medium transition-colors ${form.language === langCode ? 'border-primary-600 bg-primary-50 dark:bg-primary-900/30 text-primary-700 dark:text-primary-400' : 'border-gray-200 dark:border-gray-600 text-gray-600 dark:text-gray-400'}`}
+                  >
+                    {copy(copyKey, defaultLabel)}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Section layout (Sep 3 2026): on a phone a hub that stacks
+                every section into one long scroll is unusable. "Layered"
+                shows one section at a time -- hub, then the section list,
+                then the section full screen with a back header -- and the
+                device back gesture collapses one layer instead of leaving
+                the page. Applies to small screens only; a desktop keeps the
+                stacked layout either way. Default is Stacked, so no
+                existing user is surprised by a changed app. */}
+            <div>
+              <div className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                {copy('sectionLayoutTitle', 'Section layout')}
+                <span className="ml-1 text-xs font-normal text-gray-400">{copy('sectionLayoutHint', 'How pages with several sections behave on a phone')}</span>
+              </div>
+              <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap">
+                {SECTION_LAYOUT_OPTION_KEYS.map(([layoutValue, copyKey, defaultLabel]) => (
+                  <button
+                    key={layoutValue}
+                    type="button"
+                    onClick={() => setValue('ui_section_layout', layoutValue)}
+                    className={`rounded-full border px-3 py-1.5 text-sm font-medium transition-colors ${(toStringValue(form.ui_section_layout) || 'stacked') === layoutValue ? 'border-primary-600 bg-primary-50 dark:bg-primary-900/30 text-primary-700 dark:text-primary-400' : 'border-gray-200 dark:border-gray-600 text-gray-600 dark:text-gray-400'}`}
                   >
                     {copy(copyKey, defaultLabel)}
                   </button>
