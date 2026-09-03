@@ -1152,9 +1152,14 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
         </div>
       </div>
 
-      <p className="mb-2 text-xs text-gray-400">{tr('tap_to_view_details', 'Tap a record to view details.')}</p>
-
-      <div className="mb-3 flex justify-center">
+      {/* The "tap a record" hint used to sit on its own row above the pager
+          (two rows of vertical space for one idea); merged onto the pager's
+          own row instead -- hint on the left, pager on the right -- so the
+          page keeps the same footprint (user, Sep 3: "same row as the page
+          back and forth ... so left of screen ... try not to push anothing
+          up or down"). */}
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+        <p className="min-w-0 truncate text-xs text-gray-400">{tr('tap_to_view_details', 'Tap a record to view details.')}</p>
         <PaginationControls
           compact
           rangeAsPageSize
@@ -1168,6 +1173,7 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
             setReturnPageSize(size)
             setReturnPage(1)
           }}
+          className="shrink-0"
         />
       </div>
       <ReturnsListSurface

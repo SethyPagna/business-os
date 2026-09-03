@@ -140,7 +140,13 @@ export default function StatsStrip({
           type="button"
           aria-expanded={statsOpen}
           onClick={() => setStatsOpen((current) => !current)}
-          className={`inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-[11px] font-medium transition-colors ${
+          // h-8/px-2.5/text-xs matches the History/Manage/Add buttons that
+          // share this row -- the chip used to be its own smaller size
+          // (px-1.5/text-[11px], no fixed height), which read as the tiny
+          // odd one out beside them (user, Sep 3: "buttons ... add, history,
+          // manage, stats can be made a bit wider and consistent width/
+          // height, no need too tiny").
+          className={`inline-flex h-8 shrink-0 items-center gap-1 rounded-lg px-2.5 text-xs font-semibold transition-colors ${
             statsOpen
               ? 'bg-slate-800 text-white dark:bg-slate-200 dark:text-slate-900'
               : 'bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-zinc-800 dark:text-gray-300 dark:hover:bg-zinc-700'
