@@ -109,6 +109,11 @@ const portalRoute = loadReal('routes/portal.ts', {
   '../durable-objects/broadcastHub': { broadcast: async () => {} },
   '../lib/portalAi': { generatePortalAiResponse: async () => ({}), getPortalAiUsageStatus: () => ({}) },
   '../lib/searchMatch': searchMatch,
+  // routes/portal.ts's search tail and its relevance ordering come from
+  // this shared module (the same one products.ts/inventory.ts/branches.ts
+  // use). Real, not stubbed: the ORDER BY it produces is exactly what the
+  // assertions below are about.
+  '../lib/productSearchQuery': loadReal('lib/productSearchQuery.ts', { './searchMatch': searchMatch }),
   '../lib/importImageMatch': { MAX_IMAGES_PER_PRODUCT: 3, ADMIN_MAX_IMAGES_PER_PRODUCT: 5 },
 })
 

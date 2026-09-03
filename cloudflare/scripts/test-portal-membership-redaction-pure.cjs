@@ -83,6 +83,7 @@ const portalRoute = loadReal('routes/portal.ts', {
   '../durable-objects/broadcastHub': { broadcast: async () => {} },
   '../lib/portalAi': { generatePortalAiResponse: async () => ({}), getPortalAiUsageStatus: () => ({}) },
   '../lib/searchMatch': {},
+  '../lib/productSearchQuery': {},
   '../lib/familyPagination': { paginateProductFamilies: async () => ({ items: [], total: 0 }) },
   '../lib/importImageMatch': { MAX_IMAGES_PER_PRODUCT: 3, ADMIN_MAX_IMAGES_PER_PRODUCT: 5 },
 })
