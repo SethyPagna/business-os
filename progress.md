@@ -125,6 +125,25 @@ Two rules learned the hard way, both from real incidents in this file's own hist
 
 ## Current status
 
+**🚀 DEPLOYED (Sep 3 2026, 14:27 UTC) — Worker version `3b25fe33-a806-44f7-9d42-caca6801f102`, from committed
+`e3678a39` on `ship/2026-09-03` (NOT MAIN; pushed to origin), by session business-os-v1-c3, on the user's explicit go
+("then continue implementing and actually deploying"). Reference to re-verify — Part 587.** Built in an isolated
+worktree `Downloads/bos-dep` with a real `npm ci` (removed afterwards, which also cleared the copied secret files).
+Migrations applied: **none** (chain top 0107 == prod top 107, read from D1 before and after). `secrets:sync`: **no**.
+What shipped beyond #3 (`a486d82e`): **72 commits** — 12 lanes reconciled onto the production line
+(`claude/musing-tu-d9f677`, `fx/catalog-no-update-banner`, `fx/fleet-tooling`, `fx/khmer-naming`, `fx/products-report-style`, `fx/public-runtime-eol`, `fx/returns-semantics`, `fx/runtime-provenance`, `fx/sale-detail-rows`, `fx/search-rank`, `lane-a/fast-stock-in`, `lane-b/transfer`), the RC line's mobile 3-layer navigation and receipt Text-contrast setting ported as migration-free
+cherry-picks, and the user's Sep-3 asks: square section tiles two per row on phones with no "Sections" caption, no
+Promotions title, POS grouped card "Options: N | Total: n" with coloured numbers, bilingual receipts Khmer first, fast
+stock-in received date = today, receipt Text contrast **defaults to maximum** (the stored settings carry neither
+contrast field, so the default is what prints). Certified on committed HEAD: frontend `test:utils` 177 files green,
+`verify:i18n` green, real `vite build`; cloudflare `tsc` + 172/172. **Held out on purpose:** `fx/reports-redesign`
+(the user's two-version reports comparison is still owed) and `rc/sec-10-reports` (RC line, parked). **Not shipped,
+needs the user's ruling:** "stats regarding products and stock value should show total latest of whole system" —
+Inventory's stat cards follow the page filters by a deliberate earlier fix (cards must match the filtered table), so
+making them whole-system reverses a recorded decision. `main` is NOT what is deployed: `ship/2026-09-03` is ahead of
+`a486d82e`, and `a486d82e` was never merged to `main` — merging the ship branch to `main` is the next reconciliation
+step and is the user's call.
+
 **TWO PROGRAMS, ONE PRODUCTION — AND THE RC LINE'S 0106 IS ALREADY TAKEN (Part 586).** The fleet is
 building two separate bodies of work that both target the same Worker, and they forked at `57d8f1a2`.
 Measured, not inferred: the **RC line** (`rc/coordinated-2026-09-02`, `539567e2`) is **149 commits /
@@ -229,8 +248,15 @@ Read this before any deploy. The `deploy-provenance` skill exists because of the
 | 1 | `0a531d53-3aa6-4b31-a50e-e04c9bc109ac` | 2026-09-03T07:26:26Z | `57c0b61c` | **`hotfix/prod-2026-09-03`** (NOT main) | clean, isolated worktree `bos-rc-workers/cert-57c0b61c` | **0107**, applied before the Worker deploy | no |
 | 2 | `d701ddc1-22ff-4d87-bbe7-6b25a666b79b` | 2026-09-03T08:41:57Z | `a4f10152` | `main` | clean, isolated worktree | none | no |
 | 3 | `eb358e4d-624b-472f-aca0-f896a352b430` | 2026-09-03T09:40:33Z | `a486d82e` | **`reconcile/2026-09-03`** (NOT main) | clean, worktree `Downloads/bos-rec` | none (chain top == prod top == 107) | no |
+| 4 | `3b25fe33-a806-44f7-9d42-caca6801f102` | 2026-09-03T14:27:12Z | `e3678a39` | **`ship/2026-09-03`** (NOT main; pushed to origin) | clean, isolated worktree `Downloads/bos-dep`, real `npm ci`, removed after | none (chain top == prod top == 107) | no |
 
-**#3 IS WHAT PRODUCTION SERVES RIGHT NOW.** Frontend build stamp `a486d82ef747` / hash `e0915eed8f9ed1e4`, builtAt
+**#4 IS WHAT PRODUCTION SERVES RIGHT NOW (Part 587).** Served bundle `index-PVIjw20o.js`, the same file name
+the isolated build emitted; `/health` **200** on both hosts 49 s after the deploy; `/api/products` unauthenticated
+**401**; `/ws` GET **426**; storefront **200** with Leang branding; `d1_migrations` top still **107**; `wrangler d1
+migrations list --remote` → nothing to apply. **The next free migration number is still 0108.** #4 was cut from #3
+(`a486d82e` is its base), so everything below about #3's ancestry holds for #4.
+
+**#3 WAS what production served until 14:27Z.** Frontend build stamp `a486d82ef747` / hash `e0915eed8f9ed1e4`, builtAt
 2026-09-03T09:39:48Z, deployed 45 s later. Re-verified live this session: `/health` **200**, `d1_migrations` top =
 **107** (`0107_receipt_numbers_business_format.sql`; 106 = `0106_return_replacement_sales.sql`, 105 =
 `0105_fee_delivery_contacts.sql`). **The next free migration number is 0108.**

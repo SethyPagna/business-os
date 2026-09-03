@@ -17904,3 +17904,79 @@ the commit that introduced the rename.
 them so rather than reaching into their branch. No trial integration; `fx/search-rank` is still
 running. Nothing deployed and no Stage-2 go exists. The RC-versus-production reconciliation, and
 which of each duplicated pair survives, are the user's decisions and are now in front of them.
+
+## Part 587 (Sep 3 2026, session business-os-v1-c3, FINAL RECONCILER + DEPLOY) — the design the user liked, reconciled onto what was live, and deployed as `3b25fe33`
+
+**Signature correction.** Parts 585 and 586 are signed `business-os-v1-c9`; `ListAgents` says this session is
+`business-os-v1-c3`. The pushed commits are not rewritten; the record is corrected here.
+
+**Ask.** The user, verbatim: "I want you to reconcile then put the design into the current deployed, i like, the
+current gold design, sections design (though even better if remove the "Section"). Promotions remove the promotions
+title... in smaller screens, the sections into mini page part of the 3 layer design... though sales did it you can do
+a square design with icon larger and name below the icon... two per row... in smaller screens.... of course this is
+changeable through settings.. i also like the reports...... after you add this to list regarding reconcile... then
+continue implementing and actually deploying." Earlier in the same session: POS "Options: N | Total n" with coloured
+numbers, receipts Khmer first then English, the receipt contrast "not bold, not super contrast very dark... my printer
+is not printing with good ink", and stats "should show total latest of whole system".
+
+**What changed.** Branch `ship/2026-09-03` (pushed), cut from `a486d82e` — the commit production was serving
+(ledger #3) — and now **72 commits** ahead of it. 12 lanes are fully contained (`claude/musing-tu-d9f677`, `fx/catalog-no-update-banner`, `fx/fleet-tooling`, `fx/khmer-naming`, `fx/products-report-style`, `fx/public-runtime-eol`, `fx/returns-semantics`, `fx/runtime-provenance`, `fx/sale-detail-rows`, `fx/search-rank`, `lane-a/fast-stock-in`, `lane-b/transfer`). Two RC-line
+lanes were ported as cherry-picks after verifying they add no migration (`rc/sec-6-mobile-layers`: the 3-layer mobile
+navigation and the `ui_mobile_section_nav` setting; `rc/sec-4-receipt-contrast`: the receipt Text-contrast setting).
+Three genuine conflicts were resolved as unions, not side-picks: `ReturnDetailModal.tsx` keeps the shared
+`MoneyRow` rhythm from `fx/sale-detail-rows` and the two-era branch from `fx/returns-semantics` (a `marker` prop on
+`MoneyRow` carries `data-historical-settlement` / `data-replacement-sale`); `BranchesHubPage.tsx` takes the RC
+`HubSectionDef` shape but keeps production's section ids (the RC line still calls the second section `inventory`,
+production renamed it `products` — taking the RC ids would have broken the deep link); the five receipt files stack
+both contrast controls (the older `highContrastBold` and the newer `text_contrast`) instead of choosing one. The
+lang packs and the `test:utils` chain were unioned by script from the git stages (`unionlang.cjs`, `unionpkg.cjs`):
+zero genuine value conflicts, and a key-set diff against `a486d82e` afterwards shows **0 base keys lost** in either
+pack.
+
+On top of the reconcile, the user's asks: `HubSectionNav` layer 2 is a two-per-row grid of square tiles (icon
+12×12 box, name under it, description under that, badge in the corner, no chevron) and the "Sections" caption is
+gone from both layers; `PromotionsPage` drops its `h1` (the name still feeds layer 2's heading on a phone); the POS
+grouped card reads "Options: N | Total: n" with the option count in the accent and the summed stock in the
+red/amber/emerald convention; `labelFor('both')` joins as "ខ្មែរ / English:" and the bilingual thank-you puts the
+Khmer line first (toggle reads KH/EN); `FastStockInModal` opens with the business-day date filled (`todayStr()`);
+`DEFAULT_RECEIPT_TEXT_CONTRAST` is `'maximum'` and `normalizeReceiptTextContrast` now passes both enum strings
+through so `'normal'` remains the opt-out.
+
+**What certification found on the reconciled branch (all fixed forward, each its own commit).** Eight test files
+were red on committed HEAD; none was a behaviour regression. Three pinned *where* markup lives after the RC lane
+moved every hub's chip row into `HubSectionNav` (`nestedUiIntegrity`, `statsStrip`); the pins now follow the
+delegation. `langKeyIntegrity` + `returnsExchangeFlow` + `returnOptions` were one finding: the union re-admitted
+keys `fx/returns-semantics` had retired (`any_stock`, `customer_owes`, `shop_refunds`, `settle_difference`,
+`uneven_exchange_blocked`, `even_exchange_desc`, `perm_act_returns_settle_difference`, `replacement_items_*`) — a
+deletion on one side looks like an addition on the other to a union; dropped again, no consumer references any of
+them. `khmerRetailVocabulary`: six `lot_*`/`return_lot_*` values said ឡូត and one said អ្នកទិញ; now បាច់ / អតិថិជន.
+`testChainCoverage`: `hubSectionNav.test.ts` and `receiptTextContrast.test.ts` existed but no lane's chain had them.
+`trPlaceholderSubstitution`: a stale EXPECTED_UNFIXED allowance lane-a had already fixed. `receiptTextContrast`'s
+`textColor` pin now accepts the union with `highContrastBold`. Also cleared a leftover `CHERRY_PICK_HEAD` whose
+commit (`bae87445`) was already resolved as `249a76f1`.
+
+**Deploy.** Provenance first: `wrangler deployments list` shows #3 at 09:40:33Z, 2 min after `a486d82e` was
+committed; `d1_migrations` top = 107 = the chain top, so this deploy applies nothing. Isolated worktree
+`Downloads/bos-dep` at `e3678a39`, secret files copied in, real `npm ci` in both packages, both typechecks,
+`build:frontend`, `migrate:remote` ("No migrations to apply!"), `wrangler deploy` → **Current Version ID
+`3b25fe33-a806-44f7-9d42-caca6801f102`**, created 2026-09-03T14:27:12Z. `secrets:sync` not run. Worktree removed.
+
+**Verified (expected vs actual).** Before: served bundle `index-BPKbnMPD.js`. After: `/health` 200/200 on
+admin.leangbeauty.com and leangbeauty.com (expected ok → ok); `/api/products` unauthenticated 401 → 401; `/ws` GET
+426 → 426; storefront 200 with "Leang Beauty online store" → 200; admin `/` 200 → 200; served bundle
+`index-PVIjw20o.js` == the file the isolated build emitted; `wrangler deployments list` tail = `3b25fe33…`;
+`d1 migrations list --remote` → nothing to apply; admin login page renders in the Browser pane with only the
+expected unauthenticated bootstrap 401 in the console. Certification on committed HEAD before the deploy: frontend
+`test:utils` 177 files green, `verify:i18n` green (4542 keys, 454 source files), `vite build`; cloudflare `tsc` +
+172/172.
+
+**Not done / owed.** (1) The whole-system stats ask is **not shipped**: Inventory's stat cards follow the page
+filters by a deliberate earlier fix (the Worker's `/stats` comment: cards must match the filtered table below), so
+making them whole-system reverses a recorded decision — the user's ruling is needed, and which surface they mean
+(Inventory cards, Branches → Products, Dashboard). (2) `fx/reports-redesign` is held out (peer 09's objection stands:
+merging it decides the reports question by merge order; it also ships the All-time $0.00 defect) — the two-version
+comparison is still owed to the user. (3) `rc/sec-10-reports` stays parked on the RC line. (4) `ship/2026-09-03` is
+**not merged to `main`**, and neither was `a486d82e`; `main` no longer describes production. (5) The till's own
+localStorage print settings can still hold an old `highContrastBold:false`; if a receipt still prints light on that
+device, tick "Extra-dark bold receipt text" once in Print settings there. (6) Reply from peers 40/63/7e to the deploy
+brief: none arrived before the deploy; musing-tu-d9f677-c4 was told to use Part 588.
