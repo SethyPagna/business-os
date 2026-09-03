@@ -8,7 +8,7 @@ import InfoHint from '../../shared/InfoHint'
 export type ProductImportTopMode = 'general' | 'replace' | 'stock_actions' | 'images'
 
 const MODES = [
-  { id: 'general', label: 'Add / Update', icon: Layers, tone: 'blue' },
+  { id: 'general', label: 'Add / Update', icon: Layers, tone: 'accent' },
   { id: 'replace', label: 'Replace', icon: AlertTriangle, tone: 'red' },
   { id: 'stock_actions', label: 'Stock Actions', icon: Repeat2, tone: 'emerald' },
   { id: 'images', label: 'Images Only', icon: ImagePlus, tone: 'violet' },

@@ -3901,11 +3901,11 @@ function ProductsFullEditor() {
                     </button>
                   )}
                   items={[
-                    { label: tr('add_stock', 'Add Stock'), onClick: () => ledgerActions?.openAdjust('add'), color: 'blue', icon: <Boxes className="h-4 w-4 shrink-0" /> },
+                    { label: tr('add_stock', 'Add Stock'), onClick: () => ledgerActions?.openAdjust('add'), icon: <Boxes className="h-4 w-4 shrink-0" /> },
                     { label: tr('remove_stock', 'Remove Stock'), onClick: () => ledgerActions?.openAdjust('remove') },
                     { label: tr('adjust_quantity', 'Adjust Quantity'), onClick: () => ledgerActions?.openAdjust('set') },
                     'divider',
-                    { label: tr('fast_stockin_title', 'Fast stock-in'), onClick: () => ledgerActions?.openFastStockIn(), color: 'blue' },
+                    { label: tr('fast_stockin_title', 'Fast stock-in'), onClick: () => ledgerActions?.openFastStockIn() },
                   ] as PortalMenuItem[]}
                 />
               ) : null

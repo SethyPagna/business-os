@@ -189,7 +189,18 @@ const tokenOffenders: { colour: string[]; zIndex: string[]; viewport: string[] }
 for (const fileUrl of productsFiles) {
   const src = readFileSync(fileUrl, 'utf8')
   const rel = fileUrl.href.slice(fileUrl.href.indexOf('/products/') + 1)
-  if (/blue-[0-9]|indigo-[0-9]|#2563eb/i.test(src)) tokenOffenders.colour.push(rel)
+  // The class-name form (blue-600) is only half of it: PortalMenu carries its
+  // OWN colour vocabulary (`color: 'blue'` -> text-blue-600 + a hand-written
+  // dark: twin, PortalMenu.tsx's colorClassByType), and ProductImportModeTabs
+  // labelled its accent branch `tone: 'blue'` long after that branch started
+  // rendering --ui-accent-ink. Both were invisible to a `blue-[0-9]` sweep and
+  // both really did paint the page's second accent, so they are offenders too.
+  // NOT included: `data-tone="blue"` on a <th>. That is the shared data-table
+  // column-tint vocabulary (blue/violet/emerald/amber) styled in main.css and
+  // used identically on the sibling Sales/Inventory tables -- retiring it in
+  // the products folder alone would break sibling-surface parity, so it is
+  // reported to the coordinator rather than changed here.
+  if (/blue-[0-9]|indigo-[0-9]|#2563eb|(?:color|tone): '(?:blue|indigo)'/i.test(src)) tokenOffenders.colour.push(rel)
   if (/z-\[[0-9]+\]/.test(src)) tokenOffenders.zIndex.push(rel)
   if (/-\[[0-9]+(?:\.[0-9]+)?vh\]/.test(src)) tokenOffenders.viewport.push(rel)
 }

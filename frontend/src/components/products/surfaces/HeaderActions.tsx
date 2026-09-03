@@ -144,7 +144,7 @@ export default function ProductsHeaderActions({
     ...(onManageUnits ? [{ label: unitsLabel, onClick: onManageUnits, icon: <Ruler className={iconClass} /> }] : []),
   ]
   const transferItems: PortalMenuItem[] = [
-    ...(onImport ? [{ label: importLabel, onClick: onImport, color: 'blue' as const, icon: <Upload className={iconClass} /> }] : []),
+    ...(onImport ? [{ label: importLabel, onClick: onImport, icon: <Upload className={iconClass} /> }] : []),
     ...(onExport ? [{ label: exportLabel, onClick: onExport, color: 'green' as const, icon: <Download className={iconClass} /> }] : []),
     ...(onWireImages ? [{ label: wireImagesLabel, onClick: onWireImages, icon: <ImagePlus className={iconClass} /> }] : []),
   ]
@@ -159,7 +159,7 @@ export default function ProductsHeaderActions({
   // The Add button's menu: stock the existing catalog first, create a
   // brand-new product last.
   const addMenuItems: PortalMenuItem[] = [
-    ...(onAddStock ? [{ label: addStockLabel, onClick: onAddStock, color: 'blue' as const, icon: <Boxes className={iconClass} /> }] : []),
+    ...(onAddStock ? [{ label: addStockLabel, onClick: onAddStock, icon: <Boxes className={iconClass} /> }] : []),
     ...(onAdd ? [{ label: addNewProductLabel, onClick: onAdd, color: 'green' as const, icon: <PackagePlus className={iconClass} /> }] : []),
   ]
 
