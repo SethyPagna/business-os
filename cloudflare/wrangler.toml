@@ -302,3 +302,9 @@ GOOGLE_LOGIN_REDIRECT_URI = "https://admin.leangbeauty.com/api/auth/oauth/callba
 # GOOGLE_DRIVE_CLIENT_SECRET` for production.
 GOOGLE_DRIVE_CLIENT_ID = "784691087631-8ptg5j6vb15oi3ljg66dli7ssne88jig.apps.googleusercontent.com"
 GOOGLE_DRIVE_REDIRECT_URI = "https://admin.leangbeauty.com/api/system/drive-sync/oauth/callback"
+
+# Workers Logs (request-level method/path/status, 7-day retention). Enabled after the 2026-09-03
+# incident, when no retroactive per-invocation record existed anywhere (Sentry = exceptions only).
+[observability]
+enabled = true
+head_sampling_rate = 1
