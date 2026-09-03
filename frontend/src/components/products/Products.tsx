@@ -128,6 +128,7 @@ import { buildHierarchicalCategoryFilterOptions } from '../shared/CategoryFilter
 import { buildAvailabilityFilterSection } from '../shared/AvailabilityFilterOptions.tsx'
 import { buildSearchModeFilterSection } from '../shared/SearchModeFilterOptions.tsx'
 import { buildAutoMergedFilterSection } from './AutoMergedFilterOptions.tsx'
+import { buildCreatedDateFilterSection } from './CreatedDateFilterOptions.tsx'
 import { RESTORE_WORK_EVENT, consumePendingRestore, markRestoreHandled, minimizeWork } from '../../utils/minimizedWork.ts'
 import { buildIssuesFilterSection } from '../shared/IssuesFilterOptions.tsx'
 import { buildPromotionsFilterSection } from '../shared/PromotionsFilterOptions.ts'
@@ -2987,10 +2988,23 @@ function ProductsFullEditor() {
       branchFilter,
       setBranchFilter,
     }),
-    // Y13: the "Created" date filter is no longer a menu section -- it moved
-    // to its own row directly below the search row (see the render below).
-    // buildProductFilterSections treats createdSection as optional, so
-    // omitting it here simply drops it from the menu.
+    // The "Created" batch-received-date range. Y13 moved it out of this
+    // menu onto its own row below the search row; 85294c21 ("unify product
+    // grouping and complete exports") then deleted that row and never
+    // rehomed the control, leaving `createdDateFrom`/`createdDateTo`, the
+    // clear-all reset, the activeFilters term and the server's
+    // batchDateFrom/batchDateTo query all wired to a filter with no UI --
+    // the catalogue report could not be date-ranged at all. It comes back
+    // HERE rather than as a toolbar row because the standing rule is that a
+    // chosen filter lives inside FilterMenu instead of spending a page row
+    // (and the row the user did ask about was the pager's, which stays put).
+    createdSection: buildCreatedDateFilterSection({
+      t,
+      createdDateFrom,
+      setCreatedDateFrom,
+      createdDateTo,
+      setCreatedDateTo,
+    }),
     issuesSection: buildIssuesFilterSection({
       t,
       issueFilter,
