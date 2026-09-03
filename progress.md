@@ -2479,16 +2479,26 @@ messages. **[ ]** not started · **[~]** in progress · **[x]** done (branch nam
   - **Do not touch** the CSV header `batch(mm/dd/yyyy)` (compat surface), the `product_batches`
     columns (a migration, not a label change), or the "batch session" / chunk-size senses of the
     word. The matrix classifies each.
-- [ ] **S4-27a · Defects that are wrong whichever way the rename is ruled** — no ruling needed,
-  do these regardless. `km.json:855` and `:882` carry the Latin word `batch` inside the Khmer
-  sentence. `ProductRowParts.tsx:107` passes `'Batch'` as the *Khmer* argument to `tr()`.
-  `POS.tsx:2914-2915` uses one identical English sentence for both languages.
-  `StockChangeSection.tsx:748` and `ProductDetailReport.tsx:301` call `batchDisplayLabel()` with
-  no `batchWord`, so its English `'Batch'` default renders for Khmer users.
-  `ProductsImageOnlyView.tsx:707` and `movementGroups.ts:319` print the raw lot code (`08242026`,
-  `Lot 08242026`) instead of decoding it — the exact MMDDYYYY-where-a-date-belongs defect
-  `batchLabel.ts` exists to prevent. `CreatedDateFilterOptions.tsx:51` is labelled "Created"
-  while filtering on `received_at`.
+- [x] **S4-27a · Defects that are wrong whichever way the rename is ruled.** Built on
+  `s4/received-date` off the deployed tip `e3678a39`, pushed. Four scoped commits:
+  `dd475a3f` the Khmer text (km.json `bulk_add_batch_note` / `bulk_remove_batch_note` carried the
+  Latin word `batch` inside a Khmer sentence; `ProductRowParts.tsx` passed `'Batch'` as `tr()`'s
+  **Khmer** argument) · `bdf2998d` the raw lot codes (`ProductsImageOnlyView` rendered
+  `batch.lotCode` verbatim so the image-only role saw `08242026` beside real dates, and its row
+  type never fetched `received_at` at all; `movementGroups.ts` produced `Lot 08242026`;
+  `FastStockInModal` echoed the server's raw code) · `ffec1309` two `batchDisplayLabel()` calls
+  missing `batchWord`, so its English default reached Khmer users · `374bbe33` the Products date
+  filter, labelled "Created" while scoping by `product_batches.received_at`.
+  Gate green at that tip: `verify:i18n` OK (4,542 keys, 454 source files), `test:utils` exit 0
+  with 1,078 PASS, `vite build` clean in 30.55s. No Worker file touched.
+  **`verify:i18n` cannot catch any of the text defects** — every key existed in both packs with
+  matching key sets; key-set parity proves nothing about the words.
+  - **Still open, held for their owners** (messaged, awaiting reply): `pos/POS.tsx:2914-2915`,
+    one identical English sentence in both language slots — `business-os-v1-7c`'s S4-18 lane.
+    `products/StockChangeSection.tsx:748`, a missing `batchWord` — `business-os-v1-ba`'s S4-15
+    lane, which is also the right owner for `StockInSessionsSection.tsx:260, 265`.
+  - **Named, not fixed:** `movementGroups.ts` is a JSX-free helper with no translator in scope,
+    so its `Lot ` prefix stays hard-coded English.
 - [?] **S4-27b · Does the noun move too?** Renaming the date *field* is unambiguous. Renaming the
   collection noun is a product call: "Manage Batches" → "Manage received dates"? the `Batches`
   button? the `Batch` column header in three tables? Needs one line from the user. Two smaller
