@@ -201,23 +201,47 @@ async function main() {
     assert.strictEqual(capped.json.length, 20, 'an oversized ?limit is clamped, not honored')
   })
 
-  // The receipt lane's migration 0107 adds sales.legacy_receipt_number when
-  // no such column exists. This route ships before that, so it must answer
-  // correctly on BOTH shapes of the table -- that is the whole reason the
-  // column is probed rather than assumed.
+  // The receipt lane's migration 0107 adds sales.legacy_receipt_number, and
+  // since that lane merged into this branch the REAL chain now has the
+  // column -- so the pre-0107 shape has to be constructed, not assumed. It
+  // still has to be covered: the route probes for the column rather than
+  // assuming it precisely because a database restored from a pre-0107 backup
+  // will not have it, and "no such column" must not become a 500.
+  // (This assertion read `columns.includes(...) === false` against the base
+  // chain, which was true only while 0107 was outside this branch. The merge
+  // that brought 0107 in silently invalidated the premise, not the route.)
   await check('the lookup answers on a pre-0107 database (no legacy_receipt_number column)', async () => {
     seed()
+    const baseColumns = rawDb.prepare('PRAGMA table_info("sales")').all().map((row) => row.name)
+    if (baseColumns.includes('legacy_receipt_number')) {
+      // 0107 also indexes the column, and SQLite refuses to drop a column an
+      // index still references. Drop the index first, restore both below.
+      rawDb.exec('DROP INDEX IF EXISTS idx_sales_legacy_receipt_number')
+      rawDb.exec('ALTER TABLE sales DROP COLUMN legacy_receipt_number')
+    }
     const columns = rawDb.prepare('PRAGMA table_info("sales")').all().map((row) => row.name)
-    assert.ok(!columns.includes('legacy_receipt_number'), 'sanity: the base migration chain has no legacy column yet')
-    const { status, json } = await lookup('20260903')
-    assert.strictEqual(status, 200, 'a pre-0107 database must not 500 on "no such column"')
-    assert.strictEqual(json.length, 2)
-    assert.strictEqual(json[0].legacy_receipt_number, null, 'the field is still present in the payload, as NULL')
+    assert.ok(!columns.includes('legacy_receipt_number'), 'the pre-0107 shape must really be missing the column')
+    // Driven through the query builder rather than the route: the route
+    // caches a `true` probe for the life of the isolate on the explicit
+    // reasoning that "columns are not dropped here" -- correct in production,
+    // and it means the earlier cases in this file have already cached true,
+    // so a route call here would test the stale cache rather than the SQL.
+    // What must hold is that the pre-0107 shape produces a statement that
+    // RUNS on a table without the column and still reports the field.
+    const built = returnsRoute.buildReceiptLookupQuery({ query: '20260903', limit: 20, hasLegacyColumn: false })
+    assert.ok(built, 'a real query still builds without the legacy column')
+    const rows = rawDb.prepare(built.sql).all(built.params)
+    assert.strictEqual(rows.length, 2, 'a pre-0107 database must answer, not fail on "no such column"')
+    assert.strictEqual(rows[0].legacy_receipt_number, null, 'the field is still present in the payload, as NULL')
   })
 
   await check('once legacy_receipt_number exists it is matched and returned', async () => {
     seed()
-    rawDb.exec('ALTER TABLE sales ADD COLUMN legacy_receipt_number TEXT')
+    const cols = rawDb.prepare('PRAGMA table_info("sales")').all().map((row) => row.name)
+    if (!cols.includes('legacy_receipt_number')) {
+      rawDb.exec('ALTER TABLE sales ADD COLUMN legacy_receipt_number TEXT')
+      rawDb.exec('CREATE INDEX IF NOT EXISTS idx_sales_legacy_receipt_number ON sales(legacy_receipt_number)')
+    }
     // Bound, not inlined: the @name translator in lib/db.ts (and this
     // harness) rewrites @word anywhere in the SQL text, literals included.
     rawDb.prepare('UPDATE sales SET legacy_receipt_number = @legacy WHERE id = 1').run({ legacy: '004488@2026-09-03' })
