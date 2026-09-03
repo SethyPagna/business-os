@@ -122,6 +122,23 @@ assert.match(newReturn, /const reviewReturn[\s\S]*step === 'items'[\s\S]*onClick
 assert.match(report, /flex w-full min-w-0 items-center justify-between/, 'detail report links must remain width-bounded')
 assert.match(report, /<span className="detail-scroll-text[^\"]*">\{label\}<\/span>/, 'detail report labels must stay fully readable through bounded horizontal scrolling')
 
+// P2-4 Part 1b, measured on the running app at 375x812: the Products
+// `.page-scroll` root reported scrollWidth 408 against clientWidth 370, so the
+// whole page panned 38px sideways on a phone. The single overflowing box was
+// the density wrapper: main.css's `.products-list-density-90` pairs `zoom: .9`
+// with `width: 111.111111%`, but those are two ALTERNATIVE techniques. The
+// reciprocal width exists to refill a box that `transform: scale()` shrank
+// without touching layout; `zoom` already participates in layout, so the
+// extra 11% is real width, not a correction (Chrome resolves the percentage in
+// the element's own zoomed units: 346 / .9 = 384.44, x 1.1111 = 427.15 zoomed
+// px = 384.4 real px in a 346px content box -- exactly the 38px). The wrapper
+// therefore pins `width: auto` inline, which is what `zoom` alone wants.
+assert.match(
+  products,
+  /<div className="products-list-density-90" style=\{\{ width: 'auto' \}\}>/,
+  "the 90%-density product-list wrapper must pin width:auto -- main.css pairs its zoom:.9 with a reciprocal width:111.111111% that zoom does not need, and that extra 11% is what pushed .page-scroll to scrollWidth 408 against clientWidth 370 at 375px",
+)
+
 console.log('PASS Products responsive section, detail, and batch surfaces')
 
 // P2-4 Part 1b: the whole products folder is swept onto the design tokens, so

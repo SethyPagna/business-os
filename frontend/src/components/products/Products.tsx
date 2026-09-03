@@ -4352,9 +4352,30 @@ function ProductsFullEditor() {
           initialFilter/initialOptions plumbing removed with it below. */}
 
       {/* The product-result surface is intentionally 90% of its former
-          visual scale. The wrapper restores the layout width so shrinking
-          rows/cards does not leave an empty 10% rail on the right. */}
-      <div className="products-list-density-90">
+          visual scale, via main.css's `.products-list-density-90`
+          (`zoom: .9` + `width: 111.111111%`).
+          P2-4 Part 1b -- root cause of the 375px page overflow (measured:
+          `.page-scroll` scrollWidth 408 vs clientWidth 370, a 38px bleed that
+          made the whole Products page pan sideways on a phone):
+          `zoom` and the reciprocal width are two ALTERNATIVE ways to do this
+          and the rule applies both. `transform: scale(.9)` does not
+          participate in layout, so it needs a `width: 111.111111%` partner to
+          refill the box. `zoom` DOES participate in layout -- a zoomed block
+          already fills its containing block and already renders its contents
+          at 90% -- so the reciprocal width is not a correction, it is a
+          second, unwanted 11% of real width: Chrome resolves the percentage
+          against the containing block expressed in this element's own zoomed
+          units (346 / 0.9 = 384.44), so the used width lands at 427.15 zoomed
+          px = 384.4 real px inside a 346px content box. 384.4 - 346 = the 38px.
+          `width: auto` (the block default) is what `zoom` alone wants, and it
+          measures right in both of Chrome's readings of that percentage.
+          It is set inline rather than by deleting the declaration because
+          main.css belongs to another lane (P2-9); this is the class's only
+          consumer, so the defect cannot manifest anywhere else, and the
+          override stays a harmless no-op once that lane drops the width.
+          Verified live at 375x812: scrollWidth 408 -> 370 == clientWidth,
+          right edge still flush with the tools above. */}
+      <div className="products-list-density-90" style={{ width: 'auto' }}>
         <ProductsListSurface
           allVisibleProducts={allVisibleProducts}
           collapsedProductGroups={collapsedProductGroups}
