@@ -14,6 +14,7 @@ import Eye from 'lucide-react/dist/esm/icons/eye.js'
 import { useApp as useAppHook } from '../../AppContext.tsx'
 import AppSelect from '../shared/AppSelect.tsx'
 import InfoHint from '../shared/InfoHint.tsx'
+import DateEntryInput from '../shared/DateEntryInput.tsx'
 import ScanSearchButton from '../shared/ScanSearchButton.tsx'
 import { fmtDate } from '../../utils/formatters.ts'
 import {
@@ -958,13 +959,13 @@ export default function PromotionsPage() {
               <div className="grid grid-cols-2 gap-2">
                 <div>
                   <label className={labelCls}>{t('promo_starts') || 'Starts (optional)'}</label>
-                  <input type="date" className={inputCls} value={draft.starts_at}
-                    onChange={(event) => setDraft({ ...draft, starts_at: event.target.value })} />
+                  <DateEntryInput className={inputCls} bare t={t} ariaLabel={t('promo_starts') || 'Starts'} value={draft.starts_at}
+                    onChange={(iso) => setDraft({ ...draft, starts_at: iso })} />
                 </div>
                 <div>
                   <label className={labelCls}>{t('promo_ends') || 'Ends (optional)'}</label>
-                  <input type="date" className={inputCls} value={draft.ends_at}
-                    onChange={(event) => setDraft({ ...draft, ends_at: event.target.value })} />
+                  <DateEntryInput className={inputCls} bare t={t} ariaLabel={t('promo_ends') || 'Ends'} value={draft.ends_at}
+                    onChange={(iso) => setDraft({ ...draft, ends_at: iso })} />
                 </div>
               </div>
 
@@ -1049,13 +1050,13 @@ export default function PromotionsPage() {
               <div className="grid grid-cols-2 gap-2">
                 <div>
                   <label className={labelCls}>{t('promo_starts') || 'Starts (optional)'}</label>
-                  <input type="date" className={inputCls} value={discountDraft.discount_starts_at}
-                    onChange={(event) => setDiscountDraft({ ...discountDraft, discount_starts_at: event.target.value })} />
+                  <DateEntryInput className={inputCls} bare t={t} ariaLabel={t('promo_starts') || 'Starts'} value={discountDraft.discount_starts_at}
+                    onChange={(iso) => setDiscountDraft({ ...discountDraft, discount_starts_at: iso })} />
                 </div>
                 <div>
                   <label className={labelCls}>{t('promo_ends') || 'Ends (optional)'}</label>
-                  <input type="date" className={inputCls} value={discountDraft.discount_ends_at}
-                    onChange={(event) => setDiscountDraft({ ...discountDraft, discount_ends_at: event.target.value })} />
+                  <DateEntryInput className={inputCls} bare t={t} ariaLabel={t('promo_ends') || 'Ends'} value={discountDraft.discount_ends_at}
+                    onChange={(iso) => setDiscountDraft({ ...discountDraft, discount_ends_at: iso })} />
                 </div>
               </div>
 

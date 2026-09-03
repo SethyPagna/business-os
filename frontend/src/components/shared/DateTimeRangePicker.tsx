@@ -5,6 +5,7 @@ import ChevronLeft from 'lucide-react/dist/esm/icons/chevron-left.js'
 import ChevronRight from 'lucide-react/dist/esm/icons/chevron-right.js'
 import X from 'lucide-react/dist/esm/icons/x.js'
 import AppSelect from './AppSelect'
+import DateEntryInput from './DateEntryInput.tsx'
 import { activeStatsPreset, statsPresetRange, type StatsPresetKey } from './statsStripPresets.ts'
 
 // X1 (Part 395), redesigned Aug 30 per user direction (twice): a compact
@@ -94,19 +95,10 @@ function displayDate(iso: string): string {
   return m ? `${m[2]}/${m[3]}/${m[1]}` : ''
 }
 
-// Accepts MM/DD/YYYY (and M/D/YYYY) typed by hand; returns ISO or null.
-function parseManualDate(raw: string): string | null {
-  const trimmed = raw.trim()
-  if (!trimmed) return null
-  const m = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec(trimmed)
-  if (!m) return null
-  const month = Number(m[1])
-  const day = Number(m[2])
-  const year = Number(m[3])
-  if (month < 1 || month > 12 || day < 1 || year < 1970 || year > 2999) return null
-  if (day > new Date(Date.UTC(year, month, 0)).getUTCDate()) return null
-  return isoOf(year, month, day)
-}
+// The hand-typed date parser that used to live here (strict MM/DD/YYYY only)
+// moved to utils/dateEntry.ts and grew the keypad forms staff actually use --
+// 9032026, 932026, 20260903 -- so the range row reads them exactly like the
+// batch and stock-adjust dates. Same 1970-2999 window as before.
 
 // Accepts 24-hour time typed loosely -- "14:30", "1430", "930", "9", "9:5" --
 // and normalizes to "HH:MM" (00:00–23:59). Returns '' to clear on empty input,
@@ -158,9 +150,9 @@ export default function DateTimeRangePicker({
   // Calendar view month/year -- follows the range start when one exists.
   const [viewYear, setViewYear] = useState(() => Number((value.startDate || today).slice(0, 4)))
   const [viewMonth, setViewMonth] = useState(() => Number((value.startDate || today).slice(5, 7)))
-  // Manual input text mirrors the value but is editable mid-keystroke.
-  const [startText, setStartText] = useState(() => displayDate(value.startDate))
-  const [endText, setEndText] = useState(() => displayDate(value.endDate))
+  // The mid-keystroke text now lives inside DateEntryInput (which owns the
+  // mask and the caret); the panel only tracks whether each endpoint's typed
+  // text was readable, so the endpoint box can paint its own red border.
   const [startInvalid, setStartInvalid] = useState(false)
   const [endInvalid, setEndInvalid] = useState(false)
   // Time text mirrors the value but stays editable mid-keystroke (like the
@@ -169,8 +161,6 @@ export default function DateTimeRangePicker({
   const [endTimeText, setEndTimeText] = useState(() => value.endTime)
 
   useEffect(() => {
-    setStartText(displayDate(value.startDate))
-    setEndText(displayDate(value.endDate))
     setStartInvalid(false)
     setEndInvalid(false)
     if (value.startDate) {
@@ -231,19 +221,18 @@ export default function DateTimeRangePicker({
     setPickPhase('start')
   }
 
-  const commitManual = (which: 'start' | 'end', raw: string) => {
-    const iso = parseManualDate(raw)
+  // DateEntryInput has already normalised whatever was typed (9032026,
+  // 9/3/26, 2026-09-03, ...) into ISO 'YYYY-MM-DD', or '' for a cleared
+  // field, and reports unreadable text through onInvalidChange -- so this
+  // only has to decide what to apply.
+  const commitManual = (which: 'start' | 'end', iso: string) => {
     if (which === 'start') {
-      if (!raw.trim()) { setStartInvalid(false); if (value.startDate) apply({ startDate: '' }); return }
-      if (!iso) { setStartInvalid(true); return }
-      setStartInvalid(false)
-      // No-op when unchanged -- a blur re-committing the same text must never
+      if (!iso) { if (value.startDate) apply({ startDate: '' }); return }
+      // No-op when unchanged -- a blur re-committing the same date must never
       // fire a second apply that could race a same-tick day click.
       if (iso !== value.startDate) apply({ startDate: iso })
     } else {
-      if (!raw.trim()) { setEndInvalid(false); if (value.endDate) apply({ endDate: '' }); return }
-      if (!iso) { setEndInvalid(true); return }
-      setEndInvalid(false)
+      if (!iso) { if (value.endDate) apply({ endDate: '' }); return }
       if (iso !== value.endDate) apply({ endDate: iso })
     }
   }
@@ -340,8 +329,6 @@ export default function DateTimeRangePicker({
   // ring; mousedown anywhere in a box retargets the click sequence to it.
   const renderEndpointBox = (which: 'start' | 'end') => {
     const iso = which === 'start' ? value.startDate : value.endDate
-    const text = which === 'start' ? startText : endText
-    const setText = which === 'start' ? setStartText : setEndText
     const invalid = which === 'start' ? startInvalid : endInvalid
     const month1 = iso ? Number(iso.slice(5, 7)) : (which === 'start' ? viewMonth : Number((value.endDate || value.startDate || today).slice(5, 7)))
     const year = iso ? Number(iso.slice(0, 4)) : (which === 'start' ? viewYear : Number((value.endDate || value.startDate || today).slice(0, 4)))
@@ -358,15 +345,25 @@ export default function DateTimeRangePicker({
       >
         <div className="text-center text-[10px] font-bold uppercase tracking-wide text-slate-400 dark:text-slate-500">{label}</div>
         {/* Kept compact on purpose -- the user's "make the dates larger"
-            was about the OUTSIDE trigger pill, not this panel. */}
-        <input
-          className={`w-full min-w-0 bg-transparent text-center text-sm font-semibold outline-none placeholder:font-normal placeholder:text-slate-400 ${invalid ? 'text-red-600 dark:text-red-400' : 'text-slate-900 dark:text-slate-50'}`}
-          placeholder="MM/DD/YYYY"
-          value={text}
-          onChange={(event) => setText(event.target.value)}
-          onBlur={(event) => commitManual(which, event.target.value)}
-          onKeyDown={(event) => { if (event.key === 'Enter') commitManual(which, (event.target as HTMLInputElement).value) }}
-          aria-label={which === 'start' ? (t('range_start') || 'Start date') : (t('range_end') || 'End date')}
+            was about the OUTSIDE trigger pill, not this panel.
+            The typed field is the shared DateEntryInput (Sep 3): a bare
+            digit run like 9032026 normalises to 09/03/2026 on Enter/blur,
+            exactly as on every batch and stock-adjust date. The box paints
+            its own red border from onInvalidChange, so the field's own
+            error affordance is suppressed (showError={false}) rather than
+            doubling it, and Enter stays inside the panel
+            (advanceOnCommit={false}) instead of jumping to the calendar. */}
+        <DateEntryInput
+          value={iso}
+          onChange={(next) => commitManual(which, next)}
+          onInvalidChange={(next) => (which === 'start' ? setStartInvalid(next) : setEndInvalid(next))}
+          showError={false}
+          advanceOnCommit={false}
+          bare
+          t={t}
+          className={`w-full bg-transparent text-center font-semibold outline-none placeholder:font-normal placeholder:text-slate-400 ${invalid ? 'text-red-600 dark:text-red-400' : 'text-slate-900 dark:text-slate-50'}`}
+          placeholder="mm/dd/yyyy"
+          ariaLabel={which === 'start' ? (t('range_start') || 'Start date') : (t('range_end') || 'End date')}
         />
         {/* The month/year selects that used to sit here moved into the
             calendar's own header row (user, Aug 30: "the month and year

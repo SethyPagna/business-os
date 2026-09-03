@@ -10,6 +10,7 @@ import LockIcon from 'lucide-react/dist/esm/icons/lock.js'
 import AlertTriangleIcon from 'lucide-react/dist/esm/icons/alert-triangle.js'
 import Modal from '../../shared/Modal'
 import AppSelect, { type AppSelectOption } from '../../shared/AppSelect.tsx'
+import DateEntryInput from '../../shared/DateEntryInput.tsx'
 import { MarginCard, DualPriceInput, parseNumericInput, sanitizeNumericInput } from '../shared/primitives'
 import { calculateProductDiscount, formatPriceNumber, normalizePriceValue } from '../../../utils/pricing.ts'
 import RenameCascadeModal, { type RenameCascadeChoice, type RenameCascadeRequest } from '../../shared/RenameCascadeModal.tsx'
@@ -1672,13 +1673,16 @@ export default function ProductForm({
               <label htmlFor="product-expiry-date" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
                 {tr('product_expiry_date', 'Expiry date', 'កាលបរិច្ឆេទផុតកំណត់')}
               </label>
-              <input
+              {/* Typed, not a native picker (Sep 3) -- same keypad rule as
+                  the batch and stock-adjust dates. */}
+              <DateEntryInput
                 id="product-expiry-date"
                 name="product_expiry_date"
-                className="input min-h-11 min-w-0"
-                type="date"
+                className="min-h-11 min-w-0"
+                t={t}
+                ariaLabel={tr('product_expiry_date', 'Expiry date', 'កាលបរិច្ឆេទផុតកំណត់')}
                 value={form.expiry_date || ''}
-                onChange={(event) => setField('expiry_date', event.target.value)}
+                onChange={(iso) => setField('expiry_date', iso)}
               />
             </div>
             <div>
