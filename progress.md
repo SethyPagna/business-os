@@ -125,6 +125,26 @@ Two rules learned the hard way, both from real incidents in this file's own hist
 
 ## Current status
 
+**CORRECTION — `verify:i18n` is GREEN, and the "30 unresolved keys" line below is now stale.**
+Measured on `a486d82e` (what production runs) on Sep 3: `npm run verify:i18n` exits **0** —
+*"4498 pack keys, 449 source files, every referenced key resolves in both packs"*. Commit `fced3086`
+resolved all 32. **There is no tolerated baseline of i18n failures any more**, so any red on a lane branch
+belongs to that lane. Every lane brief has been corrected; the older paragraphs further down this section
+that describe the 30 keys as open are superseded and kept only for the history of how they were closed.
+
+**Also fixed this session, both certified, neither merged nor deployed:**
+- **`fx/runtime-provenance`** — `f8845850` + `93632d0b`. The Worker now reports the commit it was built
+  from. `npm run deploy` goes through `cloudflare/scripts/deploy.cjs`, which computes the git revision, hash
+  and timestamp and passes them to wrangler as esbuild `--define` flags; `lib/buildStamp.ts` reads them
+  behind `typeof` guards so an un-stamped build still runs and reports `dev`. **A dirty tree is stamped
+  `<commit>-dirty`** — the build this incident replaced came from a tree no commit described, and a stamp
+  that quietly named the nearest commit would be worse than none. Pinned by
+  `scripts/test-build-provenance-pure.cjs` (11 checks, proven to throw against the pre-fix file).
+- **`fx/catalog-no-update-banner`** — `5778c01f`. The public catalog route rendered the admin app-update
+  banner, offering a storefront shopper *"A new version is ready. / Restart now"* with a guard message about
+  saving unfinished work. Removed from the `isPublicCatalogRoute` branch only; still correct everywhere
+  else. `appUpdatePrompt.test.ts` gains a check that slices that one branch. Found and flagged by session 64.
+
 **DEPLOY LEDGER — Sep 3 2026, reconstructed from Cloudflare + D1 because two of these three left no record.**
 Read this before any deploy. The `deploy-provenance` skill exists because of the gap this table closes.
 

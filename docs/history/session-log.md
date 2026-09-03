@@ -17686,7 +17686,7 @@ containment in `a486d82e` · `head-cert` working tree diffed against `a486d82e` 
 unique insertions in the test) · `progress.md` diff before commit: **88 insertions, 0 deletions**.
 
 **Not done** — no deploy (nothing ships until all eight lanes return certified) · the `runtime.ts` provenance stamp
-is diagnosed, not fixed · the 30 unresolved i18n keys are still red · `rc/coordinated-2026-09-02` and the `rc/p2-*`
+is diagnosed, not fixed · `rc/coordinated-2026-09-02` and the `rc/p2-*`
 program (~150 commits) remain a separate body of work, untouched · session 64's Lane D stays frozen: both rehearsals
 red, the tier2 `CHECK constraint failed: value=1` correctly proving an invariant false across 1,400 families, tier1's
 suspected cause the denormalized `products.stock_quantity` not recomputed after branch rows move, tier3 never
