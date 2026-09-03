@@ -611,7 +611,7 @@ export default function Sidebar({ notificationSlot = null, desktopNotificationSl
               instead of a flat bottom-16, so this drawer doesn't slide in
               underneath -- and get hidden behind -- the taller nav bar that
               env(safe-area-inset-bottom) produces on notched iPhones. */}
-          <div className="fixed bottom-[calc(3.55rem+env(safe-area-inset-bottom))] left-0 right-0 z-40 max-h-[70vh] overflow-y-auto rounded-t-2xl border-t border-gray-200 bg-white shadow-2xl dark:border-gray-700 dark:bg-gray-900 md:hidden">
+          <div className="fixed bottom-[calc(3.55rem+env(safe-area-inset-bottom))] left-0 right-0 z-40 max-h-[calc(var(--app-vh-100)_*_.7)] overflow-y-auto rounded-t-2xl border-t border-gray-200 bg-white shadow-2xl dark:border-gray-700 dark:bg-gray-900 md:hidden">
             <div className="sticky top-0 bg-white px-3 pb-1 pt-3 dark:bg-gray-900">
               <div className="mx-auto mb-2 h-1 w-10 rounded-full bg-gray-300 dark:bg-gray-600" />
             </div>

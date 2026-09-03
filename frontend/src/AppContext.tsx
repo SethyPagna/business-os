@@ -581,7 +581,7 @@ function getInitialAdminPage(publicMode: boolean): string {
 function LoadingScreen() {
   // Used during the very first bootstrap before settings/user state are ready.
   return (
-    <div style={{ minHeight:'100vh', display:'flex', alignItems:'center', justifyContent:'center', background:'#1e3a8a', fontFamily:'sans-serif' }}>
+    <div style={{ minHeight:'var(--app-vh-100, 100vh)', display:'flex', alignItems:'center', justifyContent:'center', background:'#1e3a8a', fontFamily:'sans-serif' }}>
       <div style={{ textAlign:'center', color:'white' }}>
         <div style={{ fontSize:56, marginBottom:16 }}>🏪</div>
         <h2 style={{ margin:'0 0 8px', fontWeight:700, fontSize:22 }}>Business OS</h2>
