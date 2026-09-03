@@ -19,7 +19,7 @@ import {
 } from '../../utils/loaders.ts'
 import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.ts'
 import { fmtTime } from '../../utils/formatters.ts'
-import { getCustomers as getLoyaltyCustomers } from '../../api/contactReadTransport.ts'
+import { getCustomerPointSummaries } from '../../api/contactsTransport.ts'
 import { awardCustomerPoints } from '../../api/contactWriteTransport.ts'
 
 type LocaleCopy = Record<string, string>
@@ -232,6 +232,16 @@ const LOYALTY_SECTION_OPTIONS = [
   { value: 'review', labelKey: 'sectionReview', label: 'Review Queue', hintKey: 'sectionReviewHint', hint: 'Approve, reject, and award points for customer share submissions.' },
 ]
 const LOYALTY_CUSTOMER_POINTS_TIMEOUT_MS = 12000
+// The board shows ten rows, so ten rows are what the server is asked for.
+// This page used to load the ENTIRE customers table (every column, plus a
+// loyalty aggregation over every row -- the heaviest read in the system)
+// on mount, purely to sort ten membership holders by balance in the
+// browser. GET /customers/points-summary does the same ranking where the
+// data already is; the client-side sort/slice below stays as a safeguard.
+const LOYALTY_TOP_CUSTOMERS = 10
+// Scan ceiling for that ranking: membership holders only, so this is the
+// number of members considered, not the size of the customer table.
+const LOYALTY_POINTS_SCAN_LIMIT = 2000
 const LOYALTY_MEMBERSHIP_LOOKUP_TIMEOUT_MS = 12000
 
 function getPortalTransport(): Promise<PortalTransportModule> {
@@ -366,7 +376,12 @@ export default function LoyaltyPointsPage() {
     const requestId = beginTrackedRequest(customerPointsRequestRef)
     setCustomerPointsLoading(true)
     try {
-      const rows = await withLoaderTimeout(() => getLoyaltyCustomers(), label, LOYALTY_CUSTOMER_POINTS_TIMEOUT_MS)
+      const rows = await withLoaderTimeout(() => getCustomerPointSummaries({
+        membership_only: 1,
+        sort: 'points',
+        top: LOYALTY_TOP_CUSTOMERS,
+        limit: LOYALTY_POINTS_SCAN_LIMIT,
+      }), label, LOYALTY_CUSTOMER_POINTS_TIMEOUT_MS)
       if (!isTrackedRequestCurrent(customerPointsRequestRef, requestId)) return null
       const nextRows = toCustomerPointRows(rows)
       setCustomerPoints(nextRows)
@@ -454,11 +469,15 @@ export default function LoyaltyPointsPage() {
       : `${copy('pointsPerUsd', 'Points per USD')}: ${form.customer_portal_points_per_usd || '1'}`
   }, [basis, form.customer_portal_points_per_khr, form.customer_portal_points_per_usd])
 
+  // The server already filters to membership holders and ranks by balance
+  // (points-summary's membership_only / sort=points / top). This repeats
+  // both so the board is still correct if it is ever fed an unranked list
+  // -- e.g. an older Worker that does not know the new params.
   const topPointCustomers = useMemo(() => (
     customerPoints
       .filter((row) => String(row?.membership_number || '').trim())
       .sort((a, b) => Number(b.points_balance || 0) - Number(a.points_balance || 0))
-      .slice(0, 10)
+      .slice(0, LOYALTY_TOP_CUSTOMERS)
   ), [customerPoints])
 
   function setValue<K extends keyof LoyaltySettingsForm>(key: K, value: LoyaltySettingsForm[K]): void {

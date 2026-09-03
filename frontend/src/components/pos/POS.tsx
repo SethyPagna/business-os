@@ -91,6 +91,13 @@ const POS_CATEGORY_OPTIONS_TIMEOUT_MS = 8000
 const POS_MEMBERSHIP_LOOKUP_TIMEOUT_MS = 12000
 const POS_CUSTOMER_CREATE_TIMEOUT_MS = 12000
 const POS_DELIVERY_CREATE_TIMEOUT_MS = 12000
+// One short page per customer typeahead read, well above the number of
+// suggestions the dropdown shows (LAYOUT.AUTOCOMPLETE_MAX_RESULTS) so the
+// local narrowing below always has more than it can display.
+const POS_CUSTOMER_PAGE_SIZE = 50
+// Long enough that a full name typed at speed is one request, short enough
+// that the list feels live.
+const POS_CUSTOMER_SEARCH_DEBOUNCE_MS = 300
 // Y2: 20s produced FALSE failures -- a Worker busy with an import apply can
 // take longer than that to commit a sale, so the client reported an error
 // while the sale landed (the user hit exactly this). The write is deduped
@@ -488,9 +495,49 @@ async function loadPosCategories(): Promise<unknown[]> {
   return getCategories() as Promise<unknown[]>
 }
 
-async function loadPosCustomers(): Promise<CustomerRecord[]> {
+// The till never downloads the customer table. GET /api/customers with no
+// query returns every column of every row plus a per-row loyalty
+// aggregation -- measured at ~2.4 MB / ~4 s against 5,000 customers, the
+// slowest request in the system -- and the picker only ever shows a
+// handful of matches. So it asks the server the same question the person
+// is asking: "who matches what I just typed", capped at one short page.
+function toPosCustomerRows(data: unknown): CustomerRecord[] {
+  // Paged reads answer { items, total, ... }; the offline fallback (the
+  // local mirror, see contactReadTransport.ts) answers a plain array.
+  if (Array.isArray(data)) return data as CustomerRecord[]
+  const items = (data as { items?: unknown } | null)?.items
+  return Array.isArray(items) ? items as CustomerRecord[] : []
+}
+
+async function searchPosCustomers(search: string): Promise<CustomerRecord[]> {
   const { getCustomers } = await getContactReadTransport()
-  return getCustomers() as Promise<CustomerRecord[]>
+  const data = await getCustomers({
+    ...(search ? { search } : {}),
+    page: 1,
+    pageSize: POS_CUSTOMER_PAGE_SIZE,
+  })
+  return toPosCustomerRows(data)
+}
+
+// One bounded read for contacts already known by id -- the customer just
+// created, or the existing owner of a phone number the till collided with.
+// Backed by routes/contacts.ts's `ids=` filter (lib/contactIds.ts).
+//
+// The rows are re-checked against the ids that were asked for, and the
+// caller gets ONLY those. Never trust the answer to be narrow: a read that
+// fails falls back to the whole local mirror (contactReadTransport.ts's
+// catch), and a Worker that predates `ids=` ignores the param and answers
+// with the whole table. Both hand back a list whose FIRST row is simply
+// the alphabetically-first customer -- and both call sites here take
+// `[0]`, so without this filter a phone conflict would silently put a
+// stranger on the sale.
+async function loadPosCustomersByIds(ids: Array<string | number>): Promise<CustomerRecord[]> {
+  const wanted = ids.map((id) => String(id ?? '').trim()).filter(Boolean)
+  if (!wanted.length) return []
+  const { getCustomers } = await getContactReadTransport()
+  const rows = toPosCustomerRows(await getCustomers({ ids: wanted.join(',') }))
+  const wantedSet = new Set(wanted)
+  return rows.filter((row) => wantedSet.has(String(row?.id ?? '').trim()))
 }
 
 async function loadPosDeliveryContacts(): Promise<DeliveryContactRecord[]> {
@@ -1031,6 +1078,10 @@ export default function POS() {
   const customerRequestRef = useRef(0)
   const deliveryRequestRef = useRef(0)
   const customerOptionsLoadedRef = useRef(false)
+  // The customer term the picker is currently showing results for, kept in
+  // a ref so the sync-push effect can re-run that search without listing
+  // customerSearch among its dependencies (see its comment).
+  const customerSearchRef = useRef('')
   const deliveryOptionsLoadedRef = useRef(false)
   const membershipRequestRef = useRef(0)
   const membershipInfoRef = useRef<MembershipInfo | null>(null)
@@ -1291,12 +1342,15 @@ export default function POS() {
     latestLoadCatalogRef.current = loadCatalogData
   }, [loadCatalogData])
 
-  const loadCustomers = useCallback(async (label = 'POS customers') => {
+  // `search` is the term the person has typed; '' loads the first page of
+  // the name-ordered list so an untouched picker still shows something.
+  // Either way this is one bounded page, never the whole table.
+  const loadCustomers = useCallback(async (label = 'POS customers', search = '') => {
     const requestId = beginTrackedRequest(customerRequestRef)
     try {
-      const data = await withLoaderTimeout(() => loadPosCustomers(), label, POS_CONTACT_OPTIONS_TIMEOUT_MS)
+      const rows = await withLoaderTimeout(() => searchPosCustomers(search), label, POS_CONTACT_OPTIONS_TIMEOUT_MS)
       if (!isTrackedRequestCurrent(customerRequestRef, requestId)) return null
-      const nextCustomers = Array.isArray(data) ? data : []
+      const nextCustomers = Array.isArray(rows) ? rows : []
       setCustomers(nextCustomers)
       customerOptionsLoadedRef.current = true
       return nextCustomers
@@ -1478,14 +1532,31 @@ export default function POS() {
   useEffect(() => {
     if (!isActive || !contactOptionsReady) return
     const tasks: Promise<unknown>[] = []
-    if ((showCustomer || showAddCustomer) && !customerOptionsLoadedRef.current) {
-      tasks.push(loadCustomers('POS customer options on demand'))
-    }
     if (((showDelivery && Boolean(active?.isDelivery)) || showAddDelivery) && !deliveryOptionsLoadedRef.current) {
       tasks.push(loadDeliveryContacts('POS delivery options on demand'))
     }
     if (tasks.length) void Promise.allSettled(tasks)
-  }, [active?.isDelivery, contactOptionsReady, isActive, loadCustomers, loadDeliveryContacts, showAddCustomer, showAddDelivery, showCustomer, showDelivery])
+  }, [active?.isDelivery, contactOptionsReady, isActive, loadDeliveryContacts, showAddDelivery, showDelivery])
+
+  // Customer typeahead: one debounced, bounded server read per search term
+  // while the customer section (or its create dialog) is open. This replaced
+  // a single "load every customer once, then filter in memory" read -- fine
+  // at a few hundred contacts, ruinous at thousands, and the reason an
+  // unfiltered /api/customers showed up in the production logs.
+  useEffect(() => {
+    if (!isActive || !contactOptionsReady) return undefined
+    if (!showCustomer && !showAddCustomer) return undefined
+    const search = String(active?.customerSearch || '').trim()
+    customerSearchRef.current = search
+    // The first open has nothing typed yet and no rows to show: fetch that
+    // first page immediately rather than making the person wait out a
+    // debounce for a term they have not entered.
+    const delay = !customerOptionsLoadedRef.current && !search ? 0 : POS_CUSTOMER_SEARCH_DEBOUNCE_MS
+    const timer = window.setTimeout(() => {
+      void loadCustomers('POS customer search', search)
+    }, delay)
+    return () => window.clearTimeout(timer)
+  }, [active?.customerSearch, contactOptionsReady, isActive, loadCustomers, showAddCustomer, showCustomer])
 
   useEffect(() => {
     if (!isActive) {
@@ -1538,7 +1609,11 @@ export default function POS() {
       void loadCatalogData('POS sync stock')
     }
     if (channel === 'customers' && customerOptionsLoadedRef.current) {
-      void loadCustomers('POS sync customers')
+      // Re-run the SAME search the picker is showing, not a bare list read.
+      // Read through a ref: putting customerSearch in this effect's deps
+      // would re-run the whole sync branch (catalog reloads included) on
+      // every keystroke.
+      void loadCustomers('POS sync customers', customerSearchRef.current)
     }
     if (channel === 'deliveryContacts' && deliveryOptionsLoadedRef.current) {
       void loadDeliveryContacts('POS sync delivery contacts')
@@ -1735,7 +1810,16 @@ export default function POS() {
       await selectCustomer(createdCustomer)
       setShowAddCustomer(false)
       setNewCustomerForm({ name: '', membership_number: '', phone: '', address: '' })
-      await loadCustomers('POS refresh customers after create')
+      // Re-read just the row that was created (server-side defaults, ids
+      // and normalized fields), not the whole table.
+      if (createdCustomer.id) {
+        const [stored] = await loadPosCustomersByIds([createdCustomer.id]).catch(() => [])
+        if (stored) {
+          setCustomers(prev => prev.map(customer => (
+            String(customer.id) === String(createdCustomer.id) ? { ...customer, ...stored } : customer
+          )))
+        }
+      }
     } catch (e) {
       const dup = readDuplicateError(e)
       if (dup?.code === 'possible_duplicate' && !confirmDuplicate) {
@@ -1747,12 +1831,13 @@ export default function POS() {
       }
       if (dup?.code === 'phone_conflict' && dup.id) {
         // That phone already belongs to someone -- select THEM instead of
-        // failing. Refresh the list so the full record is available, then
-        // pick it out; fall back to a minimal record if the refresh misses.
+        // failing. Read that ONE record by id (routes/contacts.ts's `ids=`)
+        // so the full record is available; fall back to a minimal record if
+        // the read misses.
         try {
-          const refreshed = await loadCustomers('POS select existing after phone conflict') as unknown
-          const list = Array.isArray(refreshed) ? refreshed as CustomerRecord[] : customers
-          const existing = list.find((customer) => String(customer.id) === String(dup.id))
+          const [fetched] = await loadPosCustomersByIds([dup.id]).catch(() => [])
+          const existing = fetched
+            || customers.find((customer) => String(customer.id) === String(dup.id))
             || { id: dup.id, name: dup.name, phone: newCustomerForm.phone, address: '', email: '', membership_number: '' } as CustomerRecord
           await selectCustomer(existing)
           setShowAddCustomer(false)
