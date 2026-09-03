@@ -1,3 +1,5 @@
+import { DEFAULT_RECEIPT_TEXT_CONTRAST } from '../../utils/receiptTextContrast.ts'
+
 export type ReceiptTemplate = {
   font_family: string
   font_size: number
@@ -133,7 +135,7 @@ export const DEFAULT_TEMPLATE: ReceiptTemplate = {
   delivery_fee_position: 'totals',
   discount_position: 'before_tax',
   show_emojis: false,
-  text_contrast: 'normal',
+  text_contrast: DEFAULT_RECEIPT_TEXT_CONTRAST,
   field_order: [
     'header', 'order_info', 'customer', 'delivery', 'items', 'subtotal',
     'discount', 'tax', 'delivery_fee', 'total', 'payment', 'change', 'footer',

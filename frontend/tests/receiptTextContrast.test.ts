@@ -26,48 +26,50 @@ async function runTest(name: string, fn: TestCallback): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
-// 1. Default is 'normal' everywhere the template can originate from.
+// 1. Default is 'maximum' everywhere the template can originate from (user,
+//    Sep 3 2026: a weak-ink printer needs pure black; 'normal' is the opt-out).
 // ---------------------------------------------------------------------------
 
-await runTest('default is normal: the shared enum default', () => {
-  assert.equal(DEFAULT_RECEIPT_TEXT_CONTRAST, 'normal')
+await runTest('default is maximum: the shared enum default', () => {
+  assert.equal(DEFAULT_RECEIPT_TEXT_CONTRAST, 'maximum')
 })
 
-await runTest('default is normal: constants.ts DEFAULT_TEMPLATE (used by the settings editor)', () => {
-  assert.equal(DEFAULT_TEMPLATE.text_contrast, 'normal')
+await runTest('default is maximum: constants.ts DEFAULT_TEMPLATE (used by the settings editor)', () => {
+  assert.equal(DEFAULT_TEMPLATE.text_contrast, 'maximum')
 })
 
-await runTest('default is normal: receiptAppliedConfig.ts DEFAULT_RECEIPT_TEMPLATE (used by Receipt.tsx/preview)', () => {
-  assert.equal(DEFAULT_RECEIPT_TEMPLATE.text_contrast, 'normal')
+await runTest('default is maximum: receiptAppliedConfig.ts DEFAULT_RECEIPT_TEMPLATE (used by Receipt.tsx/preview)', () => {
+  assert.equal(DEFAULT_RECEIPT_TEMPLATE.text_contrast, 'maximum')
 })
 
-await runTest('default is normal: a stored template with no text_contrast field at all', () => {
+await runTest('default is maximum: a stored template with no text_contrast field at all', () => {
   const parsed = parseReceiptTemplate(JSON.stringify({ font_size: 14 }))
-  assert.equal(parsed.text_contrast, 'normal')
+  assert.equal(parsed.text_contrast, 'maximum')
   const normalized = normalizeReceiptTemplate({ font_size: 14 })
-  assert.equal(normalized.text_contrast, 'normal')
+  assert.equal(normalized.text_contrast, 'maximum')
 })
 
 // ---------------------------------------------------------------------------
-// 2. Enum validation: only the literal 'maximum' selects maximum contrast;
-//    everything else (typos, legacy junk, hostile input) collapses to
-//    'normal' so a corrupted record can never render unexpectedly.
+// 2. Enum validation: only the two literal enum strings pass through;
+//    everything else (typos, legacy junk, hostile input) collapses to the
+//    default so a corrupted record can never render unexpectedly.
 // ---------------------------------------------------------------------------
 
 await runTest('enum validation: RECEIPT_TEXT_CONTRAST_VALUES is exactly [normal, maximum]', () => {
   assert.deepEqual([...RECEIPT_TEXT_CONTRAST_VALUES], ['normal', 'maximum'])
 })
 
-await runTest('enum validation: normalizeReceiptTextContrast accepts maximum and rejects everything else', () => {
+await runTest('enum validation: normalizeReceiptTextContrast accepts both enum values and rejects everything else', () => {
   assert.equal(normalizeReceiptTextContrast('maximum'), 'maximum')
-  for (const bogus of ['Maximum', 'MAXIMUM', 'high', 'true', true, 1, 0, null, undefined, '', {}, []]) {
-    assert.equal(normalizeReceiptTextContrast(bogus), 'normal', `expected 'normal' for ${JSON.stringify(bogus)}`)
+  assert.equal(normalizeReceiptTextContrast('normal'), 'normal')
+  for (const bogus of ['Maximum', 'MAXIMUM', 'Normal', 'high', 'true', true, 1, 0, null, undefined, '', {}, []]) {
+    assert.equal(normalizeReceiptTextContrast(bogus), 'maximum', `expected the default for ${JSON.stringify(bogus)}`)
   }
 })
 
-await runTest('enum validation: normalizeReceiptTemplate sanitizes a garbage stored value to normal', () => {
+await runTest('enum validation: normalizeReceiptTemplate sanitizes a garbage stored value to the default', () => {
   const normalized = normalizeReceiptTemplate({ text_contrast: 'ultra-black-please' })
-  assert.equal(normalized.text_contrast, 'normal')
+  assert.equal(normalized.text_contrast, 'maximum')
 })
 
 await runTest('enum validation: normalizeReceiptTemplate preserves a valid maximum value', () => {
@@ -245,7 +247,9 @@ await runTest('i18n: both lang packs carry all four receipt_text_contrast keys',
 
 await runTest('export path: printReceipt.ts\'s text-only canvas fallback accepts a textColor override instead of a hard-coded grey', () => {
   assert.match(printUtilSource, /textColor\?:\s*string/)
-  assert.match(printUtilSource, /const textColor = options\.textColor \|\| '#111827'/)
+  // The union with the older highContrastBold switch: an explicit override
+  // still wins; without one the per-print switch picks black or the softer default.
+  assert.match(printUtilSource, /const textColor = options\.textColor \|\| \(printSettings\.highContrastBold \? '#000000' : '#111827'\)/)
   assert.match(printUtilSource, /context\.fillStyle = textColor/)
 })
 
