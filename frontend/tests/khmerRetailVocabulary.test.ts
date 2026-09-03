@@ -83,8 +83,23 @@ type GlossaryRule = {
 }
 
 const GLOSSARY: GlossaryRule[] = [
-  // អាប់ឡូត is "upload" and merely contains ឡូត -- spare it.
-  { concept: 'batch / lot', canonical: 'បាច់', forbidden: [/(?<!អាប់)ឡូត/, 'ឡុត'] },
+  // Sep 4 2026: the concept is no longer called a batch at all. The owner's
+  // own dictation ("Batch name change Date in ថ្ងៃចូល") IS the batch ->
+  // received date rename in Khmer, so ថ្ងៃចូល -- already the pinned value of
+  // batch_date and received_date above -- became the one word for the record
+  // itself too, and បាច់ joined ឡូត/ឡុត as a rival spelling.
+  //
+  // The three exceptions are a DIFFERENT word that happens to be spelled the
+  // same: a "batch session" is the multi-line review flow, and a "defective
+  // batch" is a return reason the shop writes. Neither is a stock record.
+  // (អាប់ឡូត is "upload" and merely contains ឡូត; ចាំបាច់ is "necessary" and
+  // merely contains បាច់ -- spare both.)
+  {
+    concept: 'batch / lot / received date',
+    canonical: 'ថ្ងៃចូល',
+    forbidden: [/(?<!ចាំ)បាច់/, /(?<!អាប់)ឡូត/, 'ឡុត'],
+    except: ['confirm_apply_inventory_batch', 'inventory_batch_session', 'reason_defective_batch'],
+  },
   { concept: 'customer', canonical: 'អតិថិជន', forbidden: ['អ្នកទិញ'], except: ['fee_by_customer', 'pos_customer_pays', 'customer_pays'] },
   { concept: 'cost', canonical: 'ថ្លៃដើម', forbidden: ['តម្លៃដើម'] },
   { concept: 'variant', canonical: 'ជម្រើស', forbidden: ['វ៉ារ្យ៉ង់', 'វ៉ារីយ៉ង់'] },
