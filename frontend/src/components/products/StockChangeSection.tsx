@@ -566,7 +566,7 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
               <th data-tone="blue">{tr(t, 'product', 'Product')}</th>
               <th data-tone="violet">{tr(t, 'type', 'Type')}</th>
               <th data-tone="emerald" className="text-center">{tr(t, 'quantity', 'Quantity')}</th>
-              <th className="text-center">{beforeLabel} → {afterLabel}</th>
+              <th className="dense-th-wrap text-center">{beforeLabel} → {afterLabel}</th>
               <th>{tr(t, 'branch', 'Branch')}</th>
               <th>{tr(t, 'supplier', 'Supplier')}</th>
               <th>{tr(t, 'cashier_user', 'User')}</th>

@@ -146,7 +146,12 @@ assert.match(posDetail, /batchChoicesOpen \? <><div/, 'POS batch options must re
 assert.match(posDetail, /setSelectedBatchId\(batch\.id\); setSelectedDamagedLotId\(null\); setBatchChoicesOpen\(false\)/, 'choosing a POS batch must close its options')
 assert.doesNotMatch(stockChanges, /detailRows/, 'a selected stock change must not load unrelated before/after history into its detail dialog')
 assert.match(stockChanges, /<th data-tone="emerald" className="text-center">/, 'stock change Quantity headers must center over centered values')
-assert.match(stockChanges, /<th className="text-center">\{beforeLabel\} → \{afterLabel\}<\/th>/, 'stock change Before/After headers must center over centered values')
+// dense-th-wrap is load-bearing, not decoration: .dense-data-table th is
+// white-space:nowrap with no overflow rule, and the Khmer label
+// "ស្តុកពីមុន → ស្តុកចុងក្រោយ" measures 131px against 104px of usable width in
+// this 7.5rem column -- without the class the header runs into the Branch
+// header instead of clipping. English still fits on one line either way.
+assert.match(stockChanges, /<th className="dense-th-wrap text-center">\{beforeLabel\} → \{afterLabel\}<\/th>/, 'stock change Before/After headers must center over centered values and be allowed to wrap for Khmer')
 assert.match(newReturn, /const reviewReturn[\s\S]*step === 'items'[\s\S]*onClick=\{reviewReturn\}/, 'returns must expose Review before the final confirmation on mobile')
 assert.match(report, /flex w-full min-w-0 items-center justify-between/, 'detail report links must remain width-bounded')
 assert.match(report, /<span className="detail-scroll-text[^\"]*">\{label\}<\/span>/, 'detail report labels must stay fully readable through bounded horizontal scrolling')

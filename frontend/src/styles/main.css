@@ -892,6 +892,13 @@ body.lang-km .compact-analytics-legend {
   white-space:nowrap;
 }
 .dark .dense-data-table th { border-color:#52525b; background:#202024; color:#a1a1aa; }
+/* Khmer runs about twice as wide as English for the same label, so a header
+   that fits in English can overrun a fixed column. "Before -> After" is 90px
+   in English and 131px as "ស្តុកពីមុន → ស្តុកចុងក្រោយ", against 104px of usable
+   width in its 7.5rem column -- and th is nowrap with no overflow, so it ran
+   into the Branch header instead of clipping. This lets that one header wrap
+   to two lines; English still fits on one, so nothing moves in English. */
+.dense-data-table th.dense-th-wrap { white-space:normal; line-height:.9rem; }
 .dense-data-table th[data-tone='blue'] { color:#1d4ed8; background:#eff6ff; }
 .dense-data-table th[data-tone='emerald'] { color:#047857; background:#ecfdf5; }
 .dense-data-table th[data-tone='amber'] { color:#b45309; background:#fffbeb; }
