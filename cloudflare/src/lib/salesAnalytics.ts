@@ -47,6 +47,7 @@ import {
   localDateAtOrAfter,
   localDateAtOrBefore,
   localTimeRangeClause,
+  localHourExpr,
 } from './businessDateWindow'
 
 export interface SalesFilters {
@@ -824,4 +825,182 @@ export async function getProductSalesBreakdown(
     by_day: await run(localDateExpr('s.created_at')),
     by_month: await run(localMonthExpr('s.created_at')),
   }
+}
+
+// ---------------------------------------------------------------------------
+// Reports views (Sep 3 2026, lane sec-10 / session 8c). New EXPORTS only --
+// nothing above this line changed. Grouped totals + product ranking for the
+// Reports section's "by customer / cashier / payment / hour / weekday /
+// branch" and "Products" views. Every grouped row is a full canonical
+// SalesTotals built from the SAME per-sale expressions salesLevelTotals uses
+// (recognized net sales - customer refunds = revenue; profit = revenue - COGS
+// - store-paid delivery), so the rows of one view sum to getSalesTotals for
+// the same filters -- one revenue definition, sliced, never re-derived.
+// ---------------------------------------------------------------------------
+
+export type SalesGroupKey = 'customer' | 'cashier' | 'payment_method' | 'hour' | 'weekday' | 'branch'
+export const SALES_GROUP_KEYS: readonly SalesGroupKey[] = ['customer', 'cashier', 'payment_method', 'hour', 'weekday', 'branch']
+
+export interface SalesGroupedRow extends SalesTotals {
+  /** Stable group key ('id:12', 'name:walk in', '13' for an hour, '0'..'6' for a weekday, ...). */
+  key: string
+  /** Display label as stored on the sale (customer/cashier/branch/payment name; hour 'HH'; weekday '0'..'6'). */
+  label: string
+  entity_id: number | null
+  cost_missing_snapshot_lines: number
+}
+
+function salesGroupExprs(alias: string, groupBy: SalesGroupKey): { key: string; label: string; id: string } {
+  const a = alias ? `${alias}.` : ''
+  const created = `${a}created_at`
+  switch (groupBy) {
+    case 'customer':
+      // The customer id is the identity (a rename cascades to customer_name
+      // snapshots); legacy sales without an id fall back to the name.
+      return {
+        key: `CASE WHEN ${a}customer_id IS NOT NULL THEN 'id:' || ${a}customer_id ELSE 'name:' || lower(trim(COALESCE(${a}customer_name, ''))) END`,
+        label: `MAX(COALESCE(NULLIF(trim(${a}customer_name), ''), ''))`,
+        id: `MAX(${a}customer_id)`,
+      }
+    case 'cashier':
+      return {
+        key: `CASE WHEN ${a}cashier_id IS NOT NULL THEN 'id:' || ${a}cashier_id ELSE 'name:' || lower(trim(COALESCE(${a}cashier_name, ''))) END`,
+        label: `MAX(COALESCE(NULLIF(trim(${a}cashier_name), ''), ''))`,
+        id: `MAX(${a}cashier_id)`,
+      }
+    case 'payment_method':
+      return {
+        key: `lower(trim(COALESCE(NULLIF(trim(${a}payment_method), ''), 'unknown')))`,
+        label: `MAX(COALESCE(NULLIF(trim(${a}payment_method), ''), ''))`,
+        id: 'NULL',
+      }
+    case 'hour':
+      return { key: localHourExpr(created), label: `MAX(${localHourExpr(created)})`, id: 'NULL' }
+    case 'weekday':
+      // '0' (Sunday) .. '6' (Saturday) of the UTC+7 business date.
+      return { key: `strftime('%w', ${localDateExpr(created)})`, label: `MAX(strftime('%w', ${localDateExpr(created)}))`, id: 'NULL' }
+    case 'branch':
+      return { key: `COALESCE(${a}branch_id, 0)`, label: `MAX(COALESCE(${a}branch_name, ''))`, id: `MAX(${a}branch_id)` }
+  }
+}
+
+/**
+ * Canonical SalesTotals per group. Same two-query shape as
+ * getBusinessSummaryDayRows (sale level + item-level COGS, merged through
+ * deriveTotals), only the bucket expression differs. Sorted by revenue
+ * (desc) except hour/weekday which come back in clock order.
+ */
+export async function getSalesGroupedTotals(env: Env, f: SalesFilters, groupBy: SalesGroupKey, limit = 500): Promise<SalesGroupedRow[]> {
+  const db = getDb(env)
+  const level = salesGroupExprs('sales', groupBy)
+  const joined = salesGroupExprs('s', groupBy)
+  const { sql: whereLevel, params: paramsLevel } = whereActiveSales('sales', f)
+  const { sql: whereCost, params: paramsCost } = whereActiveSales('s', f)
+
+  const [levelRows, costRows] = await Promise.all([
+    db.prepare(`
+      SELECT ${level.key} AS grp_key, ${level.label} AS grp_label, ${level.id} AS grp_id,
+             COUNT(*) AS tx_count,
+             COALESCE(SUM(subtotal_usd), 0) AS gross_sales_usd,
+             COALESCE(SUM(discount_usd), 0) AS store_discount_usd,
+             COALESCE(SUM(membership_discount_usd), 0) AS membership_discount_usd,
+             COALESCE(SUM(tax_usd), 0) AS tax_usd,
+             COALESCE(SUM(CASE WHEN COALESCE(delivery_fee_paid_by, 'customer') = 'store' THEN 0 ELSE delivery_fee_usd END), 0) AS delivery_usd,
+             COALESCE(SUM(CASE WHEN delivery_fee_paid_by = 'store' THEN delivery_fee_usd ELSE 0 END), 0) AS store_delivery_usd,
+             COALESCE(SUM(CASE WHEN ${recognizedExpr('')} THEN ${netSaleExpr('')} ELSE 0 END), 0) AS recognized_net_usd,
+             COALESCE(SUM(CASE WHEN ${awaitingExpr('')} THEN ${netSaleExpr('')} ELSE 0 END), 0) AS pending_revenue_usd,
+             COALESCE(SUM(CASE WHEN ${recognizedExpr('')} THEN tax_usd ELSE 0 END), 0) AS recognized_tax_usd,
+             COALESCE(SUM(CASE WHEN ${recognizedExpr('')} THEN ${customerDeliveryFeeExpr('')} ELSE 0 END), 0) AS recognized_delivery_usd,
+             COALESCE(SUM(CASE WHEN ${recognizedExpr('')} THEN ${storeDeliveryExpr('')} ELSE 0 END), 0) AS recognized_store_delivery_usd,
+             COALESCE(SUM(CASE WHEN ${recognizedExpr('')} THEN COALESCE(rf.refund_usd, 0) ELSE 0 END), 0) AS refund_usd
+      FROM sales
+      ${CUSTOMER_REFUND_JOIN}sales.id
+      WHERE ${whereLevel}
+      GROUP BY grp_key
+    `).all<Record<string, number> & { grp_key: string | number | null; grp_label: string | null; grp_id: number | null }>(paramsLevel),
+    db.prepare(`
+      SELECT ${joined.key} AS grp_key,
+             COALESCE(SUM(si.cost_price_usd * si.quantity), 0) AS cost_usd,
+             COALESCE(SUM(CASE WHEN si.cost_price_usd IS NULL THEN 1 ELSE 0 END), 0) AS missing_snapshot_lines
+      FROM sale_items si
+      JOIN sales s ON s.id = si.sale_id
+      WHERE ${whereCost} AND ${recognizedExpr('s.')}
+      GROUP BY grp_key
+    `).all<{ grp_key: string | number | null; cost_usd: number; missing_snapshot_lines: number }>(paramsCost),
+  ])
+
+  const keyOf = (v: string | number | null | undefined): string => (v == null ? '' : String(v))
+  const costByKey = new Map((costRows || []).map((r) => [keyOf(r.grp_key), num(r.cost_usd)]))
+  const missingByKey = new Map((costRows || []).map((r) => [keyOf(r.grp_key), num(r.missing_snapshot_lines)]))
+  const rows: SalesGroupedRow[] = (levelRows || []).map((r) => {
+    const key = keyOf(r.grp_key)
+    return {
+      key,
+      label: r.grp_label == null ? '' : String(r.grp_label),
+      entity_id: r.grp_id == null ? null : Number(r.grp_id),
+      cost_missing_snapshot_lines: missingByKey.get(key) || 0,
+      ...deriveTotals(r, costByKey.get(key) || 0),
+    }
+  })
+  if (groupBy === 'hour' || groupBy === 'weekday') {
+    rows.sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0))
+  } else {
+    rows.sort((a, b) => b.revenue_usd - a.revenue_usd || b.tx_count - a.tx_count || (a.label < b.label ? -1 : a.label > b.label ? 1 : 0))
+  }
+  const cap = Math.max(1, Math.min(2000, Math.trunc(limit) || 500))
+  return rows.length > cap ? rows.slice(0, cap) : rows
+}
+
+export interface ProductSalesRankingRow {
+  product_id: number | null
+  product_name: string
+  sale_count: number
+  qty: number
+  /** SUM(sale_items.total_usd): line totals after line discounts, before order-level store/membership discounts. */
+  line_sales_usd: number
+  cost_usd: number
+  /** line_sales_usd - cost_usd (item-level gross profit; NULL cost snapshots count as 0 and are flagged). */
+  profit_usd: number
+  cost_missing_snapshot_lines: number
+}
+
+/**
+ * Products ranked by line sales over RECOGNIZED sales only (the same
+ * population revenue and COGS are computed from), respecting every
+ * SalesFilters field through whereActiveSales.
+ */
+export async function getProductSalesRanking(env: Env, f: SalesFilters, limit = 200): Promise<ProductSalesRankingRow[]> {
+  const db = getDb(env)
+  const { sql: whereSql, params } = whereActiveSales('s', f)
+  const cap = Math.max(1, Math.min(1000, Math.trunc(limit) || 200))
+  const rows = await db.prepare(`
+    SELECT si.product_id AS product_id,
+           MAX(COALESCE(si.product_name, '')) AS product_name,
+           COUNT(DISTINCT s.id) AS sale_count,
+           COALESCE(SUM(si.quantity), 0) AS qty,
+           COALESCE(SUM(si.total_usd), 0) AS line_sales_usd,
+           COALESCE(SUM(si.cost_price_usd * si.quantity), 0) AS cost_usd,
+           COALESCE(SUM(CASE WHEN si.cost_price_usd IS NULL THEN 1 ELSE 0 END), 0) AS cost_missing_snapshot_lines
+    FROM sale_items si
+    JOIN sales s ON s.id = si.sale_id
+    WHERE ${whereSql} AND ${recognizedExpr('s.')}
+    GROUP BY COALESCE(si.product_id, 0), CASE WHEN si.product_id IS NULL THEN lower(trim(COALESCE(si.product_name, ''))) ELSE '' END
+    ORDER BY line_sales_usd DESC, qty DESC
+    LIMIT @limit
+  `).all<{ product_id: number | null; product_name: string; sale_count: number; qty: number; line_sales_usd: number; cost_usd: number; cost_missing_snapshot_lines: number }>({ ...params, limit: cap })
+  const r2 = (v: number) => Math.round(v * 100) / 100
+  return (rows || []).map((r) => {
+    const lineSales = r2(num(r.line_sales_usd))
+    const cost = r2(num(r.cost_usd))
+    return {
+      product_id: r.product_id == null ? null : Number(r.product_id),
+      product_name: String(r.product_name || ''),
+      sale_count: num(r.sale_count),
+      qty: num(r.qty),
+      line_sales_usd: lineSales,
+      cost_usd: cost,
+      profit_usd: r2(lineSales - cost),
+      cost_missing_snapshot_lines: num(r.cost_missing_snapshot_lines),
+    }
+  })
 }
