@@ -29,7 +29,7 @@ const sectionMatrix: Record<string, { file: string; tokens: string[] }> = {
 
 // The section chip row moved out of the hub pages and into the shared
 // HubSectionNav (the 3-layer mobile navigation). A hub that renders it
-// satisfies the row's viewport-bounded / scrollable pin through that
+// satisfies the row's viewport-bounded / wrapping pin through that
 // component, so the row tokens are looked up there instead of in the hub.
 const hubSectionNav = read('components/shared/HubSectionNav.tsx')
 const delegatesRow = (source: string): boolean => /<HubSectionNav\b/.test(source)
@@ -38,6 +38,7 @@ const rowSource = (source: string): string => (delegatesRow(source) ? hubSection
 for (const [page, contract] of Object.entries(sectionMatrix)) {
   const source = read(contract.file)
   for (const token of contract.tokens) {
+    if (token === 'overflow-x-auto' && delegatesRow(source)) continue
     const haystack = token === 'overflow-x-auto' ? rowSource(source) : source
     assert.ok(haystack.includes(token), `${page}: missing nested surface/action token ${token}`)
   }
@@ -51,9 +52,14 @@ assert.match(branchesHub, /active === 'products'[\s\S]*hostSection="stats"/, 'Pr
 assert.doesNotMatch(branchesHub, /active === 'inventory'/, 'Branches must not restore the redundant branch-inventory duplicate section')
 
 for (const file of ['components/branches/BranchesHubPage.tsx', 'components/review/ReviewLogsPage.tsx', 'components/utils-settings/SettingsHubPage.tsx', 'components/promotions/PromotionsPage.tsx']) {
-  const source = rowSource(read(file))
-  assert.match(source, /max-w-full[^"']*overflow-x-auto|overflow-x-auto[^"']*max-w-full/, `${file}: section row must be viewport bounded and horizontally scrollable`)
-  assert.doesNotMatch(source, /inline-flex flex-wrap rounded-xl/, `${file}: section row must not push into extra rows`)
+  const pageSource = read(file)
+  const source = rowSource(pageSource)
+  if (delegatesRow(pageSource)) {
+    assert.match(source, /hub-section-pills[^"']*max-w-full[^"']*flex-wrap/, `${file}: shared section row must be viewport bounded and wrap`)
+    assert.doesNotMatch(source, /hub-section-pills[^"']*overflow-x-auto/, `${file}: shared section row must not scroll horizontally`)
+  } else {
+    assert.match(source, /max-w-full[^"']*overflow-x-auto|overflow-x-auto[^"']*max-w-full/, `${file}: legacy section row must remain viewport bounded`)
+  }
 }
 
 const pageHeader = read('components/shared/PageHeader.tsx')
@@ -61,7 +67,8 @@ assert.match(pageHeader, /overflow-x-auto/, 'shared page actions must stay on on
 assert.match(pageHeader, /max-w-full/, 'shared page actions must be bounded by the viewport')
 
 const sectionSwitcher = read('components/shared/SectionSwitcher.tsx')
-assert.match(sectionSwitcher, /max-w-full min-w-0 overflow-x-auto/, 'shared section switcher must be viewport bounded')
+assert.match(sectionSwitcher, /section-switcher max-w-full min-w-0/, 'shared section switcher must be viewport bounded')
+assert.match(sectionSwitcher, /flex min-w-0 flex-wrap/, 'shared section switcher must wrap without horizontal scrolling')
 
 const pagination = read('components/shared/PaginationControls.tsx')
 assert.equal((pagination.match(/hidden sm:inline">\{(?:back|next)Label\}/g) || []).length, 2, 'compact pager labels must collapse to icon-only on narrow screens')

@@ -120,6 +120,19 @@ await runTest('mobile section-nav preference constants are stable (host pages / 
   assert.equal(MOBILE_SECTION_NAV_SETTINGS_KEY, 'ui_mobile_section_nav')
 })
 
+await runTest('shared mobile navigation is compact, touch-safe, and never horizontally scrolls', () => {
+  const navSource = fs.readFileSync(new URL('../src/components/shared/HubSectionNav.tsx', import.meta.url), 'utf8')
+  assert.match(navSource, /hub-section-grid grid grid-cols-2/, 'layer 2 should remain a two-column grid')
+  assert.match(navSource, /hub-section-tile[^"']*min-h-\[6\.5rem\]/, 'tiles should be compact rectangles with a reliable height floor')
+  assert.doesNotMatch(navSource, /aspect-square/, 'hub tiles must not reserve square-card empty space')
+  assert.match(navSource, /hub-section-pills[^"']*flex-wrap/, 'legacy section controls should wrap')
+  assert.doesNotMatch(navSource, /hub-section-pills[^"']*overflow-x-auto/, 'legacy section controls should not scroll horizontally')
+  assert.match(navSource, /hub-section-pill[^"']*min-h-11/, 'section controls should expose a 44px compact touch target')
+  assert.match(navSource, /aria-pressed=\{isActive\}/, 'section controls should expose selected state')
+  assert.match(navSource, /h-11 w-11/, 'layer-3 back should expose a 44px touch target')
+  assert.match(navSource, /hub-section-label[^"']*break-words/, 'tile labels should wrap safely for Khmer')
+})
+
 // i18n coverage: every hub-section description key (fed to HubSectionNav's
 // `description` field) and every Settings -> Appearance "Mobile navigation"
 // control key must exist in BOTH lang packs, or verify:i18n's own

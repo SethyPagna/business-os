@@ -12,6 +12,11 @@ assert.match(sectionSwitcher, /export default function SectionSwitcher/)
 assert.match(sectionSwitcher, /value = 'all'/)
 assert.match(sectionSwitcher, /localStorage/)
 assert.match(sectionSwitcher, /All/)
+assert.match(sectionSwitcher, /section-switcher max-w-full min-w-0/, 'the switcher should stay viewport bounded')
+assert.match(sectionSwitcher, /flex min-w-0 flex-wrap/, 'section buttons should wrap instead of scrolling sideways')
+assert.doesNotMatch(sectionSwitcher, /overflow-x-auto|whitespace-nowrap rounded-lg|min-w-max/, 'compact section navigation should not require horizontal scrolling')
+assert.match(sectionSwitcher, /min-h-11/, 'section buttons should meet the 44px compact touch-target minimum')
+assert.match(sectionSwitcher, /break-words/, 'long and Khmer labels should wrap')
 
 for (const [name, source] of [
   ['Inventory', inventory],

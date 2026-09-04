@@ -240,7 +240,7 @@ export default function HubSectionNav({
             `sections` lang key is still live as the Settings toggle's option
             label. */}
         <div className="min-w-0 shrink-0 px-3 pt-3 sm:px-4 sm:pt-4">
-          <div className="inline-flex max-w-full overflow-x-auto overscroll-x-contain rounded-xl bg-gray-100 p-0.5 [touch-action:pan-x] dark:bg-gray-800 md:border md:border-gray-200 md:dark:border-gray-700">
+          <div className="hub-section-pills flex max-w-full flex-wrap gap-1 rounded-xl bg-gray-100 p-1 dark:bg-gray-800 md:inline-flex md:border md:border-gray-200 md:dark:border-gray-700">
             {visible.map((section) => {
               const Icon = section.icon
               const isActive = active === section.id
@@ -250,7 +250,7 @@ export default function HubSectionNav({
                   type="button"
                   onClick={() => onChange(section.id)}
                   aria-pressed={isActive}
-                  className={`inline-flex h-8 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg px-2.5 text-xs font-semibold sm:text-sm ${isActive ? `bg-white shadow dark:bg-gray-900 ${section.tone || 'text-primary-600 dark:text-primary-400'} md:ring-1 md:ring-inset md:ring-black/5 md:dark:ring-white/10` : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'}`}
+                  className={`hub-section-pill inline-flex min-h-11 min-w-0 flex-1 basis-[calc(50%_-_0.25rem)] items-center justify-center gap-1.5 break-words rounded-lg px-2.5 py-2 text-center text-xs font-semibold leading-snug sm:text-sm md:h-8 md:min-h-0 md:flex-none md:basis-auto md:whitespace-nowrap md:py-0 ${isActive ? `bg-white shadow dark:bg-gray-900 ${section.tone || 'text-primary-600 dark:text-primary-400'} md:ring-1 md:ring-inset md:ring-black/5 md:dark:ring-white/10` : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'}`}
                 >
                   {Icon ? <Icon className="h-3.5 w-3.5 sm:h-4 sm:w-4" /> : null} {section.label}
                   {section.badge}
@@ -266,19 +266,18 @@ export default function HubSectionNav({
   }
 
   if (!entered) {
-    // Layer 2: SQUARE TILES, two per row (user, Sep 3 2026) -- a bigger icon
+    // Layer 2: compact rectangular tiles, two per row -- a bigger icon
     // with the name under it, rather than the full-width list rows this
     // started as. Two per row means the whole hub is visible without
-    // scrolling on a 375-wide phone, and a square target is easier to hit on
-    // a shop counter than a thin row. The chevron goes: on a tile the whole
-    // square is obviously the target, so the affordance was noise. No
+    // scrolling on a 375-wide phone without adding large empty square areas.
+    // The whole card is the target, so a chevron would only add noise. No
     // "Sections" caption here either, for the same reason as the chip row
     // above. The active section's body is intentionally NOT rendered here
     // (see the doc comment at the top of this file).
     return (
       <div className="page-scroll flex-1 space-y-3 p-3 sm:p-4">
         {title ? <h1 className="px-0.5 text-lg font-semibold text-gray-900 dark:text-white">{title}</h1> : null}
-        <div className="grid grid-cols-2 gap-2.5">
+        <div className="hub-section-grid grid grid-cols-2 gap-2.5">
           {visible.map((section) => {
             const Icon = section.icon
             return (
@@ -286,7 +285,7 @@ export default function HubSectionNav({
                 key={section.id}
                 type="button"
                 onClick={() => enter(section.id)}
-                className="relative flex aspect-square w-full flex-col items-center justify-center gap-2 rounded-2xl border border-gray-200 bg-white p-3 text-center shadow-sm transition-transform active:scale-[0.98] dark:border-gray-700 dark:bg-gray-900"
+                className="hub-section-tile relative flex min-h-[6.5rem] w-full min-w-0 flex-col items-center justify-center gap-2 rounded-2xl border border-gray-200 bg-white px-3 py-2.5 text-center shadow-sm transition-transform focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 active:scale-[0.98] dark:border-gray-700 dark:bg-gray-900"
               >
                 {section.badge ? <span className="absolute right-2 top-2">{section.badge}</span> : null}
                 {Icon ? (
@@ -294,13 +293,13 @@ export default function HubSectionNav({
                     <Icon className="h-7 w-7" />
                   </span>
                 ) : null}
-                <span className="min-w-0">
+                <span className="min-w-0 max-w-full">
                   {/* The label wraps rather than truncating: a two-word Khmer
                       section name is wider than its English counterpart and
                       would lose its second half to an ellipsis on a tile this
                       narrow. */}
-                  <span className="block text-sm font-semibold leading-tight text-gray-900 dark:text-white">{section.label}</span>
-                  {section.description ? <span className="mt-1 block text-[10px] leading-tight text-gray-500 dark:text-gray-400">{section.description}</span> : null}
+                  <span className="hub-section-label block break-words text-sm font-semibold leading-snug text-gray-900 dark:text-white">{section.label}</span>
+                  {section.description ? <span className="hub-section-description mt-1 block break-words text-[10px] leading-snug text-gray-500 dark:text-gray-400">{section.description}</span> : null}
                 </span>
               </button>
             )
@@ -324,11 +323,11 @@ export default function HubSectionNav({
           type="button"
           onClick={goBack}
           aria-label={trh('back', 'Back')}
-          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800"
+          className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-gray-600 hover:bg-gray-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 dark:text-gray-300 dark:hover:bg-gray-800"
         >
           <ChevronLeft className="h-5 w-5" />
         </button>
-        <div className="min-w-0 flex-1 truncate text-base font-semibold text-gray-900 dark:text-white">{activeSection?.label}</div>
+        <div className="min-w-0 flex-1 break-words py-1 text-base font-semibold leading-snug text-gray-900 dark:text-white">{activeSection?.label}</div>
       </div>
       {children}
     </>

@@ -2,6 +2,27 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Shared compact navigation geometry. Labels may grow vertically so Khmer
+   clusters and text zoom wrap instead of clipping or widening the page. */
+.hub-section-grid,
+.hub-section-pills,
+.section-switcher {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.hub-section-tile,
+.hub-section-pill,
+.section-switcher button {
+  overflow-wrap: anywhere;
+}
+
+.hub-section-label,
+.hub-section-description {
+  max-width: 100%;
+  white-space: normal;
+}
+
 @layer base {
   * { box-sizing: border-box; }
   html {

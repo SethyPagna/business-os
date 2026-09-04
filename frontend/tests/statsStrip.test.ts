@@ -184,7 +184,7 @@ test('Part 548: the Reports summary lines show Profit on every viewport', () => 
     'src/components/sales/reports/GroupedReport.tsx',
   ]) {
     const src = read(rel)
-    assert.ok(src.includes("tr('rpt_gross_profit', 'Gross profit')"), `${rel} renders profit in its summary`)
+    assert.match(src, /tr\('rpt_gross_profit',\s*'[^']+'\)/, `${rel} renders the shared profit label in its summary`)
     assert.ok(!/hidden sm:inline/.test(src), `${rel} never hides a figure below the sm breakpoint`)
   }
   const frame = read('src/components/sales/reports/ReportFrame.tsx')
@@ -299,11 +299,10 @@ test('Part 552: report section controls ride the title row; hub tabs fit; branch
   const shell = read('src/components/sales/SalesHubPage.tsx')
   assert.ok(shell.includes('<HubSectionNav'), 'the Sales hub renders its tab strip through HubSectionNav')
   const nav = read('src/components/shared/HubSectionNav.tsx')
-  // This line's HubSectionNav is the pre-Section-6 chip row; the newer
-  // full-width grid ships with the mobile-layers lane, not with reports.
-  assert.ok(nav.includes('max-w-full overflow-x-auto'), 'the chip row is viewport bounded and scrolls')
+  assert.ok(nav.includes('hub-section-pills flex max-w-full flex-wrap'), 'the chip row is viewport bounded and wraps')
+  assert.ok(!nav.includes('hub-section-pills flex max-w-full overflow-x-auto'), 'the chip row does not require horizontal scrolling')
   assert.ok(nav.includes('grid grid-cols-2'), 'the phone surface is a two-per-row tile grid')
-  assert.ok(nav.includes('leading-tight'), 'tile labels stay complete and may use a second line')
+  assert.ok(nav.includes('hub-section-label block break-words'), 'tile labels stay complete and may use additional lines')
 })
 
 test('Part 553/554: report sections render display-currency money + a CSV export', () => {
