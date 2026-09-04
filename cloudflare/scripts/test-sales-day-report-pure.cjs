@@ -57,6 +57,11 @@ const lift = (tableName) => liftFrom('0001_init.sql', tableName)
 const db = new Database(':memory:')
 db.exec(lift('sales'))
 db.exec(lift('sale_items'))
+// 0001 predates the per-line discount columns the kernel sums for
+// item_discount_usd. Apply the migration that added them rather than
+// hand-writing an ALTER, so the fixture cannot drift from the real column
+// types or defaults.
+db.exec(migrationSql('0007_sale_item_manual_discount.sql'))
 // getSalesTotals now LEFT JOINs a per-sale customer-refund subquery over the
 // `returns` table (net-sales revenue is stated net of customer refunds). Provide
 // the real returns schema so that SQL resolves; this suite seeds no returns, so

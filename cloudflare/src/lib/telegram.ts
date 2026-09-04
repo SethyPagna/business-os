@@ -5,7 +5,7 @@ import {
   parseReportDate, telegramCommandReference, telegramUnauthorizedReply,
 } from './telegramLang'
 import {
-  getDeliveryContactTotals, getItemDiscountUsd, getPaymentMethodBreakdown, getSalesTotals,
+  getDeliveryContactTotals, getPaymentMethodBreakdown, getSalesTotals,
   shiftWindowWhere, type SalesFilters,
 } from './salesAnalytics'
 import type { Env } from '../index'
@@ -499,14 +499,16 @@ async function shiftExpenses(env: Env, shift: ShiftReportSession, nowMs: number)
 
 async function shiftFigures(env: Env, shift: ShiftReportSession, nowMs: number): Promise<ShiftReportFigures> {
   const filters = shiftFilters(shift, nowMs)
-  const [totals, itemDiscountUsd, counts, expenses, paymentMethods, deliveries] = await Promise.all([
+  const [totals, counts, expenses, paymentMethods, deliveries] = await Promise.all([
     getSalesTotals(env, filters),
-    getItemDiscountUsd(env, filters),
     shiftInvoiceCounts(env, shift, nowMs),
     shiftExpenses(env, shift, nowMs),
     getPaymentMethodBreakdown(env, filters),
     getDeliveryContactTotals(env, filters),
   ])
+  // Since S4R5-3 the per-line discount rides along on the totals, summed
+  // inside the COGS query. It used to be a second full scan of the same rows.
+  const itemDiscountUsd = totals.item_discount_usd
   return {
     invoices: counts.invoices,
     cancelled: counts.cancelled,

@@ -205,7 +205,22 @@ export interface SalesTotals {
   gross_sales_usd: number
   store_discount_usd: number
   membership_discount_usd: number
+  // The two INVOICE-level discounts added together. Deliberately unchanged:
+  // it has meant store + membership since it was introduced and a dozen
+  // callers read it. The figure that includes the lines is
+  // total_discount_usd below.
   discount_usd: number
+  // Discount given away on the LINES (S4-7), summed in the same pass as
+  // COGS. `gross_sales_usd` is the sum of subtotals, and a subtotal is
+  // already net of its own lines’ discounts, so this money appears nowhere
+  // on the sales header -- without this field it is invisible to every
+  // report. In August 2026 alone it was $2,338.85 against $5.50 of
+  // invoice-level discount.
+  item_discount_usd: number
+  // Every discount on the sale: lines + store + membership. This is the
+  // owner’s "total discount", and the figure the reports’ Discounts column
+  // shows.
+  total_discount_usd: number
   tax_usd: number
   delivery_usd: number
   store_delivery_usd: number
@@ -261,7 +276,8 @@ export interface SalesPeriodRow {
 export function emptySalesTotals(): SalesTotals {
   return {
     tx_count: 0, gross_sales_usd: 0, store_discount_usd: 0, membership_discount_usd: 0,
-    discount_usd: 0, tax_usd: 0, delivery_usd: 0, store_delivery_usd: 0,
+    discount_usd: 0, item_discount_usd: 0, total_discount_usd: 0,
+    tax_usd: 0, delivery_usd: 0, store_delivery_usd: 0,
     delivery_actual_cost_usd: 0, delivery_actual_cost_count: 0, delivery_sale_count: 0, delivery_margin_usd: 0,
     delivery_net_usd: 0, returned_cost_usd: 0,
     refund_usd: 0, revenue_usd: 0, pending_revenue_usd: 0, collected_total_usd: 0, cost_usd: 0, profit_usd: 0, avg_order_usd: 0,
@@ -506,16 +522,25 @@ async function salesLevelTotals(env: Env, f: SalesFilters) {
 // RECOGNIZED sales only (excludes awaiting_payment as well as cancelled), so
 // profit = recognized revenue - recognized cost stays a matched pair -- unpaid
 // credit contributes neither revenue nor cost until it is paid.
-async function salesCost(env: Env, f: SalesFilters): Promise<number> {
+// The per-line discount, as a SELECT fragment rather than a query of its own.
+// Every item-level aggregate in this file joins sale_items to sales over the
+// same filter and the same recognized-only basis, so summing the discount
+// alongside the cost reads no extra rows -- and, more importantly, guarantees
+// the two figures always describe exactly the same set of lines.
+const ITEM_DISCOUNT_SELECT =
+  'COALESCE(SUM(COALESCE(si.product_discount_usd, 0) + COALESCE(si.manual_discount_usd, 0)), 0) AS item_discount_usd'
+
+async function salesCost(env: Env, f: SalesFilters): Promise<{ costUsd: number; itemDiscountUsd: number }> {
   const db = getDb(env)
   const { sql: whereSql, params } = whereActiveSales('s', f)
   const row = await db.prepare(`
-    SELECT COALESCE(SUM(si.cost_price_usd * si.quantity), 0) AS cost_usd
+    SELECT COALESCE(SUM(si.cost_price_usd * si.quantity), 0) AS cost_usd,
+           ${ITEM_DISCOUNT_SELECT}
     FROM sale_items si
     JOIN sales s ON s.id = si.sale_id
     WHERE ${whereSql} AND ${recognizedExpr('s.')}
-  `).get<{ cost_usd: number }>(params)
-  return num(row?.cost_usd)
+  `).get<{ cost_usd: number; item_discount_usd: number }>(params)
+  return { costUsd: num(row?.cost_usd), itemDiscountUsd: num(row?.item_discount_usd) }
 }
 
 // Cost of the goods a return put BACK on the sellable shelf, over the same
@@ -578,6 +603,12 @@ async function returnedCostByBucket(env: Env, f: SalesFilters, bucketExpr: strin
  * Same recognized-only basis as cost, and joined the same way, so
  * `revenue + item discount + invoice discount` reconciles against the
  * pre-discount value of what left the shelf.
+ *
+ * Since S4R5-3 the same figure rides along on SalesTotals as
+ * `item_discount_usd`, summed inside the COGS query at no extra cost. Prefer
+ * that. This stays for a caller that wants the figure WITHOUT the rest of the
+ * totals -- it is the identical expression over the identical rows, so the
+ * two can never disagree.
  */
 export async function getItemDiscountUsd(env: Env, f: SalesFilters): Promise<number> {
   const db = getDb(env)
@@ -591,7 +622,15 @@ export async function getItemDiscountUsd(env: Env, f: SalesFilters): Promise<num
   return round2(num(row?.item_discount_usd))
 }
 
-export function deriveTotals(level: Record<string, number>, costUsd: number, returnedCostUsd = 0): SalesTotals {
+// itemDiscountUsd is the fourth parameter and defaults to 0, so this stays a
+// strict superset -- every existing three-argument call site still compiles
+// and still reports exactly what it reported before.
+export function deriveTotals(
+  level: Record<string, number>,
+  costUsd: number,
+  returnedCostUsd = 0,
+  itemDiscountUsd = 0,
+): SalesTotals {
   const txCount = num(level.tx_count)
   const grossSalesUsd = num(level.gross_sales_usd)
   const storeDiscountUsd = num(level.store_discount_usd)
@@ -635,6 +674,8 @@ export function deriveTotals(level: Record<string, number>, costUsd: number, ret
     store_discount_usd: round2(storeDiscountUsd),
     membership_discount_usd: round2(membershipDiscountUsd),
     discount_usd: round2(discountUsd),
+    item_discount_usd: round2(itemDiscountUsd),
+    total_discount_usd: round2(discountUsd + itemDiscountUsd),
     tax_usd: round2(taxUsd),
     delivery_usd: round2(deliveryUsd),
     store_delivery_usd: round2(storeDeliveryUsd),
@@ -657,12 +698,12 @@ export function deriveTotals(level: Record<string, number>, costUsd: number, ret
 }
 
 export async function getSalesTotals(env: Env, f: SalesFilters): Promise<SalesTotals> {
-  const [level, costUsd, returnedCostUsd] = await Promise.all([
+  const [level, cost, returnedCostUsd] = await Promise.all([
     salesLevelTotals(env, f),
     salesCost(env, f),
     salesReturnedCost(env, f),
   ])
-  return deriveTotals(level, costUsd, returnedCostUsd)
+  return deriveTotals(level, cost.costUsd, returnedCostUsd, cost.itemDiscountUsd)
 }
 
 // Period-bucketed trend series (for the Dashboard revenue/cost/profit line
@@ -702,18 +743,25 @@ export async function getSalesPeriodSeries(env: Env, f: SalesFilters, granularit
     `).all<Record<string, number> & { period: string }>(paramsLevel),
     db.prepare(`
       SELECT ${periodExprJoined} AS period,
-             COALESCE(SUM(si.cost_price_usd * si.quantity), 0) AS cost_usd
+             COALESCE(SUM(si.cost_price_usd * si.quantity), 0) AS cost_usd,
+             ${ITEM_DISCOUNT_SELECT}
       FROM sale_items si
       JOIN sales s ON s.id = si.sale_id
       WHERE ${whereCost} AND ${recognizedExpr('s.')}
       GROUP BY ${periodExprJoined}
-    `).all<{ period: string; cost_usd: number }>(paramsCost),
+    `).all<{ period: string; cost_usd: number; item_discount_usd: number }>(paramsCost),
     returnedCostByBucket(env, f, periodExprJoined),
   ])
 
   const costByPeriod = new Map((costRows || []).map((r) => [r.period, num(r.cost_usd)]))
+  const itemDiscountByPeriod = new Map((costRows || []).map((r) => [r.period, num(r.item_discount_usd)]))
   const rows = (levelRows || []).map((r) => {
-    const totals = deriveTotals(r, costByPeriod.get(r.period) || 0, returnedByPeriod.get(r.period) || 0)
+    const totals = deriveTotals(
+      r,
+      costByPeriod.get(r.period) || 0,
+      returnedByPeriod.get(r.period) || 0,
+      itemDiscountByPeriod.get(r.period) || 0,
+    )
     return {
       period: r.period,
       date: r.period,
@@ -1225,18 +1273,20 @@ export async function getSalesGroupedTotals(env: Env, f: SalesFilters, groupBy: 
     db.prepare(`
       SELECT ${joined.key} AS grp_key,
              COALESCE(SUM(si.cost_price_usd * si.quantity), 0) AS cost_usd,
-             COALESCE(SUM(CASE WHEN si.cost_price_usd IS NULL THEN 1 ELSE 0 END), 0) AS missing_snapshot_lines
+             COALESCE(SUM(CASE WHEN si.cost_price_usd IS NULL THEN 1 ELSE 0 END), 0) AS missing_snapshot_lines,
+             ${ITEM_DISCOUNT_SELECT}
       FROM sale_items si
       JOIN sales s ON s.id = si.sale_id
       WHERE ${whereCost} AND ${recognizedExpr('s.')}
       GROUP BY grp_key
-    `).all<{ grp_key: string | number | null; cost_usd: number; missing_snapshot_lines: number }>(paramsCost),
+    `).all<{ grp_key: string | number | null; cost_usd: number; missing_snapshot_lines: number; item_discount_usd: number }>(paramsCost),
     returnedCostByBucket(env, f, joined.key),
   ])
 
   const keyOf = (v: string | number | null | undefined): string => (v == null ? '' : String(v))
   const costByKey = new Map((costRows || []).map((r) => [keyOf(r.grp_key), num(r.cost_usd)]))
   const missingByKey = new Map((costRows || []).map((r) => [keyOf(r.grp_key), num(r.missing_snapshot_lines)]))
+  const itemDiscountByKey = new Map((costRows || []).map((r) => [keyOf(r.grp_key), num(r.item_discount_usd)]))
   const rows: SalesGroupedRow[] = (levelRows || []).map((r) => {
     const key = keyOf(r.grp_key)
     return {
@@ -1244,7 +1294,7 @@ export async function getSalesGroupedTotals(env: Env, f: SalesFilters, groupBy: 
       label: r.grp_label == null ? '' : String(r.grp_label),
       entity_id: r.grp_id == null ? null : Number(r.grp_id),
       cost_missing_snapshot_lines: missingByKey.get(key) || 0,
-      ...deriveTotals(r, costByKey.get(key) || 0, returnedByKey.get(key) || 0),
+      ...deriveTotals(r, costByKey.get(key) || 0, returnedByKey.get(key) || 0, itemDiscountByKey.get(key) || 0),
     }
   })
   if (groupBy === 'hour' || groupBy === 'weekday') {
@@ -1364,21 +1414,28 @@ export async function getBusinessSummaryDayRows(env: Env, f: SalesFilters): Prom
     db.prepare(`
       SELECT ${periodExprJoined} AS period,
              COALESCE(SUM(si.cost_price_usd * si.quantity), 0) AS cost_usd,
-             COALESCE(SUM(CASE WHEN si.cost_price_usd IS NULL THEN 1 ELSE 0 END), 0) AS missing_snapshot_lines
+             COALESCE(SUM(CASE WHEN si.cost_price_usd IS NULL THEN 1 ELSE 0 END), 0) AS missing_snapshot_lines,
+             ${ITEM_DISCOUNT_SELECT}
       FROM sale_items si
       JOIN sales s ON s.id = si.sale_id
       WHERE ${whereCost} AND ${recognizedExpr('s.')}
       GROUP BY ${periodExprJoined}
-    `).all<{ period: string; cost_usd: number; missing_snapshot_lines: number }>(paramsCost),
+    `).all<{ period: string; cost_usd: number; missing_snapshot_lines: number; item_discount_usd: number }>(paramsCost),
     returnedCostByBucket(env, f, periodExprJoined),
   ])
 
   const costByPeriod = new Map((costRows || []).map((r) => [r.period, num(r.cost_usd)]))
   const missingByPeriod = new Map((costRows || []).map((r) => [r.period, num(r.missing_snapshot_lines)]))
+  const itemDiscountByPeriod = new Map((costRows || []).map((r) => [r.period, num(r.item_discount_usd)]))
   const rows = (levelRows || []).map((r) => ({
     date: r.period,
     cost_missing_snapshot_lines: missingByPeriod.get(r.period) || 0,
-    ...deriveTotals(r, costByPeriod.get(r.period) || 0, returnedByPeriod.get(r.period) || 0),
+    ...deriveTotals(
+      r,
+      costByPeriod.get(r.period) || 0,
+      returnedByPeriod.get(r.period) || 0,
+      itemDiscountByPeriod.get(r.period) || 0,
+    ),
   }))
   return rows.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0))
 }

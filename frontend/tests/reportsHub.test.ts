@@ -55,16 +55,19 @@ const read = (rel: string): string => fs.readFileSync(path.join(rootPath, rel), 
 const readJson = (rel: string): Record<string, unknown> => JSON.parse(read(rel)) as Record<string, unknown>
 
 // A canonical totals block as the server sends it to an ADMIN. Figures chosen
-// so every derived line is a distinct number: gross 300, store discount 20,
-// membership 10 -> net sales 270; pending 40; refunds 15 -> revenue 215;
-// collected 233 (= revenue + tax 8 + customer delivery 10); cost 90; store
-// delivery 5 -> profit 120.
+// so every derived line is a distinct number: item discount 45 -> list price
+// 345; gross 300, store discount 20, membership 10 -> net sales 270 and a
+// total discount of 75; pending 40; refunds 15 -> revenue 215; collected 233
+// (= revenue + tax 8 + customer delivery 10); cost 90; store delivery 5 ->
+// profit 120.
 const adminTotals = {
   tx_count: 6,
   gross_sales_usd: 300,
   store_discount_usd: 20,
   membership_discount_usd: 10,
   discount_usd: 30,
+  item_discount_usd: 45,
+  total_discount_usd: 75,
   tax_usd: 8,
   delivery_usd: 10,
   store_delivery_usd: 5,
@@ -104,7 +107,16 @@ test('normalizeTotals copies the admin keys only when the server sent them', () 
 test('buildIncomeStatement: revenue and collected groups close arithmetically on kernel figures', () => {
   const lines = buildIncomeStatement({ sales: normalizeTotals(staffTotals), profitMode: 'net', khrToUsd, expenses: { usd: 10, khr: 0 } })
   const m = lineMap(lines)
+  // The statement opens at what the goods were LISTED at and takes the
+  // per-line discount off in the open. gross_sales_usd is SUM(subtotal_usd)
+  // and a subtotal is already net of its lines’ own discounts, so opening at
+  // it (as this statement used to) hid the figure entirely -- $2,338.85 of it
+  // in production in August 2026 alone.
+  assert.equal(m.list_price.usd, 345, 'list price = gross sales + the per-line discount')
+  assert.equal(m.item_discounts.usd, 45)
+  assert.equal(m.list_price.usd - m.item_discounts.usd, m.gross_sales.usd, 'the opening pair closes onto gross sales')
   assert.equal(m.gross_sales.usd, 300)
+  assert.equal(m.gross_sales.kind, 'total', 'gross sales is now the subtotal of the two lines above it')
   assert.equal(m.net_sales.usd, 270, 'net sales = gross - store - membership discounts')
   assert.equal(m.net_sales.kind, 'total')
   assert.equal(m.pending_credit.usd, 40)
@@ -116,7 +128,7 @@ test('buildIncomeStatement: revenue and collected groups close arithmetically on
   // No cost on the server side -> no profit group at all, regardless of the profit mode / expenses given.
   assert.ok(!('cogs' in m) && !('gross_profit' in m) && !('expenses' in m) && !('net_result' in m), 'no profit lines for a caller without cost')
   assert.ok(lines.every((l) => l.group !== 'profit'))
-  assert.equal(lines.length, 9)
+  assert.equal(lines.length, 11)
 })
 
 test('buildIncomeStatement: the profit group closes (gross) and subtracts expenses (net) with KHR converted', () => {

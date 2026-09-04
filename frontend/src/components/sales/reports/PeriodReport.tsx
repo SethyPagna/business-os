@@ -81,7 +81,10 @@ export default function PeriodReport(p: ReportViewProps) {
       g !== 'day' ? { key: 'days', label: tr('rpt_days', 'Days'), kind: 'int', value: (r) => r.days, defaultVisible: false } : null,
       { key: 'tx_count', label: tr('sales', 'Sales'), kind: 'int', value: (r) => r.tx_count },
       { key: 'gross_sales_usd', label: tr('gross_sales', 'Gross sales'), kind: 'money', value: (r) => r.gross_sales_usd, defaultVisible: options.basis === 'gross', emphasis: options.basis === 'gross' },
-      { key: 'discounts', label: tr('discounts', 'Discounts'), kind: 'money', value: (r) => r.store_discount_usd + r.membership_discount_usd, defaultVisible: false },
+      // EVERY discount on the sales in the bucket -- lines included. Showing
+      // only the invoice pair here understated August 2026 by $2,338.85.
+      { key: 'discounts', label: tr('discounts', 'Discounts'), kind: 'money', value: (r) => r.total_discount_usd, defaultVisible: false },
+      { key: 'item_discounts', label: tr('rpt_item_discounts', 'Product discounts'), kind: 'money', value: (r) => r.item_discount_usd, defaultVisible: false },
       { key: 'refund_usd', label: tr('refunds', 'Refunds'), kind: 'money', value: (r) => r.refund_usd },
       { key: 'revenue_usd', label: tr('revenue', 'Revenue'), kind: 'money', value: (r) => r.revenue_usd, emphasis: options.basis === 'revenue' },
       { key: 'pending_revenue_usd', label: tr('rpt_pending_credit', 'Unpaid credit'), kind: 'money', value: (r) => r.pending_revenue_usd, defaultVisible: false },

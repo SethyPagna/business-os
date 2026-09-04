@@ -85,7 +85,13 @@ db.exec(`
     total_usd REAL,
     branch_id INTEGER,
     product_id INTEGER,
-    product_name TEXT
+    product_name TEXT,
+    -- The two per-line discount columns the kernel sums for
+    -- item_discount_usd, alongside COGS and over the same rows.
+    -- product_discount_* is the catalog promotion (0001); manual_discount_*
+    -- is what the cashier knocked off at checkout (0007).
+    product_discount_usd REAL DEFAULT 0,
+    manual_discount_usd REAL DEFAULT 0
   );
   CREATE TABLE returns (
     id INTEGER PRIMARY KEY,

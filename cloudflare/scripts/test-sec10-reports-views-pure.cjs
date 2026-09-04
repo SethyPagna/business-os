@@ -90,7 +90,13 @@ db.exec(`
     total_usd REAL,
     branch_id INTEGER,
     product_id INTEGER,
-    product_name TEXT
+    product_name TEXT,
+    -- The two per-line discount columns the kernel sums for
+    -- item_discount_usd, alongside COGS and over the same rows.
+    -- product_discount_* is the catalog promotion (0001); manual_discount_*
+    -- is what the cashier knocked off at checkout (0007).
+    product_discount_usd REAL DEFAULT 0,
+    manual_discount_usd REAL DEFAULT 0
   );
   -- delivery_actual_cost_usd on a sale is ignored when the SAME courier
   -- payment was also written as a standalone fees row, so the kernel probes
@@ -157,14 +163,19 @@ sale({ id: 5, created_at: UTC(24, 4), sale_status: 'cancelled', subtotal_usd: 99
 // Mon 24: warehouse branch, payment method blank -> 'unknown' bucket.
 sale({ id: 6, created_at: UTC(24, 6), subtotal_usd: 20, total_usd: 20, branch_id: 2, branch_name: 'Warehouse', payment_method: '', customer_name: 'walk in ' })
 
-const insItem = db.prepare('INSERT INTO sale_items (id, sale_id, quantity, cost_price_usd, total_usd, branch_id, product_id, product_name) VALUES (?,?,?,?,?,?,?,?)')
-insItem.run(1, 1, 1, 30, 90, 1, 101, 'A')     // S1: cost 30
-insItem.run(2, 1, 1, null, 10, 1, 102, 'B')   // S1: NULL cost snapshot (counts 0, flagged)
-insItem.run(3, 2, 2, 10, 50, 1, 101, 'A')     // S2: 2 x A, cost 20
-insItem.run(4, 3, 1, 15, 80, 1, 104, 'D')     // S3: cost 15
-insItem.run(5, 4, 1, 12, 40, 1, 104, 'D')     // S4 (awaiting): must not count anywhere
-insItem.run(6, 5, 1, 500, 999, 1, 101, 'A')   // S5 (cancelled): must not count anywhere
-insItem.run(7, 6, 1, 8, 20, 2, 105, 'E')      // S6: cost 8
+// The last two columns are the per-line discounts: a catalog promotion
+// (product_discount_usd) and what the cashier knocked off (manual_discount_usd).
+// Their sum is item_discount_usd, and it is summed in the SAME pass as COGS,
+// over the same recognized-only rows -- so the awaiting and cancelled lines
+// below carry deliberately large discounts that must not appear anywhere.
+const insItem = db.prepare('INSERT INTO sale_items (id, sale_id, quantity, cost_price_usd, total_usd, branch_id, product_id, product_name, product_discount_usd, manual_discount_usd) VALUES (?,?,?,?,?,?,?,?,?,?)')
+insItem.run(1, 1, 1, 30, 90, 1, 101, 'A', 2, 3)     // S1: cost 30, line discount 5
+insItem.run(2, 1, 1, null, 10, 1, 102, 'B', 0, 0)   // S1: NULL cost snapshot (counts 0, flagged)
+insItem.run(3, 2, 2, 10, 50, 1, 101, 'A', 0, 4)     // S2: 2 x A, cost 20, line discount 4
+insItem.run(4, 3, 1, 15, 80, 1, 104, 'D', 0, 0)     // S3: cost 15
+insItem.run(5, 4, 1, 12, 40, 1, 104, 'D', 50, 50)   // S4 (awaiting): must not count anywhere
+insItem.run(6, 5, 1, 500, 999, 1, 101, 'A', 0, 900) // S5 (cancelled): must not count anywhere
+insItem.run(7, 6, 1, 8, 20, 2, 105, 'E', 0, 0)      // S6: cost 8, no line discount
 
 const insRet = db.prepare('INSERT INTO returns (id, sale_id, total_refund_usd, status, return_scope, created_at, branch_id) VALUES (?,?,?,?,?,?,?)')
 insRet.run(1, 3, 10, 'completed', 'customer', UTC(24, 8), 1) // customer refund on S3
@@ -189,10 +200,33 @@ insRet.run(1, 3, 10, 'completed', 'customer', UTC(24, 8), 1) // customer refund 
     near(totals.store_delivery_usd, 3) && !near(totals.profit_usd, 154))
   check('fixture: tx_count = 5 (cancelled excluded, awaiting counted as a transaction)', totals.tx_count === 5)
 
+  // ---- the per-line discount (S4R5-3) ----------------------------------
+  // Invisible on every report before this: gross_sales_usd is SUM(subtotal_usd)
+  // and a subtotal is already net of its lines’ own discounts, so the money
+  // left no trace on the sales header at all. In production it was $2,338.85
+  // in August 2026 against $5.50 of invoice-level discount.
+  check('item discount = 9 (S1’s 2+3 and S2’s 4; the awaiting sale’s 100 and the cancelled sale’s 900 are excluded)',
+    near(totals.item_discount_usd, 9))
+  // gross_sales_usd is SUM(subtotal_usd), and a subtotal is already net of
+  // its lines’ own discounts -- so seeding 9 of line discount must leave it
+  // exactly where it was, and the item discount is money OUTSIDE it.
+  // 290 = recognized net 240 + the awaiting sale’s 40 (gross is over
+  // non-cancelled sales, before the invoice discounts) + store discount 10.
+  // The 9 of line discount is NOT in it and never was: gross_sales_usd is
+  // SUM(subtotal_usd), and a subtotal is already net of its own lines’
+  // discounts. That is exactly why the money was invisible on every report
+  // until it got a field of its own.
+  check('gross_sales_usd = 290, unmoved by the 9 of line discount seeded above',
+    near(totals.gross_sales_usd, 290))
+  check('total discount = item + store + membership',
+    near(totals.total_discount_usd, totals.item_discount_usd + totals.store_discount_usd + totals.membership_discount_usd))
+  check('discount_usd keeps its old meaning: the invoice pair only',
+    near(totals.discount_usd, totals.store_discount_usd + totals.membership_discount_usd))
+
   for (const groupBy of kernel.SALES_GROUP_KEYS) {
     const rows = await kernel.getSalesGroupedTotals(env, filters, groupBy)
     check(`${groupBy}: rows come back (${rows.length})`, rows.length > 0)
-    for (const key of ['tx_count', 'revenue_usd', 'pending_revenue_usd', 'refund_usd', 'cost_usd', 'profit_usd', 'gross_sales_usd', 'collected_total_usd']) {
+    for (const key of ['tx_count', 'revenue_usd', 'pending_revenue_usd', 'refund_usd', 'cost_usd', 'profit_usd', 'gross_sales_usd', 'collected_total_usd', 'item_discount_usd', 'total_discount_usd']) {
       check(`${groupBy}: sum(${key}) over groups = getSalesTotals (${sum(rows, key)} vs ${totals[key]})`, near(sum(rows, key), totals[key]))
     }
     check(`${groupBy}: every row carries cost_missing_snapshot_lines`, rows.every((r) => typeof r.cost_missing_snapshot_lines === 'number'))

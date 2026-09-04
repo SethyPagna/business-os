@@ -295,7 +295,13 @@ export interface ReportTotals {
   gross_sales_usd: number
   store_discount_usd: number
   membership_discount_usd: number
+  // The two INVOICE-level discounts. Unchanged meaning.
   discount_usd: number
+  // The per-LINE discount, which gross_sales_usd has already had taken out
+  // of it -- so without this field the money is invisible on every report.
+  item_discount_usd: number
+  // Lines + store + membership: the owner’s "total discount".
+  total_discount_usd: number
   tax_usd: number
   delivery_usd: number
   store_delivery_usd: number
@@ -315,7 +321,8 @@ export interface ReportTotals {
 }
 
 const TOTAL_KEYS: Array<keyof ReportTotals> = [
-  'tx_count', 'gross_sales_usd', 'store_discount_usd', 'membership_discount_usd', 'discount_usd', 'tax_usd', 'delivery_usd',
+  'tx_count', 'gross_sales_usd', 'store_discount_usd', 'membership_discount_usd', 'discount_usd',
+  'item_discount_usd', 'total_discount_usd', 'tax_usd', 'delivery_usd',
   'store_delivery_usd', 'delivery_actual_cost_usd', 'delivery_actual_cost_count', 'delivery_sale_count', 'delivery_margin_usd',
   'refund_usd', 'revenue_usd', 'pending_revenue_usd', 'collected_total_usd', 'avg_order_usd',
 ]
@@ -424,9 +431,15 @@ export interface StatementInput {
 function statementFigures(t: ReportTotals): Record<string, number> {
   const netSales = round2(t.gross_sales_usd - t.store_discount_usd - t.membership_discount_usd)
   const fig: Record<string, number> = {
+    // What the goods were listed at before ANY discount. gross_sales_usd is
+    // the sum of subtotals and a subtotal is already net of its lines’ own
+    // discounts, so the line discount has to be added back to get here.
+    list_price: round2(t.gross_sales_usd + t.item_discount_usd),
+    item_discounts: t.item_discount_usd,
     gross_sales: t.gross_sales_usd,
     store_discounts: t.store_discount_usd,
     membership_discounts: t.membership_discount_usd,
+    total_discounts: t.total_discount_usd,
     net_sales: netSales,
     pending_credit: t.pending_revenue_usd,
     refunds: t.refund_usd,
@@ -467,7 +480,9 @@ export function buildIncomeStatement(input: StatementInput): StatementLine[] {
     hintFallback: hint?.[1],
   })
   const lines: StatementLine[] = [
-    line('gross_sales', 'gross_sales', 'Gross sales', 'add', 'revenue', ['rpt_hint_gross_sales', 'Item subtotals of every non-cancelled sale, before discounts.']),
+    line('list_price', 'rpt_list_price', 'Goods at list price', 'add', 'revenue', ['rpt_hint_list_price', 'What the items sold were priced at before any discount.']),
+    line('item_discounts', 'rpt_item_discounts', 'Product discounts', 'sub', 'revenue', ['rpt_hint_item_discounts', 'Discounts given on individual lines. Already taken out of the subtotals, so it never appeared on a report before.']),
+    line('gross_sales', 'gross_sales', 'Gross sales', 'total', 'revenue', ['rpt_hint_gross_sales', 'Item subtotals of every non-cancelled sale: list price less the product discounts, before the invoice-level ones.']),
     line('store_discounts', 'rpt_store_discounts', 'Store discounts', 'sub', 'revenue'),
     line('membership_discounts', 'rpt_membership_discounts', 'Membership discounts', 'sub', 'revenue'),
     line('net_sales', 'rpt_net_sales', 'Net sales', 'total', 'revenue'),
