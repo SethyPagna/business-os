@@ -1,6 +1,8 @@
 import { useMemo, useState } from 'react'
 import { createPortal } from 'react-dom'
 import X from 'lucide-react/dist/esm/icons/x.js'
+import { useCloseGuard } from '../../../utils/useCloseGuard.ts'
+import UnsavedChangesPrompt from '../../shared/UnsavedChangesPrompt.tsx'
 import SupplierPickerField, { type SupplierChoice } from '../../shared/SupplierPickerField.tsx'
 import { backfillProductSupplier } from '../../../api/productWriteTransport.ts'
 import { batchDisplayLabel } from '../../../utils/batchLabel.ts'
@@ -91,8 +93,17 @@ export default function AttributeSupplierModal({
     }
   }
 
+  // S4-21: the picked supplier is the authored bit; the lot ticks default to
+  // all and are not work someone typed.
+  const closeGuard = useCloseGuard(
+    { dirty: choice.supplierId != null || choice.supplierName.trim().length > 0 },
+    onClose,
+  )
+  // The backdrop and the ✕ both land here.
+  const requestClose = () => { if (!busy) closeGuard.requestClose() }
+
   const modal = (
-    <div className="modal-viewport-safe pointer-events-auto fixed inset-0 z-[1060] flex items-end justify-center overflow-y-auto bg-black/50 sm:items-center" onClick={onClose}>
+    <div className="modal-viewport-safe pointer-events-auto fixed inset-0 z-[1060] flex items-end justify-center overflow-y-auto bg-black/50 sm:items-center" onClick={requestClose}>
       <div
         className="modal-panel-safe flex w-full flex-col overflow-hidden rounded-t-2xl bg-white shadow-2xl sm:max-w-md sm:rounded-2xl dark:bg-gray-800"
         onClick={(event) => event.stopPropagation()}
@@ -105,7 +116,7 @@ export default function AttributeSupplierModal({
             </button>
             <button
               type="button"
-              onClick={onClose}
+              onClick={requestClose}
               aria-label={tr('close', 'Close')}
               className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full text-gray-400 hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-gray-700 dark:hover:text-gray-200"
             >
@@ -159,6 +170,7 @@ export default function AttributeSupplierModal({
           </button>
         </div>
       </div>
+      <UnsavedChangesPrompt guard={closeGuard} />
     </div>
   )
 

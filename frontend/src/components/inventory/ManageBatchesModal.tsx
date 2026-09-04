@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { fmtDateOnly } from '../../utils/formatters'
 import X from 'lucide-react/dist/esm/icons/x.js'
+import { useCloseGuard } from '../../utils/useCloseGuard.ts'
+import UnsavedChangesPrompt from '../shared/UnsavedChangesPrompt.tsx'
 import Trash2 from 'lucide-react/dist/esm/icons/trash-2.js'
 import AppSelect, { type AppSelectOption } from '../shared/AppSelect'
 import SectionCard from '../shared/SectionCard'
@@ -142,10 +144,17 @@ export default function ManageBatchesModal({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [productId, branchId])
 
+  // S4-21: row edits here auto-save per row, so the ONLY unsaved thing is a
+  // row currently open in edit mode with a draft in it. Nothing else in
+  // this modal is authored -- the branch picker and the day drill-down are
+  // navigation.
+  const closeGuard = useCloseGuard({ dirty: editingId !== null }, onClose)
+
   if (!product) return null
 
+  // The backdrop and the ✕ both land here.
   const closeIfIdle = () => {
-    if (!savingId) onClose()
+    if (!savingId) closeGuard.requestClose()
   }
 
   const startEdit = (batch: ProductBatch) => {
@@ -453,6 +462,7 @@ export default function ManageBatchesModal({
             "Close" button duplicated it (user ask); edits here auto-save per
             row, so there was no other footer action to keep. */}
       </div>
+      <UnsavedChangesPrompt guard={closeGuard} />
     </div>,
     document.body,
   )

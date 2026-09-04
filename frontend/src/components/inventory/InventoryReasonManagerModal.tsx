@@ -2,6 +2,8 @@ import type { Dispatch, SetStateAction } from 'react'
 import { createPortal } from 'react-dom'
 import X from 'lucide-react/dist/esm/icons/x.js'
 import InfoHint from '../shared/InfoHint'
+import { useCloseGuard } from '../../utils/useCloseGuard.ts'
+import UnsavedChangesPrompt from '../shared/UnsavedChangesPrompt.tsx'
 
 type InventoryReasonType = 'adjust' | 'transfer' | 'move' | 'delete'
 type Translator = (key: string) => string | undefined
@@ -47,9 +49,20 @@ export default function InventoryReasonManagerModal({
   t,
   tr,
 }: InventoryReasonManagerModalProps) {
+  // S4-21: added reasons save as they are added, so the only unsaved thing
+  // is a label half-typed in the draft box. Small, but it is still typed
+  // work, and this modal is opened from ON TOP of an adjust form -- the
+  // declaration belongs to whichever modal is closing, so dismissing this
+  // one never consults the form underneath it.
+  const closeGuard = useCloseGuard(
+    { dirty: reasonDraft.trim().length > 0 },
+    () => setReasonManager((current) => ({ ...current, open: false })),
+  )
+
   if (!reasonManager.open) return null
 
-  const close = () => setReasonManager((current) => ({ ...current, open: false }))
+  // The backdrop and the ✕ both land here.
+  const close = () => { if (!savingReasons) closeGuard.requestClose() }
 
   return createPortal(
     <div className="modal-viewport-safe pointer-events-auto fixed inset-0 z-[1050] flex items-end justify-center overflow-y-auto bg-black/50 sm:items-center" onClick={close}>
@@ -110,6 +123,7 @@ export default function InventoryReasonManagerModal({
           </div>
         </div>
       </div>
+      <UnsavedChangesPrompt guard={closeGuard} />
     </div>,
     document.body,
   )

@@ -12,6 +12,9 @@ import Layers from 'lucide-react/dist/esm/icons/layers.js'
 import CalendarClock from 'lucide-react/dist/esm/icons/calendar-clock.js'
 import Eye from 'lucide-react/dist/esm/icons/eye.js'
 import { useApp as useAppHook } from '../../AppContext.tsx'
+import { useFormDirty } from '../../utils/formDirty.ts'
+import { useCloseGuard } from '../../utils/useCloseGuard.ts'
+import UnsavedChangesPrompt from '../shared/UnsavedChangesPrompt.tsx'
 import AppSelect from '../shared/AppSelect.tsx'
 import InfoHint from '../shared/InfoHint.tsx'
 import DateEntryInput from '../shared/DateEntryInput.tsx'
@@ -200,6 +203,17 @@ export default function PromotionsPage() {
   const [productResults, setProductResults] = useState<ProductLite[]>([])
   const [discountDraft, setDiscountDraft] = useState<DiscountDraft | null>(null)
   const [savingDiscount, setSavingDiscount] = useState(false)
+
+  // S4-21: both editors are whole-object drafts, so dirtiness is "differs
+  // from the draft as it opened". The reset key goes null between openings,
+  // which is what re-baselines the snapshot on the next one.
+  const ruleDirty = useFormDirty(draft, draft ? String(draft.id ?? "new") : null)
+  const discountDirty = useFormDirty(discountDraft, discountDraft ? String(discountDraft.product.id) : null)
+  const ruleGuard = useCloseGuard({ dirty: ruleDirty.dirty }, () => setDraft(null))
+  const discountGuard = useCloseGuard({ dirty: discountDirty.dirty }, () => setDiscountDraft(null))
+  // Backdrop and Cancel both land here.
+  const requestCloseRule = () => { if (!savingRule) ruleGuard.requestClose() }
+  const requestCloseDiscount = () => { if (!savingDiscount) discountGuard.requestClose() }
 
   // Product picker inside the rule editor.
   const [pickerQuery, setPickerQuery] = useState('')
@@ -736,7 +750,7 @@ export default function PromotionsPage() {
         </HubSectionNav>
 
         {draft ? (
-          <div className="modal-viewport-safe pointer-events-auto fixed inset-0 z-[1050] flex items-start justify-center overflow-y-auto bg-black/40" onClick={() => !savingRule && setDraft(null)}>
+          <div className="modal-viewport-safe pointer-events-auto fixed inset-0 z-[1050] flex items-start justify-center overflow-y-auto bg-black/40" onClick={requestCloseRule}>
             <div className="modal-panel-safe my-auto w-full max-w-lg space-y-3 overflow-y-auto rounded-2xl bg-white p-4 shadow-xl dark:bg-gray-900" onClick={(event) => event.stopPropagation()}>
               <h2 className="text-base font-semibold">
                 {draft.id ? (t('promo_edit_rule') || 'Edit promotion') : (t('promo_new_rule') || 'New rule')}
@@ -959,7 +973,7 @@ export default function PromotionsPage() {
               </label>
 
               <div className="flex justify-end gap-2 pt-1">
-                <button type="button" className="btn btn-ghost btn-sm" disabled={savingRule} onClick={() => setDraft(null)}>
+                <button type="button" className="btn btn-ghost btn-sm" disabled={savingRule} onClick={requestCloseRule}>
                   {t('cancel') || 'Cancel'}
                 </button>
                 <button type="button" className="btn btn-primary btn-sm" disabled={savingRule} onClick={saveRule}>
@@ -967,11 +981,12 @@ export default function PromotionsPage() {
                 </button>
               </div>
             </div>
+            <UnsavedChangesPrompt guard={ruleGuard} />
           </div>
         ) : null}
 
         {discountDraft ? (
-          <div className="modal-viewport-safe pointer-events-auto fixed inset-0 z-[1050] flex items-start justify-center overflow-y-auto bg-black/40" onClick={() => !savingDiscount && setDiscountDraft(null)}>
+          <div className="modal-viewport-safe pointer-events-auto fixed inset-0 z-[1050] flex items-start justify-center overflow-y-auto bg-black/40" onClick={requestCloseDiscount}>
             <div className="modal-panel-safe my-auto w-full max-w-lg space-y-3 overflow-y-auto rounded-2xl bg-white p-4 shadow-xl dark:bg-gray-900" onClick={(event) => event.stopPropagation()}>
               <h2 className="truncate text-base font-semibold">
                 {(t('promo_discount_for') || 'Discount for')} {String(discountDraft.product.name || `#${discountDraft.product.id}`)}
@@ -1044,7 +1059,7 @@ export default function PromotionsPage() {
               </div>
 
               <div className="flex justify-end gap-2 pt-1">
-                <button type="button" className="btn btn-ghost btn-sm" disabled={savingDiscount} onClick={() => setDiscountDraft(null)}>
+                <button type="button" className="btn btn-ghost btn-sm" disabled={savingDiscount} onClick={requestCloseDiscount}>
                   {t('cancel') || 'Cancel'}
                 </button>
                 <button type="button" className="btn btn-primary btn-sm" disabled={savingDiscount} onClick={saveDiscount}>
@@ -1052,6 +1067,7 @@ export default function PromotionsPage() {
                 </button>
               </div>
             </div>
+            <UnsavedChangesPrompt guard={discountGuard} />
           </div>
         ) : null}
       </div>
