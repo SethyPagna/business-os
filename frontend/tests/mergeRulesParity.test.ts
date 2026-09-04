@@ -58,7 +58,7 @@ const PROBES: (string | null | undefined)[] = [
   '020130264999995', '20130264999995',
   '008339327539', '08339327539', '8339327539',
   '0035000463760', '035000463760',
-  '0601', '601', '0', '00', '00000', '',
+  '0601', '601', '0617', '617', '0', '00', '00000', '0012', '12', '',
   '0abc123', 'abc', '  03614274226546  ',
   null, undefined,
 ]
@@ -85,11 +85,26 @@ check("RULING 2 boundary: '1234' and '12345' never fold together", () => {
   assert.notEqual(clientFold('1234'), clientFold('12345'))
 })
 
-check('RULING 2 boundary: short and non-numeric codes keep their zeros', () => {
+check('RULING 2 boundary: placeholder and non-numeric codes keep their zeros', () => {
   assert.equal(clientFold('0'), '0', 'a placeholder 0 must never become a blank barcode')
-  assert.equal(clientFold('0601'), '0601')
-  assert.notEqual(clientFold('0601'), clientFold('601'))
+  assert.equal(clientFold('00'), '00')
+  assert.equal(clientFold('0000'), '0000')
   assert.equal(clientFold('0abc123'), '0abc123')
+  assert.equal(clientFold('0012'), '0012', 'a 2-digit survivor is still too short to fold')
+  assert.notEqual(clientFold('0012'), clientFold('12'))
+})
+
+// OWNER RULING 2026-09-04: the five MAC shade-code pairs (601, 617, 666, 689,
+// 691) are one product entered twice and must merge, so the fold bound moved
+// from 4 surviving digits to 3. This test previously pinned the opposite.
+// The move was measured against production first: those ten rows are the ONLY
+// numeric barcodes in the catalogue whose zero-stripped form is three digits.
+check('OWNER RULING 2026-09-04: the MAC shade codes fold', () => {
+  assert.equal(clientFold('0601'), '601')
+  assert.equal(clientFold('0601'), clientFold('601'))
+  for (const shade of ['617', '666', '689', '691']) {
+    assert.equal(clientFold(`0${shade}`), clientFold(shade), `shade ${shade} must fold with its zero-padded twin`)
+  }
 })
 
 check('the keeper ordering ranks on the NUMBER of zeros shed, in both copies', () => {
@@ -103,17 +118,22 @@ check('the keeper ordering ranks on the NUMBER of zeros shed, in both copies', (
   }
 })
 
-// --- RULING 4: selling and VIP price take the MAXIMUM ---------------------
-// The VIP tier is read from special_price_usd / special_price_khr. S4-28 is
-// renaming that tier to "wholesale"; if it renames the COLUMN, this moves too.
-check('RULING 4: selling and VIP price take the maximum, never the average', () => {
+// --- RULING 4: selling and WHOLESALE price take the MAXIMUM ---------------
+// The discounted tier is wholesale_price_usd / wholesale_price_khr. It used to
+// be special_price_*; migration 0111 moved the numbers and zeroed the old pair,
+// and S4-32 moved this rule with them. While the rule still named the dead
+// columns the merge resolved max(0, 0) and a folded-away duplicate's wholesale
+// price left the catalogue silently.
+check('RULING 4: selling and wholesale price take the maximum, never the average', () => {
   const merged = resolveMergedPricing([
-    { selling_price_usd: 12, special_price_usd: 9 },
-    { selling_price_usd: 15, special_price_usd: 7 },
+    { selling_price_usd: 12, wholesale_price_usd: 9 },
+    { selling_price_usd: 15, wholesale_price_usd: 7 },
   ])
   assert.equal(merged.selling_price_usd, 15)
-  assert.equal(merged.special_price_usd, 9, 'the VIP price must not average down')
+  assert.equal(merged.wholesale_price_usd, 9, 'the wholesale price must not average down')
   assert.notEqual(merged.selling_price_usd, 13.5, 'price must not average like cost does')
+  assert.ok(!('special_price_usd' in resolveMergedPricing([{ special_price_usd: 9 } as never])),
+    'the retired special_price_* pair must never be resolved or emitted again')
 })
 
 check('RULING 3 vs 4: cost averages while price maximises', () => {
@@ -137,12 +157,12 @@ check('RULING 1: the grouped row merges them into one, averaging cost and '
   + 'maximising price', () => {
   // The real production pair, ids 9809/9810.
   const merged = mergeSameDetailRows([
-    { id: 9809, name: 'SK-II Facial Treatment Essence 230mL', barcode: null, cost_price_usd: 130.541696, selling_price_usd: 145, special_price_usd: 135, stock_quantity: 2 },
-    { id: 9810, name: 'SK-II Facial Treatment Essence 230mL', barcode: null, cost_price_usd: 130.777307, selling_price_usd: 145, special_price_usd: 130, stock_quantity: 3 },
+    { id: 9809, name: 'SK-II Facial Treatment Essence 230mL', barcode: null, cost_price_usd: 130.541696, selling_price_usd: 145, wholesale_price_usd: 135, stock_quantity: 2 },
+    { id: 9810, name: 'SK-II Facial Treatment Essence 230mL', barcode: null, cost_price_usd: 130.777307, selling_price_usd: 145, wholesale_price_usd: 130, stock_quantity: 3 },
   ] as never)
   assert.equal(merged.length, 1, 'the two unbarcoded rows must collapse to one row')
   assert.equal(merged[0].cost_price_usd, 130.6596, 'cost is the mean, rounded UP to 4dp')
-  assert.equal(merged[0].special_price_usd, 135, 'the VIP price takes the higher of the two')
+  assert.equal(merged[0].wholesale_price_usd, 135, 'the wholesale price takes the higher of the two -- the grouped row must never display less than a child row expects to charge')
   assert.equal(merged[0].stock_quantity, 5, 'stock adds')
 })
 

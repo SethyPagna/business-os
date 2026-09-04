@@ -85,9 +85,20 @@ check('an interior zero is untouched', fold('12034') === '12034')
 check("placeholder '0' never collapses to a blank barcode -- that would make it "
   + 'collide with every unbarcoded row in its name group', fold('0') === '0')
 check('an all-zero code stays exactly as it is', fold('00000') === '00000')
-check("short shade codes stay put: '0601' keeps its zero because only 3 digits "
-  + 'would survive', fold('0601') === '0601')
-check("...so '0601' and '601' do NOT fold together", fold('0601') !== fold('601'))
+// The MAC shade codes used to be the boundary the 4-digit bound existed to
+// hold ('0601' kept its zero because only three digits would survive). The
+// owner ruled on 2026-09-04 that those five pairs -- 601, 617, 666, 689, 691
+// -- are one product entered twice and must merge, so the bound is 3 and they
+// now fold. Measured against production first: the ten MAC rows are the ONLY
+// numeric barcodes in the catalogue whose zero-stripped form is three digits,
+// so this admits exactly what the owner asked for and nothing else.
+check("the MAC shade codes now fold: '0601' strips to '601'", fold('0601') === '601')
+check("...so '0601' and '601' land on the SAME key", fold('0601') === fold('601'))
+check("the other four shade pairs fold too",
+  fold('0617') === fold('617') && fold('0666') === fold('666')
+  && fold('0689') === fold('689') && fold('0691') === fold('691'))
+check("a 2-digit survivor is still too short to fold -- '0012' keeps its zeros",
+  fold('0012') === '0012' && fold('0012') !== fold('12'))
 check('a non-numeric code keeps its leading zero (an alphanumeric SKU zero is '
   + 'not a GTIN artefact)', fold('0abc123') === '0abc123')
 check('a blank barcode folds to blank', fold('') === '' && fold(null) === '')
@@ -95,23 +106,27 @@ check('the fold trims and lowercases like every other barcode normalizer',
   fold('  03614274226546  ') === '3614274226546')
 
 // ---------------------------------------------------------------------------
-// Ruling 4 -- selling and special/VIP price take the MAXIMUM.
+// Ruling 4 -- selling and wholesale price take the MAXIMUM.
 // ---------------------------------------------------------------------------
-// NB: the VIP tier is read from `special_price_usd`/`special_price_khr`.
-// S4-28 is renaming that tier to "wholesale"; if it renames the COLUMN, this
-// is the line that has to move with it.
+// The discounted tier is `wholesale_price_usd`/`wholesale_price_khr`. It used
+// to be `special_price_*`; migration 0111 moved the numbers and zeroed the old
+// pair, and S4-32 moved this rule with them -- while the field list still said
+// special_price_* the merge resolved max(0, 0) and a folded-away duplicate's
+// wholesale price left the catalogue silently.
 const maxed = resolveMergedPricing([
-  { selling_price_usd: 12, special_price_usd: 9, selling_price_khr: 40000 },
-  { selling_price_usd: 15, special_price_usd: 7, selling_price_khr: 38000 },
+  { selling_price_usd: 12, wholesale_price_usd: 9, selling_price_khr: 40000 },
+  { selling_price_usd: 15, wholesale_price_usd: 7, selling_price_khr: 38000 },
 ])
 check('selling price takes the maximum, never the average', maxed.selling_price_usd === 15)
-check('special/VIP price takes the maximum too', maxed.special_price_usd === 9)
+check('wholesale price takes the maximum too', maxed.wholesale_price_usd === 9)
 check('KHR selling price is resolved independently', maxed.selling_price_khr === 40000)
 check('each field picks its own best row -- the higher selling price and the '
-  + 'higher VIP price can come from different rows',
-  maxed.selling_price_usd === 15 && maxed.special_price_usd === 9)
+  + 'higher wholesale price can come from different rows',
+  maxed.selling_price_usd === 15 && maxed.wholesale_price_usd === 9)
 check('a field no row carried is omitted rather than zeroed',
-  !('special_price_khr' in maxed))
+  !('wholesale_price_khr' in maxed))
+check('the retired special_price_* pair is never resolved or emitted again',
+  !('special_price_usd' in resolveMergedPricing([{ special_price_usd: 9 }, { special_price_usd: 7 }])))
 check('price is NOT averaged (the deliberate contrast with cost)',
   maxed.selling_price_usd !== 13.5)
 
@@ -159,9 +174,13 @@ async function run() {
     // Ruling 2's boundary: a length difference is NOT a leading-zero typo.
     { id: 50, name: 'Length Twin', barcode: '1234' },
     { id: 51, name: 'Length Twin', barcode: '12345' },
-    // Ruling 2's boundary: short shade codes stay for manual review.
+    // Ruling 2 (owner ruling, 2026-09-04): the MAC shade codes merge after all.
     { id: 60, name: 'Mac Matte Lipstick No Box 601', barcode: '0601' },
     { id: 61, name: 'Mac Matte Lipstick No Box 601', barcode: '601' },
+    // Ruling 2's boundary, moved down with it: a 2-digit survivor is still too
+    // short to fold, so a placeholder pair like this stays for manual review.
+    { id: 70, name: 'Two Digit Twin', barcode: '0012' },
+    { id: 71, name: 'Two Digit Twin', barcode: '12' },
   ]
   for (const p of products) {
     await db.prepare('INSERT INTO products (id, name, barcode, is_active, is_group) VALUES (@id, @name, @barcode, 1, 0)')
@@ -189,8 +208,13 @@ async function run() {
     groupFor('40,41')?.canonical.id === 41)
   check("RULING 2 boundary: '1234' and '12345' are NOT proposed for merge",
     !groupFor('50,51'))
-  check("RULING 2 boundary: short shade codes '0601'/'601' are NOT auto-merged",
-    !groupFor('60,61'))
+  check("OWNER RULING 2026-09-04: the MAC shade codes '0601'/'601' now ARE "
+    + 'auto-merged -- the fold bound moved from 4 surviving digits to 3',
+    !!groupFor('60,61'))
+  check('...and the CLEAN 3-digit row survives, so no barcode is rewritten',
+    groupFor('60,61')?.canonical.id === 61)
+  check("RULING 2 boundary: a 2-digit survivor still does NOT fold ('0012' vs '12')",
+    !groupFor('70,71'))
 
   // --- Ruling 5: migration 0112, loaded BY FILENAME and actually run -----
   const migrationsDir = path.join(__dirname, '..', 'migrations')

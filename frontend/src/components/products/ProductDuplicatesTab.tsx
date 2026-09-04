@@ -78,16 +78,23 @@ function clusterIsExact(cluster: Cluster): boolean {
 
 // MIRROR of normalizeLeadingZeroBarcodeForCleanup in
 // cloudflare/src/lib/productIdentity.ts -- keep the two byte-identical in
-// behaviour. Strips EVERY leading zero (idempotent: stripping exactly one
-// moved both sides of a pair in lockstep, so '08339327539' and
-// '008339327539' never met), numeric codes only, and only when four or more
-// digits survive -- so placeholder '0' and the MAC shade codes '0601'/'601'
-// stay untouched, and '1234' can never fold into '12345'.
+// behaviour (frontend/tests/mergeRulesParity.test.ts runs both over the same
+// probes). Strips EVERY leading zero (idempotent: stripping exactly one moved
+// both sides of a pair in lockstep, so '08339327539' and '008339327539' never
+// met), numeric codes only, and only when three or more digits survive -- so
+// placeholder '0'/'00'/'0000' stay untouched rather than collapsing to a blank
+// barcode, and '1234' can never fold into '12345'.
+//
+// The bound was 4 until the owner ruled on 2026-09-04 that the five MAC shade
+// pairs ('0601'/'601', 617, 666, 689, 691) should merge after all. Measured
+// against production first: those ten rows are the ONLY numeric barcodes in
+// the catalogue whose zero-stripped form is exactly three digits, so 3 admits
+// them and nothing else. See the Worker copy for the full note.
 function cleanupBarcode(value: string | null): string {
   const barcode = String(value || '').trim().toLowerCase()
   if (!/^[0-9]+$/.test(barcode)) return barcode
   const stripped = barcode.replace(/^0+/, '')
-  return stripped.length >= 4 ? stripped : barcode
+  return stripped.length >= 3 ? stripped : barcode
 }
 
 // Only these pairs are safe for an automatic bulk decision: same exact name,

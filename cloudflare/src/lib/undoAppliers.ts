@@ -101,12 +101,22 @@ export interface MergeReversal {
   mergeContext: string
   keeperImagePathBefore: string | null
   // Optional for backward compatibility with snapshots written before merge
-  // cleanup began carrying the highest selling/special prices to the keeper.
+  // cleanup began carrying the highest selling/wholesale prices to the keeper.
   keeperPricingBefore?: {
     selling_price_usd: number
     selling_price_khr: number
-    special_price_usd: number
-    special_price_khr: number
+    // The discounted tier. Current snapshots carry wholesale_price_*; snapshots
+    // written before S4-32 carry the same numbers under the retired
+    // special_price_* spelling (migration 0111 moved the column, not the
+    // meaning). BOTH are optional and neither may be defaulted to 0 -- see
+    // wholesaleSet below for why a `|| 0` here would silently wipe a real
+    // wholesale price off the keeper the moment an old merge is undone.
+    wholesale_price_usd?: number
+    wholesale_price_khr?: number
+    /** @deprecated pre-S4-32 spelling of wholesale_price_usd; read-only fallback. */
+    special_price_usd?: number
+    /** @deprecated pre-S4-32 spelling of wholesale_price_khr; read-only fallback. */
+    special_price_khr?: number
     // Optional again, one layer deeper: snapshots written before Sep 4 2026
     // predate cost being merged at all, so they carry no cost to restore and
     // must leave the keeper's cost alone rather than zero it.
@@ -274,20 +284,44 @@ async function applyMergeReversal(env: Env, r: MergeReversal): Promise<void> {
         costKhr: Number(r.keeperPricingBefore.cost_price_khr) || 0,
       }
       : {}
+    // The wholesale tier, restored the same conditional way cost is, and for
+    // the same reason. Three snapshot vintages reach this line:
+    //   * current      -- wholesale_price_usd/khr, restored verbatim.
+    //   * pre-S4-32    -- special_price_usd/khr holding the SAME numbers under
+    //                     the name migration 0111 retired. Post-0111 those
+    //                     values are the wholesale price, so they are read as
+    //                     the fallback rather than written back to the dead
+    //                     column (which no reader would ever look at again).
+    //   * pre-merge-pricing -- neither key. Writing `|| 0` for a missing field
+    //                     would wipe a real wholesale price off the keeper on
+    //                     undo, which is the exact silent data loss S4-32
+    //                     exists to close, so the columns stay out of the SET
+    //                     list entirely.
+    const wholesaleUsdBefore = r.keeperPricingBefore.wholesale_price_usd ?? r.keeperPricingBefore.special_price_usd
+    const wholesaleKhrBefore = r.keeperPricingBefore.wholesale_price_khr ?? r.keeperPricingBefore.special_price_khr
+    const hasWholesale = wholesaleUsdBefore !== undefined || wholesaleKhrBefore !== undefined
+    const wholesaleSet = hasWholesale
+      ? `,
+                wholesale_price_usd = @wholesaleUsd,
+                wholesale_price_khr = @wholesaleKhr`
+      : ''
+    const wholesaleParams = hasWholesale
+      ? {
+        wholesaleUsd: Number(wholesaleUsdBefore) || 0,
+        wholesaleKhr: Number(wholesaleKhrBefore) || 0,
+      }
+      : {}
     stmts.push({
       sql: `UPDATE products
             SET selling_price_usd = @sellingUsd,
-                selling_price_khr = @sellingKhr,
-                special_price_usd = @specialUsd,
-                special_price_khr = @specialKhr${costSet},
+                selling_price_khr = @sellingKhr${wholesaleSet}${costSet},
                 updated_at = CURRENT_TIMESTAMP
             WHERE id = @keeperId`,
       params: {
         keeperId,
         sellingUsd: Number(r.keeperPricingBefore.selling_price_usd) || 0,
         sellingKhr: Number(r.keeperPricingBefore.selling_price_khr) || 0,
-        specialUsd: Number(r.keeperPricingBefore.special_price_usd) || 0,
-        specialKhr: Number(r.keeperPricingBefore.special_price_khr) || 0,
+        ...wholesaleParams,
         ...costParams,
       },
     })

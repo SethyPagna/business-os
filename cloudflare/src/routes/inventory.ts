@@ -1098,7 +1098,7 @@ function mirrorCostFields(usd: number, khr: number) {
 // identity rule findIdentityMatch already uses for transfers/import/
 // merge-duplicates (lib/productDetailRule.ts): same name group + same
 // DETAILS (barcode + cost) is one row; anything else is a different row.
-// Selling and special price are deliberately not part of that -- they are
+// Selling and wholesale price are deliberately not part of that -- they are
 // what we plan to charge, not what the item is. Returns the product id stock
 // should actually be added to -- either an existing sibling row that
 // already matches the edited pricing, the source row itself (pricing
@@ -1330,6 +1330,16 @@ app.post('/adjust', async (c) => {
   if (unlockPricing) {
     const pricing = body.pricing as Record<string, unknown>
     const source = product as StockRowFields
+    // The discounted tier arrives as wholesale_price_usd/khr only. The retired
+    // special_price_* spelling is NOT accepted as an alias, deliberately: a
+    // stale PWA till tab renders that field from its own cached product row,
+    // and migration 0111 zeroed the column, so an old tab can only ever send
+    // 0 there. Aliasing it would let that 0 overwrite the sibling row's
+    // inherited wholesale price on an INSERT. Ignoring the dead key instead
+    // makes an old tab fall through to `source.wholesale_price_*` below --
+    // its edit to the tier is dropped, which is the safe half of the trade,
+    // and its stock adjustment still lands. Do not "fix" this by adding the
+    // alias without re-reading migration 0111's header first.
     const overrides = {
       sellingUsd: pricing.selling_price_usd != null ? Number(pricing.selling_price_usd) || 0 : Number(source.selling_price_usd) || 0,
       sellingKhr: pricing.selling_price_khr != null ? Number(pricing.selling_price_khr) || 0 : Number(source.selling_price_khr) || 0,

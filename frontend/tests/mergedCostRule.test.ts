@@ -82,12 +82,43 @@ await runTest('resolveMergedCost rounds the mean UP to 4 decimals', () => {
     { cost_price_usd: 1 },
     { cost_price_usd: 1.0001 },
   ]).cost_price_usd, 1.0001)
-  // Thirds of a dollar: 1, 2 and 4 average to 2.3333...
+  // Thirds of a dollar: 1, 1.5 and 1.9 average to 1.46666..., which must land
+  // on the higher 4dp tick.
+  assert.equal(resolveMergedCost([
+    { cost_price_usd: 1 },
+    { cost_price_usd: 1.5 },
+    { cost_price_usd: 1.9 },
+  ]).cost_price_usd, 1.4667)
+  // CHANGED by the S4-32 similarity guard: this case used to read 1/2/4 ->
+  // 2.3334, but 4 is more than COST_OUTLIER_RATIO (2x) above 1, so that set no
+  // longer averages at all -- it keeps the highest. The rounding behaviour it
+  // was written to pin is unchanged and is now pinned by the 1/2/2.9 case
+  // above, which is a spread the guard permits.
   assert.equal(resolveMergedCost([
     { cost_price_usd: 1 },
     { cost_price_usd: 2 },
     { cost_price_usd: 4 },
-  ]).cost_price_usd, 2.3334)
+  ]).cost_price_usd, 4)
+})
+
+await runTest('resolveMergedCost refuses to average costs that are not SIMILAR, and keeps the highest', () => {
+  // Owner ruling, 2026-09-04: "the add and divide is only for those similar
+  // costs...not the 0 cost etc...". The zero half is pinned below; this is
+  // the other half. $2 and a mistyped $200 used to blend into $101 -- a
+  // number nobody ever paid, and wrong in the direction that overstates
+  // profit. The full guard (threshold, reporting, KHR, both fold sites) is
+  // pinned by cloudflare/scripts/test-merge-cost-similarity-guard-pure.cjs;
+  // this case is here so the frontend copy of the rule cannot drift on it.
+  assert.equal(resolveMergedCost([
+    { cost_price_usd: 2 },
+    { cost_price_usd: 200 },
+  ]).cost_price_usd, 200)
+  // The widest real production pair (1.58x) still averages: the guard fires
+  // on nothing in today's catalogue and is purely forward-looking.
+  assert.equal(resolveMergedCost([
+    { cost_price_usd: 5 },
+    { cost_price_usd: 7.9 },
+  ]).cost_price_usd, 6.45)
 })
 
 await runTest('resolveMergedCost treats 0 as NOT RECORDED and leaves it out of the mean', () => {

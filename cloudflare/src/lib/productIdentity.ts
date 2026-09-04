@@ -57,11 +57,22 @@ export type ProductIdentityRow = {
  *     converges them because the result never begins with a zero.
  *   * NUMERIC ONLY -- a code containing any non-digit keeps its zeros, since a
  *     leading zero in an alphanumeric SKU is not a GTIN artefact.
- *   * MINIMUM LENGTH 4 -- if stripping would leave fewer than four digits the
+ *   * MINIMUM LENGTH 3 -- if stripping would leave fewer than three digits the
  *     original is returned untouched. This is what keeps the placeholder codes
- *     safe ('0' stays '0' rather than collapsing to a blank barcode, which
- *     would make it collide with every unbarcoded row) and what keeps the MAC
- *     shade codes ('0601' vs '601') out of automatic merging.
+ *     safe: '0', '00' and '0000' all strip to nothing, so they stay verbatim
+ *     rather than collapsing to a blank barcode, which would make them collide
+ *     with every unbarcoded row.
+ *
+ *     The bound was 4 until the owner ruled otherwise on 2026-09-04. Four
+ *     excluded exactly one thing in the real catalogue: the five MAC shade-code
+ *     pairs ('0601'/'601', and the same for 617, 666, 689 and 691), which are
+ *     one product entered twice and which the owner asked to merge. Measured
+ *     against production (SELECT-only, 2026-09-04) before moving it: of 10,272
+ *     product rows, the numeric barcodes whose zero-stripped form is exactly
+ *     three digits are those ten rows and NOTHING else, so dropping the bound
+ *     to 3 admits the five pairs the owner named and no other pair at all. A
+ *     3-digit code is also still too short to be a GTIN, so this cannot
+ *     conflate two genuinely different scannable products.
  *
  * Narrow by construction: it only ever removes leading zeros, so `1234` and
  * `12345` are untouched and can never fold together. Because the fold is
@@ -82,7 +93,7 @@ export function normalizeLeadingZeroBarcodeForCleanup(value: unknown): string {
   const barcode = String(value ?? '').trim().toLowerCase()
   if (!/^[0-9]+$/.test(barcode)) return barcode
   const stripped = barcode.replace(/^0+/, '')
-  return stripped.length >= 4 ? stripped : barcode
+  return stripped.length >= 3 ? stripped : barcode
 }
 
 // Finds another ACTIVE product row that is genuinely the same item as

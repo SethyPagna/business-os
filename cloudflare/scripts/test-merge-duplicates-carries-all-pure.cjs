@@ -87,10 +87,17 @@ check('the merge deactivates the duplicate only after everything is carried over
   assert.ok(imagesAt > 0 && imagesAt < deactivateAt, 'images must be moved before the duplicate is deactivated')
 })
 
-check('the merge carries the highest selling and special prices onto the keeper', () => {
+check('the merge carries the highest selling and WHOLESALE prices onto the keeper', () => {
   assert.ok(/resolveMergedPricing\(\[canonicalBefore \|\| \{\}, dupPricing \|\| \{\}\]\)/.test(mergeBlock), 'price resolution must compare both rows')
   assert.ok(/selling_price_usd = @sellingUsd/.test(mergeBlock), 'highest USD selling price must be written to the keeper')
-  assert.ok(/special_price_usd = @specialUsd/.test(mergeBlock), 'highest USD special price must be written to the keeper')
+  // The discounted tier lives in wholesale_price_* since migration 0111.
+  // While this path still named special_price_* the merge resolved max(0, 0)
+  // and the folded-away duplicate's wholesale price left the catalogue with
+  // its row -- silently, with no error and no failing test anywhere.
+  assert.ok(/wholesale_price_usd = @wholesaleUsd/.test(mergeBlock), 'highest USD wholesale price must be written to the keeper')
+  assert.ok(/wholesale_price_khr = @wholesaleKhr/.test(mergeBlock), 'and the KHR half of the same tier')
+  assert.ok(!/special_price_(usd|khr) = @/.test(mergeBlock), 'the retired special_price_* pair must never be written by a merge again')
+  assert.ok(/wholesale_price_usd, wholesale_price_khr/.test(mergeBlock), 'both pricing SELECTs must read the wholesale columns, not the zeroed pair')
   assert.ok(/keeperPricingBefore:/.test(routeSrc), 'the keeper price before-image must be captured so undo is exact')
 })
 
@@ -103,9 +110,11 @@ check('the audit entry reports what was moved, including images', () => {
 check('both merge endpoints route through the ONE shared fold helper -- they can never drift', () => {
   const groupLoopAt = routeSrc.indexOf('for (const dup of group.duplicates)')
   assert.ok(groupLoopAt > 0, 'whole-catalog merge loop not found')
-  // The bulk path now destructures the fold's return ({ reversal }) to record
-  // one composite undo for the whole run, so allow that optional prefix.
-  assert.ok(/for \(const dup of group\.duplicates\) \{\s*\n\s*(?:const \{ reversal \} = )?await foldDuplicateProductInto\(/.test(routeSrc), 'POST /merge-duplicates must fold via the shared helper')
+  // The bulk path now destructures the fold's return ({ reversal, and since
+  // S4-32 costOutliers }) to record one composite undo for the whole run and
+  // report any refused cost average, so allow that optional prefix with any
+  // field list.
+  assert.ok(/for \(const dup of group\.duplicates\) \{\s*\n\s*(?:const \{ reversal(?:, [A-Za-z]+)* \} = )?await foldDuplicateProductInto\(/.test(routeSrc), 'POST /merge-duplicates must fold via the shared helper')
   const pairRouteAt = routeSrc.indexOf("app.post('/possible-duplicates/merge'")
   assert.ok(pairRouteAt > 0, 'the one-pair review merge route must exist')
   assert.ok(routeSrc.indexOf('foldDuplicateProductInto(', pairRouteAt) > pairRouteAt, 'POST /possible-duplicates/merge must fold via the shared helper')

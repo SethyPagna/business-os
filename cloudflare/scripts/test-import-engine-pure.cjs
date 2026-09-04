@@ -324,12 +324,12 @@ assert.strictEqual(
   'a selling-price difference alone must still merge -- price is not identity',
 )
 
-// -- Test 5b: special price is likewise not identity.
-const rowF2 = { ...rowA, special_price_usd: 2.99 }
+// -- Test 5b: the wholesale price is likewise not identity.
+const rowF2 = { ...rowA, wholesale_price_usd: 2.99 }
 assert.strictEqual(
   productImportRowSignature(rowA),
   productImportRowSignature(rowF2),
-  'a special-price difference alone must still merge',
+  'a wholesale-price difference alone must still merge',
 )
 
 // -- Test 5c: when rows DO merge and disagree on price, the HIGHEST wins --
@@ -337,11 +337,15 @@ assert.strictEqual(
 // expected to charge.
 {
   const merged = resolveMergedPricing([
-    { selling_price_usd: 3.49, special_price_usd: 2.00 },
-    { selling_price_usd: 2.99, special_price_usd: 2.75 },
+    { selling_price_usd: 3.49, wholesale_price_usd: 2.00 },
+    { selling_price_usd: 2.99, wholesale_price_usd: 2.75 },
   ])
   assert.strictEqual(merged.selling_price_usd, 3.49, 'highest selling price must win a merge')
-  assert.strictEqual(merged.special_price_usd, 2.75, 'each price field resolves independently to its own highest')
+  assert.strictEqual(merged.wholesale_price_usd, 2.75, 'each price field resolves independently to its own highest')
+  assert.ok(
+    !('special_price_usd' in resolveMergedPricing([{ special_price_usd: 2 }, { special_price_usd: 3 }])),
+    'the retired special_price_* pair must never be resolved or written again (migration 0111)',
+  )
 }
 
 // -- Test 5d: cost is NOT identity, with or without a barcode, and neither

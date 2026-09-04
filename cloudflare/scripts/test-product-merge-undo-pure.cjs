@@ -473,7 +473,10 @@ async function runBulk() {
   // Source guard: the REAL bulk route must capture reversals and record them.
   const productsSrc = fs.readFileSync(path.join(cloudflareRoot, 'src', 'routes', 'products.ts'), 'utf8')
   await check('products.ts bulk route captures each fold reversal and records ONE composite undo', async () => {
-    assert.match(productsSrc, /const \{ reversal \} = await foldDuplicateProductInto\(/)
+    // The destructure may pick up further fields from the fold's return (it
+    // also yields costOutliers since S4-32); what this pins is that `reversal`
+    // is captured at all, not the exact field list.
+    assert.match(productsSrc, /const \{ reversal(?:, [A-Za-z]+)* \} = await foldDuplicateProductInto\(/)
     assert.match(productsSrc, /reversals\.push\(reversal\)/)
     assert.match(productsSrc, /recordBulkMergeUndoSnapshot\(c\.env, user, reversals\)/)
   })

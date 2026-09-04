@@ -23,7 +23,8 @@
 // UPDATE (this session, correcting the paragraph above -- it had gone
 // stale and was actively misleading, having sent a full trace down a path
 // that turned out to already be built): products import DOES have a real
-import { normalizeProductGroupName, productDetailSignature, productIdentitySignature, resolveMergedCost, resolveMergedPricing } from './productDetailRule'
+import { COST_OUTLIER_RATIO, normalizeProductGroupName, productDetailSignature, productIdentitySignature, resolveMergedCostDetail, resolveMergedPricing } from './productDetailRule'
+import type { MergedCostOutlier } from './productDetailRule'
 import { sanitizeImportedDescription } from './productDescriptionSections'
 // per-row mode system now, just via a different channel than
 // decisionsByRowNumber/policy_json -- BulkImportModal.tsx's review step
@@ -109,9 +110,25 @@ export type RowAction = 'create' | 'update' | 'skip' | 'error'
 // callsite that doesn't bother threading a specific kind through; the
 // report still counts and lists it, just under a generic bucket instead of
 // silently dropping it from the summary.
-export type ImportWarningKind = 'negative_stock' | 'unreadable_batch_date' | 'barcode_collision' | 'sku_collision' | 'name_match' | 'membership_mismatch' | 'membership_phone_conflict' | 'duplicate_row_match' | 'stock_action_conflict' | 'other'
+export type ImportWarningKind = 'negative_stock' | 'unreadable_batch_date' | 'barcode_collision' | 'sku_collision' | 'name_match' | 'membership_mismatch' | 'membership_phone_conflict' | 'duplicate_row_match' | 'stock_action_conflict' | 'cost_outlier' | 'other'
 
 export type ImportRowWarning = { kind: ImportWarningKind; message: string }
+
+// The sentence a REFUSED cost average shows the operator (see
+// resolveMergedCostDetail's similarity guard). Written once here because two
+// separate sites can fold two costs together -- a file row merging into an
+// existing catalog product, and two rows of the SAME file merging into each
+// other -- and the operator must not see the same event described two ways.
+// Without this warning the guard would be exactly as invisible as the bug it
+// exists to prevent: a stored cost quietly different from every figure in the
+// file.
+export function costOutlierWarning(outlier: MergedCostOutlier): ImportRowWarning {
+  const currency = outlier.field === 'cost_price_khr' ? 'KHR' : 'USD'
+  return {
+    kind: 'cost_outlier',
+    message: `Costs ${outlier.min} and ${outlier.max} (${currency}) are more than ${COST_OUTLIER_RATIO}x apart, so they were NOT averaged -- the higher one (${outlier.max}) was kept. Check whether one of them is a typo.`,
+  }
+}
 
 export type ImportRowResult = {
   rowNumber: number
@@ -154,6 +171,7 @@ export const IMPORT_WARNING_LABELS: Record<ImportWarningKind, string> = {
   membership_phone_conflict: 'Membership number and phone number belong to different customers on file',
   duplicate_row_match: 'Two rows in this file matched the same existing contact',
   stock_action_conflict: 'Stock action needs explicit confirmation',
+  cost_outlier: 'Costs too far apart to average (highest kept)',
   other: 'Other warning',
 }
 
@@ -161,7 +179,7 @@ export const IMPORT_WARNING_LABELS: Record<ImportWarningKind, string> = {
 // specifically (as opposed to a routine "just so you know") -- used to
 // decide what surfaces in the import report / dashboard / audit log
 // without the caller needing its own copy of this list.
-export const SERIOUS_IMPORT_WARNING_KINDS: ReadonlySet<ImportWarningKind> = new Set(['negative_stock', 'unreadable_batch_date', 'barcode_collision', 'sku_collision', 'name_match', 'membership_mismatch', 'membership_phone_conflict', 'duplicate_row_match', 'stock_action_conflict'])
+export const SERIOUS_IMPORT_WARNING_KINDS: ReadonlySet<ImportWarningKind> = new Set(['negative_stock', 'unreadable_batch_date', 'barcode_collision', 'sku_collision', 'name_match', 'membership_mismatch', 'membership_phone_conflict', 'duplicate_row_match', 'stock_action_conflict', 'cost_outlier'])
 
 // Counts DISTINCT rows that carry at least one warning whose kind is in
 // `kinds` -- NOT the sum of summarizeImportWarnings' per-kind group counts.
@@ -1172,43 +1190,15 @@ export function getProductImportReplaceColumns(policyJson: string | null | undef
   }
 }
 
-/**
- * The wholesale half of the merge rule productDetailRule.ts's
- * resolveMergedPricing implements for the selling prices: when two rows
- * merge into one product and disagree on the wholesale price, the HIGHEST
- * wins.
- *
- * Same reasoning as the selling-price merge -- these are prices we plan to
- * charge, not facts about the item, and a merge must never quietly drop a
- * product below a price one of the merged rows expected to charge. It lives
- * here rather than inside resolveMergedPricing because that helper is shared
- * with the product-detail identity rule (and its frontend twin
- * frontend/src/utils/productDetailRule.ts), which this lane does not own;
- * the two are called together at every merge site below.
- *
- * Returns only the fields at least one row actually carried, so the caller
- * can spread the result over an existing row without clobbering an untouched
- * column with a zero -- exactly resolveMergedPricing's contract.
- */
-const WHOLESALE_MERGE_FIELDS = ['wholesale_price_usd', 'wholesale_price_khr'] as const
-
-export function resolveMergedWholesalePricing(
-  rows: Array<Record<string, unknown> | null | undefined>,
-): Partial<Record<typeof WHOLESALE_MERGE_FIELDS[number], number>> {
-  const merged: Partial<Record<typeof WHOLESALE_MERGE_FIELDS[number], number>> = {}
-  for (const field of WHOLESALE_MERGE_FIELDS) {
-    let best: number | null = null
-    for (const row of rows) {
-      const raw = row?.[field]
-      if (raw === undefined || raw === null || raw === '') continue
-      const value = Number(raw)
-      if (!Number.isFinite(value)) continue
-      if (best === null || value > best) best = value
-    }
-    if (best !== null) merged[field] = best
-  }
-  return merged
-}
+// The wholesale tier used to be merged here, by a local
+// resolveMergedWholesalePricing that duplicated resolveMergedPricing's
+// max-wins loop over wholesale_price_usd/khr. It existed only because
+// productDetailRule.ts still named the retired special_price_* pair and the
+// lane that added it did not own that file. S4-32 re-pointed the shared rule
+// at wholesale_price_*, so the shared helper now merges the tier itself and
+// the local copy would have been a second implementation of one rule -- the
+// exact drift hazard productDetailRuleParity.test.ts exists to prevent. Every
+// call site below now passes through resolveMergedPricing alone.
 
 // ---------------------------------------------------------------------------
 // Per-type classification. Each function takes the already CSV-parsed rows
@@ -1719,15 +1709,12 @@ export async function classifyProducts(
     // each wins -- merging must never quietly drop a product below a price
     // one of the merged rows expected to charge. Applied before the changes
     // diff and before the write, so the reviewer sees the value that will
-    // actually be stored. The wholesale tier merges by the same rule through
-    // resolveMergedWholesalePricing (migration 0111 moved the discounted tier
-    // off the dead special_price_* columns).
+    // actually be stored. The wholesale tier rides the SAME resolver: since
+    // S4-32, resolveMergedPricing's field list is selling_price_* +
+    // wholesale_price_* (migration 0111 moved the discounted tier off the dead
+    // special_price_* columns), so there is one implementation of max-wins.
     if (match) {
       Object.assign(data, resolveMergedPricing([
-        match as unknown as Record<string, unknown>,
-        data,
-      ]))
-      Object.assign(data, resolveMergedWholesalePricing([
         match as unknown as Record<string, unknown>,
         data,
       ]))
@@ -1748,10 +1735,17 @@ export async function classifyProducts(
     const rowStatesACost = !costWasBlank
       && ((Number(data.cost_price_usd) || 0) > 0 || (Number(data.cost_price_khr) || 0) > 0)
     if (match && rowStatesACost) {
-      Object.assign(data, resolveMergedCost([
+      // resolveMergedCostDetail, not resolveMergedCost: when the file's cost
+      // and the product's stored cost are more than COST_OUTLIER_RATIO apart
+      // the rule refuses to average them and keeps the higher one, and the
+      // reviewer has to be able to SEE that on the row -- it is the one case
+      // where the stored cost matches neither figure they can point at.
+      const costMerge = resolveMergedCostDetail([
         match as unknown as Record<string, unknown>,
         data,
-      ]))
+      ])
+      Object.assign(data, costMerge.merged)
+      for (const outlier of costMerge.outliers) rowWarnings.push(costOutlierWarning(outlier))
     }
 
     // Reconcile the "Details" field-rule preset (see applyProductDetailFieldRules'
@@ -5281,16 +5275,30 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
           // rows disagree on selling/wholesale price, the HIGHEST wins --
           // applied to BOTH rows' data, because the first row's INSERT and
           // this row's later UPDATE each write their own params and the
-          // update runs last (statement order preserves row order). Cost is
-          // the exception: it MEANS rather than maxes (S4-17), so all three
-          // resolvers are needed and none of them may be dropped.
+          // update runs last (statement order preserves row order). Selling
+          // AND wholesale both max through resolveMergedPricing since S4-32.
+          // Cost is the exception: it MEANS rather than maxes (S4-17), so both
+          // resolvers are needed and neither may be dropped.
+          const costMerge = resolveMergedCostDetail([earlier.data, d])
           const merged = {
             ...resolveMergedPricing([earlier.data, d]),
-            ...resolveMergedWholesalePricing([earlier.data, d]),
-            ...resolveMergedCost([earlier.data, d]),
+            ...costMerge.merged,
           }
           Object.assign(earlier.data, merged)
           Object.assign(d, merged)
+          // Two rows of the SAME file whose costs are too far apart to average
+          // (see resolveMergedCostDetail): the fold keeps the higher cost, and
+          // the row that lost says so. `results` is persisted for the apply
+          // phase right after this loop, so the warning reaches the import
+          // report rather than dying with the local variable.
+          for (const outlier of costMerge.outliers) {
+            r.warnings = [...(r.warnings || []), costOutlierWarning(outlier)]
+          }
+          // `message` is the joined human form of `warnings` everywhere else
+          // (see classifyProducts' row result), and several readers show it
+          // directly -- keep the two in step rather than leaving a row whose
+          // structured warning has no sentence.
+          if (costMerge.outliers.length) r.message = (r.warnings || []).map((w) => w.message).join(' ')
           continue
         }
         nextProductId += 1

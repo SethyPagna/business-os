@@ -35,6 +35,7 @@ const IMPORT_WARNING_KIND_KEYS: Record<string, string> = {
   membership_phone_conflict: 'import_warning_kind_membership_phone_conflict',
   duplicate_row_match: 'import_warning_kind_duplicate_row_match',
   stock_action_conflict: 'import_warning_kind_stock_action_conflict',
+  cost_outlier: 'import_warning_kind_cost_outlier',
   other: 'import_warning_kind_other',
 }
 
@@ -123,7 +124,11 @@ function formatRowNumbers(rows: number[]): string {
 // import with e.g. a membership-number mismatch showed it under the calmer
 // "Other warnings" section instead of "Needs attention" even though the
 // backend already correctly classified it as serious.
-const SERIOUS_KINDS = new Set(['negative_stock', 'unreadable_batch_date', 'barcode_collision', 'sku_collision', 'name_match', 'membership_mismatch', 'membership_phone_conflict', 'duplicate_row_match', 'stock_action_conflict'])
+// 'cost_outlier' (S4-32) is serious for the same reason the collisions are:
+// the row was written with a cost that matches NEITHER figure in front of the
+// operator, because the two were too far apart to average. Under "Other" it
+// would read as routine noise, which is exactly how a mistyped cost gets kept.
+const SERIOUS_KINDS = new Set(['negative_stock', 'unreadable_batch_date', 'barcode_collision', 'sku_collision', 'name_match', 'membership_mismatch', 'membership_phone_conflict', 'duplicate_row_match', 'stock_action_conflict', 'cost_outlier'])
 
 export default function ImportReportModal({ jobId, onClose, title }: ImportReportModalProps) {
   const { t } = useApp()
