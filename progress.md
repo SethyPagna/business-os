@@ -2368,23 +2368,18 @@ messages. **[ ]** not started · **[~]** in progress · **[x]** done (branch nam
 
 **Sales: status, stock and confirmation**
 
-- [ ] **S4-2 · "Complete without touching stock" (admin only, lock-gated).** New option in
-  the sale-status confirmation: mark a sale done with **no** `inventory_movements` write,
-  for sales carried over from the old system. Admin-only, and behind an explicit unlock
-  inside the dialog so it cannot be hit by accident. Non-admins never see it. Server must
-  enforce the permission, not just the UI. Record the choice on the sale so a later reader
-  can tell why stock did not move.
-- [ ] **S4-3 · Confirmation on every sales action.** Sales page and its sections: save /
-  update / status change all confirm first. The confirmation shows **before → after** for
-  the fields that change (a standing rule from earlier parts, still unbuilt). Returns are
-  exempt — they are the newest surface and already correct.
-- [ ] **S4-4 · `awaiting_payment` must deduct stock.** Stock on hold is stock that cannot be
-  sold twice, so an awaiting-payment sale should reserve it. Today's behaviour is being
-  confirmed. Interacts with S4-1: if awaiting-payment already deducted at import, then
-  completing must **not** deduct again, which is exactly the bug S4-1 cleans up.
-- [ ] **S4-5 · Returns add stock back.** Confirm the invariant end-to-end: with every sale
-  completed and every return processed, the ledger equals physical stock. Stated by the
-  user as an assumption to verify, not a change to make.
+- [~] **S4-2 · "Complete without touching stock" (admin only, lock-gated). CLAIMED by a
+  `business-os-v1-c3` subagent, branch `s4/sales-status-nostock` off `e3678a39`.**
+  Taken off `business-os-v1-02 [055499]`'s lane, and they were told directly. Reason: `s4/sales-status`
+  exists neither locally nor on `origin` — **none of the six Sep-4 peer lanes has pushed a branch** —
+  and the user has now named S4-2 as the mechanism for fixing a live stock error, so it is on the
+  critical path. S4-3, S4-4 and S4-5 remain `055499`'s and the subagent is forbidden them.
+  New option in the sale-status confirmation: mark a sale done with **no** `inventory_movements`
+  write, for sales carried over from the old system. Admin-only, enforced server-side (not just a
+  hidden button), behind an explicit unlock, invisible to other roles. Returns are out of scope by
+  the user's own words. The one requirement that is easy to miss: **a sale whose stock was
+  deliberately skipped must be recorded as such**, or nobody can later tell it apart from a sale
+  whose deduction was lost to a bug.
 
 **Telegram**
 
@@ -2470,7 +2465,39 @@ messages. **[ ]** not started · **[~]** in progress · **[x]** done (branch nam
   underneath — the same choice twice. Remove the option list. Batch entries list
   **earliest → latest** with available first, not split into available/unavailable
   sections, and every entry shows its quantity.
-- [ ] **S4-19 · Rename RECON → `ADJMM/DD/YYYY`.**
+- [~] **S4-19 · RECON is stored data, not a code label. Migration written, UNRUN.**
+  The search was the job. A repo-wide sweep of `cloudflare/src`, `frontend/src`, the lang packs
+  and the built bundles found **zero** live code that emits or parses a `RECON-` prefix — only the
+  unrelated `RECONCILE` stock-import mode and `RECONNECT_*` networking strings. It is **9,921 rows
+  in production `product_batches`**, every one `synthetic = 1` and stamped
+  `created_at = 2026-09-02T15:30:00Z`, carrying `lot_code = 'RECON-<productId>'` and
+  `batch_number = 'RECON-<YYYYMMDD>-<productId>'`. They were written by a one-off Sep-2 Codex
+  "Authoritative Item Export" reconciliation script (`tmp/latest-data-reconcile/`,
+  a raw SQL dump that is **not part of the deployed Worker**).
+  - It reaches the screen because `frontend/src/utils/batchLabel.ts`'s `batchDisplayLabel()`
+    renders any `lot_code` that is not a pure 8-digit `MMDDYYYY` string verbatim, as "a genuine
+    custom lot code" — so it shows raw in the POS lot picker, `ManageBatchesModal`,
+    `ProductDetailModal`, `ReceiveBatchModal`, `StockChangeSection`, `ProductDetailReport`,
+    `ProductRowParts` and `TransferModal`.
+  - `cloudflare/migrations/0108_recon_lot_code_to_adj_date.sql` is written and committed on
+    `s4/adj-prefix` (worktree `bos-rc-workers/s4-adj`), **not run**. It sets
+    `lot_code = 'ADJ' || strftime('%m/%d/%Y', created_at)`, dry-run-verified against remote D1 to
+    produce exactly `ADJ09/02/2026`, scoped to `lot_code LIKE 'RECON-%' AND synthetic = 1` so it
+    cannot touch a real user lot code.
+  - **Numbering caution:** production is applied through `0107` and `0108` was free when checked,
+    but numbering already collided once this week (Part 586) and several lanes are live.
+    Re-verify against `d1_migrations` immediately before applying, and remember that an already-
+    applied filename is frozen — renumbering one makes D1 re-run its DDL and fails the deploy.
+
+- [ ] **S4-19b · `batch_number` holds text where an integer is expected — a real pre-existing bug,
+  found while investigating S4-19.** Those same 9,921 rows put the `RECON-...` string into
+  `batch_number`, a column `nextBatchNumber` treats as a per-product counter via
+  `COALESCE(MAX(batch_number),0)+1`. SQLite orders TEXT above INTEGER, so `MAX()` already returns
+  the RECON text for these products and `+1` coerces it to **1** — meaning the next stock-in for
+  any of those 9,921 products silently gets `batch_number = 1`, a number that is very likely
+  already taken. Left untouched on purpose: it is a data-integrity fix, not a cosmetic rename, and
+  it intersects the still-open Part 581 lot-identity A/B decision the user has not ruled on. Do not
+  fold it into S4-19.
 
 **App-wide UI**
 
