@@ -5275,5 +5275,22 @@
   "receipt_text_contrast": "កម្រិតពណ៌អក្សរ",
   "receipt_text_contrast_desc": "កម្រិតអតិបរមាបង្ហាញអក្សរទាំងអស់លើបង្កាន់ដៃជាពណ៌ខ្មៅសុទ្ធ ដោយមិនប្ដូរទំហំ ឬកម្រាស់អក្សរ។",
   "receipt_text_contrast_maximum": "ខ្មៅអតិបរមា",
-  "receipt_text_contrast_normal": "ធម្មតា"
+  "receipt_text_contrast_normal": "ធម្មតា",
+  "create_products_session_title": "វគ្គបង្កើតផលិតផល",
+  "create_products_header_step": "ព័ត៌មានរួម (បញ្ចូលតែម្ដង)",
+  "create_products_header_hint": "ម៉ាក អ្នកផ្គត់ផ្គង់ និងសាខា អនុវត្តលើគ្រប់ផលិតផលដែលអ្នកបន្ថែមក្នុងវគ្គនេះ — វាយតែម្ដងគត់។",
+  "create_products_supplier_hint": "កត់ត្រាលើស្តុកដើមនៃគ្រប់ផលិតផលដែលវគ្គនេះបង្កើត។",
+  "create_products_start": "បន្ថែមទំនិញ",
+  "create_products_add_item": "បន្ថែមទំនិញ",
+  "create_products_edit_header": "កែព័ត៌មានរួម",
+  "create_products_created": "បានបង្កើតក្នុងវគ្គនេះ",
+  "create_products_none_yet": "មិនទាន់មានផលិតផលបង្កើតក្នុងវគ្គនេះទេ។ បន្ថែមទំនិញដំបូងរបស់អ្នក — ម៉ាក អ្នកផ្គត់ផ្គង់ និងសាខា បានបំពេញរួចហើយ។",
+  "create_products_branch_required": "ជ្រើសរើសសាខាដែលការដឹកជញ្ជូននេះទៅដល់។",
+  "create_products_item_added": "បានបន្ថែមទៅវគ្គនេះ។ បញ្ចូលផលិតផលបន្ទាប់។",
+  "create_products_stock_failed": "បានបង្កើតផលិតផល ប៉ុន្តែស្តុកដើមរបស់វាមិនអាចកត់ត្រាបានទេ។",
+  "create_products_retry_stock": "ព្យាយាមស្តុកម្ដងទៀត",
+  "create_products_finish": "បញ្ចប់វគ្គ",
+  "create_products_discard_title": "បោះបង់ចោលព័ត៌មានរួមទាំងនេះ?",
+  "create_products_discard_desc": "ម៉ាក អ្នកផ្គត់ផ្គង់ និងសាខា ដែលអ្នកបានវាយ មិនទាន់បានប្រើនៅឡើយទេ។",
+  "multiple_brands": "ម៉ាកច្រើន"
 }

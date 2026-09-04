@@ -155,6 +155,7 @@ const BulkAddStockModal = lazyRetry(() => import('./forms/BulkAddStockModal'), '
 const FastStockInModal = lazyRetry(() => import('../inventory/FastStockInModal'), 'products-fast-stock-in-modal')
 const VariantFormModal = lazyRetry(() => import('./forms/VariantFormModal'), 'products-variant-form-modal')
 const ProductForm = lazyRetry(() => import('./forms/ProductForm'), 'products-product-form')
+const CreateProductsSessionModal = lazyRetry(() => import('./CreateProductsSessionModal'), 'products-create-products-session-modal')
 const StockAdjustModal = lazyRetry(() => import('./forms/StockAdjustModal'), 'products-stock-adjust-modal')
 const ProductDetailModal = lazyRetry(() => import('./surfaces/ProductDetailModal'), 'products-product-detail-modal')
 // Reused as-is from Inventory's own batches surface (see ManageBatchesModal.tsx)
@@ -173,7 +174,11 @@ type NotificationTone = 'error' | 'info' | 'success' | 'warning' | string
 type SearchMode = 'AND' | 'OR'
 type ProductSortDirection = 'asc' | 'desc' | 'name_asc' | 'name_desc'
 type BulkEditMode = 'branch' | 'info' | 'pricing' | 'stock' | null
-type ProductModalMode = 'brands' | 'bulk' | 'cats' | 'form' | 'units' | null
+// 'create_session' is the header step (brand + supplier + branch, entered
+// once) that now fronts product creation -- see CreateProductsSessionModal.
+// 'form' remains the bare product form, still used for EDIT and for the
+// minimized add-product chip's restore.
+type ProductModalMode = 'brands' | 'bulk' | 'cats' | 'create_session' | 'form' | 'units' | null
 type ProductFormTab = 'basic' | 'pricing' | 'stock'
 
 interface BranchStockRow {
@@ -1320,6 +1325,35 @@ function ProductsFullEditor() {
       next.push(uploaded.path)
     }
     return normalizeProductGallery(next)
+  }
+
+  // S4-12: one product, written for the create-products session. Deliberately
+  // the SAME image-upload + create path handleSaveWithGallery uses below --
+  // the session modal owns the header/session model, never a second product
+  // write route. Resolves the new id; throws so the item form can report the
+  // failure and keep the typed product on screen to be corrected.
+  const createProductForSession = async (payload: Record<string, unknown>): Promise<number | string> => {
+    const form = payload as unknown as ProductRecord
+    if (!String(form.name || '').trim()) throw new Error(t('name') + ' required')
+    const galleryInput = normalizeProductGallery(form.image_gallery, form.image_path || null)
+    const uploadedGallery = await uploadGalleryImages(null, galleryInput)
+    const res = await runProductWriteMutation(() => productApi.createProduct({
+      ...form,
+      image_gallery: uploadedGallery,
+      image_path: uploadedGallery[0] || null,
+      client_request_id: `product_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+      userId: user?.id,
+      userName: user?.name,
+    }), 'Create product')
+    if (!res?.success) throw new Error(res?.error || 'Failed to create product')
+    // A Review-Required account queues the create instead of applying it, so
+    // there is no product to hang this session's opening stock on yet.
+    if ((res as { pending?: boolean })?.pending) {
+      throw new Error(t('product_creation_pending_review') || 'Product creation is pending review and cannot be added to this session yet.')
+    }
+    const createdId = extractHistoryResultId(res)
+    if (!createdId) throw new Error('Created product could not be loaded')
+    return createdId
   }
 
   const handleSaveWithGallery = async (form: ProductRecord) => {
@@ -3764,7 +3798,9 @@ function ProductsFullEditor() {
             /* Stock Changes section replaces the catalog "Add Product" button
                with its own "Adjust" menu (user, Aug 31) -> drop onAdd there;
                HeaderActions hides any undefined-handler control. */
-            onAdd={canAddProduct && activeProductSection !== 'stock_changes' && activeProductSection !== 'stock_in_sessions' ? ()=>{setSelected(null);setFormInitialTab('basic');setModal('form')} : undefined}
+            /* S4-12: Add now opens the header step first -- brand, supplier
+               and branch once, then the same product form for each item. */
+            onAdd={canAddProduct && activeProductSection !== 'stock_changes' && activeProductSection !== 'stock_in_sessions' ? ()=>{setSelected(null);setFormInitialTab('basic');setModal('create_session')} : undefined}
             // The merged Add Stock flow rides the same Add menu. Hidden on
             // the Stock Changes section, which carries its own Adjust menu.
             onAddStock={canAdjustInventoryStock && activeProductSection !== 'stock_changes' ? () => setAddStockOpen(true) : undefined}
@@ -4477,6 +4513,29 @@ function ProductsFullEditor() {
               if (done > 0) await load(true)
             }}
             t={t}
+          />
+        </Suspense>
+      )}
+      {/* S4-12: the header step -- brand + supplier + branch once, then the
+          same ProductForm below for every item in the delivery. */}
+      {modal==='create_session' && (
+        <Suspense fallback={null}>
+          <CreateProductsSessionModal
+            categories={categoryOptions}
+            units={unitOptions}
+            branches={branchOptions}
+            brandOptions={brandOptions}
+            groupCandidates={products.map((product) => ({ id: product.id, name: String(product.name || '') }))}
+            defaultBranchId={defaultBranchId}
+            onCreateProduct={createProductForSession}
+            onClose={()=>{setModal(null);setSelected(null);setFormInitialTab('basic')}}
+            onDone={() => { void load(true) }}
+            notify={notify}
+            t={t}
+            usdSymbol={usdSymbol}
+            khrSymbol={khrSymbol}
+            exchangeRate={exchangeRate}
+            user={user}
           />
         </Suspense>
       )}

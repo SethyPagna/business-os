@@ -5275,5 +5275,22 @@
   "replacement_sale_new": "New sale for these items",
   "replacement_sale_total": "New sale total",
   "replacement_sale_hint": "It gets its own receipt and is recorded in Sales like any other sale. The refund above is paid back separately.",
-  "historical_settlement": "Recorded as an exchange"
+  "historical_settlement": "Recorded as an exchange",
+  "create_products_session_title": "Create products session",
+  "create_products_header_step": "Shared details (entered once)",
+  "create_products_header_hint": "Brand, supplier and branch apply to every product you add in this session — type them once.",
+  "create_products_supplier_hint": "Recorded on the opening stock of every product this session creates.",
+  "create_products_start": "Add items",
+  "create_products_add_item": "Add item",
+  "create_products_edit_header": "Edit shared details",
+  "create_products_created": "Created this session",
+  "create_products_none_yet": "No products created yet in this session. Add your first item — brand, supplier and branch are already filled in.",
+  "create_products_branch_required": "Choose the branch this delivery goes to.",
+  "create_products_item_added": "Added to this session. Enter the next product.",
+  "create_products_stock_failed": "Product created, but its opening stock could not be posted.",
+  "create_products_retry_stock": "Retry stock",
+  "create_products_finish": "Finish session",
+  "create_products_discard_title": "Discard these shared details?",
+  "create_products_discard_desc": "The brand, supplier and branch you typed have not been used yet.",
+  "multiple_brands": "Multiple brands"
 }
