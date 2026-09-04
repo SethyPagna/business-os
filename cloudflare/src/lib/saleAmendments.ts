@@ -457,7 +457,9 @@ export function planLineQuantityIncrease(input: {
 
   return {
     statements,
-    unitsMoved: -heldUnits,
+    // `|| 0` is not redundant: negating a zero yields -0, which survives into
+    // the ledger column and compares unequal to 0 under Object.is.
+    unitsMoved: -heldUnits || 0,
     quantityBefore,
     quantityAfter,
     subtotalDeltaUsd: round2(unitPrice * added),
@@ -848,7 +850,7 @@ export function amendmentEntryStatement(entry: AmendmentEntry): StockStatement {
       amount_delta_usd: amountBefore === null || amountAfter === null ? null : round2(amountAfter - amountBefore),
       total_before_usd: round2(Number(entry.totalBeforeUsd) || 0),
       total_after_usd: round2(Number(entry.totalAfterUsd) || 0),
-      units_moved: round2(Number(entry.unitsMoved) || 0),
+      units_moved: round2(Number(entry.unitsMoved) || 0) || 0,
       stock_skipped: entry.stockSkipped ? 1 : 0,
       via: entry.via || 'amend',
       reverses_amendment_id: entry.reversesAmendmentId ?? null,
