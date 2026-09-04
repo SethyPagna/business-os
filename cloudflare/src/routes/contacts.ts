@@ -19,6 +19,7 @@ import {
 } from '../lib/contactDuplicates'
 import type { ContactOptionMode } from '../lib/contactOptions'
 import { canonicalizePhone } from '../lib/phone'
+import { mintMembershipNumber, normalizeMembershipNumber, withMintedMembershipNumber } from '../lib/membershipNumber'
 import { revokePortalSessionsForAccount } from '../lib/portalSession'
 import bcrypt from 'bcryptjs'
 import { buildContactMatchClause } from '../lib/contactSearch'
@@ -211,15 +212,13 @@ function pickColumns(body: Record<string, unknown>, columns: string[]): Record<s
   return payload
 }
 
+// Membership numbers are minted by lib/membershipNumber.ts -- the ONE
+// authority, shared with the import engine and the storefront signup, which
+// hands out the next gap-filling `LC-#####`. This file used to carry its own
+// random `LCMN-XXXXXXXX` generator; see that module's header for why four
+// independent minters on one column was the bug.
 async function generateMembershipNumber(env: Env): Promise<string> {
-  const db = getDb(env)
-  for (let attempt = 0; attempt < 50; attempt += 1) {
-    const entropy = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}${attempt.toString(36)}`.toUpperCase()
-    const candidate = `LCMN-${entropy.slice(-8)}`
-    const existing = await db.prepare('SELECT id FROM customers WHERE lower(trim(membership_number)) = lower(trim(@candidate)) LIMIT 1').get({ candidate })
-    if (!existing) return candidate
-  }
-  throw new Error('Could not generate a unique membership number')
+  return mintMembershipNumber(getDb(env))
 }
 
 // Shared error shape for both duplicate severities the create/update
@@ -932,22 +931,36 @@ function registerContactRoutes(config: ContactConfig) {
     const duplicateBlock = await checkContactDuplicateBlock(c.env, config, { name, phone: payload.phone, address: payload.address }, body.confirmDuplicate === true)
     if (duplicateBlock) return c.json(duplicateBlock.body, duplicateBlock.status as 400 | 409)
 
+    // Customers only. A number staff typed in wins (after a reuse check);
+    // a blank one is minted from the house sequence. The mint is deferred
+    // into the INSERT below so that when two walk-ins are registered at the
+    // same instant, the writer that loses the UNIQUE index race is handed
+    // the NEXT free number instead of an error.
+    let mintMembership = false
     if (config.table === 'customers') {
-      const raw = String(payload.membership_number || '').trim()
+      const raw = normalizeMembershipNumber(payload.membership_number)
       if (raw) {
         const existing = await db.prepare('SELECT id FROM customers WHERE lower(trim(membership_number)) = lower(trim(@raw)) LIMIT 1').get({ raw })
         if (existing) return c.json({ error: `Membership number "${raw}" is already in use` }, 400)
         payload.membership_number = raw
       } else {
-        payload.membership_number = await generateMembershipNumber(c.env)
+        mintMembership = true
       }
     }
 
-    const columns = Object.keys(payload)
-    const result = await db.prepare(`
-      INSERT INTO ${config.table} (${columns.join(', ')}, updated_at)
-      VALUES (${columns.map((col) => `@${col}`).join(', ')}, CURRENT_TIMESTAMP)
-    `).run(payload)
+    const runContactInsert = async () => {
+      const columns = Object.keys(payload)
+      return db.prepare(`
+        INSERT INTO ${config.table} (${columns.join(', ')}, updated_at)
+        VALUES (${columns.map((col) => `@${col}`).join(', ')}, CURRENT_TIMESTAMP)
+      `).run(payload)
+    }
+    const result = mintMembership
+      ? await withMintedMembershipNumber(db, async (membershipNumber) => {
+        payload.membership_number = membershipNumber
+        return runContactInsert()
+      })
+      : await runContactInsert()
     const id = result.lastInsertRowid
     await audit(c.env, user?.id ?? null, user?.name ?? null, 'create', config.entity, id, { name })
     await bumpVersion(c.env, config.table)
@@ -1072,7 +1085,7 @@ function registerContactRoutes(config: ContactConfig) {
     if (duplicateBlock) return c.json(duplicateBlock.body, duplicateBlock.status as 400 | 409)
 
     if (config.table === 'customers' && Object.prototype.hasOwnProperty.call(payload, 'membership_number')) {
-      const raw = String(payload.membership_number || '').trim()
+      const raw = normalizeMembershipNumber(payload.membership_number)
       if (raw) {
         const existing = await db.prepare('SELECT id FROM customers WHERE lower(trim(membership_number)) = lower(trim(@raw)) AND id != @id LIMIT 1').get({ raw, id })
         if (existing) return c.json({ error: `Membership number "${raw}" is already in use` }, 400)
@@ -2030,11 +2043,10 @@ app.post('/customers/link-conflicts/resolve-missing', async (c) => {
     if (!target) return c.json({ error: 'Target customer not found.' }, 404)
     targetId = target.id
   } else {
-    const membership = await generateMembershipNumber(c.env)
-    const inserted = await db.prepare(`
+    const inserted = await withMintedMembershipNumber(db, (membership) => db.prepare(`
       INSERT INTO customers (name, phone, phone_normalized, membership_number, created_at, updated_at)
       VALUES (@name, @phone, @phoneNormalized, @membership, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-    `).run({ name: name || phone, phone: phone || null, phoneNormalized: canonicalizePhone(phone), membership })
+    `).run({ name: name || phone, phone: phone || null, phoneNormalized: canonicalizePhone(phone), membership }))
     targetId = Number((inserted as { lastInsertRowid?: number | bigint }).lastInsertRowid ?? (inserted as { meta?: { last_row_id?: number } })?.meta?.last_row_id)
     created = true
   }

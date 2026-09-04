@@ -540,6 +540,8 @@
   "supplier_attribute_failed": "Could not attribute the supplier.",
   "clear_all": "Clear all",
   "membership_discount_khr": "Membership Discount in KHR",
+  "membership_number_auto": "Assigned on save",
+  "membership_number_auto_hint": "The next available LC- number is assigned when you save.",
   "monthly": "Monthly",
   "more_actions": "More actions",
   "move_left": "Move left",

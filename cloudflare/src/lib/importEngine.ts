@@ -68,6 +68,7 @@ import {
   type ParsedCsvRow,
 } from './importCsv'
 import { parseImportNumericValue, normalizeImportMoney } from './importNumbers'
+import { createMembershipNumberAllocator } from './membershipNumber'
 import { buildImportedContactState } from './contactOptions'
 import { bumpVersion } from './cache'
 import { broadcast } from '../durable-objects/broadcastHub'
@@ -1814,30 +1815,22 @@ export async function classifyContacts(db: D1Compat, table: 'customers' | 'suppl
 
   // Customers only: "no such thing as no membership id" -- every customer
   // row this import creates, or merges into, ends up with a
-  // membership_number, auto-generated when neither the imported row nor
-  // the matched existing record has one. Same LCMN-XXXXXXXX shape as
-  // routes/contacts.ts's generateMembershipNumber (manual add/edit path),
-  // duplicated here rather than shared because that version is async
-  // (queries D1 per candidate) and needs `env`, neither of which this
-  // synchronous, already-batch-loaded classify pass has reason to add --
-  // uniqueness here is checked against the full `existing` snapshot
-  // already loaded above, plus every number this same pass has already
-  // handed out (so two new customers in the same file, both blank, still
-  // can't collide with each other before either one is written).
-  const usedMembershipNumbers = table === 'customers'
-    ? new Set(existing.map((record) => lower(str((record as { membership_number?: unknown }).membership_number))).filter(Boolean))
-    : null
-  const nextMembershipNumber = (): string => {
-    for (let attempt = 0; attempt < 50; attempt += 1) {
-      const entropy = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}${attempt.toString(36)}`.toUpperCase()
-      const candidate = `LCMN-${entropy.slice(-8)}`
-      if (!usedMembershipNumbers!.has(candidate.toLowerCase())) {
-        usedMembershipNumbers!.add(candidate.toLowerCase())
-        return candidate
-      }
-    }
-    throw new Error('Could not generate a unique membership number')
-  }
+  // membership_number, auto-generated when neither the imported row nor the
+  // matched existing record has one.
+  //
+  // This used to be a SECOND, independent `LCMN-XXXXXXXX` random generator
+  // duplicating routes/contacts.ts's. Two minters on one column is a
+  // collision waiting for the day someone imports a spreadsheet while a
+  // cashier registers a walk-in. Both now come from lib/membershipNumber.ts:
+  // one house format (`LC-#####`), one gap-fill rule. The allocator is the
+  // synchronous flavour, seeded from the full `existing` snapshot this pass
+  // already loaded (no D1 round trip per row) and remembering every number it
+  // hands out, so two blank rows in one file can't collide with each other
+  // either. The partial UNIQUE index from migration 0015 stays the final
+  // arbiter at write time.
+  const nextMembershipNumber = table === 'customers'
+    ? createMembershipNumberAllocator(existing.map((record) => (record as { membership_number?: unknown }).membership_number))
+    : (): string => { throw new Error('Membership numbers are customers-only') }
 
   // Same-name-can't-coexist rule applies within one file too, not just
   // against the existing DB: if two rows in the same import both end up

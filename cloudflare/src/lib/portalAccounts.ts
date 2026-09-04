@@ -1,4 +1,5 @@
 import bcrypt from 'bcryptjs'
+import { mintMembershipNumber } from './membershipNumber'
 import { getDb } from './db'
 import { canonicalizePhone } from './phone'
 import { formatPhoneP8, collectContactPhones } from './contactDuplicates'
@@ -48,22 +49,22 @@ function existingReject(): SignupResult {
   return { ok: false, status: 409, error: EXISTING_REMINDER, code: 'verification_failed', abuse: true }
 }
 
+// One membership-number authority for the whole app: lib/membershipNumber.ts
+// mints the next gap-filling `LC-#####`. This file used to carry a THIRD
+// independent generator (random `LCMN-` + 6 crypto bytes). A storefront id is
+// an account NUMBER, not a credential -- signup already requires a phone that
+// matches the customer record and login requires phone AND password -- so a
+// sequential id costs nothing that the old entropy was buying.
+//
+// mintMembershipNumber() reads the customers table, and every id issued here
+// is mirrored there (claimAccount either claims an existing customer's number
+// or creates the customer row). portal_accounts ids are passed in as extra
+// taken numbers anyway, so a stale account row can never collide with a fresh
+// mint. The INSERT below is still the final arbiter for a lost race.
 async function generateMembershipId(env: Env): Promise<string> {
   const db = getDb(env)
-  for (let attempt = 0; attempt < 50; attempt += 1) {
-    // Account identifiers must not come from a predictable PRNG. Six random
-    // bytes provide 48 bits of Web-Crypto entropy; the uniqueness checks and
-    // INSERT constraint below remain the final race-safe arbiter.
-    const bytes = crypto.getRandomValues(new Uint8Array(6))
-    const entropy = Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('').toUpperCase()
-    const candidate = `LCMN-${entropy}`
-    // Globally unique across BOTH stores — a membership id must never collide
-    // with an existing customer's number or another account's.
-    const inCustomers = await db.prepare('SELECT id FROM customers WHERE lower(trim(membership_number)) = lower(trim(@candidate)) LIMIT 1').get({ candidate })
-    const inAccounts = await db.prepare('SELECT id FROM portal_accounts WHERE lower(trim(membership_id)) = lower(trim(@candidate)) LIMIT 1').get({ candidate })
-    if (!inCustomers && !inAccounts) return candidate
-  }
-  throw new Error('Could not generate a unique membership id')
+  const accountIds = await db.prepare('SELECT membership_id FROM portal_accounts').all<{ membership_id: string }>()
+  return mintMembershipNumber(db, accountIds.map((row) => row.membership_id))
 }
 
 // Does any customer already carry this canonical phone (primary or a secondary
