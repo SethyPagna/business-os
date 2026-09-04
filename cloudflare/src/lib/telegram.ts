@@ -1,5 +1,9 @@
 import { getDb } from './db'
-import { BUSINESS_UTC_OFFSET_MINUTES, businessToday, localTodayRangeClause } from './businessDateWindow'
+import { BUSINESS_UTC_OFFSET_MINUTES, businessToday, localDateRangeClause } from './businessDateWindow'
+import {
+  bi, label, labeled, localizeTelegramHeading, localizeTelegramLine, localizeTelegramValue,
+  parseReportDate, telegramCommandReference, telegramUnauthorizedReply,
+} from './telegramLang'
 import type { Env } from '../index'
 
 export type TelegramEventType = 'sales' | 'status' | 'fees' | 'stock_in' | 'stock_out'
@@ -8,7 +12,7 @@ export type TelegramEventType = 'sales' | 'status' | 'fees' | 'stock_in' | 'stoc
 export type TelegramEvent = { type: TelegramEventType; lines: string[]; heading?: string }
 
 type TelegramConfig = {
-  enabled: boolean; chatId: string; token: string
+  enabled: boolean; chatId: string; chatIds: string[]; token: string
   categories: Record<TelegramEventType, boolean>
 }
 type TelegramMessage = { text?: string; from?: { id?: number | string }; chat?: { id?: number | string } }
@@ -34,11 +38,23 @@ function money(usd: unknown, khr: unknown): string {
   return parts.length ? parts.join(' · ') : '$0.00'
 }
 
+// The alerts chat id setting doubles as the COMMAND ALLOW-LIST. A Telegram
+// chat id is digits with an optional leading '-', so a comma/space separated
+// list is unambiguous and an existing single-id setting keeps working
+// untouched -- no new setting, no Settings-screen change, and the owner can
+// approve a second manager group by typing one more id.
+function parseChatIds(value: string | undefined): string[] {
+  return String(value || '').split(/[,;\s]+/).map((entry) => cleanLine(entry, 40)).filter((entry) => /^-?\d+$/.test(entry))
+}
+
 async function getTelegramConfig(env: Env): Promise<TelegramConfig> {
   const rows = await getDb(env).prepare(`SELECT key, value FROM settings WHERE key IN (${SETTING_KEYS.map(() => '?').join(',')})`).all<{ key: string; value: string }>([...SETTING_KEYS])
   const values = Object.fromEntries(rows.map((row) => [row.key, row.value])) as Record<string, string>
+  const chatIds = parseChatIds(values.telegram_chat_id)
   return {
-    enabled: isEnabled(values.telegram_automation_enabled, true), chatId: cleanLine(values.telegram_chat_id, 80),
+    enabled: isEnabled(values.telegram_automation_enabled, true),
+    // chatId is where ALERTS are pushed (the first id); chatIds is who may ASK.
+    chatId: chatIds[0] || '', chatIds,
     token: String(env.TELEGRAM_BOT_TOKEN || '').trim(),
     // Everything is live after the first setup; individual category switches
     // remain available when a less noisy chat is preferred.
@@ -72,7 +88,15 @@ export async function sendTelegramEvent(env: Env, event: TelegramEvent): Promise
   const config = await getTelegramConfig(env)
   if (!config.enabled || !config.categories[event.type] || configurationProblem(config)) return false
   const heading: Record<TelegramEventType, string> = { sales: '🛍️ Sale recorded', status: '🧾 Receipt status updated', fees: '💸 Fee recorded', stock_in: '📥 Stock in', stock_out: '📤 Stock out' }
-  await postTelegram(config, [event.heading || heading[event.type], ...event.lines.map((line) => cleanLine(line))].filter(Boolean).join('\n'))
+  // S4-8: the ONE place every event message becomes bilingual. Doing it on
+  // the composed line (rather than in each builder) means the two routes that
+  // still assemble their lines inline -- routes/sales.ts's status change and
+  // routes/fees.ts's fee -- are covered without editing files other lanes own,
+  // and any line added later is covered the moment its label is in the table.
+  await postTelegram(config, [
+    localizeTelegramHeading(event.heading || heading[event.type]),
+    ...event.lines.map((line) => localizeTelegramLine(cleanLine(line, 400))),
+  ].filter(Boolean).join('\n'))
   return true
 }
 
@@ -83,65 +107,128 @@ export async function getTelegramStatus(env: Env): Promise<{ configured: boolean
 export async function sendTelegramTest(env: Env): Promise<void> {
   const config = await getTelegramConfig(env); const problem = configurationProblem(config)
   if (problem) throw new Error(problem)
-  await postTelegram(config, '✅ Business OS Telegram automation and owner/manager commands are connected. All notification categories are enabled by default; use Settings to turn any category off.')
+  await postTelegram(config, [
+    `✅ ${bi('Business OS alerts and commands are connected.', 'ការជូនដំណឹង និងពាក្យបញ្ជា Business OS បានភ្ជាប់រួចរាល់។')}`,
+    bi('Every notification category is on by default; turn any off in Settings.', 'គ្រប់ប្រភេទការជូនដំណឹងបើកតាមលំនាំដើម។ អ្នកអាចបិទណាមួយនៅ Settings។'),
+    '',
+    telegramCommandReference(),
+  ].join('\n'))
   await configureTelegramWebhook(env)
 }
 
-async function todayStats(env: Env) {
-  const db = getDb(env); const today = businessToday()
+// ---- Reports (S4-9) --------------------------------------------------------
+// Every report is bilingual and every report takes a DAY. `/report 09/01/2026`
+// answering only for "today" was the gap: the shop asks about yesterday's till
+// far more often than about the current one.
+
+/** One business day (UTC+7) of a UTC timestamp column, as a bound clause. */
+const dayClause = (column: string): string => localDateRangeClause(column, '@date', '@date')
+
+type MoneyBucket = { count: number; usd: number; khr: number } | null | undefined
+type UnitBucket = { count: number; quantity: number } | null | undefined
+type DayStats = { date: string; sales: MoneyBucket; fees: MoneyBucket; stockIn: UnitBucket; stockOut: UnitBucket }
+type CashierRow = { cashier: string; count: number; usd: number; khr: number }
+
+async function dayStats(env: Env, date: string): Promise<DayStats> {
+  const db = getDb(env)
   const [sales, fees, stockIn, stockOut] = await Promise.all([
-    db.prepare(`SELECT COUNT(*) AS count, COALESCE(SUM(total_usd), 0) AS usd, COALESCE(SUM(total_khr), 0) AS khr FROM sales WHERE ${localTodayRangeClause('created_at')}`).get<{ count: number; usd: number; khr: number }>(),
-    db.prepare(`SELECT COUNT(*) AS count, COALESCE(SUM(amount_usd), 0) AS usd, COALESCE(SUM(amount_khr), 0) AS khr FROM fees WHERE fee_date = @today`).get<{ count: number; usd: number; khr: number }>({ today }),
-    db.prepare(`SELECT COUNT(*) AS count, COALESCE(SUM(quantity), 0) AS quantity FROM inventory_movements WHERE movement_type IN ('add', 'transfer_in', 'move_in') AND ${localTodayRangeClause('created_at')}`).get<{ count: number; quantity: number }>(),
-    db.prepare(`SELECT COUNT(*) AS count, COALESCE(SUM(quantity), 0) AS quantity FROM inventory_movements WHERE movement_type IN ('remove', 'transfer_out', 'move_out') AND ${localTodayRangeClause('created_at')}`).get<{ count: number; quantity: number }>(),
+    db.prepare(`SELECT COUNT(*) AS count, COALESCE(SUM(total_usd), 0) AS usd, COALESCE(SUM(total_khr), 0) AS khr FROM sales WHERE ${dayClause('created_at')}`).get<{ count: number; usd: number; khr: number }>({ date }),
+    db.prepare('SELECT COUNT(*) AS count, COALESCE(SUM(amount_usd), 0) AS usd, COALESCE(SUM(amount_khr), 0) AS khr FROM fees WHERE fee_date = @date').get<{ count: number; usd: number; khr: number }>({ date }),
+    db.prepare(`SELECT COUNT(*) AS count, COALESCE(SUM(quantity), 0) AS quantity FROM inventory_movements WHERE movement_type IN ('add', 'transfer_in', 'move_in') AND ${dayClause('created_at')}`).get<{ count: number; quantity: number }>({ date }),
+    db.prepare(`SELECT COUNT(*) AS count, COALESCE(SUM(quantity), 0) AS quantity FROM inventory_movements WHERE movement_type IN ('remove', 'transfer_out', 'move_out') AND ${dayClause('created_at')}`).get<{ count: number; quantity: number }>({ date }),
   ])
-  return { today, sales, fees, stockIn, stockOut }
-}
-function formatTodaySummary(stats: Awaited<ReturnType<typeof todayStats>>, categories?: Partial<Record<TelegramEventType, boolean>>): string {
-  const lines = [`📊 Business summary — ${stats.today}`]
-  if (categories?.sales !== false) lines.push(`Sales: ${Number(stats.sales?.count || 0)} receipt(s) · ${money(stats.sales?.usd, stats.sales?.khr)}`)
-  if (categories?.fees !== false) lines.push(`Fees: ${Number(stats.fees?.count || 0)} record(s) · ${money(stats.fees?.usd, stats.fees?.khr)}`)
-  if (categories?.stock_in !== false) lines.push(`Stock in: ${Number(stats.stockIn?.count || 0)} movement(s) · ${Number(stats.stockIn?.quantity || 0)} unit(s)`)
-  if (categories?.stock_out !== false) lines.push(`Stock out: ${Number(stats.stockOut?.count || 0)} movement(s) · ${Number(stats.stockOut?.quantity || 0)} unit(s)`)
-  return lines.join('\n')
-}
-export async function sendTelegramTodaySummary(env: Env): Promise<void> {
-  const config = await getTelegramConfig(env); const problem = configurationProblem(config)
-  if (problem) throw new Error(problem)
-  await postTelegram(config, formatTodaySummary(await todayStats(env), config.categories))
+  return { date, sales, fees, stockIn, stockOut }
 }
 
-async function salesReport(env: Env): Promise<string> {
-  const db = getDb(env); const stats = await todayStats(env)
-  const sales = await db.prepare(`SELECT id, receipt_number, cashier_name, total_usd, total_khr FROM sales WHERE ${localTodayRangeClause('created_at')} ORDER BY created_at DESC LIMIT 5`).all<{ id: number; receipt_number: string | null; cashier_name: string | null; total_usd: number; total_khr: number }>()
-  if (!sales.length) return `🛍️ Sales — ${stats.today}\nNo sales recorded today.`
-  const ids = sales.map((sale) => sale.id)
-  const items = await db.prepare(`SELECT sale_id, product_name, quantity, applied_price_usd, applied_price_khr FROM sale_items WHERE sale_id IN (${ids.map(() => '?').join(',')}) ORDER BY id ASC`).all<{ sale_id: number; product_name: string | null; quantity: number; applied_price_usd: number; applied_price_khr: number }>(ids)
-  const bySale = new Map<number, typeof items>(); for (const item of items) bySale.set(item.sale_id, [...(bySale.get(item.sale_id) || []), item])
-  const lines = [`🛍️ Sales — ${stats.today}`, `Total: ${Number(stats.sales?.count || 0)} receipt(s) · ${money(stats.sales?.usd, stats.sales?.khr)}`, '', 'Latest receipts:']
-  for (const sale of sales) {
-    lines.push(`• ${sale.receipt_number || `Sale #${sale.id}`} · ${money(sale.total_usd, sale.total_khr)} · ${cleanLine(sale.cashier_name || 'No cashier')}`)
-    const saleItems = bySale.get(sale.id) || []
-    for (const item of saleItems.slice(0, 4)) lines.push(`  ${Number(item.quantity)} × ${cleanLine(item.product_name || 'Item', 100)} — ${money(item.applied_price_usd, item.applied_price_khr)} each`)
-    if (saleItems.length > 4) lines.push(`  + ${saleItems.length - 4} more item(s)`)
+// "cashier user" in the ask: who rang up how much, on that day.
+async function cashierTotals(env: Env, date: string): Promise<CashierRow[]> {
+  return getDb(env).prepare(`SELECT COALESCE(NULLIF(TRIM(cashier_name), ''), 'Unknown') AS cashier,
+      COUNT(*) AS count, COALESCE(SUM(total_usd), 0) AS usd, COALESCE(SUM(total_khr), 0) AS khr
+    FROM sales WHERE ${dayClause('created_at')}
+    GROUP BY 1 ORDER BY usd DESC, count DESC LIMIT 12`).all<CashierRow>({ date })
+}
+
+/**
+ * `YYYY-MM-DD` -> `mm/dd/yyyy`. The project pins mm/dd/yyyy + 24-hour
+ * everywhere (consistency-audit.md; formatBusinessDateTime above), so a report
+ * header must not invent a second date shape.
+ */
+export function formatBusinessDay(isoDate: string): string {
+  const parts = String(isoDate || '').match(/^(\d{4})-(\d{2})-(\d{2})$/)
+  return parts ? `${parts[2]}/${parts[3]}/${parts[1]}` : String(isoDate || '')
+}
+
+const reportTitle = (icon: string, en: string, km: string, date?: string): string =>
+  `${icon} ${bi(en, km)}${date ? ` — ${formatBusinessDay(date)}` : ''}`
+
+const counted = (count: unknown, noun: 'receipt(s)' | 'record(s)' | 'movement(s)' | 'unit(s)' | 'product(s)'): string =>
+  localizeTelegramValue(`${Number(count) || 0} ${noun}`)
+
+function formatDaySummary(stats: DayStats, cashiers: CashierRow[], categories?: Partial<Record<TelegramEventType, boolean>>): string {
+  const lines = [reportTitle('📊', 'Business summary', 'សង្ខេបអាជីវកម្ម', stats.date)]
+  if (categories?.sales !== false) lines.push(labeled('sales', `${counted(stats.sales?.count, 'receipt(s)')} · ${money(stats.sales?.usd, stats.sales?.khr)}`))
+  if (categories?.fees !== false) lines.push(labeled('fees', `${counted(stats.fees?.count, 'record(s)')} · ${money(stats.fees?.usd, stats.fees?.khr)}`))
+  if (categories?.stock_in !== false) lines.push(labeled('stockIn', `${counted(stats.stockIn?.count, 'movement(s)')} · ${counted(stats.stockIn?.quantity, 'unit(s)')}`))
+  if (categories?.stock_out !== false) lines.push(labeled('stockOut', `${counted(stats.stockOut?.count, 'movement(s)')} · ${counted(stats.stockOut?.quantity, 'unit(s)')}`))
+  if (cashiers.length) {
+    lines.push('', `${label('cashiers')}:`)
+    for (const row of cashiers) lines.push(`• ${cleanLine(row.cashier, 60)} — ${counted(row.count, 'receipt(s)')} · ${money(row.usd, row.khr)}`)
   }
   return lines.join('\n')
 }
-async function feesReport(env: Env): Promise<string> {
-  const db = getDb(env); const stats = await todayStats(env)
-  const fees = await db.prepare('SELECT fee_type, label, amount_usd, amount_khr FROM fees WHERE fee_date = @today ORDER BY id DESC LIMIT 8').all<{ fee_type: string; label: string | null; amount_usd: number; amount_khr: number }>({ today: stats.today })
-  const lines = [`💸 Fees — ${stats.today}`, `Total: ${Number(stats.fees?.count || 0)} record(s) · ${money(stats.fees?.usd, stats.fees?.khr)}`]
+
+export async function sendTelegramTodaySummary(env: Env): Promise<void> {
+  const config = await getTelegramConfig(env); const problem = configurationProblem(config)
+  if (problem) throw new Error(problem)
+  const today = businessToday()
+  await postTelegram(config, formatDaySummary(await dayStats(env, today), await cashierTotals(env, today), config.categories))
+}
+
+async function dayReport(env: Env, date: string): Promise<string> {
+  const [stats, cashiers] = await Promise.all([dayStats(env, date), cashierTotals(env, date)])
+  return formatDaySummary(stats, cashiers)
+}
+
+async function salesReport(env: Env, date: string): Promise<string> {
+  const db = getDb(env); const stats = await dayStats(env, date)
+  const sales = await db.prepare(`SELECT id, receipt_number, cashier_name, total_usd, total_khr FROM sales WHERE ${dayClause('created_at')} ORDER BY created_at DESC LIMIT 5`).all<{ id: number; receipt_number: string | null; cashier_name: string | null; total_usd: number; total_khr: number }>({ date })
+  const title = reportTitle('🛍️', 'Sales', 'ការលក់', date)
+  if (!sales.length) return `${title}\n${bi('No sales recorded on this day.', 'គ្មានការលក់បានកត់ត្រាក្នុងថ្ងៃនេះទេ។')}`
+  const ids = sales.map((sale) => sale.id)
+  const items = await db.prepare(`SELECT sale_id, product_name, quantity, applied_price_usd, applied_price_khr FROM sale_items WHERE sale_id IN (${ids.map(() => '?').join(',')}) ORDER BY id ASC`).all<{ sale_id: number; product_name: string | null; quantity: number; applied_price_usd: number; applied_price_khr: number }>(ids)
+  const bySale = new Map<number, typeof items>(); for (const item of items) bySale.set(item.sale_id, [...(bySale.get(item.sale_id) || []), item])
+  const lines = [title, labeled('total', `${counted(stats.sales?.count, 'receipt(s)')} · ${money(stats.sales?.usd, stats.sales?.khr)}`), '', `${label('latestReceipts')}:`]
+  for (const sale of sales) {
+    lines.push(`• ${sale.receipt_number || `#${sale.id}`} · ${money(sale.total_usd, sale.total_khr)} · ${localizeTelegramValue(cleanLine(sale.cashier_name || 'No cashier'))}`)
+    const saleItems = bySale.get(sale.id) || []
+    for (const item of saleItems.slice(0, 4)) lines.push(`   ${Number(item.quantity)} × ${cleanLine(item.product_name || 'Item', 100)} — ${money(item.applied_price_usd, item.applied_price_khr)}`)
+    if (saleItems.length > 4) lines.push(`   + ${saleItems.length - 4} more ${localizeTelegramValue('item(s)')}`)
+  }
+  return lines.join('\n')
+}
+
+async function feesReport(env: Env, date: string): Promise<string> {
+  const db = getDb(env); const stats = await dayStats(env, date)
+  const fees = await db.prepare('SELECT fee_type, label, amount_usd, amount_khr FROM fees WHERE fee_date = @date ORDER BY id DESC LIMIT 8').all<{ fee_type: string; label: string | null; amount_usd: number; amount_khr: number }>({ date })
+  const lines = [reportTitle('💸', 'Expenses', 'ចំណាយ', date), labeled('total', `${counted(stats.fees?.count, 'record(s)')} · ${money(stats.fees?.usd, stats.fees?.khr)}`)]
+  if (!fees.length) lines.push(bi('No expense recorded on this day.', 'គ្មានចំណាយបានកត់ត្រាក្នុងថ្ងៃនេះទេ។'))
   for (const fee of fees) lines.push(`• ${cleanLine(fee.fee_type)}${fee.label ? ` — ${cleanLine(fee.label, 90)}` : ''}: ${money(fee.amount_usd, fee.amount_khr)}`)
   return lines.join('\n')
 }
+
 async function inventoryReport(env: Env): Promise<string> {
   const db = getDb(env)
   const rows = await db.prepare(`SELECT name, stock_quantity, low_stock_threshold, out_of_stock_threshold FROM products WHERE is_active = 1 AND COALESCE(stock_quantity, 0) <= COALESCE(low_stock_threshold, 10) ORDER BY COALESCE(stock_quantity, 0) ASC, name ASC LIMIT 12`).all<{ name: string; stock_quantity: number; low_stock_threshold: number; out_of_stock_threshold: number }>()
-  const lines = ['📦 Low-stock report']; if (!rows.length) return `${lines[0]}\nNo active product is at or below its low-stock threshold.`
-  lines.push(`${rows.length} item(s) need attention:`)
-  for (const row of rows) { const status = Number(row.stock_quantity || 0) <= Number(row.out_of_stock_threshold || 0) ? 'OUT' : 'LOW'; lines.push(`• [${status}] ${cleanLine(row.name, 120)} — ${Number(row.stock_quantity || 0)} left (alert at ${Number(row.low_stock_threshold || 10)})`) }
+  const title = reportTitle('📦', 'Low stock', 'ស្តុកទាប')
+  if (!rows.length) return `${title}\n${bi('No active product is at or below its alert level.', 'គ្មានផលិតផលសកម្មណាមួយស្តុកទាបទេ។')}`
+  const lines = [title, labeled('products', rows.length)]
+  for (const row of rows) {
+    const out = Number(row.stock_quantity || 0) <= Number(row.out_of_stock_threshold || 0)
+    lines.push(`• ${out ? bi('OUT', 'អស់ស្តុក') : bi('LOW', 'ស្តុកទាប')} — ${cleanLine(row.name, 120)} — ${Number(row.stock_quantity || 0)} (⚠ ${Number(row.low_stock_threshold || 10)})`)
+  }
   return lines.join('\n')
 }
+
 async function inventorySummaryReport(env: Env): Promise<string> {
   const row = await getDb(env).prepare(`SELECT
     COUNT(*) AS products,
@@ -149,10 +236,49 @@ async function inventorySummaryReport(env: Env): Promise<string> {
     COALESCE(SUM(CASE WHEN COALESCE(stock_quantity, 0) <= COALESCE(out_of_stock_threshold, 0) THEN 1 ELSE 0 END), 0) AS out_of_stock,
     COALESCE(SUM(CASE WHEN COALESCE(stock_quantity, 0) > COALESCE(out_of_stock_threshold, 0) AND COALESCE(stock_quantity, 0) <= COALESCE(low_stock_threshold, 10) THEN 1 ELSE 0 END), 0) AS low_stock
     FROM products WHERE is_active = 1`).get<{ products: number; units: number; out_of_stock: number; low_stock: number }>()
-  return ['📦 Inventory summary', `Active products: ${Number(row?.products || 0)}`, `Units on hand: ${Number(row?.units || 0)}`, `Low stock: ${Number(row?.low_stock || 0)} · Out of stock: ${Number(row?.out_of_stock || 0)}`, 'Use /stock for the low-stock product list.'].join('\n')
+  return [
+    reportTitle('🏷️', 'Inventory', 'ស្តុក'),
+    labeled('activeProducts', Number(row?.products || 0).toLocaleString()),
+    labeled('unitsOnHand', Number(row?.units || 0).toLocaleString()),
+    `${label('lowStock')}: ${Number(row?.low_stock || 0)} · ${label('outOfStock')}: ${Number(row?.out_of_stock || 0)}`,
+    `▸ /stock — ${bi('the product list', 'បញ្ជីផលិតផល')}`,
+  ].join('\n')
 }
-function commandHelp(): string { return ['🤖 Business OS reports', '/today — today’s sales, fees, and stock movements', '/sales — today’s sales with items, prices, and cashiers', '/fees — today’s fee records', '/inventory — stock totals and health', '/stock — low-stock products', '/help — this command list'].join('\n') }
-function normalizeCommand(text: string): string { return String(text || '').trim().split(/\s+/)[0].toLowerCase().replace(/@[^\s]+$/, '') }
+
+// ---- Command dispatch (S4-9) ----------------------------------------------
+// Pure-ish and exported so scripts/test-telegram-bilingual-pure.cjs can drive
+// every command, including the bad-argument and unknown-command paths, with a
+// stubbed D1 and no bot token and no live chat.
+
+/** Commands that accept an optional day argument. */
+const DATED_COMMANDS = new Set(['/report', '/today', '/summary', '/sales', '/fees'])
+
+function unknownCommandReply(command: string): string {
+  return [
+    `🤔 ${bi(`I do not know the command ${command}.`, `មិនស្គាល់ពាក្យបញ្ជា ${command} ទេ។`)}`,
+    '',
+    telegramCommandReference(),
+  ].join('\n')
+}
+
+export async function telegramCommandReply(env: Env, text: string, nowMs: number = Date.now()): Promise<string> {
+  const parts = String(text || '').trim().split(/\s+/)
+  // Group chats deliver "/report@shop_bot"; strip the bot mention.
+  const command = String(parts[0] || '').toLowerCase().replace(/@[^\s]+$/, '')
+  const argument = parts.slice(1).join(' ')
+
+  if (command === '/help' || command === '/start') return telegramCommandReference()
+  if (command === '/inventory') return inventorySummaryReport(env)
+  if (command === '/stock' || command === '/lowstock') return inventoryReport(env)
+  if (!DATED_COMMANDS.has(command)) return unknownCommandReply(command.slice(0, 32))
+
+  const parsed = parseReportDate(argument, businessToday(nowMs))
+  if (!parsed.ok) return parsed.message
+  if (command === '/sales') return salesReport(env, parsed.date)
+  if (command === '/fees') return feesReport(env, parsed.date)
+  return dayReport(env, parsed.date)
+}
+
 
 async function webhookSecretFromToken(token: string): Promise<string> {
   const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(token))
@@ -169,17 +295,17 @@ export async function handleTelegramWebhook(env: Env, update: TelegramUpdate): P
   const message = update?.message; const text = String(message?.text || '').trim(); const chatId = String(message?.chat?.id || '')
   if (!text.startsWith('/') || !chatId) return
   const config = await getTelegramConfig(env)
-  // The configured Telegram chat is the access boundary. It must therefore
-  // be a direct owner chat or a manager-only group, never a staff alerts group.
-  if (commandProblem(config) || chatId !== config.chatId) return
-  const command = normalizeCommand(text)
-  let reply = commandHelp()
-  if (command === '/today' || command === '/summary') reply = formatTodaySummary(await todayStats(env))
-  else if (command === '/sales') reply = await salesReport(env)
-  else if (command === '/fees') reply = await feesReport(env)
-  else if (command === '/inventory') reply = await inventorySummaryReport(env)
-  else if (command === '/stock' || command === '/lowstock') reply = await inventoryReport(env)
-  await postTelegram(config, reply, chatId)
+  // No token means there is no way to reply at all, so say nothing.
+  if (commandProblem(config)) return
+  // THE ACCESS BOUNDARY (S4-9). A Telegram group carries no Business OS
+  // session, so the only thing that can be checked is which chat is asking.
+  // Any chat that is not on the owner's allow-list gets a refusal carrying
+  // nothing but its own chat id -- never a figure, a receipt or a product.
+  if (!config.chatIds.includes(chatId)) {
+    await postTelegram(config, telegramUnauthorizedReply(chatId), chatId)
+    return
+  }
+  await postTelegram(config, await telegramCommandReply(env, text), chatId)
 }
 export async function configureTelegramWebhook(env: Env): Promise<void> {
   const config = await getTelegramConfig(env); const problem = commandProblem(config)
@@ -273,7 +399,7 @@ export function formatStockChangeTelegramLines(change: TelegramStockChange): str
   if (change.totalOnHand != null) onHand.push(`all branches ${Number(change.totalOnHand) || 0}`)
   return [
     `Product: ${change.product}`,
-    `Change: ${change.type === 'add' ? '+' : '−'}${quantity}`,
+    `Stock change: ${change.type === 'add' ? '+' : '−'}${quantity}`,
     `Branch: ${change.branch || 'Unassigned'}`,
     change.reason ? `Reason: ${change.reason}` : '',
     change.lot ? `Lot: ${change.lot}` : '',
