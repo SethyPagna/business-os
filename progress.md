@@ -213,15 +213,26 @@ before these numbers existed, so they live here:
 | of those, walk-ins with no `customer_id` | 13 |
 | **distinct customers holding a real balance** | **31** |
 | sales value behind them | $3,490 |
-| `LENGTH(sales_reset_ids)` the log will capture | 269 bytes |
+| `LENGTH(sales_reset_ids)` the log will capture | 269 bytes *(at 45 rows; larger at 48 — see below)* |
 | `loyalty_point_adjustments` / `customer_share_submissions` | 0 / 0 |
 
-**⚠️ THESE NUMBERS ARE A POINT-IN-TIME READING AND HAVE ALREADY DRIFTED.** The shop rang up 6 more sales
-during the deploy preparation: 15,053 → **15,059** total and 45 → **48** accruing, so the affected customer
-count is **31 or more** and 31 is no longer the true figure. It is left above as the number the owner actually
-approved with, which is the honest record of the decision — but any post-deploy report must use the count
-captured at migration time, not this one. The lesson generalises: **a baseline for a live system must be
-captured, never frozen.** Session `ee`'s verifier hardcoded these pre-counts and went red on the live traffic;
+**⚠️ THE FIGURES ABOVE ARE WHAT THE OWNER APPROVED WITH. THE MIGRATION RAN AGAINST DIFFERENT ONES.** The shop
+rang up 6 more sales during deploy preparation. Measured by session `ee` at **2026-09-04T11:26:57Z**,
+immediately before `migrate:remote`:
+
+| | at approval | at migration |
+|---|---|---|
+| `total_sales` | 15,053 | **15,059** |
+| accruing rows | 45 | **48** |
+| **affected customers** | **31** | **34** |
+
+The 31 is kept above deliberately as the honest record of what the owner actually agreed to; **34 is what the
+migration touched.** The owner was told the number moved and why, rather than letting 34 quietly replace 31 in
+a report — they approved a specific number and 3 more customers is the same decision, but not the same figure.
+**34 is still a pre-read**: the authoritative count is the reset log's own account — distinct `customer_id`
+behind the ids in `sales_reset_ids` — and if the two disagree, the log wins.
+
+The lesson generalises: **a baseline for a live system must be captured, never frozen.** Session `ee`'s verifier hardcoded these pre-counts and went red on the live traffic;
 the dangerous version is the one that would have passed, zeroing 48 sales while asserting 45.
 
 The other 15,008 sales are already explicitly `loyalty_accrual = 0` — the old-system import wrote them that
