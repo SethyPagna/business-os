@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
+import { readFileSync, readdirSync } from 'node:fs'
 
 // S4-21: the close guard, DRIVEN rather than pattern-matched. Every
 // assertion below runs the same functions the React hook runs
@@ -227,6 +227,122 @@ await runTest('every shared-Modal call site declares unsavedChanges -- no silent
   // \r tolerated: this repo checks out CRLF (see progress.md's 1755bd6b note).
   assert.match(modal, /\n[ \t]*unsavedChanges: UnsavedChangesDeclaration\r?\n/, 'Modal.unsavedChanges must stay REQUIRED (no `?`)')
   assert.match(modal, /onClick=\{closeGuard\.requestClose\}/, 'the ✕ must go through the guard, not straight to onClose')
+})
+
+// ---------------------------------------------------------------------------
+// The parity sweep. Everything above drives the guard's behaviour; this last
+// pair enumerates the app MECHANICALLY, so "we fixed the ones we thought of"
+// cannot pass. A modal built on shared/Modal.tsx is forced to declare by the
+// compiler (the prop is required). A modal that builds its own `fixed
+// inset-0` chrome has no such forcing function -- this is it.
+//
+// Adding a hand-rolled overlay now costs one of two things: wire the guard,
+// or write down here why this one holds nothing a person could lose. Both are
+// fine. Silence is not.
+// ---------------------------------------------------------------------------
+
+/**
+ * Hand-rolled overlays that deliberately do NOT take the guard, each with the
+ * reason it holds nothing losable. Read as a sentence: "dismissing this
+ * cannot cost anyone work, because ...".
+ */
+const DELIBERATELY_UNGUARDED: Record<string, string> = {
+  // Its entire session is written to a localStorage draft on every keystroke
+  // and restored on reopen -- the file says so itself at the closeIfIdle
+  // comment ("X/backdrop keep the draft (reopen later, shipment intact)").
+  // A "Discard changes?" prompt would be asking about a loss that cannot
+  // happen, and answering Discard would not discard anything.
+  'components/inventory/FastStockInModal.tsx': 'the whole session persists as a work draft and is restored on reopen',
+  // Confirmations and choosers: what they hold is the question itself, not
+  // authored content. Reopening costs one tap.
+  'components/sales/SaleStatusConfirmModal.tsx': 'a confirmation -- its two toggles are gates on the action, not typed work',
+  'components/shared/RenameCascadeModal.tsx': 'a three-way choice dialog with nothing typed into it',
+  'components/pos/QuickAddModal.tsx': 'a chooser -- no fields at all',
+  'components/pos/POS.tsx': 'both overlays are a status chooser and a receipt viewer; the cart lives on the page, not in them',
+  // Credential entry. Nothing authored is at risk and a retyped six-digit
+  // code costs seconds; prompting mid-authentication is noise, not safety.
+  'components/utils-settings/OtpModal.tsx': 'transient credential entry -- a retyped code, never authored content',
+  // Read-only viewers and page chrome.
+  'components/catalog/ProductDetailFlyout.tsx': 'read-only viewer',
+  'components/catalog/PublicCatalogPage.tsx': 'storefront drawers -- the cart and wishlist persist, the drawers only show them',
+  'components/inventory/ProductDetailModal.tsx': 'read-only viewer',
+  'components/navigation/Sidebar.tsx': 'navigation chrome, not a modal',
+  'components/products/surfaces/ProductDescriptionDetailModal.tsx': 'read-only viewer',
+  'components/products/surfaces/ProductDetailModal.tsx': 'read-only viewer',
+  'components/products/surfaces/ProductDetailReport.tsx': 'read-only report',
+  'components/receipt-settings/ReceiptSettings.tsx': 'the overlay is the phone-sized PREVIEW of the settings; the settings form itself is the page',
+  'components/returns/ReturnDetailModal.tsx': 'read-only viewer',
+  'components/shared/ImageGalleryLightbox.tsx': 'an image lightbox',
+  'components/shared/kit/Fold.tsx': 'a layout primitive',
+  'components/users/UserDetailSheet.tsx': 'read-only viewer',
+  'components/utils-settings/AuditLog.tsx': 'the overlay is a read-only detail of one log line',
+  // NOT a judgement that these are safe -- they were out of this lane's
+  // reach. Each was held dirty by another session in the shared checkout
+  // when this pass ran, and SaleDetailModal in particular DOES carry losable
+  // work (its "Update status" notes and "Record payment" fields, around
+  // line 1476). Whoever lands those files should wire the guard there.
+  'components/sales/SaleDetailModal.tsx': 'NOT REACHED -- held by another lane; it has an Update-status/Record-payment form that still needs the guard',
+  'components/pos/ProductDetailSheet.tsx': 'NOT REACHED -- held by another lane; a viewer, so read-only in all likelihood',
+  'components/dashboard/Dashboard.tsx': 'NOT REACHED -- another lane owns this file this cycle',
+}
+
+function handRolledOverlays(): string[] {
+  const root = new URL('../src/components/', import.meta.url)
+  const found: string[] = []
+  const walk = (dir: URL, prefix: string): void => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      if (entry.isDirectory()) { walk(new URL(`${entry.name}/`, dir), `${prefix}${entry.name}/`); continue }
+      if (!entry.name.endsWith('.tsx')) continue
+      const source = readFileSync(new URL(entry.name, dir), 'utf8')
+      // The signature of an overlay someone built by hand rather than
+      // through shared/Modal.tsx.
+      if (source.includes('fixed inset-0')) found.push(`components/${prefix}${entry.name}`)
+    }
+  }
+  walk(root, '')
+  return found.sort()
+}
+
+await runTest('EVERY hand-rolled overlay is either guarded or written down as not needing it', () => {
+  const overlays = handRolledOverlays()
+  assert.ok(overlays.length > 20, 'the sweep must actually find the overlays')
+  const undeclared: string[] = []
+  for (const file of overlays) {
+    // These two ARE the mechanism, not consumers of it.
+    if (file === 'components/shared/Modal.tsx' || file === 'components/shared/UnsavedChangesPrompt.tsx') continue
+    const source = readFileSync(new URL(`../src/${file}`, import.meta.url), 'utf8')
+    if (source.includes('useCloseGuard')) continue
+    if (DELIBERATELY_UNGUARDED[file]) continue
+    undeclared.push(file)
+  }
+  assert.deepEqual(undeclared, [], 'a hand-rolled overlay must take the guard or say in DELIBERATELY_UNGUARDED why it does not')
+
+  // The exclusion list has to rot loudly, not quietly: an entry that no
+  // longer names a hand-rolled overlay, or names one that has since been
+  // guarded, is a stale excuse and fails here.
+  const stale = Object.keys(DELIBERATELY_UNGUARDED).filter((file) => {
+    if (!overlays.includes(file)) return true
+    return readFileSync(new URL(`../src/${file}`, import.meta.url), 'utf8').includes('useCloseGuard')
+  })
+  assert.deepEqual(stale, [], 'DELIBERATELY_UNGUARDED lists a file that is no longer an unguarded overlay')
+  for (const [file, reason] of Object.entries(DELIBERATELY_UNGUARDED)) {
+    assert.ok(reason.trim().length > 15, `${file} needs a real reason, not a placeholder`)
+  }
+})
+
+await runTest('a guarded overlay always RENDERS the prompt it raises', () => {
+  // The failure this catches is worse than no guard at all: requestClose
+  // sets promptOpen and returns WITHOUT closing, so a modal that never
+  // renders <UnsavedChangesPrompt> becomes impossible to dismiss once it is
+  // dirty. Nothing in the type system says the two go together.
+  const missing = handRolledOverlays().filter((file) => {
+    // Modal.tsx renders the prompt for all its children; the prompt is itself.
+    if (file === 'components/shared/Modal.tsx') return false
+    if (file === 'components/shared/UnsavedChangesPrompt.tsx') return false
+    const source = readFileSync(new URL(`../src/${file}`, import.meta.url), 'utf8')
+    return source.includes('useCloseGuard') && !source.includes('<UnsavedChangesPrompt')
+  })
+  assert.deepEqual(missing, [], 'these call useCloseGuard but never render the prompt -- they would trap the operator')
 })
 
 process.exit(failed ? 1 : 0)
