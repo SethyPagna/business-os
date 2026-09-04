@@ -537,7 +537,12 @@ export function hourRangeLabel(hh: string): string {
   return /^\d{2}$/.test(h) ? `${h}:00–${h}:59` : String(hh)
 }
 
-/** Monday date -> "mm/dd/yyyy – mm/dd/yyyy"; 'YYYY-MM' -> 'mm/yyyy'; a day -> mm/dd/yyyy. */
+/**
+ * Monday date -> "dd/mm/yyyy – dd/mm/yyyy"; a day -> dd/mm/yyyy (both via the
+ * injected fmtDate, so they follow the app-wide day-first convention).
+ * 'YYYY-MM' -> 'mm/yyyy', which is left alone deliberately: a month/year
+ * label has no day in it, so there is no order to invert.
+ */
 export function periodLabel(row: { period: string; date_from: string; date_to: string }, granularity: ReportGranularity, fmtDate: (iso: string) => string): string {
   if (granularity === 'month') {
     const m = row.period.match(/^(\d{4})-(\d{2})$/)

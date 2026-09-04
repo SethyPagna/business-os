@@ -275,7 +275,7 @@ function formatReviewDateTime(value: unknown): string {
   if (!value) return '-'
   const raw = String(value)
   const date = new Date(raw.includes('T') ? raw : `${raw}Z`)
-  // mm/dd/yyyy + 24-hour in Phnom Penh business time (fmtTime). A bare
+  // dd/mm/yyyy + 24-hour in Phnom Penh business time (fmtTime). A bare
   // toLocaleString() rendered the viewer's locale + timezone (dd/mm, 12-hour).
   return Number.isNaN(date.getTime()) ? String(value) : fmtTime(raw)
 }

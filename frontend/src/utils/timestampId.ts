@@ -1,7 +1,7 @@
 // Identifier timestamps for client-minted receipt/return numbers:
 // YYYYMMDD-HHMMSS in the business timezone (Asia/Phnom_Penh, 24-hour) --
 // user, Aug 30 2026: receipt ids encode the sale's own date+time. This
-// compact form is ONLY for identifiers; displayed dates stay mm/dd/yyyy
+// compact form is ONLY for identifiers; displayed dates are dd/mm/yyyy
 // 24-hour via utils/formatters.ts. Hand-synced server copy:
 // cloudflare/src/lib/receiptNumber.ts (fixed UTC+7 arithmetic, same
 // output); keep the two in step.

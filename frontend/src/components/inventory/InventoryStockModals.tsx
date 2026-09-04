@@ -252,7 +252,8 @@ export default function InventoryStockModals({
   }, [showBatchPicker, adjustTargetId, adjustBranchId, adjustForm.type])
   // Default to "new batch" the first time the picker has something to
   // show for an add -- matches the decided default ("Default batch
-  // `n+1: mm/dd/yyyy` stays the default for add stock"). Remove has no
+  // `n+1: mm/dd/yyyy` stays the default for add stock"). That quote is from
+  // Sep 3; the label itself became day-first on Sep 4. Remove has no
   // such default (no batch-less removals), so it's left blank until the
   // person actually picks one. Only fires once per target/branch/type
   // combo (guarded by the empty-string check) so it doesn't stomp a

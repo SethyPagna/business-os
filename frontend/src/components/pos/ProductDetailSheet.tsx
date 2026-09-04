@@ -107,7 +107,7 @@ const BATCH_CHOICES_PAGE_SIZE = 6
 type PickerBatch = ProductBatch & { __productId?: number }
 
 // Human-readable label for one lot/batch pill -- lot code when the batch has
-// one, otherwise the shared "Batch n: mm/dd/yyyy" default (batchLabel.ts),
+// one, otherwise the shared "Batch n: dd/mm/yyyy" default (batchLabel.ts),
 // falling back further to a bare id so the pill is never blank.
 function formatBatchLabel(batch: ProductBatch, posCopy: PosCopy): string {
   return batchDisplayLabel(batch, posCopy('Batch', 'បាច់'))

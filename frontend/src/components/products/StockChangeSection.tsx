@@ -478,9 +478,14 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
   // lives once on a divider header and each card need only show its time
   // (user, Aug 30 2026: "for date just show outside separating the change by
   // day... in the card just put the time as we have date to divide outside").
-  // fmtDate is mm/dd/yyyy in business time, so grouping by that string IS a
-  // business-day grouping. Rows already arrive sorted created_at desc, so
-  // iteration preserves both the day order and the within-day order. A day
+  // fmtDate renders one business day as exactly one string (dd/mm/yyyy since
+  // Sep 4 2026), so grouping by that string IS a business-day grouping. What
+  // makes that safe is that the mapping is one-to-one per day -- NOT the
+  // field order, which is why going day-first did not disturb this. Nothing
+  // here sorts or compares the rendered text: rows already arrive sorted
+  // created_at desc and iteration preserves the day and within-day order.
+  // Keep it that way; a comparison on a display string would break the
+  // moment the format moves again. A day
   // can straddle a page edge -- that's fine, the header just reappears on the
   // next page, same as every other server-paged day-grouped list here.
   const dayGroups = useMemo(() => {

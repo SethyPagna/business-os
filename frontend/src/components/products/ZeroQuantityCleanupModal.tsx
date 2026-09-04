@@ -147,7 +147,7 @@ export default function ZeroQuantityCleanupModal({
   const formatZeroSince = (value: string | null): string => {
     if (!value) return T('unknown', 'Unknown')
     if (formatDate) return formatDate(value)
-    // Shared mm/dd/yyyy formatter -- bare toLocaleDateString() follows the
+    // Shared dd/mm/yyyy formatter -- bare toLocaleDateString() follows the
     // viewer's locale (dd/mm on non-US devices).
     try { const d = new Date(value); return Number.isNaN(d.getTime()) ? value : fmtDate(d) } catch (_) { return value }
   }
