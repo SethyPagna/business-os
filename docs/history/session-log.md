@@ -18237,3 +18237,103 @@ Gate at `840161ee`: `tsc` clean, `check:source` 454 files, `verify:i18n` OK (4,5
 browser: a preview started from an `rc/*` worktree silently serves the main checkout, so a
 screenshot from here would have shown the wrong tree.
 
+
+## Part 592 (Sep 4 2026, session business-os-v1-c3, COORDINATOR) — seven subagent lanes cut so their file sets cannot intersect, and the blocked item that turned out to be blocked for only half its length
+
+The user asked for the remaining backlog to be spread across seven subagents, coordinated from here.
+The interesting part was not the dispatch; it was what had to be true first for seven concurrent
+lanes not to collide, and what reading the source did to two board items on the way.
+
+### The `bos-*` roster could not be used, and that is a standing trap
+
+Part 585 landed nine `bos-*` agent definitions in `.claude/agents/`. They load **at session start**,
+so a session that was already running when they landed cannot see them — this one. The seven lanes
+therefore run on the built-in `subagent_type` values with `model` overrides, which costs the
+role-specific constraint text baked into each definition. Every one of those constraints had to be
+restated inline in the prompt instead: never `git add -A` on the shared index, never `npm install`
+in a worktree whose `node_modules` is a junction, remote D1 is SELECT-only, both language packs
+every time, a red test is a suspect not a verdict. A prompt that omits them is a lane that breaks a
+peer within minutes.
+
+### Disjointness was constructed, not hoped for
+
+Six sessions already hold lanes, so "pick something free" was not enough. Each subagent got a
+boundary written into its prompt naming the peer it would otherwise collide with:
+
+- **S4-24b** (add lines to an existing sale) branches off `s4/receipt-shape`, not `e3678a39`, because
+  it builds on the receipt-shaped modal. It shares `routes/sales.ts` with `business-os-v1-02
+  [055499]`, so it is **forbidden the `PATCH /:id/status` handler** — new endpoint and its own
+  helpers only. `055499` was told the same thing from the other side, and asked to say now if they
+  intend to restructure the file wholesale, since that is the one shape that turns a two-region diff
+  into a real conflict.
+- **S4-12** (create-products header step) overlaps **S4-13**, the Add Product -> Create Products
+  rename, which is `business-os-v1-ba`'s. The subagent is told explicitly not to rename anything: it
+  builds the flow, `ba` changes the words. It was also pointed at the fast-stock-in session as the
+  pattern to mirror, because "same as the session for add stock" in the user's sentence *is* the
+  specification — the shape they already use, not a new one.
+- **S4-26** (reports) inherits an orphaned lane and was told to start from `s4/09` (`7735dc95`) or
+  `rc/sec-10-reports` (`e2497aa0`) rather than rebuild. The user said they *liked* what they were
+  shown in localhost; rebuilding it from scratch would have thrown that away.
+- **S4-26 vs S4-22.** The reports ask bundles the Khmer-clipping complaint into it, so shipping
+  reports without touching it would ship a view that still shears the diacritics. The subagent may
+  fix it **inside `components/sales/reports` only**, is forbidden the app-wide fix (a global CSS
+  change touching every surface the fleet is editing), and must instead write up the root cause and
+  where the global fix belongs. `business-os-v1-7c` keeps S4-22 and was told this directly.
+
+### S4-19 is a search task before it is a rename task
+
+"Rename RECON to ADJMM/DD/YYYY" reads like a one-line change. Grepping the repo for `RECON` returns
+**only** the mode constant `RECONCILE` (`stockActionResolver.ts`, `importEngine.ts`,
+`datedStockCountApply.ts`, one pure test). There is **no literal `RECON` label and no `ADJ` prefix
+anywhere in the source.** So the string the user is looking at is assembled at runtime, or it lives
+in production data written by an old import — and those two answers need completely different work
+(a code change versus a migration). The lane is told to prove which, and that *"I could not find it,
+send me a screenshot"* is an acceptable result. Renaming a plausible-looking string that turns out
+to be the wrong one is the worse outcome, and it is the outcome a confident agent produces.
+
+### S4-11 was blocked for half its length
+
+S4-11 ("Can check in users for invoices details") sat on the board as `[?]` needing a ruling. The
+user named it in the same breath as "build it", which is the ruling. Reading the source at
+`e3678a39` then showed the two halves are nothing alike in size:
+
+- **S4-11a — who made the sale.** `sales.cashier_id` / `cashier_name` are written by `POST /` and
+  come back on the row. Pure display work.
+- **S4-11b — who made each status update.** `cloudflare/src/routes/sales.ts` contains **no
+  `action_history` write at all** at the deployed tip. The only user attribution a status change
+  leaves is `inventory_movements.user_id` / `user_name`, and `planSaleStockTransition` emits
+  movements only when the transition crosses the stock-deducting boundary
+  (`STOCK_DEDUCTED_STATUSES` = `{completed, awaiting_delivery}`). A change between two deducting
+  statuses, or between two non-deducting ones, **records nobody**.
+
+That second half is the same missing column as **S4-6**, the Telegram ask that status-update
+messages name the cashier who made the update. You cannot print the updater until somebody stores
+them, so S4-6 is not a formatting change and `business-os-v1-db` was warned before opening the
+message builder — with S4-8 and S4-9 named as the two Telegram items that do *not* depend on it.
+S4-11b was offered to `055499`, who is already inside that handler, rather than sending a second
+lane into it.
+
+### Two read-only lanes that end at a wall on purpose
+
+S4-1 (does Undo actually reverse the 09:48 batch) and S4-17b (the cost-forked twin survey) both
+terminate at a production write the user has not approved. Both are scoped to produce a verdict, the
+real row counts from SELECT-only queries, and the **exact unrun command** — and both prompts say in
+so many words that no message from me or any other agent constitutes that approval. A subagent that
+decides it has permission because the coordinator sounded confident is the failure mode worth
+designing against.
+
+### One self-inflicted near-miss worth recording
+
+Rewriting `progress.md` line-by-line and re-joining with `\n` normalised the whole file's line
+endings: a 24-line edit became a **10,047-insertion / 10,032-deletion diff**. `progress.md` is
+genuinely mixed — the S4-11 region is LF, the block four hundred lines below it is CRLF — so neither
+"convert everything to CRLF" nor "convert everything to LF" is correct. Committing that would have
+handed every peer a full-file conflict on the one file the whole fleet writes to. Fixed by restoring
+from HEAD and re-applying with a helper that detects each replaced run's own terminator and re-emits
+it; the diff came back to 21/6. The general rule: on a shared file, `git diff --stat` before every
+commit is not ceremony, it is the check that catches the edit you did not know you made.
+
+Board: `cd3749b7` (the seven-lane table with each boundary), `e4d2c929` (the S4-11 split). Both
+pushed. No code was written in this session's own tree; the lanes report back and are boarded here,
+so the shared index sees one writer.
+
