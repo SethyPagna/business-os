@@ -3667,6 +3667,60 @@ whole evidence that the guard guards.
   be byte-identical in both packs because the user types it to confirm. One nit for a later pass:
   `google_login` keeps the English word "login" that its siblings `google_signin` and
   `login_with_google` both drop.
+### The cost mean applies only to similar costs — and the zero half was already true
+
+Owner, mid-run: *"the add and divide is only for those similar costs...not the 0 cost etc..."*
+
+**Half of it was already true, and that was established by running the function, not by reading its
+comment** — the comment claimed the behaviour, which is exactly the kind of claim that has been
+wrong before:
+
+```
+10 + 0      -> 10        50.70 + 0   -> 50.70      10 + ''  -> 10
+10 + null   -> 10        10 + {}     -> 10         0 + 0    -> 0
+10 + 20 + 0 -> 15   (the zero is dropped, not averaged in)
+```
+
+S4-17's `value > 0` filter (`b1463d4b`) already reads 0/blank/null as **not recorded**. Confirmed
+too that `resolveMergedCost` is the **only** place a cost mean is computed — no path averages
+independently — and that the separate rule keeping an operator's explicitly typed 0 as 0 is
+deliberate and stays.
+
+**The missing half is real:** `2 + 200` still returns `101`. Handed to S4-32 rather than done here,
+because it already owns both copies of `productDetailRule.ts` and a second editor would collide.
+
+#### The threshold was measured against production before it was chosen
+
+353 active merge-candidate groups (same normalized name + same barcode, more than one row):
+
+| Cost spread within the group | Groups |
+|---|---|
+| only one costed row, or none — **never averaged at all** | 258 |
+| within 10% — genuinely similar | 79 |
+| within 50% | 15 |
+| up to 3× | 1 |
+| **more than 3×** | **0** |
+
+**The worst real case in the entire catalogue is 1.58×**: `maybelline concealer eraser n.110` at
+$5.00 vs $7.90, then a Charlotte eyeshadow at $27 vs $38 and three Estée Lauder Double Wear shades.
+Every one is **the same product restocked at a different supplier price**, not two products wrongly
+grouped — so averaging them is correct and the owner's worry does not currently bite.
+
+So the guard is set at **2×**, which **fires on nothing today** and exists purely to catch a future
+anomaly. That is stated in the ruling and must be stated in the code comment with these numbers,
+because a threshold whose whole point is that it never fires is one a later session will otherwise
+"tune" straight into the legitimate $5/$7.90 pair.
+
+- Above the threshold: **take the highest, not the mean.** The file's own stated principle is that
+  `roundCostUp4` rounds up "so an averaged cost can never understate what was paid" — understating
+  cost overstates profit, which is the direction that hurts. Blending $5 with a suspect $200 into
+  $102 understates nothing but invents a figure nobody ever paid.
+- **The guard must be visible, not silent.** A guard nobody can see is precisely how the 0-cost case
+  survived as long as it did. If a warning cannot be threaded without widening the lane, the
+  resolver returns the flag and the gap is reported rather than swallowed.
+- Tests pinned red-before/green-after, including **the real production pair $5.00/$7.90 asserted NOT
+  to trip the guard**, and the seven zero/blank/null cases asserted unchanged throughout — if any of
+  those flips, the change broke the half that was already correct.
 ### Now / gate
 
 - ~~**Deploy**~~ — **DONE Aug 31 (Part 538): production is `242c2b75` / Worker version
