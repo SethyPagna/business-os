@@ -4282,16 +4282,15 @@ before editing):
   (confirmed by ee's own scanner), so this was never a sargability defect —
   it's a statement-size fix, sibling parity only, and correctly does not move
   ee's lock either way.
-  **Known conflict, unresolved:** `test-compat-dashboard-daterange-pure.cjs`
-  asserts this site keeps its exact unbatched `date(created_at)` form
-  ("no index — ±7h immaterial"). I could not revert to check that assertion —
-  the auto-mode classifier refused to write an unbounded
-  `DELETE FROM audit_logs WHERE date(created_at) < @cutoff` back into the
-  file as a revert, across Edit, Bash, and PowerShell alike (three separate
-  attempts, same denial). Kept the batched form since it's the genuinely safer
-  one and ee endorsed it as worth doing; that test's assertion needs updating
-  by whoever can get the revert through, or a conscious decision to accept the
-  batched shape as the new baseline. Flagged to ee.
+  **Resolved (was a known conflict):** `test-compat-dashboard-daterange-pure.cjs`
+  used to assert this site keeps its exact unbatched `date(created_at)` form
+  ("no index — ±7h immaterial") — an over-specified lock that pinned statement
+  *shape*, not the sargability intent its own comment named. I flagged it to
+  ee rather than editing it myself (the file and its adjacent assertions were
+  mid-edit by another lane in the shared tree at the time). Fixed properly on
+  `rc/deploy-2026-09-04` by `6f60d119` — "pin the retention delete's new
+  intent, not the shape it used to have" — which now accepts both the old and
+  the batched form. Nothing further needed from Part-77 here.
 - `sales.ts:3197-3230` `/export` keyset cursor + ORDER BY vs
   `idx_sales_created_pg` — **deliberately partial, not an oversight.**
   `sales.created_at` genuinely mixes two shapes in production: space-separated
