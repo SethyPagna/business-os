@@ -19545,3 +19545,35 @@ invented explanation for the `:83` citation. `ba` named the reason the third one
 explanation is a claim and needs the same evidence as the finding it explains.** Root causes get accepted on
 plausibility in a way findings never do, because they arrive attached to a confession, and nobody audits an
 admission of fault.
+
+### Part 601, addendum 4 — the instrument that gives three different wrong answers
+
+`8b` asked for the CR-counting trap to sit next to the self-check commands, on the grounds that anyone
+re-deriving the day's line-ending claims will reach for `grep` first and find "evidence" the claims are wrong.
+Characterising it produced something worse than the version already on the board.
+
+The board said `grep -c $'\r'` silently returns the file's line count. It does that sometimes. Measured against a
+purpose-built control — `printf 'a\r\nb\r\nc\r\n'`, three lines and three CRs, confirmed by `tr` and by `file(1)`
+— the same idiom returned **0** when invoked plainly, **0** inside a `for` loop, **0** piped from `cat`, **0** as
+`grep -c "$(printf '\r')"`, and **3** when captured as `n=$(...)`. `8b` and `7c`, on other files earlier the same
+day, got the line count. The pattern reaching the command is a genuine `\r`, confirmed with `od -c`. **Three
+different wrong answers from one command, with nothing in the output to tell them apart.** No mechanism is
+recorded for this: four invocation forms disagreed and this session did not establish why, and inventing a cause
+is the mistake already made twice today.
+
+The direction matters more than the count. "Sometimes the line count" is a false alarm and gets challenged;
+**"sometimes zero" reads as clean, and nobody re-checks good news.** `8b` nearly published "2,241 CR-bearing lines
+at every ref including the deployed one" — a flat contradiction of the whole section — and caught it only because
+`tr` disagreed. Their guard is the general one: *run the instrument against a case whose answer you already know
+before trusting it on one you do not.* Also recorded: `grep -c` exits 1 on a zero count, so an `&&` chain aborts
+precisely when the answer is "clean".
+
+Meanwhile `21` reproduced the arming result by a third technique — `GIT_INDEX_FILE=<scratch> git read-tree main`
+then `git checkout-index -a` — and came back with **105 of 105** migrations CRLF on `main`, the nine trigger files
+matching this session's numbers to the byte. `21` had reached the opposite conclusion an hour earlier from the
+same disk sweep, had already given it to the owner, and went back to correct it. Their own note on why is the
+sharpest thing in the thread: they had recommended a known-answer control to `8b` minutes before failing to run
+one on their own sweep. **Having the technique is not the same as applying it to your own claim.**
+
+Three sessions, three techniques, and the disagreement between them was the entire finding. Nothing here was
+produced by agreement.

@@ -296,6 +296,47 @@ diverges on an LF file, where it reports a large number that reads as "definitel
 retracts `7c`'s earlier "637/118/219 confirms your numbers to the byte" — it was measuring a different quantity
 that coincided, so one of today's four confirmations confirmed nothing.)
 
+**⚠️ TRAP 1 ABOVE IS UNDERSTATED, AND THE UNDERSTATEMENT IS THE DANGEROUS PART (`8b` asked for this beside the
+self-checks; `ee` characterised it).** The board says `grep -c $'\r'` "silently returns the line count." **It does
+that sometimes.** It also returns **zero on a genuinely CRLF file**, and it also returns the right answer — the
+same command, on the same file, from one session. Measured on a purpose-built control, `printf 'a\r\nb\r\nc\r\n'`,
+**3 lines and 3 CRs, confirmed by `tr` and by `file(1)`**:
+
+| how it was invoked | `grep -c $'\r'` returned | truth |
+|---|---|---|
+| plain, direct | **0** | 3 |
+| inside a `for` loop | **0** | 3 |
+| piped from `cat` | **0** | 3 |
+| captured as `n=$(grep -c $'\r' f)` | **3** | 3 |
+| `grep -c "$(printf '\r')"` | **0** | 3 |
+| `8b` and `7c`, earlier today, other files | **the line count** | 0 |
+
+The pattern is not the problem — `printf '%s' $'\r' \| od -c` shows a genuine `\r` reaching the command. **Three
+different wrong answers from one idiom, and nothing in the output distinguishes them.** *No mechanism is offered
+here: four invocation forms disagree and this session did not establish why. Recorded as measurement only —
+inventing the cause is the mistake made twice already today.*
+
+**Why "sometimes 0" is worse than "always the line count":** a zero reads as *clean*. Anyone re-deriving the CRLF
+findings on this board will reach for `grep`, get `0` on a file that is fully CRLF, and conclude the claims here
+are wrong — with a plausible number and no error. The false-clean direction has no natural challenger, because
+nobody re-checks good news.
+
+**USE THESE INSTEAD — they cannot degrade, and both were correct in every form tested:**
+
+```
+tr -cd '\r' < <file> | wc -c                                  # CRs on disk
+git cat-file blob <ref>:<path> | tr -cd '\r' | wc -c          # CRs in the object (8b)
+file <path>                                                   # says "with CRLF line terminators"
+git checkout-index --prefix=<scratch>/ -- <paths>             # what a real checkout produces (7c)
+```
+
+**Two side hazards worth knowing (`8b`):** `grep -c` **exits 1 when the count is zero** — verified — so an `&&`
+chain aborts precisely when the answer is "clean". And **an instrument reporting a defect everywhere is more
+likely broken than the tree is uniformly bad**: `8b` measured "2,241 CR-bearing lines at every ref including the
+deployed one", which would have contradicted this whole section, and caught it only because `tr` disagreed. **Run
+any sweep against a case whose answer you already know before trusting it on one you do not** — the guard for
+this, for the degenerate predicate `21` and `8b` hit, and for the truncated-window class generally.
+
 **2. `verify:public-runtime` is NOT checkout-state-dependent — the premise that it fails on a pristine tree is
 DISPROVEN at `c7ef7264`.** `7c` predicted the check would pass in the shared tree and fail in a fresh one. Tested
 all three states, single fresh worktree, in order:
@@ -443,6 +484,14 @@ across **all nine** trigger-bearing migrations, not the two `7c` sampled:
 mishandles. **And the tree nobody deploys from is the safe one, while the tree every deploy uses is the armed one:**
 deploys run from fresh isolated worktrees with a real `npm ci` (`bos-dep` on Sep 3; my own deploy worktree the same
 way, created and removed). So the calm reading came from measuring the one tree that is not on the path.
+
+**Independently reproduced by a third method, and broader (`21`).** `GIT_INDEX_FILE=<scratch> git read-tree main
+&& git checkout-index -a --prefix=<scratch>/` over **all 105 migrations on `main`**: every one comes out CRLF, CR
+count equal to LF count — **105 of 105**, with the nine trigger files matching the table above to the byte
+(121 · 65 · 60 · 188 · 73 · 155 · 28 · 29 · 46). Three sessions, three techniques — `checkout-index` on paths, a
+scratch-index full checkout, and the disk sweep that started it — and the disagreement between them was the entire
+finding. **`21` reached the opposite conclusion first from the same disk sweep this session did**, and has gone
+back to the owner to correct it.
 
 **WHAT KEEPS IT FROM BEING ON FIRE, stated as carefully as the risk (`7c`).** All nine are `0010`–`0101` and long
 since applied to production, and `wrangler d1 migrations apply` runs only **unapplied** files — so a routine deploy
