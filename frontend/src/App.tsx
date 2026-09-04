@@ -1,4 +1,5 @@
 import { useMobileSectionNavMode } from './utils/sectionNavPreference.ts'
+import { getHubPageFromLocation } from './components/shared/hubNavigation.ts'
 import { Component, Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react'
 import type { ComponentType, ErrorInfo, ReactNode } from 'react'
 import { createPortal } from 'react-dom'
@@ -1228,14 +1229,21 @@ function useMobileHeaderAutoHide(page: string): boolean {
   const [visible, setVisible] = useState(true)
   const scrollAnchorRef = useRef(0)
   const frameRequestedRef = useRef(false)
+  const scrollEpochRef = useRef(0)
 
   // Entering a page -- including switching between two already-mounted
   // pages -- always starts with the bar shown, and resets the anchor so
   // the next scroll delta is measured from a fresh baseline instead of
   // whatever position the previously active page happened to leave behind.
   useEffect(() => {
-    setVisible(true)
-    scrollAnchorRef.current = 0
+    const reveal = () => {
+      setVisible(true)
+      scrollAnchorRef.current = 0
+      scrollEpochRef.current += 1
+    }
+    reveal()
+    window.addEventListener(APP_NAVIGATION_EVENT, reveal)
+    return () => window.removeEventListener(APP_NAVIGATION_EVENT, reveal)
   }, [page])
 
   useEffect(() => {
@@ -1255,7 +1263,11 @@ function useMobileHeaderAutoHide(page: string): boolean {
     const handleScroll = () => {
       if (frameRequestedRef.current) return
       frameRequestedRef.current = true
-      window.requestAnimationFrame(update)
+      const epoch = scrollEpochRef.current
+      window.requestAnimationFrame(() => {
+        if (epoch !== scrollEpochRef.current) { frameRequestedRef.current = false; return }
+        update()
+      })
     }
     // capture: true -- the actual scrolling happens on the active
     // `.page-scroll` node nested deep inside <main>, and scroll events
@@ -1772,20 +1784,25 @@ export default function App() {
     }
   }, [notify, t, user])
 
-  const [, setLocationVersion] = useState(0)
+  const [shellLocation, setShellLocation] = useState(() => ({ pathname: window.location.pathname, hash: window.location.hash }))
 
   useEffect(() => {
     if (typeof window === 'undefined') return undefined
-    const handleLocationChange = () => setLocationVersion((value) => value + 1)
-    window.addEventListener('popstate', handleLocationChange)
+    const handleLocationChange = () => setShellLocation({ pathname: window.location.pathname, hash: window.location.hash })
+    // Admin Back can be temporarily rolled back by the dirty guard. Follow its
+    // committed event, so the raw target URL cannot bypass that guard here.
+    const handlePublicLocationChange = () => {
+      if (isPublicCatalogPath(window.location.pathname)) handleLocationChange()
+    }
+    window.addEventListener('popstate', handlePublicLocationChange)
     window.addEventListener(APP_NAVIGATION_EVENT, handleLocationChange)
     return () => {
-      window.removeEventListener('popstate', handleLocationChange)
+      window.removeEventListener('popstate', handlePublicLocationChange)
       window.removeEventListener(APP_NAVIGATION_EVENT, handleLocationChange)
     }
   }, [])
 
-  const pathname = typeof window !== 'undefined' ? (window.location.pathname || '/') : '/'
+  const pathname = shellLocation.pathname
   const isPublicCatalogRoute = isPublicCatalogPath(pathname)
   // '/' resolves through the org's configurable default landing page
   // (Settings > Navigation Layout, settings.default_landing_page) instead of
@@ -1793,7 +1810,7 @@ export default function App() {
   // 'dashboard' itself for an unset/unrecognized value, and the access-guard
   // effect below still won't navigate a user to a page they can't open.
   const requestedAdminPage = pathname === '/'
-    ? normalizePageId(resolveAdminLandingPage(settings.default_landing_page), 'dashboard')
+    ? normalizePageId(getHubPageFromLocation(pathname, shellLocation.hash) || resolveAdminLandingPage(settings.default_landing_page), 'dashboard')
     : normalizePageId(getAdminPageFromPath(pathname), 'dashboard')
 
   useEffect(() => {
