@@ -96,7 +96,6 @@ export default function CancelSaleModal({ label, bulk = false, saving = false, o
             <div className="mt-0.5 truncate text-xs text-gray-400">{label}</div>
           </div>
           <div className="flex shrink-0 items-center gap-1">
-            <button type="button" className="min-h-9 max-w-28 truncate rounded-lg bg-red-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50 sm:hidden" onClick={confirm} disabled={!canConfirm}>{saving ? tr('saving', 'Saving...') : tr('confirm', 'Confirm')}</button>
             <button type="button" onClick={closeIfIdle} className="flex h-8 w-8 flex-shrink-0 items-center justify-center text-gray-400 hover:text-gray-600" disabled={saving}>
               <X className="h-4 w-4" />
             </button>
@@ -161,7 +160,7 @@ export default function CancelSaleModal({ label, bulk = false, saving = false, o
             {tr('cancel_stock_hint', 'Anything not already returned goes back into stock, with a movement note naming this cancellation.')}
           </div>
         </div>
-        <div className="hidden items-center justify-end gap-2 border-t border-gray-200 p-4 dark:border-gray-700 sm:flex">
+        <div className="flex items-center justify-end gap-2 border-t border-gray-200 p-4 dark:border-gray-700">
           <button type="button" className="btn-secondary text-sm" onClick={closeIfIdle} disabled={saving}>
             {tr('keep_sale', 'Keep sale')}
           </button>

@@ -442,7 +442,6 @@ export default function NewSupplierReturnModal({ onClose, onSuccess, notify, fmt
             <p className="truncate text-xs text-gray-500 dark:text-gray-400">{tr('supplier_return_hint', 'Send stock back to supplier and record compensation/loss.')}</p>
           </div>
           <div className="flex shrink-0 items-center gap-1">
-            <button type="button" className="btn-primary min-h-9 max-w-24 truncate px-3 py-1.5 text-xs sm:hidden" onClick={submit} disabled={loading || loadingProducts || submitting}>{submitting ? `${tr('saving_label', 'Saving')}...` : tr('save', 'Save')}</button>
             <button type="button" onClick={closeIfIdle} disabled={submitting} aria-label={tr('close', 'Close')} className="flex h-8 w-8 items-center justify-center text-gray-400 hover:text-gray-600 disabled:opacity-50"><X className="h-4 w-4" /></button>
           </div>
         </div>
@@ -631,7 +630,7 @@ export default function NewSupplierReturnModal({ onClose, onSuccess, notify, fmt
           </div>
         )}
 
-        <div className="hidden items-center gap-2 border-t border-gray-200 p-4 dark:border-gray-700 sm:flex">
+        <div className="flex items-center gap-2 border-t border-gray-200 p-4 dark:border-gray-700">
           <button className="btn-secondary flex-1" onClick={closeIfIdle} disabled={submitting}>{tr('cancel', 'Cancel')}</button>
           <button className="btn-primary flex-1" onClick={submit} disabled={loading || loadingProducts || submitting}>
             {submitting ? `${tr('saving_label', 'Saving')}...` : tr('save', 'Save')}

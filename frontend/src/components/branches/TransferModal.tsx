@@ -963,14 +963,6 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
           <h2 className="min-w-0 truncate text-lg font-bold text-gray-900 dark:text-white">{t('stock_transfer') || 'Stock Transfer'}</h2>
           <div className="flex shrink-0 items-center gap-1">
             <button
-              className="btn-primary min-h-9 max-w-28 truncate px-3 py-1.5 text-xs sm:hidden"
-              type="button"
-              onClick={handleBulkTransfer}
-              disabled={savingBulk || loadingMultiProducts || !fromBranch || !toBranch || selectedCount === 0}
-            >
-              {saving || savingBulk ? (t('saving') || 'Saving...') : (t('transfer') || 'Transfer')}
-            </button>
-            <button
               type="button"
               onClick={closeGuard.requestClose}
               className="flex h-8 w-8 items-center justify-center rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-gray-700"
@@ -1383,7 +1375,7 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
           ) : null}
         </div>
 
-        <div className="hidden gap-3 border-t border-gray-200 p-4 dark:border-gray-700 sm:flex sm:p-5">
+        <div className="flex gap-3 border-t border-gray-200 p-4 dark:border-gray-700 sm:p-5">
           <button
             className="btn-primary flex-1"
             type="button"

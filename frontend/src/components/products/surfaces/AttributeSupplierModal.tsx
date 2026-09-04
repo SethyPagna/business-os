@@ -111,9 +111,6 @@ export default function AttributeSupplierModal({
         <div className="flex items-center justify-between gap-2 border-b border-gray-200 px-3 py-1.5 dark:border-gray-700">
           <p className="min-w-0 truncate text-xs font-semibold text-gray-900 dark:text-white">{tr('attribute_supplier', 'Attribute supplier')}</p>
           <div className="flex shrink-0 items-center gap-1">
-            <button type="button" onClick={apply} disabled={!canApply} className="rounded-lg bg-purple-600 px-2.5 py-1.5 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-40 sm:hidden">
-              {busy ? tr('saving', 'Saving...') : tr('attribute', 'Attribute')}
-            </button>
             <button
               type="button"
               onClick={requestClose}

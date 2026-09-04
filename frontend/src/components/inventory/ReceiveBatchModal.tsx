@@ -264,9 +264,6 @@ export default function ReceiveBatchModal({
             <div className="mt-0.5 truncate text-xs text-gray-400">{product.name}</div>
           </div>
           <div className="flex shrink-0 items-center gap-1">
-            <button type="button" className="btn-primary min-h-9 px-3 py-1.5 text-xs sm:hidden" onClick={submit} disabled={saving}>
-              {saving ? (t('saving') || 'Saving...') : tr('receive_stock', 'Receive stock')}
-            </button>
             <button type="button" onClick={closeIfIdle} className="flex h-8 w-8 flex-shrink-0 items-center justify-center text-gray-400 hover:text-gray-600" disabled={saving}>
               <X className="h-4 w-4" />
             </button>
@@ -441,7 +438,7 @@ export default function ReceiveBatchModal({
             />
           </label>
         </div>
-        <div className="hidden items-center justify-end gap-2 border-t border-gray-200 p-4 dark:border-gray-700 sm:flex">
+        <div className="flex items-center justify-end gap-2 border-t border-gray-200 p-4 dark:border-gray-700">
           <button type="button" className="btn-secondary text-sm" onClick={closeIfIdle} disabled={saving}>
             {t('cancel') || 'Cancel'}
           </button>

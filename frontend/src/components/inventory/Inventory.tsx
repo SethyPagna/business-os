@@ -2490,7 +2490,12 @@ ${inventoryFeesFormulaText}`,
             exchangeRate={exchangeRate}
             onClose={() => setShowFastStockIn(false)}
             onDone={() => load(false)}
-            onMinimize={(label: string) => minimizeWork({ key: 'fast-stockin', kind: 'fast_stockin', pageId: 'branches', label })}
+            // S4-20: minimizing is silent otherwise -- the panel just
+            // vanishes, which reads as lost work. Say where it went.
+            onMinimize={(label: string) => {
+              minimizeWork({ key: 'fast-stockin', kind: 'fast_stockin', pageId: 'branches', label })
+              notify(tr('minimized_to_chip', 'Minimized. Pick it back up from the chip — nothing was lost.', 'បានបង្រួម។ បន្តវាឡើងវិញពីស្លាក — គ្មានអ្វីបាត់បង់ទេ។'), 'info')
+            }}
           />
         </Suspense>
       ) : null}

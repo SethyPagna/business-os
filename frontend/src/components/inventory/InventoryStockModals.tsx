@@ -324,7 +324,6 @@ export default function InventoryStockModals({
                 <div className="truncate text-xs text-gray-400 mt-0.5">{adjustModal.name} - Current: {adjustCurrentQuantity} {adjustModal.unit}</div>
               </div>
               <div className="flex shrink-0 items-center gap-1">
-                <button type="button" onClick={onAdjust} className="btn-primary min-h-9 max-w-24 truncate px-3 py-1.5 text-xs sm:hidden" disabled={adjustSaving}>{adjustSaving ? (t('saving') || 'Saving...') : (adjustSubmitLabel || t('save'))}</button>
                 <button type="button" onClick={requestCloseAdjust} className="flex h-8 w-8 items-center justify-center text-gray-400 hover:text-gray-600" aria-label={t('close') || 'Close'}>
                   <X className="h-4 w-4" />
                 </button>
@@ -665,10 +664,14 @@ export default function InventoryStockModals({
               {/* The failed-submit reason sits with the values that produced
                   it, above the actions, so it survives the toast. */}
               {adjustNotice}
-              <div className="hidden gap-2 pt-1 sm:flex">
-                <button onClick={onAdjust} className="btn-primary flex-1 text-sm" disabled={adjustSaving}>{adjustSaving ? (t('saving') || 'Saving...') : (adjustSubmitLabel || t('save'))}</button>
-                <button onClick={requestCloseAdjust} className="btn-secondary text-sm" disabled={adjustSaving}>{t('cancel')}</button>
-              </div>
+            </div>
+            {/* S4-20: the actions live at the END of the form -- outside
+                .modal-scroll, so they are the last thing in the panel
+                without being the last thing behind a scroll. There is no
+                second Save beside the ✕ any more. */}
+            <div className="flex flex-shrink-0 gap-2 border-t border-gray-200 p-4 dark:border-gray-700">
+              <button onClick={onAdjust} className="btn-primary flex-1 text-sm" disabled={adjustSaving}>{adjustSaving ? (t('saving') || 'Saving...') : (adjustSubmitLabel || t('save'))}</button>
+              <button onClick={requestCloseAdjust} className="btn-secondary text-sm" disabled={adjustSaving}>{t('cancel')}</button>
             </div>
           </div>
           <UnsavedChangesPrompt guard={adjustGuard} items={adjustDiscardItems} />
@@ -684,7 +687,6 @@ export default function InventoryStockModals({
                 <div className="mt-0.5 truncate text-xs text-gray-400">{transferModal.name} - {getStockQty(transferModal)} {transferModal.unit}</div>
               </div>
               <div className="flex shrink-0 items-center gap-1">
-                <button type="button" onClick={onTransfer} className="btn-primary min-h-9 max-w-24 truncate px-3 py-1.5 text-xs sm:hidden" disabled={transferSaving}>{transferSaving ? (t('saving') || 'Saving...') : tr('transfer', 'Transfer')}</button>
                 <button type="button" onClick={requestCloseTransfer} className="flex h-8 w-8 items-center justify-center text-gray-400 hover:text-gray-600" aria-label={t('close') || 'Close'}>
                   <X className="h-4 w-4" />
                 </button>
@@ -744,14 +746,18 @@ export default function InventoryStockModals({
                 ) : null}
                 <textarea className="input min-h-[84px] text-sm" value={transferForm.reason} onChange={(event) => setTransferForm((current) => ({ ...current, reason: event.target.value }))} placeholder={tr('transfer_reason_placeholder')} />
               </label>
-              <div className="hidden gap-2 pt-1 sm:flex">
-                <button type="button" onClick={onTransfer} className="btn-primary flex-1 text-sm" disabled={transferSaving}>
-                  {transferSaving ? (t('saving') || 'Saving...') : tr('transfer', 'Transfer')}
-                </button>
-                <button type="button" onClick={requestCloseTransfer} className="btn-secondary text-sm" disabled={transferSaving}>
-                  {t('cancel') || 'Cancel'}
-                </button>
-              </div>
+            </div>
+            {/* S4-20: the actions live at the END of the form -- outside
+                .modal-scroll, so they are the last thing in the panel
+                without being the last thing behind a scroll. There is no
+                second Save beside the ✕ any more. */}
+            <div className="flex flex-shrink-0 gap-2 border-t border-gray-200 p-4 dark:border-gray-700">
+              <button type="button" onClick={onTransfer} className="btn-primary flex-1 text-sm" disabled={transferSaving}>
+                {transferSaving ? (t('saving') || 'Saving...') : tr('transfer', 'Transfer')}
+              </button>
+              <button type="button" onClick={requestCloseTransfer} className="btn-secondary text-sm" disabled={transferSaving}>
+                {t('cancel') || 'Cancel'}
+              </button>
             </div>
           </div>
           <UnsavedChangesPrompt guard={transferGuard} />

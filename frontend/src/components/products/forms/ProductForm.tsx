@@ -9,6 +9,7 @@ import Trash2Icon from 'lucide-react/dist/esm/icons/trash-2.js'
 import LockIcon from 'lucide-react/dist/esm/icons/lock.js'
 import AlertTriangleIcon from 'lucide-react/dist/esm/icons/alert-triangle.js'
 import Modal from '../../shared/Modal'
+import MinimizeButton from '../../shared/MinimizeButton.tsx'
 import AppSelect, { type AppSelectOption } from '../../shared/AppSelect.tsx'
 import DateEntryInput from '../../shared/DateEntryInput.tsx'
 import { MarginCard, DualPriceInput, parseNumericInput, sanitizeNumericInput } from '../shared/primitives'
@@ -1118,36 +1119,27 @@ export default function ProductForm({
       wide
       headerExtra={(
         <>
-          {/* On compact PWA/iOS viewports the persistent footer can fall
-              behind browser chrome or the app navigation. Save is therefore
-              also available in the fixed modal header; Close remains Cancel. */}
-          <button
-            type="button"
-            className="btn-primary min-h-9 max-w-24 truncate px-3 py-1.5 text-xs sm:hidden"
-            onClick={saveForm}
-            disabled={saving || imageUploading}
-          >
-            {saving ? (t('saving') || 'Saving...') : imageUploading ? (tr('uploading', 'Uploading...', 'កំពុងបង្ហោះ...')) : t('save')}
-          </button>
+          {/* S4-20: the header no longer carries a phone-sized Save. It used
+              to, because "on compact PWA/iOS viewports the persistent footer
+              can fall behind browser chrome" -- a real problem, but the fix
+              belongs in the footer, not in a second Save button beside the
+              ✕ where a mis-tap saves instead of closing. The footer is
+              `sticky bottom-0` inside a panel bounded by .modal-panel-safe
+              (100dvh minus the safe-area insets, styles/main.css), so it now
+              sits at the end of the form and stays on screen at every
+              breakpoint. Only the minimize control remains up here. */}
           {onMinimize ? (
-            <button
-              type="button"
+            <MinimizeButton
               disabled={saving}
-              onClick={() => {
-                if (saving) return
+              tr={tr}
+              onMinimize={() => {
                 const typedName = String(form.name || '').trim()
                 onMinimize(`${tr('add_product', 'Create Products', 'បង្កើតផលិតផលថ្មី')}${typedName ? ` — ${typedName}` : ''}`)
               }}
-              aria-label={tr('minimize', 'Minimize', 'បង្រួម')}
-              title={tr('minimize_hint', 'Minimize — continue later from the chip', 'បង្រួម — បន្តពេលក្រោយពីស្លាក')}
-              className="flex h-11 w-11 items-center justify-center rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-600 disabled:opacity-50 dark:hover:bg-gray-700"
-            >
-              <span className="text-base leading-none">−</span>
-            </button>
+            />
           ) : null}
         </>
       )}
-    
       unsavedChanges={{ workKey: dirtyWorkKey }}>
       <div className="mb-5 -mx-5 border-b border-gray-200 px-5 dark:border-gray-700">
         <div className="flex gap-1 overflow-x-auto">
@@ -1719,7 +1711,7 @@ export default function ProductForm({
           cancels the modal's own p-5 padding so the bar spans full width
           and sits flush against the bottom edge; px-5 pb-5 pt-4 puts it
           back inside the bar. */}
-      <div className="sticky bottom-0 -mx-5 -mb-5 mt-6 hidden gap-3 border-t border-gray-200 bg-white px-5 pb-5 pt-4 dark:border-gray-700 dark:bg-gray-800 sm:flex">
+      <div className="sticky bottom-0 -mx-5 -mb-5 mt-6 flex gap-3 border-t border-gray-200 bg-white px-5 pb-5 pt-4 dark:border-gray-700 dark:bg-gray-800">
         {/* Disabled while imageUploading, not just `saving`: previously a
             fast Save click during an in-flight image upload would save the
             product with the pre-upload imageList (the just-picked file
