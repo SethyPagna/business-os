@@ -18,6 +18,7 @@ import {
   customerDeliveryFeeExpr,
   saleStatusExpr,
   CUSTOMER_REFUND_JOIN,
+  whereActiveSales, netRefundExpr, collectedSaleExpr, deliveryActualCostExpr, RESTOCKED_RETURN_LINE,
   type SalesFilters,
 } from '../lib/salesAnalytics'
 import { localDateAtOrAfter, localDateAtOrBefore, localDateExpr, localTimeRangeClause } from '../lib/businessDateWindow'
@@ -85,10 +86,7 @@ function parseFilters(query: Record<string, string>): SalesFilters {
 // script can extract these functions by name and exercise them directly --
 // same approach test-fees-pure.cjs uses for routes/fees.ts's helpers). ----
 
-// The business-summary endpoints that shared this file on the RC trunk are
-// deliberately NOT ported here: they belong to the business-workbook lane and
-// have never shipped on this line. This file carries only the reports hub's
-// own /overview, /periods and /grouped views.
+// Per-record readers below also back the Reports hub's visible detail tabs.
 
 // Reports redesign (Sep 3 2026, lane sec-10 / session 8c): overview, period
 // roll-ups and grouped views for the Sales > Reports section. Pure helpers
@@ -396,5 +394,84 @@ app.get('/grouped', async (c) => {
   return c.json({ by, is_admin: isAdmin, filters: f, rows })
 })
 
+
+// Bounded record pages for the existing Sales/Returns/Expenses report tabs.
+// Snapshot IDs exclude newly inserted/backdated records; they do not freeze
+// updates to existing rows. Caller must restart paging when filters change.
+for (const kind of ['sales', 'returns', 'expenses'] as const) {
+  app.get(`/business-summary/${kind}`, async (c) => {
+    const user = c.get('user')
+    const allowed = kind === 'sales' ? canReadSales(user) : kind === 'returns' ? canReadReturns(user) : canReadFees(user)
+    if (!allowed) return c.json({ error: 'Forbidden' }, 403)
+    const query = c.req.query(); const db = getDb(c.env); const isAdmin = isAdminControlUser(user)
+    const f = parseViewFilters(query); const pageSize = clampInt(query.pageSize, 250, 1, 500)
+    const table = kind === 'expenses' ? 'fees' : kind
+    const alias = kind === 'sales' ? 's' : kind === 'returns' ? 'r' : 'f'
+    const active = kind === 'sales' ? whereActiveSales('s', f) : { sql: '1=1', params: {} }
+    const clauses = [active.sql]; const params: Record<string, unknown> = { ...active.params }
+    if (kind !== 'sales') {
+      if (f.startDate) { clauses.push(kind === 'expenses' ? 'f.fee_date >= @startDate' : localDateAtOrAfter('r.created_at')); params.startDate = f.startDate }
+      if (f.endDate) { clauses.push(kind === 'expenses' ? 'f.fee_date <= @endDate' : localDateAtOrBefore('r.created_at')); params.endDate = f.endDate }
+      if (f.branchId) { clauses.push(`${alias}.branch_id = @branchId`); params.branchId = f.branchId }
+      // Match the Returns overview: customer returns only, excluding cancelled.
+      if (kind === 'returns') clauses.push("COALESCE(r.return_scope, 'customer') = 'customer'", "COALESCE(r.status, 'completed') <> 'cancelled'")
+    }
+    if (query.q?.trim()) {
+      const fields = kind === 'sales' ? ['receipt_number', 'customer_name', 'customer_phone', 'cashier_name', 'branch_name', 'payment_method']
+        : kind === 'returns' ? ['return_number', 'receipt_number', 'customer_name', 'reason'] : ['label', 'notes', 'fee_type']
+      clauses.push(`instr(lower(${fields.map((name) => `COALESCE(${alias}.${name}, '')`).join(" || ' ' || ")}), lower(@search)) > 0`)
+      params.search = query.q.trim()
+    }
+    let snapshot = query.snapshotMaxId != null && query.snapshotMaxId !== '' ? clampInt(query.snapshotMaxId, 0, 0, Number.MAX_SAFE_INTEGER) : null
+    if (snapshot == null) snapshot = num((await db.prepare(`SELECT MAX(${alias}.id) AS max_id FROM ${table} ${alias} WHERE ${clauses.join(' AND ')}`).get<{ max_id: number }>(params))?.max_id)
+    if (!snapshot) return c.json({ rows: [], snapshot_max_id: 0, has_more: false, next_cursor: null })
+    clauses.push(`${alias}.id <= @snapshot`); params.snapshot = snapshot
+    const descending = query.order === 'desc'; const direction = descending ? 'DESC' : 'ASC'; const op = descending ? '<' : '>'
+    const stamp = `COALESCE(datetime(${alias}.created_at), '')`
+    const afterId = Number(query.afterId)
+    if (Number.isSafeInteger(afterId) && afterId > 0) {
+      clauses.push(`(${stamp} ${op} COALESCE(datetime(@afterCreatedAt), '') OR (${stamp} = COALESCE(datetime(@afterCreatedAt), '') AND ${alias}.id ${op} @afterId))`)
+      params.afterCreatedAt = query.afterCreatedAt || ''; params.afterId = afterId
+    }
+    let select: string; let joins = ''
+    if (kind === 'sales') {
+      const recognized = recognizedExpr('s.'); const net = netSaleExpr('s.'); const refund = netRefundExpr('s.', 'rf.')
+      const rawCost = `(COALESCE((SELECT SUM(si.cost_price_usd * si.quantity) FROM sale_items si WHERE si.sale_id=s.id),0)
+        - COALESCE((SELECT SUM(CASE WHEN ${RESTOCKED_RETURN_LINE} THEN ri.cost_price_usd * ri.quantity ELSE 0 END)
+          FROM return_items ri JOIN returns r ON r.id=ri.return_id WHERE r.sale_id=s.id
+          AND COALESCE(r.status,'completed')<>'cancelled' AND COALESCE(r.return_scope,'customer')='customer'),0))`
+      // A receipt floors its own cost; the loaded statement floors the SUM,
+      // exactly like deriveTotals. Carry the un-floored value for that rollup.
+      const cost = `MAX(0, ${rawCost})`
+      const adminColumns = isAdmin ? `, CASE WHEN ${recognized} THEN ${cost} ELSE 0 END AS cost_usd,
+        CASE WHEN ${recognized} THEN ${rawCost} ELSE 0 END AS cost_before_floor_usd,
+        CASE WHEN ${recognized} THEN (SELECT COUNT(*) FROM sale_items si WHERE si.sale_id=s.id AND si.cost_price_usd IS NULL) ELSE 0 END AS cost_missing_snapshot_lines,
+        CASE WHEN ${recognized} THEN ${net}-${refund}-${cost}+${customerDeliveryFeeExpr('s.')}-${deliveryActualCostExpr('s.')} ELSE 0 END AS gross_profit_usd` : ''
+      select = `s.id, s.created_at AS cursor_at, s.created_at AS date, ${localDateExpr('s.created_at')} AS business_date,
+        s.receipt_number, s.branch_name AS branch, s.cashier_name AS cashier, s.customer_name AS customer, s.customer_phone,
+        s.payment_method, ${saleStatusExpr('s.')} AS status, COALESCE(s.subtotal_usd,0) AS gross_sales_usd,
+        COALESCE(s.discount_usd,0) AS store_discount_usd, COALESCE(s.membership_discount_usd,0) AS membership_discount_usd,
+        COALESCE(s.tax_usd,0) AS tax_usd, ${customerDeliveryFeeExpr('s.')} AS delivery_usd,
+        CASE WHEN ${recognized} THEN ${refund} ELSE 0 END AS refund_usd,
+        CASE WHEN ${recognized} THEN ${net}-${refund} ELSE 0 END AS net_revenue_usd,
+        CASE WHEN ${awaitingExpr('s.')} THEN ${net} ELSE 0 END AS pending_revenue_usd,
+        CASE WHEN ${collectedSaleExpr('s.')} THEN ${net}+COALESCE(s.tax_usd,0)+${customerDeliveryFeeExpr('s.')}-COALESCE(rf.refund_usd,0) ELSE 0 END AS collected_total_usd ${adminColumns}`
+      joins = `${CUSTOMER_REFUND_JOIN}s.id`
+    } else if (kind === 'returns') {
+      select = `r.id, r.created_at AS cursor_at, r.created_at AS date, ${localDateExpr('r.created_at')} AS business_date,
+        r.return_number, r.receipt_number AS sale_receipt_number, r.customer_name AS party, r.return_scope AS scope,
+        r.return_type AS type, r.reason, r.status, r.total_refund_usd AS refund_usd, r.total_refund_khr AS refund_khr`
+    } else {
+      select = `f.id, f.created_at AS cursor_at, f.created_at, f.fee_date AS date, f.fee_type AS type, f.label,
+        b.name AS branch, s.receipt_number AS linked_sale_receipt_number, f.notes, f.amount_usd, f.amount_khr`
+      joins = 'LEFT JOIN branches b ON b.id=f.branch_id LEFT JOIN sales s ON s.id=f.sale_id'
+    }
+    const rows = await db.prepare(`SELECT ${select} FROM ${table} ${alias} ${joins} WHERE ${clauses.join(' AND ')}
+      ORDER BY ${stamp} ${direction}, ${alias}.id ${direction} LIMIT @limit`).all<Record<string, unknown>>({ ...params, limit: pageSize + 1 })
+    const hasMore = rows.length > pageSize; const page = rows.slice(0, pageSize); const last = page[page.length - 1]
+    return c.json({ rows: page.map(({ cursor_at, ...row }) => row), snapshot_max_id: snapshot, has_more: hasMore,
+      next_cursor: hasMore && last ? { created_at: last.cursor_at || '', id: last.id } : null, is_admin: isAdmin })
+  })
+}
 
 export default app

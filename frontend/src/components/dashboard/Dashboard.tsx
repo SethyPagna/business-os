@@ -1109,7 +1109,7 @@ export default function Dashboard() {
   const revenueFormulaText = translateOr('dashboard_formula_revenue', 'Net revenue = Gross sales - Discounts - Refunds')
   const collectedFormulaText = translateOr('dashboard_formula_collected_total', 'Collected total = Net revenue + Tax + Delivery')
   const storeDiscountFormulaText = translateOr('dashboard_formula_store_discounts', 'Store discounts are the cashier-entered sale discounts and product promotions.')
-  const profitFormulaText = translateOr('dashboard_formula_profit', 'Profit = Net revenue - COGS - Store-paid delivery')
+  const profitFormulaText = translateOr('dashboard_formula_profit', 'Profit = Revenue − COGS + delivery fees charged − courier costs')
   const avgOrderFormulaText = translateOr('dashboard_formula_avg_order', 'Average order = Net revenue / transaction count')
   const returnsFormulaText = translateOr('dashboard_formula_returns', 'Returns decrease net revenue and loyalty points')
   const revenueExampleText = `${fmtUSD(aRevenue)} = ${fmtUSD(aGrossSales)} - ${fmtUSD(aDiscounts)} - ${fmtUSD(aRefundUsd)}`

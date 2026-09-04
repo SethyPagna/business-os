@@ -660,6 +660,23 @@ test('the awaiting-payment block is set apart in the warning tint on every surfa
   }
 })
 
+test('sales receipt and statement cost floors match the canonical aggregate rule', () => {
+  const source = read('src/components/sales/reports/SalesListReport.tsx')
+  const helpers = source.slice(source.indexOf('const MONEY_KEYS'), source.indexOf('export default function'))
+    .replaceAll('export function', 'function')
+  const { mapSaleRow, sumSaleRows } = new Function('num', 'round2', `${stripTypeScriptTypes(helpers)}; return {mapSaleRow,sumSaleRows}`)(
+    (v: unknown) => Number(v) || 0, (v: number) => Math.round(v * 100) / 100,
+  )
+  const corrected = mapSaleRow({cost_usd:0,cost_before_floor_usd:-10,gross_profit_usd:85},0)
+  const ordinary = mapSaleRow({cost_usd:120,cost_before_floor_usd:120,gross_profit_usd:84},1)
+  assert.equal(sumSaleRows([corrected,ordinary]).cost_usd,110)
+  assert.equal(sumSaleRows([corrected,ordinary]).gross_profit_usd,179)
+  assert.equal(sumSaleRows([corrected]).cost_usd,0)
+  assert.equal(sumSaleRows([corrected]).gross_profit_usd,85)
+  assert.equal(sumSaleRows([ordinary]).gross_profit_usd,84)
+  assert.equal(sumSaleRows([mapSaleRow({},0)]).cost_usd,undefined)
+})
+
 // Execute the actual hook bodies with a small deterministic hook scheduler.
 // Render and passive effects are deliberately separate so these regressions
 // catch stale exports in the interval BEFORE effect cleanup/reset runs.

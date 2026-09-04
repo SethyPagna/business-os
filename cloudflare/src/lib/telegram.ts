@@ -82,14 +82,28 @@ function configurationProblem(config: TelegramConfig): string | null {
 function commandProblem(config: TelegramConfig): string | null {
   return configurationProblem(config)
 }
+export function splitTelegramMessage(text: string): string[] {
+  const chunks: string[] = []; let current = ''
+  // Iterate the original text: a synthetic final newline would create an
+  // empty message when the text length is an exact chunk-size multiple.
+  for (const point of text) {
+    if (current.length + point.length > 3900) { chunks.push(current); current = '' }
+    current += point
+  }
+  if (current) chunks.push(current)
+  return chunks
+}
+
 async function postTelegram(config: TelegramConfig, text: string, chatId = config.chatId): Promise<void> {
-  const response = await fetch(`https://api.telegram.org/bot${config.token}/sendMessage`, {
-    method: 'POST', headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ chat_id: chatId, text: text.slice(0, 4096), disable_web_page_preview: true }),
-  })
-  if (!response.ok) {
-    const body = await response.text().catch(() => '')
-    throw new Error(`Telegram rejected the message (${response.status})${body ? `: ${body.slice(0, 160)}` : ''}`)
+  for (const part of splitTelegramMessage(text)) {
+    const response = await fetch(`https://api.telegram.org/bot${config.token}/sendMessage`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ chat_id: chatId, text: part, disable_web_page_preview: true }),
+    })
+    if (!response.ok) {
+      const body = await response.text().catch(() => '')
+      throw new Error(`Telegram rejected the message (${response.status})${body ? `: ${body.slice(0, 160)}` : ''}`)
+    }
   }
 }
 
@@ -269,8 +283,8 @@ async function inventorySummaryReport(env: Env): Promise<string> {
 // (a single-branch till, the common shop here) is not narrowed by branch.
 //
 // WHY IT GOES THROUGH THE SALES KERNEL. Revenue has exactly one definition in
-// this system -- net sales, over recognized (neither cancelled nor
-// awaiting_payment) receipts, minus customer refunds, tax and delivery
+// this system -- net sales, over non-cancelled receipts (including
+// awaiting_payment), minus customer refunds, tax and delivery
 // excluded. A shift report that summed `total_usd` itself would be a second,
 // quietly different revenue on a surface the owner reads every evening. So it
 // calls getSalesTotals/getPaymentMethodBreakdown/getDeliveryContactTotals
@@ -283,20 +297,14 @@ async function inventorySummaryReport(env: Env): Promise<string> {
 //     owner asked for is the count of voided receipts, under the app's own
 //     word for them.
 //
-//   * "Final amount" is what should be IN THE DRAWER at the end:
-//     registered cash + money actually collected - other expense. Collected
-//     is the kernel's collected_total (revenue + tax + customer-paid
-//     delivery), because tax and a delivery fee the customer handed over are
-//     physically in the till even though neither is revenue. Credit is NOT
-//     subtracted: unpaid credit was never collected, so it is never in the
-//     revenue figure to begin with, and subtracting it would count it twice.
-//     The two components are printed under the total so the arithmetic can be
-//     checked without opening the app. THE OWNER'S REVIEW RULING kept this
-//     arithmetic unchanged but moved the "Unpaid credit" line to print BELOW
-//     Final amount rather than above it: a line sitting above a total reads
-//     as an input to that total, and credit explicitly is not one. Below the
-//     total it reads as what it is -- informational, money owed rather than
-//     money in the drawer.
+//   * "Final amount" is a recorded CASH estimate, separately in USD and KHR:
+//     registered float + cash tender - recorded expenses. Bank payments are
+//     not drawer cash. Expenses currently have no tender-method ledger and
+//     are assumed to come from the drawer, explicitly stated in the message.
+//     Missing payment data, ambiguous change, refunds and courier payments
+//     suppress the estimate/difference rather than inventing a cash shortage.
+//     Sale-time windows do not establish later-settlement cash flow. Not Paid
+//     stays below the estimate and is never deducted from it a second time.
 //
 // Riel is never folded into dollars anywhere here -- the drawer holds both and
 // the shop counts them separately, the same convention migration 0116 and
@@ -358,8 +366,55 @@ export type ShiftReportFigures = {
   otherExpenseUsd: number
   otherExpenseKhr: number
   collectedUsd: number
+  // Native tender currencies, never USD-equivalent sales totals. Null/absent
+  // means the source cannot establish a drawer balance, not zero cash.
+  cash?: { usd: number; khr: number; needsReview: boolean }
+  expenseDetails?: { label: string; usd: number; khr: number }[]
   paymentMethods: { method: string; count: number; collectedUsd: number }[]
   deliveryServices: { name: string; deliveries: number; chargedUsd: number; costUsd: number; marginUsd: number; costRecorded: number }[]
+}
+
+type ShiftTenderRow = {
+  payment_method?: unknown; payment_details?: unknown; amount_paid_usd?: unknown; amount_paid_khr?: unknown
+  change_usd?: unknown; change_khr?: unknown
+  sale_status?: unknown; total_usd?: unknown; exchange_rate?: unknown
+}
+
+/** Recorded tender only. Old change columns contain equivalent currencies,
+ * not the actual currency handed back, so never subtract both or invent one. */
+export function summarizeShiftCash(rows: ShiftTenderRow[]) {
+  let usd = 0; let khr = 0; let needsReview = false
+  const amount = (value: unknown) => {
+    const n = Number(value ?? 0)
+    if (!Number.isFinite(n) || n < 0) { needsReview = true; return 0 }
+    return n
+  }
+  for (const row of rows) {
+    const paidUsd = amount(row.amount_paid_usd); const paidKhr = amount(row.amount_paid_khr)
+    if (!(paidUsd || paidKhr) && row.sale_status !== 'awaiting_payment' && Number(row.total_usd) > 0) needsReview = true
+    let details: { method?: unknown; amount_usd?: unknown; amount_khr?: unknown }[]
+    try {
+      const parsed = typeof row.payment_details === 'string' ? JSON.parse(row.payment_details) : row.payment_details
+      if (parsed != null && !Array.isArray(parsed)) throw new Error('Invalid payment details')
+      details = parsed?.length ? parsed : [{ method: row.payment_method, amount_usd: paidUsd, amount_khr: paidKhr }]
+      if (details.length > 12 || details.some((entry) => !entry || typeof entry !== 'object')) throw new Error('Invalid payment details')
+    } catch { needsReview = true; continue }
+    let detailUsd = 0; let detailKhr = 0
+    for (const detail of details) {
+      const method = String(detail.method ?? '').trim().toLowerCase()
+      const partUsd = amount(detail.amount_usd); const partKhr = amount(detail.amount_khr)
+      detailUsd += partUsd; detailKhr += partKhr
+      if ((partUsd || partKhr) && (!method || method.includes(' + '))) { needsReview = true; continue }
+      if (method === 'cash' || method === 'សាច់ប្រាក់') { usd += partUsd; khr += partKhr }
+    }
+    if (Math.abs(detailUsd - paidUsd) > 0.011 || Math.abs(detailKhr - paidKhr) > 1) needsReview = true
+    const changeUsd = amount(row.change_usd); const changeKhr = amount(row.change_khr)
+    if (changeUsd > 0 || changeKhr > 0) needsReview = true
+    const rate = Number(row.exchange_rate)
+    if (paidKhr && !(Number.isFinite(rate) && rate > 0)) needsReview = true
+    if (row.total_usd != null && paidUsd + (paidKhr && rate > 0 ? paidKhr / rate : 0) > Number(row.total_usd) + 0.011) needsReview = true
+  }
+  return { usd: round2(usd), khr: Math.round(khr), needsReview }
 }
 
 /**
@@ -435,18 +490,19 @@ export function formatShiftReport(shopName: string, shift: ShiftReportSession, f
   // so the number can be checked against the lines above without arithmetic
   // in the reader's head, and so a disagreement points at a component rather
   // than at "the report is wrong".
-  const floatUsd = Number(shift.opening_float_usd) || 0
-  const expenseUsd = Number(figures.otherExpenseUsd) || 0
-  const finalUsd = floatUsd + (Number(figures.collectedUsd) || 0) - expenseUsd
-  lines.push(
-    labeled('finalAmount', usd(finalUsd)),
-    `     ${usd(floatUsd)} + ${usd(figures.collectedUsd)} − ${usd(expenseUsd)}`,
-    // A line each, not a ` / ` pair: this caption is a phrase long enough that
-    // joining the two languages wraps into a mush at phone width -- the same
-    // rule telegramLang.ts's command reference follows for its sentences.
-    '     registered cash + collected − expense',
-    '     សាច់ប្រាក់ចុះបញ្ជី + ប្រាក់ទទួល − ចំណាយ',
-  )
+  const cash = figures.cash
+  const finalUsd = round2((Number(shift.opening_float_usd) || 0) + (cash?.usd || 0) - figures.otherExpenseUsd)
+  const finalKhr = Math.round((Number(shift.opening_float_khr) || 0) + (cash?.khr || 0) - figures.otherExpenseKhr)
+  const cashKnown = !!cash && !cash.needsReview
+  lines.push(labeled('recordedCashReceipts', cashKnown ? money(cash.usd, cash.khr) : '—'))
+  lines.push(labeled('finalAmount', cashKnown ? money(finalUsd, finalKhr) : '—'))
+  if (cashKnown) {
+    lines.push(`     ${usd(shift.opening_float_usd)} + ${usd(cash.usd)} − ${usd(figures.otherExpenseUsd)}`,
+      `     ${Math.round(shift.opening_float_khr).toLocaleString('en-US')}៛ + ${cash.khr.toLocaleString('en-US')}៛ − ${Math.round(figures.otherExpenseKhr).toLocaleString('en-US')}៛`)
+  }
+  lines.push(bi('Recorded cash estimate; expenses assumed paid from drawer.', 'សាច់ប្រាក់ប៉ាន់ស្មានតាមកំណត់ត្រា ដោយចាត់ចំណាយថាបានបង់ពីថតសាច់ប្រាក់។'))
+  lines.push(bi('Sale-time window; later settlements are not a cash-flow ledger.', 'តាមពេលកត់ត្រាការលក់ មិនមែនបញ្ជីលំហូរសាច់ប្រាក់នៃការទូទាត់នៅពេលក្រោយទេ។'))
+  if (!cashKnown) lines.push(bi('Cash review needed: incomplete tender, change, refunds, courier costs or report limit.', 'ត្រូវពិនិត្យសាច់ប្រាក់៖ កំណត់ត្រាទូទាត់ ប្រាក់អាប់ ប្រាក់សង ថ្លៃដឹក ឬដែនកំណត់របាយការណ៍។'))
 
   // Printed AFTER Final amount, deliberately: the owner's ruling was that a
   // line above a total reads as an input to it, and unpaid credit is not one
@@ -460,11 +516,15 @@ export function formatShiftReport(shopName: string, shift: ShiftReportSession, f
   // as a missing-cash alarm on every open till.
   if (!open) {
     lines.push(labeled('cashCounted', money(shift.closing_counted_usd, shift.closing_counted_khr)))
-    const countedUsd = Number(shift.closing_counted_usd) || 0
-    const difference = Math.round((countedUsd - finalUsd) * 100) / 100
-    // Sign in FRONT of the currency symbol: `$-3.00` reads as a price.
-    const sign = difference < 0 ? '−' : difference > 0 ? '+' : ''
-    lines.push(labeled('difference', `${sign}${usd(Math.abs(difference))}`))
+    const signed = (n: number, format: (value: number) => string) => `${n < 0 ? '−' : n > 0 ? '+' : ''}${format(Math.abs(n))}`
+    lines.push(labeled('difference', cashKnown
+      ? `${signed(round2((Number(shift.closing_counted_usd) || 0) - finalUsd), usd)} · ${signed(Math.round((Number(shift.closing_counted_khr) || 0) - finalKhr), (n) => `${n.toLocaleString('en-US')}៛`)}`
+      : '—'))
+  }
+
+  if (figures.expenseDetails?.length) {
+    lines.push('', '━━━━━━━━━━━━━━━━━━', `${label('fees')}:`)
+    for (const expense of figures.expenseDetails) lines.push(`• ${cleanLine(expense.label, 65)} — ${money(expense.usd, expense.khr)}`)
   }
 
   if (figures.paymentMethods.length) {
@@ -541,7 +601,7 @@ async function shiftInvoiceCounts(env: Env, shift: ShiftReportSession, nowMs: nu
  * sales' timestamp shape; `fee_date` is a bare day and could not tell two
  * shifts on one date apart.
  */
-async function shiftExpenses(env: Env, shift: ShiftReportSession, nowMs: number) {
+export async function shiftExpenses(env: Env, shift: ShiftReportSession, nowMs: number) {
   const { clauses, params } = shiftWindowWhere('fees', shiftFilters(shift, nowMs))
   // fees has no cashier_id -- the equivalent column is created_by. Drop the
   // clause the sales table owns and add the fees one.
@@ -555,22 +615,49 @@ async function shiftExpenses(env: Env, shift: ShiftReportSession, nowMs: number)
     feeClauses.push('fees.branch_id = @branchId')
     params.branchId = shift.branch_id
   }
-  const row = await getDb(env).prepare(`
-    SELECT COALESCE(SUM(amount_usd), 0) AS usd, COALESCE(SUM(amount_khr), 0) AS khr
+  const rows = await getDb(env).prepare(`
+    SELECT COALESCE(NULLIF(TRIM(label), ''), fee_type, 'Expense') AS label,
+      COALESCE(SUM(amount_usd), 0) AS usd, COALESCE(SUM(amount_khr), 0) AS khr,
+      SUM(SUM(amount_usd)) OVER () AS overall_usd, SUM(SUM(amount_khr)) OVER () AS overall_khr
     FROM fees
     WHERE ${feeClauses.join(' AND ')}
-  `).get<{ usd: number; khr: number }>(params)
-  return { usd: Number(row?.usd || 0), khr: Number(row?.khr || 0) }
+    GROUP BY 1 ORDER BY usd DESC, khr DESC, label LIMIT 9
+  `).all<{ label: string; usd: number; khr: number; overall_usd: number; overall_khr: number }>(params)
+  const total = { usd: round2(Number(rows[0]?.overall_usd || 0)), khr: Math.round(Number(rows[0]?.overall_khr || 0)) }
+  const details = rows.slice(0, 8).map(({ label, usd, khr }) => ({ label, usd: Number(usd), khr: Number(khr) }))
+  if (rows.length > 8) details.push({ label: bi('Other expenses', 'ចំណាយផ្សេងទៀត'),
+    usd: round2(total.usd - details.reduce((n, r) => n + r.usd, 0)), khr: Math.round(total.khr - details.reduce((n, r) => n + r.khr, 0)) })
+  return { ...total, details }
+}
+
+async function shiftCash(env: Env, shift: ShiftReportSession, nowMs: number) {
+  const { clauses, params } = shiftWindowWhere('sales', shiftFilters(shift, nowMs))
+  if (shift.branch_id) { clauses.push('sales.branch_id = @branchId'); params.branchId = shift.branch_id }
+  clauses.push("COALESCE(NULLIF(sales.sale_status, ''), 'completed') <> 'cancelled'")
+  const rows = await getDb(env).prepare(`SELECT payment_method, payment_details, amount_paid_usd, amount_paid_khr, change_usd, change_khr, sale_status, total_usd, exchange_rate
+    FROM sales WHERE ${clauses.join(' AND ')} ORDER BY id LIMIT 5001`).all<ShiftTenderRow>(params)
+  const cash = summarizeShiftCash(rows.slice(0, 5000))
+  // Bound memory and refuse a partial drawer total. Refund tender currency and
+  // later settlement timing are not represented by this sale-window estimate.
+  if (rows.length > 5000) cash.needsReview = true
+  const refunds = shiftWindowWhere('returns', shiftFilters(shift, nowMs))
+  if (shift.branch_id) { refunds.clauses.push('returns.branch_id = @branchId'); refunds.params.branchId = shift.branch_id }
+  const refund = await getDb(env).prepare(`SELECT id FROM returns WHERE ${refunds.clauses.join(' AND ')}
+    AND COALESCE(status, 'completed') <> 'cancelled' AND COALESCE(return_scope, 'customer') = 'customer'
+    AND (COALESCE(total_refund_usd, 0) > 0 OR COALESCE(total_refund_khr, 0) > 0) LIMIT 1`).get<{ id: number }>(refunds.params)
+  if (refund?.id) cash.needsReview = true
+  return cash
 }
 
 async function shiftFigures(env: Env, shift: ShiftReportSession, nowMs: number): Promise<ShiftReportFigures> {
   const filters = shiftFilters(shift, nowMs)
-  const [totals, counts, expenses, paymentMethods, deliveries] = await Promise.all([
+  const [totals, counts, expenses, paymentMethods, deliveries, cash] = await Promise.all([
     getSalesTotals(env, filters),
     shiftInvoiceCounts(env, shift, nowMs),
     shiftExpenses(env, shift, nowMs),
     getPaymentMethodBreakdown(env, filters),
     getDeliveryContactTotals(env, filters),
+    shiftCash(env, shift, nowMs),
   ])
   return {
     invoices: counts.invoices,
@@ -613,6 +700,8 @@ async function shiftFigures(env: Env, shift: ShiftReportSession, nowMs: number):
     otherExpenseUsd: expenses.usd,
     otherExpenseKhr: expenses.khr,
     collectedUsd: totals.collected_total_usd,
+    cash: { ...cash, needsReview: cash.needsReview || totals.refund_usd !== 0 || totals.delivery_sale_count > 0 },
+    expenseDetails: expenses.details,
     paymentMethods: paymentMethods.map((row) => ({ method: row.payment_method, count: row.tx_count, collectedUsd: row.collected_usd })),
     deliveryServices: deliveries.map((row) => ({
       name: row.delivery_contact_name,

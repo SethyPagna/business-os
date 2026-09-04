@@ -19136,3 +19136,19 @@ i18n and frontend build passed. Local real-component EN/KM visual checks at
 Not done: true two-layer/header implementation, complete authenticated responsive
 matrix, production financial/data reconciliation. No deployment or remote write.
 Details and verification boundaries: `docs/fleet/2026-09-05-scope-review.md`.
+
+## Part 604 — shift, report and delivery follow-up (2026-09-05)
+
+Implemented and integrated native-currency/uncertainty-aware Telegram cash
+estimates, grouped expense details, safe message chunks, current-shift history,
+three missing report detail routes, canonical cost-floor parity, report/period
+stats lifecycle guards, driver fallback/Khmer text repair, and bilingual financial
+explanations. All 198 frontend files and 200 backend suites passed; both
+typechecks, i18n and frontend build passed. Independent reviews cleared their
+bounded findings. Worker source commits and remaining limits are recorded in
+`docs/fleet/2026-09-05-shift-cash-review.md`.
+
+The 133,700 KHR example is a test, not a live entry. No deployment, live Telegram
+send or remote D1 operation occurred. Historical completion still needs an owner
+payment ruling and authorized exact target/stock-provenance manifest. Original
+two-layer navigation and the full authenticated matrix are not declared complete.

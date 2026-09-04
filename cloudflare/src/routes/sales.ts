@@ -2881,9 +2881,11 @@ app.get('/', async (c) => {
   const payload = await cachedJsonResponse(c.req.raw, c.executionCtx, cacheVersion, SALES_READ_CACHE_TTL_SECONDS, async () => {
 
     const sales = await db.prepare(`
-      SELECT s.*, c.membership_number AS customer_membership_number
+      SELECT s.*, c.membership_number AS customer_membership_number,
+        dc.name AS linked_driver_name, dc.phone AS linked_driver_phone
       FROM sales s
       LEFT JOIN customers c ON c.id = s.customer_id
+      LEFT JOIN delivery_contacts dc ON dc.id = s.delivery_contact_id AND COALESCE(s.is_delivery, 0) <> 0
       WHERE ${where.join(' AND ')}
       ORDER BY ${orderSql}
       LIMIT @limit OFFSET @offset
@@ -2938,11 +2940,14 @@ app.get('/', async (c) => {
     const refundsBySale = new Map(refundRows.map((r) => [r.sale_id, r]))
 
     return sales.map((sale) => {
+      const { linked_driver_name, linked_driver_phone, ...snapshot } = sale
       const refund = refundsBySale.get(sale.id)
       const refundUsd = refund?.refund_usd || 0
       const refundKhr = refund?.refund_khr || 0
       return {
-        ...sale,
+        ...snapshot,
+        delivery_contact_name: String(sale.delivery_contact_name ?? '').trim() ? sale.delivery_contact_name : linked_driver_name ?? null,
+        delivery_contact_phone: String(sale.delivery_contact_phone ?? '').trim() ? sale.delivery_contact_phone : linked_driver_phone ?? null,
         items: itemsBySale.get(sale.id) || [],
         refund_usd: refundUsd,
         refund_khr: refundKhr,

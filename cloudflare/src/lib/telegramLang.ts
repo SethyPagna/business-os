@@ -170,6 +170,7 @@ const LABELS = {
   otherExpense: { en: 'Other expense', km: 'ចំណាយផ្សេងៗ' },
   registeredCash: { en: 'Registered cash', km: 'សាច់ប្រាក់ដែលបានចុះបញ្ជី' },
   cashCounted: { en: 'Cash counted', km: 'សាច់ប្រាក់ដែលបានរាប់' },
+  recordedCashReceipts: { en: 'Recorded cash received', km: 'សាច់ប្រាក់ទទួលបានតាមកំណត់ត្រា' },
   difference: { en: 'Difference', km: 'ភាពខុសគ្នា' },
   finalAmount: { en: 'Final amount', km: 'ចំនួនទឹកប្រាក់ចុងក្រោយ' },
   // Reuses the app's own term for pending revenue -- copied verbatim from

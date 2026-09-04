@@ -119,6 +119,7 @@ const FIGURES = {
   otherExpenseUsd: 4,
   otherExpenseKhr: 0,
   collectedUsd: 210,
+  cash: { usd: 210, khr: 0, needsReview: false },
   paymentMethods: [
     { method: 'Cash', count: 9, collectedUsd: 180 },
     { method: 'ABA', count: 3, collectedUsd: 30 },
@@ -273,12 +274,12 @@ const finalIndex = lines.indexOf(finalLine)
 const components = lines[finalIndex + 1].trim()
 // registered cash + collected - other expense = 50 + 210 - 4
 assert.equal(components, '$50.00 + $210.00 − $4.00')
-assert.equal(valueOf('Final amount'), '$256.00')
+assert.equal(valueOf('Final amount'), '$256.00 · 100,000៛')
 // The caption is a phrase, so it gets a LINE EACH rather than a ` / ` pair --
 // joined, it is wider than a phone bubble and wraps into a mush.
-assert.equal(lines[finalIndex + 2].trim(), 'registered cash + collected − expense')
+assert.equal(lines[finalIndex + 2].trim(), '100,000៛ + 0៛ − 0៛')
 assert.ok(KHMER.test(lines[finalIndex + 3]), 'the formula caption has no Khmer line')
-assert.ok(!lines[finalIndex + 2].includes(SEP) && !lines[finalIndex + 3].includes(SEP), 'the caption was joined into one over-wide line')
+assert.ok(lines[finalIndex + 3].includes('Recorded cash estimate'), 'drawer assumptions remain visible')
 
 // THE ASSERTION THAT MATTERS: credit is not subtracted. Unpaid credit is
 // excluded from the collected figure already (it is awaiting_payment, so the
@@ -290,7 +291,7 @@ assert.equal(50 + 210 - 4, 256)
 
 // Counted vs expected, once the shift is closed.
 assert.equal(valueOf('Cash counted').includes('$256.00'), true)
-assert.equal(valueOf('Difference'), '$0.00')
+assert.equal(valueOf('Difference'), '$0.00 · 0៛')
 console.log('PASS arithmetic: final amount equals its own printed components; credit is not double-counted')
 
 // THE OWNER'S PLACEMENT RULING, checked directly rather than only via the
@@ -307,10 +308,54 @@ console.log('PASS placement: "Unpaid credit" prints below "Final amount", per th
 // A short drawer shows the sign in front of the currency symbol.
 const short = telegram.formatShiftReport('Shop', { ...CLOSED, closing_counted_usd: 251 }, FIGURES, NOW)
 const shortDiff = short.split('\n').find((line) => line.startsWith(`Difference${SEP}`))
-assert.ok(shortDiff.endsWith(': −$5.00'), `a short drawer must read as a negative amount, got: ${shortDiff}`)
+assert.ok(shortDiff.endsWith(': −$5.00 · 0៛'), `a short drawer must read as a negative amount, got: ${shortDiff}`)
 const over = telegram.formatShiftReport('Shop', { ...CLOSED, closing_counted_usd: 259 }, FIGURES, NOW)
-assert.ok(over.split('\n').find((line) => line.startsWith(`Difference${SEP}`)).endsWith(': +$3.00'))
+assert.ok(over.split('\n').find((line) => line.startsWith(`Difference${SEP}`)).endsWith(': +$3.00 · 0៛'))
 console.log('PASS difference: over and short are signed in front of the currency symbol')
+
+// User's 04/09/2026 drawer: shortage already removed before registration.
+const expenses = [30000, 20000, 14000, 50000, 30000, 6000]
+assert.equal(expenses.reduce((sum, n) => sum + n, 0), 150000)
+const rielReport = telegram.formatShiftReport('Shop', {
+  ...CLOSED, opening_float_usd: 0, opening_float_khr: 300000 - 16300,
+  closing_counted_usd: 0, closing_counted_khr: 133700,
+}, { ...FIGURES, cash: { usd: 0, khr: 0, needsReview: false }, otherExpenseUsd: 0, otherExpenseKhr: 150000,
+  expenseDetails: expenses.map((khr, i) => ({ label: `Expense ${i + 1}`, usd: 0, khr })),
+}, NOW)
+assert.ok(rielReport.includes(`${lang.labeled('finalAmount', '133,700៛')}`))
+assert.ok(rielReport.includes(`${lang.labeled('difference', '$0.00 · 0៛')}`))
+assert.ok(rielReport.includes('283,700៛ + 0៛ − 150,000៛'))
+assert.ok(rielReport.includes('Expense 6 — 6,000៛'))
+const cashOnly = telegram.summarizeShiftCash([
+  { payment_method: 'Cash', amount_paid_usd: 10, amount_paid_khr: 2000, exchange_rate: 4000 },
+  { payment_method: 'ABA', amount_paid_usd: 50, amount_paid_khr: 0 },
+  { payment_method: 'Cash + ABA', amount_paid_usd: 20, amount_paid_khr: 0,
+    payment_details: JSON.stringify([{ method: 'Cash', amount_usd: 5 }, { method: 'ABA', amount_usd: 15 }]) },
+])
+assert.deepEqual(cashOnly, { usd: 15, khr: 2000, needsReview: false })
+assert.equal(telegram.summarizeShiftCash([{ payment_method: 'Cash', amount_paid_usd: 20, change_usd: 5, change_khr: 20000 }]).needsReview, true)
+for (const change of ['invalid', -1]) assert.equal(telegram.summarizeShiftCash([{ payment_method: 'Cash', amount_paid_usd: 20, change_usd: change }]).needsReview, true)
+assert.equal(telegram.summarizeShiftCash([{ payment_method: 'Cash', amount_paid_usd: 20, total_usd: 15 }]).needsReview, true)
+assert.equal(telegram.summarizeShiftCash([{ payment_method: '', amount_paid_usd: 20 }]).needsReview, true)
+assert.equal(telegram.summarizeShiftCash([{ payment_details: '{broken', amount_paid_usd: 20 }]).needsReview, true)
+assert.equal(telegram.summarizeShiftCash([{ amount_paid_usd: 20, payment_details: '[{"method":"Cash","amount_usd":10}]' }]).needsReview, true)
+assert.equal(telegram.summarizeShiftCash([{ sale_status:'awaiting_payment', amount_paid_usd:0, change_usd:1 }]).needsReview, true)
+assert.equal(telegram.summarizeShiftCash([{ sale_status:'awaiting_payment', amount_paid_usd:0, payment_details:'[{"method":"Cash","amount_usd":10}]' }]).needsReview, true)
+assert.equal(telegram.summarizeShiftCash([{ sale_status:'awaiting_payment', amount_paid_usd:0, total_usd:10 }]).needsReview, false)
+const unknownCash = telegram.formatShiftReport('Shop', CLOSED, { ...FIGURES, cash: { ...cashOnly, needsReview: true } }, NOW)
+assert.ok(unknownCash.includes(lang.labeled('finalAmount', '—')))
+assert.ok(unknownCash.includes(lang.labeled('difference', '—')))
+console.log('PASS cash: user riel example, separate tender currencies, bank exclusion, split payment and ambiguity guards')
+const longMessage = 'Cash សាច់ប្រាក់ 🍋‍🟩\n'.repeat(400)
+const parts = telegram.splitTelegramMessage(longMessage)
+assert.ok(parts.length > 1 && parts.every((part) => part.length <= 3900))
+assert.equal(parts.join(''), longMessage)
+assert.ok(parts.every((part) => !/[\uD800-\uDBFF]$/.test(part)))
+console.log('PASS long reports: all text retained across bounded Telegram messages')
+for (const length of [0,1,3899,3900,3901,7800]) {
+ const text='x'.repeat(length);const chunks=telegram.splitTelegramMessage(text)
+ assert.equal(chunks.join(''),text);assert.ok(chunks.every(part=>part.length>0&&part.length<=3900))
+}
 
 // --- 5. an open shift ---------------------------------------------------------
 
@@ -362,13 +407,14 @@ const empty = telegram.formatShiftReport('Shop', { ...CLOSED, closing_counted_us
   taxUsd: 0, refundUsd: 0, avgOrderUsd: 0, costUsd: 0, profitUsd: 0,
   deliveryFeeUsd: 0, deliveryCostUsd: 0, deliveryMarginUsd: 0, deliveryCostRecorded: 0,
   creditUsd: 0, otherExpenseUsd: 0, otherExpenseKhr: 0, collectedUsd: 0,
+  cash: { usd: 0, khr: 0, needsReview: false },
   paymentMethods: [], deliveryServices: [],
 }, NOW)
 assert.ok(!/NaN|undefined|null/.test(empty), `an empty shift produced a broken value:\n${empty}`)
 const emptyFinal = empty.split('\n').find((line) => line.startsWith(`Final amount${SEP}`))
 // The float is still in the drawer and nothing was taken out of it.
-assert.ok(emptyFinal.endsWith(': $50.00'), `an untraded shift should still hold its float, got: ${emptyFinal}`)
-assert.ok(empty.split('\n').find((line) => line.startsWith(`Difference${SEP}`)).endsWith(': $0.00'))
+assert.ok(emptyFinal.endsWith(': $50.00 · 100,000៛'), `an untraded shift should still hold its float, got: ${emptyFinal}`)
+assert.ok(empty.split('\n').find((line) => line.startsWith(`Difference${SEP}`)).endsWith(': $0.00 · 0៛'))
 console.log('PASS empty shift: zeroes throughout, the float is still the final amount')
 
 // --- 8. the command is wired and documented ----------------------------------
@@ -504,8 +550,7 @@ wired.telegramCommandReply({}, '/shift 04/09/2026', NOW).then((reply) => {
         if (/AS returned_cost_usd/.test(sql)) return { returned_cost_usd: 0 }
         if (/AS item_discount_usd/.test(sql)) return { item_discount_usd: 5 }
         if (/AS cancelled/.test(sql)) return { invoices: 12, cancelled: 1, edited: 2 }
-        // shiftExpenses -- the only other .get, and the only one FROM fees.
-        if (/FROM fees/.test(sql)) return { usd: 4, khr: 0 }
+        if (/SELECT id FROM returns/.test(sql)) return undefined
         throw new Error(`unexpected .get in the mapping stub:\n${sql}`)
       }
       return {
@@ -513,6 +558,7 @@ wired.telegramCommandReply({}, '/shift 04/09/2026', NOW).then((reply) => {
         async all(params) {
           void params
           if (/FROM shift_sessions/.test(sql)) return [CLOSED]
+          if (/SUM\(SUM\(amount_usd\)\) OVER/.test(sql)) return [{label:'Example expense',usd:4,khr:0,overall_usd:4,overall_khr:0}]
           if (/AS payment_method/.test(sql)) return [{ payment_method: 'Cash', tx_count: 12, total_usd: 210, collected_usd: 210 }]
           if (/AS delivery_contact_name[\s\S]*FROM sales/.test(sql)) {
             return [{
@@ -545,6 +591,7 @@ wired.telegramCommandReply({}, '/shift 04/09/2026', NOW).then((reply) => {
   // Each of these is a DIFFERENT number, so a line reading from the wrong
   // kernel column cannot coincidentally match.
   assert.equal(mappedValue('Revenue'), '$210.00', 'revenue is recognized net sales minus refunds')
+  assert.equal(mappedValue('Other expense'), '$4.00', 'expense total comes from the grouped query')
   assert.equal(mappedValue('Tax'), '$7.00', 'the tax line must read tax_usd')
   assert.equal(mappedValue('Refund'), '$12.00', 'the refund line must read refund_usd, not the unpaid credit')
   assert.equal(mappedValue('Unpaid credit'), '$18.00', 'and unpaid credit must still read pending_revenue_usd')
@@ -564,6 +611,24 @@ wired.telegramCommandReply({}, '/shift 04/09/2026', NOW).then((reply) => {
   assert.ok(courier.endsWith('2 · $6.00 − $3.50 = $2.50'), `the courier row lost a part: ${courier}`)
   console.log('PASS sources: every added figure reads the kernel column it claims, proved with distinct values end to end')
   console.log('OK test-shift-report-pure')
+}).then(async () => {
+  const sender = loadReal('lib/telegram.ts', {
+    './db': { getDb: () => ({prepare:()=>({all:async()=>[
+      {key:'telegram_chat_id',value:'123'}, {key:'telegram_automation_enabled',value:'1'},
+    ]})}) },
+    './businessDateWindow':businessDateWindow,'./telegramLang':lang,'./saleTotals':saleTotals,'./salesAnalytics':analytics,
+  })
+  const originalFetch=global.fetch; const sent=[]
+  try {
+    global.fetch=async(_url,options)=>{sent.push(JSON.parse(options.body));return {ok:true}}
+    await sender.sendTelegramEvent({TELEGRAM_BOT_TOKEN:'local-test-only'}, {type:'sales',lines:Array.from({length:80},(_,i)=>`Line ${i} ${'ដារ៉ា'.repeat(20)}`)})
+    assert.ok(sent.length>1)
+    assert.ok(sent.every(part=>part.chat_id==='123'&&part.text.length>0&&part.text.length<=3900))
+    assert.ok(sent.map(part=>part.text).join('').includes('Line 79'), 'last line must be sent, not truncated')
+    global.fetch=async()=>({ok:false,status:429,text:async()=>''})
+    await assert.rejects(sender.sendTelegramEvent({TELEGRAM_BOT_TOKEN:'local-test-only'}, {type:'sales',lines:['test']}), /429/)
+    console.log('PASS Telegram sender: multiple bounded nonempty requests retain last line; rejected delivery is not reported as success; fetch stub only')
+  } finally { global.fetch=originalFetch }
 }).catch((error) => {
   console.error(error)
   process.exit(1)

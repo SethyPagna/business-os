@@ -95,8 +95,8 @@ analytics.getSalesTotals({}, {
 })
 assert.ok(captured.length >= 2, `expected the header aggregate and the cost query, got ${captured.length}`)
 for (const statement of captured) {
-  assert.ok(statement.sql.includes('created_at >= @createdFrom'), 'lower bound missing from a shift-window query')
-  assert.ok(statement.sql.includes('created_at < @createdTo'), 'upper bound must be EXCLUSIVE (`<`), or a boundary sale lands on two shifts')
+  assert.match(statement.sql, /datetime\([^)]*created_at\) >= @createdFrom/, 'lower bound must normalize stored SQLite/ISO timestamps')
+  assert.match(statement.sql, /datetime\([^)]*created_at\) < @createdTo/, 'upper bound must be normalized and EXCLUSIVE, or a boundary sale lands on two shifts')
   assert.ok(!statement.sql.includes('created_at <= @createdTo'), 'upper bound must not be inclusive')
   assert.ok(statement.sql.includes('cashier_id = @cashierId'), 'cashier scope missing from a shift-window query')
   assert.equal(statement.params.createdFrom, SQLITE, 'the bound must be normalised before binding, not passed through as ISO')

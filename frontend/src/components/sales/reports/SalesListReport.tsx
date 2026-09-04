@@ -42,6 +42,7 @@ export interface SaleRow {
   pending_revenue_usd: number
   collected_total_usd: number
   cost_usd?: number
+  cost_before_floor_usd?: number
   gross_profit_usd?: number
   cost_missing_snapshot_lines?: number
 }
@@ -69,6 +70,7 @@ export function mapSaleRow(raw: unknown, index: number): SaleRow {
   // Admin-only keys: copied ONLY when present (never assigned as 0).
   if (typeof r.cost_usd === 'number') {
     row.cost_usd = num(r.cost_usd)
+    row.cost_before_floor_usd = typeof r.cost_before_floor_usd === 'number' ? num(r.cost_before_floor_usd) : row.cost_usd
     row.gross_profit_usd = num(r.gross_profit_usd)
     row.cost_missing_snapshot_lines = num(r.cost_missing_snapshot_lines)
   }
@@ -84,15 +86,18 @@ export function sumSaleRows(rows: SaleRow[]): SaleRow {
   for (const r of rows) {
     for (const k of MONEY_KEYS) (out as unknown as Record<string, number>)[k] += num(r[k])
     if (allProfit) {
-      cost += num(r.cost_usd)
-      profit += num(r.gross_profit_usd)
+      cost += num(r.cost_before_floor_usd ?? r.cost_usd)
+      profit += num(r.gross_profit_usd) + num(r.cost_usd)
       missing += num(r.cost_missing_snapshot_lines)
     }
   }
   for (const k of MONEY_KEYS) (out as unknown as Record<string, number>)[k] = round2((out as unknown as Record<string, number>)[k])
   if (allProfit) {
-    out.cost_usd = round2(cost)
-    out.gross_profit_usd = round2(profit)
+    // Same aggregate floor as the canonical server totals. Flooring each
+    // receipt before summing loses imported/restocked cost corrections.
+    out.cost_before_floor_usd = round2(cost)
+    out.cost_usd = round2(Math.max(0, cost))
+    out.gross_profit_usd = round2(profit - Math.max(0, cost))
     out.cost_missing_snapshot_lines = missing
   }
   return out

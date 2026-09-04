@@ -602,7 +602,7 @@ export function buildIncomeStatement(input: StatementInput): StatementLine[] {
     lines.push(
       line('revenue_carried', 'rpt_revenue_carried', 'Revenue (from above)', 'total', 'profit', ['rpt_hint_revenue_carried', 'The revenue line repeated, so the first input of the profit calculation is on screen beside the figures taken off it.']),
       line('cogs', 'cogs', 'Cost of goods sold', 'sub', 'profit', ['rpt_hint_cogs', 'Cost snapshots of the items sold, less the cost of goods a return put back on the sellable shelf. Lines without a snapshot count as 0 and are flagged.'], cogsNote(sales)),
-      line('delivery_collected', 'rpt_delivery_collected', 'Delivery fees collected', 'add', 'profit', ['rpt_hint_delivery_collected', 'Delivery fees customers actually paid, on recognized sales. A fee the shop waived was never collected and is not here.']),
+      line('delivery_collected', 'rpt_delivery_collected', 'Delivery fees charged', 'add', 'profit', ['rpt_hint_delivery_collected', 'Customer-billed delivery fees, including Not Paid sales. This is revenue, not cash received. Waived fees are excluded.']),
       line('delivery_paid', 'rpt_delivery_paid', 'Delivery paid to couriers', 'sub', 'profit', ['rpt_hint_delivery_paid', 'The courier money actually paid out and recorded on recognized sales. This is the real delivery cost, not a residual.'], deliveryCoverageNote(sales)),
     )
     const rounding = line('profit_rounding', 'rpt_rounding', 'Rounding', 'add', 'profit', ['rpt_hint_rounding', 'Each figure above is rounded to the cent on its own, so the chain can land a cent from the total. Shown rather than absorbed into a line.'])
@@ -690,7 +690,7 @@ function deliveryReconciliationLines(t: ReportTotals, line: LineFactory): Statem
     line('delivery_charged', 'rpt_delivery_charged', 'Charged to customers', 'memo', 'delivery', ['rpt_hint_delivery_charged', 'Delivery fees billed to customers on every delivery in the range. A fee the shop absorbed is not counted here.']),
     line('delivery_actual_cost', 'rpt_delivery_cost', 'Actual cost', 'memo', 'delivery', ['rpt_hint_delivery_actual', 'The courier money actually paid out, recorded on the sale. Never printed on a receipt; reported here so actual cost can be compared with what was charged.'], deliveryCoverageNote(t)),
     line('delivery_absorbed', 'rpt_store_delivery', 'Store-paid delivery', 'memo', 'delivery', ['rpt_hint_delivery_absorbed', 'Delivery the shop absorbed instead of charging. Revenue given away, not cash paid out, so it is reported here and never subtracted from profit.']),
-    line('delivery_net', 'rpt_delivery_net', 'Delivery contribution', 'memo', 'delivery', ['rpt_hint_delivery_net', 'Fees collected minus courier money paid out, on recognized sales. This is the delivery figure gross profit actually uses.']),
+    line('delivery_net', 'rpt_delivery_net', 'Delivery contribution', 'memo', 'delivery', ['rpt_hint_delivery_net', 'Delivery fees charged minus recorded courier costs, including Not Paid sales. This is the delivery contribution to profit.']),
   ]
 }
 

@@ -11653,3 +11653,23 @@ POS.tsx along the way — no behavior change needed there).
   Historical settlement remains pending:
   no remote D1 command or deployment was run. A fresh read-only production
   preflight and an owner ruling on the two partial payments are still required.
+
+# Part 604 — shift cash, report readers and driver follow-up (2026-09-05)
+
+- Added compact history access from current shift summaries, native-currency
+  Telegram cash estimates with explicit uncertainty, complete bounded expense
+  breakdowns and non-truncating message chunks. Mixed timestamp shift bounds
+  now normalize both formats; duplicate/concurrent close still schedules once.
+- Restored three missing report detail endpoints; fixed stale report/filter
+  results, statement cost-floor parity and Sales stats availability/scope labels.
+  Driver linked fallback and reversible Khmer/Windows-1252 repair are verified.
+  EN/KM profit explanations include charged delivery and Not Paid correctly.
+- Integrated three isolated worker commits and resolved independent reviewers'
+  edge cases. All 198 frontend test files, 200 backend suites, both typechecks,
+  i18n and frontend build passed. Local real-component visual samples only.
+- User example: 283,700 KHR registered minus 150,000 KHR expenses = 133,700 KHR.
+  Test fixture only; no live cash entry, Telegram send, deploy or remote D1 action.
+- Awaiting sales on both sides of reconciliation are requested targets, but no
+  production statuses/debt/stock were changed. Need payment-versus-status ruling
+  and authorized fresh manifest; never apply the archived invoice-only repair.
+  Full overhaul remains open. See `docs/fleet/2026-09-05-shift-cash-review.md`.

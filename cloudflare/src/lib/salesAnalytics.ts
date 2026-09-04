@@ -182,7 +182,7 @@ export function shiftWindowWhere(
   const params: Record<string, unknown> = {}
   const createdFrom = shiftWindowBound(f.createdFrom)
   if (createdFrom) {
-    clauses.push(`${alias}.created_at >= @createdFrom`)
+    clauses.push(`datetime(${alias}.created_at) >= @createdFrom`)
     params.createdFrom = createdFrom
   }
   // EXCLUSIVE upper bound: with `<=`, a sale rung at the exact second the
@@ -190,7 +190,7 @@ export function shiftWindowWhere(
   // next one.
   const createdTo = shiftWindowBound(f.createdTo)
   if (createdTo) {
-    clauses.push(`${alias}.created_at < @createdTo`)
+    clauses.push(`datetime(${alias}.created_at) < @createdTo`)
     params.createdTo = createdTo
   }
   if (f.cashierId != null && String(f.cashierId).trim() !== '') {
@@ -404,7 +404,7 @@ function storeDeliveryExpr(p: string): string {
 // recognized figure yet and starts contributing the moment those sales are
 // marked paid. delivery_actual_cost_count reports how many sales recorded a
 // cost, so a near-empty column reads as missing data rather than free delivery.
-function deliveryActualCostExpr(p: string): string {
+export function deliveryActualCostExpr(p: string): string {
   return `CASE WHEN EXISTS (
       SELECT 1 FROM fees
       WHERE fees.sale_id = ${p}id AND COALESCE(fees.fee_type, '') = 'delivery'
@@ -486,7 +486,7 @@ export const CUSTOMER_REFUND_JOIN = `LEFT JOIN (
 // Builds the shared WHERE clause + bound params for "active sales in this
 // date range (and optional branch)". `alias` lets callers use this against
 // either a bare `sales` table or an aliased `s` in a join.
-function whereActiveSales(alias: string, f: SalesFilters) {
+export function whereActiveSales(alias: string, f: SalesFilters) {
   const params: Record<string, unknown> = {}
   const clauses: string[] = []
   // Local-day range, bucketed in the fixed business timezone UTC+7 (Cambodia).

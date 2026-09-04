@@ -54,6 +54,8 @@ ok(/sessionStorage\.getItem\('pos_branch'\)/.test(currentSummary), 'current summ
 ok(/SHIFT_BRANCH_CHANGED_EVENT/.test(pos) && /addEventListener\(SHIFT_BRANCH_CHANGED_EVENT/.test(currentSummary), 'current summaries follow POS branch changes without a remount')
 ok(/useSharedShift\(branchId, user\?\.id, settings\?\.shift_scope_mode\)/.test(currentSummary), 'current summary partitions shift state by branch, user, and policy')
 ok(/shift_current_unavailable/.test(currentSummary) && /onClick=\{\(\) => void refresh\(\)\}/.test(currentSummary), 'failed current-shift reads remain visible and retryable')
+ok(/showHistory \? <ShiftHistoryPanel/.test(currentSummary) && /aria-expanded=\{showHistory\}/.test(currentSummary), 'transaction pages expose lazy shift history, including when no current shift exists')
+ok(!/ShiftHistoryPanel[^>]*canManage/.test(currentSummary), 'transaction history never exposes cash amendment controls')
 for (const [surface, source] of [['Sales', sales], ['Expenses', fees], ['Income', reports]] as const) {
   ok(/<CurrentShiftSummary\b/.test(source), `${surface} mounts the shared current-shift summary`)
 }
