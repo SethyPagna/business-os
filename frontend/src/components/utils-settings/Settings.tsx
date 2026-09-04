@@ -3,6 +3,7 @@ import type { ReactNode } from 'react'
 import { useApp as useAppHook } from '../../AppContext.tsx'
 import { BUSINESS_TIME_ZONE } from '../../constants.ts'
 import { fmtTimezoneLabel } from '../../utils/formatters.ts'
+import { resolveTaxEnabled } from '../../utils/taxSettings.ts'
 import ArrowDown from 'lucide-react/dist/esm/icons/arrow-down.js'
 import ArrowUp from 'lucide-react/dist/esm/icons/arrow-up.js'
 import BadgeDollarSign from 'lucide-react/dist/esm/icons/badge-dollar-sign.js'
@@ -642,6 +643,9 @@ export default function Settings() {
     formDirtyRef.current = true
     setForm((current) => ({ ...current, [key]: value }))
   }
+  // The tax switch, read through the SAME helper the till and the Worker use,
+  // so the checkbox can never disagree with what is actually charged.
+  const taxEnabled = resolveTaxEnabled(form.tax_enabled, form.tax_rate)
   const getUploadState = useCallback(
     (key: string) => uploadStates[key] || createInitialUploadState(),
     [uploadStates],
@@ -1149,6 +1153,25 @@ export default function Settings() {
               />
             </div>
           </div>
+          {/* The owner's tax switch (S4-30, 2026-09-04): "tax can turn on off
+              in settings which will show based on that, if off, doesn't show."
+              With the key absent it reads as ON only when a rate is set, which
+              is exactly today's behaviour, so an install that has never touched
+              this switch does not change. Turning it OFF stops tax being
+              charged and stops the tax line appearing; it does NOT erase the
+              tax already recorded on past sales, because that would leave those
+              receipts' own arithmetic wrong. */}
+          <label className="mt-4 flex items-center justify-between rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 dark:border-gray-700 dark:bg-gray-800/70">
+            <div className="pr-3">
+              <div className="text-sm font-medium text-gray-800 dark:text-gray-100">{t('tax_enabled') || 'Charge tax'}</div>
+              <div className="text-xs text-gray-500 dark:text-gray-400">{t('tax_enabled_desc') || 'When off, no tax is added to a sale and no tax line appears on the receipt or the sale details. Tax already recorded on past sales is kept.'}</div>
+            </div>
+            <input
+              type="checkbox"
+              checked={taxEnabled}
+              onChange={(event) => setValue('tax_enabled', event.target.checked ? 'true' : 'false')}
+            />
+          </label>
         </SettingsSection>
         ) : null}
 
