@@ -50,6 +50,10 @@ export interface UndoApplierContext {
 
 export type UndoApplier = (payload: Record<string, unknown>, ctx: UndoApplierContext) => Promise<void>
 
+export class UndoConflictError extends Error {
+  readonly statusCode = 409
+}
+
 // Every applier declares the permission section its replay writes under, and
 // optionally the granular ACTION within that section (merge_duplicates, say),
 // so an applier is gated exactly as tightly as the live route it mirrors --
@@ -133,6 +137,8 @@ export interface MergeReversal {
     keeperBatchId: number
     dupStockBefore: Array<{ branch_id: number; quantity: number }>
     keeperStockBefore: Array<{ branch_id: number; quantity: number }>
+    saleAllocationIds?: number[]
+    returnAllocationIds?: number[]
   }>
   reparentedSaleItemIds: number[]
   reparentedMovementIds: number[]
@@ -151,6 +157,7 @@ export interface MergeReversal {
   // inventory_movements keep their own dedicated fields above for
   // backward-compatibility with snapshots written before this existed.
   reparentedByTable?: Array<{ table: string; column: string; ids: number[] }>
+  mergedStateFingerprint?: string
 }
 
 // What a merge does with the stock still sitting on the row being discarded.
@@ -212,6 +219,58 @@ function chunk<T>(arr: T[], size: number): T[][] {
 const intIds = (arr: unknown): number[] =>
   (Array.isArray(arr) ? arr : []).map(Number).filter((n) => Number.isInteger(n) && n > 0)
 
+async function mergeStateFingerprint(db: ReturnType<typeof getDb>, reversals: MergeReversal[]): Promise<string> {
+  const productIds = [...new Set(reversals.flatMap((r) => [Number(r.keeperId), Number(r.dupId)]).filter((id) => Number.isInteger(id) && id > 0))].sort((a, b) => a - b)
+  if (!productIds.length) return ''
+  const products: Array<Record<string, unknown>> = []
+  const branchStock: Array<Record<string, unknown>> = []
+  const batches: Array<Record<string, unknown>> = []
+  const movementHeads: Array<Record<string, unknown>> = []
+  for (const ids of chunk(productIds, 80)) {
+    const placeholders = ids.map(() => '?').join(',')
+    products.push(...await db.prepare(`SELECT id, is_active, stock_quantity FROM products WHERE id IN (${placeholders})`).all<Record<string, unknown>>(ids))
+    branchStock.push(...await db.prepare(`SELECT product_id, branch_id, quantity, rfid_confirmed_qty FROM branch_stock WHERE product_id IN (${placeholders})`).all<Record<string, unknown>>(ids))
+    batches.push(...await db.prepare(`SELECT id, variant_product_id, batch_key, batch_number, is_active FROM product_batches WHERE variant_product_id IN (${placeholders})`).all<Record<string, unknown>>(ids))
+    movementHeads.push(...await db.prepare(`SELECT product_id, MAX(id) AS max_id, COUNT(*) AS row_count FROM inventory_movements WHERE product_id IN (${placeholders}) GROUP BY product_id`).all<Record<string, unknown>>(ids))
+  }
+  const savedBatchIds = reversals.flatMap((r) => [
+    ...(r.repointedBatches || []).map((b) => Number(b.id)),
+    ...(r.foldedBatches || []).flatMap((b) => [Number(b.dupBatchId), Number(b.keeperBatchId)]),
+    ...(r.writtenOffBatches || []).map((b) => Number(b.batchId)),
+  ])
+  const batchIds = [...new Set([...batches.map((b) => Number(b.id)), ...savedBatchIds].filter((id) => Number.isInteger(id) && id > 0))].sort((a, b) => a - b)
+  const batchStock: Array<Record<string, unknown>> = []
+  for (const ids of chunk(batchIds, 80)) {
+    batchStock.push(...await db.prepare(`SELECT batch_id, branch_id, quantity FROM branch_batch_stock WHERE batch_id IN (${ids.map(() => '?').join(',')})`).all<Record<string, unknown>>(ids))
+  }
+  const byNumbers = (keys: string[]) => (a: Record<string, unknown>, b: Record<string, unknown>) => {
+    for (const key of keys) {
+      const difference = Number(a[key]) - Number(b[key])
+      if (difference) return difference
+    }
+    return 0
+  }
+  products.sort(byNumbers(['id']))
+  branchStock.sort(byNumbers(['product_id', 'branch_id']))
+  batches.sort(byNumbers(['id']))
+  batchStock.sort(byNumbers(['batch_id', 'branch_id']))
+  movementHeads.sort(byNumbers(['product_id']))
+  return JSON.stringify({ products, branchStock, batches, batchStock, movementHeads })
+}
+
+async function assertMergeStateUnchanged(db: ReturnType<typeof getDb>, reversals: MergeReversal[], expected?: string): Promise<void> {
+  if (expected && await mergeStateFingerprint(db, reversals) !== expected) {
+    throw new UndoConflictError('This merge has later stock or batch activity, so it can no longer be undone safely.')
+  }
+}
+
+async function saleStateFingerprint(db: ReturnType<typeof getDb>, saleId: number): Promise<string> {
+  const sale = await db.prepare('SELECT * FROM sales WHERE id = ?').get<Record<string, unknown>>([saleId])
+  const lines = await db.prepare('SELECT * FROM sale_items WHERE sale_id = ? ORDER BY id').all<Record<string, unknown>>([saleId])
+  const amendmentHead = await db.prepare('SELECT COALESCE(MAX(id), 0) AS id FROM sale_amendments WHERE sale_id = ?').get<{ id: number }>([saleId])
+  return JSON.stringify({ sale, lines, amendmentHeadId: Number(amendmentHead?.id) || 0 })
+}
+
 // Record a completed merge as an undoable/redoable action: the large reversal
 // goes to undo_snapshots, and a small action_history row points at it. Returns
 // both ids so the merge endpoint can hand the action id back to the client.
@@ -221,10 +280,11 @@ export async function recordMergeUndoSnapshot(
   reversal: MergeReversal,
 ): Promise<{ snapshotId: number; actionHistoryId: number }> {
   const db = getDb(env)
+  const stored = { ...reversal, mergedStateFingerprint: await mergeStateFingerprint(db, [reversal]) }
   const snap = await db.prepare(`
     INSERT INTO undo_snapshots (kind, status, payload_json, created_by_id, created_by_name)
     VALUES ('product.merge', 'applied', @payload, @byId, @byName)
-  `).run({ payload: JSON.stringify(reversal), byId: user?.id ?? null, byName: user?.name ?? null })
+  `).run({ payload: JSON.stringify(stored), byId: user?.id ?? null, byName: user?.name ?? null })
   const snapshotId = Number(snap.lastInsertRowid ?? 0)
   const payload = JSON.stringify({ applier: 'product.merge', snapshot_id: snapshotId })
   const keeperName = reversal.keeperName || `#${reversal.keeperId}`
@@ -265,10 +325,11 @@ export async function recordBulkMergeUndoSnapshot(
   const list = Array.isArray(reversals) ? reversals.filter((r) => r && Number(r.dupId) > 0) : []
   if (!list.length) return null
   const db = getDb(env)
+  const mergedStateFingerprint = await mergeStateFingerprint(db, list)
   const snap = await db.prepare(`
     INSERT INTO undo_snapshots (kind, status, payload_json, created_by_id, created_by_name)
     VALUES ('product.merge.bulk', 'applied', @payload, @byId, @byName)
-  `).run({ payload: JSON.stringify({ reversals: list }), byId: user?.id ?? null, byName: user?.name ?? null })
+  `).run({ payload: JSON.stringify({ reversals: list, mergedStateFingerprint }), byId: user?.id ?? null, byName: user?.name ?? null })
   const snapshotId = Number(snap.lastInsertRowid ?? 0)
   const payload = JSON.stringify({ applier: 'product.merge.bulk', snapshot_id: snapshotId })
   const n = list.length
@@ -447,6 +508,8 @@ async function applyMergeReversal(env: Env, r: MergeReversal): Promise<void> {
     const dupBatchId = Number(fb.dupBatchId)
     const keeperBatchId = Number(fb.keeperBatchId)
     stmts.push({ sql: 'UPDATE product_batches SET is_active = 1, updated_at = CURRENT_TIMESTAMP WHERE id = @id', params: { id: dupBatchId } })
+    for (const grp of chunk(intIds(fb.saleAllocationIds), 400)) stmts.push({ sql: `UPDATE sale_item_batch_allocations SET batch_id = @dupBatchId WHERE id IN (${grp.join(',')})`, params: { dupBatchId } })
+    for (const grp of chunk(intIds(fb.returnAllocationIds), 400)) stmts.push({ sql: `UPDATE return_item_batch_allocations SET batch_id = @dupBatchId WHERE id IN (${grp.join(',')})`, params: { dupBatchId } })
     const keeperBBefore = new Map((fb.keeperStockBefore || []).map((x) => [Number(x.branch_id), Number(x.quantity) || 0]))
     for (const d of (fb.dupStockBefore || [])) {
       const b = Number(d.branch_id)
@@ -661,10 +724,11 @@ export async function recordSaleAddItemsUndoSnapshot(
 ): Promise<{ snapshotId: number; actionHistoryId: number } | null> {
   if (!reversal || !(Number(reversal.saleId) > 0) || !Array.isArray(reversal.lines) || !reversal.lines.length) return null
   const db = getDb(env)
+  const stored = { ...reversal, saleStateFingerprint: await saleStateFingerprint(db, reversal.saleId) }
   const snap = await db.prepare(`
     INSERT INTO undo_snapshots (kind, status, payload_json, created_by_id, created_by_name)
     VALUES ('sale.add_items', 'applied', @payload, @byId, @byName)
-  `).run({ payload: JSON.stringify(reversal), byId: user?.id ?? null, byName: user?.name ?? null })
+  `).run({ payload: JSON.stringify(stored), byId: user?.id ?? null, byName: user?.name ?? null })
   const snapshotId = Number(snap.lastInsertRowid ?? 0)
   const payload = JSON.stringify({ applier: 'sale.add_items', snapshot_id: snapshotId })
   const saleLabel = reversal.receiptNumber || `#${reversal.saleId}`
@@ -729,6 +793,10 @@ const APPLIERS: Record<string, UndoApplierDef> = {
 
       if (ctx.direction === 'undo') {
         if (String(snap.status) !== 'applied') throw new Error('These added items have already been removed.')
+        const savedFingerprint = (reversal as SaleAddItemsReversal & { saleStateFingerprint?: string }).saleStateFingerprint
+        if (savedFingerprint && await saleStateFingerprint(db, saleId) !== savedFingerprint) {
+          throw new UndoConflictError('This sale was edited after the items were added, so this can no longer be undone safely.')
+        }
         const removal = planSaleLineRemoval({
           saleId,
           lines: reversal.lines || [],
@@ -905,6 +973,7 @@ const APPLIERS: Record<string, UndoApplierDef> = {
 
       if (ctx.direction === 'undo') {
         if (String(snap.status) !== 'applied') throw new Error('This merge has already been undone.')
+        await assertMergeStateUnchanged(db, [reversal], reversal.mergedStateFingerprint)
         await applyMergeReversal(ctx.env, reversal)
         await db.prepare("UPDATE undo_snapshots SET status = 'reversed', updated_at = CURRENT_TIMESTAMP WHERE id = @id").run({ id: snapshotId })
       } else {
@@ -930,6 +999,7 @@ const APPLIERS: Record<string, UndoApplierDef> = {
           reversal.stockDisposition === 'write_off' ? 'write_off' : 'merge',
         )
         await db.prepare('UPDATE products SET stock_quantity = (SELECT COALESCE(SUM(quantity), 0) FROM branch_stock WHERE product_id = @id), updated_at = CURRENT_TIMESTAMP WHERE id = @id').run({ id: keeperId })
+        fresh.mergedStateFingerprint = await mergeStateFingerprint(db, [fresh])
         await db.prepare("UPDATE undo_snapshots SET status = 'applied', payload_json = @payload, updated_at = CURRENT_TIMESTAMP WHERE id = @id").run({ payload: JSON.stringify(fresh), id: snapshotId })
       }
 
@@ -963,9 +1033,11 @@ const APPLIERS: Record<string, UndoApplierDef> = {
         .get<{ id: number; status: string; payload_json: string }>([snapshotId, 'product.merge.bulk'])
       if (!snap) throw new Error('The saved details for this merge are no longer available, so it cannot be reversed.')
       let reversals: MergeReversal[]
+      let mergedStateFingerprint: string | undefined
       try {
-        const parsed = JSON.parse(snap.payload_json) as { reversals?: MergeReversal[] }
+        const parsed = JSON.parse(snap.payload_json) as { reversals?: MergeReversal[]; mergedStateFingerprint?: string }
         reversals = Array.isArray(parsed?.reversals) ? parsed.reversals : []
+        mergedStateFingerprint = parsed.mergedStateFingerprint
       } catch (_) {
         throw new Error('The saved details for this merge are unreadable, so it cannot be reversed.')
       }
@@ -973,12 +1045,14 @@ const APPLIERS: Record<string, UndoApplierDef> = {
 
       if (ctx.direction === 'undo') {
         if (String(snap.status) !== 'applied') throw new Error('This merge has already been undone.')
+        await assertMergeStateUnchanged(db, reversals, mergedStateFingerprint)
         await applyBulkMergeReversal(ctx.env, reversals)
         await db.prepare("UPDATE undo_snapshots SET status = 'reversed', updated_at = CURRENT_TIMESTAMP WHERE id = @id").run({ id: snapshotId })
       } else {
         if (String(snap.status) !== 'reversed') throw new Error('This merge is already in place; there is nothing to redo.')
         const fresh = await redoBulkMergeFolds(ctx.env, ctx.user, reversals)
-        await db.prepare("UPDATE undo_snapshots SET status = 'applied', payload_json = @payload, updated_at = CURRENT_TIMESTAMP WHERE id = @id").run({ payload: JSON.stringify({ reversals: fresh }), id: snapshotId })
+        const freshFingerprint = await mergeStateFingerprint(db, fresh)
+        await db.prepare("UPDATE undo_snapshots SET status = 'applied', payload_json = @payload, updated_at = CURRENT_TIMESTAMP WHERE id = @id").run({ payload: JSON.stringify({ reversals: fresh, mergedStateFingerprint: freshFingerprint }), id: snapshotId })
       }
 
       await audit(

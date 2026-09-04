@@ -591,6 +591,10 @@ console.log('PASS 8b -- an unlotted oversell aborts on branch_stock itself, it i
   assert.match(appliers, /action: 'add_items'/, 'and declares the same granular action the route gates on')
   assert.match(appliers, /planSaleLineRemoval/, 'undo goes through the shared reversal planner')
   assert.match(appliers, /planSaleLineAddition/, 'and redo through the shared forward planner -- no second copy of the SQL')
+  assert.match(appliers, /saleStateFingerprint/, 'the snapshot pins the full sale header, lines, and amendment head')
+  assert.match(appliers, /This sale was edited after the items were added/, 'same-status later edits make undo stale')
+  const actionHistory = fs.readFileSync(path.join(__dirname, '..', 'src', 'routes', 'actionHistory.ts'), 'utf8')
+  assert.match(actionHistory, /statusCode.*409/, 'stale undo conflicts are returned as HTTP 409')
 
   const actions = fs.readFileSync(
     path.join(__dirname, '..', '..', 'frontend', 'src', 'utils', 'permissionActions.ts'), 'utf8')

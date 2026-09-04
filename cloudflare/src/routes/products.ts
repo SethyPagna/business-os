@@ -2737,6 +2737,8 @@ export async function foldDuplicateProductInto(
     keeperBatchId: number
     dupStockBefore: Array<{ branch_id: number; quantity: number }>
     keeperStockBefore: Array<{ branch_id: number; quantity: number }>
+    saleAllocationIds?: number[]
+    returnAllocationIds?: number[]
   }> = []
   // WRITE-OFF only: each lot deactivated in place, its per-branch stock cleared.
   const writtenOffBatches: Array<{ batchId: number; stockBefore: Array<{ branch_id: number; quantity: number }> }> = []
@@ -2798,7 +2800,11 @@ export async function foldDuplicateProductInto(
         keeperBatchId: existingCanonicalBatchId,
         dupStockBefore: dupBatchStockRows.map((r) => ({ branch_id: r.branch_id, quantity: Number(r.quantity) || 0 })),
         keeperStockBefore: keeperBatchStockBefore.map((r) => ({ branch_id: r.branch_id, quantity: Number(r.quantity) || 0 })),
+        saleAllocationIds: (await db.prepare('SELECT id FROM sale_item_batch_allocations WHERE batch_id = @id').all<{ id: number }>({ id: batchRow.id })).map((r) => Number(r.id)),
+        returnAllocationIds: (await db.prepare('SELECT id FROM return_item_batch_allocations WHERE batch_id = @id').all<{ id: number }>({ id: batchRow.id })).map((r) => Number(r.id)),
       })
+      statements.push({ sql: 'UPDATE sale_item_batch_allocations SET batch_id = @keeperBatchId WHERE batch_id = @dupBatchId', params: { keeperBatchId: existingCanonicalBatchId, dupBatchId: batchRow.id } })
+      statements.push({ sql: 'UPDATE return_item_batch_allocations SET batch_id = @keeperBatchId WHERE batch_id = @dupBatchId', params: { keeperBatchId: existingCanonicalBatchId, dupBatchId: batchRow.id } })
       batchesFoldedThisDup += 1
     } else {
       statements.push({

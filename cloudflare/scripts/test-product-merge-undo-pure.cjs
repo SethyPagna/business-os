@@ -157,7 +157,9 @@ async function foldForward(d1, keeper, dup, branchNameById, mergeContext) {
       }
       stmts.push({ sql: 'DELETE FROM branch_batch_stock WHERE batch_id = @id', params: { id: batchRow.id } })
       stmts.push({ sql: 'UPDATE product_batches SET is_active = 0, updated_at = CURRENT_TIMESTAMP WHERE id = @id', params: { id: batchRow.id } })
-      foldedBatches.push({ dupBatchId: batchRow.id, keeperBatchId: existingCanonicalBatchId, dupStockBefore: dupBatchStockRows.map((r) => ({ branch_id: r.branch_id, quantity: Number(r.quantity) || 0 })), keeperStockBefore: keeperBatchStockBefore.map((r) => ({ branch_id: r.branch_id, quantity: Number(r.quantity) || 0 })) })
+      const saleAllocationIds = d1.db.prepare('SELECT id FROM sale_item_batch_allocations WHERE batch_id = ?').all(batchRow.id).map((r) => Number(r.id))
+      stmts.push({ sql: 'UPDATE sale_item_batch_allocations SET batch_id = @keeperBatchId WHERE batch_id = @dupBatchId', params: { keeperBatchId: existingCanonicalBatchId, dupBatchId: batchRow.id } })
+      foldedBatches.push({ dupBatchId: batchRow.id, keeperBatchId: existingCanonicalBatchId, dupStockBefore: dupBatchStockRows.map((r) => ({ branch_id: r.branch_id, quantity: Number(r.quantity) || 0 })), keeperStockBefore: keeperBatchStockBefore.map((r) => ({ branch_id: r.branch_id, quantity: Number(r.quantity) || 0 })), saleAllocationIds })
     } else {
       stmts.push({ sql: 'UPDATE product_batches SET variant_product_id = @canonicalId, batch_number = @batchNumber, updated_at = CURRENT_TIMESTAMP WHERE id = @id', params: { canonicalId, batchNumber: nextCanonicalBatchNumber, id: batchRow.id } })
       canonicalBatchIdByKey.set(batchRow.batch_key, batchRow.id)
@@ -203,6 +205,7 @@ function fingerprint(d1, keeperId, dupId, batchIds) {
     product_batches: q(`SELECT id, variant_product_id, batch_number, is_active FROM product_batches WHERE id IN ${bids} ORDER BY id`),
     branch_batch_stock: q(`SELECT batch_id, branch_id, quantity FROM branch_batch_stock WHERE batch_id IN ${bids} ORDER BY batch_id, branch_id`),
     sale_items: q(`SELECT id, product_id FROM sale_items WHERE product_id IN ${ids} ORDER BY id`),
+    sale_allocations: q(`SELECT id, sale_item_id, batch_id, quantity, released_quantity FROM sale_item_batch_allocations WHERE batch_id IN ${bids} ORDER BY id`),
     // Only the historical (non-adjustment) movements carry stable identity;
     // the fold's 'adjustment' rows are ephemeral markers that redo legitimately
     // regenerates with fresh ids (asserted by count, not identity).
@@ -252,6 +255,7 @@ async function run() {
   run1(`INSERT INTO branch_batch_stock (batch_id, branch_id, quantity) VALUES (5000,1,5),(5001,1,4),(5001,2,2),(5002,3,7)`)
   run1(`INSERT INTO sales (id) VALUES (900),(901)`)
   run1(`INSERT INTO sale_items (id, sale_id, product_id, product_name, quantity) VALUES (700,900,200,'Dup',1),(701,900,200,'Dup',2),(702,901,200,'Dup',1)`)
+  run1(`INSERT INTO sale_item_batch_allocations (id, sale_item_id, batch_id, branch_id, quantity, released_quantity) VALUES (750,700,5001,1,1,0)`)
   run1(`INSERT INTO inventory_movements (id, product_id, product_name, branch_id, movement_type, quantity, reason) VALUES (800,200,'Dup',1,'sale',-1,'legacy'),(801,200,'Dup',3,'received',7,'legacy')`)
 
   const branchNameById = new Map([[1, 'B1'], [2, 'B2'], [3, 'B3']])
@@ -274,6 +278,7 @@ async function run() {
     assert.equal(reversal.imagesMovedToKeeper.length, 2)
     assert.equal(reversal.repointedBatches.length, 1)
     assert.equal(reversal.foldedBatches.length, 1)
+    assert.equal(d1.db.prepare('SELECT batch_id FROM sale_item_batch_allocations WHERE id=750').get().batch_id, KB, 'historical allocation follows the active keeper lot')
     assert.equal(reversal.adjustmentMovementIds.length, 2)
   })
 
@@ -352,6 +357,19 @@ async function run() {
     assert.match(appliersSrc, /INSERT INTO branch_stock \(product_id, branch_id, quantity, rfid_confirmed_qty\)/)
     assert.match(appliersSrc, /action: 'merge_duplicates'/)
     assert.match(appliersSrc, /DELETE FROM inventory_movements WHERE id IN/)
+    assert.match(productsSrc, /UPDATE sale_item_batch_allocations SET batch_id = @keeperBatchId WHERE batch_id = @dupBatchId/)
+    assert.match(productsSrc, /UPDATE return_item_batch_allocations SET batch_id = @keeperBatchId WHERE batch_id = @dupBatchId/)
+    assert.match(appliersSrc, /This merge has later stock or batch activity/)
+  })
+
+  await check('undo refuses a merge after later stock activity', async () => {
+    await applier.run({ applier: 'product.merge', snapshot_id: snapshotId }, { env: {}, user: { id: 42 }, direction: 'redo' })
+    run1('UPDATE branch_stock SET quantity = quantity + 1 WHERE product_id = @productId AND branch_id = @branchId', { productId: KEEPER, branchId: B1 })
+    await assert.rejects(
+      applier.run({ applier: 'product.merge', snapshot_id: snapshotId }, { env: {}, user: { id: 42 }, direction: 'undo' }),
+      /later stock or batch activity/,
+    )
+    assert.equal(d1.db.prepare('SELECT is_active FROM products WHERE id=?').get(DUP).is_active, 0, 'refusal mutates nothing')
   })
 
 }

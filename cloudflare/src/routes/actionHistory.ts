@@ -293,7 +293,8 @@ async function completeServerHistoryTransition(c: Context<{ Bindings: Env; Varia
       } catch (error) {
         await db.prepare('UPDATE action_history SET last_error = @last_error, updated_at = CURRENT_TIMESTAMP WHERE id = @id')
           .run({ last_error: (error as Error)?.message || `Failed to ${direction}`, id: existing.id })
-        return c.json({ success: false, error: (error as Error)?.message || `Failed to ${direction} this action` }, 500)
+        const status = Number((error as Error & { statusCode?: number })?.statusCode) === 409 ? 409 : 500
+        return c.json({ success: false, error: (error as Error)?.message || `Failed to ${direction} this action` }, status)
       }
     }
 
