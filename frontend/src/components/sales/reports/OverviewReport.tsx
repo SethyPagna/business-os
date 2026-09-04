@@ -1,10 +1,18 @@
-// Overview ("All") -- the one-page income statement for the selected
-// range: Gross sales -> discounts -> net sales -> unpaid credit -> refunds
-// -> REVENUE -> (+ tax/delivery) COLLECTED -> (- COGS, store delivery)
-// GROSS PROFIT -> (- expenses) NET RESULT, with the previous period beside
-// it when "Compare" is on, and the breakdown folds (payments, couriers,
-// returns by reason, expenses by type) under it. Every figure is a kernel
-// figure from GET /api/reports/overview; buildIncomeStatement only arranges.
+// Overview ("All") -- the one-page income statement for the selected range:
+//
+//   Gross sales - discounts -> NET SALES - unpaid credit - refunds -> REVENUE
+//   REVENUE + tax/delivery -> COLLECTED TOTAL
+//   REVENUE - COGS + delivery collected - delivery paid -> GROSS PROFIT
+//                  - operating expenses -> TOTAL PROFIT
+//   Delivery: charged / actually paid / waived / net   (memo, no operator)
+//   Awaiting payment (theoretical)                     (yellow, below the total)
+//
+// with the previous period beside it when "Compare" is on, and the breakdown
+// folds (payments, couriers, returns by reason, expenses by type) under it.
+// Every figure is a kernel figure from GET /api/reports/overview;
+// buildIncomeStatement only arranges. The group order and labels come from the
+// model (STATEMENT_GROUPS) so the two per-row statement folds in By period and
+// the grouped views stay in step with this page.
 import { Fragment, useMemo, useRef, useState } from 'react'
 import Download from 'lucide-react/dist/esm/icons/download.js'
 import Printer from 'lucide-react/dist/esm/icons/printer.js'
@@ -32,9 +40,15 @@ import {
   normalizeTotals,
   num,
   pct,
+  receiptLineKind,
   REPORT_NOUNS,
   reportFileName,
   reportQueryParams,
+  STATEMENT_GROUPS,
+  isTheoreticalGroup,
+  statementGroupLabel,
+  statementNoteText,
+  statementOperator,
   type StatementGroup,
   type StatementLine,
 } from './reportModel.ts'
@@ -65,7 +79,12 @@ interface OverviewResponse {
 }
 type Breakdown = 'payments' | 'couriers' | 'reasons' | 'types'
 
-const GROUPS: StatementGroup[] = ['revenue', 'collected', 'profit']
+// The awaiting-payment block is highlighted and sits last. Its figures are
+// theoretical: the owner ruled (Sep 4 2026, on the shift report) that unpaid
+// money goes BELOW the final total and is labelled as unpaid, never mixed into
+// the realised arithmetic. buildIncomeStatement emits it last and
+// isTheoreticalGroup() -- in the model, so the two per-row statement folds tint
+// the same block -- says how it looks.
 
 export default function OverviewReport(p: ReportViewProps) {
   const { tr, t, fmtMoney, options, style, filters, view } = p
@@ -99,6 +118,7 @@ export default function OverviewReport(p: ReportViewProps) {
   const basisDelta = prevSales ? delta(basis, basisValue(prevSales, options.basis)) : null
   const profitLine = lines.find((l) => l.key === 'gross_profit') || null
   const netLine = lines.find((l) => l.key === 'net_result') || null
+  const pendingProfitLine = lines.find((l) => l.key === 'pending_profit') || null
   const basisLabel = tr(BASIS_LABELS[options.basis].key, BASIS_LABELS[options.basis].fallback)
 
   const summary = sales
@@ -109,7 +129,11 @@ export default function OverviewReport(p: ReportViewProps) {
         returns ? countLabel(returns.count, REPORT_NOUNS.return, tr) : null,
         expenses ? `${tr('fees', 'Expenses')} ${fmtMoney(num(expenses.amount_usd), num(expenses.amount_khr))}` : null,
         profitLine ? `${tr('rpt_gross_profit', 'Gross profit')} ${fmtMoney(profitLine.usd)} (${fmtPct(pct(profitLine.usd, basis))})` : null,
-        netLine ? `${tr('rpt_net_result', 'Net result')} ${fmtMoney(netLine.usd)}` : null,
+        netLine ? `${tr('rpt_total_profit', 'Total profit (net result)')} ${fmtMoney(netLine.usd)}` : null,
+        // The unpaid figures ride the summary too, always named as unpaid and
+        // always after the realised ones -- never folded into any of them.
+        sales.pending_revenue_usd ? `${tr('rpt_pending_revenue', 'Unpaid net sales')} ${fmtMoney(sales.pending_revenue_usd)}` : null,
+        pendingProfitLine ? `${tr('rpt_pending_profit', 'Unpaid profit')} ${fmtMoney(pendingProfitLine.usd)}` : null,
       ])
     : !sales && (returns || expenses)
       ? joinSummary([
@@ -119,21 +143,27 @@ export default function OverviewReport(p: ReportViewProps) {
       : ''
   const summaryNote = compare && data?.previous_range ? `${tr('rpt_vs_prev', 'vs')} ${fmtDateOnly(data.previous_range.startDate)} – ${fmtDateOnly(data.previous_range.endDate)}` : undefined
 
-  const groupLabel = (g: StatementGroup) => (g === 'revenue' ? tr('revenue', 'Revenue') : g === 'collected' ? tr('rpt_collected_group', 'Collected') : tr('profit', 'Profit'))
+  const groupLabel = (g: StatementGroup) => statementGroupLabel(g, tr)
   const lineLabel = (l: StatementLine) => tr(l.labelKey, l.fallback)
   const changeOf = (l: StatementLine) => (l.prevUsd == null ? null : delta(l.usd, l.prevUsd))
+  const noteText = (l: StatementLine) => (l.note ? statementNoteText(l.note, tr) : null)
 
   // ---- exports ----
+  // The CSV and the print sheet carry the SAME rows as the screen, including
+  // the operator and any "not available" / coverage note: a bridge exported as
+  // bare numbers loses exactly the thing that makes it a bridge.
   const csvRows = () =>
     lines.map((l) => ({
       Group: groupLabel(l.group),
+      Op: statementOperator(l.kind),
       Line: lineLabel(l),
       Amount_USD: l.usd,
+      Note: noteText(l) || '',
       ...(compare ? { Previous_USD: l.prevUsd ?? '', Change_Pct: changeOf(l)?.pct ?? '' } : {}),
     }))
   const exportCsv = () => downloadCSV(reportFileName('overview', filters, 'csv'), csvRows())
   const exportPrint = () => {
-    const headers = compare ? ['Group', 'Line', 'Amount_USD', 'Previous_USD', 'Change_Pct'] : ['Group', 'Line', 'Amount_USD']
+    const headers = compare ? ['Group', 'Op', 'Line', 'Amount_USD', 'Note', 'Previous_USD', 'Change_Pct'] : ['Group', 'Op', 'Line', 'Amount_USD', 'Note']
     openPrintExport({ title: `${tr('reports', 'Reports')} · ${tr(view.labelKey, view.fallback)}`, subtitle: rangeSubtitle(filters, tr), headers, rows: csvRows() })
   }
 
@@ -195,14 +225,18 @@ export default function OverviewReport(p: ReportViewProps) {
   ) : lines.length === 0 ? null : style === 'receipt' ? (
     <ReceiptSheet
       centered={!p.compact}
-      blocks={GROUPS.filter((g) => lines.some((l) => l.group === g)).map<ReceiptBlock>((g) => ({
+      blocks={STATEMENT_GROUPS.filter((g) => lines.some((l) => l.group === g)).map<ReceiptBlock>((g) => ({
         key: g,
         title: groupLabel(g),
+        highlight: isTheoreticalGroup(g),
         lines: lines
           .filter((l) => l.group === g)
           .map((l) => {
             const ch = changeOf(l)
-            return { key: l.key, label: lineLabel(l), value: fmtMoney(l.usd, l.khr), kind: l.kind, note: ch && ch.pct != null ? formatSignedPct(ch.pct) : undefined }
+            // The data note wins the slot: "no cost recorded on 812 lines"
+            // outranks a percentage change on a figure that is not measured.
+            const note = noteText(l) || (ch && ch.pct != null ? formatSignedPct(ch.pct) : undefined)
+            return { key: l.key, label: lineLabel(l), value: fmtMoney(l.usd, l.khr), kind: receiptLineKind(l.kind), note }
           }),
       }))}
     />
@@ -221,38 +255,43 @@ export default function OverviewReport(p: ReportViewProps) {
         </tr>
       </thead>
       <tbody>
-        {GROUPS.filter((g) => lines.some((l) => l.group === g)).map((g) => (
-          <Fragment key={g}>
-            <tr className="!bg-[var(--ui-surface-2)]">
-              <td colSpan={cols} className="text-[length:var(--ui-size-meta)] font-medium text-[var(--ui-ink-2)]">
-                {groupLabel(g)}
-              </td>
-            </tr>
-            {lines
-              .filter((l) => l.group === g)
-              .map((l) => {
-                const ch = changeOf(l)
-                return (
-                  <tr key={l.key} className={l.kind === 'total' ? 'font-semibold' : ''}>
-                    <td>
-                      <span className="inline-flex items-center gap-1">
-                        <span className="w-3 text-[var(--ui-ink-3)]">{l.kind === 'sub' ? '−' : l.kind === 'add' ? '+' : '='}</span>
-                        {lineLabel(l)}
-                        {l.hintKey ? <InfoHint text={tr(l.hintKey, l.hintFallback || '')} label={lineLabel(l)} /> : null}
-                      </span>
-                    </td>
-                    <td className="text-right whitespace-nowrap">{fmtMoney(l.usd, l.khr)}</td>
-                    {compare ? (
-                      <>
-                        <td className="text-right whitespace-nowrap text-[var(--ui-ink-2)]">{l.prevUsd == null ? '—' : fmtMoney(l.prevUsd)}</td>
-                        <td className="text-right whitespace-nowrap text-[var(--ui-ink-2)]">{ch ? (ch.pct == null ? fmtMoney(ch.abs) : `${fmtMoney(ch.abs)} (${formatSignedPct(ch.pct)})`) : '—'}</td>
-                      </>
-                    ) : null}
-                  </tr>
-                )
-              })}
-          </Fragment>
-        ))}
+        {STATEMENT_GROUPS.filter((g) => lines.some((l) => l.group === g)).map((g) => {
+          const highlight = isTheoreticalGroup(g)
+          return (
+            <Fragment key={g}>
+              <tr className={highlight ? '' : '!bg-[var(--ui-surface-2)]'} data-statement-group={g}>
+                <td colSpan={cols} className={['text-[length:var(--ui-size-meta)] font-medium', highlight ? 'text-[var(--ui-warn-ink)]' : 'text-[var(--ui-ink-2)]'].join(' ')}>
+                  {groupLabel(g)}
+                </td>
+              </tr>
+              {lines
+                .filter((l) => l.group === g)
+                .map((l) => {
+                  const ch = changeOf(l)
+                  const note = noteText(l)
+                  return (
+                    <tr key={l.key} className={l.kind === 'total' ? 'font-semibold' : ''} data-statement-group={g}>
+                      <td>
+                        <span className="inline-flex items-center gap-1">
+                          <span className="w-3 text-[var(--ui-ink-3)]">{statementOperator(l.kind)}</span>
+                          {lineLabel(l)}
+                          {l.hintKey ? <InfoHint text={tr(l.hintKey, l.hintFallback || '')} label={lineLabel(l)} /> : null}
+                          {note ? <span className="text-[length:var(--ui-size-meta)] text-[var(--ui-ink-3)]">({note})</span> : null}
+                        </span>
+                      </td>
+                      <td className="text-right whitespace-nowrap">{fmtMoney(l.usd, l.khr)}</td>
+                      {compare ? (
+                        <>
+                          <td className="text-right whitespace-nowrap text-[var(--ui-ink-2)]">{l.prevUsd == null ? '—' : fmtMoney(l.prevUsd)}</td>
+                          <td className="text-right whitespace-nowrap text-[var(--ui-ink-2)]">{ch ? (ch.pct == null ? fmtMoney(ch.abs) : `${fmtMoney(ch.abs)} (${formatSignedPct(ch.pct)})`) : '—'}</td>
+                        </>
+                      ) : null}
+                    </tr>
+                  )
+                })}
+            </Fragment>
+          )
+        })}
       </tbody>
     </DenseTable>
   )

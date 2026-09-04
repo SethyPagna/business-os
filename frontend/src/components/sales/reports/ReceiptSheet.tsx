@@ -25,6 +25,13 @@ export interface ReceiptBlock {
   lines: ReceiptLine[]
   onClick?: (el: HTMLElement) => void
   selected?: boolean
+  /**
+   * Set the block apart in the warning tint. Used by the income statement's
+   * awaiting-payment block (S4R3-6): those figures are theoretical and must
+   * never read as part of the totals above them, so they get their own colour
+   * as well as their own position at the bottom of the sheet.
+   */
+  highlight?: boolean
 }
 
 export interface ReceiptSheetProps {
@@ -100,6 +107,9 @@ export default function ReceiptSheet({ blocks, centered = false, className = '' 
           !centered ? 'md:mt-0 md:rounded-[var(--ui-radius)] md:border md:border-solid md:border-[var(--ui-line)] md:bg-[var(--ui-surface)] md:p-1.5 md:mx-0' : '',
           clickable ? 'w-full cursor-pointer text-left hover:bg-[var(--ui-surface-2)] -mx-1 px-1 rounded-[var(--ui-radius-sm)]' : '',
           block.selected ? 'bg-[var(--ui-accent-soft)]' : '',
+          // Padding, not line-height: a Khmer cluster's ink runs ~1.6em and a
+          // tinted box that hugs the Latin metric shears its tops and tails.
+          block.highlight ? '-mx-1 rounded-[var(--ui-radius-sm)] border border-[var(--ui-warn-line)] bg-[var(--ui-warn-soft)] px-1.5 py-1' : '',
         ].join(' ').trim()
         return clickable ? (
           <button key={block.key} type="button" className={cls} onClick={(e) => block.onClick?.(e.currentTarget)}>

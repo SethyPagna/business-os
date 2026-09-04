@@ -146,7 +146,12 @@ export function parseViewFilters(query: Record<string, string>): SalesFilters {
  * buildDaySummaryRow / buildSaleReportRow above).
  */
 export function gateTotals<T extends Record<string, unknown>>(row: T, isAdmin: boolean): Record<string, unknown> {
-  const { cost_usd, profit_usd, cost_missing_snapshot_lines, ...rest } = row as Record<string, unknown>
+  // pending_cost_usd / pending_profit_usd (S4R3-6) are the awaiting-payment
+  // cohort's COGS and profit -- the same class of admin-only money as
+  // cost_usd / profit_usd, so they leave with them. The rest of the pending
+  // block (unpaid gross sales, discounts, revenue, delivery) is sale-header
+  // money any sales-reading caller can already see and stays in `rest`.
+  const { cost_usd, profit_usd, cost_missing_snapshot_lines, pending_cost_usd, pending_profit_usd, ...rest } = row as Record<string, unknown>
   if (!isAdmin) return rest
   const revenue = num(rest.revenue_usd)
   const profit = num(profit_usd)
@@ -156,6 +161,8 @@ export function gateTotals<T extends Record<string, unknown>>(row: T, isAdmin: b
     profit_usd: round2(profit),
     cost_missing_snapshot_lines: num(cost_missing_snapshot_lines),
     margin_pct: revenue > 0 ? round2((profit / revenue) * 100) : null,
+    pending_cost_usd: round2(num(pending_cost_usd)),
+    pending_profit_usd: round2(num(pending_profit_usd)),
   }
 }
 

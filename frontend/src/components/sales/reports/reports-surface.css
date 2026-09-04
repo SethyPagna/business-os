@@ -44,6 +44,14 @@
   --ui-focus: var(--ui-accent, #9c7a3c);
   --ui-accent-ink: #ffffff;
   --ui-accent-soft: color-mix(in srgb, var(--ui-accent, #9c7a3c) 12%, transparent);
+  /* Warning tint -- the income statement's awaiting-payment block (S4R3-6).
+     The owner asked for "a yellow-highlighted block at the bottom with the
+     unpaid subtotals on their own", so the tint is load-bearing: it is what
+     stops a theoretical figure being read as a realised one. Amber 50/200/800
+     from the app's existing palette, not a new hue. */
+  --ui-warn-soft: #fffbeb;
+  --ui-warn-line: #fde68a;
+  --ui-warn-ink: #92400e;
 
   /* --- radii (main.css already owns --ui-radius) --- */
   --ui-radius-sm: 6px;
@@ -83,6 +91,29 @@
   --ui-line-2: var(--dm-border-strong, #404040);
   --ui-danger: #f87171;
   --ui-accent-ink: #1a1a1a;
+  /* Dark mode: the same amber, inverted. A #fffbeb block on a #262626 card
+     would be a white slab, which reads as an error rather than a highlight. */
+  --ui-warn-soft: rgba(180, 83, 9, .18);
+  --ui-warn-line: rgba(217, 119, 6, .45);
+  --ui-warn-ink: #fcd34d;
+}
+
+/* ---------------------------------------------------------------------------
+   The income statement's awaiting-payment block (S4R3-6).
+
+   The excel style is one <table>, so the block cannot be a bordered box the
+   way the receipt style's <div> can -- the rows are tinted instead, and the
+   group's first row takes the top rule that separates theoretical money from
+   the realised total above it. Keyed off the data attribute the Overview
+   writes, so no report row anywhere else picks this up. */
+
+[data-reports-hub] tr[data-statement-group='pending'] > td {
+  background: var(--ui-warn-soft);
+}
+
+[data-reports-hub] tr[data-statement-group='pending'] + tr:not([data-statement-group='pending']) > td,
+[data-reports-hub] tr[data-statement-group='pending']:first-of-type > td {
+  border-top: 1px solid var(--ui-warn-line);
 }
 
 /* ---------------------------------------------------------------------------

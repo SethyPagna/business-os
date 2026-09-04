@@ -303,21 +303,45 @@ export interface ReportTotals {
   delivery_actual_cost_count: number
   delivery_sale_count: number
   delivery_margin_usd: number
+  /** delivery_margin_usd's profit-bearing twin: recognized fees minus recognized courier cost. */
+  delivery_net_usd: number
+  /** The two TERMS of delivery_net_usd -- what the bridge shows instead of a residual. */
+  recognized_delivery_usd: number
+  recognized_delivery_cost_usd: number
   refund_usd: number
   revenue_usd: number
   pending_revenue_usd: number
   collected_total_usd: number
   avg_order_usd: number
+  // ---- the awaiting-payment cohort (S4R3-6) --------------------------------
+  // Reported so the theoretical block can be built; NEVER summed into a
+  // realised figure. pending_cost_usd / pending_profit_usd are admin-only and
+  // therefore optional, exactly like cost_usd / profit_usd below.
+  pending_tx_count: number
+  pending_gross_sales_usd: number
+  pending_store_discount_usd: number
+  pending_membership_discount_usd: number
+  pending_delivery_usd: number
+  pending_delivery_cost_usd: number
   cost_usd?: number
   profit_usd?: number
   margin_pct?: number | null
   cost_missing_snapshot_lines?: number
+  pending_cost_usd?: number
+  pending_profit_usd?: number
 }
 
+// Every field here is copied by normalizeTotals and SUMMED by sumTotals. A
+// field left out of this list silently reads 0 on every totals line -- which
+// looks like "the figure vanished" rather than like an error -- so a new
+// non-admin field on SalesTotals belongs in the interface above AND here.
 const TOTAL_KEYS: Array<keyof ReportTotals> = [
   'tx_count', 'gross_sales_usd', 'store_discount_usd', 'membership_discount_usd', 'discount_usd', 'tax_usd', 'delivery_usd',
   'store_delivery_usd', 'delivery_actual_cost_usd', 'delivery_actual_cost_count', 'delivery_sale_count', 'delivery_margin_usd',
+  'delivery_net_usd', 'recognized_delivery_usd', 'recognized_delivery_cost_usd',
   'refund_usd', 'revenue_usd', 'pending_revenue_usd', 'collected_total_usd', 'avg_order_usd',
+  'pending_tx_count', 'pending_gross_sales_usd', 'pending_store_discount_usd', 'pending_membership_discount_usd',
+  'pending_delivery_usd', 'pending_delivery_cost_usd',
 ]
 
 /**
@@ -335,6 +359,11 @@ export function normalizeTotals(raw: unknown): ReportTotals | null {
     out.profit_usd = num(r.profit_usd)
     out.margin_pct = typeof r.margin_pct === 'number' ? r.margin_pct : pct(out.profit_usd, out.revenue_usd)
     out.cost_missing_snapshot_lines = num(r.cost_missing_snapshot_lines)
+    // The unpaid cohort's COGS and profit ride the same gate: gateTotals
+    // strips them for a non-admin caller alongside cost_usd / profit_usd, so
+    // their presence is the same "the server sent it" signal.
+    out.pending_cost_usd = num(r.pending_cost_usd)
+    out.pending_profit_usd = num(r.pending_profit_usd)
   }
   return out
 }
@@ -364,6 +393,8 @@ export function sumTotals(rows: ReportTotals[]): ReportTotals {
   let cost = 0
   let profit = 0
   let missing = 0
+  let pendingCost = 0
+  let pendingProfit = 0
   for (const r of rows) {
     for (const k of TOTAL_KEYS) {
       if (k === 'avg_order_usd') continue
@@ -373,6 +404,8 @@ export function sumTotals(rows: ReportTotals[]): ReportTotals {
       cost += num(r.cost_usd)
       profit += num(r.profit_usd)
       missing += num(r.cost_missing_snapshot_lines)
+      pendingCost += num(r.pending_cost_usd)
+      pendingProfit += num(r.pending_profit_usd)
     }
   }
   for (const k of TOTAL_KEYS) {
@@ -384,6 +417,8 @@ export function sumTotals(rows: ReportTotals[]): ReportTotals {
     out.profit_usd = round2(profit)
     out.margin_pct = pct(out.profit_usd, out.revenue_usd)
     out.cost_missing_snapshot_lines = missing
+    out.pending_cost_usd = round2(pendingCost)
+    out.pending_profit_usd = round2(pendingProfit)
   }
   return out
 }
@@ -395,8 +430,27 @@ export interface MoneyPair {
   khr: number
 }
 
-export type StatementKind = 'add' | 'sub' | 'total'
-export type StatementGroup = 'revenue' | 'collected' | 'profit'
+/**
+ * 'memo' is a figure that is REPORTED but is not a term of the arithmetic
+ * around it: it carries no +/-/= operator and never enters a total. The
+ * delivery reconciliation is entirely memo lines, which is what lets a reader
+ * tell at a glance which rows foot and which are informational -- the exact
+ * distinction the residual "Store-paid delivery" row destroyed.
+ */
+export type StatementKind = 'add' | 'sub' | 'total' | 'memo'
+export type StatementGroup = 'revenue' | 'collected' | 'profit' | 'delivery' | 'pending'
+
+/**
+ * A qualifier rendered beside the amount when the figure is incomplete,
+ * unmeasured, or covers only part of its population. `{count}` / `{total}`
+ * are substituted by the caller (tr() does not interpolate).
+ */
+export interface StatementNote {
+  key: string
+  fallback: string
+  count?: number
+  total?: number
+}
 
 export interface StatementLine {
   key: string
@@ -410,6 +464,15 @@ export interface StatementLine {
   group: StatementGroup
   hintKey?: string
   hintFallback?: string
+  note?: StatementNote
+  /**
+   * The figure `profitMode` selects as the bottom line ('gross' -> gross
+   * profit, 'net' -> the net result). The mode no longer decides whether the
+   * expenses and net-result LINES exist -- hiding them behind an
+   * off-by-default option is what made the gross-profit-to-total-profit step
+   * invisible -- it only decides which total the summary leads with.
+   */
+  headline?: boolean
 }
 
 export interface StatementInput {
@@ -433,29 +496,85 @@ function statementFigures(t: ReportTotals): Record<string, number> {
     revenue: t.revenue_usd,
     tax_delivery_collected: round2(t.collected_total_usd - t.revenue_usd),
     collected_total: t.collected_total_usd,
+    // ---- delivery reconciliation (memo; owner, Sep 4 2026: "so we know the
+    // actual costs vs what was received or what we paid... a detailed
+    // breakdown in summary"). Four measured figures, no arithmetic role.
+    delivery_charged: t.delivery_usd,
+    delivery_actual_cost: t.delivery_actual_cost_usd,
+    delivery_absorbed: t.store_delivery_usd,
+    delivery_net: t.delivery_net_usd,
+    // ---- the theoretical (awaiting-payment) block ---------------------------
+    pending_gross_sales: t.pending_gross_sales_usd,
+    pending_discounts: round2(t.pending_store_discount_usd + t.pending_membership_discount_usd),
+    // pending_revenue_usd is ALREADY net of both discounts (the kernel's
+    // netSaleExpr), so the two lines above are the bridge TO it and are never
+    // subtracted from it a second time.
+    pending_revenue: t.pending_revenue_usd,
+    pending_delivery_collected: t.pending_delivery_usd,
+    pending_delivery_paid: t.pending_delivery_cost_usd,
   }
   if (hasProfit(t)) {
+    // The bridge from revenue to gross profit, written as the kernel computes
+    // it (salesAnalytics.ts: `profit = revenue - netCost + deliveryNet`, and
+    // `deliveryNet = recognized fees - recognized courier cost`). It used to be
+    // one residual line, `revenue - cost - profit`, labelled "Store-paid
+    // delivery" -- a plug that always footed while naming the wrong quantity.
+    fig.revenue_carried = t.revenue_usd
     fig.cogs = t.cost_usd
-    fig.store_delivery = round2(t.revenue_usd - t.cost_usd - t.profit_usd)
+    fig.delivery_collected = t.recognized_delivery_usd
+    fig.delivery_paid = t.recognized_delivery_cost_usd
     fig.gross_profit = t.profit_usd
+    // Each term above is round2'd independently by the server, so the chain can
+    // land a cent away from profit_usd. This carries that cent EXPLICITLY
+    // rather than hiding it in a labelled line; it renders only when non-zero.
+    fig.profit_rounding = round2(
+      t.profit_usd - (t.revenue_usd - t.cost_usd + t.recognized_delivery_usd - t.recognized_delivery_cost_usd),
+    )
+    fig.pending_cogs = num(t.pending_cost_usd)
+    fig.pending_profit = num(t.pending_profit_usd)
+    fig.pending_rounding = round2(
+      num(t.pending_profit_usd)
+        - (t.pending_revenue_usd - num(t.pending_cost_usd) + t.pending_delivery_usd - t.pending_delivery_cost_usd),
+    )
   }
   return fig
 }
 
 /**
- * The Overview's statement. Three groups, each arithmetically closed on the
- * canonical kernel figures it was given: Gross sales -> discounts -> net
- * sales -> unpaid credit -> refunds -> REVENUE; revenue + tax/delivery ->
- * COLLECTED; revenue - COGS - store-paid delivery -> GROSS PROFIT
- * (- expenses -> NET RESULT when the profit mode is "net" and the caller
- * may read expenses). Profit lines appear only when the server sent cost.
+ * The Overview's statement (S4R3-6). Five groups; every one of them is
+ * arithmetically closed on the canonical kernel figures it was given, and
+ * every input of every step is on screen:
+ *
+ *   REVENUE    gross sales - discounts -> net sales - unpaid credit
+ *              - refunds -> REVENUE
+ *   COLLECTED  revenue + tax/delivery -> COLLECTED TOTAL
+ *   PROFIT     revenue (carried down) - COGS + delivery collected
+ *              - delivery paid to couriers -> GROSS PROFIT
+ *              - operating expenses -> NET RESULT
+ *   DELIVERY   charged / actually paid / waived / net -- all MEMO, no operator,
+ *              never a term of anything above (owner: "actual costs vs what
+ *              was received or what we paid... a detailed breakdown")
+ *   PENDING    the awaiting-payment cohort, the same waterfall again, sitting
+ *              BELOW the final total and never absorbed by it
+ *
+ * The profit bridge is unconditional once the server sent cost: it does NOT
+ * depend on `profitMode`, which now only selects which figure the summary line
+ * leads with. Gating the expenses and net-result lines behind an off-by-default
+ * option is what made "gross profit -> total profit" invisible.
+ *
+ * Cost / profit lines still appear only when the server SENT cost -- their
+ * absence is a permission boundary (gateTotals strips them for a non-admin),
+ * not missing data, and inventing a $0.00 COGS for a caller who may not see
+ * cost would be worse than omitting the block. Missing data inside a block the
+ * caller CAN see is labelled instead: see `note` on the COGS and delivery
+ * lines.
  */
 export function buildIncomeStatement(input: StatementInput): StatementLine[] {
   const { sales, prevSales, expenses, prevExpenses, profitMode, khrToUsd } = input
   if (!sales) return []
   const cur = statementFigures(sales)
   const prev = prevSales ? statementFigures(prevSales) : null
-  const line = (key: string, labelKey: string, fallback: string, kind: StatementKind, group: StatementGroup, hint?: [string, string]): StatementLine => ({
+  const line = (key: string, labelKey: string, fallback: string, kind: StatementKind, group: StatementGroup, hint?: [string, string], note?: StatementNote): StatementLine => ({
     key,
     labelKey,
     fallback,
@@ -465,6 +584,7 @@ export function buildIncomeStatement(input: StatementInput): StatementLine[] {
     group,
     hintKey: hint?.[0],
     hintFallback: hint?.[1],
+    note,
   })
   const lines: StatementLine[] = [
     line('gross_sales', 'gross_sales', 'Gross sales', 'add', 'revenue', ['rpt_hint_gross_sales', 'Item subtotals of every non-cancelled sale, before discounts.']),
@@ -479,17 +599,24 @@ export function buildIncomeStatement(input: StatementInput): StatementLine[] {
   ]
   if (hasProfit(sales)) {
     lines.push(
-      line('cogs', 'cogs', 'Cost of goods', 'sub', 'profit', ['rpt_hint_cogs', 'Cost snapshots of the items sold. Lines without a snapshot count as 0 and are flagged.']),
-      line('store_delivery', 'rpt_store_delivery', 'Store-paid delivery', 'sub', 'profit'),
-      line('gross_profit', 'rpt_gross_profit', 'Gross profit', 'total', 'profit', ['rpt_hint_gross_profit', 'Revenue minus cost of goods and store-paid delivery.']),
+      line('revenue_carried', 'rpt_revenue_carried', 'Revenue (from above)', 'total', 'profit', ['rpt_hint_revenue_carried', 'The revenue line repeated, so the first input of the profit calculation is on screen beside the figures taken off it.']),
+      line('cogs', 'cogs', 'Cost of goods sold', 'sub', 'profit', ['rpt_hint_cogs', 'Cost snapshots of the items sold, less the cost of goods a return put back on the sellable shelf. Lines without a snapshot count as 0 and are flagged.'], cogsNote(sales)),
+      line('delivery_collected', 'rpt_delivery_collected', 'Delivery fees collected', 'add', 'profit', ['rpt_hint_delivery_collected', 'Delivery fees customers actually paid, on recognized sales. A fee the shop waived was never collected and is not here.']),
+      line('delivery_paid', 'rpt_delivery_paid', 'Delivery paid to couriers', 'sub', 'profit', ['rpt_hint_delivery_paid', 'The courier money actually paid out and recorded on recognized sales. This is the real delivery cost, not a residual.'], deliveryCoverageNote(sales)),
     )
-    if (profitMode === 'net' && expenses) {
+    const rounding = line('profit_rounding', 'rpt_rounding', 'Rounding', 'add', 'profit', ['rpt_hint_rounding', 'Each figure above is rounded to the cent on its own, so the chain can land a cent from the total. Shown rather than absorbed into a line.'])
+    if (rounding.usd !== 0) lines.push(rounding)
+    lines.push({ ...line('gross_profit', 'rpt_gross_profit', 'Gross profit', 'total', 'profit', ['rpt_hint_gross_profit', 'Revenue minus cost of goods sold, plus delivery fees collected, minus the courier money paid out. Recognized sales only.']), headline: profitMode === 'gross' })
+    // Expenses and the net result are no longer gated on the profit mode --
+    // only on whether the caller may read expenses at all. `expenses` is null
+    // exactly when the server withheld the block.
+    if (expenses) {
       const expUsd = round2(expenses.usd + num(khrToUsd(expenses.khr)))
       const prevExpUsd = prev && prevExpenses ? round2(prevExpenses.usd + num(khrToUsd(prevExpenses.khr))) : null
       lines.push({
         key: 'expenses',
-        labelKey: 'fees',
-        fallback: 'Expenses',
+        labelKey: 'rpt_operating_expenses',
+        fallback: 'Operating expenses',
         usd: expUsd,
         khr: expenses.khr,
         prevUsd: prevExpUsd,
@@ -500,16 +627,155 @@ export function buildIncomeStatement(input: StatementInput): StatementLine[] {
       })
       lines.push({
         key: 'net_result',
-        labelKey: 'rpt_net_result',
-        fallback: 'Net result',
+        labelKey: 'rpt_total_profit',
+        fallback: 'Total profit (net result)',
         usd: round2(num(cur.gross_profit) - expUsd),
         prevUsd: prev && prevExpUsd != null ? round2(num(prev.gross_profit) - prevExpUsd) : null,
         kind: 'total',
         group: 'profit',
+        headline: profitMode === 'net',
+        hintKey: 'rpt_hint_net_result',
+        hintFallback: 'Gross profit minus every recorded expense in the range. This is the bottom line.',
       })
     }
   }
+  lines.push(...deliveryReconciliationLines(sales, line))
+  lines.push(...pendingLines(sales, line))
   return lines
+}
+
+type LineFactory = (key: string, labelKey: string, fallback: string, kind: StatementKind, group: StatementGroup, hint?: [string, string], note?: StatementNote) => StatementLine
+
+/**
+ * "Not available" beats a silent $0.00. A period whose sold lines carry no
+ * cost snapshot reports COGS of exactly 0, which reads as free goods; the
+ * count is already on the wire for precisely this.
+ */
+function cogsNote(t: ReportTotals): StatementNote | undefined {
+  const missing = num(t.cost_missing_snapshot_lines)
+  if (missing <= 0) return undefined
+  if (num(t.cost_usd) === 0) return { key: 'rpt_note_cost_unavailable', fallback: 'not available — no cost recorded on {count} sold lines', count: missing }
+  return { key: 'rpt_note_cost_partial', fallback: '{count} sold lines have no cost recorded', count: missing }
+}
+
+/**
+ * The courier cost is NULL, not 0, when nobody recorded it -- the kernel says
+ * so in as many words ("a near-empty column reads as missing data rather than
+ * free delivery"). Say how much of the population the figure actually covers.
+ */
+function deliveryCoverageNote(t: ReportTotals): StatementNote | undefined {
+  const deliveries = num(t.delivery_sale_count)
+  const recorded = num(t.delivery_actual_cost_count)
+  if (deliveries <= 0 || recorded >= deliveries) return undefined
+  if (recorded === 0) return { key: 'rpt_note_delivery_none', fallback: 'not available — no courier cost recorded on {total} deliveries', total: deliveries }
+  return { key: 'rpt_note_delivery_partial', fallback: 'recorded on {count} of {total} deliveries', count: recorded, total: deliveries }
+}
+
+/**
+ * The delivery reconciliation the owner asked for in as many words: "so we
+ * know the actual costs vs what was received or what we paid... a detailed
+ * breakdown in summary" (Sep 4 2026). Charged / actually paid / waived / net.
+ *
+ * Every line is a MEMO: none of them is a term of the profit bridge above (the
+ * bridge uses the recognized-only halves of delivery_net_usd; these describe
+ * every delivery in the window, unpaid ones included). Rendering them without
+ * an operator is what keeps the distinction readable, which is exactly what
+ * the old residual row destroyed.
+ */
+function deliveryReconciliationLines(t: ReportTotals, line: LineFactory): StatementLine[] {
+  const anyDelivery = num(t.delivery_sale_count) > 0 || t.delivery_usd !== 0 || t.store_delivery_usd !== 0 || t.delivery_actual_cost_usd !== 0
+  if (!anyDelivery) return []
+  return [
+    line('delivery_charged', 'rpt_delivery_charged', 'Charged to customers', 'memo', 'delivery', ['rpt_hint_delivery_charged', 'Delivery fees billed to customers on every delivery in the range. A fee the shop absorbed is not counted here.']),
+    line('delivery_actual_cost', 'rpt_delivery_cost', 'Actual cost', 'memo', 'delivery', ['rpt_hint_delivery_actual', 'The courier money actually paid out, recorded on the sale. Never printed on a receipt; reported here so actual cost can be compared with what was charged.'], deliveryCoverageNote(t)),
+    line('delivery_absorbed', 'rpt_store_delivery', 'Store-paid delivery', 'memo', 'delivery', ['rpt_hint_delivery_absorbed', 'Delivery the shop absorbed instead of charging. Revenue given away, not cash paid out, so it is reported here and never subtracted from profit.']),
+    line('delivery_net', 'rpt_delivery_net', 'Delivery contribution', 'memo', 'delivery', ['rpt_hint_delivery_net', 'Fees collected minus courier money paid out, on recognized sales. This is the delivery figure gross profit actually uses.']),
+  ]
+}
+
+/**
+ * The theoretical block: what the period WOULD be worth once the outstanding
+ * sales are paid. Same waterfall, same bases, kept strictly apart.
+ *
+ * BINDING (user ruling, Sep 4 2026, carried over from the shift report where
+ * unpaid credit was deliberately moved BELOW the final total and relabelled):
+ * unpaid money stays out of the realised arithmetic. These lines are emitted
+ * LAST so no realised total can precede them, they carry their own group, and
+ * nothing above reads any of them.
+ */
+function pendingLines(t: ReportTotals, line: LineFactory): StatementLine[] {
+  if (num(t.pending_tx_count) <= 0 && t.pending_revenue_usd === 0) return []
+  const out: StatementLine[] = [
+    line('pending_gross_sales', 'rpt_pending_gross_sales', 'Unpaid gross sales', 'add', 'pending', ['rpt_hint_pending_gross', 'Item subtotals of the sales still awaiting payment, before discounts.']),
+    line('pending_discounts', 'rpt_pending_discounts', 'Unpaid discounts', 'sub', 'pending'),
+    line('pending_revenue', 'rpt_pending_revenue', 'Unpaid net sales', 'total', 'pending', ['rpt_hint_pending_revenue', 'What these sales would add to revenue once paid. Not counted in revenue above.']),
+  ]
+  if (hasProfit(t)) out.push(line('pending_cogs', 'rpt_pending_cogs', 'Unpaid cost of goods', 'sub', 'pending', ['rpt_hint_pending_cogs', 'Cost of the goods already handed over on sales that have not been paid for.']))
+  out.push(
+    line('pending_delivery_collected', 'rpt_pending_delivery_collected', 'Unpaid delivery fees', 'add', 'pending'),
+    line('pending_delivery_paid', 'rpt_pending_delivery_paid', 'Delivery already paid on unpaid sales', 'sub', 'pending', ['rpt_hint_pending_delivery_paid', 'Courier money already paid out on sales the customer has not settled: cash out with nothing in yet.']),
+  )
+  if (hasProfit(t)) {
+    const rounding = line('pending_rounding', 'rpt_rounding', 'Rounding', 'add', 'pending')
+    if (rounding.usd !== 0) out.push(rounding)
+    out.push(line('pending_profit', 'rpt_pending_profit', 'Unpaid profit', 'total', 'pending', ['rpt_hint_pending_profit', 'What this period would earn once every outstanding sale is settled. Theoretical: no figure above includes it.']))
+  }
+  return out
+}
+
+/**
+ * Render order for the statement's groups. The three surfaces that render a
+ * statement (Overview, and the per-row folds in By period / grouped views) all
+ * read this ONE list -- they each carried their own `['revenue','collected',
+ * 'profit'] as const`, so a new group appeared on none of them until all three
+ * were edited. PENDING is last on purpose: the awaiting-payment block sits
+ * BELOW the final realised total (user ruling, Sep 4 2026).
+ */
+export const STATEMENT_GROUPS: readonly StatementGroup[] = ['revenue', 'collected', 'profit', 'delivery', 'pending']
+
+export function statementGroupLabel(group: StatementGroup, tr: (key: string, fallback: string) => string): string {
+  if (group === 'revenue') return tr('revenue', 'Revenue')
+  if (group === 'collected') return tr('rpt_collected_group', 'Collected')
+  if (group === 'delivery') return tr('rpt_delivery_breakdown', 'Delivery: charged vs paid')
+  if (group === 'pending') return tr('rpt_pending_block', 'Awaiting payment (theoretical)')
+  return tr('profit', 'Profit')
+}
+
+/**
+ * Which statement groups are THEORETICAL money and must be set apart from the
+ * realised figures visually, not merely by position. Read by all three
+ * surfaces that render a statement, so the tint cannot end up on one of them
+ * and not the others.
+ *
+ * Binding ruling (user, Sep 4 2026, carried over from the shift report):
+ * unpaid money sits BELOW the final total, labelled as unpaid, and no realised
+ * total absorbs it.
+ */
+export function isTheoreticalGroup(group: StatementGroup): boolean {
+  return group === 'pending'
+}
+
+/**
+ * StatementKind -> ReceiptSheet's line kind. A memo carries no operator, so it
+ * renders as 'info' -- the receipt style's own "reported, not a term" kind.
+ */
+export function receiptLineKind(kind: StatementKind): 'add' | 'sub' | 'total' | 'info' {
+  return kind === 'memo' ? 'info' : kind
+}
+
+/** The +/-/= glyph a statement line leads with. A memo shows none. */
+export function statementOperator(kind: StatementKind): string {
+  if (kind === 'sub') return '−'
+  if (kind === 'add') return '+'
+  if (kind === 'total') return '='
+  return ''
+}
+
+/** Substitute a note's {count} / {total} -- tr() itself never interpolates. */
+export function statementNoteText(note: StatementNote, tr: (key: string, fallback: string) => string): string {
+  return tr(note.key, note.fallback)
+    .replace('{count}', fmtInt(num(note.count)))
+    .replace('{total}', fmtInt(num(note.total)))
 }
 
 // ---- summary line ----------------------------------------------------------
